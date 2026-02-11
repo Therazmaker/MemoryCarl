@@ -31,7 +31,7 @@ async function enableNotifications(){
 
   const swReg = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
 
-  const vapidKey = "REPLACE_WITH_YOUR_VAPID_KEY";
+  const vapidKey = "BFJYKOYqIzBN7eaGvOOhK6Iwfk7KqVt-6Bv27vnYqIpO2rlUBh-ZyL1_zDpZ-9s0272hiXic54w0Q5Rdgl1M84A";
 
   try {
     const token = await messaging.getToken({
