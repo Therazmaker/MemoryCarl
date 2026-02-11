@@ -1,4 +1,33 @@
 console.log("MemoryCarl loaded");
+// ---- Firebase Messaging (client) ----
+firebase.initializeApp({
+  apiKey: "AIzaSyAq9RTNQDnfyxcxn4MbDn61lc7ybkUjtKg",
+  authDomain: "memorycarl-3c297.firebaseapp.com",
+  projectId: "memorycarl-3c297",
+  storageBucket: "memorycarl-3c297.firebasestorage.app",
+  messagingSenderId: "731735548765",
+  appId: "1:731735548765:web:03d9cf6d2a8c4744fd7eb4"
+});
+
+const messaging = firebase.messaging();
+
+async function enableNotifications(){
+  if (!("serviceWorker" in navigator)) { alert("No serviceWorker support"); return; }
+  if (!("Notification" in window)) { alert("No Notification support"); return; }
+
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") { alert("Permission not granted"); return; }
+
+  // IMPORTANTE: registrar el SW en el scope del repo (/MemoryCarl/)
+  const swReg = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
+
+  // Pega aquí tu VAPID key (la que generaste en Firebase → Cloud Messaging)
+  const vapidKey = "PEGA_AQUI_TU_VAPID_KEY";
+
+  const token = await messaging.getToken({ vapidKey, serviceWorkerRegistration: swReg });
+  localStorage.setItem("memorycarl_fcm_token", token);
+  alert("Notifications enabled ✅\nToken saved.");
+}
 
 // ---- Storage keys ----
 const LS = {
