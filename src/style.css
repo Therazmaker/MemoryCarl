@@ -50,7 +50,7 @@ body{
   color:var(--text);
   border-color:rgba(124,92,255,.35);
 }
-.content{padding:14px 16px 90px;flex:1}
+.content{padding:14px 16px 110px;flex:1}
 .sectionTitle{display:flex;align-items:center;justify-content:space-between;margin:10px 0 12px;color:var(--muted);font-size:13px}
 .card{
   background:linear-gradient(180deg,var(--card2),var(--card));
@@ -90,7 +90,7 @@ body{
 .item .name{font-weight:900}
 .item .meta{font-size:12px;color:var(--muted)}
 .fab{
-  position:fixed;right:16px;bottom:74px;
+  position:fixed;right:16px;bottom:118px;
   width:54px;height:54px;border-radius:18px;
   border:1px solid rgba(124,92,255,.45);
   background:rgba(124,92,255,.22);
