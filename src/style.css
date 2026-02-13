@@ -197,14 +197,24 @@ body{
 }
 .bn.active .bnIcon{ filter:drop-shadow(0 6px 18px rgba(124,92,255,.22)); }
 
-/* Catalog Enhancements */
 
+/* ================== Catalog Enhancements ================== */
 select.input{
   appearance:none;
   background:rgba(255,255,255,.03);
 }
-
 select.input option{
   background:#0b0f19;
   color:white;
 }
+.checkRow{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  padding:10px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.03);
+  border-radius:14px;
+}
+.check{ width:18px; height:18px; }
+
