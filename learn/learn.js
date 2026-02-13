@@ -1,6 +1,6 @@
 const LS_PROGRESS = "memorycarl_learn_progress_v1";
-const LS_KNOW = "memorycarl_learn_knowledge_v1"; // per-item notes
-const LS_GLOSS = "memorycarl_learn_glossary_v1"; // per-term notes/overrides
+const LS_KNOW = "memorycarl_learn_knowledge_v1";
+const LS_GLOSS = "memorycarl_learn_glossary_v1";
 
 async function fetchFileText(path){
   const url = (`../${path}`).replaceAll("//","/");
@@ -128,7 +128,7 @@ function inferOwnerFunction(lines, lineNo){
   return "";
 }
 
-// ----------------------- Glossary (clickable keywords) -----------------------
+// ----------------------- Glossary (clickable terms) -----------------------
 const DEFAULT_GLOSSARY = {
   "function": { title:"function", short:"Declara una función: un bloque reutilizable que se ejecuta cuando lo llamas.", example:"function hello(){ return 'hi'; }", commonMistake:"Pensar que 'function' ejecuta algo. Solo define." },
   "if": { title:"if", short:"Condición: si es true, ejecuta el bloque; si no, lo salta.", example:"if (x > 0) { ... }", commonMistake:"Confundir '=' con '===' en comparaciones." },
@@ -139,32 +139,52 @@ const DEFAULT_GLOSSARY = {
   "let": { title:"let", short:"Variable reasignable (scope de bloque).", example:"let count = 0; count++;", commonMistake:"Usar var y crear scopes raros." },
   "async": { title:"async", short:"Función que retorna Promise y permite await.", example:"async function f(){ await g(); }", commonMistake:"Olvidar await y pensar que ya esperó." },
   "await": { title:"await", short:"Espera una Promise dentro de async.", example:"const res = await fetch(url);", commonMistake:"Usarlo fuera de async." },
-  "===": { title:"===", short:"Comparación estricta: valor y tipo.", example:"state.tab === 'routines'", commonMistake:"Usar '==' y obtener coerción rara." }
-};
-const KEYWORDS = ["function","if","return","try","catch","const","let","async","await"];
+  "===": { title:"===", short:"Comparación estricta: valor y tipo.", example:"state.tab === 'routines'", commonMistake:"Usar '==' y obtener coerción rara." },
 
-function renderCodeWithGlossary(snippet){
+  "localStorage": { title:"localStorage", short:"Storage del navegador (clave/valor) que persiste entre recargas.", example:"localStorage.setItem('k','v');", commonMistake:"Guardar objetos sin JSON.stringify." },
+  "fetch": { title:"fetch", short:"Hace requests HTTP y retorna una Promise.", example:"const res = await fetch(url);", commonMistake:"Olvidar await res.json()." },
+  "document": { title:"document", short:"El DOM de la página. Sirve para buscar/crear elementos.", example:"document.querySelector('#app')", commonMistake:"Asumir que existe el elemento antes de renderizar." },
+  "window": { title:"window", short:"Objeto global del navegador (props globales).", example:"window.location.href", commonMistake:"Usarlo en Service Worker (no existe)." },
+  "navigator": { title:"navigator", short:"Info/APIs del navegador (clipboard, serviceWorker, etc.).", example:"navigator.serviceWorker.register('sw.js')", commonMistake:"No chequear soporte primero." },
+  "firebase": { title:"firebase", short:"SDK de Firebase (auth, messaging, etc.).", example:"firebase.initializeApp(cfg)", commonMistake:"Inicializar 2 veces sin querer." },
+  "Notification": { title:"Notification", short:"API de notificaciones del navegador.", example:"Notification.requestPermission()", commonMistake:"No manejar 'denied'." },
+  "serviceWorker": { title:"serviceWorker", short:"Worker en background que permite push/notifs y cache.", example:"navigator.serviceWorker.register('./sw.js')", commonMistake:"Ruta incorrecta en GitHub Pages." }
+};
+
+const KEYWORDS = ["function","if","return","try","catch","const","let","async","await"];
+const COMMON_TERMS = [
+  "localStorage","fetch","document","window","navigator","firebase","Notification","serviceWorker",
+  "console","JSON","Date","Blob","FileReader","Math","Promise"
+];
+
+function renderCodeWithTerms(snippet){
   if(!snippet) return "";
   let safe = esc(snippet);
   safe = safe.replaceAll("===", `<span class="kw" data-term="===">===</span>`);
-  const ordered = [...KEYWORDS].sort((a,b)=>b.length-a.length);
-  for(const kw of ordered){
-    const rx = new RegExp(`\\b${kw}\\b`, "g");
-    safe = safe.replace(rx, `<span class="kw" data-term="${kw}">${kw}</span>`);
+  const terms = [...new Set([...COMMON_TERMS, ...KEYWORDS])].sort((a,b)=>b.length-a.length);
+  for(const t of terms){
+    if(t === "===") continue;
+    const rx = new RegExp(`\\b${t}\\b`, "g");
+    safe = safe.replace(rx, `<span class="kw" data-term="${t}">${t}</span>`);
   }
   return safe;
 }
+
 function loadGlossary(){
   const stored = loadJson(LS_GLOSS, {});
   return { ...DEFAULT_GLOSSARY, ...stored };
 }
 function saveGlossary(gloss){ saveJson(LS_GLOSS, gloss); }
+function normalizeTerm(s){
+  return String(s||"").trim().replace(/^["'`]+|["'`]+$/g,"").replace(/[^\w$]/g,"").slice(0,60);
+}
 
 // ----------------------- App state -----------------------
 let SEED=null, ITEMS=[], KNOW={}, PROG={}, GLOSS=loadGlossary();
 let currentQ=null, selectedId=null;
 let CODE={ loading:false, error:"", file:"", defLine:null, startLine:null, endLine:null, snippet:"", calls:[] };
 let GSTATE={ open:false, term:"" };
+let uiSelectionHint = "";
 
 async function loadCodeForItem(item){
   if(!item?.definedIn) return;
@@ -190,8 +210,6 @@ async function loadCodeForItem(item){
   }
 }
 
-function openGlossary(term){ GSTATE.open=true; GSTATE.term=term; render(); }
-function closeGlossary(){ GSTATE.open=false; GSTATE.term=""; render(); }
 function ensureTerm(term){
   if(!term) return;
   if(!GLOSS[term]){
@@ -199,6 +217,14 @@ function ensureTerm(term){
     saveGlossary(GLOSS);
   }
 }
+function openGlossary(term){
+  const t = normalizeTerm(term);
+  if(!t){ uiSelectionHint = "Selecciona una palabra (o escribe un término)."; render(); return; }
+  ensureTerm(t);
+  GSTATE.open=true; GSTATE.term=t; render();
+}
+function closeGlossary(){ GSTATE.open=false; GSTATE.term=""; render(); }
+
 function renderGlossaryModal(){
   if(!GSTATE.open) return "";
   const term = GSTATE.term;
@@ -210,15 +236,25 @@ function renderGlossaryModal(){
         <div class="row" style="justify-content:space-between; align-items:flex-start;">
           <div>
             <div class="kTitle">📘 ${esc(entry.title || term)}</div>
-            <div class="small">Glosario editable. Pega tu explicación y se guarda.</div>
+            <div class="small">Glosario editable. Puedes crear términos nuevos.</div>
           </div>
           <button class="btn" id="gClose">Cerrar</button>
         </div>
 
         <div class="hr"></div>
 
+        <div class="row" style="align-items:flex-end;">
+          <div style="flex:1;">
+            <div class="small"><b>Abrir/crear término</b></div>
+            <input class="input" id="gTerm" value="${esc(term)}" placeholder="Ej: firebase, localStorage, querySelector">
+          </div>
+          <button class="btn primary" id="gOpenTerm">Abrir</button>
+        </div>
+
+        <div class="hr"></div>
+
         <div class="small"><b>Qué es</b></div>
-        <div class="k small" style="margin-top:6px;">${esc(entry.short || "Escribe tu explicación abajo 👇")}</div>
+        <div class="k small" style="margin-top:6px;">${esc(entry.short || "Puedes escribir tu explicación en 'Tu nota'.")}</div>
 
         <div class="hr"></div>
 
@@ -232,7 +268,7 @@ function renderGlossaryModal(){
 
         <div class="hr"></div>
 
-        <div class="small"><b>Tu nota</b></div>
+        <div class="small"><b>Tu nota (pega tu explicación aquí)</b></div>
         <textarea id="gNote" rows="4" placeholder="Pega tu explicación aquí…">${esc(entry.note || "")}</textarea>
 
         <div class="row" style="margin-top:10px;">
@@ -244,6 +280,12 @@ function renderGlossaryModal(){
   `;
 }
 
+function grabSelectionFromCode(){
+  const sel = window.getSelection?.();
+  const text = sel ? sel.toString() : "";
+  return normalizeTerm(text);
+}
+
 function render(){
   const root = document.querySelector("#learnApp");
   const total = ITEMS.length;
@@ -252,14 +294,15 @@ function render(){
 
   const selected = ITEMS.find(x=>x.id===selectedId) || null;
   const userSummary = selected ? (KNOW[selected.id]?.userSummary || "") : "";
-  const codeHtml = (!CODE.loading && !CODE.error && CODE.snippet) ? renderCodeWithGlossary(CODE.snippet) : "";
+  const codeHtml = (!CODE.loading && !CODE.error && CODE.snippet) ? renderCodeWithTerms(CODE.snippet) : "";
 
   root.innerHTML = `
     <div class="wrap">
       <div class="row" style="justify-content:space-between;">
         <div>
-          <div class="h1">Aprender (Quiz + Glosario)</div>
-          <div class="small">Click en palabras del código para ver definición y pegar tu nota.</div>
+          <div class="h1">Aprender (Quiz + Docs vivos)</div>
+          <div class="small">Click en palabras del código o selecciona una palabra y crea tu propio término.</div>
+          ${uiSelectionHint ? `<div class="small">${esc(uiSelectionHint)}</div>` : ``}
         </div>
         <div class="row">
           <span class="badge">${total} items</span>
@@ -328,6 +371,7 @@ function render(){
             <div class="row">
               <button class="btn" id="btnReload">Recargar código</button>
               <button class="btn" id="btnGloss">Glosario</button>
+              <button class="btn good" id="btnFromSel">+ Término desde selección</button>
             </div>
           </div>
 
@@ -341,8 +385,11 @@ function render(){
           ${CODE.loading ? `<div class="small">Cargando…</div>` : ""}
           ${(!CODE.loading && CODE.error) ? `<div class="small">❌ ${esc(CODE.error)}</div>` : ""}
           ${(!CODE.loading && !CODE.error && CODE.snippet) ? `
-            <pre class="code"><code>${codeHtml}</code></pre>
-            <div class="small" style="margin-top:8px;">Tip: toca <span class="kw" data-term="function">function</span> o <span class="kw" data-term="if">if</span>.</div>
+            <pre class="code" id="codeBlock"><code>${codeHtml}</code></pre>
+            <div class="small" style="margin-top:8px;">
+              Tip: toca <span class="kw" data-term="function">function</span>, <span class="kw" data-term="if">if</span>,
+              o selecciona una palabra y toca <b>+ Término desde selección</b>.
+            </div>
           ` : ""}
 
           <div class="hr"></div>
@@ -369,7 +416,7 @@ function render(){
 
           <div class="row" style="margin-top:10px;">
             <button class="btn primary" id="btnSaveNote">Guardar nota</button>
-            <button class="btn" id="btnClearNote">Borrar</button>
+            <button class="btn" id="btnClearNote">Borrar nota</button>
           </div>
         </div>
       ` : ""}
@@ -391,9 +438,7 @@ function render(){
       PROG[currentQ.targetId] = { lastCorrect: ok, lastAt: new Date().toISOString() };
       saveJson(LS_PROGRESS, PROG);
       const out = root.querySelector("#qResult");
-      if(out){
-        out.innerHTML = ok ? `✅ Correcto.` : `❌ Era <b>${esc(currentQ.correct)}</b>.`;
-      }
+      if(out) out.innerHTML = ok ? `✅ Correcto.` : `❌ Era <b>${esc(currentQ.correct)}</b>.`;
     });
   });
 
@@ -412,8 +457,20 @@ function render(){
     if(it) loadCodeForItem(it);
   });
 
-  // Open glossary quick
+  // Open glossary
   root.querySelector("#btnGloss")?.addEventListener("click", ()=> openGlossary("function"));
+
+  // Create term from selection
+  root.querySelector("#btnFromSel")?.addEventListener("click", ()=>{
+    const t = grabSelectionFromCode();
+    if(!t){
+      uiSelectionHint = "Selecciona una palabra dentro del bloque de código (ej: firebase) y vuelve a intentar.";
+      render();
+      return;
+    }
+    uiSelectionHint = "";
+    openGlossary(t);
+  });
 
   // Per-item notes
   root.querySelector("#btnSaveNote")?.addEventListener("click", ()=>{
@@ -443,7 +500,7 @@ function render(){
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   });
 
-  // Clickable keywords anywhere
+  // Clickable terms anywhere
   root.querySelectorAll("[data-term]").forEach(el=>{
     el.addEventListener("click", ()=>{
       const term = el.dataset.term;
@@ -455,6 +512,11 @@ function render(){
   const gBackdrop = root.querySelector("#gBackdrop");
   gBackdrop?.addEventListener("click", (e)=>{ if(e.target === gBackdrop) closeGlossary(); });
   root.querySelector("#gClose")?.addEventListener("click", closeGlossary);
+
+  root.querySelector("#gOpenTerm")?.addEventListener("click", ()=>{
+    const term = normalizeTerm(root.querySelector("#gTerm")?.value || "");
+    openGlossary(term);
+  });
 
   root.querySelector("#gSave")?.addEventListener("click", ()=>{
     const term = GSTATE.term;
