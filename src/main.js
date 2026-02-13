@@ -80,7 +80,6 @@ const LS = {
   routines: "memorycarl_v2_routines",
   shopping: "memorycarl_v2_shopping",
   reminders: "memorycarl_v2_reminders",
-  catalog: \"memorycarl_v2_catalog\",
 };
 
 // ---- Helpers ----
@@ -100,7 +99,7 @@ function escapeHtml(str){
 
 function money(n){
   const x = Number(n || 0);
-  return x.toLocaleString("es-PE", { style:"currency", currency:"PEN" });
+  return x.toLocaleString(undefined, { style:"currency", currency:"USD" });
 }
 
 function parseTimesCsv(s){
@@ -137,21 +136,12 @@ function seedShopping(){
   return [{
     id: uid("l"),
     name: "Super",
-    items: [{ id: uid("i"), name:"Eggs", price:4.25, qty:1, store:"Super", bought:false }]
+    items: [{ id: uid("i"), name:"Eggs", price:4.25, qty:1, bought:false }]
   }];
 }
 
 function seedReminders(){
   return [{ id: uid("m"), text:"Email: follow up", done:false }];
-}
-
-
-
-function seedCatalog(){
-  return [
-    { id: uid("p"), name:"Arroz", price:5.50, store:"Tottus" },
-    { id: uid("p"), name:"Leche", price:4.20, store:"Plaza Vea" },
-  ];
 }
 
 // ---- State ----
@@ -160,14 +150,12 @@ let state = {
   routines: load(LS.routines, seedRoutines()),
   shopping: load(LS.shopping, seedShopping()),
   reminders: load(LS.reminders, seedReminders()),
-  catalog: load(LS.catalog, seedCatalog()),
 };
 
 function persist(){
   save(LS.routines, state.routines);
   save(LS.shopping, state.shopping);
   save(LS.reminders, state.reminders);
-  save(LS.catalog, state.catalog);
 }
 
 // ---- Backup (Export/Import) ----
@@ -177,8 +165,7 @@ function exportBackup(){
     exportedAt: new Date().toISOString(),
     routines: state.routines,
     shopping: state.shopping,
-    reminders: state.reminders,
-    catalog: state.catalog
+    reminders: state.reminders
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -202,8 +189,6 @@ function importBackup(file){
       const shopping = Array.isArray(data.shopping) ? data.shopping : [];
       const reminders = Array.isArray(data.reminders) ? data.reminders : [];
 
-      const catalog = Array.isArray(data.catalog) ? data.catalog : [];
-
       routines.forEach(r=>{
         r.id ||= uid("r");
         r.times = Array.isArray(r.times) ? r.times : [];
@@ -218,7 +203,6 @@ function importBackup(file){
           it.id ||= uid("i");
           it.price = Number(it.price || 0);
           it.qty = Math.max(1, Number(it.qty || 1));
-          it.store = String(it.store || \"\");
           it.bought = !!it.bought;
         });
       });
@@ -227,18 +211,9 @@ function importBackup(file){
         m.done = !!m.done;
       });
 
-      
-
-      catalog.forEach(p=>{
-        p.id ||= uid(\"p\");
-        p.name = String(p.name||\"\").trim();
-        p.price = Number(p.price||0);
-        p.store = String(p.store||\"\").trim();
-      });
-state.routines = routines;
+      state.routines = routines;
       state.shopping = shopping;
       state.reminders = reminders;
-      state.catalog = catalog.length ? catalog : seedCatalog();
       persist();
       view();
       toast("Backup imported ✅");
@@ -340,8 +315,6 @@ function view(){
   });
 
   wireActions(root);
-  const btnCatalog = root.querySelector("#btnCatalog");
-  if(btnCatalog) btnCatalog.addEventListener("click", openCatalogModal);
 }
 
 function viewLearn(){
@@ -440,14 +413,8 @@ function viewShopping(){
   return `
     <div class="sectionTitle">
       <div>Listas de compras</div>
-      <div class="row" style="margin:0;">
-        <button class="btn" id="btnCatalog">📚 Catálogo</button>
-        <div class="chip">${state.shopping.length} listas</div>
-      </div>
+      <div class="chip">${state.shopping.length} listas</div>
     </div>
-      <div class="row" style="margin:0;">
-        <button class="btn" id="btnCatalog">📚 Catálogo</button>
-      </div>
     ${state.shopping.map(l => shoppingCard(l)).join("")}
   `;
 }
@@ -475,7 +442,7 @@ function shoppingCard(list){
           <div class="item">
             <div class="left">
               <div class="name">${it.bought ? "✅" : "⬜"} ${escapeHtml(it.name)}</div>
-              <div class=\"meta\">${money(it.price)} × ${Number(it.qty||1)} = <b>${money(Number(it.price||0)*Number(it.qty||1))}</b>${it.store ? ` · 🏪 ${escapeHtml(it.store)}` : ``}</div>
+              <div class="meta">${money(it.price)} × ${Number(it.qty||1)} = <b>${money(Number(it.price||0)*Number(it.qty||1))}</b></div>
             </div>
             <div class="row">
               <button class="btn ${it.bought ? "ghost" : "good"}" data-act="toggleBought" data-item-id="${it.id}">${it.bought ? "Undo" : "Bought"}</button>
@@ -518,127 +485,6 @@ function viewReminders(){
     `).join("")}
   `;
 }
-
-
-function openCatalogModal(){
-  const host = document.querySelector("#app");
-  const b = document.createElement("div");
-  b.className = "modalBackdrop";
-  b.innerHTML = `
-    <div class="modal">
-      <div class="row" style="justify-content:space-between;align-items:flex-start;margin-top:0;">
-        <div>
-          <h2 style="margin:0;">📚 Catálogo</h2>
-          <div class="muted">Productos guardados (precio + tienda).</div>
-        </div>
-        <button class="btn" data-m="close">Cerrar</button>
-      </div>
-
-      <div class="hr"></div>
-
-      <div class="row" style="margin-top:0;">
-        <button class="btn primary" id="btnAddProd">+ Producto</button>
-        <button class="btn" id="btnSortProd">Ordenar A-Z</button>
-      </div>
-
-      <div class="hr"></div>
-
-      <div class="list" id="prodList"></div>
-    </div>
-  `;
-  host.appendChild(b);
-
-  const close = ()=> b.remove();
-  b.addEventListener("click",(e)=>{ if(e.target===b) close(); });
-  b.querySelector('[data-m="close"]').addEventListener("click", close);
-
-  const renderList = ()=>{
-    const wrap = b.querySelector("#prodList");
-    const items = state.catalog || [];
-    wrap.innerHTML = items.length ? items.map(p=>`
-      <div class="item" data-prod-id="${p.id}">
-        <div class="left">
-          <div class="name">${escapeHtml(p.name)}</div>
-          <div class="meta">${money(p.price)}${p.store?` · 🏪 ${escapeHtml(p.store)}`:""}</div>
-        </div>
-        <div class="row">
-          <button class="btn" data-a="edit">Edit</button>
-          <button class="btn danger" data-a="del">Del</button>
-        </div>
-      </div>
-    `).join("") : `<div class="muted">Aún no tienes productos. Crea tu primer producto con “+ Producto”.</div>`;
-
-    wrap.querySelectorAll("[data-a]").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        const row = btn.closest("[data-prod-id]");
-        const pid = row?.dataset.prodId;
-        const p = state.catalog.find(x=>x.id===pid);
-        if(!p) return;
-
-        if(btn.dataset.a==="del"){
-          if(!confirm("Delete product from catalog?")) return;
-          state.catalog = state.catalog.filter(x=>x.id!==pid);
-          persist();
-          renderList();
-          return;
-        }
-        if(btn.dataset.a==="edit"){
-          openPromptModal({
-            title:"Edit product",
-            fields:[
-              {key:"name", label:"Name", value:p.name},
-              {key:"price", label:"Price", type:"number", value:String(p.price ?? 0)},
-              {key:"store", label:"Store", value:p.store || ""},
-            ],
-            onSubmit: ({name, price, store})=>{
-              const n=(name||"").trim();
-              if(!n) return;
-              p.name=n;
-              p.price=Number(price||0);
-              p.store=(store||"").trim();
-              persist();
-              renderList();
-              toast("Catalog updated ✅");
-            }
-          });
-        }
-      });
-    });
-  };
-
-  b.querySelector("#btnAddProd").addEventListener("click", ()=>{
-    openPromptModal({
-      title:"New product",
-      fields:[
-        {key:"name", label:"Name", placeholder:"Arroz"},
-        {key:"price", label:"Price", type:"number", placeholder:"5.50"},
-        {key:"store", label:"Store", placeholder:"Tottus / Plaza Vea / ..."},
-      ],
-      onSubmit: ({name, price, store})=>{
-        const n=(name||"").trim();
-        if(!n) return;
-        state.catalog.unshift({
-          id: uid("p"),
-          name:n,
-          price:Number(price||0),
-          store:(store||"").trim(),
-        });
-        persist();
-        renderList();
-        toast("Saved to catalog ✅");
-      }
-    });
-  });
-
-  b.querySelector("#btnSortProd").addEventListener("click", ()=>{
-    state.catalog = [...state.catalog].sort((a,b)=> (a.name||"").localeCompare(b.name||"", undefined, {sensitivity:"base"}));
-    persist();
-    renderList();
-  });
-
-  renderList();
-}
-
 
 function wireActions(root){
   root.querySelectorAll("[data-act]").forEach(btn=>{
@@ -751,31 +597,12 @@ function wireActions(root){
               {key:"name", label:"Item", value: it.name},
               {key:"price", label:"Price", type:"number", value: String(it.price ?? 0)},
               {key:"qty", label:"Qty", type:"number", value: String(it.qty ?? 1)},
-              {key:"store", label:"Store", value: it.store || ""},
-              {key:"saveToCatalog", label:"Save to catalog", type:"checkbox", value:"0"},
             ],
-            onSubmit: ({name, price, qty, store, saveToCatalog})=>{
+            onSubmit: ({name, price, qty})=>{
               if(!name.trim()) return;
               it.name = name.trim();
               it.price = Number(price || 0);
               it.qty = Math.max(1, Number(qty || 1));
-              it.store = (store||"").trim();
-
-              const shouldSave = String(saveToCatalog) === "1";
-              if(shouldSave){
-                const n = it.name;
-                const pr = Number(it.price||0);
-                const st = it.store || "";
-                const exists = state.catalog.some(p =>
-                  (p.name||"").toLowerCase() === n.toLowerCase() &&
-                  Number(p.price||0) === pr &&
-                  (p.store||"") === st
-                );
-                if(!exists){
-                  state.catalog.unshift({ id: uid("p"), name:n, price: pr, store: st });
-                }
-              }
-
               persist(); view();
             }
           });
@@ -843,33 +670,6 @@ function openPromptModal({title, fields, onSubmit}){
   wrap.innerHTML = fields.map(f=>{
     const type = f.type || "text";
     const value = escapeHtml(f.value ?? "");
-
-    if(type==="select"){
-      const opts = (f.options||[]).map(([val,label])=>{
-        const sel = String(f.value??"")===String(val) ? "selected" : "";
-        return `<option value="${escapeHtml(val)}" ${sel}>${escapeHtml(label)}</option>`;
-      }).join("");
-      return `
-        <div>
-          <div class="muted" style="margin:2px 0 6px;">${escapeHtml(f.label)}</div>
-          <select class="input" data-k="${escapeHtml(f.key)}">${opts}</select>
-        </div>
-      `;
-    }
-
-    if(type==="checkbox"){
-      const checked = String(f.value||"") === "1";
-      return `
-        <div class="checkRow">
-          <input type="checkbox" class="check" data-k="${escapeHtml(f.key)}" ${checked?"checked":""}>
-          <div>
-            <div style="font-weight:900;">${escapeHtml(f.label)}</div>
-            <div class="muted">Opcional</div>
-          </div>
-        </div>
-      `;
-    }
-
     return `
       <div>
         <div class="muted" style="margin:2px 0 6px;">${escapeHtml(f.label)}</div>
@@ -884,19 +684,14 @@ function openPromptModal({title, fields, onSubmit}){
   b.querySelector('[data-m="save"]').addEventListener("click", ()=>{
     const data = {};
     fields.forEach(f=>{
-      const el = b.querySelector(`[data-k="${CSS.escape(f.key)}"]`);
-      if(!el){ data[f.key] = ""; return; }
-      if((f.type||"") === "checkbox"){
-        data[f.key] = el.checked ? "1" : "0";
-      } else {
-        data[f.key] = el.value;
-      }
+      const input = b.querySelector(`[data-k="${CSS.escape(f.key)}"]`);
+      data[f.key] = input ? input.value : "";
     });
     onSubmit?.(data);
     close();
   });
 
-  const first = b.querySelector("input,select,textarea");
+  const first = b.querySelector("input");
   if(first) first.focus();
 }
 
