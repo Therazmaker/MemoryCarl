@@ -225,10 +225,26 @@ function importBackup(file){
 }
 
 // ---- UI ----
+function bottomNav(){
+  const mk = (tab, icon, label) => `
+    <button class="bn ${state.tab===tab ? "active":""}" data-tab="${tab}" aria-label="${escapeHtml(label)}">
+      <div class="bnIcon">${icon}</div>
+      <div class="bnLabel">${escapeHtml(label)}</div>
+    </button>
+  `;
+
+  return `
+    <nav class="bottomNav" role="navigation" aria-label="MemoryCarl navigation">
+      ${mk("routines","📝","Rutinas")}
+      ${mk("shopping","🛒","Compras")}
+      ${mk("reminders","⏰","Reminders")}
+      ${mk("learn","🧠","Aprender")}
+    </nav>
+  `;
+}
+
 function view(){
   const root = document.querySelector("#app");
-  const isLearn = (state.tab === "learn");
-
   root.innerHTML = `
     <div class="app">
       <header class="header">
@@ -236,104 +252,96 @@ function view(){
           <h1>MemoryCarl</h1>
           <div class="pill">local • phone-first</div>
         </div>
-        <div class="tabs">
-          <div class="tab ${state.tab==="routines"?"active":""}" data-tab="routines">Rutinas</div>
-          <div class="tab ${state.tab==="shopping"?"active":""}" data-tab="shopping">Compras</div>
-          <div class="tab ${state.tab==="reminders"?"active":""}" data-tab="reminders">Reminders</div>
-          <div class="tab ${state.tab==="learn"?"active":""}" data-tab="learn">Aprender</div>
-        </div>
       </header>
 
-      <main class="content ${isLearn ? "learnContent" : ""}">
+      <main class="content">
         ${state.tab==="routines" ? viewRoutines() : ""}
         ${state.tab==="shopping" ? viewShopping() : ""}
         ${state.tab==="reminders" ? viewReminders() : ""}
         ${state.tab==="learn" ? viewLearn() : ""}
       </main>
 
-      ${isLearn ? "" : `
-        <div class="bottomBar">
-          <div class="row" style="margin:0;">
-            <button class="btn" id="btnExport">Export</button>
-            <button class="btn primary" id="btnNotif">Enable Notifs</button>
-            <button class="btn" id="btnCopyToken">Copy Token</button>
-            <label class="btn" style="cursor:pointer;">
-              Import
-              <input id="fileImport" type="file" accept="application/json" style="display:none;">
-            </label>
-          </div>
-          <div class="muted" style="margin-top:8px;">Backup local (JSON). Útil antes de limpiar cache o cambiar de teléfono.</div>
+      <div class="bottomBar">
+        <div class="row" style="margin:0;">
+          <button class="btn" id="btnExport">Export</button>
+          <button class="btn primary" id="btnNotif">Enable Notifs</button>
+          <button class="btn" id="btnCopyToken">Copy Token</button>
+          <label class="btn" style="cursor:pointer;">
+            Import
+            <input id="fileImport" type="file" accept="application/json" style="display:none;">
+          </label>
         </div>
+        <div class="muted" style="margin-top:8px;">Backup local (JSON). Útil antes de limpiar cache o cambiar de teléfono.</div>
+      </div>
 
-        <div class="fab" id="fab">+</div>
-      `}
-
+      <div class="fab" id="fab">+</div>
       <div id="toastHost"></div>
+
+      ${bottomNav()}
     </div>
   `;
 
-  root.querySelectorAll(".tab").forEach(t=>{
-    t.addEventListener("click", ()=>{
-      state.tab = t.dataset.tab;
+  // Bottom nav wiring
+  root.querySelectorAll(".bn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      state.tab = btn.dataset.tab;
       view();
     });
   });
 
-  if(!isLearn){
-    root.querySelector("#fab").addEventListener("click", ()=>{
-      if(state.tab==="routines") openRoutineModal();
-      if(state.tab==="shopping") openShoppingModal();
-      if(state.tab==="reminders") openReminderModal();
-    });
+  // FAB action per tab (disabled on Learn)
+  const fab = root.querySelector("#fab");
+  fab.style.display = (state.tab==="learn") ? "none" : "flex";
+  fab.addEventListener("click", ()=>{
+    if(state.tab==="routines") openRoutineModal();
+    if(state.tab==="shopping") openShoppingModal();
+    if(state.tab==="reminders") openReminderModal();
+  });
 
-    const btnExport = root.querySelector("#btnExport");
-    if(btnExport) btnExport.addEventListener("click", exportBackup);
+  const btnExport = root.querySelector("#btnExport");
+  if(btnExport) btnExport.addEventListener("click", exportBackup);
 
-    const btnNotif = root.querySelector("#btnNotif");
-    if(btnNotif) btnNotif.addEventListener("click", enableNotifications);
+  const btnNotif = root.querySelector("#btnNotif");
+  if(btnNotif) btnNotif.addEventListener("click", enableNotifications);
 
-    const btnCopyToken = root.querySelector("#btnCopyToken");
-    if(btnCopyToken) btnCopyToken.addEventListener("click", copyFcmToken);
+  const btnCopyToken = root.querySelector("#btnCopyToken");
+  if(btnCopyToken) btnCopyToken.addEventListener("click", copyFcmToken);
 
-    const fileImport = root.querySelector("#fileImport");
-    if(fileImport) fileImport.addEventListener("change", (e)=>{
-      const f = e.target.files?.[0];
-      if(f) importBackup(f);
-      e.target.value = "";
-    });
+  const fileImport = root.querySelector("#fileImport");
+  if(fileImport) fileImport.addEventListener("change", (e)=>{
+    const f = e.target.files?.[0];
+    if(f) importBackup(f);
+    e.target.value = "";
+  });
 
-    wireActions(root);
-  }
+  wireActions(root);
 }
 
 function viewLearn(){
   return `
-    <div class="learnWrap">
-      <div class="sectionTitle">
-        <div>Aprender tu propio código</div>
-        <div class="chip">Quiz + notas</div>
+    <div class="sectionTitle">
+      <div>Aprender</div>
+      <div class="chip">quiz + glosario</div>
+    </div>
+
+    <div class="card">
+      <div class="small">
+        Este módulo te hace preguntas sobre la estructura de MemoryCarl.
+        Cada respuesta puede abrir una “ficha” para que escribas tu explicación en 1 línea.
+      </div>
+      <div class="hr"></div>
+
+      <div class="learnFrame">
+        <iframe
+          title="MemoryCarl Learn"
+          src="./learn/"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+        ></iframe>
       </div>
 
-      <div class="card">
-        <div class="small">
-          Este módulo te hace preguntas sobre la estructura de MemoryCarl.
-          Cada respuesta puede abrir una “ficha” para que escribas tu explicación en 1 línea.
-        </div>
-        <div class="hr"></div>
-
-        <div class="learnFrame">
-          <iframe
-            title="MemoryCarl Learn"
-            src="./learn/"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-            style="width:100%; height:100%; border:0; border-radius:16px;"
-          ></iframe>
-        </div>
-
-        <div class="small" style="margin-top:10px;">
-          Tip: si actualizas el quiz, solo refresca esta pestaña.
-        </div>
+      <div class="small" style="margin-top:10px;">
+        Tip: si actualizas el quiz, solo refresca esta pestaña.
       </div>
     </div>
   `;
@@ -742,7 +750,7 @@ function toast(msg){
   let host = document.querySelector("#toastHost");
   if(!host) return;
   host.innerHTML = `<div style="
-    position:fixed;left:50%;bottom:86px;transform:translateX(-50%);
+    position:fixed;left:50%;bottom:calc(var(--navH) + 92px);transform:translateX(-50%);
     background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.18);
     color:rgba(255,255,255,.92);padding:10px 12px;border-radius:14px;
     backdrop-filter:blur(10px);z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.35);
