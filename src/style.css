@@ -136,3 +136,24 @@ body{
   height: 70vh;
   min-height: 520px;
 }
+/* --- Learn iframe: evita “velo”/banda rara --- */
+.learnFrame{
+  position: relative;
+  width: 100%;
+  height: 70vh;              /* ajusta si quieres */
+  overflow: hidden;          /* 🔥 mata la franja molesta */
+  background: #0b0f19;       /* mismo fondo */
+  border-radius: 16px;       /* igual que tu iframe */
+  border: 1px solid rgba(255,255,255,.12); /* opcional */
+}
+
+.learnFrame iframe{
+  position: absolute;
+  inset: 0;                  /* ocupa TODO */
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  background: #0b0f19;       /* evita transparencia */
+  border-radius: 0;          /* el borde redondo lo maneja el contenedor */
+}
