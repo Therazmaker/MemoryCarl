@@ -128,3 +128,11 @@ body{
 }
 .input::placeholder{color:rgba(255,255,255,.42)}
 .muted{color:var(--muted);font-size:12px}
+/* Learn tab */
+.learnContent{ padding-bottom: 18px; }
+.learnWrap{ display:flex; flex-direction:column; gap:10px; }
+.learnFrame{
+  width:100%;
+  height: 70vh;
+  min-height: 520px;
+}
