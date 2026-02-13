@@ -1,0 +1,28 @@
+name: Push Reminders
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 2 * * *"  # 02:00 UTC (luego lo ajustamos a tu hora)
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Send push
+        env:
+          FIREBASE_PROJECT_ID: "memorycarl-3c297"
+          FCM_SERVICE_ACCOUNT_B64: ${{ secrets.FCM_SERVICE_ACCOUNT_B64 }}
+          FCM_TOKEN: ${{ secrets.FCM_TOKEN }}
+          PUSH_TITLE: "MemoryCarl"
+          PUSH_BODY: "Check-in: registra tu emoción de hoy ✍️"
+        run: node scripts/sendPush.mjs
