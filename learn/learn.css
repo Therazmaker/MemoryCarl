@@ -56,3 +56,19 @@ body{
   padding:6px 10px;border-radius:999px;
   color:var(--muted);background:rgba(255,255,255,.04);
 }
+/* Learn code blocks */
+pre.code{
+  margin:10px 0 0;
+  padding:12px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(0,0,0,.28);
+  overflow:auto;
+  max-height: 340px;
+}
+pre.code code{
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size:12px;
+  line-height:1.35;
+  color:rgba(255,255,255,.92);
+}
