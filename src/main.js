@@ -1528,8 +1528,6 @@ function openProductChart(productId){
   if(!p) return;
 
   const history = p.history || [];
-  const prices = history.map(h=>h.price).concat([p.price]);
-  const labels = history.map(h=>new Date(h.date).toLocaleDateString()).concat(["Actual"]);
 
   const host = document.querySelector("#app");
   const modal = document.createElement("div");
