@@ -280,3 +280,55 @@ body{
   box-shadow:0 10px 24px rgba(0,0,0,.25);
 }
 .bn.active .bnIcon{ filter:drop-shadow(0 6px 18px rgba(124,92,255,.22)); }
+
+
+/* ================= PRODUCT SHEET ================= */
+
+.productSheetScrim{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.45);
+  opacity:0;
+  transition:opacity .2s ease;
+  z-index:40;
+}
+
+.productSheetScrim.show{
+  opacity:1;
+}
+
+.productSheetPanel{
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:0;
+  transform:translateY(100%);
+  transition:transform .25s ease;
+  background:linear-gradient(to top, rgba(11,15,25,.95), rgba(11,15,25,.85));
+  border-top-left-radius:22px;
+  border-top-right-radius:22px;
+  border-top:1px solid var(--line);
+  padding:16px;
+  z-index:41;
+  max-height:80vh;
+  overflow:auto;
+}
+
+.productSheetPanel.open{
+  transform:translateY(0);
+}
+
+.productSheetHeader{
+  text-align:center;
+  margin-bottom:12px;
+}
+
+.productSheetHeader h2{
+  margin:8px 0 4px;
+  font-size:16px;
+}
+
+.productSheetBody{
+  margin-top:8px;
+}
+

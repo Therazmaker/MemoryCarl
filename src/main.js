@@ -510,6 +510,13 @@ function viewShopping(){
   return `
     <div class="sectionTitle">
       <div>Listas de compras</div>
+    </div>
+
+<div class="row" style="margin-bottom:12px;">
+  <button class="btn" data-open-products="1">📦 Biblioteca</button>
+</div>
+
+    <div class="sectionTitle" style="display:none">
       <div class="chip">${state.shopping.length} listas</div>
     </div>
     ${state.shopping.map(l => shoppingCard(l)).join("")}
@@ -955,82 +962,92 @@ persist();
 view();
 
 
-/* ====================== FIREBASE SYNC (FCM TOKEN BASED) ====================== */
+/* ====================== PRODUCT LIBRARY SHEET ====================== */
 
-let db = null;
+LS.products = "memorycarl_v2_products";
+state.products = load(LS.products, []);
 
-function initFirestore(){
-  try{
-    if (!window.firebase) return;
-    if (!firebase.apps || firebase.apps.length === 0)
-      firebase.initializeApp(FIREBASE_CONFIG);
+const _persistOriginal = persist;
+persist = function(){
+  _persistOriginal();
+  save(LS.products, state.products);
+};
 
-    db = firebase.firestore();
-  } catch (e) {
-    console.warn("Firestore init error:", e);
+function openProductLibrarySheet(){
+  const host = document.querySelector("#app");
+
+  const sheet = document.createElement("div");
+  sheet.className = "productSheet";
+
+  sheet.innerHTML = `
+    <div class="productSheetScrim" id="psScrim"></div>
+    <div class="productSheetPanel">
+      <div class="productSheetHeader">
+        <div class="handleBar"></div>
+        <h2>Biblioteca de Productos</h2>
+      </div>
+
+      <div class="productSheetBody">
+        <div class="row">
+          <button class="btn good" id="btnAddProduct">+ Nuevo Producto</button>
+        </div>
+
+        <div class="list" style="margin-top:12px;">
+          ${state.products.map(p=>`
+            <div class="item">
+              <div class="left">
+                <div class="name">${escapeHtml(p.name)}</div>
+                <div class="meta">${money(p.price)} · ${escapeHtml(p.store||"")}</div>
+              </div>
+            </div>
+          `).join("") || '<div class="muted">No hay productos aún</div>'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(sheet);
+
+  const scrim = sheet.querySelector("#psScrim");
+  const panel = sheet.querySelector(".productSheetPanel");
+
+  requestAnimationFrame(()=>{
+    panel.classList.add("open");
+    scrim.classList.add("show");
+  });
+
+  scrim.addEventListener("click", ()=> sheet.remove());
+
+  const btnAdd = sheet.querySelector("#btnAddProduct");
+  btnAdd?.addEventListener("click", ()=>{
+    openPromptModal({
+      title:"Nuevo producto",
+      fields:[
+        {key:"name", label:"Nombre"},
+        {key:"price", label:"Precio (USD)", type:"number"},
+        {key:"store", label:"Tienda"},
+      ],
+      onSubmit: ({name, price, store})=>{
+        const n = (name||"").trim();
+        if(!n) return;
+        state.products.unshift({
+          id: uid("p"),
+          name:n,
+          price:Number(price||0),
+          store:(store||"").trim()
+        });
+        persist();
+        sheet.remove();
+        view();
+      }
+    });
+  });
+}
+
+document.addEventListener("click", function(e){
+  if(e.target && e.target.dataset && e.target.dataset.openProducts === "1"){
+    openProductLibrarySheet();
   }
-}
-
-function getUserId(){
-  return localStorage.getItem("memorycarl_fcm_token") || null;
-}
-
-async function syncToFirebase(){
-  try{
-    const uid = getUserId();
-    if(!uid) return;
-
-    initFirestore();
-    if(!db) return;
-
-    const payload = {
-      routines: state.routines,
-      shopping: state.shopping,
-      reminders: state.reminders,
-      products: state.products || [],
-      updatedAt: new Date().toISOString()
-    };
-
-    await db.collection("memorycarl").doc(uid).set(payload);
-    localStorage.setItem("mc_last_sync", payload.updatedAt);
-    console.log("Synced to Firebase");
-  }catch(err){
-    console.error("Sync error:", err);
-  }
-}
-
-async function syncFromFirebase(){
-  try{
-    const uid = getUserId();
-    if(!uid) return;
-
-    initFirestore();
-    if(!db) return;
-
-    const doc = await db.collection("memorycarl").doc(uid).get();
-    if(doc.exists){
-      const data = doc.data();
-
-      state.routines = data.routines || state.routines;
-      state.shopping = data.shopping || state.shopping;
-      state.reminders = data.reminders || state.reminders;
-      state.products = data.products || state.products;
-
-      persist();
-      view();
-      console.log("Synced from Firebase");
-    }
-  }catch(e){
-    console.warn("Sync from firebase failed");
-  }
-}
-
-window.addEventListener("beforeunload", ()=>{
-  syncToFirebase();
 });
 
-setTimeout(()=>{
-  syncFromFirebase();
-}, 1200);
-
-/* ====================== END FIREBASE SYNC ====================== */
+/* ====================== END PRODUCT LIBRARY SHEET ====================== */
