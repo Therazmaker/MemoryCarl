@@ -955,77 +955,82 @@ persist();
 view();
 
 
-/* ====================== PRODUCT LIBRARY (Phase 1 - Local) ====================== */
-LS.products = "memorycarl_v2_products";
-state.products = load(LS.products, []);
+/* ====================== FIREBASE SYNC (FCM TOKEN BASED) ====================== */
 
-const _persist = persist;
-persist = function(){
-  _persist();
-  save(LS.products, state.products);
-};
+let db = null;
 
-function openProductModal(){
-  openPromptModal({
-    title:"Nuevo producto",
-    fields:[
-      {key:"name", label:"Nombre", placeholder:"Arroz Costeño 5kg"},
-      {key:"price", label:"Precio (S/)", type:"number", placeholder:"24.90"},
-      {key:"store", label:"Tienda", placeholder:"Plaza Vea"},
-      {key:"category", label:"Categoría", placeholder:"Granos"}
-    ],
-    onSubmit: ({name, price, store, category})=>{
-      const n = (name||"").trim();
-      if(!n) return;
-      state.products.unshift({
-        id: uid("p"),
-        name:n,
-        price:Number(price||0),
-        store:(store||"").trim(),
-        category:(category||"").trim()
-      });
+function initFirestore(){
+  try{
+    if (!window.firebase) return;
+    if (!firebase.apps || firebase.apps.length === 0)
+      firebase.initializeApp(FIREBASE_CONFIG);
+
+    db = firebase.firestore();
+  } catch (e) {
+    console.warn("Firestore init error:", e);
+  }
+}
+
+function getUserId(){
+  return localStorage.getItem("memorycarl_fcm_token") || null;
+}
+
+async function syncToFirebase(){
+  try{
+    const uid = getUserId();
+    if(!uid) return;
+
+    initFirestore();
+    if(!db) return;
+
+    const payload = {
+      routines: state.routines,
+      shopping: state.shopping,
+      reminders: state.reminders,
+      products: state.products || [],
+      updatedAt: new Date().toISOString()
+    };
+
+    await db.collection("memorycarl").doc(uid).set(payload);
+    localStorage.setItem("mc_last_sync", payload.updatedAt);
+    console.log("Synced to Firebase");
+  }catch(err){
+    console.error("Sync error:", err);
+  }
+}
+
+async function syncFromFirebase(){
+  try{
+    const uid = getUserId();
+    if(!uid) return;
+
+    initFirestore();
+    if(!db) return;
+
+    const doc = await db.collection("memorycarl").doc(uid).get();
+    if(doc.exists){
+      const data = doc.data();
+
+      state.routines = data.routines || state.routines;
+      state.shopping = data.shopping || state.shopping;
+      state.reminders = data.reminders || state.reminders;
+      state.products = data.products || state.products;
+
       persist();
-      toast("Producto guardado 📦");
+      view();
+      console.log("Synced from Firebase");
     }
-  });
+  }catch(e){
+    console.warn("Sync from firebase failed");
+  }
 }
 
-function openProductPicker(list){
-  const host = document.querySelector("#app");
-  const b = document.createElement("div");
-  b.className = "modalBackdrop";
-  b.innerHTML = `
-    <div class="modal">
-      <h2>Seleccionar producto</h2>
-      <div class="grid">
-        ${state.products.map(p=>`
-          <button class="btn" data-pid="${p.id}">
-            ${escapeHtml(p.name)} • ${money(p.price)}
-          </button>
-        `).join("")}
-      </div>
-      <div class="row" style="margin-top:12px;">
-        <button class="btn ghost" data-close>Cancelar</button>
-      </div>
-    </div>`;
-  host.appendChild(b);
+window.addEventListener("beforeunload", ()=>{
+  syncToFirebase();
+});
 
-  b.querySelectorAll("[data-pid]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const p = state.products.find(x=>x.id===btn.dataset.pid);
-      if(!p) return;
-      list.items.push({
-        id: uid("i"),
-        name: p.name,
-        price: p.price,
-        qty: 1,
-        bought: false
-      });
-      persist(); view(); b.remove();
-    });
-  });
+setTimeout(()=>{
+  syncFromFirebase();
+}, 1200);
 
-  b.querySelector("[data-close]").addEventListener("click", ()=>b.remove());
-  b.addEventListener("click",(e)=>{ if(e.target===b) b.remove(); });
-}
-/* ====================== END PRODUCT LIBRARY ====================== */
+/* ====================== END FIREBASE SYNC ====================== */
