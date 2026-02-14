@@ -101,7 +101,14 @@ function escapeHtml(str){
 
 function money(n){
   const x = Number(n || 0);
-  return new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" }).format(x);
+  try{
+    return new Intl.NumberFormat("es-PE", {
+      style: "currency",
+      currency: "PEN"
+    }).format(x);
+  }catch{
+    return "S/ " + x.toFixed(2);
+  }
 }
 
 function parseTimesCsv(s){
