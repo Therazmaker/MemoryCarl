@@ -40,8 +40,12 @@ body{
 }
 
 .content{
-  padding:14px 16px calc(var(--navH) + 140px);
+  padding:14px 16px calc(var(--navH) + 24px);
   flex:1;
+}
+
+.app.hasSheet .content{
+  padding-bottom: calc(var(--navH) + 140px);
 }
 
 .sectionTitle{display:flex;align-items:center;justify-content:space-between;margin:10px 0 12px;color:var(--muted);font-size:13px}
@@ -54,6 +58,22 @@ body{
 .cardTop{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
 .cardTitle{margin:0;font-size:16px}
 .small{font-size:12px;color:var(--muted);margin-top:4px}
+
+
+.kv{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.10)}
+.kv:last-child{border-bottom:none}
+.k{color:var(--muted);font-size:12px}
+.v{font-size:12px;text-align:right}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+.note{
+  margin-top:10px;
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.03);
+  color:var(--muted);
+  font-size:12px;
+}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .btn{
   border:1px solid var(--line);
@@ -95,6 +115,70 @@ body{
   box-shadow:var(--shadow);
   display:flex;align-items:center;justify-content:center;
   cursor:pointer;user-select:none;
+}
+
+
+/* Bottom sheet for Settings actions */
+:root{ --sheetPeek:62px; }
+
+.sheetScrim{
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.45);
+  opacity:0; pointer-events:none;
+  z-index:5;
+}
+.sheetScrim.show{ opacity:1; pointer-events:auto; }
+
+.bottomSheet{
+  position:fixed;
+  left:0; right:0;
+  bottom:var(--navH);
+  z-index:6;
+  border-top:1px solid var(--line);
+  background:linear-gradient(to top, rgba(11,15,25,.92), rgba(11,15,25,.55));
+  backdrop-filter:blur(12px);
+  border-radius:18px 18px 0 0;
+  box-shadow:0 -16px 40px rgba(0,0,0,.35);
+  will-change:transform;
+  transform:translateY(0);
+}
+.bottomSheet .sheetHandle{
+  padding:10px 16px 8px;
+  cursor:grab;
+  user-select:none;
+  touch-action:none;
+}
+.bottomSheet .sheetHandle:active{ cursor:grabbing; }
+.handleBar{
+  width:46px; height:5px;
+  border-radius:999px;
+  background:rgba(255,255,255,.22);
+  margin:0 auto 8px;
+}
+.sheetHandleRow{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:10px;
+}
+.sheetTitle{
+  font-weight:900;
+  letter-spacing:.2px;
+  color:rgba(255,255,255,.92);
+}
+.iconBtn{
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.06);
+  color:rgba(255,255,255,.92);
+  border-radius:12px;
+  padding:6px 10px;
+  font-weight:900;
+}
+.bottomSheet .sheetBody{
+  padding:0 16px 14px;
+}
+
+/* Give Settings content space for peeked sheet + bottom nav */
+.hasSheet .content{
+  padding-bottom: calc(var(--navH) + var(--sheetPeek) + 18px);
 }
 
 /* Bottom action bar moved above bottom nav */

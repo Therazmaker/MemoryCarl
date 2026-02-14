@@ -149,6 +149,7 @@ function seedReminders(){
 // ---- State ----
 let state = {
   tab: "routines",
+  sheetOpen: (localStorage.getItem("mc_sheet_open")==="1"),
   routines: load(LS.routines, seedRoutines()),
   shopping: load(LS.shopping, seedShopping()),
   reminders: load(LS.reminders, seedReminders()),
@@ -241,6 +242,7 @@ function bottomNav(){
       ${mk("shopping","🛒","Compras")}
       ${mk("reminders","⏰","Reminders")}
       ${mk("learn","🧠","Aprender")}
+      ${mk("settings","⚙️","Ajustes")}
     </nav>
   `;
 }
@@ -248,7 +250,7 @@ function bottomNav(){
 function view(){
   const root = document.querySelector("#app");
   root.innerHTML = `
-    <div class="app">
+    <div class="app ${state.tab==="settings" ? "hasSheet":""}">
       <header class="header">
         <div class="brand">
           <h1>MemoryCarl</h1>
@@ -261,18 +263,33 @@ function view(){
         ${state.tab==="shopping" ? viewShopping() : ""}
         ${state.tab==="reminders" ? viewReminders() : ""}
         ${state.tab==="learn" ? viewLearn() : ""}
+        ${state.tab==="settings" ? viewSettings() : ""}
       </main>
 
-      <div class="bottomBar">
-        <div class="row" style="margin:0;">
-          <button class="btn" id="btnExport">Export</button>
-          <button class="btn primary" id="btnNotif">Enable Notifs</button>
-          <button class="btn" id="btnCopyToken">Copy Token</button>
-          <label class="btn" style="cursor:pointer;">
-            Import
-            <input id="fileImport" type="file" accept="application/json" style="display:none;">
-          </label>
+      ${state.tab==="settings" ? `
+      <div class="sheetScrim" id="sheetScrim" aria-hidden="true"></div>
+      <section class="bottomSheet" id="bottomSheet" aria-label="Settings actions panel">
+        <div class="sheetHandle" id="sheetHandle" role="button" tabindex="0" aria-expanded="false">
+          <div class="handleBar" aria-hidden="true"></div>
+          <div class="sheetHandleRow">
+            <div class="sheetTitle">Acciones</div>
+            <button class="iconBtn" id="sheetToggle" aria-label="Toggle actions panel">▴</button>
+          </div>
         </div>
+        <div class="sheetBody">
+          <div class="row" style="margin:0;">
+            <button class="btn" id="btnExport">Export</button>
+            <button class="btn primary" id="btnNotif">Enable Notifs</button>
+            <button class="btn" id="btnCopyToken">Copy Token</button>
+            <label class="btn" style="cursor:pointer;">
+              Import
+              <input id="fileImport" type="file" accept="application/json" style="display:none;">
+            </label>
+          </div>
+          <div class="muted" style="margin-top:10px;">Backup local (JSON). Útil antes de limpiar cache o cambiar de teléfono.</div>
+        </div>
+      </section>` : ""}
+
         <div class="muted" style="margin-top:8px;">Backup local (JSON). Útil antes de limpiar cache o cambiar de teléfono.</div>
       </div>
 
@@ -283,7 +300,12 @@ function view(){
     </div>
   `;
 
-  // Bottom nav wiring
+  
+  // Bottom sheet (Settings)
+  if(state.tab==="settings"){
+    initBottomSheet();
+  }
+// Bottom nav wiring
   root.querySelectorAll(".bn").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       state.tab = btn.dataset.tab;
@@ -293,7 +315,7 @@ function view(){
 
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
-  fab.style.display = (state.tab==="learn") ? "none" : "flex";
+  fab.style.display = (state.tab==="learn" || state.tab==="settings") ? "none" : "flex";
   fab.addEventListener("click", ()=>{
     if(state.tab==="routines") openRoutineModal();
     if(state.tab==="shopping") openShoppingModal();
@@ -317,6 +339,79 @@ function view(){
   });
 
   wireActions(root);
+}
+
+
+function viewSettings(){
+  const token = localStorage.getItem("memorycarl_fcm_token") || "";
+  const perm = (window.Notification && Notification.permission) ? Notification.permission : "unsupported";
+  const permLabel = perm === "granted" ? "Enabled ✅" : (perm === "denied" ? "Blocked ⛔" : (perm === "default" ? "Not enabled" : "Unsupported"));
+  const tokenLabel = token ? `${token.slice(0,18)}…${token.slice(-10)}` : "No token yet";
+
+  return `
+    <div class="sectionTitle">
+      <div>Ajustes</div>
+      <div class="chip">backup • notifs • datos</div>
+    </div>
+
+    <div class="card">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Backup</h2>
+          <div class="small">Exporta/Importa tu data local en JSON antes de limpiar cache o cambiar de teléfono.</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="kv">
+        <div class="k">Almacenamiento</div>
+        <div class="v">Local (este dispositivo)</div>
+      </div>
+      <div class="kv">
+        <div class="k">Recomendación</div>
+        <div class="v">Export semanal o antes de updates</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Notificaciones</h2>
+          <div class="small">Activa push (Firebase) y guarda tu token para pruebas o automatizaciones.</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="kv">
+        <div class="k">Estado</div>
+        <div class="v">${permLabel}</div>
+      </div>
+      <div class="kv">
+        <div class="k">Token</div>
+        <div class="v mono">${escapeHtml(tokenLabel)}</div>
+      </div>
+
+      <div class="note">
+        Tip: si queda en <span class="mono">Blocked</span>, revisa permisos del navegador para este sitio y vuelve a intentar.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Interfaz</h2>
+          <div class="small">Pequeños detalles para que se sienta como app.</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="kv">
+        <div class="k">Barra inferior</div>
+        <div class="v">Fija (modo app)</div>
+      </div>
+      <div class="kv">
+        <div class="k">Acciones rápidas</div>
+        <div class="v">Se muestran abajo en este tab</div>
+      </div>
+    </div>
+  `;
 }
 
 function viewLearn(){
@@ -759,6 +854,101 @@ function toast(msg){
     font-weight:800;font-size:13px;max-width:85%;text-align:center;
   ">${escapeHtml(msg)}</div>`;
   toastTimer = setTimeout(()=>{ host.innerHTML = ""; }, 1400);
+}
+
+function initBottomSheet(){
+  const sheet = document.querySelector("#bottomSheet");
+  const scrim = document.querySelector("#sheetScrim");
+  const handle = document.querySelector("#sheetHandle");
+  const toggleBtn = document.querySelector("#sheetToggle");
+  if(!sheet || !handle) return;
+
+  const PEEK = 62; // px visible when closed
+
+  function measureClosedY(){
+    const h = sheet.getBoundingClientRect().height;
+    return Math.max(0, h - PEEK);
+  }
+
+  function setOpen(open, opts = { animate:true }){
+    state.sheetOpen = !!open;
+    localStorage.setItem("mc_sheet_open", state.sheetOpen ? "1":"0");
+
+    const closedY = measureClosedY();
+    sheet.classList.toggle("open", state.sheetOpen);
+    scrim?.classList.toggle("show", state.sheetOpen);
+    handle.setAttribute("aria-expanded", state.sheetOpen ? "true":"false");
+
+    const y = state.sheetOpen ? 0 : closedY;
+    if(opts.animate){
+      sheet.style.transition = "transform 220ms ease";
+      scrim && (scrim.style.transition = "opacity 220ms ease");
+    }else{
+      sheet.style.transition = "none";
+      scrim && (scrim.style.transition = "none");
+    }
+    sheet.style.transform = `translateY(${y}px)`;
+    if(toggleBtn) toggleBtn.textContent = state.sheetOpen ? "▾" : "▴";
+  }
+
+  // Init position
+  setOpen(state.sheetOpen, { animate:false });
+
+  // Toggle on click
+  const onToggle = (e)=>{ e?.preventDefault?.(); setOpen(!state.sheetOpen); };
+  toggleBtn?.addEventListener("click", (e)=>{ e.stopPropagation(); onToggle(e); });
+  handle.addEventListener("click", (e)=>{ if(e.target===toggleBtn) return; onToggle(e); });
+  handle.addEventListener("keydown", (e)=>{ if(e.key==="Enter"||e.key===" "){ onToggle(e); }});
+  scrim?.addEventListener("click", ()=> setOpen(false));
+
+  // Drag to open/close
+  let dragging = false;
+  let startY = 0;
+  let startTranslate = 0;
+
+  const getCurrentTranslate = ()=>{
+    const m = /translateY\(([-\d.]+)px\)/.exec(sheet.style.transform || "");
+    return m ? parseFloat(m[1]) : (state.sheetOpen ? 0 : measureClosedY());
+  };
+
+  const onDown = (e)=>{
+    dragging = true;
+    sheet.style.transition = "none";
+    scrim && (scrim.style.transition = "none");
+    startY = e.clientY;
+    startTranslate = getCurrentTranslate();
+    sheet.setPointerCapture?.(e.pointerId);
+  };
+
+  const onMove = (e)=>{
+    if(!dragging) return;
+    const dy = e.clientY - startY;
+    const closedY = measureClosedY();
+    let next = startTranslate + dy;
+    next = Math.max(0, Math.min(closedY, next));
+    sheet.style.transform = `translateY(${next}px)`;
+    if(scrim){
+      const t = 1 - (next / closedY);
+      scrim.style.opacity = String(Math.max(0, Math.min(1, t)));
+      scrim.classList.add("show");
+    }
+  };
+
+  const onUp = ()=>{
+    if(!dragging) return;
+    dragging = false;
+    const closedY = measureClosedY();
+    const current = getCurrentTranslate();
+    const shouldOpen = current < closedY * 0.5;
+    setOpen(shouldOpen, { animate:true });
+  };
+
+  handle.addEventListener("pointerdown", onDown);
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+
+  // Re-measure on resize (orientation changes)
+  window.addEventListener("resize", ()=> setOpen(state.sheetOpen, { animate:false }));
 }
 
 persist();
