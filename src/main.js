@@ -4,7 +4,7 @@ console.log("MemoryCarl loaded");
 // 2) Paste the VAPID public key below
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker
-    .register("./firebase-messaging-sw.js?v=999")
+    .register("../firebase-messaging-sw.js?v=999")
     .then(reg => {
       console.log("SW registered:", reg.scope);
 
@@ -64,7 +64,7 @@ async function enableNotifications(){
     }
 
     // GitHub Pages: use relative path so it works under /MemoryCarl/
-    const swReg = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
+    const swReg = await navigator.serviceWorker.register("../firebase-messaging-sw.js");
 
     if (!FCM_VAPID_KEY || FCM_VAPID_KEY.includes("REPLACE_WITH_YOUR_VAPID_KEY")) {
       alert("Missing VAPID key. Paste it in src/main.js (FCM_VAPID_KEY).");
@@ -102,6 +102,10 @@ const LS = {
   routines: "memorycarl_v2_routines",
   shopping: "memorycarl_v2_shopping",
   reminders: "memorycarl_v2_reminders",
+  // Home widgets
+  musicToday: "memorycarl_v2_music_today",
+  musicLog: "memorycarl_v2_music_log",
+  sleepLog: "memorycarl_v2_sleep_log", // reserved (connect later)
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -151,6 +155,9 @@ function flushSync(reason="auto"){
         routines: state?.routines ?? load(LS.routines, []),
         shopping: state?.shopping ?? load(LS.shopping, []),
         reminders: state?.reminders ?? load(LS.reminders, []),
+        musicToday: state?.musicToday ?? load(LS.musicToday, null),
+        musicLog: state?.musicLog ?? load(LS.musicLog, []),
+        sleepLog: state?.sleepLog ?? load(LS.sleepLog, []),
       }
     };
 
@@ -226,7 +233,7 @@ function load(key, fallback){
 function save(key, value){
   localStorage.setItem(key, JSON.stringify(value));
   // Mark dirty only for core data keys (avoid syncing tokens/settings every time)
-  if (key === LS.routines || key === LS.shopping || key === LS.reminders) markDirty();
+  if (key === LS.routines || key === LS.shopping || key === LS.reminders || key === LS.musicToday || key === LS.musicLog || key === LS.sleepLog) markDirty();
 }
 
 function escapeHtml(str){
@@ -284,17 +291,25 @@ function seedReminders(){
 
 // ---- State ----
 let state = {
-  tab: "routines",
+  tab: "home",
   sheetOpen: (localStorage.getItem("mc_sheet_open")==="1"),
   routines: load(LS.routines, seedRoutines()),
   shopping: load(LS.shopping, seedShopping()),
   reminders: load(LS.reminders, seedReminders()),
+  // Home
+  musicToday: load(LS.musicToday, null),
+  musicLog: load(LS.musicLog, []),
+  sleepLog: load(LS.sleepLog, []),
+  musicCursor: 0,
 };
 
 function persist(){
   save(LS.routines, state.routines);
   save(LS.shopping, state.shopping);
   save(LS.reminders, state.reminders);
+  save(LS.musicToday, state.musicToday);
+  save(LS.musicLog, state.musicLog);
+  save(LS.sleepLog, state.sleepLog);
 }
 
 // ---- Backup (Export/Import) ----
@@ -304,7 +319,10 @@ function exportBackup(){
     exportedAt: new Date().toISOString(),
     routines: state.routines,
     shopping: state.shopping,
-    reminders: state.reminders
+    reminders: state.reminders,
+    musicToday: state.musicToday,
+    musicLog: state.musicLog,
+    sleepLog: state.sleepLog
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -353,6 +371,13 @@ function importBackup(file){
       state.routines = routines;
       state.shopping = shopping;
       state.reminders = reminders;
+
+      // Home widgets
+      state.musicToday = (data.musicToday && typeof data.musicToday === "object") ? data.musicToday : load(LS.musicToday, null);
+      state.musicLog = Array.isArray(data.musicLog) ? data.musicLog : load(LS.musicLog, []);
+      state.sleepLog = Array.isArray(data.sleepLog) ? data.sleepLog : load(LS.sleepLog, []);
+      state.musicCursor = 0;
+
       persist();
       view();
       toast("Backup imported ✅");
@@ -374,6 +399,7 @@ function bottomNav(){
 
   return `
     <nav class="bottomNav" role="navigation" aria-label="MemoryCarl navigation">
+      ${mk("home","🏠","Home")}
       ${mk("routines","📝","Rutinas")}
       ${mk("shopping","🛒","Compras")}
       ${mk("reminders","⏰","Reminders")}
@@ -395,6 +421,7 @@ function view(){
       </header>
 
       <main class="content">
+        ${state.tab==="home" ? viewHome() : ""}
         ${state.tab==="routines" ? viewRoutines() : ""}
         ${state.tab==="shopping" ? viewShopping() : ""}
         ${state.tab==="reminders" ? viewReminders() : ""}
@@ -453,6 +480,7 @@ function view(){
   const fab = root.querySelector("#fab");
   fab.style.display = (state.tab==="learn" || state.tab==="settings") ? "none" : "flex";
   fab.addEventListener("click", ()=>{
+    if(state.tab==="home") openMusicModal();
     if(state.tab==="routines") openRoutineModal();
     if(state.tab==="shopping") openShoppingModal();
     if(state.tab==="reminders") openReminderModal();
@@ -475,7 +503,9 @@ function view(){
   });
 
   wireActions(root);
+  if(state.tab==="home") wireHome(root);
 }
+
 
 
 function viewSettings(){
@@ -579,6 +609,254 @@ function viewLearn(){
     </div>
   `;
 }
+
+
+
+// ---- HOME ----
+function dayAbbrEs(d){
+  // d: 0=Sun..6=Sat
+  return ["D","L","M","M","J","V","S"][d] || "";
+}
+
+function startOfWeekMonday(date=new Date()){
+  const d = new Date(date);
+  const day = d.getDay(); // 0 Sun
+  const diff = (day === 0 ? -6 : 1 - day); // move to Monday
+  d.setDate(d.getDate() + diff);
+  d.setHours(0,0,0,0);
+  return d;
+}
+
+function formatDayNum(date){ return String(date.getDate()); }
+
+function getTodayIso(){ return isoDate(new Date()); }
+
+function getMusicDisplay(){
+  const log = Array.isArray(state.musicLog) ? state.musicLog : [];
+  const cursor = Math.max(0, Math.min(log.length-1, Number(state.musicCursor||0)));
+  const todayIso = getTodayIso();
+
+  // Prefer today's explicit record if date matches
+  if (state.musicToday && state.musicToday.date === todayIso){
+    return { item: state.musicToday, mode:"today", cursor:0, total: log.length };
+  }
+  if (log.length === 0){
+    return { item: null, mode:"empty", cursor:0, total:0 };
+  }
+  return { item: log[cursor], mode:"log", cursor, total: log.length };
+}
+
+function viewHome(){
+  const now = new Date();
+  const monday = startOfWeekMonday(now);
+  const days = Array.from({length:7}, (_,i)=>{
+    const d = new Date(monday);
+    d.setDate(monday.getDate()+i);
+    const iso = isoDate(d);
+    const isToday = iso === isoDate(now);
+    return { iso, d, isToday };
+  });
+
+  const music = getMusicDisplay();
+  const m = music.item;
+  const mTitle = m ? (m.song || m.title || "") : "";
+  const mArtist = m ? (m.artist || "") : "";
+  const mMood = m ? (m.mood || "") : "";
+  const mIntensity = (m && (m.intensity !== undefined && m.intensity !== null && m.intensity !== "")) ? Number(m.intensity) : null;
+  const hasMusic = !!mTitle;
+
+  const pending = (state.reminders||[]).filter(x=>!x.done).slice(0,3);
+  const remindersHtml = pending.length ? pending.map(r=>`
+    <label class="homeCheck">
+      <input type="checkbox" data-rem="${escapeHtml(r.id)}" />
+      <span>${escapeHtml(r.text)}</span>
+    </label>
+  `).join("") : `<div class="muted">Sin pendientes 🎈</div>`;
+
+  const weekHtml = days.map(x=>`
+    <div class="dayPill ${x.isToday ? "today":""}" data-day="${x.iso}">
+      <div class="dayNum">${formatDayNum(x.d)}</div>
+      <div class="dayAbbr">${dayAbbrEs(x.d.getDay())}</div>
+    </div>
+  `).join("");
+
+  const sleepBars = `
+    <div class="sleepBars" aria-hidden="true">
+      ${Array.from({length:6}).map(()=>`<div class="sleepBar"></div>`).join("")}
+    </div>
+    <div class="muted">Sueño: pronto lo conectamos 😴</div>
+  `;
+
+  return `
+    <div class="homeTop">
+      <div class="homeHello">
+        <div class="homeHelloText">Hola Carlos</div>
+        <div class="homeHelloSub">${escapeHtml(now.toLocaleDateString("es-PE",{weekday:"long", month:"long", day:"numeric"}))}</div>
+      </div>
+      <div class="weekStrip" role="list" aria-label="Week">
+        ${weekHtml}
+      </div>
+    </div>
+
+    <div class="homeGrid">
+      <section class="card homeCard">
+        <div class="cardTop">
+          <div>
+            <h2 class="cardTitle">Sueño</h2>
+            <div class="small">7 días</div>
+          </div>
+        </div>
+        <div class="hr"></div>
+        ${sleepBars}
+      </section>
+
+      <section class="card homeCard" id="homeRemindersCard">
+        <div class="cardTop">
+          <div>
+            <h2 class="cardTitle">Reminders</h2>
+            <div class="small">Hoy</div>
+          </div>
+          <button class="iconBtn" id="btnGoReminders" aria-label="Go reminders">↗</button>
+        </div>
+        <div class="hr"></div>
+        <div class="homeChecks">
+          ${remindersHtml}
+        </div>
+      </section>
+    </div>
+
+    <section class="card homeCard homeWide" id="homeMusicCard">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Tema Fav.</h2>
+          <div class="small">${hasMusic ? "Registrado" : "Toca + para registrar"}</div>
+        </div>
+        <button class="btn primary" id="btnAddMusic">+</button>
+      </div>
+      <div class="hr"></div>
+      ${hasMusic ? `
+        <div class="musicRow">
+          <div class="musicMeta">
+            <div class="musicTitle">${escapeHtml(mTitle)}</div>
+            <div class="musicSub">
+              ${mArtist ? `<span>${escapeHtml(mArtist)}</span>` : `<span class="muted">Artista</span>`}
+              ${mMood ? `<span class="dot">•</span><span>${escapeHtml(mMood)}</span>` : ``}
+              ${mIntensity !== null && !Number.isNaN(mIntensity) ? `<span class="dot">•</span><span>${escapeHtml(String(mIntensity))}/10</span>` : ``}
+            </div>
+          </div>
+          <div class="musicControls">
+            <button class="iconBtn" id="btnMusicPrev" ${music.total<=1 ? "disabled":""} aria-label="Prev">⏮</button>
+            <button class="iconBtn" id="btnMusicPlay" aria-label="Play">⏯</button>
+            <button class="iconBtn" id="btnMusicNext" ${music.total<=1 ? "disabled":""} aria-label="Next">⏭</button>
+          </div>
+        </div>
+        ${m.note ? `<div class="note">${escapeHtml(m.note)}</div>` : ``}
+        <div class="muted" style="margin-top:10px;">${music.mode==="log" ? `Historial ${music.cursor+1}/${music.total}` : `Hoy`}</div>
+      ` : `
+        <div class="muted">¿Qué canción te está pegando hoy? 🎧</div>
+      `}
+    </section>
+  `;
+}
+
+function openMusicModal(){
+  const host = document.querySelector("#app");
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+
+  modal.innerHTML = `
+    <div class="modal">
+      <h2>Tema Fav. (registrar)</h2>
+      <div class="grid">
+        <input class="input" id="mcSong" placeholder="Canción (obligatorio)" />
+        <input class="input" id="mcArtist" placeholder="Artista (opcional)" />
+        <input class="input" id="mcMood" placeholder="Mood tag (opcional) ej: calma, power" />
+        <input class="input" id="mcIntensity" type="number" min="1" max="10" step="1" placeholder="Intensidad (1-10, opcional)" />
+        <textarea class="input" id="mcNote" placeholder="Nota (opcional)" rows="3"></textarea>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn ghost" id="btnCancel">Cancelar</button>
+        <button class="btn primary" id="btnSave">Guardar</button>
+      </div>
+      <div class="muted" style="margin-top:10px;">Tip: si solo pones canción, ya sirve. Lo demás es extra.</div>
+    </div>
+  `;
+
+  host.appendChild(modal);
+
+  const close = ()=> modal.remove();
+  modal.addEventListener("click", (e)=>{ if(e.target===modal) close(); });
+  modal.querySelector("#btnCancel").addEventListener("click", close);
+
+  modal.querySelector("#btnSave").addEventListener("click", ()=>{
+    const song = modal.querySelector("#mcSong").value.trim();
+    const artist = modal.querySelector("#mcArtist").value.trim();
+    const mood = modal.querySelector("#mcMood").value.trim();
+    const intensityRaw = modal.querySelector("#mcIntensity").value.trim();
+    const note = modal.querySelector("#mcNote").value.trim();
+
+    if(!song){
+      toast("Falta la canción 🎵");
+      return;
+    }
+
+    const intensity = intensityRaw ? Math.max(1, Math.min(10, Number(intensityRaw))) : null;
+    const entry = {
+      id: uid("t"),
+      ts: new Date().toISOString(),
+      date: getTodayIso(),
+      song,
+      artist,
+      mood,
+      intensity,
+      note
+    };
+
+    state.musicLog = Array.isArray(state.musicLog) ? state.musicLog : [];
+    state.musicLog.unshift(entry);
+    state.musicToday = { ...entry, updatedAt: new Date().toISOString() };
+    state.musicCursor = 0;
+    persist();
+    view();
+    toast("Tema guardado ✅");
+    close();
+  });
+}
+
+function navigateMusic(delta){
+  const log = Array.isArray(state.musicLog) ? state.musicLog : [];
+  if(log.length <= 1) return;
+  const next = Math.max(0, Math.min(log.length-1, Number(state.musicCursor||0) + delta));
+  state.musicCursor = next;
+  view();
+}
+
+function wireHome(root){
+  const btnAdd = root.querySelector("#btnAddMusic");
+  if(btnAdd) btnAdd.addEventListener("click", openMusicModal);
+
+  const prev = root.querySelector("#btnMusicPrev");
+  const next = root.querySelector("#btnMusicNext");
+  if(prev) prev.addEventListener("click", ()=>navigateMusic(1)); // older
+  if(next) next.addEventListener("click", ()=>navigateMusic(-1)); // newer
+
+  const goRem = root.querySelector("#btnGoReminders");
+  if(goRem) goRem.addEventListener("click", ()=>{ state.tab="reminders"; view(); });
+
+  // reminder quick toggles
+  root.querySelectorAll('input[type="checkbox"][data-rem]').forEach(cb=>{
+    cb.addEventListener("change", ()=>{
+      const id = cb.getAttribute("data-rem");
+      const r = (state.reminders||[]).find(x=>x.id===id);
+      if(!r) return;
+      r.done = cb.checked;
+      persist();
+      // keep view, update small section
+      view();
+    });
+  });
+}
+// ---- END HOME ----
 
 function viewRoutines(){
   const sorted = [...state.routines].sort((a,b)=>{

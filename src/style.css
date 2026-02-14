@@ -280,3 +280,76 @@ body{
   box-shadow:0 10px 24px rgba(0,0,0,.25);
 }
 .bn.active .bnIcon{ filter:drop-shadow(0 6px 18px rgba(124,92,255,.22)); }
+
+
+/* ===== Home widgets ===== */
+
+.homeTop{margin-bottom:14px}
+.homeHello{margin:6px 0 12px}
+.homeHelloText{font-size:22px;font-weight:900;letter-spacing:.2px}
+.homeHelloSub{margin-top:4px;color:var(--muted);font-size:12px;text-transform:capitalize}
+
+.weekStrip{
+  display:flex;gap:8px;overflow:auto;
+  padding:8px 2px 10px;
+  -webkit-overflow-scrolling:touch;
+}
+.dayPill{
+  min-width:54px;
+  border-radius:16px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.04);
+  padding:8px 10px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+}
+.dayPill.today{
+  border-color:rgba(124,92,255,.55);
+  background:rgba(124,92,255,.16);
+  box-shadow:0 8px 20px rgba(124,92,255,.14);
+}
+.dayNum{font-weight:900;font-size:16px;line-height:1}
+.dayAbbr{margin-top:4px;color:var(--muted);font-size:12px;line-height:1}
+
+.homeGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+  align-items:stretch;
+}
+.homeCard{margin-bottom:0}
+.homeWide{margin-top:12px}
+@media (max-width:420px){
+  .homeGrid{grid-template-columns:1fr}
+}
+
+.sleepBars{display:flex;gap:10px;align-items:flex-end;height:92px;margin:6px 0 10px}
+.sleepBar{
+  width:16px;border-radius:999px;
+  background:linear-gradient(180deg, rgba(54,211,153,.85), rgba(124,92,255,.65));
+  opacity:.75;
+  height:var(--h, 40px);
+}
+.sleepBar:nth-child(1){height:48px}
+.sleepBar:nth-child(2){height:82px}
+.sleepBar:nth-child(3){height:66px}
+.sleepBar:nth-child(4){height:36px}
+.sleepBar:nth-child(5){height:74px}
+.sleepBar:nth-child(6){height:40px}
+
+.homeChecks{display:flex;flex-direction:column;gap:10px}
+.homeCheck{
+  display:flex;gap:10px;align-items:flex-start;
+  padding:8px 10px;border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.03);
+  font-size:13px;
+}
+.homeCheck input{margin-top:2px;accent-color:var(--good)}
+
+.musicRow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.musicMeta{min-width:0}
+.musicTitle{font-size:18px;font-weight:900;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.musicSub{margin-top:4px;color:var(--muted);font-size:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.musicSub .dot{opacity:.55}
+.musicControls{display:flex;gap:8px;align-items:center}
+.musicControls .iconBtn[disabled]{opacity:.45;cursor:not-allowed}
