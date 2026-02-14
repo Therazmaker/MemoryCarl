@@ -506,6 +506,7 @@ function routineCard(r){
   `;
 }
 
+/* ORIGINAL viewShopping DISABLED
 function viewShopping(){
   return `
     <div class="sectionTitle">
@@ -515,7 +516,10 @@ function viewShopping(){
     ${state.shopping.map(l => shoppingCard(l)).join("")}
   `;
 }
+*/
 
+
+/* ORIGINAL shoppingCard DISABLED
 function shoppingCard(list){
   const totalAll = list.items.reduce((acc,it)=> acc + (Number(it.price||0)*Number(it.qty||1)), 0);
   const totalPending = list.items
@@ -558,6 +562,8 @@ function shoppingCard(list){
     </section>
   `;
 }
+*/
+
 
 function viewReminders(){
   const open = state.reminders.filter(r=>!r.done).length;
@@ -955,27 +961,216 @@ persist();
 view();
 
 
-/* ====================== PRODUCT HISTORY + ANALYTICS ====================== */
+/* ====================== REBUILT SHOPPING MODULE ====================== */
 
-function updateProductPrice(productId, newPrice){
-  const p = state.products.find(x=>x.id===productId);
-  if(!p) return;
+LS.products = "memorycarl_v2_products";
+state.products = load(LS.products, []);
 
-  const oldPrice = Number(p.price || 0);
-  const np = Number(newPrice || 0);
+const _persistBase = persist;
+persist = function(){
+  _persistBase();
+  save(LS.products, state.products);
+};
 
-  if(oldPrice !== np){
-    if(!p.history) p.history = [];
-    p.history.push({
-      price: oldPrice,
-      date: new Date().toISOString()
+function priceTrend(product){
+  if(!product.history || product.history.length === 0) return null;
+  const first = product.history[0].price;
+  const last = product.price;
+  const diff = last - first;
+  const percent = first ? ((diff/first)*100).toFixed(1) : 0;
+  return { diff, percent };
+}
+
+function viewShopping(){
+  return `
+    <div class="sectionTitle">
+      <div>Compras</div>
+      <div class="chip">${state.shopping.length} listas</div>
+    </div>
+
+    <div class="row" style="margin-bottom:12px;">
+      <button class="btn" onclick="openProductLibrary()">📦 Biblioteca</button>
+    </div>
+
+    ${state.shopping.map(l => shoppingCard(l)).join("")}
+  `;
+}
+
+function shoppingCard(list){
+  const total = list.items.reduce((a,i)=>a+(i.price*i.qty),0);
+  return `
+    <section class="card" data-list-id="${list.id}">
+      <div class="cardTop">
+        <h3 class="cardTitle">${escapeHtml(list.name)}</h3>
+        <div class="chip">${money(total)}</div>
+      </div>
+      <div class="hr"></div>
+
+      <div class="list">
+        ${list.items.map(it=>`
+          <div class="item">
+            <div class="left">
+              <div class="name">${escapeHtml(it.name)}</div>
+              <div class="meta">${money(it.price)} × ${it.qty}</div>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button class="btn primary" onclick="openAddItem('${list.id}')">+ Item</button>
+      </div>
+    </section>
+  `;
+}
+
+function openAddItem(listId){
+  const list = state.shopping.find(x=>x.id===listId);
+  if(!list) return;
+
+  if(state.products.length > 0){
+    const host = document.querySelector("#app");
+    const modal = document.createElement("div");
+    modal.className = "modalBackdrop";
+
+    modal.innerHTML = `
+      <div class="modal">
+        <h2>Seleccionar producto</h2>
+        <div class="grid">
+          ${state.products.map(p=>`
+            <button class="btn" onclick="addProductToList('${listId}','${p.id}')">
+              ${escapeHtml(p.name)} · ${money(p.price)}
+            </button>
+          `).join("")}
+        </div>
+        <div class="row" style="margin-top:12px;">
+          <button class="btn ghost" onclick="this.closest('.modalBackdrop').remove()">Cancelar</button>
+        </div>
+      </div>
+    `;
+    host.appendChild(modal);
+  } else {
+    openPromptModal({
+      title:"Nuevo item",
+      fields:[
+        {key:"name", label:"Nombre"},
+        {key:"price", label:"Precio", type:"number"},
+        {key:"qty", label:"Cantidad", type:"number"}
+      ],
+      onSubmit: ({name, price, qty})=>{
+        list.items.push({
+          id: uid("i"),
+          name:name,
+          price:Number(price||0),
+          qty:Number(qty||1),
+          bought:false
+        });
+        persist(); view();
+      }
     });
-    p.price = np;
-    persist();
   }
 }
 
-function openProductAnalytics(productId){
+function addProductToList(listId, productId){
+  const list = state.shopping.find(x=>x.id===listId);
+  const product = state.products.find(x=>x.id===productId);
+  if(!list || !product) return;
+
+  list.items.push({
+    id: uid("i"),
+    name: product.name,
+    price: product.price,
+    qty: 1,
+    bought:false
+  });
+
+  persist();
+  view();
+}
+
+function openProductLibrary(){
+  const host = document.querySelector("#app");
+  const sheet = document.createElement("div");
+  sheet.className = "modalBackdrop";
+
+  sheet.innerHTML = `
+    <div class="modal">
+      <h2>Biblioteca</h2>
+
+      <div class="row">
+        <button class="btn good" onclick="openNewProduct()">+ Nuevo</button>
+      </div>
+
+      <div class="list" style="margin-top:12px;">
+        ${state.products.map(p=>{
+          const trend = priceTrend(p);
+          return `
+            <div class="item">
+              <div class="left">
+                <div class="name">${escapeHtml(p.name)}</div>
+                <div class="meta">${money(p.price)}</div>
+              </div>
+              <div class="row">
+                <button class="btn" onclick="openProductChart('${p.id}')">📈</button>
+                <button class="btn" onclick="editProductPrice('${p.id}')">Edit</button>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button class="btn ghost" onclick="this.closest('.modalBackdrop').remove()">Cerrar</button>
+      </div>
+    </div>
+  `;
+  host.appendChild(sheet);
+}
+
+function openNewProduct(){
+  openPromptModal({
+    title:"Nuevo producto",
+    fields:[
+      {key:"name", label:"Nombre"},
+      {key:"price", label:"Precio", type:"number"},
+      {key:"store", label:"Tienda"}
+    ],
+    onSubmit: ({name, price, store})=>{
+      state.products.unshift({
+        id: uid("p"),
+        name:name,
+        price:Number(price||0),
+        store:store,
+        history:[]
+      });
+      persist(); view();
+    }
+  });
+}
+
+function editProductPrice(productId){
+  const p = state.products.find(x=>x.id===productId);
+  if(!p) return;
+
+  openPromptModal({
+    title:"Actualizar precio",
+    fields:[
+      {key:"price", label:"Nuevo precio", type:"number", value:String(p.price)}
+    ],
+    onSubmit: ({price})=>{
+      const old = p.price;
+      const np = Number(price||0);
+      if(old !== np){
+        p.history = p.history || [];
+        p.history.push({ price: old, date:new Date().toISOString() });
+        p.price = np;
+      }
+      persist(); view();
+    }
+  });
+}
+
+function openProductChart(productId){
   const p = state.products.find(x=>x.id===productId);
   if(!p) return;
 
@@ -983,93 +1178,36 @@ function openProductAnalytics(productId){
   const prices = history.map(h=>h.price).concat([p.price]);
   const labels = history.map(h=>new Date(h.date).toLocaleDateString()).concat(["Actual"]);
 
-  const first = prices[0] || p.price;
-  const last = prices[prices.length-1] || p.price;
-  const diff = last - first;
-  const percent = first ? ((diff/first)*100).toFixed(1) : 0;
-
-  const trend = diff > 0 ? "⬆ Subió" : (diff < 0 ? "⬇ Bajó" : "Sin cambio");
-
   const host = document.querySelector("#app");
-  const b = document.createElement("div");
-  b.className = "modalBackdrop";
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
 
-  b.innerHTML = `
+  modal.innerHTML = `
     <div class="modal">
       <h2>${escapeHtml(p.name)}</h2>
-      <div class="small">${trend} (${percent}%)</div>
-      <canvas id="priceChart" style="margin-top:12px;"></canvas>
-
-      <div class="row" style="margin-top:14px;">
-        <button class="btn ghost" data-close>Close</button>
+      <canvas id="chart"></canvas>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn ghost" onclick="this.closest('.modalBackdrop').remove()">Cerrar</button>
       </div>
     </div>
   `;
 
-  host.appendChild(b);
+  host.appendChild(modal);
 
-  const ctx = b.querySelector("#priceChart").getContext("2d");
-
+  const ctx = modal.querySelector("#chart").getContext("2d");
   new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'Precio',
-        data: prices,
-        borderColor: '#7c5cff',
-        backgroundColor: 'rgba(124,92,255,.2)',
-        tension: .3
+    type:'line',
+    data:{
+      labels:labels,
+      datasets:[{
+        data:prices,
+        borderColor:'#7c5cff',
+        tension:.3
       }]
     },
-    options: {
-      responsive: true,
-      plugins: { legend: { display:false } }
-    }
+    options:{responsive:true, plugins:{legend:{display:false}}}
   });
-
-  b.querySelector("[data-close]").addEventListener("click", ()=>b.remove());
-  b.addEventListener("click",(e)=>{ if(e.target===b) b.remove(); });
 }
 
-/* Extend Product Sheet UI */
+/* ====================== END SHOPPING REBUILD ====================== */
 
-function renderProductRow(p){
-  return `
-    <div class="item">
-      <div class="left">
-        <div class="name">${escapeHtml(p.name)}</div>
-        <div class="meta">${money(p.price)} · ${escapeHtml(p.store||"")}</div>
-      </div>
-      <div class="row">
-        <button class="btn" data-analytics="${p.id}">📈</button>
-        <button class="btn" data-edit="${p.id}">Edit</button>
-      </div>
-    </div>
-  `;
-}
-
-document.addEventListener("click", function(e){
-  if(e.target.dataset.analytics){
-    openProductAnalytics(e.target.dataset.analytics);
-  }
-
-  if(e.target.dataset.edit){
-    const pid = e.target.dataset.edit;
-    const p = state.products.find(x=>x.id===pid);
-    if(!p) return;
-
-    openPromptModal({
-      title:"Actualizar precio",
-      fields:[
-        {key:"price", label:"Nuevo precio", type:"number", value:String(p.price)}
-      ],
-      onSubmit: ({price})=>{
-        updateProductPrice(pid, price);
-        view();
-      }
-    });
-  }
-});
-
-/* ====================== END PRODUCT ANALYTICS ====================== */
