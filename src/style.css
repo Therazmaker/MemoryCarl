@@ -280,8 +280,3 @@ body{
   box-shadow:0 10px 24px rgba(0,0,0,.25);
 }
 .bn.active .bnIcon{ filter:drop-shadow(0 6px 18px rgba(124,92,255,.22)); }
-
-/* Price trend indicator inside modal */
-.modal canvas{
-  max-height:260px;
-}
