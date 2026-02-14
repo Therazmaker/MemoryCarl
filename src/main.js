@@ -512,6 +512,11 @@ function viewShopping(){
       <div>Listas de compras</div>
       <div class="chip">${state.shopping.length} listas</div>
     </div>
+
+    <div class="row" style="margin-bottom:12px;">
+      <button class="btn" onclick="openProductLibrary()">📦 Biblioteca</button>
+    </div>
+
     ${state.shopping.map(l => shoppingCard(l)).join("")}
   `;
 }
@@ -657,6 +662,10 @@ function wireActions(root){
         if(!list) return;
 
         if(act==="addItem"){
+          if(state.products && state.products.length){
+            openProductPicker(lid);
+            return;
+          }
           openPromptModal({
             title:"Add item",
             fields:[
@@ -977,97 +986,65 @@ function priceTrend(product){
   return { diff, percent };
 }
 
-function viewShopping(){
-  return `
-    <div class="sectionTitle">
-      <div>Compras</div>
-      <div class="chip">${state.shopping.length} listas</div>
-    </div>
 
-    <div class="row" style="margin-bottom:12px;">
-      <button class="btn" onclick="openProductLibrary()">📦 Biblioteca</button>
-    </div>
+function openProductPicker(listId){
+  const list = state.shopping.find(x=>x.id===listId);
+  if(!list) return;
 
-    ${state.shopping.map(l => shoppingCard(l)).join("")}
-  `;
-}
+  const host = document.querySelector("#app");
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
 
-function shoppingCard(list){
-  const total = list.items.reduce((a,i)=>a+(i.price*i.qty),0);
-  return `
-    <section class="card" data-list-id="${list.id}">
-      <div class="cardTop">
-        <h3 class="cardTitle">${escapeHtml(list.name)}</h3>
-        <div class="chip">${money(total)}</div>
-      </div>
-      <div class="hr"></div>
-
-      <div class="list">
-        ${list.items.map(it=>`
-          <div class="item">
-            <div class="left">
-              <div class="name">${escapeHtml(it.name)}</div>
-              <div class="meta">${money(it.price)} × ${it.qty}</div>
-            </div>
-          </div>
+  modal.innerHTML = `
+    <div class="modal">
+      <h2>Seleccionar producto</h2>
+      <div class="grid">
+        ${state.products.map(p=>`
+          <button class="btn" onclick="addProductToShoppingList('${listId}','${p.id}')">
+            ${escapeHtml(p.name)} · ${money(p.price)}
+          </button>
         `).join("")}
       </div>
 
       <div class="row" style="margin-top:12px;">
-        <button class="btn primary" onclick="openAddItem('${list.id}')">+ Item</button>
+        <button class="btn primary" onclick="openManualItemPrompt('${listId}')">+ Manual</button>
+        <button class="btn ghost" onclick="this.closest('.modalBackdrop').remove()">Cancelar</button>
       </div>
-    </section>
+    </div>
   `;
+
+  host.appendChild(modal);
 }
 
-function openAddItem(listId){
+function openManualItemPrompt(listId){
   const list = state.shopping.find(x=>x.id===listId);
   if(!list) return;
 
-  if(state.products.length > 0){
-    const host = document.querySelector("#app");
-    const modal = document.createElement("div");
-    modal.className = "modalBackdrop";
+  const backdrop = document.querySelector('.modalBackdrop');
+  if(backdrop) backdrop.remove();
 
-    modal.innerHTML = `
-      <div class="modal">
-        <h2>Seleccionar producto</h2>
-        <div class="grid">
-          ${state.products.map(p=>`
-            <button class="btn" onclick="addProductToList('${listId}','${p.id}')">
-              ${escapeHtml(p.name)} · ${money(p.price)}
-            </button>
-          `).join("")}
-        </div>
-        <div class="row" style="margin-top:12px;">
-          <button class="btn ghost" onclick="this.closest('.modalBackdrop').remove()">Cancelar</button>
-        </div>
-      </div>
-    `;
-    host.appendChild(modal);
-  } else {
-    openPromptModal({
-      title:"Nuevo item",
-      fields:[
-        {key:"name", label:"Nombre"},
-        {key:"price", label:"Precio", type:"number"},
-        {key:"qty", label:"Cantidad", type:"number"}
-      ],
-      onSubmit: ({name, price, qty})=>{
-        list.items.push({
-          id: uid("i"),
-          name:name,
-          price:Number(price||0),
-          qty:Number(qty||1),
-          bought:false
-        });
-        persist(); view();
-      }
-    });
-  }
+  openPromptModal({
+    title:"Add item",
+    fields:[
+      {key:"name", label:"Item", placeholder:"Milk"},
+      {key:"price", label:"Price", placeholder:"4.25", type:"number"},
+      {key:"qty", label:"Qty", placeholder:"1", type:"number"},
+    ],
+    onSubmit: ({name, price, qty})=>{
+      if(!name.trim()) return;
+      list.items.push({
+        id: uid("i"),
+        name: name.trim(),
+        price: Number(price || 0),
+        qty: Math.max(1, Number(qty || 1)),
+        bought: false
+      });
+      persist(); view();
+    }
+  });
 }
 
-function addProductToList(listId, productId){
+function addProductToShoppingList(listId, productId){
   const list = state.shopping.find(x=>x.id===listId);
   const product = state.products.find(x=>x.id===productId);
   if(!list || !product) return;
@@ -1075,15 +1052,17 @@ function addProductToList(listId, productId){
   list.items.push({
     id: uid("i"),
     name: product.name,
-    price: product.price,
+    price: Number(product.price || 0),
     qty: 1,
-    bought:false
+    bought: false
   });
+
+  const backdrop = document.querySelector('.modalBackdrop');
+  if(backdrop) backdrop.remove();
 
   persist();
   view();
 }
-
 function openProductLibrary(){
   const host = document.querySelector("#app");
   const sheet = document.createElement("div");
