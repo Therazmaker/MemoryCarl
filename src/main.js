@@ -167,8 +167,8 @@ function exportBackup(){
     v: 2,
     exportedAt: new Date().toISOString(),
     routines: state.routines,
-    shopping: state.shopping,
-    reminders: state.reminders
+    shopping: state.shopping,    reminders: state.reminders,
+    shoppingHistory: state.shoppingHistory
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -191,6 +191,7 @@ function importBackup(file){
       const routines = Array.isArray(data.routines) ? data.routines : [];
       const shopping = Array.isArray(data.shopping) ? data.shopping : [];
       const reminders = Array.isArray(data.reminders) ? data.reminders : [];
+      const shoppingHistory = Array.isArray(data.shoppingHistory) ? data.shoppingHistory : [];
 
       routines.forEach(r=>{
         r.id ||= uid("r");
@@ -214,9 +215,25 @@ function importBackup(file){
         m.done = !!m.done;
       });
 
+      shoppingHistory.forEach(e=>{
+        e.id ||= uid("sh");
+        e.date = (e.date || new Date().toISOString().slice(0,10));
+        e.store = e.store || "";
+        e.notes = e.notes || "";
+        e.items = Array.isArray(e.items) ? e.items : [];
+        e.items.forEach(it=>{
+          it.id ||= uid("i");
+          it.price = Number(it.price || 0);
+          it.qty = Math.max(1, Number(it.qty || 1));
+          if(typeof it.category !== "string") it.category = "";
+        });
+        e.totals = e.totals && typeof e.totals==="object" ? e.totals : {};
+      });
+
       state.routines = routines;
       state.shopping = shopping;
       state.reminders = reminders;
+      state.shoppingHistory = shoppingHistory;
       persist();
       view();
       toast("Backup imported ✅");
@@ -339,6 +356,20 @@ function view(){
   });
 
   wireActions(root);
+
+  // Post-render: draw shopping dashboard chart
+  if(state.tab==="shopping" && (state.shoppingSubtab||"lists")==="dashboard"){
+    try{
+      const preset = state.shoppingDashPreset || "7d";
+      const r = dateRangePreset(preset);
+      const daily = aggregateDaily(state.shoppingHistory, {start:r.start, end:r.end});
+      const canvas = root.querySelector("#shopDailyChart");
+      if(canvas){
+        canvas.style.width = "100%";
+        drawMiniLine(canvas, daily.dates, daily.totals);
+      }
+    }catch(e){ console.warn(e); }
+  }
 }
 
 
@@ -507,6 +538,13 @@ function routineCard(r){
 }
 
 function viewShopping(){
+  const sub = state.shoppingSubtab || "lists";
+  const histCount = (state.shoppingHistory||[]).length;
+
+  if(sub === "dashboard"){
+    return viewShoppingDashboard();
+  }
+
   return `
     <div class="sectionTitle">
       <div>Listas de compras</div>
@@ -515,9 +553,127 @@ function viewShopping(){
 
     <div class="row" style="margin-bottom:12px;">
       <button class="btn" onclick="openProductLibrary()">📦 Biblioteca</button>
+      <button class="btn" data-act="openShoppingDashboard">📊 Dashboard</button>
+      <div class="chip">hist: ${histCount}</div>
     </div>
 
     ${state.shopping.map(l => shoppingCard(l)).join("")}
+  `;
+}
+
+function viewShoppingDashboard(){
+  const preset = state.shoppingDashPreset || "7d";
+  const r = dateRangePreset(preset);
+  const daily = aggregateDaily(state.shoppingHistory, {start:r.start, end:r.end});
+  const sum7 = summarizeWindow(daily, 7);
+  const cats = aggregateCategories(state.shoppingHistory, r.start, r.end);
+  const stores = topStores(state.shoppingHistory, r.start, r.end, 3);
+  const tops = topProducts(state.shoppingHistory, r.start, r.end, 5);
+
+  const catRows = Object.entries(cats).sort((a,b)=>b[1]-a[1]);
+  const totalCat = catRows.reduce((a,[,v])=>a+Number(v||0),0) || 1;
+
+  return `
+    <div class="sectionTitle">
+      <div>Compras • Dashboard</div>
+      <div class="chip">${r.label}</div>
+    </div>
+
+    <div class="row" style="margin-bottom:12px;">
+      <button class="btn" data-act="backToShoppingLists">⬅️ Listas</button>
+      <button class="btn ${preset==="7d"?"primary":""}" data-act="setShopDashPreset" data-preset="7d">7D</button>
+      <button class="btn ${preset==="30d"?"primary":""}" data-act="setShopDashPreset" data-preset="30d">30D</button>
+      <button class="btn ${preset==="thisMonth"?"primary":""}" data-act="setShopDashPreset" data-preset="thisMonth">Mes</button>
+      <button class="btn ${preset==="lastMonth"?"primary":""}" data-act="setShopDashPreset" data-preset="lastMonth">Mes-1</button>
+    </div>
+
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Gasto diario</h3>
+          <div class="small">Línea por día (sumado)</div>
+        </div>
+        <div class="chip">${daily.dates.length} días</div>
+      </div>
+      <div class="hr"></div>
+      <canvas class="shopChart" id="shopDailyChart"></canvas>
+    </section>
+
+    <div class="grid2">
+      <section class="card">
+        <div class="cardTop">
+          <div>
+            <h3 class="cardTitle">Resumen (7 días)</h3>
+            <div class="small">Total y promedio</div>
+          </div>
+          <div class="chip">7D</div>
+        </div>
+        <div class="hr"></div>
+        <div class="kv"><div class="k">Total</div><div class="v"><b>${money(sum7.sum)}</b></div></div>
+        <div class="kv"><div class="k">Promedio</div><div class="v">${money(sum7.avg)}</div></div>
+        <div class="kv"><div class="k">Máximo</div><div class="v">${money(sum7.max)} <span class="muted">${sum7.maxDate||""}</span></div></div>
+        <div class="kv"><div class="k">Mínimo</div><div class="v">${money(sum7.min)} <span class="muted">${sum7.minDate||""}</span></div></div>
+      </section>
+
+      <section class="card">
+        <div class="cardTop">
+          <div>
+            <h3 class="cardTitle">Tiendas top</h3>
+            <div class="small">Más frecuentes</div>
+          </div>
+          <div class="chip">${stores.length}</div>
+        </div>
+        <div class="hr"></div>
+        ${stores.length ? stores.map(([s,c])=>`<div class="kv"><div class="k">${escapeHtml(s)}</div><div class="v">${c}</div></div>`).join("") : `<div class="muted">Sin tiendas aún.</div>`}
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Categorías</h3>
+          <div class="small">Distribución en el rango</div>
+        </div>
+        <div class="chip">${catRows.length}</div>
+      </div>
+      <div class="hr"></div>
+      <div class="list">
+        ${catRows.length ? catRows.map(([cat,val])=>{
+          const pct = Math.round((Number(val||0)/totalCat)*100);
+          return `
+            <div class="item">
+              <div class="left">
+                <div class="name">${escapeHtml(cat)}</div>
+                <div class="meta">${pct}%</div>
+              </div>
+              <div class="row"><b>${money(val)}</b></div>
+            </div>
+          `;
+        }).join("") : `<div class="muted">Agrega categorías a tus items para ver esto.</div>`}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Top 5 productos</h3>
+          <div class="small">Por gasto</div>
+        </div>
+        <div class="chip">${tops.length}</div>
+      </div>
+      <div class="hr"></div>
+      <div class="list">
+        ${tops.length ? tops.map(t=>`
+          <div class="item">
+            <div class="left">
+              <div class="name">${escapeHtml(t.name)}</div>
+              <div class="meta">Qty: ${t.count}</div>
+            </div>
+            <div class="row"><b>${money(t.spend)}</b></div>
+          </div>
+        `).join("") : `<div class="muted">Todavía no hay compras guardadas.</div>`}
+      </div>
+    </section>
   `;
 }
 
@@ -558,6 +714,7 @@ function shoppingCard(list){
       <div class="row" style="margin-top:12px;">
         <button class="btn primary" data-act="addItem">+ Item</button>
         <button class="btn" data-act="renameList">Rename</button>
+        <button class="btn good" data-act="savePurchase">Guardar día</button>
         <button class="btn danger" data-act="deleteList">Delete list</button>
       </div>
     </section>
@@ -592,6 +749,22 @@ function wireActions(root){
   root.querySelectorAll("[data-act]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const act = btn.dataset.act;
+
+       if(act==="openShoppingDashboard"){
+         state.shoppingSubtab = "dashboard";
+         view();
+         return;
+       }
+       if(act==="backToShoppingLists"){
+         state.shoppingSubtab = "lists";
+         view();
+         return;
+       }
+       if(act==="setShopDashPreset"){
+         state.shoppingDashPreset = btn.dataset.preset || "7d";
+         view();
+         return;
+       }
 
       const routineEl = btn.closest("[data-routine-id]");
       if(routineEl){
@@ -672,8 +845,9 @@ function wireActions(root){
               {key:"name", label:"Item", placeholder:"Milk"},
               {key:"price", label:"Price", placeholder:"4.25", type:"number"},
               {key:"qty", label:"Qty", placeholder:"1", type:"number"},
+              {key:"category", label:"Category", placeholder:"Groceries"},
             ],
-            onSubmit: ({name, price, qty})=>{
+            onSubmit: ({name, price, qty, category})=>{
               if(!name.trim()) return;
               list.items.push({
                 id: uid("i"),
@@ -703,8 +877,9 @@ function wireActions(root){
               {key:"name", label:"Item", value: it.name},
               {key:"price", label:"Price", type:"number", value: String(it.price ?? 0)},
               {key:"qty", label:"Qty", type:"number", value: String(it.qty ?? 1)},
+              {key:"category", label:"Category", value: it.category || ""},
             ],
-            onSubmit: ({name, price, qty})=>{
+            onSubmit: ({name, price, qty, category})=>{
               if(!name.trim()) return;
               it.name = name.trim();
               it.price = Number(price || 0);
@@ -731,7 +906,41 @@ function wireActions(root){
           });
           return;
         }
-        if(act==="deleteList"){
+        if(act==="savePurchase"){
+           const d = isoDate();
+           openPromptModal({
+             title:"Guardar compra",
+             fields:[
+               {key:"date", label:"Fecha (YYYY-MM-DD)", value:d},
+               {key:"store", label:"Tienda", value:""},
+               {key:"notes", label:"Notas", value:""}
+             ],
+             onSubmit: ({date, store, notes})=>{
+               const safeDate = (date||"").trim() || d;
+               const items = (list.items||[]).map(it=>({
+                 id: uid("i"),
+                 name: it.name,
+                 price: Number(it.price||0),
+                 qty: Math.max(1, Number(it.qty||1)),
+                 category: (it.category||"").trim(),
+               }));
+               const totals = calcEntryTotals(items);
+               state.shoppingHistory.unshift({
+                 id: uid("sh"),
+                 date: safeDate,
+                 store: (store||"").trim(),
+                 notes: (notes||"").trim(),
+                 items,
+                 totals
+               });
+               persist();
+               toast("Compra guardada ✅");
+               view();
+             }
+           });
+           return;
+         }
+         if(act==="deleteList"){
           if(!confirm("Delete this list?")) return;
           state.shopping = state.shopping.filter(x=>x.id!==lid);
           persist(); view(); return;
@@ -968,14 +1177,181 @@ view();
 
 /* ====================== REBUILT SHOPPING MODULE ====================== */
 
+LS.shoppingHistory = "memorycarl_v2_shopping_history";
 LS.products = "memorycarl_v2_products";
 state.products = load(LS.products, []);
+state.shoppingHistory = load(LS.shoppingHistory, []);
+state.shoppingSubtab = state.shoppingSubtab || "lists";
 
 const _persistBase = persist;
 persist = function(){
   _persistBase();
   save(LS.products, state.products);
+save(LS.shoppingHistory, state.shoppingHistory);
 };
+
+
+function isoDate(d=new Date()){
+  const x = new Date(d);
+  const y = x.getFullYear();
+  const m = String(x.getMonth()+1).padStart(2,"0");
+  const day = String(x.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
+
+function calcEntryTotals(items){
+  const byCategory = {};
+  let total = 0;
+  let itemsCount = 0;
+  for(const it of (items||[])){
+    const qty = Math.max(1, Number(it.qty||1));
+    const price = Number(it.price||0);
+    const amt = qty*price;
+    total += amt;
+    itemsCount += qty;
+    const cat = (it.category||"").trim() || "Uncategorized";
+    byCategory[cat] = (byCategory[cat]||0) + amt;
+  }
+  return { total, itemsCount, byCategory };
+}
+
+function aggregateDaily(history, {start=null, end=null}={}){
+  const map = new Map();
+  for(const e of (history||[])){
+    if(!e.date) continue;
+    if(start && e.date < start) continue;
+    if(end && e.date > end) continue;
+    const v = Number(e.totals?.total || 0);
+    map.set(e.date, (map.get(e.date)||0) + v);
+  }
+  const dates = [...map.keys()].sort();
+  return { dates, totals: dates.map(d=>map.get(d)) };
+}
+
+function dateRangePreset(preset){
+  const today = isoDate();
+  const now = new Date();
+  if(preset==="7d"){
+    const s = new Date(now); s.setDate(s.getDate()-6);
+    return { start: isoDate(s), end: today, label:"Últimos 7 días" };
+  }
+  if(preset==="30d"){
+    const s = new Date(now); s.setDate(s.getDate()-29);
+    return { start: isoDate(s), end: today, label:"Últimos 30 días" };
+  }
+  if(preset==="thisMonth"){
+    const s = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start: isoDate(s), end: today, label:"Este mes" };
+  }
+  if(preset==="lastMonth"){
+    const s = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    const e = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { start: isoDate(s), end: isoDate(e), label:"Mes pasado" };
+  }
+  return { start: null, end: null, label:"Todo" };
+}
+
+function summarizeWindow(daily, n=7){
+  const dates = daily.dates.slice(-n);
+  const totals = daily.totals.slice(-n);
+  const sum = totals.reduce((a,b)=>a+b,0);
+  const avg = totals.length ? sum/totals.length : 0;
+  let max = -Infinity, maxDate = null;
+  let min = Infinity, minDate = null;
+  totals.forEach((v,i)=>{
+    if(v>max){ max=v; maxDate=dates[i]; }
+    if(v<min){ min=v; minDate=dates[i]; }
+  });
+  if(!totals.length){ max=0; min=0; }
+  return { sum, avg, max, maxDate, min, minDate };
+}
+
+function aggregateCategories(history, start, end){
+  const byCat = {};
+  for(const e of (history||[])){
+    if(start && e.date < start) continue;
+    if(end && e.date > end) continue;
+    const cats = e.totals?.byCategory || {};
+    for(const [cat, amt] of Object.entries(cats)){
+      byCat[cat] = (byCat[cat]||0) + Number(amt||0);
+    }
+  }
+  return byCat;
+}
+
+function topStores(history, start, end, topN=3){
+  const map = new Map();
+  for(const e of (history||[])){
+    if(start && e.date < start) continue;
+    if(end && e.date > end) continue;
+    const s = (e.store||"").trim();
+    if(!s) continue;
+    map.set(s, (map.get(s)||0) + 1);
+  }
+  return [...map.entries()].sort((a,b)=>b[1]-a[1]).slice(0, topN);
+}
+
+function topProducts(history, start, end, topN=5){
+  const map = new Map();
+  for(const e of (history||[])){
+    if(start && e.date < start) continue;
+    if(end && e.date > end) continue;
+    for(const it of (e.items||[])){
+      const name = (it.name||"").trim();
+      if(!name) continue;
+      const key = name.toLowerCase();
+      const spend = (Math.max(1, Number(it.qty||1))) * (Number(it.price||0));
+      const prev = map.get(key) || { name, count:0, spend:0 };
+      prev.count += Math.max(1, Number(it.qty||1));
+      prev.spend += spend;
+      map.set(key, prev);
+    }
+  }
+  return [...map.values()].sort((a,b)=>b.spend-a.spend).slice(0, topN);
+}
+
+function drawMiniLine(canvas, labels, data){
+  if(!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width = canvas.clientWidth * (window.devicePixelRatio||1);
+  const h = canvas.height = 180 * (window.devicePixelRatio||1);
+  const pad = 24 * (window.devicePixelRatio||1);
+
+  ctx.clearRect(0,0,w,h);
+  ctx.lineWidth = 2 * (window.devicePixelRatio||1);
+  ctx.strokeStyle = "#7c5cff";
+  ctx.fillStyle = "#9aa0aa";
+  ctx.font = `${12*(window.devicePixelRatio||1)}px system-ui`;
+
+  const max = Math.max(1, ...data);
+  const min = Math.min(0, ...data);
+  const xStep = data.length>1 ? (w-2*pad)/(data.length-1) : 0;
+
+  // axis
+  ctx.strokeStyle = "#22262c";
+  ctx.beginPath();
+  ctx.moveTo(pad, pad);
+  ctx.lineTo(pad, h-pad);
+  ctx.lineTo(w-pad, h-pad);
+  ctx.stroke();
+
+  // line
+  ctx.strokeStyle = "#7c5cff";
+  ctx.beginPath();
+  data.forEach((v,i)=>{
+    const x = pad + i*xStep;
+    const y = (h-pad) - ((v-min)/(max-min||1))*(h-2*pad);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // last label
+  if(labels.length){
+    const last = labels[labels.length-1];
+    const lastV = data[data.length-1] || 0;
+    ctx.fillText(`${last}  ${money(lastV)}`, pad, pad-6);
+  }
+}
 
 function priceTrend(product){
   if(!product.history || product.history.length === 0) return null;
@@ -1029,8 +1405,9 @@ function openManualItemPrompt(listId){
       {key:"name", label:"Item", placeholder:"Milk"},
       {key:"price", label:"Price", placeholder:"4.25", type:"number"},
       {key:"qty", label:"Qty", placeholder:"1", type:"number"},
+              {key:"category", label:"Category", placeholder:"Groceries"},
     ],
-    onSubmit: ({name, price, qty})=>{
+    onSubmit: ({name, price, qty, category})=>{
       if(!name.trim()) return;
       list.items.push({
         id: uid("i"),
@@ -1108,9 +1485,10 @@ function openNewProduct(){
     fields:[
       {key:"name", label:"Nombre"},
       {key:"price", label:"Precio", type:"number"},
-      {key:"store", label:"Tienda"}
+      {key:"store", label:"Tienda"},
+      {key:"category", label:"Category (default)"}
     ],
-    onSubmit: ({name, price, store})=>{
+    onSubmit: ({name, price, store, category})=>{
       state.products.unshift({
         id: uid("p"),
         name:name,
@@ -1169,19 +1547,12 @@ function openProductChart(productId){
 
   host.appendChild(modal);
 
-  const ctx = modal.querySelector("#chart").getContext("2d");
-  new Chart(ctx, {
-    type:'line',
-    data:{
-      labels:labels,
-      datasets:[{
-        data:prices,
-        borderColor:'#7c5cff',
-        tension:.3
-      }]
-    },
-    options:{responsive:true, plugins:{legend:{display:false}}}
-  });
+  const canvas = modal.querySelector("#chart");
+  const labels = history.map(h=>new Date(h.date).toLocaleDateString()).concat(["Actual"]);
+  const series = history.map(h=>h.price).concat([p.price]);
+  // Draw without Chart.js
+  canvas.style.width = "100%";
+  drawMiniLine(canvas, labels, series);
 }
 
 /* ====================== END SHOPPING REBUILD ====================== */
