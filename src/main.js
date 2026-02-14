@@ -115,6 +115,7 @@ function ensureSyncConfigured(){
   return !!getSyncUrl();
 }
 
+
 function flushSync(reason="auto"){
   try{
     if (!isDirty()) return;
@@ -136,31 +137,63 @@ function flushSync(reason="auto"){
     const url = getSyncUrl();
     const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
 
-    let ok = false;
-    if (navigator.sendBeacon) ok = navigator.sendBeacon(url, blob);
+    const setLastError = (err) => {
+      const msg = (err && (err.message || err.toString())) ? (err.message || err.toString()) : String(err);
+      console.warn("Sync send failed:", msg);
+      localStorage.setItem("memorycarl_last_sync_error", msg);
+      // Keep dirty so we can retry later
+    };
 
-    if (!ok){
-      fetch(url, {
-        method: "POST",
-        body: JSON.stringify(payload),
-        headers: { "Content-Type": "application/json" },
-        keepalive: true,
-        mode: "no-cors"
-      }).catch(()=>{});
+    // 1) Prefer sendBeacon (best for close/background)
+    if (navigator.sendBeacon){
+      const queued = navigator.sendBeacon(url, blob);
+      if (queued){
+        clearDirty();
+        localStorage.setItem(SYNC.lastSyncKey, new Date().toISOString());
+        localStorage.removeItem("memorycarl_last_sync_error");
+        return;
+      }
     }
 
-    // Best-effort: we don't get a response with beacon/no-cors.
-    clearDirty();
-    localStorage.setItem(SYNC.lastSyncKey, new Date().toISOString());
+    // 2) Fallback to fetch keepalive. (Still best-effort with no-cors)
+    fetch(url, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      mode: "no-cors"
+    })
+    .then(() => {
+      clearDirty();
+      localStorage.setItem(SYNC.lastSyncKey, new Date().toISOString());
+      localStorage.removeItem("memorycarl_last_sync_error");
+    })
+    .catch((err) => {
+      // Common case: net::ERR_BLOCKED_BY_CLIENT (adblock/privacy extension)
+      setLastError(err);
+    });
+
   }catch(e){
-    // Don't block closing the app.
     console.warn("Sync flush failed:", e);
+    localStorage.setItem("memorycarl_last_sync_error", e?.message || String(e));
   }
 }
+
 
 // Flush when tab/app is being closed or backgrounded
 window.addEventListener("beforeunload", ()=>flushSync("beforeunload"));
 document.addEventListener("visibilitychange", ()=>{ if (document.visibilityState === "hidden") flushSync("hidden"); });
+// Expose quick debug helpers in console
+window.MemoryCarlSync = {
+  flush: (reason="manual") => flushSync(reason),
+  status: () => ({
+    url: getSyncUrl(),
+    dirty: isDirty(),
+    lastSyncAt: localStorage.getItem(SYNC.lastSyncKey) || "",
+    lastError: localStorage.getItem("memorycarl_last_sync_error") || ""
+  })
+};
+
 
 
 
