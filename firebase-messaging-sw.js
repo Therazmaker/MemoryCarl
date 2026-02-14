@@ -10,3 +10,7 @@ self.addEventListener("activate", function (event) {
 self.addEventListener("fetch", function () {
   // no-op
 });
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
+});
+self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
