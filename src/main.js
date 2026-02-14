@@ -7,12 +7,22 @@ if ("serviceWorker" in navigator) {
     .register("./firebase-messaging-sw.js?v=999")
     .then(reg => {
       console.log("SW registered:", reg.scope);
-    })
-    .catch(err => {
-      console.error("SW registration failed:", err);
-    });
-}
 
+      // Si hay una versión nueva esperando, la activa rápido
+      if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+
+      reg.addEventListener("updatefound", () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener("statechange", () => {
+          if (sw.state === "installed" && navigator.serviceWorker.controller) {
+            sw.postMessage({ type: "SKIP_WAITING" });
+          }
+        });
+      });
+    })
+    .catch(err => console.error("SW registration failed:", err));
+}
 
 const FCM_VAPID_KEY = "BFJYKOYqIzBN7eaGvOOhK6Iwfk7KqVt-6Bv27vnYqIpO2rlUBh-ZyL1_zDpZ-9s0272hiXic54w0Q5Rdgl1M84A";
 const FIREBASE_CONFIG = {'apiKey': 'AIzaSyAq9RTNQDnfyxcxn4MbDn61lc7ybkUjtKg', 'authDomain': 'memorycarl-3c297.firebaseapp.com', 'projectId': 'memorycarl-3c297', 'storageBucket': 'memorycarl-3c297.firebasestorage.app', 'messagingSenderId': '731735548765', 'appId': '1:731735548765:web:03d9cf6d2a8c4744fd7eb4'};
