@@ -506,6 +506,7 @@ function routineCard(r){
   `;
 }
 
+/* ORIGINAL SHOPPING DISABLED
 function viewShopping(){
   return `
     <div class="sectionTitle">
@@ -515,6 +516,8 @@ function viewShopping(){
     ${state.shopping.map(l => shoppingCard(l)).join("")}
   `;
 }
+*/
+
 
 function shoppingCard(list){
   const totalAll = list.items.reduce((acc,it)=> acc + (Number(it.price||0)*Number(it.qty||1)), 0);
