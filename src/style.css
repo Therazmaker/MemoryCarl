@@ -353,3 +353,109 @@ body{
 .musicSub .dot{opacity:.55}
 .musicControls{display:flex;gap:8px;align-items:center}
 .musicControls .iconBtn[disabled]{opacity:.45;cursor:not-allowed}
+
+/* ===== Favorite Music split card (Daft-ish vibe) ===== */
+.musicSplitCard{padding:0; overflow:hidden}
+.musicSplit{
+  display:grid;
+  grid-template-columns: 1.35fr .95fr;
+  min-height:148px;
+}
+@media (max-width:420px){
+  .musicSplit{ grid-template-columns: 1fr; }
+}
+
+.musicLeft{
+  padding:14px 14px 12px;
+  background:
+    radial-gradient(260px 220px at 18% 20%, rgba(255,255,255,.18), transparent 60%),
+    radial-gradient(420px 260px at 10% 60%, rgba(124,92,255,.16), transparent 60%),
+    rgba(255,255,255,.06);
+  border-right:1px solid rgba(255,255,255,.10);
+}
+
+.musicLeftTop{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.musicKicker{
+  font-size:11px;
+  letter-spacing:.28em;
+  font-weight:900;
+  color:rgba(255,255,255,.78);
+}
+.musicHint{margin-top:6px;color:rgba(255,255,255,.60);font-size:12px}
+
+.musicLeftBtns{display:flex;align-items:center;gap:8px}
+.musicMini{
+  width:34px;height:34px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(0,0,0,.18);
+  color:rgba(255,255,255,.90);
+  cursor:pointer;
+}
+.musicMini[disabled]{opacity:.45;cursor:not-allowed}
+
+.musicPlay{
+  width:44px;height:44px;
+  border-radius:999px;
+  border:1px solid rgba(124,92,255,.55);
+  background:rgba(124,92,255,.22);
+  color:rgba(255,255,255,.92);
+  font-weight:900;
+  cursor:pointer;
+}
+.musicPlay[disabled]{opacity:.55;cursor:not-allowed}
+
+.musicAdd{
+  width:34px;height:34px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.06);
+  color:rgba(255,255,255,.92);
+  font-weight:900;
+  cursor:pointer;
+}
+
+.musicBig{margin-top:14px;font-size:20px;font-weight:1000;letter-spacing:.2px}
+.musicMetaLine{margin-top:8px;color:rgba(255,255,255,.70);font-size:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.musicMetaLine .dot{opacity:.55}
+.musicNote{
+  margin-top:10px;
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.04);
+  color:rgba(255,255,255,.70);
+  font-size:12px;
+}
+.musicEmpty{margin-top:16px;color:rgba(255,255,255,.70);font-size:13px}
+
+.musicRight{
+  background:rgba(0,0,0,.10);
+  position:relative;
+}
+.musicCover{
+  width:100%;height:100%;
+  object-fit:cover;
+  display:block;
+  cursor:pointer;
+}
+.musicCoverPlaceholder{
+  width:100%;height:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  background:
+    radial-gradient(340px 220px at 80% 10%, rgba(124,92,255,.22), transparent 55%),
+    radial-gradient(320px 220px at 20% 90%, rgba(54,211,153,.14), transparent 55%),
+    rgba(255,255,255,.04);
+}
+.musicCoverEmoji{font-size:30px;opacity:.92}
+.musicCoverText{font-size:12px;color:rgba(255,255,255,.65);padding:0 10px;text-align:center}

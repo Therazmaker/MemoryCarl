@@ -725,36 +725,50 @@ function viewHome(){
       </section>
     </div>
 
-    <section class="card homeCard homeWide" id="homeMusicCard">
-      <div class="cardTop">
-        <div>
-          <h2 class="cardTitle">Tema Fav.</h2>
-          <div class="small">${hasMusic ? "Registrado" : "Toca + para registrar"}</div>
-        </div>
-        <button class="btn primary" id="btnAddMusic">+</button>
-      </div>
-      <div class="hr"></div>
-      ${hasMusic ? `
-        <div class="musicRow">
-          <div class="musicMeta">
-            <div class="musicTitle">${escapeHtml(mTitle)}</div>
-            <div class="musicSub">
-              ${mArtist ? `<span>${escapeHtml(mArtist)}</span>` : `<span class="muted">Artista</span>`}
-              ${mMood ? `<span class="dot">•</span><span>${escapeHtml(mMood)}</span>` : ``}
-              ${mIntensity !== null && !Number.isNaN(mIntensity) ? `<span class="dot">•</span><span>${escapeHtml(String(mIntensity))}/10</span>` : ``}
+    <section class="card homeCard homeWide musicSplitCard" id="homeMusicCard">
+      <div class="musicSplit">
+        <div class="musicLeft">
+          <div class="musicLeftTop">
+            <div>
+              <div class="musicKicker">MÚSICA FAVORITA</div>
+              <div class="musicHint">${hasMusic ? (music.mode==="log" ? `Historial ${music.cursor+1}/${music.total}` : `Hoy`) : "Toca + para registrar"}</div>
+            </div>
+            <div class="musicLeftBtns">
+              <button class="musicMini" id="btnMusicPrev" ${music.total<=1 ? "disabled":""} aria-label="Prev">⏮</button>
+              <button class="musicPlay" id="btnMusicPlay" ${hasMusic ? "":"disabled"} aria-label="Play">▶</button>
+              <button class="musicMini" id="btnMusicNext" ${music.total<=1 ? "disabled":""} aria-label="Next">⏭</button>
+              <button class="musicAdd" id="btnAddMusic" aria-label="Add">＋</button>
             </div>
           </div>
-          <div class="musicControls">
-            <button class="iconBtn" id="btnMusicPrev" ${music.total<=1 ? "disabled":""} aria-label="Prev">⏮</button>
-            <button class="iconBtn" id="btnMusicPlay" aria-label="Play">⏯</button>
-            <button class="iconBtn" id="btnMusicNext" ${music.total<=1 ? "disabled":""} aria-label="Next">⏭</button>
-          </div>
+
+          ${hasMusic ? `
+            <div class="musicBig">${escapeHtml(mTitle)}</div>
+            <div class="musicMetaLine">
+              ${mArtist ? `<span>${escapeHtml(mArtist)}</span>` : `<span class="muted">Artista</span>`}
+              ${m.album ? `<span class="dot">•</span><span>${escapeHtml(m.album)}</span>` : ``}
+            </div>
+            <div class="musicMetaLine" style="margin-top:6px;">
+              ${mMood ? `<span>${escapeHtml(mMood)}</span>` : ``}
+              ${mMood && (mIntensity !== null && !Number.isNaN(mIntensity)) ? `<span class="dot">•</span>` : ``}
+              ${mIntensity !== null && !Number.isNaN(mIntensity) ? `<span>${escapeHtml(String(mIntensity))}/10</span>` : ``}
+            </div>
+            ${m.note ? `<div class="musicNote">${escapeHtml(m.note)}</div>` : ``}
+          ` : `
+            <div class="musicEmpty">¿Qué canción te está pegando hoy? 🎧</div>
+          `}
         </div>
-        ${m.note ? `<div class="note">${escapeHtml(m.note)}</div>` : ``}
-        <div class="muted" style="margin-top:10px;">${music.mode==="log" ? `Historial ${music.cursor+1}/${music.total}` : `Hoy`}</div>
-      ` : `
-        <div class="muted">¿Qué canción te está pegando hoy? 🎧</div>
-      `}
+
+        <div class="musicRight" ${hasMusic && (m.coverUrl||"") ? `` : `data-empty="1"`}>
+          ${hasMusic && (m.coverUrl||"") ? `
+            <img class="musicCover" src="${escapeHtml(m.coverUrl)}" alt="Cover" loading="lazy" referrerpolicy="no-referrer" />
+          ` : `
+            <div class="musicCoverPlaceholder">
+              <div class="musicCoverEmoji">🎛️</div>
+              <div class="musicCoverText">Pega un URL de portada</div>
+            </div>
+          `}
+        </div>
+      </div>
     </section>
   `;
 }
@@ -770,8 +784,11 @@ function openMusicModal(){
       <div class="grid">
         <input class="input" id="mcSong" placeholder="Canción (obligatorio)" />
         <input class="input" id="mcArtist" placeholder="Artista (opcional)" />
+        <input class="input" id="mcAlbum" placeholder="Álbum (opcional)" />
         <input class="input" id="mcMood" placeholder="Mood tag (opcional) ej: calma, power" />
         <input class="input" id="mcIntensity" type="number" min="1" max="10" step="1" placeholder="Intensidad (1-10, opcional)" />
+        <input class="input" id="mcCoverUrl" placeholder="Cover URL (opcional)" />
+        <input class="input" id="mcLinkUrl" placeholder="Link (Spotify/YouTube) (opcional)" />
         <textarea class="input" id="mcNote" placeholder="Nota (opcional)" rows="3"></textarea>
       </div>
       <div class="row" style="margin-top:12px;">
@@ -791,8 +808,11 @@ function openMusicModal(){
   modal.querySelector("#btnSave").addEventListener("click", ()=>{
     const song = modal.querySelector("#mcSong").value.trim();
     const artist = modal.querySelector("#mcArtist").value.trim();
+    const album = modal.querySelector("#mcAlbum").value.trim();
     const mood = modal.querySelector("#mcMood").value.trim();
     const intensityRaw = modal.querySelector("#mcIntensity").value.trim();
+    const coverUrlRaw = modal.querySelector("#mcCoverUrl").value.trim();
+    const linkUrlRaw = modal.querySelector("#mcLinkUrl").value.trim();
     const note = modal.querySelector("#mcNote").value.trim();
 
     if(!song){
@@ -801,14 +821,30 @@ function openMusicModal(){
     }
 
     const intensity = intensityRaw ? Math.max(1, Math.min(10, Number(intensityRaw))) : null;
+
+    const normUrl = (u)=>{
+      if(!u) return "";
+      try{
+        const url = new URL(u);
+        return url.toString();
+      }catch{
+        return "";
+      }
+    };
+    const coverUrl = normUrl(coverUrlRaw);
+    const linkUrl = normUrl(linkUrlRaw);
+
     const entry = {
       id: uid("t"),
       ts: new Date().toISOString(),
       date: getTodayIso(),
       song,
       artist,
+      album,
       mood,
       intensity,
+      coverUrl,
+      linkUrl,
       note
     };
 
@@ -839,6 +875,26 @@ function wireHome(root){
   const next = root.querySelector("#btnMusicNext");
   if(prev) prev.addEventListener("click", ()=>navigateMusic(1)); // older
   if(next) next.addEventListener("click", ()=>navigateMusic(-1)); // newer
+
+  const play = root.querySelector("#btnMusicPlay");
+  if(play) play.addEventListener("click", ()=>{
+    const music = getMusicDisplay();
+    const m = music.item;
+    const link = m && (m.linkUrl || "");
+    if(link){
+      window.open(link, "_blank", "noopener,noreferrer");
+      return;
+    }
+    toast("Agrega un link (Spotify/YouTube) en el registro 🎧");
+  });
+
+  const cover = root.querySelector(".musicCover");
+  if(cover) cover.addEventListener("click", ()=>{
+    const music = getMusicDisplay();
+    const m = music.item;
+    const link = m && (m.linkUrl || "");
+    if(link) window.open(link, "_blank", "noopener,noreferrer");
+  });
 
   const goRem = root.querySelector("#btnGoReminders");
   if(goRem) goRem.addEventListener("click", ()=>{ state.tab="reminders"; view(); });
