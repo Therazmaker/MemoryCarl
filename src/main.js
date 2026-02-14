@@ -510,13 +510,6 @@ function viewShopping(){
   return `
     <div class="sectionTitle">
       <div>Listas de compras</div>
-    </div>
-
-<div class="row" style="margin-bottom:12px;">
-  <button class="btn" data-open-products="1">📦 Biblioteca</button>
-</div>
-
-    <div class="sectionTitle" style="display:none">
       <div class="chip">${state.shopping.length} listas</div>
     </div>
     ${state.shopping.map(l => shoppingCard(l)).join("")}
@@ -962,92 +955,121 @@ persist();
 view();
 
 
-/* ====================== PRODUCT LIBRARY SHEET ====================== */
+/* ====================== PRODUCT HISTORY + ANALYTICS ====================== */
 
-LS.products = "memorycarl_v2_products";
-state.products = load(LS.products, []);
+function updateProductPrice(productId, newPrice){
+  const p = state.products.find(x=>x.id===productId);
+  if(!p) return;
 
-const _persistOriginal = persist;
-persist = function(){
-  _persistOriginal();
-  save(LS.products, state.products);
-};
+  const oldPrice = Number(p.price || 0);
+  const np = Number(newPrice || 0);
 
-function openProductLibrarySheet(){
+  if(oldPrice !== np){
+    if(!p.history) p.history = [];
+    p.history.push({
+      price: oldPrice,
+      date: new Date().toISOString()
+    });
+    p.price = np;
+    persist();
+  }
+}
+
+function openProductAnalytics(productId){
+  const p = state.products.find(x=>x.id===productId);
+  if(!p) return;
+
+  const history = p.history || [];
+  const prices = history.map(h=>h.price).concat([p.price]);
+  const labels = history.map(h=>new Date(h.date).toLocaleDateString()).concat(["Actual"]);
+
+  const first = prices[0] || p.price;
+  const last = prices[prices.length-1] || p.price;
+  const diff = last - first;
+  const percent = first ? ((diff/first)*100).toFixed(1) : 0;
+
+  const trend = diff > 0 ? "⬆ Subió" : (diff < 0 ? "⬇ Bajó" : "Sin cambio");
+
   const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop";
 
-  const sheet = document.createElement("div");
-  sheet.className = "productSheet";
+  b.innerHTML = `
+    <div class="modal">
+      <h2>${escapeHtml(p.name)}</h2>
+      <div class="small">${trend} (${percent}%)</div>
+      <canvas id="priceChart" style="margin-top:12px;"></canvas>
 
-  sheet.innerHTML = `
-    <div class="productSheetScrim" id="psScrim"></div>
-    <div class="productSheetPanel">
-      <div class="productSheetHeader">
-        <div class="handleBar"></div>
-        <h2>Biblioteca de Productos</h2>
-      </div>
-
-      <div class="productSheetBody">
-        <div class="row">
-          <button class="btn good" id="btnAddProduct">+ Nuevo Producto</button>
-        </div>
-
-        <div class="list" style="margin-top:12px;">
-          ${state.products.map(p=>`
-            <div class="item">
-              <div class="left">
-                <div class="name">${escapeHtml(p.name)}</div>
-                <div class="meta">${money(p.price)} · ${escapeHtml(p.store||"")}</div>
-              </div>
-            </div>
-          `).join("") || '<div class="muted">No hay productos aún</div>'}
-        </div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn ghost" data-close>Close</button>
       </div>
     </div>
   `;
 
-  host.appendChild(sheet);
+  host.appendChild(b);
 
-  const scrim = sheet.querySelector("#psScrim");
-  const panel = sheet.querySelector(".productSheetPanel");
+  const ctx = b.querySelector("#priceChart").getContext("2d");
 
-  requestAnimationFrame(()=>{
-    panel.classList.add("open");
-    scrim.classList.add("show");
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Precio',
+        data: prices,
+        borderColor: '#7c5cff',
+        backgroundColor: 'rgba(124,92,255,.2)',
+        tension: .3
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display:false } }
+    }
   });
 
-  scrim.addEventListener("click", ()=> sheet.remove());
+  b.querySelector("[data-close]").addEventListener("click", ()=>b.remove());
+  b.addEventListener("click",(e)=>{ if(e.target===b) b.remove(); });
+}
 
-  const btnAdd = sheet.querySelector("#btnAddProduct");
-  btnAdd?.addEventListener("click", ()=>{
-    openPromptModal({
-      title:"Nuevo producto",
-      fields:[
-        {key:"name", label:"Nombre"},
-        {key:"price", label:"Precio (USD)", type:"number"},
-        {key:"store", label:"Tienda"},
-      ],
-      onSubmit: ({name, price, store})=>{
-        const n = (name||"").trim();
-        if(!n) return;
-        state.products.unshift({
-          id: uid("p"),
-          name:n,
-          price:Number(price||0),
-          store:(store||"").trim()
-        });
-        persist();
-        sheet.remove();
-        view();
-      }
-    });
-  });
+/* Extend Product Sheet UI */
+
+function renderProductRow(p){
+  return `
+    <div class="item">
+      <div class="left">
+        <div class="name">${escapeHtml(p.name)}</div>
+        <div class="meta">${money(p.price)} · ${escapeHtml(p.store||"")}</div>
+      </div>
+      <div class="row">
+        <button class="btn" data-analytics="${p.id}">📈</button>
+        <button class="btn" data-edit="${p.id}">Edit</button>
+      </div>
+    </div>
+  `;
 }
 
 document.addEventListener("click", function(e){
-  if(e.target && e.target.dataset && e.target.dataset.openProducts === "1"){
-    openProductLibrarySheet();
+  if(e.target.dataset.analytics){
+    openProductAnalytics(e.target.dataset.analytics);
+  }
+
+  if(e.target.dataset.edit){
+    const pid = e.target.dataset.edit;
+    const p = state.products.find(x=>x.id===pid);
+    if(!p) return;
+
+    openPromptModal({
+      title:"Actualizar precio",
+      fields:[
+        {key:"price", label:"Nuevo precio", type:"number", value:String(p.price)}
+      ],
+      onSubmit: ({price})=>{
+        updateProductPrice(pid, price);
+        view();
+      }
+    });
   }
 });
 
-/* ====================== END PRODUCT LIBRARY SHEET ====================== */
+/* ====================== END PRODUCT ANALYTICS ====================== */
