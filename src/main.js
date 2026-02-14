@@ -83,6 +83,86 @@ const LS = {
   shopping: "memorycarl_v2_shopping",
   reminders: "memorycarl_v2_reminders",
 };
+// ---- Sync (Google Apps Script via sendBeacon) ----
+const SYNC = {
+  urlKey: "memorycarl_script_url",
+  apiKeyKey: "memorycarl_script_api_key",
+  dirtyKey: "memorycarl_sync_dirty",
+  lastSyncKey: "memorycarl_last_sync_at",
+};
+
+function getSyncUrl(){ return localStorage.getItem(SYNC.urlKey) || ""; }
+function setSyncUrl(u){ localStorage.setItem(SYNC.urlKey, (u||"").trim()); }
+function getSyncApiKey(){ return localStorage.getItem(SYNC.apiKeyKey) || ""; }
+function setSyncApiKey(k){ localStorage.setItem(SYNC.apiKeyKey, (k||"").trim()); }
+
+function markDirty(){
+  localStorage.setItem(SYNC.dirtyKey, "1");
+}
+function clearDirty(){
+  localStorage.setItem(SYNC.dirtyKey, "0");
+}
+function isDirty(){
+  return (localStorage.getItem(SYNC.dirtyKey) || "0") === "1";
+}
+
+function ensureSyncConfigured(){
+  let url = getSyncUrl();
+  if (!url){
+    url = prompt("Paste your Apps Script Web App URL (ends with /exec). Leave blank to keep local-only:", "");
+    if (url) setSyncUrl(url);
+  }
+  return !!getSyncUrl();
+}
+
+function flushSync(reason="auto"){
+  try{
+    if (!isDirty()) return;
+    if (!getSyncUrl() && !ensureSyncConfigured()) return;
+
+    const payload = {
+      app: "MemoryCarl",
+      v: 2,
+      ts: new Date().toISOString(),
+      reason,
+      apiKey: getSyncApiKey() || undefined,
+      data: {
+        routines: state?.routines ?? load(LS.routines, []),
+        shopping: state?.shopping ?? load(LS.shopping, []),
+        reminders: state?.reminders ?? load(LS.reminders, []),
+      }
+    };
+
+    const url = getSyncUrl();
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+
+    let ok = false;
+    if (navigator.sendBeacon) ok = navigator.sendBeacon(url, blob);
+
+    if (!ok){
+      fetch(url, {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        mode: "no-cors"
+      }).catch(()=>{});
+    }
+
+    // Best-effort: we don't get a response with beacon/no-cors.
+    clearDirty();
+    localStorage.setItem(SYNC.lastSyncKey, new Date().toISOString());
+  }catch(e){
+    // Don't block closing the app.
+    console.warn("Sync flush failed:", e);
+  }
+}
+
+// Flush when tab/app is being closed or backgrounded
+window.addEventListener("beforeunload", ()=>flushSync("beforeunload"));
+document.addEventListener("visibilitychange", ()=>{ if (document.visibilityState === "hidden") flushSync("hidden"); });
+
+
 
 // ---- Helpers ----
 function uid(prefix="id"){ return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`; }
@@ -91,7 +171,11 @@ function load(key, fallback){
   try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
   catch{ return fallback; }
 }
-function save(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
+function save(key, value){
+  localStorage.setItem(key, JSON.stringify(value));
+  // Mark dirty only for core data keys (avoid syncing tokens/settings every time)
+  if (key === LS.routines || key === LS.shopping || key === LS.reminders) markDirty();
+}
 
 function escapeHtml(str){
   return String(str ?? "")
