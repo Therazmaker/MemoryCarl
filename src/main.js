@@ -506,7 +506,6 @@ function routineCard(r){
   `;
 }
 
-/* ORIGINAL viewShopping DISABLED
 function viewShopping(){
   return `
     <div class="sectionTitle">
@@ -516,10 +515,7 @@ function viewShopping(){
     ${state.shopping.map(l => shoppingCard(l)).join("")}
   `;
 }
-*/
 
-
-/* ORIGINAL shoppingCard DISABLED
 function shoppingCard(list){
   const totalAll = list.items.reduce((acc,it)=> acc + (Number(it.price||0)*Number(it.qty||1)), 0);
   const totalPending = list.items
@@ -562,8 +558,6 @@ function shoppingCard(list){
     </section>
   `;
 }
-*/
-
 
 function viewReminders(){
   const open = state.reminders.filter(r=>!r.done).length;
@@ -957,8 +951,10 @@ function initBottomSheet(){
   window.addEventListener("resize", ()=> setOpen(state.sheetOpen, { animate:false }));
 }
 
+/* INIT_RENDER_MOVED
 persist();
 view();
+*/
 
 
 /* ====================== REBUILT SHOPPING MODULE ====================== */
@@ -1211,3 +1207,16 @@ function openProductChart(productId){
 
 /* ====================== END SHOPPING REBUILD ====================== */
 
+
+
+/* ===== Expose shopping functions globally for inline onclick ===== */
+window.openProductLibrary = openProductLibrary;
+window.openAddItem = openAddItem;
+window.addProductToList = addProductToList;
+window.openNewProduct = openNewProduct;
+window.editProductPrice = editProductPrice;
+window.openProductChart = openProductChart;
+
+/* Render after module definitions */
+persist();
+view();
