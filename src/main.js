@@ -1562,6 +1562,9 @@ window.openProductLibrary = openProductLibrary;
 window.openNewProduct = openNewProduct;
 window.editProductPrice = editProductPrice;
 window.openProductChart = openProductChart;
+window.addProductToShoppingList = addProductToShoppingList;
+window.openManualItemPrompt = openManualItemPrompt;
+
 
 /* Render after module definitions */
 persist();
