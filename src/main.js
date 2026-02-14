@@ -1675,6 +1675,9 @@ window.openProductLibrary = openProductLibrary;
 window.openNewProduct = openNewProduct;
 window.editProductPrice = editProductPrice;
 window.openProductChart = openProductChart;
+// Needed because this file runs as a module; inline onclick needs globals.
+window.addProductToShoppingList = addProductToShoppingList;
+window.openManualItemPrompt = openManualItemPrompt;
 
 /* Render after module definitions */
 persist();
