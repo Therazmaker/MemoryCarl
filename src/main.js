@@ -1190,7 +1190,6 @@ function openProductChart(productId){
 
 /* ===== Expose shopping functions globally for inline onclick ===== */
 window.openProductLibrary = openProductLibrary;
-window.addProductToList = addProductToList;
 window.openNewProduct = openNewProduct;
 window.editProductPrice = editProductPrice;
 window.openProductChart = openProductChart;
