@@ -1,16 +1,13 @@
-// sw-min-test
-self.addEventListener("install", function () {
-  self.skipWaiting();
-});
+// firebase-messaging-sw.js (minimal + clean)
 
-self.addEventListener("activate", function (event) {
+// Permite activar la nueva versión rápido
+self.addEventListener("install", () => self.skipWaiting());
+
+self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener("fetch", function () {
-  // no-op
-});
+// Recibe señal desde la página para saltar waiting
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
