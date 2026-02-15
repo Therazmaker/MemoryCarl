@@ -631,6 +631,91 @@ function formatDayNum(date){ return String(date.getDate()); }
 
 function getTodayIso(){ return isoDate(new Date()); }
 
+
+function normalizeSleepEntry(e){
+  if(!e || typeof e !== "object") return null;
+  const date = String(e.date || "").slice(0,10);
+  const totalMinutes = Number(e.totalMinutes ?? e.total_minutes ?? 0);
+  if(!date || !Number.isFinite(totalMinutes) || totalMinutes <= 0) return null;
+  return {
+    id: String(e.id || uid()),
+    ts: String(e.ts || new Date().toISOString()),
+    date,
+    totalMinutes: Math.round(totalMinutes),
+    quality: (e.quality === undefined || e.quality === null || e.quality === "") ? null : Number(e.quality),
+    note: String(e.note || ""),
+    mode: String(e.mode || "simple"),
+    start: e.start ? String(e.start) : "",
+    end: e.end ? String(e.end) : ""
+  };
+}
+
+function getSleepSeries(days=7){
+  const n = Math.max(1, Math.min(31, Number(days)||7));
+  const today = new Date();
+  const dates = [];
+  for(let i=n-1;i>=0;i--){
+    const d = new Date(today);
+    d.setDate(today.getDate()-i);
+    dates.push(isoDate(d));
+  }
+
+  const map = new Map();
+  const log = (state.sleepLog || []).map(normalizeSleepEntry).filter(Boolean);
+
+  for(const e of log){
+    map.set(e.date, (map.get(e.date)||0) + e.totalMinutes);
+  }
+
+  const items = dates.map(date => ({ date, minutes: map.get(date)||0 }));
+  const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60); // keep chart readable vs 8h baseline
+  const avgMinutes = items.reduce((s,x)=>s+x.minutes,0) / items.length;
+  const last = items[items.length-1]?.minutes || 0;
+
+  return { items, maxMinutes, avgMinutes, lastMinutes: last };
+}
+
+function renderSleepBars(series){
+  const items = series?.items || [];
+  if(!items.length){
+    return `<div class="muted">Registra tu sueño para ver el gráfico 😴</div>`;
+  }
+  const maxM = series.maxMinutes || 480;
+  const toPx = (minutes) => {
+    const minH = 18, maxH = 88;
+    const ratio = Math.max(0, Math.min(1, minutes / maxM));
+    return Math.round(minH + ratio * (maxH - minH));
+  };
+
+  const bars = items.map((x)=>{
+    const h = toPx(x.minutes);
+    const hrs = (x.minutes/60);
+    const label = x.minutes ? `${hrs.toFixed(1)}h` : "0h";
+    return `<div class="sleepBar" style="--h:${h}px" title="${escapeHtml(x.date)} • ${escapeHtml(label)}"></div>`;
+  }).join("");
+
+  const avgH = (series.avgMinutes || 0) / 60;
+  const lastH = (series.lastMinutes || 0) / 60;
+
+  const labels = items.map((x)=>{
+    const d = new Date(x.date + "T00:00:00");
+    const ch = d.toLocaleDateString("es-PE", { weekday: "short" }).slice(0,1).toUpperCase();
+    return `<span title="${escapeHtml(x.date)}">${escapeHtml(ch)}</span>`;
+  }).join("");
+
+  return `
+    <div class="sleepMetaRow">
+      <div>
+        <div class="big">${escapeHtml(lastH ? lastH.toFixed(1) : "0.0")}h</div>
+        <div class="small">Última noche · Prom ${escapeHtml(avgH.toFixed(1))}h</div>
+      </div>
+      <div class="chip">${avgH >= 7 ? "✅" : (avgH >= 6 ? "⚠️" : "🔥")}</div>
+    </div>
+    <div class="sleepBars" aria-hidden="true">${bars}</div>
+    <div class="sleepBarLabelRow" aria-hidden="true">${labels}</div>
+  `;
+}
+
 function getMusicDisplay(){
   const log = Array.isArray(state.musicLog) ? state.musicLog : [];
   const cursor = Math.max(0, Math.min(log.length-1, Number(state.musicCursor||0)));
@@ -680,12 +765,9 @@ function viewHome(){
     </div>
   `).join("");
 
-  const sleepBars = `
-    <div class="sleepBars" aria-hidden="true">
-      ${Array.from({length:6}).map(()=>`<div class="sleepBar"></div>`).join("")}
-    </div>
-    <div class="muted">Sueño: pronto lo conectamos 😴</div>
-  `;
+
+const sleepSeries = getSleepSeries(7);
+const sleepBars = renderSleepBars(sleepSeries);
 
   return `
     <div class="homeTop">
@@ -699,12 +781,13 @@ function viewHome(){
     </div>
 
     <div class="homeGrid">
-      <section class="card homeCard">
+      <section class="card homeCard" id="homeSleepCard">
         <div class="cardTop">
           <div>
             <h2 class="cardTitle">Sueño</h2>
             <div class="small">7 días</div>
           </div>
+          <button class="iconBtn" id="btnAddSleep" aria-label="Add sleep">＋</button>
         </div>
         <div class="hr"></div>
         ${sleepBars}
@@ -771,6 +854,192 @@ function viewHome(){
       </div>
     </section>
   `;
+}
+
+
+function openSleepModal(){
+  const host = document.querySelector("#app");
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+
+  const today = isoDate(new Date());
+
+  modal.innerHTML = `
+    <div class="modal" role="dialog" aria-label="Registrar sueño">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">Registrar sueño</div>
+          <div class="modalSub">Simple o avanzado. Guardado local + sync cuando cierre.</div>
+        </div>
+        <button class="iconBtn" data-close aria-label="Close">✕</button>
+      </div>
+
+      <div class="sleepTabs">
+        <button class="sleepTab active" data-mode="simple">Simple</button>
+        <button class="sleepTab" data-mode="advanced">Avanzado</button>
+      </div>
+
+      <div class="field">
+        <label>Fecha</label>
+        <input id="sleepDate" type="date" value="${today}">
+      </div>
+
+      <div id="sleepSimple">
+        <div class="sleepFormRow">
+          <div class="field">
+            <label>Horas (ej: 7.5)</label>
+            <input id="sleepHours" type="number" inputmode="decimal" step="0.25" min="0" max="24" placeholder="7.5">
+          </div>
+          <div class="field">
+            <label>Calidad (1-5)</label>
+            <select id="sleepQuality">
+              <option value="">-</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="sleepAdvanced" style="display:none;">
+        <div class="sleepFormRow">
+          <div class="field">
+            <label>Inicio</label>
+            <input id="sleepStart" type="time">
+          </div>
+          <div class="field">
+            <label>Fin</label>
+            <input id="sleepEnd" type="time">
+          </div>
+          <div class="field">
+            <label>Calidad (1-5)</label>
+            <select id="sleepQuality2">
+              <option value="">-</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+        </div>
+        <div class="muted" style="margin-top:6px;">Tip: si el fin es menor que el inicio, asumimos que fue al día siguiente.</div>
+      </div>
+
+      <div class="field">
+        <label>Nota (opcional)</label>
+        <textarea id="sleepNote" rows="2" placeholder="Ej: café tarde, sueño ligero, etc."></textarea>
+      </div>
+
+      <div class="row" style="justify-content:flex-end;margin-top:12px;">
+        <button class="btn" data-close>Cancel</button>
+        <button class="btn primary" id="btnSaveSleep">Guardar</button>
+      </div>
+    </div>
+  `;
+
+  const close = () => modal.remove();
+
+  modal.addEventListener("click", (e)=>{
+    if (e.target === modal) close();
+    if (e.target && e.target.closest("[data-close]")) close();
+  });
+
+  // Tabs
+  let mode = "simple";
+  const tabs = modal.querySelectorAll(".sleepTab");
+  const simpleEl = modal.querySelector("#sleepSimple");
+  const advEl = modal.querySelector("#sleepAdvanced");
+
+  tabs.forEach(t=>{
+    t.addEventListener("click", ()=>{
+      tabs.forEach(x=>x.classList.remove("active"));
+      t.classList.add("active");
+      mode = t.getAttribute("data-mode") || "simple";
+      simpleEl.style.display = (mode==="simple") ? "" : "none";
+      advEl.style.display = (mode==="advanced") ? "" : "none";
+    });
+  });
+
+  const calcMinutesAdvanced = (dateStr, startStr, endStr) => {
+    if(!dateStr || !startStr || !endStr) return 0;
+    const [sh, sm] = startStr.split(":").map(Number);
+    const [eh, em] = endStr.split(":").map(Number);
+    if([sh,sm,eh,em].some(n=>Number.isNaN(n))) return 0;
+
+    const start = new Date(dateStr + "T00:00:00");
+    start.setHours(sh, sm, 0, 0);
+
+    const end = new Date(dateStr + "T00:00:00");
+    end.setHours(eh, em, 0, 0);
+
+    if(end <= start) end.setDate(end.getDate()+1); // cross midnight
+
+    const minutes = Math.round((end - start) / 60000);
+    return minutes;
+  };
+
+  modal.querySelector("#btnSaveSleep").addEventListener("click", ()=>{
+    const date = (modal.querySelector("#sleepDate").value || "").trim();
+    const note = (modal.querySelector("#sleepNote").value || "").trim();
+
+    let totalMinutes = 0;
+    let quality = null;
+    let start = "", end = "";
+
+    if(mode === "simple"){
+      const hrs = Number((modal.querySelector("#sleepHours").value || "").trim());
+      if(Number.isFinite(hrs) && hrs > 0) totalMinutes = Math.round(hrs * 60);
+      const qv = (modal.querySelector("#sleepQuality").value || "").trim();
+      quality = qv ? Number(qv) : null;
+    } else {
+      start = (modal.querySelector("#sleepStart").value || "").trim();
+      end = (modal.querySelector("#sleepEnd").value || "").trim();
+      totalMinutes = calcMinutesAdvanced(date, start, end);
+      const qv = (modal.querySelector("#sleepQuality2").value || "").trim();
+      quality = qv ? Number(qv) : null;
+    }
+
+    if(!date){
+      toast("Elige una fecha 📅");
+      return;
+    }
+    if(!totalMinutes || totalMinutes <= 0){
+      toast(mode==="simple" ? "Pon horas válidas 🕒" : "Pon inicio y fin válidos ⏱");
+      return;
+    }
+    if(totalMinutes > 24*60){
+      toast("Eso es más de 24h 😅 Revisa");
+      return;
+    }
+
+    const entry = {
+      id: uid(),
+      ts: new Date().toISOString(),
+      date,
+      totalMinutes,
+      quality,
+      note,
+      mode,
+      start,
+      end
+    };
+
+    state.sleepLog = Array.isArray(state.sleepLog) ? state.sleepLog : [];
+    state.sleepLog.push(entry);
+    // keep it sane
+    if(state.sleepLog.length > 1500) state.sleepLog = state.sleepLog.slice(-1500);
+
+    persist();
+    view();
+    toast("Sueño guardado ✅");
+    close();
+  });
+
+  host.appendChild(modal);
 }
 
 function openMusicModal(){
@@ -870,6 +1139,11 @@ function navigateMusic(delta){
 function wireHome(root){
   const btnAdd = root.querySelector("#btnAddMusic");
   if(btnAdd) btnAdd.addEventListener("click", openMusicModal);
+
+  const btnSleep = root.querySelector("#btnAddSleep");
+  if(btnSleep) btnSleep.addEventListener("click", openSleepModal);
+  const sleepCard = root.querySelector("#homeSleepCard");
+  if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepModal(); });
 
   const prev = root.querySelector("#btnMusicPrev");
   const next = root.querySelector("#btnMusicNext");

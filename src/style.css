@@ -338,12 +338,19 @@ body{
   opacity:.75;
   height:var(--h, 40px);
 }
-.sleepBar:nth-child(1){height:48px}
-.sleepBar:nth-child(2){height:82px}
-.sleepBar:nth-child(3){height:66px}
-.sleepBar:nth-child(4){height:36px}
-.sleepBar:nth-child(5){height:74px}
-.sleepBar:nth-child(6){height:40px}
+
+
+/* ===== Sleep widget extras ===== */
+.sleepMetaRow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px}
+.sleepMetaRow .big{font-weight:900;font-size:20px;letter-spacing:.2px}
+.sleepMetaRow .small{color:var(--muted);font-size:12px}
+.sleepBarLabelRow{display:flex;gap:10px;justify-content:space-between;color:rgba(255,255,255,.55);font-size:11px}
+.sleepBarLabelRow span{width:16px;text-align:center}
+.sleepTabs{display:flex;gap:8px;margin:10px 0}
+.sleepTab{flex:1;padding:10px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:rgba(255,255,255,.85);font-weight:800;cursor:pointer}
+.sleepTab.active{background:rgba(124,92,255,.22);border-color:rgba(124,92,255,.5)}
+.sleepFormRow{display:flex;gap:10px;flex-wrap:wrap}
+.sleepFormRow .field{flex:1;min-width:140px}
 
 .homeChecks{display:flex;flex-direction:column;gap:10px}
 .homeCheck{
