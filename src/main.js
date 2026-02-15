@@ -4453,6 +4453,9 @@ document.addEventListener("click", function(e){
 });
 
 window.openMergeGameFull = openMergeGameFull;
+// Back-compat: if any button uses onclick="openMergeGame()"
+window.openMergeGame = openMergeGameFull;
+function openMergeGame(){ return openMergeGameFull(); }
 
 // ====================== END MERGE GAME ======================
 
