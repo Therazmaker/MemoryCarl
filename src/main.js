@@ -1620,9 +1620,26 @@ function openCalendarDrawModal(dateIso){
         <canvas id="calCanvas" width="900" height="900"></canvas>
       </div>
 
-      <div class="row" style="margin-top:12px;">
+      <div class="row" style="margin-top:12px; gap:10px; flex-wrap:wrap;">
         <button class="btn" id="btnCalClear">Borrar</button>
+        <button class="btn" id="btnCalUndo">Undo</button>
         <button class="btn" id="btnCalX">X roja</button>
+
+        <div class="calTools">
+          <div class="calPalette" aria-label="Palette">
+            <button class="dot isActive" data-cal-color="#ff3b30" title="Rojo" style="--dot:#ff3b30"></button>
+            <button class="dot" data-cal-color="#ffffff" title="Blanco" style="--dot:#ffffff"></button>
+            <button class="dot" data-cal-color="#8b5cf6" title="Morado" style="--dot:#8b5cf6"></button>
+            <button class="dot" data-cal-color="#22c55e" title="Verde" style="--dot:#22c55e"></button>
+            <button class="dot" data-cal-color="#38bdf8" title="Cian" style="--dot:#38bdf8"></button>
+            <button class="dot" data-cal-color="#f59e0b" title="Ámbar" style="--dot:#f59e0b"></button>
+          </div>
+          <div class="calSize">
+            <span class="small muted">Grosor</span>
+            <input id="calSize" type="range" min="2" max="32" step="1" value="10" />
+          </div>
+        </div>
+
         <div style="flex:1"></div>
         <button class="btn primary" id="btnCalSave">Guardar</button>
       </div>
@@ -1636,7 +1653,7 @@ function openCalendarDrawModal(dateIso){
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // Fit canvas visually
+  // Fit canvas visually (square)
   const fit = ()=>{
     const wrap = modal.querySelector(".calCanvasWrap");
     const w = wrap.clientWidth;
@@ -1646,79 +1663,161 @@ function openCalendarDrawModal(dateIso){
   fit();
   window.addEventListener("resize", fit);
 
-  // Load existing drawing
-  const existing = (state.calDraw && state.calDraw[dateIso]) ? state.calDraw[dateIso] : "";
-  if(existing){
-    const img = new Image();
-    img.onload = ()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height); };
-    img.src = existing;
-  } else {
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-  }
-
+  // ---- Drawing state ----
+  const stroke = { color: "#ff3b30", w: 10 };
   let drawing = false;
   let last = null;
-  const stroke = {
-    color: "#ff3b30",
-    w: 10
-  };
+  let currentStroke = null; // {color,w,pts:[[x,y],...]}
+  let strokes = [];         // history for undo
+  let baseImg = null;       // existing image snapshot (from previous saves)
 
   function pos(e){
     const r = canvas.getBoundingClientRect();
-    // scale to internal canvas pixels
     const sx = canvas.width / r.width;
     const sy = canvas.height / r.height;
     return [(e.clientX - r.left) * sx, (e.clientY - r.top) * sy];
   }
 
+  function drawStrokePath(st){
+    if(!st || !st.pts || st.pts.length < 2) return;
+    ctx.strokeStyle = st.color;
+    ctx.lineWidth = st.w;
+    ctx.beginPath();
+    ctx.moveTo(st.pts[0][0], st.pts[0][1]);
+    for(let i=1;i<st.pts.length;i++){
+      ctx.lineTo(st.pts[i][0], st.pts[i][1]);
+    }
+    ctx.stroke();
+  }
+
+  function renderAll(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(baseImg){
+      ctx.drawImage(baseImg, 0, 0, canvas.width, canvas.height);
+    }
+    for(const st of strokes){
+      drawStrokePath(st);
+    }
+  }
+
+  // Load existing drawing as base image
+  const existing = (state.calDraw && state.calDraw[dateIso]) ? state.calDraw[dateIso] : "";
+  if(existing){
+    const img = new Image();
+    img.onload = ()=>{
+      baseImg = img;
+      renderAll();
+    };
+    img.src = existing;
+  } else {
+    renderAll();
+  }
+
+  // Pointer drawing
   canvas.addEventListener("pointerdown", (e)=>{
     drawing = true;
     canvas.setPointerCapture(e.pointerId);
-    last = pos(e);
-  });
-  canvas.addEventListener("pointermove", (e)=>{
-    if(!drawing) return;
     const p = pos(e);
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = stroke.w;
+    last = p;
+    currentStroke = { color: stroke.color, w: stroke.w, pts: [p] };
+  });
+
+  canvas.addEventListener("pointermove", (e)=>{
+    if(!drawing || !currentStroke) return;
+    const p = pos(e);
+    currentStroke.pts.push(p);
+
+    // draw incremental segment for smooth feel
+    ctx.strokeStyle = currentStroke.color;
+    ctx.lineWidth = currentStroke.w;
     ctx.beginPath();
     ctx.moveTo(last[0], last[1]);
     ctx.lineTo(p[0], p[1]);
     ctx.stroke();
+
     last = p;
   });
-  function end(){ drawing = false; last = null; }
+
+  function end(){
+    if(!drawing) return;
+    drawing = false;
+    last = null;
+
+    if(currentStroke && currentStroke.pts.length > 1){
+      strokes.push(currentStroke);
+    }
+    currentStroke = null;
+  }
+
   canvas.addEventListener("pointerup", end);
   canvas.addEventListener("pointercancel", end);
 
-  modal.querySelector("#btnCloseCal").addEventListener("click", ()=>{ window.removeEventListener("resize", fit); modal.remove(); });
-  modal.addEventListener("click", (e)=>{ if(e.target===modal){ window.removeEventListener("resize", fit); modal.remove(); }});
+  // Close
+  function close(){
+    window.removeEventListener("resize", fit);
+    modal.remove();
+  }
+  modal.querySelector("#btnCloseCal").addEventListener("click", close);
+  modal.addEventListener("click", (e)=>{ if(e.target===modal) close(); });
 
+  // Tools
   modal.querySelector("#btnCalClear").addEventListener("click", ()=>{
-    ctx.clearRect(0,0,canvas.width,canvas.height);
+    baseImg = null;
+    strokes = [];
+    renderAll();
+    toast("Borrado 🧽");
+  });
+
+  modal.querySelector("#btnCalUndo").addEventListener("click", ()=>{
+    if(strokes.length === 0){
+      toast("Nada que deshacer");
+      return;
+    }
+    strokes.pop();
+    renderAll();
   });
 
   modal.querySelector("#btnCalX").addEventListener("click", ()=>{
-    ctx.strokeStyle = "#ff3b30";
-    ctx.lineWidth = 18;
-    ctx.beginPath();
-    ctx.moveTo(canvas.width*0.2, canvas.height*0.2);
-    ctx.lineTo(canvas.width*0.8, canvas.height*0.8);
-    ctx.moveTo(canvas.width*0.8, canvas.height*0.2);
-    ctx.lineTo(canvas.width*0.2, canvas.height*0.8);
-    ctx.stroke();
+    const a1 = [canvas.width*0.2, canvas.height*0.2];
+    const b1 = [canvas.width*0.8, canvas.height*0.8];
+    const a2 = [canvas.width*0.8, canvas.height*0.2];
+    const b2 = [canvas.width*0.2, canvas.height*0.8];
+
+    strokes.push({ color: stroke.color, w: Math.max(stroke.w, 14), pts: [a1,b1] });
+    strokes.push({ color: stroke.color, w: Math.max(stroke.w, 14), pts: [a2,b2] });
+    renderAll();
   });
 
+  const size = modal.querySelector("#calSize");
+  if(size){
+    size.addEventListener("input", ()=>{
+      stroke.w = Number(size.value || 10);
+    });
+  }
+
+  modal.querySelectorAll("[data-cal-color]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const c = btn.getAttribute("data-cal-color");
+      if(!c) return;
+      stroke.color = c;
+
+      modal.querySelectorAll("[data-cal-color]").forEach(b=>b.classList.remove("isActive"));
+      btn.classList.add("isActive");
+    });
+  });
+
+  // Save
   modal.querySelector("#btnCalSave").addEventListener("click", ()=>{
     try{
+      // Ensure everything is rendered
+      renderAll();
       const dataUrl = canvas.toDataURL("image/png");
       state.calDraw ||= {};
       state.calDraw[dateIso] = dataUrl;
       persist();
       view();
       toast("Guardado ✅");
-      window.removeEventListener("resize", fit);
-      modal.remove();
+      close();
     }catch(e){
       console.warn(e);
       toast("No se pudo guardar ❌");

@@ -513,5 +513,13 @@ body{
 .calNum{position:absolute;top:8px;left:8px;font-size:12px;color:rgba(255,255,255,.85);z-index:2}
 .calPreview{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.9}
 .calCanvasWrap{border:1px solid rgba(255,255,255,.10);border-radius:18px;background:rgba(0,0,0,.25);overflow:hidden}
+.calTools{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.calPalette{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);border-radius:999px}
+.calPalette .dot{width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.35);background:var(--dot);cursor:pointer;opacity:.85}
+.calPalette .dot:hover{opacity:1}
+.calPalette .dot.isActive{outline:2px solid rgba(255,255,255,.75);outline-offset:2px;opacity:1}
+.calSize{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);border-radius:999px}
+.calSize input[type="range"]{width:140px}
+@media(max-width:520px){.calSize input[type="range"]{width:110px}}
 .modalWide{max-width:520px}
 #calCanvas{display:block;touch-action:none}
