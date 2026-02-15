@@ -628,3 +628,164 @@ body{
   border-radius:16px;
   background:rgba(255,255,255,.03);
 }
+
+
+/* ===== Merge Lab (full screen game) ===== */
+.mergeOverlay{
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  background: radial-gradient(1200px 800px at 50% 20%, rgba(255,255,255,.06), rgba(255,255,255,0) 60%),
+              linear-gradient(180deg, rgba(10,14,22,.98), rgba(8,10,16,.98));
+  display:flex;
+  flex-direction:column;
+  padding: 12px;
+  gap: 10px;
+  overflow:hidden;
+}
+.mergeTop{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+}
+.mergeClose{
+  width:42px;
+  height:42px;
+}
+.mergeTitle{
+  flex:1;
+  min-width:0;
+}
+.mergeKicker{
+  font-weight:800;
+  letter-spacing:.08em;
+  font-size:12px;
+  opacity:.9;
+}
+.mergeSub{
+  font-size:12px;
+  opacity:.8;
+}
+.mergeStats{
+  display:flex;
+  gap:8px;
+}
+.mergeStat{
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;
+  padding:8px 10px;
+  min-width:72px;
+  text-align:right;
+}
+.mergeStat .k{
+  font-size:11px;
+  opacity:.75;
+}
+.mergeStat .v{
+  font-size:16px;
+  font-weight:800;
+}
+
+.mergeStageWrap{
+  flex:1;
+  min-height: 420px;
+  border-radius:16px;
+  background: rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+  overflow:hidden;
+  position:relative;
+}
+.mergeStage{
+  position:absolute;
+  inset:0;
+}
+.mergeCanvas{
+  width:100%;
+  height:100%;
+  display:block;
+  touch-action:none;
+}
+.mergeDanger{
+  position:absolute;
+  left: 8px;
+  right: 8px;
+  top: 110px;
+  height:2px;
+  background: rgba(255,80,80,.65);
+  box-shadow: 0 0 0 1px rgba(255,80,80,.25);
+  border-radius: 99px;
+  pointer-events:none;
+}
+
+.mergeBottom{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.mergeNext{
+  background: rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;
+  padding:10px 12px;
+  min-width: 120px;
+}
+.mergeNext .k{
+  font-size:11px;
+  opacity:.75;
+}
+.mergeNext .v{
+  font-weight:800;
+  margin-top:2px;
+}
+.mergeChain{
+  flex:1;
+  display:flex;
+  gap:8px;
+  overflow:auto;
+  padding: 4px 2px;
+  scrollbar-width: none;
+}
+.mergeChain::-webkit-scrollbar{ display:none; }
+.mergeChip{
+  flex:0 0 auto;
+  padding:8px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.08);
+  font-size:12px;
+  opacity:.85;
+  white-space:nowrap;
+}
+.mergeRestart{
+  flex:0 0 auto;
+}
+
+.mergeGameOver{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background: rgba(0,0,0,.45);
+  backdrop-filter: blur(6px);
+  padding: 18px;
+}
+.mergeOverCard{
+  width:min(420px, 100%);
+}
+.mergeOverTitle{
+  font-weight:900;
+  font-size:20px;
+  margin-bottom:6px;
+}
+.mergeOverBtns{
+  display:flex;
+  gap:10px;
+  margin-top:12px;
+}
+.btn.ghost{
+  background: rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12);
+}
+

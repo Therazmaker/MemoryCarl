@@ -1,3 +1,4 @@
+import { openMergeGame, closeMergeGame } from "./merge/merge.js";
 console.log("MemoryCarl loaded");
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
 // 1) Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates -> Generate key pair
@@ -1144,6 +1145,21 @@ const sleepBars = renderSleepBars(sleepSeries);
       ${renderBudgetMonthly()}
     </section>
 
+    <section class="card homeCard homeWide" id="homeMergeCard">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Merge Lab</h2>
+          <div class="small">Suelta y fusiona (pantalla completa)</div>
+        </div>
+        <button class="iconBtn" id="btnOpenMergeGame" aria-label="Open merge game">🎮</button>
+      </div>
+      <div class="hr"></div>
+      <div class="small" style="line-height:1.35">
+        Un mini juego dentro de MemoryCarl: toca para soltar piezas, si se tocan dos iguales se transforman en la siguiente.
+        No hay presión… excepto la línea roja 😅
+      </div>
+    </section>
+
   `;
 }
 
@@ -1599,6 +1615,14 @@ function wireHome(root){
 
   const budgetCard = root.querySelector("#homeBudgetCard");
   if(budgetCard) budgetCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddBudgetItem")) return; /* no auto-open, keeps card tappable but safe */ });
+
+  // merge lab
+  const btnMerge = root.querySelector("#btnOpenMergeGame");
+  if(btnMerge) btnMerge.addEventListener("click", (e)=>{ e.stopPropagation(); openMergeGame(); });
+
+  const mergeCard = root.querySelector("#homeMergeCard");
+  if(mergeCard) mergeCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnOpenMergeGame")) return; openMergeGame(); });
+
 
   root.querySelectorAll("[data-budget-del]").forEach(btn=>{
     btn.addEventListener("click",(e)=>{
