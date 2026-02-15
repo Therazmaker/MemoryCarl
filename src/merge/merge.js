@@ -297,16 +297,23 @@
     });
 
     // Sprite activation hook: keep circles visible until the renderer has a loaded Image for the texture.
-    
+    // (We draw sprites manually in afterRender for maximum mobile compatibility.)
 
-// Safety net (mobile): if a body has an active sprite, never let the solid circle "come back".
-// Some render paths can re-use the body's fillStyle if it was set earlier.
-Matter.Matter.            }
+    // Safety net (mobile): if a body has a sprite texture set, ensure its fill stays transparent.
+    Matter.Events.on(engine, "beforeUpdate", () => {
+      try{
+        const bodies = Matter.Composite.allBodies(engine.world);
+        for(const b of bodies){
+          const spr = b?.render?.sprite;
+          if(spr && spr.texture){
+            // Only clear fill once we know we can draw sprites manually
+            b.render.fillStyle = "rgba(0,0,0,0)";
+            if(!b.render.strokeStyle) b.render.strokeStyle = "rgba(255,255,255,0.20)";
+            if(!b.render.lineWidth) b.render.lineWidth = 1;
           }
         }
       }catch(e){}
     });
-
 
     // Expose a tiny debug handle so we can inspect the world from DevTools.
     // (Safe: no secrets, just runtime objects.)
