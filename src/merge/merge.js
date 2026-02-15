@@ -209,6 +209,20 @@
     Runner.run(runner, engine);
     Render.run(render);
 
+    // Expose a tiny debug handle so we can inspect the world from DevTools.
+    // (Safe: no secrets, just runtime objects.)
+    try{
+      window.__mcMerge = {
+        engine,
+        render,
+        runner,
+        spawnItem,
+        getBodies: () => Matter.Composite.allBodies(engine.world),
+        getItems: () => (ITEMS || DEFAULT_ITEMS)
+      };
+      console.log('[MergeLab] init ok', { width, height, spawnPool: SPAWN_POOL, items: (ITEMS||[]).length });
+    }catch(e){}
+
     // Controls: click/tap on canvas
     const onDrop = (evt)=>{
       if(gameOverState) return;
@@ -285,6 +299,10 @@
     applySpriteRender(body, item);
 
     Composite.add(engine.world, body);
+
+    try{
+      console.log('[MergeLab] spawn', { x, y: START_Y, r: item.radius, typeIndex: body.typeIndex, hasSprite: !!item.sprite });
+    }catch(e){}
 
     // Next: random only from first SPAWN_POOL items
     currentType = Math.floor(Math.random() * SPAWN_POOL);
