@@ -293,34 +293,55 @@ function seedReminders(){
 }
 
 function seedHouse(){
-  // Minimal default so you can start immediately (edit to match your home)
+  // Seed based on your described layout (can be edited anytime in Config)
+  // Levels: "light" (daily/regular) vs "deep" (weekly/deep clean)
   return {
+    mode: "light", // "light" | "deep"
     zones: [
-      { id: uid("z"), name: "Sala", order: 1 },
-      { id: uid("z"), name: "Cocina", order: 2 },
-      { id: uid("z"), name: "Baño", order: 3 },
-      { id: uid("z"), name: "Cuarto", order: 4 },
+      { id: uid("z"), name: "Sala", order: 1, priority: 4 },
+      { id: uid("z"), name: "Cocina", order: 2, priority: 5 },
+      { id: uid("z"), name: "Pasillo", order: 3, priority: 3 },
+      { id: uid("z"), name: "Cuarto Frederick", order: 4, priority: 3 },
+      { id: uid("z"), name: "Cuarto Mathias", order: 5, priority: 3 },
+      { id: uid("z"), name: "Cuarto Principal", order: 6, priority: 4 },
     ],
     tasks: [
-      // Global-ish / quick wins (we attach to a zone but type="global" helps route grouping)
-      { id: uid("t"), zoneId: null, name: "Recolectar basura (toda la casa)", minutes: 5, freqDays: 2, type: "global", lastDone: "" },
-      { id: uid("t"), zoneId: null, name: "Recoger ropa/objetos fuera de lugar", minutes: 8, freqDays: 3, type: "global", lastDone: "" },
+      // Global quick wins
+      { id: uid("t"), zoneId: null, name: "Recolectar basura (toda la casa)", minutes: 5, freqDays: 2, type: "global", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: null, name: "Recoger objetos fuera de lugar (reset)", minutes: 8, freqDays: 2, type: "global", level: "light", priority: 4, lastDone: "" },
 
-      // Zona: Sala
-      { id: uid("t"), zoneId: "ZONE_SALA", name: "Superficies (mesa/TV/estantes)", minutes: 8, freqDays: 4, type: "surface", lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_SALA", name: "Piso (barrer/aspirar)", minutes: 8, freqDays: 5, type: "floor", lastDone: "" },
+      // Sala
+      { id: uid("t"), zoneId: "ZONE_SALA", name: "Mesa de comer: limpiar superficie", minutes: 5, freqDays: 2, type: "surface", level: "light", priority: 4, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_SALA", name: "Escritorio Fergis: ordenar + limpiar", minutes: 7, freqDays: 3, type: "surface", level: "light", priority: 4, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_SALA", name: "Sala: piso (barrer/aspirar)", minutes: 8, freqDays: 4, type: "floor", level: "light", priority: 3, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_SALA", name: "Sala: polvo profundo (repisa/esquinas)", minutes: 12, freqDays: 7, type: "deep", level: "deep", priority: 3, lastDone: "" },
 
-      // Zona: Cocina
-      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Encimera + fregadero", minutes: 8, freqDays: 2, type: "surface", lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Piso (barrer/trapear)", minutes: 10, freqDays: 4, type: "floor", lastDone: "" },
+      // Cocina
+      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Platos + fregadero (reset)", minutes: 10, freqDays: 1, type: "wet", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Mesón/encimera: limpiar + desinfectar", minutes: 6, freqDays: 1, type: "surface", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Cocina/estufa: limpiar superficie", minutes: 8, freqDays: 3, type: "wet", level: "light", priority: 4, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Nevera: limpiar exterior + agarraderas", minutes: 6, freqDays: 7, type: "surface", level: "deep", priority: 3, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Cocina: piso (barrer/trapear)", minutes: 10, freqDays: 3, type: "floor", level: "light", priority: 4, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Cocina: deep (microondas/azulejos/grasita)", minutes: 18, freqDays: 7, type: "deep", level: "deep", priority: 4, lastDone: "" },
 
-      // Zona: Baño
-      { id: uid("t"), zoneId: "ZONE_BANO", name: "Lavamanos + espejo", minutes: 6, freqDays: 4, type: "wet", lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_BANO", name: "Inodoro", minutes: 6, freqDays: 4, type: "wet", lastDone: "" },
+      // Pasillo
+      { id: uid("t"), zoneId: "ZONE_PASILLO", name: "Pasillo: piso (barrer)", minutes: 6, freqDays: 5, type: "floor", level: "light", priority: 3, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_PASILLO", name: "Pasillo: quitar cosas acumuladas", minutes: 6, freqDays: 7, type: "organize", level: "deep", priority: 3, lastDone: "" },
 
-      // Zona: Cuarto
-      { id: uid("t"), zoneId: "ZONE_CUARTO", name: "Tender cama", minutes: 3, freqDays: 1, type: "surface", lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_CUARTO", name: "Piso (barrer/aspirar)", minutes: 7, freqDays: 7, type: "floor", lastDone: "" },
+      // Cuarto Frederick (juguetes)
+      { id: uid("t"), zoneId: "ZONE_FRED", name: "Juguetes: recoger y dejar ordenado", minutes: 10, freqDays: 1, type: "organize", level: "light", priority: 4, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_FRED", name: "Frederick: piso (barrer/aspirar)", minutes: 8, freqDays: 7, type: "floor", level: "deep", priority: 2, lastDone: "" },
+
+      // Cuarto Mathias
+      { id: uid("t"), zoneId: "ZONE_MATH", name: "Mathias: tender cama", minutes: 3, freqDays: 1, type: "surface", level: "light", priority: 3, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_MATH", name: "Mathias: escritorio (orden + polvo)", minutes: 8, freqDays: 4, type: "surface", level: "light", priority: 3, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_MATH", name: "Mathias: piso (barrer/aspirar)", minutes: 8, freqDays: 7, type: "floor", level: "deep", priority: 2, lastDone: "" },
+
+      // Cuarto Principal
+      { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: tender cama", minutes: 3, freqDays: 1, type: "surface", level: "light", priority: 4, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: escritorio (orden + limpiar)", minutes: 8, freqDays: 4, type: "surface", level: "light", priority: 4, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: piso (barrer/aspirar)", minutes: 9, freqDays: 7, type: "floor", level: "deep", priority: 2, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: gabetero/closet (mini organización)", minutes: 15, freqDays: 14, type: "organize", level: "deep", priority: 2, lastDone: "" },
     ],
     // UI state
     subtab: "route" // "route" | "manage"
@@ -338,8 +359,10 @@ function normalizeHouse(){
   const map = {
     "ZONE_SALA": byName.get("sala") || null,
     "ZONE_COCINA": byName.get("cocina") || null,
-    "ZONE_BANO": byName.get("baño") || byName.get("bano") || null,
-    "ZONE_CUARTO": byName.get("cuarto") || null
+    "ZONE_PASILLO": byName.get("pasillo") || null,
+    "ZONE_FRED": byName.get("cuarto frederick") || byName.get("frederick") || null,
+    "ZONE_MATH": byName.get("cuarto mathias") || byName.get("mathias") || null,
+    "ZONE_MAIN": byName.get("cuarto principal") || byName.get("principal") || null
   };
   let changed = false;
   state.house.tasks.forEach(t=>{
@@ -351,14 +374,18 @@ function normalizeHouse(){
     if(typeof t.freqDays !== "number") t.freqDays = Number(t.freqDays)||0;
     if(typeof t.lastDone !== "string") t.lastDone = (t.lastDone||"");
     if(!t.type) t.type = "misc";
+    if(!t.level) t.level = ((t.type||"")==="deep") ? "deep" : "light";
+    if(typeof t.priority !== "number") t.priority = Number(t.priority)||0;
   });
   if(!state.house.subtab) state.house.subtab = "route";
+  if(!state.house.mode) state.house.mode = "light";
   if(changed) persist();
 }
 
 // ---- State ----
 let state = {
   tab: "home",
+  moreOpen: false,
   sheetOpen: (localStorage.getItem("mc_sheet_open")==="1"),
   routines: load(LS.routines, seedRoutines()),
   shopping: load(LS.shopping, seedShopping()),
@@ -400,7 +427,8 @@ function exportBackup(){
     musicLog: state.musicLog,
     sleepLog: state.sleepLog,
     budgetMonthly: state.budgetMonthly,
-    calDraw: state.calDraw
+    calDraw: state.calDraw,
+    house: state.house
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -423,6 +451,7 @@ function importBackup(file){
       const routines = Array.isArray(data.routines) ? data.routines : [];
       const shopping = Array.isArray(data.shopping) ? data.shopping : [];
       const reminders = Array.isArray(data.reminders) ? data.reminders : [];
+      const house = (data.house && typeof data.house === "object") ? data.house : null;
 
       routines.forEach(r=>{
         r.id ||= uid("r");
@@ -449,6 +478,7 @@ function importBackup(file){
       state.routines = routines;
       state.shopping = shopping;
       state.reminders = reminders;
+      if(house){ state.house = house; normalizeHouse(); }
 
       // Home widgets
       state.musicToday = (data.musicToday && typeof data.musicToday === "object") ? data.musicToday : load(LS.musicToday, null);
@@ -456,6 +486,7 @@ function importBackup(file){
       state.sleepLog = Array.isArray(data.sleepLog) ? data.sleepLog : load(LS.sleepLog, []);
       state.budgetMonthly = Array.isArray(data.budgetMonthly) ? data.budgetMonthly : load(LS.budgetMonthly, []);
       state.calDraw = (data.calDraw && typeof data.calDraw === "object") ? data.calDraw : load(LS.calDraw, {});
+      if(!house) state.house = load(LS.house, seedHouse());
       state.musicCursor = 0;
 
       persist();
@@ -477,17 +508,54 @@ function bottomNav(){
     </button>
   `;
 
+  const mkMore = () => `
+    <button class="bn ${(["reminders","calendar","learn","settings"].includes(state.tab) || state.moreOpen) ? "active" : ""}" data-more="1" aria-label="Más">
+      <div class="bnIcon">⋯</div>
+      <div class="bnLabel">Más</div>
+    </button>
+  `;
+
   return `
     <nav class="bottomNav" role="navigation" aria-label="MemoryCarl navigation">
       ${mk("home","🏠","Home")}
+      ${mk("house","🧹","Casa")}
       ${mk("routines","📝","Rutinas")}
       ${mk("shopping","🛒","Compras")}
-      ${mk("reminders","⏰","Reminders")}
-      ${mk("house","🧹","Casa")}
-      ${mk("calendar","📅","Calendario")}
-      ${mk("learn","🧠","Aprender")}
-      ${mk("settings","⚙️","Ajustes")}
+      ${mkMore()}
     </nav>
+  `;
+}
+
+function renderMoreModal(){
+  const mk = (tab, icon, label, sub) => `
+    <button class="item" data-more-tab="${escapeHtml(tab)}" style="justify-content:space-between;">
+      <div class="row" style="gap:10px;align-items:center;">
+        <div class="tag">${icon}</div>
+        <div>
+          <div style="font-weight:800;">${escapeHtml(label)}</div>
+          ${sub ? `<div class="muted" style="margin-top:2px;">${escapeHtml(sub)}</div>` : ``}
+        </div>
+      </div>
+      <div class="muted">›</div>
+    </button>
+  `;
+
+  return `
+    <div class="modalBackdrop" id="moreBackdrop" aria-label="Más">
+      <div class="modal">
+        <div class="row" style="justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;">Más</h2>
+          <button class="iconBtn" id="btnMoreClose">Cerrar</button>
+        </div>
+
+        <div class="list" style="margin-top:12px;">
+          ${mk("reminders","⏰","Reminders","Pendientes + notifs")}
+          ${mk("calendar","📅","Calendario","Dibuja X, notas")}
+          ${mk("learn","🧠","Aprender","Mini contenido")}
+          ${mk("settings","⚙️","Ajustes","Backup, sync, etc")}
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -537,13 +605,12 @@ function view(){
         </div>
       </section>` : ""}
 
-        <div class="muted" style="margin-top:8px;">Backup local (JSON). Útil antes de limpiar cache o cambiar de teléfono.</div>
-      </div>
-
       <div class="fab" id="fab">+</div>
       <div id="toastHost"></div>
 
       ${bottomNav()}
+
+      ${state.moreOpen ? renderMoreModal() : ""}
     </div>
   `;
 
@@ -552,13 +619,37 @@ function view(){
   if(state.tab==="settings"){
     initBottomSheet();
   }
-// Bottom nav wiring
-  root.querySelectorAll(".bn").forEach(btn=>{
+  // Bottom nav wiring
+  root.querySelectorAll(".bn[data-tab]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       state.tab = btn.dataset.tab;
+      state.moreOpen = false;
       view();
     });
   });
+
+  const moreBtn = root.querySelector('.bn[data-more="1"]');
+  if(moreBtn) moreBtn.addEventListener("click", ()=>{
+    state.moreOpen = true;
+    view();
+  });
+
+  const moreBackdrop = root.querySelector("#moreBackdrop");
+  if(moreBackdrop){
+    moreBackdrop.addEventListener("click", (e)=>{
+      if(e.target === moreBackdrop){ state.moreOpen = false; view(); }
+    });
+    const closeBtn = moreBackdrop.querySelector("#btnMoreClose");
+    if(closeBtn) closeBtn.addEventListener("click", ()=>{ state.moreOpen = false; view(); });
+    moreBackdrop.querySelectorAll("[data-more-tab]").forEach(x=>{
+      x.addEventListener("click", ()=>{
+        const t = x.getAttribute("data-more-tab") || "home";
+        state.moreOpen = false;
+        state.tab = t;
+        view();
+      });
+    });
+  }
 
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
@@ -568,6 +659,7 @@ function view(){
     if(state.tab==="routines") openRoutineModal();
     if(state.tab==="shopping") openShoppingModal();
     if(state.tab==="reminders") openReminderModal();
+		if(state.tab==="house") openHouseTaskModal();
 	    if(state.tab==="calendar") openCalendarDrawModal(isoDate(new Date()));
   });
 
@@ -1628,7 +1720,12 @@ function viewReminders(){
 function getHouseZonesSorted(){
   normalizeHouse();
   const zones = state.house.zones.slice();
-  zones.sort((a,b)=> (Number(a.order)||0) - (Number(b.order)||0));
+  zones.sort((a,b)=>{
+    const pa = Number(a.priority)||0;
+    const pb = Number(b.priority)||0;
+    if(pb !== pa) return pb - pa; // higher priority first
+    return (Number(a.order)||0) - (Number(b.order)||0);
+  });
   return zones;
 }
 function getHouseZoneName(zoneId){
@@ -1654,10 +1751,23 @@ function isTaskDue(task, todayStr){
 function getHouseDueTasks(todayStr){
   normalizeHouse();
   const all = state.house.tasks || [];
-  return all.filter(t=> isTaskDue(t, todayStr));
+  const mode = state.house.mode || "light";
+  return all
+    .filter(t=> isTaskDue(t, todayStr))
+    .filter(t=> mode==="deep" ? true : (t.level||"light")!=="deep");
 }
 function buildHouseRoute(todayStr){
   const due = getHouseDueTasks(todayStr);
+  const mode = state.house.mode || "light";
+
+  const overdueScore = (t)=>{
+    const f = Number(t.freqDays)||0;
+    const last = (t.lastDone||"").trim();
+    if(!f) return 0;
+    if(!last) return 999; // never done => very overdue
+    const d = daysBetween(last, todayStr) - f;
+    return d;
+  };
 
   // 1) Globals first
   const globals = due.filter(t=> (t.type||"") === "global" || !t.zoneId);
@@ -1669,14 +1779,34 @@ function buildHouseRoute(todayStr){
     return {zone:z, tasks:list};
   }).filter(b=>b.tasks.length>0);
 
-  // 3) Sort tasks inside zones: surface -> floor -> wet -> misc
-  const pri = {surface:1, misc:2, wet:3, floor:4};
+  // 3) Sort tasks inside zones
+  // In deep mode, we float deep-clean items earlier, but still keep a sensible flow.
+  const pri = mode==="deep"
+    ? {deep:1, surface:2, wet:3, organize:4, misc:5, floor:6}
+    : {surface:1, wet:2, organize:3, misc:4, floor:5, deep:9};
   zoneBuckets.forEach(b=>{
-    b.tasks.sort((a,b2)=> (pri[a.type]||9) - (pri[b2.type]||9));
+    b.tasks.sort((a,b2)=>{
+      const pa = (pri[a.type]||9) - (pri[b2.type]||9);
+      if(pa !== 0) return pa;
+      const oa = overdueScore(a);
+      const ob = overdueScore(b2);
+      if(ob !== oa) return ob - oa;
+      const ra = Number(a.priority)||0;
+      const rb = Number(b2.priority)||0;
+      if(rb !== ra) return rb - ra;
+      return (a.name||"").localeCompare(b2.name||"");
+    });
   });
 
   const steps = [];
-  globals.forEach(t=>{
+  globals
+    .slice()
+    .sort((a,b)=>{
+      const ob = overdueScore(b) - overdueScore(a);
+      if(ob !== 0) return ob;
+      return (Number(b.priority)||0) - (Number(a.priority)||0);
+    })
+    .forEach(t=>{
     steps.push({kind:"task", taskId:t.id, zoneId:null, text:t.name, minutes:Number(t.minutes)||0});
   });
   zoneBuckets.forEach(b=>{
@@ -1704,6 +1834,7 @@ function viewHouse(){
   normalizeHouse();
   const todayStr = isoDate(new Date());
   const sub = state.house.subtab || "route";
+  const mode = state.house.mode || "light";
   const sum = houseCardSummary(todayStr);
 
   const mkSeg = (key, label) => `
@@ -1713,6 +1844,7 @@ function viewHouse(){
   const route = buildHouseRoute(todayStr);
   const session = state.house.session || null;
   const hasSession = session && session.active && Array.isArray(session.route);
+  const prog = houseSessionProgress(todayStr);
 
   const totalRouteMins = route.reduce((s,st)=> s + (Number(st.minutes)||0), 0);
 
@@ -1739,7 +1871,7 @@ function viewHouse(){
             <div>
               <div class="muted">Hoy (${escapeHtml(todayStr)})</div>
               <div style="font-weight:700;font-size:18px;margin-top:2px;">Ruta óptima</div>
-              <div class="muted" style="margin-top:4px;">Orden: global → zonas (superficies → húmedo → piso)</div>
+              <div class="muted" style="margin-top:4px;">Modo: ${mode==="deep" ? "Profunda semanal" : "Ligera"} • Orden: global → zonas (prioridad + flujo)</div>
             </div>
             <div class="row">
               <button class="btn" id="btnHouseStart">${hasSession ? "Continuar" : "Iniciar"}</button>
@@ -1747,7 +1879,24 @@ function viewHouse(){
             </div>
           </div>
 
-          <div class="muted" style="margin-top:10px;">Tiempo estimado: ~${totalRouteMins} min</div>
+          <div class="row" style="justify-content:space-between;align-items:center;margin-top:10px;gap:10px;flex-wrap:wrap;">
+            <div class="seg" style="margin:0;">
+              <button class="segBtn ${mode==="light"?"active":""}" data-house-mode="light">Ligera</button>
+              <button class="segBtn ${mode==="deep"?"active":""}" data-house-mode="deep">Profunda</button>
+            </div>
+            <div class="muted">Tiempo estimado: ~${totalRouteMins} min</div>
+          </div>
+
+          ${prog ? `
+          <div style="margin-top:10px;">
+            <div class="row" style="justify-content:space-between;align-items:center;">
+              <div class="muted">Progreso sesión</div>
+              <div class="pill">${prog.done}/${prog.total} • ${prog.pct}%</div>
+            </div>
+            <div class="progress" aria-label="House progress">
+              <div class="progressBar" style="width:${prog.pct}%;"></div>
+            </div>
+          </div>` : ``}
 
           <div class="list" style="margin-top:12px;">
             ${route.map((st, i)=>{
@@ -1766,7 +1915,7 @@ function viewHouse(){
                     <input type="checkbox" data-house-done="${escapeHtml(st.taskId)}" ${done ? "checked":""}>
                     <div style="flex:1;">
                       <div style="font-weight:650;">${escapeHtml(st.text)}</div>
-                      <div class="muted" style="margin-top:2px;">${escapeHtml(getHouseZoneName(st.zoneId))} • ${Number(st.minutes)||0} min • cada ${Number(t.freqDays)||0} días</div>
+                      <div class="muted" style="margin-top:2px;">${escapeHtml(getHouseZoneName(st.zoneId))} • ${Number(st.minutes)||0} min • cada ${Number(t.freqDays)||0} días • ${escapeHtml((t.level||"light")==="deep"?"profunda":"ligera")} • pri ${Number(t.priority)||0}</div>
                     </div>
                     <button class="btn ghost" data-house-edit-task="${escapeHtml(st.taskId)}">Edit</button>
                   </label>
@@ -1795,7 +1944,7 @@ function viewHouse(){
               <div class="item">
                 <div style="flex:1;">
                   <div style="font-weight:650;">${escapeHtml(z.name)}</div>
-                  <div class="muted">Orden: ${Number(z.order)||0}</div>
+                  <div class="muted">Orden: ${Number(z.order)||0} • Priority: ${Number(z.priority)||0}</div>
                 </div>
                 <button class="btn ghost" data-house-edit-zone="${escapeHtml(z.id)}">Edit</button>
                 <button class="btn ghost" data-house-del-zone="${escapeHtml(z.id)}">Del</button>
@@ -1833,7 +1982,7 @@ function renderHouseTasksList(){
       <div class="item">
         <div style="flex:1;">
           <div style="font-weight:650;">${escapeHtml(t.name)}</div>
-          <div class="muted">${escapeHtml(getHouseZoneName(t.zoneId))} • ${Number(t.minutes)||0} min • cada ${Number(t.freqDays)||0} días</div>
+          <div class="muted">${escapeHtml(getHouseZoneName(t.zoneId))} • ${Number(t.minutes)||0} min • cada ${Number(t.freqDays)||0} días • ${escapeHtml((t.level||"light")==="deep"?"profunda":"ligera")} • pri ${Number(t.priority)||0}</div>
         </div>
         <button class="btn ghost" data-house-edit-task="${escapeHtml(t.id)}">Edit</button>
         <button class="btn ghost" data-house-del-task="${escapeHtml(t.id)}">Del</button>
@@ -1875,6 +2024,21 @@ function resetHouseSession(){
     view();
   }
 }
+
+function houseSessionProgress(todayStr){
+  const s = state.house.session;
+  if(!s || !s.active || !Array.isArray(s.route)) return null;
+  const taskSteps = s.route.filter(x=>x.kind==="task");
+  const total = taskSteps.length;
+  let done = 0;
+  taskSteps.forEach(st=>{
+    const t = (state.house.tasks||[]).find(x=>x.id===st.taskId);
+    if(t && !isTaskDue(t, todayStr)) done += 1;
+  });
+  const pct = total ? Math.round((done/total)*100) : 0;
+  return {done, total, pct};
+}
+
 function renderHouseSession(){
   const s = state.house.session;
   if(!s || !s.active) return "";
@@ -1929,17 +2093,20 @@ function openHouseZoneModal(editId=null){
     title: z ? "Edit zone" : "New zone",
     fields:[
       {key:"name", label:"Name", placeholder:"Ej: Cocina", value: z?.name || ""},
-      {key:"order", label:"Order (1..)", type:"number", placeholder:"1", value: (z?.order ?? (getHouseZonesSorted().length+1))}
+      {key:"order", label:"Order (1..)", type:"number", placeholder:"1", value: (z?.order ?? (getHouseZonesSorted().length+1))},
+      {key:"priority", label:"Priority (1..5)", type:"number", placeholder:"3", value: (z?.priority ?? 3)}
     ],
-    onSubmit: ({name, order})=>{
+    onSubmit: ({name, order, priority})=>{
       const n = (name||"").trim();
       const o = Number(order)||0;
+      const p = Math.min(5, Math.max(1, Number(priority)||3));
       if(!n){ toast("Pon un nombre"); return; }
       if(z){
         z.name = n;
         z.order = o || z.order || 0;
+        z.priority = p;
       }else{
-        state.house.zones.push({ id: uid("z"), name:n, order:o || (state.house.zones.length+1) });
+        state.house.zones.push({ id: uid("z"), name:n, order:o || (state.house.zones.length+1), priority:p });
       }
       persist(); view(); toast("Zona guardada ✅");
     }
@@ -1965,6 +2132,8 @@ function openHouseTaskModal(editId=null){
     ["surface","Superficies"],
     ["wet","Húmedo"],
     ["floor","Piso"],
+    ["organize","Organizar"],
+    ["deep","Deep"],
     ["misc","Misc"]
   ].map(([v,l])=>`<option value="${escapeHtml(v)}">${escapeHtml(l)}</option>`).join("");
 
@@ -1993,6 +2162,17 @@ function openHouseTaskModal(editId=null){
           <div class="muted" style="margin:2px 0 6px;">Frecuencia (días)</div>
           <input class="input" id="htFreq" type="number" value="${escapeHtml(String(t?.freqDays ?? 7))}">
         </div>
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Nivel</div>
+          <select class="input" id="htLevel">
+            <option value="light">Ligera</option>
+            <option value="deep">Profunda</option>
+          </select>
+        </div>
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Priority (1..5)</div>
+          <input class="input" id="htPri" type="number" value="${escapeHtml(String(t?.priority ?? 3))}">
+        </div>
       </div>
 
       <div class="row" style="margin-top:12px;">
@@ -2009,8 +2189,11 @@ function openHouseTaskModal(editId=null){
 
   const zoneSel = b.querySelector("#htZone");
   const typeSel = b.querySelector("#htType");
+  const lvlSel = b.querySelector("#htLevel");
   zoneSel.value = t?.zoneId || "";
   typeSel.value = t?.type || (t?.zoneId ? "surface" : "global");
+  lvlSel.value = t?.level || ((t?.type||"")==="deep" ? "deep" : "light");
+  b.querySelector("#htPri").value = String(t?.priority ?? 3);
 
   b.querySelector('[data-m="cancel"]').addEventListener("click", close);
   b.querySelector('[data-m="save"]').addEventListener("click", ()=>{
@@ -2019,14 +2202,21 @@ function openHouseTaskModal(editId=null){
     const type = (typeSel.value||"").trim() || "misc";
     const minutes = Number((b.querySelector("#htMin").value||"").trim()) || 0;
     const freqDays = Number((b.querySelector("#htFreq").value||"").trim()) || 0;
+    const level = (lvlSel.value||"light").trim() || "light";
+    const priority = Math.min(5, Math.max(1, Number((b.querySelector("#htPri").value||"").trim()) || 3));
 
     if(!name){ toast("Pon un nombre"); return; }
     if(minutes<0 || freqDays<0){ toast("Valores inválidos"); return; }
 
+    // If type=global, force zoneId null
+    const finalZoneId = (type==="global") ? null : zoneId;
+    const finalLevel = (type==="deep") ? "deep" : level;
+
     if(t){
-      t.name = name; t.zoneId = zoneId; t.type = type; t.minutes = minutes; t.freqDays = freqDays;
+      t.name = name; t.zoneId = finalZoneId; t.type = type; t.minutes = minutes; t.freqDays = freqDays;
+      t.level = finalLevel; t.priority = priority;
     }else{
-      state.house.tasks.push({ id: uid("t"), name, zoneId, type, minutes, freqDays, lastDone:"" });
+      state.house.tasks.push({ id: uid("t"), name, zoneId: finalZoneId, type, minutes, freqDays, level: finalLevel, priority, lastDone:"" });
     }
     persist(); view(); toast("Tarea guardada ✅");
     close();
@@ -2060,6 +2250,20 @@ function deleteHouseTask(taskId){
 
 function wireHouse(root){
   normalizeHouse();
+
+  // mode switch (light vs deep)
+  root.querySelectorAll("[data-house-mode]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const m = btn.getAttribute("data-house-mode") || "light";
+      state.house.mode = (m==="deep") ? "deep" : "light";
+      // Changing mode changes the route, so end any active session
+      if(state.house.session && state.house.session.active){
+        state.house.session.active = false;
+      }
+      persist();
+      view();
+    });
+  });
 
   // subtab switch
   root.querySelectorAll("[data-house-sub]").forEach(btn=>{

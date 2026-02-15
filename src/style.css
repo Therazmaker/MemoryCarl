@@ -281,6 +281,21 @@ body{
 }
 .bn.active .bnIcon{ filter:drop-shadow(0 6px 18px rgba(124,92,255,.22)); }
 
+/* Progress bar (House, etc.) */
+.progress{
+  height:10px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  background:rgba(255,255,255,.05);
+  overflow:hidden;
+  margin-top:8px;
+}
+.progressBar{
+  height:100%;
+  background:rgba(124,92,255,.55);
+  width:0;
+}
+
 
 /* ===== Home widgets ===== */
 
