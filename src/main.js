@@ -106,7 +106,8 @@ const LS = {
   musicToday: "memorycarl_v2_music_today",
   musicLog: "memorycarl_v2_music_log",
   sleepLog: "memorycarl_v2_sleep_log", // reserved (connect later)
-  budgetMonthly: "memorycarl_v2_budget_monthly"
+  budgetMonthly: "memorycarl_v2_budget_monthly",
+  calDraw: "memorycarl_v2_cal_draw"
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -301,6 +302,9 @@ let state = {
   musicToday: load(LS.musicToday, null),
   musicLog: load(LS.musicLog, []),
   sleepLog: load(LS.sleepLog, []),
+  budgetMonthly: load(LS.budgetMonthly, []),
+  calDraw: load(LS.calDraw, {}),
+  calMonthOffset: 0,
   musicCursor: 0,
 };
 
@@ -312,6 +316,7 @@ function persist(){
   save(LS.musicLog, state.musicLog);
   save(LS.sleepLog, state.sleepLog);
   save(LS.budgetMonthly, state.budgetMonthly);
+  save(LS.calDraw, state.calDraw);
 }
 
 // ---- Backup (Export/Import) ----
@@ -324,7 +329,9 @@ function exportBackup(){
     reminders: state.reminders,
     musicToday: state.musicToday,
     musicLog: state.musicLog,
-    sleepLog: state.sleepLog
+    sleepLog: state.sleepLog,
+    budgetMonthly: state.budgetMonthly,
+    calDraw: state.calDraw
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -379,6 +386,7 @@ function importBackup(file){
       state.musicLog = Array.isArray(data.musicLog) ? data.musicLog : load(LS.musicLog, []);
       state.sleepLog = Array.isArray(data.sleepLog) ? data.sleepLog : load(LS.sleepLog, []);
       state.budgetMonthly = Array.isArray(data.budgetMonthly) ? data.budgetMonthly : load(LS.budgetMonthly, []);
+      state.calDraw = (data.calDraw && typeof data.calDraw === "object") ? data.calDraw : load(LS.calDraw, {});
       state.musicCursor = 0;
 
       persist();
@@ -406,6 +414,7 @@ function bottomNav(){
       ${mk("routines","📝","Rutinas")}
       ${mk("shopping","🛒","Compras")}
       ${mk("reminders","⏰","Reminders")}
+      ${mk("calendar","📅","Calendario")}
       ${mk("learn","🧠","Aprender")}
       ${mk("settings","⚙️","Ajustes")}
     </nav>
@@ -428,6 +437,7 @@ function view(){
         ${state.tab==="routines" ? viewRoutines() : ""}
         ${state.tab==="shopping" ? viewShopping() : ""}
         ${state.tab==="reminders" ? viewReminders() : ""}
+        ${state.tab==="calendar" ? viewCalendar() : ""}
         ${state.tab==="learn" ? viewLearn() : ""}
         ${state.tab==="settings" ? viewSettings() : ""}
       </main>
@@ -487,6 +497,7 @@ function view(){
     if(state.tab==="routines") openRoutineModal();
     if(state.tab==="shopping") openShoppingModal();
     if(state.tab==="reminders") openReminderModal();
+	    if(state.tab==="calendar") openCalendarDrawModal(isoDate(new Date()));
   });
 
   const btnExport = root.querySelector("#btnExport");
@@ -507,6 +518,7 @@ function view(){
 
   wireActions(root);
   if(state.tab==="home") wireHome(root);
+	  if(state.tab==="calendar") wireCalendar(root);
 }
 
 
@@ -899,6 +911,9 @@ const sleepBars = renderSleepBars(sleepSeries);
       ${renderBudgetMonthly()}
     </section>
 
+  `;
+}
+
 function normalizeMoney(v){
   const n = Number(String(v||"").replace(/[^0-9.,-]/g,"").replace(",", "."));
   return Number.isFinite(n) ? n : 0;
@@ -1015,12 +1030,6 @@ function openBudgetModal(){
     close();
   });
 }
-
-
-
-  `;
-}
-
 
 function openSleepModal(){
   const host = document.querySelector("#app");
@@ -1371,6 +1380,21 @@ function wireHome(root){
 
 
 }
+
+function wireCalendar(root){
+  const prev = root.querySelector("#calPrev");
+  const next = root.querySelector("#calNext");
+  if(prev) prev.addEventListener("click", ()=>{ state.calMonthOffset = (state.calMonthOffset||0) - 1; view(); });
+  if(next) next.addEventListener("click", ()=>{ state.calMonthOffset = (state.calMonthOffset||0) + 1; view(); });
+
+  root.querySelectorAll("[data-cal-day]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const iso = btn.dataset.calDay;
+      if(!iso) return;
+      openCalendarDrawModal(iso);
+    });
+  });
+}
 // ---- END HOME ----
 
 function viewRoutines(){
@@ -1525,6 +1549,181 @@ function viewReminders(){
       </section>
     `).join("")}
   `;
+}
+
+// ---- Calendar (big canvas + mini preview) ----
+function viewCalendar(){
+  const base = new Date();
+  const d = new Date(base.getFullYear(), base.getMonth() + (state.calMonthOffset||0), 1);
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const monthName = d.toLocaleDateString("es-PE", { month:"long", year:"numeric" });
+
+  // Sunday-first grid
+  const firstDow = new Date(y, m, 1).getDay(); // 0=Sun
+  const start = new Date(y, m, 1);
+  start.setDate(1 - firstDow);
+
+  const cells = Array.from({length:42}, (_,i)=>{
+    const cd = new Date(start);
+    cd.setDate(start.getDate()+i);
+    const iso = isoDate(cd);
+    const inMonth = cd.getMonth()===m;
+    const dayNum = cd.getDate();
+    const preview = (state.calDraw && state.calDraw[iso]) ? state.calDraw[iso] : "";
+    return { iso, inMonth, dayNum, preview };
+  });
+
+  const dow = ["D","L","M","M","J","V","S"].map(x=>`<div class="calDow">${x}</div>`).join("");
+  const grid = cells.map(c=>`
+    <button class="calCell ${c.inMonth?"":"out"}" data-cal-day="${escapeHtml(c.iso)}" aria-label="${escapeHtml(c.iso)}">
+      <div class="calNum">${c.inMonth ? c.dayNum : ""}</div>
+      ${c.preview ? `<img class="calPreview" src="${escapeHtml(c.preview)}" alt="" loading="lazy" />` : ""}
+    </button>
+  `).join("");
+
+  return `
+    <div class="sectionTitle">
+      <div>Calendario</div>
+      <div class="chip">dibuja encima ✍️</div>
+    </div>
+
+    <section class="card">
+      <div class="calTop">
+        <button class="iconBtn" id="calPrev" aria-label="Prev month">⟵</button>
+        <div class="calMonth">${escapeHtml(monthName.charAt(0).toUpperCase()+monthName.slice(1))}</div>
+        <button class="iconBtn" id="calNext" aria-label="Next month">⟶</button>
+      </div>
+      <div class="calDowRow">${dow}</div>
+      <div class="calGrid">${grid}</div>
+      <div class="muted" style="margin-top:10px;">Tip: toca un día para abrir el canvas grande. Luego verás el preview mini en la celda.</div>
+    </section>
+  `;
+}
+
+function openCalendarDrawModal(dateIso){
+  const host = document.querySelector("#app");
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+
+  modal.innerHTML = `
+    <div class="modal modalWide" role="dialog" aria-label="Dibujo del día">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">${escapeHtml(dateIso)}</div>
+          <div class="modalSub">Dibuja con el dedo. Guarda y verás un preview mini en el calendario.</div>
+        </div>
+        <button class="iconBtn" id="btnCloseCal" aria-label="Close">✕</button>
+      </div>
+
+      <div class="calCanvasWrap">
+        <canvas id="calCanvas" width="900" height="900"></canvas>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button class="btn" id="btnCalClear">Borrar</button>
+        <button class="btn" id="btnCalX">X roja</button>
+        <div style="flex:1"></div>
+        <button class="btn primary" id="btnCalSave">Guardar</button>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(modal);
+
+  const canvas = modal.querySelector("#calCanvas");
+  const ctx = canvas.getContext("2d");
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  // Fit canvas visually
+  const fit = ()=>{
+    const wrap = modal.querySelector(".calCanvasWrap");
+    const w = wrap.clientWidth;
+    canvas.style.width = w + "px";
+    canvas.style.height = w + "px";
+  };
+  fit();
+  window.addEventListener("resize", fit);
+
+  // Load existing drawing
+  const existing = (state.calDraw && state.calDraw[dateIso]) ? state.calDraw[dateIso] : "";
+  if(existing){
+    const img = new Image();
+    img.onload = ()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height); };
+    img.src = existing;
+  } else {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+  }
+
+  let drawing = false;
+  let last = null;
+  const stroke = {
+    color: "#ff3b30",
+    w: 10
+  };
+
+  function pos(e){
+    const r = canvas.getBoundingClientRect();
+    // scale to internal canvas pixels
+    const sx = canvas.width / r.width;
+    const sy = canvas.height / r.height;
+    return [(e.clientX - r.left) * sx, (e.clientY - r.top) * sy];
+  }
+
+  canvas.addEventListener("pointerdown", (e)=>{
+    drawing = true;
+    canvas.setPointerCapture(e.pointerId);
+    last = pos(e);
+  });
+  canvas.addEventListener("pointermove", (e)=>{
+    if(!drawing) return;
+    const p = pos(e);
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = stroke.w;
+    ctx.beginPath();
+    ctx.moveTo(last[0], last[1]);
+    ctx.lineTo(p[0], p[1]);
+    ctx.stroke();
+    last = p;
+  });
+  function end(){ drawing = false; last = null; }
+  canvas.addEventListener("pointerup", end);
+  canvas.addEventListener("pointercancel", end);
+
+  modal.querySelector("#btnCloseCal").addEventListener("click", ()=>{ window.removeEventListener("resize", fit); modal.remove(); });
+  modal.addEventListener("click", (e)=>{ if(e.target===modal){ window.removeEventListener("resize", fit); modal.remove(); }});
+
+  modal.querySelector("#btnCalClear").addEventListener("click", ()=>{
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+  });
+
+  modal.querySelector("#btnCalX").addEventListener("click", ()=>{
+    ctx.strokeStyle = "#ff3b30";
+    ctx.lineWidth = 18;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width*0.2, canvas.height*0.2);
+    ctx.lineTo(canvas.width*0.8, canvas.height*0.8);
+    ctx.moveTo(canvas.width*0.8, canvas.height*0.2);
+    ctx.lineTo(canvas.width*0.2, canvas.height*0.8);
+    ctx.stroke();
+  });
+
+  modal.querySelector("#btnCalSave").addEventListener("click", ()=>{
+    try{
+      const dataUrl = canvas.toDataURL("image/png");
+      state.calDraw ||= {};
+      state.calDraw[dateIso] = dataUrl;
+      persist();
+      view();
+      toast("Guardado ✅");
+      window.removeEventListener("resize", fit);
+      modal.remove();
+    }catch(e){
+      console.warn(e);
+      toast("No se pudo guardar ❌");
+    }
+  });
 }
 
 function wireActions(root){
