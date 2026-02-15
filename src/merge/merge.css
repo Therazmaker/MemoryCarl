@@ -63,3 +63,5 @@
 .mcMergeOverTitle{ font-size:22px; font-weight:900; }
 .mcMergeOverSub{ margin-top:6px; color:rgba(255,255,255,0.75); }
 .mcMergeOverBtns{ margin-top:14px; display:flex; gap:10px; justify-content:flex-end; }
+
+#mergeContainer canvas{ display:block; }

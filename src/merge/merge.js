@@ -10,19 +10,64 @@
   let width = 0, height = 0;
   let startedAt = 0;
 
-  const TYPES = [
-    { radius: 22, color: "#6EE7B7", points: 1 },
-    { radius: 28, color: "#60A5FA", points: 2 },
-    { radius: 34, color: "#F472B6", points: 4 },
-    { radius: 42, color: "#F59E0B", points: 8 },
-    { radius: 52, color: "#A78BFA", points: 16 },
-    { radius: 64, color: "#FB7185", points: 32 }
+  // Configurable (loaded from merge_config.json)
+  let CFG = null;
+  let ITEMS = null;
+  let SPAWN_POOL = 4;
+  let BG_URL = null;
+  let IMG_CACHE = new Map();
+
+  const DEFAULT_ITEMS = [
+    { id:"d0", radius: 22, color:"#6EE7B7", points:1 },
+    { id:"d1", radius: 28, color:"#60A5FA", points:2 },
+    { id:"d2", radius: 34, color:"#F472B6", points:4 },
+    { id:"d3", radius: 42, color:"#F59E0B", points:8 },
+    { id:"d4", radius: 52, color:"#A78BFA", points:16 },
+    { id:"d5", radius: 64, color:"#FB7185", points:32 }
   ];
 
   const LIMIT_Y = 120;     // y (px) from top: danger line
   const START_Y = 90;      // spawn y
   const GRACE_MS = 1300;   // ignore gameover checks right after start/spawn
   const STILL_V = 0.18;    // considered "still" (velocity threshold)
+
+  async function loadConfig(){
+    if(CFG) return CFG;
+    try{
+      const res = await fetch("./src/merge/merge_config.json", { cache: "no-store" });
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      CFG = await res.json();
+      SPAWN_POOL = Math.max(1, Math.min((CFG.spawnPool ?? 4), (CFG.items?.length ?? 6)));
+      BG_URL = CFG.background || null;
+      ITEMS = (CFG.items && CFG.items.length) ? CFG.items : DEFAULT_ITEMS;
+      return CFG;
+    }catch(err){
+      console.warn("Merge config not loaded, using defaults.", err);
+      SPAWN_POOL = 4;
+      BG_URL = null;
+      ITEMS = DEFAULT_ITEMS;
+      CFG = { spawnPool: SPAWN_POOL, background: null, items: ITEMS };
+      return CFG;
+    }
+  }
+
+  function preloadImage(url){
+    return new Promise((resolve, reject)=>{
+      if(!url) return resolve(null);
+      if(IMG_CACHE.has(url)) return resolve(IMG_CACHE.get(url));
+      const img = new Image();
+      img.onload = ()=>{ IMG_CACHE.set(url, img); resolve(img); };
+      img.onerror = (e)=>{ console.warn("Failed to load sprite", url); resolve(null); };
+      img.src = url;
+    });
+  }
+
+  async function preloadSprites(){
+    if(!ITEMS) return;
+    const urls = ITEMS.map(it => it.sprite).filter(Boolean);
+    await Promise.all(urls.map(preloadImage));
+    if(BG_URL) await preloadImage(BG_URL);
+  }
 
   function ensureHud(container){
     if(hudEl) return;
@@ -53,23 +98,38 @@
     if(el) el.textContent = String(score);
   }
 
-  function initMergeGame(containerId){
+  function setBackground(container){
+    if(BG_URL){
+      container.style.backgroundImage = `url(${BG_URL})`;
+      container.style.backgroundSize = "cover";
+      container.style.backgroundPosition = "center";
+      container.style.backgroundRepeat = "no-repeat";
+    }else{
+      container.style.backgroundImage = "none";
+      container.style.background = "#0B0F19";
+    }
+  }
+
+  async function initMergeGame(containerId){
     if(!window.Matter){
       console.error("Matter.js not found. Check index.html script order.");
       return;
     }
 
     const { Engine, Render, Runner, Bodies, Composite, Events } = Matter;
-
     const container = document.getElementById(containerId);
     if(!container){
       console.error("merge container not found:", containerId);
       return;
     }
 
+    // Load config and assets first
+    await loadConfig();
+    await preloadSprites();
+
     // Reset container
     container.innerHTML = "";
-    container.style.background = "#0B0F19";
+    setBackground(container);
 
     ensureHud(container);
     setScore(0);
@@ -90,15 +150,15 @@
         width,
         height,
         wireframes: false,
-        background: "#0B0F19",
+        background: "rgba(0,0,0,0)", // let background image show
         pixelRatio: Math.min(2, window.devicePixelRatio || 1)
       }
     });
 
     // Arena
-    const ground = Bodies.rectangle(width/2, height+30, width, 60, { isStatic: true, render:{fillStyle:"#111827"} });
-    const leftWall = Bodies.rectangle(-30, height/2, 60, height, { isStatic: true, render:{fillStyle:"#111827"} });
-    const rightWall = Bodies.rectangle(width+30, height/2, 60, height, { isStatic: true, render:{fillStyle:"#111827"} });
+    const ground = Bodies.rectangle(width/2, height+30, width, 60, { isStatic: true, render:{fillStyle:"rgba(17,24,39,0.85)"} });
+    const leftWall = Bodies.rectangle(-30, height/2, 60, height, { isStatic: true, render:{fillStyle:"rgba(17,24,39,0.85)"} });
+    const rightWall = Bodies.rectangle(width+30, height/2, 60, height, { isStatic: true, render:{fillStyle:"rgba(17,24,39,0.85)"} });
 
     // Visual limit line (sensor)
     const limitLine = Bodies.rectangle(width/2, LIMIT_Y, width, 4, {
@@ -134,7 +194,6 @@
         const b = pair.bodyB;
 
         if(a.label === "mergeItem" && b.label === "mergeItem" && a.typeIndex === b.typeIndex){
-          // avoid double merge same tick
           if(a._merging || b._merging) continue;
           a._merging = b._merging = true;
           mergeBodies(a, b);
@@ -150,60 +209,88 @@
     }, 250);
   }
 
+  function itemByIndex(i){
+    if(!ITEMS) ITEMS = DEFAULT_ITEMS;
+    return ITEMS[Math.max(0, Math.min(i, ITEMS.length-1))];
+  }
+
+  function applySpriteRender(body, item){
+    if(item.sprite && IMG_CACHE.has(item.sprite)){
+      const img = IMG_CACHE.get(item.sprite);
+      // Scale sprite so its visible size matches diameter (2r)
+      const target = (item.radius * 2);
+      const sx = target / (img.naturalWidth || img.width || 512);
+      const sy = target / (img.naturalHeight || img.height || 512);
+      body.render.sprite = {
+        texture: item.sprite,
+        xScale: sx,
+        yScale: sy
+      };
+      // Hide fill so sprite is clean
+      body.render.fillStyle = "rgba(0,0,0,0)";
+    }else if(item.color){
+      body.render.fillStyle = item.color;
+    }
+  }
+
   function spawnItem(x){
     const { Bodies, Composite } = Matter;
 
-    const type = TYPES[currentType];
-    const body = Bodies.circle(x, START_Y, type.radius, {
+    const item = itemByIndex(currentType);
+    const body = Bodies.circle(x, START_Y, item.radius, {
       restitution: 0.2,
       friction: 0.3,
       frictionAir: 0.002,
-      render: { fillStyle: type.color },
+      render: { fillStyle: item.color || "#6EE7B7" },
       label: "mergeItem"
     });
     body.typeIndex = currentType;
     body._spawnedAt = Date.now();
 
+    applySpriteRender(body, item);
+
     Composite.add(engine.world, body);
 
-    // Next: bias to small pieces
-    currentType = Math.random() < 0.7 ? 0 : 1;
+    // Next: random only from first SPAWN_POOL items
+    currentType = Math.floor(Math.random() * SPAWN_POOL);
   }
 
   function mergeBodies(a, b){
     if(gameOverState) return;
 
     const { Composite, Bodies } = Matter;
-
     const idx = a.typeIndex || 0;
-    if(idx >= TYPES.length-1){
+
+    if(idx >= (ITEMS.length-1)){
       a._merging = b._merging = false;
       return;
     }
 
     const newIndex = idx + 1;
-    const newType = TYPES[newIndex];
+    const item = itemByIndex(newIndex);
 
     const newBody = Bodies.circle(
       (a.position.x + b.position.x)/2,
       (a.position.y + b.position.y)/2,
-      newType.radius,
+      item.radius,
       {
         restitution: 0.2,
         friction: 0.3,
         frictionAir: 0.002,
-        render: { fillStyle: newType.color },
+        render: { fillStyle: item.color || "#A78BFA" },
         label: "mergeItem"
       }
     );
     newBody.typeIndex = newIndex;
     newBody._spawnedAt = Date.now();
 
+    applySpriteRender(newBody, item);
+
     Composite.remove(engine.world, a);
     Composite.remove(engine.world, b);
     Composite.add(engine.world, newBody);
 
-    setScore(score + newType.points);
+    setScore(score + (item.points || 1));
   }
 
   function isStill(body){
@@ -216,18 +303,14 @@
     if(gameOverState) return;
 
     const now = Date.now();
-    if(now - startedAt < GRACE_MS) return; // global grace
+    if(now - startedAt < GRACE_MS) return;
 
     const bodies = Matter.Composite.allBodies(engine.world);
     for(const body of bodies){
       if(body.label === "mergeItem"){
-        // per-body grace
         if(body._spawnedAt && (now - body._spawnedAt < GRACE_MS)) continue;
 
-        // "Top" of circle crossing the line (more accurate)
         const topY = body.position.y - (body.circleRadius || 0);
-
-        // Only lose if it's ABOVE the line AND it's settled (not falling through)
         if(topY < LIMIT_Y && isStill(body)){
           triggerGameOver();
           break;

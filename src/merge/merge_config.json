@@ -1,0 +1,42 @@
+{
+  "background": "./src/merge/assets/bg.png",
+  "spawnPool": 4,
+  "items": [
+    {
+      "id": "item_0",
+      "radius": 22,
+      "sprite": "./src/merge/assets/item_0.png",
+      "points": 1
+    },
+    {
+      "id": "item_1",
+      "radius": 28,
+      "sprite": "./src/merge/assets/item_1.png",
+      "points": 2
+    },
+    {
+      "id": "item_2",
+      "radius": 34,
+      "sprite": "./src/merge/assets/item_2.png",
+      "points": 4
+    },
+    {
+      "id": "item_3",
+      "radius": 42,
+      "sprite": "./src/merge/assets/item_3.png",
+      "points": 8
+    },
+    {
+      "id": "item_4",
+      "radius": 52,
+      "sprite": "./src/merge/assets/item_4.png",
+      "points": 16
+    },
+    {
+      "id": "item_5",
+      "radius": 64,
+      "sprite": "./src/merge/assets/item_5.png",
+      "points": 32
+    }
+  ]
+}
