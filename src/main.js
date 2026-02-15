@@ -1,4 +1,3 @@
-import { openMergeGame, closeMergeGame } from "./merge/merge.js";
 console.log("MemoryCarl loaded");
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
 // 1) Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates -> Generate key pair
@@ -4408,3 +4407,52 @@ view = function(){
     console.warn("Dashboard chart render failed", e);
   }
 };
+
+
+// ====================== MERGE GAME INTEGRATION ======================
+
+function openMergeGameFull(){
+  const container = document.getElementById("mergeContainer");
+  if(!container) return;
+
+  container.style.display = "block";
+  container.style.position = "fixed";
+  container.style.inset = "0";
+  container.style.background = "#111";
+  container.style.zIndex = "9999";
+
+  if(typeof initMergeGame === "function"){
+    initMergeGame("mergeContainer");
+  }
+
+  document.addEventListener("keydown", escCloseMerge);
+}
+
+function escCloseMerge(e){
+  if(e.key === "Escape"){
+    closeMergeGameFull();
+  }
+}
+
+function closeMergeGameFull(){
+  const container = document.getElementById("mergeContainer");
+  if(!container) return;
+
+  container.innerHTML = "";
+  container.style.display = "none";
+
+  document.removeEventListener("keydown", escCloseMerge);
+}
+
+// Global click delegation (no need to edit wireHome)
+document.addEventListener("click", function(e){
+  const btn = e.target.closest("#btnOpenMergeGame");
+  if(btn){
+    openMergeGameFull();
+  }
+});
+
+window.openMergeGameFull = openMergeGameFull;
+
+// ====================== END MERGE GAME ======================
+
