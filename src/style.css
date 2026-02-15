@@ -523,3 +523,13 @@ body{
 @media(max-width:520px){.calSize input[type="range"]{width:110px}}
 .modalWide{max-width:520px}
 #calCanvas{display:block;touch-action:none}
+
+
+/* Casa (House) */
+.seg{display:flex;gap:8px;padding:6px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.03)}
+.segBtn{flex:1;padding:10px 12px;border-radius:12px;border:1px solid transparent;background:transparent;color:var(--text);font-weight:800;cursor:pointer}
+.segBtn.active{background:rgba(124,92,255,.18);border-color:rgba(124,92,255,.35)}
+.tag{display:inline-flex;align-items:center;gap:8px;padding:7px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.04);font-size:12px;color:var(--muted);font-weight:800}
+.divider{height:1px;background:var(--line)}
+.progress{height:10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.03);overflow:hidden}
+.progressBar{height:100%;background:rgba(124,92,255,.55)}

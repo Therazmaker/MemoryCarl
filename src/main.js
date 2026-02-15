@@ -107,7 +107,8 @@ const LS = {
   musicLog: "memorycarl_v2_music_log",
   sleepLog: "memorycarl_v2_sleep_log", // reserved (connect later)
   budgetMonthly: "memorycarl_v2_budget_monthly",
-  calDraw: "memorycarl_v2_cal_draw"
+  calDraw: "memorycarl_v2_cal_draw",
+  house: "memorycarl_v2_house"
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -291,6 +292,70 @@ function seedReminders(){
   return [{ id: uid("m"), text:"Email: follow up", done:false }];
 }
 
+function seedHouse(){
+  // Minimal default so you can start immediately (edit to match your home)
+  return {
+    zones: [
+      { id: uid("z"), name: "Sala", order: 1 },
+      { id: uid("z"), name: "Cocina", order: 2 },
+      { id: uid("z"), name: "Baño", order: 3 },
+      { id: uid("z"), name: "Cuarto", order: 4 },
+    ],
+    tasks: [
+      // Global-ish / quick wins (we attach to a zone but type="global" helps route grouping)
+      { id: uid("t"), zoneId: null, name: "Recolectar basura (toda la casa)", minutes: 5, freqDays: 2, type: "global", lastDone: "" },
+      { id: uid("t"), zoneId: null, name: "Recoger ropa/objetos fuera de lugar", minutes: 8, freqDays: 3, type: "global", lastDone: "" },
+
+      // Zona: Sala
+      { id: uid("t"), zoneId: "ZONE_SALA", name: "Superficies (mesa/TV/estantes)", minutes: 8, freqDays: 4, type: "surface", lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_SALA", name: "Piso (barrer/aspirar)", minutes: 8, freqDays: 5, type: "floor", lastDone: "" },
+
+      // Zona: Cocina
+      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Encimera + fregadero", minutes: 8, freqDays: 2, type: "surface", lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Piso (barrer/trapear)", minutes: 10, freqDays: 4, type: "floor", lastDone: "" },
+
+      // Zona: Baño
+      { id: uid("t"), zoneId: "ZONE_BANO", name: "Lavamanos + espejo", minutes: 6, freqDays: 4, type: "wet", lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BANO", name: "Inodoro", minutes: 6, freqDays: 4, type: "wet", lastDone: "" },
+
+      // Zona: Cuarto
+      { id: uid("t"), zoneId: "ZONE_CUARTO", name: "Tender cama", minutes: 3, freqDays: 1, type: "surface", lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_CUARTO", name: "Piso (barrer/aspirar)", minutes: 7, freqDays: 7, type: "floor", lastDone: "" },
+    ],
+    // UI state
+    subtab: "route" // "route" | "manage"
+  };
+}
+
+function normalizeHouse(){
+  // Ensures house data has required shapes and maps seed placeholder zone ids
+  if(!state.house || typeof state.house !== "object") state.house = seedHouse();
+  state.house.zones = Array.isArray(state.house.zones) ? state.house.zones : [];
+  state.house.tasks = Array.isArray(state.house.tasks) ? state.house.tasks : [];
+
+  // If tasks still reference placeholders, map them once.
+  const byName = new Map(state.house.zones.map(z=>[z.name.toLowerCase(), z.id]));
+  const map = {
+    "ZONE_SALA": byName.get("sala") || null,
+    "ZONE_COCINA": byName.get("cocina") || null,
+    "ZONE_BANO": byName.get("baño") || byName.get("bano") || null,
+    "ZONE_CUARTO": byName.get("cuarto") || null
+  };
+  let changed = false;
+  state.house.tasks.forEach(t=>{
+    if(typeof t.zoneId === "string" && map[t.zoneId]){
+      t.zoneId = map[t.zoneId];
+      changed = true;
+    }
+    if(typeof t.minutes !== "number") t.minutes = Number(t.minutes)||0;
+    if(typeof t.freqDays !== "number") t.freqDays = Number(t.freqDays)||0;
+    if(typeof t.lastDone !== "string") t.lastDone = (t.lastDone||"");
+    if(!t.type) t.type = "misc";
+  });
+  if(!state.house.subtab) state.house.subtab = "route";
+  if(changed) persist();
+}
+
 // ---- State ----
 let state = {
   tab: "home",
@@ -304,9 +369,12 @@ let state = {
   sleepLog: load(LS.sleepLog, []),
   budgetMonthly: load(LS.budgetMonthly, []),
   calDraw: load(LS.calDraw, {}),
+  house: load(LS.house, seedHouse()),
   calMonthOffset: 0,
   musicCursor: 0,
 };
+
+normalizeHouse();
 
 function persist(){
   save(LS.routines, state.routines);
@@ -317,6 +385,7 @@ function persist(){
   save(LS.sleepLog, state.sleepLog);
   save(LS.budgetMonthly, state.budgetMonthly);
   save(LS.calDraw, state.calDraw);
+  save(LS.house, state.house);
 }
 
 // ---- Backup (Export/Import) ----
@@ -414,6 +483,7 @@ function bottomNav(){
       ${mk("routines","📝","Rutinas")}
       ${mk("shopping","🛒","Compras")}
       ${mk("reminders","⏰","Reminders")}
+      ${mk("house","🧹","Casa")}
       ${mk("calendar","📅","Calendario")}
       ${mk("learn","🧠","Aprender")}
       ${mk("settings","⚙️","Ajustes")}
@@ -437,6 +507,7 @@ function view(){
         ${state.tab==="routines" ? viewRoutines() : ""}
         ${state.tab==="shopping" ? viewShopping() : ""}
         ${state.tab==="reminders" ? viewReminders() : ""}
+        ${state.tab==="house" ? viewHouse() : ""}
         ${state.tab==="calendar" ? viewCalendar() : ""}
         ${state.tab==="learn" ? viewLearn() : ""}
         ${state.tab==="settings" ? viewSettings() : ""}
@@ -518,6 +589,7 @@ function view(){
 
   wireActions(root);
   if(state.tab==="home") wireHome(root);
+  if(state.tab==="house") wireHouse(root);
 	  if(state.tab==="calendar") wireCalendar(root);
 }
 
@@ -1552,6 +1624,531 @@ function viewReminders(){
 }
 
 // ---- Calendar (big canvas + mini preview) ----
+// ====================== HOUSE CLEANING (Casa) ======================
+function getHouseZonesSorted(){
+  normalizeHouse();
+  const zones = state.house.zones.slice();
+  zones.sort((a,b)=> (Number(a.order)||0) - (Number(b.order)||0));
+  return zones;
+}
+function getHouseZoneName(zoneId){
+  if(!zoneId) return "Global";
+  const z = (state.house.zones||[]).find(x=>x.id===zoneId);
+  return z ? z.name : "Zona";
+}
+function daysBetween(aStr, bStr){
+  // aStr, bStr = YYYY-MM-DD
+  try{
+    const a = new Date(aStr+"T00:00:00");
+    const b = new Date(bStr+"T00:00:00");
+    return Math.floor((b-a)/86400000);
+  }catch(e){ return 999999; }
+}
+function isTaskDue(task, todayStr){
+  const f = Number(task.freqDays)||0;
+  if(f <= 0) return true; // if not set, always show
+  const last = (task.lastDone||"").trim();
+  if(!last) return true;
+  return daysBetween(last, todayStr) >= f;
+}
+function getHouseDueTasks(todayStr){
+  normalizeHouse();
+  const all = state.house.tasks || [];
+  return all.filter(t=> isTaskDue(t, todayStr));
+}
+function buildHouseRoute(todayStr){
+  const due = getHouseDueTasks(todayStr);
+
+  // 1) Globals first
+  const globals = due.filter(t=> (t.type||"") === "global" || !t.zoneId);
+
+  // 2) Zones in order
+  const zones = getHouseZonesSorted();
+  const zoneBuckets = zones.map(z=>{
+    const list = due.filter(t=>t.zoneId===z.id && (t.type||"")!=="global");
+    return {zone:z, tasks:list};
+  }).filter(b=>b.tasks.length>0);
+
+  // 3) Sort tasks inside zones: surface -> floor -> wet -> misc
+  const pri = {surface:1, misc:2, wet:3, floor:4};
+  zoneBuckets.forEach(b=>{
+    b.tasks.sort((a,b2)=> (pri[a.type]||9) - (pri[b2.type]||9));
+  });
+
+  const steps = [];
+  globals.forEach(t=>{
+    steps.push({kind:"task", taskId:t.id, zoneId:null, text:t.name, minutes:Number(t.minutes)||0});
+  });
+  zoneBuckets.forEach(b=>{
+    steps.push({kind:"zone", zoneId:b.zone.id, text:`Zona: ${b.zone.name}`});
+    b.tasks.forEach(t=>{
+      steps.push({kind:"task", taskId:t.id, zoneId:b.zone.id, text:t.name, minutes:Number(t.minutes)||0});
+    });
+  });
+
+  // If nothing due, propose a tiny reset
+  if(steps.length===0){
+    steps.push({kind:"tip", text:"Hoy estás al día ✅ Si quieres, haz 5 min de reset: basura + ordenar 10 cosas."});
+  }
+
+  return steps;
+}
+
+function houseCardSummary(todayStr){
+  const due = getHouseDueTasks(todayStr);
+  const mins = due.reduce((s,t)=> s + (Number(t.minutes)||0), 0);
+  return {count: due.length, mins};
+}
+
+function viewHouse(){
+  normalizeHouse();
+  const todayStr = isoDate(new Date());
+  const sub = state.house.subtab || "route";
+  const sum = houseCardSummary(todayStr);
+
+  const mkSeg = (key, label) => `
+    <button class="segBtn ${sub===key?"active":""}" data-house-sub="${escapeHtml(key)}">${escapeHtml(label)}</button>
+  `;
+
+  const route = buildHouseRoute(todayStr);
+  const session = state.house.session || null;
+  const hasSession = session && session.active && Array.isArray(session.route);
+
+  const totalRouteMins = route.reduce((s,st)=> s + (Number(st.minutes)||0), 0);
+
+  return `
+    <section>
+      <div class="card">
+        <div class="cardHead">
+          <div>
+            <h2>Casa</h2>
+            <div class="muted">Sistema mínimo funcional. Luego lo convertimos en mini juego 🎮</div>
+          </div>
+          <div class="pill">${sum.count} pendientes • ~${sum.mins} min</div>
+        </div>
+
+        <div class="seg" style="margin-top:10px;">
+          ${mkSeg("route","Ruta")}
+          ${mkSeg("manage","Config")}
+        </div>
+      </div>
+
+      ${sub==="route" ? `
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:flex-end;">
+            <div>
+              <div class="muted">Hoy (${escapeHtml(todayStr)})</div>
+              <div style="font-weight:700;font-size:18px;margin-top:2px;">Ruta óptima</div>
+              <div class="muted" style="margin-top:4px;">Orden: global → zonas (superficies → húmedo → piso)</div>
+            </div>
+            <div class="row">
+              <button class="btn" id="btnHouseStart">${hasSession ? "Continuar" : "Iniciar"}</button>
+              <button class="btn ghost" id="btnHouseReset">Reset</button>
+            </div>
+          </div>
+
+          <div class="muted" style="margin-top:10px;">Tiempo estimado: ~${totalRouteMins} min</div>
+
+          <div class="list" style="margin-top:12px;">
+            ${route.map((st, i)=>{
+              if(st.kind==="zone"){
+                return `<div class="item"><div class="tag">${escapeHtml(st.text)}</div></div>`;
+              }
+              if(st.kind==="tip"){
+                return `<div class="item"><div class="muted">${escapeHtml(st.text)}</div></div>`;
+              }
+              // task
+              const t = (state.house.tasks||[]).find(x=>x.id===st.taskId) || {};
+              const done = !!(t.lastDone && !isTaskDue(t, todayStr));
+              return `
+                <div class="item">
+                  <label class="row" style="gap:10px;align-items:flex-start;">
+                    <input type="checkbox" data-house-done="${escapeHtml(st.taskId)}" ${done ? "checked":""}>
+                    <div style="flex:1;">
+                      <div style="font-weight:650;">${escapeHtml(st.text)}</div>
+                      <div class="muted" style="margin-top:2px;">${escapeHtml(getHouseZoneName(st.zoneId))} • ${Number(st.minutes)||0} min • cada ${Number(t.freqDays)||0} días</div>
+                    </div>
+                    <button class="btn ghost" data-house-edit-task="${escapeHtml(st.taskId)}">Edit</button>
+                  </label>
+                </div>
+              `;
+            }).join("")}
+          </div>
+
+          ${hasSession ? `
+          <div class="card" style="margin-top:14px;">
+            ${renderHouseSession()}
+          </div>` : ``}
+        </div>
+      ` : `
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-weight:700;font-size:18px;">Zonas</div>
+              <div class="muted">Define tu mapa lógico (luego lo dibujamos)</div>
+            </div>
+            <button class="btn" id="btnAddZone">+ Zona</button>
+          </div>
+
+          <div class="list" style="margin-top:12px;">
+            ${getHouseZonesSorted().map(z=>`
+              <div class="item">
+                <div style="flex:1;">
+                  <div style="font-weight:650;">${escapeHtml(z.name)}</div>
+                  <div class="muted">Orden: ${Number(z.order)||0}</div>
+                </div>
+                <button class="btn ghost" data-house-edit-zone="${escapeHtml(z.id)}">Edit</button>
+                <button class="btn ghost" data-house-del-zone="${escapeHtml(z.id)}">Del</button>
+              </div>
+            `).join("")}
+            ${getHouseZonesSorted().length===0 ? `<div class="item"><div class="muted">Crea tu primera zona.</div></div>` : ``}
+          </div>
+
+          <div class="divider" style="margin:14px 0;"></div>
+
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-weight:700;font-size:18px;">Tareas</div>
+              <div class="muted">Frecuencia + minutos. Eso es todo.</div>
+            </div>
+            <button class="btn" id="btnAddTask">+ Tarea</button>
+          </div>
+
+          <div class="list" style="margin-top:12px;">
+            ${renderHouseTasksList()}
+          </div>
+        </div>
+      `}
+    </section>
+  `;
+}
+
+function renderHouseTasksList(){
+  const zones = getHouseZonesSorted();
+  const tasks = state.house.tasks || [];
+
+  const group = (title, items) => `
+    <div class="item"><div class="tag">${escapeHtml(title)}</div></div>
+    ${items.map(t=>`
+      <div class="item">
+        <div style="flex:1;">
+          <div style="font-weight:650;">${escapeHtml(t.name)}</div>
+          <div class="muted">${escapeHtml(getHouseZoneName(t.zoneId))} • ${Number(t.minutes)||0} min • cada ${Number(t.freqDays)||0} días</div>
+        </div>
+        <button class="btn ghost" data-house-edit-task="${escapeHtml(t.id)}">Edit</button>
+        <button class="btn ghost" data-house-del-task="${escapeHtml(t.id)}">Del</button>
+      </div>
+    `).join("")}
+  `;
+
+  const globals = tasks.filter(t=> (t.type||"")==="global" || !t.zoneId);
+  let html = "";
+  if(globals.length) html += group("Global", globals);
+
+  zones.forEach(z=>{
+    const items = tasks.filter(t=>t.zoneId===z.id && (t.type||"")!=="global");
+    if(items.length) html += group(z.name, items);
+  });
+
+  if(!html){
+    html = `<div class="item"><div class="muted">Agrega tareas para empezar.</div></div>`;
+  }
+  return html;
+}
+
+function startHouseSession(){
+  const todayStr = isoDate(new Date());
+  const route = buildHouseRoute(todayStr);
+  state.house.session = {
+    active: true,
+    date: todayStr,
+    idx: 0,
+    route
+  };
+  persist();
+  view();
+}
+function resetHouseSession(){
+  if(state.house.session){
+    state.house.session.active = false;
+    persist();
+    view();
+  }
+}
+function renderHouseSession(){
+  const s = state.house.session;
+  if(!s || !s.active) return "";
+  const route = s.route || [];
+  const idx = Math.min(Math.max(0, Number(s.idx)||0), Math.max(0, route.length-1));
+  const current = route[idx] || {};
+  const doneCount = route.filter(st=>{
+    if(st.kind!=="task") return false;
+    const t = (state.house.tasks||[]).find(x=>x.id===st.taskId) || {};
+    return !!t.lastDone && !isTaskDue(t, s.date);
+  }).length;
+  const taskCount = route.filter(st=>st.kind==="task").length;
+  const pct = taskCount ? Math.round((doneCount/taskCount)*100) : 0;
+
+  return `
+    <div class="row" style="justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-weight:700;">Mini sesión</div>
+        <div class="muted">${doneCount}/${taskCount} • ${pct}%</div>
+      </div>
+      <button class="btn ghost" id="btnHouseEnd">Terminar</button>
+    </div>
+    <div class="progress" style="margin-top:10px;">
+      <div class="progressBar" style="width:${pct}%;"></div>
+    </div>
+
+    <div style="margin-top:12px;">
+      ${current.kind==="zone" ? `<div class="tag">${escapeHtml(current.text)}</div>` : ``}
+      ${current.kind==="tip" ? `<div class="muted">${escapeHtml(current.text)}</div>` : ``}
+      ${current.kind==="task" ? `
+        <div style="font-weight:750;font-size:18px;">${escapeHtml(current.text)}</div>
+        <div class="muted" style="margin-top:4px;">${escapeHtml(getHouseZoneName(current.zoneId))} • ${Number(current.minutes)||0} min</div>
+        <div class="row" style="gap:10px;margin-top:10px;">
+          <button class="btn" data-house-session-done="${escapeHtml(current.taskId)}">Marcar hecho</button>
+          <button class="btn ghost" data-house-edit-task="${escapeHtml(current.taskId)}">Edit</button>
+        </div>
+      ` : ``}
+    </div>
+
+    <div class="row" style="justify-content:space-between;margin-top:12px;">
+      <button class="btn ghost" id="btnHousePrev">Prev</button>
+      <div class="muted">${idx+1}/${route.length}</div>
+      <button class="btn" id="btnHouseNext">Next</button>
+    </div>
+  `;
+}
+
+function openHouseZoneModal(editId=null){
+  normalizeHouse();
+  const z = editId ? (state.house.zones||[]).find(x=>x.id===editId) : null;
+  openPromptModal({
+    title: z ? "Edit zone" : "New zone",
+    fields:[
+      {key:"name", label:"Name", placeholder:"Ej: Cocina", value: z?.name || ""},
+      {key:"order", label:"Order (1..)", type:"number", placeholder:"1", value: (z?.order ?? (getHouseZonesSorted().length+1))}
+    ],
+    onSubmit: ({name, order})=>{
+      const n = (name||"").trim();
+      const o = Number(order)||0;
+      if(!n){ toast("Pon un nombre"); return; }
+      if(z){
+        z.name = n;
+        z.order = o || z.order || 0;
+      }else{
+        state.house.zones.push({ id: uid("z"), name:n, order:o || (state.house.zones.length+1) });
+      }
+      persist(); view(); toast("Zona guardada ✅");
+    }
+  });
+}
+
+function openHouseTaskModal(editId=null){
+  normalizeHouse();
+  const t = editId ? (state.house.tasks||[]).find(x=>x.id===editId) : null;
+
+  const zones = getHouseZonesSorted();
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop";
+
+  const zoneOptions = [
+    `<option value="">Global</option>`,
+    ...zones.map(z=>`<option value="${escapeHtml(z.id)}">${escapeHtml(z.name)}</option>`)
+  ].join("");
+
+  const typeOptions = [
+    ["global","Global"],
+    ["surface","Superficies"],
+    ["wet","Húmedo"],
+    ["floor","Piso"],
+    ["misc","Misc"]
+  ].map(([v,l])=>`<option value="${escapeHtml(v)}">${escapeHtml(l)}</option>`).join("");
+
+  b.innerHTML = `
+    <div class="modal">
+      <h2>${escapeHtml(t ? "Edit task" : "New task")}</h2>
+
+      <div class="grid">
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Nombre</div>
+          <input class="input" id="htName" value="${escapeHtml(t?.name||"")}" placeholder="Ej: Barrer piso">
+        </div>
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Zona</div>
+          <select class="input" id="htZone">${zoneOptions}</select>
+        </div>
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Tipo</div>
+          <select class="input" id="htType">${typeOptions}</select>
+        </div>
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Minutos</div>
+          <input class="input" id="htMin" type="number" value="${escapeHtml(String(t?.minutes ?? 5))}">
+        </div>
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Frecuencia (días)</div>
+          <input class="input" id="htFreq" type="number" value="${escapeHtml(String(t?.freqDays ?? 7))}">
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button class="btn ghost" data-m="cancel">Cancel</button>
+        <button class="btn primary" data-m="save">Save</button>
+      </div>
+      <div class="muted" style="margin-top:10px;">Tip: si freq=1, sale diario.</div>
+    </div>
+  `;
+  host.appendChild(b);
+
+  const close = ()=> b.remove();
+  b.addEventListener("click",(e)=>{ if(e.target===b) close(); });
+
+  const zoneSel = b.querySelector("#htZone");
+  const typeSel = b.querySelector("#htType");
+  zoneSel.value = t?.zoneId || "";
+  typeSel.value = t?.type || (t?.zoneId ? "surface" : "global");
+
+  b.querySelector('[data-m="cancel"]').addEventListener("click", close);
+  b.querySelector('[data-m="save"]').addEventListener("click", ()=>{
+    const name = (b.querySelector("#htName").value||"").trim();
+    const zoneId = (zoneSel.value||"").trim() || null;
+    const type = (typeSel.value||"").trim() || "misc";
+    const minutes = Number((b.querySelector("#htMin").value||"").trim()) || 0;
+    const freqDays = Number((b.querySelector("#htFreq").value||"").trim()) || 0;
+
+    if(!name){ toast("Pon un nombre"); return; }
+    if(minutes<0 || freqDays<0){ toast("Valores inválidos"); return; }
+
+    if(t){
+      t.name = name; t.zoneId = zoneId; t.type = type; t.minutes = minutes; t.freqDays = freqDays;
+    }else{
+      state.house.tasks.push({ id: uid("t"), name, zoneId, type, minutes, freqDays, lastDone:"" });
+    }
+    persist(); view(); toast("Tarea guardada ✅");
+    close();
+  });
+}
+
+function markHouseTaskDone(taskId, dateStr){
+  const t = (state.house.tasks||[]).find(x=>x.id===taskId);
+  if(!t) return;
+  t.lastDone = dateStr;
+  persist();
+}
+
+function deleteHouseZone(zoneId){
+  const z = (state.house.zones||[]).find(x=>x.id===zoneId);
+  if(!z) return;
+  const tasks = (state.house.tasks||[]).filter(t=>t.zoneId===zoneId);
+  if(tasks.length){
+    const ok = confirm(`Esta zona tiene ${tasks.length} tareas. ¿Borrar todo?`);
+    if(!ok) return;
+    state.house.tasks = (state.house.tasks||[]).filter(t=>t.zoneId!==zoneId);
+  }
+  state.house.zones = (state.house.zones||[]).filter(x=>x.id!==zoneId);
+  persist(); view(); toast("Zona borrada 🧹");
+}
+
+function deleteHouseTask(taskId){
+  state.house.tasks = (state.house.tasks||[]).filter(t=>t.id!==taskId);
+  persist(); view(); toast("Tarea borrada 🧼");
+}
+
+function wireHouse(root){
+  normalizeHouse();
+
+  // subtab switch
+  root.querySelectorAll("[data-house-sub]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      state.house.subtab = btn.getAttribute("data-house-sub") || "route";
+      persist();
+      view();
+    });
+  });
+
+  // route actions
+  const startBtn = root.querySelector("#btnHouseStart");
+  if(startBtn) startBtn.addEventListener("click", ()=>{
+    const s = state.house.session;
+    if(s && s.active) { view(); return; }
+    startHouseSession();
+  });
+  const resetBtn = root.querySelector("#btnHouseReset");
+  if(resetBtn) resetBtn.addEventListener("click", ()=> resetHouseSession());
+
+  // session controls
+  const endBtn = root.querySelector("#btnHouseEnd");
+  if(endBtn) endBtn.addEventListener("click", ()=> resetHouseSession());
+  const prevBtn = root.querySelector("#btnHousePrev");
+  if(prevBtn) prevBtn.addEventListener("click", ()=>{
+    const s = state.house.session; if(!s||!s.active) return;
+    s.idx = Math.max(0, (Number(s.idx)||0)-1); persist(); view();
+  });
+  const nextBtn = root.querySelector("#btnHouseNext");
+  if(nextBtn) nextBtn.addEventListener("click", ()=>{
+    const s = state.house.session; if(!s||!s.active) return;
+    s.idx = Math.min((s.route||[]).length-1, (Number(s.idx)||0)+1); persist(); view();
+  });
+
+  root.querySelectorAll("[data-house-session-done]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const taskId = btn.getAttribute("data-house-session-done");
+      const s = state.house.session;
+      const dateStr = (s && s.date) ? s.date : isoDate(new Date());
+      markHouseTaskDone(taskId, dateStr);
+      // move next
+      if(s && s.active){
+        s.idx = Math.min((s.route||[]).length-1, (Number(s.idx)||0)+1);
+        persist();
+      }
+      view();
+      toast("Hecho ✅");
+    });
+  });
+
+  // mark done checkboxes (route list)
+  root.querySelectorAll("[data-house-done]").forEach(cb=>{
+    cb.addEventListener("change", ()=>{
+      const taskId = cb.getAttribute("data-house-done");
+      const todayStr = isoDate(new Date());
+      if(cb.checked){
+        markHouseTaskDone(taskId, todayStr);
+        toast("Hecho ✅");
+      }else{
+        const t = (state.house.tasks||[]).find(x=>x.id===taskId);
+        if(t){ t.lastDone = ""; persist(); }
+        toast("Reabierto");
+      }
+      view();
+    });
+  });
+
+  // manage actions
+  const btnAddZone = root.querySelector("#btnAddZone");
+  if(btnAddZone) btnAddZone.addEventListener("click", ()=> openHouseZoneModal());
+  const btnAddTask = root.querySelector("#btnAddTask");
+  if(btnAddTask) btnAddTask.addEventListener("click", ()=> openHouseTaskModal());
+
+  root.querySelectorAll("[data-house-edit-zone]").forEach(btn=>{
+    btn.addEventListener("click", ()=> openHouseZoneModal(btn.getAttribute("data-house-edit-zone")));
+  });
+  root.querySelectorAll("[data-house-del-zone]").forEach(btn=>{
+    btn.addEventListener("click", ()=> deleteHouseZone(btn.getAttribute("data-house-del-zone")));
+  });
+
+  root.querySelectorAll("[data-house-edit-task]").forEach(btn=>{
+    btn.addEventListener("click", ()=> openHouseTaskModal(btn.getAttribute("data-house-edit-task")));
+  });
+  root.querySelectorAll("[data-house-del-task]").forEach(btn=>{
+    btn.addEventListener("click", ()=> deleteHouseTask(btn.getAttribute("data-house-del-task")));
+  });
+}
+// ====================== END HOUSE CLEANING ======================
+
 function viewCalendar(){
   const base = new Date();
   const d = new Date(base.getFullYear(), base.getMonth() + (state.calMonthOffset||0), 1);
