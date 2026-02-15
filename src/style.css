@@ -314,11 +314,16 @@ body{
   display:grid;
   /* phone-first widget board */
   grid-template-columns:1fr;
-  gap:14px;
+  gap:12px;
   align-items:stretch;
 }
 .homeCard{margin-bottom:0}
 .homeWide{margin-top:14px}
+
+/* Make home widgets a bit more compact */
+.homeCard{padding:10px;border-radius:18px}
+.homeCard .cardTitle{font-size:15px}
+.homeCard .small{margin-top:2px}
 
 /* tablet: 2-column board */
 @media (min-width:720px){
@@ -331,21 +336,30 @@ body{
   .homeGrid > section{grid-column:span 6;}
 }
 
-.sleepBars{display:flex;gap:10px;align-items:flex-end;height:92px;margin:6px 0 10px}
+/* Sleep chart: 7 fixed columns so bars always line up with their day label */
+.sleepChart{
+  display:grid;
+  grid-template-columns:repeat(7, minmax(0, 1fr));
+  gap:10px;
+  align-items:end;
+  margin:6px 0 6px;
+  height:92px;
+}
+.sleepCol{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
 .sleepBar{
-  width:16px;border-radius:999px;
+  width:14px;border-radius:999px;
   background:linear-gradient(180deg, rgba(54,211,153,.85), rgba(124,92,255,.65));
   opacity:.75;
   height:var(--h, 40px);
 }
+.sleepLbl{color:rgba(255,255,255,.55);font-size:11px;line-height:1}
 
 
 /* ===== Sleep widget extras ===== */
 .sleepMetaRow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px}
 .sleepMetaRow .big{font-weight:900;font-size:20px;letter-spacing:.2px}
 .sleepMetaRow .small{color:var(--muted);font-size:12px}
-.sleepBarLabelRow{display:flex;gap:10px;justify-content:space-between;color:rgba(255,255,255,.55);font-size:11px}
-.sleepBarLabelRow span{width:16px;text-align:center}
+/* old label row removed in favor of .sleepLbl inside each column */
 .sleepTabs{display:flex;gap:8px;margin:10px 0}
 .sleepTab{flex:1;padding:10px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:rgba(255,255,255,.85);font-weight:800;cursor:pointer}
 .sleepTab.active{background:rgba(124,92,255,.22);border-color:rgba(124,92,255,.5)}

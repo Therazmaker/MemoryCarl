@@ -687,21 +687,24 @@ function renderSleepBars(series){
     return Math.round(minH + ratio * (maxH - minH));
   };
 
-  const bars = items.map((x)=>{
+  // Keep weekday letters stable and aligned with the 7 columns
+  const dayLetters = ["D","L","M","M","J","V","S"]; // Domingo..Sábado
+  const cols = items.map((x)=>{
     const h = toPx(x.minutes);
     const hrs = (x.minutes/60);
     const label = x.minutes ? `${hrs.toFixed(1)}h` : "0h";
-    return `<div class="sleepBar" style="--h:${h}px" title="${escapeHtml(x.date)} • ${escapeHtml(label)}"></div>`;
+    const d = new Date(x.date + "T00:00:00");
+    const ch = dayLetters[d.getDay()] || "·";
+    return `
+      <div class="sleepCol" title="${escapeHtml(x.date)} • ${escapeHtml(label)}">
+        <div class="sleepBar" style="--h:${h}px"></div>
+        <div class="sleepLbl">${escapeHtml(ch)}</div>
+      </div>
+    `;
   }).join("");
 
   const avgH = (series.avgMinutes || 0) / 60;
   const lastH = (series.lastMinutes || 0) / 60;
-
-  const labels = items.map((x)=>{
-    const d = new Date(x.date + "T00:00:00");
-    const ch = d.toLocaleDateString("es-PE", { weekday: "short" }).slice(0,1).toUpperCase();
-    return `<span title="${escapeHtml(x.date)}">${escapeHtml(ch)}</span>`;
-  }).join("");
 
   return `
     <div class="sleepMetaRow">
@@ -711,8 +714,7 @@ function renderSleepBars(series){
       </div>
       <div class="chip">${avgH >= 7 ? "✅" : (avgH >= 6 ? "⚠️" : "🔥")}</div>
     </div>
-    <div class="sleepBars" aria-hidden="true">${bars}</div>
-    <div class="sleepBarLabelRow" aria-hidden="true">${labels}</div>
+    <div class="sleepChart" aria-hidden="true">${cols}</div>
   `;
 }
 
