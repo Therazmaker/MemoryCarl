@@ -1,261 +1,428 @@
+// Merge Lab (drop + merge) for MemoryCarl
+// Uses Matter.js loaded globally (window.Matter)
 
-(function(){
-  // Requires Matter.js loaded globally
+let _overlay = null;
+let _engine = null;
+let _render = null;
+let _runner = null;
+let _eventsBound = false;
 
-  let engine, render, runner;
-  let currentType = 0;
-  let score = 0;
-  let gameOverState = false;
-  let hudEl = null;
-  let width = 0, height = 0;
+const CHAIN = [
+  { name: "cookie",   r: 18 },
+  { name: "macaron",  r: 24 },
+  { name: "bunny",    r: 32 },
+  { name: "cupcake",  r: 42 },
+  { name: "jelly",    r: 54 },
+  { name: "burger",   r: 70 }
+];
 
-  const TYPES = [
-    { radius: 22, color: "#6EE7B7", points: 1 },
-    { radius: 28, color: "#60A5FA", points: 2 },
-    { radius: 34, color: "#F472B6", points: 4 },
-    { radius: 42, color: "#F59E0B", points: 8 },
-    { radius: 52, color: "#A78BFA", points: 16 },
-    { radius: 64, color: "#FB7185", points: 32 }
-  ];
+function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
-  const LIMIT_Y = 120; // game over line
-  const START_Y = 90;
+function makeBody(x, y, idx){
+  const Matter = window.Matter;
+  const { Bodies } = Matter;
 
-  function ensureHud(container){
-    if(hudEl) return;
-    hudEl = document.createElement("div");
-    hudEl.className = "mcMergeHud";
-    hudEl.innerHTML = `
-      <div class="mcMergeTop">
-        <div class="mcMergeTitle">Merge Lab</div>
-        <div class="mcMergeScore"><span>Score</span><b id="mcMergeScoreVal">0</b></div>
-        <button class="mcMergeClose" id="mcMergeCloseBtn" aria-label="Close">✕</button>
+  const meta = CHAIN[idx] || CHAIN[CHAIN.length-1];
+  const r = meta.r;
+
+  const body = Bodies.circle(x, y, r, {
+    restitution: 0.15,
+    friction: 0.12,
+    frictionAir: 0.002,
+    density: 0.0018,
+    label: `merge:${idx}`,
+    render: {
+      // We won't set colors here (Matter picks defaults). CSS overlay handles vibe.
+    }
+  });
+
+  body.mergeIndex = idx;
+  body.mergeRadius = r;
+  body._isMerging = false;
+  return body;
+}
+
+function setText(id, txt){
+  const el = _overlay && _overlay.querySelector(id);
+  if(el) el.textContent = txt;
+}
+
+function getHS(){
+  try{ return Number(localStorage.getItem("merge_hs")||0) || 0; }catch{ return 0; }
+}
+function setHS(v){
+  try{ localStorage.setItem("merge_hs", String(v)); }catch{}
+}
+
+function resize(){
+  if(!_overlay || !_render) return;
+  const stage = _overlay.querySelector(".mergeStage");
+  if(!stage) return;
+
+  const rect = stage.getBoundingClientRect();
+  const w = Math.max(320, Math.floor(rect.width));
+  const h = Math.max(420, Math.floor(rect.height));
+
+  _render.canvas.width = w;
+  _render.canvas.height = h;
+  _render.options.width = w;
+  _render.options.height = h;
+
+  // Rebuild walls for new size (simple approach)
+  const Matter = window.Matter;
+  const { World, Bodies } = Matter;
+
+  // Remove existing statics tagged as wall
+  const all = _engine.world.bodies.slice();
+  all.forEach(b=>{
+    if(b.isStatic && b.label && b.label.startsWith("wall:")){
+      World.remove(_engine.world, b);
+    }
+  });
+
+  const t = 40; // thickness
+  const floor = Bodies.rectangle(w/2, h + t/2, w + t*2, t, { isStatic:true, label:"wall:floor" });
+  const left  = Bodies.rectangle(-t/2, h/2, t, h + t*2, { isStatic:true, label:"wall:left" });
+  const right = Bodies.rectangle(w + t/2, h/2, t, h + t*2, { isStatic:true, label:"wall:right" });
+
+  World.add(_engine.world, [floor, left, right]);
+
+  // danger line position (visual is CSS, but we keep a number)
+  _engine.world._dangerY = 110;
+}
+
+export function openMergeGame(){
+  if(_overlay) return;
+
+  const Matter = window.Matter;
+  if(!Matter){
+    alert("Matter.js no está cargado. Revisa index.html (CDN).");
+    return;
+  }
+
+  const { Engine, Render, Runner, World, Events, Mouse, MouseConstraint } = Matter;
+
+  _overlay = document.createElement("div");
+  _overlay.className = "mergeOverlay";
+  _overlay.innerHTML = `
+    <div class="mergeTop">
+      <button class="iconBtn mergeClose" id="mergeClose" aria-label="Cerrar">✕</button>
+      <div class="mergeTitle">
+        <div class="mergeKicker">MERGE LAB</div>
+        <div class="mergeSub">Suelta, choca, fusiona 😈🍬</div>
       </div>
-      <div class="mcMergeHint">Toca para soltar una pieza 👇</div>
-    `;
-    container.appendChild(hudEl);
+      <div class="mergeStats">
+        <div class="mergeStat"><div class="k">Score</div><div class="v" id="mergeScore">0</div></div>
+        <div class="mergeStat"><div class="k">HS</div><div class="v" id="mergeHS">0</div></div>
+      </div>
+    </div>
 
-    const btn = hudEl.querySelector("#mcMergeCloseBtn");
-    if(btn){
-      btn.addEventListener("click", ()=>{
-        // If host app exposed a closer, call it. Else hide container.
-        if(typeof window.closeMergeGameFull === "function") window.closeMergeGameFull();
-        else container.style.display = "none";
-      });
-    }
+    <div class="mergeStageWrap">
+      <div class="mergeStage">
+        <div class="mergeDanger" aria-hidden="true"></div>
+      </div>
+    </div>
+
+    <div class="mergeBottom">
+      <div class="mergeNext">
+        <div class="k">Next</div>
+        <div class="v" id="mergeNext">cookie</div>
+      </div>
+      <div class="mergeChain" id="mergeChain" aria-label="Cadena de evolución"></div>
+      <button class="btn mergeRestart" id="mergeRestart">Reiniciar</button>
+    </div>
+
+    <div class="mergeGameOver" id="mergeGameOver" hidden>
+      <div class="card mergeOverCard">
+        <div class="mergeOverTitle">Game Over</div>
+        <div class="small" id="mergeOverText">Se apiló demasiado arriba.</div>
+        <div class="mergeOverBtns">
+          <button class="btn" id="mergeOverRestart">Jugar otra</button>
+          <button class="btn ghost" id="mergeOverClose">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(_overlay);
+
+  // render chain preview
+  const chainEl = _overlay.querySelector("#mergeChain");
+  if(chainEl){
+    chainEl.innerHTML = CHAIN.map((x,i)=>`<div class="mergeChip" data-i="${i}">${i+1}. ${x.name}</div>`).join("");
   }
 
-  function setScore(v){
-    score = v;
-    const el = hudEl?.querySelector("#mcMergeScoreVal");
-    if(el) el.textContent = String(score);
-  }
+  // engine
+  _engine = Engine.create();
+  _engine.gravity.y = 1.0;
 
-  function initMergeGame(containerId){
-    if(!window.Matter){
-      console.error("Matter.js not found. Check index.html script order.");
-      return;
+  // render
+  const stage = _overlay.querySelector(".mergeStage");
+  _render = Render.create({
+    element: stage,
+    engine: _engine,
+    options: {
+      wireframes: false,
+      background: "transparent",
+      pixelRatio: window.devicePixelRatio || 1
     }
+  });
 
-    const { Engine, Render, Runner, Bodies, Composite, Events } = Matter;
+  // make canvas pointer friendly
+  _render.canvas.classList.add("mergeCanvas");
+  _render.canvas.setAttribute("aria-label", "Merge game canvas");
 
-    const container = document.getElementById(containerId);
-    if(!container){
-      console.error("merge container not found:", containerId);
-      return;
+  // runner
+  _runner = Runner.create();
+  Render.run(_render);
+  Runner.run(_runner, _engine);
+
+  // Mouse constraint (for gentle nudges, optional)
+  const mouse = Mouse.create(_render.canvas);
+  const mc = MouseConstraint.create(_engine, {
+    mouse,
+    constraint: {
+      stiffness: 0.08,
+      render: { visible: false }
     }
+  });
+  World.add(_engine.world, mc);
+  _render.mouse = mouse;
 
-    // Reset container
-    container.innerHTML = "";
-    container.style.background = "#0B0F19";
+  // state
+  let score = 0;
+  let nextIdx = 0;
+  let dropX = null;
+  let canDrop = true;
+  let isOver = false;
 
-    ensureHud(container);
-    setScore(0);
-    gameOverState = false;
+  const hs0 = getHS();
+  setText("#mergeHS", String(hs0));
+  setText("#mergeNext", CHAIN[nextIdx].name);
 
-    // Read size after it's visible
-    width = container.clientWidth || window.innerWidth;
-    height = container.clientHeight || window.innerHeight;
+  const scoreAdd = (idx)=>{
+    // more for bigger merges
+    const add = Math.round(10 * Math.pow(1.6, idx));
+    score += add;
+    setText("#mergeScore", String(score));
+    if(score > getHS()){
+      setHS(score);
+      setText("#mergeHS", String(score));
+    }
+  };
 
-    engine = Engine.create();
-    engine.gravity.y = 1;
+  const showOver = (txt)=>{
+    isOver = true;
+    canDrop = false;
+    const over = _overlay.querySelector("#mergeGameOver");
+    const t = _overlay.querySelector("#mergeOverText");
+    if(t) t.textContent = txt || "Game Over.";
+    if(over) over.hidden = false;
+  };
 
-    render = Render.create({
-      element: container,
-      engine: engine,
-      options: {
-        width,
-        height,
-        wireframes: false,
-        background: "#0B0F19",
-        pixelRatio: Math.min(2, window.devicePixelRatio || 1)
+  const hideOver = ()=>{
+    const over = _overlay.querySelector("#mergeGameOver");
+    if(over) over.hidden = true;
+    isOver = false;
+    canDrop = true;
+  };
+
+  const resetWorld = ()=>{
+    const Matter = window.Matter;
+    const { World } = Matter;
+    // remove all non-static bodies
+    const bodies = _engine.world.bodies.slice();
+    bodies.forEach(b=>{
+      if(!b.isStatic && b !== mc.body){
+        World.remove(_engine.world, b);
       }
     });
+    score = 0;
+    nextIdx = 0;
+    setText("#mergeScore", "0");
+    setText("#mergeNext", CHAIN[nextIdx].name);
+    hideOver();
+  };
 
-    // Arena
-    const ground = Bodies.rectangle(width/2, height+30, width, 60, { isStatic: true, render:{fillStyle:"#111827"} });
-    const leftWall = Bodies.rectangle(-30, height/2, 60, height, { isStatic: true, render:{fillStyle:"#111827"} });
-    const rightWall = Bodies.rectangle(width+30, height/2, 60, height, { isStatic: true, render:{fillStyle:"#111827"} });
+  // init sizing + walls
+  resize();
 
-    // Visual limit line (sensor)
-    const limitLine = Bodies.rectangle(width/2, LIMIT_Y, width, 4, {
-      isStatic: true,
-      isSensor: true,
-      label: "limitLine",
-      render: { fillStyle: "rgba(239,68,68,0.35)" }
-    });
+  // spawn logic
+  const spawn = (x)=>{
+    if(!canDrop || isOver) return;
+    canDrop = false;
 
-    Composite.add(engine.world, [ground, leftWall, rightWall, limitLine]);
+    const Matter = window.Matter;
+    const { World } = Matter;
 
-    runner = Runner.create();
-    Runner.run(runner, engine);
-    Render.run(render);
+    const w = _render.options.width || _render.canvas.width;
+    const px = clamp(x ?? (w/2), 30, w-30);
+    const body = makeBody(px, 60, nextIdx);
+    World.add(_engine.world, body);
 
-    // Controls: click/tap on canvas
-    const onDrop = (evt)=>{
-      if(gameOverState) return;
+    // choose next
+    // slight randomness with bias to small items
+    const roll = Math.random();
+    if(roll < 0.68) nextIdx = 0;
+    else if(roll < 0.88) nextIdx = 1;
+    else nextIdx = 2;
 
-      // Prefer pointer coords relative to canvas
-      const rect = render.canvas.getBoundingClientRect();
-      const clientX = (evt.touches && evt.touches[0]) ? evt.touches[0].clientX : evt.clientX;
-      const x = Math.max(30, Math.min(width-30, clientX - rect.left));
+    setText("#mergeNext", CHAIN[nextIdx].name);
 
-      spawnItem(x);
-    };
+    // cooldown
+    setTimeout(()=>{ canDrop = true; }, 280);
+  };
 
-    render.canvas.addEventListener("click", onDrop);
-    render.canvas.addEventListener("touchstart", (e)=>{ e.preventDefault(); onDrop(e); }, { passive:false });
+  // collisions => merge
+  Events.on(_engine, "collisionStart", (evt)=>{
+    if(isOver) return;
+    const pairs = evt.pairs || [];
+    const Matter = window.Matter;
+    const { World } = Matter;
 
-    Events.on(engine, "collisionStart", function(event){
-      for(const pair of event.pairs){
-        const a = pair.bodyA;
-        const b = pair.bodyB;
+    for(const p of pairs){
+      const a = p.bodyA;
+      const b = p.bodyB;
 
-        if(a.label === "mergeItem" && b.label === "mergeItem" && a.typeIndex === b.typeIndex){
-          // avoid double merge same tick
-          if(a._merging || b._merging) continue;
-          a._merging = b._merging = true;
-          mergeBodies(a, b);
+      if(!a || !b) continue;
+      if(a.isStatic || b.isStatic) continue;
+
+      const ia = a.mergeIndex;
+      const ib = b.mergeIndex;
+      if(ia === undefined || ib === undefined) continue;
+      if(ia !== ib) continue;
+
+      // already merging?
+      if(a._isMerging || b._isMerging) continue;
+
+      a._isMerging = true;
+      b._isMerging = true;
+
+      const nx = (a.position.x + b.position.x) / 2;
+      const ny = (a.position.y + b.position.y) / 2;
+
+      const ni = Math.min(ia + 1, CHAIN.length - 1);
+
+      // merge next tick (avoid modifying world during collision iteration)
+      setTimeout(()=>{
+        try{
+          World.remove(_engine.world, a);
+          World.remove(_engine.world, b);
+
+          const merged = makeBody(nx, ny, ni);
+          // tiny pop
+          merged.velocity.y = -1.2;
+          World.add(_engine.world, merged);
+
+          scoreAdd(ni);
+        }catch(e){
+          // ignore
         }
-      }
-    });
-
-    Events.on(engine, "afterUpdate", checkGameOver);
-
-    // Spawn a first piece automatically so it's not "all black"
-    setTimeout(()=>{
-      if(!gameOverState) spawnItem(width/2);
-    }, 250);
-  }
-
-  function spawnItem(x){
-    const { Bodies, Composite } = Matter;
-
-    const type = TYPES[currentType];
-    const body = Bodies.circle(x, START_Y, type.radius, {
-      restitution: 0.2,
-      friction: 0.3,
-      frictionAir: 0.002,
-      render: { fillStyle: type.color },
-      label: "mergeItem"
-    });
-    body.typeIndex = currentType;
-
-    Composite.add(engine.world, body);
-
-    // Next: bias to small pieces like the reference games
-    currentType = Math.random() < 0.7 ? 0 : 1;
-  }
-
-  function mergeBodies(a, b){
-    if(gameOverState) return;
-
-    const { Composite, Bodies } = Matter;
-
-    const idx = a.typeIndex || 0;
-    if(idx >= TYPES.length-1){
-      // At max type: just remove merge flags so they can collide normally
-      a._merging = b._merging = false;
-      return;
+      }, 0);
     }
+  });
 
-    const newIndex = idx + 1;
-    const newType = TYPES[newIndex];
+  // game over check on every tick
+  Events.on(_engine, "afterUpdate", ()=>{
+    if(isOver) return;
+    const dangerY = _engine.world._dangerY || 110;
 
-    const newBody = Bodies.circle(
-      (a.position.x + b.position.x)/2,
-      (a.position.y + b.position.y)/2,
-      newType.radius,
-      {
-        restitution: 0.2,
-        friction: 0.3,
-        frictionAir: 0.002,
-        render: { fillStyle: newType.color },
-        label: "mergeItem"
-      }
-    );
-    newBody.typeIndex = newIndex;
-
-    Composite.remove(engine.world, a);
-    Composite.remove(engine.world, b);
-    Composite.add(engine.world, newBody);
-
-    setScore(score + newType.points);
-  }
-
-  function checkGameOver(){
-    if(gameOverState) return;
-
-    const bodies = Matter.Composite.allBodies(engine.world);
-    for(const body of bodies){
-      if(body.label === "mergeItem"){
-        // Only when it's actually piled near the top (not just falling through)
-        if(body.position.y < LIMIT_Y && body.speed < 0.5){
-          triggerGameOver();
+    for(const b of _engine.world.bodies){
+      if(b.isStatic) continue;
+      if(b.mergeRadius){
+        const top = b.position.y - b.mergeRadius;
+        const calm = (Math.abs(b.velocity.y) < 0.25) && (Math.abs(b.velocity.x) < 0.25) && (Math.abs(b.angularVelocity) < 0.08);
+        if(top < dangerY && calm){
+          showOver("Se pasó la línea roja. Intenta apilar más abajo 🔥");
           break;
         }
       }
     }
+  });
+
+  // pointer handling
+  const onMove = (e)=>{
+    const rect = _render.canvas.getBoundingClientRect();
+    const clientX = (e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX);
+    dropX = clientX - rect.left;
+    // show faint guide via CSS variable
+    _overlay.style.setProperty("--merge-drop-x", `${dropX}px`);
+  };
+
+  const onDown = (e)=>{
+    // ignore clicks on UI
+    if(e.target && (e.target.closest(".mergeTop") || e.target.closest(".mergeBottom") || e.target.closest(".mergeGameOver"))) return;
+    if(e.cancelable) e.preventDefault();
+    spawn(dropX);
+  };
+
+  _render.canvas.addEventListener("mousemove", onMove);
+  _render.canvas.addEventListener("touchmove", onMove, { passive:false });
+  _render.canvas.addEventListener("mousedown", onDown);
+  _render.canvas.addEventListener("touchstart", onDown, { passive:false });
+
+  const closeBtn = _overlay.querySelector("#mergeClose");
+  if(closeBtn) closeBtn.addEventListener("click", ()=>closeMergeGame());
+
+  const restartBtn = _overlay.querySelector("#mergeRestart");
+  if(restartBtn) restartBtn.addEventListener("click", ()=>resetWorld());
+
+  const overRestart = _overlay.querySelector("#mergeOverRestart");
+  if(overRestart) overRestart.addEventListener("click", ()=>resetWorld());
+
+  const overClose = _overlay.querySelector("#mergeOverClose");
+  if(overClose) overClose.addEventListener("click", ()=>closeMergeGame());
+
+  // ESC to close
+  const onKey = (e)=>{
+    if(e.key === "Escape") closeMergeGame();
+  };
+  window.addEventListener("keydown", onKey);
+
+  // resize
+  const onResize = ()=>resize();
+  window.addEventListener("resize", onResize);
+
+  // store cleanup handlers
+  _overlay._mergeCleanup = ()=>{
+    try{ window.removeEventListener("keydown", onKey); }catch{}
+    try{ window.removeEventListener("resize", onResize); }catch{}
+    try{ _render.canvas.removeEventListener("mousemove", onMove); }catch{}
+    try{ _render.canvas.removeEventListener("touchmove", onMove); }catch{}
+    try{ _render.canvas.removeEventListener("mousedown", onDown); }catch{}
+    try{ _render.canvas.removeEventListener("touchstart", onDown); }catch{}
+  };
+}
+
+export function closeMergeGame(){
+  if(!_overlay) return;
+
+  // cleanup listeners
+  try{ _overlay._mergeCleanup && _overlay._mergeCleanup(); }catch{}
+
+  // stop matter
+  try{
+    const Matter = window.Matter;
+    if(_runner) Matter.Runner.stop(_runner);
+    if(_render){
+      Matter.Render.stop(_render);
+      // remove canvas
+      if(_render.canvas && _render.canvas.parentNode) _render.canvas.parentNode.removeChild(_render.canvas);
+    }
+    if(_engine){
+      Matter.World.clear(_engine.world, false);
+      Matter.Engine.clear(_engine);
+    }
+  }catch(e){
+    // ignore
   }
 
-  function triggerGameOver(){
-    if(gameOverState) return;
-    gameOverState = true;
+  // remove overlay
+  try{
+    if(_overlay && _overlay.parentNode) _overlay.parentNode.removeChild(_overlay);
+  }catch{}
 
-    // simple overlay message
-    const overlay = document.createElement("div");
-    overlay.className = "mcMergeOver";
-    overlay.innerHTML = `
-      <div class="mcMergeOverCard">
-        <div class="mcMergeOverTitle">Game Over</div>
-        <div class="mcMergeOverSub">Se apiló demasiado arriba.</div>
-        <div class="mcMergeOverBtns">
-          <button class="btn" id="mcMergeAgain">Jugar otra</button>
-          <button class="btn primary" id="mcMergeClose">Cerrar</button>
-        </div>
-      </div>
-    `;
-    render.element.appendChild(overlay);
-
-    overlay.querySelector("#mcMergeAgain")?.addEventListener("click", ()=>{
-      overlay.remove();
-      // reset by re-init with same container
-      const container = render.element.parentElement || render.element;
-      const id = container.id || "mergeContainer";
-      // stop old loops
-      try{
-        Matter.Render.stop(render);
-        Matter.Runner.stop(runner);
-      }catch{}
-      initMergeGame(id);
-    });
-
-    overlay.querySelector("#mcMergeClose")?.addEventListener("click", ()=>{
-      if(typeof window.closeMergeGameFull === "function") window.closeMergeGameFull();
-      else render.element.parentElement.style.display = "none";
-    });
-  }
-
-  window.initMergeGame = initMergeGame;
-
-})();
+  _overlay = null;
+  _engine = null;
+  _render = null;
+  _runner = null;
+}

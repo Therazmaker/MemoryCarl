@@ -1,46 +1,24 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#111111">
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <!-- PWA -->
-  <link rel="manifest" href="./manifest.webmanifest">
-  <meta name="theme-color" content="#111111">
   <link rel="icon" href="./icons/icon-192.png">
-
-  <!-- Styles -->
-  <link rel="stylesheet" href="./merge.css">
-
+  <link rel="stylesheet" href="./src/style.css">
   <title>MemoryCarl</title>
 
-  <!-- Firebase (compat) -->
+  <!-- Firebase (compat) for Messaging -->
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
 
-  <!-- Matter.js (ONLY ONCE) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
-<script src="./merge/merge.js"></script>
-<script type="module" src="./src/main.js"></script>
-
-
+</head>
 <body>
-
-  <!-- App principal -->
   <div id="app"></div>
-
-  <!-- Contenedor del juego (fullscreen overlay) -->
-  <div id="mergeContainer" style="display:none;"></div>
-
-  <!-- Librerías -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-  <!-- Merge Module -->
-  <script src="./src/merge/merge.js"></script>
-
-  <!-- Main App -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
   <script type="module" src="./src/main.js"></script>
-
 </body>
 </html>
