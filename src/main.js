@@ -424,6 +424,27 @@ function normalizeHouse(){
   if(!state.house.map.anim || typeof state.house.map.anim !== "object") state.house.map.anim = {active:false, idx:0, path:[]};
   if(!Array.isArray(state.house.map.anim.path)) state.house.map.anim.path = [];
 
+  // Details per zone (subzones, notes, etc.)
+  if(!state.house.details || typeof state.house.details !== "object"){ 
+    state.house.details = {};
+    changed = true;
+  }
+
+  // UI state for Casa
+  if(!state.house.ui || typeof state.house.ui !== "object"){ 
+    state.house.ui = { zoneSheet: { open:false, zoneId:null, tab:"light" } };
+    changed = true;
+  }
+  if(!state.house.ui.zoneSheet || typeof state.house.ui.zoneSheet !== "object"){ 
+    state.house.ui.zoneSheet = { open:false, zoneId:null, tab:"light" };
+    changed = true;
+  }
+  if(typeof state.house.ui.zoneSheet.open !== "boolean") state.house.ui.zoneSheet.open = false;
+  if(typeof state.house.ui.zoneSheet.tab !== "string") state.house.ui.zoneSheet.tab = "light";
+
+  // Ensure task has subzoneId (optional)
+  state.house.tasks.forEach(t=>{ if(t.subzoneId === undefined) t.subzoneId = null; });
+
   if(changed) persist();
 }
 
@@ -653,6 +674,8 @@ function view(){
       <div class="fab" id="fab">+</div>
       <div id="toastHost"></div>
 
+      ${renderHouseZoneSheet()}
+
       ${bottomNav()}
 
       ${state.moreOpen ? renderMoreModal() : ""}
@@ -728,6 +751,7 @@ function view(){
   if(state.tab==="home") wireHome(root);
   if(state.tab==="house") wireHouse(root);
 	  if(state.tab==="calendar") wireCalendar(root);
+  wireHouseZoneSheet(root);
 }
 
 
@@ -1778,6 +1802,219 @@ function getHouseZoneName(zoneId){
   const z = (state.house.zones||[]).find(x=>x.id===zoneId);
   return z ? z.name : "Zona";
 }
+
+
+function getHouseZoneIdByName(name){
+  const n = String(name||"").toLowerCase();
+  const z = (state.house.zones||[]).find(x=> String(x.name||"").toLowerCase()===n);
+  return z ? z.id : null;
+}
+
+function ensureZoneDetails(zoneId){
+  normalizeHouse();
+  if(!zoneId) return null;
+  if(!state.house.details[zoneId] || typeof state.house.details[zoneId] !== "object"){
+    state.house.details[zoneId] = { subzones: [], notes: "" };
+  }
+  const d = state.house.details[zoneId];
+  if(!Array.isArray(d.subzones)) d.subzones = [];
+  if(typeof d.notes !== "string") d.notes = String(d.notes||"");
+
+  // Seed common subzones if empty
+  if(d.subzones.length===0){
+    const zn = getHouseZoneName(zoneId).toLowerCase();
+    const seed = (names)=> names.map((nm,i)=>({id:uid('sz'), name:nm, order:i+1}));
+    if(zn.includes('cocina')) d.subzones = seed(["Mesón", "Lavaplatos", "Cocina/Estufa", "Nevera", "Piso"]);
+    else if(zn.includes('sala')) d.subzones = seed(["Mesa comedor", "Escritorio", "Piso", "Basura/Recoger"]);
+    else if(zn.includes('pasillo')) d.subzones = seed(["Piso", "Paredes", "Puertas"]);
+    else if(zn.includes('lavander')) d.subzones = seed(["Lavadora", "Tendedero", "Piso"]);
+    else if(zn.includes('baño') || zn.includes('bano')){
+      if(zn.includes('peque')) d.subzones = seed(["WC", "Lavamanos", "Espejo", "Piso"]);
+      else d.subzones = seed(["Ducha", "WC", "Lavamanos", "Espejo", "Piso"]);
+    }
+    else if(zn.includes('frederick')) d.subzones = seed(["Juguetes", "Piso", "Ropa"]);
+    else if(zn.includes('mathias')) d.subzones = seed(["Cama", "Closet", "Escritorio", "Piso"]);
+    else if(zn.includes('principal') || zn.includes('carlos') || zn.includes('fergis')) d.subzones = seed(["Cama", "Closet", "Escritorio", "Gabetero", "Piso"]);
+    else if(zn.includes('vac')) d.subzones = seed(["Landmark"]);
+  }
+
+  d.subzones.forEach((s,i)=>{ if(!s.id) s.id=uid('sz'); if(!s.name) s.name='Subzona'; if(typeof s.order!=='number') s.order=i+1; });
+  d.subzones.sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0));
+  return d;
+}
+
+function openHouseZoneSheet(zoneId){
+  normalizeHouse();
+  if(!zoneId) return;
+  ensureZoneDetails(zoneId);
+  state.house.ui.zoneSheet.open = true;
+  state.house.ui.zoneSheet.zoneId = zoneId;
+  if(!state.house.ui.zoneSheet.tab) state.house.ui.zoneSheet.tab = 'light';
+  persist();
+  view();
+}
+
+function closeHouseZoneSheet(){
+  normalizeHouse();
+  state.house.ui.zoneSheet.open = false;
+  state.house.ui.zoneSheet.zoneId = null;
+  persist();
+  view();
+}
+
+function zoneProgress(zoneId, todayStr, level){
+  const tasks = (state.house.tasks||[]).filter(t=>t.zoneId===zoneId && (level==='deep' ? (t.level||'light')==='deep' : (t.level||'light')!=='deep'));
+  if(tasks.length===0) return {done:0,total:0,pct:0};
+  const done = tasks.filter(t=>!!t.lastDone && !isTaskDue(t, todayStr)).length;
+  const pct = Math.round((done/tasks.length)*100);
+  return {done,total:tasks.length,pct};
+}
+
+function renderHouseZoneSheet(){
+  normalizeHouse();
+  const ui = state.house.ui && state.house.ui.zoneSheet;
+  if(!ui || !ui.open || !ui.zoneId) return '';
+  const todayStr = isoDate(new Date());
+  const zid = ui.zoneId;
+  const zname = getHouseZoneName(zid);
+  const tab = ui.tab || 'light';
+  const d = ensureZoneDetails(zid);
+
+  const mkTab = (k,l)=>`<button class="segBtn ${tab===k?'active':''}" data-zone-tab="${escapeHtml(k)}">${escapeHtml(l)}</button>`;
+
+  const tasks = (state.house.tasks||[]).filter(t=>t.zoneId===zid);
+  const tasksForTab = tasks.filter(t=> tab==='deep' ? (t.level||'light')==='deep' : (tab==='light' ? (t.level||'light')!=='deep' : true));
+
+  const bySub = new Map();
+  (d.subzones||[]).forEach(sz=> bySub.set(sz.id, []));
+  const misc = [];
+  tasksForTab.forEach(t=>{
+    if(t.subzoneId && bySub.has(t.subzoneId)) bySub.get(t.subzoneId).push(t);
+    else misc.push(t);
+  });
+
+  const sorter = (a,b)=>{
+    const ra=(Number(a.priority)||0), rb=(Number(b.priority)||0);
+    if(rb!==ra) return rb-ra;
+    return (a.name||'').localeCompare(b.name||'');
+  };
+  for(const [k,arr] of bySub){ arr.sort(sorter); }
+  misc.sort(sorter);
+
+  const progL = zoneProgress(zid, todayStr, 'light');
+  const progD = zoneProgress(zid, todayStr, 'deep');
+  const prog = (tab==='deep') ? progD : (tab==='light' ? progL : {done:0,total:0,pct:0});
+
+  const renderTask = (t)=>{
+    const done = !!(t.lastDone && !isTaskDue(t, todayStr));
+    return `
+      <div class="item">
+        <label class="row" style="gap:10px;align-items:flex-start;">
+          <input type="checkbox" data-zone-task-done="${escapeHtml(t.id)}" ${done?'checked':''}>
+          <div style="flex:1;">
+            <div style="font-weight:700;">${escapeHtml(t.name)}</div>
+            <div class="muted" style="margin-top:2px;">${Number(t.minutes)||0} min • cada ${Number(t.freqDays)||0} días • pri ${Number(t.priority)||0}</div>
+          </div>
+          <button class="btn ghost" data-zone-edit-task="${escapeHtml(t.id)}">Edit</button>
+        </label>
+      </div>
+    `;
+  };
+
+  const subBlocks = (d.subzones||[]).map(sz=>{
+    const arr = bySub.get(sz.id) || [];
+    return `
+      <div class="zoneSection">
+        <div class="row" style="justify-content:space-between;align-items:center;">
+          <div style="font-weight:800;">${escapeHtml(sz.name)}</div>
+          <button class="btn ghost" data-zone-add-task="${escapeHtml(sz.id)}">+ Tarea</button>
+        </div>
+        <div class="list" style="margin-top:8px;">
+          ${arr.length? arr.map(renderTask).join('') : `<div class="item"><div class="muted">Sin tareas aquí (aún).</div></div>`}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const miscBlock = `
+    <div class="zoneSection">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <div style="font-weight:800;">General</div>
+        <button class="btn ghost" data-zone-add-task="">+ Tarea</button>
+      </div>
+      <div class="list" style="margin-top:8px;">
+        ${misc.length? misc.map(renderTask).join('') : `<div class="item"><div class="muted">Nada en General.</div></div>`}
+      </div>
+    </div>
+  `;
+
+  const detailsTab = `
+    <div class="zoneSection">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <div style="font-weight:800;">Subzonas</div>
+        <button class="btn" id="btnAddSubzone">+ Subzona</button>
+      </div>
+      <div class="list" style="margin-top:10px;">
+        ${(d.subzones||[]).map(sz=>`
+          <div class="item">
+            <div class="row" style="justify-content:space-between;align-items:center;gap:10px;">
+              <div>
+                <div style="font-weight:800;">${escapeHtml(sz.name)}</div>
+                <div class="muted">order ${Number(sz.order)||0}</div>
+              </div>
+              <div class="row" style="gap:8px;">
+                <button class="btn ghost" data-subzone-edit="${escapeHtml(sz.id)}">Edit</button>
+                <button class="btn ghost" data-subzone-del="${escapeHtml(sz.id)}">Del</button>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    <div class="zoneSection" style="margin-top:12px;">
+      <div style="font-weight:800;margin-bottom:6px;">Notas</div>
+      <textarea class="input" id="zoneNotes" rows="4" placeholder="Tips, productos, reglas…">${escapeHtml(d.notes||'')}</textarea>
+      <div class="row" style="justify-content:flex-end;margin-top:10px;">
+        <button class="btn primary" id="btnSaveZoneNotes">Guardar</button>
+      </div>
+    </div>
+  `;
+
+  return `
+    <div class="sideScrim show" id="zoneScrim" aria-hidden="false"></div>
+    <aside class="sideSheet open" id="zoneSheet" aria-label="Zona">
+      <div class="sideHead">
+        <div>
+          <div class="muted" style="font-weight:900;">Zona</div>
+          <div class="sideTitle">${escapeHtml(zname)}</div>
+        </div>
+        <button class="iconBtn" id="btnZoneClose">Cerrar</button>
+      </div>
+
+      <div class="sideBody">
+        <div class="row" style="justify-content:space-between;align-items:center;">
+          <div class="seg" style="margin:0;">
+            ${mkTab('light','Ligera')}
+            ${mkTab('deep','Profunda')}
+            ${mkTab('details','Detalles')}
+          </div>
+          ${tab!=='details' ? `<div class="pill">${prog.done}/${prog.total} • ${prog.pct}%</div>` : ``}
+        </div>
+
+        ${tab!=='details' ? `
+          <div class="progress" style="margin-top:10px;"><div class="progressBar" style="width:${prog.pct}%;"></div></div>
+          <div class="row" style="justify-content:space-between;align-items:center;margin-top:10px;">
+            <div class="muted">Tareas por subzona</div>
+            <button class="btn" id="btnAddZoneTask">+ Tarea</button>
+          </div>
+          ${subBlocks}
+          ${miscBlock}
+        ` : detailsTab}
+      </div>
+    </aside>
+  `;
+}
+
 function daysBetween(aStr, bStr){
   // aStr, bStr = YYYY-MM-DD
   try{
@@ -2420,7 +2657,7 @@ function openHouseZoneModal(editId=null){
   });
 }
 
-function openHouseTaskModal(editId=null){
+function openHouseTaskModal(editId=null, defaults=null){
   normalizeHouse();
   const t = editId ? (state.house.tasks||[]).find(x=>x.id===editId) : null;
 
@@ -2456,6 +2693,10 @@ function openHouseTaskModal(editId=null){
         <div>
           <div class="muted" style="margin:2px 0 6px;">Zona</div>
           <select class="input" id="htZone">${zoneOptions}</select>
+        </div>
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Detalle</div>
+          <select class="input" id="htSub"></select>
         </div>
         <div>
           <div class="muted" style="margin:2px 0 6px;">Tipo</div>
@@ -2497,7 +2738,28 @@ function openHouseTaskModal(editId=null){
   const zoneSel = b.querySelector("#htZone");
   const typeSel = b.querySelector("#htType");
   const lvlSel = b.querySelector("#htLevel");
-  zoneSel.value = t?.zoneId || "";
+  const subSel = b.querySelector("#htSub");
+  // preselect zone/subzone
+  const preZone = t?.zoneId || (defaults && defaults.zoneId) || "";
+  zoneSel.value = preZone;
+
+  const fillSubzones = ()=>{
+    const zid = (zoneSel.value||'').trim();
+    if(!zid){
+      subSel.innerHTML = `<option value="">(sin detalle)</option>`;
+      subSel.value = '';
+      return;
+    }
+    ensureZoneDetails(zid);
+    const d = state.house.details[zid];
+    const opts = [`<option value="">(General)</option>`, ...(d.subzones||[]).map(s=>`<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`)].join('');
+    subSel.innerHTML = opts;
+    const preSub = t?.subzoneId || (defaults && defaults.subzoneId) || '';
+    subSel.value = preSub || '';
+  };
+  fillSubzones();
+  zoneSel.addEventListener('change', ()=>{ fillSubzones(); });
+
   typeSel.value = t?.type || (t?.zoneId ? "surface" : "global");
   lvlSel.value = t?.level || ((t?.type||"")==="deep" ? "deep" : "light");
   b.querySelector("#htPri").value = String(t?.priority ?? 3);
@@ -2506,6 +2768,7 @@ function openHouseTaskModal(editId=null){
   b.querySelector('[data-m="save"]').addEventListener("click", ()=>{
     const name = (b.querySelector("#htName").value||"").trim();
     const zoneId = (zoneSel.value||"").trim() || null;
+    const subzoneId = (subSel.value||"").trim() || null;
     const type = (typeSel.value||"").trim() || "misc";
     const minutes = Number((b.querySelector("#htMin").value||"").trim()) || 0;
     const freqDays = Number((b.querySelector("#htFreq").value||"").trim()) || 0;
@@ -2517,13 +2780,14 @@ function openHouseTaskModal(editId=null){
 
     // If type=global, force zoneId null
     const finalZoneId = (type==="global") ? null : zoneId;
+    const finalSubzoneId = finalZoneId ? subzoneId : null;
     const finalLevel = (type==="deep") ? "deep" : level;
 
     if(t){
-      t.name = name; t.zoneId = finalZoneId; t.type = type; t.minutes = minutes; t.freqDays = freqDays;
+      t.name = name; t.zoneId = finalZoneId; t.subzoneId = finalSubzoneId; t.type = type; t.minutes = minutes; t.freqDays = freqDays;
       t.level = finalLevel; t.priority = priority;
     }else{
-      state.house.tasks.push({ id: uid("t"), name, zoneId: finalZoneId, type, minutes, freqDays, level: finalLevel, priority, lastDone:"" });
+      state.house.tasks.push({ id: uid("t"), name, zoneId: finalZoneId, subzoneId: finalSubzoneId, type, minutes, freqDays, level: finalLevel, priority, lastDone:"" });
     }
     persist(); view(); toast("Tarea guardada ✅");
     close();
@@ -2720,7 +2984,7 @@ function wireHouse(root){
         }
         state.house.map.selected = zoneId;
         persist();
-        view();
+        openHouseZoneSheet(zoneId);
       });
 
       // Drag
@@ -2764,6 +3028,143 @@ function wireHouse(root){
   }
 }
 // ====================== END HOUSE CLEANING ======================
+
+
+
+function wireHouseZoneSheet(root){
+  normalizeHouse();
+  const scrim = root.querySelector('#zoneScrim');
+  const sheet = root.querySelector('#zoneSheet');
+  if(!scrim || !sheet) return;
+
+  const closeBtn = root.querySelector('#btnZoneClose');
+  const close = ()=> closeHouseZoneSheet();
+
+  scrim.addEventListener('click', close);
+  closeBtn && closeBtn.addEventListener('click', close);
+
+  // Esc closes
+  if(!window.__zoneSheetEsc){
+    window.__zoneSheetEsc = true;
+    window.addEventListener('keydown', (e)=>{
+      if(e.key==='Escape' && state?.house?.ui?.zoneSheet?.open){
+        closeHouseZoneSheet();
+      }
+    });
+  }
+
+  // Tabs
+  root.querySelectorAll('[data-zone-tab]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.house.ui.zoneSheet.tab = btn.getAttribute('data-zone-tab') || 'light';
+      persist();
+      view();
+    });
+  });
+
+  const zid = state.house.ui.zoneSheet.zoneId;
+
+  // Add task (zone wide)
+  const addZoneTask = root.querySelector('#btnAddZoneTask');
+  if(addZoneTask) addZoneTask.addEventListener('click', ()=> openHouseTaskModal(null, {zoneId:zid, subzoneId:null}));
+
+  root.querySelectorAll('[data-zone-add-task]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const sz = (btn.getAttribute('data-zone-add-task')||'').trim() || null;
+      openHouseTaskModal(null, {zoneId:zid, subzoneId:sz});
+    });
+  });
+
+  // Task done toggles
+  root.querySelectorAll('[data-zone-task-done]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const taskId = cb.getAttribute('data-zone-task-done');
+      const todayStr = isoDate(new Date());
+      if(cb.checked){
+        markHouseTaskDone(taskId, todayStr);
+        toast('Hecho ✅');
+      }else{
+        const t = (state.house.tasks||[]).find(x=>x.id===taskId);
+        if(t){ t.lastDone=''; persist(); }
+        toast('Reabierto');
+      }
+      view();
+    });
+  });
+
+  root.querySelectorAll('[data-zone-edit-task]').forEach(btn=>{
+    btn.addEventListener('click', ()=> openHouseTaskModal(btn.getAttribute('data-zone-edit-task')));
+  });
+
+  // Subzones CRUD (Detalles)
+  const btnAddSub = root.querySelector('#btnAddSubzone');
+  if(btnAddSub){
+    btnAddSub.addEventListener('click', ()=>{
+      openPromptModal({
+        title:'New subzone',
+        fields:[
+          {key:'name', label:'Name', placeholder:'Ej: Mesón'},
+          {key:'order', label:'Order (1..)', type:'number', placeholder:'1'}
+        ],
+        onSubmit: ({name, order})=>{
+          const n=(name||'').trim();
+          if(!n){ toast('Pon un nombre'); return; }
+          const d = ensureZoneDetails(zid);
+          d.subzones.push({id:uid('sz'), name:n, order:Number(order)|| (d.subzones.length+1)});
+          persist(); view(); toast('Subzona guardada ✅');
+        }
+      });
+    });
+  }
+
+  root.querySelectorAll('[data-subzone-edit]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const sid = btn.getAttribute('data-subzone-edit');
+      const d = ensureZoneDetails(zid);
+      const sz = (d.subzones||[]).find(x=>x.id===sid);
+      if(!sz) return;
+      openPromptModal({
+        title:'Edit subzone',
+        fields:[
+          {key:'name', label:'Name', placeholder:'', value:sz.name||''},
+          {key:'order', label:'Order (1..)', type:'number', placeholder:'', value:String(sz.order||1)}
+        ],
+        onSubmit: ({name, order})=>{
+          const n=(name||'').trim();
+          if(!n){ toast('Pon un nombre'); return; }
+          sz.name=n; sz.order=Number(order)||sz.order||1;
+          persist(); view(); toast('Actualizado ✅');
+        }
+      });
+    });
+  });
+
+  root.querySelectorAll('[data-subzone-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const sid = btn.getAttribute('data-subzone-del');
+      const d = ensureZoneDetails(zid);
+      const hasTasks = (state.house.tasks||[]).some(t=>t.zoneId===zid && t.subzoneId===sid);
+      if(hasTasks){
+        const ok = confirm('Hay tareas en esta subzona. ¿Moverlas a General y borrar?');
+        if(!ok) return;
+        (state.house.tasks||[]).forEach(t=>{ if(t.zoneId===zid && t.subzoneId===sid) t.subzoneId=null; });
+      }
+      d.subzones = (d.subzones||[]).filter(x=>x.id!==sid);
+      persist(); view(); toast('Subzona borrada 🧽');
+    });
+  });
+
+  // Notes save
+  const btnSaveNotes = root.querySelector('#btnSaveZoneNotes');
+  if(btnSaveNotes){
+    btnSaveNotes.addEventListener('click', ()=>{
+      const ta = root.querySelector('#zoneNotes');
+      const d = ensureZoneDetails(zid);
+      d.notes = (ta?.value||'').trim();
+      persist(); toast('Notas guardadas ✅');
+    });
+  }
+}
 
 function viewCalendar(){
   const base = new Date();

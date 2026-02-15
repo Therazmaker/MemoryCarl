@@ -578,3 +578,53 @@ body{
   .mapWrap{height:470px;}
   .mapNode{width:112px;}
 }
+
+/* Side sheet (Casa zone details) */
+.sideScrim{
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.45);
+  opacity:0;
+  pointer-events:none;
+  transition: opacity 180ms ease;
+  z-index:40;
+}
+.sideScrim.show{ opacity:1; pointer-events:auto; }
+
+.sideSheet{
+  position:fixed;
+  top:0; right:0;
+  height:100vh;
+  width:min(420px, 92vw);
+  background:rgba(12,16,28,.92);
+  border-left:1px solid rgba(255,255,255,.12);
+  backdrop-filter: blur(14px);
+  transform: translateX(110%);
+  transition: transform 220ms ease;
+  z-index:41;
+  display:flex;
+  flex-direction:column;
+}
+.sideSheet.open{ transform: translateX(0); }
+
+.sideHead{
+  padding:14px 14px 10px;
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+  border-bottom:1px solid rgba(255,255,255,.10);
+}
+.sideTitle{ font-weight:900; font-size:18px; margin-top:2px; }
+
+.sideBody{
+  padding:12px 14px calc(var(--navH) + 18px);
+  overflow:auto;
+}
+
+.zoneSection{
+  margin-top:12px;
+  padding:12px;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:16px;
+  background:rgba(255,255,255,.03);
+}
