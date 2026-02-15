@@ -4445,20 +4445,68 @@ function openMergeGameFull(){
   container.style.display = "block";
   container.style.position = "fixed";
   container.style.inset = "0";
-  // Ensure the container has real layout size before initMergeGame reads clientWidth/clientHeight.
-  // Some browsers can briefly report 0x0 right after display toggles.
   container.style.width = "100vw";
   container.style.height = "100vh";
   container.style.background = "#0B0F19";
   container.style.zIndex = "9999";
 
-  if(typeof window.initMergeGame === "function"){
-    // Force a reflow, then init on the next frame so measurements are correct.
-    void container.offsetHeight;
-    requestAnimationFrame(()=> window.initMergeGame("mergeContainer"));
-  }else{
-    console.warn("initMergeGame not found. Check index.html script order for merge.js");
+  // Ensure scripts are present even if the initial load order was blocked or cached oddly (mobile Brave can do this).
+  async function loadScriptOnce(src){
+    return new Promise((resolve, reject)=>{
+      // Already loaded?
+      const existing = Array.from(document.scripts||[]).find(s => (s.src||"").includes(src));
+      if(existing) return resolve(true);
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = false;
+      s.onload = ()=> resolve(true);
+      s.onerror = (e)=> reject(e);
+      document.head.appendChild(s);
+    });
   }
+
+  async function ensureMergeDeps(){
+    // Matter.js might be blocked by Brave Shields when loaded from CDN. If so, we can't run the game.
+    if(typeof window.Matter === "undefined"){
+      try{
+        // Try a secondary CDN as a best-effort fallback.
+        await loadScriptOnce("https://unpkg.com/matter-js@0.19.0/build/matter.min.js");
+      }catch(e){}
+    }
+
+    if(typeof window.initMergeGame !== "function"){
+      try{
+        await loadScriptOnce("./src/merge/merge.js");
+      }catch(e){}
+    }
+
+    return (typeof window.initMergeGame === "function") && (typeof window.Matter !== "undefined");
+  }
+
+  // Force a reflow, then init on the next frame so measurements are correct.
+  void container.offsetHeight;
+
+  ensureMergeDeps().then((ok)=>{
+    if(ok){
+      requestAnimationFrame(()=> window.initMergeGame("mergeContainer"));
+    }else{
+      console.warn("MergeLab deps missing. If you're on Brave mobile, disable Shields for this site to allow matter-js.");
+      container.innerHTML = `
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#fff;font-family:system-ui;background:#0B0F19;">
+          <div style="max-width:520px">
+            <div style="font-size:18px;font-weight:700;margin-bottom:10px">Merge Lab no pudo cargar</div>
+            <div style="opacity:.85;line-height:1.35">
+              Tu navegador bloqueó el motor del juego (Matter.js). En Brave móvil, suele ser por Shields.
+              <br><br>
+              Prueba: <b>Brave Shields → Off</b> para este sitio, y recarga.
+            </div>
+            <div style="margin-top:14px;opacity:.7;font-size:12px">v7.3</div>
+          </div>
+        </div>`;
+    }
+  }).catch((e)=>{
+    console.warn("MergeLab deps load failed", e);
+  });
 
   document.addEventListener("keydown", escCloseMerge);
 }
