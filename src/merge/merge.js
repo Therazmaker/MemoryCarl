@@ -113,13 +113,19 @@
 
   function setBackground(container){
     if(BG_URL){
-      container.style.backgroundImage = `url(${BG_URL})`;
+      const img = IMG_CACHE.get(BG_URL) || null;
+      const ok = !!(img && img.complete && (img.naturalWidth || img.width));
+      if(ok){
+        container.style.backgroundImage = `url(${BG_URL})`;
+      }else{
+        // Avoid hiding everything behind a broken background image
+        container.style.backgroundImage = "none";
+        try{ console.warn("[MergeLab] bg not ready, skipping:", BG_URL); }catch(e){}
+      }
       container.style.backgroundSize = "cover";
       container.style.backgroundPosition = "center";
-      container.style.backgroundRepeat = "no-repeat";
     }else{
       container.style.backgroundImage = "none";
-      container.style.background = "#0B0F19";
     }
   }
 
@@ -264,23 +270,31 @@
   }
 
   function applySpriteRender(body, item){
-    if(item.sprite && IMG_CACHE.has(item.sprite)){
-      const img = IMG_CACHE.get(item.sprite);
-      // Scale sprite so its visible size matches diameter (2r)
-      const target = (item.radius * 2);
-      const sx = target / (img.naturalWidth || img.width || 512);
-      const sy = target / (img.naturalHeight || img.height || 512);
-      body.render.sprite = {
-        texture: item.sprite,
-        xScale: sx,
-        yScale: sy
-      };
-      // Hide fill so sprite is clean
-      body.render.fillStyle = "rgba(0,0,0,0)";
-    }else if(item.color){
-      body.render.fillStyle = item.color;
+    // Only enable sprite rendering if the image is truly loaded and has dimensions.
+    // If the sprite fails to load (404, blocked, etc.), we keep a visible colored circle instead of an invisible body.
+    if(item.sprite){
+      const img = IMG_CACHE.get(item.sprite) || null;
+      const ok = !!(img && img.complete && (img.naturalWidth || img.width) && (img.naturalHeight || img.height));
+      if(ok){
+        const target = (item.radius * 2);
+        const iw = (img.naturalWidth || img.width || 512);
+        const ih = (img.naturalHeight || img.height || 512);
+        const sx = target / iw;
+        const sy = target / ih;
+        body.render.sprite = { texture: item.sprite, xScale: sx, yScale: sy };
+        // Keep a faint fill as a safety net (some browsers fail sprite draw silently)
+        body.render.fillStyle = item.color || "#6EE7B7";
+      }else{
+        // Sprite not usable: ensure body is visible.
+        body.render.sprite = null;
+        body.render.fillStyle = item.color || "#6EE7B7";
+        try{ console.warn("[MergeLab] sprite not ready, fallback to circle:", item.sprite, img); }catch(e){}
+      }
+      return;
     }
+    if(item.color) body.render.fillStyle = item.color;
   }
+
 
   function spawnItem(x){
     const { Bodies, Composite } = Matter;
