@@ -156,6 +156,11 @@
     // Read size after it's visible
     width = container.clientWidth || window.innerWidth;
     height = container.clientHeight || window.innerHeight;
+    // Defensive: if the container was just displayed, some browsers can report 0x0 momentarily.
+    if(width < 50) width = window.innerWidth;
+    if(height < 50) height = window.innerHeight;
+    // Ensure the container itself has size.
+    try{ container.style.width = "100vw"; container.style.height = "100vh"; }catch(e){}
 
     engine = Engine.create();
     engine.gravity.y = 1;
@@ -171,6 +176,9 @@
         pixelRatio: Math.min(2, window.devicePixelRatio || 1)
       }
     });
+
+    // Force a consistent viewport. This prevents edge cases where bounds end up off-screen.
+    try{ Matter.Render.lookAt(render, { min: { x: 0, y: 0 }, max: { x: width, y: height } }); }catch(e){}
 
     // Make sure canvas is on top of background
     try{

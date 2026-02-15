@@ -4445,11 +4445,17 @@ function openMergeGameFull(){
   container.style.display = "block";
   container.style.position = "fixed";
   container.style.inset = "0";
+  // Ensure the container has real layout size before initMergeGame reads clientWidth/clientHeight.
+  // Some browsers can briefly report 0x0 right after display toggles.
+  container.style.width = "100vw";
+  container.style.height = "100vh";
   container.style.background = "#0B0F19";
   container.style.zIndex = "9999";
 
   if(typeof window.initMergeGame === "function"){
-    window.initMergeGame("mergeContainer");
+    // Force a reflow, then init on the next frame so measurements are correct.
+    void container.offsetHeight;
+    requestAnimationFrame(()=> window.initMergeGame("mergeContainer"));
   }else{
     console.warn("initMergeGame not found. Check index.html script order for merge.js");
   }
