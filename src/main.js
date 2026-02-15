@@ -106,6 +106,7 @@ const LS = {
   musicToday: "memorycarl_v2_music_today",
   musicLog: "memorycarl_v2_music_log",
   sleepLog: "memorycarl_v2_sleep_log", // reserved (connect later)
+  budgetMonthly: "memorycarl_v2_budget_monthly"
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -310,6 +311,7 @@ function persist(){
   save(LS.musicToday, state.musicToday);
   save(LS.musicLog, state.musicLog);
   save(LS.sleepLog, state.sleepLog);
+  save(LS.budgetMonthly, state.budgetMonthly);
 }
 
 // ---- Backup (Export/Import) ----
@@ -376,6 +378,7 @@ function importBackup(file){
       state.musicToday = (data.musicToday && typeof data.musicToday === "object") ? data.musicToday : load(LS.musicToday, null);
       state.musicLog = Array.isArray(data.musicLog) ? data.musicLog : load(LS.musicLog, []);
       state.sleepLog = Array.isArray(data.sleepLog) ? data.sleepLog : load(LS.sleepLog, []);
+      state.budgetMonthly = Array.isArray(data.budgetMonthly) ? data.budgetMonthly : load(LS.budgetMonthly, []);
       state.musicCursor = 0;
 
       persist();
@@ -675,6 +678,34 @@ function getSleepSeries(days=7){
   return { items, maxMinutes, avgMinutes, lastMinutes: last };
 }
 
+
+function getSleepWeekSeries(){
+  // Current week view (Sunday..Saturday) so bars match D L M M J V S
+  const today = new Date();
+  const start = new Date(today);
+  // JS getDay(): 0=Sun..6=Sat
+  start.setDate(today.getDate() - today.getDay());
+
+  const dates = Array.from({length:7}, (_,i)=>{
+    const d = new Date(start);
+    d.setDate(start.getDate()+i);
+    return isoDate(d);
+  });
+
+  const map = new Map();
+  const log = (state.sleepLog || []).map(normalizeSleepEntry).filter(Boolean);
+  for(const e of log){
+    map.set(e.date, (map.get(e.date)||0) + e.totalMinutes);
+  }
+
+  const items = dates.map(date => ({ date, minutes: map.get(date)||0 }));
+  const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60);
+  const avgMinutes = items.reduce((s,x)=>s+x.minutes,0) / items.length;
+  const last = items[items.length-1]?.minutes || 0;
+  return { items, maxMinutes, avgMinutes, lastMinutes: last };
+}
+
+
 function renderSleepBars(series){
   const items = series?.items || [];
   if(!items.length){
@@ -682,7 +713,7 @@ function renderSleepBars(series){
   }
   const maxM = series.maxMinutes || 480;
   const toPx = (minutes) => {
-    const minH = 18, maxH = 88;
+    const minH = 14, maxH = 68;
     const ratio = Math.max(0, Math.min(1, minutes / maxM));
     return Math.round(minH + ratio * (maxH - minH));
   };
@@ -768,7 +799,7 @@ function viewHome(){
   `).join("");
 
 
-const sleepSeries = getSleepSeries(7);
+const sleepSeries = getSleepWeekSeries();
 const sleepBars = renderSleepBars(sleepSeries);
 
   return `
@@ -855,6 +886,138 @@ const sleepBars = renderSleepBars(sleepSeries);
         </div>
       </div>
     </section>
+
+    <section class="card homeCard homeWide" id="homeBudgetCard">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Presupuesto mensual</h2>
+          <div class="small">Pagos de fin de mes</div>
+        </div>
+        <button class="iconBtn" id="btnAddBudgetItem" aria-label="Add budget item">＋</button>
+      </div>
+      <div class="hr"></div>
+      ${renderBudgetMonthly()}
+    </section>
+
+function normalizeMoney(v){
+  const n = Number(String(v||"").replace(/[^0-9.,-]/g,"").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function getBudgetMonthly(){
+  const arr = Array.isArray(state.budgetMonthly) ? state.budgetMonthly : [];
+  // normalize
+  return arr.map(x=>({
+    id: x.id || uid("b"),
+    name: String(x.name||"").trim(),
+    amount: Number(x.amount||0),
+    dueDay: x.dueDay ? Number(x.dueDay) : null,
+  })).filter(x=>x.name);
+}
+
+function renderBudgetMonthly(){
+  const items = getBudgetMonthly();
+  const total = items.reduce((s,x)=>s + (Number(x.amount)||0), 0);
+  const fmt = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+  const list = items.length ? items.map(x=>`
+    <div class="budgetRow">
+      <div class="budgetName">${escapeHtml(x.name)}</div>
+      <div class="budgetAmt">S/ ${escapeHtml(fmt(x.amount))}</div>
+      <button class="miniDanger" data-budget-del="${escapeHtml(x.id)}" aria-label="Delete">✕</button>
+    </div>
+  `).join("") : `<div class="muted">Toca ＋ para agregar tus pagos del mes 💸</div>`;
+
+  return `
+    <div class="budgetTop">
+      <div class="budgetTotal">Total: <strong>S/ ${escapeHtml(fmt(total))}</strong></div>
+      <div class="budgetCount">${items.length ? `${items.length} ítem(s)` : ""}</div>
+    </div>
+    <div class="budgetList">${list}</div>
+  `;
+}
+
+function openBudgetModal(){
+  const host = document.querySelector("#app");
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+
+  modal.innerHTML = `
+    <div class="modal" role="dialog" aria-label="Agregar pago mensual">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">Agregar pago mensual</div>
+          <div class="modalSub">Registra lo que debes pagar a fin de mes. (Local + sync)</div>
+        </div>
+        <button class="iconBtn" data-close aria-label="Close">✕</button>
+      </div>
+
+      <div class="formGrid">
+        <label class="field">
+          <div class="label">Concepto</div>
+          <input id="bName" type="text" placeholder="Ej: Internet, alquiler, tarjeta..." />
+        </label>
+
+        <label class="field">
+          <div class="label">Monto (S/)</div>
+          <input id="bAmt" type="text" inputmode="decimal" placeholder="Ej: 120.50" />
+        </label>
+
+        <label class="field">
+          <div class="label">Día (opcional)</div>
+          <input id="bDay" type="number" min="1" max="31" placeholder="Ej: 30" />
+          <div class="hint">Si lo dejas vacío: fin de mes.</div>
+        </label>
+
+        <label class="field">
+          <div class="label">Nota (opcional)</div>
+          <input id="bNote" type="text" placeholder="Ej: se paga por app, recordar promo..." />
+        </label>
+      </div>
+
+      <div class="row" style="justify-content:flex-end; gap:10px; margin-top:14px;">
+        <button class="btn" data-close>Cancelar</button>
+        <button class="btn primary" id="bSave">Guardar</button>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(modal);
+
+  const close = ()=> modal.remove();
+  modal.addEventListener("click",(e)=>{
+    if(e.target === modal) close();
+    if(e.target && e.target.matches("[data-close]")) close();
+  });
+
+  const elName = modal.querySelector("#bName");
+  const elAmt = modal.querySelector("#bAmt");
+  const elDay = modal.querySelector("#bDay");
+  const elNote = modal.querySelector("#bNote");
+  elName && elName.focus();
+
+  modal.querySelector("#bSave")?.addEventListener("click", ()=>{
+    const name = String(elName?.value||"").trim();
+    const amount = normalizeMoney(elAmt?.value||"");
+    const dueDay = elDay?.value ? Math.max(1, Math.min(31, Number(elDay.value))) : null;
+    const note = String(elNote?.value||"").trim();
+
+    if(!name || !amount){
+      toast("Falta concepto o monto ✍️");
+      return;
+    }
+
+    const items = getBudgetMonthly();
+    items.push({ id: uid("b"), name, amount, dueDay, note });
+    state.budgetMonthly = items;
+    persist();
+    view();
+    toast("Pago agregado ✅");
+    close();
+  });
+}
+
+
+
   `;
 }
 
@@ -1187,6 +1350,26 @@ function wireHome(root){
       view();
     });
   });
+
+  // budget monthly
+  const btnBudget = root.querySelector("#btnAddBudgetItem");
+  if(btnBudget) btnBudget.addEventListener("click", (e)=>{ e.stopPropagation(); openBudgetModal(); });
+
+  const budgetCard = root.querySelector("#homeBudgetCard");
+  if(budgetCard) budgetCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddBudgetItem")) return; /* no auto-open, keeps card tappable but safe */ });
+
+  root.querySelectorAll("[data-budget-del]").forEach(btn=>{
+    btn.addEventListener("click",(e)=>{
+      e.stopPropagation();
+      const id = btn.getAttribute("data-budget-del");
+      state.budgetMonthly = getBudgetMonthly().filter(x=>x.id!==id);
+      persist();
+      view();
+      toast("Eliminado 🧹");
+    });
+  });
+
+
 }
 // ---- END HOME ----
 
