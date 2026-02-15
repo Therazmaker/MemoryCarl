@@ -839,7 +839,7 @@ function viewSettings(){
     <div class="card">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v6</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7</span></h2>
           <div class="small">Config del juego (fondo, sprites, radios, spawnPool). Se guarda en este dispositivo.</div>
         </div>
       </div>
@@ -1175,7 +1175,7 @@ const sleepBars = renderSleepBars(sleepSeries);
     <section class="card homeCard homeWide" id="homeMergeCard">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v6</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7</span></h2>
           <div class="small">Suelta y fusiona (pantalla completa)</div>
         </div>
         <button class="iconBtn" id="btnOpenMergeGame" aria-label="Open merge game">🎮</button>

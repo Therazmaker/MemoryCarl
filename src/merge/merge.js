@@ -65,13 +65,44 @@
   }
 
   function preloadImage(url){
-    return new Promise((resolve, reject)=>{
+    return new Promise((resolve)=>{
       if(!url) return resolve(null);
       if(IMG_CACHE.has(url)) return resolve(IMG_CACHE.get(url));
+
       const img = new Image();
-      img.onload = ()=>{ IMG_CACHE.set(url, img); resolve(img); };
-      img.onerror = (e)=>{ console.warn("Failed to load sprite", url); resolve(null); };
+      img.decoding = "async";
+
+      const finalize = ()=>{
+        // On some mobile browsers, onload can fire before decode completes.
+        // We treat "ready" as having real dimensions.
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        if(w > 0 && h > 0){
+          IMG_CACHE.set(url, img);
+          return resolve(img);
+        }
+        // Try a micro-delay then re-check.
+        setTimeout(()=>{
+          const w2 = img.naturalWidth || img.width || 0;
+          const h2 = img.naturalHeight || img.height || 0;
+          if(w2 > 0 && h2 > 0){
+            IMG_CACHE.set(url, img);
+            return resolve(img);
+          }
+          console.warn("Sprite loaded but has 0x0 size (will fallback)", url);
+          resolve(null);
+        }, 0);
+      };
+
+      img.onload = finalize;
+      img.onerror = ()=>{ console.warn("Failed to load sprite", url); resolve(null); };
+
       img.src = url;
+
+      // If the browser supports decode(), wait for it.
+      if(typeof img.decode === "function"){
+        img.decode().then(finalize).catch(()=>{/* onload will handle */});
+      }
     });
   }
 
@@ -229,7 +260,25 @@
     Render.run(render);
 
     // Sprite activation hook: keep circles visible until the renderer has a loaded Image for the texture.
-    Matter.Events.on(engine, "afterUpdate", () => {
+    
+
+// Safety net (mobile): if a body has an active sprite, never let the solid circle "come back".
+// Some render paths can re-use the body's fillStyle if it was set earlier.
+Matter.Events.on(engine, "beforeUpdate", () => {
+  try{
+    const bodies = Matter.Composite.allBodies(engine.world);
+    for(const b of bodies){
+      const t = b?.render?.sprite?.texture;
+      if(t && !b._spritePending){
+        b.render.fillStyle = "rgba(0,0,0,0)";
+        // Optional outline for readability (can be tuned later)
+        b.render.strokeStyle = "rgba(255,255,255,0.18)";
+        b.render.lineWidth = 1;
+      }
+    }
+  }catch(e){}
+});
+Matter.Events.on(engine, "afterUpdate", () => {
       try{
         const texMap = (render && render.textures) ? render.textures : {};
         const bodies = Matter.Composite.allBodies(engine.world);
