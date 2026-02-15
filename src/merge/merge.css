@@ -65,3 +65,5 @@
 .mcMergeOverBtns{ margin-top:14px; display:flex; gap:10px; justify-content:flex-end; }
 
 #mergeContainer canvas{ display:block; }
+
+.mcMergeVer{ font-size:12px; opacity:0.75; margin-left:6px; }

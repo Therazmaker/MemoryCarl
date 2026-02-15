@@ -835,6 +835,24 @@ function viewSettings(){
         <div class="v">Se muestran abajo en este tab</div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v6</span></h2>
+          <div class="small">Config del juego (fondo, sprites, radios, spawnPool). Se guarda en este dispositivo.</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="row" style="margin:0;">
+        <button class="btn" id="btnMergeCfg">Editar config</button>
+        <button class="btn" id="btnMergeCfgReset">Reset</button>
+      </div>
+      <div class="note" style="margin-top:10px;">
+        Tip: <span class="mono">spawnPool: 4</span> significa que solo salen random las primeras 4 piezas.
+      </div>
+    </div>
+
   `;
 }
 
@@ -1157,7 +1175,7 @@ const sleepBars = renderSleepBars(sleepSeries);
     <section class="card homeCard homeWide" id="homeMergeCard">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab</h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v6</span></h2>
           <div class="small">Suelta y fusiona (pantalla completa)</div>
         </div>
         <button class="iconBtn" id="btnOpenMergeGame" aria-label="Open merge game">🎮</button>

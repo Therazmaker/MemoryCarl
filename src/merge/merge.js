@@ -88,7 +88,7 @@
     hudEl.className = "mcMergeHud";
     hudEl.innerHTML = `
       <div class="mcMergeTop">
-        <div class="mcMergeTitle">Merge Lab</div>
+        <div class="mcMergeTitle">Merge Lab <span id="mcMergeVer" class="mcMergeVer"></span></div>
         <div class="mcMergeScore"><span>Score</span><b id="mcMergeScoreVal">0</b></div>
         <button class="mcMergeClose" id="mcMergeCloseBtn" aria-label="Close">✕</button>
       </div>
@@ -145,6 +145,10 @@
     setBackground(container);
 
     ensureHud(container);
+    try{
+      const vEl = container.querySelector('#mcMergeVer');
+      if(vEl) vEl.textContent = (CFG && CFG.version) ? CFG.version : '';
+    }catch(e){}
     setScore(0);
     gameOverState = false;
     startedAt = Date.now();

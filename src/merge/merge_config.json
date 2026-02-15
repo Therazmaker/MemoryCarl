@@ -38,5 +38,6 @@
       "sprite": "./src/merge/assets/item_5.png",
       "points": 32
     }
-  ]
+  ],
+  "version": "v6"
 }
