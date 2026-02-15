@@ -259,49 +259,49 @@
     Runner.run(runner, engine);
     Render.run(render);
 
+    // Manual sprite overlay for mobile reliability:
+    // Draw sprites ourselves after Matter renders shapes.
+    Matter.Events.on(render, "afterRender", () => {
+      try{
+        const ctx = render.context;
+        const bodies = Matter.Composite.allBodies(engine.world);
+        for(const b of bodies){
+          const url = b && b._spriteUrl;
+          if(!url) continue;
+          const img = IMG_CACHE.get(url);
+          if(!img) continue;
+          const r = b.circleRadius || 0;
+          if(r <= 0) continue;
+
+          // Draw sprite centered on body.
+          const w = r * 2;
+          const h = r * 2;
+
+          ctx.save();
+          ctx.translate(b.position.x, b.position.y);
+          ctx.rotate(b.angle || 0);
+          ctx.drawImage(img, -w/2, -h/2, w, h);
+          ctx.restore();
+
+          // Once we've successfully drawn at least once, hide the solid fill
+          // so the sprite is what you see (still keep a light outline).
+          if(!b._spriteFillCleared){
+            b.render.fillStyle = "rgba(0,0,0,0)";
+            b.render.strokeStyle = "rgba(255,255,255,0.20)";
+            b.render.lineWidth = 1;
+            b._spriteFillCleared = true;
+            try{ console.log("[MergeLab] sprite drawn (manual)", { texture: url }); }catch(e){}
+          }
+        }
+      }catch(e){}
+    });
+
     // Sprite activation hook: keep circles visible until the renderer has a loaded Image for the texture.
     
 
 // Safety net (mobile): if a body has an active sprite, never let the solid circle "come back".
 // Some render paths can re-use the body's fillStyle if it was set earlier.
-Matter.Events.on(engine, "beforeUpdate", () => {
-  try{
-    const bodies = Matter.Composite.allBodies(engine.world);
-    for(const b of bodies){
-      const t = b?.render?.sprite?.texture;
-      if(t && !b._spritePending){
-        b.render.fillStyle = "rgba(0,0,0,0)";
-        // Optional outline for readability (can be tuned later)
-        b.render.strokeStyle = "rgba(255,255,255,0.18)";
-        b.render.lineWidth = 1;
-      }
-    }
-  }catch(e){}
-});
-Matter.Events.on(engine, "afterUpdate", () => {
-      try{
-        const texMap = (render && render.textures) ? render.textures : {};
-        const bodies = Matter.Composite.allBodies(engine.world);
-        for(const b of bodies){
-          if(b._spritePending && (!b.render.sprite || !b.render.sprite.texture)){
-            const t = b._spritePending.texture;
-            const img = (IMG_CACHE.get(t) || (texMap ? texMap[t] : null));
-            const iw = (img && (img.naturalWidth || img.width)) || 0;
-            const ih = (img && (img.naturalHeight || img.height)) || 0;
-            if(img && (img.complete || iw || ih)){
-              // Ensure renderer also knows this image.
-              try{ if(texMap) texMap[t] = img; }catch(e){}
-
-              b.render.sprite = { texture: t, xScale: b._spritePending.xScale, yScale: b._spritePending.yScale };
-              // Once sprite is active, hide the solid fill so the sprite is the star.
-              b.render.fillStyle = "rgba(0,0,0,0)";
-              // Keep a very light outline so the piece is still readable on dark backgrounds.
-              b.render.strokeStyle = "rgba(255,255,255,0.20)";
-              b.render.lineWidth = 1;
-              b._spritePending = null;
-
-              console.log("[MergeLab] sprite activated", { texture: t, iw, ih });
-            }
+Matter.Matter.            }
           }
         }
       }catch(e){}
@@ -377,12 +377,13 @@ Matter.Events.on(engine, "afterUpdate", () => {
       const ih = (img && (img.naturalHeight || img.height)) || 512;
       const sx = target / iw;
       const sy = target / ih;
-      body._spritePending = { texture: item.sprite, xScale: sx, yScale: sy };
-      // IMPORTANT: do NOT set body.render.sprite yet, so the fallback circle stays visible.
+      body._spriteUrl = item.sprite;
+      // Keep circle visible until we successfully draw sprite on canvas.
+      // Manual sprite renderer will hide the fill after first draw.
       try{
-        console.log('[MergeLab] sprite pending', { texture: item.sprite, iw, ih, sx, sy });
+        console.log('[MergeLab] sprite pending', { texture: item.sprite });
       }catch(e){}
-    }
+}
   }
 
   function spawnItem(x){
