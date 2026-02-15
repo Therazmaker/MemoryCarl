@@ -731,7 +731,17 @@ function view(){
 	    if(state.tab==="calendar") openCalendarDrawModal(isoDate(new Date()));
   });
 
-  const btnExport = root.querySelector("#btnExport");
+  
+  const btnMergeCfg = root.querySelector("#btnMergeCfg");
+  if(btnMergeCfg) btnMergeCfg.addEventListener("click", openMergeCfgModal);
+
+  const btnMergeCfgReset = root.querySelector("#btnMergeCfgReset");
+  if(btnMergeCfgReset) btnMergeCfgReset.addEventListener("click", ()=>{
+    localStorage.removeItem("mc_merge_cfg_override");
+    toast("🧽 Merge config reseteada");
+  });
+
+const btnExport = root.querySelector("#btnExport");
   if(btnExport) btnExport.addEventListener("click", exportBackup);
 
   const btnNotif = root.querySelector("#btnNotif");
@@ -4461,3 +4471,62 @@ document.addEventListener("click", function(e){
 });
 
 // ====================== END MERGE GAME ======================
+
+
+
+function openMergeCfgModal(){
+  const existing = document.querySelector("#mergeCfgBackdrop");
+  if(existing) existing.remove();
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modalBackdrop";
+  backdrop.id = "mergeCfgBackdrop";
+  backdrop.innerHTML = `
+    <div class="modal">
+      <h2>Merge Lab Config (JSON)</h2>
+      <div class="small muted">Se aplica al abrir el juego. Si el JSON está mal, se ignora.</div>
+      <div class="grid" style="margin-top:10px;">
+        <textarea id="mergeCfgText" class="input" style="height:260px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></textarea>
+        <div class="row" style="margin:0; justify-content:flex-end;">
+          <button class="btn" id="mergeCfgCancel">Cerrar</button>
+          <button class="btn primary" id="mergeCfgSave">Guardar</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+
+  const ta = backdrop.querySelector("#mergeCfgText");
+  const local = localStorage.getItem("mc_merge_cfg_override");
+  if(local){
+    ta.value = local;
+  }else{
+    // load default file for convenience
+    fetch("./src/merge/merge_config.json").then(r=>r.text()).then(t=>ta.value=t).catch(()=>{
+      ta.value = JSON.stringify({spawnPool:4, background:"./src/merge/assets/bg.png", items:[]}, null, 2);
+    });
+  }
+
+  function close(){
+    backdrop.remove();
+  }
+
+  backdrop.addEventListener("click", (e)=>{
+    if(e.target === backdrop) close();
+  });
+
+  backdrop.querySelector("#mergeCfgCancel").addEventListener("click", close);
+
+  backdrop.querySelector("#mergeCfgSave").addEventListener("click", ()=>{
+    try{
+      const parsed = JSON.parse(ta.value);
+      localStorage.setItem("mc_merge_cfg_override", JSON.stringify(parsed, null, 2));
+      toast("✅ Merge config guardada");
+      close();
+    }catch(err){
+      toast("❌ JSON inválido");
+    }
+  });
+}
+

@@ -32,6 +32,19 @@
   const STILL_V = 0.18;    // considered "still" (velocity threshold)
 
   async function loadConfig(){
+    // Local override (from Settings UI)
+    try{
+      const raw = localStorage.getItem('mc_merge_cfg_override');
+      if(raw){
+        const parsed = JSON.parse(raw);
+        CFG = parsed;
+        SPAWN_POOL = Math.max(1, Math.min((CFG.spawnPool ?? 4), (CFG.items?.length ?? 6)));
+        BG_URL = CFG.background || null;
+        ITEMS = (CFG.items && CFG.items.length) ? CFG.items : DEFAULT_ITEMS;
+        return CFG;
+      }
+    }catch(e){ console.warn('Invalid mc_merge_cfg_override, ignoring.', e); }
+
     if(CFG) return CFG;
     try{
       const res = await fetch("./src/merge/merge_config.json", { cache: "no-store" });
@@ -154,6 +167,16 @@
         pixelRatio: Math.min(2, window.devicePixelRatio || 1)
       }
     });
+
+    // Make sure canvas is on top of background
+    try{
+      render.canvas.style.position = 'absolute';
+      render.canvas.style.inset = '0';
+      render.canvas.style.zIndex = '1';
+      render.canvas.style.width = '100%';
+      render.canvas.style.height = '100%';
+      render.canvas.style.touchAction = 'none';
+    }catch(e){}
 
     // Arena
     const ground = Bodies.rectangle(width/2, height+30, width, 60, { isStatic: true, render:{fillStyle:"rgba(17,24,39,0.85)"} });
