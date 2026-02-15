@@ -219,6 +219,26 @@
     Runner.run(runner, engine);
     Render.run(render);
 
+    // Sprite activation hook: keep circles visible until the renderer has a loaded Image for the texture.
+    Matter.Events.on(engine, "afterUpdate", () => {
+      try{
+        const texMap = (render && render.textures) ? render.textures : {};
+        const bodies = Matter.Composite.allBodies(engine.world);
+        for(const b of bodies){
+          if(b._spritePending && !b.render.sprite){
+            const t = b._spritePending.texture;
+            const img = texMap ? texMap[t] : null;
+            if(img && (img.complete || (img.naturalWidth||img.width))){
+              b.render.sprite = { texture: t, xScale: b._spritePending.xScale, yScale: b._spritePending.yScale };
+              // Leave fillStyle + stroke so it's never fully invisible.
+              console.log("[MergeLab] sprite activated", t);
+            }
+          }
+        }
+      }catch(e){}
+    });
+
+
     // Expose a tiny debug handle so we can inspect the world from DevTools.
     // (Safe: no secrets, just runtime objects.)
     try{
@@ -274,29 +294,24 @@
   }
 
   function applySpriteRender(body, item){
-    // ALWAYS keep a visible fallback fill (never fully transparent).
-    // Some browsers (or timing) can fail to paint the sprite even if the texture key exists,
-    // which would make the body "exist" but look invisible.
+    // Keep a visible fallback fill. We only enable the sprite once we confirm
+    // Matter's renderer has an actual loaded Image for the texture.
     if(item.color) body.render.fillStyle = item.color;
+    body.render.strokeStyle = "rgba(255,255,255,0.35)";
+    body.render.lineWidth = 1;
 
-    if(item.sprite && IMG_CACHE.has(item.sprite)){
-      const img = IMG_CACHE.get(item.sprite);
+    if(item.sprite){
+      // Store pending sprite info; a post-step hook will activate it once loaded.
       const target = (item.radius * 2);
+      const img = IMG_CACHE.get(item.sprite);
       const iw = (img && (img.naturalWidth || img.width)) || 512;
       const ih = (img && (img.naturalHeight || img.height)) || 512;
       const sx = target / iw;
       const sy = target / ih;
-      body.render.sprite = {
-        texture: item.sprite,
-        xScale: sx,
-        yScale: sy
-      };
+      body._spritePending = { texture: item.sprite, xScale: sx, yScale: sy };
+      // IMPORTANT: do NOT set body.render.sprite yet, so the fallback circle stays visible.
       try{
-        console.log('[MergeLab] sprite set', { texture: item.sprite, iw, ih, sx, sy });
-      }catch(e){}
-    }else{
-      try{
-        if(item.sprite) console.warn('[MergeLab] sprite missing from cache', item.sprite);
+        console.log('[MergeLab] sprite pending', { texture: item.sprite, iw, ih, sx, sy });
       }catch(e){}
     }
   }
