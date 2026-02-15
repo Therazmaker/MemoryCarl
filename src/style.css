@@ -312,14 +312,23 @@ body{
 
 .homeGrid{
   display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:12px;
+  /* phone-first widget board */
+  grid-template-columns:1fr;
+  gap:14px;
   align-items:stretch;
 }
 .homeCard{margin-bottom:0}
-.homeWide{margin-top:12px}
-@media (max-width:420px){
-  .homeGrid{grid-template-columns:1fr}
+.homeWide{margin-top:14px}
+
+/* tablet: 2-column board */
+@media (min-width:720px){
+  .homeGrid{grid-template-columns:1fr 1fr; gap:18px;}
+}
+
+/* desktop: denser widget board grid */
+@media (min-width:1100px){
+  .homeGrid{grid-template-columns:repeat(12, minmax(0, 1fr));}
+  .homeGrid > section{grid-column:span 6;}
 }
 
 .sleepBars{display:flex;gap:10px;align-items:flex-end;height:92px;margin:6px 0 10px}
