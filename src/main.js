@@ -298,12 +298,18 @@ function seedHouse(){
   return {
     mode: "light", // "light" | "deep"
     zones: [
+      // Layout (from your sketch): Cocina/Sala at top, then service core, then rooms.
       { id: uid("z"), name: "Sala", order: 1, priority: 4 },
       { id: uid("z"), name: "Cocina", order: 2, priority: 5 },
-      { id: uid("z"), name: "Pasillo", order: 3, priority: 3 },
-      { id: uid("z"), name: "Cuarto Frederick", order: 4, priority: 3 },
-      { id: uid("z"), name: "Cuarto Mathias", order: 5, priority: 3 },
-      { id: uid("z"), name: "Cuarto Principal", order: 6, priority: 4 },
+      { id: uid("z"), name: "Lavandería", order: 3, priority: 3 },
+      { id: uid("z"), name: "Baño pequeño", order: 4, priority: 5 },
+      { id: uid("z"), name: "Pasillo", order: 5, priority: 3 },
+      { id: uid("z"), name: "Cuarto Mathias", order: 6, priority: 3 },
+      { id: uid("z"), name: "Cuarto Frederick", order: 7, priority: 3 },
+      { id: uid("z"), name: "Baño grande", order: 8, priority: 5 },
+      { id: uid("z"), name: "Cuarto Principal", order: 9, priority: 4 },
+      // Not a cleanable zone, but useful for the future mini-map (void/open space)
+      { id: uid("z"), name: "Vacío (doble altura)", order: 99, priority: 1 },
     ],
     tasks: [
       // Global quick wins
@@ -328,6 +334,15 @@ function seedHouse(){
       { id: uid("t"), zoneId: "ZONE_PASILLO", name: "Pasillo: piso (barrer)", minutes: 6, freqDays: 5, type: "floor", level: "light", priority: 3, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_PASILLO", name: "Pasillo: quitar cosas acumuladas", minutes: 6, freqDays: 7, type: "organize", level: "deep", priority: 3, lastDone: "" },
 
+      // Lavandería
+      { id: uid("t"), zoneId: "ZONE_LAV", name: "Lavandería: ordenar (ropa/insumos)", minutes: 8, freqDays: 7, type: "organize", level: "deep", priority: 3, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_LAV", name: "Lavandería: limpiar superficie + polvo", minutes: 6, freqDays: 7, type: "surface", level: "deep", priority: 2, lastDone: "" },
+
+      // Baño pequeño (WC + lavamanos)
+      { id: uid("t"), zoneId: "ZONE_BS", name: "Baño pequeño: lavamanos + espejo (rápido)", minutes: 6, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BS", name: "Baño pequeño: WC (rápido)", minutes: 6, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BS", name: "Baño pequeño: deep (paredes/puerta/piso)", minutes: 15, freqDays: 7, type: "deep", level: "deep", priority: 4, lastDone: "" },
+
       // Cuarto Frederick (juguetes)
       { id: uid("t"), zoneId: "ZONE_FRED", name: "Juguetes: recoger y dejar ordenado", minutes: 10, freqDays: 1, type: "organize", level: "light", priority: 4, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_FRED", name: "Frederick: piso (barrer/aspirar)", minutes: 8, freqDays: 7, type: "floor", level: "deep", priority: 2, lastDone: "" },
@@ -342,9 +357,23 @@ function seedHouse(){
       { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: escritorio (orden + limpiar)", minutes: 8, freqDays: 4, type: "surface", level: "light", priority: 4, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: piso (barrer/aspirar)", minutes: 9, freqDays: 7, type: "floor", level: "deep", priority: 2, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: gabetero/closet (mini organización)", minutes: 15, freqDays: 14, type: "organize", level: "deep", priority: 2, lastDone: "" },
+
+      // Baño grande (con ducha)
+      { id: uid("t"), zoneId: "ZONE_BB", name: "Baño grande: lavamanos + espejo", minutes: 7, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BB", name: "Baño grande: WC", minutes: 7, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BB", name: "Baño grande: ducha (paredes/piso)", minutes: 15, freqDays: 7, type: "deep", level: "deep", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BB", name: "Baño grande: piso (trapear)", minutes: 8, freqDays: 7, type: "floor", level: "deep", priority: 4, lastDone: "" },
     ],
+    // Mini-map data (Option B: draggable blocks + connections)
+    map: {
+      nodes: {}, // zoneId -> {x,y}
+      edges: [], // {a,b}
+      connectMode: false,
+      selected: null,
+      anim: { active:false, idx:0, path:[] }
+    },
     // UI state
-    subtab: "route" // "route" | "manage"
+    subtab: "route" // "route" | "map" | "manage"
   };
 }
 
@@ -359,10 +388,14 @@ function normalizeHouse(){
   const map = {
     "ZONE_SALA": byName.get("sala") || null,
     "ZONE_COCINA": byName.get("cocina") || null,
+    "ZONE_LAV": byName.get("lavandería") || byName.get("lavanderia") || null,
+    "ZONE_BS": byName.get("baño pequeño") || byName.get("bano pequeño") || byName.get("baño pequeno") || byName.get("bano pequeno") || null,
     "ZONE_PASILLO": byName.get("pasillo") || null,
     "ZONE_FRED": byName.get("cuarto frederick") || byName.get("frederick") || null,
     "ZONE_MATH": byName.get("cuarto mathias") || byName.get("mathias") || null,
-    "ZONE_MAIN": byName.get("cuarto principal") || byName.get("principal") || null
+    "ZONE_MAIN": byName.get("cuarto principal") || byName.get("principal") || null,
+    "ZONE_BB": byName.get("baño grande") || byName.get("bano grande") || null,
+    "ZONE_VOID": byName.get("vacío (doble altura)") || byName.get("vacio (doble altura)") || byName.get("vacío") || byName.get("vacio") || null
   };
   let changed = false;
   state.house.tasks.forEach(t=>{
@@ -379,6 +412,18 @@ function normalizeHouse(){
   });
   if(!state.house.subtab) state.house.subtab = "route";
   if(!state.house.mode) state.house.mode = "light";
+
+  // Ensure map structure exists (for the mini-game map)
+  if(!state.house.map || typeof state.house.map !== "object"){
+    state.house.map = { nodes:{}, edges:[], connectMode:false, selected:null, anim:{active:false, idx:0, path:[]} };
+    changed = true;
+  }
+  state.house.map.nodes = (state.house.map.nodes && typeof state.house.map.nodes === "object") ? state.house.map.nodes : {};
+  state.house.map.edges = Array.isArray(state.house.map.edges) ? state.house.map.edges : [];
+  if(typeof state.house.map.connectMode !== "boolean") state.house.map.connectMode = false;
+  if(!state.house.map.anim || typeof state.house.map.anim !== "object") state.house.map.anim = {active:false, idx:0, path:[]};
+  if(!Array.isArray(state.house.map.anim.path)) state.house.map.anim.path = [];
+
   if(changed) persist();
 }
 
@@ -1830,6 +1875,265 @@ function houseCardSummary(todayStr){
   return {count: due.length, mins};
 }
 
+// ---------------------- HOUSE MAP (Mini game) ----------------------
+function ensureHouseMapLayout(){
+  normalizeHouse();
+  const m = state.house.map;
+  if(!m.nodes) m.nodes = {};
+  if(!Array.isArray(m.edges)) m.edges = [];
+
+  const byLower = new Map((state.house.zones||[]).map(z=>[String(z.name||"").toLowerCase(), z.id]));
+  const id = (nm)=> byLower.get(String(nm).toLowerCase());
+
+  // Default positions (roughly matching your sketch). Units are px in the map container.
+  const defaults = [
+    ["Cocina", 30, 40],
+    ["Sala", 220, 40],
+    ["Lavandería", 35, 180],
+    ["Baño pequeño", 145, 180],
+    ["Pasillo", 170, 280],
+    ["Cuarto Mathias", 45, 315],
+    ["Cuarto Frederick", 240, 250],
+    ["Baño grande", 55, 430],
+    ["Cuarto Principal", 240, 470],
+    ["Vacío (doble altura)", 240, 360],
+  ];
+
+  defaults.forEach(([name,x,y])=>{
+    const zid = id(name);
+    if(!zid) return;
+    if(!m.nodes[zid] || typeof m.nodes[zid] !== "object") m.nodes[zid] = {x, y};
+    if(typeof m.nodes[zid].x !== "number") m.nodes[zid].x = x;
+    if(typeof m.nodes[zid].y !== "number") m.nodes[zid].y = y;
+  });
+
+  // Default connections (graph). Only create if empty.
+  if((m.edges||[]).length === 0){
+    const add = (aName, bName)=>{
+      const a = id(aName), b = id(bName);
+      if(!a || !b) return;
+      m.edges.push({a, b});
+    };
+    add("Sala","Cocina");
+    add("Sala","Pasillo");
+    add("Cocina","Lavandería");
+    add("Lavandería","Baño pequeño");
+    add("Lavandería","Pasillo");
+    add("Baño pequeño","Pasillo");
+    add("Pasillo","Cuarto Mathias");
+    add("Pasillo","Cuarto Frederick");
+    add("Pasillo","Baño grande");
+    add("Baño grande","Cuarto Principal");
+    add("Pasillo","Cuarto Principal");
+    // The void is just a landmark
+    add("Vacío (doble altura)","Cuarto Frederick");
+    add("Vacío (doble altura)","Baño grande");
+  }
+
+  persist();
+}
+
+function houseAdj(){
+  const m = state.house.map;
+  const g = new Map();
+  (state.house.zones||[]).forEach(z=> g.set(z.id, []));
+  (m.edges||[]).forEach(e=>{
+    if(!e || !e.a || !e.b) return;
+    if(!g.has(e.a)) g.set(e.a, []);
+    if(!g.has(e.b)) g.set(e.b, []);
+    g.get(e.a).push(e.b);
+    g.get(e.b).push(e.a);
+  });
+  return g;
+}
+
+function houseShortestPath(start, goal){
+  if(!start || !goal) return [];
+  if(start === goal) return [start];
+  const g = houseAdj();
+  const q = [start];
+  const prev = new Map();
+  prev.set(start, null);
+  while(q.length){
+    const cur = q.shift();
+    const ns = g.get(cur) || [];
+    for(const nxt of ns){
+      if(prev.has(nxt)) continue;
+      prev.set(nxt, cur);
+      if(nxt === goal){
+        // reconstruct
+        const path = [goal];
+        let p = cur;
+        while(p){ path.push(p); p = prev.get(p); }
+        path.reverse();
+        return path;
+      }
+      q.push(nxt);
+    }
+  }
+  // If disconnected, just jump.
+  return [start, goal];
+}
+
+function houseRouteZones(todayStr){
+  const route = buildHouseRoute(todayStr);
+  const zones = [];
+  route.forEach(st=>{
+    if(st.kind !== "task") return;
+    const zid = st.zoneId || null;
+    if(!zid) return;
+    if(zones[zones.length-1] !== zid) zones.push(zid);
+  });
+  // Deduplicate keeping order
+  const seen = new Set();
+  const uniq = [];
+  zones.forEach(z=>{ if(!seen.has(z)){ seen.add(z); uniq.push(z); } });
+  return uniq;
+}
+
+function computeAnimPath(todayStr){
+  ensureHouseMapLayout();
+  const m = state.house.map;
+  const seq = houseRouteZones(todayStr);
+  // Start from Sala if present
+  const sala = (state.house.zones||[]).find(z=>String(z.name||"").toLowerCase()==="sala");
+  const start = sala ? sala.id : (seq[0] || null);
+  const targets = [start, ...seq.filter(z=>z!==start)];
+
+  const full = [];
+  for(let i=0;i<targets.length-1;i++){
+    const a = targets[i], b = targets[i+1];
+    const p = houseShortestPath(a,b);
+    if(i===0) full.push(...p);
+    else full.push(...p.slice(1));
+  }
+  m.anim = { active:false, idx:0, path: full };
+  persist();
+}
+
+function startHouseMapAnim(todayStr){
+  ensureHouseMapLayout();
+  const m = state.house.map;
+  if(!m.anim || !Array.isArray(m.anim.path) || m.anim.path.length===0) computeAnimPath(todayStr);
+  m.anim.active = true;
+  m.anim.idx = 0;
+  persist();
+
+  // Stop any prior timer
+  if(window.__houseMapTimer){ clearInterval(window.__houseMapTimer); window.__houseMapTimer = null; }
+  window.__houseMapTimer = setInterval(()=>{
+    if(!state.house?.map?.anim?.active){ clearInterval(window.__houseMapTimer); window.__houseMapTimer=null; return; }
+    state.house.map.anim.idx = Math.min(state.house.map.anim.path.length-1, (Number(state.house.map.anim.idx)||0)+1);
+    persist();
+    view();
+    if(state.house.map.anim.idx >= state.house.map.anim.path.length-1){
+      state.house.map.anim.active = false;
+      persist();
+      clearInterval(window.__houseMapTimer);
+      window.__houseMapTimer = null;
+    }
+  }, 650);
+}
+
+function stopHouseMapAnim(){
+  if(state.house?.map?.anim){ state.house.map.anim.active = false; state.house.map.anim.idx = 0; }
+  if(window.__houseMapTimer){ clearInterval(window.__houseMapTimer); window.__houseMapTimer=null; }
+  persist();
+}
+
+function toggleHouseEdge(a,b){
+  const m = state.house.map;
+  if(!a || !b || a===b) return;
+  const key = (x,y)=> (x<y) ? `${x}|${y}` : `${y}|${x}`;
+  const k = key(a,b);
+  const idx = (m.edges||[]).findIndex(e=> e && key(e.a,e.b)===k);
+  if(idx>=0){ m.edges.splice(idx,1); }
+  else { m.edges.push({a,b}); }
+  persist();
+}
+
+function renderHouseMap(todayStr){
+  ensureHouseMapLayout();
+  const m = state.house.map;
+  const nodes = m.nodes || {};
+  const edges = m.edges || [];
+  const anim = m.anim || {active:false, idx:0, path:[]};
+  const animNow = (anim.path||[])[Number(anim.idx)||0];
+
+  const nodeHtml = getHouseZonesSorted().map(z=>{
+    const pos = nodes[z.id] || {x:20,y:20};
+    const isSel = m.selected === z.id;
+    const isActive = animNow === z.id;
+    const cls = ["mapNode", isSel?"selected":"", isActive?"active":""].join(" ");
+    return `
+      <div class="${cls}" data-map-node="${escapeHtml(z.id)}" style="left:${Number(pos.x)||0}px; top:${Number(pos.y)||0}px;">
+        <div class="mapNodeTitle">${escapeHtml(z.name)}</div>
+        <div class="mapNodeMeta">pri ${Number(z.priority)||0}</div>
+      </div>
+    `;
+  }).join("");
+
+  // SVG lines
+  const lineHtml = edges.map(e=>{
+    const a = nodes[e.a];
+    const b = nodes[e.b];
+    if(!a || !b) return "";
+    const x1 = (Number(a.x)||0) + 60;
+    const y1 = (Number(a.y)||0) + 28;
+    const x2 = (Number(b.x)||0) + 60;
+    const y2 = (Number(b.y)||0) + 28;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" />`;
+  }).join("");
+
+  return `
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:700;font-size:18px;">Mapa (modo juego)</div>
+          <div class="muted">Arrastra zonas. Activa Conectar para crear rutas. Luego anima el recorrido.</div>
+        </div>
+        <div class="row" style="gap:8px;flex-wrap:wrap;">
+          <button class="btn ${m.connectMode?"primary":""}" id="btnMapConnect">${m.connectMode?"Conectar: ON":"Conectar"}</button>
+          <button class="btn ghost" id="btnMapAuto">Auto-layout</button>
+          <button class="btn" id="btnMapAnim">Animar ruta</button>
+          <button class="btn ghost" id="btnMapStop">Stop</button>
+        </div>
+      </div>
+
+      <div class="mapWrap" id="houseMap">
+        <svg class="mapSvg" id="houseMapSvg" xmlns="http://www.w3.org/2000/svg">
+          ${lineHtml}
+        </svg>
+        ${nodeHtml}
+      </div>
+
+      <div class="muted" style="margin-top:10px;">
+        Tip: en Conectar, toca 2 zonas para crear/quitar una conexión.
+      </div>
+    </div>
+  `;
+}
+
+function redrawHouseMapSvg(root){
+  const svg = root.querySelector("#houseMapSvg");
+  if(!svg) return;
+  const m = state.house.map;
+  const nodes = m.nodes || {};
+  const edges = m.edges || [];
+  const lines = edges.map(e=>{
+    const a = nodes[e.a];
+    const b = nodes[e.b];
+    if(!a || !b) return "";
+    const x1 = (Number(a.x)||0) + 60;
+    const y1 = (Number(a.y)||0) + 28;
+    const x2 = (Number(b.x)||0) + 60;
+    const y2 = (Number(b.y)||0) + 28;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" />`;
+  }).join("");
+  svg.innerHTML = lines;
+}
+// -------------------- END HOUSE MAP (Mini game) -------------------
+
 function viewHouse(){
   normalizeHouse();
   const todayStr = isoDate(new Date());
@@ -1861,6 +2165,7 @@ function viewHouse(){
 
         <div class="seg" style="margin-top:10px;">
           ${mkSeg("route","Ruta")}
+          ${mkSeg("map","Mapa")}
           ${mkSeg("manage","Config")}
         </div>
       </div>
@@ -1929,6 +2234,8 @@ function viewHouse(){
             ${renderHouseSession()}
           </div>` : ``}
         </div>
+      ` : (sub==="map" ? `
+        ${renderHouseMap(todayStr)}
       ` : `
         <div class="card">
           <div class="row" style="justify-content:space-between;align-items:center;">
@@ -1967,7 +2274,7 @@ function viewHouse(){
             ${renderHouseTasksList()}
           </div>
         </div>
-      `}
+      `)}
     </section>
   `;
 }
@@ -2350,6 +2657,111 @@ function wireHouse(root){
   root.querySelectorAll("[data-house-del-task]").forEach(btn=>{
     btn.addEventListener("click", ()=> deleteHouseTask(btn.getAttribute("data-house-del-task")));
   });
+
+  // ---------------- Map (mini game) wiring ----------------
+  const btnConnect = root.querySelector("#btnMapConnect");
+  if(btnConnect) btnConnect.addEventListener("click", ()=>{
+    state.house.map.connectMode = !state.house.map.connectMode;
+    state.house.map.selected = null;
+    persist();
+    view();
+  });
+  const btnAuto = root.querySelector("#btnMapAuto");
+  if(btnAuto) btnAuto.addEventListener("click", ()=>{
+    // Reset positions to defaults and keep edges
+    state.house.map.nodes = {};
+    ensureHouseMapLayout();
+    toast("Auto layout ✅");
+    view();
+  });
+  const btnAnim = root.querySelector("#btnMapAnim");
+  if(btnAnim) btnAnim.addEventListener("click", ()=>{
+    const todayStr = isoDate(new Date());
+    computeAnimPath(todayStr);
+    startHouseMapAnim(todayStr);
+    toast("Animando ruta 🎮");
+  });
+  const btnStop = root.querySelector("#btnMapStop");
+  if(btnStop) btnStop.addEventListener("click", ()=>{
+    stopHouseMapAnim();
+    view();
+  });
+
+  // Node interactions
+  const mapWrap = root.querySelector("#houseMap");
+  if(mapWrap){
+    redrawHouseMapSvg(root);
+    root.querySelectorAll("[data-map-node]").forEach(node=>{
+      const zoneId = node.getAttribute("data-map-node");
+
+      // Click = select/connect
+      node.addEventListener("click", (ev)=>{
+        ev.stopPropagation();
+        if(state.house.map.connectMode){
+          const sel = state.house.map.selected;
+          if(!sel){
+            state.house.map.selected = zoneId;
+            persist();
+            view();
+            return;
+          }
+          if(sel === zoneId){
+            state.house.map.selected = null;
+            persist();
+            view();
+            return;
+          }
+          toggleHouseEdge(sel, zoneId);
+          state.house.map.selected = null;
+          persist();
+          view();
+          toast("Conexión actualizada");
+          return;
+        }
+        state.house.map.selected = zoneId;
+        persist();
+        view();
+      });
+
+      // Drag
+      node.addEventListener("pointerdown", (ev)=>{
+        ev.preventDefault();
+        ev.stopPropagation();
+        node.setPointerCapture?.(ev.pointerId);
+        const startX = ev.clientX;
+        const startY = ev.clientY;
+        const pos = state.house.map.nodes[zoneId] || {x:0,y:0};
+        const ox = Number(pos.x)||0;
+        const oy = Number(pos.y)||0;
+
+        const onMove = (e)=>{
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+          const nx = Math.max(0, ox + dx);
+          const ny = Math.max(0, oy + dy);
+          state.house.map.nodes[zoneId] = {x:nx, y:ny};
+          node.style.left = nx + "px";
+          node.style.top = ny + "px";
+          redrawHouseMapSvg(root);
+        };
+        const onUp = ()=>{
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          persist();
+        };
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+      });
+    });
+
+    // Click on empty map clears selection
+    mapWrap.addEventListener("click", ()=>{
+      if(state.house.map.connectMode) return;
+      state.house.map.selected = null;
+      persist();
+      view();
+    });
+  }
 }
 // ====================== END HOUSE CLEANING ======================
 
