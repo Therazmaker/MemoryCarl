@@ -187,6 +187,15 @@
       }
     });
 
+    // Help Matter's renderer by pre-populating its texture cache with our preloaded images.
+    // This reduces timing/race issues where sprites exist but don't render on the first frames.
+    try{
+      render.textures = render.textures || {};
+      for(const [url,img] of IMG_CACHE.entries()){
+        if(img) render.textures[url] = img;
+      }
+    }catch(e){}
+
     // Force a consistent viewport. This prevents edge cases where bounds end up off-screen.
     try{ Matter.Render.lookAt(render, { min: { x: 0, y: 0 }, max: { x: width, y: height } }); }catch(e){}
 
@@ -225,13 +234,24 @@
         const texMap = (render && render.textures) ? render.textures : {};
         const bodies = Matter.Composite.allBodies(engine.world);
         for(const b of bodies){
-          if(b._spritePending && !b.render.sprite){
+          if(b._spritePending && (!b.render.sprite || !b.render.sprite.texture)){
             const t = b._spritePending.texture;
-            const img = texMap ? texMap[t] : null;
-            if(img && (img.complete || (img.naturalWidth||img.width))){
+            const img = (IMG_CACHE.get(t) || (texMap ? texMap[t] : null));
+            const iw = (img && (img.naturalWidth || img.width)) || 0;
+            const ih = (img && (img.naturalHeight || img.height)) || 0;
+            if(img && (img.complete || iw || ih)){
+              // Ensure renderer also knows this image.
+              try{ if(texMap) texMap[t] = img; }catch(e){}
+
               b.render.sprite = { texture: t, xScale: b._spritePending.xScale, yScale: b._spritePending.yScale };
-              // Leave fillStyle + stroke so it's never fully invisible.
-              console.log("[MergeLab] sprite activated", t);
+              // Once sprite is active, hide the solid fill so the sprite is the star.
+              b.render.fillStyle = "rgba(0,0,0,0)";
+              // Keep a very light outline so the piece is still readable on dark backgrounds.
+              b.render.strokeStyle = "rgba(255,255,255,0.20)";
+              b.render.lineWidth = 1;
+              b._spritePending = null;
+
+              console.log("[MergeLab] sprite activated", { texture: t, iw, ih });
             }
           }
         }
