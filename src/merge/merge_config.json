@@ -2,17 +2,42 @@
   "background": "./src/merge/assets/bg.png",
   "spawnPool": 4,
   "items": [
-    { "id": "item_0",  "radius": 22,  "sprite": "./src/merge/assets/item_0.png",  "points": 1 },
-    { "id": "item_1",  "radius": 28,  "sprite": "./src/merge/assets/item_1.png",  "points": 2 },
-    { "id": "item_2",  "radius": 34,  "sprite": "./src/merge/assets/item_2.png",  "points": 4 },
-    { "id": "item_3",  "radius": 42,  "sprite": "./src/merge/assets/item_3.png",  "points": 8 },
-    { "id": "item_4",  "radius": 52,  "sprite": "./src/merge/assets/item_4.png",  "points": 16 },
-    { "id": "item_5",  "radius": 64,  "sprite": "./src/merge/assets/item_5.png",  "points": 32 },
-    { "id": "item_6",  "radius": 76,  "sprite": "./src/merge/assets/item_6.png",  "points": 64 },
-    { "id": "item_7",  "radius": 90,  "sprite": "./src/merge/assets/item_7.png",  "points": 128 },
-    { "id": "item_8",  "radius": 106, "sprite": "./src/merge/assets/item_8.png",  "points": 256 },
-    { "id": "item_9",  "radius": 124, "sprite": "./src/merge/assets/item_9.png",  "points": 512 },
-    { "id": "item_10", "radius": 144, "sprite": "./src/merge/assets/item_10.png", "points": 1024 }
+    {
+      "id": "item_0",
+      "radius": 22,
+      "sprite": "./src/merge/assets/item_0.png",
+      "points": 1
+    },
+    {
+      "id": "item_1",
+      "radius": 28,
+      "sprite": "./src/merge/assets/item_1.png",
+      "points": 2
+    },
+    {
+      "id": "item_2",
+      "radius": 34,
+      "sprite": "./src/merge/assets/item_2.png",
+      "points": 4
+    },
+    {
+      "id": "item_3",
+      "radius": 42,
+      "sprite": "./src/merge/assets/item_3.png",
+      "points": 8
+    },
+    {
+      "id": "item_4",
+      "radius": 52,
+      "sprite": "./src/merge/assets/item_4.png",
+      "points": 16
+    },
+    {
+      "id": "item_5",
+      "radius": 64,
+      "sprite": "./src/merge/assets/item_5.png",
+      "points": 32
+    }
   ],
-  "version": "v8.0"
+  "version": "v7.6"
 }

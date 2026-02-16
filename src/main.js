@@ -994,19 +994,40 @@ function getSleepSeries(days=7){
     dates.push(isoDate(d));
   }
 
-  const map = new Map();
+  const minutesByDate = new Map();
+  const qualityByDate = new Map(); // last known quality for that day (0-10)
   const log = (state.sleepLog || []).map(normalizeSleepEntry).filter(Boolean);
 
   for(const e of log){
-    map.set(e.date, (map.get(e.date)||0) + e.totalMinutes);
+    minutesByDate.set(e.date, (minutesByDate.get(e.date)||0) + e.totalMinutes);
+    if(e.quality !== null && Number.isFinite(e.quality)){
+      const prev = qualityByDate.get(e.date);
+      if(!prev || (prev.ts < e.ts)) qualityByDate.set(e.date, { ts:e.ts, q: Number(e.quality) });
+    }
   }
 
-  const items = dates.map(date => ({ date, minutes: map.get(date)||0 }));
-  const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60); // keep chart readable vs 8h baseline
-  const avgMinutes = items.reduce((s,x)=>s+x.minutes,0) / items.length;
-  const last = items[items.length-1]?.minutes || 0;
+  const items = dates.map(date => ({
+    date,
+    minutes: minutesByDate.get(date)||0,
+    quality: qualityByDate.get(date)?.q ?? null
+  }));
 
-  return { items, maxMinutes, avgMinutes, lastMinutes: last };
+  const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60); // keep chart readable vs 8h baseline
+  // Average only completed nights (up to yesterday) and only days with data.
+  const yForAvg = new Date();
+  yForAvg.setDate(yForAvg.getDate()-1);
+  const cutoffIso = isoDate(yForAvg);
+  const completed = items.filter(x=>x.date <= cutoffIso);
+  const withData = completed.filter(x=>x.minutes > 0);
+  const avgMinutes = withData.length ? (withData.reduce((s,x)=>s+x.minutes,0) / withData.length) : 0;
+
+  // "Última noche" = yesterday (not "last column")
+  const y = new Date();
+  y.setDate(y.getDate()-1);
+  const yIso = isoDate(y);
+  const lastNightMinutes = items.find(x=>x.date===yIso)?.minutes ?? 0;
+
+  return { items, maxMinutes, avgMinutes, lastMinutes: lastNightMinutes };
 }
 
 
@@ -1023,17 +1044,45 @@ function getSleepWeekSeries(){
     return isoDate(d);
   });
 
-  const map = new Map();
+  const minutesByDate = new Map();
+  const qualityByDate = new Map();
   const log = (state.sleepLog || []).map(normalizeSleepEntry).filter(Boolean);
+
   for(const e of log){
-    map.set(e.date, (map.get(e.date)||0) + e.totalMinutes);
+    minutesByDate.set(e.date, (minutesByDate.get(e.date)||0) + e.totalMinutes);
+    if(e.quality !== null && Number.isFinite(e.quality)){
+      const prev = qualityByDate.get(e.date);
+      if(!prev || (prev.ts < e.ts)) qualityByDate.set(e.date, { ts:e.ts, q: Number(e.quality) });
+    }
   }
 
-  const items = dates.map(date => ({ date, minutes: map.get(date)||0 }));
+  const items = dates.map(date => ({
+    date,
+    minutes: minutesByDate.get(date)||0,
+    quality: qualityByDate.get(date)?.q ?? null
+  }));
+
   const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60);
-  const avgMinutes = items.reduce((s,x)=>s+x.minutes,0) / items.length;
-  const last = items[items.length-1]?.minutes || 0;
-  return { items, maxMinutes, avgMinutes, lastMinutes: last };
+  // Avg should reflect completed nights, not future days in the current week.
+  // We average only up to yesterday, and only days with data (>0).
+  const yForAvg = new Date();
+  yForAvg.setDate(yForAvg.getDate()-1);
+  const cutoffIso = isoDate(yForAvg);
+  const completed = items.filter(x=>x.date <= cutoffIso);
+  const withData = completed.filter(x=>x.minutes > 0);
+  const avgMinutes = withData.length ? (withData.reduce((s,x)=>s+x.minutes,0) / withData.length) : 0;
+
+  // "Última noche" = yesterday (if within this week; else most recent non-zero in week)
+  const y = new Date();
+  y.setDate(y.getDate()-1);
+  const yIso = isoDate(y);
+  let lastNightMinutes = items.find(x=>x.date===yIso)?.minutes;
+  if(lastNightMinutes === undefined){
+    const lastNonZero = [...items].reverse().find(x=>x.minutes>0);
+    lastNightMinutes = lastNonZero ? lastNonZero.minutes : 0;
+  }
+
+  return { items, maxMinutes, avgMinutes, lastMinutes: lastNightMinutes };
 }
 
 
@@ -1051,6 +1100,7 @@ function renderSleepBars(series){
 
   // Keep weekday letters stable and aligned with the 7 columns
   const dayLetters = ["D","L","M","M","J","V","S"]; // Domingo..Sábado
+
   const cols = items.map((x)=>{
     const h = toPx(x.minutes);
     const hrs = (x.minutes/60);
@@ -1068,6 +1118,41 @@ function renderSleepBars(series){
   const avgH = (series.avgMinutes || 0) / 60;
   const lastH = (series.lastMinutes || 0) / 60;
 
+  // Smooth line based on "intensidad" (quality 1-10). If not present, derive from hours.
+  const points = items.map((x, i)=>{
+    const qRaw = (x.quality !== null && Number.isFinite(Number(x.quality))) ? Number(x.quality) : null;
+    const derived = Math.max(0, Math.min(10, (x.minutes/60) / 8 * 10));
+    const q = (qRaw !== null) ? Math.max(0, Math.min(10, qRaw)) : derived;
+
+    // SVG viewport: width=100, height=78
+    const w = 100, h = 78;
+    const padTop = 10, padBot = 14;
+    const usable = h - padTop - padBot;
+
+    const xPos = (w/7) * (i + 0.5);
+    const yPos = padTop + (1 - (q/10)) * usable; // higher quality => higher point
+    return { x:xPos, y:yPos };
+  });
+
+  const buildSmoothPath = (pts)=>{
+    if(!pts.length) return "";
+    if(pts.length === 1) return `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+    let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+    for(let i=1;i<pts.length;i++){
+      const prev = pts[i-1];
+      const cur = pts[i];
+      const midX = (prev.x + cur.x) / 2;
+      const midY = (prev.y + cur.y) / 2;
+      d += ` Q ${prev.x.toFixed(2)} ${prev.y.toFixed(2)} ${midX.toFixed(2)} ${midY.toFixed(2)}`;
+    }
+    // ensure it ends at last point
+    const last = pts[pts.length-1];
+    d += ` T ${last.x.toFixed(2)} ${last.y.toFixed(2)}`;
+    return d;
+  };
+
+  const pathD = buildSmoothPath(points);
+
   return `
     <div class="sleepMetaRow">
       <div>
@@ -1076,7 +1161,13 @@ function renderSleepBars(series){
       </div>
       <div class="chip">${avgH >= 7 ? "✅" : (avgH >= 6 ? "⚠️" : "🔥")}</div>
     </div>
-    <div class="sleepChart" aria-hidden="true">${cols}</div>
+
+    <div class="sleepChartWrap" aria-hidden="true">
+      <svg class="sleepLine" viewBox="0 0 100 78" preserveAspectRatio="none" aria-hidden="true">
+        <path d="${escapeHtml(pathD)}" />
+      </svg>
+      <div class="sleepChart">${cols}</div>
+    </div>
   `;
 }
 
@@ -1151,7 +1242,10 @@ const sleepBars = renderSleepBars(sleepSeries);
             <h2 class="cardTitle">Sueño</h2>
             <div class="small">7 días</div>
           </div>
-          <button class="iconBtn" id="btnAddSleep" aria-label="Add sleep">＋</button>
+          <div class="row" style="gap:8px; align-items:center;">
+            <button class="iconBtn" id="btnSleepHistory" aria-label="Sleep history">📜</button>
+            <button class="iconBtn" id="btnAddSleep" aria-label="Add sleep">＋</button>
+          </div>
         </div>
         <div class="hr"></div>
         ${sleepBars}
@@ -1365,18 +1459,19 @@ function openBudgetModal(){
   });
 }
 
-function openSleepModal(){
+function openSleepModal(opts={}){
   const host = document.querySelector("#app");
   const modal = document.createElement("div");
   modal.className = "modalBackdrop";
 
-  const today = isoDate(new Date());
+  const editEntry = opts && opts.editEntry ? normalizeSleepEntry(opts.editEntry) : null;
+  const today = editEntry?.date || isoDate(new Date());
 
   modal.innerHTML = `
     <div class="modal" role="dialog" aria-label="Registrar sueño">
       <div class="modalTop">
         <div>
-          <div class="modalTitle">Registrar sueño</div>
+          <div class="modalTitle">${editEntry ? "Editar sueño" : "Registrar sueño"}</div>
           <div class="modalSub">Simple o avanzado. Guardado local + sync cuando cierre.</div>
         </div>
         <button class="iconBtn" data-close aria-label="Close">✕</button>
@@ -1444,7 +1539,8 @@ function openSleepModal(){
 
       <div class="row" style="justify-content:flex-end;margin-top:12px;">
         <button class="btn" data-close>Cancel</button>
-        <button class="btn primary" id="btnSaveSleep">Guardar</button>
+        ${editEntry ? `<button class="btn ghost" id="btnDeleteSleep">Eliminar</button>` : ""}
+        <button class="btn primary" id="btnSaveSleep">${editEntry ? "Guardar cambios" : "Guardar"}</button>
       </div>
     </div>
   `;
@@ -1457,10 +1553,17 @@ function openSleepModal(){
   });
 
   // Tabs
-  let mode = "simple";
+  let mode = editEntry?.mode || "simple";
   const tabs = modal.querySelectorAll(".sleepTab");
   const simpleEl = modal.querySelector("#sleepSimple");
   const advEl = modal.querySelector("#sleepAdvanced");
+
+  // init tab
+  tabs.forEach(x=>x.classList.remove("active"));
+  const initTab = Array.from(tabs).find(t=> (t.getAttribute("data-mode")||"") === mode) || tabs[0];
+  if(initTab) initTab.classList.add("active");
+  simpleEl.style.display = (mode==="simple") ? "" : "none";
+  advEl.style.display = (mode==="advanced") ? "" : "none";
 
   tabs.forEach(t=>{
     t.addEventListener("click", ()=>{
@@ -1471,6 +1574,19 @@ function openSleepModal(){
       advEl.style.display = (mode==="advanced") ? "" : "none";
     });
   });
+
+  // Prefill when editing
+  if(editEntry){
+    const hours = (editEntry.totalMinutes||0)/60;
+    modal.querySelector("#sleepHours").value = Number.isFinite(hours) ? String(Math.round(hours*4)/4) : "";
+    if(editEntry.quality !== null && editEntry.quality !== undefined) {
+      modal.querySelector("#sleepQuality").value = String(editEntry.quality);
+      modal.querySelector("#sleepQuality2").value = String(editEntry.quality);
+    }
+    if(editEntry.start) modal.querySelector("#sleepStart").value = editEntry.start;
+    if(editEntry.end) modal.querySelector("#sleepEnd").value = editEntry.end;
+    if(editEntry.note) modal.querySelector("#sleepNote").value = editEntry.note;
+  }
 
   const calcMinutesAdvanced = (dateStr, startStr, endStr) => {
     if(!dateStr || !startStr || !endStr) return 0;
@@ -1488,6 +1604,18 @@ function openSleepModal(){
 
     const minutes = Math.round((end - start) / 60000);
     return minutes;
+  };
+
+  const upsertEntry = (newEntry)=>{
+    state.sleepLog = Array.isArray(state.sleepLog) ? state.sleepLog : [];
+    if(editEntry){
+      const idx = state.sleepLog.findIndex(x=> (x && x.id) === editEntry.id);
+      if(idx >= 0) state.sleepLog[idx] = {...state.sleepLog[idx], ...newEntry, id: editEntry.id};
+      else state.sleepLog.push({...newEntry, id: editEntry.id});
+    } else {
+      state.sleepLog.push(newEntry);
+    }
+    if(state.sleepLog.length > 1500) state.sleepLog = state.sleepLog.slice(-1500);
   };
 
   modal.querySelector("#btnSaveSleep").addEventListener("click", ()=>{
@@ -1525,8 +1653,8 @@ function openSleepModal(){
     }
 
     const entry = {
-      id: uid(),
-      ts: new Date().toISOString(),
+      id: editEntry ? editEntry.id : uid(),
+      ts: editEntry ? (editEntry.ts || new Date().toISOString()) : new Date().toISOString(),
       date,
       totalMinutes,
       quality,
@@ -1536,18 +1664,380 @@ function openSleepModal(){
       end
     };
 
-    state.sleepLog = Array.isArray(state.sleepLog) ? state.sleepLog : [];
-    state.sleepLog.push(entry);
-    // keep it sane
-    if(state.sleepLog.length > 1500) state.sleepLog = state.sleepLog.slice(-1500);
+    upsertEntry(entry);
 
     persist();
     view();
-    toast("Sueño guardado ✅");
+    toast(editEntry ? "Sueño actualizado ✅" : "Sueño guardado ✅");
     close();
   });
 
+  const btnDel = modal.querySelector("#btnDeleteSleep");
+  if(btnDel){
+    btnDel.addEventListener("click", ()=>{
+      if(!editEntry) return;
+      const ok = confirm("¿Eliminar este registro de sueño?");
+      if(!ok) return;
+      state.sleepLog = (state.sleepLog||[]).filter(x=> (x && x.id) !== editEntry.id);
+      persist();
+      view();
+      toast("Registro eliminado 🗑️");
+      close();
+    });
+  }
+
   host.appendChild(modal);
+}
+
+function openSleepHistory(){
+  const host = document.querySelector("#app");
+  if(!host) return;
+
+  const animateIn = (el)=>{
+    try{
+      if(window.anime){
+        window.anime({
+          targets: el.querySelector(".modal"),
+          translateY: [24, 0],
+          opacity: [0, 1],
+          duration: 260,
+          easing: "easeOutCubic"
+        });
+        window.anime({targets: el, opacity:[0,1], duration:240, easing:"linear"});
+      }
+    }catch(_e){}
+  };
+
+  const animateOut = (el, done)=>{
+    let finished = false;
+    const finish = ()=>{ if(finished) return; finished = true; done && done(); };
+    try{
+      if(window.anime){
+        window.anime({targets: el.querySelector(".modal"), translateY:[0,24], opacity:[1,0], duration:220, easing:"easeInCubic", complete: finish});
+        window.anime({targets: el, opacity:[1,0], duration:220, easing:"linear"});
+        return;
+      }
+    }catch(_e){}
+    finish();
+  };
+
+  const log = (state.sleepLog || []).map(normalizeSleepEntry).filter(Boolean)
+    .sort((a,b)=>{
+      // newest first: by date then ts
+      if(a.date !== b.date) return (a.date < b.date) ? 1 : -1;
+      return String(b.ts).localeCompare(String(a.ts));
+    });
+
+  const fmtDay = (d)=> new Date(d+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short", day:"2-digit", month:"short"});
+  const fmtDate = (d)=> new Date(d+"T00:00:00").toLocaleDateString("es-PE",{weekday:"long", day:"2-digit", month:"long", year:"numeric"});
+  const toHours = (m)=> (Number(m)||0)/60;
+
+  const calcStreak = ()=>{
+    // streak ending yesterday (most meaningful)
+    const y = new Date(); y.setDate(y.getDate()-1);
+    let cur = isoDate(y);
+    const set = new Set(log.filter(x=>(x.totalMinutes||0)>0).map(x=>x.date));
+    let n = 0;
+    while(set.has(cur)){
+      n++;
+      const dt = new Date(cur+"T00:00:00");
+      dt.setDate(dt.getDate()-1);
+      cur = isoDate(dt);
+    }
+    return n;
+  };
+
+  const lastN = (nDays)=>{
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(today.getDate() - (nDays-1));
+    const startIso = isoDate(start);
+    const y = new Date();
+    y.setDate(y.getDate()-1);
+    const yIso = isoDate(y);
+    const slice = log.filter(x=>x.date >= startIso && x.date <= yIso);
+    const sum = slice.reduce((s,x)=>s+x.totalMinutes,0);
+    const countDays = new Set(slice.map(x=>x.date)).size;
+    return { sum, countDays };
+  };
+
+  const s7 = lastN(7);
+  const s30 = lastN(30);
+  const avgH = (obj)=> obj.countDays ? (obj.sum/obj.countDays/60) : 0;
+
+  // Insights
+  const y = new Date(); y.setDate(y.getDate()-1);
+  const yIso = isoDate(y);
+  const lastNight = log.find(x=>x.date === yIso) || null;
+  const streak = calcStreak();
+
+  const best = log.reduce((acc,x)=>{
+    if(!x || !(x.totalMinutes>0)) return acc;
+    if(!acc || x.totalMinutes > acc.totalMinutes) return x;
+    return acc;
+  }, null);
+
+  const worst = log.reduce((acc,x)=>{
+    if(!x || !(x.totalMinutes>0)) return acc;
+    if(!acc || x.totalMinutes < acc.totalMinutes) return x;
+    return acc;
+  }, null);
+
+  const ranges = [
+    {k:"7", label:"7D", days:7},
+    {k:"30", label:"30D", days:30},
+    {k:"90", label:"90D", days:90},
+    {k:"all", label:"Todo", days:null}
+  ];
+
+  let rangeKey = "30";
+  let metric = "hours"; // hours | quality
+  let query = "";
+
+  const sliceByRange = (key)=>{
+    const r = ranges.find(x=>x.k===key);
+    if(!r || !r.days) return log.slice();
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(today.getDate() - (r.days-1));
+    const startIso = isoDate(start);
+    const end = new Date(); end.setDate(end.getDate()-1);
+    const endIso = isoDate(end);
+    return log.filter(x=>x.date >= startIso && x.date <= endIso);
+  };
+
+  const buildChartPath = (pts)=>{
+    if(!pts.length) return "";
+    // Catmull-Rom to Bezier for smooth curve
+    const p = pts.map(o=>({x:o.x,y:o.y}));
+    const d = [];
+    d.push(`M ${p[0].x.toFixed(2)} ${p[0].y.toFixed(2)}`);
+    for(let i=0;i<p.length-1;i++){
+      const p0 = p[i-1] || p[i];
+      const p1 = p[i];
+      const p2 = p[i+1];
+      const p3 = p[i+2] || p2;
+      const c1x = p1.x + (p2.x - p0.x)/6;
+      const c1y = p1.y + (p2.y - p0.y)/6;
+      const c2x = p2.x - (p3.x - p1.x)/6;
+      const c2y = p2.y - (p3.y - p1.y)/6;
+      d.push(`C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`);
+    }
+    return d.join(" ");
+  };
+
+  const downloadText = (name, text)=>{
+    const blob = new Blob([text], {type:"text/plain;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 500);
+  };
+
+  const exportCSV = ()=>{
+    const rows = (log||[]).slice().sort((a,b)=> (a.date>b.date?1:-1));
+    const header = ["date","hours","totalMinutes","quality","start","end","note"].join(",");
+    const body = rows.map(e=>{
+      const h = (toHours(e.totalMinutes)).toFixed(2);
+      const q = (e.quality??"");
+      const note = (e.note||"").replace(/\r?\n/g," ").replace(/\"/g,"\"\"");
+      const safeNote = `"${note}"`;
+      return [e.date,h,e.totalMinutes,q,(e.start||""),(e.end||""),safeNote].join(",");
+    }).join("\n");
+    downloadText(`sleep_log_${isoDate(new Date())}.csv`, header+"\n"+body);
+    toast("CSV descargado 📄");
+  };
+
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+
+  const render = ()=>{
+    const data = sliceByRange(rangeKey);
+    const avg = (obj)=> obj.countDays ? (obj.sum/obj.countDays/60) : 0;
+    const sum = data.reduce((s,x)=>s+(x.totalMinutes||0),0);
+    const days = new Set(data.filter(x=>(x.totalMinutes||0)>0).map(x=>x.date)).size;
+    const avgHrs = days ? (sum/days/60) : 0;
+
+    // chart data
+    const sorted = data.slice().sort((a,b)=> (a.date>b.date?1:-1));
+    const maxHours = 10; // used for chart scaling
+    const w = 100, h = 100;
+    const padT = 12, padB = 16;
+    const innerH = h - padT - padB;
+    const innerW = w;
+    const points = sorted.map((e,idx)=>{
+      const x = sorted.length<=1 ? 50 : (idx/(sorted.length-1))*innerW;
+      let v = 0;
+      if(metric==="quality"){
+        v = (e.quality!==null && e.quality!==undefined) ? Number(e.quality) : null;
+        if(!Number.isFinite(v)) v = null;
+        // fallback: derive from hours
+        if(v===null){
+          const hrs = toHours(e.totalMinutes);
+          v = Math.max(0, Math.min(5, (hrs/8)*5));
+        }
+        const y = padT + (1 - Math.min(1, Math.max(0, v/5))) * innerH;
+        return {x, y, v, label: e.date};
+      }
+      const hrs = toHours(e.totalMinutes);
+      v = Math.max(0, Math.min(maxHours, hrs));
+      const y = padT + (1 - (v/maxHours)) * innerH;
+      return {x, y, v, label: e.date};
+    }).filter(Boolean);
+
+    const dPath = buildChartPath(points);
+
+    const filtered = log.filter(e=>{
+      if(rangeKey !== "all"){
+        const dataSet = new Set(data.map(x=>x.id));
+        if(!dataSet.has(e.id)) return false;
+      }
+      if(!query) return true;
+      const q = query.toLowerCase();
+      return (
+        (e.note||"").toLowerCase().includes(q) ||
+        (e.date||"").includes(q)
+      );
+    });
+
+    const rowsHtml = filtered.slice(0,220).map(e=>{
+      const hrs = toHours(e.totalMinutes);
+      const qv = (e.quality !== null && e.quality !== undefined && Number.isFinite(Number(e.quality))) ? String(e.quality) : "-";
+      const when = fmtDay(e.date);
+      return `
+        <div class="sleepRow" data-id="${escapeHtml(e.id)}">
+          <div>
+            <div class="date">${escapeHtml(when)} · ${escapeHtml(hrs.toFixed(1))}h</div>
+            <div class="meta">Calidad ${escapeHtml(qv)}${e.start && e.end ? ` · ${escapeHtml(e.start)}-${escapeHtml(e.end)}` : ""}</div>
+            ${e.note ? `<div class="note">${escapeHtml(e.note)}</div>` : ""}
+          </div>
+          <div class="acts">
+            <button class="actEdit" title="Editar">✎</button>
+            <button class="actDel" title="Eliminar">🗑</button>
+          </div>
+        </div>
+      `;
+    }).join("") || `<div class="muted" style="margin-top:8px;">Aún no hay registros 😴</div>`;
+
+    const lastTxt = lastNight ? `${toHours(lastNight.totalMinutes).toFixed(1)}h` : "-";
+    const bestTxt = best ? `${toHours(best.totalMinutes).toFixed(1)}h` : "-";
+    const worstTxt = worst ? `${toHours(worst.totalMinutes).toFixed(1)}h` : "-";
+
+    modal.innerHTML = `
+      <div class="modal sleepHistModal modalWide" role="dialog" aria-label="Historial de sueño">
+        <div class="modalTop">
+          <div>
+            <div class="modalTitle">Sueño · Histórico</div>
+            <div class="modalSub">Promedio: <strong>${escapeHtml(avgHrs.toFixed(1))}h</strong> (según rango) · Registros: <strong>${escapeHtml(String(days))}</strong></div>
+          </div>
+          <button class="iconBtn" data-close aria-label="Close">✕</button>
+        </div>
+
+        <div class="sleepChips">
+          <div class="chip">
+            <div class="k">Última noche</div>
+            <div class="v">${escapeHtml(lastTxt)}</div>
+            <div class="s">${escapeHtml(yIso)}</div>
+          </div>
+          <div class="chip">
+            <div class="k">Racha</div>
+            <div class="v">${escapeHtml(String(streak))} noches</div>
+            <div class="s">seguidas con registro</div>
+          </div>
+          <div class="chip">
+            <div class="k">Mejor noche</div>
+            <div class="v">${escapeHtml(bestTxt)}</div>
+            <div class="s">${best ? escapeHtml(fmtDay(best.date)) : "-"}</div>
+          </div>
+          <div class="chip">
+            <div class="k">Más corta</div>
+            <div class="v">${escapeHtml(worstTxt)}</div>
+            <div class="s">${worst ? escapeHtml(fmtDay(worst.date)) : "-"}</div>
+          </div>
+        </div>
+
+        <div class="sleepControls">
+          <div class="seg" role="tablist" aria-label="Rango">
+            ${ranges.map(r=>`<button class="segBtn ${r.k===rangeKey?"active":""}" data-range="${r.k}">${escapeHtml(r.label)}</button>`).join("")}
+          </div>
+
+          <div class="seg" role="tablist" aria-label="Métrica">
+            <button class="metBtn ${metric==="hours"?"active":""}" data-metric="hours">Horas</button>
+            <button class="metBtn ${metric==="quality"?"active":""}" data-metric="quality">Calidad</button>
+          </div>
+        </div>
+
+        <div class="sleepChartCard">
+          <div class="sleepChartHeader">
+            <div class="lbl">${metric==="hours" ? "Curva de horas" : "Curva de calidad"} (${escapeHtml(ranges.find(x=>x.k===rangeKey)?.label||"")})</div>
+            <div class="muted">${sorted.length ? escapeHtml(fmtDay(sorted[0].date)) : ""} ${sorted.length ? "→" : ""} ${sorted.length ? escapeHtml(fmtDay(sorted[sorted.length-1].date)) : ""}</div>
+          </div>
+
+          <svg class="sleepChartSvg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path d="${escapeHtml(dPath)}" fill="none" stroke="rgba(255,255,255,.82)" stroke-width="1.6" stroke-linecap="round" />
+            ${points.map(p=>`<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="1.9" fill="rgba(255,255,255,.9)" />`).join("")}
+          </svg>
+          <div class="sleepChartLegend">${metric==="hours" ? "Escala 0–10h (cap)" : "Escala 1–5 (fallback desde horas)"}</div>
+        </div>
+
+        <div class="sleepHistTools">
+          <input class="input" id="sleepSearch" placeholder="Buscar por nota o fecha…" value="${escapeHtml(query)}" />
+          <button class="miniBtn" id="btnSleepExport" title="Exportar CSV">CSV</button>
+          <button class="miniBtn" id="btnSleepAdd" title="Agregar">＋</button>
+        </div>
+
+        <div class="sleepRows">${rowsHtml}</div>
+
+        <div class="row" style="justify-content:flex-end; gap:10px; margin-top:10px;">
+          <button class="btn" data-close>Cerrar</button>
+        </div>
+      </div>
+    `;
+
+    // Wire events
+    modal.querySelectorAll(".segBtn").forEach(btn=>btn.addEventListener("click", ()=>{ rangeKey = btn.getAttribute("data-range") || "30"; render(); }));
+    modal.querySelectorAll(".metBtn").forEach(btn=>btn.addEventListener("click", ()=>{ metric = btn.getAttribute("data-metric") || "hours"; render(); }));
+    const searchEl = modal.querySelector("#sleepSearch");
+    if(searchEl){
+      searchEl.addEventListener("input", ()=>{ query = (searchEl.value||"").trim(); render(); });
+    }
+    const btnExp = modal.querySelector("#btnSleepExport");
+    if(btnExp) btnExp.addEventListener("click", exportCSV);
+    const btnAdd = modal.querySelector("#btnSleepAdd");
+    if(btnAdd) btnAdd.addEventListener("click", ()=>{ openSleepModal(); });
+
+    modal.querySelectorAll(".sleepRow").forEach(row=>{
+      const id = row.getAttribute("data-id");
+      const entry = log.find(x=>x.id===id);
+      const bEdit = row.querySelector(".actEdit");
+      const bDel = row.querySelector(".actDel");
+      if(bEdit) bEdit.addEventListener("click", ()=>{ if(entry) openSleepModal({editEntry: entry}); });
+      if(bDel) bDel.addEventListener("click", ()=>{
+        if(!entry) return;
+        const ok = confirm(`¿Eliminar el registro del ${fmtDate(entry.date)}?`);
+        if(!ok) return;
+        state.sleepLog = (state.sleepLog||[]).filter(x=> (x && x.id) !== entry.id);
+        persist();
+        view();
+        toast("Registro eliminado 🗑️");
+        render();
+      });
+    });
+  };
+
+  render();
+
+  modal.addEventListener("click", (e)=>{
+    if(e.target === modal) return animateOut(modal, ()=>modal.remove());
+    if(e.target && e.target.closest("[data-close]")) return animateOut(modal, ()=>modal.remove());
+  });
+
+  host.appendChild(modal);
+  animateIn(modal);
 }
 
 function openMusicModal(){
@@ -1650,8 +2140,13 @@ function wireHome(root){
 
   const btnSleep = root.querySelector("#btnAddSleep");
   if(btnSleep) btnSleep.addEventListener("click", openSleepModal);
+  const btnSleepHist = root.querySelector("#btnSleepHistory");
+  if(btnSleepHist) btnSleepHist.addEventListener("click", (e)=>{ e.stopPropagation(); openSleepHistory(); });
   const sleepCard = root.querySelector("#homeSleepCard");
-  if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepModal(); });
+  if(sleepCard) sleepCard.addEventListener("click", (e)=>{ 
+    if(e.target && (e.target.closest("#btnAddSleep") || e.target.closest("#btnSleepHistory"))) return;
+    openSleepModal(); 
+  });
 
   const prev = root.querySelector("#btnMusicPrev");
   const next = root.querySelector("#btnMusicNext");
@@ -4558,7 +5053,7 @@ function openMergeGameFull(){
               <br><br>
               Prueba: <b>Brave Shields → Off</b> para este sitio, y recarga.
             </div>
-            <div style="margin-top:14px;opacity:.7;font-size:12px">v7.4</div>
+            <div style="margin-top:14px;opacity:.7;font-size:12px">v7.9</div>
           </div>
         </div>`;
     }
@@ -4769,12 +5264,10 @@ function openMergeSpriteManagerModal(){
   const backdrop = document.createElement("div");
   backdrop.className = "modalBackdrop";
   backdrop.id = "mergeSpritesBackdrop";
-  // Keep this modal above any other sheets/modals (mobile)
-  backdrop.classList.add("topmost");
 
   backdrop.innerHTML = `
-    <div class="modal modalCompact">
-      <h2>Sprite Manager (Merge Lab) <span class="chip">v7.8</span></h2>
+    <div class="modal">
+      <h2>Sprite Manager (Merge Lab) <span class="chip">v7.9</span></h2>
       <div class="small muted">Sube tus PNG (10/11 items). Se guarda en este dispositivo (IndexedDB).</div>
 
       <div class="grid" style="margin-top:10px; gap:10px;">
@@ -4813,21 +5306,9 @@ function openMergeSpriteManagerModal(){
 
   document.body.appendChild(backdrop);
 
-  // Prevent interactions from falling through to underlying sheets/modals
-  const _modalEl = backdrop.querySelector('.modal');
-  _modalEl?.addEventListener('pointerdown', (e)=> e.stopPropagation());
-  _modalEl?.addEventListener('click', (e)=> e.stopPropagation());
-
   const grid = backdrop.querySelector("#mcSprGrid");
   const selCount = backdrop.querySelector("#mcSprCount");
   const fileInput = backdrop.querySelector("#mcSprFiles");
-
-  // Mobile fix: some browsers hide/break folder picker; keep simple file picker on mobile
-  const __mcIsMobile = /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent||"");
-  if(__mcIsMobile && fileInput){
-    fileInput.removeAttribute("webkitdirectory");
-    fileInput.removeAttribute("directory");
-  }
 
   const state = { count: 11, slots: [] };
 
@@ -4945,37 +5426,16 @@ function openMergeSpriteManagerModal(){
         saved++;
       }
     }
-    // Persist desired item count in merge config override so the game actually
-    // supports merging beyond the default (older configs were capped at 6).
+    // persist desired count in merge config override (optional)
     try{
-      const radii = [22,28,34,42,52,64,76,90,106,124,144];
-      let cfg = null;
       const raw = localStorage.getItem("mc_merge_cfg_override");
       if(raw){
-        cfg = JSON.parse(raw);
-      }else{
-        // seed from file when no override exists
-        try{
-          const txt = await fetch("./src/merge/merge_config.json", { cache: "no-store" }).then(r=>r.text());
-          cfg = JSON.parse(txt);
-        }catch(e){
-          cfg = { spawnPool: 4, background: "./src/merge/assets/bg.png", items: [] };
-        }
+        const cfg = JSON.parse(raw);
+        cfg.items = cfg.items || [];
+        cfg.version = "v7.9";
+        localStorage.setItem("mc_merge_cfg_override", JSON.stringify(cfg, null, 2));
       }
-
-      const count = Math.max(2, Math.min(11, state.count||11));
-      cfg.version = "v8.0";
-      cfg.spawnPool = Math.max(1, Math.min(cfg.spawnPool ?? 4, count));
-      cfg.background = cfg.background || "./src/merge/assets/bg.png";
-      cfg.items = Array.from({length: count}, (_,i)=>({
-        id: `item_${i}`,
-        radius: radii[i] || (radii[radii.length-1] + (i-radii.length+1)*18),
-        sprite: `./src/merge/assets/item_${i}.png`,
-        points: Math.pow(2, i)
-      }));
-
-      localStorage.setItem("mc_merge_cfg_override", JSON.stringify(cfg, null, 2));
-    }catch(e){ console.warn("Sprite Manager: failed to update merge cfg override", e); }
+    }catch(e){}
     toast(`✅ Guardado (${saved})`);
     close();
     // Suggest reload game to apply

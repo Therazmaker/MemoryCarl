@@ -10,7 +10,7 @@
   let hudEl = null;
   let width = 0, height = 0;
   let startedAt = 0;
-  const BUILD_VER = "v8.1";
+  const BUILD_VER = "v7.6";
 
   // Leaderboard (local)
   const LS_BEST = "mc_merge_best_score";
@@ -33,7 +33,6 @@
   let SPAWN_POOL = 4;
   let BG_URL = null;
   let IMG_CACHE = new Map();
-  let IMG_META = new Map();
 
 
 // Sprite override store (IndexedDB)
@@ -99,20 +98,13 @@ async function applySpriteOverrides(){
   }
 }
 
-  // Default: support up to 11 items (0..10). If the user loads custom sprites
-  // via Sprite Manager, those will replace `sprite` values at runtime.
   const DEFAULT_ITEMS = [
-    { id:"d0",  radius: 22,  color:"#6EE7B7", points:1 },
-    { id:"d1",  radius: 28,  color:"#60A5FA", points:2 },
-    { id:"d2",  radius: 34,  color:"#F472B6", points:4 },
-    { id:"d3",  radius: 42,  color:"#F59E0B", points:8 },
-    { id:"d4",  radius: 52,  color:"#A78BFA", points:16 },
-    { id:"d5",  radius: 64,  color:"#FB7185", points:32 },
-    { id:"d6",  radius: 76,  color:"#34D399", points:64 },
-    { id:"d7",  radius: 90,  color:"#38BDF8", points:128 },
-    { id:"d8",  radius: 106, color:"#F9A8D4", points:256 },
-    { id:"d9",  radius: 124, color:"#FBBF24", points:512 },
-    { id:"d10", radius: 144, color:"#C4B5FD", points:1024 }
+    { id:"d0", radius: 22, color:"#6EE7B7", points:1 },
+    { id:"d1", radius: 28, color:"#60A5FA", points:2 },
+    { id:"d2", radius: 34, color:"#F472B6", points:4 },
+    { id:"d3", radius: 42, color:"#F59E0B", points:8 },
+    { id:"d4", radius: 52, color:"#A78BFA", points:16 },
+    { id:"d5", radius: 64, color:"#FB7185", points:32 }
   ];
 
   const LIMIT_Y = 120;     // y (px) from top: danger line
@@ -153,45 +145,6 @@ async function applySpriteOverrides(){
     }
   }
 
-
-  function analyzeSpriteBounds(img){
-    try{
-      const iw = img.naturalWidth || img.width || 0;
-      const ih = img.naturalHeight || img.height || 0;
-      if(iw<=0 || ih<=0) return null;
-
-      const canvas = document.createElement("canvas");
-      canvas.width = iw;
-      canvas.height = ih;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      ctx.drawImage(img, 0, 0);
-      const data = ctx.getImageData(0,0,iw,ih).data;
-
-      let minX = iw, minY = ih, maxX = -1, maxY = -1;
-      const alphaThreshold = 12; // 0-255
-      for(let y=0;y<ih;y++){
-        for(let x=0;x<iw;x++){
-          const a = data[(y*iw + x)*4 + 3];
-          if(a > alphaThreshold){
-            if(x < minX) minX = x;
-            if(y < minY) minY = y;
-            if(x > maxX) maxX = x;
-            if(y > maxY) maxY = y;
-          }
-        }
-      }
-      if(maxX < 0 || maxY < 0){
-        return { iw, ih, sx:0, sy:0, sw:iw, sh:ih };
-      }
-      const sw = Math.max(1, (maxX - minX + 1));
-      const sh = Math.max(1, (maxY - minY + 1));
-      return { iw, ih, sx:minX, sy:minY, sw, sh };
-    }catch(e){
-      return null;
-    }
-  }
-
-
   function preloadImage(url){
     return new Promise((resolve)=>{
       if(!url) return resolve(null);
@@ -207,10 +160,6 @@ async function applySpriteOverrides(){
         const h = img.naturalHeight || img.height || 0;
         if(w > 0 && h > 0){
           IMG_CACHE.set(url, img);
-          if(!IMG_META.has(url)){
-            const meta = analyzeSpriteBounds(img);
-            if(meta) IMG_META.set(url, meta);
-          }
           return resolve(img);
         }
         // Try a micro-delay then re-check.
@@ -219,10 +168,6 @@ async function applySpriteOverrides(){
           const h2 = img.naturalHeight || img.height || 0;
           if(w2 > 0 && h2 > 0){
             IMG_CACHE.set(url, img);
-          if(!IMG_META.has(url)){
-            const meta = analyzeSpriteBounds(img);
-            if(meta) IMG_META.set(url, meta);
-          }
             return resolve(img);
           }
           console.warn("Sprite loaded but has 0x0 size (will fallback)", url);
@@ -458,12 +403,7 @@ async function applySpriteOverrides(){
           ctx.save();
           ctx.translate(b.position.x, b.position.y);
           ctx.rotate(b.angle || 0);
-          const meta = IMG_META.get(url) || null;
-          if(meta){
-            ctx.drawImage(img, meta.sx, meta.sy, meta.sw, meta.sh, -w/2, -h/2, w, h);
-          }else{
-            ctx.drawImage(img, -w/2, -h/2, w, h);
-          }
+          ctx.drawImage(img, -w/2, -h/2, w, h);
           ctx.restore();
 
           // Once we've successfully drawn at least once, hide the solid fill
