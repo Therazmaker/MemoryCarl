@@ -4,11 +4,13 @@
 
   let engine, render, runner;
   let currentType = 0;
+    updateNextPreview();
   let score = 0;
   let gameOverState = false;
   let hudEl = null;
   let width = 0, height = 0;
   let startedAt = 0;
+  const BUILD_VER = "v7.5";
 
   // Configurable (loaded from merge_config.json)
   let CFG = null;
@@ -130,8 +132,16 @@
     hudEl.innerHTML = `
       <div class="mcMergeTop">
         <div class="mcMergeTitle">Merge Lab <span id="mcMergeVer" class="mcMergeVer"></span></div>
-        <div class="mcMergeScore"><span>Score</span><b id="mcMergeScoreVal">0</b></div>
-        <button class="mcMergeClose" id="mcMergeCloseBtn" aria-label="Close">✕</button>
+
+        <div class="mcMergeRight">
+          <div class="mcMergeNext" title="Siguiente pieza">
+            <span class="mcMergeNextLbl">Next</span>
+            <div id="mcMergeNextIcon" class="mcMergeNextIcon" aria-label="Next piece"></div>
+          </div>
+
+          <div class="mcMergeScore"><span>Score</span><b id="mcMergeScoreVal">0</b></div>
+          <button class="mcMergeClose" id="mcMergeCloseBtn" aria-label="Close">✕</button>
+        </div>
       </div>
       <div class="mcMergeHint">Toca para soltar una pieza 👇</div>
     `;
@@ -151,6 +161,34 @@
     const el = hudEl?.querySelector("#mcMergeScoreVal");
     if(el) el.textContent = String(score);
   }
+
+  function updateNextPreview(){
+    try{
+      if(!hudEl) return;
+      const icon = hudEl.querySelector('#mcMergeNextIcon');
+      if(!icon) return;
+      const item = itemByIndex(currentType);
+      // default as colored orb
+      icon.style.backgroundImage = "";
+      icon.style.backgroundColor = item.color || "#6EE7B7";
+      icon.style.borderColor = (item.color || "rgba(255,255,255,.25)");
+      // size proportional, clamped
+      const sz = Math.max(18, Math.min(36, Math.round((item.radius||22) * 1.2)));
+      icon.style.width = sz + "px";
+      icon.style.height = sz + "px";
+      icon.style.borderRadius = (sz/2) + "px";
+
+      if(item.sprite){
+        // Use CSS background-image for the preview. This is independent of Matter's sprite renderer.
+        icon.style.backgroundColor = "transparent";
+        icon.style.backgroundImage = `url(${item.sprite})`;
+        icon.style.backgroundSize = "contain";
+        icon.style.backgroundRepeat = "no-repeat";
+        icon.style.backgroundPosition = "center";
+      }
+    }catch(e){}
+  }
+
 
   function setBackground(container){
     if(BG_URL){
@@ -186,9 +224,10 @@
     setBackground(container);
 
     ensureHud(container);
+    updateNextPreview();
     try{
       const vEl = container.querySelector('#mcMergeVer');
-      if(vEl) vEl.textContent = (CFG && CFG.version) ? CFG.version : '';
+      if(vEl) vEl.textContent = (CFG && CFG.version) ? CFG.version : BUILD_VER;
     }catch(e){}
     setScore(0);
     gameOverState = false;
@@ -417,6 +456,7 @@
 
     // Next: random only from first SPAWN_POOL items
     currentType = Math.floor(Math.random() * SPAWN_POOL);
+    updateNextPreview();
   }
 
   function mergeBodies(a, b){

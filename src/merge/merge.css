@@ -67,3 +67,38 @@
 #mergeContainer canvas{ display:block; }
 
 .mcMergeVer{ font-size:12px; opacity:0.75; margin-left:6px; }
+
+
+/* Right side cluster (Next + Score + Close) */
+.mcMergeRight{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  pointer-events:auto;
+}
+
+/* Next piece preview */
+.mcMergeNext{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,0.10);
+  background:rgba(0,0,0,0.15);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.20);
+}
+
+.mcMergeNextLbl{
+  font-size:12px;
+  opacity:0.8;
+  letter-spacing:0.2px;
+}
+
+.mcMergeNextIcon{
+  width:28px;
+  height:28px;
+  border-radius:999px;
+  border:2px solid rgba(255,255,255,0.18);
+  background:rgba(255,255,255,0.10);
+}
