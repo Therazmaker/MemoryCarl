@@ -10,7 +10,22 @@
   let hudEl = null;
   let width = 0, height = 0;
   let startedAt = 0;
-  const BUILD_VER = "v7.5";
+  const BUILD_VER = "v7.6";
+
+  // Leaderboard (local)
+  const LS_BEST = "mc_merge_best_score";
+  function getBestScore(){
+    const v = parseInt(localStorage.getItem(LS_BEST)||"0",10);
+    return Number.isFinite(v) ? v : 0;
+  }
+  function setBestScore(v){
+    const cur = getBestScore();
+    if(v > cur){
+      localStorage.setItem(LS_BEST, String(v));
+      const el = hudEl?.querySelector("#mcMergeBestVal");
+      if(el) el.textContent = String(v);
+    }
+  }
 
   // Configurable (loaded from merge_config.json)
   let CFG = null;
@@ -18,6 +33,70 @@
   let SPAWN_POOL = 4;
   let BG_URL = null;
   let IMG_CACHE = new Map();
+
+
+// Sprite override store (IndexedDB)
+const SPR_DB = { name: "mc_merge_sprites_db", store: "sprites", ver: 1 };
+function idbOpen(){
+  return new Promise((resolve, reject)=>{
+    const req = indexedDB.open(SPR_DB.name, SPR_DB.ver);
+    req.onupgradeneeded = ()=> {
+      const db = req.result;
+      if(!db.objectStoreNames.contains(SPR_DB.store)){
+        db.createObjectStore(SPR_DB.store, { keyPath: "id" });
+      }
+    };
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+async function idbGetAll(){
+  try{
+    const db = await idbOpen();
+    return await new Promise((resolve, reject)=>{
+      const tx = db.transaction(SPR_DB.store, "readonly");
+      const st = tx.objectStore(SPR_DB.store);
+      const req = st.getAll();
+      req.onsuccess = ()=> resolve(req.result || []);
+      req.onerror = ()=> reject(req.error);
+    });
+  }catch(e){ return []; }
+}
+const _OBJ_URLS = [];
+function blobToObjectURL(blob){
+  try{
+    const url = URL.createObjectURL(blob);
+    _OBJ_URLS.push(url);
+    return url;
+  }catch(e){ return null; }
+}
+function revokeObjectURLs(){
+  try{ _OBJ_URLS.splice(0).forEach(u=>URL.revokeObjectURL(u)); }catch(e){}
+}
+async function applySpriteOverrides(){
+  // overrides: sprite:item_0.. etc
+  const rows = await idbGetAll();
+  if(!rows.length) return;
+  const map = new Map(rows.map(r=>[r.id, r]));
+  // item sprites
+  const n = ITEMS?.length || 0;
+  for(let i=0;i<n;i++){
+    const key = `sprite:item_${i}`;
+    const row = map.get(key);
+    if(row && row.blob){
+      const url = blobToObjectURL(row.blob);
+      if(url){
+        ITEMS[i].sprite = url;
+      }
+    }
+  }
+  // background optional
+  const bg = map.get("sprite:bg");
+  if(bg && bg.blob){
+    const url = blobToObjectURL(bg.blob);
+    if(url) BG_URL = url;
+  }
+}
 
   const DEFAULT_ITEMS = [
     { id:"d0", radius: 22, color:"#6EE7B7", points:1 },
@@ -140,6 +219,7 @@
           </div>
 
           <div class="mcMergeScore"><span>Score</span><b id="mcMergeScoreVal">0</b></div>
+          <div class="mcMergeBest"><span>Best</span><b id="mcMergeBestVal">0</b></div>
           <button class="mcMergeClose" id="mcMergeCloseBtn" aria-label="Close">✕</button>
         </div>
       </div>
@@ -160,6 +240,7 @@
     score = v;
     const el = hudEl?.querySelector("#mcMergeScoreVal");
     if(el) el.textContent = String(score);
+    setBestScore(score);
   }
 
   function updateNextPreview(){
@@ -217,6 +298,7 @@
 
     // Load config and assets first
     await loadConfig();
+    await applySpriteOverrides();
     await preloadSprites();
 
     // Reset container
@@ -228,6 +310,8 @@
     try{
       const vEl = container.querySelector('#mcMergeVer');
       if(vEl) vEl.textContent = (CFG && CFG.version) ? CFG.version : BUILD_VER;
+      const bEl = container.querySelector('#mcMergeBestVal');
+      if(bEl) bEl.textContent = String(getBestScore());
     }catch(e){}
     setScore(0);
     gameOverState = false;
@@ -546,6 +630,7 @@
       try{
         Matter.Render.stop(render);
         Matter.Runner.stop(runner);
+        revokeObjectURLs();
       }catch{}
       const container = render.element.parentElement || render.element;
       const id = container.id || "mergeContainer";

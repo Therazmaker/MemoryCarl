@@ -741,6 +741,32 @@ function view(){
     toast("🧽 Merge config reseteada");
   });
 
+
+// Merge Lab: Sprite Manager + Leaderboard
+const bestEl = root.querySelector("#mcMergeBestSettingsVal");
+if(bestEl){
+  const v = parseInt(localStorage.getItem("mc_merge_best_score")||"0",10);
+  bestEl.textContent = String(Number.isFinite(v)?v:0);
+}
+
+const btnMergeSprites = root.querySelector("#btnMergeSprites");
+if(btnMergeSprites) btnMergeSprites.addEventListener("click", openMergeSpriteManagerModal);
+
+const btnMergeSpritesReset = root.querySelector("#btnMergeSpritesReset");
+if(btnMergeSpritesReset) btnMergeSpritesReset.addEventListener("click", async ()=>{
+  await mcSpriteIdbClear();
+  toast("🧽 Sprites reseteados");
+});
+
+const btnMergeBestReset = root.querySelector("#btnMergeBestReset");
+if(btnMergeBestReset) btnMergeBestReset.addEventListener("click", ()=>{
+  localStorage.removeItem("mc_merge_best_score");
+  const el = root.querySelector("#mcMergeBestSettingsVal");
+  if(el) el.textContent = "0";
+  toast("🧽 Best reseteado");
+});
+
+
 const btnExport = root.querySelector("#btnExport");
   if(btnExport) btnExport.addEventListener("click", exportBackup);
 
@@ -839,7 +865,7 @@ function viewSettings(){
     <div class="card">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v7.4</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7.6</span></h2>
           <div class="small">Config del juego (fondo, sprites, radios, spawnPool). Se guarda en este dispositivo.</div>
         </div>
       </div>
@@ -851,7 +877,39 @@ function viewSettings(){
       <div class="note" style="margin-top:10px;">
         Tip: <span class="mono">spawnPool: 4</span> significa que solo salen random las primeras 4 piezas.
       </div>
+<div class="card">
+  <div class="cardTop">
+    <div>
+      <h2 class="cardTitle">Sprites</h2>
+      <div class="small">Sube tu pack de 10/11 PNG y el juego los usa sin redeploy (se guarda en este dispositivo).</div>
     </div>
+  </div>
+  <div class="hr"></div>
+  <div class="row" style="margin:0;">
+    <button class="btn" id="btnMergeSprites">Abrir Sprite Manager</button>
+    <button class="btn" id="btnMergeSpritesReset">Reset sprites</button>
+  </div>
+  <div class="note" style="margin-top:10px;">
+    Tip: puedes exportar/importar el pack para pasarlo al teléfono.
+  </div>
+</div>
+
+<div class="card">
+  <div class="cardTop">
+    <div>
+      <h2 class="cardTitle">Leaderboard</h2>
+      <div class="small">Tu mejor score local del Merge Lab.</div>
+    </div>
+  </div>
+  <div class="hr"></div>
+  <div class="kv">
+    <div class="k">Best</div>
+    <div class="v"><b id="mcMergeBestSettingsVal">0</b></div>
+  </div>
+  <div class="row" style="margin:0;">
+    <button class="btn" id="btnMergeBestReset">Reset best</button>
+  </div>
+</div>
 
   `;
 }
@@ -1175,7 +1233,7 @@ const sleepBars = renderSleepBars(sleepSeries);
     <section class="card homeCard homeWide" id="homeMergeCard">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v7.4</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7.6</span></h2>
           <div class="small">Suelta y fusiona (pantalla completa)</div>
         </div>
         <button class="iconBtn" id="btnOpenMergeGame" aria-label="Open merge game">🎮</button>
@@ -4602,3 +4660,295 @@ function openMergeCfgModal(){
   });
 }
 
+// ====================== MERGE LAB: SPRITE MANAGER (IndexedDB) ======================
+const MC_SPR_DB = { name: "mc_merge_sprites_db", store: "sprites", ver: 1 };
+
+function mcSpriteIdbOpen(){
+  return new Promise((resolve, reject)=>{
+    const req = indexedDB.open(MC_SPR_DB.name, MC_SPR_DB.ver);
+    req.onupgradeneeded = ()=>{
+      const db = req.result;
+      if(!db.objectStoreNames.contains(MC_SPR_DB.store)){
+        db.createObjectStore(MC_SPR_DB.store, { keyPath: "id" });
+      }
+    };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+
+async function mcSpriteIdbPut(id, blob, meta={}){
+  const db = await mcSpriteIdbOpen();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(MC_SPR_DB.store, "readwrite");
+    const st = tx.objectStore(MC_SPR_DB.store);
+    const req = st.put({ id, blob, meta, updatedAt: Date.now() });
+    req.onsuccess = ()=>resolve(true);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+
+async function mcSpriteIdbGetAll(){
+  try{
+    const db = await mcSpriteIdbOpen();
+    return await new Promise((resolve, reject)=>{
+      const tx = db.transaction(MC_SPR_DB.store, "readonly");
+      const st = tx.objectStore(MC_SPR_DB.store);
+      const req = st.getAll();
+      req.onsuccess = ()=>resolve(req.result || []);
+      req.onerror = ()=>reject(req.error);
+    });
+  }catch(e){ return []; }
+}
+
+async function mcSpriteIdbClear(){
+  try{
+    const db = await mcSpriteIdbOpen();
+    return await new Promise((resolve, reject)=>{
+      const tx = db.transaction(MC_SPR_DB.store, "readwrite");
+      const st = tx.objectStore(MC_SPR_DB.store);
+      const req = st.clear();
+      req.onsuccess = ()=>resolve(true);
+      req.onerror = ()=>reject(req.error);
+    });
+  }catch(e){ return false; }
+}
+
+function blobToDataURL(blob){
+  return new Promise((resolve, reject)=>{
+    const fr = new FileReader();
+    fr.onload = ()=>resolve(fr.result);
+    fr.onerror = ()=>reject(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+
+function dataURLToBlob(dataURL){
+  const parts = String(dataURL||"").split(",");
+  const meta = parts[0] || "";
+  const b64 = parts[1] || "";
+  const mime = (meta.match(/data:(.*?);base64/)||[])[1] || "application/octet-stream";
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+async function exportSpritePack(){
+  const rows = await mcSpriteIdbGetAll();
+  const out = [];
+  for(const r of rows){
+    const dataURL = await blobToDataURL(r.blob);
+    out.push({ id: r.id, dataURL, meta: r.meta || {}, updatedAt: r.updatedAt || Date.now() });
+  }
+  const pack = { kind:"mc_merge_sprite_pack", version:"v7.6", exportedAt: new Date().toISOString(), items: out };
+  const blob = new Blob([JSON.stringify(pack, null, 2)], { type:"application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `merge_sprites_pack_${Date.now()}.json`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
+}
+
+async function importSpritePack(file){
+  const txt = await file.text();
+  const pack = JSON.parse(txt);
+  if(!pack || pack.kind !== "mc_merge_sprite_pack" || !Array.isArray(pack.items)) throw new Error("Invalid pack");
+  for(const it of pack.items){
+    if(!it.id || !it.dataURL) continue;
+    const blob = dataURLToBlob(it.dataURL);
+    await mcSpriteIdbPut(String(it.id), blob, it.meta || {});
+  }
+  toast("✅ Pack importado");
+}
+
+function openMergeSpriteManagerModal(){
+  const existing = document.querySelector("#mergeSpritesBackdrop");
+  if(existing) existing.remove();
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modalBackdrop";
+  backdrop.id = "mergeSpritesBackdrop";
+
+  backdrop.innerHTML = `
+    <div class="modal">
+      <h2>Sprite Manager (Merge Lab) <span class="chip">v7.6</span></h2>
+      <div class="small muted">Sube tus PNG (10/11 items). Se guarda en este dispositivo (IndexedDB).</div>
+
+      <div class="grid" style="margin-top:10px; gap:10px;">
+        <div class="row" style="margin:0; align-items:center; gap:8px;">
+          <label class="small" style="opacity:.85;">Slots</label>
+          <select id="mcSprCount" class="input" style="width:110px;">
+            <option value="10">10 items</option>
+            <option value="11" selected>11 items</option>
+          </select>
+
+          <input id="mcSprFiles" type="file" class="input" multiple accept="image/png,image/webp,image/jpeg" webkitdirectory directory style="flex:1;" />
+        </div>
+
+        <div id="mcSprGrid" class="grid" style="grid-template-columns:repeat(3, 1fr); gap:10px;"></div>
+
+        <div class="row" style="margin:0; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+          <div class="row" style="margin:0; gap:8px;">
+            <button class="btn" id="mcSprExport">Export pack</button>
+            <label class="btn" style="display:inline-flex; align-items:center; gap:8px; cursor:pointer;">
+              Import pack
+              <input id="mcSprImport" type="file" accept="application/json" style="display:none;">
+            </label>
+          </div>
+          <div class="row" style="margin:0; gap:8px;">
+            <button class="btn" id="mcSprClose">Cerrar</button>
+            <button class="btn primary" id="mcSprApply">Guardar</button>
+          </div>
+        </div>
+
+        <div class="note">
+          Tip: Si eliges una carpeta, nombra tus archivos <span class="mono">item_0.png ... item_10.png</span> para que se auto-asignen.
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+
+  const grid = backdrop.querySelector("#mcSprGrid");
+  const selCount = backdrop.querySelector("#mcSprCount");
+  const fileInput = backdrop.querySelector("#mcSprFiles");
+
+  const state = { count: 11, slots: [] };
+
+  function mkSlot(i, url=null){
+    return `
+      <div class="card" style="padding:10px;">
+        <div class="row" style="margin:0; justify-content:space-between; align-items:center;">
+          <div class="small muted">Item ${i}</div>
+          <div class="chip mono">item_${i}</div>
+        </div>
+        <div class="hr"></div>
+        <div style="display:flex; justify-content:center; align-items:center; height:86px;">
+          <div style="width:72px; height:72px; border-radius:18px; border:1px solid rgba(255,255,255,.12);
+            background:${url?`url(${url}) center/contain no-repeat`:"rgba(255,255,255,.04)"};">
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function refreshFromDb(){
+    const rows = await mcSpriteIdbGetAll();
+    const map = new Map(rows.map(r=>[r.id, r]));
+    state.slots = [];
+    for(let i=0;i<state.count;i++){
+      const row = map.get(`sprite:item_${i}`);
+      if(row && row.blob){
+        const url = URL.createObjectURL(row.blob);
+        state.slots.push({ i, blob: row.blob, url, fromDb:true });
+      }else{
+        state.slots.push({ i, blob: null, url: null, fromDb:false });
+      }
+    }
+    renderGrid();
+  }
+
+  function clearTempUrls(){
+    try{
+      state.slots.forEach(s=>{ if(s.url && !s.fromDb) URL.revokeObjectURL(s.url); });
+    }catch(e){}
+  }
+
+  function renderGrid(){
+    grid.innerHTML = state.slots.map(s=>mkSlot(s.i, s.url)).join("");
+  }
+
+  async function close(){
+    clearTempUrls();
+    backdrop.remove();
+  }
+
+  backdrop.addEventListener("click", (e)=>{ if(e.target === backdrop) close(); });
+  backdrop.querySelector("#mcSprClose").addEventListener("click", close);
+
+  // events
+  selCount.addEventListener("change", async ()=>{
+    state.count = parseInt(selCount.value,10) || 11;
+    await refreshFromDb();
+  });
+
+  fileInput.addEventListener("change", async ()=>{
+    const files = Array.from(fileInput.files||[]);
+    if(!files.length) return;
+
+    // Try map by item_N in filename; else assign sequentially by name sort
+    const byName = new Map();
+    for(const f of files){
+      const m = f.name.match(/item[_-]?(\d+)/i);
+      if(m) byName.set(parseInt(m[1],10), f);
+    }
+    const sorted = files.slice().sort((a,b)=>a.name.localeCompare(b.name));
+    let seqIdx = 0;
+
+    for(let i=0;i<state.count;i++){
+      const f = byName.get(i) || sorted[seqIdx++] || null;
+      if(!f) continue;
+      const blob = f;
+      // decode friendly: keep as file blob
+      const url = URL.createObjectURL(blob);
+      const slot = state.slots.find(s=>s.i===i);
+      if(slot && slot.url && !slot.fromDb) URL.revokeObjectURL(slot.url);
+      if(slot){
+        slot.blob = blob;
+        slot.url = url;
+        slot.fromDb = false;
+      }
+    }
+    renderGrid();
+    toast("📦 Sprites cargados (preview)");
+  });
+
+  backdrop.querySelector("#mcSprExport").addEventListener("click", exportSpritePack);
+
+  const imp = backdrop.querySelector("#mcSprImport");
+  imp.addEventListener("change", async ()=>{
+    const f = imp.files?.[0];
+    if(!f) return;
+    try{
+      await importSpritePack(f);
+      await refreshFromDb();
+    }catch(e){
+      toast("❌ Pack inválido");
+      console.error(e);
+    }finally{
+      imp.value = "";
+    }
+  });
+
+  backdrop.querySelector("#mcSprApply").addEventListener("click", async ()=>{
+    // store blobs
+    let saved = 0;
+    for(const s of state.slots){
+      if(s.blob){
+        await mcSpriteIdbPut(`sprite:item_${s.i}`, s.blob, { name: (s.blob.name||`item_${s.i}`) });
+        saved++;
+      }
+    }
+    // persist desired count in merge config override (optional)
+    try{
+      const raw = localStorage.getItem("mc_merge_cfg_override");
+      if(raw){
+        const cfg = JSON.parse(raw);
+        cfg.items = cfg.items || [];
+        cfg.version = "v7.6";
+        localStorage.setItem("mc_merge_cfg_override", JSON.stringify(cfg, null, 2));
+      }
+    }catch(e){}
+    toast(`✅ Guardado (${saved})`);
+    close();
+    // Suggest reload game to apply
+    toast("Tip: cierra y abre el juego para aplicar");
+  });
+
+  // initial
+  state.count = 11;
+  refreshFromDb();
+}
+// ====================== END SPRITE MANAGER ======================

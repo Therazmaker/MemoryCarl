@@ -26,6 +26,10 @@
 .mcMergeScore span{ font-size:12px; opacity:0.75; }
 .mcMergeScore b{ font-size:16px; }
 
+.mcMergeBest{ display:flex; gap:8px; align-items:baseline; color:rgba(255,255,255,0.85); }
+.mcMergeBest span{ font-size:12px; opacity:0.75; }
+.mcMergeBest b{ font-size:16px; }
+
 .mcMergeClose{
   border:0;
   background:rgba(255,255,255,0.08);
