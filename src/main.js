@@ -865,7 +865,7 @@ function viewSettings(){
     <div class="card">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v7.7</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7.8</span></h2>
           <div class="small">Config del juego (fondo, sprites, radios, spawnPool). Se guarda en este dispositivo.</div>
         </div>
       </div>
@@ -1013,7 +1013,13 @@ function getSleepSeries(days=7){
   }));
 
   const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60); // keep chart readable vs 8h baseline
-  const avgMinutes = items.reduce((s,x)=>s+x.minutes,0) / items.length;
+  // Average only completed nights (up to yesterday) and only days with data.
+  const yForAvg = new Date();
+  yForAvg.setDate(yForAvg.getDate()-1);
+  const cutoffIso = isoDate(yForAvg);
+  const completed = items.filter(x=>x.date <= cutoffIso);
+  const withData = completed.filter(x=>x.minutes > 0);
+  const avgMinutes = withData.length ? (withData.reduce((s,x)=>s+x.minutes,0) / withData.length) : 0;
 
   // "Última noche" = yesterday (not "last column")
   const y = new Date();
@@ -1057,7 +1063,14 @@ function getSleepWeekSeries(){
   }));
 
   const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60);
-  const avgMinutes = items.reduce((s,x)=>s+x.minutes,0) / items.length;
+  // Avg should reflect completed nights, not future days in the current week.
+  // We average only up to yesterday, and only days with data (>0).
+  const yForAvg = new Date();
+  yForAvg.setDate(yForAvg.getDate()-1);
+  const cutoffIso = isoDate(yForAvg);
+  const completed = items.filter(x=>x.date <= cutoffIso);
+  const withData = completed.filter(x=>x.minutes > 0);
+  const avgMinutes = withData.length ? (withData.reduce((s,x)=>s+x.minutes,0) / withData.length) : 0;
 
   // "Última noche" = yesterday (if within this week; else most recent non-zero in week)
   const y = new Date();
@@ -1229,7 +1242,10 @@ const sleepBars = renderSleepBars(sleepSeries);
             <h2 class="cardTitle">Sueño</h2>
             <div class="small">7 días</div>
           </div>
-          <button class="iconBtn" id="btnAddSleep" aria-label="Add sleep">＋</button>
+          <div class="row" style="gap:8px; align-items:center;">
+            <button class="iconBtn" id="btnSleepHistory" aria-label="Sleep history">📜</button>
+            <button class="iconBtn" id="btnAddSleep" aria-label="Add sleep">＋</button>
+          </div>
         </div>
         <div class="hr"></div>
         ${sleepBars}
@@ -1311,7 +1327,7 @@ const sleepBars = renderSleepBars(sleepSeries);
     <section class="card homeCard homeWide" id="homeMergeCard">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v7.7</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7.8</span></h2>
           <div class="small">Suelta y fusiona (pantalla completa)</div>
         </div>
         <button class="iconBtn" id="btnOpenMergeGame" aria-label="Open merge game">🎮</button>
@@ -1628,6 +1644,78 @@ function openSleepModal(){
   host.appendChild(modal);
 }
 
+function openSleepHistory(){
+  const host = document.querySelector("#app");
+  if(!host) return;
+
+  const log = (state.sleepLog || []).map(normalizeSleepEntry).filter(Boolean)
+    .sort((a,b)=>{
+      // newest first: by date then ts
+      if(a.date !== b.date) return (a.date < b.date) ? 1 : -1;
+      return String(b.ts).localeCompare(String(a.ts));
+    });
+
+  const lastN = (nDays)=>{
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(today.getDate() - (nDays-1));
+    const startIso = isoDate(start);
+    const y = new Date();
+    y.setDate(y.getDate()-1);
+    const yIso = isoDate(y);
+    const slice = log.filter(x=>x.date >= startIso && x.date <= yIso);
+    const sum = slice.reduce((s,x)=>s+x.totalMinutes,0);
+    const countDays = new Set(slice.map(x=>x.date)).size;
+    return { sum, countDays };
+  };
+
+  const s7 = lastN(7);
+  const s30 = lastN(30);
+  const avgH = (obj)=> obj.countDays ? (obj.sum/obj.countDays/60) : 0;
+
+  const rows = log.slice(0,120).map(e=>{
+    const h = e.totalMinutes/60;
+    const q = (e.quality !== null && Number.isFinite(Number(e.quality))) ? String(e.quality) : "-";
+    return `
+      <div class="item">
+        <div class="left">
+          <div class="name">${escapeHtml(new Date(e.date+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short", day:"2-digit", month:"short"}))}</div>
+          <div class="meta">${escapeHtml(h.toFixed(1))}h · Calidad ${escapeHtml(q)}${e.note ? ` · ${escapeHtml(e.note)}` : ""}</div>
+        </div>
+      </div>
+    `;
+  }).join("") || `<div class="muted">Aún no hay registros 😴</div>`;
+
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+  modal.innerHTML = `
+    <div class="modal" role="dialog" aria-label="Historial de sueño">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">Historial de Sueño</div>
+          <div class="modalSub">Prom 7 noches: <strong>${escapeHtml(avgH(s7).toFixed(1))}h</strong> · Prom 30 días: <strong>${escapeHtml(avgH(s30).toFixed(1))}h</strong></div>
+        </div>
+        <button class="iconBtn" data-close aria-label="Close">✕</button>
+      </div>
+
+      <div class="list" style="margin-top:12px; max-height:60vh; overflow:auto;">
+        ${rows}
+      </div>
+
+      <div class="row" style="justify-content:flex-end; gap:10px; margin-top:12px;">
+        <button class="btn" data-close>Cerrar</button>
+      </div>
+    </div>
+  `;
+
+  modal.addEventListener("click", (e)=>{
+    if(e.target === modal) modal.remove();
+    if(e.target && e.target.closest("[data-close]")) modal.remove();
+  });
+
+  host.appendChild(modal);
+}
+
 function openMusicModal(){
   const host = document.querySelector("#app");
   const modal = document.createElement("div");
@@ -1728,8 +1816,13 @@ function wireHome(root){
 
   const btnSleep = root.querySelector("#btnAddSleep");
   if(btnSleep) btnSleep.addEventListener("click", openSleepModal);
+  const btnSleepHist = root.querySelector("#btnSleepHistory");
+  if(btnSleepHist) btnSleepHist.addEventListener("click", (e)=>{ e.stopPropagation(); openSleepHistory(); });
   const sleepCard = root.querySelector("#homeSleepCard");
-  if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepModal(); });
+  if(sleepCard) sleepCard.addEventListener("click", (e)=>{ 
+    if(e.target && (e.target.closest("#btnAddSleep") || e.target.closest("#btnSleepHistory"))) return;
+    openSleepModal(); 
+  });
 
   const prev = root.querySelector("#btnMusicPrev");
   const next = root.querySelector("#btnMusicNext");
@@ -4636,7 +4729,7 @@ function openMergeGameFull(){
               <br><br>
               Prueba: <b>Brave Shields → Off</b> para este sitio, y recarga.
             </div>
-            <div style="margin-top:14px;opacity:.7;font-size:12px">v7.7</div>
+            <div style="margin-top:14px;opacity:.7;font-size:12px">v7.8</div>
           </div>
         </div>`;
     }
@@ -4819,7 +4912,7 @@ async function exportSpritePack(){
     const dataURL = await blobToDataURL(r.blob);
     out.push({ id: r.id, dataURL, meta: r.meta || {}, updatedAt: r.updatedAt || Date.now() });
   }
-  const pack = { kind:"mc_merge_sprite_pack", version:"v7.7", exportedAt: new Date().toISOString(), items: out };
+  const pack = { kind:"mc_merge_sprite_pack", version:"v7.8", exportedAt: new Date().toISOString(), items: out };
   const blob = new Blob([JSON.stringify(pack, null, 2)], { type:"application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -4850,7 +4943,7 @@ function openMergeSpriteManagerModal(){
 
   backdrop.innerHTML = `
     <div class="modal">
-      <h2>Sprite Manager (Merge Lab) <span class="chip">v7.7</span></h2>
+      <h2>Sprite Manager (Merge Lab) <span class="chip">v7.8</span></h2>
       <div class="small muted">Sube tus PNG (10/11 items). Se guarda en este dispositivo (IndexedDB).</div>
 
       <div class="grid" style="margin-top:10px; gap:10px;">
@@ -5015,7 +5108,7 @@ function openMergeSpriteManagerModal(){
       if(raw){
         const cfg = JSON.parse(raw);
         cfg.items = cfg.items || [];
-        cfg.version = "v7.7";
+        cfg.version = "v7.8";
         localStorage.setItem("mc_merge_cfg_override", JSON.stringify(cfg, null, 2));
       }
     }catch(e){}
