@@ -10,7 +10,7 @@
   let hudEl = null;
   let width = 0, height = 0;
   let startedAt = 0;
-  const BUILD_VER = "v7.9";
+  const BUILD_VER = "v8.1";
 
   // Leaderboard (local)
   const LS_BEST = "mc_merge_best_score";
@@ -458,7 +458,7 @@ async function applySpriteOverrides(){
           ctx.save();
           ctx.translate(b.position.x, b.position.y);
           ctx.rotate(b.angle || 0);
-          const meta = IMG_META.get(tex) || null;
+          const meta = IMG_META.get(url) || null;
           if(meta){
             ctx.drawImage(img, meta.sx, meta.sy, meta.sw, meta.sh, -w/2, -h/2, w, h);
           }else{
