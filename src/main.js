@@ -865,7 +865,7 @@ function viewSettings(){
     <div class="card">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v7.6</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7.7</span></h2>
           <div class="small">Config del juego (fondo, sprites, radios, spawnPool). Se guarda en este dispositivo.</div>
         </div>
       </div>
@@ -994,19 +994,34 @@ function getSleepSeries(days=7){
     dates.push(isoDate(d));
   }
 
-  const map = new Map();
+  const minutesByDate = new Map();
+  const qualityByDate = new Map(); // last known quality for that day (0-10)
   const log = (state.sleepLog || []).map(normalizeSleepEntry).filter(Boolean);
 
   for(const e of log){
-    map.set(e.date, (map.get(e.date)||0) + e.totalMinutes);
+    minutesByDate.set(e.date, (minutesByDate.get(e.date)||0) + e.totalMinutes);
+    if(e.quality !== null && Number.isFinite(e.quality)){
+      const prev = qualityByDate.get(e.date);
+      if(!prev || (prev.ts < e.ts)) qualityByDate.set(e.date, { ts:e.ts, q: Number(e.quality) });
+    }
   }
 
-  const items = dates.map(date => ({ date, minutes: map.get(date)||0 }));
+  const items = dates.map(date => ({
+    date,
+    minutes: minutesByDate.get(date)||0,
+    quality: qualityByDate.get(date)?.q ?? null
+  }));
+
   const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60); // keep chart readable vs 8h baseline
   const avgMinutes = items.reduce((s,x)=>s+x.minutes,0) / items.length;
-  const last = items[items.length-1]?.minutes || 0;
 
-  return { items, maxMinutes, avgMinutes, lastMinutes: last };
+  // "Última noche" = yesterday (not "last column")
+  const y = new Date();
+  y.setDate(y.getDate()-1);
+  const yIso = isoDate(y);
+  const lastNightMinutes = items.find(x=>x.date===yIso)?.minutes ?? 0;
+
+  return { items, maxMinutes, avgMinutes, lastMinutes: lastNightMinutes };
 }
 
 
@@ -1023,17 +1038,38 @@ function getSleepWeekSeries(){
     return isoDate(d);
   });
 
-  const map = new Map();
+  const minutesByDate = new Map();
+  const qualityByDate = new Map();
   const log = (state.sleepLog || []).map(normalizeSleepEntry).filter(Boolean);
+
   for(const e of log){
-    map.set(e.date, (map.get(e.date)||0) + e.totalMinutes);
+    minutesByDate.set(e.date, (minutesByDate.get(e.date)||0) + e.totalMinutes);
+    if(e.quality !== null && Number.isFinite(e.quality)){
+      const prev = qualityByDate.get(e.date);
+      if(!prev || (prev.ts < e.ts)) qualityByDate.set(e.date, { ts:e.ts, q: Number(e.quality) });
+    }
   }
 
-  const items = dates.map(date => ({ date, minutes: map.get(date)||0 }));
+  const items = dates.map(date => ({
+    date,
+    minutes: minutesByDate.get(date)||0,
+    quality: qualityByDate.get(date)?.q ?? null
+  }));
+
   const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60);
   const avgMinutes = items.reduce((s,x)=>s+x.minutes,0) / items.length;
-  const last = items[items.length-1]?.minutes || 0;
-  return { items, maxMinutes, avgMinutes, lastMinutes: last };
+
+  // "Última noche" = yesterday (if within this week; else most recent non-zero in week)
+  const y = new Date();
+  y.setDate(y.getDate()-1);
+  const yIso = isoDate(y);
+  let lastNightMinutes = items.find(x=>x.date===yIso)?.minutes;
+  if(lastNightMinutes === undefined){
+    const lastNonZero = [...items].reverse().find(x=>x.minutes>0);
+    lastNightMinutes = lastNonZero ? lastNonZero.minutes : 0;
+  }
+
+  return { items, maxMinutes, avgMinutes, lastMinutes: lastNightMinutes };
 }
 
 
@@ -1051,6 +1087,7 @@ function renderSleepBars(series){
 
   // Keep weekday letters stable and aligned with the 7 columns
   const dayLetters = ["D","L","M","M","J","V","S"]; // Domingo..Sábado
+
   const cols = items.map((x)=>{
     const h = toPx(x.minutes);
     const hrs = (x.minutes/60);
@@ -1068,6 +1105,41 @@ function renderSleepBars(series){
   const avgH = (series.avgMinutes || 0) / 60;
   const lastH = (series.lastMinutes || 0) / 60;
 
+  // Smooth line based on "intensidad" (quality 1-10). If not present, derive from hours.
+  const points = items.map((x, i)=>{
+    const qRaw = (x.quality !== null && Number.isFinite(Number(x.quality))) ? Number(x.quality) : null;
+    const derived = Math.max(0, Math.min(10, (x.minutes/60) / 8 * 10));
+    const q = (qRaw !== null) ? Math.max(0, Math.min(10, qRaw)) : derived;
+
+    // SVG viewport: width=100, height=78
+    const w = 100, h = 78;
+    const padTop = 10, padBot = 14;
+    const usable = h - padTop - padBot;
+
+    const xPos = (w/7) * (i + 0.5);
+    const yPos = padTop + (1 - (q/10)) * usable; // higher quality => higher point
+    return { x:xPos, y:yPos };
+  });
+
+  const buildSmoothPath = (pts)=>{
+    if(!pts.length) return "";
+    if(pts.length === 1) return `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+    let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+    for(let i=1;i<pts.length;i++){
+      const prev = pts[i-1];
+      const cur = pts[i];
+      const midX = (prev.x + cur.x) / 2;
+      const midY = (prev.y + cur.y) / 2;
+      d += ` Q ${prev.x.toFixed(2)} ${prev.y.toFixed(2)} ${midX.toFixed(2)} ${midY.toFixed(2)}`;
+    }
+    // ensure it ends at last point
+    const last = pts[pts.length-1];
+    d += ` T ${last.x.toFixed(2)} ${last.y.toFixed(2)}`;
+    return d;
+  };
+
+  const pathD = buildSmoothPath(points);
+
   return `
     <div class="sleepMetaRow">
       <div>
@@ -1076,7 +1148,13 @@ function renderSleepBars(series){
       </div>
       <div class="chip">${avgH >= 7 ? "✅" : (avgH >= 6 ? "⚠️" : "🔥")}</div>
     </div>
-    <div class="sleepChart" aria-hidden="true">${cols}</div>
+
+    <div class="sleepChartWrap" aria-hidden="true">
+      <svg class="sleepLine" viewBox="0 0 100 78" preserveAspectRatio="none" aria-hidden="true">
+        <path d="${escapeHtml(pathD)}" />
+      </svg>
+      <div class="sleepChart">${cols}</div>
+    </div>
   `;
 }
 
@@ -1233,7 +1311,7 @@ const sleepBars = renderSleepBars(sleepSeries);
     <section class="card homeCard homeWide" id="homeMergeCard">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v7.6</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7.7</span></h2>
           <div class="small">Suelta y fusiona (pantalla completa)</div>
         </div>
         <button class="iconBtn" id="btnOpenMergeGame" aria-label="Open merge game">🎮</button>
@@ -4558,7 +4636,7 @@ function openMergeGameFull(){
               <br><br>
               Prueba: <b>Brave Shields → Off</b> para este sitio, y recarga.
             </div>
-            <div style="margin-top:14px;opacity:.7;font-size:12px">v7.4</div>
+            <div style="margin-top:14px;opacity:.7;font-size:12px">v7.7</div>
           </div>
         </div>`;
     }
@@ -4741,7 +4819,7 @@ async function exportSpritePack(){
     const dataURL = await blobToDataURL(r.blob);
     out.push({ id: r.id, dataURL, meta: r.meta || {}, updatedAt: r.updatedAt || Date.now() });
   }
-  const pack = { kind:"mc_merge_sprite_pack", version:"v7.6", exportedAt: new Date().toISOString(), items: out };
+  const pack = { kind:"mc_merge_sprite_pack", version:"v7.7", exportedAt: new Date().toISOString(), items: out };
   const blob = new Blob([JSON.stringify(pack, null, 2)], { type:"application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -4772,7 +4850,7 @@ function openMergeSpriteManagerModal(){
 
   backdrop.innerHTML = `
     <div class="modal">
-      <h2>Sprite Manager (Merge Lab) <span class="chip">v7.6</span></h2>
+      <h2>Sprite Manager (Merge Lab) <span class="chip">v7.7</span></h2>
       <div class="small muted">Sube tus PNG (10/11 items). Se guarda en este dispositivo (IndexedDB).</div>
 
       <div class="grid" style="margin-top:10px; gap:10px;">
@@ -4937,7 +5015,7 @@ function openMergeSpriteManagerModal(){
       if(raw){
         const cfg = JSON.parse(raw);
         cfg.items = cfg.items || [];
-        cfg.version = "v7.6";
+        cfg.version = "v7.7";
         localStorage.setItem("mc_merge_cfg_override", JSON.stringify(cfg, null, 2));
       }
     }catch(e){}
