@@ -865,7 +865,7 @@ function viewSettings(){
     <div class="card">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v7.6</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7.9</span></h2>
           <div class="small">Config del juego (fondo, sprites, radios, spawnPool). Se guarda en este dispositivo.</div>
         </div>
       </div>
@@ -1233,7 +1233,7 @@ const sleepBars = renderSleepBars(sleepSeries);
     <section class="card homeCard homeWide" id="homeMergeCard">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Merge Lab <span class="chip">v7.6</span></h2>
+          <h2 class="cardTitle">Merge Lab <span class="chip">v7.9</span></h2>
           <div class="small">Suelta y fusiona (pantalla completa)</div>
         </div>
         <button class="iconBtn" id="btnOpenMergeGame" aria-label="Open merge game">🎮</button>
@@ -4741,7 +4741,7 @@ async function exportSpritePack(){
     const dataURL = await blobToDataURL(r.blob);
     out.push({ id: r.id, dataURL, meta: r.meta || {}, updatedAt: r.updatedAt || Date.now() });
   }
-  const pack = { kind:"mc_merge_sprite_pack", version:"v7.6", exportedAt: new Date().toISOString(), items: out };
+  const pack = { kind:"mc_merge_sprite_pack", version:"v7.9", exportedAt: new Date().toISOString(), items: out };
   const blob = new Blob([JSON.stringify(pack, null, 2)], { type:"application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -4951,7 +4951,7 @@ function openMergeSpriteManagerModal(){
       if(raw){
         const cfg = JSON.parse(raw);
         cfg.items = cfg.items || [];
-        cfg.version = "v7.6";
+        cfg.version = "v7.9";
         localStorage.setItem("mc_merge_cfg_override", JSON.stringify(cfg, null, 2));
       }
     }catch(e){}

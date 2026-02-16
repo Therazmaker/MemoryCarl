@@ -10,7 +10,7 @@
   let hudEl = null;
   let width = 0, height = 0;
   let startedAt = 0;
-  const BUILD_VER = "v7.6";
+  const BUILD_VER = "v7.9";
 
   // Leaderboard (local)
   const LS_BEST = "mc_merge_best_score";
@@ -33,6 +33,7 @@
   let SPAWN_POOL = 4;
   let BG_URL = null;
   let IMG_CACHE = new Map();
+  let IMG_META = new Map();
 
 
 // Sprite override store (IndexedDB)
@@ -145,6 +146,45 @@ async function applySpriteOverrides(){
     }
   }
 
+
+  function analyzeSpriteBounds(img){
+    try{
+      const iw = img.naturalWidth || img.width || 0;
+      const ih = img.naturalHeight || img.height || 0;
+      if(iw<=0 || ih<=0) return null;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = iw;
+      canvas.height = ih;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0,0,iw,ih).data;
+
+      let minX = iw, minY = ih, maxX = -1, maxY = -1;
+      const alphaThreshold = 12; // 0-255
+      for(let y=0;y<ih;y++){
+        for(let x=0;x<iw;x++){
+          const a = data[(y*iw + x)*4 + 3];
+          if(a > alphaThreshold){
+            if(x < minX) minX = x;
+            if(y < minY) minY = y;
+            if(x > maxX) maxX = x;
+            if(y > maxY) maxY = y;
+          }
+        }
+      }
+      if(maxX < 0 || maxY < 0){
+        return { iw, ih, sx:0, sy:0, sw:iw, sh:ih };
+      }
+      const sw = Math.max(1, (maxX - minX + 1));
+      const sh = Math.max(1, (maxY - minY + 1));
+      return { iw, ih, sx:minX, sy:minY, sw, sh };
+    }catch(e){
+      return null;
+    }
+  }
+
+
   function preloadImage(url){
     return new Promise((resolve)=>{
       if(!url) return resolve(null);
@@ -160,6 +200,10 @@ async function applySpriteOverrides(){
         const h = img.naturalHeight || img.height || 0;
         if(w > 0 && h > 0){
           IMG_CACHE.set(url, img);
+          if(!IMG_META.has(url)){
+            const meta = analyzeSpriteBounds(img);
+            if(meta) IMG_META.set(url, meta);
+          }
           return resolve(img);
         }
         // Try a micro-delay then re-check.
@@ -168,6 +212,10 @@ async function applySpriteOverrides(){
           const h2 = img.naturalHeight || img.height || 0;
           if(w2 > 0 && h2 > 0){
             IMG_CACHE.set(url, img);
+          if(!IMG_META.has(url)){
+            const meta = analyzeSpriteBounds(img);
+            if(meta) IMG_META.set(url, meta);
+          }
             return resolve(img);
           }
           console.warn("Sprite loaded but has 0x0 size (will fallback)", url);
@@ -403,7 +451,12 @@ async function applySpriteOverrides(){
           ctx.save();
           ctx.translate(b.position.x, b.position.y);
           ctx.rotate(b.angle || 0);
-          ctx.drawImage(img, -w/2, -h/2, w, h);
+          const meta = IMG_META.get(tex) || null;
+          if(meta){
+            ctx.drawImage(img, meta.sx, meta.sy, meta.sw, meta.sh, -w/2, -h/2, w, h);
+          }else{
+            ctx.drawImage(img, -w/2, -h/2, w, h);
+          }
           ctx.restore();
 
           // Once we've successfully drawn at least once, hide the solid fill
