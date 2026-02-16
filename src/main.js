@@ -4945,16 +4945,37 @@ function openMergeSpriteManagerModal(){
         saved++;
       }
     }
-    // persist desired count in merge config override (optional)
+    // Persist desired item count in merge config override so the game actually
+    // supports merging beyond the default (older configs were capped at 6).
     try{
+      const radii = [22,28,34,42,52,64,76,90,106,124,144];
+      let cfg = null;
       const raw = localStorage.getItem("mc_merge_cfg_override");
       if(raw){
-        const cfg = JSON.parse(raw);
-        cfg.items = cfg.items || [];
-        cfg.version = "v7.9";
-        localStorage.setItem("mc_merge_cfg_override", JSON.stringify(cfg, null, 2));
+        cfg = JSON.parse(raw);
+      }else{
+        // seed from file when no override exists
+        try{
+          const txt = await fetch("./src/merge/merge_config.json", { cache: "no-store" }).then(r=>r.text());
+          cfg = JSON.parse(txt);
+        }catch(e){
+          cfg = { spawnPool: 4, background: "./src/merge/assets/bg.png", items: [] };
+        }
       }
-    }catch(e){}
+
+      const count = Math.max(2, Math.min(11, state.count||11));
+      cfg.version = "v8.0";
+      cfg.spawnPool = Math.max(1, Math.min(cfg.spawnPool ?? 4, count));
+      cfg.background = cfg.background || "./src/merge/assets/bg.png";
+      cfg.items = Array.from({length: count}, (_,i)=>({
+        id: `item_${i}`,
+        radius: radii[i] || (radii[radii.length-1] + (i-radii.length+1)*18),
+        sprite: `./src/merge/assets/item_${i}.png`,
+        points: Math.pow(2, i)
+      }));
+
+      localStorage.setItem("mc_merge_cfg_override", JSON.stringify(cfg, null, 2));
+    }catch(e){ console.warn("Sprite Manager: failed to update merge cfg override", e); }
     toast(`✅ Guardado (${saved})`);
     close();
     // Suggest reload game to apply

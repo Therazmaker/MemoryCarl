@@ -99,13 +99,20 @@ async function applySpriteOverrides(){
   }
 }
 
+  // Default: support up to 11 items (0..10). If the user loads custom sprites
+  // via Sprite Manager, those will replace `sprite` values at runtime.
   const DEFAULT_ITEMS = [
-    { id:"d0", radius: 22, color:"#6EE7B7", points:1 },
-    { id:"d1", radius: 28, color:"#60A5FA", points:2 },
-    { id:"d2", radius: 34, color:"#F472B6", points:4 },
-    { id:"d3", radius: 42, color:"#F59E0B", points:8 },
-    { id:"d4", radius: 52, color:"#A78BFA", points:16 },
-    { id:"d5", radius: 64, color:"#FB7185", points:32 }
+    { id:"d0",  radius: 22,  color:"#6EE7B7", points:1 },
+    { id:"d1",  radius: 28,  color:"#60A5FA", points:2 },
+    { id:"d2",  radius: 34,  color:"#F472B6", points:4 },
+    { id:"d3",  radius: 42,  color:"#F59E0B", points:8 },
+    { id:"d4",  radius: 52,  color:"#A78BFA", points:16 },
+    { id:"d5",  radius: 64,  color:"#FB7185", points:32 },
+    { id:"d6",  radius: 76,  color:"#34D399", points:64 },
+    { id:"d7",  radius: 90,  color:"#38BDF8", points:128 },
+    { id:"d8",  radius: 106, color:"#F9A8D4", points:256 },
+    { id:"d9",  radius: 124, color:"#FBBF24", points:512 },
+    { id:"d10", radius: 144, color:"#C4B5FD", points:1024 }
   ];
 
   const LIMIT_Y = 120;     // y (px) from top: danger line
