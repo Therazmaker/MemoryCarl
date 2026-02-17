@@ -4,40 +4,76 @@
   "items": [
     {
       "id": "item_0",
-      "radius": 22,
+      "radius": 18,
       "sprite": "./src/merge/assets/item_0.png",
       "points": 1
     },
     {
       "id": "item_1",
-      "radius": 28,
+      "radius": 21,
       "sprite": "./src/merge/assets/item_1.png",
       "points": 2
     },
     {
       "id": "item_2",
-      "radius": 34,
+      "radius": 25,
       "sprite": "./src/merge/assets/item_2.png",
       "points": 4
     },
     {
       "id": "item_3",
-      "radius": 42,
+      "radius": 29,
       "sprite": "./src/merge/assets/item_3.png",
       "points": 8
     },
     {
       "id": "item_4",
-      "radius": 52,
+      "radius": 34,
       "sprite": "./src/merge/assets/item_4.png",
       "points": 16
     },
     {
       "id": "item_5",
-      "radius": 64,
+      "radius": 39,
       "sprite": "./src/merge/assets/item_5.png",
       "points": 32
+    },
+    {
+      "id": "item_6",
+      "radius": 46,
+      "sprite": "./src/merge/assets/item_6.png",
+      "points": 64
+    },
+    {
+      "id": "item_7",
+      "radius": 54,
+      "sprite": "./src/merge/assets/item_7.png",
+      "points": 128
+    },
+    {
+      "id": "item_8",
+      "radius": 63,
+      "sprite": "./src/merge/assets/item_8.png",
+      "points": 256
+    },
+    {
+      "id": "item_9",
+      "radius": 74,
+      "sprite": "./src/merge/assets/item_9.png",
+      "points": 512
+    },
+    {
+      "id": "item_10",
+      "radius": 87,
+      "sprite": "./src/merge/assets/item_10.png",
+      "points": 1024
+    },
+    {
+      "id": "item_11",
+      "radius": 101,
+      "sprite": "./src/merge/assets/item_11.png",
+      "points": 2048
     }
   ],
-  "version": "v7.6"
+  "version": "v7.7"
 }
