@@ -1,0 +1,28 @@
+{
+  "id": "level_001_strings_delivery",
+  "title": "El Mensaje Secreto",
+  "chapter": "Plano de los Símbolos",
+  "lesson": "Aprende strings y el operador +. Ve a la 📚 Biblioteca, escanea el dato en una variable y entrégalo en el 📮 Correo.\n\nPista: puedes hacer set msg = msg + \" ✅\"",
+  "board": { "w": 8, "h": 8 },
+  "spawn": { "hero": { "x": 1, "y": 6, "icon": "🧑‍🚀" } },
+  "pois": [
+    { "id": "library", "x": 2, "y": 2, "icon": "📚", "data": "Hola Carlos" },
+    { "id": "post", "x": 6, "y": 2, "icon": "📮" }
+  ],
+  "allowed": [
+    "hero.moveRight",
+    "hero.moveLeft",
+    "hero.moveUp",
+    "hero.moveDown",
+    "hero.scan",
+    "hero.deliver",
+    "set"
+  ],
+  "goals": [
+    { "type": "scanned", "poi": "library" },
+    { "type": "delivered", "poi": "post", "var": "msg" },
+    { "type": "contains", "var": "msg", "text": "Hola" },
+    { "type": "contains", "var": "msg", "text": "Carlos" }
+  ],
+  "starterCode": "hero.moveUp()\nhero.moveUp()\nhero.moveUp()\nhero.moveUp()\nhero.scan(\"library\",\"msg\")\n\nset msg = msg + \" ✅\"\n\nhero.moveRight()\nhero.moveRight()\nhero.moveRight()\nhero.moveRight()\nhero.deliver(\"post\",\"msg\")\n"
+}
