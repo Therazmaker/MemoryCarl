@@ -1,6 +1,6 @@
 {
   "background": "./src/merge/assets/bg.png",
-  "spawnPool": 11,
+  "spawnPool": 4,
   "items": [
     { "id": "item_0", "radius": 16, "sprite": "./src/merge/assets/item_0.png", "points": 1, "spriteScale": 1.2 },
     { "id": "item_1", "radius": 19, "sprite": "./src/merge/assets/item_1.png", "points": 2, "spriteScale": 1.2 },
