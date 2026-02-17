@@ -1030,6 +1030,295 @@ function normalizeSleepEntry(e){
   };
 }
 
+// ====================== MOOD SPRITES (Daily Emotion) ======================
+const DEFAULT_MOOD_SPRITES = [
+  { id:"angry", name:"Angry", src:"./src/emotions/Angry.png" },
+  { id:"confused", name:"Confused", src:"./src/emotions/Confused.png" },
+  { id:"happy", name:"Happy", src:"./src/emotions/Happy.png" },
+  { id:"irritated", name:"Irritated", src:"./src/emotions/Irritated.png" },
+  { id:"pleased", name:"Pleased", src:"./src/emotions/Pleased.png" },
+  { id:"sad", name:"Sad", src:"./src/emotions/Sad.png" },
+  { id:"wtf", name:"WTF", src:"./src/emotions/WTF.png" },
+];
+
+function getAllMoodSprites(){
+  const custom = Array.isArray(state.moodSpritesCustom) ? state.moodSpritesCustom : [];
+  return [...DEFAULT_MOOD_SPRITES, ...custom];
+}
+
+function getMoodSpriteById(id){
+  if(!id) return null;
+  const all = getAllMoodSprites();
+  return all.find(s=>String(s.id)===String(id)) || null;
+}
+
+function getMoodEntry(iso){
+  const map = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
+  const e = map[String(iso||"")];
+  if(!e || typeof e!=="object") return null;
+  return {
+    iso: String(iso),
+    spriteId: e.spriteId ? String(e.spriteId) : "",
+    note: e.note ? String(e.note) : "",
+    ts: e.ts ? String(e.ts) : ""
+  };
+}
+
+function setMoodEntry(iso, spriteId, note=""){
+  const key = String(iso||"");
+  state.moodDaily = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
+  if(!spriteId){
+    delete state.moodDaily[key];
+  }else{
+    state.moodDaily[key] = { spriteId: String(spriteId), note: String(note||""), ts: new Date().toISOString() };
+  }
+  persist();
+}
+
+function readFilesAsDataUrls(fileList, cb){
+  const files = Array.from(fileList || []);
+  if(!files.length){ cb([]); return; }
+  const out = [];
+  let done = 0;
+  files.forEach(f=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      out.push({ name: f.name, dataUrl: String(reader.result||"") });
+      done++;
+      if(done===files.length) cb(out);
+    };
+    reader.onerror = ()=>{
+      done++;
+      if(done===files.length) cb(out);
+    };
+    reader.readAsDataURL(f);
+  });
+}
+
+function openMoodPickerModal(iso, opts={}){
+  const host = document.querySelector("#app");
+  const backdrop = document.createElement("div");
+  backdrop.className = "modalBackdrop";
+  const existing = getMoodEntry(iso);
+  const all = getAllMoodSprites();
+  let selectedId = existing?.spriteId || "";
+  let note = existing?.note || "";
+
+  backdrop.innerHTML = `
+    <div class="modal moodPickerModal" role="dialog" aria-label="Emoción del día">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">Emoción del día</div>
+          <div class="modalSub">${escapeHtml(iso)} · Elige un sprite y listo</div>
+        </div>
+        <div class="moodTopActions">
+          <button class="iconBtn" id="btnMoodMonth" aria-label="Ver mes">Mes</button>
+          <button class="iconBtn" data-close aria-label="Cerrar">✕</button>
+        </div>
+      </div>
+
+      <div class="moodGrid" id="moodGrid">
+        ${all.map(s=>`
+          <button class="moodItem ${String(s.id)===String(selectedId)?"active":""}" data-mood="${escapeHtml(s.id)}" title="${escapeHtml(s.name||s.id)}">
+            <img src="${escapeHtml(s.src)}" alt="${escapeHtml(s.name||s.id)}" />
+          </button>
+        `).join("")}
+      </div>
+
+      <div class="field" style="margin-top:10px;">
+        <label>Nota (opcional)</label>
+        <input id="moodNote" class="input" placeholder="Ej: día pesado, flow, calma..." value="${escapeHtml(note)}" />
+      </div>
+
+      <div class="moodUpload">
+        <label class="moodUploadLabel">
+          <input id="moodUpload" type="file" accept="image/*" multiple style="display:none;" />
+          <span class="btn ghost">＋ Cargar sprites</span>
+        </label>
+        <div class="muted">Se guardan en tu app (local). Para sync global luego lo conectamos al Sheet.</div>
+      </div>
+
+      <div class="row" style="justify-content:space-between;margin-top:12px;">
+        <button class="btn ghost" id="btnMoodClear">Quitar</button>
+        <div class="row" style="gap:8px;">
+          <button class="btn" data-close>Cancel</button>
+          <button class="btn primary" id="btnMoodSave">Guardar</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const close = ()=> {
+    if(typeof window.anime==="function"){
+      animateSleepModalOut(backdrop, ()=>backdrop.remove());
+    }else{
+      backdrop.remove();
+    }
+  };
+
+  backdrop.addEventListener("click", (e)=>{
+    if(e.target===backdrop) close();
+    if(e.target && e.target.closest("[data-close]")) close();
+  });
+
+  host.appendChild(backdrop);
+  if(typeof window.anime==="function") animateSleepModalIn(backdrop);
+
+  const grid = backdrop.querySelector("#moodGrid");
+  const refreshActive = ()=>{
+    grid.querySelectorAll(".moodItem").forEach(btn=>{
+      const id = btn.getAttribute("data-mood")||"";
+      btn.classList.toggle("active", String(id)===String(selectedId));
+    });
+  };
+
+  grid.querySelectorAll("[data-mood]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      selectedId = btn.getAttribute("data-mood") || "";
+      refreshActive();
+    });
+  });
+
+  backdrop.querySelector("#moodNote")?.addEventListener("input", (e)=>{ note = e.target.value || ""; });
+
+  backdrop.querySelector("#btnMoodClear")?.addEventListener("click", ()=>{
+    selectedId = "";
+    note = "";
+    refreshActive();
+    backdrop.querySelector("#moodNote").value = "";
+  });
+
+  backdrop.querySelector("#btnMoodSave")?.addEventListener("click", ()=>{
+    setMoodEntry(iso, selectedId, note);
+    view();
+    if(typeof opts.onSaved==="function") opts.onSaved({ iso, spriteId: selectedId, note });
+    toast(selectedId ? "Emoción guardada ✅" : "Emoción eliminada 🧼");
+    close();
+  });
+
+  backdrop.querySelector("#btnMoodMonth")?.addEventListener("click", ()=>{
+    close();
+    openMoodMonthModal(iso);
+  });
+
+  backdrop.querySelector("#moodUpload")?.addEventListener("change", (e)=>{
+    const files = e.target.files;
+    readFilesAsDataUrls(files, (items)=>{
+      if(!items.length){ toast("No se cargó nada"); return; }
+      state.moodSpritesCustom = Array.isArray(state.moodSpritesCustom) ? state.moodSpritesCustom : [];
+      items.forEach(it=>{
+        const id = uid("m");
+        state.moodSpritesCustom.push({ id, name: it.name.replace(/\.[^.]+$/,""), src: it.dataUrl });
+      });
+      persist();
+      toast(`Sprites cargados: ${items.length} ✅`);
+      // re-open to refresh grid
+      const onSaved = opts.onSaved;
+      close();
+      openMoodPickerModal(iso, { onSaved });
+    });
+  });
+}
+
+function openMoodMonthModal(initialIso){
+  const host = document.querySelector("#app");
+  const backdrop = document.createElement("div");
+  backdrop.className = "modalBackdrop";
+
+  const start = initialIso ? new Date(initialIso+"T00:00:00") : new Date();
+  if(Number.isNaN(start.getTime())) start.setTime(Date.now());
+  start.setHours(0,0,0,0);
+  let cursor = new Date(start);
+  cursor.setDate(1);
+
+  const close = ()=> {
+    if(typeof window.anime==="function"){
+      animateSleepModalOut(backdrop, ()=>backdrop.remove());
+    }else{
+      backdrop.remove();
+    }
+  };
+
+  const render = ()=>{
+    const y = cursor.getFullYear();
+    const m = cursor.getMonth(); // 0-based
+    const first = new Date(y, m, 1);
+    const last = new Date(y, m+1, 0);
+    const daysInMonth = last.getDate();
+    const startDow = (first.getDay()+6)%7; // Monday=0
+    const cells = [];
+    for(let i=0;i<startDow;i++) cells.push(null);
+    for(let d=1; d<=daysInMonth; d++){
+      const dd = new Date(y,m,d);
+      cells.push(isoDate(dd));
+    }
+    while(cells.length % 7 !== 0) cells.push(null);
+
+    const title = first.toLocaleDateString("es-PE", { month:"long", year:"numeric" });
+    const map = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
+
+    const cellHtml = cells.map(iso=>{
+      if(!iso) return `<div class="moodCalCell empty"></div>`;
+      const e = map[iso];
+      const sp = e ? getMoodSpriteById(e.spriteId) : null;
+      return `
+        <button class="moodCalCell" data-iso="${escapeHtml(iso)}">
+          <div class="moodCalNum">${escapeHtml(String(Number(iso.slice(8,10))))}</div>
+          ${sp ? `<img class="moodCalImg" src="${escapeHtml(sp.src)}" alt="" />` : `<div class="moodCalEmpty">＋</div>`}
+        </button>
+      `;
+    }).join("");
+
+    backdrop.innerHTML = `
+      <div class="modal moodMonthModal" role="dialog" aria-label="Emociones del mes">
+        <div class="modalTop">
+          <div>
+            <div class="modalTitle">Emociones</div>
+            <div class="modalSub">${escapeHtml(title)}</div>
+          </div>
+          <div class="moodTopActions">
+            <button class="iconBtn" id="mPrev" aria-label="Prev">‹</button>
+            <button class="iconBtn" id="mNext" aria-label="Next">›</button>
+            <button class="iconBtn" data-close aria-label="Cerrar">✕</button>
+          </div>
+        </div>
+
+        <div class="moodCalHeader">
+          ${["L","M","M","J","V","S","D"].map(x=>`<div>${x}</div>`).join("")}
+        </div>
+        <div class="moodCalGrid">
+          ${cellHtml}
+        </div>
+
+        <div class="muted" style="margin-top:10px;">Tip: toca un día para elegir/editar su emoción.</div>
+      </div>
+    `;
+
+    backdrop.querySelector("#mPrev")?.addEventListener("click", ()=>{ cursor = new Date(y, m-1, 1); render(); });
+    backdrop.querySelector("#mNext")?.addEventListener("click", ()=>{ cursor = new Date(y, m+1, 1); render(); });
+
+    backdrop.querySelectorAll("[data-iso]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const iso = btn.getAttribute("data-iso") || "";
+        openMoodPickerModal(iso, { onSaved: ()=>render() });
+      });
+    });
+
+    backdrop.addEventListener("click", (e)=>{
+      if(e.target===backdrop) close();
+      if(e.target && e.target.closest("[data-close]")) close();
+    });
+  };
+
+  host.appendChild(backdrop);
+  if(typeof window.anime==="function") animateSleepModalIn(backdrop);
+  render();
+}
+// ====================== /MOOD SPRITES ======================
+
+
+
+
 function getSleepSeries(days=7){
   const n = Math.max(1, Math.min(31, Number(days)||7));
   const today = new Date();
@@ -1190,12 +1479,34 @@ function viewHome(){
     </label>
   `).join("") : `<div class="muted">Sin pendientes 🎈</div>`;
 
+    const moodMap = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
+  const getMoodMini = (iso)=>{
+    const e = moodMap[String(iso||"")];
+    if(!e || !e.spriteId) return "";
+    const sp = getMoodSpriteById(e.spriteId);
+    if(!sp) return "";
+    return `<img class="dayMoodMini" src="${escapeHtml(sp.src)}" alt="mood" />`;
+  };
+
+  const todayIso = isoDate(now);
+  const todayMoodEntry = moodMap[todayIso];
+  const todayMood = todayMoodEntry ? getMoodSpriteById(todayMoodEntry.spriteId) : null;
+  const moodPillInner = todayMood
+    ? `<img class="moodPillImg" src="${escapeHtml(todayMood.src)}" alt="Mood" />`
+    : `<div class="moodPillPlus">＋</div>`;
+
   const weekHtml = days.map(x=>`
     <div class="dayPill ${x.isToday ? "today":""}" data-day="${x.iso}">
       <div class="dayNum">${formatDayNum(x.d)}</div>
       <div class="dayAbbr">${dayAbbrEs(x.d.getDay())}</div>
+      ${getMoodMini(x.iso)}
     </div>
-  `).join("");
+  `).join("") + `
+    <div class="dayPill moodPill" id="homeMoodPill" data-mood-day="${todayIso}">
+      ${moodPillInner}
+      <div class="dayAbbr">Mood</div>
+    </div>
+  `;
 
 
 const sleepSeries = getSleepWeekSeries();
@@ -2008,6 +2319,27 @@ function wireHome(root){
   if(btnSleep) btnSleep.addEventListener("click", openSleepModal);
   const sleepCard = root.querySelector("#homeSleepCard");
   if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepHistoryModal(); });
+
+
+  // Mood sprites (daily emotion)
+  const moodPill = root.querySelector("#homeMoodPill");
+  if(moodPill){
+    moodPill.addEventListener("click", (e)=>{
+      e.preventDefault();
+      const iso = moodPill.getAttribute("data-mood-day") || isoDate(new Date());
+      openMoodPickerModal(iso, { onSaved: ()=>{} });
+    });
+  }
+
+  // Pick mood by tapping a day pill (week strip)
+  root.querySelectorAll('.dayPill[data-day]').forEach(p=>{
+    p.addEventListener("click", ()=>{
+      const iso = p.getAttribute("data-day") || "";
+      if(!iso) return;
+      openMoodPickerModal(iso, { onSaved: ()=>{} });
+    });
+  });
+
 
   const prev = root.querySelector("#btnMusicPrev");
   const next = root.querySelector("#btnMusicNext");

@@ -315,6 +315,8 @@ body{
   border:1px solid var(--line);
   background:rgba(255,255,255,.04);
   padding:8px 10px;
+  position:relative;
+  overflow:hidden;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
 }
 .dayPill.today{
@@ -324,6 +326,120 @@ body{
 }
 .dayNum{font-weight:900;font-size:16px;line-height:1}
 .dayAbbr{margin-top:4px;color:var(--muted);font-size:12px;line-height:1}
+
+
+.dayMoodMini{
+  position:absolute;
+  right:6px;
+  bottom:6px;
+  width:16px;
+  height:16px;
+  opacity:.95;
+  border-radius:6px;
+  background:rgba(0,0,0,.10);
+}
+
+.dayPill.moodPill{
+  min-width:54px;
+  border-style:dashed;
+}
+.moodPillImg{
+  width:24px;
+  height:24px;
+  margin-top:2px;
+}
+.moodPillPlus{
+  width:24px;
+  height:24px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:900;
+  font-size:18px;
+  border-radius:10px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12);
+}
+
+.modal.moodPickerModal{
+  max-width:560px;
+  border-radius:22px;
+  margin:12px;
+  padding-bottom:16px;
+  overflow:auto;
+}
+.moodTopActions{display:flex;gap:8px;align-items:center}
+.moodGrid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px;
+  margin-top:10px;
+}
+.moodItem{
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.04);
+  border-radius:16px;
+  padding:10px;
+  cursor:pointer;
+}
+.moodItem.active{
+  border-color:rgba(124,92,255,.60);
+  background:rgba(124,92,255,.18);
+}
+.moodItem img{
+  width:100%;
+  height:auto;
+  display:block;
+}
+.moodUpload{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+
+.modal.moodMonthModal{
+  max-width:640px;
+  border-radius:22px;
+  margin:12px;
+  padding-bottom:16px;
+  overflow:auto;
+}
+.moodCalHeader{
+  margin-top:10px;
+  display:grid;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  gap:6px;
+  color:var(--muted);
+  font-weight:800;
+  font-size:12px;
+}
+.moodCalGrid{
+  margin-top:6px;
+  display:grid;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  gap:6px;
+}
+.moodCalCell{
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.03);
+  border-radius:14px;
+  padding:8px;
+  min-height:54px;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  justify-content:space-between;
+  cursor:pointer;
+}
+.moodCalCell.empty{
+  border:1px dashed rgba(255,255,255,.08);
+  background:transparent;
+  cursor:default;
+}
+.moodCalNum{font-weight:900;font-size:12px;color:rgba(255,255,255,.85)}
+.moodCalImg{width:26px;height:26px;border-radius:10px}
+.moodCalEmpty{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);font-weight:900}
+@media (max-width:560px){
+  .modal.moodPickerModal,.modal.moodMonthModal{margin:0;border-radius:20px 20px 0 0;max-height:90vh}
+  .moodGrid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+
 
 .homeGrid{
   display:grid;
