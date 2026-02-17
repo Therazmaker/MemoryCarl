@@ -11,6 +11,7 @@
   let width = 0, height = 0;
   let startedAt = 0;
   const BUILD_VER = "v7.6";
+  const MAX_RANDOM_DROP_POOL = 4; // nunca spawnear random más allá de item_0..item_3
 
   // Leaderboard (local)
   const LS_BEST = "mc_merge_best_score";
@@ -114,37 +115,79 @@ async function applySpriteOverrides(){
   const STILL_V = 0.18;    // considered "still" (velocity threshold)
 
   async function loadConfig(){
-    // Local override (from Settings UI)
-    try{
-      const raw = localStorage.getItem('mc_merge_cfg_override');
-      if(raw){
-        const parsed = JSON.parse(raw);
-        CFG = parsed;
-        SPAWN_POOL = Math.max(1, Math.min((CFG.spawnPool ?? 4), Math.min((CFG.items?.length ?? ITEMS?.length ?? DEFAULT_ITEMS.length), MAX_SPAWN_POOL)));
-        BG_URL = CFG.background || null;
-        ITEMS = (CFG.items && CFG.items.length) ? CFG.items : DEFAULT_ITEMS;
-        return CFG;
-      }
-    }catch(e){ console.warn('Invalid mc_merge_cfg_override, ignoring.', e); }
 
-    if(CFG) return CFG;
-    try{
-      const res = await fetch("./src/merge/merge_config.json", { cache: "no-store" });
-      if(!res.ok) throw new Error("HTTP " + res.status);
-      CFG = await res.json();
-      SPAWN_POOL = Math.max(1, Math.min((CFG.spawnPool ?? 4), Math.min((CFG.items?.length ?? ITEMS?.length ?? DEFAULT_ITEMS.length), MAX_SPAWN_POOL)));
+  const MAX_RANDOM_DROP_POOL = 4; // nunca soltar random más allá de 1..4
+
+  // Local override (from Settings UI)
+  try{
+    const raw = localStorage.getItem('mc_merge_cfg_override');
+    if(raw){
+      const parsed = JSON.parse(raw);
+      CFG = parsed;
+
       BG_URL = CFG.background || null;
       ITEMS = (CFG.items && CFG.items.length) ? CFG.items : DEFAULT_ITEMS;
-      return CFG;
-    }catch(err){
-      console.warn("Merge config not loaded, using defaults.", err);
-      SPAWN_POOL = 4;
-      BG_URL = null;
-      ITEMS = DEFAULT_ITEMS;
-      CFG = { spawnPool: SPAWN_POOL, background: null, items: ITEMS };
+
+      const cfgLen = ITEMS.length;
+
+      SPAWN_POOL = Math.max(
+        1,
+        Math.min(
+          Number(CFG.spawnPool ?? 4),
+          cfgLen,
+          MAX_SPAWN_POOL,
+          MAX_RANDOM_DROP_POOL
+        )
+      );
+
       return CFG;
     }
+  }catch(e){
+    console.warn('Invalid mc_merge_cfg_override, ignoring.', e);
   }
+
+  if(CFG) return CFG;
+
+  try{
+    const res = await fetch("./src/merge/merge_config.json", { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+
+    CFG = await res.json();
+
+    BG_URL = CFG.background || null;
+    ITEMS = (CFG.items && CFG.items.length) ? CFG.items : DEFAULT_ITEMS;
+
+    const cfgLen = ITEMS.length;
+
+    SPAWN_POOL = Math.max(
+      1,
+      Math.min(
+        Number(CFG.spawnPool ?? 4),
+        cfgLen,
+        MAX_SPAWN_POOL,
+        MAX_RANDOM_DROP_POOL
+      )
+    );
+
+    return CFG;
+
+  }catch(err){
+    console.warn("Merge config not loaded, using defaults.", err);
+
+    ITEMS = DEFAULT_ITEMS;
+    SPAWN_POOL = 4;
+    BG_URL = null;
+
+    CFG = {
+      spawnPool: SPAWN_POOL,
+      background: null,
+      items: ITEMS
+    };
+
+    return CFG;
+  }
+}
+
 
   function preloadImage(url){
     return new Promise((resolve)=>{
