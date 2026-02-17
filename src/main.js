@@ -161,6 +161,14 @@ function flushSync(reason="auto"){
         musicToday: state?.musicToday ?? load(LS.musicToday, null),
         musicLog: state?.musicLog ?? load(LS.musicLog, []),
         sleepLog: state?.sleepLog ?? load(LS.sleepLog, []),
+        // Shopping system (library + history)
+        products: state?.products ?? load(LS.products, []),
+        shoppingHistory: state?.shoppingHistory ?? load(LS.shoppingHistory, []),
+        // Inventory (home stock)
+        inventory: state?.inventory ?? load(LS.inventory, []),
+        // Other useful state
+        budgetMonthly: state?.budgetMonthly ?? load(LS.budgetMonthly, null),
+        house: state?.house ?? load(LS.house, null),
       }
     };
 
@@ -236,7 +244,17 @@ function load(key, fallback){
 function save(key, value){
   localStorage.setItem(key, JSON.stringify(value));
   // Mark dirty only for core data keys (avoid syncing tokens/settings every time)
-  if (key === LS.routines || key === LS.shopping || key === LS.reminders || key === LS.musicToday || key === LS.musicLog || key === LS.sleepLog) markDirty();
+  if (
+    key === LS.routines ||
+    key === LS.shopping ||
+    key === LS.reminders ||
+    key === LS.musicToday ||
+    key === LS.musicLog ||
+    key === LS.sleepLog ||
+    key === LS.products ||
+    key === LS.shoppingHistory ||
+    key === LS.inventory
+  ) markDirty();
 }
 
 function escapeHtml(str){
@@ -2497,6 +2515,10 @@ function viewShopping(){
     return viewShoppingDashboard();
   }
 
+  if(sub === "inventory"){
+    return viewInventory();
+  }
+
   return `
     <div class="sectionTitle">
       <div>Listas de compras</div>
@@ -2505,6 +2527,7 @@ function viewShopping(){
 
     <div class="row" style="margin-bottom:12px;">
       <button class="btn" onclick="openProductLibrary()">📦 Biblioteca</button>
+      <button class="btn" data-act="openInventory">🏠 Inventario</button>
       <button class="btn" data-act="openShoppingDashboard">📊 Dashboard</button>
       <div class="chip">hist: ${histCount}</div>
     </div>
@@ -4654,6 +4677,11 @@ function wireActions(root){
         view();
         return;
       }
+      if(act==="openInventory"){
+        state.shoppingSubtab = "inventory";
+        view();
+        return;
+      }
       if(act==="backToShoppingLists"){
         state.shoppingSubtab = "lists";
         view();
@@ -4820,6 +4848,9 @@ if(act==="savePurchase"){
         price: Number(it.price||0),
         qty: Math.max(1, Number(it.qty||1)),
         category: (it.category||"").trim(),
+        productId: (it.productId||"").trim(),
+        essential: !!it.essential,
+        unit: (it.unit||"").trim(),
       }));
       const totals = calcEntryTotals(items);
       state.shoppingHistory.unshift({
@@ -5078,8 +5109,10 @@ view();
 
 LS.products = "memorycarl_v2_products";
 LS.shoppingHistory = "memorycarl_v2_shopping_history";
+LS.inventory = "memorycarl_v2_inventory";
 state.products = load(LS.products, []);
 state.shoppingHistory = load(LS.shoppingHistory, []);
+state.inventory = load(LS.inventory, []);
 state.shoppingSubtab = state.shoppingSubtab || "lists";
 state.shoppingDashPreset = state.shoppingDashPreset || "7d";
 
@@ -5088,6 +5121,7 @@ persist = function(){
   _persistBase();
   save(LS.products, state.products);
   save(LS.shoppingHistory, state.shoppingHistory);
+  save(LS.inventory, state.inventory);
 };
 
 function priceTrend(product){
@@ -5167,7 +5201,10 @@ function addProductToShoppingList(listId, productId){
     name: product.name,
     price: Number(product.price || 0),
     qty: 1,
-    bought: false
+    bought: false,
+    productId: product.id,
+    category: product.category || "",
+    essential: !!product.essential
   });
 
   const backdrop = document.querySelector('.modalBackdrop');
@@ -5215,20 +5252,241 @@ function openProductLibrary(){
   host.appendChild(sheet);
 }
 
+// ====================== INVENTORY (Home stock) ======================
+
+function ensureInventory(){
+  if(!Array.isArray(state.inventory)) state.inventory = [];
+}
+
+function inventoryFindByProductId(productId){
+  if(!productId) return null;
+  return (state.inventory||[]).find(x=>x.productId===productId) || null;
+}
+
+function addInventoryFromProduct(productId){
+  ensureInventory();
+  const p = state.products.find(x=>x.id===productId);
+  if(!p) return;
+  const existing = inventoryFindByProductId(productId);
+  if(existing){
+    existing.qty = Number(existing.qty||0) + 1;
+    persist();
+    toast("Inventario: +1 ✅");
+    view();
+    return;
+  }
+  state.inventory.unshift({
+    id: uid("inv"),
+    productId: p.id,
+    name: p.name,
+    category: p.category || "",
+    qty: 1,
+    unit: p.unit || "u",
+    minQty: 0,
+    essential: !!p.essential,
+    notes: ""
+  });
+  persist();
+  toast("Agregado al inventario ✅");
+  view();
+}
+
+function addInventoryManual(){
+  ensureInventory();
+  openPromptModal({
+    title:"Nuevo en inventario",
+    fields:[
+      {key:"name", label:"Nombre"},
+      {key:"category", label:"Categoría (opcional)", value:""},
+      {key:"qty", label:"Cantidad", type:"number", value:"1"},
+      {key:"unit", label:"Unidad (u, kg, L)", value:"u"},
+      {key:"minQty", label:"Mínimo para alerta", type:"number", value:"0"},
+      {key:"essential", label:"Esencial (1/0)", value:"1"},
+      {key:"notes", label:"Notas", value:""},
+    ],
+    onSubmit: ({name, category, qty, unit, minQty, essential, notes})=>{
+      const n = (name||"").trim();
+      if(!n) return;
+      state.inventory.unshift({
+        id: uid("inv"),
+        productId: "",
+        name: n,
+        category: (category||"").trim(),
+        qty: Number(qty||0) || 0,
+        unit: (unit||"u").trim() || "u",
+        minQty: Number(minQty||0) || 0,
+        essential: String(essential||"").trim() !== "0",
+        notes: (notes||"").trim()
+      });
+      persist();
+      view();
+    }
+  });
+}
+
+function editInventoryItem(invId){
+  ensureInventory();
+  const it = state.inventory.find(x=>x.id===invId);
+  if(!it) return;
+  openPromptModal({
+    title:"Editar inventario",
+    fields:[
+      {key:"name", label:"Nombre", value: it.name || ""},
+      {key:"category", label:"Categoría", value: it.category || ""},
+      {key:"qty", label:"Cantidad", type:"number", value: String(it.qty ?? 0)},
+      {key:"unit", label:"Unidad", value: it.unit || "u"},
+      {key:"minQty", label:"Mínimo", type:"number", value: String(it.minQty ?? 0)},
+      {key:"essential", label:"Esencial (1/0)", value: it.essential ? "1" : "0"},
+      {key:"notes", label:"Notas", value: it.notes || ""},
+    ],
+    onSubmit: ({name, category, qty, unit, minQty, essential, notes})=>{
+      const n = (name||"").trim();
+      if(!n) return;
+      it.name = n;
+      it.category = (category||"").trim();
+      it.qty = Number(qty||0) || 0;
+      it.unit = (unit||"u").trim() || "u";
+      it.minQty = Number(minQty||0) || 0;
+      it.essential = String(essential||"").trim() !== "0";
+      it.notes = (notes||"").trim();
+      persist();
+      view();
+    }
+  });
+}
+
+function deleteInventoryItem(invId){
+  ensureInventory();
+  if(!confirm("Eliminar este item del inventario?")) return;
+  state.inventory = state.inventory.filter(x=>x.id!==invId);
+  persist();
+  view();
+}
+
+function addInventoryToList(invId){
+  const it = (state.inventory||[]).find(x=>x.id===invId);
+  if(!it) return;
+  // pick first list by default
+  const lid = state.shopping?.[0]?.id;
+  if(!lid){
+    toast("Crea una lista primero");
+    return;
+  }
+  const list = state.shopping.find(x=>x.id===lid);
+  if(!list) return;
+  // If linked to a product, use its current price
+  let price = 0;
+  if(it.productId){
+    const p = state.products.find(x=>x.id===it.productId);
+    price = Number(p?.price||0);
+  }
+  list.items.push({
+    id: uid("i"),
+    name: it.name,
+    price,
+    qty: 1,
+    bought:false,
+    productId: it.productId || "",
+    category: it.category || "",
+    essential: !!it.essential
+  });
+  persist();
+  toast("Agregado a la lista ✅");
+  view();
+}
+
+function viewInventory(){
+  ensureInventory();
+  const low = (state.inventory||[]).filter(x=>Number(x.minQty||0)>0 && Number(x.qty||0) <= Number(x.minQty||0)).length;
+  const linked = (state.inventory||[]).filter(x=>!!x.productId).length;
+
+  const pickRows = (state.products||[]).map(p=>
+    `<button class="btn" onclick="addInventoryFromProduct('${p.id}')">+ ${escapeHtml(p.name)} · ${money(p.price||0)}</button>`
+  ).join("") || `<div class="muted">No hay productos en Biblioteca.</div>`;
+
+  return `
+    <div class="sectionTitle">
+      <div>Inventario</div>
+      <button class="btn" data-act="backToShoppingLists">← Volver</button>
+    </div>
+
+    <div class="row" style="margin:0 0 12px;">
+      <div class="chip">${(state.inventory||[]).length} items</div>
+      <div class="chip">${linked} link</div>
+      <div class="chip">${low} bajo</div>
+      <button class="btn good" onclick="addInventoryManual()">+ Manual</button>
+    </div>
+
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Agregar desde Biblioteca</h3>
+          <div class="small">Conecta inventario con precios</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="grid">${pickRows}</div>
+    </section>
+
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Tu inventario</h3>
+          <div class="small">Marca mínimos para alertas</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="list">
+        ${(state.inventory||[]).map(it=>{
+          const isLow = Number(it.minQty||0)>0 && Number(it.qty||0) <= Number(it.minQty||0);
+          const badge = isLow ? `<span class="chip" style="border-color:rgba(255,80,80,.35);color:rgba(255,170,170,.95)">Bajo</span>` : ``;
+          const link = it.productId ? `🔗` : `📝`;
+          return `
+            <div class="item">
+              <div class="left">
+                <div class="name">${link} ${it.essential?"⭐":""} ${escapeHtml(it.name)}</div>
+                <div class="meta">${escapeHtml(it.category||"-")} · ${Number(it.qty||0)} ${escapeHtml(it.unit||"u")} · min ${Number(it.minQty||0)} ${badge}</div>
+              </div>
+              <div class="row">
+                <button class="btn" onclick="addInventoryToList('${it.id}')">➕ Lista</button>
+                <button class="btn" onclick="editInventoryItem('${it.id}')">Edit</button>
+                <button class="btn danger" onclick="deleteInventoryItem('${it.id}')">Del</button>
+              </div>
+            </div>
+          `;
+        }).join("") || `<div class="muted">Aún no tienes items.</div>`}
+      </div>
+    </section>
+  `;
+}
+
+// Expose inventory functions for inline onclick
+window.addInventoryFromProduct = addInventoryFromProduct;
+window.addInventoryManual = addInventoryManual;
+window.editInventoryItem = editInventoryItem;
+window.deleteInventoryItem = deleteInventoryItem;
+window.addInventoryToList = addInventoryToList;
+
 function openNewProduct(){
   openPromptModal({
     title:"Nuevo producto",
     fields:[
       {key:"name", label:"Nombre"},
       {key:"price", label:"Precio", type:"number"},
-      {key:"store", label:"Tienda"}
+      {key:"store", label:"Tienda"},
+      {key:"category", label:"Categoría", value:""},
+      {key:"unit", label:"Unidad (u, kg, L)", value:"u"},
+      {key:"essential", label:"Esencial (1/0)", value:"1"}
     ],
-    onSubmit: ({name, price, store})=>{
+    onSubmit: ({name, price, store, category, unit, essential})=>{
       state.products.unshift({
         id: uid("p"),
         name:name,
         price:Number(price||0),
         store:store,
+        category:(category||"").trim(),
+        unit:(unit||"u").trim() || "u",
+        essential: String(essential||"").trim() !== "0",
         history:[]
       });
       persist(); view();
@@ -5376,6 +5634,57 @@ function dailySeries(history, start, end){
   return { dates, totals };
 }
 
+function parseIsoDate_(s){
+  // s: YYYY-MM-DD
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s||""));
+  if(!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+  if(Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function weekStartIso(dateStr){
+  const d = parseIsoDate_(dateStr);
+  if(!d) return "";
+  // Monday as start of week
+  const day = d.getDay(); // 0 Sun .. 6 Sat
+  const diff = (day === 0) ? -6 : (1 - day);
+  d.setDate(d.getDate() + diff);
+  return isoDate(d);
+}
+
+function weeklySeries(history, start, end){
+  const map = new Map();
+  for(const e of (history||[])){
+    if(!e.date) continue;
+    if(!inRange(e.date, start, end)) continue;
+    const wk = weekStartIso(e.date);
+    const v = Number(e.totals?.total || 0);
+    map.set(wk, (map.get(wk)||0) + v);
+  }
+  const weeks = [...map.keys()].sort();
+  const totals = weeks.map(w=>map.get(w));
+  return { weeks, totals };
+}
+
+function emergencyBudgetWeekly(history, lookbackWeeks=12){
+  // Uses last N weeks (including current) and returns the minimum weekly spend.
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(end.getDate() - (lookbackWeeks*7 - 1));
+  const range = { start: isoDate(start), end: isoDate(end) };
+  const w = weeklySeries(history||[], range.start, range.end);
+  if(!w.totals.length) return { min:0, minWeek:"", avg:0, range };
+  const sum = w.totals.reduce((a,b)=>a+b,0);
+  const avg = sum / w.totals.length;
+  let min = Infinity, minWeek = "";
+  for(let i=0;i<w.totals.length;i++){
+    if(w.totals[i] < min){ min = w.totals[i]; minWeek = w.weeks[i]; }
+  }
+  if(min===Infinity) min = 0;
+  return { min, minWeek, avg, range };
+}
+
 function summarize(dates, totals){
   const sum = totals.reduce((a,b)=>a+b,0);
   const avg = totals.length ? sum/totals.length : 0;
@@ -5493,6 +5802,9 @@ function viewShoppingDashboard(){
   const range = presetRange(preset);
   const daily = dailySeries(state.shoppingHistory||[], range.start, range.end);
   const sum = summarize(daily.dates, daily.totals);
+  const weekly = weeklySeries(state.shoppingHistory||[], range.start, range.end);
+  const weeklySum = summarize(weekly.weeks, weekly.totals);
+  const emer = emergencyBudgetWeekly(state.shoppingHistory||[], 12);
   const cats = aggregateCategories(state.shoppingHistory||[], range.start, range.end);
   const stores = topStores(state.shoppingHistory||[], range.start, range.end, 3);
   const products = topProducts(state.shoppingHistory||[], range.start, range.end, 5);
@@ -5533,6 +5845,23 @@ function viewShoppingDashboard(){
       <div class="kv"><div class="k">Promedio diario</div><div class="v"><b>${money(sum.avg)}</b></div></div>
       <div class="kv"><div class="k">Máximo</div><div class="v"><b>${money(sum.max)}</b> · ${escapeHtml(sum.maxDate||"-")}</div></div>
       <div class="kv"><div class="k">Mínimo</div><div class="v"><b>${money(sum.min)}</b> · ${escapeHtml(sum.minDate||"-")}</div></div>
+    </section>
+
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Vista semanal</h3>
+          <div class="small">Agrupado por semana (inicio lunes)</div>
+        </div>
+        <div class="chip">${weekly.weeks.length} sem</div>
+      </div>
+      <div class="hr"></div>
+      <div class="kv"><div class="k">Total semanal (rango)</div><div class="v"><b>${money(weeklySum.sum)}</b></div></div>
+      <div class="kv"><div class="k">Promedio por semana</div><div class="v"><b>${money(weeklySum.avg)}</b></div></div>
+      <div class="kv"><div class="k">Semana mínima (rango)</div><div class="v"><b>${money(weeklySum.min)}</b> · ${escapeHtml(weeklySum.minDate||"-")}</div></div>
+      <div class="hr"></div>
+      <div class="kv"><div class="k">Plan emergencia (mínimo 12 sem)</div><div class="v"><b>${money(emer.min)}</b> · ${escapeHtml(emer.minWeek||"-")}</div></div>
+      <div class="muted" style="margin-top:8px;">Tip: si quieres que el plan sea más estricto, marca ⭐ esenciales en Inventario/Biblioteca.</div>
     </section>
 
     <div class="grid2">
