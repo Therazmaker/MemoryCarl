@@ -31,6 +31,7 @@
   let CFG = null;
   let ITEMS = null;
   let SPAWN_POOL = 4;
+  const MAX_SPAWN_POOL = 11;
   let BG_URL = null;
   let IMG_CACHE = new Map();
 
@@ -119,7 +120,7 @@ async function applySpriteOverrides(){
       if(raw){
         const parsed = JSON.parse(raw);
         CFG = parsed;
-        SPAWN_POOL = Math.max(1, Math.min((CFG.spawnPool ?? 4), (CFG.items?.length ?? 6)));
+        SPAWN_POOL = Math.max(1, Math.min((CFG.spawnPool ?? 4), Math.min((CFG.items?.length ?? ITEMS?.length ?? DEFAULT_ITEMS.length), MAX_SPAWN_POOL)));
         BG_URL = CFG.background || null;
         ITEMS = (CFG.items && CFG.items.length) ? CFG.items : DEFAULT_ITEMS;
         return CFG;
@@ -131,7 +132,7 @@ async function applySpriteOverrides(){
       const res = await fetch("./src/merge/merge_config.json", { cache: "no-store" });
       if(!res.ok) throw new Error("HTTP " + res.status);
       CFG = await res.json();
-      SPAWN_POOL = Math.max(1, Math.min((CFG.spawnPool ?? 4), (CFG.items?.length ?? 6)));
+      SPAWN_POOL = Math.max(1, Math.min((CFG.spawnPool ?? 4), Math.min((CFG.items?.length ?? ITEMS?.length ?? DEFAULT_ITEMS.length), MAX_SPAWN_POOL)));
       BG_URL = CFG.background || null;
       ITEMS = (CFG.items && CFG.items.length) ? CFG.items : DEFAULT_ITEMS;
       return CFG;
@@ -502,11 +503,13 @@ async function applySpriteOverrides(){
     if(item.sprite){
       // Store pending sprite info; a post-step hook will activate it once loaded.
       const target = (item.radius * 2);
+      const spriteScale = Number.isFinite(item.spriteScale) ? item.spriteScale : 1.18;
       const img = IMG_CACHE.get(item.sprite);
       const iw = (img && (img.naturalWidth || img.width)) || 512;
       const ih = (img && (img.naturalHeight || img.height)) || 512;
-      const sx = target / iw;
-      const sy = target / ih;
+      const sx = (target * spriteScale) / iw;
+      const sy = (target * spriteScale) / ih;
+      body.render.sprite = { texture: item.sprite, xScale: sx, yScale: sy };
       body._spriteUrl = item.sprite;
       // Keep circle visible until we successfully draw sprite on canvas.
       // Manual sprite renderer will hide the fill after first draw.
