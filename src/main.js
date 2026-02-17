@@ -4842,6 +4842,7 @@ if(act==="savePurchase"){
     ],
     onSubmit: ({date, store, notes})=>{
       const safeDate = (date||"").trim() || d;
+      const sourceListId = `L-${Date.now()}`;
       const items = (list.items||[]).map(it=>({
         id: uid("i"),
         name: it.name,
@@ -4851,6 +4852,7 @@ if(act==="savePurchase"){
         productId: (it.productId||"").trim(),
         essential: !!it.essential,
         unit: (it.unit||"").trim(),
+        sourceListId
       }));
       const totals = calcEntryTotals(items);
       state.shoppingHistory.unshift({
@@ -4858,11 +4860,20 @@ if(act==="savePurchase"){
         date: safeDate,
         store: (store||"").trim(),
         notes: (notes||"").trim(),
+        sourceListId,
         items,
         totals
       });
+
+      // Stack to inventory (qty increases or new items created)
+      applyItemsToInventory_(items);
+
+      // Optional: mark current list as bought to reflect it was committed
+      (list.items||[]).forEach(it=>{ it.bought = true; });
+
       persist();
       toast("Compra guardada ✅");
+      state.shoppingSubtab = "dashboard";
       view();
     }
   });
@@ -5603,6 +5614,7 @@ function presetRange(preset){
   const end = new Date();
   const start = new Date(end);
   if(preset==="7d") start.setDate(end.getDate()-6);
+  else if(preset==="15d") start.setDate(end.getDate()-14);
   else if(preset==="30d") start.setDate(end.getDate()-29);
   else if(preset==="thisMonth"){
     start.setDate(1);
@@ -5726,14 +5738,14 @@ function topStores(history, start, end, topN=3){
 }
 
 function topProducts(history, start, end, topN=5){
-  const map = new Map(); // name-> {name, count, spend}
+  const map = new Map(); // key(productId|name)-> {name, count, spend}
   for(const e of (history||[])){
     if(!e.date) continue;
     if(!inRange(e.date, start, end)) continue;
     for(const it of (e.items||[])){
       const name = (it.name||"").trim();
       if(!name) continue;
-      const key = name.toLowerCase();
+      const key = (it.productId && String(it.productId).trim()) ? `pid:${String(it.productId).trim()}` : `nm:${name.toLowerCase()}`;
       const qty = Math.max(1, Number(it.qty||1));
       const price = Number(it.price||0);
       const spend = qty*price;
@@ -5744,6 +5756,57 @@ function topProducts(history, start, end, topN=5){
     }
   }
   return [...map.values()].sort((a,b)=>b.spend-a.spend).slice(0, topN);
+}
+
+function normName_(s){
+  return String(s||"").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+function applyItemsToInventory_(items){
+  state.inventory = Array.isArray(state.inventory) ? state.inventory : [];
+  state.products = Array.isArray(state.products) ? state.products : [];
+
+  for(const it of (items||[])){
+    const qty = Math.max(1, Number(it.qty||1));
+    if(!qty) continue;
+
+    const pid = String(it.productId||"").trim();
+    const name = (it.name||"").trim();
+    if(!name && !pid) continue;
+
+    const prod = pid ? state.products.find(p=>String(p.id)===pid) : null;
+    const unit = (String(it.unit||"").trim() || String(prod?.unit||"").trim() || "u");
+    const category = (String(it.category||"").trim() || String(prod?.category||"").trim() || "Other");
+    const essential = (typeof it.essential === "boolean") ? it.essential : !!(prod?.essential);
+
+    let inv = null;
+    if(pid){
+      inv = state.inventory.find(x=>String(x.productId||"").trim()===pid);
+    }
+    if(!inv){
+      const nk = normName_(name);
+      inv = state.inventory.find(x=>!String(x.productId||"").trim() && normName_(x.name)===nk);
+    }
+
+    if(inv){
+      inv.qty = Number(inv.qty||0) + qty;
+      if(!inv.unit) inv.unit = unit;
+      if(!inv.category) inv.category = category;
+      if(essential && !inv.essential) inv.essential = true;
+    }else{
+      state.inventory.unshift({
+        id: uid("inv"),
+        productId: pid,
+        name: name || (prod?.name||"Item"),
+        category,
+        qty,
+        unit,
+        essential,
+        minQty: 0,
+        notes: ""
+      });
+    }
+  }
 }
 
 function drawLineChart(canvas, labels, values){
@@ -5825,6 +5888,7 @@ function viewShoppingDashboard(){
 
     <div class="row" style="margin:0 0 12px;">
       <button class="btn ${preset==="7d"?"primary":""}" data-act="setShopDashPreset" data-preset="7d">7D</button>
+      <button class="btn ${preset==="15d"?"primary":""}" data-act="setShopDashPreset" data-preset="15d">15D</button>
       <button class="btn ${preset==="30d"?"primary":""}" data-act="setShopDashPreset" data-preset="30d">30D</button>
       <button class="btn ${preset==="thisMonth"?"primary":""}" data-act="setShopDashPreset" data-preset="thisMonth">Este mes</button>
       <button class="btn ${preset==="lastMonth"?"primary":""}" data-act="setShopDashPreset" data-preset="lastMonth">Mes pasado</button>
