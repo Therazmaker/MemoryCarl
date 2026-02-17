@@ -1,0 +1,82 @@
+LEARNQUEST – CAPÍTULO I LOS FRAGMENTOS DEL CÓDIGO ANTIGUO
+==================================
+
+VISIÓN GENERAL
+
+Una aventura épica para aprender JavaScript (y luego DOM/CSS) mediante
+niveles narrativos. El motor ejecuta. Los niveles enseñan.
+
+======================== HISTORIA – 10 NIVELES ========================
+
+NIVEL 1 — El Mensaje Fragmentado Concepto: Strings + operador +
+Historia: El mundo está roto. En la Biblioteca Antigua encuentras un
+fragmento de mensaje incompleto. Para restaurar la comunicación entre
+planos debes completar el mensaje y entregarlo en el Correo del Norte.
+Aprendes: - Strings - Concatenación - Variables - Flujo secuencial
+
+NIVEL 2 — El Eco del Nombre Concepto: .length Historia: Un guardián
+invisible solo responde si el nombre que pronuncias tiene la longitud
+correcta. Debes calcular la longitud del mensaje antes de avanzar.
+Aprendes: - .length - Propiedades de string - Validación simple
+
+NIVEL 3 — La Puerta de la Verdad Concepto: if / else Historia: Una
+puerta dorada solo se abre si la clave coincide exactamente con el
+símbolo ancestral. Si no, el plano se oscurece. Aprendes: -
+Comparaciones - Condicionales - Control de flujo
+
+NIVEL 4 — El Sendero Binario Concepto: && y || Historia: Dos cristales
+deben activarse al mismo tiempo. Si uno falla, el puente no aparece.
+Aprendes: - Operadores lógicos - Condiciones compuestas
+
+NIVEL 5 — La Rueda del Tiempo Concepto: for Historia: Una escalera
+infinita requiere repetir el mismo movimiento varias veces. No puedes
+escribir el mismo comando 10 veces. El plano exige elegancia.
+Aprendes: - Bucles - Repetición controlada
+
+NIVEL 6 — La Mochila del Explorador Concepto: Arrays Historia: Debes
+recoger tres artefactos y guardarlos en tu mochila. El orden importa.
+Aprendes: - Arrays - Acceso por índice - push()
+
+NIVEL 7 — El Taller del Arquitecto Concepto: Funciones Historia:
+Descubres un hechizo reutilizable. Si lo defines correctamente, puedes
+invocarlo múltiples veces. Aprendes: - function - Parámetros -
+Reutilización
+
+NIVEL 8 — El Reino Visible Concepto: DOM básico Historia: Un portal
+invisible solo se revela si alteras el mundo visible. Debes mostrar el
+mapa oculto. Aprendes: - Manipulación DOM - Mostrar/ocultar elementos -
+Cambiar contenido HTML
+
+NIVEL 9 — El Arte del Orden Concepto: CSS controlado Historia: El altar
+está desordenado. El plano solo se estabiliza cuando todo está alineado.
+Aprendes: - display flex - padding - gap - Validación por estilos
+computados
+
+NIVEL 10 — El Corazón del Motor Concepto: Integración total Historia: El
+plano final requiere: - Construir mensaje - Validar condición - Repetir
+acción - Manipular DOM - Entregar resultado correcto Es la prueba
+completa.
+
+======================== PLANTILLA PARA CREAR NIVELES
+========================
+
+Cuando quieras crear un nivel nuevo, usa este formato:
+
+ID: TITLE: CHAPTER: LESSON: BOARD SIZE: HERO START: POIS: GOAL TYPE:
+CONCEPT: ALLOWED COMMANDS: SPECIAL RULES: STORY TEXT: HINTS:
+
+======================== ESTRUCTURA JSON BASE ========================
+
+{ “id”: “level_001”, “title”: “El Mensaje Fragmentado”, “chapter”:
+“Plano de los Símbolos”, “lesson”: “Aprende concatenación de strings.”,
+“board”: { “w”: 8, “h”: 8 }, “spawn”: { “hero”: { “x”: 1, “y”: 6 } },
+“pois”: [ { “id”: “library”, “x”: 2, “y”: 2, “type”: “data”, “data”:
+“Hola” }, { “id”: “post”, “x”: 6, “y”: 2, “type”: “deliver” } ],
+“allowed”: [ “hero.moveUp”, “hero.moveDown”, “hero.moveLeft”,
+“hero.moveRight”, “hero.scan”, “hero.deliver”, “set” ], “goals”: [ {
+“type”: “deliver”, “var”: “msg”, “to”: “post”, “contains”: [“Hola”] } ],
+“story”: { “intro”: “Texto inicial del nivel…”, “success”: “Mensaje de
+victoria…”, “fail”: “Mensaje de error…” }, “hints”: [ “Pista 1”, “Pista
+2” ] }
+
+REGLA DE ORO: El motor ejecuta. Los niveles enseñan.

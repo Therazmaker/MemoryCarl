@@ -787,7 +787,6 @@ const btnExport = root.querySelector("#btnExport");
   if(state.tab==="home") wireHome(root);
   if(state.tab==="house") wireHouse(root);
 	  if(state.tab==="calendar") wireCalendar(root);
-  if(state.tab==="learn") wireLearn(root);
   wireHouseZoneSheet(root);
 
   // Re-open house runner modal after render if it was open
@@ -926,7 +925,17 @@ function viewLearn(){
   return `
     <div class="sectionTitle">
       <div>Aprender</div>
-      <div class="chip">quiz + glosario + LearnQuest</div>
+      <div class="chip">quiz + glosario</div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;gap:10px;">
+        <div>
+          <div style="font-weight:800;">LearnQuest 🧭</div>
+          <div class="small">Aventura épica para aprender JS/DOM con niveles en JSON</div>
+        </div>
+        <button class="btn" onclick="openLearnQuest()">Abrir</button>
+      </div>
     </div>
 
     <div class="card">
@@ -949,65 +958,37 @@ function viewLearn(){
         Tip: si actualizas el quiz, solo refresca esta pestaña.
       </div>
     </div>
-
-    <div class="card">
-      <div class="cardTop">
-        <div>
-          <h2 class="cardTitle">LearnQuest 🧭</h2>
-          <div class="small">Aventura épica para aprender JS (y luego DOM/CSS) jugando. Niveles cargados desde JSON.</div>
-        </div>
-      </div>
-      <div class="hr"></div>
-      <div class="row">
-        <button class="btn primary" id="btnOpenLearnQuest">Abrir LearnQuest</button>
-        <button class="btn ghost" id="btnOpenLearnQuestNewTab">Abrir en pestaña</button>
-      </div>
-      <div class="note" style="margin-top:10px;">
-        Tip: si algo se ve raro en móvil, prueba “Abrir en pestaña”.
-      </div>
-    </div>
   `;
 }
 
-function openLearnQuestModal(){
-  const host = document.querySelector("#app");
+
+
+function openLearnQuest(){
+  // Reuse modal styles from style.css
   const b = document.createElement("div");
   b.className = "modalBackdrop";
   b.innerHTML = `
-    <div class="modal" style="max-width:980px; width:calc(100vw - 24px);">
-      <div class="row" style="justify-content:space-between; align-items:center;">
-        <h2 style="margin:0;">LearnQuest 🧭</h2>
-        <button class="btn ghost" data-x="1">Cerrar</button>
+    <div class="modal" style="max-width:900px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <h2 style="margin:4px 0 10px;">LearnQuest 🧭</h2>
+        <button class="btn" id="lqCloseBtn" style="padding:8px 10px;">Cerrar</button>
       </div>
-      <div class="muted" style="margin-top:6px;">Motor + niveles JSON (MVP). Guardado local automático.</div>
-      <div class="hr"></div>
-      <div style="border:1px solid rgba(255,255,255,.10); border-radius:14px; overflow:hidden;">
-        <iframe
-          title="LearnQuest"
-          src="./learnquest/"
-          style="width:100%; height:75vh; border:0; display:block;"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-        ></iframe>
+      <div class="learnFrame" style="height:75vh;">
+        <iframe title="LearnQuest" src="./learnquest/" loading="lazy" referrerpolicy="no-referrer"></iframe>
       </div>
-      <div class="muted" style="margin-top:10px;">Tip: Step para debug paso a paso dentro de LearnQuest.</div>
+      <div class="small" style="margin-top:10px;opacity:.8;">
+        Tip: Puedes importar niveles .json desde el botón “📂 Importar nivel” dentro de LearnQuest.
+      </div>
     </div>
   `;
-  host.appendChild(b);
+  document.body.appendChild(b);
   const close = ()=>b.remove();
-  b.addEventListener("click", (e)=>{ if(e.target===b) close(); });
-  b.querySelector('[data-x="1"]').addEventListener("click", close);
+  b.addEventListener("click",(e)=>{ if(e.target===b) close(); });
+  b.querySelector("#lqCloseBtn").addEventListener("click", close);
 }
+window.openLearnQuest = openLearnQuest;
 
-function wireLearn(root){
-  const btn = root.querySelector("#btnOpenLearnQuest");
-  if(btn) btn.addEventListener("click", openLearnQuestModal);
 
-  const btn2 = root.querySelector("#btnOpenLearnQuestNewTab");
-  if(btn2) btn2.addEventListener("click", ()=>{
-    window.open("./learnquest/", "_blank", "noopener,noreferrer");
-  });
-}
 
 
 

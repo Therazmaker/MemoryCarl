@@ -1,260 +1,488 @@
-import { createInitialState, hydrateProgress, serializeProgress } from "./engine/state.js";
-import { createRuntime } from "./engine/runtime.js";
-import { evaluateGoals } from "./engine/goals.js";
+const LS_CUSTOM = "lq_custom_levels_v1";
+const LS_LAST_LEVEL = "lq_last_level_v1";
 
-const LS_KEY = "memorycarl_learnquest_progress_v1";
+const $ = (id)=>document.getElementById(id);
+const els = {
+  sel: $("lqLevelSelect"),
+  importBtn: $("lqImportBtn"),
+  importFile: $("lqImportFile"),
+  deleteBtn: $("lqDeleteBtn"),
+  resetBtn: $("lqResetBtn"),
+  runBtn: $("lqRunBtn"),
+  stepBtn: $("lqStepBtn"),
+  title: $("lqLevelTitle"),
+  lesson: $("lqLesson"),
+  story: $("lqStory"),
+  hint: $("lqHint"),
+  board: $("lqBoard"),
+  pos: $("lqPos"),
+  msg: $("lqMsg"),
+  goalPill: $("lqGoalPill"),
+  code: $("lqCode"),
+  log: $("lqLog"),
+  sub: $("lqSub")
+};
 
-function esc(s){
-  return String(s??"")
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#039;");
+const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+
+function loadCustomLevels(){
+  try { return JSON.parse(localStorage.getItem(LS_CUSTOM) || "[]"); }
+  catch { return []; }
+}
+function saveCustomLevels(levels){
+  localStorage.setItem(LS_CUSTOM, JSON.stringify(levels));
+}
+function upsertCustomLevel(level){
+  const levels = loadCustomLevels();
+  const i = levels.findIndex(l => l.id === level.id);
+  if(i>=0) levels[i]=level; else levels.push(level);
+  saveCustomLevels(levels);
+}
+function deleteCustomLevel(id){
+  const levels = loadCustomLevels().filter(l => l.id !== id);
+  saveCustomLevels(levels);
 }
 
-async function fetchJson(path){
-  const res = await fetch(path, { cache:"no-store" });
-  if(!res.ok) throw new Error(`No pude cargar ${path} (${res.status})`);
-  return res.json();
+async function fetchOfficialIndex(){
+  const res = await fetch("./levels/index.json", { cache: "no-store" });
+  if(!res.ok) throw new Error("No pude cargar levels/index.json");
+  return await res.json();
 }
 
-function loadProgress(){
-  try{ return JSON.parse(localStorage.getItem(LS_KEY) || "null"); }
-  catch{ return null; }
-}
-function saveProgress(payload){
-  localStorage.setItem(LS_KEY, JSON.stringify(payload));
-}
-
-function nowIso(){ return new Date().toISOString(); }
-
-function view(root, vm){
-  root.innerHTML = `
-    <div class="wrap">
-      <div class="card">
-        <div class="row" style="justify-content:space-between; align-items:flex-start;">
-          <div>
-            <div class="h1">LearnQuest 🧭 <span class="chip">MVP</span></div>
-            <div class="small">Motor + niveles JSON. Guardado local automático. Sin <span class="mono">eval</span>.</div>
-          </div>
-          <div class="row">
-            <select class="select" id="levelSelect" aria-label="Seleccionar nivel">
-              ${vm.levelIndex.levels.map(l=>`<option value="${esc(l.id)}" ${l.id===vm.levelId?"selected":""}>${esc(l.chapter||"")} · ${esc(l.title||l.id)}</option>`).join("")}
-            </select>
-          </div>
-        </div>
-        <div class="hr"></div>
-        <div class="small"><b>${esc(vm.level.title||"")}</b> <span class="k">(${esc(vm.level.chapter||"")})</span></div>
-        <div class="small" style="margin-top:6px; white-space:pre-wrap;">${esc(vm.level.lesson||"")}</div>
-      </div>
-
-      <div class="grid">
-        <div class="card boardWrap">
-          <div id="board" aria-label="tablero"></div>
-          <div class="hud">
-            <div class="pill">Pos: <span id="pos"></span></div>
-            <div class="pill">msg: <span id="msgVar"></span></div>
-            <div class="pill">Estado: <span id="status"></span></div>
-          </div>
-          <div class="small" style="margin-top:8px;">
-            Objetivos:
-            <div id="goals" style="margin-top:6px;"></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="row" style="justify-content:space-between;">
-            <div>
-              <div class="h1">Consola</div>
-              <div class="small">Comandos permitidos en este nivel: <span class="mono">${esc(vm.level.allowed.join(", "))}</span></div>
-            </div>
-            <div class="row">
-              <button class="btn primary" id="run">Run</button>
-              <button class="btn" id="step">Step</button>
-              <button class="btn ghost" id="reset">Reset</button>
-            </div>
-          </div>
-
-          <div class="hr"></div>
-          <textarea id="code" spellcheck="false"></textarea>
-          <div class="log" id="log"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="small">Guardado: <span class="mono">${esc(vm.savedAt || "(no guardado aún)")}</span> · Nivel: <span class="mono">${esc(vm.levelId)}</span></div>
-      </div>
-    </div>
-  `;
+function buildUnifiedIndex(officialIndex){
+  const official = (officialIndex?.levels || []).map(l => ({...l, source:"official"}));
+  const custom = loadCustomLevels().map(l => ({
+    id: l.id,
+    title: l.title || l.id,
+    chapter: l.chapter || "Importados",
+    file: null,
+    source: "local"
+  }));
+  return [...official, ...custom];
 }
 
-function renderBoard(level, state){
-  const el = document.getElementById("board");
-  if(!el) return;
+function setLog(text){
+  els.log.textContent = text || "";
+}
+function appendLog(line){
+  els.log.textContent = (els.log.textContent ? els.log.textContent + "\n" : "") + line;
+}
+function safeStr(v){
+  if(v === undefined || v === null) return "";
+  if(typeof v === "string") return v;
+  return JSON.stringify(v);
+}
 
-  const w = Number(level.board?.w||8);
-  const h = Number(level.board?.h||8);
-  el.style.setProperty("--w", w);
-  el.style.setProperty("--h", h);
+let unifiedIndex = [];
+let currentLevel = null;
+let state = null;
+let queue = [];
+let running = false;
 
-  el.innerHTML = "";
-  for(let y=0;y<h;y++){
-    for(let x=0;x<w;x++){
+function defaultCodeForLevel(level){
+  // Small sensible starter
+  if(level?.id?.includes("strings")) {
+    return [
+      "hero.moveUp()",
+      "hero.moveUp()",
+      "hero.moveUp()",
+      "hero.moveUp()",
+      "hero.scan(\"library\",\"msg\")",
+      "",
+      "set msg = msg + \" ✅\"",
+      "",
+      "hero.moveRight()",
+      "hero.moveRight()",
+      "hero.moveRight()",
+      "hero.moveRight()",
+      "hero.deliver(\"post\",\"msg\")"
+    ].join("\n");
+  }
+  return "hero.moveRight()";
+}
+
+function validateLevel(level){
+  if(!level || typeof level !== "object") throw new Error("Level inválido (no es objeto).");
+  if(!level.id) throw new Error("Level inválido: falta id.");
+  if(!level.title) throw new Error("Level inválido: falta title.");
+  if(!level.board?.w || !level.board?.h) throw new Error("Level inválido: falta board.w/board.h");
+  if(!level.spawn?.hero) throw new Error("Level inválido: falta spawn.hero");
+  if(!Array.isArray(level.allowed)) throw new Error("Level inválido: falta allowed[]");
+  if(!Array.isArray(level.goals)) throw new Error("Level inválido: falta goals[]");
+}
+
+async function loadLevelByMeta(meta){
+  if(meta.source === "local"){
+    const found = loadCustomLevels().find(l => l.id === meta.id);
+    if(!found) throw new Error("No encontré el nivel importado.");
+    return found;
+  }
+  const res = await fetch(meta.file, { cache: "no-store" });
+  if(!res.ok) throw new Error("No pude cargar el nivel: " + meta.file);
+  return await res.json();
+}
+
+function initState(level){
+  state = {
+    w: level.board.w,
+    h: level.board.h,
+    hero: { x: level.spawn.hero.x, y: level.spawn.hero.y },
+    vars: {},
+    flags: { scanned: {}, delivered: {} },
+  };
+}
+
+function render(level){
+  els.board.style.setProperty("--w", String(level.board.w));
+  els.board.style.setProperty("--h", String(level.board.h));
+  els.board.innerHTML = "";
+
+  const poiMap = new Map();
+  (level.pois || []).forEach(p => poiMap.set(`${p.x},${p.y}`, p));
+
+  for(let y=0; y<level.board.h; y++){
+    for(let x=0; x<level.board.w; x++){
       const d = document.createElement("div");
-      d.className = "cell" + (((x+y)%2)?" dark":"");
-
-      // POIs
-      for(const p of state.pois.values()){
-        if(p.x===x && p.y===y){
-          d.classList.add("poi");
-          const sp = document.createElement("span");
-          sp.textContent = p.icon;
-          d.appendChild(sp);
-        }
+      d.className = "lq-cell" + (((x+y)%2) ? " dark" : "");
+      const poi = poiMap.get(`${x},${y}`);
+      if(poi){
+        d.classList.add("poi");
+        d.textContent = poi.icon || "◆";
       }
-
       if(state.hero.x===x && state.hero.y===y){
         d.classList.add("hero");
-        if(!d.textContent) d.textContent = state.hero.icon || "🧑‍🚀";
+        d.textContent = "🧑‍🚀";
       }
-
-      el.appendChild(d);
+      els.board.appendChild(d);
     }
   }
 
-  const pos = document.getElementById("pos");
-  const msgVar = document.getElementById("msgVar");
-  const status = document.getElementById("status");
-  if(pos) pos.textContent = `(${state.hero.x}, ${state.hero.y})`;
-  if(msgVar) msgVar.textContent = typeof state.vars.msg === "string" ? JSON.stringify(state.vars.msg) : "(vacío)";
-  if(status) status.textContent = state.status;
+  els.pos.textContent = `(${state.hero.x}, ${state.hero.y})`;
+  els.msg.textContent = state.vars.msg ? JSON.stringify(state.vars.msg) : "(vacío)";
+}
 
-  const goalsEl = document.getElementById("goals");
-  if(goalsEl){
-    const g = evaluateGoals(level, state);
-    goalsEl.innerHTML = g.progress.map(it=>`
-      <div class="small"><span class="mono">${it.ok?"✅":"⬜"}</span> ${esc(it.label)}</div>
-    `).join("") || `<div class="small">(sin objetivos)</div>`;
+function inBounds(){
+  state.hero.x = Math.max(0, Math.min(state.w-1, state.hero.x));
+  state.hero.y = Math.max(0, Math.min(state.h-1, state.hero.y));
+}
+
+function getPoiById(level, id){
+  return (level.pois || []).find(p => p.id === id);
+}
+function atPoi(level, poiId){
+  const p = getPoiById(level, poiId);
+  if(!p) return false;
+  return state.hero.x === p.x && state.hero.y === p.y;
+}
+
+function parseLine(line){
+  const s = line.trim();
+  if(!s || s.startsWith("//")) return { type:"noop" };
+
+  const moveMatch = s.match(/^hero\.(moveRight|moveLeft|moveUp|moveDown)\(\)\s*$/);
+  if(moveMatch) return { type:"move", dir: moveMatch[1] };
+
+  const scanMatch = s.match(/^hero\.scan\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)\s*$/);
+  if(scanMatch) return { type:"scan", poi: scanMatch[1], varName: scanMatch[2] };
+
+  const delMatch = s.match(/^hero\.deliver\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)\s*$/);
+  if(delMatch) return { type:"deliver", poi: delMatch[1], varName: delMatch[2] };
+
+  const setMatch = s.match(/^set\s+([a-zA-Z_]\w*)\s*=\s*(.+)\s*$/);
+  if(setMatch) return { type:"set", varName: setMatch[1], expr: setMatch[2] };
+
+  return { type:"error", message:`Comando inválido: ${s}` };
+}
+
+function evalExpr(expr){
+  const parts = expr.split("+").map(p=>p.trim()).filter(Boolean);
+  if(parts.length===0) throw new Error("Expresión vacía.");
+
+  let out = "";
+  for(const part of parts){
+    const strMatch = part.match(/^"([^"]*)"$/);
+    if(strMatch){ out += strMatch[1]; continue; }
+
+    const varMatch = part.match(/^([a-zA-Z_]\w*)$/);
+    if(varMatch){
+      const v = state.vars[varMatch[1]];
+      if(typeof v !== "string") throw new Error(`La variable ${varMatch[1]} no existe o no es string.`);
+      out += v;
+      continue;
+    }
+    throw new Error(`Token no permitido en expresión: ${part}`);
+  }
+  return out;
+}
+
+function validateCommandAllowed(level, cmd){
+  const allow = new Set(level.allowed || []);
+  if(cmd.type === "move"){
+    return allow.has("hero."+cmd.dir);
+  }
+  if(cmd.type === "scan") return allow.has("hero.scan");
+  if(cmd.type === "deliver") return allow.has("hero.deliver");
+  if(cmd.type === "set") return allow.has("set");
+  if(cmd.type === "noop") return true;
+  if(cmd.type === "error") return true;
+  return false;
+}
+
+function buildQueue(level){
+  const lines = els.code.value.split("\n");
+  const q = [];
+  for(let i=0; i<lines.length; i++){
+    const cmd = parseLine(lines[i]);
+    cmd._line = i+1;
+    if(cmd.type==="noop") continue;
+
+    if(!validateCommandAllowed(level, cmd)){
+      return [{ type:"error", _line:i+1, message:`Comando no permitido en este nivel: ${lines[i].trim()}` }];
+    }
+    q.push(cmd);
+  }
+  return q;
+}
+
+function evaluateGoals(level){
+  const goals = level.goals || [];
+  let win = true;
+  const progress = [];
+
+  for(const g of goals){
+    if(g.type === "deliver"){
+      const okDelivered = !!state.flags.delivered?.[g.to];
+      const val = state.vars[g.var];
+      const okContains = Array.isArray(g.contains) ? g.contains.every(t => (typeof val==="string") && val.includes(t)) : true;
+      const ok = okDelivered && okContains;
+      progress.push({ label:`Entregar ${g.var} en ${g.to}`, ok });
+      if(!ok) win = false;
+    } else if(g.type === "reached"){
+      const ok = state.hero.x===g.x && state.hero.y===g.y;
+      progress.push({ label:`Llegar a (${g.x},${g.y})`, ok });
+      if(!ok) win = false;
+    } else {
+      // Unknown goal: treat as not win
+      progress.push({ label:`Goal desconocido: ${g.type}`, ok:false });
+      win = false;
+    }
+  }
+
+  return { win, progress };
+}
+
+async function execCmd(level, cmd){
+  if(cmd.type==="error"){
+    appendLog(`❌ Línea ${cmd._line}: ${cmd.message}`);
+    queue = [];
+    return false;
+  }
+
+  try{
+    if(cmd.type==="move"){
+      if(cmd.dir==="moveRight") state.hero.x++;
+      if(cmd.dir==="moveLeft") state.hero.x--;
+      if(cmd.dir==="moveUp") state.hero.y--;
+      if(cmd.dir==="moveDown") state.hero.y++;
+      inBounds();
+      appendLog(`✅ Línea ${cmd._line}: hero.${cmd.dir}()`);
+      return true;
+    }
+
+    if(cmd.type==="scan"){
+      const poi = getPoiById(level, cmd.poi);
+      if(!poi) throw new Error(`POI desconocido: ${cmd.poi}`);
+      if(!atPoi(level, cmd.poi)) throw new Error(`No estás en ${cmd.poi}.`);
+      if(poi.type !== "data") throw new Error(`${cmd.poi} no tiene data para escanear.`);
+      state.vars[cmd.varName] = String(poi.data ?? "");
+      state.flags.scanned[cmd.poi] = true;
+      appendLog(`✅ Línea ${cmd._line}: scan ${cmd.poi} -> ${cmd.varName}`);
+      return true;
+    }
+
+    if(cmd.type==="set"){
+      const val = evalExpr(cmd.expr);
+      state.vars[cmd.varName] = val;
+      appendLog(`✅ Línea ${cmd._line}: set ${cmd.varName} = "${val}"`);
+      return true;
+    }
+
+    if(cmd.type==="deliver"){
+      const poi = getPoiById(level, cmd.poi);
+      if(!poi) throw new Error(`POI desconocido: ${cmd.poi}`);
+      if(!atPoi(level, cmd.poi)) throw new Error(`No estás en ${cmd.poi}.`);
+      if(poi.type !== "deliver") throw new Error(`${cmd.poi} no acepta entregas.`);
+      const val = state.vars[cmd.varName];
+      if(typeof val !== "string") throw new Error(`La variable ${cmd.varName} no existe o no es string.`);
+      state.flags.delivered[cmd.poi] = true;
+      appendLog(`✅ Línea ${cmd._line}: deliver ${cmd.varName} -> ${cmd.poi}`);
+      return true;
+    }
+
+    appendLog(`🟡 Línea ${cmd._line}: noop`);
+    return true;
+  } catch(e){
+    appendLog(`❌ Línea ${cmd._line}: ${e.message}`);
+    queue = [];
+    return false;
   }
 }
 
-function setLog(html){
-  const el = document.getElementById("log");
-  if(el) el.innerHTML = html;
+function updateGoalUI(level){
+  const { win, progress } = evaluateGoals(level);
+  const okCount = progress.filter(p=>p.ok).length;
+  els.goalPill.textContent = `Meta: ${okCount}/${progress.length}`;
+  if(win){
+    els.sub.textContent = "✅ ¡Nivel completado!";
+  } else {
+    els.sub.textContent = "Aventura de código (MVP)";
+  }
 }
-function addLog(line, cls="hint"){
-  const el = document.getElementById("log");
-  if(!el) return;
-  const safe = esc(line);
-  el.innerHTML = (el.innerHTML ? (el.innerHTML + "\n") : "") + `<span class="${cls}">${safe}</span>`;
+
+function resetLevel(level){
+  initState(level);
+  queue = [];
+  running = false;
+  setLog("");
+  els.code.value = defaultCodeForLevel(level);
+  render(level);
+  updateGoalUI(level);
 }
 
-async function boot(){
-  const root = document.getElementById("lqRoot");
-  if(!root) return;
+async function runAll(){
+  if(running) return;
+  running = true;
+  appendLog("▶️ Ejecutando...");
+  queue = buildQueue(currentLevel);
 
-  const levelIndex = await fetchJson("./levels/index.json");
+  for(const cmd of queue){
+    const ok = await execCmd(currentLevel, cmd);
+    render(currentLevel);
+    updateGoalUI(currentLevel);
 
-  let progress = loadProgress();
-  let levelId = progress?.levelId || levelIndex.levels?.[0]?.id;
-
-  async function loadLevelById(id){
-    const meta = levelIndex.levels.find(x=>x.id===id) || levelIndex.levels[0];
-    const lvl = await fetchJson(meta.file);
-
-    // Rehydrate state + code
-    progress = loadProgress();
-    const hasSame = progress && progress.levelId === lvl.id;
-
-    let state = hasSame ? hydrateProgress(lvl, progress) : createInitialState(lvl);
-    let code = hasSame ? (progress.code || lvl.starterCode || "") : (lvl.starterCode || "");
-
-    const vm = {
-      levelIndex,
-      level: lvl,
-      levelId: lvl.id,
-      savedAt: progress?.savedAt || "",
-      state,
-      code
-    };
-
-    // Render UI
-    view(root, vm);
-
-    // Fill textarea
-    const codeEl = document.getElementById("code");
-    if(codeEl) codeEl.value = code;
-
-    // Runtime
-    const rt = createRuntime({
-      level: lvl,
-      state,
-      onUpdate: ()=>{
-        renderBoard(lvl, state);
-        // save snapshot (lightweight)
-        const currentCode = document.getElementById("code")?.value || "";
-        saveProgress(serializeProgress({ levelId: lvl.id, state, code: currentCode }));
-      },
-      onLog: (m)=> addLog(m, "ok"),
-      onError: (e)=> addLog(e, "err"),
-      onWin: ()=>{
-        addLog("🎉 ¡Nivel completado!", "ok");
-        // notify parent (optional)
-        try{ window.parent?.postMessage({ type:"LQ_WIN", levelId: lvl.id, at: nowIso() }, "*"); }catch(e){}
-      }
-    });
-
-    // Initial draw
-    setLog(`<span class="hint">Listo. Usa Run o Step. (Se guarda automático)</span>`);
-    renderBoard(lvl, state);
-
-    // Wire
-    document.getElementById("run")?.addEventListener("click", ()=>{
-      setLog("");
-      const ok = rt.loadProgram(document.getElementById("code")?.value || "");
-      if(ok) rt.run({ delayMs: 220 });
-    });
-    document.getElementById("step")?.addEventListener("click", async ()=>{
-      if(rt.getQueueLen() === 0){
-        setLog("");
-        const ok = rt.loadProgram(document.getElementById("code")?.value || "");
-        if(!ok) return;
-      }
-      await rt.step();
-    });
-    document.getElementById("reset")?.addEventListener("click", ()=>{
-      setLog(`<span class="hint">Reset. (pos/vars vuelven al inicio)</span>`);
-      // Reset to base state for this level, keep current code
-      const fresh = createInitialState(lvl);
-      rt.reset(fresh);
-      renderBoard(lvl, fresh);
-      saveProgress(serializeProgress({ levelId: lvl.id, state: fresh, code: document.getElementById("code")?.value || "" }));
-    });
-
-    // Save as user types (debounced-ish)
-    let t = null;
-    document.getElementById("code")?.addEventListener("input", ()=>{
-      clearTimeout(t);
-      t = setTimeout(()=>{
-        saveProgress(serializeProgress({ levelId: lvl.id, state, code: document.getElementById("code")?.value || "" }));
-      }, 220);
-    });
-
-    // Level select
-    document.getElementById("levelSelect")?.addEventListener("change", async (e)=>{
-      const next = e.target.value;
-      // Save current
-      saveProgress(serializeProgress({ levelId: lvl.id, state, code: document.getElementById("code")?.value || "" }));
-      await loadLevelById(next);
-    });
+    const { win } = evaluateGoals(currentLevel);
+    if(win){
+      appendLog("🎉 " + (currentLevel.story?.success || "¡Completado!"));
+      running = false;
+      return;
+    }
+    if(!ok){
+      running = false;
+      return;
+    }
+    await sleep(220);
   }
 
-  await loadLevelById(levelId);
+  const { win } = evaluateGoals(currentLevel);
+  if(!win){
+    appendLog("🧩 " + (currentLevel.story?.fail || "Aún no se completa la meta."));
+  }
+  running = false;
 }
 
-boot().catch(err=>{
-  const root = document.getElementById("lqRoot");
-  if(root) root.innerHTML = `<div class="wrap"><div class="card"><div class="h1">LearnQuest</div><div class="hr"></div><div class="small">Error: ${esc(err?.message||String(err))}</div></div></div>`;
-  console.error(err);
-});
+async function stepOnce(){
+  if(running) return;
+  if(queue.length===0) queue = buildQueue(currentLevel);
+  const cmd = queue.shift();
+  if(!cmd){
+    appendLog("🟡 No hay más comandos. (Run para reiniciar ejecución)");
+    return;
+  }
+  await execCmd(currentLevel, cmd);
+  render(currentLevel);
+  updateGoalUI(currentLevel);
+
+  const { win } = evaluateGoals(currentLevel);
+  if(win){
+    appendLog("🎉 " + (currentLevel.story?.success || "¡Completado!"));
+    queue = [];
+  }
+}
+
+async function refreshLevelSelector(){
+  const officialIndex = await fetchOfficialIndex();
+  unifiedIndex = buildUnifiedIndex(officialIndex);
+
+  els.sel.innerHTML = "";
+  for(const meta of unifiedIndex){
+    const opt = document.createElement("option");
+    opt.value = meta.id;
+    const tag = meta.source === "local" ? " (local)" : "";
+    opt.textContent = `${meta.title}${tag}`;
+    els.sel.appendChild(opt);
+  }
+
+  const last = localStorage.getItem(LS_LAST_LEVEL);
+  const pick = unifiedIndex.find(x=>x.id===last) ? last : (unifiedIndex[0]?.id || "");
+  if(pick) els.sel.value = pick;
+
+  await onSelectLevel();
+}
+
+async function onSelectLevel(){
+  const id = els.sel.value;
+  localStorage.setItem(LS_LAST_LEVEL, id);
+  const meta = unifiedIndex.find(x=>x.id===id);
+  if(!meta) return;
+
+  currentLevel = await loadLevelByMeta(meta);
+  validateLevel(currentLevel);
+
+  els.title.textContent = currentLevel.title;
+  els.lesson.textContent = currentLevel.lesson || "";
+  els.story.textContent = currentLevel.story?.intro || "";
+  els.hint.textContent = (currentLevel.hints || []).map(h=>"• "+h).join("\n");
+
+  // Delete button only enabled if local
+  const isLocal = meta.source === "local";
+  els.deleteBtn.disabled = !isLocal;
+  els.deleteBtn.style.opacity = isLocal ? "1" : ".5";
+
+  resetLevel(currentLevel);
+}
+
+function wireUI(){
+  els.sel.addEventListener("change", ()=>onSelectLevel().catch(e=>setLog("❌ "+e.message)));
+  els.resetBtn.addEventListener("click", ()=>resetLevel(currentLevel));
+  els.runBtn.addEventListener("click", ()=>runAll().catch(e=>appendLog("❌ "+e.message)));
+  els.stepBtn.addEventListener("click", ()=>stepOnce().catch(e=>appendLog("❌ "+e.message)));
+
+  els.importBtn.addEventListener("click", ()=>els.importFile.click());
+  els.importFile.addEventListener("change", async ()=>{
+    const file = els.importFile.files?.[0];
+    if(!file) return;
+    try{
+      const text = await file.text();
+      const level = JSON.parse(text);
+      validateLevel(level);
+      upsertCustomLevel(level);
+      await refreshLevelSelector();
+      els.sel.value = level.id;
+      await onSelectLevel();
+      appendLog(`✅ Importado: ${level.title}`);
+    } catch(e){
+      appendLog(`❌ Import failed: ${e.message}`);
+    } finally {
+      els.importFile.value = "";
+    }
+  });
+
+  els.deleteBtn.addEventListener("click", async ()=>{
+    const id = els.sel.value;
+    const meta = unifiedIndex.find(x=>x.id===id);
+    if(!meta || meta.source !== "local") return;
+    if(!confirm("¿Borrar este nivel importado?")) return;
+    deleteCustomLevel(id);
+    await refreshLevelSelector();
+    appendLog("🗑️ Nivel borrado.");
+  });
+}
+
+(async function boot(){
+  try{
+    wireUI();
+    await refreshLevelSelector();
+  } catch(e){
+    setLog("❌ "+e.message);
+  }
+})();

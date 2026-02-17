@@ -1,11 +1,11 @@
 {
-  "version": 1,
   "levels": [
     {
       "id": "level_001_strings_delivery",
-      "title": "El Mensaje Secreto",
+      "title": "Nivel 1 — El Mensaje Fragmentado",
+      "chapter": "Plano de los Símbolos",
       "file": "./levels/level_001_strings_delivery.json",
-      "chapter": "Plano de los Símbolos"
+      "source": "official"
     }
   ]
 }

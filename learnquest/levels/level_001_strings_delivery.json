@@ -1,28 +1,63 @@
 {
   "id": "level_001_strings_delivery",
-  "title": "El Mensaje Secreto",
+  "title": "Nivel 1 — El Mensaje Fragmentado",
   "chapter": "Plano de los Símbolos",
-  "lesson": "Aprende strings y el operador +. Ve a la 📚 Biblioteca, escanea el dato en una variable y entrégalo en el 📮 Correo.\n\nPista: puedes hacer set msg = msg + \" ✅\"",
-  "board": { "w": 8, "h": 8 },
-  "spawn": { "hero": { "x": 1, "y": 6, "icon": "🧑‍🚀" } },
+  "lesson": "Aprende strings + concatenación con +, guardando en variables y entregando un mensaje.",
+  "board": {
+    "w": 8,
+    "h": 8
+  },
+  "spawn": {
+    "hero": {
+      "x": 1,
+      "y": 6
+    }
+  },
   "pois": [
-    { "id": "library", "x": 2, "y": 2, "icon": "📚", "data": "Hola Carlos" },
-    { "id": "post", "x": 6, "y": 2, "icon": "📮" }
+    {
+      "id": "library",
+      "x": 2,
+      "y": 2,
+      "type": "data",
+      "icon": "📚",
+      "data": "Hola Carlos"
+    },
+    {
+      "id": "post",
+      "x": 6,
+      "y": 2,
+      "type": "deliver",
+      "icon": "📮"
+    }
   ],
   "allowed": [
-    "hero.moveRight",
-    "hero.moveLeft",
     "hero.moveUp",
     "hero.moveDown",
+    "hero.moveLeft",
+    "hero.moveRight",
     "hero.scan",
     "hero.deliver",
     "set"
   ],
   "goals": [
-    { "type": "scanned", "poi": "library" },
-    { "type": "delivered", "poi": "post", "var": "msg" },
-    { "type": "contains", "var": "msg", "text": "Hola" },
-    { "type": "contains", "var": "msg", "text": "Carlos" }
+    {
+      "type": "deliver",
+      "var": "msg",
+      "to": "post",
+      "contains": [
+        "Hola",
+        "Carlos"
+      ]
+    }
   ],
-  "starterCode": "hero.moveUp()\nhero.moveUp()\nhero.moveUp()\nhero.moveUp()\nhero.scan(\"library\",\"msg\")\n\nset msg = msg + \" ✅\"\n\nhero.moveRight()\nhero.moveRight()\nhero.moveRight()\nhero.moveRight()\nhero.deliver(\"post\",\"msg\")\n"
+  "story": {
+    "intro": "El mundo está fragmentado. Encuentra el fragmento del mensaje en la Biblioteca y entrégalo en el Correo del Norte.",
+    "success": "La comunicación entre planos vuelve a encenderse.",
+    "fail": "Todavía falta algo. Ajusta el mensaje y vuelve a intentarlo."
+  },
+  "hints": [
+    "Ve a 📚 y usa hero.scan(\"library\",\"msg\")",
+    "Puedes hacer: set msg = msg + \" ✅\"",
+    "Luego ve a 📮 y usa hero.deliver(\"post\",\"msg\")"
+  ]
 }
