@@ -807,3 +807,73 @@ body{
   padding:6px 10px;
   border-radius:999px;
 }
+
+
+.sleepHistoryModal{
+  max-width:560px;
+  max-height:min(88vh,760px);
+  border-radius:22px;
+  margin:12px;
+  padding-bottom:16px;
+  overflow:auto;
+}
+.sleepHistoryTopActions{display:flex;gap:8px;align-items:center}
+.sleepStatsChips{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  margin-top:10px;
+}
+.sleepStatChip{
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.05);
+  border-radius:14px;
+  padding:9px 10px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.sleepStatChip span{font-size:11px;color:var(--muted)}
+.sleepStatChip strong{font-size:14px;letter-spacing:.15px}
+.sleepHistoryControls{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.sleepControlGroup{display:flex;gap:8px;flex-wrap:wrap}
+.sleepPill{
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:7px 11px;
+  background:rgba(255,255,255,.04);
+  color:var(--text);
+  font-weight:800;
+  cursor:pointer;
+}
+.sleepPill.active{border-color:rgba(124,92,255,.55);background:rgba(124,92,255,.22)}
+.sleepCurveWrap{
+  margin-top:10px;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:14px;
+  background:rgba(255,255,255,.03);
+  padding:8px;
+}
+.sleepCurveSvg{width:100%;height:auto;display:block}
+.sleepAxis{stroke:rgba(255,255,255,.25);stroke-width:1}
+.sleepCurvePath{fill:none;stroke:rgba(124,92,255,.95);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.sleepCurveDot{fill:#fff;stroke:rgba(124,92,255,.95);stroke-width:2}
+.sleepHistoryList{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.sleepHistoryRow{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:14px;
+  padding:10px;
+  background:rgba(255,255,255,.03);
+}
+.sleepHistoryDate{font-weight:900;font-size:13px}
+.sleepHistoryMeta{font-size:12px;color:var(--muted);margin-top:2px}
+.sleepHistoryNote{font-size:12px;margin-top:5px;color:rgba(255,255,255,.82)}
+.sleepHistoryRowActions{display:flex;gap:6px}
+
+@media (max-width:560px){
+  .sleepHistoryModal{margin:0;border-radius:20px 20px 0 0;max-height:90vh}
+}

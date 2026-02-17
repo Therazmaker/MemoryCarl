@@ -1076,11 +1076,33 @@ function getSleepWeekSeries(){
   }
 
   const items = dates.map(date => ({ date, minutes: map.get(date)||0 }));
+  // Keep chart readable vs an 8h baseline
   const maxMinutes = Math.max(60, ...items.map(x=>x.minutes), 8*60);
-  const avgMinutes = items.reduce((s,x)=>s+x.minutes,0) / items.length;
-  const last = items[items.length-1]?.minutes || 0;
-  return { items, maxMinutes, avgMinutes, lastMinutes: last };
+
+  // Average only over recorded nights in this 7-day window (ignore zeros)
+  const recorded = items.filter(x=>x.minutes > 0);
+  const avgMinutes = recorded.length ? (recorded.reduce((s,x)=>s+x.minutes,0) / recorded.length) : 0;
+
+  // "Última noche" = yesterday if present, else most recent recorded night up to today
+  const todayIso = isoDate(today);
+  const y = new Date(today); y.setDate(today.getDate()-1);
+  const yIso = isoDate(y);
+  let lastMinutes = map.get(yIso) || 0;
+
+  if(!lastMinutes){
+    // find latest recorded entry within the window up to today
+    for(let i=items.length-1;i>=0;i--){
+      if(items[i].date <= todayIso && items[i].minutes > 0){
+        lastMinutes = items[i].minutes;
+        break;
+      }
+    }
+  }
+
+  return { items, maxMinutes, avgMinutes, lastMinutes };
 }
+
+
 
 
 function renderSleepBars(series){
@@ -1411,26 +1433,90 @@ function openBudgetModal(){
   });
 }
 
-function openSleepModal(){
+function formatSleepDuration(minutes){
+  const mins = Math.max(0, Math.round(Number(minutes) || 0));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if(!h) return `${m}m`;
+  if(!m) return `${h}h`;
+  return `${h}h ${String(m).padStart(2,"0")}m`;
+}
+
+function parseIsoDate(iso){
+  if(!iso) return null;
+  const d = new Date(`${iso}T00:00:00`);
+  if(Number.isNaN(d.getTime())) return null;
+  d.setHours(0,0,0,0);
+  return d;
+}
+
+function getYesterdayIso(){
+  const d = new Date();
+  d.setDate(d.getDate()-1);
+  return isoDate(d);
+}
+
+function isAnimeAvailable(){
+  return typeof window !== "undefined" && typeof window.anime === "function";
+}
+
+function animateSleepModalIn(backdrop){
+  if(!isAnimeAvailable()) return;
+  const panel = backdrop.querySelector(".sleepHistoryModal") || backdrop.querySelector(".modal");
+  window.anime.remove([backdrop, panel]);
+  window.anime({ targets: backdrop, opacity:[0,1], duration:180, easing:"linear" });
+  if(panel){
+    window.anime({ targets: panel, translateY:[18,0], opacity:[0,1], duration:260, easing:"easeOutQuad" });
+  }
+}
+
+function animateSleepModalOut(backdrop, done){
+  if(!isAnimeAvailable()){
+    done();
+    return;
+  }
+  const panel = backdrop.querySelector(".sleepHistoryModal") || backdrop.querySelector(".modal");
+  const anim = window.anime({
+    targets: panel || backdrop,
+    translateY:[0,18],
+    opacity:[1,0],
+    duration:180,
+    easing:"easeInQuad",
+    complete: done
+  });
+  if(!anim) done();
+}
+
+function openSleepModal(opts = {}){
   const host = document.querySelector("#app");
   const modal = document.createElement("div");
   modal.className = "modalBackdrop";
 
-  const today = isoDate(new Date());
+  const editId = opts && opts.editId ? String(opts.editId) : "";
+  const existingRaw = editId ? (state.sleepLog || []).find(x=>String(x.id||"")===editId) : null;
+  const existing = normalizeSleepEntry(existingRaw);
+
+  const today = existing?.date || isoDate(new Date());
+  const defaultMode = existing?.mode === "advanced" ? "advanced" : "simple";
+  const defaultHours = existing ? (existing.totalMinutes / 60).toFixed(2).replace(/\.00$/,"") : "";
+  const defaultQuality = existing?.quality ? String(existing.quality) : "";
+  const defaultStart = existing?.start || "";
+  const defaultEnd = existing?.end || "";
+  const defaultNote = existing?.note || "";
 
   modal.innerHTML = `
     <div class="modal" role="dialog" aria-label="Registrar sueño">
       <div class="modalTop">
         <div>
-          <div class="modalTitle">Registrar sueño</div>
+          <div class="modalTitle">${existing ? "Editar sueño" : "Registrar sueño"}</div>
           <div class="modalSub">Simple o avanzado. Guardado local + sync cuando cierre.</div>
         </div>
         <button class="iconBtn" data-close aria-label="Close">✕</button>
       </div>
 
       <div class="sleepTabs">
-        <button class="sleepTab active" data-mode="simple">Simple</button>
-        <button class="sleepTab" data-mode="advanced">Avanzado</button>
+        <button class="sleepTab ${defaultMode === "simple" ? "active" : ""}" data-mode="simple">Simple</button>
+        <button class="sleepTab ${defaultMode === "advanced" ? "active" : ""}" data-mode="advanced">Avanzado</button>
       </div>
 
       <div class="field">
@@ -1438,45 +1524,45 @@ function openSleepModal(){
         <input id="sleepDate" type="date" value="${today}">
       </div>
 
-      <div id="sleepSimple">
+      <div id="sleepSimple" style="display:${defaultMode==="simple" ? "" : "none"};">
         <div class="sleepFormRow">
           <div class="field">
             <label>Horas (ej: 7.5)</label>
-            <input id="sleepHours" type="number" inputmode="decimal" step="0.25" min="0" max="24" placeholder="7.5">
+            <input id="sleepHours" type="number" inputmode="decimal" step="0.25" min="0" max="24" placeholder="7.5" value="${escapeHtml(defaultHours)}">
           </div>
           <div class="field">
             <label>Calidad (1-5)</label>
             <select id="sleepQuality">
               <option value="">-</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
+              <option value="1" ${defaultQuality==="1"?"selected":""}>1</option>
+              <option value="2" ${defaultQuality==="2"?"selected":""}>2</option>
+              <option value="3" ${defaultQuality==="3"?"selected":""}>3</option>
+              <option value="4" ${defaultQuality==="4"?"selected":""}>4</option>
+              <option value="5" ${defaultQuality==="5"?"selected":""}>5</option>
             </select>
           </div>
         </div>
       </div>
 
-      <div id="sleepAdvanced" style="display:none;">
+      <div id="sleepAdvanced" style="display:${defaultMode==="advanced" ? "" : "none"};">
         <div class="sleepFormRow">
           <div class="field">
             <label>Inicio</label>
-            <input id="sleepStart" type="time">
+            <input id="sleepStart" type="time" value="${escapeHtml(defaultStart)}">
           </div>
           <div class="field">
             <label>Fin</label>
-            <input id="sleepEnd" type="time">
+            <input id="sleepEnd" type="time" value="${escapeHtml(defaultEnd)}">
           </div>
           <div class="field">
             <label>Calidad (1-5)</label>
             <select id="sleepQuality2">
               <option value="">-</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
+              <option value="1" ${defaultQuality==="1"?"selected":""}>1</option>
+              <option value="2" ${defaultQuality==="2"?"selected":""}>2</option>
+              <option value="3" ${defaultQuality==="3"?"selected":""}>3</option>
+              <option value="4" ${defaultQuality==="4"?"selected":""}>4</option>
+              <option value="5" ${defaultQuality==="5"?"selected":""}>5</option>
             </select>
           </div>
         </div>
@@ -1485,17 +1571,19 @@ function openSleepModal(){
 
       <div class="field">
         <label>Nota (opcional)</label>
-        <textarea id="sleepNote" rows="2" placeholder="Ej: café tarde, sueño ligero, etc."></textarea>
+        <textarea id="sleepNote" rows="2" placeholder="Ej: café tarde, sueño ligero, etc.">${escapeHtml(defaultNote)}</textarea>
       </div>
 
       <div class="row" style="justify-content:flex-end;margin-top:12px;">
         <button class="btn" data-close>Cancel</button>
-        <button class="btn primary" id="btnSaveSleep">Guardar</button>
+        <button class="btn primary" id="btnSaveSleep">${existing ? "Guardar cambios" : "Guardar"}</button>
       </div>
     </div>
   `;
 
-  const close = () => modal.remove();
+  const close = () => {
+    animateSleepModalOut(modal, ()=>modal.remove());
+  };
 
   modal.addEventListener("click", (e)=>{
     if (e.target === modal) close();
@@ -1503,7 +1591,7 @@ function openSleepModal(){
   });
 
   // Tabs
-  let mode = "simple";
+  let mode = defaultMode;
   const tabs = modal.querySelectorAll(".sleepTab");
   const simpleEl = modal.querySelector("#sleepSimple");
   const advEl = modal.querySelector("#sleepAdvanced");
@@ -1531,21 +1619,20 @@ function openSleepModal(){
     end.setHours(eh, em, 0, 0);
 
     if(end <= start) end.setDate(end.getDate()+1); // cross midnight
-
-    const minutes = Math.round((end - start) / 60000);
-    return minutes;
+    return Math.round((end - start) / 60000);
   };
 
-  modal.querySelector("#btnSaveSleep").addEventListener("click", ()=>{
+  modal.querySelector("#btnSaveSleep")?.addEventListener("click", ()=>{
     const date = (modal.querySelector("#sleepDate").value || "").trim();
-    const note = (modal.querySelector("#sleepNote").value || "").trim();
+    const note = String(modal.querySelector("#sleepNote").value || "").trim();
 
     let totalMinutes = 0;
     let quality = null;
-    let start = "", end = "";
+    let start = "";
+    let end = "";
 
     if(mode === "simple"){
-      const hrs = Number((modal.querySelector("#sleepHours").value || "").trim());
+      const hrs = Number(modal.querySelector("#sleepHours").value || 0);
       if(Number.isFinite(hrs) && hrs > 0) totalMinutes = Math.round(hrs * 60);
       const qv = (modal.querySelector("#sleepQuality").value || "").trim();
       quality = qv ? Number(qv) : null;
@@ -1571,7 +1658,7 @@ function openSleepModal(){
     }
 
     const entry = {
-      id: uid(),
+      id: existing?.id || uid(),
       ts: new Date().toISOString(),
       date,
       totalMinutes,
@@ -1583,18 +1670,241 @@ function openSleepModal(){
     };
 
     state.sleepLog = Array.isArray(state.sleepLog) ? state.sleepLog : [];
-    state.sleepLog.push(entry);
+    if(existing){
+      const idx = state.sleepLog.findIndex(x=>String(x.id||"") === existing.id);
+      if(idx >= 0) state.sleepLog[idx] = entry;
+      else state.sleepLog.push(entry);
+    }else{
+      state.sleepLog.push(entry);
+    }
     // keep it sane
     if(state.sleepLog.length > 1500) state.sleepLog = state.sleepLog.slice(-1500);
 
     persist();
     view();
-    toast("Sueño guardado ✅");
+    if(typeof opts.onSaved === "function") opts.onSaved(entry);
+    toast(existing ? "Sueño actualizado ✅" : "Sueño guardado ✅");
     close();
   });
 
   host.appendChild(modal);
+  animateSleepModalIn(modal);
 }
+
+function openSleepHistoryModal(){
+  const host = document.querySelector("#app");
+  const backdrop = document.createElement("div");
+  backdrop.className = "modalBackdrop";
+  backdrop.innerHTML = `
+    <div class="modal sleepHistoryModal" role="dialog" aria-label="Histórico de sueño">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">Histórico de sueño</div>
+          <div class="modalSub">Visualiza, busca, edita y exporta tus noches.</div>
+        </div>
+        <div class="sleepHistoryTopActions">
+          <button class="iconBtn" id="btnSleepCsv" aria-label="Exportar CSV">CSV</button>
+          <button class="iconBtn" id="btnSleepAdd" aria-label="Agregar">＋</button>
+          <button class="iconBtn" data-close aria-label="Cerrar">✕</button>
+        </div>
+      </div>
+      <div id="sleepHistoryContent"></div>
+    </div>
+  `;
+
+  host.appendChild(backdrop);
+  animateSleepModalIn(backdrop);
+
+  const close = ()=> animateSleepModalOut(backdrop, ()=>backdrop.remove());
+  backdrop.addEventListener("click", (e)=>{
+    if(e.target === backdrop) close();
+    if(e.target && e.target.closest("[data-close]")) close();
+  });
+
+  const stateView = { range: "30", metric: "hours", query: "" };
+  const content = backdrop.querySelector("#sleepHistoryContent");
+
+  const getLog = ()=> (state.sleepLog || [])
+    .map(normalizeSleepEntry)
+    .filter(Boolean)
+    .sort((a,b)=> (a.date === b.date ? (b.ts || "").localeCompare(a.ts || "") : b.date.localeCompare(a.date)));
+
+  const serializeCsv = (rows)=>{
+    const esc = (v)=>`"${String(v ?? "").replaceAll('"','""')}"`;
+    const head = ["fecha","horas","minutos","calidad","modo","inicio","fin","nota"];
+    const body = rows.map(r=>[
+      r.date,
+      (r.totalMinutes/60).toFixed(2),
+      r.totalMinutes,
+      r.quality ?? "",
+      r.mode,
+      r.start || "",
+      r.end || "",
+      r.note || ""
+    ]);
+    return [head, ...body].map(row=>row.map(esc).join(",")).join("\n");
+  };
+
+  const downloadCsv = (rows)=>{
+    if(!rows.length){
+      toast("No hay registros para exportar 📭");
+      return;
+    }
+    const csv = serializeCsv(rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sleep-history-${isoDate(new Date())}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("CSV exportado ✅");
+  };
+
+  const render = ()=>{
+    const full = getLog();
+    const q = stateView.query.trim().toLowerCase();
+    const filteredBySearch = q
+      ? full.filter(x=>x.date.toLowerCase().includes(q) || (x.note || "").toLowerCase().includes(q))
+      : full;
+
+    const ranged = stateView.range === "all" ? filteredBySearch : filteredBySearch.filter(x=>{
+      const d = parseIsoDate(x.date);
+      if(!d) return false;
+      const now = new Date();
+      now.setHours(0,0,0,0);
+      const days = Number(stateView.range) || 30;
+      const from = new Date(now);
+      from.setDate(from.getDate() - (days - 1));
+      return d >= from && d <= now;
+    });
+
+    const yesterday = getYesterdayIso();
+    const upToYesterday = full.filter(x=>x.date <= yesterday);
+    const yesterdayEntry = upToYesterday.find(x=>x.date === yesterday) || null;
+    const best = upToYesterday.reduce((acc, x)=> (!acc || x.totalMinutes > acc.totalMinutes) ? x : acc, null);
+    const shortest = upToYesterday.reduce((acc, x)=> (!acc || x.totalMinutes < acc.totalMinutes) ? x : acc, null);
+    const uniqueSet = new Set(upToYesterday.map(x=>x.date));
+    let streak = 0;
+    const cursor = parseIsoDate(yesterday);
+    while(cursor){
+      const ds = isoDate(cursor);
+      if(!uniqueSet.has(ds)) break;
+      streak += 1;
+      cursor.setDate(cursor.getDate()-1);
+    }
+
+    const recentAsc = [...ranged].sort((a,b)=>a.date.localeCompare(b.date));
+    const points = recentAsc.map(x=> stateView.metric === "quality" ? Number(x.quality || 0) : (x.totalMinutes / 60));
+    const maxVal = stateView.metric === "quality" ? 5 : Math.max(8, ...points, 1);
+    const minVal = stateView.metric === "quality" ? 0 : 0;
+    const chartW = 460;
+    const chartH = 160;
+    const px = (idx, len)=> len <= 1 ? 18 : Math.round(18 + ((chartW - 36) * idx / (len - 1)));
+    const py = (v)=> {
+      const ratio = (v - minVal) / Math.max(0.0001, (maxVal - minVal));
+      return Math.round(chartH - 18 - ratio * (chartH - 36));
+    };
+
+    const chartPoints = recentAsc.map((r,idx)=>({
+      x: px(idx, recentAsc.length),
+      y: py(points[idx] || 0),
+      label: r.date,
+      v: points[idx] || 0
+    }));
+    let dPath = "";
+    if(chartPoints.length){
+      dPath = `M ${chartPoints[0].x} ${chartPoints[0].y}`;
+      for(let i=1;i<chartPoints.length;i++){
+        const p0 = chartPoints[i-1];
+        const p1 = chartPoints[i];
+        const cx = Math.round((p0.x + p1.x)/2);
+        dPath += ` Q ${cx} ${p0.y}, ${p1.x} ${p1.y}`;
+      }
+    }
+
+    const chips = [
+      { label: "Última noche", value: yesterdayEntry ? formatSleepDuration(yesterdayEntry.totalMinutes) : "—" },
+      { label: "Racha", value: `${streak} noches` },
+      { label: "Mejor", value: best ? formatSleepDuration(best.totalMinutes) : "—" },
+      { label: "Más corta", value: shortest ? formatSleepDuration(shortest.totalMinutes) : "—" }
+    ];
+
+    const rows = ranged.map(x=>`
+      <div class="sleepHistoryRow">
+        <div class="sleepHistoryRowMain">
+          <div class="sleepHistoryDate">${escapeHtml(x.date)}</div>
+          <div class="sleepHistoryMeta">${escapeHtml(formatSleepDuration(x.totalMinutes))}${x.quality ? ` · Calidad ${escapeHtml(x.quality)}/5` : ""}</div>
+          ${(x.note || "").trim() ? `<div class="sleepHistoryNote">${escapeHtml(x.note)}</div>` : ""}
+        </div>
+        <div class="sleepHistoryRowActions">
+          <button class="iconBtn" data-edit-sleep="${escapeHtml(x.id)}" aria-label="Editar">✎</button>
+          <button class="iconBtn" data-del-sleep="${escapeHtml(x.id)}" aria-label="Eliminar">🗑</button>
+        </div>
+      </div>
+    `).join("");
+
+    content.innerHTML = `
+      <div class="sleepStatsChips">
+        ${chips.map(ch=>`<div class="sleepStatChip"><span>${escapeHtml(ch.label)}</span><strong>${escapeHtml(ch.value)}</strong></div>`).join("")}
+      </div>
+
+      <div class="sleepHistoryControls">
+        <div class="sleepControlGroup" data-group="range">
+          ${[["7","7D"],["30","30D"],["90","90D"],["all","Todo"]].map(([v,t])=>`<button class="sleepPill ${stateView.range===v?"active":""}" data-range="${v}">${t}</button>`).join("")}
+        </div>
+        <div class="sleepControlGroup" data-group="metric">
+          ${[["hours","Horas"],["quality","Calidad"]].map(([v,t])=>`<button class="sleepPill ${stateView.metric===v?"active":""}" data-metric="${v}">${t}</button>`).join("")}
+        </div>
+      </div>
+
+      <div class="sleepCurveWrap">
+        <svg viewBox="0 0 ${chartW} ${chartH}" class="sleepCurveSvg" aria-label="Gráfico de sueño">
+          <line x1="14" y1="${chartH-18}" x2="${chartW-14}" y2="${chartH-18}" class="sleepAxis" />
+          ${dPath ? `<path d="${dPath}" class="sleepCurvePath" />` : ""}
+          ${chartPoints.map(pt=>`<circle cx="${pt.x}" cy="${pt.y}" r="4" class="sleepCurveDot"><title>${escapeHtml(pt.label)} · ${escapeHtml(pt.v.toFixed(stateView.metric==="quality"?0:1))}${stateView.metric==="quality"?"/5":"h"}</title></circle>`).join("")}
+        </svg>
+      </div>
+
+      <div class="field" style="margin-top:10px;">
+        <label>Buscar</label>
+        <input id="sleepHistorySearch" class="input" placeholder="Busca por fecha o nota..." value="${escapeHtml(stateView.query)}" />
+      </div>
+
+      <div class="sleepHistoryList">
+        ${rows || `<div class="muted" style="padding:8px 2px;">Sin registros para este filtro.</div>`}
+      </div>
+    `;
+
+    content.querySelectorAll("[data-range]").forEach(btn=>btn.addEventListener("click", ()=>{ stateView.range = btn.getAttribute("data-range") || "30"; render(); }));
+    content.querySelectorAll("[data-metric]").forEach(btn=>btn.addEventListener("click", ()=>{ stateView.metric = btn.getAttribute("data-metric") || "hours"; render(); }));
+    content.querySelector("#sleepHistorySearch")?.addEventListener("input", (e)=>{ stateView.query = e.target.value || ""; render(); });
+
+    content.querySelectorAll("[data-edit-sleep]").forEach(btn=>btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-edit-sleep") || "";
+      openSleepModal({ editId: id, onSaved: ()=>render() });
+    }));
+
+    content.querySelectorAll("[data-del-sleep]").forEach(btn=>btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-del-sleep") || "";
+      const next = (state.sleepLog || []).filter(x=>String(x.id||"") !== id);
+      if(next.length === (state.sleepLog || []).length) return;
+      state.sleepLog = next;
+      persist();
+      view();
+      toast("Registro eliminado 🗑");
+      render();
+    }));
+  };
+
+  backdrop.querySelector("#btnSleepCsv")?.addEventListener("click", ()=> downloadCsv(getLog()));
+  backdrop.querySelector("#btnSleepAdd")?.addEventListener("click", ()=> openSleepModal({ onSaved: ()=>render() }));
+
+  render();
+}
+
 
 function openMusicModal(){
   const host = document.querySelector("#app");
@@ -1697,7 +2007,7 @@ function wireHome(root){
   const btnSleep = root.querySelector("#btnAddSleep");
   if(btnSleep) btnSleep.addEventListener("click", openSleepModal);
   const sleepCard = root.querySelector("#homeSleepCard");
-  if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepModal(); });
+  if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepHistoryModal(); });
 
   const prev = root.querySelector("#btnMusicPrev");
   const next = root.querySelector("#btnMusicNext");
