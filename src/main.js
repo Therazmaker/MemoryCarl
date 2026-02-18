@@ -1172,6 +1172,8 @@ function closeInsightsModalAnimated(){
     duration: 260,
     easing: "easeInQuad",
     complete: ()=>{
+      try{ if(typeof anime!=="undefined"){ anime.remove("#insightsRadarCanvas"); } }catch(e){}
+      try{ if(_insightsRadarChart){ _insightsRadarChart.destroy(); _insightsRadarChart=null; } }catch(e){}
       state.insightsDayOpen = false;
       view();
     }
@@ -1313,7 +1315,7 @@ function renderInsightsDayModal(){
 
           <div class="neuralGrid">
             <div class="neuralChartWrap">
-              <canvas id="insightsRadarCanvas" width="420" height="320"></canvas>
+              <div class="radarBox"><canvas id="insightsRadarCanvas"></canvas></div>
               <div class="neuralLegend muted">Mood • Sueño • Tasks • Limpieza • Compras</div>
             </div>
 
