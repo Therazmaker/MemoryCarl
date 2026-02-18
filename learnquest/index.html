@@ -58,7 +58,19 @@
 
           <textarea id="lqCode" class="lq-code" spellcheck="false"></textarea>
 
-          <pre id="lqLog" class="lq-log"></pre>
+          <div class="lq-consoles">
+            <div class="lq-console-head">
+              <div class="lq-console-title">Run Log</div>
+              <button id="lqClearRunLog" class="lq-mini-btn" type="button" title="Limpiar">Clear</button>
+            </div>
+            <pre id="lqLog" class="lq-log"></pre>
+
+            <div class="lq-console-head">
+              <div class="lq-console-title">Debug Console (console.log)</div>
+              <button id="lqClearConsole" class="lq-mini-btn" type="button" title="Limpiar">Clear</button>
+            </div>
+            <pre id="lqConsole" class="lq-log lq-console"></pre>
+          </div>
         </div>
       </section>
     </main>

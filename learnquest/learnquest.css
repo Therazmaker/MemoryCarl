@@ -101,3 +101,13 @@ body{
   .lq-main{grid-template-columns:1fr;}
   .lq-board{grid-template-columns:repeat(var(--w), 34px);grid-auto-rows:34px;}
 }
+
+
+/* Debug Console */
+.lq-consoles{margin-top:10px;display:flex;flex-direction:column;gap:10px;}
+.lq-console-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.lq-console-title{font-size:12px;opacity:.9;font-weight:700;}
+.lq-mini-btn{cursor:pointer;border-radius:10px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.06);color:#e8ecff;padding:6px 10px;font-weight:700;font-size:12px;}
+.lq-mini-btn:hover{background:rgba(255,255,255,.09);}
+.lq-console{max-height:180px;overflow:auto;}
+

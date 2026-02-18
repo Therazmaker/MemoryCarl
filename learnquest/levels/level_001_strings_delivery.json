@@ -37,7 +37,8 @@
     "hero.moveRight",
     "hero.scan",
     "hero.deliver",
-    "set"
+    "set",
+    "console.log"
   ],
   "goals": [
     {

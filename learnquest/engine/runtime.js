@@ -28,19 +28,7 @@ export function createRuntime({ level, state, onUpdate, onLog, onError, onWin })
       emitUpdate();
       return false;
     }
-    // expand move repeats into single-step actions for animated playback
-    const expanded = [];
-    for(const a of res.actions){
-      if(a.type === "move" && (a.n||1) > 1){
-        const total = a.n;
-        for(let i=1;i<=total;i++){
-          expanded.push({ ...a, n:1, _repeatIndex:i, _repeatTotal:total });
-        }
-      }else{
-        expanded.push(a);
-      }
-    }
-    queue = expanded;
+    queue = res.actions;
     return true;
   }
 
@@ -58,10 +46,7 @@ export function createRuntime({ level, state, onUpdate, onLog, onError, onWin })
       return;
     }
 
-    if(r.msg){
-      const suffix = action._repeatTotal ? ` (${action._repeatIndex}/${action._repeatTotal})` : "";
-      onLog?.(`✅ Línea ${action._line}: ${r.msg}${suffix}`);
-    }
+    if(r.msg) onLog?.(`✅ Línea ${action._line}: ${r.msg}`);
 
     const g = evaluateGoals(level, state);
     if(g.win){
