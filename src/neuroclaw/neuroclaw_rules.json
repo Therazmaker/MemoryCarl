@@ -1,0 +1,97 @@
+{
+  "v": 1,
+  "rules": [
+    {
+      "id": "sleep_low_3d",
+      "title": "Sueño bajo (3 días)",
+      "priority": "high",
+      "conditions": [
+        {
+          "key": "sleep_avg_3d_hours",
+          "op": "<",
+          "value": 5.5
+        }
+      ],
+      "message": "Tu promedio de sueño en 3 días está bajo. Hoy conviene bajar la carga y evitar decisiones grandes.",
+      "why": [
+        "sleep_avg_3d_hours < 5.5"
+      ],
+      "action": {
+        "type": "suggest",
+        "label": "Plan de reset 10 min",
+        "payload": {
+          "routine": "reset_10"
+        }
+      }
+    },
+    {
+      "id": "sleep_debt",
+      "title": "Deuda de sueño",
+      "priority": "medium",
+      "conditions": [
+        {
+          "key": "sleep_debt_3d_hours",
+          "op": ">=",
+          "value": 3
+        }
+      ],
+      "message": "Tienes deuda de sueño acumulada. Prioriza acostarte antes o siesta corta.",
+      "why": [
+        "sleep_debt_3d_hours >= 3"
+      ],
+      "action": {
+        "type": "suggest",
+        "label": "Recordatorio: dormir",
+        "payload": {
+          "reminder": "Dormir temprano hoy"
+        }
+      }
+    },
+    {
+      "id": "mood_neg_streak",
+      "title": "Racha emocional pesada",
+      "priority": "medium",
+      "conditions": [
+        {
+          "key": "mood_neg_streak",
+          "op": ">=",
+          "value": 2
+        }
+      ],
+      "message": "Llevas varios días con mood pesado. Haz algo pequeño que te suba 1 punto (sin hacerlo épico).",
+      "why": [
+        "mood_neg_streak >= 2"
+      ],
+      "action": {
+        "type": "suggest",
+        "label": "Micro-acción 5 min",
+        "payload": {
+          "routine": "micro_5"
+        }
+      }
+    },
+    {
+      "id": "reminders_overload",
+      "title": "Muchos pendientes",
+      "priority": "low",
+      "conditions": [
+        {
+          "key": "reminders_open",
+          "op": ">=",
+          "value": 6
+        }
+      ],
+      "message": "Tienes muchos reminders pendientes. Elige 1 solo para cerrar hoy (el más fácil o el más molesto).",
+      "why": [
+        "reminders_open >= 6"
+      ],
+      "action": {
+        "type": "suggest",
+        "label": "Abrir Reminders",
+        "payload": {
+          "nav": "reminders"
+        }
+      }
+    }
+  ]
+}

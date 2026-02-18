@@ -1,3 +1,4 @@
+import { runNeuroClaw } from "./neuroclaw/neuroclaw.js";
 console.log("MemoryCarl loaded");
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
 // 1) Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates -> Generate key pair
@@ -110,7 +111,10 @@ const LS = {
   calDraw: "memorycarl_v2_cal_draw",
   house: "memorycarl_v2_house",
   moodDaily: "memorycarl_v2_mood_daily",
-  moodSpritesCustom: "memorycarl_v2_mood_sprites_custom"
+  moodSpritesCustom: "memorycarl_v2_mood_sprites_custom",
+  // NeuroClaw
+  neuroclawFeedback: "memorycarl_v2_neuroclaw_feedback",
+  neuroclawLast: "memorycarl_v2_neuroclaw_last",
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -495,6 +499,9 @@ let state = {
   insightsDay: "",
   calMonthOffset: 0,
   musicCursor: 0,
+  // NeuroClaw
+  neuroclawFeedback: load(LS.neuroclawFeedback, []),
+  neuroclawLast: load(LS.neuroclawLast, { ts:"", signals:null, suggestions:[] }),
 };
 
 normalizeHouse();
@@ -515,6 +522,10 @@ function persist(){
 
   // House
   save(LS.house, state.house);
+
+  // NeuroClaw
+  try{ save(LS.neuroclawFeedback, state.neuroclawFeedback); }catch(e){}
+  try{ save(LS.neuroclawLast, state.neuroclawLast); }catch(e){}
 
   // Shopping system (added later in file, so guard)
   try{
@@ -2146,6 +2157,81 @@ function getMusicDisplay(){
   return { item: log[cursor], mode:"log", cursor, total: log.length };
 }
 
+// ====================== NeuroClaw (local suggestions engine) ======================
+async function neuroclawRunNow({ animate=true } = {}){
+  try{
+    const now = new Date();
+    const out = await runNeuroClaw({
+      sleepLog: state.sleepLog || [],
+      moodDaily: state.moodDaily || {},
+      reminders: state.reminders || []
+    }, now);
+    state.neuroclawLast = {
+      ts: new Date().toISOString(),
+      signals: out.signals,
+      suggestions: out.suggestions || []
+    };
+    persist();
+    if(animate && window.anime){
+      const card = document.querySelector("#homeNeuroCard");
+      if(card){
+        anime({ targets: card, scale:[1,1.01,1], duration: 380, easing:"easeOutQuad" });
+      }
+    }
+  }catch(e){
+    console.warn("NeuroClaw run error:", e);
+  }
+}
+
+function neuroclawTopSuggestions(limit=3){
+  const s = (state.neuroclawLast && Array.isArray(state.neuroclawLast.suggestions)) ? state.neuroclawLast.suggestions : [];
+  return s.slice(0, limit);
+}
+
+function neuroclawBadge(p){
+  const k = String(p||"low").toLowerCase();
+  if(k==="high") return `<span class="neuroBadge high">Alta</span>`;
+  if(k==="medium") return `<span class="neuroBadge med">Media</span>`;
+  return `<span class="neuroBadge low">Baja</span>`;
+}
+
+function renderNeuroClawCard(){
+  const items = neuroclawTopSuggestions(3);
+  const has = items.length>0;
+  const ts = state.neuroclawLast?.ts ? new Date(state.neuroclawLast.ts) : null;
+  const stamp = ts ? ts.toLocaleString("es-PE",{hour:"2-digit",minute:"2-digit"}) : "";
+  return `
+    <section class="card homeCard" id="homeNeuroCard">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">NeuroClaw</h2>
+          <div class="small">${has ? `Sugerencias • ${escapeHtml(stamp)}` : "Sin señales aún"}</div>
+        </div>
+        <button class="iconBtn" id="btnNeuroAnalyze" aria-label="Analyze">🧠</button>
+      </div>
+      <div class="hr"></div>
+      ${has ? `
+        <div class="neuroList">
+          ${items.map(it=>`
+            <div class="neuroItem" data-neuro-id="${escapeHtml(it.id)}">
+              <div class="neuroRow">
+                <div class="neuroMsg">${escapeHtml(it.message || it.title || "")}</div>
+                ${neuroclawBadge(it.priority)}
+              </div>
+              <div class="neuroActions">
+                <button class="miniBtn" data-neuro-rate="up" data-neuro-id="${escapeHtml(it.id)}">👍</button>
+                <button class="miniBtn" data-neuro-rate="down" data-neuro-id="${escapeHtml(it.id)}">👎</button>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      ` : `
+        <div class="muted">Registra sueño y mood unos días, y dale 🧠 para analizar.</div>
+      `}
+    </section>
+  `;
+}
+
 function viewHome(){
   const now = new Date();
   const monday = startOfWeekMonday(now);
@@ -2243,6 +2329,8 @@ const sleepBars = renderSleepBars(sleepSeries);
           ${remindersHtml}
         </div>
       </section>
+
+      ${renderNeuroClawCard()}
     </div>
 
     <section class="card homeCard homeWide musicSplitCard" id="homeMusicCard">
@@ -5790,6 +5878,8 @@ function initBottomSheet(){
 /* INIT_RENDER_MOVED
 persist();
 view();
+// INIT_NEUROCLAW
+neuroclawRunNow({ animate:false });
 */
 
 
@@ -6259,6 +6349,8 @@ window.openManualItemPrompt = openManualItemPrompt;
 /* Render after module definitions */
 persist();
 view();
+// INIT_NEUROCLAW
+neuroclawRunNow({ animate:false });
 
 
 // ---------- Shopping analytics helpers ----------

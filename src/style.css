@@ -1205,3 +1205,17 @@ body{
 }
 
 #insightsMonthChart{width:100%;height:120px;display:block;margin-top:10px;}
+
+
+/* ================= NeuroClaw ================= */
+.neuroList{display:flex;flex-direction:column;gap:10px;}
+.neuroItem{padding:10px;border-radius:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);}
+.neuroRow{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;}
+.neuroMsg{font-size:13px;line-height:1.35;flex:1;opacity:0.95;}
+.neuroActions{display:flex;gap:8px;margin-top:8px;}
+.miniBtn{border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.05);color:inherit;border-radius:12px;padding:6px 10px;font-size:12px;cursor:pointer;}
+.miniBtn:active{transform:scale(0.98);}
+.neuroBadge{font-size:11px;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.14);opacity:0.92;white-space:nowrap;}
+.neuroBadge.high{background:rgba(255,70,70,0.18);}
+.neuroBadge.med{background:rgba(255,214,102,0.18);}
+.neuroBadge.low{background:rgba(124,255,178,0.14);}
