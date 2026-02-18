@@ -1015,12 +1015,21 @@ body{
 .calDay{
   background: rgba(255,255,255,.04);
   border: 1px solid rgba(255,255,255,.06);
-  border-radius: 14px;
-  padding: 10px 10px 8px;
-  min-height: 78px;
+  border-radius: 16px;
+
+  aspect-ratio: 1 / 1;      /* 👈 Hace cada día cuadrado */
+  padding: 10px;
+  min-height: unset;        /* 👈 Mata el estiramiento */
+  height: auto;
+
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+
   text-align:left;
   cursor:pointer;
   position:relative;
+  overflow:hidden;
 }
 .calDay.blank{
   background: transparent;
