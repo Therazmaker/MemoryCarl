@@ -942,7 +942,9 @@ function viewInsights(){
     cells.push({ blank:false, day, iso, sum, isToday: iso===isoDate(now) });
   }
 
-  const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`).join("");
+    const mctx = computeInsightsMonthContext(cells);
+
+const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`).join("");
 
   return `
     <section class="card">
@@ -971,6 +973,18 @@ function viewInsights(){
         <canvas id="insightsMonthChart" height="110"></canvas>
       </div>
 
+
+      <div class="row" style="justify-content:space-between;align-items:center;margin-top:10px;">
+        <div class="chip">🔥 Heatmap</div>
+        <select id="insHeatMode" class="input" style="max-width:220px" onchange="insightsSetHeatMode(this.value)">
+          <option value="pulse" ${INS_HEAT_MODE==="pulse"?"selected":""}>Pulso</option>
+          <option value="sleep" ${INS_HEAT_MODE==="sleep"?"selected":""}>Sueño</option>
+          <option value="tasks" ${INS_HEAT_MODE==="tasks"?"selected":""}>Tasks</option>
+          <option value="clean" ${INS_HEAT_MODE==="clean"?"selected":""}>Limpieza</option>
+          <option value="shop" ${INS_HEAT_MODE==="shop"?"selected":""}>Compras</option>
+          <option value="mood" ${INS_HEAT_MODE==="mood"?"selected":""}>Mood</option>
+        </select>
+      </div>
       <div class="insCal">
         ${wk}
         ${cells.map(c=>{
@@ -979,8 +993,9 @@ function viewInsights(){
           const dna = buildInsightDNA(c.sum);
           const moneyStr = (c.sum && c.sum.shopping && c.sum.shopping.total>0) ? `<div class="calMini money">🛒 ${money(c.sum.shopping.total)}</div>` : ``;
           const cleanStr = (c.sum && c.sum.cleaning && c.sum.cleaning.totalMinutes>0) ? `<div class="calMini">🧹 ${Math.round(c.sum.cleaning.totalMinutes)}m</div>` : ``;
+          const heat = insightHeat(c.sum, INS_HEAT_MODE, mctx);
           return `
-            <button class="calDay ${c.isToday?"today":""}" data-ins-day="${c.iso}">
+            <button class="calDay ${c.isToday?"today":""} ${heat>0?"heat":""}" style="--heat:${heat.toFixed(3)}" data-ins-day="${c.iso}">
               <div class="calNum">${c.day}</div>
               <div class="calIcons">${icons}</div>
               <div class="calDNA">${dna}</div>
@@ -1008,6 +1023,16 @@ function buildInsightIcons(sum){
 // =====================
 // Insights V2 (Neural Minimal)
 // =====================
+// Heatmap mode for Insights calendar
+let INS_HEAT_MODE = localStorage.getItem("mc_ins_heat_mode") || "pulse";
+window.insightsSetHeatMode = function(mode){
+  INS_HEAT_MODE = String(mode || "pulse");
+  localStorage.setItem("mc_ins_heat_mode", INS_HEAT_MODE);
+  // re-render insights if we are on that tab
+  if(state && state.tab === "insights") view();
+};
+
+
 let _insightsMonthChart = null;
 let _insightsRadarChart = null;
 
@@ -1056,6 +1081,43 @@ function insightDayPulse(sum){
   if(!vals.length) return 0;
   return vals.reduce((a,b)=>a+b,0)/vals.length;
 }
+
+function computeInsightsMonthContext(cells){
+  let maxShop = 0, maxSleep = 0, maxClean = 0, maxPulse = 0, maxMood = 0;
+  for(const c of (cells||[])){
+    if(!c || c.blank) continue;
+    const sum = c.sum;
+    const shop = Number(sum?.shopping?.total||0);
+    const sleep = Number(sum?.sleep?.totalMinutes||0);
+    const clean = Number(sum?.cleaning?.totalMinutes||0);
+    const moodV = sum?.mood?.value != null ? (Number(sum.mood.value)||0)*10 : (sum?.mood?.spriteId ? 60 : 0);
+    const pulse = sum ? insightDayPulse(sum) : 0;
+    if(shop > maxShop) maxShop = shop;
+    if(sleep > maxSleep) maxSleep = sleep;
+    if(clean > maxClean) maxClean = clean;
+    if(pulse > maxPulse) maxPulse = pulse;
+    if(moodV > maxMood) maxMood = moodV;
+  }
+  return { maxShop, maxSleep, maxClean, maxPulse, maxMood };
+}
+
+function insightHeat(sum, mode, ctx){
+  if(!sum) return 0;
+  const v = insightVector(sum);
+  const m = String(mode||"pulse");
+  const c = ctx || {};
+  const safeDiv = (a,b)=> (b>0 ? (a/b) : 0);
+
+  if(m === "sleep") return clamp01(safeDiv(Number(sum?.sleep?.totalMinutes||0), Number(c.maxSleep||0)));
+  if(m === "tasks") return clamp01((v.tasks||0)/100);
+  if(m === "clean") return clamp01(safeDiv(Number(sum?.cleaning?.totalMinutes||0), Number(c.maxClean||0)));
+  if(m === "shop") return clamp01(safeDiv(Number(sum?.shopping?.total||0), Number(c.maxShop||0)));
+  if(m === "mood") return clamp01(safeDiv((sum?.mood?.value != null ? (Number(sum.mood.value)||0)*10 : (sum?.mood?.spriteId?60:0)), Number(c.maxMood||0)));
+
+  // pulse (default) normalized to month max
+  return clamp01(safeDiv(insightDayPulse(sum), Number(c.maxPulse||0)));
+}
+
 
 function wireInsights(root){
   // Month chart

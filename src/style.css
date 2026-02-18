@@ -1031,6 +1031,25 @@ body{
   position:relative;
   overflow:hidden;
 }
+
+
+/* Heatmap overlay (Insights) */
+.calDay{ --heat: 0; }
+.calDay.heat::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background: radial-gradient(120% 80% at 50% 0%,
+    rgba(124,92,255, calc(.06 + var(--heat) * .28)),
+    transparent 62%);
+  opacity:1;
+  pointer-events:none;
+  z-index:0;
+}
+.calDay.heat{
+  border-color: rgba(124,92,255, calc(.10 + var(--heat) * .35));
+}
+.calDay > *{ position:relative; z-index:1; }
 .calIcons{
   font-size:11px;
   line-height:1.2;
