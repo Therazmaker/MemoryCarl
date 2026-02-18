@@ -1017,7 +1017,7 @@ body{
   border: 1px solid rgba(255,255,255,.06);
   border-radius: 16px;
 
-  aspect-ratio: 1 / 1;      /* 👈 Hace cada día cuadrado */
+  aspect-ratio: 10 / 11;      /* 👈 Hace cada día cuadrado */
   padding: 10px;
   min-height: unset;        /* 👈 Mata el estiramiento */
   height: auto;
@@ -1031,6 +1031,24 @@ body{
   position:relative;
   overflow:hidden;
 }
+.calIcons{
+  font-size:11px;
+  line-height:1.2;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.calMini{
+  font-size:10px;
+  opacity:.8;
+}
+
+.calMini.money{
+  font-weight:700;
+  font-size:10px;
+}
+
 .calDay.blank{
   background: transparent;
   border-color: transparent;
