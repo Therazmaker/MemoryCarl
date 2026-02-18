@@ -770,11 +770,15 @@ function view(){
 // Insights day modal wiring
   if(state.insightsDayOpen){
     const b = root.querySelector("#insightsDayBackdrop");
-    if(b){
-      b.addEventListener("click", (e)=>{ if(e.target===b){ state.insightsDayOpen=false; view(); }});
-    }
     const c = root.querySelector("#btnInsightsDayClose");
-    if(c) c.addEventListener("click", ()=>{ state.insightsDayOpen=false; view(); });
+    // Animate in + draw radar after DOM is ready
+    setTimeout(()=>{ insightsModalIn(); insightsDrawRadar(); }, 0);
+
+    const close = ()=> closeInsightsModalAnimated();
+    if(b){
+      b.addEventListener("click", (e)=>{ if(e.target===b) close(); });
+    }
+    if(c) c.addEventListener("click", close);
   }
 
   // House history modal wiring + button
@@ -904,6 +908,7 @@ const btnExport = root.querySelector("#btnExport");
   if(state.tab==="home") wireHome(root);
   if(state.tab==="house") wireHouse(root);
 	  if(state.tab==="calendar") wireCalendar(root);
+  if(state.tab==="insights") wireInsights(root);
   wireHouseZoneSheet(root);
 
   // Re-open house runner modal after render if it was open
@@ -955,17 +960,30 @@ function viewInsights(){
 
       <div class="hr"></div>
 
+      <div class="insTrendCard">
+        <div class="row" style="justify-content:space-between;align-items:center;">
+          <div>
+            <div class="muted">Estado del mes</div>
+            <div style="font-weight:800;">Pulso diario (informativo)</div>
+          </div>
+          <div class="pill small">Mood • Sueño • Tasks • Limpieza • Compras</div>
+        </div>
+        <canvas id="insightsMonthChart" height="110"></canvas>
+      </div>
+
       <div class="insCal">
         ${wk}
         ${cells.map(c=>{
           if(c.blank) return `<div class="calDay blank"></div>`;
           const icons = buildInsightIcons(c.sum);
-          const moneyStr = (c.sum && c.sum.shopping && c.sum.shopping.total>0) ? `<div class="calMini money">${money(c.sum.shopping.total)}</div>` : ``;
-          const cleanStr = (c.sum && c.sum.cleaning && c.sum.cleaning.totalMinutes>0) ? `<div class="calMini">${Math.round(c.sum.cleaning.totalMinutes)}m 🧹</div>` : ``;
+          const dna = buildInsightDNA(c.sum);
+          const moneyStr = (c.sum && c.sum.shopping && c.sum.shopping.total>0) ? `<div class="calMini money">🛒 ${money(c.sum.shopping.total)}</div>` : ``;
+          const cleanStr = (c.sum && c.sum.cleaning && c.sum.cleaning.totalMinutes>0) ? `<div class="calMini">🧹 ${Math.round(c.sum.cleaning.totalMinutes)}m</div>` : ``;
           return `
             <button class="calDay ${c.isToday?"today":""}" data-ins-day="${c.iso}">
               <div class="calNum">${c.day}</div>
               <div class="calIcons">${icons}</div>
+              <div class="calDNA">${dna}</div>
               ${moneyStr}
               ${cleanStr}
             </button>
@@ -985,6 +1003,235 @@ function buildInsightIcons(sum){
   if(sum.reminders && (sum.reminders.total>0)) out += "⏰";
   if(sum.cleaning && sum.cleaning.count>0) out += "🧹";
   return out ? `<span>${out}</span>` : "";
+}
+
+// =====================
+// Insights V2 (Neural Minimal)
+// =====================
+let _insightsMonthChart = null;
+let _insightsRadarChart = null;
+
+function clamp01(x){ x = Number(x)||0; return x<0?0:(x>1?1:x); }
+function clamp100(x){ x = Number(x)||0; return x<0?0:(x>100?100:x); }
+
+function insightVector(sum){
+  // Returns {mood,sleep,tasks,cleaning,shopping} each 0..100
+  const mood = sum?.mood?.value != null ? clamp100((Number(sum.mood.value)||0) * 10) : (sum?.mood?.spriteId ? 60 : 0); // fallback
+  const sleepH = sum?.sleep?.totalMinutes != null ? (Number(sum.sleep.totalMinutes)||0)/60 : 0;
+  const sleep = clamp100((sleepH/8) * 100);
+
+  const tasksTotal = Number(sum?.reminders?.total||0);
+  const tasksDone  = Number(sum?.reminders?.done||0);
+  const tasks = tasksTotal>0 ? clamp100((tasksDone/tasksTotal)*100) : 0;
+
+  const cleanMin = Number(sum?.cleaning?.totalMinutes||0);
+  const cleaning = clamp100((cleanMin/45) * 100); // 45min = 100 (tunable)
+
+  const shopTotal = Number(sum?.shopping?.total||0);
+  // informative intensity: relative to 150 soles/day cap
+  const shopping = clamp100((shopTotal/150) * 100);
+
+  return { mood, sleep, tasks, cleaning, shopping };
+}
+
+function buildInsightDNA(sum){
+  if(!sum) return "";
+  const v = insightVector(sum);
+  const bars = [
+    {k:"mood", em:"🙂", v:v.mood},
+    {k:"sleep", em:"😴", v:v.sleep},
+    {k:"tasks", em:"✅", v:v.tasks},
+    {k:"clean", em:"🧹", v:v.cleaning},
+    {k:"shop", em:"🛒", v:v.shopping},
+  ];
+  return `<div class="dna" aria-label="ADN del día">
+    ${bars.map(b=>`<i class="dnaBar dna-${b.k}" style="--h:${Math.round(b.v)}" title="${b.em} ${Math.round(b.v)}"></i>`).join("")}
+  </div>`;
+}
+
+function insightDayPulse(sum){
+  // Informative composite 0..100
+  const v = insightVector(sum);
+  const vals = [v.mood, v.sleep, v.tasks, v.cleaning, v.shopping].filter(x=>x>0);
+  if(!vals.length) return 0;
+  return vals.reduce((a,b)=>a+b,0)/vals.length;
+}
+
+function wireInsights(root){
+  // Month chart
+  setTimeout(()=> insightsDrawMonthChart(), 0);
+
+  // Subtle entrance
+  setTimeout(()=>{
+    try{
+      if(typeof anime!=="undefined"){
+        anime({
+          targets: ".insTrendCard",
+          opacity: [0,1],
+          translateY: [8,0],
+          duration: 520,
+          easing: "easeOutExpo"
+        });
+        anime({
+          targets: ".insCal .calDay:not(.blank)",
+          opacity: [0,1],
+          translateY: [6,0],
+          delay: anime.stagger(8),
+          duration: 420,
+          easing: "easeOutQuad"
+        });
+      }
+    }catch(e){}
+  }, 0);
+}
+
+function insightsDrawMonthChart(){
+  const canvas = document.getElementById("insightsMonthChart");
+  if(!canvas || typeof Chart==="undefined") return;
+
+  // Build month series from the currently rendered grid
+  const dayBtns = Array.from(document.querySelectorAll("[data-ins-day]"));
+  const labels = [];
+  const data = [];
+  for(const btn of dayBtns){
+    const iso = btn.dataset.insDay;
+    if(!iso) continue;
+    const sum = buildDailySummary(String(iso));
+    const pulse = sum ? insightDayPulse(sum) : 0;
+    labels.push(iso.slice(8,10));
+    data.push(Math.round(pulse));
+  }
+
+  try{ if(_insightsMonthChart){ _insightsMonthChart.destroy(); _insightsMonthChart=null; } }catch(e){}
+
+  _insightsMonthChart = new Chart(canvas.getContext("2d"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Pulso",
+        data,
+        tension: 0.35,
+        fill: true,
+        pointRadius: 2.5,
+        pointHoverRadius: 5,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: true }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: "rgba(255,255,255,.55)" } },
+        y: { beginAtZero: true, max: 100, ticks: { color: "rgba(255,255,255,.55)" } }
+      }
+    }
+  });
+
+  // Small "draw" vibe
+  try{
+    if(typeof anime!=="undefined"){
+      anime({
+        targets: canvas,
+        opacity: [0,1],
+        duration: 420,
+        easing: "easeOutQuad"
+      });
+    }
+  }catch(e){}
+}
+
+function insightsModalIn(){
+  const card = document.getElementById("insightsNeuralCard");
+  if(!card || typeof anime==="undefined") return;
+  anime({
+    targets: card,
+    opacity: [0,1],
+    scale: [0.92, 1],
+    translateY: [12, 0],
+    duration: 520,
+    easing: "easeOutExpo"
+  });
+}
+
+function closeInsightsModalAnimated(){
+  const card = document.getElementById("insightsNeuralCard");
+  const backdrop = document.getElementById("insightsDayBackdrop");
+  if(!card || typeof anime==="undefined"){
+    state.insightsDayOpen = false; view(); return;
+  }
+  anime({
+    targets: card,
+    opacity: [1,0],
+    scale: 0.96,
+    translateY: 10,
+    duration: 260,
+    easing: "easeInQuad",
+    complete: ()=>{
+      state.insightsDayOpen = false;
+      view();
+    }
+  });
+  if(backdrop){
+    anime({ targets: backdrop, opacity: [1,0], duration: 260, easing: "linear" });
+  }
+}
+
+function insightsDrawRadar(){
+  const canvas = document.getElementById("insightsRadarCanvas");
+  if(!canvas || typeof Chart==="undefined") return;
+
+  const sum = buildDailySummary(String(state.insightsDay||"")) || null;
+  const v = sum ? insightVector(sum) : {mood:0,sleep:0,tasks:0,cleaning:0,shopping:0};
+
+  try{ if(_insightsRadarChart){ _insightsRadarChart.destroy(); _insightsRadarChart=null; } }catch(e){}
+
+  _insightsRadarChart = new Chart(canvas.getContext("2d"), {
+    type: "radar",
+    data: {
+      labels: ["Mood","Sueño","Tasks","Limpieza","Compras"],
+      datasets: [{
+        label: "Día",
+        data: [v.mood, v.sleep, v.tasks, v.cleaning, v.shopping],
+        borderWidth: 2,
+        pointRadius: 2.8,
+        pointHoverRadius: 5,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        r: {
+          min: 0,
+          max: 100,
+          ticks: { display: false },
+          grid: { color: "rgba(255,255,255,.10)" },
+          angleLines: { color: "rgba(255,255,255,.10)" },
+          pointLabels: { color: "rgba(255,255,255,.75)", font: { size: 12, weight: "600" } }
+        }
+      },
+      animation: { duration: 700 }
+    }
+  });
+
+  // Tiny pulse
+  try{
+    if(typeof anime!=="undefined"){
+      anime({
+        targets: canvas,
+        opacity: [0,1],
+        duration: 420,
+        easing: "easeOutQuad"
+      });
+    }
+  }catch(e){}
 }
 
 function buildDailySummary(iso){
@@ -1037,76 +1284,83 @@ function buildDailySummary(iso){
 function renderInsightsDayModal(){
   const iso = String(state.insightsDay||"");
   const sum = buildDailySummary(iso) || { iso };
-  const mood = sum.mood ? (()=>{ const s = getMoodSpriteById(sum.mood.spriteId); return s ? `${s.name}` : sum.mood.spriteId; })() : "Sin datos";
-  const sleep = sum.sleep ? `${Math.round((Number(sum.sleep.totalMinutes)||0)/6)/10}h • Q${escapeHtml(String(sum.sleep.quality||""))}` : "Sin datos";
-  const shopping = (sum.shopping && sum.shopping.total>0) ? `${money(sum.shopping.total)} (${sum.shopping.entries} compras)` : "Sin datos";
-  const reminders = sum.reminders ? `${sum.reminders.done}/${sum.reminders.total} done` : "Sin datos";
-  const cleaning = (sum.cleaning && sum.cleaning.totalMinutes>0) ? `${Math.round(sum.cleaning.totalMinutes)} min (${sum.cleaning.count} sesiones)` : "Sin datos";
+
+  const moodName = sum.mood ? (()=>{ const s = getMoodSpriteById(sum.mood.spriteId); return s ? `${s.name}` : sum.mood.spriteId; })() : "Sin datos";
+  const sleepStr = sum.sleep ? `${Math.round((Number(sum.sleep.totalMinutes)||0)/6)/10}h • Q${escapeHtml(String(sum.sleep.quality||""))}` : "Sin datos";
+  const shoppingStr = (sum.shopping && sum.shopping.total>0) ? `${money(sum.shopping.total)} (${sum.shopping.entries} compras)` : "Sin datos";
+  const remindersStr = sum.reminders ? `${sum.reminders.done}/${sum.reminders.total}` : "Sin datos";
+  const cleaningStr = (sum.cleaning && sum.cleaning.totalMinutes>0) ? `${Math.round(sum.cleaning.totalMinutes)} min (${sum.cleaning.count} sesiones)` : "Sin datos";
 
   const shopList = (Array.isArray(state.shoppingHistory)? state.shoppingHistory: []).filter(h=>String(h.date)===iso).slice(0,8);
   const cleanList = (state.house && Array.isArray(state.house.sessionHistory)? state.house.sessionHistory: []).filter(h=>String(h.date)===iso).slice(0,8);
 
+  // Normalized values 0..100 for radar
+  const v = insightVector(sum);
   return `
-    <div class="modalBackdrop" id="insightsDayBackdrop" aria-label="Día">
-      <div class="modal">
-        <div class="row" style="justify-content:space-between;align-items:center;">
-          <h2 style="margin:0;">${escapeHtml(iso)}</h2>
-          <button class="iconBtn" id="btnInsightsDayClose">Cerrar</button>
-        </div>
-
-        <div class="grid2" style="margin-top:12px;">
-          <div class="card" style="padding:12px;">
-            <div class="muted">Mood</div>
-            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(mood))}</div>
-            ${sum.mood && sum.mood.note ? `<div class="muted" style="margin-top:6px;">${escapeHtml(sum.mood.note)}</div>` : ``}
-          </div>
-          <div class="card" style="padding:12px;">
-            <div class="muted">Sueño</div>
-            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(sleep))}</div>
-            ${sum.sleep && sum.sleep.note ? `<div class="muted" style="margin-top:6px;">${escapeHtml(sum.sleep.note)}</div>` : ``}
-          </div>
-          <div class="card" style="padding:12px;">
-            <div class="muted">Compras</div>
-            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(shopping))}</div>
-          </div>
-          <div class="card" style="padding:12px;">
-            <div class="muted">Reminders</div>
-            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(reminders))}</div>
-          </div>
-          <div class="card" style="padding:12px;">
-            <div class="muted">Limpieza</div>
-            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(cleaning))}</div>
-          </div>
-        </div>
-
-        ${(shopList.length || cleanList.length) ? `
-        <div class="hr"></div>
-        <div class="list">
-          ${shopList.length ? `
-            <div class="muted" style="margin:6px 0 4px;">Compras del día</div>
-            ${shopList.map(h=>`
-              <div class="item">
-                <div class="left">
-                  <div class="name">🛒 ${escapeHtml(h.store||"")}</div>
-                  <div class="meta">${money(Number(h?.totals?.total||0))} • ${Number(h?.totals?.itemsCount||0)} items</div>
-                </div>
+    <div class="modalBackdrop neuralBackdrop" id="insightsDayBackdrop" aria-label="Día">
+      <div class="neuralModal">
+        <div class="neuralCard" id="insightsNeuralCard">
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <div>
+              <div class="pill small" style="display:inline-flex;gap:6px;align-items:center;">
+                <span class="dot"></span>
+                <span>Mapa mental diario</span>
               </div>
-            `).join("")}
+              <h2 style="margin:8px 0 0;">${escapeHtml(iso)}</h2>
+            </div>
+            <button class="iconBtn" id="btnInsightsDayClose">Cerrar</button>
+          </div>
+
+          <div class="neuralGrid">
+            <div class="neuralChartWrap">
+              <canvas id="insightsRadarCanvas" width="420" height="320"></canvas>
+              <div class="neuralLegend muted">Mood • Sueño • Tasks • Limpieza • Compras</div>
+            </div>
+
+            <div class="neuralSummary">
+              <div class="neuralChipRow">
+                <div class="neuralChip"><span>🙂</span><b>${escapeHtml(String(moodName))}</b></div>
+                <div class="neuralChip"><span>😴</span><b>${escapeHtml(String(sleepStr))}</b></div>
+                <div class="neuralChip"><span>✅</span><b>${escapeHtml(String(remindersStr))}</b><span class="muted">rem</span></div>
+                <div class="neuralChip"><span>🧹</span><b>${escapeHtml(String(cleaningStr))}</b></div>
+                <div class="neuralChip"><span>🛒</span><b>${escapeHtml(String(shoppingStr))}</b></div>
+              </div>
+
+              ${(sum.mood && sum.mood.note) ? `<div class="noteCard"><div class="muted">Nota mood</div><div>${escapeHtml(sum.mood.note)}</div></div>` : ``}
+              ${(sum.sleep && sum.sleep.note) ? `<div class="noteCard"><div class="muted">Nota sueño</div><div>${escapeHtml(sum.sleep.note)}</div></div>` : ``}
+            </div>
+          </div>
+
+          ${(shopList.length || cleanList.length) ? `
+            <div class="hr"></div>
+            <div class="list">
+              ${shopList.length ? `
+                <div class="muted" style="margin:6px 0 4px;">Compras del día</div>
+                ${shopList.map(h=>`
+                  <div class="item">
+                    <div class="left">
+                      <div class="name">🛒 ${escapeHtml(h.store||"")}</div>
+                      <div class="meta">${money(Number(h?.totals?.total||0))} • ${Number(h?.totals?.itemsCount||0)} items</div>
+                    </div>
+                  </div>
+                `).join("")}
+              `:``}
+
+              ${cleanList.length ? `
+                <div class="muted" style="margin:10px 0 4px;">Sesiones de limpieza</div>
+                ${cleanList.map(s=>`
+                  <div class="item">
+                    <div class="left">
+                      <div class="name">🧹 ${escapeHtml(String(s.status||"ended"))}</div>
+                      <div class="meta">${Math.round((Number(s.totalSec)||0)/60)} min • ${Array.isArray(s.logs)?s.logs.length:0} pasos</div>
+                    </div>
+                  </div>
+                `).join("")}
+              `:``}
+            </div>
           `:``}
 
-          ${cleanList.length ? `
-            <div class="muted" style="margin:10px 0 4px;">Sesiones de limpieza</div>
-            ${cleanList.map(s=>`
-              <div class="item">
-                <div class="left">
-                  <div class="name">🧹 ${escapeHtml(String(s.status||"ended"))}</div>
-                  <div class="meta">${Math.round((Number(s.totalSec)||0)/60)} min • ${Array.isArray(s.logs)?s.logs.length:0} pasos</div>
-                </div>
-              </div>
-            `).join("")}
-          `:``}
         </div>
-        `:``}
       </div>
     </div>
   `;

@@ -1056,3 +1056,103 @@ body{
 @media (max-width: 520px){
   .grid2{ grid-template-columns: 1fr; }
 }
+
+
+/* =====================
+   Insights V2 (Neural Minimal)
+   ===================== */
+.insTrendCard{
+  margin-top:12px;
+  padding:14px;
+  border-radius:16px;
+  background:linear-gradient(180deg, rgba(59,130,246,.10), rgba(139,92,246,.06));
+  border:1px solid rgba(255,255,255,.06);
+  box-shadow:0 10px 30px rgba(0,0,0,.25);
+  opacity:0;
+}
+.pill.small{font-size:12px;padding:6px 10px;opacity:.9;}
+.pill .dot{width:8px;height:8px;border-radius:99px;background:rgba(59,130,246,.9);box-shadow:0 0 12px rgba(59,130,246,.7);display:inline-block;}
+
+.calDay{
+  position:relative;
+  overflow:hidden;
+}
+.calDay:after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:radial-gradient(100% 70% at 50% 0%, rgba(59,130,246,.10), transparent 60%);
+  pointer-events:none;
+  opacity:.6;
+}
+.calDay.today:after{opacity:1;}
+
+.calDNA{margin-top:8px;}
+.dna{
+  display:flex;
+  gap:3px;
+  height:18px;
+  align-items:flex-end;
+}
+.dnaBar{
+  flex:1;
+  border-radius:6px;
+  height:calc(var(--h,0) * 1%);
+  min-height:3px;
+  background:rgba(255,255,255,.14);
+  filter:drop-shadow(0 0 8px rgba(59,130,246,.10));
+}
+.dna-mood{background:rgba(59,130,246,.35);}
+.dna-sleep{background:rgba(139,92,246,.28);}
+.dna-tasks{background:rgba(124,255,178,.22);}
+.dna-clean{background:rgba(255,214,102,.20);}
+.dna-shop{background:rgba(255,255,255,.16);}
+
+.neuralBackdrop{backdrop-filter: blur(10px);}
+.neuralModal{display:flex;justify-content:center;align-items:flex-end;min-height:100%;padding:16px;}
+.neuralCard{
+  width:min(760px, 100%);
+  border-radius:22px;
+  background:linear-gradient(180deg, rgba(17,24,39,.96), rgba(15,23,42,.96));
+  border:1px solid rgba(255,255,255,.07);
+  box-shadow:0 20px 60px rgba(0,0,0,.45);
+  padding:16px;
+  opacity:0;
+}
+.neuralGrid{
+  display:grid;
+  grid-template-columns: 1.1fr .9fr;
+  gap:14px;
+  margin-top:12px;
+}
+@media (max-width: 720px){
+  .neuralGrid{grid-template-columns:1fr;}
+}
+.neuralChartWrap{
+  border-radius:18px;
+  padding:12px;
+  background:linear-gradient(180deg, rgba(59,130,246,.10), rgba(139,92,246,.06));
+  border:1px solid rgba(255,255,255,.06);
+}
+#insightsRadarCanvas{width:100%;height:260px;display:block;}
+.neuralLegend{margin-top:8px;text-align:center;}
+.neuralSummary{display:flex;flex-direction:column;gap:10px;}
+.neuralChipRow{display:flex;flex-wrap:wrap;gap:8px;}
+.neuralChip{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  padding:10px 12px;
+  border-radius:16px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06);
+}
+.neuralChip b{font-weight:800;}
+.noteCard{
+  padding:12px;
+  border-radius:16px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.06);
+}
+
+#insightsMonthChart{width:100%;height:120px;display:block;margin-top:10px;}
