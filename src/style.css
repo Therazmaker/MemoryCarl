@@ -998,3 +998,61 @@ body{
 @media (max-width:560px){
   .sleepHistoryModal{margin:0;border-radius:20px 20px 0 0;max-height:90vh}
 }
+
+
+/* ====================== INSIGHTS (Global) ====================== */
+.insCal{
+  display:grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap:8px;
+  margin-top:12px;
+}
+.calWk{
+  text-align:center;
+  font-size:12px;
+  opacity:.7;
+}
+.calDay{
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  padding: 10px 10px 8px;
+  min-height: 78px;
+  text-align:left;
+  cursor:pointer;
+  position:relative;
+}
+.calDay.blank{
+  background: transparent;
+  border-color: transparent;
+}
+.calDay.today{
+  border-color: rgba(124,255,178,.45);
+  box-shadow: 0 0 0 2px rgba(124,255,178,.12) inset;
+}
+.calNum{
+  font-weight:900;
+  font-size:14px;
+}
+.calIcons{
+  margin-top:6px;
+  font-size:12px;
+  opacity:.95;
+  letter-spacing:1px;
+}
+.calMini{
+  margin-top:6px;
+  font-size:11px;
+  opacity:.85;
+}
+.calMini.money{
+  font-weight:700;
+}
+.grid2{
+  display:grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap:10px;
+}
+@media (max-width: 520px){
+  .grid2{ grid-template-columns: 1fr; }
+}

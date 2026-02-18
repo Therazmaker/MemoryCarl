@@ -108,7 +108,9 @@ const LS = {
   sleepLog: "memorycarl_v2_sleep_log", // reserved (connect later)
   budgetMonthly: "memorycarl_v2_budget_monthly",
   calDraw: "memorycarl_v2_cal_draw",
-  house: "memorycarl_v2_house"
+  house: "memorycarl_v2_house",
+  moodDaily: "memorycarl_v2_mood_daily",
+  moodSpritesCustom: "memorycarl_v2_mood_sprites_custom"
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -400,6 +402,9 @@ function normalizeHouse(){
   if(!state.house || typeof state.house !== "object") state.house = seedHouse();
   state.house.zones = Array.isArray(state.house.zones) ? state.house.zones : [];
   state.house.tasks = Array.isArray(state.house.tasks) ? state.house.tasks : [];
+  state.house.sessionHistory = Array.isArray(state.house.sessionHistory) ? state.house.sessionHistory : [];
+  // UI flags
+  if(typeof state.house.historyOpen !== "boolean") state.house.historyOpen = false;
 
   // If tasks still reference placeholders, map them once.
   const byName = new Map(state.house.zones.map(z=>[z.name.toLowerCase(), z.id]));
@@ -480,7 +485,14 @@ let state = {
   sleepLog: load(LS.sleepLog, []),
   budgetMonthly: load(LS.budgetMonthly, []),
   calDraw: load(LS.calDraw, {}),
+  // Mood (daily sprite + note)
+  moodDaily: load(LS.moodDaily, {}),
+  moodSpritesCustom: load(LS.moodSpritesCustom, []),
   house: load(LS.house, seedHouse()),
+  // Insights UI
+  insightsMonthOffset: 0,
+  insightsDayOpen: false,
+  insightsDay: "",
   calMonthOffset: 0,
   musicCursor: 0,
 };
@@ -496,7 +508,20 @@ function persist(){
   save(LS.sleepLog, state.sleepLog);
   save(LS.budgetMonthly, state.budgetMonthly);
   save(LS.calDraw, state.calDraw);
+
+  // Mood
+  save(LS.moodDaily, state.moodDaily);
+  save(LS.moodSpritesCustom, state.moodSpritesCustom);
+
+  // House
   save(LS.house, state.house);
+
+  // Shopping system (added later in file, so guard)
+  try{
+    if(LS.products) save(LS.products, state.products);
+    if(LS.shoppingHistory) save(LS.shoppingHistory, state.shoppingHistory);
+    if(LS.inventory) save(LS.inventory, state.inventory);
+  }catch(e){}
 }
 
 // ---- Backup (Export/Import) ----
@@ -512,7 +537,12 @@ function exportBackup(){
     sleepLog: state.sleepLog,
     budgetMonthly: state.budgetMonthly,
     calDraw: state.calDraw,
-    house: state.house
+    house: state.house,
+    moodDaily: state.moodDaily,
+    moodSpritesCustom: state.moodSpritesCustom,
+    products: state.products,
+    shoppingHistory: state.shoppingHistory,
+    inventory: state.inventory
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -536,6 +566,11 @@ function importBackup(file){
       const shopping = Array.isArray(data.shopping) ? data.shopping : [];
       const reminders = Array.isArray(data.reminders) ? data.reminders : [];
       const house = (data.house && typeof data.house === "object") ? data.house : null;
+      const moodDaily = (data.moodDaily && typeof data.moodDaily === "object") ? data.moodDaily : {};
+      const moodSpritesCustom = Array.isArray(data.moodSpritesCustom) ? data.moodSpritesCustom : [];
+      const products = Array.isArray(data.products) ? data.products : [];
+      const shoppingHistory = Array.isArray(data.shoppingHistory) ? data.shoppingHistory : [];
+      const inventory = Array.isArray(data.inventory) ? data.inventory : [];
 
       routines.forEach(r=>{
         r.id ||= uid("r");
@@ -563,6 +598,11 @@ function importBackup(file){
       state.shopping = shopping;
       state.reminders = reminders;
       if(house){ state.house = house; normalizeHouse(); }
+      state.moodDaily = moodDaily;
+      state.moodSpritesCustom = moodSpritesCustom;
+      state.products = products;
+      state.shoppingHistory = shoppingHistory;
+      state.inventory = inventory;
 
       // Home widgets
       state.musicToday = (data.musicToday && typeof data.musicToday === "object") ? data.musicToday : load(LS.musicToday, null);
@@ -636,6 +676,7 @@ function renderMoreModal(){
           ${mk("reminders","⏰","Reminders","Pendientes + notifs")}
           ${mk("calendar","📅","Calendario","Dibuja X, notas")}
           ${mk("learn","🧠","Aprender","Mini contenido")}
+          ${mk("insights","📊","Insights","Todo por día")}
           ${mk("settings","⚙️","Ajustes","Backup, sync, etc")}
         </div>
       </div>
@@ -662,6 +703,7 @@ function view(){
         ${state.tab==="house" ? viewHouse() : ""}
         ${state.tab==="calendar" ? viewCalendar() : ""}
         ${state.tab==="learn" ? viewLearn() : ""}
+        ${state.tab==="insights" ? viewInsights() : ""}
         ${state.tab==="settings" ? viewSettings() : ""}
       </main>
 
@@ -694,6 +736,9 @@ function view(){
 
       ${renderHouseZoneSheet()}
 
+      ${state.house && state.house.historyOpen ? renderHouseHistoryModal() : ""}
+      ${state.insightsDayOpen ? renderInsightsDayModal() : ""}
+
       ${bottomNav()}
 
       ${state.moreOpen ? renderMoreModal() : ""}
@@ -705,6 +750,60 @@ function view(){
   if(state.tab==="settings"){
     initBottomSheet();
   }
+
+  
+  // Insights wiring
+  if(state.tab==="insights"){
+    const prev = root.querySelector("#btnInsPrev");
+    const next = root.querySelector("#btnInsNext");
+    if(prev) prev.addEventListener("click", ()=>{ state.insightsMonthOffset = (Number(state.insightsMonthOffset)||0) - 1; view(); });
+    if(next) next.addEventListener("click", ()=>{ state.insightsMonthOffset = (Number(state.insightsMonthOffset)||0) + 1; view(); });
+    root.querySelectorAll("[data-ins-day]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        state.insightsDay = btn.dataset.insDay || "";
+        state.insightsDayOpen = true;
+        view();
+      });
+    });
+  }
+
+// Insights day modal wiring
+  if(state.insightsDayOpen){
+    const b = root.querySelector("#insightsDayBackdrop");
+    if(b){
+      b.addEventListener("click", (e)=>{ if(e.target===b){ state.insightsDayOpen=false; view(); }});
+    }
+    const c = root.querySelector("#btnInsightsDayClose");
+    if(c) c.addEventListener("click", ()=>{ state.insightsDayOpen=false; view(); });
+  }
+
+  // House history modal wiring + button
+  if(state.tab==="house"){
+    const btnH = root.querySelector("#btnHouseHistory");
+    if(btnH) btnH.addEventListener("click", ()=>{
+      state.house = state.house || seedHouse();
+      state.house.historyOpen = true;
+      view();
+    });
+  }
+  if(state.house && state.house.historyOpen){
+    const b = root.querySelector("#houseHistoryBackdrop");
+    if(b){
+      b.addEventListener("click",(e)=>{ if(e.target===b){ state.house.historyOpen=false; view(); }});
+    }
+    const c = root.querySelector("#btnHouseHistoryClose");
+    if(c) c.addEventListener("click", ()=>{ state.house.historyOpen=false; view(); });
+    root.querySelectorAll("[data-house-history-clear]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        if(confirm("Borrar historial de sesiones?")){
+          state.house.sessionHistory = [];
+          state.house.historyOpen = false;
+          persist(); view();
+        }
+      });
+    });
+  }
+
   // Bottom nav wiring
   root.querySelectorAll(".bn[data-tab]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
@@ -816,6 +915,243 @@ const btnExport = root.querySelector("#btnExport");
 }
 
 
+
+
+function viewInsights(){
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth() + (Number(state.insightsMonthOffset)||0), 1);
+  const year = d.getFullYear();
+  const month = d.getMonth();
+  const monthLabel = d.toLocaleString(undefined, { month: "long", year: "numeric" });
+
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const startDow = (first.getDay()+6)%7; // Monday=0
+
+  const cells = [];
+  for(let i=0;i<startDow;i++) cells.push({ blank:true });
+  for(let day=1; day<=last.getDate(); day++){
+    const dd = new Date(year, month, day);
+    const iso = isoDate(dd);
+    const sum = buildDailySummary(iso);
+    cells.push({ blank:false, day, iso, sum, isToday: iso===isoDate(now) });
+  }
+
+  const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`).join("");
+
+  return `
+    <section class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <div>
+          <h2 style="margin:0;">Insights</h2>
+          <div class="muted">Calendario global. Click en un día para ver todo.</div>
+        </div>
+        <div class="row" style="gap:8px;">
+          <button class="btn ghost" id="btnInsPrev">‹</button>
+          <div class="pill" style="min-width:160px;text-align:center;">${escapeHtml(monthLabel)}</div>
+          <button class="btn ghost" id="btnInsNext">›</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="insCal">
+        ${wk}
+        ${cells.map(c=>{
+          if(c.blank) return `<div class="calDay blank"></div>`;
+          const icons = buildInsightIcons(c.sum);
+          const moneyStr = (c.sum && c.sum.shopping && c.sum.shopping.total>0) ? `<div class="calMini money">${money(c.sum.shopping.total)}</div>` : ``;
+          const cleanStr = (c.sum && c.sum.cleaning && c.sum.cleaning.totalMinutes>0) ? `<div class="calMini">${Math.round(c.sum.cleaning.totalMinutes)}m 🧹</div>` : ``;
+          return `
+            <button class="calDay ${c.isToday?"today":""}" data-ins-day="${c.iso}">
+              <div class="calNum">${c.day}</div>
+              <div class="calIcons">${icons}</div>
+              ${moneyStr}
+              ${cleanStr}
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function buildInsightIcons(sum){
+  if(!sum) return "";
+  let out = "";
+  if(sum.mood && sum.mood.spriteId) out += "🙂";
+  if(sum.sleep && sum.sleep.totalMinutes) out += "😴";
+  if(sum.shopping && sum.shopping.total>0) out += "🛒";
+  if(sum.reminders && (sum.reminders.total>0)) out += "⏰";
+  if(sum.cleaning && sum.cleaning.count>0) out += "🧹";
+  return out ? `<span>${out}</span>` : "";
+}
+
+function buildDailySummary(iso){
+  const out = { iso };
+
+  // Mood
+  try{
+    const e = getMoodEntry(iso);
+    if(e && e.spriteId) out.mood = e;
+  }catch(e){}
+
+  // Sleep
+  try{
+    const sl = Array.isArray(state.sleepLog) ? state.sleepLog : [];
+    const entry = sl.find(x=>String(x.date)===String(iso));
+    if(entry) out.sleep = entry;
+  }catch(e){}
+
+  // Shopping (history entries are dated)
+  try{
+    const hist = Array.isArray(state.shoppingHistory) ? state.shoppingHistory : [];
+    const day = hist.filter(h=>String(h.date)===String(iso));
+    if(day.length){
+      const total = day.reduce((a,h)=> a + (Number(h?.totals?.total)||0), 0);
+      out.shopping = { total: Number(total.toFixed(2)), entries: day.length, itemsCount: day.reduce((a,h)=>a+(Number(h?.totals?.itemsCount)||0),0) };
+    }
+  }catch(e){}
+
+  // Reminders (done that day if we have ts? fallback: count pending)
+  try{
+    const rem = Array.isArray(state.reminders) ? state.reminders : [];
+    const total = rem.length;
+    const done = rem.filter(r=>!!r.done).length;
+    out.reminders = { total, done, pending: total-done };
+  }catch(e){}
+
+  // Cleaning sessions (Casa)
+  try{
+    const hh = state.house && Array.isArray(state.house.sessionHistory) ? state.house.sessionHistory : [];
+    const day = hh.filter(h=>String(h.date)===String(iso));
+    if(day.length){
+      const totalSec = day.reduce((a,h)=>a+(Number(h.totalSec)||0),0);
+      out.cleaning = { count: day.length, totalMinutes: totalSec/60, sessions: day };
+    }
+  }catch(e){}
+
+  return out;
+}
+
+function renderInsightsDayModal(){
+  const iso = String(state.insightsDay||"");
+  const sum = buildDailySummary(iso) || { iso };
+  const mood = sum.mood ? (()=>{ const s = getMoodSpriteById(sum.mood.spriteId); return s ? `${s.name}` : sum.mood.spriteId; })() : "Sin datos";
+  const sleep = sum.sleep ? `${Math.round((Number(sum.sleep.totalMinutes)||0)/6)/10}h • Q${escapeHtml(String(sum.sleep.quality||""))}` : "Sin datos";
+  const shopping = (sum.shopping && sum.shopping.total>0) ? `${money(sum.shopping.total)} (${sum.shopping.entries} compras)` : "Sin datos";
+  const reminders = sum.reminders ? `${sum.reminders.done}/${sum.reminders.total} done` : "Sin datos";
+  const cleaning = (sum.cleaning && sum.cleaning.totalMinutes>0) ? `${Math.round(sum.cleaning.totalMinutes)} min (${sum.cleaning.count} sesiones)` : "Sin datos";
+
+  const shopList = (Array.isArray(state.shoppingHistory)? state.shoppingHistory: []).filter(h=>String(h.date)===iso).slice(0,8);
+  const cleanList = (state.house && Array.isArray(state.house.sessionHistory)? state.house.sessionHistory: []).filter(h=>String(h.date)===iso).slice(0,8);
+
+  return `
+    <div class="modalBackdrop" id="insightsDayBackdrop" aria-label="Día">
+      <div class="modal">
+        <div class="row" style="justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;">${escapeHtml(iso)}</h2>
+          <button class="iconBtn" id="btnInsightsDayClose">Cerrar</button>
+        </div>
+
+        <div class="grid2" style="margin-top:12px;">
+          <div class="card" style="padding:12px;">
+            <div class="muted">Mood</div>
+            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(mood))}</div>
+            ${sum.mood && sum.mood.note ? `<div class="muted" style="margin-top:6px;">${escapeHtml(sum.mood.note)}</div>` : ``}
+          </div>
+          <div class="card" style="padding:12px;">
+            <div class="muted">Sueño</div>
+            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(sleep))}</div>
+            ${sum.sleep && sum.sleep.note ? `<div class="muted" style="margin-top:6px;">${escapeHtml(sum.sleep.note)}</div>` : ``}
+          </div>
+          <div class="card" style="padding:12px;">
+            <div class="muted">Compras</div>
+            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(shopping))}</div>
+          </div>
+          <div class="card" style="padding:12px;">
+            <div class="muted">Reminders</div>
+            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(reminders))}</div>
+          </div>
+          <div class="card" style="padding:12px;">
+            <div class="muted">Limpieza</div>
+            <div style="font-weight:800;margin-top:4px;">${escapeHtml(String(cleaning))}</div>
+          </div>
+        </div>
+
+        ${(shopList.length || cleanList.length) ? `
+        <div class="hr"></div>
+        <div class="list">
+          ${shopList.length ? `
+            <div class="muted" style="margin:6px 0 4px;">Compras del día</div>
+            ${shopList.map(h=>`
+              <div class="item">
+                <div class="left">
+                  <div class="name">🛒 ${escapeHtml(h.store||"")}</div>
+                  <div class="meta">${money(Number(h?.totals?.total||0))} • ${Number(h?.totals?.itemsCount||0)} items</div>
+                </div>
+              </div>
+            `).join("")}
+          `:``}
+
+          ${cleanList.length ? `
+            <div class="muted" style="margin:10px 0 4px;">Sesiones de limpieza</div>
+            ${cleanList.map(s=>`
+              <div class="item">
+                <div class="left">
+                  <div class="name">🧹 ${escapeHtml(String(s.status||"ended"))}</div>
+                  <div class="meta">${Math.round((Number(s.totalSec)||0)/60)} min • ${Array.isArray(s.logs)?s.logs.length:0} pasos</div>
+                </div>
+              </div>
+            `).join("")}
+          `:``}
+        </div>
+        `:``}
+      </div>
+    </div>
+  `;
+}
+
+function renderHouseHistoryModal(){
+  const hist = (state.house && Array.isArray(state.house.sessionHistory)) ? state.house.sessionHistory : [];
+  const byDate = {};
+  for(const h of hist){
+    const d = String(h.date||"");
+    if(!byDate[d]) byDate[d]=[];
+    byDate[d].push(h);
+  }
+  const dates = Object.keys(byDate).sort().reverse().slice(0,30);
+
+  return `
+    <div class="modalBackdrop" id="houseHistoryBackdrop" aria-label="Historial de casa">
+      <div class="modal">
+        <div class="row" style="justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;">Historial 🧹</h2>
+          <div class="row" style="gap:8px;">
+            <button class="btn danger" data-house-history-clear="1">Borrar</button>
+            <button class="iconBtn" id="btnHouseHistoryClose">Cerrar</button>
+          </div>
+        </div>
+        <div class="muted" style="margin-top:6px;">Últimas sesiones guardadas (local).</div>
+
+        <div class="list" style="margin-top:12px;">
+          ${dates.length ? dates.map(d=>{
+            const rows = byDate[d]||[];
+            const totalMin = rows.reduce((a,x)=>a+(Number(x.totalSec)||0),0)/60;
+            return `
+              <div class="item" style="align-items:flex-start;">
+                <div class="left">
+                  <div class="name">${escapeHtml(d)} • <b>${Math.round(totalMin)} min</b></div>
+                  <div class="meta">${rows.length} sesiones</div>
+                </div>
+              </div>
+            `;
+          }).join("") : `<div class="muted">Aún no hay historial.</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
 
 function viewSettings(){
   const token = localStorage.getItem("memorycarl_fcm_token") || "";
@@ -3237,6 +3573,7 @@ function viewHouse(){
             </div>
             <div class="row">
               <button class="btn" id="btnHouseStart">${hasSession ? "Continuar" : "Iniciar"}</button>
+              <button class="btn ghost" id="btnHouseHistory">Historial</button>
               <button class="btn ghost" id="btnHouseReset">Reset</button>
             </div>
           </div>
