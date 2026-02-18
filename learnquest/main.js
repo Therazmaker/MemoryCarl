@@ -20,9 +20,6 @@ const els = {
   goalPill: $("lqGoalPill"),
   code: $("lqCode"),
   log: $("lqLog"),
-  console: $("lqConsole"),
-  clearRunLog: $("lqClearRunLog"),
-  clearConsole: $("lqClearConsole"),
   sub: $("lqSub")
 };
 
@@ -69,23 +66,6 @@ function setLog(text){
 }
 function appendLog(line){
   els.log.textContent = (els.log.textContent ? els.log.textContent + "\n" : "") + line;
-}
-
-const CONSOLE_MAX = 200;
-const consoleBuf = [];
-
-function setConsole(text){
-  if(!els.console) return;
-  els.console.textContent = text || "";
-}
-function appendConsole(line){
-  consoleBuf.push(String(line ?? ""));
-  while(consoleBuf.length > CONSOLE_MAX) consoleBuf.shift();
-  if(els.console) els.console.textContent = consoleBuf.join("\n");
-}
-function clearConsole(){
-  consoleBuf.length = 0;
-  setConsole("");
 }
 function safeStr(v){
   if(v === undefined || v === null) return "";
@@ -208,9 +188,6 @@ function parseLine(line){
   const delMatch = s.match(/^hero\.deliver\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)\s*$/);
   if(delMatch) return { type:"deliver", poi: delMatch[1], varName: delMatch[2] };
 
-  const logMatch = s.match(/^console\.log\(\s*(.+?)\s*\)\s*$/);
-  if(logMatch) return { type:"console", expr: logMatch[1] };
-
   const setMatch = s.match(/^set\s+([a-zA-Z_]\w*)\s*=\s*(.+)\s*$/);
   if(setMatch) return { type:"set", varName: setMatch[1], expr: setMatch[2] };
 
@@ -238,36 +215,6 @@ function evalExpr(expr){
   return out;
 }
 
-
-function evalDebugExpr(expr){
-  // Supports: "text", varName, varName.length, numbers, concat with +
-  const parts = String(expr).split("+").map(p=>p.trim()).filter(Boolean);
-  if(parts.length===0) throw new Error("Expresión vacía.");
-  let out = "";
-  for(const part of parts){
-    const strMatch = part.match(/^"([^"]*)"$/);
-    if(strMatch){ out += strMatch[1]; continue; }
-    const numMatch = part.match(/^-?\d+(?:\.\d+)?$/);
-    if(numMatch){ out += part; continue; }
-    const lenMatch = part.match(/^([a-zA-Z_]\w*)\.length$/);
-    if(lenMatch){
-      const v = state.vars[lenMatch[1]];
-      if(v === undefined || v === null) throw new Error(`La variable ${lenMatch[1]} no existe.`);
-      out += String(String(v).length);
-      continue;
-    }
-    const varMatch = part.match(/^([a-zA-Z_]\w*)$/);
-    if(varMatch){
-      const v = state.vars[varMatch[1]];
-      if(v === undefined) throw new Error(`La variable ${varMatch[1]} no existe.`);
-      out += String(v);
-      continue;
-    }
-    throw new Error(`Token no permitido: ${part}`);
-  }
-  return out;
-}
-
 function validateCommandAllowed(level, cmd){
   const allow = new Set(level.allowed || []);
   if(cmd.type === "move"){
@@ -276,7 +223,6 @@ function validateCommandAllowed(level, cmd){
   if(cmd.type === "scan") return allow.has("hero.scan");
   if(cmd.type === "deliver") return allow.has("hero.deliver");
   if(cmd.type === "set") return allow.has("set");
-  if(cmd.type === "console") return allow.has("console.log");
   if(cmd.type === "noop") return true;
   if(cmd.type === "error") return true;
   return false;
@@ -358,13 +304,6 @@ async function execCmd(level, cmd){
       const val = evalExpr(cmd.expr);
       state.vars[cmd.varName] = val;
       appendLog(`✅ Línea ${cmd._line}: set ${cmd.varName} = "${val}"`);
-      return true;
-    }
-
-    if(cmd.type==="console"){
-      const val = evalDebugExpr(cmd.expr);
-      appendConsole(val);
-      appendLog(`🧩 Línea ${cmd._line}: console.log(...)`);
       return true;
     }
 
