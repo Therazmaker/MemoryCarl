@@ -1089,6 +1089,14 @@ function insightsDrawMonthChart(){
   const canvas = document.getElementById("insightsMonthChart");
   if(!canvas || typeof Chart==="undefined") return;
 
+  // Hard-stop Chart.js responsive resize loops (some browsers can trigger an infinite growth
+  // cycle when a responsive canvas lives inside auto-sized containers).
+  try{
+    canvas.style.height = "120px";
+    canvas.style.width = "100%";
+    canvas.height = 120;
+  }catch(e){}
+
   // Build month series from the currently rendered grid
   const dayBtns = Array.from(document.querySelectorAll("[data-ins-day]"));
   const labels = [];
@@ -1119,7 +1127,9 @@ function insightsDrawMonthChart(){
       }]
     },
     options: {
-      responsive: true,
+      // IMPORTANT: keep charts non-responsive to avoid runaway ResizeObserver loops.
+      // We control size via explicit canvas height + CSS.
+      responsive: false,
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
@@ -1187,6 +1197,17 @@ function insightsDrawRadar(){
   const canvas = document.getElementById("insightsRadarCanvas");
   if(!canvas || typeof Chart==="undefined") return;
 
+  // Prevent responsive resize loops by locking the canvas size.
+  // The wrapper (.radarBox) has a fixed height in CSS.
+  try{
+    canvas.style.height = "100%";
+    canvas.style.width  = "100%";
+    // If the wrapper exists, use its pixel height.
+    const wrap = canvas.parentElement;
+    const h = wrap ? (wrap.getBoundingClientRect().height || 260) : 260;
+    canvas.height = Math.round(h);
+  }catch(e){}
+
   const sum = buildDailySummary(String(state.insightsDay||"")) || null;
   const v = sum ? insightVector(sum) : {mood:0,sleep:0,tasks:0,cleaning:0,shopping:0};
 
@@ -1206,7 +1227,8 @@ function insightsDrawRadar(){
       }]
     },
     options: {
-      responsive: true,
+      // IMPORTANT: keep charts non-responsive to avoid runaway ResizeObserver loops.
+      responsive: false,
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
