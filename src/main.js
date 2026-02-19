@@ -1,10 +1,16 @@
 console.log("MemoryCarl loaded");
+// ===== LocalStorage Keys =====
+const KEYS = {
+  neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
+  neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",
+};
+
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
 // 1) Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates -> Generate key pair
 // 2) Paste the VAPID public key below
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker
-    .register("../firebase-messaging-sw.js?v=999")
+    .register("./firebase-messaging-sw.js?v=999")
     .then(reg => {
       console.log("SW registered:", reg.scope);
 
@@ -64,7 +70,7 @@ async function enableNotifications(){
     }
 
     // GitHub Pages: use relative path so it works under /MemoryCarl/
-    const swReg = await navigator.serviceWorker.register("../firebase-messaging-sw.js");
+    const swReg = await navigator.serviceWorker.register("./firebase-messaging-sw.js");
 
     if (!FCM_VAPID_KEY || FCM_VAPID_KEY.includes("REPLACE_WITH_YOUR_VAPID_KEY")) {
       alert("Missing VAPID key. Paste it in src/main.js (FCM_VAPID_KEY).");
@@ -140,6 +146,30 @@ function getSyncApiKey(){ return localStorage.getItem(SYNC.apiKeyKey) || ""; }
 function setSyncApiKey(k){ localStorage.setItem(SYNC.apiKeyKey, (k||"").trim()); }
 
 // ---- NeuroClaw Cloud AI (optional) ----
+
+function ensureNeuroAiConfig(){
+  // Prompts once if missing. User can cancel to keep using local-only NeuroClaw.
+  let url = getNeuroAiUrl();
+  let key = getNeuroAiKey();
+
+  // If already configured, nothing to do.
+  if(url && key) return { url, key, ok: true };
+
+  // Ask user if they want to connect to cloud AI
+  const want = window.confirm("¿Quieres conectar NeuroClaw con tu AI en la nube (Gemini)?\n\nEsto es opcional: si cancelas, NeuroClaw seguirá funcionando solo con reglas locales.");
+  if(!want) return { url:"", key:"", ok:false };
+
+  url = (window.prompt("Pega tu Cloud Run URL base (sin /insight):", url || "") || "").trim();
+  if(url && url.endsWith("/")) url = url.slice(0,-1);
+
+  key = (window.prompt("Pega tu MC_API_KEY (header x-mc-key):", key || "") || "").trim();
+
+  if(url) localStorage.setItem(KEYS.neuroclawAiUrl, url);
+  if(key) localStorage.setItem(KEYS.neuroclawAiKey, key);
+
+  return { url, key, ok: !!(url && key) };
+}
+
 function getNeuroAiUrl(){ return (localStorage.getItem(KEYS.neuroclawAiUrl) || "").trim(); }
 function setNeuroAiUrl(u){ localStorage.setItem(KEYS.neuroclawAiUrl, (u||"").trim()); }
 function getNeuroAiKey(){ return (localStorage.getItem(KEYS.neuroclawAiKey) || "").trim(); }
@@ -164,8 +194,9 @@ function ensureNeuroAiConfigured(){
 }
 
 async function neuroclawCallCloudAI({signals, now}){
-  const url = getNeuroAiUrl();
-  const key = getNeuroAiKey();
+        const cfg = ensureNeuroAiConfig();
+        const url = (cfg && cfg.url) ? cfg.url : getNeuroAiUrl();
+        const key = (cfg && cfg.key) ? cfg.key : getNeuroAiKey();
   if(!url || !key) return null;
 
   // Minimal summary to keep tokens low.
@@ -2690,8 +2721,9 @@ function neuroclawRunNow({ animate=true } = {}){
 
       // Optional: Cloud AI follow-up (does not replace local rules)
       try{
-        const url = getNeuroAiUrl();
-        const key = getNeuroAiKey();
+        const cfg = ensureNeuroAiConfig();
+        const url = (cfg && cfg.url) ? cfg.url : getNeuroAiUrl();
+        const key = (cfg && cfg.key) ? cfg.key : getNeuroAiKey();
         if(url && key && out && out.signals){
           try{ if(typeof toast==="function") toast("NeuroClaw AI: consultando…"); }catch(e){}
           const ai = await neuroclawCallCloudAI({ signals: out.signals, now });
