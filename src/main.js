@@ -2158,7 +2158,7 @@ function getMusicDisplay(){
 }
 
 // ====================== NeuroClaw (local suggestions engine) ======================
-async async function neuroclawRunNow({ animate=true } = {}){
+async async async function neuroclawRunNow({ animate=true } = {}){
   try{
     const now = new Date();
     const out = await runNeuroClaw({
