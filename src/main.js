@@ -1,4 +1,3 @@
-import { runNeuroClaw } from "./neuroclaw/neuroclaw.js";
 console.log("MemoryCarl loaded");
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
 // 1) Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates -> Generate key pair
