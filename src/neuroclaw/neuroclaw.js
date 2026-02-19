@@ -55,23 +55,20 @@
   function computeSignals(input){
     const now = input?.now instanceof Date ? input.now : new Date();
     const sleepLog = Array.isArray(input?.sleepLog) ? input.sleepLog : [];
-    // moodDaily may be an object keyed by date OR an array of entries
-    const moodDailyRaw = input?.moodDaily;
+    const moodDaily = input?.moodDaily && typeof input.moodDaily === "object" ? input.moodDaily : {};
     const reminders = Array.isArray(input?.reminders) ? input.reminders : [];
     const shoppingHistory = Array.isArray(input?.shoppingHistory) ? input.shoppingHistory : [];
     const house = input?.house && typeof input.house === "object" ? input.house : {};
 
     // ---- Sleep ----
-    // Expect entries with {date, hours} or {ts, hours} OR {totalMinutes}
+    // Expect entries with {date, hours} or {ts, hours}
     const sleepEntries = sleepLog
       .map(e=>{
         const d = toDate(e.date || e.ts || e.day || e.d);
-        // prefer explicit hours fields, but fall back to totalMinutes
-        let hours = safeNum(e.hours ?? e.h ?? e.value ?? e.sleepHours, NaN);
-        if(!Number.isFinite(hours)){
-          const mins = safeNum(e.totalMinutes ?? e.total_minutes ?? e.minutes ?? e.mins, NaN);
-          if(Number.isFinite(mins)) hours = mins / 60;
-        }
+        // Support: {totalMinutes}, {minutes}, or explicit hours
+        const mins = safeNum(e.totalMinutes ?? e.total_minutes ?? e.minutes ?? e.mins, NaN);
+        const hoursRaw = safeNum(e.hours ?? e.h ?? e.value ?? e.sleepHours, NaN);
+        const hours = Number.isFinite(mins) ? (mins/60) : hoursRaw;
         return (d && Number.isFinite(hours)) ? { d, hours } : null;
       })
       .filter(Boolean)
@@ -90,23 +87,20 @@
 
     // ---- Mood ----
     // Expect moodDaily keyed by YYYY-MM-DD with {mood, stress, energy, val} etc
-    // OR array entries with {date, value/val/intensity, stress}
-    let moodRows = [];
-    if(Array.isArray(moodDailyRaw)){
-      moodRows = moodDailyRaw.map(v=>{
-        const d = toDate(v?.date || v?.ts || v?.day);
-        const stress = safeNum(v?.stress ?? v?.s ?? v?.stressLevel ?? v?.anxiety ?? v?.tension, NaN);
-        const val = safeNum(v?.value ?? v?.val ?? v?.intensity ?? v?.moodScore ?? v?.score ?? v?.mood, NaN);
-        return (d) ? { d, stress: Number.isFinite(stress)?stress:null, val: Number.isFinite(val)?val:null } : null;
-      }).filter(Boolean).sort((a,b)=>a.d-b.d);
-    }else if(moodDailyRaw && typeof moodDailyRaw === "object"){
-      moodRows = Object.entries(moodDailyRaw).map(([k,v])=>{
-        const d = toDate(k) || toDate(v?.date || v?.ts);
-        const stress = safeNum(v?.stress ?? v?.s ?? v?.stressLevel ?? v?.anxiety ?? v?.tension, NaN);
-        const val = safeNum(v?.value ?? v?.val ?? v?.intensity ?? v?.moodScore ?? v?.score ?? v?.mood, NaN);
-        return (d) ? { d, stress: Number.isFinite(stress)?stress:null, val: Number.isFinite(val)?val:null } : null;
-      }).filter(Boolean).sort((a,b)=>a.d-b.d);
-    }
+    const MOOD_SCORE = {
+      incredible: 9, good: 7, meh: 5, bad: 3, horrible: 1,
+      // legacy ids
+      happy: 9, pleased: 7, confused: 5, sad: 3, wtf: 1, angry: 2, irritated: 2
+    };
+
+    const moodRows = Object.entries(moodDaily).map(([k,v])=>{
+      const d = toDate(k) || toDate(v?.date || v?.ts);
+      const spriteId = (v && typeof v==="object") ? String(v.spriteId||"") : "";
+      const valFromSprite = spriteId ? MOOD_SCORE[spriteId] : null;
+      const val = Number.isFinite(valFromSprite) ? valFromSprite : safeNum(v?.value ?? v?.val ?? v?.intensity, NaN);
+      const stress = safeNum(v?.stress ?? v?.s ?? v?.stressLevel, NaN); // optional (future)
+      return (d) ? { d, stress: Number.isFinite(stress)?stress:null, val: Number.isFinite(val)?val:null } : null;
+    }).filter(Boolean).sort((a,b)=>a.d-b.d);
 
     function avgFieldLastDays(rows, field, days){
       const cutoff = new Date(now.getTime() - days*24*60*60*1000);
@@ -134,7 +128,15 @@
     // Expect entries with {date, total} or {ts, amount} etc
     const shopRows = shoppingHistory.map(e=>{
       const d = toDate(e.date || e.ts || e.day);
-      const amount = safeNum(e.total ?? e.amount ?? e.value ?? e.spend, NaN);
+      // Prefer totals.total (your structure). Fallback to summing items.
+      let amount = safeNum(e?.totals?.total, NaN);
+      if(!Number.isFinite(amount)){
+        amount = safeNum(e.total ?? e.amount ?? e.value ?? e.spend, NaN);
+      }
+      if(!Number.isFinite(amount)){
+        const items = Array.isArray(e.items) ? e.items : [];
+        amount = items.reduce((sum,it)=> sum + (safeNum(it.price,0) * safeNum(it.qty,1)), 0);
+      }
       return (d && Number.isFinite(amount)) ? { d, amount } : null;
     }).filter(Boolean).sort((a,b)=>a.d-b.d);
 

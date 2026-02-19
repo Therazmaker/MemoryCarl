@@ -398,6 +398,28 @@ body{
 }
 .moodUpload{margin-top:10px;display:flex;flex-direction:column;gap:6px}
 
+/* Mood v2 (faces + labels + log cards) */
+.moodPickerModal.v2{max-width:640px;}
+.moodFaceRow{display:flex;gap:10px;justify-content:space-between;margin-top:10px;overflow:auto;padding-bottom:4px}
+.moodFace{flex:1;min-width:110px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04);border-radius:18px;padding:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px}
+.moodFace.active{border-color:rgba(124,92,255,.60);background:rgba(124,92,255,.18);}
+.moodFace img{width:56px;height:56px;object-fit:contain;display:block}
+.moodFaceLabel{font-weight:900;font-size:12px;color:var(--text);text-transform:lowercase;letter-spacing:.2px}
+.moodDots{display:flex;gap:5px;height:10px;align-items:center;justify-content:center}
+.moodDots .dot{width:6px;height:6px;border-radius:99px;background:rgba(255,255,255,.28)}
+.moodPickerModal.v2 .moodTags{margin-top:10px}
+
+.moodLogSection{margin-top:14px}
+.moodLogSectionTitle{font-weight:900;margin-bottom:8px}
+.moodLogList{display:flex;flex-direction:column;gap:10px}
+.moodLogCard{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);border-radius:18px;padding:12px}
+.moodLogHead{display:flex;gap:10px;align-items:center}
+.moodLogImg{width:52px;height:52px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);object-fit:contain;display:block}
+.moodLogImg.ph{display:flex;align-items:center;justify-content:center;font-weight:900;color:var(--muted)}
+.moodLogTitle{font-weight:1000;font-size:20px;line-height:1}
+.moodLogSub{color:var(--muted);font-size:12px;margin-top:2px}
+.moodLogTags{margin-top:8px;color:rgba(124,255,178,.92);font-weight:800}
+.moodLogNote{margin-top:8px;color:rgba(255,255,255,.92);line-height:1.35}
 .modal.moodMonthModal{
   max-width:640px;
   border-radius:22px;
