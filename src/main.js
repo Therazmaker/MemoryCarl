@@ -7218,8 +7218,47 @@ function openMergeSpriteManagerModal(){
     toast("Tip: cierra y abre el juego para aplicar");
   });
 
+
   // initial
   state.count = 11;
   refreshFromDb();
 }
 // ====================== END SPRITE MANAGER ======================
+// --- NeuroClaw: global click wiring (survives re-renders) ---
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("#btnNeuroAnalyze");
+  if (!btn) return;
+
+  e.preventDefault();
+  console.log("[NeuroClaw] Analyze click ✅");
+
+  try {
+    if (typeof toast === "function") toast("NeuroClaw: analizando… 🧠");
+    else alert("NeuroClaw: analizando… 🧠");
+  } catch (_) {}
+
+  try {
+    const p = window.NeuroClaw?.run?.(state);
+    if (p && typeof p.then === "function") {
+      p.then((out) => {
+        state.neuroclawLast = {
+          ts: new Date().toISOString(),
+          signals: out?.signals || null,
+          suggestions: out?.suggestions || []
+        };
+        try { persist(); } catch(_) {}
+        console.log("[NeuroClaw] OK", state.neuroclawLast);
+
+        if (typeof toast === "function") {
+          toast(`NeuroClaw listo ✅ (${(state.neuroclawLast.suggestions||[]).length} sugerencias)`);
+        }
+
+        if (typeof view === "function") view();
+      }).catch((err) => {
+        console.error("[NeuroClaw] ERROR", err);
+      });
+    }
+  } catch (err) {
+    console.error("[NeuroClaw] ERROR", err);
+  }
+});
