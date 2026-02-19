@@ -246,6 +246,7 @@ async function neuroclawCallCloudAI({signals, now}){
     return null;
   }
 
+  // Minimal summary to keep tokens low.
   const summary = {
     days: 7,
     localTime: (now||new Date()).toISOString(),
@@ -253,74 +254,40 @@ async function neuroclawCallCloudAI({signals, now}){
   };
 
   try{
-    const res = await fetch(url + "/insight", {
+    const endpoint = url.replace(/\/+$/,'') + "/insight";
+
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-mc-key": key,
       },
-      body: JSON.stringify({
-        summary,
-        signals
-      })
+      body: JSON.stringify({ summary, signals }),
     });
 
     console.log("[NeuroClawAI] response status", res.status);
 
-    if(!res.ok){
-      const txt = await res.text();
-      console.error("[NeuroClawAI] error body", txt);
+    let data = null;
+    try{ data = await res.json(); }
+    catch(e){
+      const txt = await res.text().catch(()=> "");
+      console.error("[NeuroClawAI] non-json body", txt);
       return null;
     }
 
-    const json = await res.json();
-    console.log("[NeuroClawAI] json", json);
+    if(!res.ok){
+      console.error("[NeuroClawAI] error json", data);
+      return null;
+    }
 
-    return json;
+    console.log("[NeuroClawAI] json", data);
+    return data;
 
   }catch(err){
     console.error("[NeuroClawAI] fetch failed", err);
     return null;
   }
 }
-
-  const res = await fetch(url.replace(/\/+$/,'') + "/insight", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-mc-key": key,
-    },
-    body: JSON.stringify({ summary, signals }),
-  });
-
-  let data = null;
-  try{ data = await res.json(); }catch(e){}
-  if(!res.ok){
-    const msg = (data && (data.detail || data.error)) ? JSON.stringify(data) : ("HTTP " + res.status);
-    throw new Error("NeuroClaw Cloud AI error: " + msg);
-  }
-  return data;
-}
-
-function markDirty(){
-  localStorage.setItem(SYNC.dirtyKey, "1");
-}
-function clearDirty(){
-  localStorage.setItem(SYNC.dirtyKey, "0");
-}
-function isDirty(){
-  return (localStorage.getItem(SYNC.dirtyKey) || "0") === "1";
-}
-
-function ensureSyncConfigured(){
-  let url = getSyncUrl();
-  if (!url){
-    url = prompt("Paste your Apps Script Web App URL (ends with /exec). Leave blank to keep local-only:", "");
-    if (url) setSyncUrl(url);
-  }
-  return !!getSyncUrl();
-}
-
 
 function flushSync(reason="auto"){
   try{
