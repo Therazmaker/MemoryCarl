@@ -1221,26 +1221,16 @@ body{
 .neuroBadge.low{background:rgba(124,255,178,0.14);}
 
 
-/* ===== NeuroClaw modal ===== */
-.neuroDbgGrid{display:grid;grid-template-columns:1fr;gap:12px;}
-@media(min-width:720px){.neuroDbgGrid{grid-template-columns:1fr 1fr;}}
-.neuroDbgH{font-weight:800;margin:6px 0 8px;}
-.neuroDbgBox{border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);border-radius:14px;padding:10px;max-height:280px;overflow:auto;}
-.neuroDbgRow{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px dashed rgba(255,255,255,0.08);}
+/* ===== NeuroClaw Debug ===== */
+.neuroDbgGrid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px;}
+@media (min-width:720px){.neuroDbgGrid{grid-template-columns:1fr 1fr;}}
+.neuroDbgH{font-weight:700;margin-bottom:6px;}
+.neuroDbgBox{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);border-radius:14px;padding:10px;max-height:42vh;overflow:auto;}
+.neuroDbgRow{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);}
 .neuroDbgRow:last-child{border-bottom:none;}
-.neuroDbgK{opacity:0.8;font-size:12px;}
-.neuroDbgV{font-weight:700;font-size:12px;text-align:right;}
-.neuroDbgSug{padding:10px;border:1px solid rgba(255,255,255,0.10);border-radius:12px;margin-bottom:10px;background:rgba(255,255,255,0.04);}
-.neuroDbgSugTop{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}
-.neuroDbgSugMsg{font-weight:750;}
-.neuroBadge{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.14);opacity:0.95}
-.neuroBadge.high{background:rgba(255,80,80,0.16);}
-.neuroBadge.medium{background:rgba(255,214,102,0.14);}
-.neuroBadge.low{background:rgba(124,255,178,0.12);}
-
-/* NeuroClaw questions */
-.neuroQ{padding:10px;border:1px solid rgba(255,255,255,0.10);border-radius:12px;margin-bottom:10px;background:rgba(255,255,255,0.04);}
-.neuroQTitle{font-weight:800;margin-bottom:4px;}
-.neuroQText{opacity:0.9;margin-bottom:8px;}
-.neuroQBtns{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;}
-.neuroQNote{width:100%;}
+.neuroDbgK{opacity:0.85;font-size:12px;}
+.neuroDbgV{font-weight:700;font-size:12px;}
+.neuroDbgSug{padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);}
+.neuroDbgSug:last-child{border-bottom:none;}
+.neuroDbgSugTop{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.neuroDbgSugMsg{font-weight:600;}
