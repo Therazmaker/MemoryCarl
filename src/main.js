@@ -1,7 +1,10 @@
 console.log("MemoryCarl loaded");
 // CSS.escape polyfill (basic)
 if(!window.CSS) window.CSS = {};
-if(!window.CSS.escape){ window.CSS.escape = (s)=>String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>"\\\"+c); }
+if(!window.CSS.escape){
+  window.CSS.escape = (s)=>String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>"\\"+c);
+}
+
 
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
 // 1) Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates -> Generate key pair
