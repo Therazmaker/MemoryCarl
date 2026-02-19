@@ -61,26 +61,36 @@
     const house = input?.house && typeof input.house === "object" ? input.house : {};
 
     // ---- Sleep ----
-    // Expect entries with {date, hours} or {ts, hours}
-    const sleepEntries = sleepLog
-      .map(e=>{
-        const d = toDate(e.date || e.ts || e.day || e.d);
-        const hours = safeNum(e.hours ?? e.h ?? e.value ?? e.sleepHours, NaN);
-        return (d && Number.isFinite(hours)) ? { d, hours } : null;
-      })
-      .filter(Boolean)
-      .sort((a,b)=>a.d-b.d);
-
-    function avgLastDays(arr, days){
-      const cutoff = new Date(now.getTime() - days*24*60*60*1000);
-      const xs = arr.filter(x=>x.d >= cutoff).map(x=>x.hours);
-      if(!xs.length) return null;
-      const s = xs.reduce((a,b)=>a+b,0);
-      return s / xs.length;
+    // Supports v2 entries: {date:'YYYY-MM-DD', totalMinutes:number}. Also supports {hours}.
+    const byDay = new Map();
+    for(const e of sleepLog){
+      const dayStr = (e && typeof e.date === 'string') ? e.date : null;
+      const dObj = toDate(dayStr || e?.date || e?.ts || e?.day || e?.d);
+      if(!dObj) continue;
+      const dayKey = (dayStr && /^\d{4}-\d{2}-\d{2}$/.test(dayStr)) ? dayStr : dObj.toISOString().slice(0,10);
+      let mins = safeNum(e?.totalMinutes, NaN);
+      if(!Number.isFinite(mins)){
+        const h = safeNum(e?.hours ?? e?.h ?? e?.value ?? e?.sleepHours, NaN);
+        mins = Number.isFinite(h) ? (h*60) : NaN;
+      }
+      if(!Number.isFinite(mins) || mins<=0) continue;
+      byDay.set(dayKey, (byDay.get(dayKey)||0) + mins);
     }
 
-    const sleep_avg_3d = avgLastDays(sleepEntries, 3);
-    const sleep_avg_7d = avgLastDays(sleepEntries, 7);
+    function sleepAvgLastDays(days){
+      const cutoff = new Date(now.getTime() - days*24*60*60*1000);
+      const totals = [];
+      for(const [k, mins] of byDay.entries()){
+        const d = toDate(k);
+        if(d && d >= cutoff) totals.push(mins);
+      }
+      if(!totals.length) return null;
+      const avgMinutes = totals.reduce((a,b)=>a+b,0) / totals.length;
+      return Math.round((avgMinutes/60)*10)/10;
+    }
+
+    const sleep_avg_3d = sleepAvgLastDays(3);
+    const sleep_avg_7d = sleepAvgLastDays(7);
 
     // ---- Mood ----
     // Expect moodDaily keyed by YYYY-MM-DD with {mood, stress, energy, val} etc

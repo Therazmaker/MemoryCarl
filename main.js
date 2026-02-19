@@ -2218,8 +2218,15 @@ function neuroclawRunNow({ animate=true } = {}){
     }
     try{ if(typeof toast==="function") toast("NeuroClaw: analizando…"); }catch(e){}
 
+    // Fallback: some modules store v2 data only in localStorage.
+    // Sleep v2 log is stored under memorycarl_v2_sleep_log.
+    let sleepLog = Array.isArray(state.sleepLog) ? state.sleepLog : [];
+    if(!sleepLog.length){
+      try{ sleepLog = JSON.parse(localStorage.getItem('memorycarl_v2_sleep_log') || '[]'); }catch(e){ sleepLog = []; }
+    }
+
     const maybePromise = runner({
-      sleepLog: state.sleepLog || [],
+      sleepLog,
       moodDaily: state.moodDaily || {},
       reminders: state.reminders || [],
       shoppingHistory: state.shoppingHistory || [],

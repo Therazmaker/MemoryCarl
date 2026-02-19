@@ -1,10 +1,7 @@
 console.log("MemoryCarl loaded");
 // CSS.escape polyfill (basic)
 if(!window.CSS) window.CSS = {};
-if(!window.CSS.escape){
-  window.CSS.escape = (s)=>String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>"\\"+c);
-}
-
+if(!window.CSS.escape){ window.CSS.escape = (s)=>String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>"\\\"+c); }
 
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
 // 1) Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates -> Generate key pair
@@ -2184,8 +2181,16 @@ function neuroclawRunNow({ animate=true } = {}){
       console.warn("NeuroClaw: engine not loaded (window.NeuroClaw.run missing)");
       return;
     }
+
+    // Fallback: some modules store v2 data only in localStorage.
+    // Sleep v2 log is stored under memorycarl_v2_sleep_log.
+    let sleepLog = Array.isArray(state.sleepLog) ? state.sleepLog : [];
+    if(!sleepLog.length){
+      try{ sleepLog = JSON.parse(localStorage.getItem('memorycarl_v2_sleep_log') || '[]'); }catch(e){ sleepLog = []; }
+    }
+
     runner({
-      sleepLog: state.sleepLog || [],
+      sleepLog,
       moodDaily: state.moodDaily || {},
       reminders: state.reminders || [],
       shoppingHistory: state.shoppingHistory || [],
