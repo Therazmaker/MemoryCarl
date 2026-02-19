@@ -92,6 +92,112 @@
           "nav": "reminders"
         }
       }
+    },
+    {
+      "id": "spend_spike",
+      "title": "Compras altas esta semana",
+      "priority": "medium",
+      "conditions": [
+        {
+          "key": "spend_7d_total",
+          "op": ">=",
+          "value": 150
+        }
+      ],
+      "message": "Tus compras de los últimos 7 días están altas. Revisa si hubo un gasto puntual y ajusta lo próximo.",
+      "why": [
+        "Señal: spend_7d_total ≥ 150"
+      ],
+      "action": {
+        "type": "open_tab",
+        "value": "shopping"
+      }
+    },
+    {
+      "id": "spend_today_big",
+      "title": "Gasto fuerte hoy",
+      "priority": "high",
+      "conditions": [
+        {
+          "key": "spend_today_total",
+          "op": ">=",
+          "value": 60
+        }
+      ],
+      "message": "Hoy gastaste bastante en compras. Si no era planificado, pausa y revisa el presupuesto antes de otra compra.",
+      "why": [
+        "Señal: spend_today_total ≥ 60"
+      ],
+      "action": {
+        "type": "open_tab",
+        "value": "shopping"
+      }
+    },
+    {
+      "id": "cleaning_due",
+      "title": "Casa acumulándose",
+      "priority": "medium",
+      "conditions": [
+        {
+          "key": "cleaning_due_tasks",
+          "op": ">=",
+          "value": 4
+        }
+      ],
+      "message": "Hay varias tareas de limpieza que ya tocarían. Haz una sesión corta de 10–15 min para bajar la carga mental.",
+      "why": [
+        "Señal: cleaning_due_tasks ≥ 4"
+      ],
+      "action": {
+        "type": "open_tab",
+        "value": "house"
+      }
+    },
+    {
+      "id": "cleaning_overdue_high",
+      "title": "Prioridades de limpieza atrasadas",
+      "priority": "high",
+      "conditions": [
+        {
+          "key": "cleaning_overdue_high",
+          "op": ">=",
+          "value": 2
+        }
+      ],
+      "message": "Tienes tareas de limpieza importantes atrasadas. Una mini sesión enfocada te va a dar aire mental.",
+      "why": [
+        "Señal: cleaning_overdue_high ≥ 2"
+      ],
+      "action": {
+        "type": "open_tab",
+        "value": "house"
+      }
+    },
+    {
+      "id": "low_sleep_high_spend",
+      "title": "Poca energía + compras",
+      "priority": "high",
+      "conditions": [
+        {
+          "key": "sleep_avg_3d_hours",
+          "op": "<",
+          "value": 5.5
+        },
+        {
+          "key": "spend_7d_total",
+          "op": ">=",
+          "value": 150
+        }
+      ],
+      "message": "Sueño bajo y compras altas suelen ir juntos. Hoy conviene ir a lo esencial y evitar decisiones impulsivas.",
+      "why": [
+        "sleep_avg_3d_hours < 5.5",
+        "spend_7d_total ≥ 150"
+      ],
+      "action": {
+        "type": "open_tab",
+        "value": "home"
+      }
     }
   ]
 }

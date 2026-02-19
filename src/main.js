@@ -2158,13 +2158,15 @@ function getMusicDisplay(){
 }
 
 // ====================== NeuroClaw (local suggestions engine) ======================
-async function neuroclawRunNow({ animate=true } = {}){
+async async function neuroclawRunNow({ animate=true } = {}){
   try{
     const now = new Date();
     const out = await runNeuroClaw({
       sleepLog: state.sleepLog || [],
       moodDaily: state.moodDaily || {},
-      reminders: state.reminders || []
+      reminders: state.reminders || [],
+      shoppingHistory: state.shoppingHistory || [],
+      house: state.house || null
     }, now);
     state.neuroclawLast = {
       ts: new Date().toISOString(),

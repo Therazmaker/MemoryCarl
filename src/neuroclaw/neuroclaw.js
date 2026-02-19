@@ -55,8 +55,10 @@ export function moodScoreFromSpriteId(id){
   return 0; // unknown/custom -> neutral (user can extend later)
 }
 
-export function computeSignals({ sleepLog=[], moodDaily={}, reminders=[] } = {}, now=new Date()){
-  // Sleep signals
+export function computeSignals({ sleepLog=[], moodDaily={}, reminders=[], shoppingHistory=[], house=null } = {}, now=new Date()){
+  const todayIso = isoDate(now);
+
+  // ---- Sleep signals ----
   const sleepMap = new Map();
   for(const raw of (sleepLog||[])){
     const date = String(raw?.date||"").slice(0,10);
@@ -82,7 +84,7 @@ export function computeSignals({ sleepLog=[], moodDaily={}, reminders=[] } = {},
   const target = 7; // hours
   const sleep_debt_3d_hours = +Math.max(0, (target*3) - (mins3/60)).toFixed(2);
 
-  // Mood signals
+  // ---- Mood signals ----
   const moodMap = (moodDaily && typeof moodDaily==="object") ? moodDaily : {};
   const moodScores = dates7.map(d=>{
     const sid = moodMap[d]?.spriteId;
@@ -101,7 +103,63 @@ export function computeSignals({ sleepLog=[], moodDaily={}, reminders=[] } = {},
     else break;
   }
 
+  // ---- Reminders ----
   const reminders_open = (reminders||[]).filter(r=>r && !r.done).length;
+
+  // ---- Shopping (compras) ----
+  const hist = Array.isArray(shoppingHistory) ? shoppingHistory : [];
+  const hist7 = hist.filter(h=>{
+    const d = String(h?.date||"").slice(0,10);
+    return d && dates7.includes(d);
+  });
+  const spend_7d_total = +hist7.reduce((a,h)=>a+(Number(h?.totals?.total)||0),0).toFixed(2);
+  const spend_today_total = +hist.filter(h=>String(h?.date||"").slice(0,10)===todayIso)
+    .reduce((a,h)=>a+(Number(h?.totals?.total)||0),0).toFixed(2);
+  const shopping_entries_7d = hist7.length;
+  const shopping_items_7d = hist7.reduce((a,h)=>a+(Number(h?.totals?.itemsCount)||0),0);
+
+  // ---- Cleaning (Casa) ----
+  const houseObj = (house && typeof house==="object") ? house : null;
+  const sess = houseObj && Array.isArray(houseObj.sessionHistory) ? houseObj.sessionHistory : [];
+  const sess7 = sess.filter(s=>{
+    const d = String(s?.date||"").slice(0,10);
+    return d && dates7.includes(d);
+  });
+  const cleaning_sessions_7d = sess7.length;
+  const cleaning_minutes_7d = +((sess7.reduce((a,s)=>a+(Number(s?.totalSec)||0),0))/60).toFixed(1);
+
+  // Due/overdue tasks count (based on lastDone + freqDays, within current mode)
+  let cleaning_due_tasks = 0;
+  let cleaning_overdue_high = 0;
+  try{
+    const mode = String(houseObj?.mode || "light");
+    const tasks = Array.isArray(houseObj?.tasks) ? houseObj.tasks : [];
+    const nowDate = new Date(now); nowDate.setHours(0,0,0,0);
+    for(const t of tasks){
+      if(!t) continue;
+      if(t.level && String(t.level)!==mode) continue;
+      const freq = Number(t.freqDays||0);
+      if(!freq || freq<=0) continue;
+
+      const last = String(t.lastDone||"").slice(0,10);
+      let lastDate = null;
+      if(last){
+        const dd = new Date(last+"T00:00:00");
+        if(!isNaN(dd.getTime())) lastDate = dd;
+      }
+      // If never done, consider due.
+      if(!lastDate){
+        cleaning_due_tasks++;
+        if(Number(t.priority||0) >= 4) cleaning_overdue_high++;
+        continue;
+      }
+      const daysSince = Math.floor((nowDate - lastDate) / (24*3600*1000));
+      if(daysSince >= freq){
+        cleaning_due_tasks++;
+        if(Number(t.priority||0) >= 4 && daysSince >= (freq+2)) cleaning_overdue_high++; // "overdue" buffer
+      }
+    }
+  }catch(e){}
 
   return {
     ts: new Date(now).toISOString(),
@@ -111,8 +169,17 @@ export function computeSignals({ sleepLog=[], moodDaily={}, reminders=[] } = {},
     mood_score_7d_avg,
     mood_neg_streak,
     reminders_open,
+    spend_7d_total,
+    spend_today_total,
+    shopping_entries_7d,
+    shopping_items_7d,
+    cleaning_sessions_7d,
+    cleaning_minutes_7d,
+    cleaning_due_tasks,
+    cleaning_overdue_high,
   };
 }
+
 
 function evalRule(rule, signals){
   const conds = Array.isArray(rule?.conditions) ? rule.conditions : [];
@@ -143,9 +210,9 @@ function priorityScore(p){
   return 1;
 }
 
-export async function runNeuroClaw({ sleepLog=[], moodDaily={}, reminders=[] } = {}, now=new Date()){
+export async function runNeuroClaw({ sleepLog=[], moodDaily={}, reminders=[], shoppingHistory=[], house=null } = {}, now=new Date()){
   const rules = await loadNeuroClawRules();
-  const signals = computeSignals({ sleepLog, moodDaily, reminders }, now);
+  const signals = computeSignals({ sleepLog, moodDaily, reminders, shoppingHistory, house }, now);
   const suggestions = [];
 
   for(const r of rules){
