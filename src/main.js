@@ -192,12 +192,48 @@ function ensureNeuroAiConfigured(){
 
   return !!(getNeuroAiUrl() && getNeuroAiKey());
 }
+// ====================== NEUROCLAW AI LOG (localStorage) ======================
+function getAiLog(){
+  try{
+    const raw = localStorage.getItem(KEYS.neuroclawAiLog);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  }catch(e){
+    return [];
+  }
+}
 
+function saveAiLog(arr){
+  try{ localStorage.setItem(KEYS.neuroclawAiLog, JSON.stringify(arr || [])); }catch(e){}
+}
+
+// entry: {id, ts, window_days, signals_snapshot, human, raw, user_rating, user_note}
+function appendAiLog(entry){
+  const log = getAiLog();
+  log.unshift(entry);
+  // límite para no crecer infinito
+  if(log.length > 200) log.length = 200;
+  saveAiLog(log);
+  return entry;
+}
+
+function rateAiLog(id, rating, note=""){
+  const log = getAiLog();
+  const it = log.find(x => x && x.id === id);
+  if(it){
+    it.user_rating = rating;  // +1 / 0 / -1
+    it.user_note = (note || "").slice(0, 500);
+    it.rated_ts = Date.now();
+    saveAiLog(log);
+    return true;
+  }
+  return false;
+}
 async function neuroclawCallCloudAI({signals, now}){
-        const cfg = ensureNeuroAiConfig();
-        const url = (cfg && cfg.url) ? cfg.url : getNeuroAiUrl();
-        const key = (cfg && cfg.key) ? cfg.key : getNeuroAiKey();
-  if(!url || !key) return null;
+  const ok = ensureNeuroAiConfigured();
+  const url = getNeuroAiUrl();
+  const key = getNeuroAiKey();
+  if(!ok || !url || !key) return null;
 
   // Minimal summary to keep tokens low.
   const summary = {
@@ -2727,9 +2763,26 @@ function neuroclawRunNow({ animate=true } = {}){
         if(url && key && out && out.signals){
           try{ if(typeof toast==="function") toast("NeuroClaw AI: consultando…"); }catch(e){}
           const ai = await neuroclawCallCloudAI({ signals: out.signals, now });
-          state.neuroclawLast = Object.assign({}, state.neuroclawLast, { ai, aiTs: Date.now() });
-          try{ saveState(); }catch(e){}
-          try{ view(); }catch(e){}
+const aiTs = Date.now();
+state.neuroclawLast = Object.assign({}, state.neuroclawLast, { ai, aiTs });
+
+try{
+  if(ai && (ai.human || ai.raw)){
+    const id = "ai_" + new Date(aiTs).toISOString();
+    appendAiLog({
+      id,
+      ts: aiTs,
+      window_days: (ai.raw && ai.raw.window_days) ? ai.raw.window_days : 7,
+      signals_snapshot: out.signals || {},
+      human: ai.human || "",
+      raw: ai.raw || {},
+      user_rating: null,
+      user_note: "",
+    });
+  }
+}catch(e){}
+
+try{ saveState(); }catch(e){}
           try{ if(typeof toast==="function") toast("NeuroClaw AI listo 🤖✅"); }catch(e){}
         }
       }catch(err){
