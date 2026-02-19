@@ -233,14 +233,56 @@ async function neuroclawCallCloudAI({signals, now}){
   const ok = ensureNeuroAiConfigured();
   const url = getNeuroAiUrl();
   const key = getNeuroAiKey();
-  if(!ok || !url || !key) return null;
 
-  // Minimal summary to keep tokens low.
+  console.log("[NeuroClawAI] call start", {
+    ok,
+    url,
+    hasKey: !!key,
+    signals
+  });
+
+  if(!ok || !url || !key){
+    console.warn("[NeuroClawAI] missing config");
+    return null;
+  }
+
   const summary = {
     days: 7,
     localTime: (now||new Date()).toISOString(),
     note: "MemoryCarl NeuroClaw insight",
   };
+
+  try{
+    const res = await fetch(url + "/insight", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-mc-key": key,
+      },
+      body: JSON.stringify({
+        summary,
+        signals
+      })
+    });
+
+    console.log("[NeuroClawAI] response status", res.status);
+
+    if(!res.ok){
+      const txt = await res.text();
+      console.error("[NeuroClawAI] error body", txt);
+      return null;
+    }
+
+    const json = await res.json();
+    console.log("[NeuroClawAI] json", json);
+
+    return json;
+
+  }catch(err){
+    console.error("[NeuroClawAI] fetch failed", err);
+    return null;
+  }
+}
 
   const res = await fetch(url.replace(/\/+$/,'') + "/insight", {
     method: "POST",
