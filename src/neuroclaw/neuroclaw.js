@@ -55,17 +55,23 @@
   function computeSignals(input){
     const now = input?.now instanceof Date ? input.now : new Date();
     const sleepLog = Array.isArray(input?.sleepLog) ? input.sleepLog : [];
-    const moodDaily = input?.moodDaily && typeof input.moodDaily === "object" ? input.moodDaily : {};
+    // moodDaily may be an object keyed by date OR an array of entries
+    const moodDailyRaw = input?.moodDaily;
     const reminders = Array.isArray(input?.reminders) ? input.reminders : [];
     const shoppingHistory = Array.isArray(input?.shoppingHistory) ? input.shoppingHistory : [];
     const house = input?.house && typeof input.house === "object" ? input.house : {};
 
     // ---- Sleep ----
-    // Expect entries with {date, hours} or {ts, hours}
+    // Expect entries with {date, hours} or {ts, hours} OR {totalMinutes}
     const sleepEntries = sleepLog
       .map(e=>{
         const d = toDate(e.date || e.ts || e.day || e.d);
-        const hours = safeNum(e.hours ?? e.h ?? e.value ?? e.sleepHours, NaN);
+        // prefer explicit hours fields, but fall back to totalMinutes
+        let hours = safeNum(e.hours ?? e.h ?? e.value ?? e.sleepHours, NaN);
+        if(!Number.isFinite(hours)){
+          const mins = safeNum(e.totalMinutes ?? e.total_minutes ?? e.minutes ?? e.mins, NaN);
+          if(Number.isFinite(mins)) hours = mins / 60;
+        }
         return (d && Number.isFinite(hours)) ? { d, hours } : null;
       })
       .filter(Boolean)
@@ -84,12 +90,23 @@
 
     // ---- Mood ----
     // Expect moodDaily keyed by YYYY-MM-DD with {mood, stress, energy, val} etc
-    const moodRows = Object.entries(moodDaily).map(([k,v])=>{
-      const d = toDate(k) || toDate(v?.date || v?.ts);
-      const stress = safeNum(v?.stress ?? v?.s ?? v?.stressLevel, NaN);
-      const val = safeNum(v?.value ?? v?.val ?? v?.intensity, NaN);
-      return (d) ? { d, stress: Number.isFinite(stress)?stress:null, val: Number.isFinite(val)?val:null } : null;
-    }).filter(Boolean).sort((a,b)=>a.d-b.d);
+    // OR array entries with {date, value/val/intensity, stress}
+    let moodRows = [];
+    if(Array.isArray(moodDailyRaw)){
+      moodRows = moodDailyRaw.map(v=>{
+        const d = toDate(v?.date || v?.ts || v?.day);
+        const stress = safeNum(v?.stress ?? v?.s ?? v?.stressLevel ?? v?.anxiety ?? v?.tension, NaN);
+        const val = safeNum(v?.value ?? v?.val ?? v?.intensity ?? v?.moodScore ?? v?.score ?? v?.mood, NaN);
+        return (d) ? { d, stress: Number.isFinite(stress)?stress:null, val: Number.isFinite(val)?val:null } : null;
+      }).filter(Boolean).sort((a,b)=>a.d-b.d);
+    }else if(moodDailyRaw && typeof moodDailyRaw === "object"){
+      moodRows = Object.entries(moodDailyRaw).map(([k,v])=>{
+        const d = toDate(k) || toDate(v?.date || v?.ts);
+        const stress = safeNum(v?.stress ?? v?.s ?? v?.stressLevel ?? v?.anxiety ?? v?.tension, NaN);
+        const val = safeNum(v?.value ?? v?.val ?? v?.intensity ?? v?.moodScore ?? v?.score ?? v?.mood, NaN);
+        return (d) ? { d, stress: Number.isFinite(stress)?stress:null, val: Number.isFinite(val)?val:null } : null;
+      }).filter(Boolean).sort((a,b)=>a.d-b.d);
+    }
 
     function avgFieldLastDays(rows, field, days){
       const cutoff = new Date(now.getTime() - days*24*60*60*1000);
