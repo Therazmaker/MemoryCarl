@@ -2213,26 +2213,40 @@ function neuroclawRunNow({ animate=true } = {}){
     const runner = (window.NeuroClaw && window.NeuroClaw.run) ? window.NeuroClaw.run : null;
     if(!runner){
       console.warn("NeuroClaw: engine not loaded (window.NeuroClaw.run missing)");
+      try{ if(typeof toast==="function") toast("NeuroClaw no cargó 😅"); }catch(e){}
       return;
     }
-    runner({
+    try{ if(typeof toast==="function") toast("NeuroClaw: analizando…"); }catch(e){}
+
+    const maybePromise = runner({
       sleepLog: state.sleepLog || [],
       moodDaily: state.moodDaily || {},
       reminders: state.reminders || [],
       shoppingHistory: state.shoppingHistory || [],
       house: state.house || {},
       now,
-    }).then(out=>{
-      // Persist last NeuroClaw run for UI + sync
+    });
+
+    const handleOut = (out)=>{
       state.neuroclawLast = out;
       state.neuroclawLastViewedAt = Date.now();
       try{ saveState(); }catch(e){}
-      try{ if(typeof renderAll==="function") renderAll(); }catch(e){}
-    }).catch(err=>{
-      console.error("NeuroClaw run error", err);
-    });
+      try{ view(); }catch(e){}
+      try{ if(typeof toast==="function") toast("NeuroClaw listo ✅"); }catch(e){}
+    };
+
+    if(maybePromise && typeof maybePromise.then === "function"){
+      maybePromise.then(handleOut).catch(err=>{
+        console.error("NeuroClaw run error", err);
+        try{ if(typeof toast==="function") toast("NeuroClaw error (ver consola)"); }catch(e){}
+      });
+    }else{
+      // support sync engines too
+      handleOut(maybePromise);
+    }
   }catch(e){
     console.error("NeuroClaw error", e);
+    try{ if(typeof toast==="function") toast("NeuroClaw error (ver consola)"); }catch(_){}
   }
 }
 

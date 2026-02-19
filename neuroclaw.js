@@ -1,5 +1,6 @@
-// NeuroClaw v0.4 - local rules engine for MemoryCarl
+// NeuroClaw v0.5 - local rules engine for MemoryCarl
 // Runs fully offline. Sync is optional via existing flush.
+// Exposes: window.NeuroClaw.run(input) -> Promise<{signals,suggestions,ts}>
 (function(){
   const OPS = {
     "<":  (a,b)=>a<b,
@@ -16,127 +17,181 @@
     const n = Number(x);
     return Number.isFinite(n) ? n : fallback;
   }
-  function ymd(d){
-    const dt = (d instanceof Date) ? d : new Date(d);
-    if(!Number.isFinite(dt.getTime())) return null;
-    const y = dt.getFullYear();
-    const m = String(dt.getMonth()+1).padStart(2,'0');
-    const da = String(dt.getDate()).padStart(2,'0');
-    return `${y}-${m}-${da}`;
-  }
-  function daysAgo(n){
-    const d = new Date();
-    d.setDate(d.getDate()-n);
-    return d;
+
+  function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+
+  function daysBetween(a, b){
+    const ms = (b.getTime() - a.getTime());
+    return ms / (1000*60*60*24);
   }
 
-  async function loadNeuroClawRules(){
+  function toDate(x){
+    if(!x) return null;
+    if(x instanceof Date) return x;
+    const d = new Date(x);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // --- Rule loading (cached) ---
+  let RULES_CACHE = null;
+  let RULES_CACHE_TS = 0;
+
+  async function loadNeuroClawRules({ force=false } = {}){
+    // cache for 60s unless forced
+    const now = Date.now();
+    if(!force && RULES_CACHE && (now - RULES_CACHE_TS) < 60000){
+      return RULES_CACHE;
+    }
     const res = await fetch("./src/neuroclaw/neuroclaw_rules.json", { cache:"no-store" });
     if(!res.ok) throw new Error("NeuroClaw rules HTTP " + res.status);
     const j = await res.json();
-    return Array.isArray(j) ? j : (j.rules || []);
+    const rules = Array.isArray(j) ? j : (j.rules || []);
+    RULES_CACHE = rules;
+    RULES_CACHE_TS = now;
+    return rules;
   }
 
-  // Compute signals from app data
+  // --- Compute signals from app data ---
   function computeSignals(input){
-    const signals = {};
-    const sleepLog = Array.isArray(input.sleepLog) ? input.sleepLog : [];
-    const moodDaily = input.moodDaily && typeof input.moodDaily === "object" ? input.moodDaily : {};
-    const shoppingHistory = Array.isArray(input.shoppingHistory) ? input.shoppingHistory : [];
-    const house = input.house && typeof input.house === "object" ? input.house : {};
-    const reminders = Array.isArray(input.reminders) ? input.reminders : [];
+    const now = input?.now instanceof Date ? input.now : new Date();
+    const sleepLog = Array.isArray(input?.sleepLog) ? input.sleepLog : [];
+    const moodDaily = input?.moodDaily && typeof input.moodDaily === "object" ? input.moodDaily : {};
+    const reminders = Array.isArray(input?.reminders) ? input.reminders : [];
+    const shoppingHistory = Array.isArray(input?.shoppingHistory) ? input.shoppingHistory : [];
+    const house = input?.house && typeof input.house === "object" ? input.house : {};
 
-    // ---- Sleep: expect entries that have date + hours (or duration) ----
-    const sleepLastNDays = (n)=>{
-      const cut = ymd(daysAgo(n));
-      const rows = sleepLog.filter(r=>{
-        const d = ymd(r.date || r.dt || r.day || r.when);
-        return d && d >= cut;
-      });
-      return rows;
-    };
-    const sleepAvg = (n)=>{
-      const rows = sleepLastNDays(n);
-      if(!rows.length) return null;
-      const vals = rows.map(r=>safeNum(r.hours ?? r.h ?? r.duration ?? r.sleepHours, NaN)).filter(Number.isFinite);
-      if(!vals.length) return null;
-      return vals.reduce((a,b)=>a+b,0)/vals.length;
-    };
-    signals.sleep_avg_3d = sleepAvg(3);
-    signals.sleep_avg_7d = sleepAvg(7);
+    // ---- Sleep ----
+    // Expect entries with {date, hours} or {ts, hours}
+    const sleepEntries = sleepLog
+      .map(e=>{
+        const d = toDate(e.date || e.ts || e.day || e.d);
+        const hours = safeNum(e.hours ?? e.h ?? e.value ?? e.sleepHours, NaN);
+        return (d && Number.isFinite(hours)) ? { d, hours } : null;
+      })
+      .filter(Boolean)
+      .sort((a,b)=>a.d-b.d);
 
-    // ---- Mood: expect moodDaily[YYYY-MM-DD] = {stress:?, mood:?, value:?} ----
-    const moodLastNDays = (n)=>{
-      const cut = ymd(daysAgo(n));
-      const keys = Object.keys(moodDaily).filter(k=>k >= cut).sort();
-      return keys.map(k=>({ day:k, ...moodDaily[k] }));
-    };
-    const stressAvg = (n)=>{
-      const rows = moodLastNDays(n);
-      const vals = rows.map(r=>safeNum(r.stress ?? r.stressLevel ?? r.value ?? r.intensity, NaN)).filter(Number.isFinite);
-      if(!vals.length) return null;
-      return vals.reduce((a,b)=>a+b,0)/vals.length;
-    };
-    signals.stress_avg_3d = stressAvg(3);
+    function avgLastDays(arr, days){
+      const cutoff = new Date(now.getTime() - days*24*60*60*1000);
+      const xs = arr.filter(x=>x.d >= cutoff).map(x=>x.hours);
+      if(!xs.length) return null;
+      const s = xs.reduce((a,b)=>a+b,0);
+      return s / xs.length;
+    }
 
-    const moodTrend7d = ()=>{
-      const rows = moodLastNDays(7);
-      const vals = rows.map(r=>safeNum(r.moodScore ?? r.mood ?? r.value ?? r.intensity, NaN)).filter(Number.isFinite);
-      if(vals.length < 3) return null;
-      return vals[vals.length-1] - vals[0];
-    };
-    signals.mood_trend_7d = moodTrend7d();
+    const sleep_avg_3d = avgLastDays(sleepEntries, 3);
+    const sleep_avg_7d = avgLastDays(sleepEntries, 7);
 
-    // ---- Shopping: sum amounts last 7 days & today ----
-    const sumSpend = (sinceDateYMD)=>{
-      let sum = 0;
-      for(const it of shoppingHistory){
-        const d = ymd(it.date || it.dt || it.day || it.when);
-        if(!d) continue;
-        if(d >= sinceDateYMD){
-          sum += safeNum(it.amount ?? it.total ?? it.cost ?? it.price, 0);
-        }
-      }
-      return sum;
-    };
-    const cut7 = ymd(daysAgo(7));
-    const today = ymd(new Date());
-    signals.spend_7d_total = sumSpend(cut7);
-    signals.spend_today_total = sumSpend(today);
+    // ---- Mood ----
+    // Expect moodDaily keyed by YYYY-MM-DD with {mood, stress, energy, val} etc
+    const moodRows = Object.entries(moodDaily).map(([k,v])=>{
+      const d = toDate(k) || toDate(v?.date || v?.ts);
+      const stress = safeNum(v?.stress ?? v?.s ?? v?.stressLevel, NaN);
+      const val = safeNum(v?.value ?? v?.val ?? v?.intensity, NaN);
+      return (d) ? { d, stress: Number.isFinite(stress)?stress:null, val: Number.isFinite(val)?val:null } : null;
+    }).filter(Boolean).sort((a,b)=>a.d-b.d);
 
-    // ---- Cleaning: detect overdue tasks (freqDays + lastDone) ----
+    function avgFieldLastDays(rows, field, days){
+      const cutoff = new Date(now.getTime() - days*24*60*60*1000);
+      const xs = rows.filter(r=>r.d >= cutoff).map(r=>r[field]).filter(n=>Number.isFinite(n));
+      if(!xs.length) return null;
+      return xs.reduce((a,b)=>a+b,0) / xs.length;
+    }
+
+    const stress_avg_3d = avgFieldLastDays(moodRows, "stress", 3);
+
+    // mood trend: compare avg of last 3d vs previous 3d (simple)
+    function trendField(rows, field){
+      const last3 = avgFieldLastDays(rows, field, 3);
+      const cutoff6 = new Date(now.getTime() - 6*24*60*60*1000);
+      const prevRows = rows.filter(r=>r.d >= cutoff6 && r.d < new Date(now.getTime() - 3*24*60*60*1000));
+      const prev = prevRows.map(r=>r[field]).filter(n=>Number.isFinite(n));
+      const prevAvg = prev.length ? prev.reduce((a,b)=>a+b,0)/prev.length : null;
+      if(last3==null || prevAvg==null) return null;
+      return last3 - prevAvg;
+    }
+
+    const mood_trend_7d = trendField(moodRows, "val");
+
+    // ---- Shopping ----
+    // Expect entries with {date, total} or {ts, amount} etc
+    const shopRows = shoppingHistory.map(e=>{
+      const d = toDate(e.date || e.ts || e.day);
+      const amount = safeNum(e.total ?? e.amount ?? e.value ?? e.spend, NaN);
+      return (d && Number.isFinite(amount)) ? { d, amount } : null;
+    }).filter(Boolean).sort((a,b)=>a.d-b.d);
+
+    function sumLastDays(rows, days){
+      const cutoff = new Date(now.getTime() - days*24*60*60*1000);
+      const xs = rows.filter(r=>r.d >= cutoff).map(r=>r.amount);
+      if(!xs.length) return 0;
+      return xs.reduce((a,b)=>a+b,0);
+    }
+    const spend_7d_total = sumLastDays(shopRows, 7);
+    const spend_1d_total = sumLastDays(shopRows, 1);
+    const shopping_entries_7d = shopRows.filter(r=>r.d >= new Date(now.getTime() - 7*24*60*60*1000)).length;
+
+    // ---- House/Cleaning ----
+    const sessionHist = Array.isArray(house.sessionHistory) ? house.sessionHistory : [];
+    const cleanRows = sessionHist.map(s=>{
+      const d = toDate(s.date || s.ts || s.startTs);
+      const mins = safeNum(s.minutes ?? s.mins ?? s.durationMin ?? s.duration, NaN);
+      return (d && Number.isFinite(mins)) ? { d, mins } : null;
+    }).filter(Boolean);
+    const cleaning_minutes_7d = cleanRows.filter(r=>r.d >= new Date(now.getTime() - 7*24*60*60*1000)).reduce((a,b)=>a+b.mins,0);
+
+    // due tasks heuristic: if tasks have freqDays and lastDone
     const tasks = Array.isArray(house.tasks) ? house.tasks : [];
-    const due = [];
-    const overdueHigh = [];
+    let cleaning_due_tasks = 0;
+    let cleaning_overdue_high = 0;
     for(const t of tasks){
-      const freq = safeNum(t.freqDays ?? t.freq ?? t.frequencyDays, NaN);
-      if(!Number.isFinite(freq)) continue;
-      const last = ymd(t.lastDone || t.last || t.doneAt);
-      if(!last) { due.push(t); if(t.priority==="high"||t.prio===3) overdueHigh.push(t); continue; }
-      const lastDt = new Date(last);
-      const diff = Math.floor((Date.now()-lastDt.getTime())/(1000*60*60*24));
-      if(diff >= freq){
-        due.push(t);
-        if(t.priority==="high"||t.prio===3) overdueHigh.push(t);
+      const freq = safeNum(t.freqDays ?? t.freq ?? t.everyDays, NaN);
+      const last = toDate(t.lastDone || t.lastTs || t.doneAt);
+      if(!Number.isFinite(freq) || !last) continue;
+      const dueInDays = freq - daysBetween(last, now);
+      if(dueInDays <= 0){
+        cleaning_due_tasks++;
+        const pr = String(t.priority || t.p || "low").toLowerCase();
+        if(pr==="high" || pr==="urgent") cleaning_overdue_high++;
       }
     }
-    signals.cleaning_due_tasks = due.length;
-    signals.cleaning_overdue_high = overdueHigh.length;
 
-    // ---- Reminders: pending count ----
-    signals.reminders_pending = reminders.filter(r=>!r.done && !r.completed).length;
+    // ---- Reminders ----
+    const pending_reminders = reminders.filter(r=>!r.done && !r.completed).length;
 
-    return signals;
+    // Stability score (simple): sleep + stress balance
+    const sleepComponent = sleep_avg_7d==null ? 50 : clamp((sleep_avg_7d/8)*100, 0, 100);
+    const stressComponent = stress_avg_3d==null ? 50 : clamp(100 - (stress_avg_3d/10)*100, 0, 100);
+    const stability_score = Math.round((sleepComponent*0.55 + stressComponent*0.45));
+
+    return {
+      sleep_avg_3d,
+      sleep_avg_7d,
+      stress_avg_3d,
+      mood_trend_7d,
+      spend_7d_total,
+      spend_1d_total,
+      shopping_entries_7d,
+      cleaning_minutes_7d,
+      cleaning_due_tasks,
+      cleaning_overdue_high,
+      pending_reminders,
+      stability_score,
+    };
   }
 
-  function evalConditions(conditions, signals){
-    for(const c of (conditions||[])){
-      const a = signals[c.field];
-      const op = OPS[c.operator];
-      const b = c.value;
-      if(!op) return false;
-      if(a === null || typeof a === "undefined") return false;
-      if(!op(a,b)) return false;
+  function evalConditions(conds, signals){
+    if(!Array.isArray(conds) || !conds.length) return false;
+    for(const c of conds){
+      const field = c.field;
+      const op = c.operator;
+      const val = c.value;
+      const fn = OPS[op];
+      if(!fn) return false;
+      const a = signals[field];
+      // if signal is null/undefined, condition fails
+      if(a===null || typeof a==="undefined") return false;
+      if(!fn(a, val)) return false;
     }
     return true;
   }
