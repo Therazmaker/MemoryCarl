@@ -46,39 +46,21 @@
     const house = input.house && typeof input.house === "object" ? input.house : {};
     const reminders = Array.isArray(input.reminders) ? input.reminders : [];
 
-    // ---- Sleep: supports v2 log entries: {date:'YYYY-MM-DD', totalMinutes:number} ----
-    const lastNDaysKeys = (n)=>{
-      const out = [];
-      const d = new Date();
-      d.setHours(0,0,0,0);
-      for(let i=0;i<n;i++){
-        const dd = new Date(d);
-        dd.setDate(d.getDate()-i);
-        out.push(dd.toISOString().slice(0,10));
-      }
-      return out; // includes today
+    // ---- Sleep: expect entries that have date + hours (or duration) ----
+    const sleepLastNDays = (n)=>{
+      const cut = ymd(daysAgo(n));
+      const rows = sleepLog.filter(r=>{
+        const d = ymd(r.date || r.dt || r.day || r.when);
+        return d && d >= cut;
+      });
+      return rows;
     };
     const sleepAvg = (n)=>{
-      const keys = new Set(lastNDaysKeys(n));
-      // Sum minutes per day (in case multiple entries exist)
-      const byDay = new Map();
-      for(const r of sleepLog){
-        const d = (r && typeof r.date === 'string') ? r.date : ymd(r.date || r.dt || r.day || r.when);
-        if(!d || !keys.has(d)) continue;
-        let mins = safeNum(r.totalMinutes, NaN);
-        if(!Number.isFinite(mins)){
-          // fallback fields
-          const h = safeNum(r.hours ?? r.h ?? r.duration ?? r.sleepHours, NaN);
-          mins = Number.isFinite(h) ? (h*60) : NaN;
-        }
-        if(!Number.isFinite(mins) || mins<=0) continue;
-        byDay.set(d, (byDay.get(d)||0) + mins);
-      }
-      const totals = [...byDay.values()].filter(v=>v>0);
-      if(!totals.length) return null;
-      const avgMinutes = totals.reduce((a,b)=>a+b,0) / totals.length;
-      const avgHours = avgMinutes / 60;
-      return Math.round(avgHours*10)/10;
+      const rows = sleepLastNDays(n);
+      if(!rows.length) return null;
+      const vals = rows.map(r=>safeNum(r.hours ?? r.h ?? r.duration ?? r.sleepHours, NaN)).filter(Number.isFinite);
+      if(!vals.length) return null;
+      return vals.reduce((a,b)=>a+b,0)/vals.length;
     };
     signals.sleep_avg_3d = sleepAvg(3);
     signals.sleep_avg_7d = sleepAvg(7);

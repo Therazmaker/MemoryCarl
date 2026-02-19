@@ -1,10 +1,7 @@
 console.log("MemoryCarl loaded");
 // CSS.escape polyfill (basic)
 if(!window.CSS) window.CSS = {};
-if(!window.CSS.escape){
-  window.CSS.escape = (s)=>String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>"\\"+c);
-}
-
+if(!window.CSS.escape){ window.CSS.escape = (s)=>String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>"\\\"+c); }
 
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
 // 1) Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates -> Generate key pair
@@ -652,6 +649,90 @@ function importBackup(file){
   reader.readAsText(file);
 }
 
+
+function restoreFromSnapshotText(rawText){
+  const text = (rawText || "").trim();
+  if(!text){ alert("Pega un JSON primero."); return; }
+
+  let snap;
+  try{
+    snap = JSON.parse(text);
+  }catch(e){
+    console.error("restoreFromSnapshotText JSON.parse failed", e);
+    alert("JSON inválido. Asegúrate de pegarlo completo (de { hasta }).");
+    return;
+  }
+
+  // Soportar formatos:
+  // 1) STATE_SNAPSHOT: {app,v,ts,reason,data:{...}}
+  // 2) Export Backup: {v, exportedAt, routines, shopping, ...}
+  // 3) Data directo: {routines, shopping, ...}
+  const payload = (snap && typeof snap === "object" && snap.data && typeof snap.data === "object") ? snap.data : snap;
+
+  // Backup rápido (in-memory) por si el usuario quiere copiarlo
+  try{
+    window.__mc_last_restore_payload = payload;
+  }catch(e){}
+
+  const apply = (keyName, value) => {
+    if(value === undefined) return;
+    try{ state[keyName] = value; }catch(e){}
+    try{
+      const lsKey = (LS && LS[keyName]) ? LS[keyName] : null;
+      if(lsKey) save(lsKey, value);
+    }catch(e){}
+  };
+
+  // Módulos principales
+  apply("routines", payload.routines);
+  apply("shopping", payload.shopping);
+  // Reminders: soportar reminders/reminder
+  const rem = (payload.reminders !== undefined) ? payload.reminders : (payload.reminder !== undefined ? payload.reminder : undefined);
+  apply("reminders", rem);
+
+  apply("musicToday", payload.musicToday);
+  apply("musicLog", payload.musicLog);
+  apply("sleepLog", payload.sleepLog);
+  apply("budgetMonthly", payload.budgetMonthly);
+  apply("calDraw", payload.calDraw);
+  apply("house", payload.house);
+  apply("moodDaily", payload.moodDaily);
+  apply("moodSpritesCustom", payload.moodSpritesCustom);
+
+  // Shopping rebuilt module keys (si existen en esta versión)
+  if(payload.products !== undefined){ try{ LS.products = LS.products || "memorycarl_v2_products"; }catch(e){} apply("products", payload.products); }
+  if(payload.shoppingHistory !== undefined){ try{ LS.shoppingHistory = LS.shoppingHistory || "memorycarl_v2_shopping_history"; }catch(e){} apply("shoppingHistory", payload.shoppingHistory); }
+  if(payload.inventory !== undefined){ try{ LS.inventory = LS.inventory || "memorycarl_v2_inventory"; }catch(e){} apply("inventory", payload.inventory); }
+
+  // Compat: algunas versiones guardaron reminders en singular
+  try{
+    if(rem !== undefined){
+      localStorage.setItem("memorycarl_v2_reminder", JSON.stringify(rem));
+    }
+  }catch(e){}
+
+  // Registrar evento
+  try{
+    const evKey = "memorycarl_v2_event_log";
+    const ev = load(evKey, []);
+    ev.push({
+      id: "ev_restore_" + Date.now(),
+      ts: new Date().toISOString(),
+      type: "restore_from_snapshot",
+      source: (snap && snap.reason) ? "STATE_SNAPSHOT" : "backup_json",
+      snapshot_ts: snap?.ts || null,
+      snapshot_reason: snap?.reason || null
+    });
+    save(evKey, ev);
+  }catch(e){}
+
+  try{ toast("Restore aplicado ✅ (recargando)"); }catch(e){}
+  setTimeout(()=>location.reload(), 250);
+}
+
+
+
+
 // ---- UI ----
 function bottomNav(){
   const mk = (tab, icon, label) => `
@@ -931,6 +1012,20 @@ const btnExport = root.querySelector("#btnExport");
     const f = e.target.files?.[0];
     if(f) importBackup(f);
     e.target.value = "";
+  });
+
+  const btnRestore = root.querySelector("#btnRestoreFromSnap");
+  if(btnRestore) btnRestore.addEventListener("click", ()=>{
+    const ta = root.querySelector("#restoreSnapText");
+    const raw = ta ? ta.value : "";
+    restoreFromSnapshotText(raw);
+  });
+
+  const btnClearSnap = root.querySelector("#btnClearSnap");
+  if(btnClearSnap) btnClearSnap.addEventListener("click", ()=>{
+    const ta = root.querySelector("#restoreSnapText");
+    if(ta) ta.value = "";
+    try{ toast("Limpio ✅"); }catch(e){}
   });
 
   wireActions(root);
@@ -1549,7 +1644,26 @@ function viewSettings(){
       <div class="kv">
         <div class="k">Recomendación</div>
         <div class="v">Export semanal o antes de updates</div>
+      
+    <div class="card">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Restaurar desde Snapshot</h2>
+          <div class="small">Pega el <span class="mono">payload_json</span> de <span class="mono">STATE_SNAPSHOT</span> (Sheets) o un backup exportado por la app. Se restaura localStorage y se recarga.</div>
+        </div>
       </div>
+      <div class="hr"></div>
+      <textarea id="restoreSnapText" class="ta mono" rows="8" placeholder='Pega aquí el JSON completo (empieza con { y termina con }).'></textarea>
+      <div class="row" style="margin:10px 0 0;">
+        <button class="btn" id="btnRestoreFromSnap">Restaurar</button>
+        <button class="btn ghost" id="btnClearSnap">Limpiar</button>
+      </div>
+      <div class="note" style="margin-top:10px;">
+        Tip: primero usa <b>Export Backup</b>. Restaurar no usa <span class="mono">eval</span>, solo <span class="mono">JSON.parse</span>.
+      </div>
+    </div>
+
+</div>
     </div>
 
     <div class="card">
@@ -2184,16 +2298,8 @@ function neuroclawRunNow({ animate=true } = {}){
       console.warn("NeuroClaw: engine not loaded (window.NeuroClaw.run missing)");
       return;
     }
-
-    // Fallback: some modules store v2 data only in localStorage.
-    // Sleep v2 log is stored under memorycarl_v2_sleep_log.
-    let sleepLog = Array.isArray(state.sleepLog) ? state.sleepLog : [];
-    if(!sleepLog.length){
-      try{ sleepLog = JSON.parse(localStorage.getItem('memorycarl_v2_sleep_log') || '[]'); }catch(e){ sleepLog = []; }
-    }
-
     runner({
-      sleepLog,
+      sleepLog: state.sleepLog || [],
       moodDaily: state.moodDaily || {},
       reminders: state.reminders || [],
       shoppingHistory: state.shoppingHistory || [],
