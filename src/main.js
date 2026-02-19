@@ -1,14 +1,10 @@
 console.log("MemoryCarl loaded");
-// CSS.escape polyfill (basic)
-if(!window.CSS) window.CSS = {};
-if(!window.CSS.escape){ window.CSS.escape = (s)=>String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>"\\\"+c); }
-
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
 // 1) Firebase Console -> Project settings -> Cloud Messaging -> Web Push certificates -> Generate key pair
 // 2) Paste the VAPID public key below
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker
-    .register(new URL("../firebase-messaging-sw.js", import.meta.url), { scope: "./" })
+    .register("../firebase-messaging-sw.js?v=999")
     .then(reg => {
       console.log("SW registered:", reg.scope);
 
@@ -68,7 +64,7 @@ async function enableNotifications(){
     }
 
     // GitHub Pages: use relative path so it works under /MemoryCarl/
-    const swReg = await navigator.serviceWorker.register(new URL("../firebase-messaging-sw.js", import.meta.url), { scope: "./" });
+    const swReg = await navigator.serviceWorker.register("../firebase-messaging-sw.js");
 
     if (!FCM_VAPID_KEY || FCM_VAPID_KEY.includes("REPLACE_WITH_YOUR_VAPID_KEY")) {
       alert("Missing VAPID key. Paste it in src/main.js (FCM_VAPID_KEY).");
@@ -105,17 +101,25 @@ function copyFcmToken(){
 const LS = {
   routines: "memorycarl_v2_routines",
   shopping: "memorycarl_v2_shopping",
-  reminders: "memorycarl_v2_reminders",
+  // Reminders: support legacy plural key too
+  reminders: "memorycarl_v2_reminder",
+  remindersLegacy: "memorycarl_v2_reminders",
+
+  // Shopping system (library + history)
+  products: "memorycarl_v2_products",
+  shoppingHistory: "memorycarl_v2_shopping_history",
+  inventory: "memorycarl_v2_inventory",
+
   // Home widgets
   musicToday: "memorycarl_v2_music_today",
   musicLog: "memorycarl_v2_music_log",
-  sleepLog: "memorycarl_v2_sleep_log", // reserved (connect later)
+  sleepLog: "memorycarl_v2_sleep_log",
   budgetMonthly: "memorycarl_v2_budget_monthly",
   calDraw: "memorycarl_v2_cal_draw",
-  eventLog: "memorycarl_v2_event_log",
   house: "memorycarl_v2_house",
   moodDaily: "memorycarl_v2_mood_daily",
   moodSpritesCustom: "memorycarl_v2_mood_sprites_custom",
+
   // NeuroClaw
   neuroclawFeedback: "memorycarl_v2_neuroclaw_feedback",
   neuroclawLast: "memorycarl_v2_neuroclaw_last",
@@ -250,6 +254,17 @@ function uid(prefix="id"){ return `${prefix}_${Math.random().toString(16).slice(
 function load(key, fallback){
   try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
   catch{ return fallback; }
+}
+
+function loadAny(keys, fallback){
+  for(const k of (keys||[])){
+    if(!k) continue;
+    try{
+      const raw = localStorage.getItem(k);
+      if(raw) return JSON.parse(raw);
+    }catch(e){}
+  }
+  return fallback;
 }
 function save(key, value){
   localStorage.setItem(key, JSON.stringify(value));
@@ -486,38 +501,28 @@ let state = {
   sheetOpen: (localStorage.getItem("mc_sheet_open")==="1"),
   routines: load(LS.routines, seedRoutines()),
   shopping: load(LS.shopping, seedShopping()),
-  reminders: load(LS.reminders, seedReminders()),
-
+  reminders: loadAny([LS.reminders, LS.remindersLegacy], seedReminders()),
   // Home
   musicToday: load(LS.musicToday, null),
   musicLog: load(LS.musicLog, []),
   sleepLog: load(LS.sleepLog, []),
   budgetMonthly: load(LS.budgetMonthly, []),
   calDraw: load(LS.calDraw, {}),
-
   // Mood (daily sprite + note)
   moodDaily: load(LS.moodDaily, {}),
   moodSpritesCustom: load(LS.moodSpritesCustom, []),
-
-  // House
   house: load(LS.house, seedHouse()),
-
   // Insights UI
   insightsMonthOffset: 0,
   insightsDayOpen: false,
   insightsDay: "",
   calMonthOffset: 0,
   musicCursor: 0,
-
+  neuroDebugOpen: false,
   // NeuroClaw
   neuroclawFeedback: load(LS.neuroclawFeedback, []),
   neuroclawLast: load(LS.neuroclawLast, { ts:"", signals:null, suggestions:[] }),
 };
-
-// --- DEBUG: expose state in console (safe) ---
-window.MC = window.MC || {};
-window.MC.state = state;
-window.state = state; // opcional, cómodo para escribir rápido en consola
 
 normalizeHouse();
 
@@ -525,6 +530,7 @@ function persist(){
   save(LS.routines, state.routines);
   save(LS.shopping, state.shopping);
   save(LS.reminders, state.reminders);
+  try{ localStorage.removeItem(LS.remindersLegacy); }catch(e){}
   save(LS.musicToday, state.musicToday);
   save(LS.musicLog, state.musicLog);
   save(LS.sleepLog, state.sleepLog);
@@ -733,6 +739,77 @@ function restoreFromSnapshotText(rawText){
 
 
 
+
+// ---- Snapshot import (from Google Sheet via Apps Script) ----
+function syncCfgLabelText(){
+  const url = getSyncUrl();
+  const key = getSyncApiKey();
+  if(!url) return "Sync: (no configurado)";
+  const short = url.length > 44 ? (url.slice(0,34) + "…" + url.slice(-8)) : url;
+  return `Sync: ${short}${key ? " • key✅" : ""}`;
+}
+
+function openSyncConfig(){
+  const currentUrl = getSyncUrl();
+  const url = prompt("Apps Script Web App URL (termina en /exec):", currentUrl || "");
+  if(url !== null) setSyncUrl(url);
+  const currentKey = getSyncApiKey();
+  const k = prompt("API key (opcional, si tu script lo requiere):", currentKey || "");
+  if(k !== null) setSyncApiKey(k);
+}
+
+async function fetchLatestSnapshotFromSheet(){
+  // Requiere que tu Apps Script soporte GET con CORS y devuelva JSON/text.
+  if(!getSyncUrl() && !ensureSyncConfigured()){
+    toast("Sync no configurado");
+    return;
+  }
+
+  const base = getSyncUrl();
+  const apiKey = getSyncApiKey();
+  const url = base + (base.includes("?") ? "&" : "?") + "action=latest_snapshot" + (apiKey ? ("&apiKey=" + encodeURIComponent(apiKey)) : "");
+
+  try{
+    toast("Buscando snapshot…");
+    const res = await fetch(url, { method:"GET", cache:"no-store", mode:"cors" });
+    const txt = await res.text();
+
+    // Puede venir como {ok:true,snapshot:{...}} o directamente el snapshot JSON
+    let obj;
+    try{ obj = JSON.parse(txt); }catch(e){ obj = null; }
+
+    const snap = (obj && typeof obj === "object" && (obj.snapshot || obj.data || obj.app)) 
+      ? (obj.snapshot || obj) 
+      : null;
+
+    if(!snap){
+      // Si no pudimos parsear, igual lo dejamos como texto en el textarea para copia manual
+      const ta = document.querySelector("#restoreSnapText");
+      if(ta) ta.value = txt;
+      alert("No pude detectar un snapshot JSON automático. Igual pegué la respuesta en el cuadro para que lo revises.");
+      return;
+    }
+
+    const pretty = JSON.stringify(snap, null, 2);
+    const ta = document.querySelector("#restoreSnapText");
+    if(ta) ta.value = pretty;
+
+    toast("Snapshot cargado ✅");
+  }catch(e){
+    console.warn("fetchLatestSnapshotFromSheet failed", e);
+    alert(
+      "No pude leer el snapshot desde el Sheet.\n\n" +
+      "Causas comunes:\n" +
+      "• Tu Apps Script no está devolviendo CORS (Access-Control-Allow-Origin)\n" +
+      "• El Web App requiere autenticación\n\n" +
+      "Solución rápida:\n" +
+      "1) Abre el Apps Script URL en una pestaña y copia el JSON\n" +
+      "2) Pégalo aquí y dale Restaurar"
+    );
+  }
+}
+
+
 // ---- UI ----
 function bottomNav(){
   const mk = (tab, icon, label) => `
@@ -849,6 +926,8 @@ function view(){
       ${state.house && state.house.historyOpen ? renderHouseHistoryModal() : ""}
       ${state.insightsDayOpen ? renderInsightsDayModal() : ""}
 
+      ${state.neuroDebugOpen ? renderNeuroDebugModal() : ""}
+
       ${bottomNav()}
 
       ${state.moreOpen ? renderMoreModal() : ""}
@@ -889,6 +968,53 @@ function view(){
       b.addEventListener("click", (e)=>{ if(e.target===b) close(); });
     }
     if(c) c.addEventListener("click", close);
+  }
+
+  
+  // NeuroClaw wiring (Home + Debug modal)
+  if(state.tab==="home"){
+    const btnN = root.querySelector("#btnNeuroAnalyze");
+    if(btnN){
+      btnN.addEventListener("click", ()=>{
+        // Open debug modal and (re)run analysis
+        state.neuroDebugOpen = true;
+        persist();
+        neuroclawRunNow({ animate:true });
+        view();
+      });
+    }
+    root.querySelectorAll("[data-neuro-rate][data-neuro-id]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const id = btn.dataset.neuroId || "";
+        const rate = btn.dataset.neuroRate || "";
+        if(!id || !rate) return;
+        state.neuroclawFeedback = Array.isArray(state.neuroclawFeedback) ? state.neuroclawFeedback : [];
+        state.neuroclawFeedback.push({ id, rate, ts: Date.now() });
+        persist();
+        try{ toast(rate==="up" ? "Guardado 👍" : "Guardado 👎"); }catch(e){}
+      });
+    });
+  }
+
+  if(state.neuroDebugOpen){
+    const b = root.querySelector("#neuroDbgBackdrop");
+    const c = root.querySelector("#btnNeuroDbgClose");
+    const r = root.querySelector("#btnNeuroDbgRerun");
+    const cp = root.querySelector("#btnNeuroDbgCopy");
+    const close = ()=>{ state.neuroDebugOpen=false; persist(); view(); };
+    if(b) b.addEventListener("click",(e)=>{ if(e.target===b) close(); });
+    if(c) c.addEventListener("click", close);
+    if(r) r.addEventListener("click", ()=>{ neuroclawRunNow({ animate:true }); });
+    if(cp) cp.addEventListener("click", async ()=>{
+      try{
+        const sig = state.neuroclawLast?.signals || {};
+        await navigator.clipboard.writeText(JSON.stringify(sig, null, 2));
+        try{ toast("Señales copiadas ✅"); }catch(e){}
+      }catch(e){
+        console.warn("Clipboard failed", e);
+        try{ toast("No pude copiar 😅"); }catch(_){}
+      }
+    });
   }
 
   // House history modal wiring + button
@@ -1027,6 +1153,26 @@ const btnExport = root.querySelector("#btnExport");
     if(ta) ta.value = "";
     try{ toast("Limpio ✅"); }catch(e){}
   });
+
+  const btnFetchSnap = root.querySelector("#btnFetchLatestSnap");
+  if(btnFetchSnap) btnFetchSnap.addEventListener("click", async ()=>{
+    await fetchLatestSnapshotFromSheet();
+    // update label (in case sync config changed)
+    const lbl = root.querySelector("#syncCfgLabel");
+    if(lbl) lbl.textContent = syncCfgLabelText();
+  });
+
+  const btnSyncCfg = root.querySelector("#btnSyncCfg");
+  if(btnSyncCfg) btnSyncCfg.addEventListener("click", ()=>{
+    openSyncConfig();
+    const lbl = root.querySelector("#syncCfgLabel");
+    if(lbl) lbl.textContent = syncCfgLabelText();
+    toast("Sync guardado ✅");
+  });
+
+  const syncLbl = root.querySelector("#syncCfgLabel");
+  if(syncLbl) syncLbl.textContent = syncCfgLabelText();
+
 
   wireActions(root);
   if(state.tab==="home") wireHome(root);
@@ -2296,26 +2442,40 @@ function neuroclawRunNow({ animate=true } = {}){
     const runner = (window.NeuroClaw && window.NeuroClaw.run) ? window.NeuroClaw.run : null;
     if(!runner){
       console.warn("NeuroClaw: engine not loaded (window.NeuroClaw.run missing)");
+      try{ if(typeof toast==="function") toast("NeuroClaw no cargó 😅"); }catch(e){}
       return;
     }
-    runner({
+    try{ if(typeof toast==="function") toast("NeuroClaw: analizando…"); }catch(e){}
+
+    const maybePromise = runner({
       sleepLog: state.sleepLog || [],
       moodDaily: state.moodDaily || {},
       reminders: state.reminders || [],
       shoppingHistory: state.shoppingHistory || [],
       house: state.house || {},
       now,
-    }).then(out=>{
-      // Persist last NeuroClaw run for UI + sync
+    });
+
+    const handleOut = (out)=>{
       state.neuroclawLast = out;
       state.neuroclawLastViewedAt = Date.now();
       try{ saveState(); }catch(e){}
-      try{ if(typeof renderAll==="function") renderAll(); }catch(e){}
-    }).catch(err=>{
-      console.error("NeuroClaw run error", err);
-    });
+      try{ view(); }catch(e){}
+      try{ if(typeof toast==="function") toast("NeuroClaw listo ✅"); }catch(e){}
+    };
+
+    if(maybePromise && typeof maybePromise.then === "function"){
+      maybePromise.then(handleOut).catch(err=>{
+        console.error("NeuroClaw run error", err);
+        try{ if(typeof toast==="function") toast("NeuroClaw error (ver consola)"); }catch(e){}
+      });
+    }else{
+      // support sync engines too
+      handleOut(maybePromise);
+    }
   }catch(e){
     console.error("NeuroClaw error", e);
+    try{ if(typeof toast==="function") toast("NeuroClaw error (ver consola)"); }catch(_){}
   }
 }
 
@@ -2334,51 +2494,19 @@ function neuroclawBadge(p){
 function renderNeuroClawCard(){
   const items = neuroclawTopSuggestions(3);
   const has = items.length>0;
-  const last = state.neuroclawLast || {};
-  const sig = (last && typeof last==="object" && last.signals && typeof last.signals==="object") ? last.signals : {};
-  const ts = last?.ts ? new Date(last.ts) : null;
+  const ts = state.neuroclawLast?.ts ? new Date(state.neuroclawLast.ts) : null;
   const stamp = ts ? ts.toLocaleString("es-PE",{hour:"2-digit",minute:"2-digit"}) : "";
-  const lastTxt = ts ? ts.toLocaleString("es-PE") : "Aún no se ha analizado";
-
-  const fmt = (n, d=1)=> (typeof n==="number" && isFinite(n)) ? n.toFixed(d) : "—";
-  const fmtInt = (n)=> (typeof n==="number" && isFinite(n)) ? String(Math.round(n)) : "—";
-
-  // Show "thinking" even when there are no rule hits
-  const lines = [
-    `🛌 3d: ${fmt(sig.sleep_avg_3d,1)}h · 7d: ${fmt(sig.sleep_avg_7d,1)}h`,
-    `🧠 estrés 3d: ${fmtInt(sig.stress_avg_3d)} · mood trend: ${fmtInt(sig.mood_trend_7d)}`,
-    `🛒 hoy: ${fmtInt(sig.spend_today_total)} · 7d: ${fmtInt(sig.spend_7d_total)}`,
-    `🧽 due: ${fmtInt(sig.cleaning_due_tasks)} · overdue: ${fmtInt(sig.cleaning_overdue_high)}`,
-    `📌 pendientes: ${fmtInt(sig.reminders_pending)}`,
-  ];
-
-  const subtitle = has
-    ? `Sugerencias • ${escapeHtml(stamp)}`
-    : (ts ? `Analizado • ${escapeHtml(stamp)}` : "Listo para analizar");
-
-  const statusTxt = has
-    ? `${items.length} sugerencia(s) activa(s)`
-    : (ts ? "Sin sugerencias hoy (pero analicé tus datos ✅)" : "Dale 🧠 para analizar");
-
   return `
     <section class="card homeCard" id="homeNeuroCard">
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">NeuroClaw</h2>
-          <div class="small">${subtitle}</div>
+          <div class="small">${has ? `Sugerencias • ${escapeHtml(stamp)}` : "Sin señales aún"}</div>
         </div>
         <button class="iconBtn" id="btnNeuroAnalyze" aria-label="Analyze">🧠</button>
       </div>
       <div class="hr"></div>
-
-      <div class="muted">${statusTxt}</div>
-      <div class="muted" style="font-size:12px;opacity:.85;margin-top:6px">Último análisis: ${escapeHtml(lastTxt)}</div>
-      <div class="muted" style="font-size:12px;opacity:.85;margin-top:6px;line-height:1.35">
-        ${lines.map(l=>`<div>${escapeHtml(l)}</div>`).join("")}
-      </div>
-
       ${has ? `
-        <div class="hr" style="margin-top:10px"></div>
         <div class="neuroList">
           ${items.map(it=>`
             <div class="neuroItem" data-neuro-id="${escapeHtml(it.id)}">
@@ -2393,10 +2521,71 @@ function renderNeuroClawCard(){
             </div>
           `).join("")}
         </div>
-      ` : ``}
+      ` : `
+        <div class="muted">Registra sueño y mood unos días, y dale 🧠 para analizar.</div>
+      `}
     </section>
   `;
 }
+
+
+function renderNeuroDebugModal(){
+  const last = state.neuroclawLast || null;
+  const signals = last && last.signals ? last.signals : null;
+  const suggestions = last && Array.isArray(last.suggestions) ? last.suggestions : [];
+  const ts = last && last.ts ? new Date(last.ts) : null;
+  const stamp = ts ? ts.toLocaleString("es-PE") : "";
+  const running = !last;
+
+  const sigRows = signals ? Object.keys(signals).sort().map(k=>{
+    const v = signals[k];
+    const vv = (typeof v==="number") ? (Math.round(v*100)/100) : v;
+    return `<div class="neuroDbgRow"><div class="neuroDbgK">${escapeHtml(k)}</div><div class="neuroDbgV">${escapeHtml(String(vv))}</div></div>`;
+  }).join("") : `<div class="muted">${running ? "Aún no hay análisis. Dale 🧠 en Home." : "Sin señales."}</div>`;
+
+  const sugRows = suggestions.length ? suggestions.map(s=>`
+    <div class="neuroDbgSug">
+      <div class="neuroDbgSugTop">
+        <div class="neuroDbgSugMsg">${escapeHtml(s.message || "")}</div>
+        ${neuroclawBadge(s.priority)}
+      </div>
+      ${s.why ? `<div class="muted">${escapeHtml(String(s.why))}</div>` : ``}
+    </div>
+  `).join("") : `<div class="muted">${running ? "" : "Ninguna regla se activó. Eso también es buena señal 😄"}</div>`;
+
+  return `
+  <div class="modalBackdrop" id="neuroDbgBackdrop">
+    <div class="modal" role="dialog" aria-label="NeuroClaw Debug">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">NeuroClaw: Qué está pensando</div>
+          <div class="modalSub">${stamp ? `Último análisis: ${escapeHtml(stamp)}` : "Ejecuta un análisis para ver señales y reglas."}</div>
+        </div>
+        <button class="iconBtn" id="btnNeuroDbgClose" aria-label="Close">✕</button>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="neuroDbgGrid">
+        <div class="neuroDbgCol">
+          <div class="neuroDbgH">Señales</div>
+          <div class="neuroDbgBox">${sigRows}</div>
+        </div>
+        <div class="neuroDbgCol">
+          <div class="neuroDbgH">Sugerencias activas</div>
+          <div class="neuroDbgBox">${sugRows}</div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button class="btn" id="btnNeuroDbgRerun">Re-analizar 🧠</button>
+        <button class="btn" id="btnNeuroDbgCopy">Copiar señales</button>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
 
 function viewHome(){
   const now = new Date();
@@ -7370,209 +7559,8 @@ function openMergeSpriteManagerModal(){
     toast("Tip: cierra y abre el juego para aplicar");
   });
 
-
   // initial
   state.count = 11;
   refreshFromDb();
 }
 // ====================== END SPRITE MANAGER ======================
-// --- NeuroClaw: global click wiring (survives re-renders) ---
-// Open a small modal that shows signals + suggestions + questions (and lets you answer "why")
-(function(){
-  function escapeHtml(s){
-    return String(s??"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
-  }
-
-  function readEventLog(){
-    try{
-      const raw = localStorage.getItem(LS.eventLog);
-      const j = raw ? JSON.parse(raw) : [];
-      return Array.isArray(j) ? j : [];
-    }catch(e){ return []; }
-  }
-
-  function writeEventLog(rec){
-    try{
-      const log = readEventLog();
-      log.push(rec);
-      localStorage.setItem(LS.eventLog, JSON.stringify(log.slice(-500)));
-    }catch(e){}
-  }
-
-  function openNeuroModal(out){
-    const host = document.querySelector("#app") || document.body;
-    const b = document.createElement("div");
-    b.className = "modalBackdrop";
-    const sug = Array.isArray(out?.suggestions) ? out.suggestions : [];
-    const sig = out?.signals || {};
-    const qs = Array.isArray(out?.questions) ? out.questions : [];
-
-    const sigRows = Object.keys(sig).sort().map(k=>{
-      const v = sig[k];
-      const vv = (typeof v==="number") ? (Math.round(v*100)/100) : v;
-      return `<div class="neuroDbgRow"><div class="neuroDbgK">${escapeHtml(k)}</div><div class="neuroDbgV">${escapeHtml(String(vv))}</div></div>`;
-    }).join("") || `<div class="muted">Sin señales todavía.</div>`;
-
-    const sugRows = sug.length ? sug.map(s=>`
-      <div class="neuroDbgSug">
-        <div class="neuroDbgSugTop">
-          <div class="neuroDbgSugMsg">${escapeHtml(s.message||"")}</div>
-          <span class="neuroBadge ${escapeHtml(String(s.priority||"low"))}">${escapeHtml(String(s.priority||""))}</span>
-        </div>
-        ${s.why ? `<div class="muted">${escapeHtml(String(s.why))}</div>` : ``}
-        <div class="neuroActions" style="margin-top:8px;">
-          <button class="miniBtn" data-neuro-rate="up" data-neuro-id="${escapeHtml(s.id||"")}">👍</button>
-          <button class="miniBtn" data-neuro-rate="down" data-neuro-id="${escapeHtml(s.id||"")}">👎</button>
-        </div>
-      </div>
-    `).join("") : `<div class="muted">Ninguna regla se activó. Eso puede ser buena señal 😄</div>`;
-
-    const qRows = qs.length ? qs.map(q=>{
-      const codes = Array.isArray(q.reasonCodes) ? q.reasonCodes : ["olvido","tiempo","otro"];
-      return `
-        <div class="neuroQ" data-qid="${escapeHtml(q.id||"")}">
-          <div class="neuroQTitle">${escapeHtml(q.title||"")}</div>
-          <div class="neuroQText">${escapeHtml(q.question||"")}</div>
-          <div class="neuroQBtns">
-            ${codes.map(code=>`<button class="miniBtn" data-neuro-qid="${escapeHtml(q.id||"")}" data-neuro-reason="${escapeHtml(code)}">${escapeHtml(code)}</button>`).join("")}
-          </div>
-          <input class="input neuroQNote" placeholder="Nota (opcional)" data-neuro-qnote="${escapeHtml(q.id||"")}" />
-        </div>
-      `;
-    }).join("") : `<div class="muted">Sin preguntas por ahora.</div>`;
-
-    b.innerHTML = `
-      <div class="modal" role="dialog" aria-label="NeuroClaw">
-        <div class="modalTop">
-          <div>
-            <div class="modalTitle">NeuroClaw 🧠</div>
-            <div class="modalSub">Señales, sugerencias y preguntas (para que aprenda contigo)</div>
-          </div>
-          <button class="iconBtn" id="btnNeuroClose" aria-label="Close">✕</button>
-        </div>
-
-        <div class="hr"></div>
-
-        <div class="neuroDbgGrid">
-          <div class="neuroDbgCol">
-            <div class="neuroDbgH">Señales</div>
-            <div class="neuroDbgBox">${sigRows}</div>
-          </div>
-          <div class="neuroDbgCol">
-            <div class="neuroDbgH">Sugerencias</div>
-            <div class="neuroDbgBox">${sugRows}</div>
-          </div>
-        </div>
-
-        <div class="hr"></div>
-        <div class="neuroDbgH" style="margin-top:8px;">Preguntas</div>
-        <div class="neuroDbgBox">${qRows}</div>
-
-        <div class="row" style="margin-top:12px;">
-          <button class="btn" id="btnNeuroRerun">Re-analizar 🧠</button>
-          <button class="btn ghost" id="btnNeuroCopy">Copiar señales</button>
-        </div>
-      </div>
-    `;
-    host.appendChild(b);
-
-    const close = ()=> b.remove();
-    b.addEventListener("click",(e)=>{ if(e.target===b) close(); });
-    b.querySelector("#btnNeuroClose")?.addEventListener("click", close);
-
-    b.querySelector("#btnNeuroRerun")?.addEventListener("click", ()=>{ close(); document.querySelector("#btnNeuroAnalyze")?.click(); });
-    b.querySelector("#btnNeuroCopy")?.addEventListener("click", async ()=>{
-      try{
-        await navigator.clipboard.writeText(JSON.stringify(sig, null, 2));
-        toast("Señales copiadas ✅");
-      }catch(e){ toast("No pude copiar 😅"); }
-    });
-
-    // ratings
-    b.querySelectorAll("[data-neuro-rate][data-neuro-id]").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        const id = btn.dataset.neuroId || "";
-        const rate = btn.dataset.neuroRate || "";
-        if(!id || !rate) return;
-        state.neuroclawFeedback = Array.isArray(state.neuroclawFeedback) ? state.neuroclawFeedback : [];
-        state.neuroclawFeedback.push({ id, rate, ts: Date.now() });
-        writeEventLog({ ts: Date.now(), type:"neuro_rate", module:"neuroclaw", payload:{ id, rate } });
-        persist();
-        toast(rate==="up" ? "Guardado 👍" : "Guardado 👎");
-      });
-    });
-
-    // question answers
-    b.querySelectorAll("[data-neuro-qid][data-neuro-reason]").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        const qid = btn.dataset.neuroQid || "";
-        const reason = btn.dataset.neuroReason || "";
-        if(!qid || !reason) return;
-        const noteEl = b.querySelector(`[data-neuro-qnote="${CSS.escape(qid)}"]`);
-        const note = noteEl ? String(noteEl.value||"").trim() : "";
-        state.neuroclawAnswers = Array.isArray(state.neuroclawAnswers) ? state.neuroclawAnswers : [];
-        const rec = { qid, reason, note, ts: Date.now() };
-        state.neuroclawAnswers.push(rec);
-        writeEventLog({ ts: rec.ts, type:"neuro_answer", module:"neuroclaw", payload: rec });
-        persist();
-        toast("Guardado ✅");
-        try{
-          const card = btn.closest(".neuroQ");
-          if(card && window.anime){
-            anime({ targets: card, scale: [1, 1.02, 1], duration: 350, easing: "easeOutQuad" });
-          }
-        }catch(e){}
-      });
-    });
-
-    try{
-      if(window.anime){
-        anime({ targets: b.querySelector(".modal"), translateY:[20,0], opacity:[0,1], duration:250, easing:"easeOutQuad" });
-      }
-    }catch(e){}
-  }
-
-  document.addEventListener("click", (e) => {
-    const btn = e.target.closest("#btnNeuroAnalyze");
-    if (!btn) return;
-
-    e.preventDefault();
-    console.log("[NeuroClaw] Analyze click ✅");
-
-    // make it feel alive instantly
-    try { toast("NeuroClaw: analizando… 🧠"); } catch(_) {}
-
-    const input = {
-      sleepLog: state.sleepLog || [],
-      moodDaily: state.moodDaily || {},
-      reminders: state.reminders || [],
-      shoppingHistory: state.shoppingHistory || [],
-      house: state.house || {},
-      now: new Date()
-    };
-
-    try{
-      const p = window.NeuroClaw?.run?.(input);
-      if(p && typeof p.then === "function"){
-        p.then(out=>{
-          state.neuroclawLast = out || null;
-          try{ persist(); }catch(_){}
-          try{ view(); }catch(_){}
-          openNeuroModal(out||{});
-          try{ toast("NeuroClaw listo ✅"); }catch(_){}
-        }).catch(err=>{
-          console.error("[NeuroClaw] ERROR", err);
-          try{ toast("NeuroClaw error (ver consola)"); }catch(_){}
-        });
-      }else{
-        state.neuroclawLast = p || null;
-        try{ persist(); }catch(_){}
-        try{ view(); }catch(_){}
-        openNeuroModal(p||{});
-      }
-    }catch(err){
-      console.error("[NeuroClaw] ERROR", err);
-      try{ toast("NeuroClaw error (ver consola)"); }catch(_){}
-    }
-  });
-})();
