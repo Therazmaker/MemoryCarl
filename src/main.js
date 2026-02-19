@@ -482,6 +482,10 @@ let state = {
   routines: load(LS.routines, seedRoutines()),
   shopping: load(LS.shopping, seedShopping()),
   reminders: load(LS.reminders, seedReminders()),
+	// --- DEBUG: expose state in console (safe) ---
+window.MC = window.MC || {};
+window.MC.state = state;
+window.state = state; // opcional, cómodo para escribir rápido en consola
   // Home
   musicToday: load(LS.musicToday, null),
   musicLog: load(LS.musicLog, []),
