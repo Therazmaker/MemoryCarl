@@ -2158,30 +2158,34 @@ function getMusicDisplay(){
 }
 
 // ====================== NeuroClaw (local suggestions engine) ======================
-async async async function neuroclawRunNow({ animate=true } = {}){
+function neuroclawRunNow({ animate=true } = {}){
   try{
     const now = new Date();
-    const out = await runNeuroClaw({
+    const runner = (window.NeuroClaw && window.NeuroClaw.run) ? window.NeuroClaw.run : null;
+    if(!runner){
+      console.warn("NeuroClaw: engine not loaded (window.NeuroClaw.run missing)");
+      return;
+    }
+    runner({
       sleepLog: state.sleepLog || [],
       moodDaily: state.moodDaily || {},
       reminders: state.reminders || [],
       shoppingHistory: state.shoppingHistory || [],
-      house: state.house || null
-    }, now);
-    state.neuroclawLast = {
-      ts: new Date().toISOString(),
-      signals: out.signals,
-      suggestions: out.suggestions || []
-    };
-    persist();
-    if(animate && window.anime){
-      const card = document.querySelector("#homeNeuroCard");
-      if(card){
-        anime({ targets: card, scale:[1,1.01,1], duration: 380, easing:"easeOutQuad" });
-      }
-    }
+      house: state.house || {},
+      now,
+    }).then(out=>{
+      state.neuroclaw = state.neuroclaw || {};
+      state.neuroclaw.last = out;
+      state.neuroclaw.lastViewedAt = Date.now();
+      try{ saveState(); }catch(e){}
+      try{ if(typeof renderAll==="function") renderAll(); }catch(e){}
+    }).catch(err=>{
+      console.error("NeuroClaw run error", err);
+    });
   }catch(e){
-    console.warn("NeuroClaw run error:", e);
+    console.error("NeuroClaw error", e);
+  }
+}
   }
 }
 

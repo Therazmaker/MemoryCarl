@@ -1,234 +1,166 @@
-// NeuroClaw v0.1 - local rules engine for MemoryCarl
-// Runs fully offline. Sync is optional via existing Sheets flush.
-
-const OPS = {
-  "<":  (a,b)=>a<b,
-  "<=": (a,b)=>a<=b,
-  ">":  (a,b)=>a>b,
-  ">=": (a,b)=>a>=b,
-  "==": (a,b)=>a===b,
-  "!=": (a,b)=>a!==b,
-  "in": (a,b)=>Array.isArray(b) && b.includes(a),
-  "notin": (a,b)=>Array.isArray(b) && !b.includes(a),
-};
-
-export async function loadNeuroClawRules(){
-  try{
-    const res = await fetch("./src/neuroclaw/neuroclaw_rules.json", { cache:"no-store" });
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    const data = await res.json();
-    return (data && data.rules && Array.isArray(data.rules)) ? data.rules : [];
-  }catch(e){
-    console.warn("NeuroClaw: failed to load rules:", e);
-    return [];
-  }
-}
-
-function isoDate(d){
-  const x = new Date(d);
-  x.setHours(0,0,0,0);
-  return x.toISOString().slice(0,10);
-}
-
-function lastNDates(n, now=new Date()){
-  const out=[];
-  const base=new Date(now);
-  base.setHours(0,0,0,0);
-  for(let i=0;i<n;i++){
-    const d=new Date(base);
-    d.setDate(base.getDate()-i);
-    out.push(isoDate(d));
-  }
-  return out;
-}
-
-export function moodScoreFromSpriteId(id){
-  const k = String(id||"").toLowerCase();
-  // Default set used in MemoryCarl
-  if(k==="happy") return 2;
-  if(k==="pleased") return 1;
-  if(k==="sad") return -2;
-  if(k==="angry") return -2;
-  if(k==="irritated") return -1;
-  if(k==="confused") return 0;
-  if(k==="wtf") return -1;
-  return 0; // unknown/custom -> neutral (user can extend later)
-}
-
-export function computeSignals({ sleepLog=[], moodDaily={}, reminders=[], shoppingHistory=[], house=null } = {}, now=new Date()){
-  const todayIso = isoDate(now);
-
-  // ---- Sleep signals ----
-  const sleepMap = new Map();
-  for(const raw of (sleepLog||[])){
-    const date = String(raw?.date||"").slice(0,10);
-    const mins = Number(raw?.totalMinutes ?? raw?.total_minutes ?? 0);
-    if(!date || !Number.isFinite(mins) || mins<=0) continue;
-    sleepMap.set(date, (sleepMap.get(date)||0) + mins);
-  }
-
-  const dates3 = lastNDates(3, now);
-  const dates7 = lastNDates(7, now);
-
-  const sumMins = (dates)=>dates.reduce((a,d)=>a+(sleepMap.get(d)||0),0);
-  const countRecorded = (dates)=>dates.reduce((a,d)=>a+((sleepMap.get(d)||0)>0 ? 1:0),0);
-
-  const mins3 = sumMins(dates3);
-  const mins7 = sumMins(dates7);
-  const rec3 = Math.max(1, countRecorded(dates3)); // avoid div0, treat missing as 1 bucket
-  const rec7 = Math.max(1, countRecorded(dates7));
-
-  const sleep_avg_3d_hours = +(mins3/60/rec3).toFixed(2);
-  const sleep_avg_7d_hours = +(mins7/60/rec7).toFixed(2);
-
-  const target = 7; // hours
-  const sleep_debt_3d_hours = +Math.max(0, (target*3) - (mins3/60)).toFixed(2);
-
-  // ---- Mood signals ----
-  const moodMap = (moodDaily && typeof moodDaily==="object") ? moodDaily : {};
-  const moodScores = dates7.map(d=>{
-    const sid = moodMap[d]?.spriteId;
-    return (sid ? moodScoreFromSpriteId(sid) : null);
-  }).filter(v=>v!==null);
-
-  const mood_score_7d_avg = moodScores.length ? +(moodScores.reduce((a,b)=>a+b,0)/moodScores.length).toFixed(2) : null;
-
-  // negative streak (consecutive days from today backwards)
-  let mood_neg_streak = 0;
-  for(const d of dates7){
-    const sid = moodMap[d]?.spriteId;
-    if(!sid) break;
-    const s = moodScoreFromSpriteId(sid);
-    if(s < 0) mood_neg_streak++;
-    else break;
-  }
-
-  // ---- Reminders ----
-  const reminders_open = (reminders||[]).filter(r=>r && !r.done).length;
-
-  // ---- Shopping (compras) ----
-  const hist = Array.isArray(shoppingHistory) ? shoppingHistory : [];
-  const hist7 = hist.filter(h=>{
-    const d = String(h?.date||"").slice(0,10);
-    return d && dates7.includes(d);
-  });
-  const spend_7d_total = +hist7.reduce((a,h)=>a+(Number(h?.totals?.total)||0),0).toFixed(2);
-  const spend_today_total = +hist.filter(h=>String(h?.date||"").slice(0,10)===todayIso)
-    .reduce((a,h)=>a+(Number(h?.totals?.total)||0),0).toFixed(2);
-  const shopping_entries_7d = hist7.length;
-  const shopping_items_7d = hist7.reduce((a,h)=>a+(Number(h?.totals?.itemsCount)||0),0);
-
-  // ---- Cleaning (Casa) ----
-  const houseObj = (house && typeof house==="object") ? house : null;
-  const sess = houseObj && Array.isArray(houseObj.sessionHistory) ? houseObj.sessionHistory : [];
-  const sess7 = sess.filter(s=>{
-    const d = String(s?.date||"").slice(0,10);
-    return d && dates7.includes(d);
-  });
-  const cleaning_sessions_7d = sess7.length;
-  const cleaning_minutes_7d = +((sess7.reduce((a,s)=>a+(Number(s?.totalSec)||0),0))/60).toFixed(1);
-
-  // Due/overdue tasks count (based on lastDone + freqDays, within current mode)
-  let cleaning_due_tasks = 0;
-  let cleaning_overdue_high = 0;
-  try{
-    const mode = String(houseObj?.mode || "light");
-    const tasks = Array.isArray(houseObj?.tasks) ? houseObj.tasks : [];
-    const nowDate = new Date(now); nowDate.setHours(0,0,0,0);
-    for(const t of tasks){
-      if(!t) continue;
-      if(t.level && String(t.level)!==mode) continue;
-      const freq = Number(t.freqDays||0);
-      if(!freq || freq<=0) continue;
-
-      const last = String(t.lastDone||"").slice(0,10);
-      let lastDate = null;
-      if(last){
-        const dd = new Date(last+"T00:00:00");
-        if(!isNaN(dd.getTime())) lastDate = dd;
-      }
-      // If never done, consider due.
-      if(!lastDate){
-        cleaning_due_tasks++;
-        if(Number(t.priority||0) >= 4) cleaning_overdue_high++;
-        continue;
-      }
-      const daysSince = Math.floor((nowDate - lastDate) / (24*3600*1000));
-      if(daysSince >= freq){
-        cleaning_due_tasks++;
-        if(Number(t.priority||0) >= 4 && daysSince >= (freq+2)) cleaning_overdue_high++; // "overdue" buffer
-      }
-    }
-  }catch(e){}
-
-  return {
-    ts: new Date(now).toISOString(),
-    sleep_avg_3d_hours,
-    sleep_avg_7d_hours,
-    sleep_debt_3d_hours,
-    mood_score_7d_avg,
-    mood_neg_streak,
-    reminders_open,
-    spend_7d_total,
-    spend_today_total,
-    shopping_entries_7d,
-    shopping_items_7d,
-    cleaning_sessions_7d,
-    cleaning_minutes_7d,
-    cleaning_due_tasks,
-    cleaning_overdue_high,
+// NeuroClaw v0.4 - local rules engine for MemoryCarl
+// Runs fully offline. Sync is optional via existing flush.
+(function(){
+  const OPS = {
+    "<":  (a,b)=>a<b,
+    "<=": (a,b)=>a<=b,
+    ">":  (a,b)=>a>b,
+    ">=": (a,b)=>a>=b,
+    "==": (a,b)=>a===b,
+    "!=": (a,b)=>a!==b,
+    "in": (a,b)=>Array.isArray(b) && b.includes(a),
+    "notin": (a,b)=>Array.isArray(b) && !b.includes(a),
   };
-}
 
-
-function evalRule(rule, signals){
-  const conds = Array.isArray(rule?.conditions) ? rule.conditions : [];
-  for(const c of conds){
-    const key = String(c?.key||"");
-    const op = String(c?.op||"==");
-    const val = c?.value;
-    const a = signals[key];
-    const fn = OPS[op];
-    if(!fn){
-      console.warn("NeuroClaw: unknown op", op, "in rule", rule?.id);
-      return false;
-    }
-    // null/undefined should fail comparisons except !=
-    if(a===null || a===undefined){
-      if(op==="!=") continue;
-      return false;
-    }
-    if(!fn(a, val)) return false;
+  function safeNum(x, fallback=0){
+    const n = Number(x);
+    return Number.isFinite(n) ? n : fallback;
   }
-  return true;
-}
+  function ymd(d){
+    const dt = (d instanceof Date) ? d : new Date(d);
+    if(!Number.isFinite(dt.getTime())) return null;
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth()+1).padStart(2,'0');
+    const da = String(dt.getDate()).padStart(2,'0');
+    return `${y}-${m}-${da}`;
+  }
+  function daysAgo(n){
+    const d = new Date();
+    d.setDate(d.getDate()-n);
+    return d;
+  }
 
-function priorityScore(p){
-  const k = String(p||"low").toLowerCase();
-  if(k==="high") return 3;
-  if(k==="medium") return 2;
-  return 1;
-}
+  async function loadNeuroClawRules(){
+    const res = await fetch("./src/neuroclaw/neuroclaw_rules.json", { cache:"no-store" });
+    if(!res.ok) throw new Error("NeuroClaw rules HTTP " + res.status);
+    const j = await res.json();
+    return Array.isArray(j) ? j : (j.rules || []);
+  }
 
-export async function runNeuroClaw({ sleepLog=[], moodDaily={}, reminders=[], shoppingHistory=[], house=null } = {}, now=new Date()){
-  const rules = await loadNeuroClawRules();
-  const signals = computeSignals({ sleepLog, moodDaily, reminders, shoppingHistory, house }, now);
-  const suggestions = [];
+  // Compute signals from app data
+  function computeSignals(input){
+    const signals = {};
+    const sleepLog = Array.isArray(input.sleepLog) ? input.sleepLog : [];
+    const moodDaily = input.moodDaily && typeof input.moodDaily === "object" ? input.moodDaily : {};
+    const shoppingHistory = Array.isArray(input.shoppingHistory) ? input.shoppingHistory : [];
+    const house = input.house && typeof input.house === "object" ? input.house : {};
+    const reminders = Array.isArray(input.reminders) ? input.reminders : [];
 
-  for(const r of rules){
-    if(!r || !r.id) continue;
-    if(evalRule(r, signals)){
-      suggestions.push({
-        id: String(r.id),
-        title: String(r.title || "Sugerencia"),
-        priority: String(r.priority || "low"),
-        message: String(r.message || ""),
-        why: Array.isArray(r.why) ? r.why.slice(0,4) : [],
-        action: r.action || null,
+    // ---- Sleep: expect entries that have date + hours (or duration) ----
+    const sleepLastNDays = (n)=>{
+      const cut = ymd(daysAgo(n));
+      const rows = sleepLog.filter(r=>{
+        const d = ymd(r.date || r.dt || r.day || r.when);
+        return d && d >= cut;
       });
+      return rows;
+    };
+    const sleepAvg = (n)=>{
+      const rows = sleepLastNDays(n);
+      if(!rows.length) return null;
+      const vals = rows.map(r=>safeNum(r.hours ?? r.h ?? r.duration ?? r.sleepHours, NaN)).filter(Number.isFinite);
+      if(!vals.length) return null;
+      return vals.reduce((a,b)=>a+b,0)/vals.length;
+    };
+    signals.sleep_avg_3d = sleepAvg(3);
+    signals.sleep_avg_7d = sleepAvg(7);
+
+    // ---- Mood: expect moodDaily[YYYY-MM-DD] = {stress:?, mood:?, value:?} ----
+    const moodLastNDays = (n)=>{
+      const cut = ymd(daysAgo(n));
+      const keys = Object.keys(moodDaily).filter(k=>k >= cut).sort();
+      return keys.map(k=>({ day:k, ...moodDaily[k] }));
+    };
+    const stressAvg = (n)=>{
+      const rows = moodLastNDays(n);
+      const vals = rows.map(r=>safeNum(r.stress ?? r.stressLevel ?? r.value ?? r.intensity, NaN)).filter(Number.isFinite);
+      if(!vals.length) return null;
+      return vals.reduce((a,b)=>a+b,0)/vals.length;
+    };
+    signals.stress_avg_3d = stressAvg(3);
+
+    const moodTrend7d = ()=>{
+      const rows = moodLastNDays(7);
+      const vals = rows.map(r=>safeNum(r.moodScore ?? r.mood ?? r.value ?? r.intensity, NaN)).filter(Number.isFinite);
+      if(vals.length < 3) return null;
+      return vals[vals.length-1] - vals[0];
+    };
+    signals.mood_trend_7d = moodTrend7d();
+
+    // ---- Shopping: sum amounts last 7 days & today ----
+    const sumSpend = (sinceDateYMD)=>{
+      let sum = 0;
+      for(const it of shoppingHistory){
+        const d = ymd(it.date || it.dt || it.day || it.when);
+        if(!d) continue;
+        if(d >= sinceDateYMD){
+          sum += safeNum(it.amount ?? it.total ?? it.cost ?? it.price, 0);
+        }
+      }
+      return sum;
+    };
+    const cut7 = ymd(daysAgo(7));
+    const today = ymd(new Date());
+    signals.spend_7d_total = sumSpend(cut7);
+    signals.spend_today_total = sumSpend(today);
+
+    // ---- Cleaning: detect overdue tasks (freqDays + lastDone) ----
+    const tasks = Array.isArray(house.tasks) ? house.tasks : [];
+    const due = [];
+    const overdueHigh = [];
+    for(const t of tasks){
+      const freq = safeNum(t.freqDays ?? t.freq ?? t.frequencyDays, NaN);
+      if(!Number.isFinite(freq)) continue;
+      const last = ymd(t.lastDone || t.last || t.doneAt);
+      if(!last) { due.push(t); if(t.priority==="high"||t.prio===3) overdueHigh.push(t); continue; }
+      const lastDt = new Date(last);
+      const diff = Math.floor((Date.now()-lastDt.getTime())/(1000*60*60*24));
+      if(diff >= freq){
+        due.push(t);
+        if(t.priority==="high"||t.prio===3) overdueHigh.push(t);
+      }
     }
+    signals.cleaning_due_tasks = due.length;
+    signals.cleaning_overdue_high = overdueHigh.length;
+
+    // ---- Reminders: pending count ----
+    signals.reminders_pending = reminders.filter(r=>!r.done && !r.completed).length;
+
+    return signals;
   }
 
-  suggestions.sort((a,b)=> priorityScore(b.priority)-priorityScore(a.priority));
-  return { signals, suggestions };
-}
+  function evalConditions(conditions, signals){
+    for(const c of (conditions||[])){
+      const a = signals[c.field];
+      const op = OPS[c.operator];
+      const b = c.value;
+      if(!op) return false;
+      if(a === null || typeof a === "undefined") return false;
+      if(!op(a,b)) return false;
+    }
+    return true;
+  }
+
+  async function runNeuroClaw(input){
+    const rules = await loadNeuroClawRules();
+    const signals = computeSignals(input||{});
+    const suggestions = [];
+    for(const r of rules){
+      if(evalConditions(r.conditions, signals)){
+        suggestions.push({
+          id: r.id,
+          message: r.message,
+          priority: r.priority || "medium",
+          why: r.why || null,
+          actions: r.actions || []
+        });
+      }
+    }
+    return { signals, suggestions, ts: Date.now() };
+  }
+
+  window.NeuroClaw = window.NeuroClaw || {};
+  window.NeuroClaw.run = runNeuroClaw;
+  window.NeuroClaw.computeSignals = computeSignals;
+  window.NeuroClaw.loadRules = loadNeuroClawRules;
+})();
