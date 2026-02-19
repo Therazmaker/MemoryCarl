@@ -129,6 +129,57 @@
     return signals;
   }
 
+  // Generate lightweight questions based on signals
+  function computeQuestions(signals, input){
+    const qs = [];
+    const sleepLog = Array.isArray(input?.sleepLog) ? input.sleepLog : [];
+    const moodDaily = (input?.moodDaily && typeof input.moodDaily === "object") ? input.moodDaily : {};
+    const reminders = Array.isArray(input?.reminders) ? input.reminders : [];
+
+    if(!sleepLog.length){
+      qs.push({
+        id: "q_sleep_none",
+        title: "Sueño sin datos",
+        question: "Aún no has registrado sueño. ¿Qué te frenó?",
+        reasonCodes: ["olvido","tiempo","estres","no_prioridad","otro"],
+        related: { module:"sleep" }
+      });
+    }
+
+    if(!Object.keys(moodDaily).length){
+      qs.push({
+        id: "q_mood_none",
+        title: "Mood vacío",
+        question: "¿Quieres que Mood sea rápido (1 toque) o detallado?",
+        reasonCodes: ["rapido","detallado","luego","otro"],
+        related: { module:"mood" }
+      });
+    }
+
+    const pending = reminders.filter(r=>!r.done && !r.completed).length;
+    if(pending>0){
+      qs.push({
+        id: "q_rem_pending",
+        title: "Reminders pendientes",
+        question: `Tienes ${pending} reminder(s) pendiente(s). ¿Qué te bloqueó?`,
+        reasonCodes: ["olvido","tiempo","estres","no_prioridad","otro"],
+        related: { module:"reminders", pending }
+      });
+    }
+
+    if(Number.isFinite(signals?.sleep_avg_3d) && signals.sleep_avg_3d < 5.5){
+      qs.push({
+        id: "q_sleep_low",
+        title: "Sueño bajo",
+        question: "Tu promedio de sueño (3 días) está bajo. ¿Qué pasó?",
+        reasonCodes: ["trabajo","estres","pantalla","salud","otro"],
+        related: { module:"sleep", sleep_avg_3d: signals.sleep_avg_3d }
+      });
+    }
+
+    return qs.slice(0, 3);
+  }
+
   function evalConditions(conditions, signals){
     for(const c of (conditions||[])){
       const a = signals[c.field];
@@ -156,7 +207,8 @@
         });
       }
     }
-    return { signals, suggestions, ts: Date.now() };
+    const questions = computeQuestions(signals, input||{});
+    return { signals, suggestions, questions, ts: Date.now() };
   }
 
   window.NeuroClaw = window.NeuroClaw || {};
