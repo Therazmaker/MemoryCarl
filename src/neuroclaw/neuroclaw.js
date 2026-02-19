@@ -56,6 +56,7 @@
     const now = input?.now instanceof Date ? input.now : new Date();
     const sleepLog = Array.isArray(input?.sleepLog) ? input.sleepLog : [];
     const moodDaily = input?.moodDaily && typeof input.moodDaily === "object" ? input.moodDaily : {};
+    const moodSpritesCustom = Array.isArray(input?.moodSpritesCustom) ? input.moodSpritesCustom : [];
     const reminders = Array.isArray(input?.reminders) ? input.reminders : [];
     const shoppingHistory = Array.isArray(input?.shoppingHistory) ? input.shoppingHistory : [];
     const house = input?.house && typeof input.house === "object" ? input.house : {};
@@ -65,10 +66,7 @@
     const sleepEntries = sleepLog
       .map(e=>{
         const d = toDate(e.date || e.ts || e.day || e.d);
-        // Support: {totalMinutes}, {minutes}, or explicit hours
-        const mins = safeNum(e.totalMinutes ?? e.total_minutes ?? e.minutes ?? e.mins, NaN);
-        const hoursRaw = safeNum(e.hours ?? e.h ?? e.value ?? e.sleepHours, NaN);
-        const hours = Number.isFinite(mins) ? (mins/60) : hoursRaw;
+        const hours = safeNum(e.hours ?? e.h ?? e.value ?? e.sleepHours, NaN);
         return (d && Number.isFinite(hours)) ? { d, hours } : null;
       })
       .filter(Boolean)
@@ -87,18 +85,36 @@
 
     // ---- Mood ----
     // Expect moodDaily keyed by YYYY-MM-DD with {mood, stress, energy, val} etc
-    const MOOD_SCORE = {
-      incredible: 9, good: 7, meh: 5, bad: 3, horrible: 1,
-      // legacy ids
-      happy: 9, pleased: 7, confused: 5, sad: 3, wtf: 1, angry: 2, irritated: 2
+    const spriteScoreDefault = {
+      incredible: 9, happy: 7, meh: 5, sad: 3, horrible: 1, wtf: 2,
+      // allow short ids too (common)
+      inc: 9, ok: 7, neutral: 5, bad: 3, awful: 1,
+    };
+    const spriteScoreFromCustom = (id)=>{
+      const it = moodSpritesCustom.find(x=>String(x.id||"")===String(id));
+      const n = Number(it?.score ?? it?.value ?? it?.val);
+      return Number.isFinite(n) ? n : null;
+    };
+    const spriteScore = (id)=>{
+      if(!id) return null;
+      const c = spriteScoreFromCustom(id);
+      if(c!=null) return c;
+      const n = Number(spriteScoreDefault[String(id)]);
+      return Number.isFinite(n) ? n : null;
     };
 
     const moodRows = Object.entries(moodDaily).map(([k,v])=>{
       const d = toDate(k) || toDate(v?.date || v?.ts);
-      const spriteId = (v && typeof v==="object") ? String(v.spriteId||"") : "";
-      const valFromSprite = spriteId ? MOOD_SCORE[spriteId] : null;
-      const val = Number.isFinite(valFromSprite) ? valFromSprite : safeNum(v?.value ?? v?.val ?? v?.intensity, NaN);
-      const stress = safeNum(v?.stress ?? v?.s ?? v?.stressLevel, NaN); // optional (future)
+      const stress = safeNum(v?.stress ?? v?.s ?? v?.stressLevel, NaN);
+      let val = safeNum(v?.value ?? v?.val ?? v?.intensity, NaN);
+
+      // If mood is stored as spriteId (our current system), map to score
+      if(!Number.isFinite(val)){
+        const sid = v?.spriteId || v?.sprite || v?.id;
+        const sc = spriteScore(sid);
+        if(sc!=null) val = sc;
+      }
+
       return (d) ? { d, stress: Number.isFinite(stress)?stress:null, val: Number.isFinite(val)?val:null } : null;
     }).filter(Boolean).sort((a,b)=>a.d-b.d);
 
@@ -122,21 +138,22 @@
       return last3 - prevAvg;
     }
 
-    const mood_trend_7d = trendField(moodRows, "val");
+function trendDeltaLastDays(rows, field, days=7){
+      const cutoff = new Date(now.getTime() - days*24*60*60*1000);
+      const recent = rows.filter(r=>r.d >= cutoff).map(r=>r[field]).filter(n=>Number.isFinite(n));
+      if(recent.length < 2) return null;
+      const first = recent[0];
+      const last = recent[recent.length-1];
+      return last - first; // can be 0 (stable)
+    }
+
+    const mood_trend_7d = trendDeltaLastDays(moodRows, "val", 7);
 
     // ---- Shopping ----
     // Expect entries with {date, total} or {ts, amount} etc
     const shopRows = shoppingHistory.map(e=>{
       const d = toDate(e.date || e.ts || e.day);
-      // Prefer totals.total (your structure). Fallback to summing items.
-      let amount = safeNum(e?.totals?.total, NaN);
-      if(!Number.isFinite(amount)){
-        amount = safeNum(e.total ?? e.amount ?? e.value ?? e.spend, NaN);
-      }
-      if(!Number.isFinite(amount)){
-        const items = Array.isArray(e.items) ? e.items : [];
-        amount = items.reduce((sum,it)=> sum + (safeNum(it.price,0) * safeNum(it.qty,1)), 0);
-      }
+      const amount = safeNum(e.total ?? e.amount ?? e.value ?? e.spend, NaN);
       return (d && Number.isFinite(amount)) ? { d, amount } : null;
     }).filter(Boolean).sort((a,b)=>a.d-b.d);
 

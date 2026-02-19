@@ -2014,41 +2014,25 @@ function normalizeSleepEntry(e){
 }
 
 // ====================== MOOD SPRITES (Daily Emotion) ======================
-const DEFAULT_MOOD_PRESETS = [
-  // "Face" selector (like your reference app)
-  // Each preset can have multiple labels (shown as dots under the face)
-  { id:"incredible", src:"./src/emotions/Happy.png",   labels:["increíble"], score:9 },
-  { id:"good",      src:"./src/emotions/Pleased.png", labels:["bien","ok","normal"], score:7 },
-  { id:"meh",       src:"./src/emotions/Confused.png",labels:["meh"], score:5 },
-  { id:"bad",       src:"./src/emotions/Sad.png",     labels:["mal","triste","cansado"], score:3 },
-  { id:"horrible",  src:"./src/emotions/WTF.png",     labels:["horrible"], score:1 },
-
-  // Legacy ids (so your old entries still render nicely)
-  { id:"sad",       src:"./src/emotions/Sad.png",     labels:["sad"], score:3 },
-  { id:"wtf",       src:"./src/emotions/WTF.png",     labels:["wtf"], score:1 },
-  { id:"happy",     src:"./src/emotions/Happy.png",   labels:["happy"], score:9 },
-  { id:"pleased",   src:"./src/emotions/Pleased.png", labels:["pleased"], score:7 },
-  { id:"confused",  src:"./src/emotions/Confused.png",labels:["confused"], score:5 },
-  { id:"angry",     src:"./src/emotions/Angry.png",   labels:["angry"], score:2 },
-  { id:"irritated", src:"./src/emotions/Irritated.png",labels:["irritated"], score:2 },
+const DEFAULT_MOOD_SPRITES = [
+  { id:"angry", name:"Angry", src:"./src/emotions/Angry.png" },
+  { id:"confused", name:"Confused", src:"./src/emotions/Confused.png" },
+  { id:"happy", name:"Happy", src:"./src/emotions/Happy.png" },
+  { id:"irritated", name:"Irritated", src:"./src/emotions/Irritated.png" },
+  { id:"pleased", name:"Pleased", src:"./src/emotions/Pleased.png" },
+  { id:"sad", name:"Sad", src:"./src/emotions/Sad.png" },
+  { id:"wtf", name:"WTF", src:"./src/emotions/WTF.png" },
 ];
 
 function getAllMoodSprites(){
   const custom = Array.isArray(state.moodSpritesCustom) ? state.moodSpritesCustom : [];
-  // custom sprites may include: {id, src, labels:[...], score:number}
-  return [...DEFAULT_MOOD_PRESETS, ...custom];
+  return [...DEFAULT_MOOD_SPRITES, ...custom];
 }
 
 function getMoodSpriteById(id){
   if(!id) return null;
   const all = getAllMoodSprites();
   return all.find(s=>String(s.id)===String(id)) || null;
-}
-
-function getMoodScoreById(id){
-  const s = getMoodSpriteById(id);
-  const n = Number(s?.score);
-  return Number.isFinite(n) ? n : null;
 }
 
 function getMoodEntry(iso){
@@ -2058,26 +2042,18 @@ function getMoodEntry(iso){
   return {
     iso: String(iso),
     spriteId: e.spriteId ? String(e.spriteId) : "",
-    label: e.label ? String(e.label) : "",
-    tags: Array.isArray(e.tags) ? e.tags.map(String) : [],
     note: e.note ? String(e.note) : "",
     ts: e.ts ? String(e.ts) : ""
   };
 }
 
-function setMoodEntry(iso, spriteId, label="", tags=[], note=""){
+function setMoodEntry(iso, spriteId, note=""){
   const key = String(iso||"");
   state.moodDaily = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
   if(!spriteId){
     delete state.moodDaily[key];
   }else{
-    state.moodDaily[key] = {
-      spriteId: String(spriteId),
-      label: String(label||""),
-      tags: Array.isArray(tags) ? tags.map(String).filter(Boolean) : [],
-      note: String(note||""),
-      ts: new Date().toISOString()
-    };
+    state.moodDaily[key] = { spriteId: String(spriteId), note: String(note||""), ts: new Date().toISOString() };
   }
   persist();
 }
@@ -2106,103 +2082,43 @@ function openMoodPickerModal(iso, opts={}){
   const host = document.querySelector("#app");
   const backdrop = document.createElement("div");
   backdrop.className = "modalBackdrop";
-
   const existing = getMoodEntry(iso);
   const all = getAllMoodSprites();
-
-  // Only show "face" presets first (incredible..horrible)
-  const faceIds = new Set(["incredible","good","meh","bad","horrible"]);
-  const faces = all.filter(s=>faceIds.has(String(s.id)));
-
   let selectedId = existing?.spriteId || "";
-  let selectedLabel = existing?.label || "";
   let note = existing?.note || "";
-  let tags = new Set(Array.isArray(existing?.tags) ? existing.tags : []);
-
-  // If existing is legacy id, keep it but try to map to a face when opening
-  if(selectedId && !faceIds.has(String(selectedId))){
-    // keep legacy id but default UI selection to closest face by score
-    const sc = getMoodScoreById(selectedId);
-    if(sc!=null){
-      const best = faces
-        .map(f=>({ id:f.id, sc: Math.abs((getMoodScoreById(f.id)||5) - sc) }))
-        .sort((a,b)=>a.sc-b.sc)[0];
-      if(best?.id) selectedId = best.id;
-    }else{
-      selectedId = "meh";
-    }
-  }
-  if(!selectedId) selectedId = "meh";
-
-  const getFace = (id)=>faces.find(f=>String(f.id)===String(id)) || null;
-
-  // Default label for selected face
-  const ensureLabel = ()=>{
-    const f = getFace(selectedId);
-    const labels = Array.isArray(f?.labels) ? f.labels : [];
-    if(!selectedLabel){
-      selectedLabel = labels[0] || String(f?.id||"");
-    }else if(labels.length && !labels.includes(selectedLabel)){
-      selectedLabel = labels[0];
-    }
-  };
-  ensureLabel();
-
-  const TAG_PRESETS = [
-    { id:"sleep",   label:"Sueño malo", icon:"🛏️" },
-    { id:"debts",   label:"Deudas", icon:"💸" },
-    { id:"work",    label:"Trabajo", icon:"🧰" },
-    { id:"family",  label:"Familia", icon:"🏠" },
-    { id:"health",  label:"Salud", icon:"🩺" },
-    { id:"money",   label:"Dinero", icon:"💰" },
-  ];
 
   backdrop.innerHTML = `
-    <div class="modal moodPickerModal v2" role="dialog" aria-label="Mood check-in">
+    <div class="modal moodPickerModal" role="dialog" aria-label="Emoción del día">
       <div class="modalTop">
         <div>
-          <div class="modalTitle">¿Cómo estás?</div>
-          <div class="modalSub">${escapeHtml(iso)} · rápido y sin drama</div>
+          <div class="modalTitle">Emoción del día</div>
+          <div class="modalSub">${escapeHtml(iso)} · Elige un sprite y listo</div>
         </div>
         <div class="moodTopActions">
-          <button class="iconBtn" id="btnMoodMonth" aria-label="Ver historial">Historial</button>
+          <button class="iconBtn" id="btnMoodMonth" aria-label="Ver mes">Mes</button>
           <button class="iconBtn" data-close aria-label="Cerrar">✕</button>
         </div>
       </div>
 
-      <div class="moodFaceRow" id="moodFaceRow">
-        ${faces.map(f=>{
-          const labels = Array.isArray(f.labels) ? f.labels : [];
-          const main = labels[0] || f.id;
-          const dots = labels.length>1 ? `<div class="moodDots">${labels.map(_=>`<span class="dot"></span>`).join("")}</div>` : `<div class="moodDots"></div>`;
-          return `
-            <button class="moodFace ${String(f.id)===String(selectedId)?"active":""}" data-face="${escapeHtml(f.id)}" title="${escapeHtml(main)}">
-              <img src="${escapeHtml(f.src)}" alt="${escapeHtml(main)}"/>
-              <div class="moodFaceLabel">${escapeHtml(main)}</div>
-              ${dots}
-            </button>
-          `;
-        }).join("")}
-      </div>
-
-      <div class="moodLabelRow" id="moodLabelRow"></div>
-
-      <div class="moodTags">
-        <div class="muted" style="margin-bottom:6px;">Tema (opcional)</div>
-        <div class="chipRow" id="moodTagChips">
-          ${TAG_PRESETS.map(t=>`
-            <button class="chip ${tags.has(t.id)?"active":""}" data-tag="${escapeHtml(t.id)}">${escapeHtml(t.icon)} ${escapeHtml(t.label)}</button>
-          `).join("")}
-        </div>
-        <div class="row" style="margin-top:8px;gap:8px;">
-          <input class="input" id="moodTagInput" placeholder="Agregar tema (ej: ansiedad, pelea, calma)" />
-          <button class="btn ghost" id="btnAddMoodTag">＋</button>
-        </div>
+      <div class="moodGrid" id="moodGrid">
+        ${all.map(s=>`
+          <button class="moodItem ${String(s.id)===String(selectedId)?"active":""}" data-mood="${escapeHtml(s.id)}" title="${escapeHtml(s.name||s.id)}">
+            <img src="${escapeHtml(s.src)}" alt="${escapeHtml(s.name||s.id)}" />
+          </button>
+        `).join("")}
       </div>
 
       <div class="field" style="margin-top:10px;">
         <label>Nota (opcional)</label>
-        <textarea id="moodNote" class="input" rows="3" placeholder="Ej: me siento triste y no sé por qué...">${escapeHtml(note)}</textarea>
+        <input id="moodNote" class="input" placeholder="Ej: día pesado, flow, calma..." value="${escapeHtml(note)}" />
+      </div>
+
+      <div class="moodUpload">
+        <label class="moodUploadLabel">
+          <input id="moodUpload" type="file" accept="image/*" multiple style="display:none;" />
+          <span class="btn ghost">＋ Cargar sprites</span>
+        </label>
+        <div class="muted">Se guardan en tu app (local). Para sync global luego lo conectamos al Sheet.</div>
       </div>
 
       <div class="row" style="justify-content:space-between;margin-top:12px;">
@@ -2231,99 +2147,35 @@ function openMoodPickerModal(iso, opts={}){
   host.appendChild(backdrop);
   if(typeof window.anime==="function") animateSleepModalIn(backdrop);
 
-  const faceRow = backdrop.querySelector("#moodFaceRow");
-  const labelRow = backdrop.querySelector("#moodLabelRow");
-  const tagChips = backdrop.querySelector("#moodTagChips");
-
-  const renderLabels = ()=>{
-    const f = getFace(selectedId);
-    const labels = Array.isArray(f?.labels) ? f.labels : [];
-    if(!labels.length){
-      labelRow.innerHTML = "";
-      return;
-    }
-    if(!selectedLabel) selectedLabel = labels[0];
-    labelRow.innerHTML = `
-      <div class="muted" style="margin-bottom:6px;">Matiz</div>
-      <div class="chipRow">
-        ${labels.map(l=>`
-          <button class="chip ${String(l)===String(selectedLabel)?"active":""}" data-label="${escapeHtml(l)}">${escapeHtml(l)}</button>
-        `).join("")}
-      </div>
-    `;
-    labelRow.querySelectorAll("[data-label]").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        selectedLabel = btn.getAttribute("data-label") || "";
-        renderLabels();
-      });
-    });
-  };
-
-  const refreshFaces = ()=>{
-    faceRow.querySelectorAll(".moodFace").forEach(btn=>{
-      const id = btn.getAttribute("data-face")||"";
+  const grid = backdrop.querySelector("#moodGrid");
+  const refreshActive = ()=>{
+    grid.querySelectorAll(".moodItem").forEach(btn=>{
+      const id = btn.getAttribute("data-mood")||"";
       btn.classList.toggle("active", String(id)===String(selectedId));
     });
   };
 
-  faceRow.querySelectorAll("[data-face]").forEach(btn=>{
+  grid.querySelectorAll("[data-mood]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
-      selectedId = btn.getAttribute("data-face") || "meh";
-      selectedLabel = "";
-      ensureLabel();
-      refreshFaces();
-      renderLabels();
+      selectedId = btn.getAttribute("data-mood") || "";
+      refreshActive();
     });
-  });
-
-  tagChips?.querySelectorAll("[data-tag]")?.forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const id = btn.getAttribute("data-tag")||"";
-      if(!id) return;
-      if(tags.has(id)) tags.delete(id); else tags.add(id);
-      btn.classList.toggle("active", tags.has(id));
-    });
-  });
-
-  backdrop.querySelector("#btnAddMoodTag")?.addEventListener("click", ()=>{
-    const inp = backdrop.querySelector("#moodTagInput");
-    const v = (inp?.value||"").trim();
-    if(!v) return;
-    const id = v.toLowerCase().replace(/\s+/g,"_").slice(0,40);
-    tags.add(id);
-
-    // add a chip visually (custom)
-    const chip = document.createElement("button");
-    chip.className = "chip active";
-    chip.setAttribute("data-tag", id);
-    chip.textContent = "🏷️ " + v;
-    chip.addEventListener("click", ()=>{
-      if(tags.has(id)) tags.delete(id); else tags.add(id);
-      chip.classList.toggle("active", tags.has(id));
-    });
-    tagChips.appendChild(chip);
-
-    if(inp) inp.value = "";
   });
 
   backdrop.querySelector("#moodNote")?.addEventListener("input", (e)=>{ note = e.target.value || ""; });
 
   backdrop.querySelector("#btnMoodClear")?.addEventListener("click", ()=>{
     selectedId = "";
-    selectedLabel = "";
     note = "";
-    tags = new Set();
+    refreshActive();
     backdrop.querySelector("#moodNote").value = "";
-    tagChips.querySelectorAll(".chip").forEach(c=>c.classList.remove("active"));
-    labelRow.innerHTML = "";
-    refreshFaces();
   });
 
   backdrop.querySelector("#btnMoodSave")?.addEventListener("click", ()=>{
-    setMoodEntry(iso, selectedId, selectedLabel, Array.from(tags), note);
+    setMoodEntry(iso, selectedId, note);
     view();
-    if(typeof opts.onSaved==="function") opts.onSaved({ iso, spriteId: selectedId, label: selectedLabel, tags: Array.from(tags), note });
-    toast(selectedId ? "Mood guardado ✅" : "Mood eliminado 🧼");
+    if(typeof opts.onSaved==="function") opts.onSaved({ iso, spriteId: selectedId, note });
+    toast(selectedId ? "Emoción guardada ✅" : "Emoción eliminada 🧼");
     close();
   });
 
@@ -2332,7 +2184,23 @@ function openMoodPickerModal(iso, opts={}){
     openMoodMonthModal(iso);
   });
 
-  renderLabels();
+  backdrop.querySelector("#moodUpload")?.addEventListener("change", (e)=>{
+    const files = e.target.files;
+    readFilesAsDataUrls(files, (items)=>{
+      if(!items.length){ toast("No se cargó nada"); return; }
+      state.moodSpritesCustom = Array.isArray(state.moodSpritesCustom) ? state.moodSpritesCustom : [];
+      items.forEach(it=>{
+        const id = uid("m");
+        state.moodSpritesCustom.push({ id, name: it.name.replace(/\.[^.]+$/,""), src: it.dataUrl });
+      });
+      persist();
+      toast(`Sprites cargados: ${items.length} ✅`);
+      // re-open to refresh grid
+      const onSaved = opts.onSaved;
+      close();
+      openMoodPickerModal(iso, { onSaved });
+    });
+  });
 }
 
 function openMoodMonthModal(initialIso){
@@ -2384,37 +2252,6 @@ function openMoodMonthModal(initialIso){
       `;
     }).join("");
 
-    // History cards for this month (new solid mood log)
-    const monthKey = `${y}-${String(m+1).padStart(2,"0")}`;
-    const monthEntries = Object.keys(map).filter(k=>String(k).startsWith(monthKey)).sort((a,b)=>String(b).localeCompare(String(a)));
-    const cardsHtml = monthEntries.slice(0, 31).map(iso=>{
-      const e = map[iso] || {};
-      const sp = getMoodSpriteById(e.spriteId);
-      const tags = Array.isArray(e.tags) ? e.tags : [];
-      const tagText = tags.map(t=>{
-        if(t==="sleep") return "🛏️ Sueño malo";
-        if(t==="debts") return "💸 Deudas";
-        if(t==="work") return "🧰 Trabajo";
-        if(t==="family") return "🏠 Familia";
-        if(t==="health") return "🩺 Salud";
-        if(t==="money") return "💰 Dinero";
-        return "🏷️ " + String(t);
-      }).slice(0,4).join(" · ");
-      return `
-        <div class="moodLogCard" data-iso="${escapeHtml(iso)}">
-          <div class="moodLogHead">
-            ${sp ? `<img class="moodLogImg" src="${escapeHtml(sp.src)}" alt=""/>` : `<div class="moodLogImg ph">＋</div>`}
-            <div class="moodLogMeta">
-              <div class="moodLogTitle">${escapeHtml((e.label||sp?.labels?.[0]||sp?.id||"").toString()||"")}</div>
-              <div class="moodLogSub">${escapeHtml(iso)}</div>
-            </div>
-          </div>
-          ${tagText ? `<div class="moodLogTags">${escapeHtml(tagText)}</div>` : ``}
-          ${e.note ? `<div class="moodLogNote">${escapeHtml(String(e.note))}</div>` : ``}
-        </div>
-      `;
-    }).join("");
-
     backdrop.innerHTML = `
       <div class="modal moodMonthModal" role="dialog" aria-label="Emociones del mes">
         <div class="modalTop">
@@ -2437,11 +2274,6 @@ function openMoodMonthModal(initialIso){
         </div>
 
         <div class="muted" style="margin-top:10px;">Tip: toca un día para elegir/editar su emoción.</div>
-
-        <div class="moodLogSection">
-          <div class="moodLogSectionTitle">Registro del mes</div>
-          <div class="moodLogList">${cardsHtml || `<div class="muted">Aún no hay registros este mes.</div>`}</div>
-        </div>
       </div>
     `;
 
@@ -2618,6 +2450,7 @@ function neuroclawRunNow({ animate=true } = {}){
     const maybePromise = runner({
       sleepLog: state.sleepLog || [],
       moodDaily: state.moodDaily || {},
+      moodSpritesCustom: state.moodSpritesCustom || [],
       reminders: state.reminders || [],
       shoppingHistory: state.shoppingHistory || [],
       house: state.house || {},
