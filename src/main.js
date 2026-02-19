@@ -2174,9 +2174,9 @@ function neuroclawRunNow({ animate=true } = {}){
       house: state.house || {},
       now,
     }).then(out=>{
-      state.neuroclaw = state.neuroclaw || {};
-      state.neuroclaw.last = out;
-      state.neuroclaw.lastViewedAt = Date.now();
+      // Persist last NeuroClaw run for UI + sync
+      state.neuroclawLast = out;
+      state.neuroclawLastViewedAt = Date.now();
       try{ saveState(); }catch(e){}
       try{ if(typeof renderAll==="function") renderAll(); }catch(e){}
     }).catch(err=>{
@@ -2184,8 +2184,6 @@ function neuroclawRunNow({ animate=true } = {}){
     });
   }catch(e){
     console.error("NeuroClaw error", e);
-  }
-}
   }
 }
 
