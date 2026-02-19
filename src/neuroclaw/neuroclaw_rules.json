@@ -1,71 +1,66 @@
 {
-  "v": 2,
-  "mode": "observer",
-  "notes": {
-    "intent": "Soft insights, low spam. Uses current OpenClaw signal keys (sleep_avg_3d, sleep_avg_7d, mood_trend_7d, spend_today_total, spend_7d_total, reminders_pending, cleaning_due_tasks, cleaning_overdue_high).",
-    "max_active_hint": 3
-  },
+  "v": 1,
   "rules": [
     {
       "id": "sleep_low_3d",
       "title": "Sueño bajo (3 días)",
-      "priority": "medium",
+      "priority": "high",
       "conditions": [
         {
-          "key": "sleep_avg_3d",
+          "key": "sleep_avg_3d_hours",
           "op": "<",
-          "value": 6.0
+          "value": 5.5
         }
       ],
-      "message": "Tu promedio de sueño en 3 días está bajo. Hoy conviene bajar la carga y apuntar a recuperación (cosas pequeñas, sin decisiones grandes).",
+      "message": "Tu promedio de sueño en 3 días está bajo. Hoy conviene bajar la carga y evitar decisiones grandes.",
       "why": [
-        "sleep_avg_3d < 6.0"
+        "sleep_avg_3d_hours < 5.5"
       ],
       "action": {
         "type": "suggest",
-        "label": "Plan reset 10 min",
+        "label": "Plan de reset 10 min",
         "payload": {
           "routine": "reset_10"
         }
       }
     },
     {
-      "id": "sleep_very_low_3d",
-      "title": "Sueño muy bajo (3 días)",
-      "priority": "high",
+      "id": "sleep_debt",
+      "title": "Deuda de sueño",
+      "priority": "medium",
       "conditions": [
         {
-          "key": "sleep_avg_3d",
-          "op": "<",
-          "value": 5.0
+          "key": "sleep_debt_3d_hours",
+          "op": ">=",
+          "value": 3
         }
       ],
-      "message": "Sueño muy bajo. Hoy tu misión es simple: lo esencial, agua/comida, y dormir antes. Todo lo demás es extra.",
+      "message": "Tienes deuda de sueño acumulada. Prioriza acostarte antes o siesta corta.",
       "why": [
-        "sleep_avg_3d < 5.0"
+        "sleep_debt_3d_hours >= 3"
       ],
       "action": {
         "type": "suggest",
-        "label": "Recordatorio: dormir temprano",
+        "label": "Recordatorio: dormir",
         "payload": {
           "reminder": "Dormir temprano hoy"
         }
       }
     },
     {
-      "id": "mood_down_trend_7d",
-      "title": "Mood bajando (7 días)",
+      "id": "mood_neg_streak",
+      "title": "Racha emocional pesada",
       "priority": "medium",
       "conditions": [
         {
-          "key": "mood_trend_7d",
-          "op": "<=",
-          "value": -2
+          "key": "mood_neg_streak",
+          "op": ">=",
+          "value": 2
         }
       ],
-      "message": "La tendencia del mood va hacia abajo esta semana. Hoy: una micro-acción que te suba 1 punto (no hace falta épica).",
+      "message": "Llevas varios días con mood pesado. Haz algo pequeño que te suba 1 punto (sin hacerlo épico).",
       "why": [
-        "mood_trend_7d <= -2"
+        "mood_neg_streak >= 2"
       ],
       "action": {
         "type": "suggest",
@@ -81,14 +76,14 @@
       "priority": "low",
       "conditions": [
         {
-          "key": "reminders_pending",
+          "key": "reminders_open",
           "op": ">=",
           "value": 6
         }
       ],
-      "message": "Hay muchos reminders pendientes. Elige 1 solo para cerrar hoy (el más fácil o el que más molesta).",
+      "message": "Tienes muchos reminders pendientes. Elige 1 solo para cerrar hoy (el más fácil o el más molesto).",
       "why": [
-        "reminders_pending >= 6"
+        "reminders_open >= 6"
       ],
       "action": {
         "type": "suggest",
@@ -99,9 +94,9 @@
       }
     },
     {
-      "id": "spend_spike_7d",
-      "title": "Compras altas (7 días)",
-      "priority": "low",
+      "id": "spend_spike",
+      "title": "Compras altas esta semana",
+      "priority": "medium",
       "conditions": [
         {
           "key": "spend_7d_total",
@@ -109,9 +104,9 @@
           "value": 150
         }
       ],
-      "message": "Tus compras de los últimos 7 días están altas. Revisa si hubo un gasto puntual y ajusta lo próximo (sin castigarte).",
+      "message": "Tus compras de los últimos 7 días están altas. Revisa si hubo un gasto puntual y ajusta lo próximo.",
       "why": [
-        "spend_7d_total ≥ 150"
+        "Señal: spend_7d_total ≥ 150"
       ],
       "action": {
         "type": "open_tab",
@@ -121,7 +116,7 @@
     {
       "id": "spend_today_big",
       "title": "Gasto fuerte hoy",
-      "priority": "medium",
+      "priority": "high",
       "conditions": [
         {
           "key": "spend_today_total",
@@ -129,9 +124,9 @@
           "value": 60
         }
       ],
-      "message": "Hoy gastaste bastante. Si no era planificado, pausa antes de otra compra y revisa el presupuesto/lista.",
+      "message": "Hoy gastaste bastante en compras. Si no era planificado, pausa y revisa el presupuesto antes de otra compra.",
       "why": [
-        "spend_today_total ≥ 60"
+        "Señal: spend_today_total ≥ 60"
       ],
       "action": {
         "type": "open_tab",
@@ -141,7 +136,7 @@
     {
       "id": "cleaning_due",
       "title": "Casa acumulándose",
-      "priority": "low",
+      "priority": "medium",
       "conditions": [
         {
           "key": "cleaning_due_tasks",
@@ -149,9 +144,9 @@
           "value": 4
         }
       ],
-      "message": "Hay varias tareas de casa que ya tocarían. Una sesión corta (10–15 min) baja la carga mental.",
+      "message": "Hay varias tareas de limpieza que ya tocarían. Haz una sesión corta de 10–15 min para bajar la carga mental.",
       "why": [
-        "cleaning_due_tasks ≥ 4"
+        "Señal: cleaning_due_tasks ≥ 4"
       ],
       "action": {
         "type": "open_tab",
@@ -160,18 +155,18 @@
     },
     {
       "id": "cleaning_overdue_high",
-      "title": "Limpieza importante atrasada",
+      "title": "Prioridades de limpieza atrasadas",
       "priority": "high",
       "conditions": [
         {
           "key": "cleaning_overdue_high",
           "op": ">=",
-          "value": 1
+          "value": 2
         }
       ],
-      "message": "Hay tareas importantes atrasadas. Si haces solo 1 hoy, ya ganas aire mental.",
+      "message": "Tienes tareas de limpieza importantes atrasadas. Una mini sesión enfocada te va a dar aire mental.",
       "why": [
-        "cleaning_overdue_high ≥ 1"
+        "Señal: cleaning_overdue_high ≥ 2"
       ],
       "action": {
         "type": "open_tab",
@@ -180,13 +175,13 @@
     },
     {
       "id": "low_sleep_high_spend",
-      "title": "Sueño bajo + compras altas",
-      "priority": "medium",
+      "title": "Poca energía + compras",
+      "priority": "high",
       "conditions": [
         {
-          "key": "sleep_avg_3d",
+          "key": "sleep_avg_3d_hours",
           "op": "<",
-          "value": 6.0
+          "value": 5.5
         },
         {
           "key": "spend_7d_total",
@@ -196,7 +191,7 @@
       ],
       "message": "Sueño bajo y compras altas suelen ir juntos. Hoy conviene ir a lo esencial y evitar decisiones impulsivas.",
       "why": [
-        "sleep_avg_3d < 6.0",
+        "sleep_avg_3d_hours < 5.5",
         "spend_7d_total ≥ 150"
       ],
       "action": {

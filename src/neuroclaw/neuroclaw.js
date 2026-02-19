@@ -212,8 +212,8 @@ const mood_trend_7d = trendLastMinusFirst(moodRows, "val", 7);
   function evalConditions(conds, signals){
     if(!Array.isArray(conds) || !conds.length) return false;
     for(const c of conds){
-      const field = c.field;
-      const op = c.operator;
+      const field = (c.field ?? c.key);
+      const op = (c.operator ?? c.op);
       const val = c.value;
       const fn = OPS[op];
       if(!fn) return false;

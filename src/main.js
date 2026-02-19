@@ -123,6 +123,8 @@ const LS = {
   // NeuroClaw
   neuroclawFeedback: "memorycarl_v2_neuroclaw_feedback",
   neuroclawLast: "memorycarl_v2_neuroclaw_last",
+  neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
+  neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -136,6 +138,60 @@ function getSyncUrl(){ return localStorage.getItem(SYNC.urlKey) || ""; }
 function setSyncUrl(u){ localStorage.setItem(SYNC.urlKey, (u||"").trim()); }
 function getSyncApiKey(){ return localStorage.getItem(SYNC.apiKeyKey) || ""; }
 function setSyncApiKey(k){ localStorage.setItem(SYNC.apiKeyKey, (k||"").trim()); }
+
+// ---- NeuroClaw Cloud AI (optional) ----
+function getNeuroAiUrl(){ return (localStorage.getItem(KEYS.neuroclawAiUrl) || "").trim(); }
+function setNeuroAiUrl(u){ localStorage.setItem(KEYS.neuroclawAiUrl, (u||"").trim()); }
+function getNeuroAiKey(){ return (localStorage.getItem(KEYS.neuroclawAiKey) || "").trim(); }
+function setNeuroAiKey(k){ localStorage.setItem(KEYS.neuroclawAiKey, (k||"").trim()); }
+
+
+function ensureNeuroAiConfigured(){
+  let url = getNeuroAiUrl();
+  let key = getNeuroAiKey();
+  if(url && key) return true;
+
+  const ok = confirm("¿Quieres conectar NeuroClaw a tu AI en la nube (Cloud Run)?\n\nEsto permite insights tipo Gemini. Puedes decir que no y seguir solo con reglas.");
+  if(!ok) return false;
+
+  url = prompt("Pega la URL base de tu servicio Cloud Run (sin /insight):", url || "");
+  if(url) setNeuroAiUrl(url);
+
+  key = prompt("Pega tu MC_API_KEY (x-mc-key) para ese servicio:", key || "");
+  if(key) setNeuroAiKey(key);
+
+  return !!(getNeuroAiUrl() && getNeuroAiKey());
+}
+
+async function neuroclawCallCloudAI({signals, now}){
+  const url = getNeuroAiUrl();
+  const key = getNeuroAiKey();
+  if(!url || !key) return null;
+
+  // Minimal summary to keep tokens low.
+  const summary = {
+    days: 7,
+    localTime: (now||new Date()).toISOString(),
+    note: "MemoryCarl NeuroClaw insight",
+  };
+
+  const res = await fetch(url.replace(/\/+$/,'') + "/insight", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-mc-key": key,
+    },
+    body: JSON.stringify({ summary, signals }),
+  });
+
+  let data = null;
+  try{ data = await res.json(); }catch(e){}
+  if(!res.ok){
+    const msg = (data && (data.detail || data.error)) ? JSON.stringify(data) : ("HTTP " + res.status);
+    throw new Error("NeuroClaw Cloud AI error: " + msg);
+  }
+  return data;
+}
 
 function markDirty(){
   localStorage.setItem(SYNC.dirtyKey, "1");
@@ -975,10 +1031,11 @@ function view(){
   if(state.tab==="home"){
     const btnN = root.querySelector("#btnNeuroAnalyze");
     if(btnN){
-      btnN.addEventListener("click", ()=>{
+      btnN.addEventListener("click", (e)=>{
         // Open debug modal and (re)run analysis
         state.neuroDebugOpen = true;
         persist();
+        try{ ensureNeuroAiConfigured(); }catch(_e){}
         neuroclawRunNow({ animate:true });
         view();
       });
@@ -2624,12 +2681,29 @@ function neuroclawRunNow({ animate=true } = {}){
       now,
     });
 
-    const handleOut = (out)=>{
+    const handleOut = async (out)=>{
       state.neuroclawLast = out;
       state.neuroclawLastViewedAt = Date.now();
       try{ saveState(); }catch(e){}
       try{ view(); }catch(e){}
       try{ if(typeof toast==="function") toast("NeuroClaw listo ✅"); }catch(e){}
+
+      // Optional: Cloud AI follow-up (does not replace local rules)
+      try{
+        const url = getNeuroAiUrl();
+        const key = getNeuroAiKey();
+        if(url && key && out && out.signals){
+          try{ if(typeof toast==="function") toast("NeuroClaw AI: consultando…"); }catch(e){}
+          const ai = await neuroclawCallCloudAI({ signals: out.signals, now });
+          state.neuroclawLast = Object.assign({}, state.neuroclawLast, { ai, aiTs: Date.now() });
+          try{ saveState(); }catch(e){}
+          try{ view(); }catch(e){}
+          try{ if(typeof toast==="function") toast("NeuroClaw AI listo 🤖✅"); }catch(e){}
+        }
+      }catch(err){
+        console.warn(err);
+        try{ if(typeof toast==="function") toast("NeuroClaw AI falló (ver consola)"); }catch(e){}
+      }
     };
 
     if(maybePromise && typeof maybePromise.then === "function"){
