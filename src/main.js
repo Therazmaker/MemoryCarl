@@ -482,30 +482,37 @@ let state = {
   routines: load(LS.routines, seedRoutines()),
   shopping: load(LS.shopping, seedShopping()),
   reminders: load(LS.reminders, seedReminders()),
-	// --- DEBUG: expose state in console (safe) ---
-window.MC = window.MC || {};
-window.MC.state = state;
-window.state = state; // opcional, cómodo para escribir rápido en consola
+
   // Home
   musicToday: load(LS.musicToday, null),
   musicLog: load(LS.musicLog, []),
   sleepLog: load(LS.sleepLog, []),
   budgetMonthly: load(LS.budgetMonthly, []),
   calDraw: load(LS.calDraw, {}),
+
   // Mood (daily sprite + note)
   moodDaily: load(LS.moodDaily, {}),
   moodSpritesCustom: load(LS.moodSpritesCustom, []),
+
+  // House
   house: load(LS.house, seedHouse()),
+
   // Insights UI
   insightsMonthOffset: 0,
   insightsDayOpen: false,
   insightsDay: "",
   calMonthOffset: 0,
   musicCursor: 0,
+
   // NeuroClaw
   neuroclawFeedback: load(LS.neuroclawFeedback, []),
   neuroclawLast: load(LS.neuroclawLast, { ts:"", signals:null, suggestions:[] }),
 };
+
+// --- DEBUG: expose state in console (safe) ---
+window.MC = window.MC || {};
+window.MC.state = state;
+window.state = state; // opcional, cómodo para escribir rápido en consola
 
 normalizeHouse();
 
