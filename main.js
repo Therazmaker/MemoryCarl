@@ -101,16 +101,25 @@ function copyFcmToken(){
 const LS = {
   routines: "memorycarl_v2_routines",
   shopping: "memorycarl_v2_shopping",
-  reminders: "memorycarl_v2_reminders",
+  // Reminders: support legacy plural key too
+  reminders: "memorycarl_v2_reminder",
+  remindersLegacy: "memorycarl_v2_reminders",
+
+  // Shopping system (library + history)
+  products: "memorycarl_v2_products",
+  shoppingHistory: "memorycarl_v2_shopping_history",
+  inventory: "memorycarl_v2_inventory",
+
   // Home widgets
   musicToday: "memorycarl_v2_music_today",
   musicLog: "memorycarl_v2_music_log",
-  sleepLog: "memorycarl_v2_sleep_log", // reserved (connect later)
+  sleepLog: "memorycarl_v2_sleep_log",
   budgetMonthly: "memorycarl_v2_budget_monthly",
   calDraw: "memorycarl_v2_cal_draw",
   house: "memorycarl_v2_house",
   moodDaily: "memorycarl_v2_mood_daily",
   moodSpritesCustom: "memorycarl_v2_mood_sprites_custom",
+
   // NeuroClaw
   neuroclawFeedback: "memorycarl_v2_neuroclaw_feedback",
   neuroclawLast: "memorycarl_v2_neuroclaw_last",
@@ -245,6 +254,17 @@ function uid(prefix="id"){ return `${prefix}_${Math.random().toString(16).slice(
 function load(key, fallback){
   try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
   catch{ return fallback; }
+}
+
+function loadAny(keys, fallback){
+  for(const k of (keys||[])){
+    if(!k) continue;
+    try{
+      const raw = localStorage.getItem(k);
+      if(raw) return JSON.parse(raw);
+    }catch(e){}
+  }
+  return fallback;
 }
 function save(key, value){
   localStorage.setItem(key, JSON.stringify(value));
@@ -481,7 +501,7 @@ let state = {
   sheetOpen: (localStorage.getItem("mc_sheet_open")==="1"),
   routines: load(LS.routines, seedRoutines()),
   shopping: load(LS.shopping, seedShopping()),
-  reminders: load(LS.reminders, seedReminders()),
+  reminders: loadAny([LS.reminders, LS.remindersLegacy], seedReminders()),
   // Home
   musicToday: load(LS.musicToday, null),
   musicLog: load(LS.musicLog, []),
@@ -510,6 +530,7 @@ function persist(){
   save(LS.routines, state.routines);
   save(LS.shopping, state.shopping);
   save(LS.reminders, state.reminders);
+  try{ localStorage.removeItem(LS.remindersLegacy); }catch(e){}
   save(LS.musicToday, state.musicToday);
   save(LS.musicLog, state.musicLog);
   save(LS.sleepLog, state.sleepLog);
@@ -716,6 +737,77 @@ function restoreFromSnapshotText(rawText){
 }
 
 
+
+
+
+// ---- Snapshot import (from Google Sheet via Apps Script) ----
+function syncCfgLabelText(){
+  const url = getSyncUrl();
+  const key = getSyncApiKey();
+  if(!url) return "Sync: (no configurado)";
+  const short = url.length > 44 ? (url.slice(0,34) + "…" + url.slice(-8)) : url;
+  return `Sync: ${short}${key ? " • key✅" : ""}`;
+}
+
+function openSyncConfig(){
+  const currentUrl = getSyncUrl();
+  const url = prompt("Apps Script Web App URL (termina en /exec):", currentUrl || "");
+  if(url !== null) setSyncUrl(url);
+  const currentKey = getSyncApiKey();
+  const k = prompt("API key (opcional, si tu script lo requiere):", currentKey || "");
+  if(k !== null) setSyncApiKey(k);
+}
+
+async function fetchLatestSnapshotFromSheet(){
+  // Requiere que tu Apps Script soporte GET con CORS y devuelva JSON/text.
+  if(!getSyncUrl() && !ensureSyncConfigured()){
+    toast("Sync no configurado");
+    return;
+  }
+
+  const base = getSyncUrl();
+  const apiKey = getSyncApiKey();
+  const url = base + (base.includes("?") ? "&" : "?") + "action=latest_snapshot" + (apiKey ? ("&apiKey=" + encodeURIComponent(apiKey)) : "");
+
+  try{
+    toast("Buscando snapshot…");
+    const res = await fetch(url, { method:"GET", cache:"no-store", mode:"cors" });
+    const txt = await res.text();
+
+    // Puede venir como {ok:true,snapshot:{...}} o directamente el snapshot JSON
+    let obj;
+    try{ obj = JSON.parse(txt); }catch(e){ obj = null; }
+
+    const snap = (obj && typeof obj === "object" && (obj.snapshot || obj.data || obj.app)) 
+      ? (obj.snapshot || obj) 
+      : null;
+
+    if(!snap){
+      // Si no pudimos parsear, igual lo dejamos como texto en el textarea para copia manual
+      const ta = document.querySelector("#restoreSnapText");
+      if(ta) ta.value = txt;
+      alert("No pude detectar un snapshot JSON automático. Igual pegué la respuesta en el cuadro para que lo revises.");
+      return;
+    }
+
+    const pretty = JSON.stringify(snap, null, 2);
+    const ta = document.querySelector("#restoreSnapText");
+    if(ta) ta.value = pretty;
+
+    toast("Snapshot cargado ✅");
+  }catch(e){
+    console.warn("fetchLatestSnapshotFromSheet failed", e);
+    alert(
+      "No pude leer el snapshot desde el Sheet.\n\n" +
+      "Causas comunes:\n" +
+      "• Tu Apps Script no está devolviendo CORS (Access-Control-Allow-Origin)\n" +
+      "• El Web App requiere autenticación\n\n" +
+      "Solución rápida:\n" +
+      "1) Abre el Apps Script URL en una pestaña y copia el JSON\n" +
+      "2) Pégalo aquí y dale Restaurar"
+    );
+  }
+}
 
 
 // ---- UI ----
@@ -1061,6 +1153,26 @@ const btnExport = root.querySelector("#btnExport");
     if(ta) ta.value = "";
     try{ toast("Limpio ✅"); }catch(e){}
   });
+
+  const btnFetchSnap = root.querySelector("#btnFetchLatestSnap");
+  if(btnFetchSnap) btnFetchSnap.addEventListener("click", async ()=>{
+    await fetchLatestSnapshotFromSheet();
+    // update label (in case sync config changed)
+    const lbl = root.querySelector("#syncCfgLabel");
+    if(lbl) lbl.textContent = syncCfgLabelText();
+  });
+
+  const btnSyncCfg = root.querySelector("#btnSyncCfg");
+  if(btnSyncCfg) btnSyncCfg.addEventListener("click", ()=>{
+    openSyncConfig();
+    const lbl = root.querySelector("#syncCfgLabel");
+    if(lbl) lbl.textContent = syncCfgLabelText();
+    toast("Sync guardado ✅");
+  });
+
+  const syncLbl = root.querySelector("#syncCfgLabel");
+  if(syncLbl) syncLbl.textContent = syncCfgLabelText();
+
 
   wireActions(root);
   if(state.tab==="home") wireHome(root);
