@@ -109,8 +109,7 @@
       return xs.reduce((a,b)=>a+b,0) / xs.length;
     }
 
-    let stress_avg_3d = avgFieldLastDays(moodRows, "stress", 3);
-    if(stress_avg_3d==null) stress_avg_3d = undefined;
+    const stress_avg_3d = avgFieldLastDays(moodRows, "stress", 3);
 
     // mood trend: compare avg of last 3d vs previous 3d (simple)
     function trendField(rows, field){
@@ -136,51 +135,18 @@
 const mood_trend_7d = trendLastMinusFirst(moodRows, "val", 7);
 
     // ---- Shopping ----
-    // Expect entries with {date, totals.total} or {ts} or an id suffix containing a timestamp.
-    function tsFromId(id){
-      if(!id) return null;
-      const parts = String(id).split("_");
-      const last = parts[parts.length-1];
-      if(!last) return null;
-      // decimal ms (e.g. 1771388895101)
-      if(/^[0-9]{10,}$/.test(last)) return Number(last);
-      // hex ms (e.g. 19c761d1705)
-      if(/^[0-9a-fA-F]{8,}$/.test(last)) return parseInt(last, 16);
-      return null;
-    }
-
-    function shopEntryDate(e){
-      // Try explicit fields first
-      let d = toDate(e.date || e.ts || e.day);
-      if(!d){
-        const tid = tsFromId(e.id);
-        if(tid) d = new Date(tid);
-      }
-      return d;
-    }
-
-    function shopEntryAmount(e){
-      // Prefer totals.total (your structure). Fallback to explicit totals
+    // Expect entries with {date, total} or {ts, amount} etc
+    const shopRows = shoppingHistory.map(e=>{
+      const d = toDate(e.date || e.ts || e.day);
+      // Prefer totals.total (your structure). Fallback to summing items.
       let amount = safeNum(e?.totals?.total, NaN);
       if(!Number.isFinite(amount)){
         amount = safeNum(e.total ?? e.amount ?? e.value ?? e.spend, NaN);
       }
       if(!Number.isFinite(amount)){
         const items = Array.isArray(e.items) ? e.items : [];
-        amount = items.reduce((sum,it)=>{
-          // Support: {price, qty} or {amount} or {total}
-          const qty = safeNum(it.qty ?? it.quantity ?? 1, 1);
-          const price = safeNum(it.price ?? it.unitPrice ?? it.cost, NaN);
-          if(Number.isFinite(price)) return sum + (price * qty);
-          return sum + safeNum(it.amount ?? it.total ?? it.value ?? 0, 0);
-        }, 0);
+        amount = items.reduce((sum,it)=> sum + (safeNum(it.price,0) * safeNum(it.qty,1)), 0);
       }
-      return amount;
-    }
-
-    const shopRows = shoppingHistory.map(e=>{
-      const d = shopEntryDate(e);
-      const amount = shopEntryAmount(e);
       return (d && Number.isFinite(amount)) ? { d, amount } : null;
     }).filter(Boolean).sort((a,b)=>a.d-b.d);
 
@@ -196,42 +162,12 @@ const mood_trend_7d = trendLastMinusFirst(moodRows, "val", 7);
 
     // ---- House/Cleaning ----
     const sessionHist = Array.isArray(house.sessionHistory) ? house.sessionHistory : [];
-
-    function tsFromId2(id){
-      if(!id) return null;
-      const parts = String(id).split("_");
-      const last = parts[parts.length-1];
-      if(!last) return null;
-      if(/^[0-9]{10,}$/.test(last)) return Number(last);
-      if(/^[0-9a-fA-F]{8,}$/.test(last)) return parseInt(last, 16);
-      return null;
-    }
-
     const cleanRows = sessionHist.map(s=>{
-      let d = toDate(s.date || s.ts || s.startTs);
-      if(!d){
-        const tid = tsFromId2(s.id);
-        if(tid) d = new Date(tid);
-      }
-      // Your structure: { totalSec } (seconds)
-      let mins = safeNum(s.minutes ?? s.mins ?? s.durationMin ?? s.duration, NaN);
-      if(!Number.isFinite(mins)){
-        const sec = safeNum(s.totalSec ?? s.total_sec ?? s.seconds ?? s.sec, NaN);
-        if(Number.isFinite(sec)) mins = sec / 60;
-      }
-      // Fallback: if logs contain per-step durations, sum them (optional)
-      if(!Number.isFinite(mins)){
-        const logs = Array.isArray(s.logs) ? s.logs : [];
-        const secSum = logs.reduce((acc, it)=> acc + safeNum(it.sec ?? it.seconds ?? it.s ?? 0, 0), 0);
-        if(secSum>0) mins = secSum/60;
-      }
+      const d = toDate(s.date || s.ts || s.startTs);
+      const mins = safeNum(s.minutes ?? s.mins ?? s.durationMin ?? s.duration, NaN);
       return (d && Number.isFinite(mins)) ? { d, mins } : null;
     }).filter(Boolean);
-
-    const cleaning_minutes_7d = cleanRows
-      .filter(r=>r.d >= new Date(now.getTime() - 7*24*60*60*1000))
-      .reduce((a,b)=>a+b.mins,0);
-
+    const cleaning_minutes_7d = cleanRows.filter(r=>r.d >= new Date(now.getTime() - 7*24*60*60*1000)).reduce((a,b)=>a+b.mins,0);
 
     // due tasks heuristic: if tasks have freqDays and lastDone
     const tasks = Array.isArray(house.tasks) ? house.tasks : [];

@@ -3,6 +3,8 @@ console.log("MemoryCarl loaded");
 const KEYS = {
   neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
   neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",
+  neuroclawAiLog: "memorycarl_v2_neuroclaw_ai_log",
+  neuroclawAiUsage: "memorycarl_v2_neuroclaw_ai_usage",
 };
 
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
@@ -193,6 +195,42 @@ function ensureNeuroAiConfigured(){
   return !!(getNeuroAiUrl() && getNeuroAiKey());
 }
 // ====================== NEUROCLAW AI LOG (localStorage) ======================
+
+function getNeuroAiUsage(){
+  try{
+    const raw = localStorage.getItem(KEYS.neuroclawAiUsage);
+    const obj = raw ? JSON.parse(raw) : null;
+    return (obj && typeof obj === "object") ? obj : null;
+  }catch(e){
+    return null;
+  }
+}
+function saveNeuroAiUsage(obj){
+  try{ localStorage.setItem(KEYS.neuroclawAiUsage, JSON.stringify(obj || {})); }catch(e){}
+}
+function getNeuroAiCallsToday(){
+  const today = (typeof getTodayIso === "function") ? getTodayIso() : new Date().toISOString().slice(0,10);
+  const u = getNeuroAiUsage();
+  if(!u || u.date !== today) return 0;
+  return Number(u.count || 0) || 0;
+}
+function canNeuroAiCall(){
+  return getNeuroAiCallsToday() < 3;
+}
+function incNeuroAiCalls(){
+  const today = (typeof getTodayIso === "function") ? getTodayIso() : new Date().toISOString().slice(0,10);
+  const u = getNeuroAiUsage();
+  const base = (u && u.date === today) ? u : { date: today, count: 0, first_ts: Date.now() };
+  base.count = (Number(base.count || 0) || 0) + 1;
+  base.last_ts = Date.now();
+  saveNeuroAiUsage(base);
+  return base.count;
+}
+function resetNeuroAiCallsToday(){
+  const today = (typeof getTodayIso === "function") ? getTodayIso() : new Date().toISOString().slice(0,10);
+  saveNeuroAiUsage({ date: today, count: 0, first_ts: Date.now(), last_ts: null, reset_ts: Date.now() });
+}
+
 function getAiLog(){
   try{
     const raw = localStorage.getItem(KEYS.neuroclawAiLog);
@@ -1083,6 +1121,59 @@ function view(){
   // Bottom sheet (Settings)
   if(state.tab==="settings"){
     initBottomSheet();
+
+    const btnCopy = root.querySelector("#btnNcAiCopy");
+    if(btnCopy){
+      btnCopy.addEventListener("click", async ()=>{
+        const log = getAiLog();
+        const payload = JSON.stringify({ exportedAt: Date.now(), log }, null, 2);
+        try{
+          await navigator.clipboard.writeText(payload);
+          if(typeof toast==="function") toast("JSON copiado ✅");
+        }catch(e){
+          // Fallback
+          try{
+            const ta = document.createElement("textarea");
+            ta.value = payload;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+            if(typeof toast==="function") toast("JSON copiado ✅");
+          }catch(_e){
+            alert("No pude copiar. Abre consola y usa getAiLog()");
+          }
+        }
+      });
+    }
+
+    const btnDl = root.querySelector("#btnNcAiDownload");
+    if(btnDl){
+      btnDl.addEventListener("click", ()=>{
+        const log = getAiLog();
+        const payload = JSON.stringify({ exportedAt: Date.now(), log }, null, 2);
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const today = (typeof getTodayIso === "function") ? getTodayIso() : new Date().toISOString().slice(0,10);
+        a.href = url;
+        a.download = `neuroclaw_ai_log_${today}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 1500);
+        try{ if(typeof toast==="function") toast("Descargando… 📦"); }catch(e){}
+      });
+    }
+
+    const btnReset = root.querySelector("#btnNcAiReset");
+    if(btnReset){
+      btnReset.addEventListener("click", ()=>{
+        resetNeuroAiCallsToday();
+        try{ if(typeof toast==="function") toast("Contador reseteado (hoy) ✅"); }catch(e){}
+        view();
+      });
+    }
   }
 
   
@@ -1921,7 +2012,41 @@ function viewSettings(){
       <div class="chip">backup • notifs • datos</div>
     </div>
 
+    
     <div class="card">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">NeuroClaw AI</h2>
+          <div class="small">Controla cuántas llamadas haces a Gemini y guarda el JSON para aprendizaje.</div>
+        </div>
+        <div class="chip">${getNeuroAiCallsToday()}/3 hoy</div>
+      </div>
+      <div class="hr"></div>
+      <div class="kv">
+        <div class="k">Límite diario</div>
+        <div class="v">3 llamadas/día (manual)</div>
+      </div>
+      <div class="kv">
+        <div class="k">Llamadas hoy</div>
+        <div class="v"><b>${getNeuroAiCallsToday()}</b> / 3</div>
+      </div>
+      <div class="kv">
+        <div class="k">Logs guardados</div>
+        <div class="v">${getAiLog().length}</div>
+      </div>
+
+      <div class="btnRow" style="margin-top:10px;flex-wrap:wrap;gap:10px;">
+        <button class="btn" id="btnNcAiCopy">Copiar JSON log</button>
+        <button class="btn" id="btnNcAiDownload">Descargar JSON</button>
+        <button class="btn ghost" id="btnNcAiReset">Reset contador (hoy)</button>
+      </div>
+
+      <div class="small" style="margin-top:10px;opacity:.85;">
+        Tip: si quieres entrenar, este log guarda <span class="mono">signals_snapshot</span> + respuesta de Gemini + tu rating.
+      </div>
+    </div>
+
+<div class="card">
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">Backup</h2>
@@ -2789,6 +2914,15 @@ function neuroclawRunNow({ animate=true } = {}){
           try{ saveState(); }catch(e){}
           try{ view(); }catch(e){}
 
+          // Daily limit: max 3 Cloud AI calls/day (protect free tier)
+          if(!canNeuroAiCall()){
+            state.neuroclawAiLoading = false;
+            try{ saveState(); }catch(e){}
+            try{ view(); }catch(e){}
+            try{ if(typeof toast==="function") toast("NeuroClaw AI: límite diario 3/3 🧯"); }catch(e){}
+            return;
+          }
+          incNeuroAiCalls();
           const ai = await neuroclawCallCloudAI({ signals: out.signals, now });
           const aiTs = Date.now();
           state.neuroclawAiLoading = false;
