@@ -2,7 +2,10 @@ console.log("MemoryCarl loaded");
 // ===== LocalStorage Keys =====
 const KEYS = {
   neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
-  neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",
+  neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",,
+  neuroclawAiLog: "memorycarl_v2_neuroclaw_ai_log",
+  neuroclawAiAuto: "memorycarl_v2_neuroclaw_auto_run",
+
 };
 
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
@@ -2750,7 +2753,7 @@ function getMusicDisplay(){
 }
 
 // ====================== NeuroClaw (local suggestions engine) ======================
-function neuroclawRunNow({ animate=true } = {}){
+function neuroclawRunNow({ animate=true, allowCloud=true } = {}){
   try{
     const now = new Date();
     const runner = (window.NeuroClaw && window.NeuroClaw.run) ? window.NeuroClaw.run : null;
@@ -2782,7 +2785,7 @@ function neuroclawRunNow({ animate=true } = {}){
         const cfg = ensureNeuroAiConfig();
         const url = (cfg && cfg.url) ? cfg.url : getNeuroAiUrl();
         const key = (cfg && cfg.key) ? cfg.key : getNeuroAiKey();
-        if(url && key && out && out.signals){
+        if(allowCloud && url && key && out && out.signals){
           try{ if(typeof toast==="function") toast("NeuroClaw AI: consultando…"); }catch(e){}
           // Show AI progress directly inside the Home card.
           state.neuroclawAiLoading = true;
@@ -2804,6 +2807,10 @@ try{
       signals_snapshot: out.signals || {},
       human: ai.human || "",
       raw: ai.raw || {},
+      model: (ai.raw && ai.raw.model) ? ai.raw.model : (ai.model || ""),
+      ai_full: ai,
+      // training-friendly: keep a compact prompt snapshot
+      prompt: { summary: { days: 7, note: "MemoryCarl NeuroClaw insight" }, localTime: (new Date(aiTs)).toISOString() },
       user_rating: null,
       user_note: "",
     });
@@ -6640,8 +6647,7 @@ function initBottomSheet(){
 /* INIT_RENDER_MOVED
 persist();
 view();
-// INIT_NEUROCLAW
-neuroclawRunNow({ animate:false });
+  // INIT_NEUROCLAW (manual only)
 */
 
 
@@ -7111,10 +7117,7 @@ window.openManualItemPrompt = openManualItemPrompt;
 /* Render after module definitions */
 persist();
 view();
-// INIT_NEUROCLAW
-neuroclawRunNow({ animate:false });
-
-
+// INIT_NEUROCLAW (manual only)
 // ---------- Shopping analytics helpers ----------
 function isoDate(d=new Date()){
   const y=d.getFullYear();
