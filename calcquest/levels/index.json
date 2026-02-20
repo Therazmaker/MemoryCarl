@@ -1,0 +1,211 @@
+{
+  "levels": [
+    {
+      "id": "calc_lvl_0_boot",
+      "title": "0) Boot Sequence: Mission Viewer OFFLINE",
+      "hint": "Crea la estructura mínima. Sin #missionRoot no hay visor. Sin #display/#keypad no hay calculadora.",
+      "mission": {
+        "title": "BOOT SEQUENCE",
+        "body": "Es hora. Carga un HTML para visualizar la misión. El visor busca: #missionRoot, #missionTitle, #missionBody. Y prepara #display + #keypad.",
+        "tags": [
+          "HTML",
+          "DOM",
+          "UI"
+        ],
+        "deadline": "00:45"
+      },
+      "starter": {
+        "html": "<!-- Construye el visor + calculadora aquí -->\n",
+        "css": "/* neon mínimo opcional */\n#missionRoot{padding:16px;border:1px solid rgba(37,246,255,.35);border-radius:14px}\n",
+        "js": "// Tip: en todos los niveles tienes window.MISSION disponible.\n"
+      },
+      "tests": [
+        {
+          "kind": "exists",
+          "sel": "#missionRoot"
+        },
+        {
+          "kind": "exists",
+          "sel": "#missionTitle"
+        },
+        {
+          "kind": "exists",
+          "sel": "#missionBody"
+        },
+        {
+          "kind": "exists",
+          "sel": "#display"
+        },
+        {
+          "kind": "exists",
+          "sel": "#keypad"
+        }
+      ],
+      "next": "calc_lvl_1_render"
+    },
+    {
+      "id": "calc_lvl_1_render",
+      "title": "1) Render: mostrar MISSION.title/body",
+      "hint": "Tu HTML debe tener #missionTitle y #missionBody. Luego, en JS, mete MISSION.title/body dentro.",
+      "mission": {
+        "title": "OPERACIÓN: DISPLAY",
+        "body": "Renderiza el mensaje en tu visor. Si no puedes leer MISSION, no puedes seguir.",
+        "tags": [
+          "JS",
+          "DOM"
+        ],
+        "deadline": "00:40"
+      },
+      "starter": {
+        "html": "<section id=\"missionRoot\">\n  <div id=\"missionTitle\"></div>\n  <div id=\"missionBody\"></div>\n</section>\n\n<div id=\"calcRoot\">\n  <div id=\"display\">0</div>\n  <div id=\"keypad\"></div>\n</div>\n",
+        "css": "#display{font-family:ui-monospace,monospace;padding:12px;border:1px solid rgba(255,255,255,.15);border-radius:12px;margin:12px 0;min-height:44px}\n#keypad{display:grid;grid-template-columns:repeat(4, minmax(44px,1fr));gap:8px}\nbutton{padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e9f6ff}\n",
+        "js": "// Render mission\nconst t = document.querySelector('#missionTitle');\nconst b = document.querySelector('#missionBody');\n// TODO: asigna MISSION.title y MISSION.body\n"
+      },
+      "tests": [
+        {
+          "kind": "exists",
+          "sel": "#missionRoot"
+        },
+        {
+          "kind": "exists",
+          "sel": "#missionTitle"
+        },
+        {
+          "kind": "exists",
+          "sel": "#missionBody"
+        },
+        {
+          "kind": "text_includes",
+          "sel": "#missionTitle",
+          "value": "$MISSION.title"
+        },
+        {
+          "kind": "text_includes",
+          "sel": "#missionBody",
+          "value": "$MISSION.body"
+        }
+      ],
+      "next": "calc_lvl_2_keypad"
+    },
+    {
+      "id": "calc_lvl_2_keypad",
+      "title": "2) Keypad Skeleton: botones con data-key",
+      "hint": "Crea botones 0-9 con data-key, y C y =. El tester los va a buscar por data-key.",
+      "mission": {
+        "title": "OPERACIÓN: KEYPAD",
+        "body": "Reconstruye el teclado. El sistema rastrea botones por data-key (dígitos, C, =).",
+        "tags": [
+          "HTML",
+          "dataset"
+        ],
+        "deadline": "00:35"
+      },
+      "starter": {
+        "html": "<section id=\"missionRoot\">\n  <div id=\"missionTitle\"></div>\n  <div id=\"missionBody\"></div>\n</section>\n\n<div id=\"calcRoot\">\n  <div id=\"display\">0</div>\n  <div id=\"keypad\">\n    <!-- TODO: crea botones 7 8 9 +, 4 5 6 -, 1 2 3 *, 0 . C =, etc -->\n  </div>\n</div>\n",
+        "css": "#missionRoot{padding:14px;border:1px solid rgba(37,246,255,.25);border-radius:14px}\n#missionTitle{font-weight:800;margin-bottom:6px}\n#missionBody{opacity:.9}\n#display{font-family:ui-monospace,monospace;padding:12px;border:1px solid rgba(255,255,255,.15);border-radius:12px;margin:12px 0;min-height:44px;text-align:right}\n#keypad{display:grid;grid-template-columns:repeat(4, minmax(44px,1fr));gap:8px}\nbutton{padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e9f6ff;cursor:pointer}\nbutton:active{transform:translateY(1px)}\n",
+        "js": "// Render mission\ndocument.querySelector('#missionTitle').textContent = MISSION.title;\ndocument.querySelector('#missionBody').textContent = MISSION.body;\n"
+      },
+      "tests": [
+        {
+          "kind": "exists",
+          "sel": "#display"
+        },
+        {
+          "kind": "exists",
+          "sel": "#keypad"
+        },
+        {
+          "kind": "exists",
+          "sel": "[data-key='0']"
+        },
+        {
+          "kind": "exists",
+          "sel": "[data-key='7']"
+        },
+        {
+          "kind": "exists",
+          "sel": "[data-key='9']"
+        },
+        {
+          "kind": "exists",
+          "sel": "[data-key='C']"
+        },
+        {
+          "kind": "exists",
+          "sel": "[data-key='=']"
+        }
+      ],
+      "next": "calc_lvl_3_clicks"
+    },
+    {
+      "id": "calc_lvl_3_clicks",
+      "title": "3) Clicks that talk: números al display",
+      "hint": "Usa delegación: escucha clicks en #keypad, mira e.target.dataset.key.",
+      "mission": {
+        "title": "OPERACIÓN: INPUT",
+        "body": "Conecta botones al display. Al clickear dígitos, concatena. Evita ceros a la izquierda.",
+        "tags": [
+          "events",
+          "state"
+        ],
+        "deadline": "00:30"
+      },
+      "starter": {
+        "html": "<section id=\"missionRoot\">\n  <div id=\"missionTitle\"></div>\n  <div id=\"missionBody\"></div>\n</section>\n\n<div id=\"calcRoot\">\n  <div id=\"display\">0</div>\n  <div id=\"keypad\">\n    <button data-key=\"7\">7</button><button data-key=\"8\">8</button><button data-key=\"9\">9</button><button data-op=\"+\">+</button>\n    <button data-key=\"4\">4</button><button data-key=\"5\">5</button><button data-key=\"6\">6</button><button data-op=\"-\">-</button>\n    <button data-key=\"1\">1</button><button data-key=\"2\">2</button><button data-key=\"3\">3</button><button data-op=\"*\">×</button>\n    <button data-key=\"0\">0</button><button data-key=\".\">.</button><button data-key=\"C\">C</button><button data-key=\"=\">=</button>\n  </div>\n</div>\n",
+        "css": "#missionRoot{padding:14px;border:1px solid rgba(37,246,255,.25);border-radius:14px}\n#missionTitle{font-weight:800;margin-bottom:6px}\n#missionBody{opacity:.9}\n#display{font-family:ui-monospace,monospace;padding:12px;border:1px solid rgba(255,255,255,.15);border-radius:12px;margin:12px 0;min-height:44px;text-align:right}\n#keypad{display:grid;grid-template-columns:repeat(4, minmax(44px,1fr));gap:8px}\nbutton{padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e9f6ff;cursor:pointer}\nbutton:active{transform:translateY(1px)}\n",
+        "js": "document.querySelector('#missionTitle').textContent = MISSION.title;\ndocument.querySelector('#missionBody').textContent = MISSION.body;\n\nconst display = document.querySelector('#display');\nconst pad = document.querySelector('#keypad');\nlet cur = '0';\n\nfunction render(){ display.textContent = cur; }\nrender();\n\npad.addEventListener('click', (e)=>{\n  const btn = e.target.closest('button');\n  if(!btn) return;\n  const k = btn.dataset.key;\n  if(!k) return;\n  // TODO: si k es dígito o '.', actualizar cur\n});\n"
+      },
+      "tests": [
+        {
+          "kind": "click_seq_display",
+          "seq": [
+            "1",
+            "2",
+            "3"
+          ],
+          "expect": "123",
+          "displaySel": "#display"
+        },
+        {
+          "kind": "click_seq_display",
+          "seq": [
+            "7"
+          ],
+          "expect": "7",
+          "displaySel": "#display"
+        }
+      ],
+      "next": "calc_lvl_4_ops"
+    },
+    {
+      "id": "calc_lvl_4_ops",
+      "title": "4) Operadores + = : primera calculadora real",
+      "hint": "Estado simple: a, op, b. Cuando presionas op, guardas a/op. Cuando presionas = calculas.",
+      "mission": {
+        "title": "OPERACIÓN: CALC",
+        "body": "Implementa + - * / y =. Maneja división por 0 con 'Error'. C debe resetear todo.",
+        "tags": [
+          "state",
+          "math"
+        ],
+        "deadline": "00:25"
+      },
+      "starter": {
+        "html": "<section id=\"missionRoot\">\n  <div id=\"missionTitle\"></div>\n  <div id=\"missionBody\"></div>\n</section>\n\n<div id=\"calcRoot\">\n  <div id=\"display\">0</div>\n  <div id=\"keypad\">\n    <button data-key=\"7\">7</button><button data-key=\"8\">8</button><button data-key=\"9\">9</button><button data-op=\"+\">+</button>\n    <button data-key=\"4\">4</button><button data-key=\"5\">5</button><button data-key=\"6\">6</button><button data-op=\"-\">-</button>\n    <button data-key=\"1\">1</button><button data-key=\"2\">2</button><button data-key=\"3\">3</button><button data-op=\"*\">×</button>\n    <button data-key=\"0\">0</button><button data-key=\".\">.</button><button data-key=\"C\">C</button><button data-op=\"/\">÷</button>\n    <button data-key=\"=\">=</button>\n  </div>\n</div>\n",
+        "css": "#missionRoot{padding:14px;border:1px solid rgba(37,246,255,.25);border-radius:14px}\n#missionTitle{font-weight:800;margin-bottom:6px}\n#missionBody{opacity:.9}\n#display{font-family:ui-monospace,monospace;padding:12px;border:1px solid rgba(255,255,255,.15);border-radius:12px;margin:12px 0;min-height:44px;text-align:right}\n#keypad{display:grid;grid-template-columns:repeat(4, minmax(44px,1fr));gap:8px}\n#keypad button[data-key='=']{grid-column:1/-1;background:rgba(37,246,255,.12);border-color:rgba(37,246,255,.35)}\nbutton{padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e9f6ff;cursor:pointer}\nbutton:active{transform:translateY(1px)}\n",
+        "js": "document.querySelector('#missionTitle').textContent = MISSION.title;\ndocument.querySelector('#missionBody').textContent = MISSION.body;\n\nconst display = document.querySelector('#display');\nconst pad = document.querySelector('#keypad');\n\nlet a = null;\nlet op = null;\nlet cur = '0';\n\nfunction render(){ display.textContent = cur; }\nrender();\n\nfunction isDigit(k){ return /^[0-9]$/.test(k); }\nfunction appendChar(k){\n  if(k === '.'){\n    if(cur.includes('.')) return;\n    cur = (cur === '0') ? '0.' : (cur + '.');\n    return;\n  }\n  if(isDigit(k)){\n    cur = (cur === '0') ? k : (cur + k);\n  }\n}\n\nfunction compute(x, op, y){\n  const A = Number(x), B = Number(y);\n  if(op === '+') return A + B;\n  if(op === '-') return A - B;\n  if(op === '*') return A * B;\n  if(op === '/'){\n    if(B === 0) return 'Error';\n    return A / B;\n  }\n  return B;\n}\n\npad.addEventListener('click', (e)=>{\n  const btn = e.target.closest('button');\n  if(!btn) return;\n\n  const k = btn.dataset.key;\n  const o = btn.dataset.op;\n\n  if(k){\n    if(k === 'C'){\n      // TODO reset a/op/cur\n    } else if(k === '='){\n      // TODO compute if possible\n    } else {\n      // digit or '.'\n      appendChar(k);\n    }\n    render();\n    return;\n  }\n\n  if(o){\n    // TODO set operator flow\n    render();\n  }\n});\n"
+      },
+      "tests": [
+        {
+          "kind": "exists",
+          "sel": "#display"
+        },
+        {
+          "kind": "exists",
+          "sel": "#keypad"
+        }
+      ],
+      "next": null
+    }
+  ]
+}

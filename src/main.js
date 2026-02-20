@@ -2284,6 +2284,16 @@ function viewLearn(){
     </div>
 
     <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;gap:10px;">
+        <div>
+          <div style="font-weight:800;">CalcQuest ⚡</div>
+          <div class="small">Hacker-neón: reconstruye HTML/CSS/JS y termina con una calculadora real</div>
+        </div>
+        <button class="btn" onclick="openCalcQuest()">Abrir</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="small">
         Este módulo te hace preguntas sobre la estructura de MemoryCarl.
         Cada respuesta puede abrir una “ficha” para que escribas tu explicación en 1 línea.
@@ -2332,6 +2342,31 @@ function openLearnQuest(){
   b.querySelector("#lqCloseBtn").addEventListener("click", close);
 }
 window.openLearnQuest = openLearnQuest;
+
+function openCalcQuest(){
+  const b = document.createElement("div");
+  b.className = "modalBackdrop";
+  b.innerHTML = `
+    <div class="modal" style="max-width:1000px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <h2 style="margin:4px 0 10px;">CalcQuest ⚡</h2>
+        <button class="btn" id="cqCloseBtn" style="padding:8px 10px;">Cerrar</button>
+      </div>
+      <div class="learnFrame" style="height:80vh;">
+        <iframe title="CalcQuest" src="./calcquest/" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      </div>
+      <div class="small" style="margin-top:10px;opacity:.8;">
+        Tip: Los niveles guardan tu código en localStorage. Usa “EXPORT” para llevarte tu calculadora a un entorno real.
+      </div>
+    </div>
+  `;
+  document.body.appendChild(b);
+  const close = ()=>b.remove();
+  b.addEventListener("click",(e)=>{ if(e.target===b) close(); });
+  b.querySelector("#cqCloseBtn").addEventListener("click", close);
+}
+window.openCalcQuest = openCalcQuest;
+
 
 
 
