@@ -4,6 +4,8 @@ const LS = {
   codePrefix: "mc_calcquest_code_",
 };
 
+const STATS_PREFIX = "mc_calcquest_stats_";
+
 const DEFAULT_MISSION = {
   title: "INCOMING TRANSMISSION",
   body: "Es hora. Carga un HTML para visualizar la misión.",
@@ -67,9 +69,45 @@ ${safeHtml}
   window.$ = (sel)=>document.querySelector(sel);
 </script>
 <script>
+  // Console bridge (iframe -> parent)
+  (function(){
+    const send = (kind, args)=>{
+      try{ parent.postMessage({__calcquest:1, kind, args: (args||[]).map(a=>{
+        try{ return (typeof a === 'string') ? a : JSON.stringify(a); }catch{ return String(a); }
+      })}, '*'); }catch(e){}
+    };
+    ['log','warn','error'].forEach(k=>{
+      const orig = console[k];
+      console[k] = function(...a){ send(k, a); return orig.apply(console, a); };
+    });
+    window.addEventListener('error', (e)=>send('error', [e.message || 'Error']));
+  })();
+</script>
+<script>
 ${safeJs}
 </script>
 </body></html>`;
+}
+
+function fmtMs(ms){
+  if(ms == null) return "—";
+  const s = Math.max(0, Math.floor(ms/1000));
+  const mm = String(Math.floor(s/60)).padStart(2,'0');
+  const ss = String(s%60).padStart(2,'0');
+  return `${mm}:${ss}`;
+}
+
+function loadStats(levelId){
+  try{
+    const raw = localStorage.getItem(STATS_PREFIX + levelId);
+    if(!raw) return {bestMs:null, attempts:0};
+    const s = JSON.parse(raw);
+    return {bestMs: (typeof s.bestMs==='number') ? s.bestMs : null, attempts: (s.attempts||0)};
+  }catch{ return {bestMs:null, attempts:0}; }
+}
+
+function saveStats(levelId, stats){
+  localStorage.setItem(STATS_PREFIX + levelId, JSON.stringify(stats||{}));
 }
 
 function exists(doc, sel){ return !!doc.querySelector(sel); }
@@ -130,6 +168,13 @@ async function runTests(level, iframe){
         const got = textOf(doc, displaySel);
         assert(got === t.expect, `Display esperado "${t.expect}", obtuve "${got}"`);
         pass(`Clicks ${t.seq.join("")} -> ${t.expect}`);
+      }else if(t.kind === "type_seq_display"){
+        const displaySel = t.displaySel || "#display";
+        if(doc.querySelector('[data-key="C"]')) click(doc, '[data-key="C"]');
+        typeKeys(doc, t.seq);
+        const got = textOf(doc, displaySel);
+        assert(got === t.expect, `Display esperado "${t.expect}", obtuve "${got}"`);
+        pass(`Input ${t.seq.join(" ")} -> ${t.expect}`);
       }else if(t.kind === "eval"){
         // Run arbitrary expression in iframe context (level author only)
         const res = win.eval(t.code);
@@ -189,7 +234,7 @@ function appShell(){
         <div class="pill" id="statusPill">MISSION VIEWER: OFFLINE</div>
       </div>
 
-      <div class="feed scanline" id="feed"></div>
+      <pre class="feed scanline" id="feed" aria-label="Terminal feed"></pre>
 
       <div class="levelBox">
         <select class="select" id="levelSelect"></select>
@@ -203,6 +248,12 @@ function appShell(){
             <div class="l">Estado</div>
             <div class="v" id="levelState">—</div>
           </div>
+          <div class="k">
+            <div class="l">Tiempo</div>
+            <div class="v" id="timerNow">00:00</div>
+            <div class="l" style="margin-top:6px">Best</div>
+            <div class="v" id="timerBest">—</div>
+          </div>
         </div>
 
         <div class="row">
@@ -211,13 +262,28 @@ function appShell(){
           <button class="btn ghost" id="btnReset">⟲ RESET LEVEL</button>
         </div>
 
-        <div class="row" style="justify-content:space-between;">
+        <div class="row" style="justify-content:space-between;gap:10px">
           <div class="small" id="hintLine">Tip: Empieza por HTML. Sin DOM, no hay misión.</div>
           <span class="badge" id="progressBadge">0/0</span>
         </div>
 
+        <div class="row" style="justify-content:space-between;gap:10px">
+          <div class="req" id="reqLine">Edita: <b>index.html</b></div>
+          <span class="badge ghost" id="whatNow">Tutorial</span>
+        </div>
+
+        <div class="row">
+          <button class="btn ghost" id="btnHints">💡 Tutorial</button>
+          <button class="btn ghost" id="btnSolution">🧩 Solución</button>
+          <button class="btn ghost" id="btnNewAttempt">⏱ Nuevo intento</button>
+        </div>
+
         <div class="row">
           <button class="btn" id="btnExport">⬇ EXPORT (HTML/CSS/JS)</button>
+        </div>
+
+        <div class="small tip">
+          Tip: si te atoras, abre <b>Tutorial</b>. La solución es para mirar 10s, cerrar, borrar y reescribir.
         </div>
       </div>
     </div>
@@ -239,33 +305,98 @@ function appShell(){
         </div>
       </div>
 
+      <div class="console">
+        <div class="consoleHeader">
+          <div>CONSOLE</div>
+          <button class="btn ghost" id="btnClearConsole">Clear</button>
+        </div>
+        <pre class="consoleOut" id="consoleOut"></pre>
+      </div>
+
       <div class="footerBar">
-        <div class="small" id="footerInfo">Ctrl+S guarda. (Auto) Preview recarga cuando tú quieras.</div>
+        <div class="small" id="footerInfo">Ctrl+S guarda. Preview recarga cuando tú quieras.</div>
         <div class="row">
           <span class="badge" id="resultBadge">—</span>
         </div>
       </div>
     </div>
+
+    <div class="modal hidden" id="helpModal" aria-hidden="true">
+      <div class="modalCard">
+        <div class="modalHead">
+          <div class="modalTitle" id="helpTitle">Tutorial</div>
+          <button class="btn ghost" id="btnHelpClose">Cerrar</button>
+        </div>
+        <div class="modalBody" id="helpBody"></div>
+        <div class="modalFoot">
+          <button class="btn ghost" id="btnApplyHtml">Aplicar HTML</button>
+          <button class="btn ghost" id="btnApplyCss">Aplicar CSS</button>
+          <button class="btn ghost" id="btnApplyJs">Aplicar JS</button>
+          <div class="small" id="helpNote"></div>
+        </div>
+      </div>
+    </div>
+
   </div>`;
 }
 
+function computeNeeds(level){
+  const tests = (level && level.tests) ? level.tests : [];
+  const needHtml = true; // siempre hay UI
+  const needJs = tests.some(t=>["eval","click_seq_display","type_seq_display","text_includes","text_eq"].includes(t.kind)) || /app\.js|JS|render|click/i.test(level?.hint||"");
+  const needCss = !!(level?.starter?.css && String(level.starter.css).trim().length);
+
+  let primary = "index.html";
+  if(needJs && /render|ops|click|teclado|calc|event/i.test(level?.title||"")) primary = "app.js";
+  if(level?.id && level.id.includes("_1_")) primary = "app.js";
+  const labelParts = [];
+  if(needHtml) labelParts.push("HTML");
+  if(needCss) labelParts.push("CSS");
+  if(needJs) labelParts.push("JS");
+
+  return {
+    html: needHtml,
+    css: needCss,
+    js: needJs,
+    primary,
+    label: labelParts.join(" + "),
+  };
+}
+
 function pushMsg(feed, who, body){
-  const el = document.createElement("div");
-  el.className = "msg";
-  el.innerHTML = `
-    <div class="top">
-      <div class="who">${escapeHtml(who)}</div>
-      <div class="time">${escapeHtml(nowTime())}</div>
-    </div>
-    <div class="body">${escapeHtml(body)}</div>
-  `;
-  feed.appendChild(el);
+  const t = nowTime();
+  const line = `[${t}] ${who}: ${String(body ?? '')}`;
+  const cur = feed.textContent || "";
+  feed.textContent = (cur ? (cur + "\n") : "") + line;
   feed.scrollTop = feed.scrollHeight;
 }
 
 function init(){
   const root = document.querySelector("#app");
   root.innerHTML = appShell();
+
+  // Console output area
+  const consoleOut = document.querySelector('#consoleOut');
+  let consoleLines = [];
+  const pushConsole = (kind, args)=>{
+    const t = nowTime();
+    const line = `[${t}] ${kind.toUpperCase()}: ${(args||[]).join(' ')}`;
+    consoleLines.push(line);
+    if(consoleLines.length > 200) consoleLines = consoleLines.slice(-200);
+    consoleOut.textContent = consoleLines.join('\n');
+    consoleOut.scrollTop = consoleOut.scrollHeight;
+  };
+
+  window.addEventListener('message', (ev)=>{
+    const d = ev.data;
+    if(!d || d.__calcquest !== 1) return;
+    pushConsole(d.kind || 'log', d.args || []);
+  });
+
+  document.querySelector('#btnClearConsole').addEventListener('click', ()=>{
+    consoleLines = [];
+    consoleOut.textContent = '';
+  });
 
   const feed = document.querySelector("#feed");
   pushMsg(feed, "SYSTEM", "📡 Incoming Transmission...");
@@ -284,7 +415,136 @@ function init(){
       level: levels.find(l=>l.id===curId),
       tab: "html",
       code: {html:"", css:"", js:""},
+      timerStart: null,
+      timerT: null,
+      passed: false,
+      helpMode: null,
     };
+    function applySolution(file){
+      const sol = state.level?.solution;
+      if(!sol) { pushMsg(feed, "ERROR", "No hay solución para este nivel."); return; }
+      if(file === 'html'){ state.code.html = sol.html || ''; state.tab = 'html'; }
+      if(file === 'css'){ state.code.css = sol.css || ''; state.tab = 'css'; }
+      if(file === 'js'){ state.code.js = sol.js || ''; state.tab = 'js'; }
+      saveCode(state.level.id, state.code);
+      updateEditor();
+      buildPreview();
+      pushMsg(feed, "SYSTEM", `Aplicado ${file}. Ahora intenta reescribirlo sin mirar ⚡`);
+    }
+
+
+
+    function startAttempt(){
+      state.passed = false;
+      state.timerStart = Date.now();
+      if(state.timerT) clearInterval(state.timerT);
+      state.timerT = setInterval(()=>{
+        const now = Date.now();
+        const ms = now - (state.timerStart || now);
+        document.querySelector('#timerNow').textContent = fmtMs(ms);
+      }, 250);
+      document.querySelector('#timerNow').textContent = '00:00';
+      document.querySelector('#resultBadge').textContent = '—';
+      document.querySelector('#statusPill').textContent = 'MISSION VIEWER: OFFLINE';
+    }
+
+    function stopAttemptAndMaybeSave(ok){
+      if(!ok || state.passed) return;
+      state.passed = true;
+      if(state.timerT){ clearInterval(state.timerT); state.timerT = null; }
+      const ms = Date.now() - (state.timerStart || Date.now());
+      const stats = loadStats(state.level.id);
+      stats.attempts = (stats.attempts||0) + 1;
+      if(stats.bestMs == null || ms < stats.bestMs){
+        stats.bestMs = ms;
+        pushMsg(document.querySelector('#feed'), 'SYSTEM', `🏁 Nuevo best: ${fmtMs(ms)}`);
+      }else{
+        pushMsg(document.querySelector('#feed'), 'SYSTEM', `🏁 Tiempo: ${fmtMs(ms)}`);
+      }
+      saveStats(state.level.id, stats);
+      document.querySelector('#timerBest').textContent = fmtMs(stats.bestMs);
+    }
+
+    function hideHelp(){
+  const modal = document.querySelector('#helpModal');
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden','true');
+}
+
+function showHelp(mode){
+  const modal = document.querySelector('#helpModal');
+  const title = document.querySelector('#helpTitle');
+  const body = document.querySelector('#helpBody');
+  const note = document.querySelector('#helpNote');
+
+  const lvl = state.level;
+  const need = computeNeeds(lvl);
+
+  // Default: disable apply buttons if there is no solution for that file
+  const sol = lvl?.solution || null;
+  const canApply = !!sol;
+
+  document.querySelector('#btnApplyHtml').style.display = canApply ? 'inline-flex' : 'none';
+  document.querySelector('#btnApplyCss').style.display  = canApply ? 'inline-flex' : 'none';
+  document.querySelector('#btnApplyJs').style.display   = canApply ? 'inline-flex' : 'none';
+
+  if(mode === 'solution'){
+    title.textContent = 'Solución (para mirar y reescribir)';
+    if(!sol){
+      body.innerHTML = `<div class="small">Aún no hay solución para este nivel.</div>`;
+      note.textContent = '';
+    }else{
+      body.innerHTML = `
+        <div class="small">Úsala así: mira 10 segundos, cierra, borra y reescribe. Repetición = poder ⚡</div>
+        <div class="helpTabs">
+          <button class="pillBtn" data-hfile="html">index.html</button>
+          <button class="pillBtn" data-hfile="css">styles.css</button>
+          <button class="pillBtn" data-hfile="js">app.js</button>
+        </div>
+        <pre class="helpCode" id="helpCode"></pre>
+      `;
+      const helpCode = body.querySelector('#helpCode');
+      const setFile = (f)=>{
+        const v = (sol && sol[f]) ? sol[f] : '';
+        helpCode.textContent = v;
+        body.querySelectorAll('.pillBtn').forEach(b=>b.classList.toggle('active', b.dataset.hfile===f));
+      };
+      body.querySelectorAll('.pillBtn').forEach(b=>{
+        b.addEventListener('click', ()=>setFile(b.dataset.hfile));
+      });
+      setFile('html');
+      note.textContent = `Necesitas: ${need.label}`;
+    }
+  }else{
+    // Guided tutorial mode
+    title.textContent = 'Tutorial guiado';
+    const steps = (lvl?.hints && lvl.hints.length) ? lvl.hints : [lvl?.hint].filter(Boolean);
+    const mission = lvl?.mission || DEFAULT_MISSION;
+    body.innerHTML = `
+      <div class="missionBox">
+        <div class="missionTitle">${escapeHtml(mission.title || 'MISIÓN')}</div>
+        <div class="missionBody">${escapeHtml(mission.body || '')}</div>
+      </div>
+
+      <div class="small" style="margin-top:10px">Qué tienes que hacer (en orden):</div>
+      <ol class="steps">${(steps||[]).map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ol>
+
+      <div class="small" style="margin-top:10px">
+        Dónde escribir ahora: <b>${need.primary}</b>
+      </div>
+
+      <div class="chips">
+        <span class="chip ${need.html?'on':''}">HTML</span>
+        <span class="chip ${need.css?'on':''}">CSS</span>
+        <span class="chip ${need.js?'on':''}">JS</span>
+      </div>
+    `;
+    note.textContent = `Objetivo: pasar ${lvl?.tests?.length||0} tests.`;
+  }
+
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden','false');
+}
 
     function refreshLevelMeta(){
       document.querySelector("#levelName").textContent = state.level?.title || "-";
@@ -294,7 +554,14 @@ function init(){
       document.querySelector("#levelState").className = "v";
       document.querySelector("#resultBadge").textContent = "—";
       document.querySelector("#statusPill").textContent = "MISSION VIEWER: OFFLINE";
-    }
+      const stats = loadStats(state.level?.id || '');
+      document.querySelector('#timerBest').textContent = fmtMs(stats.bestMs);
+      document.querySelector('#timerNow').textContent = '00:00';
+      hideHelp();
+      const need = computeNeeds(state.level);
+      document.querySelector('#reqLine').innerHTML = `Edita: <b>${need.primary}</b>`;
+      document.querySelector('#whatNow').textContent = need.label || 'Tutorial';
+}
 
     function setStateOk(ok){
       const el = document.querySelector("#levelState");
@@ -347,6 +614,7 @@ function init(){
         pushMsg(feed, res.ok ? "TRACE" : "ERROR", line);
       });
       setStateOk(res.ok);
+      stopAttemptAndMaybeSave(res.ok);
       if(res.ok){
         // auto-advance if configured
         if(state.level?.next){
@@ -366,6 +634,7 @@ function init(){
       updateEditor();
       buildPreview();
       refreshLevelMeta();
+      startAttempt();
     }
 
     // events
@@ -380,6 +649,7 @@ function init(){
       loadCode();
       pushMsg(feed, "SYSTEM", "Cambiando nivel: " + lvl.title);
       pushMsg(feed, "SYSTEM", (lvl.mission?.body || DEFAULT_MISSION.body));
+      startAttempt();
     });
 
     document.querySelectorAll(".tab").forEach(tab=>{
@@ -408,6 +678,24 @@ function init(){
     document.querySelector("#btnRun").addEventListener("click", run);
     document.querySelector("#btnReset").addEventListener("click", resetLevel);
 
+    document.querySelector('#btnNewAttempt').addEventListener('click', ()=>{
+      pushMsg(feed, 'SYSTEM', '⏱ Nuevo intento iniciado.');
+      startAttempt();
+    });
+
+        document.querySelector('#btnHints').addEventListener('click', ()=>{
+      showHelp('hints');
+    });
+    document.querySelector('#btnSolution').addEventListener('click', ()=>{
+      showHelp('solution');
+    });
+
+    document.querySelector('#btnHelpClose').addEventListener('click', hideHelp);
+
+    document.querySelector('#btnApplyHtml').addEventListener('click', ()=>applySolution('html'));
+    document.querySelector('#btnApplyCss').addEventListener('click', ()=>applySolution('css'));
+    document.querySelector('#btnApplyJs').addEventListener('click', ()=>applySolution('js'));
+
     document.querySelector("#btnExport").addEventListener("click", ()=>{
       const base = state.level?.id || "calcquest";
       download(base + "_index.html", state.code.html);
@@ -419,6 +707,7 @@ function init(){
     // init
     refreshLevelMeta();
     loadCode();
+    startAttempt();
   }).catch(err=>{
     document.querySelector("#feed").innerHTML = `<div class="msg"><div class="body">Error cargando niveles: ${escapeHtml(String(err))}</div></div>`;
   });
