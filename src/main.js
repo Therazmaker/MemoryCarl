@@ -327,6 +327,97 @@ async function neuroclawCallCloudAI({signals, now}){
   }
 }
 
+// ====================== NeuroClaw AI (local fallback / learning) ======================
+// When Cloud AI is capped (3/day) or unavailable, we still want a reflective voice.
+// This function reuses the saved AI log as "memory" and blends it with current signals.
+function neuroclawLocalFallbackAI({signals, now} = {}){
+  const ts = Date.now();
+  const log = getAiLog();
+  const recent = Array.isArray(log) ? log.slice(0, 3) : [];
+
+  // Helper: safely read numbers
+  const num = (v)=>{
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Pull a couple of key signals if present
+  const sleep3 = num(signals?.sleep_avg_3d_hours);
+  const sleep7 = num(signals?.sleep_avg_7d_hours);
+  const clean7 = num(signals?.cleaning_minutes_7d);
+  const spend1 = num(signals?.spend_1d_total);
+  const spend7 = num(signals?.spend_7d_total);
+  const remOpen = num(signals?.reminders_open);
+
+  // Compare with last snapshot, if we have one
+  const prevSig = recent?.[0]?.signals_snapshot || null;
+  const delta = (k)=>{
+    const a = num(signals?.[k]);
+    const b = num(prevSig?.[k]);
+    if(a==null || b==null) return null;
+    return a - b;
+  };
+
+  const dClean = delta('cleaning_minutes_7d');
+  const dSpend1 = delta('spend_1d_total');
+  const dRem = delta('reminders_open');
+
+  // Build reflective narrative (short, calm, actionable)
+  const lines = [];
+  lines.push('Hoy entro en modo local: no voy a gastar más llamadas externas, pero sí puedo pensar con lo que ya guardamos.');
+
+  // Anchor in concrete signals
+  const facts = [];
+  if(sleep3!=null) facts.push(`sueño 3d ≈ ${sleep3.toFixed(1)}h`);
+  else if(sleep7!=null) facts.push(`sueño 7d ≈ ${sleep7.toFixed(1)}h`);
+  if(clean7!=null) facts.push(`limpieza 7d ≈ ${Math.round(clean7)} min`);
+  if(spend1!=null) facts.push(`gasto 24h ≈ ${spend1.toFixed(2)}`);
+  else if(spend7!=null) facts.push(`gasto 7d ≈ ${spend7.toFixed(2)}`);
+  if(remOpen!=null) facts.push(`pendientes ≈ ${Math.round(remOpen)}`);
+  if(facts.length) lines.push(`Señales: ${facts.join(' · ')}.`);
+
+  // Simple trend notes
+  const trendBits = [];
+  if(dClean!=null) trendBits.push(dClean>0 ? 'más constancia en limpieza' : (dClean<0 ? 'menos limpieza que la última vez' : 'limpieza estable'));
+  if(dSpend1!=null) trendBits.push(dSpend1>0 ? 'gasto reciente subió' : (dSpend1<0 ? 'gasto reciente bajó' : 'gasto estable'));
+  if(dRem!=null) trendBits.push(dRem>0 ? 'más pendientes abiertos' : (dRem<0 ? 'menos pendientes abiertos' : 'pendientes estables'));
+  if(trendBits.length) lines.push(`Tendencia vs tu última lectura guardada: ${trendBits.join(' · ')}.`);
+
+  // Reuse a tiny excerpt of previous "human" as memory (no long quotes)
+  const memorySeeds = recent
+    .map(x => (x && typeof x.human === 'string') ? x.human.trim() : '')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(t => t.replace(/\s+/g,' ').slice(0, 160));
+
+  if(memorySeeds.length){
+    lines.push('Ecos de tus últimas visiones:');
+    memorySeeds.forEach((t,i)=> lines.push(`• ${t}${t.length>=160?'…':''}`));
+  }
+
+  // Gentle prompt / question
+  const q = [];
+  if(remOpen!=null && remOpen>=8) q.push('¿Qué 1 cosa pequeña, si la terminas hoy, te devuelve sensación de control?');
+  if(spend1!=null && spend1>0) q.push('Si tuvieras que ponerle un nombre emocional a ese gasto, ¿cuál sería?');
+  if(clean7!=null && clean7>0) q.push('¿Qué parte de la casa se sintió “más liviana” después de limpiar?');
+  if(!q.length) q.push('¿Qué necesitas escuchar hoy: claridad, calma, o impulso?');
+  lines.push(`Pregunta: ${q[0]}`);
+
+  // Micro-action
+  lines.push('Micro-acción (3 min): abre tu presupuesto mensual y escribe solo 1 cosa: “lo que más me pesa” y “lo que más me libera”. Nada más.');
+
+  const human = lines.join('\n');
+  const ai = {
+    human,
+    raw: {
+      source: 'local_fallback',
+      used_logs: recent.map(x=>x?.id).filter(Boolean),
+      ts,
+    }
+  };
+  return ai;
+}
+
 function flushSync(reason="auto"){
   try{
     if (!isDirty()) return;
@@ -2916,16 +3007,41 @@ function neuroclawRunNow({ animate=true } = {}){
 
           // Daily limit: max 3 Cloud AI calls/day (protect free tier)
           if(!canNeuroAiCall()){
+            // Fallback: generate a reflective insight using stored AI logs as memory (no external call).
+            const aiTs = Date.now();
+            const ai = neuroclawLocalFallbackAI({ signals: out.signals, now });
             state.neuroclawAiLoading = false;
+            state.neuroclawLast = Object.assign({}, state.neuroclawLast, { ai, aiTs });
+
+            try{
+              const id = "local_" + new Date(aiTs).toISOString();
+              appendAiLog({
+                id,
+                ts: aiTs,
+                window_days: 7,
+                signals_snapshot: out.signals || {},
+                human: ai?.human || "",
+                raw: ai?.raw || { source: 'local_fallback' },
+                user_rating: null,
+                user_note: "",
+              });
+            }catch(e){}
+
             try{ saveState(); }catch(e){}
             try{ view(); }catch(e){}
-            try{ if(typeof toast==="function") toast("NeuroClaw AI: límite diario 3/3 🧯"); }catch(e){}
+            try{ if(typeof toast==="function") toast("NeuroClaw AI: límite 3/3, usando memoria local 🧠"); }catch(e){}
             return;
           }
           incNeuroAiCalls();
-          const ai = await neuroclawCallCloudAI({ signals: out.signals, now });
+          let ai = await neuroclawCallCloudAI({ signals: out.signals, now });
           const aiTs = Date.now();
           state.neuroclawAiLoading = false;
+
+          // If Cloud AI fails, fallback locally (still uses stored log).
+          if(!ai){
+            ai = neuroclawLocalFallbackAI({ signals: out.signals, now });
+          }
+
           state.neuroclawLast = Object.assign({}, state.neuroclawLast, { ai, aiTs });
 
 try{
