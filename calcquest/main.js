@@ -302,7 +302,8 @@ function appShell(){
         </div>
 
         <div class="preview">
-          <iframe id="preview" sandbox="allow-scripts allow-forms allow-pointer-lock"></iframe>
+          <!-- allow-same-origin is required so parent can inspect iframe DOM for tests -->
+          <iframe id="preview" sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"></iframe>
         </div>
       </div>
 
@@ -727,7 +728,8 @@ function showHelp(mode){
 
             <div class="cqF_result">
               <div class="cqF_resultHeader">Resultado</div>
-              <iframe id="cqF_preview" sandbox="allow-scripts allow-forms allow-pointer-lock"></iframe>
+              <!-- allow-same-origin is required so parent can inspect iframe DOM for tests -->
+              <iframe id="cqF_preview" sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"></iframe>
             </div>
 
             <div class="cqF_console">
