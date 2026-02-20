@@ -65,26 +65,61 @@ ${extraHead}
 ${safeHtml}
 <script>
   window.MISSION = ${JSON.stringify(m)};
-  // Small helper the player can use
+  // Small helpers the player can use
   window.$ = (sel)=>document.querySelector(sel);
+  window.$all = (sel)=>Array.from(document.querySelectorAll(sel));
+  window.setText = (sel, v)=>{
+    const el = document.querySelector(sel);
+    if(el) el.textContent = String(v ?? "");
+    return !!el;
+  };
 </script>
 <script>
-  // Console bridge (iframe -> parent)
+  // Console bridge (iframe -> parent) + error capture
   (function(){
     const send = (kind, args)=>{
-      try{ parent.postMessage({__calcquest:1, kind, args: (args||[]).map(a=>{
-        try{ return (typeof a === 'string') ? a : JSON.stringify(a); }catch{ return String(a); }
-      })}, '*'); }catch(e){}
+      try{
+        parent.postMessage({
+          __calcquest:1,
+          kind,
+          args: (args||[]).map(a=>{
+            try{ return (typeof a === 'string') ? a : JSON.stringify(a); }
+            catch{ return String(a); }
+          })
+        }, '*');
+      }catch(e){}
     };
+
     ['log','warn','error'].forEach(k=>{
       const orig = console[k];
       console[k] = function(...a){ send(k, a); return orig.apply(console, a); };
     });
-    window.addEventListener('error', (e)=>send('error', [e.message || 'Error']));
+
+    // Stop noisy red stacks in the parent devtools: capture + prevent default
+    window.addEventListener('error', (e)=>{
+      send('error', [e.message || 'Error']);
+      try{ e.preventDefault && e.preventDefault(); }catch{}
+      return true;
+    }, true);
+
+    window.addEventListener('unhandledrejection', (e)=>{
+      const msg = (e && e.reason) ? (e.reason.message || String(e.reason)) : 'Unhandled promise rejection';
+      send('error', [msg]);
+      try{ e.preventDefault && e.preventDefault(); }catch{}
+      return true;
+    });
   })();
 </script>
 <script>
+  // User code sandbox: wrapped to avoid accidental global redeclarations
+  (function(){
+    try{
 ${safeJs}
+    }catch(err){
+      console.error(err && err.message ? err.message : String(err));
+    }
+  })();
+//# sourceURL=calcquest_user.js
 </script>
 </body></html>`;
 }
