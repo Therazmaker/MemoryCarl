@@ -49,79 +49,79 @@ function buildSrcdoc({html, css, js, mission, extraHead=""}){
   const safeJs = js || "";
   const m = mission || DEFAULT_MISSION;
 
-  // We expose MISSION in the iframe BEFORE user script.
+  // IMPORTANT: install error handlers BEFORE any user-provided <script> inside HTML runs.
+  // So we place the bridge + helpers in <head>, then render HTML, then run JS tab.
   return `<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<style>
-  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#05060c;color:#e9f6ff}
-  ${safeCss}
-</style>
-${extraHead}
-</head>
-<body>
-${safeHtml}
-<script>
-  window.MISSION = ${JSON.stringify(m)};
-  // Small helpers the player can use
-  window.$ = (sel)=>document.querySelector(sel);
-  window.$all = (sel)=>Array.from(document.querySelectorAll(sel));
-  window.setText = (sel, v)=>{
-    const el = document.querySelector(sel);
-    if(el) el.textContent = String(v ?? "");
-    return !!el;
-  };
-</script>
-<script>
-  // Console bridge (iframe -> parent) + error capture
-  (function(){
-    const send = (kind, args)=>{
-      try{
-        parent.postMessage({
-          __calcquest:1,
-          kind,
-          args: (args||[]).map(a=>{
-            try{ return (typeof a === 'string') ? a : JSON.stringify(a); }
-            catch{ return String(a); }
-          })
-        }, '*');
-      }catch(e){}
-    };
+	<html lang="es">
+	<head>
+	<meta charset="utf-8"/>
+	<meta name="viewport" content="width=device-width,initial-scale=1"/>
+	<style>
+	  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#05060c;color:#e9f6ff}
+	  ${safeCss}
+	</style>
+	${extraHead}
+	<script>
+	  // Mission + tiny helpers
+	  window.MISSION = ${JSON.stringify(m)};
+	  window.$ = (sel)=>document.querySelector(sel);
+	  window.$all = (sel)=>Array.from(document.querySelectorAll(sel));
+	  window.setText = (sel, v)=>{
+	    const el = document.querySelector(sel);
+	    if(el) el.textContent = String(v ?? "");
+	    return !!el;
+	  };
 
-    ['log','warn','error'].forEach(k=>{
-      const orig = console[k];
-      console[k] = function(...a){ send(k, a); return orig.apply(console, a); };
-    });
+	  // Console bridge (iframe -> parent) + error capture
+	  (function(){
+	    const send = (kind, args)=>{
+	      try{
+	        parent.postMessage({
+	          __calcquest:1,
+	          kind,
+	          args: (args||[]).map(a=>{
+	            try{ return (typeof a === 'string') ? a : JSON.stringify(a); }
+	            catch{ return String(a); }
+	          })
+	        }, '*');
+	      }catch(e){}
+	    };
 
-    // Stop noisy red stacks in the parent devtools: capture + prevent default
-    window.addEventListener('error', (e)=>{
-      send('error', [e.message || 'Error']);
-      try{ e.preventDefault && e.preventDefault(); }catch{}
-      return true;
-    }, true);
+	    ['log','warn','error'].forEach(k=>{
+	      const orig = console[k];
+	      console[k] = function(...a){ send(k, a); return orig.apply(console, a); };
+	    });
 
-    window.addEventListener('unhandledrejection', (e)=>{
-      const msg = (e && e.reason) ? (e.reason.message || String(e.reason)) : 'Unhandled promise rejection';
-      send('error', [msg]);
-      try{ e.preventDefault && e.preventDefault(); }catch{}
-      return true;
-    });
-  })();
-</script>
-<script>
-  // User code sandbox: wrapped to avoid accidental global redeclarations
-  (function(){
-    try{
+	    // Capture errors early and reduce noisy stacks
+	    window.addEventListener('error', (e)=>{
+	      send('error', [e.message || 'Error']);
+	      try{ e.preventDefault && e.preventDefault(); }catch{}
+	      return true;
+	    }, true);
+
+	    window.addEventListener('unhandledrejection', (e)=>{
+	      const msg = (e && e.reason) ? (e.reason.message || String(e.reason)) : 'Unhandled promise rejection';
+	      send('error', [msg]);
+	      try{ e.preventDefault && e.preventDefault(); }catch{}
+	      return true;
+	    });
+	  })();
+	</script>
+	</head>
+	<body>
+	${safeHtml}
+	<script>
+	  // JS tab sandbox: wrapped to avoid accidental global redeclarations
+	  (function(){
+	    try{
 ${safeJs}
-    }catch(err){
-      console.error(err && err.message ? err.message : String(err));
-    }
-  })();
-//# sourceURL=calcquest_user.js
-</script>
-</body></html>`;
+	    }catch(err){
+	      console.error(err && err.message ? err.message : String(err));
+	    }
+	  })();
+	//# sourceURL=calcquest_user.js
+	</script>
+	</body></html>`;
 }
 
 function fmtMs(ms){
