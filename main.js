@@ -2784,9 +2784,15 @@ function neuroclawRunNow({ animate=true } = {}){
         const key = (cfg && cfg.key) ? cfg.key : getNeuroAiKey();
         if(url && key && out && out.signals){
           try{ if(typeof toast==="function") toast("NeuroClaw AI: consultando…"); }catch(e){}
+          // Show AI progress directly inside the Home card.
+          state.neuroclawAiLoading = true;
+          try{ saveState(); }catch(e){}
+          try{ view(); }catch(e){}
+
           const ai = await neuroclawCallCloudAI({ signals: out.signals, now });
-const aiTs = Date.now();
-state.neuroclawLast = Object.assign({}, state.neuroclawLast, { ai, aiTs });
+          const aiTs = Date.now();
+          state.neuroclawAiLoading = false;
+          state.neuroclawLast = Object.assign({}, state.neuroclawLast, { ai, aiTs });
 
 try{
   if(ai && (ai.human || ai.raw)){
@@ -2805,10 +2811,14 @@ try{
 }catch(e){}
 
 try{ saveState(); }catch(e){}
+try{ view(); }catch(e){}
           try{ if(typeof toast==="function") toast("NeuroClaw AI listo 🤖✅"); }catch(e){}
         }
       }catch(err){
         console.warn(err);
+        state.neuroclawAiLoading = false;
+        try{ saveState(); }catch(e){}
+        try{ view(); }catch(e){}
         try{ if(typeof toast==="function") toast("NeuroClaw AI falló (ver consola)"); }catch(e){}
       }
     };
@@ -2842,11 +2852,30 @@ function neuroclawBadge(p){
 
 
 function renderNeuroClawAIBlock(){
+  const loading = !!state?.neuroclawAiLoading;
   const ai = state?.neuroclawLast?.ai || null;
+
+  // If we're loading, show a visible block even if we don't have ai content yet.
+  if(loading){
+    return `
+      <div class="hr"></div>
+      <div class="ncAi ncAiLoading">
+        <div class="ncAiHead">
+          <div class="ncAiTitle">NeuroClaw AI</div>
+          <div class="ncAiMeta">Procesando…</div>
+        </div>
+        <div class="ncAiBody">
+          <div class="ncAiText">Estoy leyendo tus señales y armando patrones<span class="ncDots"><span>.</span><span>.</span><span>.</span></span></div>
+        </div>
+      </div>
+    `;
+  }
+
   if(!ai) return "";
 
   const human = (ai.human || "").trim();
-  if(!human) return "";
+  const rawTxt = (!human && ai.raw) ? JSON.stringify(ai.raw, null, 2) : "";
+  if(!human && !rawTxt) return "";
 
   const tsMs = Number(state?.neuroclawLast?.aiTs || 0) || 0;
   const stamp = tsMs ? new Date(tsMs).toLocaleString("es-PE",{hour:"2-digit",minute:"2-digit"}) : "";
@@ -2854,22 +2883,23 @@ function renderNeuroClawAIBlock(){
   const meta = [stamp, model ? ("🤖 " + model) : ""].filter(Boolean).join(" • ");
 
   return `
-    <div class="hr"></div>
-    <div class="ncAi">
-      <div class="ncAiHead">
-        <div class="ncAiTitle">NeuroClaw AI</div>
-        <div class="ncAiMeta">${escapeHtml(meta)}</div>
+      <div class="hr"></div>
+      <div class="ncAi">
+        <div class="ncAiHead">
+          <div class="ncAiTitle">NeuroClaw AI</div>
+          <div class="ncAiMeta">${escapeHtml(meta)}</div>
+        </div>
+        <div class="ncAiBody">
+          <div class="ncAiText">${escapeHtml(human || rawTxt).replace(/\n/g,"<br>")}</div>
+        </div>
       </div>
-      <div class="ncAiBody">
-        <div class="ncAiText">${escapeHtml(human).replace(/\n/g,"<br>")}</div>
-      </div>
-    </div>
-  `;
+    `;
 }
 
 function renderNeuroClawCard(){
   const items = neuroclawTopSuggestions(3);
   const has = items.length>0;
+  const loading = !!state?.neuroclawAiLoading;
   const ts = state.neuroclawLast?.ts ? new Date(state.neuroclawLast.ts) : null;
   const stamp = ts ? ts.toLocaleString("es-PE",{hour:"2-digit",minute:"2-digit"}) : "";
   return `
@@ -2877,7 +2907,7 @@ function renderNeuroClawCard(){
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">NeuroClaw</h2>
-          <div class="small">${has ? `Sugerencias • ${escapeHtml(stamp)}` : "Sin señales aún"}</div>
+          <div class="small">${loading ? "Analizando…" : (has ? `Sugerencias • ${escapeHtml(stamp)}` : "Sin señales aún")}</div>
         </div>
         <button class="iconBtn" id="btnNeuroAnalyze" aria-label="Analyze">🧠</button>
       </div>

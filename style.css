@@ -1292,3 +1292,11 @@ body{
   color:rgba(255,255,255,.86);
   line-height:1.45;
 }
+
+/* Loading micro-animation */
+.ncAiLoading{opacity:0.95;}
+.ncDots{display:inline-flex;gap:2px;margin-left:4px;}
+.ncDots span{display:inline-block;opacity:0.25;animation:ncDots 1.1s infinite;}
+.ncDots span:nth-child(2){animation-delay:0.15s;}
+.ncDots span:nth-child(3){animation-delay:0.30s;}
+@keyframes ncDots{0%,100%{opacity:0.25;transform:translateY(0);}50%{opacity:0.95;transform:translateY(-1px);}}
