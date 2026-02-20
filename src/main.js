@@ -2347,12 +2347,12 @@ function openCalcQuest(){
   const b = document.createElement("div");
   b.className = "modalBackdrop";
   b.innerHTML = `
-    <div class="modal" style="max-width:1000px;">
+    <div class="modal calcquestModal" style="max-width:1000px;max-height:90vh;overflow:auto;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
         <h2 style="margin:4px 0 10px;">CalcQuest ⚡</h2>
         <button class="btn" id="cqCloseBtn" style="padding:8px 10px;">Cerrar</button>
       </div>
-      <div class="learnFrame" style="height:80vh;">
+      <div class="learnFrame" style="height:72vh;min-height:420px;">
         <iframe title="CalcQuest" src="./calcquest/" loading="lazy" referrerpolicy="no-referrer"></iframe>
       </div>
       <div class="small" style="margin-top:10px;opacity:.8;">

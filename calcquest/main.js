@@ -131,9 +131,26 @@ function typeKeys(doc, keys){
 }
 
 async function runTests(level, iframe){
-  const win = iframe.contentWindow;
-  const doc = iframe.contentDocument;
-  if(!win || !doc) return {ok:false, details:["Preview no listo"]};
+  // Diagnostics-first: if iframe DOM is not accessible, explain why.
+  let win = null;
+  let doc = null;
+  let accessErr = null;
+
+  try{ win = iframe.contentWindow; }catch(e){ accessErr = e; }
+  try{ doc = iframe.contentDocument; }catch(e){ accessErr = e; }
+
+  const srcdocLen = (iframe.getAttribute("srcdoc") || "").length;
+  const sb = iframe.getAttribute("sandbox") || "";
+
+  if(!win || !doc){
+    const why = accessErr ? `${accessErr.name}: ${accessErr.message}` : "iframe no cargó o no es accesible";
+    return {ok:false, details:[
+      `Preview no listo (${why})`,
+      `sandbox="${sb}"`,
+      `srcdocLen=${srcdocLen} (si es 0, no se inyectó el preview)`,
+      `Tip: si usas sandbox, normalmente necesitas allow-same-origin para que el motor pueda leer el DOM y correr tests.`,
+    ]};
+  }
 
   const details = [];
   const pass = (s)=>details.push("✅ " + s);
@@ -146,6 +163,14 @@ async function runTests(level, iframe){
   // allow DOM settle
   await new Promise(r=>setTimeout(r, 30));
 
+  // Precheck: list missing required selectors (helps debugging on mobile)
+  try{
+    const required = (level.tests||[]).filter(t=>t.kind==="exists").map(t=>t.sel);
+    const missing = required.filter(sel=>!exists(doc, sel));
+    if(missing.length){
+      details.push("ℹ️ Faltan elementos requeridos: " + missing.join(", "));
+    }
+  }catch(e){}
   try{
     for(const t of (level.tests || [])){
       if(t.kind === "exists"){
@@ -276,7 +301,6 @@ function appShell(){
           <button class="btn ghost" id="btnHints">💡 Tutorial</button>
           <button class="btn ghost" id="btnSolution">🧩 Solución</button>
           <button class="btn ghost" id="btnNewAttempt">⏱ Nuevo intento</button>
-          <button class="btn ghost" id="btnProgram">🧑‍💻 Programar</button>
         </div>
 
         <div class="row">
@@ -302,7 +326,6 @@ function appShell(){
         </div>
 
         <div class="preview">
-          <!-- allow-same-origin is required so parent can inspect iframe DOM for tests -->
           <iframe id="preview" sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"></iframe>
         </div>
       </div>
@@ -387,14 +410,6 @@ function init(){
     if(consoleLines.length > 200) consoleLines = consoleLines.slice(-200);
     consoleOut.textContent = consoleLines.join('\n');
     consoleOut.scrollTop = consoleOut.scrollHeight;
-  
-
-    // If the Fiddle modal is open, mirror console there too
-    const fOut = document.querySelector('#cqF_consoleOut');
-    if(fOut){
-      fOut.textContent = consoleLines.join('\\n');
-      fOut.scrollTop = fOut.scrollHeight;
-    }
   };
 
   window.addEventListener('message', (ev)=>{
@@ -605,20 +620,19 @@ function showHelp(mode){
       });
     }
 
-    function buildPreviewTo(iframe){
-      const mission = state.level?.mission || DEFAULT_MISSION;
-      iframe.srcdoc = buildSrcdoc({ html: state.code.html, css: state.code.css, js: state.code.js, mission });
-    }
-
     function buildPreview(){
       const iframe = document.querySelector("#preview");
-      buildPreviewTo(iframe);
+      const mission = state.level?.mission || DEFAULT_MISSION;
+      iframe.srcdoc = buildSrcdoc({
+        html: state.code.html,
+        css: state.code.css,
+        js: state.code.js,
+        mission
+      });
     }
 
     async function run(){
       buildPreview();
-      const fprev = document.querySelector("#cqF_preview");
-      if(fprev) buildPreviewTo(fprev);
       await new Promise(r=>setTimeout(r, 60));
       const res = await runTests(state.level, document.querySelector("#preview"));
       res.details.forEach(line=>{
@@ -692,122 +706,6 @@ function showHelp(mode){
     document.querySelector('#btnNewAttempt').addEventListener('click', ()=>{
       pushMsg(feed, 'SYSTEM', '⏱ Nuevo intento iniciado.');
       startAttempt();
-    });
-
-    // Fiddle modal (programar)
-    let fiddleOpen = false;
-    function openFiddleModal(){
-      if(fiddleOpen) return;
-      fiddleOpen = true;
-
-      const b = document.createElement('div');
-      b.className = 'cqF_backdrop';
-      b.innerHTML = `
-        <div class="cqF_modal" role="dialog" aria-label="Programar">
-          <div class="cqF_header">
-            <div class="cqF_brand">
-              <div class="cqF_title">CalcQuest IDE</div>
-              <div class="cqF_sub">Modo Programar (tipo Fiddle)</div>
-            </div>
-            <div class="cqF_actions">
-              <button class="btn good" id="cqF_run">⟳ Ejecutar</button>
-              <button class="btn" id="cqF_close">Cerrar</button>
-            </div>
-          </div>
-
-          <div class="cqF_tabs" role="tablist">
-            <button class="cqF_tab active" data-ftab="html" role="tab">HTML</button>
-            <button class="cqF_tab" data-ftab="js" role="tab">JavaScript</button>
-            <button class="cqF_tab" data-ftab="css" role="tab">CSS</button>
-          </div>
-
-          <div class="cqF_body">
-            <div class="cqF_editor">
-              <textarea id="cqF_code" spellcheck="false"></textarea>
-            </div>
-
-            <div class="cqF_result">
-              <div class="cqF_resultHeader">Resultado</div>
-              <!-- allow-same-origin is required so parent can inspect iframe DOM for tests -->
-              <iframe id="cqF_preview" sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"></iframe>
-            </div>
-
-            <div class="cqF_console">
-              <div class="cqF_consoleHeader">
-                <div>Consola</div>
-                <button class="btn ghost" id="cqF_clear">Clear</button>
-              </div>
-              <pre class="cqF_consoleOut" id="cqF_consoleOut"></pre>
-            </div>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(b);
-
-      let ftab = state.tab || 'html';
-      const ta = b.querySelector('#cqF_code');
-      const fprev = b.querySelector('#cqF_preview');
-      const applyFt = ()=>{
-        // save current textarea to state
-        const v = ta.value;
-        if(state.code && ftab) state.code[ftab] = v;
-        saveCode(state.level.id, state.code);
-      };
-      const loadFt = ()=>{
-        ta.value = state.code[ftab] || '';
-        b.querySelectorAll('.cqF_tab').forEach(t=>t.classList.toggle('active', t.dataset.ftab===ftab));
-      };
-
-      b.querySelectorAll('.cqF_tab').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          applyFt();
-          ftab = btn.dataset.ftab;
-          loadFt();
-        });
-      });
-
-      // Save on Ctrl+S / Cmd+S
-      ta.addEventListener('keydown', (e)=>{
-        if((e.ctrlKey || e.metaKey) && (e.key==='s' || e.key==='S')){
-          e.preventDefault();
-          applyFt();
-          buildPreviewTo(fprev);
-          pushMsg(feed, 'SYSTEM', '💾 Guardado + ejecutado (IDE).');
-        }
-      });
-
-      b.querySelector('#cqF_run').addEventListener('click', ()=>{
-        applyFt();
-        buildPreviewTo(fprev);
-      });
-      b.querySelector('#cqF_clear').addEventListener('click', ()=>{
-        consoleLines = [];
-        const out = b.querySelector('#cqF_consoleOut');
-        if(out) out.textContent='';
-        consoleOut.textContent='';
-      });
-      b.querySelector('#cqF_close').addEventListener('click', ()=>{
-        applyFt();
-        fiddleOpen = false;
-        b.remove();
-      });
-      // close on backdrop click
-      b.addEventListener('click', (e)=>{
-        if(e.target === b){
-          applyFt();
-          fiddleOpen = false;
-          b.remove();
-        }
-      });
-
-      // init
-      loadFt();
-      buildPreviewTo(fprev);
-    }
-
-    document.querySelector('#btnProgram').addEventListener('click', ()=>{
-      pushMsg(feed, 'SYSTEM', '🧑‍💻 Modo Programar abierto (IDE).');
-      openFiddleModal();
     });
 
         document.querySelector('#btnHints').addEventListener('click', ()=>{
