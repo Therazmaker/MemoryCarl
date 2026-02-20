@@ -739,3 +739,25 @@ function showHelp(mode){
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
+
+// --- Single-scroll: auto-grow editors (no internal textarea scroll) ---
+function __cqAutoGrow(ta){
+  if(!ta) return;
+  ta.style.height = "auto";
+  ta.style.height = (ta.scrollHeight + 2) + "px";
+}
+function __cqHookAutoGrow(){
+  const tas = document.querySelectorAll("textarea");
+  tas.forEach(ta=>{
+    // avoid duplicate listeners
+    if(ta.__cqGrowBound) return;
+    ta.__cqGrowBound = true;
+    ta.addEventListener("input", ()=>__cqAutoGrow(ta));
+    __cqAutoGrow(ta);
+  });
+}
+// run after each render tick
+setTimeout(__cqHookAutoGrow, 0);
+document.addEventListener("DOMContentLoaded", ()=>setTimeout(__cqHookAutoGrow,0));
+
