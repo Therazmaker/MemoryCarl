@@ -414,31 +414,15 @@ function save(key, value){
   ) markDirty();
 }
 
-
 // ===== Dirty flag (required by save/persist) =====
-const SYNC = {
-  dirtyKey: "memorycarl_dirty",
-  lastSyncKey: "memorycarl_last_sync"
-};
-
 function markDirty(){
-  try{
-    localStorage.setItem(SYNC.dirtyKey, "1");
-  }catch(e){}
+  try{ localStorage.setItem(SYNC.dirtyKey, "1"); }catch(e){}
 }
-
 function clearDirty(){
-  try{
-    localStorage.setItem(SYNC.dirtyKey, "0");
-  }catch(e){}
+  try{ localStorage.setItem(SYNC.dirtyKey, "0"); }catch(e){}
 }
-
 function isDirty(){
-  try{
-    return (localStorage.getItem(SYNC.dirtyKey) || "0") === "1";
-  }catch(e){
-    return false;
-  }
+  try{ return (localStorage.getItem(SYNC.dirtyKey) || "0") === "1"; }catch(e){ return false; }
 }
 
 
