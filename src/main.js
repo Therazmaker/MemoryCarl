@@ -2,7 +2,7 @@ console.log("MemoryCarl loaded");
 // ===== LocalStorage Keys =====
 const KEYS = {
   neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
-  neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",,
+  neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",
   neuroclawAiLog: "memorycarl_v2_neuroclaw_ai_log",
   neuroclawAiAuto: "memorycarl_v2_neuroclaw_auto_run",
 
