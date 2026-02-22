@@ -144,6 +144,7 @@ const LS = {
   astroSwissLast: "memorycarl_v2_astro_swiss_last",
   astroSwissSeen: "memorycarl_v2_astro_swiss_seen", // per-day cache
   bubbleFreqMin: "memorycarl_v2_bubble_freq_min",
+  lunarMoneyLog: "memorycarl_v2_lunar_money_log",
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -267,6 +268,9 @@ async function refreshSwissTransitsUI({forceSpeak=false} = {}){
     saveSwissLast(swiss);
     refreshGlobalSignals();
 
+    // Update Lunar Money log (for Home card)
+    try{ upsertLunarMoneyTodayFromSwiss(swiss); }catch(e){}
+
     // Update settings labels if present
     const lab = document.querySelector("#astroTransitLabel");
     if(lab) lab.textContent = swiss.transit_top || "";
@@ -316,6 +320,162 @@ async function refreshSwissTransitsUI({forceSpeak=false} = {}){
     console.warn("[AstroSwiss] refresh failed", e);
   }
 }
+
+// ---- Lunar Money Card (Home) ----
+function getSpend24h(){
+  const s = (window.__MC_STATE__ && typeof window.__MC_STATE__==="object") ? window.__MC_STATE__ : refreshGlobalSignals();
+  const v = (s.spend_24h_total ?? s.spend_24h ?? s.spend_1d_total ?? 0);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function loadLunarMoneyLog(){
+  try{
+    const raw = localStorage.getItem(LS.lunarMoneyLog);
+    if(!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  }catch(e){
+    return [];
+  }
+}
+
+function saveLunarMoneyLog(arr){
+  try{ localStorage.setItem(LS.lunarMoneyLog, JSON.stringify(Array.isArray(arr)?arr:[])); }catch(e){}
+}
+
+function upsertLunarMoneyTodayFromSwiss(swiss){
+  if(!swiss || typeof swiss!=="object") return;
+  const day = todayKey();
+  const spend = getSpend24h();
+  const natal = loadNatalChart();
+  const house2 = (natal && Array.isArray(natal.houses)) ? natal.houses.find(h=>Number(h.house)===2) : null;
+  const house2Sign = house2?.sign ? String(house2.sign) : "";
+
+  const entry = {
+    day,
+    ts: Date.now(),
+    moon_phase_name: swiss.moon_phase_name || "",
+    moon_sign: swiss.moon_sign || "",
+    moon_house: swiss.transit_moon_house || "",
+    spend_24h: spend,
+    house2_sign: house2Sign,
+    whisper: (swiss.transit_money_whisper || "").trim()
+  };
+
+  const log = loadLunarMoneyLog().filter(x=>x && typeof x==="object");
+  const i = log.findIndex(x=>x.day===day);
+  if(i>=0) log[i] = { ...log[i], ...entry };
+  else log.unshift(entry);
+
+  // keep last 90 days
+  saveLunarMoneyLog(log.slice(0, 90));
+}
+
+function renderLunarMoneyCard(){
+  const swiss = loadSwissLast() || {};
+  const spend = getSpend24h();
+  const natal = loadNatalChart();
+  const house2 = (natal && Array.isArray(natal.houses)) ? natal.houses.find(h=>Number(h.house)===2) : null;
+  const house2Sign = house2?.sign ? String(house2.sign) : "—";
+  const regencia = (house2Sign.toLowerCase()==="pisces" || house2Sign.toLowerCase()==="piscis") ? "Neptuno / Júpiter" : "";
+
+  const phase = (swiss.moon_phase_name || "").trim();
+  const msign = (swiss.moon_sign || "").trim();
+  const mhouse = (swiss.transit_moon_house || "").trim();
+  const whisper = (swiss.transit_money_whisper || "").trim();
+
+  const topLine = [
+    phase ? `🌙 ${phase}` : "",
+    msign ? `Luna en ${msign}` : "",
+    mhouse ? `Casa ${mhouse}` : ""
+  ].filter(Boolean).join(" • ") || "Activa Swiss y recalcula para ver tu clima lunar de hoy.";
+
+  const spendLine = `Gasto 24h: <b>S/ ${escapeHtml(String(Math.round(spend*100)/100))}</b>`;
+  const houseLine = `Casa 2: <b>${escapeHtml(house2Sign)}</b>${regencia ? ` <span class=\"muted\">(${escapeHtml(regencia)})</span>` : ""}`;
+
+  return `
+    <section class="card homeCard homeWide" id="homeLunarMoneyCard">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Luna & Dinero 🌙💸</h2>
+          <div class="small">${topLine}</div>
+        </div>
+        <div class="row" style="gap:8px;">
+          <button class="iconBtn" id="btnLunarMoneyRefresh" aria-label="Refresh">⟲</button>
+          <button class="iconBtn" id="btnLunarMoneyHistory" aria-label="History">🗓️</button>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="small" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+        <div>${spendLine}</div>
+        <div class="dot">•</div>
+        <div>${houseLine}</div>
+      </div>
+
+      <div class="hr"></div>
+
+      ${whisper ? `
+        <div style="line-height:1.45">${escapeHtml(whisper).replace(/\n/g,"<br>")}</div>
+        <div class="muted" style="margin-top:10px;">No es consejo financiero. Es lectura simbólica + tu data de gasto.</div>
+      ` : `
+        <div class="muted">Aún no hay whisper. Pulsa ⟲ para recalcular con Swiss.</div>
+      `}
+    </section>
+  `;
+}
+
+function openLunarMoneyHistoryModal(){
+  const host = document.querySelector("#app");
+  if(!host) return;
+
+  const log = loadLunarMoneyLog();
+  const rows = log.slice(0, 30).map(e=>{
+    const d = String(e.day||"");
+    const pretty = d.length===8 ? `${d.slice(6,8)}/${d.slice(4,6)}/${d.slice(0,4)}` : d;
+    const spend = Number(e.spend_24h||0);
+    const line1 = [e.moon_phase_name?`🌙 ${e.moon_phase_name}`:"", e.moon_sign?`Luna en ${e.moon_sign}`:"", e.moon_house?`Casa ${e.moon_house}`:""]
+      .filter(Boolean).join(" • ");
+    const w = (e.whisper||"").trim();
+    return `
+      <div class="card" style="margin:10px 0;">
+        <div class="cardTop" style="padding:12px 12px 6px;">
+          <div>
+            <div class="cardTitle" style="font-size:16px;">${escapeHtml(pretty)}</div>
+            <div class="small">${escapeHtml(line1 || "—")}</div>
+          </div>
+          <div class="chip">S/ ${escapeHtml(String(Math.round(spend*100)/100))}</div>
+        </div>
+        <div class="hr"></div>
+        <div style="padding:10px 12px;line-height:1.35;">
+          ${w ? escapeHtml(w).replace(/\n/g,"<br>") : `<span class="muted">Sin whisper guardado.</span>`}
+        </div>
+      </div>
+    `;
+  }).join("") || `<div class="muted">Aún no hay histórico. Pulsa ⟲ en la card para generar el de hoy.</div>`;
+
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+  modal.innerHTML = `
+    <div class="modal" role="dialog" aria-label="Histórico Lunar & Dinero">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">Histórico: Luna & Dinero 🌙💸</div>
+          <div class="modalSub">30 días máx • Seguimiento diario (no consejo financiero)</div>
+        </div>
+        <button class="iconBtn" id="btnLmClose" aria-label="Close">✕</button>
+      </div>
+      <div class="hr"></div>
+      <div style="max-height:70vh;overflow:auto;padding-right:6px;">${rows}</div>
+    </div>
+  `;
+  host.appendChild(modal);
+
+  const close = ()=> modal.remove();
+  modal.addEventListener("click",(e)=>{ if(e.target===modal) close(); });
+  modal.querySelector("#btnLmClose")?.addEventListener("click", close);
+}
+// ---- END Lunar Money Card ----
 
 // ---- NeuroClaw Cloud AI (optional) ----
 
@@ -3837,6 +3997,8 @@ const sleepBars = renderSleepBars(sleepSeries);
       ${renderBudgetMonthly()}
     </section>
 
+    ${renderLunarMoneyCard()}
+
     <section class="card homeCard homeWide" id="homeMergeCard">
       <div class="cardTop">
         <div>
@@ -4616,6 +4778,20 @@ function wireHome(root){
 
   const budgetCard = root.querySelector("#homeBudgetCard");
   if(budgetCard) budgetCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddBudgetItem")) return; /* no auto-open, keeps card tappable but safe */ });
+
+  // lunar money
+  const btnLmRef = root.querySelector("#btnLunarMoneyRefresh");
+  if(btnLmRef) btnLmRef.addEventListener("click", async (e)=>{
+    e.stopPropagation();
+    await refreshSwissTransitsUI({ forceSpeak: true });
+    view();
+  });
+
+  const btnLmHist = root.querySelector("#btnLunarMoneyHistory");
+  if(btnLmHist) btnLmHist.addEventListener("click", (e)=>{ e.stopPropagation(); openLunarMoneyHistoryModal(); });
+
+  const lmCard = root.querySelector("#homeLunarMoneyCard");
+  if(lmCard) lmCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnLunarMoneyRefresh, #btnLunarMoneyHistory")) return; openLunarMoneyHistoryModal(); });
 
   // merge lab
   const btnMerge = root.querySelector("#btnOpenMergeGame");
