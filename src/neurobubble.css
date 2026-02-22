@@ -1,0 +1,50 @@
+
+#neuroBubble{
+  position: fixed;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ffffffaa, #66ccff);
+  box-shadow: 0 0 20px #66ccff88;
+  backdrop-filter: blur(6px);
+  z-index: 9999;
+  transition: transform 0.2s ease;
+}
+
+#neuroBubble .eyes{
+  display:flex;
+  justify-content:space-around;
+  margin-top:25px;
+}
+
+.eye{
+  width:18px;
+  height:18px;
+  background:white;
+  border-radius:50%;
+  position:relative;
+}
+
+.pupil{
+  width:8px;
+  height:8px;
+  background:black;
+  border-radius:50%;
+  position:absolute;
+  top:5px;
+  left:5px;
+}
+
+.mouth{
+  width:20px;
+  height:8px;
+  border-radius:0 0 20px 20px;
+  background:black;
+  margin:10px auto;
+}
+
+#neuroBubble.dragged .mouth{
+  border-radius:50%;
+  width:12px;
+  height:12px;
+}
