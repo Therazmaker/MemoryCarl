@@ -13,8 +13,21 @@
   cursor:grab;
 }
 
-#neuroBubble.dragged{
-  cursor:grabbing;
+#neuroBubble.dragged{ cursor:grabbing; }
+
+#neuroBubble.idle{
+  opacity:0.8;
+  transform:scale(0.9);
+}
+
+#neuroBubble.thinking{
+  animation:pulse 1s infinite;
+}
+
+@keyframes pulse{
+  0%{ filter:brightness(1); }
+  50%{ filter:brightness(1.2); }
+  100%{ filter:brightness(1); }
 }
 
 .eyes{
@@ -55,7 +68,7 @@
 
 #neuroPanel{
   position:fixed;
-  width:220px;
+  width:240px;
   background:#111827ee;
   color:white;
   padding:10px;

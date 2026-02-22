@@ -1,10 +1,14 @@
 
-window.addEventListener("load", () => {
+(function(){
 
-  const memoryKey = "mc_bubble_memory_v1";
+  const memoryKey = "mc_bubble_memory_v3";
 
   function loadMemory(){
-    return JSON.parse(localStorage.getItem(memoryKey) || "{}");
+    try{
+      return JSON.parse(localStorage.getItem(memoryKey)) || {likes:0, dislikes:0};
+    }catch(e){
+      return {likes:0, dislikes:0};
+    }
   }
 
   function saveMemory(mem){
@@ -13,36 +17,40 @@ window.addEventListener("load", () => {
 
   function learn(type){
     const mem = loadMemory();
-    mem[type] = (mem[type] || 0) + 1;
+    if(type === "like") mem.likes++;
+    if(type === "dislike") mem.dislikes++;
     saveMemory(mem);
   }
 
   function getSignals(){
-    const state = window.__MC_STATE__ || {};
+    const s = window.__MC_STATE__ || {};
     return {
-      sleep: state.sleep_avg_3d_hours ?? 0,
-      spend: state.spend_24h ?? 0,
-      mood: state.mood_trend_7d ?? 0,
-      cleaning: state.cleaning_7d ?? 0
+      sleep: s.sleep_avg_3d_hours ?? 0,
+      spend: s.spend_24h ?? 0,
+      mood: s.mood_trend_7d ?? 0,
+      cleaning: s.cleaning_7d ?? 0
     };
   }
 
-  function localReply(s){
-    if(s.sleep && s.sleep < 5.5){
-      return { mood:"concerned", text:"Dormiste poco. ¿Energía o disciplina hoy?", micro:"Respira 3 veces lento." };
+  function localReply(sig){
+    if(sig.sleep && sig.sleep < 5.5){
+      return {mood:"concerned", text:"Sueño bajo. ¿Energía o disciplina hoy?", micro:"Respira 3 veces profundo."};
     }
-    if(s.spend && s.spend > 50){
-      return { mood:"alert", text:"El gasto subió. ¿Plan o impulso?", micro:"Revisa 1 línea del presupuesto." };
+    if(sig.spend && sig.spend > 50){
+      return {mood:"alert", text:"Gasto alto reciente. ¿Plan o impulso?", micro:"Revisa 1 línea del presupuesto."};
     }
-    return { mood:"calm", text:"Todo estable. ¿Buscamos claridad, calma o impulso?", micro:"Define una intención corta." };
+    return {mood:"calm", text:"Todo estable. ¿Claridad, calma o impulso?", micro:"Define una intención corta."};
   }
 
   async function cloudReply(signals){
     if(!window.NeuroClaw || !window.NeuroClaw.run) return null;
     try{
-      return await window.NeuroClaw.run({signals});
+      bubble.classList.add("thinking");
+      const r = await window.NeuroClaw.run({signals});
+      bubble.classList.remove("thinking");
+      return r;
     }catch(e){
-      console.warn("Cloud error", e);
+      bubble.classList.remove("thinking");
       return null;
     }
   }
@@ -51,7 +59,7 @@ window.addEventListener("load", () => {
     if(!cloud) return local;
     return {
       mood: local.mood,
-      text: cloud.text || local.text,
+      text: cloud.text || cloud.insight || local.text,
       micro: cloud.micro || local.micro
     };
   }
@@ -83,6 +91,7 @@ window.addEventListener("load", () => {
 
   let x = 200, y = 200, vx = 0.4, vy = 0.3;
   let dragging = false;
+  let idleTimer;
 
   function clamp(){
     x = Math.max(10, Math.min(window.innerWidth - 70, x));
@@ -103,9 +112,25 @@ window.addEventListener("load", () => {
       y += vy;
       clamp();
       bubble.style.transform = `translate(${x}px, ${y}px)`;
-      panel.style.transform = `translate(${x}px, ${y-120}px)`;
+      panel.style.transform = `translate(${x}px, ${y-130}px)`;
     }
     requestAnimationFrame(animate);
+  }
+
+  document.addEventListener("pointermove", e=>{
+    resetIdle();
+    bubble.querySelectorAll(".pupil").forEach(p=>{
+      const rect = p.parentElement.getBoundingClientRect();
+      const dx = e.clientX - rect.left - 6;
+      const dy = e.clientY - rect.top - 6;
+      p.style.transform = `translate(${dx*0.05}px, ${dy*0.05}px)`;
+    });
+  });
+
+  function resetIdle(){
+    bubble.classList.remove("idle");
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(()=>bubble.classList.add("idle"), 6000);
   }
 
   bubble.addEventListener("pointerdown", ()=>{
@@ -129,14 +154,11 @@ window.addEventListener("load", () => {
     panel.classList.toggle("open");
   });
 
-  panel.querySelector(".like").onclick = ()=> learn("likes");
-  panel.querySelector(".dislike").onclick = ()=> learn("dislikes");
+  panel.querySelector(".like").onclick = ()=> learn("like");
+  panel.querySelector(".dislike").onclick = ()=> learn("dislike");
 
   panel.querySelector(".nb-input").addEventListener("keydown", e=>{
     if(e.key === "Enter"){
-      const mem = loadMemory();
-      mem.lastReply = e.target.value;
-      saveMemory(mem);
       e.target.value = "";
     }
   });
@@ -151,7 +173,6 @@ window.addEventListener("load", () => {
     const local = localReply(signals);
     const cloud = await cloudReply(signals);
     const final = merge(local, cloud);
-
     applyMood(final.mood);
     panel.querySelector(".nb-text").textContent = final.text;
     panel.querySelector(".nb-micro").textContent = "Micro: " + final.micro;
@@ -160,4 +181,4 @@ window.addEventListener("load", () => {
   animate();
   boot();
 
-});
+})();
