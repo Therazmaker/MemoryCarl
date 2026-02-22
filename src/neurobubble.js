@@ -29,8 +29,6 @@
   function saveMemory(mem){
     try{ localStorage.setItem(memoryKey, JSON.stringify(mem)); }catch(e){}
   }
-    localStorage.setItem(memoryKey, JSON.stringify(mem));
-  }
 
   function getSignals(){
     const s = window.__MC_STATE__ || {};
