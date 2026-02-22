@@ -1,3 +1,5 @@
+import { computeMoonNow } from "./cosmic_lite.js";
+
 console.log("MemoryCarl loaded");
 // ===== LocalStorage Keys =====
 const KEYS = {
@@ -133,6 +135,9 @@ const LS = {
   neuroclawLast: "memorycarl_v2_neuroclaw_last",
   neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
   neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",
+
+  // Astrology (local-only)
+  natalChart: "memorycarl_v2_natal_chart_json",
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -146,6 +151,48 @@ function getSyncUrl(){ return localStorage.getItem(SYNC.urlKey) || ""; }
 function setSyncUrl(u){ localStorage.setItem(SYNC.urlKey, (u||"").trim()); }
 function getSyncApiKey(){ return localStorage.getItem(SYNC.apiKeyKey) || ""; }
 function setSyncApiKey(k){ localStorage.setItem(SYNC.apiKeyKey, (k||"").trim()); }
+
+// ---- Astrology (Cosmic Lite) ----
+function loadNatalChart(){
+  try{
+    const raw = localStorage.getItem(LS.natalChart);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  }catch(e){
+    return null;
+  }
+}
+
+function saveNatalChart(obj){
+  try{ localStorage.setItem(LS.natalChart, JSON.stringify(obj)); return true; }catch(e){ return false; }
+}
+
+function clearNatalChart(){
+  try{ localStorage.removeItem(LS.natalChart); }catch(e){}
+}
+
+function getCosmicLiteSignals(now = new Date()){
+  const m = computeMoonNow(now);
+  const natal = loadNatalChart();
+  return {
+    ...m,
+    natal_loaded: !!natal,
+    natal_name: natal?.meta?.name || "",
+    natal_version: natal?.v || 0,
+  };
+}
+
+function refreshGlobalSignals(){
+  // For NeuroBubble + other modules that want a single signals bag.
+  const base = (state && state.neuroclawLast && state.neuroclawLast.signals && typeof state.neuroclawLast.signals === "object")
+    ? state.neuroclawLast.signals
+    : {};
+  const cosmic = getCosmicLiteSignals(new Date());
+  window.__MC_STATE__ = Object.assign({}, base, cosmic);
+  return window.__MC_STATE__;
+}
 
 // ---- NeuroClaw Cloud AI (optional) ----
 
@@ -1146,6 +1193,8 @@ function renderMoreModal(){
 }
 
 function view(){
+  // Keep a fresh global signals bag (used by NeuroBubble and other small agents)
+  try{ refreshGlobalSignals(); }catch(e){}
   const root = document.querySelector("#app");
   root.innerHTML = `
     <div class="app ${state.tab==="settings" ? "hasSheet":""}">
@@ -1265,6 +1314,97 @@ function view(){
         view();
       });
     }
+
+    // ---- Astro (Cosmic Lite) wiring ----
+    const taNatal = root.querySelector("#natalJsonText");
+    if(taNatal){
+      const existing = loadNatalChart();
+      if(existing) taNatal.value = JSON.stringify(existing, null, 2);
+    }
+
+    const fileNatal = root.querySelector("#fileNatal");
+    if(fileNatal) fileNatal.addEventListener("change", async (e)=>{
+      const f = e.target.files?.[0];
+      if(!f) return;
+      try{
+        const txt = await f.text();
+        if(taNatal) taNatal.value = txt;
+        try{ toast("JSON cargado. Dale Guardar ✅"); }catch(_e){}
+      }catch(err){
+        console.warn("Natal file read failed", err);
+        try{ toast("No pude leer ese archivo 😅"); }catch(_e){}
+      }
+      e.target.value = "";
+    });
+
+    const chipNatal = root.querySelector("#chipNatalStatus");
+    const btnNatalSave = root.querySelector("#btnNatalSave");
+    if(btnNatalSave) btnNatalSave.addEventListener("click", ()=>{
+      const raw = (taNatal && taNatal.value) ? taNatal.value.trim() : "";
+      if(!raw){
+        try{ toast("Pega un JSON primero ✍️"); }catch(_e){}
+        return;
+      }
+      try{
+        const parsed = JSON.parse(raw);
+        const ok = saveNatalChart(parsed);
+        if(!ok) throw new Error("save failed");
+        refreshGlobalSignals();
+        if(chipNatal) chipNatal.textContent = "Carta ✅";
+        try{ toast("Carta guardada ✅"); }catch(_e){}
+      }catch(err){
+        console.warn("Natal JSON invalid", err);
+        alert("JSON inválido. Revisa comas, llaves y comillas.");
+      }
+    });
+
+    const btnNatalDl = root.querySelector("#btnNatalDownload");
+    if(btnNatalDl) btnNatalDl.addEventListener("click", ()=>{
+      const natal = loadNatalChart();
+      if(!natal){
+        try{ toast("Aún no hay carta guardada"); }catch(_e){}
+        return;
+      }
+      const payload = JSON.stringify(natal, null, 2);
+      const blob = new Blob([payload], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `memorycarl_natal_chart_${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 1500);
+    });
+
+    const btnNatalReset = root.querySelector("#btnNatalReset");
+    if(btnNatalReset) btnNatalReset.addEventListener("click", ()=>{
+      if(!confirm("Resetear carta natal guardada en este dispositivo?")) return;
+      clearNatalChart();
+      refreshGlobalSignals();
+      if(chipNatal) chipNatal.textContent = "Sin carta";
+      if(taNatal) taNatal.value = "";
+      try{ toast("Reseteado 🧽"); }catch(_e){}
+    });
+
+    const btnAstroRefresh = root.querySelector("#btnAstroRefresh");
+    if(btnAstroRefresh) btnAstroRefresh.addEventListener("click", ()=>{
+      const sig = refreshGlobalSignals();
+      const label = root.querySelector("#astroTodayLabel");
+      if(label) label.textContent = `${sig.moon_phase_name} • Luna en ${sig.moon_sign}`;
+      try{ toast("Listo 🌙"); }catch(_e){}
+    });
+
+    const btnAstroTestBubble = root.querySelector("#btnAstroTestBubble");
+    if(btnAstroTestBubble) btnAstroTestBubble.addEventListener("click", ()=>{
+      // Trigger a normal bubble read (same as tapping the bubble)
+      const el = document.querySelector("#neuroBubble");
+      if(el){
+        el.dispatchEvent(new MouseEvent("click", { bubbles:true }));
+      }else{
+        alert("No encontré Bubble en pantalla. Vuelve a Home y asegúrate que aparece.");
+      }
+    });
   }
 
   
@@ -2134,6 +2274,49 @@ function viewSettings(){
 
       <div class="small" style="margin-top:10px;opacity:.85;">
         Tip: si quieres entrenar, este log guarda <span class="mono">signals_snapshot</span> + respuesta de Gemini + tu rating.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Astro (Cosmic Lite) 🌙</h2>
+          <div class="small">Fase lunar + signo lunar (local). Y un espacio para tu carta natal en JSON.</div>
+        </div>
+        <div class="chip" id="chipNatalStatus">${loadNatalChart() ? "Carta ✅" : "Sin carta"}</div>
+      </div>
+      <div class="hr"></div>
+
+      <div class="kv">
+        <div class="k">Hoy</div>
+        <div class="v"><b id="astroTodayLabel">${escapeHtml(`${getCosmicLiteSignals().moon_phase_name} • Luna en ${getCosmicLiteSignals().moon_sign}`)}</b></div>
+      </div>
+      <div class="kv">
+        <div class="k">Lectura</div>
+        <div class="v small" id="astroHint">Bubble puede usar esto como contexto, no como destino.</div>
+      </div>
+
+      <div class="hr"></div>
+      <div class="small" style="margin-bottom:8px;">Carta natal (JSON)</div>
+      <textarea id="natalJsonText" class="ta mono" rows="8" placeholder='Pega aquí tu carta natal en JSON (te crearé el formato).'></textarea>
+
+      <div class="btnRow" style="margin-top:10px;flex-wrap:wrap;gap:10px;">
+        <label class="btn" style="cursor:pointer;">
+          Subir JSON
+          <input id="fileNatal" type="file" accept="application/json" style="display:none;">
+        </label>
+        <button class="btn" id="btnNatalSave">Guardar</button>
+        <button class="btn" id="btnNatalDownload">Descargar</button>
+        <button class="btn ghost" id="btnNatalReset">Reset</button>
+      </div>
+
+      <div class="btnRow" style="margin-top:10px;flex-wrap:wrap;gap:10px;">
+        <button class="btn" id="btnAstroRefresh">Recalcular hoy</button>
+        <button class="btn primary" id="btnAstroTestBubble">Probar Bubble</button>
+      </div>
+
+      <div class="note" style="margin-top:10px;">
+        Tip: este nivel solo calcula <span class="mono">fase lunar</span> + <span class="mono">signo lunar</span>. Luego subimos a tránsitos completos.
       </div>
     </div>
 

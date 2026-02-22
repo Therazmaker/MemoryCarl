@@ -190,16 +190,52 @@ function updateStateFromAnswer(s, tags, text){
 
   function getSignals(){
     const s = window.__MC_STATE__ || {};
+    const sleep3 = s.sleep_avg_3d_hours ?? s.sleep_avg_7d_hours ?? 0;
+    const spend1 = s.spend_1d_total ?? s.spend_24h_total ?? s.spend_24h ?? 0;
+    const mood7 = s.mood_trend_7d ?? 0;
+    const clean7 = s.cleaning_minutes_7d ?? s.cleaning_7d_min ?? s.cleaning_7d ?? 0;
+
+    const moonPhaseName = s.moon_phase_name ?? s.moon_phase ?? "";
+    const moonSign = s.moon_sign ?? "";
+
+    // Return both: legacy shorthand + explicit signal keys (so NeuroClaw can read them too)
     return {
-      sleep: s.sleep_avg_3d_hours ?? 0,
-      spend: s.spend_24h ?? 0,
-      mood: s.mood_trend_7d ?? 0,
-      cleaning: s.cleaning_7d ?? 0
+      // legacy shorthand
+      sleep: sleep3,
+      spend: spend1,
+      mood: mood7,
+      cleaning: clean7,
+
+      // explicit names
+      sleep_avg_3d_hours: sleep3,
+      spend_1d_total: spend1,
+      mood_trend_7d: mood7,
+      cleaning_minutes_7d: clean7,
+
+      // cosmic lite
+      moon_phase_name: moonPhaseName,
+      moon_sign: moonSign,
+      moon_phase_frac: s.moon_phase_frac ?? null,
+      natal_loaded: !!s.natal_loaded,
+      natal_name: s.natal_name ?? "",
     };
   }
 
   function localReply(sig){
     // Simple local "brain" until cloud is available
+    // Cosmic hint (when available)
+    if(sig.moon_phase_name && sig.moon_sign){
+      const phase = String(sig.moon_phase_name);
+      const sign = String(sig.moon_sign);
+      // Only surface this sometimes: if user has interacted recently, or if it's a strong phase.
+      if(phase === "Luna llena"){
+        return {mood:"concerned", text:`${phase} con Luna en ${sign}. Sensibilidad alta: no te pelees con tus emociones.`, micro:"Micro: escribe 1 cosa que sientes (sin juzgar)."};
+      }
+      if(phase === "Luna nueva"){
+        return {mood:"calm", text:`${phase} con Luna en ${sign}. Buen día para intención pequeña y clara.`, micro:"Micro: define 1 intención de hoy (1 línea)."};
+      }
+    }
+
     if(sig.sleep && sig.sleep < 5.5){
       return {mood:"concerned", text:"Sueño bajo. ¿Energía o disciplina hoy?", micro:"Micro: 3 respiraciones lentas."};
     }
@@ -208,6 +244,9 @@ function updateStateFromAnswer(s, tags, text){
     }
     if(sig.cleaning && sig.cleaning < 10){
       return {mood:"calm", text:"La casa está tranquila. ¿Un mini-reset de 5 min?", micro:"Micro: recoge solo 5 objetos."};
+    }
+    if(sig.moon_phase_name && sig.moon_sign){
+      return {mood:"calm", text:`${sig.moon_phase_name} • Luna en ${sig.moon_sign}. Usa esto como clima emocional, no como sentencia.`, micro:"Micro: elige 1 palabra guía para hoy."};
     }
     return {mood:"calm", text:"Todo estable. ¿Claridad, calma o impulso?", micro:"Micro: escribe 1 intención corta."};
   }
