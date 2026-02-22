@@ -5,6 +5,13 @@
    Esto limpia localStorage + caches + desregistra service workers y recarga.
 */
 (function mcPwaRescueInit(){
+  // Flag that the main UI has rendered at least once
+  if(!window.__mcBoot) window.__mcBoot = { done:false, ts: Date.now() };
+
+  function cssBtn(){
+    return "border:0;border-radius:12px;padding:8px 12px;font-weight:800;cursor:pointer;";
+  }
+
   function showRescueBanner(reason){
     try{
       if(document.getElementById('mcRescueBanner')) return;
@@ -24,64 +31,77 @@
       d.style.boxShadow = '0 10px 30px rgba(0,0,0,0.35)';
       d.innerHTML = `
         <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;">
-          <div style="line-height:1.25">
-            <div style="font-weight:700">MemoryCarl: modo rescate</div>
-            <div style="opacity:.85">Si se quedó cargando, toca “Reset”. ${reason?`<span style="opacity:.7">(${reason})</span>`:''}</div>
+          <div style="line-height:1.25;min-width:0">
+            <div style="font-weight:900">MemoryCarl: modo rescate</div>
+            <div style="opacity:.85;white-space:normal">Si se quedó en “cargando”, prueba limpiar caché primero. ${reason?`<span style="opacity:.7">(${reason})</span>`:''}</div>
           </div>
-          <button id="mcRescueBtn" style="border:0;border-radius:12px;padding:8px 12px;font-weight:700;cursor:pointer;">Reset</button>
+          <div style="display:flex;gap:8px;flex-shrink:0">
+            <button id="mcRescueSoft" style="${cssBtn()}background:#2b73ff;color:#fff;">Reset caché</button>
+            <button id="mcRescueHard" style="${cssBtn()}background:#fff;color:#111;">Reset total</button>
+          </div>
         </div>`;
       document.body.appendChild(d);
-      document.getElementById('mcRescueBtn').onclick = ()=> mcHardReset();
+      document.getElementById('mcRescueSoft').onclick = ()=> mcSoftResetCache();
+      document.getElementById('mcRescueHard').onclick = ()=> mcHardResetAll();
     }catch(_e){}
   }
 
-  async function mcHardReset(){
+  async function mcSoftResetCache(){
     try{
-      // 1) service workers
+      // unregister SWs (including firebase-messaging)
       if('serviceWorker' in navigator){
         const regs = await navigator.serviceWorker.getRegistrations();
         await Promise.all(regs.map(r=>r.unregister()));
       }
-      // 2) caches (si existen)
+      // delete caches
       if('caches' in window){
         const keys = await caches.keys();
         await Promise.all(keys.map(k=>caches.delete(k)));
       }
-      // 3) local storage
-      try{ localStorage.clear(); }catch(_e){}
     }catch(_e){}
-    // recargar sin reset param
+    // reload without query
     try{
       const u = new URL(location.href);
       u.searchParams.delete('reset');
+      u.searchParams.delete('safe');
       location.replace(u.toString());
-    }catch(_e){
-      location.reload();
-    }
+    }catch(_e){ location.reload(); }
   }
 
-  // Reset explícito por URL
+  async function mcHardResetAll(){
+    try{
+      await mcSoftResetCache();
+      try{ localStorage.clear(); }catch(_e){}
+    }catch(_e){}
+    try{
+      const u = new URL(location.href);
+      u.searchParams.delete('reset');
+      u.searchParams.delete('safe');
+      location.replace(u.toString());
+    }catch(_e){ location.reload(); }
+  }
+
+  // URL reset: ?reset=1 => soft reset (preserve data)
   try{
     const u = new URL(location.href);
     if(u.searchParams.has('reset')){
-      // mostrar mini texto mientras limpia
       document.documentElement.style.opacity = '0.9';
-      mcHardReset();
+      mcSoftResetCache();
       return;
     }
   }catch(_e){}
 
-  // Si hay error global, ofrecer reset
-  window.addEventListener('error', (e)=> showRescueBanner('error JS'));
-  window.addEventListener('unhandledrejection', (e)=> showRescueBanner('promesa rechazada'));
+  // Global errors => offer rescue
+  window.addEventListener('error', ()=> showRescueBanner('error JS'));
+  window.addEventListener('unhandledrejection', ()=> showRescueBanner('promesa rechazada'));
 
-  // Si en 4.5s no hay señales de vida, ofrecer reset igualmente
+  // If in 6s the app hasn't rendered, offer rescue anyway
   setTimeout(()=>{
-    // Heurística: si el body sigue casi vacío o no hay header/nav, mostrar
-    const txt = (document.body && document.body.innerText) ? document.body.innerText.trim() : '';
-    if(txt.length < 30) showRescueBanner('arranque lento');
-  }, 4500);
-})();
+    if(window.__mcBoot && window.__mcBoot.done) return;
+    showRescueBanner('arranque no completado');
+  }, 6000);
+})()
+;
 
 import { computeMoonNow } from "./cosmic_lite.js";
 import { getTransitLiteSignals } from "./transit_lite.js";
@@ -103,7 +123,7 @@ const KEYS = {
 // 2) Paste the VAPID public key below
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker
-    .register("./firebase-messaging-sw.js?v=1001")
+    .register("./firebase-messaging-sw.js?v=1003")
     .then(reg => {
       console.log("SW registered:", reg.scope);
 
@@ -1651,6 +1671,7 @@ function renderMoreModal(){
 }
 
 function view(){
+  try{ if(window.__mcBoot && !window.__mcBoot.done) window.__mcBoot.done = true; }catch(_e){}
   // Keep a fresh global signals bag (used by NeuroBubble and other small agents)
   try{ refreshGlobalSignals(); }catch(e){}
   const root = document.querySelector("#app");
