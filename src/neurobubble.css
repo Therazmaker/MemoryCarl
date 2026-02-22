@@ -1,50 +1,82 @@
 
 #neuroBubble{
   position: fixed;
-  width: 80px;
-  height: 80px;
+  width: 90px;
+  height: 90px;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #ffffffaa, #66ccff);
-  box-shadow: 0 0 20px #66ccff88;
-  backdrop-filter: blur(6px);
+  background: radial-gradient(circle at 30% 30%, #ffffffcc, #66ccff);
+  box-shadow: 0 0 30px #66ccff88;
+  backdrop-filter: blur(8px);
   z-index: 9999;
-  transition: transform 0.2s ease;
+  cursor: grab;
 }
 
-#neuroBubble .eyes{
+#neuroBubble.dragged{
+  cursor: grabbing;
+}
+
+.eyes{
   display:flex;
   justify-content:space-around;
-  margin-top:25px;
+  margin-top:30px;
 }
 
 .eye{
-  width:18px;
-  height:18px;
+  width:20px;
+  height:20px;
   background:white;
   border-radius:50%;
   position:relative;
 }
 
 .pupil{
-  width:8px;
-  height:8px;
+  width:10px;
+  height:10px;
   background:black;
   border-radius:50%;
   position:absolute;
   top:5px;
   left:5px;
+  transition: transform 0.1s linear;
 }
 
 .mouth{
-  width:20px;
-  height:8px;
-  border-radius:0 0 20px 20px;
+  width:24px;
+  height:10px;
+  border-radius:0 0 24px 24px;
   background:black;
   margin:10px auto;
 }
 
 #neuroBubble.dragged .mouth{
   border-radius:50%;
-  width:12px;
-  height:12px;
+  width:14px;
+  height:14px;
+}
+
+#neuroPanel{
+  position: fixed;
+  width: 220px;
+  background: rgba(20,20,30,0.9);
+  color:white;
+  padding:10px;
+  border-radius:12px;
+  font-size:12px;
+  display:none;
+  z-index:9998;
+}
+
+#neuroPanel.open{
+  display:block;
+}
+
+.neuroInput{
+  width:100%;
+  margin-top:5px;
+}
+
+.neuroActions{
+  display:flex;
+  justify-content:space-between;
+  margin-top:5px;
 }
