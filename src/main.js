@@ -7316,11 +7316,11 @@ function openProductLibrary(){
             <div class="item">
               <div class="left">
                 <div class="name">${escapeHtml(p.name)}</div>
-                <div class="meta">${money(p.price)}</div>
+                <div class="meta">${money(p.price)} ${p.unit?`· ${escapeHtml(p.unit)}`:""} ${p.category?`· ${escapeHtml(p.category)}`:""}</div>
               </div>
               <div class="row">
                 <button class="btn" onclick="openProductChart('${p.id}')">📈</button>
-                <button class="btn" onclick="editProductPrice('${p.id}')">Edit</button>
+                <button class="btn" onclick="editProductDetails('${p.id}')">✏️</button>
               </div>
             </div>
           `;
@@ -7725,6 +7725,53 @@ function editProductPrice(productId){
   });
 }
 
+function editProductDetails(productId){
+  const p = state.products.find(x=>x.id===productId);
+  if(!p) return;
+
+  openPromptModal({
+    title:"Editar producto",
+    fields:[
+      {key:"name", label:"Nombre", value:String(p.name||"")},
+      {key:"category", label:"Categoría", value:String(p.category||"")},
+      {key:"unit", label:"Unidad (u, kg, L)", value:String(p.unit||"u")},
+      {key:"price", label:(String(p.unit||"u").toLowerCase().includes("kg") ? "Precio por kg" : "Precio"), type:"number", value:String(p.price||0)},
+      {key:"store", label:"Tienda", value:String(p.store||"")},
+      {key:"essential", label:"Esencial (1/0)", value:(p.essential? "1":"0")}
+    ],
+    onSubmit: (vals)=>{
+      const name = (vals.name||"").trim();
+      if(!name) return;
+      p.name = name;
+      p.category = (vals.category||"").trim();
+      p.unit = (vals.unit||"u").trim() || "u";
+      p.store = (vals.store||"").trim();
+      p.essential = String(vals.essential||"").trim() !== "0";
+
+      const np = Number(vals.price||0);
+      if(Number(p.price||0) !== np){
+        p.history = p.history || [];
+        p.history.push({ price: Number(p.price||0), date:new Date().toISOString() });
+      }
+      p.price = np;
+
+      // propagate to inventory items linked by productId
+      (state.inventory||[]).forEach(inv=>{
+        if(inv.productId===p.id){
+          inv.name = p.name;
+          inv.category = p.category || inv.category;
+          inv.unit = p.unit || inv.unit;
+          inv.essential = !!p.essential;
+        }
+      });
+
+      persist(); view();
+    }
+  });
+}
+window.editProductDetails = editProductDetails;
+
+
 function openProductChart(productId){
   const p = state.products.find(x=>x.id===productId);
   if(!p) return;
@@ -8060,6 +8107,88 @@ function drawLineChart(canvas, labels, values){
   }
 }
 
+
+function openShoppingCategoryModal(category, preset){
+  const range = presetRange(preset || (state.shoppingDashPreset||"7d"));
+  const start = range.start;
+  const end = range.end;
+
+  const host = document.querySelector("#app");
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+
+  const rows = {};
+  (state.shoppingHistory||[]).forEach(entry=>{
+    const d = String(entry.date||"");
+    if(d < start || d > end) return;
+    (entry.items||[]).forEach(it=>{
+      const cat = (it.category||"").trim() || "other";
+      if(cat !== category) return;
+      const key = (it.productId && String(it.productId).trim()) ? ("p:"+String(it.productId).trim()) : ("n:"+String(it.name||"").trim().toLowerCase());
+      if(!rows[key]){
+        rows[key] = { key, name: it.name, productId:(it.productId||"").trim(), times:0, qty:0, spent:0, unit:(it.unit||"") };
+      }
+      const q = Math.max(1, Number(it.qty||1));
+      const price = Number(it.price||0);
+      rows[key].qty += q;
+      rows[key].spent += price * q;
+      rows[key].times += 1;
+    });
+  });
+
+  let arr = Object.values(rows);
+  arr.forEach(r=>{
+    if(r.productId){
+      const p = (state.products||[]).find(x=>x.id===r.productId);
+      if(p){
+        r.name = p.name || r.name;
+        r.unit = p.unit || r.unit;
+      }
+    }
+  });
+  arr.sort((a,b)=> (b.spent-a.spent) || (b.times-a.times));
+
+  modal.innerHTML = `
+    <div class="modal">
+      <div class="cardTop">
+        <div>
+          <h2 style="margin:0;">Categoría: ${escapeHtml(category)}</h2>
+          <div class="small">${escapeHtml(start)} → ${escapeHtml(end)}</div>
+        </div>
+        <button class="btn ghost" data-x="1">Cerrar</button>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="list">
+        ${arr.map(r=>{
+          const p = r.productId ? (state.products||[]).find(x=>x.id===r.productId) : null;
+          const canEdit = !!p;
+          return `
+            <div class="item">
+              <div class="left">
+                <div class="name">${escapeHtml(r.name)}</div>
+                <div class="meta"><b>${money(r.spent)}</b> · ${r.times} regs · qty ${Number(r.qty||0)} ${escapeHtml(r.unit||"")}</div>
+              </div>
+              <div class="row">
+                ${canEdit ? `<button class="btn" onclick="editProductDetails('${p.id}')">Editar</button>` : ``}
+              </div>
+            </div>
+          `;
+        }).join("") || `<div class="muted">No hay items en esta categoría.</div>`}
+      </div>
+
+      <div class="muted" style="margin-top:10px;">
+        Tip: para arreglar cosas en <b>other</b>, entra a Biblioteca y edita la categoría/unidad.
+      </div>
+    </div>
+  `;
+  host.appendChild(modal);
+  modal.querySelector('[data-x="1"]').addEventListener("click", ()=>modal.remove());
+  modal.addEventListener("click",(e)=>{ if(e.target===modal) modal.remove(); });
+}
+window.openShoppingCategoryModal = openShoppingCategoryModal;
+
 function viewShoppingDashboard(){
   const preset = state.shoppingDashPreset || "7d";
   const range = presetRange(preset);
@@ -8074,7 +8203,7 @@ function viewShoppingDashboard(){
 
   const catRows = Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>{
     const pct = sum.sum ? (v/sum.sum*100) : 0;
-    return `<div class="kv"><div class="k">${escapeHtml(c)}</div><div class="v"><b>${money(v)}</b> · ${pct.toFixed(0)}%</div></div>`;
+    return `<button class="kvBtn" onclick="openShoppingCategoryModal(\'${escapeHtml(c)}\', \'${preset}\')"><div class="k">${escapeHtml(c)}</div><div class="v"><b>${money(v)}</b> · ${pct.toFixed(0)}%</div></button>`;
   }).join("") || `<div class="muted">No hay datos en este rango.</div>`;
 
   const storeRows = stores.map(([s,c])=>`<div class="kv"><div class="k">${escapeHtml(s)}</div><div class="v">${c} compras</div></div>`).join("") || `<div class="muted">Sin tiendas.</div>`;

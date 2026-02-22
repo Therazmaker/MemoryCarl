@@ -1308,3 +1308,9 @@ body{
   .modal.calcquestModal{margin:0;border-radius:20px 20px 0 0;max-height:92vh;}
   .modal.calcquestModal .learnFrame{height:70vh !important;min-height:360px !important;}
 }
+
+
+.kvBtn{display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;background:transparent;border:1px solid rgba(255,255,255,0.08);padding:10px 12px;border-radius:12px;color:inherit;}
+.kvBtn:hover{border-color:rgba(255,255,255,0.16);}
+.kvBtn .k{opacity:.9;}
+.kvBtn .v{opacity:.95;}
