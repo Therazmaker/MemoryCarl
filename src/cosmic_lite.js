@@ -140,3 +140,15 @@ export function computeMoonNow(date = new Date()){
     moon_deg: Number(moonDeg.toFixed(2))
   };
 }
+
+
+export function computeSunNow(date = new Date()){
+  const d = toDays(date);
+  const s = sunCoords(d);
+  const sunDeg = norm360((s.L / rad));
+  const sign = zodiacFromDeg(sunDeg);
+  return {
+    sun_sign: sign,
+    sun_deg: Number(sunDeg.toFixed(3)),
+  };
+}

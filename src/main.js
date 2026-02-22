@@ -1,4 +1,5 @@
 import { computeMoonNow } from "./cosmic_lite.js";
+import { getTransitLiteSignals } from "./transit_lite.js";
 
 console.log("MemoryCarl loaded");
 // ===== LocalStorage Keys =====
@@ -190,7 +191,8 @@ function refreshGlobalSignals(){
     ? state.neuroclawLast.signals
     : {};
   const cosmic = getCosmicLiteSignals(new Date());
-  window.__MC_STATE__ = Object.assign({}, base, cosmic);
+  const transit = getTransitLiteSignals(new Date());
+  window.__MC_STATE__ = Object.assign({}, base, cosmic, transit);
   return window.__MC_STATE__;
 }
 
@@ -1392,6 +1394,8 @@ function view(){
       const sig = refreshGlobalSignals();
       const label = root.querySelector("#astroTodayLabel");
       if(label) label.textContent = `${sig.moon_phase_name} • Luna en ${sig.moon_sign}`;
+      const tlabel = root.querySelector("#astroTransitLabel");
+      if(tlabel) tlabel.textContent = sig.transit_top || "";
       try{ toast("Listo 🌙"); }catch(_e){}
     });
 
@@ -1404,7 +1408,28 @@ function view(){
       }else{
         alert("No encontré Bubble en pantalla. Vuelve a Home y asegúrate que aparece.");
       }
+
     });
+
+    // Bubble whisper frequency (minutes)
+    const selFreq = root.querySelector("#bubbleFreq");
+    const btnFreqSave = root.querySelector("#btnBubbleFreqSave");
+    if(selFreq){
+      // load saved
+      try{
+        const raw = localStorage.getItem("mc_bubble_cooldown_min");
+        const v = raw ? String(raw) : "60";
+        selFreq.value = ["30","60","120","240"].includes(v) ? v : "60";
+      }catch(e){}
+    }
+    if(btnFreqSave){
+      btnFreqSave.addEventListener("click", ()=>{
+        const v = selFreq ? String(selFreq.value||"60") : "60";
+        try{ localStorage.setItem("mc_bubble_cooldown_min", v); }catch(e){}
+        try{ if(typeof toast==="function") toast("Bubble actualizado 🫧"); }catch(e){}
+      });
+    }
+
   }
 
   
@@ -2292,8 +2317,26 @@ function viewSettings(){
         <div class="v"><b id="astroTodayLabel">${escapeHtml(`${getCosmicLiteSignals().moon_phase_name} • Luna en ${getCosmicLiteSignals().moon_sign}`)}</b></div>
       </div>
       <div class="kv">
+        <div class="k">Tránsitos</div>
+        <div class="v small"><span id="astroTransitLabel">${escapeHtml(getTransitLiteSignals().transit_top || "Activa tu carta natal para ver casas y aspectos.")}</span></div>
+      </div>
+      <div class="kv">
         <div class="k">Lectura</div>
         <div class="v small" id="astroHint">Bubble puede usar esto como contexto, no como destino.</div>
+      </div>
+
+      <div class="kv">
+        <div class="k">Bubble</div>
+        <div class="v small">
+          <span style="opacity:.9;">Frecuencia de susurros</span>
+          <select id="bubbleFreq" class="inp" style="margin-left:10px;max-width:180px;">
+            <option value="30">Cada 30 min</option>
+            <option value="60">Cada 1 hora</option>
+            <option value="120">Cada 2 horas</option>
+            <option value="240">Cada 4 horas</option>
+          </select>
+          <button class="btn ghost" id="btnBubbleFreqSave" style="margin-left:10px;">Guardar</button>
+        </div>
       </div>
 
       <div class="hr"></div>

@@ -218,11 +218,25 @@ function updateStateFromAnswer(s, tags, text){
       moon_phase_frac: s.moon_phase_frac ?? null,
       natal_loaded: !!s.natal_loaded,
       natal_name: s.natal_name ?? "",
+
+      // transits (lite)
+      transit_top: s.transit_top ?? "",
+      transit_hint: s.transit_hint ?? "",
+      transit_events: Array.isArray(s.transit_events) ? s.transit_events : [],
+      transit_moon_house: s.transit_moon_house ?? null,
+      transit_sun_house: s.transit_sun_house ?? null,
     };
   }
 
   function localReply(sig){
     // Simple local "brain" until cloud is available
+
+    // Transit hint (when natal is loaded)
+    if(sig.transit_hint){
+      // Surface this fairly often because you asked Bubble to talk more.
+      return {mood:"calm", text:String(sig.transit_hint), micro:"Micro: toma 10 segundos y nombra tu intención (1 frase)."};
+    }
+
     // Cosmic hint (when available)
     if(sig.moon_phase_name && sig.moon_sign){
       const phase = String(sig.moon_phase_name);
@@ -301,7 +315,16 @@ const st = decayStateDaily(loadState());
 applyMoodToUI(st);
 
   let latestNeuro = null; // {signals, suggestions, ts}
-  const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h between questions (tunable)
+  function baseCooldownMs(){
+  // user setting (minutes) stored by Settings UI
+  let m = 60;
+  try{ m = Number(localStorage.getItem("mc_bubble_cooldown_min")||60); }catch(e){}
+  if(!isFinite(m)) m = 60;
+  m = Math.max(15, Math.min(480, m));
+  return m * 60 * 1000;
+}
+
+const COOLDOWN_MS = baseCooldownMs(); // 2h between questions (tunable)
 
   const QUESTIONS = [
     { id:"q_focus_today", tags:["foco"], prompt:"¿Qué necesitas hoy: claridad, calma o impulso?", chips:["claridad","calma","impulso"] },
@@ -332,7 +355,7 @@ applyMoodToUI(st);
     const now = Date.now();
     // Dynamic cooldown: respects your attention (less spam), but reacts faster when concern is high and trust is built
     const dynCooldown = Math.max(35*60*1000, Math.min(4*60*60*1000,
-      COOLDOWN_MS * (1 + (st.streakIgnored||0)*0.35) * (1.15 - st.attachment*0.35) * (1.10 - st.concern*0.30)
+      baseCooldownMs() * (1 + (st.streakIgnored||0)*0.35) * (1.15 - st.attachment*0.35) * (1.10 - st.concern*0.30)
     ));
     if(now - (mem.lastQuestionAt||0) < dynCooldown) return null;
 
