@@ -6501,6 +6501,19 @@ function wireActions(root){
       const act = btn.dataset.act;
 
       // Shopping dashboard navigation
+// Inventory tabs
+if(act==="invTab"){
+  state.inventorySubtab = (btn.dataset.tab === "history") ? "history" : "stock";
+  view();
+  return;
+}
+if(act==="invHistPreset"){
+  state.inventoryHistPreset = btn.dataset.preset || "30d";
+  state.inventorySubtab = "history";
+  view();
+  return;
+}
+
       if(act==="openShoppingDashboard"){
         state.shoppingSubtab = "dashboard";
         view();
@@ -6593,26 +6606,6 @@ function wireActions(root){
         if(act==="addItem"){
           openSmartAddItem(lid);
           return;
-
-            title:"Add item",
-            fields:[
-              {key:"name", label:"Item", placeholder:"Milk"},
-              {key:"price", label:"Price", placeholder:"4.25", type:"number"},
-              {key:"qty", label:"Qty", placeholder:"1", type:"number"},
-            ],
-            onSubmit: ({name, price, qty})=>{
-              if(!name.trim()) return;
-              list.items.push({
-                id: uid("i"),
-                name: name.trim(),
-                price: Number(price || 0),
-                qty: Math.max(1, Number(qty || 1)),
-                bought: false
-              });
-              persist(); view();
-            }
-          });
-          return;
         }
         if(act==="toggleBought"){
           const it = list.items.find(x=>x.id===btn.dataset.itemId);
@@ -6624,18 +6617,41 @@ function wireActions(root){
         if(act==="editItem"){
           const it = list.items.find(x=>x.id===btn.dataset.itemId);
           if(!it) return;
+
+          const isWeighted = !!it.weight_g;
+          const fields = [
+            {key:"name", label:"Item", value: it.name},
+          ];
+
+          if(isWeighted){
+            fields.push({key:"pricePerKg", label:"Precio por kg", type:"number", value:String(it.pricePerKg ?? it.price ?? 0)});
+            fields.push({key:"grams", label:"Gramos", type:"number", value:String(it.weight_g ?? 500)});
+          }else{
+            fields.push({key:"price", label:"Price", type:"number", value: String(it.price ?? 0)});
+            fields.push({key:"qty", label:"Qty", type:"number", value: String(it.qty ?? 1)});
+          }
+
           openPromptModal({
             title:"Edit item",
-            fields:[
-              {key:"name", label:"Item", value: it.name},
-              {key:"price", label:"Price", type:"number", value: String(it.price ?? 0)},
-              {key:"qty", label:"Qty", type:"number", value: String(it.qty ?? 1)},
-            ],
-            onSubmit: ({name, price, qty})=>{
-              if(!name.trim()) return;
-              it.name = name.trim();
-              it.price = Number(price || 0);
-              it.qty = Math.max(1, Number(qty || 1));
+            fields,
+            onSubmit: (vals)=>{
+              const name = (vals.name||"").trim();
+              if(!name) return;
+              it.name = name;
+
+              if(isWeighted){
+                const ppk = Number(vals.pricePerKg||0);
+                const g = Math.max(1, Number(vals.grams||0));
+                it.pricePerKg = ppk;
+                it.weight_g = g;
+                it.qty = 1;
+                it.price = Number(calcPriceFromKg(ppk, g).toFixed(2));
+                it.unit = "g";
+              }else{
+                it.price = Number(vals.price || 0);
+                it.qty = Math.max(1, Number(vals.qty || 1));
+              }
+
               persist(); view();
             }
           });
@@ -7462,6 +7478,117 @@ function addInventoryToList(invId){
   view();
 }
 
+
+
+function parseIsoDateToMs_(iso){
+  try{
+    const s = String(iso||"").trim();
+    if(!s) return 0;
+    // YYYY-MM-DD
+    const [y,m,d] = s.split("-").map(n=>Number(n));
+    if(!y||!m||!d) return 0;
+    return new Date(y, m-1, d).getTime();
+  }catch(e){ return 0; }
+}
+
+function getShoppingHistoryWindow_(days){
+  const now = new Date();
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() + 24*60*60*1000;
+  const start = end - (Number(days||7) * 24*60*60*1000);
+  return {start, end};
+}
+
+function buildInventoryPurchaseStats_(days){
+  const win = getShoppingHistoryWindow_(days);
+  const hist = (state.shoppingHistory||[]);
+  const byKey = {};
+
+  for(const entry of hist){
+    const t = parseIsoDateToMs_(entry.date);
+    if(!t || t < win.start || t >= win.end) continue;
+
+    const items = entry.items || [];
+    const seenInThisEntry = new Set(); // count "times bought" per entry/day
+    for(const it of items){
+      const key = (it.productId && String(it.productId).trim()) ? ("p:"+String(it.productId).trim()) : ("n:"+String(it.name||"").trim().toLowerCase());
+      if(!byKey[key]){
+        byKey[key] = {
+          key,
+          productId: (it.productId||"").trim(),
+          name: it.name || "Item",
+          category: (it.category||"").trim(),
+          unit: (it.unit||"").trim() || "u",
+          times: 0,
+          qty: 0,
+          spent: 0
+        };
+      }
+      const row = byKey[key];
+      const q = Math.max(1, Number(it.qty||1));
+      const price = Number(it.price||0);
+      row.qty += q;
+      row.spent += price * q;
+
+      if(!seenInThisEntry.has(key)){
+        row.times += 1;
+        seenInThisEntry.add(key);
+      }
+    }
+  }
+
+  const arr = Object.values(byKey);
+  // If product exists in library, prefer latest name/category
+  arr.forEach(r=>{
+    if(r.productId){
+      const p = (state.products||[]).find(x=>x.id===r.productId);
+      if(p){
+        r.name = p.name || r.name;
+        r.category = p.category || r.category;
+        r.unit = p.unit || r.unit;
+      }
+    }
+  });
+
+  arr.sort((a,b)=> (b.times - a.times) || (b.spent - a.spent) || (String(a.name).localeCompare(String(b.name))));
+  return arr;
+}
+
+function viewInventoryHistory(){
+  const preset = state.inventoryHistPreset || "30d";
+  const days = preset==="7d" ? 7 : preset==="15d" ? 15 : 30;
+  const rows = buildInventoryPurchaseStats_(days);
+
+  return `
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Histórico de compras</h3>
+          <div class="small">Cuántas veces compraste cada producto en los últimos ${days} días</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+
+      <div class="row" style="gap:8px; margin-bottom:10px;">
+        <button class="btn ${preset==="7d"?"primary":""}" data-act="invHistPreset" data-preset="7d">7D</button>
+        <button class="btn ${preset==="15d"?"primary":""}" data-act="invHistPreset" data-preset="15d">15D</button>
+        <button class="btn ${preset==="30d"?"primary":""}" data-act="invHistPreset" data-preset="30d">30D</button>
+        <div class="chip">${rows.length} productos</div>
+      </div>
+
+      <div class="list">
+        ${rows.map(r=>`
+          <div class="item">
+            <div class="left">
+              <div class="name">${escapeHtml(r.name)}</div>
+              <div class="meta">${escapeHtml(r.category||"-")} · <b>${r.times}</b> veces · qty ${Number(r.qty||0)} · ${money(r.spent)}</div>
+            </div>
+          </div>
+        `).join("") || `<div class="muted">No hay compras guardadas en este rango.</div>`}
+      </div>
+    </section>
+  `;
+}
+
 function viewInventory(){
   ensureInventory();
   const low = (state.inventory||[]).filter(x=>Number(x.minQty||0)>0 && Number(x.qty||0) <= Number(x.minQty||0)).length;
@@ -7477,6 +7604,11 @@ function viewInventory(){
       <button class="btn" data-act="backToShoppingLists">← Volver</button>
     </div>
 
+    <div class="row" style="gap:8px; margin:0 0 12px;">
+      <button class="btn ${state.inventorySubtab!=="history"?"primary":""}" data-act="invTab" data-tab="stock">📦 Stock</button>
+      <button class="btn ${state.inventorySubtab==="history"?"primary":""}" data-act="invTab" data-tab="history">🗓️ Histórico</button>
+    </div>
+
     <div class="row" style="margin:0 0 12px;">
       <div class="chip">${(state.inventory||[]).length} items</div>
       <div class="chip">${linked} link</div>
@@ -7484,46 +7616,56 @@ function viewInventory(){
       <button class="btn good" onclick="addInventoryManual()">+ Manual</button>
     </div>
 
-    <section class="card">
-      <div class="cardTop">
-        <div>
-          <h3 class="cardTitle">Agregar desde Biblioteca</h3>
-          <div class="small">Conecta inventario con precios</div>
-        </div>
-      </div>
-      <div class="hr"></div>
-      <div class="grid">${pickRows}</div>
-    </section>
+${state.inventorySubtab==="history" ? viewInventoryHistory() : `
+  <div class="row" style="margin:0 0 12px;">
+    <div class="chip">${(state.inventory||[]).length} items</div>
+    <div class="chip">${linked} link</div>
+    <div class="chip">${low} bajo</div>
+    <button class="btn good" onclick="addInventoryManual()">+ Manual</button>
+  </div>
 
-    <section class="card">
-      <div class="cardTop">
-        <div>
-          <h3 class="cardTitle">Tu inventario</h3>
-          <div class="small">Marca mínimos para alertas</div>
-        </div>
+  <section class="card">
+    <div class="cardTop">
+      <div>
+        <h3 class="cardTitle">Agregar desde Biblioteca</h3>
+        <div class="small">Conecta inventario con precios</div>
       </div>
-      <div class="hr"></div>
-      <div class="list">
-        ${(state.inventory||[]).map(it=>{
-          const isLow = Number(it.minQty||0)>0 && Number(it.qty||0) <= Number(it.minQty||0);
-          const badge = isLow ? `<span class="chip" style="border-color:rgba(255,80,80,.35);color:rgba(255,170,170,.95)">Bajo</span>` : ``;
-          const link = it.productId ? `🔗` : `📝`;
-          return `
-            <div class="item">
-              <div class="left">
-                <div class="name">${link} ${it.essential?"⭐":""} ${escapeHtml(it.name)}</div>
-                <div class="meta">${escapeHtml(it.category||"-")} · ${Number(it.qty||0)} ${escapeHtml(it.unit||"u")} · min ${Number(it.minQty||0)} ${badge}</div>
-              </div>
-              <div class="row">
-                <button class="btn" onclick="addInventoryToList('${it.id}')">➕ Lista</button>
-                <button class="btn" onclick="editInventoryItem('${it.id}')">Edit</button>
-                <button class="btn danger" onclick="deleteInventoryItem('${it.id}')">Del</button>
-              </div>
+    </div>
+    <div class="hr"></div>
+    <div class="grid">${pickRows}</div>
+  </section>
+
+  <section class="card">
+    <div class="cardTop">
+      <div>
+        <h3 class="cardTitle">Tu inventario</h3>
+        <div class="small">Marca mínimos para alertas</div>
+      </div>
+    </div>
+    <div class="hr"></div>
+    <div class="list">
+      ${(state.inventory||[]).map(it=>{
+        const isLow = Number(it.minQty||0)>0 && Number(it.qty||0) <= Number(it.minQty||0);
+        const badge = isLow ? `<span class="chip" style="border-color:rgba(255,80,80,.35);color:rgba(255,170,170,.95)">Bajo</span>` : ``;
+        const link = it.productId ? `🔗` : `📝`;
+        return `
+          <div class="item">
+            <div class="left">
+              <div class="name">${link} ${it.essential?"⭐":""} ${escapeHtml(it.name)}</div>
+              <div class="meta">${escapeHtml(it.category||"-")} · ${Number(it.qty||0)} ${escapeHtml(it.unit||"u")} · min ${Number(it.minQty||0)} ${badge}</div>
             </div>
-          `;
-        }).join("") || `<div class="muted">Aún no tienes items.</div>`}
-      </div>
-    </section>
+            <div class="row">
+              <button class="btn" onclick="addInventoryToList('${it.id}')">➕ Lista</button>
+              <button class="btn" onclick="editInventoryItem('${it.id}')">Edit</button>
+              <button class="btn danger" onclick="deleteInventoryItem('${it.id}')">Del</button>
+            </div>
+          </div>
+        `;
+      }).join("") || `<div class="muted">Aún no tienes items.</div>`}
+    </div>
+  </section>
+`}
+
   `;
 }
 
