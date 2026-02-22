@@ -4347,6 +4347,23 @@ function viewShopping(){
   `;
 }
 
+
+
+function shoppingItemMeta(it){
+  const price = Number(it.price||0);
+  const qty = Number(it.qty||1);
+  const total = price * qty;
+
+  if(it.weight_g){
+    const g = Number(it.weight_g||0);
+    const perKg = (it.pricePerKg!=null) ? Number(it.pricePerKg||0) : null;
+    const perTxt = (perKg!=null && perKg>0) ? ` · ${money(perKg)}/kg` : "";
+    return `${money(price)} · ${g}g${perTxt} = <b>${money(total)}</b>`;
+  }
+
+  return `${money(price)} × ${qty} = <b>${money(total)}</b>`;
+}
+
 function shoppingCard(list){
   const totalAll = list.items.reduce((acc,it)=> acc + (Number(it.price||0)*Number(it.qty||1)), 0);
   const totalPending = list.items
@@ -4370,7 +4387,7 @@ function shoppingCard(list){
           <div class="item">
             <div class="left">
               <div class="name">${it.bought ? "✅" : "⬜"} ${escapeHtml(it.name)}</div>
-              <div class="meta">${money(it.price)} × ${Number(it.qty||1)} = <b>${money(Number(it.price||0)*Number(it.qty||1))}</b></div>
+              <div class="meta">${shoppingItemMeta(it)}</div>
             </div>
             <div class="row">
               <button class="btn ${it.bought ? "ghost" : "good"}" data-act="toggleBought" data-item-id="${it.id}">${it.bought ? "Undo" : "Bought"}</button>
@@ -6574,11 +6591,9 @@ function wireActions(root){
         if(!list) return;
 
         if(act==="addItem"){
-          if(state.products && state.products.length){
-            openProductPicker(lid);
-            return;
-          }
-          openPromptModal({
+          openSmartAddItem(lid);
+          return;
+
             title:"Add item",
             fields:[
               {key:"name", label:"Item", placeholder:"Milk"},
@@ -6959,6 +6974,210 @@ function priceTrend(product){
 }
 
 
+
+
+function calcPriceFromKg(pricePerKg, grams){
+  const p = Number(pricePerKg||0);
+  const g = Number(grams||0);
+  if(!p || !g) return 0;
+  return (p * (g/1000));
+}
+
+function openSmartAddItem(listId){
+  const list = state.shopping.find(x=>x.id===listId);
+  if(!list) return;
+
+  const host = document.querySelector("#app");
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+
+  const products = (state.products||[]).slice();
+
+  modal.innerHTML = `
+    <div class="modal">
+      <h2>Agregar item</h2>
+
+      <div class="row" style="gap:8px; margin-bottom:10px;">
+        <input id="smartItemSearch" class="inp" style="flex:1; min-width:160px;" placeholder="Escribe para buscar… (ej: arroz)" />
+        <button class="btn ghost" id="smartItemClose">Cerrar</button>
+      </div>
+
+      <div class="small" style="opacity:0.8; margin-bottom:8px;">
+        Tip: escribe 2-3 letras y toca una sugerencia. Si el producto es por kg, te pedirá gramos.
+      </div>
+
+      <div id="smartItemResults" class="list"></div>
+
+      <div class="hr"></div>
+
+      <div class="row" style="margin-top:12px; gap:8px;">
+        <button class="btn primary" id="smartItemManual">+ Manual</button>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(modal);
+
+  const search = modal.querySelector("#smartItemSearch");
+  const results = modal.querySelector("#smartItemResults");
+
+  function renderResults(q){
+    const query = String(q||"").trim().toLowerCase();
+    let matches = products;
+
+    if(query){
+      matches = products.filter(p=>{
+        const n = String(p.name||"").toLowerCase();
+        const c = String(p.category||"").toLowerCase();
+        return n.includes(query) || c.includes(query);
+      });
+    }
+
+    matches = matches.slice(0, 10);
+
+    if(matches.length===0){
+      results.innerHTML = `<div class="small" style="padding:10px; opacity:0.8;">No encontré nada. Usa Manual 👇</div>`;
+      return;
+    }
+
+    results.innerHTML = matches.map(p=>{
+      const u = (p.unit||"u").toLowerCase();
+      const isKg = (u.includes("kg"));
+      const priceLabel = isKg ? `${money(p.price)}/kg` : money(p.price);
+      return `
+        <div class="item">
+          <div class="left">
+            <div class="name">${escapeHtml(p.name)}</div>
+            <div class="meta">${priceLabel}${p.category?` · ${escapeHtml(p.category)}`:""}</div>
+          </div>
+          <div class="row">
+            <button class="btn primary" data-pick="${p.id}">Elegir</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function close(){
+    modal.remove();
+  }
+
+  // initial
+  renderResults("");
+
+  search.addEventListener("input", ()=> renderResults(search.value));
+  modal.querySelector("#smartItemClose").addEventListener("click", close);
+
+  results.addEventListener("click", (e)=>{
+    const btn = e.target.closest("button[data-pick]");
+    if(!btn) return;
+    const pid = btn.dataset.pick;
+    const p = products.find(x=>x.id===pid);
+    if(!p) return;
+
+    const u = String(p.unit||"u").toLowerCase();
+    const isKg = u.includes("kg");
+
+    if(isKg){
+      openPromptModal({
+        title:`${p.name} (por kg)`,
+        fields:[
+          {key:"grams", label:"Gramos", type:"number", value:"500"},
+        ],
+        onSubmit: ({grams})=>{
+          const g = Math.max(1, Number(grams||0));
+          const price = calcPriceFromKg(p.price, g);
+          list.items.push({
+            id: uid("i"),
+            name: p.name,
+            price: Number(price.toFixed(2)),
+            qty: 1,
+            bought: false,
+            productId: p.id,
+            category: p.category || "",
+            essential: !!p.essential,
+            weight_g: g,
+            pricePerKg: Number(p.price||0),
+            unit: "g"
+          });
+          persist(); view(); close();
+        }
+      });
+      return;
+    }
+
+    // Unit product
+    openPromptModal({
+      title:`${p.name}`,
+      fields:[
+        {key:"qty", label:"Cantidad", type:"number", value:"1"},
+        {key:"price", label:"Precio (por unidad)", type:"number", value:String(p.price||0)}
+      ],
+      onSubmit: ({qty, price})=>{
+        const qn = Math.max(1, Number(qty||1));
+        const pr = Number(price||0);
+        list.items.push({
+          id: uid("i"),
+          name: p.name,
+          price: pr,
+          qty: qn,
+          bought: false,
+          productId: p.id,
+          category: p.category || "",
+          essential: !!p.essential
+        });
+        persist(); view(); close();
+      }
+    });
+  });
+
+  modal.querySelector("#smartItemManual").addEventListener("click", ()=>{
+    openPromptModal({
+      title:"Item manual",
+      fields:[
+        {key:"name", label:"Nombre", placeholder:"Ej: Tomate"},
+        {key:"mode", label:"Modo (u o kg)", value:"u"},
+        {key:"price", label:"Precio (si u = precio unitario / si kg = precio por kg)", type:"number", value:"0"},
+        {key:"qty", label:"Cantidad (si u)", type:"number", value:"1"},
+        {key:"grams", label:"Gramos (si kg)", type:"number", value:"500"},
+      ],
+      onSubmit: ({name, mode, price, qty, grams})=>{
+        const n = (name||"").trim();
+        if(!n) return;
+        const m = String(mode||"u").toLowerCase();
+        const pr = Number(price||0);
+
+        if(m.includes("kg")){
+          const g = Math.max(1, Number(grams||0));
+          const calc = calcPriceFromKg(pr, g);
+          list.items.push({
+            id: uid("i"),
+            name: n,
+            price: Number(calc.toFixed(2)),
+            qty: 1,
+            bought:false,
+            weight_g: g,
+            pricePerKg: pr,
+            unit: "g"
+          });
+        }else{
+          list.items.push({
+            id: uid("i"),
+            name: n,
+            price: pr,
+            qty: Math.max(1, Number(qty||1)),
+            bought:false
+          });
+        }
+        persist(); view(); close();
+      }
+    });
+  });
+
+  // focus
+  setTimeout(()=> search.focus(), 80);
+}
+
 function openProductPicker(listId){
   const list = state.shopping.find(x=>x.id===listId);
   if(!list) return;
@@ -7021,16 +7240,39 @@ function addProductToShoppingList(listId, productId){
   const product = state.products.find(x=>x.id===productId);
   if(!list || !product) return;
 
-  list.items.push({
-    id: uid("i"),
-    name: product.name,
-    price: Number(product.price || 0),
-    qty: 1,
-    bought: false,
-    productId: product.id,
-    category: product.category || "",
-    essential: !!product.essential
-  });
+  const u = String(product.unit||"u").toLowerCase();
+  const isKg = u.includes("kg");
+
+  if(isKg){
+    // Default 500g if picked from old picker
+    const g = 500;
+    const price = calcPriceFromKg(product.price, g);
+    list.items.push({
+      id: uid("i"),
+      name: product.name,
+      price: Number(price.toFixed(2)),
+      qty: 1,
+      bought: false,
+      productId: product.id,
+      category: product.category || "",
+      essential: !!product.essential,
+      weight_g: g,
+      pricePerKg: Number(product.price||0),
+      unit: "g"
+    });
+  }else{
+    list.items.push({
+      id: uid("i"),
+      name: product.name,
+      price: Number(product.price || 0),
+      qty: 1,
+      bought: false,
+      productId: product.id,
+      category: product.category || "",
+      essential: !!product.essential,
+      unit: product.unit || "u"
+    });
+  }
 
   const backdrop = document.querySelector('.modalBackdrop');
   if(backdrop) backdrop.remove();
@@ -7038,7 +7280,7 @@ function addProductToShoppingList(listId, productId){
   persist();
   view();
 }
-function openProductLibrary(){
+function openProductLibrary()function openProductLibrary(){
   const host = document.querySelector("#app");
   const sheet = document.createElement("div");
   sheet.className = "modalBackdrop";
