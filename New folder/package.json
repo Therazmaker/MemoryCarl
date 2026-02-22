@@ -1,8 +1,0 @@
-{
-  "name": "memorycarl-push",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "google-auth-library": "^9.11.0"
-  }
-}
