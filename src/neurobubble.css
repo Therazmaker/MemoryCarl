@@ -26,7 +26,7 @@
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  animation: nbBreathe 2.8s ease-in-out infinite;
+  animation: nbBreathe var(--breatheDur, 2.8s) ease-in-out infinite;
 }
 
 @keyframes nbBreathe{
@@ -85,6 +85,7 @@
   position: absolute;
   top: 3px;
   left: 3px;
+  transform: translate(calc((1 - var(--eyeCalm, 0.6)) * 1.4px), calc((1 - var(--eyeCalm, 0.6)) * 0.8px));
 }
 
 #neuroBubble .mouth{
@@ -205,3 +206,48 @@
 .nb-actions{ display:flex; justify-content:space-between; margin-top:6px; }
 
 #neuroSay[data-side='left']::after{ left:auto; right:20px; }
+
+
+
+/* === Mood Engine hooks === */
+#neuroBubble{
+  --mood-energy: 0.72;
+  --mood-concern: 0.22;
+  --mood-focus: 0.55;
+  --mood-attach: 0.30;
+
+  --breatheDur: 2.8s;
+  --pulseA: 0.18;
+  --eyeCalm: 0.6;
+}
+
+/* Energy affects brightness slightly */
+#neuroBubble{
+  filter: brightness(calc(0.92 + var(--mood-energy) * 0.20));
+}
+
+/* Low energy: softer, slower */
+#neuroBubble.mood-low{
+  opacity: 0.88;
+}
+
+/* High energy: a touch more vivid */
+#neuroBubble.mood-high{
+  opacity: 1.0;
+}
+
+/* Concerned: subtle pulsing aura */
+#neuroBubble.soft-pulse{
+  animation: nbAura 1.15s ease-in-out infinite;
+}
+@keyframes nbAura{
+  0%{ box-shadow: 0 0 14px rgba(102,204,255, calc(var(--pulseA) * 0.9)); }
+  50%{ box-shadow: 0 0 22px rgba(102,204,255, var(--pulseA)); }
+  100%{ box-shadow: 0 0 14px rgba(102,204,255, calc(var(--pulseA) * 0.9)); }
+}
+
+/* Focused: slightly sharper outline */
+#neuroBubble.mood-focused{
+  outline: 1px solid rgba(255,255,255,0.25);
+  outline-offset: 2px;
+}

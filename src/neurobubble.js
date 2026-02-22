@@ -4,6 +4,164 @@
 
   const memoryKey = "mc_bubble_memory_v5";
 
+
+// --- Mood Engine (persistent internal state) ---
+const stateKey = "mc_bubble_state_v1";
+
+function defaultState(){
+  return {
+    energy: 0.72,     // 0..1
+    concern: 0.22,    // 0..1
+    focus: 0.55,      // 0..1
+    attachment: 0.30, // 0..1 (trust/familiarity)
+    lastUpdate: Date.now(),
+    lastSeenDay: (new Date()).toISOString().slice(0,10),
+    streakAnswered: 0,
+    streakIgnored: 0
+  };
+}
+
+function clamp01(n){ return Math.max(0, Math.min(1, n)); }
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(stateKey);
+    if(raw){
+      const s = JSON.parse(raw);
+      return Object.assign(defaultState(), s);
+    }
+  }catch(e){}
+  return defaultState();
+}
+
+function saveState(s){
+  try{ localStorage.setItem(stateKey, JSON.stringify(s)); }catch(e){}
+}
+
+function decayStateDaily(s){
+  // Gentle drift back to baseline once per day
+  const today = (new Date()).toISOString().slice(0,10);
+  if(s.lastSeenDay === today) return s;
+
+  const base = { energy:0.68, concern:0.25, focus:0.55, attachment: s.attachment }; // attachment stays
+  const pull = 0.12; // how much we pull toward baseline per day
+  s.energy  = clamp01(s.energy  + (base.energy  - s.energy )*pull);
+  s.concern = clamp01(s.concern + (base.concern - s.concern)*pull);
+  s.focus   = clamp01(s.focus   + (base.focus   - s.focus  )*pull);
+
+  // streaks decay
+  s.streakAnswered = Math.max(0, (s.streakAnswered||0) - 1);
+  s.streakIgnored  = Math.max(0, (s.streakIgnored||0) - 1);
+
+  s.lastSeenDay = today;
+  s.lastUpdate = Date.now();
+  saveState(s);
+  return s;
+}
+
+function applyMoodToUI(s){
+  // CSS vars for animation intensity
+  bubble.style.setProperty("--mood-energy", s.energy.toFixed(3));
+  bubble.style.setProperty("--mood-concern", s.concern.toFixed(3));
+  bubble.style.setProperty("--mood-focus", s.focus.toFixed(3));
+  bubble.style.setProperty("--mood-attach", s.attachment.toFixed(3));
+  // Derived animation controls
+  bubble.style.setProperty("--breatheDur", (2.2 + (1 - s.energy)*2.8).toFixed(2) + "s");
+  bubble.style.setProperty("--pulseA", (0.10 + s.concern*0.35).toFixed(3));
+  bubble.style.setProperty("--eyeCalm", (0.20 + (1 - s.concern)*0.60).toFixed(3));
+
+  bubble.classList.toggle("mood-low", s.energy < 0.42);
+  bubble.classList.toggle("mood-high", s.energy > 0.78);
+  bubble.classList.toggle("mood-concerned", s.concern > 0.55);
+  bubble.classList.toggle("mood-focused", s.focus > 0.66);
+
+  // tone nudges (subtle)
+  if(s.concern > 0.65 && !bubble.classList.contains("thinking")){
+    bubble.classList.add("soft-pulse");
+  }else{
+    bubble.classList.remove("soft-pulse");
+  }
+}
+
+function updateStateFromSignals(s, signals, suggestions){
+  signals = signals || {};
+  const fired = (suggestions || []).map(x=>x.id);
+
+  // ENERGY: tied to sleep + general strain
+  const sleep = signals.sleep_avg_3d_hours ?? signals.sleep_avg_7d_hours ?? null;
+  if(typeof sleep === "number"){
+    // map 4h..8h -> 0..1
+    const e = clamp01((sleep - 4) / 4);
+    s.energy = clamp01(s.energy*0.6 + e*0.4);
+  }else if(fired.includes("sleep_low_3d")){
+    s.energy = clamp01(s.energy - 0.10);
+  }
+
+  // CONCERN: tied to spend/debt flags
+  const spend24 = signals.spend_24h_total ?? signals.spent_24h_total ?? null;
+  if(typeof spend24 === "number"){
+    // if spend is noticeable, gently increase concern; tiny spends don't matter
+    const c = clamp01((spend24 - 5) / 50); // 5..55 -> 0..1
+    s.concern = clamp01(s.concern*0.75 + c*0.25);
+  }
+  if(fired.some(id=>/debt|budget|spend|overspend|broke/i.test(id))){
+    s.concern = clamp01(s.concern + 0.06);
+  }
+
+  // FOCUS: tied to routines/cleaning completion if present
+  const clean7 = signals.cleaning_7d_min ?? signals.clean_7d_min ?? null;
+  if(typeof clean7 === "number"){
+    const f = clamp01(clean7 / 120); // 0..120 min -> 0..1
+    s.focus = clamp01(s.focus*0.7 + f*0.3);
+  }
+
+  // attachment grows slowly just by being used
+  s.attachment = clamp01(s.attachment + 0.005);
+
+  s.lastUpdate = Date.now();
+  saveState(s);
+  applyMoodToUI(s);
+  return s;
+}
+
+function updateStateFromAnswer(s, tags, text){
+  tags = tags || [];
+  const t = (text||"").toLowerCase();
+
+  const did = /(si|hecho|logré|ya|ok|listo)/i.test(t);
+  const nope = /(no pude|no logré|me costó|no hice|mañana|luego)/i.test(t);
+
+  if(did){
+    s.focus = clamp01(s.focus + 0.06);
+    s.energy = clamp01(s.energy + 0.03);
+    s.streakAnswered = (s.streakAnswered||0) + 1;
+    s.streakIgnored = 0;
+  }
+  if(nope){
+    s.focus = clamp01(s.focus - 0.05);
+    s.concern = clamp01(s.concern + 0.04);
+    s.streakIgnored = (s.streakIgnored||0) + 1;
+    s.streakAnswered = Math.max(0, (s.streakAnswered||0) - 1);
+  }
+
+  if(tags.includes("calma")){
+    s.concern = clamp01(s.concern - 0.05);
+    s.energy = clamp01(s.energy + 0.02);
+  }
+  if(tags.includes("estrés") || tags.includes("deuda") || tags.includes("gasto")){
+    s.concern = clamp01(s.concern + 0.03);
+  }
+
+  // attachment grows when you talk to it
+  s.attachment = clamp01(s.attachment + 0.02);
+
+  s.lastUpdate = Date.now();
+  saveState(s);
+  applyMoodToUI(s);
+  return s;
+}
+
+
   function defaultMemory(){
     return {
       likes: 0,
@@ -99,6 +257,10 @@
 
   // --- Brain state (offline learning) ---
   const mem = loadMemory();
+// Persistent internal state (mood)
+const st = decayStateDaily(loadState());
+applyMoodToUI(st);
+
   let latestNeuro = null; // {signals, suggestions, ts}
   const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h between questions (tunable)
 
@@ -129,7 +291,11 @@
 
   function chooseQuestion(){
     const now = Date.now();
-    if(now - (mem.lastQuestionAt||0) < COOLDOWN_MS) return null;
+    // Dynamic cooldown: respects your attention (less spam), but reacts faster when concern is high and trust is built
+    const dynCooldown = Math.max(35*60*1000, Math.min(4*60*60*1000,
+      COOLDOWN_MS * (1 + (st.streakIgnored||0)*0.35) * (1.15 - st.attachment*0.35) * (1.10 - st.concern*0.30)
+    ));
+    if(now - (mem.lastQuestionAt||0) < dynCooldown) return null;
 
     // Priority by neuro signals/suggestions
     const s = latestNeuro?.signals || {};
@@ -188,6 +354,7 @@
     mem.lastQuestionAt = Date.now();
     mem.lastQuestionId = qid;
     saveMemory(mem);
+    updateStateFromAnswer(st, tags, text);
 
     bubble.classList.remove("thinking");
     sayBox.classList.remove("ask");
@@ -206,6 +373,8 @@
   // Neuro state bridge
   window.addEventListener("neuro:state", (ev)=>{
     latestNeuro = ev.detail || null;
+    // Update internal state from signals
+    updateStateFromSignals(st, latestNeuro?.signals || null, latestNeuro?.suggestions || null);
     // When new state arrives, decide whether to ask
     const q = chooseQuestion();
     if(q){
@@ -224,7 +393,9 @@
   window.NeuroBubble.say = say;
   window.NeuroBubble.ask = ask;
   window.NeuroBubble.submit = submitAnswer;
-  window.NeuroBubble.ingest = (detail)=>{ latestNeuro = detail; const q=chooseQuestion(); if(q) ask(q); };
+  window.NeuroBubble.ingest = (detail)=>{ latestNeuro = detail; updateStateFromSignals(st, latestNeuro?.signals||null, latestNeuro?.suggestions||null); const q=chooseQuestion(); if(q) ask(q); };
+  window.NeuroBubble.getState = ()=>Object.assign({}, st);
+  window.NeuroBubble.setMood = (partial)=>{ Object.assign(st, partial||{}); st.energy=clamp01(st.energy); st.concern=clamp01(st.concern); st.focus=clamp01(st.focus); st.attachment=clamp01(st.attachment); saveState(st); applyMoodToUI(st); };
 
   // --- Movement state ---
   let x = 200, y = 200;
@@ -345,7 +516,17 @@
     bubble.classList.add("thinking");
     clearTimeout(sayBox._t);
     // keep open longer while asking
-    sayBox._t = setTimeout(()=> sayBox.classList.remove("show","ask"), 20000);
+    sayBox._t = setTimeout(()=> {
+      // If the question times out, count it as "ignored" (lightly)
+      const stillAsking = sayBox.classList.contains("ask") && (sayBox.dataset.qid === q.id);
+      sayBox.classList.remove("show","ask");
+      if(stillAsking){
+        st.streakIgnored = (st.streakIgnored||0) + 1;
+        st.streakAnswered = Math.max(0, (st.streakAnswered||0) - 1);
+        st.attachment = clamp01(st.attachment - 0.01);
+        saveState(st); applyMoodToUI(st);
+      }
+    }, 20000);
   }
 
   // Eyes follow pointer (small)
