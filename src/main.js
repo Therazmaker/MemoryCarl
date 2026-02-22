@@ -7296,7 +7296,7 @@ function addProductToShoppingList(listId, productId){
   persist();
   view();
 }
-function openProductLibrary()function openProductLibrary(){
+function openProductLibrary(){
   const host = document.querySelector("#app");
   const sheet = document.createElement("div");
   sheet.className = "modalBackdrop";
