@@ -1,28 +1,26 @@
 
 #neuroBubble{
   position: fixed;
-  left: 0;
-  top: 0;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
+  left:0;
+  top:0;
+  width:56px;
+  height:56px;
+  border-radius:50%;
   background: radial-gradient(circle at 30% 30%, #ffffffcc, #66ccff);
-  box-shadow: 0 0 12px #66ccff66;
-  backdrop-filter: blur(6px);
-  z-index: 999999;
-  opacity: 0.92;
-  transition: transform 0.2s ease-out;
-  cursor: grab;
+  box-shadow:0 0 12px #66ccff66;
+  z-index:999999;
+  transition:transform 0.2s ease-out;
+  cursor:grab;
 }
 
 #neuroBubble.dragged{
-  cursor: grabbing;
+  cursor:grabbing;
 }
 
 .eyes{
   display:flex;
   justify-content:space-around;
-  margin-top:18px;
+  margin-top:16px;
 }
 
 .eye{
@@ -41,7 +39,6 @@
   position:absolute;
   top:3px;
   left:3px;
-  transition: transform 0.1s linear;
 }
 
 .mouth{
@@ -49,11 +46,31 @@
   height:6px;
   border-radius:0 0 16px 16px;
   background:black;
-  margin:6px auto;
+  margin:4px auto;
 }
 
-#neuroBubble.dragged .mouth{
-  border-radius:50%;
-  width:10px;
-  height:10px;
+#neuroBubble.alert{ box-shadow:0 0 16px #ff6b6b88; }
+#neuroBubble.concerned{ box-shadow:0 0 16px #ffaa0088; }
+#neuroBubble.calm{ box-shadow:0 0 12px #66ccff66; }
+
+#neuroPanel{
+  position:fixed;
+  width:220px;
+  background:#111827ee;
+  color:white;
+  padding:10px;
+  border-radius:12px;
+  font-size:12px;
+  display:none;
+  z-index:999998;
+}
+
+#neuroPanel.open{ display:block; }
+
+.nb-input{ width:100%; margin-top:6px; }
+
+.nb-actions{
+  display:flex;
+  justify-content:space-between;
+  margin-top:6px;
 }
