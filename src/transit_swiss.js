@@ -20,7 +20,7 @@
   - Produce 'transit_*' signals + a narrative hint for Bubble
 */
 
-import { computeMoonNow } from "./cosmic_lite.js";
+// Full-pro Swiss engine lives in NeuroClaw backend.
 
 const LS_NATAL = "memorycarl_v2_natal_chart_json";
 const KEY_URL = "memorycarl_v2_neuroclaw_ai_url";
@@ -167,12 +167,10 @@ export async function getTransitSwissSignals({ now = new Date(), natal = null } 
 
   const body = {
     now_iso: now.toISOString(),
-    // If natal has coords, pass them for future house improvements
-    lat: natal?.meta?.coords?.lat ?? natal?.meta?.lat ?? null,
-    lon: natal?.meta?.coords?.lon ?? natal?.meta?.lon ?? null,
+    natal: natal || null,
   };
 
-  const res = await fetch(urlBase + "/astro/transits", {
+  const res = await fetch(urlBase + "/astro/fullpro", {
     method:"POST",
     headers:{
       "content-type":"application/json",
@@ -183,76 +181,35 @@ export async function getTransitSwissSignals({ now = new Date(), natal = null } 
 
   if(!res.ok) throw new Error("HTTP " + res.status);
   const data = await res.json();
-  if(!data || data.ok !== true || !data.planets) throw new Error("Bad response");
+  if(!data || data.ok !== true) throw new Error("Bad response");
 
-  // Basic moon phase/sign from Cosmic Lite (fast + stable)
-  const moonLite = computeMoonNow(now);
+  const phase = data.phase || {};
+  const signs = data.signs || {};
 
-  // Gather transit bodies
-  const planets = data.planets || {};
-  const transitBodies = Object.keys(planets).map(k=>({
-    tp: k,
-    lon: norm360(Number(planets[k]?.lon ?? 0)),
-    retro: !!planets[k]?.retro,
-  }));
-
-  // Houses for Sun/Moon (natal cusps)
-  let moonHouse = null;
-  let sunHouse = null;
-  if(hasNatal){
-    const moonLon = transitBodies.find(b=>b.tp==="Moon")?.lon ?? moonLite.moon_deg;
-    const sunLon = transitBodies.find(b=>b.tp==="Sun")?.lon ?? null;
-    moonHouse = pickHouseForLon(moonLon, natal?.houses);
-    if(typeof sunLon === "number") sunHouse = pickHouseForLon(sunLon, natal?.houses);
-  }
-
-  // Aspects
-  let events = [];
-  if(hasNatal){
-    const pts = collectNatalPoints(natal);
-    for(const b of transitBodies){
-      for(const pt of pts){
-        const hit = aspectHit(b.lon, pt.lon, b.tp);
-        if(hit){
-          events.push({
-            tp: b.tp,
-            natal: pt.label,
-            aspect: hit.aspect,
-            aspect_deg: hit.aspect_deg,
-            orb: hit.orb,
-            retro: b.retro,
-          });
-        }
-      }
-    }
-    events.sort((a,b)=>{
-      if(a.orb !== b.orb) return a.orb - b.orb;
-      return priority(a.tp) - priority(b.tp);
-    });
-    events = events.slice(0, 10);
-  }
-
-  const best = events[0] || null;
-  const hint = vibeHint(best);
-
-  const sunSign = data?.signs?.Sun || data?.sun_sign || (typeof planets?.Sun?.sign === "string" ? planets.Sun.sign : "");
-  const sunSign2 = sunSign || (data?.extra?.sun_sign || "");
-
-  const top = topLine({
-    moonSign: moonLite.moon_sign,
-    sunSign: sunSign2 || "(Sol)",
-    bodiesTop: (data?.headline || ""),
+  const events = Array.isArray(data.events) ? data.events : [];
+  const best = data.headline || events[0] || null;
+  const moonHouse = data?.houses?.moon_house ?? null;
+  const sunHouse  = data?.houses?.sun_house ?? null;
+  const hint = data.hint || vibeHint(best);
+  const top = data.top || topLine({
+    moonSign: signs.Moon || "(Luna)",
+    sunSign: signs.Sun || "(Sol)",
+    bodiesTop: "",
     moonHouse,
     sunHouse,
     best,
     hasNatal,
   });
 
+  const planets = data.planets || {};
+
   return {
-    // keep cosmic-lite keys around for Bubble
-    moon_phase_name: moonLite.moon_phase_name,
-    moon_sign: moonLite.moon_sign,
-    moon_phase_frac: moonLite.moon_phase_frac,
+    // authoritative lunar keys (Swiss)
+    moon_phase_name: phase.phase_name || "",
+    moon_sign: signs.Moon || "",
+    moon_phase_frac: (typeof phase.phase_frac === "number") ? phase.phase_frac : null,
+    moon_illum: (typeof phase.illum === "number") ? phase.illum : null,
+    moon_phase_angle: (typeof phase.phase_angle === "number") ? phase.phase_angle : null,
 
     // transit overlay keys (same names as lite so it overrides)
     transit_has_natal: hasNatal,
@@ -261,7 +218,9 @@ export async function getTransitSwissSignals({ now = new Date(), natal = null } 
     transit_events: events,
     transit_top: top,
     transit_hint: hint,
-    transit_engine: "swiss_v1",
+    transit_engine: "swiss_fullpro",
+
+    transit_money_whisper: data.money_whisper || null,
 
     // raw
     transit_planets: planets,

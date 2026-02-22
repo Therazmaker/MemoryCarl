@@ -291,6 +291,26 @@ async function refreshSwissTransitsUI({forceSpeak=false} = {}){
         window.NeuroBubble.say({ mood:"calm", text: swiss.transit_hint, micro:"Micro: respira 3 veces y elige 1 intención." });
       }
     }
+
+    // Lunar money whisper (reflective, not advice)
+    const mw = (swiss.transit_money_whisper || "").trim();
+    if(mw){
+      const mk = `MONEY_${todayKey()}_${(swiss.moon_phase_name||"")}_${(swiss.transit_moon_house||"")}`;
+      const hasSaid = seen.seen.includes(mk);
+      const spend24 = Number(window.__MC_STATE__?.spend_24h_total ?? window.__MC_STATE__?.spend_24h ?? 0);
+      const isSpendHot = isFinite(spend24) && spend24 > 0;
+      const isFullMoon = (swiss.moon_phase_name||"").toLowerCase().includes("llena");
+
+      // Speak once per day, but allow a gentle extra nudge if full moon + spending happened.
+      const should = forceSpeak || (!hasSaid) || (isFullMoon && isSpendHot && !seen.seen.includes(mk+"_HOT"));
+      if(should && window.NeuroBubble && window.NeuroBubble.say){
+        const key2 = (isFullMoon && isSpendHot) ? (mk+"_HOT") : mk;
+        seen.seen.push(key2);
+        saveSeenSet(seen);
+        toast("🌙 Finanzas lunares: mira a Bubble");
+        window.NeuroBubble.say({ mood:"calm", text: mw, micro:"Micro (2 min): anota 1 gasto y 1 regla para hoy." });
+      }
+    }
   }catch(e){
     // keep silent; swiss is optional
     console.warn("[AstroSwiss] refresh failed", e);
