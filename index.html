@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#111111">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./src/style.css">
+  <link rel="stylesheet" href="./src/neurobubble.css">
+  <title>MemoryCarl</title>
+
+  <!-- Firebase (compat) for Messaging -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+
+  <link rel="stylesheet" href="./src/merge/merge.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+
+<style>
+/* === CalcQuest Single Scroll Patch === */
+
+/* Modal container must scroll */
+.cq-modal,
+.modal-content,
+.learnquest-modal,
+.calcquest-modal {
+  max-height: 92vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.cq-modal-body,
+.modal-body,
+.calcquest-body,
+.learnquest-body {
+  flex: 1 1 auto !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Disable internal editor scrolling */
+textarea,
+.cq-editor textarea,
+.code-editor textarea {
+  overflow: hidden !important;
+  resize: none !important;
+}
+
+/* Prevent nested scroll areas */
+.cq-editorWrap,
+.cq-consoleWrap {
+  overflow: visible !important;
+  max-height: none !important;
+}
+</style>
+
+</head>
+<body>
+  <div id="app"></div>
+  <div id="mergeContainer" style="display:none;"></div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js"></script>
+<script src="./src/merge/merge.js"></script>
+  <script src="./src/neuroclaw/neuroclaw.js"></script>
+  <script type="module" src="./src/main.js"></script>
+
+<script>
+// === Auto-grow textareas for CalcQuest ===
+function __calcquestAutoGrow(ta){
+  if(!ta) return;
+  ta.style.height = "auto";
+  ta.style.height = (ta.scrollHeight + 2) + "px";
+}
+
+function __calcquestHookAutoGrow(){
+  document.querySelectorAll("textarea").forEach(ta=>{
+    ta.addEventListener("input", ()=>__calcquestAutoGrow(ta));
+    __calcquestAutoGrow(ta);
+  });
+}
+
+document.addEventListener("DOMContentLoaded", __calcquestHookAutoGrow);
+</script>
+
+  <script src="./src/neurobubble.js"></script>
+
+</body>
+</html>
