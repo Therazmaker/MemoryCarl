@@ -4948,6 +4948,34 @@ function wireHome(root){
   });
 
 
+
+  // Swiss Astro (daily) - Home card wiring
+  const swissCard = root.querySelector("#homeSwissAstroCard");
+  if(swissCard){
+    const btnRef = swissCard.querySelector("#btnSwissRefresh");
+    const btnDet = swissCard.querySelector("#btnSwissDetails");
+    if(btnRef) btnRef.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); ensureSwissDailyLoaded({ force:true }); });
+    if(btnDet) btnDet.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); openSwissDailyModal(); });
+    swissCard.addEventListener("click", (e)=>{
+      if(e.target && e.target.closest("#btnSwissRefresh")) return;
+      if(e.target && e.target.closest("#btnSwissDetails")) return;
+      openSwissDailyModal();
+    });
+  }
+
+  // Auto-load once per day when configured (silent)
+  try{
+    if(!state?.swissDaily && getSwissAstroUrl() && getSwissAstroKey()){
+      ensureSwissDailyLoaded({ force:false });
+    }else if(state?.swissDaily && getSwissAstroUrl() && getSwissAstroKey()){
+      // if cached day differs, refresh silently
+      const today = isoDate(new Date());
+      const d = state.swissDaily;
+      const dd = d?.date || d?._iso || "";
+      if(dd && dd !== today) ensureSwissDailyLoaded({ force:false });
+    }
+  }catch(e){}
+
 }
 
 function wireCalendar(root){
