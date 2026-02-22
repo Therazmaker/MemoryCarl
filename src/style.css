@@ -1314,3 +1314,20 @@ body{
 .kvBtn:hover{border-color:rgba(255,255,255,0.16);}
 .kvBtn .k{opacity:.9;}
 .kvBtn .v{opacity:.95;}
+
+
+
+/* Swiss Astro (Home card + modal) */
+.swissMsg{
+  font-size: 14px;
+  line-height: 1.35;
+  opacity: 0.92;
+}
+.swissList{
+  margin: 0;
+  padding-left: 18px;
+}
+.swissList li{
+  margin: 6px 0;
+  opacity: .9;
+}

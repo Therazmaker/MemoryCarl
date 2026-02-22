@@ -1,6 +1,6 @@
 import { computeMoonNow } from "./cosmic_lite.js";
 import { getTransitLiteSignals } from "./transit_lite.js";
-import { getTransitSwissSignals, swissTransitsAvailable } from "./transit_swiss.js";
+import { getTransitSwissSignals, swissTransitsAvailable, getSwissDailyCached, swissDailyAvailable } from "./transit_swiss.js";
 
 console.log("MemoryCarl loaded");
 // ===== LocalStorage Keys =====
@@ -9,6 +9,8 @@ const KEYS = {
   neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",
   neuroclawAiLog: "memorycarl_v2_neuroclaw_ai_log",
   neuroclawAiUsage: "memorycarl_v2_neuroclaw_ai_usage",
+  swissAstroUrl: "memorycarl_v2_swiss_astro_url",
+  swissAstroKey: "memorycarl_v2_swiss_astro_key",
 };
 
 // ====================== NOTIFICATIONS (Firebase Cloud Messaging) ======================
@@ -321,6 +323,70 @@ async function refreshSwissTransitsUI({forceSpeak=false} = {}){
   }
 }
 
+
+async function ensureSwissDailyLoaded({ force=false } = {}){
+  if(!swissDailyAvailable()) return;
+  const now = new Date();
+  const today = isoDate(now);
+
+  // Already loaded today
+  if(!force && state?.swissDaily && (state.swissDaily.date === today || state.swissDaily._iso === today)) return;
+
+  // If not configured, skip (and don't spam prompts unless user explicitly asks)
+  if(!getSwissAstroUrl() || !getSwissAstroKey()) return;
+
+  try{
+    state.swissDailyLoading = true;
+    state.swissDailyError = "";
+    view();
+
+    const data = await getSwissDailyCached({ now, forceRefresh: force });
+    if(!data){
+      state.swissDailyError = "No se pudo obtener datos (revisa URL/Key o CORS).";
+      state.swissDailyLoading = false;
+      view();
+      return;
+    }
+    // normalize helper
+    data._iso = data.date || today;
+    state.swissDaily = data;
+    state.swissDailyTs = Date.now();
+    state.swissDailyLoading = false;
+    view();
+  }catch(e){
+    state.swissDailyError = "Error cargando Swiss.";
+    state.swissDailyLoading = false;
+    view();
+  }
+}
+
+function openSwissDailyModal(){
+  const d = state?.swissDaily;
+  const trans = (d && Array.isArray(d.transits)) ? d.transits : [];
+  const body = `
+    <div class="sectionTitle">
+      <div>Visión lunar</div>
+      <div class="chip">${escapeHtml(d?.date || isoDate(new Date()))}</div>
+    </div>
+
+    <div class="card">
+      <div class="kv">
+        <div class="k">Luna</div>
+        <div class="v"><b>${escapeHtml(d?.moon_sign || "—")}</b> <span class="small">${typeof d?.moon_phase==="number" ? `(${Math.round(d.moon_phase*100)}%)` : ""}</span></div>
+      </div>
+      <div class="kv">
+        <div class="k">Mensaje</div>
+        <div class="v">${escapeHtml(d?.message || "—")}</div>
+      </div>
+      <div class="hr"></div>
+      <div class="small" style="opacity:.9;margin-bottom:8px;">Tránsitos (top)</div>
+      ${trans.length ? `<ul class="swissList">${trans.map(t=>`<li>${escapeHtml(String(t))}</li>`).join("")}</ul>` : `<div class="muted">Sin tránsitos.</div>`}
+    </div>
+  `;
+  openSheet(body);
+}
+
+
 // ---- Lunar Money Card (Home) ----
 function getSpend24h(){
   const s = (window.__MC_STATE__ && typeof window.__MC_STATE__==="object") ? window.__MC_STATE__ : refreshGlobalSignals();
@@ -524,6 +590,30 @@ function ensureNeuroAiConfigured(){
 
   return !!(getNeuroAiUrl() && getNeuroAiKey());
 }
+
+function getSwissAstroUrl(){ return (localStorage.getItem(KEYS.swissAstroUrl) || "").trim().replace(/\/+$/,""); }
+function setSwissAstroUrl(u){ localStorage.setItem(KEYS.swissAstroUrl, (u||"").trim()); }
+function getSwissAstroKey(){ return (localStorage.getItem(KEYS.swissAstroKey) || "").trim(); }
+function setSwissAstroKey(k){ localStorage.setItem(KEYS.swissAstroKey, (k||"").trim()); }
+
+function ensureSwissAstroConfigured(){
+  let url = getSwissAstroUrl();
+  let key = getSwissAstroKey();
+  if(url && key) return true;
+
+  const ok = confirm("Para usar Swiss Astro necesitas conectar tu servicio (Cloud Run).\n\n¿Configurar ahora?");
+  if(!ok) return false;
+
+  url = prompt("Pega la URL base de tu Swiss Astro (Cloud Run), sin ruta extra:", url || "");
+  if(url) setSwissAstroUrl(url.replace(/\/+$/,""));
+
+  key = prompt("Pega tu MC_API_KEY (header x-mc-key) para Swiss Astro:", key || "");
+  if(key) setSwissAstroKey(key);
+
+  return !!(getSwissAstroUrl() && getSwissAstroKey());
+}
+
+
 // ====================== NEUROCLAW AI LOG (localStorage) ======================
 
 function getNeuroAiUsage(){
@@ -1724,13 +1814,22 @@ function view(){
     if(swissStatus){
       swissStatus.textContent = swissTransitsAvailable()
         ? "Swiss listo ✅"
-        : "Swiss: configura NeuroClaw URL+Key";
+        : "Swiss: configura Swiss Astro URL+Key";
     }
     if(btnProvSave) btnProvSave.addEventListener("click", async ()=>{
       const v = selProv ? String(selProv.value||"lite") : "lite";
       setAstroProvider(v);
       refreshGlobalSignals();
       if(v === "swiss"){
+        if(!ensureSwissAstroConfigured()){
+          // revert to lite if user cancels
+          setAstroProvider("lite");
+          if(selProv) selProv.value = "lite";
+          refreshGlobalSignals();
+          if(swissStatus) swissStatus.textContent = "Swiss: no configurado";
+          toast("Swiss cancelado");
+          return;
+        }
         await refreshSwissTransitsUI({ forceSpeak:true });
       }else{
         const sig = refreshGlobalSignals();
@@ -3780,6 +3879,40 @@ function renderNeuroClawCard(){
 }
 
 
+function renderSwissAstroCard(){
+  const loading = !!state?.swissDailyLoading;
+  const err = state?.swissDailyError || "";
+  const d = state?.swissDaily || null;
+
+  const sub = loading
+    ? "Invocando…"
+    : (d ? `${(typeof d.moon_phase==="number" ? Math.round(d.moon_phase*100) + "%" : "—")} • Luna en ${d.moon_sign || "?"}` : (swissDailyAvailable() ? "Listo para hoy" : "Configura Swiss"));
+
+  const msg = d ? (d.message || (Array.isArray(d.transits) ? d.transits[0] : "") || "") : "";
+  const body = loading
+    ? `<div class="muted">Buscando tu visión lunar del día…</div>`
+    : (err ? `<div class="muted">⚠ ${escapeHtml(err)}</div>` : (msg ? `<div class="swissMsg">${escapeHtml(msg)}</div>` : `<div class="muted">Sin datos aún.</div>`));
+
+  return `
+    <section class="card homeCard" id="homeSwissAstroCard">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Visión lunar</h2>
+          <div class="small">${escapeHtml(sub)}</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="iconBtn" id="btnSwissRefresh" aria-label="Refresh">⟳</button>
+          <button class="iconBtn" id="btnSwissDetails" aria-label="Details">↗</button>
+        </div>
+      </div>
+      <div class="hr"></div>
+      ${body}
+    </section>
+  `;
+}
+
+
+
 function renderNeuroDebugModal(){
   const last = state.neuroclawLast || null;
   const signals = last && last.signals ? last.signals : null;
@@ -3935,6 +4068,8 @@ const sleepBars = renderSleepBars(sleepSeries);
           ${remindersHtml}
         </div>
       </section>
+
+      ${renderSwissAstroCard()}
 
       ${renderNeuroClawCard()}
     </div>
@@ -4820,6 +4955,25 @@ function wireCalendar(root){
   const next = root.querySelector("#calNext");
   if(prev) prev.addEventListener("click", ()=>{ state.calMonthOffset = (state.calMonthOffset||0) - 1; view(); });
   if(next) next.addEventListener("click", ()=>{ state.calMonthOffset = (state.calMonthOffset||0) + 1; view(); });
+
+
+  // Swiss Astro (daily)
+  const swissCard = root.querySelector("#homeSwissAstroCard");
+  if(swissCard){
+    const btnRef = swissCard.querySelector("#btnSwissRefresh");
+    const btnDet = swissCard.querySelector("#btnSwissDetails");
+    if(btnRef) btnRef.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); ensureSwissDailyLoaded({ force:true }); });
+    if(btnDet) btnDet.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); openSwissDailyModal(); });
+    swissCard.addEventListener("click", (e)=>{ 
+      if(e.target && e.target.closest("#btnSwissRefresh")) return;
+      if(e.target && e.target.closest("#btnSwissDetails")) return;
+      openSwissDailyModal(); 
+    });
+  }
+
+  // Auto-load once when you enter Home (if configured)
+  ensureSwissDailyLoaded().catch(()=>{});
+
 
   root.querySelectorAll("[data-cal-day]").forEach(btn=>{
     btn.addEventListener("click", ()=>{

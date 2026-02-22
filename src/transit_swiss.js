@@ -1,10 +1,10 @@
 /*
-  Transit Swiss (NeuroClaw backend + Swiss Ephemeris)
+  Swiss Astro (Cloud Run backend)
   -------------------------------------------------
   This module does NOT ship ephemeris files to the browser.
-  Instead, it calls your NeuroClaw backend endpoint:
-      POST {NEURO_URL}/astro/transits
-      Header: x-mc-key: {NEURO_KEY}
+  Instead, it calls your Swiss Astro backend endpoint:
+      POST {NEURO_URL}/astro/daily
+      Header: x-mc-key: {SWISS_KEY}
 
   Response expected (example):
     {
@@ -23,8 +23,8 @@
 // Full-pro Swiss engine lives in NeuroClaw backend.
 
 const LS_NATAL = "memorycarl_v2_natal_chart_json";
-const KEY_URL = "memorycarl_v2_neuroclaw_ai_url";
-const KEY_KEY = "memorycarl_v2_neuroclaw_ai_key";
+const KEY_URL = "memorycarl_v2_swiss_astro_url";
+const KEY_KEY = "memorycarl_v2_swiss_astro_key";
 
 function norm360(x){ x = x % 360; if(x < 0) x += 360; return x; }
 function deltaDeg(a,b){
@@ -32,8 +32,8 @@ function deltaDeg(a,b){
   return d > 180 ? 360 - d : d;
 }
 
-function getNeuroAiUrl(){ return (localStorage.getItem(KEY_URL) || "").trim().replace(/\/+$/," ").trim(); }
-function getNeuroAiKey(){ return (localStorage.getItem(KEY_KEY) || "").trim(); }
+function getSwissAstroUrl(){ return (localStorage.getItem(KEY_URL) || "").trim().replace(/\/+$/,""); }
+function getSwissAstroKey(){ return (localStorage.getItem(KEY_KEY) || "").trim(); }
 
 export function swissTransitsAvailable(){
   const url = (localStorage.getItem(KEY_URL) || "").trim();
@@ -157,73 +157,81 @@ function topLine({moonSign, sunSign, bodiesTop, moonHouse, sunHouse, best, hasNa
   return bits.join(" • ");
 }
 
+
+export async function getSwissDailyCached({ now = new Date(), forceRefresh = false } = {}){
+  const iso = (now instanceof Date) ? now.toISOString().slice(0,10) : String(now||"").slice(0,10);
+  const cacheKey = `mc_swiss_daily_${iso}`;
+  if(!forceRefresh){
+    try{
+      const cached = localStorage.getItem(cacheKey);
+      if(cached) return JSON.parse(cached);
+    }catch(e){}
+  }
+
+  const url = getSwissAstroUrl();
+  const key = getSwissAstroKey();
+  if(!url || !key) return null;
+
+  try{
+    const res = await fetch(url.replace(/\/+$/,"") + "/astro/daily", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-mc-key": key
+      }
+    });
+    if(!res.ok){
+      const t = await res.text().catch(()=> "");
+      console.warn("[SwissAstro] HTTP", res.status, t);
+      return null;
+    }
+    const data = await res.json();
+    try{ localStorage.setItem(cacheKey, JSON.stringify(data)); }catch(e){}
+    return data;
+  }catch(e){
+    console.warn("[SwissAstro] fetch failed", e);
+    return null;
+  }
+}
+
+export function swissDailyAvailable(){
+  return swissTransitsAvailable();
+}
+
+// Back-compat: Settings / astro engine expects this function.
+// We map the daily endpoint into the signal structure used by the app.
 export async function getTransitSwissSignals({ now = new Date(), natal = null } = {}){
-  natal = natal || loadNatal();
-  const hasNatal = !!natal;
+  const data = await getSwissDailyCached({ now });
+  if(!data) return null;
 
-  const urlBase = (localStorage.getItem(KEY_URL) || "").trim().replace(/\/+$/,"");
-  const key = (localStorage.getItem(KEY_KEY) || "").trim();
-  if(!urlBase || !key) return null;
+  const transits = Array.isArray(data.transits) ? data.transits : [];
+  const events = transits.map((t, i)=>({
+    tp: "daily",
+    aspect: String(i),
+    natal: String(t || ""),
+    title: String(t || ""),
+    orb: null
+  }));
 
-  const body = {
-    now_iso: now.toISOString(),
-    natal: natal || null,
-  };
-
-  const res = await fetch(urlBase + "/astro/fullpro", {
-    method:"POST",
-    headers:{
-      "content-type":"application/json",
-      "x-mc-key": key,
-    },
-    body: JSON.stringify(body)
-  });
-
-  if(!res.ok) throw new Error("HTTP " + res.status);
-  const data = await res.json();
-  if(!data || data.ok !== true) throw new Error("Bad response");
-
-  const phase = data.phase || {};
-  const signs = data.signs || {};
-
-  const events = Array.isArray(data.events) ? data.events : [];
-  const best = data.headline || events[0] || null;
-  const moonHouse = data?.houses?.moon_house ?? null;
-  const sunHouse  = data?.houses?.sun_house ?? null;
-  const hint = data.hint || vibeHint(best);
-  const top = data.top || topLine({
-    moonSign: signs.Moon || "(Luna)",
-    sunSign: signs.Sun || "(Sol)",
-    bodiesTop: "",
-    moonHouse,
-    sunHouse,
-    best,
-    hasNatal,
-  });
-
-  const planets = data.planets || {};
+  const top = transits[0] || data.message || "Sin tránsitos";
+  const hint = data.message || "Swiss daily (mock).";
 
   return {
-    // authoritative lunar keys (Swiss)
-    moon_phase_name: phase.phase_name || "",
-    moon_sign: signs.Moon || "",
-    moon_phase_frac: (typeof phase.phase_frac === "number") ? phase.phase_frac : null,
-    moon_illum: (typeof phase.illum === "number") ? phase.illum : null,
-    moon_phase_angle: (typeof phase.phase_angle === "number") ? phase.phase_angle : null,
-
-    // transit overlay keys (same names as lite so it overrides)
-    transit_has_natal: hasNatal,
-    transit_moon_house: moonHouse,
-    transit_sun_house: sunHouse,
+    ok: true,
+    transit_engine: data.engine || "swiss_daily_v1",
+    transit_has_natal: false,
+    transit_moon_house: null,
+    transit_sun_house: null,
     transit_events: events,
     transit_top: top,
     transit_hint: hint,
-    transit_engine: "swiss_fullpro",
+    transit_money_whisper: null,
 
-    transit_money_whisper: data.money_whisper || null,
-
-    // raw
-    transit_planets: planets,
-    transit_now_utc: data.now_utc || null,
+    // Extra fields (for UI cards)
+    daily_date: data.date || null,
+    daily_moon_phase: data.moon_phase ?? null,
+    daily_moon_sign: data.moon_sign || null,
+    daily_message: data.message || null,
+    daily_transits: transits
   };
 }
