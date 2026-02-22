@@ -8305,15 +8305,33 @@ function inRange(dateStr, start, end){
 }
 
 function dailySeries(history, start, end){
+  // Returns a dense daily series (includes zero-days) between start/end (inclusive).
   const map = new Map();
   for(const e of (history||[])){
     if(!e.date) continue;
     if(!inRange(e.date, start, end)) continue;
-    const v = Number(e.totals?.total || 0);
+    const v = Number(e.totals?.total || e.total || 0);
     map.set(e.date, (map.get(e.date)||0) + v);
   }
-  const dates = [...map.keys()].sort();
-  const totals = dates.map(d=>map.get(d));
+
+  const dates = [];
+  const totals = [];
+  try{
+    const d0 = new Date(start + "T00:00:00");
+    const d1 = new Date(end + "T00:00:00");
+    for(let d = new Date(d0); d <= d1; d.setDate(d.getDate()+1)){
+      const k = isoDate(d);
+      dates.push(k);
+      totals.push(Number(map.get(k) || 0));
+    }
+  }catch(e){
+    // Fallback: sparse keys
+    const ks = [...map.keys()].sort();
+    for(const k of ks){
+      dates.push(k);
+      totals.push(Number(map.get(k) || 0));
+    }
+  }
   return { dates, totals };
 }
 
@@ -8532,6 +8550,107 @@ function drawLineChart(canvas, labels, values){
 }
 
 
+function _esDowShort(d){
+  // d: Date
+  const names = ["dom.","lun.","mar.","mié.","jue.","vie.","sáb."];
+  return names[d.getDay()] || "";
+}
+
+function drawBarChart(canvas, labels, values, { mode="weekday" } = {}){
+  if(!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const dpr = (window.devicePixelRatio||1);
+
+  // Use fixed logical height, scale by dpr for crispness
+  const w = canvas.width = Math.max(1, canvas.clientWidth) * dpr;
+  const h = canvas.height = 170 * dpr;
+  ctx.clearRect(0,0,w,h);
+
+  const padL = 18*dpr;
+  const padR = 12*dpr;
+  const padT = 16*dpr;
+  const padB = 28*dpr;
+
+  const xs = padL, xe = w - padR;
+  const ys = padT, ye = h - padB;
+
+  // baseline
+  ctx.globalAlpha = 0.9;
+  ctx.strokeStyle = "rgba(255,255,255,.14)";
+  ctx.lineWidth = 2*dpr;
+  ctx.beginPath();
+  ctx.moveTo(xs, ye);
+  ctx.lineTo(xe, ye);
+  ctx.stroke();
+
+  const vals = (values||[]).map(v=>Number(v||0));
+  const maxV = Math.max(1, ...vals);
+  const n = Math.max(1, vals.length);
+
+  const gap = Math.max(4*dpr, Math.min(10*dpr, (xe-xs) / (n*6)));
+  const barW = Math.max(6*dpr, Math.min(44*dpr, ((xe-xs) - gap*(n-1)) / n));
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillStyle = "rgba(255,255,255,.92)";
+  ctx.font = `${12*dpr}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+
+  // bars
+  for(let i=0;i<n;i++){
+    const v = vals[i];
+    const x = xs + i*(barW+gap);
+    const bh = (v/maxV) * (ye-ys);
+    const y = ye - bh;
+
+    // bar fill (MemoryCarl accent-ish)
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = "rgba(255,58,142,.92)";
+    const r = Math.min(10*dpr, barW/3, bh/3);
+    roundRect(ctx, x, y, barW, bh, r);
+    ctx.fill();
+
+    // value label on top (only if >0)
+    if(v > 0){
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = "rgba(255,255,255,.92)";
+      const txt = "S/. " + Math.round(v);
+      ctx.fillText(txt, x + barW/2, y - 4*dpr);
+    }
+
+    // x label
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = "rgba(255,255,255,.70)";
+    let lab = labels[i] || "";
+    if(mode==="weekday"){
+      try{
+        const dd = new Date(String(lab) + "T00:00:00");
+        lab = _esDowShort(dd);
+      }catch(e){}
+    }else if(mode==="daynum"){
+      try{
+        const dd = new Date(String(lab) + "T00:00:00");
+        lab = String(dd.getDate());
+      }catch(e){}
+    }
+    ctx.textBaseline = "top";
+    ctx.fillText(lab, x + barW/2, ye + 6*dpr);
+    ctx.textBaseline = "bottom";
+  }
+}
+
+// Rounded rect helper used by bar chart
+function roundRect(ctx, x, y, w, h, r){
+  const rr = Math.max(0, Math.min(r, w/2, h/2));
+  ctx.beginPath();
+  ctx.moveTo(x+rr, y);
+  ctx.arcTo(x+w, y, x+w, y+h, rr);
+  ctx.arcTo(x+w, y+h, x, y+h, rr);
+  ctx.arcTo(x, y+h, x, y, rr);
+  ctx.arcTo(x, y, x+w, y, rr);
+  ctx.closePath();
+}
+
+
 function openShoppingCategoryModal(category, preset){
   const range = presetRange(preset || (state.shoppingDashPreset||"7d"));
   const start = range.start;
@@ -8728,7 +8847,7 @@ view = function(){
       const range = presetRange(preset);
       const daily = dailySeries(state.shoppingHistory||[], range.start, range.end);
       const canvas = document.getElementById("shopDailyChart");
-      drawLineChart(canvas, daily.dates, daily.totals);
+      drawBarChart(canvas, daily.dates, daily.totals, { mode: (preset==="30d"||preset==="thisMonth"||preset==="lastMonth") ? "daynum" : "weekday" });
     }
   }catch(e){
     console.warn("Dashboard chart render failed", e);

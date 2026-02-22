@@ -200,6 +200,8 @@ const mood_trend_7d = trendLastMinusFirst(moodRows, "val", 7);
       mood_trend_7d,
       spend_7d_total,
       spend_1d_total,
+      spend_24h_total: spend_1d_total,
+      spend_24h: spend_1d_total,
       shopping_entries_7d,
       cleaning_minutes_7d,
       cleaning_due_tasks,
