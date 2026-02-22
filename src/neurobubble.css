@@ -1,121 +1,115 @@
-
+/* NeuroBubble v5: translate via CSS vars so animations never break movement */
 #neuroBubble{
   position: fixed;
-  left:0;
-  top:0;
-  width:56px;
-  height:56px;
-  border-radius:50%;
-  background: radial-gradient(circle at 30% 30%, #ffffffcc, #66ccff);
-  box-shadow:0 0 12px #66ccff66;
-  z-index:999999;
-  transition:transform 0.2s ease-out;
-  cursor:grab;
+  left: 0;
+  top: 0;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.82), rgba(102,204,255,1));
+  box-shadow: 0 0 14px rgba(102,204,255,0.45);
+  z-index: 999999;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+
+  /* Movement is controlled by JS via vars */
+  --bx: 200px;
+  --by: 200px;
+  --bscale: 1;
+  transform: translate(var(--bx), var(--by)) scale(var(--bscale));
+  will-change: transform, filter;
 }
 
-#neuroBubble.dragged{ cursor:grabbing; }
+/* A tiny inner "float" that doesn't affect translate */
+#neuroBubble .nb-inner{
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  animation: nbBreathe 2.8s ease-in-out infinite;
+}
+
+@keyframes nbBreathe{
+  0%{ transform: scale(0.98); filter: brightness(1); }
+  50%{ transform: scale(1.03); filter: brightness(1.06); }
+  100%{ transform: scale(0.98); filter: brightness(1); }
+}
+
+#neuroBubble.dragged{
+  cursor: grabbing;
+  --bscale: 1.03;
+}
 
 #neuroBubble.idle{
-  opacity:0.8;
-  transform:scale(0.9);
+  opacity: 0.9;
+  --bscale: 0.96;
 }
 
-#neuroBubble.thinking{
-  animation:pulse 1s infinite;
-}
-
-@keyframes pulse{
-  0%{ filter:brightness(1); }
-  50%{ filter:brightness(1.2); }
-  100%{ filter:brightness(1); }
-}
-
-.eyes{
-  display:flex;
-  justify-content:space-around;
-  margin-top:16px;
-}
-
-.eye{
-  width:12px;
-  height:12px;
-  background:white;
-  border-radius:50%;
-  position:relative;
-}
-
-.pupil{
-  width:6px;
-  height:6px;
-  background:black;
-  border-radius:50%;
-  position:absolute;
-  top:3px;
-  left:3px;
-}
-
-.mouth{
-  width:16px;
-  height:6px;
-  border-radius:0 0 16px 16px;
-  background:black;
-  margin:4px auto;
-}
-
-#neuroBubble.alert{ box-shadow:0 0 16px #ff6b6b88; }
-#neuroBubble.concerned{ box-shadow:0 0 16px #ffaa0088; }
-#neuroBubble.calm{ box-shadow:0 0 12px #66ccff66; }
-
-#neuroPanel{
-  position:fixed;
-  width:240px;
-  background:#111827ee;
-  color:white;
-  padding:10px;
-  border-radius:12px;
-  font-size:12px;
-  display:none;
-  z-index:999998;
-}
-
-#neuroPanel.open{ display:block; }
-
-.nb-input{ width:100%; margin-top:6px; }
-
-.nb-actions{
-  display:flex;
-  justify-content:space-between;
-  margin-top:6px;
-}
-/* --- Bubble personality animations --- */
-#neuroBubble .eye::after{
+#neuroBubble.thinking::after{
   content:"";
   position:absolute;
-  left:0; top:0;
-  width:100%; height:100%;
-  background: rgba(0,0,0,0.0);
-  border-radius: 50%;
+  inset:-6px;
+  border-radius:50%;
+  border: 2px solid rgba(255,255,255,0.45);
+  border-top-color: rgba(17,24,39,0.65);
+  animation: nbSpin 0.8s linear infinite;
   pointer-events:none;
 }
 
-#neuroBubble.blink .eye{
-  transform: scaleY(0.15);
+@keyframes nbSpin{
+  from{ transform: rotate(0deg); }
+  to{ transform: rotate(360deg); }
+}
+
+/* Face */
+#neuroBubble .eyes{
+  display:flex;
+  justify-content:space-around;
+  padding-top: 16px;
+}
+
+#neuroBubble .eye{
+  width: 12px;
+  height: 12px;
+  background: rgba(255,255,255,0.95);
+  border-radius: 50%;
+  position: relative;
   transform-origin: center;
 }
 
-#neuroBubble.talk .mouth{
-  animation: nbTalk 0.22s infinite alternate ease-in-out;
+#neuroBubble .pupil{
+  width: 6px;
+  height: 6px;
+  background: rgba(17,24,39,0.95);
+  border-radius: 50%;
+  position: absolute;
+  top: 3px;
+  left: 3px;
 }
 
+#neuroBubble .mouth{
+  width: 16px;
+  height: 6px;
+  border-radius: 0 0 16px 16px;
+  background: rgba(17,24,39,0.95);
+  margin: 4px auto 0;
+}
+
+/* Moods (glow only, never touch transform) */
+#neuroBubble.alert{ box-shadow: 0 0 18px rgba(255,107,107,0.55); }
+#neuroBubble.concerned{ box-shadow: 0 0 18px rgba(255,170,0,0.55); }
+#neuroBubble.calm{ box-shadow: 0 0 14px rgba(102,204,255,0.45); }
+
+/* Blink + talk */
+#neuroBubble.blink .eye{ transform: scaleY(0.12); }
+#neuroBubble.talk .mouth{ animation: nbTalk 0.22s infinite alternate ease-in-out; }
+
 @keyframes nbTalk{
-  from{ transform: scaleY(0.7); }
-  to{ transform: scaleY(1.15); }
+  from{ transform: scaleY(0.65); }
+  to{ transform: scaleY(1.18); }
 }
 
 /* Speech bubble */
-#neuroSay{
-/* ========== Comic Speech Bubble ========== */
-
 #neuroSay{
   position: fixed;
   max-width: 280px;
@@ -125,10 +119,9 @@
   border-radius: 18px;
   font-size: 13px;
   line-height: 1.25;
-  z-index: 9999999; /* super alto */
+  z-index: 9999999;
   display: none;
   box-shadow: 0 12px 30px rgba(0,0,0,0.35);
-  transform: translate(0,0);
 }
 
 #neuroSay.show{
@@ -154,6 +147,22 @@
 }
 
 @keyframes popIn{
-  from{ transform: scale(0.9); opacity:0; }
+  from{ transform: scale(0.92); opacity:0; }
   to{ transform: scale(1); opacity:1; }
 }
+
+/* Optional panel (kept for future, not displayed by default) */
+#neuroPanel{
+  position:fixed;
+  width:240px;
+  background:#111827ee;
+  color:white;
+  padding:10px;
+  border-radius:12px;
+  font-size:12px;
+  display:none;
+  z-index:999998;
+}
+#neuroPanel.open{ display:block; }
+.nb-input{ width:100%; margin-top:6px; }
+.nb-actions{ display:flex; justify-content:space-between; margin-top:6px; }
