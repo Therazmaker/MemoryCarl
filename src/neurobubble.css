@@ -146,6 +146,43 @@
   margin-top:6px;
 }
 
+#neuroSay .controls{
+  display:none;
+  gap:8px;
+  margin-top:10px;
+}
+#neuroSay.ask .controls{ display:flex; }
+#neuroSay .controls .inp{
+  flex:1;
+  padding:8px 10px;
+  border-radius:12px;
+  border:1px solid rgba(0,0,0,0.15);
+  font-size:13px;
+  outline:none;
+}
+#neuroSay .controls .send{
+  padding:8px 10px;
+  border-radius:12px;
+  border:0;
+  background: rgba(102,204,255,0.95);
+  color:#073042;
+  font-weight:700;
+}
+#neuroSay .chips{
+  display:none;
+  gap:6px;
+  flex-wrap:wrap;
+  margin-top:8px;
+}
+#neuroSay.ask .chips{ display:flex; }
+#neuroSay .chip{
+  border:1px solid rgba(0,0,0,0.12);
+  background: rgba(255,255,255,0.9);
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:12px;
+}
+
 @keyframes popIn{
   from{ transform: scale(0.92); opacity:0; }
   to{ transform: scale(1); opacity:1; }
@@ -166,3 +203,5 @@
 #neuroPanel.open{ display:block; }
 .nb-input{ width:100%; margin-top:6px; }
 .nb-actions{ display:flex; justify-content:space-between; margin-top:6px; }
+
+#neuroSay[data-side='left']::after{ left:auto; right:20px; }

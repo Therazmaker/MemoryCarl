@@ -240,7 +240,9 @@ const mood_trend_7d = trendLastMinusFirst(moodRows, "val", 7);
         });
       }
     }
-    return { signals, suggestions, ts: Date.now() };
+    const payload = { signals, suggestions, ts: Date.now(), source: 'neuroclaw' };
+    try{ window.dispatchEvent(new CustomEvent('neuro:state', { detail: payload })); }catch(e){}
+    return payload;
   }
 
   window.NeuroClaw = window.NeuroClaw || {};
