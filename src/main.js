@@ -1,3 +1,88 @@
+
+/* ===== PWA Rescue / Reset =====
+   Si la app se queda pegada (cache/estado viejo), abre:
+   https://therazmaker.github.io/MemoryCarl/?reset=1
+   Esto limpia localStorage + caches + desregistra service workers y recarga.
+*/
+(function mcPwaRescueInit(){
+  function showRescueBanner(reason){
+    try{
+      if(document.getElementById('mcRescueBanner')) return;
+      const d = document.createElement('div');
+      d.id = 'mcRescueBanner';
+      d.style.position = 'fixed';
+      d.style.left = '12px';
+      d.style.right = '12px';
+      d.style.bottom = '12px';
+      d.style.zIndex = 99999;
+      d.style.padding = '10px 12px';
+      d.style.borderRadius = '14px';
+      d.style.background = 'rgba(20,20,28,0.92)';
+      d.style.color = '#fff';
+      d.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      d.style.fontSize = '13px';
+      d.style.boxShadow = '0 10px 30px rgba(0,0,0,0.35)';
+      d.innerHTML = `
+        <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;">
+          <div style="line-height:1.25">
+            <div style="font-weight:700">MemoryCarl: modo rescate</div>
+            <div style="opacity:.85">Si se quedó cargando, toca “Reset”. ${reason?`<span style="opacity:.7">(${reason})</span>`:''}</div>
+          </div>
+          <button id="mcRescueBtn" style="border:0;border-radius:12px;padding:8px 12px;font-weight:700;cursor:pointer;">Reset</button>
+        </div>`;
+      document.body.appendChild(d);
+      document.getElementById('mcRescueBtn').onclick = ()=> mcHardReset();
+    }catch(_e){}
+  }
+
+  async function mcHardReset(){
+    try{
+      // 1) service workers
+      if('serviceWorker' in navigator){
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r=>r.unregister()));
+      }
+      // 2) caches (si existen)
+      if('caches' in window){
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k=>caches.delete(k)));
+      }
+      // 3) local storage
+      try{ localStorage.clear(); }catch(_e){}
+    }catch(_e){}
+    // recargar sin reset param
+    try{
+      const u = new URL(location.href);
+      u.searchParams.delete('reset');
+      location.replace(u.toString());
+    }catch(_e){
+      location.reload();
+    }
+  }
+
+  // Reset explícito por URL
+  try{
+    const u = new URL(location.href);
+    if(u.searchParams.has('reset')){
+      // mostrar mini texto mientras limpia
+      document.documentElement.style.opacity = '0.9';
+      mcHardReset();
+      return;
+    }
+  }catch(_e){}
+
+  // Si hay error global, ofrecer reset
+  window.addEventListener('error', (e)=> showRescueBanner('error JS'));
+  window.addEventListener('unhandledrejection', (e)=> showRescueBanner('promesa rechazada'));
+
+  // Si en 4.5s no hay señales de vida, ofrecer reset igualmente
+  setTimeout(()=>{
+    // Heurística: si el body sigue casi vacío o no hay header/nav, mostrar
+    const txt = (document.body && document.body.innerText) ? document.body.innerText.trim() : '';
+    if(txt.length < 30) showRescueBanner('arranque lento');
+  }, 4500);
+})();
+
 import { computeMoonNow } from "./cosmic_lite.js";
 import { getTransitLiteSignals } from "./transit_lite.js";
 import { getTransitSwissSignals, swissTransitsAvailable, getSwissDailyCached, swissDailyAvailable } from "./transit_swiss.js";
@@ -18,7 +103,7 @@ const KEYS = {
 // 2) Paste the VAPID public key below
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker
-    .register("./firebase-messaging-sw.js?v=999")
+    .register("./firebase-messaging-sw.js?v=1001")
     .then(reg => {
       console.log("SW registered:", reg.scope);
 
