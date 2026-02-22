@@ -180,5 +180,169 @@
 
   animate();
   boot();
+// =====================
+// Personality + chatter
+// =====================
 
+const sayBox = document.createElement("div");
+sayBox.id = "neuroSay";
+sayBox.innerHTML = `<div class="txt"></div><div class="sub"></div>`;
+document.body.appendChild(sayBox);
+
+let lastUserActionAt = Date.now();
+let talkCooldown = 0;
+
+// suaviza pupilas (evita “movimiento feo”)
+let pupilTx = 0, pupilTy = 0;
+document.addEventListener("pointermove", (e)=>{
+  lastUserActionAt = Date.now();
+
+  const pupils = bubble.querySelectorAll(".pupil");
+  pupils.forEach(p=>{
+    const rect = p.parentElement.getBoundingClientRect();
+    const dx = e.clientX - (rect.left + rect.width/2);
+    const dy = e.clientY - (rect.top + rect.height/2);
+    const targetX = Math.max(-4, Math.min(4, dx * 0.06));
+    const targetY = Math.max(-4, Math.min(4, dy * 0.06));
+
+    // easing: se acerca suave
+    pupilTx = pupilTx + (targetX - pupilTx) * 0.25;
+    pupilTy = pupilTy + (targetY - pupilTy) * 0.25;
+
+    p.style.transform = `translate(${pupilTx}px, ${pupilTy}px)`;
+  });
+}, {passive:true});
+
+// parpadeo automático
+setInterval(()=>{
+  bubble.classList.add("blink");
+  setTimeout(()=>bubble.classList.remove("blink"), 120);
+}, 4200 + Math.floor(Math.random()*2000));
+
+// helper para hablar
+function say(text, sub=""){
+  // coloca el globo cerca de la burbuja
+  sayBox.classList.add("show");
+  sayBox.querySelector(".txt").textContent = text;
+  sayBox.querySelector(".sub").textContent = sub;
+
+  // posición: arriba a la izquierda de la burbuja (con clamp)
+  const sx = Math.max(10, Math.min(window.innerWidth - 330, x + 70));
+  const sy = Math.max(10, Math.min(window.innerHeight - 140, y - 10));
+  sayBox.style.transform = `translate(${sx}px, ${sy}px)`;
+
+  // boca hablando
+  bubble.classList.add("talk");
+  setTimeout(()=>bubble.classList.remove("talk"), 900);
+
+  // auto-hide
+  clearTimeout(sayBox._t);
+  sayBox._t = setTimeout(()=>sayBox.classList.remove("show"), 5200);
+}
+
+// estado facial rápido
+function face(mode){
+  bubble.classList.remove("smile","annoyed");
+  if(mode) bubble.classList.add(mode);
+}
+
+// frases por personalidad
+function pickTone(){
+  const mem = (()=>{
+    try{ return JSON.parse(localStorage.getItem("mc_bubble_memory_v3")||"{}"); }catch(e){ return {}; }
+  })();
+  const likes = mem.likes||0, dislikes = mem.dislikes||0;
+  const last = (mem.lastReply||"").toLowerCase();
+
+  // mini “aprendizaje” simple
+  if(/calma|tranquil|estres|ansied|agot/.test(last)) return "calm";
+  if(/impulso|vamos|dale|accion|disciplina/.test(last)) return "push";
+  if(/claridad|orden|prioriz|confus|no se/.test(last)) return "clarity";
+
+  // si muchos dislikes, baja intensidad
+  if(dislikes > likes + 2) return "calm";
+  return "neutral";
+}
+
+function chatterLine(context="idle"){
+  const tone = pickTone();
+
+  const bank = {
+    idle: {
+      neutral: [
+        "Sigo flotando… vigilando tu reino.",
+        "¿Me das una misión pequeñita?",
+        "Puedo oler una idea buena por aquí."
+      ],
+      calm: [
+        "Vamos suave. Un paso. Sin prisa.",
+        "Si hoy es pesado, lo hacemos liviano."
+      ],
+      push: [
+        "Ok. Dame 5 minutos y te los convierto en progreso.",
+        "Listo. ¿Qué micro-victoria hacemos ya?"
+      ],
+      clarity: [
+        "Dime 1 cosa: ¿qué es lo más importante hoy?",
+        "Si tu mente es un cuarto, ¿qué tiramos primero?"
+      ],
+    },
+    drag: {
+      neutral: ["¡Ey! Me estás arrastrando por el multiverso 😵", "Ok ok, cooperando…"],
+      calm: ["Suavecito… estoy aquí."],
+      push: ["Arrástrame a la acción, jefe 😤"],
+      clarity: ["¿Me mueves porque dudas o porque decides?"]
+    },
+    open: {
+      neutral: ["Estoy aquí. Dime qué necesitas.", "Modo escucha activado."],
+      calm: ["Respira. Te sigo."],
+      push: ["Vamos. Dame una meta concreta."],
+      clarity: ["Dame contexto: ¿qué quieres resolver?"]
+    },
+    thinking: {
+      neutral: ["Estoy pensando…", "Dame un segundo, estoy armando la idea."],
+      calm: ["Procesando sin apuro…"],
+      push: ["Calculando el golpe perfecto…"],
+      clarity: ["Buscando la pieza que falta…"]
+    }
+  };
+
+  const arr = (bank[context] && bank[context][tone]) || bank.idle.neutral;
+  return arr[Math.floor(Math.random()*arr.length)];
+}
+
+// hablar cada cierto tiempo si estás idle
+setInterval(()=>{
+  const now = Date.now();
+  const idleMs = now - lastUserActionAt;
+  if(idleMs < 12000) return;            // si estás activo, no molesta
+  if(Date.now() < talkCooldown) return; // cooldown
+
+  face("smile");
+  say(chatterLine("idle"), "Tip: toca la burbuja para abrir panel.");
+  talkCooldown = Date.now() + 18000; // 18s
+}, 5000);
+
+// hooks a eventos existentes
+bubble.addEventListener("click", ()=>{
+  lastUserActionAt = Date.now();
+  face("smile");
+  say(chatterLine("open"), "Puedes escribir y presionar Enter.");
+});
+
+bubble.addEventListener("pointerdown", ()=>{
+  lastUserActionAt = Date.now();
+  face("annoyed");
+  say(chatterLine("drag"));
+});
+
+// si tienes “thinking” cuando llamas a nube, refuerza el texto
+const _origAdd = bubble.classList.add.bind(bubble.classList);
+bubble.classList.add = function(...args){
+  _origAdd(...args);
+  if(args.includes("thinking")){
+    lastUserActionAt = Date.now();
+    say(chatterLine("thinking"));
+  }
+};
 })();
