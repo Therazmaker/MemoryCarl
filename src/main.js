@@ -1,5 +1,6 @@
 import { computeMoonNow } from "./cosmic_lite.js";
 import { getTransitLiteSignals } from "./transit_lite.js";
+import { getTransitSwissSignals, swissTransitsAvailable } from "./transit_swiss.js";
 
 console.log("MemoryCarl loaded");
 // ===== LocalStorage Keys =====
@@ -139,6 +140,10 @@ const LS = {
 
   // Astrology (local-only)
   natalChart: "memorycarl_v2_natal_chart_json",
+  astroProvider: "memorycarl_v2_astro_provider", // 'lite' | 'swiss'
+  astroSwissLast: "memorycarl_v2_astro_swiss_last",
+  astroSwissSeen: "memorycarl_v2_astro_swiss_seen", // per-day cache
+  bubbleFreqMin: "memorycarl_v2_bubble_freq_min",
 };
 // ---- Sync (Google Apps Script via sendBeacon) ----
 const SYNC = {
@@ -191,9 +196,105 @@ function refreshGlobalSignals(){
     ? state.neuroclawLast.signals
     : {};
   const cosmic = getCosmicLiteSignals(new Date());
-  const transit = getTransitLiteSignals(new Date());
-  window.__MC_STATE__ = Object.assign({}, base, cosmic, transit);
+  const transitLite = getTransitLiteSignals(new Date());
+  const swiss = loadSwissLast();
+  // If swiss exists, it overrides transit_* keys.
+  window.__MC_STATE__ = Object.assign({}, base, cosmic, transitLite, (swiss||{}));
   return window.__MC_STATE__;
+}
+
+function getAstroProvider(){
+  const p = (localStorage.getItem(LS.astroProvider) || "lite").trim();
+  return (p === "swiss") ? "swiss" : "lite";
+}
+
+function setAstroProvider(p){
+  localStorage.setItem(LS.astroProvider, (p === "swiss") ? "swiss" : "lite");
+}
+
+function loadSwissLast(){
+  try{
+    const raw = localStorage.getItem(LS.astroSwissLast);
+    if(!raw) return null;
+    const obj = JSON.parse(raw);
+    if(!obj || typeof obj !== "object") return null;
+    return obj;
+  }catch(e){
+    return null;
+  }
+}
+
+function saveSwissLast(obj){
+  try{ localStorage.setItem(LS.astroSwissLast, JSON.stringify(obj)); }catch(e){}
+}
+
+function todayKey(){
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const da = String(d.getDate()).padStart(2,"0");
+  return `${y}${m}${da}`;
+}
+
+function loadSeenSet(){
+  try{
+    const raw = localStorage.getItem(LS.astroSwissSeen);
+    if(!raw) return { day: todayKey(), seen: [] };
+    const obj = JSON.parse(raw);
+    if(!obj || typeof obj !== "object") return { day: todayKey(), seen: [] };
+    if(obj.day !== todayKey()) return { day: todayKey(), seen: [] };
+    if(!Array.isArray(obj.seen)) obj.seen = [];
+    return obj;
+  }catch(e){
+    return { day: todayKey(), seen: [] };
+  }
+}
+
+function saveSeenSet(obj){
+  try{ localStorage.setItem(LS.astroSwissSeen, JSON.stringify(obj)); }catch(e){}
+}
+
+async function refreshSwissTransitsUI({forceSpeak=false} = {}){
+  if(getAstroProvider() !== "swiss") return;
+  if(!swissTransitsAvailable()) return;
+
+  const natal = loadNatalChart();
+  const now = new Date();
+  try{
+    const swiss = await getTransitSwissSignals({ now, natal });
+    if(!swiss) return;
+
+    saveSwissLast(swiss);
+    refreshGlobalSignals();
+
+    // Update settings labels if present
+    const lab = document.querySelector("#astroTransitLabel");
+    if(lab) lab.textContent = swiss.transit_top || "";
+    const hint = document.querySelector("#astroHint");
+    if(hint) hint.textContent = swiss.transit_hint || "Bubble puede usar esto como contexto, no como destino.";
+    const chip = document.querySelector("#chipTransitEngine");
+    if(chip) chip.textContent = swiss.transit_engine || "swiss";
+
+    // Notify (once per day per headline)
+    const headline = swiss?.transit_events?.[0];
+    const orb = typeof headline?.orb === "number" ? headline.orb : null;
+    const key = headline ? `${headline.tp}_${headline.aspect}_${headline.natal}` : "";
+
+    const seen = loadSeenSet();
+    const isNew = key && !seen.seen.includes(key);
+    const isTight = (orb !== null) ? (orb <= 1.6) : false;
+    if((forceSpeak || (isNew && isTight)) && swiss.transit_hint){
+      seen.seen.push(key);
+      saveSeenSet(seen);
+      toast(`🪐 Tránsito activo: ${swiss.transit_top}`);
+      if(window.NeuroBubble && window.NeuroBubble.say){
+        window.NeuroBubble.say({ mood:"calm", text: swiss.transit_hint, micro:"Micro: respira 3 veces y elige 1 intención." });
+      }
+    }
+  }catch(e){
+    // keep silent; swiss is optional
+    console.warn("[AstroSwiss] refresh failed", e);
+  }
 }
 
 // ---- NeuroClaw Cloud AI (optional) ----
@@ -1390,12 +1491,13 @@ function view(){
     });
 
     const btnAstroRefresh = root.querySelector("#btnAstroRefresh");
-    if(btnAstroRefresh) btnAstroRefresh.addEventListener("click", ()=>{
+    if(btnAstroRefresh) btnAstroRefresh.addEventListener("click", async ()=>{
       const sig = refreshGlobalSignals();
       const label = root.querySelector("#astroTodayLabel");
       if(label) label.textContent = `${sig.moon_phase_name} • Luna en ${sig.moon_sign}`;
       const tlabel = root.querySelector("#astroTransitLabel");
       if(tlabel) tlabel.textContent = sig.transit_top || "";
+      await refreshSwissTransitsUI({ forceSpeak:false });
       try{ toast("Listo 🌙"); }catch(_e){}
     });
 
@@ -1417,7 +1519,7 @@ function view(){
     if(selFreq){
       // load saved
       try{
-        const raw = localStorage.getItem("mc_bubble_cooldown_min");
+        const raw = localStorage.getItem(LS.bubbleFreqMin) || localStorage.getItem("mc_bubble_cooldown_min");
         const v = raw ? String(raw) : "60";
         selFreq.value = ["30","60","120","240"].includes(v) ? v : "60";
       }catch(e){}
@@ -1425,10 +1527,45 @@ function view(){
     if(btnFreqSave){
       btnFreqSave.addEventListener("click", ()=>{
         const v = selFreq ? String(selFreq.value||"60") : "60";
+        try{ localStorage.setItem(LS.bubbleFreqMin, v); }catch(e){}
+        // legacy key
         try{ localStorage.setItem("mc_bubble_cooldown_min", v); }catch(e){}
         try{ if(typeof toast==="function") toast("Bubble actualizado 🫧"); }catch(e){}
       });
     }
+
+    // Astro provider wiring
+    const selProv = root.querySelector("#astroProvider");
+    const btnProvSave = root.querySelector("#btnAstroProviderSave");
+    const swissStatus = root.querySelector("#astroSwissStatus");
+    if(selProv){
+      selProv.value = getAstroProvider();
+    }
+    if(swissStatus){
+      swissStatus.textContent = swissTransitsAvailable()
+        ? "Swiss listo ✅"
+        : "Swiss: configura NeuroClaw URL+Key";
+    }
+    if(btnProvSave) btnProvSave.addEventListener("click", async ()=>{
+      const v = selProv ? String(selProv.value||"lite") : "lite";
+      setAstroProvider(v);
+      refreshGlobalSignals();
+      if(v === "swiss"){
+        await refreshSwissTransitsUI({ forceSpeak:true });
+      }else{
+        const sig = refreshGlobalSignals();
+        const lab = root.querySelector("#astroTransitLabel");
+        if(lab) lab.textContent = sig.transit_top || "";
+        const chip = root.querySelector("#chipTransitEngine");
+        if(chip) chip.textContent = "lite_v1";
+      }
+      try{ toast("Motor guardado ✅"); }catch(_e){}
+    });
+
+    const btnSwissPing = root.querySelector("#btnAstroSwissPing");
+    if(btnSwissPing) btnSwissPing.addEventListener("click", async ()=>{
+      await refreshSwissTransitsUI({ forceSpeak:true });
+    });
 
   }
 
@@ -2306,9 +2443,12 @@ function viewSettings(){
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">Astro (Cosmic Lite) 🌙</h2>
-          <div class="small">Fase lunar + signo lunar (local). Y un espacio para tu carta natal en JSON.</div>
+          <div class="small">Nivel 1 (local) + opción Swiss Ephemeris (NeuroClaw) para tránsitos precisos.</div>
         </div>
-        <div class="chip" id="chipNatalStatus">${loadNatalChart() ? "Carta ✅" : "Sin carta"}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+          <div class="chip" id="chipTransitEngine">${escapeHtml((loadSwissLast()?.transit_engine) || "lite_v1")}</div>
+          <div class="chip" id="chipNatalStatus">${loadNatalChart() ? "Carta ✅" : "Sin carta"}</div>
+        </div>
       </div>
       <div class="hr"></div>
 
@@ -2319,6 +2459,18 @@ function viewSettings(){
       <div class="kv">
         <div class="k">Tránsitos</div>
         <div class="v small"><span id="astroTransitLabel">${escapeHtml(getTransitLiteSignals().transit_top || "Activa tu carta natal para ver casas y aspectos.")}</span></div>
+      </div>
+
+      <div class="kv">
+        <div class="k">Motor</div>
+        <div class="v small">
+          <select id="astroProvider" class="inp" style="max-width:220px;">
+            <option value="lite">Lite (local)</option>
+            <option value="swiss">Swiss (NeuroClaw)</option>
+          </select>
+          <button class="btn ghost" id="btnAstroProviderSave" style="margin-left:10px;">Guardar</button>
+          <span class="small" id="astroSwissStatus" style="margin-left:10px;opacity:.85;"></span>
+        </div>
       </div>
       <div class="kv">
         <div class="k">Lectura</div>
@@ -2355,11 +2507,12 @@ function viewSettings(){
 
       <div class="btnRow" style="margin-top:10px;flex-wrap:wrap;gap:10px;">
         <button class="btn" id="btnAstroRefresh">Recalcular hoy</button>
+        <button class="btn" id="btnAstroSwissPing">Probar Swiss</button>
         <button class="btn primary" id="btnAstroTestBubble">Probar Bubble</button>
       </div>
 
       <div class="note" style="margin-top:10px;">
-        Tip: este nivel solo calcula <span class="mono">fase lunar</span> + <span class="mono">signo lunar</span>. Luego subimos a tránsitos completos.
+        Tip: si eliges <b>Swiss (NeuroClaw)</b>, necesitas tu backend con endpoint <span class="mono">/astro/transits</span>. En este ZIP viene un folder listo para deploy.
       </div>
     </div>
 
@@ -7184,6 +7337,31 @@ persist();
 view();
 // INIT_NEUROCLAW
 neuroclawRunNow({ animate:false });
+
+// Astro: always compute local signals; Swiss overlay is optional.
+try{ refreshGlobalSignals(); }catch(e){}
+// Swiss transits: initial pull + periodic refresh (in-app notifications)
+try{
+  // Kick once on load (non-blocking)
+  setTimeout(()=>{ refreshSwissTransitsUI({ forceSpeak:false }); }, 1200);
+
+  // Refresh cadence: min(bubbleFreq, 60) minutes. Default 60.
+  const readFreqMin = ()=>{
+    try{
+      const raw = localStorage.getItem(LS.bubbleFreqMin) || localStorage.getItem("mc_bubble_cooldown_min") || "60";
+      const v = Number(raw||60);
+      if(!isFinite(v) || v<=0) return 60;
+      return Math.max(15, Math.min(60, v));
+    }catch(e){
+      return 60;
+    }
+  };
+  let tickMs = readFreqMin() * 60 * 1000;
+  setInterval(()=>{
+    // provider can change live
+    refreshSwissTransitsUI({ forceSpeak:false });
+  }, tickMs);
+}catch(e){}
 */
 
 
