@@ -10598,6 +10598,231 @@ try{ window.setFinanceSubTab = setFinanceSubTab; }catch(e){}
 try{ window.financeShiftMonth = financeShiftMonth; window.financeResetMonth = financeResetMonth; }catch(e){}
 try{ window.financeHardResetAllConfirm = financeHardResetAllConfirm; }catch(e){}
 
+// ===============================
+// Finance Phase 3 — Weekly Intelligence Engine
+// ===============================
+if(!state.financeWeekly) state.financeWeekly = { lastRunDay: null, reports: [] };
+
+function _financeTodayKey(){
+  const d = new Date();
+  return d.toISOString().slice(0,10);
+}
+
+function _financeIsSunday(d){
+  return (d.getDay && d.getDay() === 0);
+}
+
+function _financeStartOfDay(d){
+  const x = new Date(d);
+  x.setHours(0,0,0,0);
+  return x;
+}
+
+function _financeEndOfDay(d){
+  const x = new Date(d);
+  x.setHours(23,59,59,999);
+  return x;
+}
+
+function _financeGetMostRecentSunday(refDate){
+  const d = new Date(refDate);
+  const day = d.getDay(); // 0 sunday
+  const diff = day; // days since sunday
+  d.setDate(d.getDate() - diff);
+  return _financeStartOfDay(d);
+}
+
+function _financeGetWeekRangeEndingSunday(refDate){
+  // week = Mon..Sun, ending at the most recent Sunday (or today if Sunday)
+  const sunday = _financeGetMostRecentSunday(refDate);
+  const start = new Date(sunday);
+  start.setDate(sunday.getDate() - 6);
+  return { start: _financeStartOfDay(start), end: _financeEndOfDay(sunday) };
+}
+
+function _financeFilterMovementsInRange(range){
+  const led = financeActiveLedger() || [];
+  return led.filter(m=>{
+    const t = new Date(m.date).getTime();
+    return t >= range.start.getTime() && t <= range.end.getTime();
+  });
+}
+
+function _financeSum(arr, fn){
+  return (arr||[]).reduce((s,x)=> s + Number(fn?fn(x):x||0), 0);
+}
+
+function _financeByKey(arr, keyFn, valFn){
+  const out = {};
+  (arr||[]).forEach(x=>{
+    const k = keyFn(x);
+    out[k] = (out[k]||0) + Number(valFn?valFn(x):1);
+  });
+  return out;
+}
+
+function financeWeeklyComputeReport({refDate=null}={}){
+  const now = refDate ? new Date(refDate) : new Date();
+  const r1 = _financeGetWeekRangeEndingSunday(now);
+
+  const prevRef = new Date(r1.start);
+  prevRef.setDate(prevRef.getDate() - 1);
+  const r0 = _financeGetWeekRangeEndingSunday(prevRef);
+
+  const w1 = _financeFilterMovementsInRange(r1);
+  const w0 = _financeFilterMovementsInRange(r0);
+
+  const w1Exp = w1.filter(m=>m.type==="expense");
+  const w1Inc = w1.filter(m=>m.type==="income");
+  const w0Exp = w0.filter(m=>m.type==="expense");
+
+  if(!w1.length){
+    return {
+      id: "wk_" + Date.now(),
+      createdAt: new Date().toISOString(),
+      range: { start: r1.start.toISOString().slice(0,10), end: r1.end.toISOString().slice(0,10) },
+      title: "Semana en silencio",
+      bullets: ["No hubo movimientos esta semana. Si fue intencional, perfecto. Si no, registra aunque sea lo grande para que el análisis tenga material."],
+      stats: { expense:0, income:0, tx:0 }
+    };
+  }
+
+  const expTotal = _financeSum(w1Exp, m=>m.amount);
+  const incTotal = _financeSum(w1Inc, m=>m.amount);
+
+  const planned = w1Exp.filter(m=> String(m.reason||"").toLowerCase().includes("plan"));
+  const impulse = w1Exp.filter(m=> String(m.reason||"").toLowerCase().includes("impul"));
+  const emergency = w1Exp.filter(m=> String(m.reason||"").toLowerCase().includes("emerg"));
+  const plannedTotal = _financeSum(planned, m=>m.amount);
+  const impulseTotal = _financeSum(impulse, m=>m.amount);
+  const emergencyTotal = _financeSum(emergency, m=>m.amount);
+
+  const late = w1Exp.filter(m=>{
+    const dt = new Date(m.date);
+    return !isNaN(dt.getTime()) && dt.getHours() >= 21;
+  });
+  const lateCount = late.length;
+  const lateTotal = _financeSum(late, m=>m.amount);
+
+  const catTotals = _financeByKey(w1Exp, m=> (m.category||"Otros"), m=>m.amount);
+  const catCounts = _financeByKey(w1Exp, m=> (m.category||"Otros"), _=>1);
+
+  const topCat = Object.entries(catTotals).sort((a,b)=>b[1]-a[1])[0] || ["Otros",0];
+  const topCatName = topCat[0];
+  const topCatAmount = topCat[1];
+
+  const prevCatTotals = _financeByKey(w0Exp, m=> (m.category||"Otros"), m=>m.amount);
+  let breaker = {cat: topCatName, delta: (topCatAmount - (prevCatTotals[topCatName]||0))};
+  Object.keys(catTotals).forEach(cat=>{
+    const delta = catTotals[cat] - (prevCatTotals[cat]||0);
+    if(delta > breaker.delta) breaker = {cat, delta};
+  });
+
+  const breakerCount = catCounts[breaker.cat] || 0;
+  const breakerAvg = breakerCount ? (catTotals[breaker.cat]/breakerCount) : 0;
+  const breakerWhy = (breakerCount >= 4 && breakerAvg < (expTotal*0.15)) ? "por frecuencia" : "por monto";
+
+  const wins = Object.keys(prevCatTotals).map(cat=>{
+    return {cat, delta: (catTotals[cat]||0) - (prevCatTotals[cat]||0)};
+  }).filter(x=>x.delta < 0).sort((a,b)=>a.delta - b.delta).slice(0,3);
+
+  const bullets = [];
+  bullets.push(`Gasto semanal: **S/ ${_financeFmt(expTotal)}** · Ingreso: **S/ ${_financeFmt(incTotal)}** · Movimientos: **${w1.length}**.`);
+  if(plannedTotal || impulseTotal || emergencyTotal){
+    bullets.push(`Planificado: **S/ ${_financeFmt(plannedTotal)}** · Impulso: **S/ ${_financeFmt(impulseTotal)}** · Emergencia: **S/ ${_financeFmt(emergencyTotal)}**.`);
+  }
+  bullets.push(`Categoría dominante: **${escapeHtml(topCatName)}** con **S/ ${_financeFmt(topCatAmount)}**.`);
+  bullets.push(`La categoría que más “rompió” fue **${escapeHtml(breaker.cat)}** (${breakerWhy}). Variación vs semana anterior: **S/ ${_financeFmt(breaker.delta)}**.`);
+  if(lateCount){
+    bullets.push(`Gastos después de las 9pm: **${lateCount}** (S/ ${_financeFmt(lateTotal)}). Si quieres recortar fácil: aquí suelen haber fugas.`);
+  }else{
+    bullets.push(`Cero gastos después de las 9pm ✅. Ese patrón suele proteger el presupuesto.`);
+  }
+  if(wins.length){
+    bullets.push(`Mejoras vs semana anterior: ${wins.map(w=>`**${escapeHtml(w.cat)}** (-S/ ${_financeFmt(Math.abs(w.delta))})`).join(" · ")}.`);
+  }
+
+  return {
+    id: "wk_" + Date.now(),
+    createdAt: new Date().toISOString(),
+    range: { start: r1.start.toISOString().slice(0,10), end: r1.end.toISOString().slice(0,10) },
+    title: `Análisis semanal (${r1.start.toLocaleDateString("es-PE",{day:"2-digit",month:"short"})} → ${r1.end.toLocaleDateString("es-PE",{day:"2-digit",month:"short"})})`,
+    bullets,
+    stats: { expense: expTotal, income: incTotal, tx: w1.length, lateCount, breaker: breaker.cat }
+  };
+}
+
+function financeWeeklyGenerateNow(){
+  const rep = financeWeeklyComputeReport();
+  state.financeWeekly.reports = [rep].concat(state.financeWeekly.reports||[]).slice(0,12);
+  state.financeWeekly.lastRunDay = _financeTodayKey();
+  persist();
+  view();
+  toast("Análisis semanal generado ✨");
+  return rep;
+}
+
+function financeWeeklyMaybeAutoRun(){
+  const today = new Date();
+  if(!_financeIsSunday(today)) return;
+  const key = _financeTodayKey();
+  if(state.financeWeekly.lastRunDay === key) return;
+  financeWeeklyGenerateNow();
+}
+
+try{ window.financeWeeklyGenerateNow = financeWeeklyGenerateNow; }catch(e){}
+
+function financeToggleWeeklyHistory(){
+  state.financeWeekly.showHistory = !state.financeWeekly.showHistory;
+  persist();
+  view();
+}
+try{ window.financeToggleWeeklyHistory = financeToggleWeeklyHistory; }catch(e){}
+
+function renderFinanceWeeklyCard(){
+  const r = (state.financeWeekly.reports||[])[0];
+  if(!r){
+    return `
+      <div class="muted">Aún no hay análisis. Se genera automáticamente los domingos, o puedes tocar ✨.</div>
+      <div style="margin-top:8px" class="muted">Tip: registra categoría + razón (plan/impulso/emergencia) para que la lectura sea más precisa.</div>
+    `;
+  }
+
+  const bullets = (r.bullets||[]).map(b=> `<div class="finWeeklyBullet">• ${b}</div>`).join("");
+  const show = !!state.financeWeekly.showHistory;
+  const historyBtn = `<button class="chipBtn" onclick="financeToggleWeeklyHistory()">${show?"Ocultar":"Ver"} historial</button>`;
+
+  let historyHtml = "";
+  if(show){
+    const rest = (state.financeWeekly.reports||[]).slice(1);
+    historyHtml = rest.length ? `
+      <div class="hr" style="margin:10px 0"></div>
+      <div class="muted" style="margin-bottom:6px">Historial</div>
+      ${rest.map(h=>{
+        const t = escapeHtml(h.title||"Semana");
+        const s = (h.stats||{});
+        return `<div class="finWeeklyHistRow">
+          <div>${t}</div>
+          <div class="muted">Gasto S/ ${_financeFmt(s.expense||0)} · Ingreso S/ ${_financeFmt(s.income||0)}</div>
+        </div>`;
+      }).join("")}
+    ` : `<div class="muted" style="margin-top:8px">Sin historial todavía.</div>`;
+  }
+
+  return `
+    <div class="finWeeklyTopRow">
+      <div><strong>${escapeHtml(r.title||"Análisis")}</strong></div>
+      <div>${historyBtn}</div>
+    </div>
+    <div style="margin-top:8px">${bullets}</div>
+    ${historyHtml}
+  `;
+}
+
+
+
+
+
 
 function viewFinance(){
   const fmt = _financeFmt;
@@ -10650,7 +10875,19 @@ function viewFinance(){
       <canvas id="financeChart" height="140"></canvas>
     </section>
 
-    <section class="card homeCard homeWide">
+    
+<section class="card homeCard homeWide">
+  <div class="cardTop">
+    <h2 class="cardTitle">Análisis semanal</h2>
+    <div class="row" style="gap:8px">
+      <button class="iconBtn" title="Generar ahora" onclick="financeWeeklyGenerateNow()">✨</button>
+    </div>
+  </div>
+  <div class="hr"></div>
+  ${renderFinanceWeeklyCard()}
+</section>
+
+<section class="card homeCard homeWide">
       <div class="cardTop">
         <h2 class="cardTitle">Cuentas</h2>
         <div class="row" style="gap:8px">
@@ -10773,6 +11010,7 @@ view = function(){
   try{
     if(state.tab==="finance"){
       setTimeout(()=>{ 
+        try{ financeWeeklyMaybeAutoRun(); }catch(_e){}
         try{ financeDrawMonthChart(); }catch(_e){} 
         try{ renderDailyExpenseChart(); }catch(_e){} 
       }, 0);
