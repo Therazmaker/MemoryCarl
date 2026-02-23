@@ -9912,10 +9912,12 @@ function openMergeSpriteManagerModal(){
 LS.financeLedger = "memorycarl_v2_finance_ledger";
 LS.financeAccounts = "memorycarl_v2_finance_accounts";
 LS.financeResetAt = "memorycarl_v2_finance_resetAt";
+LS.financeDebts = "memorycarl_v2_finance_debts";
 
 state.financeLedger = load(LS.financeLedger, []);
 state.financeAccounts = load(LS.financeAccounts, []);
 state.financeResetAt = load(LS.financeResetAt, null);
+state.financeDebts = load(LS.financeDebts, []);
 
 // Quick finance wipe via URL: ?finreset=1 (useful when you want to start clean)
 try{
@@ -9938,6 +9940,7 @@ persist = function(){
   save(LS.financeLedger, state.financeLedger);
   save(LS.financeAccounts, state.financeAccounts);
   save(LS.financeResetAt, state.financeResetAt);
+  try{ save(LS.financeDebts, state.financeDebts); }catch(_e){}
   try{ save(LS.financeMeta, state.financeMeta); }catch(_e){}
   try{ save(LS.financeCategories, state.financeCategories); }catch(_e){}
   try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(state.financeProjectionMode||"normal")); }catch(_e){}
@@ -9967,6 +9970,22 @@ function financeMigrateV2(){
 
   if(state.financeResetAt === undefined) state.financeResetAt = null;
   if(state.financeBaselineAt === undefined) state.financeBaselineAt = null;
+
+  // debts: defaults
+  if(!Array.isArray(state.financeDebts)) state.financeDebts = [];
+  (state.financeDebts||[]).forEach(d=>{
+    if(!d.id) d.id = uid("debt_");
+    if(!d.name) d.name = "Deuda";
+    if(d.balance === undefined || d.balance === null) d.balance = Number(d.originalBalance||0);
+    if(d.originalBalance === undefined || d.originalBalance === null) d.originalBalance = Number(d.balance||0);
+    if(!d.provider) d.provider = "";
+    if(!d.type) d.type = "loan"; // loan | card | app
+    if(d.apr === undefined) d.apr = null;
+    if(d.monthlyDue === undefined || d.monthlyDue === null) d.monthlyDue = 0;
+    if(d.dueDay === undefined || d.dueDay === null) d.dueDay = 30;
+    if(!d.status) d.status = (Number(d.balance||0) <= 0 ? "closed" : "active");
+    if(!d.createdAt) d.createdAt = new Date().toISOString();
+  });
 
   persist();
 }
@@ -11138,6 +11157,417 @@ function renderFinanceWeeklyCard(){
 }
 
 
+/* ====================== FINANCE: DEBTS (Dashboard) ====================== */
+
+function financeDebtsActive(){
+  return (state.financeDebts||[]).filter(d=>String(d.status||"active")!=="archived");
+}
+
+function financeDebtSafeNum(x){
+  const n = Number(x);
+  return isFinite(n) ? n : 0;
+}
+
+function financeDebtTotalBalance(){
+  return financeDebtsActive().reduce((s,d)=> s + Math.max(0, financeDebtSafeNum(d.balance)), 0);
+}
+
+function financeDebtMonthlyTotal(){
+  return financeDebtsActive().filter(d=>String(d.status||"active")==="active").reduce((s,d)=> s + financeDebtSafeNum(d.monthlyDue), 0);
+}
+
+function financeDebtNextDueISO(dueDay){
+  const dd = Math.min(31, Math.max(1, Number(dueDay||30)));
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const daysInThisMonth = new Date(y, m+1, 0).getDate();
+  const day = Math.min(dd, daysInThisMonth);
+  let due = new Date(y, m, day, 12, 0, 0);
+  if(due.getTime() < now.getTime() - 12*3600*1000){
+    // next month
+    const y2 = (m===11)? (y+1) : y;
+    const m2 = (m===11)? 0 : (m+1);
+    const dim2 = new Date(y2, m2+1, 0).getDate();
+    const day2 = Math.min(dd, dim2);
+    due = new Date(y2, m2, day2, 12, 0, 0);
+  }
+  return due.toISOString().slice(0,10);
+}
+
+function financeDebtDueLabel(iso){
+  try{
+    const d = new Date(iso);
+    return d.toLocaleDateString("es-PE", { weekday:"short", day:"2-digit", month:"short" });
+  }catch(e){ return iso; }
+}
+
+function financeDebtStatusChip(d){
+  const st = String(d.status||"active");
+  if(st==="closed") return `<span class="chip chipGood">Pagada</span>`;
+  return `<span class="chip chipWarn">Activa</span>`;
+}
+
+function financeDebtProgress(d){
+  const orig = Math.max(0.01, financeDebtSafeNum(d.originalBalance||d.balance||0));
+  const bal = Math.max(0, financeDebtSafeNum(d.balance));
+  const paid = Math.max(0, orig - bal);
+  const pct = Math.max(0, Math.min(100, Math.round((paid/orig)*100)));
+  return {orig, bal, paid, pct};
+}
+
+function openFinanceDebtModal(existing){
+  const d = existing ? {...existing} : {
+    id: null,
+    name: "",
+    provider: "",
+    type: "app",
+    originalBalance: "",
+    balance: "",
+    monthlyDue: "",
+    dueDay: 30,
+    apr: "",
+    status: "active",
+  };
+
+  const host = document.querySelector('#app') || document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modalBackdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="max-width:900px;max-height:90vh;overflow:auto" role="dialog" aria-label="Deuda">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">${existing ? 'Editar deuda' : 'Nueva deuda'}</div>
+          <div class="modalSub">Registra lo que debes y lo que toca pagar cada mes.</div>
+        </div>
+        <button class="iconBtn" id="finDebtClose">✕</button>
+      </div>
+      <div class="hr"></div>
+
+      <div class="grid2" style="gap:10px">
+        <div class="field">
+          <div class="label">Nombre</div>
+          <input id="finDebtName" type="text" value="${escapeHtml(d.name||'')}" placeholder="Solventa / Kashin / Tarjeta..." />
+        </div>
+        <div class="field">
+          <div class="label">Proveedor (opcional)</div>
+          <input id="finDebtProvider" type="text" value="${escapeHtml(d.provider||'')}" placeholder="Yape, banco, app..." />
+        </div>
+
+        <div class="field">
+          <div class="label">Tipo</div>
+          <select id="finDebtType">
+            ${[
+              ['loan','Préstamo'],
+              ['card','Tarjeta'],
+              ['app','App / Microcrédito']
+            ].map(x=>`<option value="${x[0]}" ${x[0]===String(d.type||'app')?'selected':''}>${x[1]}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="field">
+          <div class="label">Día de pago (1-31)</div>
+          <input id="finDebtDueDay" type="number" min="1" max="31" value="${escapeHtml(String(d.dueDay||30))}" />
+        </div>
+
+        <div class="field">
+          <div class="label">Saldo (deuda actual)</div>
+          <input id="finDebtBalance" type="number" inputmode="decimal" value="${escapeHtml(String(d.balance||''))}" placeholder="0.00" />
+        </div>
+
+        <div class="field">
+          <div class="label">Pago mensual (mínimo / cuota)</div>
+          <input id="finDebtMonthlyDue" type="number" inputmode="decimal" value="${escapeHtml(String(d.monthlyDue||''))}" placeholder="0.00" />
+        </div>
+
+        <div class="field">
+          <div class="label">APR / Interés (opcional)</div>
+          <input id="finDebtApr" type="number" inputmode="decimal" value="${escapeHtml(String(d.apr||''))}" placeholder="%" />
+        </div>
+
+        <div class="field">
+          <div class="label">Estado</div>
+          <select id="finDebtStatus">
+            ${[
+              ['active','Activa'],
+              ['closed','Pagada'],
+              ['archived','Archivada']
+            ].map(x=>`<option value="${x[0]}" ${x[0]===String(d.status||'active')?'selected':''}>${x[1]}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div class="hr" style="margin-top:12px"></div>
+      <div class="row" style="gap:10px;justify-content:flex-end">
+        <button class="btn" id="finDebtCancel">Cancelar</button>
+        <button class="btn primary" id="finDebtSave">Guardar</button>
+      </div>
+    </div>
+  `;
+  host.appendChild(backdrop);
+  const close = ()=> backdrop.remove();
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
+  backdrop.querySelector('#finDebtClose')?.addEventListener('click', close);
+  backdrop.querySelector('#finDebtCancel')?.addEventListener('click', close);
+
+  backdrop.querySelector('#finDebtSave')?.addEventListener('click', ()=>{
+    const name = (backdrop.querySelector('#finDebtName')?.value||"").trim();
+    if(!name){ alert('Ponle un nombre a la deuda'); return; }
+    const provider = (backdrop.querySelector('#finDebtProvider')?.value||"").trim();
+    const type = String(backdrop.querySelector('#finDebtType')?.value||'app');
+    const dueDay = Math.min(31, Math.max(1, Number(backdrop.querySelector('#finDebtDueDay')?.value||30)));
+    const balance = financeDebtSafeNum(backdrop.querySelector('#finDebtBalance')?.value);
+    const monthlyDue = financeDebtSafeNum(backdrop.querySelector('#finDebtMonthlyDue')?.value);
+    const aprRaw = (backdrop.querySelector('#finDebtApr')?.value||"").trim();
+    const apr = aprRaw==="" ? null : financeDebtSafeNum(aprRaw);
+    const status = String(backdrop.querySelector('#finDebtStatus')?.value||'active');
+
+    if(existing){
+      existing.name = name;
+      existing.provider = provider;
+      existing.type = type;
+      existing.dueDay = dueDay;
+      existing.monthlyDue = monthlyDue;
+      existing.apr = apr;
+      existing.status = status;
+      // If user edits balance, keep it.
+      existing.balance = balance;
+      if(existing.originalBalance === undefined || existing.originalBalance === null) existing.originalBalance = balance;
+    }else{
+      const id = uid('debt_');
+      state.financeDebts.unshift({
+        id,
+        name,
+        provider,
+        type,
+        originalBalance: balance,
+        balance,
+        monthlyDue,
+        dueDay,
+        apr,
+        status,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    persist();
+    close();
+    view();
+  });
+}
+
+function openFinanceDebtPayModal(debtId){
+  const debt = (state.financeDebts||[]).find(d=>d.id===debtId);
+  if(!debt) return;
+  if(!(state.financeAccounts||[]).length){ alert('Crea una cuenta primero'); return; }
+
+  const now = new Date();
+  const iso = now.toISOString().slice(0,10);
+  const host = document.querySelector('#app') || document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modalBackdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="max-width:720px;max-height:90vh;overflow:auto" role="dialog" aria-label="Registrar pago">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle">Registrar pago</div>
+          <div class="modalSub">${escapeHtml(debt.name)} · saldo S/ ${_financeFmt(debt.balance)}</div>
+        </div>
+        <button class="iconBtn" id="finPayClose">✕</button>
+      </div>
+      <div class="hr"></div>
+
+      <div class="grid2" style="gap:10px">
+        <div class="field">
+          <div class="label">Fecha</div>
+          <input id="finPayDate" type="date" value="${iso}" />
+        </div>
+        <div class="field">
+          <div class="label">Monto pagado</div>
+          <input id="finPayAmount" type="number" inputmode="decimal" placeholder="0.00" value="${escapeHtml(String(debt.monthlyDue||''))}" />
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <div class="label">Cuenta</div>
+          <select id="finPayAccount">
+            ${(state.financeAccounts||[]).map(a=>`<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <div class="label">Nota (opcional)</div>
+          <input id="finPayNote" type="text" placeholder="Ej: cuota febrero" />
+        </div>
+      </div>
+
+      <div class="hr" style="margin-top:12px"></div>
+      <div class="row" style="gap:10px;justify-content:flex-end">
+        <button class="btn" id="finPayCancel">Cancelar</button>
+        <button class="btn primary" id="finPaySave">Guardar</button>
+      </div>
+    </div>
+  `;
+  host.appendChild(backdrop);
+  const close = ()=> backdrop.remove();
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
+  backdrop.querySelector('#finPayClose')?.addEventListener('click', close);
+  backdrop.querySelector('#finPayCancel')?.addEventListener('click', close);
+
+  backdrop.querySelector('#finPaySave')?.addEventListener('click', ()=>{
+    const date = String(backdrop.querySelector('#finPayDate')?.value||iso);
+    const amount = financeDebtSafeNum(backdrop.querySelector('#finPayAmount')?.value);
+    if(!(amount>0)){ alert('Monto inválido'); return; }
+    const accountId = String(backdrop.querySelector('#finPayAccount')?.value||'');
+    const noteExtra = (backdrop.querySelector('#finPayNote')?.value||'').trim();
+
+    // Update debt balance
+    debt.balance = Math.max(0, financeDebtSafeNum(debt.balance) - amount);
+    if(debt.balance<=0) debt.status = 'closed';
+
+    // Also log as finance expense
+    const entry = {
+      id: uid('fin_'),
+      date,
+      type: 'expense',
+      amount,
+      accountId,
+      category: 'Deudas',
+      reason: 'planificado',
+      note: `Pago deuda: ${debt.name}${noteExtra?(' · '+noteExtra):''}`,
+      debtId: debt.id,
+      kind: 'debt_payment',
+      archived: false,
+    };
+    state.financeLedger.unshift(entry);
+    financeRecomputeBalances();
+    persist();
+    close();
+    view();
+  });
+}
+
+let _financeDebtChart = null;
+function financeDrawDebtChart(){
+  const canvas = document.getElementById('financeDebtChart');
+  if(!canvas || typeof Chart==='undefined') return;
+  const monthKey = getCurrentMonthKey();
+  const meta = (state.financeMeta||{})[monthKey] || {expectedIncome:0};
+  const income = financeDebtSafeNum(meta.expectedIncome||0);
+  const monthly = financeDebtMonthlyTotal();
+  const gap = income - monthly;
+
+  try{ if(_financeDebtChart){ _financeDebtChart.destroy(); _financeDebtChart = null; } }catch(e){}
+
+  _financeDebtChart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['Ingreso esperado', 'Pagos de deuda', 'Gap'],
+      datasets: [{
+        label: 'S/',
+        data: [income, monthly, gap],
+        borderWidth: 1,
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      plugins: { legend: { display:false } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+}
+
+function renderFinanceDebtsTab(){
+  const fmt = _financeFmt;
+  const monthKey = getCurrentMonthKey();
+  const meta = (state.financeMeta||{})[monthKey] || {expectedIncome:0};
+
+  const totalBal = financeDebtTotalBalance();
+  const monthly = financeDebtMonthlyTotal();
+  const income = financeDebtSafeNum(meta.expectedIncome||0);
+  const gap = income - monthly;
+
+  const debts = financeDebtsActive();
+  const list = debts
+    .sort((a,b)=>{
+      const sa = String(a.status||'active');
+      const sb = String(b.status||'active');
+      if(sa!==sb) return sa==='active' ? -1 : 1;
+      return financeDebtSafeNum(b.balance) - financeDebtSafeNum(a.balance);
+    })
+    .map(d=>{
+      const p = financeDebtProgress(d);
+      const dueIso = financeDebtNextDueISO(d.dueDay);
+      const dueLbl = financeDebtDueLabel(dueIso);
+      return `
+        <div class="finDebtRow">
+          <div class="finDebtLeft" onclick="openFinanceDebtModalById('${d.id}')" style="cursor:pointer">
+            <div class="finDebtTitle">${escapeHtml(d.name)} ${financeDebtStatusChip(d)}</div>
+            <div class="muted">Pago: S/ ${fmt(d.monthlyDue||0)} · vence: ${escapeHtml(dueLbl)} · saldo: S/ ${fmt(d.balance||0)}</div>
+            <div class="finDebtBar"><div class="finDebtBarFill" style="width:${p.pct}%"></div></div>
+          </div>
+          <div class="finDebtActions">
+            <button class="iconBtn" title="Registrar pago" onclick="openFinanceDebtPayModal('${d.id}')">💸</button>
+            <button class="iconBtn" title="Editar" onclick="openFinanceDebtModalById('${d.id}')">✏️</button>
+          </div>
+        </div>
+      `;
+    }).join('') || `<div class="muted">Sin deudas registradas. Agrega tu primera deuda para empezar el plan.</div>`;
+
+  const hint = (gap<0)
+    ? `<div class="finDebtHint bad">Te faltan <strong>S/ ${fmt(Math.abs(gap))}</strong> para cubrir solo deudas este mes. Vamos a usar esto para decidir prioridades y recortar fugas.</div>`
+    : `<div class="finDebtHint good">Bien: te sobran <strong>S/ ${fmt(gap)}</strong> después de cubrir deudas. Eso puede ir a acelerar una deuda (snowball/avalancha).</div>`;
+
+  return `
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Deudas</h2>
+        <div class="row" style="gap:8px">
+          <button class="iconBtn" title="Nueva deuda" onclick="openFinanceDebtModal()">＋</button>
+        </div>
+      </div>
+      <div class="hr"></div>
+
+      <div class="grid2" style="gap:10px">
+        <div class="finDebtStat">
+          <div class="muted">Total deuda</div>
+          <div class="big">S/ ${fmt(totalBal)}</div>
+        </div>
+        <div class="finDebtStat">
+          <div class="muted">Pago mensual total</div>
+          <div class="big">S/ ${fmt(monthly)}</div>
+        </div>
+      </div>
+
+      <div style="margin-top:10px">
+        ${hint}
+      </div>
+
+      <div class="hr" style="margin-top:12px"></div>
+      <div class="cardTop" style="margin-top:2px">
+        <h3 class="cardTitle" style="font-size:14px">Ingreso vs pagos</h3>
+      </div>
+      <canvas id="financeDebtChart" height="140"></canvas>
+
+      <div class="hr" style="margin-top:12px"></div>
+      <div class="cardTop" style="margin-top:2px">
+        <h3 class="cardTitle" style="font-size:14px">Tus deudas</h3>
+      </div>
+      <div class="finDebtList">${list}</div>
+    </section>
+  `;
+}
+
+function openFinanceDebtModalById(id){
+  const d = (state.financeDebts||[]).find(x=>x.id===id);
+  if(!d) return;
+  openFinanceDebtModal(d);
+}
+
+try{
+  window.openFinanceDebtModal = openFinanceDebtModal;
+  window.openFinanceDebtModalById = openFinanceDebtModalById;
+  window.openFinanceDebtPayModal = openFinanceDebtPayModal;
+}catch(e){}
+
+
 
 
 
@@ -11148,12 +11578,13 @@ function viewFinance(){
   const monthKey = getCurrentMonthKey();
   const meta = d.meta || {expectedIncome:0,targetSavings:0};
 
-  // header tabs (Principal / Movimientos / Recordatorios)
+  // header tabs (Principal / Movimientos / Recordatorios / Deudas)
   const topTabs = `
     <div class="finTopTabs">
       <button class="finTopTab ${state.financeSubTab==="main"?"active":""}" onclick="setFinanceSubTab('main')">Principal</button>
       <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
       <button class="finTopTab ${state.financeSubTab==="reminders"?"active":""}" onclick="setFinanceSubTab('reminders')">Recordatorios</button>
+      <button class="finTopTab ${state.financeSubTab==="debts"?"active":""}" onclick="setFinanceSubTab('debts')">Deudas</button>
     </div>
   `;
 
@@ -11269,9 +11700,14 @@ function viewFinance(){
     </section>
   `;
 
+  const debtsHtml = `
+    ${renderFinanceDebtsTab()}
+  `;
+
   const body = (state.financeSubTab==="movements")
     ? movList
-    : (state.financeSubTab==="reminders" ? remindersHtml : principalHtml);
+    : (state.financeSubTab==="reminders" ? remindersHtml
+      : (state.financeSubTab==="debts" ? debtsHtml : principalHtml));
 
   return `
     ${topTabs}
@@ -11336,6 +11772,7 @@ view = function(){
         try{ financeWeeklyMaybeAutoRun(); }catch(_e){}
         try{ financeDrawMonthChart(); }catch(_e){} 
         try{ renderDailyExpenseChart(); }catch(_e){} 
+        try{ if(state.financeSubTab==='debts') financeDrawDebtChart(); }catch(_e){}
       }, 0);
     }
   }catch(e){}
