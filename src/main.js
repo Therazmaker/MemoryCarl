@@ -7546,14 +7546,13 @@ if(act==="invHistPreset"){
         }
 if(act==="savePurchase"){
   const d = isoDate();
-  openPromptModal({
-    title:"Guardar compra",
-    fields:[
-      {key:"date", label:"Fecha (YYYY-MM-DD)", value:d},
-      {key:"store", label:"Tienda", value:""},
-      {key:"notes", label:"Notas", value:""}
-    ],
-    onSubmit: ({date, store, notes})=>{
+  const defaultAccountId = state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "";
+  openShoppingSavePurchaseModal({
+    defaultDate: d,
+    defaultStore: "",
+    defaultNotes: "",
+    defaultAccountId,
+    onSubmit: ({date, store, notes, mkfin, accountId})=>{
       const safeDate = (date||"").trim() || d;
       const sourceListId = `L-${Date.now()}`;
       const items = (list.items||[]).map(it=>({
@@ -7583,6 +7582,20 @@ if(act==="savePurchase"){
 
       // Optional: mark current list as bought to reflect it was committed
       (list.items||[]).forEach(it=>{ it.bought = true; });
+
+      // Phase 4: Create finance expense automatically (Mercado)
+      if(mkfin && (state.financeAccounts||[]).length){
+        const accId = accountId || defaultAccountId;
+        const dateISO = `${safeDate}T12:00:00`;
+        financeEnsureShoppingExpense_({
+          sourceListId,
+          dateISO,
+          amount: totals.total,
+          accountId: accId,
+          store: (store||"").trim(),
+          notes: (notes||"").trim()
+        });
+      }
 
       persist();
       toast("Compra guardada ✅");
@@ -7662,6 +7675,114 @@ function openPromptModal({title, fields, onSubmit}){
 
   const first = b.querySelector("input");
   if(first) first.focus();
+}
+
+// Shopping → Finance connector (Phase 4)
+function openShoppingSavePurchaseModal({defaultDate, defaultStore, defaultNotes, defaultAccountId, onSubmit}){
+  const host = document.querySelector("#app") || document.body;
+  const b = document.createElement("div");
+  b.className = "modalBackdrop";
+
+  const accounts = (state.financeAccounts||[]);
+  const hasFinance = accounts.length>0;
+  const accOptions = hasFinance
+    ? accounts.map(a=>`<option value="${a.id}" ${a.id===defaultAccountId?'selected':''}>${escapeHtml(a.name)} (${escapeHtml(a.type||'')})</option>`).join("")
+    : "";
+
+  b.innerHTML = `
+    <div class="modal" role="dialog" aria-label="Guardar compra">
+      <h2>Guardar compra</h2>
+
+      <div class="grid" style="gap:12px;">
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Fecha</div>
+          <input class="input" data-k="date" type="date" value="${escapeHtml(defaultDate||'')}" />
+        </div>
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Tienda</div>
+          <input class="input" data-k="store" type="text" value="${escapeHtml(defaultStore||'')}" placeholder="Mass / Metro / ..." />
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <div class="muted" style="margin:2px 0 6px;">Notas</div>
+          <input class="input" data-k="notes" type="text" value="${escapeHtml(defaultNotes||'')}" placeholder="(opcional)" />
+        </div>
+
+        <div style="grid-column: 1 / -1;">
+          <label style="display:flex; align-items:center; gap:10px; user-select:none;">
+            <input type="checkbox" data-k="mkfin" ${hasFinance?'checked':''} ${hasFinance?'':'disabled'} />
+            <span>Crear gasto automático en Finanzas (Mercado)</span>
+          </label>
+          ${hasFinance ? '' : '<div class="muted" style="margin-top:6px;">(Crea una cuenta en Finanzas para activar esto.)</div>'}
+        </div>
+
+        ${hasFinance ? `
+          <div style="grid-column: 1 / -1;">
+            <div class="muted" style="margin:2px 0 6px;">Cuenta (Finanzas)</div>
+            <select class="input" data-k="accountId">${accOptions}</select>
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button class="btn ghost" data-m="cancel">Cancelar</button>
+        <button class="btn primary" data-m="save">Guardar</button>
+      </div>
+      <div class="muted" style="margin-top:10px;">Compra guardada en historial. Si activas Finanzas, también crea el movimiento.</div>
+    </div>
+  `;
+  host.appendChild(b);
+
+  const close = ()=> b.remove();
+  b.addEventListener("click",(e)=>{ if(e.target===b) close(); });
+  b.querySelector('[data-m="cancel"]').addEventListener("click", close);
+  b.querySelector('[data-m="save"]').addEventListener("click", ()=>{
+    const get = (k)=>{
+      const el = b.querySelector(`[data-k="${CSS.escape(k)}"]`);
+      if(!el) return "";
+      if(el.type==="checkbox") return !!el.checked;
+      return el.value;
+    };
+    onSubmit?.({
+      date: get('date'),
+      store: get('store'),
+      notes: get('notes'),
+      mkfin: !!get('mkfin'),
+      accountId: get('accountId')
+    });
+    close();
+  });
+
+  const first = b.querySelector("input");
+  if(first) first.focus();
+}
+
+function financeEnsureShoppingExpense_({sourceListId, dateISO, amount, accountId, store, notes}){
+  if(!sourceListId) return null;
+  if(!(state.financeAccounts||[]).length) return null;
+  const exists = (state.financeLedger||[]).some(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId);
+  if(exists) return null;
+
+  const noteParts = [];
+  if(store) noteParts.push(`Shopping · ${store}`);
+  if(notes) noteParts.push(notes);
+  const note = noteParts.join(" · ");
+
+  const entry = addFinanceEntry({
+    type: "expense",
+    amount: Number(amount||0),
+    accountId,
+    category: "Mercado",
+    reason: "planificado",
+    note,
+    date: dateISO
+  });
+  if(entry){
+    entry.source = "shopping";
+    entry.sourceListId = sourceListId;
+    entry.store = store || "";
+    persist();
+  }
+  return entry;
 }
 
 function openRoutineModal(){
@@ -9986,6 +10107,11 @@ function addFinanceEntry({type, amount, accountId, category, reason, note, date}
   };
 
   state.financeLedger.unshift(entry);
+
+  // Remember last used account(s) for convenience defaults.
+  // (Works even when main.js is loaded as a module.)
+  state.financeLastAccountId = accountId;
+  if(String(category||"").toLowerCase()==="mercado") state.financeLastMarketAccountId = accountId;
 
   financeRecomputeBalances();
   persist();
