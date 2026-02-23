@@ -1636,6 +1636,7 @@ function bottomNav(){
       ${mk("house","🧹","Casa")}
       ${mk("routines","📝","Rutinas")}
       ${mk("shopping","🛒","Compras")}
+      ${mk("finance","💰","Finanzas")}
       ${mkMore()}
     </nav>
   `;
@@ -1698,6 +1699,7 @@ function view(){
         ${state.tab==="calendar" ? viewCalendar() : ""}
         ${state.tab==="learn" ? viewLearn() : ""}
         ${state.tab==="insights" ? viewInsights() : ""}
+        ${state.tab==="finance" ? viewFinance() : ""}
         ${state.tab==="settings" ? viewSettings() : ""}
       </main>
 
@@ -9790,9 +9792,9 @@ LS.financeAccounts = "memorycarl_v2_finance_accounts";
 state.financeLedger = load(LS.financeLedger, []);
 state.financeAccounts = load(LS.financeAccounts, []);
 
-const _persistFinanceWrap2 = persist;
+const _persistFinanceWrap = persist;
 persist = function(){
-  _persistFinanceWrap2();
+  _persistFinanceWrap();
   save(LS.financeLedger, state.financeLedger);
   save(LS.financeAccounts, state.financeAccounts);
 };
@@ -9881,7 +9883,7 @@ function viewFinance(){
 
     <section class="card homeCard homeWide">
       <div class="cardTop">
-        <h2 class="cardTitle">Ingresos / Gastos</h2>
+        <h2 class="cardTitle">Movimientos</h2>
         <button class="iconBtn" onclick="openFinanceEntryModal()">＋</button>
       </div>
       <div class="hr"></div>
