@@ -8692,7 +8692,9 @@ function openProductChart(productId){
   host.appendChild(modal);
 
   const ctx = modal.querySelector("#chart").getContext("2d");
-  new Chart(ctx, {
+  try{ if(_dailyExpenseChart){ _dailyExpenseChart.destroy(); _dailyExpenseChart=null; } }catch(e){}
+
+  _dailyExpenseChart = new Chart(ctx, {
     type:'line',
     data:{
       labels:labels,
@@ -8702,7 +8704,7 @@ function openProductChart(productId){
         tension:.3
       }]
     },
-    options:{responsive:true, plugins:{legend:{display:false}}}
+    options:{responsive:false, plugins:{legend:{display:false}}}
   });
 }
 
@@ -10753,7 +10755,8 @@ function financeDrawMonthChart(){
       ]
     },
     options: {
-      responsive: true,
+      // keep non-responsive to avoid runaway ResizeObserver loops
+      responsive: false,
       maintainAspectRatio: false,
       plugins: { legend: { display: true } },
       scales: {
@@ -10836,6 +10839,8 @@ function openFinanceImport(){
 
 
 
+let _dailyExpenseChart = null;
+
 function renderDailyExpenseChart(){
   const ctx = document.getElementById("dailyExpenseChart");
   if(!ctx) return;
@@ -10852,7 +10857,8 @@ function renderDailyExpenseChart(){
       }]
     },
     options: {
-      responsive:true,
+      responsive:false,
+      maintainAspectRatio:false,
       plugins:{
         legend:{display:false}
       }
