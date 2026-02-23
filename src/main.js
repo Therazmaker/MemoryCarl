@@ -8,14 +8,6 @@
   // Flag that the main UI has rendered at least once
   if(!window.__mcBoot) window.__mcBoot = { done:false, ts: Date.now() };
 
-  // Safe mode: boot without optional network modules (useful if a config bricks boot)
-  try{
-    const u = new URL(location.href);
-    if(u.searchParams.has('safe')){
-      window.__MC_SAFE_MODE__ = true;
-    }
-  }catch(_e){}
-
   function cssBtn(){
     return "border:0;border-radius:12px;padding:8px 12px;font-weight:800;cursor:pointer;";
   }
@@ -439,6 +431,10 @@ async function refreshSwissTransitsUI({forceSpeak=false} = {}){
 
 async function ensureSwissDailyLoaded({ force=false } = {}){
   if(!swissDailyAvailable()) return;
+  // Prevent render -> wire -> load loops.
+  // When Swiss is configured, this function can be triggered during wiring.
+  // Calling view() synchronously would re-wire and call this again, freezing the boot.
+  if(!force && state?.swissDailyLoading) return;
   const now = new Date();
   const today = isoDate(now);
 
@@ -451,7 +447,8 @@ async function ensureSwissDailyLoaded({ force=false } = {}){
   try{
     state.swissDailyLoading = true;
     state.swissDailyError = "";
-    view();
+    // Schedule UI update to avoid synchronous render loops during event wiring
+    try{ setTimeout(()=>view(), 0); }catch(_e){}
 
     const data = await getSwissDailyCached({ now, forceRefresh: force });
     if(!data){
