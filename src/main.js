@@ -9807,20 +9807,25 @@ persist = function(){
 /* ===== Finance: balances derived + reset-to-zero (keeps history archived) ===== */
 
 function financeMigrateV2(){
-  // accounts: add initialBalance if missing
+  // accounts: add initialBalance + defaults if missing
   (state.financeAccounts||[]).forEach(a=>{
     if(a.initialBalance === undefined || a.initialBalance === null){
       // preserve current balance as baseline so nothing "breaks" after update
       a.initialBalance = Number(a.balance||0);
     }
+    if(!a.type) a.type = "bank";
+    if(a.color === undefined) a.color = null;
+    if(!a.createdAt) a.createdAt = new Date().toISOString();
   });
 
   // ledger: add archived flag if missing
   (state.financeLedger||[]).forEach(e=>{
     if(e.archived === undefined) e.archived = false;
+    if(e.reason === undefined) e.reason = "normal";
   });
 
   if(state.financeResetAt === undefined) state.financeResetAt = null;
+  if(state.financeBaselineAt === undefined) state.financeBaselineAt = null;
 
   persist();
 }
@@ -9869,42 +9874,83 @@ function financeResetToZeroConfirm(){
   if(ok) financeResetToZero();
 }
 
+
+function financeSetCurrentAsBaseline(){
+  // Make sure balances are current before freezing baseline
+  try{ financeRecomputeBalances(); }catch(e){}
+
+  // Archive existing active ledger so history stays but no longer affects balances
+  (state.financeLedger||[]).forEach(e=>{ if(!e.archived) e.archived = true; });
+
+  // Freeze current balances as the new baseline
+  (state.financeAccounts||[]).forEach(a=>{
+    a.initialBalance = Number(a.balance||0);
+  });
+
+  state.financeBaselineAt = isoDate(new Date());
+  persist();
+  view();
+  toast("Saldos actuales guardados como iniciales ✅ (historial archivado)");
+}
+
+function financeSetCurrentAsBaselineConfirm(){
+  const ok = confirm(
+    "¿Usar los saldos actuales como punto de inicio?\n\n" +
+    "• NO borra historial: lo archiva.\n" +
+    "• Tus saldos actuales se guardan como saldo inicial.\n" +
+    "• Desde aquí, todo lo nuevo se registrará como movimientos.\n\n" +
+    "¿Continuar?"
+  );
+  if(ok) financeSetCurrentAsBaseline();
+}
+
+
 // run migration once
 try{ financeMigrateV2(); financeRecomputeBalances(); }catch(e){ console.warn("[Finance] migrate/recompute fail", e); }
 
 /* ===== Finance CRUD ===== */
 
-function addFinanceAccount(name, initialBalance){
-  state.financeAccounts.push({
+function addFinanceAccount({name, type="bank", balance=0, color=null}){
+  const acc = {
     id: uid("acc"),
-    name,
-    initialBalance: Number(initialBalance||0),
-    balance: Number(initialBalance||0)
-  });
+    name: String(name||"Cuenta").trim(),
+    type: (type==="cash"||type==="card"||type==="bank") ? type : "bank",
+    initialBalance: Number(balance||0),
+    balance: Number(balance||0),
+    color: color || null,
+    createdAt: new Date().toISOString()
+  };
+  state.financeAccounts.push(acc);
   persist();
   view();
+  return acc;
 }
 
-function addFinanceEntry(type, amount, accountId, category, note){
+function addFinanceEntry({type, amount, accountId, category, reason, note, date}){
   const acc = state.financeAccounts.find(a=>a.id===accountId);
-  if(!acc) return;
+  if(!acc) return null;
 
   const amt = Number(amount||0);
+  const entryDate = date || new Date().toISOString();
 
-  state.financeLedger.unshift({
+  const entry = {
     id: uid("fin"),
-    date: isoDate(new Date()),
-    type,
+    date: entryDate, // ISO string
+    type, // income | expense
     amount: amt,
     accountId,
-    category: category||"General",
+    category: category||"Otros",
+    reason: reason||"normal",
     note: note||"",
     archived: false
-  });
+  };
+
+  state.financeLedger.unshift(entry);
 
   financeRecomputeBalances();
   persist();
   view();
+  return entry;
 }
 
 
@@ -9932,31 +9978,107 @@ function financeMonthData(){
 
 
 
-function openFinanceAccountModal(){
-  const name = prompt("Nombre del banco/cuenta:");
-  if(!name) return;
-  const balance = prompt("Monto inicial:");
-  addFinanceAccount(name, balance);
+function openFinanceAccountModal(prefill=null){
+  const draft = Object.assign({
+    id: null,
+    name: "",
+    type: "bank",
+    balance: 0,
+    color: ""
+  }, prefill||{});
+
+  const host = document.querySelector('#app') || document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modalBackdrop finAccBackdrop';
+  backdrop.innerHTML = `
+    <div class="modal finAccModal" role="dialog" aria-label="Cuenta">
+      <div class="finAccTop">
+        <div class="finAccTopTitle">${draft.id ? "Editar cuenta" : "Nueva cuenta"}</div>
+        <button class="iconBtn" id="finAccClose" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="finAccScroll">
+        <label class="finAccField">
+          <div class="finAccLabel">Nombre</div>
+          <input id="finAccName" type="text" placeholder="Ej: BCP, Billetera, Tarjeta" value="${escapeHtml(draft.name)}"/>
+        </label>
+
+        <label class="finAccField">
+          <div class="finAccLabel">Tipo</div>
+          <select id="finAccType">
+            <option value="bank" ${draft.type==="bank"?"selected":""}>Banco</option>
+            <option value="cash" ${draft.type==="cash"?"selected":""}>Efectivo</option>
+            <option value="card" ${draft.type==="card"?"selected":""}>Tarjeta</option>
+          </select>
+        </label>
+
+        <label class="finAccField">
+          <div class="finAccLabel">Saldo inicial</div>
+          <input id="finAccBalance" type="number" inputmode="decimal" value="${Number(draft.balance||0)}" />
+          <div class="muted" style="margin-top:6px">Tip: esto define tu “punto cero” real. Luego los movimientos ajustan el saldo.</div>
+        </label>
+
+        <label class="finAccField">
+          <div class="finAccLabel">Color (opcional)</div>
+          <input id="finAccColor" type="color" value="${draft.color || "#4b7bec"}" />
+        </label>
+
+        <div class="finAccSpacer"></div>
+      </div>
+
+      <div class="finAccBottom">
+        <button class="btn" id="finAccSave">${draft.id ? "Guardar" : "Crear cuenta"}</button>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(backdrop);
+
+  const close = ()=> backdrop.remove();
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
+  backdrop.querySelector('#finAccClose')?.addEventListener('click', close);
+
+  backdrop.querySelector('#finAccSave')?.addEventListener('click', ()=>{
+    const name = (backdrop.querySelector('#finAccName')?.value||'').trim();
+    const type = (backdrop.querySelector('#finAccType')?.value||'bank').trim();
+    const bal = Number(backdrop.querySelector('#finAccBalance')?.value||0);
+    const color = (backdrop.querySelector('#finAccColor')?.value||'').trim();
+
+    if(!name){ toast("Pon un nombre"); return; }
+
+    if(draft.id){
+      const acc = (state.financeAccounts||[]).find(a=>a.id===draft.id);
+      if(!acc){ toast("Cuenta no encontrada"); close(); return; }
+      acc.name = name;
+      acc.type = type;
+      acc.color = color || null;
+      acc.initialBalance = bal;
+      financeRecomputeBalances();
+      persist();
+      view();
+      toast("Cuenta actualizada ✅");
+    }else{
+      addFinanceAccount({name, type, balance: bal, color});
+      toast("Cuenta creada ✅");
+    }
+
+    close();
+  });
+
+  setTimeout(()=> backdrop.querySelector('#finAccName')?.focus(), 50);
 }
 
 
 function openFinanceAccountEdit(accountId){
   const acc = (state.financeAccounts||[]).find(a=>a.id===accountId);
   if(!acc) return;
-
-  const newName = prompt("Nombre de la cuenta:", acc.name||"");
-  if(newName===null) return;
-
-  const newInit = prompt("Saldo inicial (baseline):", acc.initialBalance ?? 0);
-  if(newInit===null) return;
-
-  acc.name = String(newName||acc.name||"Cuenta").trim();
-  acc.initialBalance = Number(newInit||0);
-
-  financeRecomputeBalances();
-  persist();
-  view();
-  toast("Cuenta actualizada ✅");
+  openFinanceAccountModal({
+    id: acc.id,
+    name: acc.name||"",
+    type: acc.type||"bank",
+    balance: acc.initialBalance ?? acc.balance ?? 0,
+    color: acc.color || ""
+  });
 }
 
 function openFinanceEntryModal(){
@@ -9980,6 +10102,7 @@ function openFinanceEntryModal(){
     time: `${hh}:${mm}`,
     scheduled: false,
     category: "Otros",
+    reason: "normal",
     accountId: (state.financeAccounts||[])[0]?.id,
     note: ""
   };
@@ -10028,6 +10151,23 @@ function openFinanceEntryModal(){
             <div class="finEntryPickValue">
               <select id="finEntryCategory">
                 ${["Otros","Comida","Mercado","Bebidas","Transporte","Internet","Medicina","Hogar"].map(c=>`<option ${c===draft.category?'selected':''}>${c}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="finEntryPickRow">
+          <div class="finEntryPickIcon">⚑</div>
+          <div class="finEntryPickText">
+            <div class="finEntryPickLabel">Motivo</div>
+            <div class="finEntryPickValue">
+              <select id="finEntryReason">
+                ${[
+                  ["planificado","Planificado"],
+                  ["impulso","Impulso"],
+                  ["emergencia","Emergencia"],
+                  ["normal","Normal"]
+                ].map(r=>`<option value="${r[0]}" ${r[0]=== (draft.reason||"normal")?'selected':''}>${r[1]}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -10128,25 +10268,37 @@ function openFinanceEntryModal(){
   });
 
   // save
-  backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
-    const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
-    const amount = Number(backdrop.querySelector('#finEntryAmount')?.value||0);
-    const category = (backdrop.querySelector('#finEntryCategory')?.value||'Otros');
-    const accountId = (backdrop.querySelector('#finEntryAccount')?.value||draft.accountId);
-    const note = (backdrop.querySelector('#finEntryNote')?.value||'').trim();
+backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
+  const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
+  const amount = Number(backdrop.querySelector('#finEntryAmount')?.value||0);
+  const category = (backdrop.querySelector('#finEntryCategory')?.value||'Otros');
+  const reason = (backdrop.querySelector('#finEntryReason')?.value||'normal');
+  const accountId = (backdrop.querySelector('#finEntryAccount')?.value||draft.accountId);
+  const noteText = (backdrop.querySelector('#finEntryNote')?.value||'').trim();
 
-    if(!amount || amount<=0){ toast('Pon un monto válido'); return; }
+  if(!amount || amount<=0){ toast('Pon un monto válido'); return; }
 
-    // date combines date + time to ISO-like string (keep date for grouping)
-    const date = (backdrop.querySelector('#finEntryDate')?.value || isoDate);
+  const dval = (backdrop.querySelector('#finEntryDate')?.value || isoDate);
+  const tval = (backdrop.querySelector('#finEntryTime')?.value || draft.time || "00:00");
+  const dateISO = `${dval}T${tval}:00`;
 
-    // store name into note if provided
-    const finalNote = name ? (note ? `${name} · ${note}` : name) : note;
+  // NOTE: guardamos "Nombre" como parte de note para mantener el esquema simple
+  const note = name ? (noteText ? `${name} · ${noteText}` : name) : noteText;
 
-    addFinanceEntry(draft.type, amount, accountId, category, finalNote);
-    toast('Guardado ✅');
-    close();
+  addFinanceEntry({
+    type: draft.type,
+    amount,
+    accountId,
+    category,
+    reason,
+    note,
+    date: dateISO
   });
+
+  toast('Guardado ✅');
+  close();
+});
+
 
   // focus
   setTimeout(()=>{ backdrop.querySelector('#finEntryName')?.focus(); }, 50);
@@ -10420,6 +10572,7 @@ function viewFinance(){
       <div class="cardTop">
         <h2 class="cardTitle">Cuentas</h2>
         <div class="row" style="gap:8px">
+          <button class="iconBtn" title="Usar saldos actuales como inicio" onclick="financeSetCurrentAsBaselineConfirm()">⟲</button>
           <button class="iconBtn" title="Reiniciar a cero" onclick="financeResetToZeroConfirm()">↺</button>
           <button class="iconBtn" title="Agregar cuenta" onclick="openFinanceAccountModal()">＋</button>
         </div>

@@ -1654,3 +1654,66 @@ body{
 }
 .finEntrySign.expense{ background: rgba(255,70,70,.90); }
 .finEntrySign.income{ background: rgba(70,200,120,.80); }
+
+
+/* ===== Finance: Account modal (Cuentas) ===== */
+.finAccBackdrop .modal{
+  max-width: 520px;
+}
+.finAccModal{
+  padding: 0;
+  overflow: hidden;
+  max-height: 86vh;
+}
+.finAccTop{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.finAccTopTitle{
+  font-weight: 900;
+  letter-spacing: .2px;
+  opacity: .95;
+}
+.finAccScroll{
+  padding: 14px;
+  overflow: auto;
+  max-height: calc(86vh - 120px);
+}
+.finAccField{
+  display:block;
+  margin-bottom: 12px;
+}
+.finAccLabel{
+  font-size: 12px;
+  opacity: .7;
+  margin: 4px 2px 8px;
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+.finAccScroll input,
+.finAccScroll select{
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.92);
+  border-radius: 16px;
+  padding: 14px 14px;
+  outline: none;
+}
+.finAccScroll select{ padding: 12px 14px; }
+.finAccBottom{
+  padding: 12px 14px 14px;
+  border-top: 1px solid rgba(255,255,255,.06);
+  background: rgba(0,0,0,.12);
+}
+.finAccBottom .btn{
+  width: 100%;
+  border-radius: 16px;
+  padding: 14px 14px;
+  font-weight: 900;
+}
+.finAccSpacer{ height: 6px; }
