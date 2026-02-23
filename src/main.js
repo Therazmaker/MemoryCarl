@@ -9943,32 +9943,179 @@ function financeMonthDataAdvanced(){
   };
 }
 
+
+/* ===== Finance UI: sub-tabs (Principal / Movimientos / Recordatorios) ===== */
+if(!state.financeSubTab) state.financeSubTab = "main";
+
+function setFinanceSubTab(tab){
+  state.financeSubTab = tab;
+  persist();
+  view();
+}
+
+function _financeFmt(n){
+  return (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function _financeWeekdayUpperShort(date){
+  // "dom." -> "DOM."
+  const w = date.toLocaleDateString("es-PE",{weekday:"short"});
+  // keep dot if present
+  return (w.endsWith(".") ? w : (w + ".")).toUpperCase();
+}
+
+function _financeDateHeader(dateStr){
+  const d = new Date(dateStr);
+  if(isNaN(d.getTime())) return String(dateStr||"");
+  const wd = _financeWeekdayUpperShort(d);
+  const rest = d.toLocaleDateString("es-PE",{day:"2-digit", month:"long", year:"numeric"});
+  return `${wd} ${rest}`;
+}
+
+function _financeSortLedgerNewToOld(entries){
+  // ledger is already newest-first (unshift), but we sort by date desc to be safe
+  return (entries||[]).map((e,idx)=>({e,idx})).sort((a,b)=>{
+    const ta = new Date(a.e.date).getTime();
+    const tb = new Date(b.e.date).getTime();
+    if(tb!==ta) return tb-ta;
+    return a.idx-b.idx; // stable: newer first
+  }).map(x=>x.e);
+}
+
+function _financeBalanceAfterMap(entriesNewToOld){
+  // For each account, start from current balance and roll backwards
+  const running = {};
+  (state.financeAccounts||[]).forEach(a=>{ running[a.id] = Number(a.balance||0); });
+
+  const afterById = {};
+  (entriesNewToOld||[]).forEach(e=>{
+    const accId = e.accountId;
+    const amt = Number(e.amount||0);
+    const cur = (running[accId] ?? 0);
+    afterById[e.id] = cur;
+
+    // rollback to "before this entry" for next (older) line
+    if(e.type==="expense") running[accId] = cur + amt;
+    else if(e.type==="income") running[accId] = cur - amt;
+  });
+
+  return afterById;
+}
+
+function _financeIconForCategory(cat){
+  const c = String(cat||"").toLowerCase();
+  if(c.includes("comida") || c.includes("rest") || c.includes("charcut") || c.includes("super")) return "🏠";
+  if(c.includes("bodega") || c.includes("mass") || c.includes("merc") || c.includes("market")) return "🛒";
+  if(c.includes("internet") || c.includes("entel") || c.includes("tel")) return "📶";
+  if(c.includes("med") || c.includes("salud") || c.includes("farm")) return "💊";
+  if(c.includes("bebida")) return "🥤";
+  if(c.includes("transp") || c.includes("taxi") || c.includes("bus")) return "🚌";
+  return "•";
+}
+
+function _financeGroupByDay(entries){
+  const groups = {};
+  (entries||[]).forEach(e=>{
+    const key = String(e.date||"").slice(0,10);
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(e);
+  });
+  // keep day order new->old
+  return Object.keys(groups).sort((a,b)=> (new Date(b).getTime() - new Date(a).getTime()))
+    .map(k=>({day:k, items: _financeSortLedgerNewToOld(groups[k])}));
+}
+
+function renderFinanceMovements(type){
+  const fmt = _financeFmt;
+
+  const all = _financeSortLedgerNewToOld(state.financeLedger||[]);
+  const filtered = all.filter(e=>e.type===type);
+
+  const afterMap = _financeBalanceAfterMap(all);
+  const accName = (id)=>{
+    const a = (state.financeAccounts||[]).find(x=>x.id===id);
+    return a ? a.name : "Cuenta";
+  };
+
+  const groups = _financeGroupByDay(filtered);
+
+  if(!groups.length){
+    return `<div class="muted">Sin ${type==="expense"?"gastos":"ingresos"} todavía.</div>`;
+  }
+
+  return groups.map(g=>{
+    const total = g.items.reduce((s,e)=>s+Number(e.amount||0),0);
+    const totalSigned = (type==="expense" ? -total : total);
+    const totalCls = (type==="expense" ? "negative" : "positive");
+    return `
+      <div class="finDayGroup">
+        <div class="finDayHeader">
+          <span>${_financeDateHeader(g.day)}</span>
+          <span class="finDayTotal ${totalCls}">${totalSigned<0?"-":""}S/. ${fmt(Math.abs(totalSigned))}</span>
+        </div>
+
+        ${g.items.map(e=>{
+          const amt = Number(e.amount||0);
+          const isExp = e.type==="expense";
+          const amtCls = isExp ? "negative" : "positive";
+          const title = e.category || (isExp ? "Gasto" : "Ingreso");
+          const sub = e.note || " ";
+          const balAfter = afterMap[e.id];
+          return `
+            <div class="finMovItem">
+              <div class="finMovIcon ${isExp?"expense":"income"}">${_financeIconForCategory(title)}</div>
+
+              <div class="finMovInfo">
+                <div class="finMovTitle">${escapeHtml(title)}</div>
+                <div class="finMovSub">${escapeHtml(sub)}</div>
+              </div>
+
+              <div class="finMovAmtWrap">
+                <div class="finMovAmt ${amtCls}">${isExp?"-":""}S/. ${fmt(amt)}</div>
+                <div class="finMovBal">${escapeHtml(accName(e.accountId))} S/. ${fmt(balAfter)}</div>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }).join("");
+}
+
+// expose
+try{ window.setFinanceSubTab = setFinanceSubTab; }catch(e){}
+
+
 function viewFinance(){
-  const fmt = n => (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+  const fmt = _financeFmt;
   const d = financeMonthDataAdvanced();
   const monthKey = getCurrentMonthKey();
   const meta = d.meta || {expectedIncome:0,targetSavings:0};
 
+  // header tabs (Principal / Movimientos / Recordatorios)
+  const topTabs = `
+    <div class="finTopTabs">
+      <button class="finTopTab ${state.financeSubTab==="main"?"active":""}" onclick="setFinanceSubTab('main')">Principal</button>
+      <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
+      <button class="finTopTab ${state.financeSubTab==="reminders"?"active":""}" onclick="setFinanceSubTab('reminders')">Recordatorios</button>
+    </div>
+  `;
+
+  // Principal content (reusa tus cards actuales)
   const accountsHtml = (state.financeAccounts||[]).map(a=>`
     <div class="budgetRow">
-      <div>${a.name}</div>
+      <div>${escapeHtml(a.name)}</div>
       <div>S/ ${fmt(a.balance)}</div>
     </div>
   `).join("") || `<div class="muted">Sin cuentas</div>`;
 
-  const ledgerHtml = (state.financeLedger||[]).slice(0,20).map(e=>`
-    <div class="budgetRow">
-      <div>${e.type==="income"?"🟢":"🔴"} ${e.category}</div>
-      <div>S/ ${fmt(e.amount)}</div>
-    </div>
-  `).join("") || `<div class="muted">Sin movimientos</div>`;
-
-  return `
+  const principalHtml = `
     <section class="card homeCard homeWide">
       <div class="cardTop"><h2 class="cardTitle">Resumen Diario</h2><button class="iconBtn" onclick="openFinanceImport()">⬆️</button></div>
       <div class="hr"></div>
       <canvas id="dailyExpenseChart" height="120"></canvas>
-      <div class="cardTop">
+
+      <div class="cardTop" style="margin-top:10px">
         <h2 class="cardTitle">Meta mensual</h2>
         <button class="iconBtn" onclick="openFinanceMetaModal()">⚙️</button>
       </div>
@@ -9998,17 +10145,59 @@ function viewFinance(){
       <div class="hr"></div>
       ${accountsHtml}
     </section>
+  `;
 
-    <section class="card homeCard homeWide">
+  // Movimientos content (dos pestañas: Gastos / Ingresos)
+  if(!state.financeMovTab) state.financeMovTab = "expense";
+  function setFinanceMovTab(t){
+    state.financeMovTab = t;
+    persist();
+    view();
+  }
+  try{ window.setFinanceMovTab = setFinanceMovTab; }catch(e){}
+
+  const movTabs = `
+    <div class="finMovTabs">
+      <button class="finMovTab ${state.financeMovTab==="expense"?"active":""}" onclick="setFinanceMovTab('expense')">Gastos</button>
+      <button class="finMovTab ${state.financeMovTab==="income"?"active":""}" onclick="setFinanceMovTab('income')">Ingresos</button>
+    </div>
+  `;
+
+  const movList = `
+    <section class="card homeCard homeWide finMovCard">
       <div class="cardTop">
         <h2 class="cardTitle">Movimientos</h2>
         <button class="iconBtn" onclick="openFinanceEntryModal()">＋</button>
       </div>
       <div class="hr"></div>
-      ${ledgerHtml}
+      ${movTabs}
+      <div id="financeMovementsList" class="finMovList">
+        ${renderFinanceMovements(state.financeMovTab)}
+      </div>
     </section>
   `;
+
+  const remindersHtml = `
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Recordatorios</h2>
+        <button class="iconBtn" onclick="toast('Pronto: recordatorios financieros ✨')">＋</button>
+      </div>
+      <div class="hr"></div>
+      <div class="muted">Aquí vamos a poner pagos, suscripciones, vencimientos y alertas.</div>
+    </section>
+  `;
+
+  const body = (state.financeSubTab==="movements")
+    ? movList
+    : (state.financeSubTab==="reminders" ? remindersHtml : principalHtml);
+
+  return `
+    ${topTabs}
+    ${body}
+  `;
 }
+
 
 function openFinanceMetaModal(){
   const month = getCurrentMonthKey();

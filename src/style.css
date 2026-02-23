@@ -1331,3 +1331,116 @@ body{
   margin: 6px 0;
   opacity: .9;
 }
+
+
+/* ===== Finance: top tabs + movements list (bank style) ===== */
+.finTopTabs{
+  display:flex;
+  gap:10px;
+  padding:6px 2px 14px;
+  align-items:center;
+  justify-content:flex-start;
+}
+.finTopTab{
+  appearance:none;
+  border:0;
+  background:transparent;
+  color:rgba(255,255,255,.75);
+  padding:10px 10px;
+  border-radius:14px;
+  font-weight:700;
+  font-size:14px;
+  cursor:pointer;
+}
+.finTopTab.active{
+  color:rgba(255,255,255,.95);
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.10);
+}
+
+.finMovTabs{
+  display:flex;
+  gap:10px;
+  padding:8px 0 10px;
+}
+.finMovTab{
+  appearance:none;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.03);
+  color:rgba(255,255,255,.75);
+  padding:10px 12px;
+  border-radius:14px;
+  font-weight:700;
+  cursor:pointer;
+}
+.finMovTab.active{
+  background:rgba(255,255,255,.08);
+  color:rgba(255,255,255,.95);
+  border-color:rgba(255,255,255,.18);
+}
+
+.finMovList{display:grid;gap:14px;padding-top:2px;}
+.finDayGroup{display:grid;gap:10px;}
+.finDayHeader{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:10px 2px;
+  font-weight:800;
+  letter-spacing:.2px;
+  color:rgba(255,255,255,.85);
+}
+.finDayTotal{
+  font-variant-numeric:tabular-nums;
+  font-weight:900;
+}
+.finDayTotal.negative{color:rgba(255,90,90,.95);}
+.finDayTotal.positive{color:rgba(90,220,140,.95);}
+
+.finMovItem{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px 12px;
+  border-radius:18px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.06);
+}
+.finMovIcon{
+  width:40px;height:40px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;
+  flex:0 0 40px;
+}
+.finMovIcon.expense{background:rgba(255,70,70,.95); color:white;}
+.finMovIcon.income{background:rgba(70,200,120,.95); color:white;}
+
+.finMovInfo{flex:1; min-width:0;}
+.finMovTitle{
+  font-weight:900;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.finMovSub{
+  margin-top:2px;
+  font-size:13px;
+  color:rgba(255,255,255,.60);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.finMovAmtWrap{text-align:right;}
+.finMovAmt{
+  font-weight:900;
+  font-variant-numeric:tabular-nums;
+}
+.finMovAmt.negative{color:rgba(255,90,90,.95);}
+.finMovAmt.positive{color:rgba(90,220,140,.95);}
+.finMovBal{
+  margin-top:2px;
+  font-size:12px;
+  color:rgba(255,255,255,.55);
+  font-variant-numeric:tabular-nums;
+}
