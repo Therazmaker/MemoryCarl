@@ -1092,6 +1092,16 @@ function escapeHtml(str){
     .replaceAll('"',"&quot;").replaceAll("'","&#039;");
 }
 
+// Escape for HTML attribute values inside template strings.
+// HTML-escape + escape backticks to avoid breaking template literals.
+function escapeAttr(str){
+  return escapeHtml(str).replaceAll('`', '&#096;');
+}
+
+// main.js is loaded as an ES module. Inline onclick="..." handlers execute in
+// the global scope, so expose a couple of safe helpers.
+try{ window.escapeHtml = escapeHtml; window.escapeAttr = escapeAttr; }catch(e){}
+
 function money(n){
   const x = Number(n || 0);
   return new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" }).format(x);
@@ -10141,6 +10151,39 @@ function addFinanceEntry({type, amount, accountId, category, reason, note, date}
   return entry;
 }
 
+function updateFinanceEntry(id, patch){
+  const idx = (state.financeLedger||[]).findIndex(e=>e.id===id);
+  if(idx===-1) return null;
+  const cur = state.financeLedger[idx];
+
+  // apply patch
+  const next = {
+    ...cur,
+    ...patch,
+  };
+  // normalize
+  if(next.amount !== undefined) next.amount = Number(next.amount||0);
+  if(next.date) next.date = String(next.date);
+  if(next.category) next.category = String(next.category);
+  if(next.reason) next.reason = String(next.reason);
+  if(next.note !== undefined) next.note = String(next.note||"");
+
+  state.financeLedger[idx] = next;
+  financeRecomputeBalances();
+  persist();
+  view();
+  return next;
+}
+
+function deleteFinanceEntry(id){
+  const idx = (state.financeLedger||[]).findIndex(e=>e.id===id);
+  if(idx===-1) return;
+  state.financeLedger.splice(idx,1);
+  financeRecomputeBalances();
+  persist();
+  view();
+}
+
 
 function financeMonthData(){
   const now = new Date();
@@ -10269,40 +10312,53 @@ function openFinanceAccountEdit(accountId){
   });
 }
 
-function openFinanceEntryModal(){
+function openFinanceEntryModal(existingId=null){
   if(!(state.financeAccounts||[]).length){
     alert("Primero crea una cuenta");
     return;
   }
+
+  const existing = existingId ? (state.financeLedger||[]).find(e=>e.id===existingId) : null;
 
   const now = new Date();
   const isoDate = now.toISOString().slice(0,10);
   const hh = String(now.getHours()).padStart(2,'0');
   const mm = String(now.getMinutes()).padStart(2,'0');
 
+  // split note => name + note (we store name inside note using " · ")
+  const splitNote = (s)=>{
+    const txt = String(s||"");
+    const i = txt.indexOf(" · ");
+    if(i===-1) return {name: txt, note:""};
+    return {name: txt.slice(0,i).trim(), note: txt.slice(i+3).trim()};
+  };
+
+  const existingSplit = existing ? splitNote(existing.note||"") : {name:"", note:""};
+
   // default draft
   const draft = {
-    type: state.financeMovTab || "expense",
-    name: "",
-    amount: "",
+    type: (existing?.type) || (state.financeMovTab || "expense"),
+    name: existingSplit.name,
+    amount: existing ? String(Number(existing.amount||0)) : "",
     currency: "PEN",
-    date: isoDate,
-    time: `${hh}:${mm}`,
+    date: (existing?.date ? String(existing.date).slice(0,10) : isoDate),
+    time: (existing?.date ? String(existing.date).slice(11,16) : `${hh}:${mm}`),
     scheduled: false,
-    category: "Otros",
-    reason: "normal",
-    accountId: (state.financeAccounts||[])[0]?.id,
-    note: ""
+    category: (existing?.category) || "Otros",
+    reason: (existing?.reason) || "normal",
+    accountId: (existing?.accountId) || (state.financeAccounts||[])[0]?.id,
+    note: existingSplit.note
   };
 
   const host = document.querySelector('#app') || document.body;
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop finEntryBackdrop';
   backdrop.innerHTML = `
-    <div class="modal finEntryModal" role="dialog" aria-label="Añadir movimiento">
+    <div class="modal finEntryModal" role="dialog" aria-label="${existing ? "Editar movimiento" : "Añadir movimiento"}">
       <div class="finEntryTop">
         <button class="iconBtn" id="finEntryClose" aria-label="Volver">←</button>
-        <div class="finEntryTopTitle">Añadir</div>
+        <div class="finEntryTopTitle">${existing ? "Editar" : "Añadir"}</div>
+        ${existing ? `<button class="iconBtn" id="finEntryDelete" title="Eliminar">🗑️</button>` : ""}
         <button class="iconBtn" id="finEntryPlusOne" title="+1">+1</button>
       </div>
 
@@ -10418,6 +10474,16 @@ function openFinanceEntryModal(){
   backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
   backdrop.querySelector('#finEntryClose')?.addEventListener('click', close);
 
+  // delete (edit mode)
+  backdrop.querySelector('#finEntryDelete')?.addEventListener('click', ()=>{
+    if(!existing) return;
+    const ok = confirm('¿Eliminar este movimiento?');
+    if(!ok) return;
+    deleteFinanceEntry(existing.id);
+    toast('Eliminado ✅');
+    close();
+  });
+
   // basic affordances
   backdrop.querySelector('#finEntryAttach')?.addEventListener('click', ()=> toast('Adjuntos: pronto ✨'));
   backdrop.querySelector('#finEntryCalc')?.addEventListener('click', ()=> toast('Calculadora: pronto ✨'));
@@ -10484,17 +10550,29 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   // NOTE: guardamos "Nombre" como parte de note para mantener el esquema simple
   const note = name ? (noteText ? `${name} · ${noteText}` : name) : noteText;
 
-  addFinanceEntry({
-    type: draft.type,
-    amount,
-    accountId,
-    category,
-    reason,
-    note,
-    date: dateISO
-  });
-
-  toast('Guardado ✅');
+  if(existing){
+    updateFinanceEntry(existing.id, {
+      type: draft.type,
+      amount,
+      accountId,
+      category,
+      reason,
+      note,
+      date: dateISO
+    });
+    toast('Actualizado ✅');
+  }else{
+    addFinanceEntry({
+      type: draft.type,
+      amount,
+      accountId,
+      category,
+      reason,
+      note,
+      date: dateISO
+    });
+    toast('Guardado ✅');
+  }
   close();
 });
 
@@ -10910,7 +10988,7 @@ function renderFinanceMovements(type){
           const sub = e.note || " ";
           const balAfter = afterMap[e.id];
           return `
-            <div class="finMovItem">
+            <div class="finMovItem" style="cursor:pointer" onclick="openFinanceEntryModal('${e.id}')" title="Editar">
               <div class="finMovIcon ${isExp?"expense":"income"}">${escapeHtml(financeCategoryIcon(title))}</div>
 
               <div class="finMovInfo">
