@@ -4286,7 +4286,7 @@ function renderBudgetMonthly(){
   const total = items.reduce((s,x)=>s + (Number(x.amount)||0), 0);
   const fmt = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   const list = items.length ? items.map(x=>`
-    <div class="budgetRow" style="cursor:pointer" onclick="openFinanceAccountEdit('${a.id}')">
+    <div class="budgetRow"  >
       <div class="budgetName">${escapeHtml(x.name)}</div>
       <div class="budgetAmt">S/ ${escapeHtml(fmt(x.amount))}</div>
       <button class="miniDanger" data-budget-del="${escapeHtml(x.id)}" aria-label="Delete">✕</button>
