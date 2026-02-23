@@ -9853,55 +9853,7 @@ function financeMonthData(){
   return {income, expense, projected};
 }
 
-function viewFinance(){
-  const fmt = n => (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  const d = financeMonthData();
 
-  const accountsHtml = (state.financeAccounts||[]).map(a=>`
-    <div class="budgetRow">
-      <div>${a.name}</div>
-      <div>S/ ${fmt(a.balance)}</div>
-    </div>
-  `).join("") || `<div class="muted">Sin cuentas</div>`;
-
-  const ledgerHtml = (state.financeLedger||[]).slice(0,20).map(e=>`
-    <div class="budgetRow">
-      <div>${e.type==="income"?"🟢":"🔴"} ${e.category}</div>
-      <div>S/ ${fmt(e.amount)}</div>
-    </div>
-  `).join("") || `<div class="muted">Sin movimientos</div>`;
-
-  return `
-    <section class="card homeCard homeWide">
-      <div class="cardTop">
-        <h2 class="cardTitle">Cuentas</h2>
-        <button class="iconBtn" onclick="openFinanceAccountModal()">＋</button>
-      </div>
-      <div class="hr"></div>
-      ${accountsHtml}
-    </section>
-
-    <section class="card homeCard homeWide">
-      <div class="cardTop">
-        <h2 class="cardTitle">Movimientos</h2>
-        <button class="iconBtn" onclick="openFinanceEntryModal()">＋</button>
-      </div>
-      <div class="hr"></div>
-      ${ledgerHtml}
-    </section>
-
-    <section class="card homeCard homeWide">
-      <div class="cardTop">
-        <h2 class="cardTitle">Proyección mensual</h2>
-      </div>
-      <div class="hr"></div>
-      <div>Ingresos mes: <strong>S/ ${fmt(d.income)}</strong></div>
-      <div>Gastos mes: <strong>S/ ${fmt(d.expense)}</strong></div>
-      <div>Proyección gasto: <strong>S/ ${fmt(d.projected)}</strong></div>
-      <div>Balance estimado: <strong>S/ ${fmt(d.income - d.projected)}</strong></div>
-    </section>
-  `;
-}
 
 function openFinanceAccountModal(){
   const name = prompt("Nombre del banco/cuenta:");
@@ -9920,3 +9872,172 @@ function openFinanceEntryModal(){
   const acc = state.financeAccounts[0].id;
   addFinanceEntry(type, amount, acc, "General", "");
 }
+
+LS.financeMeta = "memorycarl_v2_finance_meta";
+state.financeMeta = load(LS.financeMeta, {});
+
+function setFinanceMeta(month, expectedIncome, targetSavings){
+  state.financeMeta[month] = {
+    expectedIncome: Number(expectedIncome||0),
+    targetSavings: Number(targetSavings||0)
+  };
+  persist();
+  view();
+}
+
+function getCurrentMonthKey(){
+  return new Date().toISOString().slice(0,7);
+}
+
+function financeMonthDataAdvanced(){
+  const now = new Date();
+  const monthKey = getCurrentMonthKey();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+
+  let income = 0;
+  let expense = 0;
+
+  const dailyIncome = Array(daysInMonth).fill(0);
+  const dailyExpense = Array(daysInMonth).fill(0);
+
+  (state.financeLedger||[]).forEach(e=>{
+    if(String(e.date||"").startsWith(monthKey)){
+      const day = Number(e.date.split("-")[2]) - 1;
+      if(e.type==="income"){
+        income += Number(e.amount||0);
+        dailyIncome[day] += Number(e.amount||0);
+      }
+      if(e.type==="expense"){
+        expense += Number(e.amount||0);
+        dailyExpense[day] += Number(e.amount||0);
+      }
+    }
+  });
+
+  let accIncome = [];
+  let accExpense = [];
+  let sumI = 0;
+  let sumE = 0;
+
+  for(let i=0;i<daysInMonth;i++){
+    sumI += dailyIncome[i];
+    sumE += dailyExpense[i];
+    accIncome.push(sumI);
+    accExpense.push(sumE);
+  }
+
+  const today = now.getDate();
+  const dailyAvg = today ? expense/today : 0;
+  const projected = dailyAvg * daysInMonth;
+
+  const meta = state.financeMeta[monthKey] || {expectedIncome:0,targetSavings:0};
+
+  return {
+    income,
+    expense,
+    projected,
+    accIncome,
+    accExpense,
+    daysInMonth,
+    meta
+  };
+}
+
+function viewFinance(){
+  const fmt = n => (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+  const d = financeMonthDataAdvanced();
+  const monthKey = getCurrentMonthKey();
+  const meta = d.meta || {expectedIncome:0,targetSavings:0};
+
+  const accountsHtml = (state.financeAccounts||[]).map(a=>`
+    <div class="budgetRow">
+      <div>${a.name}</div>
+      <div>S/ ${fmt(a.balance)}</div>
+    </div>
+  `).join("") || `<div class="muted">Sin cuentas</div>`;
+
+  const ledgerHtml = (state.financeLedger||[]).slice(0,20).map(e=>`
+    <div class="budgetRow">
+      <div>${e.type==="income"?"🟢":"🔴"} ${e.category}</div>
+      <div>S/ ${fmt(e.amount)}</div>
+    </div>
+  `).join("") || `<div class="muted">Sin movimientos</div>`;
+
+  return `
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Meta mensual</h2>
+        <button class="iconBtn" onclick="openFinanceMetaModal()">⚙️</button>
+      </div>
+      <div class="hr"></div>
+      <div>Ingreso esperado: <strong>S/ ${fmt(meta.expectedIncome)}</strong></div>
+      <div>Ahorro meta: <strong>S/ ${fmt(meta.targetSavings)}</strong></div>
+      <div>Ingreso real: <strong>S/ ${fmt(d.income)}</strong></div>
+      <div>Diferencia ingreso: <strong>S/ ${fmt(d.income - meta.expectedIncome)}</strong></div>
+    </section>
+
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Proyección</h2>
+      </div>
+      <div class="hr"></div>
+      <div>Gasto real: <strong>S/ ${fmt(d.expense)}</strong></div>
+      <div>Gasto proyectado: <strong>S/ ${fmt(d.projected)}</strong></div>
+      <div>Balance proyectado: <strong>S/ ${fmt(d.income - d.projected)}</strong></div>
+      <canvas id="financeChart" height="140"></canvas>
+    </section>
+
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Cuentas</h2>
+        <button class="iconBtn" onclick="openFinanceAccountModal()">＋</button>
+      </div>
+      <div class="hr"></div>
+      ${accountsHtml}
+    </section>
+
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Movimientos</h2>
+        <button class="iconBtn" onclick="openFinanceEntryModal()">＋</button>
+      </div>
+      <div class="hr"></div>
+      ${ledgerHtml}
+    </section>
+  `;
+}
+
+function openFinanceMetaModal(){
+  const month = getCurrentMonthKey();
+  const current = state.financeMeta[month] || {};
+  const inc = prompt("Ingreso esperado del mes:", current.expectedIncome||0);
+  const sav = prompt("Meta de ahorro:", current.targetSavings||0);
+  setFinanceMeta(month, inc, sav);
+}
+
+const _viewFinanceWrap = view;
+view = function(){
+  _viewFinanceWrap();
+  try{
+    if(state.tab==="finance"){
+      const d = financeMonthDataAdvanced();
+      const ctx = document.getElementById("financeChart");
+      if(!ctx) return;
+
+      new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: Array.from({length:d.daysInMonth},(_,i)=>i+1),
+          datasets: [
+            {label:"Ingresos acumulados", data:d.accIncome},
+            {label:"Gastos acumulados", data:d.accExpense}
+          ]
+        },
+        options: {
+          responsive:true,
+          plugins:{legend:{display:true}}
+        }
+      });
+    }
+  }catch(e){}
+};
