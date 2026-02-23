@@ -9965,6 +9965,9 @@ function viewFinance(){
 
   return `
     <section class="card homeCard homeWide">
+      <div class="cardTop"><h2 class="cardTitle">Resumen Diario</h2><button class="iconBtn" onclick="openFinanceImport()">⬆️</button></div>
+      <div class="hr"></div>
+      <canvas id="dailyExpenseChart" height="120"></canvas>
       <div class="cardTop">
         <h2 class="cardTitle">Meta mensual</h2>
         <button class="iconBtn" onclick="openFinanceMetaModal()">⚙️</button>
@@ -10041,3 +10044,93 @@ view = function(){
     }
   }catch(e){}
 };
+
+
+function getLast7DaysExpenseData(){
+  const now = new Date();
+  const labels = [];
+  const values = [];
+  
+  for(let i=6;i>=0;i--){
+    const d = new Date(now);
+    d.setDate(now.getDate()-i);
+    const key = d.toISOString().slice(0,10);
+    const label = d.toLocaleDateString("es-PE",{weekday:"short"});
+    
+    const total = (state.financeLedger||[])
+      .filter(e=>e.type==="expense" && e.date===key)
+      .reduce((s,e)=>s+Number(e.amount||0),0);
+    
+    labels.push(label);
+    values.push(total);
+  }
+  
+  return {labels, values};
+}
+
+
+
+function importFinanceSeed(data){
+  try{
+    if(data.financeAccounts) state.financeAccounts = data.financeAccounts;
+    if(data.financeLedger) state.financeLedger = data.financeLedger;
+    persist();
+    view();
+    alert("Base financiera importada correctamente.");
+  }catch(e){
+    alert("Error al importar.");
+  }
+}
+
+function openFinanceImport(){
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json";
+  input.onchange = e=>{
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = ev=>{
+      const data = JSON.parse(ev.target.result);
+      importFinanceSeed(data);
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+
+
+function renderDailyExpenseChart(){
+  const ctx = document.getElementById("dailyExpenseChart");
+  if(!ctx) return;
+  
+  const d = getLast7DaysExpenseData();
+  
+  new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: d.labels,
+      datasets: [{
+        label: "Gastos diarios",
+        data: d.values
+      }]
+    },
+    options: {
+      responsive:true,
+      plugins:{
+        legend:{display:false}
+      }
+    }
+  });
+}
+
+const _viewFinanceChartWrap = view;
+view = function(){
+  _viewFinanceChartWrap();
+  try{
+    if(state.tab==="finance"){
+      renderDailyExpenseChart();
+    }
+  }catch(e){}
+};
+
