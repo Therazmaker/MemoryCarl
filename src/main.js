@@ -571,7 +571,52 @@ function renderLunarMoneyCard(){
   const houseLine = `Casa 2: <b>${escapeHtml(house2Sign)}</b>${regencia ? ` <span class=\"muted\">(${escapeHtml(regencia)})</span>` : ""}`;
 
   return `
-    <section class="card homeCard homeWide" id="homeLunarMoneyCard">
+    <section class="card homeCard homeWide financeTopTabs">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="font-weight:900;font-size:16px;">💰 Finanzas</div>
+        <div class="row" style="gap:8px;justify-content:flex-end;margin:0;">
+          ${tabBtn("main","🏠","Principal")}
+          ${tabBtn("tx","🔁","Transacciones")}
+        </div>
+      </div>
+      <div class="row" style="gap:8px;margin:0;">
+        <button class="btn" onclick="openFinanceAccountModalV2()">+ Cuenta</button>
+        <button class="btn danger" onclick="openFinanceMovementModalV2('expense')">- Gasto</button>
+        <button class="btn good" onclick="openFinanceMovementModalV2('income')">+ Ingreso</button>
+        <div style="flex:1;"></div>
+        <select class="input" id="finProjMode" style="max-width:170px;">
+          <option value="conservative" ${state.financeProjectionMode==='conservative'?'selected':''}>Conservador</option>
+          <option value="normal" ${state.financeProjectionMode==='normal'?'selected':''}>Normal</option>
+          <option value="realistic" ${state.financeProjectionMode==='realistic'?'selected':''}>Realista</option>
+        </select>
+      </div>
+      <div class="muted" style="margin-top:10px;">Cuentas y movimientos con modales reales (v2).</div>
+    </section>
+
+    ${sub==="main" ? `
+      <section class="card homeCard homeWide">
+        <div class="cardTop"><h2 class="cardTitle">Cuentas</h2></div>
+        <div class="hr"></div>
+        ${financeV2AccountsHtml()}
+      </section>
+      <section class="card homeCard homeWide">
+        <div class="cardTop"><h2 class="cardTitle">Gráfico mensual</h2></div>
+        <div class="hr"></div>
+        <canvas id="financeChartV2" height="140"></canvas>
+      </section>
+    ` : ``}
+
+    ${sub==="tx" ? `
+      <section class="card homeCard homeWide">
+        <div class="cardTop"><h2 class="cardTitle">Movimientos</h2></div>
+        <div class="hr"></div>
+        ${financeV2TxHtml()}
+      </section>
+    ` : ``}
+
+    <!-- Legacy content kept below (for compatibility) -->
+    <section class="card homeCard homeWide" style="display:none;">
+ class="card homeCard homeWide" id="homeLunarMoneyCard">
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">Luna & Dinero 🌙💸</h2>
@@ -7584,7 +7629,31 @@ if(act==="savePurchase"){
       // Optional: mark current list as bought to reflect it was committed
       (list.items||[]).forEach(it=>{ it.bought = true; });
 
-      persist();
+      
+
+
+      // Finance v2: auto expense from Shopping (Mercado)
+      try{
+        if(window.FINANCE){
+          financeEnsureDefaultAccount();
+          const accs = FINANCE.state.accounts||[];
+          const lastAcc = (localStorage.getItem("finance_v2_last_account")||"").trim();
+          const accId = lastAcc || (accs[0] ? accs[0].id : "");
+          if(accId){
+            localStorage.setItem("finance_v2_last_account", accountId||"");
+      FINANCE.addMovement({
+              date: safeDate + "T12:00:00.000Z",
+              type: "expense",
+              amount: Number(totals.total||0),
+              accountId: accId,
+              category: "Mercado",
+              reason: "planificado",
+              note: store ? ("Compra en " + store) : "Compra (Shopping)"
+            });
+          }
+        }
+      }catch(e){ console.warn("Shopping->Finance v2 hook", e); }
+persist();
       toast("Compra guardada ✅");
       state.shoppingSubtab = "dashboard";
       view();
@@ -7661,6 +7730,89 @@ function openPromptModal({title, fields, onSubmit}){
   });
 
   const first = b.querySelector("input");
+  if(first) first.focus();
+}
+
+
+
+// ===== Enhanced modal (supports select, textarea, color, date) =====
+function openFormModal({title, fields, onSubmit, noteText}){
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop";
+  b.innerHTML = `
+    <div class="modal modalWide">
+      <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <h2 style="margin:0;">${escapeHtml(title||"")}</h2>
+        <button class="iconBtn" data-m="close">✕</button>
+      </div>
+      <div class="grid" id="fields"></div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn ghost" data-m="cancel">Cancel</button>
+        <button class="btn primary" data-m="save">Save</button>
+      </div>
+      ${noteText ? `<div class="muted" style="margin-top:10px;">${escapeHtml(noteText)}</div>` : ``}
+    </div>
+  `;
+  host.appendChild(b);
+
+  const wrap = b.querySelector("#fields");
+  wrap.innerHTML = (fields||[]).map(f=>{
+    const t = (f.type||"text").toLowerCase();
+    const k = escapeHtml(f.key||"");
+    const label = escapeHtml(f.label||f.key||"");
+    const value = (f.value ?? "");
+    const ph = escapeHtml(f.placeholder||"");
+
+    const common = `class="input" data-k="${k}" ${f.required? "required":""}`;
+
+    let control = "";
+    if(t==="select"){
+      const opts = (f.options||[]).map(o=>{
+        const ov = (typeof o==="string") ? o : (o.value ?? "");
+        const ol = (typeof o==="string") ? o : (o.label ?? o.value ?? "");
+        const sel = String(ov)===String(value) ? "selected" : "";
+        return `<option value="${escapeHtml(ov)}" ${sel}>${escapeHtml(ol)}</option>`;
+      }).join("");
+      control = `<select ${common}>${opts}</select>`;
+    }else if(t==="textarea"){
+      control = `<textarea ${common} rows="${escapeHtml(String(f.rows||4))}" placeholder="${ph}">${escapeHtml(String(value))}</textarea>`;
+    }else if(t==="color"){
+      const v = String(value||"#4aa3ff");
+      control = `<input ${common} type="color" value="${escapeHtml(v)}">`;
+    }else if(t==="date"){
+      // value expected YYYY-MM-DD
+      const v = String(value||"");
+      control = `<input ${common} type="date" value="${escapeHtml(v)}" placeholder="${ph}">`;
+    }else{
+      const v = escapeHtml(String(value ?? ""));
+      const it = escapeHtml(t);
+      control = `<input ${common} type="${it}" value="${v}" placeholder="${ph}">`;
+    }
+
+    return `
+      <div>
+        <div class="muted" style="margin:2px 0 6px;">${label}</div>
+        ${control}
+      </div>
+    `;
+  }).join("");
+
+  const close = ()=> b.remove();
+  b.addEventListener("click",(e)=>{ if(e.target===b) close(); });
+  const x = b.querySelector('[data-m="close"]'); if(x) x.addEventListener("click", close);
+  b.querySelector('[data-m="cancel"]').addEventListener("click", close);
+  b.querySelector('[data-m="save"]').addEventListener("click", ()=>{
+    const data = {};
+    (fields||[]).forEach(f=>{
+      const el = b.querySelector(`[data-k="${CSS.escape(f.key)}"]`);
+      data[f.key] = el ? el.value : "";
+    });
+    onSubmit?.(data);
+    close();
+  });
+
+  const first = b.querySelector("input,select,textarea");
   if(first) first.focus();
 }
 
@@ -9792,6 +9944,160 @@ LS.financeAccounts = "memorycarl_v2_finance_accounts";
 state.financeLedger = load(LS.financeLedger, []);
 state.financeAccounts = load(LS.financeAccounts, []);
 
+
+// ===== Finance v2 UI (Accounts + Transactions) =====
+state.financeSubtab = state.financeSubtab || "main"; // main | tx
+state.financeProjectionMode = state.financeProjectionMode || "normal"; // conservative | normal | realistic
+
+const FIN_CATEGORIES = ["Mercado","Transporte","Servicios","Deudas","Hogar","Salud","Educación","Ocio","Suscripciones","Otros"];
+const FIN_REASONS = [
+  {value:"planificado", label:"Planificado"},
+  {value:"impulso", label:"Impulso"},
+  {value:"emergencia", label:"Emergencia"},
+  {value:"necesidad", label:"Necesidad"},
+  {value:"inversion", label:"Inversión"}
+];
+
+function financeFmt(n){
+  return (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function financeEnsureDefaultAccount(){
+  try{
+    if(window.FINANCE && FINANCE.state && Array.isArray(FINANCE.state.accounts)){
+      if(FINANCE.state.accounts.length===0){
+        FINANCE.createAccount({name:"Principal", type:"cash", balance:0, color:"#4aa3ff"});
+      }
+    }
+  }catch(e){}
+}
+
+function openFinanceAccountModalV2(){
+  financeEnsureDefaultAccount();
+  openFormModal({
+    title:"Nueva cuenta",
+    noteText:"Se guarda en localStorage (Finance v2).",
+    fields:[
+      {key:"name", label:"Nombre de la cuenta", placeholder:"BCP / Efectivo / Tarjeta", required:true},
+      {key:"type", label:"Tipo", type:"select", value:"bank", options:[
+        {value:"bank", label:"Banco"},
+        {value:"cash", label:"Efectivo"},
+        {value:"card", label:"Tarjeta"}
+      ]},
+      {key:"balance", label:"Saldo inicial", type:"number", value:"0"},
+      {key:"color", label:"Color (opcional)", type:"color", value:"#4aa3ff"}
+    ],
+    onSubmit: ({name,type,balance,color})=>{
+      const nm = (name||"").trim();
+      if(!nm) return;
+      if(window.FINANCE){
+        FINANCE.createAccount({
+          name: nm,
+          type: (type||"bank"),
+          balance: Number(balance||0),
+          color: color||null
+        });
+      }
+      toast?.("Cuenta creada ✅");
+      view();
+    }
+  });
+}
+
+function openFinanceMovementModalV2(prefType){
+  financeEnsureDefaultAccount();
+  const accounts = (window.FINANCE?.state?.accounts||[]);
+  const defaultAcc = accounts[0]?.id || "";
+  const today = new Date().toISOString().slice(0,10);
+
+  openFormModal({
+    title: (prefType==="income" ? "Nuevo ingreso" : "Nuevo gasto"),
+    fields:[
+      {key:"date", label:"Fecha", type:"date", value: today},
+      {key:"type", label:"Tipo", type:"select", value: (prefType||"expense"), options:[
+        {value:"income", label:"Ingreso"},
+        {value:"expense", label:"Gasto"}
+      ]},
+      {key:"amount", label:"Monto", type:"number", value:"0", required:true},
+      {key:"accountId", label:"Cuenta", type:"select", value: defaultAcc, options: accounts.map(a=>({value:a.id, label:`${a.name} (${a.type})`}))},
+      {key:"category", label:"Categoría", type:"select", value:"Mercado", options: FIN_CATEGORIES.map(c=>({value:c,label:c}))},
+      {key:"reason", label:"Razón", type:"select", value:"planificado", options: FIN_REASONS},
+      {key:"note", label:"Nota (opcional)", type:"textarea", rows:3, value:""}
+    ],
+    onSubmit: ({date,type,amount,accountId,category,reason,note})=>{
+      const amt = Number(amount||0);
+      if(!amt || amt<=0) return;
+      const dt = (date||today).trim() || today;
+      if(window.FINANCE){
+        FINANCE.addMovement({
+          date: dt + "T12:00:00.000Z",
+          type: (type||"expense"),
+          amount: amt,
+          accountId,
+          category: (category||"Otros"),
+          reason: (reason||"planificado"),
+          note: (note||"").trim()
+        });
+      }
+      toast?.("Movimiento guardado ✅");
+      view();
+    }
+  });
+}
+
+function financeV2AccountsHtml(){
+  financeEnsureDefaultAccount();
+  const accounts = (window.FINANCE?.state?.accounts||[]);
+  if(!accounts.length){
+    return `<div class="muted">Sin cuentas (crea una)</div>`;
+  }
+  return accounts.map(a=>`
+    <div class="budgetRow">
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span class="dot" style="background:${escapeHtml(a.color||"#666")};"></span>
+        <div>
+          <div style="font-weight:800;">${escapeHtml(a.name)}</div>
+          <div class="muted" style="margin-top:2px;">${escapeHtml(a.type)}</div>
+        </div>
+      </div>
+      <div style="font-weight:900;">S/ ${financeFmt(a.balance)}</div>
+    </div>
+  `).join("");
+}
+
+function financeV2TxHtml(){
+  financeEnsureDefaultAccount();
+  const mv = (window.FINANCE?.state?.movements||[]);
+  if(!mv.length) return `<div class="muted">Sin movimientos todavía.</div>`;
+  const accountsById = Object.fromEntries((window.FINANCE?.state?.accounts||[]).map(a=>[a.id,a]));
+  return mv.slice(0,60).map(m=>{
+    const acc = accountsById[m.accountId];
+    const icon = (m.type==="income") ? "🟢" : "🔴";
+    const dt = (m.date||"").slice(0,10);
+    return `
+      <div class="budgetRow" style="align-items:flex-start;">
+        <div>
+          <div style="font-weight:800;">${icon} ${escapeHtml(m.category||"")}</div>
+          <div class="muted" style="margin-top:2px;">${escapeHtml(dt)} · ${escapeHtml(acc?acc.name:"(sin cuenta)")} · ${escapeHtml(m.reason||"")}</div>
+          ${m.note ? `<div class="small" style="margin-top:4px;">${escapeHtml(m.note)}</div>` : ``}
+        </div>
+        <div style="text-align:right;">
+          <div style="font-weight:900;">S/ ${financeFmt(m.amount)}</div>
+          <button class="btn ghost" style="margin-top:6px;" onclick="financeV2DeleteTx('${escapeHtml(m.id)}')">Eliminar</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function financeV2DeleteTx(id){
+  if(!confirm("¿Eliminar movimiento?")) return;
+  try{ window.FINANCE?.deleteMovement?.(id); }catch(e){}
+  toast?.("Eliminado ✅");
+  view();
+}
+
+
 const _persistFinanceWrap = persist;
 persist = function(){
   _persistFinanceWrap();
@@ -9944,6 +10250,14 @@ function financeMonthDataAdvanced(){
 }
 
 function viewFinance(){
+
+  // --- Finance v2: keep existing features + add sub-tabs (Principal / Transacciones)
+  financeEnsureDefaultAccount();
+  const sub = state.financeSubtab || "main";
+  const tabBtn = (key, icon, label)=> `
+    <button class="chip ${sub===key?'chipOn':''}" data-fin-sub="${escapeHtml(key)}">${icon} ${escapeHtml(label)}</button>
+  `;
+
   const fmt = n => (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   const d = financeMonthDataAdvanced();
   const monthKey = getCurrentMonthKey();
@@ -10041,6 +10355,65 @@ view = function(){
           plugins:{legend:{display:true}}
         }
       });
+
+
+
+    // Finance v2 chart (3 lines) + UI hooks
+    try{
+      const subBtns = document.querySelectorAll("[data-fin-sub]");
+      subBtns.forEach(btn=>{
+        btn.addEventListener("click", ()=>{
+          state.financeSubtab = btn.getAttribute("data-fin-sub") || "main";
+          persist(); view();
+        });
+      });
+
+      const sel = document.getElementById("finProjMode");
+      if(sel){
+        sel.addEventListener("change", ()=>{
+          state.financeProjectionMode = sel.value || "normal";
+          persist(); view();
+        });
+      }
+
+      if(state.tab==="finance" && (state.financeSubtab||"main")==="main"){
+        const canvas = document.getElementById("financeChartV2");
+        if(canvas && window.FINANCE){
+          const md = FINANCE.getMonthlyData();
+          const proj = FINANCE.projection(state.financeProjectionMode||"normal");
+          const days = md.days || [];
+          const expense = md.expenseLine || [];
+          const income = md.incomeLine || [];
+
+          // build projection line across days (continue from current expense)
+          const projLine = [];
+          const base = expense.length ? expense[expense.length-1] : 0;
+          for(let i=0;i<days.length;i++){
+            // simple: assume remaining days projection distributed
+            if(i < expense.length) projLine.push(null);
+            else{
+              const j = i-expense.length;
+              projLine.push(base + (proj[j] ?? (proj.length?proj[proj.length-1]:0)));
+            }
+          }
+
+          // destroy previous instance if any
+          if(window.__financeChartV2 && window.__financeChartV2.destroy) window.__financeChartV2.destroy();
+          window.__financeChartV2 = new Chart(canvas, {
+            type:"line",
+            data:{
+              labels: days,
+              datasets:[
+                {label:"🔵 Gasto acumulado real", data: expense},
+                {label:"🟡 Proyección", data: projLine},
+                {label:"🔴 Ingreso acumulado", data: income}
+              ]
+            },
+            options:{responsive:true, plugins:{legend:{display:true}}}
+          });
+        }
+      }
+    }catch(e){ console.warn("Finance v2 afterView", e); }
     }
   }catch(e){}
 };
