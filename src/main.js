@@ -11216,6 +11216,393 @@ function financeDebtProgress(d){
   return {orig, bal, paid, pct};
 }
 
+
+// ===== Finance Commitments (Servicios / gastos fijos) + Pillars =====
+function financeEnsureCommitments(){
+  if(!state.financeCommitments) state.financeCommitments = [];
+  if(!state.financeCommitmentGroups) state.financeCommitmentGroups = ["Hogar","Servicios","Suscripciones","Salud","Otros"];
+}
+
+function financeComputePillars(monthKey){
+  const ledger = financeActiveLedger();
+  const mk = monthKey || getCurrentMonthKey();
+  const isInMonth = (iso)=>{
+    try{
+      const d = new Date(iso);
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,"0");
+      return `${y}-${m}`===mk;
+    }catch(e){ return false; }
+  };
+
+  let market=0, services=0, debts=0, other=0;
+  for(const e of ledger){
+    if(e.archived) continue;
+    if(e.type!=="expense") continue;
+    if(!isInMonth(e.date)) continue;
+
+    const cat = String(e.category||"").toLowerCase();
+    const kind = String(e.kind||"").toLowerCase();
+
+    if(cat==="mercado" || cat==="market" || kind==="shopping_auto"){
+      market += Number(e.amount||0);
+    }else if(cat==="deudas" || kind==="debt_payment"){
+      debts += Number(e.amount||0);
+    }else if(cat==="servicios" || cat==="compromisos" || kind==="commitment_payment"){
+      services += Number(e.amount||0);
+    }else{
+      other += Number(e.amount||0);
+    }
+  }
+  return {market, services, debts, other};
+}
+
+function openFinanceCommitmentModal(existing){
+  financeEnsureCommitments();
+  const c = existing || {
+    id: uid("cmt"),
+    name: "",
+    group: "Hogar",
+    amount: 0,
+    dueDay: 1,
+    note: "",
+    createdAt: new Date().toISOString(),
+    active: true
+  };
+
+  const groups = (state.financeCommitmentGroups||["Hogar","Servicios","Otros"]).map(g=>`<option ${c.group===g?'selected':''}>${escapeHtml(g)}</option>`).join("");
+
+  const html = `
+    <div class="modalOverlay" onclick="closeModal(event)">
+      <div class="modal modalBig" onclick="event.stopPropagation()">
+        <div class="modalHeader">
+          <div class="modalTitle">${existing ? "Editar compromiso" : "Nuevo compromiso"}</div>
+          <button class="iconBtn" onclick="closeModal()">✕</button>
+        </div>
+
+        <div class="modalBody modalScroll">
+          <label class="fieldLabel">Nombre</label>
+          <input id="cmtName" class="textInput" value="${escapeAttr(c.name||"")}" placeholder="Alquiler, Luz, Internet..." />
+
+          <div class="row" style="gap:10px; margin-top:10px">
+            <div style="flex:1">
+              <label class="fieldLabel">Grupo</label>
+              <select id="cmtGroup" class="textInput">${groups}</select>
+            </div>
+            <div style="width:140px">
+              <label class="fieldLabel">Día de pago</label>
+              <input id="cmtDay" type="number" min="1" max="31" class="textInput" value="${Number(c.dueDay||1)}" />
+            </div>
+          </div>
+
+          <label class="fieldLabel" style="margin-top:10px">Monto mensual</label>
+          <input id="cmtAmount" type="number" step="0.01" class="textInput" value="${Number(c.amount||0)}" />
+
+          <label class="fieldLabel" style="margin-top:10px">Nota</label>
+          <textarea id="cmtNote" class="textInput" rows="3" placeholder="Detalles, proveedor, contrato...">${escapeHtml(c.note||"")}</textarea>
+
+          <div class="row" style="gap:10px; margin-top:10px; align-items:center">
+            <input id="cmtActive" type="checkbox" ${c.active!==false?'checked':''} />
+            <div>Activa</div>
+          </div>
+        </div>
+
+        <div class="modalFooter">
+          ${existing ? `<button class="btn danger" onclick="deleteFinanceCommitment('${c.id}')">Eliminar</button>` : `<div></div>`}
+          <button class="btn primary" onclick="saveFinanceCommitment('${c.id}')">Guardar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  showModal(html);
+}
+
+function saveFinanceCommitment(id){
+  financeEnsureCommitments();
+  const name = (document.querySelector("#cmtName")?.value||"").trim();
+  const group = (document.querySelector("#cmtGroup")?.value||"Otros").trim();
+  const dueDay = Math.max(1, Math.min(31, Number(document.querySelector("#cmtDay")?.value||1)));
+  const amount = Number(document.querySelector("#cmtAmount")?.value||0);
+  const note = (document.querySelector("#cmtNote")?.value||"").trim();
+  const active = !!document.querySelector("#cmtActive")?.checked;
+
+  if(!name){
+    alert("Ponle un nombre al compromiso.");
+    return;
+  }
+
+  const arr = state.financeCommitments;
+  const i = arr.findIndex(x=>x.id===id);
+  const nowIso = new Date().toISOString();
+  const base = (i>=0 ? arr[i] : {id, createdAt: nowIso});
+  const obj = {
+    ...base,
+    name,
+    group,
+    dueDay,
+    amount,
+    note,
+    active
+  };
+  if(i>=0) arr[i]=obj; else arr.unshift(obj);
+  persist();
+  closeModal();
+  view();
+}
+
+function deleteFinanceCommitment(id){
+  if(!confirm("¿Eliminar este compromiso?")) return;
+  financeEnsureCommitments();
+  state.financeCommitments = (state.financeCommitments||[]).filter(x=>x.id!==id);
+  persist();
+  closeModal();
+  view();
+}
+
+function _financeNextDueDate(dueDay){
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const candidate = new Date(y, m, dueDay, 12, 0, 0);
+  if(candidate < now){
+    return new Date(y, m+1, dueDay, 12, 0, 0);
+  }
+  return candidate;
+}
+
+function financeCommitmentPaidInMonth(commitmentId, monthKey){
+  const mk = monthKey || getCurrentMonthKey();
+  const ledger = financeActiveLedger();
+  for(const e of ledger){
+    if(e.archived) continue;
+    if(String(e.kind||"")!=="commitment_payment") continue;
+    if(e.commitmentId!==commitmentId) continue;
+    const d = new Date(e.date);
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,"0");
+    if(`${y}-${m}`===mk) return true;
+  }
+  return false;
+}
+
+function openFinanceCommitmentPayModal(id){
+  financeEnsureCommitments();
+  const c = (state.financeCommitments||[]).find(x=>x.id===id);
+  if(!c) return;
+
+  if(!(state.financeAccounts||[]).length){
+    alert("Crea una cuenta primero en Finanzas.");
+    return;
+  }
+
+  const accId = state.financeLastAccountId || state.financeAccounts[0].id;
+  const accOptions = (state.financeAccounts||[]).map(a=>`<option value="${a.id}" ${a.id===accId?'selected':''}>${escapeHtml(a.name)}</option>`).join("");
+
+  const today = new Date();
+  const isoDate = today.toISOString().slice(0,10);
+  const isoTime = today.toTimeString().slice(0,5);
+
+  const html = `
+    <div class="modalOverlay" onclick="closeModal(event)">
+      <div class="modal modalBig" onclick="event.stopPropagation()">
+        <div class="modalHeader">
+          <div class="modalTitle">Registrar pago</div>
+          <button class="iconBtn" onclick="closeModal()">✕</button>
+        </div>
+        <div class="modalBody modalScroll">
+          <div class="muted">Compromiso: <strong>${escapeHtml(c.name)}</strong></div>
+
+          <div class="row" style="gap:10px; margin-top:10px">
+            <div style="flex:1">
+              <label class="fieldLabel">Cuenta</label>
+              <select id="cmtPayAcc" class="textInput">${accOptions}</select>
+            </div>
+            <div style="width:160px">
+              <label class="fieldLabel">Monto</label>
+              <input id="cmtPayAmt" type="number" step="0.01" class="textInput" value="${Number(c.amount||0)}" />
+            </div>
+          </div>
+
+          <div class="row" style="gap:10px; margin-top:10px">
+            <div style="flex:1">
+              <label class="fieldLabel">Fecha</label>
+              <input id="cmtPayDate" type="date" class="textInput" value="${isoDate}" />
+            </div>
+            <div style="width:160px">
+              <label class="fieldLabel">Hora</label>
+              <input id="cmtPayTime" type="time" class="textInput" value="${isoTime}" />
+            </div>
+          </div>
+
+          <label class="fieldLabel" style="margin-top:10px">Nota</label>
+          <input id="cmtPayNote" class="textInput" placeholder="Opcional" value="" />
+        </div>
+        <div class="modalFooter">
+          <div></div>
+          <button class="btn primary" onclick="saveFinanceCommitmentPayment('${c.id}')">Guardar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  showModal(html);
+}
+
+function saveFinanceCommitmentPayment(commitmentId){
+  const c = (state.financeCommitments||[]).find(x=>x.id===commitmentId);
+  if(!c) return;
+
+  const accountId = document.querySelector("#cmtPayAcc")?.value;
+  const amount = Number(document.querySelector("#cmtPayAmt")?.value||0);
+  const date = document.querySelector("#cmtPayDate")?.value || new Date().toISOString().slice(0,10);
+  const time = document.querySelector("#cmtPayTime")?.value || "12:00";
+  const noteExtra = (document.querySelector("#cmtPayNote")?.value||"").trim();
+
+  const iso = new Date(`${date}T${time}:00`).toISOString();
+  addFinanceEntry({
+    type: "expense",
+    amount,
+    accountId,
+    category: "Servicios",
+    reason: "planificado",
+    note: `Compromisos · ${c.name}${noteExtra?(" · "+noteExtra):""}`,
+    date: iso,
+    kind: "commitment_payment",
+    commitmentId
+  });
+
+  closeModal();
+  view();
+}
+
+function renderFinanceCommitmentsTab(){
+  financeEnsureCommitments();
+  const fmt = _financeFmt;
+  const monthKey = getCurrentMonthKey();
+
+  const list = (state.financeCommitments||[])
+    .filter(x=>x.active!==false)
+    .sort((a,b)=>(Number(a.dueDay||1)-Number(b.dueDay||1)))
+    .map(c=>{
+      const paid = financeCommitmentPaidInMonth(c.id, monthKey);
+      return `
+        <div class="finDebtItem" style="cursor:pointer" onclick="openFinanceCommitmentModalById('${c.id}')">
+          <div class="finDebtLeft">
+            <div class="finDebtName">${escapeHtml(c.name)}</div>
+            <div class="finDebtMeta">${escapeHtml(c.group||"")} · Día ${Number(c.dueDay||1)}</div>
+          </div>
+          <div class="finDebtRight">
+            <div class="finDebtPay">S/ ${fmt(c.amount||0)}</div>
+            <div class="finDebtMeta">${paid ? "✅ Pagado este mes" : "⏳ Pendiente"}</div>
+          </div>
+        </div>
+      `;
+    }).join("") || `<div class="muted">Aún no tienes compromisos. Crea uno con “＋ Nuevo”.</div>`;
+
+  // Due lists
+  const now = new Date();
+  const inDays = (n)=> new Date(now.getTime() + n*24*60*60*1000);
+  const endWeek = inDays(7);
+
+  const dueThisWeek = (state.financeCommitments||[]).filter(c=>{
+    if(c.active===false) return false;
+    const d = _financeNextDueDate(Number(c.dueDay||1));
+    return d >= now && d <= endWeek;
+  }).sort((a,b)=>_financeNextDueDate(a.dueDay)-_financeNextDueDate(b.dueDay));
+
+  const y= now.getFullYear(); const m= now.getMonth();
+  const monthStart = new Date(y,m,1,0,0,0);
+  const monthEnd = new Date(y,m+1,0,23,59,59);
+  const dueThisMonth = (state.financeCommitments||[]).filter(c=>{
+    if(c.active===false) return false;
+    const d = new Date(y,m, Number(c.dueDay||1), 12,0,0);
+    return d>=monthStart && d<=monthEnd;
+  }).sort((a,b)=>Number(a.dueDay||1)-Number(b.dueDay||1));
+
+  const dueWeekHtml = dueThisWeek.map(c=>{
+    const d = _financeNextDueDate(Number(c.dueDay||1));
+    const label = d.toLocaleDateString("es-PE",{weekday:"short", day:"2-digit", month:"short"});
+    return `<div class="dueRow">
+      <div>📌 ${escapeHtml(c.name)}</div>
+      <div class="muted">${label} · S/ ${fmt(c.amount||0)}</div>
+    </div>`;
+  }).join("") || `<div class="muted">Nada vence en los próximos 7 días.</div>`;
+
+  const dueMonthHtml = dueThisMonth.map(c=>{
+    return `<div class="dueRow">
+      <div>📆 ${escapeHtml(c.name)}</div>
+      <div class="muted">Día ${String(Number(c.dueDay||1)).padStart(2,'0')} · S/ ${fmt(c.amount||0)}</div>
+    </div>`;
+  }).join("") || `<div class="muted">Nada programado este mes.</div>`;
+
+  return `
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Compromisos</h2>
+        <button class="iconBtn" onclick="openFinanceCommitmentModal()">＋</button>
+      </div>
+      <div class="hr"></div>
+
+      <div class="row" style="gap:12px; flex-wrap:wrap">
+        <div class="miniCard">
+          <div class="miniTitle">Esta semana</div>
+          <div class="miniBody">${dueWeekHtml}</div>
+        </div>
+        <div class="miniCard">
+          <div class="miniTitle">Este mes</div>
+          <div class="miniBody">${dueMonthHtml}</div>
+        </div>
+      </div>
+
+      <div class="hr" style="margin-top:12px"></div>
+      <div class="cardTop" style="margin-top:2px">
+        <h3 class="cardTitle" style="font-size:14px">Lista</h3>
+      </div>
+      <div class="finDebtList">${list}</div>
+    </section>
+  `;
+}
+
+function openFinanceCommitmentModalById(id){
+  const c = (state.financeCommitments||[]).find(x=>x.id===id);
+  if(!c) return;
+  openFinanceCommitmentModal(c);
+}
+
+try{
+  window.openFinanceCommitmentModal = openFinanceCommitmentModal;
+  window.openFinanceCommitmentModalById = openFinanceCommitmentModalById;
+  window.openFinanceCommitmentPayModal = openFinanceCommitmentPayModal;
+  window.saveFinanceCommitment = saveFinanceCommitment;
+  window.deleteFinanceCommitment = deleteFinanceCommitment;
+  window.saveFinanceCommitmentPayment = saveFinanceCommitmentPayment;
+}catch(e){}
+
+// Draw pillars chart after finance render
+let _financePillarsChart = null;
+function financeDrawPillarsChart(){
+  const canvas = document.getElementById("financePillarsChart");
+  if(!canvas || !window.Chart) return;
+  const monthKey = getCurrentMonthKey();
+  const p = financeComputePillars(monthKey);
+  try{ if(_financePillarsChart){ _financePillarsChart.destroy(); _financePillarsChart=null; } }catch(e){}
+  const ctx = canvas.getContext("2d");
+  _financePillarsChart = new Chart(ctx,{
+    type:"bar",
+    data:{
+      labels:["Mercado","Servicios","Deudas","Otros"],
+      datasets:[{label:"S/", data:[p.market,p.services,p.debts,p.other]}]
+    },
+    options:{
+      responsive:false,
+      maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        y:{beginAtZero:true}
+      }
+    }
+  });
+}
+
 function openFinanceDebtModal(existing){
   const d = existing ? {...existing} : {
     id: null,
@@ -11943,6 +12330,8 @@ function viewFinance(){
   const d = financeMonthDataAdvanced();
   const monthKey = getCurrentMonthKey();
   const meta = d.meta || {expectedIncome:0,targetSavings:0};
+  const finPillars = financeComputePillars(monthKey);
+
 
   // header tabs (Principal / Movimientos / Recordatorios / Deudas)
   const topTabs = `
@@ -11951,6 +12340,7 @@ function viewFinance(){
       <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
       <button class="finTopTab ${state.financeSubTab==="reminders"?"active":""}" onclick="setFinanceSubTab('reminders')">Recordatorios</button>
       <button class="finTopTab ${state.financeSubTab==="debts"?"active":""}" onclick="setFinanceSubTab('debts')">Deudas</button>
+      <button class="finTopTab ${state.financeSubTab==="commitments"?"active":""}" onclick="setFinanceSubTab('commitments')">Compromisos</button>
     </div>
   `;
 
@@ -11977,6 +12367,25 @@ function viewFinance(){
       <div>Ahorro meta: <strong>S/ ${fmt(meta.targetSavings)}</strong></div>
       <div>Ingreso real: <strong>S/ ${fmt(d.income)}</strong></div>
       <div>Diferencia ingreso: <strong>S/ ${fmt(d.income - meta.expectedIncome)}</strong></div>
+    </section>
+
+
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Pilares del mes</h2>
+        <button class="iconBtn" onclick="setFinanceSubTab('commitments')">⚡</button>
+      </div>
+      <div class="hr"></div>
+      <div class="row" style="gap:10px; flex-wrap:wrap">
+        <div class="chipStat">🛒 Mercado: <strong>S/ ${_financeFmt(finPillars.market)}</strong></div>
+        <div class="chipStat">🧾 Servicios: <strong>S/ ${_financeFmt(finPillars.services)}</strong></div>
+        <div class="chipStat">💳 Deudas: <strong>S/ ${_financeFmt(finPillars.debts)}</strong></div>
+        <div class="chipStat">📦 Otros: <strong>S/ ${_financeFmt(finPillars.other)}</strong></div>
+      </div>
+      <div style="margin-top:10px">
+        <canvas id="financePillarsChart" height="140"></canvas>
+      </div>
+      <div class="muted" style="margin-top:8px">Esto se calcula desde tus movimientos del mes actual.</div>
     </section>
 
     <section class="card homeCard homeWide">
@@ -12070,10 +12479,15 @@ function viewFinance(){
     ${renderFinanceDebtsTab()}
   `;
 
+  const commitmentsHtml = `
+    ${renderFinanceCommitmentsTab()}
+  `;
+
   const body = (state.financeSubTab==="movements")
     ? movList
     : (state.financeSubTab==="reminders" ? remindersHtml
-      : (state.financeSubTab==="debts" ? debtsHtml : principalHtml));
+      : (state.financeSubTab==="debts" ? debtsHtml
+        : (state.financeSubTab==="commitments" ? commitmentsHtml : principalHtml)));
 
   return `
     ${topTabs}
@@ -12138,6 +12552,7 @@ view = function(){
         try{ financeWeeklyMaybeAutoRun(); }catch(_e){}
         try{ financeDrawMonthChart(); }catch(_e){} 
         try{ renderDailyExpenseChart(); }catch(_e){} 
+        try{ if(state.financeSubTab==='main') financeDrawPillarsChart(); }catch(_e){}
         try{ if(state.financeSubTab==='debts') financeDrawDebtChart(); }catch(_e){}
       }, 0);
     }
