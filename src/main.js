@@ -9794,6 +9794,21 @@ state.financeLedger = load(LS.financeLedger, []);
 state.financeAccounts = load(LS.financeAccounts, []);
 state.financeResetAt = load(LS.financeResetAt, null);
 
+// Quick finance wipe via URL: ?finreset=1 (useful when you want to start clean)
+try{
+  const qs = new URLSearchParams(location.search||"");
+  if(qs.get("finreset")==="1"){
+    // wipe only finance keys; keep rest of app
+    state.financeLedger = [];
+    state.financeAccounts = [];
+    state.financeResetAt = isoDate(new Date());
+    state.financeBaselineAt = isoDate(new Date());
+    state.financeMonthOffset = 0;
+    // do not auto-clear meta
+    persist();
+  }
+}catch(e){}
+
 const _persistFinanceWrap = persist;
 persist = function(){
   _persistFinanceWrap();
@@ -9902,6 +9917,29 @@ function financeSetCurrentAsBaselineConfirm(){
     "¿Continuar?"
   );
   if(ok) financeSetCurrentAsBaseline();
+}
+
+function financeHardResetAll(){
+  // FULL WIPE: accounts + ledger. Use when starting fresh.
+  state.financeLedger = [];
+  state.financeAccounts = [];
+  state.financeResetAt = isoDate(new Date());
+  state.financeBaselineAt = isoDate(new Date());
+  state.financeMonthOffset = 0;
+  // keep financeMeta (expected income) by default
+  persist();
+  view();
+  toast("Finanzas borradas ✅ (inicio limpio)");
+}
+
+function financeHardResetAllConfirm(){
+  const ok = confirm(
+    "⚠️ Borrar TODO en Finanzas y empezar de cero?\n\n" +
+    "• Borra cuentas y movimientos.\n" +
+    "• No se puede deshacer.\n\n" +
+    "¿Continuar?"
+  );
+  if(ok) financeHardResetAll();
 }
 
 
@@ -10306,6 +10344,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
 
 LS.financeMeta = "memorycarl_v2_finance_meta";
 state.financeMeta = load(LS.financeMeta, {});
+if(state.financeMonthOffset===undefined) state.financeMonthOffset = 0;
 
 function setFinanceMeta(month, expectedIncome, targetSavings){
   state.financeMeta[month] = {
@@ -10317,13 +10356,31 @@ function setFinanceMeta(month, expectedIncome, targetSavings){
 }
 
 function getCurrentMonthKey(){
-  return new Date().toISOString().slice(0,7);
+  const off = Number(state.financeMonthOffset||0);
+  const d = new Date();
+  d.setMonth(d.getMonth()+off);
+  return d.toISOString().slice(0,7);
+}
+
+function financeShiftMonth(delta){
+  state.financeMonthOffset = Number(state.financeMonthOffset||0) + Number(delta||0);
+  persist();
+  view();
+}
+
+function financeResetMonth(){
+  state.financeMonthOffset = 0;
+  persist();
+  view();
 }
 
 function financeMonthDataAdvanced(){
-  const now = new Date();
-  const monthKey = getCurrentMonthKey();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  const off = Number(state.financeMonthOffset||0);
+  const base = new Date();
+  base.setMonth(base.getMonth()+off);
+
+  const monthKey = base.toISOString().slice(0,7);
+  const daysInMonth = new Date(base.getFullYear(), base.getMonth()+1, 0).getDate();
 
   let income = 0;
   let expense = 0;
@@ -10332,21 +10389,25 @@ function financeMonthDataAdvanced(){
   const dailyExpense = Array(daysInMonth).fill(0);
 
   (financeActiveLedger()||[]).forEach(e=>{
-    if(String(e.date||"").startsWith(monthKey)){
-      const day = Number(e.date.split("-")[2]) - 1;
+    const ds = String(e.date||"");
+    if(ds.startsWith(monthKey)){
+      const parts = ds.slice(0,10).split("-");
+      const day = Math.max(0, Math.min(daysInMonth-1, Number(parts[2]||"1") - 1));
       if(e.type==="income"){
-        income += Number(e.amount||0);
-        dailyIncome[day] += Number(e.amount||0);
+        const v = Number(e.amount||0);
+        income += v;
+        dailyIncome[day] += v;
       }
       if(e.type==="expense"){
-        expense += Number(e.amount||0);
-        dailyExpense[day] += Number(e.amount||0);
+        const v = Number(e.amount||0);
+        expense += v;
+        dailyExpense[day] += v;
       }
     }
   });
 
-  let accIncome = [];
-  let accExpense = [];
+  const accIncome = [];
+  const accExpense = [];
   let sumI = 0;
   let sumE = 0;
 
@@ -10357,19 +10418,36 @@ function financeMonthDataAdvanced(){
     accExpense.push(sumE);
   }
 
-  const today = now.getDate();
-  const dailyAvg = today ? expense/today : 0;
-  const projected = dailyAvg * daysInMonth;
+  // Projection line (expense). Only for current month; for other months show real.
+  const isCurrentMonth = (off===0);
+  const today = new Date().getDate();
+  const dailyAvg = (isCurrentMonth && today) ? (expense/today) : 0;
+  const projectedTotal = dailyAvg * daysInMonth;
+
+  const accProjected = [];
+  for(let i=0;i<daysInMonth;i++){
+    if(isCurrentMonth && (i+1) <= today){
+      accProjected.push(accExpense[i]);
+    }else if(isCurrentMonth){
+      const daysFuture = (i+1) - today;
+      accProjected.push(accExpense[Math.max(0,today-1)] + dailyAvg*daysFuture);
+    }else{
+      accProjected.push(accExpense[i]);
+    }
+  }
 
   const meta = state.financeMeta[monthKey] || {expectedIncome:0,targetSavings:0};
 
   return {
+    monthKey,
     income,
     expense,
-    projected,
+    projected: isCurrentMonth ? projectedTotal : expense,
     accIncome,
     accExpense,
+    accProjected,
     daysInMonth,
+    isCurrentMonth,
     meta
   };
 }
@@ -10515,6 +10593,8 @@ function renderFinanceMovements(type){
 
 // expose
 try{ window.setFinanceSubTab = setFinanceSubTab; }catch(e){}
+try{ window.financeShiftMonth = financeShiftMonth; window.financeResetMonth = financeResetMonth; }catch(e){}
+try{ window.financeHardResetAllConfirm = financeHardResetAllConfirm; }catch(e){}
 
 
 function viewFinance(){
@@ -10572,8 +10652,12 @@ function viewFinance(){
       <div class="cardTop">
         <h2 class="cardTitle">Cuentas</h2>
         <div class="row" style="gap:8px">
+          <button class="iconBtn" title="Mes anterior" onclick="financeShiftMonth(-1)">◀</button>
+          <button class="iconBtn" title="Mes actual" onclick="financeResetMonth()">●</button>
+          <button class="iconBtn" title="Mes siguiente" onclick="financeShiftMonth(1)">▶</button>
           <button class="iconBtn" title="Usar saldos actuales como inicio" onclick="financeSetCurrentAsBaselineConfirm()">⟲</button>
-          <button class="iconBtn" title="Reiniciar a cero" onclick="financeResetToZeroConfirm()">↺</button>
+          <button class="iconBtn" title="Reiniciar a cero (archiva historial)" onclick="financeResetToZeroConfirm()">↺</button>
+          <button class="iconBtn" title="Borrar TODO (inicio limpio)" onclick="financeHardResetAllConfirm()">🧨</button>
           <button class="iconBtn" title="Agregar cuenta" onclick="openFinanceAccountModal()">＋</button>
         </div>
       </div>
@@ -10642,33 +10726,56 @@ function openFinanceMetaModal(){
   setFinanceMeta(month, inc, sav);
 }
 
+let _financeMonthChart = null;
+
+function financeDrawMonthChart(){
+  const canvas = document.getElementById("financeChart");
+  if(!canvas || typeof Chart==="undefined") return;
+
+  const d = financeMonthDataAdvanced();
+  const labels = Array.from({length:d.daysInMonth}, (_,i)=> i+1);
+
+  try{
+    canvas.style.maxWidth = "100%";
+    canvas.style.width = "100%";
+  }catch(_e){}
+
+  try{ if(_financeMonthChart){ _financeMonthChart.destroy(); _financeMonthChart = null; } }catch(e){}
+
+  _financeMonthChart = new Chart(canvas.getContext("2d"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: "Gasto acumulado real", data: d.accExpense, tension: 0.25, pointRadius: 0 },
+        { label: "Proyección", data: d.accProjected, tension: 0.25, pointRadius: 0, borderDash: [6,4] },
+        { label: "Ingreso acumulado", data: d.accIncome, tension: 0.25, pointRadius: 0 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: true } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10 } },
+        y: { beginAtZero: true }
+      }
+    }
+  });
+}
+
 const _viewFinanceWrap = view;
 view = function(){
   _viewFinanceWrap();
   try{
     if(state.tab==="finance"){
-      const d = financeMonthDataAdvanced();
-      const ctx = document.getElementById("financeChart");
-      if(!ctx) return;
-
-      new Chart(ctx, {
-        type: "line",
-        data: {
-          labels: Array.from({length:d.daysInMonth},(_,i)=>i+1),
-          datasets: [
-            {label:"Ingresos acumulados", data:d.accIncome},
-            {label:"Gastos acumulados", data:d.accExpense}
-          ]
-        },
-        options: {
-          responsive:true,
-          plugins:{legend:{display:true}}
-        }
-      });
+      setTimeout(()=>{ 
+        try{ financeDrawMonthChart(); }catch(_e){} 
+        try{ renderDailyExpenseChart(); }catch(_e){} 
+      }, 0);
     }
   }catch(e){}
 };
-
 
 function getLast7DaysExpenseData(){
   const now = new Date();
@@ -10776,4 +10883,16 @@ try{
     financeResetToZeroConfirm,
     financeSetCurrentAsBaselineConfirm
   });
+}catch(e){}
+
+// finance handlers (module-safe)
+try{
+  window.financeResetToZeroConfirm = financeResetToZeroConfirm;
+  window.financeSetCurrentAsBaselineConfirm = financeSetCurrentAsBaselineConfirm;
+  window.financeHardResetAllConfirm = financeHardResetAllConfirm;
+  window.financeShiftMonth = financeShiftMonth;
+  window.financeResetMonth = financeResetMonth;
+  window.openFinanceAccountModal = openFinanceAccountModal;
+  window.openFinanceAccountEdit = openFinanceAccountEdit;
+  window.openFinanceEntryModal = openFinanceEntryModal;
 }catch(e){}
