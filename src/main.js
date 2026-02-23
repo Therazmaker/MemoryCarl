@@ -10767,8 +10767,13 @@ view = function(){
 
 /* ===== Finance: expose handlers for inline onclick (module scope -> window) ===== */
 try{
-  window.openFinanceImport = openFinanceImport;
-  window.openFinanceMetaModal = openFinanceMetaModal;
-  window.openFinanceAccountModal = openFinanceAccountModal;
-  window.openFinanceEntryModal = openFinanceEntryModal;
+  Object.assign(window, {
+    openFinanceImport,
+    openFinanceMetaModal,
+    openFinanceAccountModal,
+    openFinanceAccountEdit,
+    openFinanceEntryModal,
+    financeResetToZeroConfirm,
+    financeSetCurrentAsBaselineConfirm
+  });
 }catch(e){}
