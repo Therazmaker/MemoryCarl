@@ -9867,10 +9867,192 @@ function openFinanceEntryModal(){
     alert("Primero crea una cuenta");
     return;
   }
-  const type = prompt("Tipo (income / expense):");
-  const amount = prompt("Monto:");
-  const acc = state.financeAccounts[0].id;
-  addFinanceEntry(type, amount, acc, "General", "");
+
+  const now = new Date();
+  const isoDate = now.toISOString().slice(0,10);
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+
+  // default draft
+  const draft = {
+    type: state.financeMovTab || "expense",
+    name: "",
+    amount: "",
+    currency: "PEN",
+    date: isoDate,
+    time: `${hh}:${mm}`,
+    scheduled: false,
+    category: "Otros",
+    accountId: (state.financeAccounts||[])[0]?.id,
+    note: ""
+  };
+
+  const host = document.querySelector('#app') || document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modalBackdrop finEntryBackdrop';
+  backdrop.innerHTML = `
+    <div class="modal finEntryModal" role="dialog" aria-label="Añadir movimiento">
+      <div class="finEntryTop">
+        <button class="iconBtn" id="finEntryClose" aria-label="Volver">←</button>
+        <div class="finEntryTopTitle">Añadir</div>
+        <button class="iconBtn" id="finEntryPlusOne" title="+1">+1</button>
+      </div>
+
+      <div class="finEntryScroll">
+
+        <div class="finEntryField finEntryName">
+          <input id="finEntryName" type="text" placeholder="Nombre" value="${escapeHtml(draft.name)}" />
+          <button class="iconBtn" id="finEntryAttach" title="Adjuntar">📎</button>
+        </div>
+
+        <div class="finEntryDateRow">
+          <div class="finEntryDateChip">
+            <span>📅</span>
+            <input id="finEntryDate" type="date" value="${draft.date}" />
+          </div>
+          <div class="finEntryDateChip">
+            <span>🕒</span>
+            <input id="finEntryTime" type="time" value="${draft.time}" />
+          </div>
+          <button class="finEntryScheduleBtn" id="finEntrySchedule">Programar</button>
+        </div>
+
+        <div class="finEntryAmountRow">
+          <div class="finEntrySign ${draft.type==='expense' ? 'expense' : 'income'}" id="finEntrySign">${draft.type==='expense' ? '−' : '+'}</div>
+          <input id="finEntryAmount" type="number" inputmode="decimal" placeholder="0.00" value="${escapeHtml(draft.amount)}" />
+          <button class="iconBtn" id="finEntryCalc" title="Calculadora">🧮</button>
+          <button class="finEntryCurrency" id="finEntryCurrency">${draft.currency}</button>
+        </div>
+
+        <div class="finEntryPickRow">
+          <div class="finEntryPickIcon">⋯</div>
+          <div class="finEntryPickText">
+            <div class="finEntryPickLabel">Categoría</div>
+            <div class="finEntryPickValue">
+              <select id="finEntryCategory">
+                ${["Otros","Comida","Mercado","Bebidas","Transporte","Internet","Medicina","Hogar"].map(c=>`<option ${c===draft.category?'selected':''}>${c}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="finEntryPickRow">
+          <div class="finEntryPickIcon">💳</div>
+          <div class="finEntryPickText">
+            <div class="finEntryPickLabel">Cuenta</div>
+            <div class="finEntryPickValue">
+              <select id="finEntryAccount">
+                ${(state.financeAccounts||[]).map(a=>`<option value="${a.id}" ${a.id===draft.accountId?'selected':''}>${escapeHtml(a.name)} (${a.type||''})</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="finEntryPickRow" id="finEntrySplitRow">
+          <div class="finEntryPickIcon">≡</div>
+          <div class="finEntryPickText">
+            <div class="finEntryPickLabel">Dividir</div>
+            <div class="finEntryPickValue muted">Pronto</div>
+          </div>
+        </div>
+
+        <div class="finEntryPickRow" id="finEntryStateRow">
+          <div class="finEntryPickIcon">▦</div>
+          <div class="finEntryPickText">
+            <div class="finEntryPickLabel">Estado</div>
+            <div class="finEntryPickValue muted">Normal</div>
+          </div>
+        </div>
+
+        <div class="finEntryPickRow" id="finEntryTagRow">
+          <div class="finEntryPickIcon">#</div>
+          <div class="finEntryPickText">
+            <div class="finEntryPickLabel">Etiqueta</div>
+            <div class="finEntryPickValue muted">(opcional)</div>
+          </div>
+        </div>
+
+        <div class="finEntryNote">
+          <textarea id="finEntryNote" placeholder="Nota">${escapeHtml(draft.note)}</textarea>
+        </div>
+
+        <div class="finEntrySpacer"></div>
+      </div>
+
+      <div class="finEntryBottomBar">
+        <div class="finEntryTypeBtns">
+          <button class="finEntryTypeBtn ${draft.type==='expense'?'active':''}" data-type="expense">GASTOS</button>
+          <button class="finEntryTypeBtn ${draft.type==='income'?'active':''}" data-type="income">INGRESOS</button>
+          <button class="finEntryTypeBtn" data-type="transfer">TRANSFERIR</button>
+        </div>
+        <button class="finEntrySave" id="finEntrySave" aria-label="Guardar">💾</button>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(backdrop);
+
+  const close = ()=> backdrop.remove();
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
+  backdrop.querySelector('#finEntryClose')?.addEventListener('click', close);
+
+  // basic affordances
+  backdrop.querySelector('#finEntryAttach')?.addEventListener('click', ()=> toast('Adjuntos: pronto ✨'));
+  backdrop.querySelector('#finEntryCalc')?.addEventListener('click', ()=> toast('Calculadora: pronto ✨'));
+  backdrop.querySelector('#finEntryPlusOne')?.addEventListener('click', ()=>{
+    const a = backdrop.querySelector('#finEntryAmount');
+    const cur = Number(a?.value||0);
+    if(a) a.value = (cur + 1).toFixed(2);
+  });
+  backdrop.querySelector('#finEntrySchedule')?.addEventListener('click', ()=>{
+    draft.scheduled = !draft.scheduled;
+    toast(draft.scheduled ? 'Programado ✅' : 'Sin programación');
+  });
+
+  function setType(t){
+    draft.type = t;
+    const sign = backdrop.querySelector('#finEntrySign');
+    if(sign){
+      sign.textContent = (t==='expense' ? '−' : '+');
+      sign.classList.toggle('expense', t==='expense');
+      sign.classList.toggle('income', t==='income');
+    }
+    backdrop.querySelectorAll('.finEntryTypeBtn').forEach(b=>{
+      b.classList.toggle('active', b.getAttribute('data-type')===t);
+    });
+  }
+
+  backdrop.querySelectorAll('.finEntryTypeBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const t = btn.getAttribute('data-type');
+      if(t==='transfer') return toast('Transferir: siguiente fase 😼');
+      setType(t);
+    });
+  });
+
+  // save
+  backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
+    const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
+    const amount = Number(backdrop.querySelector('#finEntryAmount')?.value||0);
+    const category = (backdrop.querySelector('#finEntryCategory')?.value||'Otros');
+    const accountId = (backdrop.querySelector('#finEntryAccount')?.value||draft.accountId);
+    const note = (backdrop.querySelector('#finEntryNote')?.value||'').trim();
+
+    if(!amount || amount<=0){ toast('Pon un monto válido'); return; }
+
+    // date combines date + time to ISO-like string (keep date for grouping)
+    const date = (backdrop.querySelector('#finEntryDate')?.value || isoDate);
+
+    // store name into note if provided
+    const finalNote = name ? (note ? `${name} · ${note}` : name) : note;
+
+    addFinanceEntry(draft.type, amount, accountId, category, finalNote);
+    toast('Guardado ✅');
+    close();
+  });
+
+  // focus
+  setTimeout(()=>{ backdrop.querySelector('#finEntryName')?.focus(); }, 50);
 }
 
 LS.financeMeta = "memorycarl_v2_finance_meta";

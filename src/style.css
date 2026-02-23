@@ -1444,3 +1444,213 @@ body{
   color:rgba(255,255,255,.55);
   font-variant-numeric:tabular-nums;
 }
+
+/* ===== Finance: Entry modal (Añadir) ===== */
+.finEntryBackdrop .modal{
+  max-width: 560px;
+}
+.finEntryModal{
+  padding: 0;
+  overflow: hidden;
+  max-height: 92vh;
+}
+.finEntryTop{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.finEntryTopTitle{
+  font-weight: 900;
+  letter-spacing: .2px;
+  opacity: .95;
+}
+.finEntryScroll{
+  padding: 14px;
+  overflow: auto;
+  max-height: calc(92vh - 120px);
+}
+.finEntryField input,
+.finEntryScroll input,
+.finEntryScroll select,
+.finEntryScroll textarea{
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.92);
+  border-radius: 16px;
+  padding: 14px 14px;
+  outline: none;
+}
+.finEntryScroll select{ padding: 12px 14px; }
+.finEntryName{
+  display:flex;
+  gap:10px;
+  align-items:center;
+}
+.finEntryName input{
+  font-size: 22px;
+  font-weight: 900;
+  padding: 16px 16px;
+}
+.finEntryName .iconBtn{
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+
+.finEntryDateRow{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  margin-top: 12px;
+}
+.finEntryDateChip{
+  flex: 1;
+  display:flex;
+  gap:10px;
+  align-items:center;
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 16px;
+  padding: 8px 10px;
+}
+.finEntryDateChip input{
+  border: 0;
+  background: transparent;
+  padding: 8px 0;
+}
+.finEntryScheduleBtn{
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  color: rgba(255,255,255,.85);
+  border-radius: 16px;
+  padding: 12px 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.finEntryAmountRow{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  margin-top: 14px;
+}
+.finEntrySign{
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight: 1000;
+  background: rgba(255,70,70,.90);
+  color: #fff;
+  flex: 0 0 42px;
+}
+.finEntryAmountRow input{
+  flex: 1;
+  font-size: 22px;
+  font-weight: 900;
+  text-align: left;
+}
+.finEntryAmountRow .iconBtn{
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+.finEntryCurrency{
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  color: rgba(255,255,255,.85);
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.finEntryPickRow{
+  display:flex;
+  gap:12px;
+  align-items:center;
+  margin-top: 12px;
+}
+.finEntryPickIcon{
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  opacity: .95;
+}
+.finEntryPickText{ flex: 1; min-width: 0; }
+.finEntryPickLabel{
+  font-size: 12px;
+  color: rgba(255,255,255,.55);
+  margin-bottom: 6px;
+  font-weight: 800;
+}
+.finEntryPickValue select{
+  padding: 14px 14px;
+}
+
+.finEntryNote textarea{
+  margin-top: 14px;
+  min-height: 120px;
+  resize: none;
+}
+
+.finEntrySpacer{ height: 60px; }
+
+.finEntryBottomBar{
+  display:flex;
+  gap: 12px;
+  align-items:center;
+  justify-content:space-between;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255,255,255,.06);
+  background: rgba(0,0,0,.25);
+}
+.finEntryTypeBtns{
+  display:flex;
+  gap: 10px;
+  flex: 1;
+}
+.finEntryTypeBtn{
+  flex: 1;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.03);
+  color: rgba(255,255,255,.75);
+  border-radius: 16px;
+  padding: 12px 10px;
+  font-weight: 1000;
+  letter-spacing: .3px;
+  cursor: pointer;
+}
+.finEntryTypeBtn.active{
+  color: rgba(255,255,255,.95);
+  border-color: rgba(255,255,255,.18);
+}
+.finEntryTypeBtn[data-type="expense"].active{ background: rgba(255,70,70,.85); }
+.finEntryTypeBtn[data-type="income"].active{ background: rgba(70,200,120,.75); }
+
+.finEntrySave{
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(90,220,140,.25);
+  font-size: 20px;
+  cursor: pointer;
+}
+.finEntrySign.expense{ background: rgba(255,70,70,.90); }
+.finEntrySign.income{ background: rgba(70,200,120,.80); }
