@@ -11474,6 +11474,361 @@ function financeDrawDebtChart(){
   });
 }
 
+/* ====================== FINANCE: DEBTS (Vencimientos + Plan + Simulador) ====================== */
+
+function financeDebtPlannerGet(monthKey){
+  state.financeDebtPlanner = state.financeDebtPlanner || {};
+  if(!state.financeDebtPlanner[monthKey]){
+    state.financeDebtPlanner[monthKey] = {
+      strategy: 'snowball', // snowball | avalanche
+      extraMonthly: 0,      // extra payment per month (above minimums)
+      externalMonthly: 0,   // extra income (ej: emprendimiento Fergis) para cubrir intereses/extra
+      includeInterest: true
+    };
+  }
+  return state.financeDebtPlanner[monthKey];
+}
+
+function financeDebtPlannerSet(monthKey, patch){
+  const cur = financeDebtPlannerGet(monthKey);
+  Object.assign(cur, patch||{});
+  persist();
+  view();
+}
+
+function financeDebtUpcomingItems(){
+  const now = new Date();
+  const todayISO = now.toISOString().slice(0,10);
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0,0,0);
+  const weekEnd = new Date(start.getTime() + 7*24*3600*1000);
+  const y = now.getFullYear();
+  const m = now.getMonth();
+
+  const actives = financeDebtsActive().filter(d=>String(d.status||'active')==='active');
+  const items = actives.map(d=>{
+    const dueISO = financeDebtNextDueISO(d.dueDay);
+    const dueDate = new Date(dueISO+'T12:00:00');
+    return {
+      id: d.id,
+      name: d.name,
+      dueISO,
+      dueDate,
+      dueLabel: financeDebtDueLabel(dueISO),
+      amount: financeDebtSafeNum(d.monthlyDue||0),
+      balance: financeDebtSafeNum(d.balance||0),
+      apr: financeDebtSafeNum(d.apr||0)
+    };
+  }).sort((a,b)=> a.dueDate - b.dueDate);
+
+  const inWeek = items.filter(it=> it.dueDate >= start && it.dueDate < weekEnd);
+  const inMonth = items.filter(it=> it.dueDate.getFullYear()===y && it.dueDate.getMonth()===m);
+
+  return { todayISO, inWeek, inMonth, all: items };
+}
+
+function financeDebtChooseTarget(debts, strategy){
+  const list = debts.filter(d=>d.balance>0.01);
+  if(!list.length) return null;
+  if(strategy==='avalanche'){
+    // highest APR first; fallback by balance
+    list.sort((a,b)=>{
+      const da = financeDebtSafeNum(a.apr||0);
+      const db = financeDebtSafeNum(b.apr||0);
+      if(db!==da) return db-da;
+      return (b.balance||0)-(a.balance||0);
+    });
+    return list[0];
+  }
+  // snowball: smallest balance first
+  list.sort((a,b)=> (a.balance||0)-(b.balance||0));
+  return list[0];
+}
+
+function financeDebtSimulate({strategy, extraMonthly, externalMonthly, includeInterest}){
+  const now = new Date();
+  const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const debts0 = financeDebtsActive()
+    .filter(d=>String(d.status||'active')==='active')
+    .map(d=>({
+      id: d.id,
+      name: d.name,
+      apr: financeDebtSafeNum(d.apr||0),
+      due: financeDebtSafeNum(d.monthlyDue||0),
+      balance: Math.max(0, financeDebtSafeNum(d.balance||0))
+    }))
+    .filter(d=>d.balance>0);
+
+  const out = {
+    months: 0,
+    finishISO: null,
+    totalInterest: 0,
+    totalPaid: 0,
+    steps: [],
+    ok: debts0.length>0
+  };
+  if(!out.ok){
+    out.finishISO = now.toISOString().slice(0,10);
+    return out;
+  }
+
+  // Safety caps to avoid infinite loops on bad inputs
+  const MAX_MONTHS = 240;
+
+  let debts = debts0;
+  let freed = 0; // freed minimums from paid-off debts (snowball effect)
+  let monthCursor = new Date(startMonth.getTime());
+
+  for(let month=0; month<MAX_MONTHS; month++){
+    // check done
+    const remaining = debts.reduce((s,d)=> s + d.balance, 0);
+    if(remaining <= 0.01){
+      out.months = month;
+      out.finishISO = monthCursor.toISOString().slice(0,10);
+      break;
+    }
+
+    // accrue interest (monthly)
+    if(includeInterest){
+      for(const d of debts){
+        const apr = financeDebtSafeNum(d.apr||0);
+        if(apr>0 && d.balance>0){
+          const i = d.balance * (apr/100) / 12;
+          d.balance += i;
+          out.totalInterest += i;
+        }
+      }
+    }
+
+    // pay minimums
+    let paidThisMonth = 0;
+    for(const d of debts){
+      if(d.balance<=0) continue;
+      const pay = Math.min(d.balance, Math.max(0, d.due||0));
+      d.balance -= pay;
+      paidThisMonth += pay;
+      if(d.balance<=0.01){
+        // debt paid: free its minimum payment for next months
+        freed += Math.max(0, d.due||0);
+        d.balance = 0;
+      }
+    }
+
+    // extra pool this month
+    let extraPool = Math.max(0, financeDebtSafeNum(extraMonthly||0)) + Math.max(0, financeDebtSafeNum(externalMonthly||0)) + freed;
+
+    // allocate extra to target debt (then next)
+    while(extraPool>0.01){
+      const target = financeDebtChooseTarget(debts, strategy);
+      if(!target) break;
+      const pay = Math.min(target.balance, extraPool);
+      target.balance -= pay;
+      paidThisMonth += pay;
+      extraPool -= pay;
+      if(target.balance<=0.01){
+        freed += Math.max(0, target.due||0);
+        target.balance = 0;
+      }
+    }
+
+    out.totalPaid += paidThisMonth;
+
+    // record first 3 months as steps preview
+    if(out.steps.length<3){
+      const snapshot = debts
+        .filter(d=>d.balance>0.01)
+        .sort((a,b)=> b.balance-a.balance)
+        .slice(0,5)
+        .map(d=> `${d.name}: S/ ${_financeFmt(d.balance)}`);
+      out.steps.push({
+        monthISO: monthCursor.toISOString().slice(0,10),
+        paid: paidThisMonth,
+        remaining: debts.reduce((s,d)=> s + d.balance, 0),
+        top: snapshot
+      });
+    }
+
+    // advance month
+    monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth()+1, 1);
+  }
+
+  if(!out.finishISO){
+    out.months = MAX_MONTHS;
+    out.finishISO = monthCursor.toISOString().slice(0,10);
+  }
+  return out;
+}
+
+function financeDebtRenderUpcoming(){
+  const fmt = _financeFmt;
+  const u = financeDebtUpcomingItems();
+
+  function itemRow(it){
+    return `
+      <div class="finDueRow">
+        <div class="finDueLeft">
+          <div class="finDueTitle">${escapeHtml(it.name)}</div>
+          <div class="muted">Vence: ${escapeHtml(it.dueLabel)} · saldo S/ ${fmt(it.balance)}</div>
+        </div>
+        <div class="finDueAmt">S/ ${fmt(it.amount)}</div>
+      </div>
+    `;
+  }
+
+  const weekHtml = u.inWeek.length ? u.inWeek.map(itemRow).join('') : `<div class="muted">Nada en los próximos 7 días.</div>`;
+  const monthHtml = u.inMonth.length ? u.inMonth.map(itemRow).join('') : `<div class="muted">Sin vencimientos este mes (según día de pago).</div>`;
+
+  const weekTotal = u.inWeek.reduce((s,x)=> s + financeDebtSafeNum(x.amount), 0);
+  const monthTotal = u.inMonth.reduce((s,x)=> s + financeDebtSafeNum(x.amount), 0);
+
+  return `
+    <div class="grid2" style="gap:10px">
+      <div class="finDueBox">
+        <div class="finDueHead">
+          <div><strong>Esta semana</strong></div>
+          <div class="muted">S/ ${fmt(weekTotal)}</div>
+        </div>
+        ${weekHtml}
+      </div>
+      <div class="finDueBox">
+        <div class="finDueHead">
+          <div><strong>Este mes</strong></div>
+          <div class="muted">S/ ${fmt(monthTotal)}</div>
+        </div>
+        ${monthHtml}
+      </div>
+    </div>
+  `;
+}
+
+function financeDebtPlanUI(){
+  const fmt = _financeFmt;
+  const monthKey = getCurrentMonthKey();
+  const plan = financeDebtPlannerGet(monthKey);
+  const meta = (state.financeMeta||{})[monthKey] || {expectedIncome:0};
+  const income = financeDebtSafeNum(meta.expectedIncome||0);
+  const minPays = financeDebtMonthlyTotal();
+  const baseGap = income - minPays;
+
+  const extra = financeDebtSafeNum(plan.extraMonthly||0);
+  const ext = financeDebtSafeNum(plan.externalMonthly||0);
+  const pool = Math.max(0, baseGap) + extra + ext;
+
+  const sim = financeDebtSimulate({
+    strategy: plan.strategy,
+    extraMonthly: extra,
+    externalMonthly: ext,
+    includeInterest: !!plan.includeInterest
+  });
+
+  const target = financeDebtChooseTarget(
+    financeDebtsActive().filter(d=>String(d.status||'active')==='active').map(d=>({
+      id:d.id, name:d.name, apr:d.apr, balance:financeDebtSafeNum(d.balance), due:financeDebtSafeNum(d.monthlyDue)
+    })),
+    plan.strategy
+  );
+
+  const targetLine = target
+    ? (plan.strategy==='avalanche'
+      ? `Prioridad: <strong>${escapeHtml(target.name)}</strong> (APR más alto)`
+      : `Prioridad: <strong>${escapeHtml(target.name)}</strong> (saldo más pequeño)`)
+    : `Sin deudas activas.`;
+
+  const finishLbl = (function(){
+    try{
+      const d = new Date(sim.finishISO);
+      return d.toLocaleDateString('es-PE', {month:'short', year:'numeric'});
+    }catch(e){ return sim.finishISO; }
+  })();
+
+  const steps = sim.steps.map(s=>{
+    const lines = (s.top||[]).map(t=>`<div class="muted">· ${t}</div>`).join('');
+    return `
+      <div class="finSimStep">
+        <div><strong>${escapeHtml(s.monthISO)}</strong> · pagas S/ ${fmt(s.paid)} · queda S/ ${fmt(s.remaining)}</div>
+        ${lines ? `<div style="margin-top:6px">${lines}</div>` : ``}
+      </div>
+    `;
+  }).join('');
+
+  const interestNote = plan.includeInterest
+    ? `<div class="muted">Incluye interés aproximado (APR/12 si está registrado). Si una deuda no tiene APR, se asume 0%.</div>`
+    : `<div class="muted">Simulación sin interés (solo amortización). Útil para tener un estimado rápido.</div>`;
+
+  const extHint = `<div class="muted">Tip: el ingreso externo (emprendimiento de Fergis) puede ir directo a cubrir intereses o acelerar la deuda objetivo.</div>`;
+
+  return `
+    <div class="finPlanBox">
+      <div class="cardTop" style="margin-top:0">
+        <h3 class="cardTitle" style="font-size:14px">Plan y simulación</h3>
+      </div>
+      <div class="hr"></div>
+
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="chipBtn ${plan.strategy==='snowball'?'active':''}" onclick="financeDebtSetStrategy('snowball')">Snowball</button>
+        <button class="chipBtn ${plan.strategy==='avalanche'?'active':''}" onclick="financeDebtSetStrategy('avalanche')">Avalanche</button>
+
+        <label class="row" style="gap:6px;align-items:center;margin-left:auto">
+          <input type="checkbox" ${plan.includeInterest?'checked':''} onchange="financeDebtToggleInterest(this.checked)" />
+          <span class="muted">interés</span>
+        </label>
+      </div>
+
+      <div class="grid2" style="gap:10px;margin-top:10px">
+        <div class="field">
+          <div class="label">Extra mensual (tú)</div>
+          <input type="number" inputmode="decimal" value="${escapeHtml(String(extra))}" oninput="financeDebtSetExtraMonthly(this.value)" placeholder="0.00" />
+          <div class="muted">Pago adicional que puedes meter encima de mínimos.</div>
+        </div>
+        <div class="field">
+          <div class="label">Extra mensual externo (Fergis)</div>
+          <input type="number" inputmode="decimal" value="${escapeHtml(String(ext))}" oninput="financeDebtSetExternalMonthly(this.value)" placeholder="0.00" />
+          ${extHint}
+        </div>
+      </div>
+
+      <div class="hr" style="margin-top:12px"></div>
+
+      <div class="finPlanSummary">
+        <div>${targetLine}</div>
+        <div class="muted" style="margin-top:6px">Pool estimado para acelerar: <strong>S/ ${fmt(pool)}</strong> (gap positivo + extras)</div>
+        <div class="muted" style="margin-top:6px">Deuda libre en aprox: <strong>${sim.months}</strong> meses (≈ ${escapeHtml(finishLbl)})</div>
+        <div class="muted" style="margin-top:6px">Interés estimado total: <strong>S/ ${fmt(sim.totalInterest)}</strong></div>
+      </div>
+
+      <div style="margin-top:10px">${interestNote}</div>
+
+      <div class="hr" style="margin-top:12px"></div>
+      <div class="muted" style="margin-bottom:6px">Vista previa (primeros meses)</div>
+      ${steps || `<div class="muted">Agrega al menos 1 deuda activa con saldo para simular.</div>`}
+    </div>
+  `;
+}
+
+function financeDebtSetStrategy(s){
+  const monthKey = getCurrentMonthKey();
+  financeDebtPlannerSet(monthKey, {strategy: String(s||'snowball')});
+}
+function financeDebtSetExtraMonthly(v){
+  const monthKey = getCurrentMonthKey();
+  financeDebtPlannerSet(monthKey, {extraMonthly: financeDebtSafeNum(v)});
+}
+function financeDebtSetExternalMonthly(v){
+  const monthKey = getCurrentMonthKey();
+  financeDebtPlannerSet(monthKey, {externalMonthly: financeDebtSafeNum(v)});
+}
+function financeDebtToggleInterest(flag){
+  const monthKey = getCurrentMonthKey();
+  financeDebtPlannerSet(monthKey, {includeInterest: !!flag});
+}
+
+try{
+  window.financeDebtSetStrategy = financeDebtSetStrategy;
+  window.financeDebtSetExtraMonthly = financeDebtSetExtraMonthly;
+  window.financeDebtSetExternalMonthly = financeDebtSetExternalMonthly;
+  window.financeDebtToggleInterest = financeDebtToggleInterest;
+}catch(e){}
+
+
 function renderFinanceDebtsTab(){
   const fmt = _financeFmt;
   const monthKey = getCurrentMonthKey();
@@ -11544,7 +11899,18 @@ function renderFinanceDebtsTab(){
       <div class="cardTop" style="margin-top:2px">
         <h3 class="cardTitle" style="font-size:14px">Ingreso vs pagos</h3>
       </div>
-      <canvas id="financeDebtChart" height="140"></canvas>
+      \1
+
+      <div class="hr" style="margin-top:12px"></div>
+      <div class="cardTop" style="margin-top:2px">
+        <h3 class="cardTitle" style="font-size:14px">Calendario de vencimientos</h3>
+      </div>
+      <div class="finDueWrap">
+        ${financeDebtRenderUpcoming()}
+      </div>
+
+      <div class="hr" style="margin-top:12px"></div>
+      ${financeDebtPlanUI()}
 
       <div class="hr" style="margin-top:12px"></div>
       <div class="cardTop" style="margin-top:2px">
