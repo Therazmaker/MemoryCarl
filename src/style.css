@@ -1581,6 +1581,8 @@ body{
   align-items:center;
   margin-top: 12px;
 }
+.finEntryPickClickable{ cursor:pointer; }
+.finEntryPickArrow{ opacity:.55; font-weight: 900; }
 .finEntryPickIcon{
   width: 40px;
   height: 40px;
@@ -1735,6 +1737,10 @@ body{
   font-weight: 800;
   cursor: pointer;
 }
+.chipBtn.active{
+  border-color: rgba(255,255,255,.22);
+  background: rgba(255,255,255,.14);
+}
 .chipBtn:active{ transform: scale(.98); }
 .finWeeklyBullet{
   line-height: 1.25;
@@ -1748,3 +1754,89 @@ body{
   padding: 8px 0;
   border-top: 1px solid rgba(255,255,255,.06);
 }
+
+/* ===== Finance Phase 5: Category Picker ===== */
+.finCatBackdrop .modal{ max-width: 520px; }
+.finCatModal{
+  width: min(520px, 96vw);
+  max-height: 86vh;
+  overflow: hidden;
+  border-radius: 22px;
+}
+.finCatTop{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 10px 12px;
+}
+.finCatTitle{ font-weight: 900; opacity:.9; }
+.finCatPanel{ padding: 10px 12px 14px; }
+.finCatSearchRow{ display:flex; gap:10px; align-items:center; }
+.finCatSearch{
+  flex:1;
+  display:flex;
+  gap:10px;
+  align-items:center;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  border-radius: 999px;
+  padding: 10px 12px;
+}
+.finCatSearch input{
+  flex:1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: rgba(255,255,255,.92);
+  font-weight: 700;
+}
+.finCatSearchIcon{ opacity:.7; }
+.finCatNewBtn{
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.9);
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.finCatBody{
+  margin-top: 12px;
+  overflow: auto;
+  max-height: calc(86vh - 130px);
+  padding-right: 4px;
+}
+.finCatGroup{ margin-top: 10px; }
+.finCatGroupTitle{
+  text-align:center;
+  font-weight: 900;
+  opacity: .85;
+  margin: 10px 0 8px;
+}
+.finCatGrid{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.finCatItem{
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,.92);
+  cursor: pointer;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap: 8px;
+}
+.finCatIcon{
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color: #fff;
+  font-weight: 900;
+  border: 1px solid rgba(0,0,0,.25);
+}
+.finCatLabel{ text-align:center; font-weight: 800; opacity:.9; font-size: 13px; }

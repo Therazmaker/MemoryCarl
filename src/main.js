@@ -9938,6 +9938,9 @@ persist = function(){
   save(LS.financeLedger, state.financeLedger);
   save(LS.financeAccounts, state.financeAccounts);
   save(LS.financeResetAt, state.financeResetAt);
+  try{ save(LS.financeMeta, state.financeMeta); }catch(_e){}
+  try{ save(LS.financeCategories, state.financeCategories); }catch(_e){}
+  try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(state.financeProjectionMode||"normal")); }catch(_e){}
 };
 
 
@@ -10310,16 +10313,13 @@ function openFinanceEntryModal(){
           <button class="finEntryCurrency" id="finEntryCurrency">${draft.currency}</button>
         </div>
 
-        <div class="finEntryPickRow">
-          <div class="finEntryPickIcon">⋯</div>
+        <div class="finEntryPickRow finEntryPickClickable" id="finEntryCategoryRow">
+          <div class="finEntryPickIcon" id="finEntryCategoryIcon">${escapeHtml(financeCategoryIcon(draft.category))}</div>
           <div class="finEntryPickText">
             <div class="finEntryPickLabel">Categoría</div>
-            <div class="finEntryPickValue">
-              <select id="finEntryCategory">
-                ${["Otros","Comida","Mercado","Bebidas","Transporte","Internet","Medicina","Hogar"].map(c=>`<option ${c===draft.category?'selected':''}>${c}</option>`).join('')}
-              </select>
-            </div>
+            <div class="finEntryPickValue" id="finEntryCategoryValue">${escapeHtml(draft.category||"Otros")}</div>
           </div>
+          <div class="finEntryPickArrow">▾</div>
         </div>
 
         <div class="finEntryPickRow">
@@ -10412,6 +10412,20 @@ function openFinanceEntryModal(){
     toast(draft.scheduled ? 'Programado ✅' : 'Sin programación');
   });
 
+  // Category picker (Phase 5)
+  backdrop.querySelector('#finEntryCategoryRow')?.addEventListener('click', ()=>{
+    financeOpenCategoryPicker({
+      title: 'Categorías',
+      onPick: (cat)=>{
+        draft.category = cat?.name || 'Otros';
+        const v = backdrop.querySelector('#finEntryCategoryValue');
+        const ic = backdrop.querySelector('#finEntryCategoryIcon');
+        if(v) v.textContent = draft.category;
+        if(ic) ic.textContent = financeCategoryIcon(draft.category);
+      }
+    });
+  });
+
   function setType(t){
     draft.type = t;
     const sign = backdrop.querySelector('#finEntrySign');
@@ -10437,7 +10451,7 @@ function openFinanceEntryModal(){
 backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
   const amount = Number(backdrop.querySelector('#finEntryAmount')?.value||0);
-  const category = (backdrop.querySelector('#finEntryCategory')?.value||'Otros');
+  const category = (draft.category||'Otros');
   const reason = (backdrop.querySelector('#finEntryReason')?.value||'normal');
   const accountId = (backdrop.querySelector('#finEntryAccount')?.value||draft.accountId);
   const noteText = (backdrop.querySelector('#finEntryNote')?.value||'').trim();
@@ -10474,6 +10488,165 @@ LS.financeMeta = "memorycarl_v2_finance_meta";
 state.financeMeta = load(LS.financeMeta, {});
 if(state.financeMonthOffset===undefined) state.financeMonthOffset = 0;
 
+// Finance Categories + Projection Mode (Phase 5)
+LS.financeCategories = "memorycarl_v2_finance_categories";
+state.financeCategories = load(LS.financeCategories, null);
+try{
+  const pm = localStorage.getItem("memorycarl_v2_finance_projection_mode");
+  if(pm) state.financeProjectionMode = pm;
+}catch(e){}
+if(!state.financeProjectionMode) state.financeProjectionMode = "normal"; // conservative | normal | realistic
+
+function financeInitCategories(){
+  if(state.financeCategories && Array.isArray(state.financeCategories.groups)) return;
+  state.financeCategories = {
+    v: 1,
+    groups: [
+      { id:"home", name:"Casa", items:[
+        { id:"rent", name:"Alquiler", icon:"🏢", color:"#ff4d4d" },
+        { id:"school", name:"Colegio", icon:"🎓", color:"#ff4d4d" },
+        { id:"bday", name:"Cumpleaños", icon:"👨‍👩‍👧", color:"#ff4d4d" },
+        { id:"internet", name:"Internet", icon:"📶", color:"#ff4d4d" },
+        { id:"gas", name:"Gas", icon:"🔥", color:"#ff4d4d" }
+      ]},
+      { id:"food", name:"Comida", items:[
+        { id:"market", name:"Mercado", icon:"🛒", color:"#ff4d4d" },
+        { id:"bodegas", name:"Bodegas", icon:"🛒", color:"#ff4d4d" },
+        { id:"drinks", name:"Bebidas", icon:"🥤", color:"#ff4d4d" }
+      ]},
+      { id:"health", name:"Salud", items:[
+        { id:"meds", name:"Medicamentos", icon:"💊", color:"#ff4d4d" },
+        { id:"therapy", name:"Psicología", icon:"🧠", color:"#ff4d4d" }
+      ]},
+      { id:"other", name:"Otros", items:[
+        { id:"other", name:"Otros", icon:"●", color:"#ff4d4d" }
+      ]}
+    ]
+  };
+  persist();
+}
+
+function financeFlattenCategories(){
+  financeInitCategories();
+  const out = [];
+  (state.financeCategories.groups||[]).forEach(g=>{
+    (g.items||[]).forEach(it=> out.push({ ...it, groupId:g.id, groupName:g.name }));
+  });
+  return out;
+}
+
+function financeFindCategoryByName(name){
+  const n = String(name||"").trim().toLowerCase();
+  if(!n) return null;
+  return financeFlattenCategories().find(c=> String(c.name||"").toLowerCase()===n) || null;
+}
+
+function financeCategoryIcon(name){
+  const c = financeFindCategoryByName(name);
+  return c?.icon || _financeIconForCategory(name);
+}
+
+function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}={}){
+  financeInitCategories();
+  const host = document.querySelector('#app') || document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modalBackdrop finCatBackdrop';
+
+  backdrop.innerHTML = `
+    <div class="modal finCatModal" role="dialog" aria-label="${escapeHtml(title)}">
+      <div class="finCatTop">
+        <button class="iconBtn" id="finCatClose">←</button>
+        <div class="finCatTitle">${escapeHtml(title)}</div>
+        <div style="width:38px"></div>
+      </div>
+
+      <div class="finCatPanel">
+        <div class="finCatSearchRow">
+          <div class="finCatSearch">
+            <span class="finCatSearchIcon">🔎</span>
+            <input id="finCatSearchInput" placeholder="Buscar" />
+          </div>
+          ${allowNew ? `<button class="finCatNewBtn" id="finCatNewBtn">Nuevo</button>` : ``}
+        </div>
+
+        <div id="finCatBody" class="finCatBody"></div>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(backdrop);
+  const close = ()=> backdrop.remove();
+  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
+  backdrop.querySelector('#finCatClose')?.addEventListener('click', close);
+
+  const body = backdrop.querySelector('#finCatBody');
+  const input = backdrop.querySelector('#finCatSearchInput');
+
+  function render(filter=""){
+    const f = String(filter||"").trim().toLowerCase();
+    const groups = (state.financeCategories.groups||[]).map(g=>{
+      const items = (g.items||[]).filter(it=>{
+        if(!f) return true;
+        return String(it.name||"").toLowerCase().includes(f);
+      });
+      return {g, items};
+    }).filter(x=>x.items.length);
+
+    if(!groups.length){
+      body.innerHTML = `<div class="muted" style="padding:12px">Sin resultados.</div>`;
+      return;
+    }
+
+    body.innerHTML = groups.map(({g,items})=>{
+      return `
+        <div class="finCatGroup">
+          <div class="finCatGroupTitle">${escapeHtml(g.name)}</div>
+          <div class="finCatGrid">
+            ${items.map(it=>`
+              <button class="finCatItem" data-name="${escapeHtml(it.name)}" title="${escapeHtml(it.name)}">
+                <div class="finCatIcon" style="background:${escapeHtml(it.color||'#ff4d4d')}">${escapeHtml(it.icon||'●')}</div>
+                <div class="finCatLabel">${escapeHtml(it.name)}</div>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    body.querySelectorAll('.finCatItem').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const nm = btn.getAttribute('data-name') || '';
+        const cat = financeFindCategoryByName(nm) || {name:nm, icon:'●'};
+        try{ onPick && onPick(cat); }catch(_e){}
+        close();
+      });
+    });
+  }
+
+  input?.addEventListener('input', ()=> render(input.value));
+  render("");
+
+  backdrop.querySelector('#finCatNewBtn')?.addEventListener('click', ()=>{
+    const nm = prompt('Nombre de la categoría:');
+    if(!nm) return;
+    const groupName = prompt('Grupo (ej: Casa, Comida, Salud, Otros):', 'Casa') || 'Otros';
+    const icon = prompt('Icono (emoji o símbolo):', '●') || '●';
+    const color = prompt('Color HEX (opcional, ej #ff4d4d):', '#ff4d4d') || '#ff4d4d';
+
+    const gKey = String(groupName).trim();
+    if(!gKey) return;
+    let grp = (state.financeCategories.groups||[]).find(g=> String(g.name).toLowerCase()===gKey.toLowerCase());
+    if(!grp){
+      grp = { id: 'g_' + Date.now(), name: gKey, items: [] };
+      state.financeCategories.groups.push(grp);
+    }
+    grp.items = grp.items || [];
+    grp.items.push({ id: 'c_' + Date.now(), name: String(nm).trim(), icon: String(icon).trim().slice(0,4), color: String(color).trim() });
+    persist();
+    render(input?.value||"");
+  });
+}
+
 function setFinanceMeta(month, expectedIncome, targetSavings){
   state.financeMeta[month] = {
     expectedIncome: Number(expectedIncome||0),
@@ -10501,6 +10674,15 @@ function financeResetMonth(){
   persist();
   view();
 }
+
+function financeSetProjectionMode(mode){
+  const m = String(mode||"normal");
+  if(!["conservative","normal","realistic"].includes(m)) return;
+  state.financeProjectionMode = m;
+  persist();
+  view();
+}
+try{ window.financeSetProjectionMode = financeSetProjectionMode; }catch(e){}
 
 function financeMonthDataAdvanced(){
   const off = Number(state.financeMonthOffset||0);
@@ -10549,8 +10731,18 @@ function financeMonthDataAdvanced(){
   // Projection line (expense). Only for current month; for other months show real.
   const isCurrentMonth = (off===0);
   const today = new Date().getDate();
-  const dailyAvg = (isCurrentMonth && today) ? (expense/today) : 0;
-  const projectedTotal = dailyAvg * daysInMonth;
+  let dailyAvg = 0;
+  if(isCurrentMonth && today){
+    const mode = String(state.financeProjectionMode||"normal");
+    const n = (mode==="conservative") ? 3 : (mode==="realistic" ? 7 : today);
+    const take = Math.max(1, Math.min(n, today));
+    const startIdx = Math.max(0, (today - take));
+    let sum = 0;
+    for(let i=startIdx; i<today; i++) sum += Number(dailyExpense[i]||0);
+    dailyAvg = sum / take;
+  }
+  const remainingDays = Math.max(0, daysInMonth - today);
+  const projectedTotal = isCurrentMonth ? (expense + dailyAvg * remainingDays) : expense;
 
   const accProjected = [];
   for(let i=0;i<daysInMonth;i++){
@@ -10700,7 +10892,7 @@ function renderFinanceMovements(type){
           const balAfter = afterMap[e.id];
           return `
             <div class="finMovItem">
-              <div class="finMovIcon ${isExp?"expense":"income"}">${_financeIconForCategory(title)}</div>
+              <div class="finMovIcon ${isExp?"expense":"income"}">${escapeHtml(financeCategoryIcon(title))}</div>
 
               <div class="finMovInfo">
                 <div class="finMovTitle">${escapeHtml(title)}</div>
@@ -10993,6 +11185,11 @@ function viewFinance(){
     <section class="card homeCard homeWide">
       <div class="cardTop">
         <h2 class="cardTitle">Proyección</h2>
+        <div class="row" style="gap:8px">
+          <button class="chipBtn ${state.financeProjectionMode==='conservative'?'active':''}" onclick="financeSetProjectionMode('conservative')">Conservador</button>
+          <button class="chipBtn ${(!state.financeProjectionMode || state.financeProjectionMode==='normal')?'active':''}" onclick="financeSetProjectionMode('normal')">Normal</button>
+          <button class="chipBtn ${state.financeProjectionMode==='realistic'?'active':''}" onclick="financeSetProjectionMode('realistic')">Realista</button>
+        </div>
       </div>
       <div class="hr"></div>
       <div>Gasto real: <strong>S/ ${fmt(d.expense)}</strong></div>
@@ -11210,8 +11407,10 @@ function renderDailyExpenseChart(){
   if(!ctx) return;
   
   const d = getLast7DaysExpenseData();
-  
-  new Chart(ctx, {
+
+  try{ if(_dailyExpenseChart){ _dailyExpenseChart.destroy(); _dailyExpenseChart = null; } }catch(_e){}
+
+  _dailyExpenseChart = new Chart(ctx, {
     type: "bar",
     data: {
       labels: d.labels,
