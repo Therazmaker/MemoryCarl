@@ -4243,7 +4243,7 @@ const sleepBars = renderSleepBars(sleepSeries);
       ${renderBudgetMonthly()}
     </section>
 
-    ${renderLunarMoneyCard()}\n${renderFinanceProjectionCard()}
+    ${renderLunarMoneyCard()}
 
     <section class="card homeCard homeWide" id="homeMergeCard">
       <div class="cardTop">
@@ -9782,7 +9782,7 @@ function openMergeSpriteManagerModal(){
 }
 // ====================== END SPRITE MANAGER ======================
 
-/* ====================== FINANCE PROJECTION MODULE ====================== */
+/* ====================== FINANCE TAB ====================== */
 
 LS.financeLedger = "memorycarl_v2_finance_ledger";
 LS.financeAccounts = "memorycarl_v2_finance_accounts";
@@ -9790,22 +9790,41 @@ LS.financeAccounts = "memorycarl_v2_finance_accounts";
 state.financeLedger = load(LS.financeLedger, []);
 state.financeAccounts = load(LS.financeAccounts, []);
 
-const _persistFinanceWrap = persist;
+const _persistFinanceWrap2 = persist;
 persist = function(){
-  _persistFinanceWrap();
+  _persistFinanceWrap2();
   save(LS.financeLedger, state.financeLedger);
   save(LS.financeAccounts, state.financeAccounts);
 };
 
-function addFinanceEntry({type, amount, category, note}){
+function addFinanceAccount(name, balance){
+  state.financeAccounts.push({
+    id: uid("acc"),
+    name,
+    balance: Number(balance||0)
+  });
+  persist();
+  view();
+}
+
+function addFinanceEntry(type, amount, accountId, category, note){
+  const acc = state.financeAccounts.find(a=>a.id===accountId);
+  if(!acc) return;
+
+  const amt = Number(amount||0);
+  if(type==="expense") acc.balance -= amt;
+  if(type==="income") acc.balance += amt;
+
   state.financeLedger.unshift({
     id: uid("fin"),
     date: isoDate(new Date()),
-    type: type, // "income" | "expense"
-    amount: Number(amount||0),
+    type,
+    amount: amt,
+    accountId,
     category: category||"General",
     note: note||""
   });
+
   persist();
   view();
 }
@@ -9814,10 +9833,10 @@ function financeMonthData(){
   const now = new Date();
   const ym = now.toISOString().slice(0,7);
   const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
-  
+
   let income = 0;
   let expense = 0;
-  
+
   (state.financeLedger||[]).forEach(e=>{
     if(String(e.date||"").startsWith(ym)){
       if(e.type==="income") income += Number(e.amount||0);
@@ -9829,29 +9848,73 @@ function financeMonthData(){
   const dailyAvg = today ? expense/today : 0;
   const projected = dailyAvg * daysInMonth;
 
-  return {income, expense, projected, daysInMonth};
+  return {income, expense, projected};
 }
 
-function renderFinanceProjectionCard(){
-  const d = financeMonthData();
+function viewFinance(){
   const fmt = n => (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+  const d = financeMonthData();
+
+  const accountsHtml = (state.financeAccounts||[]).map(a=>`
+    <div class="budgetRow">
+      <div>${a.name}</div>
+      <div>S/ ${fmt(a.balance)}</div>
+    </div>
+  `).join("") || `<div class="muted">Sin cuentas</div>`;
+
+  const ledgerHtml = (state.financeLedger||[]).slice(0,20).map(e=>`
+    <div class="budgetRow">
+      <div>${e.type==="income"?"🟢":"🔴"} ${e.category}</div>
+      <div>S/ ${fmt(e.amount)}</div>
+    </div>
+  `).join("") || `<div class="muted">Sin movimientos</div>`;
 
   return `
-    <section class="card homeCard homeWide" id="homeFinanceCard">
+    <section class="card homeCard homeWide">
       <div class="cardTop">
-        <div>
-          <h2 class="cardTitle">Proyección financiera</h2>
-          <div class="small">Ingresos vs Gastos del mes</div>
-        </div>
+        <h2 class="cardTitle">Cuentas</h2>
+        <button class="iconBtn" onclick="openFinanceAccountModal()">＋</button>
       </div>
       <div class="hr"></div>
-      <div style="font-size:14px;line-height:1.6">
-        <div>Ingresos mes: <strong>S/ ${fmt(d.income)}</strong></div>
-        <div>Gastos mes: <strong>S/ ${fmt(d.expense)}</strong></div>
-        <div>Proyección fin de mes: <strong>S/ ${fmt(d.projected)}</strong></div>
-        <div>Balance estimado: <strong>S/ ${fmt(d.income - d.projected)}</strong></div>
+      ${accountsHtml}
+    </section>
+
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Ingresos / Gastos</h2>
+        <button class="iconBtn" onclick="openFinanceEntryModal()">＋</button>
       </div>
+      <div class="hr"></div>
+      ${ledgerHtml}
+    </section>
+
+    <section class="card homeCard homeWide">
+      <div class="cardTop">
+        <h2 class="cardTitle">Proyección mensual</h2>
+      </div>
+      <div class="hr"></div>
+      <div>Ingresos mes: <strong>S/ ${fmt(d.income)}</strong></div>
+      <div>Gastos mes: <strong>S/ ${fmt(d.expense)}</strong></div>
+      <div>Proyección gasto: <strong>S/ ${fmt(d.projected)}</strong></div>
+      <div>Balance estimado: <strong>S/ ${fmt(d.income - d.projected)}</strong></div>
     </section>
   `;
 }
 
+function openFinanceAccountModal(){
+  const name = prompt("Nombre del banco/cuenta:");
+  if(!name) return;
+  const balance = prompt("Monto inicial:");
+  addFinanceAccount(name, balance);
+}
+
+function openFinanceEntryModal(){
+  if(!(state.financeAccounts||[]).length){
+    alert("Primero crea una cuenta");
+    return;
+  }
+  const type = prompt("Tipo (income / expense):");
+  const amount = prompt("Monto:");
+  const acc = state.financeAccounts[0].id;
+  addFinanceEntry(type, amount, acc, "General", "");
+}
