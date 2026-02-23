@@ -10134,3 +10134,12 @@ view = function(){
   }catch(e){}
 };
 
+
+
+/* ===== Finance: expose handlers for inline onclick (module scope -> window) ===== */
+try{
+  window.openFinanceImport = openFinanceImport;
+  window.openFinanceMetaModal = openFinanceMetaModal;
+  window.openFinanceAccountModal = openFinanceAccountModal;
+  window.openFinanceEntryModal = openFinanceEntryModal;
+}catch(e){}
