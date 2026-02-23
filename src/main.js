@@ -9946,6 +9946,14 @@ state.financeAccounts = load(LS.financeAccounts, []);
 
 
 // ===== Finance v2 UI (Accounts + Transactions) =====
+
+// (hotfix) Global helper for finance top tabs (some templates reference tabBtn)
+function tabBtn(key, icon, label){
+  const sub = state.financeSubtab || "main";
+  return `
+    <button class="chip ${sub===key?'chipOn':''}" data-fin-sub="${escapeHtml(key)}">${icon} ${escapeHtml(label)}</button>
+  `;
+}
 state.financeSubtab = state.financeSubtab || "main"; // main | tx
 state.financeProjectionMode = state.financeProjectionMode || "normal"; // conservative | normal | realistic
 
@@ -10254,10 +10262,6 @@ function viewFinance(){
   // --- Finance v2: keep existing features + add sub-tabs (Principal / Transacciones)
   financeEnsureDefaultAccount();
   const sub = state.financeSubtab || "main";
-  const tabBtn = (key, icon, label)=> `
-    <button class="chip ${sub===key?'chipOn':''}" data-fin-sub="${escapeHtml(key)}">${icon} ${escapeHtml(label)}</button>
-  `;
-
   const fmt = n => (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   const d = financeMonthDataAdvanced();
   const monthKey = getCurrentMonthKey();
