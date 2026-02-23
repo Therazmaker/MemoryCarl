@@ -4286,7 +4286,7 @@ function renderBudgetMonthly(){
   const total = items.reduce((s,x)=>s + (Number(x.amount)||0), 0);
   const fmt = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   const list = items.length ? items.map(x=>`
-    <div class="budgetRow">
+    <div class="budgetRow" style="cursor:pointer" onclick="openFinanceAccountEdit('${a.id}')">
       <div class="budgetName">${escapeHtml(x.name)}</div>
       <div class="budgetAmt">S/ ${escapeHtml(fmt(x.amount))}</div>
       <button class="miniDanger" data-budget-del="${escapeHtml(x.id)}" aria-label="Delete">✕</button>
@@ -9788,22 +9788,98 @@ function openMergeSpriteManagerModal(){
 
 LS.financeLedger = "memorycarl_v2_finance_ledger";
 LS.financeAccounts = "memorycarl_v2_finance_accounts";
+LS.financeResetAt = "memorycarl_v2_finance_resetAt";
 
 state.financeLedger = load(LS.financeLedger, []);
 state.financeAccounts = load(LS.financeAccounts, []);
+state.financeResetAt = load(LS.financeResetAt, null);
 
 const _persistFinanceWrap = persist;
 persist = function(){
   _persistFinanceWrap();
   save(LS.financeLedger, state.financeLedger);
   save(LS.financeAccounts, state.financeAccounts);
+  save(LS.financeResetAt, state.financeResetAt);
 };
 
-function addFinanceAccount(name, balance){
+
+
+/* ===== Finance: balances derived + reset-to-zero (keeps history archived) ===== */
+
+function financeMigrateV2(){
+  // accounts: add initialBalance if missing
+  (state.financeAccounts||[]).forEach(a=>{
+    if(a.initialBalance === undefined || a.initialBalance === null){
+      // preserve current balance as baseline so nothing "breaks" after update
+      a.initialBalance = Number(a.balance||0);
+    }
+  });
+
+  // ledger: add archived flag if missing
+  (state.financeLedger||[]).forEach(e=>{
+    if(e.archived === undefined) e.archived = false;
+  });
+
+  if(state.financeResetAt === undefined) state.financeResetAt = null;
+
+  persist();
+}
+
+function financeActiveLedger(){
+  return (state.financeLedger||[]).filter(e=>!e.archived);
+}
+
+function financeRecomputeBalances(){
+  const sums = {};
+  (financeActiveLedger()||[]).forEach(e=>{
+    const accId = e.accountId;
+    if(!accId) return;
+    if(sums[accId] === undefined) sums[accId] = 0;
+    const amt = Number(e.amount||0);
+    if(e.type === "expense") sums[accId] -= amt;
+    else if(e.type === "income") sums[accId] += amt;
+    // transfers handled elsewhere later
+  });
+
+  (state.financeAccounts||[]).forEach(a=>{
+    const base = Number(a.initialBalance||0);
+    const delta = Number(sums[a.id]||0);
+    a.balance = base + delta;
+  });
+}
+
+function financeResetToZero(){
+  // archive all existing entries so history stays but balances start fresh
+  (state.financeLedger||[]).forEach(e=>{ e.archived = true; });
+
+  // reset baseline to zero so you can set initial later
+  (state.financeAccounts||[]).forEach(a=>{
+    a.initialBalance = 0;
+    a.balance = 0;
+  });
+
+  state.financeResetAt = isoDate(new Date());
+  persist();
+  view();
+  toast("Finanzas reiniciadas a cero ✅ (historial archivado)");
+}
+
+function financeResetToZeroConfirm(){
+  const ok = confirm("¿Reiniciar finanzas a cero?\n\n• NO borra tu historial: lo archiva.\n• Tus cuentas quedan en 0 para que pongas saldo inicial.\n\n¿Continuar?");
+  if(ok) financeResetToZero();
+}
+
+// run migration once
+try{ financeMigrateV2(); financeRecomputeBalances(); }catch(e){ console.warn("[Finance] migrate/recompute fail", e); }
+
+/* ===== Finance CRUD ===== */
+
+function addFinanceAccount(name, initialBalance){
   state.financeAccounts.push({
     id: uid("acc"),
     name,
-    balance: Number(balance||0)
+    initialBalance: Number(initialBalance||0),
+    balance: Number(initialBalance||0)
   });
   persist();
   view();
@@ -9814,8 +9890,6 @@ function addFinanceEntry(type, amount, accountId, category, note){
   if(!acc) return;
 
   const amt = Number(amount||0);
-  if(type==="expense") acc.balance -= amt;
-  if(type==="income") acc.balance += amt;
 
   state.financeLedger.unshift({
     id: uid("fin"),
@@ -9824,12 +9898,15 @@ function addFinanceEntry(type, amount, accountId, category, note){
     amount: amt,
     accountId,
     category: category||"General",
-    note: note||""
+    note: note||"",
+    archived: false
   });
 
+  financeRecomputeBalances();
   persist();
   view();
 }
+
 
 function financeMonthData(){
   const now = new Date();
@@ -9839,7 +9916,7 @@ function financeMonthData(){
   let income = 0;
   let expense = 0;
 
-  (state.financeLedger||[]).forEach(e=>{
+  (financeActiveLedger()||[]).forEach(e=>{
     if(String(e.date||"").startsWith(ym)){
       if(e.type==="income") income += Number(e.amount||0);
       if(e.type==="expense") expense += Number(e.amount||0);
@@ -9860,6 +9937,26 @@ function openFinanceAccountModal(){
   if(!name) return;
   const balance = prompt("Monto inicial:");
   addFinanceAccount(name, balance);
+}
+
+
+function openFinanceAccountEdit(accountId){
+  const acc = (state.financeAccounts||[]).find(a=>a.id===accountId);
+  if(!acc) return;
+
+  const newName = prompt("Nombre de la cuenta:", acc.name||"");
+  if(newName===null) return;
+
+  const newInit = prompt("Saldo inicial (baseline):", acc.initialBalance ?? 0);
+  if(newInit===null) return;
+
+  acc.name = String(newName||acc.name||"Cuenta").trim();
+  acc.initialBalance = Number(newInit||0);
+
+  financeRecomputeBalances();
+  persist();
+  view();
+  toast("Cuenta actualizada ✅");
 }
 
 function openFinanceEntryModal(){
@@ -10082,7 +10179,7 @@ function financeMonthDataAdvanced(){
   const dailyIncome = Array(daysInMonth).fill(0);
   const dailyExpense = Array(daysInMonth).fill(0);
 
-  (state.financeLedger||[]).forEach(e=>{
+  (financeActiveLedger()||[]).forEach(e=>{
     if(String(e.date||"").startsWith(monthKey)){
       const day = Number(e.date.split("-")[2]) - 1;
       if(e.type==="income"){
@@ -10210,7 +10307,7 @@ function _financeGroupByDay(entries){
 function renderFinanceMovements(type){
   const fmt = _financeFmt;
 
-  const all = _financeSortLedgerNewToOld(state.financeLedger||[]);
+  const all = _financeSortLedgerNewToOld(financeActiveLedger()||[]);
   const filtered = all.filter(e=>e.type===type);
 
   const afterMap = _financeBalanceAfterMap(all);
@@ -10285,7 +10382,7 @@ function viewFinance(){
 
   // Principal content (reusa tus cards actuales)
   const accountsHtml = (state.financeAccounts||[]).map(a=>`
-    <div class="budgetRow">
+    <div class="budgetRow" style="cursor:pointer" onclick="openFinanceAccountEdit('${a.id}')">
       <div>${escapeHtml(a.name)}</div>
       <div>S/ ${fmt(a.balance)}</div>
     </div>
@@ -10322,7 +10419,10 @@ function viewFinance(){
     <section class="card homeCard homeWide">
       <div class="cardTop">
         <h2 class="cardTitle">Cuentas</h2>
-        <button class="iconBtn" onclick="openFinanceAccountModal()">＋</button>
+        <div class="row" style="gap:8px">
+          <button class="iconBtn" title="Reiniciar a cero" onclick="financeResetToZeroConfirm()">↺</button>
+          <button class="iconBtn" title="Agregar cuenta" onclick="openFinanceAccountModal()">＋</button>
+        </div>
       </div>
       <div class="hr"></div>
       ${accountsHtml}
@@ -10428,7 +10528,7 @@ function getLast7DaysExpenseData(){
     const key = d.toISOString().slice(0,10);
     const label = d.toLocaleDateString("es-PE",{weekday:"short"});
     
-    const total = (state.financeLedger||[])
+    const total = (financeActiveLedger()||[])
       .filter(e=>e.type==="expense" && e.date===key)
       .reduce((s,e)=>s+Number(e.amount||0),0);
     
@@ -10445,6 +10545,11 @@ function importFinanceSeed(data){
   try{
     if(data.financeAccounts) state.financeAccounts = data.financeAccounts;
     if(data.financeLedger) state.financeLedger = data.financeLedger;
+
+    // ensure new fields exist
+    try{ financeMigrateV2(); }catch(_e){}
+    try{ financeRecomputeBalances(); }catch(_e){}
+
     persist();
     view();
     alert("Base financiera importada correctamente.");
