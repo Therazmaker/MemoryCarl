@@ -341,9 +341,6 @@ function todayKey(){
   const y = d.getFullYear();
   const m = String(d.getMonth()+1).padStart(2,"0");
   const da = String(d.getDate()).padStart(2,"0");
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `${y}${m}${da}`;
 }
 
@@ -495,10 +492,6 @@ function openSwissDailyModal(){
       <div class="small" style="opacity:.9;margin-bottom:8px;">Tránsitos (top)</div>
       ${trans.length ? `<ul class="swissList">${trans.map(t=>`<li>${escapeHtml(String(t))}</li>`).join("")}</ul>` : `<div class="muted">Sin tránsitos.</div>`}
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
   openSheet(body);
 }
@@ -577,9 +570,6 @@ function renderLunarMoneyCard(){
   const spendLine = `Gasto 24h: <b>S/ ${escapeHtml(String(Math.round(spend*100)/100))}</b>`;
   const houseLine = `Casa 2: <b>${escapeHtml(house2Sign)}</b>${regencia ? ` <span class=\"muted\">(${escapeHtml(regencia)})</span>` : ""}`;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <section class="card homeCard homeWide" id="homeLunarMoneyCard">
       <div class="cardTop">
@@ -623,10 +613,7 @@ function openLunarMoneyHistoryModal(){
     const line1 = [e.moon_phase_name?`🌙 ${e.moon_phase_name}`:"", e.moon_sign?`Luna en ${e.moon_sign}`:"", e.moon_house?`Casa ${e.moon_house}`:""]
       .filter(Boolean).join(" • ");
     const w = (e.whisper||"").trim();
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+    return `
       <div class="card" style="margin:10px 0;">
         <div class="cardTop" style="padding:12px 12px 6px;">
           <div>
@@ -656,10 +643,6 @@ function openLunarMoneyHistoryModal(){
       </div>
       <div class="hr"></div>
       <div style="max-height:70vh;overflow:auto;padding-right:6px;">${rows}</div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
   host.appendChild(modal);
@@ -1057,10 +1040,7 @@ window.MemoryCarlSync = {
 
 
 // ---- Helpers ----
-function uid(prefix="id"){ const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`; }
+function uid(prefix="id"){ return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`; }
 
 function load(key, fallback){
   try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
@@ -1127,10 +1107,7 @@ function parseTimesCsv(s){
       if(!m) return t;
       const hh = String(Math.min(23, Math.max(0, Number(m[1])))).padStart(2,"0");
       const mm = String(Math.min(59, Math.max(0, Number(m[2])))).padStart(2,"0");
-      const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `${hh}:${mm}`;
+      return `${hh}:${mm}`;
     });
 }
 
@@ -1573,9 +1550,6 @@ function syncCfgLabelText(){
   const key = getSyncApiKey();
   if(!url) return "Sync: (no configurado)";
   const short = url.length > 44 ? (url.slice(0,34) + "…" + url.slice(-8)) : url;
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `Sync: ${short}${key ? " • key✅" : ""}`;
 }
 
@@ -1656,9 +1630,6 @@ function bottomNav(){
     </button>
   `;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <nav class="bottomNav" role="navigation" aria-label="MemoryCarl navigation">
       ${mk("home","🏠","Home")}
@@ -1684,9 +1655,6 @@ function renderMoreModal(){
     </button>
   `;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="modalBackdrop" id="moreBackdrop" aria-label="Más">
       <div class="modal">
@@ -1703,10 +1671,6 @@ function renderMoreModal(){
           ${mk("settings","⚙️","Ajustes","Backup, sync, etc")}
         </div>
       </div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
 }
@@ -1774,10 +1738,6 @@ function view(){
       ${bottomNav()}
 
       ${state.moreOpen ? renderMoreModal() : ""}
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
 
@@ -2276,9 +2236,6 @@ function viewInsights(){
 
 const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`).join("");
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <section class="card">
       <div class="row" style="justify-content:space-between;align-items:center;">
@@ -2321,19 +2278,13 @@ const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`)
       <div class="insCal">
         ${wk}
         ${cells.map(c=>{
-          if(c.blank) const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<div class="calDay blank"></div>`;
+          if(c.blank) return `<div class="calDay blank"></div>`;
           const icons = buildInsightIcons(c.sum);
           const dna = buildInsightDNA(c.sum);
           const moneyStr = (c.sum && c.sum.shopping && c.sum.shopping.total>0) ? `<div class="calMini money">🛒 ${money(c.sum.shopping.total)}</div>` : ``;
           const cleanStr = (c.sum && c.sum.cleaning && c.sum.cleaning.totalMinutes>0) ? `<div class="calMini">🧹 ${Math.round(c.sum.cleaning.totalMinutes)}m</div>` : ``;
           const heat = insightHeat(c.sum, INS_HEAT_MODE, mctx);
-          const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+          return `
             <button class="calDay ${c.isToday?"today":""} ${heat>0?"heat":""}" style="--heat:${heat.toFixed(3)}" data-ins-day="${c.iso}">
               <div class="calNum">${c.day}</div>
               <div class="calIcons">${icons}</div>
@@ -2408,9 +2359,6 @@ function buildInsightDNA(sum){
     {k:"clean", em:"🧹", v:v.cleaning},
     {k:"shop", em:"🛒", v:v.shopping},
   ];
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `<div class="dna" aria-label="ADN del día">
     ${bars.map(b=>`<i class="dnaBar dna-${b.k}" style="--h:${Math.round(b.v)}" title="${b.em} ${Math.round(b.v)}"></i>`).join("")}
   </div>`;
@@ -2724,9 +2672,6 @@ function renderInsightsDayModal(){
 
   // Normalized values 0..100 for radar
   const v = insightVector(sum);
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="modalBackdrop neuralBackdrop" id="insightsDayBackdrop" aria-label="Día">
       <div class="neuralModal">
@@ -2794,10 +2739,6 @@ function renderInsightsDayModal(){
         </div>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 }
 
@@ -2811,9 +2752,6 @@ function renderHouseHistoryModal(){
   }
   const dates = Object.keys(byDate).sort().reverse().slice(0,30);
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="modalBackdrop" id="houseHistoryBackdrop" aria-label="Historial de casa">
       <div class="modal">
@@ -2830,10 +2768,7 @@ function renderHouseHistoryModal(){
           ${dates.length ? dates.map(d=>{
             const rows = byDate[d]||[];
             const totalMin = rows.reduce((a,x)=>a+(Number(x.totalSec)||0),0)/60;
-            const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+            return `
               <div class="item" style="align-items:flex-start;">
                 <div class="left">
                   <div class="name">${escapeHtml(d)} • <b>${Math.round(totalMin)} min</b></div>
@@ -2845,10 +2780,6 @@ function renderHouseHistoryModal(){
         </div>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 }
 
@@ -2858,9 +2789,6 @@ function viewSettings(){
   const permLabel = perm === "granted" ? "Enabled ✅" : (perm === "denied" ? "Blocked ⛔" : (perm === "default" ? "Not enabled" : "Unsupported"));
   const tokenLabel = token ? `${token.slice(0,18)}…${token.slice(-10)}` : "No token yet";
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sectionTitle">
       <div>Ajustes</div>
@@ -3108,9 +3036,6 @@ function viewSettings(){
 }
 
 function viewLearn(){
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sectionTitle">
       <div>Aprender</div>
@@ -3157,10 +3082,6 @@ function viewLearn(){
         Tip: si actualizas el quiz, solo refresca esta pestaña.
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 }
 
@@ -3182,10 +3103,6 @@ function openLearnQuest(){
       <div class="small" style="margin-top:10px;opacity:.8;">
         Tip: Puedes importar niveles .json desde el botón “📂 Importar nivel” dentro de LearnQuest.
       </div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
   document.body.appendChild(b);
@@ -3210,10 +3127,6 @@ function openCalcQuest(){
       <div class="small" style="margin-top:10px;opacity:.8;">
         Tip: Los niveles guardan tu código en localStorage. Usa “EXPORT” para llevarte tu calculadora a un entorno real.
       </div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
   document.body.appendChild(b);
@@ -3428,10 +3341,7 @@ function openMoodPickerModal(iso, opts={}){
           const labels = Array.isArray(f.labels) ? f.labels : [];
           const main = labels[0] || f.id;
           const dots = labels.length>1 ? `<div class="moodDots">${labels.map(_=>`<span class="dot"></span>`).join("")}</div>` : `<div class="moodDots"></div>`;
-          const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+          return `
             <button class="moodFace ${String(f.id)===String(selectedId)?"active":""}" data-face="${escapeHtml(f.id)}" title="${escapeHtml(main)}">
               <img src="${escapeHtml(f.src)}" alt="${escapeHtml(main)}"/>
               <div class="moodFaceLabel">${escapeHtml(main)}</div>
@@ -3468,10 +3378,6 @@ function openMoodPickerModal(iso, opts={}){
           <button class="btn primary" id="btnMoodSave">Guardar</button>
         </div>
       </div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
 
@@ -3633,16 +3539,10 @@ function openMoodMonthModal(initialIso){
     const map = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
 
     const cellHtml = cells.map(iso=>{
-      if(!iso) const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<div class="moodCalCell empty"></div>`;
+      if(!iso) return `<div class="moodCalCell empty"></div>`;
       const e = map[iso];
       const sp = e ? getMoodSpriteById(e.spriteId) : null;
-      const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+      return `
         <button class="moodCalCell" data-iso="${escapeHtml(iso)}">
           <div class="moodCalNum">${escapeHtml(String(Number(iso.slice(8,10))))}</div>
           ${sp ? `<img class="moodCalImg" src="${escapeHtml(sp.src)}" alt="" />` : `<div class="moodCalEmpty">＋</div>`}
@@ -3666,10 +3566,7 @@ function openMoodMonthModal(initialIso){
         if(t==="money") return "💰 Dinero";
         return "🏷️ " + String(t);
       }).slice(0,4).join(" · ");
-      const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+      return `
         <div class="moodLogCard" data-iso="${escapeHtml(iso)}">
           <div class="moodLogHead">
             ${sp ? `<img class="moodLogImg" src="${escapeHtml(sp.src)}" alt=""/>` : `<div class="moodLogImg ph">＋</div>`}
@@ -3817,10 +3714,7 @@ function getSleepWeekSeries(){
 function renderSleepBars(series){
   const items = series?.items || [];
   if(!items.length){
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<div class="muted">Registra tu sueño para ver el gráfico 😴</div>`;
+    return `<div class="muted">Registra tu sueño para ver el gráfico 😴</div>`;
   }
   const maxM = series.maxMinutes || 480;
   const toPx = (minutes) => {
@@ -3837,10 +3731,7 @@ function renderSleepBars(series){
     const label = x.minutes ? `${hrs.toFixed(1)}h` : "0h";
     const d = new Date(x.date + "T00:00:00");
     const ch = dayLetters[d.getDay()] || "·";
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+    return `
       <div class="sleepCol" title="${escapeHtml(x.date)} • ${escapeHtml(label)}">
         <div class="sleepBar" style="--h:${h}px"></div>
         <div class="sleepLbl">${escapeHtml(ch)}</div>
@@ -3851,9 +3742,6 @@ function renderSleepBars(series){
   const avgH = (series.avgMinutes || 0) / 60;
   const lastH = (series.lastMinutes || 0) / 60;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sleepMetaRow">
       <div>
@@ -3863,10 +3751,6 @@ function renderSleepBars(series){
       <div class="chip">${avgH >= 7 ? "✅" : (avgH >= 6 ? "⚠️" : "🔥")}</div>
     </div>
     <div class="sleepChart" aria-hidden="true">${cols}</div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 }
 
@@ -4015,17 +3899,8 @@ function neuroclawTopSuggestions(limit=3){
 
 function neuroclawBadge(p){
   const k = String(p||"low").toLowerCase();
-  if(k==="high") const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<span class="neuroBadge high">Alta</span>`;
-  if(k==="medium") const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<span class="neuroBadge med">Media</span>`;
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+  if(k==="high") return `<span class="neuroBadge high">Alta</span>`;
+  if(k==="medium") return `<span class="neuroBadge med">Media</span>`;
   return `<span class="neuroBadge low">Baja</span>`;
 }
 
@@ -4036,10 +3911,7 @@ function renderNeuroClawAIBlock(){
 
   // If we're loading, show a visible block even if we don't have ai content yet.
   if(loading){
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+    return `
       <div class="hr"></div>
       <div class="ncAi ncAiLoading">
         <div class="ncAiHead">
@@ -4064,9 +3936,6 @@ function renderNeuroClawAIBlock(){
   const model = (ai.raw && ai.raw.model) ? String(ai.raw.model) : "";
   const meta = [stamp, model ? ("🤖 " + model) : ""].filter(Boolean).join(" • ");
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
       <div class="hr"></div>
       <div class="ncAi">
@@ -4087,9 +3956,6 @@ function renderNeuroClawCard(){
   const loading = !!state?.neuroclawAiLoading;
   const ts = state.neuroclawLast?.ts ? new Date(state.neuroclawLast.ts) : null;
   const stamp = ts ? ts.toLocaleString("es-PE",{hour:"2-digit",minute:"2-digit"}) : "";
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <section class="card homeCard" id="homeNeuroCard">
       <div class="cardTop">
@@ -4138,9 +4004,6 @@ function renderSwissAstroCard(){
     ? `<div class="muted">Buscando tu visión lunar del día…</div>`
     : (err ? `<div class="muted">⚠ ${escapeHtml(err)}</div>` : (msg ? `<div class="swissMsg">${escapeHtml(msg)}</div>` : `<div class="muted">Sin datos aún.</div>`));
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <section class="card homeCard" id="homeSwissAstroCard">
       <div class="cardTop">
@@ -4172,10 +4035,7 @@ function renderNeuroDebugModal(){
   const sigRows = signals ? Object.keys(signals).sort().map(k=>{
     const v = signals[k];
     const vv = (typeof v==="number") ? (Math.round(v*100)/100) : v;
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<div class="neuroDbgRow"><div class="neuroDbgK">${escapeHtml(k)}</div><div class="neuroDbgV">${escapeHtml(String(vv))}</div></div>`;
+    return `<div class="neuroDbgRow"><div class="neuroDbgK">${escapeHtml(k)}</div><div class="neuroDbgV">${escapeHtml(String(vv))}</div></div>`;
   }).join("") : `<div class="muted">${running ? "Aún no hay análisis. Dale 🧠 en Home." : "Sin señales."}</div>`;
 
   const sugRows = suggestions.length ? suggestions.map(s=>`
@@ -4188,9 +4048,6 @@ function renderNeuroDebugModal(){
     </div>
   `).join("") : `<div class="muted">${running ? "" : "Ninguna regla se activó. Eso también es buena señal 😄"}</div>`;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
   <div class="modalBackdrop" id="neuroDbgBackdrop">
     <div class="modal" role="dialog" aria-label="NeuroClaw Debug">
@@ -4221,10 +4078,6 @@ function renderNeuroDebugModal(){
       </div>
     </div>
   </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 }
 
@@ -4262,10 +4115,7 @@ function viewHome(){
     if(!e || !e.spriteId) return "";
     const sp = getMoodSpriteById(e.spriteId);
     if(!sp) return "";
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<img class="dayMoodMini" src="${escapeHtml(sp.src)}" alt="mood" />`;
+    return `<img class="dayMoodMini" src="${escapeHtml(sp.src)}" alt="mood" />`;
   };
 
   const todayIso = isoDate(now);
@@ -4286,19 +4136,12 @@ function viewHome(){
       ${moodPillInner}
       <div class="dayAbbr">Mood</div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
 
 const sleepSeries = getSleepWeekSeries();
 const sleepBars = renderSleepBars(sleepSeries);
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="homeTop">
       <div class="homeHello">
@@ -4400,7 +4243,7 @@ const sleepBars = renderSleepBars(sleepSeries);
       ${renderBudgetMonthly()}
     </section>
 
-    ${renderLunarMoneyCard()}
+    ${renderLunarMoneyCard()}\n${renderFinanceProjectionCard()}
 
     <section class="card homeCard homeWide" id="homeMergeCard">
       <div class="cardTop">
@@ -4436,24 +4279,6 @@ function getBudgetMonthly(){
   })).filter(x=>x.name);
 }
 
-
-function currentMonthFinanceTotal(){
-  const now = new Date();
-  const ym = now.toISOString().slice(0,7);
-  return (state.financeLedger||[])
-    .filter(x=>String(x.date||"").startsWith(ym))
-    .reduce((s,x)=>s+Number(x.amount||0),0);
-}
-
-function projectedMonthFinance(){
-  const now = new Date();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
-  const today = now.getDate();
-  const total = currentMonthFinanceTotal();
-  const dailyAvg = today ? total/today : 0;
-  return dailyAvg * daysInMonth;
-}
-
 function renderBudgetMonthly(){
   const items = getBudgetMonthly();
   const total = items.reduce((s,x)=>s + (Number(x.amount)||0), 0);
@@ -4466,19 +4291,12 @@ function renderBudgetMonthly(){
     </div>
   `).join("") : `<div class="muted">Toca ＋ para agregar tus pagos del mes 💸</div>`;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="budgetTop">
       <div class="budgetTotal">Total: <strong>S/ ${escapeHtml(fmt(total))}</strong></div>
       <div class="budgetCount">${items.length ? `${items.length} ítem(s)` : ""}</div>
     </div>
     <div class="budgetList">${list}</div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 }
 
@@ -4525,10 +4343,6 @@ function openBudgetModal(){
         <button class="btn primary" id="bSave">Guardar</button>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
   host.appendChild(modal);
@@ -4570,17 +4384,8 @@ function formatSleepDuration(minutes){
   const mins = Math.max(0, Math.round(Number(minutes) || 0));
   const h = Math.floor(mins / 60);
   const m = mins % 60;
-  if(!h) const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `${m}m`;
-  if(!m) const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `${h}h`;
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+  if(!h) return `${m}m`;
+  if(!m) return `${h}h`;
   return `${h}h ${String(m).padStart(2,"0")}m`;
 }
 
@@ -4721,10 +4526,6 @@ function openSleepModal(opts = {}){
         <button class="btn primary" id="btnSaveSleep">${existing ? "Guardar cambios" : "Guardar"}</button>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
   const close = () => {
@@ -4855,10 +4656,6 @@ function openSleepHistoryModal(){
         </div>
       </div>
       <div id="sleepHistoryContent"></div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
 
@@ -5079,10 +4876,6 @@ function openMusicModal(){
         <button class="btn primary" id="btnSave">Guardar</button>
       </div>
       <div class="muted" style="margin-top:10px;">Tip: si solo pones canción, ya sirve. Lo demás es extra.</div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
 
@@ -5338,9 +5131,6 @@ function viewRoutines(){
     return ta.localeCompare(tb) || (a.title||"").localeCompare(b.title||"");
   });
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sectionTitle">
       <div>Rutinas</div>
@@ -5356,9 +5146,6 @@ function routineCard(r){
   const times = r.times?.length ? r.times.join(" • ") : "No time";
   const last = r.lastRun ? new Date(r.lastRun).toLocaleString() : "Never";
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <section class="card" data-routine-id="${r.id}">
       <div class="cardTop">
@@ -5411,9 +5198,6 @@ function viewShopping(){
     return viewInventory();
   }
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sectionTitle">
       <div>Listas de compras</div>
@@ -5442,15 +5226,9 @@ function shoppingItemMeta(it){
     const g = Number(it.weight_g||0);
     const perKg = (it.pricePerKg!=null) ? Number(it.pricePerKg||0) : null;
     const perTxt = (perKg!=null && perKg>0) ? ` · ${money(perKg)}/kg` : "";
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `${money(price)} · ${g}g${perTxt} = <b>${money(total)}</b>`;
+    return `${money(price)} · ${g}g${perTxt} = <b>${money(total)}</b>`;
   }
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `${money(price)} × ${qty} = <b>${money(total)}</b>`;
 }
 
@@ -5460,9 +5238,6 @@ function shoppingCard(list){
     .filter(it=>!it.bought)
     .reduce((acc,it)=> acc + (Number(it.price||0)*Number(it.qty||1)), 0);
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <section class="card" data-list-id="${list.id}">
       <div class="cardTop">
@@ -5503,9 +5278,6 @@ function shoppingCard(list){
 
 function viewReminders(){
   const open = state.reminders.filter(r=>!r.done).length;
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sectionTitle">
       <div>Reminders</div>
@@ -5651,10 +5423,7 @@ function renderHouseZoneSheet(){
 
   const renderTask = (t)=>{
     const done = !!(t.lastDone && !isTaskDue(t, todayStr));
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+    return `
       <div class="item">
         <label class="row" style="gap:10px;align-items:flex-start;">
           <input type="checkbox" data-zone-task-done="${escapeHtml(t.id)}" ${done?'checked':''}>
@@ -5670,10 +5439,7 @@ function renderHouseZoneSheet(){
 
   const subBlocks = (d.subzones||[]).map(sz=>{
     const arr = bySub.get(sz.id) || [];
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+    return `
       <div class="zoneSection">
         <div class="row" style="justify-content:space-between;align-items:center;">
           <div style="font-weight:800;">${escapeHtml(sz.name)}</div>
@@ -5695,10 +5461,6 @@ function renderHouseZoneSheet(){
       <div class="list" style="margin-top:8px;">
         ${misc.length? misc.map(renderTask).join('') : `<div class="item"><div class="muted">Nada en General.</div></div>`}
       </div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
 
@@ -5732,15 +5494,8 @@ function renderHouseZoneSheet(){
         <button class="btn primary" id="btnSaveZoneNotes">Guardar</button>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sideScrim show" id="zoneScrim" aria-hidden="false"></div>
     <aside class="sideSheet open" id="zoneSheet" aria-label="Zona">
@@ -6063,10 +5818,7 @@ function renderHouseMap(todayStr){
     const isSel = m.selected === z.id;
     const isActive = animNow === z.id;
     const cls = ["mapNode", isSel?"selected":"", isActive?"active":""].join(" ");
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+    return `
       <div class="${cls}" data-map-node="${escapeHtml(z.id)}" style="left:${Number(pos.x)||0}px; top:${Number(pos.y)||0}px;">
         <div class="mapNodeTitle">${escapeHtml(z.name)}</div>
         <div class="mapNodeMeta">pri ${Number(z.priority)||0}</div>
@@ -6083,15 +5835,9 @@ function renderHouseMap(todayStr){
     const y1 = (Number(a.y)||0) + 28;
     const x2 = (Number(b.x)||0) + 60;
     const y2 = (Number(b.y)||0) + 28;
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" />`;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" />`;
   }).join("");
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -6118,10 +5864,6 @@ function renderHouseMap(todayStr){
         Tip: en Conectar, toca 2 zonas para crear/quitar una conexión.
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 }
 
@@ -6139,10 +5881,7 @@ function redrawHouseMapSvg(root){
     const y1 = (Number(a.y)||0) + 28;
     const x2 = (Number(b.x)||0) + 60;
     const y2 = (Number(b.y)||0) + 28;
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" />`;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" />`;
   }).join("");
   svg.innerHTML = lines;
 }
@@ -6166,9 +5905,6 @@ function viewHouse(){
 
   const totalRouteMins = route.reduce((s,st)=> s + (Number(st.minutes)||0), 0);
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <section>
       <div class="card">
@@ -6224,24 +5960,15 @@ function viewHouse(){
           <div class="list" style="margin-top:12px;">
             ${route.map((st, i)=>{
               if(st.kind==="zone"){
-                const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<div class="item"><div class="tag">${escapeHtml(st.text)}</div></div>`;
+                return `<div class="item"><div class="tag">${escapeHtml(st.text)}</div></div>`;
               }
               if(st.kind==="tip"){
-                const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<div class="item"><div class="muted">${escapeHtml(st.text)}</div></div>`;
+                return `<div class="item"><div class="muted">${escapeHtml(st.text)}</div></div>`;
               }
               // task
               const t = (state.house.tasks||[]).find(x=>x.id===st.taskId) || {};
               const done = !!(t.lastDone && !isTaskDue(t, todayStr));
-              const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+              return `
                 <div class="item">
                   <label class="row" style="gap:10px;align-items:flex-start;">
                     <input type="checkbox" data-house-done="${escapeHtml(st.taskId)}" ${done ? "checked":""}>
@@ -6403,10 +6130,6 @@ function openHouseSessionRunnerModal(){
         </div>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
   document.body.appendChild(b);
 
@@ -6511,9 +6234,6 @@ function fmtMMSS(sec){
   sec = Math.max(0, Number(sec)||0);
   const m = Math.floor(sec/60);
   const s = sec%60;
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `${m}:${String(s).padStart(2,"0")}`;
 }
 
@@ -6707,10 +6427,6 @@ function renderHouseRunnerStage(force=false){
         <button class="btn ghost" data-hr="next">Siguiente</button>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
   stage.querySelector('[data-hr="extend"]').addEventListener("click", ()=>{
@@ -6744,10 +6460,7 @@ function openHouseSessionHistoryModal(){
   const rows = list.slice(0, 20).map(s=>{
     const min = Math.round((Number(s.totalSec||0)/60));
     const status = s.status || "ended";
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<div class="row" style="justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);">
+    return `<div class="row" style="justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);">
       <div>
         <div style="font-weight:750;">${escapeHtml(s.date)}</div>
         <div class="muted">${escapeHtml(status)} • ${min} min • ${Array.isArray(s.logs)?s.logs.length:0} pasos</div>
@@ -6767,10 +6480,6 @@ function openHouseSessionHistoryModal(){
       <div style="margin-top:12px;max-height:60vh;overflow:auto;">
         ${rows}
       </div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
   document.body.appendChild(b);
@@ -6810,9 +6519,6 @@ function renderHouseSession(){
   const taskCount = route.filter(st=>st.kind==="task").length;
   const pct = taskCount ? Math.round((doneCount/taskCount)*100) : 0;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="row" style="justify-content:space-between;align-items:center;">
       <div>
@@ -6842,10 +6548,6 @@ function renderHouseSession(){
       <button class="btn ghost" id="btnHousePrev">Prev</button>
       <div class="muted">${idx+1}/${route.length}</div>
       <button class="btn" id="btnHouseNext">Next</button>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
 }
@@ -6948,10 +6650,6 @@ function openHouseTaskModal(editId=null, defaults=null){
         <button class="btn primary" data-m="save">Save</button>
       </div>
       <div class="muted" style="margin-top:10px;">Tip: si freq=1, sale diario.</div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
   host.appendChild(b);
@@ -7422,9 +7120,6 @@ function viewCalendar(){
     </button>
   `).join("");
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sectionTitle">
       <div>Calendario</div>
@@ -7486,10 +7181,6 @@ function openCalendarDrawModal(dateIso){
         <div style="flex:1"></div>
         <button class="btn primary" id="btnCalSave">Guardar</button>
       </div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
 
@@ -7887,7 +7578,6 @@ if(act==="savePurchase"){
 
       // Stack to inventory (qty increases or new items created)
       applyItemsToInventory_(items);
-      addFinanceEntryFromShopping(state.shoppingHistory[0]);
 
       // Optional: mark current list as bought to reflect it was committed
       (list.items||[]).forEach(it=>{ it.bought = true; });
@@ -7940,10 +7630,6 @@ function openPromptModal({title, fields, onSubmit}){
       </div>
       <div class="muted" style="margin-top:10px;">Saved in localStorage.</div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
   host.appendChild(b);
 
@@ -7951,10 +7637,7 @@ function openPromptModal({title, fields, onSubmit}){
   wrap.innerHTML = fields.map(f=>{
     const type = f.type || "text";
     const value = escapeHtml(f.value ?? "");
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+    return `
       <div>
         <div class="muted" style="margin:2px 0 6px;">${escapeHtml(f.label)}</div>
         <input class="input" data-k="${escapeHtml(f.key)}" type="${escapeHtml(type)}" value="${value}" placeholder="${escapeHtml(f.placeholder || "")}">
@@ -8171,31 +7854,6 @@ try{
 */
 
 
-
-/* ====================== FINANCE LEDGER MODULE ====================== */
-LS.financeLedger = "memorycarl_v2_finance_ledger";
-state.financeLedger = load(LS.financeLedger, []);
-
-const _persistFinanceBase = persist;
-persist = function(){
-  _persistFinanceBase();
-  save(LS.financeLedger, state.financeLedger);
-};
-
-function addFinanceEntryFromShopping(entry){
-  if(!entry || !entry.totals) return;
-  const total = Number(entry.totals.total||0);
-  if(!total) return;
-  state.financeLedger.unshift({
-    id: uid("fin"),
-    date: entry.date,
-    amount: total,
-    category: "Mercado",
-    store: entry.store||"",
-    items: entry.items||[]
-  });
-}
-
 /* ====================== REBUILT SHOPPING MODULE ====================== */
 
 LS.products = "memorycarl_v2_products";
@@ -8265,10 +7923,6 @@ function openSmartAddItem(listId){
         <button class="btn primary" id="smartItemManual">+ Manual</button>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
   host.appendChild(modal);
@@ -8299,10 +7953,7 @@ function openSmartAddItem(listId){
       const u = (p.unit||"u").toLowerCase();
       const isKg = (u.includes("kg"));
       const priceLabel = isKg ? `${money(p.price)}/kg` : money(p.price);
-      const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+      return `
         <div class="item">
           <div class="left">
             <div class="name">${escapeHtml(p.name)}</div>
@@ -8460,10 +8111,6 @@ function openProductPicker(listId){
         <button class="btn ghost" onclick="this.closest('.modalBackdrop').remove()">Cancelar</button>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
   host.appendChild(modal);
@@ -8558,10 +8205,7 @@ function openProductLibrary(){
       <div class="list" style="margin-top:12px;">
         ${state.products.map(p=>{
           const trend = priceTrend(p);
-          const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+          return `
             <div class="item">
               <div class="left">
                 <div class="name">${escapeHtml(p.name)}</div>
@@ -8579,10 +8223,6 @@ function openProductLibrary(){
       <div class="row" style="margin-top:12px;">
         <button class="btn ghost" onclick="this.closest('.modalBackdrop').remove()">Cerrar</button>
       </div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
   host.appendChild(sheet);
@@ -8811,9 +8451,6 @@ function viewInventoryHistory(){
   const days = preset==="7d" ? 7 : preset==="15d" ? 15 : 30;
   const rows = buildInventoryPurchaseStats_(days);
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <section class="card">
       <div class="cardTop">
@@ -8854,9 +8491,6 @@ function viewInventory(){
     `<button class="btn" onclick="addInventoryFromProduct('${p.id}')">+ ${escapeHtml(p.name)} · ${money(p.price||0)}</button>`
   ).join("") || `<div class="muted">No hay productos en Biblioteca.</div>`;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sectionTitle">
       <div>Inventario</div>
@@ -8907,10 +8541,7 @@ ${state.inventorySubtab==="history" ? viewInventoryHistory() : `
         const isLow = Number(it.minQty||0)>0 && Number(it.qty||0) <= Number(it.minQty||0);
         const badge = isLow ? `<span class="chip" style="border-color:rgba(255,80,80,.35);color:rgba(255,170,170,.95)">Bajo</span>` : ``;
         const link = it.productId ? `🔗` : `📝`;
-        const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+        return `
           <div class="item">
             <div class="left">
               <div class="name">${link} ${it.essential?"⭐":""} ${escapeHtml(it.name)}</div>
@@ -9054,10 +8685,6 @@ function openProductChart(productId){
         <button class="btn ghost" onclick="this.closest('.modalBackdrop').remove()">Cerrar</button>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
   host.appendChild(modal);
@@ -9102,9 +8729,6 @@ function isoDate(d=new Date()){
   const y=d.getFullYear();
   const m=String(d.getMonth()+1).padStart(2,"0");
   const da=String(d.getDate()).padStart(2,"0");
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `${y}-${m}-${da}`;
 }
 
@@ -9552,10 +9176,7 @@ function openShoppingCategoryModal(category, preset){
         ${arr.map(r=>{
           const p = r.productId ? (state.products||[]).find(x=>x.id===r.productId) : null;
           const canEdit = !!p;
-          const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+          return `
             <div class="item">
               <div class="left">
                 <div class="name">${escapeHtml(r.name)}</div>
@@ -9572,10 +9193,6 @@ function openShoppingCategoryModal(category, preset){
       <div class="muted" style="margin-top:10px;">
         Tip: para arreglar cosas en <b>other</b>, entra a Biblioteca y edita la categoría/unidad.
       </div>
-    </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
     </div>
   `;
   host.appendChild(modal);
@@ -9598,18 +9215,12 @@ function viewShoppingDashboard(){
 
   const catRows = Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>{
     const pct = sum.sum ? (v/sum.sum*100) : 0;
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `<button class="kvBtn" onclick="openShoppingCategoryModal(\'${escapeHtml(c)}\', \'${preset}\')"><div class="k">${escapeHtml(c)}</div><div class="v"><b>${money(v)}</b> · ${pct.toFixed(0)}%</div></button>`;
+    return `<button class="kvBtn" onclick="openShoppingCategoryModal(\'${escapeHtml(c)}\', \'${preset}\')"><div class="k">${escapeHtml(c)}</div><div class="v"><b>${money(v)}</b> · ${pct.toFixed(0)}%</div></button>`;
   }).join("") || `<div class="muted">No hay datos en este rango.</div>`;
 
   const storeRows = stores.map(([s,c])=>`<div class="kv"><div class="k">${escapeHtml(s)}</div><div class="v">${c} compras</div></div>`).join("") || `<div class="muted">Sin tiendas.</div>`;
   const prodRows = products.map(p=>`<div class="kv"><div class="k">${escapeHtml(p.name)}</div><div class="v"><b>${money(p.spend)}</b> · ${p.count} u.</div></div>`).join("") || `<div class="muted">Sin productos.</div>`;
 
-  const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
     <div class="sectionTitle">
       <div>Compras · Dashboard</div>
@@ -9841,10 +9452,6 @@ function openMergeCfgModal(){
         </div>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
   document.body.appendChild(backdrop);
@@ -10029,10 +9636,6 @@ function openMergeSpriteManagerModal(){
         </div>
       </div>
     </div>
-    <div class="budgetProjection" style="margin-top:10px;font-size:13px;opacity:.85">
-      <div>Gasto real mes: <strong>S/ ${escapeHtml(fmt2(real))}</strong></div>
-      <div>Proyección fin de mes: <strong>S/ ${escapeHtml(fmt2(proj))}</strong></div>
-    </div>
   `;
 
   document.body.appendChild(backdrop);
@@ -10044,10 +9647,7 @@ function openMergeSpriteManagerModal(){
   const state = { count: 11, slots: [] };
 
   function mkSlot(i, url=null){
-    const real = currentMonthFinanceTotal();
-  const proj = projectedMonthFinance();
-  const fmt2 = (n)=> (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
-  return `
+    return `
       <div class="card" style="padding:10px;">
         <div class="row" style="margin:0; justify-content:space-between; align-items:center;">
           <div class="small muted">Item ${i}</div>
@@ -10181,3 +9781,77 @@ function openMergeSpriteManagerModal(){
   refreshFromDb();
 }
 // ====================== END SPRITE MANAGER ======================
+
+/* ====================== FINANCE PROJECTION MODULE ====================== */
+
+LS.financeLedger = "memorycarl_v2_finance_ledger";
+LS.financeAccounts = "memorycarl_v2_finance_accounts";
+
+state.financeLedger = load(LS.financeLedger, []);
+state.financeAccounts = load(LS.financeAccounts, []);
+
+const _persistFinanceWrap = persist;
+persist = function(){
+  _persistFinanceWrap();
+  save(LS.financeLedger, state.financeLedger);
+  save(LS.financeAccounts, state.financeAccounts);
+};
+
+function addFinanceEntry({type, amount, category, note}){
+  state.financeLedger.unshift({
+    id: uid("fin"),
+    date: isoDate(new Date()),
+    type: type, // "income" | "expense"
+    amount: Number(amount||0),
+    category: category||"General",
+    note: note||""
+  });
+  persist();
+  view();
+}
+
+function financeMonthData(){
+  const now = new Date();
+  const ym = now.toISOString().slice(0,7);
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  
+  let income = 0;
+  let expense = 0;
+  
+  (state.financeLedger||[]).forEach(e=>{
+    if(String(e.date||"").startsWith(ym)){
+      if(e.type==="income") income += Number(e.amount||0);
+      if(e.type==="expense") expense += Number(e.amount||0);
+    }
+  });
+
+  const today = now.getDate();
+  const dailyAvg = today ? expense/today : 0;
+  const projected = dailyAvg * daysInMonth;
+
+  return {income, expense, projected, daysInMonth};
+}
+
+function renderFinanceProjectionCard(){
+  const d = financeMonthData();
+  const fmt = n => (Number(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+
+  return `
+    <section class="card homeCard homeWide" id="homeFinanceCard">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Proyección financiera</h2>
+          <div class="small">Ingresos vs Gastos del mes</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div style="font-size:14px;line-height:1.6">
+        <div>Ingresos mes: <strong>S/ ${fmt(d.income)}</strong></div>
+        <div>Gastos mes: <strong>S/ ${fmt(d.expense)}</strong></div>
+        <div>Proyección fin de mes: <strong>S/ ${fmt(d.projected)}</strong></div>
+        <div>Balance estimado: <strong>S/ ${fmt(d.income - d.projected)}</strong></div>
+      </div>
+    </section>
+  `;
+}
+
