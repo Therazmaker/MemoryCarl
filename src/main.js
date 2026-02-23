@@ -11168,6 +11168,48 @@ function financeDebtSafeNum(x){
   return isFinite(n) ? n : 0;
 }
 
+function financeFmtPEN(n){
+  return (financeDebtSafeNum(n)||0).toLocaleString("es-PE",{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function financeDebtIncomeVsPaymentsUI(){
+  const monthKey = getCurrentMonthKey();
+  const meta = (state.financeMeta||{})[monthKey] || {expectedIncome:0,targetSavings:0};
+  const expectedIncome = financeDebtSafeNum(meta.expectedIncome||0);
+  const monthly = financeDebtMonthlyTotal();
+  const gap = expectedIncome - monthly;
+
+  const gapCls = gap >= 0 ? "pos" : "neg";
+  const gapLabel = gap >= 0 ? "Te queda" : "Te falta";
+
+  return `
+    <div class="finDebtIncomeBox">
+      <div class="grid2" style="gap:10px">
+        <label class="finField">
+          <div class="muted" style="margin-bottom:6px">Ingreso esperado (mes)</div>
+          <input id="finExpectedIncomeInput" class="finInput" inputmode="decimal" placeholder="2800" value="${expectedIncome||""}">
+        </label>
+
+        <div class="finDebtStat" style="align-self:end">
+          <div class="muted">Pago mensual de deudas</div>
+          <div class="big">S/ ${financeFmtPEN(monthly)}</div>
+        </div>
+      </div>
+
+      <div class="finGapRow">
+        <div class="muted">${gapLabel}</div>
+        <div class="finGapVal ${gapCls}">S/ ${financeFmtPEN(Math.abs(gap))}</div>
+      </div>
+
+      <div style="height:140px; margin-top:10px">
+        <canvas id="financeDebtChart" width="320" height="140"></canvas>
+      </div>
+    </div>
+  `;
+}
+
+
+
 function financeDebtTotalBalance(){
   return financeDebtsActive().reduce((s,d)=> s + Math.max(0, financeDebtSafeNum(d.balance)), 0);
 }
@@ -11831,6 +11873,21 @@ function openFinanceDebtPayModal(debtId){
 }
 
 let _financeDebtChart = null;
+function financeBindDebtIncomeInput(){
+  const el = document.getElementById('finExpectedIncomeInput');
+  if(!el) return;
+  if(el.dataset.bound==="1") return;
+  el.dataset.bound = "1";
+  el.addEventListener('input', ()=>{
+    const monthKey = getCurrentMonthKey();
+    const meta = state.financeMeta[monthKey] || {expectedIncome:0,targetSavings:0};
+    const raw = String(el.value||"").replace(/[^0-9.,-]/g,'').replace(',','.');
+    const val = Number(raw||0);
+    setFinanceMeta(monthKey, isFinite(val)?val:0, meta.targetSavings||0);
+    try{ financeDrawDebtChart(); }catch(_e){}
+  });
+}
+
 function financeDrawDebtChart(){
   const canvas = document.getElementById('financeDebtChart');
   if(!canvas || typeof Chart==='undefined') return;
@@ -12286,7 +12343,7 @@ function renderFinanceDebtsTab(){
       <div class="cardTop" style="margin-top:2px">
         <h3 class="cardTitle" style="font-size:14px">Ingreso vs pagos</h3>
       </div>
-      \1
+      ${financeDebtIncomeVsPaymentsUI()}
 
       <div class="hr" style="margin-top:12px"></div>
       <div class="cardTop" style="margin-top:2px">
@@ -12554,6 +12611,7 @@ view = function(){
         try{ renderDailyExpenseChart(); }catch(_e){} 
         try{ if(state.financeSubTab==='main') financeDrawPillarsChart(); }catch(_e){}
         try{ if(state.financeSubTab==='debts') financeDrawDebtChart(); }catch(_e){}
+        try{ if(state.financeSubTab==='debts') financeBindDebtIncomeInput(); }catch(_e){}
       }, 0);
     }
   }catch(e){}
