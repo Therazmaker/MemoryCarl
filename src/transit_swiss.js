@@ -26,6 +26,39 @@ const LS_NATAL = "memorycarl_v2_natal_chart_json";
 const KEY_URL = "memorycarl_v2_swiss_astro_url";
 const KEY_KEY = "memorycarl_v2_swiss_astro_key";
 
+// --- Safety: never let Swiss block app boot ---
+// Some mobile networks can leave fetch hanging. We enforce a timeout.
+function fetchJsonWithTimeout(url, { method="GET", headers={}, body=null, timeoutMs=6500 } = {}){
+  // Safe-mode: allow the app to boot even if Swiss is misconfigured.
+  try{ if(typeof window !== "undefined" && window.__MC_SAFE_MODE__) return Promise.resolve({ ok:false, _safeSkipped:true }); }catch(_e){}
+
+  const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  const timer = setTimeout(()=>{ try{ ctrl && ctrl.abort(); }catch(_e){} }, Math.max(1500, Number(timeoutMs)||6500));
+
+  const opts = {
+    method,
+    headers,
+    signal: ctrl ? ctrl.signal : undefined,
+  };
+  if(body != null) opts.body = body;
+
+  return fetch(url, opts)
+    .then(async (res)=>{
+      if(!res.ok){
+        // Try to capture useful text without throwing.
+        const t = await res.text().catch(()=> "");
+        return { ok:false, _http: res.status, _text: t };
+      }
+      try{
+        return await res.json();
+      }catch(e){
+        const t = await res.text().catch(()=> "");
+        return { ok:false, _jsonError: true, _text: t };
+      }
+    })
+    .finally(()=> clearTimeout(timer));
+}
+
 function norm360(x){ x = x % 360; if(x < 0) x += 360; return x; }
 function deltaDeg(a,b){
   const d = Math.abs(norm360(a) - norm360(b));
@@ -36,6 +69,7 @@ function getSwissAstroUrl(){ return (localStorage.getItem(KEY_URL) || "").trim()
 function getSwissAstroKey(){ return (localStorage.getItem(KEY_KEY) || "").trim(); }
 
 export function swissTransitsAvailable(){
+  try{ if(typeof window !== "undefined" && window.__MC_SAFE_MODE__) return false; }catch(_e){}
   const url = (localStorage.getItem(KEY_URL) || "").trim();
   const key = (localStorage.getItem(KEY_KEY) || "").trim();
   return !!(url && key);
@@ -173,19 +207,23 @@ export async function getSwissDailyCached({ now = new Date(), forceRefresh = fal
   if(!url || !key) return null;
 
   try{
-    const res = await fetch(url.replace(/\/+$/,"") + "/astro/daily", {
+    const endpoint = url.replace(/\/+$/,"") + "/astro/daily";
+    const data = await fetchJsonWithTimeout(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-mc-key": key
-      }
+      },
+      // No body needed for the daily endpoint today, but keep it explicit.
+      body: JSON.stringify({}),
+      timeoutMs: 6500
     });
-    if(!res.ok){
-      const t = await res.text().catch(()=> "");
-      console.warn("[SwissAstro] HTTP", res.status, t);
+
+    if(!data || data.ok === false || data._http){
+      // Keep app running; Swiss is optional.
+      console.warn("[SwissAstro] failed", data?._http || "no_data");
       return null;
     }
-    const data = await res.json();
     try{ localStorage.setItem(cacheKey, JSON.stringify(data)); }catch(e){}
     return data;
   }catch(e){

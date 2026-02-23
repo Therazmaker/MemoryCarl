@@ -8,6 +8,14 @@
   // Flag that the main UI has rendered at least once
   if(!window.__mcBoot) window.__mcBoot = { done:false, ts: Date.now() };
 
+  // Safe mode: boot without optional network modules (useful if a config bricks boot)
+  try{
+    const u = new URL(location.href);
+    if(u.searchParams.has('safe')){
+      window.__MC_SAFE_MODE__ = true;
+    }
+  }catch(_e){}
+
   function cssBtn(){
     return "border:0;border-radius:12px;padding:8px 12px;font-weight:800;cursor:pointer;";
   }
