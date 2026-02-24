@@ -10039,22 +10039,44 @@ function financeMigrateV2(){
 }
 
 
-function financeParseAmount(val){
-  // Accept inputs like "12.5", "12,5", "S/ 1,234.56", "1.234,56"
-  let s = String(val ?? "").trim();
-  if(!s) return 0;
-  s = s.replace(/[^0-9,\.\-]/g, "");
-  const hasComma = s.includes(",");
-  const hasDot = s.includes(".");
+function financeParseAmount(raw){
+  // Robust parse for mobile/desktop:
+  // "42" => 42
+  // "42,50" => 42.5
+  // "S/ 1,234.56" => 1234.56
+  // "1.234,56" => 1234.56
+  if(raw === null || raw === undefined) return 0;
+  let v = String(raw).trim();
+  if(!v) return 0;
+
+  // Keep digits, separators and minus
+  v = v.replace(/[^0-9,\.\-]/g, "");
+
+  const hasComma = v.includes(",");
+  const hasDot = v.includes(".");
+
   if(hasComma && hasDot){
-    // Assume dot is thousands separator and comma is decimal
-    s = s.replace(/\./g, "").replace(/,/g, ".");
-  }else{
-    s = s.replace(/,/g, ".");
+    // Decide last separator as decimal
+    const lastComma = v.lastIndexOf(",");
+    const lastDot = v.lastIndexOf(".");
+    if(lastComma > lastDot){
+      // comma decimal, dots thousands
+      v = v.replace(/\./g, "");
+      v = v.replace(/,/g, ".");
+    }else{
+      // dot decimal, commas thousands
+      v = v.replace(/,/g, "");
+    }
+  }else if(hasComma){
+    // comma decimal
+    v = v.replace(/,/g, ".");
   }
-  const n = Number(s);
+  // else: dot or plain digits OK
+
+  const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
 }
+
 
 function financeActiveLedger(){
   return (state.financeLedger||[]).filter(e=>!e.archived);
@@ -10439,7 +10461,8 @@ function openFinanceEntryModal(existingId=null){
 
         <div class="finEntryAmountRow">
           <div class="finEntrySign ${draft.type==='expense' ? 'expense' : 'income'}" id="finEntrySign">${draft.type==='expense' ? '−' : '+'}</div>
-          <input id="finEntryAmount" type="number" inputmode="decimal" placeholder="0.00" value="${escapeHtml(draft.amount)}" />
+          <!-- NOTE: use type=text + inputmode=decimal to avoid mobile locale quirks with type=number -->
+          <input id="finEntryAmount" type="text" inputmode="decimal" pattern="[0-9.,\s-]*" placeholder="0.00" value="${escapeHtml(draft.amount)}" />
           <button class="iconBtn" id="finEntryCalc" title="Calculadora">🧮</button>
           <button class="finEntryCurrency" id="finEntryCurrency">${draft.currency}</button>
         </div>
@@ -10545,7 +10568,7 @@ function openFinanceEntryModal(existingId=null){
   backdrop.querySelector('#finEntryCalc')?.addEventListener('click', ()=> toast('Calculadora: pronto ✨'));
   backdrop.querySelector('#finEntryPlusOne')?.addEventListener('click', ()=>{
     const a = backdrop.querySelector('#finEntryAmount');
-    const cur = Number(a?.value||0);
+    const cur = financeParseAmount(a?.value||0);
     if(a) a.value = (cur + 1).toFixed(2);
   });
   backdrop.querySelector('#finEntrySchedule')?.addEventListener('click', ()=>{
@@ -10591,13 +10614,18 @@ function openFinanceEntryModal(existingId=null){
   // save
 backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
-  const amount = financeParseAmount(backdrop.querySelector('#finEntryAmount')?.value||0);
+  const rawAmount = (backdrop.querySelector('#finEntryAmount')?.value||'');
+  const amount = financeParseAmount(rawAmount);
   const category = (draft.category||'Otros');
   const reason = (backdrop.querySelector('#finEntryReason')?.value||'normal');
   const accountId = (backdrop.querySelector('#finEntryAccount')?.value||draft.accountId);
   const noteText = (backdrop.querySelector('#finEntryNote')?.value||'').trim();
 
-  if(!amount || amount<=0){ toast('Pon un monto válido'); return; }
+  if(!amount || amount<=0){
+    console.warn('[Finance] invalid amount', { rawAmount, amount });
+    toast('Pon un monto válido');
+    return;
+  }
 
   const dval = (backdrop.querySelector('#finEntryDate')?.value || isoDate);
   const tval = (backdrop.querySelector('#finEntryTime')?.value || draft.time || "00:00");
@@ -11402,6 +11430,7 @@ function financeEnsureCommitments(){
 function financeComputePillars(monthKey){
   const ledger = financeActiveLedger();
   const mk = monthKey || getCurrentMonthKey();
+
   const isInMonth = (iso)=>{
     try{
       const d = new Date(iso);
@@ -11411,6 +11440,7 @@ function financeComputePillars(monthKey){
     }catch(e){ return false; }
   };
 
+  // 1) Real expenses from ledger
   let market=0, services=0, debts=0, other=0;
   for(const e of ledger){
     if(e.archived) continue;
@@ -11430,8 +11460,25 @@ function financeComputePillars(monthKey){
       other += Number(e.amount||0);
     }
   }
+
+  // 2) Planned monthly amounts from Deudas + Compromisos (even if not paid yet)
+  // This makes them visible in "Pilares del mes" card.
+  try{
+    const plannedDebts = (state.financeDebts||[])
+      .filter(d=>String(d.status||"active")!=="closed")
+      .reduce((sum,d)=> sum + (Number(d.monthlyDue||0) || 0), 0);
+
+    const plannedCommitments = (state.financeCommitments||[])
+      .filter(c=>c && (c.active!==false))
+      .reduce((sum,c)=> sum + (Number(c.amount||0) || 0), 0);
+
+    debts += plannedDebts;
+    services += plannedCommitments;
+  }catch(_e){}
+
   return {market, services, debts, other};
 }
+
 
 function openFinanceCommitmentModal(existing){
   financeEnsureCommitments();
