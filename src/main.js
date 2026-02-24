@@ -10038,6 +10038,24 @@ function financeMigrateV2(){
   persist();
 }
 
+
+function financeParseAmount(val){
+  // Accept inputs like "12.5", "12,5", "S/ 1,234.56", "1.234,56"
+  let s = String(val ?? "").trim();
+  if(!s) return 0;
+  s = s.replace(/[^0-9,\.\-]/g, "");
+  const hasComma = s.includes(",");
+  const hasDot = s.includes(".");
+  if(hasComma && hasDot){
+    // Assume dot is thousands separator and comma is decimal
+    s = s.replace(/\./g, "").replace(/,/g, ".");
+  }else{
+    s = s.replace(/,/g, ".");
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function financeActiveLedger(){
   return (state.financeLedger||[]).filter(e=>!e.archived);
 }
@@ -10161,7 +10179,7 @@ function addFinanceEntry({type, amount, accountId, category, reason, note, date}
   const acc = state.financeAccounts.find(a=>a.id===accountId);
   if(!acc) return null;
 
-  const amt = Number(amount||0);
+  const amt = financeParseAmount(amount);
   const entryDate = date || new Date().toISOString();
 
   const entry = {
@@ -10573,7 +10591,7 @@ function openFinanceEntryModal(existingId=null){
   // save
 backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
-  const amount = Number(backdrop.querySelector('#finEntryAmount')?.value||0);
+  const amount = financeParseAmount(backdrop.querySelector('#finEntryAmount')?.value||0);
   const category = (draft.category||'Otros');
   const reason = (backdrop.querySelector('#finEntryReason')?.value||'normal');
   const accountId = (backdrop.querySelector('#finEntryAccount')?.value||draft.accountId);
