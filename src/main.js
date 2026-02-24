@@ -1519,8 +1519,10 @@ function importBackup(file){
       state.inventory = inventory;
 
       // Finance apply
-      if(financeAccounts.length) state.financeAccounts = financeAccounts;
-      if(financeLedger.length) state.financeLedger = financeLedger;
+      // IMPORTANT: Do NOT import/overwrite accounts from backups/snapshots.
+      // We only import ledger/debts/commitments so historical charts work,
+      // while keeping current accounts (balances) independent.
+      if(financeLedger.length) state.financeLedger = financeSanitizeImportedLedger(financeLedger, { detachAccounts:true });
       state.financeDebts = financeDebts;
       state.financeCommitments = financeCommitments;
       state.financeMeta = financeMeta;
@@ -10127,6 +10129,29 @@ function financeNormalizeType(t){
   return s || "expense";
 }
 
+// Sanitize imported ledger entries so charts work and mobile parsing stays consistent.
+// Optionally detach entries from accounts so imported history does not affect balances.
+function financeSanitizeImportedLedger(list, opts){
+  const detachAccounts = !!(opts && opts.detachAccounts);
+  const out = [];
+  (Array.isArray(list)?list:[]).forEach(raw=>{
+    if(!raw || typeof raw !== "object") return;
+    const e = {...raw};
+    e.id ||= uid("fin");
+    e.type = financeNormalizeType(e.type);
+    e.amount = financeParseAmount(e.amount);
+    // keep date as string; charts use slice(0,10)
+    e.date = (e.date ? String(e.date) : new Date().toISOString());
+    e.archived = !!e.archived;
+    if(detachAccounts){
+      delete e.accountId;
+      delete e.account;
+    }
+    out.push(e);
+  });
+  return out;
+}
+
 
 function financeActiveLedger(){
   return (state.financeLedger||[]).filter(e=>!e.archived);
@@ -12876,8 +12901,10 @@ function getLast7DaysExpenseData(){
 
 function importFinanceSeed(data){
   try{
-    if(data.financeAccounts) state.financeAccounts = data.financeAccounts;
-    if(data.financeLedger) state.financeLedger = data.financeLedger;
+    // IMPORTANT: Do NOT import/overwrite accounts. Only import historical movements.
+    if(data.financeLedger) state.financeLedger = financeSanitizeImportedLedger(data.financeLedger, { detachAccounts:true });
+    if(data.financeDebts) state.financeDebts = Array.isArray(data.financeDebts) ? data.financeDebts : state.financeDebts;
+    if(data.financeCommitments) state.financeCommitments = Array.isArray(data.financeCommitments) ? data.financeCommitments : state.financeCommitments;
 
     // ensure new fields exist
     try{ financeMigrateV2(); }catch(_e){}
