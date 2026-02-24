@@ -14345,3 +14345,71 @@ try{
   window.openFinanceAccountEdit = openFinanceAccountEdit;
   window.openFinanceEntryModal = openFinanceEntryModal;
 }catch(e){}
+
+
+/* ===== SAFE OVERRIDE flushSync (syntax-stable version) ===== */
+function flushSync(reason="auto"){
+  try{
+    if (!isDirty() && !["beforeunload","hidden"].includes(reason)) return;
+    if (!getSyncUrl() && !ensureSyncConfigured()) return;
+
+    const payload = {
+      app: "MemoryCarl",
+      v: 2,
+      ts: new Date().toISOString(),
+      reason,
+      apiKey: getSyncApiKey() || undefined,
+      data: {
+        routines: state?.routines ?? load(LS.routines, []),
+        shopping: state?.shopping ?? load(LS.shopping, []),
+        reminders: state?.reminders ?? load(LS.reminders, []),
+
+        musicToday: state?.musicToday ?? load(LS.musicToday, null),
+        musicLog: state?.musicLog ?? load(LS.musicLog, []),
+        sleepLog: state?.sleepLog ?? load(LS.sleepLog, []),
+        budgetMonthly: state?.budgetMonthly ?? load(LS.budgetMonthly, null),
+        calDraw: state?.calDraw ?? load(LS.calDraw, null),
+        house: state?.house ?? load(LS.house, null),
+        moodDaily: state?.moodDaily ?? load(LS.moodDaily, null),
+        moodSpritesCustom: state?.moodSpritesCustom ?? load(LS.moodSpritesCustom, null),
+
+        products: state?.products ?? load(LS.products, []),
+        shoppingHistory: state?.shoppingHistory ?? load(LS.shoppingHistory, []),
+
+        inventory: state?.inventory ?? load(LS.inventory, []),
+        inventoryLots: state?.inventoryLots ?? load(LS.inventoryLots, []),
+        inventoryFlowLog: state?.inventoryFlowLog ?? load(LS.inventoryFlowLog, []),
+
+        finance_accounts: mcLoadAny("memorycarl_v2_finance_accounts", []),
+        finance_ledger: mcLoadAny("memorycarl_v2_finance_ledger", []),
+
+        lsRaw: getMcLocalStorageRaw(),
+      }
+    };
+
+    const url = getSyncUrl();
+    const blob = new Blob([JSON.stringify(payload)], { type: "text/plain" });
+
+    if (navigator.sendBeacon){
+      const queued = navigator.sendBeacon(url, blob);
+      if (queued){
+        clearDirty();
+        localStorage.setItem(SYNC.lastSyncKey, new Date().toISOString());
+        return;
+      }
+    }
+
+    fetch(url, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      keepalive: true,
+      mode: "no-cors"
+    }).then(() => {
+      clearDirty();
+      localStorage.setItem(SYNC.lastSyncKey, new Date().toISOString());
+    });
+
+  }catch(e){
+    console.warn("Sync flush failed:", e);
+  }
+}
