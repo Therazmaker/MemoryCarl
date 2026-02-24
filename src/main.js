@@ -103,6 +103,8 @@
 })()
 ;
 
+window.__MC_VERSION__ = "invcal-v1-2026-02-24a";
+
 import { computeMoonNow } from "./cosmic_lite.js";
 import { getTransitLiteSignals } from "./transit_lite.js";
 import { getTransitSwissSignals, swissTransitsAvailable, getSwissDailyCached, swissDailyAvailable } from "./transit_swiss.js";
@@ -228,6 +230,7 @@ const LS = {
   products: "memorycarl_v2_products",
   shoppingHistory: "memorycarl_v2_shopping_history",
   inventory: "memorycarl_v2_inventory",
+  inventoryLots: "memorycarl_v2_inventory_lots",
 
   // Home widgets
   musicToday: "memorycarl_v2_music_today",
@@ -978,6 +981,7 @@ function flushSync(reason="auto"){
         shoppingHistory: state?.shoppingHistory ?? load(LS.shoppingHistory, []),
         // Inventory (home stock)
         inventory: state?.inventory ?? load(LS.inventory, []),
+        inventoryLots: state?.inventoryLots ?? load(LS.inventoryLots, []),
         // Other useful state
         budgetMonthly: state?.budgetMonthly ?? load(LS.budgetMonthly, null),
         house: state?.house ?? load(LS.house, null),
@@ -1412,6 +1416,8 @@ function persist(){
     if(LS.products) save(LS.products, state.products);
     if(LS.shoppingHistory) save(LS.shoppingHistory, state.shoppingHistory);
     if(LS.inventory) save(LS.inventory, state.inventory);
+  save(LS.inventoryLots, state.inventoryLots||[]);
+    if(LS.inventoryLots) save(LS.inventoryLots, state.inventoryLots||[]);
   }catch(e){}
 
   // Finance (guard: LS keys defined later)
@@ -1444,6 +1450,7 @@ function exportBackup(){
     products: state.products,
     shoppingHistory: state.shoppingHistory,
     inventory: state.inventory,
+    inventoryLots: state.inventoryLots,
     financeAccounts: state.financeAccounts,
     financeLedger: state.financeLedger,
     financeDebts: state.financeDebts,
@@ -1477,6 +1484,7 @@ function importBackup(file){
       const products = Array.isArray(data.products) ? data.products : [];
       const shoppingHistory = Array.isArray(data.shoppingHistory) ? data.shoppingHistory : [];
       const inventory = Array.isArray(data.inventory) ? data.inventory : [];
+      const inventoryLots = Array.isArray(data.inventoryLots) ? data.inventoryLots : [];
 
       // Finance
       const financeAccounts = Array.isArray(data.financeAccounts) ? data.financeAccounts : [];
@@ -1517,6 +1525,7 @@ function importBackup(file){
       state.products = products;
       state.shoppingHistory = shoppingHistory;
       state.inventory = inventory;
+      state.inventoryLots = inventoryLots;
 
       // Finance apply
       // IMPORTANT: Do NOT import/overwrite accounts from backups/snapshots.
@@ -1602,6 +1611,7 @@ function restoreFromSnapshotText(rawText){
   if(payload.products !== undefined){ try{ LS.products = LS.products || "memorycarl_v2_products"; }catch(e){} apply("products", payload.products); }
   if(payload.shoppingHistory !== undefined){ try{ LS.shoppingHistory = LS.shoppingHistory || "memorycarl_v2_shopping_history"; }catch(e){} apply("shoppingHistory", payload.shoppingHistory); }
   if(payload.inventory !== undefined){ try{ LS.inventory = LS.inventory || "memorycarl_v2_inventory"; }catch(e){} apply("inventory", payload.inventory); }
+if(payload.inventoryLots !== undefined){ try{ LS.inventoryLots = LS.inventoryLots || "memorycarl_v2_inventory_lots"; }catch(e){} apply("inventoryLots", payload.inventoryLots); }
 
   // Compat: algunas versiones guardaron reminders en singular
   try{
@@ -7462,13 +7472,19 @@ function wireActions(root){
       // Shopping dashboard navigation
 // Inventory tabs
 if(act==="invTab"){
-  state.inventorySubtab = (btn.dataset.tab === "history") ? "history" : "stock";
+  state.inventorySubtab = (btn.dataset.tab === "history") ? "history" : (btn.dataset.tab === "calendar" ? "calendar" : "stock");
   view();
   return;
 }
 if(act==="invHistPreset"){
   state.inventoryHistPreset = btn.dataset.preset || "30d";
   state.inventorySubtab = "history";
+  view();
+  return;
+}
+if(act==="invCalNav"){
+  state.inventoryCalOffset = Number(state.inventoryCalOffset||0) + Number(btn.dataset.dir||0);
+  state.inventorySubtab = "calendar";
   view();
   return;
 }
@@ -7668,6 +7684,7 @@ if(act==="savePurchase"){
 
       // Stack to inventory (qty increases or new items created)
       applyItemsToInventory_(items);
+      applyItemsToInventoryLots_(items, { boughtAtISO: new Date().toISOString(), sourceListId, store:(store||"").trim() });
 
       // Optional: mark current list as bought to reflect it was committed
       (list.items||[]).forEach(it=>{ it.bought = true; });
@@ -8071,9 +8088,11 @@ try{
 LS.products = "memorycarl_v2_products";
 LS.shoppingHistory = "memorycarl_v2_shopping_history";
 LS.inventory = "memorycarl_v2_inventory";
+LS.inventoryLots = "memorycarl_v2_inventory_lots";
 state.products = load(LS.products, []);
 state.shoppingHistory = load(LS.shoppingHistory, []);
 state.inventory = load(LS.inventory, []);
+state.inventoryLots = load(LS.inventoryLots, []);
 state.shoppingSubtab = state.shoppingSubtab || "lists";
 state.shoppingDashPreset = state.shoppingDashPreset || "7d";
 
@@ -8444,6 +8463,7 @@ function openProductLibrary(){
 
 function ensureInventory(){
   if(!Array.isArray(state.inventory)) state.inventory = [];
+  if(!Array.isArray(state.inventoryLots)) state.inventoryLots = [];
 }
 
 function inventoryFindByProductId(productId){
@@ -8453,6 +8473,8 @@ function inventoryFindByProductId(productId){
 
 function addInventoryFromProduct(productId){
   ensureInventory();
+  ensureInventoryLots();
+  state.inventorySubtab = state.inventorySubtab || "stock";
   const p = state.products.find(x=>x.id===productId);
   if(!p) return;
   const existing = inventoryFindByProductId(productId);
@@ -8694,7 +8716,346 @@ function viewInventoryHistory(){
   `;
 }
 
-function viewInventory(){
+
+
+function ensureInventoryLots(){
+  state.inventoryLots = Array.isArray(state.inventoryLots) ? state.inventoryLots : [];
+}
+
+function lotProductKey_(lot){
+  const pid = String(lot?.productId||"").trim();
+  if(pid) return `pid:${pid}`;
+  const name = (lot?.name||"").trim();
+  return `nm:${normName_(name)}`;
+}
+
+function invGetConsumptionStats_(lots){
+  // returns map key -> { avgDays, samples, lastBoughtAt, lastFinishedAt }
+  const map = new Map();
+  const done = (lots||[]).filter(l=>l?.boughtAt && l?.finishedAt);
+  // newest first
+  done.sort((a,b)=>String(b.finishedAt||"").localeCompare(String(a.finishedAt||"")));
+  for(const l of done){
+    const key = lotProductKey_(l);
+    const ba = Date.parse(l.boughtAt);
+    const fa = Date.parse(l.finishedAt);
+    if(!isFinite(ba) || !isFinite(fa) || fa<=ba) continue;
+    const days = (fa - ba) / (1000*60*60*24);
+    const cur = map.get(key) || { samples:[], lastBoughtAt:null, lastFinishedAt:null };
+    if(cur.samples.length < 6) cur.samples.push(days);
+    if(!cur.lastBoughtAt) cur.lastBoughtAt = l.boughtAt;
+    if(!cur.lastFinishedAt) cur.lastFinishedAt = l.finishedAt;
+    map.set(key, cur);
+  }
+  // finalize avg
+  const out = new Map();
+  for(const [k,v] of map.entries()){
+    const samples = v.samples.filter(x=>isFinite(x) && x>0);
+    const avg = samples.length ? (samples.reduce((a,b)=>a+b,0)/samples.length) : null;
+    out.set(k, {
+      avgDays: avg ? Math.max(1, avg) : null,
+      samples: samples.length,
+      lastBoughtAt: v.lastBoughtAt,
+      lastFinishedAt: v.lastFinishedAt
+    });
+  }
+  return out;
+}
+
+function invMonthGrid_(year, monthIdx){
+  // monthIdx: 0-11
+  const first = new Date(year, monthIdx, 1);
+  const startDow = (first.getDay()+6)%7; // Monday=0
+  const start = new Date(year, monthIdx, 1 - startDow);
+  const days = [];
+  for(let i=0;i<42;i++){
+    const d = new Date(start);
+    d.setDate(start.getDate()+i);
+    days.push(d);
+  }
+  return { first, days };
+}
+
+function fmtYMD_(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const da = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${da}`;
+}
+
+function openFinishLotModal(productKey){
+  ensureInventoryLots();
+  const openLots = (state.inventoryLots||[]).filter(l=>{
+    if(l.finishedAt) return false;
+    return lotProductKey_(l) === productKey;
+  });
+
+  if(!openLots.length){
+    toast("No hay lotes activos para este producto.");
+    return;
+  }
+
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop";
+
+  const now = new Date();
+  const nowDate = fmtYMD_(now);
+  const nowTime = String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
+
+  b.innerHTML = `
+    <div class="modal modalWide">
+      <h2>Marcar como “Se acabó”</h2>
+      <div class="small">Selecciona el lote y coloca la fecha/hora real. Esto alimenta la predicción.</div>
+      <div class="hr"></div>
+
+      <div class="grid" style="grid-template-columns: 1fr 1fr;">
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Lote activo</div>
+          <select class="input" id="lotPick">
+            ${openLots.map(l=>{
+              const label = `${escapeHtml(l.name||"Item")} · ${Number(l.qty||0)} ${escapeHtml(l.unit||"u")} · comprado ${escapeHtml(String(l.boughtAt||"").slice(0,16).replace("T"," "))}`;
+              return `<option value="${escapeHtml(l.id)}">${label}</option>`;
+            }).join("")}
+          </select>
+        </div>
+        <div>
+          <div class="muted" style="margin:2px 0 6px;">Fecha de fin</div>
+          <div class="row" style="gap:8px;">
+            <input class="input" id="finDate" type="date" value="${nowDate}">
+            <input class="input" id="finTime" type="time" value="${nowTime}">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px; gap:8px;">
+        <button class="btn ghost" data-m="cancel">Cancelar</button>
+        <button class="btn primary" data-m="save">Guardar</button>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(b);
+
+  b.addEventListener("click",(e)=>{
+    const t = e.target.closest("[data-m]");
+    if(!t) return;
+    const act = t.dataset.m;
+    if(act==="cancel"){ b.remove(); return; }
+    if(act==="save"){
+      const lotId = b.querySelector("#lotPick")?.value;
+      const d = b.querySelector("#finDate")?.value;
+      const tm = b.querySelector("#finTime")?.value || "12:00";
+      if(!lotId || !d){ toast("Completa la fecha."); return; }
+      const iso = `${d}T${tm}:00`;
+      const lot = (state.inventoryLots||[]).find(x=>x.id===lotId);
+      if(lot){
+        lot.finishedAt = iso;
+        persist();
+        toast("Lote cerrado ✅");
+        b.remove();
+        view();
+      }
+    }
+  });
+}
+
+function viewInventoryCalendar(){
+  ensureInventory();
+  ensureInventoryLots();
+
+  // month navigation
+  state.inventoryCalOffset = Number(state.inventoryCalOffset||0);
+  const base = new Date();
+  const m = new Date(base.getFullYear(), base.getMonth() + state.inventoryCalOffset, 1);
+  const year = m.getFullYear();
+  const monthIdx = m.getMonth();
+  const monthName = m.toLocaleString("es-ES",{month:"long", year:"numeric"});
+
+  const { days } = invMonthGrid_(year, monthIdx);
+  const ymdMonth = String(year)+"-"+String(monthIdx+1).padStart(2,"0");
+
+  const lots = (state.inventoryLots||[]);
+  const stats = invGetConsumptionStats_(lots);
+
+  // Build day markers
+  const dayMap = new Map(); // ymd -> {buys:[], fins:[]}
+  const pushDay = (ymd, kind, lot)=>{
+    const cur = dayMap.get(ymd) || { buys:[], fins:[] };
+    cur[kind].push(lot);
+    dayMap.set(ymd, cur);
+  };
+  for(const l of lots){
+    if(l?.boughtAt){
+      const ymd = String(l.boughtAt).slice(0,10);
+      pushDay(ymd,"buys", l);
+    }
+    if(l?.finishedAt){
+      const ymd = String(l.finishedAt).slice(0,10);
+      pushDay(ymd,"fins", l);
+    }
+  }
+
+  // Predictions list (active lots)
+  const activeLots = lots.filter(l=>l?.boughtAt && !l.finishedAt);
+  const predictRows = activeLots.map(l=>{
+    const key = lotProductKey_(l);
+    const st = stats.get(key);
+    if(!st?.avgDays) return null;
+    const ba = Date.parse(l.boughtAt);
+    if(!isFinite(ba)) return null;
+    const pred = new Date(ba + st.avgDays*24*60*60*1000);
+    const daysLeft = Math.round((pred.getTime() - Date.now())/(24*60*60*1000));
+    return {
+      key,
+      name: l.name || "Item",
+      unit: l.unit || "u",
+      predYmd: fmtYMD_(pred),
+      daysLeft
+    };
+  }).filter(Boolean)
+    .sort((a,b)=>a.daysLeft-b.daysLeft)
+    .slice(0, 10);
+
+  // Monthly suggestions (simple)
+  const essentials = (state.inventory||[]).filter(x=>x.essential);
+  const plan = [];
+  for(const it of essentials){
+    const key = it.productId ? `pid:${String(it.productId).trim()}` : `nm:${normName_(it.name)}`;
+    const st = stats.get(key);
+    if(!st?.avgDays) continue;
+    // next buy = predicted finish of latest active lot minus 2 days
+    const act = activeLots.filter(l=>lotProductKey_(l)===key).sort((a,b)=>String(b.boughtAt||"").localeCompare(String(a.boughtAt||"")));
+    const latest = act[0];
+    if(!latest) continue;
+    const ba = Date.parse(latest.boughtAt);
+    if(!isFinite(ba)) continue;
+    const predFin = new Date(ba + st.avgDays*24*60*60*1000);
+    const buyAt = new Date(predFin.getTime() - 2*24*60*60*1000);
+    plan.push({
+      key,
+      name: it.name,
+      when: fmtYMD_(buyAt),
+      note: `dura ~${Math.round(st.avgDays)}d (${st.samples} muestras)`
+    });
+  }
+  plan.sort((a,b)=>String(a.when).localeCompare(String(b.when)));
+
+  const dayCells = days.map(d=>{
+    const ymd = fmtYMD_(d);
+    const inMonth = d.getMonth()===monthIdx;
+    const ev = dayMap.get(ymd);
+    const buys = ev?.buys?.length || 0;
+    const fins = ev?.fins?.length || 0;
+    const dots = `
+      <div class="calDots">
+        ${buys?`<span class="dot buy" title="Compras: ${buys}"></span>`:""}
+        ${fins?`<span class="dot fin" title="Se acabó: ${fins}"></span>`:""}
+      </div>
+    `;
+    return `
+      <div class="calCell ${inMonth?"":"dim"}">
+        <div class="calDayNum">${d.getDate()}</div>
+        ${dots}
+      </div>
+    `;
+  }).join("");
+
+  const topPredict = predictRows.map(r=>{
+    const warn = r.daysLeft<=2 ? "chip danger" : (r.daysLeft<=5 ? "chip warn" : "chip");
+    const label = r.daysLeft<0 ? `pasado (${Math.abs(r.daysLeft)}d)` : `${r.daysLeft}d`;
+    return `
+      <div class="item">
+        <div class="left">
+          <div class="name">${escapeHtml(r.name)}</div>
+          <div class="meta">Predicción fin: <b>${escapeHtml(r.predYmd)}</b> · <span class="${warn}">${escapeHtml(label)}</span></div>
+        </div>
+        <div class="row">
+          <button class="btn" onclick="openFinishLotModal('${escapeHtml(r.key)}')">Se acabó</button>
+        </div>
+      </div>
+    `;
+  }).join("") || `<div class="muted">Aún no hay predicciones. Necesitas cerrar algunos lotes con “Se acabó”.</div>`;
+
+  const planRows = plan.slice(0,12).map(p=>`
+    <div class="item">
+      <div class="left">
+        <div class="name">${escapeHtml(p.name)}</div>
+        <div class="meta">Comprar aprox: <b>${escapeHtml(p.when)}</b> · ${escapeHtml(p.note)}</div>
+      </div>
+      <div class="row">
+        <button class="btn" onclick="openFinishLotModal('${escapeHtml(p.key)}')">Cerrar lote</button>
+      </div>
+    </div>
+  `).join("") || `<div class="muted">Sin plan aún. Marca “Se acabó” en varios productos para que aprenda tu ritmo.</div>`;
+
+  // open lots grouped quick actions
+  const openGroups = new Map();
+  for(const l of activeLots){
+    const key = lotProductKey_(l);
+    const cur = openGroups.get(key) || { name:l.name||"Item", count:0 };
+    cur.count += 1;
+    openGroups.set(key, cur);
+  }
+  const openBtns = [...openGroups.entries()].slice(0,12).map(([k,v])=>
+    `<button class="btn" onclick="openFinishLotModal('${escapeHtml(k)}')">Se acabó · ${escapeHtml(v.name)}</button>`
+  ).join("") || `<div class="muted">No hay lotes activos.</div>`;
+
+  return `
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Calendario de Inventario</h3>
+          <div class="small">Compras (•) y “se acabó” (•). Tu consumo se vuelve visible.</div>
+        </div>
+        <div class="row">
+          <button class="btn" data-act="invCalNav" data-dir="-1">◀</button>
+          <div class="chip">${escapeHtml(monthName)}</div>
+          <button class="btn" data-act="invCalNav" data-dir="1">▶</button>
+        </div>
+      </div>
+      <div class="hr"></div>
+
+      <div class="calGrid">
+        <div class="calHead">L</div><div class="calHead">M</div><div class="calHead">X</div><div class="calHead">J</div><div class="calHead">V</div><div class="calHead">S</div><div class="calHead">D</div>
+        ${dayCells}
+      </div>
+
+      <div class="hr" style="margin-top:12px;"></div>
+      <div class="small">Accesos rápidos: cerrar un lote (cuando se termina)</div>
+      <div class="grid" style="grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px;">
+        ${openBtns}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Predicción: ¿cuándo se acaba?</h3>
+          <div class="small">Basado en duración promedio de lotes cerrados.</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="list">${topPredict}</div>
+    </section>
+
+    <section class="card">
+      <div class="cardTop">
+        <div>
+          <h3 class="cardTitle">Plan sugerido (mes)</h3>
+          <div class="small">Para esenciales con historial suficiente.</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="list">${planRows}</div>
+    </section>
+  `;
+}
+
+// expose
+window.openFinishLotModal = openFinishLotModal;
+
+
   ensureInventory();
   const low = (state.inventory||[]).filter(x=>Number(x.minQty||0)>0 && Number(x.qty||0) <= Number(x.minQty||0)).length;
   const linked = (state.inventory||[]).filter(x=>!!x.productId).length;
@@ -8710,8 +9071,9 @@ function viewInventory(){
     </div>
 
     <div class="row" style="gap:8px; margin:0 0 12px;">
-      <button class="btn ${state.inventorySubtab!=="history"?"primary":""}" data-act="invTab" data-tab="stock">📦 Stock</button>
+      <button class="btn ${state.inventorySubtab==="stock"?"primary":""}" data-act="invTab" data-tab="stock">📦 Stock</button>
       <button class="btn ${state.inventorySubtab==="history"?"primary":""}" data-act="invTab" data-tab="history">🗓️ Histórico</button>
+      <button class="btn ${state.inventorySubtab==="calendar"?"primary":""}" data-act="invTab" data-tab="calendar">📅 Calendario</button>
     </div>
 
     <div class="row" style="margin:0 0 12px;">
@@ -8721,7 +9083,7 @@ function viewInventory(){
       <button class="btn good" onclick="addInventoryManual()">+ Manual</button>
     </div>
 
-${state.inventorySubtab==="history" ? viewInventoryHistory() : `
+${state.inventorySubtab==="history" ? viewInventoryHistory() : (state.inventorySubtab==="calendar" ? viewInventoryCalendar() : `
   <div class="row" style="margin:0 0 12px;">
     <div class="chip">${(state.inventory||[]).length} items</div>
     <div class="chip">${linked} link</div>
@@ -8753,6 +9115,7 @@ ${state.inventorySubtab==="history" ? viewInventoryHistory() : `
         const isLow = Number(it.minQty||0)>0 && Number(it.qty||0) <= Number(it.minQty||0);
         const badge = isLow ? `<span class="chip" style="border-color:rgba(255,80,80,.35);color:rgba(255,170,170,.95)">Bajo</span>` : ``;
         const link = it.productId ? `🔗` : `📝`;
+        const pkey = it.productId ? ("pid:"+String(it.productId)) : ("nm:"+normName_(it.name));
         return `
           <div class="item">
             <div class="left">
@@ -8761,6 +9124,7 @@ ${state.inventorySubtab==="history" ? viewInventoryHistory() : `
             </div>
             <div class="row">
               <button class="btn" onclick="addInventoryToList('${it.id}')">➕ Lista</button>
+              <button class="btn" onclick="openFinishLotModal('${escapeHtml(pkey)}')">Se acabó</button>
               <button class="btn" onclick="editInventoryItem('${it.id}')">Edit</button>
               <button class="btn danger" onclick="deleteInventoryItem('${it.id}')">Del</button>
             </div>
@@ -8769,7 +9133,7 @@ ${state.inventorySubtab==="history" ? viewInventoryHistory() : `
       }).join("") || `<div class="muted">Aún no tienes items.</div>`}
     </div>
   </section>
-`}
+`)}
 
   `;
 }
@@ -9178,6 +9542,54 @@ function applyItemsToInventory_(items){
         notes: ""
       });
     }
+  }
+}
+
+
+function ensureInventoryLots_(){
+  state.inventoryLots = Array.isArray(state.inventoryLots) ? state.inventoryLots : [];
+}
+
+function invLotKey_(it){
+  const pid = String(it?.productId||"").trim();
+  const name = (it?.name||"").trim();
+  if(pid) return `pid:${pid}`;
+  return `nm:${normName_(name)}`;
+}
+
+function applyItemsToInventoryLots_(items, meta){
+  ensureInventoryLots_();
+  meta = meta && typeof meta==="object" ? meta : {};
+  const boughtAtISO = meta.boughtAtISO || new Date().toISOString();
+  const sourceListId = String(meta.sourceListId||"").trim();
+  const store = String(meta.store||"").trim();
+
+  for(const it of (items||[])){
+    const qty = Math.max(1, Number(it.qty||1));
+    if(!qty) continue;
+
+    const pid = String(it.productId||"").trim();
+    const name = (it.name||"").trim();
+    if(!name && !pid) continue;
+
+    const prod = pid ? (state.products||[]).find(p=>String(p.id)===pid) : null;
+    const unit = (String(it.unit||"").trim() || String(prod?.unit||"").trim() || "u");
+    const category = (String(it.category||"").trim() || String(prod?.category||"").trim() || "Other");
+
+    state.inventoryLots.unshift({
+      id: uid("lot"),
+      productId: pid,
+      name: name || (prod?.name||"Item"),
+      category,
+      qty,
+      unit,
+      boughtAt: boughtAtISO,
+      finishedAt: null,
+      source: "shopping",
+      sourceListId: sourceListId || null,
+      store: store || null,
+      note: ""
+    });
   }
 }
 

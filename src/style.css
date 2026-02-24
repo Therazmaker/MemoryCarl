@@ -1886,3 +1886,60 @@ body{
 .finPlanBox{margin-top:10px;padding:12px;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)}
 .finPlanSummary{padding:10px;border-radius:16px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02)}
 .finSimStep{padding:10px;border-radius:16px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02);margin-top:8px}
+
+
+/* ====================== INVENTORY CALENDAR ====================== */
+.calGrid{
+  display:grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap:8px;
+}
+.calHead{
+  font-size:12px;
+  opacity:.75;
+  text-align:center;
+  padding:4px 0;
+}
+.calCell{
+  position:relative;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:14px;
+  min-height:54px;
+  padding:8px;
+  background: rgba(255,255,255,.03);
+}
+.calCell.dim{
+  opacity:.45;
+}
+.calDayNum{
+  font-size:12px;
+  opacity:.85;
+}
+.calDots{
+  position:absolute;
+  bottom:8px;
+  left:8px;
+  display:flex;
+  gap:6px;
+}
+.dot{
+  width:10px;
+  height:10px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.22);
+  background: rgba(255,255,255,.12);
+}
+.dot.buy{
+  background: rgba(120,200,255,.35);
+}
+.dot.fin{
+  background: rgba(255,140,140,.35);
+}
+.chip.warn{
+  border-color: rgba(255,210,120,.35);
+  color: rgba(255,235,180,.95);
+}
+.chip.danger{
+  border-color: rgba(255,120,120,.35);
+  color: rgba(255,185,185,.95);
+}
