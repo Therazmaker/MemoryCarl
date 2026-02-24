@@ -231,7 +231,6 @@ const LS = {
   shoppingHistory: "memorycarl_v2_shopping_history",
   inventory: "memorycarl_v2_inventory",
   inventoryLots: "memorycarl_v2_inventory_lots",
-  inventoryFlowLog: "memorycarl_v2_inventory_flow_log",
 
   // Home widgets
   musicToday: "memorycarl_v2_music_today",
@@ -1017,7 +1016,6 @@ shoppingHistory: state?.shoppingHistory ?? load(LS.shoppingHistory, []),
 // Inventory (home stock)
 inventory: state?.inventory ?? load(LS.inventory, []),
 inventoryLots: state?.inventoryLots ?? load(LS.inventoryLots, []),
-inventoryFlowLog: state?.inventoryFlowLog ?? load(LS.inventoryFlowLog, []),
 
 // NeuroClaw + Astro (local caches)
 neuroclawFeedback: state?.neuroclawFeedback ?? load(LS.neuroclawFeedback, []),
@@ -1493,7 +1491,6 @@ function persist(){
     if(LS.inventory) save(LS.inventory, state.inventory);
   save(LS.inventoryLots, state.inventoryLots||[]);
     if(LS.inventoryLots) save(LS.inventoryLots, state.inventoryLots||[]);
-    if(LS.inventoryFlowLog) save(LS.inventoryFlowLog, state.inventoryFlowLog||[]);
   }catch(e){}
 
   // Finance (guard: LS keys defined later)
@@ -1527,7 +1524,6 @@ function exportBackup(){
     shoppingHistory: state.shoppingHistory,
     inventory: state.inventory,
     inventoryLots: state.inventoryLots,
-    inventoryFlowLog: state.inventoryFlowLog,
     financeAccounts: state.financeAccounts,
     financeLedger: state.financeLedger,
     financeDebts: state.financeDebts,
@@ -1562,7 +1558,6 @@ function importBackup(file){
       const shoppingHistory = Array.isArray(data.shoppingHistory) ? data.shoppingHistory : [];
       const inventory = Array.isArray(data.inventory) ? data.inventory : [];
       const inventoryLots = Array.isArray(data.inventoryLots) ? data.inventoryLots : [];
-      const inventoryFlowLog = Array.isArray(data.inventoryFlowLog) ? data.inventoryFlowLog : [];
 
       // Finance
       const financeAccounts = Array.isArray(data.financeAccounts) ? data.financeAccounts : [];
@@ -1604,7 +1599,6 @@ function importBackup(file){
       state.shoppingHistory = shoppingHistory;
       state.inventory = inventory;
       state.inventoryLots = inventoryLots;
-      state.inventoryFlowLog = inventoryFlowLog;
 
       // Finance apply
       // IMPORTANT: Do NOT import/overwrite accounts from backups/snapshots.
@@ -1715,7 +1709,6 @@ if(payload && typeof payload === "object" && payload.lsRaw && typeof payload.lsR
   if(payload.shoppingHistory !== undefined){ try{ LS.shoppingHistory = LS.shoppingHistory || "memorycarl_v2_shopping_history"; }catch(e){} apply("shoppingHistory", payload.shoppingHistory); }
   if(payload.inventory !== undefined){ try{ LS.inventory = LS.inventory || "memorycarl_v2_inventory"; }catch(e){} apply("inventory", payload.inventory); }
 if(payload.inventoryLots !== undefined){ try{ LS.inventoryLots = LS.inventoryLots || "memorycarl_v2_inventory_lots"; }catch(e){} apply("inventoryLots", payload.inventoryLots); }
-if(payload.inventoryFlowLog !== undefined){ try{ LS.inventoryFlowLog = LS.inventoryFlowLog || "memorycarl_v2_inventory_flow_log"; }catch(e){} apply("inventoryFlowLog", payload.inventoryFlowLog); }
 
 
 // Finance Core
@@ -2429,9 +2422,6 @@ const btnExport = root.querySelector("#btnExport");
 	  if(state.tab==="calendar") wireCalendar(root);
   if(state.tab==="insights") wireInsights(root);
   wireHouseZoneSheet(root);
-
-  // Charts: Inventory Market View
-  try{ setTimeout(()=>renderInventoryMarketCharts(), 0); }catch(e){}
 
   // Re-open house runner modal after render if it was open
   try{
@@ -6260,7 +6250,7 @@ function viewHouse(){
             ${renderHouseTasksList()}
           </div>
         </div>
-      `))}
+      `)}
     </section>
   `;
 }
@@ -7603,7 +7593,7 @@ function wireActions(root){
       // Shopping dashboard navigation
 // Inventory tabs
 if(act==="invTab"){
-  state.inventorySubtab = (btn.dataset.tab === "history") ? "history" : (btn.dataset.tab === "calendar" ? "calendar" : (btn.dataset.tab === "market" ? "market" : "stock"));
+  state.inventorySubtab = (btn.dataset.tab === "history") ? "history" : (btn.dataset.tab === "calendar" ? "calendar" : "stock");
   view();
   return;
 }
@@ -8248,12 +8238,10 @@ LS.products = "memorycarl_v2_products";
 LS.shoppingHistory = "memorycarl_v2_shopping_history";
 LS.inventory = "memorycarl_v2_inventory";
 LS.inventoryLots = "memorycarl_v2_inventory_lots";
-LS.inventoryFlowLog = "memorycarl_v2_inventory_flow_log";
 state.products = load(LS.products, []);
 state.shoppingHistory = load(LS.shoppingHistory, []);
 state.inventory = load(LS.inventory, []);
 state.inventoryLots = load(LS.inventoryLots, []);
-state.inventoryFlowLog = load(LS.inventoryFlowLog, []);
 state.shoppingSubtab = state.shoppingSubtab || "lists";
 state.shoppingDashPreset = state.shoppingDashPreset || "7d";
 
@@ -8625,42 +8613,12 @@ function openProductLibrary(){
 function ensureInventory(){
   if(!Array.isArray(state.inventory)) state.inventory = [];
   if(!Array.isArray(state.inventoryLots)) state.inventoryLots = [];
-  if(!Array.isArray(state.inventoryFlowLog)) state.inventoryFlowLog = [];
   // defaults for new % tracking
   (state.inventory||[]).forEach(it=>{
     if(it.refillPointPct == null) it.refillPointPct = 25;
     if(it.levelPct == null) it.levelPct = "";
     if(it.lastCheck == null) it.lastCheck = "";
   });
-}
-
-
-function invKeyFromItem_(it){
-  const pid = String(it?.productId||"").trim();
-  if(pid) return `pid:${pid}`;
-  const name = (it?.name||"").trim();
-  return `nm:${normName_(name)}`;
-}
-
-function invLogEvent_(type, it, extra){
-  // type: 'check' | 'restock' | 'depleted'
-  state.inventoryFlowLog = Array.isArray(state.inventoryFlowLog) ? state.inventoryFlowLog : [];
-  const now = new Date();
-  const base = {
-    id: uid("if"),
-    ts: now.toISOString(),
-    date: now.toISOString().slice(0,10),
-    type: String(type||"").trim(),
-    productKey: invKeyFromItem_(it),
-    productId: String(it?.productId||"").trim(),
-    name: String(it?.name||"").trim(),
-    category: String(it?.category||"").trim(),
-    levelPct: (it && (it.levelPct===0 || it.levelPct)) ? Number(it.levelPct) : null
-  };
-  const ev = Object.assign(base, (extra && typeof extra==="object") ? extra : {});
-  state.inventoryFlowLog.unshift(ev);
-  // keep it light
-  if(state.inventoryFlowLog.length > 5000) state.inventoryFlowLog = state.inventoryFlowLog.slice(0, 5000);
 }
 
 function inventoryFindByProductId(productId){
@@ -8677,12 +8635,8 @@ function addInventoryFromProduct(productId){
   const existing = inventoryFindByProductId(productId);
   if(existing){
     existing.qty = Number(existing.qty||0) + 1;
-    existing.levelPct = 100;
-    existing.lastCheck = isoDate();
-    if(existing.refillPointPct == null) existing.refillPointPct = 25;
-    invLogEvent_("restock", existing, { via:"library" });
     persist();
-    toast("Cocina: repuesto a 100% ✅");
+    toast("Inventario: +1 ✅");
     view();
     return;
   }
@@ -8696,20 +8650,19 @@ function addInventoryFromProduct(productId){
     minQty: 0,
     essential: !!p.essential,
     notes: "",
-    levelPct: 100,
+    levelPct: "",
     refillPointPct: 25,
-    lastCheck: isoDate()
+    lastCheck: ""
   });
-  invLogEvent_("restock", state.inventory[0], { via:"library" });
   persist();
-  toast("Agregado a Cocina ✅");
+  toast("Agregado al inventario ✅");
   view();
 }
 
 function addInventoryManual(){
   ensureInventory();
   openPromptModal({
-    title:"Nuevo en Cocina",
+    title:"Nuevo en inventario",
     fields:[
       {key:"name", label:"Nombre"},
       {key:"category", label:"Categoría (opcional)", value:""},
@@ -8749,7 +8702,7 @@ function editInventoryItem(invId){
   const it = state.inventory.find(x=>x.id===invId);
   if(!it) return;
   openPromptModal({
-    title:"Editar Cocina",
+    title:"Editar inventario",
     fields:[
       {key:"name", label:"Nombre", value: it.name || ""},
       {key:"category", label:"Categoría", value: it.category || ""},
@@ -8932,209 +8885,6 @@ function viewInventoryHistory(){
       </div>
     </section>
   `;
-}
-
-
-
-function viewInventoryMarket(){
-  ensureInventory();
-  // Build a quick list of products seen in flow log
-  const log = Array.isArray(state.inventoryFlowLog) ? state.inventoryFlowLog : [];
-  const keys = new Map(); // key -> {name, category, productId}
-  for(const ev of log){
-    const k = String(ev.productKey||"").trim();
-    if(!k) continue;
-    if(!keys.has(k)){
-      keys.set(k, { name: ev.name||k, category: ev.category||"", productId: ev.productId||"" });
-    }
-  }
-  // Also include currently active items (kitchen)
-  (state.inventory||[]).forEach(it=>{
-    const k = invKeyFromItem_(it);
-    if(!keys.has(k)) keys.set(k, { name: it.name||k, category: it.category||"", productId: it.productId||"" });
-  });
-
-  const options = [...keys.entries()]
-    .sort((a,b)=>String(a[1].name||"").localeCompare(String(b[1].name||""), "es", { sensitivity:"base" }))
-    .map(([k,meta])=>`<option value="${escapeHtml(k)}">${escapeHtml(meta.name || k)}${meta.category?` · ${escapeHtml(meta.category)}`:""}</option>`)
-    .join("");
-
-  const sel = state.invMarketPickKey || (keys.size ? [...keys.keys()][0] : "");
-
-  // Summary numbers (today kitchen)
-  const active = (state.inventory||[]);
-  const avgPct = active.length ? Math.round(active.reduce((a,it)=> a + (Number(it.levelPct)||0), 0) / active.length) : 0;
-  const critical = active.filter(it=>{
-    const pct = Number(it.levelPct||0);
-    const rp = Number(it.refillPointPct ?? 25);
-    return pct>0 && pct<=rp;
-  }).length;
-
-  return `
-    <section class="card">
-      <div class="cardTop">
-        <div>
-          <h3 class="cardTitle">Market View</h3>
-          <div class="small">Lectura de consumo como si fuera un gráfico de trading 📈 (basado en tus check-ins)</div>
-        </div>
-      </div>
-      <div class="hr"></div>
-
-      <div class="row" style="gap:8px; flex-wrap:wrap;">
-        <div class="chip">Cocina hoy: <b>${active.length}</b> items</div>
-        <div class="chip">Promedio: <b>${avgPct}%</b></div>
-        <div class="chip">Críticos: <b>${critical}</b></div>
-      </div>
-
-      <div class="hr"></div>
-
-      <div class="grid" style="grid-template-columns: 1fr; gap:10px;">
-        <div>
-          <div class="muted" style="margin:2px 0 6px;">Producto (línea %)</div>
-          <select class="input" onchange="setInvMarketPick(this.value)">
-            ${options || `<option value="">(sin datos todavía)</option>`}
-          </select>
-        </div>
-
-        <div class="row" style="gap:10px; flex-wrap:wrap;">
-          <button class="btn" onclick="setInvMarketRange('7d')">7D</button>
-          <button class="btn" onclick="setInvMarketRange('30d')">30D</button>
-          <button class="btn" onclick="setInvMarketRange('90d')">90D</button>
-          <div class="chip">Rango: ${(state.invMarketRange||"30d").toUpperCase()}</div>
-        </div>
-
-        <div>
-          <canvas id="invMarketLine" style="width:100%; height:160px; display:block;"></canvas>
-          <div class="small muted" id="invMarketLineMeta"></div>
-        </div>
-
-        <div>
-          <h3 class="cardTitle" style="font-size:16px;">Alertas de consumo (semana)</h3>
-          <div class="small">Los que se están gastando más rápido de lo normal</div>
-          <div class="hr"></div>
-          <div class="list" id="invMarketFastList">
-            <div class="muted">Cargando…</div>
-          </div>
-        </div>
-
-      </div>
-    </section>
-  `;
-}
-
-window.setInvMarketPick = function(k){
-  state.invMarketPickKey = String(k||"");
-  persist();
-  view();
-};
-
-window.setInvMarketRange = function(r){
-  state.invMarketRange = (r==="7d"||r==="90d") ? r : "30d";
-  persist();
-  view();
-};
-
-function renderInventoryMarketCharts(){
-  try{
-    if(state.tab!=="shopping" || state.shoppingSubtab!=="inventory") return;
-    if(state.inventorySubtab!=="market") return;
-
-    ensureInventory();
-    const log = Array.isArray(state.inventoryFlowLog) ? state.inventoryFlowLog : [];
-
-    const range = state.invMarketRange || "30d";
-    const days = range==="7d" ? 7 : range==="90d" ? 90 : 30;
-    const since = Date.now() - days*24*3600*1000;
-
-    const pick = String(state.invMarketPickKey || "");
-    // Build series: use 'check' events primarily, include 'restock' too (as 100)
-    const series = log
-      .filter(ev=> (ev && ev.ts && Date.parse(ev.ts)>=since) )
-      .filter(ev=> !pick || String(ev.productKey||"")===pick )
-      .filter(ev=> ["check","restock","depleted"].includes(String(ev.type||"")) )
-      .map(ev=>({ t: Date.parse(ev.ts), d: String(ev.date||"").slice(0,10), v: (ev.type==="depleted"?0:Number(ev.levelPct||0)) }))
-      .sort((a,b)=>a.t-b.t);
-
-    // compress by date: last value per day
-    const byDay = new Map();
-    for(const s of series){
-      byDay.set(s.d, s.v);
-    }
-    const daysSorted = [...byDay.keys()].sort();
-    const vals = daysSorted.map(d=>byDay.get(d));
-    const canvas = document.querySelector("#invMarketLine");
-    drawLineChart(canvas, daysSorted, vals);
-
-    const meta = document.querySelector("#invMarketLineMeta");
-    if(meta){
-      if(daysSorted.length<2){
-        meta.textContent = "Necesitas al menos 2 check-ins en el rango para ver tendencia.";
-      }else{
-        const first = vals[0], last = vals[vals.length-1];
-        const delta = last - first;
-        meta.textContent = `Cambio neto en ${days} días: ${delta>=0?"+":""}${delta}%`;
-      }
-    }
-
-    // Fast consumption list for last 7d vs 30d baseline
-    const now = Date.now();
-    const wkSince = now - 7*24*3600*1000;
-    const moSince = now - 30*24*3600*1000;
-
-    function speedForKey(key, sinceTs){
-      const s = log
-        .filter(ev=> ev && ev.ts && Date.parse(ev.ts)>=sinceTs)
-        .filter(ev=> String(ev.productKey||"")===key)
-        .filter(ev=> ev.type==="check" || ev.type==="restock" || ev.type==="depleted")
-        .map(ev=>({ t: Date.parse(ev.ts), v: (ev.type==="depleted"?0:Number(ev.levelPct||0)) }))
-        .sort((a,b)=>a.t-b.t);
-      if(s.length<2) return null;
-      const a=s[0], b=s[s.length-1];
-      const dtDays = Math.max(1, (b.t-a.t)/(24*3600*1000));
-      return (a.v - b.v)/dtDays; // % consumed per day
-    }
-
-    // Candidate keys = current kitchen + keys in log
-    const keySet = new Set();
-    (state.inventory||[]).forEach(it=> keySet.add(invKeyFromItem_(it)));
-    log.forEach(ev=>{ if(ev.productKey) keySet.add(String(ev.productKey)); });
-
-    const rows = [];
-    for(const k of keySet){
-      const wk = speedForKey(k, wkSince);
-      const mo = speedForKey(k, moSince);
-      if(wk==null || mo==null) continue;
-      const ratio = mo>0 ? (wk/mo) : null;
-      if(ratio!=null && ratio>=1.4 && wk>=3){ // 40% faster than normal and meaningful
-        // Find name
-        const nm = (state.inventory||[]).find(it=>invKeyFromItem_(it)===k)?.name
-          || log.find(ev=>ev.productKey===k)?.name
-          || k;
-        rows.push({ key:k, name:nm, wk, mo, ratio });
-      }
-    }
-    rows.sort((a,b)=> b.ratio - a.ratio);
-
-    const host = document.querySelector("#invMarketFastList");
-    if(host){
-      host.innerHTML = rows.slice(0,8).map(r=>{
-        const pctW = Math.round(r.wk*10)/10;
-        const pctM = Math.round(r.mo*10)/10;
-        const rr = Math.round(r.ratio*10)/10;
-        return `
-          <div class="item">
-            <div class="left">
-              <div class="name">⚡ ${escapeHtml(r.name)}</div>
-              <div class="meta">Semana: <b>${pctW}%/día</b> · Base 30D: ${pctM}%/día · x${rr}</div>
-            </div>
-            <button class="btn" onclick="setInvMarketPick('${escapeHtml(r.key)}')">Ver</button>
-          </div>
-        `;
-      }).join("") || `<div class="muted">Aún no hay señales claras. Sigue haciendo check-in diario.</div>`;
-    }
-  }catch(e){
-    console.warn(e);
-  }
 }
 
 
@@ -9526,14 +9276,6 @@ function viewInventory(){
     return (state.inventoryLots||[]).some(l=>!l.finishedAt && lotProductKey_(l)===pkey);
   }
   function stockStatus_(it){
-    const pctRaw = (it.levelPct===0 || it.levelPct) ? Number(it.levelPct) : null;
-    const pct = (pctRaw===null || Number.isNaN(pctRaw)) ? null : pctRaw;
-    const refill = Number(it.refillPointPct ?? it.refillPct ?? 25);
-    if(pct != null){
-      if(pct<=0) return "out";
-      if(refill>0 && pct<=refill) return "low";
-      return "ok";
-    }
     const qty = Number(it.qty||0);
     const min = Number(it.minQty||0);
     if(qty<=0) return "out";
@@ -9687,7 +9429,7 @@ function viewInventory(){
 
   return `
     <div class="sectionTitle">
-      <div>Cocina</div>
+      <div>Inventario</div>
       <button class="btn" data-act="backToShoppingLists">← Volver</button>
     </div>
 
@@ -9695,10 +9437,9 @@ function viewInventory(){
       <button class="btn ${state.inventorySubtab==="stock"?"primary":""}" data-act="invTab" data-tab="stock">📦 Stock</button>
       <button class="btn ${state.inventorySubtab==="history"?"primary":""}" data-act="invTab" data-tab="history">🗓️ Histórico</button>
       <button class="btn ${state.inventorySubtab==="calendar"?"primary":""}" data-act="invTab" data-tab="calendar">📅 Calendario</button>
-      <button class="btn ${state.inventorySubtab==="market"?"primary":""}" data-act="invTab" data-tab="market">📈 Market</button>
     </div>
 
-    ${state.inventorySubtab==="history" ? viewInventoryHistory() : (state.inventorySubtab==="calendar" ? viewInventoryCalendar() : (state.inventorySubtab==="market" ? viewInventoryMarket() : `
+    ${state.inventorySubtab==="history" ? viewInventoryHistory() : (state.inventorySubtab==="calendar" ? viewInventoryCalendar() : `
       <section class="card" style="margin-bottom:12px;">
         <div class="invToolbar">
           <input class="input" placeholder="Buscar (nombre, categoría…)" value="${escapeHtml(state.invQuery||"")}"
@@ -9736,7 +9477,7 @@ function viewInventory(){
 
       <div style="height:12px"></div>
       ${sections || `<div class="muted">No hay items que coincidan con tu filtro.</div>`}
-    `))}
+    `)}
 
   `;
 }
@@ -9756,7 +9497,6 @@ function setInvQuery(v){
 window.setInvQuery = setInvQuery;
 
 // % Manual (Daily Check)
-
 function updateInventoryPct(invId, value){
   ensureInventory();
   const it = (state.inventory||[]).find(x=>x.id===invId);
@@ -9768,43 +9508,13 @@ function updateInventoryPct(invId, value){
     view();
     return;
   }
-
   it.levelPct = Math.round(pct);
-  it.lastCheck = isoDate();
+  it.lastCheck = new Date().toISOString().slice(0,10);
   if(it.refillPointPct == null) it.refillPointPct = 25;
-
-  // Log check-in (esto alimenta los gráficos tipo TradingView)
-  invLogEvent_("check", it, { levelPct: it.levelPct });
-
-  // Auto-eliminar sin preguntar si llega a 0%
-  if(it.levelPct <= 0){
-    // Cerrar lotes activos (si existen) para no dejar colgados los stats
-    try{
-      const key = invKeyFromItem_(it);
-      const nowISO = new Date().toISOString();
-      (state.inventoryLots||[]).forEach(l=>{
-        if(!l.finishedAt && lotProductKey_(l)===key){
-          l.finishedAt = nowISO;
-        }
-      });
-    }catch(e){}
-
-    invLogEvent_("depleted", it, { levelPct: 0 });
-
-    // Sacar de Cocina (inventario vivo)
-    state.inventory = (state.inventory||[]).filter(x=>x.id!==invId);
-
-    persist();
-    toast("Se acabó: removido de Cocina 🧾");
-    view();
-    return;
-  }
-
   persist();
   view();
 }
 window.updateInventoryPct = updateInventoryPct;
-
 
 function markInventoryChecked(invId){
   ensureInventory();
@@ -10199,14 +9909,9 @@ function applyItemsToInventory_(items){
 
     if(inv){
       inv.qty = Number(inv.qty||0) + qty;
-      // Cocina: al comprar, vuelve a estar "presente" al 100%
-      inv.levelPct = 100;
-      inv.lastCheck = isoDate();
-      if(inv.refillPointPct == null) inv.refillPointPct = 25;
       if(!inv.unit) inv.unit = unit;
       if(!inv.category) inv.category = category;
       if(essential && !inv.essential) inv.essential = true;
-      invLogEvent_("restock", inv, { via:"purchase", qtyAdded: qty });
     }else{
       state.inventory.unshift({
         id: uid("inv"),
@@ -10217,12 +9922,8 @@ function applyItemsToInventory_(items){
         unit,
         essential,
         minQty: 0,
-        notes: "",
-        levelPct: 100,
-        refillPointPct: 25,
-        lastCheck: isoDate()
+        notes: ""
       });
-      invLogEvent_("restock", state.inventory[0], { via:"purchase", qtyAdded: qty });
     }
   }
 }
@@ -14345,71 +14046,3 @@ try{
   window.openFinanceAccountEdit = openFinanceAccountEdit;
   window.openFinanceEntryModal = openFinanceEntryModal;
 }catch(e){}
-
-
-/* ===== SAFE OVERRIDE flushSync (syntax-stable version) ===== */
-function flushSync(reason="auto"){
-  try{
-    if (!isDirty() && !["beforeunload","hidden"].includes(reason)) return;
-    if (!getSyncUrl() && !ensureSyncConfigured()) return;
-
-    const payload = {
-      app: "MemoryCarl",
-      v: 2,
-      ts: new Date().toISOString(),
-      reason,
-      apiKey: getSyncApiKey() || undefined,
-      data: {
-        routines: state?.routines ?? load(LS.routines, []),
-        shopping: state?.shopping ?? load(LS.shopping, []),
-        reminders: state?.reminders ?? load(LS.reminders, []),
-
-        musicToday: state?.musicToday ?? load(LS.musicToday, null),
-        musicLog: state?.musicLog ?? load(LS.musicLog, []),
-        sleepLog: state?.sleepLog ?? load(LS.sleepLog, []),
-        budgetMonthly: state?.budgetMonthly ?? load(LS.budgetMonthly, null),
-        calDraw: state?.calDraw ?? load(LS.calDraw, null),
-        house: state?.house ?? load(LS.house, null),
-        moodDaily: state?.moodDaily ?? load(LS.moodDaily, null),
-        moodSpritesCustom: state?.moodSpritesCustom ?? load(LS.moodSpritesCustom, null),
-
-        products: state?.products ?? load(LS.products, []),
-        shoppingHistory: state?.shoppingHistory ?? load(LS.shoppingHistory, []),
-
-        inventory: state?.inventory ?? load(LS.inventory, []),
-        inventoryLots: state?.inventoryLots ?? load(LS.inventoryLots, []),
-        inventoryFlowLog: state?.inventoryFlowLog ?? load(LS.inventoryFlowLog, []),
-
-        finance_accounts: mcLoadAny("memorycarl_v2_finance_accounts", []),
-        finance_ledger: mcLoadAny("memorycarl_v2_finance_ledger", []),
-
-        lsRaw: getMcLocalStorageRaw(),
-      }
-    };
-
-    const url = getSyncUrl();
-    const blob = new Blob([JSON.stringify(payload)], { type: "text/plain" });
-
-    if (navigator.sendBeacon){
-      const queued = navigator.sendBeacon(url, blob);
-      if (queued){
-        clearDirty();
-        localStorage.setItem(SYNC.lastSyncKey, new Date().toISOString());
-        return;
-      }
-    }
-
-    fetch(url, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      keepalive: true,
-      mode: "no-cors"
-    }).then(() => {
-      clearDirty();
-      localStorage.setItem(SYNC.lastSyncKey, new Date().toISOString());
-    });
-
-  }catch(e){
-    console.warn("Sync flush failed:", e);
-  }
-}
