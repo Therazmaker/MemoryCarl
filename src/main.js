@@ -10077,6 +10077,14 @@ function financeParseAmount(raw){
   return Number.isFinite(n) ? n : 0;
 }
 
+function financeNormalizeType(t){
+  const s = String(t||"").toLowerCase().trim();
+  if(["income","ingreso","in","+","plus","entrada"].includes(s)) return "income";
+  if(["expense","gasto","out","-","minus","salida"].includes(s)) return "expense";
+  // Default: expense to avoid silently inflating balances
+  return s || "expense";
+}
+
 
 function financeActiveLedger(){
   return (state.financeLedger||[]).filter(e=>!e.archived);
@@ -10203,11 +10211,12 @@ function addFinanceEntry({type, amount, accountId, category, reason, note, date}
 
   const amt = financeParseAmount(amount);
   const entryDate = date || new Date().toISOString();
+  const tnorm = financeNormalizeType(type);
 
   const entry = {
     id: uid("fin"),
     date: entryDate, // ISO string
-    type, // income | expense
+    type: tnorm, // income | expense
     amount: amt,
     accountId,
     category: category||"Otros",
@@ -10240,7 +10249,8 @@ function updateFinanceEntry(id, patch){
     ...patch,
   };
   // normalize
-  if(next.amount !== undefined) next.amount = Number(next.amount||0);
+  if(next.amount !== undefined) next.amount = financeParseAmount(next.amount);
+  if(next.type !== undefined) next.type = financeNormalizeType(next.type);
   if(next.date) next.date = String(next.date);
   if(next.category) next.category = String(next.category);
   if(next.reason) next.reason = String(next.reason);
@@ -10462,7 +10472,7 @@ function openFinanceEntryModal(existingId=null){
         <div class="finEntryAmountRow">
           <div class="finEntrySign ${draft.type==='expense' ? 'expense' : 'income'}" id="finEntrySign">${draft.type==='expense' ? '−' : '+'}</div>
           <!-- NOTE: use type=text + inputmode=decimal to avoid mobile locale quirks with type=number -->
-          <input id="finEntryAmount" type="text" inputmode="decimal" pattern="[0-9.,\s-]*" placeholder="0.00" value="${escapeHtml(draft.amount)}" />
+          <input id="finEntryAmount" type="text" inputmode="decimal" placeholder="0.00" value="${escapeHtml(draft.amount)}" />
           <button class="iconBtn" id="finEntryCalc" title="Calculadora">🧮</button>
           <button class="finEntryCurrency" id="finEntryCurrency">${draft.currency}</button>
         </div>
