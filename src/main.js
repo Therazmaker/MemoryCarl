@@ -11971,6 +11971,25 @@ function openFinanceDebtModal(existing){
           <div class="label">APR / Interés (opcional)</div>
           <input id="finDebtApr" type="number" inputmode="decimal" value="${escapeHtml(String(d.apr||''))}" placeholder="%" />
         </div>
+        <div class="field" style="grid-column:1/-1">
+          <div class="label">Ruleteo (opcional)</div>
+          <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center">
+            <label class="row" style="gap:6px;align-items:center">
+              <input id="finDebtRolloverEnabled" type="checkbox" ${d.rolloverEnabled ? 'checked' : ''} />
+              <span>Se puede ruletear</span>
+            </label>
+            <div class="row" style="gap:6px;align-items:center">
+              <span class="muted">Recibes</span>
+              <input id="finDebtRolloverPayout" type="number" inputmode="decimal" style="max-width:140px" value="${escapeHtml(String(d.rolloverPayout ?? ''))}" placeholder="0.00" />
+            </div>
+            <div class="row" style="gap:6px;align-items:center">
+              <span class="muted">Confiabilidad</span>
+              <input id="finDebtRolloverReliability" type="number" inputmode="decimal" min="0" max="1" step="0.05" style="max-width:120px" value="${escapeHtml(String(d.rolloverReliability ?? ''))}" placeholder="0-1" />
+            </div>
+          </div>
+          <div class="muted">Ej: Kashin 0.95 / 400, Solventa 0.95 / 450, Yape 0.55 / 300.</div>
+        </div>
+
 
         <div class="field">
           <div class="label">Estado</div>
@@ -12008,6 +12027,11 @@ function openFinanceDebtModal(existing){
     const aprRaw = (backdrop.querySelector('#finDebtApr')?.value||"").trim();
     const apr = aprRaw==="" ? null : financeDebtSafeNum(aprRaw);
     const status = String(backdrop.querySelector('#finDebtStatus')?.value||'active');
+    const rolloverEnabled = !!(backdrop.querySelector('#finDebtRolloverEnabled')?.checked);
+    const rolloverPayout = financeDebtSafeNum(backdrop.querySelector('#finDebtRolloverPayout')?.value);
+    const rolloverReliabilityRaw = (backdrop.querySelector('#finDebtRolloverReliability')?.value||"").trim();
+    const rolloverReliability = rolloverReliabilityRaw==="" ? null : Math.max(0, Math.min(1, financeDebtSafeNum(rolloverReliabilityRaw)));
+
 
     if(existing){
       existing.name = name;
@@ -12017,6 +12041,9 @@ function openFinanceDebtModal(existing){
       existing.monthlyDue = monthlyDue;
       existing.apr = apr;
       existing.status = status;
+      existing.rolloverEnabled = rolloverEnabled;
+      existing.rolloverPayout = rolloverPayout || null;
+      existing.rolloverReliability = (rolloverReliability===null? null : rolloverReliability);
       // If user edits balance, keep it.
       existing.balance = balance;
       if(existing.originalBalance === undefined || existing.originalBalance === null) existing.originalBalance = balance;
@@ -12033,6 +12060,9 @@ function openFinanceDebtModal(existing){
         dueDay,
         apr,
         status,
+        rolloverEnabled,
+        rolloverPayout: rolloverPayout || null,
+        rolloverReliability: (rolloverReliability===null? null : rolloverReliability),
         createdAt: new Date().toISOString(),
       });
     }
@@ -12402,6 +12432,223 @@ function financeDebtRenderUpcoming(){
   `;
 }
 
+
+/* ====================== FINANCE: DEBTS (Modo Supervivencia / Ruleteo) ====================== */
+
+function financeDebtSumCash(){
+  return (state.financeAccounts||[]).reduce((s,a)=> s + financeDebtSafeNum(a.balance||0), 0);
+}
+
+// Estimate next 7 days market spending using last 14 days average of Mercado expenses
+function financeEstimateNext7dMarket(){
+  const ledger = financeActiveLedger() || [];
+  const now = new Date();
+  const start = new Date(now.getTime() - 14*24*3600*1000);
+  const byDay = {};
+  for(const e of ledger){
+    if(!e || e.archived) continue;
+    if(String(e.type||'')!=='expense') continue;
+    if(String(e.category||'')!=='Mercado') continue;
+    const dt = new Date(String(e.date||''));
+    if(!(dt instanceof Date) || isNaN(dt)) continue;
+    if(dt < start) continue;
+    const k = dt.toISOString().slice(0,10);
+    byDay[k] = (byDay[k]||0) + financeDebtSafeNum(e.amount||0);
+  }
+  const days = Object.keys(byDay).length || 0;
+  const total = Object.values(byDay).reduce((s,x)=> s + financeDebtSafeNum(x), 0);
+  const avgPerDay = days ? (total / days) : 0;
+  return Math.max(0, avgPerDay * 7);
+}
+
+function financeCommitmentNextDueISO(dueDay){
+  return financeDebtNextDueISO(dueDay);
+}
+
+function financeCommitmentsUpcomingItems(){
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0,0,0);
+  const weekEnd = new Date(start.getTime() + 7*24*3600*1000);
+  const y = now.getFullYear();
+  const m = now.getMonth();
+
+  const actives = (state.financeCommitments||[]).filter(c=>c && c.active!==false);
+  const items = actives.map(c=>{
+    const dueISO = financeCommitmentNextDueISO(c.dueDay);
+    const dueDate = new Date(dueISO+'T12:00:00');
+    return {
+      id: c.id,
+      name: c.name,
+      dueISO,
+      dueDate,
+      dueLabel: financeDebtDueLabel(dueISO),
+      amount: financeDebtSafeNum(c.amount||0),
+      balance: financeDebtSafeNum(c.amount||0)
+    };
+  }).sort((a,b)=> a.dueDate - b.dueDate);
+
+  const inWeek = items.filter(it=> it.dueDate >= start && it.dueDate < weekEnd);
+  const inMonth = items.filter(it=> it.dueDate.getFullYear()===y && it.dueDate.getMonth()===m);
+
+  return { inWeek, inMonth, all: items };
+}
+
+function financeDebtGetRolloverInfo(d){
+  const name = String(d?.name||'');
+  const base = { enabled: !!d?.rolloverEnabled, payout: financeDebtSafeNum(d?.rolloverPayout||0), reliability: (d?.rolloverReliability===null||d?.rolloverReliability===undefined) ? null : financeDebtSafeNum(d?.rolloverReliability) };
+
+  // smart defaults (your current reality)
+  if(!base.enabled){
+    if(name==='Kashin') base.enabled = true;
+    if(name==='Solventa') base.enabled = true;
+    if(name==='Yape') base.enabled = true;
+  }
+  if(!(base.payout>0)){
+    if(name==='Kashin') base.payout = 400;
+    if(name==='Solventa') base.payout = 450;
+    if(name==='Yape') base.payout = 300;
+  }
+  if(base.reliability===null){
+    if(name==='Kashin') base.reliability = 0.95;
+    if(name==='Solventa') base.reliability = 0.95;
+    if(name==='Yape') base.reliability = 0.55;
+    if(base.reliability===null) base.reliability = 0.8;
+  }
+  base.reliability = Math.max(0, Math.min(1, financeDebtSafeNum(base.reliability||0)));
+  return base;
+}
+
+function financeDebtSurvivalAnalyze(){
+  const cash = financeDebtSumCash();
+  const marketReserve = financeEstimateNext7dMarket();
+
+  const debU = financeDebtUpcomingItems();
+  const cmtU = financeCommitmentsUpcomingItems();
+
+  const weekDebts = debU.inWeek || [];
+  const weekCmts = cmtU.inWeek || [];
+  const weekDebtTotal = weekDebts.reduce((s,x)=> s + financeDebtSafeNum(x.amount||0), 0);
+  const weekCmtTotal = weekCmts.reduce((s,x)=> s + financeDebtSafeNum(x.amount||0), 0);
+  const obligations = weekDebtTotal + weekCmtTotal;
+
+  const deficit = Math.max(0, (obligations + marketReserve) - cash);
+
+  const rollCandidates = financeDebtsActive()
+    .filter(d=>String(d.status||'active')==='active')
+    .map(d=>{
+      const r = financeDebtGetRolloverInfo(d);
+      return {
+        id: d.id,
+        name: d.name,
+        due: financeDebtSafeNum(d.monthlyDue||0),
+        payout: financeDebtSafeNum(r.payout||0),
+        reliability: financeDebtSafeNum(r.reliability||0),
+        enabled: !!r.enabled
+      };
+    })
+    .filter(x=>x.enabled && x.payout>0);
+
+  rollCandidates.sort((a,b)=>{
+    if(b.reliability!==a.reliability) return b.reliability-a.reliability;
+    return b.payout-a.payout;
+  });
+
+  let coveredRiskAdj = 0;
+  let coveredNom = 0;
+  const chosen = [];
+  for(const c of rollCandidates){
+    if(coveredRiskAdj >= deficit && coveredNom >= deficit) break;
+    chosen.push(c);
+    coveredNom += c.payout;
+    coveredRiskAdj += c.payout * c.reliability;
+  }
+
+  const status = deficit>0 ? 'survival' : 'stable';
+  const rollRateHint = deficit>0 ? Math.min(0.99, (deficit / Math.max(1, obligations+marketReserve))) : 0;
+
+  return {
+    status,
+    cash,
+    marketReserve,
+    obligations,
+    weekDebtTotal,
+    weekCmtTotal,
+    deficit,
+    rollCandidates,
+    chosen,
+    coveredNom,
+    coveredRiskAdj,
+    rollRateHint
+  };
+}
+
+function renderFinanceDebtSurvivalBox(){
+  const fmt = _financeFmt;
+  const a = financeDebtSurvivalAnalyze();
+
+  const badge = a.status==='survival'
+    ? `<span class="chipDanger">Supervivencia</span>`
+    : `<span class="chipGood">Estable</span>`;
+
+  const deficitLine = a.deficit>0
+    ? `<div class="finDebtHint bad" style="margin-top:10px">Hueco semanal estimado: <strong>S/ ${fmt(a.deficit)}</strong>. Esto incluye compromisos + deudas que vencen en 7 días y una reserva de Mercado de S/ ${fmt(a.marketReserve)}.</div>`
+    : `<div class="finDebtHint good" style="margin-top:10px">Esta semana estás cubierto. Reserva Mercado estimada: <strong>S/ ${fmt(a.marketReserve)}</strong>.</div>`;
+
+  const chosenHtml = (a.chosen||[]).length ? a.chosen.map(c=>{
+    const risk = c.payout * c.reliability;
+    const netCost = Math.max(0, financeDebtSafeNum(c.due) - financeDebtSafeNum(c.payout));
+    return `
+      <div class="finDueRow">
+        <div class="finDueLeft">
+          <div class="finDueTitle">🔁 ${escapeHtml(c.name)} <span class="muted">(confiab. ${(c.reliability||0).toFixed(2)})</span></div>
+          <div class="muted">Pagas S/ ${fmt(c.due)} y normalmente recibes S/ ${fmt(c.payout)} (neto -S/ ${fmt(netCost)}). Cobertura ajustada ≈ S/ ${fmt(risk)}.</div>
+        </div>
+        <div class="finDueAmt">S/ ${fmt(c.payout)}</div>
+      </div>
+    `;
+  }).join('') : `<div class="muted">Sin sugerencias de ruleteo por ahora.</div>`;
+
+  const coverLine = a.deficit>0
+    ? `<div class="muted" style="margin-top:8px">Cobertura sugerida: <strong>S/ ${fmt(a.coveredNom)}</strong> (ajustada por confiabilidad ≈ <strong>S/ ${fmt(a.coveredRiskAdj)}</strong>).</div>`
+    : ``;
+
+  const saveHint = a.status==='survival'
+    ? `<div class="muted" style="margin-top:10px">Regla de escudo: si hoy entra un ingreso real, guarda <strong>5%</strong> antes de repartir (aunque sea poquito). Cuando pases a estable: 10%.</div>`
+    : `<div class="muted" style="margin-top:10px">Regla de escudo: si entra un ingreso extra esta semana, guarda <strong>10%</strong> y el resto lo usas para acelerar la deuda objetivo.</div>`;
+
+  return `
+    <div class="finPlanBox">
+      <div class="cardTop" style="margin-top:0">
+        <h3 class="cardTitle" style="font-size:14px">Modo Supervivencia (Ruleteo)</h3>
+        <div class="row" style="gap:8px;align-items:center">${badge}</div>
+      </div>
+      <div class="hr"></div>
+
+      <div class="grid2" style="gap:10px">
+        <div class="finDebtStat">
+          <div class="muted">Caja actual</div>
+          <div class="big">S/ ${fmt(a.cash)}</div>
+        </div>
+        <div class="finDebtStat">
+          <div class="muted">Obligaciones 7d</div>
+          <div class="big">S/ ${fmt(a.obligations)}</div>
+        </div>
+      </div>
+
+      ${deficitLine}
+
+      <div class="hr" style="margin-top:12px"></div>
+      <div class="muted" style="margin-bottom:6px">Sugerencia de ruleteo (si hace falta)</div>
+      <div class="finDueBox" style="padding:10px">${chosenHtml}</div>
+
+      ${coverLine}
+      ${saveHint}
+    </div>
+  `;
+}
+
+try{ window.financeDebtSurvivalAnalyze = financeDebtSurvivalAnalyze; }catch(_e){}
+
 function financeDebtPlanUI(){
   const fmt = _financeFmt;
   const monthKey = getCurrentMonthKey();
@@ -12610,6 +12857,9 @@ function renderFinanceDebtsTab(){
       <div class="finDueWrap">
         ${financeDebtRenderUpcoming()}
       </div>
+
+      <div class="hr" style="margin-top:12px"></div>
+      ${renderFinanceDebtSurvivalBox()}
 
       <div class="hr" style="margin-top:12px"></div>
       ${financeDebtPlanUI()}
