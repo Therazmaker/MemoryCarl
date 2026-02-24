@@ -1102,6 +1102,44 @@ function escapeAttr(str){
 // the global scope, so expose a couple of safe helpers.
 try{ window.escapeHtml = escapeHtml; window.escapeAttr = escapeAttr; }catch(e){}
 
+// ===== Modal helper (global, for inline onclick handlers) =====
+function ensureModalRoot(){
+  let root = document.getElementById("modalRoot");
+  if(!root){
+    root = document.createElement("div");
+    root.id = "modalRoot";
+    root.style.position = "fixed";
+    root.style.inset = "0";
+    root.style.zIndex = "9999";
+    root.style.display = "none";
+    document.body.appendChild(root);
+  }
+  return root;
+}
+
+function showModal(html){
+  const root = ensureModalRoot();
+  root.innerHTML = html || "";
+  root.style.display = "block";
+  try{ document.body.style.overflow = "hidden"; }catch(e){}
+}
+
+function closeModal(ev){
+  if(ev && ev.target && !(ev.target.classList && ev.target.classList.contains("modalOverlay"))){
+    return;
+  }
+  const root = ensureModalRoot();
+  root.innerHTML = "";
+  root.style.display = "none";
+  try{ document.body.style.overflow = ""; }catch(e){}
+}
+
+document.addEventListener("keydown", (e)=>{
+  if(e.key === "Escape") closeModal();
+});
+
+try{ window.showModal = showModal; window.closeModal = closeModal; }catch(e){}
+
 function money(n){
   const x = Number(n || 0);
   return new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" }).format(x);
