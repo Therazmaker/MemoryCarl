@@ -958,10 +958,34 @@ function neuroclawLocalFallbackAI({signals, now} = {}){
   return ai;
 }
 
+
+
+// ===== Full Backup helpers (cloud restore-ready) =====
+function mcSafeJsonParse(raw){
+  try{ return JSON.parse(raw); }catch(e){ return null; }
+}
+function getMcLocalStorageRaw(){
+  // Capture ALL MemoryCarl keys (including settings/creds) so restore can be exact.
+  const out = {};
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(!k) continue;
+      if(k.startsWith("memorycarl_")){
+        out[k] = localStorage.getItem(k);
+      }
+    }
+  }catch(e){}
+  return out;
+}
+function mcLoadAny(key, fallback){
+  try{ return load(key, fallback); }catch(e){ return fallback; }
+}
 function flushSync(reason="auto"){
   try{
-    if (!isDirty()) return;
-    if (!getSyncUrl() && !ensureSyncConfigured()) return;
+    if (!isDirty() && !["beforeunload","hidden"].includes(reason)) return;
+    // For close/background events we still try a last-chance backup, even if dirty flag missed something.
+if (!getSyncUrl() && !ensureSyncConfigured()) return;
 
     const payload = {
       app: "MemoryCarl",
@@ -970,21 +994,60 @@ function flushSync(reason="auto"){
       reason,
       apiKey: getSyncApiKey() || undefined,
       data: {
-        routines: state?.routines ?? load(LS.routines, []),
-        shopping: state?.shopping ?? load(LS.shopping, []),
-        reminders: state?.reminders ?? load(LS.reminders, []),
-        musicToday: state?.musicToday ?? load(LS.musicToday, null),
-        musicLog: state?.musicLog ?? load(LS.musicLog, []),
-        sleepLog: state?.sleepLog ?? load(LS.sleepLog, []),
-        // Shopping system (library + history)
-        products: state?.products ?? load(LS.products, []),
-        shoppingHistory: state?.shoppingHistory ?? load(LS.shoppingHistory, []),
-        // Inventory (home stock)
-        inventory: state?.inventory ?? load(LS.inventory, []),
-        inventoryLots: state?.inventoryLots ?? load(LS.inventoryLots, []),
-        // Other useful state
-        budgetMonthly: state?.budgetMonthly ?? load(LS.budgetMonthly, null),
-        house: state?.house ?? load(LS.house, null),
+
+routines: state?.routines ?? load(LS.routines, []),
+shopping: state?.shopping ?? load(LS.shopping, []),
+reminders: state?.reminders ?? load(LS.reminders, []),
+
+// Home widgets
+musicToday: state?.musicToday ?? load(LS.musicToday, null),
+musicLog: state?.musicLog ?? load(LS.musicLog, []),
+sleepLog: state?.sleepLog ?? load(LS.sleepLog, []),
+budgetMonthly: state?.budgetMonthly ?? load(LS.budgetMonthly, null),
+calDraw: state?.calDraw ?? load(LS.calDraw, null),
+house: state?.house ?? load(LS.house, null),
+moodDaily: state?.moodDaily ?? load(LS.moodDaily, null),
+moodSpritesCustom: state?.moodSpritesCustom ?? load(LS.moodSpritesCustom, null),
+
+// Shopping system (library + history)
+products: state?.products ?? load(LS.products, []),
+shoppingHistory: state?.shoppingHistory ?? load(LS.shoppingHistory, []),
+
+// Inventory (home stock)
+inventory: state?.inventory ?? load(LS.inventory, []),
+inventoryLots: state?.inventoryLots ?? load(LS.inventoryLots, []),
+
+// NeuroClaw + Astro (local caches)
+neuroclawFeedback: state?.neuroclawFeedback ?? load(LS.neuroclawFeedback, []),
+neuroclawLast: state?.neuroclawLast ?? load(LS.neuroclawLast, null),
+neuroclawAiLog: mcLoadAny("memorycarl_v2_neuroclaw_ai_log", []),
+neuroclawAiUsage: mcLoadAny("memorycarl_v2_neuroclaw_ai_usage", null),
+lunarMoneyLog: mcLoadAny(LS.lunarMoneyLog, []),
+natalChart: mcLoadAny(LS.natalChart, null),
+astroProvider: localStorage.getItem(LS.astroProvider) || "lite",
+astroSwissLast: mcLoadAny(LS.astroSwissLast, null),
+astroSwissSeen: mcLoadAny(LS.astroSwissSeen, null),
+
+// Finance Core (IMPORTANT)
+finance_accounts: mcLoadAny("memorycarl_v2_finance_accounts", []),
+finance_ledger: mcLoadAny("memorycarl_v2_finance_ledger", []),
+finance_debts: mcLoadAny("memorycarl_v2_finance_debts", []),
+finance_commitments: mcLoadAny("memorycarl_v2_finance_commitments", []),
+finance_categories: mcLoadAny("memorycarl_v2_finance_categories", []),
+finance_meta: mcLoadAny("memorycarl_v2_finance_meta", null),
+finance_projection_mode: localStorage.getItem("memorycarl_v2_finance_projection_mode") || "",
+finance_resetAt: localStorage.getItem("memorycarl_v2_finance_resetAt") || "",
+
+// Settings/credentials needed for full recovery (kept in lsRaw too)
+neuroclawAiUrl: localStorage.getItem(LS.neuroclawAiUrl) || "",
+neuroclawAiKey: localStorage.getItem(LS.neuroclawAiKey) || "",
+swissAstroUrl: localStorage.getItem("memorycarl_v2_swiss_astro_url") || "",
+swissAstroKey: localStorage.getItem("memorycarl_v2_swiss_astro_key") || "",
+syncUrl: getSyncUrl() || "",
+syncApiKey: getSyncApiKey() || "",
+
+// Absolute restore: raw localStorage dump for exact recovery
+lsRaw: getMcLocalStorageRaw(),
       }
     };
 
@@ -1070,18 +1133,8 @@ function loadAny(keys, fallback){
 }
 function save(key, value){
   localStorage.setItem(key, JSON.stringify(value));
-  // Mark dirty only for core data keys (avoid syncing tokens/settings every time)
-  if (
-    key === LS.routines ||
-    key === LS.shopping ||
-    key === LS.reminders ||
-    key === LS.musicToday ||
-    key === LS.musicLog ||
-    key === LS.sleepLog ||
-    key === LS.products ||
-    key === LS.shoppingHistory ||
-    key === LS.inventory
-  ) markDirty();
+  // Mark dirty for any MemoryCarl data key (we throttle sends elsewhere).
+  if(typeof key === "string" && key.startsWith("memorycarl_")) markDirty();
 }
 
 // ===== Dirty flag (required by save/persist) =====
@@ -1094,6 +1147,26 @@ function clearDirty(){
 function isDirty(){
   try{ return (localStorage.getItem(SYNC.dirtyKey) || "0") === "1"; }catch(e){ return false; }
 }
+
+
+// Ensure ANY direct localStorage write to MemoryCarl keys marks dirty (some modules bypass save()).
+(function mcPatchLocalStorageSetItem(){
+  try{
+    if(window.__mc_ls_patched) return;
+    window.__mc_ls_patched = true;
+    const _set = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = function(k, v){
+      _set(k, v);
+      try{
+        if(typeof k === "string" && k.startsWith("memorycarl_")){
+          if(k !== SYNC.dirtyKey && k !== SYNC.lastSyncKey && k !== "memorycarl_last_sync_error"){
+            markDirty();
+          }
+        }
+      }catch(e){}
+    };
+  }catch(e){}
+})();
 
 
 
@@ -1577,6 +1650,30 @@ function restoreFromSnapshotText(rawText){
   // 3) Data directo: {routines, shopping, ...}
   const payload = (snap && typeof snap === "object" && snap.data && typeof snap.data === "object") ? snap.data : snap;
 
+
+// If we have a raw localStorage dump, restore EXACTLY and reload.
+// This fixes the "snapshot vs export" mismatch by bringing back every key.
+if(payload && typeof payload === "object" && payload.lsRaw && typeof payload.lsRaw === "object"){
+  try{
+    const entries = Object.entries(payload.lsRaw);
+    if(entries.length){
+      entries.forEach(([k,v])=>{
+        try{
+          if(typeof k === "string" && k.startsWith("memorycarl_")){
+            if(v === null || v === undefined) localStorage.removeItem(k);
+            else localStorage.setItem(k, String(v));
+          }
+        }catch(e){}
+      });
+    }
+  }catch(e){
+    console.warn("lsRaw restore failed", e);
+  }
+  try{ toast("Restore completo aplicado ✅ (recargando)"); }catch(e){}
+  setTimeout(()=>location.reload(), 250);
+  return;
+}
+
   // Backup rápido (in-memory) por si el usuario quiere copiarlo
   try{
     window.__mc_last_restore_payload = payload;
@@ -1613,6 +1710,21 @@ function restoreFromSnapshotText(rawText){
   if(payload.inventory !== undefined){ try{ LS.inventory = LS.inventory || "memorycarl_v2_inventory"; }catch(e){} apply("inventory", payload.inventory); }
 if(payload.inventoryLots !== undefined){ try{ LS.inventoryLots = LS.inventoryLots || "memorycarl_v2_inventory_lots"; }catch(e){} apply("inventoryLots", payload.inventoryLots); }
 
+
+// Finance Core
+const finApplyRaw = (lsKey, value) => {
+  if(value === undefined) return;
+  try{ localStorage.setItem(lsKey, JSON.stringify(value)); }catch(e){}
+};
+if(payload.finance_accounts !== undefined) finApplyRaw("memorycarl_v2_finance_accounts", payload.finance_accounts);
+if(payload.finance_ledger !== undefined) finApplyRaw("memorycarl_v2_finance_ledger", payload.finance_ledger);
+if(payload.finance_debts !== undefined) finApplyRaw("memorycarl_v2_finance_debts", payload.finance_debts);
+if(payload.finance_commitments !== undefined) finApplyRaw("memorycarl_v2_finance_commitments", payload.finance_commitments);
+if(payload.finance_categories !== undefined) finApplyRaw("memorycarl_v2_finance_categories", payload.finance_categories);
+if(payload.finance_meta !== undefined) finApplyRaw("memorycarl_v2_finance_meta", payload.finance_meta);
+if(payload.finance_projection_mode !== undefined) try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(payload.finance_projection_mode||"")); }catch(e){}
+if(payload.finance_resetAt !== undefined) try{ localStorage.setItem("memorycarl_v2_finance_resetAt", String(payload.finance_resetAt||"")); }catch(e){}
+
   // Compat: algunas versiones guardaron reminders en singular
   try{
     if(rem !== undefined){
@@ -1620,7 +1732,16 @@ if(payload.inventoryLots !== undefined){ try{ LS.inventoryLots = LS.inventoryLot
     }
   }catch(e){}
 
-  // Registrar evento
+  
+
+// Credenciales / Settings (opcional)
+if(payload.syncUrl !== undefined) try{ setSyncUrl(payload.syncUrl); }catch(e){}
+if(payload.syncApiKey !== undefined) try{ setSyncApiKey(payload.syncApiKey); }catch(e){}
+if(payload.neuroclawAiUrl !== undefined) try{ localStorage.setItem(LS.neuroclawAiUrl, String(payload.neuroclawAiUrl||"")); }catch(e){}
+if(payload.neuroclawAiKey !== undefined) try{ localStorage.setItem(LS.neuroclawAiKey, String(payload.neuroclawAiKey||"")); }catch(e){}
+if(payload.swissAstroUrl !== undefined) try{ localStorage.setItem("memorycarl_v2_swiss_astro_url", String(payload.swissAstroUrl||"")); }catch(e){}
+if(payload.swissAstroKey !== undefined) try{ localStorage.setItem("memorycarl_v2_swiss_astro_key", String(payload.swissAstroKey||"")); }catch(e){}
+// Registrar evento
   try{
     const evKey = "memorycarl_v2_event_log";
     const ev = load(evKey, []);
