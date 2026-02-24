@@ -261,6 +261,13 @@ const SYNC = {
   lastSyncKey: "memorycarl_last_sync_at",
 };
 
+function ensureSyncConfigured(){
+  // Returns true only when sync is configured; used to avoid runtime ReferenceError.
+  const url = getSyncUrl();
+  const key = getSyncApiKey();
+  return !!(url && key);
+}
+
 function getSyncUrl(){ return localStorage.getItem(SYNC.urlKey) || ""; }
 function setSyncUrl(u){ localStorage.setItem(SYNC.urlKey, (u||"").trim()); }
 function getSyncApiKey(){ return localStorage.getItem(SYNC.apiKeyKey) || ""; }
@@ -1406,6 +1413,16 @@ function persist(){
     if(LS.shoppingHistory) save(LS.shoppingHistory, state.shoppingHistory);
     if(LS.inventory) save(LS.inventory, state.inventory);
   }catch(e){}
+
+  // Finance (guard: LS keys defined later)
+  try{
+    if(LS.financeLedger) save(LS.financeLedger, state.financeLedger||[]);
+    if(LS.financeAccounts) save(LS.financeAccounts, state.financeAccounts||[]);
+    if(LS.financeResetAt) save(LS.financeResetAt, state.financeResetAt||null);
+    if(LS.financeDebts) save(LS.financeDebts, state.financeDebts||[]);
+    if(LS.financeCommitments) save(LS.financeCommitments, state.financeCommitments||[]);
+    if(LS.financeMeta) save(LS.financeMeta, state.financeMeta||{});
+  }catch(e){}
 }
 
 // ---- Backup (Export/Import) ----
@@ -1426,7 +1443,12 @@ function exportBackup(){
     moodSpritesCustom: state.moodSpritesCustom,
     products: state.products,
     shoppingHistory: state.shoppingHistory,
-    inventory: state.inventory
+    inventory: state.inventory,
+    financeAccounts: state.financeAccounts,
+    financeLedger: state.financeLedger,
+    financeDebts: state.financeDebts,
+    financeCommitments: state.financeCommitments,
+    financeMeta: state.financeMeta
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -1455,6 +1477,14 @@ function importBackup(file){
       const products = Array.isArray(data.products) ? data.products : [];
       const shoppingHistory = Array.isArray(data.shoppingHistory) ? data.shoppingHistory : [];
       const inventory = Array.isArray(data.inventory) ? data.inventory : [];
+
+      // Finance
+      const financeAccounts = Array.isArray(data.financeAccounts) ? data.financeAccounts : [];
+      const financeLedger = Array.isArray(data.financeLedger) ? data.financeLedger : [];
+      const financeDebts = Array.isArray(data.financeDebts) ? data.financeDebts : [];
+      const financeCommitments = Array.isArray(data.financeCommitments) ? data.financeCommitments : [];
+      const financeMeta = (data.financeMeta && typeof data.financeMeta==="object") ? data.financeMeta : {};
+
 
       routines.forEach(r=>{
         r.id ||= uid("r");
@@ -1487,6 +1517,15 @@ function importBackup(file){
       state.products = products;
       state.shoppingHistory = shoppingHistory;
       state.inventory = inventory;
+
+      // Finance apply
+      if(financeAccounts.length) state.financeAccounts = financeAccounts;
+      if(financeLedger.length) state.financeLedger = financeLedger;
+      state.financeDebts = financeDebts;
+      state.financeCommitments = financeCommitments;
+      state.financeMeta = financeMeta;
+      try{ financeRecomputeBalances(); }catch(_e){}
+
 
       // Home widgets
       state.musicToday = (data.musicToday && typeof data.musicToday === "object") ? data.musicToday : load(LS.musicToday, null);
@@ -9961,11 +10000,14 @@ LS.financeLedger = "memorycarl_v2_finance_ledger";
 LS.financeAccounts = "memorycarl_v2_finance_accounts";
 LS.financeResetAt = "memorycarl_v2_finance_resetAt";
 LS.financeDebts = "memorycarl_v2_finance_debts";
+LS.financeCommitments = "memorycarl_v2_finance_commitments";
 
 state.financeLedger = load(LS.financeLedger, []);
 state.financeAccounts = load(LS.financeAccounts, []);
 state.financeResetAt = load(LS.financeResetAt, null);
 state.financeDebts = load(LS.financeDebts, []);
+state.financeCommitments = load(LS.financeCommitments, []);
+
 
 // Quick finance wipe via URL: ?finreset=1 (useful when you want to start clean)
 try{
@@ -12820,7 +12862,7 @@ function getLast7DaysExpenseData(){
     const label = d.toLocaleDateString("es-PE",{weekday:"short"});
     
     const total = (financeActiveLedger()||[])
-      .filter(e=>e.type==="expense" && e.date===key)
+      .filter(e=>e.type==="expense" && String(e.date||"").slice(0,10)===key)
       .reduce((s,e)=>s+Number(e.amount||0),0);
     
     labels.push(label);
