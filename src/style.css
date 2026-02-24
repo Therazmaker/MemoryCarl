@@ -2040,3 +2040,26 @@ body{
 
 .invRowLow .invName, .invCardLow .invCardTitle{ color: rgba(255,235,180,.96); }
 .invRowOut .invName, .invCardOut .invCardTitle{ color: rgba(255,185,185,.96); }
+
+
+/* % Manual input (Daily Check) */
+.invPctEdit{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-top:8px;
+  flex-wrap:wrap;
+}
+.invPctEditCard{ justify-content:flex-end; }
+.invPctLabel{
+  font-weight:900;
+  opacity:.85;
+  font-size:12px;
+}
+.invPctInput{
+  width:84px;
+  padding:8px 10px;
+}
+.invPctToday{
+  padding:8px 10px;
+}

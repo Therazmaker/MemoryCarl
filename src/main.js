@@ -8613,6 +8613,12 @@ function openProductLibrary(){
 function ensureInventory(){
   if(!Array.isArray(state.inventory)) state.inventory = [];
   if(!Array.isArray(state.inventoryLots)) state.inventoryLots = [];
+  // defaults for new % tracking
+  (state.inventory||[]).forEach(it=>{
+    if(it.refillPointPct == null) it.refillPointPct = 25;
+    if(it.levelPct == null) it.levelPct = "";
+    if(it.lastCheck == null) it.lastCheck = "";
+  });
 }
 
 function inventoryFindByProductId(productId){
@@ -8643,7 +8649,10 @@ function addInventoryFromProduct(productId){
     unit: p.unit || "u",
     minQty: 0,
     essential: !!p.essential,
-    notes: ""
+    notes: "",
+    levelPct: "",
+    refillPointPct: 25,
+    lastCheck: ""
   });
   persist();
   toast("Agregado al inventario ✅");
@@ -8662,8 +8671,10 @@ function addInventoryManual(){
       {key:"minQty", label:"Mínimo para alerta", type:"number", value:"0"},
       {key:"essential", label:"Esencial (1/0)", value:"1"},
       {key:"notes", label:"Notas", value:""},
+      {key:"levelPct", label:"% actual (0-100)", type:"number", value:""},
+      {key:"refillPointPct", label:"% para alerta (ej 25)", type:"number", value:"25"},
     ],
-    onSubmit: ({name, category, qty, unit, minQty, essential, notes})=>{
+    onSubmit: ({name, category, qty, unit, minQty, essential, notes, levelPct, refillPointPct})=>{
       const n = (name||"").trim();
       if(!n) return;
       state.inventory.unshift({
@@ -8675,7 +8686,10 @@ function addInventoryManual(){
         unit: (unit||"u").trim() || "u",
         minQty: Number(minQty||0) || 0,
         essential: String(essential||"").trim() !== "0",
-        notes: (notes||"").trim()
+        notes: (notes||"").trim(),
+        levelPct: String(levelPct||"").trim(),
+        refillPointPct: Number(refillPointPct||25) || 25,
+        lastCheck: ""
       });
       persist();
       view();
@@ -8697,8 +8711,10 @@ function editInventoryItem(invId){
       {key:"minQty", label:"Mínimo", type:"number", value: String(it.minQty ?? 0)},
       {key:"essential", label:"Esencial (1/0)", value: it.essential ? "1" : "0"},
       {key:"notes", label:"Notas", value: it.notes || ""},
+      {key:"levelPct", label:"% actual (0-100)", type:"number", value: String((it.levelPct===0||it.levelPct)?it.levelPct:"")},
+      {key:"refillPointPct", label:"% para alerta", type:"number", value: String(it.refillPointPct ?? 25)},
     ],
-    onSubmit: ({name, category, qty, unit, minQty, essential, notes})=>{
+    onSubmit: ({name, category, qty, unit, minQty, essential, notes, levelPct, refillPointPct})=>{
       const n = (name||"").trim();
       if(!n) return;
       it.name = n;
@@ -8708,6 +8724,12 @@ function editInventoryItem(invId){
       it.minQty = Number(minQty||0) || 0;
       it.essential = String(essential||"").trim() !== "0";
       it.notes = (notes||"").trim();
+      const pctRaw = String(levelPct||"").trim();
+      it.levelPct = pctRaw==="" ? "" : Math.max(0, Math.min(100, Number(pctRaw)));
+      it.refillPointPct = Number(refillPointPct||25) || 25;
+      if(it.levelPct!=="" && !Number.isNaN(Number(it.levelPct))){
+        it.lastCheck = new Date().toISOString().slice(0,10);
+      }
       persist();
       view();
     }
@@ -9217,8 +9239,26 @@ function viewInventory(){
   const lots = (state.inventoryLots||[]);
 
   const linked = inv.filter(x=>!!x.productId).length;
-  const lowCount = inv.filter(x=>Number(x.minQty||0)>0 && Number(x.qty||0) <= Number(x.minQty||0) && Number(x.qty||0)>0).length;
-  const outCount = inv.filter(x=>Number(x.qty||0) <= 0).length;
+
+  // Counts should respect % tracking when available
+  function stockStatusQuick_(it){
+    const pctRaw = (it.levelPct===0 || it.levelPct) ? Number(it.levelPct) : null;
+    const pct = (pctRaw===null || Number.isNaN(pctRaw)) ? null : pctRaw;
+    const refill = Number(it.refillPointPct ?? it.refillPct ?? 25);
+    if(pct != null){
+      if(pct<=0) return "out";
+      if(refill>0 && pct<=refill) return "low";
+      return "ok";
+    }
+    const qty = Number(it.qty||0);
+    const min = Number(it.minQty||0);
+    if(qty<=0) return "out";
+    if(min>0 && qty<=min) return "low";
+    return "ok";
+  }
+
+  const lowCount = inv.filter(x=>stockStatusQuick_(x)==="low").length;
+  const outCount = inv.filter(x=>stockStatusQuick_(x)==="out").length;
   const lotCount = inv.filter(x=>{
     const pkey = x.productId ? ("pid:"+String(x.productId)) : ("nm:"+normName_(x.name));
     return lots.some(l=>!l.finishedAt && lotProductKey_(l)===pkey);
@@ -9310,7 +9350,8 @@ function viewInventory(){
       const qty = Number(it.qty||0);
       const min = Number(it.minQty||0);
       const minTxt = min>0 ? ` · min ${min}` : "";
-      const subtitle = `${escapeHtml(it.category||"-")} · <b>${qty}${escapeHtml(it.unit||"u")}</b>${minTxt}`;
+      const pctDisp = ((it.levelPct===0 || it.levelPct) ? ` · <b>${Number(it.levelPct)}%</b>` : "");
+      const subtitle = `${escapeHtml(it.category||"-")} · <b>${qty}${escapeHtml(it.unit||"u")}</b>${pctDisp}${minTxt}`;
 
       const pkey = it.productId ? ("pid:"+String(it.productId)) : ("nm:"+normName_(it.name));
 
@@ -9320,6 +9361,14 @@ function viewInventory(){
             <div class="invCardTop">
               <div class="invCardTitle">${link} ${it.essential?"⭐":""} ${escapeHtml(it.name)}</div>
               <div class="invCardBadges">${badgeStatus}${badgeLot}</div>
+              <div class="invPctEdit invPctEditCard">
+                <span class="invPctLabel">%</span>
+                <input class="input invPctInput" type="number" min="0" max="100"
+                       value="${(it.levelPct===0||it.levelPct)?Number(it.levelPct):""}"
+                       placeholder="—"
+                       onchange="updateInventoryPct('${it.id}', this.value)" />
+                <button class="btn ghost invPctToday" title="Marcar revisado hoy" onclick="markInventoryChecked('${it.id}')">✅</button>
+              </div>
             </div>
             <div class="invCardMeta">${subtitle}</div>
             <div class="invCardActions">
@@ -9339,6 +9388,14 @@ function viewInventory(){
             <div class="invName">${link} ${it.essential?"⭐":""} ${escapeHtml(it.name)}</div>
             <div class="invMeta">${subtitle}</div>
             <div class="invBadges">${badgeStatus}${badgeLot}</div>
+            <div class="invPctEdit">
+              <span class="invPctLabel">%</span>
+              <input class="input invPctInput" type="number" min="0" max="100"
+                     value="${(it.levelPct===0||it.levelPct)?Number(it.levelPct):""}"
+                     placeholder="—"
+                     onchange="updateInventoryPct('${it.id}', this.value)" />
+              <button class="btn ghost invPctToday" title="Marcar revisado hoy" onclick="markInventoryChecked('${it.id}')">✅</button>
+            </div>
           </div>
           <div class="invActions">
             <button class="btn" title="Añadir a lista" onclick="addInventoryToList('${it.id}')">➕</button>
@@ -9438,6 +9495,37 @@ function setInvQuery(v){
   view();
 }
 window.setInvQuery = setInvQuery;
+
+// % Manual (Daily Check)
+function updateInventoryPct(invId, value){
+  ensureInventory();
+  const it = (state.inventory||[]).find(x=>x.id===invId);
+  if(!it) return;
+
+  const pct = Number(String(value||"").trim());
+  if(Number.isNaN(pct) || pct<0 || pct>100){
+    toast("Porcentaje inválido (0-100)");
+    view();
+    return;
+  }
+  it.levelPct = Math.round(pct);
+  it.lastCheck = new Date().toISOString().slice(0,10);
+  if(it.refillPointPct == null) it.refillPointPct = 25;
+  persist();
+  view();
+}
+window.updateInventoryPct = updateInventoryPct;
+
+function markInventoryChecked(invId){
+  ensureInventory();
+  const it = (state.inventory||[]).find(x=>x.id===invId);
+  if(!it) return;
+  it.lastCheck = new Date().toISOString().slice(0,10);
+  persist();
+  toast("Revisado hoy ✅");
+  view();
+}
+window.markInventoryChecked = markInventoryChecked;
 
 
 function openNewProduct(){
