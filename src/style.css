@@ -1943,3 +1943,100 @@ body{
   border-color: rgba(255,120,120,.35);
   color: rgba(255,185,185,.95);
 }
+
+
+/* ===== Inventory UI upgrade ===== */
+.invToolbar{ padding:12px; }
+.chipBtn{
+  border:1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.88);
+  padding:6px 10px;
+  border-radius:999px;
+  cursor:pointer;
+  font-weight:800;
+}
+.chipBtn.on{
+  background: rgba(120,170,255,.18);
+  border-color: rgba(120,170,255,.32);
+}
+.invGroup{ overflow:hidden; }
+.invGroupHead{
+  padding:12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  cursor:pointer;
+}
+.invGroupTitle{ font-weight:900; }
+.invGroupBody{ padding:0 12px 12px; }
+
+.invRow{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 0;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+.invRow:first-child{ border-top:0; }
+.invLeft{ min-width:0; }
+.invName{ font-weight:900; }
+.invMeta{ opacity:.8; font-size:12px; margin-top:2px; }
+.invBadges{ display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+.invActions{ display:flex; gap:8px; flex-shrink:0; }
+
+.invBadge{
+  font-size:11px;
+  font-weight:900;
+  padding:4px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+}
+.invBadgeLot{
+  border-color: rgba(160,200,255,.28);
+  background: rgba(160,200,255,.10);
+}
+.invBadgeNoLot{
+  border-color: rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+  opacity:.85;
+}
+.invPill{
+  font-size:11px;
+  font-weight:900;
+  padding:4px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+}
+.invPillGreen{
+  border-color: rgba(140,255,180,.28);
+  background: rgba(140,255,180,.10);
+}
+.invPillYellow{
+  border-color: rgba(255,210,120,.30);
+  background: rgba(255,210,120,.10);
+}
+.invPillRed{
+  border-color: rgba(255,120,120,.34);
+  background: rgba(255,120,120,.12);
+}
+
+.invCard{
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:18px;
+  padding:12px;
+  background: rgba(255,255,255,.04);
+  margin-bottom:10px;
+}
+.invCardTop{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.invCardTitle{ font-weight:900; }
+.invCardBadges{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.invCardMeta{ opacity:.8; font-size:12px; margin-top:6px; }
+.invCardActions{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; justify-content:flex-end; }
+
+.invRowLow .invName, .invCardLow .invCardTitle{ color: rgba(255,235,180,.96); }
+.invRowOut .invName, .invCardOut .invCardTitle{ color: rgba(255,185,185,.96); }
