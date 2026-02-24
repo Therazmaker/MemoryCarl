@@ -9055,7 +9055,8 @@ function viewInventoryCalendar(){
 // expose
 window.openFinishLotModal = openFinishLotModal;
 
-
+function viewInventory(){
+
   ensureInventory();
   const low = (state.inventory||[]).filter(x=>Number(x.minQty||0)>0 && Number(x.qty||0) <= Number(x.minQty||0)).length;
   const linked = (state.inventory||[]).filter(x=>!!x.productId).length;
