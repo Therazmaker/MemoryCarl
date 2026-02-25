@@ -5,152 +5,119 @@ export function initFootballLab(){
     localStorage.setItem("footballDB", JSON.stringify({
       teams: [],
       players: [],
-      matches: []
+      matches: [],
+      weights: {
+        shots: 1.2,
+        passes: 1.0,
+        dribbles: 1.0,
+        defense: 1.1,
+        goalkeeper: 1.3
+      }
     }));
   }
 
-  function getDB(){
-    return JSON.parse(localStorage.getItem("footballDB"));
-  }
-
-  function saveDB(db){
-    localStorage.setItem("footballDB", JSON.stringify(db));
-  }
-
+  function getDB(){ return JSON.parse(localStorage.getItem("footballDB")); }
+  function saveDB(db){ localStorage.setItem("footballDB", JSON.stringify(db)); }
   function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
 
-  const btn = document.createElement("button");
-  btn.innerText = "⚽ Football Lab";
-  btn.style.position = "fixed";
-  btn.style.bottom = "20px";
-  btn.style.right = "20px";
-  btn.style.zIndex = "9999";
-  btn.style.padding = "10px 14px";
-  btn.style.borderRadius = "12px";
-  btn.style.border = "none";
-  btn.style.background = "#0f172a";
-  btn.style.color = "white";
-  btn.style.cursor = "pointer";
-  document.body.appendChild(btn);
-
-  const modal = document.createElement("div");
-  modal.style.position = "fixed";
-  modal.style.inset = "0";
-  modal.style.background = "rgba(0,0,0,0.75)";
-  modal.style.display = "none";
-  modal.style.alignItems = "center";
-  modal.style.justifyContent = "center";
-  modal.style.zIndex = "10000";
-
-  modal.innerHTML = `
-  <div style="background:#111;padding:20px;border-radius:16px;width:95%;max-width:900px;color:white;max-height:90%;overflow:auto;">
-
-    <h2>Football Lab V2-B — Match Logger</h2>
-
-    <h3>Seleccionar Jugador</h3>
-    <select id="fl_player_select"></select>
-
-    <h3>Datos del Partido</h3>
-    <label>Minutos <input id="fl_min" type="number" min="0" max="90" value="90"/></label><br/>
-    <label>Goles <input id="fl_goals" type="number" value="0"/></label><br/>
-    <label>Asistencias <input id="fl_ast" type="number" value="0"/></label><br/>
-    <label>Pases Completados <input id="fl_passc" type="number" value="0"/></label><br/>
-    <label>Pases Intentados <input id="fl_passa" type="number" value="0"/></label><br/>
-    <label>Duelos Ganados <input id="fl_duelw" type="number" value="0"/></label><br/>
-    <label>Duelos Totales <input id="fl_duelt" type="number" value="0"/></label><br/>
-    <label>Pérdidas <input id="fl_losses" type="number" value="0"/></label><br/>
-    <label>Tarjetas Amarillas <input id="fl_yellow" type="number" value="0"/></label><br/>
-    <label>Tarjeta Roja <input id="fl_red" type="number" value="0"/></label><br/><br/>
-
-    <button id="fl_calculate">Calcular & Actualizar Rating</button>
-
-    <div id="fl_result" style="margin-top:15px;"></div>
-
-    <hr/>
-    <button id="fl_close">Cerrar</button>
-  </div>
-  `;
-
-  document.body.appendChild(modal);
-
-  btn.onclick = () => {
-    renderPlayers();
-    modal.style.display = "flex";
-  };
-
-  modal.querySelector("#fl_close").onclick = () => {
-    modal.style.display = "none";
-  };
-
-  function renderPlayers(){
-    const db = getDB();
-    const select = modal.querySelector("#fl_player_select");
-    select.innerHTML = "";
-    db.players.forEach(p=>{
-      const opt = document.createElement("option");
-      opt.value = p.id;
-      opt.innerText = p.name + " (" + p.rating.toFixed(2) + ")";
-      select.appendChild(opt);
-    });
+  const moreBtn = document.querySelector("#moreBtn");
+  if(moreBtn){
+    const labBtn = document.createElement("button");
+    labBtn.innerText = "⚽ Football Lab";
+    labBtn.className = "more-item";
+    labBtn.onclick = openLab;
+    moreBtn.parentElement.appendChild(labBtn);
   }
 
-  modal.querySelector("#fl_calculate").onclick = () => {
-
+  function openLab(){
     const db = getDB();
-    const playerId = parseInt(modal.querySelector("#fl_player_select").value);
-    const player = db.players.find(p=>p.id===playerId);
-    if(!player) return;
 
-    const minutes = parseFloat(fl_min.value)||0;
-    const goals = parseFloat(fl_goals.value)||0;
-    const ast = parseFloat(fl_ast.value)||0;
-    const passc = parseFloat(fl_passc.value)||0;
-    const passa = parseFloat(fl_passa.value)||1;
-    const duelw = parseFloat(fl_duelw.value)||0;
-    const duelt = parseFloat(fl_duelt.value)||1;
-    const losses = parseFloat(fl_losses.value)||0;
-    const yellow = parseFloat(fl_yellow.value)||0;
-    const red = parseFloat(fl_red.value)||0;
+    const root = document.getElementById("app");
+    root.innerHTML = `
+      <div style="padding:20px;">
+        <h2>⚽ Football Lab V3</h2>
 
-    const minFactor = Math.sqrt(minutes/90);
-    const passPct = passc/passa;
-    const duelPct = duelw/duelt;
+        <h3>Pesos del Modelo</h3>
+        ${Object.keys(db.weights).map(k=>`
+          <label>${k} 
+            <input type="range" min="0.5" max="2" step="0.1" value="${db.weights[k]}" id="w_${k}"/>
+            <span id="w_val_${k}">${db.weights[k]}</span>
+          </label><br/>
+        `).join("")}
 
-    let score =
-      (goals*1.2) +
-      (ast*0.8) +
-      (passPct*2) +
-      (duelPct*1.5) -
-      (losses*0.05) -
-      (yellow*0.3) -
-      (red*1);
+        <button id="saveWeights">Guardar Pesos</button>
 
-    score = score * minFactor;
+        <hr/>
 
-    score = clamp(score,0,10);
+        <h3>Probabilidad Simple Versus</h3>
+        <select id="teamA"></select>
+        vs
+        <select id="teamB"></select>
+        <button id="calcProb">Calcular</button>
+        <div id="probResult"></div>
 
-    const expected = player.rating;
-    const K = 0.15 * minFactor;
+        <hr/>
+        <button id="backHome">Volver</button>
+      </div>
+    `;
 
-    const newRating = clamp(player.rating + K*(score-expected),0,10);
+    const teamA = document.getElementById("teamA");
+    const teamB = document.getElementById("teamB");
 
-    player.rating = newRating;
+    db.teams.forEach(t=>{
+      const o1 = document.createElement("option");
+      o1.value = t.id;
+      o1.innerText = t.name;
+      teamA.appendChild(o1);
 
-    db.matches.push({
-      playerId,
-      date: new Date().toISOString(),
-      score: score,
-      oldRating: expected,
-      newRating: newRating
+      const o2 = document.createElement("option");
+      o2.value = t.id;
+      o2.innerText = t.name;
+      teamB.appendChild(o2);
     });
 
-    saveDB(db);
+    Object.keys(db.weights).forEach(k=>{
+      const slider = document.getElementById("w_"+k);
+      slider.oninput = ()=>{
+        document.getElementById("w_val_"+k).innerText = slider.value;
+      };
+    });
 
-    modal.querySelector("#fl_result").innerHTML =
-      "<strong>Performance Score:</strong> " + score.toFixed(2) +
-      "<br/><strong>Nuevo Rating:</strong> " + newRating.toFixed(2);
+    document.getElementById("saveWeights").onclick = ()=>{
+      Object.keys(db.weights).forEach(k=>{
+        db.weights[k] = parseFloat(document.getElementById("w_"+k).value);
+      });
+      saveDB(db);
+      alert("Pesos guardados.");
+    };
 
-    renderPlayers();
-  };
+    document.getElementById("calcProb").onclick = ()=>{
+      const idA = parseInt(teamA.value);
+      const idB = parseInt(teamB.value);
+
+      const playersA = db.players.filter(p=>p.teamId===idA);
+      const playersB = db.players.filter(p=>p.teamId===idB);
+
+      const avgA = playersA.length ? playersA.reduce((s,p)=>s+p.rating,0)/playersA.length : 0;
+      const avgB = playersB.length ? playersB.reduce((s,p)=>s+p.rating,0)/playersB.length : 0;
+
+      const diff = avgA - avgB;
+
+      const probA = 1/(1+Math.exp(-diff));
+      const probB = 1-probA;
+
+      document.getElementById("probResult").innerHTML =
+        "<strong>"+
+        (playersA.length?playersA[0].teamName||"Equipo A":"Equipo A")+
+        "</strong>: "+(probA*100).toFixed(1)+"%<br/>"+
+        "<strong>"+
+        (playersB.length?playersB[0].teamName||"Equipo B":"Equipo B")+
+        "</strong>: "+(probB*100).toFixed(1)+"%";
+    };
+
+    document.getElementById("backHome").onclick = ()=>{
+      location.reload();
+    };
+  }
 
 }
