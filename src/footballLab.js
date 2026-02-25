@@ -4,20 +4,11 @@ export function initFootballLab(){
   if(!localStorage.getItem("footballDB")){
     localStorage.setItem("footballDB", JSON.stringify({
       teams: [],
-      players: [],
-      matches: [],
-      weights: {
-        shots: 1.2,
-        passes: 1.0,
-        dribbles: 1.0,
-        defense: 1.1,
-        goalkeeper: 1.3
-      }
+      players: []
     }));
   }
 
   function getDB(){ return JSON.parse(localStorage.getItem("footballDB")); }
-  function saveDB(db){ localStorage.setItem("footballDB", JSON.stringify(db)); }
   function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
 
   const moreBtn = document.querySelector("#moreBtn");
@@ -31,93 +22,108 @@ export function initFootballLab(){
 
   function openLab(){
     const db = getDB();
-
     const root = document.getElementById("app");
+
     root.innerHTML = `
       <div style="padding:20px;">
-        <h2>⚽ Football Lab V3</h2>
+        <h2>⚽ Football Lab V4</h2>
 
-        <h3>Pesos del Modelo</h3>
-        ${Object.keys(db.weights).map(k=>`
-          <label>${k} 
-            <input type="range" min="0.5" max="2" step="0.1" value="${db.weights[k]}" id="w_${k}"/>
-            <span id="w_val_${k}">${db.weights[k]}</span>
-          </label><br/>
-        `).join("")}
+        <h3>Formación</h3>
+        <select id="formation">
+          <option value="433">4-3-3</option>
+          <option value="442">4-4-2</option>
+          <option value="343">3-4-3</option>
+        </select>
 
-        <button id="saveWeights">Guardar Pesos</button>
+        <h3>Equipo Local</h3>
+        <select id="teamHome"></select>
 
-        <hr/>
+        <h3>Equipo Visitante</h3>
+        <select id="teamAway"></select>
 
-        <h3>Probabilidad Simple Versus</h3>
-        <select id="teamA"></select>
-        vs
-        <select id="teamB"></select>
-        <button id="calcProb">Calcular</button>
-        <div id="probResult"></div>
+        <button id="calc">Calcular Probabilidad</button>
+
+        <div id="output" style="margin-top:20px;"></div>
 
         <hr/>
-        <button id="backHome">Volver</button>
+        <button onclick="location.reload()">Volver</button>
       </div>
     `;
 
-    const teamA = document.getElementById("teamA");
-    const teamB = document.getElementById("teamB");
+    const teamHome = document.getElementById("teamHome");
+    const teamAway = document.getElementById("teamAway");
 
     db.teams.forEach(t=>{
       const o1 = document.createElement("option");
       o1.value = t.id;
       o1.innerText = t.name;
-      teamA.appendChild(o1);
+      teamHome.appendChild(o1);
 
       const o2 = document.createElement("option");
       o2.value = t.id;
       o2.innerText = t.name;
-      teamB.appendChild(o2);
+      teamAway.appendChild(o2);
     });
 
-    Object.keys(db.weights).forEach(k=>{
-      const slider = document.getElementById("w_"+k);
-      slider.oninput = ()=>{
-        document.getElementById("w_val_"+k).innerText = slider.value;
-      };
-    });
+    document.getElementById("calc").onclick = ()=>{
 
-    document.getElementById("saveWeights").onclick = ()=>{
-      Object.keys(db.weights).forEach(k=>{
-        db.weights[k] = parseFloat(document.getElementById("w_"+k).value);
-      });
-      saveDB(db);
-      alert("Pesos guardados.");
-    };
+      const homeId = parseInt(teamHome.value);
+      const awayId = parseInt(teamAway.value);
 
-    document.getElementById("calcProb").onclick = ()=>{
-      const idA = parseInt(teamA.value);
-      const idB = parseInt(teamB.value);
+      const homePlayers = db.players.filter(p=>p.teamId===homeId);
+      const awayPlayers = db.players.filter(p=>p.teamId===awayId);
 
-      const playersA = db.players.filter(p=>p.teamId===idA);
-      const playersB = db.players.filter(p=>p.teamId===idB);
+      function computeStrength(players){
 
-      const avgA = playersA.length ? playersA.reduce((s,p)=>s+p.rating,0)/playersA.length : 0;
-      const avgB = playersB.length ? playersB.reduce((s,p)=>s+p.rating,0)/playersB.length : 0;
+        let attack=0, defense=0, control=0;
 
-      const diff = avgA - avgB;
+        players.forEach(p=>{
+          if(["ST","LW","RW","CAM"].includes(p.position)){
+            attack += p.rating;
+          }
+          if(["CB","LB","RB","CDM","GK"].includes(p.position)){
+            defense += p.rating;
+          }
+          if(["CM","CAM","CDM"].includes(p.position)){
+            control += p.rating;
+          }
+        });
 
-      const probA = 1/(1+Math.exp(-diff));
-      const probB = 1-probA;
+        attack = attack / (players.length||1);
+        defense = defense / (players.length||1);
+        control = control / (players.length||1);
 
-      document.getElementById("probResult").innerHTML =
-        "<strong>"+
-        (playersA.length?playersA[0].teamName||"Equipo A":"Equipo A")+
-        "</strong>: "+(probA*100).toFixed(1)+"%<br/>"+
-        "<strong>"+
-        (playersB.length?playersB[0].teamName||"Equipo B":"Equipo B")+
-        "</strong>: "+(probB*100).toFixed(1)+"%";
-    };
+        const total = 0.4*attack + 0.4*defense + 0.2*control;
 
-    document.getElementById("backHome").onclick = ()=>{
-      location.reload();
+        return {attack, defense, control, total};
+      }
+
+      const H = computeStrength(homePlayers);
+      const A = computeStrength(awayPlayers);
+
+      const homeAdv = 0.05;
+      const homeTotal = H.total * (1+homeAdv);
+      const awayTotal = A.total;
+
+      const diff = homeTotal - awayTotal;
+
+      const pHome = 1/(1+Math.exp(-diff));
+      const drawBase = 0.28;
+      const pDraw = drawBase * Math.exp(-Math.abs(diff));
+      const pAway = 1 - pHome;
+
+      const norm = pHome + pDraw + pAway;
+
+      document.getElementById("output").innerHTML = `
+        <h3>Resultado Probabilístico</h3>
+        <strong>Home Win:</strong> ${(pHome/norm*100).toFixed(1)}%<br/>
+        <strong>Draw:</strong> ${(pDraw/norm*100).toFixed(1)}%<br/>
+        <strong>Away Win:</strong> ${(pAway/norm*100).toFixed(1)}%
+
+        <hr/>
+        <strong>Home Strength:</strong> ${homeTotal.toFixed(2)}<br/>
+        <strong>Away Strength:</strong> ${awayTotal.toFixed(2)}<br/>
+      `;
     };
   }
-
 }
