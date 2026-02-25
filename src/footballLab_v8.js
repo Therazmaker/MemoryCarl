@@ -256,7 +256,7 @@ export function initFootballLab(){
 
   function openFLModal({title="Modal", sub="", bodyHTML="", onSave=null}){
     ensureFLModal();
-    const overlay = document.getElementById("fl_modalOverlay");
+    let overlay = document.getElementById("fl_modalOverlay");
     overlay.style.display = "flex";
     overlay.querySelector("#fl_modalTitle").textContent = title;
     overlay.querySelector("#fl_modalSub").textContent = sub || "";
@@ -280,7 +280,7 @@ export function initFootballLab(){
   }
 
   function closeFLModal(){
-    const overlay = document.getElementById("fl_modalOverlay");
+    let overlay = document.getElementById("fl_modalOverlay");
     if(!overlay) return;
     overlay.style.display = "none";
     overlay.querySelector("#fl_modalBody").innerHTML = "";
@@ -471,14 +471,16 @@ function readNum(overlay, id, fallback=0){
 
         saveDB(db);
         openLab("player",{playerId});
-    // sliders: keep number <-> range synced
-    const overlay = document.getElementById("fl_modalOverlay");
+    {
+// sliders: keep number <-> range synced
+    let overlay = document.getElementById("fl_modalOverlay");
     if(overlay){
       ["m_score","s_minutes","s_rating","s_passC","s_passA","s_keyPasses","s_progPasses","s_duelsWon","s_duelsTot","s_dribblesWon","s_defActions","s_goals","s_assists","s_xg","s_xa"].forEach(idBase=>{
         syncPair(overlay, idBase, 0);
       });
       attachLiveCalcs(overlay);
     }
+}
 
       }
     });
