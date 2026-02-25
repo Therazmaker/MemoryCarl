@@ -14313,212 +14313,29 @@ function viewFootball(){
 }
 
 function initFootballTab(root){
-  // Prepare selects, handlers, modal flows
-  const db = fbGetDB();
-
-  const backdrop = root.querySelector("#fbModalBackdrop");
-  const modalTitle = root.querySelector("#fbModalTitle");
-  const modalBody = root.querySelector("#fbModalBody");
-
-  function openModal(title, bodyHtml){
-    if(!backdrop) return;
-    modalTitle.textContent = title;
-    modalBody.innerHTML = bodyHtml;
-    backdrop.style.display = "block";
-  }
-  function closeModal(){
-    if(!backdrop) return;
-    backdrop.style.display = "none";
-  }
-
-  // Basic actions
-  root.querySelectorAll("[data-fb-action]").forEach(el=>{
-    el.addEventListener("click", async ()=>{
-      const act = el.getAttribute("data-fb-action");
-      if(act==="backTeams"){
-        state.footballTeamId = null;
-        view();
-      }
-      if(act==="closeModal"){
-        closeModal();
-      }
-      if(act==="openTeamCreate"){
-        openModal("Crear equipo", `
-          <div class="muted small">Nombre del equipo</div>
-          <input id="fbNewTeamName" class="input" placeholder="Ej: Barcelona" />
-          <div style="height:12px;"></div>
-          <button class="btn primary" id="fbCreateTeamBtn">Crear</button>
-        `);
-        const btn = root.querySelector("#fbCreateTeamBtn");
-        btn?.addEventListener("click", ()=>{
-          const name = (root.querySelector("#fbNewTeamName")?.value || "").trim();
-          if(!name) return;
-          const db2 = fbGetDB();
-          db2.teams.push({ id: Date.now(), name });
-          fbSaveDB(db2);
-          closeModal();
-          view();
-        });
-      }
-      if(act==="openPlayerCreate"){
-        const teamId = state.footballTeamId;
-        openModal("Agregar jugador", `
-          <div class="muted small">Nombre</div>
-          <input id="fbNewPlayerName" class="input" placeholder="Ej: Juan Pérez" />
-          <div style="height:10px;"></div>
-
-          <div class="muted small">Posición</div>
-          <input id="fbNewPlayerPos" class="input" placeholder="Ej: CM, ST, CB..." />
-          <div style="height:10px;"></div>
-
-          <div class="muted small">Rating base (0–10)</div>
-          <input id="fbNewPlayerRating" class="input" type="number" step="0.1" min="0" max="10" value="5.0"/>
-          <div style="height:12px;"></div>
-
-          <button class="btn primary" id="fbCreatePlayerBtn">Crear</button>
-        `);
-        root.querySelector("#fbCreatePlayerBtn")?.addEventListener("click", ()=>{
-          const name = (root.querySelector("#fbNewPlayerName")?.value || "").trim();
-          const position = (root.querySelector("#fbNewPlayerPos")?.value || "").trim();
-          const rating = parseFloat(root.querySelector("#fbNewPlayerRating")?.value || "5");
-          if(!name || !teamId) return;
-          const db2 = fbGetDB();
-          db2.players.push({ id: Date.now(), teamId, name, position, rating: fbClamp(isNaN(rating)?5:rating, 0, 10) });
-          fbSaveDB(db2);
-          closeModal();
-          view();
-        });
-      }
-      if(act==="openMatchMore"){
-        const box = root.querySelector("#fbMatchMore");
-        if(box) box.style.display = (box.style.display==="none" ? "block" : "none");
-      }
-      if(act==="applyMatch"){
-        const teamId = state.footballTeamId;
-        if(!teamId) return;
-
-        const pid = root.querySelector("#fbMatchPlayer")?.value;
-        const db2 = fbGetDB();
-        const player = db2.players.find(p=>String(p.id)===String(pid));
-        if(!player) return;
-
-        const stats = {
-          minutes: root.querySelector("#fbMin")?.value,
-          goals: root.querySelector("#fbGoals")?.value,
-          assists: root.querySelector("#fbAssists")?.value,
-          passC: root.querySelector("#fbPassC")?.value,
-          passA: root.querySelector("#fbPassA")?.value,
-          duelW: root.querySelector("#fbDuelW")?.value,
-          duelT: root.querySelector("#fbDuelT")?.value,
-          shotsOn: root.querySelector("#fbShotsOn")?.value,
-          recoveries: root.querySelector("#fbRecov")?.value,
-          losses: root.querySelector("#fbLosses")?.value,
-          yellow: root.querySelector("#fbYellow")?.value,
-          red: root.querySelector("#fbRed")?.value
-        };
-
-        const score = fbPerfScore10(stats);
-        const upd = fbUpdatePlayerRating(player, score, stats.minutes);
-
-        // persist
-        const old = player.rating;
-        player.rating = upd.next;
-
-        db2.matches.push({
-          id: Date.now(),
-          date: new Date().toISOString(),
-          teamId,
-          playerId: player.id,
-          stats: {
-            minutes:+stats.minutes||0, goals:+stats.goals||0, assists:+stats.assists||0,
-            passC:+stats.passC||0, passA:+stats.passA||0, duelW:+stats.duelW||0, duelT:+stats.duelT||0,
-            shotsOn:+stats.shotsOn||0, recoveries:+stats.recoveries||0, losses:+stats.losses||0,
-            yellow:+stats.yellow||0, red:+stats.red||0
-          },
-          score10: score,
-          ratingOld: upd.old,
-          ratingNew: upd.next
-        });
-
-        fbSaveDB(db2);
-
-        const out = root.querySelector("#fbMatchResult");
-        if(out){
-          out.innerHTML = `Score: <span class="chip mono">${score.toFixed(2)}</span> · Rating: <span class="chip mono">${upd.old.toFixed(2)}</span> → <span class="chip mono">${upd.next.toFixed(2)}</span>`;
-        }
-
-        // refresh just this tab
-        view();
-      }
-      if(act==="export"){
-        const db2 = fbGetDB();
-        const payload = JSON.stringify({ exportedAt: Date.now(), footballDB: db2 }, null, 2);
-        try{
-          const blob = new Blob([payload], { type:"application/json" });
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
-          a.download = "footballDB.json";
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          if(typeof toast==="function") toast("Export listo ✅");
-        }catch(e){
-          console.error(e);
-          alert("No pude exportar.");
-        }
-      }
-    });
-  });
-
-  // open team
-  root.querySelectorAll("[data-fb-open-team]").forEach(el=>{
-    el.addEventListener("click", ()=>{
-      const id = el.getAttribute("data-fb-open-team");
-      state.footballTeamId = id;
-      view();
-    });
-  });
-
-  // player select for match logger
-  const teamId = state.footballTeamId;
-  if(teamId){
-    const db3 = fbGetDB();
-    const sel = root.querySelector("#fbMatchPlayer");
-    if(sel){
-      sel.innerHTML = "";
-      db3.players.filter(p=>String(p.teamId)===String(teamId)).forEach(p=>{
-        const opt = document.createElement("option");
-        opt.value = p.id;
-        opt.textContent = `${p.name} (${(+p.rating||0).toFixed(2)})`;
-        sel.appendChild(opt);
-      });
+  // Football Lab (V6e) now uses the full Lab UI (openLab) instead of the legacy tab UI.
+  try{
+    // Ensure module init ran (creates DB + exposes window.__FOOTBALL_LAB__)
+    if(!window.__FOOTBALL_LAB__){
+      try{ initFootballLab(); }catch(e){ console.warn(e); }
     }
-  }
+    // Open the lab "home" view (this replaces #app content with the lab UI)
+    if(window.__FOOTBALL_LAB__?.open){
+      window.__FOOTBALL_LAB__.open("home");
+      return;
+    }
+  }catch(e){ console.error(e); }
 
-  // import file
-  root.querySelectorAll('input[data-fb-action="importFile"]').forEach(inp=>{
-    inp.addEventListener("change", async ()=>{
-      const file = inp.files && inp.files[0];
-      if(!file) return;
-      try{
-        const text = await file.text();
-        const parsed = JSON.parse(text);
-        const dbIn = parsed.footballDB || parsed;
-        if(!dbIn || !Array.isArray(dbIn.teams) || !Array.isArray(dbIn.players)){
-          alert("JSON inválido para Football DB");
-          return;
-        }
-        // keep matches optional
-        if(!Array.isArray(dbIn.matches)) dbIn.matches = [];
-        fbSaveDB({ teams: dbIn.teams, players: dbIn.players, matches: dbIn.matches });
-        if(typeof toast==="function") toast("Importado ✅");
-        view();
-      }catch(e){
-        console.error(e);
-        alert("No pude importar ese archivo.");
-      }
-    });
-  });
+  // Fallback UI if something blocks the lab
+  const app = document.getElementById("app");
+  if(app){
+    app.innerHTML = `
+      <div class="card">
+        <div style="font-weight:900;font-size:16px;">⚽ Football Lab</div>
+        <div class="muted" style="margin-top:6px;">No pude abrir el Lab. Revisa consola para errores.</div>
+      </div>
+    `;
+  }
 }
 
 

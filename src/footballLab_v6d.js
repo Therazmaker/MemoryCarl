@@ -13,7 +13,7 @@
  */
 
 export function initFootballLab(){
-  console.log("⚽ FOOTBALL LAB V6d ACTIVE");
+  console.log("⚽ FOOTBALL LAB V6e ACTIVE");
 
   const KEY = "footballDB";
 
@@ -124,7 +124,7 @@ export function initFootballLab(){
       <div style="padding:18px 18px 22px 18px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
           <div>
-            <div style="font-size:20px;font-weight:800;">⚽ Football Lab <span class="fl-pill">V6</span></div>
+            <div style="font-size:20px;font-weight:800;">⚽ Football Lab <span class="fl-pill">V6e</span></div>
             <div style="opacity:.8;font-size:12px;">Modo estudio • Temporada actual: <b>${escapeHtml(db.settings.currentSeason)}</b></div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
@@ -1518,10 +1518,10 @@ export function initFootballLab(){
   }
 
 
-  // --- Debug hook (V6d) ---
+  // --- Debug hook (V6e) ---
   try{
     window.__FOOTBALL_LAB__ = {
-      version: "V6d",
+      version: "V6e",
       open: (view, payload)=> openLab(view, payload),
       db: ()=> loadDB(),
       setDB: (db)=> saveDB(db),
