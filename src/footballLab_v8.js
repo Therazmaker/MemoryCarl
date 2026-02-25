@@ -960,8 +960,92 @@ export function initFootballLab(){
     // last matches view
     const last = logs.slice(0, 8);
     document.getElementById("lastMatches").innerHTML = last.map(m=>{
-      return `• ${escapeHtml(m.date)} — score <b>${fmt(m.score,2)}</b> • min ${m.stats?.minutes ?? 0} • G ${m.stats?.goals ?? 0} • A ${m.stats?.assists ?? 0}<br/>`;
+      const mid = escapeHtml(m.id||"");
+      const date = escapeHtml(m.date||"");
+      const score = fmt(m.score,2);
+      const min = (m.stats?.minutes ?? 0);
+      const g = (m.stats?.goals ?? 0);
+      const a = (m.stats?.assists ?? 0);
+      return `
+        <div class="fl-row" style="align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.06);">
+          <div class="fl-small" style="flex:1; min-width:0;">
+            • ${date} — score <b>${score}</b> • min ${min} • G ${g} • A ${a}
+          </div>
+          <div style="display:flex; gap:6px; flex-shrink:0;">
+            <button class="mc-btn" data-editmatch="${mid}" style="padding:6px 10px;">Editar</button>
+            <button class="mc-btn" data-delmatch="${mid}" style="padding:6px 10px; opacity:.9;">Eliminar</button>
+          </div>
+        </div>
+      `;
     }).join("") || `<span style="opacity:.75;">Aún no hay partidos registrados en esta temporada.</span>`;
+
+    // wire edit/delete for last matches
+    document.querySelectorAll("[data-editmatch]").forEach(btn=>{
+      btn.onclick = ()=>{
+        const mid = btn.getAttribute("data-editmatch");
+        const mm = db.matches.find(x=>x.id===mid);
+        if(!mm) return;
+        // quick prompt-based editor (fast + safe)
+        const pNum = (label, val)=>{ const v = prompt(label, String(val ?? 0)); if(v===null) return null; const n = parseFloat(v); return Number.isFinite(n) ? n : (val ?? 0); };
+        const pStr = (label, val)=>{ const v = prompt(label, String(val ?? "")); if(v===null) return null; return String(v); };
+
+        const newDate = pStr("Fecha (YYYY-MM-DD)", mm.date);
+        if(newDate===null) return;
+
+        const newScore = pNum("Score (0-10)", mm.score);
+        if(newScore===null) return;
+
+        mm.date = newDate || mm.date;
+        mm.score = clamp(newScore, 0, 10);
+
+        mm.stats = mm.stats || {};
+        const mins = pNum("Minutos", mm.stats.minutes ?? 0); if(mins===null) return;
+        const goals = pNum("Goles", mm.stats.goals ?? 0); if(goals===null) return;
+        const assists = pNum("Asistencias", mm.stats.assists ?? 0); if(assists===null) return;
+        const keyPasses = pNum("Key passes", mm.stats.keyPasses ?? 0); if(keyPasses===null) return;
+        const progPasses = pNum("Pases progresivos", mm.stats.progPasses ?? 0); if(progPasses===null) return;
+        const passC = pNum("Pases completados", mm.stats.passC ?? 0); if(passC===null) return;
+        const passA = pNum("Pases intentados", mm.stats.passA ?? 0); if(passA===null) return;
+
+        const duelsWon = pNum("Duelos ganados", mm.stats.duelsWon ?? 0); if(duelsWon===null) return;
+        const duelsTot = pNum("Duelos totales", mm.stats.duelsTot ?? 0); if(duelsTot===null) return;
+        const dribblesWon = pNum("Regates buenos", mm.stats.dribblesWon ?? 0); if(dribblesWon===null) return;
+        const defActions = pNum("Acciones defensivas", mm.stats.defActions ?? 0); if(defActions===null) return;
+
+        mm.stats.minutes = Math.max(0, Math.round(mins));
+        mm.stats.goals = Math.max(0, Math.round(goals));
+        mm.stats.assists = Math.max(0, Math.round(assists));
+        mm.stats.keyPasses = Math.max(0, Math.round(keyPasses));
+        mm.stats.progPasses = Math.max(0, Math.round(progPasses));
+        mm.stats.passC = Math.max(0, Math.round(passC));
+        mm.stats.passA = Math.max(0, Math.round(passA));
+        mm.stats.duelsWon = Math.max(0, Math.round(duelsWon));
+        mm.stats.duelsTot = Math.max(0, Math.round(duelsTot));
+        mm.stats.dribblesWon = Math.max(0, Math.round(dribblesWon));
+        mm.stats.defActions = Math.max(0, Math.round(defActions));
+
+        // keep derived fields in sync
+        mm.stats.passPct = (mm.stats.passA>0) ? (mm.stats.passC / mm.stats.passA) : 0;
+        mm.stats.duelPct = (mm.stats.duelsTot>0) ? (mm.stats.duelsWon / mm.stats.duelsTot) : 0;
+
+        saveDB(db);
+        openLab("player",{playerId: p.id});
+      };
+    });
+
+    document.querySelectorAll("[data-delmatch]").forEach(btn=>{
+      btn.onclick = ()=>{
+        const mid = btn.getAttribute("data-delmatch");
+        const mm = db.matches.find(x=>x.id===mid);
+        if(!mm) return;
+        const ok = confirm(`Eliminar este partido?
+${mm.date} • score ${fmt(mm.score,2)}`);
+        if(!ok) return;
+        db.matches = db.matches.filter(x=>x.id!==mid);
+        saveDB(db);
+        openLab("player",{playerId: p.id});
+      };
+    });
 
     // Save match inline
     document.getElementById("pl_saveMatch").onclick = ()=>{
