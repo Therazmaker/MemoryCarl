@@ -301,7 +301,76 @@ export function initFootballLab(){
     `;
   }
 
-  function readNum(overlay, id, fallback=0){
+  
+  function inputPair(label, idBase, value, opts={}){
+    const {
+      min=0, max=10, step=1, placeholder="", unit=""
+    } = opts || {};
+    const v = (value===undefined || value===null) ? "" : String(value);
+    const idNum = idBase+"_num";
+    const idRange = idBase+"_range";
+    const u = unit ? `<span style="opacity:.75; font-size:12px;">${escapeHtml(unit)}</span>` : "";
+    return `
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+          <div style="opacity:.85; font-size:12px;">${escapeHtml(label)}</div>
+          ${u}
+        </div>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <input id="${escapeHtml(idNum)}" type="number" value="${escapeHtml(v)}" placeholder="${escapeHtml(placeholder)}"
+            min="${escapeHtml(String(min))}" max="${escapeHtml(String(max))}" step="${escapeHtml(String(step))}"
+            style="width:140px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.03); color:inherit; outline:none;" />
+          <input id="${escapeHtml(idRange)}" type="range" value="${escapeHtml(v||String(min))}"
+            min="${escapeHtml(String(min))}" max="${escapeHtml(String(max))}" step="${escapeHtml(String(step))}"
+            style="flex:1;" />
+        </div>
+      </div>
+    `;
+  }
+
+  function syncPair(overlay, idBase, fallback=0){
+    const n = overlay.querySelector("#"+CSS.escape(idBase+"_num"));
+    const r = overlay.querySelector("#"+CSS.escape(idBase+"_range"));
+    if(!n || !r) return;
+    const toNum = (x)=>{ const v=parseFloat(String(x||"").replace(",", ".")); return Number.isFinite(v) ? v : fallback; };
+    const setBoth = (val)=>{
+      const vv = String(val);
+      n.value = vv;
+      r.value = vv;
+    };
+    n.addEventListener("input", ()=>{ r.value = n.value; });
+    r.addEventListener("input", ()=>{ n.value = r.value; });
+    // normalize initial
+    setBoth(toNum(n.value));
+  }
+
+  function getPairNum(overlay, idBase, fallback=0){
+    const el = overlay.querySelector("#"+CSS.escape(idBase+"_num"));
+    if(!el) return fallback;
+    const n = parseFloat(String(el.value||"").replace(",", "."));
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function attachLiveCalcs(overlay){
+    const upd = ()=>{
+      const passC = getPairNum(overlay,"s_passC",0);
+      const passA = getPairNum(overlay,"s_passA",0);
+      const duelsW = getPairNum(overlay,"s_duelsWon",0);
+      const duelsT = getPairNum(overlay,"s_duelsTot",0);
+      const passPct = (passA>0) ? (passC/passA*100) : 0;
+      const duelPct = (duelsT>0) ? (duelsW/duelsT*100) : 0;
+      const pEl = overlay.querySelector("#calc_passPct");
+      const dEl = overlay.querySelector("#calc_duelPct");
+      if(pEl) pEl.textContent = `${fmt(passPct,0)}%`;
+      if(dEl) dEl.textContent = `${fmt(duelPct,0)}%`;
+    };
+    overlay.querySelectorAll("input").forEach(inp=>{
+      inp.addEventListener("input", upd);
+    });
+    upd();
+  }
+
+function readNum(overlay, id, fallback=0){
     const el = overlay.querySelector("#"+CSS.escape(id));
     if(!el) return fallback;
     const n = parseFloat(String(el.value||"").replace(",", "."));
@@ -325,37 +394,43 @@ export function initFootballLab(){
     const bodyHTML = `
       <div class="fl-grid2">
         ${inputRow("Fecha (YYYY-MM-DD)", "m_date", mm.date || "", "text", "2026-02-19")}
-        ${inputRow("Score (0-10)", "m_score", mm.score ?? 0, "number")}
-        ${inputRow("Minutos", "s_minutes", mm.stats.minutes ?? 0, "number")}
-        ${inputRow("Rating (0-10)", "s_rating", mm.stats.rating ?? mm.score ?? 0, "number")}
+        ${inputPair("Score (0-10)", "m_score", mm.score ?? 0, {min:0, max:10, step:0.1})}
+        ${inputPair("Minutos", "s_minutes", mm.stats.minutes ?? 0, {min:0, max:120, step:1})}
+        ${inputPair("Rating (0-10)", "s_rating", mm.stats.rating ?? mm.score ?? 0, {min:0, max:10, step:0.1})}
       </div>
 
-      <div style="margin:14px 0 8px; font-weight:700; opacity:.9;">Pases</div>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin:14px 0 8px;">
+        <div style="font-weight:700; opacity:.9;">Pases</div>
+        <div style="opacity:.85; font-size:12px;">Pass%: <b id="calc_passPct">0%</b></div>
+      </div>
       <div class="fl-grid2">
-        ${inputRow("Pases completados", "s_passC", mm.stats.passC ?? 0, "number")}
-        ${inputRow("Pases intentados", "s_passA", mm.stats.passA ?? 0, "number")}
-        ${inputRow("Key passes", "s_keyPasses", mm.stats.keyPasses ?? 0, "number")}
-        ${inputRow("Pases progresivos", "s_progPasses", mm.stats.progPasses ?? 0, "number")}
+        ${inputPair("Pases completados", "s_passC", mm.stats.passC ?? 0, {min:0, max:150, step:1})}
+        ${inputPair("Pases intentados", "s_passA", mm.stats.passA ?? 0, {min:0, max:200, step:1})}
+        ${inputPair("Key passes", "s_keyPasses", mm.stats.keyPasses ?? 0, {min:0, max:20, step:1})}
+        ${inputPair("Pases progresivos", "s_progPasses", mm.stats.progPasses ?? 0, {min:0, max:50, step:1})}
       </div>
 
-      <div style="margin:14px 0 8px; font-weight:700; opacity:.9;">Duelo / Regate / Defensa</div>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin:14px 0 8px;">
+        <div style="font-weight:700; opacity:.9;">Duelo / Regate / Defensa</div>
+        <div style="opacity:.85; font-size:12px;">Duel%: <b id="calc_duelPct">0%</b></div>
+      </div>
       <div class="fl-grid2">
-        ${inputRow("Duelos ganados", "s_duelsWon", mm.stats.duelsWon ?? 0, "number")}
-        ${inputRow("Duelos totales", "s_duelsTot", mm.stats.duelsTot ?? 0, "number")}
-        ${inputRow("Regates buenos", "s_dribblesWon", mm.stats.dribblesWon ?? 0, "number")}
-        ${inputRow("Acciones defensivas", "s_defActions", mm.stats.defActions ?? 0, "number")}
+        ${inputPair("Duelos ganados", "s_duelsWon", mm.stats.duelsWon ?? 0, {min:0, max:50, step:1})}
+        ${inputPair("Duelos totales", "s_duelsTot", mm.stats.duelsTot ?? 0, {min:0, max:60, step:1})}
+        ${inputPair("Regates buenos", "s_dribblesWon", mm.stats.dribblesWon ?? 0, {min:0, max:20, step:1})}
+        ${inputPair("Acciones defensivas", "s_defActions", mm.stats.defActions ?? 0, {min:0, max:40, step:1})}
       </div>
 
       <div style="margin:14px 0 8px; font-weight:700; opacity:.9;">Producción</div>
       <div class="fl-grid2">
-        ${inputRow("Goles", "s_goals", mm.stats.goals ?? 0, "number")}
-        ${inputRow("Asistencias", "s_assists", mm.stats.assists ?? 0, "number")}
-        ${inputRow("xG", "s_xg", mm.stats.xG ?? 0, "number")}
-        ${inputRow("xA", "s_xa", mm.stats.xA ?? 0, "number")}
+        ${inputPair("Goles", "s_goals", mm.stats.goals ?? 0, {min:0, max:10, step:1})}
+        ${inputPair("Asistencias", "s_assists", mm.stats.assists ?? 0, {min:0, max:10, step:1})}
+        ${inputPair("xG", "s_xg", mm.stats.xG ?? 0, {min:0, max:5, step:0.01})}
+        ${inputPair("xA", "s_xa", mm.stats.xA ?? 0, {min:0, max:5, step:0.01})}
       </div>
 
       <div style="margin-top:12px; opacity:.7; font-size:12px;">
-        Tip: si quieres, puedes ajustar <b>matchTitle</b> y <b>matchId</b> en el JSON importado.
+        Tip: los % se calculan en vivo mientras mueves los sliders.
       </div>
     `;
 
@@ -365,9 +440,9 @@ export function initFootballLab(){
       bodyHTML,
       onSave: (overlay)=>{
         const newDate = readStr(overlay, "m_date", mm.date || "");
-        const newScore = readNum(overlay, "m_score", mm.score ?? 0);
-        const minutes = readNum(overlay, "s_minutes", mm.stats.minutes ?? 0);
-        const rating = readNum(overlay, "s_rating", mm.stats.rating ?? mm.score ?? 0);
+        const newScore = getPairNum(overlay, "m_score", mm.score ?? 0);
+        const minutes = getPairNum(overlay, "s_minutes", mm.stats.minutes ?? 0);
+        const rating = getPairNum(overlay, "s_rating", mm.stats.rating ?? mm.score ?? 0);
 
         mm.date = newDate || mm.date;
         mm.score = clamp(newScore, 0, 10);
@@ -375,20 +450,20 @@ export function initFootballLab(){
         // stats
         mm.stats.minutes = Math.max(0, Math.round(minutes));
         mm.stats.rating = clamp(rating, 0, 10);
-        mm.stats.passC = Math.max(0, Math.round(readNum(overlay, "s_passC", mm.stats.passC ?? 0)));
-        mm.stats.passA = Math.max(0, Math.round(readNum(overlay, "s_passA", mm.stats.passA ?? 0)));
-        mm.stats.keyPasses = Math.max(0, Math.round(readNum(overlay, "s_keyPasses", mm.stats.keyPasses ?? 0)));
-        mm.stats.progPasses = Math.max(0, Math.round(readNum(overlay, "s_progPasses", mm.stats.progPasses ?? 0)));
+        mm.stats.passC = Math.max(0, Math.round(getPairNum(overlay, "s_passC", mm.stats.passC ?? 0)));
+        mm.stats.passA = Math.max(0, Math.round(getPairNum(overlay, "s_passA", mm.stats.passA ?? 0)));
+        mm.stats.keyPasses = Math.max(0, Math.round(getPairNum(overlay, "s_keyPasses", mm.stats.keyPasses ?? 0)));
+        mm.stats.progPasses = Math.max(0, Math.round(getPairNum(overlay, "s_progPasses", mm.stats.progPasses ?? 0)));
 
-        mm.stats.duelsWon = Math.max(0, Math.round(readNum(overlay, "s_duelsWon", mm.stats.duelsWon ?? 0)));
-        mm.stats.duelsTot = Math.max(0, Math.round(readNum(overlay, "s_duelsTot", mm.stats.duelsTot ?? 0)));
-        mm.stats.dribblesWon = Math.max(0, Math.round(readNum(overlay, "s_dribblesWon", mm.stats.dribblesWon ?? 0)));
-        mm.stats.defActions = Math.max(0, Math.round(readNum(overlay, "s_defActions", mm.stats.defActions ?? 0)));
+        mm.stats.duelsWon = Math.max(0, Math.round(getPairNum(overlay, "s_duelsWon", mm.stats.duelsWon ?? 0)));
+        mm.stats.duelsTot = Math.max(0, Math.round(getPairNum(overlay, "s_duelsTot", mm.stats.duelsTot ?? 0)));
+        mm.stats.dribblesWon = Math.max(0, Math.round(getPairNum(overlay, "s_dribblesWon", mm.stats.dribblesWon ?? 0)));
+        mm.stats.defActions = Math.max(0, Math.round(getPairNum(overlay, "s_defActions", mm.stats.defActions ?? 0)));
 
-        mm.stats.goals = Math.max(0, Math.round(readNum(overlay, "s_goals", mm.stats.goals ?? 0)));
-        mm.stats.assists = Math.max(0, Math.round(readNum(overlay, "s_assists", mm.stats.assists ?? 0)));
-        mm.stats.xG = Math.max(0, readNum(overlay, "s_xg", mm.stats.xG ?? 0));
-        mm.stats.xA = Math.max(0, readNum(overlay, "s_xa", mm.stats.xA ?? 0));
+        mm.stats.goals = Math.max(0, Math.round(getPairNum(overlay, "s_goals", mm.stats.goals ?? 0)));
+        mm.stats.assists = Math.max(0, Math.round(getPairNum(overlay, "s_assists", mm.stats.assists ?? 0)));
+        mm.stats.xG = Math.max(0, getPairNum(overlay, "s_xg", mm.stats.xG ?? 0));
+        mm.stats.xA = Math.max(0, getPairNum(overlay, "s_xa", mm.stats.xA ?? 0));
 
         // derived
         mm.stats.passPct = (mm.stats.passA > 0) ? (mm.stats.passC / mm.stats.passA) : 0;
@@ -396,6 +471,15 @@ export function initFootballLab(){
 
         saveDB(db);
         openLab("player",{playerId});
+    // sliders: keep number <-> range synced
+    const overlay = document.getElementById("fl_modalOverlay");
+    if(overlay){
+      ["m_score","s_minutes","s_rating","s_passC","s_passA","s_keyPasses","s_progPasses","s_duelsWon","s_duelsTot","s_dribblesWon","s_defActions","s_goals","s_assists","s_xg","s_xa"].forEach(idBase=>{
+        syncPair(overlay, idBase, 0);
+      });
+      attachLiveCalcs(overlay);
+    }
+
       }
     });
   }
@@ -455,6 +539,7 @@ function renderHome(db){
           <input class="fl-input" id="teamName" placeholder="Nombre del equipo">
           <button class="mc-btn" id="addTeam">Agregar</button>
         </div>
+        <div id="fl_teamStatus" class="fl-small" style="margin-top:8px; opacity:.75;"></div>
         <div id="teamsList" style="margin-top:10px;"></div>
       </div>
 
@@ -496,14 +581,46 @@ function renderHome(db){
       list.querySelectorAll("[data-open]").forEach(b=>b.onclick = ()=>openLab("team",{teamId:b.getAttribute("data-open")}));
       list.querySelectorAll("[data-lineup]").forEach(b=>b.onclick = ()=>openLab("lineup",{teamId:b.getAttribute("data-lineup")}));
       list.querySelectorAll("[data-del]").forEach(b=>b.onclick = ()=>{
-        const id = b.getAttribute("data-del");
+        const idRaw = b.getAttribute("data-del");
+        const id = String(idRaw||"");
         if(!confirm("¿Eliminar equipo y sus jugadores?")) return;
-        db.teams = db.teams.filter(t=>t.id!==id);
-        db.players = db.players.filter(p=>p.teamId!==id);
-        // keep matches (historical), but they reference playerId; that's ok for study. optionally prune:
-        // db.matches = db.matches.filter(m => db.players.some(p=>p.id===m.playerId));
-        saveDB(db);
-        openLab("teams");
+
+        try{
+          const before = db.teams.length;
+
+          // Remove team + its players (robust against number/string ids)
+          db.teams = db.teams.filter(t=>String(t.id)!==id);
+          db.players = db.players.filter(p=>String(p.teamId)!==id);
+
+          // Optional: prune lineups for this team
+          if(db.lineups && db.lineups[id]) delete db.lineups[id];
+          if(db.lineups){
+            // also remove numeric-key variant, just in case
+            for(const k of Object.keys(db.lineups)){
+              if(String(k)===id) delete db.lineups[k];
+            }
+          }
+
+          saveDB(db);
+
+          const after = db.teams.length;
+          const st = document.getElementById("fl_teamStatus");
+          if(st){
+            st.textContent = (after < before) ? "Equipo eliminado ✅" : "No se pudo eliminar (id no coincide).";
+            st.style.opacity = "0.85";
+          }
+
+          // Re-render immediately (no depender de navegación)
+          renderTeams(db);
+
+        }catch(err){
+          console.error("[FootballLab] delete team error", err);
+          const st = document.getElementById("fl_teamStatus");
+          if(st){
+            st.textContent = "Error al eliminar: " + (err?.message || err);
+            st.style.opacity = "0.95";
+          }
+        }
       });
     }
 
@@ -579,8 +696,10 @@ function renderHome(db){
         </div>
         <div class="fl-row" style="margin-top:10px;gap:8px;flex-wrap:wrap;">
           <button class="mc-btn" id="fl_impPaste">Pegar</button>
+          <button class="mc-btn" id="fl_impFile">Archivo</button>
           <button class="mc-btn" id="fl_impRun">Importar</button>
           <button class="mc-btn" id="fl_impClear">Limpiar</button>
+          <input type="file" id="fl_impFileInput" accept="application/json,.json" style="display:none;" />
         </div>
         <textarea class="fl-input" id="fl_impText" rows="7" placeholder='Pega aquí el JSON...'></textarea>
         <div id="fl_impStatus" class="fl-small" style="margin-top:8px;"></div>
@@ -877,6 +996,26 @@ function renderHome(db){
     }
 
     document.getElementById("fl_impPaste").onclick = pasteClipboard;
+    const fileBtn = document.getElementById("fl_impFile");
+    const fileInput = document.getElementById("fl_impFileInput");
+    if(fileBtn && fileInput){
+      fileBtn.onclick = ()=>fileInput.click();
+      fileInput.onchange = async ()=>{
+        const f = fileInput.files && fileInput.files[0];
+        if(!f) return;
+        try{
+          const text = await f.text();
+          if(impText) impText.value = text;
+          setImpStatus(`Archivo cargado ✅ ${f.name}`, true);
+        }catch(e){
+          setImpStatus("No pude leer el archivo JSON.", false);
+        }finally{
+          // allow reselect same file
+          fileInput.value = "";
+        }
+      };
+    }
+
     document.getElementById("fl_impRun").onclick = doImport;
     document.getElementById("fl_impClear").onclick = ()=>{
       if(impText) impText.value = "";
