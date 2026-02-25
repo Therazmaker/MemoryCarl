@@ -107,7 +107,7 @@ export function initFootballLab(){
   const moreBtn = document.querySelector("#moreBtn");
   if(moreBtn){
     const labBtn = document.createElement("button");
-    labBtn.innerText = "⚽ Football Lab <span class="fl-pill">V5b</span>";
+    labBtn.innerText = "⚽ Football Lab (V5c)";
     labBtn.className = "more-item";
     labBtn.onclick = () => openLab("home");
     moreBtn.parentElement.appendChild(labBtn);
@@ -122,7 +122,7 @@ export function initFootballLab(){
       <div style="padding:18px 18px 22px 18px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
           <div>
-            <div style="font-size:20px;font-weight:800;">⚽ Football Lab</div>
+            <div style="font-size:20px;font-weight:800;">⚽ Football Lab <span class="fl-pill">V5c</span></div>
             <div style="opacity:.8;font-size:12px;">Modo estudio • Temporada actual: <b>${escapeHtml(db.settings.currentSeason)}</b></div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
