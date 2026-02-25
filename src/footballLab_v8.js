@@ -222,7 +222,185 @@ export function initFootballLab(){
   }
 
   // ---- Home ----
-  function renderHome(db){
+  
+  // ----- Modal helper (simple, local to FutbolLab) -----
+  function ensureFLModal(){
+    if(document.getElementById("fl_modalOverlay")) return;
+    const overlay = document.createElement("div");
+    overlay.id = "fl_modalOverlay";
+    overlay.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:9999; padding:16px;";
+    overlay.innerHTML = `
+      <div id="fl_modalBox" style="width:min(920px, 100%); max-height:90vh; overflow:auto; background:rgba(20,20,24,.98); border:1px solid rgba(255,255,255,.10); border-radius:16px; box-shadow:0 12px 60px rgba(0,0,0,.5);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 14px; border-bottom:1px solid rgba(255,255,255,.08); position:sticky; top:0; background:rgba(20,20,24,.98); z-index:2;">
+          <div>
+            <div id="fl_modalTitle" style="font-weight:700; font-size:15px;">Editar partido</div>
+            <div id="fl_modalSub" style="opacity:.8; font-size:12px; margin-top:2px;"></div>
+          </div>
+          <button id="fl_modalClose" class="mc-btn" style="padding:8px 10px;">Cerrar</button>
+        </div>
+        <div id="fl_modalBody" style="padding:14px;"></div>
+        <div style="display:flex; justify-content:flex-end; gap:10px; padding:14px; border-top:1px solid rgba(255,255,255,.08); position:sticky; bottom:0; background:rgba(20,20,24,.98);">
+          <button id="fl_modalCancel" class="mc-btn" style="padding:10px 12px; opacity:.9;">Cancelar</button>
+          <button id="fl_modalSave" class="mc-btn" style="padding:10px 12px; font-weight:700;">Guardar</button>
+        </div>
+      </div>
+    `;
+    overlay.addEventListener("click", (e)=>{
+      if(e.target === overlay) closeFLModal();
+    });
+    document.body.appendChild(overlay);
+
+    overlay.querySelector("#fl_modalClose").onclick = closeFLModal;
+    overlay.querySelector("#fl_modalCancel").onclick = closeFLModal;
+  }
+
+  function openFLModal({title="Modal", sub="", bodyHTML="", onSave=null}){
+    ensureFLModal();
+    const overlay = document.getElementById("fl_modalOverlay");
+    overlay.style.display = "flex";
+    overlay.querySelector("#fl_modalTitle").textContent = title;
+    overlay.querySelector("#fl_modalSub").textContent = sub || "";
+    const body = overlay.querySelector("#fl_modalBody");
+    body.innerHTML = bodyHTML;
+
+    const saveBtn = overlay.querySelector("#fl_modalSave");
+    saveBtn.onclick = ()=>{
+      if(typeof onSave === "function"){
+        const ok = onSave(overlay);
+        if(ok !== false) closeFLModal();
+      } else {
+        closeFLModal();
+      }
+    };
+
+    // escape key
+    const esc = (ev)=>{ if(ev.key==="Escape"){ closeFLModal(); } };
+    overlay._esc = esc;
+    window.addEventListener("keydown", esc);
+  }
+
+  function closeFLModal(){
+    const overlay = document.getElementById("fl_modalOverlay");
+    if(!overlay) return;
+    overlay.style.display = "none";
+    overlay.querySelector("#fl_modalBody").innerHTML = "";
+    if(overlay._esc){
+      window.removeEventListener("keydown", overlay._esc);
+      overlay._esc = null;
+    }
+  }
+
+  function inputRow(label, id, value, type="number", placeholder=""){
+    const v = (value===undefined || value===null) ? "" : String(value);
+    return `
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <div style="opacity:.85; font-size:12px;">${escapeHtml(label)}</div>
+        <input id="${escapeHtml(id)}" type="${escapeHtml(type)}" value="${escapeHtml(v)}" placeholder="${escapeHtml(placeholder)}"
+          style="width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.03); color:inherit; outline:none;" />
+      </div>
+    `;
+  }
+
+  function readNum(overlay, id, fallback=0){
+    const el = overlay.querySelector("#"+CSS.escape(id));
+    if(!el) return fallback;
+    const n = parseFloat(String(el.value||"").replace(",", "."));
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function readStr(overlay, id, fallback=""){
+    const el = overlay.querySelector("#"+CSS.escape(id));
+    if(!el) return fallback;
+    return String(el.value||fallback).trim();
+  }
+
+  function openEditMatchModal(db, playerId, matchId){
+    const mm = db.matches.find(x=>x.id===matchId);
+    if(!mm) return;
+
+    mm.stats = mm.stats || {};
+    const title = "Editar partido";
+    const sub = `${mm.matchTitle || mm.title || "Partido"} • ${mm.date || ""}`;
+
+    const bodyHTML = `
+      <div class="fl-grid2">
+        ${inputRow("Fecha (YYYY-MM-DD)", "m_date", mm.date || "", "text", "2026-02-19")}
+        ${inputRow("Score (0-10)", "m_score", mm.score ?? 0, "number")}
+        ${inputRow("Minutos", "s_minutes", mm.stats.minutes ?? 0, "number")}
+        ${inputRow("Rating (0-10)", "s_rating", mm.stats.rating ?? mm.score ?? 0, "number")}
+      </div>
+
+      <div style="margin:14px 0 8px; font-weight:700; opacity:.9;">Pases</div>
+      <div class="fl-grid2">
+        ${inputRow("Pases completados", "s_passC", mm.stats.passC ?? 0, "number")}
+        ${inputRow("Pases intentados", "s_passA", mm.stats.passA ?? 0, "number")}
+        ${inputRow("Key passes", "s_keyPasses", mm.stats.keyPasses ?? 0, "number")}
+        ${inputRow("Pases progresivos", "s_progPasses", mm.stats.progPasses ?? 0, "number")}
+      </div>
+
+      <div style="margin:14px 0 8px; font-weight:700; opacity:.9;">Duelo / Regate / Defensa</div>
+      <div class="fl-grid2">
+        ${inputRow("Duelos ganados", "s_duelsWon", mm.stats.duelsWon ?? 0, "number")}
+        ${inputRow("Duelos totales", "s_duelsTot", mm.stats.duelsTot ?? 0, "number")}
+        ${inputRow("Regates buenos", "s_dribblesWon", mm.stats.dribblesWon ?? 0, "number")}
+        ${inputRow("Acciones defensivas", "s_defActions", mm.stats.defActions ?? 0, "number")}
+      </div>
+
+      <div style="margin:14px 0 8px; font-weight:700; opacity:.9;">Producción</div>
+      <div class="fl-grid2">
+        ${inputRow("Goles", "s_goals", mm.stats.goals ?? 0, "number")}
+        ${inputRow("Asistencias", "s_assists", mm.stats.assists ?? 0, "number")}
+        ${inputRow("xG", "s_xg", mm.stats.xG ?? 0, "number")}
+        ${inputRow("xA", "s_xa", mm.stats.xA ?? 0, "number")}
+      </div>
+
+      <div style="margin-top:12px; opacity:.7; font-size:12px;">
+        Tip: si quieres, puedes ajustar <b>matchTitle</b> y <b>matchId</b> en el JSON importado.
+      </div>
+    `;
+
+    openFLModal({
+      title,
+      sub,
+      bodyHTML,
+      onSave: (overlay)=>{
+        const newDate = readStr(overlay, "m_date", mm.date || "");
+        const newScore = readNum(overlay, "m_score", mm.score ?? 0);
+        const minutes = readNum(overlay, "s_minutes", mm.stats.minutes ?? 0);
+        const rating = readNum(overlay, "s_rating", mm.stats.rating ?? mm.score ?? 0);
+
+        mm.date = newDate || mm.date;
+        mm.score = clamp(newScore, 0, 10);
+
+        // stats
+        mm.stats.minutes = Math.max(0, Math.round(minutes));
+        mm.stats.rating = clamp(rating, 0, 10);
+        mm.stats.passC = Math.max(0, Math.round(readNum(overlay, "s_passC", mm.stats.passC ?? 0)));
+        mm.stats.passA = Math.max(0, Math.round(readNum(overlay, "s_passA", mm.stats.passA ?? 0)));
+        mm.stats.keyPasses = Math.max(0, Math.round(readNum(overlay, "s_keyPasses", mm.stats.keyPasses ?? 0)));
+        mm.stats.progPasses = Math.max(0, Math.round(readNum(overlay, "s_progPasses", mm.stats.progPasses ?? 0)));
+
+        mm.stats.duelsWon = Math.max(0, Math.round(readNum(overlay, "s_duelsWon", mm.stats.duelsWon ?? 0)));
+        mm.stats.duelsTot = Math.max(0, Math.round(readNum(overlay, "s_duelsTot", mm.stats.duelsTot ?? 0)));
+        mm.stats.dribblesWon = Math.max(0, Math.round(readNum(overlay, "s_dribblesWon", mm.stats.dribblesWon ?? 0)));
+        mm.stats.defActions = Math.max(0, Math.round(readNum(overlay, "s_defActions", mm.stats.defActions ?? 0)));
+
+        mm.stats.goals = Math.max(0, Math.round(readNum(overlay, "s_goals", mm.stats.goals ?? 0)));
+        mm.stats.assists = Math.max(0, Math.round(readNum(overlay, "s_assists", mm.stats.assists ?? 0)));
+        mm.stats.xG = Math.max(0, readNum(overlay, "s_xg", mm.stats.xG ?? 0));
+        mm.stats.xA = Math.max(0, readNum(overlay, "s_xa", mm.stats.xA ?? 0));
+
+        // derived
+        mm.stats.passPct = (mm.stats.passA > 0) ? (mm.stats.passC / mm.stats.passA) : 0;
+        mm.stats.duelPct = (mm.stats.duelsTot > 0) ? (mm.stats.duelsWon / mm.stats.duelsTot) : 0;
+
+        saveDB(db);
+        openLab("player",{playerId});
+      }
+    });
+  }
+
+function renderHome(db){
     const v = document.getElementById("fl_view");
 
     const counts = {
@@ -983,53 +1161,7 @@ export function initFootballLab(){
     document.querySelectorAll("[data-editmatch]").forEach(btn=>{
       btn.onclick = ()=>{
         const mid = btn.getAttribute("data-editmatch");
-        const mm = db.matches.find(x=>x.id===mid);
-        if(!mm) return;
-        // quick prompt-based editor (fast + safe)
-        const pNum = (label, val)=>{ const v = prompt(label, String(val ?? 0)); if(v===null) return null; const n = parseFloat(v); return Number.isFinite(n) ? n : (val ?? 0); };
-        const pStr = (label, val)=>{ const v = prompt(label, String(val ?? "")); if(v===null) return null; return String(v); };
-
-        const newDate = pStr("Fecha (YYYY-MM-DD)", mm.date);
-        if(newDate===null) return;
-
-        const newScore = pNum("Score (0-10)", mm.score);
-        if(newScore===null) return;
-
-        mm.date = newDate || mm.date;
-        mm.score = clamp(newScore, 0, 10);
-
-        mm.stats = mm.stats || {};
-        const mins = pNum("Minutos", mm.stats.minutes ?? 0); if(mins===null) return;
-        const goals = pNum("Goles", mm.stats.goals ?? 0); if(goals===null) return;
-        const assists = pNum("Asistencias", mm.stats.assists ?? 0); if(assists===null) return;
-        const keyPasses = pNum("Key passes", mm.stats.keyPasses ?? 0); if(keyPasses===null) return;
-        const progPasses = pNum("Pases progresivos", mm.stats.progPasses ?? 0); if(progPasses===null) return;
-        const passC = pNum("Pases completados", mm.stats.passC ?? 0); if(passC===null) return;
-        const passA = pNum("Pases intentados", mm.stats.passA ?? 0); if(passA===null) return;
-
-        const duelsWon = pNum("Duelos ganados", mm.stats.duelsWon ?? 0); if(duelsWon===null) return;
-        const duelsTot = pNum("Duelos totales", mm.stats.duelsTot ?? 0); if(duelsTot===null) return;
-        const dribblesWon = pNum("Regates buenos", mm.stats.dribblesWon ?? 0); if(dribblesWon===null) return;
-        const defActions = pNum("Acciones defensivas", mm.stats.defActions ?? 0); if(defActions===null) return;
-
-        mm.stats.minutes = Math.max(0, Math.round(mins));
-        mm.stats.goals = Math.max(0, Math.round(goals));
-        mm.stats.assists = Math.max(0, Math.round(assists));
-        mm.stats.keyPasses = Math.max(0, Math.round(keyPasses));
-        mm.stats.progPasses = Math.max(0, Math.round(progPasses));
-        mm.stats.passC = Math.max(0, Math.round(passC));
-        mm.stats.passA = Math.max(0, Math.round(passA));
-        mm.stats.duelsWon = Math.max(0, Math.round(duelsWon));
-        mm.stats.duelsTot = Math.max(0, Math.round(duelsTot));
-        mm.stats.dribblesWon = Math.max(0, Math.round(dribblesWon));
-        mm.stats.defActions = Math.max(0, Math.round(defActions));
-
-        // keep derived fields in sync
-        mm.stats.passPct = (mm.stats.passA>0) ? (mm.stats.passC / mm.stats.passA) : 0;
-        mm.stats.duelPct = (mm.stats.duelsTot>0) ? (mm.stats.duelsWon / mm.stats.duelsTot) : 0;
-
-        saveDB(db);
-        openLab("player",{playerId: p.id});
+        openEditMatchModal(db, p.id, mid);
       };
     });
 
