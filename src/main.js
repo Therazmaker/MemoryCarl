@@ -2329,8 +2329,9 @@ function view(){
   }
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
-  fab.style.display = (state.tab==="learn" || state.tab==="settings") ? "none" : "flex";
-  fab.addEventListener("click", ()=>{
+  if(fab){
+    fab.style.display = (state.tab==="learn" || state.tab==="settings") ? "none" : "flex";
+    fab.addEventListener("click", ()=>{
     if(state.tab==="home") openMusicModal();
     if(state.tab==="routines") openRoutineModal();
     if(state.tab==="shopping") openShoppingModal();
@@ -2724,6 +2725,7 @@ function insightsDrawMonthChart(){
       }
     }
   });
+  }
 
   // Small "draw" vibe
   try{
