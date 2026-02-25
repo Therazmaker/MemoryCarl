@@ -393,7 +393,22 @@ export function initFootballLab(){
         <div class="fl-small" style="margin-top:8px;">Tip: rating base es “nivel general”. La forma de la temporada lo ajusta.</div>
       </div>
 
+      
       <div class="fl-card">
+        <div style="font-weight:800;">⬇️ Importar JSON (FootballLab Clip)</div>
+        <div class="fl-small" style="margin-top:6px;opacity:.85;">
+          Pega aquí el JSON exportado desde la extensión. Se creará el jugador (si no existe) y se agregará el partido a su historial.
+        </div>
+        <div class="fl-row" style="margin-top:10px;gap:8px;flex-wrap:wrap;">
+          <button class="mc-btn" id="fl_impPaste">Pegar</button>
+          <button class="mc-btn" id="fl_impRun">Importar</button>
+          <button class="mc-btn" id="fl_impClear">Limpiar</button>
+        </div>
+        <textarea class="fl-input" id="fl_impText" rows="7" placeholder='Pega aquí el JSON...'></textarea>
+        <div id="fl_impStatus" class="fl-small" style="margin-top:8px;"></div>
+      </div>
+
+<div class="fl-card">
         <div style="font-weight:800;">👥 Plantilla</div>
         <div id="playersList" style="margin-top:8px;"></div>
       </div>
@@ -425,6 +440,242 @@ export function initFootballLab(){
       saveDB(db);
       openLab("team",{teamId});
     };
+
+
+    // ---- Import JSON (FootballLab Clip) ----
+    const impText = document.getElementById("fl_impText");
+    const impStatus = document.getElementById("fl_impStatus");
+
+    function setImpStatus(msg, ok=true){
+      if(!impStatus) return;
+      impStatus.style.color = ok ? "var(--colors-success-default, #2e7d32)" : "var(--colors-danger-default, #c62828)";
+      impStatus.textContent = msg;
+    }
+
+    function monthToNumber(mon){
+      const m = String(mon||"").toLowerCase().slice(0,3);
+      const map = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+      return map[m] || null;
+    }
+
+    function toISODate(maybe){
+      const s = String(maybe||"").trim();
+      // Already ISO
+      if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+      // "19 Feb" / "19 Feb 2026"
+      const m = s.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s*(\d{4})?$/);
+      if(m){
+        const day = String(m[1]).padStart(2,"0");
+        const mon = monthToNumber(m[2]);
+        const year = m[3] || String(new Date().getFullYear());
+        if(mon){
+          return `${year}-${String(mon).padStart(2,"0")}-${day}`;
+        }
+      }
+
+      // fallback: today
+      const d = new Date();
+      const y = d.getFullYear();
+      const mo = String(d.getMonth()+1).padStart(2,"0");
+      const da = String(d.getDate()).padStart(2,"0");
+      return `${y}-${mo}-${da}`;
+    }
+
+    function pickClipPayload(obj){
+      // Accept either: normalized capture (schemaVersion...) OR raw from extension
+      if(!obj || typeof obj !== "object") return null;
+
+      // Normalized capture
+      if(obj.player && obj.context){
+        return {
+          playerName: obj.player.name || "",
+          teamName: obj.player.team || "",
+          positionText: obj.player.position || "",
+          matchTitle: obj.context.matchTitle || "",
+          matchId: obj.context.matchId || "",
+          matchDate: obj.context.date || "",
+          minutesText: obj.context.minutes || "",
+          ratingText: obj.context.rating || "",
+          stats: obj.stats || {}
+        };
+      }
+
+      // Raw capture
+      if(obj.playerName && (obj.matchTitle || obj.stats)){
+        return {
+          playerName: obj.playerName || "",
+          teamName: obj.teamName || "",
+          positionText: obj.positionText || "",
+          matchTitle: obj.matchTitle || "",
+          matchId: obj.matchId || "",
+          matchDate: obj.matchDate || "",
+          minutesText: obj.minutesText || "",
+          ratingText: obj.ratingText || "",
+          stats: Array.isArray(obj.stats) ? obj.stats : obj.stats || {}
+        };
+      }
+
+      // Maybe wrapped
+      if(obj.capture) return pickClipPayload(obj.capture);
+
+      return null;
+    }
+
+    function toNumber(x){
+      const s = String(x ?? "").replace(",", ".").trim();
+      const m = s.match(/-?\d+(?:\.\d+)?/);
+      return m ? Number(m[0]) : 0;
+    }
+
+    function normalizeStats(stats){
+      // If already an object of keys -> use directly
+      if(stats && !Array.isArray(stats) && typeof stats === "object"){
+        return stats;
+      }
+      // If array of {label,value} -> map a few common ones
+      const out = {};
+      const rows = Array.isArray(stats) ? stats : [];
+      for(const r of rows){
+        const label = String(r?.label||"").toLowerCase();
+        const value = String(r?.value||"").trim();
+
+        if(label.includes("accurate passes")){ // "28/34 (82%)"
+          const m = value.match(/(\d+)\s*\/\s*(\d+)/);
+          if(m){ out.passC = Number(m[1]); out.passA = Number(m[2]); }
+        }
+        if(label.includes("key passes")) out.keyPasses = toNumber(value);
+        if(label.includes("expected goals") && !label.includes("on target")) out.xG = toNumber(value);
+        if(label.includes("expected assists")) out.xA = toNumber(value);
+        if(label === "goals") out.goals = toNumber(value);
+        if(label === "assists") out.assists = toNumber(value);
+        if(label.includes("long balls")){
+          const m = value.match(/(\d+)\s*\/\s*(\d+)/);
+          if(m){ out.longBallC = Number(m[1]); out.longBallA = Number(m[2]); }
+        }
+        if(label.includes("own half")){
+          const m = value.match(/(\d+)\s*\/\s*(\d+)/);
+          if(m){ out.ownHalfPassC = Number(m[1]); out.ownHalfPassA = Number(m[2]); }
+        }
+        if(label.includes("opposition half")){
+          const m = value.match(/(\d+)\s*\/\s*(\d+)/);
+          if(m){ out.oppHalfPassC = Number(m[1]); out.oppHalfPassA = Number(m[2]); }
+        }
+        if(label.includes("possession lost")) out.possessionLost = toNumber(value);
+        if(label.includes("dribbles") && value.includes("(")) out.dribblesWon = toNumber(value); // rough
+        if(label.includes("tackles") && value.includes("(")) out.defActions = toNumber(value); // rough
+      }
+      return out;
+    }
+
+    async function pasteClipboard(){
+      try{
+        const t = await navigator.clipboard.readText();
+        if(impText) impText.value = t || "";
+        setImpStatus(t ? "Pegado desde el portapapeles ✅" : "Portapapeles vacío.", !!t);
+      }catch(e){
+        setImpStatus("No se pudo leer el portapapeles. Pega manualmente.", false);
+      }
+    }
+
+    function doImport(){
+      try{
+        const raw = (impText?.value || "").trim();
+        if(!raw) return setImpStatus("Pega un JSON primero.", false);
+
+        const obj = JSON.parse(raw);
+        const payload = pickClipPayload(obj);
+        if(!payload) return setImpStatus("JSON no reconocido. Debe venir de FootballLab Clip.", false);
+
+        const playerName = String(payload.playerName||"").trim();
+        if(!playerName) return setImpStatus("El JSON no trae nombre de jugador.", false);
+
+        // Find or create player in this team
+        let p = db.players.find(x => x.teamId===teamId && x.name.toLowerCase()===playerName.toLowerCase());
+        const clipPos = String(payload.positionText||"").trim();
+        const pos = ["GK","CB","LB","RB","CDM","CM","CAM","LW","RW","ST"].includes(clipPos) ? clipPos : "CM";
+        const clipRating = clamp(toNumber(payload.ratingText), 0, 10);
+
+        if(!p){
+          p = { id: uid("p"), teamId, name: playerName, position: pos, rating: (clipRating>0?clipRating:6.5) };
+          db.players.push(p);
+        }else{
+          // Optional: update position if unknown-ish
+          if(p.position==="CM" && pos!=="CM") p.position = pos;
+        }
+
+        const statsIn = normalizeStats(payload.stats);
+
+        // Build match record with safe defaults
+        const baseStats = {
+          minutes: 0, goals: 0, assists: 0, yellow: 0, red: 0, losses: 0,
+          shotsOn: 0, keyPasses: 0, progPasses: 0, passC: 0, passA: 0,
+          dribblesWon: 0, duelsWon: 0, duelsTot: 0, defActions: 0,
+          saves: 0, conceded: 0, cleanSheet: 0,
+          xG: 0, xA: 0, possessionLost: 0,
+          longBallC: 0, longBallA: 0,
+          ownHalfPassC: 0, ownHalfPassA: 0,
+          oppHalfPassC: 0, oppHalfPassA: 0,
+          highClaims: 0, punches: 0
+        };
+
+        const minutes = toNumber(payload.minutesText);
+        baseStats.minutes = minutes>0 ? Math.round(minutes) : 0;
+
+        // Merge known keys
+        Object.keys(baseStats).forEach(k=>{
+          if(statsIn && (k in statsIn)) baseStats[k] = toNumber(statsIn[k]);
+        });
+
+        // Extra keys from normalized clip (passPct etc.) we ignore for now
+
+        const season = db.settings.currentSeason;
+        const leagueId = db.settings.currentLeagueId || (db.leagues?.[0]?.id || "lg_league");
+
+        const dateISO = toISODate(payload.matchDate);
+        const matchTitle = String(payload.matchTitle||"").trim();
+        const matchId = String(payload.matchId||"").trim();
+
+        const expected = clamp(p.rating, 0, 10);
+        const newRating = (clipRating>0 ? clipRating : expected);
+
+        db.matches.push({
+          id: uid("m"),
+          playerId: p.id,
+          teamId: p.teamId,
+          season,
+          leagueId,
+          date: dateISO,
+          position: p.position,
+          stats: baseStats,
+          score: matchTitle || "",
+          matchTitle: matchTitle || "",
+          matchId: matchId || "",
+          oldRating: expected,
+          newRating: newRating
+        });
+
+        // Optional: update player rating to clip rating if present
+        if(clipRating>0) p.rating = clipRating;
+
+        saveDB(db);
+        setImpStatus(`Importado ✅ Jugador: ${playerName} • Partido: ${matchTitle||"(sin título)"} • Fecha: ${dateISO}`, true);
+        // refresh view
+        openLab("team",{teamId});
+      }catch(e){
+        setImpStatus("Error importando: " + String(e?.message||e), false);
+      }
+    }
+
+    document.getElementById("fl_impPaste").onclick = pasteClipboard;
+    document.getElementById("fl_impRun").onclick = doImport;
+    document.getElementById("fl_impClear").onclick = ()=>{
+      if(impText) impText.value = "";
+      setImpStatus("Listo. Pega un JSON cuando quieras.");
+    };
+    setImpStatus("Listo. Pega un JSON cuando quieras.");
+    // ---- /Import JSON ----
+
 
     const list = document.getElementById("playersList");
     if(players.length===0){
