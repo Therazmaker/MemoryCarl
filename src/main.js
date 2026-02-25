@@ -1,4 +1,3 @@
-import { initFootballLab } from "./footballLab.js";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -1890,6 +1889,7 @@ function renderMoreModal(){
           ${mk("calendar","📅","Calendario","Dibuja X, notas")}
           ${mk("learn","🧠","Aprender","Mini contenido")}
           ${mk("insights","📊","Insights","Todo por día")}
+          ${mk("football","⚽","Football Lab","Equipos, jugadores, ratings")}
           ${mk("settings","⚙️","Ajustes","Backup, sync, etc")}
         </div>
       </div>
@@ -1922,6 +1922,7 @@ function view(){
         ${state.tab==="insights" ? viewInsights() : ""}
         ${state.tab==="finance" ? viewFinance() : ""}
         ${state.tab==="settings" ? viewSettings() : ""}
+        ${state.tab==="football" ? viewFootball() : ""}
       </main>
 
       ${state.tab==="settings" ? `
@@ -2319,6 +2320,12 @@ function view(){
     });
   }
 
+
+
+  // Football Lab tab init
+  if(state.tab==="football"){
+    try{ initFootballTab(root); }catch(e){ console.error(e); }
+  }
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
   fab.style.display = (state.tab==="learn" || state.tab==="settings") ? "none" : "flex";
@@ -14048,4 +14055,468 @@ try{
   window.openFinanceEntryModal = openFinanceEntryModal;
 }catch(e){}
 
-window.addEventListener("DOMContentLoaded", () => { try { initFootballLab(); } catch(e){ console.error(e); } });
+
+/* =========================
+   FOOTBALL LAB (V2-Clean UI) — V2-A + Match Logger integrated as a proper tab
+   Storage: localStorage["footballDB"]
+   ========================= */
+
+function fbGetDB(){
+  let raw = localStorage.getItem("footballDB");
+  if(!raw){
+    const seed = { teams: [], players: [], matches: [] };
+    localStorage.setItem("footballDB", JSON.stringify(seed));
+    return seed;
+  }
+  try{
+    const db = JSON.parse(raw);
+    if(!db.teams) db.teams=[];
+    if(!db.players) db.players=[];
+    if(!db.matches) db.matches=[];
+    return db;
+  }catch(e){
+    const seed = { teams: [], players: [], matches: [] };
+    localStorage.setItem("footballDB", JSON.stringify(seed));
+    return seed;
+  }
+}
+function fbSaveDB(db){
+  localStorage.setItem("footballDB", JSON.stringify(db));
+}
+
+function fbClamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+
+function fbPerfScore10(stats){
+  // Lightweight, SofaScore-inspired philosophy:
+  // actions with different weights; normalized by minutes; penalty for cards/errors.
+  const minutes = +stats.minutes || 0;
+  const goals   = +stats.goals || 0;
+  const assists = +stats.assists || 0;
+
+  const passC = +stats.passC || 0;
+  const passA = Math.max(1, +stats.passA || 1);
+  const duelW = +stats.duelW || 0;
+  const duelT = Math.max(1, +stats.duelT || 1);
+
+  const shotsOn = +stats.shotsOn || 0;
+  const recov   = +stats.recoveries || 0;
+  const losses  = +stats.losses || 0;
+
+  const yellow  = +stats.yellow || 0;
+  const red     = +stats.red || 0;
+
+  const minFactor = Math.sqrt(fbClamp(minutes/90, 0, 1)); // soft normalization
+  const passPct = fbClamp(passC/passA, 0, 1);
+  const duelPct = fbClamp(duelW/duelT, 0, 1);
+
+  // Base score components (0..10-ish before clamp)
+  // Note: this is intentionally interpretable; we can calibrate per position later.
+  let score =
+    (goals*1.25) +
+    (assists*0.85) +
+    (shotsOn*0.25) +
+    (passPct*2.0) +
+    (duelPct*1.4) +
+    (recov*0.05) -
+    (losses*0.05) -
+    (yellow*0.3) -
+    (red*1.2);
+
+  score = score * minFactor;
+
+  // Keep within 0..10
+  return fbClamp(score, 0, 10);
+}
+
+function fbUpdatePlayerRating(player, matchScore10, minutes){
+  const expected = +player.rating || 5.0;
+  const minFactor = Math.sqrt(fbClamp((+minutes||0)/90, 0, 1));
+  const K = 0.18 * minFactor; // smooth: full match ~0.18 max adjustment per game
+  const next = fbClamp(expected + K*(matchScore10 - expected), 0, 10);
+  return { old: expected, next };
+}
+
+function viewFootball(){
+  const db = fbGetDB();
+  const selectedTeamId = state.footballTeamId || null;
+  const team = selectedTeamId ? db.teams.find(t=>String(t.id)===String(selectedTeamId)) : null;
+
+  const teamHeader = team ? `
+    <div class="row" style="justify-content:space-between;align-items:center;">
+      <div>
+        <div class="muted small">Equipo</div>
+        <div style="font-size:22px;font-weight:900;">${escapeHtml(team.name)}</div>
+      </div>
+      <button class="btn" data-fb-action="backTeams">← Equipos</button>
+    </div>
+  ` : `
+    <div class="row" style="justify-content:space-between;align-items:center;">
+      <div>
+        <div class="muted small">Modo estudio</div>
+        <div style="font-size:22px;font-weight:900;">⚽ Football Lab</div>
+      </div>
+      <div class="row" style="margin:0; gap:8px;">
+        <button class="btn" data-fb-action="export">Export</button>
+        <label class="btn" style="cursor:pointer;">
+          Import
+          <input data-fb-action="importFile" type="file" accept="application/json" style="display:none;">
+        </label>
+      </div>
+    </div>
+  `;
+
+  const teamsList = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <div style="font-weight:900;">Equipos</div>
+        <button class="btn primary" data-fb-action="openTeamCreate">+ Equipo</button>
+      </div>
+      <div class="hr"></div>
+      <div class="list">
+        ${db.teams.length ? db.teams.map(t=>`
+          <button class="item" data-fb-open-team="${escapeHtml(String(t.id))}" style="justify-content:space-between;">
+            <div class="row" style="gap:10px;align-items:center;">
+              <div class="tag">🏟</div>
+              <div>
+                <div style="font-weight:800;">${escapeHtml(t.name)}</div>
+                <div class="muted" style="margin-top:2px;">${db.players.filter(p=>String(p.teamId)===String(t.id)).length} jugadores</div>
+              </div>
+            </div>
+            <div class="muted">›</div>
+          </button>
+        `).join("") : `<div class="muted" style="padding:10px;">Aún no hay equipos. Crea el primero.</div>`}
+      </div>
+    </div>
+  `;
+
+  const teamView = team ? `
+    <div class="card" style="margin-top:12px;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <div style="font-weight:900;">Jugadores</div>
+        <button class="btn primary" data-fb-action="openPlayerCreate">+ Jugador</button>
+      </div>
+      <div class="hr"></div>
+
+      <div class="list">
+        ${db.players.filter(p=>String(p.teamId)===String(team.id)).length
+          ? db.players.filter(p=>String(p.teamId)===String(team.id)).map(p=>`
+            <button class="item" data-fb-open-player="${escapeHtml(String(p.id))}" style="justify-content:space-between;">
+              <div class="row" style="gap:10px;align-items:center;">
+                <div class="tag">👤</div>
+                <div>
+                  <div style="font-weight:800;">${escapeHtml(p.name)} <span class="muted">(${escapeHtml(p.position||"")})</span></div>
+                  <div class="muted" style="margin-top:2px;">Rating: <span class="chip mono">${(+p.rating||0).toFixed(2)}</span></div>
+                </div>
+              </div>
+              <div class="muted">›</div>
+            </button>
+          `).join("")
+          : `<div class="muted" style="padding:10px;">Agrega jugadores a este equipo.</div>`
+        }
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <div style="font-weight:900;">Match Logger</div>
+        <div class="muted small">Actualiza rating por rendimiento</div>
+      </div>
+      <div class="hr"></div>
+
+      <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div style="flex:1;min-width:180px;">
+          <div class="muted small">Jugador</div>
+          <select id="fbMatchPlayer" class="input" style="width:100%;"></select>
+        </div>
+        <div style="width:90px;">
+          <div class="muted small">Min</div>
+          <input id="fbMin" class="input" type="number" min="0" max="90" value="90"/>
+        </div>
+        <div style="width:90px;">
+          <div class="muted small">G</div>
+          <input id="fbGoals" class="input" type="number" value="0"/>
+        </div>
+        <div style="width:90px;">
+          <div class="muted small">A</div>
+          <input id="fbAssists" class="input" type="number" value="0"/>
+        </div>
+        <button class="btn primary" data-fb-action="openMatchMore" style="white-space:nowrap;">+ Stats</button>
+        <button class="btn" data-fb-action="applyMatch" style="white-space:nowrap;">Aplicar</button>
+      </div>
+
+      <div id="fbMatchMore" style="display:none; margin-top:12px;">
+        <div class="row" style="gap:10px;flex-wrap:wrap;">
+          <div style="width:120px;">
+            <div class="muted small">Pases C</div>
+            <input id="fbPassC" class="input" type="number" value="0"/>
+          </div>
+          <div style="width:120px;">
+            <div class="muted small">Pases A</div>
+            <input id="fbPassA" class="input" type="number" value="0"/>
+          </div>
+          <div style="width:120px;">
+            <div class="muted small">Duelos W</div>
+            <input id="fbDuelW" class="input" type="number" value="0"/>
+          </div>
+          <div style="width:120px;">
+            <div class="muted small">Duelos T</div>
+            <input id="fbDuelT" class="input" type="number" value="0"/>
+          </div>
+          <div style="width:120px;">
+            <div class="muted small">Tiros on</div>
+            <input id="fbShotsOn" class="input" type="number" value="0"/>
+          </div>
+          <div style="width:120px;">
+            <div class="muted small">Recov</div>
+            <input id="fbRecov" class="input" type="number" value="0"/>
+          </div>
+          <div style="width:120px;">
+            <div class="muted small">Pérdidas</div>
+            <input id="fbLosses" class="input" type="number" value="0"/>
+          </div>
+          <div style="width:90px;">
+            <div class="muted small">🟨</div>
+            <input id="fbYellow" class="input" type="number" value="0"/>
+          </div>
+          <div style="width:90px;">
+            <div class="muted small">🟥</div>
+            <input id="fbRed" class="input" type="number" value="0"/>
+          </div>
+        </div>
+      </div>
+
+      <div id="fbMatchResult" class="muted" style="margin-top:10px;"></div>
+    </div>
+  ` : "";
+
+  const modals = `
+    <div class="modalBackdrop" id="fbModalBackdrop" style="display:none;">
+      <div class="modal">
+        <div class="row" style="justify-content:space-between;align-items:center;">
+          <h2 id="fbModalTitle" style="margin:0;">Football</h2>
+          <button class="iconBtn" data-fb-action="closeModal">Cerrar</button>
+        </div>
+        <div id="fbModalBody" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  `;
+
+  return `
+    <section>
+      ${teamHeader}
+      <div style="height:12px;"></div>
+      ${team ? teamView : teamsList}
+      ${modals}
+    </section>
+  `;
+}
+
+function initFootballTab(root){
+  // Prepare selects, handlers, modal flows
+  const db = fbGetDB();
+
+  const backdrop = root.querySelector("#fbModalBackdrop");
+  const modalTitle = root.querySelector("#fbModalTitle");
+  const modalBody = root.querySelector("#fbModalBody");
+
+  function openModal(title, bodyHtml){
+    if(!backdrop) return;
+    modalTitle.textContent = title;
+    modalBody.innerHTML = bodyHtml;
+    backdrop.style.display = "block";
+  }
+  function closeModal(){
+    if(!backdrop) return;
+    backdrop.style.display = "none";
+  }
+
+  // Basic actions
+  root.querySelectorAll("[data-fb-action]").forEach(el=>{
+    el.addEventListener("click", async ()=>{
+      const act = el.getAttribute("data-fb-action");
+      if(act==="backTeams"){
+        state.footballTeamId = null;
+        view();
+      }
+      if(act==="closeModal"){
+        closeModal();
+      }
+      if(act==="openTeamCreate"){
+        openModal("Crear equipo", `
+          <div class="muted small">Nombre del equipo</div>
+          <input id="fbNewTeamName" class="input" placeholder="Ej: Barcelona" />
+          <div style="height:12px;"></div>
+          <button class="btn primary" id="fbCreateTeamBtn">Crear</button>
+        `);
+        const btn = root.querySelector("#fbCreateTeamBtn");
+        btn?.addEventListener("click", ()=>{
+          const name = (root.querySelector("#fbNewTeamName")?.value || "").trim();
+          if(!name) return;
+          const db2 = fbGetDB();
+          db2.teams.push({ id: Date.now(), name });
+          fbSaveDB(db2);
+          closeModal();
+          view();
+        });
+      }
+      if(act==="openPlayerCreate"){
+        const teamId = state.footballTeamId;
+        openModal("Agregar jugador", `
+          <div class="muted small">Nombre</div>
+          <input id="fbNewPlayerName" class="input" placeholder="Ej: Juan Pérez" />
+          <div style="height:10px;"></div>
+
+          <div class="muted small">Posición</div>
+          <input id="fbNewPlayerPos" class="input" placeholder="Ej: CM, ST, CB..." />
+          <div style="height:10px;"></div>
+
+          <div class="muted small">Rating base (0–10)</div>
+          <input id="fbNewPlayerRating" class="input" type="number" step="0.1" min="0" max="10" value="5.0"/>
+          <div style="height:12px;"></div>
+
+          <button class="btn primary" id="fbCreatePlayerBtn">Crear</button>
+        `);
+        root.querySelector("#fbCreatePlayerBtn")?.addEventListener("click", ()=>{
+          const name = (root.querySelector("#fbNewPlayerName")?.value || "").trim();
+          const position = (root.querySelector("#fbNewPlayerPos")?.value || "").trim();
+          const rating = parseFloat(root.querySelector("#fbNewPlayerRating")?.value || "5");
+          if(!name || !teamId) return;
+          const db2 = fbGetDB();
+          db2.players.push({ id: Date.now(), teamId, name, position, rating: fbClamp(isNaN(rating)?5:rating, 0, 10) });
+          fbSaveDB(db2);
+          closeModal();
+          view();
+        });
+      }
+      if(act==="openMatchMore"){
+        const box = root.querySelector("#fbMatchMore");
+        if(box) box.style.display = (box.style.display==="none" ? "block" : "none");
+      }
+      if(act==="applyMatch"){
+        const teamId = state.footballTeamId;
+        if(!teamId) return;
+
+        const pid = root.querySelector("#fbMatchPlayer")?.value;
+        const db2 = fbGetDB();
+        const player = db2.players.find(p=>String(p.id)===String(pid));
+        if(!player) return;
+
+        const stats = {
+          minutes: root.querySelector("#fbMin")?.value,
+          goals: root.querySelector("#fbGoals")?.value,
+          assists: root.querySelector("#fbAssists")?.value,
+          passC: root.querySelector("#fbPassC")?.value,
+          passA: root.querySelector("#fbPassA")?.value,
+          duelW: root.querySelector("#fbDuelW")?.value,
+          duelT: root.querySelector("#fbDuelT")?.value,
+          shotsOn: root.querySelector("#fbShotsOn")?.value,
+          recoveries: root.querySelector("#fbRecov")?.value,
+          losses: root.querySelector("#fbLosses")?.value,
+          yellow: root.querySelector("#fbYellow")?.value,
+          red: root.querySelector("#fbRed")?.value
+        };
+
+        const score = fbPerfScore10(stats);
+        const upd = fbUpdatePlayerRating(player, score, stats.minutes);
+
+        // persist
+        const old = player.rating;
+        player.rating = upd.next;
+
+        db2.matches.push({
+          id: Date.now(),
+          date: new Date().toISOString(),
+          teamId,
+          playerId: player.id,
+          stats: {
+            minutes:+stats.minutes||0, goals:+stats.goals||0, assists:+stats.assists||0,
+            passC:+stats.passC||0, passA:+stats.passA||0, duelW:+stats.duelW||0, duelT:+stats.duelT||0,
+            shotsOn:+stats.shotsOn||0, recoveries:+stats.recoveries||0, losses:+stats.losses||0,
+            yellow:+stats.yellow||0, red:+stats.red||0
+          },
+          score10: score,
+          ratingOld: upd.old,
+          ratingNew: upd.next
+        });
+
+        fbSaveDB(db2);
+
+        const out = root.querySelector("#fbMatchResult");
+        if(out){
+          out.innerHTML = `Score: <span class="chip mono">${score.toFixed(2)}</span> · Rating: <span class="chip mono">${upd.old.toFixed(2)}</span> → <span class="chip mono">${upd.next.toFixed(2)}</span>`;
+        }
+
+        // refresh just this tab
+        view();
+      }
+      if(act==="export"){
+        const db2 = fbGetDB();
+        const payload = JSON.stringify({ exportedAt: Date.now(), footballDB: db2 }, null, 2);
+        try{
+          const blob = new Blob([payload], { type:"application/json" });
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "footballDB.json";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          if(typeof toast==="function") toast("Export listo ✅");
+        }catch(e){
+          console.error(e);
+          alert("No pude exportar.");
+        }
+      }
+    });
+  });
+
+  // open team
+  root.querySelectorAll("[data-fb-open-team]").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      const id = el.getAttribute("data-fb-open-team");
+      state.footballTeamId = id;
+      view();
+    });
+  });
+
+  // player select for match logger
+  const teamId = state.footballTeamId;
+  if(teamId){
+    const db3 = fbGetDB();
+    const sel = root.querySelector("#fbMatchPlayer");
+    if(sel){
+      sel.innerHTML = "";
+      db3.players.filter(p=>String(p.teamId)===String(teamId)).forEach(p=>{
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = `${p.name} (${(+p.rating||0).toFixed(2)})`;
+        sel.appendChild(opt);
+      });
+    }
+  }
+
+  // import file
+  root.querySelectorAll('input[data-fb-action="importFile"]').forEach(inp=>{
+    inp.addEventListener("change", async ()=>{
+      const file = inp.files && inp.files[0];
+      if(!file) return;
+      try{
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        const dbIn = parsed.footballDB || parsed;
+        if(!dbIn || !Array.isArray(dbIn.teams) || !Array.isArray(dbIn.players)){
+          alert("JSON inválido para Football DB");
+          return;
+        }
+        // keep matches optional
+        if(!Array.isArray(dbIn.matches)) dbIn.matches = [];
+        fbSaveDB({ teams: dbIn.teams, players: dbIn.players, matches: dbIn.matches });
+        if(typeof toast==="function") toast("Importado ✅");
+        view();
+      }catch(e){
+        console.error(e);
+        alert("No pude importar ese archivo.");
+      }
+    });
+  });
+}
+

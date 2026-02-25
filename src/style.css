@@ -2063,3 +2063,7 @@ body{
 .invPctToday{
   padding:8px 10px;
 }
+
+
+/* Football Lab */
+#fbModalBackdrop .modal{max-width:820px;}
