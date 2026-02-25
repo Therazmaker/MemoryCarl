@@ -483,43 +483,67 @@ export function initFootballLab(){
     }
 
     function pickClipPayload(obj){
-      // Accept either: normalized capture (schemaVersion...) OR raw from extension
-      if(!obj || typeof obj !== "object") return null;
+      // Accept many shapes from FootballLab Clip: {capture}, {ok,capture}, {player/context}, {playerName,...}
+      if(!obj) return null;
 
-      // Normalized capture
-      if(obj.player && obj.context){
-        return {
-          playerName: obj.player.name || "",
-          teamName: obj.player.team || "",
-          positionText: obj.player.position || "",
-          matchTitle: obj.context.matchTitle || "",
-          matchId: obj.context.matchId || "",
-          matchDate: obj.context.date || "",
-          minutesText: obj.context.minutes || "",
-          ratingText: obj.context.rating || "",
-          stats: obj.stats || {}
-        };
+      // If array (queue), take first valid
+      if(Array.isArray(obj)){
+        for(const it of obj){
+          const p = pickClipPayload(it);
+          if(p) return p;
+        }
+        return null;
       }
 
-      // Raw capture
-      if(obj.playerName && (obj.matchTitle || obj.stats)){
-        return {
-          playerName: obj.playerName || "",
-          teamName: obj.teamName || "",
-          positionText: obj.positionText || "",
-          matchTitle: obj.matchTitle || "",
-          matchId: obj.matchId || "",
-          matchDate: obj.matchDate || "",
-          minutesText: obj.minutesText || "",
-          ratingText: obj.ratingText || "",
-          stats: Array.isArray(obj.stats) ? obj.stats : obj.stats || {}
-        };
-      }
+      if(typeof obj !== "object") return null;
 
       // Maybe wrapped
       if(obj.capture) return pickClipPayload(obj.capture);
+      if(obj.data && obj.data.capture) return pickClipPayload(obj.data.capture);
 
-      return null;
+      // Helpers to read date/minutes/rating in multiple keys
+      const ctx = obj.context || obj.ctx || obj.meta || {};
+      const dateAny = (ctx.date ?? ctx.matchDate ?? ctx.dateLabel ?? obj.matchDate ?? obj.date ?? "");
+      const minAny  = (ctx.minutes ?? ctx.minutesText ?? obj.minutesText ?? obj.minutes ?? "");
+      const ratAny  = (ctx.rating ?? ctx.ratingText ?? obj.ratingText ?? obj.rating ?? "");
+
+      // Player can be object OR string
+      const playerObj = obj.player || {};
+      const playerNameAny =
+        (typeof playerObj === "string" ? playerObj :
+          (playerObj.name ?? playerObj.playerName ?? obj.playerName ?? obj.name ?? "")
+        );
+
+      const teamNameAny =
+        (typeof playerObj === "object" ? (playerObj.team ?? playerObj.teamName ?? "") : (obj.teamName ?? ""));
+
+      const posAny =
+        (typeof playerObj === "object" ? (playerObj.position ?? playerObj.positionText ?? "") : (obj.positionText ?? ""));
+
+      const matchTitleAny = (ctx.matchTitle ?? obj.matchTitle ?? ctx.title ?? obj.title ?? "");
+      const matchIdAny    = (ctx.matchId ?? obj.matchId ?? ctx.id ?? obj.id ?? "");
+
+      const statsAny = (obj.stats ?? obj.statistics ?? obj.statRows ?? []);
+
+      // Recognize only if it looks like a clip payload (has at least player and something match/stats)
+      const looksLike = (String(playerNameAny||"").trim().length>0) && (String(matchTitleAny||"").trim().length>0 || statsAny);
+      if(!looksLike){
+        // Still allow if it has player/context but missing matchTitle (some clips)
+        const maybeOk = (obj.player && (obj.context || obj.stats));
+        if(!maybeOk) return null;
+      }
+
+      return {
+        playerName: String(playerNameAny||""),
+        teamName: String(teamNameAny||""),
+        positionText: String(posAny||""),
+        matchTitle: String(matchTitleAny||""),
+        matchId: String(matchIdAny||""),
+        matchDate: String(dateAny||""),
+        minutesText: String(minAny||""),
+        ratingText: String(ratAny||""),
+        stats: statsAny
+      };
     }
 
     function toNumber(x){
@@ -588,12 +612,19 @@ export function initFootballLab(){
         if(!payload) return setImpStatus("JSON no reconocido. Debe venir de FootballLab Clip.", false);
 
         const playerName = String(payload.playerName||"").trim();
-        if(!playerName) return setImpStatus("El JSON no trae nombre de jugador.", false);
+        if(!playerName) return setImpStatus("El JSON no trae nombre de jugador (playerName).", false);
 
         // Find or create player in this team
         let p = db.players.find(x => x.teamId===teamId && x.name.toLowerCase()===playerName.toLowerCase());
-        const clipPos = String(payload.positionText||"").trim();
-        const pos = ["GK","CB","LB","RB","CDM","CM","CAM","LW","RW","ST"].includes(clipPos) ? clipPos : "CM";
+        const clipPosRaw = String(payload.positionText||"").trim();
+        const clipPos = clipPosRaw.split("—")[0].split("-")[0].trim().toUpperCase();
+        const POSCODES = ["GK","CB","LB","RB","CDM","CM","CAM","LW","RW","ST"];
+        let pos = POSCODES.includes(clipPos) ? clipPos : "CM";
+        if(pos==="CM"){
+          for(const c of POSCODES){
+            if(clipPosRaw.toUpperCase().includes(c)){ pos=c; break; }
+          }
+        }
         const clipRating = clamp(toNumber(payload.ratingText), 0, 10);
 
         if(!p){
@@ -659,7 +690,7 @@ export function initFootballLab(){
         if(clipRating>0) p.rating = clipRating;
 
         saveDB(db);
-        setImpStatus(`Importado ✅ Jugador: ${playerName} • Partido: ${matchTitle||"(sin título)"} • Fecha: ${dateISO}`, true);
+        setImpStatus(`Importado ✅ ${playerName} • ${matchTitle||"(sin título)"} • ${dateISO} • min:${baseStats.minutes} • KP:${baseStats.keyPasses} • Pass:${baseStats.passC}/${baseStats.passA}`, true);
         // refresh view
         openLab("team",{teamId});
       }catch(e){
