@@ -1,3 +1,4 @@
+import { initFootballLab } from "./footballLab.js";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -14046,3 +14047,5 @@ try{
   window.openFinanceAccountEdit = openFinanceAccountEdit;
   window.openFinanceEntryModal = openFinanceEntryModal;
 }catch(e){}
+
+window.addEventListener("DOMContentLoaded", () => { try { initFootballLab(); } catch(e){ console.error(e); } });
