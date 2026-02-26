@@ -1373,7 +1373,6 @@ function renderHome(db){
         $info.textContent = "Cargado ✅" + (title ? " ("+title+")" : "");
       }
     }
-    }
 
     document.getElementById("pl_applyJson")?.addEventListener("click", ()=>{
       const raw = ($json?.value || "").trim();
