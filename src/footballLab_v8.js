@@ -982,10 +982,10 @@ function renderHome(db){
           matchTitle: matchTitle || "",
           matchId: matchId || "",
           oldRating: expected,
-          newRating: newRating
-        });
-
-        // Optional: update player rating to clip rating if present
+          newRating:        newRating,
+        clip: _clipMeta ? { meta: _clipMeta, context: _clipCtx, player: (_clip?.player||null), stats: _clipStats } : null
+      });
+// Optional: update player rating to clip rating if present
         if(clipRating>0) p.rating = clipRating;
 
         saveDB(db);
@@ -1487,13 +1487,64 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
         longBallC, longBallA,
         ownHalfPassC, ownHalfPassA,
         oppHalfPassC, oppHalfPassA,
-        highClaims, punches
-      });
+        highClaims, punches,
+          // extra SofaScore fields (kept even if UI has no inputs)
+          touches: clipNum(_clipStats?.touches, 0),
+          crosses: clipNum(_clipStats?.crosses, 0),
+          crossesGood: clipNum(_clipStats?.crossesGood, 0),
+          passPct: (_clipStats?.passPct ?? null),
+          longBallPct: (_clipStats?.longBallPct ?? null),
+          dribbles: clipNum(_clipStats?.dribbles, 0),
+          dribblesGood: clipNum(_clipStats?.dribblesGood, 0),
+          tackles: clipNum(_clipStats?.tackles, 0),
+          tacklesGood: clipNum(_clipStats?.tacklesGood, 0),
+          interceptions: clipNum(_clipStats?.interceptions, 0),
+          clearances: clipNum(_clipStats?.clearances, 0),
+          recoveries: clipNum(_clipStats?.recoveries, 0),
+          groundDuels: clipNum(_clipStats?.groundDuels, 0),
+          groundDuelsGood: clipNum(_clipStats?.groundDuelsGood, 0)
+        });
 
       // Elo-style update (performance vs expected), scaled by minutes
       const expected = p.rating;
       const upd = updateEloRating(expected, score, minutes, 0.20);
       const newRating = upd.newRating;
+
+
+      // --- Preserve SofaScore clip JSON (if provided) ---
+      let _clip = null;
+      let _clipStats = null;
+      let _clipCtx = null;
+      let _clipMeta = null;
+      try{
+        const rawClip = (document.getElementById("pl_json")?.value || "").trim();
+        if(rawClip){
+          _clip = JSON.parse(rawClip);
+          _clipStats = _clip?.stats || null;
+          _clipCtx = _clip?.context || _clip?.match || null;
+          _clipMeta = {
+            schemaVersion: _clip?.schemaVersion || null,
+            source: _clip?.source || null,
+            capturedAt: _clip?.capturedAt || null,
+            matchId: _clipCtx?.matchId || _clipCtx?.id || null,
+            matchTitle: _clipCtx?.matchTitle || _clipCtx?.title || _clipCtx?.name || null,
+            rating: (_clipCtx?.rating ?? null)
+          };
+          const clipDate = (_clipCtx?.date && /^\d{4}-\d{2}-\d{2}/.test(String(_clipCtx.date)))
+            ? String(_clipCtx.date).slice(0,10)
+            : null;
+          if(!document.getElementById("pl_date")?.value && clipDate){
+            document.getElementById("pl_date").value = clipDate;
+          }
+        }
+      }catch(e){
+        // ignore invalid json on save
+      }
+
+      const clipNum = (v, d=0)=>{
+        const n = Number(v);
+        return Number.isFinite(n) ? n : d;
+      };
 
       // append log
       db.matches.push({
