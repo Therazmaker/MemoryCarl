@@ -1392,9 +1392,6 @@ const _bt = document.getElementById("backTeam");
 const _ol = document.getElementById("openLogger");
     if(_ol) _ol.onclick = ()=> openLab("logger",{teamId:p.teamId});
 // last matches view
-    const season = db.settings.currentSeason;
-    const leagueId = db.settings.currentLeagueId;
-
     const logs = (db.matches||[])
       .filter(m=>m.playerId===p.id && m.season===season && (m.leagueId||leagueId)===leagueId)
       .sort((a,b)=> (b.date||"").localeCompare(a.date||""));
