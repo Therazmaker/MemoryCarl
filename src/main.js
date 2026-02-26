@@ -1,9 +1,9 @@
-import { initFootballLab } from "./footballLab_v8.js";
+import { initFootballLab } from "./footballLab_v8e.js";
 
 // ---- Build markers (for debugging cache / deploy issues) ----
 // If you don't see these in DevTools console, you are NOT running this build.
-window.FOOTBALL_LAB_VERSION = "1008-odds-xlb4";
-window.FOOTBALL_LAB_BANNER = "MemoryCarl BUILD 1008 (Odds + XL Builder 4 líneas)";
+window.FOOTBALL_LAB_VERSION = "1009-calibA-fix";
+window.FOOTBALL_LAB_BANNER = "MemoryCarl BUILD 1009 (Calib A + fix loader)";
 console.log("%c"+window.FOOTBALL_LAB_BANNER, "background:#111;color:#7CFFB2;padding:4px 8px;border-radius:10px;font-weight:900;");
 
 /* ===== PWA Rescue / Reset =====
@@ -14167,7 +14167,7 @@ function fbUpdatePlayerRating(player, matchScore10, minutes){
 }
 
 function viewFootball(){
-  // Simple launcher UI. The full Football Lab UI is rendered by footballLab_v8.js via window.__FOOTBALL_LAB__.open()
+  // Simple launcher UI. The full Football Lab UI is rendered by footballLab_v8e.js via window.__FOOTBALL_LAB__.open()
   const db = fbGetDB();
   const season = escapeHtml(db?.settings?.currentSeason || "");
   return `

@@ -13,8 +13,8 @@
  */
 
 export function initFootballLab(){
-  window.FOOTBALL_LAB_FILE = "footballLab_v8.js";
-  console.log("⚽ FOOTBALL LAB V6e ACTIVE", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
+  window.FOOTBALL_LAB_FILE = "footballLab_v8e.js";
+  console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
   const KEY = "footballDB";
   let _fbSimCharts = { totals:null, scorelines:null };
