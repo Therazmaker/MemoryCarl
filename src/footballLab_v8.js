@@ -1388,12 +1388,14 @@ function renderHome(db){
       if($info) $info.textContent = "";
     });
 
-document.getElementById("backTeam").onclick = ()=> openLab("team",{teamId:p.teamId});
-    document.getElementById("openLogger").onclick = ()=> openLab("logger",{teamId:p.teamId});
-
-    // last matches view
+const _bt = document.getElementById("backTeam");
+    if(_bt) _bt.onclick = ()=> openLab("team",{teamId:p.teamId});
+const _ol = document.getElementById("openLogger");
+    if(_ol) _ol.onclick = ()=> openLab("logger",{teamId:p.teamId});
+// last matches view
     const last = logs.slice(0, 8);
-    document.getElementById("lastMatches").innerHTML = last.map(m=>{
+    const _lm = document.getElementById("lastMatches");
+    if(_lm) _lm.innerHTML = last.map(m=>{
       const mid = escapeHtml(m.id||"");
       const date = escapeHtml(m.date||"");
       const score = fmt(m.score,2);
