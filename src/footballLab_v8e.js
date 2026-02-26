@@ -13,6 +13,21 @@
  */
 
 export function initFootballLab(){
+  // Idempotent init (prevents duplicate listeners when view re-renders)
+  if (window.__footballLabInited) return;
+  window.__footballLabInited = true;
+
+  // Ensure public hook exists as early as possible
+  // (main.js expects this to exist to open the Lab)
+  if (!window.__FOOTBALL_LAB__) {
+    window.__FOOTBALL_LAB__ = {
+      version: "V6e",
+      open: ()=>{ throw new Error("FootballLab not ready yet"); },
+      db: ()=> null,
+      setDB: ()=> null,
+      help: "window.__FOOTBALL_LAB__.open('versus')"
+    };
+  }
   window.FOOTBALL_LAB_FILE = "footballLab_v8e.js";
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
@@ -3049,37 +3064,17 @@ const od1 = document.getElementById("od_1");
 
     }
 
-    
+    document.getElementById("mcAutoXg")?.addEventListener("click", ()=>{
+      autoXgFromStrength();
+    });
+    document.getElementById("mcRun")?.addEventListener("click", ()=>{
+      try{ console.log("⚽ MonteCarlo: click Simular"); runMonteCarlo(); }
+      catch(err){ console.error("MonteCarlo error:", err); const o=document.getElementById("mc_out"); if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`; }
+    });
+
+    // Initial auto-fill once (nice default)
+    autoXgFromStrength();
 };
-
-    // Wire Monte Carlo buttons (they live in this view). Previously these listeners
-    // were attached only after clicking the main "run" button, so Monte Carlo looked "dead".
-    (function wireMonteCarloUI(){
-      const autoBtn = document.getElementById("mcAutoXg");
-      if(autoBtn && !autoBtn.dataset.wired){
-        autoBtn.dataset.wired = "1";
-        autoBtn.addEventListener("click", ()=>{ autoXgFromStrength(); });
-      }
-
-      const runBtn = document.getElementById("mcRun");
-      if(runBtn && !runBtn.dataset.wired){
-        runBtn.dataset.wired = "1";
-        runBtn.addEventListener("click", ()=>{
-          try{
-            console.log("⚽ MonteCarlo: click Simular");
-            runMonteCarlo();
-          }catch(err){
-            console.error("MonteCarlo error:", err);
-            const o = document.getElementById("mc_out");
-            if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`;
-          }
-        });
-      }
-
-      // Nice default: auto-fill xG once per render
-      try{ autoXgFromStrength(); }catch(_e){}
-    })();
-
   }
 
   function computeStrengthFallback(db, teamId){
@@ -3176,4 +3171,10 @@ const od1 = document.getElementById("od_1");
 }
 
 window.initFootballLab = initFootballLab;
+
+// Auto-init on load so the Lab is available without extra wiring
+try {
+  initFootballLab();
+} catch (e) {
+  console.warn("FootballLab auto-init failed", e);
 }
