@@ -13,20 +13,40 @@
  */
 
 export function initFootballLab(){
-  // Idempotent init (prevents duplicate listeners when view re-renders)
-  if (window.__footballLabInited) return;
-  window.__footballLabInited = true;
+  // Robust init guard:
+  // - If a previous init failed mid-way, we must allow re-init.
+  // - Prevent double-init while running.
+  const st = window.__footballLabInitState;
+  if (st === "ready") return;
+  if (st === "inProgress") return;
+  window.__footballLabInitState = "inProgress";
 
   // Ensure public hook exists as early as possible
   // (main.js expects this to exist to open the Lab)
+  const placeholderOpen = (view, payload)=>{
+    // Attempt a late init if we aren't ready yet (helps after a failed/cached load).
+    if (window.__footballLabInitState !== "ready"){
+      try{ window.initFootballLab?.(); }catch(_e){}
+    }
+    const lab = window.__FOOTBALL_LAB__;
+    // If the hook was replaced with the real one, delegate.
+    if (lab && typeof lab.open === "function" && lab.open !== placeholderOpen){
+      return lab.open(view, payload);
+    }
+    throw new Error("FootballLab not ready yet");
+  };
   if (!window.__FOOTBALL_LAB__) {
     window.__FOOTBALL_LAB__ = {
       version: "V6e",
-      open: ()=>{ throw new Error("FootballLab not ready yet"); },
+      // main.js might call open() while init is still building the UI.
+      // We provide a safe placeholder that will be replaced when ready.
+      open: placeholderOpen,
       db: ()=> null,
       setDB: ()=> null,
       help: "window.__FOOTBALL_LAB__.open('versus')"
     };
+  } else if (typeof window.__FOOTBALL_LAB__.open !== "function") {
+    window.__FOOTBALL_LAB__.open = placeholderOpen;
   }
   window.FOOTBALL_LAB_FILE = "footballLab_v8e.js";
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
@@ -3166,6 +3186,9 @@ const od1 = document.getElementById("od_1");
     };
   }catch(e){ console.warn("FootballLab debug hook failed", e); }
 
+  // Mark ready only after the whole init finishes successfully.
+  window.__footballLabInitState = "ready";
+
 
 // end initFootballLab
 }
@@ -3176,6 +3199,8 @@ window.initFootballLab = initFootballLab;
 try {
   initFootballLab();
 } catch (e) {
+  window.__footballLabInitState = "failed";
   console.warn("FootballLab auto-init failed", e);
 }
+
 }
