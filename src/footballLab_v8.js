@@ -1262,7 +1262,21 @@ function renderHome(db){
           </div>
         </details>
 
-        <div class="fl-row" style="margin-top:10px;">
+        
+        <details style="margin-top:12px;">
+          <summary style="cursor:pointer;">📥 Pegar JSON (FootballLab Clip)</summary>
+          <div class="fl-small" style="margin-top:6px; opacity:.85;">
+            Copia el JSON desde la extensión y pégalo aquí. Se llenará el formulario automáticamente.
+          </div>
+          <textarea id="pl_json" class="fl-input" style="margin-top:8px; min-height:120px; width:100%; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" placeholder='{"player":...,"match":...,"stats":...}'></textarea>
+          <div class="fl-row" style="margin-top:8px; align-items:center;">
+            <button class="mc-btn" id="pl_applyJson">Aplicar al formulario</button>
+            <button class="mc-btn" id="pl_clearJson">Limpiar</button>
+            <div id="pl_jsonInfo" class="fl-small"></div>
+          </div>
+        </details>
+
+<div class="fl-row" style="margin-top:10px;">
           <button class="mc-btn" id="pl_saveMatch">Guardar partido</button>
           <div id="pl_savedInfo" class="fl-small"></div>
         </div>
@@ -1273,7 +1287,108 @@ function renderHome(db){
     const iso = new Date().toISOString().slice(0,10);
     document.getElementById("pl_date").value = iso;
 
-    document.getElementById("backTeam").onclick = ()=> openLab("team",{teamId:p.teamId});
+    
+    // JSON import (FootballLab Clip)
+    const $json = document.getElementById("pl_json");
+    const $info = document.getElementById("pl_jsonInfo");
+
+    function parseJsonSafe(s){
+      try { return { ok:true, data: JSON.parse(s) }; }
+      catch(e){ return { ok:false, error: e?.message || String(e) }; }
+    }
+
+    function num(v, d=0){
+      const n = Number(v);
+      return Number.isFinite(n) ? n : d;
+    }
+
+    function setVal(id, v){
+      const el = document.getElementById(id);
+      if(!el) return;
+      el.value = (v===null || v===undefined) ? "" : String(v);
+    }
+
+    function ymdFromAny(v){
+      if(!v) return null;
+      // Already YYYY-MM-DD
+      if(/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return String(v);
+      // "19 Feb" etc not reliable
+      const d = new Date(v);
+      if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+      return null;
+    }
+
+    function applyCaptureToForm(capture){
+      const match = capture?.match || {};
+      const stats = capture?.stats || {};
+      const passing = stats.passing || stats.passes || {};
+      const duels = stats.duels || {};
+      const dribbles = stats.dribbles || {};
+      const defense = stats.defense || {};
+
+      // basics
+      setVal("pl_minutes", num(stats.minutesPlayed ?? match.minutesPlayed ?? stats.minutes ?? match.minutes, 0));
+      setVal("pl_goals", num(stats.goals ?? 0, 0));
+      setVal("pl_assists", num(stats.assists ?? 0, 0));
+
+      const dateGuess = ymdFromAny(match.date) || ymdFromAny(match.startTime) || ymdFromAny(match.kickoff) || null;
+      if(dateGuess) setVal("pl_date", dateGuess);
+
+      // passing
+      setVal("pl_passC", num(passing.accurate ?? stats.accuratePasses ?? 0, 0));
+      setVal("pl_passA", num(passing.total ?? stats.totalPasses ?? 0, 0));
+      setVal("pl_keyPasses", num(passing.keyPasses ?? stats.keyPasses ?? 0, 0));
+      setVal("pl_progPasses", num(passing.progressivePasses ?? stats.progressivePasses ?? 0, 0));
+
+      setVal("pl_longBallC", num(passing.longBallsAccurate ?? stats.longBallsAccurate ?? 0, 0));
+      setVal("pl_longBallA", num(passing.longBallsTotal ?? stats.longBallsTotal ?? 0, 0));
+
+      setVal("pl_oppHalfC", num(passing.oppHalfAccurate ?? stats.oppHalfAccurate ?? 0, 0));
+      setVal("pl_oppHalfA", num(passing.oppHalfTotal ?? stats.oppHalfTotal ?? 0, 0));
+      setVal("pl_ownHalfC", num(passing.ownHalfAccurate ?? stats.ownHalfAccurate ?? 0, 0));
+      setVal("pl_ownHalfA", num(passing.ownHalfTotal ?? stats.ownHalfTotal ?? 0, 0));
+
+      // duels / dribbles / defense
+      setVal("pl_duelsWon", num(duels.won ?? stats.duelsWon ?? 0, 0));
+      setVal("pl_duelsTot", num(duels.total ?? stats.duelsTotal ?? 0, 0));
+      setVal("pl_dribblesWon", num(dribbles.successful ?? stats.dribblesSuccessful ?? stats.dribblesWon ?? 0, 0));
+      setVal("pl_defActions", num(defense.actions ?? stats.defActions ?? stats.defensiveActions ?? 0, 0));
+      setVal("pl_posLost", num(stats.possessionLost ?? stats.posLost ?? 0, 0));
+
+      // shooting/creative
+      setVal("pl_shotsOn", num(stats.shotsOnTarget ?? stats.shotsOn ?? 0, 0));
+      setVal("pl_xG", num(stats.xg ?? stats.xG ?? 0, 0));
+      setVal("pl_xA", num(stats.xa ?? stats.xA ?? 0, 0));
+
+      // goalkeeper (if present in json)
+      setVal("pl_saves", num(stats.saves ?? 0, 0));
+      setVal("pl_conceded", num(stats.goalsConceded ?? stats.conceded ?? 0, 0));
+      setVal("pl_cleanSheet", num(stats.cleanSheet ?? 0, 0));
+      setVal("pl_punches", num(stats.punches ?? 0, 0));
+      setVal("pl_highClaims", num(stats.highClaims ?? 0, 0));
+
+      // feedback
+      if($info){
+        const title = match.title || match.name || "";
+        $info.textContent = "Cargado ✅" + (title ? " ("+title+")" : "");
+      }
+    }
+    }
+
+    document.getElementById("pl_applyJson")?.addEventListener("click", ()=>{
+      const raw = ($json?.value || "").trim();
+      if(!raw){ if($info) $info.textContent="Pega un JSON primero."; return; }
+      const parsed = parseJsonSafe(raw);
+      if(!parsed.ok){ if($info) $info.textContent="JSON inválido: " + parsed.error; return; }
+      applyCaptureToForm(parsed.data);
+    });
+
+    document.getElementById("pl_clearJson")?.addEventListener("click", ()=>{
+      if($json) $json.value = "";
+      if($info) $info.textContent = "";
+    });
+
+document.getElementById("backTeam").onclick = ()=> openLab("team",{teamId:p.teamId});
     document.getElementById("openLogger").onclick = ()=> openLab("logger",{teamId:p.teamId});
 
     // last matches view
