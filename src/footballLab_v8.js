@@ -2367,3 +2367,4 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
 
 
 // end initFootballLab
+}
