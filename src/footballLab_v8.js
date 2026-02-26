@@ -3140,17 +3140,20 @@ const od1 = document.getElementById("od_1");
   }
 
 
-  // --- Debug hook (V6e) ---
-  try{
-    window.__FOOTBALL_LAB__ = {
-      version: "V6e",
-      open: (view, payload)=> openLab(view, payload),
-      db: ()=> loadDB(),
-      setDB: (db)=> saveDB(db),
-      help: "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})"
-    };
-  }catch(e){ console.warn("FootballLab debug hook failed", e); }
-
+ // --- Debug hook (V6e) ---
+try {
+  window.__FOOTBALL_LAB__ = {
+    version: "V6e",
+    open: (view, payload) => openLab(view, payload),
+    db: () => loadDB(),
+    setDB: (db) => saveDB(db),
+    help: "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})"
+  };
+} catch (e) {
+  console.warn("FootballLab debug hook failed", e);
+}
 
 // end initFootballLab
+} // ✅ Cierre faltante
 
+try { initFootballLab(); } catch(e) { console.warn("initFootballLab() failed", e); }
