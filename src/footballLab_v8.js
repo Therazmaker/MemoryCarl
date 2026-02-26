@@ -1390,12 +1390,7 @@ function renderHome(db){
 const _bt = document.getElementById("backTeam");
     if(_bt) _bt.onclick = ()=> openLab("team",{teamId:p.teamId});
 const _ol = document.getElementById("openLogger");
-    if(_ol) _ol.onclick = ()=> openLab("logger",{teamId:p.teamId});
-// last matches view
-    const logs = (db.matches||[])
-      .filter(m=>m.playerId===p.id && m.season===season && (m.leagueId||leagueId)===leagueId)
-      .sort((a,b)=> (b.date||"").localeCompare(a.date||""));
-
+    if(_ol) _ol.onclick = ()=> openLab("logger",{teamId:p.teamId});// last matches view
     const last = (Array.isArray(logs) ? logs : []).slice(0, 8);
     const _lm = document.getElementById("lastMatches");
     if(_lm) _lm.innerHTML = last.map(m=>{
