@@ -16,6 +16,7 @@ export function initFootballLab(){
   console.log("⚽ FOOTBALL LAB V6e ACTIVE");
 
   const KEY = "footballDB";
+  let _fbSimCharts = { totals:null, scorelines:null };
 
   const DEFAULT_DB = {
     settings: {
@@ -101,6 +102,26 @@ export function initFootballLab(){
   }
 
   function fmt(n, d=2){ return (Number.isFinite(n) ? n : 0).toFixed(d); }
+
+  // --- Poisson sampler (for goal simulation) ---
+  function poissonSample(lambda){
+    const L = Math.exp(-Math.max(0, lambda));
+    let k = 0;
+    let p = 1;
+    while(p > L){
+      k++;
+      p *= Math.random();
+      // safety guard for extreme lambdas
+      if(k > 20) break;
+    }
+    return Math.max(0, k-1);
+  }
+
+  function clampNum(v, min, max, fallback){
+    const n = Number(v);
+    if(!Number.isFinite(n)) return fallback;
+    return clamp(n, min, max);
+  }
 
   const POS_LABELS = {
     GK: "GK — Portero",
@@ -2238,7 +2259,50 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
         </div>
       </div>
 
-      <div class="fl-card">
+            <div class="fl-card">
+        <div style="font-weight:800;">🎲 Monte Carlo (marcador y mercados)</div>
+        <div class="fl-small" style="margin-top:6px;">
+          Simula miles de partidos usando <b>xG</b> (goles esperados). Puedes ponerlos manual o auto-calcularlos desde la fuerza.
+        </div>
+
+        <div class="fl-row" style="margin-top:10px; flex-wrap:wrap;">
+          <div style="min-width:160px;">
+            <div class="fl-h3">xG Local</div>
+            <input class="fl-input" id="mc_xgH" type="number" step="0.05" min="0.1" max="5" value="1.35">
+          </div>
+          <div style="min-width:160px;">
+            <div class="fl-h3">xG Visitante</div>
+            <input class="fl-input" id="mc_xgA" type="number" step="0.05" min="0.1" max="5" value="1.15">
+          </div>
+          <div style="min-width:160px;">
+            <div class="fl-h3">Simulaciones</div>
+            <input class="fl-input" id="mc_N" type="number" step="1000" min="1000" max="50000" value="10000">
+          </div>
+          <div style="display:flex; gap:8px; align-items:flex-end;">
+            <button class="mc-btn" id="mcAutoXg">Auto xG</button>
+            <button class="mc-btn" id="mcRun">Simular</button>
+          </div>
+        </div>
+
+        <div class="fl-grid2" style="margin-top:12px;">
+          <div class="fl-card" style="margin:0;">
+            <div style="font-weight:800;">Resultados</div>
+            <div id="mc_out" style="margin-top:8px;"></div>
+          </div>
+          <div class="fl-card" style="margin:0;">
+            <div style="font-weight:800;">Distribución de goles</div>
+            <div class="fl-small" style="margin-top:6px;">0–5 y “6+”.</div>
+            <canvas id="mc_chartTotals" height="160"></canvas>
+          </div>
+        </div>
+
+        <div class="fl-card" style="margin-top:12px;">
+          <div style="font-weight:800;">Top marcadores</div>
+          <canvas id="mc_chartScores" height="180"></canvas>
+        </div>
+      </div>
+
+<div class="fl-card">
         <div style="font-weight:800;">🔎 Nota sobre temporada</div>
         <div class="fl-small" style="margin-top:6px;">
           El “FormScore” solo usa registros de la temporada <b>${escapeHtml(db.settings.currentSeason)}</b>.
@@ -2324,7 +2388,143 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
       // persist setting
       db.settings.homeAdvantage = homeAdv;
       saveDB(db);
-    };
+    
+
+
+    // --- Monte Carlo wiring (xG-based score simulation) ---
+    const mcOut = document.getElementById("mc_out");
+    const mcXgH = document.getElementById("mc_xgH");
+    const mcXgA = document.getElementById("mc_xgA");
+    const mcN = document.getElementById("mc_N");
+
+    function autoXgFromStrength(){
+      // Map strength totals to a reasonable xG baseline.
+      // Diff pushes xG in opposite directions; clamps keep it sane.
+      const homeId = homeSel.value;
+      const awayId = awaySel.value;
+      const formation = formSel.value;
+      const homeAdv = clamp(parseFloat(document.getElementById("homeAdv").value)||0, 0, 0.30);
+
+      const xiHome = getXIFromBuilder(homeId, formation, db);
+      const xiAway = getXIFromBuilder(awayId, formation, db);
+
+      const H = xiHome.length ? computeStrengthFromXI(db, xiHome, true) : computeStrengthFallback(db, homeId);
+      const A = xiAway.length ? computeStrengthFromXI(db, xiAway, true) : computeStrengthFallback(db, awayId);
+
+      const homeTotal = H.total * (1+homeAdv);
+      const awayTotal = A.total;
+      const diff = homeTotal - awayTotal;
+
+      const xgH = clamp(1.35 + diff*0.35, 0.25, 3.80);
+      const xgA = clamp(1.15 - diff*0.25, 0.25, 3.80);
+
+      mcXgH.value = fmt(xgH,2);
+      mcXgA.value = fmt(xgA,2);
+      return {xgH, xgA};
+    }
+
+    function renderMcCharts(totals, topScores){
+      if(typeof Chart === "undefined") return;
+
+      // totals chart
+      const totCanvas = document.getElementById("mc_chartTotals");
+      const scCanvas  = document.getElementById("mc_chartScores");
+      if(!totCanvas || !scCanvas) return;
+
+      try{ _fbSimCharts.totals?.destroy?.(); }catch(e){}
+      try{ _fbSimCharts.scorelines?.destroy?.(); }catch(e){}
+
+      _fbSimCharts.totals = new Chart(totCanvas.getContext("2d"), {
+        type: "bar",
+        data: {
+          labels: ["0","1","2","3","4","5","6+"],
+          datasets: [{ label: "Partidos", data: totals }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+
+      _fbSimCharts.scorelines = new Chart(scCanvas.getContext("2d"), {
+        type: "bar",
+        data: {
+          labels: topScores.map(x=>x.label),
+          datasets: [{ label: "Prob %", data: topScores.map(x=>x.pct) }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true } }
+        }
+      });
+    }
+
+    function runMonteCarlo(){
+      const homeTeam = db.teams.find(t=>t.id===homeSel.value);
+      const awayTeam = db.teams.find(t=>t.id===awaySel.value);
+      const nameH = homeTeam?.name || "Local";
+      const nameA = awayTeam?.name || "Visitante";
+
+      const N = clampNum(mcN?.value, 1000, 50000, 10000);
+      const xgH = clampNum(mcXgH?.value, 0.1, 5, 1.35);
+      const xgA = clampNum(mcXgA?.value, 0.1, 5, 1.15);
+
+      let wH=0, wA=0, d=0, btts=0, over25=0;
+      const totals = Array(7).fill(0); // 0..5, 6+
+      const scoreCount = new Map();
+
+      for(let i=0;i<N;i++){
+        const gH = poissonSample(xgH);
+        const gA = poissonSample(xgA);
+        if(gH>gA) wH++; else if(gA>gH) wA++; else d++;
+        if(gH>0 && gA>0) btts++;
+        if((gH+gA) >= 3) over25++;
+
+        const tg = gH+gA;
+        totals[Math.min(6, tg)]++;
+
+        const key = `${gH}-${gA}`;
+        scoreCount.set(key, (scoreCount.get(key)||0)+1);
+      }
+
+      const pct = (x)=> (x*100/N);
+      const topScores = Array.from(scoreCount.entries())
+        .map(([k,c])=>({label:k, pct: +(pct(c).toFixed(2)), c}))
+        .sort((a,b)=> b.c - a.c)
+        .slice(0, 10);
+
+      if(mcOut){
+        mcOut.innerHTML = `
+          <div class="fl-pill"><b>${escapeHtml(nameH)}</b> ${fmt(pct(wH),1)}%</div>
+          <div class="fl-pill"><b>Empate</b> ${fmt(pct(d),1)}%</div>
+          <div class="fl-pill"><b>${escapeHtml(nameA)}</b> ${fmt(pct(wA),1)}%</div>
+          <div style="margin-top:10px;" class="fl-small">
+            <b>BTTS</b>: ${fmt(pct(btts),1)}% &nbsp;•&nbsp;
+            <b>Over 2.5</b>: ${fmt(pct(over25),1)}% &nbsp;•&nbsp;
+            <b>xG</b>: ${fmt(xgH,2)} / ${fmt(xgA,2)} &nbsp;•&nbsp;
+            <b>N</b>: ${N}
+          </div>
+        `;
+      }
+
+      // normalize totals into percentages for chart? We'll keep counts but label says partidos.
+      renderMcCharts(totals, topScores);
+    }
+
+    document.getElementById("mcAutoXg")?.addEventListener("click", ()=>{
+      autoXgFromStrength();
+    });
+    document.getElementById("mcRun")?.addEventListener("click", ()=>{
+      runMonteCarlo();
+    });
+
+    // Initial auto-fill once (nice default)
+    autoXgFromStrength();
+};
   }
 
   function computeStrengthFallback(db, teamId){
