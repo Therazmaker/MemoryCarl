@@ -2365,5 +2365,5 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
     };
   }catch(e){ console.warn("FootballLab debug hook failed", e); }
 
-} 
+
 // end initFootballLab
