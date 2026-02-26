@@ -3178,3 +3178,4 @@ try {
 } catch (e) {
   console.warn("FootballLab auto-init failed", e);
 }
+}
