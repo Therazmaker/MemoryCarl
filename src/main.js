@@ -2431,7 +2431,8 @@ const btnExport = root.querySelector("#btnExport");
   if(state.tab==="home") wireHome(root);
   if(state.tab==="house") wireHouse(root);
 	  if(state.tab==="calendar") wireCalendar(root);
-  if(state.tab==="insights") wireInsights(root);
+  if(state.tab==="insights") wireInsights(root)
+  if(state.tab==="football") wireFootball(root);
   wireHouseZoneSheet(root);
 
   // Re-open house runner modal after render if it was open
@@ -7602,6 +7603,23 @@ function wireActions(root){
     btn.addEventListener("click", ()=>{
       const act = btn.dataset.act;
 
+      // Football Lab actions
+      if(act && act.startsWith("fb")){
+        try{
+          const A = window.__fbActions || {};
+          if(act==="fbBackTeams") return A.backTeams?.();
+          if(act==="fbExport") return A.export?.();
+          if(act==="fbOpenTeamCreate") return A.openTeamCreate?.();
+          if(act==="fbOpenPlayerCreate") return A.openPlayerCreate?.();
+          if(act==="fbOpenMatchMore") return A.openMatchMore?.();
+          if(act==="fbApplyMatch") return A.applyMatch?.();
+          if(act==="fbCloseModal") return A.closeModal?.();
+          if(act==="fbSimAuto") return A.simAuto?.();
+          if(act==="fbSimRun") return A.simRun?.();
+        }catch(e){ console.warn(e); }
+      }
+
+
       // Shopping dashboard navigation
 // Inventory tabs
 if(act==="invTab"){
@@ -7897,6 +7915,420 @@ if(act==="savePurchase"){
     });
   });
 }
+
+
+function wireFootball(root){
+  // Ensure FootballLab helpers are initialized (for other parts that may depend on it)
+  if(!window.__FOOTBALL_LAB__){
+    try{ initFootballLab(); }catch(e){ /* ignore */ }
+  }
+
+  const db = fbGetDB();
+  const teamId = state.footballTeamId || null;
+  const team = teamId ? db.teams.find(t=>String(t.id)===String(teamId)) : null;
+
+  // ---- helpers
+  const save = ()=> fbSaveDB(db);
+  const uid = ()=> String(Date.now()) + "_" + Math.random().toString(16).slice(2,8);
+
+  function openModal(title, bodyHTML){
+    const back = root.querySelector("#fbModalBackdrop");
+    const ttl = root.querySelector("#fbModalTitle");
+    const body = root.querySelector("#fbModalBody");
+    if(!back || !ttl || !body) return null;
+    ttl.textContent = title || "Football";
+    body.innerHTML = bodyHTML || "";
+    back.style.display = "flex";
+    // close on backdrop click
+    back.onclick = (e)=>{ if(e.target===back){ back.style.display="none"; } };
+    return { back, ttl, body };
+  }
+  function closeModal(){
+    const back = root.querySelector("#fbModalBackdrop");
+    if(back) back.style.display="none";
+  }
+
+  function buildTeamOptions(sel){
+    if(!sel) return;
+    sel.innerHTML = db.teams.map(t=>`<option value="${escapeHtml(String(t.id))}">${escapeHtml(t.name)}</option>`).join("");
+  }
+
+  // ---- Home view: teams list open
+  root.querySelectorAll("[data-fb-open-team]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const id = btn.getAttribute("data-fb-open-team");
+      state.footballTeamId = id;
+      view();
+    });
+  });
+
+  // ---- Team view: player open/edit
+  root.querySelectorAll("[data-fb-open-player]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const pid = btn.getAttribute("data-fb-open-player");
+      const p = db.players.find(x=>String(x.id)===String(pid));
+      if(!p) return toast("Jugador no encontrado");
+      const modal = openModal("Editar jugador", `
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:200px;">
+            <div class="muted small">Nombre</div>
+            <input id="fbEditPName" class="input" value="${escapeHtml(p.name||"")}" />
+          </div>
+          <div style="width:140px;">
+            <div class="muted small">Rating (0-10)</div>
+            <input id="fbEditPRating" class="input" type="number" min="0" max="10" step="0.05" value="${(+p.rating||0).toFixed(2)}" />
+          </div>
+          <div style="width:160px;">
+            <div class="muted small">Posición</div>
+            <input id="fbEditPPos" class="input" value="${escapeHtml(p.position||"")}" />
+          </div>
+        </div>
+
+        <div class="hr"></div>
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <div class="muted small">Logs: ${(p.logs||[]).length}</div>
+          <button class="btn danger" id="fbDeletePlayer">Eliminar</button>
+        </div>
+
+        <div style="height:10px;"></div>
+        <button class="btn primary" id="fbSavePlayer">Guardar</button>
+      `);
+      if(!modal) return;
+
+      modal.body.querySelector("#fbSavePlayer")?.addEventListener("click", ()=>{
+        const name = modal.body.querySelector("#fbEditPName")?.value?.trim();
+        const rating = +modal.body.querySelector("#fbEditPRating")?.value;
+        const pos = modal.body.querySelector("#fbEditPPos")?.value?.trim();
+        if(!name) return toast("Nombre requerido");
+        p.name = name;
+        p.rating = fbClamp(isFinite(rating)?rating:5, 0, 10);
+        p.position = pos || "";
+        save();
+        toast("Guardado ✅");
+        closeModal();
+        view();
+      });
+
+      modal.body.querySelector("#fbDeletePlayer")?.addEventListener("click", ()=>{
+        if(!confirm("¿Eliminar jugador?")) return;
+        db.players = db.players.filter(x=>String(x.id)!==String(pid));
+        save();
+        toast("Eliminado 🗑️");
+        closeModal();
+        view();
+      });
+    });
+  });
+
+  // ---- Match logger wiring (team view)
+  if(team){
+    const sel = root.querySelector("#fbMatchPlayer");
+    if(sel){
+      const plist = db.players.filter(p=>String(p.teamId)===String(team.id));
+      sel.innerHTML = plist.map(p=>`<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)} (${(+p.rating||0).toFixed(1)})</option>`).join("");
+    }
+  }
+
+  // ---- Simulator wiring (home view)
+  if(!team){
+    const sh = root.querySelector("#fbSimHome");
+    const sa = root.querySelector("#fbSimAway");
+    buildTeamOptions(sh); buildTeamOptions(sa);
+
+    // keep last selection in state
+    if(sh){
+      if(state.fbSimHome) sh.value = String(state.fbSimHome);
+      sh.addEventListener("change", ()=>{ state.fbSimHome = sh.value; });
+    }
+    if(sa){
+      if(state.fbSimAway) sa.value = String(state.fbSimAway);
+      sa.addEventListener("change", ()=>{ state.fbSimAway = sa.value; });
+    }
+  }
+
+  // ---- Actions handled via data-act in wireActions; we expose handlers via window for simplicity
+  
+  // Import input (file)
+  const importInp = root.querySelector('[data-act="fbImportFile"]');
+  if(importInp && !importInp.__wired){
+    importInp.__wired = true;
+    importInp.addEventListener("change", ()=>{
+      const f = importInp.files && importInp.files[0];
+      if(f) (window.__fbActions?.importFile || (()=>{}))(f);
+      importInp.value = "";
+    });
+  }
+
+window.__fbActions = {
+    backTeams(){
+      state.footballTeamId = null;
+      view();
+    },
+    export(){
+      try{
+        const blob = new Blob([JSON.stringify(db, null, 2)], {type:"application/json"});
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "footballDB_export.json";
+        a.click();
+        setTimeout(()=>URL.revokeObjectURL(a.href), 800);
+        toast("Export listo ✅");
+      }catch(e){ console.warn(e); toast("No se pudo exportar ❌"); }
+    },
+    importFile(file){
+      if(!file) return;
+      const fr = new FileReader();
+      fr.onload = ()=>{
+        try{
+          const data = JSON.parse(String(fr.result||"{}"));
+          if(!data || typeof data!=="object") throw new Error("bad json");
+          if(!Array.isArray(data.teams) || !Array.isArray(data.players) || !Array.isArray(data.matches)){
+            // allow minimal schema
+            data.teams ||= [];
+            data.players ||= [];
+            data.matches ||= [];
+          }
+          localStorage.setItem("footballDB", JSON.stringify(data));
+          toast("Importado ✅");
+          view();
+        }catch(e){ console.warn(e); toast("JSON inválido ❌"); }
+      };
+      fr.readAsText(file);
+    },
+    openTeamCreate(){
+      const modal = openModal("Crear equipo", `
+        <div class="muted small">Nombre</div>
+        <input id="fbNewTeamName" class="input" placeholder="Ej: Barcelona" />
+        <div style="height:10px;"></div>
+        <button class="btn primary" id="fbCreateTeam">Crear</button>
+      `);
+      modal?.body.querySelector("#fbCreateTeam")?.addEventListener("click", ()=>{
+        const name = modal.body.querySelector("#fbNewTeamName")?.value?.trim();
+        if(!name) return toast("Nombre requerido");
+        db.teams.push({ id: uid(), name, createdAt: new Date().toISOString() });
+        save();
+        toast("Equipo creado ✅");
+        closeModal();
+        view();
+      });
+    },
+    openPlayerCreate(){
+      if(!team){ toast("Primero entra en un equipo"); return; }
+      const modal = openModal("Crear jugador", `
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:200px;">
+            <div class="muted small">Nombre</div>
+            <input id="fbNewPName" class="input" placeholder="Ej: Juan Pérez" />
+          </div>
+          <div style="width:140px;">
+            <div class="muted small">Rating (0-10)</div>
+            <input id="fbNewPRating" class="input" type="number" min="0" max="10" step="0.05" value="5.00" />
+          </div>
+          <div style="width:160px;">
+            <div class="muted small">Posición</div>
+            <input id="fbNewPPos" class="input" placeholder="Ej: ST" />
+          </div>
+        </div>
+        <div style="height:10px;"></div>
+        <button class="btn primary" id="fbCreatePlayer">Crear</button>
+      `);
+      modal?.body.querySelector("#fbCreatePlayer")?.addEventListener("click", ()=>{
+        const name = modal.body.querySelector("#fbNewPName")?.value?.trim();
+        const rating = +modal.body.querySelector("#fbNewPRating")?.value;
+        const pos = modal.body.querySelector("#fbNewPPos")?.value?.trim();
+        if(!name) return toast("Nombre requerido");
+        db.players.push({
+          id: uid(),
+          teamId: team.id,
+          name,
+          rating: fbClamp(isFinite(rating)?rating:5, 0, 10),
+          position: pos || "",
+          createdAt: new Date().toISOString(),
+          logs: []
+        });
+        save();
+        toast("Jugador creado ✅");
+        closeModal();
+        view();
+      });
+    },
+    openMatchMore(){
+      const box = root.querySelector("#fbMatchMore");
+      if(box) box.style.display = (box.style.display==="none" || !box.style.display) ? "block" : "none";
+    },
+    applyMatch(){
+      if(!team) return;
+      const pid = root.querySelector("#fbMatchPlayer")?.value;
+      const p = db.players.find(x=>String(x.id)===String(pid));
+      if(!p) return toast("Selecciona un jugador");
+
+      const stats = {
+        minutes: +root.querySelector("#fbMin")?.value || 0,
+        goals: +root.querySelector("#fbGoals")?.value || 0,
+        assists: +root.querySelector("#fbAssists")?.value || 0,
+        passC: +root.querySelector("#fbPassC")?.value || 0,
+        passA: +root.querySelector("#fbPassA")?.value || 0,
+        duelW: +root.querySelector("#fbDuelW")?.value || 0,
+        duelT: +root.querySelector("#fbDuelT")?.value || 0,
+        shotsOn: +root.querySelector("#fbShotsOn")?.value || 0,
+        recoveries: +root.querySelector("#fbRecov")?.value || 0,
+        losses: +root.querySelector("#fbLosses")?.value || 0,
+        yellow: +root.querySelector("#fbYellow")?.value || 0,
+        red: +root.querySelector("#fbRed")?.value || 0,
+      };
+
+      const score10 = fbPerfScore10(stats);
+      const upd = fbUpdatePlayerRating(p, score10, stats.minutes);
+      p.rating = upd.next;
+      p.logs = Array.isArray(p.logs) ? p.logs : [];
+      p.logs.unshift({ id: uid(), at: new Date().toISOString(), stats, score10 });
+
+      save();
+
+      const out = root.querySelector("#fbMatchResult");
+      if(out){
+        out.innerHTML = `✅ <b>${escapeHtml(p.name)}</b> | score: <span class="chip mono">${score10.toFixed(2)}</span> | rating: <span class="chip mono">${upd.old.toFixed(2)} → ${upd.next.toFixed(2)}</span>`;
+      }
+      toast("Aplicado ✅");
+      view();
+    },
+    closeModal(){
+      closeModal();
+    },
+
+    // ---------- Simulator ----------
+    simAuto(){
+      const hid = root.querySelector("#fbSimHome")?.value || "";
+      const aid = root.querySelector("#fbSimAway")?.value || "";
+      const ht = db.teams.find(t=>String(t.id)===String(hid));
+      const at = db.teams.find(t=>String(t.id)===String(aid));
+      if(!ht || !at){ toast("Elige local y visitante"); return; }
+
+      // Estimate xG using mean player ratings (very lightweight; you can upgrade later with real xG/league data)
+      const hPlayers = db.players.filter(p=>String(p.teamId)===String(ht.id));
+      const aPlayers = db.players.filter(p=>String(p.teamId)===String(at.id));
+      const hR = hPlayers.length ? (hPlayers.reduce((s,p)=>s+(+p.rating||0),0)/hPlayers.length) : 5;
+      const aR = aPlayers.length ? (aPlayers.reduce((s,p)=>s+(+p.rating||0),0)/aPlayers.length) : 5;
+
+      const base = 1.25; // baseline goals per team
+      const homeAdv = 0.12;
+      const lamH = fbClamp(base * (hR/5) * (5/Math.max(1,aR)) + homeAdv, 0.2, 3.8);
+      const lamA = fbClamp(base * (aR/5) * (5/Math.max(1,hR)), 0.2, 3.8);
+
+      const ih = root.querySelector("#fbSimXgH");
+      const ia = root.querySelector("#fbSimXgA");
+      if(ih) ih.value = lamH.toFixed(2);
+      if(ia) ia.value = lamA.toFixed(2);
+      toast("Auto xG listo ✨");
+    },
+    simRun(){
+      const hid = root.querySelector("#fbSimHome")?.value || "";
+      const aid = root.querySelector("#fbSimAway")?.value || "";
+      const ht = db.teams.find(t=>String(t.id)===String(hid));
+      const at = db.teams.find(t=>String(t.id)===String(aid));
+      if(!ht || !at){ toast("Elige local y visitante"); return; }
+      if(String(hid)===String(aid)){ toast("Local y visitante no pueden ser el mismo"); return; }
+
+      const xgH = +root.querySelector("#fbSimXgH")?.value;
+      const xgA = +root.querySelector("#fbSimXgA")?.value;
+      const lamH = fbClamp(isFinite(xgH) && xgH>0 ? xgH : 1.25, 0.05, 6);
+      const lamA = fbClamp(isFinite(xgA) && xgA>0 ? xgA : 1.10, 0.05, 6);
+
+      const N = 10000;
+
+      function randPoisson(lambda){
+        // Knuth
+        const L = Math.exp(-lambda);
+        let k = 0, p = 1;
+        do{ k++; p *= Math.random(); }while(p > L && k<40);
+        return k-1;
+      }
+
+      let wH=0, wA=0, d=0;
+      let btts=0;
+      const totals = Array(8).fill(0); // 0..6, 7=7+
+      const scoreCount = new Map(); // "h-a" -> count
+      for(let i=0;i<N;i++){
+        const gh = randPoisson(lamH);
+        const ga = randPoisson(lamA);
+        if(gh>ga) wH++; else if(ga>gh) wA++; else d++;
+        if(gh>0 && ga>0) btts++;
+        const tg = gh+ga;
+        totals[Math.min(7, tg)]++;
+        const key = gh+"-"+ga;
+        scoreCount.set(key, (scoreCount.get(key)||0)+1);
+      }
+
+      // top scores
+      const top = Array.from(scoreCount.entries()).sort((a,b)=>b[1]-a[1]).slice(0,10);
+      const topLabels = top.map(x=>x[0]);
+      const topVals = top.map(x=>+(x[1]/N*100).toFixed(2));
+
+      // totals dist
+      const totLabels = ["0","1","2","3","4","5","6","7+"];
+      const totVals = totals.map(c=>+(c/N*100).toFixed(2));
+
+      // Over/Under
+      const pOver25 = (totals[3]+totals[4]+totals[5]+totals[6]+totals[7]) / N * 100; // 3+
+      const pUnder25 = 100 - pOver25;
+
+      const sum = root.querySelector("#fbSimSummary");
+      if(sum){
+        sum.innerHTML = `
+          <div class="row" style="gap:10px; flex-wrap:wrap;">
+            <span class="chip">λH ${lamH.toFixed(2)}</span>
+            <span class="chip">λA ${lamA.toFixed(2)}</span>
+            <span class="chip">1 ${ (wH/N*100).toFixed(1) }%</span>
+            <span class="chip">X ${ (d/N*100).toFixed(1) }%</span>
+            <span class="chip">2 ${ (wA/N*100).toFixed(1) }%</span>
+            <span class="chip">BTTS ${(btts/N*100).toFixed(1)}%</span>
+            <span class="chip">O2.5 ${pOver25.toFixed(1)}%</span>
+            <span class="chip">U2.5 ${pUnder25.toFixed(1)}%</span>
+          </div>
+          <div class="muted small" style="margin-top:6px;">${escapeHtml(ht.name)} vs ${escapeHtml(at.name)} | ${N.toLocaleString()} simulaciones</div>
+        `;
+      }
+
+      // Charts (Chart.js is already used in the app)
+      try{
+        window.__fbSimCharts ||= {};
+        if(window.__fbSimCharts.tot){ window.__fbSimCharts.tot.destroy(); }
+        if(window.__fbSimCharts.top){ window.__fbSimCharts.top.destroy(); }
+
+        const cTot = root.querySelector("#fbSimChartTotals");
+        const cTop = root.querySelector("#fbSimChartTop");
+
+        if(cTot && window.Chart){
+          window.__fbSimCharts.tot = new Chart(cTot.getContext("2d"), {
+            type:"bar",
+            data:{ labels: totLabels, datasets:[{ label:"%", data: totVals, borderWidth:1 }]},
+            options:{
+              responsive:true,
+              plugins:{ legend:{display:false} },
+              scales:{ y:{ beginAtZero:true, suggestedMax:40 } }
+            }
+          });
+        }
+        if(cTop && window.Chart){
+          window.__fbSimCharts.top = new Chart(cTop.getContext("2d"), {
+            type:"bar",
+            data:{ labels: topLabels, datasets:[{ label:"%", data: topVals, borderWidth:1 }]},
+            options:{
+              responsive:true,
+              plugins:{ legend:{display:false} },
+              scales:{ y:{ beginAtZero:true, suggestedMax:20 } }
+            }
+          });
+        }
+      }catch(e){ console.warn(e); }
+
+      toast("Simulación lista 🎲");
+    }
+  };
+}
+
+
+
 
 function openPromptModal({title, fields, onSubmit}){
   const host = document.querySelector("#app");
@@ -14151,7 +14583,7 @@ function viewFootball(){
         <div class="muted small">Equipo</div>
         <div style="font-size:22px;font-weight:900;">${escapeHtml(team.name)}</div>
       </div>
-      <button class="btn" data-fb-action="backTeams">← Equipos</button>
+      <button class="btn" data-act="fbBackTeams">← Equipos</button>
     </div>
   ` : `
     <div class="row" style="justify-content:space-between;align-items:center;">
@@ -14160,10 +14592,10 @@ function viewFootball(){
         <div style="font-size:22px;font-weight:900;">⚽ Football Lab</div>
       </div>
       <div class="row" style="margin:0; gap:8px;">
-        <button class="btn" data-fb-action="export">Export</button>
+        <button class="btn" data-act="fbExport">Export</button>
         <label class="btn" style="cursor:pointer;">
           Import
-          <input data-fb-action="importFile" type="file" accept="application/json" style="display:none;">
+          <input data-act="fbImportFile" type="file" accept="application/json" style="display:none;">
         </label>
       </div>
     </div>
@@ -14173,7 +14605,7 @@ function viewFootball(){
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center;">
         <div style="font-weight:900;">Equipos</div>
-        <button class="btn primary" data-fb-action="openTeamCreate">+ Equipo</button>
+        <button class="btn primary" data-act="fbOpenTeamCreate">+ Equipo</button>
       </div>
       <div class="hr"></div>
       <div class="list">
@@ -14193,11 +14625,57 @@ function viewFootball(){
     </div>
   `;
 
-  const teamView = team ? `
+  
+  const simulator = `
+    <div class="card" style="margin-top:12px;">
+      <div class="row" style="justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:900;">🎲 Simulador (Monte Carlo)</div>
+          <div class="muted small">Poisson simple con xG manual o auto (por ratings)</div>
+        </div>
+        <button class="btn" data-act="fbSimRun">Simular 10k</button>
+      </div>
+      <div class="hr"></div>
+
+      <div class="row" style="gap:10px; flex-wrap:wrap; align-items:flex-end;">
+        <div style="flex:1; min-width:180px;">
+          <div class="muted small">Local</div>
+          <select id="fbSimHome" class="input" style="width:100%;"></select>
+        </div>
+        <div style="flex:1; min-width:180px;">
+          <div class="muted small">Visitante</div>
+          <select id="fbSimAway" class="input" style="width:100%;"></select>
+        </div>
+        <div style="width:120px;">
+          <div class="muted small">xG Local</div>
+          <input id="fbSimXgH" class="input" type="number" step="0.05" min="0" value=""/>
+        </div>
+        <div style="width:120px;">
+          <div class="muted small">xG Visita</div>
+          <input id="fbSimXgA" class="input" type="number" step="0.05" min="0" value=""/>
+        </div>
+        <button class="btn" data-act="fbSimAuto" title="Rellenar xG con estimación por ratings">Auto xG</button>
+      </div>
+
+      <div id="fbSimSummary" class="muted" style="margin-top:10px;"></div>
+
+      <div class="row" style="gap:12px; flex-wrap:wrap; margin-top:12px;">
+        <div class="card" style="flex:1; min-width:260px; padding:12px;">
+          <div class="muted small" style="margin-bottom:6px;">Distribución de goles totales</div>
+          <canvas id="fbSimChartTotals" height="140"></canvas>
+        </div>
+        <div class="card" style="flex:1; min-width:260px; padding:12px;">
+          <div class="muted small" style="margin-bottom:6px;">Top marcadores</div>
+          <canvas id="fbSimChartTop" height="140"></canvas>
+        </div>
+      </div>
+    </div>
+  `;
+const teamView = team ? `
     <div class="card" style="margin-top:12px;">
       <div class="row" style="justify-content:space-between;align-items:center;">
         <div style="font-weight:900;">Jugadores</div>
-        <button class="btn primary" data-fb-action="openPlayerCreate">+ Jugador</button>
+        <button class="btn primary" data-act="fbOpenPlayerCreate">+ Jugador</button>
       </div>
       <div class="hr"></div>
 
@@ -14244,8 +14722,8 @@ function viewFootball(){
           <div class="muted small">A</div>
           <input id="fbAssists" class="input" type="number" value="0"/>
         </div>
-        <button class="btn primary" data-fb-action="openMatchMore" style="white-space:nowrap;">+ Stats</button>
-        <button class="btn" data-fb-action="applyMatch" style="white-space:nowrap;">Aplicar</button>
+        <button class="btn primary" data-act="fbOpenMatchMore" style="white-space:nowrap;">+ Stats</button>
+        <button class="btn" data-act="fbApplyMatch" style="white-space:nowrap;">Aplicar</button>
       </div>
 
       <div id="fbMatchMore" style="display:none; margin-top:12px;">
@@ -14298,7 +14776,7 @@ function viewFootball(){
       <div class="modal">
         <div class="row" style="justify-content:space-between;align-items:center;">
           <h2 id="fbModalTitle" style="margin:0;">Football</h2>
-          <button class="iconBtn" data-fb-action="closeModal">Cerrar</button>
+          <button class="iconBtn" data-act="fbCloseModal">Cerrar</button>
         </div>
         <div id="fbModalBody" style="margin-top:12px;"></div>
       </div>
@@ -14309,7 +14787,7 @@ function viewFootball(){
     <section>
       ${teamHeader}
       <div style="height:12px;"></div>
-      ${team ? teamView : teamsList}
+      ${team ? teamView : (simulator + teamsList)}
       ${modals}
     </section>
   `;
