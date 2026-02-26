@@ -13,9 +13,15 @@
  */
 
 export function initFootballLab(){
-  // Robust init guard:
-  // - If a previous init failed mid-way, we must allow re-init.
-  // - Prevent double-init while running.
+  // Robust init guard with a "ready promise" so callers can wait safely.
+  // This prevents main.js from calling open() before the module finished wiring.
+  if (!window.__footballLabReadyPromise) {
+    window.__footballLabReadyPromise = new Promise((resolve, reject) => {
+      window.__footballLabReadyResolve = resolve;
+      window.__footballLabReadyReject = reject;
+    });
+  }
+
   const st = window.__footballLabInitState;
   if (st === "ready") return;
   if (st === "inProgress") return;
@@ -24,16 +30,19 @@ export function initFootballLab(){
   // Ensure public hook exists as early as possible
   // (main.js expects this to exist to open the Lab)
   const placeholderOpen = (view, payload)=>{
-    // Attempt a late init if we aren't ready yet (helps after a failed/cached load).
+    // Kick init again if needed, but do NOT throw immediately.
+    // Wait for the ready promise, then call the real open.
     if (window.__footballLabInitState !== "ready"){
       try{ window.initFootballLab?.(); }catch(_e){}
     }
-    const lab = window.__FOOTBALL_LAB__;
-    // If the hook was replaced with the real one, delegate.
-    if (lab && typeof lab.open === "function" && lab.open !== placeholderOpen){
-      return lab.open(view, payload);
-    }
-    throw new Error("FootballLab not ready yet");
+    const p = window.__footballLabReadyPromise;
+    if (!p) throw new Error("FootballLab not ready yet");
+    return p.then(()=>{
+      const lab = window.__FOOTBALL_LAB__;
+      const realOpen = lab && (lab.__openReal || (lab.open && lab.open !== placeholderOpen ? lab.open : null));
+      if (typeof realOpen === "function") return realOpen(view, payload);
+      throw new Error("FootballLab not ready yet");
+    });
   };
   if (!window.__FOOTBALL_LAB__) {
     window.__FOOTBALL_LAB__ = {
@@ -3175,11 +3184,14 @@ const od1 = document.getElementById("od_1");
   }
 
 
-  // --- Debug hook (V6e) ---
+  // --- Debug/public hook (V6e) ---
   try{
+    const realOpen = (view, payload)=> openLab(view, payload);
     window.__FOOTBALL_LAB__ = {
       version: "V6e",
-      open: (view, payload)=> openLab(view, payload),
+      // Keep both for compatibility and for placeholder delegation.
+      __openReal: realOpen,
+      open: realOpen,
       db: ()=> loadDB(),
       setDB: (db)=> saveDB(db),
       help: "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})"
@@ -3188,6 +3200,7 @@ const od1 = document.getElementById("od_1");
 
   // Mark ready only after the whole init finishes successfully.
   window.__footballLabInitState = "ready";
+  try{ window.__footballLabReadyResolve?.(true); }catch(_e){}
 
 
 // end initFootballLab
@@ -3197,9 +3210,16 @@ window.initFootballLab = initFootballLab;
 
 // Auto-init on load so the Lab is available without extra wiring
 try {
-  initFootballLab();
+  // Delay init until DOM is ready enough, so we don't trip on missing nodes.
+  const kick = ()=>{ initFootballLab(); };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", kick, { once:true });
+  } else {
+    kick();
+  }
 } catch (e) {
   window.__footballLabInitState = "failed";
+  try{ window.__footballLabReadyReject?.(e); }catch(_e){}
   console.warn("FootballLab auto-init failed", e);
 }
 
