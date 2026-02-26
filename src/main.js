@@ -220,6 +220,7 @@ function copyFcmToken(){
 // ====================== END NOTIFICATIONS ======================
 
 // ---- Storage keys ----
+window.INS_HEAT_MODE = window.INS_HEAT_MODE || (localStorage.getItem("mc_ins_heat_mode") || "pulse");
 const LS = {
   routines: "memorycarl_v2_routines",
   shopping: "memorycarl_v2_shopping",
@@ -2499,12 +2500,12 @@ const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`)
       <div class="row" style="justify-content:space-between;align-items:center;margin-top:10px;">
         <div class="chip">🔥 Heatmap</div>
         <select id="insHeatMode" class="input" style="max-width:220px" onchange="insightsSetHeatMode(this.value)">
-          <option value="pulse" ${INS_HEAT_MODE==="pulse"?"selected":""}>Pulso</option>
-          <option value="sleep" ${INS_HEAT_MODE==="sleep"?"selected":""}>Sueño</option>
-          <option value="tasks" ${INS_HEAT_MODE==="tasks"?"selected":""}>Tasks</option>
-          <option value="clean" ${INS_HEAT_MODE==="clean"?"selected":""}>Limpieza</option>
-          <option value="shop" ${INS_HEAT_MODE==="shop"?"selected":""}>Compras</option>
-          <option value="mood" ${INS_HEAT_MODE==="mood"?"selected":""}>Mood</option>
+          <option value="pulse" ${window.INS_HEAT_MODE==="pulse"?"selected":""}>Pulso</option>
+          <option value="sleep" ${window.INS_HEAT_MODE==="sleep"?"selected":""}>Sueño</option>
+          <option value="tasks" ${window.INS_HEAT_MODE==="tasks"?"selected":""}>Tasks</option>
+          <option value="clean" ${window.INS_HEAT_MODE==="clean"?"selected":""}>Limpieza</option>
+          <option value="shop" ${window.INS_HEAT_MODE==="shop"?"selected":""}>Compras</option>
+          <option value="mood" ${window.INS_HEAT_MODE==="mood"?"selected":""}>Mood</option>
         </select>
       </div>
       <div class="insCal">
@@ -2515,7 +2516,7 @@ const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`)
           const dna = buildInsightDNA(c.sum);
           const moneyStr = (c.sum && c.sum.shopping && c.sum.shopping.total>0) ? `<div class="calMini money">🛒 ${money(c.sum.shopping.total)}</div>` : ``;
           const cleanStr = (c.sum && c.sum.cleaning && c.sum.cleaning.totalMinutes>0) ? `<div class="calMini">🧹 ${Math.round(c.sum.cleaning.totalMinutes)}m</div>` : ``;
-          const heat = insightHeat(c.sum, INS_HEAT_MODE, mctx);
+          const heat = insightHeat(c.sum, window.INS_HEAT_MODE, mctx);
           return `
             <button class="calDay ${c.isToday?"today":""} ${heat>0?"heat":""}" style="--heat:${heat.toFixed(3)}" data-ins-day="${c.iso}">
               <div class="calNum">${c.day}</div>
@@ -2546,10 +2547,10 @@ function buildInsightIcons(sum){
 // Insights V2 (Neural Minimal)
 // =====================
 // Heatmap mode for Insights calendar
-let INS_HEAT_MODE = localStorage.getItem("mc_ins_heat_mode") || "pulse";
+window.INS_HEAT_MODE = window.INS_HEAT_MODE || (localStorage.getItem("mc_ins_heat_mode") || "pulse");
 window.insightsSetHeatMode = function(mode){
-  INS_HEAT_MODE = String(mode || "pulse");
-  localStorage.setItem("mc_ins_heat_mode", INS_HEAT_MODE);
+  window.INS_HEAT_MODE = String(mode || "pulse");
+  localStorage.setItem("mc_ins_heat_mode", window.INS_HEAT_MODE);
   // re-render insights if we are on that tab
   if(state && state.tab === "insights") view();
 };
