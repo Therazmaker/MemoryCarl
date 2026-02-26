@@ -3168,3 +3168,4 @@ const od1 = document.getElementById("od_1");
 }
 
 window.initFootballLab = initFootballLab;
+}
