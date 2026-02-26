@@ -1,5 +1,11 @@
 import { initFootballLab } from "./footballLab_v8.js";
 
+// ---- Build markers (for debugging cache / deploy issues) ----
+// If you don't see these in DevTools console, you are NOT running this build.
+window.FOOTBALL_LAB_VERSION = "1008-odds-xlb4";
+window.FOOTBALL_LAB_BANNER = "MemoryCarl BUILD 1008 (Odds + XL Builder 4 líneas)";
+console.log("%c"+window.FOOTBALL_LAB_BANNER, "background:#111;color:#7CFFB2;padding:4px 8px;border-radius:10px;font-weight:900;");
+
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
    https://therazmaker.github.io/MemoryCarl/?reset=1

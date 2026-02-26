@@ -13,7 +13,8 @@
  */
 
 export function initFootballLab(){
-  console.log("⚽ FOOTBALL LAB V6e ACTIVE");
+  window.FOOTBALL_LAB_FILE = "footballLab_v8.js";
+  console.log("⚽ FOOTBALL LAB V6e ACTIVE", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
   const KEY = "footballDB";
   let _fbSimCharts = { totals:null, scorelines:null };
@@ -1728,9 +1729,217 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
       o.textContent = (f==="433"?"4-3-3":f==="442"?"4-4-2":"3-4-3");
       formationSel.appendChild(o);
     });
+    // Custom 4-line editable formation
+    {
+      const o = document.createElement("option");
+      o.value = "custom4";
+      o.textContent = "Custom (4 líneas)";
+      formationSel.appendChild(o);
+    }
+
 
     function buildSlots(){
       const f = formationSel.value;
+
+      // ---- Custom 4-line formation (editable) ----
+      if(f === "custom4"){
+        if(!lineupStore[f]){
+          lineupStore[f] = {
+            defN: 4, midN: 3, attN: 3,
+            gk: "",
+            def: Array(4).fill(""),
+            mid: Array(3).fill(""),
+            att: Array(3).fill(""),
+            defRoles: ["LB","CB","CB","RB"],
+            midRoles: ["CDM","CM","CAM"],
+            attRoles: ["LW","ST","RW"]
+          };
+        }
+        const saved = lineupStore[f];
+
+        // normalize lengths
+        function ensureLen(arr, n){ 
+          const a = Array.isArray(arr) ? arr.slice(0,n) : [];
+          while(a.length < n) a.push("");
+          return a;
+        }
+        function ensureRoles(arr, n, defRole){
+          const a = Array.isArray(arr) ? arr.slice(0,n) : [];
+          while(a.length < n) a.push(defRole);
+          return a;
+        }
+
+        const wrap = document.getElementById("slots");
+        wrap.innerHTML = `
+          <div class="fl-card" style="margin:0 0 10px 0;">
+            <div style="font-weight:800;">Formación editable (4 líneas)</div>
+            <div class="fl-small" style="margin-top:6px;">Ajusta la cantidad por línea. Total (DEF+MID+ATT) debe ser 10.</div>
+            <div class="fl-row" style="margin-top:10px; flex-wrap:wrap; gap:10px;">
+              <div style="min-width:120px;">
+                <div class="fl-h3">DEF</div>
+                <input class="fl-input" id="c4_defN" type="number" min="3" max="6" step="1" value="${saved.defN}">
+              </div>
+              <div style="min-width:120px;">
+                <div class="fl-h3">MID</div>
+                <input class="fl-input" id="c4_midN" type="number" min="2" max="6" step="1" value="${saved.midN}">
+              </div>
+              <div style="min-width:120px;">
+                <div class="fl-h3">ATT</div>
+                <input class="fl-input" id="c4_attN" type="number" min="1" max="4" step="1" value="${saved.attN}">
+              </div>
+              <div style="flex:1 1 auto;">
+                <div class="fl-h3">Total</div>
+                <div id="c4_total" class="fl-small" style="margin-top:10px;font-weight:800;"></div>
+              </div>
+            </div>
+          </div>
+
+          ${renderLineSection("GK","🧤 Portero", 1)}
+          ${renderLineSection("DEF","🛡 Defensas", saved.defN)}
+          ${renderLineSection("MID","⚙️ Medios", saved.midN)}
+          ${renderLineSection("ATT","🔥 Ataque", saved.attN)}
+        `;
+
+        function renderLineSection(key, title, n){
+          const rows = [];
+          for(let i=0;i<n;i++){
+            const idRole = `c4_${key}_role_${i}`;
+            const idSel  = `c4_${key}_pid_${i}`;
+            const showRole = (key!=="GK");
+            rows.push(`
+              <div class="fl-row" style="margin-top:8px;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                <div style="min-width:220px;">
+                  <div style="font-weight:800;">${title} ${key==="GK"?"":`#${i+1}`}</div>
+                </div>
+                ${showRole ? `
+                  <div style="min-width:180px;">
+                    <div class="fl-h3">Rol</div>
+                    <select class="fl-select" id="${idRole}"></select>
+                  </div>` : ``}
+                <div style="flex:1 1 260px;">
+                  <div class="fl-h3">Jugador</div>
+                  <select class="fl-select" id="${idSel}"></select>
+                </div>
+              </div>
+            `);
+          }
+          return `
+            <div class="fl-card" style="margin:10px 0;">
+              <div style="font-weight:800;">${title}</div>
+              ${rows.join("")}
+            </div>
+          `;
+        }
+
+        // wire counts
+        const defNEl = document.getElementById("c4_defN");
+        const midNEl = document.getElementById("c4_midN");
+        const attNEl = document.getElementById("c4_attN");
+        const totalEl = document.getElementById("c4_total");
+
+        function refreshTotal(){
+          const defN = clamp(parseInt(defNEl.value||"4",10), 3, 6);
+          const midN = clamp(parseInt(midNEl.value||"3",10), 2, 6);
+          const attN = clamp(parseInt(attNEl.value||"3",10), 1, 4);
+          const total = defN + midN + attN;
+          totalEl.innerHTML = `DEF ${defN} + MID ${midN} + ATT ${attN} = <b>${total}</b> (debe ser 10)`;
+          totalEl.style.color = (total===10) ? "" : "var(--danger, #ff6b6b)";
+          return {defN, midN, attN, total};
+        }
+
+        function applyCounts(){
+          const {defN, midN, attN, total} = refreshTotal();
+          // keep whatever user set, but warn if not 10
+          saved.defN = defN; saved.midN = midN; saved.attN = attN;
+          saved.def = ensureLen(saved.def, defN);
+          saved.mid = ensureLen(saved.mid, midN);
+          saved.att = ensureLen(saved.att, attN);
+          saved.defRoles = ensureRoles(saved.defRoles, defN, "CB");
+          saved.midRoles = ensureRoles(saved.midRoles, midN, "CM");
+          saved.attRoles = ensureRoles(saved.attRoles, attN, "ST");
+          lineupStore[f] = saved;
+          // rebuild UI with new counts
+          buildSlots();
+        }
+
+        defNEl.onchange = applyCounts;
+        midNEl.onchange = applyCounts;
+        attNEl.onchange = applyCounts;
+
+        refreshTotal();
+
+        // fill player pools once
+        const byId = new Map(players.map(p=>[p.id,p]));
+        function fillPlayerSelect(sel, pickedId){
+          sel.innerHTML = `<option value="">(vacío)</option>`;
+          players
+            .slice()
+            .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id))
+            .forEach(p=>{
+              const eff = getEffectiveRating(db, p.id);
+              const o = document.createElement("option");
+              o.value = p.id;
+              o.textContent = `${p.name} • ${p.position} • base ${fmt(p.rating,1)} • eff ${fmt(eff,1)}`;
+              sel.appendChild(o);
+            });
+          if(pickedId) sel.value = pickedId;
+        }
+
+        function fillRoleSelect(sel, options, picked){
+          sel.innerHTML = "";
+          options.forEach(code=>{
+            const o = document.createElement("option");
+            o.value = code;
+            o.textContent = POS_LABELS[code] || code;
+            sel.appendChild(o);
+          });
+          if(picked && options.includes(picked)) sel.value = picked;
+        }
+
+        // GK
+        {
+          const sel = document.getElementById("c4_GK_pid_0");
+          fillPlayerSelect(sel, saved.gk);
+          sel.onchange = ()=>{ saved.gk = sel.value||""; previewStrength(); };
+        }
+
+        const DEF_ROLE_OPTS = ["LB","CB","RB"];
+        const MID_ROLE_OPTS = ["CDM","CM","CAM"];
+        const ATT_ROLE_OPTS = ["LW","ST","RW"];
+
+        // DEF
+        for(let i=0;i<saved.defN;i++){
+          const selRole = document.getElementById(`c4_DEF_role_${i}`);
+          const selPid  = document.getElementById(`c4_DEF_pid_${i}`);
+          fillRoleSelect(selRole, DEF_ROLE_OPTS, saved.defRoles[i]||"CB");
+          fillPlayerSelect(selPid, saved.def[i]||"");
+          selRole.onchange = ()=>{ saved.defRoles[i]=selRole.value; previewStrength(); };
+          selPid.onchange  = ()=>{ saved.def[i]=selPid.value||""; previewStrength(); };
+        }
+        // MID
+        for(let i=0;i<saved.midN;i++){
+          const selRole = document.getElementById(`c4_MID_role_${i}`);
+          const selPid  = document.getElementById(`c4_MID_pid_${i}`);
+          fillRoleSelect(selRole, MID_ROLE_OPTS, saved.midRoles[i]||"CM");
+          fillPlayerSelect(selPid, saved.mid[i]||"");
+          selRole.onchange = ()=>{ saved.midRoles[i]=selRole.value; previewStrength(); };
+          selPid.onchange  = ()=>{ saved.mid[i]=selPid.value||""; previewStrength(); };
+        }
+        // ATT
+        for(let i=0;i<saved.attN;i++){
+          const selRole = document.getElementById(`c4_ATT_role_${i}`);
+          const selPid  = document.getElementById(`c4_ATT_pid_${i}`);
+          fillRoleSelect(selRole, ATT_ROLE_OPTS, saved.attRoles[i]||"ST");
+          fillPlayerSelect(selPid, saved.att[i]||"");
+          selRole.onchange = ()=>{ saved.attRoles[i]=selRole.value; previewStrength(); };
+          selPid.onchange  = ()=>{ saved.att[i]=selPid.value||""; previewStrength(); };
+        }
+
+        previewStrength();
+        return;
+      }
+
+      // ---- Preset formations ----
       const slots = FORMATIONS[f] || FORMATIONS["433"];
 
       if(!lineupStore[f]) lineupStore[f] = {};
@@ -1781,6 +1990,17 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
 
     document.getElementById("saveLineup").onclick = ()=>{
       const f = formationSel.value;
+
+      // Custom 4-line: state is already in lineupStore[f], just persist
+      if(f === "custom4"){
+        if(!lineupStore[f]) lineupStore[f] = {};
+        db.lineups[teamId] = lineupStore;
+        saveDB(db);
+        alert("XI guardado (Custom).");
+        previewStrength();
+        return;
+      }
+
       if(!lineupStore[f]) lineupStore[f] = {};
       const saved = lineupStore[f];
       // store by index, to support repeated positions
@@ -1798,6 +2018,56 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
 
     document.getElementById("autoFill").onclick = ()=>{
       const f = formationSel.value;
+
+      if(f === "custom4"){
+        const saved = lineupStore[f];
+        if(!saved) return;
+
+        const used = new Set();
+        // GK: best GK, else best overall
+        {
+          const pool = players
+            .filter(p=>p.position==="GK" && !used.has(p.id))
+            .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id));
+          let pick = pool[0] || players
+            .filter(p=>!used.has(p.id))
+            .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id))[0] || null;
+          if(pick){
+            saved.gk = pick.id;
+            used.add(pick.id);
+          }
+        }
+
+        function fillLine(n, roles, picks){
+          for(let i=0;i<n;i++){
+            const need = roles[i] || "CM";
+            const pool = players
+              .filter(p=>p.position===need && !used.has(p.id))
+              .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id));
+            let pick = pool[0] || null;
+            if(!pick){
+              pick = players
+                .filter(p=>!used.has(p.id))
+                .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id))[0] || null;
+            }
+            if(pick){
+              picks[i] = pick.id;
+              used.add(pick.id);
+            }else{
+              picks[i] = "";
+            }
+          }
+        }
+
+        fillLine(saved.defN, saved.defRoles, saved.def);
+        fillLine(saved.midN, saved.midRoles, saved.mid);
+        fillLine(saved.attN, saved.attRoles, saved.att);
+
+        // rebuild UI to reflect new picks
+        buildSlots();
+        return;
+      }
+
       const slots = FORMATIONS[f] || FORMATIONS["433"];
       // pick best effective by matching position, avoiding duplicates
       const used = new Set();
@@ -1839,6 +2109,26 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
   }
 
   function getXIFromBuilder(teamId, formation, db){
+    // Custom 4-line formation
+    if(formation === "custom4"){
+      const cfg = db.lineups?.[teamId]?.[formation];
+      const xi = [];
+      if(!cfg) return xi;
+
+      const add = (pid, slotPos)=>{
+        if(!pid) return;
+        const p = db.players.find(pp=>pp.id===pid);
+        if(!p) return;
+        xi.push({ ...p, _slotPos: slotPos });
+      };
+
+      add(cfg.gk, "GK");
+      (cfg.def||[]).forEach((pid, i)=>add(pid, (cfg.defRoles||[])[i] || "CB"));
+      (cfg.mid||[]).forEach((pid, i)=>add(pid, (cfg.midRoles||[])[i] || "CM"));
+      (cfg.att||[]).forEach((pid, i)=>add(pid, (cfg.attRoles||[])[i] || "ST"));
+      return xi;
+    }
+
     const lineups = db.lineups?.[teamId]?.[formation] || {};
     const slots = FORMATIONS[formation] || FORMATIONS["433"];
     const xi = [];
@@ -2286,6 +2576,60 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
           </div>
         </div>
 
+        <div class="fl-card" style="margin-top:12px;">
+          <div style="font-weight:800;">💸 Cuotas (opcional, tú las metes)</div>
+          <div class="fl-small" style="margin-top:6px;">Convierte cuotas a probabilidades “limpias” (sin margen) y las compara con tu simulación. Si activas calibración, ajusta el total de goles para acercarse al mercado O/U 2.5.</div>
+
+          <div class="fl-row" style="margin-top:10px; flex-wrap:wrap; gap:10px;">
+            <div style="min-width:120px;">
+              <div class="fl-h3">1</div>
+              <input class="fl-input" id="od_1" type="number" step="0.01" min="1.01" placeholder="2.10">
+            </div>
+            <div style="min-width:120px;">
+              <div class="fl-h3">X</div>
+              <input class="fl-input" id="od_x" type="number" step="0.01" min="1.01" placeholder="3.30">
+            </div>
+            <div style="min-width:120px;">
+              <div class="fl-h3">2</div>
+              <input class="fl-input" id="od_2" type="number" step="0.01" min="1.01" placeholder="3.60">
+            </div>
+
+            <div style="min-width:140px;">
+              <div class="fl-h3">Over 2.5</div>
+              <input class="fl-input" id="od_o25" type="number" step="0.01" min="1.01" placeholder="1.90">
+            </div>
+            <div style="min-width:140px;">
+              <div class="fl-h3">Under 2.5</div>
+              <input class="fl-input" id="od_u25" type="number" step="0.01" min="1.01" placeholder="1.95">
+            </div>
+
+            <div style="min-width:140px;">
+              <div class="fl-h3">BTTS Sí</div>
+              <input class="fl-input" id="od_bttsY" type="number" step="0.01" min="1.01" placeholder="1.85">
+            </div>
+            <div style="min-width:140px;">
+              <div class="fl-h3">BTTS No</div>
+              <input class="fl-input" id="od_bttsN" type="number" step="0.01" min="1.01" placeholder="1.95">
+            </div>
+
+            <div style="min-width:220px;">
+              <div class="fl-h3">Blend (tu modelo vs mercado)</div>
+              <input class="fl-input" id="od_w" type="number" step="0.05" min="0" max="1" value="0.65">
+              <div class="fl-small" style="margin-top:6px;">0 = solo mercado • 1 = solo tu modelo</div>
+            </div>
+
+            <div style="display:flex; gap:8px; align-items:flex-end;">
+              <label class="fl-small" style="display:flex;gap:8px;align-items:center;">
+                <input type="checkbox" id="od_calibrate" checked>
+                Calibrar xG con O/U 2.5
+              </label>
+            </div>
+          </div>
+
+          <div id="od_out" class="fl-small" style="margin-top:10px;"></div>
+        </div>
+
+
         <div class="fl-grid2" style="margin-top:12px;">
           <div class="fl-card" style="margin:0;">
             <div style="font-weight:800;">Resultados</div>
@@ -2323,6 +2667,13 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
       o.textContent = (f==="433"?"4-3-3":f==="442"?"4-4-2":"3-4-3");
       formSel.appendChild(o);
     });
+    {
+      const o = document.createElement("option");
+      o.value = "custom4";
+      o.textContent = "Custom (4 líneas)";
+      formSel.appendChild(o);
+    }
+
 
     db.teams.forEach(t=>{
       const o1 = document.createElement("option");
@@ -2398,6 +2749,17 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
     const mcXgH = document.getElementById("mc_xgH");
     const mcXgA = document.getElementById("mc_xgA");
     const mcN = document.getElementById("mc_N");
+const od1 = document.getElementById("od_1");
+    const odX = document.getElementById("od_x");
+    const od2 = document.getElementById("od_2");
+    const odO25 = document.getElementById("od_o25");
+    const odU25 = document.getElementById("od_u25");
+    const odBTTSY = document.getElementById("od_bttsY");
+    const odBTTSN = document.getElementById("od_bttsN");
+    const odW = document.getElementById("od_w");
+    const odCal = document.getElementById("od_calibrate");
+    const odOut = document.getElementById("od_out");
+
 
     function autoXgFromStrength(){
       // Map strength totals to a reasonable xG baseline.
@@ -2470,10 +2832,61 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
       const awayTeam = db.teams.find(t=>t.id===awaySel.value);
       const nameH = homeTeam?.name || "Local";
       const nameA = awayTeam?.name || "Visitante";
-
       const N = clampNum(mcN?.value, 1000, 50000, 10000);
-      const xgH = clampNum(mcXgH?.value, 0.1, 5, 1.35);
-      const xgA = clampNum(mcXgA?.value, 0.1, 5, 1.15);
+      const baseXgH = clampNum(mcXgH?.value, 0.1, 5, 1.35);
+      const baseXgA = clampNum(mcXgA?.value, 0.1, 5, 1.15);
+
+      // --- Odds -> fair probabilities (remove margin) ---
+      function fairFromOdds(arr){
+        const ps = arr.map(o=> (Number.isFinite(o) && o>1.0001) ? (1/o) : null);
+        if(ps.some(v=>v===null)) return null;
+        const s = ps.reduce((a,b)=>a+b,0);
+        if(!(s>0)) return null;
+        return ps.map(p=>p/s);
+      }
+      function readOdd(el){
+        const v = parseFloat((el?.value||"").trim());
+        return (Number.isFinite(v) && v>1.0001) ? v : null;
+      }
+      function poissonOver25Prob(L){
+        // P(G>=3) where G ~ Poisson(L)
+        const e = Math.exp(-Math.max(0, L));
+        return 1 - e*(1 + L + (L*L)/2);
+      }
+      function calibrateTotalGoals(targetOver){
+        // binary search total lambda to match target P(over2.5)
+        let lo = 0.2, hi = 6.0;
+        for(let it=0; it<40; it++){
+          const mid = (lo+hi)/2;
+          const p = poissonOver25Prob(mid);
+          if(p < targetOver) lo = mid;
+          else hi = mid;
+        }
+        return (lo+hi)/2;
+      }
+
+      const o_1 = readOdd(od1), o_x = readOdd(odX), o_2 = readOdd(od2);
+      const o_o25 = readOdd(odO25), o_u25 = readOdd(odU25);
+      const o_by = readOdd(odBTTSY), o_bn = readOdd(odBTTSN);
+
+      const fair1x2 = fairFromOdds([o_1, o_x, o_2]);
+      const fairOU = fairFromOdds([o_o25, o_u25]);       // [Over, Under]
+      const fairBTTS = fairFromOdds([o_by, o_bn]);      // [Yes, No]
+      const wBlend = clampNum(odW?.value, 0, 1, 0.65);
+      const doCal = !!odCal?.checked;
+
+      // --- Market calibration (optional): adjust total goals using O/U 2.5 ---
+      let xgH = baseXgH, xgA = baseXgA;
+      if(doCal && fairOU){
+        const targetOver = fairOU[0];
+        const totalBase = baseXgH + baseXgA;
+        if(totalBase > 0.05 && targetOver > 0.01 && targetOver < 0.99){
+          const totalCal = calibrateTotalGoals(targetOver);
+          const r = baseXgH / totalBase;
+          xgH = clamp(r * totalCal, 0.05, 6);
+          xgA = clamp((1-r) * totalCal, 0.05, 6);
+        }
+      }
 
       let wH=0, wA=0, d=0, btts=0, over25=0;
       const totals = Array(7).fill(0); // 0..5, 6+
@@ -2500,17 +2913,64 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
         .slice(0, 10);
 
       if(mcOut){
+        const pH = wH/N, pD = d/N, pA = wA/N;
+        const pBTTS = btts/N;
+        const pO25 = over25/N;
+
+        const mkH = fair1x2 ? fair1x2[0] : null;
+        const mkD = fair1x2 ? fair1x2[1] : null;
+        const mkA = fair1x2 ? fair1x2[2] : null;
+
+        const mkO25 = fairOU ? fairOU[0] : null;
+        const mkU25 = fairOU ? fairOU[1] : null;
+
+        const mkBTTSY = fairBTTS ? fairBTTS[0] : null;
+        const mkBTTSN = fairBTTS ? fairBTTS[1] : null;
+
+        const bH = (mkH!=null) ? (wBlend*pH + (1-wBlend)*mkH) : pH;
+        const bD = (mkD!=null) ? (wBlend*pD + (1-wBlend)*mkD) : pD;
+        const bA = (mkA!=null) ? (wBlend*pA + (1-wBlend)*mkA) : pA;
+
+        const bO25 = (mkO25!=null) ? (wBlend*pO25 + (1-wBlend)*mkO25) : pO25;
+        const bBTTS = (mkBTTSY!=null) ? (wBlend*pBTTS + (1-wBlend)*mkBTTSY) : pBTTS;
+
         mcOut.innerHTML = `
           <div class="fl-pill"><b>${escapeHtml(nameH)}</b> ${fmt(pct(wH),1)}%</div>
           <div class="fl-pill"><b>Empate</b> ${fmt(pct(d),1)}%</div>
           <div class="fl-pill"><b>${escapeHtml(nameA)}</b> ${fmt(pct(wA),1)}%</div>
+
           <div style="margin-top:10px;" class="fl-small">
             <b>BTTS</b>: ${fmt(pct(btts),1)}% &nbsp;•&nbsp;
-            <b>Over 2.5</b>: ${fmt(pct(over25),1)}% &nbsp;•&nbsp;
-            <b>xG</b>: ${fmt(xgH,2)} / ${fmt(xgA,2)} &nbsp;•&nbsp;
-            <b>N</b>: ${N}
+            <b>Over 2.5</b>: ${fmt(pct(over25),1)}%<br/>
+            <b>xG</b>: ${fmt(xgH,2)} / ${fmt(xgA,2)} &nbsp;•&nbsp; <b>N</b>: ${N}
           </div>
+
+          ${(fair1x2 || fairOU || fairBTTS) ? `
+            <div style="margin-top:10px;" class="fl-small">
+              <div style="font-weight:800;">Mercado (sin margen) + Blend</div>
+              ${fair1x2 ? `1X2 mercado: ${fmt(mkH*100,1)} / ${fmt(mkD*100,1)} / ${fmt(mkA*100,1)}% &nbsp;•&nbsp; blend: ${fmt(bH*100,1)} / ${fmt(bD*100,1)} / ${fmt(bA*100,1)}%<br/>` : ``}
+              ${fairOU ? `O/U2.5 mercado: Over ${fmt(mkO25*100,1)}% (Under ${fmt(mkU25*100,1)}%) &nbsp;•&nbsp; blend Over ${fmt(bO25*100,1)}%<br/>` : ``}
+              ${fairBTTS ? `BTTS mercado: Sí ${fmt(mkBTTSY*100,1)}% (No ${fmt(mkBTTSN*100,1)}%) &nbsp;•&nbsp; blend Sí ${fmt(bBTTS*100,1)}%` : ``}
+            </div>
+          ` : ``}
         `;
+
+        if(odOut){
+          const parts = [];
+          if(fair1x2){
+            parts.push(`📌 1X2 fair: <b>${fmt(mkH*100,1)}%</b> / <b>${fmt(mkD*100,1)}%</b> / <b>${fmt(mkA*100,1)}%</b> • Edge (tu modelo - mercado): ${fmt((pH-mkH)*100,1)} / ${fmt((pD-mkD)*100,1)} / ${fmt((pA-mkA)*100,1)} pts`);
+          }
+          if(fairOU){
+            parts.push(`📌 O/U2.5 fair: Over <b>${fmt(mkO25*100,1)}%</b> • Tu sim: ${fmt(pO25*100,1)}% • Edge: ${fmt((pO25-mkO25)*100,1)} pts`);
+          }
+          if(fairBTTS){
+            parts.push(`📌 BTTS fair: Sí <b>${fmt(mkBTTSY*100,1)}%</b> • Tu sim: ${fmt(pBTTS*100,1)}% • Edge: ${fmt((pBTTS-mkBTTSY)*100,1)} pts`);
+          }
+          if(!parts.length){
+            parts.push(`Si metes cuotas arriba, aquí verás probabilidades limpias (sin margen) + edge vs tu modelo.`);
+          }
+          odOut.innerHTML = parts.join("<br/>");
+        }
       }
 
       // normalize totals into percentages for chart? We'll keep counts but label says partidos.
