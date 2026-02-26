@@ -17,6 +17,18 @@ export function initFootballLab(){
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
   const KEY = "footballDB";
+
+  // --- Public hook (early) ---
+  // This makes sure MemoryCarl can open the Lab even if some later UI wiring throws.
+  try{
+    window.__FOOTBALL_LAB__ = window.__FOOTBALL_LAB__ || {};
+    window.__FOOTBALL_LAB__.version = "V6e";
+    window.__FOOTBALL_LAB__.open = (view, payload)=> openLab(view, payload||{});
+    window.__FOOTBALL_LAB__.db = ()=> loadDB();
+    window.__FOOTBALL_LAB__.setDB = (db)=> saveDB(db);
+    window.__FOOTBALL_LAB__.help = "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})";
+  }catch(e){ console.warn("FootballLab early hook failed", e); }
+
   let _fbSimCharts = { totals:null, scorelines:null };
 
   const DEFAULT_DB = {
@@ -3156,4 +3168,3 @@ const od1 = document.getElementById("od_1");
 }
 
 window.initFootballLab = initFootballLab;
-}
