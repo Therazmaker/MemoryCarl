@@ -37,7 +37,6 @@ export function initFootballLab(){
     matches: [], // match logs per player
     lineups: {}  // lineups[teamId][formation][pos] = playerId
   };
-  let db = null; // closure db cache
 
   function getAutoSeasonLabel(){
     const d = new Date();
@@ -81,9 +80,6 @@ export function initFootballLab(){
       return structuredClone(DEFAULT_DB);
     }
   }
-
-  // init closure db once (views re-load it in openLab too)
-  db = loadDB();
 
   function saveDB(db){
     localStorage.setItem(KEY, JSON.stringify(db));
@@ -142,7 +138,7 @@ export function initFootballLab(){
   }
 
   function openLab(view, payload={}){
-    db = loadDB();
+    const db = loadDB();
     const root = document.getElementById("app");
 
     // Minimal top nav
@@ -1096,7 +1092,6 @@ function renderHome(db){
   
   // ---- Player Profile (V6) ----
   function renderPlayer(db, playerId){
-    db = db || loadDB(); // safety: allow calls without db
     const p = db.players.find(pp=>pp.id===playerId);
     const v = document.getElementById("fl_view");
     if(!p){
@@ -1402,10 +1397,10 @@ const _ol = document.getElementById("openLogger");
     const leagueId = db.settings.currentLeagueId;
 
     const logs = (db.matches||[])
-      .filter(m=>m.playerId===playerId && m.season===season && (m.leagueId||leagueId)===leagueId)
+      .filter(m=>m.playerId===p.id && m.season===season && (m.leagueId||leagueId)===leagueId)
       .sort((a,b)=> (b.date||"").localeCompare(a.date||""));
 
-    const last = (typeof logs !== 'undefined' && Array.isArray(logs) ? logs : []).slice(0, 8);
+    const last = (Array.isArray(logs) ? logs : []).slice(0, 8);
     const _lm = document.getElementById("lastMatches");
     if(_lm) _lm.innerHTML = last.map(m=>{
       const mid = escapeHtml(m.id||"");
