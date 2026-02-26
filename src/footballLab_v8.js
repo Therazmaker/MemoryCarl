@@ -1499,6 +1499,38 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
       const punches = num("pl_punches");
 
 
+
+
+      // --- Preserve SofaScore clip JSON (if provided) ---
+      let _clip = null;
+      let _clipStats = null;
+      let _clipCtx = null;
+      let _clipMeta = null;
+      try{
+        const rawClip = (document.getElementById("pl_json")?.value || "").trim();
+        if(rawClip){
+          _clip = JSON.parse(rawClip);
+          _clipStats = _clip?.stats || null;
+          _clipCtx = _clip?.context || _clip?.match || null;
+          _clipMeta = {
+            schemaVersion: _clip?.schemaVersion || null,
+            source: _clip?.source || null,
+            capturedAt: _clip?.capturedAt || null,
+            matchId: _clipCtx?.matchId || _clipCtx?.id || null,
+            matchTitle: _clipCtx?.matchTitle || _clipCtx?.title || _clipCtx?.name || null,
+            rating: (_clipCtx?.rating ?? null)
+          };
+          const clipDate = (_clipCtx?.date && /^\d{4}-\d{2}-\d{2}/.test(String(_clipCtx.date)))
+            ? String(_clipCtx.date).slice(0,10)
+            : null;
+          if(!document.getElementById("pl_date")?.value && clipDate){
+            document.getElementById("pl_date").value = clipDate;
+          }
+        }
+      }catch(e){
+        // ignore invalid json on save
+      }
+
       const score = computeMatchScore(db, p.position, {
         minutes, goals, assists, yellow, red, losses,
         shotsOn, keyPasses, progPasses, passC, passA,
@@ -1531,36 +1563,6 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
       const upd = updateEloRating(expected, score, minutes, 0.20);
       const newRating = upd.newRating;
 
-
-      // --- Preserve SofaScore clip JSON (if provided) ---
-      let _clip = null;
-      let _clipStats = null;
-      let _clipCtx = null;
-      let _clipMeta = null;
-      try{
-        const rawClip = (document.getElementById("pl_json")?.value || "").trim();
-        if(rawClip){
-          _clip = JSON.parse(rawClip);
-          _clipStats = _clip?.stats || null;
-          _clipCtx = _clip?.context || _clip?.match || null;
-          _clipMeta = {
-            schemaVersion: _clip?.schemaVersion || null,
-            source: _clip?.source || null,
-            capturedAt: _clip?.capturedAt || null,
-            matchId: _clipCtx?.matchId || _clipCtx?.id || null,
-            matchTitle: _clipCtx?.matchTitle || _clipCtx?.title || _clipCtx?.name || null,
-            rating: (_clipCtx?.rating ?? null)
-          };
-          const clipDate = (_clipCtx?.date && /^\d{4}-\d{2}-\d{2}/.test(String(_clipCtx.date)))
-            ? String(_clipCtx.date).slice(0,10)
-            : null;
-          if(!document.getElementById("pl_date")?.value && clipDate){
-            document.getElementById("pl_date").value = clipDate;
-          }
-        }
-      }catch(e){
-        // ignore invalid json on save
-      }
 
       function clipNum(v, d=0){
         const n = Number(v);
