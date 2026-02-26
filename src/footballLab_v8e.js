@@ -14,14 +14,14 @@
 
 export function initFootballLab(){
 
-// Idempotent init guard
-try{
-  if(window.__footballLabInitialized){
-    // Ensure debug hook exists
-    if(window.__FOOTBALL_LAB__?.open) return;
-  }
-  window.__footballLabInitialized = true;
-}catch(e){ /* ignore */ }
+  // Idempotent init guard (hard stop): this file can be loaded or init-called multiple
+  // times by the app/router. We must NEVER re-register listeners or re-render.
+  try{
+    if(window.__footballLabInitialized){
+      return window.__FOOTBALL_LAB__;
+    }
+    window.__footballLabInitialized = true;
+  }catch(e){ /* ignore */ }
   window.FOOTBALL_LAB_FILE = "footballLab_v8e.js";
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
