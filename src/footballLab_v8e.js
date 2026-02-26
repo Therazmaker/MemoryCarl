@@ -17,18 +17,6 @@ export function initFootballLab(){
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
   const KEY = "footballDB";
-
-  // --- Public hook (early) ---
-  // This makes sure MemoryCarl can open the Lab even if some later UI wiring throws.
-  try{
-    window.__FOOTBALL_LAB__ = window.__FOOTBALL_LAB__ || {};
-    window.__FOOTBALL_LAB__.version = "V6e";
-    window.__FOOTBALL_LAB__.open = (view, payload)=> openLab(view, payload||{});
-    window.__FOOTBALL_LAB__.db = ()=> loadDB();
-    window.__FOOTBALL_LAB__.setDB = (db)=> saveDB(db);
-    window.__FOOTBALL_LAB__.help = "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})";
-  }catch(e){ console.warn("FootballLab early hook failed", e); }
-
   let _fbSimCharts = { totals:null, scorelines:null };
 
   const DEFAULT_DB = {
@@ -3061,17 +3049,37 @@ const od1 = document.getElementById("od_1");
 
     }
 
-    document.getElementById("mcAutoXg")?.addEventListener("click", ()=>{
-      autoXgFromStrength();
-    });
-    document.getElementById("mcRun")?.addEventListener("click", ()=>{
-      try{ console.log("⚽ MonteCarlo: click Simular"); runMonteCarlo(); }
-      catch(err){ console.error("MonteCarlo error:", err); const o=document.getElementById("mc_out"); if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`; }
-    });
-
-    // Initial auto-fill once (nice default)
-    autoXgFromStrength();
+    
 };
+
+    // Wire Monte Carlo buttons (they live in this view). Previously these listeners
+    // were attached only after clicking the main "run" button, so Monte Carlo looked "dead".
+    (function wireMonteCarloUI(){
+      const autoBtn = document.getElementById("mcAutoXg");
+      if(autoBtn && !autoBtn.dataset.wired){
+        autoBtn.dataset.wired = "1";
+        autoBtn.addEventListener("click", ()=>{ autoXgFromStrength(); });
+      }
+
+      const runBtn = document.getElementById("mcRun");
+      if(runBtn && !runBtn.dataset.wired){
+        runBtn.dataset.wired = "1";
+        runBtn.addEventListener("click", ()=>{
+          try{
+            console.log("⚽ MonteCarlo: click Simular");
+            runMonteCarlo();
+          }catch(err){
+            console.error("MonteCarlo error:", err);
+            const o = document.getElementById("mc_out");
+            if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`;
+          }
+        });
+      }
+
+      // Nice default: auto-fill xG once per render
+      try{ autoXgFromStrength(); }catch(_e){}
+    })();
+
   }
 
   function computeStrengthFallback(db, teamId){
