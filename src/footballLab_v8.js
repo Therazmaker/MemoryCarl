@@ -2623,6 +2623,10 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
                 <input type="checkbox" id="od_calibrate" checked>
                 Calibrar xG con O/U 2.5
               </label>
+              <label class="fl-small" style="display:flex;gap:8px;align-items:center; margin-left:14px;">
+                <input type="checkbox" id="od_calibrate_full">
+                Calibrar con mercado completo (1X2 + O/U + BTTS)
+              </label>
             </div>
           </div>
 
@@ -2758,6 +2762,7 @@ const od1 = document.getElementById("od_1");
     const odBTTSN = document.getElementById("od_bttsN");
     const odW = document.getElementById("od_w");
     const odCal = document.getElementById("od_calibrate");
+    const odCalFull = document.getElementById("od_calibrate_full");
     const odOut = document.getElementById("od_out");
 
 
@@ -2854,7 +2859,7 @@ const od1 = document.getElementById("od_1");
         return 1 - e*(1 + L + (L*L)/2);
       }
       function calibrateTotalGoals(targetOver){
-        // binary search total lambda to match target P(over2.5)
+        // binary search total lambda to match target P(over2.5) for total goals G~Poisson(L)
         let lo = 0.2, hi = 6.0;
         for(let it=0; it<40; it++){
           const mid = (lo+hi)/2;
@@ -2865,92 +2870,151 @@ const od1 = document.getElementById("od_1");
         return (lo+hi)/2;
       }
 
-      const o_1 = readOdd(od1), o_x = readOdd(odX), o_2 = readOdd(od2);
-      const o_o25 = readOdd(odO25), o_u25 = readOdd(odU25);
-      const o_by = readOdd(odBTTSY), o_bn = readOdd(odBTTSN);
+      // Fast deterministic "simulation": Poisson pmfs + joint matrix (no randomness, super stable)
+      function simulateFast(lambdaH, lambdaA, maxG=10){
+        lambdaH = clamp(lambdaH, 0.01, 8);
+        lambdaA = clamp(lambdaA, 0.01, 8);
+        maxG = clampNum(maxG, 6, 14, 10);
 
-      const fair1x2 = fairFromOdds([o_1, o_x, o_2]);
-      const fairOU = fairFromOdds([o_o25, o_u25]);       // [Over, Under]
-      const fairBTTS = fairFromOdds([o_by, o_bn]);      // [Yes, No]
+        function pmfPoisson(L){
+          const p = Array(maxG+1).fill(0);
+          const e = Math.exp(-L);
+          p[0] = e;
+          for(let k=1;k<=maxG;k++){
+            p[k] = p[k-1] * L / k;
+          }
+          // absorb tail into last bucket to keep total ~1
+          const s = p.reduce((a,b)=>a+b,0);
+          if(s>0 && s<1){
+            p[maxG] += (1-s);
+          }
+          return p;
+        }
+
+        const pH = pmfPoisson(lambdaH);
+        const pA = pmfPoisson(lambdaA);
+
+        let winH=0, winA=0, draw=0, btts=0, over25=0;
+        const totals = Array(7).fill(0); // 0..5, 6+
+        const scoreMap = new Map();      // "h-a" -> prob
+
+        for(let h=0; h<=maxG; h++){
+          for(let a=0; a<=maxG; a++){
+            const pr = pH[h] * pA[a];
+            if(h>a) winH += pr;
+            else if(a>h) winA += pr;
+            else draw += pr;
+            if(h>0 && a>0) btts += pr;
+            if(h+a >= 3) over25 += pr;
+
+            totals[Math.min(6, h+a)] += pr;
+
+            // Keep top scorelines later; store all for now (matrix size <= 225)
+            scoreMap.set(`${h}-${a}`, pr);
+          }
+        }
+
+        const topScores = Array.from(scoreMap.entries())
+          .map(([label, p])=>({label, p}))
+          .sort((x,y)=> y.p - x.p)
+          .slice(0, 12);
+
+        return {
+          pHome: winH, pDraw: draw, pAway: winA,
+          pBTTS: btts, pOver25: over25,
+          totals, topScores
+        };
+      }
+
+      function fairFromOdds2(oYes, oNo){
+        const a = (Number.isFinite(oYes) && oYes>1.0001) ? 1/oYes : null;
+        const b = (Number.isFinite(oNo) && oNo>1.0001) ? 1/oNo : null;
+        if(a==null || b==null) return null;
+        const s = a+b;
+        return s>0 ? [a/s, b/s] : null;
+      }
+
+      function marketTargets(){
+      const mk = marketTargets();
+      const fair1x2 = mk.fair1x2;
+      const fairOU = mk.fairOU;
+      const fairBTTS = mk.fairBTTS;
+
       const wBlend = clampNum(odW?.value, 0, 1, 0.65);
       const doCal = !!odCal?.checked;
+      const doFull = !!odCalFull?.checked;
 
-      // --- Market calibration (optional): adjust total goals using O/U 2.5 ---
-      let xgH = baseXgH, xgA = baseXgA;
-      if(doCal && fairOU){
+      // Base lambdas from your model (xG inputs)
+      let baseH = baseXgH, baseA = baseXgA;
+
+      // --- Market calibration options ---
+      let marketFit = null;
+
+      // A) Full calibration (1X2 + O/U + BTTS) if targets exist
+      if(doFull && (mk.pHome!=null || mk.pOver25!=null || mk.pBTTS!=null)){
+        marketFit = calibrateWithMarketFull(baseH, baseA, mk);
+      } else if(doCal && fairOU) {
+        // B) Lite calibration: adjust only total goals using O/U 2.5
         const targetOver = fairOU[0];
-        const totalBase = baseXgH + baseXgA;
+        const totalBase = baseH + baseA;
         if(totalBase > 0.05 && targetOver > 0.01 && targetOver < 0.99){
           const totalCal = calibrateTotalGoals(targetOver);
-          const r = baseXgH / totalBase;
-          xgH = clamp(r * totalCal, 0.05, 6);
-          xgA = clamp((1-r) * totalCal, 0.05, 6);
+          const r = baseH / totalBase;
+          marketFit = { lambdaH: clamp(r * totalCal, 0.05, 6), lambdaA: clamp((1-r) * totalCal, 0.05, 6), err: null };
         }
       }
 
-      let wH=0, wA=0, d=0, btts=0, over25=0;
-      const totals = Array(7).fill(0); // 0..5, 6+
-      const scoreCount = new Map();
+      // Blend lambdas (0 = market, 1 = model)
+      const xgH = marketFit ? (wBlend*baseH + (1-wBlend)*marketFit.lambdaH) : baseH;
+      const xgA = marketFit ? (wBlend*baseA + (1-wBlend)*marketFit.lambdaA) : baseA;
 
-      for(let i=0;i<N;i++){
-        const gH = poissonSample(xgH);
-        const gA = poissonSample(xgA);
-        if(gH>gA) wH++; else if(gA>gH) wA++; else d++;
-        if(gH>0 && gA>0) btts++;
-        if((gH+gA) >= 3) over25++;
+      
+      // Deterministic "fast sim" (no randomness): stable outputs + instant calibration
+      const simFinal = simulateFast(xgH, xgA, 10);
+      const simModel = simulateFast(baseH, baseA, 10);
 
-        const tg = gH+gA;
-        totals[Math.min(6, tg)]++;
+      const pH = simFinal.pHome, pD = simFinal.pDraw, pA = simFinal.pAway;
+      const pBTTS = simFinal.pBTTS;
+      const pO25 = simFinal.pOver25;
 
-        const key = `${gH}-${gA}`;
-        scoreCount.set(key, (scoreCount.get(key)||0)+1);
-      }
+      const mkH = fair1x2 ? fair1x2[0] : null;
+      const mkD = fair1x2 ? fair1x2[1] : null;
+      const mkA = fair1x2 ? fair1x2[2] : null;
 
-      const pct = (x)=> (x*100/N);
-      const topScores = Array.from(scoreCount.entries())
-        .map(([k,c])=>({label:k, pct: +(pct(c).toFixed(2)), c}))
-        .sort((a,b)=> b.c - a.c)
-        .slice(0, 10);
+      const mkO25 = fairOU ? fairOU[0] : null;
+      const mkU25 = fairOU ? fairOU[1] : null;
+
+      const mkBTTSY = fairBTTS ? fairBTTS[0] : null;
+      const mkBTTSN = fairBTTS ? fairBTTS[1] : null;
+
+      // For charts, convert probs to pseudo-counts (for visual scale)
+      const totals = simFinal.totals.map(p => Math.round(p * N));
+      const topScores = simFinal.topScores.map(s => ({
+        label: s.label,
+        pct: +((s.p*100).toFixed(2)),
+        c: Math.round(s.p * N)
+      }));
 
       if(mcOut){
-        const pH = wH/N, pD = d/N, pA = wA/N;
-        const pBTTS = btts/N;
-        const pO25 = over25/N;
-
-        const mkH = fair1x2 ? fair1x2[0] : null;
-        const mkD = fair1x2 ? fair1x2[1] : null;
-        const mkA = fair1x2 ? fair1x2[2] : null;
-
-        const mkO25 = fairOU ? fairOU[0] : null;
-        const mkU25 = fairOU ? fairOU[1] : null;
-
-        const mkBTTSY = fairBTTS ? fairBTTS[0] : null;
-        const mkBTTSN = fairBTTS ? fairBTTS[1] : null;
-
-        const bH = (mkH!=null) ? (wBlend*pH + (1-wBlend)*mkH) : pH;
-        const bD = (mkD!=null) ? (wBlend*pD + (1-wBlend)*mkD) : pD;
-        const bA = (mkA!=null) ? (wBlend*pA + (1-wBlend)*mkA) : pA;
-
-        const bO25 = (mkO25!=null) ? (wBlend*pO25 + (1-wBlend)*mkO25) : pO25;
-        const bBTTS = (mkBTTSY!=null) ? (wBlend*pBTTS + (1-wBlend)*mkBTTSY) : pBTTS;
-
         mcOut.innerHTML = `
-          <div class="fl-pill"><b>${escapeHtml(nameH)}</b> ${fmt(pct(wH),1)}%</div>
-          <div class="fl-pill"><b>Empate</b> ${fmt(pct(d),1)}%</div>
-          <div class="fl-pill"><b>${escapeHtml(nameA)}</b> ${fmt(pct(wA),1)}%</div>
+          <div class="fl-pill"><b>${escapeHtml(nameH)}</b> ${fmt(pH*100,1)}%</div>
+          <div class="fl-pill"><b>Empate</b> ${fmt(pD*100,1)}%</div>
+          <div class="fl-pill"><b>${escapeHtml(nameA)}</b> ${fmt(pA*100,1)}%</div>
 
           <div style="margin-top:10px;" class="fl-small">
-            <b>BTTS</b>: ${fmt(pct(btts),1)}% &nbsp;•&nbsp;
-            <b>Over 2.5</b>: ${fmt(pct(over25),1)}%<br/>
-            <b>xG</b>: ${fmt(xgH,2)} / ${fmt(xgA,2)} &nbsp;•&nbsp; <b>N</b>: ${N}
+            <b>BTTS</b>: ${fmt(pBTTS*100,1)}% &nbsp;•&nbsp;
+            <b>Over 2.5</b>: ${fmt(pO25*100,1)}%<br/>
+            <b>xG Final</b>: ${fmt(xgH,2)} / ${fmt(xgA,2)} &nbsp;•&nbsp;
+            <b>xG Modelo</b>: ${fmt(baseH,2)} / ${fmt(baseA,2)} &nbsp;•&nbsp; <b>N</b>: ${N}
+            ${marketFit ? `<br/><span class="fl-small">λ mercado: ${fmt(marketFit.lambdaH,2)} / ${fmt(marketFit.lambdaA,2)}${marketFit.err!=null?` • err ${fmt(marketFit.err,6)}`:``}</span>` : ``}
           </div>
 
           ${(fair1x2 || fairOU || fairBTTS) ? `
             <div style="margin-top:10px;" class="fl-small">
-              <div style="font-weight:800;">Mercado (sin margen) + Blend</div>
-              ${fair1x2 ? `1X2 mercado: ${fmt(mkH*100,1)} / ${fmt(mkD*100,1)} / ${fmt(mkA*100,1)}% &nbsp;•&nbsp; blend: ${fmt(bH*100,1)} / ${fmt(bD*100,1)} / ${fmt(bA*100,1)}%<br/>` : ``}
-              ${fairOU ? `O/U2.5 mercado: Over ${fmt(mkO25*100,1)}% (Under ${fmt(mkU25*100,1)}%) &nbsp;•&nbsp; blend Over ${fmt(bO25*100,1)}%<br/>` : ``}
-              ${fairBTTS ? `BTTS mercado: Sí ${fmt(mkBTTSY*100,1)}% (No ${fmt(mkBTTSN*100,1)}%) &nbsp;•&nbsp; blend Sí ${fmt(bBTTS*100,1)}%` : ``}
+              <div style="font-weight:800;">Mercado (sin margen)</div>
+              ${fair1x2 ? `1X2: ${fmt(mkH*100,1)} / ${fmt(mkD*100,1)} / ${fmt(mkA*100,1)}%<br/>` : ``}
+              ${fairOU ? `O/U2.5: Over ${fmt(mkO25*100,1)}% (Under ${fmt(mkU25*100,1)}%)<br/>` : ``}
+              ${fairBTTS ? `BTTS: Sí ${fmt(mkBTTSY*100,1)}% (No ${fmt(mkBTTSN*100,1)}%)` : ``}
             </div>
           ` : ``}
         `;
@@ -2958,30 +3022,39 @@ const od1 = document.getElementById("od_1");
         if(odOut){
           const parts = [];
           if(fair1x2){
-            parts.push(`📌 1X2 fair: <b>${fmt(mkH*100,1)}%</b> / <b>${fmt(mkD*100,1)}%</b> / <b>${fmt(mkA*100,1)}%</b> • Edge (tu modelo - mercado): ${fmt((pH-mkH)*100,1)} / ${fmt((pD-mkD)*100,1)} / ${fmt((pA-mkA)*100,1)} pts`);
+            parts.push(`📌 1X2 edge (FINAL - mercado): ${fmt((pH-mkH)*100,1)} / ${fmt((pD-mkD)*100,1)} / ${fmt((pA-mkA)*100,1)} pts`);
           }
           if(fairOU){
-            parts.push(`📌 O/U2.5 fair: Over <b>${fmt(mkO25*100,1)}%</b> • Tu sim: ${fmt(pO25*100,1)}% • Edge: ${fmt((pO25-mkO25)*100,1)} pts`);
+            parts.push(`📌 Over2.5 edge (FINAL - mercado): ${fmt((pO25-mkO25)*100,1)} pts`);
           }
           if(fairBTTS){
-            parts.push(`📌 BTTS fair: Sí <b>${fmt(mkBTTSY*100,1)}%</b> • Tu sim: ${fmt(pBTTS*100,1)}% • Edge: ${fmt((pBTTS-mkBTTSY)*100,1)} pts`);
+            parts.push(`📌 BTTS Sí edge (FINAL - mercado): ${fmt((pBTTS-mkBTTSY)*100,1)} pts`);
+          }
+          if(marketFit && (mkH!=null || mkO25!=null || mkBTTSY!=null)){
+            // show how far the raw model is from market (before calibration/blend)
+            const eParts = [];
+            if(mkH!=null) eParts.push(`Modelo vs mercado 1: ${fmt((simModel.pHome-mkH)*100,1)} pts`);
+            if(mkO25!=null) eParts.push(`Over2.5: ${fmt((simModel.pOver25-mkO25)*100,1)} pts`);
+            if(mkBTTSY!=null) eParts.push(`BTTS Sí: ${fmt((simModel.pBTTS-mkBTTSY)*100,1)} pts`);
+            if(eParts.length) parts.push(`🧭 Distancia del modelo: ${eParts.join(" • ")}`);
           }
           if(!parts.length){
-            parts.push(`Si metes cuotas arriba, aquí verás probabilidades limpias (sin margen) + edge vs tu modelo.`);
+            parts.push(`Si metes cuotas arriba, aquí verás probabilidades limpias (sin margen) + edge vs tu simulación.`);
           }
           odOut.innerHTML = parts.join("<br/>");
         }
       }
 
-      // normalize totals into percentages for chart? We'll keep counts but label says partidos.
       renderMcCharts(totals, topScores);
+
     }
 
     document.getElementById("mcAutoXg")?.addEventListener("click", ()=>{
       autoXgFromStrength();
     });
     document.getElementById("mcRun")?.addEventListener("click", ()=>{
-      runMonteCarlo();
+      try{ console.log("⚽ MonteCarlo: click Simular"); runMonteCarlo(); }
+      catch(err){ console.error("MonteCarlo error:", err); const o=document.getElementById("mc_out"); if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`; }
     });
 
     // Initial auto-fill once (nice default)
