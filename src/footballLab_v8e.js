@@ -3155,4 +3155,4 @@ const od1 = document.getElementById("od_1");
 // end initFootballLab
 }
 
-export { initFootballLab };
+window.initFootballLab = initFootballLab;
