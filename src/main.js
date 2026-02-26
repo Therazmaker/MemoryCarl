@@ -2,8 +2,8 @@ import { initFootballLab } from "./footballLab_v8e.js";
 
 // ---- Build markers (for debugging cache / deploy issues) ----
 // If you don't see these in DevTools console, you are NOT running this build.
-window.FOOTBALL_LAB_VERSION = "1009-calibA-fix";
-window.FOOTBALL_LAB_BANNER = "MemoryCarl BUILD 1009 (Calib A + fix loader)";
+window.FOOTBALL_LAB_VERSION = "1010-calibA-exportfix";
+window.FOOTBALL_LAB_BANNER = "MemoryCarl BUILD 1010 (Calib A + export fix)";
 console.log("%c"+window.FOOTBALL_LAB_BANNER, "background:#111;color:#7CFFB2;padding:4px 8px;border-radius:10px;font-weight:900;");
 
 /* ===== PWA Rescue / Reset =====
