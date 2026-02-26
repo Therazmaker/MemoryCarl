@@ -1562,10 +1562,10 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
         // ignore invalid json on save
       }
 
-      const clipNum = (v, d=0)=>{
+      function clipNum(v, d=0){
         const n = Number(v);
         return Number.isFinite(n) ? n : d;
-      };
+      }
 
       // append log
       db.matches.push({
