@@ -34,6 +34,8 @@ export function initFootballLab(){
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
   const KEY = "footballDB";
+  const FOOTBALL_DATA_TOKEN = "887c6e73d29347deac6d230b65ea72e0";
+  const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
   let _fbSimCharts = { totals:null, scorelines:null };
   let _fbTrackerCharts = { pnl:null, wl:null };
 
@@ -43,9 +45,8 @@ export function initFootballLab(){
       homeAdvantage: 0.05,                // +5%
       formLastN: 5,                       // last N matches in current season
       formWeight: 0.35,                   // how much match form pulls rating (0..1)
-      apiSportsKey: "",
       apiCacheHours: 12,
-      apiLeagueId: "",
+      apiCompetitionId: "",
       apiSeason: String(new Date().getFullYear())
     },
     weights: { // action category weights (editable)
@@ -92,9 +93,13 @@ export function initFootballLab(){
       if(!db.apiCache) db.apiCache = { fixturesByTeam: {} };
       if(!db.apiCache.fixturesByTeam) db.apiCache.fixturesByTeam = {};
       if(!db.apiCache.teamsByLeagueSeason) db.apiCache.teamsByLeagueSeason = {};
-      if(typeof db.settings.apiSportsKey !== "string") db.settings.apiSportsKey = "";
+      // migrated from old API-Sports settings
+      if(typeof db.settings.apiCompetitionId !== "string"){
+        db.settings.apiCompetitionId = typeof db.settings.apiLeagueId === "string" ? db.settings.apiLeagueId : "";
+      }
+      delete db.settings.apiLeagueId;
+      delete db.settings.apiSportsKey;
       if(!Number.isFinite(Number(db.settings.apiCacheHours))) db.settings.apiCacheHours = 12;
-      if(typeof db.settings.apiLeagueId !== "string") db.settings.apiLeagueId = "";
       if(typeof db.settings.apiSeason !== "string" || !db.settings.apiSeason.trim()) db.settings.apiSeason = String(new Date().getFullYear());
       // migrate leagues (V8)
       if(!db.leagues || !Array.isArray(db.leagues) || db.leagues.length===0){
@@ -119,6 +124,30 @@ export function initFootballLab(){
     localStorage.setItem(KEY, JSON.stringify(db));
   }
 
+  async function footballDataFetch(path){
+    const res = await fetch(`${FOOTBALL_DATA_BASE_URL}${path}`, {
+      headers: { "X-Auth-Token": FOOTBALL_DATA_TOKEN }
+    });
+    if(!res.ok){
+      throw new Error(`HTTP ${res.status}: ${res.statusText || "Error consultando football-data.org"}`);
+    }
+    return res.json();
+  }
+
+  function normalizeFootballDataMatch(match){
+    return {
+      teams: {
+        home: { id: Number(match?.homeTeam?.id) },
+        away: { id: Number(match?.awayTeam?.id) }
+      },
+      goals: {
+        home: Number(match?.score?.fullTime?.home),
+        away: Number(match?.score?.fullTime?.away)
+      },
+      utcDate: String(match?.utcDate || "")
+    };
+  }
+
   async function getTeamLastFixtures(db, apiTeamId, opts={}){
     const teamKey = String(apiTeamId||"").trim();
     if(!teamKey) throw new Error("Falta apiTeamId del equipo.");
@@ -137,39 +166,32 @@ export function initFootballLab(){
       return { fixtures: cached.fixtures, source: "cache", savedAt: cached.savedAt, provider: cached.provider || "cache" };
     }
 
-    const apiKey = String(db?.settings?.apiSportsKey || "").trim();
-    if(!apiKey){
-      throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
-    }
-
     const attempts = [];
-    const url = `https://v3.football.api-sports.io/fixtures?team=${encodeURIComponent(teamKey)}&last=${last}`;
-    const res = await fetch(url, {
-      headers: {
-        "x-apisports-key": apiKey
-      }
-    });
+    try{
+      const data = await footballDataFetch(`/teams/${encodeURIComponent(teamKey)}/matches?status=FINISHED`);
+      const fixtures = (Array.isArray(data?.matches) ? data.matches : [])
+        .map(normalizeFootballDataMatch)
+        .filter(fx=>Number.isFinite(fx?.goals?.home) && Number.isFinite(fx?.goals?.away))
+        .sort((a,b)=>new Date(b.utcDate || 0) - new Date(a.utcDate || 0))
+        .slice(0, last);
 
-    if(!res.ok){
-      attempts.push({ provider: "api-sports", status: res.status, errors: [res.statusText || "HTTP error"] });
+      db.apiCache.fixturesByTeam[teamKey] = { fixtures, savedAt: now, provider: "football-data" };
+      db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: "football-data", attempts: [{ provider: "football-data", status: "ok" }] };
+      saveDB(db);
+      return { fixtures, source: "live", savedAt: now, provider: "football-data" };
+    }catch(err){
+      attempts.push({ provider: "football-data", status: "error", errors: [String(err?.message || err)] });
       db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: "none", attempts };
       saveDB(db);
-      throw new Error(`No se pudo sincronizar (HTTP ${res.status}).`);
+      throw new Error(`No se pudo sincronizar: ${String(err?.message || err)}`);
     }
-
-    const data = await res.json();
-    const fixtures = Array.isArray(data?.response) ? data.response : [];
-    db.apiCache.fixturesByTeam[teamKey] = { fixtures, savedAt: now, provider: "api-sports" };
-    db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: "api-sports", attempts: [{ provider: "api-sports", status: "ok" }] };
-    saveDB(db);
-    return { fixtures, source: "live", savedAt: now, provider: "api-sports" };
   }
 
   async function getTeamsByLeagueSeason(db, opts={}){
-    const league = String(opts.league || db?.settings?.apiLeagueId || "").trim();
+    const league = String(opts.league || db?.settings?.apiCompetitionId || "").trim();
     const season = String(opts.season || db?.settings?.apiSeason || "").trim();
     const force = !!opts.force;
-    if(!league || !season) throw new Error("Indica League ID y Season para consultar equipos.");
+    if(!league || !season) throw new Error("Indica Competition ID y Season para consultar equipos.");
 
     const ttlMs = clampNum(db?.settings?.apiCacheHours, 1, 168, 12) * 60 * 60 * 1000;
     const now = Date.now();
@@ -183,28 +205,21 @@ export function initFootballLab(){
       return { teams: cached.teams, source: "cache", savedAt: cached.savedAt, provider: cached.provider || "cache" };
     }
 
-    const apiKey = String(db?.settings?.apiSportsKey || "").trim();
-    if(!apiKey) throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
-
-    const url = `https://v3.football.api-sports.io/teams?league=${encodeURIComponent(league)}&season=${encodeURIComponent(season)}`;
-    const res = await fetch(url, { headers: { "x-apisports-key": apiKey } });
-    if(!res.ok) throw new Error(`No se pudo consultar equipos (HTTP ${res.status}).`);
-
-    const data = await res.json();
-    const teams = (Array.isArray(data?.response) ? data.response : [])
+    const data = await footballDataFetch(`/competitions/${encodeURIComponent(league)}/teams?season=${encodeURIComponent(season)}`);
+    const teams = (Array.isArray(data?.teams) ? data.teams : [])
       .map(item=>({
-        id: String(item?.team?.id || "").trim(),
-        name: String(item?.team?.name || "").trim(),
-        country: String(item?.team?.country || "").trim()
+        id: String(item?.id || "").trim(),
+        name: String(item?.name || "").trim(),
+        country: String(item?.area?.name || "").trim()
       }))
       .filter(t=>t.id && t.name)
       .sort((a,b)=>a.name.localeCompare(b.name, "es", { sensitivity:"base" }));
 
-    db.apiCache.teamsByLeagueSeason[cacheKey] = { teams, savedAt: now, provider: "api-sports" };
-    db.settings.apiLeagueId = league;
+    db.apiCache.teamsByLeagueSeason[cacheKey] = { teams, savedAt: now, provider: "football-data" };
+    db.settings.apiCompetitionId = league;
     db.settings.apiSeason = season;
     saveDB(db);
-    return { teams, source: "live", savedAt: now, provider: "api-sports" };
+    return { teams, source: "live", savedAt: now, provider: "football-data" };
   }
 
   function summarizeFixtureForm(fixtures, apiTeamId){
@@ -932,7 +947,7 @@ function renderHome(db){
 
         <div class="fl-row" style="margin-top:10px;align-items:flex-end;">
           <div>
-            <div class="fl-h3">API Team ID (API-SPORTS)</div>
+            <div class="fl-h3">API Team ID (football-data.org)</div>
             <input class="fl-input" id="apiTeamId" type="number" min="1" placeholder="Ej: 33" value="${escapeHtml(String(team.apiTeamId||""))}">
           </div>
           <div style="display:flex;gap:8px;">
@@ -945,20 +960,20 @@ function renderHome(db){
 
         <div class="fl-row" style="margin-top:14px;align-items:flex-end;">
           <div>
-            <div class="fl-h3">League ID</div>
-            <input class="fl-input" id="apiLeagueId" type="number" min="1" placeholder="Ej: 39" value="${escapeHtml(String(db?.settings?.apiLeagueId||""))}">
+            <div class="fl-h3">Competition ID</div>
+            <input class="fl-input" id="apiCompetitionId" type="number" min="1" placeholder="Ej: 2014" value="${escapeHtml(String(db?.settings?.apiCompetitionId||""))}">
           </div>
           <div>
             <div class="fl-h3">Season</div>
             <input class="fl-input" id="apiSeason" type="number" min="2000" max="2100" placeholder="Ej: 2024" value="${escapeHtml(String(db?.settings?.apiSeason||""))}">
           </div>
           <div style="display:flex;gap:8px;">
-            <button class="mc-btn" id="loadApiTeams">Cargar equipos (ID)</button>
+            <button class="mc-btn" id="loadApiTeams">Cargar equipos (competición)</button>
           </div>
         </div>
         <div class="fl-row" style="margin-top:8px;gap:8px;align-items:flex-end;">
           <select class="fl-select" id="apiTeamPicker" style="min-width:260px;flex:1;">
-            <option value="">Primero carga equipos por liga/temporada…</option>
+            <option value="">Primero carga equipos por competición/temporada…</option>
           </select>
           <button class="mc-btn" id="usePickedApiTeam">Usar equipo seleccionado</button>
         </div>
@@ -1021,7 +1036,7 @@ function renderHome(db){
         apiTeamPicker.innerHTML = `<option value="">Sin equipos para mostrar</option>`;
         return;
       }
-      apiTeamPicker.innerHTML = `<option value="">Selecciona equipo de API-SPORTS…</option>` + teams.map(t=>
+      apiTeamPicker.innerHTML = `<option value="">Selecciona equipo de football-data.org…</option>` + teams.map(t=>
         `<option value="${escapeHtml(t.id)}" data-name="${escapeHtml(t.name)}">${escapeHtml(t.name)}${t.country ? ` (${escapeHtml(t.country)})` : ""} • ID ${escapeHtml(t.id)}</option>`
       ).join("");
 
@@ -1033,7 +1048,7 @@ function renderHome(db){
     }
 
     (function preloadApiTeamPicker(){
-      const lg = String(db?.settings?.apiLeagueId||"").trim();
+      const lg = String(db?.settings?.apiCompetitionId||"").trim();
       const sn = String(db?.settings?.apiSeason||"").trim();
       const key = `${lg}_${sn}`;
       const cached = db?.apiCache?.teamsByLeagueSeason?.[key];
@@ -1087,13 +1102,13 @@ function renderHome(db){
     };
 
     document.getElementById("loadApiTeams").onclick = async ()=>{
-      const league = String(document.getElementById("apiLeagueId")?.value || "").trim();
+      const league = String(document.getElementById("apiCompetitionId")?.value || "").trim();
       const season = String(document.getElementById("apiSeason")?.value || "").trim();
       if(!league || !season){
-        if(apiLookupStatus) apiLookupStatus.textContent = "Completa League ID y Season para buscar equipos.";
+        if(apiLookupStatus) apiLookupStatus.textContent = "Completa Competition ID y Season para buscar equipos.";
         return;
       }
-      if(apiLookupStatus) apiLookupStatus.textContent = "Consultando equipos en API-SPORTS...";
+      if(apiLookupStatus) apiLookupStatus.textContent = "Consultando equipos en football-data.org...";
       try{
         const out = await getTeamsByLeagueSeason(db, { league, season, force:true });
         paintApiTeamPicker(out.teams);
@@ -3922,7 +3937,7 @@ const od1 = document.getElementById("od_1");
     if(!Number.isFinite(Number(db.settings.formLastN))) db.settings.formLastN = 5;
     if(!Number.isFinite(Number(db.settings.formWeight))) db.settings.formWeight = 0.35;
     if(!Number.isFinite(Number(db.settings.homeAdvantage))) db.settings.homeAdvantage = 0.05;
-    if(typeof db.settings.apiSportsKey !== "string") db.settings.apiSportsKey = "";
+    if(typeof db.settings.apiCompetitionId !== "string") db.settings.apiCompetitionId = "";
     if(!Number.isFinite(Number(db.settings.apiCacheHours))) db.settings.apiCacheHours = 12;
 
     v.innerHTML = `
@@ -3958,9 +3973,9 @@ const od1 = document.getElementById("od_1");
           </div>
 
           <div>
-            <div class="fl-h3">API-SPORTS Key</div>
-            <input class="fl-input" id="apiSportsKey" placeholder="Tu key de v3.football.api-sports.io" value="${escapeHtml(db.settings.apiSportsKey || "")}">
-            <div class="fl-small" style="margin-top:6px;">Se usa para /fixtures?team=..&last=5 y se guarda local.</div>
+            <div class="fl-h3">Proveedor API</div>
+            <input class="fl-input" value="football-data.org (token hardcodeado)" disabled>
+            <div class="fl-small" style="margin-top:6px;">Migrado desde API-SPORTS para evitar depender de Ajustes.</div>
           </div>
 
           <div>
@@ -3989,7 +4004,6 @@ const od1 = document.getElementById("od_1");
       db.settings.formLastN = clamp(parseInt(document.getElementById("lastN").value)||5, 1, 20);
       db.settings.formWeight = clamp(parseFloat(document.getElementById("formW").value)||0.35, 0, 1);
       db.settings.homeAdvantage = clamp(parseFloat(document.getElementById("homeAdv").value)||0.05, 0, 0.30);
-      db.settings.apiSportsKey = String(document.getElementById("apiSportsKey").value || "").trim();
       db.settings.apiCacheHours = clamp(parseInt(document.getElementById("apiCacheHours").value)||12, 1, 168);
       saveDB(db);
       alert("Guardado.");
