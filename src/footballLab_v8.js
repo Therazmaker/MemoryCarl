@@ -23,19 +23,19 @@ export function initFootballLab(){
   }catch(e){ /* ignore */ }
 
   window.FOOTBALL_LAB_FILE = "footballLab_v8.js";
-  // Idempotent init guard (hard stop): this file can be loaded or init-called multiple
-  // times by the app/router. We must NEVER re-register listeners or re-render.
+  // Idempotent init guard: only short-circuit if an OPENABLE api already exists.
+  // If a previous boot failed halfway, we must allow a retry.
   try{
-    if(window.__footballLabInitialized){
+    if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
       return window.__FOOTBALL_LAB__;
     }
     window.__footballLabInitialized = true;
   }catch(e){ /* ignore */ }
-  window.FOOTBALL_LAB_FILE = "footballLab_v8e.js";
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
   const KEY = "footballDB";
   let _fbSimCharts = { totals:null, scorelines:null };
+  let _fbTrackerCharts = { pnl:null, wl:null };
 
   const DEFAULT_DB = {
     settings: {
@@ -55,7 +55,8 @@ export function initFootballLab(){
     teams: [],
     players: [],
     matches: [], // match logs per player
-    lineups: {}  // lineups[teamId][formation][pos] = playerId
+    lineups: {}, // lineups[teamId][formation][pos] = playerId
+    betTracker: []
   };
 
   function getAutoSeasonLabel(){
@@ -82,6 +83,7 @@ export function initFootballLab(){
       if(!db.players) db.players = [];
       if(!db.matches) db.matches = [];
       if(!db.lineups) db.lineups = {};
+      if(!db.betTracker) db.betTracker = [];
       // migrate leagues (V8)
       if(!db.leagues || !Array.isArray(db.leagues) || db.leagues.length===0){
         db.leagues = [
@@ -177,6 +179,18 @@ export function initFootballLab(){
     moreBtn.parentElement.appendChild(labBtn);
   }
 
+  function publishFootballLabApi(){
+    window.__FOOTBALL_LAB__ = {
+      version: "V6e",
+      open: (view, payload)=> openLab(view, payload),
+      db: ()=> loadDB(),
+      setDB: (db)=> saveDB(db),
+      help: "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})"
+    };
+  }
+
+  let renderTracker = null;
+
   function openLab(view, payload={}){
     const db = loadDB();
     const root = document.getElementById("app");
@@ -193,6 +207,7 @@ export function initFootballLab(){
             <button class="mc-btn" id="navHome">Inicio</button>
             <button class="mc-btn" id="navTeams">Equipos</button>
             <button class="mc-btn" id="navVersus">Versus</button>
+            <button class="mc-btn" id="navTracker">Tracker</button>
             <button class="mc-btn" id="navSettings">Ajustes</button>
             <button class="mc-btn" id="navBack">Volver</button>
           </div>
@@ -209,6 +224,7 @@ export function initFootballLab(){
     document.getElementById("navHome").onclick = ()=>openLab("home");
     document.getElementById("navTeams").onclick = ()=>openLab("teams");
     document.getElementById("navVersus").onclick = ()=>openLab("versus");
+    document.getElementById("navTracker").onclick = ()=>openLab("tracker");
     document.getElementById("navSettings").onclick = ()=>openLab("settings");
     document.getElementById("navBack").onclick = ()=>location.reload();
 
@@ -219,10 +235,85 @@ export function initFootballLab(){
     if(view==="lineup") renderLineup(db, payload.teamId);
     if(view==="logger") renderLogger(db, payload.teamId);
     if(view==="versus") renderVersus(db);
+    if(view==="tracker") renderTrackerTab(db);
     if(view==="settings") renderSettings(db);
     if(view==="player") renderPlayer(db, payload.playerId);
 
   }
+
+  function renderTrackerTab(db){
+    const v = document.getElementById("fl_view");
+    if(!Array.isArray(db.betTracker)) db.betTracker = [];
+    v.innerHTML = `
+      <div class="fl-card">
+        <div style="font-weight:900;">📈 Tracker de apuestas</div>
+        <div class="fl-row" style="margin-top:10px;">
+          <input class="fl-input" id="trk_match" placeholder="Partido / evento">
+          <input class="fl-input" id="trk_market" placeholder="Mercado">
+          <select class="fl-select" id="trk_result"><option value="win">Ganada</option><option value="loss">Perdida</option><option value="push">Nula</option></select>
+          <input class="fl-input" id="trk_odds" type="number" min="1.01" step="0.01" value="1.90">
+          <input class="fl-input" id="trk_stake" type="number" min="0" step="0.01" value="10">
+          <button class="mc-btn" id="trk_add">Agregar</button>
+        </div>
+        <div id="trk_summary" class="fl-small" style="margin-top:10px;"></div>
+      </div>
+      <div class="fl-grid2">
+        <div class="fl-card" style="margin:0;"><canvas id="trk_chart_pnl" height="180"></canvas></div>
+        <div class="fl-card" style="margin:0;"><canvas id="trk_chart_wl" height="180"></canvas></div>
+      </div>
+      <div class="fl-card"><div id="trk_list"></div></div>
+    `;
+
+    const draw = ()=>{
+      const rows = db.betTracker;
+      let wins=0, losses=0, pushes=0, stake=0, pnl=0;
+      let cumGain=0, cumLoss=0;
+      const labels=[], gainLine=[], lossLine=[];
+      rows.forEach((r,i)=>{
+        const p = Number(r.profit)||0;
+        if(r.result==="win") wins++; else if(r.result==="loss") losses++; else pushes++;
+        stake += Number(r.stake)||0;
+        pnl += p;
+        if(p>0) cumGain += p;
+        if(p<0) cumLoss += p;
+        labels.push(String(i+1));
+        gainLine.push(+cumGain.toFixed(2));
+        lossLine.push(+cumLoss.toFixed(2));
+      });
+      const roi = stake>0 ? (pnl/stake)*100 : 0;
+      document.getElementById("trk_summary").innerHTML = `Apuestas: <b>${rows.length}</b> • W/L/P: <b>${wins}</b>/<b>${losses}</b>/<b>${pushes}</b> • Stake: <b>${fmt(stake,2)}</b> • PnL: <b style="color:${pnl>=0?"#8ff0a4":"#ff9b9b"};">${fmt(pnl,2)}</b> • ROI: <b>${fmt(roi,2)}%</b>`;
+      document.getElementById("trk_list").innerHTML = rows.slice().reverse().map(r=>`<div class="fl-small" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.08);"><b>${escapeHtml(r.match||"(sin partido)")}</b> • ${escapeHtml(r.market||"Mercado")} • ${r.result} • cuota ${fmt(r.odds,2)} • stake ${fmt(r.stake,2)} • <b style="color:${(r.profit||0)>=0?"#8ff0a4":"#ff9b9b"};">${fmt(r.profit,2)}</b></div>`).join("") || `<div class="fl-small" style="opacity:.7;">Sin registros.</div>`;
+      if(typeof Chart!=="undefined"){
+        try{ _fbTrackerCharts.pnl?.destroy?.(); }catch(e){}
+        try{ _fbTrackerCharts.wl?.destroy?.(); }catch(e){}
+        _fbTrackerCharts.pnl = new Chart(document.getElementById("trk_chart_pnl").getContext("2d"), {
+          type:"line",
+          data:{
+            labels,
+            datasets:[
+              { data:gainLine, label:"Ganancias acumuladas", borderColor:"#3fb950", backgroundColor:"rgba(63,185,80,.15)", fill:true, tension:.25 },
+              { data:lossLine, label:"Pérdidas acumuladas", borderColor:"#f85149", backgroundColor:"rgba(248,81,73,.10)", fill:true, tension:.25 }
+            ]
+          },
+          options:{responsive:true, maintainAspectRatio:false}
+        });
+        _fbTrackerCharts.wl = new Chart(document.getElementById("trk_chart_wl").getContext("2d"), { type:"doughnut", data:{labels:["Ganadas","Perdidas","Nulas"], datasets:[{data:[wins,losses,pushes], backgroundColor:["#3fb950","#f85149","#8b949e"]}]}, options:{responsive:true, maintainAspectRatio:false} });
+      }
+    };
+
+    document.getElementById("trk_add").onclick = ()=>{
+      const result = document.getElementById("trk_result").value;
+      const odds = clampNum(document.getElementById("trk_odds").value, 1.01, 999, 1.9);
+      const stake = Math.max(0, Number(document.getElementById("trk_stake").value)||0);
+      db.betTracker.push({ id: uid("bet"), match: document.getElementById("trk_match").value.trim(), market: document.getElementById("trk_market").value.trim(), result, odds, stake, profit: result==="win" ? (odds-1)*stake : result==="loss" ? -stake : 0 });
+      saveDB(db);
+      draw();
+    };
+
+    draw();
+  }
+
+  publishFootballLabApi();
 
   function injectMiniStyle(){
     if(document.getElementById("fl_v5_style")) return;
@@ -2782,6 +2873,60 @@ const od1 = document.getElementById("od_1");
     const odCalFull = document.getElementById("od_calibrate_full");
     const odOut = document.getElementById("od_out");
 
+    // Fail-safe wiring: ensure Monte Carlo buttons work even if advanced block fails.
+    const mcAutoBtnFallback = document.getElementById("mcAutoXg");
+    const mcRunBtnFallback = document.getElementById("mcRun");
+    if(mcRunBtnFallback){
+      mcRunBtnFallback.onclick = ()=>{
+        const xgH = clampNum(mcXgH?.value, 0.1, 5, 1.35);
+        const xgA = clampNum(mcXgA?.value, 0.1, 5, 1.15);
+        const N = clampNum(mcN?.value, 1000, 50000, 10000);
+
+        const maxG = 10;
+        const pmf = (L)=>{
+          const p = Array(maxG+1).fill(0);
+          p[0] = Math.exp(-L);
+          for(let k=1;k<=maxG;k++) p[k] = p[k-1]*L/k;
+          const s = p.reduce((a,b)=>a+b,0);
+          if(s<1) p[maxG] += (1-s);
+          return p;
+        };
+        const pH = pmf(xgH), pA = pmf(xgA);
+        let wH=0,d=0,wA=0,btts=0,o25=0;
+        for(let h=0;h<=maxG;h++) for(let a=0;a<=maxG;a++){
+          const pr = pH[h]*pA[a];
+          if(h>a) wH += pr; else if(a>h) wA += pr; else d += pr;
+          if(h>0 && a>0) btts += pr;
+          if(h+a>=3) o25 += pr;
+        }
+        if(mcOut){
+          mcOut.innerHTML = `
+            <div class="fl-pill"><b>Local</b> ${fmt(wH*100,1)}%</div>
+            <div class="fl-pill"><b>Empate</b> ${fmt(d*100,1)}%</div>
+            <div class="fl-pill"><b>Visitante</b> ${fmt(wA*100,1)}%</div>
+            <div style="margin-top:10px;" class="fl-small">
+              <b>BTTS</b>: ${fmt(btts*100,1)}% &nbsp;•&nbsp; <b>Over 2.5</b>: ${fmt(o25*100,1)}%<br/>
+              <b>xG</b>: ${fmt(xgH,2)} / ${fmt(xgA,2)} &nbsp;•&nbsp; <b>N</b>: ${N}
+            </div>
+          `;
+        }
+      };
+    }
+    if(mcAutoBtnFallback){
+      mcAutoBtnFallback.onclick = ()=>{
+        const homeId = homeSel.value;
+        const awayId = awaySel.value;
+        const formation = formSel.value;
+        const homeAdv = clamp(parseFloat(document.getElementById("homeAdv").value)||0, 0, 0.30);
+        const xiHome = getXIFromBuilder(homeId, formation, db);
+        const xiAway = getXIFromBuilder(awayId, formation, db);
+        const H = xiHome.length ? computeStrengthFromXI(db, xiHome, true) : computeStrengthFallback(db, homeId);
+        const A = xiAway.length ? computeStrengthFromXI(db, xiAway, true) : computeStrengthFallback(db, awayId);
+        const diff = H.total*(1+homeAdv) - A.total;
+        mcXgH.value = fmt(clamp(1.35 + diff*0.35, 0.25, 3.80),2);
+        mcXgA.value = fmt(clamp(1.15 - diff*0.25, 0.25, 3.80),2);
+      };
+    }
 
     function autoXgFromStrength(){
       // Map strength totals to a reasonable xG baseline.
@@ -2952,6 +3097,51 @@ const od1 = document.getElementById("od_1");
       }
 
       function marketTargets(){
+        const o1 = readOdd(od1), oX = readOdd(odX), o2 = readOdd(od2);
+        const oO = readOdd(odO25), oU = readOdd(odU25);
+        const oY = readOdd(odBTTSY), oN = readOdd(odBTTSN);
+
+        const fair1x2 = fairFromOdds([o1, oX, o2]);
+        const fairOU = fairFromOdds2(oO, oU);
+        const fairBTTS = fairFromOdds2(oY, oN);
+
+        return {
+          fair1x2,
+          fairOU,
+          fairBTTS,
+          pHome: fair1x2 ? fair1x2[0] : null,
+          pDraw: fair1x2 ? fair1x2[1] : null,
+          pAway: fair1x2 ? fair1x2[2] : null,
+          pOver25: fairOU ? fairOU[0] : null,
+          pBTTS: fairBTTS ? fairBTTS[0] : null
+        };
+      }
+
+      function calibrateWithMarketFull(baseH, baseA, mk){
+        // Lightweight search around base lambdas to approach market targets.
+        let best = { lambdaH: baseH, lambdaA: baseA, err: Number.POSITIVE_INFINITY };
+        const hMin = clamp(baseH*0.55, 0.05, 6);
+        const hMax = clamp(baseH*1.65, 0.05, 6);
+        const aMin = clamp(baseA*0.55, 0.05, 6);
+        const aMax = clamp(baseA*1.65, 0.05, 6);
+
+        for(let i=0; i<=24; i++){
+          const lh = hMin + (hMax-hMin)*(i/24);
+          for(let j=0; j<=24; j++){
+            const la = aMin + (aMax-aMin)*(j/24);
+            const sim = simulateFast(lh, la, 10);
+            let err = 0;
+            if(mk.pHome!=null) err += Math.pow(sim.pHome - mk.pHome, 2);
+            if(mk.pOver25!=null) err += Math.pow(sim.pOver25 - mk.pOver25, 2);
+            if(mk.pBTTS!=null) err += Math.pow(sim.pBTTS - mk.pBTTS, 2);
+            if(err < best.err){
+              best = { lambdaH: lh, lambdaA: la, err };
+            }
+          }
+        }
+        return best;
+      }
+
       const mk = marketTargets();
       const fair1x2 = mk.fair1x2;
       const fairOU = mk.fairOU;
@@ -3161,13 +3351,22 @@ const od1 = document.getElementById("od_1");
 
     }
 
-    document.getElementById("mcAutoXg")?.addEventListener("click", ()=>{
-      autoXgFromStrength();
-    });
-    document.getElementById("mcRun")?.addEventListener("click", ()=>{
-      try{ console.log("⚽ MonteCarlo: click Simular"); runMonteCarlo(); }
-      catch(err){ console.error("MonteCarlo error:", err); const o=document.getElementById("mc_out"); if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`; }
-    });
+    const mcAutoBtn = document.getElementById("mcAutoXg");
+    const mcRunBtn = document.getElementById("mcRun");
+
+    if(mcAutoBtn){
+      mcAutoBtn.onclick = ()=>{ autoXgFromStrength(); };
+    }
+    if(mcRunBtn){
+      mcRunBtn.onclick = ()=>{
+        try{ console.log("⚽ MonteCarlo: click Simular"); runMonteCarlo(); }
+        catch(err){
+          console.error("MonteCarlo error:", err);
+          const o=document.getElementById("mc_out");
+          if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`;
+        }
+      };
+    }
 
     // Initial auto-fill once (nice default)
     autoXgFromStrength();
@@ -3181,6 +3380,178 @@ const od1 = document.getElementById("od_1");
     const avg = effs.reduce((a,b)=>a+b,0)/effs.length;
     return {attack:avg, defense:avg, control:avg, total:avg};
   }
+
+  // ---- Bet Tracker ----
+  renderTracker = function(db){
+    const v = document.getElementById("fl_view");
+    if(!Array.isArray(db.betTracker)) db.betTracker = [];
+
+    v.innerHTML = `
+      <div class="fl-card">
+        <div style="font-weight:900;">📈 Tracker de apuestas</div>
+        <div class="fl-small" style="margin-top:6px;">Registra ganadas/perdidas, cuota, stake y mira tu curva de rendimiento.</div>
+        <div class="fl-grid2" style="margin-top:10px;">
+          <div>
+            <div class="fl-h3">Partido / Evento</div>
+            <input class="fl-input" id="bt_match" placeholder="Ej: Real Madrid vs Barça">
+          </div>
+          <div>
+            <div class="fl-h3">Mercado</div>
+            <input class="fl-input" id="bt_market" placeholder="Ej: 1X2, Over 2.5, BTTS">
+          </div>
+          <div>
+            <div class="fl-h3">Resultado</div>
+            <select class="fl-select" id="bt_result">
+              <option value="win">Ganada ✅</option>
+              <option value="loss">Perdida ❌</option>
+              <option value="push">Nula ↔️</option>
+            </select>
+          </div>
+          <div>
+            <div class="fl-h3">Cuota decimal</div>
+            <input class="fl-input" id="bt_odds" type="number" min="1.01" step="0.01" value="1.90">
+          </div>
+          <div>
+            <div class="fl-h3">Stake</div>
+            <input class="fl-input" id="bt_stake" type="number" min="0" step="0.01" value="10">
+          </div>
+          <div>
+            <div class="fl-h3">Fecha</div>
+            <input class="fl-input" id="bt_date" type="date" value="${new Date().toISOString().slice(0,10)}">
+          </div>
+        </div>
+        <div class="fl-row" style="margin-top:12px;">
+          <button class="mc-btn" id="bt_add">Agregar registro</button>
+        </div>
+      </div>
+
+      <div class="fl-grid2">
+        <div class="fl-card" style="margin:0;">
+          <div style="font-weight:800;">Resumen</div>
+          <div id="bt_summary" class="fl-small" style="margin-top:8px;"></div>
+        </div>
+        <div class="fl-card" style="margin:0;">
+          <div style="font-weight:800;">Win / Loss</div>
+          <canvas id="bt_chartWL" height="180"></canvas>
+        </div>
+      </div>
+
+      <div class="fl-card" style="margin-top:12px;">
+        <div style="font-weight:800;">Curva de PnL acumulado</div>
+        <canvas id="bt_chartPnL" height="190"></canvas>
+      </div>
+
+      <div class="fl-card" style="margin-top:12px;">
+        <div style="font-weight:800;">Historial</div>
+        <div id="bt_list" style="margin-top:8px;"></div>
+      </div>
+    `;
+
+    function calcProfit(item){
+      const odds = clampNum(item.odds, 1.01, 999, 1.9);
+      const stake = Math.max(0, Number(item.stake)||0);
+      if(item.result === "win") return (odds-1)*stake;
+      if(item.result === "loss") return -stake;
+      return 0;
+    }
+
+    function redraw(){
+      const rows = db.betTracker
+        .slice()
+        .sort((a,b)=> String(a.date||"").localeCompare(String(b.date||"")) || String(a.id||"").localeCompare(String(b.id||"")));
+
+      let wins=0, losses=0, pushes=0;
+      let totalStake=0, totalProfit=0;
+      let cum=0;
+      const labels=[];
+      const pnlData=[];
+
+      rows.forEach((r, idx)=>{
+        const p = Number.isFinite(r.profit) ? r.profit : calcProfit(r);
+        if(r.result==="win") wins++;
+        else if(r.result==="loss") losses++;
+        else pushes++;
+        totalStake += Math.max(0, Number(r.stake)||0);
+        totalProfit += p;
+        cum += p;
+        labels.push(`${idx+1}`);
+        pnlData.push(+cum.toFixed(2));
+      });
+
+      const roi = totalStake>0 ? (totalProfit/totalStake)*100 : 0;
+      document.getElementById("bt_summary").innerHTML = `
+        Apuestas: <b>${rows.length}</b> &nbsp;•&nbsp; W/L/P: <b>${wins}</b>/<b>${losses}</b>/<b>${pushes}</b><br/>
+        Stake total: <b>${fmt(totalStake,2)}</b> &nbsp;•&nbsp; PnL: <b style="color:${totalProfit>=0?"#8ff0a4":"#ff9b9b"};">${fmt(totalProfit,2)}</b><br/>
+        ROI: <b>${fmt(roi,2)}%</b>
+      `;
+
+      const list = document.getElementById("bt_list");
+      list.innerHTML = rows.map(r=>`
+        <div class="fl-card" style="margin:8px 0;">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+            <div>
+              <div><b>${escapeHtml(r.match||"(sin partido)")}</b> • ${escapeHtml(r.market||"Mercado")}</div>
+              <div class="fl-small">${escapeHtml(r.date||"")} • ${r.result==="win"?"Ganada":""}${r.result==="loss"?"Perdida":""}${r.result==="push"?"Nula":""} • cuota ${fmt(r.odds,2)} • stake ${fmt(r.stake,2)}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-weight:800;color:${(r.profit||0)>=0?"#8ff0a4":"#ff9b9b"};">${fmt(r.profit,2)}</div>
+              <button class="mc-btn" data-del="${r.id}" style="margin-top:6px;">Eliminar</button>
+            </div>
+          </div>
+        </div>
+      `).join("") || `<div class="fl-small" style="opacity:.75;">Sin registros todavía.</div>`;
+
+      list.querySelectorAll("[data-del]").forEach(b=>b.onclick = ()=>{
+        const id = b.getAttribute("data-del");
+        db.betTracker = db.betTracker.filter(x=>x.id!==id);
+        saveDB(db);
+        redraw();
+      });
+
+      if(typeof Chart !== "undefined"){
+        try{ _fbTrackerCharts.pnl?.destroy?.(); }catch(e){}
+        try{ _fbTrackerCharts.wl?.destroy?.(); }catch(e){}
+
+        const pnlCtx = document.getElementById("bt_chartPnL")?.getContext("2d");
+        const wlCtx = document.getElementById("bt_chartWL")?.getContext("2d");
+        if(pnlCtx){
+          _fbTrackerCharts.pnl = new Chart(pnlCtx, {
+            type: "line",
+            data: { labels, datasets:[{ label:"PnL acumulado", data:pnlData, tension:0.25, fill:true }] },
+            options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
+          });
+        }
+        if(wlCtx){
+          _fbTrackerCharts.wl = new Chart(wlCtx, {
+            type: "doughnut",
+            data: { labels:["Ganadas","Perdidas","Nulas"], datasets:[{ data:[wins,losses,pushes], backgroundColor:["#3fb950","#f85149","#8b949e"] }] },
+            options: { responsive:true, maintainAspectRatio:false }
+          });
+        }
+      }
+    }
+
+    document.getElementById("bt_add").onclick = ()=>{
+      const result = document.getElementById("bt_result").value;
+      const odds = clampNum(document.getElementById("bt_odds").value, 1.01, 999, 1.9);
+      const stake = Math.max(0, Number(document.getElementById("bt_stake").value)||0);
+      const row = {
+        id: uid("bet"),
+        date: document.getElementById("bt_date").value || new Date().toISOString().slice(0,10),
+        match: document.getElementById("bt_match").value.trim(),
+        market: document.getElementById("bt_market").value.trim(),
+        result,
+        odds,
+        stake,
+        profit: result==="win" ? (odds-1)*stake : result==="loss" ? -stake : 0
+      };
+      db.betTracker.push(row);
+      saveDB(db);
+      redraw();
+    };
+
+    redraw();
+  };
 
   // ---- Settings ----
   function renderSettings(db){
@@ -3253,13 +3624,7 @@ const od1 = document.getElementById("od_1");
 
   // --- Debug hook (V6e) ---
   try{
-    window.__FOOTBALL_LAB__ = {
-      version: "V6e",
-      open: (view, payload)=> openLab(view, payload),
-      db: ()=> loadDB(),
-      setDB: (db)=> saveDB(db),
-      help: "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})"
-    };
+    publishFootballLabApi();
     window.__footballLabInitialized = true;
   }catch(e){ console.warn("FootballLab debug hook failed", e); }
 
@@ -3278,5 +3643,4 @@ try{
   try{ window.__footballLabInitialized = false; }catch(_e){}
   console.warn("FootballLab auto-init failed", e);
 }
-}catch(e){ console.warn("FootballLab auto-init failed", e); }
 }
