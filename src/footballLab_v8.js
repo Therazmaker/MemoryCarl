@@ -34,6 +34,8 @@ export function initFootballLab(){
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
   const KEY = "footballDB";
+  const API_COMPETITIONS_CACHE_KEY = "footballLab_competitions";
+  const API_TEAMS_CACHE_PREFIX = "footballLab_teams_";
   const FOOTBALL_DATA_TOKEN = "887c6e73d29347deac6d230b65ea72e0";
   const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
   let _fbSimCharts = { totals:null, scorelines:null };
@@ -62,7 +64,7 @@ export function initFootballLab(){
     matches: [], // match logs per player
     lineups: {}, // lineups[teamId][formation][pos] = playerId
     betTracker: [],
-    apiCache: { fixturesByTeam: {}, teamsByLeagueSeason: {} }
+    apiCache: { fixturesByTeam: {}, teamsByLeagueSeason: {}, competitions: null }
   };
 
   function getAutoSeasonLabel(){
@@ -93,6 +95,7 @@ export function initFootballLab(){
       if(!db.apiCache) db.apiCache = { fixturesByTeam: {} };
       if(!db.apiCache.fixturesByTeam) db.apiCache.fixturesByTeam = {};
       if(!db.apiCache.teamsByLeagueSeason) db.apiCache.teamsByLeagueSeason = {};
+      if(!db.apiCache.competitions || typeof db.apiCache.competitions !== "object") db.apiCache.competitions = null;
       // migrated from old API-Sports settings
       if(typeof db.settings.apiCompetitionId !== "string"){
         db.settings.apiCompetitionId = typeof db.settings.apiLeagueId === "string" ? db.settings.apiLeagueId : "";
@@ -216,10 +219,51 @@ export function initFootballLab(){
       .sort((a,b)=>a.name.localeCompare(b.name, "es", { sensitivity:"base" }));
 
     db.apiCache.teamsByLeagueSeason[cacheKey] = { teams, savedAt: now, provider: "football-data" };
+    try{
+      localStorage.setItem(`${API_TEAMS_CACHE_PREFIX}${cacheKey}`, JSON.stringify(teams));
+      if(String(league) === "2021") localStorage.setItem("pl_teams", JSON.stringify(teams));
+    }catch(e){ /* ignore storage quota */ }
     db.settings.apiCompetitionId = league;
     db.settings.apiSeason = season;
     saveDB(db);
     return { teams, source: "live", savedAt: now, provider: "football-data" };
+  }
+
+  async function getCompetitions(db, opts={}){
+    const force = !!opts.force;
+    const ttlMs = clampNum(db?.settings?.apiCacheHours, 1, 168, 12) * 60 * 60 * 1000;
+    const now = Date.now();
+
+    if(!db.apiCache) db.apiCache = { fixturesByTeam: {}, teamsByLeagueSeason: {}, competitions: null };
+    const cached = db.apiCache.competitions;
+    if(!force && cached?.savedAt && (now - cached.savedAt) < ttlMs && Array.isArray(cached.competitions)){
+      return { competitions: cached.competitions, source: "cache", savedAt: cached.savedAt, provider: cached.provider || "cache" };
+    }
+
+    const data = await footballDataFetch(`/competitions`);
+    const competitions = (Array.isArray(data?.competitions) ? data.competitions : [])
+      .map(c=>({
+        id: String(c?.id || "").trim(),
+        name: String(c?.name || "").trim(),
+        code: String(c?.code || "").trim(),
+        type: String(c?.type || "").trim()
+      }))
+      .filter(c=>c.id && c.name)
+      .sort((a,b)=>a.name.localeCompare(b.name, "es", { sensitivity:"base" }));
+
+    db.apiCache.competitions = { competitions, savedAt: now, provider: "football-data" };
+    saveDB(db);
+    try{ localStorage.setItem(API_COMPETITIONS_CACHE_KEY, JSON.stringify(competitions)); }catch(e){ /* ignore */ }
+    return { competitions, source: "live", savedAt: now, provider: "football-data" };
+  }
+
+  async function getTeamIdByName(db, competitionId, teamName, opts={}){
+    const nameNeedle = String(teamName || "").trim().toLowerCase();
+    if(!nameNeedle) return "";
+    const season = String(opts.season || db?.settings?.apiSeason || "").trim() || String(new Date().getFullYear());
+    const out = await getTeamsByLeagueSeason(db, { league: competitionId, season, force: !!opts.force });
+    const team = out.teams.find(t=>String(t.name || "").toLowerCase().includes(nameNeedle));
+    return team?.id || "";
   }
 
   function summarizeFixtureForm(fixtures, apiTeamId){
@@ -968,14 +1012,22 @@ function renderHome(db){
             <input class="fl-input" id="apiSeason" type="number" min="2000" max="2100" placeholder="Ej: 2024" value="${escapeHtml(String(db?.settings?.apiSeason||""))}">
           </div>
           <div style="display:flex;gap:8px;">
+            <button class="mc-btn" id="loadApiCompetitions">Cargar ligas</button>
             <button class="mc-btn" id="loadApiTeams">Cargar equipos (competición)</button>
           </div>
+        </div>
+        <div class="fl-row" style="margin-top:8px;gap:8px;align-items:flex-end;">
+          <select class="fl-select" id="apiCompetitionPicker" style="min-width:260px;flex:1;">
+            <option value="">Liga/competición desde /competitions…</option>
+          </select>
+          <button class="mc-btn" id="usePickedCompetition">Usar liga</button>
         </div>
         <div class="fl-row" style="margin-top:8px;gap:8px;align-items:flex-end;">
           <select class="fl-select" id="apiTeamPicker" style="min-width:260px;flex:1;">
             <option value="">Primero carga equipos por competición/temporada…</option>
           </select>
           <button class="mc-btn" id="usePickedApiTeam">Usar equipo seleccionado</button>
+          <button class="mc-btn" id="findApiTeamByName">Buscar ID por nombre</button>
         </div>
         <div id="apiTeamLookupStatus" class="fl-small" style="margin-top:6px;opacity:.85;"></div>
       </div>
@@ -1029,6 +1081,20 @@ function renderHome(db){
     const apiSummary = document.getElementById("apiFixtureSummary");
     const apiLookupStatus = document.getElementById("apiTeamLookupStatus");
     const apiTeamPicker = document.getElementById("apiTeamPicker");
+    const apiCompetitionPicker = document.getElementById("apiCompetitionPicker");
+
+    function paintCompetitionPicker(competitions){
+      if(!apiCompetitionPicker) return;
+      if(!Array.isArray(competitions) || !competitions.length){
+        apiCompetitionPicker.innerHTML = `<option value="">Sin competiciones para mostrar</option>`;
+        return;
+      }
+      apiCompetitionPicker.innerHTML = `<option value="">Selecciona liga/competición…</option>` + competitions.map(c=>
+        `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}${c.code ? ` (${escapeHtml(c.code)})` : ""} • ID ${escapeHtml(c.id)}</option>`
+      ).join("");
+      const currentComp = String(db?.settings?.apiCompetitionId || "").trim();
+      if(currentComp && competitions.some(c=>String(c.id)===currentComp)) apiCompetitionPicker.value = currentComp;
+    }
 
     function paintApiTeamPicker(teams){
       if(!apiTeamPicker) return;
@@ -1047,14 +1113,31 @@ function renderHome(db){
       }
     }
 
-    (function preloadApiTeamPicker(){
+    (function preloadApiPickers(){
+      const competitionCache = db?.apiCache?.competitions;
+      if(Array.isArray(competitionCache?.competitions) && competitionCache.competitions.length){
+        paintCompetitionPicker(competitionCache.competitions);
+      }else{
+        try{
+          const raw = localStorage.getItem(API_COMPETITIONS_CACHE_KEY);
+          const parsed = raw ? JSON.parse(raw) : [];
+          if(Array.isArray(parsed) && parsed.length) paintCompetitionPicker(parsed);
+        }catch(e){ /* ignore */ }
+      }
+
       const lg = String(db?.settings?.apiCompetitionId||"").trim();
       const sn = String(db?.settings?.apiSeason||"").trim();
       const key = `${lg}_${sn}`;
       const cached = db?.apiCache?.teamsByLeagueSeason?.[key];
       if(Array.isArray(cached?.teams) && cached.teams.length){
         paintApiTeamPicker(cached.teams);
+        return;
       }
+      try{
+        const rawTeams = localStorage.getItem(`${API_TEAMS_CACHE_PREFIX}${key}`) || (lg==="2021" ? localStorage.getItem("pl_teams") : "");
+        const parsedTeams = rawTeams ? JSON.parse(rawTeams) : [];
+        if(Array.isArray(parsedTeams) && parsedTeams.length) paintApiTeamPicker(parsedTeams);
+      }catch(e){ /* ignore */ }
     })();
     function paintFixtureSummary(sourceLabel=""){
       if(!apiSummary) return;
@@ -1101,8 +1184,35 @@ function renderHome(db){
       }
     };
 
+    document.getElementById("loadApiCompetitions").onclick = async ()=>{
+      if(apiLookupStatus) apiLookupStatus.textContent = "Consultando /competitions en football-data.org...";
+      try{
+        const out = await getCompetitions(db, { force:true });
+        paintCompetitionPicker(out.competitions);
+        if(apiLookupStatus){
+          apiLookupStatus.textContent = out.competitions.length
+            ? `Competiciones cargadas ✅ (${out.competitions.length}, fuente: ${out.source})`
+            : `Consulta completada ⚠️ (0 competiciones, fuente: ${out.source})`;
+        }
+      }catch(err){
+        if(apiLookupStatus) apiLookupStatus.textContent = `Error al consultar competiciones: ${String(err?.message||err)}`;
+      }
+    };
+
+    document.getElementById("usePickedCompetition").onclick = ()=>{
+      const selectedId = String(apiCompetitionPicker?.value || "").trim();
+      if(!selectedId){
+        if(apiLookupStatus) apiLookupStatus.textContent = "Selecciona una competición antes de aplicarla.";
+        return;
+      }
+      document.getElementById("apiCompetitionId").value = selectedId;
+      db.settings.apiCompetitionId = selectedId;
+      saveDB(db);
+      if(apiLookupStatus) apiLookupStatus.textContent = `Competition ID aplicado ✅ (${selectedId}).`;
+    };
+
     document.getElementById("loadApiTeams").onclick = async ()=>{
-      const league = String(document.getElementById("apiCompetitionId")?.value || "").trim();
+      const league = String(document.getElementById("apiCompetitionId")?.value || apiCompetitionPicker?.value || "").trim();
       const season = String(document.getElementById("apiSeason")?.value || "").trim();
       if(!league || !season){
         if(apiLookupStatus) apiLookupStatus.textContent = "Completa Competition ID y Season para buscar equipos.";
@@ -1134,6 +1244,34 @@ function renderHome(db){
       if(apiLookupStatus) apiLookupStatus.textContent = `ID aplicado al equipo local ✅ (${selectedId}).`;
       if(apiStatus) apiStatus.textContent = "API Team ID guardado ✅";
       paintFixtureSummary();
+    };
+
+    document.getElementById("findApiTeamByName").onclick = async ()=>{
+      const competitionId = String(document.getElementById("apiCompetitionId")?.value || apiCompetitionPicker?.value || "").trim();
+      const season = String(document.getElementById("apiSeason")?.value || "").trim();
+      if(!competitionId){
+        if(apiLookupStatus) apiLookupStatus.textContent = "Primero define un Competition ID para buscar por nombre.";
+        return;
+      }
+      if(!team?.name){
+        if(apiLookupStatus) apiLookupStatus.textContent = "Este equipo local no tiene nombre para buscar.";
+        return;
+      }
+      if(apiLookupStatus) apiLookupStatus.textContent = `Buscando '${team.name}' en competición ${competitionId}...`;
+      try{
+        const foundId = await getTeamIdByName(db, competitionId, team.name, { season, force:false });
+        if(!foundId){
+          if(apiLookupStatus) apiLookupStatus.textContent = `No se encontró coincidencia para '${team.name}'.`;
+          return;
+        }
+        document.getElementById("apiTeamId").value = foundId;
+        team.apiTeamId = foundId;
+        saveDB(db);
+        if(apiLookupStatus) apiLookupStatus.textContent = `ID encontrado por nombre ✅ (${team.name} → ${foundId}).`;
+        if(apiStatus) apiStatus.textContent = "API Team ID guardado ✅";
+      }catch(err){
+        if(apiLookupStatus) apiLookupStatus.textContent = `Error al buscar por nombre: ${String(err?.message||err)}`;
+      }
     };
 
     document.getElementById("addPlayer").onclick = ()=>{
