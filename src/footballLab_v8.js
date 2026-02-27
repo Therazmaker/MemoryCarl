@@ -3278,5 +3278,5 @@ try{
   try{ window.__footballLabInitialized = false; }catch(_e){}
   console.warn("FootballLab auto-init failed", e);
 }
-}catch(e){ console.warn("FootballLab auto-init failed", e); }
+}
 }
