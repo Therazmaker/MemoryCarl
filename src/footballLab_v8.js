@@ -38,6 +38,7 @@ export function initFootballLab(){
   const API_TEAMS_CACHE_PREFIX = "footballLab_teams_";
   const FOOTBALL_DATA_TOKEN = "887c6e73d29347deac6d230b65ea72e0";
   const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
+  const CORS_PROXY_BASE_URL = "https://corsproxy.io/?";
   let _fbSimCharts = { totals:null, scorelines:null };
   let _fbTrackerCharts = { pnl:null, wl:null };
 
@@ -128,13 +129,24 @@ export function initFootballLab(){
   }
 
   async function footballDataFetch(path){
-    const res = await fetch(`${FOOTBALL_DATA_BASE_URL}${path}`, {
-      headers: { "X-Auth-Token": FOOTBALL_DATA_TOKEN }
-    });
-    if(!res.ok){
-      throw new Error(`HTTP ${res.status}: ${res.statusText || "Error consultando football-data.org"}`);
+    const targetUrl = `${FOOTBALL_DATA_BASE_URL}${path}`;
+    const requestOptions = { headers: { "X-Auth-Token": FOOTBALL_DATA_TOKEN } };
+
+    try{
+      const res = await fetch(targetUrl, requestOptions);
+      if(!res.ok){
+        throw new Error(`HTTP ${res.status}: ${res.statusText || "Error consultando football-data.org"}`);
+      }
+      return res.json();
+    }catch(primaryErr){
+      // fallback for deployments where football-data.org blocks origin by CORS
+      const proxyUrl = `${CORS_PROXY_BASE_URL}${encodeURIComponent(targetUrl)}`;
+      const res = await fetch(proxyUrl, requestOptions);
+      if(!res.ok){
+        throw new Error(`HTTP ${res.status}: ${res.statusText || "Error consultando football-data.org"}`);
+      }
+      return res.json();
     }
-    return res.json();
   }
 
   function normalizeFootballDataMatch(match){
