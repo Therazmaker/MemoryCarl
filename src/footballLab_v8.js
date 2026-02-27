@@ -136,7 +136,7 @@ export function initFootballLab(){
       throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
     }
 
-    const url = `https://v3.football.api-sport.com/fixtures?team=${encodeURIComponent(teamKey)}&last=${last}`;
+    const url = `https://v3.football.api-sports.io/fixtures?team=${encodeURIComponent(teamKey)}&last=${last}`;
     const res = await fetch(url, {
       headers: {
         "x-apisports-key": apiKey
@@ -3815,7 +3815,7 @@ const od1 = document.getElementById("od_1");
 
           <div>
             <div class="fl-h3">API-SPORTS Key</div>
-            <input class="fl-input" id="apiSportsKey" placeholder="Tu key de v3.football.api-sport.com" value="${escapeHtml(db.settings.apiSportsKey || "")}">
+            <input class="fl-input" id="apiSportsKey" placeholder="Tu key de v3.football.api-sports.io" value="${escapeHtml(db.settings.apiSportsKey || "")}">
             <div class="fl-small" style="margin-top:6px;">Se usa para /fixtures?team=..&last=5 y se guarda local.</div>
           </div>
 
