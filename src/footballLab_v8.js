@@ -2793,6 +2793,60 @@ const od1 = document.getElementById("od_1");
     const odCalFull = document.getElementById("od_calibrate_full");
     const odOut = document.getElementById("od_out");
 
+    // Fail-safe wiring: ensure Monte Carlo buttons work even if advanced block fails.
+    const mcAutoBtnFallback = document.getElementById("mcAutoXg");
+    const mcRunBtnFallback = document.getElementById("mcRun");
+    if(mcRunBtnFallback){
+      mcRunBtnFallback.onclick = ()=>{
+        const xgH = clampNum(mcXgH?.value, 0.1, 5, 1.35);
+        const xgA = clampNum(mcXgA?.value, 0.1, 5, 1.15);
+        const N = clampNum(mcN?.value, 1000, 50000, 10000);
+
+        const maxG = 10;
+        const pmf = (L)=>{
+          const p = Array(maxG+1).fill(0);
+          p[0] = Math.exp(-L);
+          for(let k=1;k<=maxG;k++) p[k] = p[k-1]*L/k;
+          const s = p.reduce((a,b)=>a+b,0);
+          if(s<1) p[maxG] += (1-s);
+          return p;
+        };
+        const pH = pmf(xgH), pA = pmf(xgA);
+        let wH=0,d=0,wA=0,btts=0,o25=0;
+        for(let h=0;h<=maxG;h++) for(let a=0;a<=maxG;a++){
+          const pr = pH[h]*pA[a];
+          if(h>a) wH += pr; else if(a>h) wA += pr; else d += pr;
+          if(h>0 && a>0) btts += pr;
+          if(h+a>=3) o25 += pr;
+        }
+        if(mcOut){
+          mcOut.innerHTML = `
+            <div class="fl-pill"><b>Local</b> ${fmt(wH*100,1)}%</div>
+            <div class="fl-pill"><b>Empate</b> ${fmt(d*100,1)}%</div>
+            <div class="fl-pill"><b>Visitante</b> ${fmt(wA*100,1)}%</div>
+            <div style="margin-top:10px;" class="fl-small">
+              <b>BTTS</b>: ${fmt(btts*100,1)}% &nbsp;•&nbsp; <b>Over 2.5</b>: ${fmt(o25*100,1)}%<br/>
+              <b>xG</b>: ${fmt(xgH,2)} / ${fmt(xgA,2)} &nbsp;•&nbsp; <b>N</b>: ${N}
+            </div>
+          `;
+        }
+      };
+    }
+    if(mcAutoBtnFallback){
+      mcAutoBtnFallback.onclick = ()=>{
+        const homeId = homeSel.value;
+        const awayId = awaySel.value;
+        const formation = formSel.value;
+        const homeAdv = clamp(parseFloat(document.getElementById("homeAdv").value)||0, 0, 0.30);
+        const xiHome = getXIFromBuilder(homeId, formation, db);
+        const xiAway = getXIFromBuilder(awayId, formation, db);
+        const H = xiHome.length ? computeStrengthFromXI(db, xiHome, true) : computeStrengthFallback(db, homeId);
+        const A = xiAway.length ? computeStrengthFromXI(db, xiAway, true) : computeStrengthFallback(db, awayId);
+        const diff = H.total*(1+homeAdv) - A.total;
+        mcXgH.value = fmt(clamp(1.35 + diff*0.35, 0.25, 3.80),2);
+        mcXgA.value = fmt(clamp(1.15 - diff*0.25, 0.25, 3.80),2);
+      };
+    }
 
     function autoXgFromStrength(){
       // Map strength totals to a reasonable xG baseline.
@@ -2963,6 +3017,51 @@ const od1 = document.getElementById("od_1");
       }
 
       function marketTargets(){
+        const o1 = readOdd(od1), oX = readOdd(odX), o2 = readOdd(od2);
+        const oO = readOdd(odO25), oU = readOdd(odU25);
+        const oY = readOdd(odBTTSY), oN = readOdd(odBTTSN);
+
+        const fair1x2 = fairFromOdds([o1, oX, o2]);
+        const fairOU = fairFromOdds2(oO, oU);
+        const fairBTTS = fairFromOdds2(oY, oN);
+
+        return {
+          fair1x2,
+          fairOU,
+          fairBTTS,
+          pHome: fair1x2 ? fair1x2[0] : null,
+          pDraw: fair1x2 ? fair1x2[1] : null,
+          pAway: fair1x2 ? fair1x2[2] : null,
+          pOver25: fairOU ? fairOU[0] : null,
+          pBTTS: fairBTTS ? fairBTTS[0] : null
+        };
+      }
+
+      function calibrateWithMarketFull(baseH, baseA, mk){
+        // Lightweight search around base lambdas to approach market targets.
+        let best = { lambdaH: baseH, lambdaA: baseA, err: Number.POSITIVE_INFINITY };
+        const hMin = clamp(baseH*0.55, 0.05, 6);
+        const hMax = clamp(baseH*1.65, 0.05, 6);
+        const aMin = clamp(baseA*0.55, 0.05, 6);
+        const aMax = clamp(baseA*1.65, 0.05, 6);
+
+        for(let i=0; i<=24; i++){
+          const lh = hMin + (hMax-hMin)*(i/24);
+          for(let j=0; j<=24; j++){
+            const la = aMin + (aMax-aMin)*(j/24);
+            const sim = simulateFast(lh, la, 10);
+            let err = 0;
+            if(mk.pHome!=null) err += Math.pow(sim.pHome - mk.pHome, 2);
+            if(mk.pOver25!=null) err += Math.pow(sim.pOver25 - mk.pOver25, 2);
+            if(mk.pBTTS!=null) err += Math.pow(sim.pBTTS - mk.pBTTS, 2);
+            if(err < best.err){
+              best = { lambdaH: lh, lambdaA: la, err };
+            }
+          }
+        }
+        return best;
+      }
+
       const mk = marketTargets();
       const fair1x2 = mk.fair1x2;
       const fairOU = mk.fairOU;
@@ -3172,13 +3271,22 @@ const od1 = document.getElementById("od_1");
 
     }
 
-    document.getElementById("mcAutoXg")?.addEventListener("click", ()=>{
-      autoXgFromStrength();
-    });
-    document.getElementById("mcRun")?.addEventListener("click", ()=>{
-      try{ console.log("⚽ MonteCarlo: click Simular"); runMonteCarlo(); }
-      catch(err){ console.error("MonteCarlo error:", err); const o=document.getElementById("mc_out"); if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`; }
-    });
+    const mcAutoBtn = document.getElementById("mcAutoXg");
+    const mcRunBtn = document.getElementById("mcRun");
+
+    if(mcAutoBtn){
+      mcAutoBtn.onclick = ()=>{ autoXgFromStrength(); };
+    }
+    if(mcRunBtn){
+      mcRunBtn.onclick = ()=>{
+        try{ console.log("⚽ MonteCarlo: click Simular"); runMonteCarlo(); }
+        catch(err){
+          console.error("MonteCarlo error:", err);
+          const o=document.getElementById("mc_out");
+          if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`;
+        }
+      };
+    }
 
     // Initial auto-fill once (nice default)
     autoXgFromStrength();
