@@ -275,27 +275,146 @@ export function initFootballLab(){
     };
   }
 
-  function versusModel(db, homeId, awayId){
-    const homeStrength = teamStrength(db, homeId);
-    const awayStrength = teamStrength(db, awayId);
-    const homeAdv = Number(db.versus.homeAdvantage)||1.1;
-    const pace = Math.max(0.85, Math.min(1.3, Number(db.versus.paceFactor)||1));
-    const fHome = teamFormFromTracker(db, homeId);
-    const fAway = teamFormFromTracker(db, awayId);
+  function weightedAverage(items, valueFn, decay=0.9){
+    if(!items.length) return null;
+    let weighted = 0;
+    let totalWeight = 0;
+    const ordered = items.slice().sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")));
+    ordered.forEach((item, idx)=>{
+      const value = Number(valueFn(item));
+      if(!Number.isFinite(value)) return;
+      const weight = decay ** (ordered.length - idx - 1);
+      weighted += value * weight;
+      totalWeight += weight;
+    });
+    return totalWeight>0 ? weighted/totalWeight : null;
+  }
 
-    const atkHome = homeStrength * fHome.attack * fHome.momentum * homeAdv;
-    const atkAway = awayStrength * fAway.attack * fAway.momentum;
-    const defHome = homeStrength * (2 - fHome.defense*0.9);
-    const defAway = awayStrength * (2 - fAway.defense*0.9);
+  function listLeagueMatches(db, leagueId, limit=140){
+    return db.tracker
+      .filter(m=>!leagueId || m.leagueId===leagueId)
+      .slice(-limit);
+  }
 
-    const lHome = Math.max(0.2, Math.min(4.5, 1.15 * atkHome / Math.max(0.65, defAway) * pace));
-    const lAway = Math.max(0.2, Math.min(4.5, 1.05 * atkAway / Math.max(0.65, defHome) * pace));
+  function leagueContextFromTracker(db, leagueId){
+    const matches = listLeagueMatches(db, leagueId, 180);
+    if(!matches.length){
+      return {
+        matches: 0,
+        avgGoalsHome: 1.35,
+        avgGoalsAway: 1.15,
+        avgCornersTotal: 9.2,
+        avgCardsTotal: 4.4
+      };
+    }
+    const avg = (getter, fallback=0)=>{
+      const vals = matches.map(getter).filter(v=>Number.isFinite(v));
+      if(!vals.length) return fallback;
+      return vals.reduce((a,b)=>a+b,0)/vals.length;
+    };
+    const cornersAvg = avg(m=>{
+      const h = pickFirstNumber(m.homeCorners, m.cornersHome, m.corners?.home);
+      const a = pickFirstNumber(m.awayCorners, m.cornersAway, m.corners?.away);
+      return Number.isFinite(h) && Number.isFinite(a) ? h+a : NaN;
+    }, 9.2);
+    const cardsAvg = avg(m=>{
+      const hy = pickFirstNumber(m.homeYellow, m.cardsHomeYellow, m.cards?.homeYellow, 0) || 0;
+      const ay = pickFirstNumber(m.awayYellow, m.cardsAwayYellow, m.cards?.awayYellow, 0) || 0;
+      const hr = pickFirstNumber(m.homeRed, m.cardsHomeRed, m.cards?.homeRed, 0) || 0;
+      const ar = pickFirstNumber(m.awayRed, m.cardsAwayRed, m.cards?.awayRed, 0) || 0;
+      return hy + ay + (hr + ar) * 1.6;
+    }, 4.4);
 
-    const maxGoals = 5;
+    return {
+      matches: matches.length,
+      avgGoalsHome: avg(m=>Number(m.homeGoals)||0, 1.35),
+      avgGoalsAway: avg(m=>Number(m.awayGoals)||0, 1.15),
+      avgCornersTotal: cornersAvg,
+      avgCardsTotal: cardsAvg
+    };
+  }
+
+  function teamAnalytics(db, teamId, leagueId, limit=20){
+    const games = db.tracker
+      .filter(g=>(g.homeId===teamId || g.awayId===teamId) && (!leagueId || g.leagueId===leagueId))
+      .slice(-limit);
+    const homeGames = games.filter(g=>g.homeId===teamId);
+    const awayGames = games.filter(g=>g.awayId===teamId);
+
+    const avgSide = (list, forKey, againstKey, fallbackFor, fallbackAgainst)=>{
+      const forWeighted = weightedAverage(list, g=>pickFirstNumber(g[forKey], g[fallbackFor]), 0.9);
+      const againstWeighted = weightedAverage(list, g=>pickFirstNumber(g[againstKey], g[fallbackAgainst]), 0.9);
+      return {
+        for: Number.isFinite(forWeighted) ? forWeighted : 0,
+        against: Number.isFinite(againstWeighted) ? againstWeighted : 0,
+        played: list.length
+      };
+    };
+
+    const goalsHome = avgSide(homeGames, "homeGoals", "awayGoals");
+    const goalsAway = avgSide(awayGames, "awayGoals", "homeGoals");
+    const xgHome = avgSide(homeGames, "homeXg", "awayXg", "xgHome", "xgAway");
+    const xgAway = avgSide(awayGames, "awayXg", "homeXg", "xgAway", "xgHome");
+
+    const cornersFor = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      return pickFirstNumber(isHome ? g.homeCorners : g.awayCorners, isHome ? g.cornersHome : g.cornersAway);
+    }, 0.9) || 0;
+    const cornersAgainst = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      return pickFirstNumber(isHome ? g.awayCorners : g.homeCorners, isHome ? g.cornersAway : g.cornersHome);
+    }, 0.9) || 0;
+    const cardsRate = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      const y = pickFirstNumber(isHome ? g.homeYellow : g.awayYellow, 0) || 0;
+      const r = pickFirstNumber(isHome ? g.homeRed : g.awayRed, 0) || 0;
+      return y + r*1.6;
+    }, 0.88) || 0;
+
+    const form5Games = games.slice(-5);
+    let formPts = 0, formGF = 0, formGA = 0;
+    form5Games.forEach(g=>{
+      const isHome = g.homeId===teamId;
+      const gf = isHome ? Number(g.homeGoals)||0 : Number(g.awayGoals)||0;
+      const ga = isHome ? Number(g.awayGoals)||0 : Number(g.homeGoals)||0;
+      formGF += gf;
+      formGA += ga;
+      formPts += gf>ga ? 3 : gf===ga ? 1 : 0;
+    });
+
+    return {
+      sample: games.length,
+      goalsHome,
+      goalsAway,
+      xgHome,
+      xgAway,
+      cornersFor,
+      cornersAgainst,
+      cardsRate,
+      form5: {
+        played: form5Games.length,
+        points: formPts,
+        gf: formGF,
+        ga: formGA,
+        gd: formGF - formGA
+      }
+    };
+  }
+
+  function clamp(value, min, max){
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function calibrateToMarket(base, marketProb, modelProb){
+    if(!Number.isFinite(marketProb) || !Number.isFinite(modelProb) || !modelProb || !base) return base;
+    const ratio = clamp(marketProb/modelProb, 0.82, 1.22);
+    return base * ratio;
+  }
+
+  function probsFromLambdas(lHome, lAway, maxGoals=5){
     const matrix = [];
-    let pHome=0,pDraw=0,pAway=0, pTotal=0;
+    let pHome=0,pDraw=0,pAway=0,pTotal=0;
     let best = { h:0, a:0, p:0 };
-
     for(let h=0;h<=maxGoals;h++){
       const row = [];
       for(let a=0;a<=maxGoals;a++){
@@ -309,7 +428,6 @@ export function initFootballLab(){
       }
       matrix.push(row);
     }
-
     if(pTotal>0){
       pHome /= pTotal;
       pDraw /= pTotal;
@@ -319,8 +437,68 @@ export function initFootballLab(){
         for(let a=0;a<=maxGoals;a++) matrix[h][a] /= pTotal;
       }
     }
+    return { matrix, pHome, pDraw, pAway, maxGoals, best };
+  }
 
-    return { lHome, lAway, pHome, pDraw, pAway, matrix, maxGoals, best, factors: { fHome, fAway, pace, homeAdv } };
+  function versusModel(db, homeId, awayId, opts={}){
+    const homeTeam = db.teams.find(t=>t.id===homeId);
+    const awayTeam = db.teams.find(t=>t.id===awayId);
+    const leagueId = opts.leagueId || homeTeam?.leagueId || awayTeam?.leagueId || "";
+
+    const leagueCtx = leagueContextFromTracker(db, leagueId);
+    const homeForm = teamFormFromTracker(db, homeId);
+    const awayForm = teamFormFromTracker(db, awayId);
+    const homeData = teamAnalytics(db, homeId, leagueId, Number(db.versus.sampleSize)||20);
+    const awayData = teamAnalytics(db, awayId, leagueId, Number(db.versus.sampleSize)||20);
+
+    const homeStrength = teamStrength(db, homeId);
+    const awayStrength = teamStrength(db, awayId);
+    const homeAdv = Number(db.versus.homeAdvantage)||1.1;
+    const pace = clamp(Number(db.versus.paceFactor)||1, 0.82, 1.35);
+
+    const baseHomeFor = homeData.xgHome.for>0 ? homeData.xgHome.for : homeData.goalsHome.for;
+    const baseHomeAgainst = homeData.xgHome.against>0 ? homeData.xgHome.against : homeData.goalsHome.against;
+    const baseAwayFor = awayData.xgAway.for>0 ? awayData.xgAway.for : awayData.goalsAway.for;
+    const baseAwayAgainst = awayData.xgAway.against>0 ? awayData.xgAway.against : awayData.goalsAway.against;
+
+    const attackHome = clamp((baseHomeFor || leagueCtx.avgGoalsHome) / Math.max(0.35, leagueCtx.avgGoalsHome), 0.55, 1.9);
+    const defenseAwayWeakness = clamp((baseAwayAgainst || leagueCtx.avgGoalsHome) / Math.max(0.35, leagueCtx.avgGoalsHome), 0.55, 1.9);
+    const attackAway = clamp((baseAwayFor || leagueCtx.avgGoalsAway) / Math.max(0.35, leagueCtx.avgGoalsAway), 0.55, 1.9);
+    const defenseHomeWeakness = clamp((baseHomeAgainst || leagueCtx.avgGoalsAway) / Math.max(0.35, leagueCtx.avgGoalsAway), 0.55, 1.9);
+
+    let lHome = leagueCtx.avgGoalsHome * attackHome * defenseAwayWeakness;
+    let lAway = leagueCtx.avgGoalsAway * attackAway * defenseHomeWeakness;
+
+    lHome *= homeAdv * pace * homeStrength * homeForm.momentum;
+    lAway *= pace * awayStrength * awayForm.momentum;
+
+    lHome = clamp(lHome, 0.2, 4.6);
+    lAway = clamp(lAway, 0.2, 4.4);
+
+    const dist = probsFromLambdas(lHome, lAway, 5);
+
+    const cardsExpected = clamp((homeData.cardsRate + awayData.cardsRate + leagueCtx.avgCardsTotal)/2, 1.8, 8.8);
+    const cornersExpected = clamp(
+      (homeData.cornersFor + awayData.cornersAgainst + homeData.cornersAgainst + awayData.cornersFor + leagueCtx.avgCornersTotal) / 3,
+      5.5,
+      15.5
+    );
+
+    return {
+      lHome,
+      lAway,
+      pHome: dist.pHome,
+      pDraw: dist.pDraw,
+      pAway: dist.pAway,
+      matrix: dist.matrix,
+      maxGoals: dist.maxGoals,
+      best: dist.best,
+      cardsExpected,
+      cornersExpected,
+      leagueCtx,
+      teams: { homeData, awayData },
+      factors: { homeForm, awayForm, pace, homeAdv, attackHome, attackAway, defenseAwayWeakness, defenseHomeWeakness }
+    };
   }
 
   function normalizeImport(raw){
@@ -803,6 +981,18 @@ export function initFootballLab(){
           <select id="trAway" class="fl-select"><option value="">Visitante</option>${options}</select>
           <input id="trNote" class="fl-input" placeholder="Nota" />
           <button class="fl-btn" id="addTrack">Guardar</button>
+        </div>
+        <div class="fl-row" style="margin-top:8px;">
+          <input id="trHXg" type="number" step="0.01" class="fl-input" placeholder="xG L" style="width:84px" />
+          <input id="trAXg" type="number" step="0.01" class="fl-input" placeholder="xG V" style="width:84px" />
+          <input id="trHC" type="number" class="fl-input" placeholder="Corners L" style="width:94px" />
+          <input id="trAC" type="number" class="fl-input" placeholder="Corners V" style="width:94px" />
+          <input id="trHY" type="number" class="fl-input" placeholder="Amarillas L" style="width:104px" />
+          <input id="trAY" type="number" class="fl-input" placeholder="Amarillas V" style="width:104px" />
+          <input id="trRefCards" type="number" step="0.1" class="fl-input" placeholder="Tarjetas árbitro" style="width:130px" />
+          <input id="trOddH" type="number" step="0.01" class="fl-input" placeholder="Cuota 1" style="width:84px" />
+          <input id="trOddD" type="number" step="0.01" class="fl-input" placeholder="Cuota X" style="width:84px" />
+          <input id="trOddA" type="number" step="0.01" class="fl-input" placeholder="Cuota 2" style="width:84px" />
         </div></div>
         <div class="fl-card"><table class="fl-table"><thead><tr><th>Fecha</th><th>Liga</th><th>Local</th><th>Marcador</th><th>Visitante</th><th>Nota</th><th></th></tr></thead><tbody>${rows||"<tr><td colspan='7'>Sin eventos</td></tr>"}</tbody></table></div>
       `;
@@ -823,6 +1013,16 @@ export function initFootballLab(){
           awayId,
           homeGoals: Number(document.getElementById("trHG").value)||0,
           awayGoals: Number(document.getElementById("trAG").value)||0,
+          homeXg: pickFirstNumber(document.getElementById("trHXg").value),
+          awayXg: pickFirstNumber(document.getElementById("trAXg").value),
+          homeCorners: pickFirstNumber(document.getElementById("trHC").value),
+          awayCorners: pickFirstNumber(document.getElementById("trAC").value),
+          homeYellow: pickFirstNumber(document.getElementById("trHY").value),
+          awayYellow: pickFirstNumber(document.getElementById("trAY").value),
+          refereeCardsAvg: pickFirstNumber(document.getElementById("trRefCards").value),
+          oddsHome: pickFirstNumber(document.getElementById("trOddH").value),
+          oddsDraw: pickFirstNumber(document.getElementById("trOddD").value),
+          oddsAway: pickFirstNumber(document.getElementById("trOddA").value),
           note: document.getElementById("trNote").value.trim(),
           stats: []
         });
@@ -885,7 +1085,7 @@ export function initFootballLab(){
     }
 
     if(view==="versus"){
-      db.versus ||= { homeAdvantage: 1.1, paceFactor: 1 };
+      db.versus ||= { homeAdvantage: 1.1, paceFactor: 1, sampleSize: 20, marketBlend: 0.35 };
       const options = db.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
       content.innerHTML = `
         <div class="fl-card fl-vs-layout">
@@ -897,6 +1097,8 @@ export function initFootballLab(){
             <div class="fl-row" style="margin-bottom:8px;">
               <input id="vsHA" class="fl-input" type="number" step="0.05" value="${db.versus.homeAdvantage}" title="Home Advantage" />
               <input id="vsPace" class="fl-input" type="number" step="0.05" value="${db.versus.paceFactor || 1}" title="Pace Factor" />
+              <input id="vsN" class="fl-input" type="number" step="1" min="5" max="40" value="${db.versus.sampleSize || 20}" title="Muestra N" />
+              <input id="vsBlend" class="fl-input" type="number" step="0.05" min="0" max="0.8" value="${db.versus.marketBlend || 0.35}" title="Blend mercado" />
               <button class="fl-btn" id="runVs">Simular</button>
             </div>
             <div class="fl-row">
@@ -934,6 +1136,8 @@ export function initFootballLab(){
         const awayId = document.getElementById("vsAway").value;
         db.versus.homeAdvantage = Number(document.getElementById("vsHA").value)||1.1;
         db.versus.paceFactor = Number(document.getElementById("vsPace").value)||1;
+        db.versus.sampleSize = Number(document.getElementById("vsN").value)||20;
+        db.versus.marketBlend = clamp(Number(document.getElementById("vsBlend").value)||0.35, 0, 0.8);
         saveDb(db);
         if(!homeId || !awayId || homeId===awayId) return;
         const result = versusModel(db, homeId, awayId);
@@ -942,9 +1146,27 @@ export function initFootballLab(){
           document.getElementById("vsOddD").value,
           document.getElementById("vsOddA").value
         );
+        if(market){
+          const blend = db.versus.marketBlend || 0;
+          const calHome = calibrateToMarket(result.lHome, market.pH, result.pHome);
+          const calAway = calibrateToMarket(result.lAway, market.pA, result.pAway);
+          result.lHome = result.lHome * (1-blend) + calHome * blend;
+          result.lAway = result.lAway * (1-blend) + calAway * blend;
+          const calibrated = probsFromLambdas(result.lHome, result.lAway, result.maxGoals);
+          result.matrix = calibrated.matrix;
+          result.pHome = calibrated.pHome;
+          result.pDraw = calibrated.pDraw;
+          result.pAway = calibrated.pAway;
+          result.best = calibrated.best;
+        }
         const marketLine = market
           ? `<div class="fl-muted" style="margin-top:6px;">Mercado limpio → 1: <b>${(market.pH*100).toFixed(1)}%</b> · X: <b>${(market.pD*100).toFixed(1)}%</b> · 2: <b>${(market.pA*100).toFixed(1)}%</b></div>`
           : "";
+
+        const homeFacts = result.teams.homeData.form5;
+        const awayFacts = result.teams.awayData.form5;
+        const narrative = `Forma últimos 5: local ${homeFacts.points} pts (${homeFacts.gf}-${homeFacts.ga}) y visitante ${awayFacts.points} pts (${awayFacts.gf}-${awayFacts.ga}). `
+          + `En esta liga el promedio es ${result.leagueCtx.avgGoalsHome.toFixed(2)}-${result.leagueCtx.avgGoalsAway.toFixed(2)} goles (L/V).`;
 
         document.getElementById("vsOut").innerHTML = `
           <div>λ Home: <b>${result.lHome.toFixed(2)}</b> · λ Away: <b>${result.lAway.toFixed(2)}</b></div>
@@ -954,7 +1176,8 @@ export function initFootballLab(){
             <div><span>Away Win</span><b>${(result.pAway*100).toFixed(1)}%</b></div>
           </div>
           <div style="margin-top:8px;">Marcador más probable: <b>${result.best.h} - ${result.best.a}</b> (${(result.best.p*100).toFixed(1)}%)</div>
-          <div class="fl-muted" style="margin-top:6px;">Forma (últ. ${result.factors.fHome.played}/${result.factors.fAway.played}): local ${result.factors.fHome.attack.toFixed(2)} / visitante ${result.factors.fAway.attack.toFixed(2)}</div>
+          <div class="fl-muted" style="margin-top:6px;">Corners esperados: <b>${result.cornersExpected.toFixed(1)}</b> · Tarjetas esperadas: <b>${result.cardsExpected.toFixed(1)}</b></div>
+          <div class="fl-muted" style="margin-top:6px;">${narrative}</div>
           ${marketLine}
         `;
 
