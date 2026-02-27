@@ -84,8 +84,36 @@ export function initFootballLab(){
       .fl-muted{color:#9ca3af;font-size:13px}
       .fl-table{width:100%;border-collapse:collapse}
       .fl-table td,.fl-table th{border-bottom:1px solid #2d333b;padding:6px;text-align:left;font-size:13px}
+      .fl-squad-section-title{font-size:30px;font-weight:900;margin-bottom:10px;color:#f6f8fa}
+      .fl-squad-table{display:grid;gap:8px}
+      .fl-squad-head,.fl-squad-row{display:grid;grid-template-columns:52px minmax(230px,1.8fr) 54px 54px 74px 52px 52px 42px 42px;align-items:center;column-gap:8px}
+      .fl-squad-head{background:#21262d;border:1px solid #30363d;border-radius:9px;padding:8px 10px;font-size:12px;font-weight:700;letter-spacing:.07em;color:#9ca3af;text-transform:uppercase}
+      .fl-squad-row{background:#1b222c;border:1px solid #30363d;border-radius:10px;padding:12px 10px;font-size:15px}
+      .fl-squad-row:hover{background:#242d3a}
+      .fl-squad-cell-center{text-align:center}
+      .fl-squad-name{display:flex;align-items:center;gap:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .fl-flag{font-size:16px;line-height:1}
+      .fl-card-yellow{display:inline-block;width:10px;height:16px;border-radius:3px;background:#f5c400}
+      .fl-card-red{display:inline-block;width:10px;height:16px;border-radius:3px;background:#e10600}
     `;
     document.head.appendChild(style);
+  }
+
+  function pickFirstNumber(...values){
+    for(const value of values){
+      if(value===null || value===undefined || value==="") continue;
+      const raw = typeof value === "string" ? value.replace(",", ".") : value;
+      const n = Number(raw);
+      if(Number.isFinite(n)) return n;
+    }
+    return null;
+  }
+
+  function pickFirstString(...values){
+    for(const value of values){
+      if(typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
   }
 
   function teamStrength(db, teamId){
@@ -164,6 +192,60 @@ export function initFootballLab(){
     if(sec.includes("centrocamp") || sec.includes("medio")) return "MF";
     if(sec.includes("delanter")) return "FW";
     return "OT";
+  }
+
+  function parseImportedSquadRow(row, fallbackPos){
+    const flag = pickFirstString(row.flag, row.flagEmoji, row.countryFlag, row.nationalityFlag, row.country?.flag, row.nationality?.flag);
+    return {
+      name: String(row.name||"").trim(),
+      pos: fallbackPos,
+      rating: 5,
+      number: pickFirstNumber(row.number, row.shirtNumber, row.shirt, row.jersey, row.dorsal, row["#"]),
+      age: pickFirstNumber(row.age, row.edad),
+      appearances: pickFirstNumber(row.appearances, row.apps, row.matches, row.matchesPlayed, row.partidos, row.titularidades),
+      minutes: pickFirstNumber(row.minutes, row.min, row.minutos, row.playedMinutes),
+      goals: pickFirstNumber(row.goals, row.goles),
+      assists: pickFirstNumber(row.assists, row.asistencias),
+      yellowCards: pickFirstNumber(row.yellowCards, row.yellow, row.amarillas, row.bookings),
+      redCards: pickFirstNumber(row.redCards, row.red, row.rojas),
+      flag
+    };
+  }
+
+  function renderSquadSection(title, players){
+    const rows = players.map(pl=>`
+      <div class="fl-squad-row">
+        <div class="fl-squad-cell-center">${pl.number ?? "-"}</div>
+        <div class="fl-squad-name">${pl.flag ? `<span class="fl-flag">${pl.flag}</span>` : ""}<span>${pl.name}</span></div>
+        <div class="fl-squad-cell-center">${pl.age ?? "-"}</div>
+        <div class="fl-squad-cell-center">${pl.appearances ?? "-"}</div>
+        <div class="fl-squad-cell-center">${pl.minutes ?? "-"}</div>
+        <div class="fl-squad-cell-center">${pl.goals ?? 0}</div>
+        <div class="fl-squad-cell-center">${pl.assists ?? 0}</div>
+        <div class="fl-squad-cell-center">${pl.yellowCards ? pl.yellowCards : 0}</div>
+        <div class="fl-squad-cell-center">${pl.redCards ? pl.redCards : 0}</div>
+      </div>
+    `).join("");
+
+    return `
+      <div class="fl-card">
+        <div class="fl-squad-section-title">${title}</div>
+        <div class="fl-squad-table">
+          <div class="fl-squad-head">
+            <div class="fl-squad-cell-center">#</div>
+            <div>Nombre</div>
+            <div class="fl-squad-cell-center">Edad</div>
+            <div class="fl-squad-cell-center">👕</div>
+            <div class="fl-squad-cell-center">Min</div>
+            <div class="fl-squad-cell-center">⚽</div>
+            <div class="fl-squad-cell-center">A</div>
+            <div class="fl-squad-cell-center"><span class="fl-card-yellow" title="Amarillas"></span></div>
+            <div class="fl-squad-cell-center"><span class="fl-card-red" title="Rojas"></span></div>
+          </div>
+          ${rows || `<div class="fl-muted">Sin jugadores</div>`}
+        </div>
+      </div>
+    `;
   }
 
   function render(view="home", payload={}){
@@ -344,7 +426,7 @@ export function initFootballLab(){
       const byPos = { GK:[], DF:[], MF:[], FW:[], OT:[] };
       players.forEach(p=>{ const pos = p.pos || "OT"; (byPos[pos]||byPos.OT).push(p); });
       const sections = [["Porteros","GK"],["Defensas","DF"],["Centrocampistas","MF"],["Delanteros","FW"],["Otros","OT"]]
-        .map(([title,key])=>`<div class="fl-card"><b>${title}</b><div style="margin-top:6px;">${(byPos[key]||[]).map(pl=>`<div>${pl.name}</div>`).join("") || "<span class='fl-muted'>Sin jugadores</span>"}</div></div>`).join("");
+        .map(([title,key])=>renderSquadSection(title, byPos[key]||[])).join("");
 
       content.innerHTML = `
         <div class="fl-card">
@@ -381,7 +463,7 @@ export function initFootballLab(){
         try{
           const raw = document.getElementById("squadImport").value.trim();
           const data = JSON.parse(raw);
-          const rows = (data.squadBySection||[]).flatMap(sec=>(sec.rows||[]).map(r=>({ ...r, __pos: sectionToPos(sec.section) })));
+          const rows = (data.squadBySection||[]).flatMap(sec=>(sec.rows||[]).map(r=>parseImportedSquadRow(r, sectionToPos(sec.section))));
           if(data.team?.name){
             team.name = String(data.team.name).replace(/^Fútbol:\s*/i,"").replace(/\s*-\s*plantilla$/i,"").trim() || team.name;
           }
@@ -391,10 +473,19 @@ export function initFootballLab(){
             if(!name) return;
             let p = db.players.find(x=>x.teamId===team.id && x.name.toLowerCase()===name.toLowerCase());
             if(!p){
-              db.players.push({ id: uid("pl"), name, teamId: team.id, pos: r.__pos, rating: 5 });
+              db.players.push({ id: uid("pl"), teamId: team.id, ...r });
               created++;
             }else{
-              p.pos = p.pos || r.__pos;
+              p.pos = p.pos || r.pos;
+              p.number = r.number ?? p.number;
+              p.age = r.age ?? p.age;
+              p.appearances = r.appearances ?? p.appearances;
+              p.minutes = r.minutes ?? p.minutes;
+              p.goals = r.goals ?? p.goals;
+              p.assists = r.assists ?? p.assists;
+              p.yellowCards = r.yellowCards ?? p.yellowCards;
+              p.redCards = r.redCards ?? p.redCards;
+              p.flag = r.flag || p.flag;
               updated++;
             }
           });
