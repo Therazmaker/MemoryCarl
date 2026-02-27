@@ -189,11 +189,6 @@ export function initFootballLab(){
     };
   }
 
-<<<<<<< codex/redisenar-simulador-de-juegos-ln0ni0
-  let renderTracker = null;
-
-=======
->>>>>>> main
   function openLab(view, payload={}){
     const db = loadDB();
     const root = document.getElementById("app");
@@ -244,7 +239,6 @@ export function initFootballLab(){
 
   }
 
-<<<<<<< codex/redisenar-simulador-de-juegos-ln0ni0
   function renderTrackerTab(db){
     const v = document.getElementById("fl_view");
     if(!Array.isArray(db.betTracker)) db.betTracker = [];
@@ -302,8 +296,7 @@ export function initFootballLab(){
     draw();
   }
 
-=======
->>>>>>> main
+
   publishFootballLabApi();
 
   function injectMiniStyle(){
