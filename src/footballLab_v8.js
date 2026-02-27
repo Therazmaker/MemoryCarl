@@ -42,7 +42,9 @@ export function initFootballLab(){
       currentSeason: getAutoSeasonLabel(), // e.g., "2025-2026"
       homeAdvantage: 0.05,                // +5%
       formLastN: 5,                       // last N matches in current season
-      formWeight: 0.35                    // how much match form pulls rating (0..1)
+      formWeight: 0.35,                   // how much match form pulls rating (0..1)
+      apiSportsKey: "",
+      apiCacheHours: 12
     },
     weights: { // action category weights (editable)
       shots: 1.2,
@@ -56,7 +58,8 @@ export function initFootballLab(){
     players: [],
     matches: [], // match logs per player
     lineups: {}, // lineups[teamId][formation][pos] = playerId
-    betTracker: []
+    betTracker: [],
+    apiCache: { fixturesByTeam: {} }
   };
 
   function getAutoSeasonLabel(){
@@ -84,6 +87,10 @@ export function initFootballLab(){
       if(!db.matches) db.matches = [];
       if(!db.lineups) db.lineups = {};
       if(!db.betTracker) db.betTracker = [];
+      if(!db.apiCache) db.apiCache = { fixturesByTeam: {} };
+      if(!db.apiCache.fixturesByTeam) db.apiCache.fixturesByTeam = {};
+      if(typeof db.settings.apiSportsKey !== "string") db.settings.apiSportsKey = "";
+      if(!Number.isFinite(Number(db.settings.apiCacheHours))) db.settings.apiCacheHours = 12;
       // migrate leagues (V8)
       if(!db.leagues || !Array.isArray(db.leagues) || db.leagues.length===0){
         db.leagues = [
@@ -105,6 +112,115 @@ export function initFootballLab(){
 
   function saveDB(db){
     localStorage.setItem(KEY, JSON.stringify(db));
+  }
+
+  async function getTeamLastFixtures(db, apiTeamId, opts={}){
+    const teamKey = String(apiTeamId||"").trim();
+    if(!teamKey) throw new Error("Falta apiTeamId del equipo.");
+
+    const force = !!opts.force;
+    const last = clamp(parseInt(opts.last)||5, 1, 10);
+    const ttlMs = clampNum(db?.settings?.apiCacheHours, 1, 168, 12) * 60 * 60 * 1000;
+    const now = Date.now();
+
+    if(!db.apiCache) db.apiCache = { fixturesByTeam: {} };
+    if(!db.apiCache.fixturesByTeam) db.apiCache.fixturesByTeam = {};
+
+    const cached = db.apiCache.fixturesByTeam[teamKey];
+    if(!force && cached?.savedAt && (now - cached.savedAt) < ttlMs && Array.isArray(cached.fixtures)){
+      return { fixtures: cached.fixtures, source: "cache", savedAt: cached.savedAt };
+    }
+
+    const apiKey = String(db?.settings?.apiSportsKey || "").trim();
+    if(!apiKey){
+      throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
+    }
+
+    const url = `https://v3.football.api-sport.com/fixtures?team=${encodeURIComponent(teamKey)}&last=${last}`;
+    const res = await fetch(url, {
+      headers: {
+        "x-apisports-key": apiKey
+      }
+    });
+    if(!res.ok){
+      throw new Error(`API-SPORTS respondió ${res.status}`);
+    }
+    const payload = await res.json();
+    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+
+    db.apiCache.fixturesByTeam[teamKey] = { savedAt: now, fixtures };
+    saveDB(db);
+    return { fixtures, source: "network", savedAt: now };
+  }
+
+
+  async function searchApiTeams(db, query){
+    const q = String(query||"").trim();
+    if(!q) return [];
+
+    const apiKey = String(db?.settings?.apiSportsKey || "").trim();
+    if(!apiKey) throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
+
+    const url = `https://v3.football.api-sport.com/teams?search=${encodeURIComponent(q)}`;
+    const res = await fetch(url, {
+      headers: {
+        "x-apisports-key": apiKey
+      }
+    });
+    if(!res.ok){
+      throw new Error(`API-SPORTS respondió ${res.status}`);
+    }
+    const payload = await res.json();
+    const rows = Array.isArray(payload?.response) ? payload.response : [];
+    return rows.map(r=>({
+      id: r?.team?.id,
+      name: String(r?.team?.name || ""),
+      country: String(r?.team?.country || ""),
+      leagueHint: String(r?.league?.name || "")
+    })).filter(x=>Number.isFinite(Number(x.id)) && x.name);
+  }
+
+  function summarizeFixtureForm(fixtures, apiTeamId){
+    const teamIdNum = Number(apiTeamId);
+    let pts = 0;
+    let played = 0;
+    for(const fx of (fixtures || [])){
+      const homeId = Number(fx?.teams?.home?.id);
+      const awayId = Number(fx?.teams?.away?.id);
+      const hg = Number(fx?.goals?.home);
+      const ag = Number(fx?.goals?.away);
+      if(!Number.isFinite(hg) || !Number.isFinite(ag)) continue;
+
+      const isHome = homeId === teamIdNum;
+      const isAway = awayId === teamIdNum;
+      if(!isHome && !isAway) continue;
+
+      const gf = isHome ? hg : ag;
+      const ga = isHome ? ag : hg;
+      played += 1;
+      if(gf > ga) pts += 3;
+      else if(gf === ga) pts += 1;
+    }
+    if(!played) return { played:0, points:0, ppg:0, factor:1 };
+    const ppg = pts / played;
+    // 1.50 ppg = neutral, cap +/-15%
+    const factor = clamp(1 + ((ppg - 1.5) * 0.10), 0.85, 1.15);
+    return { played, points:pts, ppg, factor };
+  }
+
+
+  async function syncApiFixturesForTeam(db, teamId, opts={}){
+    const t = db.teams.find(x=>x.id===teamId);
+    if(!t) return { ok:false, reason:"team_not_found" };
+    const apiTeamId = String(t.apiTeamId||"").trim();
+    if(!apiTeamId) return { ok:false, reason:"missing_api_team_id", team:t };
+
+    const out = await getTeamLastFixtures(db, apiTeamId, {
+      last: clamp(parseInt(opts.last)||5, 1, 10),
+      force: !!opts.force
+    });
+    const summary = summarizeFixtureForm(out.fixtures, apiTeamId);
+    return { ok:true, team:t, apiTeamId, ...out, summary };
   }
 
   function uid(prefix="id"){
@@ -178,6 +294,89 @@ export function initFootballLab(){
     labBtn.onclick = () => openLab("home");
     moreBtn.parentElement.appendChild(labBtn);
   }
+
+  let renderSettings = function(db){
+    const v = document.getElementById("fl_view");
+
+    v.innerHTML = `
+      <div class="fl-card">
+        <div style="font-weight:900;">⚙️ Ajustes</div>
+        <div class="fl-small" style="margin-top:6px;">Esto controla cómo “la temporada actual” influye en la simulación.</div>
+      </div>
+
+      <div class="fl-card">
+        <div class="fl-grid2">
+          <div>
+            <div class="fl-h3">Temporada actual</div>
+            <input class="fl-input" id="season" value="${escapeHtml(db.settings.currentSeason)}" placeholder="Ej: 2025-2026">
+            <div class="fl-small" style="margin-top:6px;">Solo los registros con esta temporada se usan para FormScore.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">Últimos N partidos</div>
+            <input class="fl-input" id="lastN" type="number" min="1" max="20" step="1" value="${db.settings.formLastN}">
+            <div class="fl-small" style="margin-top:6px;">Cuántos partidos recientes cuentan para la forma.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">Peso de forma (0..1)</div>
+            <input class="fl-input" id="formW" type="number" min="0" max="1" step="0.05" value="${fmt(db.settings.formWeight,2)}">
+            <div class="fl-small" style="margin-top:6px;">Qué tanto la forma mueve el rating efectivo.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">Localía</div>
+            <input class="fl-input" id="homeAdv" type="number" min="0" max="0.30" step="0.01" value="${fmt(db.settings.homeAdvantage,2)}">
+            <div class="fl-small" style="margin-top:6px;">Bonus al total del equipo local.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">API-SPORTS Key</div>
+            <input class="fl-input" id="apiSportsKey" placeholder="Tu key de v3.football.api-sport.com" value="${escapeHtml(db.settings.apiSportsKey || "")}">
+            <div class="fl-small" style="margin-top:6px;">Se usa para /fixtures?team=..&last=5 y se guarda local. Flujo: Versus intenta cache -> API solo si cache vencida.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">Cache API (horas)</div>
+            <input class="fl-input" id="apiCacheHours" type="number" min="1" max="168" step="1" value="${clampNum(db.settings.apiCacheHours,1,168,12)}">
+            <div class="fl-small" style="margin-top:6px;">Evita gastar llamadas del free tier (100/día).</div>
+          </div>
+        </div>
+
+        <div class="fl-row" style="margin-top:12px;">
+          <button class="mc-btn" id="save">Guardar</button>
+          <button class="mc-btn" id="resetSeason">Auto-temporada</button>
+        </div>
+      </div>
+
+      <div class="fl-card">
+        <div style="font-weight:800;">📌 Glosario rápido de posiciones</div>
+        <div class="fl-small" style="margin-top:8px;">
+          ${Object.keys(POS_LABELS).map(k=>`• <b>${k}</b>: ${escapeHtml(POS_LABELS[k].split("—")[1].trim())}`).join("<br/>")}
+        </div>
+      </div>
+    `;
+
+    document.getElementById("save").onclick = ()=>{
+      db.settings.currentSeason = document.getElementById("season").value.trim() || getAutoSeasonLabel();
+      db.settings.formLastN = clamp(parseInt(document.getElementById("lastN").value)||5, 1, 20);
+      db.settings.formWeight = clamp(parseFloat(document.getElementById("formW").value)||0.35, 0, 1);
+      db.settings.homeAdvantage = clamp(parseFloat(document.getElementById("homeAdv").value)||0.05, 0, 0.30);
+      db.settings.apiSportsKey = String(document.getElementById("apiSportsKey").value || "").trim();
+      db.settings.apiCacheHours = clamp(parseInt(document.getElementById("apiCacheHours").value)||12, 1, 168);
+      saveDB(db);
+      alert("Guardado.");
+      openLab("settings");
+    };
+
+    document.getElementById("resetSeason").onclick = ()=>{
+      db.settings.currentSeason = getAutoSeasonLabel();
+      saveDB(db);
+      openLab("settings");
+    };
+  }
+
+
 
   function publishFootballLabApi(){
     window.__FOOTBALL_LAB__ = {
@@ -792,6 +991,31 @@ function renderHome(db){
             <button class="mc-btn" id="goLogger">Match Logger</button>
           </div>
         </div>
+
+        <div class="fl-row" style="margin-top:10px;align-items:flex-end;">
+          <div>
+            <div class="fl-h3">API Team ID (API-SPORTS)</div>
+            <input class="fl-input" id="apiTeamId" type="number" min="1" placeholder="Ej: 33" value="${escapeHtml(String(team.apiTeamId||""))}">
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="mc-btn" id="saveApiTeamId">Guardar ID</button>
+            <button class="mc-btn" id="syncTeamFixtures">Sync últimos 5</button>
+          </div>
+        </div>
+        <div id="apiFixtureStatus" class="fl-small" style="margin-top:8px;opacity:.85;"></div>
+        <div id="apiFixtureSummary" class="fl-small" style="margin-top:4px;"></div>
+
+        <div class="fl-row" style="margin-top:12px;align-items:flex-end;">
+          <div>
+            <div class="fl-h3">Buscar Team ID por nombre</div>
+            <input class="fl-input" id="apiTeamSearch" placeholder="Ej: Ferencvaros" value="${escapeHtml(String(team.name||""))}">
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="mc-btn" id="searchApiTeamBtn">Buscar en API</button>
+          </div>
+        </div>
+        <div id="apiTeamSearchStatus" class="fl-small" style="margin-top:8px;opacity:.85;"></div>
+        <div id="apiTeamSearchResults" class="fl-small" style="margin-top:4px;"></div>
       </div>
 
       <div class="fl-card">
@@ -838,6 +1062,87 @@ function renderHome(db){
 
     document.getElementById("goLineup").onclick = ()=>openLab("lineup",{teamId});
     document.getElementById("goLogger").onclick = ()=>openLab("logger",{teamId});
+
+    const apiStatus = document.getElementById("apiFixtureStatus");
+    const apiSummary = document.getElementById("apiFixtureSummary");
+    const apiSearchStatus = document.getElementById("apiTeamSearchStatus");
+    const apiSearchResults = document.getElementById("apiTeamSearchResults");
+    function paintFixtureSummary(sourceLabel=""){
+      if(!apiSummary) return;
+      const cache = db?.apiCache?.fixturesByTeam?.[String(team.apiTeamId||"")];
+      const fixtures = Array.isArray(cache?.fixtures) ? cache.fixtures : [];
+      if(!fixtures.length){
+        apiSummary.innerHTML = "";
+        return;
+      }
+      const f = summarizeFixtureForm(fixtures, team.apiTeamId);
+      apiSummary.innerHTML = `Forma API (${fixtures.length}): <b>${f.points} pts</b> • PPG <b>${fmt(f.ppg,2)}</b> • factor <b>x${fmt(f.factor,2)}</b> ${sourceLabel ? `• ${escapeHtml(sourceLabel)}` : ""}`;
+    }
+    paintFixtureSummary();
+
+    document.getElementById("saveApiTeamId").onclick = ()=>{
+      const raw = String(document.getElementById("apiTeamId").value||"").trim();
+      team.apiTeamId = raw ? String(parseInt(raw,10)||"") : "";
+      saveDB(db);
+      if(apiStatus) apiStatus.textContent = "API Team ID guardado ✅";
+      paintFixtureSummary();
+    };
+
+    document.getElementById("syncTeamFixtures").onclick = async ()=>{
+      const raw = String(document.getElementById("apiTeamId").value||"").trim();
+      const apiTeamId = String(parseInt(raw,10)||"");
+      if(!apiTeamId){
+        if(apiStatus) apiStatus.textContent = "Primero guarda un API Team ID válido.";
+        return;
+      }
+      team.apiTeamId = apiTeamId;
+      saveDB(db);
+      if(apiStatus) apiStatus.textContent = "Sincronizando últimos 5 partidos...";
+      try{
+        const out = await getTeamLastFixtures(db, apiTeamId, { last:5, force:true });
+        if(apiStatus) apiStatus.textContent = `Sincronizado ✅ (${out.fixtures.length} partidos, fuente: ${out.source})`;
+        paintFixtureSummary(`actualizado ${new Date(out.savedAt).toLocaleString()}`);
+      }catch(err){
+        if(apiStatus) apiStatus.textContent = `Error API: ${String(err?.message||err)}`;
+      }
+    };
+
+
+    document.getElementById("searchApiTeamBtn").onclick = async ()=>{
+      const q = String(document.getElementById("apiTeamSearch").value||"").trim();
+      if(!q){
+        if(apiSearchStatus) apiSearchStatus.textContent = "Escribe un nombre para buscar.";
+        if(apiSearchResults) apiSearchResults.innerHTML = "";
+        return;
+      }
+      if(apiSearchStatus) apiSearchStatus.textContent = `Buscando "${q}"...`;
+      if(apiSearchResults) apiSearchResults.innerHTML = "";
+      try{
+        const rows = await searchApiTeams(db, q);
+        if(!rows.length){
+          if(apiSearchStatus) apiSearchStatus.textContent = "Sin resultados.";
+          return;
+        }
+        if(apiSearchStatus) apiSearchStatus.textContent = `Encontrados: ${rows.length}. Click en un ID para usarlo.`;
+        if(apiSearchResults){
+          apiSearchResults.innerHTML = rows.slice(0,8).map(r=>{
+            return `<div style="margin:4px 0;">• <button class="mc-btn" data-pick-api-team="${r.id}">ID ${r.id}</button> <b>${escapeHtml(r.name)}</b> ${r.country ? `(${escapeHtml(r.country)})` : ""}</div>`;
+          }).join("");
+          apiSearchResults.querySelectorAll("[data-pick-api-team]").forEach(btn=>{
+            btn.onclick = ()=>{
+              const id = String(btn.getAttribute("data-pick-api-team")||"").trim();
+              const apiTeamInput = document.getElementById("apiTeamId");
+              if(apiTeamInput) apiTeamInput.value = id;
+              team.apiTeamId = id;
+              saveDB(db);
+              if(apiStatus) apiStatus.textContent = `API Team ID seleccionado: ${id} ✅`;
+            };
+          });
+        }
+      }catch(err){
+        if(apiSearchStatus) apiSearchStatus.textContent = `Error búsqueda API: ${String(err?.message||err)}`;
+      }
+    };
 
     document.getElementById("addPlayer").onclick = ()=>{
       const name = document.getElementById("pName").value.trim();
@@ -2628,9 +2933,11 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
 
         <div class="fl-row" style="margin-top:10px;">
           <button class="mc-btn" id="run">Simular</button>
+          <button class="mc-btn" id="syncApiBoth">Sync API equipos</button>
           <button class="mc-btn" id="openHomeXI">XI Local</button>
           <button class="mc-btn" id="openAwayXI">XI Visitante</button>
         </div>
+        <div id="versusApiStatus" class="fl-small" style="margin-top:8px;"></div>
       </div>
 
       <div class="fl-grid2">
@@ -2793,7 +3100,36 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
       openLab("lineup",{teamId:tid});
     };
 
-    document.getElementById("run").onclick = ()=>{
+    const versusApiStatus = document.getElementById("versusApiStatus");
+    async function syncSelectedTeamsFromApi(force=false){
+      const ids = [homeSel.value, awaySel.value].filter(Boolean);
+      if(!ids.length) return;
+      if(versusApiStatus) versusApiStatus.textContent = "Sincronizando API (últimos 5) ...";
+      const lines = [];
+      for(const tid of ids){
+        try{
+          const out = await syncApiFixturesForTeam(db, tid, { last:5, force });
+          const teamName = out.team?.name || tid;
+          if(!out.ok){
+            if(out.reason === "missing_api_team_id") lines.push(`• ${teamName}: sin API Team ID`);
+            else lines.push(`• ${teamName}: no sincronizado (${out.reason||"error"})`);
+            continue;
+          }
+          lines.push(`• ${teamName}: ${out.fixtures.length} partidos (${out.source}) PPG ${fmt(out.summary.ppg,2)}`);
+        }catch(err){
+          const team = db.teams.find(t=>t.id===tid);
+          lines.push(`• ${team?.name||tid}: error ${String(err?.message||err)}`);
+        }
+      }
+      if(versusApiStatus) versusApiStatus.innerHTML = lines.join("<br/>");
+    }
+
+    document.getElementById("syncApiBoth").onclick = async ()=>{
+      await syncSelectedTeamsFromApi(true);
+    };
+
+    document.getElementById("run").onclick = async ()=>{
+      await syncSelectedTeamsFromApi(false);
       const homeId = homeSel.value;
       const awayId = awaySel.value;
       const formation = formSel.value;
@@ -3362,11 +3698,19 @@ const od1 = document.getElementById("od_1");
     // Use effective ratings across squad as coarse fallback
     const effs = ps.map(p=>getEffectiveRating(db,p.id));
     const avg = effs.reduce((a,b)=>a+b,0)/effs.length;
-    return {attack:avg, defense:avg, control:avg, total:avg};
+
+    // Optional boost/penalty with cached API team form (last fixtures)
+    const t = db.teams.find(x=>x.id===teamId);
+    const apiTeamId = t?.apiTeamId ? String(t.apiTeamId) : "";
+    const fixtures = apiTeamId ? (db?.apiCache?.fixturesByTeam?.[apiTeamId]?.fixtures || []) : [];
+    const form = summarizeFixtureForm(fixtures, apiTeamId);
+    const boosted = avg * form.factor;
+
+    return {attack:boosted, defense:boosted, control:boosted, total:boosted};
   }
 
   // ---- Bet Tracker ----
-  renderTracker = function(db){
+  let renderTracker = function(db){
     const v = document.getElementById("fl_view");
     if(!Array.isArray(db.betTracker)) db.betTracker = [];
 
@@ -3538,74 +3882,6 @@ const od1 = document.getElementById("od_1");
   };
 
   // ---- Settings ----
-  function renderSettings(db){
-    const v = document.getElementById("fl_view");
-
-    v.innerHTML = `
-      <div class="fl-card">
-        <div style="font-weight:900;">⚙️ Ajustes</div>
-        <div class="fl-small" style="margin-top:6px;">Esto controla cómo “la temporada actual” influye en la simulación.</div>
-      </div>
-
-      <div class="fl-card">
-        <div class="fl-grid2">
-          <div>
-            <div class="fl-h3">Temporada actual</div>
-            <input class="fl-input" id="season" value="${escapeHtml(db.settings.currentSeason)}" placeholder="Ej: 2025-2026">
-            <div class="fl-small" style="margin-top:6px;">Solo los registros con esta temporada se usan para FormScore.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">Últimos N partidos</div>
-            <input class="fl-input" id="lastN" type="number" min="1" max="20" step="1" value="${db.settings.formLastN}">
-            <div class="fl-small" style="margin-top:6px;">Cuántos partidos recientes cuentan para la forma.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">Peso de forma (0..1)</div>
-            <input class="fl-input" id="formW" type="number" min="0" max="1" step="0.05" value="${fmt(db.settings.formWeight,2)}">
-            <div class="fl-small" style="margin-top:6px;">Qué tanto la forma mueve el rating efectivo.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">Localía</div>
-            <input class="fl-input" id="homeAdv" type="number" min="0" max="0.30" step="0.01" value="${fmt(db.settings.homeAdvantage,2)}">
-            <div class="fl-small" style="margin-top:6px;">Bonus al total del equipo local.</div>
-          </div>
-        </div>
-
-        <div class="fl-row" style="margin-top:12px;">
-          <button class="mc-btn" id="save">Guardar</button>
-          <button class="mc-btn" id="resetSeason">Auto-temporada</button>
-        </div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:800;">📌 Glosario rápido de posiciones</div>
-        <div class="fl-small" style="margin-top:8px;">
-          ${Object.keys(POS_LABELS).map(k=>`• <b>${k}</b>: ${escapeHtml(POS_LABELS[k].split("—")[1].trim())}`).join("<br/>")}
-        </div>
-      </div>
-    `;
-
-    document.getElementById("save").onclick = ()=>{
-      db.settings.currentSeason = document.getElementById("season").value.trim() || getAutoSeasonLabel();
-      db.settings.formLastN = clamp(parseInt(document.getElementById("lastN").value)||5, 1, 20);
-      db.settings.formWeight = clamp(parseFloat(document.getElementById("formW").value)||0.35, 0, 1);
-      db.settings.homeAdvantage = clamp(parseFloat(document.getElementById("homeAdv").value)||0.05, 0, 0.30);
-      saveDB(db);
-      alert("Guardado.");
-      openLab("settings");
-    };
-
-    document.getElementById("resetSeason").onclick = ()=>{
-      db.settings.currentSeason = getAutoSeasonLabel();
-      saveDB(db);
-      openLab("settings");
-    };
-  }
-
-
   // --- Debug hook (V6e) ---
   try{
     publishFootballLabApi();
