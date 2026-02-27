@@ -123,12 +123,13 @@ export function initFootballLab(){
     const ttlMs = clampNum(db?.settings?.apiCacheHours, 1, 168, 12) * 60 * 60 * 1000;
     const now = Date.now();
 
-    if(!db.apiCache) db.apiCache = { fixturesByTeam: {} };
+    if(!db.apiCache) db.apiCache = { fixturesByTeam: {}, lastFetchByTeam: {} };
     if(!db.apiCache.fixturesByTeam) db.apiCache.fixturesByTeam = {};
+    if(!db.apiCache.lastFetchByTeam) db.apiCache.lastFetchByTeam = {};
 
     const cached = db.apiCache.fixturesByTeam[teamKey];
     if(!force && cached?.savedAt && (now - cached.savedAt) < ttlMs && Array.isArray(cached.fixtures)){
-      return { fixtures: cached.fixtures, source: "cache", savedAt: cached.savedAt };
+      return { fixtures: cached.fixtures, source: "cache", savedAt: cached.savedAt, provider: cached.provider || "cache" };
     }
 
     const apiKey = String(db?.settings?.apiSportsKey || "").trim();
@@ -141,16 +142,12 @@ export function initFootballLab(){
       headers: {
         "x-apisports-key": apiKey
       }
-    });
-    if(!res.ok){
-      throw new Error(`API-SPORTS respondió ${res.status}`);
     }
-    const payload = await res.json();
-    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
 
-    db.apiCache.fixturesByTeam[teamKey] = { savedAt: now, fixtures };
+    db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: "none", attempts };
     saveDB(db);
-    return { fixtures, source: "network", savedAt: now };
+    const summary = attempts.map(a=>`${a.provider}:${a.status}${a.errors?.length?` (${a.errors.join(" | ")})`:""}`).join(" • ");
+    throw new Error(`No se pudo sincronizar. ${summary || "Sin respuesta útil de la API."}`);
   }
 
   function summarizeFixtureForm(fixtures, apiTeamId){
@@ -970,7 +967,12 @@ function renderHome(db){
       if(apiStatus) apiStatus.textContent = "Sincronizando últimos 5 partidos...";
       try{
         const out = await getTeamLastFixtures(db, apiTeamId, { last:5, force:true });
-        if(apiStatus) apiStatus.textContent = `Sincronizado ✅ (${out.fixtures.length} partidos, fuente: ${out.source})`;
+        const provider = out.provider ? `, proveedor: ${out.provider}` : "";
+        if(apiStatus){
+          apiStatus.textContent = out.fixtures.length
+            ? `Sincronizado ✅ (${out.fixtures.length} partidos, fuente: ${out.source}${provider})`
+            : `Sincronizado ⚠️ (0 partidos, fuente: ${out.source}${provider}). Revisa Team ID, plan/API key o temporada.`;
+        }
         paintFixtureSummary(`actualizado ${new Date(out.savedAt).toLocaleString()}`);
       }catch(err){
         if(apiStatus) apiStatus.textContent = `Error API: ${String(err?.message||err)}`;

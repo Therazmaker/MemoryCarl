@@ -14086,20 +14086,28 @@ try{
    ========================= */
 
 function fbGetDB(){
-  let raw = localStorage.getItem("footballDB");
+  const seed = {
+    settings: { currentSeason: "", apiSportsKey: "" },
+    teams: [],
+    players: [],
+    matches: []
+  };
+  const raw = localStorage.getItem("footballDB");
   if(!raw){
-    const seed = { teams: [], players: [], matches: [] };
     localStorage.setItem("footballDB", JSON.stringify(seed));
     return seed;
   }
   try{
     const db = JSON.parse(raw);
-    if(!db.teams) db.teams=[];
-    if(!db.players) db.players=[];
-    if(!db.matches) db.matches=[];
+    if(!db.settings || typeof db.settings !== "object") db.settings = {};
+    if(typeof db.settings.currentSeason !== "string") db.settings.currentSeason = "";
+    if(typeof db.settings.apiSportsKey !== "string") db.settings.apiSportsKey = "";
+    if(!Array.isArray(db.teams)) db.teams=[];
+    if(!Array.isArray(db.players)) db.players=[];
+    if(!Array.isArray(db.matches)) db.matches=[];
     return db;
   }catch(e){
-    const seed = { teams: [], players: [], matches: [] };
+    try{ localStorage.setItem("footballDB_corrupt_backup", raw); }catch(_e){}
     localStorage.setItem("footballDB", JSON.stringify(seed));
     return seed;
   }
