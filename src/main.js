@@ -1,4 +1,4 @@
-import { initFootballLab } from "./footballLab_v8e.js?v=1010";
+import { initFootballLab } from "./footballLab_v8.js?v=1009";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -14161,7 +14161,7 @@ function fbUpdatePlayerRating(player, matchScore10, minutes){
 }
 
 function viewFootball(){
-  // Simple launcher UI. The full Football Lab UI is rendered by footballLab_v8e.js via window.__FOOTBALL_LAB__.open()
+  // Simple launcher UI. The full Football Lab UI is rendered by footballLab_v8.js via window.__FOOTBALL_LAB__.open()
   const db = fbGetDB();
   const season = escapeHtml(db?.settings?.currentSeason || "");
   return `
