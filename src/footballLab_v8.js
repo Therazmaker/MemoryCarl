@@ -3392,3 +3392,4 @@ try{
   console.warn("FootballLab auto-init failed", e);
 }
 }
+}
