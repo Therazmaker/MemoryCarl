@@ -95,6 +95,14 @@ export function initFootballLab(){
       .fl-flag{font-size:16px;line-height:1}
       .fl-card-yellow{display:inline-block;width:10px;height:16px;border-radius:3px;background:#f5c400}
       .fl-card-red{display:inline-block;width:10px;height:16px;border-radius:3px;background:#e10600}
+      .fl-vs-layout{display:grid;grid-template-columns:minmax(280px,1fr) minmax(340px,1.25fr);gap:12px}
+      .fl-vs-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+      .fl-vs-cell{border:1px solid #30363d;border-radius:8px;padding:6px;text-align:center;font-size:12px;background:#111722}
+      .fl-vs-cell.head{background:#202a37;font-weight:800}
+      .fl-vs-cell.hot{border-color:#2ea043;box-shadow:0 0 0 1px rgba(46,160,67,.25) inset}
+      .fl-kpi{display:grid;grid-template-columns:repeat(3,minmax(88px,1fr));gap:8px}
+      .fl-kpi > div{background:#111722;border:1px solid #2d333b;border-radius:10px;padding:8px;text-align:center}
+      .fl-kpi b{display:block;font-size:18px;color:#f6f8fa}
     `;
     document.head.appendChild(style);
   }
@@ -129,21 +137,94 @@ export function initFootballLab(){
     return (Math.exp(-lambda) * (lambda**goals))/fact;
   }
 
+  function impliedProb(odd){
+    const n = Number(odd);
+    if(!Number.isFinite(n) || n<=1.01) return null;
+    return 1/n;
+  }
+
+  function clean1x2Probs(oddH, oddD, oddA){
+    const pH = impliedProb(oddH);
+    const pD = impliedProb(oddD);
+    const pA = impliedProb(oddA);
+    if(pH===null || pD===null || pA===null) return null;
+    const overround = pH+pD+pA;
+    if(!overround) return null;
+    return { pH: pH/overround, pD: pD/overround, pA: pA/overround };
+  }
+
+  function teamFormFromTracker(db, teamId, limit=6){
+    const games = db.tracker
+      .filter(g=>g.homeId===teamId || g.awayId===teamId)
+      .slice(-limit);
+    if(!games.length) return { attack:1, defense:1, momentum:1, played:0 };
+    let gf=0, ga=0, pts=0;
+    games.forEach(g=>{
+      const isHome = g.homeId===teamId;
+      const goalsFor = isHome ? Number(g.homeGoals)||0 : Number(g.awayGoals)||0;
+      const goalsAgainst = isHome ? Number(g.awayGoals)||0 : Number(g.homeGoals)||0;
+      gf += goalsFor;
+      ga += goalsAgainst;
+      pts += goalsFor>goalsAgainst ? 3 : goalsFor===goalsAgainst ? 1 : 0;
+    });
+    const n = games.length;
+    const avgFor = gf/n;
+    const avgAgainst = ga/n;
+    const pointsRate = pts/(n*3);
+    return {
+      attack: Math.max(0.7, Math.min(1.45, 0.8 + avgFor*0.35)),
+      defense: Math.max(0.7, Math.min(1.45, 0.8 + avgAgainst*0.35)),
+      momentum: Math.max(0.85, Math.min(1.2, 0.9 + pointsRate*0.4)),
+      played: n
+    };
+  }
+
   function versusModel(db, homeId, awayId){
-    const home = teamStrength(db, homeId) * (Number(db.versus.homeAdvantage)||1.1);
-    const away = teamStrength(db, awayId);
-    const lHome = 1.2 * home;
-    const lAway = 1.1 * away;
-    let pHome=0,pDraw=0,pAway=0;
-    for(let h=0;h<=5;h++){
-      for(let a=0;a<=5;a++){
+    const homeStrength = teamStrength(db, homeId);
+    const awayStrength = teamStrength(db, awayId);
+    const homeAdv = Number(db.versus.homeAdvantage)||1.1;
+    const pace = Math.max(0.85, Math.min(1.3, Number(db.versus.paceFactor)||1));
+    const fHome = teamFormFromTracker(db, homeId);
+    const fAway = teamFormFromTracker(db, awayId);
+
+    const atkHome = homeStrength * fHome.attack * fHome.momentum * homeAdv;
+    const atkAway = awayStrength * fAway.attack * fAway.momentum;
+    const defHome = homeStrength * (2 - fHome.defense*0.9);
+    const defAway = awayStrength * (2 - fAway.defense*0.9);
+
+    const lHome = Math.max(0.2, Math.min(4.5, 1.15 * atkHome / Math.max(0.65, defAway) * pace));
+    const lAway = Math.max(0.2, Math.min(4.5, 1.05 * atkAway / Math.max(0.65, defHome) * pace));
+
+    const maxGoals = 5;
+    const matrix = [];
+    let pHome=0,pDraw=0,pAway=0, pTotal=0;
+    let best = { h:0, a:0, p:0 };
+
+    for(let h=0;h<=maxGoals;h++){
+      const row = [];
+      for(let a=0;a<=maxGoals;a++){
         const p = poisson(lHome,h) * poisson(lAway,a);
+        row.push(p);
+        pTotal += p;
         if(h>a) pHome += p;
         if(h===a) pDraw += p;
         if(h<a) pAway += p;
+        if(p>best.p) best = { h, a, p };
+      }
+      matrix.push(row);
+    }
+
+    if(pTotal>0){
+      pHome /= pTotal;
+      pDraw /= pTotal;
+      pAway /= pTotal;
+      best.p /= pTotal;
+      for(let h=0;h<=maxGoals;h++){
+        for(let a=0;a<=maxGoals;a++) matrix[h][a] /= pTotal;
       }
     }
-    return { lHome, lAway, pHome, pDraw, pAway };
+
+    return { lHome, lAway, pHome, pDraw, pAway, matrix, maxGoals, best, factors: { fHome, fAway, pace, homeAdv } };
   }
 
   function normalizeImport(raw){
@@ -519,29 +600,80 @@ export function initFootballLab(){
     }
 
     if(view==="versus"){
+      db.versus ||= { homeAdvantage: 1.1, paceFactor: 1 };
       const options = db.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
       content.innerHTML = `
-        <div class="fl-card">
-          <div class="fl-row">
-            <select id="vsHome" class="fl-select"><option value="">Home</option>${options}</select>
-            <select id="vsAway" class="fl-select"><option value="">Away</option>${options}</select>
-            <input id="vsHA" class="fl-input" type="number" step="0.05" value="${db.versus.homeAdvantage}" title="Home Advantage" />
-            <button class="fl-btn" id="runVs">Simular</button>
+        <div class="fl-card fl-vs-layout">
+          <div>
+            <div class="fl-row" style="margin-bottom:8px;">
+              <select id="vsHome" class="fl-select"><option value="">Home</option>${options}</select>
+              <select id="vsAway" class="fl-select"><option value="">Away</option>${options}</select>
+            </div>
+            <div class="fl-row" style="margin-bottom:8px;">
+              <input id="vsHA" class="fl-input" type="number" step="0.05" value="${db.versus.homeAdvantage}" title="Home Advantage" />
+              <input id="vsPace" class="fl-input" type="number" step="0.05" value="${db.versus.paceFactor || 1}" title="Pace Factor" />
+              <button class="fl-btn" id="runVs">Simular</button>
+            </div>
+            <div class="fl-row">
+              <input id="vsOddH" class="fl-input" type="number" step="0.01" placeholder="Cuota 1" style="width:120px" />
+              <input id="vsOddD" class="fl-input" type="number" step="0.01" placeholder="Cuota X" style="width:120px" />
+              <input id="vsOddA" class="fl-input" type="number" step="0.01" placeholder="Cuota 2" style="width:120px" />
+            </div>
+            <div id="vsOut" style="margin-top:10px;" class="fl-muted">Selecciona dos equipos.</div>
           </div>
-          <div id="vsOut" style="margin-top:10px;" class="fl-muted">Selecciona dos equipos.</div>
+          <div>
+            <div style="font-weight:800;margin-bottom:6px;">Matriz de marcador exacto (0-5)</div>
+            <div id="vsMatrix" class="fl-vs-grid"></div>
+          </div>
         </div>
       `;
+
+      const renderMatrix = (matrix, best, maxGoals)=>{
+        const grid = document.getElementById("vsMatrix");
+        if(!grid) return;
+        const cells = [];
+        cells.push('<div class="fl-vs-cell head">L/A</div>');
+        for(let a=0;a<=maxGoals;a++) cells.push(`<div class="fl-vs-cell head">${a}</div>`);
+        for(let h=0;h<=maxGoals;h++){
+          cells.push(`<div class="fl-vs-cell head">${h}</div>`);
+          for(let a=0;a<=maxGoals;a++){
+            const hot = best && h===best.h && a===best.a ? "hot" : "";
+            cells.push(`<div class="fl-vs-cell ${hot}">${(matrix[h][a]*100).toFixed(1)}%</div>`);
+          }
+        }
+        grid.innerHTML = cells.join("");
+      };
+
       document.getElementById("runVs").onclick = ()=>{
         const homeId = document.getElementById("vsHome").value;
         const awayId = document.getElementById("vsAway").value;
         db.versus.homeAdvantage = Number(document.getElementById("vsHA").value)||1.1;
+        db.versus.paceFactor = Number(document.getElementById("vsPace").value)||1;
         saveDb(db);
         if(!homeId || !awayId || homeId===awayId) return;
         const result = versusModel(db, homeId, awayId);
+        const market = clean1x2Probs(
+          document.getElementById("vsOddH").value,
+          document.getElementById("vsOddD").value,
+          document.getElementById("vsOddA").value
+        );
+        const marketLine = market
+          ? `<div class="fl-muted" style="margin-top:6px;">Mercado limpio → 1: <b>${(market.pH*100).toFixed(1)}%</b> · X: <b>${(market.pD*100).toFixed(1)}%</b> · 2: <b>${(market.pA*100).toFixed(1)}%</b></div>`
+          : "";
+
         document.getElementById("vsOut").innerHTML = `
-          λ Home: <b>${result.lHome.toFixed(2)}</b> · λ Away: <b>${result.lAway.toFixed(2)}</b><br/>
-          Prob Home: <b>${(result.pHome*100).toFixed(1)}%</b> · Draw: <b>${(result.pDraw*100).toFixed(1)}%</b> · Away: <b>${(result.pAway*100).toFixed(1)}%</b>
+          <div>λ Home: <b>${result.lHome.toFixed(2)}</b> · λ Away: <b>${result.lAway.toFixed(2)}</b></div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span>Home Win</span><b>${(result.pHome*100).toFixed(1)}%</b></div>
+            <div><span>Draw</span><b>${(result.pDraw*100).toFixed(1)}%</b></div>
+            <div><span>Away Win</span><b>${(result.pAway*100).toFixed(1)}%</b></div>
+          </div>
+          <div style="margin-top:8px;">Marcador más probable: <b>${result.best.h} - ${result.best.a}</b> (${(result.best.p*100).toFixed(1)}%)</div>
+          <div class="fl-muted" style="margin-top:6px;">Forma (últ. ${result.factors.fHome.played}/${result.factors.fAway.played}): local ${result.factors.fHome.attack.toFixed(2)} / visitante ${result.factors.fAway.attack.toFixed(2)}</div>
+          ${marketLine}
         `;
+
+        renderMatrix(result.matrix, result.best, result.maxGoals);
       };
     }
   }
