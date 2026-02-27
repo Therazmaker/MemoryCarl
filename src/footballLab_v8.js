@@ -123,12 +123,13 @@ export function initFootballLab(){
     const ttlMs = clampNum(db?.settings?.apiCacheHours, 1, 168, 12) * 60 * 60 * 1000;
     const now = Date.now();
 
-    if(!db.apiCache) db.apiCache = { fixturesByTeam: {} };
+    if(!db.apiCache) db.apiCache = { fixturesByTeam: {}, lastFetchByTeam: {} };
     if(!db.apiCache.fixturesByTeam) db.apiCache.fixturesByTeam = {};
+    if(!db.apiCache.lastFetchByTeam) db.apiCache.lastFetchByTeam = {};
 
     const cached = db.apiCache.fixturesByTeam[teamKey];
     if(!force && cached?.savedAt && (now - cached.savedAt) < ttlMs && Array.isArray(cached.fixtures)){
-      return { fixtures: cached.fixtures, source: "cache", savedAt: cached.savedAt };
+      return { fixtures: cached.fixtures, source: "cache", savedAt: cached.savedAt, provider: cached.provider || "cache" };
     }
 
     const apiKey = String(db?.settings?.apiSportsKey || "").trim();
@@ -136,21 +137,56 @@ export function initFootballLab(){
       throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
     }
 
-    const url = `https://v3.football.api-sport.com/fixtures?team=${encodeURIComponent(teamKey)}&last=${last}`;
-    const res = await fetch(url, {
-      headers: {
-        "x-apisports-key": apiKey
+    const query = `team=${encodeURIComponent(teamKey)}&last=${last}`;
+    const providers = [
+      {
+        name: "api-sports",
+        url: `https://v3.football.api-sports.io/fixtures?${query}`,
+        headers: { "x-apisports-key": apiKey }
+      },
+      {
+        name: "rapidapi",
+        url: `https://api-football-v1.p.rapidapi.com/v3/fixtures?${query}`,
+        headers: {
+          "x-rapidapi-key": apiKey,
+          "x-rapidapi-host": "api-football-v1.p.rapidapi.com"
+        }
       }
-    });
-    if(!res.ok){
-      throw new Error(`API-SPORTS respondió ${res.status}`);
-    }
-    const payload = await res.json();
-    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+    ];
 
-    db.apiCache.fixturesByTeam[teamKey] = { savedAt: now, fixtures };
+    const attempts = [];
+    for(const provider of providers){
+      try{
+        const res = await fetch(provider.url, { headers: provider.headers });
+        const text = await res.text();
+        let payload = null;
+        try{ payload = text ? JSON.parse(text) : null; }catch(_e){ payload = null; }
+        const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+        const errorsObj = payload?.errors && typeof payload.errors === "object" ? payload.errors : null;
+        const errorList = errorsObj ? Object.values(errorsObj).map(v=>String(v||"").trim()).filter(Boolean) : [];
+
+        attempts.push({ provider: provider.name, ok: res.ok, status: res.status, count: fixtures.length, errors: errorList });
+
+        if(!res.ok){
+          continue;
+        }
+        if(errorList.length){
+          continue;
+        }
+
+        db.apiCache.fixturesByTeam[teamKey] = { savedAt: now, fixtures, provider: provider.name };
+        db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: provider.name, attempts };
+        saveDB(db);
+        return { fixtures, source: "network", savedAt: now, provider: provider.name, attempts };
+      }catch(err){
+        attempts.push({ provider: provider.name, ok: false, status: 0, count: 0, errors: [String(err?.message||err)] });
+      }
+    }
+
+    db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: "none", attempts };
     saveDB(db);
-    return { fixtures, source: "network", savedAt: now };
+    const summary = attempts.map(a=>`${a.provider}:${a.status}${a.errors?.length?` (${a.errors.join(" | ")})`:""}`).join(" • ");
+    throw new Error(`No se pudo sincronizar. ${summary || "Sin respuesta útil de la API."}`);
   }
 
   function summarizeFixtureForm(fixtures, apiTeamId){
@@ -970,7 +1006,12 @@ function renderHome(db){
       if(apiStatus) apiStatus.textContent = "Sincronizando últimos 5 partidos...";
       try{
         const out = await getTeamLastFixtures(db, apiTeamId, { last:5, force:true });
-        if(apiStatus) apiStatus.textContent = `Sincronizado ✅ (${out.fixtures.length} partidos, fuente: ${out.source})`;
+        const provider = out.provider ? `, proveedor: ${out.provider}` : "";
+        if(apiStatus){
+          apiStatus.textContent = out.fixtures.length
+            ? `Sincronizado ✅ (${out.fixtures.length} partidos, fuente: ${out.source}${provider})`
+            : `Sincronizado ⚠️ (0 partidos, fuente: ${out.source}${provider}). Revisa Team ID, plan/API key o temporada.`;
+        }
         paintFixtureSummary(`actualizado ${new Date(out.savedAt).toLocaleString()}`);
       }catch(err){
         if(apiStatus) apiStatus.textContent = `Error API: ${String(err?.message||err)}`;
@@ -3815,7 +3856,7 @@ const od1 = document.getElementById("od_1");
 
           <div>
             <div class="fl-h3">API-SPORTS Key</div>
-            <input class="fl-input" id="apiSportsKey" placeholder="Tu key de v3.football.api-sport.com" value="${escapeHtml(db.settings.apiSportsKey || "")}">
+            <input class="fl-input" id="apiSportsKey" placeholder="Tu key de v3.football.api-sports.io" value="${escapeHtml(db.settings.apiSportsKey || "")}">
             <div class="fl-small" style="margin-top:6px;">Se usa para /fixtures?team=..&last=5 y se guarda local.</div>
           </div>
 
