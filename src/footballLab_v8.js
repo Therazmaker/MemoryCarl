@@ -23,6 +23,15 @@ export function initFootballLab(){
   }catch(e){ /* ignore */ }
 
   window.FOOTBALL_LAB_FILE = "footballLab_v8.js";
+  // Idempotent init guard (hard stop): this file can be loaded or init-called multiple
+  // times by the app/router. We must NEVER re-register listeners or re-render.
+  try{
+    if(window.__footballLabInitialized){
+      return window.__FOOTBALL_LAB__;
+    }
+    window.__footballLabInitialized = true;
+  }catch(e){ /* ignore */ }
+  window.FOOTBALL_LAB_FILE = "footballLab_v8e.js";
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
   const KEY = "footballDB";
@@ -2972,6 +2981,101 @@ const od1 = document.getElementById("od_1");
         }
       }
 
+
+      // Fast deterministic "simulation": Poisson pmfs + joint matrix (no randomness, super stable)
+      function simulateFast(lambdaH, lambdaA, maxG=10){
+        lambdaH = clamp(lambdaH, 0.01, 8);
+        lambdaA = clamp(lambdaA, 0.01, 8);
+        maxG = clampNum(maxG, 6, 14, 10);
+
+        function pmfPoisson(L){
+          const p = Array(maxG+1).fill(0);
+          const e = Math.exp(-L);
+          p[0] = e;
+          for(let k=1;k<=maxG;k++){
+            p[k] = p[k-1] * L / k;
+          }
+          // absorb tail into last bucket to keep total ~1
+          const s = p.reduce((a,b)=>a+b,0);
+          if(s>0 && s<1){
+            p[maxG] += (1-s);
+          }
+          return p;
+        }
+
+        const pH = pmfPoisson(lambdaH);
+        const pA = pmfPoisson(lambdaA);
+
+        let winH=0, winA=0, draw=0, btts=0, over25=0;
+        const totals = Array(7).fill(0); // 0..5, 6+
+        const scoreMap = new Map();      // "h-a" -> prob
+
+        for(let h=0; h<=maxG; h++){
+          for(let a=0; a<=maxG; a++){
+            const pr = pH[h] * pA[a];
+            if(h>a) winH += pr;
+            else if(a>h) winA += pr;
+            else draw += pr;
+            if(h>0 && a>0) btts += pr;
+            if(h+a >= 3) over25 += pr;
+
+            totals[Math.min(6, h+a)] += pr;
+
+            // Keep top scorelines later; store all for now (matrix size <= 225)
+            scoreMap.set(`${h}-${a}`, pr);
+          }
+        }
+
+        const topScores = Array.from(scoreMap.entries())
+          .map(([label, p])=>({label, p}))
+          .sort((x,y)=> y.p - x.p)
+          .slice(0, 12);
+
+        return {
+          pHome: winH, pDraw: draw, pAway: winA,
+          pBTTS: btts, pOver25: over25,
+          totals, topScores
+        };
+      }
+
+      function fairFromOdds2(oYes, oNo){
+        const a = (Number.isFinite(oYes) && oYes>1.0001) ? 1/oYes : null;
+        const b = (Number.isFinite(oNo) && oNo>1.0001) ? 1/oNo : null;
+        if(a==null || b==null) return null;
+        const s = a+b;
+        return s>0 ? [a/s, b/s] : null;
+      }
+
+      function marketTargets(){
+      const mk = marketTargets();
+      const fair1x2 = mk.fair1x2;
+      const fairOU = mk.fairOU;
+      const fairBTTS = mk.fairBTTS;
+
+      const wBlend = clampNum(odW?.value, 0, 1, 0.65);
+      const doCal = !!odCal?.checked;
+      const doFull = !!odCalFull?.checked;
+
+      // Base lambdas from your model (xG inputs)
+      let baseH = baseXgH, baseA = baseXgA;
+
+      // --- Market calibration options ---
+      let marketFit = null;
+
+      // A) Full calibration (1X2 + O/U + BTTS) if targets exist
+      if(doFull && (mk.pHome!=null || mk.pOver25!=null || mk.pBTTS!=null)){
+        marketFit = calibrateWithMarketFull(baseH, baseA, mk);
+      } else if(doCal && fairOU) {
+        // B) Lite calibration: adjust only total goals using O/U 2.5
+        const targetOver = fairOU[0];
+        const totalBase = baseH + baseA;
+        if(totalBase > 0.05 && targetOver > 0.01 && targetOver < 0.99){
+          const totalCal = calibrateTotalGoals(targetOver);
+          const r = baseH / totalBase;
+          marketFit = { lambdaH: clamp(r * totalCal, 0.05, 6), lambdaA: clamp((1-r) * totalCal, 0.05, 6), err: null };
+        }
+      }
+
       // Blend lambdas (0 = market, 1 = model)
       const xgH = marketFit ? (wBlend*baseH + (1-wBlend)*marketFit.lambdaH) : baseH;
       const xgA = marketFit ? (wBlend*baseA + (1-wBlend)*marketFit.lambdaA) : baseA;
@@ -3174,4 +3278,5 @@ try{
   try{ window.__footballLabInitialized = false; }catch(_e){}
   console.warn("FootballLab auto-init failed", e);
 }
+}catch(e){ console.warn("FootballLab auto-init failed", e); }
 }
