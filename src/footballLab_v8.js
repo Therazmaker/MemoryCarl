@@ -310,7 +310,14 @@ export function initFootballLab(){
     if(view==="logger") renderLogger(db, payload.teamId);
     if(view==="versus") renderVersus(db);
     if(view==="tracker") renderTrackerTab(db);
-    if(view==="settings") renderSettings(db);
+    if(view==="settings"){
+      try{ renderSettings(db); }
+      catch(err){
+        console.error("FootballLab settings render error", err);
+        const vv = document.getElementById("fl_view");
+        if(vv) vv.innerHTML = `<div class="fl-card"><div style="font-weight:800;">⚠️ Error al abrir Ajustes</div><div class="fl-small" style="margin-top:8px;">${escapeHtml(String(err?.message||err))}</div></div>`;
+      }
+    }
     if(view==="player") renderPlayer(db, payload.playerId);
 
   }
@@ -2864,6 +2871,7 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
           <div class="fl-card" style="margin:0;">
             <div style="font-weight:800;">Resultados</div>
             <div id="mc_out" style="margin-top:8px;"></div>
+            <div id="mc_matrixWrap" style="margin-top:10px;"></div>
           </div>
           <div class="fl-card" style="margin:0;">
             <div style="font-weight:800;">Distribución de goles</div>
@@ -3004,6 +3012,7 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
 
     // --- Monte Carlo wiring (xG-based score simulation) ---
     const mcOut = document.getElementById("mc_out");
+    const mcMatrixWrap = document.getElementById("mc_matrixWrap");
     const mcXgH = document.getElementById("mc_xgH");
     const mcXgA = document.getElementById("mc_xgA");
     const mcN = document.getElementById("mc_N");
@@ -3140,6 +3149,38 @@ const od1 = document.getElementById("od_1");
       });
     }
 
+    function renderScoreMatrix(matrix, nameH, nameA){
+      if(!mcMatrixWrap || !Array.isArray(matrix)) return;
+      let best = { h:0, a:0, p:-1 };
+      for(let h=0; h<6; h++){
+        for(let a=0; a<6; a++){
+          const p = Number(matrix[h]?.[a] || 0);
+          if(p > best.p) best = { h, a, p };
+        }
+      }
+      const maxP = Math.max(0.000001, best.p);
+      const header = ['0','1','2','3','4','5+'];
+      const rows = matrix.map((row, h)=>{
+        const cells = row.map((p, a)=>{
+          const alpha = Math.max(0.06, Math.min(0.92, p / maxP));
+          const isBest = h===best.h && a===best.a;
+          return `<td style="padding:6px 7px;text-align:center;border:1px solid rgba(255,255,255,.12);background:rgba(43,115,255,${alpha.toFixed(3)});${isBest?'outline:2px solid #ffd166;font-weight:900;':''}">${fmt(p*100,1)}%</td>`;
+        }).join('');
+        return `<tr><th style="padding:6px 7px;border:1px solid rgba(255,255,255,.12);">${header[h]}</th>${cells}</tr>`;
+      }).join('');
+      mcMatrixWrap.innerHTML = `
+        <div class="fl-small" style="margin-bottom:6px;"><b>Matriz exacta (0–5+)</b> · filas ${escapeHtml(nameH)} · columnas ${escapeHtml(nameA)} · más probable: <b>${best.h}:${best.a}</b> (${fmt(best.p*100,2)}%)</div>
+        <div style="overflow:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:420px;">
+            <thead>
+              <tr><th style="padding:6px 7px;border:1px solid rgba(255,255,255,.12);">${escapeHtml(nameH)}\${escapeHtml(nameA)}</th>${header.map(x=>`<th style="padding:6px 7px;border:1px solid rgba(255,255,255,.12);">${x}</th>`).join('')}</tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
     function runMonteCarlo(){
       const homeTeam = db.teams.find(t=>t.id===homeSel.value);
       const awayTeam = db.teams.find(t=>t.id===awaySel.value);
@@ -3227,10 +3268,20 @@ const od1 = document.getElementById("od_1");
           .sort((x,y)=> y.p - x.p)
           .slice(0, 12);
 
+        const matrix = Array.from({length:6}, ()=>Array(6).fill(0));
+        for(let h=0; h<=maxG; h++){
+          for(let a=0; a<=maxG; a++){
+            const hh = Math.min(5, h);
+            const aa = Math.min(5, a);
+            matrix[hh][aa] += pH[h] * pA[a];
+          }
+        }
+
         return {
           pHome: winH, pDraw: draw, pAway: winA,
           pBTTS: btts, pOver25: over25,
-          totals, topScores
+          totals, topScores,
+          matrix
         };
       }
 
@@ -3367,10 +3418,20 @@ const od1 = document.getElementById("od_1");
           .sort((x,y)=> y.p - x.p)
           .slice(0, 12);
 
+        const matrix = Array.from({length:6}, ()=>Array(6).fill(0));
+        for(let h=0; h<=maxG; h++){
+          for(let a=0; a<=maxG; a++){
+            const hh = Math.min(5, h);
+            const aa = Math.min(5, a);
+            matrix[hh][aa] += pH[h] * pA[a];
+          }
+        }
+
         return {
           pHome: winH, pDraw: draw, pAway: winA,
           pBTTS: btts, pOver25: over25,
-          totals, topScores
+          totals, topScores,
+          matrix
         };
       }
 
@@ -3448,6 +3509,7 @@ const od1 = document.getElementById("od_1");
           <div class="fl-pill"><b>${escapeHtml(nameH)}</b> ${fmt(pH*100,1)}%</div>
           <div class="fl-pill"><b>Empate</b> ${fmt(pD*100,1)}%</div>
           <div class="fl-pill"><b>${escapeHtml(nameA)}</b> ${fmt(pA*100,1)}%</div>
+          <div class="fl-pill"><b>Marcador más probable</b> ${escapeHtml(simFinal.topScores?.[0]?.label || "-")} (${fmt((simFinal.topScores?.[0]?.p||0)*100,1)}%)</div>
 
           <div style="margin-top:10px;" class="fl-small">
             <b>BTTS</b>: ${fmt(pBTTS*100,1)}% &nbsp;•&nbsp;
@@ -3494,6 +3556,7 @@ const od1 = document.getElementById("od_1");
       }
 
       renderMcCharts(totals, topScores);
+      renderScoreMatrix(simFinal.matrix, nameH, nameA);
 
     }
 
@@ -3710,6 +3773,13 @@ const od1 = document.getElementById("od_1");
   // ---- Settings ----
   renderSettings = function(db){
     const v = document.getElementById("fl_view");
+    if(!db.settings) db.settings = structuredClone(DEFAULT_DB.settings);
+    if(!db.settings.currentSeason) db.settings.currentSeason = getAutoSeasonLabel();
+    if(!Number.isFinite(Number(db.settings.formLastN))) db.settings.formLastN = 5;
+    if(!Number.isFinite(Number(db.settings.formWeight))) db.settings.formWeight = 0.35;
+    if(!Number.isFinite(Number(db.settings.homeAdvantage))) db.settings.homeAdvantage = 0.05;
+    if(typeof db.settings.apiSportsKey !== "string") db.settings.apiSportsKey = "";
+    if(!Number.isFinite(Number(db.settings.apiCacheHours))) db.settings.apiCacheHours = 12;
 
     v.innerHTML = `
       <div class="fl-card">
