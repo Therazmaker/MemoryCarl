@@ -1,4 +1,4 @@
-import { initFootballLab } from "./footballLab_v8.js";
+import { initFootballLab } from "./footballLab_v8.js?v=1009";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -14185,8 +14185,13 @@ function viewFootball(){
 function initFootballTab(root){
   // Football Lab (V6e) now uses the full Lab UI (openLab) instead of the legacy tab UI.
   try{
-    // Ensure module init ran (creates DB + exposes window.__FOOTBALL_LAB__)
-    if(!window.__FOOTBALL_LAB__){
+    // Ensure module init ran (creates DB + exposes window.__FOOTBALL_LAB__).
+    // If a previous boot got stuck half-way, force one clean retry.
+    if(!window.__FOOTBALL_LAB__?.open){
+      try{ initFootballLab(); }catch(e){ console.warn(e); }
+    }
+    if(!window.__FOOTBALL_LAB__?.open){
+      try{ window.__footballLabInitialized = false; }catch(e){}
       try{ initFootballLab(); }catch(e){ console.warn(e); }
     }
     // Open the lab "home" view (this replaces #app content with the lab UI)
@@ -14194,6 +14199,12 @@ function initFootballTab(root){
       window.__FOOTBALL_LAB__.open("home");
       return;
     }
+    console.error("[FootballLab] API unavailable after retry", {
+      initialized: !!window.__footballLabInitialized,
+      hasApi: !!window.__FOOTBALL_LAB__,
+      hasOpen: !!window.__FOOTBALL_LAB__?.open,
+      file: window.FOOTBALL_LAB_FILE || null
+    });
   }catch(e){ console.error(e); }
 
   // Fallback UI if something blocks the lab
