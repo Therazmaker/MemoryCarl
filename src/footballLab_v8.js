@@ -137,49 +137,10 @@ export function initFootballLab(){
       throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
     }
 
-    const query = `team=${encodeURIComponent(teamKey)}&last=${last}`;
-    const providers = [
-      {
-        name: "api-sports",
-        url: `https://v3.football.api-sports.io/fixtures?${query}`,
-        headers: { "x-apisports-key": apiKey }
-      },
-      {
-        name: "rapidapi",
-        url: `https://api-football-v1.p.rapidapi.com/v3/fixtures?${query}`,
-        headers: {
-          "x-rapidapi-key": apiKey,
-          "x-rapidapi-host": "api-football-v1.p.rapidapi.com"
-        }
-      }
-    ];
-
-    const attempts = [];
-    for(const provider of providers){
-      try{
-        const res = await fetch(provider.url, { headers: provider.headers });
-        const text = await res.text();
-        let payload = null;
-        try{ payload = text ? JSON.parse(text) : null; }catch(_e){ payload = null; }
-        const fixtures = Array.isArray(payload?.response) ? payload.response : [];
-        const errorsObj = payload?.errors && typeof payload.errors === "object" ? payload.errors : null;
-        const errorList = errorsObj ? Object.values(errorsObj).map(v=>String(v||"").trim()).filter(Boolean) : [];
-
-        attempts.push({ provider: provider.name, ok: res.ok, status: res.status, count: fixtures.length, errors: errorList });
-
-        if(!res.ok){
-          continue;
-        }
-        if(errorList.length){
-          continue;
-        }
-
-        db.apiCache.fixturesByTeam[teamKey] = { savedAt: now, fixtures, provider: provider.name };
-        db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: provider.name, attempts };
-        saveDB(db);
-        return { fixtures, source: "network", savedAt: now, provider: provider.name, attempts };
-      }catch(err){
-        attempts.push({ provider: provider.name, ok: false, status: 0, count: 0, errors: [String(err?.message||err)] });
+    const url = `https://v3.football.api-sports.io/fixtures?team=${encodeURIComponent(teamKey)}&last=${last}`;
+    const res = await fetch(url, {
+      headers: {
+        "x-apisports-key": apiKey
       }
     }
 
