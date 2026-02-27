@@ -1,4 +1,8 @@
+<<<<<<< codex/redisenar-simulador-de-juegos-ln0ni0
+import { initFootballLab } from "./footballLab_v8.js?v=1009";
+=======
 import { initFootballLab } from "./footballLab_v8.js?v=1008";
+>>>>>>> main
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
