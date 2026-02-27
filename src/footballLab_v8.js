@@ -137,17 +137,27 @@ export function initFootballLab(){
       throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
     }
 
+    const attempts = [];
     const url = `https://v3.football.api-sports.io/fixtures?team=${encodeURIComponent(teamKey)}&last=${last}`;
     const res = await fetch(url, {
       headers: {
         "x-apisports-key": apiKey
       }
+    });
+
+    if(!res.ok){
+      attempts.push({ provider: "api-sports", status: res.status, errors: [res.statusText || "HTTP error"] });
+      db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: "none", attempts };
+      saveDB(db);
+      throw new Error(`No se pudo sincronizar (HTTP ${res.status}).`);
     }
 
-    db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: "none", attempts };
+    const data = await res.json();
+    const fixtures = Array.isArray(data?.response) ? data.response : [];
+    db.apiCache.fixturesByTeam[teamKey] = { fixtures, savedAt: now, provider: "api-sports" };
+    db.apiCache.lastFetchByTeam[teamKey] = { savedAt: now, provider: "api-sports", attempts: [{ provider: "api-sports", status: "ok" }] };
     saveDB(db);
-    const summary = attempts.map(a=>`${a.provider}:${a.status}${a.errors?.length?` (${a.errors.join(" | ")})`:""}`).join(" • ");
-    throw new Error(`No se pudo sincronizar. ${summary || "Sin respuesta útil de la API."}`);
+    return { fixtures, source: "live", savedAt: now, provider: "api-sports" };
   }
 
   function summarizeFixtureForm(fixtures, apiTeamId){
