@@ -629,7 +629,11 @@ export function initFootballLab(){
           <td>${league?.name || "Liga"}</td>
           <td>${home} ${m.homeGoals}-${m.awayGoals} ${away}</td>
           <td>${rival?.name || "-"}</td>
-          <td><button class="fl-btn" data-open-stats-modal="${m.id}">Estadísticas</button></td>
+          <td class="fl-row" style="gap:6px;">
+            <button class="fl-btn" data-open-stats-modal="${m.id}">Estadísticas</button>
+            <button class="fl-btn" data-edit-match="${m.id}">Editar</button>
+            <button class="fl-btn" data-delete-match="${m.id}">Borrar</button>
+          </td>
         </tr>`;
       }).join("");
       const resultTeamOptions = db.teams
@@ -639,7 +643,10 @@ export function initFootballLab(){
 
       content.innerHTML = `
         <div class="fl-card">
-          <div style="font-size:30px;font-weight:900;">${team.name}</div>
+          <div class="fl-row" style="justify-content:space-between;align-items:center;gap:10px;">
+            <div style="font-size:30px;font-weight:900;">${team.name}</div>
+            <button class="fl-btn" id="editTeamName">Editar nombre</button>
+          </div>
           <div>Estadio: <b>${team.meta.stadium || '-'}</b> ${team.meta.city?`(${team.meta.city})`:''}</div>
           <div>Capacidad: <b>${team.meta.capacity || '-'}</b></div>
           <div class="fl-row" style="margin-top:8px;">${["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"].map(t=>`<span class="fl-muted" style="padding:4px 6px;border-bottom:${t==='PLANTILLA'?'2px solid #ff3b69':'2px solid transparent'};">${t}</span>`).join("")}</div>
@@ -668,12 +675,20 @@ export function initFootballLab(){
             <span id="resultStatus" class="fl-muted"></span>
           </div>
           <table class="fl-table">
-            <thead><tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Rival</th><th></th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Rival</th><th>Acciones</th></tr></thead>
             <tbody>${matchRows || "<tr><td colspan='5'>Sin partidos todavía</td></tr>"}</tbody>
           </table>
         </div>
         ${sections}
       `;
+      document.getElementById("editTeamName").onclick = ()=>{
+        const name = prompt("Nuevo nombre del equipo", team.name);
+        const nextName = String(name||"").trim();
+        if(!nextName) return;
+        team.name = nextName;
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
       document.getElementById("backLiga").onclick = ()=>render("liga");
       document.getElementById("saveMeta").onclick = ()=>{
         team.meta = {
@@ -746,6 +761,28 @@ export function initFootballLab(){
       content.querySelectorAll("[data-open-stats-modal]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-stats-modal"));
         openStatsModal({ db, match, onSave: ()=>render("equipo", { teamId: team.id }) });
+      });
+      content.querySelectorAll("[data-edit-match]").forEach(btn=>btn.onclick = ()=>{
+        const match = db.tracker.find(m=>m.id===btn.getAttribute("data-edit-match"));
+        if(!match) return;
+        const date = prompt("Fecha del partido (YYYY-MM-DD)", match.date || "") || match.date || "";
+        const homeGoals = prompt("Goles del local", String(match.homeGoals ?? 0));
+        const awayGoals = prompt("Goles del visitante", String(match.awayGoals ?? 0));
+        if(homeGoals===null || awayGoals===null) return;
+        match.date = String(date).trim();
+        match.homeGoals = Number(homeGoals)||0;
+        match.awayGoals = Number(awayGoals)||0;
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      });
+      content.querySelectorAll("[data-delete-match]").forEach(btn=>btn.onclick = ()=>{
+        const matchId = btn.getAttribute("data-delete-match");
+        const match = db.tracker.find(m=>m.id===matchId);
+        if(!match) return;
+        if(!confirm("¿Borrar este partido?")) return;
+        db.tracker = db.tracker.filter(m=>m.id!==matchId);
+        saveDb(db);
+        render("equipo", { teamId: team.id });
       });
       return;
     }
