@@ -293,6 +293,7 @@ export function initFootballLab(){
 
     // Buttons style fallback if MemoryCarl doesn't define it
     injectMiniStyle();
+    ensureNavDelegate();
 
     // nav
     document.getElementById("navHome").onclick = ()=>openLab("home");
@@ -303,6 +304,7 @@ export function initFootballLab(){
     document.getElementById("navBack").onclick = ()=>location.reload();
 
     // render
+    try{
     if(view==="home") renderHome(db);
     if(view==="teams") renderTeams(db);
     if(view==="team") renderTeam(db, payload.teamId);
@@ -374,6 +376,38 @@ export function initFootballLab(){
 
 
   publishFootballLabApi();
+    }catch(err){
+      console.error("FootballLab render error:", err);
+      const v = document.getElementById("fl_view");
+      if(v) v.innerHTML = `<div class="fl-card"><b>⚠️ Error renderizando vista</b><div class="fl-small" style="margin-top:8px;">${escapeHtml(String(err && err.stack || err))}</div></div>`;
+    }
+
+
+  // --- Nav delegation guard (fix for clicks not triggering onclick) ---
+  function ensureNavDelegate(){
+    if(window.__FL_NAV_DELEGATE__) return;
+    window.__FL_NAV_DELEGATE__ = true;
+    document.addEventListener("click", (e)=>{
+      const btn = e.target && e.target.closest ? e.target.closest("#navHome,#navTeams,#navVersus,#navTracker,#navLogger,#navSettings,#navBack") : null;
+      if(!btn) return;
+      const id = btn.id;
+      // If some other handler stops propagation before reaching element onclick, this capture listener still runs.
+      try{
+        if(id==="navHome") return openLab("home");
+        if(id==="navTeams") return openLab("teams");
+        if(id==="navVersus") return openLab("versus");
+        if(id==="navTracker") return openLab("tracker");
+        if(id==="navLogger") return openLab("logger");
+        if(id==="navSettings") return openLab("settings");
+        if(id==="navBack") return location.reload();
+      }catch(err){
+        console.error("FootballLab nav delegate error:", err);
+        const v = document.getElementById("fl_view");
+        if(v) v.innerHTML = `<div class="fl-card"><b>⚠️ Error abriendo vista</b><div class="fl-small" style="margin-top:8px;">${escapeHtml(String(err && err.message || err))}</div></div>`;
+      }
+    }, true); // capture
+  }
+
 
   function injectMiniStyle(){
     if(document.getElementById("fl_v5_style")) return;
