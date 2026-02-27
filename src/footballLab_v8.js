@@ -156,13 +156,23 @@ export function initFootballLab(){
     };
   }
 
-  function render(view="home"){
+
+  function sectionToPos(section){
+    const sec = String(section||"").toLowerCase();
+    if(sec.includes("portero")) return "GK";
+    if(sec.includes("defensa")) return "DF";
+    if(sec.includes("centrocamp") || sec.includes("medio")) return "MF";
+    if(sec.includes("delanter")) return "FW";
+    return "OT";
+  }
+
+  function render(view="home", payload={}){
     ensureStyles();
     const app = document.getElementById("app");
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","equipos","jugadores","tracker","versus"];
+    const tabs = ["home","liga","tracker","versus"];
     const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
 
     app.innerHTML = `
@@ -215,18 +225,16 @@ export function initFootballLab(){
     }
 
     if(view==="liga"){
-      const rows = db.leagues.map(l=>`<tr><td>${l.name}</td><td>${l.code||"-"}</td><td>${l.id}</td></tr>`).join("");
+      if(!db.settings.selectedLeagueId && db.leagues[0]) db.settings.selectedLeagueId = db.leagues[0].id;
+      const leagueCards = db.leagues.map(l=>{
+        const teams = db.teams.filter(t=>t.leagueId===l.id);
+        const open = db.settings.selectedLeagueId===l.id;
+        const names = teams.map(t=>`<div class="fl-row" style="justify-content:space-between;"><span>${t.name}</span><button class="fl-btn" data-open-team="${t.id}">Abrir</button></div>`).join("");
+        return `<div class="fl-card"><button class="fl-btn" data-select-league="${l.id}" style="width:100%;text-align:left;">${open?"▾":"▸"} ${l.name}</button><div class="fl-muted" style="margin-top:6px;">${teams.length} equipos</div><div style="display:${open?"block":"none"};margin-top:8px;">${names||"<div class='fl-muted'>Sin equipos</div>"}</div></div>`;
+      }).join("");
+
       content.innerHTML = `
         <div class="fl-card fl-grid two">
-          <div>
-            <div class="fl-muted">Token football-data.org</div>
-            <input id="apiToken" class="fl-input" value="${db.settings.apiToken || ""}" placeholder="X-Auth-Token" />
-            <div class="fl-row" style="margin-top:8px;">
-              <button class="fl-btn" id="saveToken">Guardar token</button>
-              <button class="fl-btn" id="syncCompetitions">Sync /competitions</button>
-              <span id="lgStatus" class="fl-muted"></span>
-            </div>
-          </div>
           <div>
             <div class="fl-muted">Alta manual de liga</div>
             <div class="fl-row">
@@ -235,25 +243,39 @@ export function initFootballLab(){
               <button id="addLeague" class="fl-btn">Agregar</button>
             </div>
           </div>
+          <div>
+            <div class="fl-muted">Agregar equipo a la liga seleccionada</div>
+            <div class="fl-row">
+              <input id="teamName" class="fl-input" placeholder="Equipo" />
+              <button class="fl-btn" id="addTeamLiga">Agregar</button>
+            </div>
+          </div>
         </div>
-        <div class="fl-card"><table class="fl-table"><thead><tr><th>Liga</th><th>Code</th><th>ID</th></tr></thead><tbody>${rows||"<tr><td colspan='3'>Sin ligas</td></tr>"}</tbody></table></div>
+        ${leagueCards || '<div class="fl-card"><div class="fl-muted">Sin ligas</div></div>'}
       `;
-      document.getElementById("saveToken").onclick = ()=>{ db.settings.apiToken = document.getElementById("apiToken").value.trim(); saveDb(db); };
-      document.getElementById("addLeague").onclick = ()=>{ db.leagues.push({ id: uid("lg"), name: document.getElementById("leagueName").value.trim(), code: document.getElementById("leagueCode").value.trim() }); saveDb(db); render("liga"); };
-      document.getElementById("syncCompetitions").onclick = async ()=>{
-        const status = document.getElementById("lgStatus");
-        try{
-          status.textContent = "Sincronizando...";
-          const token = document.getElementById("apiToken").value.trim();
-          if(!token) throw new Error("Falta token");
-          const data = await apiFetch("/competitions", token);
-          const comps = (data.competitions||[]).map(c=>({ id: String(c.id), name: c.name, code: c.code || "" }));
-          db.leagues = comps;
-          localStorage.setItem(COMP_CACHE_KEY, JSON.stringify(comps));
-          saveDb(db);
-          render("liga");
-        }catch(err){ status.textContent = `Error: ${String(err.message||err)}`; }
+
+      document.getElementById("addLeague").onclick = ()=>{
+        const name = document.getElementById("leagueName").value.trim();
+        if(!name) return;
+        const lg = { id: uid("lg"), name, code: document.getElementById("leagueCode").value.trim() };
+        db.leagues.push(lg);
+        db.settings.selectedLeagueId = lg.id;
+        saveDb(db);
+        render("liga");
       };
+      document.getElementById("addTeamLiga").onclick = ()=>{
+        const name = document.getElementById("teamName").value.trim();
+        if(!name || !db.settings.selectedLeagueId) return;
+        db.teams.push({ id: uid("tm"), name, apiTeamId:"", leagueId: db.settings.selectedLeagueId, meta: { stadium:"", city:"", capacity:"" } });
+        saveDb(db);
+        render("liga");
+      };
+      content.querySelectorAll("[data-select-league]").forEach(btn=>btn.onclick = ()=>{
+        db.settings.selectedLeagueId = btn.getAttribute("data-select-league");
+        saveDb(db);
+        render("liga");
+      });
+      content.querySelectorAll("[data-open-team]").forEach(btn=>btn.onclick = ()=> render("equipo", { teamId: btn.getAttribute("data-open-team") }));
       return;
     }
 
@@ -310,6 +332,82 @@ export function initFootballLab(){
       return;
     }
 
+    if(view==="equipo"){
+      const teamId = payload.teamId || payload?.id;
+      const team = db.teams.find(t=>t.id===teamId);
+      if(!team){
+        content.innerHTML = `<div class="fl-card">Equipo no encontrado.</div>`;
+        return;
+      }
+      team.meta ||= { stadium:"", city:"", capacity:"" };
+      const players = db.players.filter(p=>p.teamId===team.id);
+      const byPos = { GK:[], DF:[], MF:[], FW:[], OT:[] };
+      players.forEach(p=>{ const pos = p.pos || "OT"; (byPos[pos]||byPos.OT).push(p); });
+      const sections = [["Porteros","GK"],["Defensas","DF"],["Centrocampistas","MF"],["Delanteros","FW"],["Otros","OT"]]
+        .map(([title,key])=>`<div class="fl-card"><b>${title}</b><div style="margin-top:6px;">${(byPos[key]||[]).map(pl=>`<div>${pl.name}</div>`).join("") || "<span class='fl-muted'>Sin jugadores</span>"}</div></div>`).join("");
+
+      content.innerHTML = `
+        <div class="fl-card">
+          <div style="font-size:30px;font-weight:900;">${team.name}</div>
+          <div>Estadio: <b>${team.meta.stadium || '-'}</b> ${team.meta.city?`(${team.meta.city})`:''}</div>
+          <div>Capacidad: <b>${team.meta.capacity || '-'}</b></div>
+          <div class="fl-row" style="margin-top:8px;">${["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"].map(t=>`<span class="fl-muted" style="padding:4px 6px;border-bottom:${t==='PLANTILLA'?'2px solid #ff3b69':'2px solid transparent'};">${t}</span>`).join("")}</div>
+        </div>
+        <div class="fl-card fl-row">
+          <input id="teamStadium" class="fl-input" placeholder="Estadio" value="${team.meta.stadium || ''}">
+          <input id="teamCity" class="fl-input" placeholder="Ciudad" value="${team.meta.city || ''}">
+          <input id="teamCapacity" class="fl-input" placeholder="Capacidad" value="${team.meta.capacity || ''}">
+          <button class="fl-btn" id="saveMeta">Guardar</button>
+          <button class="fl-btn" id="backLiga">Volver a ligas</button>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">Importar plantilla JSON</div>
+          <textarea id="squadImport" class="fl-text" placeholder='{"team":{},"squadBySection":[]}'></textarea>
+          <div class="fl-row" style="margin-top:8px;"><button class="fl-btn" id="runSquadImport">Importar plantilla</button><span id="squadStatus" class="fl-muted"></span></div>
+        </div>
+        ${sections}
+      `;
+      document.getElementById("backLiga").onclick = ()=>render("liga");
+      document.getElementById("saveMeta").onclick = ()=>{
+        team.meta = {
+          stadium: document.getElementById("teamStadium").value.trim(),
+          city: document.getElementById("teamCity").value.trim(),
+          capacity: document.getElementById("teamCapacity").value.trim()
+        };
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
+      document.getElementById("runSquadImport").onclick = ()=>{
+        try{
+          const raw = document.getElementById("squadImport").value.trim();
+          const data = JSON.parse(raw);
+          const rows = (data.squadBySection||[]).flatMap(sec=>(sec.rows||[]).map(r=>({ ...r, __pos: sectionToPos(sec.section) })));
+          if(data.team?.name){
+            team.name = String(data.team.name).replace(/^Fútbol:\s*/i,"").replace(/\s*-\s*plantilla$/i,"").trim() || team.name;
+          }
+          let created=0, updated=0;
+          rows.forEach(r=>{
+            const name = String(r.name||"").trim();
+            if(!name) return;
+            let p = db.players.find(x=>x.teamId===team.id && x.name.toLowerCase()===name.toLowerCase());
+            if(!p){
+              db.players.push({ id: uid("pl"), name, teamId: team.id, pos: r.__pos, rating: 5 });
+              created++;
+            }else{
+              p.pos = p.pos || r.__pos;
+              updated++;
+            }
+          });
+          saveDb(db);
+          document.getElementById("squadStatus").textContent = `✅ Importado. Nuevos: ${created}, actualizados: ${updated}`;
+          render("equipo", { teamId: team.id });
+        }catch(err){
+          document.getElementById("squadStatus").textContent = `❌ ${String(err.message||err)}`;
+        }
+      };
+      return;
+    }
+
     if(view==="tracker"){
       const options = db.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
       const rows = db.tracker.map(t=>`<tr><td>${t.date||""}</td><td>${db.teams.find(x=>x.id===t.homeId)?.name||"-"}</td><td>${t.homeGoals}-${t.awayGoals}</td><td>${db.teams.find(x=>x.id===t.awayId)?.name||"-"}</td><td>${t.note||""}</td></tr>`).join("");
@@ -358,9 +456,9 @@ export function initFootballLab(){
   }
 
   window.__FOOTBALL_LAB__ = {
-    open(view="home"){ render(view); },
+    open(view="home", payload={}){ render(view, payload); },
     getDB(){ return loadDb(); },
-    help: "window.__FOOTBALL_LAB__.open('liga'|'equipos'|'jugadores'|'tracker'|'versus')"
+    help: "window.__FOOTBALL_LAB__.open('liga'|'equipo'|'tracker'|'versus')"
   };
 
   return window.__FOOTBALL_LAB__;
