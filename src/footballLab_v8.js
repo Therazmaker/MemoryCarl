@@ -155,8 +155,16 @@ export function initFootballLab(){
 
   function parseStatsPayload(raw){
     const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const sectionStats = Array.isArray(data?.sections)
+      ? data.sections.flatMap(section=>(section?.stats||[]).map(stat=>({
+        key: stat?.category || stat?.key || stat?.label || stat?.name || stat?.stat || "Métrica",
+        home: stat?.home?.main ?? stat?.home?.raw ?? stat?.home,
+        away: stat?.away?.main ?? stat?.away?.raw ?? stat?.away
+      })))
+      : [];
     const list = Array.isArray(data)
       ? data
+      : sectionStats.length ? sectionStats
       : Array.isArray(data?.stats) ? data.stats
       : Array.isArray(data?.estadisticas) ? data.estadisticas
       : Array.isArray(data?.statistics) ? data.statistics
@@ -170,6 +178,44 @@ export function initFootballLab(){
 
     if(!stats.length) throw new Error("JSON de estadísticas inválido");
     return stats;
+  }
+
+  function openStatsModal({ db, match, onSave } = {}){
+    if(!match) return;
+    const backdrop = document.createElement("div");
+    backdrop.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;";
+    backdrop.innerHTML = `
+      <div class="fl-card" style="width:min(860px,100%);max-height:90vh;overflow:auto;">
+        <div class="fl-row" style="justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:18px;font-weight:900;">Estadísticas del partido</div>
+          <button class="fl-btn" id="closeStatsModal">Cerrar</button>
+        </div>
+        <div class="fl-muted" style="margin-bottom:8px;">Pega JSON con formato <code>stats</code>, <code>statistics</code> o <code>sections[].stats[]</code>.</div>
+        <textarea id="statsImportModal" class="fl-text" placeholder='{"kind":"match_stats","sections":[{"section":"Estadísticas principales","stats":[{"category":"Posesión","home":{"main":"67%"},"away":{"main":"33%"}}]}]}'></textarea>
+        <div class="fl-row" style="margin-top:8px;">
+          <button class="fl-btn" id="saveStatsModal">Guardar estadísticas</button>
+          <span id="statsModalStatus" class="fl-muted"></span>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const close = ()=>backdrop.remove();
+    backdrop.addEventListener("click", (e)=>{ if(e.target===backdrop) close(); });
+    backdrop.querySelector("#closeStatsModal").onclick = close;
+    backdrop.querySelector("#saveStatsModal").onclick = ()=>{
+      const status = backdrop.querySelector("#statsModalStatus");
+      try{
+        const stats = parseStatsPayload(backdrop.querySelector("#statsImportModal").value.trim());
+        match.stats = stats;
+        saveDb(db);
+        status.textContent = `✅ Guardado (${stats.length} métricas)`;
+        onSave?.();
+        setTimeout(close, 500);
+      }catch(err){
+        status.textContent = `❌ ${String(err.message||err)}`;
+      }
+    };
   }
 
   function toNumLoose(value){
@@ -495,7 +541,7 @@ export function initFootballLab(){
     if(view==="equipos"){
       const options = db.leagues.map(l=>`<option value="${l.id}" ${db.settings.selectedLeagueId===l.id?"selected":""}>${l.name}</option>`).join("");
       const leagueTeams = db.teams.filter(t=>t.leagueId===db.settings.selectedLeagueId);
-      const rows = leagueTeams.map(t=>`<tr><td>${t.name}</td><td>${t.apiTeamId||"-"}</td></tr>`).join("");
+      const rows = leagueTeams.map(t=>`<tr><td><input class="fl-input" data-edit-team-name="${t.id}" value="${t.name}"></td><td><input class="fl-input" data-edit-team-api="${t.id}" value="${t.apiTeamId||""}"></td><td><button class="fl-btn" data-save-team="${t.id}">Guardar</button></td></tr>`).join("");
       content.innerHTML = `
         <div class="fl-card">
           <div class="fl-row">
@@ -507,7 +553,7 @@ export function initFootballLab(){
             <span id="tmStatus" class="fl-muted"></span>
           </div>
         </div>
-        <div class="fl-card"><table class="fl-table"><thead><tr><th>Equipo</th><th>API ID</th></tr></thead><tbody>${rows||"<tr><td colspan='2'>Sin equipos</td></tr>"}</tbody></table></div>
+        <div class="fl-card"><table class="fl-table"><thead><tr><th>Equipo (editable)</th><th>API ID</th><th></th></tr></thead><tbody>${rows||"<tr><td colspan='3'>Sin equipos</td></tr>"}</tbody></table></div>
       `;
       document.getElementById("selLeague").onchange = (e)=>{ db.settings.selectedLeagueId = e.target.value; saveDb(db); render("equipos"); };
       document.getElementById("addTeam").onclick = ()=>{ db.teams.push({ id: uid("tm"), name: document.getElementById("teamName").value.trim(), apiTeamId: document.getElementById("teamApi").value.trim(), leagueId: db.settings.selectedLeagueId }); saveDb(db); render("equipos"); };
@@ -525,6 +571,17 @@ export function initFootballLab(){
           render("equipos");
         }catch(err){ status.textContent = `Error: ${String(err.message||err)}`; }
       };
+      content.querySelectorAll("[data-save-team]").forEach(btn=>btn.onclick = ()=>{
+        const teamId = btn.getAttribute("data-save-team");
+        const team = db.teams.find(t=>t.id===teamId);
+        if(!team) return;
+        const name = content.querySelector(`[data-edit-team-name="${teamId}"]`)?.value.trim();
+        const apiTeamId = content.querySelector(`[data-edit-team-api="${teamId}"]`)?.value.trim();
+        if(name) team.name = name;
+        team.apiTeamId = apiTeamId || "";
+        saveDb(db);
+        render("equipos");
+      });
       return;
     }
 
@@ -572,9 +629,13 @@ export function initFootballLab(){
           <td>${league?.name || "Liga"}</td>
           <td>${home} ${m.homeGoals}-${m.awayGoals} ${away}</td>
           <td>${rival?.name || "-"}</td>
-          <td><button class="fl-btn" data-open-match="${m.id}">Abrir</button></td>
+          <td><button class="fl-btn" data-open-stats-modal="${m.id}">Estadísticas</button></td>
         </tr>`;
       }).join("");
+      const resultTeamOptions = db.teams
+        .filter(t=>t.leagueId===team.leagueId)
+        .map(t=>`<option value="${t.id}" ${t.id===team.id?"selected":""}>${t.name}</option>`)
+        .join("");
 
       content.innerHTML = `
         <div class="fl-card">
@@ -597,6 +658,15 @@ export function initFootballLab(){
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
+          <div class="fl-row" style="margin-bottom:10px;">
+            <input id="resDate" type="date" class="fl-input" />
+            <select id="resHome" class="fl-select"><option value="">Local</option>${resultTeamOptions}</select>
+            <input id="resHG" type="number" class="fl-input" placeholder="GL" style="width:74px" />
+            <input id="resAG" type="number" class="fl-input" placeholder="GV" style="width:74px" />
+            <select id="resAway" class="fl-select"><option value="">Visitante</option>${resultTeamOptions}</select>
+            <button class="fl-btn" id="addResult">Guardar partido</button>
+            <span id="resultStatus" class="fl-muted"></span>
+          </div>
           <table class="fl-table">
             <thead><tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Rival</th><th></th></tr></thead>
             <tbody>${matchRows || "<tr><td colspan='5'>Sin partidos todavía</td></tr>"}</tbody>
@@ -651,8 +721,31 @@ export function initFootballLab(){
           document.getElementById("squadStatus").textContent = `❌ ${String(err.message||err)}`;
         }
       };
-      content.querySelectorAll("[data-open-match]").forEach(btn=>btn.onclick = ()=>{
-        render("match", { matchId: btn.getAttribute("data-open-match"), backTeamId: team.id });
+      document.getElementById("addResult").onclick = ()=>{
+        const homeId = document.getElementById("resHome").value;
+        const awayId = document.getElementById("resAway").value;
+        const status = document.getElementById("resultStatus");
+        if(!homeId || !awayId || homeId===awayId){
+          status.textContent = "Selecciona local y visitante distintos.";
+          return;
+        }
+        db.tracker.push({
+          id: uid("tr"),
+          leagueId: team.leagueId || db.settings.selectedLeagueId || "",
+          date: document.getElementById("resDate").value,
+          homeId,
+          awayId,
+          homeGoals: Number(document.getElementById("resHG").value)||0,
+          awayGoals: Number(document.getElementById("resAG").value)||0,
+          note: "",
+          stats: []
+        });
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
+      content.querySelectorAll("[data-open-stats-modal]").forEach(btn=>btn.onclick = ()=>{
+        const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-stats-modal"));
+        openStatsModal({ db, match, onSave: ()=>render("equipo", { teamId: team.id }) });
       });
       return;
     }
