@@ -153,33 +153,6 @@ export function initFootballLab(){
     return { fixtures, source: "network", savedAt: now };
   }
 
-
-  async function searchApiTeams(db, query){
-    const q = String(query||"").trim();
-    if(!q) return [];
-
-    const apiKey = String(db?.settings?.apiSportsKey || "").trim();
-    if(!apiKey) throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
-
-    const url = `https://v3.football.api-sport.com/teams?search=${encodeURIComponent(q)}`;
-    const res = await fetch(url, {
-      headers: {
-        "x-apisports-key": apiKey
-      }
-    });
-    if(!res.ok){
-      throw new Error(`API-SPORTS respondió ${res.status}`);
-    }
-    const payload = await res.json();
-    const rows = Array.isArray(payload?.response) ? payload.response : [];
-    return rows.map(r=>({
-      id: r?.team?.id,
-      name: String(r?.team?.name || ""),
-      country: String(r?.team?.country || ""),
-      leagueHint: String(r?.league?.name || "")
-    })).filter(x=>Number.isFinite(Number(x.id)) && x.name);
-  }
-
   function summarizeFixtureForm(fixtures, apiTeamId){
     const teamIdNum = Number(apiTeamId);
     let pts = 0;
@@ -206,21 +179,6 @@ export function initFootballLab(){
     // 1.50 ppg = neutral, cap +/-15%
     const factor = clamp(1 + ((ppg - 1.5) * 0.10), 0.85, 1.15);
     return { played, points:pts, ppg, factor };
-  }
-
-
-  async function syncApiFixturesForTeam(db, teamId, opts={}){
-    const t = db.teams.find(x=>x.id===teamId);
-    if(!t) return { ok:false, reason:"team_not_found" };
-    const apiTeamId = String(t.apiTeamId||"").trim();
-    if(!apiTeamId) return { ok:false, reason:"missing_api_team_id", team:t };
-
-    const out = await getTeamLastFixtures(db, apiTeamId, {
-      last: clamp(parseInt(opts.last)||5, 1, 10),
-      force: !!opts.force
-    });
-    const summary = summarizeFixtureForm(out.fixtures, apiTeamId);
-    return { ok:true, team:t, apiTeamId, ...out, summary };
   }
 
   function uid(prefix="id"){
@@ -923,18 +881,6 @@ function renderHome(db){
         </div>
         <div id="apiFixtureStatus" class="fl-small" style="margin-top:8px;opacity:.85;"></div>
         <div id="apiFixtureSummary" class="fl-small" style="margin-top:4px;"></div>
-
-        <div class="fl-row" style="margin-top:12px;align-items:flex-end;">
-          <div>
-            <div class="fl-h3">Buscar Team ID por nombre</div>
-            <input class="fl-input" id="apiTeamSearch" placeholder="Ej: Ferencvaros" value="${escapeHtml(String(team.name||""))}">
-          </div>
-          <div style="display:flex;gap:8px;">
-            <button class="mc-btn" id="searchApiTeamBtn">Buscar en API</button>
-          </div>
-        </div>
-        <div id="apiTeamSearchStatus" class="fl-small" style="margin-top:8px;opacity:.85;"></div>
-        <div id="apiTeamSearchResults" class="fl-small" style="margin-top:4px;"></div>
       </div>
 
       <div class="fl-card">
@@ -984,8 +930,6 @@ function renderHome(db){
 
     const apiStatus = document.getElementById("apiFixtureStatus");
     const apiSummary = document.getElementById("apiFixtureSummary");
-    const apiSearchStatus = document.getElementById("apiTeamSearchStatus");
-    const apiSearchResults = document.getElementById("apiTeamSearchResults");
     function paintFixtureSummary(sourceLabel=""){
       if(!apiSummary) return;
       const cache = db?.apiCache?.fixturesByTeam?.[String(team.apiTeamId||"")];
@@ -1023,43 +967,6 @@ function renderHome(db){
         paintFixtureSummary(`actualizado ${new Date(out.savedAt).toLocaleString()}`);
       }catch(err){
         if(apiStatus) apiStatus.textContent = `Error API: ${String(err?.message||err)}`;
-      }
-    };
-
-
-    document.getElementById("searchApiTeamBtn").onclick = async ()=>{
-      const q = String(document.getElementById("apiTeamSearch").value||"").trim();
-      if(!q){
-        if(apiSearchStatus) apiSearchStatus.textContent = "Escribe un nombre para buscar.";
-        if(apiSearchResults) apiSearchResults.innerHTML = "";
-        return;
-      }
-      if(apiSearchStatus) apiSearchStatus.textContent = `Buscando "${q}"...`;
-      if(apiSearchResults) apiSearchResults.innerHTML = "";
-      try{
-        const rows = await searchApiTeams(db, q);
-        if(!rows.length){
-          if(apiSearchStatus) apiSearchStatus.textContent = "Sin resultados.";
-          return;
-        }
-        if(apiSearchStatus) apiSearchStatus.textContent = `Encontrados: ${rows.length}. Click en un ID para usarlo.`;
-        if(apiSearchResults){
-          apiSearchResults.innerHTML = rows.slice(0,8).map(r=>{
-            return `<div style="margin:4px 0;">• <button class="mc-btn" data-pick-api-team="${r.id}">ID ${r.id}</button> <b>${escapeHtml(r.name)}</b> ${r.country ? `(${escapeHtml(r.country)})` : ""}</div>`;
-          }).join("");
-          apiSearchResults.querySelectorAll("[data-pick-api-team]").forEach(btn=>{
-            btn.onclick = ()=>{
-              const id = String(btn.getAttribute("data-pick-api-team")||"").trim();
-              const apiTeamInput = document.getElementById("apiTeamId");
-              if(apiTeamInput) apiTeamInput.value = id;
-              team.apiTeamId = id;
-              saveDB(db);
-              if(apiStatus) apiStatus.textContent = `API Team ID seleccionado: ${id} ✅`;
-            };
-          });
-        }
-      }catch(err){
-        if(apiSearchStatus) apiSearchStatus.textContent = `Error búsqueda API: ${String(err?.message||err)}`;
       }
     };
 
@@ -3839,7 +3746,7 @@ const od1 = document.getElementById("od_1");
           <div>
             <div class="fl-h3">API-SPORTS Key</div>
             <input class="fl-input" id="apiSportsKey" placeholder="Tu key de v3.football.api-sport.com" value="${escapeHtml(db.settings.apiSportsKey || "")}">
-            <div class="fl-small" style="margin-top:6px;">Se usa para /fixtures?team=..&last=5 y se guarda local. Flujo: Versus intenta cache -> API solo si cache vencida.</div>
+            <div class="fl-small" style="margin-top:6px;">Se usa para /fixtures?team=..&last=5 y se guarda local.</div>
           </div>
 
           <div>
