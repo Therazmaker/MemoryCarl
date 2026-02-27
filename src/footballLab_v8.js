@@ -253,6 +253,8 @@ export function initFootballLab(){
     moreBtn.parentElement.appendChild(labBtn);
   }
 
+  let renderSettings = function(db){};
+
   function publishFootballLabApi(){
     window.__FOOTBALL_LAB__ = {
       version: "V6e",
@@ -2757,9 +2759,11 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
 
         <div class="fl-row" style="margin-top:10px;">
           <button class="mc-btn" id="run">Simular</button>
+          <button class="mc-btn" id="syncApiBoth">Sync API equipos</button>
           <button class="mc-btn" id="openHomeXI">XI Local</button>
           <button class="mc-btn" id="openAwayXI">XI Visitante</button>
         </div>
+        <div id="versusApiStatus" class="fl-small" style="margin-top:8px;"></div>
       </div>
 
       <div class="fl-grid2">
@@ -2922,7 +2926,36 @@ ${mm.date} • score ${fmt(mm.score,2)}`);
       openLab("lineup",{teamId:tid});
     };
 
-    document.getElementById("run").onclick = ()=>{
+    const versusApiStatus = document.getElementById("versusApiStatus");
+    async function syncSelectedTeamsFromApi(force=false){
+      const ids = [homeSel.value, awaySel.value].filter(Boolean);
+      if(!ids.length) return;
+      if(versusApiStatus) versusApiStatus.textContent = "Sincronizando API (últimos 5) ...";
+      const lines = [];
+      for(const tid of ids){
+        try{
+          const out = await syncApiFixturesForTeam(db, tid, { last:5, force });
+          const teamName = out.team?.name || tid;
+          if(!out.ok){
+            if(out.reason === "missing_api_team_id") lines.push(`• ${teamName}: sin API Team ID`);
+            else lines.push(`• ${teamName}: no sincronizado (${out.reason||"error"})`);
+            continue;
+          }
+          lines.push(`• ${teamName}: ${out.fixtures.length} partidos (${out.source}) PPG ${fmt(out.summary.ppg,2)}`);
+        }catch(err){
+          const team = db.teams.find(t=>t.id===tid);
+          lines.push(`• ${team?.name||tid}: error ${String(err?.message||err)}`);
+        }
+      }
+      if(versusApiStatus) versusApiStatus.innerHTML = lines.join("<br/>");
+    }
+
+    document.getElementById("syncApiBoth").onclick = async ()=>{
+      await syncSelectedTeamsFromApi(true);
+    };
+
+    document.getElementById("run").onclick = async ()=>{
+      await syncSelectedTeamsFromApi(false);
       const homeId = homeSel.value;
       const awayId = awaySel.value;
       const formation = formSel.value;
@@ -3503,7 +3536,7 @@ const od1 = document.getElementById("od_1");
   }
 
   // ---- Bet Tracker ----
-  renderTracker = function(db){
+  let renderTracker = function(db){
     const v = document.getElementById("fl_view");
     if(!Array.isArray(db.betTracker)) db.betTracker = [];
 
@@ -3675,7 +3708,7 @@ const od1 = document.getElementById("od_1");
   };
 
   // ---- Settings ----
-  function renderSettings(db){
+  renderSettings = function(db){
     const v = document.getElementById("fl_view");
 
     v.innerHTML = `
