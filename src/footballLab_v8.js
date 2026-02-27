@@ -153,33 +153,6 @@ export function initFootballLab(){
     return { fixtures, source: "network", savedAt: now };
   }
 
-
-  async function searchApiTeams(db, query){
-    const q = String(query||"").trim();
-    if(!q) return [];
-
-    const apiKey = String(db?.settings?.apiSportsKey || "").trim();
-    if(!apiKey) throw new Error("Configura tu API Key de API-SPORTS en Ajustes.");
-
-    const url = `https://v3.football.api-sport.com/teams?search=${encodeURIComponent(q)}`;
-    const res = await fetch(url, {
-      headers: {
-        "x-apisports-key": apiKey
-      }
-    });
-    if(!res.ok){
-      throw new Error(`API-SPORTS respondió ${res.status}`);
-    }
-    const payload = await res.json();
-    const rows = Array.isArray(payload?.response) ? payload.response : [];
-    return rows.map(r=>({
-      id: r?.team?.id,
-      name: String(r?.team?.name || ""),
-      country: String(r?.team?.country || ""),
-      leagueHint: String(r?.league?.name || "")
-    })).filter(x=>Number.isFinite(Number(x.id)) && x.name);
-  }
-
   function summarizeFixtureForm(fixtures, apiTeamId){
     const teamIdNum = Number(apiTeamId);
     let pts = 0;
@@ -206,21 +179,6 @@ export function initFootballLab(){
     // 1.50 ppg = neutral, cap +/-15%
     const factor = clamp(1 + ((ppg - 1.5) * 0.10), 0.85, 1.15);
     return { played, points:pts, ppg, factor };
-  }
-
-
-  async function syncApiFixturesForTeam(db, teamId, opts={}){
-    const t = db.teams.find(x=>x.id===teamId);
-    if(!t) return { ok:false, reason:"team_not_found" };
-    const apiTeamId = String(t.apiTeamId||"").trim();
-    if(!apiTeamId) return { ok:false, reason:"missing_api_team_id", team:t };
-
-    const out = await getTeamLastFixtures(db, apiTeamId, {
-      last: clamp(parseInt(opts.last)||5, 1, 10),
-      force: !!opts.force
-    });
-    const summary = summarizeFixtureForm(out.fixtures, apiTeamId);
-    return { ok:true, team:t, apiTeamId, ...out, summary };
   }
 
   function uid(prefix="id"){
@@ -295,88 +253,7 @@ export function initFootballLab(){
     moreBtn.parentElement.appendChild(labBtn);
   }
 
-  let renderSettings = function(db){
-    const v = document.getElementById("fl_view");
-
-    v.innerHTML = `
-      <div class="fl-card">
-        <div style="font-weight:900;">⚙️ Ajustes</div>
-        <div class="fl-small" style="margin-top:6px;">Esto controla cómo “la temporada actual” influye en la simulación.</div>
-      </div>
-
-      <div class="fl-card">
-        <div class="fl-grid2">
-          <div>
-            <div class="fl-h3">Temporada actual</div>
-            <input class="fl-input" id="season" value="${escapeHtml(db.settings.currentSeason)}" placeholder="Ej: 2025-2026">
-            <div class="fl-small" style="margin-top:6px;">Solo los registros con esta temporada se usan para FormScore.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">Últimos N partidos</div>
-            <input class="fl-input" id="lastN" type="number" min="1" max="20" step="1" value="${db.settings.formLastN}">
-            <div class="fl-small" style="margin-top:6px;">Cuántos partidos recientes cuentan para la forma.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">Peso de forma (0..1)</div>
-            <input class="fl-input" id="formW" type="number" min="0" max="1" step="0.05" value="${fmt(db.settings.formWeight,2)}">
-            <div class="fl-small" style="margin-top:6px;">Qué tanto la forma mueve el rating efectivo.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">Localía</div>
-            <input class="fl-input" id="homeAdv" type="number" min="0" max="0.30" step="0.01" value="${fmt(db.settings.homeAdvantage,2)}">
-            <div class="fl-small" style="margin-top:6px;">Bonus al total del equipo local.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">API-SPORTS Key</div>
-            <input class="fl-input" id="apiSportsKey" placeholder="Tu key de v3.football.api-sport.com" value="${escapeHtml(db.settings.apiSportsKey || "")}">
-            <div class="fl-small" style="margin-top:6px;">Se usa para /fixtures?team=..&last=5 y se guarda local. Flujo: Versus intenta cache -> API solo si cache vencida.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">Cache API (horas)</div>
-            <input class="fl-input" id="apiCacheHours" type="number" min="1" max="168" step="1" value="${clampNum(db.settings.apiCacheHours,1,168,12)}">
-            <div class="fl-small" style="margin-top:6px;">Evita gastar llamadas del free tier (100/día).</div>
-          </div>
-        </div>
-
-        <div class="fl-row" style="margin-top:12px;">
-          <button class="mc-btn" id="save">Guardar</button>
-          <button class="mc-btn" id="resetSeason">Auto-temporada</button>
-        </div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:800;">📌 Glosario rápido de posiciones</div>
-        <div class="fl-small" style="margin-top:8px;">
-          ${Object.keys(POS_LABELS).map(k=>`• <b>${k}</b>: ${escapeHtml(POS_LABELS[k].split("—")[1].trim())}`).join("<br/>")}
-        </div>
-      </div>
-    `;
-
-    document.getElementById("save").onclick = ()=>{
-      db.settings.currentSeason = document.getElementById("season").value.trim() || getAutoSeasonLabel();
-      db.settings.formLastN = clamp(parseInt(document.getElementById("lastN").value)||5, 1, 20);
-      db.settings.formWeight = clamp(parseFloat(document.getElementById("formW").value)||0.35, 0, 1);
-      db.settings.homeAdvantage = clamp(parseFloat(document.getElementById("homeAdv").value)||0.05, 0, 0.30);
-      db.settings.apiSportsKey = String(document.getElementById("apiSportsKey").value || "").trim();
-      db.settings.apiCacheHours = clamp(parseInt(document.getElementById("apiCacheHours").value)||12, 1, 168);
-      saveDB(db);
-      alert("Guardado.");
-      openLab("settings");
-    };
-
-    document.getElementById("resetSeason").onclick = ()=>{
-      db.settings.currentSeason = getAutoSeasonLabel();
-      saveDB(db);
-      openLab("settings");
-    };
-  }
-
-
+  let renderSettings = function(db){};
 
   function publishFootballLabApi(){
     window.__FOOTBALL_LAB__ = {
@@ -1004,18 +881,6 @@ function renderHome(db){
         </div>
         <div id="apiFixtureStatus" class="fl-small" style="margin-top:8px;opacity:.85;"></div>
         <div id="apiFixtureSummary" class="fl-small" style="margin-top:4px;"></div>
-
-        <div class="fl-row" style="margin-top:12px;align-items:flex-end;">
-          <div>
-            <div class="fl-h3">Buscar Team ID por nombre</div>
-            <input class="fl-input" id="apiTeamSearch" placeholder="Ej: Ferencvaros" value="${escapeHtml(String(team.name||""))}">
-          </div>
-          <div style="display:flex;gap:8px;">
-            <button class="mc-btn" id="searchApiTeamBtn">Buscar en API</button>
-          </div>
-        </div>
-        <div id="apiTeamSearchStatus" class="fl-small" style="margin-top:8px;opacity:.85;"></div>
-        <div id="apiTeamSearchResults" class="fl-small" style="margin-top:4px;"></div>
       </div>
 
       <div class="fl-card">
@@ -1065,8 +930,6 @@ function renderHome(db){
 
     const apiStatus = document.getElementById("apiFixtureStatus");
     const apiSummary = document.getElementById("apiFixtureSummary");
-    const apiSearchStatus = document.getElementById("apiTeamSearchStatus");
-    const apiSearchResults = document.getElementById("apiTeamSearchResults");
     function paintFixtureSummary(sourceLabel=""){
       if(!apiSummary) return;
       const cache = db?.apiCache?.fixturesByTeam?.[String(team.apiTeamId||"")];
@@ -1104,43 +967,6 @@ function renderHome(db){
         paintFixtureSummary(`actualizado ${new Date(out.savedAt).toLocaleString()}`);
       }catch(err){
         if(apiStatus) apiStatus.textContent = `Error API: ${String(err?.message||err)}`;
-      }
-    };
-
-
-    document.getElementById("searchApiTeamBtn").onclick = async ()=>{
-      const q = String(document.getElementById("apiTeamSearch").value||"").trim();
-      if(!q){
-        if(apiSearchStatus) apiSearchStatus.textContent = "Escribe un nombre para buscar.";
-        if(apiSearchResults) apiSearchResults.innerHTML = "";
-        return;
-      }
-      if(apiSearchStatus) apiSearchStatus.textContent = `Buscando "${q}"...`;
-      if(apiSearchResults) apiSearchResults.innerHTML = "";
-      try{
-        const rows = await searchApiTeams(db, q);
-        if(!rows.length){
-          if(apiSearchStatus) apiSearchStatus.textContent = "Sin resultados.";
-          return;
-        }
-        if(apiSearchStatus) apiSearchStatus.textContent = `Encontrados: ${rows.length}. Click en un ID para usarlo.`;
-        if(apiSearchResults){
-          apiSearchResults.innerHTML = rows.slice(0,8).map(r=>{
-            return `<div style="margin:4px 0;">• <button class="mc-btn" data-pick-api-team="${r.id}">ID ${r.id}</button> <b>${escapeHtml(r.name)}</b> ${r.country ? `(${escapeHtml(r.country)})` : ""}</div>`;
-          }).join("");
-          apiSearchResults.querySelectorAll("[data-pick-api-team]").forEach(btn=>{
-            btn.onclick = ()=>{
-              const id = String(btn.getAttribute("data-pick-api-team")||"").trim();
-              const apiTeamInput = document.getElementById("apiTeamId");
-              if(apiTeamInput) apiTeamInput.value = id;
-              team.apiTeamId = id;
-              saveDB(db);
-              if(apiStatus) apiStatus.textContent = `API Team ID seleccionado: ${id} ✅`;
-            };
-          });
-        }
-      }catch(err){
-        if(apiSearchStatus) apiSearchStatus.textContent = `Error búsqueda API: ${String(err?.message||err)}`;
       }
     };
 
@@ -3882,6 +3708,88 @@ const od1 = document.getElementById("od_1");
   };
 
   // ---- Settings ----
+  renderSettings = function(db){
+    const v = document.getElementById("fl_view");
+
+    v.innerHTML = `
+      <div class="fl-card">
+        <div style="font-weight:900;">⚙️ Ajustes</div>
+        <div class="fl-small" style="margin-top:6px;">Esto controla cómo “la temporada actual” influye en la simulación.</div>
+      </div>
+
+      <div class="fl-card">
+        <div class="fl-grid2">
+          <div>
+            <div class="fl-h3">Temporada actual</div>
+            <input class="fl-input" id="season" value="${escapeHtml(db.settings.currentSeason)}" placeholder="Ej: 2025-2026">
+            <div class="fl-small" style="margin-top:6px;">Solo los registros con esta temporada se usan para FormScore.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">Últimos N partidos</div>
+            <input class="fl-input" id="lastN" type="number" min="1" max="20" step="1" value="${db.settings.formLastN}">
+            <div class="fl-small" style="margin-top:6px;">Cuántos partidos recientes cuentan para la forma.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">Peso de forma (0..1)</div>
+            <input class="fl-input" id="formW" type="number" min="0" max="1" step="0.05" value="${fmt(db.settings.formWeight,2)}">
+            <div class="fl-small" style="margin-top:6px;">Qué tanto la forma mueve el rating efectivo.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">Localía</div>
+            <input class="fl-input" id="homeAdv" type="number" min="0" max="0.30" step="0.01" value="${fmt(db.settings.homeAdvantage,2)}">
+            <div class="fl-small" style="margin-top:6px;">Bonus al total del equipo local.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">API-SPORTS Key</div>
+            <input class="fl-input" id="apiSportsKey" placeholder="Tu key de v3.football.api-sport.com" value="${escapeHtml(db.settings.apiSportsKey || "")}">
+            <div class="fl-small" style="margin-top:6px;">Se usa para /fixtures?team=..&last=5 y se guarda local.</div>
+          </div>
+
+          <div>
+            <div class="fl-h3">Cache API (horas)</div>
+            <input class="fl-input" id="apiCacheHours" type="number" min="1" max="168" step="1" value="${clampNum(db.settings.apiCacheHours,1,168,12)}">
+            <div class="fl-small" style="margin-top:6px;">Evita gastar llamadas del free tier (100/día).</div>
+          </div>
+        </div>
+
+        <div class="fl-row" style="margin-top:12px;">
+          <button class="mc-btn" id="save">Guardar</button>
+          <button class="mc-btn" id="resetSeason">Auto-temporada</button>
+        </div>
+      </div>
+
+      <div class="fl-card">
+        <div style="font-weight:800;">📌 Glosario rápido de posiciones</div>
+        <div class="fl-small" style="margin-top:8px;">
+          ${Object.keys(POS_LABELS).map(k=>`• <b>${k}</b>: ${escapeHtml(POS_LABELS[k].split("—")[1].trim())}`).join("<br/>")}
+        </div>
+      </div>
+    `;
+
+    document.getElementById("save").onclick = ()=>{
+      db.settings.currentSeason = document.getElementById("season").value.trim() || getAutoSeasonLabel();
+      db.settings.formLastN = clamp(parseInt(document.getElementById("lastN").value)||5, 1, 20);
+      db.settings.formWeight = clamp(parseFloat(document.getElementById("formW").value)||0.35, 0, 1);
+      db.settings.homeAdvantage = clamp(parseFloat(document.getElementById("homeAdv").value)||0.05, 0, 0.30);
+      db.settings.apiSportsKey = String(document.getElementById("apiSportsKey").value || "").trim();
+      db.settings.apiCacheHours = clamp(parseInt(document.getElementById("apiCacheHours").value)||12, 1, 168);
+      saveDB(db);
+      alert("Guardado.");
+      openLab("settings");
+    };
+
+    document.getElementById("resetSeason").onclick = ()=>{
+      db.settings.currentSeason = getAutoSeasonLabel();
+      saveDB(db);
+      openLab("settings");
+    };
+  }
+
+
   // --- Debug hook (V6e) ---
   try{
     publishFootballLabApi();
