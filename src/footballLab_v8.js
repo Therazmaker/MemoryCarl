@@ -23,15 +23,14 @@ export function initFootballLab(){
   }catch(e){ /* ignore */ }
 
   window.FOOTBALL_LAB_FILE = "footballLab_v8.js";
-  // Idempotent init guard (hard stop): this file can be loaded or init-called multiple
-  // times by the app/router. We must NEVER re-register listeners or re-render.
+  // Idempotent init guard: only short-circuit if an OPENABLE api already exists.
+  // If a previous boot failed halfway, we must allow a retry.
   try{
-    if(window.__footballLabInitialized){
+    if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
       return window.__FOOTBALL_LAB__;
     }
     window.__footballLabInitialized = true;
   }catch(e){ /* ignore */ }
-  window.FOOTBALL_LAB_FILE = "footballLab_v8e.js";
   console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
 
   const KEY = "footballDB";
@@ -177,6 +176,16 @@ export function initFootballLab(){
     moreBtn.parentElement.appendChild(labBtn);
   }
 
+  function publishFootballLabApi(){
+    window.__FOOTBALL_LAB__ = {
+      version: "V6e",
+      open: (view, payload)=> openLab(view, payload),
+      db: ()=> loadDB(),
+      setDB: (db)=> saveDB(db),
+      help: "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})"
+    };
+  }
+
   function openLab(view, payload={}){
     const db = loadDB();
     const root = document.getElementById("app");
@@ -223,6 +232,8 @@ export function initFootballLab(){
     if(view==="player") renderPlayer(db, payload.playerId);
 
   }
+
+  publishFootballLabApi();
 
   function injectMiniStyle(){
     if(document.getElementById("fl_v5_style")) return;
@@ -3253,13 +3264,7 @@ const od1 = document.getElementById("od_1");
 
   // --- Debug hook (V6e) ---
   try{
-    window.__FOOTBALL_LAB__ = {
-      version: "V6e",
-      open: (view, payload)=> openLab(view, payload),
-      db: ()=> loadDB(),
-      setDB: (db)=> saveDB(db),
-      help: "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})"
-    };
+    publishFootballLabApi();
     window.__footballLabInitialized = true;
   }catch(e){ console.warn("FootballLab debug hook failed", e); }
 
@@ -3278,5 +3283,5 @@ try{
   try{ window.__footballLabInitialized = false; }catch(_e){}
   console.warn("FootballLab auto-init failed", e);
 }
-}catch(e){ console.warn("FootballLab auto-init failed", e); }
+}
 }
