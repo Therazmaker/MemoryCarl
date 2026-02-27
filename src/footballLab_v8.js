@@ -189,8 +189,6 @@ export function initFootballLab(){
     };
   }
 
-  let renderTracker = null;
-
   function openLab(view, payload={}){
     const db = loadDB();
     const root = document.getElementById("app");
@@ -266,37 +264,22 @@ export function initFootballLab(){
 
     const draw = ()=>{
       const rows = db.betTracker;
-      let wins=0, losses=0, pushes=0, stake=0, pnl=0;
-      let cumGain=0, cumLoss=0;
-      const labels=[], gainLine=[], lossLine=[];
+      let wins=0, losses=0, pushes=0, stake=0, pnl=0, cum=0;
+      const labels=[], data=[];
       rows.forEach((r,i)=>{
-        const p = Number(r.profit)||0;
         if(r.result==="win") wins++; else if(r.result==="loss") losses++; else pushes++;
         stake += Number(r.stake)||0;
-        pnl += p;
-        if(p>0) cumGain += p;
-        if(p<0) cumLoss += p;
+        pnl += Number(r.profit)||0;
+        cum += Number(r.profit)||0;
         labels.push(String(i+1));
-        gainLine.push(+cumGain.toFixed(2));
-        lossLine.push(+cumLoss.toFixed(2));
+        data.push(+cum.toFixed(2));
       });
-      const roi = stake>0 ? (pnl/stake)*100 : 0;
-      document.getElementById("trk_summary").innerHTML = `Apuestas: <b>${rows.length}</b> • W/L/P: <b>${wins}</b>/<b>${losses}</b>/<b>${pushes}</b> • Stake: <b>${fmt(stake,2)}</b> • PnL: <b style="color:${pnl>=0?"#8ff0a4":"#ff9b9b"};">${fmt(pnl,2)}</b> • ROI: <b>${fmt(roi,2)}%</b>`;
+      document.getElementById("trk_summary").innerHTML = `Apuestas: <b>${rows.length}</b> • W/L/P: <b>${wins}</b>/<b>${losses}</b>/<b>${pushes}</b> • Stake: <b>${fmt(stake,2)}</b> • PnL: <b style="color:${pnl>=0?"#8ff0a4":"#ff9b9b"};">${fmt(pnl,2)}</b>`;
       document.getElementById("trk_list").innerHTML = rows.slice().reverse().map(r=>`<div class="fl-small" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.08);"><b>${escapeHtml(r.match||"(sin partido)")}</b> • ${escapeHtml(r.market||"Mercado")} • ${r.result} • cuota ${fmt(r.odds,2)} • stake ${fmt(r.stake,2)} • <b style="color:${(r.profit||0)>=0?"#8ff0a4":"#ff9b9b"};">${fmt(r.profit,2)}</b></div>`).join("") || `<div class="fl-small" style="opacity:.7;">Sin registros.</div>`;
       if(typeof Chart!=="undefined"){
         try{ _fbTrackerCharts.pnl?.destroy?.(); }catch(e){}
         try{ _fbTrackerCharts.wl?.destroy?.(); }catch(e){}
-        _fbTrackerCharts.pnl = new Chart(document.getElementById("trk_chart_pnl").getContext("2d"), {
-          type:"line",
-          data:{
-            labels,
-            datasets:[
-              { data:gainLine, label:"Ganancias acumuladas", borderColor:"#3fb950", backgroundColor:"rgba(63,185,80,.15)", fill:true, tension:.25 },
-              { data:lossLine, label:"Pérdidas acumuladas", borderColor:"#f85149", backgroundColor:"rgba(248,81,73,.10)", fill:true, tension:.25 }
-            ]
-          },
-          options:{responsive:true, maintainAspectRatio:false}
-        });
+        _fbTrackerCharts.pnl = new Chart(document.getElementById("trk_chart_pnl").getContext("2d"), { type:"line", data:{labels, datasets:[{data, label:"PnL", fill:true, tension:.25}]}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}} });
         _fbTrackerCharts.wl = new Chart(document.getElementById("trk_chart_wl").getContext("2d"), { type:"doughnut", data:{labels:["Ganadas","Perdidas","Nulas"], datasets:[{data:[wins,losses,pushes], backgroundColor:["#3fb950","#f85149","#8b949e"]}]}, options:{responsive:true, maintainAspectRatio:false} });
       }
     };
@@ -312,6 +295,7 @@ export function initFootballLab(){
 
     draw();
   }
+
 
   publishFootballLabApi();
 
