@@ -2982,6 +2982,118 @@ function computeTeamIntelligencePanel(db, teamId){
     return { matrix, pHome, pDraw, pAway, maxGoals, best };
   }
 
+  function computeB3TeamRatings(db, teamId, leagueId, side="home", limit=20){
+    const leagueCtx = leagueContextFromTracker(db, leagueId);
+    const data = teamAnalytics(db, teamId, leagueId, limit);
+    const games = db.tracker
+      .filter(g=>(g.homeId===teamId || g.awayId===teamId) && (!leagueId || g.leagueId===leagueId))
+      .slice(-limit);
+
+    const statAvg = (keys, mode="for")=>{
+      const values = games.map(g=>{
+        const isHome = g.homeId===teamId;
+        const ownSide = isHome ? "home" : "away";
+        const oppSide = isHome ? "away" : "home";
+        return metricFromStats(g.stats, keys, mode==="for" ? ownSide : oppSide);
+      }).filter(v=>Number.isFinite(v));
+      if(!values.length) return null;
+      return values.reduce((a,b)=>a+b,0)/values.length;
+    };
+
+    const xgFor = side==="home" ? data.xgHome.for : data.xgAway.for;
+    const xgAgainst = side==="home" ? data.xgHome.against : data.xgAway.against;
+    const goalsForBase = side==="home" ? data.goalsHome.for : data.goalsAway.for;
+    const goalsAgainstBase = side==="home" ? data.goalsHome.against : data.goalsAway.against;
+    const leagueFor = side==="home" ? leagueCtx.avgGoalsHome : leagueCtx.avgGoalsAway;
+    const leagueAgainst = side==="home" ? leagueCtx.avgGoalsAway : leagueCtx.avgGoalsHome;
+
+    const sotFor = statAvg(["shots on target", "tiros a puerta", "remates a puerta"], "for");
+    const sotAgainst = statAvg(["shots on target", "tiros a puerta", "remates a puerta"], "against");
+    const boxTouches = statAvg(["touches in opposition box", "toques en area rival", "penalty area entries", "attacks in box"], "for");
+    const errorsAgainst = statAvg(["errors leading to shot", "errors leading to goal", "errores conducentes", "errores que terminan"], "for");
+
+    const atkXg = clamp((xgFor || goalsForBase || leagueFor) / Math.max(0.35, leagueFor), 0.7, 1.3);
+    const atkSot = Number.isFinite(sotFor) ? clamp(sotFor / 4.6, 0.7, 1.3) : 1;
+    const atkTouches = Number.isFinite(boxTouches) ? clamp(boxTouches / 24, 0.7, 1.3) : 1;
+    const defXg = clamp((xgAgainst || goalsAgainstBase || leagueAgainst) / Math.max(0.35, leagueAgainst), 0.7, 1.3);
+    const defSot = Number.isFinite(sotAgainst) ? clamp(sotAgainst / 4.4, 0.7, 1.3) : 1;
+    const defErrors = Number.isFinite(errorsAgainst) ? clamp(0.9 + errorsAgainst * 0.18, 0.7, 1.3) : 1;
+
+    const attack = clamp(0.55*atkXg + 0.25*atkSot + 0.20*atkTouches, 0.7, 1.3);
+    const defenseWeakness = clamp(0.60*defXg + 0.30*defSot + 0.10*defErrors, 0.7, 1.3);
+    const availableSignals = [xgFor, xgAgainst, sotFor, sotAgainst, boxTouches].filter(v=>Number.isFinite(v)).length;
+    const completeness = clamp(availableSignals / 5, 0, 1);
+    const form = data.form5 || { played: 0, points: 0 };
+    const consistency = clamp(0.45 + ((form.points / Math.max(1, form.played*3)) * 0.55), 0, 1);
+    return { attack, defenseWeakness, completeness, consistency, samples: data.sample || 0 };
+  }
+
+  function computeMomentumAdj(intel={}, oppIntel={}){
+    const self = clamp((Number(intel?.metrics?.momentum5) || 0.5) - 0.5, -0.5, 0.5);
+    const opp = clamp((Number(oppIntel?.metrics?.momentum5) || 0.5) - 0.5, -0.5, 0.5);
+    return clamp((self - opp) * 0.16, -0.08, 0.08);
+  }
+
+  function computeB3Confidence({ samples=0, completeness=0, consistency=0 }={}){
+    return clamp(0.2 + 0.15*Math.sqrt(Math.max(0, samples)) + 0.35*completeness + 0.3*consistency, 0.2, 0.85);
+  }
+
+  function blend1x2Probs(model, market, confidence){
+    if(!market) return { ...model };
+    return {
+      pH: confidence*model.pH + (1-confidence)*market.pH,
+      pD: confidence*model.pD + (1-confidence)*market.pD,
+      pA: confidence*model.pA + (1-confidence)*market.pA
+    };
+  }
+
+  function applyDrawBoostToLambdas(lHome, lAway, drawBoost=0){
+    const boost = clamp(Number(drawBoost) || 0, -0.04, 0.04);
+    if(Math.abs(boost) < 1e-6) return { lHome, lAway };
+    const avg = (lHome + lAway) / 2;
+    const closeness = boost >= 0 ? (1 - boost*1.25) : (1 + Math.abs(boost)*1.1);
+    return {
+      lHome: clamp(avg + (lHome - avg) * closeness, 0.05, 4.5),
+      lAway: clamp(avg + (lAway - avg) * closeness, 0.05, 4.5)
+    };
+  }
+
+  function adjustLambdasToMatchProbs(baseLambdas, target, maxGoals=5){
+    let lHome = clamp(baseLambdas.lHome, 0.05, 4.5);
+    let lAway = clamp(baseLambdas.lAway, 0.05, 4.5);
+    for(let i=0;i<16;i++){
+      const p = probsFromLambdas(lHome, lAway, maxGoals);
+      const sideErr = ((target.pH - target.pA) - (p.pHome - p.pAway));
+      const drawErr = (target.pD - p.pDraw);
+      const tilt = Math.exp(clamp(sideErr * 0.65, -0.25, 0.25));
+      lHome = clamp(lHome * tilt, 0.05, 4.5);
+      lAway = clamp(lAway / tilt, 0.05, 4.5);
+      const total = (lHome + lAway) * Math.exp(clamp(-drawErr * 0.55, -0.18, 0.18));
+      const shareHome = lHome / Math.max(0.1, lHome + lAway);
+      lHome = clamp(total * shareHome, 0.05, 4.5);
+      lAway = clamp(total * (1-shareHome), 0.05, 4.5);
+      const closeness = 1 - clamp(drawErr * 0.5, -0.16, 0.16);
+      const avg = (lHome + lAway)/2;
+      lHome = clamp(avg + (lHome - avg)*closeness, 0.05, 4.5);
+      lAway = clamp(avg + (lAway - avg)*closeness, 0.05, 4.5);
+    }
+    return { lHome, lAway };
+  }
+
+  function applyVolatilityToMatrix(matrix, volatility=1){
+    const vol = clamp(Number(volatility) || 1, 0.9, 1.2);
+    if(Math.abs(vol - 1) < 0.01) return matrix;
+    const gamma = clamp(1 / vol, 0.78, 1.15);
+    let sum = 0;
+    const transformed = matrix.map(row=>row.map(cell=>{
+      const v = Math.pow(Math.max(1e-9, cell), gamma);
+      sum += v;
+      return v;
+    }));
+    if(sum<=0) return matrix;
+    return transformed.map(row=>row.map(cell=>cell/sum));
+  }
+
   function versusModel(db, homeId, awayId, opts={}){
     ensureLearningState(db);
     db.versus ||= {};
@@ -4930,23 +5042,80 @@ function computeTeamIntelligencePanel(db, teamId){
         );
         const baseLambdaHome = result.lHome;
         const baseLambdaAway = result.lAway;
-        if(market){
-          const blend = db.versus.marketBlend || 0;
-          const calHome = calibrateToMarket(result.lHome, market.pH, result.pHome);
-          const calAway = calibrateToMarket(result.lAway, market.pA, result.pAway);
-          const oddsShift = ((calHome - result.lHome) + (calAway - result.lAway))/2;
-          result.lHome = result.lHome * (1-blend) + calHome * blend;
-          result.lAway = result.lAway * (1-blend) + calAway * blend;
-          const calibrated = probsFromLambdas(result.lHome, result.lAway, result.maxGoals);
-          result.matrix = calibrated.matrix;
-          result.pHome = calibrated.pHome;
-          result.pDraw = calibrated.pDraw;
-          result.pAway = calibrated.pAway;
-          result.best = calibrated.best;
-          result.factors.breakdown.oddsCalibration = { applied: true, shift: oddsShift };
-        }else{
-          result.factors.breakdown.oddsCalibration = { applied: false, shift: 0 };
-        }
+
+        const b3LeagueId = db.teams.find(t=>t.id===homeId)?.leagueId || db.teams.find(t=>t.id===awayId)?.leagueId || "";
+        const homeRatings = computeB3TeamRatings(db, homeId, b3LeagueId, "home", db.versus.sampleSize || 20);
+        const awayRatings = computeB3TeamRatings(db, awayId, b3LeagueId, "away", db.versus.sampleSize || 20);
+        const homeIntel = computeTeamIntelligencePanel(db, homeId);
+        const awayIntel = computeTeamIntelligencePanel(db, awayId);
+        const momHome = computeMomentumAdj(homeIntel, awayIntel);
+        const momAway = computeMomentumAdj(awayIntel, homeIntel);
+
+        const drawBoost = clamp(
+          ((result.tableContext.home.pressure + result.tableContext.away.pressure - 1) * 0.05)
+          - ((result.tableContext.home.riskMode + result.tableContext.away.riskMode) * 0.015),
+          -0.04,
+          0.04
+        );
+        const psychVol = clamp(
+          0.9 + ((homeIntel.psych.volatility + awayIntel.psych.volatility)/200) * 0.3
+          + ((homeIntel.psych.aggressiveness + awayIntel.psych.aggressiveness)/200) * 0.08,
+          0.9,
+          1.2
+        );
+        const riskTilt = clamp((result.tableContext.home.riskMode - result.tableContext.away.riskMode) * 0.05, -0.05, 0.05);
+
+        let lHome0 = result.leagueCtx.avgGoalsHome
+          * homeRatings.attack
+          * awayRatings.defenseWeakness
+          * (1 + ((db.versus.homeAdvantage || 1.1) - 1))
+          * (1 + momHome)
+          * (1 + riskTilt);
+        let lAway0 = result.leagueCtx.avgGoalsAway
+          * awayRatings.attack
+          * homeRatings.defenseWeakness
+          * (1 + momAway)
+          * (1 - riskTilt);
+        ({ lHome: lHome0, lAway: lAway0 } = applyDrawBoostToLambdas(lHome0, lAway0, drawBoost));
+
+        const pModelDist = probsFromLambdas(clamp(lHome0, 0.05, 4.5), clamp(lAway0, 0.05, 4.5), result.maxGoals);
+        const pModel = { pH: pModelDist.pHome, pD: pModelDist.pDraw, pA: pModelDist.pAway };
+        const conf = computeB3Confidence({
+          samples: Math.min(homeRatings.samples, awayRatings.samples),
+          completeness: (homeRatings.completeness + awayRatings.completeness) / 2,
+          consistency: (homeRatings.consistency + awayRatings.consistency) / 2
+        });
+        const blendWeight = (db.versus.marketBlend || 0.35) * (market ? 1 : 0);
+        const effConf = market ? clamp(conf * (0.75 + blendWeight*0.7), 0.2, 0.88) : conf;
+        const pFinal = blend1x2Probs(pModel, market, effConf);
+
+        const adjusted = adjustLambdasToMatchProbs({ lHome: lHome0, lAway: lAway0 }, pFinal, result.maxGoals);
+        result.lHome = adjusted.lHome;
+        result.lAway = adjusted.lAway;
+        const calibrated = probsFromLambdas(result.lHome, result.lAway, result.maxGoals);
+        result.matrix = applyVolatilityToMatrix(calibrated.matrix, psychVol);
+        const distSummary = summarizeMatrix(result.matrix);
+        result.pHome = distSummary.pHome;
+        result.pDraw = distSummary.pDraw;
+        result.pAway = distSummary.pAway;
+        result.best = distSummary.best;
+        result.factors.breakdown.oddsCalibration = {
+          applied: !!market,
+          shift: ((adjusted.lHome - lHome0) + (adjusted.lAway - lAway0))/2,
+          confidence: effConf,
+          pModel,
+          pFinal,
+          pMarket: market
+        };
+        result.factors.breakdown.b3 = {
+          homeRatings,
+          awayRatings,
+          momentum: { home: momHome, away: momAway },
+          drawBoost,
+          volatility: psychVol,
+          riskTilt,
+          confidence: effConf
+        };
         result.factors.breakdown.marketMultiplier = ((result.lHome / Math.max(0.05, baseLambdaHome)) + (result.lAway / Math.max(0.05, baseLambdaAway))) / 2;
         const dominant = topScoreCells(result.matrix, 3);
         const btts = bttsProbability(result.matrix);
@@ -4965,7 +5134,7 @@ function computeTeamIntelligencePanel(db, teamId){
           `El local sube λ por ataque reciente (${((breakdown.homeAttackBoost-1)*100).toFixed(0)}%) y debilidad defensiva rival (${((breakdown.awayDefenseWeakness-1)*100).toFixed(0)}%).`,
           `El visitante se ajusta por su ataque fuera (${((breakdown.awayAttackPenalty-1)*100).toFixed(0)}%) y la defensa local (${((breakdown.homeDefenseStrength-1)*100).toFixed(0)}%).`,
           breakdown.oddsCalibration.applied
-            ? `La calibración por mercado movió λ en ${breakdown.oddsCalibration.shift.toFixed(2)} (blend ${(db.versus.marketBlend*100).toFixed(0)}%).`
+            ? `B³ blend: modelo ${(breakdown.oddsCalibration.pModel.pH*100).toFixed(1)}/${(breakdown.oddsCalibration.pModel.pD*100).toFixed(1)}/${(breakdown.oddsCalibration.pModel.pA*100).toFixed(1)} vs mercado ${(breakdown.oddsCalibration.pMarket.pH*100).toFixed(1)}/${(breakdown.oddsCalibration.pMarket.pD*100).toFixed(1)}/${(breakdown.oddsCalibration.pMarket.pA*100).toFixed(1)} con conf ${(breakdown.oddsCalibration.confidence*100).toFixed(0)}%.`
             : "Sin cuotas, no se aplicó calibración de mercado.",
           `Estadísticas guardadas: impacto ataque local ×${(breakdown.statsAttackHome || 1).toFixed(2)} y visitante ×${(breakdown.statsAttackAway || 1).toFixed(2)} (muestras ${breakdown.statsSample?.home || 0}/${breakdown.statsSample?.away || 0}).`,
           `Contexto tabla jornada ${result.tableContext.matchday}: pressure ${result.tableContext.home.pressure.toFixed(2)} / ${result.tableContext.away.pressure.toFixed(2)}, risk ${result.tableContext.home.riskMode.toFixed(2)} / ${result.tableContext.away.riskMode.toFixed(2)} → empate +${(result.tableContext.drawBoost*100).toFixed(1)}%.`
@@ -4980,6 +5149,7 @@ function computeTeamIntelligencePanel(db, teamId){
           `Bias local: ×${(1 + (breakdown.teamBias.home.attack || 0)).toFixed(2)}`,
           `Stats: ×${((breakdown.statsAttackHome || 1) * (breakdown.statsAttackAway || 1)).toFixed(2)}`,
           `Table draw boost: +${((breakdown.drawBoost || 0)*100).toFixed(1)}%`,
+          `B³ draw/vol: ${(breakdown.b3?.drawBoost*100 || 0).toFixed(1)}% / x${(breakdown.b3?.volatility || 1).toFixed(2)}`,
           `Mercado: ×${(breakdown.marketMultiplier || 1).toFixed(2)}`
         ];
 
