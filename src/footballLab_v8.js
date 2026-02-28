@@ -3028,14 +3028,82 @@ function computeTeamIntelligencePanel(db, teamId){
     return { attack, defenseWeakness, completeness, consistency, samples: data.sample || 0 };
   }
 
+  function computeTrainingStats(teamMatches=[]){
+    const matches = Array.isArray(teamMatches) ? teamMatches : [];
+    const totalMatches = matches.length;
+
+    const hasStats = (m)=>{
+      if(Array.isArray(m?.stats)) return m.stats.length > 0;
+      return !!m?.stats && m.stats.kind === "match_stats";
+    };
+    const hasXgInSections = (sections=[])=>{
+      if(!Array.isArray(sections)) return false;
+      return sections.some(sec=>(sec?.stats || []).some(st=>String(st?.category || st?.key || "").toLowerCase().includes("xg")));
+    };
+    const hasXgMetric = (m)=>{
+      const fromTop = [m?.homeXg, m?.awayXg, m?.xgHome, m?.xgAway].some(v=>Number.isFinite(Number(v)));
+      if(fromTop) return true;
+      if(Array.isArray(m?.stats)){
+        return m.stats.some(st=>String(st?.key || st?.category || "").toLowerCase().includes("xg"));
+      }
+      return hasXgInSections(m?.stats?.sections);
+    };
+
+    const withStats = matches.filter(hasStats).length;
+    const withXG = matches.filter(hasXgMetric).length;
+    const withNarrative = matches.filter(m=>typeof m?.storyRaw === "string" && m.storyRaw.trim().length > 50).length;
+
+    const completeness = clamp01(
+      0.55 * (withStats / Math.max(1, totalMatches))
+      + 0.35 * (withXG / Math.max(1, totalMatches))
+      + 0.10 * (withNarrative / Math.max(1, totalMatches))
+    );
+
+    return {
+      totalMatches,
+      withStats,
+      withXG,
+      withNarrative,
+      completeness
+    };
+  }
+
+  function dynamicConfMax(samples){
+    if(samples < 30) return 0.55;
+    if(samples < 80) return 0.70;
+    return 0.85;
+  }
+
   function computeMomentumAdj(intel={}, oppIntel={}){
     const self = clamp((Number(intel?.metrics?.momentum5) || 0.5) - 0.5, -0.5, 0.5);
     const opp = clamp((Number(oppIntel?.metrics?.momentum5) || 0.5) - 0.5, -0.5, 0.5);
     return clamp((self - opp) * 0.16, -0.08, 0.08);
   }
 
-  function computeB3Confidence({ samples=0, completeness=0, consistency=0 }={}){
-    return clamp(0.2 + 0.15*Math.sqrt(Math.max(0, samples)) + 0.35*completeness + 0.3*consistency, 0.2, 0.85);
+  function computeB3Confidence({ samples=0, completeness=0, consistency01=0 }={}){
+    let confSamples;
+    if(samples < 5) confSamples = 0.25;
+    else if(samples < 10) confSamples = 0.35;
+    else if(samples < 20) confSamples = 0.45;
+    else if(samples < 35) confSamples = 0.55;
+    else if(samples < 60) confSamples = 0.65;
+    else confSamples = 0.75;
+
+    const confData = 0.65 + 0.35 * clamp01(completeness);
+    const confCons = 0.70 + 0.30 * clamp01(consistency01);
+    let conf = confSamples * confData * confCons;
+    conf = Math.min(conf, dynamicConfMax(samples));
+    conf = Math.max(conf, 0.20);
+    return conf;
+  }
+
+  function computeGlobalTrainingSize(allTeams=[], tracker=[]){
+    const teamIds = new Set((allTeams || []).map(t=>t.id));
+    const matches = Array.isArray(tracker)
+      ? tracker.filter(m=>teamIds.has(m?.homeId) || teamIds.has(m?.awayId))
+      : [];
+    const stats = computeTrainingStats(matches);
+    return { matches: stats.totalMatches, withStats: stats.withStats, withXG: stats.withXG };
   }
 
   function blend1x2Probs(model, market, confidence){
@@ -5046,6 +5114,20 @@ function computeTeamIntelligencePanel(db, teamId){
         const b3LeagueId = db.teams.find(t=>t.id===homeId)?.leagueId || db.teams.find(t=>t.id===awayId)?.leagueId || "";
         const homeRatings = computeB3TeamRatings(db, homeId, b3LeagueId, "home", db.versus.sampleSize || 20);
         const awayRatings = computeB3TeamRatings(db, awayId, b3LeagueId, "away", db.versus.sampleSize || 20);
+        const homeMatches = db.tracker
+          .filter(g=>(g.homeId===homeId || g.awayId===homeId) && (!b3LeagueId || g.leagueId===b3LeagueId))
+          .slice(-(db.versus.sampleSize || 20));
+        const awayMatches = db.tracker
+          .filter(g=>(g.homeId===awayId || g.awayId===awayId) && (!b3LeagueId || g.leagueId===b3LeagueId))
+          .slice(-(db.versus.sampleSize || 20));
+        const homeTraining = computeTrainingStats(homeMatches);
+        const awayTraining = computeTrainingStats(awayMatches);
+        const training = {
+          totalMatches: homeTraining.totalMatches + awayTraining.totalMatches,
+          withStats: homeTraining.withStats + awayTraining.withStats,
+          withXG: homeTraining.withXG + awayTraining.withXG,
+          completeness: (homeTraining.completeness + awayTraining.completeness) / 2
+        };
         const homeIntel = computeTeamIntelligencePanel(db, homeId);
         const awayIntel = computeTeamIntelligencePanel(db, awayId);
         const momHome = computeMomentumAdj(homeIntel, awayIntel);
@@ -5081,9 +5163,9 @@ function computeTeamIntelligencePanel(db, teamId){
         const pModelDist = probsFromLambdas(clamp(lHome0, 0.05, 4.5), clamp(lAway0, 0.05, 4.5), result.maxGoals);
         const pModel = { pH: pModelDist.pHome, pD: pModelDist.pDraw, pA: pModelDist.pAway };
         const conf = computeB3Confidence({
-          samples: Math.min(homeRatings.samples, awayRatings.samples),
-          completeness: (homeRatings.completeness + awayRatings.completeness) / 2,
-          consistency: (homeRatings.consistency + awayRatings.consistency) / 2
+          samples: training.withStats,
+          completeness: training.completeness,
+          consistency01: (homeRatings.consistency + awayRatings.consistency) / 2
         });
         const blendWeight = (db.versus.marketBlend || 0.35) * (market ? 1 : 0);
         const effConf = market ? clamp(conf * (0.75 + blendWeight*0.7), 0.2, 0.88) : conf;
@@ -5110,12 +5192,14 @@ function computeTeamIntelligencePanel(db, teamId){
         result.factors.breakdown.b3 = {
           homeRatings,
           awayRatings,
+          training,
           momentum: { home: momHome, away: momAway },
           drawBoost,
           volatility: psychVol,
           riskTilt,
           confidence: effConf
         };
+        const globalTraining = computeGlobalTrainingSize(db.teams, db.tracker);
         result.factors.breakdown.marketMultiplier = ((result.lHome / Math.max(0.05, baseLambdaHome)) + (result.lAway / Math.max(0.05, baseLambdaAway))) / 2;
         const dominant = topScoreCells(result.matrix, 3);
         const btts = bttsProbability(result.matrix);
@@ -5136,7 +5220,9 @@ function computeTeamIntelligencePanel(db, teamId){
           breakdown.oddsCalibration.applied
             ? `B³ blend: modelo ${(breakdown.oddsCalibration.pModel.pH*100).toFixed(1)}/${(breakdown.oddsCalibration.pModel.pD*100).toFixed(1)}/${(breakdown.oddsCalibration.pModel.pA*100).toFixed(1)} vs mercado ${(breakdown.oddsCalibration.pMarket.pH*100).toFixed(1)}/${(breakdown.oddsCalibration.pMarket.pD*100).toFixed(1)}/${(breakdown.oddsCalibration.pMarket.pA*100).toFixed(1)} con conf ${(breakdown.oddsCalibration.confidence*100).toFixed(0)}%.`
             : "Sin cuotas, no se aplicó calibración de mercado.",
+          `Entrenamiento modelo: ${breakdown.b3?.training?.withStats || 0}/${breakdown.b3?.training?.totalMatches || 0} con stats, xG ${breakdown.b3?.training?.withXG || 0}, completitud ${((breakdown.b3?.training?.completeness || 0)*100).toFixed(0)}%, conf ${((breakdown.b3?.confidence || 0)*100).toFixed(0)}%.`,
           `Estadísticas guardadas: impacto ataque local ×${(breakdown.statsAttackHome || 1).toFixed(2)} y visitante ×${(breakdown.statsAttackAway || 1).toFixed(2)} (muestras ${breakdown.statsSample?.home || 0}/${breakdown.statsSample?.away || 0}).`,
+          `Dataset global: ${globalTraining.matches} partidos | ${globalTraining.withStats} con stats | ${globalTraining.withXG} con xG.`,
           `Contexto tabla jornada ${result.tableContext.matchday}: pressure ${result.tableContext.home.pressure.toFixed(2)} / ${result.tableContext.away.pressure.toFixed(2)}, risk ${result.tableContext.home.riskMode.toFixed(2)} / ${result.tableContext.away.riskMode.toFixed(2)} → empate +${(result.tableContext.drawBoost*100).toFixed(1)}%.`
         ];
         const dominantTxt = dominant.map(c=>`${c.h}-${c.a} (${(c.p*100).toFixed(1)}%)`).join(", ");
@@ -5203,6 +5289,12 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-muted" style="margin-top:6px;">Marcadores dominantes: <b>${dominantTxt}</b></div>
           <div class="fl-muted" style="margin-top:6px;">${bttsTxt}</div>
           <div class="fl-muted" style="margin-top:6px;">Corners esperados: <b>${result.cornersExpected.toFixed(1)}</b> · Tarjetas esperadas: <b>${result.cardsExpected.toFixed(1)}</b></div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span>Training size</span><b>${training.withStats}/${training.totalMatches}</b></div>
+            <div><span>Completeness</span><b>${(training.completeness*100).toFixed(0)}%</b></div>
+            <div><span>Conf</span><b>${(effConf*100).toFixed(0)}%</b></div>
+          </div>
+          <div class="fl-muted" style="margin-top:6px;">Entrenamiento: ${training.withStats}/${training.totalMatches} | xG: ${training.withXG} | Comp: ${(training.completeness*100).toFixed(0)}% | Conf: ${(effConf*100).toFixed(0)}%</div>
           <div class="fl-muted" style="margin-top:6px;">${narrative}</div>
           <div class="fl-muted" style="margin-top:6px;">• ${explainers.join("<br/>• ")}</div>
           <div class="fl-muted" style="margin-top:6px;">Contribuciones λ local → <b>${multiplierLines.join(" · ")}</b></div>
