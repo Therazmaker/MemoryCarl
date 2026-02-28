@@ -649,6 +649,110 @@ export function initFootballLab(){
     };
   }
 
+  function buildTeamBehaviorSeries(db, teamId){
+    const ordered = db.tracker
+      .filter(g=>g.homeId===teamId || g.awayId===teamId)
+      .slice()
+      .sort((a,b)=>String(a.date || "").localeCompare(String(b.date || "")));
+    let cumulativePoints = 0;
+    let cumulativeGoalDiff = 0;
+    const formQueue = [];
+    let wins = 0;
+    let draws = 0;
+    let losses = 0;
+
+    const series = ordered.map((match, idx)=>{
+      const isHome = match.homeId===teamId;
+      const gf = isHome ? Number(match.homeGoals)||0 : Number(match.awayGoals)||0;
+      const ga = isHome ? Number(match.awayGoals)||0 : Number(match.homeGoals)||0;
+      const points = gf>ga ? 3 : gf===ga ? 1 : 0;
+      if(points===3) wins += 1;
+      else if(points===1) draws += 1;
+      else losses += 1;
+      cumulativePoints += points;
+      cumulativeGoalDiff += gf - ga;
+      formQueue.push(points);
+      if(formQueue.length > 5) formQueue.shift();
+      const formAvg = formQueue.reduce((acc, val)=>acc+val, 0) / formQueue.length;
+      const momentumNow = clamp(formAvg / 3, 0, 1);
+
+      return {
+        index: idx + 1,
+        label: match.date || `J${idx+1}`,
+        cumulativePoints,
+        cumulativeGoalDiff,
+        momentumNow,
+        gf,
+        ga
+      };
+    });
+
+    const last = series[series.length - 1] || null;
+    const prev = series.length > 1 ? series[series.length - 2] : null;
+    return {
+      series,
+      summary: {
+        played: series.length,
+        points: last?.cumulativePoints || 0,
+        goalDiff: last?.cumulativeGoalDiff || 0,
+        wins,
+        draws,
+        losses,
+        currentMomentum: last?.momentumNow || 0,
+        momentumDelta: last && prev ? (last.momentumNow - prev.momentumNow) : 0
+      }
+    };
+  }
+
+  let _teamBehaviorChart = null;
+  function renderTeamBehaviorChart(canvas, behavior){
+    if(!canvas || typeof Chart === "undefined") return;
+    const series = behavior?.series || [];
+    try{ if(_teamBehaviorChart){ _teamBehaviorChart.destroy(); _teamBehaviorChart = null; } }catch(_e){}
+    if(!series.length) return;
+
+    _teamBehaviorChart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: {
+        labels: series.map((row, idx)=> row.label || `J${idx+1}`),
+        datasets: [
+          {
+            label: "Puntos acumulados",
+            data: series.map(row=>row.cumulativePoints),
+            borderColor: "#1f6feb",
+            backgroundColor: "rgba(31,111,235,.2)",
+            tension: 0.25,
+            yAxisID: "y"
+          },
+          {
+            label: "Momentum actual (0-100)",
+            data: series.map(row=>Math.round(row.momentumNow * 100)),
+            borderColor: "#2ea043",
+            backgroundColor: "rgba(46,160,67,.18)",
+            tension: 0.3,
+            yAxisID: "y1"
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        scales: {
+          x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
+          y: { position: "left", ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } },
+          y1: {
+            position: "right",
+            min: 0,
+            max: 100,
+            ticks: { color: "#9ca3af" },
+            grid: { drawOnChartArea: false }
+          }
+        }
+      }
+    });
+  }
+
   function clamp(value, min, max){
     return Math.max(min, Math.min(max, value));
   }
@@ -1902,6 +2006,17 @@ export function initFootballLab(){
       const teamMatches = db.tracker
         .filter(m=>m.homeId===team.id || m.awayId===team.id)
         .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+      const behavior = buildTeamBehaviorSeries(db, team.id);
+      const trendLabel = behavior.summary.currentMomentum >= 0.66
+        ? "🔥 Alto"
+        : behavior.summary.currentMomentum >= 0.4
+          ? "⚖️ Medio"
+          : "🧊 Bajo";
+      const trendDirection = behavior.summary.momentumDelta > 0.04
+        ? "↗ Subiendo"
+        : behavior.summary.momentumDelta < -0.04
+          ? "↘ Bajando"
+          : "→ Estable";
       const sections = [["Porteros","GK"],["Defensas","DF"],["Centrocampistas","MF"],["Delanteros","FW"],["Otros","OT"]]
         .map(([title,key])=>renderSquadSection(title, byPos[key]||[])).join("");
       const matchRows = teamMatches.map(m=>{
@@ -1948,6 +2063,21 @@ export function initFootballLab(){
           <div style="font-weight:800;margin-bottom:6px;">Importar plantilla JSON</div>
           <textarea id="squadImport" class="fl-text" placeholder='{"team":{},"squadBySection":[]}'></textarea>
           <div class="fl-row" style="margin-top:8px;"><button class="fl-btn" id="runSquadImport">Importar plantilla</button><span id="squadStatus" class="fl-muted"></span></div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Patrones de comportamiento</div>
+          <div class="fl-kpi" style="margin-bottom:8px;">
+            <div><span class="fl-mini">PJ</span><b>${behavior.summary.played}</b></div>
+            <div><span class="fl-mini">Puntos acumulados</span><b>${behavior.summary.points}</b></div>
+            <div><span class="fl-mini">Dif. gol acumulada</span><b>${behavior.summary.goalDiff >= 0 ? "+" : ""}${behavior.summary.goalDiff}</b></div>
+          </div>
+          <div class="fl-row" style="margin-bottom:8px;gap:10px;">
+            <span class="fl-chip">Estado actual: ${trendLabel}</span>
+            <span class="fl-chip">Tendencia: ${trendDirection}</span>
+            <span class="fl-chip">Racha global: ${behavior.summary.wins}G-${behavior.summary.draws}E-${behavior.summary.losses}P</span>
+          </div>
+          <div class="fl-mini" style="margin-bottom:8px;">La línea azul suma todo lo registrado (puntos acumulados). La verde muestra el comportamiento actual (momentum de los últimos 5 partidos).</div>
+          <div style="height:220px;"><canvas id="teamBehaviorChart"></canvas></div>
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
@@ -2044,6 +2174,7 @@ export function initFootballLab(){
         saveDb(db);
         render("equipo", { teamId: team.id });
       };
+      renderTeamBehaviorChart(document.getElementById("teamBehaviorChart"), behavior);
       content.querySelectorAll("[data-open-stats-modal]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-stats-modal"));
         openStatsModal({ db, match, onSave: ()=>render("equipo", { teamId: team.id }) });
