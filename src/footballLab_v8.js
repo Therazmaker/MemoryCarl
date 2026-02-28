@@ -1802,6 +1802,211 @@ export function initFootballLab(){
     return profile;
   }
 
+  function safeParseJson(raw){
+    try{
+      return JSON.parse(raw);
+    }catch(_e){
+      return null;
+    }
+  }
+
+  function lpeNormDanger(value){
+    return clamp((Number(value) || 0) / 22, 0, 1);
+  }
+
+  function lpeNormPossession(value){
+    if(value===undefined || value===null || value==="") return 0.5;
+    return clamp((Number(value) || 0) / 100, 0, 1);
+  }
+
+  function lpeReadStat(stats, teamKey, stat){
+    return Number(stats?.[teamKey]?.[stat] || 0);
+  }
+
+  function lpeStateModifier(scoreDiff=0, minute=0){
+    const gameWeight = clamp((Number(minute) || 0) / 90, 0, 1);
+    return clamp(-(Number(scoreDiff) || 0) * 0.05 * (0.6 + gameWeight), -0.15, 0.15);
+  }
+
+  function computeLiveProjectionWindow(payload={}, context={}){
+    const stats = payload.stats || {};
+    const score = payload.score || {};
+    const homeShotsOn = lpeReadStat(stats, "home", "shotsOn");
+    const awayShotsOn = lpeReadStat(stats, "away", "shotsOn");
+    const homeShots = lpeReadStat(stats, "home", "shots");
+    const awayShots = lpeReadStat(stats, "away", "shots");
+    const homeBig = lpeReadStat(stats, "home", "bigChances");
+    const awayBig = lpeReadStat(stats, "away", "bigChances");
+    const homeCorners = lpeReadStat(stats, "home", "corners");
+    const awayCorners = lpeReadStat(stats, "away", "corners");
+    const homeDanger = lpeReadStat(stats, "home", "dangerAttacks");
+    const awayDanger = lpeReadStat(stats, "away", "dangerAttacks");
+    const homePoss = lpeNormPossession(stats?.home?.possession);
+    const awayPoss = lpeNormPossession(stats?.away?.possession);
+    const homeFouls = lpeReadStat(stats, "home", "fouls");
+    const awayFouls = lpeReadStat(stats, "away", "fouls");
+    const homeYellows = lpeReadStat(stats, "home", "yellows");
+    const awayYellows = lpeReadStat(stats, "away", "yellows");
+
+    const iddRaw = ({ shotsOn, shots, big, corners, danger, poss, fouls, yellows })=>
+      0.55*shotsOn +
+      0.40*shots +
+      0.35*big +
+      0.20*corners +
+      0.15*lpeNormDanger(danger) +
+      0.10*poss -
+      0.10*fouls -
+      0.25*yellows;
+
+    const homeIddRaw = iddRaw({ shotsOn: homeShotsOn, shots: homeShots, big: homeBig, corners: homeCorners, danger: homeDanger, poss: homePoss, fouls: homeFouls, yellows: homeYellows });
+    const awayIddRaw = iddRaw({ shotsOn: awayShotsOn, shots: awayShots, big: awayBig, corners: awayCorners, danger: awayDanger, poss: awayPoss, fouls: awayFouls, yellows: awayYellows });
+    const iddDiff = awayIddRaw - homeIddRaw;
+    const iddAway = clamp(iddDiff / 4, -1, 1);
+    const iddHome = -iddAway;
+
+    const shotsTotal = homeShots + awayShots + homeShotsOn + awayShotsOn;
+    const cornersTotal = homeCorners + awayCorners;
+    const bigTotal = homeBig + awayBig;
+    const foulsTotal = homeFouls + awayFouls;
+    const intensity = clamp((shotsTotal + cornersTotal + bigTotal + foulsTotal*0.3) / 10, 0, 1);
+    const threatHome = clamp((homeBig*1.6 + homeShotsOn*1.2 + homeShots*0.5 + homeCorners*0.25) / 6, 0, 1);
+    const threatAway = clamp((awayBig*1.6 + awayShotsOn*1.2 + awayShots*0.5 + awayCorners*0.25) / 6, 0, 1);
+    const dangerTotalNorm = lpeNormDanger(homeDanger + awayDanger);
+    const pace = clamp((shotsTotal + foulsTotal + cornersTotal + dangerTotalNorm) / 14, 0, 1);
+
+    const prevFast = Number(context?.fastEma?.idd?.away || 0);
+    const prevSlow = Number(context?.ema?.idd?.away || 0);
+    const prevFastThreat = Number(context?.fastEma?.threat?.edge || 0);
+    const prevSlowThreat = Number(context?.ema?.threat?.edge || 0);
+    const fastAlpha = 0.55;
+    const slowAlpha = 0.18;
+
+    const fastAway = prevFast*(1-fastAlpha) + iddAway*fastAlpha;
+    const slowAway = prevSlow*(1-slowAlpha) + iddAway*slowAlpha;
+    const threatEdge = threatAway - threatHome;
+    const fastThreat = prevFastThreat*(1-fastAlpha) + threatEdge*fastAlpha;
+    const slowThreat = prevSlowThreat*(1-slowAlpha) + threatEdge*slowAlpha;
+
+    const regimeDeltaIdd = Math.abs(fastAway - slowAway);
+    const regimeDeltaThreat = Math.abs(fastThreat - slowThreat);
+    const regimeDelta = Math.max(regimeDeltaIdd, regimeDeltaThreat);
+
+    const lastUncertaintyIdd = Number(context?.uncertainty?.idd || 0.18);
+    const lastUncertaintyThreat = Number(context?.uncertainty?.threat || 0.22);
+    const uncertaintyIdd = clamp(0.85*lastUncertaintyIdd + 0.15*Math.abs(iddAway - slowAway), 0.05, 0.6);
+    const uncertaintyThreat = clamp(0.85*lastUncertaintyThreat + 0.15*Math.abs(threatEdge - slowThreat), 0.05, 0.6);
+    const zIdd = (iddAway - slowAway) / (uncertaintyIdd + 0.05);
+
+    const previousStreak = Number(context?.zStreak || 0);
+    const zStreak = Math.abs(zIdd) > 1.6 ? previousStreak + 1 : 0;
+    const minuteLabel = String(payload.window || payload.minuteWindow || payload.minute || "live");
+    const windowEnd = Number(String(minuteLabel).split("-").slice(-1)[0]) || 0;
+    const scoreDiff = (Number(score.away) || 0) - (Number(score.home) || 0);
+    const iddNext = clamp(0.55*fastAway + 0.45*slowAway + lpeStateModifier(scoreDiff, windowEnd), -1, 1);
+    const epi = clamp(
+      0.45*intensity +
+      0.35*pace +
+      0.30*Math.max(threatHome, threatAway) +
+      0.25*regimeDelta,
+      0,
+      1
+    );
+
+    const alerts = [];
+    const dominantTeam = iddAway > 0 ? "away" : "home";
+    if(Math.abs(zIdd) > 2.2){
+      alerts.push({ type: "SHIFT", minuteWindow: minuteLabel, team: dominantTeam, why: `z=${zIdd.toFixed(2)}, regimeDelta=${regimeDelta.toFixed(2)}` });
+    }
+    if(regimeDelta > 0.22){
+      alerts.push({ type: "TREND_BREAK", minuteWindow: minuteLabel, team: dominantTeam, why: `regimeDelta=${regimeDelta.toFixed(2)}` });
+    }
+    if(zStreak >= 2){
+      alerts.push({ type: "SUSTAINED_CHANGE", minuteWindow: minuteLabel, team: dominantTeam, why: `abs(z)>1.6 por ${zStreak} ventanas` });
+    }
+    if(epi > 0.75){
+      alerts.push({ type: "EPI_SPIKE", minuteWindow: minuteLabel, level: Number(epi.toFixed(2)) });
+    }
+
+    const epaPsych = context?.epaPsych || null;
+    const frustrationA = Number(epaPsych?.home?.frustration ?? epaPsych?.away?.frustration ?? NaN);
+    const frustrationB = Number(epaPsych?.away?.frustration ?? NaN);
+    if(alerts.some(a=>a.type==="SHIFT") && Number.isFinite(frustrationA) && Number.isFinite(frustrationB)){
+      const frustrationDelta = Math.abs(frustrationA - frustrationB);
+      if(frustrationDelta < 0.08){
+        alerts.push({ type: "TACTICAL_SHIFT", minuteWindow: minuteLabel, why: "Cambio táctico/ritmo no reflejado emocionalmente" });
+      }
+    }
+
+    const state = {
+      idd: { home: iddHome, away: iddAway },
+      intensity,
+      threat: { home: threatHome, away: threatAway },
+      pace,
+      projection: {
+        iddNext,
+        dominance: iddNext > 0 ? `Away +${Math.abs(iddNext).toFixed(2)}` : `Home +${Math.abs(iddNext).toFixed(2)}`,
+        shockRisk: epi > 0.75 ? "alto" : epi > 0.55 ? "medio" : "bajo",
+        eventTension: epi
+      }
+    };
+
+    return {
+      state,
+      ema: {
+        idd: { home: -slowAway, away: slowAway },
+        threat: { home: -slowThreat, away: slowThreat, edge: slowThreat }
+      },
+      fastEma: {
+        idd: { home: -fastAway, away: fastAway },
+        threat: { home: -fastThreat, away: fastThreat, edge: fastThreat }
+      },
+      uncertainty: { idd: uncertaintyIdd, threat: uncertaintyThreat },
+      regimeDelta,
+      zScore: zIdd,
+      zStreak,
+      alerts,
+      window: minuteLabel,
+      score: { home: Number(score.home) || 0, away: Number(score.away) || 0 }
+    };
+  }
+
+  function updateLiveProjectionState(prevState={}, payload={}, context={}){
+    const previous = prevState || {};
+    const k = Number(previous.k || 0) + 1;
+    const update = computeLiveProjectionWindow(payload, {
+      fastEma: previous.fastEma,
+      ema: previous.ema,
+      uncertainty: previous.uncertainty,
+      zStreak: previous.zStreak,
+      epaPsych: context.epaPsych
+    });
+    return {
+      matchId: payload.matchId || previous.matchId || uid("lpe"),
+      teams: payload.teams || previous.teams || { home: "Home", away: "Away" },
+      k,
+      state: update.state,
+      ema: update.ema,
+      fastEma: update.fastEma,
+      uncertainty: update.uncertainty,
+      regimeDelta: update.regimeDelta,
+      zScore: update.zScore,
+      zStreak: update.zStreak,
+      projections: update.state.projection,
+      score: update.score,
+      lastWindow: update.window,
+      history: [...(previous.history || []), {
+        k,
+        window: update.window,
+        iddAway: update.state.idd.away,
+        fastAway: update.fastEma.idd.away,
+        slowAway: update.ema.idd.away,
+        epi: update.state.projection.eventTension
+      }].slice(-24),
+      alerts: [...(previous.alerts || []), ...update.alerts].slice(-40),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
   function extractNarratedEvents(rawText, teams){
     const lines = String(rawText || "").split(/\n+/).map(s=>s.trim()).filter(Boolean);
     const events = [];
@@ -3104,10 +3309,24 @@ export function initFootballLab(){
           <pre id="epaJson" class="fl-mini" style="white-space:pre-wrap;margin-top:10px;">Sin análisis EPA.</pre>
           <ul id="epaText" class="fl-mini" style="margin:8px 0 0 18px;"></ul>
         </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">📈 Live Projection Engine (LPE)</div>
+          <div class="fl-mini" style="margin-bottom:8px;">Acumulativo por <code>matchId</code>: pega ventanas nuevas y actualiza el estado previo.</div>
+          <textarea id="lpeInput" class="fl-text" placeholder='Pega JSON de ventana {"matchId":"...","teams":...,"stats":...,"score":...}'></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="lpeUpdate">Actualizar LPE</button>
+            <button class="fl-btn" id="lpeReset">Reiniciar partido</button>
+            <span id="lpeStatus" class="fl-mini"></span>
+          </div>
+          <div id="lpeSummary" class="fl-mini" style="margin-top:8px;">Sin estado LPE.</div>
+          <div id="lpeAlerts" class="fl-mini" style="margin-top:8px;"></div>
+          <pre id="lpeJson" class="fl-mini" style="white-space:pre-wrap;margin-top:10px;">{}</pre>
+        </div>
       `;
 
       let lastPayload = null;
       let lastEPA = null;
+      let lastLPE = null;
       const drawCandleChart = (candles=[])=>{
         const svg = document.getElementById("momCandleSvg");
         if(!svg) return;
@@ -3264,6 +3483,70 @@ export function initFootballLab(){
           localStorage.setItem(`team_profile_${teamName}`, JSON.stringify(updated));
         });
         document.getElementById("epaStatus").textContent = "✅ Firma temprana guardada para ambos equipos.";
+      };
+
+      const renderLPE = (state)=>{
+        const summary = document.getElementById("lpeSummary");
+        const alertsEl = document.getElementById("lpeAlerts");
+        const jsonEl = document.getElementById("lpeJson");
+        if(!summary || !alertsEl || !jsonEl) return;
+        if(!state){
+          summary.textContent = "Sin estado LPE.";
+          alertsEl.innerHTML = "";
+          jsonEl.textContent = "{}";
+          return;
+        }
+        const teams = state.teams || { home: "home", away: "away" };
+        const p = state.projections || {};
+        summary.innerHTML = `
+          <div><b>${teams.home}</b> vs <b>${teams.away}</b> · ventana ${state.lastWindow || "live"} · iteración ${state.k}</div>
+          <div>IDD next: <b>${Number(p.iddNext || 0).toFixed(2)}</b> · Dominio probable: <b>${p.dominance || "-"}</b></div>
+          <div>Shock risk: <b>${p.shockRisk || "-"}</b> · EPI: <b>${(Number(p.eventTension || 0)*100).toFixed(0)}%</b></div>
+        `;
+        const recentAlerts = (state.alerts || []).slice(-6).reverse();
+        alertsEl.innerHTML = recentAlerts.length
+          ? recentAlerts.map(a=>`<span style="display:inline-block;padding:4px 8px;border:1px solid #2d333b;border-radius:999px;margin:0 6px 6px 0;">${a.type}${a.team?` · ${a.team}`:""}${a.level?` · ${Math.round(a.level*100)}%`:""}</span>`).join("")
+          : "Sin alertas todavía.";
+        jsonEl.textContent = JSON.stringify(state, null, 2);
+      };
+
+      document.getElementById("lpeUpdate").onclick = ()=>{
+        const status = document.getElementById("lpeStatus");
+        const raw = document.getElementById("lpeInput").value || "";
+        const parsed = safeParseJson(raw);
+        if(!parsed){
+          status.textContent = "❌ JSON inválido.";
+          return;
+        }
+        const matchId = parsed.matchId || `TMP-${Date.now()}`;
+        const lpeKey = `match_lpe_${matchId}`;
+        const previous = safeParseJson(localStorage.getItem(lpeKey) || "null") || {};
+        const epaPsych = lastEPA?.teams?.length===2
+          ? {
+            home: lastEPA.psych?.[parsed.teams?.home] || null,
+            away: lastEPA.psych?.[parsed.teams?.away] || null
+          }
+          : null;
+        const nextState = updateLiveProjectionState(previous, parsed, { epaPsych });
+        localStorage.setItem(lpeKey, JSON.stringify(nextState));
+        lastLPE = nextState;
+        renderLPE(nextState);
+        status.textContent = `✅ LPE actualizado (${nextState.k} ventanas)`;
+      };
+
+      document.getElementById("lpeReset").onclick = ()=>{
+        const status = document.getElementById("lpeStatus");
+        const raw = document.getElementById("lpeInput").value || "";
+        const parsed = safeParseJson(raw);
+        const matchId = parsed?.matchId;
+        if(!matchId){
+          status.textContent = "⚠️ Para reiniciar, pega un JSON con matchId.";
+          return;
+        }
+        localStorage.removeItem(`match_lpe_${matchId}`);
+        lastLPE = null;
+        renderLPE(null);
+        status.textContent = `✅ Estado LPE reiniciado para ${matchId}.`;
       };
 
       document.getElementById("momConvert").onclick = ()=>{
