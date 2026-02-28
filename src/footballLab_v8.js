@@ -1325,6 +1325,266 @@ export function initFootballLab(){
     };
   }
 
+  function createEarlyTeamStats(){
+    return {
+      shots: 0,
+      bigChances: 0,
+      corners: 0,
+      dangerCross: 0,
+      finalThird: 0,
+      interceptions: 0,
+      savesForced: 0,
+      controlMentions: 0,
+      lossMentions: 0,
+      fouls: 0,
+      cards: 0
+    };
+  }
+
+  function detectEarlyType(line=""){
+    if(/ocasi[oó]n clar[ií]sima|casi marca|mano a mano|\bsolo\b|punto de penalti/i.test(line)) return "bigChance";
+    if(/dispara|remata|cabezazo|\btiro\b|disparo|chut/i.test(line)) return "shot";
+    if(/c[oó]rner/i.test(line)) return "corner";
+    if(/centro peligroso|cuelga al [aá]rea/i.test(line)) return "dangerCross";
+    if(/dentro del [aá]rea|borde del [aá]rea|[aá]rea peque[nñ]a/i.test(line)) return "finalThird";
+    if(/interceptado|despejado|rechaza/i.test(line)) return "interception";
+    if(/parada|interviene|ataj|en los guantes/i.test(line)) return "save";
+    if(/domina la posesi[oó]n|intercambian pases|combina/i.test(line)) return "control";
+    if(/pierde la posesi[oó]n|error|bal[oó]n sale/i.test(line)) return "loss";
+    if(/falta|entrada|infracci[oó]n/i.test(line)) return "foul";
+    if(/tarjeta amarilla|\bamarilla\b|tarjeta roja|\broja\b/i.test(line)) return "card";
+    return null;
+  }
+
+  function parseEarlyNarrative(text, { teamA="", teamB="", windowMinutes=10 }={}){
+    const lines = String(text || "").split(/\n+/).map(line=>line.trim()).filter(Boolean);
+    const teams = [teamA, teamB].filter(Boolean);
+    const statsByTeam = new Map();
+    const pushTeam = (name)=>{
+      if(!name || statsByTeam.has(name)) return;
+      statsByTeam.set(name, createEarlyTeamStats());
+    };
+    teams.forEach(pushTeam);
+    const events = [];
+    let pendingMinute = null;
+
+    const findTeamInLine = (line="")=>{
+      const teamFromParens = line.match(/\(([^)]+)\)/);
+      if(teamFromParens?.[1]) return teamFromParens[1].trim();
+      const lineNorm = normalizeTeamToken(line);
+      const explicit = [...statsByTeam.keys()].find(name=>lineNorm.includes(normalizeTeamToken(name)));
+      return explicit || null;
+    };
+
+    lines.forEach(line=>{
+      const minuteFound = line.match(/(\d{1,3}\s*\+\s*\d{1,2}|\d{1,3})\s*'/);
+      if(minuteFound) pendingMinute = parseMinuteToken(minuteFound[1]);
+      const minute = Number.isFinite(Number(pendingMinute)) ? Number(pendingMinute) : null;
+      if(minute===null || minute > windowMinutes) return;
+      if(/^\d{1,3}\s*\+\s*\d{1,2}\s*'$/.test(line) || /^\d{1,3}\s*'$/.test(line)) return;
+
+      const type = detectEarlyType(line);
+      if(!type) return;
+      const detectedTeam = findTeamInLine(line) || teamA || "Equipo A";
+      pushTeam(detectedTeam);
+      events.push({ minute, team: detectedTeam, type, text: line });
+    });
+
+    if(statsByTeam.size < 2) pushTeam(teamB || "Rival");
+    const teamList = [...statsByTeam.keys()].slice(0, 2);
+    teamList.forEach(name=>{ if(!statsByTeam.has(name)) statsByTeam.set(name, createEarlyTeamStats()); });
+
+    events.forEach(evt=>{
+      const teamStats = statsByTeam.get(evt.team);
+      if(!teamStats) return;
+      if(evt.type === "shot") teamStats.shots += 1;
+      if(evt.type === "bigChance") teamStats.bigChances += 1;
+      if(evt.type === "corner") teamStats.corners += 1;
+      if(evt.type === "dangerCross") teamStats.dangerCross += 1;
+      if(evt.type === "finalThird") teamStats.finalThird += 1;
+      if(evt.type === "interception") teamStats.interceptions += 1;
+      if(evt.type === "save") teamStats.savesForced += 1;
+      if(evt.type === "control") teamStats.controlMentions += 1;
+      if(evt.type === "loss") teamStats.lossMentions += 1;
+      if(evt.type === "foul") teamStats.fouls += 1;
+      if(evt.type === "card") teamStats.cards += 1;
+      if(evt.type === "dangerCross" && /remata|disparo|tiro|cabezazo/i.test(evt.text)) teamStats.shots += 0.5;
+    });
+
+    return { teams: teamList, events, statsByTeam };
+  }
+
+  function computeEarlyPhaseAnalyzer(text, { teamA="", teamB="", windowMinutes=10 }={}){
+    const { teams, statsByTeam } = parseEarlyNarrative(text, { teamA, teamB, windowMinutes });
+    const [firstTeam, secondTeam] = teams;
+    const a = statsByTeam.get(firstTeam) || createEarlyTeamStats();
+    const b = statsByTeam.get(secondTeam) || createEarlyTeamStats();
+
+    const total = (k)=>Number(a[k] || 0) + Number(b[k] || 0);
+    const norm = (value, max=4)=>clamp((Number(value) || 0) / max, 0, 1);
+
+    const rawIntensity =
+      1.0*total("shots") +
+      1.4*total("bigChances") +
+      0.6*total("corners") +
+      0.7*total("savesForced") +
+      0.3*total("fouls");
+    const intensity = clamp(rawIntensity / 6, 0, 1);
+
+    const rawIDD = (s)=>
+      0.60*s.bigChances +
+      0.45*s.shots +
+      0.25*s.corners +
+      0.20*s.controlMentions +
+      0.15*s.dangerCross -
+      0.20*s.lossMentions -
+      0.10*s.fouls;
+
+    const iddDiff = rawIDD(a) - rawIDD(b);
+    const iddA = clamp(iddDiff / 4, -1, 1);
+    const iddB = -iddA;
+
+    const threatOf = (s)=>clamp((1.7*s.bigChances + 1.0*s.shots + 0.4*s.finalThird + 0.3*s.savesForced) / 6, 0, 1);
+    const threatA = threatOf(a);
+    const threatB = threatOf(b);
+
+    let initiative = "equilibrado";
+    if(iddA > 0.12) initiative = firstTeam;
+    else if(iddB > 0.12) initiative = secondTeam;
+
+    const controlType = (()=>{
+      const cornersTotal = total("corners");
+      const shotsTotal = total("shots") + total("bigChances");
+      const controlTotal = total("controlMentions");
+      const foulsTotal = total("fouls");
+      const lossTotal = total("lossMentions");
+      const cornerLimit = windowMinutes >= 20 ? 3 : 2;
+      const maxThreat = Math.max(threatA, threatB);
+      if(cornersTotal >= cornerLimit) return "setpiece_pressure";
+      if(foulsTotal >= 4 && lossTotal >= 3 && shotsTotal <= 2) return "scrappy";
+      if(controlTotal >= 3 && maxThreat < 0.45) return "territorial_probe";
+      if(shotsTotal >= 4 && controlTotal <= 2) return "direct_punch";
+      return "balanced";
+    })();
+
+    const shockRiskFor = (selfIdd, self, opp)=>clamp(
+      0.35*Math.max(0, selfIdd) +
+      0.25*norm(self.lossMentions, 4) +
+      0.25*norm(opp.shots + opp.bigChances, 5) -
+      0.15*norm(opp.interceptions, 5),
+      0,
+      1
+    );
+    const shockA = shockRiskFor(iddA, a, b);
+    const shockB = shockRiskFor(iddB, b, a);
+
+    const disciplineA = clamp((a.fouls + 2*a.cards) / 6, 0, 1);
+    const disciplineB = clamp((b.fouls + 2*b.cards) / 6, 0, 1);
+    const intensityBand = intensity < 0.35 ? "low_intensity" : (intensity < 0.7 ? "medium_intensity" : "high_intensity");
+    const tags = [
+      initiative===firstTeam ? "early_initiative_home" : "",
+      initiative===secondTeam ? "early_initiative_away" : "",
+      intensityBand,
+      controlType === "setpiece_pressure" ? `setpiece_pressure_${threatA>=threatB?"home":"away"}` : "",
+      controlType === "scrappy" ? "scrappy_opening" : "",
+      shockA > 0.55 ? "shock_risk_home_high" : "",
+      shockB > 0.55 ? "shock_risk_away_high" : ""
+    ].filter(Boolean);
+
+    const tempoWord = intensity < 0.35 ? "bajo" : (intensity < 0.7 ? "medio" : "alto");
+    const dominantTeam = initiative===firstTeam ? firstTeam : (initiative===secondTeam ? secondTeam : null);
+    const leaderShock = dominantTeam===firstTeam ? shockA : (dominantTeam===secondTeam ? shockB : Math.max(shockA, shockB));
+
+    const textLines = [
+      dominantTeam
+        ? `Inicio con iniciativa de ${dominantTeam} y ritmo ${tempoWord}.`
+        : `Inicio equilibrado con ritmo ${tempoWord}.`,
+      Math.max(threatA, threatB) > 0.6
+        ? "Amenaza real: llegadas claras y acciones dentro del área."
+        : Math.max(threatA, threatB) >= 0.35
+          ? "Amenaza moderada: aproximaciones sin ocasión clarísima."
+          : "Poco peligro: más control que profundidad.",
+      leaderShock > 0.55
+        ? "Riesgo de shock: el rival puede castigar en transición."
+        : "Bajo riesgo de transición inmediata."
+    ];
+
+    const features = {
+      idd: {
+        [firstTeam]: iddA,
+        [secondTeam]: iddB
+      },
+      intensity,
+      initiative,
+      threat: {
+        [firstTeam]: threatA,
+        [secondTeam]: threatB
+      },
+      controlType,
+      shockRisk: {
+        [firstTeam]: shockA,
+        [secondTeam]: shockB
+      },
+      disciplineRisk: {
+        [firstTeam]: disciplineA,
+        [secondTeam]: disciplineB
+      }
+    };
+
+    return {
+      window: `0-${windowMinutes}`,
+      teams: [firstTeam, secondTeam],
+      features,
+      tags,
+      text: textLines,
+      signatureUpdate: {
+        [firstTeam]: { early_idd: iddA, early_intensity: intensity, early_threat: threatA, early_shockRisk: shockA, openingType: controlType },
+        [secondTeam]: { early_idd: iddB, early_intensity: intensity, early_threat: threatB, early_shockRisk: shockB, openingType: controlType }
+      }
+    };
+  }
+
+  function updateTeamEarlyProfile(teamProfile, teamName, update={}){
+    const profile = structuredClone(teamProfile || {});
+    const current = profile.earlyProfile || {
+      n: 0,
+      avgEarlyIDD: 0,
+      avgEarlyIntensity: 0,
+      avgEarlyThreat: 0,
+      avgEarlyShockRisk: 0,
+      openingTypes: {
+        territorial_probe: 0,
+        direct_punch: 0,
+        setpiece_pressure: 0,
+        scrappy: 0,
+        balanced: 0
+      }
+    };
+    const n = Number(current.n) || 0;
+    const nextN = n + 1;
+    const avg = (oldValue, newValue)=>((Number(oldValue) || 0)*n + (Number(newValue) || 0)) / Math.max(1, nextN);
+    const openingTypes = { ...current.openingTypes };
+    const seenTypes = ["territorial_probe", "direct_punch", "setpiece_pressure", "scrappy", "balanced"];
+    seenTypes.forEach(type=>{
+      const prevCount = (Number(openingTypes[type]) || 0) * n;
+      const nextCount = prevCount + (update.openingType === type ? 1 : 0);
+      openingTypes[type] = nextCount / Math.max(1, nextN);
+    });
+
+    profile.team = teamName || profile.team || "";
+    profile.version = profile.version || "momentumSignature_v1";
+    profile.updatedAt = new Date().toISOString();
+    profile.earlyProfile = {
+      n: nextN,
+      avgEarlyIDD: avg(current.avgEarlyIDD, update.early_idd),
+      avgEarlyIntensity: avg(current.avgEarlyIntensity, update.early_intensity),
+      avgEarlyThreat: avg(current.avgEarlyThreat, update.early_threat),
+      avgEarlyShockRisk: avg(current.avgEarlyShockRisk, update.early_shockRisk),
+      openingTypes
+    };
+    return profile;
+  }
+
   function extractNarratedEvents(rawText, teams){
     const lines = String(rawText || "").split(/\n+/).map(s=>s.trim()).filter(Boolean);
     const events = [];
@@ -2599,9 +2859,32 @@ export function initFootballLab(){
             <div><b>Patrón:</b> -</div>
           </div>
         </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">⚽ Early Phase Analyzer (EPA)</div>
+          <div class="fl-grid two" style="margin-bottom:8px;">
+            <div>
+              <div class="fl-mini">Ventana</div>
+              <select id="epaWindow" class="fl-select" style="width:100%;margin-top:4px;">
+                <option value="10" selected>0-10</option>
+                <option value="20">0-20</option>
+              </select>
+            </div>
+            <div class="fl-mini" style="display:flex;align-items:flex-end;">Función secundaria: no reemplaza el análisis de momentum actual.</div>
+          </div>
+          <textarea id="epaNarrative" class="fl-text" placeholder="Pega relato temprano (0-10 / 0-20)"></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="epaAnalyze">Analizar</button>
+            <button class="fl-btn" id="epaSaveProfile" disabled>Guardar firma temprana al equipo</button>
+            <span id="epaStatus" class="fl-mini"></span>
+          </div>
+          <div id="epaCards" class="fl-grid two" style="margin-top:10px;gap:10px;"></div>
+          <pre id="epaJson" class="fl-mini" style="white-space:pre-wrap;margin-top:10px;">Sin análisis EPA.</pre>
+          <ul id="epaText" class="fl-mini" style="margin:8px 0 0 18px;"></ul>
+        </div>
       `;
 
       let lastPayload = null;
+      let lastEPA = null;
       const drawCandleChart = (candles=[])=>{
         const svg = document.getElementById("momCandleSvg");
         if(!svg) return;
@@ -2672,6 +2955,54 @@ export function initFootballLab(){
             <div><b>Patrón:</b> ${patternLine}</div>
           `;
         }
+      };
+
+      const renderEPA = (epa)=>{
+        const cards = document.getElementById("epaCards");
+        const textList = document.getElementById("epaText");
+        const jsonOut = document.getElementById("epaJson");
+        if(!epa || !cards || !textList || !jsonOut) return;
+        const [teamA, teamB] = epa.teams;
+        const iddA = Number(epa.features?.idd?.[teamA] || 0);
+        const threatA = Number(epa.features?.threat?.[teamA] || 0);
+        const threatB = Number(epa.features?.threat?.[teamB] || 0);
+        const shockA = Number(epa.features?.shockRisk?.[teamA] || 0);
+        const shockB = Number(epa.features?.shockRisk?.[teamB] || 0);
+        cards.innerHTML = `
+          <div><b>IDD early</b><div class="fl-mini">${teamA}: ${iddA.toFixed(2)} · ${teamB}: ${(-iddA).toFixed(2)}</div></div>
+          <div><b>Intensidad</b><div class="fl-mini">${(Number(epa.features?.intensity||0)*100).toFixed(0)}%</div></div>
+          <div><b>Threat</b><div class="fl-mini">${teamA}: ${(threatA*100).toFixed(0)}% · ${teamB}: ${(threatB*100).toFixed(0)}%</div></div>
+          <div><b>Shock risk</b><div class="fl-mini">${teamA}: ${(shockA*100).toFixed(0)}% · ${teamB}: ${(shockB*100).toFixed(0)}%</div></div>
+        `;
+        textList.innerHTML = (epa.text || []).map(line=>`<li>${line}</li>`).join("");
+        jsonOut.textContent = JSON.stringify(epa, null, 2);
+      };
+
+      document.getElementById("epaAnalyze").onclick = ()=>{
+        const teamA = document.getElementById("momTeamA").value;
+        const teamB = document.getElementById("momTeamB").value;
+        const raw = document.getElementById("epaNarrative").value || document.getElementById("momNarrative").value;
+        const windowMinutes = Number(document.getElementById("epaWindow").value) || 10;
+        if(!teamA || !teamB || teamA===teamB){
+          document.getElementById("epaStatus").textContent = "❌ Selecciona dos equipos distintos.";
+          return;
+        }
+        const epa = computeEarlyPhaseAnalyzer(raw, { teamA, teamB, windowMinutes });
+        renderEPA(epa);
+        lastEPA = epa;
+        document.getElementById("epaSaveProfile").disabled = false;
+        document.getElementById("epaStatus").textContent = `✅ EPA ${epa.window} generado`;
+      };
+
+      document.getElementById("epaSaveProfile").onclick = ()=>{
+        if(!lastEPA?.signatureUpdate) return;
+        const [teamA, teamB] = lastEPA.teams;
+        [teamA, teamB].forEach(teamName=>{
+          const current = JSON.parse(localStorage.getItem(`team_profile_${teamName}`) || "null");
+          const updated = updateTeamEarlyProfile(current, teamName, lastEPA.signatureUpdate[teamName] || {});
+          localStorage.setItem(`team_profile_${teamName}`, JSON.stringify(updated));
+        });
+        document.getElementById("epaStatus").textContent = "✅ Firma temprana guardada para ambos equipos.";
       };
 
       document.getElementById("momConvert").onclick = ()=>{
