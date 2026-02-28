@@ -959,22 +959,78 @@ export function initFootballLab(){
   function inferEngineMetricsFromMatch(match, teamId){
     const isHome = match?.homeId===teamId;
     const side = isHome ? "home" : "away";
-    const avgIDD = clamp(Number(match?.narrativeModule?.diagnostic?.labels?.control_without_conversion) || 0, 0, 1) * 2 - 1;
-    const lateIDD = clamp(Number(match?.narrativeModule?.diagnostic?.labels?.late_push) || 0, 0, 1) * 2 - 1;
+    const oppSide = isHome ? "away" : "home";
+    const narrativeLabels = match?.narrativeModule?.diagnostic?.diagnostic?.labels
+      || match?.narrativeModule?.diagnostic?.labels
+      || {};
+    const avgIDD = clamp(Number(narrativeLabels.control_without_conversion) || 0, 0, 1) * 2 - 1;
+    const lateIDD = clamp(Number(narrativeLabels.late_risk_exposure) || 0, 0, 1) * 2 - 1;
     const threat = metricFromStats(match?.stats, ["big chances", "ocasiones", "ataques peligrosos"], side);
     const intensityRaw = metricFromStats(match?.stats, ["shots", "remates", "shots on target", "tiros a puerta"], side);
+    const ownXg = metricFromStats(match?.stats, ["goles esperados (xg)", "xg"], side);
+    const oppXg = metricFromStats(match?.stats, ["goles esperados (xg)", "xg"], oppSide);
+    const ownXgot = metricFromStats(match?.stats, ["xg a puerta", "xgot"], side);
+    const shotsOn = metricFromStats(match?.stats, ["shots on target", "tiros a puerta", "remates a puerta"], side);
+    const corners = metricFromStats(match?.stats, ["corners", "corneres", "córneres"], side);
+    const touchesBox = metricFromStats(match?.stats, ["toques en el area rival", "toques en el área rival"], side);
+    const fouls = metricFromStats(match?.stats, ["faltas", "fouls"], side);
+    const yellows = metricFromStats(match?.stats, ["tarjetas amarillas", "yellow cards"], side);
+    const tackles = metricFromStats(match?.stats, ["entradas", "tackles"], side);
+    const duels = metricFromStats(match?.stats, ["duelos ganados", "duels won"], side);
+    const interceptions = metricFromStats(match?.stats, ["intercepciones", "interceptions"], side);
+    const narrativeEvents = match?.narrativeModule?.normalized?.events || [];
+    const shockGoals = narrativeEvents.filter(evt=>evt?.type==="goal" && Number(evt?.min)>=70).length;
+    const aggressionIndex = clamp(
+      0.30 * clamp((Number(tackles) || 50) / 100, 0, 1) +
+      0.20 * clamp((Number(duels) || 40) / 70, 0, 1) +
+      0.16 * clamp((Number(interceptions) || 4) / 10, 0, 1) +
+      0.20 * clamp((Number(fouls) || 8) / 16, 0, 1) +
+      0.14 * clamp((Number(yellows) || 1) / 5, 0, 1),
+      0,
+      1
+    );
+    const shockIndex = clamp(
+      0.35 * clamp(Number(narrativeLabels.transition_punished) || 0, 0, 1) +
+      0.25 * clamp(Number(narrativeLabels.late_risk_exposure) || 0, 0, 1) +
+      0.20 * clamp((Number(shockGoals) || 0) / 3, 0, 1) +
+      0.20 * clamp((Number(oppXg) || 1.2) / 2.8, 0, 1),
+      0,
+      1
+    );
+    const psychLoad = clamp(
+      0.36 * clamp(Number(narrativeLabels.control_without_conversion) || 0, 0, 1) +
+      0.30 * clamp(Number(narrativeLabels.discipline_impact) || 0, 0, 1) +
+      0.18 * aggressionIndex +
+      0.16 * shockIndex,
+      0,
+      1
+    );
+    const confidence = clamp(
+      0.35 * clamp((Number(ownXg) || 0.9) / 2.2, 0, 1) +
+      0.25 * clamp((Number(ownXgot) || 1) / 2.5, 0, 1) +
+      0.20 * clamp((Number(shotsOn) || 3) / 9, 0, 1) +
+      0.20 * clamp((Number(touchesBox) || 14) / 45, 0, 1),
+      0,
+      1
+    );
+    const composure = clamp(0.62 - psychLoad * 0.34 + confidence * 0.24, 0, 1);
+    const frustration = clamp(0.24 + psychLoad * 0.58 - confidence * 0.22, 0, 1);
+    const tiltRisk = clamp(0.18 + psychLoad * 0.50 + aggressionIndex * 0.24 - composure * 0.26, 0, 1);
     return {
       avgIDD,
       lateIDD,
       threat: clamp(Number(threat) || 0.5, 0, 1),
       intensity: clamp(Number(intensityRaw) || 0.5, 0, 1),
-      shockGoals: 0,
-      sterilePressure: clamp(Number(match?.narrativeModule?.diagnostic?.labels?.control_without_conversion) || 0.2, 0, 1),
+      shockGoals,
+      aggressionIndex,
+      shockIndex,
+      psychLoad,
+      sterilePressure: clamp(Number(narrativeLabels.control_without_conversion) || 0.2, 0, 1),
       psych: {
-        avgConfidence: 0.55,
-        avgComposure: 0.52,
-        avgFrustration: 0.35,
-        avgTiltRisk: 0.32
+        avgConfidence: confidence,
+        avgComposure: composure,
+        avgFrustration: frustration,
+        avgTiltRisk: tiltRisk
       }
     };
   }
@@ -1013,6 +1069,9 @@ export function initFootballLab(){
         pi,
         epa,
         ema,
+        aggression: clamp(Number(metrics.aggressionIndex) || 0.5, 0, 1),
+        shock: clamp(Number(metrics.shockIndex) || 0.5, 0, 1),
+        psychLoad: clamp(Number(metrics.psychLoad) || Number(psych.avgTiltRisk) || 0.5, 0, 1),
         isHome: sample.isHome
       });
     });
@@ -1026,6 +1085,11 @@ export function initFootballLab(){
       currentStrength,
       homeAway: { home, away },
       haTraits,
+      profile: {
+        aggression: series.length ? series.reduce((sum, item)=>sum + item.aggression, 0) / series.length : 0.5,
+        shock: series.length ? series.reduce((sum, item)=>sum + item.shock, 0) / series.length : 0.5,
+        psychLoad: series.length ? series.reduce((sum, item)=>sum + item.psychLoad, 0) / series.length : 0.5
+      },
       series
     };
     return profile.engineV1;
@@ -1041,6 +1105,9 @@ export function initFootballLab(){
     const dataStrength = (engine?.series || []).map(item=>Math.round((item.score || 0) * 100));
     const dataEPA = (engine?.series || []).map(item=>Math.round((item.epa || 0) * 100));
     const dataEMA = (engine?.series || []).map(item=>Math.round((item.ema || 0) * 100));
+    const dataAggression = (engine?.series || []).map(item=>Math.round((item.aggression || 0) * 100));
+    const dataShock = (engine?.series || []).map(item=>Math.round((item.shock || 0) * 100));
+    const dataPsychLoad = (engine?.series || []).map(item=>Math.round((item.psychLoad || 0) * 100));
     canvas._chart = new Chart(canvas.getContext("2d"), {
       type: "line",
       data: {
@@ -1048,7 +1115,10 @@ export function initFootballLab(){
         datasets: [
           { label: "Fuerza global", data: dataStrength, borderColor: "#2ea043", backgroundColor: "rgba(46,160,67,.16)", tension: 0.25 },
           { label: "EPA", data: dataEPA, borderColor: "#1f6feb", backgroundColor: "rgba(31,111,235,.16)", tension: 0.25 },
-          { label: "EMA psicológico", data: dataEMA, borderColor: "#d29922", backgroundColor: "rgba(210,153,34,.14)", tension: 0.25 }
+          { label: "EMA psicológico", data: dataEMA, borderColor: "#d29922", backgroundColor: "rgba(210,153,34,.14)", tension: 0.25 },
+          { label: "Agresividad", data: dataAggression, borderColor: "#ff7b72", backgroundColor: "rgba(255,123,114,.12)", tension: 0.2, borderDash: [5, 3] },
+          { label: "Shock", data: dataShock, borderColor: "#a371f7", backgroundColor: "rgba(163,113,247,.14)", tension: 0.2, borderDash: [3, 3] },
+          { label: "Carga psicológica", data: dataPsychLoad, borderColor: "#f2cc60", backgroundColor: "rgba(242,204,96,.10)", tension: 0.22 }
         ]
       },
       options: {
@@ -3347,8 +3417,11 @@ export function initFootballLab(){
             <div><span class="fl-mini">Home Boost</span><b>${(Number(engine?.haTraits?.homeBoost)||0).toFixed(2)}</b></div>
             <div><span class="fl-mini">Away Resilience</span><b>${(Number(engine?.haTraits?.awayResilience)||0).toFixed(2)}</b></div>
             <div><span class="fl-mini">Travel Tilt</span><b>${(Number(engine?.haTraits?.travelTilt)||0).toFixed(2)}</b></div>
+            <div><span class="fl-mini">Agresividad</span><b>${Math.round((Number(engine?.profile?.aggression)||0.5)*100)}%</b></div>
+            <div><span class="fl-mini">Shock</span><b>${Math.round((Number(engine?.profile?.shock)||0.5)*100)}%</b></div>
+            <div><span class="fl-mini">Carga psicológica</span><b>${Math.round((Number(engine?.profile?.psychLoad)||0.5)*100)}%</b></div>
           </div>
-          <div class="fl-mini" style="margin-bottom:8px;">Usa el botón <b>EPA/EMA/HAE</b> junto a cada partido para alimentar este gráfico con datos narrados + estadísticas.</div>
+          <div class="fl-mini" style="margin-bottom:8px;">Usa el botón <b>EPA/EMA/HAE</b> junto a cada partido para alimentar este gráfico con datos narrados + estadísticas. El motor ahora estima fuerza, agresividad, shock y carga psicológica desde xG, volumen ofensivo, duelos y disciplina.</div>
           <div style="height:250px;"><canvas id="teamGlobalEngineChart"></canvas></div>
         </div>
         <div class="fl-card">
