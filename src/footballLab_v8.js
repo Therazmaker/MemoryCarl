@@ -26,6 +26,7 @@ export function initFootballLab(){
     teams: [],
     players: [],
     tracker: [],
+    diagProfiles: {},
     versus: {
       homeAdvantage: 1.1,
       paceFactor: 1,
@@ -77,6 +78,7 @@ export function initFootballLab(){
       db.teams ||= [];
       db.players ||= [];
       db.tracker ||= [];
+      db.diagProfiles ||= {};
       db.versus ||= { homeAdvantage: 1.1 };
       db.versus.paceFactor = clamp(Number(db.versus.paceFactor) || 1, 0.82, 1.35);
       db.versus.sampleSize = clamp(Number(db.versus.sampleSize) || 20, 5, 40);
@@ -651,6 +653,191 @@ export function initFootballLab(){
     return Math.max(min, Math.min(max, value));
   }
 
+  function ensureDiagProfileState(db){
+    db.diagProfiles ||= {};
+  }
+
+  function createEmptyDiagProfile(teamName=""){
+    return {
+      team: teamName,
+      version: "diagProfile_v1",
+      matchesCount: 0,
+      traits: {
+        territorial_strength: 0.5,
+        finishing_quality: 0.5,
+        transition_attack: 0.5,
+        transition_defense: 0.5,
+        low_block_execution: 0.5,
+        chance_creation: 0.5,
+        discipline_risk: 0.5,
+        late_game_management: 0.5
+      },
+      lastUpdated: null
+    };
+  }
+
+  function getOrCreateDiagProfile(db, teamId, teamName){
+    ensureDiagProfileState(db);
+    if(!db.diagProfiles[teamId]) db.diagProfiles[teamId] = createEmptyDiagProfile(teamName || "");
+    const profile = db.diagProfiles[teamId];
+    profile.team = teamName || profile.team || "";
+    profile.version = "diagProfile_v1";
+    profile.matchesCount = Number(profile.matchesCount) || 0;
+    profile.traits ||= createEmptyDiagProfile().traits;
+    Object.keys(createEmptyDiagProfile().traits).forEach(key=>{
+      profile.traits[key] = clamp(Number(profile.traits[key]) || 0.5, 0, 1);
+    });
+    return profile;
+  }
+
+  function parseMinuteToken(raw){
+    const txt = String(raw || "").trim();
+    const plus = txt.match(/(\d+)\s*\+\s*(\d+)\s*'?/);
+    if(plus) return Number(plus[1]) + Number(plus[2]);
+    const simple = txt.match(/(\d{1,3})\s*'?/);
+    return simple ? Number(simple[1]) : null;
+  }
+
+  function extractNarratedEvents(rawText, teams){
+    const lines = String(rawText || "").split(/\n+/).map(s=>s.trim()).filter(Boolean);
+    const events = [];
+    const counters = {
+      home: { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, savesNarrated: 0, cards: 0, interceptions: 0 },
+      away: { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, savesNarrated: 0, cards: 0, interceptions: 0 }
+    };
+    const teamNameMap = [
+      { key: "home", name: String(teams?.home || "").toLowerCase() },
+      { key: "away", name: String(teams?.away || "").toLowerCase() }
+    ];
+    let pendingMinute = null;
+
+    lines.forEach(line=>{
+      const minuteFound = line.match(/(\d{1,3}\s*\+\s*\d{1,2}|\d{1,3})\s*'/);
+      if(minuteFound) pendingMinute = parseMinuteToken(minuteFound[1]);
+      if(/^\d{1,3}\s*\+\s*\d{1,2}\s*'$/.test(line) || /^\d{1,3}\s*'$/.test(line)) return;
+
+      let type = null;
+      if(/¡?gol!?/i.test(line)) type = "goal";
+      else if(/tarjeta amarilla|amonestad/i.test(line)) type = "yellow";
+      else if(/sustituci[oó]n|\bcambio\.?/i.test(line)) type = "sub";
+      else if(/c[oó]rner/i.test(line)) type = "corner";
+      else if(/fuera de juego/i.test(line)) type = "offside";
+      else if(/falta|infracci[oó]n/i.test(line)) type = "foul";
+      else if(/parada|atajada/i.test(line)) type = "save";
+      if(!type) return;
+
+      const playerTeam = line.match(/([A-Za-zÀ-ÿ' .-]+)\s*\(([^)]+)\)/);
+      const player = playerTeam ? playerTeam[1].trim() : undefined;
+      const teamFromPlayer = playerTeam ? playerTeam[2].trim() : "";
+      const lineLower = line.toLowerCase();
+      const teamGuess = teamNameMap.find(t=>t.name && (lineLower.includes(t.name) || teamFromPlayer.toLowerCase().includes(t.name)));
+      const team = teamGuess ? teams[teamGuess.key] : (teamFromPlayer || undefined);
+
+      const event = { min: pendingMinute ?? null, type, team };
+      if(player) event.player = player;
+      events.push(event);
+
+      const side = team===teams?.home ? "home" : team===teams?.away ? "away" : null;
+      if(side){
+        if(type==="corner") counters[side].corners += 1;
+        if(type==="yellow") counters[side].cards += 1;
+        if(type==="save") counters[side].savesNarrated += 1;
+        if(/dispara|cabecea|centra peligroso|remata/i.test(line)) counters[side].attacksNarrated += 1;
+        if(/ocasi[oó]n clar[ií]sima|casi marca|remata dentro del [aá]rea/i.test(line)) counters[side].bigChancesNarrated += 1;
+        if(/interceptad|despejad/i.test(line)) counters[side].interceptions += 1;
+      }
+    });
+
+    return { events, counters, lines };
+  }
+
+  function normalizeStat(value, scale=8){
+    return clamp((Number(value) || 0) / scale, 0, 1);
+  }
+
+  function buildNarrativeDiagnostic({ match, teams, parsed }){
+    const goalsHome = Number(match.homeGoals) || 0;
+    const goalsAway = Number(match.awayGoals) || 0;
+    const losingSide = goalsHome===goalsAway ? null : (goalsHome<goalsAway ? "home" : "away");
+    const winnerSide = goalsHome===goalsAway ? null : (goalsHome>goalsAway ? "home" : "away");
+    const breakMinute = parsed.events.find(e=>e.type==="goal")?.min ?? null;
+    const losingC = losingSide ? parsed.counters[losingSide] : { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, cards: 0, interceptions: 0 };
+    const winnerC = winnerSide ? parsed.counters[winnerSide] : { savesNarrated: 0 };
+    const loserGoals = losingSide==="home" ? goalsHome : losingSide==="away" ? goalsAway : 0;
+
+    const control_without_conversion = clamp(
+      0.5*normalizeStat(losingC.attacksNarrated, 12) +
+      0.3*normalizeStat(losingC.corners, 7) +
+      0.4*normalizeStat(losingC.bigChancesNarrated, 5) -
+      0.7*normalizeStat(loserGoals, 3),
+      0,
+      1
+    );
+    const transition_punished = breakMinute ? 0.4 : 0;
+    const low_block_resistance = clamp(
+      0.4*normalizeStat(losingC.corners, 8) +
+      0.4*normalizeStat(losingC.interceptions, 8) +
+      0.3*normalizeStat(winnerC.savesNarrated, 8),
+      0,
+      1
+    );
+    const late_push = parsed.events.filter(e=>Number(e.min)>=75 && losingSide && e.team===teams[losingSide] && ["corner", "foul", "goal"].includes(e.type)).length;
+    const late_goal_by_winner = parsed.events.some(e=>e.type==="goal" && Number(e.min)>=90 && winnerSide && e.team===teams[winnerSide]);
+    const late_risk_exposure = clamp(normalizeStat(late_push, 5) + (late_goal_by_winner ? 0.35 : 0), 0, 1);
+    const earlyYellows = parsed.events.filter(e=>e.type==="yellow" && Number(e.min)>0 && Number(e.min)<35);
+    const discipline_impact = clamp(normalizeStat(earlyYellows.length, 3) + normalizeStat(losingC.cards, 6) * 0.6, 0, 1);
+
+    const labels = { control_without_conversion, transition_punished, low_block_resistance, discipline_impact, late_risk_exposure };
+    const summary = [
+      control_without_conversion>0.55 ? `${teams[losingSide] || "Un equipo"} generó volumen sin convertir.` : "Partido equilibrado sin gran brecha de conversión.",
+      breakMinute ? `El minuto quiebre fue el ${breakMinute}', cambiando el guion.` : "Sin minuto de quiebre claro en el relato.",
+      late_risk_exposure>0.55 ? "El cierre mostró exposición al riesgo en tramo final." : "Tramo final relativamente controlado."
+    ];
+    return { breakMinute, labels, summary };
+  }
+
+  function applyDiagnosticToProfiles(db, { match, diagnostic }){
+    const home = db.teams.find(t=>t.id===match.homeId);
+    const away = db.teams.find(t=>t.id===match.awayId);
+    const homeP = getOrCreateDiagProfile(db, match.homeId, home?.name || "Local");
+    const awayP = getOrCreateDiagProfile(db, match.awayId, away?.name || "Visitante");
+    const alphaHome = homeP.matchesCount<5 ? 0.2 : 0.12;
+    const alphaAway = awayP.matchesCount<5 ? 0.2 : 0.12;
+    const labels = diagnostic.labels || {};
+    const homeWon = (Number(match.homeGoals)||0) > (Number(match.awayGoals)||0);
+    const awayWon = (Number(match.awayGoals)||0) > (Number(match.homeGoals)||0);
+
+    const homeSignals = {
+      territorial_strength: homeWon ? 0.62 : 0.55,
+      finishing_quality: homeWon ? 0.65 : 1 - (labels.control_without_conversion || 0.5),
+      transition_attack: homeWon ? 0.55 + (labels.transition_punished || 0.4)*0.35 : 0.48,
+      transition_defense: clamp(0.7 - (labels.transition_punished || 0.4)*0.5, 0, 1),
+      low_block_execution: homeWon ? 0.55 + (labels.low_block_resistance || 0.5)*0.3 : 0.5,
+      chance_creation: clamp(0.52 + (labels.control_without_conversion || 0.5)*0.25, 0, 1),
+      discipline_risk: labels.discipline_impact || 0.4,
+      late_game_management: clamp(0.65 - (labels.late_risk_exposure || 0.4)*0.3 + (homeWon ? 0.1 : -0.05), 0, 1)
+    };
+    const awaySignals = {
+      territorial_strength: awayWon ? 0.62 : 0.55,
+      finishing_quality: awayWon ? 0.65 : 1 - (labels.control_without_conversion || 0.5),
+      transition_attack: awayWon ? 0.55 + (labels.transition_punished || 0.4)*0.35 : 0.48,
+      transition_defense: clamp(0.7 - (labels.transition_punished || 0.4)*0.5, 0, 1),
+      low_block_execution: awayWon ? 0.55 + (labels.low_block_resistance || 0.5)*0.3 : 0.5,
+      chance_creation: clamp(0.52 + (labels.control_without_conversion || 0.5)*0.25, 0, 1),
+      discipline_risk: labels.discipline_impact || 0.4,
+      late_game_management: clamp(0.65 - (labels.late_risk_exposure || 0.4)*0.3 + (awayWon ? 0.1 : -0.05), 0, 1)
+    };
+
+    Object.keys(homeP.traits).forEach(key=>{
+      homeP.traits[key] = clamp(homeP.traits[key] * (1-alphaHome) + (homeSignals[key] ?? 0.5) * alphaHome, 0, 1);
+      awayP.traits[key] = clamp(awayP.traits[key] * (1-alphaAway) + (awaySignals[key] ?? 0.5) * alphaAway, 0, 1);
+    });
+    homeP.matchesCount += 1;
+    awayP.matchesCount += 1;
+    homeP.lastUpdated = new Date().toISOString();
+    awayP.lastUpdated = new Date().toISOString();
+  }
+
   function ensureLearningState(db){
     db.learning ||= structuredClone(defaultDb.learning);
     db.learning.schemaVersion = Number(db.learning.schemaVersion) || 2;
@@ -885,6 +1072,24 @@ export function initFootballLab(){
 
     lHome *= statsHome.attack * statsAway.defenseWeakness;
     lAway *= statsAway.attack * statsHome.defenseWeakness;
+
+    ensureDiagProfileState(db);
+    const homeProfile = db.diagProfiles?.[homeId];
+    const awayProfile = db.diagProfiles?.[awayId];
+    if(homeProfile && awayProfile){
+      const ht = homeProfile.traits || {};
+      const at = awayProfile.traits || {};
+      const attackPowerHome = 0.45*(Number(ht.territorial_strength)||0.5) + 0.35*(Number(ht.chance_creation)||0.5) + 0.2*(Number(ht.finishing_quality)||0.5);
+      const attackPowerAway = 0.45*(Number(at.territorial_strength)||0.5) + 0.35*(Number(at.chance_creation)||0.5) + 0.2*(Number(at.finishing_quality)||0.5);
+      const defensePowerHome = 0.55*(Number(ht.transition_defense)||0.5) + 0.45*(Number(ht.low_block_execution)||0.5);
+      const defensePowerAway = 0.55*(Number(at.transition_defense)||0.5) + 0.45*(Number(at.low_block_execution)||0.5);
+      const matchupHome = clamp(0.85 + attackPowerHome*0.4 - defensePowerAway*0.25, 0.7, 1.3);
+      const matchupAway = clamp(0.85 + attackPowerAway*0.4 - defensePowerHome*0.25, 0.7, 1.3);
+      const transitionShockHome = clamp((Number(ht.transition_attack)||0.5) - (Number(at.transition_defense)||0.5), -0.35, 0.35);
+      const transitionShockAway = clamp((Number(at.transition_attack)||0.5) - (Number(ht.transition_defense)||0.5), -0.35, 0.35);
+      lHome *= matchupHome * (1 + transitionShockHome*0.2);
+      lAway *= matchupAway * (1 + transitionShockAway*0.2);
+    }
 
     lHome = clamp(lHome, 0.05, 4.5);
     lAway = clamp(lAway, 0.05, 4.5);
@@ -1564,12 +1769,21 @@ export function initFootballLab(){
         return;
       }
       match.stats ||= [];
+      match.narrativeModule ||= { rawText: "", normalized: null, diagnostic: null };
       const home = db.teams.find(t=>t.id===match.homeId);
       const away = db.teams.find(t=>t.id===match.awayId);
       const league = db.leagues.find(l=>l.id===match.leagueId);
       const statsHtml = match.stats.length
         ? statsBarsHtml(match.stats)
         : `<div class="fl-muted">Sin estadísticas. Pega JSON para cargar.</div>`;
+      const labels = match.narrativeModule?.diagnostic?.labels || null;
+      const diagHtml = labels ? `
+        <div class="fl-mini">Minuto quiebre: <b>${match.narrativeModule.diagnostic.breakMinute ?? "N/A"}</b></div>
+        <div class="fl-grid" style="margin-top:8px;grid-template-columns:1fr;">
+          ${Object.entries(labels).map(([k,v])=>`<div><div class="fl-mini">${k.replaceAll("_"," ")}: ${(Number(v)*100).toFixed(0)}%</div><div style="height:8px;background:#242b36;border-radius:999px;"><div style="width:${clamp(Number(v)||0,0,1)*100}%;height:8px;background:#1f6feb;border-radius:999px;"></div></div></div>`).join("")}
+        </div>
+        <ul style="margin:10px 0 0 16px;">${(match.narrativeModule.diagnostic.summary||[]).map(s=>`<li class="fl-mini">${s}</li>`).join("")}</ul>
+      ` : `<div class="fl-muted">Sin diagnóstico todavía.</div>`;
 
       content.innerHTML = `
         <div class="fl-card">
@@ -1581,15 +1795,68 @@ export function initFootballLab(){
           ${statsHtml}
         </div>
         <div class="fl-card">
-          <div style="font-weight:800;margin-bottom:6px;">Importar estadísticas JSON</div>
-          <textarea id="statsImport" class="fl-text" placeholder='{"stats":[{"key":"Posesión","home":"67%","away":"33%"}]}'></textarea>
+          <div style="font-weight:800;margin-bottom:6px;">📋 Pegar relato</div>
+          <textarea id="matchNarrative" class="fl-text" placeholder="Pega el relato línea por línea con minutos.">${match.narrativeModule.rawText || ""}</textarea>
           <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="convertNarrative">Convertir</button>
+            <span id="narrativeStatus" class="fl-muted"></span>
+          </div>
+          <div id="normalizedEvents" class="fl-mini" style="margin-top:8px;"></div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">🕵️ Diagnóstico</div>
+          ${diagHtml}
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">➕ Guardar al perfil</div>
+          <div class="fl-row">
+            <button class="fl-btn" id="applyDiag">Aplicar al ${home?.name || "Local"} y ${away?.name || "Visitante"}</button>
             <button class="fl-btn" id="saveStats">Guardar estadísticas</button>
             <button class="fl-btn" id="goBackMatch">Volver</button>
             <span id="statsStatus" class="fl-muted"></span>
           </div>
         </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">Importar estadísticas JSON</div>
+          <textarea id="statsImport" class="fl-text" placeholder='{"stats":[{"key":"Posesión","home":"67%","away":"33%"}]}'></textarea>
+        </div>
       `;
+
+      const renderEventsPreview = ()=>{
+        const list = match.narrativeModule?.normalized?.events || [];
+        document.getElementById("normalizedEvents").innerHTML = list.length
+          ? `<b>Eventos extraídos (${list.length}):</b><br/>` + list.slice(0,30).map(e=>`${e.min ?? "?"}' • ${e.type} • ${e.team || "?"}${e.player ? ` • ${e.player}`:""}`).join("<br/>")
+          : "Sin eventos convertidos aún.";
+      };
+      renderEventsPreview();
+
+      document.getElementById("convertNarrative").onclick = ()=>{
+        const raw = document.getElementById("matchNarrative").value;
+        const parsed = extractNarratedEvents(raw, { home: home?.name || "Local", away: away?.name || "Visitante" });
+        const diagnostic = buildNarrativeDiagnostic({ match, teams: { home: home?.name || "Local", away: away?.name || "Visitante" }, parsed });
+        match.narrativeModule = {
+          rawText: raw,
+          normalized: {
+            matchId: match.id,
+            teams: { home: home?.name || "Local", away: away?.name || "Visitante" },
+            events: parsed.events
+          },
+          diagnostic: { matchId: match.id, diagnostic }
+        };
+        saveDb(db);
+        document.getElementById("narrativeStatus").textContent = `✅ ${parsed.events.length} eventos convertidos`;
+        render("match", payload);
+      };
+
+      document.getElementById("applyDiag").onclick = ()=>{
+        if(!match.narrativeModule?.diagnostic?.diagnostic){
+          document.getElementById("statsStatus").textContent = "❌ Convierte un relato primero.";
+          return;
+        }
+        applyDiagnosticToProfiles(db, { match, diagnostic: match.narrativeModule.diagnostic.diagnostic });
+        saveDb(db);
+        document.getElementById("statsStatus").textContent = "✅ Perfil acumulado actualizado (EMA).";
+      };
 
       document.getElementById("saveStats").onclick = ()=>{
         try{
