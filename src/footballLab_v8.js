@@ -36,6 +36,19 @@ export function initFootballLab(){
       tableContext: {}
     },
     predictions: [],
+    bitacora: {
+      bank: 15,
+      kellyFraction: 0.25,
+      minUnit: 1,
+      maxStakePct: 0.2,
+      dailyGoalPct: 0.05,
+      dailyRiskPct: 0.15,
+      stopLoss: 2,
+      stopWin: 1,
+      maxBetsPerDay: 3,
+      maxConsecutiveLosses: 2,
+      entries: []
+    },
     learning: {
       schemaVersion: 2,
       leagueScale: {},
@@ -72,6 +85,7 @@ export function initFootballLab(){
       db.versus.tableContextTrust = clamp(Number(db.versus.tableContextTrust) || defaultDb.versus.tableContextTrust, 0, 1);
       db.versus.tableContext ||= {};
       db.predictions ||= [];
+      db.bitacora = ensureBitacoraState(db.bitacora);
       db.learning ||= structuredClone(defaultDb.learning);
       db.learning.schemaVersion = Number(db.learning.schemaVersion) || 2;
       db.learning.leagueScale ||= {};
@@ -135,8 +149,96 @@ export function initFootballLab(){
       .fl-kpi{display:grid;grid-template-columns:repeat(3,minmax(88px,1fr));gap:8px}
       .fl-kpi > div{background:#111722;border:1px solid #2d333b;border-radius:10px;padding:8px;text-align:center}
       .fl-kpi b{display:block;font-size:18px;color:#f6f8fa}
+      .fl-mini{font-size:12px;color:#9ca3af}
+      .fl-chip{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #2d333b;background:#111722;font-size:12px}
+      .fl-chip.ok{border-color:#238636;color:#3fb950}
+      .fl-chip.warn{border-color:#d29922;color:#f2cc60}
+      .fl-chip.bad{border-color:#da3633;color:#ff7b72}
     `;
     document.head.appendChild(style);
+  }
+
+  function ensureBitacoraState(raw){
+    const base = {
+      bank: 15,
+      kellyFraction: 0.25,
+      minUnit: 1,
+      maxStakePct: 0.2,
+      dailyGoalPct: 0.05,
+      dailyRiskPct: 0.15,
+      stopLoss: 2,
+      stopWin: 1,
+      maxBetsPerDay: 3,
+      maxConsecutiveLosses: 2,
+      entries: []
+    };
+    const st = { ...base, ...(raw || {}) };
+    st.bank = Math.max(1, Number(st.bank) || base.bank);
+    st.kellyFraction = clamp(Number(st.kellyFraction) || base.kellyFraction, 0.05, 1);
+    st.minUnit = Math.max(0.5, Number(st.minUnit) || base.minUnit);
+    st.maxStakePct = clamp(Number(st.maxStakePct) || base.maxStakePct, 0.05, 0.5);
+    st.dailyGoalPct = clamp(Number(st.dailyGoalPct) || base.dailyGoalPct, 0.01, 0.2);
+    st.dailyRiskPct = clamp(Number(st.dailyRiskPct) || base.dailyRiskPct, 0.05, 0.4);
+    st.stopLoss = Math.max(0.5, Number(st.stopLoss) || base.stopLoss);
+    st.stopWin = Math.max(0.5, Number(st.stopWin) || base.stopWin);
+    st.maxBetsPerDay = clamp(Number(st.maxBetsPerDay) || base.maxBetsPerDay, 1, 8);
+    st.maxConsecutiveLosses = clamp(Number(st.maxConsecutiveLosses) || base.maxConsecutiveLosses, 1, 5);
+    st.entries = Array.isArray(st.entries) ? st.entries : [];
+    return st;
+  }
+
+  function calcBitacoraSuggestion({ bank, odds, probability, kellyFraction, minUnit, maxStakePct }){
+    const b = Math.max(0, Number(odds) - 1);
+    const p = clamp(Number(probability) || 0, 0, 1);
+    const q = 1 - p;
+    const ev = p * b - q;
+    const kellyStar = b > 0 ? (p * b - q) / b : -1;
+    const frac = Math.max(0, kellyStar * (Number(kellyFraction) || 0.25));
+    const rawStake = Math.max(0, frac * Number(bank || 0));
+    const maxStake = Math.max(Number(minUnit) || 1, (Number(bank) || 0) * (Number(maxStakePct) || 0.2));
+    const rounded = Math.round(rawStake / minUnit) * minUnit;
+    const suggestedStake = ev > 0
+      ? clamp(Math.max(minUnit, rounded || minUnit), minUnit, maxStake)
+      : 0;
+    return { ev, b, kellyStar, frac, rawStake, suggestedStake, noBet: ev <= 0 };
+  }
+
+  function projectBankroll({ bank, p, odds, stake, steps=12, paths=1000 }){
+    const safeStake = Math.max(0.01, Number(stake) || 0);
+    const safeOdds = Math.max(1.01, Number(odds) || 1.01);
+    const safeP = clamp(Number(p) || 0.5, 0.01, 0.99);
+    const walk = Array.from({ length: paths }, ()=>{
+      let b = Number(bank) || 0;
+      const line = [b];
+      for(let i=0;i<steps;i++){
+        const win = Math.random() < safeP;
+        b += win ? safeStake * (safeOdds - 1) : -safeStake;
+        line.push(b);
+      }
+      return line;
+    });
+    const quant = (arr, q)=>{
+      const sorted = [...arr].sort((a,b)=>a-b);
+      const idx = Math.floor((sorted.length - 1) * q);
+      return sorted[idx] ?? 0;
+    };
+    return Array.from({ length: steps + 1 }, (_v, idx)=>{
+      const bucket = walk.map(pth=>pth[idx]);
+      const mean = bucket.reduce((s,v)=>s+v,0) / (bucket.length || 1);
+      return { step: idx, mean, p10: quant(bucket, 0.1), p90: quant(bucket, 0.9) };
+    });
+  }
+
+  function sparklinePath(values, width=640, height=200, minY=null, maxY=null){
+    if(!values.length) return "";
+    const low = minY ?? Math.min(...values);
+    const high = maxY ?? Math.max(...values);
+    const spread = (high - low) || 1;
+    return values.map((v,i)=>{
+      const x = values.length===1 ? 0 : (i/(values.length-1))*width;
+      const y = height - ((v - low) / spread) * height;
+      return `${i===0?"M":"L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+    }).join(" ");
   }
 
   function pickFirstNumber(...values){
@@ -1018,7 +1120,7 @@ export function initFootballLab(){
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus"];
+    const tabs = ["home","liga","tracker","versus","bitacora"];
     const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
 
     app.innerHTML = `
@@ -1506,6 +1608,207 @@ export function initFootballLab(){
       return;
     }
 
+    if(view==="bitacora"){
+      db.bitacora = ensureBitacoraState(db.bitacora);
+      const st = db.bitacora;
+      const today = new Date().toISOString().slice(0,10);
+      const todayEntries = st.entries.filter(e=>(e.date||"").slice(0,10)===today);
+      const todayProfit = todayEntries.reduce((s,e)=>s+(Number(e.profit)||0),0);
+      const todayRisk = todayEntries.reduce((s,e)=>s+(Number(e.stake)||0),0);
+      let lossStreak = 0;
+      for(let i=todayEntries.length-1;i>=0;i--){
+        if(todayEntries[i].result==="loss") lossStreak += 1;
+        else break;
+      }
+      const dailyGoal = st.bank * st.dailyGoalPct;
+      const dailyRiskCap = st.bank * st.dailyRiskPct;
+      const stopByLoss = todayProfit <= -st.stopLoss;
+      const stopByWin = todayProfit >= st.stopWin;
+      const stopByRisk = todayRisk >= dailyRiskCap;
+      const stopByCount = todayEntries.length >= st.maxBetsPerDay;
+      const stopByStreak = lossStreak >= st.maxConsecutiveLosses;
+      const quickRules = [
+        { odds: 1.7, p: 0.6 },
+        { odds: 2.0, p: 0.55 },
+        { odds: 2.5, p: 0.45 }
+      ];
+
+      const lastRows = st.entries.slice(-20);
+      const bankSeries = [
+        Math.max(0, st.bank - lastRows.reduce((s,e)=>s+(Number(e.profit)||0),0)),
+        ...lastRows.map(e=>Number(e.bankAfter) || st.bank)
+      ];
+      const histMin = Math.min(...bankSeries);
+      const histMax = Math.max(...bankSeries);
+      const histPath = sparklinePath(bankSeries, 640, 180, histMin-0.5, histMax+0.5);
+
+      const avgP = lastRows.length ? lastRows.reduce((s,e)=>s+(Number(e.probability)||0.52),0)/lastRows.length : 0.55;
+      const avgOdds = lastRows.length ? lastRows.reduce((s,e)=>s+(Number(e.odds)||2),0)/lastRows.length : 2;
+      const avgStake = lastRows.length ? Math.max(st.minUnit, lastRows.reduce((s,e)=>s+(Number(e.stake)||st.minUnit),0)/lastRows.length) : st.minUnit;
+      const projection = projectBankroll({ bank: st.bank, p: avgP, odds: avgOdds, stake: avgStake, steps: 12, paths: 1000 });
+      const projAll = projection.flatMap(p=>[p.p10, p.p90, p.mean]);
+      const pMin = Math.min(...projAll);
+      const pMax = Math.max(...projAll);
+      const meanPath = sparklinePath(projection.map(p=>p.mean), 640, 180, pMin-0.5, pMax+0.5);
+      const lowPath = sparklinePath(projection.map(p=>p.p10), 640, 180, pMin-0.5, pMax+0.5);
+      const highPath = sparklinePath(projection.map(p=>p.p90), 640, 180, pMin-0.5, pMax+0.5);
+
+      const rows = st.entries.slice().reverse().slice(0,10).map(e=>`
+        <tr>
+          <td>${(e.date||"").slice(0,10)}</td>
+          <td>S/${Number(e.stake||0).toFixed(2)}</td>
+          <td>${Number(e.odds||0).toFixed(2)}</td>
+          <td>${((Number(e.probability)||0)*100).toFixed(1)}%</td>
+          <td>${e.result||"-"}</td>
+          <td style="color:${Number(e.profit)>=0?"#3fb950":"#ff7b72"}">${Number(e.profit||0)>=0?"+":""}${Number(e.profit||0).toFixed(2)}</td>
+          <td>S/${Number(e.bankAfter||0).toFixed(2)}</td>
+        </tr>
+      `).join("");
+
+      content.innerHTML = `
+        <div class="fl-card fl-grid two">
+          <div>
+            <div style="font-weight:800;margin-bottom:8px;">Bankroll actual</div>
+            <div class="fl-row">
+              <input id="bkBank" class="fl-input" type="number" min="1" step="0.5" value="${st.bank.toFixed(2)}" style="width:130px" />
+              <input id="bkGoal" class="fl-input" type="number" min="1" max="20" step="1" value="${(st.dailyGoalPct*100).toFixed(0)}" title="Objetivo diario %" style="width:140px" />
+              <input id="bkRisk" class="fl-input" type="number" min="5" max="40" step="1" value="${(st.dailyRiskPct*100).toFixed(0)}" title="Riesgo diario %" style="width:140px" />
+              <input id="bkKelly" class="fl-input" type="number" min="5" max="100" step="5" value="${(st.kellyFraction*100).toFixed(0)}" title="Kelly fraccionado %" style="width:150px" />
+              <button class="fl-btn" id="saveBankCfg">Guardar config</button>
+            </div>
+            <div class="fl-mini" style="margin-top:8px;">Objetivo del día: <b>S/${dailyGoal.toFixed(2)}</b> · Riesgo máx día: <b>S/${dailyRiskCap.toFixed(2)}</b> · Stop-loss S/${st.stopLoss.toFixed(2)} · Stop-win S/${st.stopWin.toFixed(2)}</div>
+            <div class="fl-row" style="margin-top:8px;">
+              <span class="fl-chip ${stopByLoss||stopByRisk||stopByStreak?"bad":"ok"}">Hoy ${todayEntries.length}/${st.maxBetsPerDay} apuestas</span>
+              <span class="fl-chip ${todayProfit>=0?"ok":"bad"}">P&L día ${todayProfit>=0?"+":""}S/${todayProfit.toFixed(2)}</span>
+              <span class="fl-chip ${stopByWin?"ok":(stopByLoss||stopByRisk||stopByStreak?"bad":"warn")}">${stopByWin?"Stop-win activo":(stopByLoss||stopByRisk||stopByStreak?"Parar por riesgo":"Puedes seguir")}</span>
+            </div>
+          </div>
+          <div>
+            <div style="font-weight:800;margin-bottom:8px;">Sugerir apuesta (EV + Kelly)</div>
+            <div class="fl-row">
+              <input id="bkOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:120px" />
+              <input id="bkProb" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="Prob (0-1)" style="width:140px" />
+              <button class="fl-btn" id="bkSuggest">Sugerir apuesta</button>
+            </div>
+            <div id="bkSuggestOut" class="fl-mini" style="margin-top:8px;">Ingresa cuota y probabilidad para calcular EV y stake redondo.</div>
+            <div class="fl-mini" style="margin-top:8px;">Regla rápida: 1.70→p≥0.60 · 2.00→p≥0.55 · 2.50→p≥0.45 · máximo 2-3 apuestas/día.</div>
+          </div>
+        </div>
+
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Plan del día (2-3 tickets)</div>
+          <div class="fl-mini">1) Busca mercado entre 1.80 y 2.20 con EV positivo. 2) Segunda apuesta solo si sigues dentro del riesgo diario. 3) Si pierdes ${st.maxConsecutiveLosses} seguidas, se termina el día.</div>
+        </div>
+
+        <div class="fl-card fl-grid two">
+          <div>
+            <div style="font-weight:800;margin-bottom:8px;">Registrar apuesta</div>
+            <div class="fl-row">
+              <input id="logStake" class="fl-input" type="number" step="0.5" min="${st.minUnit}" value="${st.minUnit}" placeholder="Stake" style="width:120px" />
+              <input id="logOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:120px" />
+              <input id="logProb" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="Prob" style="width:120px" />
+              <select id="logResult" class="fl-select" style="width:120px"><option value="win">win</option><option value="loss">loss</option><option value="push">push</option></select>
+              <button class="fl-btn" id="saveLog">Guardar</button>
+            </div>
+            <div id="logOut" class="fl-mini" style="margin-top:8px;"></div>
+          </div>
+          <div>
+            <div style="font-weight:800;margin-bottom:8px;">Historial de bank</div>
+            <svg viewBox="0 0 640 180" style="width:100%;height:180px;background:#0f141d;border:1px solid #2d333b;border-radius:10px;">
+              <path d="${histPath}" fill="none" stroke="#58a6ff" stroke-width="2.5"/>
+            </svg>
+          </div>
+        </div>
+
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Proyección Monte Carlo (12 apuestas, 1000 caminos)</div>
+          <div class="fl-mini">Base: p promedio ${(avgP*100).toFixed(1)}%, cuota ${avgOdds.toFixed(2)}, stake S/${avgStake.toFixed(2)}.</div>
+          <svg viewBox="0 0 640 180" style="width:100%;height:180px;background:#0f141d;border:1px solid #2d333b;border-radius:10px;margin-top:8px;">
+            <path d="${lowPath}" fill="none" stroke="#ff7b72" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="${highPath}" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="${meanPath}" fill="none" stroke="#f2cc60" stroke-width="2.5"/>
+          </svg>
+          <div class="fl-mini" style="margin-top:6px;">Línea amarilla: media esperada · Verde: banda optimista (P90) · Roja: banda pesimista (P10).</div>
+        </div>
+
+        <div class="fl-card">
+          <table class="fl-table">
+            <thead><tr><th>Fecha</th><th>Stake</th><th>Cuota</th><th>p</th><th>Resultado</th><th>Profit</th><th>Bank</th></tr></thead>
+            <tbody>${rows || "<tr><td colspan='7'>Sin registros</td></tr>"}</tbody>
+          </table>
+        </div>
+      `;
+
+      document.getElementById("saveBankCfg").onclick = ()=>{
+        st.bank = Math.max(1, Number(document.getElementById("bkBank").value) || st.bank);
+        st.dailyGoalPct = clamp((Number(document.getElementById("bkGoal").value) || (st.dailyGoalPct*100)) / 100, 0.01, 0.2);
+        st.dailyRiskPct = clamp((Number(document.getElementById("bkRisk").value) || (st.dailyRiskPct*100)) / 100, 0.05, 0.4);
+        st.kellyFraction = clamp((Number(document.getElementById("bkKelly").value) || (st.kellyFraction*100)) / 100, 0.05, 1);
+        saveDb(db);
+        render("bitacora");
+      };
+
+      document.getElementById("bkSuggest").onclick = ()=>{
+        const odds = Number(document.getElementById("bkOdds").value);
+        const probability = Number(document.getElementById("bkProb").value);
+        const out = document.getElementById("bkSuggestOut");
+        if(!(odds>1) || !(probability>0 && probability<1)){
+          out.textContent = "❌ Completa cuota (>1) y probabilidad (0-1).";
+          return;
+        }
+        const calc = calcBitacoraSuggestion({
+          bank: st.bank,
+          odds,
+          probability,
+          kellyFraction: st.kellyFraction,
+          minUnit: st.minUnit,
+          maxStakePct: st.maxStakePct
+        });
+        const qr = quickRules.reduce((acc, rule)=> Math.abs(rule.odds - odds) < Math.abs(acc.odds - odds) ? rule : acc, quickRules[0]);
+        const ruleMsg = probability >= qr.p ? "✅ Pasa regla rápida" : `⚠️ Regla rápida pide p≥${qr.p.toFixed(2)}`;
+        out.innerHTML = `EV por S/1: <b>${calc.ev.toFixed(3)}</b> · Kelly*: <b>${(calc.kellyStar*100).toFixed(1)}%</b> · Fracc: <b>${(calc.frac*100).toFixed(1)}%</b><br/>`
+          + `${calc.noBet ? "❌ NO BET (EV ≤ 0)." : `✅ Stake sugerido: <b>S/${calc.suggestedStake.toFixed(2)}</b> (raw S/${calc.rawStake.toFixed(2)}).`}<br/>${ruleMsg}`;
+      };
+
+      document.getElementById("saveLog").onclick = ()=>{
+        const stake = Math.max(st.minUnit, Number(document.getElementById("logStake").value) || st.minUnit);
+        const odds = Math.max(1.01, Number(document.getElementById("logOdds").value) || 0);
+        const probability = clamp(Number(document.getElementById("logProb").value) || 0.5, 0.01, 0.99);
+        const result = document.getElementById("logResult").value;
+        const out = document.getElementById("logOut");
+        if(!(odds>1)){
+          out.textContent = "❌ Cuota inválida.";
+          return;
+        }
+        const calc = calcBitacoraSuggestion({
+          bank: st.bank,
+          odds,
+          probability,
+          kellyFraction: st.kellyFraction,
+          minUnit: st.minUnit,
+          maxStakePct: st.maxStakePct
+        });
+        const profit = result==="win" ? stake * (odds - 1) : (result==="loss" ? -stake : 0);
+        st.bank = Math.max(0, st.bank + profit);
+        const entry = {
+          id: uid("bet"),
+          date: new Date().toISOString(),
+          stake,
+          odds,
+          probability,
+          result,
+          ev: calc.ev,
+          profit,
+          bankAfter: st.bank
+        };
+        st.entries.push(entry);
+        saveDb(db);
+        out.innerHTML = `✅ Apuesta guardada. Profit ${profit>=0?"+":""}S/${profit.toFixed(2)} · bank S/${st.bank.toFixed(2)}`;
+        setTimeout(()=>render("bitacora"), 250);
+      };
+      return;
+    }
+
     if(view==="versus"){
       db.versus ||= { homeAdvantage: 1.1, paceFactor: 1, sampleSize: 20, marketBlend: 0.35, matchday: 20, tableContextTrust: 0.45, tableContext: {} };
       db.versus.tableContext ||= {};
@@ -1809,7 +2112,7 @@ export function initFootballLab(){
   window.__FOOTBALL_LAB__ = {
     open(view="home", payload={}){ render(view, payload); },
     getDB(){ return loadDb(); },
-    help: "window.__FOOTBALL_LAB__.open('liga'|'equipo'|'tracker'|'versus')"
+    help: "window.__FOOTBALL_LAB__.open('liga'|'equipo'|'tracker'|'versus'|'bitacora')"
   };
 
   return window.__FOOTBALL_LAB__;
