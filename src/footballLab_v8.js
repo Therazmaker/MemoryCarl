@@ -26,7 +26,15 @@ export function initFootballLab(){
     teams: [],
     players: [],
     tracker: [],
-    versus: { homeAdvantage: 1.1 },
+    versus: {
+      homeAdvantage: 1.1,
+      paceFactor: 1,
+      sampleSize: 20,
+      marketBlend: 0.35,
+      matchday: 20,
+      tableContextTrust: 0.45,
+      tableContext: {}
+    },
     predictions: [],
     learning: {
       schemaVersion: 2,
@@ -57,6 +65,12 @@ export function initFootballLab(){
       db.players ||= [];
       db.tracker ||= [];
       db.versus ||= { homeAdvantage: 1.1 };
+      db.versus.paceFactor = clamp(Number(db.versus.paceFactor) || 1, 0.82, 1.35);
+      db.versus.sampleSize = clamp(Number(db.versus.sampleSize) || 20, 5, 40);
+      db.versus.marketBlend = clamp(Number(db.versus.marketBlend) || defaultDb.versus.marketBlend, 0, 0.8);
+      db.versus.matchday = clamp(Number(db.versus.matchday) || defaultDb.versus.matchday, 1, 50);
+      db.versus.tableContextTrust = clamp(Number(db.versus.tableContextTrust) || defaultDb.versus.tableContextTrust, 0, 1);
+      db.versus.tableContext ||= {};
       db.predictions ||= [];
       db.learning ||= structuredClone(defaultDb.learning);
       db.learning.schemaVersion = Number(db.learning.schemaVersion) || 2;
@@ -293,6 +307,85 @@ export function initFootballLab(){
     };
   }
 
+  function normalizeStatKey(key){
+    return String(key || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim();
+  }
+
+  function statNumberFromSide(raw){
+    if(raw===null || raw===undefined) return null;
+    const clean = String(raw).replace("%", "").replace(",", ".").trim();
+    if(!clean) return null;
+    const n = Number(clean);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function metricFromStats(stats, patterns, side){
+    if(!Array.isArray(stats) || !stats.length) return null;
+    for(const item of stats){
+      const key = normalizeStatKey(item?.key);
+      if(!patterns.some(pattern=>key.includes(pattern))) continue;
+      const value = statNumberFromSide(side==="home" ? item?.home : item?.away);
+      if(Number.isFinite(value)) return value;
+    }
+    return null;
+  }
+
+  function tableContextForTeam({ teamContext, matchday, isHome }){
+    const pos = clamp(Number(teamContext?.pos) || 10, 1, 20);
+    const objective = pickFirstString(teamContext?.objective, "mid").toLowerCase();
+    const phase = matchday>=28 ? "late" : matchday>=12 ? "mid" : "early";
+    const relegationZone = pos>=18;
+    const titleZone = pos<=3;
+    let pressure = 0.18 + (phase==="late" ? 0.18 : phase==="mid" ? 0.08 : 0);
+    if(relegationZone) pressure += phase==="late" ? 0.48 : 0.28;
+    if(titleZone) pressure += phase==="late" ? 0.3 : 0.18;
+    if(objective==="relegation" || objective==="survival") pressure += 0.14;
+    if(objective==="title" || objective==="europe") pressure += 0.12;
+    if(objective==="mid") pressure -= 0.05;
+
+    let riskMode = 0;
+    if(relegationZone) riskMode += isHome ? 0.2 : -0.1;
+    if(titleZone) riskMode += isHome ? 0.1 : -0.2;
+    if(objective==="cupfocus") riskMode -= 0.2;
+    if(objective==="relegation") riskMode += isHome ? 0.15 : -0.05;
+    if(phase==="late") riskMode += pressure>0.55 ? -0.05 : 0;
+
+    return {
+      pos,
+      objective,
+      pressure: clamp(pressure, 0, 1),
+      riskMode: clamp(riskMode, -1, 1),
+      phase
+    };
+  }
+
+  function applyDrawBoostToMatrix(matrix, drawBoost){
+    const safeBoost = clamp(Number(drawBoost) || 0, 0, 0.25);
+    const adjusted = matrix.map((row, h)=>row.map((cell, a)=>{
+      if(h!==a) return cell;
+      return cell * (1 + safeBoost);
+    }));
+    let total = 0;
+    adjusted.forEach(row=>row.forEach(p=>{ total += p; }));
+    if(!(total>0)) return matrix;
+    return adjusted.map(row=>row.map(p=>p/total));
+  }
+
+  function summarizeMatrix(matrix){
+    let pHome = 0, pDraw = 0, pAway = 0;
+    let best = { h: 0, a: 0, p: 0 };
+    for(let h=0; h<matrix.length; h++){
+      for(let a=0; a<matrix[h].length; a++){
+        const p = matrix[h][a];
+        if(h>a) pHome += p;
+        else if(h===a) pDraw += p;
+        else pAway += p;
+        if(p>best.p) best = { h, a, p };
+      }
+    }
+    return { pHome, pDraw, pAway, best };
+  }
+
   function weightedAverage(items, valueFn, decay=0.9){
     if(!items.length) return null;
     let weighted = 0;
@@ -389,6 +482,34 @@ export function initFootballLab(){
       return y + r*1.6;
     }, 0.88) || 0;
 
+    const statsAttackRate = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      const side = isHome ? "home" : "away";
+      const shotsOnTarget = metricFromStats(g.stats, ["shots on target", "tiros a puerta", "remates a puerta"], side);
+      const dangerous = metricFromStats(g.stats, ["big chances", "ocasiones", "ataques peligrosos"], side);
+      const poss = metricFromStats(g.stats, ["possession", "posesion"], side);
+      const values = [
+        Number.isFinite(shotsOnTarget) ? shotsOnTarget * 0.12 : null,
+        Number.isFinite(dangerous) ? dangerous * 0.06 : null,
+        Number.isFinite(poss) ? poss / 100 : null
+      ].filter(v=>Number.isFinite(v));
+      if(!values.length) return null;
+      return values.reduce((a,b)=>a+b,0)/values.length;
+    }, 0.9);
+
+    const statsDefenseRate = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      const oppSide = isHome ? "away" : "home";
+      const oppShotsOnTarget = metricFromStats(g.stats, ["shots on target", "tiros a puerta", "remates a puerta"], oppSide);
+      const oppDangerous = metricFromStats(g.stats, ["big chances", "ocasiones", "ataques peligrosos"], oppSide);
+      const values = [
+        Number.isFinite(oppShotsOnTarget) ? oppShotsOnTarget * 0.12 : null,
+        Number.isFinite(oppDangerous) ? oppDangerous * 0.06 : null
+      ].filter(v=>Number.isFinite(v));
+      if(!values.length) return null;
+      return values.reduce((a,b)=>a+b,0)/values.length;
+    }, 0.9);
+
     const form5Games = games.slice(-5);
     let formPts = 0, formGF = 0, formGA = 0;
     form5Games.forEach(g=>{
@@ -409,6 +530,11 @@ export function initFootballLab(){
       cornersFor,
       cornersAgainst,
       cardsRate,
+      statsImpact: {
+        attack: Number.isFinite(statsAttackRate) ? clamp(0.88 + statsAttackRate * 0.35, 0.78, 1.35) : 1,
+        defenseWeakness: Number.isFinite(statsDefenseRate) ? clamp(0.85 + statsDefenseRate * 0.4, 0.72, 1.38) : 1,
+        sample: games.filter(g=>Array.isArray(g.stats) && g.stats.length>0).length
+      },
       form5: {
         played: form5Games.length,
         points: formPts,
@@ -613,6 +739,8 @@ export function initFootballLab(){
 
   function versusModel(db, homeId, awayId, opts={}){
     ensureLearningState(db);
+    db.versus ||= {};
+    db.versus.tableContext ||= {};
     const homeTeam = db.teams.find(t=>t.id===homeId);
     const awayTeam = db.teams.find(t=>t.id===awayId);
     const leagueId = opts.leagueId || homeTeam?.leagueId || awayTeam?.leagueId || "";
@@ -647,13 +775,34 @@ export function initFootballLab(){
     lHome *= leagueScale.home * (1 + homeBias.attack) * (1 - awayBias.defense);
     lAway *= leagueScale.away * (1 + awayBias.attack) * (1 - homeBias.defense);
 
+    const statsHome = homeData.statsImpact || { attack: 1, defenseWeakness: 1, sample: 0 };
+    const statsAway = awayData.statsImpact || { attack: 1, defenseWeakness: 1, sample: 0 };
+
     lHome *= homeAdv * pace * homeStrength * homeForm.momentum;
     lAway *= pace * awayStrength * awayForm.momentum;
+
+    lHome *= statsHome.attack * statsAway.defenseWeakness;
+    lAway *= statsAway.attack * statsHome.defenseWeakness;
 
     lHome = clamp(lHome, 0.05, 4.5);
     lAway = clamp(lAway, 0.05, 4.5);
 
+    const tableContextRaw = db.versus.tableContext || {};
+    const matchday = clamp(Number(opts.matchday ?? db.versus.matchday ?? 20) || 20, 1, 50);
+    const homeContext = tableContextForTeam({ teamContext: tableContextRaw[homeId], matchday, isHome: true });
+    const awayContext = tableContextForTeam({ teamContext: tableContextRaw[awayId], matchday, isHome: false });
+    const trust = clamp(Number(opts.tableContextTrust ?? db.versus.tableContextTrust ?? 0.45) || 0.45, 0, 1);
+    const drawBoostBase = ((homeContext.pressure + awayContext.pressure) / 2) * 0.14
+      + (Math.max(0, -homeContext.riskMode) + Math.max(0, -awayContext.riskMode)) * 0.08;
+    const drawBoost = clamp(drawBoostBase * trust, 0, 0.25);
+
     const dist = probsFromLambdas(lHome, lAway, 5);
+    dist.matrix = applyDrawBoostToMatrix(dist.matrix, drawBoost);
+    const distSummary = summarizeMatrix(dist.matrix);
+    dist.pHome = distSummary.pHome;
+    dist.pDraw = distSummary.pDraw;
+    dist.pAway = distSummary.pAway;
+    dist.best = distSummary.best;
 
     const cardsExpected = clamp((homeData.cardsRate + awayData.cardsRate + leagueCtx.avgCardsTotal)/2, 1.8, 8.8);
     const cornersExpected = clamp(
@@ -695,10 +844,23 @@ export function initFootballLab(){
           homeDefenseStrength: defenseHomeWeakness,
           homeFormMomentum: homeForm.momentum,
           awayFormMomentum: awayForm.momentum,
+          statsAttackHome: statsHome.attack,
+          statsAttackAway: statsAway.attack,
+          statsSample: { home: statsHome.sample, away: statsAway.sample },
+          tableFactorGoals: {
+            homeRisk: homeContext.riskMode,
+            awayRisk: awayContext.riskMode,
+            homePressure: homeContext.pressure,
+            awayPressure: awayContext.pressure,
+            matchday
+          },
+          drawBoost,
+          tableContextTrust: trust,
           leagueScale,
           teamBias: { home: homeBias, away: awayBias }
         }
-      }
+      },
+      tableContext: { home: homeContext, away: awayContext, drawBoost, matchday, trust }
     };
   }
 
@@ -1345,7 +1507,8 @@ export function initFootballLab(){
     }
 
     if(view==="versus"){
-      db.versus ||= { homeAdvantage: 1.1, paceFactor: 1, sampleSize: 20, marketBlend: 0.35 };
+      db.versus ||= { homeAdvantage: 1.1, paceFactor: 1, sampleSize: 20, marketBlend: 0.35, matchday: 20, tableContextTrust: 0.45, tableContext: {} };
+      db.versus.tableContext ||= {};
       ensureLearningState(db);
       db.versus.marketBlend = clamp(Number(db.learning.marketTrust) || Number(db.versus.marketBlend) || 0.35, 0, 0.8);
       const options = db.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
@@ -1374,6 +1537,14 @@ export function initFootballLab(){
               <input id="vsOddH" class="fl-input" type="number" step="0.01" placeholder="Cuota 1" style="width:120px" />
               <input id="vsOddD" class="fl-input" type="number" step="0.01" placeholder="Cuota X" style="width:120px" />
               <input id="vsOddA" class="fl-input" type="number" step="0.01" placeholder="Cuota 2" style="width:120px" />
+            </div>
+            <div class="fl-row" style="margin-top:8px;">
+              <input id="vsMatchday" class="fl-input" type="number" min="1" max="50" value="${db.versus.matchday || 20}" title="Jornada" style="width:120px" />
+              <input id="vsCtxTrust" class="fl-input" type="number" step="0.05" min="0" max="1" value="${db.versus.tableContextTrust || 0.45}" title="Peso contexto tabla" style="width:170px" />
+              <input id="vsHomePos" class="fl-input" type="number" min="1" max="20" placeholder="Pos local" style="width:120px" />
+              <select id="vsHomeObj" class="fl-select" style="width:140px"><option value="">Obj local</option><option value="title">title</option><option value="europe">europe</option><option value="mid">mid</option><option value="survival">survival</option><option value="relegation">relegation</option><option value="cupFocus">cupFocus</option></select>
+              <input id="vsAwayPos" class="fl-input" type="number" min="1" max="20" placeholder="Pos visita" style="width:120px" />
+              <select id="vsAwayObj" class="fl-select" style="width:140px"><option value="">Obj visita</option><option value="title">title</option><option value="europe">europe</option><option value="mid">mid</option><option value="survival">survival</option><option value="relegation">relegation</option><option value="cupFocus">cupFocus</option></select>
             </div>
             <div id="vsOut" style="margin-top:10px;" class="fl-muted">Selecciona dos equipos.</div>
             <div class="fl-row" style="margin-top:8px;">
@@ -1416,6 +1587,20 @@ export function initFootballLab(){
 
       let lastSimulation = null;
 
+      const syncTableContextInputs = ()=>{
+        const homeId = document.getElementById("vsHome").value;
+        const awayId = document.getElementById("vsAway").value;
+        const homeCtx = db.versus.tableContext?.[homeId] || {};
+        const awayCtx = db.versus.tableContext?.[awayId] || {};
+        document.getElementById("vsHomePos").value = homeCtx.pos || "";
+        document.getElementById("vsAwayPos").value = awayCtx.pos || "";
+        document.getElementById("vsHomeObj").value = homeCtx.objective || "";
+        document.getElementById("vsAwayObj").value = awayCtx.objective || "";
+      };
+
+      document.getElementById("vsHome").onchange = syncTableContextInputs;
+      document.getElementById("vsAway").onchange = syncTableContextInputs;
+
       document.getElementById("runVs").onclick = ()=>{
         const homeId = document.getElementById("vsHome").value;
         const awayId = document.getElementById("vsAway").value;
@@ -1423,10 +1608,32 @@ export function initFootballLab(){
         db.versus.paceFactor = Number(document.getElementById("vsPace").value)||1;
         db.versus.sampleSize = Number(document.getElementById("vsN").value)||20;
         db.versus.marketBlend = clamp(Number(document.getElementById("vsBlend").value)||0.35, 0, 0.8);
+        db.versus.matchday = clamp(Number(document.getElementById("vsMatchday").value)||20, 1, 50);
+        db.versus.tableContextTrust = clamp(Number(document.getElementById("vsCtxTrust").value)||0.45, 0, 1);
         db.learning.marketTrust = db.versus.marketBlend;
         saveDb(db);
         if(!homeId || !awayId || homeId===awayId) return;
-        const result = versusModel(db, homeId, awayId);
+
+        const homePos = pickFirstNumber(document.getElementById("vsHomePos").value);
+        const awayPos = pickFirstNumber(document.getElementById("vsAwayPos").value);
+        const homeObjective = pickFirstString(document.getElementById("vsHomeObj").value);
+        const awayObjective = pickFirstString(document.getElementById("vsAwayObj").value);
+        if(homePos!==null || homeObjective){
+          db.versus.tableContext[homeId] = {
+            ...(db.versus.tableContext[homeId] || {}),
+            ...(homePos!==null ? { pos: clamp(homePos, 1, 20) } : {}),
+            ...(homeObjective ? { objective: homeObjective } : {})
+          };
+        }
+        if(awayPos!==null || awayObjective){
+          db.versus.tableContext[awayId] = {
+            ...(db.versus.tableContext[awayId] || {}),
+            ...(awayPos!==null ? { pos: clamp(awayPos, 1, 20) } : {}),
+            ...(awayObjective ? { objective: awayObjective } : {})
+          };
+        }
+        saveDb(db);
+        const result = versusModel(db, homeId, awayId, { matchday: db.versus.matchday, tableContextTrust: db.versus.tableContextTrust });
         const market = clean1x2Probs(
           document.getElementById("vsOddH").value,
           document.getElementById("vsOddD").value,
@@ -1470,7 +1677,9 @@ export function initFootballLab(){
           `El visitante se ajusta por su ataque fuera (${((breakdown.awayAttackPenalty-1)*100).toFixed(0)}%) y la defensa local (${((breakdown.homeDefenseStrength-1)*100).toFixed(0)}%).`,
           breakdown.oddsCalibration.applied
             ? `La calibración por mercado movió λ en ${breakdown.oddsCalibration.shift.toFixed(2)} (blend ${(db.versus.marketBlend*100).toFixed(0)}%).`
-            : "Sin cuotas, no se aplicó calibración de mercado."
+            : "Sin cuotas, no se aplicó calibración de mercado.",
+          `Estadísticas guardadas: impacto ataque local ×${(breakdown.statsAttackHome || 1).toFixed(2)} y visitante ×${(breakdown.statsAttackAway || 1).toFixed(2)} (muestras ${breakdown.statsSample?.home || 0}/${breakdown.statsSample?.away || 0}).`,
+          `Contexto tabla jornada ${result.tableContext.matchday}: pressure ${result.tableContext.home.pressure.toFixed(2)} / ${result.tableContext.away.pressure.toFixed(2)}, risk ${result.tableContext.home.riskMode.toFixed(2)} / ${result.tableContext.away.riskMode.toFixed(2)} → empate +${(result.tableContext.drawBoost*100).toFixed(1)}%.`
         ];
         const dominantTxt = dominant.map(c=>`${c.h}-${c.a} (${(c.p*100).toFixed(1)}%)`).join(", ");
         const bttsTxt = `BTTS: ${(btts*100).toFixed(1)}% (Away=0 en ${(awayZero*100).toFixed(1)}%)`;
@@ -1480,6 +1689,8 @@ export function initFootballLab(){
           `Ataque local: ×${breakdown.homeAttackBoost.toFixed(2)}`,
           `Defensa rival: ×${breakdown.awayDefenseWeakness.toFixed(2)}`,
           `Bias local: ×${(1 + (breakdown.teamBias.home.attack || 0)).toFixed(2)}`,
+          `Stats: ×${((breakdown.statsAttackHome || 1) * (breakdown.statsAttackAway || 1)).toFixed(2)}`,
+          `Table draw boost: +${((breakdown.drawBoost || 0)*100).toFixed(1)}%`,
           `Mercado: ×${(breakdown.marketMultiplier || 1).toFixed(2)}`
         ];
 
