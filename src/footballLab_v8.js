@@ -1803,11 +1803,85 @@ export function initFootballLab(){
   }
 
   function safeParseJson(raw){
+    if(raw && typeof raw === "object") return raw;
+    const text = String(raw || "").trim();
+    if(!text) return null;
     try{
-      return JSON.parse(raw);
+      const parsed = JSON.parse(text);
+      if(typeof parsed === "string"){
+        try{
+          return JSON.parse(parsed);
+        }catch(_e2){
+          return null;
+        }
+      }
+      return parsed;
     }catch(_e){
+      if((text.startsWith('"{') && text.endsWith('}"')) || (text.startsWith("'{") && text.endsWith("}'"))){
+        try{
+          return JSON.parse(text.slice(1, -1));
+        }catch(_e3){
+          return null;
+        }
+      }
       return null;
     }
+  }
+
+  function normalizeIncomingLpePayload(payload={}){
+    if(payload?.kind !== "match_stats") return payload;
+
+    const parseNum = (candidate)=>{
+      const direct = Number(candidate);
+      if(Number.isFinite(direct)) return direct;
+      const raw = String(candidate ?? "").replace(/%/g, "").replace(/,/g, ".").match(/-?\d+(?:\.\d+)?/);
+      return raw ? Number(raw[0]) : 0;
+    };
+
+    const categoryMap = {
+      "Remates a puerta": "shotsOn",
+      "Remates totales": "shots",
+      "Grandes ocasiones": "bigChances",
+      "Córneres": "corners",
+      "Posesión": "possession",
+      "Faltas": "fouls",
+      "Tarjetas amarillas": "yellows",
+      "Ataques peligrosos": "dangerAttacks",
+      "Ataques de peligro": "dangerAttacks",
+      "Peligrosos ataques": "dangerAttacks"
+    };
+
+    const stats = { home: {}, away: {} };
+    const sections = Array.isArray(payload?.sections) ? payload.sections : [];
+    sections.forEach(section=>{
+      (section?.stats || []).forEach(stat=>{
+        const key = categoryMap[String(stat?.category || "").trim()];
+        if(!key) return;
+        const homeNum = parseNum(stat?.home?.numeric ?? stat?.home?.main ?? stat?.home?.raw ?? stat?.home);
+        const awayNum = parseNum(stat?.away?.numeric ?? stat?.away?.main ?? stat?.away?.raw ?? stat?.away);
+        stats.home[key] = homeNum;
+        stats.away[key] = awayNum;
+      });
+    });
+
+    const matchup = String(payload?.team?.name || "");
+    const teamMatch = matchup.match(/^(.+?)\s+vs\s+(.+?)(?:\s*\(|$)/i);
+    const teams = teamMatch
+      ? { home: teamMatch[1].trim(), away: teamMatch[2].trim() }
+      : payload?.teams || { home: "Home", away: "Away" };
+
+    const pageUrl = String(payload?.pageUrl || "");
+    const midMatch = pageUrl.match(/[?&]mid=([^&]+)/i);
+    const fallbackId = `${teams.home || "home"}_vs_${teams.away || "away"}`.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+
+    return {
+      matchId: payload?.matchId || (midMatch ? `mid_${midMatch[1]}` : fallbackId || `TMP-${Date.now()}`),
+      teams,
+      score: payload?.score || { home: 0, away: 0 },
+      stats,
+      window: payload?.window || payload?.minuteWindow || payload?.capturedAt || "live",
+      source: payload?.source || "match_stats"
+    };
   }
 
   function lpeNormDanger(value){
@@ -3311,8 +3385,8 @@ export function initFootballLab(){
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">📈 Live Projection Engine (LPE)</div>
-          <div class="fl-mini" style="margin-bottom:8px;">Acumulativo por <code>matchId</code>: pega ventanas nuevas y actualiza el estado previo.</div>
-          <textarea id="lpeInput" class="fl-text" placeholder='Pega JSON de ventana {"matchId":"...","teams":...,"stats":...,"score":...}'></textarea>
+          <div class="fl-mini" style="margin-bottom:8px;">Acumulativo por <code>matchId</code>: acepta JSON LPE directo o <code>kind: "match_stats"</code> (Flashscore/Sofascore) y lo normaliza.</div>
+          <textarea id="lpeInput" class="fl-text" placeholder='Pega JSON de ventana {"matchId":"...","teams":...,"stats":...,"score":...} o {"kind":"match_stats","sections":[...]}'></textarea>
           <div class="fl-row" style="margin-top:8px;">
             <button class="fl-btn" id="lpeUpdate">Actualizar LPE</button>
             <button class="fl-btn" id="lpeReset">Reiniciar partido</button>
@@ -3513,7 +3587,8 @@ export function initFootballLab(){
       document.getElementById("lpeUpdate").onclick = ()=>{
         const status = document.getElementById("lpeStatus");
         const raw = document.getElementById("lpeInput").value || "";
-        const parsed = safeParseJson(raw);
+        const parsedRaw = safeParseJson(raw);
+        const parsed = parsedRaw ? normalizeIncomingLpePayload(parsedRaw) : null;
         if(!parsed){
           status.textContent = "❌ JSON inválido.";
           return;
@@ -3537,7 +3612,8 @@ export function initFootballLab(){
       document.getElementById("lpeReset").onclick = ()=>{
         const status = document.getElementById("lpeStatus");
         const raw = document.getElementById("lpeInput").value || "";
-        const parsed = safeParseJson(raw);
+        const parsedRaw = safeParseJson(raw);
+        const parsed = parsedRaw ? normalizeIncomingLpePayload(parsedRaw) : null;
         const matchId = parsed?.matchId;
         if(!matchId){
           status.textContent = "⚠️ Para reiniciar, pega un JSON con matchId.";
