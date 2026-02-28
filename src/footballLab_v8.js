@@ -2790,6 +2790,17 @@ export function initFootballLab(){
           <div class="fl-muted">Importa/pega JSON y sincroniza IDs reales desde football-data.org.</div>
         </div>
         <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Backup completo de Football Lab</div>
+          <div class="fl-muted">Exporta e importa <b>todos</b> los datos guardados en footballDB para recuperar tu estado completo.</div>
+          <textarea id="jsonBackup" class="fl-text" placeholder='{"settings":{},"leagues":[],"teams":[],"players":[],"tracker":[]}'></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="fillBackup">Cargar backup actual</button>
+            <button class="fl-btn" id="downloadBackup">Descargar .json</button>
+            <button class="fl-btn" id="runBackupImport">Importar backup completo</button>
+            <span id="backupStatus" class="fl-muted"></span>
+          </div>
+        </div>
+        <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">Importar JSON</div>
           <textarea id="jsonImport" class="fl-text" placeholder='{"liga":{"name":"Premier League","equipos":[...]}}'></textarea>
           <div class="fl-row" style="margin-top:8px;">
@@ -2798,6 +2809,57 @@ export function initFootballLab(){
           </div>
         </div>
       `;
+      const backupEl = document.getElementById("jsonBackup");
+      const backupStatusEl = document.getElementById("backupStatus");
+      const setBackupStatus = (msg)=>{ backupStatusEl.textContent = msg; };
+
+      const fillBackupTextarea = ()=>{
+        backupEl.value = JSON.stringify(loadDb(), null, 2);
+        setBackupStatus("✅ Backup completo cargado en el cuadro.");
+      };
+
+      document.getElementById("fillBackup").onclick = ()=>{
+        fillBackupTextarea();
+      };
+
+      document.getElementById("downloadBackup").onclick = ()=>{
+        try{
+          const snapshot = JSON.stringify(loadDb(), null, 2);
+          backupEl.value = snapshot;
+          const blob = new Blob([snapshot], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          const now = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+          a.href = url;
+          a.download = `footballlab-backup-${now}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          setBackupStatus("✅ Backup descargado.");
+        }catch(err){
+          setBackupStatus(`❌ ${String(err.message || err)}`);
+        }
+      };
+
+      document.getElementById("runBackupImport").onclick = ()=>{
+        try{
+          const raw = backupEl.value.trim();
+          if(!raw) throw new Error("Pega un JSON de backup completo.");
+          const parsed = JSON.parse(raw);
+          if(!parsed || typeof parsed !== "object" || Array.isArray(parsed)){
+            throw new Error("El backup debe ser un objeto JSON válido.");
+          }
+          saveDb(parsed);
+          const normalized = loadDb();
+          saveDb(normalized);
+          backupEl.value = JSON.stringify(normalized, null, 2);
+          setBackupStatus("✅ Backup importado. Football Lab quedó restaurado.");
+        }catch(err){
+          setBackupStatus(`❌ ${String(err.message || err)}`);
+        }
+      };
+
+      fillBackupTextarea();
+
       document.getElementById("runImport").onclick = ()=>{
         try{
           const parsed = normalizeImport(document.getElementById("jsonImport").value.trim());
