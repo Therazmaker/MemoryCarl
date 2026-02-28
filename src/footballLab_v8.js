@@ -698,6 +698,256 @@ export function initFootballLab(){
     return simple ? Number(simple[1]) : null;
   }
 
+  function normalizeTeamToken(value){
+    return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  }
+
+  function parseMatchNarrative(text, teamHints=[]){
+    const teams = Array.isArray(teamHints) ? teamHints.filter(Boolean) : [];
+    const lines = String(text || "").split(/\n+/).map(line=>line.trim()).filter(Boolean);
+    const minuteRegex = /(\d+)(\+\d+)?\s*'/;
+    const keywordMap = [
+      { type: "goal", regex: /\bgol\b|anota|marca/i },
+      { type: "red", regex: /tarjeta roja|\broja\b|expulsad/i },
+      { type: "yellow", regex: /tarjeta|amonestad/i },
+      { type: "corner", regex: /c[oó]rner/i },
+      { type: "save", regex: /parada|atajad|interviene/i },
+      { type: "big_chance", regex: /ocasi[oó]n clar[ií]sima|mano a mano|clar[ií]sima/i },
+      { type: "shot", regex: /remata|disparo|chut/i },
+      { type: "offside", regex: /fuera de juego/i },
+      { type: "foul", regex: /falta|infracci[oó]n/i },
+      { type: "pressure", regex: /presi[oó]n|asedia|encierra|domina/i }
+    ];
+    const teamNorm = teams.map(name=>({ name, token: normalizeTeamToken(name) })).filter(x=>x.token);
+    const events = [];
+    let pendingMinute = null;
+
+    lines.forEach((line)=>{
+      const minuteMatch = line.match(minuteRegex);
+      if(minuteMatch){
+        pendingMinute = Number(minuteMatch[1]) + Number((minuteMatch[2] || "").replace("+", "") || 0);
+      }
+      const eventType = keywordMap.find(item=>item.regex.test(line))?.type;
+      if(!eventType) return;
+      const lineNorm = normalizeTeamToken(line);
+      const team = teamNorm.find(item=>lineNorm.includes(item.token))?.name;
+      events.push({
+        min: pendingMinute ?? null,
+        type: eventType,
+        team,
+        text: line
+      });
+    });
+
+    return { teams, events };
+  }
+
+  function buildEventTimeline(events=[]){
+    return [...events]
+      .map((evt, idx)=>({ ...evt, min: Number.isFinite(Number(evt.min)) ? Number(evt.min) : 0, idx }))
+      .sort((a,b)=>a.min===b.min ? a.idx-b.idx : a.min-b.min)
+      .map(({ idx, ...evt })=>evt);
+  }
+
+  function blockFromMinute(minute){
+    const safeMinute = Number.isFinite(Number(minute)) ? Number(minute) : 0;
+    if(safeMinute >= 90) return 9;
+    return clamp(Math.floor(safeMinute / 10), 0, 8);
+  }
+
+  function createBlockStats(){
+    return {
+      shots: 0,
+      big_chances: 0,
+      corners: 0,
+      goals: 0,
+      goals_conceded: 0,
+      saves_forced: 0,
+      cards: 0,
+      fouls: 0,
+      pressure_mentions: 0,
+      idd: 0,
+      idd_normalized: 0
+    };
+  }
+
+  function computeMomentumBlocks(events=[], teams=[]){
+    const timeline = buildEventTimeline(events);
+    const [homeTeam, awayTeam] = teams;
+    const blocks = Array.from({ length: 10 }, (_v, idx)=>({
+      block: idx,
+      range: idx < 9 ? `${idx*10}-${(idx+1)*10}` : "90+",
+      teams: {
+        [homeTeam || "home"]: createBlockStats(),
+        [awayTeam || "away"]: createBlockStats()
+      },
+      idd: {}
+    }));
+    const statMap = {
+      shot: "shots",
+      big_chance: "big_chances",
+      corner: "corners",
+      goal: "goals",
+      foul: "fouls",
+      yellow: "cards",
+      red: "cards",
+      pressure: "pressure_mentions"
+    };
+
+    timeline.forEach((event)=>{
+      const blk = blocks[blockFromMinute(event.min)];
+      const side = event.team === awayTeam ? awayTeam : homeTeam;
+      const otherSide = side === homeTeam ? awayTeam : homeTeam;
+      const key = statMap[event.type];
+      if(key && blk.teams[side]) blk.teams[side][key] += 1;
+      if(event.type === "save" && blk.teams[otherSide]) blk.teams[otherSide].saves_forced += 1;
+      if(event.type === "goal" && blk.teams[otherSide]) blk.teams[otherSide].goals_conceded += 1;
+    });
+
+    blocks.forEach((block)=>{
+      [homeTeam, awayTeam].forEach(team=>{
+        const stats = block.teams[team];
+        const idd =
+          0.5 * stats.big_chances +
+          0.4 * stats.shots +
+          0.3 * stats.corners +
+          0.2 * stats.pressure_mentions -
+          0.6 * stats.goals_conceded -
+          0.2 * stats.cards;
+        stats.idd = idd;
+        stats.idd_normalized = clamp(idd / 5, -1, 1);
+        block.idd[team] = stats.idd_normalized;
+      });
+    });
+
+    return blocks;
+  }
+
+  function generateCandles(blocks=[], team=""){
+    let prev = 0;
+    return blocks.map((block)=>{
+      const close = Number(block.idd?.[team]) || 0;
+      const open = prev;
+      const high = Math.max(open, close);
+      const low = Math.min(open, close);
+      prev = close;
+      return { block: block.block, open, high, low, close };
+    });
+  }
+
+  function detectPatterns({ candles=[], blocks=[], team="", opponent="" }){
+    const detected = [];
+    let greenStreak = 0;
+    let streakGoals = 0;
+    candles.forEach((candle, idx)=>{
+      if(candle.close > candle.open){
+        greenStreak += 1;
+        streakGoals += Number(blocks[idx]?.teams?.[team]?.goals || 0);
+      }else{
+        if(greenStreak >= 2 && streakGoals === 0) detected.push({ type: "accumulation_without_conversion", block: idx-1 });
+        greenStreak = 0;
+        streakGoals = 0;
+      }
+      if(candle.close > 0.4 && Number(blocks[idx+1]?.teams?.[opponent]?.goals || 0) > 0){
+        detected.push({ type: "shock_transition", block: idx+1 });
+      }
+      if(candle.close < -0.3 && Number(blocks[idx]?.teams?.[team]?.saves_forced || 0) >= 2 && Number(blocks[idx]?.teams?.[team]?.goals_conceded || 0)===0){
+        detected.push({ type: "low_block_success", block: idx });
+      }
+    });
+    if(greenStreak >= 2 && streakGoals === 0) detected.push({ type: "accumulation_without_conversion", block: candles.length-1 });
+    for(let i=3;i<candles.length;i++){
+      const prev2 = candles[i-3].close > 0.2 && candles[i-2].close > 0.2;
+      const next2 = candles[i-1].close < -0.2 && candles[i].close < -0.2;
+      if(prev2 && next2) detected.push({ type: "reversion", block: i });
+    }
+    const pre70 = candles.slice(0,7).some(c=>c.close > 0.45);
+    const post70Drop = candles.slice(7).some(c=>c.close < -0.25);
+    const rivalLateGoal = blocks.slice(8).some(b=>Number(b.teams?.[opponent]?.goals || 0) > 0);
+    if(pre70 && post70Drop && rivalLateGoal) detected.push({ type: "late_collapse", block: 8 });
+    return detected;
+  }
+
+  function computeMomentumSignature(team, blocks=[], events=[]){
+    const iddSeries = blocks.map(block=>Number(block.idd?.[team]) || 0);
+    const avg_IDD = iddSeries.reduce((sum, v)=>sum+v, 0) / Math.max(1, iddSeries.length);
+    const variance = iddSeries.reduce((sum, v)=>sum + (v-avg_IDD)*(v-avg_IDD), 0) / Math.max(1, iddSeries.length);
+    const volatility = Math.sqrt(variance);
+    const lateBlocks = blocks.filter(block=>block.block>=7);
+    const late_strength = lateBlocks.reduce((sum, block)=>sum + (Number(block.idd?.[team]) || 0), 0) / Math.max(1, lateBlocks.length);
+    const totals = blocks.reduce((acc, block)=>{
+      const st = block.teams?.[team] || createBlockStats();
+      acc.goals += Number(st.goals) || 0;
+      acc.big_chances += Number(st.big_chances) || 0;
+      acc.shots += Number(st.shots) || 0;
+      return acc;
+    }, { goals: 0, big_chances: 0, shots: 0 });
+    const conversion_efficiency = clamp(totals.goals / Math.max(0.25, totals.big_chances + totals.shots*0.5), 0, 2);
+    const teamGoals = events.filter(evt=>evt.type==="goal" && evt.team===team);
+    const shockGoalsCount = teamGoals.filter(evt=>{
+      const block = blocks[blockFromMinute(evt.min)];
+      return Number(block?.idd?.[team]) < 0;
+    }).length;
+    const shock_goals = teamGoals.length ? shockGoalsCount / teamGoals.length : 0;
+    const lowBlockSamples = blocks.filter(block=>Number(block.idd?.[team]) < -0.2);
+    const lowBlockRes = lowBlockSamples.length
+      ? lowBlockSamples.filter(block=>Number(block.teams?.[team]?.goals_conceded || 0)===0).length / lowBlockSamples.length
+      : 0.5;
+
+    return {
+      team,
+      momentumSignature: {
+        avg_IDD,
+        volatility,
+        late_strength,
+        conversion_efficiency,
+        shock_goals,
+        low_block_resistance: lowBlockRes
+      }
+    };
+  }
+
+  function signatureToPowers(signature){
+    const s = signature || {};
+    const attack_power =
+      0.4*(Number(s.avg_IDD) || 0) +
+      0.3*(Number(s.conversion_efficiency) || 0) +
+      0.3*(Number(s.late_strength) || 0);
+    const defense_power =
+      0.5*(1 - clamp(Number(s.volatility) || 0, 0, 1)) +
+      0.5*(Number(s.low_block_resistance) || 0.5);
+    return { attack_power: clamp(attack_power, 0, 1.5), defense_power: clamp(defense_power, 0, 1.2) };
+  }
+
+  function updateTeamProfile(teamProfile, diagnostic){
+    const current = teamProfile?.momentumSignature || null;
+    const next = diagnostic?.momentumSignature || {};
+    const alpha = current ? 0.25 : 1;
+    const blend = (key, fallback=0)=>{
+      const currV = Number(current?.[key]);
+      const nextV = Number(next?.[key]);
+      if(!Number.isFinite(nextV)) return Number.isFinite(currV) ? currV : fallback;
+      if(!Number.isFinite(currV)) return nextV;
+      return currV*(1-alpha) + nextV*alpha;
+    };
+    const momentumSignature = {
+      avg_IDD: blend("avg_IDD", 0),
+      volatility: blend("volatility", 0.5),
+      late_strength: blend("late_strength", 0),
+      conversion_efficiency: blend("conversion_efficiency", 0.5),
+      shock_goals: blend("shock_goals", 0.3),
+      low_block_resistance: blend("low_block_resistance", 0.5)
+    };
+    return {
+      team: diagnostic?.team || teamProfile?.team || "",
+      version: "momentumSignature_v1",
+      samples: (Number(teamProfile?.samples) || 0) + 1,
+      updatedAt: new Date().toISOString(),
+      momentumSignature,
+      simulation: signatureToPowers(momentumSignature)
+    };
+  }
+
   function extractNarratedEvents(rawText, teams){
     const lines = String(rawText || "").split(/\n+/).map(s=>s.trim()).filter(Boolean);
     const events = [];
@@ -1091,6 +1341,23 @@ export function initFootballLab(){
       lAway *= matchupAway * (1 + transitionShockAway*0.2);
     }
 
+    const homeMomentumProfileRaw = homeTeam?.name ? localStorage.getItem(`team_profile_${homeTeam.name}`) : null;
+    const awayMomentumProfileRaw = awayTeam?.name ? localStorage.getItem(`team_profile_${awayTeam.name}`) : null;
+    let homeMomentum = null;
+    let awayMomentum = null;
+    try{ homeMomentum = homeMomentumProfileRaw ? JSON.parse(homeMomentumProfileRaw) : null; }catch(_e){ homeMomentum = null; }
+    try{ awayMomentum = awayMomentumProfileRaw ? JSON.parse(awayMomentumProfileRaw) : null; }catch(_e){ awayMomentum = null; }
+    if(homeMomentum?.simulation && awayMomentum?.simulation){
+      const homeAttack = clamp(Number(homeMomentum.simulation.attack_power) || 0.5, 0, 1.5);
+      const awayAttack = clamp(Number(awayMomentum.simulation.attack_power) || 0.5, 0, 1.5);
+      const homeDefense = clamp(Number(homeMomentum.simulation.defense_power) || 0.5, 0, 1.2);
+      const awayDefense = clamp(Number(awayMomentum.simulation.defense_power) || 0.5, 0, 1.2);
+      const homeShock = clamp(Number(homeMomentum.momentumSignature?.shock_goals) || 0, 0, 1);
+      const awayShock = clamp(Number(awayMomentum.momentumSignature?.shock_goals) || 0, 0, 1);
+      lHome *= clamp(0.85 + homeAttack*(1-awayDefense), 0.78, 1.3) * (1 + homeShock*0.08);
+      lAway *= clamp(0.85 + awayAttack*(1-homeDefense), 0.78, 1.3) * (1 + awayShock*0.08);
+    }
+
     lHome = clamp(lHome, 0.05, 4.5);
     lAway = clamp(lAway, 0.05, 4.5);
 
@@ -1325,7 +1592,7 @@ export function initFootballLab(){
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","bitacora"];
+    const tabs = ["home","liga","tracker","versus","momentum","bitacora"];
     const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
 
     app.innerHTML = `
@@ -1871,6 +2138,136 @@ export function initFootballLab(){
       document.getElementById("goBackMatch").onclick = ()=>{
         if(payload.backTeamId) return render("equipo", { teamId: payload.backTeamId });
         render("tracker");
+      };
+      return;
+    }
+
+    if(view==="momentum"){
+      const teamOptions = db.teams.map(t=>`<option value="${t.name}">${t.name}</option>`).join("");
+      content.innerHTML = `
+        <div class="fl-card">
+          <div style="font-weight:900;font-size:20px;">📊 Momentum Lab</div>
+          <div class="fl-mini">Motor de velas, patrones y firma histórica por relato.</div>
+        </div>
+        <div class="fl-card fl-grid two">
+          <div>
+            <div class="fl-mini">Equipo A</div>
+            <select id="momTeamA" class="fl-select" style="width:100%;margin-top:4px;">${teamOptions}</select>
+          </div>
+          <div>
+            <div class="fl-mini">Equipo B</div>
+            <select id="momTeamB" class="fl-select" style="width:100%;margin-top:4px;">${teamOptions}</select>
+          </div>
+        </div>
+        <div class="fl-card">
+          <textarea id="momNarrative" class="fl-text" placeholder="Pega el relato crudo aquí"></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="momConvert">Convertir</button>
+            <button class="fl-btn" id="momSaveProfile" disabled>Guardar al perfil</button>
+            <span id="momStatus" class="fl-mini"></span>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Velas IDD (equipo A)</div>
+          <svg id="momCandleSvg" viewBox="0 0 700 220" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px"></svg>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">IDD acumulado</div>
+          <svg id="momLineSvg" viewBox="0 0 700 220" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px"></svg>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Patrones detectados</div>
+          <div id="momPatterns" class="fl-mini">Sin análisis todavía.</div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Resumen de firma</div>
+          <pre id="momSignature" class="fl-mini" style="white-space:pre-wrap"></pre>
+        </div>
+      `;
+
+      let lastPayload = null;
+      const drawCandleChart = (candles=[])=>{
+        const svg = document.getElementById("momCandleSvg");
+        if(!svg) return;
+        const width = 700;
+        const height = 220;
+        const zeroY = height/2;
+        const scaleY = 85;
+        const barW = 40;
+        const gap = 20;
+        const bodyW = 18;
+        const axis = `<line x1="0" y1="${zeroY}" x2="${width}" y2="${zeroY}" stroke="#39414d" stroke-width="1"/>`;
+        const bars = candles.map((c, i)=>{
+          const x = 25 + i*(barW+gap);
+          const yOpen = zeroY - c.open*scaleY;
+          const yClose = zeroY - c.close*scaleY;
+          const yHigh = zeroY - c.high*scaleY;
+          const yLow = zeroY - c.low*scaleY;
+          const color = c.close >= c.open ? "#2ea043" : "#f85149";
+          const bodyY = Math.min(yOpen, yClose);
+          const bodyH = Math.max(2, Math.abs(yOpen-yClose));
+          return `<g>
+            <line x1="${x+barW/2}" y1="${yHigh}" x2="${x+barW/2}" y2="${yLow}" stroke="${color}" stroke-width="2"/>
+            <rect x="${x + (barW-bodyW)/2}" y="${bodyY}" width="${bodyW}" height="${bodyH}" fill="${color}"/>
+            <text x="${x+barW/2}" y="208" fill="#9ca3af" font-size="10" text-anchor="middle">${c.block===9?"90+":`${c.block*10}`}</text>
+          </g>`;
+        }).join("");
+        svg.innerHTML = axis + bars;
+      };
+
+      const drawIddLine = (blocks=[], team)=>{
+        const svg = document.getElementById("momLineSvg");
+        if(!svg) return;
+        const width = 700;
+        const height = 220;
+        const zeroY = height/2;
+        const pts = blocks.map((b, idx)=>{
+          const x = 20 + idx * ((width - 40) / 9);
+          const y = zeroY - (Number(b.idd?.[team]) || 0) * 90;
+          return `${x},${y}`;
+        }).join(" ");
+        svg.innerHTML = `
+          <line x1="0" y1="${zeroY}" x2="${width}" y2="${zeroY}" stroke="#39414d" stroke-width="1"/>
+          <polyline points="${pts}" fill="none" stroke="#58a6ff" stroke-width="3"/>
+        `;
+      };
+
+      document.getElementById("momConvert").onclick = ()=>{
+        const teamA = document.getElementById("momTeamA").value;
+        const teamB = document.getElementById("momTeamB").value;
+        const raw = document.getElementById("momNarrative").value;
+        if(!teamA || !teamB || teamA===teamB){
+          document.getElementById("momStatus").textContent = "❌ Selecciona dos equipos distintos.";
+          return;
+        }
+        const parsed = parseMatchNarrative(raw, [teamA, teamB]);
+        const timeline = buildEventTimeline(parsed.events);
+        const blocks = computeMomentumBlocks(timeline, [teamA, teamB]);
+        const candles = generateCandles(blocks, teamA);
+        const patterns = detectPatterns({ candles, blocks, team: teamA, opponent: teamB });
+        const signature = computeMomentumSignature(teamA, blocks, timeline);
+        const bundle = { teams: [teamA, teamB], events: timeline, blocks, candles, patterns, signature, createdAt: new Date().toISOString() };
+        const matchMomentumId = uid("mom");
+        localStorage.setItem(`match_events_${matchMomentumId}`, JSON.stringify(timeline));
+        localStorage.setItem(`match_momentum_${matchMomentumId}`, JSON.stringify(bundle));
+        drawCandleChart(candles);
+        drawIddLine(blocks, teamA);
+        document.getElementById("momPatterns").innerHTML = patterns.length
+          ? patterns.map(p=>`• ${p.type} (bloque ${p.block===9?"90+":p.block})`).join("<br/>")
+          : "Sin patrones detectados con las reglas actuales.";
+        document.getElementById("momSignature").textContent = JSON.stringify(signature.momentumSignature, null, 2);
+        document.getElementById("momStatus").textContent = `✅ ${timeline.length} eventos convertidos`;
+        document.getElementById("momSaveProfile").disabled = false;
+        lastPayload = bundle;
+      };
+
+      document.getElementById("momSaveProfile").onclick = ()=>{
+        if(!lastPayload) return;
+        const teamA = lastPayload.teams[0];
+        const current = JSON.parse(localStorage.getItem(`team_profile_${teamA}`) || "null");
+        const updated = updateTeamProfile(current, { team: teamA, momentumSignature: lastPayload.signature.momentumSignature });
+        localStorage.setItem(`team_profile_${teamA}`, JSON.stringify(updated));
+        document.getElementById("momStatus").textContent = `✅ Perfil ${teamA} actualizado (${updated.samples} muestras)`;
       };
       return;
     }
