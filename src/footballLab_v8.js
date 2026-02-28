@@ -1430,8 +1430,47 @@ export function initFootballLab(){
     return { teams: teamList, events, statsByTeam, windowRange };
   }
 
-  function computeEarlyPhaseAnalyzer(text, { teamA="", teamB="", windowKey="0-10", seedProfiles={} }={}){
-    const { teams, statsByTeam, events, windowRange } = parseEarlyNarrative(text, { teamA, teamB, windowKey });
+  function buildEarlyStatsFromEvents(eventsInput=[], { teamA="", teamB="", windowRange }={}){
+    const events = Array.isArray(eventsInput) ? eventsInput : [];
+    const teams = [teamA, teamB].filter(Boolean);
+    const statsByTeam = new Map();
+    const pushTeam = (name)=>{
+      if(!name || statsByTeam.has(name)) return;
+      statsByTeam.set(name, createEarlyTeamStats());
+    };
+    teams.forEach(pushTeam);
+
+    events.forEach(evt=>{
+      if(!evt?.team) return;
+      pushTeam(evt.team);
+      const teamStats = statsByTeam.get(evt.team);
+      if(!teamStats) return;
+      if(evt.type === "shot") teamStats.shots += 1;
+      if(evt.type === "bigChance") teamStats.bigChances += 1;
+      if(evt.type === "corner") teamStats.corners += 1;
+      if(evt.type === "dangerCross") teamStats.dangerCross += 1;
+      if(evt.type === "finalThird") teamStats.finalThird += 1;
+      if(evt.type === "interception") teamStats.interceptions += 1;
+      if(evt.type === "save") teamStats.savesForced += 1;
+      if(evt.type === "control") teamStats.controlMentions += 1;
+      if(evt.type === "loss") teamStats.lossMentions += 1;
+      if(evt.type === "foul") teamStats.fouls += 1;
+      if(evt.type === "card") teamStats.cards += 1;
+      if(evt.type === "dangerCross" && /remata|disparo|tiro|cabezazo/i.test(String(evt.text || ""))) teamStats.shots += 0.5;
+    });
+
+    if(statsByTeam.size < 2) pushTeam(teamB || "Rival");
+    const teamList = [...statsByTeam.keys()].slice(0, 2);
+    teamList.forEach(name=>{ if(!statsByTeam.has(name)) statsByTeam.set(name, createEarlyTeamStats()); });
+    const filteredEvents = events.filter(evt=>teamList.includes(evt.team));
+    return { teams: teamList, statsByTeam, events: filteredEvents, windowRange };
+  }
+
+  function computeEarlyPhaseAnalyzer(text, { teamA="", teamB="", windowKey="0-10", seedProfiles={}, eventsOverride=null }={}){
+    const parsed = Array.isArray(eventsOverride)
+      ? buildEarlyStatsFromEvents(eventsOverride, { teamA, teamB, windowRange: resolveEarlyWindow(windowKey) })
+      : parseEarlyNarrative(text, { teamA, teamB, windowKey });
+    const { teams, statsByTeam, events, windowRange } = parsed;
     const [firstTeam, secondTeam] = teams;
     const a = statsByTeam.get(firstTeam) || createEarlyTeamStats();
     const b = statsByTeam.get(secondTeam) || createEarlyTeamStats();
@@ -3358,20 +3397,13 @@ export function initFootballLab(){
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">⚽ Early Phase Analyzer (EPA)</div>
           <div class="fl-grid two" style="margin-bottom:8px;">
-            <div>
-              <div class="fl-mini">Ventana</div>
-              <select id="epaWindow" class="fl-select" style="width:100%;margin-top:4px;">
-                <option value="0-10" selected>0-10</option>
-                <option value="10-20">10-20</option>
-                <option value="20-30">20-30</option>
-                <option value="30-45">30-45</option>
-              </select>
-            </div>
+            <div class="fl-mini">Modo acumulativo: cada nuevo texto se mezcla con lo ya cargado para ver la evolución completa del partido.</div>
             <div class="fl-mini" style="display:flex;align-items:flex-end;">Función secundaria: no reemplaza el análisis de momentum actual.</div>
           </div>
-          <textarea id="epaNarrative" class="fl-text" placeholder="Pega relato temprano (0-10, 10-20, 20-30 o 30-45)"></textarea>
+          <textarea id="epaNarrative" class="fl-text" placeholder="Pega más relato (minuto a minuto). Se acumula automáticamente."></textarea>
           <div class="fl-row" style="margin-top:8px;">
-            <button class="fl-btn" id="epaAnalyze">Analizar</button>
+            <button class="fl-btn" id="epaAnalyze">Actualizar EPA</button>
+            <button class="fl-btn" id="epaReset">Reiniciar EPA</button>
             <button class="fl-btn" id="epaSaveProfile" disabled>Guardar firma temprana al equipo</button>
             <span id="epaStatus" class="fl-mini"></span>
           </div>
@@ -3532,24 +3564,101 @@ export function initFootballLab(){
         jsonOut.textContent = JSON.stringify(epa, null, 2);
       };
 
+      const buildEpaAccumKey = (teamA, teamB)=>{
+        const parts = [String(teamA || "").trim(), String(teamB || "").trim()]
+          .filter(Boolean)
+          .map(normalizeTeamToken)
+          .sort();
+        return `match_epa_accum_${parts.join("__")}`;
+      };
+
+      const mergeEarlyEvents = (baseEvents=[], incomingEvents=[])=>{
+        const map = new Map();
+        [...(Array.isArray(baseEvents) ? baseEvents : []), ...(Array.isArray(incomingEvents) ? incomingEvents : [])].forEach(evt=>{
+          if(!evt) return;
+          const k = `${Number(evt.minute) || 0}|${String(evt.team || "").trim().toLowerCase()}|${String(evt.type || "").trim().toLowerCase()}|${String(evt.text || "").trim().toLowerCase()}`;
+          if(!map.has(k)) map.set(k, evt);
+        });
+        return [...map.values()].sort((a,b)=> (Number(a.minute)||0) - (Number(b.minute)||0));
+      };
+
+      const resolveAccumWindowKey = (events=[])=>{
+        const maxMinute = Math.max(10, ...events.map(evt=>Number(evt?.minute) || 0));
+        return `0-${Math.ceil(maxMinute)}`;
+      };
+
+      const resolveEpaPsychForLpe = (epa, lpeTeams={})=>{
+        if(!epa?.teams?.length || !epa?.psych) return null;
+        const [epaHome, epaAway] = epa.teams;
+        const psych = epa.psych || {};
+        const norm = (v)=>normalizeTeamToken(v || "");
+        const directHome = psych[lpeTeams?.home] || psych[Object.keys(psych).find(k=>norm(k)===norm(lpeTeams?.home))];
+        const directAway = psych[lpeTeams?.away] || psych[Object.keys(psych).find(k=>norm(k)===norm(lpeTeams?.away))];
+        return {
+          home: directHome || psych[epaHome] || null,
+          away: directAway || psych[epaAway] || null
+        };
+      };
+
       document.getElementById("epaAnalyze").onclick = ()=>{
         const teamA = document.getElementById("momTeamA").value;
         const teamB = document.getElementById("momTeamB").value;
-        const raw = document.getElementById("epaNarrative").value || document.getElementById("momNarrative").value;
-        const windowKey = document.getElementById("epaWindow").value || "0-10";
+        const status = document.getElementById("epaStatus");
+        const narrativeEl = document.getElementById("epaNarrative");
+        const raw = (narrativeEl?.value || document.getElementById("momNarrative").value || "").trim();
         if(!teamA || !teamB || teamA===teamB){
-          document.getElementById("epaStatus").textContent = "❌ Selecciona dos equipos distintos.";
+          status.textContent = "❌ Selecciona dos equipos distintos.";
+          return;
+        }
+        if(!raw){
+          status.textContent = "⚠️ Pega texto para actualizar EPA.";
           return;
         }
         const seedProfiles = {
           [teamA]: JSON.parse(localStorage.getItem(`team_profile_${teamA}`) || "null") || {},
           [teamB]: JSON.parse(localStorage.getItem(`team_profile_${teamB}`) || "null") || {}
         };
-        const epa = computeEarlyPhaseAnalyzer(raw, { teamA, teamB, windowKey, seedProfiles });
+        const accumKey = buildEpaAccumKey(teamA, teamB);
+        const previousAccum = safeParseJson(localStorage.getItem(accumKey) || "null") || {};
+        const incoming = parseEarlyNarrative(raw, { teamA, teamB, windowKey: "0-200" });
+        const mergedEvents = mergeEarlyEvents(previousAccum.events, incoming.events || []);
+        const windowKey = resolveAccumWindowKey(mergedEvents);
+        const epa = computeEarlyPhaseAnalyzer("", { teamA, teamB, windowKey, seedProfiles, eventsOverride: mergedEvents });
+        const snapshot = {
+          teamA,
+          teamB,
+          windowKey,
+          events: mergedEvents,
+          updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem(accumKey, JSON.stringify(snapshot));
         renderEPA(epa);
         lastEPA = epa;
+        if(narrativeEl) narrativeEl.value = "";
         document.getElementById("epaSaveProfile").disabled = false;
-        document.getElementById("epaStatus").textContent = `✅ EPA ${epa.window} generado`;
+        status.textContent = `✅ EPA acumulado ${epa.window} (${mergedEvents.length} eventos).`;
+      };
+
+      document.getElementById("epaReset").onclick = ()=>{
+        const teamA = document.getElementById("momTeamA").value;
+        const teamB = document.getElementById("momTeamB").value;
+        const status = document.getElementById("epaStatus");
+        if(!teamA || !teamB || teamA===teamB){
+          status.textContent = "⚠️ Selecciona dos equipos para reiniciar EPA.";
+          return;
+        }
+        localStorage.removeItem(buildEpaAccumKey(teamA, teamB));
+        lastEPA = null;
+        const cards = document.getElementById("epaCards");
+        const textList = document.getElementById("epaText");
+        const jsonOut = document.getElementById("epaJson");
+        const psychSvg = document.getElementById("epaPsychSvg");
+        if(cards) cards.innerHTML = "";
+        if(textList) textList.innerHTML = "";
+        if(jsonOut) jsonOut.textContent = "Sin análisis EPA.";
+        if(psychSvg) psychSvg.innerHTML = "";
+        document.getElementById("epaSaveProfile").disabled = true;
+        status.textContent = "✅ EPA reiniciado para este partido.";
       };
 
       document.getElementById("epaSaveProfile").onclick = ()=>{
@@ -3669,12 +3778,7 @@ export function initFootballLab(){
         const matchId = parsed.matchId || `TMP-${Date.now()}`;
         const lpeKey = `match_lpe_${matchId}`;
         const previous = safeParseJson(localStorage.getItem(lpeKey) || "null") || {};
-        const epaPsych = lastEPA?.teams?.length===2
-          ? {
-            home: lastEPA.psych?.[parsed.teams?.home] || null,
-            away: lastEPA.psych?.[parsed.teams?.away] || null
-          }
-          : null;
+        const epaPsych = resolveEpaPsychForLpe(lastEPA, parsed.teams);
         const nextState = updateLiveProjectionState(previous, parsed, { epaPsych });
         localStorage.setItem(lpeKey, JSON.stringify(nextState));
         lastLPE = nextState;
