@@ -907,6 +907,234 @@ export function initFootballLab(){
     return next;
   }
 
+  function normalizeIdd(value){
+    const raw = clamp(Number(value) || 0, -1, 1);
+    return clamp((raw + 1) / 2, 0, 1);
+  }
+
+  function computePerformanceIndex(metrics={}){
+    const avgIDD = normalizeIdd(metrics.avgIDD);
+    const threat = clamp(Number(metrics.threat) || 0, 0, 1);
+    const lateIDD = normalizeIdd(metrics.lateIDD);
+    const avgComposure = clamp(Number(metrics?.psych?.avgComposure) || 0, 0, 1);
+    const avgTiltRisk = clamp(Number(metrics?.psych?.avgTiltRisk) || 0, 0, 1);
+    return clamp(
+      0.45 * avgIDD +
+      0.25 * threat +
+      0.10 * lateIDD +
+      0.10 * avgComposure -
+      0.10 * avgTiltRisk,
+      0,
+      1
+    );
+  }
+
+  function createHomeAwayBucket(){
+    return { n: 0, avgPI: 0.5, avgIDD: 0, avgThreat: 0.5, avgComposure: 0.5, avgTilt: 0.5, lateStrength: 0.5 };
+  }
+
+  function updateHomeAwayBucket(bucket, payload){
+    const prevN = Number(bucket.n) || 0;
+    const alpha = prevN < 10 ? 0.18 : 0.10;
+    const ema = (oldVal, nextVal)=> oldVal * (1 - alpha) + nextVal * alpha;
+    bucket.avgPI = clamp(ema(Number(bucket.avgPI) || 0.5, clamp(Number(payload.pi) || 0.5, 0, 1)), 0, 1);
+    bucket.avgIDD = clamp(ema(Number(bucket.avgIDD) || 0, clamp(Number(payload.avgIDD) || 0, -1, 1)), -1, 1);
+    bucket.avgThreat = clamp(ema(Number(bucket.avgThreat) || 0.5, clamp(Number(payload.threat) || 0, 0, 1)), 0, 1);
+    bucket.avgComposure = clamp(ema(Number(bucket.avgComposure) || 0.5, clamp(Number(payload.avgComposure) || 0, 0, 1)), 0, 1);
+    bucket.avgTilt = clamp(ema(Number(bucket.avgTilt) || 0.5, clamp(Number(payload.avgTilt) || 0, 0, 1)), 0, 1);
+    bucket.lateStrength = clamp(ema(Number(bucket.lateStrength) || 0.5, normalizeIdd(payload.lateIDD)), 0, 1);
+    bucket.n = prevN + 1;
+    return bucket;
+  }
+
+  function computeHaTraits(homeBucket, awayBucket){
+    const homeBoost = clamp((Number(homeBucket.avgPI) || 0.5) - (Number(awayBucket.avgPI) || 0.5), -0.30, 0.30);
+    const awayResilience = clamp((Number(awayBucket.avgPI) || 0.5) / ((Number(homeBucket.avgPI) || 0.5) + 0.001), 0, 1);
+    const awayFragility = clamp(1 - awayResilience, 0, 1);
+    const crowdEnergy = clamp((Number(homeBucket.lateStrength) || 0.5) - (Number(awayBucket.lateStrength) || 0.5) + 0.5, 0, 1);
+    const travelTilt = clamp((Number(awayBucket.avgTilt) || 0.5) - (Number(homeBucket.avgTilt) || 0.5) + 0.5, 0, 1);
+    return { homeBoost, awayResilience, awayFragility, crowdEnergy, travelTilt };
+  }
+
+  function inferEngineMetricsFromMatch(match, teamId){
+    const isHome = match?.homeId===teamId;
+    const side = isHome ? "home" : "away";
+    const avgIDD = clamp(Number(match?.narrativeModule?.diagnostic?.labels?.control_without_conversion) || 0, 0, 1) * 2 - 1;
+    const lateIDD = clamp(Number(match?.narrativeModule?.diagnostic?.labels?.late_push) || 0, 0, 1) * 2 - 1;
+    const threat = metricFromStats(match?.stats, ["big chances", "ocasiones", "ataques peligrosos"], side);
+    const intensityRaw = metricFromStats(match?.stats, ["shots", "remates", "shots on target", "tiros a puerta"], side);
+    return {
+      avgIDD,
+      lateIDD,
+      threat: clamp(Number(threat) || 0.5, 0, 1),
+      intensity: clamp(Number(intensityRaw) || 0.5, 0, 1),
+      shockGoals: 0,
+      sterilePressure: clamp(Number(match?.narrativeModule?.diagnostic?.labels?.control_without_conversion) || 0.2, 0, 1),
+      psych: {
+        avgConfidence: 0.55,
+        avgComposure: 0.52,
+        avgFrustration: 0.35,
+        avgTiltRisk: 0.32
+      }
+    };
+  }
+
+  function recomputeTeamGlobalEngine(db, teamId){
+    const team = db.teams.find(t=>t.id===teamId);
+    if(!team) return null;
+    const profile = getOrCreateDiagProfile(db, teamId, team.name);
+    const orderedMatches = db.tracker
+      .filter(m=>(m.homeId===teamId || m.awayId===teamId) && m?.teamEngine?.[teamId])
+      .sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")));
+    const home = createHomeAwayBucket();
+    const away = createHomeAwayBucket();
+    const series = [];
+    orderedMatches.forEach((match, idx)=>{
+      const sample = match.teamEngine[teamId];
+      const metrics = sample.metrics || {};
+      const psych = metrics.psych || {};
+      const pi = computePerformanceIndex(metrics);
+      sample.pi = pi;
+      const target = sample.isHome ? home : away;
+      updateHomeAwayBucket(target, {
+        pi,
+        avgIDD: metrics.avgIDD,
+        lateIDD: metrics.lateIDD,
+        threat: metrics.threat,
+        avgComposure: psych.avgComposure,
+        avgTilt: psych.avgTiltRisk
+      });
+      const epa = clamp(Number(sample.epa) || 0.5, 0, 1);
+      const ema = clamp(Number(sample.emaIntensity) || 0.5, 0, 1);
+      const globalStrength = clamp(0.40*pi + 0.25*epa + 0.20*ema + 0.15*(1 - clamp(Number(psych.avgTiltRisk) || 0.5, 0, 1)), 0, 1);
+      series.push({
+        label: match.date || `M${idx+1}`,
+        score: globalStrength,
+        pi,
+        epa,
+        ema,
+        isHome: sample.isHome
+      });
+    });
+    const haTraits = computeHaTraits(home, away);
+    const trend = series.slice(-5);
+    const currentStrength = trend.length ? trend.reduce((sum, item)=>sum + item.score, 0) / trend.length : 0.5;
+    profile.engineV1 = {
+      version: "hae_epa_ema_v1",
+      updatedAt: new Date().toISOString(),
+      samples: series.length,
+      currentStrength,
+      homeAway: { home, away },
+      haTraits,
+      series
+    };
+    return profile.engineV1;
+  }
+
+  function renderTeamGlobalEngineChart(canvas, engine){
+    if(!canvas || typeof Chart!=="function") return;
+    if(canvas._chart){
+      canvas._chart.destroy();
+      canvas._chart = null;
+    }
+    const labels = (engine?.series || []).map(item=>item.label);
+    const dataStrength = (engine?.series || []).map(item=>Math.round((item.score || 0) * 100));
+    const dataEPA = (engine?.series || []).map(item=>Math.round((item.epa || 0) * 100));
+    const dataEMA = (engine?.series || []).map(item=>Math.round((item.ema || 0) * 100));
+    canvas._chart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "Fuerza global", data: dataStrength, borderColor: "#2ea043", backgroundColor: "rgba(46,160,67,.16)", tension: 0.25 },
+          { label: "EPA", data: dataEPA, borderColor: "#1f6feb", backgroundColor: "rgba(31,111,235,.16)", tension: 0.25 },
+          { label: "EMA psicológico", data: dataEMA, borderColor: "#d29922", backgroundColor: "rgba(210,153,34,.14)", tension: 0.25 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        scales: {
+          x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
+          y: { min: 0, max: 100, ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } }
+        }
+      }
+    });
+  }
+
+  function openTeamEngineModal({ db, match, team, onSave } = {}){
+    if(!match || !team) return;
+    const inferred = inferEngineMetricsFromMatch(match, team.id);
+    const prev = match?.teamEngine?.[team.id] || {};
+    const metrics = prev.metrics || inferred;
+    const psych = metrics.psych || inferred.psych;
+    const epa = clamp(Number(prev.epa) || 0.5, 0, 1);
+    const emaIntensity = clamp(Number(prev.emaIntensity) || 0.5, 0, 1);
+    const backdrop = document.createElement("div");
+    backdrop.className = "fl-modal-backdrop";
+    backdrop.innerHTML = `
+      <div class="fl-modal">
+        <div class="fl-row" style="justify-content:space-between;align-items:center;">
+          <div style="font-size:18px;font-weight:900;">EPA + EMA + Localía (${team.name})</div>
+          <button class="fl-btn" id="closeEngineModal">Cerrar</button>
+        </div>
+        <div class="fl-grid two" style="margin-top:8px;">
+          <label class="fl-mini">EPA (0-1)<input id="engEPA" class="fl-input" type="number" min="0" max="1" step="0.01" value="${epa}"></label>
+          <label class="fl-mini">EMA intensidad velas (0-1)<input id="engEMA" class="fl-input" type="number" min="0" max="1" step="0.01" value="${emaIntensity}"></label>
+          <label class="fl-mini">avgIDD (-1 a 1)<input id="engAvgIDD" class="fl-input" type="number" min="-1" max="1" step="0.01" value="${Number(metrics.avgIDD)||0}"></label>
+          <label class="fl-mini">lateIDD (-1 a 1)<input id="engLateIDD" class="fl-input" type="number" min="-1" max="1" step="0.01" value="${Number(metrics.lateIDD)||0}"></label>
+          <label class="fl-mini">threat (0-1)<input id="engThreat" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(metrics.threat)||0.5,0,1)}"></label>
+          <label class="fl-mini">intensity (0-1)<input id="engIntensity" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(metrics.intensity)||0.5,0,1)}"></label>
+          <label class="fl-mini">shockGoals<input id="engShockGoals" class="fl-input" type="number" min="0" max="10" step="1" value="${Number(metrics.shockGoals)||0}"></label>
+          <label class="fl-mini">sterilePressure (0-1)<input id="engSterile" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(metrics.sterilePressure)||0.2,0,1)}"></label>
+          <label class="fl-mini">confidence (0-1)<input id="engConf" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(psych.avgConfidence)||0.55,0,1)}"></label>
+          <label class="fl-mini">composure (0-1)<input id="engComp" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(psych.avgComposure)||0.52,0,1)}"></label>
+          <label class="fl-mini">frustration (0-1)<input id="engFrus" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(psych.avgFrustration)||0.35,0,1)}"></label>
+          <label class="fl-mini">tiltRisk (0-1)<input id="engTilt" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(psych.avgTiltRisk)||0.32,0,1)}"></label>
+        </div>
+        <div class="fl-row" style="margin-top:10px;">
+          <button class="fl-btn" id="saveEngineModal">Guardar en gráfico global</button>
+          <span id="engineModalStatus" class="fl-muted"></span>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+    backdrop.querySelector("#closeEngineModal").onclick = ()=>backdrop.remove();
+    backdrop.onclick = (ev)=>{ if(ev.target===backdrop) backdrop.remove(); };
+    backdrop.querySelector("#saveEngineModal").onclick = ()=>{
+      const payload = {
+        team: team.name,
+        isHome: match.homeId===team.id,
+        epa: clamp(Number(backdrop.querySelector("#engEPA").value) || 0, 0, 1),
+        emaIntensity: clamp(Number(backdrop.querySelector("#engEMA").value) || 0, 0, 1),
+        metrics: {
+          avgIDD: clamp(Number(backdrop.querySelector("#engAvgIDD").value) || 0, -1, 1),
+          lateIDD: clamp(Number(backdrop.querySelector("#engLateIDD").value) || 0, -1, 1),
+          threat: clamp(Number(backdrop.querySelector("#engThreat").value) || 0, 0, 1),
+          intensity: clamp(Number(backdrop.querySelector("#engIntensity").value) || 0, 0, 1),
+          shockGoals: Math.max(0, Number(backdrop.querySelector("#engShockGoals").value) || 0),
+          sterilePressure: clamp(Number(backdrop.querySelector("#engSterile").value) || 0, 0, 1),
+          psych: {
+            avgConfidence: clamp(Number(backdrop.querySelector("#engConf").value) || 0, 0, 1),
+            avgComposure: clamp(Number(backdrop.querySelector("#engComp").value) || 0, 0, 1),
+            avgFrustration: clamp(Number(backdrop.querySelector("#engFrus").value) || 0, 0, 1),
+            avgTiltRisk: clamp(Number(backdrop.querySelector("#engTilt").value) || 0, 0, 1)
+          }
+        },
+        updatedAt: new Date().toISOString()
+      };
+      payload.pi = computePerformanceIndex(payload.metrics);
+      match.teamEngine ||= {};
+      match.teamEngine[team.id] = payload;
+      recomputeTeamGlobalEngine(db, team.id);
+      saveDb(db);
+      const status = backdrop.querySelector("#engineModalStatus");
+      status.textContent = `✅ PI ${payload.pi.toFixed(3)} guardado y agregado al motor global.`;
+      if(typeof onSave==="function") setTimeout(()=>{ backdrop.remove(); onSave(); }, 320);
+    };
+  }
+
   function simulateMatchV2(plan, rngSeed){
     const rng = createRng(rngSeed);
     const ht = plan.homeProfile.traits || {};
@@ -3025,6 +3253,7 @@ export function initFootballLab(){
         .filter(m=>m.homeId===team.id || m.awayId===team.id)
         .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
       const behavior = buildTeamBehaviorSeries(db, team.id);
+      const engine = recomputeTeamGlobalEngine(db, team.id) || getOrCreateDiagProfile(db, team.id, team.name).engineV1;
       const trendLabel = behavior.summary.currentMomentum >= 0.66
         ? "🔥 Alto"
         : behavior.summary.currentMomentum >= 0.4
@@ -3050,6 +3279,7 @@ export function initFootballLab(){
           <td>${rival?.name || "-"}</td>
           <td class="fl-row" style="gap:6px;">
             <button class="fl-btn" data-open-stats-modal="${m.id}">Estadísticas</button>
+            <button class="fl-btn" data-open-engine-modal="${m.id}">EPA/EMA/HAE</button>
             <button class="fl-btn" data-edit-match="${m.id}">Editar</button>
             <button class="fl-btn" data-delete-match="${m.id}">Borrar</button>
           </td>
@@ -3081,6 +3311,18 @@ export function initFootballLab(){
           <div style="font-weight:800;margin-bottom:6px;">Importar plantilla JSON</div>
           <textarea id="squadImport" class="fl-text" placeholder='{"team":{},"squadBySection":[]}'></textarea>
           <div class="fl-row" style="margin-top:8px;"><button class="fl-btn" id="runSquadImport">Importar plantilla</button><span id="squadStatus" class="fl-muted"></span></div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Motor global: EPA + EMA + Localía</div>
+          <div class="fl-kpi" style="margin-bottom:8px;">
+            <div><span class="fl-mini">Fuerza actual</span><b>${Math.round((Number(engine?.currentStrength)||0.5)*100)}%</b></div>
+            <div><span class="fl-mini">Muestras</span><b>${Number(engine?.samples)||0}</b></div>
+            <div><span class="fl-mini">Home Boost</span><b>${(Number(engine?.haTraits?.homeBoost)||0).toFixed(2)}</b></div>
+            <div><span class="fl-mini">Away Resilience</span><b>${(Number(engine?.haTraits?.awayResilience)||0).toFixed(2)}</b></div>
+            <div><span class="fl-mini">Travel Tilt</span><b>${(Number(engine?.haTraits?.travelTilt)||0).toFixed(2)}</b></div>
+          </div>
+          <div class="fl-mini" style="margin-bottom:8px;">Usa el botón <b>EPA/EMA/HAE</b> junto a cada partido para alimentar este gráfico con datos narrados + estadísticas.</div>
+          <div style="height:250px;"><canvas id="teamGlobalEngineChart"></canvas></div>
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">Patrones de comportamiento</div>
@@ -3193,9 +3435,14 @@ export function initFootballLab(){
         render("equipo", { teamId: team.id });
       };
       renderTeamBehaviorChart(document.getElementById("teamBehaviorChart"), behavior);
+      renderTeamGlobalEngineChart(document.getElementById("teamGlobalEngineChart"), engine);
       content.querySelectorAll("[data-open-stats-modal]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-stats-modal"));
         openStatsModal({ db, match, onSave: ()=>render("equipo", { teamId: team.id }) });
+      });
+      content.querySelectorAll("[data-open-engine-modal]").forEach(btn=>btn.onclick = ()=>{
+        const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-engine-modal"));
+        openTeamEngineModal({ db, match, team, onSave: ()=>render("equipo", { teamId: team.id }) });
       });
       content.querySelectorAll("[data-edit-match]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-edit-match"));
