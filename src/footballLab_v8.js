@@ -1071,27 +1071,33 @@ export function initFootballLab(){
     const psych = metrics.psych || inferred.psych;
     const epa = clamp(Number(prev.epa) || 0.5, 0, 1);
     const emaIntensity = clamp(Number(prev.emaIntensity) || 0.5, 0, 1);
+    const existingNarrative = match?.narrativeModule?.rawText || "";
+    const existingStatsJson = match?.stats?.length
+      ? JSON.stringify({ stats: match.stats }, null, 2)
+      : "";
+    const homeName = db.teams.find(t=>t.id===match.homeId)?.name || "Local";
+    const awayName = db.teams.find(t=>t.id===match.awayId)?.name || "Visitante";
     const backdrop = document.createElement("div");
     backdrop.className = "fl-modal-backdrop";
     backdrop.innerHTML = `
-      <div class="fl-modal">
+      <div class="fl-modal" style="max-width:920px;max-height:90vh;overflow:auto;">
         <div class="fl-row" style="justify-content:space-between;align-items:center;">
           <div style="font-size:18px;font-weight:900;">EPA + EMA + Localía (${team.name})</div>
           <button class="fl-btn" id="closeEngineModal">Cerrar</button>
         </div>
+        <div class="fl-card" style="margin-top:10px;">
+          <div style="font-weight:800;margin-bottom:6px;">📋 Relato del partido</div>
+          <textarea id="engNarrative" class="fl-text" placeholder="Pega el relato línea por línea con minutos.">${existingNarrative}</textarea>
+        </div>
+        <div class="fl-card" style="margin-top:10px;">
+          <div style="font-weight:800;margin-bottom:6px;">📊 Estadísticas (JSON)</div>
+          <textarea id="engStatsJson" class="fl-text" placeholder='{"stats":[{"key":"Posesión","home":"67%","away":"33%"}]}' style="min-height:160px;">${existingStatsJson}</textarea>
+          <div class="fl-mini" style="margin-top:6px;">Si ya había datos, aquí los puedes ver y editar.</div>
+        </div>
+        <div class="fl-mini" style="margin-top:8px;">Las métricas del motor se recalculan desde el relato + estadísticas al guardar.</div>
         <div class="fl-grid two" style="margin-top:8px;">
           <label class="fl-mini">EPA (0-1)<input id="engEPA" class="fl-input" type="number" min="0" max="1" step="0.01" value="${epa}"></label>
           <label class="fl-mini">EMA intensidad velas (0-1)<input id="engEMA" class="fl-input" type="number" min="0" max="1" step="0.01" value="${emaIntensity}"></label>
-          <label class="fl-mini">avgIDD (-1 a 1)<input id="engAvgIDD" class="fl-input" type="number" min="-1" max="1" step="0.01" value="${Number(metrics.avgIDD)||0}"></label>
-          <label class="fl-mini">lateIDD (-1 a 1)<input id="engLateIDD" class="fl-input" type="number" min="-1" max="1" step="0.01" value="${Number(metrics.lateIDD)||0}"></label>
-          <label class="fl-mini">threat (0-1)<input id="engThreat" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(metrics.threat)||0.5,0,1)}"></label>
-          <label class="fl-mini">intensity (0-1)<input id="engIntensity" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(metrics.intensity)||0.5,0,1)}"></label>
-          <label class="fl-mini">shockGoals<input id="engShockGoals" class="fl-input" type="number" min="0" max="10" step="1" value="${Number(metrics.shockGoals)||0}"></label>
-          <label class="fl-mini">sterilePressure (0-1)<input id="engSterile" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(metrics.sterilePressure)||0.2,0,1)}"></label>
-          <label class="fl-mini">confidence (0-1)<input id="engConf" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(psych.avgConfidence)||0.55,0,1)}"></label>
-          <label class="fl-mini">composure (0-1)<input id="engComp" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(psych.avgComposure)||0.52,0,1)}"></label>
-          <label class="fl-mini">frustration (0-1)<input id="engFrus" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(psych.avgFrustration)||0.35,0,1)}"></label>
-          <label class="fl-mini">tiltRisk (0-1)<input id="engTilt" class="fl-input" type="number" min="0" max="1" step="0.01" value="${clamp(Number(psych.avgTiltRisk)||0.32,0,1)}"></label>
         </div>
         <div class="fl-row" style="margin-top:10px;">
           <button class="fl-btn" id="saveEngineModal">Guardar en gráfico global</button>
@@ -1103,25 +1109,47 @@ export function initFootballLab(){
     backdrop.querySelector("#closeEngineModal").onclick = ()=>backdrop.remove();
     backdrop.onclick = (ev)=>{ if(ev.target===backdrop) backdrop.remove(); };
     backdrop.querySelector("#saveEngineModal").onclick = ()=>{
+      const status = backdrop.querySelector("#engineModalStatus");
+      const narrativeRaw = backdrop.querySelector("#engNarrative").value.trim();
+      const statsRaw = backdrop.querySelector("#engStatsJson").value.trim();
+      if(narrativeRaw){
+        const parsed = extractNarratedEvents(narrativeRaw, { home: homeName, away: awayName });
+        const diagnostic = buildNarrativeDiagnostic({ match, teams: { home: homeName, away: awayName }, parsed });
+        match.narrativeModule = {
+          rawText: narrativeRaw,
+          normalized: {
+            matchId: match.id,
+            teams: { home: homeName, away: awayName },
+            events: parsed.events
+          },
+          diagnostic: { matchId: match.id, diagnostic }
+        };
+      }
+      if(statsRaw){
+        try{
+          match.stats = parseStatsPayload(statsRaw);
+        }catch(err){
+          status.textContent = `❌ ${String(err.message || err)}`;
+          return;
+        }
+      }
+      const inferredFresh = inferEngineMetricsFromMatch(match, team.id);
+      const mergedPsych = {
+        ...inferredFresh.psych,
+        ...(psych || {})
+      };
+      const finalMetrics = {
+        ...inferredFresh,
+        ...metrics,
+        ...inferredFresh,
+        psych: mergedPsych
+      };
       const payload = {
         team: team.name,
         isHome: match.homeId===team.id,
         epa: clamp(Number(backdrop.querySelector("#engEPA").value) || 0, 0, 1),
         emaIntensity: clamp(Number(backdrop.querySelector("#engEMA").value) || 0, 0, 1),
-        metrics: {
-          avgIDD: clamp(Number(backdrop.querySelector("#engAvgIDD").value) || 0, -1, 1),
-          lateIDD: clamp(Number(backdrop.querySelector("#engLateIDD").value) || 0, -1, 1),
-          threat: clamp(Number(backdrop.querySelector("#engThreat").value) || 0, 0, 1),
-          intensity: clamp(Number(backdrop.querySelector("#engIntensity").value) || 0, 0, 1),
-          shockGoals: Math.max(0, Number(backdrop.querySelector("#engShockGoals").value) || 0),
-          sterilePressure: clamp(Number(backdrop.querySelector("#engSterile").value) || 0, 0, 1),
-          psych: {
-            avgConfidence: clamp(Number(backdrop.querySelector("#engConf").value) || 0, 0, 1),
-            avgComposure: clamp(Number(backdrop.querySelector("#engComp").value) || 0, 0, 1),
-            avgFrustration: clamp(Number(backdrop.querySelector("#engFrus").value) || 0, 0, 1),
-            avgTiltRisk: clamp(Number(backdrop.querySelector("#engTilt").value) || 0, 0, 1)
-          }
-        },
+        metrics: finalMetrics,
         updatedAt: new Date().toISOString()
       };
       payload.pi = computePerformanceIndex(payload.metrics);
@@ -1129,7 +1157,6 @@ export function initFootballLab(){
       match.teamEngine[team.id] = payload;
       recomputeTeamGlobalEngine(db, team.id);
       saveDb(db);
-      const status = backdrop.querySelector("#engineModalStatus");
       status.textContent = `✅ PI ${payload.pi.toFixed(3)} guardado y agregado al motor global.`;
       if(typeof onSave==="function") setTimeout(()=>{ backdrop.remove(); onSave(); }, 320);
     };
