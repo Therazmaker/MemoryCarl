@@ -34,7 +34,12 @@ export function initFootballLab(){
       marketBlend: 0.35,
       matchday: 20,
       tableContextTrust: 0.45,
-      tableContext: {}
+      tableContext: {},
+      simV2: {
+        baseGoalRatePerBlock: 0.22,
+        globalVolatility: 0.34,
+        leagueGoalsAvg: 2.6
+      }
     },
     predictions: [],
     bitacora: {
@@ -86,6 +91,10 @@ export function initFootballLab(){
       db.versus.matchday = clamp(Number(db.versus.matchday) || defaultDb.versus.matchday, 1, 50);
       db.versus.tableContextTrust = clamp(Number(db.versus.tableContextTrust) || defaultDb.versus.tableContextTrust, 0, 1);
       db.versus.tableContext ||= {};
+      db.versus.simV2 ||= structuredClone(defaultDb.versus.simV2);
+      db.versus.simV2.baseGoalRatePerBlock = clamp(Number(db.versus.simV2.baseGoalRatePerBlock) || defaultDb.versus.simV2.baseGoalRatePerBlock, 0.08, 0.6);
+      db.versus.simV2.globalVolatility = clamp(Number(db.versus.simV2.globalVolatility) || defaultDb.versus.simV2.globalVolatility, 0.1, 0.8);
+      db.versus.simV2.leagueGoalsAvg = clamp(Number(db.versus.simV2.leagueGoalsAvg) || defaultDb.versus.simV2.leagueGoalsAvg, 1.6, 4.2);
       db.predictions ||= [];
       db.bitacora = ensureBitacoraState(db.bitacora);
       db.learning ||= structuredClone(defaultDb.learning);
@@ -792,6 +801,158 @@ export function initFootballLab(){
       profile.traits[key] = clamp(Number(profile.traits[key]) || 0.5, 0, 1);
     });
     return profile;
+  }
+
+  function classifyStyle(traits={}){
+    if((traits.territorial_strength||0)>0.58 && (traits.finishing_quality||0)<0.45) return "sterile_domination";
+    if((traits.low_block_execution||0)>0.55 && (traits.transition_attack||0)>0.55) return "absorb_and_strike";
+    if((traits.late_game_management||0)>0.58) return "late_collider";
+    if((traits.discipline_risk||0)>0.62) return "high_variance";
+    if((traits.territorial_strength||0)>0.56 && (traits.chance_creation||0)>0.52) return "territorial_builder";
+    return "balanced";
+  }
+
+  function createRng(seed){
+    if(!Number.isFinite(Number(seed))) return Math.random;
+    let x = (Number(seed) >>> 0) || 1;
+    return ()=>{
+      x += 0x6D2B79F5;
+      let r = Math.imul(x ^ (x >>> 15), x | 1);
+      r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function randn(rng){
+    const u = Math.max(1e-9, rng());
+    const v = Math.max(1e-9, rng());
+    return Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+  }
+
+  function buildMatchPlan(teamAProfile, teamBProfile, context={}){
+    const h = teamAProfile.traits || {};
+    const a = teamBProfile.traits || {};
+    const clash = [];
+    if((h.territorial_strength||0)>0.56 && (a.transition_attack||0)>0.55 && (h.transition_defense||0)<0.47) clash.push("away_transition_window");
+    if((a.territorial_strength||0)>0.56 && (h.transition_attack||0)>0.55 && (a.transition_defense||0)<0.47) clash.push("home_transition_window");
+    if((h.territorial_strength||0)>0.58 && (h.finishing_quality||0)<0.45) clash.push("home_sterile_risk");
+    if((a.territorial_strength||0)>0.58 && (a.finishing_quality||0)<0.45) clash.push("away_sterile_risk");
+    return {
+      home: teamAProfile.team,
+      away: teamBProfile.team,
+      context: {
+        homeAdv: clamp(Number(context.homeAdv)||0.06, 0, 0.3),
+        leagueGoalsAvg: clamp(Number(context.leagueGoalsAvg)||2.6, 1.6, 4.2)
+      },
+      matchup: {
+        homeStyle: classifyStyle(h),
+        awayStyle: classifyStyle(a),
+        styleClash: clash
+      },
+      rates: {
+        baseGoalRatePerBlock: clamp(Number(context.baseGoalRatePerBlock)||0.22, 0.08, 0.6),
+        volatility: clamp(Number(context.globalVolatility)||0.34, 0.1, 0.8)
+      },
+      homeProfile: teamAProfile,
+      awayProfile: teamBProfile
+    };
+  }
+
+  function generateCandlesFromBlocks(blocks=[], team="home"){
+    let prev = 0;
+    return blocks.map(b=>{
+      const close = team==="home" ? Number(b.iddHome)||0 : Number(b.iddAway)||0;
+      const item = { label: `${b.t0}-${b.t1}`, open: prev, close, high: Math.max(prev, close), low: Math.min(prev, close) };
+      prev = close;
+      return item;
+    });
+  }
+
+  function generateDiagnosis(candles=[], blocksEvents=[]){
+    const closes = candles.map(c=>Number(c.close)||0);
+    const diffs = closes.slice(1).map((v, i)=>v-closes[i]);
+    let breakIdx = 0;
+    let maxDelta = -1;
+    diffs.forEach((d, i)=>{ if(Math.abs(d)>maxDelta){ maxDelta = Math.abs(d); breakIdx = i+1; } });
+    const breakBlock = candles[breakIdx]?.label || "0-10";
+    const late = closes.slice(8);
+    const lateStrength = late.length ? late.reduce((a,b)=>a+b,0)/late.length : 0;
+    const signs = closes.reduce((acc,v,i)=> acc + ((i>0 && Math.sign(v)!==Math.sign(closes[i-1])) ? 1 : 0), 0);
+    const vol = closes.length ? Math.sqrt(closes.reduce((s,v)=>s + v*v,0)/closes.length) : 0;
+    const patterns = [];
+    if(blocksEvents.some(e=>e.type==="goal" && e.shock)) patterns.push("shock_transition");
+    if(vol>0.35) patterns.push("oscillation");
+    if(lateStrength<-0.12) patterns.push("late_risk_exposure");
+    if(signs>=5) patterns.push("second_half_break");
+    if(!blocksEvents.some(e=>e.type==="goal") && closes.reduce((a,b)=>a+b,0)>1.2) patterns.push("sterile_dominance");
+    const text = [];
+    if(patterns.includes("sterile_dominance")) text.push("Dominio sin conversión: presión sostenida sin premio.");
+    if(patterns.includes("shock_transition")) text.push("Gol contra tendencia: transición castiga el control rival.");
+    if(patterns.includes("late_risk_exposure")) text.push("Cierre vulnerable: exposición tardía.");
+    if(!text.length) text.push("Partido por fases sin quiebre dominante.");
+    return { breakBlock, patterns, text, metrics: { vol, lateStrength, switches: signs } };
+  }
+
+  function applyMatchToTeamProfile(profile, diagnostic, perspective="for"){
+    const next = structuredClone(profile || createEmptyDiagProfile());
+    const alpha = 0.12;
+    const touch = (k, s)=>{ next.traits[k] = clamp(next.traits[k]*(1-alpha) + s*alpha, 0, 1); };
+    const has = p=>diagnostic?.patterns?.includes(p);
+    if(has("sterile_dominance")){ touch("territorial_strength", 0.66); touch("finishing_quality", 0.36); }
+    if(has("shock_transition")){ touch("transition_attack", perspective==="for" ? 0.66 : 0.45); touch("transition_defense", perspective==="against" ? 0.35 : 0.58); }
+    if(has("late_risk_exposure")) touch("late_game_management", 0.35);
+    if(has("oscillation")) touch("discipline_risk", 0.64);
+    next.matchesCount = (Number(next.matchesCount)||0) + 1;
+    next.lastUpdated = new Date().toISOString();
+    return next;
+  }
+
+  function simulateMatchV2(plan, rngSeed){
+    const rng = createRng(rngSeed);
+    const ht = plan.homeProfile.traits || {};
+    const at = plan.awayProfile.traits || {};
+    const attackH = 0.40*(ht.territorial_strength||0.5) + 0.35*(ht.chance_creation||0.5) + 0.25*(ht.finishing_quality||0.5);
+    const attackA = 0.40*(at.territorial_strength||0.5) + 0.35*(at.chance_creation||0.5) + 0.25*(at.finishing_quality||0.5);
+    const defenseH = 0.50*(ht.transition_defense||0.5) + 0.50*(ht.low_block_execution||0.5);
+    const defenseA = 0.50*(at.transition_defense||0.5) + 0.50*(at.low_block_execution||0.5);
+    const blocks = [];
+    const allEvents = [];
+    const score = { home: 0, away: 0 };
+    let prevIdd = 0;
+    for(let k=0;k<10;k++){
+      const t0 = k*10;
+      const t1 = k===9 ? 90 : (k+1)*10;
+      const scoreDiff = score.home - score.away;
+      const late = t0>=70;
+      const state = scoreDiff<0 ? (late?0.15:0.08) : scoreDiff>0 ? -0.05 : 0;
+      const noise = randn(rng) * ((Number(ht.discipline_risk)||0.5 + (Number(at.discipline_risk)||0.5))/2) * plan.rates.volatility;
+      let style = 0;
+      if(plan.matchup.styleClash.includes("home_transition_window")) style += 0.08;
+      if(plan.matchup.styleClash.includes("away_transition_window")) style -= 0.08;
+      if(plan.matchup.styleClash.includes("home_sterile_risk") && k>=3 && k<=7) style -= 0.06;
+      if(plan.matchup.styleClash.includes("away_sterile_risk") && k>=3 && k<=7) style += 0.06;
+      const base = (attackH-defenseA) - (attackA-defenseH)*0.65 + plan.context.homeAdv*0.4;
+      const iddHome = clamp(0.55*prevIdd + 0.45*(base + style + state + noise), -1, 1);
+      const iddAway = -iddHome;
+      const events = [];
+      const goalH = plan.rates.baseGoalRatePerBlock * (1 + 0.9*Math.max(0, iddHome)) * (ht.finishing_quality||0.5) * (1-defenseA*0.75);
+      const goalA = plan.rates.baseGoalRatePerBlock * (1 + 0.9*Math.max(0, iddAway)) * (at.finishing_quality||0.5) * (1-defenseH*0.75);
+      const shockH = 0.08*(ht.transition_attack||0.5)*Math.max(0,-iddHome)*(1-(at.transition_defense||0.5));
+      const shockA = 0.08*(at.transition_attack||0.5)*Math.max(0,-iddAway)*(1-(ht.transition_defense||0.5));
+      if(rng() < goalH + shockH){ score.home += 1; events.push({type:"goal", team:"home", min:t0+Math.floor(rng()*10), shock:rng() < shockH/(goalH+shockH+1e-6)}); }
+      if(rng() < goalA + shockA){ score.away += 1; events.push({type:"goal", team:"away", min:t0+Math.floor(rng()*10), shock:rng() < shockA/(goalA+shockA+1e-6)}); }
+      const cardH = 0.05 + (ht.discipline_risk||0.5)*0.2 + (iddHome<-0.3 ? 0.08 : 0);
+      const cardA = 0.05 + (at.discipline_risk||0.5)*0.2 + (iddAway<-0.3 ? 0.08 : 0);
+      if(rng()<cardH) events.push({type:"yellow", team:"home", min:t0+Math.floor(rng()*10)});
+      if(rng()<cardA) events.push({type:"yellow", team:"away", min:t0+Math.floor(rng()*10)});
+      allEvents.push(...events);
+      blocks.push({ t0, t1, iddHome, iddAway, events });
+      prevIdd = iddHome;
+    }
+    const candlesHome = generateCandlesFromBlocks(blocks, "home");
+    const candlesAway = generateCandlesFromBlocks(blocks, "away");
+    const diagnostic = generateDiagnosis(candlesHome, allEvents);
+    return { score, blocks, candlesHome, candlesAway, diagnostic };
   }
 
   function parseMinuteToken(raw){
@@ -2812,6 +2973,11 @@ export function initFootballLab(){
             </div>
             <div id="vsOut" style="margin-top:10px;" class="fl-muted">Selecciona dos equipos.</div>
             <div class="fl-row" style="margin-top:8px;">
+              <button class="fl-btn" id="runVsV2">Simular v2 (momentum)</button>
+              <button class="fl-btn" id="saveVsV2Profile">Guardar v2 en perfiles</button>
+            </div>
+            <div id="vsV2Out" style="margin-top:8px;" class="fl-mini">Simulación por bloques IDD pendiente.</div>
+            <div class="fl-row" style="margin-top:8px;">
               <button class="fl-btn" id="saveVsPrediction">Guardar predicción</button>
               <span id="vsSaveStatus" class="fl-muted"></span>
             </div>
@@ -2850,6 +3016,7 @@ export function initFootballLab(){
       };
 
       let lastSimulation = null;
+      let lastSimulationV2 = null;
 
       const syncTableContextInputs = ()=>{
         const homeId = document.getElementById("vsHome").value;
@@ -2864,6 +3031,55 @@ export function initFootballLab(){
 
       document.getElementById("vsHome").onchange = syncTableContextInputs;
       document.getElementById("vsAway").onchange = syncTableContextInputs;
+
+      document.getElementById("runVsV2").onclick = ()=>{
+        const homeId = document.getElementById("vsHome").value;
+        const awayId = document.getElementById("vsAway").value;
+        const out = document.getElementById("vsV2Out");
+        if(!homeId || !awayId || homeId===awayId){
+          out.textContent = "❌ Selecciona dos equipos distintos.";
+          return;
+        }
+        const homeTeam = db.teams.find(t=>t.id===homeId);
+        const awayTeam = db.teams.find(t=>t.id===awayId);
+        const homeProfile = getOrCreateDiagProfile(db, homeId, homeTeam?.name || "Local");
+        const awayProfile = getOrCreateDiagProfile(db, awayId, awayTeam?.name || "Visitante");
+        const simCfg = db.versus.simV2 || defaultDb.versus.simV2;
+        const plan = buildMatchPlan(homeProfile, awayProfile, {
+          homeAdv: clamp((Number(document.getElementById("vsHA").value) || db.versus.homeAdvantage || 1.1) - 1, 0, 0.3),
+          leagueGoalsAvg: simCfg.leagueGoalsAvg,
+          baseGoalRatePerBlock: simCfg.baseGoalRatePerBlock,
+          globalVolatility: simCfg.globalVolatility
+        });
+        const sim = simulateMatchV2(plan);
+        lastSimulationV2 = { sim, homeId, awayId };
+        const blocks = sim.blocks.map(b=>`${b.t0}-${b.t1}: ${b.iddHome.toFixed(2)} (${b.events.map(e=>e.type + (e.shock?"⚡":"")).join(",") || "-"})`).join(" · ");
+        out.innerHTML = `
+          <div><b>Score v2:</b> ${sim.score.home}-${sim.score.away}</div>
+          <div><b>Quiebre:</b> ${sim.diagnostic.breakBlock}</div>
+          <div><b>Patrones:</b> ${(sim.diagnostic.patterns.join(", ") || "sin etiqueta")}</div>
+          <div>${sim.diagnostic.text.map(t=>`• ${t}`).join("<br/>")}</div>
+          <div style="margin-top:6px;"><b>IDD velas local:</b> ${sim.candlesHome.map(c=>`${c.label}:${c.close.toFixed(2)}`).join(" | ")}</div>
+          <div style="margin-top:6px;"><b>Bloques:</b> ${blocks}</div>
+        `;
+      };
+
+      document.getElementById("saveVsV2Profile").onclick = ()=>{
+        const out = document.getElementById("vsV2Out");
+        if(!lastSimulationV2){
+          out.textContent = "❌ Ejecuta Simular v2 primero.";
+          return;
+        }
+        const { sim, homeId, awayId } = lastSimulationV2;
+        const homeTeam = db.teams.find(t=>t.id===homeId);
+        const awayTeam = db.teams.find(t=>t.id===awayId);
+        const currentHome = getOrCreateDiagProfile(db, homeId, homeTeam?.name || "Local");
+        const currentAway = getOrCreateDiagProfile(db, awayId, awayTeam?.name || "Visitante");
+        db.diagProfiles[homeId] = applyMatchToTeamProfile(currentHome, sim.diagnostic, "for");
+        db.diagProfiles[awayId] = applyMatchToTeamProfile(currentAway, sim.diagnostic, "against");
+        saveDb(db);
+        out.innerHTML += `<div style="margin-top:6px;color:#3fb950;">✅ Rasgos de ambos equipos actualizados (EMA).</div>`;
+      };
 
       document.getElementById("runVs").onclick = ()=>{
         const homeId = document.getElementById("vsHome").value;
