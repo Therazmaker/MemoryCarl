@@ -26,7 +26,15 @@ export function initFootballLab(){
     teams: [],
     players: [],
     tracker: [],
-    versus: { homeAdvantage: 1.1 }
+    versus: { homeAdvantage: 1.1 },
+    predictions: [],
+    learning: {
+      leagueScale: {},
+      teamBias: {},
+      marketTrust: 0.35,
+      lrLeague: 0.12,
+      lrTeam: 0.08
+    }
   };
 
   function uid(prefix){
@@ -47,6 +55,11 @@ export function initFootballLab(){
       db.players ||= [];
       db.tracker ||= [];
       db.versus ||= { homeAdvantage: 1.1 };
+      db.predictions ||= [];
+      db.learning ||= structuredClone(defaultDb.learning);
+      db.learning.leagueScale ||= {};
+      db.learning.teamBias ||= {};
+      db.learning.marketTrust = clamp(Number(db.learning.marketTrust) || defaultDb.learning.marketTrust, 0, 0.85);
       return db;
     }catch(_e){
       localStorage.setItem(KEY, JSON.stringify(defaultDb));
@@ -405,6 +418,87 @@ export function initFootballLab(){
     return Math.max(min, Math.min(max, value));
   }
 
+  function ensureLearningState(db){
+    db.learning ||= structuredClone(defaultDb.learning);
+    db.learning.leagueScale ||= {};
+    db.learning.teamBias ||= {};
+    db.predictions ||= [];
+  }
+
+  function getLeagueScale(db, leagueId){
+    ensureLearningState(db);
+    const raw = db.learning.leagueScale[leagueId] || {};
+    return {
+      home: clamp(Number(raw.home) || 1, 0.75, 1.3),
+      away: clamp(Number(raw.away) || 1, 0.75, 1.3)
+    };
+  }
+
+  function getTeamBias(db, teamId){
+    ensureLearningState(db);
+    const raw = db.learning.teamBias[teamId] || {};
+    return {
+      attack: clamp(Number(raw.attack) || 0, -0.35, 0.35),
+      defense: clamp(Number(raw.defense) || 0, -0.35, 0.35)
+    };
+  }
+
+  function topScoreCells(matrix, topN=3){
+    const cells = [];
+    for(let h=0;h<matrix.length;h++){
+      for(let a=0;a<matrix[h].length;a++) cells.push({ h, a, p: matrix[h][a] });
+    }
+    return cells.sort((a,b)=>b.p-a.p).slice(0, topN);
+  }
+
+  function bttsProbability(matrix){
+    let sum = 0;
+    for(let h=1;h<matrix.length;h++){
+      for(let a=1;a<matrix[h].length;a++) sum += matrix[h][a];
+    }
+    return sum;
+  }
+
+  function updateLearningFromResult(db, prediction, result){
+    ensureLearningState(db);
+    const leagueId = prediction.leagueId || "global";
+    const lrLeague = clamp(Number(db.learning.lrLeague) || 0.12, 0.02, 0.5);
+    const lrTeam = clamp(Number(db.learning.lrTeam) || 0.08, 0.02, 0.4);
+    const leagueScale = getLeagueScale(db, leagueId);
+
+    const ratioHome = clamp((result.homeGoals + 0.25) / Math.max(0.25, prediction.lambdaHome), 0.75, 1.25);
+    const ratioAway = clamp((result.awayGoals + 0.25) / Math.max(0.25, prediction.lambdaAway), 0.75, 1.25);
+    leagueScale.home = clamp(leagueScale.home * (1 - lrLeague + lrLeague * ratioHome), 0.75, 1.3);
+    leagueScale.away = clamp(leagueScale.away * (1 - lrLeague + lrLeague * ratioAway), 0.75, 1.3);
+    db.learning.leagueScale[leagueId] = leagueScale;
+
+    const homeBias = getTeamBias(db, prediction.homeId);
+    const awayBias = getTeamBias(db, prediction.awayId);
+    const homeErr = clamp(result.homeGoals - prediction.lambdaHome, -1.6, 1.6);
+    const awayErr = clamp(result.awayGoals - prediction.lambdaAway, -1.6, 1.6);
+
+    homeBias.attack = clamp(homeBias.attack + homeErr * lrTeam * 0.06, -0.35, 0.35);
+    homeBias.defense = clamp(homeBias.defense - awayErr * lrTeam * 0.04, -0.35, 0.35);
+    awayBias.attack = clamp(awayBias.attack + awayErr * lrTeam * 0.06, -0.35, 0.35);
+    awayBias.defense = clamp(awayBias.defense - homeErr * lrTeam * 0.04, -0.35, 0.35);
+
+    db.learning.teamBias[prediction.homeId] = homeBias;
+    db.learning.teamBias[prediction.awayId] = awayBias;
+
+    const actual = result.homeGoals===result.awayGoals ? "draw" : result.homeGoals>result.awayGoals ? "home" : "away";
+    const pActual = actual==="home" ? prediction.pHome : actual==="draw" ? prediction.pDraw : prediction.pAway;
+    const logLoss = -Math.log(Math.max(1e-9, pActual));
+
+    return {
+      homeErr,
+      awayErr,
+      logLoss,
+      leagueScale,
+      homeBias,
+      awayBias
+    };
+  }
+
   function calibrateToMarket(base, marketProb, modelProb){
     if(!Number.isFinite(marketProb) || !Number.isFinite(modelProb) || !modelProb || !base) return base;
     const ratio = clamp(marketProb/modelProb, 0.82, 1.22);
@@ -441,6 +535,7 @@ export function initFootballLab(){
   }
 
   function versusModel(db, homeId, awayId, opts={}){
+    ensureLearningState(db);
     const homeTeam = db.teams.find(t=>t.id===homeId);
     const awayTeam = db.teams.find(t=>t.id===awayId);
     const leagueId = opts.leagueId || homeTeam?.leagueId || awayTeam?.leagueId || "";
@@ -455,6 +550,9 @@ export function initFootballLab(){
     const awayStrength = teamStrength(db, awayId);
     const homeAdv = Number(db.versus.homeAdvantage)||1.1;
     const pace = clamp(Number(db.versus.paceFactor)||1, 0.82, 1.35);
+    const leagueScale = getLeagueScale(db, leagueId);
+    const homeBias = getTeamBias(db, homeId);
+    const awayBias = getTeamBias(db, awayId);
 
     const baseHomeFor = homeData.xgHome.for>0 ? homeData.xgHome.for : homeData.goalsHome.for;
     const baseHomeAgainst = homeData.xgHome.against>0 ? homeData.xgHome.against : homeData.goalsHome.against;
@@ -468,6 +566,9 @@ export function initFootballLab(){
 
     let lHome = leagueCtx.avgGoalsHome * attackHome * defenseAwayWeakness;
     let lAway = leagueCtx.avgGoalsAway * attackAway * defenseHomeWeakness;
+
+    lHome *= leagueScale.home * (1 + homeBias.attack) * (1 - awayBias.defense);
+    lAway *= leagueScale.away * (1 + awayBias.attack) * (1 - homeBias.defense);
 
     lHome *= homeAdv * pace * homeStrength * homeForm.momentum;
     lAway *= pace * awayStrength * awayForm.momentum;
@@ -497,7 +598,29 @@ export function initFootballLab(){
       cornersExpected,
       leagueCtx,
       teams: { homeData, awayData },
-      factors: { homeForm, awayForm, pace, homeAdv, attackHome, attackAway, defenseAwayWeakness, defenseHomeWeakness }
+      factors: {
+        homeForm,
+        awayForm,
+        pace,
+        homeAdv,
+        attackHome,
+        attackAway,
+        defenseAwayWeakness,
+        defenseHomeWeakness,
+        leagueScale,
+        teamBias: { homeBias, awayBias },
+        breakdown: {
+          leagueBase: { home: leagueCtx.avgGoalsHome, away: leagueCtx.avgGoalsAway },
+          homeAttackBoost: attackHome,
+          awayDefenseWeakness,
+          awayAttackPenalty: attackAway,
+          homeDefenseStrength: defenseHomeWeakness,
+          homeFormMomentum: homeForm.momentum,
+          awayFormMomentum: awayForm.momentum,
+          leagueScale,
+          teamBias: { home: homeBias, away: awayBias }
+        }
+      }
     };
   }
 
@@ -535,7 +658,9 @@ export function initFootballLab(){
       teams: flatTeams,
       players,
       tracker: root.tracker || [],
-      versus: root.versus || null
+      versus: root.versus || null,
+      predictions: root.predictions || [],
+      learning: root.learning || null
     };
   }
 
@@ -651,6 +776,8 @@ export function initFootballLab(){
           db.players = [...db.players.filter(p=>!parsed.teams.some(t=>t.id===p.teamId)), ...parsed.players];
           if(Array.isArray(parsed.tracker) && parsed.tracker.length) db.tracker = [...db.tracker, ...parsed.tracker];
           if(parsed.versus) db.versus = { ...db.versus, ...parsed.versus };
+          if(Array.isArray(parsed.predictions) && parsed.predictions.length) db.predictions = [...db.predictions, ...parsed.predictions];
+          if(parsed.learning) db.learning = { ...db.learning, ...parsed.learning };
           db.settings.selectedLeagueId = parsed.league.id;
           saveDb(db);
           document.getElementById("importStatus").textContent = "✅ JSON importado";
@@ -1086,7 +1213,16 @@ export function initFootballLab(){
 
     if(view==="versus"){
       db.versus ||= { homeAdvantage: 1.1, paceFactor: 1, sampleSize: 20, marketBlend: 0.35 };
+      ensureLearningState(db);
+      db.versus.marketBlend = clamp(Number(db.learning.marketTrust) || Number(db.versus.marketBlend) || 0.35, 0, 0.8);
       const options = db.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
+      const pendingPredictions = db.predictions.filter(p=>!p.resolved).slice(-20).reverse();
+      const pendingOptions = pendingPredictions.map(p=>{
+        const home = db.teams.find(t=>t.id===p.homeId)?.name || "Local";
+        const away = db.teams.find(t=>t.id===p.awayId)?.name || "Visitante";
+        return `<option value="${p.id}">${p.date || "sin fecha"} · ${home} vs ${away}</option>`;
+      }).join("");
+
       content.innerHTML = `
         <div class="fl-card fl-vs-layout">
           <div>
@@ -1107,11 +1243,25 @@ export function initFootballLab(){
               <input id="vsOddA" class="fl-input" type="number" step="0.01" placeholder="Cuota 2" style="width:120px" />
             </div>
             <div id="vsOut" style="margin-top:10px;" class="fl-muted">Selecciona dos equipos.</div>
+            <div class="fl-row" style="margin-top:8px;">
+              <button class="fl-btn" id="saveVsPrediction">Guardar predicción</button>
+              <span id="vsSaveStatus" class="fl-muted"></span>
+            </div>
           </div>
           <div>
             <div style="font-weight:800;margin-bottom:6px;">Matriz de marcador exacto (0-5)</div>
             <div id="vsMatrix" class="fl-vs-grid"></div>
           </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Feedback / training</div>
+          <div class="fl-row">
+            <select id="fbPrediction" class="fl-select"><option value="">Predicción pendiente</option>${pendingOptions}</select>
+            <input id="fbHG" type="number" class="fl-input" placeholder="Goles local reales" style="width:160px" />
+            <input id="fbAG" type="number" class="fl-input" placeholder="Goles visitante reales" style="width:170px" />
+            <button class="fl-btn" id="applyFeedback">Actualizar modelo</button>
+          </div>
+          <div id="fbOut" class="fl-muted" style="margin-top:8px;">Registra un resultado real para recalibrar league scale y team bias.</div>
         </div>
       `;
 
@@ -1131,6 +1281,8 @@ export function initFootballLab(){
         grid.innerHTML = cells.join("");
       };
 
+      let lastSimulation = null;
+
       document.getElementById("runVs").onclick = ()=>{
         const homeId = document.getElementById("vsHome").value;
         const awayId = document.getElementById("vsAway").value;
@@ -1138,6 +1290,7 @@ export function initFootballLab(){
         db.versus.paceFactor = Number(document.getElementById("vsPace").value)||1;
         db.versus.sampleSize = Number(document.getElementById("vsN").value)||20;
         db.versus.marketBlend = clamp(Number(document.getElementById("vsBlend").value)||0.35, 0, 0.8);
+        db.learning.marketTrust = db.versus.marketBlend;
         saveDb(db);
         if(!homeId || !awayId || homeId===awayId) return;
         const result = versusModel(db, homeId, awayId);
@@ -1150,6 +1303,7 @@ export function initFootballLab(){
           const blend = db.versus.marketBlend || 0;
           const calHome = calibrateToMarket(result.lHome, market.pH, result.pHome);
           const calAway = calibrateToMarket(result.lAway, market.pA, result.pAway);
+          const oddsShift = ((calHome - result.lHome) + (calAway - result.lAway))/2;
           result.lHome = result.lHome * (1-blend) + calHome * blend;
           result.lAway = result.lAway * (1-blend) + calAway * blend;
           const calibrated = probsFromLambdas(result.lHome, result.lAway, result.maxGoals);
@@ -1158,7 +1312,15 @@ export function initFootballLab(){
           result.pDraw = calibrated.pDraw;
           result.pAway = calibrated.pAway;
           result.best = calibrated.best;
+          result.factors.breakdown.oddsCalibration = { applied: true, shift: oddsShift };
+        }else{
+          result.factors.breakdown.oddsCalibration = { applied: false, shift: 0 };
         }
+        const dominant = topScoreCells(result.matrix, 3);
+        const btts = bttsProbability(result.matrix);
+        const awayZero = result.matrix.reduce((acc,row)=>acc + (row[0] || 0), 0);
+        const breakdown = result.factors.breakdown;
+
         const marketLine = market
           ? `<div class="fl-muted" style="margin-top:6px;">Mercado limpio → 1: <b>${(market.pH*100).toFixed(1)}%</b> · X: <b>${(market.pD*100).toFixed(1)}%</b> · 2: <b>${(market.pA*100).toFixed(1)}%</b></div>`
           : "";
@@ -1167,6 +1329,35 @@ export function initFootballLab(){
         const awayFacts = result.teams.awayData.form5;
         const narrative = `Forma últimos 5: local ${homeFacts.points} pts (${homeFacts.gf}-${homeFacts.ga}) y visitante ${awayFacts.points} pts (${awayFacts.gf}-${awayFacts.ga}). `
           + `En esta liga el promedio es ${result.leagueCtx.avgGoalsHome.toFixed(2)}-${result.leagueCtx.avgGoalsAway.toFixed(2)} goles (L/V).`;
+        const explainers = [
+          `El local sube λ por ataque reciente (${((breakdown.homeAttackBoost-1)*100).toFixed(0)}%) y debilidad defensiva rival (${((breakdown.awayDefenseWeakness-1)*100).toFixed(0)}%).`,
+          `El visitante se ajusta por su ataque fuera (${((breakdown.awayAttackPenalty-1)*100).toFixed(0)}%) y la defensa local (${((breakdown.homeDefenseStrength-1)*100).toFixed(0)}%).`,
+          breakdown.oddsCalibration.applied
+            ? `La calibración por mercado movió λ en ${breakdown.oddsCalibration.shift.toFixed(2)} (blend ${(db.versus.marketBlend*100).toFixed(0)}%).`
+            : "Sin cuotas, no se aplicó calibración de mercado."
+        ];
+        const dominantTxt = dominant.map(c=>`${c.h}-${c.a} (${(c.p*100).toFixed(1)}%)`).join(", ");
+        const bttsTxt = `BTTS: ${(btts*100).toFixed(1)}% (Away=0 en ${(awayZero*100).toFixed(1)}%)`;
+
+        lastSimulation = {
+          id: uid("pred"),
+          date: new Date().toISOString().slice(0,10),
+          leagueId: db.teams.find(t=>t.id===homeId)?.leagueId || "",
+          homeId,
+          awayId,
+          lambdaHome: result.lHome,
+          lambdaAway: result.lAway,
+          pHome: result.pHome,
+          pDraw: result.pDraw,
+          pAway: result.pAway,
+          best: result.best,
+          dominant,
+          btts,
+          breakdown,
+          matrix: result.matrix,
+          odds: market || null,
+          resolved: false
+        };
 
         document.getElementById("vsOut").innerHTML = `
           <div>λ Home: <b>${result.lHome.toFixed(2)}</b> · λ Away: <b>${result.lAway.toFixed(2)}</b></div>
@@ -1176,12 +1367,53 @@ export function initFootballLab(){
             <div><span>Away Win</span><b>${(result.pAway*100).toFixed(1)}%</b></div>
           </div>
           <div style="margin-top:8px;">Marcador más probable: <b>${result.best.h} - ${result.best.a}</b> (${(result.best.p*100).toFixed(1)}%)</div>
+          <div class="fl-muted" style="margin-top:6px;">Marcadores dominantes: <b>${dominantTxt}</b></div>
+          <div class="fl-muted" style="margin-top:6px;">${bttsTxt}</div>
           <div class="fl-muted" style="margin-top:6px;">Corners esperados: <b>${result.cornersExpected.toFixed(1)}</b> · Tarjetas esperadas: <b>${result.cardsExpected.toFixed(1)}</b></div>
           <div class="fl-muted" style="margin-top:6px;">${narrative}</div>
+          <div class="fl-muted" style="margin-top:6px;">• ${explainers.join("<br/>• ")}</div>
           ${marketLine}
         `;
 
         renderMatrix(result.matrix, result.best, result.maxGoals);
+      };
+
+      document.getElementById("saveVsPrediction").onclick = ()=>{
+        const status = document.getElementById("vsSaveStatus");
+        if(!lastSimulation){
+          status.textContent = "❌ Ejecuta una simulación primero.";
+          return;
+        }
+        db.predictions.push({ ...lastSimulation });
+        saveDb(db);
+        status.textContent = "✅ Predicción guardada para feedback.";
+      };
+
+      document.getElementById("applyFeedback").onclick = ()=>{
+        const predId = document.getElementById("fbPrediction").value;
+        const homeGoals = pickFirstNumber(document.getElementById("fbHG").value);
+        const awayGoals = pickFirstNumber(document.getElementById("fbAG").value);
+        const out = document.getElementById("fbOut");
+        if(!predId || homeGoals===null || awayGoals===null){
+          out.textContent = "❌ Selecciona predicción y resultado real.";
+          return;
+        }
+        const prediction = db.predictions.find(p=>p.id===predId && !p.resolved);
+        if(!prediction){
+          out.textContent = "❌ Predicción no encontrada.";
+          return;
+        }
+        prediction.resolved = true;
+        prediction.actual = { homeGoals, awayGoals };
+        prediction.updatedAt = new Date().toISOString();
+        prediction.goalError = { home: homeGoals - prediction.lambdaHome, away: awayGoals - prediction.lambdaAway };
+
+        const metrics = updateLearningFromResult(db, prediction, { homeGoals, awayGoals });
+        prediction.logLoss = metrics.logLoss;
+        saveDb(db);
+        out.innerHTML = `✅ Feedback aplicado. Error goles: <b>${prediction.goalError.home.toFixed(2)}</b> / <b>${prediction.goalError.away.toFixed(2)}</b> · log-loss <b>${metrics.logLoss.toFixed(3)}</b><br/>`
+          + `🧠 Ajustes: leagueScale ${metrics.leagueScale.home.toFixed(3)}-${metrics.leagueScale.away.toFixed(3)} · bias ataque local ${metrics.homeBias.attack.toFixed(3)} · bias ataque visitante ${metrics.awayBias.attack.toFixed(3)}.`;
+        render("versus");
       };
     }
   }
