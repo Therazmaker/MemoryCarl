@@ -3393,6 +3393,10 @@ export function initFootballLab(){
             <span id="lpeStatus" class="fl-mini"></span>
           </div>
           <div id="lpeSummary" class="fl-mini" style="margin-top:8px;">Sin estado LPE.</div>
+          <div class="fl-card" style="margin-top:10px;">
+            <div style="font-weight:700;margin-bottom:8px;">Tendencia acumulativa + proyección (IDD/EPI)</div>
+            <svg id="lpeProjectionSvg" viewBox="0 0 700 230" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px"></svg>
+          </div>
           <div id="lpeAlerts" class="fl-mini" style="margin-top:8px;"></div>
           <pre id="lpeJson" class="fl-mini" style="white-space:pre-wrap;margin-top:10px;">{}</pre>
         </div>
@@ -3559,6 +3563,73 @@ export function initFootballLab(){
         document.getElementById("epaStatus").textContent = "✅ Firma temprana guardada para ambos equipos.";
       };
 
+      const drawLpeProjectionChart = (history=[])=>{
+        const svg = document.getElementById("lpeProjectionSvg");
+        if(!svg) return;
+        const width = 700;
+        const height = 230;
+        const pad = { top: 18, right: 16, bottom: 26, left: 38 };
+        const plotW = width - pad.left - pad.right;
+        const plotH = height - pad.top - pad.bottom;
+        const yFromNorm = (v)=> pad.top + (1 - clamp((Number(v) || 0), 0, 1)) * plotH;
+        const yFromSigned = (v)=> pad.top + (1 - (clamp((Number(v) || 0), -1, 1) + 1)/2) * plotH;
+
+        const real = Array.isArray(history) ? history : [];
+        const realPoints = real.slice(-12);
+        const projectionCount = 3;
+        const projected = [];
+
+        const linearProjection = (arr, key)=>{
+          const series = arr.map((item, idx)=>({ x: idx + 1, y: Number(item?.[key]) || 0 }));
+          if(!series.length) return Array.from({ length: projectionCount }, ()=>0);
+          if(series.length===1) return Array.from({ length: projectionCount }, ()=>series[0].y);
+          const meanX = series.reduce((acc, p)=>acc+p.x, 0) / series.length;
+          const meanY = series.reduce((acc, p)=>acc+p.y, 0) / series.length;
+          const num = series.reduce((acc, p)=>acc + (p.x - meanX)*(p.y - meanY), 0);
+          const den = series.reduce((acc, p)=>acc + (p.x - meanX)*(p.x - meanX), 0) || 1;
+          const slope = num/den;
+          const intercept = meanY - slope*meanX;
+          return Array.from({ length: projectionCount }, (_v, i)=> intercept + slope*(series.length + i + 1));
+        };
+
+        const iddProjected = linearProjection(realPoints, "iddAway").map(v=>clamp(v, -1, 1));
+        const epiProjected = linearProjection(realPoints, "epi").map(v=>clamp(v, 0, 1));
+        for(let i=0;i<projectionCount;i+=1){
+          projected.push({
+            idx: realPoints.length + i,
+            iddAway: iddProjected[i],
+            epi: epiProjected[i]
+          });
+        }
+
+        const all = [...realPoints, ...projected];
+        if(!all.length){
+          svg.innerHTML = `<text x="24" y="42" fill="#8b949e" font-size="12">Carga al menos una ventana LPE para visualizar tendencia y proyección.</text>`;
+          return;
+        }
+
+        const maxIndex = Math.max(all.length - 1, 1);
+        const xPos = (idx)=> pad.left + (idx / maxIndex) * plotW;
+        const linePath = (arr, key, yMapper)=> arr.map((p, idx)=>`${idx===0?"M":"L"}${xPos(idx)} ${yMapper(p[key])}`).join(" ");
+        const realPathIdd = linePath(realPoints, "iddAway", yFromSigned);
+        const projPathIdd = linePath([...realPoints.slice(-1), ...projected], "iddAway", yFromSigned);
+        const realPathEpi = linePath(realPoints, "epi", yFromNorm);
+        const projPathEpi = linePath([...realPoints.slice(-1), ...projected], "epi", yFromNorm);
+        const splitX = xPos(Math.max(realPoints.length - 1, 0));
+
+        svg.innerHTML = `
+          <line x1="${pad.left}" y1="${yFromSigned(0)}" x2="${width-pad.right}" y2="${yFromSigned(0)}" stroke="#39414d" stroke-width="1"/>
+          <line x1="${splitX}" y1="${pad.top}" x2="${splitX}" y2="${height-pad.bottom}" stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
+          <text x="${splitX + 6}" y="${pad.top + 14}" fill="#8b949e" font-size="11">proyección</text>
+          <path d="${realPathIdd}" fill="none" stroke="#58a6ff" stroke-width="2.5"/>
+          <path d="${projPathIdd}" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6 5"/>
+          <path d="${realPathEpi}" fill="none" stroke="#2ea043" stroke-width="2"/>
+          <path d="${projPathEpi}" fill="none" stroke="#2ea043" stroke-width="1.8" stroke-dasharray="5 5"/>
+          <text x="${pad.left}" y="${height-8}" fill="#58a6ff" font-size="11">IDD away (azul)</text>
+          <text x="${pad.left + 140}" y="${height-8}" fill="#2ea043" font-size="11">EPI (verde)</text>
+        `;
+      };
+
       const renderLPE = (state)=>{
         const summary = document.getElementById("lpeSummary");
         const alertsEl = document.getElementById("lpeAlerts");
@@ -3568,6 +3639,7 @@ export function initFootballLab(){
           summary.textContent = "Sin estado LPE.";
           alertsEl.innerHTML = "";
           jsonEl.textContent = "{}";
+          drawLpeProjectionChart([]);
           return;
         }
         const teams = state.teams || { home: "home", away: "away" };
@@ -3581,6 +3653,7 @@ export function initFootballLab(){
         alertsEl.innerHTML = recentAlerts.length
           ? recentAlerts.map(a=>`<span style="display:inline-block;padding:4px 8px;border:1px solid #2d333b;border-radius:999px;margin:0 6px 6px 0;">${a.type}${a.team?` · ${a.team}`:""}${a.level?` · ${Math.round(a.level*100)}%`:""}</span>`).join("")
           : "Sin alertas todavía.";
+        drawLpeProjectionChart(state.history || []);
         jsonEl.textContent = JSON.stringify(state, null, 2);
       };
 
