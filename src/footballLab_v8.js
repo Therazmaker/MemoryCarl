@@ -831,8 +831,120 @@ export function initFootballLab(){
       const high = Math.max(open, close);
       const low = Math.min(open, close);
       prev = close;
-      return { block: block.block, open, high, low, close };
+      return { block: block.block, label: block.range || (block.block===9?"90+":`${block.block*10}-${(block.block+1)*10}`), open, high, low, close };
     });
+  }
+
+  function cumulativeSum(series=[]){
+    let acc = 0;
+    return series.map((value)=>{
+      acc += Number(value) || 0;
+      return acc;
+    });
+  }
+
+  function stdDev(series=[]){
+    if(!series.length) return 0;
+    const mean = series.reduce((sum, value)=>sum + (Number(value) || 0), 0) / series.length;
+    const variance = series.reduce((sum, value)=>{
+      const n = Number(value) || 0;
+      return sum + (n-mean)*(n-mean);
+    }, 0) / series.length;
+    return Math.sqrt(variance);
+  }
+
+  function countSignChanges(series=[]){
+    let prev = 0;
+    return series.reduce((count, value)=>{
+      const sign = (Number(value) || 0) > 0 ? 1 : ((Number(value) || 0) < 0 ? -1 : 0);
+      if(sign===0) return count;
+      if(prev!==0 && sign!==prev) count += 1;
+      prev = sign;
+      return count;
+    }, 0);
+  }
+
+  function maxConsecutiveBy(series=[], predicate=()=>false){
+    let curr = 0;
+    let max = 0;
+    series.forEach((value)=>{
+      if(predicate(Number(value) || 0)){
+        curr += 1;
+        if(curr > max) max = curr;
+      }else{
+        curr = 0;
+      }
+    });
+    return max;
+  }
+
+  function computeMomentumDiagnostic(candles=[]){
+    const iddSeries = candles.map(c=>Number(c.close) || 0);
+    const iddAccum = cumulativeSum(iddSeries);
+    const deltas = iddAccum.slice(1).map((value, idx)=>value - iddAccum[idx]);
+    const maxDeltaAbs = deltas.reduce((best, value)=>Math.max(best, Math.abs(value)), 0);
+    const breakDeltaIdx = deltas.reduce((bestIdx, value, idx)=>(
+      Math.abs(value) > Math.abs(deltas[bestIdx] || 0) ? idx : bestIdx
+    ), 0);
+    const breakIdx = deltas.length ? breakDeltaIdx + 1 : 0;
+    const breakLabel = candles[breakIdx]?.label || candles[0]?.label || "-";
+    const breakDelta = deltas[breakDeltaIdx] || 0;
+    const vol = stdDev(iddSeries);
+    const trend = (iddAccum.at(-1) || 0) - (iddAccum[0] || 0);
+    const lateStrength = iddSeries.length ? (iddSeries.slice(-2).reduce((sum,v)=>sum+v,0) / Math.max(1, iddSeries.slice(-2).length)) : 0;
+    const switches = countSignChanges(iddSeries);
+    const greenStreakMax = maxConsecutiveBy(iddSeries, v=>v > 0.15);
+    const redStreakMax = maxConsecutiveBy(iddSeries, v=>v < -0.15);
+    const secondPhaseBreak = ["50-60", "60-70"].includes(breakLabel) && breakDelta < -0.2;
+    const equilibrium = Math.abs(trend) < 0.2 && vol < 0.25;
+    const dominantNoClose = trend > 0.2 && lateStrength < 0;
+    const oscillation = switches >= 4;
+    const lateWeakness = lateStrength < -0.2 || (iddSeries.at(-1) || 0) < -0.25;
+
+    const tagScores = {
+      equilibrium: clamp(1 - (Math.abs(trend)/0.2 + vol/0.25)/2, 0, 1),
+      no_close: dominantNoClose ? clamp((trend/0.8) + Math.max(0, -lateStrength/0.5), 0, 1) : 0,
+      second_phase_break: secondPhaseBreak ? clamp(Math.abs(breakDelta)/Math.max(0.01, maxDeltaAbs), 0, 1) : 0,
+      oscillation: clamp(switches/6, 0, 1),
+      late_weakness: clamp(Math.max(0, -lateStrength)/0.4, 0, 1)
+    };
+
+    const tags = [];
+    if(equilibrium) tags.push("equilibrado_estable");
+    if(dominantNoClose) tags.push("domino_sin_cierre");
+    if(secondPhaseBreak) tags.push("second_phase_break");
+    if(oscillation) tags.push("oscillation");
+    if(lateWeakness) tags.push("late_weakness");
+
+    const diagnosticText = [];
+    if(Math.abs(trend) < 0.2) diagnosticText.push("Partido de equilibrio con fases alternadas.");
+    else if(trend > 0.2) diagnosticText.push("Equipo A tuvo ventaja territorial global.");
+    else diagnosticText.push("Equipo A fue superado en el global del desarrollo.");
+    diagnosticText.push(`Quiebre principal: ${breakLabel} (cambio fuerte de momentum).`);
+    diagnosticText.push(`Volatilidad: ${vol > 0.35 ? "alta" : (vol > 0.2 ? "media" : "baja")}.`);
+    diagnosticText.push(`Final: ${lateStrength > 0.2 ? "fuerte" : (lateStrength < -0.2 ? "débil" : "neutral")}.`);
+
+    if(oscillation) diagnosticText.push("Patrón: vaivén (alternancias frecuentes).");
+    else if(secondPhaseBreak && lateWeakness) diagnosticText.push("Patrón: ruptura y caída final.");
+    else if(greenStreakMax >= 2 && lateStrength < 0) diagnosticText.push("Patrón: acumulación estéril.");
+
+    return {
+      metrics: {
+        vol,
+        trend,
+        breakLabel,
+        breakDelta,
+        lateStrength,
+        switches,
+        greenStreakMax,
+        redStreakMax
+      },
+      tagScores,
+      tags,
+      iddSeries,
+      iddAccum,
+      diagnosticText
+    };
   }
 
   function detectPatterns({ candles=[], blocks=[], team="", opponent="" }){
@@ -2163,6 +2275,7 @@ export function initFootballLab(){
           <textarea id="momNarrative" class="fl-text" placeholder="Pega el relato crudo aquí"></textarea>
           <div class="fl-row" style="margin-top:8px;">
             <button class="fl-btn" id="momConvert">Convertir</button>
+            <button class="fl-btn" id="momGenerateDiag" disabled>Generar diagnóstico</button>
             <button class="fl-btn" id="momSaveProfile" disabled>Guardar al perfil</button>
             <span id="momStatus" class="fl-mini"></span>
           </div>
@@ -2182,6 +2295,17 @@ export function initFootballLab(){
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">Resumen de firma</div>
           <pre id="momSignature" class="fl-mini" style="white-space:pre-wrap"></pre>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Diagnóstico automático</div>
+          <pre id="momDiagJson" class="fl-mini" style="white-space:pre-wrap;margin-bottom:8px;">Genera un diagnóstico para ver métricas y etiquetas.</pre>
+          <div id="momDiagSections" class="fl-mini">
+            <div><b>Resumen:</b> -</div>
+            <div><b>Quiebre:</b> -</div>
+            <div><b>Volatilidad:</b> -</div>
+            <div><b>Cierre:</b> -</div>
+            <div><b>Patrón:</b> -</div>
+          </div>
         </div>
       `;
 
@@ -2221,15 +2345,41 @@ export function initFootballLab(){
         const width = 700;
         const height = 220;
         const zeroY = height/2;
-        const pts = blocks.map((b, idx)=>{
+        const accum = cumulativeSum(blocks.map(b=>Number(b.idd?.[team]) || 0));
+        const pts = accum.map((value, idx)=>{
           const x = 20 + idx * ((width - 40) / 9);
-          const y = zeroY - (Number(b.idd?.[team]) || 0) * 90;
+          const y = zeroY - value * 40;
           return `${x},${y}`;
         }).join(" ");
         svg.innerHTML = `
           <line x1="0" y1="${zeroY}" x2="${width}" y2="${zeroY}" stroke="#39414d" stroke-width="1"/>
           <polyline points="${pts}" fill="none" stroke="#58a6ff" stroke-width="3"/>
         `;
+      };
+
+      const renderMomentumDiagnostic = (diagnostic)=>{
+        if(!diagnostic) return;
+        const diagJson = document.getElementById("momDiagJson");
+        const diagSections = document.getElementById("momDiagSections");
+        if(diagJson) diagJson.textContent = JSON.stringify({
+          metrics: diagnostic.metrics,
+          tags: diagnostic.tags,
+          diagnosticText: diagnostic.diagnosticText
+        }, null, 2);
+        const summary = diagnostic.diagnosticText[0] || "-";
+        const breakLine = diagnostic.diagnosticText.find(line=>line.startsWith("Quiebre principal:")) || "-";
+        const volLine = diagnostic.diagnosticText.find(line=>line.startsWith("Volatilidad:")) || "-";
+        const closeLine = diagnostic.diagnosticText.find(line=>line.startsWith("Final:")) || "-";
+        const patternLine = diagnostic.diagnosticText.find(line=>line.startsWith("Patrón:")) || "Patrón: sin clasificación dominante.";
+        if(diagSections){
+          diagSections.innerHTML = `
+            <div><b>Resumen:</b> ${summary}</div>
+            <div><b>Quiebre:</b> ${breakLine}</div>
+            <div><b>Volatilidad:</b> ${volLine}</div>
+            <div><b>Cierre:</b> ${closeLine}</div>
+            <div><b>Patrón:</b> ${patternLine}</div>
+          `;
+        }
       };
 
       document.getElementById("momConvert").onclick = ()=>{
@@ -2246,8 +2396,8 @@ export function initFootballLab(){
         const candles = generateCandles(blocks, teamA);
         const patterns = detectPatterns({ candles, blocks, team: teamA, opponent: teamB });
         const signature = computeMomentumSignature(teamA, blocks, timeline);
-        const bundle = { teams: [teamA, teamB], events: timeline, blocks, candles, patterns, signature, createdAt: new Date().toISOString() };
         const matchMomentumId = uid("mom");
+        const bundle = { matchMomentumId, teams: [teamA, teamB], events: timeline, blocks, candles, patterns, signature, momentumDiagnostic: null, createdAt: new Date().toISOString() };
         localStorage.setItem(`match_events_${matchMomentumId}`, JSON.stringify(timeline));
         localStorage.setItem(`match_momentum_${matchMomentumId}`, JSON.stringify(bundle));
         drawCandleChart(candles);
@@ -2258,7 +2408,23 @@ export function initFootballLab(){
         document.getElementById("momSignature").textContent = JSON.stringify(signature.momentumSignature, null, 2);
         document.getElementById("momStatus").textContent = `✅ ${timeline.length} eventos convertidos`;
         document.getElementById("momSaveProfile").disabled = false;
+        document.getElementById("momGenerateDiag").disabled = false;
+        document.getElementById("momDiagJson").textContent = "Genera un diagnóstico para ver métricas y etiquetas.";
         lastPayload = bundle;
+      };
+
+      document.getElementById("momGenerateDiag").onclick = ()=>{
+        if(!lastPayload?.candles?.length){
+          document.getElementById("momStatus").textContent = "❌ Convierte un relato primero.";
+          return;
+        }
+        const diagnostic = computeMomentumDiagnostic(lastPayload.candles);
+        lastPayload.momentumDiagnostic = diagnostic;
+        if(lastPayload.matchMomentumId){
+          localStorage.setItem(`match_momentum_${lastPayload.matchMomentumId}`, JSON.stringify(lastPayload));
+        }
+        renderMomentumDiagnostic(diagnostic);
+        document.getElementById("momStatus").textContent = "✅ Diagnóstico generado y guardado.";
       };
 
       document.getElementById("momSaveProfile").onclick = ()=>{
