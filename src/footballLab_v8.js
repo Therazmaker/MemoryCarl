@@ -1356,7 +1356,23 @@ export function initFootballLab(){
     return null;
   }
 
-  function parseEarlyNarrative(text, { teamA="", teamB="", windowMinutes=10 }={}){
+  function resolveEarlyWindow(windowKey="0-10"){
+    const token = String(windowKey || "0-10").trim();
+    const pair = token.match(/(\d{1,3})\s*-\s*(\d{1,3})/);
+    if(pair){
+      const start = Number(pair[1]);
+      const end = Number(pair[2]);
+      if(Number.isFinite(start) && Number.isFinite(end) && end > start){
+        return { start, end, label: `${start}-${end}` };
+      }
+    }
+    const end = Number(token);
+    if(Number.isFinite(end) && end > 0) return { start: 0, end, label: `0-${end}` };
+    return { start: 0, end: 10, label: "0-10" };
+  }
+
+  function parseEarlyNarrative(text, { teamA="", teamB="", windowKey="0-10" }={}){
+    const windowRange = resolveEarlyWindow(windowKey);
     const lines = String(text || "").split(/\n+/).map(line=>line.trim()).filter(Boolean);
     const teams = [teamA, teamB].filter(Boolean);
     const statsByTeam = new Map();
@@ -1380,7 +1396,7 @@ export function initFootballLab(){
       const minuteFound = line.match(/(\d{1,3}\s*\+\s*\d{1,2}|\d{1,3})\s*'/);
       if(minuteFound) pendingMinute = parseMinuteToken(minuteFound[1]);
       const minute = Number.isFinite(Number(pendingMinute)) ? Number(pendingMinute) : null;
-      if(minute===null || minute > windowMinutes) return;
+      if(minute===null || minute <= windowRange.start || minute > windowRange.end) return;
       if(/^\d{1,3}\s*\+\s*\d{1,2}\s*'$/.test(line) || /^\d{1,3}\s*'$/.test(line)) return;
 
       const type = detectEarlyType(line);
@@ -1411,17 +1427,18 @@ export function initFootballLab(){
       if(evt.type === "dangerCross" && /remata|disparo|tiro|cabezazo/i.test(evt.text)) teamStats.shots += 0.5;
     });
 
-    return { teams: teamList, events, statsByTeam };
+    return { teams: teamList, events, statsByTeam, windowRange };
   }
 
-  function computeEarlyPhaseAnalyzer(text, { teamA="", teamB="", windowMinutes=10 }={}){
-    const { teams, statsByTeam } = parseEarlyNarrative(text, { teamA, teamB, windowMinutes });
+  function computeEarlyPhaseAnalyzer(text, { teamA="", teamB="", windowKey="0-10", seedProfiles={} }={}){
+    const { teams, statsByTeam, events, windowRange } = parseEarlyNarrative(text, { teamA, teamB, windowKey });
     const [firstTeam, secondTeam] = teams;
     const a = statsByTeam.get(firstTeam) || createEarlyTeamStats();
     const b = statsByTeam.get(secondTeam) || createEarlyTeamStats();
 
     const total = (k)=>Number(a[k] || 0) + Number(b[k] || 0);
-    const norm = (value, max=4)=>clamp((Number(value) || 0) / max, 0, 1);
+    const normLimit = (windowRange.end - windowRange.start) <= 10 ? 4 : 6;
+    const norm = (value, max=normLimit)=>clamp((Number(value) || 0) / max, 0, 1);
 
     const rawIntensity =
       1.0*total("shots") +
@@ -1458,7 +1475,7 @@ export function initFootballLab(){
       const controlTotal = total("controlMentions");
       const foulsTotal = total("fouls");
       const lossTotal = total("lossMentions");
-      const cornerLimit = windowMinutes >= 20 ? 3 : 2;
+      const cornerLimit = (windowRange.end - windowRange.start) >= 20 ? 3 : 2;
       const maxThreat = Math.max(threatA, threatB);
       if(cornersTotal >= cornerLimit) return "setpiece_pressure";
       if(foulsTotal >= 4 && lossTotal >= 3 && shotsTotal <= 2) return "scrappy";
@@ -1509,6 +1526,129 @@ export function initFootballLab(){
         : "Bajo riesgo de transición inmediata."
     ];
 
+    const computePsychFromProfile = (teamName)=>{
+      const p = seedProfiles?.[teamName]?.earlyPsychProfile || {};
+      return {
+        confidence: clamp(Number(p.avgConfidence ?? 0.50), 0, 1),
+        composure: clamp(Number(p.avgComposure ?? 0.55), 0, 1),
+        frustration: clamp(Math.max(0.10, Number(p.sterileTendency ?? 0.10) * 0.45), 0, 1),
+        belief: clamp(Number(p.avgConfidence ?? 0.50), 0, 1),
+        tiltRisk: clamp(Math.max(0.20, Number(p.tiltSensitivity ?? 0.20) * 0.5), 0, 1)
+      };
+    };
+
+    const psychFor = (teamName, self, opp, iddValue, threatValue, oppShockRisk)=>{
+      const base = computePsychFromProfile(teamName);
+      const dom = clamp((iddValue + 1) / 2, 0, 1);
+      const sterilePressure = clamp(0.5*norm(self.controlMentions) + 0.5*norm(self.shots + self.corners) - 0.8*threatValue, 0, 1);
+      const friction = clamp((self.fouls + 2*self.cards) / 6, 0, 1);
+      const scares = clamp(norm(opp.bigChances + opp.shots + opp.savesForced), 0, 1);
+      const shockSignalOpp = clamp(oppShockRisk, 0, 1);
+
+      const confidence = clamp(
+        base.confidence*0.35 +
+        0.50 + 0.35*dom + 0.30*threatValue - 0.25*scares - 0.15*friction,
+        0,
+        1
+      );
+      const composure = clamp(
+        base.composure*0.35 +
+        0.55 - 0.35*friction - 0.20*intensity - 0.20*scares + 0.15*(1 - sterilePressure),
+        0,
+        1
+      );
+      const frustration = clamp(
+        base.frustration*0.35 +
+        0.10 + 0.55*sterilePressure + 0.25*norm(opp.savesForced) + 0.15*(dom > 0.6 ? 1 : 0),
+        0,
+        1
+      );
+      const belief = clamp(
+        base.belief*0.35 +
+        0.50 + 0.30*dom + 0.15*(1 - scares) - 0.25*shockSignalOpp,
+        0,
+        1
+      );
+      const tiltRisk = clamp(
+        base.tiltRisk*0.35 +
+        0.20 + 0.45*frustration + 0.35*(1 - composure) + 0.20*scares,
+        0,
+        1
+      );
+      return { confidence, composure, frustration, belief, tiltRisk, dom, sterilePressure };
+    };
+
+    const psychA = psychFor(firstTeam, a, b, iddA, threatA, shockB);
+    const psychB = psychFor(secondTeam, b, a, iddB, threatB, shockA);
+
+    const tagsPsychFor = (selfPsych, threatValue, oppShockRisk)=>{
+      const tags = [];
+      if(selfPsych.confidence > 0.65) tags.push("confident_start");
+      if(selfPsych.composure < 0.40) tags.push("nervous_start");
+      if(selfPsych.frustration > 0.60 && threatValue < 0.45) tags.push("sterile_frustration");
+      if(selfPsych.tiltRisk > 0.60) tags.push("tilt_warning");
+      if(oppShockRisk > 0.55 && selfPsych.dom > 0.55) tags.push("shock_fear");
+      if(selfPsych.dom > 0.55 && selfPsych.composure > 0.60) tags.push("calm_control");
+      return tags;
+    };
+
+    const psychTags = {
+      [firstTeam]: tagsPsychFor(psychA, threatA, shockB),
+      [secondTeam]: tagsPsychFor(psychB, threatB, shockA)
+    };
+
+    const psychTextFor = (teamName, pTags, selfPsych, threatValue, oppShockRisk)=>{
+      const lines = [];
+      if(pTags.includes("nervous_start")) lines.push("Inicio ansioso: falta temple y orden.");
+      else if(pTags.includes("calm_control")) lines.push("Confianza subiendo, composure estable.");
+      else if(pTags.includes("confident_start")) lines.push("Arranque con confianza y control emocional.");
+      else lines.push("Inicio contenido, buscando estabilidad emocional.");
+
+      if(pTags.includes("sterile_frustration")) lines.push("Dominio con frustración creciendo: presión sin premio claro.");
+      else if(selfPsych.frustration > 0.60) lines.push("Frustración alta: cuidado con decisiones apresuradas.");
+      else lines.push(threatValue >= 0.45 ? "Amenaza moderada/alta sin romper del todo el partido." : "Poco peligro directo: ritmo más de control que de daño.");
+
+      if(pTags.includes("shock_fear")) lines.push("Rival huele shock: transición peligrosa si hay pérdida.");
+      else if(pTags.includes("tilt_warning")) lines.push("Alerta de tilt: un golpe rival puede desordenar al equipo.");
+      else lines.push(oppShockRisk > 0.55 ? "Riesgo de shock presente: vigilar transiciones defensivas." : "Riesgo de shock bajo en este tramo.");
+      return lines.slice(0, 3);
+    };
+
+    const psychText = {
+      [firstTeam]: psychTextFor(firstTeam, psychTags[firstTeam], psychA, threatA, shockB),
+      [secondTeam]: psychTextFor(secondTeam, psychTags[secondTeam], psychB, threatB, shockA)
+    };
+
+    const eventWeight = { shot: 1, bigChance: 1.5, corner: 0.6, save: 0.7, control: 0.4, finalThird: 0.5, foul: 0.25, card: 0.35, dangerCross: 0.4 };
+    const bucketCount = 5;
+    const bucketSpan = (windowRange.end - windowRange.start) / bucketCount;
+    const chartBuckets = Array.from({ length: bucketCount }, (_, idx)=>({
+      start: windowRange.start + idx*bucketSpan,
+      end: windowRange.start + (idx+1)*bucketSpan,
+      total: 0,
+      [firstTeam]: 0,
+      [secondTeam]: 0
+    }));
+    events.forEach(evt=>{
+      const idx = clamp(Math.floor((evt.minute - windowRange.start - 0.0001) / Math.max(1, bucketSpan)), 0, bucketCount-1);
+      const bucket = chartBuckets[idx];
+      const w = Number(eventWeight[evt.type] || 0.25);
+      bucket.total += w;
+      if(evt.team === firstTeam) bucket[firstTeam] += w;
+      if(evt.team === secondTeam) bucket[secondTeam] += w;
+    });
+    const makeEMA = (series=[], alpha=0.4)=>{
+      let prev = 0;
+      return series.map((v, idx)=>{
+        prev = idx===0 ? v : prev*(1-alpha) + v*alpha;
+        return prev;
+      });
+    };
+    const movementA = chartBuckets.map(b=>b[firstTeam]);
+    const movementB = chartBuckets.map(b=>b[secondTeam]);
+    const emaA = makeEMA(movementA, 0.45);
+    const emaB = makeEMA(movementB, 0.45);
+
     const features = {
       idd: {
         [firstTeam]: iddA,
@@ -1528,18 +1668,67 @@ export function initFootballLab(){
       disciplineRisk: {
         [firstTeam]: disciplineA,
         [secondTeam]: disciplineB
+      },
+      psychSignals: {
+        [firstTeam]: { dom: psychA.dom, sterilePressure: psychA.sterilePressure },
+        [secondTeam]: { dom: psychB.dom, sterilePressure: psychB.sterilePressure }
       }
     };
 
     return {
-      window: `0-${windowMinutes}`,
+      window: windowRange.label,
       teams: [firstTeam, secondTeam],
       features,
       tags,
       text: textLines,
+      psych: {
+        [firstTeam]: {
+          confidence: psychA.confidence,
+          composure: psychA.composure,
+          frustration: psychA.frustration,
+          belief: psychA.belief,
+          tiltRisk: psychA.tiltRisk
+        },
+        [secondTeam]: {
+          confidence: psychB.confidence,
+          composure: psychB.composure,
+          frustration: psychB.frustration,
+          belief: psychB.belief,
+          tiltRisk: psychB.tiltRisk
+        }
+      },
+      psychTags,
+      psychText,
+      psychChart: {
+        buckets: chartBuckets.map((b, idx)=>({
+          idx,
+          label: `${Math.round(b.start)}-${Math.round(b.end)}`,
+          intensity: clamp(b.total / 3, 0, 1),
+          [firstTeam]: b[firstTeam],
+          [secondTeam]: b[secondTeam],
+          ema: {
+            [firstTeam]: emaA[idx],
+            [secondTeam]: emaB[idx]
+          }
+        }))
+      },
       signatureUpdate: {
-        [firstTeam]: { early_idd: iddA, early_intensity: intensity, early_threat: threatA, early_shockRisk: shockA, openingType: controlType },
-        [secondTeam]: { early_idd: iddB, early_intensity: intensity, early_threat: threatB, early_shockRisk: shockB, openingType: controlType }
+        [firstTeam]: {
+          early_idd: iddA,
+          early_intensity: intensity,
+          early_threat: threatA,
+          early_shockRisk: shockA,
+          openingType: controlType,
+          early_psych: { confidence: psychA.confidence, composure: psychA.composure, frustration: psychA.frustration, tiltRisk: psychA.tiltRisk }
+        },
+        [secondTeam]: {
+          early_idd: iddB,
+          early_intensity: intensity,
+          early_threat: threatB,
+          early_shockRisk: shockB,
+          openingType: controlType,
+          early_psych: { confidence: psychB.confidence, composure: psychB.composure, frustration: psychB.frustration, tiltRisk: psychB.tiltRisk }
+        }
       }
     };
   }
@@ -1581,6 +1770,34 @@ export function initFootballLab(){
       avgEarlyThreat: avg(current.avgEarlyThreat, update.early_threat),
       avgEarlyShockRisk: avg(current.avgEarlyShockRisk, update.early_shockRisk),
       openingTypes
+    };
+
+    const psychCurrent = profile.earlyPsychProfile || {
+      n: 0,
+      avgConfidence: 0.50,
+      avgComposure: 0.55,
+      avgFrustration: 0.10,
+      avgTiltRisk: 0.20,
+      tiltSensitivity: 0.20,
+      sterileTendency: 0.10
+    };
+    const psychN = Number(psychCurrent.n) || 0;
+    const psychNextN = psychN + 1;
+    const a = psychN > 20 ? 0.08 : 0.15;
+    const ema = (oldValue, newValue, fallback)=>{
+      const oldV = Number.isFinite(Number(oldValue)) ? Number(oldValue) : fallback;
+      const newV = Number.isFinite(Number(newValue)) ? Number(newValue) : oldV;
+      return oldV*(1-a) + newV*a;
+    };
+    const psychIn = update.early_psych || {};
+    profile.earlyPsychProfile = {
+      n: psychNextN,
+      avgConfidence: ema(psychCurrent.avgConfidence, psychIn.confidence, 0.50),
+      avgComposure: ema(psychCurrent.avgComposure, psychIn.composure, 0.55),
+      avgFrustration: ema(psychCurrent.avgFrustration, psychIn.frustration, 0.10),
+      avgTiltRisk: ema(psychCurrent.avgTiltRisk, psychIn.tiltRisk, 0.20),
+      tiltSensitivity: ema(psychCurrent.tiltSensitivity, psychIn.tiltRisk, 0.20),
+      sterileTendency: ema(psychCurrent.sterileTendency, psychIn.frustration, 0.10)
     };
     return profile;
   }
@@ -2865,17 +3082,23 @@ export function initFootballLab(){
             <div>
               <div class="fl-mini">Ventana</div>
               <select id="epaWindow" class="fl-select" style="width:100%;margin-top:4px;">
-                <option value="10" selected>0-10</option>
-                <option value="20">0-20</option>
+                <option value="0-10" selected>0-10</option>
+                <option value="10-20">10-20</option>
+                <option value="20-30">20-30</option>
+                <option value="30-45">30-45</option>
               </select>
             </div>
             <div class="fl-mini" style="display:flex;align-items:flex-end;">Función secundaria: no reemplaza el análisis de momentum actual.</div>
           </div>
-          <textarea id="epaNarrative" class="fl-text" placeholder="Pega relato temprano (0-10 / 0-20)"></textarea>
+          <textarea id="epaNarrative" class="fl-text" placeholder="Pega relato temprano (0-10, 10-20, 20-30 o 30-45)"></textarea>
           <div class="fl-row" style="margin-top:8px;">
             <button class="fl-btn" id="epaAnalyze">Analizar</button>
             <button class="fl-btn" id="epaSaveProfile" disabled>Guardar firma temprana al equipo</button>
             <span id="epaStatus" class="fl-mini"></span>
+          </div>
+          <div class="fl-card" style="margin-top:10px;">
+            <div style="font-weight:700;margin-bottom:8px;">Movimiento psicológico EMA sobre velas de intensidad</div>
+            <svg id="epaPsychSvg" viewBox="0 0 700 220" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px"></svg>
           </div>
           <div id="epaCards" class="fl-grid two" style="margin-top:10px;gap:10px;"></div>
           <pre id="epaJson" class="fl-mini" style="white-space:pre-wrap;margin-top:10px;">Sin análisis EPA.</pre>
@@ -2961,6 +3184,7 @@ export function initFootballLab(){
         const cards = document.getElementById("epaCards");
         const textList = document.getElementById("epaText");
         const jsonOut = document.getElementById("epaJson");
+        const psychSvg = document.getElementById("epaPsychSvg");
         if(!epa || !cards || !textList || !jsonOut) return;
         const [teamA, teamB] = epa.teams;
         const iddA = Number(epa.features?.idd?.[teamA] || 0);
@@ -2968,13 +3192,46 @@ export function initFootballLab(){
         const threatB = Number(epa.features?.threat?.[teamB] || 0);
         const shockA = Number(epa.features?.shockRisk?.[teamA] || 0);
         const shockB = Number(epa.features?.shockRisk?.[teamB] || 0);
+        const psychA = epa.psych?.[teamA] || {};
+        const psychB = epa.psych?.[teamB] || {};
         cards.innerHTML = `
           <div><b>IDD early</b><div class="fl-mini">${teamA}: ${iddA.toFixed(2)} · ${teamB}: ${(-iddA).toFixed(2)}</div></div>
           <div><b>Intensidad</b><div class="fl-mini">${(Number(epa.features?.intensity||0)*100).toFixed(0)}%</div></div>
           <div><b>Threat</b><div class="fl-mini">${teamA}: ${(threatA*100).toFixed(0)}% · ${teamB}: ${(threatB*100).toFixed(0)}%</div></div>
           <div><b>Shock risk</b><div class="fl-mini">${teamA}: ${(shockA*100).toFixed(0)}% · ${teamB}: ${(shockB*100).toFixed(0)}%</div></div>
+          <div><b>Psych (${teamA})</b><div class="fl-mini">Cnf ${(Number(psychA.confidence||0)*100).toFixed(0)} · Comp ${(Number(psychA.composure||0)*100).toFixed(0)} · Fr ${(Number(psychA.frustration||0)*100).toFixed(0)}</div></div>
+          <div><b>Psych (${teamB})</b><div class="fl-mini">Cnf ${(Number(psychB.confidence||0)*100).toFixed(0)} · Comp ${(Number(psychB.composure||0)*100).toFixed(0)} · Fr ${(Number(psychB.frustration||0)*100).toFixed(0)}</div></div>
         `;
-        textList.innerHTML = (epa.text || []).map(line=>`<li>${line}</li>`).join("");
+        const psychText = [
+          ...(epa.text || []),
+          `${teamA}: ${(epa.psychText?.[teamA] || []).join(" · ")}`,
+          `${teamB}: ${(epa.psychText?.[teamB] || []).join(" · ")}`
+        ];
+        textList.innerHTML = psychText.map(line=>`<li>${line}</li>`).join("");
+        if(psychSvg){
+          const buckets = epa.psychChart?.buckets || [];
+          const width = 700;
+          const height = 220;
+          const zeroY = 170;
+          const maxMove = Math.max(1, ...buckets.map(b=>Math.max(Number(b.ema?.[teamA]||0), Number(b.ema?.[teamB]||0))));
+          const xAt = (idx)=>20 + idx*((width-40)/Math.max(1, buckets.length-1));
+          const yMove = (v)=>170 - (Number(v)||0)*(90/maxMove);
+          const intensityBars = buckets.map((b, idx)=>{
+            const x = xAt(idx) - 18;
+            const h = (Number(b.intensity)||0)*80;
+            const y = zeroY - h;
+            return `<g><rect x="${x}" y="${y}" width="36" height="${h}" fill="rgba(88,166,255,.25)" stroke="rgba(88,166,255,.45)"/><text x="${xAt(idx)}" y="205" fill="#9ca3af" font-size="10" text-anchor="middle">${b.label}</text></g>`;
+          }).join("");
+          const poly = (team, color)=>buckets.map((b, idx)=>`${xAt(idx)},${yMove(b.ema?.[team]||0)}`).join(" ");
+          psychSvg.innerHTML = `
+            <line x1="0" y1="${zeroY}" x2="${width}" y2="${zeroY}" stroke="#39414d" stroke-width="1"/>
+            ${intensityBars}
+            <polyline points="${poly(teamA, "#2ea043")}" fill="none" stroke="#2ea043" stroke-width="3"/>
+            <polyline points="${poly(teamB, "#f85149")}" fill="none" stroke="#f85149" stroke-width="3"/>
+            <text x="24" y="16" fill="#2ea043" font-size="11">EMA ${teamA}</text>
+            <text x="130" y="16" fill="#f85149" font-size="11">EMA ${teamB}</text>
+          `;
+        }
         jsonOut.textContent = JSON.stringify(epa, null, 2);
       };
 
@@ -2982,12 +3239,16 @@ export function initFootballLab(){
         const teamA = document.getElementById("momTeamA").value;
         const teamB = document.getElementById("momTeamB").value;
         const raw = document.getElementById("epaNarrative").value || document.getElementById("momNarrative").value;
-        const windowMinutes = Number(document.getElementById("epaWindow").value) || 10;
+        const windowKey = document.getElementById("epaWindow").value || "0-10";
         if(!teamA || !teamB || teamA===teamB){
           document.getElementById("epaStatus").textContent = "❌ Selecciona dos equipos distintos.";
           return;
         }
-        const epa = computeEarlyPhaseAnalyzer(raw, { teamA, teamB, windowMinutes });
+        const seedProfiles = {
+          [teamA]: JSON.parse(localStorage.getItem(`team_profile_${teamA}`) || "null") || {},
+          [teamB]: JSON.parse(localStorage.getItem(`team_profile_${teamB}`) || "null") || {}
+        };
+        const epa = computeEarlyPhaseAnalyzer(raw, { teamA, teamB, windowKey, seedProfiles });
         renderEPA(epa);
         lastEPA = epa;
         document.getElementById("epaSaveProfile").disabled = false;
