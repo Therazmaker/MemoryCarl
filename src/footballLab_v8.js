@@ -762,6 +762,215 @@ export function initFootballLab(){
     });
   }
 
+  function parseStatNumber(value){
+    if(value===null || value===undefined) return null;
+    if(typeof value === "number") return Number.isFinite(value) ? value : null;
+    const txt = String(value).replace(/,/g, ".");
+    const m = txt.match(/-?\d+(\.\d+)?/);
+    return m ? Number(m[0]) : null;
+  }
+
+  function getMatchStatForTeam(match, teamId, regexList=[]){
+    const stats = Array.isArray(match?.stats) ? match.stats : [];
+    if(!stats.length) return null;
+    const isHome = match.homeId===teamId;
+    const keyField = (row)=>String(row?.key || row?.name || row?.label || "").toLowerCase();
+    for(const row of stats){
+      const key = keyField(row);
+      if(!regexList.some(rx=>rx.test(key))) continue;
+      const sideValue = isHome ? (row.home ?? row.local ?? row.teamA) : (row.away ?? row.visitante ?? row.teamB);
+      const parsed = parseStatNumber(sideValue);
+      if(Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  }
+
+  function average(values, fallback=0){
+    const clean = values.filter(v=>Number.isFinite(v));
+    if(!clean.length) return fallback;
+    return clean.reduce((a,b)=>a+b,0) / clean.length;
+  }
+
+  function stdDev(values){
+    const clean = values.filter(v=>Number.isFinite(v));
+    if(clean.length < 2) return 0;
+    const mean = average(clean, 0);
+    const variance = clean.reduce((acc, val)=>acc + (val - mean) ** 2, 0) / clean.length;
+    return Math.sqrt(Math.max(0, variance));
+  }
+
+    function engineForTeam(db, teamId){
+    return recomputeTeamGlobalEngine(db, teamId) || getOrCreateDiagProfile(db, teamId, "").engineV1 || {};
+  }
+
+function computeTeamIntelligencePanel(db, teamId){
+    const matches = db.tracker
+      .filter(m=>m.homeId===teamId || m.awayId===teamId)
+      .slice()
+      .sort((a,b)=>String(a.date || "").localeCompare(String(b.date || "")));
+    const engine = recomputeTeamGlobalEngine(db, teamId) || getOrCreateDiagProfile(db, teamId, "").engineV1 || {};
+    if(!matches.length){
+      return {
+        matches: [],
+        metrics: { powerIndex: 50, trend: "→ Plano", trendSlope: 0, consistencyScore: 50, momentum5: 0.5 },
+        psych: { aggressiveness: 50, resilience: 50, volatility: 50, fatigue: 50 },
+        tactical: { directAttack: 50, possession: 50, transitions: 50, press: 50, setPieces: 50 },
+        momentum: { labels: [], xgDifferential: [], realPerformance: [], expectedPerformance: [] },
+        prediction: { eloDynamic: 1500, offenseRating: 50, defenseRating: 50, psychIndex: 50, consistencyIndex: 50 }
+      };
+    }
+
+    const pointsSeries = [];
+    const xgDiffSeries = [];
+    const expectedSeries = [];
+    const powerSeries = [];
+    const fatigueLoad = [];
+    const labels = [];
+    let comebackPoints = 0;
+    let comebackSamples = 0;
+    let travelPenalty = 0;
+
+    matches.forEach((m, idx)=>{
+      const isHome = m.homeId===teamId;
+      const gf = isHome ? Number(m.homeGoals)||0 : Number(m.awayGoals)||0;
+      const ga = isHome ? Number(m.awayGoals)||0 : Number(m.homeGoals)||0;
+      const pts = gf>ga ? 3 : gf===ga ? 1 : 0;
+      const xgFor = isHome ? parseStatNumber(m.homeXg) : parseStatNumber(m.awayXg);
+      const xgAgainst = isHome ? parseStatNumber(m.awayXg) : parseStatNumber(m.homeXg);
+      const xgDiff = Number.isFinite(xgFor) && Number.isFinite(xgAgainst) ? xgFor - xgAgainst : (gf - ga) * 0.6;
+      const expectedPts = clamp(1.5 + xgDiff * 1.2, 0, 3);
+      labels.push(m.date || `J${idx+1}`);
+      pointsSeries.push(pts);
+      xgDiffSeries.push(xgDiff);
+      expectedSeries.push(expectedPts / 3);
+      if(ga > 0){
+        comebackSamples += 1;
+        if(gf >= ga) comebackPoints += pts;
+      }
+      if(!isHome) travelPenalty += 1;
+      const dateTs = Date.parse(m.date || "");
+      const prevTs = idx>0 ? Date.parse(matches[idx-1].date || "") : NaN;
+      const restDays = Number.isFinite(dateTs) && Number.isFinite(prevTs) ? Math.max(0, (dateTs - prevTs)/(1000*60*60*24)) : 5;
+      fatigueLoad.push(clamp((4 - restDays) / 4, 0, 1));
+
+      const shortPoints = pointsSeries.slice(Math.max(0, pointsSeries.length - 5));
+      const momentum5 = average(shortPoints, 1.5) / 3;
+      const consistencyInv = 1 - clamp(stdDev(pointsSeries) / 1.5, 0, 1);
+      const homeMatches = matches.slice(0, idx+1).filter(x=>x.homeId===teamId);
+      const awayMatches = matches.slice(0, idx+1).filter(x=>x.awayId===teamId);
+      const homePpg = average(homeMatches.map(x=>{ const g1=Number(x.homeGoals)||0, g2=Number(x.awayGoals)||0; return g1>g2?3:g1===g2?1:0; }), 1.2) / 3;
+      const awayPpg = average(awayMatches.map(x=>{ const g1=Number(x.awayGoals)||0, g2=Number(x.homeGoals)||0; return g1>g2?3:g1===g2?1:0; }), 1.0) / 3;
+      const locality = clamp(0.5 + (homePpg - awayPpg) * 0.5, 0, 1);
+      const psychInverse = 1 - clamp(Number(engine?.profile?.psychLoad) || 0.5, 0, 1);
+      const shockInverse = 1 - clamp(Number(engine?.profile?.shock) || 0.5, 0, 1);
+      const xgNorm = clamp(0.5 + average(xgDiffSeries, 0) / 2.2, 0, 1);
+      const power = clamp((0.30*xgNorm + 0.20*momentum5 + 0.15*consistencyInv + 0.15*locality + 0.10*psychInverse + 0.10*shockInverse) * 100, 0, 100);
+      powerSeries.push(power);
+    });
+
+    const momentum5 = average(pointsSeries.slice(-5), 1.5) / 3;
+    const consistencyScore = clamp((1 - stdDev(pointsSeries)/1.5) * 100, 0, 100);
+    const powerIndex = powerSeries[powerSeries.length-1] || 50;
+    const recentAvg = average(powerSeries.slice(-5), powerIndex);
+    const prevAvg = average(powerSeries.slice(-10, -5), recentAvg);
+    const trendSlope = recentAvg - prevAvg;
+
+    const aggression = clamp(
+      35 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/falta/, /foul/]) ?? 12), 12) / 20
+      + 20 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/amarilla/, /yellow/]) ?? 2.2), 2.2) / 5
+      + 25 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/duel/]) ?? 50), 50) / 100
+      + 20 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/tiro.*20/, /shot.*20/]) ?? 2), 2) / 6,
+      0,
+      100
+    );
+    const resilience = clamp(
+      50 * (comebackSamples ? (comebackPoints / (comebackSamples*3)) : 0.5)
+      + 30 * clamp(average(pointsSeries.slice(-5), 1.5) / 3, 0, 1)
+      + 20 * clamp((Number(engine?.haTraits?.awayResilience)||0), 0, 1),
+      0,
+      100
+    );
+    const perfResidual = pointsSeries.map((pts, i)=>(pts/3) - expectedSeries[i]);
+    const volatility = clamp(stdDev(perfResidual) * 220, 0, 100);
+    const fatigue = clamp((average(fatigueLoad, 0.4)*60) + (travelPenalty / Math.max(1, matches.length))*40, 0, 100);
+
+    const possession = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/posesi/]) ?? 50), 50), 0, 100);
+    const wingPlay = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/banda/, /cross/, /centro/]) ?? 40), 40), 0, 100);
+    const inBoxShots = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/área/, /area/, /box/]) ?? 45), 45), 0, 100);
+    const progressivePass = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/progres/]) ?? 48), 48), 0, 100);
+    const highPress = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/presi/, /press/]) ?? 46), 46), 0, 100);
+
+    return {
+      matches,
+      metrics: {
+        powerIndex,
+        trendSlope,
+        trend: trendSlope > 2 ? "↗ Subiendo" : trendSlope < -2 ? "↘ Cayendo" : "→ Plano",
+        consistencyScore,
+        momentum5,
+        powerSeries,
+        labels
+      },
+      psych: { aggressiveness: aggression, resilience, volatility, fatigue },
+      tactical: {
+        directAttack: clamp((wingPlay*0.4 + inBoxShots*0.6), 0, 100),
+        possession,
+        transitions: clamp((progressivePass*0.6 + highPress*0.4), 0, 100),
+        press: highPress,
+        setPieces: clamp((average(matches.map(m=>isFinite(parseStatNumber(m.homeCorners)||parseStatNumber(m.awayCorners)) ? (m.homeId===teamId ? Number(m.homeCorners)||0 : Number(m.awayCorners)||0) : 5), 5) / 12) * 100, 0, 100)
+      },
+      momentum: {
+        labels,
+        xgDifferential: xgDiffSeries.map(v=>clamp(50 + v*20, 0, 100)),
+        realPerformance: pointsSeries.map(v=>Math.round((v/3)*100)),
+        expectedPerformance: expectedSeries.map(v=>Math.round(v*100))
+      },
+      prediction: {
+        eloDynamic: Math.round(1450 + powerIndex*3.2),
+        offenseRating: clamp(50 + average(xgDiffSeries, 0)*18 + average(pointsSeries.slice(-5), 1.5)*8, 0, 100),
+        defenseRating: clamp(55 - average(xgDiffSeries, 0)*14 + consistencyScore*0.25, 0, 100),
+        psychIndex: clamp(100 - ((fatigue*0.45) + (volatility*0.25) - (resilience*0.2) - (aggression*0.1)), 0, 100),
+        consistencyIndex: consistencyScore
+      }
+    };
+  }
+
+  function renderSimpleLineChart(canvas, labels, datasets){
+    if(!canvas || typeof Chart !== "function") return;
+    if(canvas._chart){ try{ canvas._chart.destroy(); }catch(_e){} }
+    canvas._chart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        scales: {
+          x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
+          y: { min: 0, max: 100, ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } }
+        }
+      }
+    });
+  }
+
+  function renderRadarChart(canvas, labels, data, color="#1f6feb"){
+    if(!canvas || typeof Chart !== "function") return;
+    if(canvas._chart){ try{ canvas._chart.destroy(); }catch(_e){} }
+    canvas._chart = new Chart(canvas.getContext("2d"), {
+      type: "radar",
+      data: {
+        labels,
+        datasets: [{ label: "Índice", data, borderColor: color, backgroundColor: `${color}33`, pointBackgroundColor: color }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        scales: { r: { suggestedMin: 0, suggestedMax: 100, angleLines: { color: "rgba(255,255,255,.1)" }, grid: { color: "rgba(255,255,255,.09)" }, pointLabels: { color: "#9ca3af" }, ticks: { color: "#9ca3af", backdropColor: "transparent" } } }
+      }
+    });
+  }
+
   function clamp(value, min, max){
     return Math.max(min, Math.min(max, value));
   }
@@ -2855,6 +3064,20 @@ export function initFootballLab(){
       lAway *= clamp(0.85 + awayAttack*(1-homeDefense), 0.78, 1.3) * (1 + awayShock*0.08);
     }
 
+    const homeIntel = computeTeamIntelligencePanel(db, homeId);
+    const awayIntel = computeTeamIntelligencePanel(db, awayId);
+    const attackVsDefenseHome = clamp((homeIntel.prediction.offenseRating - awayIntel.prediction.defenseRating) / 100, -0.35, 0.35);
+    const attackVsDefenseAway = clamp((awayIntel.prediction.offenseRating - homeIntel.prediction.defenseRating) / 100, -0.35, 0.35);
+    const psychBoostHome = clamp((homeIntel.prediction.psychIndex - awayIntel.prediction.psychIndex) / 260, -0.22, 0.22);
+    const psychBoostAway = clamp((awayIntel.prediction.psychIndex - homeIntel.prediction.psychIndex) / 260, -0.22, 0.22);
+    const momentumWeightHome = clamp(((homeIntel.metrics.momentum5 || 0.5) - (awayIntel.metrics.momentum5 || 0.5)) * 0.22, -0.16, 0.16);
+    const momentumWeightAway = clamp(((awayIntel.metrics.momentum5 || 0.5) - (homeIntel.metrics.momentum5 || 0.5)) * 0.22, -0.16, 0.16);
+    const homeBoost = clamp((Number(engineForTeam(db, homeId)?.haTraits?.homeBoost) || 0) * 0.08, -0.12, 0.16);
+    const awayTravelPenalty = clamp((Number(engineForTeam(db, awayId)?.haTraits?.travelTilt) || 0) * 0.06, -0.12, 0.14);
+
+    lHome *= clamp(1 + attackVsDefenseHome + psychBoostHome + momentumWeightHome + homeBoost - awayTravelPenalty, 0.7, 1.42);
+    lAway *= clamp(1 + attackVsDefenseAway + psychBoostAway + momentumWeightAway, 0.7, 1.35);
+
     lHome = clamp(lHome, 0.05, 4.5);
     lAway = clamp(lAway, 0.05, 4.5);
 
@@ -2928,7 +3151,17 @@ export function initFootballLab(){
           drawBoost,
           tableContextTrust: trust,
           leagueScale,
-          teamBias: { home: homeBias, away: awayBias }
+          teamBias: { home: homeBias, away: awayBias },
+          intelligenceBlend: {
+            home: homeIntel.prediction,
+            away: awayIntel.prediction,
+            attackVsDefenseHome,
+            attackVsDefenseAway,
+            psychBoostHome,
+            psychBoostAway,
+            momentumWeightHome,
+            momentumWeightAway
+          }
         }
       },
       tableContext: { home: homeContext, away: awayContext, drawBoost, matchday, trust }
@@ -3351,16 +3584,8 @@ export function initFootballLab(){
         .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
       const behavior = buildTeamBehaviorSeries(db, team.id);
       const engine = recomputeTeamGlobalEngine(db, team.id) || getOrCreateDiagProfile(db, team.id, team.name).engineV1;
-      const trendLabel = behavior.summary.currentMomentum >= 0.66
-        ? "🔥 Alto"
-        : behavior.summary.currentMomentum >= 0.4
-          ? "⚖️ Medio"
-          : "🧊 Bajo";
-      const trendDirection = behavior.summary.momentumDelta > 0.04
-        ? "↗ Subiendo"
-        : behavior.summary.momentumDelta < -0.04
-          ? "↘ Bajando"
-          : "→ Estable";
+      const intel = computeTeamIntelligencePanel(db, team.id);
+      const gaugeAngle = Math.round(clamp(Number(intel.metrics.powerIndex) || 0, 0, 100) * 3.6);
       const sections = [["Porteros","GK"],["Defensas","DF"],["Centrocampistas","MF"],["Delanteros","FW"],["Otros","OT"]]
         .map(([title,key])=>renderSquadSection(title, byPos[key]||[])).join("");
       const matchRows = teamMatches.map(m=>{
@@ -3410,34 +3635,57 @@ export function initFootballLab(){
           <div class="fl-row" style="margin-top:8px;"><button class="fl-btn" id="runSquadImport">Importar plantilla</button><span id="squadStatus" class="fl-muted"></span></div>
         </div>
         <div class="fl-card">
-          <div style="font-weight:800;margin-bottom:8px;">Motor global: EPA + EMA + Localía</div>
-          <div class="fl-kpi" style="margin-bottom:8px;">
-            <div><span class="fl-mini">Fuerza actual</span><b>${Math.round((Number(engine?.currentStrength)||0.5)*100)}%</b></div>
-            <div><span class="fl-mini">Muestras</span><b>${Number(engine?.samples)||0}</b></div>
-            <div><span class="fl-mini">Home Boost</span><b>${(Number(engine?.haTraits?.homeBoost)||0).toFixed(2)}</b></div>
-            <div><span class="fl-mini">Away Resilience</span><b>${(Number(engine?.haTraits?.awayResilience)||0).toFixed(2)}</b></div>
-            <div><span class="fl-mini">Travel Tilt</span><b>${(Number(engine?.haTraits?.travelTilt)||0).toFixed(2)}</b></div>
-            <div><span class="fl-mini">Agresividad</span><b>${Math.round((Number(engine?.profile?.aggression)||0.5)*100)}%</b></div>
-            <div><span class="fl-mini">Shock</span><b>${Math.round((Number(engine?.profile?.shock)||0.5)*100)}%</b></div>
-            <div><span class="fl-mini">Carga psicológica</span><b>${Math.round((Number(engine?.profile?.psychLoad)||0.5)*100)}%</b></div>
+          <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Team Intelligence Panel v2</div>
+          <div class="fl-row" style="align-items:center;gap:16px;flex-wrap:wrap;">
+            <div style="width:180px;height:180px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(#1f6feb ${gaugeAngle}deg,#2d333b ${gaugeAngle}deg);padding:10px;">
+              <div style="width:100%;height:100%;border-radius:50%;background:#0f141b;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+                <div class="fl-mini">TEAM POWER INDEX</div>
+                <div style="font-size:38px;font-weight:900;line-height:1;">${Math.round(intel.metrics.powerIndex)}</div>
+                <div class="fl-mini">/100</div>
+              </div>
+            </div>
+            <div style="flex:1;min-width:300px;">
+              <div class="fl-kpi" style="margin-bottom:8px;">
+                <div><span class="fl-mini">Tendencia</span><b>${intel.metrics.trend}</b></div>
+                <div><span class="fl-mini">Consistencia</span><b>${Math.round(intel.metrics.consistencyScore)}%</b></div>
+                <div><span class="fl-mini">Momentum 5</span><b>${Math.round((intel.metrics.momentum5||0)*100)}%</b></div>
+                <div><span class="fl-mini">ELO dinámico</span><b>${intel.prediction.eloDynamic}</b></div>
+                <div><span class="fl-mini">Off/Def</span><b>${Math.round(intel.prediction.offenseRating)} / ${Math.round(intel.prediction.defenseRating)}</b></div>
+              </div>
+              <div style="height:140px;"><canvas id="teamPowerHistoryChart"></canvas></div>
+            </div>
           </div>
-          <div class="fl-mini" style="margin-bottom:8px;">Usa el botón <b>EPA/EMA/HAE</b> junto a cada partido para alimentar este gráfico con datos narrados + estadísticas. El motor ahora estima fuerza, agresividad, shock y carga psicológica desde xG, volumen ofensivo, duelos y disciplina.</div>
-          <div style="height:250px;"><canvas id="teamGlobalEngineChart"></canvas></div>
         </div>
         <div class="fl-card">
-          <div style="font-weight:800;margin-bottom:8px;">Patrones de comportamiento</div>
-          <div class="fl-kpi" style="margin-bottom:8px;">
-            <div><span class="fl-mini">PJ</span><b>${behavior.summary.played}</b></div>
-            <div><span class="fl-mini">Puntos acumulados</span><b>${behavior.summary.points}</b></div>
-            <div><span class="fl-mini">Dif. gol acumulada</span><b>${behavior.summary.goalDiff >= 0 ? "+" : ""}${behavior.summary.goalDiff}</b></div>
+          <div style="font-weight:800;margin-bottom:8px;">📈 Momentum dinámico (xG vs resultado real vs esperado)</div>
+          <div style="height:220px;"><canvas id="teamMomentumTripleChart"></canvas></div>
+        </div>
+        <div class="fl-row" style="gap:10px;align-items:stretch;">
+          <div class="fl-card" style="flex:1;min-width:320px;">
+            <div style="font-weight:800;margin-bottom:8px;">🧠 Estado psicológico</div>
+            <div class="fl-kpi" style="margin-bottom:8px;">
+              <div><span class="fl-mini">Agresividad</span><b>${Math.round(intel.psych.aggressiveness)}</b></div>
+              <div><span class="fl-mini">Resiliencia</span><b>${Math.round(intel.psych.resilience)}</b></div>
+              <div><span class="fl-mini">Volatilidad</span><b>${Math.round(intel.psych.volatility)}</b></div>
+              <div><span class="fl-mini">Fatiga</span><b>${Math.round(intel.psych.fatigue)}</b></div>
+            </div>
+            <div style="height:230px;"><canvas id="teamPsychRadar"></canvas></div>
           </div>
-          <div class="fl-row" style="margin-bottom:8px;gap:10px;">
-            <span class="fl-chip">Estado actual: ${trendLabel}</span>
-            <span class="fl-chip">Tendencia: ${trendDirection}</span>
-            <span class="fl-chip">Racha global: ${behavior.summary.wins}G-${behavior.summary.draws}E-${behavior.summary.losses}P</span>
+          <div class="fl-card" style="flex:1;min-width:320px;">
+            <div style="font-weight:800;margin-bottom:8px;">🧬 Tactical DNA Map</div>
+            <div style="height:280px;"><canvas id="teamTacticalRadar"></canvas></div>
           </div>
-          <div class="fl-mini" style="margin-bottom:8px;">La línea azul suma todo lo registrado (puntos acumulados). La verde muestra el comportamiento actual (momentum de los últimos 5 partidos).</div>
-          <div style="height:220px;"><canvas id="teamBehaviorChart"></canvas></div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">🔮 Motor de predicción integrado</div>
+          <div class="fl-kpi">
+            <div><span class="fl-mini">Rating ofensivo</span><b>${Math.round(intel.prediction.offenseRating)}</b></div>
+            <div><span class="fl-mini">Rating defensivo</span><b>${Math.round(intel.prediction.defenseRating)}</b></div>
+            <div><span class="fl-mini">Índice psicológico</span><b>${Math.round(intel.prediction.psychIndex)}</b></div>
+            <div><span class="fl-mini">Índice consistencia</span><b>${Math.round(intel.prediction.consistencyIndex)}</b></div>
+            <div><span class="fl-mini">Home Boost (engine)</span><b>${(Number(engine?.haTraits?.homeBoost)||0).toFixed(2)}</b></div>
+            <div><span class="fl-mini">Travel Tilt</span><b>${(Number(engine?.haTraits?.travelTilt)||0).toFixed(2)}</b></div>
+          </div>
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
@@ -3534,8 +3782,32 @@ export function initFootballLab(){
         saveDb(db);
         render("equipo", { teamId: team.id });
       };
-      renderTeamBehaviorChart(document.getElementById("teamBehaviorChart"), behavior);
-      renderTeamGlobalEngineChart(document.getElementById("teamGlobalEngineChart"), engine);
+      renderSimpleLineChart(
+        document.getElementById("teamPowerHistoryChart"),
+        intel.metrics.labels,
+        [{ label: "Team Power Index", data: intel.metrics.powerSeries, borderColor: "#1f6feb", backgroundColor: "rgba(31,111,235,.2)", tension: 0.25 }]
+      );
+      renderSimpleLineChart(
+        document.getElementById("teamMomentumTripleChart"),
+        intel.momentum.labels,
+        [
+          { label: "xG diferencial", data: intel.momentum.xgDifferential, borderColor: "#1f6feb", backgroundColor: "rgba(31,111,235,.15)", tension: 0.2 },
+          { label: "Resultado real", data: intel.momentum.realPerformance, borderColor: "#2ea043", backgroundColor: "rgba(46,160,67,.12)", tension: 0.2 },
+          { label: "Rendimiento esperado", data: intel.momentum.expectedPerformance, borderColor: "#d29922", backgroundColor: "rgba(210,153,34,.14)", tension: 0.2 }
+        ]
+      );
+      renderRadarChart(
+        document.getElementById("teamPsychRadar"),
+        ["Agresividad", "Resiliencia", "Volatilidad", "Fatiga mental"],
+        [intel.psych.aggressiveness, intel.psych.resilience, intel.psych.volatility, intel.psych.fatigue],
+        "#ff7b72"
+      );
+      renderRadarChart(
+        document.getElementById("teamTacticalRadar"),
+        ["Ataque directo", "Posesión", "Transiciones", "Presión", "Balón parado"],
+        [intel.tactical.directAttack, intel.tactical.possession, intel.tactical.transitions, intel.tactical.press, intel.tactical.setPieces],
+        "#58a6ff"
+      );
       content.querySelectorAll("[data-open-stats-modal]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-stats-modal"));
         openStatsModal({ db, match, onSave: ()=>render("equipo", { teamId: team.id }) });
