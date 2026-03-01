@@ -1092,6 +1092,36 @@ export function initFootballLab(){
     return m ? Number(m[0]) : null;
   }
 
+  function parseSortableDate(value){
+    const raw = String(value || "").trim();
+    if(!raw) return Number.NaN;
+    const exact = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(exact){
+      const year = Number(exact[1]);
+      const month = Number(exact[2]) - 1;
+      const day = Number(exact[3]);
+      return Date.UTC(year, month, day);
+    }
+    const loose = raw.match(/^(\d{4,})-(\d{2})-(\d{2})$/);
+    if(loose){
+      const year = Number(String(loose[1]).slice(-4));
+      const month = Number(loose[2]) - 1;
+      const day = Number(loose[3]);
+      return Date.UTC(year, month, day);
+    }
+    const parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  }
+
+  function compareByDateAsc(a, b){
+    const aTs = parseSortableDate(a?.date);
+    const bTs = parseSortableDate(b?.date);
+    if(Number.isFinite(aTs) && Number.isFinite(bTs)) return aTs - bTs;
+    if(Number.isFinite(aTs)) return -1;
+    if(Number.isFinite(bTs)) return 1;
+    return String(a?.date || "").localeCompare(String(b?.date || ""));
+  }
+
   function getMatchStatForTeam(match, teamId, regexList=[]){
     const stats = Array.isArray(match?.stats) ? match.stats : [];
     if(!stats.length) return null;
@@ -1129,7 +1159,7 @@ function computeTeamIntelligencePanel(db, teamId){
     const matches = db.tracker
       .filter(m=>m.homeId===teamId || m.awayId===teamId)
       .slice()
-      .sort((a,b)=>String(a.date || "").localeCompare(String(b.date || "")));
+      .sort(compareByDateAsc);
     const engine = recomputeTeamGlobalEngine(db, teamId) || getOrCreateDiagProfile(db, teamId, "").engineV1 || {};
     if(!matches.length){
       return {
@@ -1170,8 +1200,8 @@ function computeTeamIntelligencePanel(db, teamId){
         if(gf >= ga) comebackPoints += pts;
       }
       if(!isHome) travelPenalty += 1;
-      const dateTs = Date.parse(m.date || "");
-      const prevTs = idx>0 ? Date.parse(matches[idx-1].date || "") : NaN;
+      const dateTs = parseSortableDate(m.date);
+      const prevTs = idx>0 ? parseSortableDate(matches[idx-1].date) : NaN;
       const restDays = Number.isFinite(dateTs) && Number.isFinite(prevTs) ? Math.max(0, (dateTs - prevTs)/(1000*60*60*24)) : 5;
       fatigueLoad.push(clamp((4 - restDays) / 4, 0, 1));
 
@@ -4187,7 +4217,7 @@ function computeTeamIntelligencePanel(db, teamId){
       players.forEach(p=>{ const pos = p.pos || "OT"; (byPos[pos]||byPos.OT).push(p); });
       const teamMatches = db.tracker
         .filter(m=>m.homeId===team.id || m.awayId===team.id)
-        .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+        .sort((a,b)=>compareByDateAsc(b, a));
       const behavior = buildTeamBehaviorSeries(db, team.id);
       const engine = recomputeTeamGlobalEngine(db, team.id) || getOrCreateDiagProfile(db, team.id, team.name).engineV1;
       const intel = computeTeamIntelligencePanel(db, team.id);
