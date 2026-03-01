@@ -975,6 +975,10 @@ function computeTeamIntelligencePanel(db, teamId){
     return Math.max(min, Math.min(max, value));
   }
 
+  function clamp01(value){
+    return clamp(Number(value) || 0, 0, 1);
+  }
+
   function ensureDiagProfileState(db){
     db.diagProfiles ||= {};
   }
