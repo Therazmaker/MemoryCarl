@@ -42,6 +42,7 @@ export function initFootballLab(){
       }
     },
     predictions: [],
+    marketTracker: [],
     bitacora: {
       bank: 15,
       kellyFraction: 0.25,
@@ -98,6 +99,7 @@ export function initFootballLab(){
       db.versus.simV2.globalVolatility = clamp(Number(db.versus.simV2.globalVolatility) || defaultDb.versus.simV2.globalVolatility, 0.1, 0.8);
       db.versus.simV2.leagueGoalsAvg = clamp(Number(db.versus.simV2.leagueGoalsAvg) || defaultDb.versus.simV2.leagueGoalsAvg, 1.6, 4.2);
       db.predictions ||= [];
+      db.marketTracker = Array.isArray(db.marketTracker) ? db.marketTracker.map(ensureMarketMatchState) : [];
       db.bitacora = ensureBitacoraState(db.bitacora);
       db.learning ||= structuredClone(defaultDb.learning);
       db.learning.schemaVersion = Number(db.learning.schemaVersion) || 2;
@@ -221,6 +223,97 @@ export function initFootballLab(){
     st.pickCandidates = Array.isArray(st.pickCandidates) ? st.pickCandidates : [];
     st.entries = Array.isArray(st.entries) ? st.entries : [];
     return st;
+  }
+
+  function ensureMarketMatchState(raw){
+    const base = {
+      matchId: "",
+      fecha: "",
+      liga: "",
+      lambda: { home: null, away: null },
+      probModel: { home: null, draw: null, away: null },
+      cuotas: [],
+      closingOdds: null,
+      apuestaTomada: null,
+      settlement: null
+    };
+    const row = { ...base, ...(raw || {}) };
+    row.lambda = {
+      home: pickFirstNumber(row.lambda?.home),
+      away: pickFirstNumber(row.lambda?.away)
+    };
+    row.probModel = {
+      home: clamp(pickFirstNumber(row.probModel?.home) ?? 0, 0, 1),
+      draw: clamp(pickFirstNumber(row.probModel?.draw) ?? 0, 0, 1),
+      away: clamp(pickFirstNumber(row.probModel?.away) ?? 0, 0, 1)
+    };
+    const probSum = row.probModel.home + row.probModel.draw + row.probModel.away;
+    if(probSum > 0){
+      row.probModel.home /= probSum;
+      row.probModel.draw /= probSum;
+      row.probModel.away /= probSum;
+    }
+    row.cuotas = Array.isArray(row.cuotas) ? row.cuotas
+      .map(q=>({
+        timestamp: String(q?.timestamp || ""),
+        home: pickFirstNumber(q?.home),
+        draw: pickFirstNumber(q?.draw),
+        away: pickFirstNumber(q?.away)
+      }))
+      .filter(q=>q.home>1 && q.draw>1 && q.away>1)
+      .sort((a,b)=>String(a.timestamp).localeCompare(String(b.timestamp))) : [];
+    row.closingOdds = row.closingOdds && row.closingOdds.home>1 && row.closingOdds.draw>1 && row.closingOdds.away>1
+      ? {
+        home: pickFirstNumber(row.closingOdds.home),
+        draw: pickFirstNumber(row.closingOdds.draw),
+        away: pickFirstNumber(row.closingOdds.away)
+      }
+      : null;
+    if(row.apuestaTomada){
+      row.apuestaTomada = {
+        side: ["home","draw","away"].includes(row.apuestaTomada.side) ? row.apuestaTomada.side : "home",
+        cuota: Math.max(1.01, pickFirstNumber(row.apuestaTomada.cuota) || 1.01),
+        probModelo: clamp(pickFirstNumber(row.apuestaTomada.probModelo) ?? 0.01, 0.01, 0.99),
+        stake: Math.max(0, pickFirstNumber(row.apuestaTomada.stake) || 0),
+        timestamp: String(row.apuestaTomada.timestamp || "")
+      };
+    }
+    row.settlement = row.settlement && typeof row.settlement === "object" ? row.settlement : null;
+    return row;
+  }
+
+  function marketProbsFromOdds(odds){
+    if(!odds) return null;
+    return clean1x2Probs(odds.home, odds.draw, odds.away);
+  }
+
+  function marketRecordMetrics(record){
+    const latestOdds = record.cuotas[record.cuotas.length - 1] || null;
+    const initialOdds = record.cuotas[0] || null;
+    const marketLatest = marketProbsFromOdds(latestOdds);
+    const marketInitial = marketProbsFromOdds(initialOdds);
+    const side = record.apuestaTomada?.side || "home";
+    const modelP = Number(record.probModel?.[side]) || 0;
+    const marketP = Number(marketLatest?.[`p${side[0].toUpperCase()}${side.slice(1)}`] || (side === "draw" ? marketLatest?.pD : null) || (side === "away" ? marketLatest?.pA : marketLatest?.pH)) || 0;
+    const currentOdd = Number(latestOdds?.[side]) || 0;
+    const initialOdd = Number(initialOdds?.[side]) || currentOdd;
+    const evCurrent = currentOdd > 1 ? (modelP * currentOdd) - 1 : null;
+    const evInitial = initialOdd > 1 ? (modelP * initialOdd) - 1 : null;
+    const edge = modelP - marketP;
+    const drift = initialOdd > 0 ? (currentOdd - initialOdd) / initialOdd : 0;
+    const volatility = record.cuotas.length > 1
+      ? record.cuotas.slice(1).reduce((acc, q, idx)=>{
+        const prev = Number(record.cuotas[idx]?.[side]) || 0;
+        const next = Number(q?.[side]) || prev;
+        return acc + Math.abs(next - prev) / Math.max(1.01, prev);
+      }, 0) / (record.cuotas.length - 1)
+      : 0;
+    const closing = record.closingOdds?.[side] || null;
+    const clv = record.apuestaTomada && closing ? record.apuestaTomada.cuota - closing : null;
+    const convergence = marketInitial
+      ? Math.abs(modelP - marketP) < Math.abs(modelP - (side === "home" ? marketInitial.pH : side === "draw" ? marketInitial.pD : marketInitial.pA))
+      : null;
+    return { side, modelP, marketP, currentOdd, evCurrent, evInitial, edge, drift, volatility, clv, convergence };
   }
 
   function calcBitacoraSuggestion({ bank, odds, probability, kellyFraction, minUnit, maxStakePct }){
@@ -3766,7 +3859,7 @@ function computeTeamIntelligencePanel(db, teamId){
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","momentum","bitacora"];
+    const tabs = ["home","liga","tracker","versus","momentum","bitacora","market"];
     const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
 
     app.innerHTML = `
@@ -5218,6 +5311,206 @@ function computeTeamIntelligencePanel(db, teamId){
     }
 
 
+    if(view==="market"){
+      db.marketTracker = Array.isArray(db.marketTracker) ? db.marketTracker.map(ensureMarketMatchState) : [];
+      const todayKey = new Date().toISOString().slice(0,10);
+      const upcoming = db.tracker.filter(m=>(m.date||"") >= todayKey || (!Number.isFinite(m.homeGoals) && !Number.isFinite(m.awayGoals)));
+      const trackerOptions = upcoming.map(m=>{
+        const home = db.teams.find(t=>t.id===m.homeId)?.name || "Local";
+        const away = db.teams.find(t=>t.id===m.awayId)?.name || "Visitante";
+        const lg = db.leagues.find(l=>l.id===m.leagueId)?.name || "Liga";
+        return `<option value="${m.id}">${m.date || "sin fecha"} · ${home} vs ${away} (${lg})</option>`;
+      }).join("");
+
+      const rows = db.marketTracker.map(row=>({ row, metrics: marketRecordMetrics(row) }));
+      const settled = rows.filter(r=>r.row.settlement && Number.isFinite(r.metrics.clv));
+      const edgeGlobal = rows.length ? rows.reduce((acc,r)=>acc+r.metrics.edge,0)/rows.length : 0;
+      const clvAvg = settled.length ? settled.reduce((acc,r)=>acc+r.metrics.clv,0)/settled.length : 0;
+      const adelantado = rows.length ? rows.filter(r=>r.metrics.convergence===true).length / rows.length : 0;
+      const evTomado = rows.filter(r=>r.row.apuestaTomada).map(r=>(r.row.apuestaTomada.probModelo * r.row.apuestaTomada.cuota) - 1);
+      const evTomadoAvg = evTomado.length ? evTomado.reduce((a,b)=>a+b,0)/evTomado.length : 0;
+      const roiRealNum = settled.reduce((acc,r)=>{
+        const bet = r.row.apuestaTomada;
+        const result = r.row.settlement?.resultadoReal;
+        if(!bet || !bet.stake) return acc;
+        const won = result === r.metrics.side;
+        return acc + (won ? bet.stake*(bet.cuota-1) : -bet.stake);
+      }, 0);
+      const totalStake = settled.reduce((acc,r)=>acc+(Number(r.row.apuestaTomada?.stake)||0),0);
+      const roiReal = totalStake>0 ? roiRealNum/totalStake : 0;
+      const roiEsperado = totalStake>0 ? settled.reduce((acc,r)=>{
+        const bet = r.row.apuestaTomada;
+        return acc + (((bet.probModelo*bet.cuota)-1) * bet.stake);
+      },0)/totalStake : 0;
+
+      const cards = rows.map(({ row, metrics })=>{
+        const sideLabel = metrics.side === "home" ? "1" : (metrics.side === "draw" ? "X" : "2");
+        const latest = row.cuotas[row.cuotas.length-1] || null;
+        const firstTs = row.cuotas[0]?.timestamp?.slice(5,16) || "inicio";
+        const lastTs = latest?.timestamp?.slice(5,16) || "actual";
+        const chartPoints = row.cuotas.map((q, idx)=>{
+          const mkt = marketProbsFromOdds(q);
+          const pMkt = metrics.side === "home" ? mkt?.pH : (metrics.side === "draw" ? mkt?.pD : mkt?.pA);
+          const odd = Number(q[metrics.side]) || 0;
+          const ev = odd>1 ? (metrics.modelP * odd)-1 : 0;
+          return { idx, pMkt: pMkt || 0, ev };
+        });
+        const modelLine = sparklinePath(chartPoints.map(()=>metrics.modelP), 620, 160, -0.2, 1);
+        const marketLine = sparklinePath(chartPoints.map(p=>p.pMkt), 620, 160, -0.2, 1);
+        const evLine = sparklinePath(chartPoints.map(p=>p.ev), 620, 160, -0.2, 1);
+        const badges = [];
+        if(metrics.convergence===true) badges.push('<span class="fl-chip ok">🟢 Mercado converge</span>');
+        if(metrics.convergence===false) badges.push('<span class="fl-chip bad">🔴 Mercado se aleja</span>');
+        if(metrics.volatility > 0.04) badges.push('<span class="fl-chip warn">⚡ Alta volatilidad</span>');
+        if(row.cuotas.length>=3 && row.cuotas.slice(-3).every(q=>((metrics.modelP*(Number(q[metrics.side])||0))-1) > 0)) badges.push('<span class="fl-chip ok">🎯 EV persistente 3 ticks</span>');
+        const signal = metrics.edge>0.06 && (metrics.evCurrent||0)>0.04 && metrics.drift>=-0.02
+          ? 'Entrada anticipada'
+          : ((metrics.evCurrent||0)>0 && row.cuotas.length>1 && metrics.convergence ? 'Confirmación de mercado' : (metrics.drift>0.06 ? 'Reducir stake o descartar' : 'Sin señal'));
+        return `
+          <div class="fl-card">
+            <div class="fl-row" style="justify-content:space-between;">
+              <div><b>${row.fecha || "sin fecha"}</b> · ${row.liga || "Liga"} · Match ${row.matchId || "manual"}</div>
+              <div class="fl-chip">Side ${sideLabel}</div>
+            </div>
+            <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-top:8px;">
+              <div><div class="fl-mini">Prob modelo vs mercado</div><b>${(metrics.modelP*100).toFixed(1)}% / ${(metrics.marketP*100).toFixed(1)}%</b></div>
+              <div><div class="fl-mini">EV actual</div><b style="color:${(metrics.evCurrent||0)>0?'#3fb950':'#ff7b72'}">${((metrics.evCurrent||0)*100).toFixed(2)}%</b></div>
+              <div><div class="fl-mini">Edge</div><b style="color:${metrics.edge>0?'#3fb950':'#ff7b72'}">${(metrics.edge*100).toFixed(2)}%</b></div>
+              <div><div class="fl-mini">Drift cuota</div><b style="color:${metrics.drift<0?'#3fb950':'#f2cc60'}">${(metrics.drift*100).toFixed(2)}%</b></div>
+              <div><div class="fl-mini">CLV</div><b style="color:${(metrics.clv||0)>0?'#3fb950':'#ff7b72'}">${metrics.clv===null?'-':metrics.clv.toFixed(3)}</b></div>
+            </div>
+            <div class="fl-mini" style="margin:8px 0;">${firstTs} → ${lastTs}</div>
+            <svg viewBox="0 0 620 160" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px;">
+              <path d="${modelLine}" fill="none" stroke="#58a6ff" stroke-width="2"></path>
+              <path d="${marketLine}" fill="none" stroke="#f2cc60" stroke-width="2"></path>
+              <path d="${evLine}" fill="none" stroke="#3fb950" stroke-width="2"></path>
+            </svg>
+            <div class="fl-row" style="margin-top:8px;">${badges.join(' ') || '<span class="fl-chip">Sin señales todavía</span>'}</div>
+            <div class="fl-mini" style="margin-top:8px;"><b>Señal:</b> ${signal}</div>
+          </div>
+        `;
+      }).join("");
+
+      content.innerHTML = `
+        <div class="fl-card">
+          <div style="font-size:20px;font-weight:900;">📈 Market Tracker</div>
+          <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-top:8px;">
+            <div><div class="fl-mini">EDGE GLOBAL</div><b style="color:${edgeGlobal>0?'#3fb950':'#ff7b72'}">${(edgeGlobal*100).toFixed(2)}%</b></div>
+            <div><div class="fl-mini">CLV promedio</div><b style="color:${clvAvg>0?'#3fb950':'#ff7b72'}">${(clvAvg*100).toFixed(2)}%</b></div>
+            <div><div class="fl-mini">Modelo adelantado</div><b>${(adelantado*100).toFixed(1)}%</b></div>
+            <div><div class="fl-mini">EV promedio tomado</div><b>${(evTomadoAvg*100).toFixed(2)}%</b></div>
+            <div><div class="fl-mini">ROI real / esperado</div><b>${(roiReal*100).toFixed(1)}% / ${(roiEsperado*100).toFixed(1)}%</b></div>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div class="fl-row" style="flex-wrap:wrap;">
+            <select id="mkMatch" class="fl-select"><option value="">Partido de tracker (opcional)</option>${trackerOptions}</select>
+            <input id="mkDate" type="date" class="fl-input" />
+            <input id="mkLeague" class="fl-input" placeholder="Liga" style="min-width:130px;" />
+            <input id="mkLambdaH" type="number" step="0.01" class="fl-input" placeholder="λ home" style="width:90px;" />
+            <input id="mkLambdaA" type="number" step="0.01" class="fl-input" placeholder="λ away" style="width:90px;" />
+            <input id="mkPH" type="number" step="0.01" class="fl-input" placeholder="p home" style="width:90px;" />
+            <input id="mkPD" type="number" step="0.01" class="fl-input" placeholder="p draw" style="width:90px;" />
+            <input id="mkPA" type="number" step="0.01" class="fl-input" placeholder="p away" style="width:90px;" />
+            <button class="fl-btn" id="mkSaveMatch">Guardar partido market</button>
+          </div>
+          <div class="fl-row" style="margin-top:8px;flex-wrap:wrap;">
+            <select id="mkTarget" class="fl-select">${db.marketTracker.map(r=>`<option value="${r.matchId}">${r.fecha || "sin fecha"} · ${r.matchId}</option>`).join('')}</select>
+            <input id="mkOddH" type="number" step="0.01" class="fl-input" placeholder="cuota 1" style="width:88px;" />
+            <input id="mkOddD" type="number" step="0.01" class="fl-input" placeholder="cuota X" style="width:88px;" />
+            <input id="mkOddA" type="number" step="0.01" class="fl-input" placeholder="cuota 2" style="width:88px;" />
+            <button class="fl-btn" id="mkAddTick">Agregar snapshot cuota</button>
+            <select id="mkSide" class="fl-select"><option value="home">1</option><option value="draw">X</option><option value="away">2</option></select>
+            <input id="mkBetOdd" type="number" step="0.01" class="fl-input" placeholder="cuota tomada" style="width:110px;" />
+            <input id="mkBetStake" type="number" step="0.1" class="fl-input" placeholder="stake" style="width:90px;" />
+            <button class="fl-btn" id="mkSaveBet">Guardar apuesta</button>
+          </div>
+          <div class="fl-row" style="margin-top:8px;flex-wrap:wrap;">
+            <input id="mkCloseH" type="number" step="0.01" class="fl-input" placeholder="cierre 1" style="width:88px;" />
+            <input id="mkCloseD" type="number" step="0.01" class="fl-input" placeholder="cierre X" style="width:88px;" />
+            <input id="mkCloseA" type="number" step="0.01" class="fl-input" placeholder="cierre 2" style="width:88px;" />
+            <select id="mkResult" class="fl-select"><option value="">resultado real</option><option value="home">home</option><option value="draw">draw</option><option value="away">away</option></select>
+            <button class="fl-btn" id="mkCloseMatch">Cerrar mercado</button>
+            <span id="mkOut" class="fl-mini"></span>
+          </div>
+        </div>
+        ${cards || '<div class="fl-card">Sin partidos en market tracker todavía.</div>'}
+      `;
+
+      const findTarget = ()=> db.marketTracker.find(r=>r.matchId===document.getElementById("mkTarget")?.value);
+      document.getElementById("mkSaveMatch").onclick = ()=>{
+        const trId = document.getElementById("mkMatch").value;
+        const tr = db.tracker.find(m=>m.id===trId);
+        const exists = db.marketTracker.find(r=>r.matchId===(trId || document.getElementById("mkDate").value));
+        if(exists){ document.getElementById("mkOut").textContent = "Ya existe ese matchId."; return; }
+        const row = ensureMarketMatchState({
+          matchId: trId || uid("mkt"),
+          fecha: document.getElementById("mkDate").value || tr?.date || "",
+          liga: document.getElementById("mkLeague").value || db.leagues.find(l=>l.id===tr?.leagueId)?.name || "",
+          lambda: { home: pickFirstNumber(document.getElementById("mkLambdaH").value), away: pickFirstNumber(document.getElementById("mkLambdaA").value) },
+          probModel: {
+            home: pickFirstNumber(document.getElementById("mkPH").value) ?? 0.33,
+            draw: pickFirstNumber(document.getElementById("mkPD").value) ?? 0.34,
+            away: pickFirstNumber(document.getElementById("mkPA").value) ?? 0.33
+          },
+          cuotas: tr?.oddsHome>1 && tr?.oddsDraw>1 && tr?.oddsAway>1 ? [{ timestamp: new Date().toISOString(), home: tr.oddsHome, draw: tr.oddsDraw, away: tr.oddsAway }] : []
+        });
+        db.marketTracker.unshift(row);
+        saveDb(db);
+        render("market");
+      };
+      document.getElementById("mkAddTick").onclick = ()=>{
+        const target = findTarget();
+        if(!target) return;
+        const home = pickFirstNumber(document.getElementById("mkOddH").value);
+        const draw = pickFirstNumber(document.getElementById("mkOddD").value);
+        const away = pickFirstNumber(document.getElementById("mkOddA").value);
+        if(!(home>1 && draw>1 && away>1)) return;
+        target.cuotas.push({ timestamp: new Date().toISOString(), home, draw, away });
+        target.cuotas = ensureMarketMatchState(target).cuotas;
+        saveDb(db);
+        render("market");
+      };
+      document.getElementById("mkSaveBet").onclick = ()=>{
+        const target = findTarget();
+        if(!target) return;
+        const side = document.getElementById("mkSide").value;
+        const cuota = pickFirstNumber(document.getElementById("mkBetOdd").value);
+        const stake = pickFirstNumber(document.getElementById("mkBetStake").value);
+        if(!(cuota>1) || !(stake>0)) return;
+        target.apuestaTomada = {
+          side,
+          cuota,
+          probModelo: target.probModel?.[side] || 0.33,
+          stake,
+          timestamp: new Date().toISOString()
+        };
+        saveDb(db);
+        render("market");
+      };
+      document.getElementById("mkCloseMatch").onclick = ()=>{
+        const target = findTarget();
+        const out = document.getElementById("mkOut");
+        if(!target){ out.textContent = "Selecciona partido."; return; }
+        const ch = pickFirstNumber(document.getElementById("mkCloseH").value);
+        const cd = pickFirstNumber(document.getElementById("mkCloseD").value);
+        const ca = pickFirstNumber(document.getElementById("mkCloseA").value);
+        if(ch>1 && cd>1 && ca>1) target.closingOdds = { home: ch, draw: cd, away: ca };
+        const metrics = marketRecordMetrics(target);
+        target.settlement = {
+          resultadoReal: document.getElementById("mkResult").value || null,
+          cuotaCierre: target.closingOdds?.[metrics.side] || null,
+          CLV: metrics.clv,
+          EVInicial: metrics.evInitial,
+          EVFinal: metrics.evCurrent
+        };
+        saveDb(db);
+        render("market");
+      };
+      return;
+    }
+
+
     if(view==="versus"){
       db.versus ||= { homeAdvantage: 1.1, paceFactor: 1, sampleSize: 20, marketBlend: 0.35, matchday: 20, tableContextTrust: 0.45, tableContext: {} };
       db.versus.tableContext ||= {};
@@ -5786,7 +6079,7 @@ function computeTeamIntelligencePanel(db, teamId){
   window.__FOOTBALL_LAB__ = {
     open(view="home", payload={}){ render(view, payload); },
     getDB(){ return loadDb(); },
-    help: "window.__FOOTBALL_LAB__.open('liga'|'equipo'|'tracker'|'versus'|'bitacora')"
+    help: "window.__FOOTBALL_LAB__.open('liga'|'equipo'|'tracker'|'versus'|'bitacora'|'market')"
   };
 
   return window.__FOOTBALL_LAB__;
