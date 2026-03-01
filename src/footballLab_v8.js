@@ -200,6 +200,9 @@ export function initFootballLab(){
       riskLevel: "balanceado",
       stopLossStreak: 2,
       autoMode: true,
+      planStartBank: null,
+      planStartDate: "",
+      planTargetBank: null,
       pickCandidates: [],
       entries: []
     };
@@ -220,6 +223,9 @@ export function initFootballLab(){
     st.riskLevel = ["conservador","balanceado","agresivo"].includes(st.riskLevel) ? st.riskLevel : base.riskLevel;
     st.stopLossStreak = clamp(Number(st.stopLossStreak) || base.stopLossStreak, 1, 4);
     st.autoMode = st.autoMode !== false;
+    st.planStartBank = Number.isFinite(Number(st.planStartBank)) ? Math.max(1, Number(st.planStartBank)) : null;
+    st.planStartDate = String(st.planStartDate || "");
+    st.planTargetBank = Number.isFinite(Number(st.planTargetBank)) ? Math.max(1, Number(st.planTargetBank)) : null;
     st.pickCandidates = Array.isArray(st.pickCandidates) ? st.pickCandidates : [];
     st.entries = Array.isArray(st.entries) ? st.entries : [];
     return st;
@@ -472,9 +478,16 @@ export function initFootballLab(){
     const targetDays = clamp(Math.round(Number(st.targetDays) || 7), 1, 30);
     const targetMode = st.targetMode === "percent" ? "percent" : "amount";
     const bank = Math.max(1, Number(st.bank) || 1);
+    const planStartBank = Math.max(1, Number(st.planStartBank) || bank);
     const targetValue = Math.max(targetMode === "percent" ? 1 : bank + 1, Number(st.targetValue) || (targetMode === "percent" ? 25 : bank * 1.25));
-    const targetBank = targetMode === "percent" ? bank * (1 + targetValue/100) : targetValue;
-    const totalGoal = Math.max(0.1, targetBank - bank);
+    const targetBank = targetMode === "percent"
+      ? planStartBank * (1 + targetValue/100)
+      : Math.max(targetValue, planStartBank + 1);
+    const totalGoal = Math.max(0.1, targetBank - planStartBank);
+    const progressProfit = bank - planStartBank;
+    const progressPct = clamp(progressProfit / totalGoal, -2, 2);
+    const remainingToTarget = Math.max(0, targetBank - bank);
+    const remainingPct = clamp(1 - progressPct, 0, 3);
     const dailyGoal = totalGoal / targetDays;
     const avgOdds = (profile.oddsMin + profile.oddsMax) / 2;
     const pRequired = clamp(1/avgOdds + profile.baseEv, 0.45, 0.92);
@@ -514,8 +527,13 @@ export function initFootballLab(){
       targetDays,
       targetMode,
       targetValue,
+      planStartBank,
       targetBank,
       totalGoal,
+      progressProfit,
+      progressPct,
+      remainingToTarget,
+      remainingPct,
       dailyGoal,
       avgOdds,
       pRequired,
@@ -527,6 +545,30 @@ export function initFootballLab(){
       evGate,
       recoveryMode: lossesToday >= 1
     };
+  }
+
+  function bitacoraRoadmap(plan, dayIndex, bank){
+    const checkpoints = [
+      { id: "base", label: "Base", pct: 0.25 },
+      { id: "run", label: "Tracción", pct: 0.5 },
+      { id: "close", label: "Cierre", pct: 0.75 },
+      { id: "goal", label: "Meta", pct: 1 }
+    ];
+    return checkpoints.map(cp=>{
+      const checkpointBank = plan.planStartBank + (plan.totalGoal * cp.pct);
+      const checkpointDay = Math.max(1, Math.round(plan.targetDays * cp.pct));
+      const reached = bank >= checkpointBank;
+      const expectedByNow = dayIndex >= checkpointDay;
+      const gap = bank - checkpointBank;
+      return {
+        ...cp,
+        checkpointBank,
+        checkpointDay,
+        reached,
+        expectedByNow,
+        gap
+      };
+    });
   }
 
   function evaluatePickCandidate({ odds, pFinal, pMkt, pickType }, st, plan, todayState){
@@ -543,12 +585,23 @@ export function initFootballLab(){
     if(todayState.result === "losing") stake *= 0.8;
     stake = clamp(stake, st.minUnit, Math.max(st.minUnit, st.bank * st.maxStakePct));
     let label = "🔴 No toca hoy";
+    let reason = "No cumple EV o rango de cuota del plan.";
+    let confidence = 0.35;
     if(ev >= plan.evGate && odds >= plan.profile.oddsMin && odds <= plan.profile.oddsMax){
       label = "🟢 Apta para plan";
+      reason = "Cumple EV mínima y está dentro del rango de cuota objetivo.";
+      confidence = 0.82;
     }else if(ev > 0){
       label = "🟡 Solo si vas ganando";
+      reason = "Tiene EV positivo, pero fuera de la zona óptima del plan.";
+      confidence = 0.6;
     }
-    if(plan.streakStop) label = "🔴 Día bloqueado por racha";
+    if(plan.streakStop){
+      label = "🔴 Día bloqueado por racha";
+      reason = "Se activó el freno por pérdidas consecutivas.";
+      confidence = 0.15;
+    }
+    const flexibility = clamp(1 - Math.abs(odds - ((plan.profile.oddsMin + plan.profile.oddsMax)/2)) / Math.max(0.2, plan.profile.oddsMax - plan.profile.oddsMin), 0, 1);
     return {
       pickType,
       odds,
@@ -558,7 +611,10 @@ export function initFootballLab(){
       ev,
       kelly: fractionalKelly,
       stake,
-      label
+      label,
+      reason,
+      confidence,
+      flexibility
     };
   }
 
@@ -5183,11 +5239,20 @@ function computeTeamIntelligencePanel(db, teamId){
       const todayProfit = todayEntries.reduce((s,e)=>s+(Number(e.profit)||0),0);
       const todayRisk = todayEntries.reduce((s,e)=>s+(Number(e.stake)||0),0);
       const todayState = { result: todayProfit > 0 ? "winning" : (todayProfit < 0 ? "losing" : "flat") };
+      if(!st.planStartBank || !st.planStartDate){
+        st.planStartBank = st.bank;
+        st.planStartDate = today;
+      }
       const plan = computeBitacoraPlan(st, todayEntries);
+      if(!st.planTargetBank || Math.abs(st.planTargetBank - plan.targetBank) > 0.01){
+        st.planTargetBank = plan.targetBank;
+      }
       const riskLeft = Math.max(0, (st.bank * st.dailyRiskPct) - todayRisk);
       const dayIndex = Math.max(1, Math.min(plan.targetDays, Number(st.entries.slice(-1)[0]?.planDayIndex) || 1));
       const maxDayBets = Math.max(2, Math.min(3, Number(st.maxBetsPerDay) || 3));
       const allowThirdStep = todayEntries.length < maxDayBets && !plan.streakStop;
+      const roadmap = bitacoraRoadmap(plan, dayIndex, st.bank);
+      const onTrack = plan.progressPct >= ((dayIndex-1) / Math.max(1, plan.targetDays));
 
       const pickCandidates = Array.isArray(st.pickCandidates) && st.pickCandidates.length
         ? st.pickCandidates
@@ -5246,15 +5311,30 @@ function computeTeamIntelligencePanel(db, teamId){
           <td style="color:${row.ev>=0?"#3fb950":"#ff7b72"}">${(row.ev*100).toFixed(1)}%</td>
           <td>${(row.kelly*100).toFixed(1)}%</td>
           <td>S/${row.stake.toFixed(2)}</td>
-          <td>${row.label}</td>
+          <td>${(row.confidence*100).toFixed(0)}%</td>
+          <td>${(row.flexibility*100).toFixed(0)}%</td>
+          <td title="${row.reason}">${row.label}</td>
         </tr>
       `).join("");
+
+      const roadmapRows = roadmap.map(step=>`
+        <tr>
+          <td>${step.reached?"✅":"⏳"} ${step.label}</td>
+          <td>Día ${step.checkpointDay}</td>
+          <td>S/${step.checkpointBank.toFixed(2)}</td>
+          <td style="color:${step.gap>=0?"#3fb950":"#ff7b72"}">${step.gap>=0?"+":""}S/${step.gap.toFixed(2)}</td>
+          <td>${step.reached?"Cumplido":(step.expectedByNow?"Acelerar":"En ventana")}</td>
+        </tr>
+      `).join("");
+
+      const progressColor = plan.progressPct >= 1 ? "#3fb950" : (plan.progressPct >= 0.6 ? "#f2cc60" : "#ff7b72");
 
       content.innerHTML = `
         <div class="fl-card">
           <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">
             <div><div class="fl-mini">Bank</div><div style="font-size:24px;font-weight:900;">S/${st.bank.toFixed(2)}</div></div>
             <div><div class="fl-mini">Meta ${plan.targetDays} días</div><div style="font-size:24px;font-weight:900;">S/${plan.targetBank.toFixed(2)}</div></div>
+            <div><div class="fl-mini">Progreso real del plan</div><div style="font-size:24px;font-weight:900;color:${progressColor};">${(plan.progressPct*100).toFixed(1)}%</div></div>
             <div><div class="fl-mini">Riesgo restante hoy</div><div style="font-size:24px;font-weight:900;color:${riskLeft>0?"#f2cc60":"#ff7b72"};">S/${riskLeft.toFixed(2)}</div></div>
             <div style="display:flex;justify-content:flex-end;align-items:center;"><button class="fl-btn" id="bkBuildPlan">Generar plan</button></div>
           </div>
@@ -5270,7 +5350,7 @@ function computeTeamIntelligencePanel(db, teamId){
             <input id="bkStopStreak" class="fl-input" type="number" min="1" max="4" step="1" value="${st.stopLossStreak}" style="width:100px" title="Stop racha" />
           </div>
           <div id="bkPilot" class="fl-mini" style="margin-top:8px;">
-            🧠 Plan de hoy (Día ${dayIndex}/${plan.targetDays}): meta +S/${plan.dailyGoal.toFixed(2)} · odds ${plan.profile.oddsMin.toFixed(2)}-${plan.profile.oddsMax.toFixed(2)} · p mínima ${(plan.pRequired*100).toFixed(1)}% · EV mínima +${(plan.evGate*100).toFixed(1)}%.
+            🧠 Plan de hoy (Día ${dayIndex}/${plan.targetDays}): ${onTrack?"✅ Vas en ruta":"⚠️ Debes acelerar"} · avance ${plan.progressProfit>=0?"+":""}S/${plan.progressProfit.toFixed(2)} desde inicio · faltan S/${plan.remainingToTarget.toFixed(2)} para meta · odds ${plan.profile.oddsMin.toFixed(2)}-${plan.profile.oddsMax.toFixed(2)} · p mínima ${(plan.pRequired*100).toFixed(1)}% · EV mínima +${(plan.evGate*100).toFixed(1)}%.
           </div>
         </div>
 
@@ -5282,6 +5362,7 @@ function computeTeamIntelligencePanel(db, teamId){
             <div class="fl-mini" style="margin-top:4px;">${allowThirdStep?`Si gana → Paso 3 opcional · stake S/${plan.stepStakes[2].toFixed(2)}`:"Paso 3 bloqueado por riesgo del día"}</div>
             <div class="fl-mini" style="margin-top:8px;color:${plan.recoveryMode?"#f2cc60":"#3fb950"};">${plan.recoveryMode?"🔻 Recuperación suave: baja stake mañana y exige EV +1.5%.":"✅ Modo normal: puedes escalar +10% a +25% si sigues verde."}</div>
             <div class="fl-mini" style="margin-top:8px;color:${plan.streakStop?"#ff7b72":"#9ca3af"};">${plan.streakStop?"Stop por racha activa: 2 pérdidas seguidas, se cierra el día.":"Stop racha controlado."}</div>
+            <div class="fl-mini" style="margin-top:8px;">📍 Roadmap: cada checkpoint marca cuánto bank necesitas y si vas adelantado/atrasado.</div>
             <label class="fl-row" style="margin-top:10px;align-items:center;gap:6px;"><input id="bkAutoMode" type="checkbox" ${st.autoMode?"checked":""} /> Auto: ON</label>
           </div>
 
@@ -5295,9 +5376,10 @@ function computeTeamIntelligencePanel(db, teamId){
               <button class="fl-btn" id="addPick">Agregar</button>
             </div>
             <table class="fl-table" style="margin-top:8px;">
-              <thead><tr><th>Tipo</th><th>Cuota</th><th>pFinal</th><th>pMkt</th><th>EV</th><th>0.25 Kelly</th><th>Stake</th><th>Etiqueta</th></tr></thead>
+              <thead><tr><th>Tipo</th><th>Cuota</th><th>pFinal</th><th>pMkt</th><th>EV</th><th>0.25 Kelly</th><th>Stake</th><th>Conf</th><th>Flex</th><th>Etiqueta</th></tr></thead>
               <tbody>${radarRows}</tbody>
             </table>
+            <div class="fl-mini" style="margin-top:8px;">Conf = confianza del setup en el plan. Flex = qué tanto encaja en tu ventana ideal de cuota para ajustar sin romper el roadmap.</div>
           </div>
         </div>
 
@@ -5310,6 +5392,7 @@ function computeTeamIntelligencePanel(db, teamId){
               <path d="${guidePath}" fill="none" stroke="#f2cc60" stroke-width="2"/>
               <path d="${equityPath}" fill="none" stroke="#58a6ff" stroke-width="2.8"/>
             </svg>
+            <div class="fl-mini" style="margin-top:8px;">Azul: bank real. Amarillo: trayectoria ideal diaria para cumplir meta. Verde/rojo punteado: banda probabilística (P90/P10) según tu stake, p y cuota promedio.</div>
             <div class="fl-row" style="margin-top:8px;">
               <span class="fl-chip">Drawdown máx: ${(Math.max(...equitySeries)-Math.min(...equitySeries)).toFixed(2)}</span>
               <span class="fl-chip">Días para meta (est): ${Math.max(1, Math.ceil((plan.targetBank-st.bank)/Math.max(0.01,plan.dailyGoal)))}</span>
@@ -5317,7 +5400,9 @@ function computeTeamIntelligencePanel(db, teamId){
             </div>
           </div>
           <div class="fl-card">
-            <div style="font-weight:800;margin-bottom:8px;">Historial compacto (7 días)</div>
+            <div style="font-weight:800;margin-bottom:8px;">🗺️ Roadmap del plan + Historial compacto</div>
+            <table class="fl-table" style="margin-bottom:10px;"><thead><tr><th>Checkpoint</th><th>Día objetivo</th><th>Bank objetivo</th><th>Gap</th><th>Estado</th></tr></thead><tbody>${roadmapRows}</tbody></table>
+            <div style="font-weight:700;margin-bottom:6px;">Últimas apuestas (7 días)</div>
             <table class="fl-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Cuota</th><th>Res</th><th>P/L</th><th>Tag</th></tr></thead><tbody>${compactHistory || "<tr><td colspan='6'>Sin registros</td></tr>"}</tbody></table>
             <div class="fl-row" style="margin-top:10px;">
               <input id="logStake" class="fl-input" type="number" step="0.5" min="${st.minUnit}" value="${plan.stepStakes[0]}" style="width:90px" placeholder="Stake" />
@@ -5343,6 +5428,11 @@ function computeTeamIntelligencePanel(db, teamId){
         st.dailyRiskPct = clamp((Number(document.getElementById("bkStopPct").value) || (st.dailyRiskPct*100))/100, 0.05, 0.4);
         st.stopLossStreak = clamp(Number(document.getElementById("bkStopStreak").value) || st.stopLossStreak, 1, 4);
         st.autoMode = !!document.getElementById("bkAutoMode").checked;
+        st.planStartBank = st.bank;
+        st.planStartDate = new Date().toISOString().slice(0,10);
+        st.planTargetBank = st.targetMode === "percent"
+          ? st.planStartBank * (1 + st.targetValue/100)
+          : st.targetValue;
         saveDb(db);
         render("bitacora");
       };
