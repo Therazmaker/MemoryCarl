@@ -185,6 +185,13 @@ export function initFootballLab(){
       stopWin: 1,
       maxBetsPerDay: 3,
       maxConsecutiveLosses: 2,
+      targetDays: 7,
+      targetMode: "amount",
+      targetValue: 22,
+      riskLevel: "balanceado",
+      stopLossStreak: 2,
+      autoMode: true,
+      pickCandidates: [],
       entries: []
     };
     const st = { ...base, ...(raw || {}) };
@@ -196,8 +203,15 @@ export function initFootballLab(){
     st.dailyRiskPct = clamp(Number(st.dailyRiskPct) || base.dailyRiskPct, 0.05, 0.4);
     st.stopLoss = Math.max(0.5, Number(st.stopLoss) || base.stopLoss);
     st.stopWin = Math.max(0.5, Number(st.stopWin) || base.stopWin);
-    st.maxBetsPerDay = clamp(Number(st.maxBetsPerDay) || base.maxBetsPerDay, 1, 8);
+    st.maxBetsPerDay = clamp(Number(st.maxBetsPerDay) || base.maxBetsPerDay, 2, 3);
     st.maxConsecutiveLosses = clamp(Number(st.maxConsecutiveLosses) || base.maxConsecutiveLosses, 1, 5);
+    st.targetDays = clamp(Number(st.targetDays) || base.targetDays, 1, 30);
+    st.targetMode = st.targetMode === "percent" ? "percent" : "amount";
+    st.targetValue = Math.max(1, Number(st.targetValue) || base.targetValue);
+    st.riskLevel = ["conservador","balanceado","agresivo"].includes(st.riskLevel) ? st.riskLevel : base.riskLevel;
+    st.stopLossStreak = clamp(Number(st.stopLossStreak) || base.stopLossStreak, 1, 4);
+    st.autoMode = st.autoMode !== false;
+    st.pickCandidates = Array.isArray(st.pickCandidates) ? st.pickCandidates : [];
     st.entries = Array.isArray(st.entries) ? st.entries : [];
     return st;
   }
@@ -242,6 +256,141 @@ export function initFootballLab(){
       const mean = bucket.reduce((s,v)=>s+v,0) / (bucket.length || 1);
       return { step: idx, mean, p10: quant(bucket, 0.1), p90: quant(bucket, 0.9) };
     });
+  }
+
+  function getRiskProfile(level){
+    const map = {
+      conservador: {
+        label: "Conservador",
+        oddsMin: 1.3,
+        oddsMax: 1.55,
+        baseEv: 0.01,
+        kellyFactor: 0.2,
+        maxStakePct: 0.12
+      },
+      balanceado: {
+        label: "Balanceado",
+        oddsMin: 1.4,
+        oddsMax: 1.75,
+        baseEv: 0.02,
+        kellyFactor: 0.25,
+        maxStakePct: 0.18
+      },
+      agresivo: {
+        label: "Agresivo",
+        oddsMin: 1.6,
+        oddsMax: 2.2,
+        baseEv: 0.03,
+        kellyFactor: 0.3,
+        maxStakePct: 0.25
+      }
+    };
+    return map[level] || map.balanceado;
+  }
+
+  function unitForBank(bank){
+    const b = Number(bank) || 0;
+    if(b < 20) return 1;
+    if(b < 50) return 2;
+    if(b < 100) return 3;
+    if(b < 180) return 4;
+    if(b < 300) return 5;
+    return Math.max(6, Math.round(b/50));
+  }
+
+  function computeBitacoraPlan(st, todayEntries){
+    const profile = getRiskProfile(st.riskLevel);
+    const targetDays = clamp(Math.round(Number(st.targetDays) || 7), 1, 30);
+    const targetMode = st.targetMode === "percent" ? "percent" : "amount";
+    const bank = Math.max(1, Number(st.bank) || 1);
+    const targetValue = Math.max(targetMode === "percent" ? 1 : bank + 1, Number(st.targetValue) || (targetMode === "percent" ? 25 : bank * 1.25));
+    const targetBank = targetMode === "percent" ? bank * (1 + targetValue/100) : targetValue;
+    const totalGoal = Math.max(0.1, targetBank - bank);
+    const dailyGoal = totalGoal / targetDays;
+    const avgOdds = (profile.oddsMin + profile.oddsMax) / 2;
+    const pRequired = clamp(1/avgOdds + profile.baseEv, 0.45, 0.92);
+    const unit = unitForBank(bank);
+    const lossesToday = todayEntries.filter(e=>e.result === "loss").length;
+    const consecutiveLosses = (()=>{
+      let streak = 0;
+      for(let i=todayEntries.length-1;i>=0;i--){
+        if(todayEntries[i].result === "loss") streak += 1;
+        else break;
+      }
+      return streak;
+    })();
+    const isWinningDay = todayEntries.reduce((s,e)=>s+(Number(e.profit)||0),0) > 0;
+    const streakStop = consecutiveLosses >= st.stopLossStreak;
+    let stakeMult = 1;
+    let evGate = profile.baseEv;
+    if(isWinningDay && !streakStop){
+      stakeMult = 1.15;
+    }
+    if(lossesToday >= 1){
+      stakeMult = Math.min(stakeMult, 0.8);
+      evGate += 0.01;
+    }
+    if(lossesToday >= 2){
+      stakeMult = 0.65;
+      evGate += 0.015;
+    }
+    const stepStakes = [
+      Math.max(st.minUnit, Math.round((unit * stakeMult) / st.minUnit) * st.minUnit),
+      Math.max(st.minUnit, Math.round((unit * 1.25 * stakeMult) / st.minUnit) * st.minUnit),
+      Math.max(st.minUnit, Math.round((unit * 1.5 * stakeMult) / st.minUnit) * st.minUnit)
+    ];
+    const maxStake = Math.max(st.minUnit, bank * Math.min(profile.maxStakePct, st.maxStakePct));
+    return {
+      profile,
+      targetDays,
+      targetMode,
+      targetValue,
+      targetBank,
+      totalGoal,
+      dailyGoal,
+      avgOdds,
+      pRequired,
+      unit,
+      lossesToday,
+      consecutiveLosses,
+      streakStop,
+      stepStakes: stepStakes.map(v=>clamp(v, st.minUnit, maxStake)),
+      evGate,
+      recoveryMode: lossesToday >= 1
+    };
+  }
+
+  function evaluatePickCandidate({ odds, pFinal, pMkt, pickType }, st, plan, todayState){
+    const implied = odds > 1 ? 1 / odds : 0;
+    const marketRef = Number.isFinite(pMkt) && pMkt > 0 ? pMkt : implied;
+    const edge = pFinal - marketRef;
+    const ev = (pFinal * odds) - 1;
+    const b = Math.max(0.0001, odds - 1);
+    const kelly = clamp((pFinal * b - (1 - pFinal)) / b, -1, 1);
+    const fractionalKelly = Math.max(0, kelly * st.kellyFraction);
+    const rawStake = (Number(st.bank) || 0) * fractionalKelly;
+    let stake = Math.max(st.minUnit, Math.round(rawStake / st.minUnit) * st.minUnit);
+    if(todayState.result === "winning") stake *= 1.15;
+    if(todayState.result === "losing") stake *= 0.8;
+    stake = clamp(stake, st.minUnit, Math.max(st.minUnit, st.bank * st.maxStakePct));
+    let label = "🔴 No toca hoy";
+    if(ev >= plan.evGate && odds >= plan.profile.oddsMin && odds <= plan.profile.oddsMax){
+      label = "🟢 Apta para plan";
+    }else if(ev > 0){
+      label = "🟡 Solo si vas ganando";
+    }
+    if(plan.streakStop) label = "🔴 Día bloqueado por racha";
+    return {
+      pickType,
+      odds,
+      pFinal,
+      pMkt: marketRef,
+      edge,
+      ev,
+      kelly: fractionalKelly,
+      stake,
+      label
+    };
   }
 
   function sparklinePath(values, width=640, height=200, minY=null, maxY=null){
@@ -4834,159 +4983,186 @@ function computeTeamIntelligencePanel(db, teamId){
       const todayEntries = st.entries.filter(e=>(e.date||"").slice(0,10)===today);
       const todayProfit = todayEntries.reduce((s,e)=>s+(Number(e.profit)||0),0);
       const todayRisk = todayEntries.reduce((s,e)=>s+(Number(e.stake)||0),0);
-      let lossStreak = 0;
-      for(let i=todayEntries.length-1;i>=0;i--){
-        if(todayEntries[i].result==="loss") lossStreak += 1;
-        else break;
-      }
-      const dailyGoal = st.bank * st.dailyGoalPct;
-      const dailyRiskCap = st.bank * st.dailyRiskPct;
-      const stopByLoss = todayProfit <= -st.stopLoss;
-      const stopByWin = todayProfit >= st.stopWin;
-      const stopByRisk = todayRisk >= dailyRiskCap;
-      const stopByCount = todayEntries.length >= st.maxBetsPerDay;
-      const stopByStreak = lossStreak >= st.maxConsecutiveLosses;
-      const quickRules = [
-        { odds: 1.7, p: 0.6 },
-        { odds: 2.0, p: 0.55 },
-        { odds: 2.5, p: 0.45 }
-      ];
+      const todayState = { result: todayProfit > 0 ? "winning" : (todayProfit < 0 ? "losing" : "flat") };
+      const plan = computeBitacoraPlan(st, todayEntries);
+      const riskLeft = Math.max(0, (st.bank * st.dailyRiskPct) - todayRisk);
+      const dayIndex = Math.max(1, Math.min(plan.targetDays, Number(st.entries.slice(-1)[0]?.planDayIndex) || 1));
+      const maxDayBets = Math.max(2, Math.min(3, Number(st.maxBetsPerDay) || 3));
+      const allowThirdStep = todayEntries.length < maxDayBets && !plan.streakStop;
 
-      const lastRows = st.entries.slice(-20);
-      const bankSeries = [
-        Math.max(0, st.bank - lastRows.reduce((s,e)=>s+(Number(e.profit)||0),0)),
-        ...lastRows.map(e=>Number(e.bankAfter) || st.bank)
-      ];
-      const histMin = Math.min(...bankSeries);
-      const histMax = Math.max(...bankSeries);
-      const histPath = sparklinePath(bankSeries, 640, 180, histMin-0.5, histMax+0.5);
+      const pickCandidates = Array.isArray(st.pickCandidates) && st.pickCandidates.length
+        ? st.pickCandidates
+        : [
+          { id: uid("pick"), odds: 1.52, pFinal: 0.69, pMkt: 0.65, pickType: "1X2" },
+          { id: uid("pick"), odds: 1.66, pFinal: 0.64, pMkt: 0.6, pickType: "DNB" }
+        ];
+      st.pickCandidates = pickCandidates;
 
-      const avgP = lastRows.length ? lastRows.reduce((s,e)=>s+(Number(e.probability)||0.52),0)/lastRows.length : 0.55;
-      const avgOdds = lastRows.length ? lastRows.reduce((s,e)=>s+(Number(e.odds)||2),0)/lastRows.length : 2;
-      const avgStake = lastRows.length ? Math.max(st.minUnit, lastRows.reduce((s,e)=>s+(Number(e.stake)||st.minUnit),0)/lastRows.length) : st.minUnit;
-      const projection = projectBankroll({ bank: st.bank, p: avgP, odds: avgOdds, stake: avgStake, steps: 12, paths: 1000 });
-      const projAll = projection.flatMap(p=>[p.p10, p.p90, p.mean]);
-      const pMin = Math.min(...projAll);
-      const pMax = Math.max(...projAll);
-      const meanPath = sparklinePath(projection.map(p=>p.mean), 640, 180, pMin-0.5, pMax+0.5);
-      const lowPath = sparklinePath(projection.map(p=>p.p10), 640, 180, pMin-0.5, pMax+0.5);
-      const highPath = sparklinePath(projection.map(p=>p.p90), 640, 180, pMin-0.5, pMax+0.5);
+      const evaluated = pickCandidates
+        .map(row=>evaluatePickCandidate({
+          odds: Number(row.odds) || 0,
+          pFinal: clamp(Number(row.pFinal) || 0, 0.01, 0.99),
+          pMkt: Number(row.pMkt),
+          pickType: row.pickType || "1X2"
+        }, st, plan, todayState));
 
-      const rows = st.entries.slice().reverse().slice(0,10).map(e=>`
+      const lastRows = st.entries.slice(-Math.max(7, plan.targetDays));
+      const startBank = lastRows.length ? (Number(lastRows[0].bankBefore) || (Number(lastRows[0].bankAfter) - Number(lastRows[0].profit||0)) || st.bank) : st.bank;
+      const equitySeries = [startBank, ...lastRows.map(e=>Number(e.bankAfter) || 0)];
+      const guideSeries = Array.from({ length: equitySeries.length }, (_v, idx)=>startBank + (plan.totalGoal/Math.max(1, plan.targetDays)) * idx);
+
+      const avgP = lastRows.length ? lastRows.reduce((s,e)=>s+(Number(e.probability)||plan.pRequired),0)/lastRows.length : plan.pRequired;
+      const avgOdds = lastRows.length ? lastRows.reduce((s,e)=>s+(Number(e.odds)||plan.avgOdds),0)/lastRows.length : plan.avgOdds;
+      const avgStake = lastRows.length ? Math.max(st.minUnit, lastRows.reduce((s,e)=>s+(Number(e.stake)||st.minUnit),0)/lastRows.length) : plan.stepStakes[0];
+      const projection = projectBankroll({ bank: st.bank, p: avgP, odds: avgOdds, stake: avgStake, steps: plan.targetDays, paths: 850 });
+
+      const chartValues = [...equitySeries, ...guideSeries, ...projection.flatMap(p=>[p.p10,p.p90])];
+      const minV = Math.min(...chartValues) - 0.5;
+      const maxV = Math.max(...chartValues) + 0.5;
+      const equityPath = sparklinePath(equitySeries, 640, 200, minV, maxV);
+      const guidePath = sparklinePath(guideSeries, 640, 200, minV, maxV);
+      const lowPath = sparklinePath(projection.map(p=>p.p10), 640, 200, minV, maxV);
+      const highPath = sparklinePath(projection.map(p=>p.p90), 640, 200, minV, maxV);
+
+      const compactHistory = st.entries.slice().reverse().slice(0,7).map(e=>{
+        const tag = Number(e.ev) >= 0.03 ? "edge+" : (Number(e.ev) > 0 ? "ok" : "frío");
+        return `
+          <tr>
+            <td>${(e.date||"").slice(5,10)}</td>
+            <td>${e.pickType || "-"}</td>
+            <td>${Number(e.odds||0).toFixed(2)}</td>
+            <td>${e.result || "-"}</td>
+            <td style="color:${Number(e.profit)>=0?"#3fb950":"#ff7b72"}">${Number(e.profit)>=0?"+":""}${Number(e.profit||0).toFixed(2)}</td>
+            <td><span class="fl-chip ${tag === "edge+" ? "ok" : (tag === "ok" ? "warn" : "bad")}">${tag}</span></td>
+          </tr>
+        `;
+      }).join("");
+
+      const radarRows = evaluated.map((row, idx)=>`
         <tr>
-          <td>${(e.date||"").slice(0,10)}</td>
-          <td>S/${Number(e.stake||0).toFixed(2)}</td>
-          <td>${Number(e.odds||0).toFixed(2)}</td>
-          <td>${((Number(e.probability)||0)*100).toFixed(1)}%</td>
-          <td>${e.result||"-"}</td>
-          <td style="color:${Number(e.profit)>=0?"#3fb950":"#ff7b72"}">${Number(e.profit||0)>=0?"+":""}${Number(e.profit||0).toFixed(2)}</td>
-          <td>S/${Number(e.bankAfter||0).toFixed(2)}</td>
+          <td>${pickCandidates[idx].pickType}</td>
+          <td>${row.odds.toFixed(2)}</td>
+          <td>${(row.pFinal*100).toFixed(1)}%</td>
+          <td>${(row.pMkt*100).toFixed(1)}%</td>
+          <td style="color:${row.ev>=0?"#3fb950":"#ff7b72"}">${(row.ev*100).toFixed(1)}%</td>
+          <td>${(row.kelly*100).toFixed(1)}%</td>
+          <td>S/${row.stake.toFixed(2)}</td>
+          <td>${row.label}</td>
         </tr>
       `).join("");
 
       content.innerHTML = `
-        <div class="fl-card fl-grid two">
-          <div>
-            <div style="font-weight:800;margin-bottom:8px;">Bankroll actual</div>
-            <div class="fl-row">
-              <input id="bkBank" class="fl-input" type="number" min="1" step="0.5" value="${st.bank.toFixed(2)}" style="width:130px" />
-              <input id="bkGoal" class="fl-input" type="number" min="1" max="20" step="1" value="${(st.dailyGoalPct*100).toFixed(0)}" title="Objetivo diario %" style="width:140px" />
-              <input id="bkRisk" class="fl-input" type="number" min="5" max="40" step="1" value="${(st.dailyRiskPct*100).toFixed(0)}" title="Riesgo diario %" style="width:140px" />
-              <input id="bkKelly" class="fl-input" type="number" min="5" max="100" step="5" value="${(st.kellyFraction*100).toFixed(0)}" title="Kelly fraccionado %" style="width:150px" />
-              <button class="fl-btn" id="saveBankCfg">Guardar config</button>
-            </div>
-            <div class="fl-mini" style="margin-top:8px;">Objetivo del día: <b>S/${dailyGoal.toFixed(2)}</b> · Riesgo máx día: <b>S/${dailyRiskCap.toFixed(2)}</b> · Stop-loss S/${st.stopLoss.toFixed(2)} · Stop-win S/${st.stopWin.toFixed(2)}</div>
-            <div class="fl-row" style="margin-top:8px;">
-              <span class="fl-chip ${stopByLoss||stopByRisk||stopByStreak?"bad":"ok"}">Hoy ${todayEntries.length}/${st.maxBetsPerDay} apuestas</span>
-              <span class="fl-chip ${todayProfit>=0?"ok":"bad"}">P&L día ${todayProfit>=0?"+":""}S/${todayProfit.toFixed(2)}</span>
-              <span class="fl-chip ${stopByWin?"ok":(stopByLoss||stopByRisk||stopByStreak?"bad":"warn")}">${stopByWin?"Stop-win activo":(stopByLoss||stopByRisk||stopByStreak?"Parar por riesgo":"Puedes seguir")}</span>
-            </div>
-          </div>
-          <div>
-            <div style="font-weight:800;margin-bottom:8px;">Sugerir apuesta (EV + Kelly)</div>
-            <div class="fl-row">
-              <input id="bkOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:120px" />
-              <input id="bkProb" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="Prob (0-1)" style="width:140px" />
-              <button class="fl-btn" id="bkSuggest">Sugerir apuesta</button>
-            </div>
-            <div id="bkSuggestOut" class="fl-mini" style="margin-top:8px;">Ingresa cuota y probabilidad para calcular EV y stake redondo.</div>
-            <div class="fl-mini" style="margin-top:8px;">Regla rápida: 1.70→p≥0.60 · 2.00→p≥0.55 · 2.50→p≥0.45 · máximo 2-3 apuestas/día.</div>
-          </div>
-        </div>
-
         <div class="fl-card">
-          <div style="font-weight:800;margin-bottom:8px;">Plan del día (2-3 tickets)</div>
-          <div class="fl-mini">1) Busca mercado entre 1.80 y 2.20 con EV positivo. 2) Segunda apuesta solo si sigues dentro del riesgo diario. 3) Si pierdes ${st.maxConsecutiveLosses} seguidas, se termina el día.</div>
+          <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">
+            <div><div class="fl-mini">Bank</div><div style="font-size:24px;font-weight:900;">S/${st.bank.toFixed(2)}</div></div>
+            <div><div class="fl-mini">Meta ${plan.targetDays} días</div><div style="font-size:24px;font-weight:900;">S/${plan.targetBank.toFixed(2)}</div></div>
+            <div><div class="fl-mini">Riesgo restante hoy</div><div style="font-size:24px;font-weight:900;color:${riskLeft>0?"#f2cc60":"#ff7b72"};">S/${riskLeft.toFixed(2)}</div></div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;"><button class="fl-btn" id="bkBuildPlan">Generar plan</button></div>
+          </div>
+          <div class="fl-row" style="margin-top:10px;">
+            <input id="bkBank" class="fl-input" type="number" min="1" step="0.5" value="${st.bank.toFixed(2)}" placeholder="Bank actual" style="width:120px" />
+            <input id="bkDays" class="fl-input" type="number" min="1" max="30" value="${st.targetDays}" placeholder="Días" style="width:90px" />
+            <input id="bkTarget" class="fl-input" type="number" min="1" step="0.5" value="${st.targetValue}" placeholder="Meta" style="width:120px" />
+            <select id="bkTargetMode" class="fl-select" style="width:120px"><option value="amount" ${st.targetMode==="amount"?"selected":""}>Meta S/</option><option value="percent" ${st.targetMode==="percent"?"selected":""}>Meta %</option></select>
+            <select id="bkRiskLevel" class="fl-select" style="width:140px"><option value="conservador" ${st.riskLevel==="conservador"?"selected":""}>Conservador</option><option value="balanceado" ${st.riskLevel==="balanceado"?"selected":""}>Balanceado</option><option value="agresivo" ${st.riskLevel==="agresivo"?"selected":""}>Agresivo</option></select>
+            <input id="bkMaxBets" class="fl-input" type="number" min="2" max="3" step="1" value="${maxDayBets}" style="width:95px" title="Máx apuestas día" />
+            <input id="bkStopSoles" class="fl-input" type="number" min="0.5" step="0.5" value="${st.stopLoss.toFixed(2)}" style="width:110px" title="Stop diario S/" />
+            <input id="bkStopPct" class="fl-input" type="number" min="5" max="40" step="1" value="${(st.dailyRiskPct*100).toFixed(0)}" style="width:100px" title="Stop diario %" />
+            <input id="bkStopStreak" class="fl-input" type="number" min="1" max="4" step="1" value="${st.stopLossStreak}" style="width:100px" title="Stop racha" />
+          </div>
+          <div id="bkPilot" class="fl-mini" style="margin-top:8px;">
+            🧠 Plan de hoy (Día ${dayIndex}/${plan.targetDays}): meta +S/${plan.dailyGoal.toFixed(2)} · odds ${plan.profile.oddsMin.toFixed(2)}-${plan.profile.oddsMax.toFixed(2)} · p mínima ${(plan.pRequired*100).toFixed(1)}% · EV mínima +${(plan.evGate*100).toFixed(1)}%.
+          </div>
         </div>
 
-        <div class="fl-card fl-grid two">
-          <div>
-            <div style="font-weight:800;margin-bottom:8px;">Registrar apuesta</div>
+        <div class="fl-grid two">
+          <div class="fl-card">
+            <div style="font-weight:800;margin-bottom:8px;">🧾 Misiones del día</div>
+            <div class="fl-mini">Paso 1: cuota ${plan.profile.oddsMin.toFixed(2)}-${Math.min(plan.profile.oddsMax, 1.6).toFixed(2)} · stake S/${plan.stepStakes[0].toFixed(2)} · EV ≥ +${(plan.evGate*100).toFixed(1)}%</div>
+            <div class="fl-mini" style="margin-top:4px;">Si gana → Paso 2: cuota 1.40-1.55 · stake S/${plan.stepStakes[1].toFixed(2)} · EV ≥ +${((plan.evGate-0.005)*100).toFixed(1)}%</div>
+            <div class="fl-mini" style="margin-top:4px;">${allowThirdStep?`Si gana → Paso 3 opcional · stake S/${plan.stepStakes[2].toFixed(2)}`:"Paso 3 bloqueado por riesgo del día"}</div>
+            <div class="fl-mini" style="margin-top:8px;color:${plan.recoveryMode?"#f2cc60":"#3fb950"};">${plan.recoveryMode?"🔻 Recuperación suave: baja stake mañana y exige EV +1.5%.":"✅ Modo normal: puedes escalar +10% a +25% si sigues verde."}</div>
+            <div class="fl-mini" style="margin-top:8px;color:${plan.streakStop?"#ff7b72":"#9ca3af"};">${plan.streakStop?"Stop por racha activa: 2 pérdidas seguidas, se cierra el día.":"Stop racha controlado."}</div>
+            <label class="fl-row" style="margin-top:10px;align-items:center;gap:6px;"><input id="bkAutoMode" type="checkbox" ${st.autoMode?"checked":""} /> Auto: ON</label>
+          </div>
+
+          <div class="fl-card">
+            <div style="font-weight:800;margin-bottom:8px;">🎯 Radar de picks</div>
             <div class="fl-row">
-              <input id="logStake" class="fl-input" type="number" step="0.5" min="${st.minUnit}" value="${st.minUnit}" placeholder="Stake" style="width:120px" />
-              <input id="logOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:120px" />
-              <input id="logProb" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="Prob" style="width:120px" />
-              <select id="logResult" class="fl-select" style="width:120px"><option value="win">win</option><option value="loss">loss</option><option value="push">push</option></select>
+              <select id="pickType" class="fl-select" style="width:120px"><option>1X2</option><option>DNB</option><option>Doble oportunidad</option><option>Under/Over</option></select>
+              <input id="pickOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:100px" />
+              <input id="pickP" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="pFinal" style="width:100px" />
+              <input id="pickPmkt" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="pMkt" style="width:100px" />
+              <button class="fl-btn" id="addPick">Agregar</button>
+            </div>
+            <table class="fl-table" style="margin-top:8px;">
+              <thead><tr><th>Tipo</th><th>Cuota</th><th>pFinal</th><th>pMkt</th><th>EV</th><th>0.25 Kelly</th><th>Stake</th><th>Etiqueta</th></tr></thead>
+              <tbody>${radarRows}</tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="fl-grid two">
+          <div class="fl-card">
+            <div style="font-weight:800;margin-bottom:8px;">📈 Equity real vs plan ideal vs banda de riesgo</div>
+            <svg viewBox="0 0 640 200" style="width:100%;height:220px;background:#0f141d;border:1px solid #2d333b;border-radius:10px;">
+              <path d="${lowPath}" fill="none" stroke="#ff7b72" stroke-width="1.2" stroke-dasharray="4 3"/>
+              <path d="${highPath}" fill="none" stroke="#2ea043" stroke-width="1.2" stroke-dasharray="4 3"/>
+              <path d="${guidePath}" fill="none" stroke="#f2cc60" stroke-width="2"/>
+              <path d="${equityPath}" fill="none" stroke="#58a6ff" stroke-width="2.8"/>
+            </svg>
+            <div class="fl-row" style="margin-top:8px;">
+              <span class="fl-chip">Drawdown máx: ${(Math.max(...equitySeries)-Math.min(...equitySeries)).toFixed(2)}</span>
+              <span class="fl-chip">Días para meta (est): ${Math.max(1, Math.ceil((plan.targetBank-st.bank)/Math.max(0.01,plan.dailyGoal)))}</span>
+              <span class="fl-chip ${riskLeft>0?"warn":"bad"}">Riesgo hoy: S/${riskLeft.toFixed(2)}</span>
+            </div>
+          </div>
+          <div class="fl-card">
+            <div style="font-weight:800;margin-bottom:8px;">Historial compacto (7 días)</div>
+            <table class="fl-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Cuota</th><th>Res</th><th>P/L</th><th>Tag</th></tr></thead><tbody>${compactHistory || "<tr><td colspan='6'>Sin registros</td></tr>"}</tbody></table>
+            <div class="fl-row" style="margin-top:10px;">
+              <input id="logStake" class="fl-input" type="number" step="0.5" min="${st.minUnit}" value="${plan.stepStakes[0]}" style="width:90px" placeholder="Stake" />
+              <input id="logOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:90px" />
+              <input id="logProb" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="pFinal" style="width:90px" />
+              <select id="logPickType" class="fl-select" style="width:140px"><option>1X2</option><option>DNB</option><option>Doble oportunidad</option><option>Under/Over</option></select>
+              <select id="logResult" class="fl-select" style="width:90px"><option value="win">win</option><option value="loss">loss</option><option value="push">push</option></select>
               <button class="fl-btn" id="saveLog">Guardar</button>
             </div>
             <div id="logOut" class="fl-mini" style="margin-top:8px;"></div>
           </div>
-          <div>
-            <div style="font-weight:800;margin-bottom:8px;">Historial de bank</div>
-            <svg viewBox="0 0 640 180" style="width:100%;height:180px;background:#0f141d;border:1px solid #2d333b;border-radius:10px;">
-              <path d="${histPath}" fill="none" stroke="#58a6ff" stroke-width="2.5"/>
-            </svg>
-          </div>
-        </div>
-
-        <div class="fl-card">
-          <div style="font-weight:800;margin-bottom:8px;">Proyección Monte Carlo (12 apuestas, 1000 caminos)</div>
-          <div class="fl-mini">Base: p promedio ${(avgP*100).toFixed(1)}%, cuota ${avgOdds.toFixed(2)}, stake S/${avgStake.toFixed(2)}.</div>
-          <svg viewBox="0 0 640 180" style="width:100%;height:180px;background:#0f141d;border:1px solid #2d333b;border-radius:10px;margin-top:8px;">
-            <path d="${lowPath}" fill="none" stroke="#ff7b72" stroke-width="1.5" stroke-dasharray="4 3"/>
-            <path d="${highPath}" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-dasharray="4 3"/>
-            <path d="${meanPath}" fill="none" stroke="#f2cc60" stroke-width="2.5"/>
-          </svg>
-          <div class="fl-mini" style="margin-top:6px;">Línea amarilla: media esperada · Verde: banda optimista (P90) · Roja: banda pesimista (P10).</div>
-        </div>
-
-        <div class="fl-card">
-          <table class="fl-table">
-            <thead><tr><th>Fecha</th><th>Stake</th><th>Cuota</th><th>p</th><th>Resultado</th><th>Profit</th><th>Bank</th></tr></thead>
-            <tbody>${rows || "<tr><td colspan='7'>Sin registros</td></tr>"}</tbody>
-          </table>
         </div>
       `;
 
-      document.getElementById("saveBankCfg").onclick = ()=>{
+      document.getElementById("bkBuildPlan").onclick = ()=>{
         st.bank = Math.max(1, Number(document.getElementById("bkBank").value) || st.bank);
-        st.dailyGoalPct = clamp((Number(document.getElementById("bkGoal").value) || (st.dailyGoalPct*100)) / 100, 0.01, 0.2);
-        st.dailyRiskPct = clamp((Number(document.getElementById("bkRisk").value) || (st.dailyRiskPct*100)) / 100, 0.05, 0.4);
-        st.kellyFraction = clamp((Number(document.getElementById("bkKelly").value) || (st.kellyFraction*100)) / 100, 0.05, 1);
+        st.targetDays = clamp(Number(document.getElementById("bkDays").value) || st.targetDays, 1, 30);
+        st.targetMode = document.getElementById("bkTargetMode").value === "percent" ? "percent" : "amount";
+        st.targetValue = Math.max(1, Number(document.getElementById("bkTarget").value) || st.targetValue);
+        st.riskLevel = document.getElementById("bkRiskLevel").value || st.riskLevel;
+        st.maxBetsPerDay = clamp(Number(document.getElementById("bkMaxBets").value) || st.maxBetsPerDay, 2, 3);
+        st.stopLoss = Math.max(0.5, Number(document.getElementById("bkStopSoles").value) || st.stopLoss);
+        st.dailyRiskPct = clamp((Number(document.getElementById("bkStopPct").value) || (st.dailyRiskPct*100))/100, 0.05, 0.4);
+        st.stopLossStreak = clamp(Number(document.getElementById("bkStopStreak").value) || st.stopLossStreak, 1, 4);
+        st.autoMode = !!document.getElementById("bkAutoMode").checked;
         saveDb(db);
         render("bitacora");
       };
 
-      document.getElementById("bkSuggest").onclick = ()=>{
-        const odds = Number(document.getElementById("bkOdds").value);
-        const probability = Number(document.getElementById("bkProb").value);
-        const out = document.getElementById("bkSuggestOut");
-        if(!(odds>1) || !(probability>0 && probability<1)){
-          out.textContent = "❌ Completa cuota (>1) y probabilidad (0-1).";
-          return;
-        }
-        const calc = calcBitacoraSuggestion({
-          bank: st.bank,
+      document.getElementById("addPick").onclick = ()=>{
+        const odds = Number(document.getElementById("pickOdds").value);
+        const pFinal = Number(document.getElementById("pickP").value);
+        const pMktRaw = Number(document.getElementById("pickPmkt").value);
+        if(!(odds>1) || !(pFinal>0 && pFinal<1)) return;
+        st.pickCandidates.unshift({
+          id: uid("pick"),
+          pickType: document.getElementById("pickType").value || "1X2",
           odds,
-          probability,
-          kellyFraction: st.kellyFraction,
-          minUnit: st.minUnit,
-          maxStakePct: st.maxStakePct
+          pFinal,
+          pMkt: (pMktRaw>0 && pMktRaw<1) ? pMktRaw : null
         });
-        const qr = quickRules.reduce((acc, rule)=> Math.abs(rule.odds - odds) < Math.abs(acc.odds - odds) ? rule : acc, quickRules[0]);
-        const ruleMsg = probability >= qr.p ? "✅ Pasa regla rápida" : `⚠️ Regla rápida pide p≥${qr.p.toFixed(2)}`;
-        out.innerHTML = `EV por S/1: <b>${calc.ev.toFixed(3)}</b> · Kelly*: <b>${(calc.kellyStar*100).toFixed(1)}%</b> · Fracc: <b>${(calc.frac*100).toFixed(1)}%</b><br/>`
-          + `${calc.noBet ? "❌ NO BET (EV ≤ 0)." : `✅ Stake sugerido: <b>S/${calc.suggestedStake.toFixed(2)}</b> (raw S/${calc.rawStake.toFixed(2)}).`}<br/>${ruleMsg}`;
+        st.pickCandidates = st.pickCandidates.slice(0,8);
+        saveDb(db);
+        render("bitacora");
       };
 
       document.getElementById("saveLog").onclick = ()=>{
@@ -4994,6 +5170,7 @@ function computeTeamIntelligencePanel(db, teamId){
         const odds = Math.max(1.01, Number(document.getElementById("logOdds").value) || 0);
         const probability = clamp(Number(document.getElementById("logProb").value) || 0.5, 0.01, 0.99);
         const result = document.getElementById("logResult").value;
+        const pickType = document.getElementById("logPickType").value || "1X2";
         const out = document.getElementById("logOut");
         if(!(odds>1)){
           out.textContent = "❌ Cuota inválida.";
@@ -5008,6 +5185,7 @@ function computeTeamIntelligencePanel(db, teamId){
           maxStakePct: st.maxStakePct
         });
         const profit = result==="win" ? stake * (odds - 1) : (result==="loss" ? -stake : 0);
+        const bankBefore = st.bank;
         st.bank = Math.max(0, st.bank + profit);
         const entry = {
           id: uid("bet"),
@@ -5015,18 +5193,23 @@ function computeTeamIntelligencePanel(db, teamId){
           stake,
           odds,
           probability,
+          pickType,
+          pMkt: 1/odds,
           result,
           ev: calc.ev,
           profit,
-          bankAfter: st.bank
+          bankBefore,
+          bankAfter: st.bank,
+          planDayIndex: dayIndex
         };
         st.entries.push(entry);
         saveDb(db);
         out.innerHTML = `✅ Apuesta guardada. Profit ${profit>=0?"+":""}S/${profit.toFixed(2)} · bank S/${st.bank.toFixed(2)}`;
-        setTimeout(()=>render("bitacora"), 250);
+        setTimeout(()=>render("bitacora"), 220);
       };
       return;
     }
+
 
     if(view==="versus"){
       db.versus ||= { homeAdvantage: 1.1, paceFactor: 1, sampleSize: 20, marketBlend: 0.35, matchday: 20, tableContextTrust: 0.45, tableContext: {} };
