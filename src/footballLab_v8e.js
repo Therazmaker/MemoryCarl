@@ -27,6 +27,7 @@ export function initFootballLab(){
 
   const KEY = "footballDB";
   let _fbSimCharts = { totals:null, scorelines:null };
+  let _teamPlayerDateSort = "none"; // none | desc | asc (by latest match date)
 
   const DEFAULT_DB = {
     settings: {
@@ -695,6 +696,23 @@ function renderHome(db){
     }
 
     const players = db.players.filter(p=>p.teamId===teamId);
+    const season = db.settings.currentSeason;
+
+    function getLastMatchDateISO(playerId){
+      return db.matches
+        .filter(m=>m.playerId===playerId && m.season===season && /^\d{4}-\d{2}-\d{2}$/.test(String(m.date||"")))
+        .reduce((maxDate, m)=>{
+          const d = String(m.date||"");
+          return d > maxDate ? d : maxDate;
+        }, "");
+    }
+
+    const playersView = [...players];
+    if(_teamPlayerDateSort === "desc"){
+      playersView.sort((a,b)=>getLastMatchDateISO(b.id).localeCompare(getLastMatchDateISO(a.id)));
+    }else if(_teamPlayerDateSort === "asc"){
+      playersView.sort((a,b)=>getLastMatchDateISO(a.id).localeCompare(getLastMatchDateISO(b.id)));
+    }
 
     v.innerHTML = `
       <div class="fl-card">
@@ -739,7 +757,11 @@ function renderHome(db){
       </div>
 
 <div class="fl-card">
-        <div style="font-weight:800;">👥 Plantilla</div>
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
+          <div style="font-weight:800;">👥 Plantilla</div>
+          <button class="mc-btn" id="sortPlayersByDate">Ordenar por fecha (${_teamPlayerDateSort === "asc" ? "↑" : "↓"})</button>
+        </div>
+        <div class="fl-small" style="margin-top:6px;opacity:.8;">Ordena según la fecha del último partido registrado en esta temporada.</div>
         <div id="playersList" style="margin-top:8px;"></div>
       </div>
     `;
@@ -1064,10 +1086,20 @@ function renderHome(db){
       return;
     }
 
+    const sortBtn = document.getElementById("sortPlayersByDate");
+    if(sortBtn){
+      sortBtn.onclick = ()=>{
+        if(_teamPlayerDateSort === "desc") _teamPlayerDateSort = "asc";
+        else _teamPlayerDateSort = "desc";
+        renderTeam(db, teamId);
+      };
+    }
+
     // Show effective rating preview using current season form
-    const rows = players.map(p=>{
+    const rows = playersView.map(p=>{
       const eff = getEffectiveRating(db, p.id);
       const form = getFormScore(db, p.id);
+      const lastMatchDate = getLastMatchDateISO(p.id);
       return `
         <div class="fl-card" style="margin:8px 0;">
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
@@ -1076,6 +1108,7 @@ function renderHome(db){
               <div class="fl-small">
                 Base: <b>${fmt(p.rating,2)}</b> • Forma(${db.settings.currentSeason}): <b>${fmt(form,2)}</b> • Efectivo: <b>${fmt(eff,2)}</b>
               </div>
+              <div class="fl-small" style="opacity:.85;">Último partido: <b>${escapeHtml(lastMatchDate || "sin registros")}</b></div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
               <button class="mc-btn" data-profile="${p.id}">Perfil</button>
