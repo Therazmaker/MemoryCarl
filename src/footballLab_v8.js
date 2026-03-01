@@ -161,6 +161,13 @@ export function initFootballLab(){
       .fl-vs-cell{border:1px solid #30363d;border-radius:8px;padding:6px;text-align:center;font-size:12px;background:#111722}
       .fl-vs-cell.head{background:#202a37;font-weight:800}
       .fl-vs-cell.hot{border-color:#2ea043;box-shadow:0 0 0 1px rgba(46,160,67,.25) inset}
+      .fl-vs-cell.zone-home{background:rgba(46,160,67,.16)}
+      .fl-vs-cell.zone-draw{background:rgba(242,201,76,.16)}
+      .fl-vs-cell.zone-away{background:rgba(248,81,73,.14)}
+      .fl-vs-bars{display:grid;gap:6px;margin-top:10px}
+      .fl-vs-bar{display:grid;grid-template-columns:80px 1fr auto;gap:8px;align-items:center}
+      .fl-vs-bar-track{height:10px;border-radius:999px;background:#0d1117;border:1px solid #30363d;overflow:hidden}
+      .fl-vs-bar-fill{height:100%;background:linear-gradient(90deg,#1f6feb,#58a6ff)}
       .fl-kpi{display:grid;grid-template-columns:repeat(3,minmax(88px,1fr));gap:8px}
       .fl-kpi > div{background:#111722;border:1px solid #2d333b;border-radius:10px;padding:8px;text-align:center}
       .fl-kpi b{display:block;font-size:18px;color:#f6f8fa}
@@ -5311,6 +5318,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const renderMatrix = (matrix, best, maxGoals)=>{
         const grid = document.getElementById("vsMatrix");
         if(!grid) return;
+        grid.style.gridTemplateColumns = `repeat(${maxGoals + 2}, 1fr)`;
         const cells = [];
         cells.push('<div class="fl-vs-cell head">L/A</div>');
         for(let a=0;a<=maxGoals;a++) cells.push(`<div class="fl-vs-cell head">${a}</div>`);
@@ -5318,7 +5326,8 @@ function computeTeamIntelligencePanel(db, teamId){
           cells.push(`<div class="fl-vs-cell head">${h}</div>`);
           for(let a=0;a<=maxGoals;a++){
             const hot = best && h===best.h && a===best.a ? "hot" : "";
-            cells.push(`<div class="fl-vs-cell ${hot}">${(matrix[h][a]*100).toFixed(1)}%</div>`);
+            const zone = h>a ? "zone-home" : (h===a ? "zone-draw" : "zone-away");
+            cells.push(`<div class="fl-vs-cell ${zone} ${hot}">${(matrix[h][a]*100).toFixed(1)}%</div>`);
           }
         }
         grid.innerHTML = cells.join("");
@@ -5582,6 +5591,37 @@ function computeTeamIntelligencePanel(db, teamId){
         ];
         const dominantTxt = dominant.map(c=>`${c.h}-${c.a} (${(c.p*100).toFixed(1)}%)`).join(", ");
         const bttsTxt = `BTTS: ${(btts*100).toFixed(1)}% (Away=0 en ${(awayZero*100).toFixed(1)}%)`;
+        const totalLambda = result.lHome + result.lAway;
+        const lambdaGap = Math.abs(result.lHome - result.lAway);
+        const balance = totalLambda > 0 ? clamp(1 - (lambdaGap / totalLambda), 0, 1) : 0;
+        const balanceLabel = balance >= 0.72 ? "Alto" : (balance >= 0.45 ? "Medio" : "Bajo");
+        const partyProfile = [];
+        partyProfile.push(totalLambda > 2.7 ? `Partido abierto (λ total: ${totalLambda.toFixed(2)})` : `Partido controlado (λ total: ${totalLambda.toFixed(2)})`);
+        if((result.lHome - result.lAway) > 0.7) partyProfile.push("Local ofensivo fuerte");
+        if((result.lAway - result.lHome) > 0.7) partyProfile.push("Visitante ofensivo fuerte");
+        if(result.lAway >= 0.95) partyProfile.push("Visitante con probabilidad alta de marcar");
+        if(btts > 0.5) partyProfile.push(`Alta probabilidad de BTTS (${(btts*100).toFixed(1)}%)`);
+        if(result.pDraw > 0.28) partyProfile.push(`Empate estructural alto (${(result.pDraw*100).toFixed(1)}%)`);
+
+        let homeOutcomeCells = 0;
+        let drawOutcomeCells = 0;
+        const threshold = 0.01;
+        for(let h=0; h<=result.maxGoals; h++){
+          for(let a=0; a<=result.maxGoals; a++){
+            if((result.matrix[h][a] || 0) < threshold) continue;
+            if(h>a) homeOutcomeCells += 1;
+            else if(h===a) drawOutcomeCells += 1;
+          }
+        }
+        const drawTop = topScoreCells(result.matrix, result.maxGoals + 1).filter(c=>c.h===c.a).sort((x,y)=>y.p-x.p);
+        const drawLead = drawTop[0];
+        const drawLeadShare = result.pDraw > 0 ? ((drawLead?.p || 0) / result.pDraw) * 100 : 0;
+        const concentrationTxt = `Home Win está distribuido en ${homeOutcomeCells} marcadores (≥${(threshold*100).toFixed(0)}%). Empate en ${drawOutcomeCells}, liderado por ${drawLead ? `${drawLead.h}-${drawLead.a}` : "-"} (${drawLeadShare.toFixed(1)}% del bloque empate).`;
+        const dominantLabel = result.pHome >= result.pDraw && result.pHome >= result.pAway
+          ? "🏠 Local"
+          : (result.pDraw >= result.pAway ? "🤝 Empate" : "✈️ Visita");
+        const autoRead = `El ${dominantLabel.replace(/^[^ ]+ /, "").toLowerCase()} es favorito en el agregado (${(Math.max(result.pHome, result.pDraw, result.pAway)*100).toFixed(1)}%), pero ${(result.lAway >= 0.95 ? "el visitante tiene buena probabilidad de marcar" : "el flujo ofensivo está más repartido")}. El ${result.best.h}-${result.best.a} es el marcador individual más frecuente, aunque el conjunto de marcadores ${result.pHome >= result.pAway ? "favorables al local" : "favorables al visitante"} domina la distribución.`;
+        const dominantWidth = Math.max(result.pHome, result.pDraw, result.pAway) || 1;
 
         const multiplierLines = [
           `Base liga: ${breakdown.leagueBase.home.toFixed(2)}`,
@@ -5639,14 +5679,27 @@ function computeTeamIntelligencePanel(db, teamId){
 
         document.getElementById("vsOut").innerHTML = `
           <div>λ Home: <b>${result.lHome.toFixed(2)}</b> · λ Away: <b>${result.lAway.toFixed(2)}</b></div>
+          <div style="margin-top:10px;font-weight:800;">RESULTADO MÁS PROBABLE (AGREGADO)</div>
           <div class="fl-kpi" style="margin-top:8px;">
             <div><span>Home Win</span><b>${(result.pHome*100).toFixed(1)}%</b></div>
             <div><span>Draw</span><b>${(result.pDraw*100).toFixed(1)}%</b></div>
             <div><span>Away Win</span><b>${(result.pAway*100).toFixed(1)}%</b></div>
           </div>
-          <div style="margin-top:8px;">Marcador más probable: <b>${result.best.h} - ${result.best.a}</b> (${(result.best.p*100).toFixed(1)}%)</div>
+          <div class="fl-vs-bars">
+            <div class="fl-vs-bar"><span>Local</span><div class="fl-vs-bar-track"><div class="fl-vs-bar-fill" style="width:${(result.pHome/dominantWidth*100).toFixed(1)}%"></div></div><b>${(result.pHome*100).toFixed(1)}%</b></div>
+            <div class="fl-vs-bar"><span>Empate</span><div class="fl-vs-bar-track"><div class="fl-vs-bar-fill" style="width:${(result.pDraw/dominantWidth*100).toFixed(1)}%"></div></div><b>${(result.pDraw*100).toFixed(1)}%</b></div>
+            <div class="fl-vs-bar"><span>Visita</span><div class="fl-vs-bar-track"><div class="fl-vs-bar-fill" style="width:${(result.pAway/dominantWidth*100).toFixed(1)}%"></div></div><b>${(result.pAway*100).toFixed(1)}%</b></div>
+          </div>
+          <div style="margin-top:10px;font-weight:800;">MARCADOR MÁS FRECUENTE INDIVIDUAL</div>
+          <div style="margin-top:6px;"><b>${result.best.h} - ${result.best.a}</b> (${(result.best.p*100).toFixed(1)}%)</div>
+          <div class="fl-muted" style="margin-top:6px;">⚠ Esto no implica que el empate sea el resultado dominante. Es la celda individual más alta en la matriz.</div>
+          <div style="margin-top:10px;font-weight:800;">Perfil del partido</div>
+          <div class="fl-muted" style="margin-top:6px;">• ${partyProfile.join("<br/>• ")}</div>
+          <div class="fl-muted" style="margin-top:6px;">Equilibrio del partido: <b>${balanceLabel}</b> (Desbalance λ: ${lambdaGap.toFixed(2)} · Índice: ${(balance*100).toFixed(1)}%)</div>
+          <div class="fl-muted" style="margin-top:6px;">Concentración del resultado: ${concentrationTxt}</div>
           <div class="fl-muted" style="margin-top:6px;">Marcadores dominantes: <b>${dominantTxt}</b></div>
           <div class="fl-muted" style="margin-top:6px;">${bttsTxt}</div>
+          <div class="fl-muted" style="margin-top:6px;">Lectura automática: ${autoRead}</div>
           <div class="fl-muted" style="margin-top:6px;">Corners esperados: <b>${result.cornersExpected.toFixed(1)}</b> · Tarjetas esperadas: <b>${result.cardsExpected.toFixed(1)}</b></div>
           <div class="fl-kpi" style="margin-top:8px;">
             <div><span>Training size</span><b>${training.withStats}/${training.totalMatches}</b></div>
