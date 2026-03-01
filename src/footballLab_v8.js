@@ -59,7 +59,9 @@ export function initFootballLab(){
       schemaVersion: 2,
       leagueScale: {},
       teamBias: {},
+      temperatureByLeague: {},
       metrics: { global: null, byLeague: {} },
+      trainingSet: [],
       marketTrust: 0.35,
       lrLeague: 0.12,
       lrTeam: 0.08
@@ -101,6 +103,8 @@ export function initFootballLab(){
       db.learning.schemaVersion = Number(db.learning.schemaVersion) || 2;
       db.learning.leagueScale ||= {};
       db.learning.teamBias ||= {};
+      db.learning.temperatureByLeague ||= {};
+      db.learning.trainingSet ||= [];
       db.learning.metrics ||= { global: null, byLeague: {} };
       db.learning.metrics.byLeague ||= {};
       db.learning.marketTrust = clamp(Number(db.learning.marketTrust) || defaultDb.learning.marketTrust, 0, 0.85);
@@ -2803,9 +2807,56 @@ function computeTeamIntelligencePanel(db, teamId){
     db.learning.schemaVersion = Number(db.learning.schemaVersion) || 2;
     db.learning.leagueScale ||= {};
     db.learning.teamBias ||= {};
+    db.learning.temperatureByLeague ||= {};
+    db.learning.trainingSet ||= [];
     db.learning.metrics ||= { global: null, byLeague: {} };
     db.learning.metrics.byLeague ||= {};
     db.predictions ||= [];
+  }
+
+  function applyTemperatureTo1x2(probPack, temperature=1){
+    const t = clamp(Number(temperature) || 1, 0.7, 1.6);
+    const toLogit = (p)=>Math.log(Math.max(1e-8, p));
+    const exps = [Math.exp(toLogit(probPack.pH)/t), Math.exp(toLogit(probPack.pD)/t), Math.exp(toLogit(probPack.pA)/t)];
+    const z = exps[0] + exps[1] + exps[2] || 1;
+    return { pH: exps[0]/z, pD: exps[1]/z, pA: exps[2]/z };
+  }
+
+  function getLeagueTemperature(db, leagueId){
+    ensureLearningState(db);
+    return clamp(Number(db.learning.temperatureByLeague[leagueId]) || 1, 0.7, 1.6);
+  }
+
+  function calcPredictionDivergence(prediction){
+    const pModel = prediction?.pModel;
+    const pMarket = prediction?.pMarket;
+    if(!pModel || !pMarket) return 0;
+    return (Math.abs((pModel.pH || 0) - (pMarket.pH || 0))
+      + Math.abs((pModel.pD || 0) - (pMarket.pD || 0))
+      + Math.abs((pModel.pA || 0) - (pMarket.pA || 0))) / 3;
+  }
+
+  function recentWindowMetrics(db, limit=10){
+    const resolved = db.predictions.filter(p=>p.resolved && p.actual).slice(-limit);
+    if(!resolved.length) return { n: 0, brier: null, lambdaError: null };
+    let brier = 0;
+    let lambdaError = 0;
+    resolved.forEach((p)=>{
+      if(Number.isFinite(p.brierScore)) brier += p.brierScore;
+      lambdaError += (Math.abs((p.actual.homeGoals || 0) - (p.lambdaHome || 0)) + Math.abs((p.actual.awayGoals || 0) - (p.lambdaAway || 0))) / 2;
+    });
+    return {
+      n: resolved.length,
+      brier: brier / resolved.length,
+      lambdaError: lambdaError / resolved.length
+    };
+  }
+
+  function modelHealthEmoji(recentBrier){
+    if(!Number.isFinite(recentBrier)) return "🟡";
+    if(recentBrier < 0.2) return "🟢";
+    if(recentBrier < 0.26) return "🟡";
+    return "🔴";
   }
 
   function createMetricState(){
@@ -2873,6 +2924,7 @@ function computeTeamIntelligencePanel(db, teamId){
     const lrLeague = clamp(Number(db.learning.lrLeague) || 0.12, 0.01, 0.35);
     const lrTeam = clamp(Number(db.learning.lrTeam) || 0.08, 0.01, 0.25);
     const leagueScaleBefore = getLeagueScale(db, leagueId);
+    const temperatureBefore = getLeagueTemperature(db, leagueId);
     const leagueScale = { ...leagueScaleBefore };
 
     const confidence = Math.max(Number(prediction.pHome) || 0, Number(prediction.pDraw) || 0, Number(prediction.pAway) || 0);
@@ -2897,6 +2949,23 @@ function computeTeamIntelligencePanel(db, teamId){
     leagueScale.away = clamp(leagueScale.away * (1 - lrEffectiveLeague + lrEffectiveLeague * ratioAway), 0.75, 1.35);
     db.learning.leagueScale[leagueId] = leagueScale;
 
+    const actual = result.homeGoals===result.awayGoals ? "draw" : result.homeGoals>result.awayGoals ? "home" : "away";
+    const predictedWinner = prediction.pHome>=prediction.pDraw && prediction.pHome>=prediction.pAway
+      ? "home"
+      : prediction.pDraw>=prediction.pAway
+        ? "draw"
+        : "away";
+    const missExtreme = (actual!==predictedWinner) && Math.max(prediction.pHome, prediction.pDraw, prediction.pAway) > 0.58;
+    const hitFlat = (actual===predictedWinner) && Math.max(prediction.pHome, prediction.pDraw, prediction.pAway) < 0.44;
+    const temperatureAfter = clamp(
+      temperatureBefore
+      + (missExtreme ? 0.03 : 0)
+      - (hitFlat ? 0.02 : 0),
+      0.7,
+      1.6
+    );
+    db.learning.temperatureByLeague[leagueId] = temperatureAfter;
+
     const homeBiasBefore = getTeamBias(db, prediction.homeId);
     const awayBiasBefore = getTeamBias(db, prediction.awayId);
     const homeBias = { ...homeBiasBefore };
@@ -2912,7 +2981,6 @@ function computeTeamIntelligencePanel(db, teamId){
     db.learning.teamBias[prediction.homeId] = homeBias;
     db.learning.teamBias[prediction.awayId] = awayBias;
 
-    const actual = result.homeGoals===result.awayGoals ? "draw" : result.homeGoals>result.awayGoals ? "home" : "away";
     const pActual = actual==="home" ? prediction.pHome : actual==="draw" ? prediction.pDraw : prediction.pAway;
     const logLoss = -Math.log(Math.max(1e-9, pActual));
     const brier = ((prediction.pHome - (actual==="home" ? 1 : 0))**2
@@ -2932,6 +3000,34 @@ function computeTeamIntelligencePanel(db, teamId){
       errAway: result.awayGoals - prediction.lambdaAway
     });
 
+    db.learning.trainingSet.push({
+      id: prediction.id,
+      matchId: prediction.matchKey || prediction.id,
+      timestamp: new Date().toISOString(),
+      teams: { homeId: prediction.homeId, awayId: prediction.awayId },
+      leagueId,
+      features: {
+        leagueBase: prediction.breakdown?.leagueBase || null,
+        homeAdv: prediction.features?.homeAdv ?? null,
+        xGdiff: (prediction.lambdaHome || 0) - (prediction.lambdaAway || 0),
+        momentum5: prediction.features?.formMomentum || null,
+        marketProbs: prediction.pMarket || null,
+        notesFlags: result.flags || null
+      },
+      pred: {
+        pModel: prediction.pModel || null,
+        pFinal: prediction.pFinal || { pH: prediction.pHome, pD: prediction.pDraw, pA: prediction.pAway },
+        lambdaHome: prediction.lambdaHome,
+        lambdaAway: prediction.lambdaAway
+      },
+      label: {
+        outcome: actual,
+        score: { homeGoals: result.homeGoals, awayGoals: result.awayGoals },
+        reading: result.reading || null
+      }
+    });
+    if(db.learning.trainingSet.length > 400) db.learning.trainingSet = db.learning.trainingSet.slice(-400);
+
     return {
       homeErr,
       awayErr,
@@ -2942,6 +3038,8 @@ function computeTeamIntelligencePanel(db, teamId){
       lrEffectiveTeam,
       leagueScale,
       leagueScaleBefore,
+      temperatureBefore,
+      temperatureAfter,
       homeBias,
       awayBias,
       homeBiasBefore,
@@ -3362,6 +3460,8 @@ function computeTeamIntelligencePanel(db, teamId){
     learning.schemaVersion = Number(learning.schemaVersion) || 2;
     learning.leagueScale ||= {};
     learning.teamBias ||= {};
+    learning.temperatureByLeague ||= {};
+    learning.trainingSet ||= [];
     learning.metrics ||= { global: null, byLeague: {} };
     learning.metrics.byLeague ||= {};
     learning.marketTrust = clamp(sanitizeFiniteNumber(learning.marketTrust, 0.35), 0, 0.85);
@@ -3381,6 +3481,10 @@ function computeTeamIntelligencePanel(db, teamId){
         defense: clamp(sanitizeFiniteNumber(item.defense, 0), -0.35, 0.35)
       };
     });
+    Object.keys(learning.temperatureByLeague).forEach((leagueId)=>{
+      learning.temperatureByLeague[leagueId] = clamp(sanitizeFiniteNumber(learning.temperatureByLeague[leagueId], 1), 0.7, 1.6);
+    });
+    if(Array.isArray(learning.trainingSet)) learning.trainingSet = learning.trainingSet.slice(-400);
     return learning;
   }
 
@@ -4936,6 +5040,10 @@ function computeTeamIntelligencePanel(db, teamId){
         const away = db.teams.find(t=>t.id===p.awayId)?.name || "Visitante";
         return `<option value="${p.id}">${p.date || "sin fecha"} · ${home} vs ${away}</option>`;
       }).join("");
+      const globalTraining = computeGlobalTrainingSize(db.teams, db.tracker);
+      const recentMetrics = recentWindowMetrics(db, 10);
+      const globalBrier = db.learning.metrics?.global?.brierScore;
+      const health = modelHealthEmoji(globalBrier);
 
       content.innerHTML = `
         <div class="fl-card fl-vs-layout">
@@ -4981,14 +5089,39 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>
         </div>
         <div class="fl-card">
-          <div style="font-weight:800;margin-bottom:8px;">Feedback / training</div>
-          <div class="fl-row">
-            <select id="fbPrediction" class="fl-select"><option value="">Predicción pendiente</option>${pendingOptions}</select>
-            <input id="fbHG" type="number" class="fl-input" placeholder="Goles local reales" style="width:160px" />
-            <input id="fbAG" type="number" class="fl-input" placeholder="Goles visitante reales" style="width:170px" />
-            <button class="fl-btn" id="applyFeedback">Actualizar modelo</button>
+          <div style="font-weight:800;margin-bottom:8px;">Entrenar modelo (Training Dock)</div>
+          <div class="fl-kpi" style="margin-bottom:8px;">
+            <div><span>Dataset global</span><b>${globalTraining.matches}</b></div>
+            <div><span>Stats/xG</span><b>${globalTraining.withStats}/${globalTraining.withXG}</b></div>
+            <div><span>Salud modelo</span><b>${health}</b></div>
           </div>
-          <div id="fbOut" class="fl-muted" style="margin-top:8px;">Registra un resultado real para recalibrar league scale y team bias.</div>
+          <div class="fl-mini" style="margin-bottom:8px;">Conf actual: <b>${(clamp(Number(db.learning.metrics?.global?.nMatches || 0)/120, 0.18, 0.92)*100).toFixed(0)}%</b> · Brier (10): <b>${recentMetrics.brier===null?'-':recentMetrics.brier.toFixed(3)}</b> · λ error (10): <b>${recentMetrics.lambdaError===null?'-':recentMetrics.lambdaError.toFixed(3)}</b></div>
+          <div class="fl-row" style="margin-bottom:8px;">
+            <select id="fbPrediction" class="fl-select"><option value="">Predicción pendiente</option>${pendingOptions}</select>
+            <span id="fbUseful" class="fl-chip">Selecciona partido</span>
+          </div>
+          <div class="fl-mini" style="margin-bottom:6px;">✅ Misión 1: Resultado (1 clic)</div>
+          <div class="fl-row" style="margin-bottom:8px;">
+            <button class="fl-btn" data-outcome="home">Local</button>
+            <button class="fl-btn" data-outcome="draw">Empate</button>
+            <button class="fl-btn" data-outcome="away">Visita</button>
+            <input id="fbOutcome" class="fl-input" placeholder="Resultado" style="width:120px" readonly />
+          </div>
+          <div class="fl-mini" style="margin-bottom:6px;">🎯 Misión 2: Marcador</div>
+          <div class="fl-row" style="margin-bottom:8px;">
+            <input id="fbHG" type="number" class="fl-input" min="0" max="9" placeholder="Goles local" style="width:140px" />
+            <input id="fbAG" type="number" class="fl-input" min="0" max="9" placeholder="Goles visita" style="width:140px" />
+            <button class="fl-btn" data-score="0-0">0-0</button><button class="fl-btn" data-score="1-0">1-0</button><button class="fl-btn" data-score="1-1">1-1</button><button class="fl-btn" data-score="2-1">2-1</button>
+          </div>
+          <div class="fl-mini" style="margin-bottom:6px;">🧠 Misión 3: Lectura + contexto</div>
+          <div class="fl-row" style="margin-bottom:8px;">
+            <select id="fbReading" class="fl-select" style="width:170px"><option value="">¿Quién jugó mejor?</option><option value="home">Local mejor</option><option value="draw">Parejo</option><option value="away">Visita mejor</option></select>
+            <select id="fbRed" class="fl-select" style="width:120px"><option value="0">Roja: No</option><option value="1">Roja: Sí</option></select>
+            <select id="fbInjury" class="fl-select" style="width:140px"><option value="0">Lesión: No</option><option value="1">Lesión: Sí</option></select>
+            <select id="fbTrap" class="fl-select" style="width:170px"><option value="0">Rotación trampa: No</option><option value="1">Rotación trampa: Sí</option></select>
+            <button class="fl-btn" id="applyFeedback">Entrenar con este partido</button>
+          </div>
+          <div id="fbOut" class="fl-muted" style="margin-top:8px;">Guarda evidencia automática + calibración online (T y λ) de forma incremental.</div>
         </div>
       `;
 
@@ -5024,6 +5157,39 @@ function computeTeamIntelligencePanel(db, teamId){
 
       document.getElementById("vsHome").onchange = syncTableContextInputs;
       document.getElementById("vsAway").onchange = syncTableContextInputs;
+
+      document.querySelectorAll("button[data-outcome]").forEach((btn)=>{
+        btn.onclick = ()=>{
+          document.getElementById("fbOutcome").value = btn.getAttribute("data-outcome") || "";
+        };
+      });
+      document.querySelectorAll("button[data-score]").forEach((btn)=>{
+        btn.onclick = ()=>{
+          const [h,a] = (btn.getAttribute("data-score") || "0-0").split("-");
+          document.getElementById("fbHG").value = h;
+          document.getElementById("fbAG").value = a;
+        };
+      });
+      const refreshUsefulMatch = ()=>{
+        const predId = document.getElementById("fbPrediction").value;
+        const chip = document.getElementById("fbUseful");
+        const prediction = db.predictions.find(p=>p.id===predId);
+        if(!prediction){
+          chip.className = "fl-chip";
+          chip.textContent = "Selecciona partido";
+          return;
+        }
+        const divergence = calcPredictionDivergence(prediction);
+        if(divergence > 0.12){
+          chip.className = "fl-chip ok";
+          chip.textContent = `🔥 Partido útil para entrenar · divergencia ${divergence.toFixed(2)}`;
+        }else{
+          chip.className = "fl-chip warn";
+          chip.textContent = `Partido normal · entreno ligero ${divergence.toFixed(2)}`;
+        }
+      };
+      document.getElementById("fbPrediction").onchange = refreshUsefulMatch;
+      refreshUsefulMatch();
 
       document.getElementById("runVsV2").onclick = ()=>{
         const homeId = document.getElementById("vsHome").value;
@@ -5173,7 +5339,9 @@ function computeTeamIntelligencePanel(db, teamId){
         });
         const blendWeight = (db.versus.marketBlend || 0.35) * (market ? 1 : 0);
         const effConf = market ? clamp(conf * (0.75 + blendWeight*0.7), 0.2, 0.88) : conf;
-        const pFinal = blend1x2Probs(pModel, market, effConf);
+        const pBlend = blend1x2Probs(pModel, market, effConf);
+        const leagueTemperature = getLeagueTemperature(db, b3LeagueId || "global");
+        const pFinal = applyTemperatureTo1x2(pBlend, leagueTemperature);
 
         const adjusted = adjustLambdasToMatchProbs({ lHome: lHome0, lAway: lAway0 }, pFinal, result.maxGoals);
         result.lHome = adjusted.lHome;
@@ -5265,6 +5433,10 @@ function computeTeamIntelligencePanel(db, teamId){
           pHome: result.pHome,
           pDraw: result.pDraw,
           pAway: result.pAway,
+          pModel,
+          pFinal,
+          pMarket: market || null,
+          confidence: effConf,
           best: result.best,
           dominant,
           btts,
@@ -5323,6 +5495,8 @@ function computeTeamIntelligencePanel(db, teamId){
         const predId = document.getElementById("fbPrediction").value;
         const homeGoals = pickFirstNumber(document.getElementById("fbHG").value);
         const awayGoals = pickFirstNumber(document.getElementById("fbAG").value);
+        const reading = pickFirstString(document.getElementById("fbReading").value);
+        const outcome = pickFirstString(document.getElementById("fbOutcome").value);
         const out = document.getElementById("fbOut");
         if(!predId || homeGoals===null || awayGoals===null){
           out.textContent = "❌ Selecciona predicción y resultado real.";
@@ -5333,12 +5507,21 @@ function computeTeamIntelligencePanel(db, teamId){
           out.textContent = "❌ Predicción no encontrada.";
           return;
         }
+        const beforeRecent = recentWindowMetrics(db, 10);
+        const confBefore = clamp(Number(db.learning.metrics?.global?.nMatches || 0)/120, 0.18, 0.92);
+        const flags = {
+          redCard: document.getElementById("fbRed").value === "1",
+          injuries: document.getElementById("fbInjury").value === "1",
+          rotation: document.getElementById("fbTrap").value === "1"
+        };
+
         prediction.resolved = true;
-        prediction.actual = { homeGoals, awayGoals };
+        prediction.actual = { homeGoals, awayGoals, reading, outcome };
         prediction.updatedAt = new Date().toISOString();
         prediction.goalError = { home: homeGoals - prediction.lambdaHome, away: awayGoals - prediction.lambdaAway };
+        prediction.flags = flags;
 
-        const metrics = updateLearningFromResult(db, prediction, { homeGoals, awayGoals });
+        const metrics = updateLearningFromResult(db, prediction, { homeGoals, awayGoals, reading, outcome, flags });
         prediction.logLoss = metrics.logLoss;
         prediction.brierScore = metrics.brier;
         prediction.learningUpdate = {
@@ -5349,13 +5532,16 @@ function computeTeamIntelligencePanel(db, teamId){
           awayBiasBefore: metrics.awayBiasBefore,
           awayBiasAfter: metrics.awayBias,
           confidence: metrics.confidence,
-          effectiveLr: { league: metrics.lrEffectiveLeague, team: metrics.lrEffectiveTeam }
+          effectiveLr: { league: metrics.lrEffectiveLeague, team: metrics.lrEffectiveTeam },
+          temperature: { before: metrics.temperatureBefore, after: metrics.temperatureAfter }
         };
         saveDb(db);
-        out.innerHTML = `✅ Feedback aplicado. Error goles: <b>${prediction.goalError.home.toFixed(2)}</b> / <b>${prediction.goalError.away.toFixed(2)}</b> · log-loss <b>${metrics.logLoss.toFixed(3)}</b> · brier <b>${metrics.brier.toFixed(3)}</b><br/>`
-          + `🧠 leagueScale ${metrics.leagueScaleBefore.home.toFixed(3)}→${metrics.leagueScale.home.toFixed(3)} / ${metrics.leagueScaleBefore.away.toFixed(3)}→${metrics.leagueScale.away.toFixed(3)} · `
-          + `bias local atk ${metrics.homeBiasBefore.attack.toFixed(3)}→${metrics.homeBias.attack.toFixed(3)} · visitante atk ${metrics.awayBiasBefore.attack.toFixed(3)}→${metrics.awayBias.attack.toFixed(3)}.<br/>`
-          + `📈 Métrica global: ${metrics.metricsGlobal.nMatches} partidos · log-loss ${metrics.metricsGlobal.avgLogLoss.toFixed(3)} · brier ${metrics.metricsGlobal.brierScore.toFixed(3)}.`;
+
+        const afterRecent = recentWindowMetrics(db, 10);
+        const confAfter = clamp(Number(db.learning.metrics?.global?.nMatches || 0)/120, 0.18, 0.92);
+        out.innerHTML = `✅ Entrenamiento aplicado. Error goles: <b>${prediction.goalError.home.toFixed(2)}</b> / <b>${prediction.goalError.away.toFixed(2)}</b> · log-loss <b>${metrics.logLoss.toFixed(3)}</b> · brier <b>${metrics.brier.toFixed(3)}</b><br/>`
+          + `🧠 leagueScale ${metrics.leagueScaleBefore.home.toFixed(3)}→${metrics.leagueScale.home.toFixed(3)} / ${metrics.leagueScaleBefore.away.toFixed(3)}→${metrics.leagueScale.away.toFixed(3)} · T liga ${metrics.temperatureBefore.toFixed(2)}→${metrics.temperatureAfter.toFixed(2)}.<br/>`
+          + `📈 Impacto: Conf ${(confBefore*100).toFixed(0)}%→${(confAfter*100).toFixed(0)}% · Brier(10) ${beforeRecent.brier===null?'-':beforeRecent.brier.toFixed(3)}→${afterRecent.brier===null?'-':afterRecent.brier.toFixed(3)} · λ error(10) ${beforeRecent.lambdaError===null?'-':beforeRecent.lambdaError.toFixed(3)}→${afterRecent.lambdaError===null?'-':afterRecent.lambdaError.toFixed(3)}.`;
         render("versus");
       };
     }
