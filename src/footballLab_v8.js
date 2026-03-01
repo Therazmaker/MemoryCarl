@@ -301,19 +301,88 @@ export function initFootballLab(){
     const evInitial = initialOdd > 1 ? (modelP * initialOdd) - 1 : null;
     const edge = modelP - marketP;
     const drift = initialOdd > 0 ? (currentOdd - initialOdd) / initialOdd : 0;
-    const volatility = record.cuotas.length > 1
-      ? record.cuotas.slice(1).reduce((acc, q, idx)=>{
+    const signedMoves = record.cuotas.length > 1
+      ? record.cuotas.slice(1).map((q, idx)=>{
         const prev = Number(record.cuotas[idx]?.[side]) || 0;
         const next = Number(q?.[side]) || prev;
-        return acc + Math.abs(next - prev) / Math.max(1.01, prev);
-      }, 0) / (record.cuotas.length - 1)
+        return prev > 1 ? (next - prev) / prev : 0;
+      })
+      : [];
+    const volatility = signedMoves.length
+      ? signedMoves.reduce((acc, mv)=>acc + Math.abs(mv), 0) / signedMoves.length
       : 0;
+    const acceleration = signedMoves.length > 1
+      ? signedMoves.slice(1).reduce((peak, mv, idx)=>Math.max(peak, Math.abs(mv - signedMoves[idx])), 0)
+      : 0;
+    const persistence = signedMoves.reduce((state, mv)=>{
+      const dir = mv > 0 ? 1 : (mv < 0 ? -1 : 0);
+      if(!dir) return { streak: 0, maxStreak: state.maxStreak, lastDir: state.lastDir, reversals: state.reversals };
+      const streak = dir === state.lastDir ? state.streak + 1 : 1;
+      const reversals = state.lastDir && dir !== state.lastDir ? state.reversals + 1 : state.reversals;
+      return { streak, maxStreak: Math.max(state.maxStreak, streak), lastDir: dir, reversals };
+    }, { streak: 0, maxStreak: 0, lastDir: 0, reversals: 0 });
+    const firstTsRaw = Date.parse(initialOdds?.timestamp || "");
+    const lastTsRaw = Date.parse(latestOdds?.timestamp || "");
+    const elapsedHours = Number.isFinite(firstTsRaw) && Number.isFinite(lastTsRaw) && lastTsRaw > firstTsRaw
+      ? (lastTsRaw - firstTsRaw) / 36e5
+      : 0;
+    const velocity = elapsedHours > 0 ? drift / elapsedHours : 0;
+    const directionSingle = persistence.maxStreak >= 2 && persistence.reversals === 0;
+    const isEarlyMoney = Math.abs(drift) > 0.05 && elapsedHours > 0 && elapsedHours <= 12 && directionSingle && persistence.maxStreak >= 2;
+    const isStable = Math.abs(drift) < 0.03 && Math.abs(velocity) < 0.004 && persistence.reversals > 0;
+    const isVolatile = !isEarlyMoney && (Math.abs(drift) >= 0.04 && persistence.reversals >= 1 && volatility > 0.025);
+    const marketState = isEarlyMoney
+      ? "early_money"
+      : (isStable ? "stable" : (isVolatile ? "volatile" : "neutral"));
+    const marketStateLabel = marketState === "early_money"
+      ? "🔴 Dinero temprano detectado"
+      : (marketState === "stable"
+        ? "🟢 Mercado estable"
+        : (marketState === "volatile" ? "🟠 Mercado volátil / especulativo" : "🟡 Mercado mixto"));
+    const stabilityScore = clamp(100 - (Math.abs(drift) * 50) - (volatility * 30), 0, 100);
+    const stabilityBand = stabilityScore >= 70 ? "estable" : (stabilityScore >= 40 ? "moderado" : "agresivo");
     const closing = record.closingOdds?.[side] || null;
     const clv = record.apuestaTomada && closing ? record.apuestaTomada.cuota - closing : null;
+    const initialMarketP = side === "home" ? marketInitial?.pH : side === "draw" ? marketInitial?.pD : marketInitial?.pA;
     const convergence = marketInitial
-      ? Math.abs(modelP - marketP) < Math.abs(modelP - (side === "home" ? marketInitial.pH : side === "draw" ? marketInitial.pD : marketInitial.pA))
+      ? Math.abs(modelP - marketP) < Math.abs(modelP - initialMarketP)
       : null;
-    return { side, modelP, marketP, currentOdd, evCurrent, evInitial, edge, drift, volatility, clv, convergence };
+    const convergenceDelta = Number.isFinite(initialMarketP) ? Math.abs(modelP - initialMarketP) - Math.abs(modelP - marketP) : null;
+    const earlyMoneyAgainst = isEarlyMoney && drift > 0;
+    const earlyMoneyWith = isEarlyMoney && drift < 0;
+    const strategySignal = (edge > 0.04 && (evCurrent || 0) > 0 && earlyMoneyWith)
+      ? "Regla A: Modelo + dinero temprano a favor → confirmación fuerte"
+      : ((edge > 0.04 && (evCurrent || 0) > 0 && earlyMoneyAgainst)
+        ? "Regla B: Modelo vs dinero temprano contrario → no apostar"
+        : ((edge > 0.06 && marketState === "stable")
+          ? "Regla C: Mercado estable + edge alto → entrada anticipada ideal"
+          : "Sin confirmación estratégica fuerte"));
+    return {
+      side,
+      modelP,
+      marketP,
+      currentOdd,
+      evCurrent,
+      evInitial,
+      edge,
+      drift,
+      volatility,
+      acceleration,
+      persistence: persistence.maxStreak,
+      reversals: persistence.reversals,
+      elapsedHours,
+      velocity,
+      marketState,
+      marketStateLabel,
+      stabilityScore,
+      stabilityBand,
+      clv,
+      convergence,
+      convergenceDelta,
+      earlyMoneyAgainst,
+      earlyMoneyWith,
+      strategySignal
+    };
   }
 
   function calcBitacoraSuggestion({ bank, odds, probability, kellyFraction, minUnit, maxStakePct }){
@@ -5361,11 +5430,16 @@ function computeTeamIntelligencePanel(db, teamId){
         const badges = [];
         if(metrics.convergence===true) badges.push('<span class="fl-chip ok">🟢 Mercado converge</span>');
         if(metrics.convergence===false) badges.push('<span class="fl-chip bad">🔴 Mercado se aleja</span>');
+        if(metrics.marketState === "early_money") badges.push('<span class="fl-chip bad">🔴 Dinero temprano</span>');
+        if(metrics.marketState === "stable") badges.push('<span class="fl-chip ok">🟢 Flujo orgánico</span>');
+        if(metrics.marketState === "volatile") badges.push('<span class="fl-chip warn">🟠 Volátil / ruido</span>');
         if(metrics.volatility > 0.04) badges.push('<span class="fl-chip warn">⚡ Alta volatilidad</span>');
         if(row.cuotas.length>=3 && row.cuotas.slice(-3).every(q=>((metrics.modelP*(Number(q[metrics.side])||0))-1) > 0)) badges.push('<span class="fl-chip ok">🎯 EV persistente 3 ticks</span>');
-        const signal = metrics.edge>0.06 && (metrics.evCurrent||0)>0.04 && metrics.drift>=-0.02
-          ? 'Entrada anticipada'
-          : ((metrics.evCurrent||0)>0 && row.cuotas.length>1 && metrics.convergence ? 'Confirmación de mercado' : (metrics.drift>0.06 ? 'Reducir stake o descartar' : 'Sin señal'));
+        const velocityLabel = Math.abs(metrics.velocity) > 0.01 ? "Alta" : (Math.abs(metrics.velocity) > 0.004 ? "Media" : "Baja");
+        const directionLabel = metrics.drift < 0 ? "a favor de este lado" : "en contra de este lado";
+        const signal = metrics.strategySignal;
+        const scoreColor = metrics.stabilityScore >= 70 ? "#3fb950" : (metrics.stabilityScore >= 40 ? "#f2cc60" : "#ff7b72");
+        const gaugeDegree = Math.round((metrics.stabilityScore/100) * 360);
         return `
           <div class="fl-card">
             <div class="fl-row" style="justify-content:space-between;">
@@ -5377,7 +5451,23 @@ function computeTeamIntelligencePanel(db, teamId){
               <div><div class="fl-mini">EV actual</div><b style="color:${(metrics.evCurrent||0)>0?'#3fb950':'#ff7b72'}">${((metrics.evCurrent||0)*100).toFixed(2)}%</b></div>
               <div><div class="fl-mini">Edge</div><b style="color:${metrics.edge>0?'#3fb950':'#ff7b72'}">${(metrics.edge*100).toFixed(2)}%</b></div>
               <div><div class="fl-mini">Drift cuota</div><b style="color:${metrics.drift<0?'#3fb950':'#f2cc60'}">${(metrics.drift*100).toFixed(2)}%</b></div>
+              <div><div class="fl-mini">Convergencia modelo-mercado</div><b style="color:${(metrics.convergenceDelta||0)>=0?'#3fb950':'#ff7b72'}">${metrics.convergenceDelta===null?'-':`${metrics.convergenceDelta>=0?'+':''}${(metrics.convergenceDelta*100).toFixed(2)} pp`}</b></div>
               <div><div class="fl-mini">CLV</div><b style="color:${(metrics.clv||0)>0?'#3fb950':'#ff7b72'}">${metrics.clv===null?'-':metrics.clv.toFixed(3)}</b></div>
+            </div>
+            <div class="fl-card" style="margin-top:8px;border:1px solid #2d333b;background:#0d1117;">
+              <div class="fl-row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+                <div>
+                  <div class="fl-mini">Estado del mercado</div>
+                  <b>${metrics.marketStateLabel}</b>
+                  <div class="fl-mini" style="margin-top:4px;">Velocidad: <b>${velocityLabel}</b> (${(metrics.velocity*100).toFixed(2)}%/h) · Persistencia: <b>${metrics.persistence}</b> snapshots · Dirección ${directionLabel}</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="width:54px;height:54px;border-radius:50%;background:conic-gradient(${scoreColor} ${gaugeDegree}deg,#30363d ${gaugeDegree}deg);display:grid;place-items:center;">
+                    <div style="width:38px;height:38px;border-radius:50%;background:#111827;display:grid;place-items:center;font-size:11px;font-weight:700;color:${scoreColor};">${Math.round(metrics.stabilityScore)}%</div>
+                  </div>
+                  <div class="fl-mini">Market Stability<br/><b style="color:${scoreColor}">${Math.round(metrics.stabilityScore)}%</b> · ${metrics.stabilityBand}</div>
+                </div>
+              </div>
             </div>
             <div class="fl-mini" style="margin:8px 0;">${firstTs} → ${lastTs}</div>
             <svg viewBox="0 0 620 160" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px;">
