@@ -3705,6 +3705,13 @@ function computeTeamIntelligencePanel(db, teamId){
   function normalizeIncomingLpePayload(payload={}){
     if(payload?.kind !== "match_stats") return payload;
 
+    const normalizeLabel = (value="")=>String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
     const parseNum = (candidate)=>{
       const direct = Number(candidate);
       if(Number.isFinite(direct)) return direct;
@@ -3713,26 +3720,37 @@ function computeTeamIntelligencePanel(db, teamId){
     };
 
     const categoryMap = {
-      "Remates a puerta": "shotsOn",
-      "Remates totales": "shots",
-      "Grandes ocasiones": "bigChances",
-      "Córneres": "corners",
-      "Posesión": "possession",
-      "Faltas": "fouls",
-      "Tarjetas amarillas": "yellows",
-      "Ataques peligrosos": "dangerAttacks",
-      "Ataques de peligro": "dangerAttacks",
-      "Peligrosos ataques": "dangerAttacks"
+      "remates a puerta": "shotsOn",
+      "disparos a puerta": "shotsOn",
+      "tiros a puerta": "shotsOn",
+      "remates totales": "shots",
+      "disparos totales": "shots",
+      "tiros totales": "shots",
+      "grandes ocasiones": "bigChances",
+      "grandes posibilidades": "bigChances",
+      "big chances": "bigChances",
+      "corneres": "corners",
+      "tiros de esquina": "corners",
+      "posesion": "possession",
+      "posesion del balon": "possession",
+      "faltas": "fouls",
+      "tarjetas amarillas": "yellows",
+      "ataques peligrosos": "dangerAttacks",
+      "ataques de peligro": "dangerAttacks",
+      "peligrosos ataques": "dangerAttacks",
+      "toques en el area contraria": "dangerAttacks",
+      "xg": "xg",
+      "goles esperados xg": "xg"
     };
 
     const stats = { home: {}, away: {} };
     const sections = Array.isArray(payload?.sections) ? payload.sections : [];
     sections.forEach(section=>{
       (section?.stats || []).forEach(stat=>{
-        const key = categoryMap[String(stat?.category || "").trim()];
+        const key = categoryMap[normalizeLabel(stat?.category || "")];
         if(!key) return;
-        const homeNum = parseNum(stat?.home?.numeric ?? stat?.home?.main ?? stat?.home?.raw ?? stat?.home);
-        const awayNum = parseNum(stat?.away?.numeric ?? stat?.away?.main ?? stat?.away?.raw ?? stat?.away);
+        const homeNum = parseNum(stat?.home?.raw ?? stat?.home?.main ?? stat?.home?.numeric ?? stat?.home);
+        const awayNum = parseNum(stat?.away?.raw ?? stat?.away?.main ?? stat?.away?.numeric ?? stat?.away);
         stats.home[key] = homeNum;
         stats.away[key] = awayNum;
       });
@@ -5943,8 +5961,10 @@ function computeTeamIntelligencePanel(db, teamId){
             <div class="fl-mini" style="display:flex;align-items:flex-end;">Función secundaria: no reemplaza el análisis de momentum actual.</div>
           </div>
           <textarea id="epaNarrative" class="fl-text" placeholder="Pega más relato (minuto a minuto). Se acumula automáticamente."></textarea>
+          <textarea id="epaStatsInput" class="fl-text" style="margin-top:8px;" placeholder='(Opcional) Pega JSON de estadísticas: {"kind":"match_stats", ...}'></textarea>
           <div class="fl-row" style="margin-top:8px;">
             <button class="fl-btn" id="epaAnalyze">Actualizar EPA</button>
+            <button class="fl-btn" id="epaInjectStats">Inyectar stats al EPA</button>
             <button class="fl-btn" id="epaReset">Reiniciar EPA</button>
             <button class="fl-btn" id="epaSaveProfile" disabled>Guardar firma temprana al equipo</button>
             <span id="epaStatus" class="fl-mini"></span>
@@ -6173,6 +6193,37 @@ function computeTeamIntelligencePanel(db, teamId){
         };
       };
 
+      const buildStatsStateForEpa = (normalized={}, teamA="", teamB="", fallbackState={})=>{
+        const fallbackScore = fallbackState || {};
+        const stats = normalized?.stats || {};
+        const score = normalized?.score || {};
+        const mapStats = (side)=>({
+          ...createEarlyTeamStats(),
+          shots: Number(stats?.[side]?.shots || 0),
+          shotsOnTarget: Number(stats?.[side]?.shotsOn || 0),
+          bigChances: Number(stats?.[side]?.bigChances || 0),
+          corners: Number(stats?.[side]?.corners || 0),
+          dangerActions: Number(stats?.[side]?.dangerAttacks || 0),
+          fouls: Number(stats?.[side]?.fouls || 0),
+          cards: Number(stats?.[side]?.yellows || 0)
+        });
+        const homeStats = mapStats("home");
+        const awayStats = mapStats("away");
+        return {
+          minute: Number(normalized?.minute || String(normalized?.window || "").split("-").slice(-1)[0] || fallbackScore.minute || 55),
+          scoreHome: Number(score.home ?? fallbackScore.scoreHome ?? 0),
+          scoreAway: Number(score.away ?? fallbackScore.scoreAway ?? 0),
+          statsCumulative: {
+            [teamA]: homeStats,
+            [teamB]: awayStats
+          },
+          statsSegment: {
+            [teamA]: homeStats,
+            [teamB]: awayStats
+          }
+        };
+      };
+
       document.getElementById("epaAnalyze").onclick = ()=>{
         const teamA = document.getElementById("momTeamA").value;
         const teamB = document.getElementById("momTeamB").value;
@@ -6210,6 +6261,58 @@ function computeTeamIntelligencePanel(db, teamId){
         if(narrativeEl) narrativeEl.value = "";
         document.getElementById("epaSaveProfile").disabled = false;
         status.textContent = `✅ EPA acumulado ${epa.window} (${mergedEvents.length} eventos).`;
+      };
+
+      document.getElementById("epaInjectStats").onclick = ()=>{
+        const status = document.getElementById("epaStatus");
+        const rawStats = (document.getElementById("epaStatsInput")?.value || "").trim();
+        if(!lastEPA){
+          status.textContent = "⚠️ Primero ejecuta EPA con relato para tener base.";
+          return;
+        }
+        if(!rawStats){
+          status.textContent = "⚠️ Pega un JSON de estadísticas para inyectar.";
+          return;
+        }
+        const parsedRaw = safeParseJson(rawStats);
+        if(!parsedRaw){
+          status.textContent = "❌ JSON de estadísticas inválido.";
+          return;
+        }
+        const normalized = normalizeIncomingLpePayload(parsedRaw);
+        if(!normalized?.stats?.home || !normalized?.stats?.away){
+          status.textContent = "❌ No se pudieron mapear estadísticas de home/away.";
+          return;
+        }
+        const [teamA, teamB] = lastEPA.teams || [];
+        const statsState = buildStatsStateForEpa(normalized, teamA, teamB, lastEPA.liveState || {});
+        const baseProb = lastEPA.liveProbabilities || {};
+        const statsProb = computeLiveOutcomeProbabilities(statsState, teamA, teamB);
+        const blend = (a,b,w=0.62)=>((Number(a)||0)*(1-w))+((Number(b)||0)*w);
+        const blended = {
+          ...statsProb,
+          pHome: blend(baseProb.pHome, statsProb.pHome),
+          pDraw: blend(baseProb.pDraw, statsProb.pDraw),
+          pAway: blend(baseProb.pAway, statsProb.pAway)
+        };
+        const total = blended.pHome + blended.pDraw + blended.pAway || 1;
+        blended.pHome /= total;
+        blended.pDraw /= total;
+        blended.pAway /= total;
+        blended.label = `Ahora mismo: ${teamA} ${(blended.pHome*100).toFixed(0)}% | Empate ${(blended.pDraw*100).toFixed(0)}% | ${teamB} ${(blended.pAway*100).toFixed(0)}%`;
+        const reasons = ["Probabilidades recalibradas con estadísticas inyectadas.", ...(statsProb.reasons || [])];
+        blended.reasons = [...new Set(reasons)].slice(0, 5);
+        blended.explanation = blended.reasons[0] || statsProb.explanation || baseProb.explanation;
+
+        lastEPA.liveProbabilities = blended;
+        lastEPA.statsInjection = {
+          source: normalized?.source || parsedRaw?.source || "manual",
+          window: normalized?.window || "live",
+          capturedAt: parsedRaw?.capturedAt || null,
+          stats: normalized.stats
+        };
+        renderEPA(lastEPA);
+        status.textContent = "✅ Stats inyectadas: probabilidad live recalibrada.";
       };
 
       document.getElementById("epaReset").onclick = ()=>{
