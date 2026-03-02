@@ -223,6 +223,40 @@ export function initFootballLab(){
     return db.teams.filter(t=>ids.has(t.id));
   }
 
+  function getTeamCompetitions(db, teamId){
+    const links = (db.teamCompetitions || []).filter(tc=>tc.teamId===teamId && tc.leagueId);
+    const byId = new Set(links.map(tc=>tc.leagueId));
+    return db.leagues
+      .filter(l=>byId.has(l.id))
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+  }
+
+  function upsertMirrorFutureMatch({ db, team, rival, match }){
+    if(!team || !rival || !match) return;
+    ensureTeamIntState(rival);
+    const mirrorId = `mirror::${match.id}`;
+    const payload = {
+      ...match,
+      id: mirrorId,
+      mirrorOf: match.id,
+      rivalryBoost: false,
+      isHome: !Boolean(match.isHome),
+      rivalTeamId: team.id
+    };
+    const idx = rival.futureMatches.findIndex(row=>row.id===mirrorId || row.mirrorOf===match.id);
+    if(idx>=0) rival.futureMatches[idx] = { ...rival.futureMatches[idx], ...payload };
+    else rival.futureMatches.push(payload);
+  }
+
+  function removeMirrorFutureMatch({ db, team, matchId }){
+    if(!team || !matchId) return;
+    db.teams.forEach((candidate)=>{
+      if(candidate.id===team.id) return;
+      ensureTeamIntState(candidate);
+      candidate.futureMatches = (candidate.futureMatches || []).filter(row=>row.mirrorOf!==matchId && row.id!==`mirror::${matchId}`);
+    });
+  }
+
   async function apiFetch(path, token){
     const res = await fetch(`${FOOTBALL_DATA_BASE_URL}${path}`, {
       headers: { "X-Auth-Token": token }
@@ -865,6 +899,9 @@ export function initFootballLab(){
       .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
       .map(t=>`<option value="${t.id}">${t.name}</option>`)
       .join("");
+    const marketOptions = (db.marketTracker || [])
+      .map(row=>`<option value="${row.matchId}">${row.fecha || "sin fecha"} · ${row.liga || "sin liga"} · ${row.matchId}</option>`)
+      .join("");
     backdrop.innerHTML = `
       <div class="fl-modal">
         <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:10px;">
@@ -881,6 +918,7 @@ export function initFootballLab(){
           <div class="fl-field"><label>Etapa</label><input id="fmStage" class="fl-input" placeholder="Liga / Grupos / KO / Final"></div>
           <div class="fl-field"><label>Importancia</label><select id="fmImportance" class="fl-select"><option value="nada en juego">Nada en juego</option><option value="top4">Top4</option><option value="descenso">Descenso</option><option value="derby">Derby</option><option value="final">Final</option></select><div id="fmImportanceHint" class="fl-mini" style="margin-top:4px;opacity:.75;"></div></div>
           <div class="fl-field"><label>Market mood</label><select id="fmMarketMood" class="fl-select"><option value="estable">Estable</option><option value="dinero temprano">Dinero temprano</option><option value="raro">Raro</option></select></div>
+          <div class="fl-field"><label>Market vinculado</label><select id="fmMarketLink" class="fl-select"><option value="">Sin vínculo</option>${marketOptions}</select></div>
           <div class="fl-field"><label>Snapshot cuota (1X2)</label><input id="fmOdds" class="fl-input" placeholder="1.70,3.80,5.20"></div>
           <div class="fl-field"><label>Descanso (días)</label><input id="fmRestDays" type="number" min="0" max="14" class="fl-input" placeholder="Auto"></div>
         </div>
@@ -918,6 +956,7 @@ export function initFootballLab(){
     setValue("#fmImportance", normalizeImportanceTag(editing?.importanceTag || "nada en juego"));
     setValue("#fmStage", editing?.stage || "Liga");
     setValue("#fmMarketMood", editing?.marketMood || "estable");
+    setValue("#fmMarketLink", editing?.marketMatchId || "");
     setValue("#fmRestDays", Number.isFinite(Number(editing?.restDays)) ? editing.restDays : "");
     setValue("#fmIsHome", editing?.isHome ?? true);
     setValue("#fmPeakNear", editing?.peakMatchHint);
@@ -937,6 +976,21 @@ export function initFootballLab(){
     backdrop.querySelector("#fmCompetitionId").onchange = refreshImportanceHint;
     refreshImportanceHint();
 
+    const applyMarketFromLink = ()=>{
+      const marketId = String(backdrop.querySelector("#fmMarketLink")?.value || "").trim();
+      if(!marketId) return;
+      const row = (db.marketTracker || []).find(item=>item.matchId===marketId);
+      if(!row) return;
+      const last = Array.isArray(row.cuotas) && row.cuotas.length ? row.cuotas[row.cuotas.length-1] : null;
+      if(last){
+        backdrop.querySelector("#fmOdds").value = [last.home, last.draw, last.away].filter(Number.isFinite).join(",");
+      }
+      if(Array.isArray(row.cuotas) && row.cuotas.length >= 3) backdrop.querySelector("#fmMarketMood").value = "dinero temprano";
+      if(row.settlement?.CLV && Math.abs(Number(row.settlement.CLV)) >= 0.08) backdrop.querySelector("#fmMarketMood").value = "raro";
+    };
+    backdrop.querySelector("#fmMarketLink").onchange = applyMarketFromLink;
+    applyMarketFromLink();
+
     backdrop.querySelector("#saveFutureModal").onclick = ()=>{
       const status = backdrop.querySelector("#futureModalStatus");
       const rivalTeamId = backdrop.querySelector("#fmRival").value;
@@ -947,6 +1001,7 @@ export function initFootballLab(){
       const importanceTag = normalizeImportanceTag(backdrop.querySelector("#fmImportance").value || "nada en juego");
       const stage = String(backdrop.querySelector("#fmStage").value || "Liga").trim() || "Liga";
       const marketMood = String(backdrop.querySelector("#fmMarketMood").value || "estable").trim();
+      const marketMatchId = String(backdrop.querySelector("#fmMarketLink").value || "").trim();
       const oddsRaw = String(backdrop.querySelector("#fmOdds").value || "").trim();
       const restDaysRaw = backdrop.querySelector("#fmRestDays").value;
       const restDays = restDaysRaw==="" ? null : clamp(Number(restDaysRaw) || 0, 0, 14);
@@ -965,6 +1020,7 @@ export function initFootballLab(){
         isHome: backdrop.querySelector("#fmIsHome").checked,
         importanceTag,
         marketMood,
+        marketMatchId,
         peakMatchHint: backdrop.querySelector("#fmPeakNear").checked,
         longTravel: backdrop.querySelector("#fmLongTravel").checked,
         postHype: backdrop.querySelector("#fmPostHype").checked,
@@ -986,6 +1042,9 @@ export function initFootballLab(){
       }else{
         team.futureMatches.push(payload);
       }
+      removeMirrorFutureMatch({ db, team, matchId: payload.id });
+      const rival = db.teams.find(t=>t.id===rivalTeamId);
+      if(rival) upsertMirrorFutureMatch({ db, team, rival, match: payload });
       ensureTeamInLeague(db, team.id, competitionId);
       ensureTeamInLeague(db, rivalTeamId, competitionId);
       saveDb(db);
@@ -997,6 +1056,7 @@ export function initFootballLab(){
     if(deleteBtn){
       deleteBtn.onclick = ()=>{
         team.futureMatches = (team.futureMatches || []).filter(m=>m.id!==editing.id);
+        removeMirrorFutureMatch({ db, team, matchId: editing.id });
         saveDb(db);
         onSave?.();
         close();
@@ -4785,6 +4845,10 @@ function computeTeamIntelligencePanel(db, teamId){
       const gaugeAngle = Math.round(clamp(Number(intel.metrics.powerIndex) || 0, 0, 100) * 3.6);
       const sections = [["Porteros","GK"],["Defensas","DF"],["Centrocampistas","MF"],["Delanteros","FW"],["Otros","OT"]]
         .map(([title,key])=>renderSquadSection(title, byPos[key]||[])).join("");
+      const teamCompetitions = getTeamCompetitions(db, team.id);
+      const competitionSummary = teamCompetitions.length
+        ? teamCompetitions.map(c=>`${c.name} (${c.type || "league"})`).join(" • ")
+        : "Sin competencias vinculadas";
       const futureMatches = (team.futureMatches || [])
         .filter(m=>{
           const d = diffDaysFromToday(m.date);
@@ -4860,10 +4924,14 @@ function computeTeamIntelligencePanel(db, teamId){
         <div class="fl-card">
           <div class="fl-row" style="justify-content:space-between;align-items:center;gap:10px;">
             <div style="font-size:30px;font-weight:900;">${team.name}</div>
-            <button class="fl-btn" id="editTeamName">Editar nombre</button>
+            <div class="fl-row">
+              <button class="fl-btn" id="editTeamName">Editar nombre</button>
+              <button class="fl-btn" id="deleteTeamBtn" style="border-color:#da3633;color:#ff7b72;">Eliminar equipo</button>
+            </div>
           </div>
           <div>Estadio: <b>${team.meta.stadium || '-'}</b> ${team.meta.city?`(${team.meta.city})`:''}</div>
           <div>Capacidad: <b>${team.meta.capacity || '-'}</b></div>
+          <div class="fl-mini" style="margin-top:4px;">Competiciones vinculadas: <b>${teamCompetitions.length}</b> · ${competitionSummary}</div>
           <div class="fl-row" style="margin-top:8px;">${["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"].map(t=>`<span class="fl-muted" style="padding:4px 6px;border-bottom:${t==='PLANTILLA'?'2px solid #ff3b69':'2px solid transparent'};">${t}</span>`).join("")}</div>
         </div>
         <div class="fl-card fl-row">
@@ -5054,6 +5122,19 @@ function computeTeamIntelligencePanel(db, teamId){
         team.name = nextName;
         saveDb(db);
         render("equipo", { teamId: team.id });
+      };
+      document.getElementById("deleteTeamBtn").onclick = ()=>{
+        if(!confirm(`¿Eliminar equipo ${team.name}? Se borrarán jugadores, partidos y vínculos.`)) return;
+        db.teams = db.teams.filter(t=>t.id!==team.id);
+        db.players = db.players.filter(p=>p.teamId!==team.id);
+        db.tracker = db.tracker.filter(m=>m.homeId!==team.id && m.awayId!==team.id);
+        db.teamCompetitions = (db.teamCompetitions || []).filter(tc=>tc.teamId!==team.id);
+        db.teams.forEach(other=>{
+          ensureTeamIntState(other);
+          other.futureMatches = (other.futureMatches || []).filter(m=>m.rivalTeamId!==team.id);
+        });
+        saveDb(db);
+        render("liga");
       };
       document.getElementById("backLiga").onclick = ()=>render("liga");
       document.getElementById("saveMeta").onclick = ()=>{
