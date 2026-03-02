@@ -4838,7 +4838,16 @@ function computeTeamIntelligencePanel(db, teamId){
       players.forEach(p=>{ const pos = p.pos || "OT"; (byPos[pos]||byPos.OT).push(p); });
       const teamMatches = db.tracker
         .filter(m=>m.homeId===team.id || m.awayId===team.id)
-        .sort((a,b)=>compareByDateAsc(b, a));
+        .sort((a,b)=>{
+          const aOrder = Number.isFinite(a.manualOrder) ? a.manualOrder : null;
+          const bOrder = Number.isFinite(b.manualOrder) ? b.manualOrder : null;
+          if(aOrder!==null || bOrder!==null){
+            if(aOrder===null) return 1;
+            if(bOrder===null) return -1;
+            if(aOrder!==bOrder) return aOrder - bOrder;
+          }
+          return compareByDateAsc(b, a);
+        });
       const behavior = buildTeamBehaviorSeries(db, team.id);
       const engine = recomputeTeamGlobalEngine(db, team.id) || getOrCreateDiagProfile(db, team.id, team.name).engineV1;
       const intel = computeTeamIntelligencePanel(db, team.id);
@@ -4897,18 +4906,22 @@ function computeTeamIntelligencePanel(db, teamId){
       const pressureRef = intRows[0]?.out?.windowInfo?.windowPressure || { congestionLevel:"🟢" };
       const globalRotation = pressureRef.congestionLevel==="🔴" || backToBack>=2 || next14.length>=4 ? "Alta" : next14.length>=2 ? "Media" : "Baja";
       const patterns = buildTeamIntPatterns(db, team);
-      const matchRows = teamMatches.map(m=>{
+      const matchRows = teamMatches.map((m, idx)=>{
         const isHome = m.homeId===team.id;
         const rival = db.teams.find(t=>t.id===(isHome ? m.awayId : m.homeId));
         const league = db.leagues.find(l=>l.id===m.leagueId);
         const home = db.teams.find(t=>t.id===m.homeId)?.name || "-";
         const away = db.teams.find(t=>t.id===m.awayId)?.name || "-";
+        const moveUpDisabled = idx===0 ? "disabled" : "";
+        const moveDownDisabled = idx===teamMatches.length-1 ? "disabled" : "";
         return `<tr>
           <td>${m.date||"-"}</td>
           <td>${league?.name || "Liga"}</td>
           <td>${home} ${m.homeGoals}-${m.awayGoals} ${away}</td>
           <td>${rival?.name || "-"}</td>
           <td class="fl-row" style="gap:6px;">
+            <button class="fl-btn" data-move-match="${m.id}" data-move-delta="-1" ${moveUpDisabled}>⬆️</button>
+            <button class="fl-btn" data-move-match="${m.id}" data-move-delta="1" ${moveDownDisabled}>⬇️</button>
             <button class="fl-btn" data-open-stats-modal="${m.id}">Estadísticas</button>
             <button class="fl-btn" data-open-engine-modal="${m.id}">EPA/EMA/HAE</button>
             <button class="fl-btn" data-edit-match="${m.id}">Editar</button>
@@ -5243,6 +5256,23 @@ function computeTeamIntelligencePanel(db, teamId){
       content.querySelectorAll("[data-open-engine-modal]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-engine-modal"));
         openTeamEngineModal({ db, match, team, onSave: ()=>render("equipo", { teamId: team.id }) });
+      });
+      content.querySelectorAll("[data-move-match]").forEach(btn=>btn.onclick = ()=>{
+        const matchId = btn.getAttribute("data-move-match");
+        const delta = Number(btn.getAttribute("data-move-delta"));
+        if(!matchId || !Number.isFinite(delta)) return;
+        const orderedIds = teamMatches.map(m=>m.id);
+        const idx = orderedIds.indexOf(matchId);
+        if(idx<0) return;
+        const target = idx + delta;
+        if(target<0 || target>=orderedIds.length) return;
+        [orderedIds[idx], orderedIds[target]] = [orderedIds[target], orderedIds[idx]];
+        orderedIds.forEach((id, order)=>{
+          const match = db.tracker.find(m=>m.id===id);
+          if(match) match.manualOrder = order;
+        });
+        saveDb(db);
+        render("equipo", { teamId: team.id });
       });
       content.querySelectorAll("[data-edit-match]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-edit-match"));
