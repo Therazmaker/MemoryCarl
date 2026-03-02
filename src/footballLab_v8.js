@@ -376,6 +376,7 @@ export function initFootballLab(){
   function ensureMarketMatchState(raw){
     const base = {
       matchId: "",
+      label: "",
       fecha: "",
       liga: "",
       lambda: { home: null, away: null },
@@ -386,6 +387,7 @@ export function initFootballLab(){
       settlement: null
     };
     const row = { ...base, ...(raw || {}) };
+    row.label = String(row.label || "").trim();
     row.lambda = {
       home: pickFirstNumber(row.lambda?.home),
       away: pickFirstNumber(row.lambda?.away)
@@ -531,6 +533,18 @@ export function initFootballLab(){
       earlyMoneyWith,
       strategySignal
     };
+  }
+
+  function marketRowLabel(db, row){
+    const customLabel = String(row?.label || "").trim();
+    if(customLabel) return customLabel;
+    const linked = db.tracker.find((m)=>m.id===row.matchId);
+    if(linked){
+      const home = db.teams.find(t=>t.id===linked.homeId)?.name || "Local";
+      const away = db.teams.find(t=>t.id===linked.awayId)?.name || "Visitante";
+      return `${home} vs ${away}`;
+    }
+    return String(row.matchId || "Partido manual");
   }
 
   function calcBitacoraSuggestion({ bank, odds, probability, kellyFraction, minUnit, maxStakePct }){
@@ -4855,6 +4869,13 @@ function computeTeamIntelligencePanel(db, teamId){
       const sections = [["Porteros","GK"],["Defensas","DF"],["Centrocampistas","MF"],["Delanteros","FW"],["Otros","OT"]]
         .map(([title,key])=>renderSquadSection(title, byPos[key]||[])).join("");
       const teamCompetitions = getTeamCompetitions(db, team.id);
+      const teamCompetitionIds = new Set(teamCompetitions.map(c=>c.id));
+      const availableCompetitions = db.leagues
+        .filter((league)=>!teamCompetitionIds.has(league.id))
+        .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+      const linkCompetitionOptions = availableCompetitions
+        .map((league)=>`<option value="${league.id}">${league.name} (${league.type || "league"})</option>`)
+        .join("");
       const competitionSummary = teamCompetitions.length
         ? teamCompetitions.map(c=>`${c.name} (${c.type || "league"})`).join(" • ")
         : "Sin competencias vinculadas";
@@ -4938,6 +4959,7 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-row" style="justify-content:space-between;align-items:center;gap:10px;">
             <div style="font-size:30px;font-weight:900;">${team.name}</div>
             <div class="fl-row">
+              <button class="fl-btn" id="linkLeagueBtn">Vincular liga</button>
               <button class="fl-btn" id="editTeamName">Editar nombre</button>
               <button class="fl-btn" id="deleteTeamBtn" style="border-color:#da3633;color:#ff7b72;">Eliminar equipo</button>
             </div>
@@ -4945,6 +4967,14 @@ function computeTeamIntelligencePanel(db, teamId){
           <div>Estadio: <b>${team.meta.stadium || '-'}</b> ${team.meta.city?`(${team.meta.city})`:''}</div>
           <div>Capacidad: <b>${team.meta.capacity || '-'}</b></div>
           <div class="fl-mini" style="margin-top:4px;">Competiciones vinculadas: <b>${teamCompetitions.length}</b> · ${competitionSummary}</div>
+          <div id="linkLeaguePanel" class="fl-row" style="margin-top:8px;display:none;">
+            <select id="linkLeagueSelect" class="fl-select">
+              <option value="">Selecciona competencia</option>
+              ${linkCompetitionOptions}
+            </select>
+            <button class="fl-btn" id="confirmLinkLeague">Guardar vínculo</button>
+            <span class="fl-mini" id="linkLeagueStatus"></span>
+          </div>
           <div class="fl-row" style="margin-top:8px;">${["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"].map(t=>`<span class="fl-muted" style="padding:4px 6px;border-bottom:${t==='PLANTILLA'?'2px solid #ff3b69':'2px solid transparent'};">${t}</span>`).join("")}</div>
         </div>
         <div class="fl-card fl-row">
@@ -5133,6 +5163,22 @@ function computeTeamIntelligencePanel(db, teamId){
         const nextName = String(name||"").trim();
         if(!nextName) return;
         team.name = nextName;
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
+      document.getElementById("linkLeagueBtn").onclick = ()=>{
+        const panel = document.getElementById("linkLeaguePanel");
+        if(!panel) return;
+        panel.style.display = panel.style.display === "none" ? "flex" : "none";
+      };
+      document.getElementById("confirmLinkLeague").onclick = ()=>{
+        const leagueId = String(document.getElementById("linkLeagueSelect")?.value || "").trim();
+        const status = document.getElementById("linkLeagueStatus");
+        if(!leagueId){
+          if(status) status.textContent = "Selecciona una competencia.";
+          return;
+        }
+        ensureTeamInLeague(db, team.id, leagueId);
         saveDb(db);
         render("equipo", { teamId: team.id });
       };
@@ -6334,8 +6380,11 @@ function computeTeamIntelligencePanel(db, teamId){
         return `
           <div class="fl-card">
             <div class="fl-row" style="justify-content:space-between;">
-              <div><b>${row.fecha || "sin fecha"}</b> · ${row.liga || "Liga"} · Match ${row.matchId || "manual"}</div>
-              <div class="fl-chip">Side ${sideLabel}</div>
+              <div><b>${row.fecha || "sin fecha"}</b> · ${row.liga || "Liga"} · ${marketRowLabel(db, row)}</div>
+              <div class="fl-row" style="gap:6px;">
+                <div class="fl-chip">Side ${sideLabel}</div>
+                <button class="fl-btn" data-delete-market="${row.matchId}" style="border-color:#da3633;color:#ff7b72;">Borrar</button>
+              </div>
             </div>
             <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-top:8px;">
               <div><div class="fl-mini">Prob modelo vs mercado</div><b>${(metrics.modelP*100).toFixed(1)}% / ${(metrics.marketP*100).toFixed(1)}%</b></div>
@@ -6396,7 +6445,7 @@ function computeTeamIntelligencePanel(db, teamId){
             <button class="fl-btn" id="mkSaveMatch">Guardar partido market</button>
           </div>
           <div class="fl-row" style="margin-top:8px;flex-wrap:wrap;">
-            <select id="mkTarget" class="fl-select">${db.marketTracker.map(r=>`<option value="${r.matchId}">${r.fecha || "sin fecha"} · ${r.matchId}</option>`).join('')}</select>
+            <select id="mkTarget" class="fl-select">${db.marketTracker.map(r=>`<option value="${r.matchId}">${r.fecha || "sin fecha"} · ${marketRowLabel(db, r)}</option>`).join('')}</select>
             <input id="mkOddH" type="number" step="0.01" class="fl-input" placeholder="cuota 1" style="width:88px;" />
             <input id="mkOddD" type="number" step="0.01" class="fl-input" placeholder="cuota X" style="width:88px;" />
             <input id="mkOddA" type="number" step="0.01" class="fl-input" placeholder="cuota 2" style="width:88px;" />
@@ -6428,6 +6477,7 @@ function computeTeamIntelligencePanel(db, teamId){
           matchId: trId || uid("mkt"),
           fecha: document.getElementById("mkDate").value || tr?.date || "",
           liga: document.getElementById("mkLeague").value || db.leagues.find(l=>l.id===tr?.leagueId)?.name || "",
+          label: tr ? `${db.teams.find(t=>t.id===tr.homeId)?.name || "Local"} vs ${db.teams.find(t=>t.id===tr.awayId)?.name || "Visitante"}` : "",
           lambda: { home: pickFirstNumber(document.getElementById("mkLambdaH").value), away: pickFirstNumber(document.getElementById("mkLambdaA").value) },
           probModel: {
             home: pickFirstNumber(document.getElementById("mkPH").value) ?? 0.33,
@@ -6469,6 +6519,16 @@ function computeTeamIntelligencePanel(db, teamId){
         saveDb(db);
         render("market");
       };
+      content.querySelectorAll("[data-delete-market]").forEach((btn)=>btn.onclick = ()=>{
+        const matchId = btn.getAttribute("data-delete-market");
+        if(!matchId) return;
+        const target = db.marketTracker.find((row)=>row.matchId===matchId);
+        const displayName = target ? marketRowLabel(db, target) : matchId;
+        if(!confirm(`¿Borrar ${displayName} del market tracker?`)) return;
+        db.marketTracker = db.marketTracker.filter((row)=>row.matchId!==matchId);
+        saveDb(db);
+        render("market");
+      });
       document.getElementById("mkCloseMatch").onclick = ()=>{
         const target = findTarget();
         const out = document.getElementById("mkOut");
