@@ -1295,19 +1295,55 @@ export function initFootballLab(){
     const xgHome = avgSide(homeGames, "homeXg", "awayXg", "xgHome", "xgAway");
     const xgAway = avgSide(awayGames, "awayXg", "homeXg", "xgAway", "xgHome");
 
+    const narrativeSideCounters = (match, side)=>{
+      const counters = match?.narrativeModule?.normalized?.counters?.[side];
+      if(counters) return counters;
+      const events = match?.narrativeModule?.normalized?.events || [];
+      const teams = match?.narrativeModule?.normalized?.teams || {};
+      const sideName = String(teams[side] || "").toLowerCase();
+      if(!events.length || !sideName) return null;
+      return events.reduce((acc, ev)=>{
+        if(String(ev?.team || "").toLowerCase()!==sideName) return acc;
+        if(ev.type==="corner") acc.corners += 1;
+        if(ev.type==="yellow") acc.cards += 1;
+        if(ev.type==="red") acc.reds += 1;
+        return acc;
+      }, { corners: 0, cards: 0, reds: 0 });
+    };
+
+    const narrativeValue = (match, sideTeamId, kind)=>{
+      const side = match.homeId===sideTeamId ? "home" : match.awayId===sideTeamId ? "away" : null;
+      if(!side) return null;
+      const counters = narrativeSideCounters(match, side);
+      if(!counters) return null;
+      if(kind==="corners") return Number(counters.corners);
+      if(kind==="cards") return Number(counters.cards) + Number(counters.reds || 0) * 1.6;
+      return null;
+    };
+
     const cornersFor = weightedAverage(games, g=>{
       const isHome = g.homeId===teamId;
-      return pickFirstNumber(isHome ? g.homeCorners : g.awayCorners, isHome ? g.cornersHome : g.cornersAway);
+      return pickFirstNumber(
+        isHome ? g.homeCorners : g.awayCorners,
+        isHome ? g.cornersHome : g.cornersAway,
+        narrativeValue(g, teamId, "corners")
+      );
     }, 0.9) || 0;
     const cornersAgainst = weightedAverage(games, g=>{
       const isHome = g.homeId===teamId;
-      return pickFirstNumber(isHome ? g.awayCorners : g.homeCorners, isHome ? g.cornersAway : g.cornersHome);
+      const oppTeamId = isHome ? g.awayId : g.homeId;
+      return pickFirstNumber(
+        isHome ? g.awayCorners : g.homeCorners,
+        isHome ? g.cornersAway : g.cornersHome,
+        narrativeValue(g, oppTeamId, "corners")
+      );
     }, 0.9) || 0;
     const cardsRate = weightedAverage(games, g=>{
       const isHome = g.homeId===teamId;
       const y = pickFirstNumber(isHome ? g.homeYellow : g.awayYellow, 0) || 0;
       const r = pickFirstNumber(isHome ? g.homeRed : g.awayRed, 0) || 0;
-      return y + r*1.6;
+      const explicit = y + r*1.6;
+      return explicit>0 ? explicit : (narrativeValue(g, teamId, "cards") || 0);
     }, 0.88) || 0;
 
     const statsAttackRate = weightedAverage(games, g=>{
@@ -2358,7 +2394,8 @@ function computeTeamIntelligencePanel(db, teamId){
           normalized: {
             matchId: match.id,
             teams: { home: homeName, away: awayName },
-            events: parsed.events
+            events: parsed.events,
+            counters: parsed.counters
           },
           diagnostic: { matchId: match.id, diagnostic }
         };
@@ -3617,8 +3654,8 @@ function computeTeamIntelligencePanel(db, teamId){
     const lines = String(rawText || "").split(/\n+/).map(s=>s.trim()).filter(Boolean);
     const events = [];
     const counters = {
-      home: { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, savesNarrated: 0, cards: 0, interceptions: 0 },
-      away: { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, savesNarrated: 0, cards: 0, interceptions: 0 }
+      home: { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, savesNarrated: 0, cards: 0, reds: 0, interceptions: 0 },
+      away: { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, savesNarrated: 0, cards: 0, reds: 0, interceptions: 0 }
     };
     const teamNameMap = [
       { key: "home", name: String(teams?.home || "").toLowerCase() },
@@ -3633,6 +3670,7 @@ function computeTeamIntelligencePanel(db, teamId){
 
       let type = null;
       if(/¡?gol!?/i.test(line)) type = "goal";
+      else if(/tarjeta roja|expulsad/i.test(line)) type = "red";
       else if(/tarjeta amarilla|amonestad/i.test(line)) type = "yellow";
       else if(/sustituci[oó]n|\bcambio\.?/i.test(line)) type = "sub";
       else if(/c[oó]rner/i.test(line)) type = "corner";
@@ -3656,6 +3694,7 @@ function computeTeamIntelligencePanel(db, teamId){
       if(side){
         if(type==="corner") counters[side].corners += 1;
         if(type==="yellow") counters[side].cards += 1;
+        if(type==="red") counters[side].reds += 1;
         if(type==="save") counters[side].savesNarrated += 1;
         if(/dispara|cabecea|centra peligroso|remata/i.test(line)) counters[side].attacksNarrated += 1;
         if(/ocasi[oó]n clar[ií]sima|casi marca|remata dentro del [aá]rea/i.test(line)) counters[side].bigChancesNarrated += 1;
@@ -5495,7 +5534,8 @@ function computeTeamIntelligencePanel(db, teamId){
           normalized: {
             matchId: match.id,
             teams: { home: home?.name || "Local", away: away?.name || "Visitante" },
-            events: parsed.events
+            events: parsed.events,
+            counters: parsed.counters
           },
           diagnostic: { matchId: match.id, diagnostic }
         };
