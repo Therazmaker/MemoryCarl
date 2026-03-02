@@ -112,6 +112,18 @@ export function initFootballLab(){
       db.learning.metrics ||= { global: null, byLeague: {} };
       db.learning.metrics.byLeague ||= {};
       db.learning.marketTrust = clamp(Number(db.learning.marketTrust) || defaultDb.learning.marketTrust, 0, 0.85);
+      db.leagues = db.leagues.map((league)=>({ ...league, type: normalizeCompetitionType(league?.type) }));
+      db.teams.forEach((team)=>{
+        ensureTeamIntState(team);
+        team.futureMatches = (team.futureMatches || []).map((match)=>{
+          const competition = getCompetitionById(db, match?.competitionId || match?.leagueId || "");
+          return {
+            ...match,
+            competitionId: competition?.id || match?.competitionId || match?.leagueId || "",
+            competition: competition?.name || match?.competition || "Liga"
+          };
+        });
+      });
 
       // V9 migration: teams are global entities, league participation lives in teamCompetitions.
       if(!Array.isArray(db.teamCompetitions)) db.teamCompetitions = [];
@@ -152,6 +164,30 @@ export function initFootballLab(){
     db.teamCompetitions ||= [];
     const exists = db.teamCompetitions.some(tc=>tc.teamId===teamId && tc.leagueId===leagueId);
     if(!exists) db.teamCompetitions.push({ teamId, leagueId, joinedAt: Date.now() });
+  }
+
+  function normalizeCompetitionType(type){
+    const clean = String(type || "").trim().toLowerCase();
+    if(["league","cup","continental","friendly"].includes(clean)) return clean;
+    return "league";
+  }
+
+  function getCompetitionById(db, competitionId){
+    return db.leagues.find((league)=>league.id===competitionId) || null;
+  }
+
+  function competitionTypeFromMatch(db, match){
+    const byId = getCompetitionById(db, match?.competitionId || match?.leagueId || "");
+    if(byId) return normalizeCompetitionType(byId.type);
+    const competition = String(match?.competition || "").toLowerCase();
+    if(/ucl|champions|europa|libertadores|continental/.test(competition)) return "continental";
+    if(/copa|cup/.test(competition)) return "cup";
+    if(/amistoso|friendly/.test(competition)) return "friendly";
+    return "league";
+  }
+
+  function stakesModeFromMatch(db, match){
+    return competitionTypeFromMatch(db, match)==="league" ? "table" : "knockout";
   }
 
   function getOrCreateTeamByName(db, name, defaults={}){
@@ -819,8 +855,10 @@ export function initFootballLab(){
     const editing = (team.futureMatches || []).find(m=>m.id===matchId) || null;
     const backdrop = document.createElement("div");
     backdrop.className = "fl-modal-backdrop";
-    const leagueOptions = db.leagues
-      .map(l=>`<option value="${l.name}">${l.name}</option>`)
+    const competitionOptions = db.leagues
+      .slice()
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
+      .map(l=>`<option value="${l.id}">${l.name} · ${l.type || "league"}</option>`)
       .join("");
     const rivalOptions = db.teams
       .filter(t=>t.id!==team.id)
@@ -839,9 +877,9 @@ export function initFootballLab(){
         <div class="fl-modal-grid" style="margin-bottom:10px;">
           <div class="fl-field"><label>Rival</label><select id="fmRival" class="fl-select"><option value="">Seleccionar rival</option>${rivalOptions}</select></div>
           <div class="fl-field"><label>Fecha</label><input id="fmDate" type="date" class="fl-input"></div>
-          <div class="fl-field"><label>Liga / Competición</label><input id="fmCompetition" class="fl-input" list="fmLeagueList" placeholder="Liga, Copa, UCL..."><datalist id="fmLeagueList">${leagueOptions}</datalist></div>
+          <div class="fl-field"><label>Liga / Competición</label><select id="fmCompetitionId" class="fl-select"><option value="">Seleccionar competición</option>${competitionOptions}</select></div>
           <div class="fl-field"><label>Etapa</label><input id="fmStage" class="fl-input" placeholder="Liga / Grupos / KO / Final"></div>
-          <div class="fl-field"><label>Importancia</label><select id="fmImportance" class="fl-select"><option value="nada en juego">Nada en juego</option><option value="top4">Top4</option><option value="descenso">Descenso</option><option value="derby">Derby</option><option value="final">Final</option></select></div>
+          <div class="fl-field"><label>Importancia</label><select id="fmImportance" class="fl-select"><option value="nada en juego">Nada en juego</option><option value="top4">Top4</option><option value="descenso">Descenso</option><option value="derby">Derby</option><option value="final">Final</option></select><div id="fmImportanceHint" class="fl-mini" style="margin-top:4px;opacity:.75;"></div></div>
           <div class="fl-field"><label>Market mood</label><select id="fmMarketMood" class="fl-select"><option value="estable">Estable</option><option value="dinero temprano">Dinero temprano</option><option value="raro">Raro</option></select></div>
           <div class="fl-field"><label>Snapshot cuota (1X2)</label><input id="fmOdds" class="fl-input" placeholder="1.70,3.80,5.20"></div>
           <div class="fl-field"><label>Descanso (días)</label><input id="fmRestDays" type="number" min="0" max="14" class="fl-input" placeholder="Auto"></div>
@@ -876,7 +914,7 @@ export function initFootballLab(){
     };
     setValue("#fmRival", editing?.rivalTeamId || "");
     setValue("#fmDate", editing?.date || "");
-    setValue("#fmCompetition", editing?.competition || "Liga");
+    setValue("#fmCompetitionId", editing?.competitionId || editing?.leagueId || "");
     setValue("#fmImportance", normalizeImportanceTag(editing?.importanceTag || "nada en juego"));
     setValue("#fmStage", editing?.stage || "Liga");
     setValue("#fmMarketMood", editing?.marketMood || "estable");
@@ -887,11 +925,25 @@ export function initFootballLab(){
     setValue("#fmPostHype", editing?.postHype);
     setValue("#fmWeather", editing?.weatherFlag);
 
+    const refreshImportanceHint = ()=>{
+      const compId = backdrop.querySelector("#fmCompetitionId").value;
+      const competition = getCompetitionById(db, compId);
+      const hint = backdrop.querySelector("#fmImportanceHint");
+      if(!hint) return;
+      hint.textContent = normalizeCompetitionType(competition?.type) === "league"
+        ? "Modo tabla activo: Top4/Descenso aplican."
+        : "Importancia de tabla no aplica; se evalúa modo KO.";
+    };
+    backdrop.querySelector("#fmCompetitionId").onchange = refreshImportanceHint;
+    refreshImportanceHint();
+
     backdrop.querySelector("#saveFutureModal").onclick = ()=>{
       const status = backdrop.querySelector("#futureModalStatus");
       const rivalTeamId = backdrop.querySelector("#fmRival").value;
       const date = String(backdrop.querySelector("#fmDate").value || "").trim();
-      const competition = String(backdrop.querySelector("#fmCompetition").value || "Liga").trim() || "Liga";
+      const competitionId = String(backdrop.querySelector("#fmCompetitionId").value || "").trim();
+      const selectedCompetition = getCompetitionById(db, competitionId);
+      const competition = selectedCompetition?.name || "Liga";
       const importanceTag = normalizeImportanceTag(backdrop.querySelector("#fmImportance").value || "nada en juego");
       const stage = String(backdrop.querySelector("#fmStage").value || "Liga").trim() || "Liga";
       const marketMood = String(backdrop.querySelector("#fmMarketMood").value || "estable").trim();
@@ -900,12 +952,15 @@ export function initFootballLab(){
       const restDays = restDaysRaw==="" ? null : clamp(Number(restDaysRaw) || 0, 0, 14);
       if(!rivalTeamId){ status.textContent = "❌ Selecciona un rival."; return; }
       if(!date){ status.textContent = "❌ Elige una fecha."; return; }
+      if(!competitionId){ status.textContent = "❌ Selecciona una competición."; return; }
 
       const payload = {
         id: editing?.id || uid("fm"),
         date,
         rivalTeamId,
         competition,
+        competitionId,
+        competitionType: normalizeCompetitionType(selectedCompetition?.type),
         stage,
         isHome: backdrop.querySelector("#fmIsHome").checked,
         importanceTag,
@@ -931,6 +986,8 @@ export function initFootballLab(){
       }else{
         team.futureMatches.push(payload);
       }
+      ensureTeamInLeague(db, team.id, competitionId);
+      ensureTeamInLeague(db, rivalTeamId, competitionId);
       saveDb(db);
       onSave?.();
       close();
@@ -1426,16 +1483,28 @@ export function initFootballLab(){
     return "nada en juego";
   }
 
-  function stakesByTag(tag){
-    const map = { "final":40, "top4":32, "descenso":34, "derby":28, "nada en juego":8 };
-    return map[normalizeImportanceTag(tag)] || 8;
+  function stakesByTag(tag, stakesMode="table"){
+    const normalized = normalizeImportanceTag(tag);
+    if(stakesMode === "knockout"){
+      const map = { "final":35, "derby":18, "top4":0, "descenso":0, "nada en juego":10 };
+      return map[normalized] ?? 10;
+    }
+    const tableMap = { "top4":22, "descenso":22, "derby":12, "final":30, "nada en juego":8 };
+    return tableMap[normalized] ?? 8;
   }
 
-  function competitionWeight(match){
-    const competition = String(match?.competition || "").toLowerCase();
-    if(/ucl|champions|europa|libertadores/.test(competition)) return 32;
-    if(/copa|cup/.test(competition)) return 26;
+  function competitionWeight(db, match){
+    const type = competitionTypeFromMatch(db, match);
+    if(type === "continental") return 32;
+    if(type === "cup") return 26;
+    if(type === "friendly") return 12;
     return 22;
+  }
+
+  function competitionPressureWeight(type){
+    if(type === "continental") return 1.3;
+    if(type === "cup") return 0.8;
+    return 1.0;
   }
 
   function stageWeight(stage){
@@ -1456,16 +1525,22 @@ export function initFootballLab(){
     return Number.isFinite(avg) ? { avg, ts } : null;
   }
 
-  function buildWindowSignals(match, allFutureMatches){
+  function buildWindowSignals({ db, team, match }){
+    const allMatches = (team?.futureMatches || []).filter(Boolean);
     const centerDay = diffDaysFromToday(match.date);
-    const rows = (allFutureMatches || []).filter(row=>row.id!==match.id).map(row=>({ row, d: diffDaysFromToday(row.date) })).filter(x=>Number.isFinite(x.d));
+    const rows = allMatches.filter(row=>row.id!==match.id).map(row=>({ row, d: diffDaysFromToday(row.date) })).filter(x=>Number.isFinite(x.d));
     const in7 = rows.filter(x=>x.d>=0 && x.d<=7).length + (Number.isFinite(centerDay) && centerDay>=0 && centerDay<=7 ? 1 : 0);
     const in14 = rows.filter(x=>x.d>=0 && x.d<=14).length + (Number.isFinite(centerDay) && centerDay>=0 && centerDay<=14 ? 1 : 0);
-    const hardness = Math.round((allFutureMatches || []).filter(row=>{ const d = diffDaysFromToday(row.date); return Number.isFinite(d) && d>=0 && d<=14; }).reduce((acc, row)=>acc + (competitionWeight(row)*0.5) + stakesByTag(row.importanceTag)*0.5 + stageWeight(row.stage), 0));
+    const windowRows = allMatches.filter(row=>{ const d = diffDaysFromToday(row.date); return Number.isFinite(d) && d>=0 && d<=14; });
+    const hardness = Math.round(windowRows.reduce((acc, row)=>{
+      const stakesMode = stakesModeFromMatch(db, row);
+      const pressureW = competitionPressureWeight(competitionTypeFromMatch(db, row));
+      return acc + (((competitionWeight(db, row)*0.5) + stakesByTag(row.importanceTag, stakesMode)*0.5 + stageWeight(row.stage)) * pressureW);
+    }, 0));
     const congestionScore = clamp((in7*20) + (in14*7) + Math.min(25, hardness/7), 0, 100);
-    const futurePeak = rows.filter(x=>x.d>=0 && x.d<=7).some(x=>competitionWeight(x.row) + stageWeight(x.row.stage) + stakesByTag(x.row.importanceTag) >= 55);
-    const prevIntense = rows.filter(x=>x.d<0 && x.d>=-4).some(x=>competitionWeight(x.row) + stakesByTag(x.row.importanceTag) >= 50);
-    const beforePriority = rows.some(x=>x.d>0 && x.d<=4 && (competitionWeight(x.row) + stageWeight(x.row.stage) > competitionWeight(match) + stageWeight(match.stage) + 4));
+    const futurePeak = rows.filter(x=>x.d>=0 && x.d<=7).some(x=>competitionWeight(db, x.row) + stageWeight(x.row.stage) + stakesByTag(x.row.importanceTag, stakesModeFromMatch(db, x.row)) >= 55);
+    const prevIntense = rows.filter(x=>x.d<0 && x.d>=-4).some(x=>competitionWeight(db, x.row) + stakesByTag(x.row.importanceTag, stakesModeFromMatch(db, x.row)) >= 50);
+    const beforePriority = rows.some(x=>x.d>0 && x.d<=4 && (competitionWeight(db, x.row) + stageWeight(x.row.stage) > competitionWeight(db, match) + stageWeight(match.stage) + 4));
     const betweenIntense = prevIntense && futurePeak;
     const sandwichRisk = clamp((beforePriority ? 60 : 0) + (betweenIntense ? 40 : 0), 0, 100);
     const recoveryNeed = clamp((prevIntense ? 45 : 10) + (congestionScore*0.45), 0, 100);
@@ -1487,8 +1562,10 @@ export function initFootballLab(){
     ensureTeamIntState(team);
     const profile = team.intProfile || {};
     const importanceTag = normalizeImportanceTag(match.importanceTag);
+    const stakesMode = stakesModeFromMatch(db, match);
+    const competitionType = competitionTypeFromMatch(db, match);
     const seasonGoal = String(profile.seasonGoal || profile.seasonObjective || "top4").toLowerCase();
-    const stakes = clamp((competitionWeight(match)*0.55) + stageWeight(match.stage) + (stakesByTag(importanceTag)*0.55) + (/titulo/.test(seasonGoal) ? 4 : 1), 0, 40);
+    const stakes = clamp((competitionWeight(db, match)*0.55) + stageWeight(match.stage) + (stakesByTag(importanceTag, stakesMode)*0.55) + (/titulo/.test(seasonGoal) ? 4 : 1), 0, 40);
     const isPriorityComp = profile.priorityCompetition && String(match.competition||"").toLowerCase().includes(String(profile.priorityCompetition).toLowerCase());
     const contextGoal = /titulo|title/.test(seasonGoal) ? 9 : /descenso/.test(seasonGoal) ? 8 : /top4/.test(seasonGoal) ? 7 : 5;
     const contextSituation = /lider|primero/.test(String(profile.seasonContext||"").toLowerCase()) ? 6 : /persig|pelea/.test(String(profile.seasonContext||"").toLowerCase()) ? 5 : 3;
@@ -1497,7 +1574,7 @@ export function initFootballLab(){
     const restDays = Number.isFinite(Number(match.restDays)) ? Number(match.restDays) : 4;
     const depth = clamp(Number(profile.squadDepth) || 3, 1, 5);
     const coachRotation = clamp(Number(profile.coachRotation || profile.coachRotationPolicy) || 3, 1, 5);
-    const window = buildWindowSignals(match, allFutureMatches || []);
+    const window = buildWindowSignals({ db, team, match });
     const windowAdjustment = clamp(8 - (window.congestionScore*0.20) - (window.sandwichRisk*0.12) - (window.recoveryNeed*0.08) + (window.peakMatchNearby ? -4 : 0), -25, 10);
     const emotion = clamp((isDerby ? 6 : 0) + (match.postHype ? 2 : 0) + (match.weatherFlag ? 1 : 0), 0, 10);
     const snapshots = Array.isArray(match.snapshots) ? match.snapshots : [];
@@ -1506,13 +1583,22 @@ export function initFootballLab(){
     const lateSnapback = parsed.length>=3 ? ((parsed[parsed.length-1].avg - parsed[Math.max(0, parsed.length-2)].avg) / parsed[Math.max(0, parsed.length-2)].avg) * 100 : 0;
     const volatilityIndex = parsed.length>=2 ? clamp(stdDev(parsed.map(p=>p.avg))*60, 0, 100) : 0;
     const marketSignal = clamp((/dinero temprano/.test(String(match.marketMood||"")) ? -4 : 0) + (/raro/.test(String(match.marketMood||"")) ? -6 : 2) + (earlyDrift<=-2 ? 3 : earlyDrift>=2 ? -3 : 0) + (Math.abs(lateSnapback)>=1.5 ? -2 : 0), -10, 10);
-    const interest = clamp(stakes + teamContext + windowAdjustment + emotion + marketSignal, 0, 100);
+    let interest = clamp(stakes + teamContext + windowAdjustment + emotion + marketSignal, 0, 100);
     const rotationPressure = clamp((window.congestionScore*0.35) + (window.sandwichRisk*0.35) + (window.recoveryNeed*0.2) + (coachRotation*6) - (depth*5) + (restDays<=3 ? 12 : 0), 0, 100);
     const rotationProbable = rotationPressure >= 68 ? "Alta" : rotationPressure >= 42 ? "Media" : "Baja";
     const dataCompleteness = clamp((match.competition ? 8 : 0) + (match.stage ? 8 : 0) + (match.importanceTag ? 8 : 0) + (profile.seasonGoal || profile.seasonObjective ? 8 : 0) + (profile.priorityCompetition ? 8 : 0), 0, 40);
     const depthScore = clamp((snapshots.length >= 1 ? 10 : 0) + (snapshots.length >= 2 ? 8 : 0) + (snapshots.length >= 3 ? 6 : 0) + (snapshots.some(s=>s.kind==="lineup") ? 6 : 0), 0, 30);
     const consistency = clamp((Math.abs(windowAdjustment)>=12 && Math.abs(marketSignal)<=2 ? 10 : 20) + (windowAdjustment<0 && marketSignal<0 ? 8 : 0) + (match.overrideWithoutEvidence ? -8 : 0), 0, 30);
-    const confidence = clamp(dataCompleteness + depthScore + consistency, 0, 100);
+    let confidence = clamp(dataCompleteness + depthScore + consistency, 0, 100);
+    const latestRawSnapshot = snapshots[snapshots.length-1] || null;
+    const underdogOdds = Number(match.isHome===false
+      ? (latestRawSnapshot?.awayOdds ?? latestRawSnapshot?.away ?? latestRawSnapshot?.a)
+      : (latestRawSnapshot?.homeOdds ?? latestRawSnapshot?.home ?? latestRawSnapshot?.h));
+    const isUnderdogCup = competitionType === "cup" && Number.isFinite(underdogOdds) && underdogOdds > 4;
+    if(isUnderdogCup){
+      interest = clamp(interest + 25, 0, 100);
+      confidence = clamp(confidence + 5, 0, 100);
+    }
     const reasonTags = [
       isPriorityComp ? `Prioridad en ${match.competition || "competición"}` : "",
       /lider|primero/.test(String(profile.seasonContext||"").toLowerCase()) ? "Defiende posición alta" : "",
@@ -1537,6 +1623,7 @@ export function initFootballLab(){
       rotationProbable,
       marketMood: match.marketMood || "estable",
       restDays,
+      stakesMode,
       reasonTags,
       market: { earlyDrift, lateSnapback, volatilityIndex, marketSignal },
       windowInfo: window
@@ -4287,6 +4374,7 @@ function computeTeamIntelligencePanel(db, teamId){
     const leagueName = league.name || league.nombre || "Liga importada";
     const leagueCode = league.code || league.codigo || "";
     const leagueId = league.id ? String(league.id) : uid("lg");
+    const leagueType = normalizeCompetitionType(league.type || league.tipo || "league");
 
     const teamsSrc = league.equipos || league.teams || [];
     const teams = teamsSrc.map(t=>([
@@ -4320,7 +4408,7 @@ function computeTeamIntelligencePanel(db, teamId){
     })) : [];
 
     return {
-      league: { id: leagueId, name: leagueName, code: leagueCode },
+      league: { id: leagueId, name: leagueName, code: leagueCode, type: leagueType },
       teams: flatTeams,
       players,
       tracker: Array.isArray(root.tracker) ? root.tracker : [],
@@ -4538,7 +4626,8 @@ function computeTeamIntelligencePanel(db, teamId){
         const teams = getTeamsForLeague(db, l.id);
         const open = db.settings.selectedLeagueId===l.id;
         const names = teams.map(t=>`<div class="fl-row" style="justify-content:space-between;"><span>${t.name}</span><button class="fl-btn" data-open-team="${t.id}">Abrir</button></div>`).join("");
-        return `<div class="fl-card"><button class="fl-btn" data-select-league="${l.id}" style="width:100%;text-align:left;">${open?"▾":"▸"} ${l.name}</button><div class="fl-muted" style="margin-top:6px;">${teams.length} equipos</div><div style="display:${open?"block":"none"};margin-top:8px;">${names||"<div class='fl-muted'>Sin equipos</div>"}</div></div>`;
+        const typeLabel = ({ league:"Liga", cup:"Copa", continental:"Continental", friendly:"Amistoso" })[normalizeCompetitionType(l.type)] || "Liga";
+        return `<div class="fl-card"><button class="fl-btn" data-select-league="${l.id}" style="width:100%;text-align:left;">${open?"▾":"▸"} ${l.name}</button><div class="fl-muted" style="margin-top:6px;">${typeLabel} · ${teams.length} equipos</div><div style="display:${open?"block":"none"};margin-top:8px;">${names||"<div class='fl-muted'>Sin equipos</div>"}</div></div>`;
       }).join("");
 
       content.innerHTML = `
@@ -4548,6 +4637,12 @@ function computeTeamIntelligencePanel(db, teamId){
             <div class="fl-row">
               <input id="leagueName" class="fl-input" placeholder="Nombre" />
               <input id="leagueCode" class="fl-input" placeholder="Code" />
+              <select id="leagueType" class="fl-select">
+                <option value="league">Liga</option>
+                <option value="cup">Copa</option>
+                <option value="continental">Continental</option>
+                <option value="friendly">Amistoso</option>
+              </select>
               <button id="addLeague" class="fl-btn">Agregar</button>
             </div>
           </div>
@@ -4565,7 +4660,12 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById("addLeague").onclick = ()=>{
         const name = document.getElementById("leagueName").value.trim();
         if(!name) return;
-        const lg = { id: uid("lg"), name, code: document.getElementById("leagueCode").value.trim() };
+        const lg = {
+          id: uid("lg"),
+          name,
+          code: document.getElementById("leagueCode").value.trim(),
+          type: normalizeCompetitionType(document.getElementById("leagueType").value)
+        };
         db.leagues.push(lg);
         db.settings.selectedLeagueId = lg.id;
         saveDb(db);
@@ -4729,7 +4829,7 @@ function computeTeamIntelligencePanel(db, teamId){
         const d2 = parseSortableDate(m.date);
         return Number.isFinite(d1) && Number.isFinite(d2) && ((d2-d1)/86400000)<=3;
       }).length;
-      const scheduleHardness = Math.round(next14.reduce((acc,m)=>acc + competitionWeight(m)*0.45 + stakesByTag(m.importanceTag)*0.55 + stageWeight(m.stage), 0));
+      const scheduleHardness = Math.round(next14.reduce((acc,m)=>acc + competitionWeight(db, m)*0.45 + stakesByTag(m.importanceTag, stakesModeFromMatch(db, m))*0.55 + stageWeight(m.stage), 0));
       const pressureRef = intRows[0]?.out?.windowInfo?.windowPressure || { congestionLevel:"🟢" };
       const globalRotation = pressureRef.congestionLevel==="🔴" || backToBack>=2 || next14.length>=4 ? "Alta" : next14.length>=2 ? "Media" : "Baja";
       const patterns = buildTeamIntPatterns(db, team);
