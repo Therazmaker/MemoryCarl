@@ -5010,7 +5010,8 @@ function computeTeamIntelligencePanel(db, teamId){
       };
       content.querySelectorAll("[data-save-team]").forEach(btn=>btn.onclick = ()=>{
         const teamId = btn.getAttribute("data-save-team");
-            if(!team) return;
+        const team = db.teams.find((t)=>t.id===teamId);
+        if(!team) return;
         const name = content.querySelector(`[data-edit-team-name="${teamId}"]`)?.value.trim();
         const apiTeamId = content.querySelector(`[data-edit-team-api="${teamId}"]`)?.value.trim();
         if(name) team.name = name;
@@ -5040,7 +5041,8 @@ function computeTeamIntelligencePanel(db, teamId){
 
     if(view==="equipo"){
       const teamId = payload.teamId || payload?.id;
-        if(!team){
+      const team = db.teams.find((t)=>t.id===teamId);
+      if(!team){
         content.innerHTML = `<div class="fl-card">Equipo no encontrado.</div>`;
         return;
       }
