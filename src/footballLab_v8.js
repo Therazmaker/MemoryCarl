@@ -774,12 +774,15 @@ export function initFootballLab(){
           <div class="fl-field"><label>Rival</label><select id="fmRival" class="fl-select"><option value="">Seleccionar rival</option>${rivalOptions}</select></div>
           <div class="fl-field"><label>Fecha</label><input id="fmDate" type="date" class="fl-input"></div>
           <div class="fl-field"><label>Liga / Competición</label><input id="fmCompetition" class="fl-input" list="fmLeagueList" placeholder="Liga, Copa, UCL..."><datalist id="fmLeagueList">${leagueOptions}</datalist></div>
+          <div class="fl-field"><label>Etapa</label><input id="fmStage" class="fl-input" placeholder="Liga / Grupos / KO / Final"></div>
           <div class="fl-field"><label>Importancia</label><select id="fmImportance" class="fl-select"><option value="nada en juego">Nada en juego</option><option value="top4">Top4</option><option value="descenso">Descenso</option><option value="derby">Derby</option><option value="final">Final</option></select></div>
           <div class="fl-field"><label>Market mood</label><select id="fmMarketMood" class="fl-select"><option value="estable">Estable</option><option value="dinero temprano">Dinero temprano</option><option value="raro">Raro</option></select></div>
+          <div class="fl-field"><label>Snapshot cuota (1X2)</label><input id="fmOdds" class="fl-input" placeholder="1.70,3.80,5.20"></div>
           <div class="fl-field"><label>Descanso (días)</label><input id="fmRestDays" type="number" min="0" max="14" class="fl-input" placeholder="Auto"></div>
         </div>
         <div class="fl-row" style="gap:16px;margin-bottom:12px;">
           <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmIsHome" type="checkbox"> Juega de local</label>
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmPeakNear" type="checkbox"> Pico en 7 días</label>
           <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmLongTravel" type="checkbox"> Viaje largo</label>
           <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmPostHype" type="checkbox"> Post-hype</label>
           <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmWeather" type="checkbox"> Clima adverso</label>
@@ -809,9 +812,11 @@ export function initFootballLab(){
     setValue("#fmDate", editing?.date || "");
     setValue("#fmCompetition", editing?.competition || "Liga");
     setValue("#fmImportance", normalizeImportanceTag(editing?.importanceTag || "nada en juego"));
+    setValue("#fmStage", editing?.stage || "Liga");
     setValue("#fmMarketMood", editing?.marketMood || "estable");
     setValue("#fmRestDays", Number.isFinite(Number(editing?.restDays)) ? editing.restDays : "");
     setValue("#fmIsHome", editing?.isHome ?? true);
+    setValue("#fmPeakNear", editing?.peakMatchHint);
     setValue("#fmLongTravel", editing?.longTravel);
     setValue("#fmPostHype", editing?.postHype);
     setValue("#fmWeather", editing?.weatherFlag);
@@ -822,7 +827,9 @@ export function initFootballLab(){
       const date = String(backdrop.querySelector("#fmDate").value || "").trim();
       const competition = String(backdrop.querySelector("#fmCompetition").value || "Liga").trim() || "Liga";
       const importanceTag = normalizeImportanceTag(backdrop.querySelector("#fmImportance").value || "nada en juego");
+      const stage = String(backdrop.querySelector("#fmStage").value || "Liga").trim() || "Liga";
       const marketMood = String(backdrop.querySelector("#fmMarketMood").value || "estable").trim();
+      const oddsRaw = String(backdrop.querySelector("#fmOdds").value || "").trim();
       const restDaysRaw = backdrop.querySelector("#fmRestDays").value;
       const restDays = restDaysRaw==="" ? null : clamp(Number(restDaysRaw) || 0, 0, 14);
       if(!rivalTeamId){ status.textContent = "❌ Selecciona un rival."; return; }
@@ -833,14 +840,22 @@ export function initFootballLab(){
         date,
         rivalTeamId,
         competition,
+        stage,
         isHome: backdrop.querySelector("#fmIsHome").checked,
         importanceTag,
         marketMood,
+        peakMatchHint: backdrop.querySelector("#fmPeakNear").checked,
         longTravel: backdrop.querySelector("#fmLongTravel").checked,
         postHype: backdrop.querySelector("#fmPostHype").checked,
         weatherFlag: backdrop.querySelector("#fmWeather").checked,
-        snapshots: Array.isArray(editing?.snapshots) ? editing.snapshots : []
+        snapshots: Array.isArray(editing?.snapshots) ? [...editing.snapshots] : []
       };
+      if(oddsRaw){
+        const nums = oddsRaw.split(/[ ,;/|]+/).map(v=>Number(v)).filter(Number.isFinite);
+        if(nums.length>=3){
+          payload.snapshots.push({ homeOdds: nums[0], drawOdds: nums[1], awayOdds: nums[2], timestamp: new Date().toISOString(), note: "quick-fill" });
+        }
+      }
       if(restDays!==null) payload.restDays = restDays;
       else if(editing && "restDays" in editing) payload.restDays = undefined;
 
@@ -1317,17 +1332,26 @@ export function initFootballLab(){
   function ensureTeamIntState(team){
     team.intProfile ||= {
       priorityCompetition: "Liga",
-      seasonObjective: "top4",
+      seasonGoal: "top4",
       squadDepth: 3,
-      coachRotationPolicy: 3,
-      psychTags: [],
-      rivalries: [],
+      coachRotation: 3,
+      styleTags: [],
+      derbyRivals: [],
       seasonContext: "",
       modeLens: "empresa"
     };
+    if(!team.intProfile.seasonGoal && team.intProfile.seasonObjective) team.intProfile.seasonGoal = team.intProfile.seasonObjective;
+    if(!team.intProfile.seasonObjective) team.intProfile.seasonObjective = team.intProfile.seasonGoal;
+    if(!team.intProfile.coachRotation && team.intProfile.coachRotationPolicy) team.intProfile.coachRotation = team.intProfile.coachRotationPolicy;
+    if(!team.intProfile.coachRotationPolicy) team.intProfile.coachRotationPolicy = team.intProfile.coachRotation;
+    if(!Array.isArray(team.intProfile.styleTags) && Array.isArray(team.intProfile.psychTags)) team.intProfile.styleTags = [...team.intProfile.psychTags];
+    if(!Array.isArray(team.intProfile.psychTags) && Array.isArray(team.intProfile.styleTags)) team.intProfile.psychTags = [...team.intProfile.styleTags];
+    if(!Array.isArray(team.intProfile.derbyRivals) && Array.isArray(team.intProfile.rivalries)) team.intProfile.derbyRivals = [...team.intProfile.rivalries];
+    if(!Array.isArray(team.intProfile.rivalries) && Array.isArray(team.intProfile.derbyRivals)) team.intProfile.rivalries = [...team.intProfile.derbyRivals];
     team.futureMatches ||= [];
     team.intSnapshotsByMatchId ||= {};
     team.intPatterns ||= {};
+    team.intMatchStateById ||= {};
   }
 
   function normalizeImportanceTag(tag){
@@ -1341,36 +1365,115 @@ export function initFootballLab(){
     return map[normalizeImportanceTag(tag)] || 8;
   }
 
+  function competitionWeight(match){
+    const competition = String(match?.competition || "").toLowerCase();
+    if(/ucl|champions|europa|libertadores/.test(competition)) return 32;
+    if(/copa|cup/.test(competition)) return 26;
+    return 22;
+  }
+
+  function stageWeight(stage){
+    const clean = String(stage || "").toLowerCase();
+    if(/final/.test(clean)) return 10;
+    if(/semi|cuartos|quarter|octavos|ko|elimin/.test(clean)) return 8;
+    if(/grupo|group/.test(clean)) return 4;
+    return 2;
+  }
+
+  function parseMarketSnapshot(snapshot){
+    const h = Number(snapshot?.homeOdds ?? snapshot?.home ?? snapshot?.h);
+    const d = Number(snapshot?.drawOdds ?? snapshot?.draw ?? snapshot?.x);
+    const a = Number(snapshot?.awayOdds ?? snapshot?.away ?? snapshot?.a);
+    const tsRaw = snapshot?.timestamp || snapshot?.ts || snapshot?.date;
+    const ts = parseSortableDate(tsRaw);
+    const avg = average([h,d,a].filter(Number.isFinite), Number.NaN);
+    return Number.isFinite(avg) ? { avg, ts } : null;
+  }
+
+  function buildWindowSignals(match, allFutureMatches){
+    const centerDay = diffDaysFromToday(match.date);
+    const rows = (allFutureMatches || []).filter(row=>row.id!==match.id).map(row=>({ row, d: diffDaysFromToday(row.date) })).filter(x=>Number.isFinite(x.d));
+    const in7 = rows.filter(x=>x.d>=0 && x.d<=7).length + (Number.isFinite(centerDay) && centerDay>=0 && centerDay<=7 ? 1 : 0);
+    const in14 = rows.filter(x=>x.d>=0 && x.d<=14).length + (Number.isFinite(centerDay) && centerDay>=0 && centerDay<=14 ? 1 : 0);
+    const hardness = Math.round((allFutureMatches || []).filter(row=>{ const d = diffDaysFromToday(row.date); return Number.isFinite(d) && d>=0 && d<=14; }).reduce((acc, row)=>acc + (competitionWeight(row)*0.5) + stakesByTag(row.importanceTag)*0.5 + stageWeight(row.stage), 0));
+    const congestionScore = clamp((in7*20) + (in14*7) + Math.min(25, hardness/7), 0, 100);
+    const futurePeak = rows.filter(x=>x.d>=0 && x.d<=7).some(x=>competitionWeight(x.row) + stageWeight(x.row.stage) + stakesByTag(x.row.importanceTag) >= 55);
+    const prevIntense = rows.filter(x=>x.d<0 && x.d>=-4).some(x=>competitionWeight(x.row) + stakesByTag(x.row.importanceTag) >= 50);
+    const beforePriority = rows.some(x=>x.d>0 && x.d<=4 && (competitionWeight(x.row) + stageWeight(x.row.stage) > competitionWeight(match) + stageWeight(match.stage) + 4));
+    const betweenIntense = prevIntense && futurePeak;
+    const sandwichRisk = clamp((beforePriority ? 60 : 0) + (betweenIntense ? 40 : 0), 0, 100);
+    const recoveryNeed = clamp((prevIntense ? 45 : 10) + (congestionScore*0.45), 0, 100);
+    return {
+      congestionScore,
+      sandwichRisk,
+      peakMatchNearby: futurePeak,
+      recoveryNeed,
+      windowPressure: {
+        matches7d: in7,
+        matches14d: in14,
+        hardness,
+        congestionLevel: congestionScore >= 70 ? "🔴" : congestionScore >= 45 ? "🟡" : "🟢"
+      }
+    };
+  }
+
   function calculateInterestSignals({ team, rival, match, allFutureMatches, db }){
     ensureTeamIntState(team);
     const profile = team.intProfile || {};
-    const days = diffDaysFromToday(match.date);
     const importanceTag = normalizeImportanceTag(match.importanceTag);
-    const stakes = clamp(stakesByTag(importanceTag) + (profile.seasonObjective === "titulo" ? 3 : 0), 0, 40);
-    const nextBig = (allFutureMatches || []).some(row=>row.id!==match.id && diffDaysFromToday(row.date)!==null && diffDaysFromToday(row.date) > -1 && diffDaysFromToday(row.date) < 7 && stakesByTag(row.importanceTag) > stakesByTag(match.importanceTag));
-    const priorityReal = clamp((profile.priorityCompetition && String(match.competition||"").toLowerCase().includes(String(profile.priorityCompetition).toLowerCase()) ? 11 : 5) + (nextBig ? 3 : 8) + (String(profile.seasonContext||"").trim() ? 3 : 0), 0, 25);
-    const restDays = Number.isFinite(Number(match.restDays)) ? Number(match.restDays) : (Number.isFinite(days) ? clamp(days, 0, 12) : 4);
+    const seasonGoal = String(profile.seasonGoal || profile.seasonObjective || "top4").toLowerCase();
+    const stakes = clamp((competitionWeight(match)*0.55) + stageWeight(match.stage) + (stakesByTag(importanceTag)*0.55) + (/titulo/.test(seasonGoal) ? 4 : 1), 0, 40);
+    const isPriorityComp = profile.priorityCompetition && String(match.competition||"").toLowerCase().includes(String(profile.priorityCompetition).toLowerCase());
+    const contextGoal = /titulo|title/.test(seasonGoal) ? 9 : /descenso/.test(seasonGoal) ? 8 : /top4/.test(seasonGoal) ? 7 : 5;
+    const contextSituation = /lider|primero/.test(String(profile.seasonContext||"").toLowerCase()) ? 6 : /persig|pelea/.test(String(profile.seasonContext||"").toLowerCase()) ? 5 : 3;
+    const isDerby = importanceTag === "derby" || (rival && (profile.derbyRivals||profile.rivalries||[]).some(name=>String(name).toLowerCase()===String(rival.name||"").toLowerCase() || String(name)===String(rival.id||"")));
+    const teamContext = clamp(contextGoal + contextSituation + (isPriorityComp ? 6 : 3) + (isDerby ? 6 : 0), 0, 25);
+    const restDays = Number.isFinite(Number(match.restDays)) ? Number(match.restDays) : 4;
     const depth = clamp(Number(profile.squadDepth) || 3, 1, 5);
-    const congestionRisk = (allFutureMatches || []).filter(row=>{
-      const d = diffDaysFromToday(row.date);
-      return Number.isFinite(d) && d>=0 && d<=14;
-    }).length >= 3;
-    const rotationEnergy = clamp((restDays <= 3 ? 4 : 10) + (6 - depth) + (congestionRisk ? 4 : 0), 0, 20);
-    const isDerby = importanceTag === "derby" || (rival && (profile.rivalries||[]).some(name=>String(name).toLowerCase()===String(rival.name||"").toLowerCase()));
-    const contextFlags = clamp((isDerby ? 5 : 0) + (match.longTravel ? 4 : 0) + (match.postHype ? 4 : 0) + (match.weatherFlag ? 2 : 0), 0, 15);
-    const interest = clamp(stakes + priorityReal + contextFlags + (20 - rotationEnergy), 0, 100);
+    const coachRotation = clamp(Number(profile.coachRotation || profile.coachRotationPolicy) || 3, 1, 5);
+    const window = buildWindowSignals(match, allFutureMatches || []);
+    const windowAdjustment = clamp(8 - (window.congestionScore*0.20) - (window.sandwichRisk*0.12) - (window.recoveryNeed*0.08) + (window.peakMatchNearby ? -4 : 0), -25, 10);
+    const emotion = clamp((isDerby ? 6 : 0) + (match.postHype ? 2 : 0) + (match.weatherFlag ? 1 : 0), 0, 10);
     const snapshots = Array.isArray(match.snapshots) ? match.snapshots : [];
-    const dataCompleteness = clamp((match.marketMood ? 15 : 0) + (match.importanceTag ? 15 : 0) + (match.competition ? 10 : 0), 0, 40);
+    const parsed = snapshots.map(parseMarketSnapshot).filter(Boolean).sort((a,b)=>(Number.isFinite(a.ts)?a.ts:0)-(Number.isFinite(b.ts)?b.ts:0));
+    const earlyDrift = parsed.length>=2 ? ((parsed[parsed.length-1].avg - parsed[0].avg) / parsed[0].avg) * 100 : 0;
+    const lateSnapback = parsed.length>=3 ? ((parsed[parsed.length-1].avg - parsed[Math.max(0, parsed.length-2)].avg) / parsed[Math.max(0, parsed.length-2)].avg) * 100 : 0;
+    const volatilityIndex = parsed.length>=2 ? clamp(stdDev(parsed.map(p=>p.avg))*60, 0, 100) : 0;
+    const marketSignal = clamp((/dinero temprano/.test(String(match.marketMood||"")) ? -4 : 0) + (/raro/.test(String(match.marketMood||"")) ? -6 : 2) + (earlyDrift<=-2 ? 3 : earlyDrift>=2 ? -3 : 0) + (Math.abs(lateSnapback)>=1.5 ? -2 : 0), -10, 10);
+    const interest = clamp(stakes + teamContext + windowAdjustment + emotion + marketSignal, 0, 100);
+    const rotationPressure = clamp((window.congestionScore*0.35) + (window.sandwichRisk*0.35) + (window.recoveryNeed*0.2) + (coachRotation*6) - (depth*5) + (restDays<=3 ? 12 : 0), 0, 100);
+    const rotationProbable = rotationPressure >= 68 ? "Alta" : rotationPressure >= 42 ? "Media" : "Baja";
+    const dataCompleteness = clamp((match.competition ? 8 : 0) + (match.stage ? 8 : 0) + (match.importanceTag ? 8 : 0) + (profile.seasonGoal || profile.seasonObjective ? 8 : 0) + (profile.priorityCompetition ? 8 : 0), 0, 40);
     const depthScore = clamp((snapshots.length >= 1 ? 10 : 0) + (snapshots.length >= 2 ? 8 : 0) + (snapshots.length >= 3 ? 6 : 0) + (snapshots.some(s=>s.kind==="lineup") ? 6 : 0), 0, 30);
-    const marketConsistency = clamp(match.marketMood === "raro" ? 12 : 24, 0, 30);
-    const confidence = clamp(dataCompleteness + depthScore + marketConsistency, 0, 100);
+    const consistency = clamp((Math.abs(windowAdjustment)>=12 && Math.abs(marketSignal)<=2 ? 10 : 20) + (windowAdjustment<0 && marketSignal<0 ? 8 : 0) + (match.overrideWithoutEvidence ? -8 : 0), 0, 30);
+    const confidence = clamp(dataCompleteness + depthScore + consistency, 0, 100);
+    const reasonTags = [
+      isPriorityComp ? `Prioridad en ${match.competition || "competición"}` : "",
+      /lider|primero/.test(String(profile.seasonContext||"").toLowerCase()) ? "Defiende posición alta" : "",
+      window.congestionScore >= 55 ? `Bloque cargado (${window.windowPressure.matches14d} partidos/14d)` : "",
+      window.sandwichRisk >= 60 ? "Partido en sándwich de calendario" : "",
+      window.peakMatchNearby ? "Hay partido pico cercano" : ""
+    ].filter(Boolean).slice(0,2);
+    team.intMatchStateById[match.id] = {
+      computed: { interest, rotationProbable, confidence },
+      windowInfo: {
+        congestion: Math.round(window.congestionScore),
+        sandwich: Math.round(window.sandwichRisk),
+        peakNearby: window.peakMatchNearby,
+        recoveryNeed: Math.round(window.recoveryNeed)
+      },
+      snapshots,
+      notes: Array.isArray(match.notes) ? match.notes : []
+    };
     return {
-      stakes, priorityReal, rotationEnergy, contextFlags,
+      stakes, teamContext, windowAdjustment, rotationPressure,
       interest, confidence,
-      rotationProbable: rotationEnergy >= 14 ? "Alta" : (rotationEnergy >= 8 ? "Media" : "Baja"),
+      rotationProbable,
       marketMood: match.marketMood || "estable",
       restDays,
-      congestionRisk
+      reasonTags,
+      market: { earlyDrift, lateSnapback, volatilityIndex, marketSignal },
+      windowInfo: window
     };
   }
 
@@ -4517,22 +4620,23 @@ function computeTeamIntelligencePanel(db, teamId){
               <div style="font-weight:800;">${team.name} vs ${rival?.name || "Rival"}</div>
               <div class="fl-mini">${match.competition || "Liga"} • ${match.date || "-"} • ${match.isHome ? "Local" : "Visitante"}</div>
             </div>
-            <span class="fl-chip ${out.interest>=70?"ok":out.interest>=45?"warn":"bad"}">${match.importanceTag || "nada en juego"}</span>
+            <span class="fl-chip ${out.interest>=70?"ok":out.interest>=45?"warn":"bad"}">${out.interest>=75?"Must-win":out.rotationProbable==="Alta"?"Gestión":out.interest<45?"Trámite":"Volátil"}</span>
           </div>
           <div class="fl-row" style="margin-top:8px;gap:14px;">
             <div class="fl-mini">Interés ${Math.round(out.interest)}</div>
             <div style="flex:1;min-width:140px;height:8px;border-radius:999px;background:#0d1117;border:1px solid #30363d;overflow:hidden;"><div style="width:${Math.round(out.interest)}%;height:100%;background:linear-gradient(90deg,#2ea043,#f2cc60,#f85149);"></div></div>
             <div class="fl-mini">Confianza ${Math.round(out.confidence)}</div>
             <div class="fl-mini">Rotación ${out.rotationProbable}</div>
-            <div class="fl-mini">Mood ${out.marketMood}</div>
-            <button class="fl-btn" data-open-dual-intel="${match.id}">Abrir Match Intel</button>
+            <div class="fl-mini">Mercado ${out.marketMood}</div>
+            <div class="fl-mini">${(out.reasonTags||[]).join(" · ") || "Sin razones aún"}</div>
+            <button class="fl-btn" data-open-dual-intel="${match.id}">Abrir Intel (Dual)</button>
             <button class="fl-btn" data-edit-future-match="${match.id}">Editar partido</button>
           </div>
         </div>
       `).join("");
       const intMatrixRows = intRows.map(({ match, rival, out, rivalOut, gap })=>{
         const heat = out.interest >= 70 ? "rgba(46,160,67,.25)" : out.interest >=45 ? "rgba(210,153,34,.2)" : "rgba(110,118,129,.25)";
-        return `<tr style="background:${heat};"><td>${match.date || "-"}<br><span class="fl-mini">vs ${rival?.name || "Rival"}</span></td><td>${Math.round(out.stakes)}</td><td>${Math.round(out.priorityReal)}</td><td>${Math.round(20-out.rotationEnergy)}</td><td>${Math.round(out.contextFlags)}</td><td>${Math.round(out.interest)}</td><td>${Math.round(rivalOut.interest)}</td><td>${gap>0?"+":""}${gap}</td><td>${Math.round(out.confidence)} ${match.marketMood==="raro"?"📉":""}</td></tr>`;
+        return `<tr style="background:${heat};"><td>${match.date || "-"}<br><span class="fl-mini">vs ${rival?.name || "Rival"}</span></td><td>${Math.round(out.stakes)}</td><td>${Math.round(out.teamContext)}</td><td>${Math.round(out.windowInfo.congestionScore)}</td><td>${Math.round(out.rotationPressure/10)}</td><td>${Math.round(out.interest)}</td><td>${Math.round(rivalOut.interest)}</td><td>${gap>0?"+":""}${gap}</td><td>${Math.round(out.confidence)} ${match.marketMood==="raro"?"📉":""}</td></tr>`;
       }).join("");
       const next14 = (team.futureMatches || []).filter(m=>{ const d = diffDaysFromToday(m.date); return Number.isFinite(d) && d>=0 && d<=14; }).sort((a,b)=>compareByDateAsc(a,b));
       const backToBack = next14.filter((m,i,arr)=>{
@@ -4541,8 +4645,9 @@ function computeTeamIntelligencePanel(db, teamId){
         const d2 = parseSortableDate(m.date);
         return Number.isFinite(d1) && Number.isFinite(d2) && ((d2-d1)/86400000)<=3;
       }).length;
-      const scheduleHardness = Math.round(average(next14.map(m=>stakesByTag(m.importanceTag)), 0) + backToBack*3 + next14.filter(m=>m.longTravel).length*2);
-      const globalRotation = backToBack>=2 || next14.length>=4 ? "Alta" : next14.length>=2 ? "Media" : "Baja";
+      const scheduleHardness = Math.round(next14.reduce((acc,m)=>acc + competitionWeight(m)*0.45 + stakesByTag(m.importanceTag)*0.55 + stageWeight(m.stage), 0));
+      const pressureRef = intRows[0]?.out?.windowInfo?.windowPressure || { congestionLevel:"🟢" };
+      const globalRotation = pressureRef.congestionLevel==="🔴" || backToBack>=2 || next14.length>=4 ? "Alta" : next14.length>=2 ? "Media" : "Baja";
       const patterns = buildTeamIntPatterns(db, team);
       const matchRows = teamMatches.map(m=>{
         const isHome = m.homeId===team.id;
@@ -4675,16 +4780,17 @@ function computeTeamIntelligencePanel(db, teamId){
           ${agendaCards || "<div class='fl-muted'>Sin partidos futuros en ventana 21 días.</div>"}
         </div>
         <div class="fl-card">
-          <div style="font-weight:800;margin-bottom:8px;">2) Matriz de Interés</div>
-          <table class="fl-table"><thead><tr><th>Partido</th><th>Stakes</th><th>Prioridad</th><th>Energía</th><th>Flags</th><th>Interés Eq.</th><th>Interés Rival</th><th>Gap</th><th>Confianza</th></tr></thead><tbody>${intMatrixRows || "<tr><td colspan='9'>Sin datos de agenda.</td></tr>"}</tbody></table>
+          <div style="font-weight:800;margin-bottom:8px;">2) Matriz por partido (heatmap)</div>
+          <table class="fl-table"><thead><tr><th>Partido</th><th>Stakes</th><th>Contexto</th><th>Ventana</th><th>Rotación</th><th>Interés Eq.</th><th>Interés Rival</th><th>Gap</th><th>Confianza</th></tr></thead><tbody>${intMatrixRows || "<tr><td colspan='9'>Sin datos de agenda.</td></tr>"}</tbody></table>
         </div>
         <div class="fl-row" style="gap:10px;align-items:stretch;">
           <div class="fl-card" style="flex:1;min-width:320px;">
-            <div style="font-weight:800;margin-bottom:8px;">3) Carga & Rotación (14 días)</div>
+            <div style="font-weight:800;margin-bottom:8px;">3) Window Pressure (14 días)</div>
             <div class="fl-kpi">
-              <div><span class="fl-mini">Matches 14d</span><b>${next14.length}</b></div>
-              <div><span class="fl-mini">Back-to-back</span><b>${backToBack}</b></div>
-              <div><span class="fl-mini">Dureza agenda</span><b>${scheduleHardness}</b></div>
+              <div><span class="fl-mini">Partidos 7d</span><b>${(intRows[0]?.out?.windowInfo?.windowPressure?.matches7d ?? 0)}</b></div>
+              <div><span class="fl-mini">Partidos 14d</span><b>${next14.length}</b></div>
+              <div><span class="fl-mini">Dureza acumulada</span><b>${scheduleHardness}</b></div>
+              <div><span class="fl-mini">Congestión</span><b>${pressureRef.congestionLevel}</b></div>
               <div><span class="fl-mini">Rotación global</span><b>${globalRotation}</b></div>
             </div>
           </div>
@@ -4700,17 +4806,21 @@ function computeTeamIntelligencePanel(db, teamId){
         const profile = team.intProfile || {};
         const priorityCompetition = prompt("Competición prioridad A (Liga/UCL/Copa)", profile.priorityCompetition || "Liga");
         if(priorityCompetition===null) return;
-        const seasonObjective = prompt("Objetivo temporada actual (titulo/top4/evitar descenso/nada)", profile.seasonObjective || "top4");
+        const seasonGoal = prompt("Objetivo temporada (titulo/top4/descenso/nada)", profile.seasonGoal || profile.seasonObjective || "top4");
         const squadDepth = prompt("Profundidad de plantilla (1-5)", String(profile.squadDepth || 3));
-        const coachRotationPolicy = prompt("Política de rotación del entrenador (1-5)", String(profile.coachRotationPolicy || 3));
-        const psychTags = prompt("Estilo psicológico (tags separados por coma)", Array.isArray(profile.psychTags) ? profile.psychTags.join(", ") : "");
-        const rivalries = prompt("Rivalidades (equipos separados por coma)", Array.isArray(profile.rivalries) ? profile.rivalries.join(", ") : "");
+        const coachRotation = prompt("Rotación del entrenador (1-5)", String(profile.coachRotation || profile.coachRotationPolicy || 3));
+        const styleTags = prompt("Style tags (coma): conservador, agresivo, empate...", Array.isArray(profile.styleTags) ? profile.styleTags.join(", ") : "");
+        const derbyRivals = prompt("Derby rivals (nombre o ID, coma)", Array.isArray(profile.derbyRivals) ? profile.derbyRivals.join(", ") : "");
         profile.priorityCompetition = String(priorityCompetition || "Liga").trim() || "Liga";
-        profile.seasonObjective = String(seasonObjective || "top4").trim() || "top4";
+        profile.seasonGoal = String(seasonGoal || "top4").trim() || "top4";
+        profile.seasonObjective = profile.seasonGoal;
         profile.squadDepth = clamp(Number(squadDepth) || 3, 1, 5);
-        profile.coachRotationPolicy = clamp(Number(coachRotationPolicy) || 3, 1, 5);
-        profile.psychTags = String(psychTags || "").split(",").map(s=>s.trim()).filter(Boolean);
-        profile.rivalries = String(rivalries || "").split(",").map(s=>s.trim()).filter(Boolean);
+        profile.coachRotation = clamp(Number(coachRotation) || 3, 1, 5);
+        profile.coachRotationPolicy = profile.coachRotation;
+        profile.styleTags = String(styleTags || "").split(",").map(s=>s.trim()).filter(Boolean);
+        profile.psychTags = [...profile.styleTags];
+        profile.derbyRivals = String(derbyRivals || "").split(",").map(s=>s.trim()).filter(Boolean);
+        profile.rivalries = [...profile.derbyRivals];
         team.intProfile = profile;
         saveDb(db);
         render("equipo", { teamId: team.id });
@@ -4734,12 +4844,16 @@ function computeTeamIntelligencePanel(db, teamId){
         const own = calculateInterestSignals({ team, rival, match, allFutureMatches: team.futureMatches || [], db });
         const opp = rival ? calculateInterestSignals({ team: rival, rival: team, match, allFutureMatches: rival.futureMatches || [], db }) : { interest: 50, confidence: 40 };
         const gap = Math.round(own.interest - opp.interest);
+        const windowGap = Math.round((own.windowInfo?.congestionScore || 0) - (opp.windowInfo?.congestionScore || 0));
+        const conclusion = gap >= 20 ? "Ventaja motivacional de tu equipo." : gap <= -20 ? "Rival más activado en esta ventana." : "Gap motivacional pequeño, revisar gestión.";
         alert([
           `Dual Match Intel`,
-          `${team.name} interés ${Math.round(own.interest)} vs ${rival?.name || "Rival"} ${Math.round(opp.interest)}`,
-          `Gap: ${gap>0?"+":""}${gap}`,
-          `Market drift: ${match.marketMood || "estable"}`,
-          gap <= -20 ? "Conclusión: riesgo de favoritismo inflado." : gap >= 20 ? "Conclusión: ventaja motivacional de tu equipo." : "Conclusión: interés bastante equilibrado."
+          `${team.name}: interés ${Math.round(own.interest)} | rotación ${own.rotationProbable} | confianza ${Math.round(own.confidence)}`,
+          `${rival?.name || "Rival"}: interés ${Math.round(opp.interest)} | rotación ${opp.rotationProbable || "Media"} | confianza ${Math.round(opp.confidence || 50)}`,
+          `Interest Gap: ${gap>0?"+":""}${gap}`,
+          `Gap de Ventana: ${windowGap>0?"+":""}${windowGap}`,
+          `Mercado: early ${Math.round(own.market?.earlyDrift || 0)}% / vol ${Math.round(own.market?.volatilityIndex || 0)}`,
+          `Conclusión: ${conclusion}`
         ].join("\n"));
       });
       content.querySelectorAll("[data-edit-future-match]").forEach(btn=>btn.onclick = ()=>{
