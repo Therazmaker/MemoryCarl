@@ -3016,21 +3016,34 @@ function computeTeamIntelligencePanel(db, teamId){
   function createEarlyTeamStats(){
     return {
       shots: 0,
+      shotsOnTarget: 0,
       bigChances: 0,
+      goals: 0,
       corners: 0,
       dangerCross: 0,
+      dangerActions: 0,
       finalThird: 0,
       interceptions: 0,
       savesForced: 0,
       controlMentions: 0,
       lossMentions: 0,
       fouls: 0,
-      cards: 0
+      cards: 0,
+      redCards: 0,
+      penalties: 0,
+      posts: 0,
+      injuries: 0,
+      possessionHints: 0
     };
   }
 
   function detectEarlyType(line=""){
-    if(/ocasi[oó]n clar[ií]sima|casi marca|mano a mano|\bsolo\b|punto de penalti/i.test(line)) return "bigChance";
+    if(/\bgol\b|anota|marca\s+el\s+\d+-\d+|empata|pone el|adelanta/i.test(line)) return "goal";
+    if(/tarjeta roja|\broja\b|expulsad/i.test(line)) return "redCard";
+    if(/penal(?:ti)?|pena m[aá]xima/i.test(line)) return "penalty";
+    if(/al poste|al larguero|al travesa[nñ]o|estrella(?:\s+el)?\s+bal[oó]n\s+en\s+el\s+poste/i.test(line)) return "post";
+    if(/ocasi[oó]n clar[ií]sima|casi marca|mano a mano|\bsolo\b|punto de penalti|gran oportunidad/i.test(line)) return "bigChance";
+    if(/disparo a puerta|remate a puerta|atajada obligada|forz[ao]\s+al\s+portero|tiro al arco/i.test(line)) return "shotOnTarget";
     if(/dispara|remata|cabezazo|\btiro\b|disparo|chut/i.test(line)) return "shot";
     if(/c[oó]rner/i.test(line)) return "corner";
     if(/centro peligroso|cuelga al [aá]rea/i.test(line)) return "dangerCross";
@@ -3038,9 +3051,12 @@ function computeTeamIntelligencePanel(db, teamId){
     if(/interceptado|despejado|rechaza/i.test(line)) return "interception";
     if(/parada|interviene|ataj|en los guantes/i.test(line)) return "save";
     if(/domina la posesi[oó]n|intercambian pases|combina/i.test(line)) return "control";
+    if(/posesi[oó]n\s+\d{1,3}%|tiene\s+la\s+pelota|controla\s+el\s+bal[oó]n/i.test(line)) return "possessionHint";
     if(/pierde la posesi[oó]n|error|bal[oó]n sale/i.test(line)) return "loss";
+    if(/presi[oó]n|asedia|encierra|acoso|insiste/i.test(line)) return "dangerAction";
     if(/falta|entrada|infracci[oó]n/i.test(line)) return "foul";
-    if(/tarjeta amarilla|\bamarilla\b|tarjeta roja|\broja\b/i.test(line)) return "card";
+    if(/tarjeta amarilla|\bamarilla\b/i.test(line)) return "card";
+    if(/lesi[oó]n|se duele|molestias|abandona lesionado/i.test(line)) return "injury";
     return null;
   }
 
@@ -3101,17 +3117,25 @@ function computeTeamIntelligencePanel(db, teamId){
     events.forEach(evt=>{
       const teamStats = statsByTeam.get(evt.team);
       if(!teamStats) return;
+      if(evt.type === "goal") teamStats.goals += 1;
       if(evt.type === "shot") teamStats.shots += 1;
+      if(evt.type === "shotOnTarget") teamStats.shotsOnTarget += 1;
       if(evt.type === "bigChance") teamStats.bigChances += 1;
       if(evt.type === "corner") teamStats.corners += 1;
       if(evt.type === "dangerCross") teamStats.dangerCross += 1;
+      if(evt.type === "dangerAction") teamStats.dangerActions += 1;
       if(evt.type === "finalThird") teamStats.finalThird += 1;
       if(evt.type === "interception") teamStats.interceptions += 1;
       if(evt.type === "save") teamStats.savesForced += 1;
       if(evt.type === "control") teamStats.controlMentions += 1;
+      if(evt.type === "possessionHint") teamStats.possessionHints += 1;
       if(evt.type === "loss") teamStats.lossMentions += 1;
       if(evt.type === "foul") teamStats.fouls += 1;
       if(evt.type === "card") teamStats.cards += 1;
+      if(evt.type === "redCard") teamStats.redCards += 1;
+      if(evt.type === "penalty") teamStats.penalties += 1;
+      if(evt.type === "post") teamStats.posts += 1;
+      if(evt.type === "injury") teamStats.injuries += 1;
       if(evt.type === "dangerCross" && /remata|disparo|tiro|cabezazo/i.test(evt.text)) teamStats.shots += 0.5;
     });
 
@@ -3133,17 +3157,25 @@ function computeTeamIntelligencePanel(db, teamId){
       pushTeam(evt.team);
       const teamStats = statsByTeam.get(evt.team);
       if(!teamStats) return;
+      if(evt.type === "goal") teamStats.goals += 1;
       if(evt.type === "shot") teamStats.shots += 1;
+      if(evt.type === "shotOnTarget") teamStats.shotsOnTarget += 1;
       if(evt.type === "bigChance") teamStats.bigChances += 1;
       if(evt.type === "corner") teamStats.corners += 1;
       if(evt.type === "dangerCross") teamStats.dangerCross += 1;
+      if(evt.type === "dangerAction") teamStats.dangerActions += 1;
       if(evt.type === "finalThird") teamStats.finalThird += 1;
       if(evt.type === "interception") teamStats.interceptions += 1;
       if(evt.type === "save") teamStats.savesForced += 1;
       if(evt.type === "control") teamStats.controlMentions += 1;
+      if(evt.type === "possessionHint") teamStats.possessionHints += 1;
       if(evt.type === "loss") teamStats.lossMentions += 1;
       if(evt.type === "foul") teamStats.fouls += 1;
       if(evt.type === "card") teamStats.cards += 1;
+      if(evt.type === "redCard") teamStats.redCards += 1;
+      if(evt.type === "penalty") teamStats.penalties += 1;
+      if(evt.type === "post") teamStats.posts += 1;
+      if(evt.type === "injury") teamStats.injuries += 1;
       if(evt.type === "dangerCross" && /remata|disparo|tiro|cabezazo/i.test(String(evt.text || ""))) teamStats.shots += 0.5;
     });
 
@@ -3152,6 +3184,99 @@ function computeTeamIntelligencePanel(db, teamId){
     teamList.forEach(name=>{ if(!statsByTeam.has(name)) statsByTeam.set(name, createEarlyTeamStats()); });
     const filteredEvents = events.filter(evt=>teamList.includes(evt.team));
     return { teams: teamList, statsByTeam, events: filteredEvents, windowRange };
+  }
+
+  function scoreFromNarrative(events=[], firstTeam="", secondTeam=""){
+    const score = { [firstTeam]: 0, [secondTeam]: 0 };
+    (Array.isArray(events) ? events : []).forEach(evt=>{
+      if(evt?.type === "goal" && (evt.team === firstTeam || evt.team === secondTeam)) score[evt.team] += 1;
+    });
+    return score;
+  }
+
+  function buildEpaLiveSnapshots(events=[], firstTeam="", secondTeam="", windowRange={ start: 0, end: 10 }){
+    const safeEvents = (Array.isArray(events) ? events : []).slice().sort((a,b)=> (Number(a?.minute)||0) - (Number(b?.minute)||0));
+    const start = Number(windowRange?.start) || 0;
+    const end = Math.max(start + 10, Number(windowRange?.end) || 10);
+    const slices = [];
+    for(let t=start+10; t<=end+0.0001; t+=10){
+      const segmentEvents = safeEvents.filter(evt=> (Number(evt?.minute)||0) > t-10 && (Number(evt?.minute)||0) <= t);
+      const cumulativeEvents = safeEvents.filter(evt=> (Number(evt?.minute)||0) <= t);
+      const cumulativeStats = buildEarlyStatsFromEvents(cumulativeEvents, { teamA: firstTeam, teamB: secondTeam, windowRange: { start, end: t } }).statsByTeam;
+      const segmentStats = buildEarlyStatsFromEvents(segmentEvents, { teamA: firstTeam, teamB: secondTeam, windowRange: { start: t-10, end: t } }).statsByTeam;
+      const score = scoreFromNarrative(cumulativeEvents, firstTeam, secondTeam);
+      slices.push({
+        minute: t,
+        scoreHome: Number(score[firstTeam] || 0),
+        scoreAway: Number(score[secondTeam] || 0),
+        statsCumulative: {
+          [firstTeam]: cumulativeStats.get(firstTeam) || createEarlyTeamStats(),
+          [secondTeam]: cumulativeStats.get(secondTeam) || createEarlyTeamStats()
+        },
+        statsSegment: {
+          [firstTeam]: segmentStats.get(firstTeam) || createEarlyTeamStats(),
+          [secondTeam]: segmentStats.get(secondTeam) || createEarlyTeamStats()
+        },
+        relatoSegment: segmentEvents.map(evt=>String(evt?.text || "")).filter(Boolean)
+      });
+    }
+    return slices;
+  }
+
+  function computeLiveOutcomeProbabilities(liveState={}, teamHome="", teamAway=""){
+    const minute = clamp(Number(liveState?.minute) || 0, 1, 95);
+    const scoreHome = Number(liveState?.scoreHome || 0);
+    const scoreAway = Number(liveState?.scoreAway || 0);
+    const goalDiff = scoreHome - scoreAway;
+    const segment = liveState?.statsSegment || {};
+    const homeRecent = segment?.[teamHome] || createEarlyTeamStats();
+    const awayRecent = segment?.[teamAway] || createEarlyTeamStats();
+    const cards = liveState?.statsCumulative || {};
+    const homeCum = cards?.[teamHome] || createEarlyTeamStats();
+    const awayCum = cards?.[teamAway] || createEarlyTeamStats();
+
+    const normDiff = (h, a, scale=2)=>clamp((Number(h||0)-Number(a||0))/scale, -1, 1);
+    const gamePhase = clamp(minute / 90, 0, 1);
+    const A_score = clamp(goalDiff * (0.7 + 1.5*gamePhase), -3.5, 3.5);
+    const A_redCards = clamp((Number(awayCum.redCards||0) - Number(homeCum.redCards||0)) * 1.35, -2.7, 2.7);
+    const A_recent =
+      0.90*normDiff(homeRecent.shotsOnTarget + 0.7*homeRecent.bigChances, awayRecent.shotsOnTarget + 0.7*awayRecent.bigChances, 2.2) +
+      0.45*normDiff(homeRecent.corners, awayRecent.corners, 3) +
+      0.35*normDiff(homeRecent.dangerActions + homeRecent.dangerCross, awayRecent.dangerActions + awayRecent.dangerCross, 4);
+    const A_bigEvents =
+      0.65*normDiff(homeRecent.posts + homeRecent.penalties, awayRecent.posts + awayRecent.penalties, 1.5) -
+      0.20*normDiff(homeRecent.injuries, awayRecent.injuries, 2);
+
+    const A = A_score + A_redCards + A_recent + A_bigEvents;
+    const sigmoid = (x)=>1/(1+Math.exp(-x));
+    const homeRaw = sigmoid(1.2*A);
+    const awayRaw = sigmoid(-1.2*A);
+    const drawBase = clamp(0.58 - 0.30*gamePhase - 0.20*Math.abs(goalDiff), 0.08, 0.65);
+    const drawRaw = drawBase * Math.exp(-1.35*Math.abs(A));
+    const sum = homeRaw + awayRaw + drawRaw || 1;
+    const pHome = homeRaw / sum;
+    const pDraw = drawRaw / sum;
+    const pAway = awayRaw / sum;
+
+    const reasons = [];
+    if(Math.abs(A_score) > 0.8) reasons.push(`Marcador/minuto pesa fuerte (${scoreHome}-${scoreAway}, ${minute}').`);
+    if(Math.abs(A_recent) > 0.25) reasons.push(A_recent > 0
+      ? `${teamHome} empuja el tramo reciente (tiros a puerta/córners/presión).`
+      : `${teamAway} está ganando momentum en el tramo reciente.`);
+    if(Math.abs(A_redCards) > 0.2) reasons.push("Impacto disciplinario relevante por expulsión(es).");
+    if(Math.abs(A_bigEvents) > 0.2) reasons.push("Eventos grandes detectados (poste/penal/lesión) movieron la balanza.");
+    if(!reasons.length) reasons.push("Partido equilibrado: pocas señales diferenciales en este tramo.");
+
+    const leader = pHome >= pAway ? teamHome : teamAway;
+    return {
+      advantage: A,
+      pHome,
+      pDraw,
+      pAway,
+      label: `Ahora mismo: ${teamHome} ${(pHome*100).toFixed(0)}% | Empate ${(pDraw*100).toFixed(0)}% | ${teamAway} ${(pAway*100).toFixed(0)}%`,
+      explanation: `${leader} ${leader===teamHome ? "sube" : "presiona"}: ${reasons[0]}`,
+      reasons
+    };
   }
 
   function computeEarlyPhaseAnalyzer(text, { teamA="", teamB="", windowKey="0-10", seedProfiles={}, eventsOverride=null }={}){
@@ -3168,7 +3293,8 @@ function computeTeamIntelligencePanel(db, teamId){
     const norm = (value, max=normLimit)=>clamp((Number(value) || 0) / max, 0, 1);
 
     const rawIntensity =
-      1.0*total("shots") +
+      0.8*total("shots") +
+      1.2*total("shotsOnTarget") +
       1.4*total("bigChances") +
       0.6*total("corners") +
       0.7*total("savesForced") +
@@ -3178,6 +3304,7 @@ function computeTeamIntelligencePanel(db, teamId){
     const rawIDD = (s)=>
       0.60*s.bigChances +
       0.45*s.shots +
+      0.50*s.shotsOnTarget +
       0.25*s.corners +
       0.20*s.controlMentions +
       0.15*s.dangerCross -
@@ -3188,7 +3315,7 @@ function computeTeamIntelligencePanel(db, teamId){
     const iddA = clamp(iddDiff / 4, -1, 1);
     const iddB = -iddA;
 
-    const threatOf = (s)=>clamp((1.7*s.bigChances + 1.0*s.shots + 0.4*s.finalThird + 0.3*s.savesForced) / 6, 0, 1);
+    const threatOf = (s)=>clamp((1.7*s.bigChances + 1.2*s.shotsOnTarget + 0.8*s.shots + 0.4*s.finalThird + 0.3*s.savesForced + 0.3*s.posts) / 7, 0, 1);
     const threatA = threatOf(a);
     const threatB = threatOf(b);
 
@@ -3214,7 +3341,7 @@ function computeTeamIntelligencePanel(db, teamId){
     const shockRiskFor = (selfIdd, self, opp)=>clamp(
       0.35*Math.max(0, selfIdd) +
       0.25*norm(self.lossMentions, 4) +
-      0.25*norm(opp.shots + opp.bigChances, 5) -
+      0.25*norm(opp.shots + opp.shotsOnTarget + opp.bigChances, 6) -
       0.15*norm(opp.interceptions, 5),
       0,
       1
@@ -3346,7 +3473,7 @@ function computeTeamIntelligencePanel(db, teamId){
       [secondTeam]: psychTextFor(secondTeam, psychTags[secondTeam], psychB, threatB, shockA)
     };
 
-    const eventWeight = { shot: 1, bigChance: 1.5, corner: 0.6, save: 0.7, control: 0.4, finalThird: 0.5, foul: 0.25, card: 0.35, dangerCross: 0.4 };
+    const eventWeight = { goal: 2.2, shot: 0.9, shotOnTarget: 1.2, bigChance: 1.5, corner: 0.6, save: 0.7, control: 0.4, finalThird: 0.5, foul: 0.25, card: 0.35, redCard: 1.7, penalty: 1.5, post: 1.2, dangerAction: 0.55, dangerCross: 0.4 };
     const bucketCount = 5;
     const bucketSpan = (windowRange.end - windowRange.start) / bucketCount;
     const chartBuckets = Array.from({ length: bucketCount }, (_, idx)=>({
@@ -3375,6 +3502,23 @@ function computeTeamIntelligencePanel(db, teamId){
     const movementB = chartBuckets.map(b=>b[secondTeam]);
     const emaA = makeEMA(movementA, 0.45);
     const emaB = makeEMA(movementB, 0.45);
+
+    const snapshots = buildEpaLiveSnapshots(events, firstTeam, secondTeam, windowRange);
+    const latestSnapshot = snapshots[snapshots.length-1] || {
+      minute: windowRange.end,
+      scoreHome: 0,
+      scoreAway: 0,
+      statsCumulative: {
+        [firstTeam]: a,
+        [secondTeam]: b
+      },
+      statsSegment: {
+        [firstTeam]: a,
+        [secondTeam]: b
+      },
+      relatoSegment: []
+    };
+    const liveProbabilities = computeLiveOutcomeProbabilities(latestSnapshot, firstTeam, secondTeam);
 
     const features = {
       idd: {
@@ -3405,6 +3549,9 @@ function computeTeamIntelligencePanel(db, teamId){
     return {
       window: windowRange.label,
       teams: [firstTeam, secondTeam],
+      liveState: latestSnapshot,
+      snapshots,
+      liveProbabilities,
       features,
       tags,
       text: textLines,
@@ -5918,7 +6065,29 @@ function computeTeamIntelligencePanel(db, teamId){
         const shockB = Number(epa.features?.shockRisk?.[teamB] || 0);
         const psychA = epa.psych?.[teamA] || {};
         const psychB = epa.psych?.[teamB] || {};
+        const live = epa.liveProbabilities || {};
+        const pHome = Number(live.pHome || 0);
+        const pDraw = Number(live.pDraw || 0);
+        const pAway = Number(live.pAway || 0);
+        const whyItems = Array.isArray(live.reasons) ? live.reasons : [];
         cards.innerHTML = `
+          <div style="grid-column:1/-1;background:#0f172a;border:1px solid #24324a;border-radius:10px;padding:10px;">
+            <div style="font-weight:800;margin-bottom:4px;">PROBABILIDAD DE VICTORIA EN VIVO</div>
+            <div class="fl-mini" style="margin-bottom:6px;">${live.label || "Sin datos de probabilidad live."}</div>
+            <div style="height:10px;background:#d9d9d9;border-radius:999px;overflow:hidden;display:flex;">
+              <div style="width:${(pHome*100).toFixed(2)}%;background:#7a7a7a"></div>
+              <div style="width:${(pDraw*100).toFixed(2)}%;background:#cfcfcf"></div>
+              <div style="width:${(pAway*100).toFixed(2)}%;background:#1f6feb"></div>
+            </div>
+            <div class="fl-mini" style="display:flex;justify-content:space-between;margin-top:6px;">
+              <span>${teamA} ${(pHome*100).toFixed(0)}%</span>
+              <span>Empate ${(pDraw*100).toFixed(0)}%</span>
+              <span>${teamB} ${(pAway*100).toFixed(0)}%</span>
+            </div>
+            <div class="fl-mini" style="margin-top:8px;">${live.explanation || "Sin explicación contextual."}</div>
+            <button class="fl-btn" id="epaWhyToggle" style="margin-top:8px;">Ver por qué</button>
+            <ul id="epaWhyList" class="fl-mini" style="display:none;margin:8px 0 0 18px;">${whyItems.map(item=>`<li>${item}</li>`).join("")}</ul>
+          </div>
           <div><b>IDD early</b><div class="fl-mini">${teamA}: ${iddA.toFixed(2)} · ${teamB}: ${(-iddA).toFixed(2)}</div></div>
           <div><b>Intensidad</b><div class="fl-mini">${(Number(epa.features?.intensity||0)*100).toFixed(0)}%</div></div>
           <div><b>Threat</b><div class="fl-mini">${teamA}: ${(threatA*100).toFixed(0)}% · ${teamB}: ${(threatB*100).toFixed(0)}%</div></div>
@@ -5926,6 +6095,15 @@ function computeTeamIntelligencePanel(db, teamId){
           <div><b>Psych (${teamA})</b><div class="fl-mini">Cnf ${(Number(psychA.confidence||0)*100).toFixed(0)} · Comp ${(Number(psychA.composure||0)*100).toFixed(0)} · Fr ${(Number(psychA.frustration||0)*100).toFixed(0)}</div></div>
           <div><b>Psych (${teamB})</b><div class="fl-mini">Cnf ${(Number(psychB.confidence||0)*100).toFixed(0)} · Comp ${(Number(psychB.composure||0)*100).toFixed(0)} · Fr ${(Number(psychB.frustration||0)*100).toFixed(0)}</div></div>
         `;
+        const whyToggle = document.getElementById("epaWhyToggle");
+        const whyList = document.getElementById("epaWhyList");
+        if(whyToggle && whyList){
+          whyToggle.onclick = ()=>{
+            const open = whyList.style.display !== "none";
+            whyList.style.display = open ? "none" : "block";
+            whyToggle.textContent = open ? "Ver por qué" : "Ocultar detalle";
+          };
+        }
         const psychText = [
           ...(epa.text || []),
           `${teamA}: ${(epa.psychText?.[teamA] || []).join(" · ")}`,
