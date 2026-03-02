@@ -24,6 +24,7 @@ export function initFootballLab(){
     },
     leagues: [],
     teams: [],
+    teamCompetitions: [],
     players: [],
     tracker: [],
     diagProfiles: {},
@@ -84,6 +85,7 @@ export function initFootballLab(){
       db.settings ||= structuredClone(defaultDb.settings);
       db.leagues ||= [];
       db.teams ||= [];
+      db.teamCompetitions ||= [];
       db.players ||= [];
       db.tracker ||= [];
       db.diagProfiles ||= {};
@@ -110,6 +112,26 @@ export function initFootballLab(){
       db.learning.metrics ||= { global: null, byLeague: {} };
       db.learning.metrics.byLeague ||= {};
       db.learning.marketTrust = clamp(Number(db.learning.marketTrust) || defaultDb.learning.marketTrust, 0, 0.85);
+
+      // V9 migration: teams are global entities, league participation lives in teamCompetitions.
+      if(!Array.isArray(db.teamCompetitions)) db.teamCompetitions = [];
+      const linked = new Set(db.teamCompetitions.map(tc=>`${tc.teamId}::${tc.leagueId}`));
+      const ensureLink = (teamId, leagueId)=>{
+        if(!teamId || !leagueId) return;
+        const key = `${teamId}::${leagueId}`;
+        if(linked.has(key)) return;
+        linked.add(key);
+        db.teamCompetitions.push({ teamId, leagueId, joinedAt: Date.now() });
+      };
+      db.teams.forEach((team)=>{
+        if(team?.leagueId) ensureLink(team.id, team.leagueId);
+      });
+      db.tracker.forEach((m)=>{
+        if(m?.leagueId){
+          ensureLink(m.homeId, m.leagueId);
+          ensureLink(m.awayId, m.leagueId);
+        }
+      });
       return db;
     }catch(_e){
       localStorage.setItem(KEY, JSON.stringify(defaultDb));
@@ -119,6 +141,50 @@ export function initFootballLab(){
 
   function saveDb(db){
     localStorage.setItem(KEY, JSON.stringify(db));
+  }
+
+  function normName(value){
+    return String(value || "").toLowerCase().trim().replace(/\s+/g, " ");
+  }
+
+  function ensureTeamInLeague(db, teamId, leagueId){
+    if(!teamId || !leagueId) return;
+    db.teamCompetitions ||= [];
+    const exists = db.teamCompetitions.some(tc=>tc.teamId===teamId && tc.leagueId===leagueId);
+    if(!exists) db.teamCompetitions.push({ teamId, leagueId, joinedAt: Date.now() });
+  }
+
+  function getOrCreateTeamByName(db, name, defaults={}){
+    const normalized = normName(name);
+    if(!normalized) return null;
+    let team = db.teams.find((t)=>{
+      const aliases = Array.isArray(t.aliases) ? t.aliases : [];
+      return normName(t.name)===normalized || aliases.some(a=>normName(a)===normalized);
+    });
+    if(team) return team;
+    team = {
+      id: uid("tm"),
+      name: String(name).trim(),
+      country: defaults.country || "",
+      aliases: Array.isArray(defaults.aliases) ? defaults.aliases : [],
+      apiTeamId: defaults.apiTeamId || "",
+      createdAt: Date.now(),
+      meta: defaults.meta || { stadium:"", city:"", capacity:"" }
+    };
+    db.teams.push(team);
+    return team;
+  }
+
+  function getTeamIdsForLeague(db, leagueId){
+    if(!leagueId) return [];
+    const bridgeIds = (db.teamCompetitions || []).filter(tc=>tc.leagueId===leagueId).map(tc=>tc.teamId);
+    const legacyIds = db.teams.filter(t=>t.leagueId===leagueId).map(t=>t.id);
+    return [...new Set([...bridgeIds, ...legacyIds])];
+  }
+
+  function getTeamsForLeague(db, leagueId){
+    const ids = new Set(getTeamIdsForLeague(db, leagueId));
+    return db.teams.filter(t=>ids.has(t.id));
   }
 
   async function apiFetch(path, token){
@@ -759,7 +825,7 @@ export function initFootballLab(){
     const rivalOptions = db.teams
       .filter(t=>t.id!==team.id)
       .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
-      .map(t=>`<option value="${t.id}">${t.name}${t.leagueId===team.leagueId?" · misma liga":""}</option>`)
+      .map(t=>`<option value="${t.id}">${t.name}</option>`)
       .join("");
     backdrop.innerHTML = `
       <div class="fl-modal">
@@ -4434,8 +4500,13 @@ function computeTeamIntelligencePanel(db, teamId){
         try{
           const parsed = normalizeImport(document.getElementById("jsonImport").value.trim());
           db.leagues = [parsed.league, ...db.leagues.filter(l=>l.id!==parsed.league.id)];
-          db.teams = [...db.teams.filter(t=>t.leagueId!==parsed.league.id), ...parsed.teams];
-          db.players = [...db.players.filter(p=>!parsed.teams.some(t=>t.id===p.teamId)), ...parsed.players];
+          parsed.teams.forEach((incomingTeam)=>{
+            const team = getOrCreateTeamByName(db, incomingTeam.name, incomingTeam);
+            if(!team.apiTeamId && incomingTeam.apiTeamId) team.apiTeamId = incomingTeam.apiTeamId;
+            team.meta = { ...(team.meta||{}), ...(incomingTeam.meta||{}) };
+            ensureTeamInLeague(db, team.id, parsed.league.id);
+          });
+          db.players = [...db.players.filter(p=>!parsed.players.some(ip=>ip.id===p.id)), ...parsed.players];
           if(Array.isArray(parsed.tracker) && parsed.tracker.length) db.tracker = [...db.tracker, ...parsed.tracker];
           if(parsed.versus) db.versus = { ...db.versus, ...parsed.versus };
           if(Array.isArray(parsed.predictions) && parsed.predictions.length) db.predictions = [...db.predictions, ...parsed.predictions];
@@ -4464,7 +4535,7 @@ function computeTeamIntelligencePanel(db, teamId){
     if(view==="liga"){
       if(!db.settings.selectedLeagueId && db.leagues[0]) db.settings.selectedLeagueId = db.leagues[0].id;
       const leagueCards = db.leagues.map(l=>{
-        const teams = db.teams.filter(t=>t.leagueId===l.id);
+        const teams = getTeamsForLeague(db, l.id);
         const open = db.settings.selectedLeagueId===l.id;
         const names = teams.map(t=>`<div class="fl-row" style="justify-content:space-between;"><span>${t.name}</span><button class="fl-btn" data-open-team="${t.id}">Abrir</button></div>`).join("");
         return `<div class="fl-card"><button class="fl-btn" data-select-league="${l.id}" style="width:100%;text-align:left;">${open?"▾":"▸"} ${l.name}</button><div class="fl-muted" style="margin-top:6px;">${teams.length} equipos</div><div style="display:${open?"block":"none"};margin-top:8px;">${names||"<div class='fl-muted'>Sin equipos</div>"}</div></div>`;
@@ -4503,7 +4574,8 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById("addTeamLiga").onclick = ()=>{
         const name = document.getElementById("teamName").value.trim();
         if(!name || !db.settings.selectedLeagueId) return;
-        db.teams.push({ id: uid("tm"), name, apiTeamId:"", leagueId: db.settings.selectedLeagueId, meta: { stadium:"", city:"", capacity:"" } });
+        const team = getOrCreateTeamByName(db, name, { meta: { stadium:"", city:"", capacity:"" } });
+        ensureTeamInLeague(db, team.id, db.settings.selectedLeagueId);
         saveDb(db);
         render("liga");
       };
@@ -4518,7 +4590,7 @@ function computeTeamIntelligencePanel(db, teamId){
 
     if(view==="equipos"){
       const options = db.leagues.map(l=>`<option value="${l.id}" ${db.settings.selectedLeagueId===l.id?"selected":""}>${l.name}</option>`).join("");
-      const leagueTeams = db.teams.filter(t=>t.leagueId===db.settings.selectedLeagueId);
+      const leagueTeams = getTeamsForLeague(db, db.settings.selectedLeagueId);
       const rows = leagueTeams.map(t=>`<tr><td><input class="fl-input" data-edit-team-name="${t.id}" value="${t.name}"></td><td><input class="fl-input" data-edit-team-api="${t.id}" value="${t.apiTeamId||""}"></td><td><button class="fl-btn" data-save-team="${t.id}">Guardar</button></td></tr>`).join("");
       content.innerHTML = `
         <div class="fl-card">
@@ -4534,7 +4606,15 @@ function computeTeamIntelligencePanel(db, teamId){
         <div class="fl-card"><table class="fl-table"><thead><tr><th>Equipo (editable)</th><th>API ID</th><th></th></tr></thead><tbody>${rows||"<tr><td colspan='3'>Sin equipos</td></tr>"}</tbody></table></div>
       `;
       document.getElementById("selLeague").onchange = (e)=>{ db.settings.selectedLeagueId = e.target.value; saveDb(db); render("equipos"); };
-      document.getElementById("addTeam").onclick = ()=>{ db.teams.push({ id: uid("tm"), name: document.getElementById("teamName").value.trim(), apiTeamId: document.getElementById("teamApi").value.trim(), leagueId: db.settings.selectedLeagueId }); saveDb(db); render("equipos"); };
+      document.getElementById("addTeam").onclick = ()=>{
+        const name = document.getElementById("teamName").value.trim();
+        if(!name || !db.settings.selectedLeagueId) return;
+        const team = getOrCreateTeamByName(db, name, { apiTeamId: document.getElementById("teamApi").value.trim() });
+        if(!team.apiTeamId) team.apiTeamId = document.getElementById("teamApi").value.trim();
+        ensureTeamInLeague(db, team.id, db.settings.selectedLeagueId);
+        saveDb(db);
+        render("equipos");
+      };
       document.getElementById("syncTeams").onclick = async ()=>{
         const status = document.getElementById("tmStatus");
         try{
@@ -4542,8 +4622,12 @@ function computeTeamIntelligencePanel(db, teamId){
           if(!db.settings.selectedLeagueId) throw new Error("Selecciona liga");
           if(!db.settings.apiToken) throw new Error("Falta token");
           const data = await apiFetch(`/competitions/${db.settings.selectedLeagueId}/teams?season=${db.settings.season}`, db.settings.apiToken);
-          const incoming = (data.teams||[]).map(t=>({ id: uid("tm"), name: t.name, apiTeamId: String(t.id), leagueId: db.settings.selectedLeagueId }));
-          db.teams = [...db.teams.filter(t=>t.leagueId!==db.settings.selectedLeagueId), ...incoming];
+          const incoming = (data.teams||[]).map(t=>({ name: t.name, apiTeamId: String(t.id) }));
+          incoming.forEach((teamRaw)=>{
+            const team = getOrCreateTeamByName(db, teamRaw.name, { apiTeamId: teamRaw.apiTeamId });
+            if(!team.apiTeamId) team.apiTeamId = teamRaw.apiTeamId;
+            ensureTeamInLeague(db, team.id, db.settings.selectedLeagueId);
+          });
           localStorage.setItem(`${TEAMS_CACHE_PREFIX}${db.settings.selectedLeagueId}`, JSON.stringify(incoming));
           saveDb(db);
           render("equipos");
@@ -4668,8 +4752,7 @@ function computeTeamIntelligencePanel(db, teamId){
           </td>
         </tr>`;
       }).join("");
-      const resultTeamOptions = db.teams
-        .filter(t=>t.leagueId===team.leagueId)
+      const resultTeamOptions = getTeamsForLeague(db, db.settings.selectedLeagueId || "")
         .map(t=>`<option value="${t.id}" ${t.id===team.id?"selected":""}>${t.name}</option>`)
         .join("");
 
@@ -4927,9 +5010,14 @@ function computeTeamIntelligencePanel(db, teamId){
           status.textContent = "Selecciona local y visitante distintos.";
           return;
         }
+        const leagueId = db.settings.selectedLeagueId || "";
+        if(leagueId){
+          ensureTeamInLeague(db, homeId, leagueId);
+          ensureTeamInLeague(db, awayId, leagueId);
+        }
         db.tracker.push({
           id: uid("tr"),
-          leagueId: team.leagueId || db.settings.selectedLeagueId || "",
+          leagueId,
           date: document.getElementById("resDate").value,
           homeId,
           awayId,
@@ -5003,9 +5091,9 @@ function computeTeamIntelligencePanel(db, teamId){
     if(view==="tracker"){
       if(!db.settings.selectedLeagueId && db.leagues[0]) db.settings.selectedLeagueId = db.leagues[0].id;
       const leagueOptions = db.leagues.map(l=>`<option value="${l.id}" ${db.settings.selectedLeagueId===l.id?"selected":""}>${l.name}</option>`).join("");
-      const leagueTeams = db.teams.filter(t=>!db.settings.selectedLeagueId || t.leagueId===db.settings.selectedLeagueId);
+      const leagueTeams = db.settings.selectedLeagueId ? getTeamsForLeague(db, db.settings.selectedLeagueId) : db.teams;
       const options = leagueTeams.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
-      const rows = db.tracker.map(t=>`<tr><td>${t.date||""}</td><td>${db.leagues.find(l=>l.id===t.leagueId)?.name||"-"}</td><td>${db.teams.find(x=>x.id===t.homeId)?.name||"-"}</td><td>${t.homeGoals}-${t.awayGoals}</td><td>${db.teams.find(x=>x.id===t.awayId)?.name||"-"}</td><td>${t.note||""}</td><td><button class="fl-btn" data-open-match="${t.id}">Abrir</button></td></tr>`).join("");
+      const rows = db.tracker.filter(t=>!db.settings.selectedLeagueId || t.leagueId===db.settings.selectedLeagueId).map(t=>`<tr><td>${t.date||""}</td><td>${db.leagues.find(l=>l.id===t.leagueId)?.name||"-"}</td><td>${db.teams.find(x=>x.id===t.homeId)?.name||"-"}</td><td>${t.homeGoals}-${t.awayGoals}</td><td>${db.teams.find(x=>x.id===t.awayId)?.name||"-"}</td><td>${t.note||""}</td><td><button class="fl-btn" data-open-match="${t.id}">Abrir</button></td></tr>`).join("");
       content.innerHTML = `
         <div class="fl-card"><div class="fl-row">
           <select id="trLeague" class="fl-select"><option value="">Liga</option>${leagueOptions}</select>
@@ -5040,9 +5128,14 @@ function computeTeamIntelligencePanel(db, teamId){
         const homeId = document.getElementById("trHome").value;
         const awayId = document.getElementById("trAway").value;
         if(!homeId || !awayId || homeId===awayId) return;
+        const leagueId = db.settings.selectedLeagueId || "";
+        if(leagueId){
+          ensureTeamInLeague(db, homeId, leagueId);
+          ensureTeamInLeague(db, awayId, leagueId);
+        }
         db.tracker.push({
           id: uid("tr"),
-          leagueId: db.settings.selectedLeagueId || db.teams.find(t=>t.id===homeId)?.leagueId || "",
+          leagueId,
           date: document.getElementById("trDate").value,
           homeId,
           awayId,
