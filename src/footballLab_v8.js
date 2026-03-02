@@ -178,6 +178,12 @@ export function initFootballLab(){
       .fl-chip.ok{border-color:#238636;color:#3fb950}
       .fl-chip.warn{border-color:#d29922;color:#f2cc60}
       .fl-chip.bad{border-color:#da3633;color:#ff7b72}
+      .fl-modal-backdrop{position:fixed;inset:0;background:rgba(1,4,9,.78);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;backdrop-filter:blur(3px)}
+      .fl-modal{width:min(760px,100%);max-height:92vh;overflow:auto;background:linear-gradient(180deg,#1a2330,#121922);border:1px solid #2f3d4f;border-radius:16px;box-shadow:0 20px 80px rgba(0,0,0,.45);padding:16px}
+      .fl-modal-title{font-size:20px;font-weight:900}
+      .fl-modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+      .fl-field{display:grid;gap:6px}
+      .fl-field label{font-size:12px;color:#9ca3af}
     `;
     document.head.appendChild(style);
   }
@@ -739,6 +745,125 @@ export function initFootballLab(){
         status.textContent = `❌ ${String(err.message||err)}`;
       }
     };
+  }
+
+  function openFutureMatchModal({ db, team, matchId = "", onSave } = {}){
+    if(!team) return;
+    ensureTeamIntState(team);
+    const editing = (team.futureMatches || []).find(m=>m.id===matchId) || null;
+    const backdrop = document.createElement("div");
+    backdrop.className = "fl-modal-backdrop";
+    const leagueOptions = db.leagues
+      .map(l=>`<option value="${l.name}">${l.name}</option>`)
+      .join("");
+    const rivalOptions = db.teams
+      .filter(t=>t.id!==team.id)
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
+      .map(t=>`<option value="${t.id}">${t.name}${t.leagueId===team.leagueId?" · misma liga":""}</option>`)
+      .join("");
+    backdrop.innerHTML = `
+      <div class="fl-modal">
+        <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div>
+            <div class="fl-modal-title">${editing ? "Editar partido" : "Nuevo partido"}</div>
+            <div class="fl-mini">Completa rival, liga/competición y contexto para INT.</div>
+          </div>
+          <button class="fl-btn" id="closeFutureModal">Cerrar</button>
+        </div>
+        <div class="fl-modal-grid" style="margin-bottom:10px;">
+          <div class="fl-field"><label>Rival</label><select id="fmRival" class="fl-select"><option value="">Seleccionar rival</option>${rivalOptions}</select></div>
+          <div class="fl-field"><label>Fecha</label><input id="fmDate" type="date" class="fl-input"></div>
+          <div class="fl-field"><label>Liga / Competición</label><input id="fmCompetition" class="fl-input" list="fmLeagueList" placeholder="Liga, Copa, UCL..."><datalist id="fmLeagueList">${leagueOptions}</datalist></div>
+          <div class="fl-field"><label>Importancia</label><select id="fmImportance" class="fl-select"><option value="nada en juego">Nada en juego</option><option value="top4">Top4</option><option value="descenso">Descenso</option><option value="derby">Derby</option><option value="final">Final</option></select></div>
+          <div class="fl-field"><label>Market mood</label><select id="fmMarketMood" class="fl-select"><option value="estable">Estable</option><option value="dinero temprano">Dinero temprano</option><option value="raro">Raro</option></select></div>
+          <div class="fl-field"><label>Descanso (días)</label><input id="fmRestDays" type="number" min="0" max="14" class="fl-input" placeholder="Auto"></div>
+        </div>
+        <div class="fl-row" style="gap:16px;margin-bottom:12px;">
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmIsHome" type="checkbox"> Juega de local</label>
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmLongTravel" type="checkbox"> Viaje largo</label>
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmPostHype" type="checkbox"> Post-hype</label>
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmWeather" type="checkbox"> Clima adverso</label>
+        </div>
+        <div class="fl-row" style="justify-content:space-between;">
+          <span id="futureModalStatus" class="fl-mini"></span>
+          <div class="fl-row">
+            ${editing ? '<button class="fl-btn" id="deleteFutureModal" style="border-color:#da3633;color:#ff7b72;">Eliminar</button>' : ''}
+            <button class="fl-btn" id="saveFutureModal">${editing ? "Guardar cambios" : "Registrar partido"}</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const close = ()=>backdrop.remove();
+    backdrop.addEventListener("click", (e)=>{ if(e.target===backdrop) close(); });
+    backdrop.querySelector("#closeFutureModal").onclick = close;
+
+    const setValue = (id, value)=>{
+      const el = backdrop.querySelector(id);
+      if(!el) return;
+      if(el.type === "checkbox") el.checked = Boolean(value);
+      else if(value!==undefined && value!==null) el.value = String(value);
+    };
+    setValue("#fmRival", editing?.rivalTeamId || "");
+    setValue("#fmDate", editing?.date || "");
+    setValue("#fmCompetition", editing?.competition || "Liga");
+    setValue("#fmImportance", normalizeImportanceTag(editing?.importanceTag || "nada en juego"));
+    setValue("#fmMarketMood", editing?.marketMood || "estable");
+    setValue("#fmRestDays", Number.isFinite(Number(editing?.restDays)) ? editing.restDays : "");
+    setValue("#fmIsHome", editing?.isHome ?? true);
+    setValue("#fmLongTravel", editing?.longTravel);
+    setValue("#fmPostHype", editing?.postHype);
+    setValue("#fmWeather", editing?.weatherFlag);
+
+    backdrop.querySelector("#saveFutureModal").onclick = ()=>{
+      const status = backdrop.querySelector("#futureModalStatus");
+      const rivalTeamId = backdrop.querySelector("#fmRival").value;
+      const date = String(backdrop.querySelector("#fmDate").value || "").trim();
+      const competition = String(backdrop.querySelector("#fmCompetition").value || "Liga").trim() || "Liga";
+      const importanceTag = normalizeImportanceTag(backdrop.querySelector("#fmImportance").value || "nada en juego");
+      const marketMood = String(backdrop.querySelector("#fmMarketMood").value || "estable").trim();
+      const restDaysRaw = backdrop.querySelector("#fmRestDays").value;
+      const restDays = restDaysRaw==="" ? null : clamp(Number(restDaysRaw) || 0, 0, 14);
+      if(!rivalTeamId){ status.textContent = "❌ Selecciona un rival."; return; }
+      if(!date){ status.textContent = "❌ Elige una fecha."; return; }
+
+      const payload = {
+        id: editing?.id || uid("fm"),
+        date,
+        rivalTeamId,
+        competition,
+        isHome: backdrop.querySelector("#fmIsHome").checked,
+        importanceTag,
+        marketMood,
+        longTravel: backdrop.querySelector("#fmLongTravel").checked,
+        postHype: backdrop.querySelector("#fmPostHype").checked,
+        weatherFlag: backdrop.querySelector("#fmWeather").checked,
+        snapshots: Array.isArray(editing?.snapshots) ? editing.snapshots : []
+      };
+      if(restDays!==null) payload.restDays = restDays;
+      else if(editing && "restDays" in editing) payload.restDays = undefined;
+
+      if(editing){
+        const idx = team.futureMatches.findIndex(m=>m.id===editing.id);
+        if(idx>=0) team.futureMatches[idx] = { ...editing, ...payload };
+      }else{
+        team.futureMatches.push(payload);
+      }
+      saveDb(db);
+      onSave?.();
+      close();
+    };
+
+    const deleteBtn = backdrop.querySelector("#deleteFutureModal");
+    if(deleteBtn){
+      deleteBtn.onclick = ()=>{
+        team.futureMatches = (team.futureMatches || []).filter(m=>m.id!==editing.id);
+        saveDb(db);
+        onSave?.();
+        close();
+      };
+    }
   }
 
   function toNumLoose(value){
@@ -4401,6 +4526,7 @@ function computeTeamIntelligencePanel(db, teamId){
             <div class="fl-mini">Rotación ${out.rotationProbable}</div>
             <div class="fl-mini">Mood ${out.marketMood}</div>
             <button class="fl-btn" data-open-dual-intel="${match.id}">Abrir Match Intel</button>
+            <button class="fl-btn" data-edit-future-match="${match.id}">Editar partido</button>
           </div>
         </div>
       `).join("");
@@ -4590,26 +4716,11 @@ function computeTeamIntelligencePanel(db, teamId){
         render("equipo", { teamId: team.id });
       };
       document.getElementById("addFutureMatchBtn").onclick = ()=>{
-        const rivalName = prompt("Rival", "") || "";
-        if(!rivalName.trim()) return;
-        const rival = db.teams.find(t=>String(t.name).toLowerCase()===String(rivalName).toLowerCase());
-        const date = prompt("Fecha (YYYY-MM-DD)", "") || "";
-        const competition = prompt("Competición", "Liga") || "Liga";
-        const isHome = confirm("¿Juega de local?");
-        const importanceTag = normalizeImportanceTag(prompt("Importancia (Final/Top4/Descenso/Derby/Nada en juego)", "Nada en juego") || "Nada en juego");
-        const marketMood = String(prompt("Market mood (estable/dinero temprano/raro)", "estable") || "estable").trim();
-        team.futureMatches.push({
-          id: uid("fm"),
-          date,
-          rivalTeamId: rival?.id || "",
-          competition,
-          isHome,
-          importanceTag,
-          marketMood,
-          snapshots: []
+        openFutureMatchModal({
+          db,
+          team,
+          onSave: ()=>render("equipo", { teamId: team.id })
         });
-        saveDb(db);
-        render("equipo", { teamId: team.id });
       };
       document.getElementById("intModeLens").onchange = (e)=>{
         team.intProfile.modeLens = e.target.value === "guerra" ? "guerra" : "empresa";
@@ -4630,6 +4741,14 @@ function computeTeamIntelligencePanel(db, teamId){
           `Market drift: ${match.marketMood || "estable"}`,
           gap <= -20 ? "Conclusión: riesgo de favoritismo inflado." : gap >= 20 ? "Conclusión: ventaja motivacional de tu equipo." : "Conclusión: interés bastante equilibrado."
         ].join("\n"));
+      });
+      content.querySelectorAll("[data-edit-future-match]").forEach(btn=>btn.onclick = ()=>{
+        openFutureMatchModal({
+          db,
+          team,
+          matchId: btn.getAttribute("data-edit-future-match") || "",
+          onSave: ()=>render("equipo", { teamId: team.id })
+        });
       });
       document.getElementById("editTeamName").onclick = ()=>{
         const name = prompt("Nuevo nombre del equipo", team.name);
