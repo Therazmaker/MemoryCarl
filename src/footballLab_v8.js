@@ -2398,6 +2398,7 @@ function computeTeamIntelligencePanel(db, teamId){
   }
 
   function recomputeTeamGlobalEngine(db, teamId){
+    const team = db.teams.find(t=>t.id===teamId);
     if(!team) return null;
     const profile = getOrCreateDiagProfile(db, teamId, team.name);
     const orderedMatches = db.tracker
