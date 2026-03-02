@@ -285,13 +285,14 @@ export function initFootballLab(){
       .fl-table td,.fl-table th{border-bottom:1px solid #2d333b;padding:6px;text-align:left;font-size:13px}
       .fl-squad-section-title{font-size:30px;font-weight:900;margin-bottom:10px;color:#f6f8fa}
       .fl-squad-table{display:grid;gap:8px}
-      .fl-squad-head,.fl-squad-row{display:grid;grid-template-columns:52px minmax(220px,1.6fr) minmax(120px,.9fr) 54px 54px 74px 52px 52px 42px 42px;align-items:center;column-gap:8px}
+      .fl-squad-head,.fl-squad-row{display:grid;grid-template-columns:52px minmax(220px,1.6fr) 102px minmax(120px,.9fr) 54px 54px 74px 52px 52px 42px 42px;align-items:center;column-gap:8px}
       .fl-squad-head{background:#21262d;border:1px solid #30363d;border-radius:9px;padding:8px 10px;font-size:12px;font-weight:700;letter-spacing:.07em;color:#9ca3af;text-transform:uppercase}
       .fl-squad-row{background:#1b222c;border:1px solid #30363d;border-radius:10px;padding:12px 10px;font-size:15px}
       .fl-squad-row:hover{background:#242d3a}
       .fl-squad-cell-center{text-align:center}
       .fl-squad-name{display:flex;align-items:center;gap:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .fl-squad-heat{display:grid;gap:4px}
+      .fl-squad-pos-select{width:100%;padding:6px 8px;border-radius:8px;border:1px solid #30363d;background:#0f141b;color:#f6f8fa;font-size:12px;font-weight:700}
       .fl-squad-heat-track{height:9px;border-radius:999px;background:#0d1117;border:1px solid #30363d;overflow:hidden}
       .fl-squad-heat-fill{height:100%;border-radius:999px;transition:width .25s ease}
       .fl-flag{font-size:16px;line-height:1}
@@ -4864,6 +4865,16 @@ function computeTeamIntelligencePanel(db, teamId){
     return "OT";
   }
 
+  function normalizePlayerPos(pos){
+    const token = String(pos||"").trim().toLowerCase();
+    if(!token) return "OT";
+    if(["gk","por","pt"].includes(token) || token.includes("portero") || token.includes("goalkeeper")) return "GK";
+    if(["df","def"].includes(token) || token.includes("defensa") || token.includes("defender")) return "DF";
+    if(["mf","mid"].includes(token) || token.includes("centrocamp") || token.includes("medio") || token.includes("midfielder")) return "MF";
+    if(["fw","att","st","cf"].includes(token) || token.includes("delanter") || token.includes("forward") || token.includes("striker")) return "FW";
+    return "OT";
+  }
+
   function parseImportedSquadRow(row, fallbackPos){
     const flag = pickFirstString(row.flag, row.flagEmoji, row.countryFlag, row.nationalityFlag, row.country?.flag, row.nationality?.flag);
     return {
@@ -4967,6 +4978,11 @@ function computeTeamIntelligencePanel(db, teamId){
       <div class="fl-squad-row">
         <div class="fl-squad-cell-center">${pl.number ?? "-"}</div>
         <div class="fl-squad-name">${pl.flag ? `<span class="fl-flag">${pl.flag}</span>` : ""}<span>${pl.name}</span></div>
+        <div class="fl-squad-cell-center">
+          <select class="fl-squad-pos-select" data-player-pos="${pl.id}">
+            ${[["GK","Portero"],["DF","Defensa"],["MF","Centrocampista"],["FW","Delantero"],["OT","Otro"]].map(([key,label])=>`<option value="${key}" ${normalizePlayerPos(pl.pos)===key?"selected":""}>${label}</option>`).join("")}
+          </select>
+        </div>
         <div class="fl-squad-heat">
           <div class="fl-squad-heat-track"><div class="fl-squad-heat-fill" style="width:${clamp(Number(playerHeatMap[normalizePersonName(pl.name)]) || 50, 0, 100)}%;background:${psychHeatColor(playerHeatMap[normalizePersonName(pl.name)])};"></div></div>
           <div class="fl-mini" style="text-align:center">${Math.round(clamp(Number(playerHeatMap[normalizePersonName(pl.name)]) || 50, 0, 100))}</div>
@@ -4988,6 +5004,7 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-squad-head">
             <div class="fl-squad-cell-center">#</div>
             <div>Nombre</div>
+            <div class="fl-squad-cell-center">Pos</div>
             <div class="fl-squad-cell-center">Pulse</div>
             <div class="fl-squad-cell-center">Edad</div>
             <div class="fl-squad-cell-center">👕</div>
@@ -5281,7 +5298,7 @@ function computeTeamIntelligencePanel(db, teamId){
         </div></div>
         <div class="fl-card"><table class="fl-table"><thead><tr><th>Jugador</th><th>Equipo</th><th>Pos</th><th>Rating</th></tr></thead><tbody>${rows||"<tr><td colspan='4'>Sin jugadores</td></tr>"}</tbody></table></div>
       `;
-      document.getElementById("addPlayer").onclick = ()=>{ db.players.push({ id: uid("pl"), name: document.getElementById("playerName").value.trim(), teamId: document.getElementById("playerTeam").value, pos: document.getElementById("playerPos").value.trim(), rating: Number(document.getElementById("playerRating").value)||5 }); saveDb(db); render("jugadores"); };
+      document.getElementById("addPlayer").onclick = ()=>{ db.players.push({ id: uid("pl"), name: document.getElementById("playerName").value.trim(), teamId: document.getElementById("playerTeam").value, pos: normalizePlayerPos(document.getElementById("playerPos").value.trim()), rating: Number(document.getElementById("playerRating").value)||5 }); saveDb(db); render("jugadores"); };
       return;
     }
 
@@ -5296,7 +5313,13 @@ function computeTeamIntelligencePanel(db, teamId){
       team.meta ||= { stadium:"", city:"", capacity:"" };
       const players = db.players.filter(p=>p.teamId===team.id);
       const byPos = { GK:[], DF:[], MF:[], FW:[], OT:[] };
-      players.forEach(p=>{ const pos = p.pos || "OT"; (byPos[pos]||byPos.OT).push(p); });
+      players.forEach(p=>{ const pos = normalizePlayerPos(p.pos); (byPos[pos]||byPos.OT).push(p); });
+      Object.values(byPos).forEach(list=>list.sort((a,b)=>{
+        const aNum = Number.isFinite(Number(a.number)) ? Number(a.number) : 999;
+        const bNum = Number.isFinite(Number(b.number)) ? Number(b.number) : 999;
+        if(aNum!==bNum) return aNum - bNum;
+        return String(a.name||"").localeCompare(String(b.name||""), "es", { sensitivity:"base" });
+      }));
       const teamMatches = db.tracker
         .filter(m=>m.homeId===team.id || m.awayId===team.id)
         .sort((a,b)=>{
@@ -5654,6 +5677,14 @@ function computeTeamIntelligencePanel(db, teamId){
         saveDb(db);
         render("equipo", { teamId: team.id });
       };
+      content.querySelectorAll("[data-player-pos]").forEach(sel=>sel.onchange = (e)=>{
+        const playerId = sel.getAttribute("data-player-pos");
+        const player = db.players.find((x)=>x.id===playerId && x.teamId===team.id);
+        if(!player) return;
+        player.pos = normalizePlayerPos(e.target.value);
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      });
       document.getElementById("runSquadImport").onclick = ()=>{
         try{
           const raw = document.getElementById("squadImport").value.trim();
@@ -5676,10 +5707,10 @@ function computeTeamIntelligencePanel(db, teamId){
             if(!name) return;
             let p = db.players.find(x=>x.teamId===team.id && x.name.toLowerCase()===name.toLowerCase());
             if(!p){
-              db.players.push({ id: uid("pl"), teamId: team.id, ...r });
+              db.players.push({ id: uid("pl"), teamId: team.id, ...r, pos: normalizePlayerPos(r.pos) });
               created++;
             }else{
-              p.pos = p.pos || r.pos;
+              p.pos = normalizePlayerPos(p.pos || r.pos);
               p.number = r.number ?? p.number;
               p.age = r.age ?? p.age;
               p.appearances = r.appearances ?? p.appearances;
