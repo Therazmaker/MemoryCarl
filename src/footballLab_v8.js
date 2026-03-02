@@ -6557,7 +6557,18 @@ function computeTeamIntelligencePanel(db, teamId){
       db.versus.tableContext ||= {};
       ensureLearningState(db);
       db.versus.marketBlend = clamp(Number(db.learning.marketTrust) || Number(db.versus.marketBlend) || 0.35, 0, 0.8);
-      const options = db.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
+      if(!db.settings.selectedLeagueId && db.leagues[0]) db.settings.selectedLeagueId = db.leagues[0].id;
+      const leagueOptions = db.leagues
+        .slice()
+        .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
+        .map(l=>`<option value="${l.id}" ${db.settings.selectedLeagueId===l.id?"selected":""}>${l.name}</option>`)
+        .join("");
+      const teamsForLeague = db.settings.selectedLeagueId ? getTeamsForLeague(db, db.settings.selectedLeagueId) : db.teams;
+      const options = teamsForLeague
+        .slice()
+        .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
+        .map(t=>`<option value="${t.id}">${t.name}</option>`)
+        .join("");
       const pendingPredictions = db.predictions.filter(p=>!p.resolved).slice(-20).reverse();
       const pendingOptions = pendingPredictions.map(p=>{
         const home = db.teams.find(t=>t.id===p.homeId)?.name || "Local";
@@ -6572,6 +6583,9 @@ function computeTeamIntelligencePanel(db, teamId){
       content.innerHTML = `
         <div class="fl-card fl-vs-layout">
           <div>
+            <div class="fl-row" style="margin-bottom:8px;">
+              <select id="vsLeague" class="fl-select" style="max-width:220px;"><option value="">Liga</option>${leagueOptions}</select>
+            </div>
             <div class="fl-row" style="margin-bottom:8px;">
               <select id="vsHome" class="fl-select"><option value="">Home</option>${options}</select>
               <select id="vsAway" class="fl-select"><option value="">Away</option>${options}</select>
@@ -6717,6 +6731,15 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById("fbPrediction").onchange = refreshUsefulMatch;
       refreshUsefulMatch();
 
+      const vsLeagueEl = document.getElementById("vsLeague");
+      if(vsLeagueEl){
+        vsLeagueEl.onchange = ()=>{
+          db.settings.selectedLeagueId = vsLeagueEl.value || "";
+          saveDb(db);
+          render("versus");
+        };
+      }
+
       document.getElementById("runVsV2").onclick = ()=>{
         const homeId = document.getElementById("vsHome").value;
         const awayId = document.getElementById("vsAway").value;
@@ -6769,6 +6792,7 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById("runVs").onclick = ()=>{
         const homeId = document.getElementById("vsHome").value;
         const awayId = document.getElementById("vsAway").value;
+        const selectedLeagueId = document.getElementById("vsLeague")?.value || "";
         db.versus.homeAdvantage = Number(document.getElementById("vsHA").value)||1.1;
         db.versus.paceFactor = Number(document.getElementById("vsPace").value)||1;
         db.versus.sampleSize = Number(document.getElementById("vsN").value)||20;
@@ -6798,7 +6822,7 @@ function computeTeamIntelligencePanel(db, teamId){
           };
         }
         saveDb(db);
-        const result = versusModel(db, homeId, awayId, { matchday: db.versus.matchday, tableContextTrust: db.versus.tableContextTrust });
+        const result = versusModel(db, homeId, awayId, { leagueId: selectedLeagueId, matchday: db.versus.matchday, tableContextTrust: db.versus.tableContextTrust });
         const market = clean1x2Probs(
           document.getElementById("vsOddH").value,
           document.getElementById("vsOddD").value,
@@ -6807,7 +6831,7 @@ function computeTeamIntelligencePanel(db, teamId){
         const baseLambdaHome = result.lHome;
         const baseLambdaAway = result.lAway;
 
-        const b3LeagueId = db.teams.find(t=>t.id===homeId)?.leagueId || db.teams.find(t=>t.id===awayId)?.leagueId || "";
+        const b3LeagueId = selectedLeagueId || db.teams.find(t=>t.id===homeId)?.leagueId || db.teams.find(t=>t.id===awayId)?.leagueId || "";
         const homeRatings = computeB3TeamRatings(db, homeId, b3LeagueId, "home", db.versus.sampleSize || 20);
         const awayRatings = computeB3TeamRatings(db, awayId, b3LeagueId, "away", db.versus.sampleSize || 20);
         const homeMatches = db.tracker
