@@ -285,12 +285,15 @@ export function initFootballLab(){
       .fl-table td,.fl-table th{border-bottom:1px solid #2d333b;padding:6px;text-align:left;font-size:13px}
       .fl-squad-section-title{font-size:30px;font-weight:900;margin-bottom:10px;color:#f6f8fa}
       .fl-squad-table{display:grid;gap:8px}
-      .fl-squad-head,.fl-squad-row{display:grid;grid-template-columns:52px minmax(230px,1.8fr) 54px 54px 74px 52px 52px 42px 42px;align-items:center;column-gap:8px}
+      .fl-squad-head,.fl-squad-row{display:grid;grid-template-columns:52px minmax(220px,1.6fr) minmax(120px,.9fr) 54px 54px 74px 52px 52px 42px 42px;align-items:center;column-gap:8px}
       .fl-squad-head{background:#21262d;border:1px solid #30363d;border-radius:9px;padding:8px 10px;font-size:12px;font-weight:700;letter-spacing:.07em;color:#9ca3af;text-transform:uppercase}
       .fl-squad-row{background:#1b222c;border:1px solid #30363d;border-radius:10px;padding:12px 10px;font-size:15px}
       .fl-squad-row:hover{background:#242d3a}
       .fl-squad-cell-center{text-align:center}
       .fl-squad-name{display:flex;align-items:center;gap:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .fl-squad-heat{display:grid;gap:4px}
+      .fl-squad-heat-track{height:9px;border-radius:999px;background:#0d1117;border:1px solid #30363d;overflow:hidden}
+      .fl-squad-heat-fill{height:100%;border-radius:999px;transition:width .25s ease}
       .fl-flag{font-size:16px;line-height:1}
       .fl-card-yellow{display:inline-block;width:10px;height:16px;border-radius:3px;background:#f5c400}
       .fl-card-red{display:inline-block;width:10px;height:16px;border-radius:3px;background:#e10600}
@@ -1790,6 +1793,153 @@ export function initFootballLab(){
     return Math.sqrt(Math.max(0, variance));
   }
 
+  function normalizePersonName(name){
+    return String(name || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s'-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function psychHeatColor(score){
+    const v = clamp(Number(score) || 0, 0, 100);
+    if(v >= 72) return "#3fb950";
+    if(v >= 52) return "#58a6ff";
+    if(v >= 35) return "#d29922";
+    return "#f85149";
+  }
+
+  function computeTeamPlayerPsychHeat(db, teamId, options={}){
+    const maxMatches = clamp(Number(options.maxMatches) || 12, 3, 30);
+    const players = db.players.filter(p=>p.teamId===teamId);
+    const matches = db.tracker
+      .filter(m=>m.homeId===teamId || m.awayId===teamId)
+      .slice()
+      .sort(compareByDateAsc)
+      .slice(-maxMatches);
+    const perPlayer = new Map();
+
+    const touchPlayer = (name)=>{
+      const key = normalizePersonName(name);
+      if(!key) return null;
+      if(!perPlayer.has(key)) perPlayer.set(key, {
+        key,
+        name: String(name || "").trim() || "Jugador",
+        score: 50,
+        events: 0,
+        aggr: 0,
+        res: 0,
+        vol: 0,
+        fat: 0
+      });
+      return perPlayer.get(key);
+    };
+
+    matches.forEach((match, idx)=>{
+      const teamName = match.homeId===teamId ? match.homeName : match.awayName;
+      const teamNorm = normalizePersonName(teamName);
+      const recency = 0.68 + ((idx + 1) / Math.max(1, matches.length)) * 0.32;
+      const events = match?.narrativeModule?.normalized?.events || [];
+      events.forEach((evt)=>{
+        const playerName = evt?.player;
+        if(!playerName) return;
+        const evtTeamNorm = normalizePersonName(evt?.team);
+        if(teamNorm && evtTeamNorm && teamNorm !== evtTeamNorm) return;
+        const p = touchPlayer(playerName);
+        if(!p) return;
+        const min = Number(evt?.min);
+        let scoreDelta = 0;
+        if(evt.type === "goal"){
+          scoreDelta += 9;
+          p.res += 0.16;
+        }else if(evt.type === "save"){
+          scoreDelta += 7;
+          p.res += 0.14;
+        }else if(evt.type === "corner"){
+          scoreDelta += 1.4;
+        }else if(evt.type === "yellow"){
+          scoreDelta -= 6.5;
+          p.aggr += 0.16;
+          p.vol += 0.12;
+        }else if(evt.type === "red"){
+          scoreDelta -= 16;
+          p.aggr += 0.28;
+          p.vol += 0.22;
+          p.fat += 0.14;
+        }else if(evt.type === "foul"){
+          scoreDelta -= 2;
+          p.aggr += 0.08;
+        }else if(evt.type === "offside"){
+          scoreDelta -= 1.2;
+          p.vol += 0.04;
+        }else if(evt.type === "sub"){
+          if(Number.isFinite(min) && min >= 70) p.fat += 0.04;
+          scoreDelta += 0.5;
+        }
+        p.score = clamp(p.score + scoreDelta * recency, 0, 100);
+        p.events += 1;
+      });
+    });
+
+    const rosterHeat = players.map((pl)=>{
+      const key = normalizePersonName(pl.name);
+      const fromNarrative = perPlayer.get(key);
+      const statBase = clamp(
+        50
+        + (Number(pl.goals)||0) * 1.5
+        + (Number(pl.assists)||0) * 1.3
+        + clamp((Number(pl.minutes)||0) / 700, 0, 4)
+        - (Number(pl.yellowCards)||0) * 1.9
+        - (Number(pl.redCards)||0) * 7,
+        5,
+        95
+      );
+      const heat = fromNarrative
+        ? clamp(fromNarrative.score * 0.72 + statBase * 0.28, 0, 100)
+        : statBase;
+      return {
+        key,
+        name: pl.name,
+        heat,
+        events: fromNarrative?.events || 0,
+        aggr: fromNarrative?.aggr || 0,
+        res: fromNarrative?.res || 0,
+        vol: fromNarrative?.vol || 0,
+        fat: fromNarrative?.fat || 0
+      };
+    });
+
+    const heatValues = rosterHeat.map(item=>item.heat);
+    const avgHeat = average(heatValues, 50);
+    const spread = stdDev(heatValues);
+    const byName = {};
+    rosterHeat.forEach(item=>{ byName[item.key] = Math.round(item.heat); });
+    const samples = Math.max(1, rosterHeat.length);
+    const aggr = rosterHeat.reduce((sum, p)=>sum + p.aggr, 0) / samples;
+    const res = rosterHeat.reduce((sum, p)=>sum + p.res, 0) / samples;
+    const vol = rosterHeat.reduce((sum, p)=>sum + p.vol, 0) / samples;
+    const fat = rosterHeat.reduce((sum, p)=>sum + p.fat, 0) / samples;
+
+    return {
+      byName,
+      list: rosterHeat,
+      summary: {
+        avgHeat,
+        spread,
+        narrativeEvents: rosterHeat.reduce((sum, p)=>sum + p.events, 0),
+        psychAdjustments: {
+          aggressiveness: clamp(aggr * 28 + Math.max(0, 52 - avgHeat) * 0.12, -8, 12),
+          resilience: clamp(res * 24 + (avgHeat - 50) * 0.18, -10, 12),
+          volatility: clamp(vol * 30 + spread * 0.07, -8, 14),
+          fatigue: clamp(fat * 18 + Math.max(0, 54 - avgHeat) * 0.1, -8, 12)
+        },
+        teamPsychPulse: clamp(avgHeat - spread * 0.3 + res * 40 - fat * 24, 0, 100)
+      }
+    };
+  }
+
     function engineForTeam(db, teamId){
     return recomputeTeamGlobalEngine(db, teamId) || getOrCreateDiagProfile(db, teamId, "").engineV1 || {};
   }
@@ -1800,14 +1950,16 @@ function computeTeamIntelligencePanel(db, teamId){
       .slice()
       .sort(compareByDateAsc);
     const engine = recomputeTeamGlobalEngine(db, teamId) || getOrCreateDiagProfile(db, teamId, "").engineV1 || {};
+    const playerHeat = computeTeamPlayerPsychHeat(db, teamId);
     if(!matches.length){
       return {
         matches: [],
         metrics: { powerIndex: 50, trend: "→ Plano", trendSlope: 0, consistencyScore: 50, momentum5: 0.5 },
-        psych: { aggressiveness: 50, resilience: 50, volatility: 50, fatigue: 50 },
+        psych: { aggressiveness: 50, resilience: 50, volatility: 50, fatigue: 50, playerPulse: playerHeat.summary.teamPsychPulse },
         tactical: { directAttack: 50, possession: 50, transitions: 50, press: 50, setPieces: 50 },
         momentum: { labels: [], xgDifferential: [], realPerformance: [], expectedPerformance: [] },
-        prediction: { eloDynamic: 1500, offenseRating: 50, defenseRating: 50, psychIndex: 50, consistencyIndex: 50 }
+        prediction: { eloDynamic: 1500, offenseRating: 50, defenseRating: 50, psychIndex: 50, consistencyIndex: 50 },
+        playerHeat
       };
     }
 
@@ -1866,7 +2018,7 @@ function computeTeamIntelligencePanel(db, teamId){
     const prevAvg = average(powerSeries.slice(-10, -5), recentAvg);
     const trendSlope = recentAvg - prevAvg;
 
-    const aggression = clamp(
+    const aggressionBase = clamp(
       35 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/falta/, /foul/]) ?? 12), 12) / 20
       + 20 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/amarilla/, /yellow/]) ?? 2.2), 2.2) / 5
       + 25 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/duel/]) ?? 50), 50) / 100
@@ -1874,7 +2026,7 @@ function computeTeamIntelligencePanel(db, teamId){
       0,
       100
     );
-    const resilience = clamp(
+    const resilienceBase = clamp(
       50 * (comebackSamples ? (comebackPoints / (comebackSamples*3)) : 0.5)
       + 30 * clamp(average(pointsSeries.slice(-5), 1.5) / 3, 0, 1)
       + 20 * clamp((Number(engine?.haTraits?.awayResilience)||0), 0, 1),
@@ -1882,8 +2034,13 @@ function computeTeamIntelligencePanel(db, teamId){
       100
     );
     const perfResidual = pointsSeries.map((pts, i)=>(pts/3) - expectedSeries[i]);
-    const volatility = clamp(stdDev(perfResidual) * 220, 0, 100);
-    const fatigue = clamp((average(fatigueLoad, 0.4)*60) + (travelPenalty / Math.max(1, matches.length))*40, 0, 100);
+    const volatilityBase = clamp(stdDev(perfResidual) * 220, 0, 100);
+    const fatigueBase = clamp((average(fatigueLoad, 0.4)*60) + (travelPenalty / Math.max(1, matches.length))*40, 0, 100);
+    const psychAdj = playerHeat.summary.psychAdjustments;
+    const aggression = clamp(aggressionBase + psychAdj.aggressiveness, 0, 100);
+    const resilience = clamp(resilienceBase + psychAdj.resilience, 0, 100);
+    const volatility = clamp(volatilityBase + psychAdj.volatility, 0, 100);
+    const fatigue = clamp(fatigueBase + psychAdj.fatigue, 0, 100);
 
     const possession = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/posesi/]) ?? 50), 50), 0, 100);
     const wingPlay = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/banda/, /cross/, /centro/]) ?? 40), 40), 0, 100);
@@ -1902,7 +2059,8 @@ function computeTeamIntelligencePanel(db, teamId){
         powerSeries,
         labels
       },
-      psych: { aggressiveness: aggression, resilience, volatility, fatigue },
+      psych: { aggressiveness: aggression, resilience, volatility, fatigue, playerPulse: playerHeat.summary.teamPsychPulse },
+      playerHeat,
       tactical: {
         directAttack: clamp((wingPlay*0.4 + inBoxShots*0.6), 0, 100),
         possession,
@@ -2240,7 +2398,6 @@ function computeTeamIntelligencePanel(db, teamId){
   }
 
   function recomputeTeamGlobalEngine(db, teamId){
-    const team = db.teams.find(t=>t.id===teamId);
     if(!team) return null;
     const profile = getOrCreateDiagProfile(db, teamId, team.name);
     const orderedMatches = db.tracker
@@ -4559,11 +4716,15 @@ function computeTeamIntelligencePanel(db, teamId){
     };
   }
 
-  function renderSquadSection(title, players){
+  function renderSquadSection(title, players, playerHeatMap={}){
     const rows = players.map(pl=>`
       <div class="fl-squad-row">
         <div class="fl-squad-cell-center">${pl.number ?? "-"}</div>
         <div class="fl-squad-name">${pl.flag ? `<span class="fl-flag">${pl.flag}</span>` : ""}<span>${pl.name}</span></div>
+        <div class="fl-squad-heat">
+          <div class="fl-squad-heat-track"><div class="fl-squad-heat-fill" style="width:${clamp(Number(playerHeatMap[normalizePersonName(pl.name)]) || 50, 0, 100)}%;background:${psychHeatColor(playerHeatMap[normalizePersonName(pl.name)])};"></div></div>
+          <div class="fl-mini" style="text-align:center">${Math.round(clamp(Number(playerHeatMap[normalizePersonName(pl.name)]) || 50, 0, 100))}</div>
+        </div>
         <div class="fl-squad-cell-center">${pl.age ?? "-"}</div>
         <div class="fl-squad-cell-center">${pl.appearances ?? "-"}</div>
         <div class="fl-squad-cell-center">${pl.minutes ?? "-"}</div>
@@ -4581,6 +4742,7 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-squad-head">
             <div class="fl-squad-cell-center">#</div>
             <div>Nombre</div>
+            <div class="fl-squad-cell-center">Pulse</div>
             <div class="fl-squad-cell-center">Edad</div>
             <div class="fl-squad-cell-center">👕</div>
             <div class="fl-squad-cell-center">Min</div>
@@ -4848,8 +5010,7 @@ function computeTeamIntelligencePanel(db, teamId){
       };
       content.querySelectorAll("[data-save-team]").forEach(btn=>btn.onclick = ()=>{
         const teamId = btn.getAttribute("data-save-team");
-        const team = db.teams.find(t=>t.id===teamId);
-        if(!team) return;
+            if(!team) return;
         const name = content.querySelector(`[data-edit-team-name="${teamId}"]`)?.value.trim();
         const apiTeamId = content.querySelector(`[data-edit-team-api="${teamId}"]`)?.value.trim();
         if(name) team.name = name;
@@ -4879,8 +5040,7 @@ function computeTeamIntelligencePanel(db, teamId){
 
     if(view==="equipo"){
       const teamId = payload.teamId || payload?.id;
-      const team = db.teams.find(t=>t.id===teamId);
-      if(!team){
+        if(!team){
         content.innerHTML = `<div class="fl-card">Equipo no encontrado.</div>`;
         return;
       }
@@ -4906,7 +5066,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const intel = computeTeamIntelligencePanel(db, team.id);
       const gaugeAngle = Math.round(clamp(Number(intel.metrics.powerIndex) || 0, 0, 100) * 3.6);
       const sections = [["Porteros","GK"],["Defensas","DF"],["Centrocampistas","MF"],["Delanteros","FW"],["Otros","OT"]]
-        .map(([title,key])=>renderSquadSection(title, byPos[key]||[])).join("");
+        .map(([title,key])=>renderSquadSection(title, byPos[key]||[], intel.playerHeat?.byName || {})).join("");
       const teamCompetitions = getTeamCompetitions(db, team.id);
       const teamCompetitionIds = new Set(teamCompetitions.map(c=>c.id));
       const availableCompetitions = db.leagues
@@ -5062,6 +5222,8 @@ function computeTeamIntelligencePanel(db, teamId){
               <div><span class="fl-mini">Resiliencia</span><b>${Math.round(intel.psych.resilience)}</b></div>
               <div><span class="fl-mini">Volatilidad</span><b>${Math.round(intel.psych.volatility)}</b></div>
               <div><span class="fl-mini">Fatiga</span><b>${Math.round(intel.psych.fatigue)}</b></div>
+              <div><span class="fl-mini">Pulse plantilla</span><b>${Math.round(intel.psych.playerPulse || intel.playerHeat?.summary?.teamPsychPulse || 50)}</b></div>
+              <div><span class="fl-mini">Eventos narrados</span><b>${Math.round(intel.playerHeat?.summary?.narrativeEvents || 0)}</b></div>
             </div>
             <div style="height:230px;"><canvas id="teamPsychRadar"></canvas></div>
           </div>
