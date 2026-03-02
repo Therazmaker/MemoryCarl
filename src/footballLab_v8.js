@@ -4882,6 +4882,86 @@ function computeTeamIntelligencePanel(db, teamId){
     };
   }
 
+  function parseManualSquadText(raw){
+    const tokens = String(raw||"")
+      .split(/\r?\n/)
+      .map((line)=>line.trim())
+      .filter(Boolean);
+
+    const isNumericToken = (value)=>/^-?\d+(?:[.,]\d+)?$/.test(String(value||"").trim());
+    const toNumber = (value)=>{
+      const n = Number(String(value).replace(",", "."));
+      return Number.isFinite(n) ? n : null;
+    };
+    const isHeaderToken = (value)=>{
+      const token = String(value||"").trim().toLowerCase();
+      return ["#","name","nombre","edad","age","min","mins","minutos","pj","apps","goals","goles","a","asistencias","amarillas","rojas"].includes(token);
+    };
+    const isSectionToken = (value)=>{
+      const token = String(value||"").trim().toLowerCase();
+      return token.includes("portero") || token.includes("defensa") || token.includes("centrocamp") || token.includes("medio") || token.includes("delanter") || token.includes("otros");
+    };
+    const looksLikeName = (value)=>{
+      const token = String(value||"").trim();
+      if(!token || isHeaderToken(token) || isSectionToken(token) || isNumericToken(token)) return false;
+      return /[\p{L}]/u.test(token);
+    };
+
+    const rows = [];
+    let i = 0;
+    let currentPos = "OT";
+    while(i < tokens.length){
+      const token = tokens[i];
+      if(isSectionToken(token)){
+        currentPos = sectionToPos(token);
+        i += 1;
+        continue;
+      }
+      if(isHeaderToken(token)){
+        i += 1;
+        continue;
+      }
+
+      let number = null;
+      let name = "";
+      if(isNumericToken(token) && looksLikeName(tokens[i+1])){
+        number = toNumber(token);
+        name = tokens[i+1];
+        i += 2;
+      }else if(looksLikeName(token)){
+        name = token;
+        i += 1;
+      }else{
+        i += 1;
+        continue;
+      }
+
+      const numericFields = [];
+      while(i < tokens.length && isNumericToken(tokens[i]) && numericFields.length < 7){
+        const n = toNumber(tokens[i]);
+        if(Number.isFinite(n)) numericFields.push(n);
+        i += 1;
+      }
+
+      rows.push({
+        name,
+        pos: currentPos,
+        rating: 5,
+        number,
+        age: numericFields[0] ?? null,
+        appearances: numericFields[1] ?? null,
+        minutes: numericFields[2] ?? null,
+        goals: numericFields[3] ?? null,
+        assists: numericFields[4] ?? null,
+        yellowCards: numericFields[5] ?? null,
+        redCards: numericFields[6] ?? null,
+        flag: ""
+      });
+    }
+
+    return rows.filter((row)=>row.name);
+  }
+
   function renderSquadSection(title, players, playerHeatMap={}){
     const rows = players.map(pl=>`
       <div class="fl-squad-row">
@@ -5352,8 +5432,8 @@ function computeTeamIntelligencePanel(db, teamId){
           <button class="fl-btn" id="backLiga">Volver a ligas</button>
         </div>
         <div class="fl-card">
-          <div style="font-weight:800;margin-bottom:6px;">Importar plantilla JSON</div>
-          <textarea id="squadImport" class="fl-text" placeholder='{"team":{},"squadBySection":[]}'></textarea>
+          <div style="font-weight:800;margin-bottom:6px;">Importar plantilla (JSON o texto pegado)</div>
+          <textarea id="squadImport" class="fl-text" placeholder='Pega JSON o texto copiado (#, Name, Age, MIN...)'></textarea>
           <div class="fl-row" style="margin-top:8px;"><button class="fl-btn" id="runSquadImport">Importar plantilla</button><span id="squadStatus" class="fl-muted"></span></div>
         </div>
         <div class="fl-card">
@@ -5577,10 +5657,18 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById("runSquadImport").onclick = ()=>{
         try{
           const raw = document.getElementById("squadImport").value.trim();
-          const data = JSON.parse(raw);
-          const rows = (data.squadBySection||[]).flatMap(sec=>(sec.rows||[]).map(r=>parseImportedSquadRow(r, sectionToPos(sec.section))));
-          if(data.team?.name){
-            team.name = String(data.team.name).replace(/^Fútbol:\s*/i,"").replace(/\s*-\s*plantilla$/i,"").trim() || team.name;
+          let rows = [];
+          let importedTeamName = "";
+          if(raw.startsWith("{") || raw.startsWith("[")){
+            const data = JSON.parse(raw);
+            rows = (data.squadBySection||[]).flatMap(sec=>(sec.rows||[]).map(r=>parseImportedSquadRow(r, sectionToPos(sec.section))));
+            importedTeamName = String(data.team?.name||"").trim();
+          }else{
+            rows = parseManualSquadText(raw);
+          }
+          if(!rows.length) throw new Error("No se encontraron jugadores válidos en el texto importado");
+          if(importedTeamName){
+            team.name = importedTeamName.replace(/^Fútbol:\s*/i,"").replace(/\s*-\s*plantilla$/i,"").trim() || team.name;
           }
           let created=0, updated=0;
           rows.forEach(r=>{
