@@ -8622,6 +8622,72 @@ function computeTeamIntelligencePanel(db, teamId){
     const BRAIN_SNAPSHOTS_KEY_BASE = "brain-memory-carl-snapshots-v2";
     const BRAIN_LOSS_KEY_BASE = "brain-memory-carl-loss-v2";
     let activeBrainProfileId = "global";
+    const BRAIN_WINDOW = 5;
+    const BRAIN_VECTOR_SIZE = 9;
+    const BRAIN_CONTEXT_SIZE = 3;
+    const BRAIN_INPUT_SIZE = (BRAIN_WINDOW * BRAIN_VECTOR_SIZE * 2) + BRAIN_CONTEXT_SIZE;
+
+    function toISODate(value){
+      const raw = String(value || "").trim();
+      if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+      const parsed = new Date(raw);
+      if(Number.isNaN(parsed.getTime())) return "";
+      return parsed.toISOString().slice(0, 10);
+    }
+
+    function resolveMatchDate(modeMeta){
+      const historical = modeMeta?.mode === "historico" ? toISODate(modeMeta?.historicalDate) : "";
+      if(historical) return historical;
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function buildContextVector({ mode = "pre", homeVector = [], awayVector = [] } = {}){
+      const homeAdvantage = clamp((Number(db?.versus?.homeAdvantage) || 1.1) / 2, 0, 1);
+      const modePressure = mode === "live" ? 1 : mode === "historico" ? 0.35 : 0.55;
+      const importanceDelta = clamp(((Number(homeVector?.[6]) || 0.5) - (Number(awayVector?.[6]) || 0.5) + 1) / 2, 0, 1);
+      return [homeAdvantage, modePressure, importanceDelta];
+    }
+
+    function createZeroVector(){
+      return Array(BRAIN_VECTOR_SIZE).fill(0);
+    }
+
+    function buildTeamSequenceFromSamples(samples, teamId, targetMatchDate, currentVector){
+      const safeDate = toISODate(targetMatchDate) || "9999-12-31";
+      const history = (samples || [])
+        .filter((sample)=>{
+          if(!sample?.teamVectors || !teamId) return false;
+          const rowDate = toISODate(sample.matchDate);
+          return !!sample.teamVectors[teamId] && !!rowDate && rowDate < safeDate;
+        })
+        .sort((a,b)=>{
+          const dCmp = String(a.matchDate || "").localeCompare(String(b.matchDate || ""));
+          if(dCmp!==0) return dCmp;
+          return (Number(a.capturedAt) || 0) - (Number(b.capturedAt) || 0);
+        })
+        .map((sample)=>sample.teamVectors[teamId].slice(0, BRAIN_VECTOR_SIZE));
+      const merged = currentVector ? [...history, currentVector.slice(0, BRAIN_VECTOR_SIZE)] : history;
+      const cut = merged.slice(-BRAIN_WINDOW);
+      while(cut.length < BRAIN_WINDOW) cut.unshift(createZeroVector());
+      return cut;
+    }
+
+    function flattenBrainInput(seqA, seqB, context = []){
+      return [...seqA.flat(), ...seqB.flat(), ...context].slice(0, BRAIN_INPUT_SIZE);
+    }
+
+    function normalizeBrainSample(raw){
+      if(!raw || typeof raw !== "object") return null;
+      const normalized = {
+        ...raw,
+        x: Array.isArray(raw.x) ? raw.x.map(Number).filter((n)=>Number.isFinite(n)) : [],
+        y: Array.isArray(raw.y) ? raw.y.map(Number).slice(0, 3) : []
+      };
+      if(normalized.x.length !== BRAIN_INPUT_SIZE || normalized.y.length !== 3) return null;
+      normalized.matchDate = toISODate(raw.matchDate || raw?.meta?.historicalDate || raw?.meta?.matchDate) || resolveMatchDate(raw?.meta || {});
+      normalized.capturedAt = Number(raw.capturedAt || raw.createdAt || Date.now()) || Date.now();
+      return normalized;
+    }
 
     function safeParseJSON(value, fallback){
       try{
@@ -8651,7 +8717,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const rawSnapshots = localStorage.getItem(snapshotsKey);
       const rawLoss = localStorage.getItem(lossKey);
       const snapshots = Array.isArray(safeParseJSON(rawSnapshots, []))
-        ? safeParseJSON(rawSnapshots, []).filter((row)=>Array.isArray(row?.x) && Array.isArray(row?.y)).slice(0, 10)
+        ? safeParseJSON(rawSnapshots, []).map(normalizeBrainSample).filter(Boolean).slice(0, 120)
         : [];
       const losses = Array.isArray(safeParseJSON(rawLoss, []))
         ? safeParseJSON(rawLoss, []).map(Number).filter((n)=>Number.isFinite(n)).slice(-30)
@@ -8663,7 +8729,7 @@ function computeTeamIntelligencePanel(db, teamId){
     function persistBrainTelemetry(profileId = activeBrainProfileId){
       try{
         const { snapshotsKey, lossKey } = getBrainTelemetryKeys(profileId);
-        localStorage.setItem(snapshotsKey, JSON.stringify(brainTrainingHistory.slice(0, 10)));
+        localStorage.setItem(snapshotsKey, JSON.stringify(brainTrainingHistory.slice(0, 120)));
         localStorage.setItem(lossKey, JSON.stringify(brainLossHistory.slice(-30)));
       }catch(_err){
         // fallback silencioso: no bloquear la UI por cuota.
@@ -8699,7 +8765,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const latestLoss = losses.at(-1);
       const prevLoss = losses[0];
       const trend = (Number.isFinite(latestLoss) && Number.isFinite(prevLoss)) ? latestLoss - prevLoss : null;
-      const capacityPct = Math.min(100, Math.round((snapshots / 10) * 100));
+      const capacityPct = Math.min(100, Math.round((snapshots / 120) * 100));
       const confidence = Math.round(((latestPredictionConfidence ?? 0) * 100));
       const quality = Number.isFinite(latestLoss)
         ? latestLoss < 0.35 ? "alta" : latestLoss < 0.7 ? "media" : "baja"
@@ -8732,7 +8798,7 @@ function computeTeamIntelligencePanel(db, teamId){
       el.innerHTML = [
         `<div>${modelState}</div>`,
         `<div>Perfil de memoria: <b>${health.profileId}</b>.</div>`,
-        `<div>Capacidad usada: <b>${health.capacityPct}%</b> (${health.snapshots}/10 snapshots locales).</div>`,
+        `<div>Capacidad usada: <b>${health.capacityPct}%</b> (${health.snapshots}/120 snapshots locales).</div>`,
         `<div>Loss reciente: <b>${lossText}</b> · tendencia: <b>${trendText}</b> · calidad: <b>${health.quality}</b>.</div>`,
         `<div>Confianza de predicción (entropía+margen): <b>${health.confidence}%</b>.</div>`,
         extra ? `<div style="color:#58a6ff;">${extra}</div>` : ""
@@ -8781,6 +8847,27 @@ function computeTeamIntelligencePanel(db, teamId){
       model.compile({ optimizer: tf.train.adam(0.002), loss: "categoricalCrossentropy", metrics: ["accuracy"] });
     }
 
+    function brainModelInputSize(model){
+      const shape = model?.inputs?.[0]?.shape;
+      if(!Array.isArray(shape) || shape.length < 2) return null;
+      return Number(shape[shape.length - 1]) || null;
+    }
+
+    async function createTemporalBrainModel(){
+      const model = tf.sequential();
+      model.add(tf.layers.dense({
+        inputShape: [BRAIN_INPUT_SIZE],
+        units: 96,
+        activation: "relu",
+        name: "percepcion_inicial"
+      }));
+      model.add(tf.layers.dropout({ rate: 0.18, name: "drop_regularizacion" }));
+      model.add(tf.layers.dense({ units: 32, activation: "relu", name: "fusion_temporal" }));
+      model.add(tf.layers.dense({ units: 3, activation: "softmax", name: "salida_partido" }));
+      model.compile({ optimizer: tf.train.adam(0.002), loss: "categoricalCrossentropy", metrics: ["accuracy"] });
+      return model;
+    }
+
     async function bootstrapBrainModel(statusEl){
       if(typeof tf === "undefined") return;
       if(brainModel) return;
@@ -8793,8 +8880,14 @@ function computeTeamIntelligencePanel(db, teamId){
       }
       try{
         const restoredModel = await tf.loadLayersModel("localstorage://brain-memory-carl");
-        syncBrainModelGlobal(restoredModel);
-        if(estado) estado.textContent = "✅ Modelo restaurado automáticamente desde localStorage.";
+        if(brainModelInputSize(restoredModel) !== BRAIN_INPUT_SIZE){
+          const temporalModel = await createTemporalBrainModel();
+          syncBrainModelGlobal(temporalModel);
+          if(estado) estado.textContent = `♻️ Modelo restaurado incompatible (${brainModelInputSize(restoredModel) || "?"}). Se migró a temporal-safe ${BRAIN_INPUT_SIZE}.`;
+        }else{
+          syncBrainModelGlobal(restoredModel);
+          if(estado) estado.textContent = "✅ Modelo restaurado automáticamente desde localStorage.";
+        }
       }catch(_err){
         // El modelo aún no existe en localStorage: se creará manualmente al inicializar.
       }
@@ -8835,7 +8928,8 @@ function computeTeamIntelligencePanel(db, teamId){
         const clase = muestra.y[0] ? "Local" : muestra.y[1] ? "Empate" : "Visitante";
         const metaMode = muestra?.meta?.modeLabel || "Pre-Partido";
         const metaDate = muestra?.meta?.historicalDate ? ` · ${muestra.meta.historicalDate}` : "";
-        return `<div>#${idx+1} · ${metaMode}${metaDate} · ${clase} · x=[${muestra.x.map(v=>v.toFixed(2)).join(", ")}]</div>`;
+        const matchDate = muestra.matchDate ? ` · matchDate ${muestra.matchDate}` : "";
+        return `<div>#${idx+1} · ${metaMode}${metaDate}${matchDate} · ${clase} · x=[${muestra.x.slice(0, 12).map(v=>v.toFixed(2)).join(", ")}${muestra.x.length>12?", …":""}]</div>`;
       }).join("");
       persistBrainTelemetry();
       renderBrainHealthCheck();
@@ -9153,21 +9247,45 @@ function computeTeamIntelligencePanel(db, teamId){
         </div>`;
       }).join("");
 
+      const modeMeta = getBrainModeMeta();
+      const matchDate = resolveMatchDate(modeMeta);
+      if(modeMeta.mode === "historico" && !toISODate(modeMeta.historicalDate)){
+        document.getElementById("brainModelStatus").textContent = "❌ En modo Históricos debes indicar la fecha del partido.";
+        return;
+      }
+      const teamAId = brainSelectors?.A?.team?.value || "";
+      const teamBId = brainSelectors?.B?.team?.value || "";
+      const seqA = buildTeamSequenceFromSamples(brainTrainingHistory, teamAId, matchDate, blendedA);
+      const seqB = buildTeamSequenceFromSamples(brainTrainingHistory, teamBId, matchDate, blendedB);
+      const contextVector = buildContextVector({ mode: modeMeta.mode, homeVector: blendedA, awayVector: blendedB });
+      const combinedInput = flattenBrainInput(seqA, seqB, contextVector);
+
       document.getElementById("brainTensorDisplay").textContent =
-        `A [[${blendedA.map(v=>v.toFixed(4)).join(", ")}]]  |  B [[${blendedB.map(v=>v.toFixed(4)).join(", ")}]]`;
+        `A seq[${seqA.length}x${BRAIN_VECTOR_SIZE}] | B seq[${seqB.length}x${BRAIN_VECTOR_SIZE}] | ctx=[${contextVector.map(v=>v.toFixed(3)).join(", ")}]`;
 
       const resultadoReal = oneHotResultado(document.getElementById("brainResultadoReal").value);
-      const modeMeta = getBrainModeMeta();
       brainTrainingContext.mode = modeMeta.mode;
       brainTrainingContext.historicalDate = modeMeta.historicalDate;
       ultimaMuestra = {
-        x: blendedA,
+        x: combinedInput,
         y: resultadoReal,
         createdAt: Date.now(),
+        capturedAt: Date.now(),
+        matchDate,
+        teamAId,
+        teamBId,
+        seqA,
+        seqB,
+        context: contextVector,
+        teamVectors: {
+          ...(teamAId ? { [teamAId]: blendedA.slice(0, BRAIN_VECTOR_SIZE) } : {}),
+          ...(teamBId ? { [teamBId]: blendedB.slice(0, BRAIN_VECTOR_SIZE) } : {})
+        },
         meta: {
           mode: modeMeta.mode,
           modeLabel: modeMeta.modeLabel,
-          historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
+          historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : "",
+          matchDate
         }
       };
 
@@ -9176,14 +9294,11 @@ function computeTeamIntelligencePanel(db, teamId){
 
       if(brainModel && typeof tf !== "undefined"){
         try{
-          const tA = tf.tensor2d([blendedA]);
-          const tB = tf.tensor2d([blendedB]);
-          const pA = brainModel.predict(tA);
-          const pB = brainModel.predict(tB);
-          const rawA = await pA.data();
-          const rawB = await pB.data();
-          predA = ajustarPrediccionPorMarcador(Array.from(rawA), marcadorVivo.home, marcadorVivo.away);
-          predB = ajustarPrediccionPorMarcador(Array.from(rawB), marcadorVivo.away, marcadorVivo.home);
+          const tCombined = tf.tensor2d([combinedInput]);
+          const pCombined = brainModel.predict(tCombined);
+          const rawCombined = await pCombined.data();
+          predA = ajustarPrediccionPorMarcador(Array.from(rawCombined), marcadorVivo.home, marcadorVivo.away);
+          predB = [predA[2], predA[1], predA[0]];
           latestPredictionConfidence = (computePredictionConfidence(predA) + computePredictionConfidence(predB)) / 2;
           renderBrainHealthCheck();
 
@@ -9200,10 +9315,8 @@ function computeTeamIntelligencePanel(db, teamId){
             iaDerrotaEl.value = Number(predA[2] || 0).toFixed(2);
           }
 
-          tA.dispose();
-          tB.dispose();
-          pA.dispose();
-          pB.dispose();
+          tCombined.dispose();
+          pCombined.dispose();
         }catch(err){
           document.getElementById("brainModelStatus").textContent = `⚠ Predict error: ${err.message}`;
         }
@@ -9263,18 +9376,15 @@ function computeTeamIntelligencePanel(db, teamId){
         let model = null;
         try{
           model = await tf.loadLayersModel("localstorage://brain-memory-carl");
-          statusEl.textContent = "✅ Modelo restaurado desde localStorage.";
+          if(brainModelInputSize(model) !== BRAIN_INPUT_SIZE){
+            model = await createTemporalBrainModel();
+            statusEl.textContent = `♻️ Modelo previo no compatible. Nuevo temporal-safe ${BRAIN_INPUT_SIZE} creado.`;
+          }else{
+            statusEl.textContent = "✅ Modelo restaurado desde localStorage.";
+          }
         }catch(_err){
-          model = tf.sequential();
-          model.add(tf.layers.dense({
-            inputShape: [9],
-            units: 32,
-            activation: "relu",
-            name: "percepcion_inicial"
-          }));
-          model.add(tf.layers.dense({ units: 3, activation: "softmax", name: "salida_partido" }));
-          model.compile({ optimizer: tf.train.adam(0.002), loss: "categoricalCrossentropy", metrics: ["accuracy"] });
-          statusEl.textContent = "✅ Modelo nuevo listo (9→32→3, softmax).";
+          model = await createTemporalBrainModel();
+          statusEl.textContent = `✅ Modelo temporal seguro listo (${BRAIN_INPUT_SIZE}→96→32→3, softmax).`;
         }
         syncBrainModelGlobal(model);
       }catch(err){
@@ -9305,10 +9415,15 @@ function computeTeamIntelligencePanel(db, teamId){
           modeLabel: modeMeta.modeLabel,
           historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
         };
-        brainTrainingHistory.unshift({ ...ultimaMuestra });
-        if(brainTrainingHistory.length > 10) brainTrainingHistory.pop();
+        const normalizedSample = normalizeBrainSample({ ...ultimaMuestra });
+        if(!normalizedSample){
+          statusEl.textContent = "❌ Muestra inválida: falta secuencia temporal completa.";
+          return;
+        }
+        brainTrainingHistory.unshift(normalizedSample);
+        if(brainTrainingHistory.length > 120) brainTrainingHistory.pop();
         renderSnapshots();
-        const loss = await aprenderConMuestra(ultimaMuestra);
+        const loss = await aprenderConMuestra(normalizedSample);
         await persistBrainModel(statusEl);
         statusEl.textContent += Number.isFinite(loss) ? ` · loss ${loss.toFixed(4)}` : "";
       }catch(err){
@@ -9329,9 +9444,14 @@ function computeTeamIntelligencePanel(db, teamId){
       try{
         ensureBrainModelCompiled(brainModel);
         statusEl.textContent = "⏳ Entrenando lote reciente...";
-        const xs = tf.tensor2d(brainTrainingHistory.map(m=>m.x));
-        const ys = tf.tensor2d(brainTrainingHistory.map(m=>m.y));
-        const history = await brainModel.fit(xs, ys, { epochs: 12, batchSize: Math.min(4, brainTrainingHistory.length), shuffle: true, verbose: 0 });
+        const validBatch = brainTrainingHistory.filter((m)=>Array.isArray(m?.x) && m.x.length===BRAIN_INPUT_SIZE && Array.isArray(m?.y) && m.y.length===3);
+        if(!validBatch.length){
+          statusEl.textContent = "❌ No hay muestras válidas con secuencias temporales para entrenar.";
+          return;
+        }
+        const xs = tf.tensor2d(validBatch.map(m=>m.x));
+        const ys = tf.tensor2d(validBatch.map(m=>m.y));
+        const history = await brainModel.fit(xs, ys, { epochs: 12, batchSize: Math.min(6, validBatch.length), shuffle: true, verbose: 0 });
         xs.dispose();
         ys.dispose();
         const losses = history?.history?.loss || [];
