@@ -2321,6 +2321,108 @@ function computeTeamIntelligencePanel(db, teamId){
     return { homeBoost, awayResilience, awayFragility, crowdEnergy, travelTilt };
   }
 
+  const PESOS_FOOTBALL_LAB = {
+    agresividad: {
+      "falta": 0.04,
+      "tarjeta amarilla": 0.18,
+      "tarjeta roja": 0.50,
+      "entrada dura": 0.12,
+      "amonestado": 0.15,
+      "pelea": 0.25,
+      "discusión": 0.10,
+      "var": 0.08
+    },
+    peligro: {
+      "remate": 0.12,
+      "tiro a puerta": 0.15,
+      "larguero": 0.25,
+      "poste": 0.25,
+      "paradón": 0.20,
+      "salva bajo palos": 0.30,
+      "córner": 0.05,
+      "fuera de juego": -0.02,
+      "ataque": 0.03
+    }
+  };
+
+  function escapeRegexToken(text = ""){
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function detectarMinutoMaximoRelato(texto = ""){
+    const pattern = /(\d{1,3})(?:\s*\+\s*(\d{1,2}))?\s*'/g;
+    let maxMinute = 0;
+    let match;
+    while((match = pattern.exec(texto)) !== null){
+      const base = Number(match[1]) || 0;
+      const extra = Number(match[2]) || 0;
+      const minute = base + extra;
+      if(minute > maxMinute) maxMinute = minute;
+    }
+    return Math.max(maxMinute, 0);
+  }
+
+  function extraerMetricasDelRelato(texto = ""){
+    const raw = String(texto || "").toLowerCase();
+    const baseScores = { agresividad: 0, peligro: 0 };
+
+    for(const categoria of Object.keys(PESOS_FOOTBALL_LAB)){
+      for(const [palabra, peso] of Object.entries(PESOS_FOOTBALL_LAB[categoria])){
+        const regex = new RegExp(escapeRegexToken(palabra), "gi");
+        const coincidencias = (raw.match(regex) || []).length;
+        baseScores[categoria] += coincidencias * Number(peso || 0);
+      }
+    }
+
+    const minutoMax = detectarMinutoMaximoRelato(raw);
+    const ventanaMin = minutoMax > 0 ? minutoMax : 90;
+    const factorTiempo = Math.max(ventanaMin / 90, 0.1);
+
+    return {
+      agresividad: clamp(baseScores.agresividad / factorTiempo, 0, 1),
+      peligro: clamp(baseScores.peligro / factorTiempo, 0, 1),
+      minutoMax,
+      factorTiempo,
+      raw: baseScores
+    };
+  }
+
+  function computeTeamNarrativeMetrics(matches = []){
+    const narrated = matches
+      .map((match)=>({
+        match,
+        text: String(match?.narrativeModule?.rawText || "").trim()
+      }))
+      .filter((row)=>row.text.length>0)
+      .map((row)=>({ ...row, metrics: extraerMetricasDelRelato(row.text) }));
+
+    if(!narrated.length){
+      return {
+        games: 0,
+        avgAgresividad: 0,
+        avgPeligro: 0,
+        avgWindow: 90,
+        topAgresividad: null,
+        topPeligro: null
+      };
+    }
+
+    const avgAgresividad = narrated.reduce((acc, row)=>acc + row.metrics.agresividad, 0) / narrated.length;
+    const avgPeligro = narrated.reduce((acc, row)=>acc + row.metrics.peligro, 0) / narrated.length;
+    const avgWindow = narrated.reduce((acc, row)=>acc + (row.metrics.minutoMax || 90), 0) / narrated.length;
+    const byAgg = [...narrated].sort((a,b)=>b.metrics.agresividad - a.metrics.agresividad);
+    const byDanger = [...narrated].sort((a,b)=>b.metrics.peligro - a.metrics.peligro);
+
+    return {
+      games: narrated.length,
+      avgAgresividad,
+      avgPeligro,
+      avgWindow,
+      topAgresividad: byAgg[0] || null,
+      topPeligro: byDanger[0] || null
+    };
+  }
+
   function inferEngineMetricsFromMatch(match, teamId){
     const isHome = match?.homeId===teamId;
     const side = isHome ? "home" : "away";
@@ -5399,6 +5501,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const pressureRef = intRows[0]?.out?.windowInfo?.windowPressure || { congestionLevel:"🟢" };
       const globalRotation = pressureRef.congestionLevel==="🔴" || backToBack>=2 || next14.length>=4 ? "Alta" : next14.length>=2 ? "Media" : "Baja";
       const patterns = buildTeamIntPatterns(db, team);
+      const narrativeMetrics = computeTeamNarrativeMetrics(teamMatches);
       const matchRows = teamMatches.map((m, idx)=>{
         const isHome = m.homeId===team.id;
         const rival = db.teams.find(t=>t.id===(isHome ? m.awayId : m.homeId));
@@ -5503,6 +5606,26 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-card" style="flex:1;min-width:320px;">
             <div style="font-weight:800;margin-bottom:8px;">🧬 Tactical DNA Map</div>
             <div style="height:280px;"><canvas id="teamTacticalRadar"></canvas></div>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">🗺️ Football Lab · Narraciones guardadas</div>
+          <div class="fl-kpi" style="margin-bottom:8px;">
+            <div><span class="fl-mini">Partidos con relato</span><b>${narrativeMetrics.games}</b></div>
+            <div><span class="fl-mini">Agresividad media</span><b>${(narrativeMetrics.avgAgresividad*100).toFixed(0)}%</b></div>
+            <div><span class="fl-mini">Peligro medio</span><b>${(narrativeMetrics.avgPeligro*100).toFixed(0)}%</b></div>
+            <div><span class="fl-mini">Ventana media</span><b>${Math.round(narrativeMetrics.avgWindow)}'</b></div>
+          </div>
+          <div class="fl-mini">
+            Cálculo automático desde <b>narrativeModule.rawText</b> de cada partido del equipo.
+            Se aplica el diccionario de paso (agresividad/peligro) y luego normalización por ventana:
+            <b>scoreFinal = scoreExtraido / (minutoMax/90)</b>.
+          </div>
+          <div class="fl-mini" style="margin-top:6px;">
+            ${narrativeMetrics.topAgresividad ? `Pico de agresividad: <b>${(narrativeMetrics.topAgresividad.metrics.agresividad*100).toFixed(0)}%</b> (${narrativeMetrics.topAgresividad.match.date || "sin fecha"}).` : "Sin relatos guardados para calcular picos."}
+          </div>
+          <div class="fl-mini" style="margin-top:4px;">
+            ${narrativeMetrics.topPeligro ? `Pico de peligro: <b>${(narrativeMetrics.topPeligro.metrics.peligro*100).toFixed(0)}%</b> (${narrativeMetrics.topPeligro.match.date || "sin fecha"}).` : ""}
           </div>
         </div>
         <div class="fl-card">
@@ -8058,74 +8181,6 @@ function computeTeamIntelligencePanel(db, teamId){
         normBrain(diasDescanso, 0, 14),
         normBrain(momentum,    -1,  1),
       ];
-    }
-
-    const PESOS_FOOTBALL_LAB = {
-      agresividad: {
-        "falta": 0.04,
-        "tarjeta amarilla": 0.18,
-        "tarjeta roja": 0.50,
-        "entrada dura": 0.12,
-        "amonestado": 0.15,
-        "pelea": 0.25,
-        "discusión": 0.10,
-        "var": 0.08
-      },
-      peligro: {
-        "remate": 0.12,
-        "tiro a puerta": 0.15,
-        "larguero": 0.25,
-        "poste": 0.25,
-        "paradón": 0.20,
-        "salva bajo palos": 0.30,
-        "córner": 0.05,
-        "fuera de juego": -0.02,
-        "ataque": 0.03
-      }
-    };
-
-    function escapeRegexToken(text = ""){
-      return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
-
-    function detectarMinutoMaximoRelato(texto = ""){
-      const pattern = /(\d{1,3})(?:\s*\+\s*(\d{1,2}))?\s*'/g;
-      let maxMinute = 0;
-      let match;
-      while((match = pattern.exec(texto)) !== null){
-        const base = Number(match[1]) || 0;
-        const extra = Number(match[2]) || 0;
-        const minute = base + extra;
-        if(minute > maxMinute) maxMinute = minute;
-      }
-      return Math.max(maxMinute, 0);
-    }
-
-    function extraerMetricasDelRelato(texto = ""){
-      const raw = String(texto || "").toLowerCase();
-      const baseScores = { agresividad: 0, peligro: 0 };
-
-      for(const categoria of Object.keys(PESOS_FOOTBALL_LAB)){
-        for(const [palabra, peso] of Object.entries(PESOS_FOOTBALL_LAB[categoria])){
-          const regex = new RegExp(escapeRegexToken(palabra), "gi");
-          const coincidencias = (raw.match(regex) || []).length;
-          baseScores[categoria] += coincidencias * Number(peso || 0);
-        }
-      }
-
-      const minutoMax = detectarMinutoMaximoRelato(raw);
-      const ventanaMin = minutoMax > 0 ? minutoMax : 90;
-      const factorTiempo = Math.max(ventanaMin / 90, 0.1);
-      const agresividad = clamp(baseScores.agresividad / factorTiempo, 0, 1);
-      const peligro = clamp(baseScores.peligro / factorTiempo, 0, 1);
-
-      return {
-        agresividad,
-        peligro,
-        minutoMax,
-        factorTiempo,
-        raw: baseScores
-      };
     }
 
     function getNarrativeMetrics(side = "A"){
