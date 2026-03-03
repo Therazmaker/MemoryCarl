@@ -8189,8 +8189,8 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>
         </div>
         <div class="fl-row" style="margin-bottom:12px;">
-          <button class="fl-btn" id="brainProcess">⚡ Procesar Vector de Estado</button>
-          <button class="fl-btn" id="brainInitModel">🧠 Inicializar Modelo TF.js</button>
+          <button class="fl-btn" id="brainInitModel">1️⃣ 🧠 Inicializar Modelo TF.js</button>
+          <button class="fl-btn" id="brainProcess">2️⃣ ⚡ Procesar Vector de Estado</button>
           <button class="fl-btn secondary" id="brainExportMemory">📤 Exportar memoria</button>
           <button class="fl-btn secondary" id="brainImportMemory">📥 Importar memoria</button>
           <input id="brainImportFile" type="file" accept="application/json" style="display:none;" />
@@ -8202,8 +8202,8 @@ function computeTeamIntelligencePanel(db, teamId){
               <option value="derrota">Derrota</option>
             </select>
           </label>
-          <button class="fl-btn" id="brainLearnOne">✅ Validar y Aprender</button>
-          <button class="fl-btn" id="brainLearnBatch">📚 Entrenar Lote (últimos 10)</button>
+          <button class="fl-btn" id="brainLearnOne">3️⃣ ✅ Validar y Aprender</button>
+          <button class="fl-btn" id="brainLearnBatch">4️⃣ 📚 Entrenar Lote (últimos 10)</button>
           <span id="brainModelStatus" class="fl-muted" style="margin-left:8px;"></span>
         </div>
         <div class="fl-grid two" style="margin-bottom:12px;">
@@ -8687,11 +8687,18 @@ function computeTeamIntelligencePanel(db, teamId){
     }
 
     function syncBrainModelGlobal(model){
+      ensureBrainModelCompiled(model);
       brainModel = model || null;
       if(typeof globalThis !== "undefined"){
         globalThis.modelo = brainModel;
       }
       renderBrainHealthCheck();
+    }
+
+    function ensureBrainModelCompiled(model){
+      if(typeof tf === "undefined" || !model || typeof model.compile !== "function") return;
+      if(model.optimizer) return;
+      model.compile({ optimizer: tf.train.adam(0.002), loss: "categoricalCrossentropy", metrics: ["accuracy"] });
     }
 
     async function bootstrapBrainModel(statusEl){
@@ -8766,6 +8773,7 @@ function computeTeamIntelligencePanel(db, teamId){
     }
 
     async function aprenderConMuestra(muestra){
+      ensureBrainModelCompiled(brainModel);
       const xs = tf.tensor2d([muestra.x]);
       const ys = tf.tensor2d([muestra.y]);
       const history = await brainModel.fit(xs, ys, {
@@ -9139,6 +9147,7 @@ function computeTeamIntelligencePanel(db, teamId){
         return;
       }
       try{
+        ensureBrainModelCompiled(brainModel);
         statusEl.textContent = "⏳ Entrenando lote reciente...";
         const xs = tf.tensor2d(brainTrainingHistory.map(m=>m.x));
         const ys = tf.tensor2d(brainTrainingHistory.map(m=>m.y));
