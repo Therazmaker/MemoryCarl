@@ -21,6 +21,12 @@ import {
   VENTANA_TIEMPO_DEFAULT,
   IMPORTANCIA_TORNEO,
 } from "./HipocampoManager.js";
+import {
+  Cerebelo,
+  clasificarDiscrepancia,
+  calcularSemaforo,
+  UMBRAL_ERROR_DEFAULT,
+} from "./Cerebelo.js";
 
 // Re-export helpers so consumers can import from a single entry point
 export {
@@ -35,6 +41,10 @@ export {
   generarInsightTendencia,
   VENTANA_TIEMPO_DEFAULT,
   IMPORTANCIA_TORNEO,
+  Cerebelo,
+  clasificarDiscrepancia,
+  calcularSemaforo,
+  UMBRAL_ERROR_DEFAULT,
 };
 
 // ─── Paso 3: Capa de Entrada en TensorFlow.js ────────────────────────────────

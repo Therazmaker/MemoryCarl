@@ -3,6 +3,8 @@
  * Local-first simulator with JSON import and football-data.org helpers.
  */
 
+import { Cerebelo } from "./Cerebelo.js";
+
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
     return window.__FOOTBALL_LAB__;
@@ -7794,6 +7796,42 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>
         </div>
       </div>
+      <div class="fl-card" style="margin-top:12px;">
+        <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Cerebelo — Capa de Refinamiento</div>
+        <div class="fl-muted" style="margin-bottom:12px;">
+          Ingresa la predicción del Córtex (Capa 3) y el resultado del Simulador Estadístico.
+          El Cerebelo compara ambas fuentes y emite un veredicto refinado con indicador de coherencia.
+        </div>
+        <div class="fl-grid two" style="margin-bottom:12px;">
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Predicción del Córtex (Capa 3)</div>
+            <div class="fl-grid" style="gap:6px;">
+              <label class="fl-muted">P(Victoria) <input id="cerebeloIAVictoria" type="number" min="0" max="1" step="0.01" value="0.70" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Empate) <input id="cerebeloIAEmpate" type="number" min="0" max="1" step="0.01" value="0.20" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Derrota) <input id="cerebeloIADerrota" type="number" min="0" max="1" step="0.01" value="0.10" class="fl-input" style="width:90px;margin-left:8px;"></label>
+            </div>
+          </div>
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Resultado del Simulador Estadístico</div>
+            <div class="fl-grid" style="gap:6px;">
+              <label class="fl-muted">P(Victoria) <input id="cerebeloSimVictoria" type="number" min="0" max="1" step="0.01" value="0.30" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Empate) <input id="cerebeloSimEmpate" type="number" min="0" max="1" step="0.01" value="0.40" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Derrota) <input id="cerebeloSimDerrota" type="number" min="0" max="1" step="0.01" value="0.30" class="fl-input" style="width:90px;margin-left:8px;"></label>
+            </div>
+          </div>
+        </div>
+        <div class="fl-row" style="margin-bottom:12px;">
+          <button class="fl-btn" id="cerebeloRefinar">🔬 Refinar con Cerebelo</button>
+        </div>
+        <div id="cerebeloResult" style="display:none;">
+          <div id="cerebeloSemaforo" class="fl-card" style="padding:12px;margin-bottom:10px;text-align:center;font-size:20px;font-weight:900;"></div>
+          <div class="fl-grid" style="grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;" id="cerebeloProbs"></div>
+          <div class="fl-card" style="background:#0d1117;padding:10px;">
+            <div class="fl-muted" style="margin-bottom:4px;font-size:12px;">Detalle del Veredicto</div>
+            <div id="cerebeloDetalle" style="font-size:12px;color:#c9d1d9;line-height:1.6;"></div>
+          </div>
+        </div>
+      </div>
     `;
 
     const LABELS = [
@@ -7927,6 +7965,57 @@ function computeTeamIntelligencePanel(db, teamId){
       }catch(err){
         statusEl.textContent = `❌ ${err.message}`;
       }
+    };
+
+    const cerebelo = new Cerebelo();
+
+    document.getElementById("cerebeloRefinar").onclick = ()=>{
+      const iaVictoria = parseFloat(document.getElementById("cerebeloIAVictoria").value) || 0;
+      const iaEmpate   = parseFloat(document.getElementById("cerebeloIAEmpate").value)   || 0;
+      const iaDerrota  = parseFloat(document.getElementById("cerebeloIADerrota").value)  || 0;
+      const simVictoria = parseFloat(document.getElementById("cerebeloSimVictoria").value) || 0;
+      const simEmpate   = parseFloat(document.getElementById("cerebeloSimEmpate").value)   || 0;
+      const simDerrota  = parseFloat(document.getElementById("cerebeloSimDerrota").value)  || 0;
+
+      const prediccionIA       = [iaVictoria,  iaEmpate,  iaDerrota];
+      const resultadoSimulador = [simVictoria, simEmpate, simDerrota];
+
+      const veredicto = cerebelo.refinar(prediccionIA, resultadoSimulador);
+
+      const semaforoColors = { verde: "#3fb950", amarillo: "#f2cc60", rojo: "#f85149" };
+      const semaforoBg     = { verde: "#0d2a14", amarillo: "#2a2208", rojo: "#2a0d0d" };
+      const sc = semaforoColors[veredicto.semaforo.color] || "#c9d1d9";
+      const sb = semaforoBg[veredicto.semaforo.color]     || "#161b22";
+
+      document.getElementById("cerebeloResult").style.display = "block";
+      document.getElementById("cerebeloSemaforo").style.background = sb;
+      document.getElementById("cerebeloSemaforo").style.borderLeft = `4px solid ${sc}`;
+      document.getElementById("cerebeloSemaforo").innerHTML =
+        `${veredicto.semaforo.emoji} <span style="color:${sc}">${veredicto.semaforo.mensaje}</span>`;
+
+      const probLabels = ["Victoria","Empate","Derrota"];
+      document.getElementById("cerebeloProbs").innerHTML = veredicto.resultadoFinal.map((val, i)=>{
+        const pct   = (val * 100).toFixed(1);
+        const color = val >= 0.5 ? "#3fb950" : val >= 0.3 ? "#f2cc60" : "#f85149";
+        return `<div class="fl-card" style="padding:10px;background:#111722;text-align:center;">
+          <div class="fl-muted" style="font-size:11px;margin-bottom:4px;">${probLabels[i]}</div>
+          <div style="font-size:24px;font-weight:900;color:${color};">${pct}%</div>
+          <div style="height:6px;border-radius:999px;background:#0d1117;border:1px solid #2d333b;margin-top:6px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;border-radius:999px;background:${color};"></div>
+          </div>
+        </div>`;
+      }).join("");
+
+      const aprendizajeMsg = veredicto.marcarParaAprendizaje
+        ? "📌 Marcado para el Hipocampo (fallo lógico — mayor peso en aprendizaje futuro)."
+        : veredicto.tipoDiscrepancia === "ruido"
+          ? "🚫 Evento aleatorio — No guardar para entrenamiento."
+          : "✅ Datos coherentes — Uso normal en entrenamiento.";
+
+      document.getElementById("cerebeloDetalle").innerHTML =
+        `<b>Confianza:</b> ${veredicto.confianza}<br>` +
+        `<b>Tipo de discrepancia:</b> ${veredicto.tipoDiscrepancia}<br>` +
+        `<b>Filtro de ruido:</b> ${aprendizajeMsg}`;
     };
   }
 
