@@ -1,3208 +1,8039 @@
-
 /**
- * Football Lab V5
- * - Teams + Players DB (0–10 rating)
- * - Match Logger with "Season" + only-current-season form
- * - XI Builder per Team + Formation
- * - Strength by lines (Attack/Defense/Control) using XI effective ratings (base + form)
- * - 3-way probabilities (Home/Draw/Away)
- *
- * Notes:
- * - Data stored local-first in localStorage key "footballDB"
- * - This is a study lab, not a betting tool.
+ * Football Lab — Clean rebuild
+ * Local-first simulator with JSON import and football-data.org helpers.
  */
 
+import { Cerebelo } from "./Cerebelo.js";
+
 export function initFootballLab(){
-
-  // Idempotent init guard (hard stop): this file can be loaded or init-called multiple
-  // times by the app/router. We must NEVER re-register listeners or re-render.
-  try{
-    if(window.__footballLabInitialized){
-      return window.__FOOTBALL_LAB__;
-    }
-    window.__footballLabInitialized = true;
-  }catch(e){ /* ignore */ }
-  window.FOOTBALL_LAB_FILE = "footballLab_v8e.js";
-  console.log("⚽ FOOTBALL LAB V6e ACTIVE (v8e)", "•", window.FOOTBALL_LAB_VERSION || "(no main marker)");
-
-  const KEY = "footballDB";
-  let _fbSimCharts = { totals:null, scorelines:null };
-  let _teamPlayerDateSort = "none"; // none | desc | asc (by latest match date)
-
-  const DEFAULT_DB = {
-    settings: {
-      currentSeason: getAutoSeasonLabel(), // e.g., "2025-2026"
-      homeAdvantage: 0.05,                // +5%
-      formLastN: 5,                       // last N matches in current season
-      formWeight: 0.35                    // how much match form pulls rating (0..1)
-    },
-    weights: { // action category weights (editable)
-      shots: 1.2,
-      passes: 1.0,
-      dribbles: 1.0,
-      defense: 1.1,
-      goalkeeper: 1.3,
-      discipline: 1.0
-    },
-    teams: [],
-    players: [],
-    matches: [], // match logs per player
-    lineups: {}  // lineups[teamId][formation][pos] = playerId
-  };
-
-  function getAutoSeasonLabel(){
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = d.getMonth()+1;
-    // Common football season: Aug -> May
-    if(m >= 8) return `${y}-${y+1}`;
-    return `${y-1}-${y}`;
+  if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
+    return window.__FOOTBALL_LAB__;
   }
 
-  function loadDB(){
+  window.__footballLabInitialized = true;
+  window.FOOTBALL_LAB_FILE = "footballLab_v8e.js";
+
+  const KEY = "footballDB";
+  const COMP_CACHE_KEY = "footballLab_competitions";
+  const TEAMS_CACHE_PREFIX = "footballLab_teams_";
+  const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
+
+  const defaultDb = {
+    settings: {
+      apiToken: "",
+      season: String(new Date().getFullYear()),
+      selectedLeagueId: ""
+    },
+    leagues: [],
+    teams: [],
+    teamCompetitions: [],
+    players: [],
+    tracker: [],
+    diagProfiles: {},
+    versus: {
+      homeAdvantage: 1.1,
+      paceFactor: 1,
+      sampleSize: 20,
+      marketBlend: 0.35,
+      matchday: 20,
+      tableContextTrust: 0.45,
+      tableContext: {},
+      simV2: {
+        baseGoalRatePerBlock: 0.22,
+        globalVolatility: 0.34,
+        leagueGoalsAvg: 2.6
+      }
+    },
+    predictions: [],
+    marketTracker: [],
+    bitacora: {
+      bank: 15,
+      kellyFraction: 0.25,
+      minUnit: 1,
+      maxStakePct: 0.2,
+      dailyGoalPct: 0.05,
+      dailyRiskPct: 0.15,
+      stopLoss: 2,
+      stopWin: 1,
+      maxBetsPerDay: 3,
+      maxConsecutiveLosses: 2,
+      entries: []
+    },
+    learning: {
+      schemaVersion: 2,
+      leagueScale: {},
+      teamBias: {},
+      temperatureByLeague: {},
+      metrics: { global: null, byLeague: {} },
+      trainingSet: [],
+      marketTrust: 0.35,
+      lrLeague: 0.12,
+      lrTeam: 0.08
+    }
+  };
+
+  function uid(prefix){
+    return `${prefix}_${Math.random().toString(36).slice(2,9)}${Date.now().toString(36).slice(-4)}`;
+  }
+
+  function loadDb(){
     const raw = localStorage.getItem(KEY);
     if(!raw){
-      localStorage.setItem(KEY, JSON.stringify(DEFAULT_DB));
-      return structuredClone(DEFAULT_DB);
+      localStorage.setItem(KEY, JSON.stringify(defaultDb));
+      return structuredClone(defaultDb);
     }
     try{
       const db = JSON.parse(raw);
-      // soft-migrate
-      if(!db.settings) db.settings = structuredClone(DEFAULT_DB.settings);
-      if(!db.weights) db.weights = structuredClone(DEFAULT_DB.weights);
-      if(!db.teams) db.teams = [];
-      if(!db.players) db.players = [];
-      if(!db.matches) db.matches = [];
-      if(!db.lineups) db.lineups = {};
-      // migrate leagues (V8)
-      if(!db.leagues || !Array.isArray(db.leagues) || db.leagues.length===0){
-        db.leagues = [
-          { id: "lg_league", name: "Liga", createdAt: Date.now() },
-          { id: "lg_cup", name: "Copa", createdAt: Date.now() },
-          { id: "lg_intl", name: "Internacional", createdAt: Date.now() },
-          { id: "lg_friendly", name: "Amistoso", createdAt: Date.now() },
-        ];
-      }
-      if(!db.settings) db.settings = {};
-      if(!db.settings.currentLeagueId) db.settings.currentLeagueId = db.leagues[0].id;
+      db.settings ||= structuredClone(defaultDb.settings);
+      db.leagues ||= [];
+      db.teams ||= [];
+      db.teamCompetitions ||= [];
+      db.players ||= [];
+      db.tracker ||= [];
+      db.diagProfiles ||= {};
+      db.versus ||= { homeAdvantage: 1.1 };
+      db.versus.paceFactor = clamp(Number(db.versus.paceFactor) || 1, 0.82, 1.35);
+      db.versus.sampleSize = clamp(Number(db.versus.sampleSize) || 20, 5, 40);
+      db.versus.marketBlend = clamp(Number(db.versus.marketBlend) || defaultDb.versus.marketBlend, 0, 0.8);
+      db.versus.matchday = clamp(Number(db.versus.matchday) || defaultDb.versus.matchday, 1, 50);
+      db.versus.tableContextTrust = clamp(Number(db.versus.tableContextTrust) || defaultDb.versus.tableContextTrust, 0, 1);
+      db.versus.tableContext ||= {};
+      db.versus.simV2 ||= structuredClone(defaultDb.versus.simV2);
+      db.versus.simV2.baseGoalRatePerBlock = clamp(Number(db.versus.simV2.baseGoalRatePerBlock) || defaultDb.versus.simV2.baseGoalRatePerBlock, 0.08, 0.6);
+      db.versus.simV2.globalVolatility = clamp(Number(db.versus.simV2.globalVolatility) || defaultDb.versus.simV2.globalVolatility, 0.1, 0.8);
+      db.versus.simV2.leagueGoalsAvg = clamp(Number(db.versus.simV2.leagueGoalsAvg) || defaultDb.versus.simV2.leagueGoalsAvg, 1.6, 4.2);
+      db.predictions ||= [];
+      db.marketTracker = Array.isArray(db.marketTracker) ? db.marketTracker.map(ensureMarketMatchState) : [];
+      db.bitacora = ensureBitacoraState(db.bitacora);
+      db.learning ||= structuredClone(defaultDb.learning);
+      db.learning.schemaVersion = Number(db.learning.schemaVersion) || 2;
+      db.learning.leagueScale ||= {};
+      db.learning.teamBias ||= {};
+      db.learning.temperatureByLeague ||= {};
+      db.learning.trainingSet ||= [];
+      db.learning.metrics ||= { global: null, byLeague: {} };
+      db.learning.metrics.byLeague ||= {};
+      db.learning.marketTrust = clamp(Number(db.learning.marketTrust) || defaultDb.learning.marketTrust, 0, 0.85);
+      db.leagues = db.leagues.map((league)=>({ ...league, type: normalizeCompetitionType(league?.type) }));
+      db.teams.forEach((team)=>{
+        ensureTeamIntState(team);
+        team.futureMatches = (team.futureMatches || []).map((match)=>{
+          const competition = getCompetitionById(db, match?.competitionId || match?.leagueId || "");
+          return {
+            ...match,
+            competitionId: competition?.id || match?.competitionId || match?.leagueId || "",
+            competition: competition?.name || match?.competition || "Liga"
+          };
+        });
+      });
 
+      // V9 migration: teams are global entities, league participation lives in teamCompetitions.
+      if(!Array.isArray(db.teamCompetitions)) db.teamCompetitions = [];
+      const linked = new Set(db.teamCompetitions.map(tc=>`${tc.teamId}::${tc.leagueId}`));
+      const ensureLink = (teamId, leagueId)=>{
+        if(!teamId || !leagueId) return;
+        const key = `${teamId}::${leagueId}`;
+        if(linked.has(key)) return;
+        linked.add(key);
+        db.teamCompetitions.push({ teamId, leagueId, joinedAt: Date.now() });
+      };
+      db.teams.forEach((team)=>{
+        if(team?.leagueId) ensureLink(team.id, team.leagueId);
+      });
+      db.tracker.forEach((m)=>{
+        if(m?.leagueId){
+          ensureLink(m.homeId, m.leagueId);
+          ensureLink(m.awayId, m.leagueId);
+        }
+      });
       return db;
-    }catch(e){
-      localStorage.setItem(KEY, JSON.stringify(DEFAULT_DB));
-      return structuredClone(DEFAULT_DB);
+    }catch(_e){
+      localStorage.setItem(KEY, JSON.stringify(defaultDb));
+      return structuredClone(defaultDb);
     }
   }
 
-  function saveDB(db){
+  function saveDb(db){
     localStorage.setItem(KEY, JSON.stringify(db));
   }
 
-  function uid(prefix="id"){
-    return `${prefix}_${Date.now()}_${Math.floor(Math.random()*1e6)}`;
+  function normName(value){
+    return String(value || "").toLowerCase().trim().replace(/\s+/g, " ");
   }
 
-  function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
-
-  // --- Elo-style update (performance vs expected), scaled by minutes ---
-  function updateEloRating(current, performanceScore, minutes, kBase=0.18){
-    const minFactor = Math.sqrt(clamp((minutes||0)/90, 0, 1));
-    const K = kBase * minFactor;
-    const expected = current;
-    const delta = K * (performanceScore - expected);
-    return { newRating: clamp(expected + delta, 0, 10), delta, K };
+  function ensureTeamInLeague(db, teamId, leagueId){
+    if(!teamId || !leagueId) return;
+    db.teamCompetitions ||= [];
+    const exists = db.teamCompetitions.some(tc=>tc.teamId===teamId && tc.leagueId===leagueId);
+    if(!exists) db.teamCompetitions.push({ teamId, leagueId, joinedAt: Date.now() });
   }
 
-  function fmt(n, d=2){ return (Number.isFinite(n) ? n : 0).toFixed(d); }
-
-  // --- Poisson sampler (for goal simulation) ---
-  function poissonSample(lambda){
-    const L = Math.exp(-Math.max(0, lambda));
-    let k = 0;
-    let p = 1;
-    while(p > L){
-      k++;
-      p *= Math.random();
-      // safety guard for extreme lambdas
-      if(k > 20) break;
-    }
-    return Math.max(0, k-1);
+  function normalizeCompetitionType(type){
+    const clean = String(type || "").trim().toLowerCase();
+    if(["league","cup","continental","friendly"].includes(clean)) return clean;
+    return "league";
   }
 
-  function clampNum(v, min, max, fallback){
-    const n = Number(v);
-    if(!Number.isFinite(n)) return fallback;
-    return clamp(n, min, max);
+  function getCompetitionById(db, competitionId){
+    return db.leagues.find((league)=>league.id===competitionId) || null;
   }
 
-  const POS_LABELS = {
-    GK: "GK — Portero",
-    CB: "CB — Defensa Central",
-    LB: "LB — Lateral Izquierdo",
-    RB: "RB — Lateral Derecho",
-    CM: "CM — Mediocampista Central",
-    CDM: "CDM — Mediocentro Defensivo",
-    CAM: "CAM — Mediocentro Ofensivo",
-    LW: "LW — Extremo Izquierdo",
-    RW: "RW — Extremo Derecho",
-    ST: "ST — Delantero Centro"
-  };
-
-  const FORMATIONS = {
-    "433": ["GK","LB","CB","CB","RB","CDM","CM","CAM","LW","ST","RW"],
-    "442": ["GK","LB","CB","CB","RB","CM","CM","LM","RM","ST","ST"], // LM/RM mapped to LW/RW for strength
-    "343": ["GK","CB","CB","CB","LM","RM","CM","CAM","LW","ST","RW"], // LM/RM mapped to LW/RW
-  };
-
-  function normalizePos(pos){
-    if(pos === "LM") return "LW";
-    if(pos === "RM") return "RW";
-    return pos;
+  function competitionTypeFromMatch(db, match){
+    const byId = getCompetitionById(db, match?.competitionId || match?.leagueId || "");
+    if(byId) return normalizeCompetitionType(byId.type);
+    const competition = String(match?.competition || "").toLowerCase();
+    if(/ucl|champions|europa|libertadores|continental/.test(competition)) return "continental";
+    if(/copa|cup/.test(competition)) return "cup";
+    if(/amistoso|friendly/.test(competition)) return "friendly";
+    return "league";
   }
 
-  // ---- Hook into MemoryCarl "Más" (More) ----
-  const moreBtn = document.querySelector("#moreBtn");
-  if(moreBtn){
-    const labBtn = document.createElement("button");
-    labBtn.innerText = "⚽ Football Lab (V8)";
-    labBtn.className = "more-item";
-    labBtn.onclick = () => openLab("home");
-    moreBtn.parentElement.appendChild(labBtn);
+  function stakesModeFromMatch(db, match){
+    return competitionTypeFromMatch(db, match)==="league" ? "table" : "knockout";
   }
 
-  function openLab(view, payload={}){
-    const db = loadDB();
-    const root = document.getElementById("app");
-
-    // Minimal top nav
-    root.innerHTML = `
-      <div style="padding:18px 18px 22px 18px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-          <div>
-            <div style="font-size:20px;font-weight:800;">⚽ Football Lab <span class="fl-pill">V6e</span></div>
-            <div style="opacity:.8;font-size:12px;">Modo estudio • Temporada actual: <b>${escapeHtml(db.settings.currentSeason)}</b></div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="mc-btn" id="navHome">Inicio</button>
-            <button class="mc-btn" id="navTeams">Equipos</button>
-            <button class="mc-btn" id="navVersus">Versus</button>
-            <button class="mc-btn" id="navSettings">Ajustes</button>
-            <button class="mc-btn" id="navBack">Volver</button>
-          </div>
-        </div>
-        <div style="height:10px;"></div>
-        <div id="fl_view"></div>
-      </div>
-    `;
-
-    // Buttons style fallback if MemoryCarl doesn't define it
-    injectMiniStyle();
-
-    // nav
-    document.getElementById("navHome").onclick = ()=>openLab("home");
-    document.getElementById("navTeams").onclick = ()=>openLab("teams");
-    document.getElementById("navVersus").onclick = ()=>openLab("versus");
-    document.getElementById("navSettings").onclick = ()=>openLab("settings");
-    document.getElementById("navBack").onclick = ()=>location.reload();
-
-    // render
-    if(view==="home") renderHome(db);
-    if(view==="teams") renderTeams(db);
-    if(view==="team") renderTeam(db, payload.teamId);
-    if(view==="lineup") renderLineup(db, payload.teamId);
-    if(view==="logger") renderLogger(db, payload.teamId);
-    if(view==="versus") renderVersus(db);
-    if(view==="settings") renderSettings(db);
-    if(view==="player") renderPlayer(db, payload.playerId);
-
-  }
-
-  function injectMiniStyle(){
-    if(document.getElementById("fl_v5_style")) return;
-    const s = document.createElement("style");
-    s.id="fl_v5_style";
-    s.textContent = `
-      .mc-btn{
-        background:#151515;border:1px solid rgba(255,255,255,.12);
-        color:#fff;padding:8px 10px;border-radius:10px;cursor:pointer;
-        font-weight:650;font-size:12px;
-      }
-      .mc-btn:hover{ border-color: rgba(255,255,255,.25); }
-      .fl-card{
-        background:#0f0f0f;border:1px solid rgba(255,255,255,.10);
-        border-radius:14px;padding:12px;margin:10px 0;
-      }
-      .fl-row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-      .fl-row > * { flex: 1 1 auto; }
-      .fl-input, .fl-select{
-        background:#111;border:1px solid rgba(255,255,255,.15);
-        color:#fff;border-radius:10px;padding:9px 10px; width:100%;
-      }
-      .fl-small{ font-size:12px; opacity:.85; }
-      .fl-h3{ margin:10px 0 6px 0; font-size:14px; opacity:.9; }
-      .fl-pill{
-        display:inline-block;padding:4px 8px;border:1px solid rgba(255,255,255,.14);
-        border-radius:999px;font-size:11px;opacity:.9;margin-right:6px;margin-top:6px;
-      }
-      .fl-grid2{ display:grid; grid-template-columns: 1fr; gap:10px; }
-      @media (min-width: 820px){ .fl-grid2{ grid-template-columns: 1fr 1fr; } }
-    `;
-    document.head.appendChild(s);
-  }
-
-  function escapeHtml(str){
-    return String(str||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-  }
-
-  // ---- Home ----
-  
-  // ----- Modal helper (simple, local to FutbolLab) -----
-  function ensureFLModal(){
-    if(document.getElementById("fl_modalOverlay")) return;
-    const overlay = document.createElement("div");
-    overlay.id = "fl_modalOverlay";
-    overlay.style.cssText = "position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:9999; padding:16px;";
-    overlay.innerHTML = `
-      <div id="fl_modalBox" style="width:min(920px, 100%); max-height:90vh; overflow:auto; background:rgba(20,20,24,.98); border:1px solid rgba(255,255,255,.10); border-radius:16px; box-shadow:0 12px 60px rgba(0,0,0,.5);">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 14px; border-bottom:1px solid rgba(255,255,255,.08); position:sticky; top:0; background:rgba(20,20,24,.98); z-index:2;">
-          <div>
-            <div id="fl_modalTitle" style="font-weight:700; font-size:15px;">Editar partido</div>
-            <div id="fl_modalSub" style="opacity:.8; font-size:12px; margin-top:2px;"></div>
-          </div>
-          <button id="fl_modalClose" class="mc-btn" style="padding:8px 10px;">Cerrar</button>
-        </div>
-        <div id="fl_modalBody" style="padding:14px;"></div>
-        <div style="display:flex; justify-content:flex-end; gap:10px; padding:14px; border-top:1px solid rgba(255,255,255,.08); position:sticky; bottom:0; background:rgba(20,20,24,.98);">
-          <button id="fl_modalCancel" class="mc-btn" style="padding:10px 12px; opacity:.9;">Cancelar</button>
-          <button id="fl_modalSave" class="mc-btn" style="padding:10px 12px; font-weight:700;">Guardar</button>
-        </div>
-      </div>
-    `;
-    overlay.addEventListener("click", (e)=>{
-      if(e.target === overlay) closeFLModal();
+  function getOrCreateTeamByName(db, name, defaults={}){
+    const normalized = normName(name);
+    if(!normalized) return null;
+    let team = db.teams.find((t)=>{
+      const aliases = Array.isArray(t.aliases) ? t.aliases : [];
+      return normName(t.name)===normalized || aliases.some(a=>normName(a)===normalized);
     });
-    document.body.appendChild(overlay);
-
-    overlay.querySelector("#fl_modalClose").onclick = closeFLModal;
-    overlay.querySelector("#fl_modalCancel").onclick = closeFLModal;
-  }
-
-  function openFLModal({title="Modal", sub="", bodyHTML="", onSave=null}){
-    ensureFLModal();
-    let overlay = document.getElementById("fl_modalOverlay");
-    overlay.style.display = "flex";
-    overlay.querySelector("#fl_modalTitle").textContent = title;
-    overlay.querySelector("#fl_modalSub").textContent = sub || "";
-    const body = overlay.querySelector("#fl_modalBody");
-    body.innerHTML = bodyHTML;
-
-    const saveBtn = overlay.querySelector("#fl_modalSave");
-    saveBtn.onclick = ()=>{
-      if(typeof onSave === "function"){
-        const ok = onSave(overlay);
-        if(ok !== false) closeFLModal();
-      } else {
-        closeFLModal();
-      }
+    if(team) return team;
+    team = {
+      id: uid("tm"),
+      name: String(name).trim(),
+      country: defaults.country || "",
+      aliases: Array.isArray(defaults.aliases) ? defaults.aliases : [],
+      apiTeamId: defaults.apiTeamId || "",
+      createdAt: Date.now(),
+      meta: defaults.meta || { stadium:"", city:"", capacity:"" }
     };
-
-    // escape key
-    const esc = (ev)=>{ if(ev.key==="Escape"){ closeFLModal(); } };
-    overlay._esc = esc;
-    window.addEventListener("keydown", esc);
+    db.teams.push(team);
+    return team;
   }
 
-  function closeFLModal(){
-    let overlay = document.getElementById("fl_modalOverlay");
-    if(!overlay) return;
-    overlay.style.display = "none";
-    overlay.querySelector("#fl_modalBody").innerHTML = "";
-    if(overlay._esc){
-      window.removeEventListener("keydown", overlay._esc);
-      overlay._esc = null;
-    }
+  function getTeamIdsForLeague(db, leagueId){
+    if(!leagueId) return [];
+    const bridgeIds = (db.teamCompetitions || []).filter(tc=>tc.leagueId===leagueId).map(tc=>tc.teamId);
+    const legacyIds = db.teams.filter(t=>t.leagueId===leagueId).map(t=>t.id);
+    return [...new Set([...bridgeIds, ...legacyIds])];
   }
 
-  function inputRow(label, id, value, type="number", placeholder=""){
-    const v = (value===undefined || value===null) ? "" : String(value);
-    return `
-      <div style="display:flex; flex-direction:column; gap:6px;">
-        <div style="opacity:.85; font-size:12px;">${escapeHtml(label)}</div>
-        <input id="${escapeHtml(id)}" type="${escapeHtml(type)}" value="${escapeHtml(v)}" placeholder="${escapeHtml(placeholder)}"
-          style="width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.03); color:inherit; outline:none;" />
-      </div>
-    `;
+  function getTeamsForLeague(db, leagueId){
+    const ids = new Set(getTeamIdsForLeague(db, leagueId));
+    return db.teams.filter(t=>ids.has(t.id));
   }
 
-  
-  function inputPair(label, idBase, value, opts={}){
-    const {
-      min=0, max=10, step=1, placeholder="", unit=""
-    } = opts || {};
-    const v = (value===undefined || value===null) ? "" : String(value);
-    const idNum = idBase+"_num";
-    const idRange = idBase+"_range";
-    const u = unit ? `<span style="opacity:.75; font-size:12px;">${escapeHtml(unit)}</span>` : "";
-    return `
-      <div style="display:flex; flex-direction:column; gap:8px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-          <div style="opacity:.85; font-size:12px;">${escapeHtml(label)}</div>
-          ${u}
-        </div>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <input id="${escapeHtml(idNum)}" type="number" value="${escapeHtml(v)}" placeholder="${escapeHtml(placeholder)}"
-            min="${escapeHtml(String(min))}" max="${escapeHtml(String(max))}" step="${escapeHtml(String(step))}"
-            style="width:140px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.03); color:inherit; outline:none;" />
-          <input id="${escapeHtml(idRange)}" type="range" value="${escapeHtml(v||String(min))}"
-            min="${escapeHtml(String(min))}" max="${escapeHtml(String(max))}" step="${escapeHtml(String(step))}"
-            style="flex:1;" />
-        </div>
-      </div>
-    `;
+  function getTeamCompetitions(db, teamId){
+    const links = (db.teamCompetitions || []).filter(tc=>tc.teamId===teamId && tc.leagueId);
+    const byId = new Set(links.map(tc=>tc.leagueId));
+    return db.leagues
+      .filter(l=>byId.has(l.id))
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
   }
 
-  function syncPair(overlay, idBase, fallback=0){
-    const n = overlay.querySelector("#"+CSS.escape(idBase+"_num"));
-    const r = overlay.querySelector("#"+CSS.escape(idBase+"_range"));
-    if(!n || !r) return;
-    const toNum = (x)=>{ const v=parseFloat(String(x||"").replace(",", ".")); return Number.isFinite(v) ? v : fallback; };
-    const setBoth = (val)=>{
-      const vv = String(val);
-      n.value = vv;
-      r.value = vv;
+  function upsertMirrorFutureMatch({ db, team, rival, match }){
+    if(!team || !rival || !match) return;
+    ensureTeamIntState(rival);
+    const mirrorId = `mirror::${match.id}`;
+    const payload = {
+      ...match,
+      id: mirrorId,
+      mirrorOf: match.id,
+      rivalryBoost: false,
+      isHome: !Boolean(match.isHome),
+      rivalTeamId: team.id
     };
-    n.addEventListener("input", ()=>{ r.value = n.value; });
-    r.addEventListener("input", ()=>{ n.value = r.value; });
-    // normalize initial
-    setBoth(toNum(n.value));
+    const idx = rival.futureMatches.findIndex(row=>row.id===mirrorId || row.mirrorOf===match.id);
+    if(idx>=0) rival.futureMatches[idx] = { ...rival.futureMatches[idx], ...payload };
+    else rival.futureMatches.push(payload);
   }
 
-  function getPairNum(overlay, idBase, fallback=0){
-    const el = overlay.querySelector("#"+CSS.escape(idBase+"_num"));
-    if(!el) return fallback;
-    const n = parseFloat(String(el.value||"").replace(",", "."));
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  function attachLiveCalcs(overlay){
-    const upd = ()=>{
-      const passC = getPairNum(overlay,"s_passC",0);
-      const passA = getPairNum(overlay,"s_passA",0);
-      const duelsW = getPairNum(overlay,"s_duelsWon",0);
-      const duelsT = getPairNum(overlay,"s_duelsTot",0);
-      const passPct = (passA>0) ? (passC/passA*100) : 0;
-      const duelPct = (duelsT>0) ? (duelsW/duelsT*100) : 0;
-      const pEl = overlay.querySelector("#calc_passPct");
-      const dEl = overlay.querySelector("#calc_duelPct");
-      if(pEl) pEl.textContent = `${fmt(passPct,0)}%`;
-      if(dEl) dEl.textContent = `${fmt(duelPct,0)}%`;
-    };
-    overlay.querySelectorAll("input").forEach(inp=>{
-      inp.addEventListener("input", upd);
-    });
-    upd();
-  }
-
-function readNum(overlay, id, fallback=0){
-    const el = overlay.querySelector("#"+CSS.escape(id));
-    if(!el) return fallback;
-    const n = parseFloat(String(el.value||"").replace(",", "."));
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  function readStr(overlay, id, fallback=""){
-    const el = overlay.querySelector("#"+CSS.escape(id));
-    if(!el) return fallback;
-    return String(el.value||fallback).trim();
-  }
-
-  function openEditMatchModal(db, playerId, matchId){
-    const mm = db.matches.find(x=>x.id===matchId);
-    if(!mm) return;
-
-    mm.stats = mm.stats || {};
-    const title = "Editar partido";
-    const sub = `${mm.matchTitle || mm.title || "Partido"} • ${mm.date || ""}`;
-
-    const bodyHTML = `
-      <div class="fl-grid2">
-        ${inputRow("Fecha (YYYY-MM-DD)", "m_date", mm.date || "", "text", "2026-02-19")}
-        ${inputPair("Score (0-10)", "m_score", mm.score ?? 0, {min:0, max:10, step:0.1})}
-        ${inputPair("Minutos", "s_minutes", mm.stats.minutes ?? 0, {min:0, max:120, step:1})}
-        ${inputPair("Rating (0-10)", "s_rating", mm.stats.rating ?? mm.score ?? 0, {min:0, max:10, step:0.1})}
-      </div>
-
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin:14px 0 8px;">
-        <div style="font-weight:700; opacity:.9;">Pases</div>
-        <div style="opacity:.85; font-size:12px;">Pass%: <b id="calc_passPct">0%</b></div>
-      </div>
-      <div class="fl-grid2">
-        ${inputPair("Pases completados", "s_passC", mm.stats.passC ?? 0, {min:0, max:150, step:1})}
-        ${inputPair("Pases intentados", "s_passA", mm.stats.passA ?? 0, {min:0, max:200, step:1})}
-        ${inputPair("Key passes", "s_keyPasses", mm.stats.keyPasses ?? 0, {min:0, max:20, step:1})}
-        ${inputPair("Pases progresivos", "s_progPasses", mm.stats.progPasses ?? 0, {min:0, max:50, step:1})}
-      </div>
-
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin:14px 0 8px;">
-        <div style="font-weight:700; opacity:.9;">Duelo / Regate / Defensa</div>
-        <div style="opacity:.85; font-size:12px;">Duel%: <b id="calc_duelPct">0%</b></div>
-      </div>
-      <div class="fl-grid2">
-        ${inputPair("Duelos ganados", "s_duelsWon", mm.stats.duelsWon ?? 0, {min:0, max:50, step:1})}
-        ${inputPair("Duelos totales", "s_duelsTot", mm.stats.duelsTot ?? 0, {min:0, max:60, step:1})}
-        ${inputPair("Regates buenos", "s_dribblesWon", mm.stats.dribblesWon ?? 0, {min:0, max:20, step:1})}
-        ${inputPair("Acciones defensivas", "s_defActions", mm.stats.defActions ?? 0, {min:0, max:40, step:1})}
-      </div>
-
-      <div style="margin:14px 0 8px; font-weight:700; opacity:.9;">Producción</div>
-      <div class="fl-grid2">
-        ${inputPair("Goles", "s_goals", mm.stats.goals ?? 0, {min:0, max:10, step:1})}
-        ${inputPair("Asistencias", "s_assists", mm.stats.assists ?? 0, {min:0, max:10, step:1})}
-        ${inputPair("xG", "s_xg", mm.stats.xG ?? 0, {min:0, max:5, step:0.01})}
-        ${inputPair("xA", "s_xa", mm.stats.xA ?? 0, {min:0, max:5, step:0.01})}
-      </div>
-
-      <div style="margin-top:12px; opacity:.7; font-size:12px;">
-        Tip: los % se calculan en vivo mientras mueves los sliders.
-      </div>
-    `;
-
-    openFLModal({
-      title,
-      sub,
-      bodyHTML,
-      onSave: (overlay)=>{
-        const newDate = readStr(overlay, "m_date", mm.date || "");
-        const newScore = getPairNum(overlay, "m_score", mm.score ?? 0);
-        const minutes = getPairNum(overlay, "s_minutes", mm.stats.minutes ?? 0);
-        const rating = getPairNum(overlay, "s_rating", mm.stats.rating ?? mm.score ?? 0);
-
-        mm.date = newDate || mm.date;
-        mm.score = clamp(newScore, 0, 10);
-
-        // stats
-        mm.stats.minutes = Math.max(0, Math.round(minutes));
-        mm.stats.rating = clamp(rating, 0, 10);
-        mm.stats.passC = Math.max(0, Math.round(getPairNum(overlay, "s_passC", mm.stats.passC ?? 0)));
-        mm.stats.passA = Math.max(0, Math.round(getPairNum(overlay, "s_passA", mm.stats.passA ?? 0)));
-        mm.stats.keyPasses = Math.max(0, Math.round(getPairNum(overlay, "s_keyPasses", mm.stats.keyPasses ?? 0)));
-        mm.stats.progPasses = Math.max(0, Math.round(getPairNum(overlay, "s_progPasses", mm.stats.progPasses ?? 0)));
-
-        mm.stats.duelsWon = Math.max(0, Math.round(getPairNum(overlay, "s_duelsWon", mm.stats.duelsWon ?? 0)));
-        mm.stats.duelsTot = Math.max(0, Math.round(getPairNum(overlay, "s_duelsTot", mm.stats.duelsTot ?? 0)));
-        mm.stats.dribblesWon = Math.max(0, Math.round(getPairNum(overlay, "s_dribblesWon", mm.stats.dribblesWon ?? 0)));
-        mm.stats.defActions = Math.max(0, Math.round(getPairNum(overlay, "s_defActions", mm.stats.defActions ?? 0)));
-
-        mm.stats.goals = Math.max(0, Math.round(getPairNum(overlay, "s_goals", mm.stats.goals ?? 0)));
-        mm.stats.assists = Math.max(0, Math.round(getPairNum(overlay, "s_assists", mm.stats.assists ?? 0)));
-        mm.stats.xG = Math.max(0, getPairNum(overlay, "s_xg", mm.stats.xG ?? 0));
-        mm.stats.xA = Math.max(0, getPairNum(overlay, "s_xa", mm.stats.xA ?? 0));
-
-        // derived
-        mm.stats.passPct = (mm.stats.passA > 0) ? (mm.stats.passC / mm.stats.passA) : 0;
-        mm.stats.duelPct = (mm.stats.duelsTot > 0) ? (mm.stats.duelsWon / mm.stats.duelsTot) : 0;
-
-        saveDB(db);
-        openLab("player",{playerId});
-    {
-// sliders: keep number <-> range synced
-    let overlay = document.getElementById("fl_modalOverlay");
-    if(overlay){
-      ["m_score","s_minutes","s_rating","s_passC","s_passA","s_keyPasses","s_progPasses","s_duelsWon","s_duelsTot","s_dribblesWon","s_defActions","s_goals","s_assists","s_xg","s_xa"].forEach(idBase=>{
-        syncPair(overlay, idBase, 0);
-      });
-      attachLiveCalcs(overlay);
-    }
-}
-
-      }
+  function removeMirrorFutureMatch({ db, team, matchId }){
+    if(!team || !matchId) return;
+    db.teams.forEach((candidate)=>{
+      if(candidate.id===team.id) return;
+      ensureTeamIntState(candidate);
+      candidate.futureMatches = (candidate.futureMatches || []).filter(row=>row.mirrorOf!==matchId && row.id!==`mirror::${matchId}`);
     });
   }
 
-function renderHome(db){
-    const v = document.getElementById("fl_view");
-
-    const counts = {
-      teams: db.teams.length,
-      players: db.players.length,
-      logsSeason: db.matches.filter(m=>m.season===db.settings.currentSeason).length
-    };
-
-    v.innerHTML = `
-      <div class="fl-grid2">
-        <div class="fl-card">
-          <div style="font-weight:800;">📚 Resumen</div>
-          <div class="fl-small" style="margin-top:6px;">
-            Equipos: <b>${counts.teams}</b> • Jugadores: <b>${counts.players}</b><br/>
-            Registros (temporada actual): <b>${counts.logsSeason}</b>
-          </div>
-          <div style="margin-top:10px;" class="fl-row">
-            <button class="mc-btn" id="goTeams">Gestionar Equipos</button>
-            <button class="mc-btn" id="goVersus">Versus</button>
-          </div>
-          <div class="fl-small" style="margin-top:10px;">
-            Idea clave: solo usamos <b>temporada actual</b> para simular el próximo partido (forma reciente).
-          </div>
-        </div>
-
-        <div class="fl-card">
-          <div style="font-weight:800;">🧠 Cómo se calcula “forma”</div>
-          <div class="fl-small" style="margin-top:6px;">
-            Para cada jugador: tomamos sus últimos <b>${db.settings.formLastN}</b> partidos en la temporada <b>${escapeHtml(db.settings.currentSeason)}</b>.
-            Eso genera un <b>FormScore</b> (0–10) que ajusta su rating base con un peso <b>${fmt(db.settings.formWeight,2)}</b>.
-          </div>
-          <div class="fl-small" style="margin-top:10px;">
-            Rating efectivo = base + formWeight × (FormScore - base).<br/>
-            Así, un jugador “7.2” en gran racha se comporta como “más fuerte” para el próximo partido.
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.getElementById("goTeams").onclick = ()=>openLab("teams");
-    document.getElementById("goVersus").onclick = ()=>openLab("versus");
-  }
-
-  // ---- Teams list ----
-  function renderTeams(db){
-    const v = document.getElementById("fl_view");
-
-    v.innerHTML = `
-      <div class="fl-card">
-        <div style="font-weight:800;">🏟 Equipos</div>
-        <div class="fl-row" style="margin-top:10px;">
-          <input class="fl-input" id="teamName" placeholder="Nombre del equipo">
-          <button class="mc-btn" id="addTeam">Agregar</button>
-        </div>
-        <div id="fl_teamStatus" class="fl-small" style="margin-top:8px; opacity:.75;"></div>
-        <div id="teamsList" style="margin-top:10px;"></div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:800;">📦 Backup</div>
-        <div class="fl-row" style="margin-top:10px;">
-          <button class="mc-btn" id="exportDB">Exportar JSON</button>
-          <button class="mc-btn" id="importDB">Importar JSON</button>
-        </div>
-        <textarea class="fl-input" id="dbText" rows="6" placeholder="Aquí sale/pega tu JSON..."></textarea>
-        <div class="fl-small" style="margin-top:8px;">Tip: Exporta antes de hacer cambios grandes.</div>
-      </div>
-    `;
-
-    const list = document.getElementById("teamsList");
-
-    function draw(){
-      const rows = db.teams.map(t=>{
-        const pCount = db.players.filter(p=>p.teamId===t.id).length;
-        return `
-          <div class="fl-card" style="margin:10px 0;">
-            <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-              <div>
-                <div style="font-weight:800;">${escapeHtml(t.name)}</div>
-                <div class="fl-small">${pCount} jugadores</div>
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-                <button class="mc-btn" data-open="${t.id}">Abrir</button>
-                <button class="mc-btn" data-lineup="${t.id}">XI</button>
-                <button class="mc-btn" data-del="${t.id}">Eliminar</button>
-              </div>
-            </div>
-          </div>
-        `;
-      }).join("");
-
-      list.innerHTML = rows || `<div class="fl-small" style="opacity:.75;">Aún no hay equipos. Crea el primero arriba 👆</div>`;
-
-      list.querySelectorAll("[data-open]").forEach(b=>b.onclick = ()=>openLab("team",{teamId:b.getAttribute("data-open")}));
-      list.querySelectorAll("[data-lineup]").forEach(b=>b.onclick = ()=>openLab("lineup",{teamId:b.getAttribute("data-lineup")}));
-      list.querySelectorAll("[data-del]").forEach(b=>b.onclick = ()=>{
-        const idRaw = b.getAttribute("data-del");
-        const id = String(idRaw||"");
-        if(!confirm("¿Eliminar equipo y sus jugadores?")) return;
-
-        try{
-          const before = db.teams.length;
-
-          // Remove team + its players (robust against number/string ids)
-          db.teams = db.teams.filter(t=>String(t.id)!==id);
-          db.players = db.players.filter(p=>String(p.teamId)!==id);
-
-          // Optional: prune lineups for this team
-          if(db.lineups && db.lineups[id]) delete db.lineups[id];
-          if(db.lineups){
-            // also remove numeric-key variant, just in case
-            for(const k of Object.keys(db.lineups)){
-              if(String(k)===id) delete db.lineups[k];
-            }
-          }
-
-          saveDB(db);
-
-          const after = db.teams.length;
-          const st = document.getElementById("fl_teamStatus");
-          if(st){
-            st.textContent = (after < before) ? "Equipo eliminado ✅" : "No se pudo eliminar (id no coincide).";
-            st.style.opacity = "0.85";
-          }
-
-          // Re-render immediately (no depender de navegación)
-          renderTeams(db);
-
-        }catch(err){
-          console.error("[FootballLab] delete team error", err);
-          const st = document.getElementById("fl_teamStatus");
-          if(st){
-            st.textContent = "Error al eliminar: " + (err?.message || err);
-            st.style.opacity = "0.95";
-          }
-        }
-      });
-    }
-
-    draw();
-
-    document.getElementById("addTeam").onclick = ()=>{
-      const name = document.getElementById("teamName").value.trim();
-      if(!name) return;
-      db.teams.push({id:uid("team"), name});
-      saveDB(db);
-      openLab("teams");
-    };
-
-    document.getElementById("exportDB").onclick = ()=>{
-      document.getElementById("dbText").value = JSON.stringify(db, null, 2);
-    };
-
-    document.getElementById("importDB").onclick = ()=>{
-      try{
-        const txt = document.getElementById("dbText").value.trim();
-        if(!txt) return;
-        const incoming = JSON.parse(txt);
-        localStorage.setItem(KEY, JSON.stringify(incoming));
-        alert("Importado. Reiniciando vista…");
-        openLab("teams");
-      }catch(e){
-        alert("JSON inválido.");
-      }
-    };
-  }
-
-  // ---- Team detail: Players + logger shortcut ----
-  function renderTeam(db, teamId){
-    const team = db.teams.find(t=>t.id===teamId);
-    const v = document.getElementById("fl_view");
-    if(!team){
-      v.innerHTML = `<div class="fl-card">Equipo no encontrado.</div>`;
-      return;
-    }
-
-    const players = db.players.filter(p=>p.teamId===teamId);
-    const season = db.settings.currentSeason;
-
-    function getLastMatchDateISO(playerId){
-      return db.matches
-        .filter(m=>m.playerId===playerId && m.season===season && /^\d{4}-\d{2}-\d{2}$/.test(String(m.date||"")))
-        .reduce((maxDate, m)=>{
-          const d = String(m.date||"");
-          return d > maxDate ? d : maxDate;
-        }, "");
-    }
-
-    const playersView = [...players];
-    if(_teamPlayerDateSort === "desc"){
-      playersView.sort((a,b)=>getLastMatchDateISO(b.id).localeCompare(getLastMatchDateISO(a.id)));
-    }else if(_teamPlayerDateSort === "asc"){
-      playersView.sort((a,b)=>getLastMatchDateISO(a.id).localeCompare(getLastMatchDateISO(b.id)));
-    }
-
-    v.innerHTML = `
-      <div class="fl-card">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <div>
-            <div style="font-weight:900;font-size:16px;">${escapeHtml(team.name)}</div>
-            <div class="fl-small">Jugadores: ${players.length} • Temporada: <b>${escapeHtml(db.settings.currentSeason)}</b></div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="mc-btn" id="goLineup">XI Builder</button>
-            <button class="mc-btn" id="goLogger">Match Logger</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:800;">➕ Agregar Jugador</div>
-        <div class="fl-row" style="margin-top:10px;">
-          <input class="fl-input" id="pName" placeholder="Nombre">
-          <select class="fl-select" id="pPos"></select>
-          <input class="fl-input" id="pRating" type="number" min="0" max="10" step="0.1" placeholder="Rating base (0–10)">
-          <button class="mc-btn" id="addPlayer">Agregar</button>
-        </div>
-        <div class="fl-small" style="margin-top:8px;">Tip: rating base es “nivel general”. La forma de la temporada lo ajusta.</div>
-      </div>
-
-      
-      <div class="fl-card">
-        <div style="font-weight:800;">⬇️ Importar JSON (FootballLab Clip)</div>
-        <div class="fl-small" style="margin-top:6px;opacity:.85;">
-          Pega aquí el JSON exportado desde la extensión. Se creará el jugador (si no existe) y se agregará el partido a su historial.
-        </div>
-        <div class="fl-row" style="margin-top:10px;gap:8px;flex-wrap:wrap;">
-          <button class="mc-btn" id="fl_impPaste">Pegar</button>
-          <button class="mc-btn" id="fl_impFile">Archivo</button>
-          <button class="mc-btn" id="fl_impRun">Importar</button>
-          <button class="mc-btn" id="fl_impClear">Limpiar</button>
-          <input type="file" id="fl_impFileInput" accept="application/json,.json" style="display:none;" />
-        </div>
-        <textarea class="fl-input" id="fl_impText" rows="7" placeholder='Pega aquí el JSON...'></textarea>
-        <div id="fl_impStatus" class="fl-small" style="margin-top:8px;"></div>
-      </div>
-
-<div class="fl-card">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
-          <div style="font-weight:800;">👥 Plantilla</div>
-          <button class="mc-btn" id="sortPlayersByDate">Ordenar por fecha (${_teamPlayerDateSort === "asc" ? "↑" : "↓"})</button>
-        </div>
-        <div class="fl-small" style="margin-top:6px;opacity:.8;">Ordena según la fecha del último partido registrado en esta temporada.</div>
-        <div id="playersList" style="margin-top:8px;"></div>
-      </div>
-    `;
-
-    const pPos = document.getElementById("pPos");
-    ["GK","CB","LB","RB","CDM","CM","CAM","LW","RW","ST"].forEach(code=>{
-      const o = document.createElement("option");
-      o.value = code;
-      o.textContent = POS_LABELS[code] || code;
-      pPos.appendChild(o);
+  async function apiFetch(path, token){
+    const res = await fetch(`${FOOTBALL_DATA_BASE_URL}${path}`, {
+      headers: { "X-Auth-Token": token }
     });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
 
-    document.getElementById("goLineup").onclick = ()=>openLab("lineup",{teamId});
-    document.getElementById("goLogger").onclick = ()=>openLab("logger",{teamId});
+  function ensureStyles(){
+    if(document.getElementById("fl-clean-styles")) return;
+    const style = document.createElement("style");
+    style.id = "fl-clean-styles";
+    style.textContent = `
+      .fl-wrap{max-width:1100px;margin:18px auto;padding:0 12px;color:#e8edf3;font-family:Inter,system-ui,sans-serif}
+      .fl-card{background:#161b22;border:1px solid #2d333b;border-radius:14px;padding:14px;margin-bottom:12px}
+      .fl-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+      .fl-grid{display:grid;gap:10px}
+      .fl-grid.two{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+      .fl-btn,.fl-input,.fl-select,.fl-text{border-radius:10px;border:1px solid #2d333b;background:#0d1117;color:#e8edf3;padding:8px 10px}
+      .fl-btn{cursor:pointer;font-weight:700}
+      .fl-btn.active{background:#1f6feb}
+      .fl-text{min-height:140px;width:100%;resize:vertical}
+      .fl-title{font-size:22px;font-weight:900;margin-bottom:8px}
+      .fl-muted{color:#9ca3af;font-size:13px}
+      .fl-table{width:100%;border-collapse:collapse}
+      .fl-table td,.fl-table th{border-bottom:1px solid #2d333b;padding:6px;text-align:left;font-size:13px}
+      .fl-squad-section-title{font-size:30px;font-weight:900;margin-bottom:10px;color:#f6f8fa}
+      .fl-squad-table{display:grid;gap:8px}
+      .fl-squad-head,.fl-squad-row{display:grid;grid-template-columns:52px minmax(220px,1.6fr) 102px minmax(120px,.9fr) 54px 54px 74px 52px 52px 42px 42px;align-items:center;column-gap:8px}
+      .fl-squad-head{background:#21262d;border:1px solid #30363d;border-radius:9px;padding:8px 10px;font-size:12px;font-weight:700;letter-spacing:.07em;color:#9ca3af;text-transform:uppercase}
+      .fl-squad-row{background:#1b222c;border:1px solid #30363d;border-radius:10px;padding:12px 10px;font-size:15px}
+      .fl-squad-row:hover{background:#242d3a}
+      .fl-squad-cell-center{text-align:center}
+      .fl-squad-name{display:flex;align-items:center;gap:10px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .fl-squad-heat{display:grid;gap:4px}
+      .fl-squad-pos-select{width:100%;padding:6px 8px;border-radius:8px;border:1px solid #30363d;background:#0f141b;color:#f6f8fa;font-size:12px;font-weight:700}
+      .fl-squad-heat-track{height:9px;border-radius:999px;background:#0d1117;border:1px solid #30363d;overflow:hidden}
+      .fl-squad-heat-fill{height:100%;border-radius:999px;transition:width .25s ease}
+      .fl-flag{font-size:16px;line-height:1}
+      .fl-card-yellow{display:inline-block;width:10px;height:16px;border-radius:3px;background:#f5c400}
+      .fl-card-red{display:inline-block;width:10px;height:16px;border-radius:3px;background:#e10600}
+      .fl-vs-layout{display:grid;grid-template-columns:minmax(280px,1fr) minmax(340px,1.25fr);gap:12px}
+      .fl-vs-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+      .fl-vs-cell{border:1px solid #30363d;border-radius:8px;padding:6px;text-align:center;font-size:12px;background:#111722}
+      .fl-vs-cell.head{background:#202a37;font-weight:800}
+      .fl-vs-cell.hot{border-color:#2ea043;box-shadow:0 0 0 1px rgba(46,160,67,.25) inset}
+      .fl-vs-cell.zone-home{background:rgba(46,160,67,.16)}
+      .fl-vs-cell.zone-draw{background:rgba(242,201,76,.16)}
+      .fl-vs-cell.zone-away{background:rgba(248,81,73,.14)}
+      .fl-vs-bars{display:grid;gap:6px;margin-top:10px}
+      .fl-vs-bar{display:grid;grid-template-columns:80px 1fr auto;gap:8px;align-items:center}
+      .fl-vs-bar-track{height:10px;border-radius:999px;background:#0d1117;border:1px solid #30363d;overflow:hidden}
+      .fl-vs-bar-fill{height:100%;background:linear-gradient(90deg,#1f6feb,#58a6ff)}
+      .fl-kpi{display:grid;grid-template-columns:repeat(3,minmax(88px,1fr));gap:8px}
+      .fl-kpi > div{background:#111722;border:1px solid #2d333b;border-radius:10px;padding:8px;text-align:center}
+      .fl-kpi b{display:block;font-size:18px;color:#f6f8fa}
+      .fl-mini{font-size:12px;color:#9ca3af}
+      .fl-chip{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #2d333b;background:#111722;font-size:12px}
+      .fl-chip.ok{border-color:#238636;color:#3fb950}
+      .fl-chip.warn{border-color:#d29922;color:#f2cc60}
+      .fl-chip.bad{border-color:#da3633;color:#ff7b72}
+      .fl-modal-backdrop{position:fixed;inset:0;background:rgba(1,4,9,.78);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;backdrop-filter:blur(3px)}
+      .fl-modal{width:min(760px,100%);max-height:92vh;overflow:auto;background:linear-gradient(180deg,#1a2330,#121922);border:1px solid #2f3d4f;border-radius:16px;box-shadow:0 20px 80px rgba(0,0,0,.45);padding:16px}
+      .fl-modal-title{font-size:20px;font-weight:900}
+      .fl-modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+      .fl-field{display:grid;gap:6px}
+      .fl-field label{font-size:12px;color:#9ca3af}
+    `;
+    document.head.appendChild(style);
+  }
 
-    document.getElementById("addPlayer").onclick = ()=>{
-      const name = document.getElementById("pName").value.trim();
-      const position = pPos.value;
-      const rating = parseFloat(document.getElementById("pRating").value);
-      if(!name || !Number.isFinite(rating)) return;
-      db.players.push({
-        id: uid("p"),
-        teamId,
-        name,
-        position,
-        rating: clamp(rating,0,10)
-      });
-      saveDB(db);
-      openLab("team",{teamId});
+  function ensureBitacoraState(raw){
+    const base = {
+      bank: 15,
+      kellyFraction: 0.25,
+      minUnit: 1,
+      maxStakePct: 0.2,
+      dailyGoalPct: 0.05,
+      dailyRiskPct: 0.15,
+      stopLoss: 2,
+      stopWin: 1,
+      maxBetsPerDay: 3,
+      maxConsecutiveLosses: 2,
+      targetDays: 7,
+      targetMode: "amount",
+      targetValue: 22,
+      riskLevel: "balanceado",
+      stopLossStreak: 2,
+      autoMode: true,
+      planStartBank: null,
+      planStartDate: "",
+      planTargetBank: null,
+      pickCandidates: [],
+      entries: []
     };
+    const st = { ...base, ...(raw || {}) };
+    st.bank = Math.max(1, Number(st.bank) || base.bank);
+    st.kellyFraction = clamp(Number(st.kellyFraction) || base.kellyFraction, 0.05, 1);
+    st.minUnit = Math.max(0.5, Number(st.minUnit) || base.minUnit);
+    st.maxStakePct = clamp(Number(st.maxStakePct) || base.maxStakePct, 0.05, 0.5);
+    st.dailyGoalPct = clamp(Number(st.dailyGoalPct) || base.dailyGoalPct, 0.01, 0.2);
+    st.dailyRiskPct = clamp(Number(st.dailyRiskPct) || base.dailyRiskPct, 0.05, 0.4);
+    st.stopLoss = Math.max(0.5, Number(st.stopLoss) || base.stopLoss);
+    st.stopWin = Math.max(0.5, Number(st.stopWin) || base.stopWin);
+    st.maxBetsPerDay = clamp(Number(st.maxBetsPerDay) || base.maxBetsPerDay, 2, 3);
+    st.maxConsecutiveLosses = clamp(Number(st.maxConsecutiveLosses) || base.maxConsecutiveLosses, 1, 5);
+    st.targetDays = clamp(Number(st.targetDays) || base.targetDays, 1, 30);
+    st.targetMode = st.targetMode === "percent" ? "percent" : "amount";
+    st.targetValue = Math.max(1, Number(st.targetValue) || base.targetValue);
+    st.riskLevel = ["conservador","balanceado","agresivo"].includes(st.riskLevel) ? st.riskLevel : base.riskLevel;
+    st.stopLossStreak = clamp(Number(st.stopLossStreak) || base.stopLossStreak, 1, 4);
+    st.autoMode = st.autoMode !== false;
+    st.planStartBank = Number.isFinite(Number(st.planStartBank)) ? Math.max(1, Number(st.planStartBank)) : null;
+    st.planStartDate = String(st.planStartDate || "");
+    st.planTargetBank = Number.isFinite(Number(st.planTargetBank)) ? Math.max(1, Number(st.planTargetBank)) : null;
+    st.pickCandidates = Array.isArray(st.pickCandidates) ? st.pickCandidates : [];
+    st.entries = Array.isArray(st.entries) ? st.entries : [];
+    return st;
+  }
 
-
-    // ---- Import JSON (FootballLab Clip) ----
-    const impText = document.getElementById("fl_impText");
-    const impStatus = document.getElementById("fl_impStatus");
-
-    function setImpStatus(msg, ok=true){
-      if(!impStatus) return;
-      impStatus.style.color = ok ? "var(--colors-success-default, #2e7d32)" : "var(--colors-danger-default, #c62828)";
-      impStatus.textContent = msg;
+  function ensureMarketMatchState(raw){
+    const base = {
+      matchId: "",
+      label: "",
+      fecha: "",
+      liga: "",
+      lambda: { home: null, away: null },
+      probModel: { home: null, draw: null, away: null },
+      cuotas: [],
+      closingOdds: null,
+      apuestaTomada: null,
+      settlement: null
+    };
+    const row = { ...base, ...(raw || {}) };
+    row.label = String(row.label || "").trim();
+    row.lambda = {
+      home: pickFirstNumber(row.lambda?.home),
+      away: pickFirstNumber(row.lambda?.away)
+    };
+    row.probModel = {
+      home: clamp(pickFirstNumber(row.probModel?.home) ?? 0, 0, 1),
+      draw: clamp(pickFirstNumber(row.probModel?.draw) ?? 0, 0, 1),
+      away: clamp(pickFirstNumber(row.probModel?.away) ?? 0, 0, 1)
+    };
+    const probSum = row.probModel.home + row.probModel.draw + row.probModel.away;
+    if(probSum > 0){
+      row.probModel.home /= probSum;
+      row.probModel.draw /= probSum;
+      row.probModel.away /= probSum;
     }
-
-    function monthToNumber(mon){
-      const m = String(mon||"").toLowerCase().slice(0,3);
-      const map = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
-      return map[m] || null;
+    row.cuotas = Array.isArray(row.cuotas) ? row.cuotas
+      .map(q=>({
+        timestamp: String(q?.timestamp || ""),
+        home: pickFirstNumber(q?.home),
+        draw: pickFirstNumber(q?.draw),
+        away: pickFirstNumber(q?.away)
+      }))
+      .filter(q=>q.home>1 && q.draw>1 && q.away>1)
+      .sort((a,b)=>String(a.timestamp).localeCompare(String(b.timestamp))) : [];
+    row.closingOdds = row.closingOdds && row.closingOdds.home>1 && row.closingOdds.draw>1 && row.closingOdds.away>1
+      ? {
+        home: pickFirstNumber(row.closingOdds.home),
+        draw: pickFirstNumber(row.closingOdds.draw),
+        away: pickFirstNumber(row.closingOdds.away)
+      }
+      : null;
+    if(row.apuestaTomada){
+      row.apuestaTomada = {
+        side: ["home","draw","away"].includes(row.apuestaTomada.side) ? row.apuestaTomada.side : "home",
+        cuota: Math.max(1.01, pickFirstNumber(row.apuestaTomada.cuota) || 1.01),
+        probModelo: clamp(pickFirstNumber(row.apuestaTomada.probModelo) ?? 0.01, 0.01, 0.99),
+        stake: Math.max(0, pickFirstNumber(row.apuestaTomada.stake) || 0),
+        timestamp: String(row.apuestaTomada.timestamp || "")
+      };
     }
+    row.settlement = row.settlement && typeof row.settlement === "object" ? row.settlement : null;
+    return row;
+  }
 
-    function toISODate(maybe){
-      const s = String(maybe||"").trim();
-      // Already ISO
-      if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  function marketProbsFromOdds(odds){
+    if(!odds) return null;
+    return clean1x2Probs(odds.home, odds.draw, odds.away);
+  }
 
-      // "19 Feb" / "19 Feb 2026"
-      const m = s.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s*(\d{4})?$/);
-      if(m){
-        const day = String(m[1]).padStart(2,"0");
-        const mon = monthToNumber(m[2]);
-        const year = m[3] || String(new Date().getFullYear());
-        if(mon){
-          return `${year}-${String(mon).padStart(2,"0")}-${day}`;
-        }
-      }
+  function marketRecordMetrics(record){
+    const latestOdds = record.cuotas[record.cuotas.length - 1] || null;
+    const initialOdds = record.cuotas[0] || null;
+    const marketLatest = marketProbsFromOdds(latestOdds);
+    const marketInitial = marketProbsFromOdds(initialOdds);
+    const side = record.apuestaTomada?.side || "home";
+    const modelP = Number(record.probModel?.[side]) || 0;
+    const marketP = Number(marketLatest?.[`p${side[0].toUpperCase()}${side.slice(1)}`] || (side === "draw" ? marketLatest?.pD : null) || (side === "away" ? marketLatest?.pA : marketLatest?.pH)) || 0;
+    const currentOdd = Number(latestOdds?.[side]) || 0;
+    const initialOdd = Number(initialOdds?.[side]) || currentOdd;
+    const evCurrent = currentOdd > 1 ? (modelP * currentOdd) - 1 : null;
+    const evInitial = initialOdd > 1 ? (modelP * initialOdd) - 1 : null;
+    const edge = modelP - marketP;
+    const drift = initialOdd > 0 ? (currentOdd - initialOdd) / initialOdd : 0;
+    const signedMoves = record.cuotas.length > 1
+      ? record.cuotas.slice(1).map((q, idx)=>{
+        const prev = Number(record.cuotas[idx]?.[side]) || 0;
+        const next = Number(q?.[side]) || prev;
+        return prev > 1 ? (next - prev) / prev : 0;
+      })
+      : [];
+    const volatility = signedMoves.length
+      ? signedMoves.reduce((acc, mv)=>acc + Math.abs(mv), 0) / signedMoves.length
+      : 0;
+    const acceleration = signedMoves.length > 1
+      ? signedMoves.slice(1).reduce((peak, mv, idx)=>Math.max(peak, Math.abs(mv - signedMoves[idx])), 0)
+      : 0;
+    const persistence = signedMoves.reduce((state, mv)=>{
+      const dir = mv > 0 ? 1 : (mv < 0 ? -1 : 0);
+      if(!dir) return { streak: 0, maxStreak: state.maxStreak, lastDir: state.lastDir, reversals: state.reversals };
+      const streak = dir === state.lastDir ? state.streak + 1 : 1;
+      const reversals = state.lastDir && dir !== state.lastDir ? state.reversals + 1 : state.reversals;
+      return { streak, maxStreak: Math.max(state.maxStreak, streak), lastDir: dir, reversals };
+    }, { streak: 0, maxStreak: 0, lastDir: 0, reversals: 0 });
+    const firstTsRaw = Date.parse(initialOdds?.timestamp || "");
+    const lastTsRaw = Date.parse(latestOdds?.timestamp || "");
+    const elapsedHours = Number.isFinite(firstTsRaw) && Number.isFinite(lastTsRaw) && lastTsRaw > firstTsRaw
+      ? (lastTsRaw - firstTsRaw) / 36e5
+      : 0;
+    const velocity = elapsedHours > 0 ? drift / elapsedHours : 0;
+    const directionSingle = persistence.maxStreak >= 2 && persistence.reversals === 0;
+    const isEarlyMoney = Math.abs(drift) > 0.05 && elapsedHours > 0 && elapsedHours <= 12 && directionSingle && persistence.maxStreak >= 2;
+    const isStable = Math.abs(drift) < 0.03 && Math.abs(velocity) < 0.004 && persistence.reversals > 0;
+    const isVolatile = !isEarlyMoney && (Math.abs(drift) >= 0.04 && persistence.reversals >= 1 && volatility > 0.025);
+    const marketState = isEarlyMoney
+      ? "early_money"
+      : (isStable ? "stable" : (isVolatile ? "volatile" : "neutral"));
+    const marketStateLabel = marketState === "early_money"
+      ? "🔴 Dinero temprano detectado"
+      : (marketState === "stable"
+        ? "🟢 Mercado estable"
+        : (marketState === "volatile" ? "🟠 Mercado volátil / especulativo" : "🟡 Mercado mixto"));
+    const stabilityScore = clamp(100 - (Math.abs(drift) * 50) - (volatility * 30), 0, 100);
+    const stabilityBand = stabilityScore >= 70 ? "estable" : (stabilityScore >= 40 ? "moderado" : "agresivo");
+    const closing = record.closingOdds?.[side] || null;
+    const clv = record.apuestaTomada && closing ? record.apuestaTomada.cuota - closing : null;
+    const initialMarketP = side === "home" ? marketInitial?.pH : side === "draw" ? marketInitial?.pD : marketInitial?.pA;
+    const convergence = marketInitial
+      ? Math.abs(modelP - marketP) < Math.abs(modelP - initialMarketP)
+      : null;
+    const convergenceDelta = Number.isFinite(initialMarketP) ? Math.abs(modelP - initialMarketP) - Math.abs(modelP - marketP) : null;
+    const earlyMoneyAgainst = isEarlyMoney && drift > 0;
+    const earlyMoneyWith = isEarlyMoney && drift < 0;
+    const strategySignal = (edge > 0.04 && (evCurrent || 0) > 0 && earlyMoneyWith)
+      ? "Regla A: Modelo + dinero temprano a favor → confirmación fuerte"
+      : ((edge > 0.04 && (evCurrent || 0) > 0 && earlyMoneyAgainst)
+        ? "Regla B: Modelo vs dinero temprano contrario → no apostar"
+        : ((edge > 0.06 && marketState === "stable")
+          ? "Regla C: Mercado estable + edge alto → entrada anticipada ideal"
+          : "Sin confirmación estratégica fuerte"));
+    return {
+      side,
+      modelP,
+      marketP,
+      currentOdd,
+      evCurrent,
+      evInitial,
+      edge,
+      drift,
+      volatility,
+      acceleration,
+      persistence: persistence.maxStreak,
+      reversals: persistence.reversals,
+      elapsedHours,
+      velocity,
+      marketState,
+      marketStateLabel,
+      stabilityScore,
+      stabilityBand,
+      clv,
+      convergence,
+      convergenceDelta,
+      earlyMoneyAgainst,
+      earlyMoneyWith,
+      strategySignal
+    };
+  }
 
-      // fallback: today
-      const d = new Date();
-      const y = d.getFullYear();
-      const mo = String(d.getMonth()+1).padStart(2,"0");
-      const da = String(d.getDate()).padStart(2,"0");
-      return `${y}-${mo}-${da}`;
+  function marketRowLabel(db, row){
+    const customLabel = String(row?.label || "").trim();
+    if(customLabel) return customLabel;
+    const linked = db.tracker.find((m)=>m.id===row.matchId);
+    if(linked){
+      const home = db.teams.find(t=>t.id===linked.homeId)?.name || "Local";
+      const away = db.teams.find(t=>t.id===linked.awayId)?.name || "Visitante";
+      return `${home} vs ${away}`;
     }
+    return String(row.matchId || "Partido manual");
+  }
 
-    function pickClipPayload(obj){
-      // Accept many shapes from FootballLab Clip: {capture}, {ok,capture}, {player/context}, {playerName,...}
-      if(!obj) return null;
+  function calcBitacoraSuggestion({ bank, odds, probability, kellyFraction, minUnit, maxStakePct }){
+    const b = Math.max(0, Number(odds) - 1);
+    const p = clamp(Number(probability) || 0, 0, 1);
+    const q = 1 - p;
+    const ev = p * b - q;
+    const kellyStar = b > 0 ? (p * b - q) / b : -1;
+    const frac = Math.max(0, kellyStar * (Number(kellyFraction) || 0.25));
+    const rawStake = Math.max(0, frac * Number(bank || 0));
+    const maxStake = Math.max(Number(minUnit) || 1, (Number(bank) || 0) * (Number(maxStakePct) || 0.2));
+    const rounded = Math.round(rawStake / minUnit) * minUnit;
+    const suggestedStake = ev > 0
+      ? clamp(Math.max(minUnit, rounded || minUnit), minUnit, maxStake)
+      : 0;
+    return { ev, b, kellyStar, frac, rawStake, suggestedStake, noBet: ev <= 0 };
+  }
 
-      // If array (queue), take first valid
-      if(Array.isArray(obj)){
-        for(const it of obj){
-          const p = pickClipPayload(it);
-          if(p) return p;
-        }
-        return null;
+  function projectBankroll({ bank, p, odds, stake, steps=12, paths=1000 }){
+    const safeStake = Math.max(0.01, Number(stake) || 0);
+    const safeOdds = Math.max(1.01, Number(odds) || 1.01);
+    const safeP = clamp(Number(p) || 0.5, 0.01, 0.99);
+    const walk = Array.from({ length: paths }, ()=>{
+      let b = Number(bank) || 0;
+      const line = [b];
+      for(let i=0;i<steps;i++){
+        const win = Math.random() < safeP;
+        b += win ? safeStake * (safeOdds - 1) : -safeStake;
+        line.push(b);
       }
+      return line;
+    });
+    const quant = (arr, q)=>{
+      const sorted = [...arr].sort((a,b)=>a-b);
+      const idx = Math.floor((sorted.length - 1) * q);
+      return sorted[idx] ?? 0;
+    };
+    return Array.from({ length: steps + 1 }, (_v, idx)=>{
+      const bucket = walk.map(pth=>pth[idx]);
+      const mean = bucket.reduce((s,v)=>s+v,0) / (bucket.length || 1);
+      return { step: idx, mean, p10: quant(bucket, 0.1), p90: quant(bucket, 0.9) };
+    });
+  }
 
-      if(typeof obj !== "object") return null;
-
-      // Maybe wrapped
-      if(obj.capture) return pickClipPayload(obj.capture);
-      if(obj.data && obj.data.capture) return pickClipPayload(obj.data.capture);
-
-      // Helpers to read date/minutes/rating in multiple keys
-      const ctx = obj.context || obj.ctx || obj.meta || {};
-      const dateAny = (ctx.date ?? ctx.matchDate ?? ctx.dateLabel ?? obj.matchDate ?? obj.date ?? "");
-      const minAny  = (ctx.minutes ?? ctx.minutesText ?? obj.minutesText ?? obj.minutes ?? "");
-      const ratAny  = (ctx.rating ?? ctx.ratingText ?? obj.ratingText ?? obj.rating ?? "");
-
-      // Player can be object OR string
-      const playerObj = obj.player || {};
-      const playerNameAny =
-        (typeof playerObj === "string" ? playerObj :
-          (playerObj.name ?? playerObj.playerName ?? obj.playerName ?? obj.name ?? "")
-        );
-
-      const teamNameAny =
-        (typeof playerObj === "object" ? (playerObj.team ?? playerObj.teamName ?? "") : (obj.teamName ?? ""));
-
-      const posAny =
-        (typeof playerObj === "object" ? (playerObj.position ?? playerObj.positionText ?? "") : (obj.positionText ?? ""));
-
-      const matchTitleAny = (ctx.matchTitle ?? obj.matchTitle ?? ctx.title ?? obj.title ?? "");
-      const matchIdAny    = (ctx.matchId ?? obj.matchId ?? ctx.id ?? obj.id ?? "");
-
-      const statsAny = (obj.stats ?? obj.statistics ?? obj.statRows ?? []);
-
-      // Recognize only if it looks like a clip payload (has at least player and something match/stats)
-      const looksLike = (String(playerNameAny||"").trim().length>0) && (String(matchTitleAny||"").trim().length>0 || statsAny);
-      if(!looksLike){
-        // Still allow if it has player/context but missing matchTitle (some clips)
-        const maybeOk = (obj.player && (obj.context || obj.stats));
-        if(!maybeOk) return null;
+  function getRiskProfile(level){
+    const map = {
+      conservador: {
+        label: "Conservador",
+        oddsMin: 1.3,
+        oddsMax: 1.55,
+        baseEv: 0.01,
+        kellyFactor: 0.2,
+        maxStakePct: 0.12
+      },
+      balanceado: {
+        label: "Balanceado",
+        oddsMin: 1.4,
+        oddsMax: 1.75,
+        baseEv: 0.02,
+        kellyFactor: 0.25,
+        maxStakePct: 0.18
+      },
+      agresivo: {
+        label: "Agresivo",
+        oddsMin: 1.6,
+        oddsMax: 2.2,
+        baseEv: 0.03,
+        kellyFactor: 0.3,
+        maxStakePct: 0.25
       }
+    };
+    return map[level] || map.balanceado;
+  }
 
+  function unitForBank(bank){
+    const b = Number(bank) || 0;
+    if(b < 20) return 1;
+    if(b < 50) return 2;
+    if(b < 100) return 3;
+    if(b < 180) return 4;
+    if(b < 300) return 5;
+    return Math.max(6, Math.round(b/50));
+  }
+
+  function computeBitacoraPlan(st, todayEntries){
+    const profile = getRiskProfile(st.riskLevel);
+    const targetDays = clamp(Math.round(Number(st.targetDays) || 7), 1, 30);
+    const targetMode = st.targetMode === "percent" ? "percent" : "amount";
+    const bank = Math.max(1, Number(st.bank) || 1);
+    const planStartBank = Math.max(1, Number(st.planStartBank) || bank);
+    const targetValue = Math.max(targetMode === "percent" ? 1 : bank + 1, Number(st.targetValue) || (targetMode === "percent" ? 25 : bank * 1.25));
+    const targetBank = targetMode === "percent"
+      ? planStartBank * (1 + targetValue/100)
+      : Math.max(targetValue, planStartBank + 1);
+    const totalGoal = Math.max(0.1, targetBank - planStartBank);
+    const progressProfit = bank - planStartBank;
+    const progressPct = clamp(progressProfit / totalGoal, -2, 2);
+    const remainingToTarget = Math.max(0, targetBank - bank);
+    const remainingPct = clamp(1 - progressPct, 0, 3);
+    const dailyGoal = totalGoal / targetDays;
+    const avgOdds = (profile.oddsMin + profile.oddsMax) / 2;
+    const pRequired = clamp(1/avgOdds + profile.baseEv, 0.45, 0.92);
+    const unit = unitForBank(bank);
+    const lossesToday = todayEntries.filter(e=>e.result === "loss").length;
+    const consecutiveLosses = (()=>{
+      let streak = 0;
+      for(let i=todayEntries.length-1;i>=0;i--){
+        if(todayEntries[i].result === "loss") streak += 1;
+        else break;
+      }
+      return streak;
+    })();
+    const isWinningDay = todayEntries.reduce((s,e)=>s+(Number(e.profit)||0),0) > 0;
+    const streakStop = consecutiveLosses >= st.stopLossStreak;
+    let stakeMult = 1;
+    let evGate = profile.baseEv;
+    if(isWinningDay && !streakStop){
+      stakeMult = 1.15;
+    }
+    if(lossesToday >= 1){
+      stakeMult = Math.min(stakeMult, 0.8);
+      evGate += 0.01;
+    }
+    if(lossesToday >= 2){
+      stakeMult = 0.65;
+      evGate += 0.015;
+    }
+    const stepStakes = [
+      Math.max(st.minUnit, Math.round((unit * stakeMult) / st.minUnit) * st.minUnit),
+      Math.max(st.minUnit, Math.round((unit * 1.25 * stakeMult) / st.minUnit) * st.minUnit),
+      Math.max(st.minUnit, Math.round((unit * 1.5 * stakeMult) / st.minUnit) * st.minUnit)
+    ];
+    const maxStake = Math.max(st.minUnit, bank * Math.min(profile.maxStakePct, st.maxStakePct));
+    return {
+      profile,
+      targetDays,
+      targetMode,
+      targetValue,
+      planStartBank,
+      targetBank,
+      totalGoal,
+      progressProfit,
+      progressPct,
+      remainingToTarget,
+      remainingPct,
+      dailyGoal,
+      avgOdds,
+      pRequired,
+      unit,
+      lossesToday,
+      consecutiveLosses,
+      streakStop,
+      stepStakes: stepStakes.map(v=>clamp(v, st.minUnit, maxStake)),
+      evGate,
+      recoveryMode: lossesToday >= 1
+    };
+  }
+
+  function bitacoraRoadmap(plan, dayIndex, bank){
+    const checkpoints = [
+      { id: "base", label: "Base", pct: 0.25 },
+      { id: "run", label: "Tracción", pct: 0.5 },
+      { id: "close", label: "Cierre", pct: 0.75 },
+      { id: "goal", label: "Meta", pct: 1 }
+    ];
+    return checkpoints.map(cp=>{
+      const checkpointBank = plan.planStartBank + (plan.totalGoal * cp.pct);
+      const checkpointDay = Math.max(1, Math.round(plan.targetDays * cp.pct));
+      const reached = bank >= checkpointBank;
+      const expectedByNow = dayIndex >= checkpointDay;
+      const gap = bank - checkpointBank;
       return {
-        playerName: String(playerNameAny||""),
-        teamName: String(teamNameAny||""),
-        positionText: String(posAny||""),
-        matchTitle: String(matchTitleAny||""),
-        matchId: String(matchIdAny||""),
-        matchDate: String(dateAny||""),
-        minutesText: String(minAny||""),
-        ratingText: String(ratAny||""),
-        stats: statsAny
+        ...cp,
+        checkpointBank,
+        checkpointDay,
+        reached,
+        expectedByNow,
+        gap
       };
+    });
+  }
+
+  function evaluatePickCandidate({ odds, pFinal, pMkt, pickType }, st, plan, todayState){
+    const implied = odds > 1 ? 1 / odds : 0;
+    const marketRef = Number.isFinite(pMkt) && pMkt > 0 ? pMkt : implied;
+    const edge = pFinal - marketRef;
+    const ev = (pFinal * odds) - 1;
+    const b = Math.max(0.0001, odds - 1);
+    const kelly = clamp((pFinal * b - (1 - pFinal)) / b, -1, 1);
+    const fractionalKelly = Math.max(0, kelly * st.kellyFraction);
+    const rawStake = (Number(st.bank) || 0) * fractionalKelly;
+    let stake = Math.max(st.minUnit, Math.round(rawStake / st.minUnit) * st.minUnit);
+    if(todayState.result === "winning") stake *= 1.15;
+    if(todayState.result === "losing") stake *= 0.8;
+    stake = clamp(stake, st.minUnit, Math.max(st.minUnit, st.bank * st.maxStakePct));
+    let label = "🔴 No toca hoy";
+    let reason = "No cumple EV o rango de cuota del plan.";
+    let confidence = 0.35;
+    if(ev >= plan.evGate && odds >= plan.profile.oddsMin && odds <= plan.profile.oddsMax){
+      label = "🟢 Apta para plan";
+      reason = "Cumple EV mínima y está dentro del rango de cuota objetivo.";
+      confidence = 0.82;
+    }else if(ev > 0){
+      label = "🟡 Solo si vas ganando";
+      reason = "Tiene EV positivo, pero fuera de la zona óptima del plan.";
+      confidence = 0.6;
     }
-
-    function toNumber(x){
-      const s = String(x ?? "").replace(",", ".").trim();
-      const m = s.match(/-?\d+(?:\.\d+)?/);
-      return m ? Number(m[0]) : 0;
+    if(plan.streakStop){
+      label = "🔴 Día bloqueado por racha";
+      reason = "Se activó el freno por pérdidas consecutivas.";
+      confidence = 0.15;
     }
-
-    function normalizeStats(stats){
-      // If already an object of keys -> use directly
-      if(stats && !Array.isArray(stats) && typeof stats === "object"){
-        return stats;
-      }
-      // If array of {label,value} -> map a few common ones
-      const out = {};
-      const rows = Array.isArray(stats) ? stats : [];
-      for(const r of rows){
-        const label = String(r?.label||"").toLowerCase();
-        const value = String(r?.value||"").trim();
-
-        if(label.includes("accurate passes")){ // "28/34 (82%)"
-          const m = value.match(/(\d+)\s*\/\s*(\d+)/);
-          if(m){ out.passC = Number(m[1]); out.passA = Number(m[2]); }
-        }
-        if(label.includes("key passes")) out.keyPasses = toNumber(value);
-        if(label.includes("expected goals") && !label.includes("on target")) out.xG = toNumber(value);
-        if(label.includes("expected assists")) out.xA = toNumber(value);
-        if(label === "goals") out.goals = toNumber(value);
-        if(label === "assists") out.assists = toNumber(value);
-        if(label.includes("long balls")){
-          const m = value.match(/(\d+)\s*\/\s*(\d+)/);
-          if(m){ out.longBallC = Number(m[1]); out.longBallA = Number(m[2]); }
-        }
-        if(label.includes("own half")){
-          const m = value.match(/(\d+)\s*\/\s*(\d+)/);
-          if(m){ out.ownHalfPassC = Number(m[1]); out.ownHalfPassA = Number(m[2]); }
-        }
-        if(label.includes("opposition half")){
-          const m = value.match(/(\d+)\s*\/\s*(\d+)/);
-          if(m){ out.oppHalfPassC = Number(m[1]); out.oppHalfPassA = Number(m[2]); }
-        }
-        if(label.includes("possession lost")) out.possessionLost = toNumber(value);
-        if(label.includes("dribbles") && value.includes("(")) out.dribblesWon = toNumber(value); // rough
-        if(label.includes("tackles") && value.includes("(")) out.defActions = toNumber(value); // rough
-      }
-      return out;
-    }
-
-    async function pasteClipboard(){
-      try{
-        const t = await navigator.clipboard.readText();
-        if(impText) impText.value = t || "";
-        setImpStatus(t ? "Pegado desde el portapapeles ✅" : "Portapapeles vacío.", !!t);
-      }catch(e){
-        setImpStatus("No se pudo leer el portapapeles. Pega manualmente.", false);
-      }
-    }
-
-    function doImport(){
-      try{
-        const raw = (impText?.value || "").trim();
-        if(!raw) return setImpStatus("Pega un JSON primero.", false);
-
-        const obj = JSON.parse(raw);
-        const payload = pickClipPayload(obj);
-        if(!payload) return setImpStatus("JSON no reconocido. Debe venir de FootballLab Clip.", false);
-
-        const playerName = String(payload.playerName||"").trim();
-        if(!playerName) return setImpStatus("El JSON no trae nombre de jugador (playerName).", false);
-
-        // Find or create player in this team
-        let p = db.players.find(x => x.teamId===teamId && x.name.toLowerCase()===playerName.toLowerCase());
-        const clipPosRaw = String(payload.positionText||"").trim();
-        const clipPos = clipPosRaw.split("—")[0].split("-")[0].trim().toUpperCase();
-        const POSCODES = ["GK","CB","LB","RB","CDM","CM","CAM","LW","RW","ST"];
-        let pos = POSCODES.includes(clipPos) ? clipPos : "CM";
-        if(pos==="CM"){
-          for(const c of POSCODES){
-            if(clipPosRaw.toUpperCase().includes(c)){ pos=c; break; }
-          }
-        }
-        const clipRating = clamp(toNumber(payload.ratingText), 0, 10);
-
-        if(!p){
-          p = { id: uid("p"), teamId, name: playerName, position: pos, rating: (clipRating>0?clipRating:6.5) };
-          db.players.push(p);
-        }else{
-          // Optional: update position if unknown-ish
-          if(p.position==="CM" && pos!=="CM") p.position = pos;
-        }
-
-        const statsIn = normalizeStats(payload.stats);
-
-        // Build match record with safe defaults
-        const baseStats = {
-          minutes: 0, goals: 0, assists: 0, yellow: 0, red: 0, losses: 0,
-          shotsOn: 0, keyPasses: 0, progPasses: 0, passC: 0, passA: 0,
-          dribblesWon: 0, duelsWon: 0, duelsTot: 0, defActions: 0,
-          saves: 0, conceded: 0, cleanSheet: 0,
-          xG: 0, xA: 0, possessionLost: 0,
-          longBallC: 0, longBallA: 0,
-          ownHalfPassC: 0, ownHalfPassA: 0,
-          oppHalfPassC: 0, oppHalfPassA: 0,
-          highClaims: 0, punches: 0
-        };
-
-        const minutes = toNumber(payload.minutesText);
-        baseStats.minutes = minutes>0 ? Math.round(minutes) : 0;
-
-        // Merge known keys
-        Object.keys(baseStats).forEach(k=>{
-          if(statsIn && (k in statsIn)) baseStats[k] = toNumber(statsIn[k]);
-        });
-
-        // Extra keys from normalized clip (passPct etc.) we ignore for now
-
-        const season = db.settings.currentSeason;
-        const leagueId = db.settings.currentLeagueId || (db.leagues?.[0]?.id || "lg_league");
-
-        const dateISO = toISODate(payload.matchDate);
-        const matchTitle = String(payload.matchTitle||"").trim();
-        const matchId = String(payload.matchId||"").trim();
-
-        const expected = clamp(p.rating, 0, 10);
-        const newRating = (clipRating>0 ? clipRating : expected);
-
-        db.matches.push({
-          id: uid("m"),
-          playerId: p.id,
-          teamId: p.teamId,
-          season,
-          leagueId,
-          date: dateISO,
-          position: p.position,
-          stats: baseStats,
-          score: matchTitle || "",
-          matchTitle: matchTitle || "",
-          matchId: matchId || "",
-          oldRating: expected,
-          newRating:        newRating,
-        clip: _clipMeta ? { meta: _clipMeta, context: _clipCtx, player: (_clip?.player||null), stats: _clipStats } : null
-      });
-// Optional: update player rating to clip rating if present
-        if(clipRating>0) p.rating = clipRating;
-
-        saveDB(db);
-        setImpStatus(`Importado ✅ ${playerName} • ${matchTitle||"(sin título)"} • ${dateISO} • min:${baseStats.minutes} • KP:${baseStats.keyPasses} • Pass:${baseStats.passC}/${baseStats.passA}`, true);
-        // refresh view
-        openLab("team",{teamId});
-      }catch(e){
-        setImpStatus("Error importando: " + String(e?.message||e), false);
-      }
-    }
-
-    document.getElementById("fl_impPaste").onclick = pasteClipboard;
-    const fileBtn = document.getElementById("fl_impFile");
-    const fileInput = document.getElementById("fl_impFileInput");
-    if(fileBtn && fileInput){
-      fileBtn.onclick = ()=>fileInput.click();
-      fileInput.onchange = async ()=>{
-        const f = fileInput.files && fileInput.files[0];
-        if(!f) return;
-        try{
-          const text = await f.text();
-          if(impText) impText.value = text;
-          setImpStatus(`Archivo cargado ✅ ${f.name}`, true);
-        }catch(e){
-          setImpStatus("No pude leer el archivo JSON.", false);
-        }finally{
-          // allow reselect same file
-          fileInput.value = "";
-        }
-      };
-    }
-
-    document.getElementById("fl_impRun").onclick = doImport;
-    document.getElementById("fl_impClear").onclick = ()=>{
-      if(impText) impText.value = "";
-      setImpStatus("Listo. Pega un JSON cuando quieras.");
+    const flexibility = clamp(1 - Math.abs(odds - ((plan.profile.oddsMin + plan.profile.oddsMax)/2)) / Math.max(0.2, plan.profile.oddsMax - plan.profile.oddsMin), 0, 1);
+    return {
+      pickType,
+      odds,
+      pFinal,
+      pMkt: marketRef,
+      edge,
+      ev,
+      kelly: fractionalKelly,
+      stake,
+      label,
+      reason,
+      confidence,
+      flexibility
     };
-    setImpStatus("Listo. Pega un JSON cuando quieras.");
-    // ---- /Import JSON ----
+  }
 
+  function sparklinePath(values, width=640, height=200, minY=null, maxY=null){
+    if(!values.length) return "";
+    const low = minY ?? Math.min(...values);
+    const high = maxY ?? Math.max(...values);
+    const spread = (high - low) || 1;
+    return values.map((v,i)=>{
+      const x = values.length===1 ? 0 : (i/(values.length-1))*width;
+      const y = height - ((v - low) / spread) * height;
+      return `${i===0?"M":"L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+    }).join(" ");
+  }
 
-    const list = document.getElementById("playersList");
-    if(players.length===0){
-      list.innerHTML = `<div class="fl-small" style="opacity:.75;">Sin jugadores aún. Agrega el primero arriba 👆</div>`;
-      return;
+  function pickFirstNumber(...values){
+    for(const value of values){
+      if(value===null || value===undefined || value==="") continue;
+      const raw = typeof value === "string" ? value.replace(",", ".") : value;
+      const n = Number(raw);
+      if(Number.isFinite(n)) return n;
     }
+    return null;
+  }
 
-    const sortBtn = document.getElementById("sortPlayersByDate");
-    if(sortBtn){
-      sortBtn.onclick = ()=>{
-        if(_teamPlayerDateSort === "desc") _teamPlayerDateSort = "asc";
-        else _teamPlayerDateSort = "desc";
-        renderTeam(db, teamId);
+  function pickFirstString(...values){
+    for(const value of values){
+      if(typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  }
+
+  function teamStrength(db, teamId){
+    const players = db.players.filter(p=>p.teamId===teamId);
+    if(!players.length) return 1.0;
+    const avg = players.reduce((acc,p)=>acc+(Number(p.rating)||5),0)/players.length;
+    return Math.max(0.6, avg/5);
+  }
+
+  function poisson(lambda, goals){
+    let fact = 1;
+    for(let i=2;i<=goals;i++) fact*=i;
+    return (Math.exp(-lambda) * (lambda**goals))/fact;
+  }
+
+  function impliedProb(odd){
+    const n = Number(odd);
+    if(!Number.isFinite(n) || n<=1.01) return null;
+    return 1/n;
+  }
+
+  function clean1x2Probs(oddH, oddD, oddA){
+    const pH = impliedProb(oddH);
+    const pD = impliedProb(oddD);
+    const pA = impliedProb(oddA);
+    if(pH===null || pD===null || pA===null) return null;
+    const overround = pH+pD+pA;
+    if(!overround) return null;
+    return { pH: pH/overround, pD: pD/overround, pA: pA/overround };
+  }
+
+  function parseStatsPayload(raw){
+    const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const sectionStats = Array.isArray(data?.sections)
+      ? data.sections.flatMap(section=>(section?.stats||[]).map(stat=>({
+        key: stat?.category || stat?.key || stat?.label || stat?.name || stat?.stat || "Métrica",
+        home: stat?.home?.main ?? stat?.home?.raw ?? stat?.home,
+        away: stat?.away?.main ?? stat?.away?.raw ?? stat?.away
+      })))
+      : [];
+    const list = Array.isArray(data)
+      ? data
+      : sectionStats.length ? sectionStats
+      : Array.isArray(data?.stats) ? data.stats
+      : Array.isArray(data?.estadisticas) ? data.estadisticas
+      : Array.isArray(data?.statistics) ? data.statistics
+      : [];
+
+    const stats = list.map(item=>({
+      key: String(item?.key || item?.label || item?.name || item?.stat || "Métrica").trim(),
+      home: String(item?.home ?? item?.local ?? item?.a ?? "0").trim(),
+      away: String(item?.away ?? item?.visitante ?? item?.b ?? "0").trim()
+    })).filter(s=>s.key);
+
+    if(!stats.length) throw new Error("JSON de estadísticas inválido");
+    return stats;
+  }
+
+  function openStatsModal({ db, match, onSave } = {}){
+    if(!match) return;
+    const backdrop = document.createElement("div");
+    backdrop.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;";
+    backdrop.innerHTML = `
+      <div class="fl-card" style="width:min(860px,100%);max-height:90vh;overflow:auto;">
+        <div class="fl-row" style="justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:18px;font-weight:900;">Estadísticas del partido</div>
+          <button class="fl-btn" id="closeStatsModal">Cerrar</button>
+        </div>
+        <div class="fl-muted" style="margin-bottom:8px;">Pega JSON con formato <code>stats</code>, <code>statistics</code> o <code>sections[].stats[]</code>.</div>
+        <textarea id="statsImportModal" class="fl-text" placeholder='{"kind":"match_stats","sections":[{"section":"Estadísticas principales","stats":[{"category":"Posesión","home":{"main":"67%"},"away":{"main":"33%"}}]}]}'></textarea>
+        <div class="fl-row" style="margin-top:8px;">
+          <button class="fl-btn" id="saveStatsModal">Guardar estadísticas</button>
+          <span id="statsModalStatus" class="fl-muted"></span>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const close = ()=>backdrop.remove();
+    backdrop.addEventListener("click", (e)=>{ if(e.target===backdrop) close(); });
+    backdrop.querySelector("#closeStatsModal").onclick = close;
+    backdrop.querySelector("#saveStatsModal").onclick = ()=>{
+      const status = backdrop.querySelector("#statsModalStatus");
+      try{
+        const stats = parseStatsPayload(backdrop.querySelector("#statsImportModal").value.trim());
+        match.stats = stats;
+        saveDb(db);
+        status.textContent = `✅ Guardado (${stats.length} métricas)`;
+        onSave?.();
+        setTimeout(close, 500);
+      }catch(err){
+        status.textContent = `❌ ${String(err.message||err)}`;
+      }
+    };
+  }
+
+  function openFutureMatchModal({ db, team, matchId = "", onSave } = {}){
+    if(!team) return;
+    ensureTeamIntState(team);
+    const editing = (team.futureMatches || []).find(m=>m.id===matchId) || null;
+    const backdrop = document.createElement("div");
+    backdrop.className = "fl-modal-backdrop";
+    const competitionOptions = db.leagues
+      .slice()
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
+      .map(l=>`<option value="${l.id}">${l.name} · ${l.type || "league"}</option>`)
+      .join("");
+    const rivalOptions = db.teams
+      .filter(t=>t.id!==team.id)
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
+      .map(t=>`<option value="${t.id}">${t.name}</option>`)
+      .join("");
+    const marketOptions = (db.marketTracker || [])
+      .map(row=>`<option value="${row.matchId}">${row.fecha || "sin fecha"} · ${row.liga || "sin liga"} · ${row.matchId}</option>`)
+      .join("");
+    backdrop.innerHTML = `
+      <div class="fl-modal">
+        <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div>
+            <div class="fl-modal-title">${editing ? "Editar partido" : "Nuevo partido"}</div>
+            <div class="fl-mini">Completa rival, liga/competición y contexto para INT.</div>
+          </div>
+          <button class="fl-btn" id="closeFutureModal">Cerrar</button>
+        </div>
+        <div class="fl-modal-grid" style="margin-bottom:10px;">
+          <div class="fl-field"><label>Rival</label><select id="fmRival" class="fl-select"><option value="">Seleccionar rival</option>${rivalOptions}</select></div>
+          <div class="fl-field"><label>Fecha</label><input id="fmDate" type="date" class="fl-input"></div>
+          <div class="fl-field"><label>Liga / Competición</label><select id="fmCompetitionId" class="fl-select"><option value="">Seleccionar competición</option>${competitionOptions}</select></div>
+          <div class="fl-field"><label>Etapa</label><input id="fmStage" class="fl-input" placeholder="Liga / Grupos / KO / Final"></div>
+          <div class="fl-field"><label>Importancia</label><select id="fmImportance" class="fl-select"><option value="nada en juego">Nada en juego</option><option value="top4">Top4</option><option value="descenso">Descenso</option><option value="derby">Derby</option><option value="final">Final</option></select><div id="fmImportanceHint" class="fl-mini" style="margin-top:4px;opacity:.75;"></div></div>
+          <div class="fl-field"><label>Market mood</label><select id="fmMarketMood" class="fl-select"><option value="estable">Estable</option><option value="dinero temprano">Dinero temprano</option><option value="raro">Raro</option></select></div>
+          <div class="fl-field"><label>Market vinculado</label><select id="fmMarketLink" class="fl-select"><option value="">Sin vínculo</option>${marketOptions}</select></div>
+          <div class="fl-field"><label>Snapshot cuota (1X2)</label><input id="fmOdds" class="fl-input" placeholder="1.70,3.80,5.20"></div>
+          <div class="fl-field"><label>Descanso (días)</label><input id="fmRestDays" type="number" min="0" max="14" class="fl-input" placeholder="Auto"></div>
+        </div>
+        <div class="fl-row" style="gap:16px;margin-bottom:12px;">
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmIsHome" type="checkbox"> Juega de local</label>
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmPeakNear" type="checkbox"> Pico en 7 días</label>
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmLongTravel" type="checkbox"> Viaje largo</label>
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmPostHype" type="checkbox"> Post-hype</label>
+          <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input id="fmWeather" type="checkbox"> Clima adverso</label>
+        </div>
+        <div class="fl-row" style="justify-content:space-between;">
+          <span id="futureModalStatus" class="fl-mini"></span>
+          <div class="fl-row">
+            ${editing ? '<button class="fl-btn" id="deleteFutureModal" style="border-color:#da3633;color:#ff7b72;">Eliminar</button>' : ''}
+            <button class="fl-btn" id="saveFutureModal">${editing ? "Guardar cambios" : "Registrar partido"}</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const close = ()=>backdrop.remove();
+    backdrop.addEventListener("click", (e)=>{ if(e.target===backdrop) close(); });
+    backdrop.querySelector("#closeFutureModal").onclick = close;
+
+    const setValue = (id, value)=>{
+      const el = backdrop.querySelector(id);
+      if(!el) return;
+      if(el.type === "checkbox") el.checked = Boolean(value);
+      else if(value!==undefined && value!==null) el.value = String(value);
+    };
+    setValue("#fmRival", editing?.rivalTeamId || "");
+    setValue("#fmDate", editing?.date || "");
+    setValue("#fmCompetitionId", editing?.competitionId || editing?.leagueId || "");
+    setValue("#fmImportance", normalizeImportanceTag(editing?.importanceTag || "nada en juego"));
+    setValue("#fmStage", editing?.stage || "Liga");
+    setValue("#fmMarketMood", editing?.marketMood || "estable");
+    setValue("#fmMarketLink", editing?.marketMatchId || "");
+    setValue("#fmRestDays", Number.isFinite(Number(editing?.restDays)) ? editing.restDays : "");
+    setValue("#fmIsHome", editing?.isHome ?? true);
+    setValue("#fmPeakNear", editing?.peakMatchHint);
+    setValue("#fmLongTravel", editing?.longTravel);
+    setValue("#fmPostHype", editing?.postHype);
+    setValue("#fmWeather", editing?.weatherFlag);
+
+    const refreshImportanceHint = ()=>{
+      const compId = backdrop.querySelector("#fmCompetitionId").value;
+      const competition = getCompetitionById(db, compId);
+      const hint = backdrop.querySelector("#fmImportanceHint");
+      if(!hint) return;
+      hint.textContent = normalizeCompetitionType(competition?.type) === "league"
+        ? "Modo tabla activo: Top4/Descenso aplican."
+        : "Importancia de tabla no aplica; se evalúa modo KO.";
+    };
+    backdrop.querySelector("#fmCompetitionId").onchange = refreshImportanceHint;
+    refreshImportanceHint();
+
+    const applyMarketFromLink = ()=>{
+      const marketId = String(backdrop.querySelector("#fmMarketLink")?.value || "").trim();
+      if(!marketId) return;
+      const row = (db.marketTracker || []).find(item=>item.matchId===marketId);
+      if(!row) return;
+      const last = Array.isArray(row.cuotas) && row.cuotas.length ? row.cuotas[row.cuotas.length-1] : null;
+      if(last){
+        backdrop.querySelector("#fmOdds").value = [last.home, last.draw, last.away].filter(Number.isFinite).join(",");
+      }
+      if(Array.isArray(row.cuotas) && row.cuotas.length >= 3) backdrop.querySelector("#fmMarketMood").value = "dinero temprano";
+      if(row.settlement?.CLV && Math.abs(Number(row.settlement.CLV)) >= 0.08) backdrop.querySelector("#fmMarketMood").value = "raro";
+    };
+    backdrop.querySelector("#fmMarketLink").onchange = applyMarketFromLink;
+    applyMarketFromLink();
+
+    backdrop.querySelector("#saveFutureModal").onclick = ()=>{
+      const status = backdrop.querySelector("#futureModalStatus");
+      const rivalTeamId = backdrop.querySelector("#fmRival").value;
+      const date = String(backdrop.querySelector("#fmDate").value || "").trim();
+      const competitionId = String(backdrop.querySelector("#fmCompetitionId").value || "").trim();
+      const selectedCompetition = getCompetitionById(db, competitionId);
+      const competition = selectedCompetition?.name || "Liga";
+      const importanceTag = normalizeImportanceTag(backdrop.querySelector("#fmImportance").value || "nada en juego");
+      const stage = String(backdrop.querySelector("#fmStage").value || "Liga").trim() || "Liga";
+      const marketMood = String(backdrop.querySelector("#fmMarketMood").value || "estable").trim();
+      const marketMatchId = String(backdrop.querySelector("#fmMarketLink").value || "").trim();
+      const oddsRaw = String(backdrop.querySelector("#fmOdds").value || "").trim();
+      const restDaysRaw = backdrop.querySelector("#fmRestDays").value;
+      const restDays = restDaysRaw==="" ? null : clamp(Number(restDaysRaw) || 0, 0, 14);
+      if(!rivalTeamId){ status.textContent = "❌ Selecciona un rival."; return; }
+      if(!date){ status.textContent = "❌ Elige una fecha."; return; }
+      if(!competitionId){ status.textContent = "❌ Selecciona una competición."; return; }
+
+      const payload = {
+        id: editing?.id || uid("fm"),
+        date,
+        rivalTeamId,
+        competition,
+        competitionId,
+        competitionType: normalizeCompetitionType(selectedCompetition?.type),
+        stage,
+        isHome: backdrop.querySelector("#fmIsHome").checked,
+        importanceTag,
+        marketMood,
+        marketMatchId,
+        peakMatchHint: backdrop.querySelector("#fmPeakNear").checked,
+        longTravel: backdrop.querySelector("#fmLongTravel").checked,
+        postHype: backdrop.querySelector("#fmPostHype").checked,
+        weatherFlag: backdrop.querySelector("#fmWeather").checked,
+        snapshots: Array.isArray(editing?.snapshots) ? [...editing.snapshots] : []
+      };
+      if(oddsRaw){
+        const nums = oddsRaw.split(/[ ,;/|]+/).map(v=>Number(v)).filter(Number.isFinite);
+        if(nums.length>=3){
+          payload.snapshots.push({ homeOdds: nums[0], drawOdds: nums[1], awayOdds: nums[2], timestamp: new Date().toISOString(), note: "quick-fill" });
+        }
+      }
+      if(restDays!==null) payload.restDays = restDays;
+      else if(editing && "restDays" in editing) payload.restDays = undefined;
+
+      if(editing){
+        const idx = team.futureMatches.findIndex(m=>m.id===editing.id);
+        if(idx>=0) team.futureMatches[idx] = { ...editing, ...payload };
+      }else{
+        team.futureMatches.push(payload);
+      }
+      removeMirrorFutureMatch({ db, team, matchId: payload.id });
+      const rival = db.teams.find(t=>t.id===rivalTeamId);
+      if(rival) upsertMirrorFutureMatch({ db, team, rival, match: payload });
+      ensureTeamInLeague(db, team.id, competitionId);
+      ensureTeamInLeague(db, rivalTeamId, competitionId);
+      saveDb(db);
+      onSave?.();
+      close();
+    };
+
+    const deleteBtn = backdrop.querySelector("#deleteFutureModal");
+    if(deleteBtn){
+      deleteBtn.onclick = ()=>{
+        team.futureMatches = (team.futureMatches || []).filter(m=>m.id!==editing.id);
+        removeMirrorFutureMatch({ db, team, matchId: editing.id });
+        saveDb(db);
+        onSave?.();
+        close();
       };
     }
+  }
 
-    // Show effective rating preview using current season form
-    const rows = playersView.map(p=>{
-      const eff = getEffectiveRating(db, p.id);
-      const form = getFormScore(db, p.id);
-      const lastMatchDate = getLastMatchDateISO(p.id);
+  function toNumLoose(value){
+    if(value===null || value===undefined) return null;
+    const clean = String(value).replace('%','').replace(',','.').trim();
+    if(!clean) return null;
+    const n = Number(clean);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function statsBarsHtml(stats){
+    return stats.map(s=>{
+      const h = toNumLoose(s.home);
+      const a = toNumLoose(s.away);
+      const total = (h!==null && a!==null) ? h+a : null;
+      const hPct = total && total>0 ? (h/total)*100 : 50;
+      const aPct = total && total>0 ? (a/total)*100 : 50;
       return `
-        <div class="fl-card" style="margin:8px 0;">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-            <div>
-              <div style="font-weight:850;">${escapeHtml(p.name)} <span class="fl-pill">${escapeHtml(POS_LABELS[p.position]||p.position)}</span></div>
-              <div class="fl-small">
-                Base: <b>${fmt(p.rating,2)}</b> • Forma(${db.settings.currentSeason}): <b>${fmt(form,2)}</b> • Efectivo: <b>${fmt(eff,2)}</b>
-              </div>
-              <div class="fl-small" style="opacity:.85;">Último partido: <b>${escapeHtml(lastMatchDate || "sin registros")}</b></div>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-              <button class="mc-btn" data-profile="${p.id}">Perfil</button>
-              <button class="mc-btn" data-edit="${p.id}">Editar</button>
-              <button class="mc-btn" data-del="${p.id}">Eliminar</button>
-            </div>
+        <div style="margin-bottom:12px;">
+          <div class="fl-row" style="justify-content:space-between;font-weight:700;">
+            <span>${s.home}</span>
+            <span>${s.key}</span>
+            <span>${s.away}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
+            <div style="height:8px;border-radius:999px;background:linear-gradient(90deg,#ff3b69 ${hPct}%, #2d333b ${hPct}%);"></div>
+            <div style="height:8px;border-radius:999px;background:linear-gradient(90deg,#2d333b ${100-aPct}%, #1f6feb ${100-aPct}%);"></div>
           </div>
         </div>
       `;
     }).join("");
+  }
 
-    list.innerHTML = rows;
+  function teamFormFromTracker(db, teamId, limit=6){
+    const games = db.tracker
+      .filter(g=>g.homeId===teamId || g.awayId===teamId)
+      .slice(-limit);
+    if(!games.length) return { attack:1, defense:1, momentum:1, played:0 };
+    let gf=0, ga=0, pts=0;
+    games.forEach(g=>{
+      const isHome = g.homeId===teamId;
+      const goalsFor = isHome ? Number(g.homeGoals)||0 : Number(g.awayGoals)||0;
+      const goalsAgainst = isHome ? Number(g.awayGoals)||0 : Number(g.homeGoals)||0;
+      gf += goalsFor;
+      ga += goalsAgainst;
+      pts += goalsFor>goalsAgainst ? 3 : goalsFor===goalsAgainst ? 1 : 0;
+    });
+    const n = games.length;
+    const avgFor = gf/n;
+    const avgAgainst = ga/n;
+    const pointsRate = pts/(n*3);
+    return {
+      attack: Math.max(0.7, Math.min(1.45, 0.8 + avgFor*0.35)),
+      defense: Math.max(0.7, Math.min(1.45, 0.8 + avgAgainst*0.35)),
+      momentum: Math.max(0.85, Math.min(1.2, 0.9 + pointsRate*0.4)),
+      played: n
+    };
+  }
 
-    list.querySelectorAll("[data-del]").forEach(b=>b.onclick = ()=>{
-      const pid = b.getAttribute("data-del");
-      if(!confirm("¿Eliminar jugador?")) return;
-      db.players = db.players.filter(pp=>pp.id!==pid);
-      // Keep match logs (study). optionally prune:
-      // db.matches = db.matches.filter(m=>m.playerId!==pid);
-      saveDB(db);
-      openLab("team",{teamId});
+  function normalizeStatKey(key){
+    return String(key || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim();
+  }
+
+  function statNumberFromSide(raw){
+    if(raw===null || raw===undefined) return null;
+    const clean = String(raw).replace("%", "").replace(",", ".").trim();
+    if(!clean) return null;
+    const n = Number(clean);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function metricFromStats(stats, patterns, side){
+    if(!Array.isArray(stats) || !stats.length) return null;
+    for(const item of stats){
+      const key = normalizeStatKey(item?.key);
+      if(!patterns.some(pattern=>key.includes(pattern))) continue;
+      const value = statNumberFromSide(side==="home" ? item?.home : item?.away);
+      if(Number.isFinite(value)) return value;
+    }
+    return null;
+  }
+
+  function tableContextForTeam({ teamContext, matchday, isHome }){
+    const pos = clamp(Number(teamContext?.pos) || 10, 1, 20);
+    const objective = pickFirstString(teamContext?.objective, "mid").toLowerCase();
+    const phase = matchday>=28 ? "late" : matchday>=12 ? "mid" : "early";
+    const relegationZone = pos>=18;
+    const titleZone = pos<=3;
+    let pressure = 0.18 + (phase==="late" ? 0.18 : phase==="mid" ? 0.08 : 0);
+    if(relegationZone) pressure += phase==="late" ? 0.48 : 0.28;
+    if(titleZone) pressure += phase==="late" ? 0.3 : 0.18;
+    if(objective==="relegation" || objective==="survival") pressure += 0.14;
+    if(objective==="title" || objective==="europe") pressure += 0.12;
+    if(objective==="mid") pressure -= 0.05;
+
+    let riskMode = 0;
+    if(relegationZone) riskMode += isHome ? 0.2 : -0.1;
+    if(titleZone) riskMode += isHome ? 0.1 : -0.2;
+    if(objective==="cupfocus") riskMode -= 0.2;
+    if(objective==="relegation") riskMode += isHome ? 0.15 : -0.05;
+    if(phase==="late") riskMode += pressure>0.55 ? -0.05 : 0;
+
+    return {
+      pos,
+      objective,
+      pressure: clamp(pressure, 0, 1),
+      riskMode: clamp(riskMode, -1, 1),
+      phase
+    };
+  }
+
+  function applyDrawBoostToMatrix(matrix, drawBoost){
+    const safeBoost = clamp(Number(drawBoost) || 0, 0, 0.25);
+    const adjusted = matrix.map((row, h)=>row.map((cell, a)=>{
+      if(h!==a) return cell;
+      return cell * (1 + safeBoost);
+    }));
+    let total = 0;
+    adjusted.forEach(row=>row.forEach(p=>{ total += p; }));
+    if(!(total>0)) return matrix;
+    return adjusted.map(row=>row.map(p=>p/total));
+  }
+
+  function summarizeMatrix(matrix){
+    let pHome = 0, pDraw = 0, pAway = 0;
+    let best = { h: 0, a: 0, p: 0 };
+    for(let h=0; h<matrix.length; h++){
+      for(let a=0; a<matrix[h].length; a++){
+        const p = matrix[h][a];
+        if(h>a) pHome += p;
+        else if(h===a) pDraw += p;
+        else pAway += p;
+        if(p>best.p) best = { h, a, p };
+      }
+    }
+    return { pHome, pDraw, pAway, best };
+  }
+
+  function weightedAverage(items, valueFn, decay=0.9){
+    if(!items.length) return null;
+    let weighted = 0;
+    let totalWeight = 0;
+    const ordered = items.slice().sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")));
+    ordered.forEach((item, idx)=>{
+      const value = Number(valueFn(item));
+      if(!Number.isFinite(value)) return;
+      const weight = decay ** (ordered.length - idx - 1);
+      weighted += value * weight;
+      totalWeight += weight;
+    });
+    return totalWeight>0 ? weighted/totalWeight : null;
+  }
+
+  function listLeagueMatches(db, leagueId, limit=140){
+    return db.tracker
+      .filter(m=>!leagueId || m.leagueId===leagueId)
+      .slice(-limit);
+  }
+
+  function leagueContextFromTracker(db, leagueId){
+    const matches = listLeagueMatches(db, leagueId, 180);
+    if(!matches.length){
+      return {
+        matches: 0,
+        avgGoalsHome: 1.35,
+        avgGoalsAway: 1.15,
+        avgCornersTotal: 9.2,
+        avgCardsTotal: 4.4
+      };
+    }
+    const avg = (getter, fallback=0)=>{
+      const vals = matches.map(getter).filter(v=>Number.isFinite(v));
+      if(!vals.length) return fallback;
+      return vals.reduce((a,b)=>a+b,0)/vals.length;
+    };
+    const cornersAvg = avg(m=>{
+      const h = pickFirstNumber(m.homeCorners, m.cornersHome, m.corners?.home);
+      const a = pickFirstNumber(m.awayCorners, m.cornersAway, m.corners?.away);
+      return Number.isFinite(h) && Number.isFinite(a) ? h+a : NaN;
+    }, 9.2);
+    const cardsAvg = avg(m=>{
+      const hy = pickFirstNumber(m.homeYellow, m.cardsHomeYellow, m.cards?.homeYellow, 0) || 0;
+      const ay = pickFirstNumber(m.awayYellow, m.cardsAwayYellow, m.cards?.awayYellow, 0) || 0;
+      const hr = pickFirstNumber(m.homeRed, m.cardsHomeRed, m.cards?.homeRed, 0) || 0;
+      const ar = pickFirstNumber(m.awayRed, m.cardsAwayRed, m.cards?.awayRed, 0) || 0;
+      return hy + ay + (hr + ar) * 1.6;
+    }, 4.4);
+
+    return {
+      matches: matches.length,
+      avgGoalsHome: avg(m=>Number(m.homeGoals)||0, 1.35),
+      avgGoalsAway: avg(m=>Number(m.awayGoals)||0, 1.15),
+      avgCornersTotal: cornersAvg,
+      avgCardsTotal: cardsAvg
+    };
+  }
+
+  function teamAnalytics(db, teamId, leagueId, limit=20){
+    const games = db.tracker
+      .filter(g=>(g.homeId===teamId || g.awayId===teamId) && (!leagueId || g.leagueId===leagueId))
+      .slice(-limit);
+    const homeGames = games.filter(g=>g.homeId===teamId);
+    const awayGames = games.filter(g=>g.awayId===teamId);
+
+    const avgSide = (list, forKey, againstKey, fallbackFor, fallbackAgainst)=>{
+      const forWeighted = weightedAverage(list, g=>pickFirstNumber(g[forKey], g[fallbackFor]), 0.9);
+      const againstWeighted = weightedAverage(list, g=>pickFirstNumber(g[againstKey], g[fallbackAgainst]), 0.9);
+      return {
+        for: Number.isFinite(forWeighted) ? forWeighted : 0,
+        against: Number.isFinite(againstWeighted) ? againstWeighted : 0,
+        played: list.length
+      };
+    };
+
+    const goalsHome = avgSide(homeGames, "homeGoals", "awayGoals");
+    const goalsAway = avgSide(awayGames, "awayGoals", "homeGoals");
+    const xgHome = avgSide(homeGames, "homeXg", "awayXg", "xgHome", "xgAway");
+    const xgAway = avgSide(awayGames, "awayXg", "homeXg", "xgAway", "xgHome");
+
+    const narrativeSideCounters = (match, side)=>{
+      const counters = match?.narrativeModule?.normalized?.counters?.[side];
+      if(counters) return counters;
+      const events = match?.narrativeModule?.normalized?.events || [];
+      const teams = match?.narrativeModule?.normalized?.teams || {};
+      const sideName = String(teams[side] || "").toLowerCase();
+      if(!events.length || !sideName) return null;
+      return events.reduce((acc, ev)=>{
+        if(String(ev?.team || "").toLowerCase()!==sideName) return acc;
+        if(ev.type==="corner") acc.corners += 1;
+        if(ev.type==="yellow") acc.cards += 1;
+        if(ev.type==="red") acc.reds += 1;
+        return acc;
+      }, { corners: 0, cards: 0, reds: 0 });
+    };
+
+    const narrativeValue = (match, sideTeamId, kind)=>{
+      const side = match.homeId===sideTeamId ? "home" : match.awayId===sideTeamId ? "away" : null;
+      if(!side) return null;
+      const counters = narrativeSideCounters(match, side);
+      if(!counters) return null;
+      if(kind==="corners") return Number(counters.corners);
+      if(kind==="cards") return Number(counters.cards) + Number(counters.reds || 0) * 1.6;
+      return null;
+    };
+
+    const cornersFor = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      return pickFirstNumber(
+        isHome ? g.homeCorners : g.awayCorners,
+        isHome ? g.cornersHome : g.cornersAway,
+        narrativeValue(g, teamId, "corners")
+      );
+    }, 0.9) || 0;
+    const cornersAgainst = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      const oppTeamId = isHome ? g.awayId : g.homeId;
+      return pickFirstNumber(
+        isHome ? g.awayCorners : g.homeCorners,
+        isHome ? g.cornersAway : g.cornersHome,
+        narrativeValue(g, oppTeamId, "corners")
+      );
+    }, 0.9) || 0;
+    const cardsRate = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      const y = pickFirstNumber(isHome ? g.homeYellow : g.awayYellow, 0) || 0;
+      const r = pickFirstNumber(isHome ? g.homeRed : g.awayRed, 0) || 0;
+      const explicit = y + r*1.6;
+      return explicit>0 ? explicit : (narrativeValue(g, teamId, "cards") || 0);
+    }, 0.88) || 0;
+
+    const statsAttackRate = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      const side = isHome ? "home" : "away";
+      const shotsOnTarget = metricFromStats(g.stats, ["shots on target", "tiros a puerta", "remates a puerta"], side);
+      const dangerous = metricFromStats(g.stats, ["big chances", "ocasiones", "ataques peligrosos"], side);
+      const poss = metricFromStats(g.stats, ["possession", "posesion"], side);
+      const values = [
+        Number.isFinite(shotsOnTarget) ? shotsOnTarget * 0.12 : null,
+        Number.isFinite(dangerous) ? dangerous * 0.06 : null,
+        Number.isFinite(poss) ? poss / 100 : null
+      ].filter(v=>Number.isFinite(v));
+      if(!values.length) return null;
+      return values.reduce((a,b)=>a+b,0)/values.length;
+    }, 0.9);
+
+    const statsDefenseRate = weightedAverage(games, g=>{
+      const isHome = g.homeId===teamId;
+      const oppSide = isHome ? "away" : "home";
+      const oppShotsOnTarget = metricFromStats(g.stats, ["shots on target", "tiros a puerta", "remates a puerta"], oppSide);
+      const oppDangerous = metricFromStats(g.stats, ["big chances", "ocasiones", "ataques peligrosos"], oppSide);
+      const values = [
+        Number.isFinite(oppShotsOnTarget) ? oppShotsOnTarget * 0.12 : null,
+        Number.isFinite(oppDangerous) ? oppDangerous * 0.06 : null
+      ].filter(v=>Number.isFinite(v));
+      if(!values.length) return null;
+      return values.reduce((a,b)=>a+b,0)/values.length;
+    }, 0.9);
+
+    const form5Games = games.slice(-5);
+    let formPts = 0, formGF = 0, formGA = 0;
+    form5Games.forEach(g=>{
+      const isHome = g.homeId===teamId;
+      const gf = isHome ? Number(g.homeGoals)||0 : Number(g.awayGoals)||0;
+      const ga = isHome ? Number(g.awayGoals)||0 : Number(g.homeGoals)||0;
+      formGF += gf;
+      formGA += ga;
+      formPts += gf>ga ? 3 : gf===ga ? 1 : 0;
     });
 
-    list.querySelectorAll("[data-profile]").forEach(b=>b.onclick = ()=>{
-      const pid = b.getAttribute("data-profile");
-      openLab("player",{playerId: pid});
+    return {
+      sample: games.length,
+      goalsHome,
+      goalsAway,
+      xgHome,
+      xgAway,
+      cornersFor,
+      cornersAgainst,
+      cardsRate,
+      statsImpact: {
+        attack: Number.isFinite(statsAttackRate) ? clamp(0.88 + statsAttackRate * 0.35, 0.78, 1.35) : 1,
+        defenseWeakness: Number.isFinite(statsDefenseRate) ? clamp(0.85 + statsDefenseRate * 0.4, 0.72, 1.38) : 1,
+        sample: games.filter(g=>Array.isArray(g.stats) && g.stats.length>0).length
+      },
+      form5: {
+        played: form5Games.length,
+        points: formPts,
+        gf: formGF,
+        ga: formGA,
+        gd: formGF - formGA
+      }
+    };
+  }
+
+  function buildTeamBehaviorSeries(db, teamId){
+    const ordered = db.tracker
+      .filter(g=>g.homeId===teamId || g.awayId===teamId)
+      .slice()
+      .sort((a,b)=>String(a.date || "").localeCompare(String(b.date || "")));
+    let cumulativePoints = 0;
+    let cumulativeGoalDiff = 0;
+    const formQueue = [];
+    let wins = 0;
+    let draws = 0;
+    let losses = 0;
+
+    const series = ordered.map((match, idx)=>{
+      const isHome = match.homeId===teamId;
+      const gf = isHome ? Number(match.homeGoals)||0 : Number(match.awayGoals)||0;
+      const ga = isHome ? Number(match.awayGoals)||0 : Number(match.homeGoals)||0;
+      const points = gf>ga ? 3 : gf===ga ? 1 : 0;
+      if(points===3) wins += 1;
+      else if(points===1) draws += 1;
+      else losses += 1;
+      cumulativePoints += points;
+      cumulativeGoalDiff += gf - ga;
+      formQueue.push(points);
+      if(formQueue.length > 5) formQueue.shift();
+      const formAvg = formQueue.reduce((acc, val)=>acc+val, 0) / formQueue.length;
+      const momentumNow = clamp(formAvg / 3, 0, 1);
+
+      return {
+        index: idx + 1,
+        label: match.date || `J${idx+1}`,
+        cumulativePoints,
+        cumulativeGoalDiff,
+        momentumNow,
+        gf,
+        ga
+      };
     });
 
-    list.querySelectorAll("[data-edit]").forEach(b=>b.onclick = ()=>{
-      const pid = b.getAttribute("data-edit");
-      const p = db.players.find(pp=>pp.id===pid);
-      if(!p) return;
-      const newName = prompt("Nombre", p.name);
-      if(newName===null) return;
-      const newRating = prompt("Rating base (0–10)", String(p.rating));
-      if(newRating===null) return;
-      p.name = newName.trim() || p.name;
-      const r = parseFloat(newRating);
-      if(Number.isFinite(r)) p.rating = clamp(r,0,10);
-      saveDB(db);
-      openLab("team",{teamId});
+    const last = series[series.length - 1] || null;
+    const prev = series.length > 1 ? series[series.length - 2] : null;
+    return {
+      series,
+      summary: {
+        played: series.length,
+        points: last?.cumulativePoints || 0,
+        goalDiff: last?.cumulativeGoalDiff || 0,
+        wins,
+        draws,
+        losses,
+        currentMomentum: last?.momentumNow || 0,
+        momentumDelta: last && prev ? (last.momentumNow - prev.momentumNow) : 0
+      }
+    };
+  }
+
+  let _teamBehaviorChart = null;
+  function renderTeamBehaviorChart(canvas, behavior){
+    if(!canvas || typeof Chart === "undefined") return;
+    const series = behavior?.series || [];
+    try{ if(_teamBehaviorChart){ _teamBehaviorChart.destroy(); _teamBehaviorChart = null; } }catch(_e){}
+    if(!series.length) return;
+
+    _teamBehaviorChart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: {
+        labels: series.map((row, idx)=> row.label || `J${idx+1}`),
+        datasets: [
+          {
+            label: "Puntos acumulados",
+            data: series.map(row=>row.cumulativePoints),
+            borderColor: "#1f6feb",
+            backgroundColor: "rgba(31,111,235,.2)",
+            tension: 0.25,
+            yAxisID: "y"
+          },
+          {
+            label: "Momentum actual (0-100)",
+            data: series.map(row=>Math.round(row.momentumNow * 100)),
+            borderColor: "#2ea043",
+            backgroundColor: "rgba(46,160,67,.18)",
+            tension: 0.3,
+            yAxisID: "y1"
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        scales: {
+          x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
+          y: { position: "left", ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } },
+          y1: {
+            position: "right",
+            min: 0,
+            max: 100,
+            ticks: { color: "#9ca3af" },
+            grid: { drawOnChartArea: false }
+          }
+        }
+      }
     });
   }
 
-  
-  // ---- Player Profile (V6) ----
-  function renderPlayer(db, playerId){
-    const p = db.players.find(pp=>pp.id===playerId);
-    const v = document.getElementById("fl_view");
-    if(!p){
-      v.innerHTML = `<div class="fl-card">Jugador no encontrado.</div>`;
-      return;
+  function parseStatNumber(value){
+    if(value===null || value===undefined) return null;
+    if(typeof value === "number") return Number.isFinite(value) ? value : null;
+    const txt = String(value).replace(/,/g, ".");
+    const m = txt.match(/-?\d+(\.\d+)?/);
+    return m ? Number(m[0]) : null;
+  }
+
+  function parseSortableDate(value){
+    const raw = String(value || "").trim();
+    if(!raw) return Number.NaN;
+    const exact = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(exact){
+      const year = Number(exact[1]);
+      const month = Number(exact[2]) - 1;
+      const day = Number(exact[3]);
+      return Date.UTC(year, month, day);
     }
-    const team = db.teams.find(t=>t.id===p.teamId);
-    const season = db.settings.currentSeason;
-    const leagueId = db.settings.currentLeagueId;
-    const league = (db.leagues||[]).find(l=>l.id===leagueId);
+    const loose = raw.match(/^(\d{4,})-(\d{2})-(\d{2})$/);
+    if(loose){
+      const year = Number(String(loose[1]).slice(-4));
+      const month = Number(loose[2]) - 1;
+      const day = Number(loose[3]);
+      return Date.UTC(year, month, day);
+    }
+    const parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  }
 
-    // logs for current season
-    const logs = db.matches
-      .filter(m=>m.playerId===playerId && m.season===season && (m.leagueId||db.settings.currentLeagueId)===leagueId)
-      .sort((a,b)=> (b.date||"").localeCompare(a.date||""));
+  function compareByDateAsc(a, b){
+    const aTs = parseSortableDate(a?.date);
+    const bTs = parseSortableDate(b?.date);
+    if(Number.isFinite(aTs) && Number.isFinite(bTs)) return aTs - bTs;
+    if(Number.isFinite(aTs)) return -1;
+    if(Number.isFinite(bTs)) return 1;
+    return String(a?.date || "").localeCompare(String(b?.date || ""));
+  }
 
-    const eff = getEffectiveRating(db, playerId);
-    const form = getFormScore(db, playerId);
+  function startOfTodayTs(){
+    const now = new Date();
+    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  }
 
-    // Aggregate season stats (simple sums + per90)
-    const agg = aggregateSeason(logs);
+  function diffDaysFromToday(dateStr){
+    const ts = parseSortableDate(dateStr);
+    if(!Number.isFinite(ts)) return null;
+    return Math.round((ts - startOfTodayTs()) / 86400000);
+  }
 
-    v.innerHTML = `
-      <div class="fl-card">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <div>
-            <div style="font-weight:900;font-size:16px;">👤 ${escapeHtml(p.name)}</div>
-            <div class="fl-small">${escapeHtml(team?.name||"Sin equipo")} • <b>${escapeHtml(POS_LABELS[p.position]||p.position)}</b> • ${escapeHtml(league?.name||"Liga")} • Temporada: <b>${escapeHtml(season)}</b></div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="mc-btn" id="backTeam">Volver al equipo</button>
-            <button class="mc-btn" id="openLogger">Registrar partido</button>
-          </div>
+  function ensureTeamIntState(team){
+    team.intProfile ||= {
+      priorityCompetition: "Liga",
+      seasonGoal: "top4",
+      squadDepth: 3,
+      coachRotation: 3,
+      styleTags: [],
+      derbyRivals: [],
+      seasonContext: "",
+      modeLens: "empresa"
+    };
+    if(!team.intProfile.seasonGoal && team.intProfile.seasonObjective) team.intProfile.seasonGoal = team.intProfile.seasonObjective;
+    if(!team.intProfile.seasonObjective) team.intProfile.seasonObjective = team.intProfile.seasonGoal;
+    if(!team.intProfile.coachRotation && team.intProfile.coachRotationPolicy) team.intProfile.coachRotation = team.intProfile.coachRotationPolicy;
+    if(!team.intProfile.coachRotationPolicy) team.intProfile.coachRotationPolicy = team.intProfile.coachRotation;
+    if(!Array.isArray(team.intProfile.styleTags) && Array.isArray(team.intProfile.psychTags)) team.intProfile.styleTags = [...team.intProfile.psychTags];
+    if(!Array.isArray(team.intProfile.psychTags) && Array.isArray(team.intProfile.styleTags)) team.intProfile.psychTags = [...team.intProfile.styleTags];
+    if(!Array.isArray(team.intProfile.derbyRivals) && Array.isArray(team.intProfile.rivalries)) team.intProfile.derbyRivals = [...team.intProfile.rivalries];
+    if(!Array.isArray(team.intProfile.rivalries) && Array.isArray(team.intProfile.derbyRivals)) team.intProfile.rivalries = [...team.intProfile.derbyRivals];
+    team.futureMatches ||= [];
+    team.intSnapshotsByMatchId ||= {};
+    team.intPatterns ||= {};
+    team.intMatchStateById ||= {};
+  }
+
+  function normalizeImportanceTag(tag){
+    const clean = String(tag || "").trim().toLowerCase();
+    if(["final","top4","descenso","derby","nada en juego"].includes(clean)) return clean;
+    return "nada en juego";
+  }
+
+  function stakesByTag(tag, stakesMode="table"){
+    const normalized = normalizeImportanceTag(tag);
+    if(stakesMode === "knockout"){
+      const map = { "final":35, "derby":18, "top4":0, "descenso":0, "nada en juego":10 };
+      return map[normalized] ?? 10;
+    }
+    const tableMap = { "top4":22, "descenso":22, "derby":12, "final":30, "nada en juego":8 };
+    return tableMap[normalized] ?? 8;
+  }
+
+  function competitionWeight(db, match){
+    const type = competitionTypeFromMatch(db, match);
+    if(type === "continental") return 32;
+    if(type === "cup") return 26;
+    if(type === "friendly") return 12;
+    return 22;
+  }
+
+  function competitionPressureWeight(type){
+    if(type === "continental") return 1.3;
+    if(type === "cup") return 0.8;
+    return 1.0;
+  }
+
+  function stageWeight(stage){
+    const clean = String(stage || "").toLowerCase();
+    if(/final/.test(clean)) return 10;
+    if(/semi|cuartos|quarter|octavos|ko|elimin/.test(clean)) return 8;
+    if(/grupo|group/.test(clean)) return 4;
+    return 2;
+  }
+
+  function parseMarketSnapshot(snapshot){
+    const h = Number(snapshot?.homeOdds ?? snapshot?.home ?? snapshot?.h);
+    const d = Number(snapshot?.drawOdds ?? snapshot?.draw ?? snapshot?.x);
+    const a = Number(snapshot?.awayOdds ?? snapshot?.away ?? snapshot?.a);
+    const tsRaw = snapshot?.timestamp || snapshot?.ts || snapshot?.date;
+    const ts = parseSortableDate(tsRaw);
+    const avg = average([h,d,a].filter(Number.isFinite), Number.NaN);
+    return Number.isFinite(avg) ? { avg, ts } : null;
+  }
+
+  function buildWindowSignals({ db, team, match }){
+    const allMatches = (team?.futureMatches || []).filter(Boolean);
+    const centerDay = diffDaysFromToday(match.date);
+    const rows = allMatches.filter(row=>row.id!==match.id).map(row=>({ row, d: diffDaysFromToday(row.date) })).filter(x=>Number.isFinite(x.d));
+    const in7 = rows.filter(x=>x.d>=0 && x.d<=7).length + (Number.isFinite(centerDay) && centerDay>=0 && centerDay<=7 ? 1 : 0);
+    const in14 = rows.filter(x=>x.d>=0 && x.d<=14).length + (Number.isFinite(centerDay) && centerDay>=0 && centerDay<=14 ? 1 : 0);
+    const windowRows = allMatches.filter(row=>{ const d = diffDaysFromToday(row.date); return Number.isFinite(d) && d>=0 && d<=14; });
+    const hardness = Math.round(windowRows.reduce((acc, row)=>{
+      const stakesMode = stakesModeFromMatch(db, row);
+      const pressureW = competitionPressureWeight(competitionTypeFromMatch(db, row));
+      return acc + (((competitionWeight(db, row)*0.5) + stakesByTag(row.importanceTag, stakesMode)*0.5 + stageWeight(row.stage)) * pressureW);
+    }, 0));
+    const congestionScore = clamp((in7*20) + (in14*7) + Math.min(25, hardness/7), 0, 100);
+    const futurePeak = rows.filter(x=>x.d>=0 && x.d<=7).some(x=>competitionWeight(db, x.row) + stageWeight(x.row.stage) + stakesByTag(x.row.importanceTag, stakesModeFromMatch(db, x.row)) >= 55);
+    const prevIntense = rows.filter(x=>x.d<0 && x.d>=-4).some(x=>competitionWeight(db, x.row) + stakesByTag(x.row.importanceTag, stakesModeFromMatch(db, x.row)) >= 50);
+    const beforePriority = rows.some(x=>x.d>0 && x.d<=4 && (competitionWeight(db, x.row) + stageWeight(x.row.stage) > competitionWeight(db, match) + stageWeight(match.stage) + 4));
+    const betweenIntense = prevIntense && futurePeak;
+    const sandwichRisk = clamp((beforePriority ? 60 : 0) + (betweenIntense ? 40 : 0), 0, 100);
+    const recoveryNeed = clamp((prevIntense ? 45 : 10) + (congestionScore*0.45), 0, 100);
+    return {
+      congestionScore,
+      sandwichRisk,
+      peakMatchNearby: futurePeak,
+      recoveryNeed,
+      windowPressure: {
+        matches7d: in7,
+        matches14d: in14,
+        hardness,
+        congestionLevel: congestionScore >= 70 ? "🔴" : congestionScore >= 45 ? "🟡" : "🟢"
+      }
+    };
+  }
+
+  function calculateInterestSignals({ team, rival, match, allFutureMatches, db }){
+    ensureTeamIntState(team);
+    const profile = team.intProfile || {};
+    const importanceTag = normalizeImportanceTag(match.importanceTag);
+    const stakesMode = stakesModeFromMatch(db, match);
+    const competitionType = competitionTypeFromMatch(db, match);
+    const seasonGoal = String(profile.seasonGoal || profile.seasonObjective || "top4").toLowerCase();
+    const stakes = clamp((competitionWeight(db, match)*0.55) + stageWeight(match.stage) + (stakesByTag(importanceTag, stakesMode)*0.55) + (/titulo/.test(seasonGoal) ? 4 : 1), 0, 40);
+    const isPriorityComp = profile.priorityCompetition && String(match.competition||"").toLowerCase().includes(String(profile.priorityCompetition).toLowerCase());
+    const contextGoal = /titulo|title/.test(seasonGoal) ? 9 : /descenso/.test(seasonGoal) ? 8 : /top4/.test(seasonGoal) ? 7 : 5;
+    const contextSituation = /lider|primero/.test(String(profile.seasonContext||"").toLowerCase()) ? 6 : /persig|pelea/.test(String(profile.seasonContext||"").toLowerCase()) ? 5 : 3;
+    const isDerby = importanceTag === "derby" || (rival && (profile.derbyRivals||profile.rivalries||[]).some(name=>String(name).toLowerCase()===String(rival.name||"").toLowerCase() || String(name)===String(rival.id||"")));
+    const teamContext = clamp(contextGoal + contextSituation + (isPriorityComp ? 6 : 3) + (isDerby ? 6 : 0), 0, 25);
+    const restDays = Number.isFinite(Number(match.restDays)) ? Number(match.restDays) : 4;
+    const depth = clamp(Number(profile.squadDepth) || 3, 1, 5);
+    const coachRotation = clamp(Number(profile.coachRotation || profile.coachRotationPolicy) || 3, 1, 5);
+    const window = buildWindowSignals({ db, team, match });
+    const windowAdjustment = clamp(8 - (window.congestionScore*0.20) - (window.sandwichRisk*0.12) - (window.recoveryNeed*0.08) + (window.peakMatchNearby ? -4 : 0), -25, 10);
+    const emotion = clamp((isDerby ? 6 : 0) + (match.postHype ? 2 : 0) + (match.weatherFlag ? 1 : 0), 0, 10);
+    const snapshots = Array.isArray(match.snapshots) ? match.snapshots : [];
+    const parsed = snapshots.map(parseMarketSnapshot).filter(Boolean).sort((a,b)=>(Number.isFinite(a.ts)?a.ts:0)-(Number.isFinite(b.ts)?b.ts:0));
+    const earlyDrift = parsed.length>=2 ? ((parsed[parsed.length-1].avg - parsed[0].avg) / parsed[0].avg) * 100 : 0;
+    const lateSnapback = parsed.length>=3 ? ((parsed[parsed.length-1].avg - parsed[Math.max(0, parsed.length-2)].avg) / parsed[Math.max(0, parsed.length-2)].avg) * 100 : 0;
+    const volatilityIndex = parsed.length>=2 ? clamp(stdDev(parsed.map(p=>p.avg))*60, 0, 100) : 0;
+    const marketSignal = clamp((/dinero temprano/.test(String(match.marketMood||"")) ? -4 : 0) + (/raro/.test(String(match.marketMood||"")) ? -6 : 2) + (earlyDrift<=-2 ? 3 : earlyDrift>=2 ? -3 : 0) + (Math.abs(lateSnapback)>=1.5 ? -2 : 0), -10, 10);
+    let interest = clamp(stakes + teamContext + windowAdjustment + emotion + marketSignal, 0, 100);
+    const rotationPressure = clamp((window.congestionScore*0.35) + (window.sandwichRisk*0.35) + (window.recoveryNeed*0.2) + (coachRotation*6) - (depth*5) + (restDays<=3 ? 12 : 0), 0, 100);
+    const rotationProbable = rotationPressure >= 68 ? "Alta" : rotationPressure >= 42 ? "Media" : "Baja";
+    const dataCompleteness = clamp((match.competition ? 8 : 0) + (match.stage ? 8 : 0) + (match.importanceTag ? 8 : 0) + (profile.seasonGoal || profile.seasonObjective ? 8 : 0) + (profile.priorityCompetition ? 8 : 0), 0, 40);
+    const depthScore = clamp((snapshots.length >= 1 ? 10 : 0) + (snapshots.length >= 2 ? 8 : 0) + (snapshots.length >= 3 ? 6 : 0) + (snapshots.some(s=>s.kind==="lineup") ? 6 : 0), 0, 30);
+    const consistency = clamp((Math.abs(windowAdjustment)>=12 && Math.abs(marketSignal)<=2 ? 10 : 20) + (windowAdjustment<0 && marketSignal<0 ? 8 : 0) + (match.overrideWithoutEvidence ? -8 : 0), 0, 30);
+    let confidence = clamp(dataCompleteness + depthScore + consistency, 0, 100);
+    const latestRawSnapshot = snapshots[snapshots.length-1] || null;
+    const underdogOdds = Number(match.isHome===false
+      ? (latestRawSnapshot?.awayOdds ?? latestRawSnapshot?.away ?? latestRawSnapshot?.a)
+      : (latestRawSnapshot?.homeOdds ?? latestRawSnapshot?.home ?? latestRawSnapshot?.h));
+    const isUnderdogCup = competitionType === "cup" && Number.isFinite(underdogOdds) && underdogOdds > 4;
+    if(isUnderdogCup){
+      interest = clamp(interest + 25, 0, 100);
+      confidence = clamp(confidence + 5, 0, 100);
+    }
+    const reasonTags = [
+      isPriorityComp ? `Prioridad en ${match.competition || "competición"}` : "",
+      /lider|primero/.test(String(profile.seasonContext||"").toLowerCase()) ? "Defiende posición alta" : "",
+      window.congestionScore >= 55 ? `Bloque cargado (${window.windowPressure.matches14d} partidos/14d)` : "",
+      window.sandwichRisk >= 60 ? "Partido en sándwich de calendario" : "",
+      window.peakMatchNearby ? "Hay partido pico cercano" : ""
+    ].filter(Boolean).slice(0,2);
+    team.intMatchStateById[match.id] = {
+      computed: { interest, rotationProbable, confidence },
+      windowInfo: {
+        congestion: Math.round(window.congestionScore),
+        sandwich: Math.round(window.sandwichRisk),
+        peakNearby: window.peakMatchNearby,
+        recoveryNeed: Math.round(window.recoveryNeed)
+      },
+      snapshots,
+      notes: Array.isArray(match.notes) ? match.notes : []
+    };
+    return {
+      stakes, teamContext, windowAdjustment, rotationPressure,
+      interest, confidence,
+      rotationProbable,
+      marketMood: match.marketMood || "estable",
+      restDays,
+      stakesMode,
+      reasonTags,
+      market: { earlyDrift, lateSnapback, volatilityIndex, marketSignal },
+      windowInfo: window
+    };
+  }
+
+  function buildTeamIntPatterns(db, team){
+    const matches = db.tracker.filter(m=>m.homeId===team.id || m.awayId===team.id).slice(-18);
+    if(!matches.length) return { badges:["Sin datos suficientes"], drop:0, variance:0, preBigDrop:0 };
+    const goalDiffs = matches.map(m=>{
+      const isHome = m.homeId===team.id;
+      return (isHome ? Number(m.homeGoals) - Number(m.awayGoals) : Number(m.awayGoals) - Number(m.homeGoals));
+    });
+    const lowStake = team.futureMatches.filter(m=>normalizeImportanceTag(m.importanceTag)==="nada en juego").length;
+    const variance = stdDev(goalDiffs);
+    const avg = average(goalDiffs, 0);
+    const badges = [];
+    if(lowStake>=2 && avg < 0.2) badges.push("🧊 Baja intensidad en low-stakes");
+    if(variance > 1.3) badges.push("🎲 Alta varianza cuando rota");
+    if(goalDiffs.some(v=>v>=2)) badges.push("⚡ Se activa en partidos grandes");
+    if(matches.filter(m=>{
+      const isHome = m.homeId===team.id;
+      return !isHome && Number(m.homeGoals)===Number(m.awayGoals);
+    }).length >= 3) badges.push("🧯 Tiende a conformarse con empate de visita");
+    return { badges: badges.length ? badges : ["Sin patrón fuerte todavía"], drop: Math.round((0.5 - avg) * 10), variance: Number(variance.toFixed(2)), preBigDrop: Math.round(variance*8) };
+  }
+
+  function getMatchStatForTeam(match, teamId, regexList=[]){
+    const stats = Array.isArray(match?.stats) ? match.stats : [];
+    if(!stats.length) return null;
+    const isHome = match.homeId===teamId;
+    const keyField = (row)=>String(row?.key || row?.name || row?.label || "").toLowerCase();
+    for(const row of stats){
+      const key = keyField(row);
+      if(!regexList.some(rx=>rx.test(key))) continue;
+      const sideValue = isHome ? (row.home ?? row.local ?? row.teamA) : (row.away ?? row.visitante ?? row.teamB);
+      const parsed = parseStatNumber(sideValue);
+      if(Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  }
+
+  function average(values, fallback=0){
+    const clean = values.filter(v=>Number.isFinite(v));
+    if(!clean.length) return fallback;
+    return clean.reduce((a,b)=>a+b,0) / clean.length;
+  }
+
+  function stdDev(values){
+    const clean = values.filter(v=>Number.isFinite(v));
+    if(clean.length < 2) return 0;
+    const mean = average(clean, 0);
+    const variance = clean.reduce((acc, val)=>acc + (val - mean) ** 2, 0) / clean.length;
+    return Math.sqrt(Math.max(0, variance));
+  }
+
+  function normalizePersonName(name){
+    return String(name || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s'-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function psychHeatColor(score){
+    const v = clamp(Number(score) || 0, 0, 100);
+    if(v >= 72) return "#3fb950";
+    if(v >= 52) return "#58a6ff";
+    if(v >= 35) return "#d29922";
+    return "#f85149";
+  }
+
+  function computeTeamPlayerPsychHeat(db, teamId, options={}){
+    const maxMatches = clamp(Number(options.maxMatches) || 12, 3, 30);
+    const players = db.players.filter(p=>p.teamId===teamId);
+    const matches = db.tracker
+      .filter(m=>m.homeId===teamId || m.awayId===teamId)
+      .slice()
+      .sort(compareByDateAsc)
+      .slice(-maxMatches);
+    const perPlayer = new Map();
+
+    const touchPlayer = (name)=>{
+      const key = normalizePersonName(name);
+      if(!key) return null;
+      if(!perPlayer.has(key)) perPlayer.set(key, {
+        key,
+        name: String(name || "").trim() || "Jugador",
+        score: 50,
+        events: 0,
+        aggr: 0,
+        res: 0,
+        vol: 0,
+        fat: 0
+      });
+      return perPlayer.get(key);
+    };
+
+    matches.forEach((match, idx)=>{
+      const teamName = match.homeId===teamId ? match.homeName : match.awayName;
+      const teamNorm = normalizePersonName(teamName);
+      const recency = 0.68 + ((idx + 1) / Math.max(1, matches.length)) * 0.32;
+      const events = match?.narrativeModule?.normalized?.events || [];
+      events.forEach((evt)=>{
+        const playerName = evt?.player;
+        if(!playerName) return;
+        const evtTeamNorm = normalizePersonName(evt?.team);
+        if(teamNorm && evtTeamNorm && teamNorm !== evtTeamNorm) return;
+        const p = touchPlayer(playerName);
+        if(!p) return;
+        const min = Number(evt?.min);
+        let scoreDelta = 0;
+        if(evt.type === "goal"){
+          scoreDelta += 9;
+          p.res += 0.16;
+        }else if(evt.type === "save"){
+          scoreDelta += 7;
+          p.res += 0.14;
+        }else if(evt.type === "corner"){
+          scoreDelta += 1.4;
+        }else if(evt.type === "yellow"){
+          scoreDelta -= 6.5;
+          p.aggr += 0.16;
+          p.vol += 0.12;
+        }else if(evt.type === "red"){
+          scoreDelta -= 16;
+          p.aggr += 0.28;
+          p.vol += 0.22;
+          p.fat += 0.14;
+        }else if(evt.type === "foul"){
+          scoreDelta -= 2;
+          p.aggr += 0.08;
+        }else if(evt.type === "offside"){
+          scoreDelta -= 1.2;
+          p.vol += 0.04;
+        }else if(evt.type === "sub"){
+          if(Number.isFinite(min) && min >= 70) p.fat += 0.04;
+          scoreDelta += 0.5;
+        }
+        p.score = clamp(p.score + scoreDelta * recency, 0, 100);
+        p.events += 1;
+      });
+    });
+
+    const rosterHeat = players.map((pl)=>{
+      const key = normalizePersonName(pl.name);
+      const fromNarrative = perPlayer.get(key);
+      const statBase = clamp(
+        50
+        + (Number(pl.goals)||0) * 1.5
+        + (Number(pl.assists)||0) * 1.3
+        + clamp((Number(pl.minutes)||0) / 700, 0, 4)
+        - (Number(pl.yellowCards)||0) * 1.9
+        - (Number(pl.redCards)||0) * 7,
+        5,
+        95
+      );
+      const heat = fromNarrative
+        ? clamp(fromNarrative.score * 0.72 + statBase * 0.28, 0, 100)
+        : statBase;
+      return {
+        key,
+        name: pl.name,
+        heat,
+        events: fromNarrative?.events || 0,
+        aggr: fromNarrative?.aggr || 0,
+        res: fromNarrative?.res || 0,
+        vol: fromNarrative?.vol || 0,
+        fat: fromNarrative?.fat || 0
+      };
+    });
+
+    const heatValues = rosterHeat.map(item=>item.heat);
+    const avgHeat = average(heatValues, 50);
+    const spread = stdDev(heatValues);
+    const byName = {};
+    rosterHeat.forEach(item=>{ byName[item.key] = Math.round(item.heat); });
+    const samples = Math.max(1, rosterHeat.length);
+    const aggr = rosterHeat.reduce((sum, p)=>sum + p.aggr, 0) / samples;
+    const res = rosterHeat.reduce((sum, p)=>sum + p.res, 0) / samples;
+    const vol = rosterHeat.reduce((sum, p)=>sum + p.vol, 0) / samples;
+    const fat = rosterHeat.reduce((sum, p)=>sum + p.fat, 0) / samples;
+
+    return {
+      byName,
+      list: rosterHeat,
+      summary: {
+        avgHeat,
+        spread,
+        narrativeEvents: rosterHeat.reduce((sum, p)=>sum + p.events, 0),
+        psychAdjustments: {
+          aggressiveness: clamp(aggr * 28 + Math.max(0, 52 - avgHeat) * 0.12, -8, 12),
+          resilience: clamp(res * 24 + (avgHeat - 50) * 0.18, -10, 12),
+          volatility: clamp(vol * 30 + spread * 0.07, -8, 14),
+          fatigue: clamp(fat * 18 + Math.max(0, 54 - avgHeat) * 0.1, -8, 12)
+        },
+        teamPsychPulse: clamp(avgHeat - spread * 0.3 + res * 40 - fat * 24, 0, 100)
+      }
+    };
+  }
+
+    function engineForTeam(db, teamId){
+    return recomputeTeamGlobalEngine(db, teamId) || getOrCreateDiagProfile(db, teamId, "").engineV1 || {};
+  }
+
+function computeTeamIntelligencePanel(db, teamId){
+    const matches = db.tracker
+      .filter(m=>m.homeId===teamId || m.awayId===teamId)
+      .slice()
+      .sort(compareByDateAsc);
+    const engine = recomputeTeamGlobalEngine(db, teamId) || getOrCreateDiagProfile(db, teamId, "").engineV1 || {};
+    const playerHeat = computeTeamPlayerPsychHeat(db, teamId);
+    if(!matches.length){
+      return {
+        matches: [],
+        metrics: { powerIndex: 50, trend: "→ Plano", trendSlope: 0, consistencyScore: 50, momentum5: 0.5 },
+        psych: { aggressiveness: 50, resilience: 50, volatility: 50, fatigue: 50, playerPulse: playerHeat.summary.teamPsychPulse },
+        tactical: { directAttack: 50, possession: 50, transitions: 50, press: 50, setPieces: 50 },
+        momentum: { labels: [], xgDifferential: [], realPerformance: [], expectedPerformance: [] },
+        prediction: { eloDynamic: 1500, offenseRating: 50, defenseRating: 50, psychIndex: 50, consistencyIndex: 50 },
+        playerHeat
+      };
+    }
+
+    const pointsSeries = [];
+    const xgDiffSeries = [];
+    const expectedSeries = [];
+    const powerSeries = [];
+    const fatigueLoad = [];
+    const labels = [];
+    let comebackPoints = 0;
+    let comebackSamples = 0;
+    let travelPenalty = 0;
+
+    matches.forEach((m, idx)=>{
+      const isHome = m.homeId===teamId;
+      const gf = isHome ? Number(m.homeGoals)||0 : Number(m.awayGoals)||0;
+      const ga = isHome ? Number(m.awayGoals)||0 : Number(m.homeGoals)||0;
+      const pts = gf>ga ? 3 : gf===ga ? 1 : 0;
+      const xgFor = isHome ? parseStatNumber(m.homeXg) : parseStatNumber(m.awayXg);
+      const xgAgainst = isHome ? parseStatNumber(m.awayXg) : parseStatNumber(m.homeXg);
+      const xgDiff = Number.isFinite(xgFor) && Number.isFinite(xgAgainst) ? xgFor - xgAgainst : (gf - ga) * 0.6;
+      const expectedPts = clamp(1.5 + xgDiff * 1.2, 0, 3);
+      labels.push(m.date || `J${idx+1}`);
+      pointsSeries.push(pts);
+      xgDiffSeries.push(xgDiff);
+      expectedSeries.push(expectedPts / 3);
+      if(ga > 0){
+        comebackSamples += 1;
+        if(gf >= ga) comebackPoints += pts;
+      }
+      if(!isHome) travelPenalty += 1;
+      const dateTs = parseSortableDate(m.date);
+      const prevTs = idx>0 ? parseSortableDate(matches[idx-1].date) : NaN;
+      const restDays = Number.isFinite(dateTs) && Number.isFinite(prevTs) ? Math.max(0, (dateTs - prevTs)/(1000*60*60*24)) : 5;
+      fatigueLoad.push(clamp((4 - restDays) / 4, 0, 1));
+
+      const shortPoints = pointsSeries.slice(Math.max(0, pointsSeries.length - 5));
+      const momentum5 = average(shortPoints, 1.5) / 3;
+      const consistencyInv = 1 - clamp(stdDev(pointsSeries) / 1.5, 0, 1);
+      const homeMatches = matches.slice(0, idx+1).filter(x=>x.homeId===teamId);
+      const awayMatches = matches.slice(0, idx+1).filter(x=>x.awayId===teamId);
+      const homePpg = average(homeMatches.map(x=>{ const g1=Number(x.homeGoals)||0, g2=Number(x.awayGoals)||0; return g1>g2?3:g1===g2?1:0; }), 1.2) / 3;
+      const awayPpg = average(awayMatches.map(x=>{ const g1=Number(x.awayGoals)||0, g2=Number(x.homeGoals)||0; return g1>g2?3:g1===g2?1:0; }), 1.0) / 3;
+      const locality = clamp(0.5 + (homePpg - awayPpg) * 0.5, 0, 1);
+      const psychInverse = 1 - clamp(Number(engine?.profile?.psychLoad) || 0.5, 0, 1);
+      const shockInverse = 1 - clamp(Number(engine?.profile?.shock) || 0.5, 0, 1);
+      const xgNorm = clamp(0.5 + average(xgDiffSeries, 0) / 2.2, 0, 1);
+      const power = clamp((0.30*xgNorm + 0.20*momentum5 + 0.15*consistencyInv + 0.15*locality + 0.10*psychInverse + 0.10*shockInverse) * 100, 0, 100);
+      powerSeries.push(power);
+    });
+
+    const momentum5 = average(pointsSeries.slice(-5), 1.5) / 3;
+    const consistencyScore = clamp((1 - stdDev(pointsSeries)/1.5) * 100, 0, 100);
+    const powerIndex = powerSeries[powerSeries.length-1] || 50;
+    const recentAvg = average(powerSeries.slice(-5), powerIndex);
+    const prevAvg = average(powerSeries.slice(-10, -5), recentAvg);
+    const trendSlope = recentAvg - prevAvg;
+
+    const aggressionBase = clamp(
+      35 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/falta/, /foul/]) ?? 12), 12) / 20
+      + 20 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/amarilla/, /yellow/]) ?? 2.2), 2.2) / 5
+      + 25 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/duel/]) ?? 50), 50) / 100
+      + 20 * average(matches.map(m=>getMatchStatForTeam(m, teamId, [/tiro.*20/, /shot.*20/]) ?? 2), 2) / 6,
+      0,
+      100
+    );
+    const resilienceBase = clamp(
+      50 * (comebackSamples ? (comebackPoints / (comebackSamples*3)) : 0.5)
+      + 30 * clamp(average(pointsSeries.slice(-5), 1.5) / 3, 0, 1)
+      + 20 * clamp((Number(engine?.haTraits?.awayResilience)||0), 0, 1),
+      0,
+      100
+    );
+    const perfResidual = pointsSeries.map((pts, i)=>(pts/3) - expectedSeries[i]);
+    const volatilityBase = clamp(stdDev(perfResidual) * 220, 0, 100);
+    const fatigueBase = clamp((average(fatigueLoad, 0.4)*60) + (travelPenalty / Math.max(1, matches.length))*40, 0, 100);
+    const psychAdj = playerHeat.summary.psychAdjustments;
+    const aggression = clamp(aggressionBase + psychAdj.aggressiveness, 0, 100);
+    const resilience = clamp(resilienceBase + psychAdj.resilience, 0, 100);
+    const volatility = clamp(volatilityBase + psychAdj.volatility, 0, 100);
+    const fatigue = clamp(fatigueBase + psychAdj.fatigue, 0, 100);
+
+    const possession = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/posesi/]) ?? 50), 50), 0, 100);
+    const wingPlay = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/banda/, /cross/, /centro/]) ?? 40), 40), 0, 100);
+    const inBoxShots = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/área/, /area/, /box/]) ?? 45), 45), 0, 100);
+    const progressivePass = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/progres/]) ?? 48), 48), 0, 100);
+    const highPress = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/presi/, /press/]) ?? 46), 46), 0, 100);
+
+    return {
+      matches,
+      metrics: {
+        powerIndex,
+        trendSlope,
+        trend: trendSlope > 2 ? "↗ Subiendo" : trendSlope < -2 ? "↘ Cayendo" : "→ Plano",
+        consistencyScore,
+        momentum5,
+        powerSeries,
+        labels
+      },
+      psych: { aggressiveness: aggression, resilience, volatility, fatigue, playerPulse: playerHeat.summary.teamPsychPulse },
+      playerHeat,
+      tactical: {
+        directAttack: clamp((wingPlay*0.4 + inBoxShots*0.6), 0, 100),
+        possession,
+        transitions: clamp((progressivePass*0.6 + highPress*0.4), 0, 100),
+        press: highPress,
+        setPieces: clamp((average(matches.map(m=>isFinite(parseStatNumber(m.homeCorners)||parseStatNumber(m.awayCorners)) ? (m.homeId===teamId ? Number(m.homeCorners)||0 : Number(m.awayCorners)||0) : 5), 5) / 12) * 100, 0, 100)
+      },
+      momentum: {
+        labels,
+        xgDifferential: xgDiffSeries.map(v=>clamp(50 + v*20, 0, 100)),
+        realPerformance: pointsSeries.map(v=>Math.round((v/3)*100)),
+        expectedPerformance: expectedSeries.map(v=>Math.round(v*100))
+      },
+      prediction: {
+        eloDynamic: Math.round(1450 + powerIndex*3.2),
+        offenseRating: clamp(50 + average(xgDiffSeries, 0)*18 + average(pointsSeries.slice(-5), 1.5)*8, 0, 100),
+        defenseRating: clamp(55 - average(xgDiffSeries, 0)*14 + consistencyScore*0.25, 0, 100),
+        psychIndex: clamp(100 - ((fatigue*0.45) + (volatility*0.25) - (resilience*0.2) - (aggression*0.1)), 0, 100),
+        consistencyIndex: consistencyScore
+      }
+    };
+  }
+
+  function renderSimpleLineChart(canvas, labels, datasets){
+    if(!canvas || typeof Chart !== "function") return;
+    if(canvas._chart){ try{ canvas._chart.destroy(); }catch(_e){} }
+    canvas._chart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        scales: {
+          x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
+          y: { min: 0, max: 100, ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } }
+        }
+      }
+    });
+  }
+
+  function renderRadarChart(canvas, labels, data, color="#1f6feb"){
+    if(!canvas || typeof Chart !== "function") return;
+    if(canvas._chart){ try{ canvas._chart.destroy(); }catch(_e){} }
+    canvas._chart = new Chart(canvas.getContext("2d"), {
+      type: "radar",
+      data: {
+        labels,
+        datasets: [{ label: "Índice", data, borderColor: color, backgroundColor: `${color}33`, pointBackgroundColor: color }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        scales: { r: { suggestedMin: 0, suggestedMax: 100, angleLines: { color: "rgba(255,255,255,.1)" }, grid: { color: "rgba(255,255,255,.09)" }, pointLabels: { color: "#9ca3af" }, ticks: { color: "#9ca3af", backdropColor: "transparent" } } }
+      }
+    });
+  }
+
+  function clamp(value, min, max){
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function clamp01(value){
+    return clamp(Number(value) || 0, 0, 1);
+  }
+
+  function ensureDiagProfileState(db){
+    db.diagProfiles ||= {};
+  }
+
+  function createEmptyDiagProfile(teamName=""){
+    return {
+      team: teamName,
+      version: "diagProfile_v1",
+      matchesCount: 0,
+      traits: {
+        territorial_strength: 0.5,
+        finishing_quality: 0.5,
+        transition_attack: 0.5,
+        transition_defense: 0.5,
+        low_block_execution: 0.5,
+        chance_creation: 0.5,
+        discipline_risk: 0.5,
+        late_game_management: 0.5
+      },
+      lastUpdated: null
+    };
+  }
+
+  function getOrCreateDiagProfile(db, teamId, teamName){
+    ensureDiagProfileState(db);
+    if(!db.diagProfiles[teamId]) db.diagProfiles[teamId] = createEmptyDiagProfile(teamName || "");
+    const profile = db.diagProfiles[teamId];
+    profile.team = teamName || profile.team || "";
+    profile.version = "diagProfile_v1";
+    profile.matchesCount = Number(profile.matchesCount) || 0;
+    profile.traits ||= createEmptyDiagProfile().traits;
+    Object.keys(createEmptyDiagProfile().traits).forEach(key=>{
+      profile.traits[key] = clamp(Number(profile.traits[key]) || 0.5, 0, 1);
+    });
+    return profile;
+  }
+
+  function classifyStyle(traits={}){
+    if((traits.territorial_strength||0)>0.58 && (traits.finishing_quality||0)<0.45) return "sterile_domination";
+    if((traits.low_block_execution||0)>0.55 && (traits.transition_attack||0)>0.55) return "absorb_and_strike";
+    if((traits.late_game_management||0)>0.58) return "late_collider";
+    if((traits.discipline_risk||0)>0.62) return "high_variance";
+    if((traits.territorial_strength||0)>0.56 && (traits.chance_creation||0)>0.52) return "territorial_builder";
+    return "balanced";
+  }
+
+  function createRng(seed){
+    if(!Number.isFinite(Number(seed))) return Math.random;
+    let x = (Number(seed) >>> 0) || 1;
+    return ()=>{
+      x += 0x6D2B79F5;
+      let r = Math.imul(x ^ (x >>> 15), x | 1);
+      r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function randn(rng){
+    const u = Math.max(1e-9, rng());
+    const v = Math.max(1e-9, rng());
+    return Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+  }
+
+  function buildMatchPlan(teamAProfile, teamBProfile, context={}){
+    const h = teamAProfile.traits || {};
+    const a = teamBProfile.traits || {};
+    const clash = [];
+    if((h.territorial_strength||0)>0.56 && (a.transition_attack||0)>0.55 && (h.transition_defense||0)<0.47) clash.push("away_transition_window");
+    if((a.territorial_strength||0)>0.56 && (h.transition_attack||0)>0.55 && (a.transition_defense||0)<0.47) clash.push("home_transition_window");
+    if((h.territorial_strength||0)>0.58 && (h.finishing_quality||0)<0.45) clash.push("home_sterile_risk");
+    if((a.territorial_strength||0)>0.58 && (a.finishing_quality||0)<0.45) clash.push("away_sterile_risk");
+    return {
+      home: teamAProfile.team,
+      away: teamBProfile.team,
+      context: {
+        homeAdv: clamp(Number(context.homeAdv)||0.06, 0, 0.3),
+        leagueGoalsAvg: clamp(Number(context.leagueGoalsAvg)||2.6, 1.6, 4.2)
+      },
+      matchup: {
+        homeStyle: classifyStyle(h),
+        awayStyle: classifyStyle(a),
+        styleClash: clash
+      },
+      rates: {
+        baseGoalRatePerBlock: clamp(Number(context.baseGoalRatePerBlock)||0.22, 0.08, 0.6),
+        volatility: clamp(Number(context.globalVolatility)||0.34, 0.1, 0.8)
+      },
+      homeProfile: teamAProfile,
+      awayProfile: teamBProfile
+    };
+  }
+
+  function generateCandlesFromBlocks(blocks=[], team="home"){
+    let prev = 0;
+    return blocks.map(b=>{
+      const close = team==="home" ? Number(b.iddHome)||0 : Number(b.iddAway)||0;
+      const item = { label: `${b.t0}-${b.t1}`, open: prev, close, high: Math.max(prev, close), low: Math.min(prev, close) };
+      prev = close;
+      return item;
+    });
+  }
+
+  function generateDiagnosis(candles=[], blocksEvents=[]){
+    const closes = candles.map(c=>Number(c.close)||0);
+    const diffs = closes.slice(1).map((v, i)=>v-closes[i]);
+    let breakIdx = 0;
+    let maxDelta = -1;
+    diffs.forEach((d, i)=>{ if(Math.abs(d)>maxDelta){ maxDelta = Math.abs(d); breakIdx = i+1; } });
+    const breakBlock = candles[breakIdx]?.label || "0-10";
+    const late = closes.slice(8);
+    const lateStrength = late.length ? late.reduce((a,b)=>a+b,0)/late.length : 0;
+    const signs = closes.reduce((acc,v,i)=> acc + ((i>0 && Math.sign(v)!==Math.sign(closes[i-1])) ? 1 : 0), 0);
+    const vol = closes.length ? Math.sqrt(closes.reduce((s,v)=>s + v*v,0)/closes.length) : 0;
+    const patterns = [];
+    if(blocksEvents.some(e=>e.type==="goal" && e.shock)) patterns.push("shock_transition");
+    if(vol>0.35) patterns.push("oscillation");
+    if(lateStrength<-0.12) patterns.push("late_risk_exposure");
+    if(signs>=5) patterns.push("second_half_break");
+    if(!blocksEvents.some(e=>e.type==="goal") && closes.reduce((a,b)=>a+b,0)>1.2) patterns.push("sterile_dominance");
+    const text = [];
+    if(patterns.includes("sterile_dominance")) text.push("Dominio sin conversión: presión sostenida sin premio.");
+    if(patterns.includes("shock_transition")) text.push("Gol contra tendencia: transición castiga el control rival.");
+    if(patterns.includes("late_risk_exposure")) text.push("Cierre vulnerable: exposición tardía.");
+    if(!text.length) text.push("Partido por fases sin quiebre dominante.");
+    return { breakBlock, patterns, text, metrics: { vol, lateStrength, switches: signs } };
+  }
+
+  function applyMatchToTeamProfile(profile, diagnostic, perspective="for"){
+    const next = structuredClone(profile || createEmptyDiagProfile());
+    const alpha = 0.12;
+    const touch = (k, s)=>{ next.traits[k] = clamp(next.traits[k]*(1-alpha) + s*alpha, 0, 1); };
+    const has = p=>diagnostic?.patterns?.includes(p);
+    if(has("sterile_dominance")){ touch("territorial_strength", 0.66); touch("finishing_quality", 0.36); }
+    if(has("shock_transition")){ touch("transition_attack", perspective==="for" ? 0.66 : 0.45); touch("transition_defense", perspective==="against" ? 0.35 : 0.58); }
+    if(has("late_risk_exposure")) touch("late_game_management", 0.35);
+    if(has("oscillation")) touch("discipline_risk", 0.64);
+    next.matchesCount = (Number(next.matchesCount)||0) + 1;
+    next.lastUpdated = new Date().toISOString();
+    return next;
+  }
+
+  function normalizeIdd(value){
+    const raw = clamp(Number(value) || 0, -1, 1);
+    return clamp((raw + 1) / 2, 0, 1);
+  }
+
+  function computePerformanceIndex(metrics={}){
+    const avgIDD = normalizeIdd(metrics.avgIDD);
+    const threat = clamp(Number(metrics.threat) || 0, 0, 1);
+    const lateIDD = normalizeIdd(metrics.lateIDD);
+    const avgComposure = clamp(Number(metrics?.psych?.avgComposure) || 0, 0, 1);
+    const avgTiltRisk = clamp(Number(metrics?.psych?.avgTiltRisk) || 0, 0, 1);
+    return clamp(
+      0.45 * avgIDD +
+      0.25 * threat +
+      0.10 * lateIDD +
+      0.10 * avgComposure -
+      0.10 * avgTiltRisk,
+      0,
+      1
+    );
+  }
+
+  function createHomeAwayBucket(){
+    return { n: 0, avgPI: 0.5, avgIDD: 0, avgThreat: 0.5, avgComposure: 0.5, avgTilt: 0.5, lateStrength: 0.5 };
+  }
+
+  function updateHomeAwayBucket(bucket, payload){
+    const prevN = Number(bucket.n) || 0;
+    const alpha = prevN < 10 ? 0.18 : 0.10;
+    const ema = (oldVal, nextVal)=> oldVal * (1 - alpha) + nextVal * alpha;
+    bucket.avgPI = clamp(ema(Number(bucket.avgPI) || 0.5, clamp(Number(payload.pi) || 0.5, 0, 1)), 0, 1);
+    bucket.avgIDD = clamp(ema(Number(bucket.avgIDD) || 0, clamp(Number(payload.avgIDD) || 0, -1, 1)), -1, 1);
+    bucket.avgThreat = clamp(ema(Number(bucket.avgThreat) || 0.5, clamp(Number(payload.threat) || 0, 0, 1)), 0, 1);
+    bucket.avgComposure = clamp(ema(Number(bucket.avgComposure) || 0.5, clamp(Number(payload.avgComposure) || 0, 0, 1)), 0, 1);
+    bucket.avgTilt = clamp(ema(Number(bucket.avgTilt) || 0.5, clamp(Number(payload.avgTilt) || 0, 0, 1)), 0, 1);
+    bucket.lateStrength = clamp(ema(Number(bucket.lateStrength) || 0.5, normalizeIdd(payload.lateIDD)), 0, 1);
+    bucket.n = prevN + 1;
+    return bucket;
+  }
+
+  function computeHaTraits(homeBucket, awayBucket){
+    const homeBoost = clamp((Number(homeBucket.avgPI) || 0.5) - (Number(awayBucket.avgPI) || 0.5), -0.30, 0.30);
+    const awayResilience = clamp((Number(awayBucket.avgPI) || 0.5) / ((Number(homeBucket.avgPI) || 0.5) + 0.001), 0, 1);
+    const awayFragility = clamp(1 - awayResilience, 0, 1);
+    const crowdEnergy = clamp((Number(homeBucket.lateStrength) || 0.5) - (Number(awayBucket.lateStrength) || 0.5) + 0.5, 0, 1);
+    const travelTilt = clamp((Number(awayBucket.avgTilt) || 0.5) - (Number(homeBucket.avgTilt) || 0.5) + 0.5, 0, 1);
+    return { homeBoost, awayResilience, awayFragility, crowdEnergy, travelTilt };
+  }
+
+  function inferEngineMetricsFromMatch(match, teamId){
+    const isHome = match?.homeId===teamId;
+    const side = isHome ? "home" : "away";
+    const oppSide = isHome ? "away" : "home";
+    const narrativeLabels = match?.narrativeModule?.diagnostic?.diagnostic?.labels
+      || match?.narrativeModule?.diagnostic?.labels
+      || {};
+    const avgIDD = clamp(Number(narrativeLabels.control_without_conversion) || 0, 0, 1) * 2 - 1;
+    const lateIDD = clamp(Number(narrativeLabels.late_risk_exposure) || 0, 0, 1) * 2 - 1;
+    const threat = metricFromStats(match?.stats, ["big chances", "ocasiones", "ataques peligrosos"], side);
+    const intensityRaw = metricFromStats(match?.stats, ["shots", "remates", "shots on target", "tiros a puerta"], side);
+    const ownXg = metricFromStats(match?.stats, ["goles esperados (xg)", "xg"], side);
+    const oppXg = metricFromStats(match?.stats, ["goles esperados (xg)", "xg"], oppSide);
+    const ownXgot = metricFromStats(match?.stats, ["xg a puerta", "xgot"], side);
+    const shotsOn = metricFromStats(match?.stats, ["shots on target", "tiros a puerta", "remates a puerta"], side);
+    const corners = metricFromStats(match?.stats, ["corners", "corneres", "córneres"], side);
+    const touchesBox = metricFromStats(match?.stats, ["toques en el area rival", "toques en el área rival"], side);
+    const fouls = metricFromStats(match?.stats, ["faltas", "fouls"], side);
+    const yellows = metricFromStats(match?.stats, ["tarjetas amarillas", "yellow cards"], side);
+    const tackles = metricFromStats(match?.stats, ["entradas", "tackles"], side);
+    const duels = metricFromStats(match?.stats, ["duelos ganados", "duels won"], side);
+    const interceptions = metricFromStats(match?.stats, ["intercepciones", "interceptions"], side);
+    const narrativeEvents = match?.narrativeModule?.normalized?.events || [];
+    const shockGoals = narrativeEvents.filter(evt=>evt?.type==="goal" && Number(evt?.min)>=70).length;
+    const aggressionIndex = clamp(
+      0.30 * clamp((Number(tackles) || 50) / 100, 0, 1) +
+      0.20 * clamp((Number(duels) || 40) / 70, 0, 1) +
+      0.16 * clamp((Number(interceptions) || 4) / 10, 0, 1) +
+      0.20 * clamp((Number(fouls) || 8) / 16, 0, 1) +
+      0.14 * clamp((Number(yellows) || 1) / 5, 0, 1),
+      0,
+      1
+    );
+    const shockIndex = clamp(
+      0.35 * clamp(Number(narrativeLabels.transition_punished) || 0, 0, 1) +
+      0.25 * clamp(Number(narrativeLabels.late_risk_exposure) || 0, 0, 1) +
+      0.20 * clamp((Number(shockGoals) || 0) / 3, 0, 1) +
+      0.20 * clamp((Number(oppXg) || 1.2) / 2.8, 0, 1),
+      0,
+      1
+    );
+    const psychLoad = clamp(
+      0.36 * clamp(Number(narrativeLabels.control_without_conversion) || 0, 0, 1) +
+      0.30 * clamp(Number(narrativeLabels.discipline_impact) || 0, 0, 1) +
+      0.18 * aggressionIndex +
+      0.16 * shockIndex,
+      0,
+      1
+    );
+    const confidence = clamp(
+      0.35 * clamp((Number(ownXg) || 0.9) / 2.2, 0, 1) +
+      0.25 * clamp((Number(ownXgot) || 1) / 2.5, 0, 1) +
+      0.20 * clamp((Number(shotsOn) || 3) / 9, 0, 1) +
+      0.20 * clamp((Number(touchesBox) || 14) / 45, 0, 1),
+      0,
+      1
+    );
+    const composure = clamp(0.62 - psychLoad * 0.34 + confidence * 0.24, 0, 1);
+    const frustration = clamp(0.24 + psychLoad * 0.58 - confidence * 0.22, 0, 1);
+    const tiltRisk = clamp(0.18 + psychLoad * 0.50 + aggressionIndex * 0.24 - composure * 0.26, 0, 1);
+    return {
+      avgIDD,
+      lateIDD,
+      threat: clamp(Number(threat) || 0.5, 0, 1),
+      intensity: clamp(Number(intensityRaw) || 0.5, 0, 1),
+      shockGoals,
+      aggressionIndex,
+      shockIndex,
+      psychLoad,
+      sterilePressure: clamp(Number(narrativeLabels.control_without_conversion) || 0.2, 0, 1),
+      psych: {
+        avgConfidence: confidence,
+        avgComposure: composure,
+        avgFrustration: frustration,
+        avgTiltRisk: tiltRisk
+      }
+    };
+  }
+
+  function recomputeTeamGlobalEngine(db, teamId){
+    const team = db.teams.find(t=>t.id===teamId);
+    if(!team) return null;
+    const profile = getOrCreateDiagProfile(db, teamId, team.name);
+    const orderedMatches = db.tracker
+      .filter(m=>(m.homeId===teamId || m.awayId===teamId) && m?.teamEngine?.[teamId])
+      .sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")));
+    const home = createHomeAwayBucket();
+    const away = createHomeAwayBucket();
+    const series = [];
+    orderedMatches.forEach((match, idx)=>{
+      const sample = match.teamEngine[teamId];
+      const metrics = sample.metrics || {};
+      const psych = metrics.psych || {};
+      const pi = computePerformanceIndex(metrics);
+      sample.pi = pi;
+      const target = sample.isHome ? home : away;
+      updateHomeAwayBucket(target, {
+        pi,
+        avgIDD: metrics.avgIDD,
+        lateIDD: metrics.lateIDD,
+        threat: metrics.threat,
+        avgComposure: psych.avgComposure,
+        avgTilt: psych.avgTiltRisk
+      });
+      const epa = clamp(Number(sample.epa) || 0.5, 0, 1);
+      const ema = clamp(Number(sample.emaIntensity) || 0.5, 0, 1);
+      const globalStrength = clamp(0.40*pi + 0.25*epa + 0.20*ema + 0.15*(1 - clamp(Number(psych.avgTiltRisk) || 0.5, 0, 1)), 0, 1);
+      series.push({
+        label: match.date || `M${idx+1}`,
+        score: globalStrength,
+        pi,
+        epa,
+        ema,
+        aggression: clamp(Number(metrics.aggressionIndex) || 0.5, 0, 1),
+        shock: clamp(Number(metrics.shockIndex) || 0.5, 0, 1),
+        psychLoad: clamp(Number(metrics.psychLoad) || Number(psych.avgTiltRisk) || 0.5, 0, 1),
+        isHome: sample.isHome
+      });
+    });
+    const haTraits = computeHaTraits(home, away);
+    const trend = series.slice(-5);
+    const currentStrength = trend.length ? trend.reduce((sum, item)=>sum + item.score, 0) / trend.length : 0.5;
+    profile.engineV1 = {
+      version: "hae_epa_ema_v1",
+      updatedAt: new Date().toISOString(),
+      samples: series.length,
+      currentStrength,
+      homeAway: { home, away },
+      haTraits,
+      profile: {
+        aggression: series.length ? series.reduce((sum, item)=>sum + item.aggression, 0) / series.length : 0.5,
+        shock: series.length ? series.reduce((sum, item)=>sum + item.shock, 0) / series.length : 0.5,
+        psychLoad: series.length ? series.reduce((sum, item)=>sum + item.psychLoad, 0) / series.length : 0.5
+      },
+      series
+    };
+    return profile.engineV1;
+  }
+
+  function renderTeamGlobalEngineChart(canvas, engine){
+    if(!canvas || typeof Chart!=="function") return;
+    if(canvas._chart){
+      canvas._chart.destroy();
+      canvas._chart = null;
+    }
+    const labels = (engine?.series || []).map(item=>item.label);
+    const dataStrength = (engine?.series || []).map(item=>Math.round((item.score || 0) * 100));
+    const dataEPA = (engine?.series || []).map(item=>Math.round((item.epa || 0) * 100));
+    const dataEMA = (engine?.series || []).map(item=>Math.round((item.ema || 0) * 100));
+    const dataAggression = (engine?.series || []).map(item=>Math.round((item.aggression || 0) * 100));
+    const dataShock = (engine?.series || []).map(item=>Math.round((item.shock || 0) * 100));
+    const dataPsychLoad = (engine?.series || []).map(item=>Math.round((item.psychLoad || 0) * 100));
+    canvas._chart = new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "Fuerza global", data: dataStrength, borderColor: "#2ea043", backgroundColor: "rgba(46,160,67,.16)", tension: 0.25 },
+          { label: "EPA", data: dataEPA, borderColor: "#1f6feb", backgroundColor: "rgba(31,111,235,.16)", tension: 0.25 },
+          { label: "EMA psicológico", data: dataEMA, borderColor: "#d29922", backgroundColor: "rgba(210,153,34,.14)", tension: 0.25 },
+          { label: "Agresividad", data: dataAggression, borderColor: "#ff7b72", backgroundColor: "rgba(255,123,114,.12)", tension: 0.2, borderDash: [5, 3] },
+          { label: "Shock", data: dataShock, borderColor: "#a371f7", backgroundColor: "rgba(163,113,247,.14)", tension: 0.2, borderDash: [3, 3] },
+          { label: "Carga psicológica", data: dataPsychLoad, borderColor: "#f2cc60", backgroundColor: "rgba(242,204,96,.10)", tension: 0.22 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        scales: {
+          x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
+          y: { min: 0, max: 100, ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } }
+        }
+      }
+    });
+  }
+
+  function openTeamEngineModal({ db, match, team, onSave } = {}){
+    if(!match || !team) return;
+    const inferred = inferEngineMetricsFromMatch(match, team.id);
+    const prev = match?.teamEngine?.[team.id] || {};
+    const metrics = prev.metrics || inferred;
+    const psych = metrics.psych || inferred.psych;
+    const epa = clamp(Number(prev.epa) || 0.5, 0, 1);
+    const emaIntensity = clamp(Number(prev.emaIntensity) || 0.5, 0, 1);
+    const existingNarrative = match?.narrativeModule?.rawText || "";
+    const existingStatsJson = match?.stats?.length
+      ? JSON.stringify({ stats: match.stats }, null, 2)
+      : "";
+    const homeName = db.teams.find(t=>t.id===match.homeId)?.name || "Local";
+    const awayName = db.teams.find(t=>t.id===match.awayId)?.name || "Visitante";
+    const backdrop = document.createElement("div");
+    backdrop.className = "fl-modal-backdrop";
+    backdrop.innerHTML = `
+      <div class="fl-modal" style="max-width:920px;max-height:90vh;overflow:auto;">
+        <div class="fl-row" style="justify-content:space-between;align-items:center;">
+          <div style="font-size:18px;font-weight:900;">EPA + EMA + Localía (${team.name})</div>
+          <button class="fl-btn" id="closeEngineModal">Cerrar</button>
         </div>
-      </div>
-
-      <div class="fl-grid2">
-        <div class="fl-card">
-          <div style="font-weight:850;">📈 Rendimiento actual</div>
-          <div class="fl-small" style="margin-top:8px;">
-            Rating base: <b>${fmt(p.rating,2)}</b><br/>
-            Forma (últimos ${db.settings.formLastN}): <b>${Number.isFinite(form)?fmt(form,2):"—"}</b><br/>
-            Rating efectivo (para simular): <b>${fmt(eff,2)}</b>
-          </div>
-          <div class="fl-small" style="margin-top:10px;opacity:.85;">
-            El rating efectivo sale de sus juegos pasados de la <b>temporada actual</b>. Si no hay registros, usa el rating base.
-          </div>
+        <div class="fl-card" style="margin-top:10px;">
+          <div style="font-weight:800;margin-bottom:6px;">📋 Relato del partido</div>
+          <textarea id="engNarrative" class="fl-text" placeholder="Pega el relato línea por línea con minutos.">${existingNarrative}</textarea>
         </div>
-
-        <div class="fl-card">
-          <div style="font-weight:850;">📊 Resumen temporada (acumulado)</div>
-          <div class="fl-small" style="margin-top:8px;">
-            Partidos: <b>${agg.matches}</b> • Minutos: <b>${agg.minutes}</b><br/>
-            Goles: <b>${agg.goals}</b> • Asistencias: <b>${agg.assists}</b><br/>
-            Tiros a puerta: <b>${agg.shotsOn}</b> • Key passes: <b>${agg.keyPasses}</b><br/>
-            Pases: <b>${agg.passC}</b>/<b>${agg.passA}</b> (${fmt(agg.passPct*100,1)}%)<br/>
-            Pases progresivos: <b>${agg.progPasses}</b> • Regates: <b>${agg.dribblesWon}</b><br/>
-            Duelos: <b>${agg.duelsWon}</b>/<b>${agg.duelsTot}</b> (${fmt(agg.duelPct*100,1)}%)<br/>
-            Acciones defensivas: <b>${agg.defActions}</b><br/>
-            Pérdidas de posesión: <b>${agg.possessionLost}</b><br/>
-            Pases largos: <b>${agg.longBallC}</b>/<b>${agg.longBallA}</b>
-          </div>
-          <div class="fl-small" style="margin-top:10px;">
-            <b>Por 90 (aprox):</b> G ${fmt(agg.per90.goals,2)} • A ${fmt(agg.per90.assists,2)} • KP ${fmt(agg.per90.keyPasses,2)} • ProgP ${fmt(agg.per90.progPasses,2)}
-          </div>
+        <div class="fl-card" style="margin-top:10px;">
+          <div style="font-weight:800;margin-bottom:6px;">📊 Estadísticas (JSON)</div>
+          <textarea id="engStatsJson" class="fl-text" placeholder='{"stats":[{"key":"Posesión","home":"67%","away":"33%"}]}' style="min-height:160px;">${existingStatsJson}</textarea>
+          <div class="fl-mini" style="margin-top:6px;">Si ya había datos, aquí los puedes ver y editar.</div>
         </div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:850;">🧾 Últimos partidos (temporada actual)</div>
-        <div id="lastMatches" class="fl-small" style="margin-top:8px;"></div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:850;">➕ Registrar un partido aquí mismo</div>
-        <div class="fl-small" style="margin-top:6px;">Rellena lo esencial y guarda. Mientras más registres, mejor se vuelve el “rendimiento actual”.</div>
-
+        <div class="fl-mini" style="margin-top:8px;">Las métricas del motor se recalculan desde el relato + estadísticas al guardar.</div>
+        <div class="fl-grid two" style="margin-top:8px;">
+          <label class="fl-mini">EPA (0-1)<input id="engEPA" class="fl-input" type="number" min="0" max="1" step="0.01" value="${epa}"></label>
+          <label class="fl-mini">EMA intensidad velas (0-1)<input id="engEMA" class="fl-input" type="number" min="0" max="1" step="0.01" value="${emaIntensity}"></label>
+        </div>
         <div class="fl-row" style="margin-top:10px;">
-          <div>
-            <div class="fl-h3">Fecha</div>
-            <input class="fl-input" id="pl_date" type="date">
-          </div>
-          <div>
-            <div class="fl-h3">Minutos</div>
-            <input class="fl-input" id="pl_minutes" type="number" min="0" max="120" step="1" value="90">
-          </div>
-          <div>
-            <div class="fl-h3">Goles</div>
-            <input class="fl-input" id="pl_goals" type="number" min="0" step="1" value="0">
-          </div>
-          <div>
-            <div class="fl-h3">Asist.</div>
-            <input class="fl-input" id="pl_assists" type="number" min="0" step="1" value="0">
-          </div>
-        </div>
-
-        <details style="margin-top:10px;">
-          <summary style="cursor:pointer;">+ Stats (tipo Sofascore)</summary>
-          <div class="fl-grid2" style="margin-top:10px;">
-            <div class="fl-card" style="margin:0;">
-              <div class="fl-small"><b>Pases</b></div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_passC" type="number" min="0" step="1" placeholder="Pases completados">
-                <input class="fl-input" id="pl_passA" type="number" min="0" step="1" placeholder="Pases intentados">
-              </div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_keyPasses" type="number" min="0" step="1" placeholder="Key passes">
-                <input class="fl-input" id="pl_progPasses" type="number" min="0" step="1" placeholder="Pases progresivos">
-              </div>
-            </div>
-
-            <div class="fl-card" style="margin:0;">
-              <div class="fl-small"><b>Duelo/Regate/Defensa</b></div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_duelsWon" type="number" min="0" step="1" placeholder="Duelos ganados">
-                <input class="fl-input" id="pl_duelsTot" type="number" min="0" step="1" placeholder="Duelos totales">
-              </div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_dribblesWon" type="number" min="0" step="1" placeholder="Regates buenos">
-                <input class="fl-input" id="pl_defActions" type="number" min="0" step="1" placeholder="Acciones defensivas">
-              </div>
-            </div>
-          </div>
-
-          <div class="fl-grid2" style="margin-top:10px;">
-            <div class="fl-card" style="margin:0;">
-              <div class="fl-small"><b>Tiro/Disciplina</b></div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_shotsOn" type="number" min="0" step="1" placeholder="Tiros a puerta">
-                <input class="fl-input" id="pl_posLost" type="number" min="0" step="1" placeholder="Pérdidas de posesión">
-              </div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_xG" type="number" min="0" step="0.01" placeholder="Goles esperados (xG)">
-                <input class="fl-input" id="pl_xA" type="number" min="0" step="0.01" placeholder="Asistencias esperadas (xA)">
-              </div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_yellow" type="number" min="0" step="1" placeholder="Amarillas">
-                <input class="fl-input" id="pl_red" type="number" min="0" step="1" placeholder="Rojas">
-              </div>
-            </div>
-
-            <div class="fl-card" style="margin:0;">
-              <div class="fl-small"><b>Portero (si aplica)</b></div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_saves" type="number" min="0" step="1" placeholder="Atajadas">
-                <input class="fl-input" id="pl_conceded" type="number" min="0" step="1" placeholder="Goles concedidos">
-              </div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_cleanSheet" type="number" min="0" max="1" step="1" placeholder="Portería a cero 0/1">
-                <input class="fl-input" id="pl_highClaims" type="number" min="0" step="1" placeholder="Salidas altas (High claims)">
-              </div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_punches" type="number" min="0" step="1" placeholder="Despejes de puños (Punches)">
-                <input class="fl-input" id="pl_longBallC" type="number" min="0" step="1" placeholder="Pases largos acertados">
-              </div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_longBallA" type="number" min="0" step="1" placeholder="Pases largos intentados">
-                <input class="fl-input" id="pl_ownHalfC" type="number" min="0" step="1" placeholder="Pases en campo propio (acertados)">
-              </div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_ownHalfA" type="number" min="0" step="1" placeholder="Pases en campo propio (intentados)">
-                <input class="fl-input" id="pl_oppHalfC" type="number" min="0" step="1" placeholder="Pases en campo rival (acertados)">
-              </div>
-              <div class="fl-row" style="margin-top:8px;">
-                <input class="fl-input" id="pl_oppHalfA" type="number" min="0" step="1" placeholder="Pases en campo rival (intentados)">
-              </div>
-            </div>
-          </div>
-        </details>
-
-        
-        <details style="margin-top:12px;">
-          <summary style="cursor:pointer;">📥 Pegar JSON (FootballLab Clip)</summary>
-          <div class="fl-small" style="margin-top:6px; opacity:.85;">
-            Copia el JSON desde la extensión y pégalo aquí. Se llenará el formulario automáticamente.
-          </div>
-          <textarea id="pl_json" class="fl-input" style="margin-top:8px; min-height:120px; width:100%; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" placeholder='{"player":...,"match":...,"stats":...}'></textarea>
-          <div class="fl-row" style="margin-top:8px; align-items:center;">
-            <button class="mc-btn" id="pl_applyJson">Aplicar al formulario</button>
-            <button class="mc-btn" id="pl_clearJson">Limpiar</button>
-            <div id="pl_jsonInfo" class="fl-small"></div>
-          </div>
-        </details>
-
-<div class="fl-row" style="margin-top:10px;">
-          <button class="mc-btn" id="pl_saveMatch">Guardar partido</button>
-          <div id="pl_savedInfo" class="fl-small"></div>
+          <button class="fl-btn" id="saveEngineModal">Guardar en gráfico global</button>
+          <span id="engineModalStatus" class="fl-muted"></span>
         </div>
       </div>
     `;
+    document.body.appendChild(backdrop);
+    backdrop.querySelector("#closeEngineModal").onclick = ()=>backdrop.remove();
+    backdrop.onclick = (ev)=>{ if(ev.target===backdrop) backdrop.remove(); };
+    backdrop.querySelector("#saveEngineModal").onclick = ()=>{
+      const status = backdrop.querySelector("#engineModalStatus");
+      const narrativeRaw = backdrop.querySelector("#engNarrative").value.trim();
+      const statsRaw = backdrop.querySelector("#engStatsJson").value.trim();
+      if(narrativeRaw){
+        const parsed = extractNarratedEvents(narrativeRaw, { home: homeName, away: awayName });
+        const diagnostic = buildNarrativeDiagnostic({ match, teams: { home: homeName, away: awayName }, parsed });
+        match.narrativeModule = {
+          rawText: narrativeRaw,
+          normalized: {
+            matchId: match.id,
+            teams: { home: homeName, away: awayName },
+            events: parsed.events,
+            counters: parsed.counters
+          },
+          diagnostic: { matchId: match.id, diagnostic }
+        };
+      }
+      if(statsRaw){
+        try{
+          match.stats = parseStatsPayload(statsRaw);
+        }catch(err){
+          status.textContent = `❌ ${String(err.message || err)}`;
+          return;
+        }
+      }
+      const inferredFresh = inferEngineMetricsFromMatch(match, team.id);
+      const mergedPsych = {
+        ...inferredFresh.psych,
+        ...(psych || {})
+      };
+      const finalMetrics = {
+        ...inferredFresh,
+        ...metrics,
+        ...inferredFresh,
+        psych: mergedPsych
+      };
+      const payload = {
+        team: team.name,
+        isHome: match.homeId===team.id,
+        epa: clamp(Number(backdrop.querySelector("#engEPA").value) || 0, 0, 1),
+        emaIntensity: clamp(Number(backdrop.querySelector("#engEMA").value) || 0, 0, 1),
+        metrics: finalMetrics,
+        updatedAt: new Date().toISOString()
+      };
+      payload.pi = computePerformanceIndex(payload.metrics);
+      match.teamEngine ||= {};
+      match.teamEngine[team.id] = payload;
+      recomputeTeamGlobalEngine(db, team.id);
+      saveDb(db);
+      status.textContent = `✅ PI ${payload.pi.toFixed(3)} guardado y agregado al motor global.`;
+      if(typeof onSave==="function") setTimeout(()=>{ backdrop.remove(); onSave(); }, 320);
+    };
+  }
 
-    // set date default
-    const iso = new Date().toISOString().slice(0,10);
-    document.getElementById("pl_date").value = iso;
-
-    
-    // JSON import (FootballLab Clip)
-    const $json = document.getElementById("pl_json");
-    const $info = document.getElementById("pl_jsonInfo");
-
-    function parseJsonSafe(s){
-      try { return { ok:true, data: JSON.parse(s) }; }
-      catch(e){ return { ok:false, error: e?.message || String(e) }; }
+  function simulateMatchV2(plan, rngSeed){
+    const rng = createRng(rngSeed);
+    const ht = plan.homeProfile.traits || {};
+    const at = plan.awayProfile.traits || {};
+    const attackH = 0.40*(ht.territorial_strength||0.5) + 0.35*(ht.chance_creation||0.5) + 0.25*(ht.finishing_quality||0.5);
+    const attackA = 0.40*(at.territorial_strength||0.5) + 0.35*(at.chance_creation||0.5) + 0.25*(at.finishing_quality||0.5);
+    const defenseH = 0.50*(ht.transition_defense||0.5) + 0.50*(ht.low_block_execution||0.5);
+    const defenseA = 0.50*(at.transition_defense||0.5) + 0.50*(at.low_block_execution||0.5);
+    const blocks = [];
+    const allEvents = [];
+    const score = { home: 0, away: 0 };
+    let prevIdd = 0;
+    for(let k=0;k<10;k++){
+      const t0 = k*10;
+      const t1 = k===9 ? 90 : (k+1)*10;
+      const scoreDiff = score.home - score.away;
+      const late = t0>=70;
+      const state = scoreDiff<0 ? (late?0.15:0.08) : scoreDiff>0 ? -0.05 : 0;
+      const noise = randn(rng) * ((Number(ht.discipline_risk)||0.5 + (Number(at.discipline_risk)||0.5))/2) * plan.rates.volatility;
+      let style = 0;
+      if(plan.matchup.styleClash.includes("home_transition_window")) style += 0.08;
+      if(plan.matchup.styleClash.includes("away_transition_window")) style -= 0.08;
+      if(plan.matchup.styleClash.includes("home_sterile_risk") && k>=3 && k<=7) style -= 0.06;
+      if(plan.matchup.styleClash.includes("away_sterile_risk") && k>=3 && k<=7) style += 0.06;
+      const base = (attackH-defenseA) - (attackA-defenseH)*0.65 + plan.context.homeAdv*0.4;
+      const iddHome = clamp(0.55*prevIdd + 0.45*(base + style + state + noise), -1, 1);
+      const iddAway = -iddHome;
+      const events = [];
+      const goalH = plan.rates.baseGoalRatePerBlock * (1 + 0.9*Math.max(0, iddHome)) * (ht.finishing_quality||0.5) * (1-defenseA*0.75);
+      const goalA = plan.rates.baseGoalRatePerBlock * (1 + 0.9*Math.max(0, iddAway)) * (at.finishing_quality||0.5) * (1-defenseH*0.75);
+      const shockH = 0.08*(ht.transition_attack||0.5)*Math.max(0,-iddHome)*(1-(at.transition_defense||0.5));
+      const shockA = 0.08*(at.transition_attack||0.5)*Math.max(0,-iddAway)*(1-(ht.transition_defense||0.5));
+      if(rng() < goalH + shockH){ score.home += 1; events.push({type:"goal", team:"home", min:t0+Math.floor(rng()*10), shock:rng() < shockH/(goalH+shockH+1e-6)}); }
+      if(rng() < goalA + shockA){ score.away += 1; events.push({type:"goal", team:"away", min:t0+Math.floor(rng()*10), shock:rng() < shockA/(goalA+shockA+1e-6)}); }
+      const cardH = 0.05 + (ht.discipline_risk||0.5)*0.2 + (iddHome<-0.3 ? 0.08 : 0);
+      const cardA = 0.05 + (at.discipline_risk||0.5)*0.2 + (iddAway<-0.3 ? 0.08 : 0);
+      if(rng()<cardH) events.push({type:"yellow", team:"home", min:t0+Math.floor(rng()*10)});
+      if(rng()<cardA) events.push({type:"yellow", team:"away", min:t0+Math.floor(rng()*10)});
+      allEvents.push(...events);
+      blocks.push({ t0, t1, iddHome, iddAway, events });
+      prevIdd = iddHome;
     }
+    const candlesHome = generateCandlesFromBlocks(blocks, "home");
+    const candlesAway = generateCandlesFromBlocks(blocks, "away");
+    const diagnostic = generateDiagnosis(candlesHome, allEvents);
+    return { score, blocks, candlesHome, candlesAway, diagnostic };
+  }
 
-    function num(v, d=0){
-      const n = Number(v);
-      return Number.isFinite(n) ? n : d;
+  function parseMinuteToken(raw){
+    const txt = String(raw || "").trim();
+    const plus = txt.match(/(\d+)\s*\+\s*(\d+)\s*'?/);
+    if(plus) return Number(plus[1]) + Number(plus[2]);
+    const simple = txt.match(/(\d{1,3})\s*'?/);
+    return simple ? Number(simple[1]) : null;
+  }
+
+  function normalizeTeamToken(value){
+    return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  }
+
+  function parseMatchNarrative(text, teamHints=[]){
+    const teams = Array.isArray(teamHints) ? teamHints.filter(Boolean) : [];
+    const lines = String(text || "").split(/\n+/).map(line=>line.trim()).filter(Boolean);
+    const minuteRegex = /(\d+)(\+\d+)?\s*'/;
+    const keywordMap = [
+      { type: "goal", regex: /\bgol\b|anota|marca/i },
+      { type: "red", regex: /tarjeta roja|\broja\b|expulsad/i },
+      { type: "yellow", regex: /tarjeta|amonestad/i },
+      { type: "corner", regex: /c[oó]rner/i },
+      { type: "save", regex: /parada|atajad|interviene/i },
+      { type: "big_chance", regex: /ocasi[oó]n clar[ií]sima|mano a mano|clar[ií]sima/i },
+      { type: "shot", regex: /remata|disparo|chut/i },
+      { type: "offside", regex: /fuera de juego/i },
+      { type: "foul", regex: /falta|infracci[oó]n/i },
+      { type: "pressure", regex: /presi[oó]n|asedia|encierra|domina/i }
+    ];
+    const teamNorm = teams.map(name=>({ name, token: normalizeTeamToken(name) })).filter(x=>x.token);
+    const events = [];
+    let pendingMinute = null;
+
+    lines.forEach((line)=>{
+      const minuteMatch = line.match(minuteRegex);
+      if(minuteMatch){
+        pendingMinute = Number(minuteMatch[1]) + Number((minuteMatch[2] || "").replace("+", "") || 0);
+      }
+      const eventType = keywordMap.find(item=>item.regex.test(line))?.type;
+      if(!eventType) return;
+      const lineNorm = normalizeTeamToken(line);
+      const team = teamNorm.find(item=>lineNorm.includes(item.token))?.name;
+      events.push({
+        min: pendingMinute ?? null,
+        type: eventType,
+        team,
+        text: line
+      });
+    });
+
+    return { teams, events };
+  }
+
+  function buildEventTimeline(events=[]){
+    return [...events]
+      .map((evt, idx)=>({ ...evt, min: Number.isFinite(Number(evt.min)) ? Number(evt.min) : 0, idx }))
+      .sort((a,b)=>a.min===b.min ? a.idx-b.idx : a.min-b.min)
+      .map(({ idx, ...evt })=>evt);
+  }
+
+  function blockFromMinute(minute){
+    const safeMinute = Number.isFinite(Number(minute)) ? Number(minute) : 0;
+    if(safeMinute >= 90) return 9;
+    return clamp(Math.floor(safeMinute / 10), 0, 8);
+  }
+
+  function createBlockStats(){
+    return {
+      shots: 0,
+      big_chances: 0,
+      corners: 0,
+      goals: 0,
+      goals_conceded: 0,
+      saves_forced: 0,
+      cards: 0,
+      fouls: 0,
+      pressure_mentions: 0,
+      idd: 0,
+      idd_normalized: 0
+    };
+  }
+
+  function computeMomentumBlocks(events=[], teams=[]){
+    const timeline = buildEventTimeline(events);
+    const [homeTeam, awayTeam] = teams;
+    const blocks = Array.from({ length: 10 }, (_v, idx)=>({
+      block: idx,
+      range: idx < 9 ? `${idx*10}-${(idx+1)*10}` : "90+",
+      teams: {
+        [homeTeam || "home"]: createBlockStats(),
+        [awayTeam || "away"]: createBlockStats()
+      },
+      idd: {}
+    }));
+    const statMap = {
+      shot: "shots",
+      big_chance: "big_chances",
+      corner: "corners",
+      goal: "goals",
+      foul: "fouls",
+      yellow: "cards",
+      red: "cards",
+      pressure: "pressure_mentions"
+    };
+
+    timeline.forEach((event)=>{
+      const blk = blocks[blockFromMinute(event.min)];
+      const side = event.team === awayTeam ? awayTeam : homeTeam;
+      const otherSide = side === homeTeam ? awayTeam : homeTeam;
+      const key = statMap[event.type];
+      if(key && blk.teams[side]) blk.teams[side][key] += 1;
+      if(event.type === "save" && blk.teams[otherSide]) blk.teams[otherSide].saves_forced += 1;
+      if(event.type === "goal" && blk.teams[otherSide]) blk.teams[otherSide].goals_conceded += 1;
+    });
+
+    blocks.forEach((block)=>{
+      [homeTeam, awayTeam].forEach(team=>{
+        const stats = block.teams[team];
+        const idd =
+          0.5 * stats.big_chances +
+          0.4 * stats.shots +
+          0.3 * stats.corners +
+          0.2 * stats.pressure_mentions -
+          0.6 * stats.goals_conceded -
+          0.2 * stats.cards;
+        stats.idd = idd;
+        stats.idd_normalized = clamp(idd / 5, -1, 1);
+        block.idd[team] = stats.idd_normalized;
+      });
+    });
+
+    return blocks;
+  }
+
+  function generateCandles(blocks=[], team=""){
+    let prev = 0;
+    return blocks.map((block)=>{
+      const close = Number(block.idd?.[team]) || 0;
+      const open = prev;
+      const high = Math.max(open, close);
+      const low = Math.min(open, close);
+      prev = close;
+      return { block: block.block, label: block.range || (block.block===9?"90+":`${block.block*10}-${(block.block+1)*10}`), open, high, low, close };
+    });
+  }
+
+  function cumulativeSum(series=[]){
+    let acc = 0;
+    return series.map((value)=>{
+      acc += Number(value) || 0;
+      return acc;
+    });
+  }
+
+  function stdDev(series=[]){
+    if(!series.length) return 0;
+    const mean = series.reduce((sum, value)=>sum + (Number(value) || 0), 0) / series.length;
+    const variance = series.reduce((sum, value)=>{
+      const n = Number(value) || 0;
+      return sum + (n-mean)*(n-mean);
+    }, 0) / series.length;
+    return Math.sqrt(variance);
+  }
+
+  function countSignChanges(series=[]){
+    let prev = 0;
+    return series.reduce((count, value)=>{
+      const sign = (Number(value) || 0) > 0 ? 1 : ((Number(value) || 0) < 0 ? -1 : 0);
+      if(sign===0) return count;
+      if(prev!==0 && sign!==prev) count += 1;
+      prev = sign;
+      return count;
+    }, 0);
+  }
+
+  function maxConsecutiveBy(series=[], predicate=()=>false){
+    let curr = 0;
+    let max = 0;
+    series.forEach((value)=>{
+      if(predicate(Number(value) || 0)){
+        curr += 1;
+        if(curr > max) max = curr;
+      }else{
+        curr = 0;
+      }
+    });
+    return max;
+  }
+
+  function computeMomentumDiagnostic(candles=[]){
+    const iddSeries = candles.map(c=>Number(c.close) || 0);
+    const iddAccum = cumulativeSum(iddSeries);
+    const deltas = iddAccum.slice(1).map((value, idx)=>value - iddAccum[idx]);
+    const maxDeltaAbs = deltas.reduce((best, value)=>Math.max(best, Math.abs(value)), 0);
+    const breakDeltaIdx = deltas.reduce((bestIdx, value, idx)=>(
+      Math.abs(value) > Math.abs(deltas[bestIdx] || 0) ? idx : bestIdx
+    ), 0);
+    const breakIdx = deltas.length ? breakDeltaIdx + 1 : 0;
+    const breakLabel = candles[breakIdx]?.label || candles[0]?.label || "-";
+    const breakDelta = deltas[breakDeltaIdx] || 0;
+    const vol = stdDev(iddSeries);
+    const trend = (iddAccum.at(-1) || 0) - (iddAccum[0] || 0);
+    const lateStrength = iddSeries.length ? (iddSeries.slice(-2).reduce((sum,v)=>sum+v,0) / Math.max(1, iddSeries.slice(-2).length)) : 0;
+    const switches = countSignChanges(iddSeries);
+    const greenStreakMax = maxConsecutiveBy(iddSeries, v=>v > 0.15);
+    const redStreakMax = maxConsecutiveBy(iddSeries, v=>v < -0.15);
+    const secondPhaseBreak = ["50-60", "60-70"].includes(breakLabel) && breakDelta < -0.2;
+    const equilibrium = Math.abs(trend) < 0.2 && vol < 0.25;
+    const dominantNoClose = trend > 0.2 && lateStrength < 0;
+    const oscillation = switches >= 4;
+    const lateWeakness = lateStrength < -0.2 || (iddSeries.at(-1) || 0) < -0.25;
+
+    const tagScores = {
+      equilibrium: clamp(1 - (Math.abs(trend)/0.2 + vol/0.25)/2, 0, 1),
+      no_close: dominantNoClose ? clamp((trend/0.8) + Math.max(0, -lateStrength/0.5), 0, 1) : 0,
+      second_phase_break: secondPhaseBreak ? clamp(Math.abs(breakDelta)/Math.max(0.01, maxDeltaAbs), 0, 1) : 0,
+      oscillation: clamp(switches/6, 0, 1),
+      late_weakness: clamp(Math.max(0, -lateStrength)/0.4, 0, 1)
+    };
+
+    const tags = [];
+    if(equilibrium) tags.push("equilibrado_estable");
+    if(dominantNoClose) tags.push("domino_sin_cierre");
+    if(secondPhaseBreak) tags.push("second_phase_break");
+    if(oscillation) tags.push("oscillation");
+    if(lateWeakness) tags.push("late_weakness");
+
+    const diagnosticText = [];
+    if(Math.abs(trend) < 0.2) diagnosticText.push("Partido de equilibrio con fases alternadas.");
+    else if(trend > 0.2) diagnosticText.push("Equipo A tuvo ventaja territorial global.");
+    else diagnosticText.push("Equipo A fue superado en el global del desarrollo.");
+    diagnosticText.push(`Quiebre principal: ${breakLabel} (cambio fuerte de momentum).`);
+    diagnosticText.push(`Volatilidad: ${vol > 0.35 ? "alta" : (vol > 0.2 ? "media" : "baja")}.`);
+    diagnosticText.push(`Final: ${lateStrength > 0.2 ? "fuerte" : (lateStrength < -0.2 ? "débil" : "neutral")}.`);
+
+    if(oscillation) diagnosticText.push("Patrón: vaivén (alternancias frecuentes).");
+    else if(secondPhaseBreak && lateWeakness) diagnosticText.push("Patrón: ruptura y caída final.");
+    else if(greenStreakMax >= 2 && lateStrength < 0) diagnosticText.push("Patrón: acumulación estéril.");
+
+    return {
+      metrics: {
+        vol,
+        trend,
+        breakLabel,
+        breakDelta,
+        lateStrength,
+        switches,
+        greenStreakMax,
+        redStreakMax
+      },
+      tagScores,
+      tags,
+      iddSeries,
+      iddAccum,
+      diagnosticText
+    };
+  }
+
+  function detectPatterns({ candles=[], blocks=[], team="", opponent="" }){
+    const detected = [];
+    let greenStreak = 0;
+    let streakGoals = 0;
+    candles.forEach((candle, idx)=>{
+      if(candle.close > candle.open){
+        greenStreak += 1;
+        streakGoals += Number(blocks[idx]?.teams?.[team]?.goals || 0);
+      }else{
+        if(greenStreak >= 2 && streakGoals === 0) detected.push({ type: "accumulation_without_conversion", block: idx-1 });
+        greenStreak = 0;
+        streakGoals = 0;
+      }
+      if(candle.close > 0.4 && Number(blocks[idx+1]?.teams?.[opponent]?.goals || 0) > 0){
+        detected.push({ type: "shock_transition", block: idx+1 });
+      }
+      if(candle.close < -0.3 && Number(blocks[idx]?.teams?.[team]?.saves_forced || 0) >= 2 && Number(blocks[idx]?.teams?.[team]?.goals_conceded || 0)===0){
+        detected.push({ type: "low_block_success", block: idx });
+      }
+    });
+    if(greenStreak >= 2 && streakGoals === 0) detected.push({ type: "accumulation_without_conversion", block: candles.length-1 });
+    for(let i=3;i<candles.length;i++){
+      const prev2 = candles[i-3].close > 0.2 && candles[i-2].close > 0.2;
+      const next2 = candles[i-1].close < -0.2 && candles[i].close < -0.2;
+      if(prev2 && next2) detected.push({ type: "reversion", block: i });
     }
+    const pre70 = candles.slice(0,7).some(c=>c.close > 0.45);
+    const post70Drop = candles.slice(7).some(c=>c.close < -0.25);
+    const rivalLateGoal = blocks.slice(8).some(b=>Number(b.teams?.[opponent]?.goals || 0) > 0);
+    if(pre70 && post70Drop && rivalLateGoal) detected.push({ type: "late_collapse", block: 8 });
+    return detected;
+  }
 
-    function setVal(id, v){
-      const el = document.getElementById(id);
-      if(!el) return;
-      el.value = (v===null || v===undefined) ? "" : String(v);
+  function computeMomentumSignature(team, blocks=[], events=[]){
+    const iddSeries = blocks.map(block=>Number(block.idd?.[team]) || 0);
+    const avg_IDD = iddSeries.reduce((sum, v)=>sum+v, 0) / Math.max(1, iddSeries.length);
+    const variance = iddSeries.reduce((sum, v)=>sum + (v-avg_IDD)*(v-avg_IDD), 0) / Math.max(1, iddSeries.length);
+    const volatility = Math.sqrt(variance);
+    const lateBlocks = blocks.filter(block=>block.block>=7);
+    const late_strength = lateBlocks.reduce((sum, block)=>sum + (Number(block.idd?.[team]) || 0), 0) / Math.max(1, lateBlocks.length);
+    const totals = blocks.reduce((acc, block)=>{
+      const st = block.teams?.[team] || createBlockStats();
+      acc.goals += Number(st.goals) || 0;
+      acc.big_chances += Number(st.big_chances) || 0;
+      acc.shots += Number(st.shots) || 0;
+      return acc;
+    }, { goals: 0, big_chances: 0, shots: 0 });
+    const conversion_efficiency = clamp(totals.goals / Math.max(0.25, totals.big_chances + totals.shots*0.5), 0, 2);
+    const teamGoals = events.filter(evt=>evt.type==="goal" && evt.team===team);
+    const shockGoalsCount = teamGoals.filter(evt=>{
+      const block = blocks[blockFromMinute(evt.min)];
+      return Number(block?.idd?.[team]) < 0;
+    }).length;
+    const shock_goals = teamGoals.length ? shockGoalsCount / teamGoals.length : 0;
+    const lowBlockSamples = blocks.filter(block=>Number(block.idd?.[team]) < -0.2);
+    const lowBlockRes = lowBlockSamples.length
+      ? lowBlockSamples.filter(block=>Number(block.teams?.[team]?.goals_conceded || 0)===0).length / lowBlockSamples.length
+      : 0.5;
+
+    return {
+      team,
+      momentumSignature: {
+        avg_IDD,
+        volatility,
+        late_strength,
+        conversion_efficiency,
+        shock_goals,
+        low_block_resistance: lowBlockRes
+      }
+    };
+  }
+
+  function signatureToPowers(signature){
+    const s = signature || {};
+    const attack_power =
+      0.4*(Number(s.avg_IDD) || 0) +
+      0.3*(Number(s.conversion_efficiency) || 0) +
+      0.3*(Number(s.late_strength) || 0);
+    const defense_power =
+      0.5*(1 - clamp(Number(s.volatility) || 0, 0, 1)) +
+      0.5*(Number(s.low_block_resistance) || 0.5);
+    return { attack_power: clamp(attack_power, 0, 1.5), defense_power: clamp(defense_power, 0, 1.2) };
+  }
+
+  function updateTeamProfile(teamProfile, diagnostic){
+    const current = teamProfile?.momentumSignature || null;
+    const next = diagnostic?.momentumSignature || {};
+    const alpha = current ? 0.25 : 1;
+    const blend = (key, fallback=0)=>{
+      const currV = Number(current?.[key]);
+      const nextV = Number(next?.[key]);
+      if(!Number.isFinite(nextV)) return Number.isFinite(currV) ? currV : fallback;
+      if(!Number.isFinite(currV)) return nextV;
+      return currV*(1-alpha) + nextV*alpha;
+    };
+    const momentumSignature = {
+      avg_IDD: blend("avg_IDD", 0),
+      volatility: blend("volatility", 0.5),
+      late_strength: blend("late_strength", 0),
+      conversion_efficiency: blend("conversion_efficiency", 0.5),
+      shock_goals: blend("shock_goals", 0.3),
+      low_block_resistance: blend("low_block_resistance", 0.5)
+    };
+    return {
+      team: diagnostic?.team || teamProfile?.team || "",
+      version: "momentumSignature_v1",
+      samples: (Number(teamProfile?.samples) || 0) + 1,
+      updatedAt: new Date().toISOString(),
+      momentumSignature,
+      simulation: signatureToPowers(momentumSignature)
+    };
+  }
+
+  function createEarlyTeamStats(){
+    return {
+      shots: 0,
+      shotsOnTarget: 0,
+      bigChances: 0,
+      goals: 0,
+      corners: 0,
+      dangerCross: 0,
+      dangerActions: 0,
+      finalThird: 0,
+      interceptions: 0,
+      savesForced: 0,
+      controlMentions: 0,
+      lossMentions: 0,
+      fouls: 0,
+      cards: 0,
+      redCards: 0,
+      penalties: 0,
+      posts: 0,
+      injuries: 0,
+      possessionHints: 0
+    };
+  }
+
+  function detectEarlyType(line=""){
+    if(/\bgol\b|anota|marca\s+el\s+\d+-\d+|empata|pone el|adelanta/i.test(line)) return "goal";
+    if(/tarjeta roja|\broja\b|expulsad/i.test(line)) return "redCard";
+    if(/penal(?:ti)?|pena m[aá]xima/i.test(line)) return "penalty";
+    if(/al poste|al larguero|al travesa[nñ]o|estrella(?:\s+el)?\s+bal[oó]n\s+en\s+el\s+poste/i.test(line)) return "post";
+    if(/ocasi[oó]n clar[ií]sima|casi marca|mano a mano|\bsolo\b|punto de penalti|gran oportunidad/i.test(line)) return "bigChance";
+    if(/disparo a puerta|remate a puerta|atajada obligada|forz[ao]\s+al\s+portero|tiro al arco/i.test(line)) return "shotOnTarget";
+    if(/dispara|remata|cabezazo|\btiro\b|disparo|chut/i.test(line)) return "shot";
+    if(/c[oó]rner/i.test(line)) return "corner";
+    if(/centro peligroso|cuelga al [aá]rea/i.test(line)) return "dangerCross";
+    if(/dentro del [aá]rea|borde del [aá]rea|[aá]rea peque[nñ]a/i.test(line)) return "finalThird";
+    if(/interceptado|despejado|rechaza/i.test(line)) return "interception";
+    if(/parada|interviene|ataj|en los guantes/i.test(line)) return "save";
+    if(/domina la posesi[oó]n|intercambian pases|combina/i.test(line)) return "control";
+    if(/posesi[oó]n\s+\d{1,3}%|tiene\s+la\s+pelota|controla\s+el\s+bal[oó]n/i.test(line)) return "possessionHint";
+    if(/pierde la posesi[oó]n|error|bal[oó]n sale/i.test(line)) return "loss";
+    if(/presi[oó]n|asedia|encierra|acoso|insiste/i.test(line)) return "dangerAction";
+    if(/falta|entrada|infracci[oó]n/i.test(line)) return "foul";
+    if(/tarjeta amarilla|\bamarilla\b/i.test(line)) return "card";
+    if(/lesi[oó]n|se duele|molestias|abandona lesionado/i.test(line)) return "injury";
+    return null;
+  }
+
+  function resolveEarlyWindow(windowKey="0-10"){
+    const token = String(windowKey || "0-10").trim();
+    const pair = token.match(/(\d{1,3})\s*-\s*(\d{1,3})/);
+    if(pair){
+      const start = Number(pair[1]);
+      const end = Number(pair[2]);
+      if(Number.isFinite(start) && Number.isFinite(end) && end > start){
+        return { start, end, label: `${start}-${end}` };
+      }
     }
+    const end = Number(token);
+    if(Number.isFinite(end) && end > 0) return { start: 0, end, label: `0-${end}` };
+    return { start: 0, end: 10, label: "0-10" };
+  }
 
-    function ymdFromAny(v){
-      if(!v) return null;
-      // Already YYYY-MM-DD
-      if(/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return String(v);
-      // "19 Feb" etc not reliable
-      const d = new Date(v);
-      if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+  function parseEarlyNarrative(text, { teamA="", teamB="", windowKey="0-10" }={}){
+    const windowRange = resolveEarlyWindow(windowKey);
+    const lines = String(text || "").split(/\n+/).map(line=>line.trim()).filter(Boolean);
+    const teams = [teamA, teamB].filter(Boolean);
+    const statsByTeam = new Map();
+    const pushTeam = (name)=>{
+      if(!name || statsByTeam.has(name)) return;
+      statsByTeam.set(name, createEarlyTeamStats());
+    };
+    teams.forEach(pushTeam);
+    const events = [];
+    let pendingMinute = null;
+
+    const findTeamInLine = (line="")=>{
+      const teamFromParens = line.match(/\(([^)]+)\)/);
+      if(teamFromParens?.[1]) return teamFromParens[1].trim();
+      const lineNorm = normalizeTeamToken(line);
+      const explicit = [...statsByTeam.keys()].find(name=>lineNorm.includes(normalizeTeamToken(name)));
+      return explicit || null;
+    };
+
+    lines.forEach(line=>{
+      const minuteFound = line.match(/(\d{1,3}\s*\+\s*\d{1,2}|\d{1,3})\s*'/);
+      if(minuteFound) pendingMinute = parseMinuteToken(minuteFound[1]);
+      const minute = Number.isFinite(Number(pendingMinute)) ? Number(pendingMinute) : null;
+      if(minute===null || minute <= windowRange.start || minute > windowRange.end) return;
+      if(/^\d{1,3}\s*\+\s*\d{1,2}\s*'$/.test(line) || /^\d{1,3}\s*'$/.test(line)) return;
+
+      const type = detectEarlyType(line);
+      if(!type) return;
+      const detectedTeam = findTeamInLine(line) || teamA || "Equipo A";
+      pushTeam(detectedTeam);
+      events.push({ minute, team: detectedTeam, type, text: line });
+    });
+
+    if(statsByTeam.size < 2) pushTeam(teamB || "Rival");
+    const teamList = [...statsByTeam.keys()].slice(0, 2);
+    teamList.forEach(name=>{ if(!statsByTeam.has(name)) statsByTeam.set(name, createEarlyTeamStats()); });
+
+    events.forEach(evt=>{
+      const teamStats = statsByTeam.get(evt.team);
+      if(!teamStats) return;
+      if(evt.type === "goal") teamStats.goals += 1;
+      if(evt.type === "shot") teamStats.shots += 1;
+      if(evt.type === "shotOnTarget") teamStats.shotsOnTarget += 1;
+      if(evt.type === "bigChance") teamStats.bigChances += 1;
+      if(evt.type === "corner") teamStats.corners += 1;
+      if(evt.type === "dangerCross") teamStats.dangerCross += 1;
+      if(evt.type === "dangerAction") teamStats.dangerActions += 1;
+      if(evt.type === "finalThird") teamStats.finalThird += 1;
+      if(evt.type === "interception") teamStats.interceptions += 1;
+      if(evt.type === "save") teamStats.savesForced += 1;
+      if(evt.type === "control") teamStats.controlMentions += 1;
+      if(evt.type === "possessionHint") teamStats.possessionHints += 1;
+      if(evt.type === "loss") teamStats.lossMentions += 1;
+      if(evt.type === "foul") teamStats.fouls += 1;
+      if(evt.type === "card") teamStats.cards += 1;
+      if(evt.type === "redCard") teamStats.redCards += 1;
+      if(evt.type === "penalty") teamStats.penalties += 1;
+      if(evt.type === "post") teamStats.posts += 1;
+      if(evt.type === "injury") teamStats.injuries += 1;
+      if(evt.type === "dangerCross" && /remata|disparo|tiro|cabezazo/i.test(evt.text)) teamStats.shots += 0.5;
+    });
+
+    return { teams: teamList, events, statsByTeam, windowRange };
+  }
+
+  function buildEarlyStatsFromEvents(eventsInput=[], { teamA="", teamB="", windowRange }={}){
+    const events = Array.isArray(eventsInput) ? eventsInput : [];
+    const teams = [teamA, teamB].filter(Boolean);
+    const statsByTeam = new Map();
+    const pushTeam = (name)=>{
+      if(!name || statsByTeam.has(name)) return;
+      statsByTeam.set(name, createEarlyTeamStats());
+    };
+    teams.forEach(pushTeam);
+
+    events.forEach(evt=>{
+      if(!evt?.team) return;
+      pushTeam(evt.team);
+      const teamStats = statsByTeam.get(evt.team);
+      if(!teamStats) return;
+      if(evt.type === "goal") teamStats.goals += 1;
+      if(evt.type === "shot") teamStats.shots += 1;
+      if(evt.type === "shotOnTarget") teamStats.shotsOnTarget += 1;
+      if(evt.type === "bigChance") teamStats.bigChances += 1;
+      if(evt.type === "corner") teamStats.corners += 1;
+      if(evt.type === "dangerCross") teamStats.dangerCross += 1;
+      if(evt.type === "dangerAction") teamStats.dangerActions += 1;
+      if(evt.type === "finalThird") teamStats.finalThird += 1;
+      if(evt.type === "interception") teamStats.interceptions += 1;
+      if(evt.type === "save") teamStats.savesForced += 1;
+      if(evt.type === "control") teamStats.controlMentions += 1;
+      if(evt.type === "possessionHint") teamStats.possessionHints += 1;
+      if(evt.type === "loss") teamStats.lossMentions += 1;
+      if(evt.type === "foul") teamStats.fouls += 1;
+      if(evt.type === "card") teamStats.cards += 1;
+      if(evt.type === "redCard") teamStats.redCards += 1;
+      if(evt.type === "penalty") teamStats.penalties += 1;
+      if(evt.type === "post") teamStats.posts += 1;
+      if(evt.type === "injury") teamStats.injuries += 1;
+      if(evt.type === "dangerCross" && /remata|disparo|tiro|cabezazo/i.test(String(evt.text || ""))) teamStats.shots += 0.5;
+    });
+
+    if(statsByTeam.size < 2) pushTeam(teamB || "Rival");
+    const teamList = [...statsByTeam.keys()].slice(0, 2);
+    teamList.forEach(name=>{ if(!statsByTeam.has(name)) statsByTeam.set(name, createEarlyTeamStats()); });
+    const filteredEvents = events.filter(evt=>teamList.includes(evt.team));
+    return { teams: teamList, statsByTeam, events: filteredEvents, windowRange };
+  }
+
+  function scoreFromNarrative(events=[], firstTeam="", secondTeam=""){
+    const score = { [firstTeam]: 0, [secondTeam]: 0 };
+    (Array.isArray(events) ? events : []).forEach(evt=>{
+      if(evt?.type === "goal" && (evt.team === firstTeam || evt.team === secondTeam)) score[evt.team] += 1;
+    });
+    return score;
+  }
+
+  function buildEpaLiveSnapshots(events=[], firstTeam="", secondTeam="", windowRange={ start: 0, end: 10 }){
+    const safeEvents = (Array.isArray(events) ? events : []).slice().sort((a,b)=> (Number(a?.minute)||0) - (Number(b?.minute)||0));
+    const start = Number(windowRange?.start) || 0;
+    const end = Math.max(start + 10, Number(windowRange?.end) || 10);
+    const slices = [];
+    for(let t=start+10; t<=end+0.0001; t+=10){
+      const segmentEvents = safeEvents.filter(evt=> (Number(evt?.minute)||0) > t-10 && (Number(evt?.minute)||0) <= t);
+      const cumulativeEvents = safeEvents.filter(evt=> (Number(evt?.minute)||0) <= t);
+      const cumulativeStats = buildEarlyStatsFromEvents(cumulativeEvents, { teamA: firstTeam, teamB: secondTeam, windowRange: { start, end: t } }).statsByTeam;
+      const segmentStats = buildEarlyStatsFromEvents(segmentEvents, { teamA: firstTeam, teamB: secondTeam, windowRange: { start: t-10, end: t } }).statsByTeam;
+      const score = scoreFromNarrative(cumulativeEvents, firstTeam, secondTeam);
+      slices.push({
+        minute: t,
+        scoreHome: Number(score[firstTeam] || 0),
+        scoreAway: Number(score[secondTeam] || 0),
+        statsCumulative: {
+          [firstTeam]: cumulativeStats.get(firstTeam) || createEarlyTeamStats(),
+          [secondTeam]: cumulativeStats.get(secondTeam) || createEarlyTeamStats()
+        },
+        statsSegment: {
+          [firstTeam]: segmentStats.get(firstTeam) || createEarlyTeamStats(),
+          [secondTeam]: segmentStats.get(secondTeam) || createEarlyTeamStats()
+        },
+        relatoSegment: segmentEvents.map(evt=>String(evt?.text || "")).filter(Boolean)
+      });
+    }
+    return slices;
+  }
+
+  function computeLiveOutcomeProbabilities(liveState={}, teamHome="", teamAway=""){
+    const minute = clamp(Number(liveState?.minute) || 0, 1, 95);
+    const scoreHome = Number(liveState?.scoreHome || 0);
+    const scoreAway = Number(liveState?.scoreAway || 0);
+    const goalDiff = scoreHome - scoreAway;
+    const segment = liveState?.statsSegment || {};
+    const homeRecent = segment?.[teamHome] || createEarlyTeamStats();
+    const awayRecent = segment?.[teamAway] || createEarlyTeamStats();
+    const cards = liveState?.statsCumulative || {};
+    const homeCum = cards?.[teamHome] || createEarlyTeamStats();
+    const awayCum = cards?.[teamAway] || createEarlyTeamStats();
+
+    const normDiff = (h, a, scale=2)=>clamp((Number(h||0)-Number(a||0))/scale, -1, 1);
+    const gamePhase = clamp(minute / 90, 0, 1);
+    const A_score = clamp(goalDiff * (0.7 + 1.5*gamePhase), -3.5, 3.5);
+    const A_redCards = clamp((Number(awayCum.redCards||0) - Number(homeCum.redCards||0)) * 1.35, -2.7, 2.7);
+    const A_recent =
+      0.90*normDiff(homeRecent.shotsOnTarget + 0.7*homeRecent.bigChances, awayRecent.shotsOnTarget + 0.7*awayRecent.bigChances, 2.2) +
+      0.45*normDiff(homeRecent.corners, awayRecent.corners, 3) +
+      0.35*normDiff(homeRecent.dangerActions + homeRecent.dangerCross, awayRecent.dangerActions + awayRecent.dangerCross, 4);
+    const A_bigEvents =
+      0.65*normDiff(homeRecent.posts + homeRecent.penalties, awayRecent.posts + awayRecent.penalties, 1.5) -
+      0.20*normDiff(homeRecent.injuries, awayRecent.injuries, 2);
+
+    const A = A_score + A_redCards + A_recent + A_bigEvents;
+    const sigmoid = (x)=>1/(1+Math.exp(-x));
+    const homeRaw = sigmoid(1.2*A);
+    const awayRaw = sigmoid(-1.2*A);
+    const drawBase = clamp(0.58 - 0.30*gamePhase - 0.20*Math.abs(goalDiff), 0.08, 0.65);
+    const drawRaw = drawBase * Math.exp(-1.35*Math.abs(A));
+    const sum = homeRaw + awayRaw + drawRaw || 1;
+    const pHome = homeRaw / sum;
+    const pDraw = drawRaw / sum;
+    const pAway = awayRaw / sum;
+
+    const reasons = [];
+    if(Math.abs(A_score) > 0.8) reasons.push(`Marcador/minuto pesa fuerte (${scoreHome}-${scoreAway}, ${minute}').`);
+    if(Math.abs(A_recent) > 0.25) reasons.push(A_recent > 0
+      ? `${teamHome} empuja el tramo reciente (tiros a puerta/córners/presión).`
+      : `${teamAway} está ganando momentum en el tramo reciente.`);
+    if(Math.abs(A_redCards) > 0.2) reasons.push("Impacto disciplinario relevante por expulsión(es).");
+    if(Math.abs(A_bigEvents) > 0.2) reasons.push("Eventos grandes detectados (poste/penal/lesión) movieron la balanza.");
+    if(!reasons.length) reasons.push("Partido equilibrado: pocas señales diferenciales en este tramo.");
+
+    const leader = pHome >= pAway ? teamHome : teamAway;
+    return {
+      advantage: A,
+      pHome,
+      pDraw,
+      pAway,
+      label: `Ahora mismo: ${teamHome} ${(pHome*100).toFixed(0)}% | Empate ${(pDraw*100).toFixed(0)}% | ${teamAway} ${(pAway*100).toFixed(0)}%`,
+      explanation: `${leader} ${leader===teamHome ? "sube" : "presiona"}: ${reasons[0]}`,
+      reasons
+    };
+  }
+
+  function computeEarlyPhaseAnalyzer(text, { teamA="", teamB="", windowKey="0-10", seedProfiles={}, eventsOverride=null }={}){
+    const parsed = Array.isArray(eventsOverride)
+      ? buildEarlyStatsFromEvents(eventsOverride, { teamA, teamB, windowRange: resolveEarlyWindow(windowKey) })
+      : parseEarlyNarrative(text, { teamA, teamB, windowKey });
+    const { teams, statsByTeam, events, windowRange } = parsed;
+    const [firstTeam, secondTeam] = teams;
+    const a = statsByTeam.get(firstTeam) || createEarlyTeamStats();
+    const b = statsByTeam.get(secondTeam) || createEarlyTeamStats();
+
+    const total = (k)=>Number(a[k] || 0) + Number(b[k] || 0);
+    const normLimit = (windowRange.end - windowRange.start) <= 10 ? 4 : 6;
+    const norm = (value, max=normLimit)=>clamp((Number(value) || 0) / max, 0, 1);
+
+    const rawIntensity =
+      0.8*total("shots") +
+      1.2*total("shotsOnTarget") +
+      1.4*total("bigChances") +
+      0.6*total("corners") +
+      0.7*total("savesForced") +
+      0.3*total("fouls");
+    const intensity = clamp(rawIntensity / 6, 0, 1);
+
+    const rawIDD = (s)=>
+      0.60*s.bigChances +
+      0.45*s.shots +
+      0.50*s.shotsOnTarget +
+      0.25*s.corners +
+      0.20*s.controlMentions +
+      0.15*s.dangerCross -
+      0.20*s.lossMentions -
+      0.10*s.fouls;
+
+    const iddDiff = rawIDD(a) - rawIDD(b);
+    const iddA = clamp(iddDiff / 4, -1, 1);
+    const iddB = -iddA;
+
+    const threatOf = (s)=>clamp((1.7*s.bigChances + 1.2*s.shotsOnTarget + 0.8*s.shots + 0.4*s.finalThird + 0.3*s.savesForced + 0.3*s.posts) / 7, 0, 1);
+    const threatA = threatOf(a);
+    const threatB = threatOf(b);
+
+    let initiative = "equilibrado";
+    if(iddA > 0.12) initiative = firstTeam;
+    else if(iddB > 0.12) initiative = secondTeam;
+
+    const controlType = (()=>{
+      const cornersTotal = total("corners");
+      const shotsTotal = total("shots") + total("bigChances");
+      const controlTotal = total("controlMentions");
+      const foulsTotal = total("fouls");
+      const lossTotal = total("lossMentions");
+      const cornerLimit = (windowRange.end - windowRange.start) >= 20 ? 3 : 2;
+      const maxThreat = Math.max(threatA, threatB);
+      if(cornersTotal >= cornerLimit) return "setpiece_pressure";
+      if(foulsTotal >= 4 && lossTotal >= 3 && shotsTotal <= 2) return "scrappy";
+      if(controlTotal >= 3 && maxThreat < 0.45) return "territorial_probe";
+      if(shotsTotal >= 4 && controlTotal <= 2) return "direct_punch";
+      return "balanced";
+    })();
+
+    const shockRiskFor = (selfIdd, self, opp)=>clamp(
+      0.35*Math.max(0, selfIdd) +
+      0.25*norm(self.lossMentions, 4) +
+      0.25*norm(opp.shots + opp.shotsOnTarget + opp.bigChances, 6) -
+      0.15*norm(opp.interceptions, 5),
+      0,
+      1
+    );
+    const shockA = shockRiskFor(iddA, a, b);
+    const shockB = shockRiskFor(iddB, b, a);
+
+    const disciplineA = clamp((a.fouls + 2*a.cards) / 6, 0, 1);
+    const disciplineB = clamp((b.fouls + 2*b.cards) / 6, 0, 1);
+    const intensityBand = intensity < 0.35 ? "low_intensity" : (intensity < 0.7 ? "medium_intensity" : "high_intensity");
+    const tags = [
+      initiative===firstTeam ? "early_initiative_home" : "",
+      initiative===secondTeam ? "early_initiative_away" : "",
+      intensityBand,
+      controlType === "setpiece_pressure" ? `setpiece_pressure_${threatA>=threatB?"home":"away"}` : "",
+      controlType === "scrappy" ? "scrappy_opening" : "",
+      shockA > 0.55 ? "shock_risk_home_high" : "",
+      shockB > 0.55 ? "shock_risk_away_high" : ""
+    ].filter(Boolean);
+
+    const tempoWord = intensity < 0.35 ? "bajo" : (intensity < 0.7 ? "medio" : "alto");
+    const dominantTeam = initiative===firstTeam ? firstTeam : (initiative===secondTeam ? secondTeam : null);
+    const leaderShock = dominantTeam===firstTeam ? shockA : (dominantTeam===secondTeam ? shockB : Math.max(shockA, shockB));
+
+    const textLines = [
+      dominantTeam
+        ? `Inicio con iniciativa de ${dominantTeam} y ritmo ${tempoWord}.`
+        : `Inicio equilibrado con ritmo ${tempoWord}.`,
+      Math.max(threatA, threatB) > 0.6
+        ? "Amenaza real: llegadas claras y acciones dentro del área."
+        : Math.max(threatA, threatB) >= 0.35
+          ? "Amenaza moderada: aproximaciones sin ocasión clarísima."
+          : "Poco peligro: más control que profundidad.",
+      leaderShock > 0.55
+        ? "Riesgo de shock: el rival puede castigar en transición."
+        : "Bajo riesgo de transición inmediata."
+    ];
+
+    const computePsychFromProfile = (teamName)=>{
+      const p = seedProfiles?.[teamName]?.earlyPsychProfile || {};
+      return {
+        confidence: clamp(Number(p.avgConfidence ?? 0.50), 0, 1),
+        composure: clamp(Number(p.avgComposure ?? 0.55), 0, 1),
+        frustration: clamp(Math.max(0.10, Number(p.sterileTendency ?? 0.10) * 0.45), 0, 1),
+        belief: clamp(Number(p.avgConfidence ?? 0.50), 0, 1),
+        tiltRisk: clamp(Math.max(0.20, Number(p.tiltSensitivity ?? 0.20) * 0.5), 0, 1)
+      };
+    };
+
+    const psychFor = (teamName, self, opp, iddValue, threatValue, oppShockRisk)=>{
+      const base = computePsychFromProfile(teamName);
+      const dom = clamp((iddValue + 1) / 2, 0, 1);
+      const sterilePressure = clamp(0.5*norm(self.controlMentions) + 0.5*norm(self.shots + self.corners) - 0.8*threatValue, 0, 1);
+      const friction = clamp((self.fouls + 2*self.cards) / 6, 0, 1);
+      const scares = clamp(norm(opp.bigChances + opp.shots + opp.savesForced), 0, 1);
+      const shockSignalOpp = clamp(oppShockRisk, 0, 1);
+
+      const confidence = clamp(
+        base.confidence*0.35 +
+        0.50 + 0.35*dom + 0.30*threatValue - 0.25*scares - 0.15*friction,
+        0,
+        1
+      );
+      const composure = clamp(
+        base.composure*0.35 +
+        0.55 - 0.35*friction - 0.20*intensity - 0.20*scares + 0.15*(1 - sterilePressure),
+        0,
+        1
+      );
+      const frustration = clamp(
+        base.frustration*0.35 +
+        0.10 + 0.55*sterilePressure + 0.25*norm(opp.savesForced) + 0.15*(dom > 0.6 ? 1 : 0),
+        0,
+        1
+      );
+      const belief = clamp(
+        base.belief*0.35 +
+        0.50 + 0.30*dom + 0.15*(1 - scares) - 0.25*shockSignalOpp,
+        0,
+        1
+      );
+      const tiltRisk = clamp(
+        base.tiltRisk*0.35 +
+        0.20 + 0.45*frustration + 0.35*(1 - composure) + 0.20*scares,
+        0,
+        1
+      );
+      return { confidence, composure, frustration, belief, tiltRisk, dom, sterilePressure };
+    };
+
+    const psychA = psychFor(firstTeam, a, b, iddA, threatA, shockB);
+    const psychB = psychFor(secondTeam, b, a, iddB, threatB, shockA);
+
+    const tagsPsychFor = (selfPsych, threatValue, oppShockRisk)=>{
+      const tags = [];
+      if(selfPsych.confidence > 0.65) tags.push("confident_start");
+      if(selfPsych.composure < 0.40) tags.push("nervous_start");
+      if(selfPsych.frustration > 0.60 && threatValue < 0.45) tags.push("sterile_frustration");
+      if(selfPsych.tiltRisk > 0.60) tags.push("tilt_warning");
+      if(oppShockRisk > 0.55 && selfPsych.dom > 0.55) tags.push("shock_fear");
+      if(selfPsych.dom > 0.55 && selfPsych.composure > 0.60) tags.push("calm_control");
+      return tags;
+    };
+
+    const psychTags = {
+      [firstTeam]: tagsPsychFor(psychA, threatA, shockB),
+      [secondTeam]: tagsPsychFor(psychB, threatB, shockA)
+    };
+
+    const psychTextFor = (teamName, pTags, selfPsych, threatValue, oppShockRisk)=>{
+      const lines = [];
+      if(pTags.includes("nervous_start")) lines.push("Inicio ansioso: falta temple y orden.");
+      else if(pTags.includes("calm_control")) lines.push("Confianza subiendo, composure estable.");
+      else if(pTags.includes("confident_start")) lines.push("Arranque con confianza y control emocional.");
+      else lines.push("Inicio contenido, buscando estabilidad emocional.");
+
+      if(pTags.includes("sterile_frustration")) lines.push("Dominio con frustración creciendo: presión sin premio claro.");
+      else if(selfPsych.frustration > 0.60) lines.push("Frustración alta: cuidado con decisiones apresuradas.");
+      else lines.push(threatValue >= 0.45 ? "Amenaza moderada/alta sin romper del todo el partido." : "Poco peligro directo: ritmo más de control que de daño.");
+
+      if(pTags.includes("shock_fear")) lines.push("Rival huele shock: transición peligrosa si hay pérdida.");
+      else if(pTags.includes("tilt_warning")) lines.push("Alerta de tilt: un golpe rival puede desordenar al equipo.");
+      else lines.push(oppShockRisk > 0.55 ? "Riesgo de shock presente: vigilar transiciones defensivas." : "Riesgo de shock bajo en este tramo.");
+      return lines.slice(0, 3);
+    };
+
+    const psychText = {
+      [firstTeam]: psychTextFor(firstTeam, psychTags[firstTeam], psychA, threatA, shockB),
+      [secondTeam]: psychTextFor(secondTeam, psychTags[secondTeam], psychB, threatB, shockA)
+    };
+
+    const eventWeight = { goal: 2.2, shot: 0.9, shotOnTarget: 1.2, bigChance: 1.5, corner: 0.6, save: 0.7, control: 0.4, finalThird: 0.5, foul: 0.25, card: 0.35, redCard: 1.7, penalty: 1.5, post: 1.2, dangerAction: 0.55, dangerCross: 0.4 };
+    const bucketCount = 5;
+    const bucketSpan = (windowRange.end - windowRange.start) / bucketCount;
+    const chartBuckets = Array.from({ length: bucketCount }, (_, idx)=>({
+      start: windowRange.start + idx*bucketSpan,
+      end: windowRange.start + (idx+1)*bucketSpan,
+      total: 0,
+      [firstTeam]: 0,
+      [secondTeam]: 0
+    }));
+    events.forEach(evt=>{
+      const idx = clamp(Math.floor((evt.minute - windowRange.start - 0.0001) / Math.max(1, bucketSpan)), 0, bucketCount-1);
+      const bucket = chartBuckets[idx];
+      const w = Number(eventWeight[evt.type] || 0.25);
+      bucket.total += w;
+      if(evt.team === firstTeam) bucket[firstTeam] += w;
+      if(evt.team === secondTeam) bucket[secondTeam] += w;
+    });
+    const makeEMA = (series=[], alpha=0.4)=>{
+      let prev = 0;
+      return series.map((v, idx)=>{
+        prev = idx===0 ? v : prev*(1-alpha) + v*alpha;
+        return prev;
+      });
+    };
+    const movementA = chartBuckets.map(b=>b[firstTeam]);
+    const movementB = chartBuckets.map(b=>b[secondTeam]);
+    const emaA = makeEMA(movementA, 0.45);
+    const emaB = makeEMA(movementB, 0.45);
+
+    const snapshots = buildEpaLiveSnapshots(events, firstTeam, secondTeam, windowRange);
+    const latestSnapshot = snapshots[snapshots.length-1] || {
+      minute: windowRange.end,
+      scoreHome: 0,
+      scoreAway: 0,
+      statsCumulative: {
+        [firstTeam]: a,
+        [secondTeam]: b
+      },
+      statsSegment: {
+        [firstTeam]: a,
+        [secondTeam]: b
+      },
+      relatoSegment: []
+    };
+    const liveProbabilities = computeLiveOutcomeProbabilities(latestSnapshot, firstTeam, secondTeam);
+
+    const features = {
+      idd: {
+        [firstTeam]: iddA,
+        [secondTeam]: iddB
+      },
+      intensity,
+      initiative,
+      threat: {
+        [firstTeam]: threatA,
+        [secondTeam]: threatB
+      },
+      controlType,
+      shockRisk: {
+        [firstTeam]: shockA,
+        [secondTeam]: shockB
+      },
+      disciplineRisk: {
+        [firstTeam]: disciplineA,
+        [secondTeam]: disciplineB
+      },
+      psychSignals: {
+        [firstTeam]: { dom: psychA.dom, sterilePressure: psychA.sterilePressure },
+        [secondTeam]: { dom: psychB.dom, sterilePressure: psychB.sterilePressure }
+      }
+    };
+
+    return {
+      window: windowRange.label,
+      teams: [firstTeam, secondTeam],
+      liveState: latestSnapshot,
+      snapshots,
+      liveProbabilities,
+      features,
+      tags,
+      text: textLines,
+      psych: {
+        [firstTeam]: {
+          confidence: psychA.confidence,
+          composure: psychA.composure,
+          frustration: psychA.frustration,
+          belief: psychA.belief,
+          tiltRisk: psychA.tiltRisk
+        },
+        [secondTeam]: {
+          confidence: psychB.confidence,
+          composure: psychB.composure,
+          frustration: psychB.frustration,
+          belief: psychB.belief,
+          tiltRisk: psychB.tiltRisk
+        }
+      },
+      psychTags,
+      psychText,
+      psychChart: {
+        buckets: chartBuckets.map((b, idx)=>({
+          idx,
+          label: `${Math.round(b.start)}-${Math.round(b.end)}`,
+          intensity: clamp(b.total / 3, 0, 1),
+          [firstTeam]: b[firstTeam],
+          [secondTeam]: b[secondTeam],
+          ema: {
+            [firstTeam]: emaA[idx],
+            [secondTeam]: emaB[idx]
+          }
+        }))
+      },
+      signatureUpdate: {
+        [firstTeam]: {
+          early_idd: iddA,
+          early_intensity: intensity,
+          early_threat: threatA,
+          early_shockRisk: shockA,
+          openingType: controlType,
+          early_psych: { confidence: psychA.confidence, composure: psychA.composure, frustration: psychA.frustration, tiltRisk: psychA.tiltRisk }
+        },
+        [secondTeam]: {
+          early_idd: iddB,
+          early_intensity: intensity,
+          early_threat: threatB,
+          early_shockRisk: shockB,
+          openingType: controlType,
+          early_psych: { confidence: psychB.confidence, composure: psychB.composure, frustration: psychB.frustration, tiltRisk: psychB.tiltRisk }
+        }
+      }
+    };
+  }
+
+  function updateTeamEarlyProfile(teamProfile, teamName, update={}){
+    const profile = structuredClone(teamProfile || {});
+    const current = profile.earlyProfile || {
+      n: 0,
+      avgEarlyIDD: 0,
+      avgEarlyIntensity: 0,
+      avgEarlyThreat: 0,
+      avgEarlyShockRisk: 0,
+      openingTypes: {
+        territorial_probe: 0,
+        direct_punch: 0,
+        setpiece_pressure: 0,
+        scrappy: 0,
+        balanced: 0
+      }
+    };
+    const n = Number(current.n) || 0;
+    const nextN = n + 1;
+    const avg = (oldValue, newValue)=>((Number(oldValue) || 0)*n + (Number(newValue) || 0)) / Math.max(1, nextN);
+    const openingTypes = { ...current.openingTypes };
+    const seenTypes = ["territorial_probe", "direct_punch", "setpiece_pressure", "scrappy", "balanced"];
+    seenTypes.forEach(type=>{
+      const prevCount = (Number(openingTypes[type]) || 0) * n;
+      const nextCount = prevCount + (update.openingType === type ? 1 : 0);
+      openingTypes[type] = nextCount / Math.max(1, nextN);
+    });
+
+    profile.team = teamName || profile.team || "";
+    profile.version = profile.version || "momentumSignature_v1";
+    profile.updatedAt = new Date().toISOString();
+    profile.earlyProfile = {
+      n: nextN,
+      avgEarlyIDD: avg(current.avgEarlyIDD, update.early_idd),
+      avgEarlyIntensity: avg(current.avgEarlyIntensity, update.early_intensity),
+      avgEarlyThreat: avg(current.avgEarlyThreat, update.early_threat),
+      avgEarlyShockRisk: avg(current.avgEarlyShockRisk, update.early_shockRisk),
+      openingTypes
+    };
+
+    const psychCurrent = profile.earlyPsychProfile || {
+      n: 0,
+      avgConfidence: 0.50,
+      avgComposure: 0.55,
+      avgFrustration: 0.10,
+      avgTiltRisk: 0.20,
+      tiltSensitivity: 0.20,
+      sterileTendency: 0.10
+    };
+    const psychN = Number(psychCurrent.n) || 0;
+    const psychNextN = psychN + 1;
+    const a = psychN > 20 ? 0.08 : 0.15;
+    const ema = (oldValue, newValue, fallback)=>{
+      const oldV = Number.isFinite(Number(oldValue)) ? Number(oldValue) : fallback;
+      const newV = Number.isFinite(Number(newValue)) ? Number(newValue) : oldV;
+      return oldV*(1-a) + newV*a;
+    };
+    const psychIn = update.early_psych || {};
+    profile.earlyPsychProfile = {
+      n: psychNextN,
+      avgConfidence: ema(psychCurrent.avgConfidence, psychIn.confidence, 0.50),
+      avgComposure: ema(psychCurrent.avgComposure, psychIn.composure, 0.55),
+      avgFrustration: ema(psychCurrent.avgFrustration, psychIn.frustration, 0.10),
+      avgTiltRisk: ema(psychCurrent.avgTiltRisk, psychIn.tiltRisk, 0.20),
+      tiltSensitivity: ema(psychCurrent.tiltSensitivity, psychIn.tiltRisk, 0.20),
+      sterileTendency: ema(psychCurrent.sterileTendency, psychIn.frustration, 0.10)
+    };
+    return profile;
+  }
+
+  function safeParseJson(raw){
+    if(raw && typeof raw === "object") return raw;
+    const text = String(raw || "").trim();
+    if(!text) return null;
+    try{
+      const parsed = JSON.parse(text);
+      if(typeof parsed === "string"){
+        try{
+          return JSON.parse(parsed);
+        }catch(_e2){
+          return null;
+        }
+      }
+      return parsed;
+    }catch(_e){
+      if((text.startsWith('"{') && text.endsWith('}"')) || (text.startsWith("'{") && text.endsWith("}'"))){
+        try{
+          return JSON.parse(text.slice(1, -1));
+        }catch(_e3){
+          return null;
+        }
+      }
       return null;
     }
+  }
 
-    function applyCaptureToForm(capture){
-      const match = capture?.match || {};
-      const stats = capture?.stats || {};
-      const passing = stats.passing || stats.passes || {};
-      const duels = stats.duels || {};
-      const dribbles = stats.dribbles || {};
-      const defense = stats.defense || {};
+  function normalizeIncomingLpePayload(payload={}){
+    if(payload?.kind !== "match_stats") return payload;
 
-      // basics
-      setVal("pl_minutes", num(stats.minutesPlayed ?? match.minutesPlayed ?? stats.minutes ?? match.minutes, 0));
-      setVal("pl_goals", num(stats.goals ?? 0, 0));
-      setVal("pl_assists", num(stats.assists ?? 0, 0));
+    const normalizeLabel = (value="")=>String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
 
-      const dateGuess = ymdFromAny(match.date) || ymdFromAny(match.startTime) || ymdFromAny(match.kickoff) || null;
-      if(dateGuess) setVal("pl_date", dateGuess);
+    const parseNum = (candidate)=>{
+      const direct = Number(candidate);
+      if(Number.isFinite(direct)) return direct;
+      const raw = String(candidate ?? "").replace(/%/g, "").replace(/,/g, ".").match(/-?\d+(?:\.\d+)?/);
+      return raw ? Number(raw[0]) : 0;
+    };
 
-      // passing
-      setVal("pl_passC", num(passing.accurate ?? stats.accuratePasses ?? 0, 0));
-      setVal("pl_passA", num(passing.total ?? stats.totalPasses ?? 0, 0));
-      setVal("pl_keyPasses", num(passing.keyPasses ?? stats.keyPasses ?? 0, 0));
-      setVal("pl_progPasses", num(passing.progressivePasses ?? stats.progressivePasses ?? 0, 0));
+    const categoryMap = {
+      "remates a puerta": "shotsOn",
+      "disparos a puerta": "shotsOn",
+      "tiros a puerta": "shotsOn",
+      "remates totales": "shots",
+      "disparos totales": "shots",
+      "tiros totales": "shots",
+      "grandes ocasiones": "bigChances",
+      "grandes posibilidades": "bigChances",
+      "big chances": "bigChances",
+      "corneres": "corners",
+      "tiros de esquina": "corners",
+      "posesion": "possession",
+      "posesion del balon": "possession",
+      "faltas": "fouls",
+      "tarjetas amarillas": "yellows",
+      "ataques peligrosos": "dangerAttacks",
+      "ataques de peligro": "dangerAttacks",
+      "peligrosos ataques": "dangerAttacks",
+      "toques en el area contraria": "dangerAttacks",
+      "xg": "xg",
+      "goles esperados xg": "xg"
+    };
 
-      setVal("pl_longBallC", num(passing.longBallsAccurate ?? stats.longBallsAccurate ?? 0, 0));
-      setVal("pl_longBallA", num(passing.longBallsTotal ?? stats.longBallsTotal ?? 0, 0));
+    const stats = { home: {}, away: {} };
+    const sections = Array.isArray(payload?.sections) ? payload.sections : [];
+    sections.forEach(section=>{
+      (section?.stats || []).forEach(stat=>{
+        const key = categoryMap[normalizeLabel(stat?.category || "")];
+        if(!key) return;
+        const homeNum = parseNum(stat?.home?.raw ?? stat?.home?.main ?? stat?.home?.numeric ?? stat?.home);
+        const awayNum = parseNum(stat?.away?.raw ?? stat?.away?.main ?? stat?.away?.numeric ?? stat?.away);
+        stats.home[key] = homeNum;
+        stats.away[key] = awayNum;
+      });
+    });
 
-      setVal("pl_oppHalfC", num(passing.oppHalfAccurate ?? stats.oppHalfAccurate ?? 0, 0));
-      setVal("pl_oppHalfA", num(passing.oppHalfTotal ?? stats.oppHalfTotal ?? 0, 0));
-      setVal("pl_ownHalfC", num(passing.ownHalfAccurate ?? stats.ownHalfAccurate ?? 0, 0));
-      setVal("pl_ownHalfA", num(passing.ownHalfTotal ?? stats.ownHalfTotal ?? 0, 0));
+    const matchup = String(payload?.team?.name || "");
+    const teamMatch = matchup.match(/^(.+?)\s+vs\s+(.+?)(?:\s*\(|$)/i);
+    const teams = teamMatch
+      ? { home: teamMatch[1].trim(), away: teamMatch[2].trim() }
+      : payload?.teams || { home: "Home", away: "Away" };
 
-      // duels / dribbles / defense
-      setVal("pl_duelsWon", num(duels.won ?? stats.duelsWon ?? 0, 0));
-      setVal("pl_duelsTot", num(duels.total ?? stats.duelsTotal ?? 0, 0));
-      setVal("pl_dribblesWon", num(dribbles.successful ?? stats.dribblesSuccessful ?? stats.dribblesWon ?? 0, 0));
-      setVal("pl_defActions", num(defense.actions ?? stats.defActions ?? stats.defensiveActions ?? 0, 0));
-      setVal("pl_posLost", num(stats.possessionLost ?? stats.posLost ?? 0, 0));
+    const pageUrl = String(payload?.pageUrl || "");
+    const midMatch = pageUrl.match(/[?&]mid=([^&]+)/i);
+    const fallbackId = `${teams.home || "home"}_vs_${teams.away || "away"}`.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 
-      // shooting/creative
-      setVal("pl_shotsOn", num(stats.shotsOnTarget ?? stats.shotsOn ?? 0, 0));
-      setVal("pl_xG", num(stats.xg ?? stats.xG ?? 0, 0));
-      setVal("pl_xA", num(stats.xa ?? stats.xA ?? 0, 0));
+    return {
+      matchId: payload?.matchId || (midMatch ? `mid_${midMatch[1]}` : fallbackId || `TMP-${Date.now()}`),
+      teams,
+      score: payload?.score || { home: 0, away: 0 },
+      stats,
+      window: payload?.window || payload?.minuteWindow || payload?.capturedAt || "live",
+      source: payload?.source || "match_stats"
+    };
+  }
 
-      // goalkeeper (if present in json)
-      setVal("pl_saves", num(stats.saves ?? 0, 0));
-      setVal("pl_conceded", num(stats.goalsConceded ?? stats.conceded ?? 0, 0));
-      setVal("pl_cleanSheet", num(stats.cleanSheet ?? 0, 0));
-      setVal("pl_punches", num(stats.punches ?? 0, 0));
-      setVal("pl_highClaims", num(stats.highClaims ?? 0, 0));
+  function lpeNormDanger(value){
+    return clamp((Number(value) || 0) / 22, 0, 1);
+  }
 
-      // feedback
-      if($info){
-        const title = match.title || match.name || "";
-        $info.textContent = "Cargado ✅" + (title ? " ("+title+")" : "");
+  function lpeNormPossession(value){
+    if(value===undefined || value===null || value==="") return 0.5;
+    return clamp((Number(value) || 0) / 100, 0, 1);
+  }
+
+  function lpeReadStat(stats, teamKey, stat){
+    return Number(stats?.[teamKey]?.[stat] || 0);
+  }
+
+  function lpeStateModifier(scoreDiff=0, minute=0){
+    const gameWeight = clamp((Number(minute) || 0) / 90, 0, 1);
+    return clamp(-(Number(scoreDiff) || 0) * 0.05 * (0.6 + gameWeight), -0.15, 0.15);
+  }
+
+  function computeLiveProjectionWindow(payload={}, context={}){
+    const stats = payload.stats || {};
+    const score = payload.score || {};
+    const homeShotsOn = lpeReadStat(stats, "home", "shotsOn");
+    const awayShotsOn = lpeReadStat(stats, "away", "shotsOn");
+    const homeShots = lpeReadStat(stats, "home", "shots");
+    const awayShots = lpeReadStat(stats, "away", "shots");
+    const homeBig = lpeReadStat(stats, "home", "bigChances");
+    const awayBig = lpeReadStat(stats, "away", "bigChances");
+    const homeCorners = lpeReadStat(stats, "home", "corners");
+    const awayCorners = lpeReadStat(stats, "away", "corners");
+    const homeDanger = lpeReadStat(stats, "home", "dangerAttacks");
+    const awayDanger = lpeReadStat(stats, "away", "dangerAttacks");
+    const homePoss = lpeNormPossession(stats?.home?.possession);
+    const awayPoss = lpeNormPossession(stats?.away?.possession);
+    const homeFouls = lpeReadStat(stats, "home", "fouls");
+    const awayFouls = lpeReadStat(stats, "away", "fouls");
+    const homeYellows = lpeReadStat(stats, "home", "yellows");
+    const awayYellows = lpeReadStat(stats, "away", "yellows");
+
+    const iddRaw = ({ shotsOn, shots, big, corners, danger, poss, fouls, yellows })=>
+      0.55*shotsOn +
+      0.40*shots +
+      0.35*big +
+      0.20*corners +
+      0.15*lpeNormDanger(danger) +
+      0.10*poss -
+      0.10*fouls -
+      0.25*yellows;
+
+    const homeIddRaw = iddRaw({ shotsOn: homeShotsOn, shots: homeShots, big: homeBig, corners: homeCorners, danger: homeDanger, poss: homePoss, fouls: homeFouls, yellows: homeYellows });
+    const awayIddRaw = iddRaw({ shotsOn: awayShotsOn, shots: awayShots, big: awayBig, corners: awayCorners, danger: awayDanger, poss: awayPoss, fouls: awayFouls, yellows: awayYellows });
+    const iddDiff = awayIddRaw - homeIddRaw;
+    const iddAway = clamp(iddDiff / 4, -1, 1);
+    const iddHome = -iddAway;
+
+    const shotsTotal = homeShots + awayShots + homeShotsOn + awayShotsOn;
+    const cornersTotal = homeCorners + awayCorners;
+    const bigTotal = homeBig + awayBig;
+    const foulsTotal = homeFouls + awayFouls;
+    const intensity = clamp((shotsTotal + cornersTotal + bigTotal + foulsTotal*0.3) / 10, 0, 1);
+    const threatHome = clamp((homeBig*1.6 + homeShotsOn*1.2 + homeShots*0.5 + homeCorners*0.25) / 6, 0, 1);
+    const threatAway = clamp((awayBig*1.6 + awayShotsOn*1.2 + awayShots*0.5 + awayCorners*0.25) / 6, 0, 1);
+    const dangerTotalNorm = lpeNormDanger(homeDanger + awayDanger);
+    const pace = clamp((shotsTotal + foulsTotal + cornersTotal + dangerTotalNorm) / 14, 0, 1);
+
+    const prevFast = Number(context?.fastEma?.idd?.away || 0);
+    const prevSlow = Number(context?.ema?.idd?.away || 0);
+    const prevFastThreat = Number(context?.fastEma?.threat?.edge || 0);
+    const prevSlowThreat = Number(context?.ema?.threat?.edge || 0);
+    const fastAlpha = 0.55;
+    const slowAlpha = 0.18;
+
+    const fastAway = prevFast*(1-fastAlpha) + iddAway*fastAlpha;
+    const slowAway = prevSlow*(1-slowAlpha) + iddAway*slowAlpha;
+    const threatEdge = threatAway - threatHome;
+    const fastThreat = prevFastThreat*(1-fastAlpha) + threatEdge*fastAlpha;
+    const slowThreat = prevSlowThreat*(1-slowAlpha) + threatEdge*slowAlpha;
+
+    const regimeDeltaIdd = Math.abs(fastAway - slowAway);
+    const regimeDeltaThreat = Math.abs(fastThreat - slowThreat);
+    const regimeDelta = Math.max(regimeDeltaIdd, regimeDeltaThreat);
+
+    const lastUncertaintyIdd = Number(context?.uncertainty?.idd || 0.18);
+    const lastUncertaintyThreat = Number(context?.uncertainty?.threat || 0.22);
+    const uncertaintyIdd = clamp(0.85*lastUncertaintyIdd + 0.15*Math.abs(iddAway - slowAway), 0.05, 0.6);
+    const uncertaintyThreat = clamp(0.85*lastUncertaintyThreat + 0.15*Math.abs(threatEdge - slowThreat), 0.05, 0.6);
+    const zIdd = (iddAway - slowAway) / (uncertaintyIdd + 0.05);
+
+    const previousStreak = Number(context?.zStreak || 0);
+    const zStreak = Math.abs(zIdd) > 1.6 ? previousStreak + 1 : 0;
+    const minuteLabel = String(payload.window || payload.minuteWindow || payload.minute || "live");
+    const windowEnd = Number(String(minuteLabel).split("-").slice(-1)[0]) || 0;
+    const scoreDiff = (Number(score.away) || 0) - (Number(score.home) || 0);
+    const iddNext = clamp(0.55*fastAway + 0.45*slowAway + lpeStateModifier(scoreDiff, windowEnd), -1, 1);
+    const epi = clamp(
+      0.45*intensity +
+      0.35*pace +
+      0.30*Math.max(threatHome, threatAway) +
+      0.25*regimeDelta,
+      0,
+      1
+    );
+
+    const alerts = [];
+    const dominantTeam = iddAway > 0 ? "away" : "home";
+    if(Math.abs(zIdd) > 2.2){
+      alerts.push({ type: "SHIFT", minuteWindow: minuteLabel, team: dominantTeam, why: `z=${zIdd.toFixed(2)}, regimeDelta=${regimeDelta.toFixed(2)}` });
+    }
+    if(regimeDelta > 0.22){
+      alerts.push({ type: "TREND_BREAK", minuteWindow: minuteLabel, team: dominantTeam, why: `regimeDelta=${regimeDelta.toFixed(2)}` });
+    }
+    if(zStreak >= 2){
+      alerts.push({ type: "SUSTAINED_CHANGE", minuteWindow: minuteLabel, team: dominantTeam, why: `abs(z)>1.6 por ${zStreak} ventanas` });
+    }
+    if(epi > 0.75){
+      alerts.push({ type: "EPI_SPIKE", minuteWindow: minuteLabel, level: Number(epi.toFixed(2)) });
+    }
+
+    const epaPsych = context?.epaPsych || null;
+    const frustrationA = Number(epaPsych?.home?.frustration ?? epaPsych?.away?.frustration ?? NaN);
+    const frustrationB = Number(epaPsych?.away?.frustration ?? NaN);
+    if(alerts.some(a=>a.type==="SHIFT") && Number.isFinite(frustrationA) && Number.isFinite(frustrationB)){
+      const frustrationDelta = Math.abs(frustrationA - frustrationB);
+      if(frustrationDelta < 0.08){
+        alerts.push({ type: "TACTICAL_SHIFT", minuteWindow: minuteLabel, why: "Cambio táctico/ritmo no reflejado emocionalmente" });
       }
     }
 
-    document.getElementById("pl_applyJson")?.addEventListener("click", ()=>{
-      const raw = ($json?.value || "").trim();
-      if(!raw){ if($info) $info.textContent="Pega un JSON primero."; return; }
-      const parsed = parseJsonSafe(raw);
-      if(!parsed.ok){ if($info) $info.textContent="JSON inválido: " + parsed.error; return; }
-      applyCaptureToForm(parsed.data);
+    const state = {
+      idd: { home: iddHome, away: iddAway },
+      intensity,
+      threat: { home: threatHome, away: threatAway },
+      pace,
+      projection: {
+        iddNext,
+        dominance: iddNext > 0 ? `Away +${Math.abs(iddNext).toFixed(2)}` : `Home +${Math.abs(iddNext).toFixed(2)}`,
+        shockRisk: epi > 0.75 ? "alto" : epi > 0.55 ? "medio" : "bajo",
+        eventTension: epi
+      }
+    };
+
+    return {
+      state,
+      ema: {
+        idd: { home: -slowAway, away: slowAway },
+        threat: { home: -slowThreat, away: slowThreat, edge: slowThreat }
+      },
+      fastEma: {
+        idd: { home: -fastAway, away: fastAway },
+        threat: { home: -fastThreat, away: fastThreat, edge: fastThreat }
+      },
+      uncertainty: { idd: uncertaintyIdd, threat: uncertaintyThreat },
+      regimeDelta,
+      zScore: zIdd,
+      zStreak,
+      alerts,
+      window: minuteLabel,
+      score: { home: Number(score.home) || 0, away: Number(score.away) || 0 }
+    };
+  }
+
+  function updateLiveProjectionState(prevState={}, payload={}, context={}){
+    const previous = prevState || {};
+    const k = Number(previous.k || 0) + 1;
+    const update = computeLiveProjectionWindow(payload, {
+      fastEma: previous.fastEma,
+      ema: previous.ema,
+      uncertainty: previous.uncertainty,
+      zStreak: previous.zStreak,
+      epaPsych: context.epaPsych
+    });
+    return {
+      matchId: payload.matchId || previous.matchId || uid("lpe"),
+      teams: payload.teams || previous.teams || { home: "Home", away: "Away" },
+      k,
+      state: update.state,
+      ema: update.ema,
+      fastEma: update.fastEma,
+      uncertainty: update.uncertainty,
+      regimeDelta: update.regimeDelta,
+      zScore: update.zScore,
+      zStreak: update.zStreak,
+      projections: update.state.projection,
+      score: update.score,
+      lastWindow: update.window,
+      history: [...(previous.history || []), {
+        k,
+        window: update.window,
+        iddAway: update.state.idd.away,
+        fastAway: update.fastEma.idd.away,
+        slowAway: update.ema.idd.away,
+        epi: update.state.projection.eventTension
+      }].slice(-24),
+      alerts: [...(previous.alerts || []), ...update.alerts].slice(-40),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  function extractNarratedEvents(rawText, teams){
+    const lines = String(rawText || "").split(/\n+/).map(s=>s.trim()).filter(Boolean);
+    const events = [];
+    const counters = {
+      home: { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, savesNarrated: 0, cards: 0, reds: 0, interceptions: 0 },
+      away: { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, savesNarrated: 0, cards: 0, reds: 0, interceptions: 0 }
+    };
+    const teamNameMap = [
+      { key: "home", name: String(teams?.home || "").toLowerCase() },
+      { key: "away", name: String(teams?.away || "").toLowerCase() }
+    ];
+    let pendingMinute = null;
+
+    lines.forEach(line=>{
+      const minuteFound = line.match(/(\d{1,3}\s*\+\s*\d{1,2}|\d{1,3})\s*'/);
+      if(minuteFound) pendingMinute = parseMinuteToken(minuteFound[1]);
+      if(/^\d{1,3}\s*\+\s*\d{1,2}\s*'$/.test(line) || /^\d{1,3}\s*'$/.test(line)) return;
+
+      let type = null;
+      if(/¡?gol!?/i.test(line)) type = "goal";
+      else if(/tarjeta roja|expulsad/i.test(line)) type = "red";
+      else if(/tarjeta amarilla|amonestad/i.test(line)) type = "yellow";
+      else if(/sustituci[oó]n|\bcambio\.?/i.test(line)) type = "sub";
+      else if(/c[oó]rner/i.test(line)) type = "corner";
+      else if(/fuera de juego/i.test(line)) type = "offside";
+      else if(/falta|infracci[oó]n/i.test(line)) type = "foul";
+      else if(/parada|atajada/i.test(line)) type = "save";
+      if(!type) return;
+
+      const playerTeam = line.match(/([A-Za-zÀ-ÿ' .-]+)\s*\(([^)]+)\)/);
+      const player = playerTeam ? playerTeam[1].trim() : undefined;
+      const teamFromPlayer = playerTeam ? playerTeam[2].trim() : "";
+      const lineLower = line.toLowerCase();
+      const teamGuess = teamNameMap.find(t=>t.name && (lineLower.includes(t.name) || teamFromPlayer.toLowerCase().includes(t.name)));
+      const team = teamGuess ? teams[teamGuess.key] : (teamFromPlayer || undefined);
+
+      const event = { min: pendingMinute ?? null, type, team };
+      if(player) event.player = player;
+      events.push(event);
+
+      const side = team===teams?.home ? "home" : team===teams?.away ? "away" : null;
+      if(side){
+        if(type==="corner") counters[side].corners += 1;
+        if(type==="yellow") counters[side].cards += 1;
+        if(type==="red") counters[side].reds += 1;
+        if(type==="save") counters[side].savesNarrated += 1;
+        if(/dispara|cabecea|centra peligroso|remata/i.test(line)) counters[side].attacksNarrated += 1;
+        if(/ocasi[oó]n clar[ií]sima|casi marca|remata dentro del [aá]rea/i.test(line)) counters[side].bigChancesNarrated += 1;
+        if(/interceptad|despejad/i.test(line)) counters[side].interceptions += 1;
+      }
     });
 
-    document.getElementById("pl_clearJson")?.addEventListener("click", ()=>{
-      if($json) $json.value = "";
-      if($info) $info.textContent = "";
+    return { events, counters, lines };
+  }
+
+  function normalizeStat(value, scale=8){
+    return clamp((Number(value) || 0) / scale, 0, 1);
+  }
+
+  function buildNarrativeDiagnostic({ match, teams, parsed }){
+    const goalsHome = Number(match.homeGoals) || 0;
+    const goalsAway = Number(match.awayGoals) || 0;
+    const losingSide = goalsHome===goalsAway ? null : (goalsHome<goalsAway ? "home" : "away");
+    const winnerSide = goalsHome===goalsAway ? null : (goalsHome>goalsAway ? "home" : "away");
+    const breakMinute = parsed.events.find(e=>e.type==="goal")?.min ?? null;
+    const losingC = losingSide ? parsed.counters[losingSide] : { corners: 0, attacksNarrated: 0, bigChancesNarrated: 0, cards: 0, interceptions: 0 };
+    const winnerC = winnerSide ? parsed.counters[winnerSide] : { savesNarrated: 0 };
+    const loserGoals = losingSide==="home" ? goalsHome : losingSide==="away" ? goalsAway : 0;
+
+    const control_without_conversion = clamp(
+      0.5*normalizeStat(losingC.attacksNarrated, 12) +
+      0.3*normalizeStat(losingC.corners, 7) +
+      0.4*normalizeStat(losingC.bigChancesNarrated, 5) -
+      0.7*normalizeStat(loserGoals, 3),
+      0,
+      1
+    );
+    const transition_punished = breakMinute ? 0.4 : 0;
+    const low_block_resistance = clamp(
+      0.4*normalizeStat(losingC.corners, 8) +
+      0.4*normalizeStat(losingC.interceptions, 8) +
+      0.3*normalizeStat(winnerC.savesNarrated, 8),
+      0,
+      1
+    );
+    const late_push = parsed.events.filter(e=>Number(e.min)>=75 && losingSide && e.team===teams[losingSide] && ["corner", "foul", "goal"].includes(e.type)).length;
+    const late_goal_by_winner = parsed.events.some(e=>e.type==="goal" && Number(e.min)>=90 && winnerSide && e.team===teams[winnerSide]);
+    const late_risk_exposure = clamp(normalizeStat(late_push, 5) + (late_goal_by_winner ? 0.35 : 0), 0, 1);
+    const earlyYellows = parsed.events.filter(e=>e.type==="yellow" && Number(e.min)>0 && Number(e.min)<35);
+    const discipline_impact = clamp(normalizeStat(earlyYellows.length, 3) + normalizeStat(losingC.cards, 6) * 0.6, 0, 1);
+
+    const labels = { control_without_conversion, transition_punished, low_block_resistance, discipline_impact, late_risk_exposure };
+    const summary = [
+      control_without_conversion>0.55 ? `${teams[losingSide] || "Un equipo"} generó volumen sin convertir.` : "Partido equilibrado sin gran brecha de conversión.",
+      breakMinute ? `El minuto quiebre fue el ${breakMinute}', cambiando el guion.` : "Sin minuto de quiebre claro en el relato.",
+      late_risk_exposure>0.55 ? "El cierre mostró exposición al riesgo en tramo final." : "Tramo final relativamente controlado."
+    ];
+    return { breakMinute, labels, summary };
+  }
+
+  function applyDiagnosticToProfiles(db, { match, diagnostic }){
+    const home = db.teams.find(t=>t.id===match.homeId);
+    const away = db.teams.find(t=>t.id===match.awayId);
+    const homeP = getOrCreateDiagProfile(db, match.homeId, home?.name || "Local");
+    const awayP = getOrCreateDiagProfile(db, match.awayId, away?.name || "Visitante");
+    const alphaHome = homeP.matchesCount<5 ? 0.2 : 0.12;
+    const alphaAway = awayP.matchesCount<5 ? 0.2 : 0.12;
+    const labels = diagnostic.labels || {};
+    const homeWon = (Number(match.homeGoals)||0) > (Number(match.awayGoals)||0);
+    const awayWon = (Number(match.awayGoals)||0) > (Number(match.homeGoals)||0);
+
+    const homeSignals = {
+      territorial_strength: homeWon ? 0.62 : 0.55,
+      finishing_quality: homeWon ? 0.65 : 1 - (labels.control_without_conversion || 0.5),
+      transition_attack: homeWon ? 0.55 + (labels.transition_punished || 0.4)*0.35 : 0.48,
+      transition_defense: clamp(0.7 - (labels.transition_punished || 0.4)*0.5, 0, 1),
+      low_block_execution: homeWon ? 0.55 + (labels.low_block_resistance || 0.5)*0.3 : 0.5,
+      chance_creation: clamp(0.52 + (labels.control_without_conversion || 0.5)*0.25, 0, 1),
+      discipline_risk: labels.discipline_impact || 0.4,
+      late_game_management: clamp(0.65 - (labels.late_risk_exposure || 0.4)*0.3 + (homeWon ? 0.1 : -0.05), 0, 1)
+    };
+    const awaySignals = {
+      territorial_strength: awayWon ? 0.62 : 0.55,
+      finishing_quality: awayWon ? 0.65 : 1 - (labels.control_without_conversion || 0.5),
+      transition_attack: awayWon ? 0.55 + (labels.transition_punished || 0.4)*0.35 : 0.48,
+      transition_defense: clamp(0.7 - (labels.transition_punished || 0.4)*0.5, 0, 1),
+      low_block_execution: awayWon ? 0.55 + (labels.low_block_resistance || 0.5)*0.3 : 0.5,
+      chance_creation: clamp(0.52 + (labels.control_without_conversion || 0.5)*0.25, 0, 1),
+      discipline_risk: labels.discipline_impact || 0.4,
+      late_game_management: clamp(0.65 - (labels.late_risk_exposure || 0.4)*0.3 + (awayWon ? 0.1 : -0.05), 0, 1)
+    };
+
+    Object.keys(homeP.traits).forEach(key=>{
+      homeP.traits[key] = clamp(homeP.traits[key] * (1-alphaHome) + (homeSignals[key] ?? 0.5) * alphaHome, 0, 1);
+      awayP.traits[key] = clamp(awayP.traits[key] * (1-alphaAway) + (awaySignals[key] ?? 0.5) * alphaAway, 0, 1);
+    });
+    homeP.matchesCount += 1;
+    awayP.matchesCount += 1;
+    homeP.lastUpdated = new Date().toISOString();
+    awayP.lastUpdated = new Date().toISOString();
+  }
+
+  function ensureLearningState(db){
+    db.learning ||= structuredClone(defaultDb.learning);
+    db.learning.schemaVersion = Number(db.learning.schemaVersion) || 2;
+    db.learning.leagueScale ||= {};
+    db.learning.teamBias ||= {};
+    db.learning.temperatureByLeague ||= {};
+    db.learning.trainingSet ||= [];
+    db.learning.metrics ||= { global: null, byLeague: {} };
+    db.learning.metrics.byLeague ||= {};
+    db.predictions ||= [];
+  }
+
+  function applyTemperatureTo1x2(probPack, temperature=1){
+    const t = clamp(Number(temperature) || 1, 0.7, 1.6);
+    const toLogit = (p)=>Math.log(Math.max(1e-8, p));
+    const exps = [Math.exp(toLogit(probPack.pH)/t), Math.exp(toLogit(probPack.pD)/t), Math.exp(toLogit(probPack.pA)/t)];
+    const z = exps[0] + exps[1] + exps[2] || 1;
+    return { pH: exps[0]/z, pD: exps[1]/z, pA: exps[2]/z };
+  }
+
+  function getLeagueTemperature(db, leagueId){
+    ensureLearningState(db);
+    return clamp(Number(db.learning.temperatureByLeague[leagueId]) || 1, 0.7, 1.6);
+  }
+
+  function calcPredictionDivergence(prediction){
+    const pModel = prediction?.pModel;
+    const pMarket = prediction?.pMarket;
+    if(!pModel || !pMarket) return 0;
+    return (Math.abs((pModel.pH || 0) - (pMarket.pH || 0))
+      + Math.abs((pModel.pD || 0) - (pMarket.pD || 0))
+      + Math.abs((pModel.pA || 0) - (pMarket.pA || 0))) / 3;
+  }
+
+  function recentWindowMetrics(db, limit=10){
+    const resolved = db.predictions.filter(p=>p.resolved && p.actual).slice(-limit);
+    if(!resolved.length) return { n: 0, brier: null, lambdaError: null };
+    let brier = 0;
+    let lambdaError = 0;
+    resolved.forEach((p)=>{
+      if(Number.isFinite(p.brierScore)) brier += p.brierScore;
+      lambdaError += (Math.abs((p.actual.homeGoals || 0) - (p.lambdaHome || 0)) + Math.abs((p.actual.awayGoals || 0) - (p.lambdaAway || 0))) / 2;
+    });
+    return {
+      n: resolved.length,
+      brier: brier / resolved.length,
+      lambdaError: lambdaError / resolved.length
+    };
+  }
+
+  function modelHealthEmoji(recentBrier){
+    if(!Number.isFinite(recentBrier)) return "🟡";
+    if(recentBrier < 0.2) return "🟢";
+    if(recentBrier < 0.26) return "🟡";
+    return "🔴";
+  }
+
+  function createMetricState(){
+    return {
+      nMatches: 0,
+      avgLogLoss: 0,
+      brierScore: 0,
+      avgGoalErrorHome: 0,
+      avgGoalErrorAway: 0
+    };
+  }
+
+  function rollingAverage(prevAvg, n, value){
+    return ((prevAvg * n) + value) / (n + 1);
+  }
+
+  function updateMetricState(target, { logLoss, brier, errHome, errAway }){
+    const state = target || createMetricState();
+    const n = Number(state.nMatches) || 0;
+    state.avgLogLoss = rollingAverage(Number(state.avgLogLoss) || 0, n, logLoss);
+    state.brierScore = rollingAverage(Number(state.brierScore) || 0, n, brier);
+    state.avgGoalErrorHome = rollingAverage(Number(state.avgGoalErrorHome) || 0, n, Math.abs(errHome));
+    state.avgGoalErrorAway = rollingAverage(Number(state.avgGoalErrorAway) || 0, n, Math.abs(errAway));
+    state.nMatches = n + 1;
+    return state;
+  }
+
+  function getLeagueScale(db, leagueId){
+    ensureLearningState(db);
+    const raw = db.learning.leagueScale[leagueId] || {};
+    return {
+      home: clamp(Number(raw.home) || 1, 0.75, 1.35),
+      away: clamp(Number(raw.away) || 1, 0.75, 1.35)
+    };
+  }
+
+  function getTeamBias(db, teamId){
+    ensureLearningState(db);
+    const raw = db.learning.teamBias[teamId] || {};
+    return {
+      attack: clamp(Number(raw.attack) || 0, -0.35, 0.35),
+      defense: clamp(Number(raw.defense) || 0, -0.35, 0.35)
+    };
+  }
+
+  function topScoreCells(matrix, topN=3){
+    const cells = [];
+    for(let h=0;h<matrix.length;h++){
+      for(let a=0;a<matrix[h].length;a++) cells.push({ h, a, p: matrix[h][a] });
+    }
+    return cells.sort((a,b)=>b.p-a.p).slice(0, topN);
+  }
+
+  function bttsProbability(matrix){
+    let sum = 0;
+    for(let h=1;h<matrix.length;h++){
+      for(let a=1;a<matrix[h].length;a++) sum += matrix[h][a];
+    }
+    return sum;
+  }
+
+  function updateLearningFromResult(db, prediction, result){
+    ensureLearningState(db);
+    const leagueId = prediction.leagueId || "global";
+    const lrLeague = clamp(Number(db.learning.lrLeague) || 0.12, 0.01, 0.35);
+    const lrTeam = clamp(Number(db.learning.lrTeam) || 0.08, 0.01, 0.25);
+    const leagueScaleBefore = getLeagueScale(db, leagueId);
+    const temperatureBefore = getLeagueTemperature(db, leagueId);
+    const leagueScale = { ...leagueScaleBefore };
+
+    const confidence = Math.max(Number(prediction.pHome) || 0, Number(prediction.pDraw) || 0, Number(prediction.pAway) || 0);
+    const recencyDays = Math.max(0, (Date.now() - new Date(prediction.createdAt || prediction.updatedAt || Date.now()).getTime()) / 86400000);
+    const recencyWeight = clamp(Math.exp(-recencyDays / 240), 0.45, 1);
+
+    const xgHome = pickFirstNumber(result.xgHome, result.homeXg, result.expectedHomeGoals);
+    const xgAway = pickFirstNumber(result.xgAway, result.awayXg, result.expectedAwayGoals);
+    const targetHome = xgHome ?? result.homeGoals;
+    const targetAway = xgAway ?? result.awayGoals;
+    const xgDistance = (xgHome===null || xgAway===null)
+      ? 0
+      : (Math.abs(result.homeGoals - xgHome) + Math.abs(result.awayGoals - xgAway)) / 2;
+    const xgTrust = xgHome===null || xgAway===null ? 1 : clamp(1 - xgDistance*0.12, 0.65, 1.05);
+
+    const lrEffectiveLeague = lrLeague * (0.5 + confidence) * recencyWeight * xgTrust;
+    const lrEffectiveTeam = lrTeam * (0.5 + confidence) * recencyWeight * xgTrust;
+
+    const ratioHome = clamp((targetHome + 0.25) / Math.max(0.25, prediction.lambdaHome), 0.75, 1.25);
+    const ratioAway = clamp((targetAway + 0.25) / Math.max(0.25, prediction.lambdaAway), 0.75, 1.25);
+    leagueScale.home = clamp(leagueScale.home * (1 - lrEffectiveLeague + lrEffectiveLeague * ratioHome), 0.75, 1.35);
+    leagueScale.away = clamp(leagueScale.away * (1 - lrEffectiveLeague + lrEffectiveLeague * ratioAway), 0.75, 1.35);
+    db.learning.leagueScale[leagueId] = leagueScale;
+
+    const actual = result.homeGoals===result.awayGoals ? "draw" : result.homeGoals>result.awayGoals ? "home" : "away";
+    const predictedWinner = prediction.pHome>=prediction.pDraw && prediction.pHome>=prediction.pAway
+      ? "home"
+      : prediction.pDraw>=prediction.pAway
+        ? "draw"
+        : "away";
+    const missExtreme = (actual!==predictedWinner) && Math.max(prediction.pHome, prediction.pDraw, prediction.pAway) > 0.58;
+    const hitFlat = (actual===predictedWinner) && Math.max(prediction.pHome, prediction.pDraw, prediction.pAway) < 0.44;
+    const temperatureAfter = clamp(
+      temperatureBefore
+      + (missExtreme ? 0.03 : 0)
+      - (hitFlat ? 0.02 : 0),
+      0.7,
+      1.6
+    );
+    db.learning.temperatureByLeague[leagueId] = temperatureAfter;
+
+    const homeBiasBefore = getTeamBias(db, prediction.homeId);
+    const awayBiasBefore = getTeamBias(db, prediction.awayId);
+    const homeBias = { ...homeBiasBefore };
+    const awayBias = { ...awayBiasBefore };
+    const homeErr = clamp(targetHome - prediction.lambdaHome, -1.6, 1.6);
+    const awayErr = clamp(targetAway - prediction.lambdaAway, -1.6, 1.6);
+
+    homeBias.attack = clamp(homeBias.attack + homeErr * lrEffectiveTeam * 0.09, -0.35, 0.35);
+    homeBias.defense = clamp(homeBias.defense - awayErr * lrEffectiveTeam * 0.06, -0.35, 0.35);
+    awayBias.attack = clamp(awayBias.attack + awayErr * lrEffectiveTeam * 0.09, -0.35, 0.35);
+    awayBias.defense = clamp(awayBias.defense - homeErr * lrEffectiveTeam * 0.06, -0.35, 0.35);
+
+    db.learning.teamBias[prediction.homeId] = homeBias;
+    db.learning.teamBias[prediction.awayId] = awayBias;
+
+    const pActual = actual==="home" ? prediction.pHome : actual==="draw" ? prediction.pDraw : prediction.pAway;
+    const logLoss = -Math.log(Math.max(1e-9, pActual));
+    const brier = ((prediction.pHome - (actual==="home" ? 1 : 0))**2
+      + (prediction.pDraw - (actual==="draw" ? 1 : 0))**2
+      + (prediction.pAway - (actual==="away" ? 1 : 0))**2) / 3;
+
+    db.learning.metrics.global = updateMetricState(db.learning.metrics.global, {
+      logLoss,
+      brier,
+      errHome: result.homeGoals - prediction.lambdaHome,
+      errAway: result.awayGoals - prediction.lambdaAway
+    });
+    db.learning.metrics.byLeague[leagueId] = updateMetricState(db.learning.metrics.byLeague[leagueId], {
+      logLoss,
+      brier,
+      errHome: result.homeGoals - prediction.lambdaHome,
+      errAway: result.awayGoals - prediction.lambdaAway
     });
 
-const _bt = document.getElementById("backTeam");
-    if(_bt) _bt.onclick = ()=> openLab("team",{teamId:p.teamId});
-const _ol = document.getElementById("openLogger");
-    if(_ol) _ol.onclick = ()=> openLab("logger",{teamId:p.teamId});// last matches view
-    const last = (Array.isArray(logs) ? logs : []).slice(0, 8);
-    const _lm = document.getElementById("lastMatches");
-    if(_lm) _lm.innerHTML = last.map(m=>{
-      const mid = escapeHtml(m.id||"");
-      const date = escapeHtml(m.date||"");
-      const score = fmt(m.score,2);
-      const min = (m.stats?.minutes ?? 0);
-      const g = (m.stats?.goals ?? 0);
-      const a = (m.stats?.assists ?? 0);
-      return `
-        <div class="fl-row" style="align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.06);">
-          <div class="fl-small" style="flex:1; min-width:0;">
-            • ${date} — score <b>${score}</b> • min ${min} • G ${g} • A ${a}
+    db.learning.trainingSet.push({
+      id: prediction.id,
+      matchId: prediction.matchKey || prediction.id,
+      timestamp: new Date().toISOString(),
+      teams: { homeId: prediction.homeId, awayId: prediction.awayId },
+      leagueId,
+      features: {
+        leagueBase: prediction.breakdown?.leagueBase || null,
+        homeAdv: prediction.features?.homeAdv ?? null,
+        xGdiff: (prediction.lambdaHome || 0) - (prediction.lambdaAway || 0),
+        momentum5: prediction.features?.formMomentum || null,
+        marketProbs: prediction.pMarket || null,
+        notesFlags: result.flags || null
+      },
+      pred: {
+        pModel: prediction.pModel || null,
+        pFinal: prediction.pFinal || { pH: prediction.pHome, pD: prediction.pDraw, pA: prediction.pAway },
+        lambdaHome: prediction.lambdaHome,
+        lambdaAway: prediction.lambdaAway
+      },
+      label: {
+        outcome: actual,
+        score: { homeGoals: result.homeGoals, awayGoals: result.awayGoals },
+        reading: result.reading || null
+      }
+    });
+    if(db.learning.trainingSet.length > 400) db.learning.trainingSet = db.learning.trainingSet.slice(-400);
+
+    return {
+      homeErr,
+      awayErr,
+      logLoss,
+      brier,
+      confidence,
+      lrEffectiveLeague,
+      lrEffectiveTeam,
+      leagueScale,
+      leagueScaleBefore,
+      temperatureBefore,
+      temperatureAfter,
+      homeBias,
+      awayBias,
+      homeBiasBefore,
+      awayBiasBefore,
+      metricsGlobal: db.learning.metrics.global,
+      metricsLeague: db.learning.metrics.byLeague[leagueId]
+    };
+  }
+
+  function calibrateToMarket(base, marketProb, modelProb){
+    if(!Number.isFinite(marketProb) || !Number.isFinite(modelProb) || !modelProb || !base) return base;
+    const ratio = clamp(marketProb/modelProb, 0.82, 1.22);
+    return base * ratio;
+  }
+
+  function probsFromLambdas(lHome, lAway, maxGoals=5){
+    const matrix = [];
+    let pHome=0,pDraw=0,pAway=0,pTotal=0;
+    let best = { h:0, a:0, p:0 };
+    for(let h=0;h<=maxGoals;h++){
+      const row = [];
+      for(let a=0;a<=maxGoals;a++){
+        const p = poisson(lHome,h) * poisson(lAway,a);
+        row.push(p);
+        pTotal += p;
+        if(h>a) pHome += p;
+        if(h===a) pDraw += p;
+        if(h<a) pAway += p;
+        if(p>best.p) best = { h, a, p };
+      }
+      matrix.push(row);
+    }
+    if(pTotal>0){
+      pHome /= pTotal;
+      pDraw /= pTotal;
+      pAway /= pTotal;
+      best.p /= pTotal;
+      for(let h=0;h<=maxGoals;h++){
+        for(let a=0;a<=maxGoals;a++) matrix[h][a] /= pTotal;
+      }
+    }
+    return { matrix, pHome, pDraw, pAway, maxGoals, best };
+  }
+
+  function computeB3TeamRatings(db, teamId, leagueId, side="home", limit=20){
+    const leagueCtx = leagueContextFromTracker(db, leagueId);
+    const data = teamAnalytics(db, teamId, leagueId, limit);
+    const games = db.tracker
+      .filter(g=>(g.homeId===teamId || g.awayId===teamId) && (!leagueId || g.leagueId===leagueId))
+      .slice(-limit);
+
+    const statAvg = (keys, mode="for")=>{
+      const values = games.map(g=>{
+        const isHome = g.homeId===teamId;
+        const ownSide = isHome ? "home" : "away";
+        const oppSide = isHome ? "away" : "home";
+        return metricFromStats(g.stats, keys, mode==="for" ? ownSide : oppSide);
+      }).filter(v=>Number.isFinite(v));
+      if(!values.length) return null;
+      return values.reduce((a,b)=>a+b,0)/values.length;
+    };
+
+    const xgFor = side==="home" ? data.xgHome.for : data.xgAway.for;
+    const xgAgainst = side==="home" ? data.xgHome.against : data.xgAway.against;
+    const goalsForBase = side==="home" ? data.goalsHome.for : data.goalsAway.for;
+    const goalsAgainstBase = side==="home" ? data.goalsHome.against : data.goalsAway.against;
+    const leagueFor = side==="home" ? leagueCtx.avgGoalsHome : leagueCtx.avgGoalsAway;
+    const leagueAgainst = side==="home" ? leagueCtx.avgGoalsAway : leagueCtx.avgGoalsHome;
+
+    const sotFor = statAvg(["shots on target", "tiros a puerta", "remates a puerta"], "for");
+    const sotAgainst = statAvg(["shots on target", "tiros a puerta", "remates a puerta"], "against");
+    const boxTouches = statAvg(["touches in opposition box", "toques en area rival", "penalty area entries", "attacks in box"], "for");
+    const errorsAgainst = statAvg(["errors leading to shot", "errors leading to goal", "errores conducentes", "errores que terminan"], "for");
+
+    const atkXg = clamp((xgFor || goalsForBase || leagueFor) / Math.max(0.35, leagueFor), 0.7, 1.3);
+    const atkSot = Number.isFinite(sotFor) ? clamp(sotFor / 4.6, 0.7, 1.3) : 1;
+    const atkTouches = Number.isFinite(boxTouches) ? clamp(boxTouches / 24, 0.7, 1.3) : 1;
+    const defXg = clamp((xgAgainst || goalsAgainstBase || leagueAgainst) / Math.max(0.35, leagueAgainst), 0.7, 1.3);
+    const defSot = Number.isFinite(sotAgainst) ? clamp(sotAgainst / 4.4, 0.7, 1.3) : 1;
+    const defErrors = Number.isFinite(errorsAgainst) ? clamp(0.9 + errorsAgainst * 0.18, 0.7, 1.3) : 1;
+
+    const attack = clamp(0.55*atkXg + 0.25*atkSot + 0.20*atkTouches, 0.7, 1.3);
+    const defenseWeakness = clamp(0.60*defXg + 0.30*defSot + 0.10*defErrors, 0.7, 1.3);
+    const availableSignals = [xgFor, xgAgainst, sotFor, sotAgainst, boxTouches].filter(v=>Number.isFinite(v)).length;
+    const completeness = clamp(availableSignals / 5, 0, 1);
+    const form = data.form5 || { played: 0, points: 0 };
+    const consistency = clamp(0.45 + ((form.points / Math.max(1, form.played*3)) * 0.55), 0, 1);
+    return { attack, defenseWeakness, completeness, consistency, samples: data.sample || 0 };
+  }
+
+  function computeTrainingStats(teamMatches=[]){
+    const matches = Array.isArray(teamMatches) ? teamMatches : [];
+    const totalMatches = matches.length;
+
+    const hasStats = (m)=>{
+      if(Array.isArray(m?.stats)) return m.stats.length > 0;
+      return !!m?.stats && m.stats.kind === "match_stats";
+    };
+    const hasXgInSections = (sections=[])=>{
+      if(!Array.isArray(sections)) return false;
+      return sections.some(sec=>(sec?.stats || []).some(st=>String(st?.category || st?.key || "").toLowerCase().includes("xg")));
+    };
+    const hasXgMetric = (m)=>{
+      const fromTop = [m?.homeXg, m?.awayXg, m?.xgHome, m?.xgAway].some(v=>Number.isFinite(Number(v)));
+      if(fromTop) return true;
+      if(Array.isArray(m?.stats)){
+        return m.stats.some(st=>String(st?.key || st?.category || "").toLowerCase().includes("xg"));
+      }
+      return hasXgInSections(m?.stats?.sections);
+    };
+
+    const withStats = matches.filter(hasStats).length;
+    const withXG = matches.filter(hasXgMetric).length;
+    const withNarrative = matches.filter(m=>typeof m?.storyRaw === "string" && m.storyRaw.trim().length > 50).length;
+
+    const completeness = clamp01(
+      0.55 * (withStats / Math.max(1, totalMatches))
+      + 0.35 * (withXG / Math.max(1, totalMatches))
+      + 0.10 * (withNarrative / Math.max(1, totalMatches))
+    );
+
+    return {
+      totalMatches,
+      withStats,
+      withXG,
+      withNarrative,
+      completeness
+    };
+  }
+
+  function dynamicConfMax(samples){
+    if(samples < 30) return 0.55;
+    if(samples < 80) return 0.70;
+    return 0.85;
+  }
+
+  function computeMomentumAdj(intel={}, oppIntel={}){
+    const self = clamp((Number(intel?.metrics?.momentum5) || 0.5) - 0.5, -0.5, 0.5);
+    const opp = clamp((Number(oppIntel?.metrics?.momentum5) || 0.5) - 0.5, -0.5, 0.5);
+    return clamp((self - opp) * 0.16, -0.08, 0.08);
+  }
+
+  function computeB3Confidence({ samples=0, completeness=0, consistency01=0 }={}){
+    let confSamples;
+    if(samples < 5) confSamples = 0.25;
+    else if(samples < 10) confSamples = 0.35;
+    else if(samples < 20) confSamples = 0.45;
+    else if(samples < 35) confSamples = 0.55;
+    else if(samples < 60) confSamples = 0.65;
+    else confSamples = 0.75;
+
+    const confData = 0.65 + 0.35 * clamp01(completeness);
+    const confCons = 0.70 + 0.30 * clamp01(consistency01);
+    let conf = confSamples * confData * confCons;
+    conf = Math.min(conf, dynamicConfMax(samples));
+    conf = Math.max(conf, 0.20);
+    return conf;
+  }
+
+  function computeGlobalTrainingSize(allTeams=[], tracker=[]){
+    const teamIds = new Set((allTeams || []).map(t=>t.id));
+    const matches = Array.isArray(tracker)
+      ? tracker.filter(m=>teamIds.has(m?.homeId) || teamIds.has(m?.awayId))
+      : [];
+    const stats = computeTrainingStats(matches);
+    return { matches: stats.totalMatches, withStats: stats.withStats, withXG: stats.withXG };
+  }
+
+  function blend1x2Probs(model, market, confidence){
+    if(!market) return { ...model };
+    return {
+      pH: confidence*model.pH + (1-confidence)*market.pH,
+      pD: confidence*model.pD + (1-confidence)*market.pD,
+      pA: confidence*model.pA + (1-confidence)*market.pA
+    };
+  }
+
+  function applyDrawBoostToLambdas(lHome, lAway, drawBoost=0){
+    const boost = clamp(Number(drawBoost) || 0, -0.04, 0.04);
+    if(Math.abs(boost) < 1e-6) return { lHome, lAway };
+    const avg = (lHome + lAway) / 2;
+    const closeness = boost >= 0 ? (1 - boost*1.25) : (1 + Math.abs(boost)*1.1);
+    return {
+      lHome: clamp(avg + (lHome - avg) * closeness, 0.05, 4.5),
+      lAway: clamp(avg + (lAway - avg) * closeness, 0.05, 4.5)
+    };
+  }
+
+  function adjustLambdasToMatchProbs(baseLambdas, target, maxGoals=5){
+    let lHome = clamp(baseLambdas.lHome, 0.05, 4.5);
+    let lAway = clamp(baseLambdas.lAway, 0.05, 4.5);
+    for(let i=0;i<16;i++){
+      const p = probsFromLambdas(lHome, lAway, maxGoals);
+      const sideErr = ((target.pH - target.pA) - (p.pHome - p.pAway));
+      const drawErr = (target.pD - p.pDraw);
+      const tilt = Math.exp(clamp(sideErr * 0.65, -0.25, 0.25));
+      lHome = clamp(lHome * tilt, 0.05, 4.5);
+      lAway = clamp(lAway / tilt, 0.05, 4.5);
+      const total = (lHome + lAway) * Math.exp(clamp(-drawErr * 0.55, -0.18, 0.18));
+      const shareHome = lHome / Math.max(0.1, lHome + lAway);
+      lHome = clamp(total * shareHome, 0.05, 4.5);
+      lAway = clamp(total * (1-shareHome), 0.05, 4.5);
+      const closeness = 1 - clamp(drawErr * 0.5, -0.16, 0.16);
+      const avg = (lHome + lAway)/2;
+      lHome = clamp(avg + (lHome - avg)*closeness, 0.05, 4.5);
+      lAway = clamp(avg + (lAway - avg)*closeness, 0.05, 4.5);
+    }
+    return { lHome, lAway };
+  }
+
+  function applyVolatilityToMatrix(matrix, volatility=1){
+    const vol = clamp(Number(volatility) || 1, 0.9, 1.2);
+    if(Math.abs(vol - 1) < 0.01) return matrix;
+    const gamma = clamp(1 / vol, 0.78, 1.15);
+    let sum = 0;
+    const transformed = matrix.map(row=>row.map(cell=>{
+      const v = Math.pow(Math.max(1e-9, cell), gamma);
+      sum += v;
+      return v;
+    }));
+    if(sum<=0) return matrix;
+    return transformed.map(row=>row.map(cell=>cell/sum));
+  }
+
+  function versusModel(db, homeId, awayId, opts={}){
+    ensureLearningState(db);
+    db.versus ||= {};
+    db.versus.tableContext ||= {};
+    const homeTeam = db.teams.find(t=>t.id===homeId);
+    const awayTeam = db.teams.find(t=>t.id===awayId);
+    const leagueId = opts.leagueId || homeTeam?.leagueId || awayTeam?.leagueId || "";
+
+    const leagueCtx = leagueContextFromTracker(db, leagueId);
+    const homeForm = teamFormFromTracker(db, homeId);
+    const awayForm = teamFormFromTracker(db, awayId);
+    const homeData = teamAnalytics(db, homeId, leagueId, Number(db.versus.sampleSize)||20);
+    const awayData = teamAnalytics(db, awayId, leagueId, Number(db.versus.sampleSize)||20);
+
+    const homeStrength = teamStrength(db, homeId);
+    const awayStrength = teamStrength(db, awayId);
+    const homeAdv = Number(db.versus.homeAdvantage)||1.1;
+    const pace = clamp(Number(db.versus.paceFactor)||1, 0.82, 1.35);
+    const leagueScale = getLeagueScale(db, leagueId);
+    const homeBias = getTeamBias(db, homeId);
+    const awayBias = getTeamBias(db, awayId);
+
+    const baseHomeFor = homeData.xgHome.for>0 ? homeData.xgHome.for : homeData.goalsHome.for;
+    const baseHomeAgainst = homeData.xgHome.against>0 ? homeData.xgHome.against : homeData.goalsHome.against;
+    const baseAwayFor = awayData.xgAway.for>0 ? awayData.xgAway.for : awayData.goalsAway.for;
+    const baseAwayAgainst = awayData.xgAway.against>0 ? awayData.xgAway.against : awayData.goalsAway.against;
+
+    const attackHome = clamp((baseHomeFor || leagueCtx.avgGoalsHome) / Math.max(0.35, leagueCtx.avgGoalsHome), 0.55, 1.9);
+    const defenseAwayWeakness = clamp((baseAwayAgainst || leagueCtx.avgGoalsHome) / Math.max(0.35, leagueCtx.avgGoalsHome), 0.55, 1.9);
+    const attackAway = clamp((baseAwayFor || leagueCtx.avgGoalsAway) / Math.max(0.35, leagueCtx.avgGoalsAway), 0.55, 1.9);
+    const defenseHomeWeakness = clamp((baseHomeAgainst || leagueCtx.avgGoalsAway) / Math.max(0.35, leagueCtx.avgGoalsAway), 0.55, 1.9);
+
+    let lHome = leagueCtx.avgGoalsHome * attackHome * defenseAwayWeakness;
+    let lAway = leagueCtx.avgGoalsAway * attackAway * defenseHomeWeakness;
+
+    lHome *= leagueScale.home * (1 + homeBias.attack) * (1 - awayBias.defense);
+    lAway *= leagueScale.away * (1 + awayBias.attack) * (1 - homeBias.defense);
+
+    const statsHome = homeData.statsImpact || { attack: 1, defenseWeakness: 1, sample: 0 };
+    const statsAway = awayData.statsImpact || { attack: 1, defenseWeakness: 1, sample: 0 };
+
+    lHome *= homeAdv * pace * homeStrength * homeForm.momentum;
+    lAway *= pace * awayStrength * awayForm.momentum;
+
+    lHome *= statsHome.attack * statsAway.defenseWeakness;
+    lAway *= statsAway.attack * statsHome.defenseWeakness;
+
+    ensureDiagProfileState(db);
+    const homeProfile = db.diagProfiles?.[homeId];
+    const awayProfile = db.diagProfiles?.[awayId];
+    if(homeProfile && awayProfile){
+      const ht = homeProfile.traits || {};
+      const at = awayProfile.traits || {};
+      const attackPowerHome = 0.45*(Number(ht.territorial_strength)||0.5) + 0.35*(Number(ht.chance_creation)||0.5) + 0.2*(Number(ht.finishing_quality)||0.5);
+      const attackPowerAway = 0.45*(Number(at.territorial_strength)||0.5) + 0.35*(Number(at.chance_creation)||0.5) + 0.2*(Number(at.finishing_quality)||0.5);
+      const defensePowerHome = 0.55*(Number(ht.transition_defense)||0.5) + 0.45*(Number(ht.low_block_execution)||0.5);
+      const defensePowerAway = 0.55*(Number(at.transition_defense)||0.5) + 0.45*(Number(at.low_block_execution)||0.5);
+      const matchupHome = clamp(0.85 + attackPowerHome*0.4 - defensePowerAway*0.25, 0.7, 1.3);
+      const matchupAway = clamp(0.85 + attackPowerAway*0.4 - defensePowerHome*0.25, 0.7, 1.3);
+      const transitionShockHome = clamp((Number(ht.transition_attack)||0.5) - (Number(at.transition_defense)||0.5), -0.35, 0.35);
+      const transitionShockAway = clamp((Number(at.transition_attack)||0.5) - (Number(ht.transition_defense)||0.5), -0.35, 0.35);
+      lHome *= matchupHome * (1 + transitionShockHome*0.2);
+      lAway *= matchupAway * (1 + transitionShockAway*0.2);
+    }
+
+    const homeMomentumProfileRaw = homeTeam?.name ? localStorage.getItem(`team_profile_${homeTeam.name}`) : null;
+    const awayMomentumProfileRaw = awayTeam?.name ? localStorage.getItem(`team_profile_${awayTeam.name}`) : null;
+    let homeMomentum = null;
+    let awayMomentum = null;
+    try{ homeMomentum = homeMomentumProfileRaw ? JSON.parse(homeMomentumProfileRaw) : null; }catch(_e){ homeMomentum = null; }
+    try{ awayMomentum = awayMomentumProfileRaw ? JSON.parse(awayMomentumProfileRaw) : null; }catch(_e){ awayMomentum = null; }
+    if(homeMomentum?.simulation && awayMomentum?.simulation){
+      const homeAttack = clamp(Number(homeMomentum.simulation.attack_power) || 0.5, 0, 1.5);
+      const awayAttack = clamp(Number(awayMomentum.simulation.attack_power) || 0.5, 0, 1.5);
+      const homeDefense = clamp(Number(homeMomentum.simulation.defense_power) || 0.5, 0, 1.2);
+      const awayDefense = clamp(Number(awayMomentum.simulation.defense_power) || 0.5, 0, 1.2);
+      const homeShock = clamp(Number(homeMomentum.momentumSignature?.shock_goals) || 0, 0, 1);
+      const awayShock = clamp(Number(awayMomentum.momentumSignature?.shock_goals) || 0, 0, 1);
+      lHome *= clamp(0.85 + homeAttack*(1-awayDefense), 0.78, 1.3) * (1 + homeShock*0.08);
+      lAway *= clamp(0.85 + awayAttack*(1-homeDefense), 0.78, 1.3) * (1 + awayShock*0.08);
+    }
+
+    const homeIntel = computeTeamIntelligencePanel(db, homeId);
+    const awayIntel = computeTeamIntelligencePanel(db, awayId);
+    const attackVsDefenseHome = clamp((homeIntel.prediction.offenseRating - awayIntel.prediction.defenseRating) / 100, -0.35, 0.35);
+    const attackVsDefenseAway = clamp((awayIntel.prediction.offenseRating - homeIntel.prediction.defenseRating) / 100, -0.35, 0.35);
+    const psychBoostHome = clamp((homeIntel.prediction.psychIndex - awayIntel.prediction.psychIndex) / 260, -0.22, 0.22);
+    const psychBoostAway = clamp((awayIntel.prediction.psychIndex - homeIntel.prediction.psychIndex) / 260, -0.22, 0.22);
+    const momentumWeightHome = clamp(((homeIntel.metrics.momentum5 || 0.5) - (awayIntel.metrics.momentum5 || 0.5)) * 0.22, -0.16, 0.16);
+    const momentumWeightAway = clamp(((awayIntel.metrics.momentum5 || 0.5) - (homeIntel.metrics.momentum5 || 0.5)) * 0.22, -0.16, 0.16);
+    const homeBoost = clamp((Number(engineForTeam(db, homeId)?.haTraits?.homeBoost) || 0) * 0.08, -0.12, 0.16);
+    const awayTravelPenalty = clamp((Number(engineForTeam(db, awayId)?.haTraits?.travelTilt) || 0) * 0.06, -0.12, 0.14);
+
+    lHome *= clamp(1 + attackVsDefenseHome + psychBoostHome + momentumWeightHome + homeBoost - awayTravelPenalty, 0.7, 1.42);
+    lAway *= clamp(1 + attackVsDefenseAway + psychBoostAway + momentumWeightAway, 0.7, 1.35);
+
+    lHome = clamp(lHome, 0.05, 4.5);
+    lAway = clamp(lAway, 0.05, 4.5);
+
+    const tableContextRaw = db.versus.tableContext || {};
+    const matchday = clamp(Number(opts.matchday ?? db.versus.matchday ?? 20) || 20, 1, 50);
+    const homeContext = tableContextForTeam({ teamContext: tableContextRaw[homeId], matchday, isHome: true });
+    const awayContext = tableContextForTeam({ teamContext: tableContextRaw[awayId], matchday, isHome: false });
+    const trust = clamp(Number(opts.tableContextTrust ?? db.versus.tableContextTrust ?? 0.45) || 0.45, 0, 1);
+    const drawBoostBase = ((homeContext.pressure + awayContext.pressure) / 2) * 0.14
+      + (Math.max(0, -homeContext.riskMode) + Math.max(0, -awayContext.riskMode)) * 0.08;
+    const drawBoost = clamp(drawBoostBase * trust, 0, 0.25);
+
+    const dist = probsFromLambdas(lHome, lAway, 5);
+    dist.matrix = applyDrawBoostToMatrix(dist.matrix, drawBoost);
+    const distSummary = summarizeMatrix(dist.matrix);
+    dist.pHome = distSummary.pHome;
+    dist.pDraw = distSummary.pDraw;
+    dist.pAway = distSummary.pAway;
+    dist.best = distSummary.best;
+
+    const cardsExpected = clamp((homeData.cardsRate + awayData.cardsRate + leagueCtx.avgCardsTotal)/2, 1.8, 8.8);
+    const cornersExpected = clamp(
+      (homeData.cornersFor + awayData.cornersAgainst + homeData.cornersAgainst + awayData.cornersFor + leagueCtx.avgCornersTotal) / 3,
+      5.5,
+      15.5
+    );
+
+    return {
+      lHome,
+      lAway,
+      pHome: dist.pHome,
+      pDraw: dist.pDraw,
+      pAway: dist.pAway,
+      matrix: dist.matrix,
+      maxGoals: dist.maxGoals,
+      best: dist.best,
+      cardsExpected,
+      cornersExpected,
+      leagueCtx,
+      teams: { homeData, awayData },
+      factors: {
+        homeForm,
+        awayForm,
+        pace,
+        homeAdv,
+        attackHome,
+        attackAway,
+        defenseAwayWeakness,
+        defenseHomeWeakness,
+        leagueScale,
+        teamBias: { homeBias, awayBias },
+        breakdown: {
+          leagueBase: { home: leagueCtx.avgGoalsHome, away: leagueCtx.avgGoalsAway },
+          homeAttackBoost: attackHome,
+          awayDefenseWeakness: defenseAwayWeakness,
+          awayAttackPenalty: attackAway,
+          marketMultiplier: 1,
+          homeDefenseStrength: defenseHomeWeakness,
+          homeFormMomentum: homeForm.momentum,
+          awayFormMomentum: awayForm.momentum,
+          statsAttackHome: statsHome.attack,
+          statsAttackAway: statsAway.attack,
+          statsSample: { home: statsHome.sample, away: statsAway.sample },
+          tableFactorGoals: {
+            homeRisk: homeContext.riskMode,
+            awayRisk: awayContext.riskMode,
+            homePressure: homeContext.pressure,
+            awayPressure: awayContext.pressure,
+            matchday
+          },
+          drawBoost,
+          tableContextTrust: trust,
+          leagueScale,
+          teamBias: { home: homeBias, away: awayBias },
+          intelligenceBlend: {
+            home: homeIntel.prediction,
+            away: awayIntel.prediction,
+            attackVsDefenseHome,
+            attackVsDefenseAway,
+            psychBoostHome,
+            psychBoostAway,
+            momentumWeightHome,
+            momentumWeightAway
+          }
+        }
+      },
+      tableContext: { home: homeContext, away: awayContext, drawBoost, matchday, trust }
+    };
+  }
+
+  function sanitizeFiniteNumber(value, fallback){
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function normalizeLearning(rawLearning){
+    const learning = rawLearning && typeof rawLearning === "object" ? structuredClone(rawLearning) : {};
+    learning.schemaVersion = Number(learning.schemaVersion) || 2;
+    learning.leagueScale ||= {};
+    learning.teamBias ||= {};
+    learning.temperatureByLeague ||= {};
+    learning.trainingSet ||= [];
+    learning.metrics ||= { global: null, byLeague: {} };
+    learning.metrics.byLeague ||= {};
+    learning.marketTrust = clamp(sanitizeFiniteNumber(learning.marketTrust, 0.35), 0, 0.85);
+    learning.lrLeague = clamp(sanitizeFiniteNumber(learning.lrLeague, 0.12), 0.01, 0.35);
+    learning.lrTeam = clamp(sanitizeFiniteNumber(learning.lrTeam, 0.08), 0.01, 0.25);
+    Object.keys(learning.leagueScale).forEach((leagueId)=>{
+      const item = learning.leagueScale[leagueId] || {};
+      learning.leagueScale[leagueId] = {
+        home: clamp(sanitizeFiniteNumber(item.home, 1), 0.75, 1.35),
+        away: clamp(sanitizeFiniteNumber(item.away, 1), 0.75, 1.35)
+      };
+    });
+    Object.keys(learning.teamBias).forEach((teamId)=>{
+      const item = learning.teamBias[teamId] || {};
+      learning.teamBias[teamId] = {
+        attack: clamp(sanitizeFiniteNumber(item.attack, 0), -0.35, 0.35),
+        defense: clamp(sanitizeFiniteNumber(item.defense, 0), -0.35, 0.35)
+      };
+    });
+    Object.keys(learning.temperatureByLeague).forEach((leagueId)=>{
+      learning.temperatureByLeague[leagueId] = clamp(sanitizeFiniteNumber(learning.temperatureByLeague[leagueId], 1), 0.7, 1.6);
+    });
+    if(Array.isArray(learning.trainingSet)) learning.trainingSet = learning.trainingSet.slice(-400);
+    return learning;
+  }
+
+  function normalizeImport(raw){
+    const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const root = data?.liga ? data : data?.league ? { liga: data.league, ...data } : data;
+    const league = root?.liga || root?.league;
+    if(!league) throw new Error("JSON inválido: falta liga/league");
+
+    const leagueName = league.name || league.nombre || "Liga importada";
+    const leagueCode = league.code || league.codigo || "";
+    const leagueId = league.id ? String(league.id) : uid("lg");
+    const leagueType = normalizeCompetitionType(league.type || league.tipo || "league");
+
+    const teamsSrc = league.equipos || league.teams || [];
+    const teams = teamsSrc.map(t=>([
+      {
+        id: t.id ? String(t.id) : uid("tm"),
+        name: t.name || t.nombre || "Equipo",
+        apiTeamId: t.apiTeamId ? String(t.apiTeamId) : "",
+        leagueId
+      },
+      (t.jugadores || t.players || []).map(p=>({
+        id: p.id ? String(p.id) : uid("pl"),
+        name: p.name || p.nombre || "Jugador",
+        teamId: t.id ? String(t.id) : null,
+        pos: p.pos || p.position || "",
+        rating: clamp(sanitizeFiniteNumber(p.rating, 5), 1, 10)
+      }))
+    ]));
+
+    const flatTeams = teams.map(x=>x[0]);
+    const players = teams.flatMap(x=>x[1].map(p=>({ ...p, teamId: p.teamId || x[0].id })));
+    const predictions = Array.isArray(root.predictions) ? root.predictions.filter(Boolean).map((pred)=>({
+      ...pred,
+      id: pred.id || uid("pred"),
+      createdAt: pred.createdAt || new Date().toISOString(),
+      lambdaHome: clamp(sanitizeFiniteNumber(pred.lambdaHome, 1.2), 0.05, 4.5),
+      lambdaAway: clamp(sanitizeFiniteNumber(pred.lambdaAway, 1), 0.05, 4.5),
+      pHome: clamp(sanitizeFiniteNumber(pred.pHome, 0.33), 0, 1),
+      pDraw: clamp(sanitizeFiniteNumber(pred.pDraw, 0.34), 0, 1),
+      pAway: clamp(sanitizeFiniteNumber(pred.pAway, 0.33), 0, 1),
+      resolved: Boolean(pred.resolved)
+    })) : [];
+
+    return {
+      league: { id: leagueId, name: leagueName, code: leagueCode, type: leagueType },
+      teams: flatTeams,
+      players,
+      tracker: Array.isArray(root.tracker) ? root.tracker : [],
+      versus: root.versus || null,
+      predictions,
+      learning: normalizeLearning(root.learning)
+    };
+  }
+
+
+  function sectionToPos(section){
+    const sec = String(section||"").toLowerCase();
+    if(sec.includes("portero")) return "GK";
+    if(sec.includes("defensa")) return "DF";
+    if(sec.includes("centrocamp") || sec.includes("medio")) return "MF";
+    if(sec.includes("delanter")) return "FW";
+    return "OT";
+  }
+
+  function normalizePlayerPos(pos){
+    const token = String(pos||"").trim().toLowerCase();
+    if(!token) return "OT";
+    if(["gk","por","pt"].includes(token) || token.includes("portero") || token.includes("goalkeeper")) return "GK";
+    if(["df","def"].includes(token) || token.includes("defensa") || token.includes("defender")) return "DF";
+    if(["mf","mid"].includes(token) || token.includes("centrocamp") || token.includes("medio") || token.includes("midfielder")) return "MF";
+    if(["fw","att","st","cf"].includes(token) || token.includes("delanter") || token.includes("forward") || token.includes("striker")) return "FW";
+    return "OT";
+  }
+
+  function parseImportedSquadRow(row, fallbackPos){
+    const flag = pickFirstString(row.flag, row.flagEmoji, row.countryFlag, row.nationalityFlag, row.country?.flag, row.nationality?.flag);
+    return {
+      name: String(row.name||"").trim(),
+      pos: fallbackPos,
+      rating: 5,
+      number: pickFirstNumber(row.number, row.shirtNumber, row.shirt, row.jersey, row.dorsal, row["#"]),
+      age: pickFirstNumber(row.age, row.edad),
+      appearances: pickFirstNumber(row.appearances, row.apps, row.matches, row.matchesPlayed, row.partidos, row.titularidades),
+      minutes: pickFirstNumber(row.minutes, row.min, row.minutos, row.playedMinutes),
+      goals: pickFirstNumber(row.goals, row.goles),
+      assists: pickFirstNumber(row.assists, row.asistencias),
+      yellowCards: pickFirstNumber(row.yellowCards, row.yellow, row.amarillas, row.bookings),
+      redCards: pickFirstNumber(row.redCards, row.red, row.rojas),
+      flag
+    };
+  }
+
+  function parseManualSquadText(raw){
+    const tokens = String(raw||"")
+      .split(/\r?\n/)
+      .map((line)=>line.trim())
+      .filter(Boolean);
+
+    const isNumericToken = (value)=>/^-?\d+(?:[.,]\d+)?$/.test(String(value||"").trim());
+    const toNumber = (value)=>{
+      const n = Number(String(value).replace(",", "."));
+      return Number.isFinite(n) ? n : null;
+    };
+    const isHeaderToken = (value)=>{
+      const token = String(value||"").trim().toLowerCase();
+      return ["#","name","nombre","edad","age","min","mins","minutos","pj","apps","goals","goles","a","asistencias","amarillas","rojas"].includes(token);
+    };
+    const isSectionToken = (value)=>{
+      const token = String(value||"").trim().toLowerCase();
+      return token.includes("portero") || token.includes("defensa") || token.includes("centrocamp") || token.includes("medio") || token.includes("delanter") || token.includes("otros");
+    };
+    const looksLikeName = (value)=>{
+      const token = String(value||"").trim();
+      if(!token || isHeaderToken(token) || isSectionToken(token) || isNumericToken(token)) return false;
+      return /[\p{L}]/u.test(token);
+    };
+
+    const rows = [];
+    let i = 0;
+    let currentPos = "OT";
+    while(i < tokens.length){
+      const token = tokens[i];
+      if(isSectionToken(token)){
+        currentPos = sectionToPos(token);
+        i += 1;
+        continue;
+      }
+      if(isHeaderToken(token)){
+        i += 1;
+        continue;
+      }
+
+      let number = null;
+      let name = "";
+      if(isNumericToken(token) && looksLikeName(tokens[i+1])){
+        number = toNumber(token);
+        name = tokens[i+1];
+        i += 2;
+      }else if(looksLikeName(token)){
+        name = token;
+        i += 1;
+      }else{
+        i += 1;
+        continue;
+      }
+
+      const numericFields = [];
+      while(i < tokens.length && isNumericToken(tokens[i]) && numericFields.length < 7){
+        const n = toNumber(tokens[i]);
+        if(Number.isFinite(n)) numericFields.push(n);
+        i += 1;
+      }
+
+      rows.push({
+        name,
+        pos: currentPos,
+        rating: 5,
+        number,
+        age: numericFields[0] ?? null,
+        appearances: numericFields[1] ?? null,
+        minutes: numericFields[2] ?? null,
+        goals: numericFields[3] ?? null,
+        assists: numericFields[4] ?? null,
+        yellowCards: numericFields[5] ?? null,
+        redCards: numericFields[6] ?? null,
+        flag: ""
+      });
+    }
+
+    return rows.filter((row)=>row.name);
+  }
+
+  function renderSquadSection(title, players, playerHeatMap={}){
+    const rows = players.map(pl=>`
+      <div class="fl-squad-row">
+        <div class="fl-squad-cell-center">${pl.number ?? "-"}</div>
+        <div class="fl-squad-name">${pl.flag ? `<span class="fl-flag">${pl.flag}</span>` : ""}<span>${pl.name}</span></div>
+        <div class="fl-squad-cell-center">
+          <select class="fl-squad-pos-select" data-player-pos="${pl.id}">
+            ${[["GK","Portero"],["DF","Defensa"],["MF","Centrocampista"],["FW","Delantero"],["OT","Otro"]].map(([key,label])=>`<option value="${key}" ${normalizePlayerPos(pl.pos)===key?"selected":""}>${label}</option>`).join("")}
+          </select>
+        </div>
+        <div class="fl-squad-heat">
+          <div class="fl-squad-heat-track"><div class="fl-squad-heat-fill" style="width:${clamp(Number(playerHeatMap[normalizePersonName(pl.name)]) || 50, 0, 100)}%;background:${psychHeatColor(playerHeatMap[normalizePersonName(pl.name)])};"></div></div>
+          <div class="fl-mini" style="text-align:center">${Math.round(clamp(Number(playerHeatMap[normalizePersonName(pl.name)]) || 50, 0, 100))}</div>
+        </div>
+        <div class="fl-squad-cell-center">${pl.age ?? "-"}</div>
+        <div class="fl-squad-cell-center">${pl.appearances ?? "-"}</div>
+        <div class="fl-squad-cell-center">${pl.minutes ?? "-"}</div>
+        <div class="fl-squad-cell-center">${pl.goals ?? 0}</div>
+        <div class="fl-squad-cell-center">${pl.assists ?? 0}</div>
+        <div class="fl-squad-cell-center">${pl.yellowCards ? pl.yellowCards : 0}</div>
+        <div class="fl-squad-cell-center">${pl.redCards ? pl.redCards : 0}</div>
+      </div>
+    `).join("");
+
+    return `
+      <div class="fl-card">
+        <div class="fl-squad-section-title">${title}</div>
+        <div class="fl-squad-table">
+          <div class="fl-squad-head">
+            <div class="fl-squad-cell-center">#</div>
+            <div>Nombre</div>
+            <div class="fl-squad-cell-center">Pos</div>
+            <div class="fl-squad-cell-center">Pulse</div>
+            <div class="fl-squad-cell-center">Edad</div>
+            <div class="fl-squad-cell-center">👕</div>
+            <div class="fl-squad-cell-center">Min</div>
+            <div class="fl-squad-cell-center">⚽</div>
+            <div class="fl-squad-cell-center">A</div>
+            <div class="fl-squad-cell-center"><span class="fl-card-yellow" title="Amarillas"></span></div>
+            <div class="fl-squad-cell-center"><span class="fl-card-red" title="Rojas"></span></div>
           </div>
-          <div style="display:flex; gap:6px; flex-shrink:0;">
-            <button class="mc-btn" data-editmatch="${mid}" style="padding:6px 10px;">Editar</button>
-            <button class="mc-btn" data-delmatch="${mid}" style="padding:6px 10px; opacity:.9;">Eliminar</button>
+          ${rows || `<div class="fl-muted">Sin jugadores</div>`}
+        </div>
+      </div>
+    `;
+  }
+
+  function render(view="home", payload={}){
+    ensureStyles();
+    const app = document.getElementById("app");
+    if(!app) return;
+    const db = loadDb();
+
+    const tabs = ["home","liga","tracker","versus","momentum","bitacora","market","brain"];
+    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
+
+    app.innerHTML = `
+      <div class="fl-wrap">
+        <div class="fl-row fl-card">
+          <div class="fl-title">⚽ Football Lab limpio</div>
+          ${nav}
+        </div>
+        <div id="fl-content"></div>
+      </div>
+    `;
+
+    app.querySelectorAll("[data-tab]").forEach(btn=>{
+      btn.onclick = ()=>render(btn.dataset.tab);
+    });
+
+    const content = document.getElementById("fl-content");
+
+    if(view==="home"){
+      content.innerHTML = `
+        <div class="fl-card">
+          <div><b>Arquitectura:</b> Liga → Equipos → Jugadores + Tracker + Versus.</div>
+          <div class="fl-muted">Importa/pega JSON y sincroniza IDs reales desde football-data.org.</div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Backup completo de Football Lab</div>
+          <div class="fl-muted">Exporta e importa <b>todos</b> los datos guardados en footballDB para recuperar tu estado completo.</div>
+          <textarea id="jsonBackup" class="fl-text" placeholder='{"settings":{},"leagues":[],"teams":[],"players":[],"tracker":[]}'></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="fillBackup">Cargar backup actual</button>
+            <button class="fl-btn" id="downloadBackup">Descargar .json</button>
+            <button class="fl-btn" id="runBackupImport">Importar backup completo</button>
+            <span id="backupStatus" class="fl-muted"></span>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Importar JSON</div>
+          <textarea id="jsonImport" class="fl-text" placeholder='{"liga":{"name":"Premier League","equipos":[...]}}'></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="runImport">Importar</button>
+            <span id="importStatus" class="fl-muted"></span>
           </div>
         </div>
       `;
-    }).join("") || `<span style="opacity:.75;">Aún no hay partidos registrados en esta temporada.</span>`;
+      const backupEl = document.getElementById("jsonBackup");
+      const backupStatusEl = document.getElementById("backupStatus");
+      const setBackupStatus = (msg)=>{ backupStatusEl.textContent = msg; };
 
-    // wire edit/delete for last matches
-    document.querySelectorAll("[data-editmatch]").forEach(btn=>{
-      btn.onclick = ()=>{
-        const mid = btn.getAttribute("data-editmatch");
-        openEditMatchModal(db, p.id, mid);
+      const fillBackupTextarea = ()=>{
+        backupEl.value = JSON.stringify(loadDb(), null, 2);
+        setBackupStatus("✅ Backup completo cargado en el cuadro.");
       };
-    });
 
-    document.querySelectorAll("[data-delmatch]").forEach(btn=>{
-      btn.onclick = ()=>{
-        const mid = btn.getAttribute("data-delmatch");
-        const mm = db.matches.find(x=>x.id===mid);
-        if(!mm) return;
-        const ok = confirm(`Eliminar este partido?
-${mm.date} • score ${fmt(mm.score,2)}`);
-        if(!ok) return;
-        db.matches = db.matches.filter(x=>x.id!==mid);
-        saveDB(db);
-        openLab("player",{playerId: p.id});
+      document.getElementById("fillBackup").onclick = ()=>{
+        fillBackupTextarea();
       };
-    });
 
-    // Save match inline
-    document.getElementById("pl_saveMatch").onclick = ()=>{
-      const num = (id)=>{ const el = document.getElementById(id); return el ? (parseFloat(el.value)||0) : 0; };
+      document.getElementById("downloadBackup").onclick = ()=>{
+        try{
+          const snapshot = JSON.stringify(loadDb(), null, 2);
+          backupEl.value = snapshot;
+          const blob = new Blob([snapshot], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          const now = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+          a.href = url;
+          a.download = `footballlab-backup-${now}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          setBackupStatus("✅ Backup descargado.");
+        }catch(err){
+          setBackupStatus(`❌ ${String(err.message || err)}`);
+        }
+      };
 
-      const date = document.getElementById("pl_date").value || iso;
-      const minutes = num("pl_minutes");
-      const goals = num("pl_goals");
-      const assists = num("pl_assists");
-
-      const passC = num("pl_passC");
-      const passA = Math.max(1, num("pl_passA"));
-      const keyPasses = num("pl_keyPasses");
-      const progPasses = num("pl_progPasses");
-
-      const duelsWon = num("pl_duelsWon");
-      const duelsTot = Math.max(1, num("pl_duelsTot"));
-      const dribblesWon = num("pl_dribblesWon");
-      const defActions = num("pl_defActions");
-
-      const shotsOn = num("pl_shotsOn");
-      const losses = num("pl_posLost");
-      const yellow = num("pl_yellow");
-      const red = num("pl_red");
-
-      const saves = num("pl_saves");
-      const conceded = num("pl_conceded");
-      const cleanSheet = num("pl_cleanSheet");
-
-      const xG = parseFloat(document.getElementById("pl_xG")?.value) || 0;
-      const xA = parseFloat(document.getElementById("pl_xA")?.value) || 0;
-      const possessionLost = num("pl_posLost");
-
-      const longBallC = num("pl_longBallC");
-      const longBallA = Math.max(1, num("pl_longBallA"));
-      const ownHalfPassC = num("pl_ownHalfC");
-      const ownHalfPassA = Math.max(1, num("pl_ownHalfA"));
-      const oppHalfPassC = num("pl_oppHalfC");
-      const oppHalfPassA = Math.max(1, num("pl_oppHalfA"));
-
-      const highClaims = num("pl_highClaims");
-      const punches = num("pl_punches");
-
-
-
-
-      // --- Preserve SofaScore clip JSON (if provided) ---
-      let _clip = null;
-      let _clipStats = null;
-      let _clipCtx = null;
-      let _clipMeta = null;
-      try{
-        const rawClip = (document.getElementById("pl_json")?.value || "").trim();
-        if(rawClip){
-          _clip = JSON.parse(rawClip);
-          _clipStats = _clip?.stats || null;
-          _clipCtx = _clip?.context || _clip?.match || null;
-          _clipMeta = {
-            schemaVersion: _clip?.schemaVersion || null,
-            source: _clip?.source || null,
-            capturedAt: _clip?.capturedAt || null,
-            matchId: _clipCtx?.matchId || _clipCtx?.id || null,
-            matchTitle: _clipCtx?.matchTitle || _clipCtx?.title || _clipCtx?.name || null,
-            rating: (_clipCtx?.rating ?? null)
-          };
-          const clipDate = (_clipCtx?.date && /^\d{4}-\d{2}-\d{2}/.test(String(_clipCtx.date)))
-            ? String(_clipCtx.date).slice(0,10)
-            : null;
-          if(!document.getElementById("pl_date")?.value && clipDate){
-            document.getElementById("pl_date").value = clipDate;
+      document.getElementById("runBackupImport").onclick = ()=>{
+        try{
+          const raw = backupEl.value.trim();
+          if(!raw) throw new Error("Pega un JSON de backup completo.");
+          const parsed = JSON.parse(raw);
+          if(!parsed || typeof parsed !== "object" || Array.isArray(parsed)){
+            throw new Error("El backup debe ser un objeto JSON válido.");
           }
+          saveDb(parsed);
+          const normalized = loadDb();
+          saveDb(normalized);
+          backupEl.value = JSON.stringify(normalized, null, 2);
+          setBackupStatus("✅ Backup importado. Football Lab quedó restaurado.");
+        }catch(err){
+          setBackupStatus(`❌ ${String(err.message || err)}`);
         }
-      }catch(e){
-        // ignore invalid json on save
-      }
+      };
 
-      const score = computeMatchScore(db, p.position, {
-        minutes, goals, assists, yellow, red, losses,
-        shotsOn, keyPasses, progPasses, passC, passA,
-        dribblesWon, duelsWon, duelsTot, defActions,
-        saves, conceded, cleanSheet,
-        xG, xA, possessionLost,
-        longBallC, longBallA,
-        ownHalfPassC, ownHalfPassA,
-        oppHalfPassC, oppHalfPassA,
-        highClaims, punches,
-          // extra SofaScore fields (kept even if UI has no inputs)
-          touches: clipNum(_clipStats?.touches, 0),
-          crosses: clipNum(_clipStats?.crosses, 0),
-          crossesGood: clipNum(_clipStats?.crossesGood, 0),
-          passPct: (_clipStats?.passPct ?? null),
-          longBallPct: (_clipStats?.longBallPct ?? null),
-          dribbles: clipNum(_clipStats?.dribbles, 0),
-          dribblesGood: clipNum(_clipStats?.dribblesGood, 0),
-          tackles: clipNum(_clipStats?.tackles, 0),
-          tacklesGood: clipNum(_clipStats?.tacklesGood, 0),
-          interceptions: clipNum(_clipStats?.interceptions, 0),
-          clearances: clipNum(_clipStats?.clearances, 0),
-          recoveries: clipNum(_clipStats?.recoveries, 0),
-          groundDuels: clipNum(_clipStats?.groundDuels, 0),
-          groundDuelsGood: clipNum(_clipStats?.groundDuelsGood, 0)
-        });
+      fillBackupTextarea();
 
-      // Elo-style update (performance vs expected), scaled by minutes
-      const expected = p.rating;
-      const upd = updateEloRating(expected, score, minutes, 0.20);
-      const newRating = upd.newRating;
-
-
-      function clipNum(v, d=0){
-        const n = Number(v);
-        return Number.isFinite(n) ? n : d;
-      }
-
-      // append log
-      db.matches.push({
-        id: uid("m"),
-        playerId: p.id,
-        teamId: p.teamId,
-        season: season,
-        leagueId: (document.getElementById("ml_league")?.value || leagueId),
-        date,
-        position: p.position,
-        stats: {
-          minutes, goals, assists, yellow, red, losses,
-          shotsOn, keyPasses, progPasses, passC, passA,
-          dribblesWon, duelsWon, duelsTot, defActions,
-          saves, conceded, cleanSheet,
-          xG, xA, possessionLost,
-          longBallC, longBallA,
-          ownHalfPassC, ownHalfPassA,
-          oppHalfPassC, oppHalfPassA,
-          highClaims, punches
-        },
-        score,
-        oldRating: expected,
-        newRating
-      });
-
-      // update player base
-      p.rating = newRating;
-      saveDB(db);
-
-      document.getElementById("pl_savedInfo").innerHTML =
-        `Guardado ✅ score <b>${fmt(score,2)}</b> • base ${fmt(newRating,2)} • efectivo ${fmt(getEffectiveRating(db,p.id),2)}`;
-
-      // refresh profile to recalc aggregates
-      openLab("player",{playerId: p.id});
-    };
-  }
-
-  function aggregateSeason(logs){
-    const agg = {
-      matches: logs.length,
-      minutes: 0,
-      goals: 0,
-      assists: 0,
-      shotsOn: 0,
-      keyPasses: 0,
-      progPasses: 0,
-      passC: 0,
-      passA: 0,
-      dribblesWon: 0,
-      duelsWon: 0,
-      duelsTot: 0,
-      defActions: 0,
-      possessionLost: 0,
-      longBallC: 0,
-      longBallA: 0,
-      highClaims: 0,
-      punches: 0,
-      passPct: 0,
-      duelPct: 0,
-      per90: {goals:0, assists:0, keyPasses:0, progPasses:0}
-    };
-
-    logs.forEach(m=>{
-      const s = m.stats || {};
-      agg.minutes += (s.minutes||0);
-      agg.goals += (s.goals||0);
-      agg.assists += (s.assists||0);
-      agg.shotsOn += (s.shotsOn||0);
-      agg.keyPasses += (s.keyPasses||0);
-      agg.progPasses += (s.progPasses||0);
-      agg.passC += (s.passC||0);
-      agg.passA += (s.passA||0);
-      agg.dribblesWon += (s.dribblesWon||0);
-      agg.duelsWon += (s.duelsWon||0);
-      agg.duelsTot += (s.duelsTot||0);
-      agg.defActions += (s.defActions||0);
-      agg.possessionLost += (s.possessionLost||0);
-      agg.longBallC += (s.longBallC||0);
-      agg.longBallA += (s.longBallA||0);
-      agg.highClaims += (s.highClaims||0);
-      agg.punches += (s.punches||0);
-    });
-
-    agg.passPct = agg.passC / Math.max(1, agg.passA);
-    agg.duelPct = agg.duelsWon / Math.max(1, agg.duelsTot);
-
-    const m90 = agg.minutes / 90;
-    if(m90 > 0){
-      agg.per90.goals = agg.goals / m90;
-      agg.per90.assists = agg.assists / m90;
-      agg.per90.keyPasses = agg.keyPasses / m90;
-      agg.per90.progPasses = agg.progPasses / m90;
-    }
-    return agg;
-  }
-
-// ---- XI Builder ----
-  function renderLineup(db, teamId){
-    const team = db.teams.find(t=>t.id===teamId);
-    const v = document.getElementById("fl_view");
-    if(!team){ v.innerHTML = `<div class="fl-card">Equipo no encontrado.</div>`; return; }
-
-    const players = db.players.filter(p=>p.teamId===teamId);
-
-    if(!db.lineups[teamId]) db.lineups[teamId] = {};
-    const lineupStore = db.lineups[teamId];
-
-    v.innerHTML = `
-      <div class="fl-card">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <div>
-            <div style="font-weight:900;">XI Builder — ${escapeHtml(team.name)}</div>
-            <div class="fl-small">Elige la formación y asigna tus 11 titulares.</div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="mc-btn" id="goTeam">Volver al equipo</button>
-            <button class="mc-btn" id="goLogger">Match Logger</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="fl-card">
-        <div class="fl-row">
-          <div>
-            <div class="fl-h3">Formación</div>
-            <select class="fl-select" id="formation"></select>
-          </div>
-          <div>
-            <div class="fl-h3">Tip</div>
-            <div class="fl-small">LM/RM se tratan como extremos (LW/RW) para fuerza.</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:800;">Asignación de posiciones</div>
-        <div id="slots" style="margin-top:10px;"></div>
-        <div class="fl-row" style="margin-top:10px;">
-          <button class="mc-btn" id="saveLineup">Guardar XI</button>
-          <button class="mc-btn" id="autoFill">Auto-llenar (por posición)</button>
-        </div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:800;">Vista rápida de fuerza (XI)</div>
-        <div id="strengthPreview" class="fl-small" style="margin-top:8px;"></div>
-      </div>
-    `;
-
-    document.getElementById("goTeam").onclick = ()=>openLab("team",{teamId});
-    document.getElementById("goLogger").onclick = ()=>openLab("logger",{teamId});
-
-    const formationSel = document.getElementById("formation");
-    Object.keys(FORMATIONS).forEach(f=>{
-      const o = document.createElement("option");
-      o.value = f;
-      o.textContent = (f==="433"?"4-3-3":f==="442"?"4-4-2":"3-4-3");
-      formationSel.appendChild(o);
-    });
-    // Custom 4-line editable formation
-    {
-      const o = document.createElement("option");
-      o.value = "custom4";
-      o.textContent = "Custom (4 líneas)";
-      formationSel.appendChild(o);
-    }
-
-
-    function buildSlots(){
-      const f = formationSel.value;
-
-      // ---- Custom 4-line formation (editable) ----
-      if(f === "custom4"){
-        if(!lineupStore[f]){
-          lineupStore[f] = {
-            defN: 4, midN: 3, attN: 3,
-            gk: "",
-            def: Array(4).fill(""),
-            mid: Array(3).fill(""),
-            att: Array(3).fill(""),
-            defRoles: ["LB","CB","CB","RB"],
-            midRoles: ["CDM","CM","CAM"],
-            attRoles: ["LW","ST","RW"]
-          };
-        }
-        const saved = lineupStore[f];
-
-        // normalize lengths
-        function ensureLen(arr, n){ 
-          const a = Array.isArray(arr) ? arr.slice(0,n) : [];
-          while(a.length < n) a.push("");
-          return a;
-        }
-        function ensureRoles(arr, n, defRole){
-          const a = Array.isArray(arr) ? arr.slice(0,n) : [];
-          while(a.length < n) a.push(defRole);
-          return a;
-        }
-
-        const wrap = document.getElementById("slots");
-        wrap.innerHTML = `
-          <div class="fl-card" style="margin:0 0 10px 0;">
-            <div style="font-weight:800;">Formación editable (4 líneas)</div>
-            <div class="fl-small" style="margin-top:6px;">Ajusta la cantidad por línea. Total (DEF+MID+ATT) debe ser 10.</div>
-            <div class="fl-row" style="margin-top:10px; flex-wrap:wrap; gap:10px;">
-              <div style="min-width:120px;">
-                <div class="fl-h3">DEF</div>
-                <input class="fl-input" id="c4_defN" type="number" min="3" max="6" step="1" value="${saved.defN}">
-              </div>
-              <div style="min-width:120px;">
-                <div class="fl-h3">MID</div>
-                <input class="fl-input" id="c4_midN" type="number" min="2" max="6" step="1" value="${saved.midN}">
-              </div>
-              <div style="min-width:120px;">
-                <div class="fl-h3">ATT</div>
-                <input class="fl-input" id="c4_attN" type="number" min="1" max="4" step="1" value="${saved.attN}">
-              </div>
-              <div style="flex:1 1 auto;">
-                <div class="fl-h3">Total</div>
-                <div id="c4_total" class="fl-small" style="margin-top:10px;font-weight:800;"></div>
-              </div>
-            </div>
-          </div>
-
-          ${renderLineSection("GK","🧤 Portero", 1)}
-          ${renderLineSection("DEF","🛡 Defensas", saved.defN)}
-          ${renderLineSection("MID","⚙️ Medios", saved.midN)}
-          ${renderLineSection("ATT","🔥 Ataque", saved.attN)}
-        `;
-
-        function renderLineSection(key, title, n){
-          const rows = [];
-          for(let i=0;i<n;i++){
-            const idRole = `c4_${key}_role_${i}`;
-            const idSel  = `c4_${key}_pid_${i}`;
-            const showRole = (key!=="GK");
-            rows.push(`
-              <div class="fl-row" style="margin-top:8px;flex-wrap:wrap;gap:10px;align-items:flex-end;">
-                <div style="min-width:220px;">
-                  <div style="font-weight:800;">${title} ${key==="GK"?"":`#${i+1}`}</div>
-                </div>
-                ${showRole ? `
-                  <div style="min-width:180px;">
-                    <div class="fl-h3">Rol</div>
-                    <select class="fl-select" id="${idRole}"></select>
-                  </div>` : ``}
-                <div style="flex:1 1 260px;">
-                  <div class="fl-h3">Jugador</div>
-                  <select class="fl-select" id="${idSel}"></select>
-                </div>
-              </div>
-            `);
-          }
-          return `
-            <div class="fl-card" style="margin:10px 0;">
-              <div style="font-weight:800;">${title}</div>
-              ${rows.join("")}
-            </div>
-          `;
-        }
-
-        // wire counts
-        const defNEl = document.getElementById("c4_defN");
-        const midNEl = document.getElementById("c4_midN");
-        const attNEl = document.getElementById("c4_attN");
-        const totalEl = document.getElementById("c4_total");
-
-        function refreshTotal(){
-          const defN = clamp(parseInt(defNEl.value||"4",10), 3, 6);
-          const midN = clamp(parseInt(midNEl.value||"3",10), 2, 6);
-          const attN = clamp(parseInt(attNEl.value||"3",10), 1, 4);
-          const total = defN + midN + attN;
-          totalEl.innerHTML = `DEF ${defN} + MID ${midN} + ATT ${attN} = <b>${total}</b> (debe ser 10)`;
-          totalEl.style.color = (total===10) ? "" : "var(--danger, #ff6b6b)";
-          return {defN, midN, attN, total};
-        }
-
-        function applyCounts(){
-          const {defN, midN, attN, total} = refreshTotal();
-          // keep whatever user set, but warn if not 10
-          saved.defN = defN; saved.midN = midN; saved.attN = attN;
-          saved.def = ensureLen(saved.def, defN);
-          saved.mid = ensureLen(saved.mid, midN);
-          saved.att = ensureLen(saved.att, attN);
-          saved.defRoles = ensureRoles(saved.defRoles, defN, "CB");
-          saved.midRoles = ensureRoles(saved.midRoles, midN, "CM");
-          saved.attRoles = ensureRoles(saved.attRoles, attN, "ST");
-          lineupStore[f] = saved;
-          // rebuild UI with new counts
-          buildSlots();
-        }
-
-        defNEl.onchange = applyCounts;
-        midNEl.onchange = applyCounts;
-        attNEl.onchange = applyCounts;
-
-        refreshTotal();
-
-        // fill player pools once
-        const byId = new Map(players.map(p=>[p.id,p]));
-        function fillPlayerSelect(sel, pickedId){
-          sel.innerHTML = `<option value="">(vacío)</option>`;
-          players
-            .slice()
-            .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id))
-            .forEach(p=>{
-              const eff = getEffectiveRating(db, p.id);
-              const o = document.createElement("option");
-              o.value = p.id;
-              o.textContent = `${p.name} • ${p.position} • base ${fmt(p.rating,1)} • eff ${fmt(eff,1)}`;
-              sel.appendChild(o);
-            });
-          if(pickedId) sel.value = pickedId;
-        }
-
-        function fillRoleSelect(sel, options, picked){
-          sel.innerHTML = "";
-          options.forEach(code=>{
-            const o = document.createElement("option");
-            o.value = code;
-            o.textContent = POS_LABELS[code] || code;
-            sel.appendChild(o);
+      document.getElementById("runImport").onclick = ()=>{
+        try{
+          const parsed = normalizeImport(document.getElementById("jsonImport").value.trim());
+          db.leagues = [parsed.league, ...db.leagues.filter(l=>l.id!==parsed.league.id)];
+          parsed.teams.forEach((incomingTeam)=>{
+            const team = getOrCreateTeamByName(db, incomingTeam.name, incomingTeam);
+            if(!team.apiTeamId && incomingTeam.apiTeamId) team.apiTeamId = incomingTeam.apiTeamId;
+            team.meta = { ...(team.meta||{}), ...(incomingTeam.meta||{}) };
+            ensureTeamInLeague(db, team.id, parsed.league.id);
           });
-          if(picked && options.includes(picked)) sel.value = picked;
+          db.players = [...db.players.filter(p=>!parsed.players.some(ip=>ip.id===p.id)), ...parsed.players];
+          if(Array.isArray(parsed.tracker) && parsed.tracker.length) db.tracker = [...db.tracker, ...parsed.tracker];
+          if(parsed.versus) db.versus = { ...db.versus, ...parsed.versus };
+          if(Array.isArray(parsed.predictions) && parsed.predictions.length) db.predictions = [...db.predictions, ...parsed.predictions];
+          if(parsed.learning){
+            db.learning = normalizeLearning({
+              ...db.learning,
+              ...parsed.learning,
+              leagueScale: { ...(db.learning?.leagueScale||{}), ...(parsed.learning.leagueScale||{}) },
+              teamBias: { ...(db.learning?.teamBias||{}), ...(parsed.learning.teamBias||{}) },
+              metrics: {
+                global: parsed.learning.metrics?.global || db.learning?.metrics?.global || null,
+                byLeague: { ...(db.learning?.metrics?.byLeague||{}), ...(parsed.learning.metrics?.byLeague||{}) }
+              }
+            });
+          }
+          db.settings.selectedLeagueId = parsed.league.id;
+          saveDb(db);
+          document.getElementById("importStatus").textContent = "✅ JSON importado";
+        }catch(err){
+          document.getElementById("importStatus").textContent = `❌ ${String(err.message||err)}`;
         }
+      };
+      return;
+    }
 
-        // GK
-        {
-          const sel = document.getElementById("c4_GK_pid_0");
-          fillPlayerSelect(sel, saved.gk);
-          sel.onchange = ()=>{ saved.gk = sel.value||""; previewStrength(); };
-        }
+    if(view==="liga"){
+      if(!db.settings.selectedLeagueId && db.leagues[0]) db.settings.selectedLeagueId = db.leagues[0].id;
+      const leagueCards = db.leagues.map(l=>{
+        const teams = getTeamsForLeague(db, l.id);
+        const open = db.settings.selectedLeagueId===l.id;
+        const names = teams.map(t=>`<div class="fl-row" style="justify-content:space-between;"><span>${t.name}</span><button class="fl-btn" data-open-team="${t.id}">Abrir</button></div>`).join("");
+        const typeLabel = ({ league:"Liga", cup:"Copa", continental:"Continental", friendly:"Amistoso" })[normalizeCompetitionType(l.type)] || "Liga";
+        return `<div class="fl-card"><button class="fl-btn" data-select-league="${l.id}" style="width:100%;text-align:left;">${open?"▾":"▸"} ${l.name}</button><div class="fl-muted" style="margin-top:6px;">${typeLabel} · ${teams.length} equipos</div><div style="display:${open?"block":"none"};margin-top:8px;">${names||"<div class='fl-muted'>Sin equipos</div>"}</div></div>`;
+      }).join("");
 
-        const DEF_ROLE_OPTS = ["LB","CB","RB"];
-        const MID_ROLE_OPTS = ["CDM","CM","CAM"];
-        const ATT_ROLE_OPTS = ["LW","ST","RW"];
+      content.innerHTML = `
+        <div class="fl-card fl-grid two">
+          <div>
+            <div class="fl-muted">Alta manual de liga</div>
+            <div class="fl-row">
+              <input id="leagueName" class="fl-input" placeholder="Nombre" />
+              <input id="leagueCode" class="fl-input" placeholder="Code" />
+              <select id="leagueType" class="fl-select">
+                <option value="league">Liga</option>
+                <option value="cup">Copa</option>
+                <option value="continental">Continental</option>
+                <option value="friendly">Amistoso</option>
+              </select>
+              <button id="addLeague" class="fl-btn">Agregar</button>
+            </div>
+          </div>
+          <div>
+            <div class="fl-muted">Agregar equipo a la liga seleccionada</div>
+            <div class="fl-row">
+              <input id="teamName" class="fl-input" placeholder="Equipo" />
+              <button class="fl-btn" id="addTeamLiga">Agregar</button>
+            </div>
+          </div>
+        </div>
+        ${leagueCards || '<div class="fl-card"><div class="fl-muted">Sin ligas</div></div>'}
+      `;
 
-        // DEF
-        for(let i=0;i<saved.defN;i++){
-          const selRole = document.getElementById(`c4_DEF_role_${i}`);
-          const selPid  = document.getElementById(`c4_DEF_pid_${i}`);
-          fillRoleSelect(selRole, DEF_ROLE_OPTS, saved.defRoles[i]||"CB");
-          fillPlayerSelect(selPid, saved.def[i]||"");
-          selRole.onchange = ()=>{ saved.defRoles[i]=selRole.value; previewStrength(); };
-          selPid.onchange  = ()=>{ saved.def[i]=selPid.value||""; previewStrength(); };
-        }
-        // MID
-        for(let i=0;i<saved.midN;i++){
-          const selRole = document.getElementById(`c4_MID_role_${i}`);
-          const selPid  = document.getElementById(`c4_MID_pid_${i}`);
-          fillRoleSelect(selRole, MID_ROLE_OPTS, saved.midRoles[i]||"CM");
-          fillPlayerSelect(selPid, saved.mid[i]||"");
-          selRole.onchange = ()=>{ saved.midRoles[i]=selRole.value; previewStrength(); };
-          selPid.onchange  = ()=>{ saved.mid[i]=selPid.value||""; previewStrength(); };
-        }
-        // ATT
-        for(let i=0;i<saved.attN;i++){
-          const selRole = document.getElementById(`c4_ATT_role_${i}`);
-          const selPid  = document.getElementById(`c4_ATT_pid_${i}`);
-          fillRoleSelect(selRole, ATT_ROLE_OPTS, saved.attRoles[i]||"ST");
-          fillPlayerSelect(selPid, saved.att[i]||"");
-          selRole.onchange = ()=>{ saved.attRoles[i]=selRole.value; previewStrength(); };
-          selPid.onchange  = ()=>{ saved.att[i]=selPid.value||""; previewStrength(); };
-        }
+      document.getElementById("addLeague").onclick = ()=>{
+        const name = document.getElementById("leagueName").value.trim();
+        if(!name) return;
+        const lg = {
+          id: uid("lg"),
+          name,
+          code: document.getElementById("leagueCode").value.trim(),
+          type: normalizeCompetitionType(document.getElementById("leagueType").value)
+        };
+        db.leagues.push(lg);
+        db.settings.selectedLeagueId = lg.id;
+        saveDb(db);
+        render("liga");
+      };
+      document.getElementById("addTeamLiga").onclick = ()=>{
+        const name = document.getElementById("teamName").value.trim();
+        if(!name || !db.settings.selectedLeagueId) return;
+        const team = getOrCreateTeamByName(db, name, { meta: { stadium:"", city:"", capacity:"" } });
+        ensureTeamInLeague(db, team.id, db.settings.selectedLeagueId);
+        saveDb(db);
+        render("liga");
+      };
+      content.querySelectorAll("[data-select-league]").forEach(btn=>btn.onclick = ()=>{
+        db.settings.selectedLeagueId = btn.getAttribute("data-select-league");
+        saveDb(db);
+        render("liga");
+      });
+      content.querySelectorAll("[data-open-team]").forEach(btn=>btn.onclick = ()=> render("equipo", { teamId: btn.getAttribute("data-open-team") }));
+      return;
+    }
 
-        previewStrength();
+    if(view==="equipos"){
+      const options = db.leagues.map(l=>`<option value="${l.id}" ${db.settings.selectedLeagueId===l.id?"selected":""}>${l.name}</option>`).join("");
+      const leagueTeams = getTeamsForLeague(db, db.settings.selectedLeagueId);
+      const rows = leagueTeams.map(t=>`<tr><td><input class="fl-input" data-edit-team-name="${t.id}" value="${t.name}"></td><td><input class="fl-input" data-edit-team-api="${t.id}" value="${t.apiTeamId||""}"></td><td><button class="fl-btn" data-save-team="${t.id}">Guardar</button></td></tr>`).join("");
+      content.innerHTML = `
+        <div class="fl-card">
+          <div class="fl-row">
+            <select id="selLeague" class="fl-select"><option value="">Liga</option>${options}</select>
+            <input id="teamName" class="fl-input" placeholder="Equipo" />
+            <input id="teamApi" class="fl-input" placeholder="API Team ID" />
+            <button class="fl-btn" id="addTeam">Agregar</button>
+            <button class="fl-btn" id="syncTeams">Sync /competitions/{id}/teams</button>
+            <span id="tmStatus" class="fl-muted"></span>
+          </div>
+        </div>
+        <div class="fl-card"><table class="fl-table"><thead><tr><th>Equipo (editable)</th><th>API ID</th><th></th></tr></thead><tbody>${rows||"<tr><td colspan='3'>Sin equipos</td></tr>"}</tbody></table></div>
+      `;
+      document.getElementById("selLeague").onchange = (e)=>{ db.settings.selectedLeagueId = e.target.value; saveDb(db); render("equipos"); };
+      document.getElementById("addTeam").onclick = ()=>{
+        const name = document.getElementById("teamName").value.trim();
+        if(!name || !db.settings.selectedLeagueId) return;
+        const team = getOrCreateTeamByName(db, name, { apiTeamId: document.getElementById("teamApi").value.trim() });
+        if(!team.apiTeamId) team.apiTeamId = document.getElementById("teamApi").value.trim();
+        ensureTeamInLeague(db, team.id, db.settings.selectedLeagueId);
+        saveDb(db);
+        render("equipos");
+      };
+      document.getElementById("syncTeams").onclick = async ()=>{
+        const status = document.getElementById("tmStatus");
+        try{
+          status.textContent = "Sincronizando equipos...";
+          if(!db.settings.selectedLeagueId) throw new Error("Selecciona liga");
+          if(!db.settings.apiToken) throw new Error("Falta token");
+          const data = await apiFetch(`/competitions/${db.settings.selectedLeagueId}/teams?season=${db.settings.season}`, db.settings.apiToken);
+          const incoming = (data.teams||[]).map(t=>({ name: t.name, apiTeamId: String(t.id) }));
+          incoming.forEach((teamRaw)=>{
+            const team = getOrCreateTeamByName(db, teamRaw.name, { apiTeamId: teamRaw.apiTeamId });
+            if(!team.apiTeamId) team.apiTeamId = teamRaw.apiTeamId;
+            ensureTeamInLeague(db, team.id, db.settings.selectedLeagueId);
+          });
+          localStorage.setItem(`${TEAMS_CACHE_PREFIX}${db.settings.selectedLeagueId}`, JSON.stringify(incoming));
+          saveDb(db);
+          render("equipos");
+        }catch(err){ status.textContent = `Error: ${String(err.message||err)}`; }
+      };
+      content.querySelectorAll("[data-save-team]").forEach(btn=>btn.onclick = ()=>{
+        const teamId = btn.getAttribute("data-save-team");
+        const team = db.teams.find((t)=>t.id===teamId);
+        if(!team) return;
+        const name = content.querySelector(`[data-edit-team-name="${teamId}"]`)?.value.trim();
+        const apiTeamId = content.querySelector(`[data-edit-team-api="${teamId}"]`)?.value.trim();
+        if(name) team.name = name;
+        team.apiTeamId = apiTeamId || "";
+        saveDb(db);
+        render("equipos");
+      });
+      return;
+    }
+
+    if(view==="jugadores"){
+      const teamOptions = db.teams.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
+      const rows = db.players.map(p=>`<tr><td>${p.name}</td><td>${db.teams.find(t=>t.id===p.teamId)?.name||"-"}</td><td>${p.pos||"-"}</td><td>${p.rating}</td></tr>`).join("");
+      content.innerHTML = `
+        <div class="fl-card"><div class="fl-row">
+          <input id="playerName" class="fl-input" placeholder="Jugador" />
+          <select id="playerTeam" class="fl-select"><option value="">Equipo</option>${teamOptions}</select>
+          <input id="playerPos" class="fl-input" placeholder="Pos" />
+          <input id="playerRating" class="fl-input" type="number" min="1" max="10" step="0.1" value="5" />
+          <button id="addPlayer" class="fl-btn">Agregar</button>
+        </div></div>
+        <div class="fl-card"><table class="fl-table"><thead><tr><th>Jugador</th><th>Equipo</th><th>Pos</th><th>Rating</th></tr></thead><tbody>${rows||"<tr><td colspan='4'>Sin jugadores</td></tr>"}</tbody></table></div>
+      `;
+      document.getElementById("addPlayer").onclick = ()=>{ db.players.push({ id: uid("pl"), name: document.getElementById("playerName").value.trim(), teamId: document.getElementById("playerTeam").value, pos: normalizePlayerPos(document.getElementById("playerPos").value.trim()), rating: Number(document.getElementById("playerRating").value)||5 }); saveDb(db); render("jugadores"); };
+      return;
+    }
+
+    if(view==="equipo"){
+      const teamId = payload.teamId || payload?.id;
+      const team = db.teams.find((t)=>t.id===teamId);
+      if(!team){
+        content.innerHTML = `<div class="fl-card">Equipo no encontrado.</div>`;
         return;
       }
+      ensureTeamIntState(team);
+      team.meta ||= { stadium:"", city:"", capacity:"" };
+      const players = db.players.filter(p=>p.teamId===team.id);
+      const byPos = { GK:[], DF:[], MF:[], FW:[], OT:[] };
+      players.forEach(p=>{ const pos = normalizePlayerPos(p.pos); (byPos[pos]||byPos.OT).push(p); });
+      Object.values(byPos).forEach(list=>list.sort((a,b)=>{
+        const aNum = Number.isFinite(Number(a.number)) ? Number(a.number) : 999;
+        const bNum = Number.isFinite(Number(b.number)) ? Number(b.number) : 999;
+        if(aNum!==bNum) return aNum - bNum;
+        return String(a.name||"").localeCompare(String(b.name||""), "es", { sensitivity:"base" });
+      }));
+      const teamMatches = db.tracker
+        .filter(m=>m.homeId===team.id || m.awayId===team.id)
+        .sort((a,b)=>{
+          const aOrder = Number.isFinite(a.manualOrder) ? a.manualOrder : null;
+          const bOrder = Number.isFinite(b.manualOrder) ? b.manualOrder : null;
+          if(aOrder!==null || bOrder!==null){
+            if(aOrder===null) return 1;
+            if(bOrder===null) return -1;
+            if(aOrder!==bOrder) return aOrder - bOrder;
+          }
+          return compareByDateAsc(b, a);
+        });
+      const behavior = buildTeamBehaviorSeries(db, team.id);
+      const engine = recomputeTeamGlobalEngine(db, team.id) || getOrCreateDiagProfile(db, team.id, team.name).engineV1;
+      const intel = computeTeamIntelligencePanel(db, team.id);
+      const gaugeAngle = Math.round(clamp(Number(intel.metrics.powerIndex) || 0, 0, 100) * 3.6);
+      const sections = [["Porteros","GK"],["Defensas","DF"],["Centrocampistas","MF"],["Delanteros","FW"],["Otros","OT"]]
+        .map(([title,key])=>renderSquadSection(title, byPos[key]||[], intel.playerHeat?.byName || {})).join("");
+      const teamCompetitions = getTeamCompetitions(db, team.id);
+      const teamCompetitionIds = new Set(teamCompetitions.map(c=>c.id));
+      const availableCompetitions = db.leagues
+        .filter((league)=>!teamCompetitionIds.has(league.id))
+        .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+      const linkCompetitionOptions = availableCompetitions
+        .map((league)=>`<option value="${league.id}">${league.name} (${league.type || "league"})</option>`)
+        .join("");
+      const competitionSummary = teamCompetitions.length
+        ? teamCompetitions.map(c=>`${c.name} (${c.type || "league"})`).join(" • ")
+        : "Sin competencias vinculadas";
+      const futureMatches = (team.futureMatches || [])
+        .filter(m=>{
+          const d = diffDaysFromToday(m.date);
+          return Number.isFinite(d) && d>=0 && d<=21;
+        })
+        .sort((a,b)=>compareByDateAsc(a,b));
+      const intRows = futureMatches.map(match=>{
+        const rival = db.teams.find(t=>t.id===match.rivalTeamId);
+        const out = calculateInterestSignals({ team, rival, match, allFutureMatches: team.futureMatches || [], db });
+        const rivalOut = rival ? calculateInterestSignals({ team: rival, rival: team, match:{ ...match, rivalryBoost:false }, allFutureMatches: rival.futureMatches || [], db }) : { interest: 50 };
+        return { match, rival, out, rivalOut, gap: Math.round(out.interest - rivalOut.interest) };
+      });
+      const agendaCards = intRows.map(({ match, rival, out })=>`
+        <div class="fl-card" style="margin-bottom:8px;background:#111722;">
+          <div class="fl-row" style="justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div>
+              <div style="font-weight:800;">${team.name} vs ${rival?.name || "Rival"}</div>
+              <div class="fl-mini">${match.competition || "Liga"} • ${match.date || "-"} • ${match.isHome ? "Local" : "Visitante"}</div>
+            </div>
+            <span class="fl-chip ${out.interest>=70?"ok":out.interest>=45?"warn":"bad"}">${out.interest>=75?"Must-win":out.rotationProbable==="Alta"?"Gestión":out.interest<45?"Trámite":"Volátil"}</span>
+          </div>
+          <div class="fl-row" style="margin-top:8px;gap:14px;">
+            <div class="fl-mini">Interés ${Math.round(out.interest)}</div>
+            <div style="flex:1;min-width:140px;height:8px;border-radius:999px;background:#0d1117;border:1px solid #30363d;overflow:hidden;"><div style="width:${Math.round(out.interest)}%;height:100%;background:linear-gradient(90deg,#2ea043,#f2cc60,#f85149);"></div></div>
+            <div class="fl-mini">Confianza ${Math.round(out.confidence)}</div>
+            <div class="fl-mini">Rotación ${out.rotationProbable}</div>
+            <div class="fl-mini">Mercado ${out.marketMood}</div>
+            <div class="fl-mini">${(out.reasonTags||[]).join(" · ") || "Sin razones aún"}</div>
+            <button class="fl-btn" data-open-dual-intel="${match.id}">Abrir Intel (Dual)</button>
+            <button class="fl-btn" data-edit-future-match="${match.id}">Editar partido</button>
+          </div>
+        </div>
+      `).join("");
+      const intMatrixRows = intRows.map(({ match, rival, out, rivalOut, gap })=>{
+        const heat = out.interest >= 70 ? "rgba(46,160,67,.25)" : out.interest >=45 ? "rgba(210,153,34,.2)" : "rgba(110,118,129,.25)";
+        return `<tr style="background:${heat};"><td>${match.date || "-"}<br><span class="fl-mini">vs ${rival?.name || "Rival"}</span></td><td>${Math.round(out.stakes)}</td><td>${Math.round(out.teamContext)}</td><td>${Math.round(out.windowInfo.congestionScore)}</td><td>${Math.round(out.rotationPressure/10)}</td><td>${Math.round(out.interest)}</td><td>${Math.round(rivalOut.interest)}</td><td>${gap>0?"+":""}${gap}</td><td>${Math.round(out.confidence)} ${match.marketMood==="raro"?"📉":""}</td></tr>`;
+      }).join("");
+      const next14 = (team.futureMatches || []).filter(m=>{ const d = diffDaysFromToday(m.date); return Number.isFinite(d) && d>=0 && d<=14; }).sort((a,b)=>compareByDateAsc(a,b));
+      const backToBack = next14.filter((m,i,arr)=>{
+        if(i===0) return false;
+        const d1 = parseSortableDate(arr[i-1].date);
+        const d2 = parseSortableDate(m.date);
+        return Number.isFinite(d1) && Number.isFinite(d2) && ((d2-d1)/86400000)<=3;
+      }).length;
+      const scheduleHardness = Math.round(next14.reduce((acc,m)=>acc + competitionWeight(db, m)*0.45 + stakesByTag(m.importanceTag, stakesModeFromMatch(db, m))*0.55 + stageWeight(m.stage), 0));
+      const pressureRef = intRows[0]?.out?.windowInfo?.windowPressure || { congestionLevel:"🟢" };
+      const globalRotation = pressureRef.congestionLevel==="🔴" || backToBack>=2 || next14.length>=4 ? "Alta" : next14.length>=2 ? "Media" : "Baja";
+      const patterns = buildTeamIntPatterns(db, team);
+      const matchRows = teamMatches.map((m, idx)=>{
+        const isHome = m.homeId===team.id;
+        const rival = db.teams.find(t=>t.id===(isHome ? m.awayId : m.homeId));
+        const league = db.leagues.find(l=>l.id===m.leagueId);
+        const home = db.teams.find(t=>t.id===m.homeId)?.name || "-";
+        const away = db.teams.find(t=>t.id===m.awayId)?.name || "-";
+        const moveUpDisabled = idx===0 ? "disabled" : "";
+        const moveDownDisabled = idx===teamMatches.length-1 ? "disabled" : "";
+        return `<tr>
+          <td>${m.date||"-"}</td>
+          <td>${league?.name || "Liga"}</td>
+          <td>${home} ${m.homeGoals}-${m.awayGoals} ${away}</td>
+          <td>${rival?.name || "-"}</td>
+          <td class="fl-row" style="gap:6px;">
+            <button class="fl-btn" data-move-match="${m.id}" data-move-delta="-1" ${moveUpDisabled}>⬆️</button>
+            <button class="fl-btn" data-move-match="${m.id}" data-move-delta="1" ${moveDownDisabled}>⬇️</button>
+            <button class="fl-btn" data-open-stats-modal="${m.id}">Estadísticas</button>
+            <button class="fl-btn" data-open-engine-modal="${m.id}">EPA/EMA/HAE</button>
+            <button class="fl-btn" data-edit-match="${m.id}">Editar</button>
+            <button class="fl-btn" data-delete-match="${m.id}">Borrar</button>
+          </td>
+        </tr>`;
+      }).join("");
+      const resultTeamOptions = getTeamsForLeague(db, db.settings.selectedLeagueId || "")
+        .map(t=>`<option value="${t.id}" ${t.id===team.id?"selected":""}>${t.name}</option>`)
+        .join("");
 
-      // ---- Preset formations ----
-      const slots = FORMATIONS[f] || FORMATIONS["433"];
-
-      if(!lineupStore[f]) lineupStore[f] = {};
-      const saved = lineupStore[f];
-
-      const wrap = document.getElementById("slots");
-      wrap.innerHTML = slots.map((pos, idx)=>{
-        const npos = normalizePos(pos);
-        const label = POS_LABELS[npos] || `${npos}`;
-        const selId = `slot_${idx}`;
-        return `
-          <div class="fl-card" style="margin:8px 0;">
+      content.innerHTML = `
+        <div class="fl-card">
+          <div class="fl-row" style="justify-content:space-between;align-items:center;gap:10px;">
+            <div style="font-size:30px;font-weight:900;">${team.name}</div>
             <div class="fl-row">
-              <div style="min-width:220px;">
-                <div style="font-weight:800;">${escapeHtml(label)}</div>
-                <div class="fl-small">Slot ${idx+1}</div>
-              </div>
-              <div style="flex:2 1 auto;">
-                <select class="fl-select" id="${selId}" data-pos="${npos}"></select>
+              <button class="fl-btn" id="linkLeagueBtn">Vincular liga</button>
+              <button class="fl-btn" id="editTeamName">Editar nombre</button>
+              <button class="fl-btn" id="deleteTeamBtn" style="border-color:#da3633;color:#ff7b72;">Eliminar equipo</button>
+            </div>
+          </div>
+          <div>Estadio: <b>${team.meta.stadium || '-'}</b> ${team.meta.city?`(${team.meta.city})`:''}</div>
+          <div>Capacidad: <b>${team.meta.capacity || '-'}</b></div>
+          <div class="fl-mini" style="margin-top:4px;">Competiciones vinculadas: <b>${teamCompetitions.length}</b> · ${competitionSummary}</div>
+          <div id="linkLeaguePanel" class="fl-row" style="margin-top:8px;display:none;">
+            <select id="linkLeagueSelect" class="fl-select">
+              <option value="">Selecciona competencia</option>
+              ${linkCompetitionOptions}
+            </select>
+            <button class="fl-btn" id="confirmLinkLeague">Guardar vínculo</button>
+            <span class="fl-mini" id="linkLeagueStatus"></span>
+          </div>
+          <div class="fl-row" style="margin-top:8px;">${["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"].map(t=>`<span class="fl-muted" style="padding:4px 6px;border-bottom:${t==='PLANTILLA'?'2px solid #ff3b69':'2px solid transparent'};">${t}</span>`).join("")}</div>
+        </div>
+        <div class="fl-card fl-row">
+          <input id="teamStadium" class="fl-input" placeholder="Estadio" value="${team.meta.stadium || ''}">
+          <input id="teamCity" class="fl-input" placeholder="Ciudad" value="${team.meta.city || ''}">
+          <input id="teamCapacity" class="fl-input" placeholder="Capacidad" value="${team.meta.capacity || ''}">
+          <button class="fl-btn" id="saveMeta">Guardar</button>
+          <button class="fl-btn" id="backLiga">Volver a ligas</button>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">Importar plantilla (JSON o texto pegado)</div>
+          <textarea id="squadImport" class="fl-text" placeholder='Pega JSON o texto copiado (#, Name, Age, MIN...)'></textarea>
+          <div class="fl-row" style="margin-top:8px;"><button class="fl-btn" id="runSquadImport">Importar plantilla</button><span id="squadStatus" class="fl-muted"></span></div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Team Intelligence Panel v2</div>
+          <div class="fl-row" style="align-items:center;gap:16px;flex-wrap:wrap;">
+            <div style="width:180px;height:180px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(#1f6feb ${gaugeAngle}deg,#2d333b ${gaugeAngle}deg);padding:10px;">
+              <div style="width:100%;height:100%;border-radius:50%;background:#0f141b;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+                <div class="fl-mini">TEAM POWER INDEX</div>
+                <div style="font-size:38px;font-weight:900;line-height:1;">${Math.round(intel.metrics.powerIndex)}</div>
+                <div class="fl-mini">/100</div>
               </div>
             </div>
+            <div style="flex:1;min-width:300px;">
+              <div class="fl-kpi" style="margin-bottom:8px;">
+                <div><span class="fl-mini">Tendencia</span><b>${intel.metrics.trend}</b></div>
+                <div><span class="fl-mini">Consistencia</span><b>${Math.round(intel.metrics.consistencyScore)}%</b></div>
+                <div><span class="fl-mini">Momentum 5</span><b>${Math.round((intel.metrics.momentum5||0)*100)}%</b></div>
+                <div><span class="fl-mini">ELO dinámico</span><b>${intel.prediction.eloDynamic}</b></div>
+                <div><span class="fl-mini">Off/Def</span><b>${Math.round(intel.prediction.offenseRating)} / ${Math.round(intel.prediction.defenseRating)}</b></div>
+              </div>
+              <div style="height:140px;"><canvas id="teamPowerHistoryChart"></canvas></div>
+            </div>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">📈 Momentum dinámico (xG vs resultado real vs esperado)</div>
+          <div style="height:220px;"><canvas id="teamMomentumTripleChart"></canvas></div>
+        </div>
+        <div class="fl-row" style="gap:10px;align-items:stretch;">
+          <div class="fl-card" style="flex:1;min-width:320px;">
+            <div style="font-weight:800;margin-bottom:8px;">🧠 Estado psicológico</div>
+            <div class="fl-kpi" style="margin-bottom:8px;">
+              <div><span class="fl-mini">Agresividad</span><b>${Math.round(intel.psych.aggressiveness)}</b></div>
+              <div><span class="fl-mini">Resiliencia</span><b>${Math.round(intel.psych.resilience)}</b></div>
+              <div><span class="fl-mini">Volatilidad</span><b>${Math.round(intel.psych.volatility)}</b></div>
+              <div><span class="fl-mini">Fatiga</span><b>${Math.round(intel.psych.fatigue)}</b></div>
+              <div><span class="fl-mini">Pulse plantilla</span><b>${Math.round(intel.psych.playerPulse || intel.playerHeat?.summary?.teamPsychPulse || 50)}</b></div>
+              <div><span class="fl-mini">Eventos narrados</span><b>${Math.round(intel.playerHeat?.summary?.narrativeEvents || 0)}</b></div>
+            </div>
+            <div style="height:230px;"><canvas id="teamPsychRadar"></canvas></div>
+          </div>
+          <div class="fl-card" style="flex:1;min-width:320px;">
+            <div style="font-weight:800;margin-bottom:8px;">🧬 Tactical DNA Map</div>
+            <div style="height:280px;"><canvas id="teamTacticalRadar"></canvas></div>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">🔮 Motor de predicción integrado</div>
+          <div class="fl-kpi">
+            <div><span class="fl-mini">Rating ofensivo</span><b>${Math.round(intel.prediction.offenseRating)}</b></div>
+            <div><span class="fl-mini">Rating defensivo</span><b>${Math.round(intel.prediction.defenseRating)}</b></div>
+            <div><span class="fl-mini">Índice psicológico</span><b>${Math.round(intel.prediction.psychIndex)}</b></div>
+            <div><span class="fl-mini">Índice consistencia</span><b>${Math.round(intel.prediction.consistencyIndex)}</b></div>
+            <div><span class="fl-mini">Home Boost (engine)</span><b>${(Number(engine?.haTraits?.homeBoost)||0).toFixed(2)}</b></div>
+            <div><span class="fl-mini">Travel Tilt</span><b>${(Number(engine?.haTraits?.travelTilt)||0).toFixed(2)}</b></div>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
+          <div class="fl-row" style="margin-bottom:10px;">
+            <input id="resDate" type="date" class="fl-input" />
+            <select id="resHome" class="fl-select"><option value="">Local</option>${resultTeamOptions}</select>
+            <input id="resHG" type="number" class="fl-input" placeholder="GL" style="width:74px" />
+            <input id="resAG" type="number" class="fl-input" placeholder="GV" style="width:74px" />
+            <select id="resAway" class="fl-select"><option value="">Visitante</option>${resultTeamOptions}</select>
+            <button class="fl-btn" id="addResult">Guardar partido</button>
+            <span id="resultStatus" class="fl-muted"></span>
+          </div>
+          <table class="fl-table">
+            <thead><tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Rival</th><th>Acciones</th></tr></thead>
+            <tbody>${matchRows || "<tr><td colspan='5'>Sin partidos todavía</td></tr>"}</tbody>
+          </table>
+        </div>
+        <div class="fl-card">
+          <div class="fl-row" style="justify-content:space-between;align-items:center;">
+            <div style="font-weight:900;font-size:18px;">🎯 Interés & Prioridades (INT)</div>
+            <div class="fl-row">
+              <button class="fl-btn" id="teamIntConfigBtn">⚙️ Config INT del Equipo</button>
+              <button class="fl-btn" id="addFutureMatchBtn">+ Próximo partido</button>
+              <select id="intModeLens" class="fl-select"><option value="empresa" ${team.intProfile.modeLens==="empresa"?"selected":""}>Modo Empresa</option><option value="guerra" ${team.intProfile.modeLens==="guerra"?"selected":""}>Modo Guerra</option></select>
+            </div>
+          </div>
+          <div class="fl-mini" style="margin-top:6px;">${team.intProfile.modeLens==="guerra"?"Modo Guerra: lectura agresiva (presión y rivalidad).":"Modo Empresa: lectura de gestión (rotación y control de riesgo)."}</div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">1) Agenda Próxima (7–21 días)</div>
+          ${agendaCards || "<div class='fl-muted'>Sin partidos futuros en ventana 21 días.</div>"}
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">2) Matriz por partido (heatmap)</div>
+          <table class="fl-table"><thead><tr><th>Partido</th><th>Stakes</th><th>Contexto</th><th>Ventana</th><th>Rotación</th><th>Interés Eq.</th><th>Interés Rival</th><th>Gap</th><th>Confianza</th></tr></thead><tbody>${intMatrixRows || "<tr><td colspan='9'>Sin datos de agenda.</td></tr>"}</tbody></table>
+        </div>
+        <div class="fl-row" style="gap:10px;align-items:stretch;">
+          <div class="fl-card" style="flex:1;min-width:320px;">
+            <div style="font-weight:800;margin-bottom:8px;">3) Window Pressure (14 días)</div>
+            <div class="fl-kpi">
+              <div><span class="fl-mini">Partidos 7d</span><b>${(intRows[0]?.out?.windowInfo?.windowPressure?.matches7d ?? 0)}</b></div>
+              <div><span class="fl-mini">Partidos 14d</span><b>${next14.length}</b></div>
+              <div><span class="fl-mini">Dureza acumulada</span><b>${scheduleHardness}</b></div>
+              <div><span class="fl-mini">Congestión</span><b>${pressureRef.congestionLevel}</b></div>
+              <div><span class="fl-mini">Rotación global</span><b>${globalRotation}</b></div>
+            </div>
+          </div>
+          <div class="fl-card" style="flex:1;min-width:320px;">
+            <div style="font-weight:800;margin-bottom:8px;">4) Historial “Modo Trámite”</div>
+            <div class="fl-row" style="margin-bottom:8px;">${patterns.badges.map(b=>`<span class='fl-chip'>${b}</span>`).join(" ")}</div>
+            <div class="fl-mini">Drop low-stakes: ${patterns.drop} • Varianza: ${patterns.variance} • Pre-big dip: ${patterns.preBigDrop}</div>
+          </div>
+        </div>
+        ${sections}
+      `;
+      document.getElementById("teamIntConfigBtn").onclick = ()=>{
+        const profile = team.intProfile || {};
+        const priorityCompetition = prompt("Competición prioridad A (Liga/UCL/Copa)", profile.priorityCompetition || "Liga");
+        if(priorityCompetition===null) return;
+        const seasonGoal = prompt("Objetivo temporada (titulo/top4/descenso/nada)", profile.seasonGoal || profile.seasonObjective || "top4");
+        const squadDepth = prompt("Profundidad de plantilla (1-5)", String(profile.squadDepth || 3));
+        const coachRotation = prompt("Rotación del entrenador (1-5)", String(profile.coachRotation || profile.coachRotationPolicy || 3));
+        const styleTags = prompt("Style tags (coma): conservador, agresivo, empate...", Array.isArray(profile.styleTags) ? profile.styleTags.join(", ") : "");
+        const derbyRivals = prompt("Derby rivals (nombre o ID, coma)", Array.isArray(profile.derbyRivals) ? profile.derbyRivals.join(", ") : "");
+        profile.priorityCompetition = String(priorityCompetition || "Liga").trim() || "Liga";
+        profile.seasonGoal = String(seasonGoal || "top4").trim() || "top4";
+        profile.seasonObjective = profile.seasonGoal;
+        profile.squadDepth = clamp(Number(squadDepth) || 3, 1, 5);
+        profile.coachRotation = clamp(Number(coachRotation) || 3, 1, 5);
+        profile.coachRotationPolicy = profile.coachRotation;
+        profile.styleTags = String(styleTags || "").split(",").map(s=>s.trim()).filter(Boolean);
+        profile.psychTags = [...profile.styleTags];
+        profile.derbyRivals = String(derbyRivals || "").split(",").map(s=>s.trim()).filter(Boolean);
+        profile.rivalries = [...profile.derbyRivals];
+        team.intProfile = profile;
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
+      document.getElementById("addFutureMatchBtn").onclick = ()=>{
+        openFutureMatchModal({
+          db,
+          team,
+          onSave: ()=>render("equipo", { teamId: team.id })
+        });
+      };
+      document.getElementById("intModeLens").onchange = (e)=>{
+        team.intProfile.modeLens = e.target.value === "guerra" ? "guerra" : "empresa";
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
+      content.querySelectorAll("[data-open-dual-intel]").forEach(btn=>btn.onclick = ()=>{
+        const match = (team.futureMatches || []).find(m=>m.id===btn.getAttribute("data-open-dual-intel"));
+        if(!match) return;
+        const rival = db.teams.find(t=>t.id===match.rivalTeamId);
+        const own = calculateInterestSignals({ team, rival, match, allFutureMatches: team.futureMatches || [], db });
+        const opp = rival ? calculateInterestSignals({ team: rival, rival: team, match, allFutureMatches: rival.futureMatches || [], db }) : { interest: 50, confidence: 40 };
+        const gap = Math.round(own.interest - opp.interest);
+        const windowGap = Math.round((own.windowInfo?.congestionScore || 0) - (opp.windowInfo?.congestionScore || 0));
+        const conclusion = gap >= 20 ? "Ventaja motivacional de tu equipo." : gap <= -20 ? "Rival más activado en esta ventana." : "Gap motivacional pequeño, revisar gestión.";
+        alert([
+          `Dual Match Intel`,
+          `${team.name}: interés ${Math.round(own.interest)} | rotación ${own.rotationProbable} | confianza ${Math.round(own.confidence)}`,
+          `${rival?.name || "Rival"}: interés ${Math.round(opp.interest)} | rotación ${opp.rotationProbable || "Media"} | confianza ${Math.round(opp.confidence || 50)}`,
+          `Interest Gap: ${gap>0?"+":""}${gap}`,
+          `Gap de Ventana: ${windowGap>0?"+":""}${windowGap}`,
+          `Mercado: early ${Math.round(own.market?.earlyDrift || 0)}% / vol ${Math.round(own.market?.volatilityIndex || 0)}`,
+          `Conclusión: ${conclusion}`
+        ].join("\n"));
+      });
+      content.querySelectorAll("[data-edit-future-match]").forEach(btn=>btn.onclick = ()=>{
+        openFutureMatchModal({
+          db,
+          team,
+          matchId: btn.getAttribute("data-edit-future-match") || "",
+          onSave: ()=>render("equipo", { teamId: team.id })
+        });
+      });
+      document.getElementById("editTeamName").onclick = ()=>{
+        const name = prompt("Nuevo nombre del equipo", team.name);
+        const nextName = String(name||"").trim();
+        if(!nextName) return;
+        team.name = nextName;
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
+      document.getElementById("linkLeagueBtn").onclick = ()=>{
+        const panel = document.getElementById("linkLeaguePanel");
+        if(!panel) return;
+        panel.style.display = panel.style.display === "none" ? "flex" : "none";
+      };
+      document.getElementById("confirmLinkLeague").onclick = ()=>{
+        const leagueId = String(document.getElementById("linkLeagueSelect")?.value || "").trim();
+        const status = document.getElementById("linkLeagueStatus");
+        if(!leagueId){
+          if(status) status.textContent = "Selecciona una competencia.";
+          return;
+        }
+        ensureTeamInLeague(db, team.id, leagueId);
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
+      document.getElementById("deleteTeamBtn").onclick = ()=>{
+        if(!confirm(`¿Eliminar equipo ${team.name}? Se borrarán jugadores, partidos y vínculos.`)) return;
+        db.teams = db.teams.filter(t=>t.id!==team.id);
+        db.players = db.players.filter(p=>p.teamId!==team.id);
+        db.tracker = db.tracker.filter(m=>m.homeId!==team.id && m.awayId!==team.id);
+        db.teamCompetitions = (db.teamCompetitions || []).filter(tc=>tc.teamId!==team.id);
+        db.teams.forEach(other=>{
+          ensureTeamIntState(other);
+          other.futureMatches = (other.futureMatches || []).filter(m=>m.rivalTeamId!==team.id);
+        });
+        saveDb(db);
+        render("liga");
+      };
+      document.getElementById("backLiga").onclick = ()=>render("liga");
+      document.getElementById("saveMeta").onclick = ()=>{
+        team.meta = {
+          stadium: document.getElementById("teamStadium").value.trim(),
+          city: document.getElementById("teamCity").value.trim(),
+          capacity: document.getElementById("teamCapacity").value.trim()
+        };
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
+      content.querySelectorAll("[data-player-pos]").forEach(sel=>sel.onchange = (e)=>{
+        const playerId = sel.getAttribute("data-player-pos");
+        const player = db.players.find((x)=>x.id===playerId && x.teamId===team.id);
+        if(!player) return;
+        player.pos = normalizePlayerPos(e.target.value);
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      });
+      document.getElementById("runSquadImport").onclick = ()=>{
+        try{
+          const raw = document.getElementById("squadImport").value.trim();
+          let rows = [];
+          let importedTeamName = "";
+          if(raw.startsWith("{") || raw.startsWith("[")){
+            const data = JSON.parse(raw);
+            rows = (data.squadBySection||[]).flatMap(sec=>(sec.rows||[]).map(r=>parseImportedSquadRow(r, sectionToPos(sec.section))));
+            importedTeamName = String(data.team?.name||"").trim();
+          }else{
+            rows = parseManualSquadText(raw);
+          }
+          if(!rows.length) throw new Error("No se encontraron jugadores válidos en el texto importado");
+          if(importedTeamName){
+            team.name = importedTeamName.replace(/^Fútbol:\s*/i,"").replace(/\s*-\s*plantilla$/i,"").trim() || team.name;
+          }
+          let created=0, updated=0;
+          rows.forEach(r=>{
+            const name = String(r.name||"").trim();
+            if(!name) return;
+            let p = db.players.find(x=>x.teamId===team.id && x.name.toLowerCase()===name.toLowerCase());
+            if(!p){
+              db.players.push({ id: uid("pl"), teamId: team.id, ...r, pos: normalizePlayerPos(r.pos) });
+              created++;
+            }else{
+              p.pos = normalizePlayerPos(p.pos || r.pos);
+              p.number = r.number ?? p.number;
+              p.age = r.age ?? p.age;
+              p.appearances = r.appearances ?? p.appearances;
+              p.minutes = r.minutes ?? p.minutes;
+              p.goals = r.goals ?? p.goals;
+              p.assists = r.assists ?? p.assists;
+              p.yellowCards = r.yellowCards ?? p.yellowCards;
+              p.redCards = r.redCards ?? p.redCards;
+              p.flag = r.flag || p.flag;
+              updated++;
+            }
+          });
+          saveDb(db);
+          document.getElementById("squadStatus").textContent = `✅ Importado. Nuevos: ${created}, actualizados: ${updated}`;
+          render("equipo", { teamId: team.id });
+        }catch(err){
+          document.getElementById("squadStatus").textContent = `❌ ${String(err.message||err)}`;
+        }
+      };
+      document.getElementById("addResult").onclick = ()=>{
+        const homeId = document.getElementById("resHome").value;
+        const awayId = document.getElementById("resAway").value;
+        const status = document.getElementById("resultStatus");
+        if(!homeId || !awayId || homeId===awayId){
+          status.textContent = "Selecciona local y visitante distintos.";
+          return;
+        }
+        const leagueId = db.settings.selectedLeagueId || "";
+        if(leagueId){
+          ensureTeamInLeague(db, homeId, leagueId);
+          ensureTeamInLeague(db, awayId, leagueId);
+        }
+        db.tracker.push({
+          id: uid("tr"),
+          leagueId,
+          date: document.getElementById("resDate").value,
+          homeId,
+          awayId,
+          homeGoals: Number(document.getElementById("resHG").value)||0,
+          awayGoals: Number(document.getElementById("resAG").value)||0,
+          note: "",
+          stats: []
+        });
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      };
+      renderSimpleLineChart(
+        document.getElementById("teamPowerHistoryChart"),
+        intel.metrics.labels,
+        [{ label: "Team Power Index", data: intel.metrics.powerSeries, borderColor: "#1f6feb", backgroundColor: "rgba(31,111,235,.2)", tension: 0.25 }]
+      );
+      renderSimpleLineChart(
+        document.getElementById("teamMomentumTripleChart"),
+        intel.momentum.labels,
+        [
+          { label: "xG diferencial", data: intel.momentum.xgDifferential, borderColor: "#1f6feb", backgroundColor: "rgba(31,111,235,.15)", tension: 0.2 },
+          { label: "Resultado real", data: intel.momentum.realPerformance, borderColor: "#2ea043", backgroundColor: "rgba(46,160,67,.12)", tension: 0.2 },
+          { label: "Rendimiento esperado", data: intel.momentum.expectedPerformance, borderColor: "#d29922", backgroundColor: "rgba(210,153,34,.14)", tension: 0.2 }
+        ]
+      );
+      renderRadarChart(
+        document.getElementById("teamPsychRadar"),
+        ["Agresividad", "Resiliencia", "Volatilidad", "Fatiga mental"],
+        [intel.psych.aggressiveness, intel.psych.resilience, intel.psych.volatility, intel.psych.fatigue],
+        "#ff7b72"
+      );
+      renderRadarChart(
+        document.getElementById("teamTacticalRadar"),
+        ["Ataque directo", "Posesión", "Transiciones", "Presión", "Balón parado"],
+        [intel.tactical.directAttack, intel.tactical.possession, intel.tactical.transitions, intel.tactical.press, intel.tactical.setPieces],
+        "#58a6ff"
+      );
+      content.querySelectorAll("[data-open-stats-modal]").forEach(btn=>btn.onclick = ()=>{
+        const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-stats-modal"));
+        openStatsModal({ db, match, onSave: ()=>render("equipo", { teamId: team.id }) });
+      });
+      content.querySelectorAll("[data-open-engine-modal]").forEach(btn=>btn.onclick = ()=>{
+        const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-engine-modal"));
+        openTeamEngineModal({ db, match, team, onSave: ()=>render("equipo", { teamId: team.id }) });
+      });
+      content.querySelectorAll("[data-move-match]").forEach(btn=>btn.onclick = ()=>{
+        const matchId = btn.getAttribute("data-move-match");
+        const delta = Number(btn.getAttribute("data-move-delta"));
+        if(!matchId || !Number.isFinite(delta)) return;
+        const orderedIds = teamMatches.map(m=>m.id);
+        const idx = orderedIds.indexOf(matchId);
+        if(idx<0) return;
+        const target = idx + delta;
+        if(target<0 || target>=orderedIds.length) return;
+        [orderedIds[idx], orderedIds[target]] = [orderedIds[target], orderedIds[idx]];
+        orderedIds.forEach((id, order)=>{
+          const match = db.tracker.find(m=>m.id===id);
+          if(match) match.manualOrder = order;
+        });
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      });
+      content.querySelectorAll("[data-edit-match]").forEach(btn=>btn.onclick = ()=>{
+        const match = db.tracker.find(m=>m.id===btn.getAttribute("data-edit-match"));
+        if(!match) return;
+        const date = prompt("Fecha del partido (YYYY-MM-DD)", match.date || "") || match.date || "";
+        const homeGoals = prompt("Goles del local", String(match.homeGoals ?? 0));
+        const awayGoals = prompt("Goles del visitante", String(match.awayGoals ?? 0));
+        if(homeGoals===null || awayGoals===null) return;
+        match.date = String(date).trim();
+        match.homeGoals = Number(homeGoals)||0;
+        match.awayGoals = Number(awayGoals)||0;
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      });
+      content.querySelectorAll("[data-delete-match]").forEach(btn=>btn.onclick = ()=>{
+        const matchId = btn.getAttribute("data-delete-match");
+        const match = db.tracker.find(m=>m.id===matchId);
+        if(!match) return;
+        if(!confirm("¿Borrar este partido?")) return;
+        db.tracker = db.tracker.filter(m=>m.id!==matchId);
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+      });
+      return;
+    }
+
+    if(view==="tracker"){
+      if(!db.settings.selectedLeagueId && db.leagues[0]) db.settings.selectedLeagueId = db.leagues[0].id;
+      const leagueOptions = db.leagues.map(l=>`<option value="${l.id}" ${db.settings.selectedLeagueId===l.id?"selected":""}>${l.name}</option>`).join("");
+      const leagueTeams = db.settings.selectedLeagueId ? getTeamsForLeague(db, db.settings.selectedLeagueId) : db.teams;
+      const options = leagueTeams.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
+      const rows = db.tracker.filter(t=>!db.settings.selectedLeagueId || t.leagueId===db.settings.selectedLeagueId).map(t=>`<tr><td>${t.date||""}</td><td>${db.leagues.find(l=>l.id===t.leagueId)?.name||"-"}</td><td>${db.teams.find(x=>x.id===t.homeId)?.name||"-"}</td><td>${t.homeGoals}-${t.awayGoals}</td><td>${db.teams.find(x=>x.id===t.awayId)?.name||"-"}</td><td>${t.note||""}</td><td><button class="fl-btn" data-open-match="${t.id}">Abrir</button></td></tr>`).join("");
+      content.innerHTML = `
+        <div class="fl-card"><div class="fl-row">
+          <select id="trLeague" class="fl-select"><option value="">Liga</option>${leagueOptions}</select>
+          <input id="trDate" type="date" class="fl-input" />
+          <select id="trHome" class="fl-select"><option value="">Local</option>${options}</select>
+          <input id="trHG" type="number" class="fl-input" placeholder="GL" style="width:74px" />
+          <input id="trAG" type="number" class="fl-input" placeholder="GV" style="width:74px" />
+          <select id="trAway" class="fl-select"><option value="">Visitante</option>${options}</select>
+          <input id="trNote" class="fl-input" placeholder="Nota" />
+          <button class="fl-btn" id="addTrack">Guardar</button>
+        </div>
+        <div class="fl-row" style="margin-top:8px;">
+          <input id="trHXg" type="number" step="0.01" class="fl-input" placeholder="xG L" style="width:84px" />
+          <input id="trAXg" type="number" step="0.01" class="fl-input" placeholder="xG V" style="width:84px" />
+          <input id="trHC" type="number" class="fl-input" placeholder="Corners L" style="width:94px" />
+          <input id="trAC" type="number" class="fl-input" placeholder="Corners V" style="width:94px" />
+          <input id="trHY" type="number" class="fl-input" placeholder="Amarillas L" style="width:104px" />
+          <input id="trAY" type="number" class="fl-input" placeholder="Amarillas V" style="width:104px" />
+          <input id="trRefCards" type="number" step="0.1" class="fl-input" placeholder="Tarjetas árbitro" style="width:130px" />
+          <input id="trOddH" type="number" step="0.01" class="fl-input" placeholder="Cuota 1" style="width:84px" />
+          <input id="trOddD" type="number" step="0.01" class="fl-input" placeholder="Cuota X" style="width:84px" />
+          <input id="trOddA" type="number" step="0.01" class="fl-input" placeholder="Cuota 2" style="width:84px" />
+        </div></div>
+        <div class="fl-card"><table class="fl-table"><thead><tr><th>Fecha</th><th>Liga</th><th>Local</th><th>Marcador</th><th>Visitante</th><th>Nota</th><th></th></tr></thead><tbody>${rows||"<tr><td colspan='7'>Sin eventos</td></tr>"}</tbody></table></div>
+      `;
+      document.getElementById("trLeague").onchange = (e)=>{
+        db.settings.selectedLeagueId = e.target.value;
+        saveDb(db);
+        render("tracker");
+      };
+      document.getElementById("addTrack").onclick = ()=>{
+        const homeId = document.getElementById("trHome").value;
+        const awayId = document.getElementById("trAway").value;
+        if(!homeId || !awayId || homeId===awayId) return;
+        const leagueId = db.settings.selectedLeagueId || "";
+        if(leagueId){
+          ensureTeamInLeague(db, homeId, leagueId);
+          ensureTeamInLeague(db, awayId, leagueId);
+        }
+        db.tracker.push({
+          id: uid("tr"),
+          leagueId,
+          date: document.getElementById("trDate").value,
+          homeId,
+          awayId,
+          homeGoals: Number(document.getElementById("trHG").value)||0,
+          awayGoals: Number(document.getElementById("trAG").value)||0,
+          homeXg: pickFirstNumber(document.getElementById("trHXg").value),
+          awayXg: pickFirstNumber(document.getElementById("trAXg").value),
+          homeCorners: pickFirstNumber(document.getElementById("trHC").value),
+          awayCorners: pickFirstNumber(document.getElementById("trAC").value),
+          homeYellow: pickFirstNumber(document.getElementById("trHY").value),
+          awayYellow: pickFirstNumber(document.getElementById("trAY").value),
+          refereeCardsAvg: pickFirstNumber(document.getElementById("trRefCards").value),
+          oddsHome: pickFirstNumber(document.getElementById("trOddH").value),
+          oddsDraw: pickFirstNumber(document.getElementById("trOddD").value),
+          oddsAway: pickFirstNumber(document.getElementById("trOddA").value),
+          note: document.getElementById("trNote").value.trim(),
+          stats: []
+        });
+        saveDb(db);
+        render("tracker");
+      };
+      content.querySelectorAll("[data-open-match]").forEach(btn=>btn.onclick = ()=>render("match", { matchId: btn.getAttribute("data-open-match") }));
+      return;
+    }
+
+    if(view==="match"){
+      const match = db.tracker.find(m=>m.id===payload.matchId);
+      if(!match){
+        content.innerHTML = `<div class="fl-card">Partido no encontrado.</div>`;
+        return;
+      }
+      match.stats ||= [];
+      match.narrativeModule ||= { rawText: "", normalized: null, diagnostic: null };
+      const home = db.teams.find(t=>t.id===match.homeId);
+      const away = db.teams.find(t=>t.id===match.awayId);
+      const league = db.leagues.find(l=>l.id===match.leagueId);
+      const statsHtml = match.stats.length
+        ? statsBarsHtml(match.stats)
+        : `<div class="fl-muted">Sin estadísticas. Pega JSON para cargar.</div>`;
+      const labels = match.narrativeModule?.diagnostic?.labels || null;
+      const diagHtml = labels ? `
+        <div class="fl-mini">Minuto quiebre: <b>${match.narrativeModule.diagnostic.breakMinute ?? "N/A"}</b></div>
+        <div class="fl-grid" style="margin-top:8px;grid-template-columns:1fr;">
+          ${Object.entries(labels).map(([k,v])=>`<div><div class="fl-mini">${k.replaceAll("_"," ")}: ${(Number(v)*100).toFixed(0)}%</div><div style="height:8px;background:#242b36;border-radius:999px;"><div style="width:${clamp(Number(v)||0,0,1)*100}%;height:8px;background:#1f6feb;border-radius:999px;"></div></div></div>`).join("")}
+        </div>
+        <ul style="margin:10px 0 0 16px;">${(match.narrativeModule.diagnostic.summary||[]).map(s=>`<li class="fl-mini">${s}</li>`).join("")}</ul>
+      ` : `<div class="fl-muted">Sin diagnóstico todavía.</div>`;
+
+      content.innerHTML = `
+        <div class="fl-card">
+          <div class="fl-muted">${league?.name || "Liga"} • ${match.date || "sin fecha"}</div>
+          <div style="font-size:28px;font-weight:900;margin-top:4px;">${home?.name || "Local"} ${match.homeGoals}-${match.awayGoals} ${away?.name || "Visitante"}</div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Estadísticas</div>
+          ${statsHtml}
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">📋 Pegar relato</div>
+          <textarea id="matchNarrative" class="fl-text" placeholder="Pega el relato línea por línea con minutos.">${match.narrativeModule.rawText || ""}</textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="convertNarrative">Convertir</button>
+            <span id="narrativeStatus" class="fl-muted"></span>
+          </div>
+          <div id="normalizedEvents" class="fl-mini" style="margin-top:8px;"></div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">🕵️ Diagnóstico</div>
+          ${diagHtml}
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">➕ Guardar al perfil</div>
+          <div class="fl-row">
+            <button class="fl-btn" id="applyDiag">Aplicar al ${home?.name || "Local"} y ${away?.name || "Visitante"}</button>
+            <button class="fl-btn" id="saveStats">Guardar estadísticas</button>
+            <button class="fl-btn" id="goBackMatch">Volver</button>
+            <span id="statsStatus" class="fl-muted"></span>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">Importar estadísticas JSON</div>
+          <textarea id="statsImport" class="fl-text" placeholder='{"stats":[{"key":"Posesión","home":"67%","away":"33%"}]}'></textarea>
+        </div>
+      `;
+
+      const renderEventsPreview = ()=>{
+        const list = match.narrativeModule?.normalized?.events || [];
+        document.getElementById("normalizedEvents").innerHTML = list.length
+          ? `<b>Eventos extraídos (${list.length}):</b><br/>` + list.slice(0,30).map(e=>`${e.min ?? "?"}' • ${e.type} • ${e.team || "?"}${e.player ? ` • ${e.player}`:""}`).join("<br/>")
+          : "Sin eventos convertidos aún.";
+      };
+      renderEventsPreview();
+
+      document.getElementById("convertNarrative").onclick = ()=>{
+        const raw = document.getElementById("matchNarrative").value;
+        const parsed = extractNarratedEvents(raw, { home: home?.name || "Local", away: away?.name || "Visitante" });
+        const diagnostic = buildNarrativeDiagnostic({ match, teams: { home: home?.name || "Local", away: away?.name || "Visitante" }, parsed });
+        match.narrativeModule = {
+          rawText: raw,
+          normalized: {
+            matchId: match.id,
+            teams: { home: home?.name || "Local", away: away?.name || "Visitante" },
+            events: parsed.events,
+            counters: parsed.counters
+          },
+          diagnostic: { matchId: match.id, diagnostic }
+        };
+        saveDb(db);
+        document.getElementById("narrativeStatus").textContent = `✅ ${parsed.events.length} eventos convertidos`;
+        render("match", payload);
+      };
+
+      document.getElementById("applyDiag").onclick = ()=>{
+        if(!match.narrativeModule?.diagnostic?.diagnostic){
+          document.getElementById("statsStatus").textContent = "❌ Convierte un relato primero.";
+          return;
+        }
+        applyDiagnosticToProfiles(db, { match, diagnostic: match.narrativeModule.diagnostic.diagnostic });
+        saveDb(db);
+        document.getElementById("statsStatus").textContent = "✅ Perfil acumulado actualizado (EMA).";
+      };
+
+      document.getElementById("saveStats").onclick = ()=>{
+        try{
+          const stats = parseStatsPayload(document.getElementById("statsImport").value.trim());
+          match.stats = stats;
+          saveDb(db);
+          render("match", payload);
+        }catch(err){
+          document.getElementById("statsStatus").textContent = `❌ ${String(err.message||err)}`;
+        }
+      };
+      document.getElementById("goBackMatch").onclick = ()=>{
+        if(payload.backTeamId) return render("equipo", { teamId: payload.backTeamId });
+        render("tracker");
+      };
+      return;
+    }
+
+    if(view==="momentum"){
+      const teamOptions = db.teams.map(t=>`<option value="${t.name}">${t.name}</option>`).join("");
+      content.innerHTML = `
+        <div class="fl-card">
+          <div style="font-weight:900;font-size:20px;">📊 Momentum Lab</div>
+          <div class="fl-mini">Motor de velas, patrones y firma histórica por relato.</div>
+        </div>
+        <div class="fl-card fl-grid two">
+          <div>
+            <div class="fl-mini">Equipo A</div>
+            <select id="momTeamA" class="fl-select" style="width:100%;margin-top:4px;">${teamOptions}</select>
+          </div>
+          <div>
+            <div class="fl-mini">Equipo B</div>
+            <select id="momTeamB" class="fl-select" style="width:100%;margin-top:4px;">${teamOptions}</select>
+          </div>
+        </div>
+        <div class="fl-card">
+          <textarea id="momNarrative" class="fl-text" placeholder="Pega el relato crudo aquí"></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="momConvert">Convertir</button>
+            <button class="fl-btn" id="momGenerateDiag" disabled>Generar diagnóstico</button>
+            <button class="fl-btn" id="momSaveProfile" disabled>Guardar al perfil</button>
+            <span id="momStatus" class="fl-mini"></span>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Velas IDD (equipo A)</div>
+          <svg id="momCandleSvg" viewBox="0 0 700 220" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px"></svg>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">IDD acumulado</div>
+          <svg id="momLineSvg" viewBox="0 0 700 220" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px"></svg>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Patrones detectados</div>
+          <div id="momPatterns" class="fl-mini">Sin análisis todavía.</div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Resumen de firma</div>
+          <pre id="momSignature" class="fl-mini" style="white-space:pre-wrap"></pre>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">Diagnóstico automático</div>
+          <pre id="momDiagJson" class="fl-mini" style="white-space:pre-wrap;margin-bottom:8px;">Genera un diagnóstico para ver métricas y etiquetas.</pre>
+          <div id="momDiagSections" class="fl-mini">
+            <div><b>Resumen:</b> -</div>
+            <div><b>Quiebre:</b> -</div>
+            <div><b>Volatilidad:</b> -</div>
+            <div><b>Cierre:</b> -</div>
+            <div><b>Patrón:</b> -</div>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">⚽ Early Phase Analyzer (EPA)</div>
+          <div class="fl-grid two" style="margin-bottom:8px;">
+            <div class="fl-mini">Modo acumulativo: cada nuevo texto se mezcla con lo ya cargado para ver la evolución completa del partido.</div>
+            <div class="fl-mini" style="display:flex;align-items:flex-end;">Función secundaria: no reemplaza el análisis de momentum actual.</div>
+          </div>
+          <textarea id="epaNarrative" class="fl-text" placeholder="Pega más relato (minuto a minuto). Se acumula automáticamente."></textarea>
+          <textarea id="epaStatsInput" class="fl-text" style="margin-top:8px;" placeholder='(Opcional) Pega JSON de estadísticas: {"kind":"match_stats", ...}'></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="epaAnalyze">Actualizar EPA</button>
+            <button class="fl-btn" id="epaInjectStats">Inyectar stats al EPA</button>
+            <button class="fl-btn" id="epaReset">Reiniciar EPA</button>
+            <button class="fl-btn" id="epaSaveProfile" disabled>Guardar firma temprana al equipo</button>
+            <span id="epaStatus" class="fl-mini"></span>
+          </div>
+          <div class="fl-card" style="margin-top:10px;">
+            <div style="font-weight:700;margin-bottom:8px;">Movimiento psicológico EMA sobre velas de intensidad</div>
+            <svg id="epaPsychSvg" viewBox="0 0 700 220" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px"></svg>
+          </div>
+          <div id="epaCards" class="fl-grid two" style="margin-top:10px;gap:10px;"></div>
+          <pre id="epaJson" class="fl-mini" style="white-space:pre-wrap;margin-top:10px;">Sin análisis EPA.</pre>
+          <ul id="epaText" class="fl-mini" style="margin:8px 0 0 18px;"></ul>
+        </div>
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">📈 Live Projection Engine (LPE)</div>
+          <div class="fl-mini" style="margin-bottom:8px;">Acumulativo por <code>matchId</code>: acepta JSON LPE directo o <code>kind: "match_stats"</code> (Flashscore/Sofascore) y lo normaliza.</div>
+          <textarea id="lpeInput" class="fl-text" placeholder='Pega JSON de ventana {"matchId":"...","teams":...,"stats":...,"score":...} o {"kind":"match_stats","sections":[...]}'></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="lpeUpdate">Actualizar LPE</button>
+            <button class="fl-btn" id="lpeReset">Reiniciar partido</button>
+            <span id="lpeStatus" class="fl-mini"></span>
+          </div>
+          <div id="lpeSummary" class="fl-mini" style="margin-top:8px;">Sin estado LPE.</div>
+          <div class="fl-card" style="margin-top:10px;">
+            <div style="font-weight:700;margin-bottom:8px;">Tendencia acumulativa + proyección (IDD/EPI)</div>
+            <svg id="lpeProjectionSvg" viewBox="0 0 700 230" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px"></svg>
+          </div>
+          <div id="lpeAlerts" class="fl-mini" style="margin-top:8px;"></div>
+          <pre id="lpeJson" class="fl-mini" style="white-space:pre-wrap;margin-top:10px;">{}</pre>
+        </div>
+      `;
+
+      let lastPayload = null;
+      let lastEPA = null;
+      let lastLPE = null;
+      const drawCandleChart = (candles=[])=>{
+        const svg = document.getElementById("momCandleSvg");
+        if(!svg) return;
+        const width = 700;
+        const height = 220;
+        const zeroY = height/2;
+        const scaleY = 85;
+        const barW = 40;
+        const gap = 20;
+        const bodyW = 18;
+        const axis = `<line x1="0" y1="${zeroY}" x2="${width}" y2="${zeroY}" stroke="#39414d" stroke-width="1"/>`;
+        const bars = candles.map((c, i)=>{
+          const x = 25 + i*(barW+gap);
+          const yOpen = zeroY - c.open*scaleY;
+          const yClose = zeroY - c.close*scaleY;
+          const yHigh = zeroY - c.high*scaleY;
+          const yLow = zeroY - c.low*scaleY;
+          const color = c.close >= c.open ? "#2ea043" : "#f85149";
+          const bodyY = Math.min(yOpen, yClose);
+          const bodyH = Math.max(2, Math.abs(yOpen-yClose));
+          return `<g>
+            <line x1="${x+barW/2}" y1="${yHigh}" x2="${x+barW/2}" y2="${yLow}" stroke="${color}" stroke-width="2"/>
+            <rect x="${x + (barW-bodyW)/2}" y="${bodyY}" width="${bodyW}" height="${bodyH}" fill="${color}"/>
+            <text x="${x+barW/2}" y="208" fill="#9ca3af" font-size="10" text-anchor="middle">${c.block===9?"90+":`${c.block*10}`}</text>
+          </g>`;
+        }).join("");
+        svg.innerHTML = axis + bars;
+      };
+
+      const drawIddLine = (blocks=[], team)=>{
+        const svg = document.getElementById("momLineSvg");
+        if(!svg) return;
+        const width = 700;
+        const height = 220;
+        const zeroY = height/2;
+        const accum = cumulativeSum(blocks.map(b=>Number(b.idd?.[team]) || 0));
+        const pts = accum.map((value, idx)=>{
+          const x = 20 + idx * ((width - 40) / 9);
+          const y = zeroY - value * 40;
+          return `${x},${y}`;
+        }).join(" ");
+        svg.innerHTML = `
+          <line x1="0" y1="${zeroY}" x2="${width}" y2="${zeroY}" stroke="#39414d" stroke-width="1"/>
+          <polyline points="${pts}" fill="none" stroke="#58a6ff" stroke-width="3"/>
+        `;
+      };
+
+      const renderMomentumDiagnostic = (diagnostic)=>{
+        if(!diagnostic) return;
+        const diagJson = document.getElementById("momDiagJson");
+        const diagSections = document.getElementById("momDiagSections");
+        if(diagJson) diagJson.textContent = JSON.stringify({
+          metrics: diagnostic.metrics,
+          tags: diagnostic.tags,
+          diagnosticText: diagnostic.diagnosticText
+        }, null, 2);
+        const summary = diagnostic.diagnosticText[0] || "-";
+        const breakLine = diagnostic.diagnosticText.find(line=>line.startsWith("Quiebre principal:")) || "-";
+        const volLine = diagnostic.diagnosticText.find(line=>line.startsWith("Volatilidad:")) || "-";
+        const closeLine = diagnostic.diagnosticText.find(line=>line.startsWith("Final:")) || "-";
+        const patternLine = diagnostic.diagnosticText.find(line=>line.startsWith("Patrón:")) || "Patrón: sin clasificación dominante.";
+        if(diagSections){
+          diagSections.innerHTML = `
+            <div><b>Resumen:</b> ${summary}</div>
+            <div><b>Quiebre:</b> ${breakLine}</div>
+            <div><b>Volatilidad:</b> ${volLine}</div>
+            <div><b>Cierre:</b> ${closeLine}</div>
+            <div><b>Patrón:</b> ${patternLine}</div>
+          `;
+        }
+      };
+
+      const renderEPA = (epa)=>{
+        const cards = document.getElementById("epaCards");
+        const textList = document.getElementById("epaText");
+        const jsonOut = document.getElementById("epaJson");
+        const psychSvg = document.getElementById("epaPsychSvg");
+        if(!epa || !cards || !textList || !jsonOut) return;
+        const [teamA, teamB] = epa.teams;
+        const iddA = Number(epa.features?.idd?.[teamA] || 0);
+        const threatA = Number(epa.features?.threat?.[teamA] || 0);
+        const threatB = Number(epa.features?.threat?.[teamB] || 0);
+        const shockA = Number(epa.features?.shockRisk?.[teamA] || 0);
+        const shockB = Number(epa.features?.shockRisk?.[teamB] || 0);
+        const psychA = epa.psych?.[teamA] || {};
+        const psychB = epa.psych?.[teamB] || {};
+        const live = epa.liveProbabilities || {};
+        const pHome = Number(live.pHome || 0);
+        const pDraw = Number(live.pDraw || 0);
+        const pAway = Number(live.pAway || 0);
+        const whyItems = Array.isArray(live.reasons) ? live.reasons : [];
+        cards.innerHTML = `
+          <div style="grid-column:1/-1;background:#0f172a;border:1px solid #24324a;border-radius:10px;padding:10px;">
+            <div style="font-weight:800;margin-bottom:4px;">PROBABILIDAD DE VICTORIA EN VIVO</div>
+            <div class="fl-mini" style="margin-bottom:6px;">${live.label || "Sin datos de probabilidad live."}</div>
+            <div style="height:10px;background:#d9d9d9;border-radius:999px;overflow:hidden;display:flex;">
+              <div style="width:${(pHome*100).toFixed(2)}%;background:#7a7a7a"></div>
+              <div style="width:${(pDraw*100).toFixed(2)}%;background:#cfcfcf"></div>
+              <div style="width:${(pAway*100).toFixed(2)}%;background:#1f6feb"></div>
+            </div>
+            <div class="fl-mini" style="display:flex;justify-content:space-between;margin-top:6px;">
+              <span>${teamA} ${(pHome*100).toFixed(0)}%</span>
+              <span>Empate ${(pDraw*100).toFixed(0)}%</span>
+              <span>${teamB} ${(pAway*100).toFixed(0)}%</span>
+            </div>
+            <div class="fl-mini" style="margin-top:8px;">${live.explanation || "Sin explicación contextual."}</div>
+            <button class="fl-btn" id="epaWhyToggle" style="margin-top:8px;">Ver por qué</button>
+            <ul id="epaWhyList" class="fl-mini" style="display:none;margin:8px 0 0 18px;">${whyItems.map(item=>`<li>${item}</li>`).join("")}</ul>
+          </div>
+          <div><b>IDD early</b><div class="fl-mini">${teamA}: ${iddA.toFixed(2)} · ${teamB}: ${(-iddA).toFixed(2)}</div></div>
+          <div><b>Intensidad</b><div class="fl-mini">${(Number(epa.features?.intensity||0)*100).toFixed(0)}%</div></div>
+          <div><b>Threat</b><div class="fl-mini">${teamA}: ${(threatA*100).toFixed(0)}% · ${teamB}: ${(threatB*100).toFixed(0)}%</div></div>
+          <div><b>Shock risk</b><div class="fl-mini">${teamA}: ${(shockA*100).toFixed(0)}% · ${teamB}: ${(shockB*100).toFixed(0)}%</div></div>
+          <div><b>Psych (${teamA})</b><div class="fl-mini">Cnf ${(Number(psychA.confidence||0)*100).toFixed(0)} · Comp ${(Number(psychA.composure||0)*100).toFixed(0)} · Fr ${(Number(psychA.frustration||0)*100).toFixed(0)}</div></div>
+          <div><b>Psych (${teamB})</b><div class="fl-mini">Cnf ${(Number(psychB.confidence||0)*100).toFixed(0)} · Comp ${(Number(psychB.composure||0)*100).toFixed(0)} · Fr ${(Number(psychB.frustration||0)*100).toFixed(0)}</div></div>
+        `;
+        const whyToggle = document.getElementById("epaWhyToggle");
+        const whyList = document.getElementById("epaWhyList");
+        if(whyToggle && whyList){
+          whyToggle.onclick = ()=>{
+            const open = whyList.style.display !== "none";
+            whyList.style.display = open ? "none" : "block";
+            whyToggle.textContent = open ? "Ver por qué" : "Ocultar detalle";
+          };
+        }
+        const psychText = [
+          ...(epa.text || []),
+          `${teamA}: ${(epa.psychText?.[teamA] || []).join(" · ")}`,
+          `${teamB}: ${(epa.psychText?.[teamB] || []).join(" · ")}`
+        ];
+        textList.innerHTML = psychText.map(line=>`<li>${line}</li>`).join("");
+        if(psychSvg){
+          const buckets = epa.psychChart?.buckets || [];
+          const width = 700;
+          const height = 220;
+          const zeroY = 170;
+          const maxMove = Math.max(1, ...buckets.map(b=>Math.max(Number(b.ema?.[teamA]||0), Number(b.ema?.[teamB]||0))));
+          const xAt = (idx)=>20 + idx*((width-40)/Math.max(1, buckets.length-1));
+          const yMove = (v)=>170 - (Number(v)||0)*(90/maxMove);
+          const intensityBars = buckets.map((b, idx)=>{
+            const x = xAt(idx) - 18;
+            const h = (Number(b.intensity)||0)*80;
+            const y = zeroY - h;
+            return `<g><rect x="${x}" y="${y}" width="36" height="${h}" fill="rgba(88,166,255,.25)" stroke="rgba(88,166,255,.45)"/><text x="${xAt(idx)}" y="205" fill="#9ca3af" font-size="10" text-anchor="middle">${b.label}</text></g>`;
+          }).join("");
+          const poly = (team, color)=>buckets.map((b, idx)=>`${xAt(idx)},${yMove(b.ema?.[team]||0)}`).join(" ");
+          psychSvg.innerHTML = `
+            <line x1="0" y1="${zeroY}" x2="${width}" y2="${zeroY}" stroke="#39414d" stroke-width="1"/>
+            ${intensityBars}
+            <polyline points="${poly(teamA, "#2ea043")}" fill="none" stroke="#2ea043" stroke-width="3"/>
+            <polyline points="${poly(teamB, "#f85149")}" fill="none" stroke="#f85149" stroke-width="3"/>
+            <text x="24" y="16" fill="#2ea043" font-size="11">EMA ${teamA}</text>
+            <text x="130" y="16" fill="#f85149" font-size="11">EMA ${teamB}</text>
+          `;
+        }
+        jsonOut.textContent = JSON.stringify(epa, null, 2);
+      };
+
+      const buildEpaAccumKey = (teamA, teamB)=>{
+        const parts = [String(teamA || "").trim(), String(teamB || "").trim()]
+          .filter(Boolean)
+          .map(normalizeTeamToken)
+          .sort();
+        return `match_epa_accum_${parts.join("__")}`;
+      };
+
+      const mergeEarlyEvents = (baseEvents=[], incomingEvents=[])=>{
+        const map = new Map();
+        [...(Array.isArray(baseEvents) ? baseEvents : []), ...(Array.isArray(incomingEvents) ? incomingEvents : [])].forEach(evt=>{
+          if(!evt) return;
+          const k = `${Number(evt.minute) || 0}|${String(evt.team || "").trim().toLowerCase()}|${String(evt.type || "").trim().toLowerCase()}|${String(evt.text || "").trim().toLowerCase()}`;
+          if(!map.has(k)) map.set(k, evt);
+        });
+        return [...map.values()].sort((a,b)=> (Number(a.minute)||0) - (Number(b.minute)||0));
+      };
+
+      const resolveAccumWindowKey = (events=[])=>{
+        const maxMinute = Math.max(10, ...events.map(evt=>Number(evt?.minute) || 0));
+        return `0-${Math.ceil(maxMinute)}`;
+      };
+
+      const resolveEpaPsychForLpe = (epa, lpeTeams={})=>{
+        if(!epa?.teams?.length || !epa?.psych) return null;
+        const [epaHome, epaAway] = epa.teams;
+        const psych = epa.psych || {};
+        const norm = (v)=>normalizeTeamToken(v || "");
+        const directHome = psych[lpeTeams?.home] || psych[Object.keys(psych).find(k=>norm(k)===norm(lpeTeams?.home))];
+        const directAway = psych[lpeTeams?.away] || psych[Object.keys(psych).find(k=>norm(k)===norm(lpeTeams?.away))];
+        return {
+          home: directHome || psych[epaHome] || null,
+          away: directAway || psych[epaAway] || null
+        };
+      };
+
+      const buildStatsStateForEpa = (normalized={}, teamA="", teamB="", fallbackState={})=>{
+        const fallbackScore = fallbackState || {};
+        const stats = normalized?.stats || {};
+        const score = normalized?.score || {};
+        const mapStats = (side)=>({
+          ...createEarlyTeamStats(),
+          shots: Number(stats?.[side]?.shots || 0),
+          shotsOnTarget: Number(stats?.[side]?.shotsOn || 0),
+          bigChances: Number(stats?.[side]?.bigChances || 0),
+          corners: Number(stats?.[side]?.corners || 0),
+          dangerActions: Number(stats?.[side]?.dangerAttacks || 0),
+          fouls: Number(stats?.[side]?.fouls || 0),
+          cards: Number(stats?.[side]?.yellows || 0)
+        });
+        const homeStats = mapStats("home");
+        const awayStats = mapStats("away");
+        return {
+          minute: Number(normalized?.minute || String(normalized?.window || "").split("-").slice(-1)[0] || fallbackScore.minute || 55),
+          scoreHome: Number(score.home ?? fallbackScore.scoreHome ?? 0),
+          scoreAway: Number(score.away ?? fallbackScore.scoreAway ?? 0),
+          statsCumulative: {
+            [teamA]: homeStats,
+            [teamB]: awayStats
+          },
+          statsSegment: {
+            [teamA]: homeStats,
+            [teamB]: awayStats
+          }
+        };
+      };
+
+      document.getElementById("epaAnalyze").onclick = ()=>{
+        const teamA = document.getElementById("momTeamA").value;
+        const teamB = document.getElementById("momTeamB").value;
+        const status = document.getElementById("epaStatus");
+        const narrativeEl = document.getElementById("epaNarrative");
+        const raw = (narrativeEl?.value || document.getElementById("momNarrative").value || "").trim();
+        if(!teamA || !teamB || teamA===teamB){
+          status.textContent = "❌ Selecciona dos equipos distintos.";
+          return;
+        }
+        if(!raw){
+          status.textContent = "⚠️ Pega texto para actualizar EPA.";
+          return;
+        }
+        const seedProfiles = {
+          [teamA]: JSON.parse(localStorage.getItem(`team_profile_${teamA}`) || "null") || {},
+          [teamB]: JSON.parse(localStorage.getItem(`team_profile_${teamB}`) || "null") || {}
+        };
+        const accumKey = buildEpaAccumKey(teamA, teamB);
+        const previousAccum = safeParseJson(localStorage.getItem(accumKey) || "null") || {};
+        const incoming = parseEarlyNarrative(raw, { teamA, teamB, windowKey: "0-200" });
+        const mergedEvents = mergeEarlyEvents(previousAccum.events, incoming.events || []);
+        const windowKey = resolveAccumWindowKey(mergedEvents);
+        const epa = computeEarlyPhaseAnalyzer("", { teamA, teamB, windowKey, seedProfiles, eventsOverride: mergedEvents });
+        const snapshot = {
+          teamA,
+          teamB,
+          windowKey,
+          events: mergedEvents,
+          updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem(accumKey, JSON.stringify(snapshot));
+        renderEPA(epa);
+        lastEPA = epa;
+        if(narrativeEl) narrativeEl.value = "";
+        document.getElementById("epaSaveProfile").disabled = false;
+        status.textContent = `✅ EPA acumulado ${epa.window} (${mergedEvents.length} eventos).`;
+      };
+
+      document.getElementById("epaInjectStats").onclick = ()=>{
+        const status = document.getElementById("epaStatus");
+        const rawStats = (document.getElementById("epaStatsInput")?.value || "").trim();
+        if(!lastEPA){
+          status.textContent = "⚠️ Primero ejecuta EPA con relato para tener base.";
+          return;
+        }
+        if(!rawStats){
+          status.textContent = "⚠️ Pega un JSON de estadísticas para inyectar.";
+          return;
+        }
+        const parsedRaw = safeParseJson(rawStats);
+        if(!parsedRaw){
+          status.textContent = "❌ JSON de estadísticas inválido.";
+          return;
+        }
+        const normalized = normalizeIncomingLpePayload(parsedRaw);
+        if(!normalized?.stats?.home || !normalized?.stats?.away){
+          status.textContent = "❌ No se pudieron mapear estadísticas de home/away.";
+          return;
+        }
+        const [teamA, teamB] = lastEPA.teams || [];
+        const statsState = buildStatsStateForEpa(normalized, teamA, teamB, lastEPA.liveState || {});
+        const baseProb = lastEPA.liveProbabilities || {};
+        const statsProb = computeLiveOutcomeProbabilities(statsState, teamA, teamB);
+        const blend = (a,b,w=0.62)=>((Number(a)||0)*(1-w))+((Number(b)||0)*w);
+        const blended = {
+          ...statsProb,
+          pHome: blend(baseProb.pHome, statsProb.pHome),
+          pDraw: blend(baseProb.pDraw, statsProb.pDraw),
+          pAway: blend(baseProb.pAway, statsProb.pAway)
+        };
+        const total = blended.pHome + blended.pDraw + blended.pAway || 1;
+        blended.pHome /= total;
+        blended.pDraw /= total;
+        blended.pAway /= total;
+        blended.label = `Ahora mismo: ${teamA} ${(blended.pHome*100).toFixed(0)}% | Empate ${(blended.pDraw*100).toFixed(0)}% | ${teamB} ${(blended.pAway*100).toFixed(0)}%`;
+        const reasons = ["Probabilidades recalibradas con estadísticas inyectadas.", ...(statsProb.reasons || [])];
+        blended.reasons = [...new Set(reasons)].slice(0, 5);
+        blended.explanation = blended.reasons[0] || statsProb.explanation || baseProb.explanation;
+
+        lastEPA.liveProbabilities = blended;
+        lastEPA.statsInjection = {
+          source: normalized?.source || parsedRaw?.source || "manual",
+          window: normalized?.window || "live",
+          capturedAt: parsedRaw?.capturedAt || null,
+          stats: normalized.stats
+        };
+        renderEPA(lastEPA);
+        status.textContent = "✅ Stats inyectadas: probabilidad live recalibrada.";
+      };
+
+      document.getElementById("epaReset").onclick = ()=>{
+        const teamA = document.getElementById("momTeamA").value;
+        const teamB = document.getElementById("momTeamB").value;
+        const status = document.getElementById("epaStatus");
+        if(!teamA || !teamB || teamA===teamB){
+          status.textContent = "⚠️ Selecciona dos equipos para reiniciar EPA.";
+          return;
+        }
+        localStorage.removeItem(buildEpaAccumKey(teamA, teamB));
+        lastEPA = null;
+        const cards = document.getElementById("epaCards");
+        const textList = document.getElementById("epaText");
+        const jsonOut = document.getElementById("epaJson");
+        const psychSvg = document.getElementById("epaPsychSvg");
+        if(cards) cards.innerHTML = "";
+        if(textList) textList.innerHTML = "";
+        if(jsonOut) jsonOut.textContent = "Sin análisis EPA.";
+        if(psychSvg) psychSvg.innerHTML = "";
+        document.getElementById("epaSaveProfile").disabled = true;
+        status.textContent = "✅ EPA reiniciado para este partido.";
+      };
+
+      document.getElementById("epaSaveProfile").onclick = ()=>{
+        if(!lastEPA?.signatureUpdate) return;
+        const [teamA, teamB] = lastEPA.teams;
+        [teamA, teamB].forEach(teamName=>{
+          const current = JSON.parse(localStorage.getItem(`team_profile_${teamName}`) || "null");
+          const updated = updateTeamEarlyProfile(current, teamName, lastEPA.signatureUpdate[teamName] || {});
+          localStorage.setItem(`team_profile_${teamName}`, JSON.stringify(updated));
+        });
+        document.getElementById("epaStatus").textContent = "✅ Firma temprana guardada para ambos equipos.";
+      };
+
+      const drawLpeProjectionChart = (history=[])=>{
+        const svg = document.getElementById("lpeProjectionSvg");
+        if(!svg) return;
+        const width = 700;
+        const height = 230;
+        const pad = { top: 18, right: 16, bottom: 26, left: 38 };
+        const plotW = width - pad.left - pad.right;
+        const plotH = height - pad.top - pad.bottom;
+        const yFromNorm = (v)=> pad.top + (1 - clamp((Number(v) || 0), 0, 1)) * plotH;
+        const yFromSigned = (v)=> pad.top + (1 - (clamp((Number(v) || 0), -1, 1) + 1)/2) * plotH;
+
+        const real = Array.isArray(history) ? history : [];
+        const realPoints = real.slice(-12);
+        const projectionCount = 3;
+        const projected = [];
+
+        const linearProjection = (arr, key)=>{
+          const series = arr.map((item, idx)=>({ x: idx + 1, y: Number(item?.[key]) || 0 }));
+          if(!series.length) return Array.from({ length: projectionCount }, ()=>0);
+          if(series.length===1) return Array.from({ length: projectionCount }, ()=>series[0].y);
+          const meanX = series.reduce((acc, p)=>acc+p.x, 0) / series.length;
+          const meanY = series.reduce((acc, p)=>acc+p.y, 0) / series.length;
+          const num = series.reduce((acc, p)=>acc + (p.x - meanX)*(p.y - meanY), 0);
+          const den = series.reduce((acc, p)=>acc + (p.x - meanX)*(p.x - meanX), 0) || 1;
+          const slope = num/den;
+          const intercept = meanY - slope*meanX;
+          return Array.from({ length: projectionCount }, (_v, i)=> intercept + slope*(series.length + i + 1));
+        };
+
+        const iddProjected = linearProjection(realPoints, "iddAway").map(v=>clamp(v, -1, 1));
+        const epiProjected = linearProjection(realPoints, "epi").map(v=>clamp(v, 0, 1));
+        for(let i=0;i<projectionCount;i+=1){
+          projected.push({
+            idx: realPoints.length + i,
+            iddAway: iddProjected[i],
+            epi: epiProjected[i]
+          });
+        }
+
+        const all = [...realPoints, ...projected];
+        if(!all.length){
+          svg.innerHTML = `<text x="24" y="42" fill="#8b949e" font-size="12">Carga al menos una ventana LPE para visualizar tendencia y proyección.</text>`;
+          return;
+        }
+
+        const maxIndex = Math.max(all.length - 1, 1);
+        const xPos = (idx)=> pad.left + (idx / maxIndex) * plotW;
+        const linePath = (arr, key, yMapper)=> arr.map((p, idx)=>`${idx===0?"M":"L"}${xPos(idx)} ${yMapper(p[key])}`).join(" ");
+        const realPathIdd = linePath(realPoints, "iddAway", yFromSigned);
+        const projPathIdd = linePath([...realPoints.slice(-1), ...projected], "iddAway", yFromSigned);
+        const realPathEpi = linePath(realPoints, "epi", yFromNorm);
+        const projPathEpi = linePath([...realPoints.slice(-1), ...projected], "epi", yFromNorm);
+        const splitX = xPos(Math.max(realPoints.length - 1, 0));
+
+        svg.innerHTML = `
+          <line x1="${pad.left}" y1="${yFromSigned(0)}" x2="${width-pad.right}" y2="${yFromSigned(0)}" stroke="#39414d" stroke-width="1"/>
+          <line x1="${splitX}" y1="${pad.top}" x2="${splitX}" y2="${height-pad.bottom}" stroke="#30363d" stroke-width="1" stroke-dasharray="4 4"/>
+          <text x="${splitX + 6}" y="${pad.top + 14}" fill="#8b949e" font-size="11">proyección</text>
+          <path d="${realPathIdd}" fill="none" stroke="#58a6ff" stroke-width="2.5"/>
+          <path d="${projPathIdd}" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6 5"/>
+          <path d="${realPathEpi}" fill="none" stroke="#2ea043" stroke-width="2"/>
+          <path d="${projPathEpi}" fill="none" stroke="#2ea043" stroke-width="1.8" stroke-dasharray="5 5"/>
+          <text x="${pad.left}" y="${height-8}" fill="#58a6ff" font-size="11">IDD away (azul)</text>
+          <text x="${pad.left + 140}" y="${height-8}" fill="#2ea043" font-size="11">EPI (verde)</text>
+        `;
+      };
+
+      const renderLPE = (state)=>{
+        const summary = document.getElementById("lpeSummary");
+        const alertsEl = document.getElementById("lpeAlerts");
+        const jsonEl = document.getElementById("lpeJson");
+        if(!summary || !alertsEl || !jsonEl) return;
+        if(!state){
+          summary.textContent = "Sin estado LPE.";
+          alertsEl.innerHTML = "";
+          jsonEl.textContent = "{}";
+          drawLpeProjectionChart([]);
+          return;
+        }
+        const teams = state.teams || { home: "home", away: "away" };
+        const p = state.projections || {};
+        summary.innerHTML = `
+          <div><b>${teams.home}</b> vs <b>${teams.away}</b> · ventana ${state.lastWindow || "live"} · iteración ${state.k}</div>
+          <div>IDD next: <b>${Number(p.iddNext || 0).toFixed(2)}</b> · Dominio probable: <b>${p.dominance || "-"}</b></div>
+          <div>Shock risk: <b>${p.shockRisk || "-"}</b> · EPI: <b>${(Number(p.eventTension || 0)*100).toFixed(0)}%</b></div>
+        `;
+        const recentAlerts = (state.alerts || []).slice(-6).reverse();
+        alertsEl.innerHTML = recentAlerts.length
+          ? recentAlerts.map(a=>`<span style="display:inline-block;padding:4px 8px;border:1px solid #2d333b;border-radius:999px;margin:0 6px 6px 0;">${a.type}${a.team?` · ${a.team}`:""}${a.level?` · ${Math.round(a.level*100)}%`:""}</span>`).join("")
+          : "Sin alertas todavía.";
+        drawLpeProjectionChart(state.history || []);
+        jsonEl.textContent = JSON.stringify(state, null, 2);
+      };
+
+      document.getElementById("lpeUpdate").onclick = ()=>{
+        const status = document.getElementById("lpeStatus");
+        const raw = document.getElementById("lpeInput").value || "";
+        const parsedRaw = safeParseJson(raw);
+        const parsed = parsedRaw ? normalizeIncomingLpePayload(parsedRaw) : null;
+        if(!parsed){
+          status.textContent = "❌ JSON inválido.";
+          return;
+        }
+        const matchId = parsed.matchId || `TMP-${Date.now()}`;
+        const lpeKey = `match_lpe_${matchId}`;
+        const previous = safeParseJson(localStorage.getItem(lpeKey) || "null") || {};
+        const epaPsych = resolveEpaPsychForLpe(lastEPA, parsed.teams);
+        const nextState = updateLiveProjectionState(previous, parsed, { epaPsych });
+        localStorage.setItem(lpeKey, JSON.stringify(nextState));
+        lastLPE = nextState;
+        renderLPE(nextState);
+        status.textContent = `✅ LPE actualizado (${nextState.k} ventanas)`;
+      };
+
+      document.getElementById("lpeReset").onclick = ()=>{
+        const status = document.getElementById("lpeStatus");
+        const raw = document.getElementById("lpeInput").value || "";
+        const parsedRaw = safeParseJson(raw);
+        const parsed = parsedRaw ? normalizeIncomingLpePayload(parsedRaw) : null;
+        const matchId = parsed?.matchId;
+        if(!matchId){
+          status.textContent = "⚠️ Para reiniciar, pega un JSON con matchId.";
+          return;
+        }
+        localStorage.removeItem(`match_lpe_${matchId}`);
+        lastLPE = null;
+        renderLPE(null);
+        status.textContent = `✅ Estado LPE reiniciado para ${matchId}.`;
+      };
+
+      document.getElementById("momConvert").onclick = ()=>{
+        const teamA = document.getElementById("momTeamA").value;
+        const teamB = document.getElementById("momTeamB").value;
+        const raw = document.getElementById("momNarrative").value;
+        if(!teamA || !teamB || teamA===teamB){
+          document.getElementById("momStatus").textContent = "❌ Selecciona dos equipos distintos.";
+          return;
+        }
+        const parsed = parseMatchNarrative(raw, [teamA, teamB]);
+        const timeline = buildEventTimeline(parsed.events);
+        const blocks = computeMomentumBlocks(timeline, [teamA, teamB]);
+        const candles = generateCandles(blocks, teamA);
+        const patterns = detectPatterns({ candles, blocks, team: teamA, opponent: teamB });
+        const signature = computeMomentumSignature(teamA, blocks, timeline);
+        const matchMomentumId = uid("mom");
+        const bundle = { matchMomentumId, teams: [teamA, teamB], events: timeline, blocks, candles, patterns, signature, momentumDiagnostic: null, createdAt: new Date().toISOString() };
+        localStorage.setItem(`match_events_${matchMomentumId}`, JSON.stringify(timeline));
+        localStorage.setItem(`match_momentum_${matchMomentumId}`, JSON.stringify(bundle));
+        drawCandleChart(candles);
+        drawIddLine(blocks, teamA);
+        document.getElementById("momPatterns").innerHTML = patterns.length
+          ? patterns.map(p=>`• ${p.type} (bloque ${p.block===9?"90+":p.block})`).join("<br/>")
+          : "Sin patrones detectados con las reglas actuales.";
+        document.getElementById("momSignature").textContent = JSON.stringify(signature.momentumSignature, null, 2);
+        document.getElementById("momStatus").textContent = `✅ ${timeline.length} eventos convertidos`;
+        document.getElementById("momSaveProfile").disabled = false;
+        document.getElementById("momGenerateDiag").disabled = false;
+        document.getElementById("momDiagJson").textContent = "Genera un diagnóstico para ver métricas y etiquetas.";
+        lastPayload = bundle;
+      };
+
+      document.getElementById("momGenerateDiag").onclick = ()=>{
+        if(!lastPayload?.candles?.length){
+          document.getElementById("momStatus").textContent = "❌ Convierte un relato primero.";
+          return;
+        }
+        const diagnostic = computeMomentumDiagnostic(lastPayload.candles);
+        lastPayload.momentumDiagnostic = diagnostic;
+        if(lastPayload.matchMomentumId){
+          localStorage.setItem(`match_momentum_${lastPayload.matchMomentumId}`, JSON.stringify(lastPayload));
+        }
+        renderMomentumDiagnostic(diagnostic);
+        document.getElementById("momStatus").textContent = "✅ Diagnóstico generado y guardado.";
+      };
+
+      document.getElementById("momSaveProfile").onclick = ()=>{
+        if(!lastPayload) return;
+        const teamA = lastPayload.teams[0];
+        const current = JSON.parse(localStorage.getItem(`team_profile_${teamA}`) || "null");
+        const updated = updateTeamProfile(current, { team: teamA, momentumSignature: lastPayload.signature.momentumSignature });
+        localStorage.setItem(`team_profile_${teamA}`, JSON.stringify(updated));
+        document.getElementById("momStatus").textContent = `✅ Perfil ${teamA} actualizado (${updated.samples} muestras)`;
+      };
+      return;
+    }
+
+    if(view==="bitacora"){
+      db.bitacora = ensureBitacoraState(db.bitacora);
+      const st = db.bitacora;
+      const today = new Date().toISOString().slice(0,10);
+      const todayEntries = st.entries.filter(e=>(e.date||"").slice(0,10)===today);
+      const todayProfit = todayEntries.reduce((s,e)=>s+(Number(e.profit)||0),0);
+      const todayRisk = todayEntries.reduce((s,e)=>s+(Number(e.stake)||0),0);
+      const todayState = { result: todayProfit > 0 ? "winning" : (todayProfit < 0 ? "losing" : "flat") };
+      if(!st.planStartBank || !st.planStartDate){
+        st.planStartBank = st.bank;
+        st.planStartDate = today;
+      }
+      const plan = computeBitacoraPlan(st, todayEntries);
+      if(!st.planTargetBank || Math.abs(st.planTargetBank - plan.targetBank) > 0.01){
+        st.planTargetBank = plan.targetBank;
+      }
+      const riskLeft = Math.max(0, (st.bank * st.dailyRiskPct) - todayRisk);
+      const dayIndex = Math.max(1, Math.min(plan.targetDays, Number(st.entries.slice(-1)[0]?.planDayIndex) || 1));
+      const maxDayBets = Math.max(2, Math.min(3, Number(st.maxBetsPerDay) || 3));
+      const allowThirdStep = todayEntries.length < maxDayBets && !plan.streakStop;
+      const roadmap = bitacoraRoadmap(plan, dayIndex, st.bank);
+      const onTrack = plan.progressPct >= ((dayIndex-1) / Math.max(1, plan.targetDays));
+
+      const pickCandidates = Array.isArray(st.pickCandidates) && st.pickCandidates.length
+        ? st.pickCandidates
+        : [
+          { id: uid("pick"), odds: 1.52, pFinal: 0.69, pMkt: 0.65, pickType: "1X2" },
+          { id: uid("pick"), odds: 1.66, pFinal: 0.64, pMkt: 0.6, pickType: "DNB" }
+        ];
+      st.pickCandidates = pickCandidates;
+
+      const evaluated = pickCandidates
+        .map(row=>evaluatePickCandidate({
+          odds: Number(row.odds) || 0,
+          pFinal: clamp(Number(row.pFinal) || 0, 0.01, 0.99),
+          pMkt: Number(row.pMkt),
+          pickType: row.pickType || "1X2"
+        }, st, plan, todayState));
+
+      const lastRows = st.entries.slice(-Math.max(7, plan.targetDays));
+      const startBank = lastRows.length ? (Number(lastRows[0].bankBefore) || (Number(lastRows[0].bankAfter) - Number(lastRows[0].profit||0)) || st.bank) : st.bank;
+      const equitySeries = [startBank, ...lastRows.map(e=>Number(e.bankAfter) || 0)];
+      const guideSeries = Array.from({ length: equitySeries.length }, (_v, idx)=>startBank + (plan.totalGoal/Math.max(1, plan.targetDays)) * idx);
+
+      const avgP = lastRows.length ? lastRows.reduce((s,e)=>s+(Number(e.probability)||plan.pRequired),0)/lastRows.length : plan.pRequired;
+      const avgOdds = lastRows.length ? lastRows.reduce((s,e)=>s+(Number(e.odds)||plan.avgOdds),0)/lastRows.length : plan.avgOdds;
+      const avgStake = lastRows.length ? Math.max(st.minUnit, lastRows.reduce((s,e)=>s+(Number(e.stake)||st.minUnit),0)/lastRows.length) : plan.stepStakes[0];
+      const projection = projectBankroll({ bank: st.bank, p: avgP, odds: avgOdds, stake: avgStake, steps: plan.targetDays, paths: 850 });
+
+      const chartValues = [...equitySeries, ...guideSeries, ...projection.flatMap(p=>[p.p10,p.p90])];
+      const minV = Math.min(...chartValues) - 0.5;
+      const maxV = Math.max(...chartValues) + 0.5;
+      const equityPath = sparklinePath(equitySeries, 640, 200, minV, maxV);
+      const guidePath = sparklinePath(guideSeries, 640, 200, minV, maxV);
+      const lowPath = sparklinePath(projection.map(p=>p.p10), 640, 200, minV, maxV);
+      const highPath = sparklinePath(projection.map(p=>p.p90), 640, 200, minV, maxV);
+
+      const compactHistory = st.entries.slice().reverse().slice(0,7).map(e=>{
+        const tag = Number(e.ev) >= 0.03 ? "edge+" : (Number(e.ev) > 0 ? "ok" : "frío");
+        return `
+          <tr>
+            <td>${(e.date||"").slice(5,10)}</td>
+            <td>${e.pickType || "-"}</td>
+            <td>${Number(e.odds||0).toFixed(2)}</td>
+            <td>${e.result || "-"}</td>
+            <td style="color:${Number(e.profit)>=0?"#3fb950":"#ff7b72"}">${Number(e.profit)>=0?"+":""}${Number(e.profit||0).toFixed(2)}</td>
+            <td><span class="fl-chip ${tag === "edge+" ? "ok" : (tag === "ok" ? "warn" : "bad")}">${tag}</span></td>
+          </tr>
+        `;
+      }).join("");
+
+      const radarRows = evaluated.map((row, idx)=>`
+        <tr>
+          <td>${pickCandidates[idx].pickType}</td>
+          <td>${row.odds.toFixed(2)}</td>
+          <td>${(row.pFinal*100).toFixed(1)}%</td>
+          <td>${(row.pMkt*100).toFixed(1)}%</td>
+          <td style="color:${row.ev>=0?"#3fb950":"#ff7b72"}">${(row.ev*100).toFixed(1)}%</td>
+          <td>${(row.kelly*100).toFixed(1)}%</td>
+          <td>S/${row.stake.toFixed(2)}</td>
+          <td>${(row.confidence*100).toFixed(0)}%</td>
+          <td>${(row.flexibility*100).toFixed(0)}%</td>
+          <td title="${row.reason}">${row.label}</td>
+        </tr>
+      `).join("");
+
+      const roadmapRows = roadmap.map(step=>`
+        <tr>
+          <td>${step.reached?"✅":"⏳"} ${step.label}</td>
+          <td>Día ${step.checkpointDay}</td>
+          <td>S/${step.checkpointBank.toFixed(2)}</td>
+          <td style="color:${step.gap>=0?"#3fb950":"#ff7b72"}">${step.gap>=0?"+":""}S/${step.gap.toFixed(2)}</td>
+          <td>${step.reached?"Cumplido":(step.expectedByNow?"Acelerar":"En ventana")}</td>
+        </tr>
+      `).join("");
+
+      const progressColor = plan.progressPct >= 1 ? "#3fb950" : (plan.progressPct >= 0.6 ? "#f2cc60" : "#ff7b72");
+
+      content.innerHTML = `
+        <div class="fl-card">
+          <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">
+            <div><div class="fl-mini">Bank</div><div style="font-size:24px;font-weight:900;">S/${st.bank.toFixed(2)}</div></div>
+            <div><div class="fl-mini">Meta ${plan.targetDays} días</div><div style="font-size:24px;font-weight:900;">S/${plan.targetBank.toFixed(2)}</div></div>
+            <div><div class="fl-mini">Progreso real del plan</div><div style="font-size:24px;font-weight:900;color:${progressColor};">${(plan.progressPct*100).toFixed(1)}%</div></div>
+            <div><div class="fl-mini">Riesgo restante hoy</div><div style="font-size:24px;font-weight:900;color:${riskLeft>0?"#f2cc60":"#ff7b72"};">S/${riskLeft.toFixed(2)}</div></div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;"><button class="fl-btn" id="bkBuildPlan">Generar plan</button></div>
+          </div>
+          <div class="fl-row" style="margin-top:10px;">
+            <input id="bkBank" class="fl-input" type="number" min="1" step="0.5" value="${st.bank.toFixed(2)}" placeholder="Bank actual" style="width:120px" />
+            <input id="bkDays" class="fl-input" type="number" min="1" max="30" value="${st.targetDays}" placeholder="Días" style="width:90px" />
+            <input id="bkTarget" class="fl-input" type="number" min="1" step="0.5" value="${st.targetValue}" placeholder="Meta" style="width:120px" />
+            <select id="bkTargetMode" class="fl-select" style="width:120px"><option value="amount" ${st.targetMode==="amount"?"selected":""}>Meta S/</option><option value="percent" ${st.targetMode==="percent"?"selected":""}>Meta %</option></select>
+            <select id="bkRiskLevel" class="fl-select" style="width:140px"><option value="conservador" ${st.riskLevel==="conservador"?"selected":""}>Conservador</option><option value="balanceado" ${st.riskLevel==="balanceado"?"selected":""}>Balanceado</option><option value="agresivo" ${st.riskLevel==="agresivo"?"selected":""}>Agresivo</option></select>
+            <input id="bkMaxBets" class="fl-input" type="number" min="2" max="3" step="1" value="${maxDayBets}" style="width:95px" title="Máx apuestas día" />
+            <input id="bkStopSoles" class="fl-input" type="number" min="0.5" step="0.5" value="${st.stopLoss.toFixed(2)}" style="width:110px" title="Stop diario S/" />
+            <input id="bkStopPct" class="fl-input" type="number" min="5" max="40" step="1" value="${(st.dailyRiskPct*100).toFixed(0)}" style="width:100px" title="Stop diario %" />
+            <input id="bkStopStreak" class="fl-input" type="number" min="1" max="4" step="1" value="${st.stopLossStreak}" style="width:100px" title="Stop racha" />
+          </div>
+          <div id="bkPilot" class="fl-mini" style="margin-top:8px;">
+            🧠 Plan de hoy (Día ${dayIndex}/${plan.targetDays}): ${onTrack?"✅ Vas en ruta":"⚠️ Debes acelerar"} · avance ${plan.progressProfit>=0?"+":""}S/${plan.progressProfit.toFixed(2)} desde inicio · faltan S/${plan.remainingToTarget.toFixed(2)} para meta · odds ${plan.profile.oddsMin.toFixed(2)}-${plan.profile.oddsMax.toFixed(2)} · p mínima ${(plan.pRequired*100).toFixed(1)}% · EV mínima +${(plan.evGate*100).toFixed(1)}%.
+          </div>
+        </div>
+
+        <div class="fl-grid two">
+          <div class="fl-card">
+            <div style="font-weight:800;margin-bottom:8px;">🧾 Misiones del día</div>
+            <div class="fl-mini">Paso 1: cuota ${plan.profile.oddsMin.toFixed(2)}-${Math.min(plan.profile.oddsMax, 1.6).toFixed(2)} · stake S/${plan.stepStakes[0].toFixed(2)} · EV ≥ +${(plan.evGate*100).toFixed(1)}%</div>
+            <div class="fl-mini" style="margin-top:4px;">Si gana → Paso 2: cuota 1.40-1.55 · stake S/${plan.stepStakes[1].toFixed(2)} · EV ≥ +${((plan.evGate-0.005)*100).toFixed(1)}%</div>
+            <div class="fl-mini" style="margin-top:4px;">${allowThirdStep?`Si gana → Paso 3 opcional · stake S/${plan.stepStakes[2].toFixed(2)}`:"Paso 3 bloqueado por riesgo del día"}</div>
+            <div class="fl-mini" style="margin-top:8px;color:${plan.recoveryMode?"#f2cc60":"#3fb950"};">${plan.recoveryMode?"🔻 Recuperación suave: baja stake mañana y exige EV +1.5%.":"✅ Modo normal: puedes escalar +10% a +25% si sigues verde."}</div>
+            <div class="fl-mini" style="margin-top:8px;color:${plan.streakStop?"#ff7b72":"#9ca3af"};">${plan.streakStop?"Stop por racha activa: 2 pérdidas seguidas, se cierra el día.":"Stop racha controlado."}</div>
+            <div class="fl-mini" style="margin-top:8px;">📍 Roadmap: cada checkpoint marca cuánto bank necesitas y si vas adelantado/atrasado.</div>
+            <label class="fl-row" style="margin-top:10px;align-items:center;gap:6px;"><input id="bkAutoMode" type="checkbox" ${st.autoMode?"checked":""} /> Auto: ON</label>
+          </div>
+
+          <div class="fl-card">
+            <div style="font-weight:800;margin-bottom:8px;">🎯 Radar de picks</div>
+            <div class="fl-row">
+              <select id="pickType" class="fl-select" style="width:120px"><option>1X2</option><option>DNB</option><option>Doble oportunidad</option><option>Under/Over</option></select>
+              <input id="pickOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:100px" />
+              <input id="pickP" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="pFinal" style="width:100px" />
+              <input id="pickPmkt" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="pMkt" style="width:100px" />
+              <button class="fl-btn" id="addPick">Agregar</button>
+            </div>
+            <table class="fl-table" style="margin-top:8px;">
+              <thead><tr><th>Tipo</th><th>Cuota</th><th>pFinal</th><th>pMkt</th><th>EV</th><th>0.25 Kelly</th><th>Stake</th><th>Conf</th><th>Flex</th><th>Etiqueta</th></tr></thead>
+              <tbody>${radarRows}</tbody>
+            </table>
+            <div class="fl-mini" style="margin-top:8px;">Conf = confianza del setup en el plan. Flex = qué tanto encaja en tu ventana ideal de cuota para ajustar sin romper el roadmap.</div>
+          </div>
+        </div>
+
+        <div class="fl-grid two">
+          <div class="fl-card">
+            <div style="font-weight:800;margin-bottom:8px;">📈 Equity real vs plan ideal vs banda de riesgo</div>
+            <svg viewBox="0 0 640 200" style="width:100%;height:220px;background:#0f141d;border:1px solid #2d333b;border-radius:10px;">
+              <path d="${lowPath}" fill="none" stroke="#ff7b72" stroke-width="1.2" stroke-dasharray="4 3"/>
+              <path d="${highPath}" fill="none" stroke="#2ea043" stroke-width="1.2" stroke-dasharray="4 3"/>
+              <path d="${guidePath}" fill="none" stroke="#f2cc60" stroke-width="2"/>
+              <path d="${equityPath}" fill="none" stroke="#58a6ff" stroke-width="2.8"/>
+            </svg>
+            <div class="fl-mini" style="margin-top:8px;">Azul: bank real. Amarillo: trayectoria ideal diaria para cumplir meta. Verde/rojo punteado: banda probabilística (P90/P10) según tu stake, p y cuota promedio.</div>
+            <div class="fl-row" style="margin-top:8px;">
+              <span class="fl-chip">Drawdown máx: ${(Math.max(...equitySeries)-Math.min(...equitySeries)).toFixed(2)}</span>
+              <span class="fl-chip">Días para meta (est): ${Math.max(1, Math.ceil((plan.targetBank-st.bank)/Math.max(0.01,plan.dailyGoal)))}</span>
+              <span class="fl-chip ${riskLeft>0?"warn":"bad"}">Riesgo hoy: S/${riskLeft.toFixed(2)}</span>
+            </div>
+          </div>
+          <div class="fl-card">
+            <div style="font-weight:800;margin-bottom:8px;">🗺️ Roadmap del plan + Historial compacto</div>
+            <table class="fl-table" style="margin-bottom:10px;"><thead><tr><th>Checkpoint</th><th>Día objetivo</th><th>Bank objetivo</th><th>Gap</th><th>Estado</th></tr></thead><tbody>${roadmapRows}</tbody></table>
+            <div style="font-weight:700;margin-bottom:6px;">Últimas apuestas (7 días)</div>
+            <table class="fl-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Cuota</th><th>Res</th><th>P/L</th><th>Tag</th></tr></thead><tbody>${compactHistory || "<tr><td colspan='6'>Sin registros</td></tr>"}</tbody></table>
+            <div class="fl-row" style="margin-top:10px;">
+              <input id="logStake" class="fl-input" type="number" step="0.5" min="${st.minUnit}" value="${plan.stepStakes[0]}" style="width:90px" placeholder="Stake" />
+              <input id="logOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:90px" />
+              <input id="logProb" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="pFinal" style="width:90px" />
+              <select id="logPickType" class="fl-select" style="width:140px"><option>1X2</option><option>DNB</option><option>Doble oportunidad</option><option>Under/Over</option></select>
+              <select id="logResult" class="fl-select" style="width:90px"><option value="win">win</option><option value="loss">loss</option><option value="push">push</option></select>
+              <button class="fl-btn" id="saveLog">Guardar</button>
+            </div>
+            <div id="logOut" class="fl-mini" style="margin-top:8px;"></div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById("bkBuildPlan").onclick = ()=>{
+        st.bank = Math.max(1, Number(document.getElementById("bkBank").value) || st.bank);
+        st.targetDays = clamp(Number(document.getElementById("bkDays").value) || st.targetDays, 1, 30);
+        st.targetMode = document.getElementById("bkTargetMode").value === "percent" ? "percent" : "amount";
+        st.targetValue = Math.max(1, Number(document.getElementById("bkTarget").value) || st.targetValue);
+        st.riskLevel = document.getElementById("bkRiskLevel").value || st.riskLevel;
+        st.maxBetsPerDay = clamp(Number(document.getElementById("bkMaxBets").value) || st.maxBetsPerDay, 2, 3);
+        st.stopLoss = Math.max(0.5, Number(document.getElementById("bkStopSoles").value) || st.stopLoss);
+        st.dailyRiskPct = clamp((Number(document.getElementById("bkStopPct").value) || (st.dailyRiskPct*100))/100, 0.05, 0.4);
+        st.stopLossStreak = clamp(Number(document.getElementById("bkStopStreak").value) || st.stopLossStreak, 1, 4);
+        st.autoMode = !!document.getElementById("bkAutoMode").checked;
+        st.planStartBank = st.bank;
+        st.planStartDate = new Date().toISOString().slice(0,10);
+        st.planTargetBank = st.targetMode === "percent"
+          ? st.planStartBank * (1 + st.targetValue/100)
+          : st.targetValue;
+        saveDb(db);
+        render("bitacora");
+      };
+
+      document.getElementById("addPick").onclick = ()=>{
+        const odds = Number(document.getElementById("pickOdds").value);
+        const pFinal = Number(document.getElementById("pickP").value);
+        const pMktRaw = Number(document.getElementById("pickPmkt").value);
+        if(!(odds>1) || !(pFinal>0 && pFinal<1)) return;
+        st.pickCandidates.unshift({
+          id: uid("pick"),
+          pickType: document.getElementById("pickType").value || "1X2",
+          odds,
+          pFinal,
+          pMkt: (pMktRaw>0 && pMktRaw<1) ? pMktRaw : null
+        });
+        st.pickCandidates = st.pickCandidates.slice(0,8);
+        saveDb(db);
+        render("bitacora");
+      };
+
+      document.getElementById("saveLog").onclick = ()=>{
+        const stake = Math.max(st.minUnit, Number(document.getElementById("logStake").value) || st.minUnit);
+        const odds = Math.max(1.01, Number(document.getElementById("logOdds").value) || 0);
+        const probability = clamp(Number(document.getElementById("logProb").value) || 0.5, 0.01, 0.99);
+        const result = document.getElementById("logResult").value;
+        const pickType = document.getElementById("logPickType").value || "1X2";
+        const out = document.getElementById("logOut");
+        if(!(odds>1)){
+          out.textContent = "❌ Cuota inválida.";
+          return;
+        }
+        const calc = calcBitacoraSuggestion({
+          bank: st.bank,
+          odds,
+          probability,
+          kellyFraction: st.kellyFraction,
+          minUnit: st.minUnit,
+          maxStakePct: st.maxStakePct
+        });
+        const profit = result==="win" ? stake * (odds - 1) : (result==="loss" ? -stake : 0);
+        const bankBefore = st.bank;
+        st.bank = Math.max(0, st.bank + profit);
+        const entry = {
+          id: uid("bet"),
+          date: new Date().toISOString(),
+          stake,
+          odds,
+          probability,
+          pickType,
+          pMkt: 1/odds,
+          result,
+          ev: calc.ev,
+          profit,
+          bankBefore,
+          bankAfter: st.bank,
+          planDayIndex: dayIndex
+        };
+        st.entries.push(entry);
+        saveDb(db);
+        out.innerHTML = `✅ Apuesta guardada. Profit ${profit>=0?"+":""}S/${profit.toFixed(2)} · bank S/${st.bank.toFixed(2)}`;
+        setTimeout(()=>render("bitacora"), 220);
+      };
+      return;
+    }
+
+
+    if(view==="market"){
+      db.marketTracker = Array.isArray(db.marketTracker) ? db.marketTracker.map(ensureMarketMatchState) : [];
+      const todayKey = new Date().toISOString().slice(0,10);
+      const upcoming = db.tracker.filter(m=>(m.date||"") >= todayKey || (!Number.isFinite(m.homeGoals) && !Number.isFinite(m.awayGoals)));
+      const trackerOptions = upcoming.map(m=>{
+        const home = db.teams.find(t=>t.id===m.homeId)?.name || "Local";
+        const away = db.teams.find(t=>t.id===m.awayId)?.name || "Visitante";
+        const lg = db.leagues.find(l=>l.id===m.leagueId)?.name || "Liga";
+        return `<option value="${m.id}">${m.date || "sin fecha"} · ${home} vs ${away} (${lg})</option>`;
+      }).join("");
+
+      const rows = db.marketTracker.map(row=>({ row, metrics: marketRecordMetrics(row) }));
+      const settled = rows.filter(r=>r.row.settlement && Number.isFinite(r.metrics.clv));
+      const edgeGlobal = rows.length ? rows.reduce((acc,r)=>acc+r.metrics.edge,0)/rows.length : 0;
+      const clvAvg = settled.length ? settled.reduce((acc,r)=>acc+r.metrics.clv,0)/settled.length : 0;
+      const adelantado = rows.length ? rows.filter(r=>r.metrics.convergence===true).length / rows.length : 0;
+      const evTomado = rows.filter(r=>r.row.apuestaTomada).map(r=>(r.row.apuestaTomada.probModelo * r.row.apuestaTomada.cuota) - 1);
+      const evTomadoAvg = evTomado.length ? evTomado.reduce((a,b)=>a+b,0)/evTomado.length : 0;
+      const roiRealNum = settled.reduce((acc,r)=>{
+        const bet = r.row.apuestaTomada;
+        const result = r.row.settlement?.resultadoReal;
+        if(!bet || !bet.stake) return acc;
+        const won = result === r.metrics.side;
+        return acc + (won ? bet.stake*(bet.cuota-1) : -bet.stake);
+      }, 0);
+      const totalStake = settled.reduce((acc,r)=>acc+(Number(r.row.apuestaTomada?.stake)||0),0);
+      const roiReal = totalStake>0 ? roiRealNum/totalStake : 0;
+      const roiEsperado = totalStake>0 ? settled.reduce((acc,r)=>{
+        const bet = r.row.apuestaTomada;
+        return acc + (((bet.probModelo*bet.cuota)-1) * bet.stake);
+      },0)/totalStake : 0;
+
+      const cards = rows.map(({ row, metrics })=>{
+        const sideLabel = metrics.side === "home" ? "1" : (metrics.side === "draw" ? "X" : "2");
+        const latest = row.cuotas[row.cuotas.length-1] || null;
+        const firstTs = row.cuotas[0]?.timestamp?.slice(5,16) || "inicio";
+        const lastTs = latest?.timestamp?.slice(5,16) || "actual";
+        const chartPoints = row.cuotas.map((q, idx)=>{
+          const mkt = marketProbsFromOdds(q);
+          const pMkt = metrics.side === "home" ? mkt?.pH : (metrics.side === "draw" ? mkt?.pD : mkt?.pA);
+          const odd = Number(q[metrics.side]) || 0;
+          const ev = odd>1 ? (metrics.modelP * odd)-1 : 0;
+          return { idx, pMkt: pMkt || 0, ev };
+        });
+        const modelLine = sparklinePath(chartPoints.map(()=>metrics.modelP), 620, 160, -0.2, 1);
+        const marketLine = sparklinePath(chartPoints.map(p=>p.pMkt), 620, 160, -0.2, 1);
+        const evLine = sparklinePath(chartPoints.map(p=>p.ev), 620, 160, -0.2, 1);
+        const badges = [];
+        if(metrics.convergence===true) badges.push('<span class="fl-chip ok">🟢 Mercado converge</span>');
+        if(metrics.convergence===false) badges.push('<span class="fl-chip bad">🔴 Mercado se aleja</span>');
+        if(metrics.marketState === "early_money") badges.push('<span class="fl-chip bad">🔴 Dinero temprano</span>');
+        if(metrics.marketState === "stable") badges.push('<span class="fl-chip ok">🟢 Flujo orgánico</span>');
+        if(metrics.marketState === "volatile") badges.push('<span class="fl-chip warn">🟠 Volátil / ruido</span>');
+        if(metrics.volatility > 0.04) badges.push('<span class="fl-chip warn">⚡ Alta volatilidad</span>');
+        if(row.cuotas.length>=3 && row.cuotas.slice(-3).every(q=>((metrics.modelP*(Number(q[metrics.side])||0))-1) > 0)) badges.push('<span class="fl-chip ok">🎯 EV persistente 3 ticks</span>');
+        const velocityLabel = Math.abs(metrics.velocity) > 0.01 ? "Alta" : (Math.abs(metrics.velocity) > 0.004 ? "Media" : "Baja");
+        const directionLabel = metrics.drift < 0 ? "a favor de este lado" : "en contra de este lado";
+        const signal = metrics.strategySignal;
+        const scoreColor = metrics.stabilityScore >= 70 ? "#3fb950" : (metrics.stabilityScore >= 40 ? "#f2cc60" : "#ff7b72");
+        const gaugeDegree = Math.round((metrics.stabilityScore/100) * 360);
+        return `
+          <div class="fl-card">
+            <div class="fl-row" style="justify-content:space-between;">
+              <div><b>${row.fecha || "sin fecha"}</b> · ${row.liga || "Liga"} · ${marketRowLabel(db, row)}</div>
+              <div class="fl-row" style="gap:6px;">
+                <div class="fl-chip">Side ${sideLabel}</div>
+                <button class="fl-btn" data-delete-market="${row.matchId}" style="border-color:#da3633;color:#ff7b72;">Borrar</button>
+              </div>
+            </div>
+            <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-top:8px;">
+              <div><div class="fl-mini">Prob modelo vs mercado</div><b>${(metrics.modelP*100).toFixed(1)}% / ${(metrics.marketP*100).toFixed(1)}%</b></div>
+              <div><div class="fl-mini">EV actual</div><b style="color:${(metrics.evCurrent||0)>0?'#3fb950':'#ff7b72'}">${((metrics.evCurrent||0)*100).toFixed(2)}%</b></div>
+              <div><div class="fl-mini">Edge</div><b style="color:${metrics.edge>0?'#3fb950':'#ff7b72'}">${(metrics.edge*100).toFixed(2)}%</b></div>
+              <div><div class="fl-mini">Drift cuota</div><b style="color:${metrics.drift<0?'#3fb950':'#f2cc60'}">${(metrics.drift*100).toFixed(2)}%</b></div>
+              <div><div class="fl-mini">Convergencia modelo-mercado</div><b style="color:${(metrics.convergenceDelta||0)>=0?'#3fb950':'#ff7b72'}">${metrics.convergenceDelta===null?'-':`${metrics.convergenceDelta>=0?'+':''}${(metrics.convergenceDelta*100).toFixed(2)} pp`}</b></div>
+              <div><div class="fl-mini">CLV</div><b style="color:${(metrics.clv||0)>0?'#3fb950':'#ff7b72'}">${metrics.clv===null?'-':metrics.clv.toFixed(3)}</b></div>
+            </div>
+            <div class="fl-card" style="margin-top:8px;border:1px solid #2d333b;background:#0d1117;">
+              <div class="fl-row" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+                <div>
+                  <div class="fl-mini">Estado del mercado</div>
+                  <b>${metrics.marketStateLabel}</b>
+                  <div class="fl-mini" style="margin-top:4px;">Velocidad: <b>${velocityLabel}</b> (${(metrics.velocity*100).toFixed(2)}%/h) · Persistencia: <b>${metrics.persistence}</b> snapshots · Dirección ${directionLabel}</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="width:54px;height:54px;border-radius:50%;background:conic-gradient(${scoreColor} ${gaugeDegree}deg,#30363d ${gaugeDegree}deg);display:grid;place-items:center;">
+                    <div style="width:38px;height:38px;border-radius:50%;background:#111827;display:grid;place-items:center;font-size:11px;font-weight:700;color:${scoreColor};">${Math.round(metrics.stabilityScore)}%</div>
+                  </div>
+                  <div class="fl-mini">Market Stability<br/><b style="color:${scoreColor}">${Math.round(metrics.stabilityScore)}%</b> · ${metrics.stabilityBand}</div>
+                </div>
+              </div>
+            </div>
+            <div class="fl-mini" style="margin:8px 0;">${firstTs} → ${lastTs}</div>
+            <svg viewBox="0 0 620 160" style="width:100%;background:#0d1117;border:1px solid #2d333b;border-radius:10px;">
+              <path d="${modelLine}" fill="none" stroke="#58a6ff" stroke-width="2"></path>
+              <path d="${marketLine}" fill="none" stroke="#f2cc60" stroke-width="2"></path>
+              <path d="${evLine}" fill="none" stroke="#3fb950" stroke-width="2"></path>
+            </svg>
+            <div class="fl-row" style="margin-top:8px;">${badges.join(' ') || '<span class="fl-chip">Sin señales todavía</span>'}</div>
+            <div class="fl-mini" style="margin-top:8px;"><b>Señal:</b> ${signal}</div>
           </div>
         `;
       }).join("");
 
-      // fill selects
-      slots.forEach((pos, idx)=>{
-        const npos = normalizePos(pos);
-        const sel = document.getElementById(`slot_${idx}`);
-        sel.innerHTML = `<option value="">(vacío)</option>`;
-        players.forEach(p=>{
-          const eff = getEffectiveRating(db, p.id);
-          const o = document.createElement("option");
-          o.value = p.id;
-          o.textContent = `${p.name} • ${p.position} • base ${fmt(p.rating,1)} • eff ${fmt(eff,1)}`;
-          sel.appendChild(o);
-        });
-        // restore saved
-        const picked = saved[`${idx}`];
-        if(picked) sel.value = picked;
-        sel.onchange = ()=>previewStrength();
-      });
-
-      previewStrength();
-    }
-
-    formationSel.onchange = ()=>buildSlots();
-
-    document.getElementById("saveLineup").onclick = ()=>{
-      const f = formationSel.value;
-
-      // Custom 4-line: state is already in lineupStore[f], just persist
-      if(f === "custom4"){
-        if(!lineupStore[f]) lineupStore[f] = {};
-        db.lineups[teamId] = lineupStore;
-        saveDB(db);
-        alert("XI guardado (Custom).");
-        previewStrength();
-        return;
-      }
-
-      if(!lineupStore[f]) lineupStore[f] = {};
-      const saved = lineupStore[f];
-      // store by index, to support repeated positions
-      const slots = FORMATIONS[f] || FORMATIONS["433"];
-      slots.forEach((pos, idx)=>{
-        const sel = document.getElementById(`slot_${idx}`);
-        const val = sel.value || "";
-        saved[`${idx}`] = val;
-      });
-      db.lineups[teamId] = lineupStore;
-      saveDB(db);
-      alert("XI guardado.");
-      previewStrength();
-    };
-
-    document.getElementById("autoFill").onclick = ()=>{
-      const f = formationSel.value;
-
-      if(f === "custom4"){
-        const saved = lineupStore[f];
-        if(!saved) return;
-
-        const used = new Set();
-        // GK: best GK, else best overall
-        {
-          const pool = players
-            .filter(p=>p.position==="GK" && !used.has(p.id))
-            .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id));
-          let pick = pool[0] || players
-            .filter(p=>!used.has(p.id))
-            .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id))[0] || null;
-          if(pick){
-            saved.gk = pick.id;
-            used.add(pick.id);
-          }
-        }
-
-        function fillLine(n, roles, picks){
-          for(let i=0;i<n;i++){
-            const need = roles[i] || "CM";
-            const pool = players
-              .filter(p=>p.position===need && !used.has(p.id))
-              .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id));
-            let pick = pool[0] || null;
-            if(!pick){
-              pick = players
-                .filter(p=>!used.has(p.id))
-                .sort((a,b)=>getEffectiveRating(db,b.id)-getEffectiveRating(db,a.id))[0] || null;
-            }
-            if(pick){
-              picks[i] = pick.id;
-              used.add(pick.id);
-            }else{
-              picks[i] = "";
-            }
-          }
-        }
-
-        fillLine(saved.defN, saved.defRoles, saved.def);
-        fillLine(saved.midN, saved.midRoles, saved.mid);
-        fillLine(saved.attN, saved.attRoles, saved.att);
-
-        // rebuild UI to reflect new picks
-        buildSlots();
-        return;
-      }
-
-      const slots = FORMATIONS[f] || FORMATIONS["433"];
-      // pick best effective by matching position, avoiding duplicates
-      const used = new Set();
-      slots.forEach((pos, idx)=>{
-        const need = normalizePos(pos);
-        const pool = players
-          .filter(p=>p.position===need && !used.has(p.id))
-          .sort((a,b)=>getEffectiveRating(db,b.id) - getEffectiveRating(db,a.id));
-        let pick = pool[0] || null;
-        if(!pick){
-          // fallback: any unused
-          pick = players
-            .filter(p=>!used.has(p.id))
-            .sort((a,b)=>getEffectiveRating(db,b.id) - getEffectiveRating(db,a.id))[0] || null;
-        }
-        const sel = document.getElementById(`slot_${idx}`);
-        if(pick){
-          sel.value = pick.id;
-          used.add(pick.id);
-        }else{
-          sel.value = "";
-        }
-      });
-      previewStrength();
-    };
-
-    function previewStrength(){
-      const f = formationSel.value;
-      const xi = getXIFromBuilder(teamId, f, db);
-      const s = computeStrengthFromXI(db, xi, true);
-      document.getElementById("strengthPreview").innerHTML = `
-        Ataque: <b>${fmt(s.attack,2)}</b> • Defensa: <b>${fmt(s.defense,2)}</b> • Control: <b>${fmt(s.control,2)}</b><br/>
-        Total XI: <b>${fmt(s.total,2)}</b>
+      content.innerHTML = `
+        <div class="fl-card">
+          <div style="font-size:20px;font-weight:900;">📈 Market Tracker</div>
+          <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-top:8px;">
+            <div><div class="fl-mini">EDGE GLOBAL</div><b style="color:${edgeGlobal>0?'#3fb950':'#ff7b72'}">${(edgeGlobal*100).toFixed(2)}%</b></div>
+            <div><div class="fl-mini">CLV promedio</div><b style="color:${clvAvg>0?'#3fb950':'#ff7b72'}">${(clvAvg*100).toFixed(2)}%</b></div>
+            <div><div class="fl-mini">Modelo adelantado</div><b>${(adelantado*100).toFixed(1)}%</b></div>
+            <div><div class="fl-mini">EV promedio tomado</div><b>${(evTomadoAvg*100).toFixed(2)}%</b></div>
+            <div><div class="fl-mini">ROI real / esperado</div><b>${(roiReal*100).toFixed(1)}% / ${(roiEsperado*100).toFixed(1)}%</b></div>
+          </div>
+        </div>
+        <div class="fl-card">
+          <div class="fl-row" style="flex-wrap:wrap;">
+            <select id="mkMatch" class="fl-select"><option value="">Partido de tracker (opcional)</option>${trackerOptions}</select>
+            <input id="mkDate" type="date" class="fl-input" />
+            <input id="mkLeague" class="fl-input" placeholder="Liga" style="min-width:130px;" />
+            <input id="mkLambdaH" type="number" step="0.01" class="fl-input" placeholder="λ home" style="width:90px;" />
+            <input id="mkLambdaA" type="number" step="0.01" class="fl-input" placeholder="λ away" style="width:90px;" />
+            <input id="mkPH" type="number" step="0.01" class="fl-input" placeholder="p home" style="width:90px;" />
+            <input id="mkPD" type="number" step="0.01" class="fl-input" placeholder="p draw" style="width:90px;" />
+            <input id="mkPA" type="number" step="0.01" class="fl-input" placeholder="p away" style="width:90px;" />
+            <button class="fl-btn" id="mkSaveMatch">Guardar partido market</button>
+          </div>
+          <div class="fl-row" style="margin-top:8px;flex-wrap:wrap;">
+            <select id="mkTarget" class="fl-select">${db.marketTracker.map(r=>`<option value="${r.matchId}">${r.fecha || "sin fecha"} · ${marketRowLabel(db, r)}</option>`).join('')}</select>
+            <input id="mkOddH" type="number" step="0.01" class="fl-input" placeholder="cuota 1" style="width:88px;" />
+            <input id="mkOddD" type="number" step="0.01" class="fl-input" placeholder="cuota X" style="width:88px;" />
+            <input id="mkOddA" type="number" step="0.01" class="fl-input" placeholder="cuota 2" style="width:88px;" />
+            <button class="fl-btn" id="mkAddTick">Agregar snapshot cuota</button>
+            <select id="mkSide" class="fl-select"><option value="home">1</option><option value="draw">X</option><option value="away">2</option></select>
+            <input id="mkBetOdd" type="number" step="0.01" class="fl-input" placeholder="cuota tomada" style="width:110px;" />
+            <input id="mkBetStake" type="number" step="0.1" class="fl-input" placeholder="stake" style="width:90px;" />
+            <button class="fl-btn" id="mkSaveBet">Guardar apuesta</button>
+          </div>
+          <div class="fl-row" style="margin-top:8px;flex-wrap:wrap;">
+            <input id="mkCloseH" type="number" step="0.01" class="fl-input" placeholder="cierre 1" style="width:88px;" />
+            <input id="mkCloseD" type="number" step="0.01" class="fl-input" placeholder="cierre X" style="width:88px;" />
+            <input id="mkCloseA" type="number" step="0.01" class="fl-input" placeholder="cierre 2" style="width:88px;" />
+            <select id="mkResult" class="fl-select"><option value="">resultado real</option><option value="home">home</option><option value="draw">draw</option><option value="away">away</option></select>
+            <button class="fl-btn" id="mkCloseMatch">Cerrar mercado</button>
+            <span id="mkOut" class="fl-mini"></span>
+          </div>
+        </div>
+        ${cards || '<div class="fl-card">Sin partidos en market tracker todavía.</div>'}
       `;
-    }
 
-    // init
-    buildSlots();
-  }
-
-  function getXIFromBuilder(teamId, formation, db){
-    // Custom 4-line formation
-    if(formation === "custom4"){
-      const cfg = db.lineups?.[teamId]?.[formation];
-      const xi = [];
-      if(!cfg) return xi;
-
-      const add = (pid, slotPos)=>{
-        if(!pid) return;
-        const p = db.players.find(pp=>pp.id===pid);
-        if(!p) return;
-        xi.push({ ...p, _slotPos: slotPos });
+      const findTarget = ()=> db.marketTracker.find(r=>r.matchId===document.getElementById("mkTarget")?.value);
+      document.getElementById("mkSaveMatch").onclick = ()=>{
+        const trId = document.getElementById("mkMatch").value;
+        const tr = db.tracker.find(m=>m.id===trId);
+        const exists = db.marketTracker.find(r=>r.matchId===(trId || document.getElementById("mkDate").value));
+        if(exists){ document.getElementById("mkOut").textContent = "Ya existe ese matchId."; return; }
+        const row = ensureMarketMatchState({
+          matchId: trId || uid("mkt"),
+          fecha: document.getElementById("mkDate").value || tr?.date || "",
+          liga: document.getElementById("mkLeague").value || db.leagues.find(l=>l.id===tr?.leagueId)?.name || "",
+          label: tr ? `${db.teams.find(t=>t.id===tr.homeId)?.name || "Local"} vs ${db.teams.find(t=>t.id===tr.awayId)?.name || "Visitante"}` : "",
+          lambda: { home: pickFirstNumber(document.getElementById("mkLambdaH").value), away: pickFirstNumber(document.getElementById("mkLambdaA").value) },
+          probModel: {
+            home: pickFirstNumber(document.getElementById("mkPH").value) ?? 0.33,
+            draw: pickFirstNumber(document.getElementById("mkPD").value) ?? 0.34,
+            away: pickFirstNumber(document.getElementById("mkPA").value) ?? 0.33
+          },
+          cuotas: tr?.oddsHome>1 && tr?.oddsDraw>1 && tr?.oddsAway>1 ? [{ timestamp: new Date().toISOString(), home: tr.oddsHome, draw: tr.oddsDraw, away: tr.oddsAway }] : []
+        });
+        db.marketTracker.unshift(row);
+        saveDb(db);
+        render("market");
       };
-
-      add(cfg.gk, "GK");
-      (cfg.def||[]).forEach((pid, i)=>add(pid, (cfg.defRoles||[])[i] || "CB"));
-      (cfg.mid||[]).forEach((pid, i)=>add(pid, (cfg.midRoles||[])[i] || "CM"));
-      (cfg.att||[]).forEach((pid, i)=>add(pid, (cfg.attRoles||[])[i] || "ST"));
-      return xi;
-    }
-
-    const lineups = db.lineups?.[teamId]?.[formation] || {};
-    const slots = FORMATIONS[formation] || FORMATIONS["433"];
-    const xi = [];
-    slots.forEach((pos, idx)=>{
-      const pid = lineups[`${idx}`];
-      if(!pid) return;
-      const p = db.players.find(pp=>pp.id===pid);
-      if(!p) return;
-      xi.push({ ...p, _slotPos: normalizePos(pos) });
-    });
-    return xi;
-  }
-
-  // ---- Match Logger (season-aware) ----
-  function renderLogger(db, teamId){
-    const team = db.teams.find(t=>t.id===teamId);
-    const v = document.getElementById("fl_view");
-    if(!team){ v.innerHTML = `<div class="fl-card">Equipo no encontrado.</div>`; return; }
-
-    const players = db.players.filter(p=>p.teamId===teamId);
-
-    v.innerHTML = `
-      <div class="fl-card">
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <div>
-            <div style="font-weight:900;">Match Logger — ${escapeHtml(team.name)}</div>
-            <div class="fl-small">Registra rendimiento por partido. Solo temporada actual afecta la simulación.</div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="mc-btn" id="goTeam">Volver al equipo</button>
-            <button class="mc-btn" id="goLineup">XI Builder</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="fl-card">
-        <div class="fl-row">
-          <div>
-            <div class="fl-h3">Jugador</div>
-            <select class="fl-select" id="plSel"></select>
-          </div>
-          <div>
-            <div class="fl-h3">Temporada</div>
-            <input class="fl-input" id="season" value="${escapeHtml(db.settings.currentSeason)}" placeholder="Ej: 2025-2026">
-          </div>
-          <div>
-            <div class="fl-h3">Fecha</div>
-            <input class="fl-input" id="date" type="date">
-          </div>
-        </div>
-      </div>
-
-      <div class="fl-grid2">
-        <div class="fl-card">
-          <div style="font-weight:800;">📌 Básico</div>
-          <div class="fl-row" style="margin-top:10px;">
-            <input class="fl-input" id="minutes" type="number" min="0" max="120" step="1" placeholder="Minutos (0–90)">
-            <input class="fl-input" id="goals" type="number" min="0" step="1" placeholder="Goles">
-            <input class="fl-input" id="assists" type="number" min="0" step="1" placeholder="Asistencias">
-          </div>
-          <div class="fl-row" style="margin-top:10px;">
-            <input class="fl-input" id="yellow" type="number" min="0" step="1" placeholder="Amarillas">
-            <input class="fl-input" id="red" type="number" min="0" step="1" placeholder="Rojas">
-            <input class="fl-input" id="losses" type="number" min="0" step="1" placeholder="Pérdidas">
-          </div>
-        </div>
-
-        <div class="fl-card">
-          <div style="font-weight:800;">⚡ Acciones con valor (Sofascore vibe)</div>
-          <div class="fl-small" style="margin-top:6px;">No todos los pases valen igual: progresivos suman más que regresivos.</div>
-          <div class="fl-row" style="margin-top:10px;">
-            <input class="fl-input" id="shotsOn" type="number" min="0" step="1" placeholder="Tiros a puerta">
-            <input class="fl-input" id="keyPasses" type="number" min="0" step="1" placeholder="Key passes">
-            <input class="fl-input" id="progPasses" type="number" min="0" step="1" placeholder="Pases progresivos">
-          </div>
-          <div class="fl-row" style="margin-top:10px;">
-            <input class="fl-input" id="passC" type="number" min="0" step="1" placeholder="Pases completados">
-            <input class="fl-input" id="passA" type="number" min="0" step="1" placeholder="Pases intentados">
-            <input class="fl-input" id="dribblesWon" type="number" min="0" step="1" placeholder="Regates buenos">
-          </div>
-          <div class="fl-row" style="margin-top:10px;">
-            <input class="fl-input" id="duelsWon" type="number" min="0" step="1" placeholder="Duelos ganados">
-            <input class="fl-input" id="duelsTot" type="number" min="0" step="1" placeholder="Duelos totales">
-            <input class="fl-input" id="defActions" type="number" min="0" step="1" placeholder="Acciones defensivas">
-          </div>
-          <div class="fl-row" style="margin-top:10px;">
-            <input class="fl-input" id="saves" type="number" min="0" step="1" placeholder="Atajadas (GK)">
-            <input class="fl-input" id="conceded" type="number" min="0" step="1" placeholder="Goles concedidos (GK)">
-            <input class="fl-input" id="cleanSheet" type="number" min="0" max="1" step="1" placeholder="Clean sheet 0/1">
-          </div>
-        </div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:800;">Pesos por categoría</div>
-        <div class="fl-small" style="margin-top:6px;">Ajusta el “impacto” de cada categoría (tu criterio).</div>
-        <div class="fl-row" style="margin-top:10px;align-items:flex-end;">
-          ${Object.keys(db.weights).map(k=>`
-            <div style="min-width:180px;flex:1 1 180px;">
-              <div class="fl-small"><b>${k}</b> <span id="w_${k}_v">${db.weights[k]}</span></div>
-              <input id="w_${k}" type="range" min="0.3" max="2.5" step="0.1" value="${db.weights[k]}" style="width:100%;">
-            </div>
-          `).join("")}
-        </div>
-        <div class="fl-row" style="margin-top:10px;">
-          <button class="mc-btn" id="saveWeights">Guardar Pesos</button>
-          <button class="mc-btn" id="apply">Calcular & Guardar</button>
-        </div>
-        <div id="result" class="fl-small" style="margin-top:10px;"></div>
-      </div>
-
-      <div class="fl-card">
-        <div style="font-weight:800;">Historial reciente (temporada actual)</div>
-        <div id="recentLogs" class="fl-small" style="margin-top:8px;"></div>
-      </div>
-    `;
-
-    document.getElementById("goTeam").onclick = ()=>openLab("team",{teamId});
-    document.getElementById("goLineup").onclick = ()=>openLab("lineup",{teamId});
-
-    // defaults
-    const d = new Date();
-    const iso = d.toISOString().slice(0,10);
-    document.getElementById("date").value = iso;
-
-    const plSel = document.getElementById("plSel");
-    if(players.length===0){
-      plSel.innerHTML = `<option>(Agrega jugadores primero)</option>`;
+      document.getElementById("mkAddTick").onclick = ()=>{
+        const target = findTarget();
+        if(!target) return;
+        const home = pickFirstNumber(document.getElementById("mkOddH").value);
+        const draw = pickFirstNumber(document.getElementById("mkOddD").value);
+        const away = pickFirstNumber(document.getElementById("mkOddA").value);
+        if(!(home>1 && draw>1 && away>1)) return;
+        target.cuotas.push({ timestamp: new Date().toISOString(), home, draw, away });
+        target.cuotas = ensureMarketMatchState(target).cuotas;
+        saveDb(db);
+        render("market");
+      };
+      document.getElementById("mkSaveBet").onclick = ()=>{
+        const target = findTarget();
+        if(!target) return;
+        const side = document.getElementById("mkSide").value;
+        const cuota = pickFirstNumber(document.getElementById("mkBetOdd").value);
+        const stake = pickFirstNumber(document.getElementById("mkBetStake").value);
+        if(!(cuota>1) || !(stake>0)) return;
+        target.apuestaTomada = {
+          side,
+          cuota,
+          probModelo: target.probModel?.[side] || 0.33,
+          stake,
+          timestamp: new Date().toISOString()
+        };
+        saveDb(db);
+        render("market");
+      };
+      content.querySelectorAll("[data-delete-market]").forEach((btn)=>btn.onclick = ()=>{
+        const matchId = btn.getAttribute("data-delete-market");
+        if(!matchId) return;
+        const target = db.marketTracker.find((row)=>row.matchId===matchId);
+        const displayName = target ? marketRowLabel(db, target) : matchId;
+        if(!confirm(`¿Borrar ${displayName} del market tracker?`)) return;
+        db.marketTracker = db.marketTracker.filter((row)=>row.matchId!==matchId);
+        saveDb(db);
+        render("market");
+      });
+      document.getElementById("mkCloseMatch").onclick = ()=>{
+        const target = findTarget();
+        const out = document.getElementById("mkOut");
+        if(!target){ out.textContent = "Selecciona partido."; return; }
+        const ch = pickFirstNumber(document.getElementById("mkCloseH").value);
+        const cd = pickFirstNumber(document.getElementById("mkCloseD").value);
+        const ca = pickFirstNumber(document.getElementById("mkCloseA").value);
+        if(ch>1 && cd>1 && ca>1) target.closingOdds = { home: ch, draw: cd, away: ca };
+        const metrics = marketRecordMetrics(target);
+        target.settlement = {
+          resultadoReal: document.getElementById("mkResult").value || null,
+          cuotaCierre: target.closingOdds?.[metrics.side] || null,
+          CLV: metrics.clv,
+          EVInicial: metrics.evInitial,
+          EVFinal: metrics.evCurrent
+        };
+        saveDb(db);
+        render("market");
+      };
       return;
     }
-    players.forEach(p=>{
-      const o = document.createElement("option");
-      o.value = p.id;
-      o.textContent = `${p.name} • ${p.position} • base ${fmt(p.rating,1)} • eff ${fmt(getEffectiveRating(db,p.id),1)}`;
-      plSel.appendChild(o);
-    });
 
-    // sliders text
-    Object.keys(db.weights).forEach(k=>{
-      const r = document.getElementById("w_"+k);
-      r.oninput = ()=> document.getElementById("w_"+k+"_v").textContent = r.value;
-    });
 
-    document.getElementById("saveWeights").onclick = ()=>{
-      Object.keys(db.weights).forEach(k=> db.weights[k] = parseFloat(document.getElementById("w_"+k).value));
-      saveDB(db);
-      alert("Pesos guardados.");
-    };
+    if(view==="versus"){
+      db.versus ||= { homeAdvantage: 1.1, paceFactor: 1, sampleSize: 20, marketBlend: 0.35, matchday: 20, tableContextTrust: 0.45, tableContext: {} };
+      db.versus.tableContext ||= {};
+      ensureLearningState(db);
+      db.versus.marketBlend = clamp(Number(db.learning.marketTrust) || Number(db.versus.marketBlend) || 0.35, 0, 0.8);
+      if(!db.settings.selectedLeagueId && db.leagues[0]) db.settings.selectedLeagueId = db.leagues[0].id;
+      const leagueOptions = db.leagues
+        .slice()
+        .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
+        .map(l=>`<option value="${l.id}" ${db.settings.selectedLeagueId===l.id?"selected":""}>${l.name}</option>`)
+        .join("");
+      const teamsForLeague = db.settings.selectedLeagueId ? getTeamsForLeague(db, db.settings.selectedLeagueId) : db.teams;
+      const options = teamsForLeague
+        .slice()
+        .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }))
+        .map(t=>`<option value="${t.id}">${t.name}</option>`)
+        .join("");
+      const pendingPredictions = db.predictions.filter(p=>!p.resolved).slice(-20).reverse();
+      const pendingOptions = pendingPredictions.map(p=>{
+        const home = db.teams.find(t=>t.id===p.homeId)?.name || "Local";
+        const away = db.teams.find(t=>t.id===p.awayId)?.name || "Visitante";
+        return `<option value="${p.id}">${p.date || "sin fecha"} · ${home} vs ${away}</option>`;
+      }).join("");
+      const globalTraining = computeGlobalTrainingSize(db.teams, db.tracker);
+      const recentMetrics = recentWindowMetrics(db, 10);
+      const globalBrier = db.learning.metrics?.global?.brierScore;
+      const health = modelHealthEmoji(globalBrier);
 
-    document.getElementById("apply").onclick = ()=>{
-      const pid = plSel.value;
-      const p = db.players.find(pp=>pp.id===pid);
-      if(!p) return;
-
-      const season = document.getElementById("season").value.trim() || db.settings.currentSeason;
-      const date = document.getElementById("date").value || new Date().toISOString().slice(0,10);
-
-      // read numbers safely
-      const num = (id)=>{ const el = document.getElementById(id); return el ? (parseFloat(el.value)||0) : 0; };
-
-      const minutes = num("minutes");
-      const goals = num("goals");
-      const assists = num("assists");
-      const yellow = num("yellow");
-      const red = num("red");
-      const losses = num("losses");
-
-      const shotsOn = num("shotsOn");
-      const keyPasses = num("keyPasses");
-      const progPasses = num("progPasses");
-      const passC = num("passC");
-      const passA = Math.max(1, num("passA"));
-      const dribblesWon = num("dribblesWon");
-      const duelsWon = num("duelsWon");
-      const duelsTot = Math.max(1, num("duelsTot"));
-      const defActions = num("defActions");
-
-      const saves = num("saves");
-      const conceded = num("conceded");
-      const cleanSheet = num("cleanSheet");
-
-      // update weights from sliders (for this calc)
-      Object.keys(db.weights).forEach(k=> db.weights[k] = parseFloat(document.getElementById("w_"+k).value));
-
-      // compute matchScore (0..10)
-      const score = computeMatchScore(db, p.position, {
-        minutes, goals, assists, yellow, red, losses,
-        shotsOn, keyPasses, progPasses, passC, passA,
-        dribblesWon, duelsWon, duelsTot, defActions,
-        saves, conceded, cleanSheet
-      });
-
-      // update player's base rating slightly (learning) OR keep base stable?
-      // We'll do: base rating evolves slowly toward current-season form, but mostly stable.
-      // Update "rating" with a small K based on minutes:
-      const minFactor = Math.sqrt(clamp(minutes/90, 0, 1));
-      const expected = p.rating;
-      const K = 0.12 * minFactor; // conservative
-      const newRating = clamp(expected + K * (score - expected), 0, 10);
-
-      // log
-      db.matches.push({
-        id: uid("m"),
-        playerId: pid,
-        teamId: p.teamId,
-        season,
-        date,
-        position: p.position,
-        stats: {
-          minutes, goals, assists, yellow, red, losses,
-          shotsOn, keyPasses, progPasses, passC, passA,
-          dribblesWon, duelsWon, duelsTot, defActions,
-          saves, conceded, cleanSheet
-        },
-        score,
-        oldRating: expected,
-        newRating
-      });
-
-      p.rating = newRating;
-
-      // save
-      saveDB(db);
-
-      // show
-      const eff = getEffectiveRating(db, pid);
-      document.getElementById("result").innerHTML = `
-        <b>Performance Score:</b> ${fmt(score,2)} • <b>Rating base:</b> ${fmt(newRating,2)} • <b>Rating efectivo:</b> ${fmt(eff,2)}<br/>
-        <span class="fl-small">Temporada: ${escapeHtml(season)} • Fecha: ${escapeHtml(date)}</span>
-      `;
-
-      // refresh dropdown label
-      openLab("logger",{teamId});
-    };
-
-    // recent logs list
-    const season = db.settings.currentSeason;
-    const recent = db.matches
-      .filter(m=>m.teamId===teamId && m.season===season)
-      .sort((a,b)=> (b.date||"").localeCompare(a.date||""))
-      .slice(0, 8);
-
-    document.getElementById("recentLogs").innerHTML = recent.map(m=>{
-      const p = db.players.find(pp=>pp.id===m.playerId);
-      return `• ${escapeHtml(m.date)} — ${escapeHtml(p?.name||"Jugador")} (${m.position}) score ${fmt(m.score,2)}<br/>`;
-    }).join("") || `<span style="opacity:.75;">Aún no hay registros de esta temporada.</span>`;
-  }
-
-  // ---- Compute match score (weighted categories) ----
-  function computeMatchScore(db, pos, s){
-    const w = db.weights;
-
-    const minutes = clamp(s.minutes||0, 0, 120);
-    const minFactor = Math.sqrt(clamp(minutes/90, 0, 1));
-
-    // ratios
-    const passPct = (s.passC||0) / Math.max(1, s.passA||1);
-    const duelPct = (s.duelsWon||0) / Math.max(1, s.duelsTot||1);
-
-    // Category contributions (rough but tunable)
-    const shotsVal =
-      (s.goals||0) * 1.8 +
-      (s.assists||0) * 1.0 +
-      (s.shotsOn||0) * 0.35;
-
-    const passesVal =
-      passPct * 1.4 +
-      (s.keyPasses||0) * 0.45 +
-      (s.progPasses||0) * 0.18;
-
-    const dribblesVal =
-      (s.dribblesWon||0) * 0.28 +
-      duelPct * 0.6;
-
-    const defenseVal =
-      (s.defActions||0) * 0.22 +
-      duelPct * 0.8;
-
-    const gkVal =
-      (s.saves||0) * 0.35 +
-      (s.cleanSheet||0) * 0.9 -
-      (s.conceded||0) * 0.45;
-
-    const disciplineVal =
-      (s.losses||0) * -0.06 +
-      (s.yellow||0) * -0.25 +
-      (s.red||0) * -0.95;
-
-    // Position-based mixing (so GK isn't judged by dribbles etc.)
-    let mix = {shots:0.25, passes:0.25, dribbles:0.15, defense:0.25, goalkeeper:0.10};
-    if(pos==="GK") mix = {shots:0.05, passes:0.15, dribbles:0.05, defense:0.25, goalkeeper:0.50};
-    if(pos==="CB") mix = {shots:0.10, passes:0.20, dribbles:0.10, defense:0.45, goalkeeper:0.15};
-    if(pos==="LB"||pos==="RB") mix = {shots:0.12, passes:0.25, dribbles:0.18, defense:0.30, goalkeeper:0.15};
-    if(pos==="CDM") mix = {shots:0.10, passes:0.30, dribbles:0.12, defense:0.40, goalkeeper:0.08};
-    if(pos==="CM") mix = {shots:0.14, passes:0.38, dribbles:0.16, defense:0.26, goalkeeper:0.06};
-    if(pos==="CAM") mix = {shots:0.28, passes:0.38, dribbles:0.20, defense:0.10, goalkeeper:0.04};
-    if(pos==="LW"||pos==="RW") mix = {shots:0.32, passes:0.28, dribbles:0.26, defense:0.10, goalkeeper:0.04};
-    if(pos==="ST") mix = {shots:0.48, passes:0.18, dribbles:0.18, defense:0.10, goalkeeper:0.06};
-
-    // Weighted sum (then scaled to 0..10)
-    // Multiply category by its global weight + mix
-    let raw =
-      (shotsVal * w.shots * mix.shots) +
-      (passesVal * w.passes * mix.passes) +
-      (dribblesVal * w.dribbles * mix.dribbles) +
-      (defenseVal * w.defense * mix.defense) +
-      (gkVal * w.goalkeeper * mix.goalkeeper) +
-      (disciplineVal * w.discipline);
-
-    raw *= minFactor;
-
-    // Map raw -> 0..10 with a gentle curve
-    // The constants here are deliberately conservative to avoid huge jumps.
-    const score = clamp( 5 + raw, 0, 10 );
-    return score;
-  }
-
-  // ---- Form score from current season ----
-  function getFormScore(db, playerId){
-    const season = db.settings.currentSeason;
-    const leagueId = db.settings.currentLeagueId;
-    const logs = db.matches
-      .filter(m=>m.playerId===playerId && m.season===season && (m.leagueId||db.settings.currentLeagueId)===leagueId)
-      .sort((a,b)=> (b.date||"").localeCompare(a.date||""))
-      .slice(0, Math.max(1, db.settings.formLastN||5));
-
-    if(logs.length===0) return NaN;
-
-    // weighted by minutes factor (more minutes => more trust)
-    let sum=0, wsum=0;
-    logs.forEach(m=>{
-      const mins = m.stats?.minutes ?? 0;
-      const wf = Math.sqrt(clamp((mins||0)/90, 0, 1));
-      sum += (m.score||0) * wf;
-      wsum += wf;
-    });
-    if(wsum<=0) return NaN;
-    return clamp(sum/wsum, 0, 10);
-  }
-
-  function getEffectiveRating(db, playerId){
-    const p = db.players.find(pp=>pp.id===playerId);
-    if(!p) return 0;
-    const base = clamp(p.rating||0, 0, 10);
-    const form = getFormScore(db, playerId);
-    if(!Number.isFinite(form)) return base;
-    const fw = clamp(db.settings.formWeight ?? 0.35, 0, 1);
-    return clamp(base + fw*(form - base), 0, 10);
-  }
-
-  // ---- Strength from XI ----
-  function computeStrengthFromXI(db, xi, includeControl=true){
-    // xi entries carry _slotPos possibly (preferred)
-    const group = {attack:[], defense:[], control:[]};
-
-    xi.forEach(p=>{
-      const pos = normalizePos(p._slotPos || p.position || "");
-      const eff = getEffectiveRating(db, p.id);
-      if(["ST","LW","RW","CAM"].includes(pos)) group.attack.push(eff);
-      if(["CB","LB","RB","CDM","GK"].includes(pos)) group.defense.push(eff);
-      if(["CM","CAM","CDM"].includes(pos)) group.control.push(eff);
-    });
-
-    const avg = (arr)=> arr.length ? (arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
-    const attack = avg(group.attack);
-    const defense = avg(group.defense);
-    const control = includeControl ? avg(group.control) : 0;
-
-    const total = includeControl ? (0.4*attack + 0.4*defense + 0.2*control) : (0.5*attack + 0.5*defense);
-    return {attack, defense, control, total};
-  }
-
-  // ---- Versus (V5) ----
-  function renderVersus(db){
-    const v = document.getElementById("fl_view");
-
-    v.innerHTML = `
-      <div class="fl-card">
-        <div style="font-weight:900;">⚔️ Versus Simulator (temporada actual)</div>
-        <div class="fl-small" style="margin-top:6px;">
-          Usa XI guardado por equipo (si existe). Si no hay XI, usa promedio de plantilla (menos preciso).
-        </div>
-      </div>
-
-      <div class="fl-card">
-        <div class="fl-row">
+      content.innerHTML = `
+        <div class="fl-card fl-vs-layout">
           <div>
-            <div class="fl-h3">Local</div>
-            <select class="fl-select" id="homeTeam"></select>
+            <div class="fl-row" style="margin-bottom:8px;">
+              <select id="vsLeague" class="fl-select" style="max-width:220px;"><option value="">Liga</option>${leagueOptions}</select>
+            </div>
+            <div class="fl-row" style="margin-bottom:8px;">
+              <select id="vsHome" class="fl-select"><option value="">Home</option>${options}</select>
+              <select id="vsAway" class="fl-select"><option value="">Away</option>${options}</select>
+            </div>
+            <div class="fl-row" style="margin-bottom:8px;">
+              <input id="vsHA" class="fl-input" type="number" step="0.05" value="${db.versus.homeAdvantage}" title="Home Advantage" />
+              <input id="vsPace" class="fl-input" type="number" step="0.05" value="${db.versus.paceFactor || 1}" title="Pace Factor" />
+              <input id="vsN" class="fl-input" type="number" step="1" min="5" max="40" value="${db.versus.sampleSize || 20}" title="Muestra N" />
+              <input id="vsBlend" class="fl-input" type="number" step="0.05" min="0" max="0.8" value="${db.versus.marketBlend || 0.35}" title="Blend mercado" />
+              <button class="fl-btn" id="runVs">Simular</button>
+            </div>
+            <div class="fl-row">
+              <input id="vsOddH" class="fl-input" type="number" step="0.01" placeholder="Cuota 1" style="width:120px" />
+              <input id="vsOddD" class="fl-input" type="number" step="0.01" placeholder="Cuota X" style="width:120px" />
+              <input id="vsOddA" class="fl-input" type="number" step="0.01" placeholder="Cuota 2" style="width:120px" />
+            </div>
+            <div class="fl-row" style="margin-top:8px;">
+              <input id="vsMatchday" class="fl-input" type="number" min="1" max="50" value="${db.versus.matchday || 20}" title="Jornada" style="width:120px" />
+              <input id="vsCtxTrust" class="fl-input" type="number" step="0.05" min="0" max="1" value="${db.versus.tableContextTrust || 0.45}" title="Peso contexto tabla" style="width:170px" />
+              <input id="vsHomePos" class="fl-input" type="number" min="1" max="20" placeholder="Pos local" style="width:120px" />
+              <select id="vsHomeObj" class="fl-select" style="width:140px"><option value="">Obj local</option><option value="title">title</option><option value="europe">europe</option><option value="mid">mid</option><option value="survival">survival</option><option value="relegation">relegation</option><option value="cupFocus">cupFocus</option></select>
+              <input id="vsAwayPos" class="fl-input" type="number" min="1" max="20" placeholder="Pos visita" style="width:120px" />
+              <select id="vsAwayObj" class="fl-select" style="width:140px"><option value="">Obj visita</option><option value="title">title</option><option value="europe">europe</option><option value="mid">mid</option><option value="survival">survival</option><option value="relegation">relegation</option><option value="cupFocus">cupFocus</option></select>
+            </div>
+            <div id="vsOut" style="margin-top:10px;" class="fl-muted">Selecciona dos equipos.</div>
+            <div class="fl-row" style="margin-top:8px;">
+              <button class="fl-btn" id="runVsV2">Simular v2 (momentum)</button>
+              <button class="fl-btn" id="saveVsV2Profile">Guardar v2 en perfiles</button>
+            </div>
+            <div id="vsV2Out" style="margin-top:8px;" class="fl-mini">Simulación por bloques IDD pendiente.</div>
+            <div class="fl-row" style="margin-top:8px;">
+              <button class="fl-btn" id="saveVsPrediction">Guardar predicción</button>
+              <span id="vsSaveStatus" class="fl-muted"></span>
+            </div>
           </div>
           <div>
-            <div class="fl-h3">Visitante</div>
-            <select class="fl-select" id="awayTeam"></select>
+            <div style="font-weight:800;margin-bottom:6px;">Matriz de marcador exacto (0-5)</div>
+            <div id="vsMatrix" class="fl-vs-grid"></div>
           </div>
-          <div>
-            <div class="fl-h3">Formación</div>
-            <select class="fl-select" id="formation"></select>
-          </div>
-          <div>
-            <div class="fl-h3">Localía</div>
-            <input class="fl-input" id="homeAdv" type="number" step="0.01" min="0" max="0.30" value="${fmt(db.settings.homeAdvantage,2)}">
-          </div>
-        </div>
-
-        <div class="fl-row" style="margin-top:10px;">
-          <button class="mc-btn" id="run">Simular</button>
-          <button class="mc-btn" id="openHomeXI">XI Local</button>
-          <button class="mc-btn" id="openAwayXI">XI Visitante</button>
-        </div>
-      </div>
-
-      <div class="fl-grid2">
-        <div class="fl-card">
-          <div style="font-weight:800;">📊 Probabilidades</div>
-          <div id="probs" style="margin-top:8px;"></div>
         </div>
         <div class="fl-card">
-          <div style="font-weight:800;">🧠 Desglose de fuerza</div>
-          <div id="strength" class="fl-small" style="margin-top:8px;"></div>
-        </div>
-      </div>
-
-            <div class="fl-card">
-        <div style="font-weight:800;">🎲 Monte Carlo (marcador y mercados)</div>
-        <div class="fl-small" style="margin-top:6px;">
-          Simula miles de partidos usando <b>xG</b> (goles esperados). Puedes ponerlos manual o auto-calcularlos desde la fuerza.
-        </div>
-
-        <div class="fl-row" style="margin-top:10px; flex-wrap:wrap;">
-          <div style="min-width:160px;">
-            <div class="fl-h3">xG Local</div>
-            <input class="fl-input" id="mc_xgH" type="number" step="0.05" min="0.1" max="5" value="1.35">
+          <div style="font-weight:800;margin-bottom:8px;">Entrenar modelo (Training Dock)</div>
+          <div class="fl-kpi" style="margin-bottom:8px;">
+            <div><span>Dataset global</span><b>${globalTraining.matches}</b></div>
+            <div><span>Stats/xG</span><b>${globalTraining.withStats}/${globalTraining.withXG}</b></div>
+            <div><span>Salud modelo</span><b>${health}</b></div>
           </div>
-          <div style="min-width:160px;">
-            <div class="fl-h3">xG Visitante</div>
-            <input class="fl-input" id="mc_xgA" type="number" step="0.05" min="0.1" max="5" value="1.15">
+          <div class="fl-mini" style="margin-bottom:8px;">Conf actual: <b>${(clamp(Number(db.learning.metrics?.global?.nMatches || 0)/120, 0.18, 0.92)*100).toFixed(0)}%</b> · Brier (10): <b>${recentMetrics.brier===null?'-':recentMetrics.brier.toFixed(3)}</b> · λ error (10): <b>${recentMetrics.lambdaError===null?'-':recentMetrics.lambdaError.toFixed(3)}</b></div>
+          <div class="fl-row" style="margin-bottom:8px;">
+            <select id="fbPrediction" class="fl-select"><option value="">Predicción pendiente</option>${pendingOptions}</select>
+            <span id="fbUseful" class="fl-chip">Selecciona partido</span>
           </div>
-          <div style="min-width:160px;">
-            <div class="fl-h3">Simulaciones</div>
-            <input class="fl-input" id="mc_N" type="number" step="1000" min="1000" max="50000" value="10000">
+          <div class="fl-mini" style="margin-bottom:6px;">✅ Misión 1: Resultado (1 clic)</div>
+          <div class="fl-row" style="margin-bottom:8px;">
+            <button class="fl-btn" data-outcome="home">Local</button>
+            <button class="fl-btn" data-outcome="draw">Empate</button>
+            <button class="fl-btn" data-outcome="away">Visita</button>
+            <input id="fbOutcome" class="fl-input" placeholder="Resultado" style="width:120px" readonly />
           </div>
-          <div style="display:flex; gap:8px; align-items:flex-end;">
-            <button class="mc-btn" id="mcAutoXg">Auto xG</button>
-            <button class="mc-btn" id="mcRun">Simular</button>
+          <div class="fl-mini" style="margin-bottom:6px;">🎯 Misión 2: Marcador</div>
+          <div class="fl-row" style="margin-bottom:8px;">
+            <input id="fbHG" type="number" class="fl-input" min="0" max="9" placeholder="Goles local" style="width:140px" />
+            <input id="fbAG" type="number" class="fl-input" min="0" max="9" placeholder="Goles visita" style="width:140px" />
+            <button class="fl-btn" data-score="0-0">0-0</button><button class="fl-btn" data-score="1-0">1-0</button><button class="fl-btn" data-score="1-1">1-1</button><button class="fl-btn" data-score="2-1">2-1</button>
           </div>
+          <div class="fl-mini" style="margin-bottom:6px;">🧠 Misión 3: Lectura + contexto</div>
+          <div class="fl-row" style="margin-bottom:8px;">
+            <select id="fbReading" class="fl-select" style="width:170px"><option value="">¿Quién jugó mejor?</option><option value="home">Local mejor</option><option value="draw">Parejo</option><option value="away">Visita mejor</option></select>
+            <select id="fbRed" class="fl-select" style="width:120px"><option value="0">Roja: No</option><option value="1">Roja: Sí</option></select>
+            <select id="fbInjury" class="fl-select" style="width:140px"><option value="0">Lesión: No</option><option value="1">Lesión: Sí</option></select>
+            <select id="fbTrap" class="fl-select" style="width:170px"><option value="0">Rotación trampa: No</option><option value="1">Rotación trampa: Sí</option></select>
+            <button class="fl-btn" id="applyFeedback">Entrenar con este partido</button>
+          </div>
+          <div id="fbOut" class="fl-muted" style="margin-top:8px;">Guarda evidencia automática + calibración online (T y λ) de forma incremental.</div>
         </div>
-
-        <div class="fl-card" style="margin-top:12px;">
-          <div style="font-weight:800;">💸 Cuotas (opcional, tú las metes)</div>
-          <div class="fl-small" style="margin-top:6px;">Convierte cuotas a probabilidades “limpias” (sin margen) y las compara con tu simulación. Si activas calibración, ajusta el total de goles para acercarse al mercado O/U 2.5.</div>
-
-          <div class="fl-row" style="margin-top:10px; flex-wrap:wrap; gap:10px;">
-            <div style="min-width:120px;">
-              <div class="fl-h3">1</div>
-              <input class="fl-input" id="od_1" type="number" step="0.01" min="1.01" placeholder="2.10">
-            </div>
-            <div style="min-width:120px;">
-              <div class="fl-h3">X</div>
-              <input class="fl-input" id="od_x" type="number" step="0.01" min="1.01" placeholder="3.30">
-            </div>
-            <div style="min-width:120px;">
-              <div class="fl-h3">2</div>
-              <input class="fl-input" id="od_2" type="number" step="0.01" min="1.01" placeholder="3.60">
-            </div>
-
-            <div style="min-width:140px;">
-              <div class="fl-h3">Over 2.5</div>
-              <input class="fl-input" id="od_o25" type="number" step="0.01" min="1.01" placeholder="1.90">
-            </div>
-            <div style="min-width:140px;">
-              <div class="fl-h3">Under 2.5</div>
-              <input class="fl-input" id="od_u25" type="number" step="0.01" min="1.01" placeholder="1.95">
-            </div>
-
-            <div style="min-width:140px;">
-              <div class="fl-h3">BTTS Sí</div>
-              <input class="fl-input" id="od_bttsY" type="number" step="0.01" min="1.01" placeholder="1.85">
-            </div>
-            <div style="min-width:140px;">
-              <div class="fl-h3">BTTS No</div>
-              <input class="fl-input" id="od_bttsN" type="number" step="0.01" min="1.01" placeholder="1.95">
-            </div>
-
-            <div style="min-width:220px;">
-              <div class="fl-h3">Blend (tu modelo vs mercado)</div>
-              <input class="fl-input" id="od_w" type="number" step="0.05" min="0" max="1" value="0.65">
-              <div class="fl-small" style="margin-top:6px;">0 = solo mercado • 1 = solo tu modelo</div>
-            </div>
-
-            <div style="display:flex; gap:8px; align-items:flex-end;">
-              <label class="fl-small" style="display:flex;gap:8px;align-items:center;">
-                <input type="checkbox" id="od_calibrate" checked>
-                Calibrar xG con O/U 2.5
-              </label>
-              <label class="fl-small" style="display:flex;gap:8px;align-items:center; margin-left:14px;">
-                <input type="checkbox" id="od_calibrate_full">
-                Calibrar con mercado completo (1X2 + O/U + BTTS)
-              </label>
-            </div>
-          </div>
-
-          <div id="od_out" class="fl-small" style="margin-top:10px;"></div>
-        </div>
-
-
-        <div class="fl-grid2" style="margin-top:12px;">
-          <div class="fl-card" style="margin:0;">
-            <div style="font-weight:800;">Resultados</div>
-            <div id="mc_out" style="margin-top:8px;"></div>
-          </div>
-          <div class="fl-card" style="margin:0;">
-            <div style="font-weight:800;">Distribución de goles</div>
-            <div class="fl-small" style="margin-top:6px;">0–5 y “6+”.</div>
-            <canvas id="mc_chartTotals" height="160"></canvas>
-          </div>
-        </div>
-
-        <div class="fl-card" style="margin-top:12px;">
-          <div style="font-weight:800;">Top marcadores</div>
-          <canvas id="mc_chartScores" height="180"></canvas>
-        </div>
-      </div>
-
-<div class="fl-card">
-        <div style="font-weight:800;">🔎 Nota sobre temporada</div>
-        <div class="fl-small" style="margin-top:6px;">
-          El “FormScore” solo usa registros de la temporada <b>${escapeHtml(db.settings.currentSeason)}</b>.
-          Si un jugador no tiene registros en esta temporada, su rating efectivo = rating base.
-        </div>
-      </div>
-    `;
-
-    const homeSel = document.getElementById("homeTeam");
-    const awaySel = document.getElementById("awayTeam");
-    const formSel = document.getElementById("formation");
-
-    Object.keys(FORMATIONS).forEach(f=>{
-      const o = document.createElement("option");
-      o.value = f;
-      o.textContent = (f==="433"?"4-3-3":f==="442"?"4-4-2":"3-4-3");
-      formSel.appendChild(o);
-    });
-    {
-      const o = document.createElement("option");
-      o.value = "custom4";
-      o.textContent = "Custom (4 líneas)";
-      formSel.appendChild(o);
-    }
-
-
-    db.teams.forEach(t=>{
-      const o1 = document.createElement("option");
-      o1.value = t.id; o1.textContent = t.name;
-      homeSel.appendChild(o1);
-
-      const o2 = document.createElement("option");
-      o2.value = t.id; o2.textContent = t.name;
-      awaySel.appendChild(o2);
-    });
-
-    document.getElementById("openHomeXI").onclick = ()=>{
-      const tid = homeSel.value;
-      if(!tid) return;
-      openLab("lineup",{teamId:tid});
-    };
-    document.getElementById("openAwayXI").onclick = ()=>{
-      const tid = awaySel.value;
-      if(!tid) return;
-      openLab("lineup",{teamId:tid});
-    };
-
-    document.getElementById("run").onclick = ()=>{
-      const homeId = homeSel.value;
-      const awayId = awaySel.value;
-      const formation = formSel.value;
-      const homeAdv = clamp(parseFloat(document.getElementById("homeAdv").value)||0, 0, 0.30);
-
-      const xiHome = getXIFromBuilder(homeId, formation, db);
-      const xiAway = getXIFromBuilder(awayId, formation, db);
-
-      const homeTeam = db.teams.find(t=>t.id===homeId);
-      const awayTeam = db.teams.find(t=>t.id===awayId);
-
-      const H = xiHome.length ? computeStrengthFromXI(db, xiHome, true) : computeStrengthFallback(db, homeId);
-      const A = xiAway.length ? computeStrengthFromXI(db, xiAway, true) : computeStrengthFallback(db, awayId);
-
-      const homeTotal = H.total * (1+homeAdv);
-      const awayTotal = A.total;
-
-      const diff = homeTotal - awayTotal;
-
-      // 3-way: draw higher when diff is small
-      const pHomeRaw = 1/(1+Math.exp(-1.25*diff));
-      const drawBase = 0.28;
-      const pDrawRaw = drawBase * Math.exp(-Math.abs(diff)*1.1);
-      const pAwayRaw = 1 - pHomeRaw;
-
-      const norm = pHomeRaw + pDrawRaw + pAwayRaw;
-      const pH = pHomeRaw/norm, pD = pDrawRaw/norm, pA = pAwayRaw/norm;
-
-      document.getElementById("probs").innerHTML = `
-        <div class="fl-pill"><b>${escapeHtml(homeTeam?.name||"Local")}</b> ${fmt(pH*100,1)}%</div>
-        <div class="fl-pill"><b>Empate</b> ${fmt(pD*100,1)}%</div>
-        <div class="fl-pill"><b>${escapeHtml(awayTeam?.name||"Visitante")}</b> ${fmt(pA*100,1)}%</div>
       `;
 
-      document.getElementById("strength").innerHTML = `
-        <b>Local</b> Total: ${fmt(homeTotal,2)} (A:${fmt(H.attack,2)} D:${fmt(H.defense,2)} C:${fmt(H.control,2)})<br/>
-        <b>Visitante</b> Total: ${fmt(awayTotal,2)} (A:${fmt(A.attack,2)} D:${fmt(A.defense,2)} C:${fmt(A.control,2)})<br/>
-        <span class="fl-small">Diff: ${fmt(diff,2)} • Localía: +${fmt(homeAdv*100,1)}%</span><br/>
-        <span class="fl-small">XI usado: ${xiHome.length? "Sí":"No"} / ${xiAway.length? "Sí":"No"}</span>
-      `;
-
-      // persist setting
-      db.settings.homeAdvantage = homeAdv;
-      saveDB(db);
-    
-
-
-    // --- Monte Carlo wiring (xG-based score simulation) ---
-    const mcOut = document.getElementById("mc_out");
-    const mcXgH = document.getElementById("mc_xgH");
-    const mcXgA = document.getElementById("mc_xgA");
-    const mcN = document.getElementById("mc_N");
-const od1 = document.getElementById("od_1");
-    const odX = document.getElementById("od_x");
-    const od2 = document.getElementById("od_2");
-    const odO25 = document.getElementById("od_o25");
-    const odU25 = document.getElementById("od_u25");
-    const odBTTSY = document.getElementById("od_bttsY");
-    const odBTTSN = document.getElementById("od_bttsN");
-    const odW = document.getElementById("od_w");
-    const odCal = document.getElementById("od_calibrate");
-    const odCalFull = document.getElementById("od_calibrate_full");
-    const odOut = document.getElementById("od_out");
-
-
-    function autoXgFromStrength(){
-      // Map strength totals to a reasonable xG baseline.
-      // Diff pushes xG in opposite directions; clamps keep it sane.
-      const homeId = homeSel.value;
-      const awayId = awaySel.value;
-      const formation = formSel.value;
-      const homeAdv = clamp(parseFloat(document.getElementById("homeAdv").value)||0, 0, 0.30);
-
-      const xiHome = getXIFromBuilder(homeId, formation, db);
-      const xiAway = getXIFromBuilder(awayId, formation, db);
-
-      const H = xiHome.length ? computeStrengthFromXI(db, xiHome, true) : computeStrengthFallback(db, homeId);
-      const A = xiAway.length ? computeStrengthFromXI(db, xiAway, true) : computeStrengthFallback(db, awayId);
-
-      const homeTotal = H.total * (1+homeAdv);
-      const awayTotal = A.total;
-      const diff = homeTotal - awayTotal;
-
-      const xgH = clamp(1.35 + diff*0.35, 0.25, 3.80);
-      const xgA = clamp(1.15 - diff*0.25, 0.25, 3.80);
-
-      mcXgH.value = fmt(xgH,2);
-      mcXgA.value = fmt(xgA,2);
-      return {xgH, xgA};
-    }
-
-    function renderMcCharts(totals, topScores){
-      if(typeof Chart === "undefined") return;
-
-      // totals chart
-      const totCanvas = document.getElementById("mc_chartTotals");
-      const scCanvas  = document.getElementById("mc_chartScores");
-      if(!totCanvas || !scCanvas) return;
-
-      try{ _fbSimCharts.totals?.destroy?.(); }catch(e){}
-      try{ _fbSimCharts.scorelines?.destroy?.(); }catch(e){}
-
-      _fbSimCharts.totals = new Chart(totCanvas.getContext("2d"), {
-        type: "bar",
-        data: {
-          labels: ["0","1","2","3","4","5","6+"],
-          datasets: [{ label: "Partidos", data: totals }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: { y: { beginAtZero: true } }
+      const renderMatrix = (matrix, best, maxGoals)=>{
+        const grid = document.getElementById("vsMatrix");
+        if(!grid) return;
+        grid.style.gridTemplateColumns = `repeat(${maxGoals + 2}, 1fr)`;
+        const cells = [];
+        cells.push('<div class="fl-vs-cell head">L/A</div>');
+        for(let a=0;a<=maxGoals;a++) cells.push(`<div class="fl-vs-cell head">${a}</div>`);
+        for(let h=0;h<=maxGoals;h++){
+          cells.push(`<div class="fl-vs-cell head">${h}</div>`);
+          for(let a=0;a<=maxGoals;a++){
+            const hot = best && h===best.h && a===best.a ? "hot" : "";
+            const zone = h>a ? "zone-home" : (h===a ? "zone-draw" : "zone-away");
+            cells.push(`<div class="fl-vs-cell ${zone} ${hot}">${(matrix[h][a]*100).toFixed(1)}%</div>`);
+          }
         }
+        grid.innerHTML = cells.join("");
+      };
+
+      let lastSimulation = null;
+      let lastSimulationV2 = null;
+
+      const syncTableContextInputs = ()=>{
+        const homeId = document.getElementById("vsHome").value;
+        const awayId = document.getElementById("vsAway").value;
+        const homeCtx = db.versus.tableContext?.[homeId] || {};
+        const awayCtx = db.versus.tableContext?.[awayId] || {};
+        document.getElementById("vsHomePos").value = homeCtx.pos || "";
+        document.getElementById("vsAwayPos").value = awayCtx.pos || "";
+        document.getElementById("vsHomeObj").value = homeCtx.objective || "";
+        document.getElementById("vsAwayObj").value = awayCtx.objective || "";
+      };
+
+      document.getElementById("vsHome").onchange = syncTableContextInputs;
+      document.getElementById("vsAway").onchange = syncTableContextInputs;
+
+      document.querySelectorAll("button[data-outcome]").forEach((btn)=>{
+        btn.onclick = ()=>{
+          document.getElementById("fbOutcome").value = btn.getAttribute("data-outcome") || "";
+        };
       });
-
-      _fbSimCharts.scorelines = new Chart(scCanvas.getContext("2d"), {
-        type: "bar",
-        data: {
-          labels: topScores.map(x=>x.label),
-          datasets: [{ label: "Prob %", data: topScores.map(x=>x.pct) }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: { y: { beginAtZero: true } }
-        }
+      document.querySelectorAll("button[data-score]").forEach((btn)=>{
+        btn.onclick = ()=>{
+          const [h,a] = (btn.getAttribute("data-score") || "0-0").split("-");
+          document.getElementById("fbHG").value = h;
+          document.getElementById("fbAG").value = a;
+        };
       });
-    }
-
-    function runMonteCarlo(){
-      const homeTeam = db.teams.find(t=>t.id===homeSel.value);
-      const awayTeam = db.teams.find(t=>t.id===awaySel.value);
-      const nameH = homeTeam?.name || "Local";
-      const nameA = awayTeam?.name || "Visitante";
-      const N = clampNum(mcN?.value, 1000, 50000, 10000);
-      const baseXgH = clampNum(mcXgH?.value, 0.1, 5, 1.35);
-      const baseXgA = clampNum(mcXgA?.value, 0.1, 5, 1.15);
-
-      // --- Odds -> fair probabilities (remove margin) ---
-      function fairFromOdds(arr){
-        const ps = arr.map(o=> (Number.isFinite(o) && o>1.0001) ? (1/o) : null);
-        if(ps.some(v=>v===null)) return null;
-        const s = ps.reduce((a,b)=>a+b,0);
-        if(!(s>0)) return null;
-        return ps.map(p=>p/s);
-      }
-      function readOdd(el){
-        const v = parseFloat((el?.value||"").trim());
-        return (Number.isFinite(v) && v>1.0001) ? v : null;
-      }
-      function poissonOver25Prob(L){
-        // P(G>=3) where G ~ Poisson(L)
-        const e = Math.exp(-Math.max(0, L));
-        return 1 - e*(1 + L + (L*L)/2);
-      }
-      function calibrateTotalGoals(targetOver){
-        // binary search total lambda to match target P(over2.5) for total goals G~Poisson(L)
-        let lo = 0.2, hi = 6.0;
-        for(let it=0; it<40; it++){
-          const mid = (lo+hi)/2;
-          const p = poissonOver25Prob(mid);
-          if(p < targetOver) lo = mid;
-          else hi = mid;
+      const refreshUsefulMatch = ()=>{
+        const predId = document.getElementById("fbPrediction").value;
+        const chip = document.getElementById("fbUseful");
+        const prediction = db.predictions.find(p=>p.id===predId);
+        if(!prediction){
+          chip.className = "fl-chip";
+          chip.textContent = "Selecciona partido";
+          return;
         }
-        return (lo+hi)/2;
-      }
-
-      // Fast deterministic "simulation": Poisson pmfs + joint matrix (no randomness, super stable)
-      function simulateFast(lambdaH, lambdaA, maxG=10){
-        lambdaH = clamp(lambdaH, 0.01, 8);
-        lambdaA = clamp(lambdaA, 0.01, 8);
-        maxG = clampNum(maxG, 6, 14, 10);
-
-        function pmfPoisson(L){
-          const p = Array(maxG+1).fill(0);
-          const e = Math.exp(-L);
-          p[0] = e;
-          for(let k=1;k<=maxG;k++){
-            p[k] = p[k-1] * L / k;
-          }
-          // absorb tail into last bucket to keep total ~1
-          const s = p.reduce((a,b)=>a+b,0);
-          if(s>0 && s<1){
-            p[maxG] += (1-s);
-          }
-          return p;
+        const divergence = calcPredictionDivergence(prediction);
+        if(divergence > 0.12){
+          chip.className = "fl-chip ok";
+          chip.textContent = `🔥 Partido útil para entrenar · divergencia ${divergence.toFixed(2)}`;
+        }else{
+          chip.className = "fl-chip warn";
+          chip.textContent = `Partido normal · entreno ligero ${divergence.toFixed(2)}`;
         }
+      };
+      document.getElementById("fbPrediction").onchange = refreshUsefulMatch;
+      refreshUsefulMatch();
 
-        const pH = pmfPoisson(lambdaH);
-        const pA = pmfPoisson(lambdaA);
-
-        let winH=0, winA=0, draw=0, btts=0, over25=0;
-        const totals = Array(7).fill(0); // 0..5, 6+
-        const scoreMap = new Map();      // "h-a" -> prob
-
-        for(let h=0; h<=maxG; h++){
-          for(let a=0; a<=maxG; a++){
-            const pr = pH[h] * pA[a];
-            if(h>a) winH += pr;
-            else if(a>h) winA += pr;
-            else draw += pr;
-            if(h>0 && a>0) btts += pr;
-            if(h+a >= 3) over25 += pr;
-
-            totals[Math.min(6, h+a)] += pr;
-
-            // Keep top scorelines later; store all for now (matrix size <= 225)
-            scoreMap.set(`${h}-${a}`, pr);
-          }
-        }
-
-        const topScores = Array.from(scoreMap.entries())
-          .map(([label, p])=>({label, p}))
-          .sort((x,y)=> y.p - x.p)
-          .slice(0, 12);
-
-        return {
-          pHome: winH, pDraw: draw, pAway: winA,
-          pBTTS: btts, pOver25: over25,
-          totals, topScores
+      const vsLeagueEl = document.getElementById("vsLeague");
+      if(vsLeagueEl){
+        vsLeagueEl.onchange = ()=>{
+          db.settings.selectedLeagueId = vsLeagueEl.value || "";
+          saveDb(db);
+          render("versus");
         };
       }
 
-      function fairFromOdds2(oYes, oNo){
-        const a = (Number.isFinite(oYes) && oYes>1.0001) ? 1/oYes : null;
-        const b = (Number.isFinite(oNo) && oNo>1.0001) ? 1/oNo : null;
-        if(a==null || b==null) return null;
-        const s = a+b;
-        return s>0 ? [a/s, b/s] : null;
-      }
-
-      function marketTargets(){
-      const mk = marketTargets();
-      const fair1x2 = mk.fair1x2;
-      const fairOU = mk.fairOU;
-      const fairBTTS = mk.fairBTTS;
-
-      const wBlend = clampNum(odW?.value, 0, 1, 0.65);
-      const doCal = !!odCal?.checked;
-      const doFull = !!odCalFull?.checked;
-
-      // Base lambdas from your model (xG inputs)
-      let baseH = baseXgH, baseA = baseXgA;
-
-      // --- Market calibration options ---
-      let marketFit = null;
-
-      // A) Full calibration (1X2 + O/U + BTTS) if targets exist
-      if(doFull && (mk.pHome!=null || mk.pOver25!=null || mk.pBTTS!=null)){
-        marketFit = calibrateWithMarketFull(baseH, baseA, mk);
-      } else if(doCal && fairOU) {
-        // B) Lite calibration: adjust only total goals using O/U 2.5
-        const targetOver = fairOU[0];
-        const totalBase = baseH + baseA;
-        if(totalBase > 0.05 && targetOver > 0.01 && targetOver < 0.99){
-          const totalCal = calibrateTotalGoals(targetOver);
-          const r = baseH / totalBase;
-          marketFit = { lambdaH: clamp(r * totalCal, 0.05, 6), lambdaA: clamp((1-r) * totalCal, 0.05, 6), err: null };
+      document.getElementById("runVsV2").onclick = ()=>{
+        const homeId = document.getElementById("vsHome").value;
+        const awayId = document.getElementById("vsAway").value;
+        const out = document.getElementById("vsV2Out");
+        if(!homeId || !awayId || homeId===awayId){
+          out.textContent = "❌ Selecciona dos equipos distintos.";
+          return;
         }
-      }
+        const homeTeam = db.teams.find(t=>t.id===homeId);
+        const awayTeam = db.teams.find(t=>t.id===awayId);
+        const homeProfile = getOrCreateDiagProfile(db, homeId, homeTeam?.name || "Local");
+        const awayProfile = getOrCreateDiagProfile(db, awayId, awayTeam?.name || "Visitante");
+        const simCfg = db.versus.simV2 || defaultDb.versus.simV2;
+        const plan = buildMatchPlan(homeProfile, awayProfile, {
+          homeAdv: clamp((Number(document.getElementById("vsHA").value) || db.versus.homeAdvantage || 1.1) - 1, 0, 0.3),
+          leagueGoalsAvg: simCfg.leagueGoalsAvg,
+          baseGoalRatePerBlock: simCfg.baseGoalRatePerBlock,
+          globalVolatility: simCfg.globalVolatility
+        });
+        const sim = simulateMatchV2(plan);
+        lastSimulationV2 = { sim, homeId, awayId };
+        const blocks = sim.blocks.map(b=>`${b.t0}-${b.t1}: ${b.iddHome.toFixed(2)} (${b.events.map(e=>e.type + (e.shock?"⚡":"")).join(",") || "-"})`).join(" · ");
+        out.innerHTML = `
+          <div><b>Score v2:</b> ${sim.score.home}-${sim.score.away}</div>
+          <div><b>Quiebre:</b> ${sim.diagnostic.breakBlock}</div>
+          <div><b>Patrones:</b> ${(sim.diagnostic.patterns.join(", ") || "sin etiqueta")}</div>
+          <div>${sim.diagnostic.text.map(t=>`• ${t}`).join("<br/>")}</div>
+          <div style="margin-top:6px;"><b>IDD velas local:</b> ${sim.candlesHome.map(c=>`${c.label}:${c.close.toFixed(2)}`).join(" | ")}</div>
+          <div style="margin-top:6px;"><b>Bloques:</b> ${blocks}</div>
+        `;
+      };
 
-      // Blend lambdas (0 = market, 1 = model)
-      const xgH = marketFit ? (wBlend*baseH + (1-wBlend)*marketFit.lambdaH) : baseH;
-      const xgA = marketFit ? (wBlend*baseA + (1-wBlend)*marketFit.lambdaA) : baseA;
+      document.getElementById("saveVsV2Profile").onclick = ()=>{
+        const out = document.getElementById("vsV2Out");
+        if(!lastSimulationV2){
+          out.textContent = "❌ Ejecuta Simular v2 primero.";
+          return;
+        }
+        const { sim, homeId, awayId } = lastSimulationV2;
+        const homeTeam = db.teams.find(t=>t.id===homeId);
+        const awayTeam = db.teams.find(t=>t.id===awayId);
+        const currentHome = getOrCreateDiagProfile(db, homeId, homeTeam?.name || "Local");
+        const currentAway = getOrCreateDiagProfile(db, awayId, awayTeam?.name || "Visitante");
+        db.diagProfiles[homeId] = applyMatchToTeamProfile(currentHome, sim.diagnostic, "for");
+        db.diagProfiles[awayId] = applyMatchToTeamProfile(currentAway, sim.diagnostic, "against");
+        saveDb(db);
+        out.innerHTML += `<div style="margin-top:6px;color:#3fb950;">✅ Rasgos de ambos equipos actualizados (EMA).</div>`;
+      };
 
-      
-      // Deterministic "fast sim" (no randomness): stable outputs + instant calibration
-      const simFinal = simulateFast(xgH, xgA, 10);
-      const simModel = simulateFast(baseH, baseA, 10);
+      document.getElementById("runVs").onclick = ()=>{
+        const homeId = document.getElementById("vsHome").value;
+        const awayId = document.getElementById("vsAway").value;
+        const selectedLeagueId = document.getElementById("vsLeague")?.value || "";
+        db.versus.homeAdvantage = Number(document.getElementById("vsHA").value)||1.1;
+        db.versus.paceFactor = Number(document.getElementById("vsPace").value)||1;
+        db.versus.sampleSize = Number(document.getElementById("vsN").value)||20;
+        db.versus.marketBlend = clamp(Number(document.getElementById("vsBlend").value)||0.35, 0, 0.8);
+        db.versus.matchday = clamp(Number(document.getElementById("vsMatchday").value)||20, 1, 50);
+        db.versus.tableContextTrust = clamp(Number(document.getElementById("vsCtxTrust").value)||0.45, 0, 1);
+        db.learning.marketTrust = db.versus.marketBlend;
+        saveDb(db);
+        if(!homeId || !awayId || homeId===awayId) return;
 
-      const pH = simFinal.pHome, pD = simFinal.pDraw, pA = simFinal.pAway;
-      const pBTTS = simFinal.pBTTS;
-      const pO25 = simFinal.pOver25;
+        const homePos = pickFirstNumber(document.getElementById("vsHomePos").value);
+        const awayPos = pickFirstNumber(document.getElementById("vsAwayPos").value);
+        const homeObjective = pickFirstString(document.getElementById("vsHomeObj").value);
+        const awayObjective = pickFirstString(document.getElementById("vsAwayObj").value);
+        if(homePos!==null || homeObjective){
+          db.versus.tableContext[homeId] = {
+            ...(db.versus.tableContext[homeId] || {}),
+            ...(homePos!==null ? { pos: clamp(homePos, 1, 20) } : {}),
+            ...(homeObjective ? { objective: homeObjective } : {})
+          };
+        }
+        if(awayPos!==null || awayObjective){
+          db.versus.tableContext[awayId] = {
+            ...(db.versus.tableContext[awayId] || {}),
+            ...(awayPos!==null ? { pos: clamp(awayPos, 1, 20) } : {}),
+            ...(awayObjective ? { objective: awayObjective } : {})
+          };
+        }
+        saveDb(db);
+        const result = versusModel(db, homeId, awayId, { leagueId: selectedLeagueId, matchday: db.versus.matchday, tableContextTrust: db.versus.tableContextTrust });
+        const market = clean1x2Probs(
+          document.getElementById("vsOddH").value,
+          document.getElementById("vsOddD").value,
+          document.getElementById("vsOddA").value
+        );
+        const baseLambdaHome = result.lHome;
+        const baseLambdaAway = result.lAway;
 
-      const mkH = fair1x2 ? fair1x2[0] : null;
-      const mkD = fair1x2 ? fair1x2[1] : null;
-      const mkA = fair1x2 ? fair1x2[2] : null;
+        const b3LeagueId = selectedLeagueId || db.teams.find(t=>t.id===homeId)?.leagueId || db.teams.find(t=>t.id===awayId)?.leagueId || "";
+        const homeRatings = computeB3TeamRatings(db, homeId, b3LeagueId, "home", db.versus.sampleSize || 20);
+        const awayRatings = computeB3TeamRatings(db, awayId, b3LeagueId, "away", db.versus.sampleSize || 20);
+        const homeMatches = db.tracker
+          .filter(g=>(g.homeId===homeId || g.awayId===homeId) && (!b3LeagueId || g.leagueId===b3LeagueId))
+          .slice(-(db.versus.sampleSize || 20));
+        const awayMatches = db.tracker
+          .filter(g=>(g.homeId===awayId || g.awayId===awayId) && (!b3LeagueId || g.leagueId===b3LeagueId))
+          .slice(-(db.versus.sampleSize || 20));
+        const homeTraining = computeTrainingStats(homeMatches);
+        const awayTraining = computeTrainingStats(awayMatches);
+        const training = {
+          totalMatches: homeTraining.totalMatches + awayTraining.totalMatches,
+          withStats: homeTraining.withStats + awayTraining.withStats,
+          withXG: homeTraining.withXG + awayTraining.withXG,
+          completeness: (homeTraining.completeness + awayTraining.completeness) / 2
+        };
+        const homeIntel = computeTeamIntelligencePanel(db, homeId);
+        const awayIntel = computeTeamIntelligencePanel(db, awayId);
+        const momHome = computeMomentumAdj(homeIntel, awayIntel);
+        const momAway = computeMomentumAdj(awayIntel, homeIntel);
 
-      const mkO25 = fairOU ? fairOU[0] : null;
-      const mkU25 = fairOU ? fairOU[1] : null;
+        const drawBoost = clamp(
+          ((result.tableContext.home.pressure + result.tableContext.away.pressure - 1) * 0.05)
+          - ((result.tableContext.home.riskMode + result.tableContext.away.riskMode) * 0.015),
+          -0.04,
+          0.04
+        );
+        const psychVol = clamp(
+          0.9 + ((homeIntel.psych.volatility + awayIntel.psych.volatility)/200) * 0.3
+          + ((homeIntel.psych.aggressiveness + awayIntel.psych.aggressiveness)/200) * 0.08,
+          0.9,
+          1.2
+        );
+        const riskTilt = clamp((result.tableContext.home.riskMode - result.tableContext.away.riskMode) * 0.05, -0.05, 0.05);
 
-      const mkBTTSY = fairBTTS ? fairBTTS[0] : null;
-      const mkBTTSN = fairBTTS ? fairBTTS[1] : null;
+        let lHome0 = result.leagueCtx.avgGoalsHome
+          * homeRatings.attack
+          * awayRatings.defenseWeakness
+          * (1 + ((db.versus.homeAdvantage || 1.1) - 1))
+          * (1 + momHome)
+          * (1 + riskTilt);
+        let lAway0 = result.leagueCtx.avgGoalsAway
+          * awayRatings.attack
+          * homeRatings.defenseWeakness
+          * (1 + momAway)
+          * (1 - riskTilt);
+        ({ lHome: lHome0, lAway: lAway0 } = applyDrawBoostToLambdas(lHome0, lAway0, drawBoost));
 
-      // For charts, convert probs to pseudo-counts (for visual scale)
-      const totals = simFinal.totals.map(p => Math.round(p * N));
-      const topScores = simFinal.topScores.map(s => ({
-        label: s.label,
-        pct: +((s.p*100).toFixed(2)),
-        c: Math.round(s.p * N)
-      }));
+        const pModelDist = probsFromLambdas(clamp(lHome0, 0.05, 4.5), clamp(lAway0, 0.05, 4.5), result.maxGoals);
+        const pModel = { pH: pModelDist.pHome, pD: pModelDist.pDraw, pA: pModelDist.pAway };
+        const conf = computeB3Confidence({
+          samples: training.withStats,
+          completeness: training.completeness,
+          consistency01: (homeRatings.consistency + awayRatings.consistency) / 2
+        });
+        const blendWeight = (db.versus.marketBlend || 0.35) * (market ? 1 : 0);
+        const effConf = market ? clamp(conf * (0.75 + blendWeight*0.7), 0.2, 0.88) : conf;
+        const pBlend = blend1x2Probs(pModel, market, effConf);
+        const leagueTemperature = getLeagueTemperature(db, b3LeagueId || "global");
+        const pFinal = applyTemperatureTo1x2(pBlend, leagueTemperature);
 
-      if(mcOut){
-        mcOut.innerHTML = `
-          <div class="fl-pill"><b>${escapeHtml(nameH)}</b> ${fmt(pH*100,1)}%</div>
-          <div class="fl-pill"><b>Empate</b> ${fmt(pD*100,1)}%</div>
-          <div class="fl-pill"><b>${escapeHtml(nameA)}</b> ${fmt(pA*100,1)}%</div>
+        const adjusted = adjustLambdasToMatchProbs({ lHome: lHome0, lAway: lAway0 }, pFinal, result.maxGoals);
+        result.lHome = adjusted.lHome;
+        result.lAway = adjusted.lAway;
+        const calibrated = probsFromLambdas(result.lHome, result.lAway, result.maxGoals);
+        result.matrix = applyVolatilityToMatrix(calibrated.matrix, psychVol);
+        const distSummary = summarizeMatrix(result.matrix);
+        result.pHome = distSummary.pHome;
+        result.pDraw = distSummary.pDraw;
+        result.pAway = distSummary.pAway;
+        result.best = distSummary.best;
+        result.factors.breakdown.oddsCalibration = {
+          applied: !!market,
+          shift: ((adjusted.lHome - lHome0) + (adjusted.lAway - lAway0))/2,
+          confidence: effConf,
+          pModel,
+          pFinal,
+          pMarket: market
+        };
+        result.factors.breakdown.b3 = {
+          homeRatings,
+          awayRatings,
+          training,
+          momentum: { home: momHome, away: momAway },
+          drawBoost,
+          volatility: psychVol,
+          riskTilt,
+          confidence: effConf
+        };
+        const globalTraining = computeGlobalTrainingSize(db.teams, db.tracker);
+        result.factors.breakdown.marketMultiplier = ((result.lHome / Math.max(0.05, baseLambdaHome)) + (result.lAway / Math.max(0.05, baseLambdaAway))) / 2;
+        const dominant = topScoreCells(result.matrix, 3);
+        const btts = bttsProbability(result.matrix);
+        const awayZero = result.matrix.reduce((acc,row)=>acc + (row[0] || 0), 0);
+        const breakdown = result.factors.breakdown;
 
-          <div style="margin-top:10px;" class="fl-small">
-            <b>BTTS</b>: ${fmt(pBTTS*100,1)}% &nbsp;•&nbsp;
-            <b>Over 2.5</b>: ${fmt(pO25*100,1)}%<br/>
-            <b>xG Final</b>: ${fmt(xgH,2)} / ${fmt(xgA,2)} &nbsp;•&nbsp;
-            <b>xG Modelo</b>: ${fmt(baseH,2)} / ${fmt(baseA,2)} &nbsp;•&nbsp; <b>N</b>: ${N}
-            ${marketFit ? `<br/><span class="fl-small">λ mercado: ${fmt(marketFit.lambdaH,2)} / ${fmt(marketFit.lambdaA,2)}${marketFit.err!=null?` • err ${fmt(marketFit.err,6)}`:``}</span>` : ``}
+        const marketLine = market
+          ? `<div class="fl-muted" style="margin-top:6px;">Mercado limpio → 1: <b>${(market.pH*100).toFixed(1)}%</b> · X: <b>${(market.pD*100).toFixed(1)}%</b> · 2: <b>${(market.pA*100).toFixed(1)}%</b></div>`
+          : "";
+
+        const homeFacts = result.teams.homeData.form5;
+        const awayFacts = result.teams.awayData.form5;
+        const narrative = `Forma últimos 5: local ${homeFacts.points} pts (${homeFacts.gf}-${homeFacts.ga}) y visitante ${awayFacts.points} pts (${awayFacts.gf}-${awayFacts.ga}). `
+          + `En esta liga el promedio es ${result.leagueCtx.avgGoalsHome.toFixed(2)}-${result.leagueCtx.avgGoalsAway.toFixed(2)} goles (L/V).`;
+        const explainers = [
+          `El local sube λ por ataque reciente (${((breakdown.homeAttackBoost-1)*100).toFixed(0)}%) y debilidad defensiva rival (${((breakdown.awayDefenseWeakness-1)*100).toFixed(0)}%).`,
+          `El visitante se ajusta por su ataque fuera (${((breakdown.awayAttackPenalty-1)*100).toFixed(0)}%) y la defensa local (${((breakdown.homeDefenseStrength-1)*100).toFixed(0)}%).`,
+          breakdown.oddsCalibration.applied
+            ? `B³ blend: modelo ${(breakdown.oddsCalibration.pModel.pH*100).toFixed(1)}/${(breakdown.oddsCalibration.pModel.pD*100).toFixed(1)}/${(breakdown.oddsCalibration.pModel.pA*100).toFixed(1)} vs mercado ${(breakdown.oddsCalibration.pMarket.pH*100).toFixed(1)}/${(breakdown.oddsCalibration.pMarket.pD*100).toFixed(1)}/${(breakdown.oddsCalibration.pMarket.pA*100).toFixed(1)} con conf ${(breakdown.oddsCalibration.confidence*100).toFixed(0)}%.`
+            : "Sin cuotas, no se aplicó calibración de mercado.",
+          `Entrenamiento modelo: ${breakdown.b3?.training?.withStats || 0}/${breakdown.b3?.training?.totalMatches || 0} con stats, xG ${breakdown.b3?.training?.withXG || 0}, completitud ${((breakdown.b3?.training?.completeness || 0)*100).toFixed(0)}%, conf ${((breakdown.b3?.confidence || 0)*100).toFixed(0)}%.`,
+          `Estadísticas guardadas: impacto ataque local ×${(breakdown.statsAttackHome || 1).toFixed(2)} y visitante ×${(breakdown.statsAttackAway || 1).toFixed(2)} (muestras ${breakdown.statsSample?.home || 0}/${breakdown.statsSample?.away || 0}).`,
+          `Dataset global: ${globalTraining.matches} partidos | ${globalTraining.withStats} con stats | ${globalTraining.withXG} con xG.`,
+          `Contexto tabla jornada ${result.tableContext.matchday}: pressure ${result.tableContext.home.pressure.toFixed(2)} / ${result.tableContext.away.pressure.toFixed(2)}, risk ${result.tableContext.home.riskMode.toFixed(2)} / ${result.tableContext.away.riskMode.toFixed(2)} → empate +${(result.tableContext.drawBoost*100).toFixed(1)}%.`
+        ];
+        const dominantTxt = dominant.map(c=>`${c.h}-${c.a} (${(c.p*100).toFixed(1)}%)`).join(", ");
+        const bttsTxt = `BTTS: ${(btts*100).toFixed(1)}% (Away=0 en ${(awayZero*100).toFixed(1)}%)`;
+        const totalLambda = result.lHome + result.lAway;
+        const lambdaGap = Math.abs(result.lHome - result.lAway);
+        const balance = totalLambda > 0 ? clamp(1 - (lambdaGap / totalLambda), 0, 1) : 0;
+        const balanceLabel = balance >= 0.72 ? "Alto" : (balance >= 0.45 ? "Medio" : "Bajo");
+        const partyProfile = [];
+        partyProfile.push(totalLambda > 2.7 ? `Partido abierto (λ total: ${totalLambda.toFixed(2)})` : `Partido controlado (λ total: ${totalLambda.toFixed(2)})`);
+        if((result.lHome - result.lAway) > 0.7) partyProfile.push("Local ofensivo fuerte");
+        if((result.lAway - result.lHome) > 0.7) partyProfile.push("Visitante ofensivo fuerte");
+        if(result.lAway >= 0.95) partyProfile.push("Visitante con probabilidad alta de marcar");
+        if(btts > 0.5) partyProfile.push(`Alta probabilidad de BTTS (${(btts*100).toFixed(1)}%)`);
+        if(result.pDraw > 0.28) partyProfile.push(`Empate estructural alto (${(result.pDraw*100).toFixed(1)}%)`);
+
+        let homeOutcomeCells = 0;
+        let drawOutcomeCells = 0;
+        const threshold = 0.01;
+        for(let h=0; h<=result.maxGoals; h++){
+          for(let a=0; a<=result.maxGoals; a++){
+            if((result.matrix[h][a] || 0) < threshold) continue;
+            if(h>a) homeOutcomeCells += 1;
+            else if(h===a) drawOutcomeCells += 1;
+          }
+        }
+        const drawTop = topScoreCells(result.matrix, result.maxGoals + 1).filter(c=>c.h===c.a).sort((x,y)=>y.p-x.p);
+        const drawLead = drawTop[0];
+        const drawLeadShare = result.pDraw > 0 ? ((drawLead?.p || 0) / result.pDraw) * 100 : 0;
+        const concentrationTxt = `Home Win está distribuido en ${homeOutcomeCells} marcadores (≥${(threshold*100).toFixed(0)}%). Empate en ${drawOutcomeCells}, liderado por ${drawLead ? `${drawLead.h}-${drawLead.a}` : "-"} (${drawLeadShare.toFixed(1)}% del bloque empate).`;
+        const dominantLabel = result.pHome >= result.pDraw && result.pHome >= result.pAway
+          ? "🏠 Local"
+          : (result.pDraw >= result.pAway ? "🤝 Empate" : "✈️ Visita");
+        const autoRead = `El ${dominantLabel.replace(/^[^ ]+ /, "").toLowerCase()} es favorito en el agregado (${(Math.max(result.pHome, result.pDraw, result.pAway)*100).toFixed(1)}%), pero ${(result.lAway >= 0.95 ? "el visitante tiene buena probabilidad de marcar" : "el flujo ofensivo está más repartido")}. El ${result.best.h}-${result.best.a} es el marcador individual más frecuente, aunque el conjunto de marcadores ${result.pHome >= result.pAway ? "favorables al local" : "favorables al visitante"} domina la distribución.`;
+        const dominantWidth = Math.max(result.pHome, result.pDraw, result.pAway) || 1;
+
+        const multiplierLines = [
+          `Base liga: ${breakdown.leagueBase.home.toFixed(2)}`,
+          `Ataque local: ×${breakdown.homeAttackBoost.toFixed(2)}`,
+          `Defensa rival: ×${breakdown.awayDefenseWeakness.toFixed(2)}`,
+          `Bias local: ×${(1 + (breakdown.teamBias.home.attack || 0)).toFixed(2)}`,
+          `Stats: ×${((breakdown.statsAttackHome || 1) * (breakdown.statsAttackAway || 1)).toFixed(2)}`,
+          `Table draw boost: +${((breakdown.drawBoost || 0)*100).toFixed(1)}%`,
+          `B³ draw/vol: ${(breakdown.b3?.drawBoost*100 || 0).toFixed(1)}% / x${(breakdown.b3?.volatility || 1).toFixed(2)}`,
+          `Mercado: ×${(breakdown.marketMultiplier || 1).toFixed(2)}`
+        ];
+
+        const createdAt = new Date().toISOString();
+        const dateOnly = createdAt.slice(0,10);
+        const leagueKey = db.teams.find(t=>t.id===homeId)?.leagueId || "global";
+        const matrixTop = topScoreCells(result.matrix, 6);
+        const predictionId = uid("pred");
+        lastSimulation = {
+          id: predictionId,
+          predictionId,
+          createdAt,
+          updatedAt: createdAt,
+          date: dateOnly,
+          matchKey: `${homeId}-${awayId}-${dateOnly}`,
+          leagueId: leagueKey,
+          leagueKey,
+          homeId,
+          awayId,
+          teamIds: { homeId, awayId },
+          lambdaHome: result.lHome,
+          lambdaAway: result.lAway,
+          pHome: result.pHome,
+          pDraw: result.pDraw,
+          pAway: result.pAway,
+          pModel,
+          pFinal,
+          pMarket: market || null,
+          confidence: effConf,
+          best: result.best,
+          dominant,
+          btts,
+          breakdown,
+          matrix: result.matrix,
+          matrixTop,
+          odds: market || null,
+          marketOdds: market || null,
+          features: {
+            pace: result.factors.pace,
+            homeAdv: result.factors.homeAdv,
+            teamStrength: { home: teamStrength(db, homeId), away: teamStrength(db, awayId) },
+            formMomentum: { home: result.factors.homeForm.momentum, away: result.factors.awayForm.momentum }
+          },
+          resolved: false
+        };
+
+        document.getElementById("vsOut").innerHTML = `
+          <div>λ Home: <b>${result.lHome.toFixed(2)}</b> · λ Away: <b>${result.lAway.toFixed(2)}</b></div>
+          <div style="margin-top:10px;font-weight:800;">RESULTADO MÁS PROBABLE (AGREGADO)</div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span>Home Win</span><b>${(result.pHome*100).toFixed(1)}%</b></div>
+            <div><span>Draw</span><b>${(result.pDraw*100).toFixed(1)}%</b></div>
+            <div><span>Away Win</span><b>${(result.pAway*100).toFixed(1)}%</b></div>
           </div>
-
-          ${(fair1x2 || fairOU || fairBTTS) ? `
-            <div style="margin-top:10px;" class="fl-small">
-              <div style="font-weight:800;">Mercado (sin margen)</div>
-              ${fair1x2 ? `1X2: ${fmt(mkH*100,1)} / ${fmt(mkD*100,1)} / ${fmt(mkA*100,1)}%<br/>` : ``}
-              ${fairOU ? `O/U2.5: Over ${fmt(mkO25*100,1)}% (Under ${fmt(mkU25*100,1)}%)<br/>` : ``}
-              ${fairBTTS ? `BTTS: Sí ${fmt(mkBTTSY*100,1)}% (No ${fmt(mkBTTSN*100,1)}%)` : ``}
-            </div>
-          ` : ``}
+          <div class="fl-vs-bars">
+            <div class="fl-vs-bar"><span>Local</span><div class="fl-vs-bar-track"><div class="fl-vs-bar-fill" style="width:${(result.pHome/dominantWidth*100).toFixed(1)}%"></div></div><b>${(result.pHome*100).toFixed(1)}%</b></div>
+            <div class="fl-vs-bar"><span>Empate</span><div class="fl-vs-bar-track"><div class="fl-vs-bar-fill" style="width:${(result.pDraw/dominantWidth*100).toFixed(1)}%"></div></div><b>${(result.pDraw*100).toFixed(1)}%</b></div>
+            <div class="fl-vs-bar"><span>Visita</span><div class="fl-vs-bar-track"><div class="fl-vs-bar-fill" style="width:${(result.pAway/dominantWidth*100).toFixed(1)}%"></div></div><b>${(result.pAway*100).toFixed(1)}%</b></div>
+          </div>
+          <div style="margin-top:10px;font-weight:800;">MARCADOR MÁS FRECUENTE INDIVIDUAL</div>
+          <div style="margin-top:6px;"><b>${result.best.h} - ${result.best.a}</b> (${(result.best.p*100).toFixed(1)}%)</div>
+          <div class="fl-muted" style="margin-top:6px;">⚠ Esto no implica que el empate sea el resultado dominante. Es la celda individual más alta en la matriz.</div>
+          <div style="margin-top:10px;font-weight:800;">Perfil del partido</div>
+          <div class="fl-muted" style="margin-top:6px;">• ${partyProfile.join("<br/>• ")}</div>
+          <div class="fl-muted" style="margin-top:6px;">Equilibrio del partido: <b>${balanceLabel}</b> (Desbalance λ: ${lambdaGap.toFixed(2)} · Índice: ${(balance*100).toFixed(1)}%)</div>
+          <div class="fl-muted" style="margin-top:6px;">Concentración del resultado: ${concentrationTxt}</div>
+          <div class="fl-muted" style="margin-top:6px;">Marcadores dominantes: <b>${dominantTxt}</b></div>
+          <div class="fl-muted" style="margin-top:6px;">${bttsTxt}</div>
+          <div class="fl-muted" style="margin-top:6px;">Lectura automática: ${autoRead}</div>
+          <div class="fl-muted" style="margin-top:6px;">Corners esperados: <b>${result.cornersExpected.toFixed(1)}</b> · Tarjetas esperadas: <b>${result.cardsExpected.toFixed(1)}</b></div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span>Training size</span><b>${training.withStats}/${training.totalMatches}</b></div>
+            <div><span>Completeness</span><b>${(training.completeness*100).toFixed(0)}%</b></div>
+            <div><span>Conf</span><b>${(effConf*100).toFixed(0)}%</b></div>
+          </div>
+          <div class="fl-muted" style="margin-top:6px;">Entrenamiento: ${training.withStats}/${training.totalMatches} | xG: ${training.withXG} | Comp: ${(training.completeness*100).toFixed(0)}% | Conf: ${(effConf*100).toFixed(0)}%</div>
+          <div class="fl-muted" style="margin-top:6px;">${narrative}</div>
+          <div class="fl-muted" style="margin-top:6px;">• ${explainers.join("<br/>• ")}</div>
+          <div class="fl-muted" style="margin-top:6px;">Contribuciones λ local → <b>${multiplierLines.join(" · ")}</b></div>
+          ${marketLine}
         `;
 
-        if(odOut){
-          const parts = [];
-          if(fair1x2){
-            parts.push(`📌 1X2 edge (FINAL - mercado): ${fmt((pH-mkH)*100,1)} / ${fmt((pD-mkD)*100,1)} / ${fmt((pA-mkA)*100,1)} pts`);
-          }
-          if(fairOU){
-            parts.push(`📌 Over2.5 edge (FINAL - mercado): ${fmt((pO25-mkO25)*100,1)} pts`);
-          }
-          if(fairBTTS){
-            parts.push(`📌 BTTS Sí edge (FINAL - mercado): ${fmt((pBTTS-mkBTTSY)*100,1)} pts`);
-          }
-          if(marketFit && (mkH!=null || mkO25!=null || mkBTTSY!=null)){
-            // show how far the raw model is from market (before calibration/blend)
-            const eParts = [];
-            if(mkH!=null) eParts.push(`Modelo vs mercado 1: ${fmt((simModel.pHome-mkH)*100,1)} pts`);
-            if(mkO25!=null) eParts.push(`Over2.5: ${fmt((simModel.pOver25-mkO25)*100,1)} pts`);
-            if(mkBTTSY!=null) eParts.push(`BTTS Sí: ${fmt((simModel.pBTTS-mkBTTSY)*100,1)} pts`);
-            if(eParts.length) parts.push(`🧭 Distancia del modelo: ${eParts.join(" • ")}`);
-          }
-          if(!parts.length){
-            parts.push(`Si metes cuotas arriba, aquí verás probabilidades limpias (sin margen) + edge vs tu simulación.`);
-          }
-          odOut.innerHTML = parts.join("<br/>");
+        renderMatrix(result.matrix, result.best, result.maxGoals);
+      };
+
+      document.getElementById("saveVsPrediction").onclick = ()=>{
+        const status = document.getElementById("vsSaveStatus");
+        if(!lastSimulation){
+          status.textContent = "❌ Ejecuta una simulación primero.";
+          return;
         }
-      }
+        db.predictions.push({ ...lastSimulation });
+        saveDb(db);
+        status.textContent = "✅ Predicción guardada para feedback.";
+      };
 
-      renderMcCharts(totals, topScores);
+      document.getElementById("applyFeedback").onclick = ()=>{
+        const predId = document.getElementById("fbPrediction").value;
+        const homeGoals = pickFirstNumber(document.getElementById("fbHG").value);
+        const awayGoals = pickFirstNumber(document.getElementById("fbAG").value);
+        const reading = pickFirstString(document.getElementById("fbReading").value);
+        const outcome = pickFirstString(document.getElementById("fbOutcome").value);
+        const out = document.getElementById("fbOut");
+        if(!predId || homeGoals===null || awayGoals===null){
+          out.textContent = "❌ Selecciona predicción y resultado real.";
+          return;
+        }
+        const prediction = db.predictions.find(p=>p.id===predId && !p.resolved);
+        if(!prediction){
+          out.textContent = "❌ Predicción no encontrada.";
+          return;
+        }
+        const beforeRecent = recentWindowMetrics(db, 10);
+        const confBefore = clamp(Number(db.learning.metrics?.global?.nMatches || 0)/120, 0.18, 0.92);
+        const flags = {
+          redCard: document.getElementById("fbRed").value === "1",
+          injuries: document.getElementById("fbInjury").value === "1",
+          rotation: document.getElementById("fbTrap").value === "1"
+        };
 
+        prediction.resolved = true;
+        prediction.actual = { homeGoals, awayGoals, reading, outcome };
+        prediction.updatedAt = new Date().toISOString();
+        prediction.goalError = { home: homeGoals - prediction.lambdaHome, away: awayGoals - prediction.lambdaAway };
+        prediction.flags = flags;
+
+        const metrics = updateLearningFromResult(db, prediction, { homeGoals, awayGoals, reading, outcome, flags });
+        prediction.logLoss = metrics.logLoss;
+        prediction.brierScore = metrics.brier;
+        prediction.learningUpdate = {
+          leagueScaleBefore: metrics.leagueScaleBefore,
+          leagueScaleAfter: metrics.leagueScale,
+          homeBiasBefore: metrics.homeBiasBefore,
+          homeBiasAfter: metrics.homeBias,
+          awayBiasBefore: metrics.awayBiasBefore,
+          awayBiasAfter: metrics.awayBias,
+          confidence: metrics.confidence,
+          effectiveLr: { league: metrics.lrEffectiveLeague, team: metrics.lrEffectiveTeam },
+          temperature: { before: metrics.temperatureBefore, after: metrics.temperatureAfter }
+        };
+        saveDb(db);
+
+        const afterRecent = recentWindowMetrics(db, 10);
+        const confAfter = clamp(Number(db.learning.metrics?.global?.nMatches || 0)/120, 0.18, 0.92);
+        out.innerHTML = `✅ Entrenamiento aplicado. Error goles: <b>${prediction.goalError.home.toFixed(2)}</b> / <b>${prediction.goalError.away.toFixed(2)}</b> · log-loss <b>${metrics.logLoss.toFixed(3)}</b> · brier <b>${metrics.brier.toFixed(3)}</b><br/>`
+          + `🧠 leagueScale ${metrics.leagueScaleBefore.home.toFixed(3)}→${metrics.leagueScale.home.toFixed(3)} / ${metrics.leagueScaleBefore.away.toFixed(3)}→${metrics.leagueScale.away.toFixed(3)} · T liga ${metrics.temperatureBefore.toFixed(2)}→${metrics.temperatureAfter.toFixed(2)}.<br/>`
+          + `📈 Impacto: Conf ${(confBefore*100).toFixed(0)}%→${(confAfter*100).toFixed(0)}% · Brier(10) ${beforeRecent.brier===null?'-':beforeRecent.brier.toFixed(3)}→${afterRecent.brier===null?'-':afterRecent.brier.toFixed(3)} · λ error(10) ${beforeRecent.lambdaError===null?'-':beforeRecent.lambdaError.toFixed(3)}→${afterRecent.lambdaError===null?'-':afterRecent.lambdaError.toFixed(3)}.`;
+        render("versus");
+      };
     }
-
-    document.getElementById("mcAutoXg")?.addEventListener("click", ()=>{
-      autoXgFromStrength();
-    });
-    document.getElementById("mcRun")?.addEventListener("click", ()=>{
-      try{ console.log("⚽ MonteCarlo: click Simular"); runMonteCarlo(); }
-      catch(err){ console.error("MonteCarlo error:", err); const o=document.getElementById("mc_out"); if(o) o.innerHTML = `<div class="fl-small" style="color:#ffb3b3;">Error: ${escapeHtml(String(err?.message||err))}</div>`; }
-    });
-
-    // Initial auto-fill once (nice default)
-    autoXgFromStrength();
-};
   }
 
-  function computeStrengthFallback(db, teamId){
-    const ps = db.players.filter(p=>p.teamId===teamId);
-    if(ps.length===0) return {attack:0, defense:0, control:0, total:0};
-    // Use effective ratings across squad as coarse fallback
-    const effs = ps.map(p=>getEffectiveRating(db,p.id));
-    const avg = effs.reduce((a,b)=>a+b,0)/effs.length;
-    return {attack:avg, defense:avg, control:avg, total:avg};
-  }
-
-  // ---- Settings ----
-  function renderSettings(db){
-    const v = document.getElementById("fl_view");
-
-    v.innerHTML = `
+  if(view==="brain"){
+    content.innerHTML = `
       <div class="fl-card">
-        <div style="font-weight:900;">⚙️ Ajustes</div>
-        <div class="fl-small" style="margin-top:6px;">Esto controla cómo “la temporada actual” influye en la simulación.</div>
-      </div>
-
-      <div class="fl-card">
-        <div class="fl-grid2">
-          <div>
-            <div class="fl-h3">Temporada actual</div>
-            <input class="fl-input" id="season" value="${escapeHtml(db.settings.currentSeason)}" placeholder="Ej: 2025-2026">
-            <div class="fl-small" style="margin-top:6px;">Solo los registros con esta temporada se usan para FormScore.</div>
+        <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Consola del Cerebro — Capa de Percepción</div>
+        <div class="fl-muted" style="margin-bottom:12px;">
+          Ingresa las métricas del equipo para construir el Vector de Estado normalizado.
+          Cada valor se muestra en escala [0,1] listo para ser procesado por la red neuronal.
+        </div>
+        <div class="fl-grid two" style="margin-bottom:12px;">
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Métricas del Equipo</div>
+            <div class="fl-grid" style="gap:6px;">
+              <label class="fl-muted">Pulse (0-100) <input id="brainPulse" type="number" min="0" max="100" value="70" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Fatiga (0-100) <input id="brainFatiga" type="number" min="0" max="100" value="40" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Resiliencia (0-100) <input id="brainResiliencia" type="number" min="0" max="100" value="65" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Agresividad (0-100) <input id="brainAgresividad" type="number" min="0" max="100" value="55" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Volatilidad (0-100) <input id="brainVolatilidad" type="number" min="0" max="100" value="40" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Edad Media (17-40) <input id="brainEdad" type="number" min="17" max="40" value="26" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Importancia Torneo (0-1) <input id="brainImportancia" type="number" min="0" max="1" step="0.05" value="0.8" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Días Descanso (0-14) <input id="brainDescanso" type="number" min="0" max="14" value="3" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Momentum (-1 a 1) <input id="brainMomentum" type="number" min="-1" max="1" step="0.05" value="0.3" class="fl-input" style="width:80px;margin-left:8px;"></label>
+            </div>
           </div>
-
-          <div>
-            <div class="fl-h3">Últimos N partidos</div>
-            <input class="fl-input" id="lastN" type="number" min="1" max="20" step="1" value="${db.settings.formLastN}">
-            <div class="fl-small" style="margin-top:6px;">Cuántos partidos recientes cuentan para la forma.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">Peso de forma (0..1)</div>
-            <input class="fl-input" id="formW" type="number" min="0" max="1" step="0.05" value="${fmt(db.settings.formWeight,2)}">
-            <div class="fl-small" style="margin-top:6px;">Qué tanto la forma mueve el rating efectivo.</div>
-          </div>
-
-          <div>
-            <div class="fl-h3">Localía</div>
-            <input class="fl-input" id="homeAdv" type="number" min="0" max="0.30" step="0.01" value="${fmt(db.settings.homeAdvantage,2)}">
-            <div class="fl-small" style="margin-top:6px;">Bonus al total del equipo local.</div>
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Relato del Partido (NLP)</div>
+            <textarea id="brainRelato" class="fl-text" style="min-height:180px;"
+              placeholder="Pega líneas del relato del partido aquí, p.ej.:&#10;45' Gol de Mbappé tras contraataque brillante&#10;60' Presión alta del equipo local&#10;75' Lesión de Busquets, rotación forzada"></textarea>
           </div>
         </div>
-
-        <div class="fl-row" style="margin-top:12px;">
-          <button class="mc-btn" id="save">Guardar</button>
-          <button class="mc-btn" id="resetSeason">Auto-temporada</button>
+        <div class="fl-row" style="margin-bottom:12px;">
+          <button class="fl-btn" id="brainProcess">⚡ Procesar Vector de Estado</button>
+          <button class="fl-btn" id="brainInitModel">🧠 Inicializar Modelo TF.js</button>
+          <span id="brainModelStatus" class="fl-muted" style="margin-left:8px;"></span>
+        </div>
+        <div id="brainMonitor" style="display:none;">
+          <div style="font-weight:800;margin-bottom:8px;">📊 Monitor del Cerebro — Datos Normalizados</div>
+          <div id="brainVectorDisplay" class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:10px;"></div>
+          <div class="fl-card" style="background:#0d1117;padding:10px;">
+            <div class="fl-muted" style="margin-bottom:4px;">Tensor de entrada (1 × 9)</div>
+            <code id="brainTensorDisplay" style="font-size:12px;color:#58a6ff;word-break:break-all;"></code>
+          </div>
+          <div id="brainModelOut" style="margin-top:10px;display:none;" class="fl-card">
+            <div style="font-weight:800;margin-bottom:6px;">🔬 Salida de la Capa de Percepción (32 neuronas)</div>
+            <div class="fl-muted" style="margin-bottom:4px;">Activaciones ReLU de la primera capa densa:</div>
+            <code id="brainLayerOutput" style="font-size:11px;color:#3fb950;word-break:break-all;"></code>
+          </div>
         </div>
       </div>
-
-      <div class="fl-card">
-        <div style="font-weight:800;">📌 Glosario rápido de posiciones</div>
-        <div class="fl-small" style="margin-top:8px;">
-          ${Object.keys(POS_LABELS).map(k=>`• <b>${k}</b>: ${escapeHtml(POS_LABELS[k].split("—")[1].trim())}`).join("<br/>")}
+      <div class="fl-card" style="margin-top:12px;">
+        <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Cerebelo — Capa de Refinamiento</div>
+        <div class="fl-muted" style="margin-bottom:12px;">
+          Ingresa la predicción del Córtex (Capa 3) y el resultado del Simulador Estadístico.
+          El Cerebelo compara ambas fuentes y emite un veredicto refinado con indicador de coherencia.
+        </div>
+        <div class="fl-grid two" style="margin-bottom:12px;">
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Predicción del Córtex (Capa 3)</div>
+            <div class="fl-grid" style="gap:6px;">
+              <label class="fl-muted">P(Victoria) <input id="cerebeloIAVictoria" type="number" min="0" max="1" step="0.01" value="0.70" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Empate) <input id="cerebeloIAEmpate" type="number" min="0" max="1" step="0.01" value="0.20" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Derrota) <input id="cerebeloIADerrota" type="number" min="0" max="1" step="0.01" value="0.10" class="fl-input" style="width:90px;margin-left:8px;"></label>
+            </div>
+          </div>
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Resultado del Simulador Estadístico</div>
+            <div class="fl-grid" style="gap:6px;">
+              <label class="fl-muted">P(Victoria) <input id="cerebeloSimVictoria" type="number" min="0" max="1" step="0.01" value="0.30" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Empate) <input id="cerebeloSimEmpate" type="number" min="0" max="1" step="0.01" value="0.40" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Derrota) <input id="cerebeloSimDerrota" type="number" min="0" max="1" step="0.01" value="0.30" class="fl-input" style="width:90px;margin-left:8px;"></label>
+            </div>
+          </div>
+        </div>
+        <div class="fl-row" style="margin-bottom:12px;">
+          <button class="fl-btn" id="cerebeloRefinar">🔬 Refinar con Cerebelo</button>
+        </div>
+        <div id="cerebeloResult" style="display:none;">
+          <div id="cerebeloSemaforo" class="fl-card" style="padding:12px;margin-bottom:10px;text-align:center;font-size:20px;font-weight:900;"></div>
+          <div class="fl-grid" style="grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;" id="cerebeloProbs"></div>
+          <div class="fl-card" style="background:#0d1117;padding:10px;">
+            <div class="fl-muted" style="margin-bottom:4px;font-size:12px;">Detalle del Veredicto</div>
+            <div id="cerebeloDetalle" style="font-size:12px;color:#c9d1d9;line-height:1.6;"></div>
+          </div>
         </div>
       </div>
     `;
 
-    document.getElementById("save").onclick = ()=>{
-      db.settings.currentSeason = document.getElementById("season").value.trim() || getAutoSeasonLabel();
-      db.settings.formLastN = clamp(parseInt(document.getElementById("lastN").value)||5, 1, 20);
-      db.settings.formWeight = clamp(parseFloat(document.getElementById("formW").value)||0.35, 0, 1);
-      db.settings.homeAdvantage = clamp(parseFloat(document.getElementById("homeAdv").value)||0.05, 0, 0.30);
-      saveDB(db);
-      alert("Guardado.");
-      openLab("settings");
+    const LABELS = [
+      "Pulse","Fatiga","Resiliencia","Agresividad",
+      "Volatilidad","Edad Media","Importancia Torneo",
+      "Días Descanso","Momentum"
+    ];
+
+    function normBrain(value, min, max){
+      if(max===min) return 0;
+      return Math.min(1, Math.max(0, (value - min) / (max - min)));
+    }
+
+    function getBrainVector(){
+      const pulse        = parseFloat(document.getElementById("brainPulse").value)       || 0;
+      const fatiga       = parseFloat(document.getElementById("brainFatiga").value)      || 0;
+      const resiliencia  = parseFloat(document.getElementById("brainResiliencia").value) || 0;
+      const agresividad  = parseFloat(document.getElementById("brainAgresividad").value) ?? 50;
+      const volatilidad  = parseFloat(document.getElementById("brainVolatilidad").value) ?? 50;
+      const edadMedia    = parseFloat(document.getElementById("brainEdad").value)        || 26;
+      const importancia  = parseFloat(document.getElementById("brainImportancia").value) || 0.5;
+      const diasDescanso = parseFloat(document.getElementById("brainDescanso").value)    || 3;
+      const momentum     = parseFloat(document.getElementById("brainMomentum").value)    || 0;
+
+      return [
+        normBrain(pulse,       0, 100),
+        normBrain(fatiga,      0, 100),
+        normBrain(resiliencia, 0, 100),
+        normBrain(agresividad, 0, 100),
+        normBrain(volatilidad, 0, 100),
+        normBrain(edadMedia,  17,  40),
+        Math.min(1, Math.max(0, importancia)),
+        normBrain(diasDescanso, 0, 14),
+        normBrain(momentum,    -1,  1),
+      ];
+    }
+
+    const RELATO_DICT = {
+      "presión alta":0.20,"presion alta":0.20,"ritmo lento":-0.10,
+      "contraataque":0.15,"rotación":-0.30,"rotacion":-0.30,
+      "lesión":0.10,"lesion":0.10,"gol":0.12,"penalti":0.08,
+      "expulsión":0.15,"expulsion":0.15,"tarjeta roja":0.15,
+      "tarjeta amarilla":0.05,"remate":0.06,"parada":0.05,
+      "falta":0.04,"córner":0.04,"corner":0.04,"dominio":0.08,
+      "posesión":0.05,"posesion":0.05,"urgencia":0.10,
+      "empuje":0.08,"calma":-0.05,"sustitución":-0.05,"sustitucion":-0.05
     };
 
-    document.getElementById("resetSeason").onclick = ()=>{
-      db.settings.currentSeason = getAutoSeasonLabel();
-      saveDB(db);
-      openLab("settings");
+    function getIntensidad(){
+      const lines = (document.getElementById("brainRelato").value || "").split("\n").filter(l=>l.trim());
+      let score = 0.5;
+      lines.forEach(line=>{
+        const lower = line.toLowerCase();
+        for(const [kw, val] of Object.entries(RELATO_DICT)){
+          if(lower.includes(kw)) score += val;
+        }
+      });
+      return Math.min(Math.max(score, 0), 1);
+    }
+
+    let brainModel = null;
+
+    document.getElementById("brainProcess").onclick = ()=>{
+      const vector    = getBrainVector();
+      const intensidad = getIntensidad();
+      // Blend momentum with relato intensity (index 8 = momentum in state vector)
+      const blended   = [...vector];
+      blended[8]      = Math.min(1, Math.max(0, (blended[8] + intensidad) / 2));
+
+      const monitor = document.getElementById("brainMonitor");
+      monitor.style.display = "block";
+
+      const dispLabels = [...LABELS];
+      dispLabels[8] = "Momentum+Relato";
+      const vecDisplay = document.getElementById("brainVectorDisplay");
+      vecDisplay.innerHTML = dispLabels.map((lbl, i)=>{
+        const val = blended[i];
+        const pct = (val * 100).toFixed(0);
+        const color = val >= 0.7 ? "#3fb950" : val >= 0.4 ? "#f2cc60" : "#f85149";
+        return `<div class="fl-card" style="padding:8px;background:#111722;">
+          <div class="fl-muted" style="font-size:11px;">${lbl}</div>
+          <div style="font-size:20px;font-weight:900;color:${color};">${val.toFixed(2)}</div>
+          <div style="height:6px;border-radius:999px;background:#0d1117;border:1px solid #2d333b;margin-top:4px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;border-radius:999px;background:${color};"></div>
+          </div>
+        </div>`;
+      }).join("") + `<div class="fl-card" style="padding:8px;background:#111722;">
+          <div class="fl-muted" style="font-size:11px;">Intensidad Relato</div>
+          <div style="font-size:20px;font-weight:900;color:#58a6ff;">${intensidad.toFixed(2)}</div>
+          <div style="height:6px;border-radius:999px;background:#0d1117;border:1px solid #2d333b;margin-top:4px;overflow:hidden;">
+            <div style="width:${(intensidad*100).toFixed(0)}%;height:100%;border-radius:999px;background:#58a6ff;"></div>
+          </div>
+        </div>`;
+
+      document.getElementById("brainTensorDisplay").textContent =
+        `[[${blended.map(v=>v.toFixed(4)).join(", ")}]]`;
+
+      if(brainModel && typeof tf !== "undefined"){
+        try{
+          const t = tf.tensor2d([blended]);
+          const out = brainModel.predict(t);
+          const outData = Array.from(out.dataSync()).map(v=>v.toFixed(4));
+          t.dispose(); out.dispose();
+          const modelOut = document.getElementById("brainModelOut");
+          modelOut.style.display = "block";
+          document.getElementById("brainLayerOutput").textContent =
+            `[${outData.join(", ")}]`;
+        }catch(err){
+          document.getElementById("brainModelStatus").textContent = `⚠ Predict error: ${err.message}`;
+        }
+      }
+    };
+
+    document.getElementById("brainInitModel").onclick = async ()=>{
+      const statusEl = document.getElementById("brainModelStatus");
+      if(typeof tf === "undefined"){
+        statusEl.textContent = "❌ TensorFlow.js no cargado.";
+        return;
+      }
+      try{
+        statusEl.textContent = "⏳ Inicializando...";
+        const model = tf.sequential();
+        model.add(tf.layers.dense({
+          inputShape: [9],
+          units: 32,
+          activation: "relu",
+          name: "percepcion_inicial"
+        }));
+        brainModel = model;
+        statusEl.textContent = "✅ Primera capa lista (9 → 32 neuronas, ReLU).";
+      }catch(err){
+        statusEl.textContent = `❌ ${err.message}`;
+      }
+    };
+
+    const cerebelo = new Cerebelo();
+
+    document.getElementById("cerebeloRefinar").onclick = ()=>{
+      const iaVictoria = parseFloat(document.getElementById("cerebeloIAVictoria").value) || 0;
+      const iaEmpate   = parseFloat(document.getElementById("cerebeloIAEmpate").value)   || 0;
+      const iaDerrota  = parseFloat(document.getElementById("cerebeloIADerrota").value)  || 0;
+      const simVictoria = parseFloat(document.getElementById("cerebeloSimVictoria").value) || 0;
+      const simEmpate   = parseFloat(document.getElementById("cerebeloSimEmpate").value)   || 0;
+      const simDerrota  = parseFloat(document.getElementById("cerebeloSimDerrota").value)  || 0;
+
+      const prediccionIA       = [iaVictoria,  iaEmpate,  iaDerrota];
+      const resultadoSimulador = [simVictoria, simEmpate, simDerrota];
+
+      const veredicto = cerebelo.refinar(prediccionIA, resultadoSimulador);
+
+      const semaforoColors = { verde: "#3fb950", amarillo: "#f2cc60", rojo: "#f85149" };
+      const semaforoBg     = { verde: "#0d2a14", amarillo: "#2a2208", rojo: "#2a0d0d" };
+      const sc = semaforoColors[veredicto.semaforo.color] || "#c9d1d9";
+      const sb = semaforoBg[veredicto.semaforo.color]     || "#161b22";
+
+      document.getElementById("cerebeloResult").style.display = "block";
+      document.getElementById("cerebeloSemaforo").style.background = sb;
+      document.getElementById("cerebeloSemaforo").style.borderLeft = `4px solid ${sc}`;
+      document.getElementById("cerebeloSemaforo").innerHTML =
+        `${veredicto.semaforo.emoji} <span style="color:${sc}">${veredicto.semaforo.mensaje}</span>`;
+
+      const probLabels = ["Victoria","Empate","Derrota"];
+      document.getElementById("cerebeloProbs").innerHTML = veredicto.resultadoFinal.map((val, i)=>{
+        const pct   = (val * 100).toFixed(1);
+        const color = val >= 0.5 ? "#3fb950" : val >= 0.3 ? "#f2cc60" : "#f85149";
+        return `<div class="fl-card" style="padding:10px;background:#111722;text-align:center;">
+          <div class="fl-muted" style="font-size:11px;margin-bottom:4px;">${probLabels[i]}</div>
+          <div style="font-size:24px;font-weight:900;color:${color};">${pct}%</div>
+          <div style="height:6px;border-radius:999px;background:#0d1117;border:1px solid #2d333b;margin-top:6px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;border-radius:999px;background:${color};"></div>
+          </div>
+        </div>`;
+      }).join("");
+
+      const aprendizajeMsg = veredicto.marcarParaAprendizaje
+        ? "📌 Marcado para el Hipocampo (fallo lógico — mayor peso en aprendizaje futuro)."
+        : veredicto.tipoDiscrepancia === "ruido"
+          ? "🚫 Evento aleatorio — No guardar para entrenamiento."
+          : "✅ Datos coherentes — Uso normal en entrenamiento.";
+
+      document.getElementById("cerebeloDetalle").innerHTML =
+        `<b>Confianza:</b> ${veredicto.confianza}<br>` +
+        `<b>Tipo de discrepancia:</b> ${veredicto.tipoDiscrepancia}<br>` +
+        `<b>Filtro de ruido:</b> ${aprendizajeMsg}`;
     };
   }
 
+  window.__FOOTBALL_LAB__ = {
+    open(view="home", payload={}){ render(view, payload); },
+    getDB(){ return loadDb(); },
+    help: "window.__FOOTBALL_LAB__.open('liga'|'equipo'|'tracker'|'versus'|'bitacora'|'market'|'brain')"
+  };
 
-  // --- Debug hook (V6e) ---
-  try{
-    window.__FOOTBALL_LAB__ = {
-      version: "V6e",
-      open: (view, payload)=> openLab(view, payload),
-      db: ()=> loadDB(),
-      setDB: (db)=> saveDB(db),
-      help: "window.__FOOTBALL_LAB__.open('player',{playerId:'...'})"
-    };
-  }catch(e){ console.warn("FootballLab debug hook failed", e); }
-
-
-// end initFootballLab
+  return window.__FOOTBALL_LAB__;
 }
 
 window.initFootballLab = initFootballLab;
 
-// Auto-init on module load (so main.js can open immediately)
 try{
   if(!window.__FOOTBALL_LAB__?.open){
     initFootballLab();
   }
-}catch(e){ console.warn("FootballLab auto-init failed", e); }
+}catch(e){
+  console.warn("FootballLab auto-init failed", e);
 }
