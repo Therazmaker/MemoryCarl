@@ -48,7 +48,7 @@ export function calcularSemaforo(tipoDiscrepancia, modoAhorro = false) {
     return {
       color:   "rojo",
       emoji:   "🔴",
-      mensaje: "Discrepancia total. El Cerebelo sugiere revisar si hubo una noticia de última hora (lesión o rotación masiva).",
+      mensaje: "Discrepancia alta. Úsalo para entrenar como caso anómalo (posible lesión, rotación masiva o contexto no modelado).",
     };
   }
   if (tipoDiscrepancia === "ruido" || modoAhorro) {
