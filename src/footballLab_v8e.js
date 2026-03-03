@@ -8010,7 +8010,7 @@ function computeTeamIntelligencePanel(db, teamId){
       return Math.min(Math.max(score, 0), 1);
     }
 
-    let brainModel = null;
+    let brainModel = (typeof window !== "undefined" && window.modelo) ? window.modelo : null;
     let ultimaMuestra = null;
     const brainTrainingHistory = [];
     const brainLossHistory = [];
@@ -8101,7 +8101,7 @@ function computeTeamIntelligencePanel(db, teamId){
       fillBrainMetricsFromTeam(teamId, leagueId);
     };
 
-    document.getElementById("brainProcess").onclick = ()=>{
+    document.getElementById("brainProcess").onclick = async ()=>{
       const vector    = getBrainVector();
       const intensidad = getIntensidad();
       // Blend momentum with relato intensity (index 8 = momentum in state vector)
@@ -8141,14 +8141,26 @@ function computeTeamIntelligencePanel(db, teamId){
 
       if(brainModel && typeof tf !== "undefined"){
         try{
-          const t = tf.tensor2d([blended]);
-          const out = brainModel.predict(t);
-          const outData = Array.from(out.dataSync()).map(v=>v.toFixed(4));
-          t.dispose(); out.dispose();
+          const tensorEntrada = tf.tensor2d([blended]);
+          const prediccion = brainModel.predict(tensorEntrada);
+          const rawData = await prediccion.data();
+          const outData = Array.from(rawData).map(v=>v.toFixed(4));
           const modelOut = document.getElementById("brainModelOut");
           modelOut.style.display = "block";
           document.getElementById("brainLayerOutput").textContent =
             `[${outData.join(", ")}]`;
+
+          const iaVictoriaEl = document.getElementById("cerebeloIAVictoria");
+          const iaEmpateEl = document.getElementById("cerebeloIAEmpate");
+          const iaDerrotaEl = document.getElementById("cerebeloIADerrota");
+          if(iaVictoriaEl && iaEmpateEl && iaDerrotaEl){
+            iaVictoriaEl.value = Number(rawData[0] || 0).toFixed(2);
+            iaEmpateEl.value = Number(rawData[1] || 0).toFixed(2);
+            iaDerrotaEl.value = Number(rawData[2] || 0).toFixed(2);
+          }
+
+          tensorEntrada.dispose();
+          prediccion.dispose();
         }catch(err){
           document.getElementById("brainModelStatus").textContent = `⚠ Predict error: ${err.message}`;
         }
@@ -8180,6 +8192,9 @@ function computeTeamIntelligencePanel(db, teamId){
           statusEl.textContent = "✅ Modelo nuevo listo (9→32→3, softmax).";
         }
         brainModel = model;
+        if(typeof window !== "undefined"){
+          window.modelo = model;
+        }
       }catch(err){
         statusEl.textContent = `❌ ${err.message}`;
       }
