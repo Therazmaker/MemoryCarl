@@ -7951,6 +7951,31 @@ function computeTeamIntelligencePanel(db, teamId){
       el.value = decimals > 0 ? next.toFixed(decimals) : String(Math.round(next));
     }
 
+    function describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned){
+      const playerCount = db.players.filter((p)=>p.teamId===teamId).length;
+      const playedMatches = db.tracker.filter((m)=>m.homeId===teamId || m.awayId===teamId).length;
+      const competitionType = normalizeCompetitionType(getCompetitionById(db, leagueId)?.type) || "league";
+      const heatList = Array.isArray(intel?.playerHeat?.list) ? intel.playerHeat.list : [];
+      const narrativeEvents = Number(intel?.playerHeat?.summary?.narrativeEvents) || 0;
+      const playersWithNarrative = heatList.filter((p)=>Number(p?.events) > 0).length;
+      const narrativeCoverage = playerCount > 0 ? (playersWithNarrative / playerCount) : 0;
+      const psychAdj = intel?.playerHeat?.summary?.psychAdjustments || {};
+      const narrativeSignal = clamp(narrativeEvents / Math.max(1, playedMatches * 8), 0, 1);
+      const narrativeQuality = narrativeSignal < 0.25
+        ? "baja (posible ruido por poca muestra)"
+        : narrativeSignal < 0.6
+          ? "media"
+          : "alta";
+
+      return [
+        `Fuentes: ${playedMatches} partidos tracker + ${playerCount} jugadores + relato normalizado.`,
+        `Narrativa usada: eventos=${narrativeEvents}, jugadores impactados=${playersWithNarrative}/${Math.max(playerCount, 1)} (${(narrativeCoverage*100).toFixed(0)}%), señal=${narrativeQuality}.`,
+        `Ajustes desde narrativa → agre:${(Number(psychAdj.aggressiveness)||0).toFixed(1)}, res:${(Number(psychAdj.resilience)||0).toFixed(1)}, vol:${(Number(psychAdj.volatility)||0).toFixed(1)}, fat:${(Number(psychAdj.fatigue)||0).toFixed(1)}.`,
+        `Pulse plantilla=${Math.round(Number(intel?.psych?.playerPulse) || 0)}; momentum5=${((Number(intel?.metrics?.momentum5) || 0.5) * 100).toFixed(0)}% → input ${momentumSigned.toFixed(2)}.`,
+        `Importancia torneo derivada por tipo de competencia: ${competitionType}.`
+      ].join(" ");
+    }
+
     function fillBrainMetricsFromTeam(teamId, leagueId, side = "A"){
       const team = db.teams.find((row)=>row.id===teamId);
       const statusEl = brainSelectors[side]?.status;
@@ -7971,7 +7996,7 @@ function computeTeamIntelligencePanel(db, teamId){
       setInputValue(`brainDescanso${side}`, restDaysForTeam(teamId));
       setInputValue(`brainMomentum${side}`, momentumSigned, 2);
 
-      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}.`;
+      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned)}`;
     }
 
     function renderBrainTeamOptions(leagueId, side = "A"){
@@ -8035,28 +8060,79 @@ function computeTeamIntelligencePanel(db, teamId){
       ];
     }
 
-    const RELATO_DICT = {
-      "presión alta":0.20,"presion alta":0.20,"ritmo lento":-0.10,
-      "contraataque":0.15,"rotación":-0.30,"rotacion":-0.30,
-      "lesión":0.10,"lesion":0.10,"gol":0.12,"penalti":0.08,
-      "expulsión":0.15,"expulsion":0.15,"tarjeta roja":0.15,
-      "tarjeta amarilla":0.05,"remate":0.06,"parada":0.05,
-      "falta":0.04,"córner":0.04,"corner":0.04,"dominio":0.08,
-      "posesión":0.05,"posesion":0.05,"urgencia":0.10,
-      "empuje":0.08,"calma":-0.05,"sustitución":-0.05,"sustitucion":-0.05
+    const PESOS_FOOTBALL_LAB = {
+      agresividad: {
+        "falta": 0.04,
+        "tarjeta amarilla": 0.18,
+        "tarjeta roja": 0.50,
+        "entrada dura": 0.12,
+        "amonestado": 0.15,
+        "pelea": 0.25,
+        "discusión": 0.10,
+        "var": 0.08
+      },
+      peligro: {
+        "remate": 0.12,
+        "tiro a puerta": 0.15,
+        "larguero": 0.25,
+        "poste": 0.25,
+        "paradón": 0.20,
+        "salva bajo palos": 0.30,
+        "córner": 0.05,
+        "fuera de juego": -0.02,
+        "ataque": 0.03
+      }
     };
 
-    function getIntensidad(side = "A"){
-      const lines = (document.getElementById(`brainRelato${side}`).value || "").split("\n").filter(l=>l.trim());
-      let score = 0.5;
-      lines.forEach(line=>{
-        const lower = line.toLowerCase();
-        for(const [kw, val] of Object.entries(RELATO_DICT)){
-          if(lower.includes(kw)) score += val;
-        }
-      });
-      return Math.min(Math.max(score, 0), 1);
+    function escapeRegexToken(text = ""){
+      return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
+
+    function detectarMinutoMaximoRelato(texto = ""){
+      const pattern = /(\d{1,3})(?:\s*\+\s*(\d{1,2}))?\s*'/g;
+      let maxMinute = 0;
+      let match;
+      while((match = pattern.exec(texto)) !== null){
+        const base = Number(match[1]) || 0;
+        const extra = Number(match[2]) || 0;
+        const minute = base + extra;
+        if(minute > maxMinute) maxMinute = minute;
+      }
+      return Math.max(maxMinute, 0);
+    }
+
+    function extraerMetricasDelRelato(texto = ""){
+      const raw = String(texto || "").toLowerCase();
+      const baseScores = { agresividad: 0, peligro: 0 };
+
+      for(const categoria of Object.keys(PESOS_FOOTBALL_LAB)){
+        for(const [palabra, peso] of Object.entries(PESOS_FOOTBALL_LAB[categoria])){
+          const regex = new RegExp(escapeRegexToken(palabra), "gi");
+          const coincidencias = (raw.match(regex) || []).length;
+          baseScores[categoria] += coincidencias * Number(peso || 0);
+        }
+      }
+
+      const minutoMax = detectarMinutoMaximoRelato(raw);
+      const ventanaMin = minutoMax > 0 ? minutoMax : 90;
+      const factorTiempo = Math.max(ventanaMin / 90, 0.1);
+      const agresividad = clamp(baseScores.agresividad / factorTiempo, 0, 1);
+      const peligro = clamp(baseScores.peligro / factorTiempo, 0, 1);
+
+      return {
+        agresividad,
+        peligro,
+        minutoMax,
+        factorTiempo,
+        raw: baseScores
+      };
+    }
+
+    function getNarrativeMetrics(side = "A"){
+      const texto = document.getElementById(`brainRelato${side}`)?.value || "";
+      return extraerMetricasDelRelato(texto);
+    }
+
 
     let brainModel = null;
     let ultimaMuestra = null;
@@ -8205,22 +8281,25 @@ function computeTeamIntelligencePanel(db, teamId){
     document.getElementById("brainProcess").onclick = async ()=>{
       const vectorA = getBrainVector("A");
       const vectorB = getBrainVector("B");
-      const intensidadA = getIntensidad("A");
-      const intensidadB = getIntensidad("B");
+      const relatoA = getNarrativeMetrics("A");
+      const relatoB = getNarrativeMetrics("B");
       const blendedA = [...vectorA];
       const blendedB = [...vectorB];
-      blendedA[8] = Math.min(1, Math.max(0, (blendedA[8] + intensidadA) / 2));
-      blendedB[8] = Math.min(1, Math.max(0, (blendedB[8] + intensidadB) / 2));
+      blendedA[8] = Math.min(1, Math.max(0, (blendedA[8] + relatoA.peligro) / 2));
+      blendedB[8] = Math.min(1, Math.max(0, (blendedB[8] + relatoB.peligro) / 2));
+      blendedA[3] = Math.min(1, Math.max(0, (blendedA[3] + relatoA.agresividad) / 2));
+      blendedB[3] = Math.min(1, Math.max(0, (blendedB[3] + relatoB.agresividad) / 2));
 
       const monitor = document.getElementById("brainMonitor");
       monitor.style.display = "block";
 
       const dispLabels = [...LABELS];
+      dispLabels[3] = "Agresividad+Relato";
       dispLabels[8] = "Momentum+Relato";
       const vecDisplay = document.getElementById("brainVectorDisplay");
       vecDisplay.innerHTML = ["A", "B"].map((side)=>{
         const vec = side === "A" ? blendedA : blendedB;
-        const intensidad = side === "A" ? intensidadA : intensidadB;
+        const relato = side === "A" ? relatoA : relatoB;
         const items = dispLabels.map((lbl, i)=>{
           const val = vec[i];
           const pct = (val * 100).toFixed(0);
@@ -8236,7 +8315,7 @@ function computeTeamIntelligencePanel(db, teamId){
         return `<div class="fl-card" style="padding:10px;">
           <div style="font-weight:900;margin-bottom:8px;">Equipo ${side}</div>
           <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">${items}</div>
-          <div class="fl-muted" style="margin-top:8px;">Intensidad relato: <b>${intensidad.toFixed(2)}</b></div>
+          <div class="fl-muted" style="margin-top:8px;">Relato (peligro/agresividad): <b>${relato.peligro.toFixed(2)}</b> / <b>${relato.agresividad.toFixed(2)}</b> · ventana ${relato.minutoMax || 90}' (x${relato.factorTiempo.toFixed(2)})</div>
         </div>`;
       }).join("");
 
