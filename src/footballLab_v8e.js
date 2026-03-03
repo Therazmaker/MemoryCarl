@@ -8619,8 +8619,9 @@ function computeTeamIntelligencePanel(db, teamId){
     const brainLossHistory = [];
     let latestPredictionConfidence = null;
     const brainTrainingContext = { mode: "pre", historicalDate: "" };
-    const BRAIN_SNAPSHOTS_KEY = "brain-memory-carl-snapshots-v1";
-    const BRAIN_LOSS_KEY = "brain-memory-carl-loss-v1";
+    const BRAIN_SNAPSHOTS_KEY_BASE = "brain-memory-carl-snapshots-v2";
+    const BRAIN_LOSS_KEY_BASE = "brain-memory-carl-loss-v2";
+    let activeBrainProfileId = "global";
 
     function safeParseJSON(value, fallback){
       try{
@@ -8630,9 +8631,25 @@ function computeTeamIntelligencePanel(db, teamId){
       }
     }
 
-    function restoreBrainTelemetry(){
-      const rawSnapshots = localStorage.getItem(BRAIN_SNAPSHOTS_KEY);
-      const rawLoss = localStorage.getItem(BRAIN_LOSS_KEY);
+    function getBrainProfileId(){
+      const teamA = brainSelectors?.A?.team?.value || "";
+      const leagueA = brainSelectors?.A?.league?.value || "";
+      if(teamA) return `team-${teamA}`;
+      if(leagueA) return `league-${leagueA}`;
+      return "global";
+    }
+
+    function getBrainTelemetryKeys(profileId = activeBrainProfileId){
+      return {
+        snapshotsKey: `${BRAIN_SNAPSHOTS_KEY_BASE}-${profileId}`,
+        lossKey: `${BRAIN_LOSS_KEY_BASE}-${profileId}`
+      };
+    }
+
+    function restoreBrainTelemetry(profileId = activeBrainProfileId){
+      const { snapshotsKey, lossKey } = getBrainTelemetryKeys(profileId);
+      const rawSnapshots = localStorage.getItem(snapshotsKey);
+      const rawLoss = localStorage.getItem(lossKey);
       const snapshots = Array.isArray(safeParseJSON(rawSnapshots, []))
         ? safeParseJSON(rawSnapshots, []).filter((row)=>Array.isArray(row?.x) && Array.isArray(row?.y)).slice(0, 10)
         : [];
@@ -8643,13 +8660,25 @@ function computeTeamIntelligencePanel(db, teamId){
       brainLossHistory.splice(0, brainLossHistory.length, ...losses);
     }
 
-    function persistBrainTelemetry(){
+    function persistBrainTelemetry(profileId = activeBrainProfileId){
       try{
-        localStorage.setItem(BRAIN_SNAPSHOTS_KEY, JSON.stringify(brainTrainingHistory.slice(0, 10)));
-        localStorage.setItem(BRAIN_LOSS_KEY, JSON.stringify(brainLossHistory.slice(-30)));
+        const { snapshotsKey, lossKey } = getBrainTelemetryKeys(profileId);
+        localStorage.setItem(snapshotsKey, JSON.stringify(brainTrainingHistory.slice(0, 10)));
+        localStorage.setItem(lossKey, JSON.stringify(brainLossHistory.slice(-30)));
       }catch(_err){
         // fallback silencioso: no bloquear la UI por cuota.
       }
+    }
+
+    function switchBrainProfile(nextProfileId = getBrainProfileId()){
+      const resolved = nextProfileId || "global";
+      if(resolved === activeBrainProfileId) return;
+      persistBrainTelemetry(activeBrainProfileId);
+      activeBrainProfileId = resolved;
+      restoreBrainTelemetry(activeBrainProfileId);
+      renderSnapshots();
+      renderLossChart();
+      renderBrainHealthCheck(`🧠 Perfil activo: <b>${activeBrainProfileId}</b>.`);
     }
 
     function computePredictionConfidence(prediction){
@@ -8682,7 +8711,8 @@ function computeTeamIntelligencePanel(db, teamId){
         trend,
         confidence,
         quality,
-        ready: !!brainModel
+        ready: !!brainModel,
+        profileId: activeBrainProfileId
       };
     }
 
@@ -8701,6 +8731,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const lossText = Number.isFinite(health.latestLoss) ? health.latestLoss.toFixed(4) : "n/a";
       el.innerHTML = [
         `<div>${modelState}</div>`,
+        `<div>Perfil de memoria: <b>${health.profileId}</b>.</div>`,
         `<div>Capacidad usada: <b>${health.capacityPct}%</b> (${health.snapshots}/10 snapshots locales).</div>`,
         `<div>Loss reciente: <b>${lossText}</b> · tendencia: <b>${trendText}</b> · calidad: <b>${health.quality}</b>.</div>`,
         `<div>Confianza de predicción (entropía+margen): <b>${health.confidence}%</b>.</div>`,
@@ -8861,10 +8892,11 @@ function computeTeamIntelligencePanel(db, teamId){
       return loss;
     }
 
-    restoreBrainTelemetry();
+    initBrainSelectorState();
+    activeBrainProfileId = getBrainProfileId();
+    restoreBrainTelemetry(activeBrainProfileId);
     renderSnapshots();
     renderLossChart();
-    initBrainSelectorState();
     refreshBrainModeUI();
     bootstrapBrainModel();
     renderBrainHealthCheck();
@@ -8897,8 +8929,9 @@ function computeTeamIntelligencePanel(db, teamId){
         latestPredictionConfidence = null;
         brainTrainingHistory.splice(0, brainTrainingHistory.length);
         brainLossHistory.splice(0, brainLossHistory.length);
-        localStorage.removeItem(BRAIN_SNAPSHOTS_KEY);
-        localStorage.removeItem(BRAIN_LOSS_KEY);
+        const { snapshotsKey, lossKey } = getBrainTelemetryKeys(activeBrainProfileId);
+        localStorage.removeItem(snapshotsKey);
+        localStorage.removeItem(lossKey);
         const modeEl = document.getElementById("brainTrainingMode");
         const dateEl = document.getElementById("brainHistoricalDate");
         if(modeEl) modeEl.value = "pre";
@@ -9018,6 +9051,15 @@ function computeTeamIntelligencePanel(db, teamId){
       cfg.league.onchange = ()=>{
         renderBrainTeamOptions(cfg.league.value, side);
         cfg.status.textContent = "Liga actualizada. Selecciona equipo y carga datos.";
+        if(side === "A"){
+          switchBrainProfile(getBrainProfileId());
+        }
+      };
+
+      cfg.team.onchange = ()=>{
+        if(side === "A"){
+          switchBrainProfile(getBrainProfileId());
+        }
       };
 
       document.getElementById(`brainAutoload${side}`).onclick = ()=>{
@@ -9344,9 +9386,9 @@ function computeTeamIntelligencePanel(db, teamId){
       }).join("");
 
       const aprendizajeMsg = veredicto.marcarParaAprendizaje
-        ? "📌 Marcado para el Hipocampo (fallo lógico — mayor peso en aprendizaje futuro)."
+        ? "📌 Caso válido para entrenamiento (anomalía lógica — mayor peso en aprendizaje futuro)."
         : veredicto.tipoDiscrepancia === "ruido"
-          ? "🚫 Evento aleatorio — No guardar para entrenamiento."
+          ? "⚠️ Evento ruidoso — guardar solo si tienes etiqueta real confirmada."
           : "✅ Datos coherentes — Uso normal en entrenamiento.";
 
       document.getElementById("cerebeloDetalle").innerHTML =
