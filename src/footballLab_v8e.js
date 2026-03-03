@@ -7758,6 +7758,16 @@ function computeTeamIntelligencePanel(db, teamId){
         <div class="fl-grid two" style="margin-bottom:12px;">
           <div class="fl-card" style="padding:10px;">
             <div style="font-weight:800;margin-bottom:8px;">Métricas del Equipo</div>
+            <div class="fl-grid" style="gap:6px;margin-bottom:10px;">
+              <label class="fl-muted">Liga
+                <select id="brainLeagueSelect" class="fl-select" style="width:100%;margin-top:4px;"></select>
+              </label>
+              <label class="fl-muted">Equipo
+                <select id="brainTeamSelect" class="fl-select" style="width:100%;margin-top:4px;"></select>
+              </label>
+              <button class="fl-btn secondary" id="brainAutoload" type="button">📥 Cargar datos reales</button>
+              <div id="brainAutoStatus" class="fl-mini">Selecciona liga/equipo para autocompletar métricas.</div>
+            </div>
             <div class="fl-grid" style="gap:6px;">
               <label class="fl-muted">Pulse (0-100) <input id="brainPulse" type="number" min="0" max="100" value="70" class="fl-input" style="width:80px;margin-left:8px;"></label>
               <label class="fl-muted">Fatiga (0-100) <input id="brainFatiga" type="number" min="0" max="100" value="40" class="fl-input" style="width:80px;margin-left:8px;"></label>
@@ -7858,6 +7868,95 @@ function computeTeamIntelligencePanel(db, teamId){
       "Volatilidad","Edad Media","Importancia Torneo",
       "Días Descanso","Momentum"
     ];
+
+    const brainLeagueSelect = document.getElementById("brainLeagueSelect");
+    const brainTeamSelect = document.getElementById("brainTeamSelect");
+    const brainAutoStatus = document.getElementById("brainAutoStatus");
+
+    function avgAgeForTeam(teamId){
+      const ages = db.players
+        .filter((p)=>p.teamId===teamId)
+        .map((p)=>Number(p.age ?? p.edad))
+        .filter(Number.isFinite);
+      return ages.length ? average(ages, 26) : 26;
+    }
+
+    function restDaysForTeam(teamId){
+      const latest = db.tracker
+        .filter((m)=>m.homeId===teamId || m.awayId===teamId)
+        .slice()
+        .sort((a, b)=>parseSortableDate(b.date) - parseSortableDate(a.date))[0];
+      if(!latest) return 3;
+      const latestTs = parseSortableDate(latest.date);
+      if(!Number.isFinite(latestTs)) return 3;
+      const nowTs = Date.now();
+      const diff = Math.floor((nowTs - latestTs) / 86400000);
+      return clamp(diff, 0, 14);
+    }
+
+    function estimatedTournamentImportance(leagueId){
+      const type = normalizeCompetitionType(getCompetitionById(db, leagueId)?.type);
+      if(type === "continental") return 0.95;
+      if(type === "cup") return 0.85;
+      if(type === "friendly") return 0.45;
+      return 0.8;
+    }
+
+    function setInputValue(inputId, value, decimals = 0){
+      const el = document.getElementById(inputId);
+      if(!el) return;
+      const next = Number(value);
+      if(!Number.isFinite(next)) return;
+      el.value = decimals > 0 ? next.toFixed(decimals) : String(Math.round(next));
+    }
+
+    function fillBrainMetricsFromTeam(teamId, leagueId){
+      const team = db.teams.find((row)=>row.id===teamId);
+      if(!team){
+        brainAutoStatus.textContent = "❌ Equipo no encontrado.";
+        return;
+      }
+      const intel = computeTeamIntelligencePanel(db, teamId);
+      const momentumSigned = clamp((Number(intel.metrics?.momentum5) || 0.5) * 2 - 1, -1, 1);
+
+      setInputValue("brainPulse", intel.psych?.playerPulse ?? 50);
+      setInputValue("brainFatiga", intel.psych?.fatigue ?? 40);
+      setInputValue("brainResiliencia", intel.psych?.resilience ?? 50);
+      setInputValue("brainAgresividad", intel.psych?.aggressiveness ?? 50);
+      setInputValue("brainVolatilidad", intel.psych?.volatility ?? 50);
+      setInputValue("brainEdad", clamp(avgAgeForTeam(teamId), 17, 40));
+      setInputValue("brainImportancia", estimatedTournamentImportance(leagueId), 2);
+      setInputValue("brainDescanso", restDaysForTeam(teamId));
+      setInputValue("brainMomentum", momentumSigned, 2);
+
+      brainAutoStatus.textContent = `✅ Métricas cargadas para ${team.name}.`;
+    }
+
+    function renderBrainTeamOptions(leagueId){
+      const teams = getTeamsForLeague(db, leagueId)
+        .slice()
+        .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+      brainTeamSelect.innerHTML = teams.length
+        ? teams.map((team)=>`<option value="${team.id}">${team.name}</option>`).join("")
+        : `<option value="">Sin equipos en esta liga</option>`;
+      brainTeamSelect.disabled = !teams.length;
+    }
+
+    function initBrainSelectorState(){
+      const leagues = db.leagues
+        .slice()
+        .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+      brainLeagueSelect.innerHTML = leagues.length
+        ? leagues.map((league)=>`<option value="${league.id}">${league.name}</option>`).join("")
+        : `<option value="">Sin ligas</option>`;
+      brainLeagueSelect.disabled = !leagues.length;
+      const fallbackLeagueId = leagues[0]?.id || "";
+      const preferredLeagueId = leagues.some((league)=>league.id===db.settings.selectedLeagueId)
+        ? db.settings.selectedLeagueId
+        : fallbackLeagueId;
+      if(preferredLeagueId) brainLeagueSelect.value = preferredLeagueId;
+      renderBrainTeamOptions(brainLeagueSelect.value || preferredLeagueId);
+    }
 
     function normBrain(value, min, max){
       if(max===min) return 0;
@@ -7985,6 +8084,22 @@ function computeTeamIntelligencePanel(db, teamId){
 
     renderSnapshots();
     renderLossChart();
+    initBrainSelectorState();
+
+    brainLeagueSelect.onchange = ()=>{
+      renderBrainTeamOptions(brainLeagueSelect.value);
+      brainAutoStatus.textContent = "Liga actualizada. Selecciona equipo y carga datos.";
+    };
+
+    document.getElementById("brainAutoload").onclick = ()=>{
+      const leagueId = brainLeagueSelect.value || "";
+      const teamId = brainTeamSelect.value || "";
+      if(!leagueId || !teamId){
+        brainAutoStatus.textContent = "❌ Selecciona primero una liga y un equipo.";
+        return;
+      }
+      fillBrainMetricsFromTeam(teamId, leagueId);
+    };
 
     document.getElementById("brainProcess").onclick = ()=>{
       const vector    = getBrainVector();
