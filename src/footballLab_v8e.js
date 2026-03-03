@@ -6971,9 +6971,23 @@ function computeTeamIntelligencePanel(db, teamId){
             <td>${e.result || "-"}</td>
             <td style="color:${Number(e.profit)>=0?"#3fb950":"#ff7b72"}">${Number(e.profit)>=0?"+":""}${Number(e.profit||0).toFixed(2)}</td>
             <td><span class="fl-chip ${tag === "edge+" ? "ok" : (tag === "ok" ? "warn" : "bad")}">${tag}</span></td>
+            <td><button class="fl-btn" data-edit-log="${e.id}" style="padding:4px 8px;">Editar</button></td>
           </tr>
         `;
       }).join("");
+
+      const historySeries = st.entries.slice(-20).map((e, idx)=>({
+        idx,
+        label: (e.date || "").slice(5,10) || `#${idx+1}`,
+        bank: Number(e.bankAfter) || 0
+      }));
+      const historyValues = historySeries.map(p=>p.bank);
+      const historyMin = historyValues.length ? Math.min(...historyValues) : 0;
+      const historyMax = historyValues.length ? Math.max(...historyValues) : 0;
+      const historyPath = historyValues.length ? sparklinePath(historyValues, 640, 180, historyMin - 0.5, historyMax + 0.5) : "";
+      const historyMidLabel = historySeries.length ? historySeries[Math.floor((historySeries.length-1)/2)].label : "-";
+      const historyFirstLabel = historySeries[0]?.label || "-";
+      const historyLastLabel = historySeries[historySeries.length-1]?.label || "-";
 
       const radarRows = evaluated.map((row, idx)=>`
         <tr>
@@ -7076,7 +7090,20 @@ function computeTeamIntelligencePanel(db, teamId){
             <div style="font-weight:800;margin-bottom:8px;">🗺️ Roadmap del plan + Historial compacto</div>
             <table class="fl-table" style="margin-bottom:10px;"><thead><tr><th>Checkpoint</th><th>Día objetivo</th><th>Bank objetivo</th><th>Gap</th><th>Estado</th></tr></thead><tbody>${roadmapRows}</tbody></table>
             <div style="font-weight:700;margin-bottom:6px;">Últimas apuestas (7 días)</div>
-            <table class="fl-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Cuota</th><th>Res</th><th>P/L</th><th>Tag</th></tr></thead><tbody>${compactHistory || "<tr><td colspan='6'>Sin registros</td></tr>"}</tbody></table>
+            <table class="fl-table"><thead><tr><th>Fecha</th><th>Tipo</th><th>Cuota</th><th>Res</th><th>P/L</th><th>Tag</th><th>Acción</th></tr></thead><tbody>${compactHistory || "<tr><td colspan='7'>Sin registros</td></tr>"}</tbody></table>
+            <div class="fl-card" style="margin-top:10px;border:1px solid #2d333b;background:#0d1117;">
+              <div style="font-weight:700;margin-bottom:6px;">📉 Evolución de bank (fecha vs dinero)</div>
+              ${historyValues.length ? `
+                <svg viewBox="0 0 640 210" style="width:100%;height:210px;background:#0f141d;border:1px solid #2d333b;border-radius:10px;">
+                  <path d="${historyPath}" fill="none" stroke="#ff4d4f" stroke-width="2.4"/>
+                  <text x="8" y="16" fill="#9ca3af" font-size="11">S/${historyMax.toFixed(2)}</text>
+                  <text x="8" y="196" fill="#9ca3af" font-size="11">S/${historyMin.toFixed(2)}</text>
+                  <text x="6" y="206" fill="#8b949e" font-size="10">${historyFirstLabel}</text>
+                  <text x="305" y="206" fill="#8b949e" font-size="10">${historyMidLabel}</text>
+                  <text x="585" y="206" fill="#8b949e" font-size="10">${historyLastLabel}</text>
+                </svg>
+              ` : `<div class="fl-mini">Sin datos suficientes todavía.</div>`}
+            </div>
             <div class="fl-row" style="margin-top:10px;">
               <input id="logStake" class="fl-input" type="number" step="0.5" min="${st.minUnit}" value="${plan.stepStakes[0]}" style="width:90px" placeholder="Stake" />
               <input id="logOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:90px" />
@@ -7169,6 +7196,101 @@ function computeTeamIntelligencePanel(db, teamId){
         out.innerHTML = `✅ Apuesta guardada. Profit ${profit>=0?"+":""}S/${profit.toFixed(2)} · bank S/${st.bank.toFixed(2)}`;
         setTimeout(()=>render("bitacora"), 220);
       };
+
+      const recalcBitacoraBanks = ()=>{
+        if(!st.entries.length) return;
+        const first = st.entries[0] || {};
+        let running = Number(first.bankBefore);
+        if(!Number.isFinite(running)){
+          const firstAfter = Number(first.bankAfter);
+          const firstProfit = Number(first.profit);
+          running = Number.isFinite(firstAfter) && Number.isFinite(firstProfit)
+            ? firstAfter - firstProfit
+            : (Number(st.planStartBank) || Number(st.bank) || 0);
+        }
+        st.entries.forEach((entry, idx)=>{
+          const odds = Math.max(1.01, Number(entry.odds) || 1.01);
+          const stake = Math.max(st.minUnit, Number(entry.stake) || st.minUnit);
+          const result = ["win", "loss", "push"].includes(entry.result) ? entry.result : "push";
+          const probability = clamp(Number(entry.probability) || 0.5, 0.01, 0.99);
+          const profit = result === "win" ? stake * (odds - 1) : (result === "loss" ? -stake : 0);
+          entry.stake = stake;
+          entry.odds = odds;
+          entry.result = result;
+          entry.probability = probability;
+          entry.profit = profit;
+          entry.ev = (probability * odds) - 1;
+          entry.bankBefore = running;
+          running += profit;
+          entry.bankAfter = running;
+          entry.planDayIndex = Number(entry.planDayIndex) || idx + 1;
+        });
+        st.bank = Math.max(0, running);
+      };
+
+      const openBitacoraEditModal = (entryId)=>{
+        const entry = st.entries.find(item=>item.id===entryId);
+        if(!entry) return;
+        const backdrop = document.createElement("div");
+        backdrop.className = "fl-modal-backdrop";
+        backdrop.innerHTML = `
+          <div class="fl-modal" style="max-width:620px;">
+            <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <div>
+                <div class="fl-modal-title">Editar apuesta</div>
+                <div class="fl-mini">Ajusta datos o elimina el registro si fue error.</div>
+              </div>
+              <button class="fl-btn" id="closeEditBet">Cerrar</button>
+            </div>
+            <div class="fl-modal-grid">
+              <div class="fl-field"><label>Fecha</label><input id="editBetDate" type="datetime-local" class="fl-input" value="${(entry.date||"").slice(0,16)}"></div>
+              <div class="fl-field"><label>Tipo</label><select id="editBetType" class="fl-select"><option>1X2</option><option>DNB</option><option>Doble oportunidad</option><option>Under/Over</option></select></div>
+              <div class="fl-field"><label>Stake</label><input id="editBetStake" type="number" min="${st.minUnit}" step="0.5" class="fl-input" value="${Number(entry.stake||st.minUnit).toFixed(2)}"></div>
+              <div class="fl-field"><label>Cuota</label><input id="editBetOdds" type="number" min="1.01" step="0.01" class="fl-input" value="${Number(entry.odds||1.5).toFixed(2)}"></div>
+              <div class="fl-field"><label>pFinal</label><input id="editBetProb" type="number" min="0.01" max="0.99" step="0.01" class="fl-input" value="${clamp(Number(entry.probability)||0.5,0.01,0.99).toFixed(2)}"></div>
+              <div class="fl-field"><label>Resultado</label><select id="editBetResult" class="fl-select"><option value="win">win</option><option value="loss">loss</option><option value="push">push</option></select></div>
+            </div>
+            <div class="fl-row" style="justify-content:space-between;margin-top:12px;">
+              <button class="fl-btn" id="deleteEditBet" style="border-color:#da3633;color:#ff7b72;">Borrar</button>
+              <div class="fl-row">
+                <span id="editBetStatus" class="fl-mini"></span>
+                <button class="fl-btn" id="saveEditBet">Guardar cambios</button>
+              </div>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(backdrop);
+        const close = ()=>backdrop.remove();
+        backdrop.addEventListener("click", (ev)=>{ if(ev.target===backdrop) close(); });
+        backdrop.querySelector("#closeEditBet").onclick = close;
+        backdrop.querySelector("#editBetType").value = entry.pickType || "1X2";
+        backdrop.querySelector("#editBetResult").value = entry.result || "push";
+
+        backdrop.querySelector("#saveEditBet").onclick = ()=>{
+          entry.date = String(backdrop.querySelector("#editBetDate").value || entry.date || new Date().toISOString()).trim();
+          entry.pickType = backdrop.querySelector("#editBetType").value || "1X2";
+          entry.stake = Math.max(st.minUnit, Number(backdrop.querySelector("#editBetStake").value) || st.minUnit);
+          entry.odds = Math.max(1.01, Number(backdrop.querySelector("#editBetOdds").value) || 1.01);
+          entry.probability = clamp(Number(backdrop.querySelector("#editBetProb").value) || 0.5, 0.01, 0.99);
+          entry.result = backdrop.querySelector("#editBetResult").value || "push";
+          recalcBitacoraBanks();
+          saveDb(db);
+          close();
+          render("bitacora");
+        };
+
+        backdrop.querySelector("#deleteEditBet").onclick = ()=>{
+          st.entries = st.entries.filter(item=>item.id!==entryId);
+          recalcBitacoraBanks();
+          saveDb(db);
+          close();
+          render("bitacora");
+        };
+      };
+
+      content.querySelectorAll("[data-edit-log]").forEach(btn=>{
+        btn.onclick = ()=>openBitacoraEditModal(btn.getAttribute("data-edit-log"));
+      });
       return;
     }
 
