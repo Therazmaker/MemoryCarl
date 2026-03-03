@@ -7779,7 +7779,27 @@ function computeTeamIntelligencePanel(db, teamId){
         <div class="fl-row" style="margin-bottom:12px;">
           <button class="fl-btn" id="brainProcess">⚡ Procesar Vector de Estado</button>
           <button class="fl-btn" id="brainInitModel">🧠 Inicializar Modelo TF.js</button>
+          <label class="fl-muted" style="display:flex;align-items:center;gap:6px;">
+            Resultado real
+            <select id="brainResultadoReal" class="fl-select">
+              <option value="victoria">Victoria</option>
+              <option value="empate">Empate</option>
+              <option value="derrota">Derrota</option>
+            </select>
+          </label>
+          <button class="fl-btn" id="brainLearnOne">✅ Validar y Aprender</button>
+          <button class="fl-btn" id="brainLearnBatch">📚 Entrenar Lote (últimos 10)</button>
           <span id="brainModelStatus" class="fl-muted" style="margin-left:8px;"></span>
+        </div>
+        <div class="fl-grid two" style="margin-bottom:12px;">
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:6px;">📉 Curva de loss (online)</div>
+            <div id="brainLossChart" style="height:90px;border:1px solid #2d333b;border-radius:8px;background:#0d1117;padding:4px;"></div>
+          </div>
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:6px;">🧾 Snapshots de entrenamiento (máx. 10)</div>
+            <div id="brainSnapshots" class="fl-muted" style="font-size:12px;display:grid;gap:4px;"></div>
+          </div>
         </div>
         <div id="brainMonitor" style="display:none;">
           <div style="font-weight:800;margin-bottom:8px;">📊 Monitor del Cerebro — Datos Normalizados</div>
@@ -7892,6 +7912,79 @@ function computeTeamIntelligencePanel(db, teamId){
     }
 
     let brainModel = null;
+    let ultimaMuestra = null;
+    const brainTrainingHistory = [];
+    const brainLossHistory = [];
+
+    function oneHotResultado(valor){
+      if(valor === "victoria") return [1,0,0];
+      if(valor === "empate") return [0,1,0];
+      return [0,0,1];
+    }
+
+    function renderSnapshots(){
+      const el = document.getElementById("brainSnapshots");
+      if(!el) return;
+      if(!brainTrainingHistory.length){
+        el.innerHTML = "Sin snapshots todavía. Procesa un vector y luego valida.";
+        return;
+      }
+      el.innerHTML = brainTrainingHistory.map((muestra, idx)=>{
+        const clase = muestra.y[0] ? "V" : muestra.y[1] ? "E" : "D";
+        return `<div>#${idx+1} · ${clase} · x=[${muestra.x.map(v=>v.toFixed(2)).join(", ")}]</div>`;
+      }).join("");
+    }
+
+    function renderLossChart(){
+      const chart = document.getElementById("brainLossChart");
+      if(!chart) return;
+      if(!brainLossHistory.length){
+        chart.innerHTML = `<div class="fl-muted" style="font-size:12px;padding:8px;">Aún no hay entrenamientos.</div>`;
+        return;
+      }
+      const w = 340;
+      const h = 78;
+      const min = Math.min(...brainLossHistory);
+      const max = Math.max(...brainLossHistory);
+      const span = Math.max(0.0001, max - min);
+      const points = brainLossHistory.map((loss, i)=>{
+        const x = (i / Math.max(1, brainLossHistory.length - 1)) * (w - 10) + 5;
+        const y = h - (((loss - min) / span) * (h - 10) + 5);
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      }).join(" ");
+      chart.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%">
+        <polyline fill="none" stroke="#58a6ff" stroke-width="2" points="${points}" />
+        <text x="6" y="12" fill="#9ca3af" font-size="10">min ${min.toFixed(4)}</text>
+        <text x="6" y="24" fill="#9ca3af" font-size="10">max ${max.toFixed(4)}</text>
+      </svg>`;
+    }
+
+    async function persistBrainModel(statusEl){
+      await brainModel.save("localstorage://brain-memory-carl");
+      statusEl.textContent = "💾 Modelo actualizado y persistido en localstorage://brain-memory-carl";
+    }
+
+    async function aprenderConMuestra(muestra){
+      const xs = tf.tensor2d([muestra.x]);
+      const ys = tf.tensor2d([muestra.y]);
+      const history = await brainModel.fit(xs, ys, {
+        epochs: 5,
+        shuffle: true,
+        verbose: 0
+      });
+      xs.dispose();
+      ys.dispose();
+      const loss = history?.history?.loss?.at(-1);
+      if(Number.isFinite(loss)){
+        brainLossHistory.push(loss);
+        if(brainLossHistory.length > 30) brainLossHistory.shift();
+      }
+      renderLossChart();
+      return loss;
+    }
+
+    renderSnapshots();
+    renderLossChart();
 
     document.getElementById("brainProcess").onclick = ()=>{
       const vector    = getBrainVector();
@@ -7928,6 +8021,9 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById("brainTensorDisplay").textContent =
         `[[${blended.map(v=>v.toFixed(4)).join(", ")}]]`;
 
+      const resultadoReal = oneHotResultado(document.getElementById("brainResultadoReal").value);
+      ultimaMuestra = { x: blended, y: resultadoReal, createdAt: Date.now() };
+
       if(brainModel && typeof tf !== "undefined"){
         try{
           const t = tf.tensor2d([blended]);
@@ -7952,15 +8048,76 @@ function computeTeamIntelligencePanel(db, teamId){
       }
       try{
         statusEl.textContent = "⏳ Inicializando...";
-        const model = tf.sequential();
-        model.add(tf.layers.dense({
-          inputShape: [9],
-          units: 32,
-          activation: "relu",
-          name: "percepcion_inicial"
-        }));
+        let model = null;
+        try{
+          model = await tf.loadLayersModel("localstorage://brain-memory-carl");
+          statusEl.textContent = "✅ Modelo restaurado desde localStorage.";
+        }catch(_err){
+          model = tf.sequential();
+          model.add(tf.layers.dense({
+            inputShape: [9],
+            units: 32,
+            activation: "relu",
+            name: "percepcion_inicial"
+          }));
+          model.add(tf.layers.dense({ units: 3, activation: "softmax", name: "salida_partido" }));
+          model.compile({ optimizer: tf.train.adam(0.002), loss: "categoricalCrossentropy", metrics: ["accuracy"] });
+          statusEl.textContent = "✅ Modelo nuevo listo (9→32→3, softmax).";
+        }
         brainModel = model;
-        statusEl.textContent = "✅ Primera capa lista (9 → 32 neuronas, ReLU).";
+      }catch(err){
+        statusEl.textContent = `❌ ${err.message}`;
+      }
+    };
+
+    document.getElementById("brainLearnOne").onclick = async ()=>{
+      const statusEl = document.getElementById("brainModelStatus");
+      if(typeof tf === "undefined" || !brainModel){
+        statusEl.textContent = "❌ Inicializa el modelo antes de entrenar.";
+        return;
+      }
+      if(!ultimaMuestra){
+        statusEl.textContent = "❌ Primero procesa un vector de estado.";
+        return;
+      }
+      try{
+        statusEl.textContent = "⏳ Aprendiendo de este partido...";
+        ultimaMuestra.y = oneHotResultado(document.getElementById("brainResultadoReal").value);
+        brainTrainingHistory.unshift({ ...ultimaMuestra });
+        if(brainTrainingHistory.length > 10) brainTrainingHistory.pop();
+        renderSnapshots();
+        const loss = await aprenderConMuestra(ultimaMuestra);
+        await persistBrainModel(statusEl);
+        statusEl.textContent += Number.isFinite(loss) ? ` · loss ${loss.toFixed(4)}` : "";
+      }catch(err){
+        statusEl.textContent = `❌ ${err.message}`;
+      }
+    };
+
+    document.getElementById("brainLearnBatch").onclick = async ()=>{
+      const statusEl = document.getElementById("brainModelStatus");
+      if(typeof tf === "undefined" || !brainModel){
+        statusEl.textContent = "❌ Inicializa el modelo antes de entrenar.";
+        return;
+      }
+      if(!brainTrainingHistory.length){
+        statusEl.textContent = "❌ No hay snapshots para entrenamiento en lote.";
+        return;
+      }
+      try{
+        statusEl.textContent = "⏳ Entrenando lote reciente...";
+        const xs = tf.tensor2d(brainTrainingHistory.map(m=>m.x));
+        const ys = tf.tensor2d(brainTrainingHistory.map(m=>m.y));
+        const history = await brainModel.fit(xs, ys, { epochs: 12, batchSize: Math.min(4, brainTrainingHistory.length), shuffle: true, verbose: 0 });
+        xs.dispose();
+        ys.dispose();
+        const losses = history?.history?.loss || [];
+        losses.forEach((loss)=>{
+          if(Number.isFinite(loss)) brainLossHistory.push(loss);
+        });
+        if(brainLossHistory.length > 30) brainLossHistory.splice(0, brainLossHistory.length - 30);
+        renderLossChart();
+        await persistBrainModel(statusEl);
       }catch(err){
         statusEl.textContent = `❌ ${err.message}`;
       }
