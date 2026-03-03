@@ -5026,7 +5026,7 @@ function computeTeamIntelligencePanel(db, teamId){
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","momentum","bitacora","market"];
+    const tabs = ["home","liga","tracker","versus","momentum","bitacora","market","brain"];
     const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
 
     app.innerHTML = `
@@ -7746,10 +7746,194 @@ function computeTeamIntelligencePanel(db, teamId){
     }
   }
 
+  if(view==="brain"){
+    content.innerHTML = `
+      <div class="fl-card">
+        <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Consola del Cerebro — Capa de Percepción</div>
+        <div class="fl-muted" style="margin-bottom:12px;">
+          Ingresa las métricas del equipo para construir el Vector de Estado normalizado.
+          Cada valor se muestra en escala [0,1] listo para ser procesado por la red neuronal.
+        </div>
+        <div class="fl-grid two" style="margin-bottom:12px;">
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Métricas del Equipo</div>
+            <div class="fl-grid" style="gap:6px;">
+              <label class="fl-muted">Pulse (0-100) <input id="brainPulse" type="number" min="0" max="100" value="70" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Fatiga (0-100) <input id="brainFatiga" type="number" min="0" max="100" value="40" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Resiliencia (0-100) <input id="brainResiliencia" type="number" min="0" max="100" value="65" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Agresividad (0-100) <input id="brainAgresividad" type="number" min="0" max="100" value="55" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Volatilidad (0-100) <input id="brainVolatilidad" type="number" min="0" max="100" value="40" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Edad Media (17-40) <input id="brainEdad" type="number" min="17" max="40" value="26" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Importancia Torneo (0-1) <input id="brainImportancia" type="number" min="0" max="1" step="0.05" value="0.8" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Días Descanso (0-14) <input id="brainDescanso" type="number" min="0" max="14" value="3" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Momentum (-1 a 1) <input id="brainMomentum" type="number" min="-1" max="1" step="0.05" value="0.3" class="fl-input" style="width:80px;margin-left:8px;"></label>
+            </div>
+          </div>
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Relato del Partido (NLP)</div>
+            <textarea id="brainRelato" class="fl-text" style="min-height:180px;"
+              placeholder="Pega líneas del relato del partido aquí, p.ej.:&#10;45' Gol de Mbappé tras contraataque brillante&#10;60' Presión alta del equipo local&#10;75' Lesión de Busquets, rotación forzada"></textarea>
+          </div>
+        </div>
+        <div class="fl-row" style="margin-bottom:12px;">
+          <button class="fl-btn" id="brainProcess">⚡ Procesar Vector de Estado</button>
+          <button class="fl-btn" id="brainInitModel">🧠 Inicializar Modelo TF.js</button>
+          <span id="brainModelStatus" class="fl-muted" style="margin-left:8px;"></span>
+        </div>
+        <div id="brainMonitor" style="display:none;">
+          <div style="font-weight:800;margin-bottom:8px;">📊 Monitor del Cerebro — Datos Normalizados</div>
+          <div id="brainVectorDisplay" class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:10px;"></div>
+          <div class="fl-card" style="background:#0d1117;padding:10px;">
+            <div class="fl-muted" style="margin-bottom:4px;">Tensor de entrada (1 × 9)</div>
+            <code id="brainTensorDisplay" style="font-size:12px;color:#58a6ff;word-break:break-all;"></code>
+          </div>
+          <div id="brainModelOut" style="margin-top:10px;display:none;" class="fl-card">
+            <div style="font-weight:800;margin-bottom:6px;">🔬 Salida de la Capa de Percepción (32 neuronas)</div>
+            <div class="fl-muted" style="margin-bottom:4px;">Activaciones ReLU de la primera capa densa:</div>
+            <code id="brainLayerOutput" style="font-size:11px;color:#3fb950;word-break:break-all;"></code>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const LABELS = [
+      "Pulse","Fatiga","Resiliencia","Agresividad",
+      "Volatilidad","Edad Media","Importancia Torneo",
+      "Días Descanso","Momentum"
+    ];
+
+    function normBrain(value, min, max){
+      if(max===min) return 0;
+      return Math.min(1, Math.max(0, (value - min) / (max - min)));
+    }
+
+    function getBrainVector(){
+      const pulse        = parseFloat(document.getElementById("brainPulse").value)       || 0;
+      const fatiga       = parseFloat(document.getElementById("brainFatiga").value)      || 0;
+      const resiliencia  = parseFloat(document.getElementById("brainResiliencia").value) || 0;
+      const agresividad  = parseFloat(document.getElementById("brainAgresividad").value) ?? 50;
+      const volatilidad  = parseFloat(document.getElementById("brainVolatilidad").value) ?? 50;
+      const edadMedia    = parseFloat(document.getElementById("brainEdad").value)        || 26;
+      const importancia  = parseFloat(document.getElementById("brainImportancia").value) || 0.5;
+      const diasDescanso = parseFloat(document.getElementById("brainDescanso").value)    || 3;
+      const momentum     = parseFloat(document.getElementById("brainMomentum").value)    || 0;
+
+      return [
+        normBrain(pulse,       0, 100),
+        normBrain(fatiga,      0, 100),
+        normBrain(resiliencia, 0, 100),
+        normBrain(agresividad, 0, 100),
+        normBrain(volatilidad, 0, 100),
+        normBrain(edadMedia,  17,  40),
+        Math.min(1, Math.max(0, importancia)),
+        normBrain(diasDescanso, 0, 14),
+        normBrain(momentum,    -1,  1),
+      ];
+    }
+
+    const RELATO_DICT = {
+      "presión alta":0.20,"presion alta":0.20,"ritmo lento":-0.10,
+      "contraataque":0.15,"rotación":-0.30,"rotacion":-0.30,
+      "lesión":0.10,"lesion":0.10,"gol":0.12,"penalti":0.08,
+      "expulsión":0.15,"expulsion":0.15,"tarjeta roja":0.15,
+      "tarjeta amarilla":0.05,"remate":0.06,"parada":0.05,
+      "falta":0.04,"córner":0.04,"corner":0.04,"dominio":0.08,
+      "posesión":0.05,"posesion":0.05,"urgencia":0.10,
+      "empuje":0.08,"calma":-0.05,"sustitución":-0.05,"sustitucion":-0.05
+    };
+
+    function getIntensidad(){
+      const lines = (document.getElementById("brainRelato").value || "").split("\n").filter(l=>l.trim());
+      let score = 0.5;
+      lines.forEach(line=>{
+        const lower = line.toLowerCase();
+        for(const [kw, val] of Object.entries(RELATO_DICT)){
+          if(lower.includes(kw)) score += val;
+        }
+      });
+      return Math.min(Math.max(score, 0), 1);
+    }
+
+    let brainModel = null;
+
+    document.getElementById("brainProcess").onclick = ()=>{
+      const vector    = getBrainVector();
+      const intensidad = getIntensidad();
+      // Blend momentum with relato intensity (index 8 = momentum in state vector)
+      const blended   = [...vector];
+      blended[8]      = Math.min(1, Math.max(0, (blended[8] + intensidad) / 2));
+
+      const monitor = document.getElementById("brainMonitor");
+      monitor.style.display = "block";
+
+      const dispLabels = [...LABELS];
+      dispLabels[8] = "Momentum+Relato";
+      const vecDisplay = document.getElementById("brainVectorDisplay");
+      vecDisplay.innerHTML = dispLabels.map((lbl, i)=>{
+        const val = blended[i];
+        const pct = (val * 100).toFixed(0);
+        const color = val >= 0.7 ? "#3fb950" : val >= 0.4 ? "#f2cc60" : "#f85149";
+        return `<div class="fl-card" style="padding:8px;background:#111722;">
+          <div class="fl-muted" style="font-size:11px;">${lbl}</div>
+          <div style="font-size:20px;font-weight:900;color:${color};">${val.toFixed(2)}</div>
+          <div style="height:6px;border-radius:999px;background:#0d1117;border:1px solid #2d333b;margin-top:4px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;border-radius:999px;background:${color};"></div>
+          </div>
+        </div>`;
+      }).join("") + `<div class="fl-card" style="padding:8px;background:#111722;">
+          <div class="fl-muted" style="font-size:11px;">Intensidad Relato</div>
+          <div style="font-size:20px;font-weight:900;color:#58a6ff;">${intensidad.toFixed(2)}</div>
+          <div style="height:6px;border-radius:999px;background:#0d1117;border:1px solid #2d333b;margin-top:4px;overflow:hidden;">
+            <div style="width:${(intensidad*100).toFixed(0)}%;height:100%;border-radius:999px;background:#58a6ff;"></div>
+          </div>
+        </div>`;
+
+      document.getElementById("brainTensorDisplay").textContent =
+        `[[${blended.map(v=>v.toFixed(4)).join(", ")}]]`;
+
+      if(brainModel && typeof tf !== "undefined"){
+        try{
+          const t = tf.tensor2d([blended]);
+          const out = brainModel.predict(t);
+          const outData = Array.from(out.dataSync()).map(v=>v.toFixed(4));
+          t.dispose(); out.dispose();
+          const modelOut = document.getElementById("brainModelOut");
+          modelOut.style.display = "block";
+          document.getElementById("brainLayerOutput").textContent =
+            `[${outData.join(", ")}]`;
+        }catch(err){
+          document.getElementById("brainModelStatus").textContent = `⚠ Predict error: ${err.message}`;
+        }
+      }
+    };
+
+    document.getElementById("brainInitModel").onclick = async ()=>{
+      const statusEl = document.getElementById("brainModelStatus");
+      if(typeof tf === "undefined"){
+        statusEl.textContent = "❌ TensorFlow.js no cargado.";
+        return;
+      }
+      try{
+        statusEl.textContent = "⏳ Inicializando...";
+        const model = tf.sequential();
+        model.add(tf.layers.dense({
+          inputShape: [9],
+          units: 32,
+          activation: "relu",
+          name: "percepcion_inicial"
+        }));
+        brainModel = model;
+        statusEl.textContent = "✅ Primera capa lista (9 → 32 neuronas, ReLU).";
+      }catch(err){
+        statusEl.textContent = `❌ ${err.message}`;
+      }
+    };
+  }
+
   window.__FOOTBALL_LAB__ = {
     open(view="home", payload={}){ render(view, payload); },
     getDB(){ return loadDb(); },
-    help: "window.__FOOTBALL_LAB__.open('liga'|'equipo'|'tracker'|'versus'|'bitacora'|'market')"
+    help: "window.__FOOTBALL_LAB__.open('liga'|'equipo'|'tracker'|'versus'|'bitacora'|'market'|'brain')"
   };
 
   return window.__FOOTBALL_LAB__;
