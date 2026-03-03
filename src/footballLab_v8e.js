@@ -2426,14 +2426,52 @@ function computeTeamIntelligencePanel(db, teamId){
     const minutoMax = detectarMinutoMaximoRelato(raw);
     const ventanaMin = minutoMax > 0 ? minutoMax : 90;
     const factorTiempo = Math.max(ventanaMin / 90, 0.1);
+    const golesDetectados = (raw.match(/\bg+o+l+\b|\banota\b|\bmarca\b/gi) || []).length;
 
     return {
       agresividad: clamp(baseScores.agresividad / factorTiempo, 0, 1),
       peligro: clamp(baseScores.peligro / factorTiempo, 0, 1),
+      golesDetectados,
       minutoMax,
       factorTiempo,
       raw: baseScores
     };
+  }
+
+  function extraerMarcadorDesdeRelato(texto = ""){
+    const raw = String(texto || "");
+    const marcadorRegex = /(\d{1,2})\s*[-:]\s*(\d{1,2})/g;
+    let match;
+    let ultimo = null;
+    while((match = marcadorRegex.exec(raw)) !== null){
+      ultimo = { home: Number(match[1]) || 0, away: Number(match[2]) || 0 };
+    }
+    return ultimo;
+  }
+
+  function ajustarPrediccionPorMarcador(prediccion = [0, 0, 0], golesFavor = 0, golesContra = 0){
+    const base = Array.isArray(prediccion) ? prediccion.map((v)=>Math.max(0, Number(v) || 0)) : [0, 0, 0];
+    while(base.length < 3) base.push(0);
+    const diferencia = (Number(golesFavor) || 0) - (Number(golesContra) || 0);
+    let boost = 0;
+    if(diferencia >= 2) boost = 0.35;
+    else if(diferencia === 1) boost = 0.15;
+    else if(diferencia === -1) boost = -0.20;
+    else if(diferencia <= -2) boost = -0.35;
+
+    const salida = [...base];
+    salida[0] = clamp(salida[0] + boost, 0, 1);
+    if(boost > 0){
+      salida[1] = Math.max(0, salida[1] - boost * 0.45);
+      salida[2] = Math.max(0, salida[2] - boost * 0.55);
+    }else if(boost < 0){
+      const castigo = Math.abs(boost);
+      salida[1] = Math.max(0, salida[1] - castigo * 0.35);
+      salida[2] = clamp(salida[2] + castigo * 0.35, 0, 1);
+    }
+
+    const sum = salida.reduce((acc, v)=>acc + v, 0) || 1;
+    return salida.map((v)=>v / sum);
   }
 
   function computeTeamNarrativeMetrics(matches = []){
@@ -8304,6 +8342,9 @@ function computeTeamIntelligencePanel(db, teamId){
       const edge = Number(cortexData.edge) || 0;
       const ventaja = Number(cortexData.ventaja) || 0;
       const peligro = clamp(Number(cortexData.peligro) || 0, 0, 1);
+      const scoreHome = Number(cortexData.scoreHome) || 0;
+      const scoreAway = Number(cortexData.scoreAway) || 0;
+      const scoreDiff = scoreHome - scoreAway;
       const ctxHome = homeTeam?.contextoEstrategico || {};
       const ctxAway = awayTeam?.contextoEstrategico || {};
       const homeName = homeTeam?.name || "Equipo A";
@@ -8321,6 +8362,9 @@ function computeTeamIntelligencePanel(db, teamId){
       const formaActual = `Forma Actual: ${homeName} ${escenarioVictoria}. ${connectorA}, ${alertaRacha}.`;
       const historico = `Histórico: ${homeName} reporta racha local "${ctxHome.rachaLocal || "sin datos suficientes"}" y ${awayName} responde con patrón "${(ctxAway.patrones || ["sin patrón dominante"])[0]}".`;
       const factorX = `Factor X: las ausencias clave del local (${(ctxHome.ausenciasClave || []).join(", ") || "sin bajas críticas"}) y el asedio narrativo (${(peligro * 100).toFixed(0)}%) inclinan el ritmo del partido.`;
+      const partidoLiquidado = scoreDiff >= 2
+        ? `Con el segundo gol, el escenario cambia por completo. El patrón de racha queda oficialmente anulado por la realidad del marcador (${scoreHome}-${scoreAway}). Mi confianza en la victoria local sube al ${(victoriaIA * 100).toFixed(0)}%. El riesgo ahora es únicamente la fatiga acumulada (${peligro.toFixed(2)}).`
+        : "";
 
       let veredicto = "Veredicto: ";
       if(edge > 0.05){
@@ -8329,7 +8373,7 @@ function computeTeamIntelligencePanel(db, teamId){
         veredicto += "el mercado está razonablemente ajustado y la lectura recomienda cautela pre-partido.";
       }
 
-      return [contexto, formaActual, historico, factorX, veredicto].join("\n\n");
+      return [contexto, formaActual, historico, factorX, partidoLiquidado, veredicto].filter(Boolean).join("\n\n");
     }
 
     function renderBrainTeamOptions(leagueId, side = "A"){
@@ -8769,12 +8813,28 @@ function computeTeamIntelligencePanel(db, teamId){
       const vectorB = getBrainVector("B");
       const relatoA = getNarrativeMetrics("A");
       const relatoB = getNarrativeMetrics("B");
+      const textoRelatoA = document.getElementById("brainRelatoA")?.value || "";
+      const textoRelatoB = document.getElementById("brainRelatoB")?.value || "";
+      const marcadorRelatoA = extraerMarcadorDesdeRelato(textoRelatoA);
+      const marcadorRelatoB = extraerMarcadorDesdeRelato(textoRelatoB);
+      const marcadorVivo = marcadorRelatoA || marcadorRelatoB || { home: 0, away: 0 };
       const blendedA = [...vectorA];
       const blendedB = [...vectorB];
       blendedA[8] = Math.min(1, Math.max(0, (blendedA[8] + relatoA.peligro) / 2));
       blendedB[8] = Math.min(1, Math.max(0, (blendedB[8] + relatoB.peligro) / 2));
       blendedA[3] = Math.min(1, Math.max(0, (blendedA[3] + relatoA.agresividad) / 2));
       blendedB[3] = Math.min(1, Math.max(0, (blendedB[3] + relatoB.agresividad) / 2));
+
+      if(relatoA.golesDetectados > 0 || relatoB.golesDetectados > 0){
+        blendedA[8] = 0.5;
+        blendedB[8] = 0.5;
+        const golDiff = (Number(marcadorVivo.home) || 0) - (Number(marcadorVivo.away) || 0);
+        const resilienciaDelta = clamp(golDiff * 0.10, -0.10, 0.10);
+        blendedA[2] = clamp(blendedA[2] + resilienciaDelta, 0, 1);
+        blendedB[2] = clamp(blendedB[2] - resilienciaDelta, 0, 1);
+        blendedA[8] = Math.max(blendedA[8], 0.45 + Math.min(0.25, relatoA.peligro * 0.4));
+        blendedB[8] = Math.max(blendedB[8], 0.45 + Math.min(0.25, relatoB.peligro * 0.4));
+      }
 
       const monitor = document.getElementById("brainMonitor");
       monitor.style.display = "block";
@@ -8822,8 +8882,8 @@ function computeTeamIntelligencePanel(db, teamId){
           const pB = brainModel.predict(tB);
           const rawA = await pA.data();
           const rawB = await pB.data();
-          predA = Array.from(rawA);
-          predB = Array.from(rawB);
+          predA = ajustarPrediccionPorMarcador(Array.from(rawA), marcadorVivo.home, marcadorVivo.away);
+          predB = ajustarPrediccionPorMarcador(Array.from(rawB), marcadorVivo.away, marcadorVivo.home);
           latestPredictionConfidence = (computePredictionConfidence(predA) + computePredictionConfidence(predB)) / 2;
           renderBrainHealthCheck();
 
@@ -8872,7 +8932,9 @@ function computeTeamIntelligencePanel(db, teamId){
           victoriaIA: predA[0] || 0,
           edge: (predA[0] || 0) - (parseFloat(document.getElementById("cerebeloSimVictoria")?.value) || 0),
           ventaja: resumen.ventaja,
-          peligro: relatoA.peligro
+          peligro: relatoA.peligro,
+          scoreHome: marcadorVivo.home,
+          scoreAway: marcadorVivo.away
         });
         reporteEl.textContent = textoParaLeer;
         locutorAnalista(textoParaLeer);
