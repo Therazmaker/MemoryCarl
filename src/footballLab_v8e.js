@@ -8128,7 +8128,7 @@ function computeTeamIntelligencePanel(db, teamId){
         </div>
         <div class="fl-grid two" style="margin-bottom:12px;">
           <div class="fl-card" style="padding:10px;">
-            <div style="font-weight:800;margin-bottom:8px;">Equipo A (ej. Everton)</div>
+            <div style="font-weight:800;margin-bottom:8px;">Equipo A (Local · ej. Everton)</div>
             <div class="fl-grid" style="gap:6px;margin-bottom:10px;">
               <label class="fl-muted">Liga
                 <select id="brainLeagueSelectA" class="fl-select" style="width:100%;margin-top:4px;"></select>
@@ -8152,7 +8152,7 @@ function computeTeamIntelligencePanel(db, teamId){
             </div>
           </div>
           <div class="fl-card" style="padding:10px;">
-            <div style="font-weight:800;margin-bottom:8px;">Equipo B (ej. Burnley)</div>
+            <div style="font-weight:800;margin-bottom:8px;">Equipo B (Visitante · ej. Burnley)</div>
             <div class="fl-grid" style="gap:6px;margin-bottom:10px;">
               <label class="fl-muted">Liga
                 <select id="brainLeagueSelectB" class="fl-select" style="width:100%;margin-top:4px;"></select>
@@ -9137,7 +9137,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const comparisonEl = document.getElementById("brainComparisonOut");
       comparisonEl.style.display = "block";
       comparisonEl.innerHTML = `
-        <div style="font-weight:900;font-size:15px;margin-bottom:6px;color:${resumen.tono};">Duelo de Vectores · ΔVictoria ${(resumen.ventaja >= 0 ? "+" : "") + resumen.ventaja.toFixed(2)}</div>
+        <div style="font-weight:900;font-size:15px;margin-bottom:6px;color:${resumen.tono};">Duelo de Vectores · ΔLocal(A) ${(resumen.ventaja >= 0 ? "+" : "") + resumen.ventaja.toFixed(2)}</div>
         <div class="fl-muted" style="margin-bottom:8px;">${resumen.mensaje}</div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:12px;color:#58a6ff;">Equipo A</span>
