@@ -7746,9 +7746,8 @@ function computeTeamIntelligencePanel(db, teamId){
         render("versus");
       };
     }
-  }
 
-  if(view==="brain"){
+    if(view==="brain"){
     content.innerHTML = `
       <div class="fl-card">
         <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Consola del Cerebro — Capa de Percepción</div>
@@ -8017,6 +8016,8 @@ function computeTeamIntelligencePanel(db, teamId){
         `<b>Tipo de discrepancia:</b> ${veredicto.tipoDiscrepancia}<br>` +
         `<b>Filtro de ruido:</b> ${aprendizajeMsg}`;
     };
+  }
+
   }
 
   window.__FOOTBALL_LAB__ = {
