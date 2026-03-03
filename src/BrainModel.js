@@ -27,6 +27,12 @@ import {
   calcularSemaforo,
   UMBRAL_ERROR_DEFAULT,
 } from "./Cerebelo.js";
+import {
+  prepararDataset,
+  ejecutarEntrenamiento,
+  guardarProgreso,
+  entrenarDesdeUI,
+} from "./TrainingLab.js";
 
 // Re-export helpers so consumers can import from a single entry point
 export {
@@ -45,6 +51,10 @@ export {
   clasificarDiscrepancia,
   calcularSemaforo,
   UMBRAL_ERROR_DEFAULT,
+  prepararDataset,
+  ejecutarEntrenamiento,
+  guardarProgreso,
+  entrenarDesdeUI,
 };
 
 // ─── Paso 3: Capa de Entrada en TensorFlow.js ────────────────────────────────
