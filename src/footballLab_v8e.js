@@ -8031,6 +8031,9 @@ function computeTeamIntelligencePanel(db, teamId){
         <div class="fl-row" style="margin-bottom:12px;">
           <button class="fl-btn" id="brainProcess">⚡ Procesar Vector de Estado</button>
           <button class="fl-btn" id="brainInitModel">🧠 Inicializar Modelo TF.js</button>
+          <button class="fl-btn secondary" id="brainExportMemory">📤 Exportar memoria</button>
+          <button class="fl-btn secondary" id="brainImportMemory">📥 Importar memoria</button>
+          <input id="brainImportFile" type="file" accept="application/json" style="display:none;" />
           <label class="fl-muted" style="display:flex;align-items:center;gap:6px;">
             Resultado real
             <select id="brainResultadoReal" class="fl-select">
@@ -8051,6 +8054,12 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-card" style="padding:10px;">
             <div style="font-weight:800;margin-bottom:6px;">🧾 Snapshots de entrenamiento (máx. 10)</div>
             <div id="brainSnapshots" class="fl-muted" style="font-size:12px;display:grid;gap:4px;"></div>
+          </div>
+        </div>
+        <div class="fl-card" style="margin-bottom:12px;padding:10px;background:#0d1117;border-left:4px solid #58a6ff;">
+          <div style="font-weight:800;margin-bottom:6px;">🩺 Health Check del Brain</div>
+          <div id="brainHealthCheck" class="fl-muted" style="font-size:12px;line-height:1.6;">
+            Inicializa o restaura un modelo para calcular capacidad, confianza e integridad.
           </div>
         </div>
         <div id="brainMonitor" style="display:none;">
@@ -8394,12 +8403,129 @@ function computeTeamIntelligencePanel(db, teamId){
     let ultimaMuestra = null;
     const brainTrainingHistory = [];
     const brainLossHistory = [];
+    let latestPredictionConfidence = null;
+    const BRAIN_SNAPSHOTS_KEY = "brain-memory-carl-snapshots-v1";
+    const BRAIN_LOSS_KEY = "brain-memory-carl-loss-v1";
+
+    function safeParseJSON(value, fallback){
+      try{
+        return JSON.parse(value);
+      }catch(_err){
+        return fallback;
+      }
+    }
+
+    function restoreBrainTelemetry(){
+      const rawSnapshots = localStorage.getItem(BRAIN_SNAPSHOTS_KEY);
+      const rawLoss = localStorage.getItem(BRAIN_LOSS_KEY);
+      const snapshots = Array.isArray(safeParseJSON(rawSnapshots, []))
+        ? safeParseJSON(rawSnapshots, []).filter((row)=>Array.isArray(row?.x) && Array.isArray(row?.y)).slice(0, 10)
+        : [];
+      const losses = Array.isArray(safeParseJSON(rawLoss, []))
+        ? safeParseJSON(rawLoss, []).map(Number).filter((n)=>Number.isFinite(n)).slice(-30)
+        : [];
+      brainTrainingHistory.splice(0, brainTrainingHistory.length, ...snapshots);
+      brainLossHistory.splice(0, brainLossHistory.length, ...losses);
+    }
+
+    function persistBrainTelemetry(){
+      try{
+        localStorage.setItem(BRAIN_SNAPSHOTS_KEY, JSON.stringify(brainTrainingHistory.slice(0, 10)));
+        localStorage.setItem(BRAIN_LOSS_KEY, JSON.stringify(brainLossHistory.slice(-30)));
+      }catch(_err){
+        // fallback silencioso: no bloquear la UI por cuota.
+      }
+    }
+
+    function computePredictionConfidence(prediction){
+      if(!Array.isArray(prediction) || !prediction.length) return 0;
+      const probs = prediction.map((v)=>Math.max(0, Number(v) || 0));
+      const sum = probs.reduce((acc, v)=>acc + v, 0) || 1;
+      const normalized = probs.map((v)=>v / sum);
+      const entropy = -normalized.reduce((acc, p)=>acc + (p > 0 ? p * Math.log(p) : 0), 0);
+      const maxEntropy = Math.log(normalized.length || 1);
+      const certainty = maxEntropy > 0 ? 1 - (entropy / maxEntropy) : 0;
+      const margin = Math.max(0, ...normalized) - [...normalized].sort((a,b)=>b-a)[1];
+      return Math.max(0, Math.min(1, 0.75 * certainty + 0.25 * margin));
+    }
+
+    function getHealthCheck(){
+      const snapshots = brainTrainingHistory.length;
+      const losses = brainLossHistory.slice(-8);
+      const latestLoss = losses.at(-1);
+      const prevLoss = losses[0];
+      const trend = (Number.isFinite(latestLoss) && Number.isFinite(prevLoss)) ? latestLoss - prevLoss : null;
+      const capacityPct = Math.min(100, Math.round((snapshots / 10) * 100));
+      const confidence = Math.round(((latestPredictionConfidence ?? 0) * 100));
+      const quality = Number.isFinite(latestLoss)
+        ? latestLoss < 0.35 ? "alta" : latestLoss < 0.7 ? "media" : "baja"
+        : "sin datos";
+      return {
+        snapshots,
+        capacityPct,
+        latestLoss,
+        trend,
+        confidence,
+        quality,
+        ready: !!brainModel
+      };
+    }
+
+    function renderBrainHealthCheck(extra = ""){
+      const el = document.getElementById("brainHealthCheck");
+      if(!el) return;
+      const health = getHealthCheck();
+      const trendText = health.trend == null
+        ? "sin histórico suficiente"
+        : health.trend < 0
+          ? `mejora (${health.trend.toFixed(4)})`
+          : health.trend > 0
+            ? `empeora (+${health.trend.toFixed(4)})`
+            : "estable";
+      const modelState = health.ready ? "🟢 Modelo activo" : "🟡 Modelo no inicializado";
+      const lossText = Number.isFinite(health.latestLoss) ? health.latestLoss.toFixed(4) : "n/a";
+      el.innerHTML = [
+        `<div>${modelState}</div>`,
+        `<div>Capacidad usada: <b>${health.capacityPct}%</b> (${health.snapshots}/10 snapshots locales).</div>`,
+        `<div>Loss reciente: <b>${lossText}</b> · tendencia: <b>${trendText}</b> · calidad: <b>${health.quality}</b>.</div>`,
+        `<div>Confianza de predicción (entropía+margen): <b>${health.confidence}%</b>.</div>`,
+        extra ? `<div style="color:#58a6ff;">${extra}</div>` : ""
+      ].filter(Boolean).join("");
+    }
+
+    function toBase64FromArrayBuffer(buffer){
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for(let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    }
+
+    function fromBase64ToArrayBuffer(base64){
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for(let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      return bytes.buffer;
+    }
+
+    async function computeChecksum(text){
+      if(typeof crypto === "undefined" || !crypto?.subtle){
+        let hash = 0;
+        for(let i = 0; i < text.length; i += 1){
+          hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+        }
+        return `fallback-${Math.abs(hash)}`;
+      }
+      const data = new TextEncoder().encode(text);
+      const digest = await crypto.subtle.digest("SHA-256", data);
+      return Array.from(new Uint8Array(digest)).map((b)=>b.toString(16).padStart(2, "0")).join("");
+    }
 
     function syncBrainModelGlobal(model){
       brainModel = model || null;
       if(typeof globalThis !== "undefined"){
         globalThis.modelo = brainModel;
       }
+      renderBrainHealthCheck();
     }
 
     async function bootstrapBrainModel(statusEl){
@@ -8438,6 +8564,8 @@ function computeTeamIntelligencePanel(db, teamId){
         const clase = muestra.y[0] ? "V" : muestra.y[1] ? "E" : "D";
         return `<div>#${idx+1} · ${clase} · x=[${muestra.x.map(v=>v.toFixed(2)).join(", ")}]</div>`;
       }).join("");
+      persistBrainTelemetry();
+      renderBrainHealthCheck();
     }
 
     function renderLossChart(){
@@ -8462,6 +8590,8 @@ function computeTeamIntelligencePanel(db, teamId){
         <text x="6" y="12" fill="#9ca3af" font-size="10">min ${min.toFixed(4)}</text>
         <text x="6" y="24" fill="#9ca3af" font-size="10">max ${max.toFixed(4)}</text>
       </svg>`;
+      persistBrainTelemetry();
+      renderBrainHealthCheck();
     }
 
     async function persistBrainModel(statusEl){
@@ -8488,10 +8618,110 @@ function computeTeamIntelligencePanel(db, teamId){
       return loss;
     }
 
+    restoreBrainTelemetry();
     renderSnapshots();
     renderLossChart();
     initBrainSelectorState();
     bootstrapBrainModel();
+    renderBrainHealthCheck();
+
+    document.getElementById("brainExportMemory")?.addEventListener("click", async ()=>{
+      const statusEl = document.getElementById("brainModelStatus");
+      if(typeof tf === "undefined" || !brainModel){
+        statusEl.textContent = "❌ Inicializa el modelo antes de exportar.";
+        return;
+      }
+      try{
+        statusEl.textContent = "⏳ Exportando memoria del brain...";
+        let artifacts = null;
+        await brainModel.save(tf.io.withSaveHandler(async (modelArtifacts)=>{
+          artifacts = modelArtifacts;
+          return { modelArtifactsInfo: { dateSaved: new Date(), modelTopologyType: "JSON", modelTopologyBytes: 0, weightDataBytes: modelArtifacts?.weightData?.byteLength || 0 } };
+        }));
+        if(!artifacts){
+          throw new Error("No se pudieron obtener artefactos del modelo.");
+        }
+        const payloadBase = {
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          modelTopology: artifacts.modelTopology,
+          weightSpecs: artifacts.weightSpecs || [],
+          weightDataBase64: toBase64FromArrayBuffer(artifacts.weightData || new ArrayBuffer(0)),
+          trainingConfig: artifacts.trainingConfig || null,
+          userDefinedMetadata: artifacts.userDefinedMetadata || null,
+          snapshots: brainTrainingHistory.slice(0, 10),
+          lossHistory: brainLossHistory.slice(-30),
+          lastPredictionConfidence: latestPredictionConfidence
+        };
+        const checksum = await computeChecksum(JSON.stringify(payloadBase));
+        const payload = { ...payloadBase, checksum };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `brain-memory-carl-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        renderBrainHealthCheck(`📤 Export OK · checksum ${checksum.slice(0, 12)}… · snapshots ${payload.snapshots.length}.`);
+        statusEl.textContent = "✅ Memoria exportada. Guarda el JSON para evitar pérdidas.";
+      }catch(err){
+        statusEl.textContent = `❌ Error al exportar: ${err.message}`;
+      }
+    });
+
+    document.getElementById("brainImportMemory")?.addEventListener("click", ()=>{
+      document.getElementById("brainImportFile")?.click();
+    });
+
+    document.getElementById("brainImportFile")?.addEventListener("change", async (event)=>{
+      const statusEl = document.getElementById("brainModelStatus");
+      const input = event.target;
+      const file = input?.files?.[0];
+      if(!file) return;
+      if(typeof tf === "undefined"){
+        statusEl.textContent = "❌ TensorFlow.js no disponible para importar.";
+        return;
+      }
+      try{
+        statusEl.textContent = "⏳ Importando memoria...";
+        const raw = await file.text();
+        const payload = safeParseJSON(raw, null);
+        if(!payload || !payload.modelTopology || !payload.weightDataBase64){
+          throw new Error("Archivo inválido: falta topología o pesos.");
+        }
+        const expectedChecksum = payload.checksum;
+        const { checksum: _checksum, ...basePayload } = payload;
+        const currentChecksum = await computeChecksum(JSON.stringify(basePayload));
+        const checksumMatch = !expectedChecksum || expectedChecksum === currentChecksum;
+        const model = await tf.loadLayersModel(tf.io.fromMemory({
+          modelTopology: payload.modelTopology,
+          weightSpecs: payload.weightSpecs || [],
+          weightData: fromBase64ToArrayBuffer(payload.weightDataBase64),
+          trainingConfig: payload.trainingConfig || null,
+          userDefinedMetadata: payload.userDefinedMetadata || null
+        }));
+        syncBrainModelGlobal(model);
+        brainTrainingHistory.splice(0, brainTrainingHistory.length, ...((payload.snapshots || []).slice(0, 10)));
+        brainLossHistory.splice(0, brainLossHistory.length, ...((payload.lossHistory || []).slice(-30)));
+        const importedConfidence = Number(payload.lastPredictionConfidence);
+        latestPredictionConfidence = Number.isFinite(importedConfidence) ? importedConfidence : null;
+        renderSnapshots();
+        renderLossChart();
+        persistBrainTelemetry();
+        await persistBrainModel(statusEl);
+        const importedChecksum = await computeChecksum(JSON.stringify(basePayload));
+        const postImportMatch = importedChecksum === currentChecksum;
+        const integrityMsg = checksumMatch && postImportMatch
+          ? "Integridad validada: no se perdió información."
+          : "Importado con advertencia: checksum no coincide.";
+        renderBrainHealthCheck(`📥 Import OK · ${integrityMsg} · snapshots ${brainTrainingHistory.length}.`);
+        statusEl.textContent = `✅ Memoria importada. ${integrityMsg}`;
+      }catch(err){
+        statusEl.textContent = `❌ Error al importar: ${err.message}`;
+      }finally{
+        if(input) input.value = "";
+      }
+    });
 
     ["A", "B"].forEach((side)=>{
       const cfg = brainSelectors[side];
@@ -8594,6 +8824,8 @@ function computeTeamIntelligencePanel(db, teamId){
           const rawB = await pB.data();
           predA = Array.from(rawA);
           predB = Array.from(rawB);
+          latestPredictionConfidence = (computePredictionConfidence(predA) + computePredictionConfidence(predB)) / 2;
+          renderBrainHealthCheck();
 
           document.getElementById("brainModelOut").style.display = "block";
           document.getElementById("brainLayerOutput").textContent =
