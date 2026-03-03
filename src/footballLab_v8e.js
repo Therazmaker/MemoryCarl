@@ -8061,6 +8061,10 @@ function computeTeamIntelligencePanel(db, teamId){
             <code id="brainTensorDisplay" style="font-size:12px;color:#58a6ff;word-break:break-all;"></code>
           </div>
           <div id="brainComparisonOut" class="fl-card" style="margin-top:10px;background:#111722;padding:10px;display:none;"></div>
+          <div class="fl-card" style="margin-top:10px;background:#0d1117;border-top:2px solid #58a6ff;padding:10px;">
+            <div class="fl-title" style="color:#58a6ff;font-size:16px;">🎙️ Informe del Analista Senior</div>
+            <div id="reporte-texto" style="font-style:italic;line-height:1.6;color:#c9d1d9;">Esperando datos del Córtex...</div>
+          </div>
           <div id="brainModelOut" style="margin-top:10px;display:none;" class="fl-card">
             <div style="font-weight:800;margin-bottom:6px;">🔬 Salida de la Capa de Percepción (3 probabilidades por equipo)</div>
             <div class="fl-muted" style="margin-bottom:4px;">Predicción softmax [Victoria, Empate, Derrota] para A y B:</div>
@@ -8111,6 +8115,20 @@ function computeTeamIntelligencePanel(db, teamId){
       "Volatilidad","Edad Media","Importancia Torneo",
       "Días Descanso","Momentum"
     ];
+
+    const NARRATIVA_SINTESIS = {
+      escenariosVictoria: [
+        "domina las probabilidades con un sólido {percent}%",
+        "se perfila como favorito estadístico en el duelo del Hill Dickinson",
+        "mantiene la ventaja en el modelo predictivo"
+      ],
+      alertasRacha: {
+        critica: "la carga psicológica de {racha} derrotas consecutivas pesa más que la táctica",
+        estable: "llegan en un momento de forma equilibrado",
+        ascendente: "el momentum positivo de los últimos encuentros es su mejor arma"
+      },
+      conectores: ["Sin embargo", "Por otro lado", "A pesar de esto"]
+    };
 
     const brainSelectors = {
       A: {
@@ -8212,6 +8230,53 @@ function computeTeamIntelligencePanel(db, teamId){
       setInputValue(`brainMomentum${side}`, momentumSigned, 2);
 
       if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. Ajuste contextual -> pulse ${(ajusteContextual.pulse*100).toFixed(0)} pts, resiliencia ${(ajusteContextual.resiliencia*100).toFixed(0)} pts, agresividad ${(ajusteContextual.agresividad*100).toFixed(0)} pts. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned)}`;
+    }
+
+    function pickNarrativeVariant(variants, seed = 0){
+      if(!Array.isArray(variants) || !variants.length) return "";
+      const idx = Math.abs(Math.round(seed * 1000)) % variants.length;
+      return variants[idx] || variants[0];
+    }
+
+    function classifyRacha(rachaText){
+      const text = String(rachaText || "").toLowerCase();
+      const losingStreak = text.match(/(\d+)\s*(partidos?)?\s*(sin ganar|derrotas?)/i);
+      if(losingStreak && Number(losingStreak[1]) >= 3) return "critica";
+      if(/gan[óo]|victorias?|invicto|momentum|positiv/i.test(text)) return "ascendente";
+      return "estable";
+    }
+
+    function synthesizeMatchReport(homeTeam, awayTeam, cortexData = {}){
+      const victoriaIA = clamp(Number(cortexData.victoriaIA) || 0, 0, 1);
+      const edge = Number(cortexData.edge) || 0;
+      const ventaja = Number(cortexData.ventaja) || 0;
+      const peligro = clamp(Number(cortexData.peligro) || 0, 0, 1);
+      const ctxHome = homeTeam?.contextoEstrategico || {};
+      const ctxAway = awayTeam?.contextoEstrategico || {};
+      const homeName = homeTeam?.name || "Equipo A";
+      const awayName = awayTeam?.name || "Equipo B";
+
+      const rachaTipo = classifyRacha(ctxHome.rachaLocal);
+      const alertaRachaTpl = NARRATIVA_SINTESIS.alertasRacha[rachaTipo] || NARRATIVA_SINTESIS.alertasRacha.estable;
+      const alertaRacha = alertaRachaTpl.replace("{racha}", String(ctxHome.rachaLocal || "3"));
+      const connectorA = pickNarrativeVariant(NARRATIVA_SINTESIS.conectores, victoriaIA + peligro);
+      const connectorB = pickNarrativeVariant(NARRATIVA_SINTESIS.conectores, edge + Math.abs(ventaja));
+      const escenarioVictoria = pickNarrativeVariant(NARRATIVA_SINTESIS.escenariosVictoria, victoriaIA)
+        .replace("{percent}", (victoriaIA * 100).toFixed(0));
+
+      const contexto = `Contexto: duelo de realidades cruzadas entre ${homeName} y ${awayName}. ${homeName} intenta imponer localía mientras ${awayName} llega con presión competitiva.`;
+      const formaActual = `Forma Actual: ${homeName} ${escenarioVictoria}. ${connectorA}, ${alertaRacha}.`;
+      const historico = `Histórico: ${homeName} reporta racha local "${ctxHome.rachaLocal || "sin datos suficientes"}" y ${awayName} responde con patrón "${(ctxAway.patrones || ["sin patrón dominante"])[0]}".`;
+      const factorX = `Factor X: las ausencias clave del local (${(ctxHome.ausenciasClave || []).join(", ") || "sin bajas críticas"}) y el asedio narrativo (${(peligro * 100).toFixed(0)}%) inclinan el ritmo del partido.`;
+
+      let veredicto = "Veredicto: ";
+      if(edge > 0.05){
+        veredicto += `${connectorB}, hay valor fuera del mercado principal: ${edge > 0.1 ? "Doble Oportunidad" : "Hándicap"} a favor de ${ventaja >= 0 ? homeName : awayName}.`;
+      }else{
+        veredicto += "el mercado está razonablemente ajustado y la lectura recomienda cautela pre-partido.";
+      }
+
+      return [contexto, formaActual, historico, factorX, veredicto].join("\n\n");
     }
 
     function renderBrainTeamOptions(leagueId, side = "A"){
@@ -8522,6 +8587,18 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>
           <span style="font-size:12px;color:#f85149;">Equipo B</span>
         </div>`;
+
+      const selectedTeamA = db.teams.find((team)=>team.id === brainSelectors.A.team.value);
+      const selectedTeamB = db.teams.find((team)=>team.id === brainSelectors.B.team.value);
+      const reporteEl = document.getElementById("reporte-texto");
+      if(reporteEl){
+        reporteEl.textContent = synthesizeMatchReport(selectedTeamA, selectedTeamB, {
+          victoriaIA: predA[0] || 0,
+          edge: (predA[0] || 0) - (parseFloat(document.getElementById("cerebeloSimVictoria")?.value) || 0),
+          ventaja: resumen.ventaja,
+          peligro: relatoA.peligro
+        });
+      }
 
       const cerebeloRefinarBtn = document.getElementById("cerebeloRefinar");
       if(cerebeloRefinarBtn) cerebeloRefinarBtn.click();
