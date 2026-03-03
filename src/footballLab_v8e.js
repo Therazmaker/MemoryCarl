@@ -7752,38 +7752,69 @@ function computeTeamIntelligencePanel(db, teamId){
       <div class="fl-card">
         <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Consola del Cerebro — Capa de Percepción</div>
         <div class="fl-muted" style="margin-bottom:12px;">
-          Ingresa las métricas del equipo para construir el Vector de Estado normalizado.
-          Cada valor se muestra en escala [0,1] listo para ser procesado por la red neuronal.
+          Ingresa las métricas de dos equipos para construir sus Vectores de Estado normalizados.
+          El cerebro procesa ambos y calcula una ventaja relativa (duelo de vectores) en tiempo real.
         </div>
         <div class="fl-grid two" style="margin-bottom:12px;">
           <div class="fl-card" style="padding:10px;">
-            <div style="font-weight:800;margin-bottom:8px;">Métricas del Equipo</div>
+            <div style="font-weight:800;margin-bottom:8px;">Equipo A (ej. Everton)</div>
             <div class="fl-grid" style="gap:6px;margin-bottom:10px;">
               <label class="fl-muted">Liga
-                <select id="brainLeagueSelect" class="fl-select" style="width:100%;margin-top:4px;"></select>
+                <select id="brainLeagueSelectA" class="fl-select" style="width:100%;margin-top:4px;"></select>
               </label>
               <label class="fl-muted">Equipo
-                <select id="brainTeamSelect" class="fl-select" style="width:100%;margin-top:4px;"></select>
+                <select id="brainTeamSelectA" class="fl-select" style="width:100%;margin-top:4px;"></select>
               </label>
-              <button class="fl-btn secondary" id="brainAutoload" type="button">📥 Cargar datos reales</button>
-              <div id="brainAutoStatus" class="fl-mini">Selecciona liga/equipo para autocompletar métricas.</div>
+              <button class="fl-btn secondary" id="brainAutoloadA" type="button">📥 Cargar datos reales A</button>
+              <div id="brainAutoStatusA" class="fl-mini">Selecciona liga/equipo para autocompletar métricas.</div>
             </div>
             <div class="fl-grid" style="gap:6px;">
-              <label class="fl-muted">Pulse (0-100) <input id="brainPulse" type="number" min="0" max="100" value="70" class="fl-input" style="width:80px;margin-left:8px;"></label>
-              <label class="fl-muted">Fatiga (0-100) <input id="brainFatiga" type="number" min="0" max="100" value="40" class="fl-input" style="width:80px;margin-left:8px;"></label>
-              <label class="fl-muted">Resiliencia (0-100) <input id="brainResiliencia" type="number" min="0" max="100" value="65" class="fl-input" style="width:80px;margin-left:8px;"></label>
-              <label class="fl-muted">Agresividad (0-100) <input id="brainAgresividad" type="number" min="0" max="100" value="55" class="fl-input" style="width:80px;margin-left:8px;"></label>
-              <label class="fl-muted">Volatilidad (0-100) <input id="brainVolatilidad" type="number" min="0" max="100" value="40" class="fl-input" style="width:80px;margin-left:8px;"></label>
-              <label class="fl-muted">Edad Media (17-40) <input id="brainEdad" type="number" min="17" max="40" value="26" class="fl-input" style="width:80px;margin-left:8px;"></label>
-              <label class="fl-muted">Importancia Torneo (0-1) <input id="brainImportancia" type="number" min="0" max="1" step="0.05" value="0.8" class="fl-input" style="width:80px;margin-left:8px;"></label>
-              <label class="fl-muted">Días Descanso (0-14) <input id="brainDescanso" type="number" min="0" max="14" value="3" class="fl-input" style="width:80px;margin-left:8px;"></label>
-              <label class="fl-muted">Momentum (-1 a 1) <input id="brainMomentum" type="number" min="-1" max="1" step="0.05" value="0.3" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Pulse (0-100) <input id="brainPulseA" type="number" min="0" max="100" value="70" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Fatiga (0-100) <input id="brainFatigaA" type="number" min="0" max="100" value="40" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Resiliencia (0-100) <input id="brainResilienciaA" type="number" min="0" max="100" value="65" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Agresividad (0-100) <input id="brainAgresividadA" type="number" min="0" max="100" value="55" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Volatilidad (0-100) <input id="brainVolatilidadA" type="number" min="0" max="100" value="40" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Edad Media (17-40) <input id="brainEdadA" type="number" min="17" max="40" value="26" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Importancia Torneo (0-1) <input id="brainImportanciaA" type="number" min="0" max="1" step="0.05" value="0.8" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Días Descanso (0-14) <input id="brainDescansoA" type="number" min="0" max="14" value="3" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Momentum (-1 a 1) <input id="brainMomentumA" type="number" min="-1" max="1" step="0.05" value="0.3" class="fl-input" style="width:80px;margin-left:8px;"></label>
             </div>
           </div>
           <div class="fl-card" style="padding:10px;">
-            <div style="font-weight:800;margin-bottom:8px;">Relato del Partido (NLP)</div>
-            <textarea id="brainRelato" class="fl-text" style="min-height:180px;"
-              placeholder="Pega líneas del relato del partido aquí, p.ej.:&#10;45' Gol de Mbappé tras contraataque brillante&#10;60' Presión alta del equipo local&#10;75' Lesión de Busquets, rotación forzada"></textarea>
+            <div style="font-weight:800;margin-bottom:8px;">Equipo B (ej. Burnley)</div>
+            <div class="fl-grid" style="gap:6px;margin-bottom:10px;">
+              <label class="fl-muted">Liga
+                <select id="brainLeagueSelectB" class="fl-select" style="width:100%;margin-top:4px;"></select>
+              </label>
+              <label class="fl-muted">Equipo
+                <select id="brainTeamSelectB" class="fl-select" style="width:100%;margin-top:4px;"></select>
+              </label>
+              <button class="fl-btn secondary" id="brainAutoloadB" type="button">📥 Cargar datos reales B</button>
+              <div id="brainAutoStatusB" class="fl-mini">Selecciona liga/equipo para autocompletar métricas.</div>
+            </div>
+            <div class="fl-grid" style="gap:6px;">
+              <label class="fl-muted">Pulse (0-100) <input id="brainPulseB" type="number" min="0" max="100" value="64" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Fatiga (0-100) <input id="brainFatigaB" type="number" min="0" max="100" value="48" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Resiliencia (0-100) <input id="brainResilienciaB" type="number" min="0" max="100" value="60" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Agresividad (0-100) <input id="brainAgresividadB" type="number" min="0" max="100" value="52" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Volatilidad (0-100) <input id="brainVolatilidadB" type="number" min="0" max="100" value="44" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Edad Media (17-40) <input id="brainEdadB" type="number" min="17" max="40" value="27" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Importancia Torneo (0-1) <input id="brainImportanciaB" type="number" min="0" max="1" step="0.05" value="0.8" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Días Descanso (0-14) <input id="brainDescansoB" type="number" min="0" max="14" value="3" class="fl-input" style="width:80px;margin-left:8px;"></label>
+              <label class="fl-muted">Momentum (-1 a 1) <input id="brainMomentumB" type="number" min="-1" max="1" step="0.05" value="0.1" class="fl-input" style="width:80px;margin-left:8px;"></label>
+            </div>
+          </div>
+        </div>
+        <div class="fl-grid two" style="margin-bottom:12px;">
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Relato Equipo A (NLP)</div>
+            <textarea id="brainRelatoA" class="fl-text" style="min-height:140px;"
+              placeholder="Relato del Equipo A, p.ej.:&#10;45' Gol tras contraataque&#10;60' Presión alta"></textarea>
+          </div>
+          <div class="fl-card" style="padding:10px;">
+            <div style="font-weight:800;margin-bottom:8px;">Relato Equipo B (NLP)</div>
+            <textarea id="brainRelatoB" class="fl-text" style="min-height:140px;"
+              placeholder="Relato del Equipo B, p.ej.:&#10;50' Defensa cansada&#10;75' Errores en salida"></textarea>
           </div>
         </div>
         <div class="fl-row" style="margin-bottom:12px;">
@@ -7815,12 +7846,13 @@ function computeTeamIntelligencePanel(db, teamId){
           <div style="font-weight:800;margin-bottom:8px;">📊 Monitor del Cerebro — Datos Normalizados</div>
           <div id="brainVectorDisplay" class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:10px;"></div>
           <div class="fl-card" style="background:#0d1117;padding:10px;">
-            <div class="fl-muted" style="margin-bottom:4px;">Tensor de entrada (1 × 9)</div>
+            <div class="fl-muted" style="margin-bottom:4px;">Tensor de entrada comparativo (A y B)</div>
             <code id="brainTensorDisplay" style="font-size:12px;color:#58a6ff;word-break:break-all;"></code>
           </div>
+          <div id="brainComparisonOut" class="fl-card" style="margin-top:10px;background:#111722;padding:10px;display:none;"></div>
           <div id="brainModelOut" style="margin-top:10px;display:none;" class="fl-card">
-            <div style="font-weight:800;margin-bottom:6px;">🔬 Salida de la Capa de Percepción (32 neuronas)</div>
-            <div class="fl-muted" style="margin-bottom:4px;">Activaciones ReLU de la primera capa densa:</div>
+            <div style="font-weight:800;margin-bottom:6px;">🔬 Salida de la Capa de Percepción (3 probabilidades por equipo)</div>
+            <div class="fl-muted" style="margin-bottom:4px;">Predicción softmax [Victoria, Empate, Derrota] para A y B:</div>
             <code id="brainLayerOutput" style="font-size:11px;color:#3fb950;word-break:break-all;"></code>
           </div>
         </div>
@@ -7869,9 +7901,18 @@ function computeTeamIntelligencePanel(db, teamId){
       "Días Descanso","Momentum"
     ];
 
-    const brainLeagueSelect = document.getElementById("brainLeagueSelect");
-    const brainTeamSelect = document.getElementById("brainTeamSelect");
-    const brainAutoStatus = document.getElementById("brainAutoStatus");
+    const brainSelectors = {
+      A: {
+        league: document.getElementById("brainLeagueSelectA"),
+        team: document.getElementById("brainTeamSelectA"),
+        status: document.getElementById("brainAutoStatusA")
+      },
+      B: {
+        league: document.getElementById("brainLeagueSelectB"),
+        team: document.getElementById("brainTeamSelectB"),
+        status: document.getElementById("brainAutoStatusB")
+      }
+    };
 
     function avgAgeForTeam(teamId){
       const ages = db.players
@@ -7910,52 +7951,59 @@ function computeTeamIntelligencePanel(db, teamId){
       el.value = decimals > 0 ? next.toFixed(decimals) : String(Math.round(next));
     }
 
-    function fillBrainMetricsFromTeam(teamId, leagueId){
+    function fillBrainMetricsFromTeam(teamId, leagueId, side = "A"){
       const team = db.teams.find((row)=>row.id===teamId);
+      const statusEl = brainSelectors[side]?.status;
       if(!team){
-        brainAutoStatus.textContent = "❌ Equipo no encontrado.";
+        if(statusEl) statusEl.textContent = "❌ Equipo no encontrado.";
         return;
       }
       const intel = computeTeamIntelligencePanel(db, teamId);
       const momentumSigned = clamp((Number(intel.metrics?.momentum5) || 0.5) * 2 - 1, -1, 1);
 
-      setInputValue("brainPulse", intel.psych?.playerPulse ?? 50);
-      setInputValue("brainFatiga", intel.psych?.fatigue ?? 40);
-      setInputValue("brainResiliencia", intel.psych?.resilience ?? 50);
-      setInputValue("brainAgresividad", intel.psych?.aggressiveness ?? 50);
-      setInputValue("brainVolatilidad", intel.psych?.volatility ?? 50);
-      setInputValue("brainEdad", clamp(avgAgeForTeam(teamId), 17, 40));
-      setInputValue("brainImportancia", estimatedTournamentImportance(leagueId), 2);
-      setInputValue("brainDescanso", restDaysForTeam(teamId));
-      setInputValue("brainMomentum", momentumSigned, 2);
+      setInputValue(`brainPulse${side}`, intel.psych?.playerPulse ?? 50);
+      setInputValue(`brainFatiga${side}`, intel.psych?.fatigue ?? 40);
+      setInputValue(`brainResiliencia${side}`, intel.psych?.resilience ?? 50);
+      setInputValue(`brainAgresividad${side}`, intel.psych?.aggressiveness ?? 50);
+      setInputValue(`brainVolatilidad${side}`, intel.psych?.volatility ?? 50);
+      setInputValue(`brainEdad${side}`, clamp(avgAgeForTeam(teamId), 17, 40));
+      setInputValue(`brainImportancia${side}`, estimatedTournamentImportance(leagueId), 2);
+      setInputValue(`brainDescanso${side}`, restDaysForTeam(teamId));
+      setInputValue(`brainMomentum${side}`, momentumSigned, 2);
 
-      brainAutoStatus.textContent = `✅ Métricas cargadas para ${team.name}.`;
+      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}.`;
     }
 
-    function renderBrainTeamOptions(leagueId){
+    function renderBrainTeamOptions(leagueId, side = "A"){
+      const teamSelect = brainSelectors[side]?.team;
+      if(!teamSelect) return;
       const teams = getTeamsForLeague(db, leagueId)
         .slice()
         .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
-      brainTeamSelect.innerHTML = teams.length
+      teamSelect.innerHTML = teams.length
         ? teams.map((team)=>`<option value="${team.id}">${team.name}</option>`).join("")
         : `<option value="">Sin equipos en esta liga</option>`;
-      brainTeamSelect.disabled = !teams.length;
+      teamSelect.disabled = !teams.length;
     }
 
     function initBrainSelectorState(){
       const leagues = db.leagues
         .slice()
         .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
-      brainLeagueSelect.innerHTML = leagues.length
-        ? leagues.map((league)=>`<option value="${league.id}">${league.name}</option>`).join("")
-        : `<option value="">Sin ligas</option>`;
-      brainLeagueSelect.disabled = !leagues.length;
       const fallbackLeagueId = leagues[0]?.id || "";
       const preferredLeagueId = leagues.some((league)=>league.id===db.settings.selectedLeagueId)
         ? db.settings.selectedLeagueId
         : fallbackLeagueId;
-      if(preferredLeagueId) brainLeagueSelect.value = preferredLeagueId;
-      renderBrainTeamOptions(brainLeagueSelect.value || preferredLeagueId);
+      ["A", "B"].forEach((side)=>{
+        const leagueSelect = brainSelectors[side]?.league;
+        if(!leagueSelect) return;
+        leagueSelect.innerHTML = leagues.length
+          ? leagues.map((league)=>`<option value="${league.id}">${league.name}</option>`).join("")
+          : `<option value="">Sin ligas</option>`;
+        leagueSelect.disabled = !leagues.length;
+        if(preferredLeagueId) leagueSelect.value = preferredLeagueId;
+        renderBrainTeamOptions(leagueSelect.value || preferredLeagueId, side);
+      });
     }
 
     function normBrain(value, min, max){
@@ -7963,16 +8011,16 @@ function computeTeamIntelligencePanel(db, teamId){
       return Math.min(1, Math.max(0, (value - min) / (max - min)));
     }
 
-    function getBrainVector(){
-      const pulse        = parseFloat(document.getElementById("brainPulse").value)       || 0;
-      const fatiga       = parseFloat(document.getElementById("brainFatiga").value)      || 0;
-      const resiliencia  = parseFloat(document.getElementById("brainResiliencia").value) || 0;
-      const agresividad  = parseFloat(document.getElementById("brainAgresividad").value) ?? 50;
-      const volatilidad  = parseFloat(document.getElementById("brainVolatilidad").value) ?? 50;
-      const edadMedia    = parseFloat(document.getElementById("brainEdad").value)        || 26;
-      const importancia  = parseFloat(document.getElementById("brainImportancia").value) || 0.5;
-      const diasDescanso = parseFloat(document.getElementById("brainDescanso").value)    || 3;
-      const momentum     = parseFloat(document.getElementById("brainMomentum").value)    || 0;
+    function getBrainVector(side = "A"){
+      const pulse        = parseFloat(document.getElementById(`brainPulse${side}`).value)       || 0;
+      const fatiga       = parseFloat(document.getElementById(`brainFatiga${side}`).value)      || 0;
+      const resiliencia  = parseFloat(document.getElementById(`brainResiliencia${side}`).value) || 0;
+      const agresividad  = parseFloat(document.getElementById(`brainAgresividad${side}`).value) ?? 50;
+      const volatilidad  = parseFloat(document.getElementById(`brainVolatilidad${side}`).value) ?? 50;
+      const edadMedia    = parseFloat(document.getElementById(`brainEdad${side}`).value)        || 26;
+      const importancia  = parseFloat(document.getElementById(`brainImportancia${side}`).value) || 0.5;
+      const diasDescanso = parseFloat(document.getElementById(`brainDescanso${side}`).value)    || 3;
+      const momentum     = parseFloat(document.getElementById(`brainMomentum${side}`).value)    || 0;
 
       return [
         normBrain(pulse,       0, 100),
@@ -7998,8 +8046,8 @@ function computeTeamIntelligencePanel(db, teamId){
       "empuje":0.08,"calma":-0.05,"sustitución":-0.05,"sustitucion":-0.05
     };
 
-    function getIntensidad(){
-      const lines = (document.getElementById("brainRelato").value || "").split("\n").filter(l=>l.trim());
+    function getIntensidad(side = "A"){
+      const lines = (document.getElementById(`brainRelato${side}`).value || "").split("\n").filter(l=>l.trim());
       let score = 0.5;
       lines.forEach(line=>{
         const lower = line.toLowerCase();
@@ -8113,27 +8161,67 @@ function computeTeamIntelligencePanel(db, teamId){
     initBrainSelectorState();
     bootstrapBrainModel();
 
-    brainLeagueSelect.onchange = ()=>{
-      renderBrainTeamOptions(brainLeagueSelect.value);
-      brainAutoStatus.textContent = "Liga actualizada. Selecciona equipo y carga datos.";
-    };
+    ["A", "B"].forEach((side)=>{
+      const cfg = brainSelectors[side];
+      cfg.league.onchange = ()=>{
+        renderBrainTeamOptions(cfg.league.value, side);
+        cfg.status.textContent = "Liga actualizada. Selecciona equipo y carga datos.";
+      };
 
-    document.getElementById("brainAutoload").onclick = ()=>{
-      const leagueId = brainLeagueSelect.value || "";
-      const teamId = brainTeamSelect.value || "";
-      if(!leagueId || !teamId){
-        brainAutoStatus.textContent = "❌ Selecciona primero una liga y un equipo.";
-        return;
+      document.getElementById(`brainAutoload${side}`).onclick = ()=>{
+        const leagueId = cfg.league.value || "";
+        const teamId = cfg.team.value || "";
+        if(!leagueId || !teamId){
+          cfg.status.textContent = "❌ Selecciona primero una liga y un equipo.";
+          return;
+        }
+        fillBrainMetricsFromTeam(teamId, leagueId, side);
+      };
+    });
+
+    function calcularVentajaRelativa(prediccionA, prediccionB){
+      const ventaja = (prediccionA?.[0] || 0) - (prediccionB?.[0] || 0);
+      if(ventaja > 0.20){
+        return {
+          ventaja,
+          mensaje: "🔥 VENTAJA DOMINANTE: Equipo A está muy por encima del estado físico/mental del Equipo B.",
+          tono: "#3fb950"
+        };
       }
-      fillBrainMetricsFromTeam(teamId, leagueId);
-    };
+      if(ventaja > 0){
+        return {
+          ventaja,
+          mensaje: "⚖️ EQUILIBRIO: Equipo A está mejor, pero el Equipo B tiene capacidad de resistencia.",
+          tono: "#f2cc60"
+        };
+      }
+      return {
+        ventaja,
+        mensaje: "⚠️ ALERTA: El Equipo B está mostrando mejores métricas críticas que el Equipo A.",
+        tono: "#f85149"
+      };
+    }
+
+    function estimarVictoriaBase(vector){
+      if(!Array.isArray(vector) || vector.length < 9) return 0.33;
+      const pulse = vector[0] || 0;
+      const fatiga = vector[1] || 0;
+      const resiliencia = vector[2] || 0;
+      const descanso = vector[7] || 0;
+      const momentumRelato = vector[8] || 0;
+      const score = 0.38 * pulse + 0.30 * resiliencia + 0.22 * momentumRelato + 0.10 * descanso - 0.32 * fatiga;
+      return Math.min(1, Math.max(0, 0.5 + score - 0.34));
+    }
 
     document.getElementById("brainProcess").onclick = async ()=>{
-      const vector    = getBrainVector();
-      const intensidad = getIntensidad();
-      // Blend momentum with relato intensity (index 8 = momentum in state vector)
-      const blended   = [...vector];
-      blended[8]      = Math.min(1, Math.max(0, (blended[8] + intensidad) / 2));
+      const vectorA = getBrainVector("A");
+      const vectorB = getBrainVector("B");
+      const intensidadA = getIntensidad("A");
+      const intensidadB = getIntensidad("B");
+      const blendedA = [...vectorA];
+      const blendedB = [...vectorB];
+      blendedA[8] = Math.min(1, Math.max(0, (blendedA[8] + intensidadA) / 2));
+      blendedB[8] = Math.min(1, Math.max(0, (blendedB[8] + intensidadB) / 2));
 
       const monitor = document.getElementById("brainMonitor");
       monitor.style.display = "block";
@@ -8141,62 +8229,87 @@ function computeTeamIntelligencePanel(db, teamId){
       const dispLabels = [...LABELS];
       dispLabels[8] = "Momentum+Relato";
       const vecDisplay = document.getElementById("brainVectorDisplay");
-      vecDisplay.innerHTML = dispLabels.map((lbl, i)=>{
-        const val = blended[i];
-        const pct = (val * 100).toFixed(0);
-        const color = val >= 0.7 ? "#3fb950" : val >= 0.4 ? "#f2cc60" : "#f85149";
-        return `<div class="fl-card" style="padding:8px;background:#111722;">
-          <div class="fl-muted" style="font-size:11px;">${lbl}</div>
-          <div style="font-size:20px;font-weight:900;color:${color};">${val.toFixed(2)}</div>
-          <div style="height:6px;border-radius:999px;background:#0d1117;border:1px solid #2d333b;margin-top:4px;overflow:hidden;">
-            <div style="width:${pct}%;height:100%;border-radius:999px;background:${color};"></div>
-          </div>
+      vecDisplay.innerHTML = ["A", "B"].map((side)=>{
+        const vec = side === "A" ? blendedA : blendedB;
+        const intensidad = side === "A" ? intensidadA : intensidadB;
+        const items = dispLabels.map((lbl, i)=>{
+          const val = vec[i];
+          const pct = (val * 100).toFixed(0);
+          const color = val >= 0.7 ? "#3fb950" : val >= 0.4 ? "#f2cc60" : "#f85149";
+          return `<div class="fl-card" style="padding:8px;background:#111722;">
+            <div class="fl-muted" style="font-size:11px;">${lbl}</div>
+            <div style="font-size:20px;font-weight:900;color:${color};">${val.toFixed(2)}</div>
+            <div style="height:6px;border-radius:999px;background:#0d1117;border:1px solid #2d333b;margin-top:4px;overflow:hidden;">
+              <div style="width:${pct}%;height:100%;border-radius:999px;background:${color};"></div>
+            </div>
+          </div>`;
+        }).join("");
+        return `<div class="fl-card" style="padding:10px;">
+          <div style="font-weight:900;margin-bottom:8px;">Equipo ${side}</div>
+          <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;">${items}</div>
+          <div class="fl-muted" style="margin-top:8px;">Intensidad relato: <b>${intensidad.toFixed(2)}</b></div>
         </div>`;
-      }).join("") + `<div class="fl-card" style="padding:8px;background:#111722;">
-          <div class="fl-muted" style="font-size:11px;">Intensidad Relato</div>
-          <div style="font-size:20px;font-weight:900;color:#58a6ff;">${intensidad.toFixed(2)}</div>
-          <div style="height:6px;border-radius:999px;background:#0d1117;border:1px solid #2d333b;margin-top:4px;overflow:hidden;">
-            <div style="width:${(intensidad*100).toFixed(0)}%;height:100%;border-radius:999px;background:#58a6ff;"></div>
-          </div>
-        </div>`;
+      }).join("");
 
       document.getElementById("brainTensorDisplay").textContent =
-        `[[${blended.map(v=>v.toFixed(4)).join(", ")}]]`;
+        `A [[${blendedA.map(v=>v.toFixed(4)).join(", ")}]]  |  B [[${blendedB.map(v=>v.toFixed(4)).join(", ")}]]`;
 
       const resultadoReal = oneHotResultado(document.getElementById("brainResultadoReal").value);
-      ultimaMuestra = { x: blended, y: resultadoReal, createdAt: Date.now() };
+      ultimaMuestra = { x: blendedA, y: resultadoReal, createdAt: Date.now() };
+
+      let predA = [estimarVictoriaBase(blendedA), 0.25, 0.25];
+      let predB = [estimarVictoriaBase(blendedB), 0.25, 0.25];
 
       if(brainModel && typeof tf !== "undefined"){
         try{
-          const tensorEntrada = tf.tensor2d([blended]);
-          const prediccion = brainModel.predict(tensorEntrada);
-          const rawData = await prediccion.data();
-          const outData = Array.from(rawData).map(v=>v.toFixed(4));
-          const modelOut = document.getElementById("brainModelOut");
-          modelOut.style.display = "block";
+          const tA = tf.tensor2d([blendedA]);
+          const tB = tf.tensor2d([blendedB]);
+          const pA = brainModel.predict(tA);
+          const pB = brainModel.predict(tB);
+          const rawA = await pA.data();
+          const rawB = await pB.data();
+          predA = Array.from(rawA);
+          predB = Array.from(rawB);
+
+          document.getElementById("brainModelOut").style.display = "block";
           document.getElementById("brainLayerOutput").textContent =
-            `[${outData.join(", ")}]`;
+            `A [${predA.map(v=>v.toFixed(4)).join(", ")}] · B [${predB.map(v=>v.toFixed(4)).join(", ")}]`;
 
           const iaVictoriaEl = document.getElementById("cerebeloIAVictoria");
           const iaEmpateEl = document.getElementById("cerebeloIAEmpate");
           const iaDerrotaEl = document.getElementById("cerebeloIADerrota");
           if(iaVictoriaEl && iaEmpateEl && iaDerrotaEl){
-            iaVictoriaEl.value = Number(rawData[0] || 0).toFixed(2);
-            iaEmpateEl.value = Number(rawData[1] || 0).toFixed(2);
-            iaDerrotaEl.value = Number(rawData[2] || 0).toFixed(2);
+            iaVictoriaEl.value = Number(predA[0] || 0).toFixed(2);
+            iaEmpateEl.value = Number(predA[1] || 0).toFixed(2);
+            iaDerrotaEl.value = Number(predA[2] || 0).toFixed(2);
           }
 
-          tensorEntrada.dispose();
-          prediccion.dispose();
+          tA.dispose();
+          tB.dispose();
+          pA.dispose();
+          pB.dispose();
         }catch(err){
           document.getElementById("brainModelStatus").textContent = `⚠ Predict error: ${err.message}`;
         }
       }
 
+      const resumen = calcularVentajaRelativa(predA, predB);
+      const porcentajeTug = (Math.min(1, Math.max(-1, resumen.ventaja / 0.6)) + 1) * 50;
+      const comparisonEl = document.getElementById("brainComparisonOut");
+      comparisonEl.style.display = "block";
+      comparisonEl.innerHTML = `
+        <div style="font-weight:900;font-size:15px;margin-bottom:6px;color:${resumen.tono};">Duelo de Vectores · ΔVictoria ${(resumen.ventaja >= 0 ? "+" : "") + resumen.ventaja.toFixed(2)}</div>
+        <div class="fl-muted" style="margin-bottom:8px;">${resumen.mensaje}</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:12px;color:#58a6ff;">Equipo A</span>
+          <div style="position:relative;flex:1;height:10px;border-radius:999px;border:1px solid #2d333b;background:linear-gradient(90deg,#1f6feb 0%,#30363d 50%,#f85149 100%);">
+            <div style="position:absolute;top:-3px;left:calc(${porcentajeTug.toFixed(1)}% - 6px);width:12px;height:16px;border-radius:8px;background:#ffffff;"></div>
+          </div>
+          <span style="font-size:12px;color:#f85149;">Equipo B</span>
+        </div>`;
+
       const cerebeloRefinarBtn = document.getElementById("cerebeloRefinar");
-      if(cerebeloRefinarBtn){
-        cerebeloRefinarBtn.click();
-      }
+      if(cerebeloRefinarBtn) cerebeloRefinarBtn.click();
     };
 
     document.getElementById("brainInitModel").onclick = async ()=>{
