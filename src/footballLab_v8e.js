@@ -326,6 +326,7 @@ export function initFootballLab(){
       .fl-modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
       .fl-field{display:grid;gap:6px}
       .fl-field label{font-size:12px;color:#9ca3af}
+      .context-box{border-left:4px solid #1f6feb}
     `;
     document.head.appendChild(style);
   }
@@ -1591,6 +1592,54 @@ export function initFootballLab(){
     team.intSnapshotsByMatchId ||= {};
     team.intPatterns ||= {};
     team.intMatchStateById ||= {};
+    team.contextoEstrategico ||= {
+      rachaLocal: "",
+      ausenciasClave: [],
+      patrones: [],
+      factorDia: {}
+    };
+    team.contextoEstrategico.rachaLocal = String(team.contextoEstrategico.rachaLocal || "").trim();
+    team.contextoEstrategico.ausenciasClave = Array.isArray(team.contextoEstrategico.ausenciasClave)
+      ? team.contextoEstrategico.ausenciasClave.map(item=>String(item || "").trim()).filter(Boolean)
+      : [];
+    team.contextoEstrategico.patrones = Array.isArray(team.contextoEstrategico.patrones)
+      ? team.contextoEstrategico.patrones.map(item=>String(item || "").trim()).filter(Boolean)
+      : [];
+    team.contextoEstrategico.factorDia = typeof team.contextoEstrategico.factorDia === "object" && team.contextoEstrategico.factorDia !== null
+      ? team.contextoEstrategico.factorDia
+      : {};
+  }
+
+  function parseCommaList(raw){
+    return String(raw || "")
+      .split(",")
+      .map(item=>item.trim())
+      .filter(Boolean);
+  }
+
+  function obtenerAjusteContextual(db, equipoId, date = new Date()){
+    const team = db.teams.find((t)=>t.id===equipoId);
+    const ctx = team?.contextoEstrategico || {};
+    const ajuste = { agresividad: 0, pulse: 0, resiliencia: 0 };
+
+    const rachaLocal = String(ctx.rachaLocal || "").toUpperCase();
+    const ausenciasClave = Array.isArray(ctx.ausenciasClave) ? ctx.ausenciasClave : [];
+    const patrones = Array.isArray(ctx.patrones) ? ctx.patrones : [];
+    const factorDia = ctx.factorDia && typeof ctx.factorDia === "object" ? ctx.factorDia : {};
+
+    if(/\b\d+P\b/.test(rachaLocal) || rachaLocal.includes("P")) ajuste.resiliencia -= 0.15;
+    if(ausenciasClave.length > 0) ajuste.pulse -= 0.10;
+    if(patrones.some((p)=>/\b1T\b/i.test(String(p || "")))) ajuste.pulse -= 0.05;
+    if(patrones.some((p)=>/no gana en casa|sin ganar en casa/i.test(String(p || "")))) ajuste.resiliencia -= 0.05;
+
+    const dayKey = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(date);
+    const dayPenalty = Number(factorDia[dayKey]);
+    if(Number.isFinite(dayPenalty)) ajuste.pulse += dayPenalty;
+
+    ajuste.agresividad = clamp(ajuste.agresividad, -0.3, 0.3);
+    ajuste.pulse = clamp(ajuste.pulse, -0.3, 0.3);
+    ajuste.resiliencia = clamp(ajuste.resiliencia, -0.3, 0.3);
+    return ajuste;
   }
 
   function normalizeImportanceTag(tag){
@@ -5415,6 +5464,7 @@ function computeTeamIntelligencePanel(db, teamId){
       }
       ensureTeamIntState(team);
       team.meta ||= { stadium:"", city:"", capacity:"" };
+      const contexto = team.contextoEstrategico || { rachaLocal:"", ausenciasClave:[], patrones:[], factorDia:{} };
       const players = db.players.filter(p=>p.teamId===team.id);
       const byPos = { GK:[], DF:[], MF:[], FW:[], OT:[] };
       players.forEach(p=>{ const pos = normalizePlayerPos(p.pos); (byPos[pos]||byPos.OT).push(p); });
@@ -5556,8 +5606,29 @@ function computeTeamIntelligencePanel(db, teamId){
           <input id="teamStadium" class="fl-input" placeholder="Estadio" value="${team.meta.stadium || ''}">
           <input id="teamCity" class="fl-input" placeholder="Ciudad" value="${team.meta.city || ''}">
           <input id="teamCapacity" class="fl-input" placeholder="Capacidad" value="${team.meta.capacity || ''}">
-          <button class="fl-btn" id="saveMeta">Guardar</button>
+          <button class="fl-btn" id="saveMeta">Guardar equipo</button>
           <button class="fl-btn" id="backLiga">Volver a ligas</button>
+        </div>
+        <div class="fl-card context-box">
+          <div class="fl-title" style="font-size:14px;">🧠 Contexto Estratégico</div>
+          <div class="fl-grid two">
+            <div class="fl-field">
+              <label>Racha/Tendencia Actual</label>
+              <input type="text" class="fl-input" id="ctx-racha" placeholder="Ej: 5 partidos sin ganar en casa" value="${contexto.rachaLocal || ''}">
+            </div>
+            <div class="fl-field">
+              <label>Bajas Sensibles</label>
+              <input type="text" class="fl-input" id="ctx-bajas" placeholder="Jugadores lesionados" value="${(contexto.ausenciasClave || []).join(', ')}">
+            </div>
+          </div>
+          <div class="fl-field" style="margin-top:10px;">
+            <label>Patrones Detectados (Insight)</label>
+            <textarea class="fl-text" id="ctx-insights" style="min-height:60px;" placeholder="Ej: Solo 1 de los últimos 12 tuvo +1 gol en el 1T">${(contexto.patrones || []).join(', ')}</textarea>
+          </div>
+          <div class="fl-field" style="margin-top:10px;">
+            <label>Factor por día (JSON opcional)</label>
+            <input type="text" class="fl-input" id="ctx-factor-dia" placeholder='{"Tuesday": -0.2}' value='${JSON.stringify(contexto.factorDia || {})}'>
+          </div>
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:6px;">Importar plantilla (JSON o texto pegado)</div>
@@ -5794,10 +5865,27 @@ function computeTeamIntelligencePanel(db, teamId){
       };
       document.getElementById("backLiga").onclick = ()=>render("liga");
       document.getElementById("saveMeta").onclick = ()=>{
+        let factorDia = {};
+        const rawFactorDia = document.getElementById("ctx-factor-dia")?.value?.trim() || "";
+        if(rawFactorDia){
+          try{
+            const parsed = JSON.parse(rawFactorDia);
+            factorDia = typeof parsed === "object" && parsed !== null ? parsed : {};
+          }catch(_e){
+            alert("Factor por día inválido. Usa JSON, por ejemplo: {\"Tuesday\": -0.2}");
+            return;
+          }
+        }
         team.meta = {
           stadium: document.getElementById("teamStadium").value.trim(),
           city: document.getElementById("teamCity").value.trim(),
           capacity: document.getElementById("teamCapacity").value.trim()
+        };
+        team.contextoEstrategico = {
+          rachaLocal: document.getElementById("ctx-racha")?.value?.trim() || "",
+          ausenciasClave: parseCommaList(document.getElementById("ctx-bajas")?.value || ""),
+          patrones: parseCommaList(document.getElementById("ctx-insights")?.value || ""),
+          factorDia
         };
         saveDb(db);
         render("equipo", { teamId: team.id });
@@ -8108,18 +8196,22 @@ function computeTeamIntelligencePanel(db, teamId){
       }
       const intel = computeTeamIntelligencePanel(db, teamId);
       const momentumSigned = clamp((Number(intel.metrics?.momentum5) || 0.5) * 2 - 1, -1, 1);
+      const ajusteContextual = obtenerAjusteContextual(db, teamId);
+      const pulseAjustado = clamp((intel.psych?.playerPulse ?? 50) + ajusteContextual.pulse * 100, 0, 100);
+      const resilienciaAjustada = clamp((intel.psych?.resilience ?? 50) + ajusteContextual.resiliencia * 100, 0, 100);
+      const agresividadAjustada = clamp((intel.psych?.aggressiveness ?? 50) + ajusteContextual.agresividad * 100, 0, 100);
 
-      setInputValue(`brainPulse${side}`, intel.psych?.playerPulse ?? 50);
+      setInputValue(`brainPulse${side}`, pulseAjustado);
       setInputValue(`brainFatiga${side}`, intel.psych?.fatigue ?? 40);
-      setInputValue(`brainResiliencia${side}`, intel.psych?.resilience ?? 50);
-      setInputValue(`brainAgresividad${side}`, intel.psych?.aggressiveness ?? 50);
+      setInputValue(`brainResiliencia${side}`, resilienciaAjustada);
+      setInputValue(`brainAgresividad${side}`, agresividadAjustada);
       setInputValue(`brainVolatilidad${side}`, intel.psych?.volatility ?? 50);
       setInputValue(`brainEdad${side}`, clamp(avgAgeForTeam(teamId), 17, 40));
       setInputValue(`brainImportancia${side}`, estimatedTournamentImportance(leagueId), 2);
       setInputValue(`brainDescanso${side}`, restDaysForTeam(teamId));
       setInputValue(`brainMomentum${side}`, momentumSigned, 2);
 
-      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned)}`;
+      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. Ajuste contextual -> pulse ${(ajusteContextual.pulse*100).toFixed(0)} pts, resiliencia ${(ajusteContextual.resiliencia*100).toFixed(0)} pts, agresividad ${(ajusteContextual.agresividad*100).toFixed(0)} pts. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned)}`;
     }
 
     function renderBrainTeamOptions(leagueId, side = "A"){
