@@ -8334,17 +8334,35 @@ function computeTeamIntelligencePanel(db, teamId){
       return ages.length ? average(ages, 26) : 26;
     }
 
-    function restDaysForTeam(teamId){
-      const latest = db.tracker
+    function restDaysForTeam(teamId, options = {}){
+      const tracker = Array.isArray(options?.tracker) ? options.tracker : db.tracker;
+      const referenceDate = String(options?.referenceDate || "").trim();
+      const referenceTs = parseSortableDate(referenceDate);
+      const useHistoricalReference = Number.isFinite(referenceTs);
+      const latest = tracker
         .filter((m)=>m.homeId===teamId || m.awayId===teamId)
+        .filter((m)=>{
+          if(!useHistoricalReference) return true;
+          const matchTs = parseSortableDate(m.date);
+          return Number.isFinite(matchTs) && matchTs < referenceTs;
+        })
         .slice()
         .sort((a, b)=>parseSortableDate(b.date) - parseSortableDate(a.date))[0];
       if(!latest) return 3;
       const latestTs = parseSortableDate(latest.date);
       if(!Number.isFinite(latestTs)) return 3;
-      const nowTs = Date.now();
+      const nowTs = useHistoricalReference ? referenceTs : Date.now();
       const diff = Math.floor((nowTs - latestTs) / 86400000);
       return clamp(diff, 0, 14);
+    }
+
+    function filterTrackerBeforeDate(tracker = [], dateStr = ""){
+      const targetTs = parseSortableDate(dateStr);
+      if(!Number.isFinite(targetTs)) return Array.isArray(tracker) ? tracker.slice() : [];
+      return (Array.isArray(tracker) ? tracker : []).filter((match)=>{
+        const matchTs = parseSortableDate(match?.date);
+        return Number.isFinite(matchTs) && matchTs < targetTs;
+      });
     }
 
     function estimatedTournamentImportance(leagueId){
@@ -8363,9 +8381,10 @@ function computeTeamIntelligencePanel(db, teamId){
       el.value = decimals > 0 ? next.toFixed(decimals) : String(Math.round(next));
     }
 
-    function describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned){
+    function describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned, options = {}){
+      const tracker = Array.isArray(options?.tracker) ? options.tracker : db.tracker;
       const playerCount = db.players.filter((p)=>p.teamId===teamId).length;
-      const playedMatches = db.tracker.filter((m)=>m.homeId===teamId || m.awayId===teamId).length;
+      const playedMatches = tracker.filter((m)=>m.homeId===teamId || m.awayId===teamId).length;
       const competitionType = normalizeCompetitionType(getCompetitionById(db, leagueId)?.type) || "league";
       const heatList = Array.isArray(intel?.playerHeat?.list) ? intel.playerHeat.list : [];
       const narrativeEvents = Number(intel?.playerHeat?.summary?.narrativeEvents) || 0;
@@ -8378,9 +8397,12 @@ function computeTeamIntelligencePanel(db, teamId){
         : narrativeSignal < 0.6
           ? "media"
           : "alta";
+      const dateScope = options?.historicalDate
+        ? ` (corte pre-partido ${options.historicalDate})`
+        : "";
 
       return [
-        `Fuentes: ${playedMatches} partidos tracker + ${playerCount} jugadores + relato normalizado.`,
+        `Fuentes${dateScope}: ${playedMatches} partidos tracker + ${playerCount} jugadores + relato normalizado.`,
         `Narrativa usada: eventos=${narrativeEvents}, jugadores impactados=${playersWithNarrative}/${Math.max(playerCount, 1)} (${(narrativeCoverage*100).toFixed(0)}%), señal=${narrativeQuality}.`,
         `Ajustes desde narrativa → agre:${(Number(psychAdj.aggressiveness)||0).toFixed(1)}, res:${(Number(psychAdj.resilience)||0).toFixed(1)}, vol:${(Number(psychAdj.volatility)||0).toFixed(1)}, fat:${(Number(psychAdj.fatigue)||0).toFixed(1)}.`,
         `Pulse plantilla=${Math.round(Number(intel?.psych?.playerPulse) || 0)}; momentum5=${((Number(intel?.metrics?.momentum5) || 0.5) * 100).toFixed(0)}% → input ${momentumSigned.toFixed(2)}.`,
@@ -8395,7 +8417,14 @@ function computeTeamIntelligencePanel(db, teamId){
         if(statusEl) statusEl.textContent = "❌ Equipo no encontrado.";
         return;
       }
-      const intel = computeTeamIntelligencePanel(db, teamId);
+      const modeMeta = getBrainModeMeta();
+      const historicalTracker = modeMeta.mode === "historico"
+        ? filterTrackerBeforeDate(db.tracker, modeMeta.historicalDate)
+        : db.tracker;
+      const dbForCalc = modeMeta.mode === "historico"
+        ? { ...db, tracker: historicalTracker }
+        : db;
+      const intel = computeTeamIntelligencePanel(dbForCalc, teamId);
       const momentumSigned = clamp((Number(intel.metrics?.momentum5) || 0.5) * 2 - 1, -1, 1);
       const ajusteContextual = obtenerAjusteContextual(db, teamId);
       const pulseAjustado = clamp((intel.psych?.playerPulse ?? 50) + ajusteContextual.pulse * 100, 0, 100);
@@ -8409,10 +8438,16 @@ function computeTeamIntelligencePanel(db, teamId){
       setInputValue(`brainVolatilidad${side}`, intel.psych?.volatility ?? 50);
       setInputValue(`brainEdad${side}`, clamp(avgAgeForTeam(teamId), 17, 40));
       setInputValue(`brainImportancia${side}`, estimatedTournamentImportance(leagueId), 2);
-      setInputValue(`brainDescanso${side}`, restDaysForTeam(teamId));
+      setInputValue(`brainDescanso${side}`, restDaysForTeam(teamId, {
+        tracker: historicalTracker,
+        referenceDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
+      }));
       setInputValue(`brainMomentum${side}`, momentumSigned, 2);
 
-      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. Ajuste contextual -> pulse ${(ajusteContextual.pulse*100).toFixed(0)} pts, resiliencia ${(ajusteContextual.resiliencia*100).toFixed(0)} pts, agresividad ${(ajusteContextual.agresividad*100).toFixed(0)} pts. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned)}`;
+      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. Ajuste contextual -> pulse ${(ajusteContextual.pulse*100).toFixed(0)} pts, resiliencia ${(ajusteContextual.resiliencia*100).toFixed(0)} pts, agresividad ${(ajusteContextual.agresividad*100).toFixed(0)} pts. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned, {
+        tracker: historicalTracker,
+        historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
+      })}`;
     }
 
     function pickNarrativeVariant(variants, seed = 0){
