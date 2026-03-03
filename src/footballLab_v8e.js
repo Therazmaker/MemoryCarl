@@ -8202,17 +8202,6 @@ function computeTeamIntelligencePanel(db, teamId){
       };
     }
 
-    function estimarVictoriaBase(vector){
-      if(!Array.isArray(vector) || vector.length < 9) return 0.33;
-      const pulse = vector[0] || 0;
-      const fatiga = vector[1] || 0;
-      const resiliencia = vector[2] || 0;
-      const descanso = vector[7] || 0;
-      const momentumRelato = vector[8] || 0;
-      const score = 0.38 * pulse + 0.30 * resiliencia + 0.22 * momentumRelato + 0.10 * descanso - 0.32 * fatiga;
-      return Math.min(1, Math.max(0, 0.5 + score - 0.34));
-    }
-
     document.getElementById("brainProcess").onclick = async ()=>{
       const vectorA = getBrainVector("A");
       const vectorB = getBrainVector("B");
@@ -8257,8 +8246,8 @@ function computeTeamIntelligencePanel(db, teamId){
       const resultadoReal = oneHotResultado(document.getElementById("brainResultadoReal").value);
       ultimaMuestra = { x: blendedA, y: resultadoReal, createdAt: Date.now() };
 
-      let predA = [estimarVictoriaBase(blendedA), 0.25, 0.25];
-      let predB = [estimarVictoriaBase(blendedB), 0.25, 0.25];
+      let predA = [0, 0, 0];
+      let predB = [0, 0, 0];
 
       if(brainModel && typeof tf !== "undefined"){
         try{
