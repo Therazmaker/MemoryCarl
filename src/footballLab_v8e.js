@@ -8191,15 +8191,28 @@ function computeTeamIntelligencePanel(db, teamId){
         <div class="fl-row" style="margin-bottom:12px;">
           <button class="fl-btn" id="brainInitModel">1️⃣ 🧠 Inicializar Modelo TF.js</button>
           <button class="fl-btn" id="brainProcess">2️⃣ ⚡ Procesar Vector de Estado</button>
+          <button class="fl-btn danger" id="brainResetMemory">🧹 Reiniciar cerebro</button>
           <button class="fl-btn secondary" id="brainExportMemory">📤 Exportar memoria</button>
           <button class="fl-btn secondary" id="brainImportMemory">📥 Importar memoria</button>
           <input id="brainImportFile" type="file" accept="application/json" style="display:none;" />
           <label class="fl-muted" style="display:flex;align-items:center;gap:6px;">
-            Resultado real
+            Modo
+            <select id="brainTrainingMode" class="fl-select">
+              <option value="pre">Pre-Partido</option>
+              <option value="live">Live</option>
+              <option value="historico">Históricos</option>
+            </select>
+          </label>
+          <label class="fl-muted" style="display:flex;align-items:center;gap:6px;" id="brainHistoricalDateWrap">
+            Fecha del partido
+            <input id="brainHistoricalDate" type="date" class="fl-input">
+          </label>
+          <label class="fl-muted" style="display:flex;align-items:center;gap:6px;">
+            Resultado real (Local/Empate/Visitante)
             <select id="brainResultadoReal" class="fl-select">
-              <option value="victoria">Victoria</option>
+              <option value="local">Local</option>
               <option value="empate">Empate</option>
-              <option value="derrota">Derrota</option>
+              <option value="visitante">Visitante</option>
             </select>
           </label>
           <button class="fl-btn" id="brainLearnOne">3️⃣ ✅ Validar y Aprender</button>
@@ -8237,7 +8250,7 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>
           <div id="brainModelOut" style="margin-top:10px;display:none;" class="fl-card">
             <div style="font-weight:800;margin-bottom:6px;">🔬 Salida de la Capa de Percepción (3 probabilidades por equipo)</div>
-            <div class="fl-muted" style="margin-bottom:4px;">Predicción softmax [Victoria, Empate, Derrota] para A y B:</div>
+            <div class="fl-muted" style="margin-bottom:4px;">Predicción softmax [Local, Empate, Visitante] para A y B:</div>
             <code id="brainLayerOutput" style="font-size:11px;color:#3fb950;word-break:break-all;"></code>
           </div>
         </div>
@@ -8252,17 +8265,17 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-card" style="padding:10px;">
             <div style="font-weight:800;margin-bottom:8px;">Predicción del Córtex (Capa 3)</div>
             <div class="fl-grid" style="gap:6px;">
-              <label class="fl-muted">P(Victoria) <input id="cerebeloIAVictoria" type="number" min="0" max="1" step="0.01" value="0.70" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Local) <input id="cerebeloIAVictoria" type="number" min="0" max="1" step="0.01" value="0.70" class="fl-input" style="width:90px;margin-left:8px;"></label>
               <label class="fl-muted">P(Empate) <input id="cerebeloIAEmpate" type="number" min="0" max="1" step="0.01" value="0.20" class="fl-input" style="width:90px;margin-left:8px;"></label>
-              <label class="fl-muted">P(Derrota) <input id="cerebeloIADerrota" type="number" min="0" max="1" step="0.01" value="0.10" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Visitante) <input id="cerebeloIADerrota" type="number" min="0" max="1" step="0.01" value="0.10" class="fl-input" style="width:90px;margin-left:8px;"></label>
             </div>
           </div>
           <div class="fl-card" style="padding:10px;">
             <div style="font-weight:800;margin-bottom:8px;">Resultado del Simulador Estadístico</div>
             <div class="fl-grid" style="gap:6px;">
-              <label class="fl-muted">P(Victoria) <input id="cerebeloSimVictoria" type="number" min="0" max="1" step="0.01" value="0.30" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Local) <input id="cerebeloSimVictoria" type="number" min="0" max="1" step="0.01" value="0.30" class="fl-input" style="width:90px;margin-left:8px;"></label>
               <label class="fl-muted">P(Empate) <input id="cerebeloSimEmpate" type="number" min="0" max="1" step="0.01" value="0.40" class="fl-input" style="width:90px;margin-left:8px;"></label>
-              <label class="fl-muted">P(Derrota) <input id="cerebeloSimDerrota" type="number" min="0" max="1" step="0.01" value="0.30" class="fl-input" style="width:90px;margin-left:8px;"></label>
+              <label class="fl-muted">P(Visitante) <input id="cerebeloSimDerrota" type="number" min="0" max="1" step="0.01" value="0.30" class="fl-input" style="width:90px;margin-left:8px;"></label>
             </div>
           </div>
         </div>
@@ -8570,6 +8583,7 @@ function computeTeamIntelligencePanel(db, teamId){
     const brainTrainingHistory = [];
     const brainLossHistory = [];
     let latestPredictionConfidence = null;
+    const brainTrainingContext = { mode: "pre", historicalDate: "" };
     const BRAIN_SNAPSHOTS_KEY = "brain-memory-carl-snapshots-v1";
     const BRAIN_LOSS_KEY = "brain-memory-carl-loss-v1";
 
@@ -8721,9 +8735,27 @@ function computeTeamIntelligencePanel(db, teamId){
     }
 
     function oneHotResultado(valor){
-      if(valor === "victoria") return [1,0,0];
+      if(valor === "local") return [1,0,0];
       if(valor === "empate") return [0,1,0];
       return [0,0,1];
+    }
+
+    function getBrainModeMeta(){
+      const modeEl = document.getElementById("brainTrainingMode");
+      const dateEl = document.getElementById("brainHistoricalDate");
+      const mode = modeEl?.value || "pre";
+      const historicalDate = String(dateEl?.value || "").trim();
+      return {
+        mode,
+        historicalDate,
+        modeLabel: mode === "live" ? "Live" : mode === "historico" ? "Histórico" : "Pre-Partido"
+      };
+    }
+
+    function refreshBrainModeUI(){
+      const { mode } = getBrainModeMeta();
+      const wrap = document.getElementById("brainHistoricalDateWrap");
+      if(wrap) wrap.style.display = mode === "historico" ? "inline-flex" : "none";
     }
 
     function renderSnapshots(){
@@ -8734,8 +8766,10 @@ function computeTeamIntelligencePanel(db, teamId){
         return;
       }
       el.innerHTML = brainTrainingHistory.map((muestra, idx)=>{
-        const clase = muestra.y[0] ? "V" : muestra.y[1] ? "E" : "D";
-        return `<div>#${idx+1} · ${clase} · x=[${muestra.x.map(v=>v.toFixed(2)).join(", ")}]</div>`;
+        const clase = muestra.y[0] ? "Local" : muestra.y[1] ? "Empate" : "Visitante";
+        const metaMode = muestra?.meta?.modeLabel || "Pre-Partido";
+        const metaDate = muestra?.meta?.historicalDate ? ` · ${muestra.meta.historicalDate}` : "";
+        return `<div>#${idx+1} · ${metaMode}${metaDate} · ${clase} · x=[${muestra.x.map(v=>v.toFixed(2)).join(", ")}]</div>`;
       }).join("");
       persistBrainTelemetry();
       renderBrainHealthCheck();
@@ -8796,8 +8830,55 @@ function computeTeamIntelligencePanel(db, teamId){
     renderSnapshots();
     renderLossChart();
     initBrainSelectorState();
+    refreshBrainModeUI();
     bootstrapBrainModel();
     renderBrainHealthCheck();
+
+    document.getElementById("brainTrainingMode")?.addEventListener("change", ()=>{
+      const meta = getBrainModeMeta();
+      brainTrainingContext.mode = meta.mode;
+      brainTrainingContext.historicalDate = meta.historicalDate;
+      refreshBrainModeUI();
+    });
+
+    document.getElementById("brainHistoricalDate")?.addEventListener("change", ()=>{
+      const meta = getBrainModeMeta();
+      brainTrainingContext.historicalDate = meta.historicalDate;
+    });
+
+    document.getElementById("brainResetMemory")?.addEventListener("click", async ()=>{
+      const statusEl = document.getElementById("brainModelStatus");
+      const ok = confirm("¿Reiniciar el cerebro? Se borrará el modelo local, snapshots y curva de loss.");
+      if(!ok) return;
+      try{
+        if(typeof tf !== "undefined"){
+          try{ await tf.io.removeModel("localstorage://brain-memory-carl"); }catch(_err){ /* modelo no existía */ }
+        }
+        if(brainModel && typeof brainModel.dispose === "function"){
+          brainModel.dispose();
+        }
+        syncBrainModelGlobal(null);
+        ultimaMuestra = null;
+        latestPredictionConfidence = null;
+        brainTrainingHistory.splice(0, brainTrainingHistory.length);
+        brainLossHistory.splice(0, brainLossHistory.length);
+        localStorage.removeItem(BRAIN_SNAPSHOTS_KEY);
+        localStorage.removeItem(BRAIN_LOSS_KEY);
+        const modeEl = document.getElementById("brainTrainingMode");
+        const dateEl = document.getElementById("brainHistoricalDate");
+        if(modeEl) modeEl.value = "pre";
+        if(dateEl) dateEl.value = "";
+        brainTrainingContext.mode = "pre";
+        brainTrainingContext.historicalDate = "";
+        refreshBrainModeUI();
+        renderSnapshots();
+        renderLossChart();
+        renderBrainHealthCheck("🧹 Cerebro reiniciado. Listo para entrenar limpio por modos.");
+        if(statusEl) statusEl.textContent = "✅ Cerebro reiniciado: modelo y memoria local eliminados.";
+      }catch(err){
+        if(statusEl) statusEl.textContent = `❌ No se pudo reiniciar: ${err.message}`;
+      }
+    });
 
     document.getElementById("brainExportMemory")?.addEventListener("click", async ()=>{
       const statusEl = document.getElementById("brainModelStatus");
@@ -8999,7 +9080,19 @@ function computeTeamIntelligencePanel(db, teamId){
         `A [[${blendedA.map(v=>v.toFixed(4)).join(", ")}]]  |  B [[${blendedB.map(v=>v.toFixed(4)).join(", ")}]]`;
 
       const resultadoReal = oneHotResultado(document.getElementById("brainResultadoReal").value);
-      ultimaMuestra = { x: blendedA, y: resultadoReal, createdAt: Date.now() };
+      const modeMeta = getBrainModeMeta();
+      brainTrainingContext.mode = modeMeta.mode;
+      brainTrainingContext.historicalDate = modeMeta.historicalDate;
+      ultimaMuestra = {
+        x: blendedA,
+        y: resultadoReal,
+        createdAt: Date.now(),
+        meta: {
+          mode: modeMeta.mode,
+          modeLabel: modeMeta.modeLabel,
+          historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
+        }
+      };
 
       let predA = [0, 0, 0];
       let predB = [0, 0, 0];
@@ -9123,8 +9216,18 @@ function computeTeamIntelligencePanel(db, teamId){
         return;
       }
       try{
+        const modeMeta = getBrainModeMeta();
+        if(modeMeta.mode === "historico" && !modeMeta.historicalDate){
+          statusEl.textContent = "❌ En modo Históricos debes indicar la fecha del partido.";
+          return;
+        }
         statusEl.textContent = "⏳ Aprendiendo de este partido...";
         ultimaMuestra.y = oneHotResultado(document.getElementById("brainResultadoReal").value);
+        ultimaMuestra.meta = {
+          mode: modeMeta.mode,
+          modeLabel: modeMeta.modeLabel,
+          historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
+        };
         brainTrainingHistory.unshift({ ...ultimaMuestra });
         if(brainTrainingHistory.length > 10) brainTrainingHistory.pop();
         renderSnapshots();
@@ -9192,7 +9295,7 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById("cerebeloSemaforo").innerHTML =
         `${veredicto.semaforo.emoji} <span style="color:${sc}">${veredicto.semaforo.mensaje}</span>`;
 
-      const probLabels = ["Victoria","Empate","Derrota"];
+      const probLabels = ["Local","Empate","Visitante"];
       document.getElementById("cerebeloProbs").innerHTML = veredicto.resultadoFinal.map((val, i)=>{
         const pct   = (val * 100).toFixed(1);
         const color = val >= 0.5 ? "#3fb950" : val >= 0.3 ? "#f2cc60" : "#f85149";
