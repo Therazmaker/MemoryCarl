@@ -8208,11 +8208,11 @@ function computeTeamIntelligencePanel(db, teamId){
             <input id="brainHistoricalDate" type="date" class="fl-input">
           </label>
           <label class="fl-muted" style="display:flex;align-items:center;gap:6px;">
-            Resultado real (A=Local, B=Visitante)
+            Resultado real (Local/Empate/Visitante)
             <select id="brainResultadoReal" class="fl-select">
-              <option value="local">Local (gana A)</option>
+              <option value="local">Local</option>
               <option value="empate">Empate</option>
-              <option value="visitante">Visitante (gana B)</option>
+              <option value="visitante">Visitante</option>
             </select>
           </label>
           <button class="fl-btn" id="brainLearnOne">3️⃣ ✅ Validar y Aprender</button>
@@ -8735,7 +8735,6 @@ function computeTeamIntelligencePanel(db, teamId){
     }
 
     function oneHotResultado(valor){
-      // Convención fija del Brain: Equipo A = Local, Equipo B = Visitante.
       if(valor === "local") return [1,0,0];
       if(valor === "empate") return [0,1,0];
       return [0,0,1];
@@ -8767,7 +8766,7 @@ function computeTeamIntelligencePanel(db, teamId){
         return;
       }
       el.innerHTML = brainTrainingHistory.map((muestra, idx)=>{
-        const clase = muestra.y[0] ? "Local (A)" : muestra.y[1] ? "Empate" : "Visitante (B)";
+        const clase = muestra.y[0] ? "Local" : muestra.y[1] ? "Empate" : "Visitante";
         const metaMode = muestra?.meta?.modeLabel || "Pre-Partido";
         const metaDate = muestra?.meta?.historicalDate ? ` · ${muestra.meta.historicalDate}` : "";
         return `<div>#${idx+1} · ${metaMode}${metaDate} · ${clase} · x=[${muestra.x.map(v=>v.toFixed(2)).join(", ")}]</div>`;
@@ -9296,7 +9295,7 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById("cerebeloSemaforo").innerHTML =
         `${veredicto.semaforo.emoji} <span style="color:${sc}">${veredicto.semaforo.mensaje}</span>`;
 
-      const probLabels = ["Local (A)","Empate","Visitante (B)"];
+      const probLabels = ["Local","Empate","Visitante"];
       document.getElementById("cerebeloProbs").innerHTML = veredicto.resultadoFinal.map((val, i)=>{
         const pct   = (val * 100).toFixed(1);
         const color = val >= 0.5 ? "#3fb950" : val >= 0.3 ? "#f2cc60" : "#f85149";
