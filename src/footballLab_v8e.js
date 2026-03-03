@@ -8010,10 +8010,36 @@ function computeTeamIntelligencePanel(db, teamId){
       return Math.min(Math.max(score, 0), 1);
     }
 
-    let brainModel = (typeof window !== "undefined" && window.modelo) ? window.modelo : null;
+    let brainModel = null;
     let ultimaMuestra = null;
     const brainTrainingHistory = [];
     const brainLossHistory = [];
+
+    function syncBrainModelGlobal(model){
+      brainModel = model || null;
+      if(typeof globalThis !== "undefined"){
+        globalThis.modelo = brainModel;
+      }
+    }
+
+    async function bootstrapBrainModel(statusEl){
+      if(typeof tf === "undefined") return;
+      if(brainModel) return;
+      const estado = statusEl || document.getElementById("brainModelStatus");
+      const globalModel = (typeof globalThis !== "undefined") ? globalThis.modelo : null;
+      if(globalModel){
+        syncBrainModelGlobal(globalModel);
+        if(estado) estado.textContent = "✅ Modelo conectado desde globalThis.modelo.";
+        return;
+      }
+      try{
+        const restoredModel = await tf.loadLayersModel("localstorage://brain-memory-carl");
+        syncBrainModelGlobal(restoredModel);
+        if(estado) estado.textContent = "✅ Modelo restaurado automáticamente desde localStorage.";
+      }catch(_err){
+        // El modelo aún no existe en localStorage: se creará manualmente al inicializar.
+      }
+    }
 
     function oneHotResultado(valor){
       if(valor === "victoria") return [1,0,0];
@@ -8085,6 +8111,7 @@ function computeTeamIntelligencePanel(db, teamId){
     renderSnapshots();
     renderLossChart();
     initBrainSelectorState();
+    bootstrapBrainModel();
 
     brainLeagueSelect.onchange = ()=>{
       renderBrainTeamOptions(brainLeagueSelect.value);
@@ -8191,10 +8218,7 @@ function computeTeamIntelligencePanel(db, teamId){
           model.compile({ optimizer: tf.train.adam(0.002), loss: "categoricalCrossentropy", metrics: ["accuracy"] });
           statusEl.textContent = "✅ Modelo nuevo listo (9→32→3, softmax).";
         }
-        brainModel = model;
-        if(typeof window !== "undefined"){
-          window.modelo = model;
-        }
+        syncBrainModelGlobal(model);
       }catch(err){
         statusEl.textContent = `❌ ${err.message}`;
       }
