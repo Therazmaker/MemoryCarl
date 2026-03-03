@@ -8064,6 +8064,7 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-card" style="margin-top:10px;background:#0d1117;border-top:2px solid #58a6ff;padding:10px;">
             <div class="fl-title" style="color:#58a6ff;font-size:16px;">🎙️ Informe del Analista Senior</div>
             <div id="reporte-texto" style="font-style:italic;line-height:1.6;color:#c9d1d9;">Esperando datos del Córtex...</div>
+            <button id="brainReadReport" type="button" class="fl-btn" style="margin-top:8px;">🔊 Escuchar de nuevo</button>
           </div>
           <div id="brainModelOut" style="margin-top:10px;display:none;" class="fl-card">
             <div style="font-weight:800;margin-bottom:6px;">🔬 Salida de la Capa de Percepción (3 probabilidades por equipo)</div>
@@ -8244,6 +8245,49 @@ function computeTeamIntelligencePanel(db, teamId){
       if(losingStreak && Number(losingStreak[1]) >= 3) return "critica";
       if(/gan[óo]|victorias?|invicto|momentum|positiv/i.test(text)) return "ascendente";
       return "estable";
+    }
+
+    function getBestSpanishVoice(){
+      const synth = window.speechSynthesis;
+      if(!synth?.getVoices) return null;
+      const voces = synth.getVoices() || [];
+      return voces.find((voice)=>/natural/i.test(voice.name) && /^es(-|_)/i.test(voice.lang || ""))
+        || voces.find((voice)=>/google/i.test(voice.name) && /^es(-|_)/i.test(voice.lang || ""))
+        || voces.find((voice)=>/^es(-|_)/i.test(voice.lang || ""))
+        || voces[0]
+        || null;
+    }
+
+    function locutorAnalista(texto){
+      if(!window.speechSynthesis || typeof SpeechSynthesisUtterance === "undefined"){
+        console.error("Tu navegador no soporta salida de voz.");
+        return;
+      }
+      const frase = String(texto || "").trim();
+      if(!frase) return;
+
+      window.speechSynthesis.cancel();
+      const lectura = new SpeechSynthesisUtterance(frase);
+      lectura.lang = "es-ES";
+      lectura.pitch = 0.85;
+      lectura.rate = 0.95;
+      lectura.volume = 1;
+
+      const voz = getBestSpanishVoice();
+      if(voz) lectura.voice = voz;
+
+      window.speechSynthesis.speak(lectura);
+    }
+
+    function leerInformeActual(){
+      const texto = document.getElementById("reporte-texto")?.textContent || "";
+      locutorAnalista(texto);
+    }
+
+    if(window.speechSynthesis && typeof window.speechSynthesis.onvoiceschanged !== "undefined"){
+      window.speechSynthesis.onvoiceschanged = ()=>{
+        getBestSpanishVoice();
+      };
     }
 
     function synthesizeMatchReport(homeTeam, awayTeam, cortexData = {}){
@@ -8592,17 +8636,27 @@ function computeTeamIntelligencePanel(db, teamId){
       const selectedTeamB = db.teams.find((team)=>team.id === brainSelectors.B.team.value);
       const reporteEl = document.getElementById("reporte-texto");
       if(reporteEl){
-        reporteEl.textContent = synthesizeMatchReport(selectedTeamA, selectedTeamB, {
+        const textoParaLeer = synthesizeMatchReport(selectedTeamA, selectedTeamB, {
           victoriaIA: predA[0] || 0,
           edge: (predA[0] || 0) - (parseFloat(document.getElementById("cerebeloSimVictoria")?.value) || 0),
           ventaja: resumen.ventaja,
           peligro: relatoA.peligro
         });
+        reporteEl.textContent = textoParaLeer;
+        locutorAnalista(textoParaLeer);
       }
 
       const cerebeloRefinarBtn = document.getElementById("cerebeloRefinar");
       if(cerebeloRefinarBtn) cerebeloRefinarBtn.click();
     };
+
+
+    const brainReadReportBtn = document.getElementById("brainReadReport");
+    if(brainReadReportBtn){
+      brainReadReportBtn.onclick = ()=>{
+        leerInformeActual();
+      };
+    }
 
     document.getElementById("brainInitModel").onclick = async ()=>{
       const statusEl = document.getElementById("brainModelStatus");
