@@ -8192,6 +8192,11 @@ function computeTeamIntelligencePanel(db, teamId){
           document.getElementById("brainModelStatus").textContent = `⚠ Predict error: ${err.message}`;
         }
       }
+
+      const cerebeloRefinarBtn = document.getElementById("cerebeloRefinar");
+      if(cerebeloRefinarBtn){
+        cerebeloRefinarBtn.click();
+      }
     };
 
     document.getElementById("brainInitModel").onclick = async ()=>{
