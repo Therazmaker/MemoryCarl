@@ -319,6 +319,25 @@ export function initFootballLab(){
     return BRAIN_V2_PHASES.find((phase)=>safe>=phase.min && safe<=phase.max)?.key || "76-90+";
   }
 
+  function mnePhaseOfMinute(minute){
+    const safe = clamp(Number(minute) || 0, 0, 140);
+    if(safe<=15) return "0-15";
+    if(safe<=30) return "15-30";
+    if(safe<=45) return "30-45";
+    if(safe<=60) return "45-60";
+    if(safe<=75) return "60-75";
+    return "75-90";
+  }
+
+  function buildPhaseCountsFromMinutes(minutes = []){
+    const counts = { "0-15": 0, "15-30": 0, "30-45": 0, "45-60": 0, "60-75": 0, "75-90": 0 };
+    (Array.isArray(minutes) ? minutes : []).forEach((minute)=>{
+      const phase = mnePhaseOfMinute(minute);
+      counts[phase] = (Number(counts[phase]) || 0) + 1;
+    });
+    return counts;
+  }
+
   function parseNarrativeEventType(line = ""){
     const txt = String(line || "").toLowerCase();
     const rules = [
@@ -757,7 +776,13 @@ export function initFootballLab(){
     pushReason("big_chances_advantage", home.big_chance - away.big_chance, 0.5, 3, "Ventaja en chances claras", events.filter((e)=>e.type==="big_chance").map((e)=>e.minute));
     pushReason("finishing_edge", (home.goal / Math.max(1, home.big_chance)) - (away.goal / Math.max(1, away.big_chance)), 0.05, 0.6, "Mejor definición de cara al gol", events.filter((e)=>e.type==="goal").map((e)=>e.minute));
     pushReason("momentum_control", Object.values(momentumByPhase).reduce((acc, v)=>acc + Number(v), 0), 1, 8, "Dominio territorial por fases", Object.entries(momentumByPhase).filter(([,v])=>v>0).map(([phase])=>BRAIN_V2_PHASES.find((p)=>p.key===phase)?.max || 0));
-    return reasons.sort((a,b)=>b.strength-a.strength).slice(0, 6);
+    return reasons
+      .sort((a,b)=>b.strength-a.strength)
+      .slice(0, 6)
+      .map((reason)=>({
+        ...reason,
+        phaseCounts: reason.phaseCounts || buildPhaseCountsFromMinutes(reason.mins || [])
+      }));
   }
 
   function buildBrainV2Story({ teamName, opponentName, outcome, finalScore, reasons = [] }){
@@ -769,14 +794,29 @@ export function initFootballLab(){
 
   function buildTeamNarrativeProfileFromMemories(rows = []){
     const list = (Array.isArray(rows) ? rows : []).slice(-20);
+    const phaseKeys = ["0-15", "15-30", "30-45", "45-60", "60-75", "75-90"];
+    const emptyPhaseDNA = {
+      finishing_failure: Object.fromEntries(phaseKeys.map((key)=>[key, 0])),
+      territorial_pressure: Object.fromEntries(phaseKeys.map((key)=>[key, 0])),
+      momentum_control: Object.fromEntries(phaseKeys.map((key)=>[key, 0])),
+      counter_strike: Object.fromEntries(phaseKeys.map((key)=>[key, 0])),
+      setpiece_threat: Object.fromEntries(phaseKeys.map((key)=>[key, 0])),
+      wasted_setpieces: Object.fromEntries(phaseKeys.map((key)=>[key, 0])),
+      late_pressure: Object.fromEntries(phaseKeys.map((key)=>[key, 0])),
+      keeper_heroics: Object.fromEntries(phaseKeys.map((key)=>[key, 0])),
+      discipline_issues: Object.fromEntries(phaseKeys.map((key)=>[key, 0])),
+      var_turning_point: Object.fromEntries(phaseKeys.map((key)=>[key, 0]))
+    };
     if(!list.length){
       return {
         lastN: 0,
         tendencies: { latePressureAvg: 0, setPieceDependence: 0, keeperImpactRate: 0, disciplineCostRate: 0, finishingEfficiency: 0, momentumVolatility: 0 },
-        reasonTagRates: {}
+        reasonTagRates: {},
+        phaseDNA: emptyPhaseDNA
       };
     }
     const reasonHits = {};
+    const phaseDNA = JSON.parse(JSON.stringify(emptyPhaseDNA));
     const agg = list.reduce((acc, row)=>{
       const sum = row?.summary || buildBrainV2MatchSummary({ row, teamName: row?.teamName || "Local", opponentName: row?.opponent || "Rival" });
       const f = sum?.features || {};
@@ -788,11 +828,28 @@ export function initFootballLab(){
       const momentVals = Object.values(f?.momentumByPhase || {}).map(Number).filter(Number.isFinite);
       const vol = momentVals.length ? stdDev(momentVals) : 0;
       acc.volatility += vol;
-      (sum?.reasons || []).forEach((r)=>{ reasonHits[r.tag] = (reasonHits[r.tag] || 0) + 1; });
+      (sum?.reasons || []).forEach((r)=>{
+        reasonHits[r.tag] = (reasonHits[r.tag] || 0) + 1;
+        const targetTag = r.tag in phaseDNA ? r.tag : null;
+        if(!targetTag) return;
+        const counts = r.phaseCounts && typeof r.phaseCounts === "object"
+          ? r.phaseCounts
+          : buildPhaseCountsFromMinutes(r.mins || []);
+        phaseKeys.forEach((phase)=>{
+          phaseDNA[targetTag][phase] = (Number(phaseDNA[targetTag][phase]) || 0) + (Number(counts[phase]) || 0);
+        });
+      });
       return acc;
     }, { latePressure: 0, setPiece: 0, keeper: 0, discipline: 0, finishing: 0, volatility: 0 });
     const n = list.length;
     const reasonTagRates = Object.fromEntries(Object.entries(reasonHits).map(([k,v])=>[k, Number((v/n).toFixed(2))]));
+    Object.keys(phaseDNA).forEach((tag)=>{
+      const total = phaseKeys.reduce((acc, phase)=>acc + (Number(phaseDNA[tag][phase]) || 0), 0);
+      phaseKeys.forEach((phase)=>{
+        const value = Number(phaseDNA[tag][phase]) || 0;
+        phaseDNA[tag][phase] = Number((total > 0 ? value / total : 0).toFixed(3));
+      });
+    });
     return {
       lastN: n,
       tendencies: {
@@ -803,8 +860,125 @@ export function initFootballLab(){
         finishingEfficiency: Number((agg.finishing / n).toFixed(2)),
         momentumVolatility: Number((agg.volatility / n).toFixed(2))
       },
-      reasonTagRates
+      reasonTagRates,
+      phaseDNA
     };
+  }
+
+
+  const MNE_PHASE_PRIORS = {
+    "0-15": { title: "Arranque y tanteo", bullets: ["Inicio de presión y control territorial", "Primeras señales de ABP y ritmo"] },
+    "15-30": { title: "Primer ajuste de plan", bullets: ["El partido entra en patrón táctico", "Aparece la primera oleada real de peligro"] },
+    "30-45": { title: "Empuje antes del descanso", bullets: ["Fatiga leve y valor de pelota parada", "Últimos ataques antes del descanso"] },
+    "45-60": { title: "Reinicio intenso", bullets: ["Ajustes tras descanso", "Ritmo más agresivo durante 15 minutos"] },
+    "60-75": { title: "Ventana de cambios", bullets: ["Ingresos alteran la estructura", "Sube la probabilidad de gol por espacios"] },
+    "75-90": { title: "Cierre emocional", bullets: ["Presión final y nervios", "Faltas y ABP toman protagonismo"] }
+  };
+
+  const MNE_SCENE_LIBRARY = [
+    { id: "home_early_push", phaseAffinity: ["0-15", "15-30"], side: "home", title: "Arranque de control local", producesTags: ["territorial_pressure", "setpiece_threat"], requiredSignals: [({ home })=>home.control > 58, ({ home })=>home.dna.territorial_pressure > 0.2], liveTriggers: [{ if: "home corners >= 3 by 20'", then: "boost setpiece_threat narrative", weight: 0.12 }] },
+    { id: "away_early_push", phaseAffinity: ["0-15", "15-30"], side: "away", title: "Visitante acelera de inicio", producesTags: ["territorial_pressure"], requiredSignals: [({ away })=>away.control > 55, ({ away })=>away.attack_production > 50], liveTriggers: [{ if: "away possession >= 53% by 15'", then: "territorial_pressure away gains confidence", weight: 0.1 }] },
+    { id: "away_counter_threat", phaseAffinity: ["15-30", "45-60", "60-75"], side: "away", title: "Riesgo de contra visitante", producesTags: ["counter_strike"], requiredSignals: [({ away })=>away.dna.counter_strike > 0.18, ({ home })=>home.control > 55], liveTriggers: [{ if: "away shotsOT >= 2 by 30'", then: "counter_strike becomes primary", weight: 0.15 }] },
+    { id: "home_counter_threat", phaseAffinity: ["15-30", "45-60", "60-75"], side: "home", title: "Golpe local en transición", producesTags: ["counter_strike"], requiredSignals: [({ home })=>home.dna.counter_strike > 0.16, ({ away })=>away.control > 55], liveTriggers: [{ if: "home recoveries high + 1 shotOT by 35'", then: "home counter_strike rises", weight: 0.11 }] },
+    { id: "finishing_crisis_home", phaseAffinity: ["30-45", "45-60", "60-75", "75-90"], side: "home", title: "Crisis de definición local", producesTags: ["finishing_failure"], requiredSignals: [({ home })=>home.dna.finishing_failure > 0.22, ({ home })=>home.attack_production > 52], liveTriggers: [{ if: "home bigChances >= 2 and goals == 0 by 60'", then: "boost finishing_failure", weight: 0.12 }] },
+    { id: "finishing_crisis_away", phaseAffinity: ["30-45", "45-60", "60-75", "75-90"], side: "away", title: "Crisis de definición visitante", producesTags: ["finishing_failure"], requiredSignals: [({ away })=>away.dna.finishing_failure > 0.22, ({ away })=>away.attack_production > 48], liveTriggers: [{ if: "away bigChances >= 2 and goals == 0 by 60'", then: "boost finishing_failure away", weight: 0.12 }] },
+    { id: "late_siege_home", phaseAffinity: ["75-90"], side: "home", title: "Asedio final local", producesTags: ["late_pressure", "setpiece_threat"], requiredSignals: [({ home })=>home.dna.late_pressure > 0.2], liveTriggers: [{ if: "home corners >= 5 by 80'", then: "late_siege confidence +0.10", weight: 0.1 }] },
+    { id: "setpiece_battle", phaseAffinity: ["30-45", "60-75", "75-90"], side: "neutral", title: "Batalla de balón parado", producesTags: ["setpiece_threat", "wasted_setpieces"], requiredSignals: [({ home, away })=>(home.setpiece_strength + away.setpiece_strength) > 105], liveTriggers: [{ if: "combined corners >= 8 by 70'", then: "setpiece_battle takes over", weight: 0.1 }] }
+  ];
+
+  function buildMneMetrics(summary = {}, profile = {}){
+    const avg = summary?.avg || {};
+    const rate = profile?.reasonTagRates || {};
+    const tendencies = profile?.tendencies || {};
+    const get = (keys = [], fallback = 0)=>{
+      for(const key of keys){
+        const value = Number(avg[key]);
+        if(Number.isFinite(value) && value !== 0) return value;
+      }
+      return fallback;
+    };
+    return {
+      attack_production: clamp((get(["xg"], 1.1) * 28) + (get(["shots"], 10) * 2.2), 0, 100),
+      attack_conversion: clamp((tendencies.finishingEfficiency || 0.3) * 100, 0, 100),
+      defense_stability: clamp(100 - (get(["xga", "xg_against"], 1.2) * 24) - (Number(tendencies.momentumVolatility) || 0) * 14, 0, 100),
+      control: clamp(get(["possession"], 50), 0, 100),
+      setpiece_strength: clamp((get(["corners"], 4.5) * 10) + ((tendencies.setPieceDependence || 0) * 28), 0, 100),
+      discipline: clamp(100 - ((tendencies.disciplineCostRate || 0) * 95), 0, 100),
+      dna: {
+        finishing_failure: clamp01(rate.finishing_failure || 0),
+        territorial_pressure: clamp01(rate.territorial_pressure || 0),
+        momentum_control: clamp01(rate.momentum_control || 0),
+        counter_strike: clamp01(rate.counter_strike || 0),
+        setpiece_threat: clamp01(rate.setpiece_threat || 0),
+        wasted_setpieces: clamp01(rate.wasted_setpieces || 0),
+        late_pressure: clamp01(rate.late_pressure || 0),
+        keeper_heroics: clamp01(rate.keeper_heroics || 0),
+        discipline_issues: clamp01(rate.discipline_issues || 0),
+        var_turning_point: clamp01(rate.var_turning_point || 0)
+      },
+      phaseDNA: profile?.phaseDNA || {}
+    };
+  }
+
+  function buildMatchNarrativeEngine({ homeMetrics, awayMetrics, styleClashes = [], sampleSize = 0 }){
+    const phases = ["0-15", "15-30", "30-45", "45-60", "60-75", "75-90"];
+    const sceneBoosts = {};
+    styleClashes.forEach((clash)=>{
+      if(clash === "away_transition_window") sceneBoosts.away_counter_threat = (sceneBoosts.away_counter_threat || 0) + 0.8;
+      if(clash === "home_transition_window") sceneBoosts.home_counter_threat = (sceneBoosts.home_counter_threat || 0) + 0.8;
+      if(clash === "home_sterile_risk") sceneBoosts.finishing_crisis_home = (sceneBoosts.finishing_crisis_home || 0) + 0.7;
+      if(clash === "away_sterile_risk") sceneBoosts.finishing_crisis_away = (sceneBoosts.finishing_crisis_away || 0) + 0.7;
+    });
+    const evalCtx = { home: homeMetrics, away: awayMetrics };
+    const narrative = phases.map((phase)=>{
+      const ranked = MNE_SCENE_LIBRARY
+        .filter((scene)=>scene.phaseAffinity.includes(phase))
+        .map((scene)=>{
+          const conditionsMet = (scene.requiredSignals || []).reduce((acc, fn)=>acc + (fn(evalCtx) ? 1 : 0), 0);
+          const affinity = (scene.producesTags || []).reduce((acc, tag)=>{
+            const homeW = Number(homeMetrics.phaseDNA?.[tag]?.[phase]) || 0;
+            const awayW = Number(awayMetrics.phaseDNA?.[tag]?.[phase]) || 0;
+            return acc + Math.max(homeW, awayW) * 2;
+          }, 0);
+          const sideBonus = scene.side === "home" ? 0.25 : scene.side === "away" ? 0.2 : 0.18;
+          const base = conditionsMet + affinity + sideBonus + (sceneBoosts[scene.id] || 0);
+          return { scene, score: base };
+        })
+        .sort((a,b)=>b.score-a.score);
+      const top = ranked.slice(0, 2);
+      const score = top.reduce((acc, item)=>acc + item.score, 0);
+      const raw = score / (score + 4);
+      const confidence = clamp(Math.sqrt(raw), 0.08, 0.95);
+      const tags = [...new Set(top.flatMap((item)=>item.scene.producesTags || []))];
+      const notes = [...(MNE_PHASE_PRIORS[phase]?.bullets || []), ...top.map((item)=>item.scene.title)].slice(0, 2);
+      return {
+        phase,
+        title: top[0]?.scene?.title || MNE_PHASE_PRIORS[phase]?.title || "Fase en observación",
+        confidence: Number(confidence.toFixed(2)),
+        tags,
+        notes,
+        confidenceMeta: {
+          N: sampleSize,
+          completeness: Number(clamp(sampleSize / 20, 0.2, 1).toFixed(2)),
+          lowConfidence: sampleSize < 10,
+          signalsUsed: ["control", "counter_strike", "late_pressure", "setpiece_threat"],
+          scenes: top.map((item)=>item.scene.id)
+        }
+      };
+    });
+
+    const keyRisks = [
+      { tag: "finishing_failure", side: homeMetrics.dna.finishing_failure >= awayMetrics.dna.finishing_failure ? "home" : "away", impact: "reduce goles", confidence: Number(Math.max(homeMetrics.dna.finishing_failure, awayMetrics.dna.finishing_failure).toFixed(2)) },
+      { tag: "discipline_issues", side: homeMetrics.dna.discipline_issues >= awayMetrics.dna.discipline_issues ? "home" : "away", impact: "ABP peligrosas", confidence: Number(Math.max(homeMetrics.dna.discipline_issues, awayMetrics.dna.discipline_issues).toFixed(2)) },
+      { tag: "counter_strike", side: homeMetrics.dna.counter_strike >= awayMetrics.dna.counter_strike ? "home" : "away", impact: "transiciones que cambian el guion", confidence: Number(Math.max(homeMetrics.dna.counter_strike, awayMetrics.dna.counter_strike).toFixed(2)) }
+    ].sort((a,b)=>b.confidence-a.confidence).slice(0, 3);
+
+    const liveTriggers = MNE_SCENE_LIBRARY
+      .flatMap((scene)=>(scene.liveTriggers || []).map((trigger)=>({ ...trigger, sceneId: scene.id })))
+      .sort((a,b)=>(Number(b.weight)||0)-(Number(a.weight)||0))
+      .slice(0, 3);
+
+    return { narrative, keyRisks, liveTriggers };
   }
 
   function buildBrainV2Vision({ homeSummary, awaySummary, odds, homeProfile = null, awayProfile = null }){
@@ -838,6 +1012,19 @@ export function initFootballLab(){
       finishing: (Number(hp.finishingEfficiency) || 0) - (Number(ap.finishingEfficiency) || 0),
       discipline: (Number(ap.disciplineCostRate) || 0) - (Number(hp.disciplineCostRate) || 0)
     };
+    const homeMne = buildMneMetrics(homeSummary, homeProfile);
+    const awayMne = buildMneMetrics(awaySummary, awayProfile);
+    const styleClashes = [];
+    if(homeMne.control > 60 && awayMne.dna.counter_strike > 0.2 && awayMne.attack_production > 52) styleClashes.push("away_transition_window");
+    if(awayMne.control > 58 && homeMne.dna.counter_strike > 0.2 && homeMne.attack_production > 52) styleClashes.push("home_transition_window");
+    if(homeMne.control > 60 && homeMne.dna.finishing_failure > 0.22) styleClashes.push("home_sterile_risk");
+    if(awayMne.control > 58 && awayMne.dna.finishing_failure > 0.22) styleClashes.push("away_sterile_risk");
+    const mne = buildMatchNarrativeEngine({
+      homeMetrics: homeMne,
+      awayMetrics: awayMne,
+      styleClashes,
+      sampleSize: Math.min(Number(homeProfile?.lastN) || 0, Number(awayProfile?.lastN) || 0)
+    });
     const xgNarrative = {
       xg_home: clamp(
         xg.xg_home
@@ -951,7 +1138,24 @@ export function initFootballLab(){
       },
       insights,
       reasonPreview,
-      narrativeDeltas
+      narrativeDeltas,
+      styleClashes,
+      mne,
+      updateNarrativeWithLiveSignals(liveStats = {}){
+        const rules = [
+          { check: ()=>Number(liveStats?.home?.corners) >= 3 && Number(liveStats?.minute) <= 20, tag: "setpiece_threat", side: "home", boost: 0.12 },
+          { check: ()=>Number(liveStats?.away?.shotsOT) >= 2 && Number(liveStats?.minute) <= 30, tag: "counter_strike", side: "away", boost: 0.15 }
+        ];
+        const nextNarrative = (mne.narrative || []).map((phase)=>{
+          let confidence = Number(phase.confidence) || 0;
+          rules.forEach((rule)=>{
+            if(!rule.check()) return;
+            if((phase.tags || []).includes(rule.tag)) confidence += rule.boost;
+          });
+          return { ...phase, confidence: Number(clamp(confidence, 0, 0.99).toFixed(2)) };
+        });
+        return { ...mne, narrative: nextNarrative };
+      }
     };
   }
 
@@ -8994,6 +9198,23 @@ passes: 425"></textarea>
             <div style="font-weight:800;">🧠 Por qué este resultado (pre-match)</div>
             <div class="fl-mini" style="margin-top:6px;display:grid;gap:4px;">
               ${(vision.reasonPreview || []).map((r, idx)=>`<div>#${idx+1} ${r.tag} · ${(r.strength*100).toFixed(0)}% · ${r.note}</div>`).join('') || '<div>Sin razones fuertes todavía.</div>'}
+            </div>
+          </div>
+          <div class="fl-card" style="margin-top:10px;padding:10px;">
+            <div style="font-weight:800;">📜 Match Narrative Engine (MNE)</div>
+            <div class="fl-mini" style="margin-top:6px;display:grid;gap:8px;">
+              ${(vision.mne?.narrative || []).map((phase)=>`
+                <div class="fl-card" style="padding:8px;">
+                  <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>${phase.phase} · ${phase.title}</b><span>${Math.round((phase.confidence || 0)*100)}%</span></div>
+                  <div style="margin-top:4px;">Tags: ${(phase.tags || []).join(', ') || 'sin tags'}</div>
+                  <ul style="margin:4px 0 0 16px;">${(phase.notes || []).slice(0,2).map((note)=>`<li>${note}</li>`).join('')}</ul>
+                  <div style="margin-top:4px;">Data: N=${phase.confidenceMeta?.N || 0} · Completeness=${Math.round((phase.confidenceMeta?.completeness || 0)*100)}% ${phase.confidenceMeta?.lowConfidence ? '· ⚠️ low confidence' : ''}</div>
+                </div>
+              `).join('')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px;">
+              <div class="fl-card" style="padding:8px;"><b>Key Risks</b>${(vision.mne?.keyRisks || []).map((risk)=>`<div class="fl-mini">• ${risk.tag} (${risk.side}) · ${risk.impact} · ${Math.round((risk.confidence||0)*100)}%</div>`).join('') || '<div class="fl-mini">Sin riesgos dominantes.</div>'}</div>
+              <div class="fl-card" style="padding:8px;"><b>Live Triggers</b>${(vision.mne?.liveTriggers || []).map((trigger)=>`<div class="fl-mini">• Si ${trigger.if} → ${trigger.then} (${trigger.weight>0?'+':''}${trigger.weight.toFixed(2)})</div>`).join('') || '<div class="fl-mini">Sin triggers todavía.</div>'}</div>
             </div>
           </div>
           <div class="fl-mini" style="margin-top:8px;">${vision.missing.length ? `⚠️ Falta info: ${vision.missing.join(' · ')}` : '✅ Dataset suficiente para seguir mejorando el modelo TensorFlow.'}</div>
