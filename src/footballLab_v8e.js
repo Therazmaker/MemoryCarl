@@ -7629,9 +7629,6 @@ passes: 425"></textarea>
 
       document.getElementById('b2HybridEvaluate')?.addEventListener('click', async ()=>{
         try{
-          if(typeof tf === 'undefined'){
-            throw new Error('TensorFlow.js no está cargado en esta vista. Abre la consola Brain y presiona TRAIN/LOAD para inicializarlo, luego vuelve a Evaluate.');
-          }
           if(!hybridBrain.model){
             await hybridBrain.load();
           }
