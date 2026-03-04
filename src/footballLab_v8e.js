@@ -6,6 +6,8 @@
 import { Cerebelo } from "./Cerebelo.js";
 import { HybridBrainService, inferOutcomeLabel, estimateLiveDelta } from "./HybridBrain.js";
 import { buildTrainingDataset, createTensorflowBrainModel, trainTensorflowBrainModel, saveBrainArtifacts, loadBrainArtifacts, inferWithBrain, buildTeamProfile, buildFeatureVectorFromProfiles, extractNarrativeFeatures } from "./footballlab/brain/tensorflow_brain.js";
+import { computeExpectedGoals } from "./footballlab/xg_engine.js";
+import { scoreMatrix, matrixToOutcome, mostLikelyScore, oddsToMarketProbabilities, blendOutcomes } from "./footballlab/poisson_engine.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -266,36 +268,34 @@ export function initFootballLab(){
       }
       return fallback;
     };
-    const homePower = (get(homeSummary, "xg", 1.2) * 0.45) + (get(homeSummary, "shots", 10) * 0.03) + (get(homeSummary, "possession", 50) * 0.01) + ((homeSummary.positive - homeSummary.negative) * 0.08);
-    const awayPower = (get(awaySummary, "xg", 1.1) * 0.45) + (get(awaySummary, "shots", 9) * 0.03) + (get(awaySummary, "possession", 50) * 0.01) + ((awaySummary.positive - awaySummary.negative) * 0.08);
-    const rawDiff = clamp((homePower - awayPower) * 0.22, -0.65, 0.65);
-    const modelHome = clamp(0.45 + rawDiff, 0.08, 0.85);
-    const modelAway = clamp(0.35 - rawDiff * 0.8, 0.07, 0.78);
-    const modelDraw = clamp(1 - modelHome - modelAway, 0.08, 0.5);
-    const normBase = modelHome + modelDraw + modelAway;
+    const xgInputHome = {
+      xg_for: get(homeSummary, "xg", 1.2),
+      goals_for: getAny(homeSummary, ["goals_for", "goals", "gf"], get(homeSummary, "goals", 1.3)),
+      xg_against: getAny(homeSummary, ["xga", "xg_against"], 1.2),
+      goals_against: getAny(homeSummary, ["goals_against", "ga"], 1.1)
+    };
+    const xgInputAway = {
+      xg_for: get(awaySummary, "xg", 1.1),
+      goals_for: getAny(awaySummary, ["goals_for", "goals", "gf"], get(awaySummary, "goals", 1.1)),
+      xg_against: getAny(awaySummary, ["xga", "xg_against"], 1.2),
+      goals_against: getAny(awaySummary, ["goals_against", "ga"], 1.2)
+    };
+
+    const xg = computeExpectedGoals(xgInputHome, xgInputAway);
+    const matrix = scoreMatrix(xg.xg_home, xg.xg_away);
+    const modelOutcome = matrixToOutcome(matrix);
+    const likelyScore = mostLikelyScore(matrix);
 
     const cleanOdds = {
       home: Number(odds?.home),
       draw: Number(odds?.draw),
       away: Number(odds?.away)
     };
-    let blended = {
-      home: modelHome / normBase,
-      draw: modelDraw / normBase,
-      away: modelAway / normBase
-    };
+    let blended = modelOutcome;
     const hasOdds = cleanOdds.home > 1 && cleanOdds.draw > 1 && cleanOdds.away > 1;
     if(hasOdds){
-      const ih = 1 / cleanOdds.home;
-      const id = 1 / cleanOdds.draw;
-      const ia = 1 / cleanOdds.away;
-      const sum = ih + id + ia || 1;
-      const market = { home: ih / sum, draw: id / sum, away: ia / sum };
-      blended = {
-        home: (blended.home * 0.72) + (market.home * 0.28),
-        draw: (blended.draw * 0.72) + (market.draw * 0.28),
-        away: (blended.away * 0.72) + (market.away * 0.28)
-      };
+      const market = oddsToMarketProbabilities(cleanOdds);
+      blended = blendOutcomes(blended, market, 0.65);
     }
 
     const missing = [];
@@ -339,8 +339,8 @@ export function initFootballLab(){
     );
 
     const expected = {
-      goalsHome: clamp(get(homeSummary, "xg", 1.2) * 0.72 + homeSot * 0.11, 0.2, 3.9),
-      goalsAway: clamp(get(awaySummary, "xg", 1.1) * 0.72 + awaySot * 0.11, 0.2, 3.9),
+      goalsHome: clamp(xg.xg_home, 0.2, 3.9),
+      goalsAway: clamp(xg.xg_away, 0.2, 3.9),
       cornersHome: clamp(homeCorners + (bars.homeAttack - bars.awayAttack) * 0.03, 1.5, 11.5),
       cornersAway: clamp(awayCorners + (bars.awayAttack - bars.homeAttack) * 0.03, 1.5, 11.5),
       cardsHome: clamp(homeCards + homeFatigue * 0.015, 0.6, 6.2),
@@ -359,6 +359,7 @@ export function initFootballLab(){
       missing,
       bars,
       expected,
+      score: likelyScore,
       physical: {
         homeResistance,
         awayResistance,
@@ -7729,6 +7730,7 @@ passes: 425"></textarea>
         const pA = (vision.probs.away * 100).toFixed(1);
         const conf = (vision.confidence * 100).toFixed(0);
         const exp = vision.expected || {};
+        const score = vision.score || { home: 0, away: 0, prob: 0 };
         const phy = vision.physical || {};
         out.innerHTML = `
           <div style="font-weight:800;">${homeTeam?.name || 'Local'} vs ${awayTeam?.name || 'Visita'}</div>
@@ -7739,7 +7741,8 @@ passes: 425"></textarea>
           </div>
           <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples}</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px;">
-            <div class="fl-card" style="padding:8px;"><div class="fl-mini">⚽ Goles esperados</div><div style="font-weight:800;">${exp.goalsHome?.toFixed(2)} - ${exp.goalsAway?.toFixed(2)}</div></div>
+            <div class="fl-card" style="padding:8px;"><div class="fl-mini">⚽ xG esperado</div><div style="font-weight:800;">${exp.goalsHome?.toFixed(2)} - ${exp.goalsAway?.toFixed(2)}</div></div>
+            <div class="fl-card" style="padding:8px;"><div class="fl-mini">🎯 Marcador probable</div><div style="font-weight:800;">${score.home}-${score.away} (${(score.prob * 100).toFixed(1)}%)</div></div>
             <div class="fl-card" style="padding:8px;"><div class="fl-mini">🚩 Córners</div><div style="font-weight:800;">${exp.cornersHome?.toFixed(1)} - ${exp.cornersAway?.toFixed(1)}</div></div>
             <div class="fl-card" style="padding:8px;"><div class="fl-mini">🟨 Tarjetas</div><div style="font-weight:800;">${exp.cardsHome?.toFixed(1)} - ${exp.cardsAway?.toFixed(1)}</div></div>
           </div>
