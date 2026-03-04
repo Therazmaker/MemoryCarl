@@ -129,6 +129,8 @@ export function initFootballLab(){
     const counts = {};
     let positive = 0;
     let negative = 0;
+    let fatigueNotes = 0;
+    let resilienceNotes = 0;
     rows.forEach((m)=>{
       const stats = parseNumericStats(m?.statsRaw || "");
       Object.entries(stats).forEach(([k,v])=>{
@@ -138,16 +140,25 @@ export function initFootballLab(){
       const text = String(m?.narrative || "").toLowerCase();
       if(/domin|creativ|presion|solido|efectiv|control/.test(text)) positive += 1;
       if(/error|roja|lesion|fall|debil|desorden|fragil/.test(text)) negative += 1;
+      if(/cansad|fatig|agot|sin piernas|baj[óo] el ritmo|fundid/.test(text)) fatigueNotes += 1;
+      if(/remont|resist|aguant|intens|sostuvo|compiti[oó]/.test(text)) resilienceNotes += 1;
     });
     const avg = {};
     Object.keys(totals).forEach((k)=>{
       avg[k] = totals[k] / Math.max(1, counts[k] || 1);
     });
-    return { samples: rows.length, avg, positive, negative };
+    return { samples: rows.length, avg, positive, negative, fatigueNotes, resilienceNotes };
   }
 
   function buildBrainV2Vision({ homeSummary, awaySummary, odds }){
     const get = (s, key, fallback)=>Number(s?.avg?.[key] ?? fallback);
+    const getAny = (s, keys = [], fallback = 0)=>{
+      for(const key of keys){
+        const value = Number(s?.avg?.[key]);
+        if(Number.isFinite(value) && value !== 0) return value;
+      }
+      return fallback;
+    };
     const homePower = (get(homeSummary, "xg", 1.2) * 0.45) + (get(homeSummary, "shots", 10) * 0.03) + (get(homeSummary, "possession", 50) * 0.01) + ((homeSummary.positive - homeSummary.negative) * 0.08);
     const awayPower = (get(awaySummary, "xg", 1.1) * 0.45) + (get(awaySummary, "shots", 9) * 0.03) + (get(awaySummary, "possession", 50) * 0.01) + ((awaySummary.positive - awaySummary.negative) * 0.08);
     const rawDiff = clamp((homePower - awayPower) * 0.22, -0.65, 0.65);
@@ -192,11 +203,62 @@ export function initFootballLab(){
       awayControl: clamp(Math.round(get(awaySummary, "possession", 50)), 15, 95)
     };
 
+    const homeSot = getAny(homeSummary, ["shots_on_target", "shots_target", "on_target"], get(homeSummary, "shots", 10) * 0.36);
+    const awaySot = getAny(awaySummary, ["shots_on_target", "shots_target", "on_target"], get(awaySummary, "shots", 9) * 0.34);
+    const homeCorners = getAny(homeSummary, ["corners", "corner_kicks"], 4.8);
+    const awayCorners = getAny(awaySummary, ["corners", "corner_kicks"], 4.2);
+    const homeCards = getAny(homeSummary, ["yellow_cards", "cards", "tarjetas"], 2.1) + (getAny(homeSummary, ["red_cards", "rojas"], 0.12) * 2.1);
+    const awayCards = getAny(awaySummary, ["yellow_cards", "cards", "tarjetas"], 2.2) + (getAny(awaySummary, ["red_cards", "rojas"], 0.13) * 2.1);
+
+    const homeResistance = clamp(
+      ((get(homeSummary, "possession", 50) * 0.42) + (getAny(homeSummary, ["passes", "accurate_passes"], 380) * 0.04) + (homeSummary.resilienceNotes * 3.5) - (homeSummary.fatigueNotes * 2.8)),
+      20,
+      98
+    );
+    const awayResistance = clamp(
+      ((get(awaySummary, "possession", 50) * 0.42) + (getAny(awaySummary, ["passes", "accurate_passes"], 350) * 0.04) + (awaySummary.resilienceNotes * 3.5) - (awaySummary.fatigueNotes * 2.8)),
+      20,
+      98
+    );
+    const homeFatigue = clamp(
+      (32 + homeCards * 9 + getAny(homeSummary, ["fouls", "faltas"], 11) * 1.3 + homeSummary.fatigueNotes * 8 - homeSummary.resilienceNotes * 4),
+      8,
+      96
+    );
+    const awayFatigue = clamp(
+      (32 + awayCards * 9 + getAny(awaySummary, ["fouls", "faltas"], 12) * 1.3 + awaySummary.fatigueNotes * 8 - awaySummary.resilienceNotes * 4),
+      8,
+      96
+    );
+
+    const expected = {
+      goalsHome: clamp(get(homeSummary, "xg", 1.2) * 0.72 + homeSot * 0.11, 0.2, 3.9),
+      goalsAway: clamp(get(awaySummary, "xg", 1.1) * 0.72 + awaySot * 0.11, 0.2, 3.9),
+      cornersHome: clamp(homeCorners + (bars.homeAttack - bars.awayAttack) * 0.03, 1.5, 11.5),
+      cornersAway: clamp(awayCorners + (bars.awayAttack - bars.homeAttack) * 0.03, 1.5, 11.5),
+      cardsHome: clamp(homeCards + homeFatigue * 0.015, 0.6, 6.2),
+      cardsAway: clamp(awayCards + awayFatigue * 0.015, 0.6, 6.2)
+    };
+
+    const insights = [
+      `${bars.homeAttack >= bars.awayAttack ? "⚽ Local llega con mayor pegada" : "⚽ Visita llega con mayor pegada"} (${bars.homeAttack}% vs ${bars.awayAttack}%).`,
+      `${homeResistance >= awayResistance ? "🫀 Local muestra más resistencia" : "🫀 Visita muestra más resistencia"} (${Math.round(homeResistance)} vs ${Math.round(awayResistance)}).`,
+      `${homeFatigue >= awayFatigue ? "🥵 Local aparece más cargado físicamente" : "🥵 Visita aparece más cargado físicamente"} (${Math.round(homeFatigue)} vs ${Math.round(awayFatigue)}).`
+    ];
+
     return {
       probs: blended,
       confidence: clamp(0.45 + Math.abs(blended.home - blended.away) * 0.7 + ((homeSummary.samples + awaySummary.samples) / 50), 0.2, 0.96),
       missing,
-      bars
+      bars,
+      expected,
+      physical: {
+        homeResistance,
+        awayResistance,
+        homeFatigue,
+        awayFatigue
+      },
+      insights
     };
   }
 
@@ -7491,6 +7553,8 @@ passes: 425"></textarea>
         const pD = (vision.probs.draw * 100).toFixed(1);
         const pA = (vision.probs.away * 100).toFixed(1);
         const conf = (vision.confidence * 100).toFixed(0);
+        const exp = vision.expected || {};
+        const phy = vision.physical || {};
         out.innerHTML = `
           <div style="font-weight:800;">${homeTeam?.name || 'Local'} vs ${awayTeam?.name || 'Visita'}</div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
@@ -7499,11 +7563,23 @@ passes: 425"></textarea>
             <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Visita</div><div style="font-size:22px;font-weight:900;">${pA}%</div></div>
           </div>
           <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px;">
+            <div class="fl-card" style="padding:8px;"><div class="fl-mini">⚽ Goles esperados</div><div style="font-weight:800;">${exp.goalsHome?.toFixed(2)} - ${exp.goalsAway?.toFixed(2)}</div></div>
+            <div class="fl-card" style="padding:8px;"><div class="fl-mini">🚩 Córners</div><div style="font-weight:800;">${exp.cornersHome?.toFixed(1)} - ${exp.cornersAway?.toFixed(1)}</div></div>
+            <div class="fl-card" style="padding:8px;"><div class="fl-mini">🟨 Tarjetas</div><div style="font-weight:800;">${exp.cardsHome?.toFixed(1)} - ${exp.cardsAway?.toFixed(1)}</div></div>
+          </div>
           <div style="margin-top:10px;display:grid;gap:6px;">
             <div>⚔️ Ataque local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.homeAttack}%;height:8px;background:#3fb950;border-radius:999px;"></div></div></div>
             <div>🛡️ Ataque visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.awayAttack}%;height:8px;background:#58a6ff;border-radius:999px;"></div></div></div>
             <div>🎛️ Control local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.homeControl}%;height:8px;background:#f2cc60;border-radius:999px;"></div></div></div>
             <div>🧭 Control visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.awayControl}%;height:8px;background:#d2a8ff;border-radius:999px;"></div></div></div>
+            <div>🫀 Resistencia local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${Math.round(phy.homeResistance || 0)}%;height:8px;background:#2ea043;border-radius:999px;"></div></div></div>
+            <div>🫀 Resistencia visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${Math.round(phy.awayResistance || 0)}%;height:8px;background:#1f6feb;border-radius:999px;"></div></div></div>
+            <div>🥵 Cansancio local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${Math.round(phy.homeFatigue || 0)}%;height:8px;background:#ff7b72;border-radius:999px;"></div></div></div>
+            <div>🥵 Cansancio visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${Math.round(phy.awayFatigue || 0)}%;height:8px;background:#ffa657;border-radius:999px;"></div></div></div>
+          </div>
+          <div class="fl-mini" style="margin-top:8px;display:grid;gap:4px;">
+            ${(vision.insights || []).map((line)=>`<div>${line}</div>`).join('')}
           </div>
           <div class="fl-mini" style="margin-top:8px;">${vision.missing.length ? `⚠️ Falta info: ${vision.missing.join(' · ')}` : '✅ Dataset suficiente para seguir mejorando el modelo TensorFlow.'}</div>
         `;
