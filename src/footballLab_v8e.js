@@ -7328,7 +7328,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const selectedTeamId = payload.teamId || sortedTeams[0]?.id || "";
       const teamOptions = sortedTeams.map((t)=>`<option value="${t.id}" ${selectedTeamId===t.id?"selected":""}>${t.name}</option>`).join("");
       const teamMemories = (brainV2.memories[selectedTeamId] || []).slice().sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date));
-      const memoryRows = teamMemories.slice(0, 8).map((m)=>`<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${(m.narrative || "").slice(0, 90)}</td></tr>`).join("");
+      const memoryRows = teamMemories.slice(0, 8).map((m)=>`<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${(m.narrative || "").slice(0, 90)}</td><td><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></td></tr>`).join("");
       const selectedTeamSummary = summarizeTeamMemory(teamMemories);
       const selectedTeamHasBrain = selectedTeamSummary.samples > 0;
       const selectedTeamBadge = selectedTeamHasBrain
@@ -7388,7 +7388,7 @@ passes: 425"></textarea>
             <span id="b2Status" class="fl-muted"></span>
           </div>
           <div class="fl-mini" style="margin-top:8px;">${selectedTeamBadge}</div>
-          <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Relato</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="3" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
+          <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Relato</th><th>Acciones</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="4" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
         </div>
         <div class="fl-card">
           <div style="font-size:18px;font-weight:800;">🎯 Simulador visual Local vs Visita</div>
@@ -7456,6 +7456,18 @@ passes: 425"></textarea>
         status.textContent = `✅ Partido guardado. Memoria total: ${brainV2.memories[teamId].length}`;
         render('brainv2', { leagueId: selectedLeagueId, teamId });
       });
+
+      document.querySelectorAll('.b2DeleteMatch').forEach((btn)=>btn.addEventListener('click', ()=>{
+        const status = document.getElementById('b2Status');
+        const teamId = btn.dataset.teamId || "";
+        const matchId = btn.dataset.matchId || "";
+        if(!teamId || !matchId || !brainV2.memories[teamId]) return;
+        if(!confirm('¿Borrar este partido de la memoria?')) return;
+        brainV2.memories[teamId] = brainV2.memories[teamId].filter((row)=>row.id !== matchId);
+        saveBrainV2(brainV2);
+        if(status) status.textContent = '🗑️ Partido eliminado de la memoria.';
+        render('brainv2', { leagueId: selectedLeagueId, teamId });
+      }));
 
       document.getElementById('b2Simulate')?.addEventListener('click', ()=>{
         const homeIdSel = document.getElementById('b2Home')?.value || "";
