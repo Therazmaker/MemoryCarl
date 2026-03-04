@@ -80,6 +80,9 @@ export function initFootballLab(){
     },
     predictions: [],
     marketTracker: [],
+    teamRatings: {},
+    leagueTableSnapshots: [],
+    marketOddsSnapshots: [],
     bitacora: {
       bank: 15,
       kellyFraction: 0.25,
@@ -1217,6 +1220,9 @@ export function initFootballLab(){
       db.versus.simV2.leagueGoalsAvg = clamp(Number(db.versus.simV2.leagueGoalsAvg) || defaultDb.versus.simV2.leagueGoalsAvg, 1.6, 4.2);
       db.predictions ||= [];
       db.marketTracker = Array.isArray(db.marketTracker) ? db.marketTracker.map(ensureMarketMatchState) : [];
+      db.teamRatings = db.teamRatings && typeof db.teamRatings === "object" ? db.teamRatings : {};
+      db.leagueTableSnapshots = Array.isArray(db.leagueTableSnapshots) ? db.leagueTableSnapshots : [];
+      db.marketOddsSnapshots = Array.isArray(db.marketOddsSnapshots) ? db.marketOddsSnapshots : [];
       db.bitacora = ensureBitacoraState(db.bitacora);
       db.learning ||= structuredClone(defaultDb.learning);
       db.learning.schemaVersion = Number(db.learning.schemaVersion) || 2;
@@ -1255,15 +1261,14 @@ export function initFootballLab(){
         if(team?.leagueId) ensureLink(team.id, team.leagueId);
       });
       db.tracker.forEach((m)=>{
-        m.stats ||= [];
-        if(typeof m.statsRaw === "undefined") m.statsRaw = null;
-        m.featureSnapshots ||= {};
-        m.featureSnapshotStatus ||= {};
+        ensureTrackerMatchState(m);
         if(m?.leagueId){
           ensureLink(m.homeId, m.leagueId);
           ensureLink(m.awayId, m.leagueId);
         }
       });
+      rebuildTeamRatings(db);
+      refreshOpponentStrengthSnapshots(db);
       return db;
     }catch(_e){
       localStorage.setItem(KEY, JSON.stringify(defaultDb));
@@ -1272,7 +1277,62 @@ export function initFootballLab(){
   }
 
   function saveDb(db){
+    rebuildTeamRatings(db);
+    refreshOpponentStrengthSnapshots(db);
     localStorage.setItem(KEY, JSON.stringify(db));
+  }
+
+  function ensureTrackerMatchState(match){
+    if(!match || typeof match !== "object") return match;
+    match.stats ||= [];
+    if(typeof match.statsRaw === "undefined") match.statsRaw = null;
+    match.featureSnapshots ||= {};
+    match.featureSnapshotStatus ||= {};
+    match.opponentStrengthByTeam ||= {};
+    if(match.oddsHome>1 && match.oddsDraw>1 && match.oddsAway>1){
+      match.marketOddsSnapshot ||= {
+        matchId: match.id,
+        homeOdds: Number(match.oddsHome),
+        drawOdds: Number(match.oddsDraw),
+        awayOdds: Number(match.oddsAway),
+        capturedAt: String(match.date || ""),
+        bookmaker: "manual"
+      };
+    }
+    return match;
+  }
+
+  function refreshOpponentStrengthSnapshots(db){
+    const tableByLeague = new Map();
+    const marketRows = [];
+    (db?.tracker || []).forEach((match)=>{
+      ensureTrackerMatchState(match);
+      const market = clean1x2Probs(match.oddsHome, match.oddsDraw, match.oddsAway);
+      match.opponentStrengthByTeam[match.homeId] = buildOpponentStrengthSnapshot({
+        db,
+        match,
+        teamId: match.homeId,
+        venue: "H",
+        marketOdds: market,
+        matchDate: match.date
+      });
+      match.opponentStrengthByTeam[match.awayId] = buildOpponentStrengthSnapshot({
+        db,
+        match,
+        teamId: match.awayId,
+        venue: "A",
+        marketOdds: market,
+        matchDate: match.date
+      });
+      if(match.leagueId){
+        tableByLeague.set(match.leagueId, buildLeagueTableSnapshot(db, match.leagueId, match.date));
+      }
+      if(match.marketOddsSnapshot){
+        marketRows.push(match.marketOddsSnapshot);
+      }
+    });
+    db.leagueTableSnapshots = [...tableByLeague.values()].slice(-40);
+    db.marketOddsSnapshots = marketRows.slice(-500);
   }
 
   function normName(value){
@@ -1957,6 +2017,152 @@ export function initFootballLab(){
     return { pH: pH/overround, pD: pD/overround, pA: pA/overround };
   }
 
+  function eloToStrength01(elo=1500){
+    const x = (Number(elo || 1500) - 1500) / 200;
+    return 1 / (1 + Math.exp(-x));
+  }
+
+  function tableToStrength01(rank=10, total=20, points=0, played=0){
+    const safeTotal = Math.max(2, Number(total) || 20);
+    const safeRank = clamp(Number(rank) || safeTotal, 1, safeTotal);
+    const strengthRank = 1 - ((safeRank - 1) / (safeTotal - 1));
+    const ppg = (Number(points) || 0) / Math.max(1, Number(played) || 0);
+    const ppg01 = clamp((ppg - 0.5) / 2, 0, 1);
+    return clamp(strengthRank * 0.6 + ppg01 * 0.4, 0, 1);
+  }
+
+  function confidenceElo(matchesCount=0){
+    return clamp((Number(matchesCount) || 0) / 20, 0.2, 1);
+  }
+
+  function confidenceTable(played=0, totalMatchdays=38){
+    const progress = (Number(played) || 0) / Math.max(1, Number(totalMatchdays) || 38);
+    return clamp(0.3 + 0.7 * progress, 0.3, 1);
+  }
+
+  function confidenceMarket({ hasDrawOdds=true, snapshotTooEarly=false }={}){
+    let conf = 0.9;
+    if(!hasDrawOdds) conf -= 0.2;
+    if(snapshotTooEarly) conf -= 0.2;
+    return clamp(conf, 0.4, 1);
+  }
+
+  function normalizeDynamicWeights({ base, conf }){
+    let wE = (Number(base.elo) || 0) * (Number(conf.elo) || 0);
+    let wT = (Number(base.table) || 0) * (Number(conf.table) || 0);
+    let wM = (Number(base.market) || 0) * (Number(conf.market) || 0);
+    const sum = wE + wT + wM;
+    if(sum<=0) return { elo: 0.5, table: 0.5, market: 0 };
+    wE /= sum; wT /= sum; wM /= sum;
+    return { elo: wE, table: wT, market: wM };
+  }
+
+  function rebuildTeamRatings(db){
+    const ratings = {};
+    const KByMatches = (matchesCount=0)=>matchesCount<10 ? 40 : matchesCount<30 ? 25 : 18;
+    const matches = (db?.tracker || []).slice().sort(compareByDateAsc);
+    matches.forEach((m)=>{
+      if(!m?.homeId || !m?.awayId) return;
+      const h = ratings[m.homeId] || { teamId: m.homeId, rating: 1500, matchesCount: 0, lastUpdated: "" };
+      const a = ratings[m.awayId] || { teamId: m.awayId, rating: 1500, matchesCount: 0, lastUpdated: "" };
+      const homeAdvElo = 70;
+      const expectedHome = 1 / (1 + Math.pow(10, ((a.rating - (h.rating + homeAdvElo)) / 400)));
+      const expectedAway = 1 - expectedHome;
+      const hg = Number(m.homeGoals) || 0;
+      const ag = Number(m.awayGoals) || 0;
+      const scoreHome = hg>ag ? 1 : hg===ag ? 0.5 : 0;
+      const scoreAway = 1 - scoreHome;
+      h.rating += KByMatches(h.matchesCount) * (scoreHome - expectedHome);
+      a.rating += KByMatches(a.matchesCount) * (scoreAway - expectedAway);
+      h.matchesCount += 1;
+      a.matchesCount += 1;
+      h.lastUpdated = m.date || h.lastUpdated;
+      a.lastUpdated = m.date || a.lastUpdated;
+      ratings[m.homeId] = h;
+      ratings[m.awayId] = a;
+    });
+    db.teamRatings = ratings;
+  }
+
+  function buildLeagueTableSnapshot(db, leagueId="", date=""){
+    const matches = (db?.tracker || [])
+      .filter((m)=>!leagueId || m.leagueId===leagueId)
+      .filter((m)=>!date || String(m.date || "")<=String(date || ""));
+    const rowsMap = new Map();
+    const touch = (teamId)=>{
+      if(!rowsMap.has(teamId)) rowsMap.set(teamId, { teamId, points: 0, gf: 0, ga: 0, played: 0 });
+      return rowsMap.get(teamId);
+    };
+    matches.forEach((m)=>{
+      const home = touch(m.homeId);
+      const away = touch(m.awayId);
+      const hg = Number(m.homeGoals) || 0;
+      const ag = Number(m.awayGoals) || 0;
+      home.gf += hg; home.ga += ag; home.played += 1;
+      away.gf += ag; away.ga += hg; away.played += 1;
+      if(hg>ag){ home.points += 3; }
+      else if(hg<ag){ away.points += 3; }
+      else { home.points += 1; away.points += 1; }
+    });
+    const rows = [...rowsMap.values()].sort((a,b)=>{
+      if(b.points!==a.points) return b.points-a.points;
+      const gdA = a.gf-a.ga;
+      const gdB = b.gf-b.ga;
+      if(gdB!==gdA) return gdB-gdA;
+      return b.gf-a.gf;
+    }).map((row, idx)=>({ ...row, rank: idx+1 }));
+    return { leagueId, seasonId: db?.settings?.season || "", date: date || new Date().toISOString().slice(0,10), rows };
+  }
+
+  function buildOpponentStrengthSnapshot({ db, match, teamId, venue, marketOdds=null, matchDate="" }){
+    const opponentId = teamId===match.homeId ? match.awayId : match.homeId;
+    const oppRating = db.teamRatings?.[opponentId] || { rating: 1500, matchesCount: 0 };
+    const eloStrength01 = eloToStrength01(oppRating.rating);
+    const tableSnapshot = buildLeagueTableSnapshot(db, match.leagueId || "", matchDate || match.date || "");
+    const row = (tableSnapshot.rows || []).find((r)=>r.teamId===opponentId) || null;
+    const totalTeams = Math.max(2, (tableSnapshot.rows || []).length || 20);
+    const tableStrength01 = row ? tableToStrength01(row.rank, totalTeams, row.points, row.played) : 0.5;
+    const market = marketOdds || clean1x2Probs(match.oddsHome, match.oddsDraw, match.oddsAway);
+    const marketStrength01 = market
+      ? (venue === "H" ? Number(market.pA) || 0.5 : Number(market.pH) || 0.5)
+      : 0.5;
+    const totalMatchdays = Math.max(10, totalTeams - 1);
+    const conf = {
+      elo: confidenceElo(oppRating.matchesCount),
+      table: confidenceTable(Number(row?.played) || 0, totalMatchdays),
+      market: market ? confidenceMarket({ hasDrawOdds: true, snapshotTooEarly: false }) : 0
+    };
+    const base = { elo: 0.3, table: row ? 0.2 : 0, market: market ? 0.5 : 0 };
+    const weights = normalizeDynamicWeights({ base, conf });
+    const strength01 = clamp(
+      weights.elo * eloStrength01
+      + weights.table * tableStrength01
+      + weights.market * marketStrength01,
+      0,
+      1
+    );
+    return {
+      matchId: match.id,
+      date: matchDate || match.date || "",
+      opponentId,
+      venue,
+      signals: {
+        elo: { value: Number(oppRating.rating.toFixed(1)), conf: Number(conf.elo.toFixed(2)) },
+        table: { value: Number(tableStrength01.toFixed(2)), conf: Number(conf.table.toFixed(2)) },
+        market: { value: Number(marketStrength01.toFixed(2)), conf: Number(conf.market.toFixed(2)) }
+      },
+      blend: {
+        strength01: Number(strength01.toFixed(2)),
+        weights: {
+          elo: Number(weights.elo.toFixed(2)),
+          table: Number(weights.table.toFixed(2)),
+          market: Number(weights.market.toFixed(2))
+        },
+        notes: [market ? "market strong" : "market missing", row ? "table ok" : "table missing", "elo stable"]
+      }
+    };
+  }
+
   function parseStatsPayload(raw){
     const data = typeof raw === "string" ? JSON.parse(raw) : raw;
     const sectionStats = Array.isArray(data?.sections)
@@ -2408,6 +2614,7 @@ export function initFootballLab(){
       const points = gf>ga ? 3 : gf===ga ? 1 : 0;
       const reasons = buildRelatoTags(m?.narrativeRaw || "", teamName, m?.opponent?.name || "Rival");
       const tagMap = Object.fromEntries(reasons.map((r)=>[r.tagId, r]));
+      const oppStrength01 = clamp(Number(m?.opponentStrength01 ?? m?.opponent?.strength01 ?? 0.5) || 0.5, 0, 1);
       return {
         matchId: String(m?.matchId || uid("pkm")),
         date: m?.matchDate || "-",
@@ -2419,6 +2626,7 @@ export function initFootballLab(){
         points,
         goalDiff: gf-ga,
         efficiency: gf / Math.max(1, stats.shots.own || stats.shotsAll.own || 1),
+        oppStrength01,
         stats,
         reasons,
         tagMap,
@@ -2441,14 +2649,14 @@ export function initFootballLab(){
       const goalsFor = avg(rows.map((r)=>r.gf));
       const poss = avg(rows.map((r)=>r.stats.possession.own || 50));
       const cornersDelta = avg(rows.map((r)=>r.stats.corners.own - r.stats.corners.opp));
-      const finishingFail = avg(rows.map((r)=>Number(r.tagMap.finishing_failure?.strength) || 0));
-      const clinical = avg(rows.map((r)=>Number(r.tagMap.clinical_finish?.strength) || 0));
-      const momentum = avg(rows.map((r)=>Number(r.tagMap.momentum_control?.strength || r.tagMap.territorial_pressure?.strength) || 0));
-      const territorial = avg(rows.map((r)=>Number(r.tagMap.territorial_pressure?.strength) || 0));
-      const setpieceThreat = avg(rows.map((r)=>Number(r.tagMap.setpiece_threat?.strength) || 0));
-      const disciplineIssues = avg(rows.map((r)=>Number(r.tagMap.discipline_issues?.strength) || 0));
-      const defensiveIssues = avg(rows.map((r)=>Number(r.tagMap.defensive_errors?.strength || r.tagMap.discipline_issues?.strength) || 0));
-      const avgEfficiency = avg(rows.map((r)=>r.efficiency));
+      const finishingFail = avg(rows.map((r)=>(Number(r.tagMap.finishing_failure?.strength) || 0) * (1.1 - 0.2*(r.oppStrength01 || 0.5))));
+      const clinical = avg(rows.map((r)=>(Number(r.tagMap.clinical_finish?.strength) || 0) * (0.9 + 0.2*(r.oppStrength01 || 0.5))));
+      const momentum = avg(rows.map((r)=>(Number(r.tagMap.momentum_control?.strength || r.tagMap.territorial_pressure?.strength) || 0) * (0.9 + 0.2*(r.oppStrength01 || 0.5))));
+      const territorial = avg(rows.map((r)=>(Number(r.tagMap.territorial_pressure?.strength) || 0) * (0.9 + 0.2*(r.oppStrength01 || 0.5))));
+      const setpieceThreat = avg(rows.map((r)=>(Number(r.tagMap.setpiece_threat?.strength) || 0) * (0.9 + 0.2*(r.oppStrength01 || 0.5))));
+      const disciplineIssues = avg(rows.map((r)=>(Number(r.tagMap.discipline_issues?.strength) || 0) * (1.1 - 0.2*(r.oppStrength01 || 0.5))));
+      const defensiveIssues = avg(rows.map((r)=>(Number(r.tagMap.defensive_errors?.strength || r.tagMap.discipline_issues?.strength) || 0) * (1.1 - 0.2*(r.oppStrength01 || 0.5))));
+      const avgEfficiency = avg(rows.map((r)=>r.efficiency * (0.90 + 0.25*(r.oppStrength01 || 0.5))));
       const attackProduction = clamp(30 + shotsFor*3 + shotsOTFor*4 + bigFor*9 + clamp(cornersDelta+2,0,8)*4 + setpieceThreat*16 + territorial*14, 0, 100);
       const attackConversion = clamp(20 + goalsFor*18 + avgEfficiency*95 + clinical*22 - finishingFail*28, 0, 100);
       const attack = clamp(attackProduction*0.6 + attackConversion*0.4, 0, 100);
@@ -3803,6 +4011,7 @@ function computeTeamIntelligencePanel(db, teamId){
         tactical: { directAttack: 50, possession: 50, transitions: 50, press: 50, setPieces: 50 },
         momentum: { labels: [], xgDifferential: [], realPerformance: [], expectedPerformance: [] },
         prediction: { eloDynamic: 1500, offenseRating: 50, defenseRating: 50, psychIndex: 50, consistencyIndex: 50 },
+        sos: { sos01: 0.5, sos: 0 },
         playerHeat
       };
     }
@@ -3891,6 +4100,8 @@ function computeTeamIntelligencePanel(db, teamId){
     const inBoxShots = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/área/, /area/, /box/]) ?? 45), 45), 0, 100);
     const progressivePass = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/progres/]) ?? 48), 48), 0, 100);
     const highPress = clamp(average(matches.map(m=>getMatchStatForTeam(m, teamId, [/presi/, /press/]) ?? 46), 46), 0, 100);
+    const sos01 = average(matches.map((m)=>Number(m?.opponentStrengthByTeam?.[teamId]?.blend?.strength01) || 0.5), 0.5);
+    const sos = Math.round((sos01 - 0.5) * 400);
 
     return {
       matches,
@@ -3924,7 +4135,8 @@ function computeTeamIntelligencePanel(db, teamId){
         defenseRating: clamp(55 - average(xgDiffSeries, 0)*14 + consistencyScore*0.25, 0, 100),
         psychIndex: clamp(100 - ((fatigue*0.45) + (volatility*0.25) - (resilience*0.2) - (aggression*0.1)), 0, 100),
         consistencyIndex: consistencyScore
-      }
+      },
+      sos: { sos01: Number(sos01.toFixed(2)), sos }
     };
   }
 
@@ -6625,6 +6837,11 @@ function computeTeamIntelligencePanel(db, teamId){
     const homeTeam = db.teams.find(t=>t.id===homeId);
     const awayTeam = db.teams.find(t=>t.id===awayId);
     const leagueId = opts.leagueId || homeTeam?.leagueId || awayTeam?.leagueId || "";
+    const marketOdds = opts.marketOdds || null;
+    const virtualMatch = { id: `sim_${homeId}_${awayId}`, homeId, awayId, leagueId, date: opts.matchDate || new Date().toISOString().slice(0,10), oddsHome: marketOdds?.oddH, oddsDraw: marketOdds?.oddD, oddsAway: marketOdds?.oddA };
+    const marketStrengthProbs = marketOdds ? clean1x2Probs(marketOdds.oddH, marketOdds.oddD, marketOdds.oddA) : null;
+    const homeOppStrength = buildOpponentStrengthSnapshot({ db, match: virtualMatch, teamId: homeId, venue: "H", marketOdds: marketStrengthProbs, matchDate: virtualMatch.date });
+    const awayOppStrength = buildOpponentStrengthSnapshot({ db, match: virtualMatch, teamId: awayId, venue: "A", marketOdds: marketStrengthProbs, matchDate: virtualMatch.date });
 
     const leagueCtx = leagueContextFromTracker(db, leagueId);
     const homeForm = teamFormFromTracker(db, homeId);
@@ -6671,6 +6888,11 @@ function computeTeamIntelligencePanel(db, teamId){
 
     lHome *= statsHome.attack * statsAway.defenseWeakness;
     lAway *= statsAway.attack * statsHome.defenseWeakness;
+
+    const qualityDiff = clamp((awayOppStrength?.blend?.strength01 || 0.5) - (homeOppStrength?.blend?.strength01 || 0.5), -0.5, 0.5);
+    const qualityTilt = Math.exp(qualityDiff * 0.55);
+    lHome *= qualityTilt;
+    lAway /= qualityTilt;
 
     ensureDiagProfileState(db);
     const homeProfile = db.diagProfiles?.[homeId];
@@ -6807,6 +7029,12 @@ function computeTeamIntelligencePanel(db, teamId){
             momentumWeightHome,
             momentumWeightAway,
             matchChaos
+          },
+          opponentStrength: {
+            homeOpponent: homeOppStrength,
+            awayOpponent: awayOppStrength,
+            qualityDiff,
+            qualityTilt
           },
           dna: {
             home: { ...homeDna, ...dnaHomeStrength },
@@ -7615,6 +7843,7 @@ function computeTeamIntelligencePanel(db, teamId){
                 <div><span class="fl-mini">Momentum 5</span><b>${Math.round((intel.metrics.momentum5||0)*100)}%</b></div>
                 <div><span class="fl-mini">ELO dinámico</span><b>${intel.prediction.eloDynamic}</b></div>
                 <div><span class="fl-mini">Off/Def</span><b>${Math.round(intel.prediction.offenseRating)} / ${Math.round(intel.prediction.defenseRating)}</b></div>
+                <div><span class="fl-mini">SOS (Elo-style)</span><b>${intel.sos?.sos>=0?"+":""}${intel.sos?.sos || 0}</b></div>
               </div>
               <div style="height:140px;"><canvas id="teamPowerHistoryChart"></canvas></div>
             </div>
@@ -8321,7 +8550,7 @@ function computeTeamIntelligencePanel(db, teamId){
           ensureTeamInLeague(db, homeId, leagueId);
           ensureTeamInLeague(db, awayId, leagueId);
         }
-        db.tracker.push({
+        const newMatch = ensureTrackerMatchState({
           id: uid("tr"),
           leagueId,
           date: document.getElementById("resDate").value,
@@ -8335,6 +8564,7 @@ function computeTeamIntelligencePanel(db, teamId){
           featureSnapshots: {},
           featureSnapshotStatus: {}
         });
+        db.tracker.push(newMatch);
         saveDb(db);
         render("equipo", { teamId: team.id });
       };
@@ -8504,7 +8734,7 @@ function computeTeamIntelligencePanel(db, teamId){
           ensureTeamInLeague(db, homeId, leagueId);
           ensureTeamInLeague(db, awayId, leagueId);
         }
-        db.tracker.push({
+        const trackedMatch = ensureTrackerMatchState({
           id: uid("tr"),
           leagueId,
           date: document.getElementById("trDate").value,
@@ -8528,6 +8758,7 @@ function computeTeamIntelligencePanel(db, teamId){
           featureSnapshots: {},
           featureSnapshotStatus: {}
         });
+        db.tracker.push(trackedMatch);
         saveDb(db);
         render("tracker");
       };
@@ -8550,6 +8781,13 @@ function computeTeamIntelligencePanel(db, teamId){
         ? statsBarsHtml(match.stats)
         : `<div class="fl-muted">Sin estadísticas. Pega JSON para cargar.</div>`;
       const labels = match.narrativeModule?.diagnostic?.labels || null;
+      const homeOpp = match?.opponentStrengthByTeam?.[match.homeId] || null;
+      const awayOpp = match?.opponentStrengthByTeam?.[match.awayId] || null;
+      const oppTooltip = (snap)=>{
+        if(!snap) return "Sin snapshot";
+        const w = snap?.blend?.weights || {};
+        return `Elo ${snap.signals?.elo?.value ?? "-"} (c ${snap.signals?.elo?.conf ?? "-"}) · Tabla ${(snap.signals?.table?.value ?? "-")} (c ${snap.signals?.table?.conf ?? "-"}) · Market ${(snap.signals?.market?.value ?? "-")} (c ${snap.signals?.market?.conf ?? "-"}) · Blend ${snap.blend?.strength01 ?? "-"} (w ${w.elo ?? "-"}/${w.table ?? "-"}/${w.market ?? "-"})`;
+      };
       const diagHtml = labels ? `
         <div class="fl-mini">Minuto quiebre: <b>${match.narrativeModule.diagnostic.breakMinute ?? "N/A"}</b></div>
         <div class="fl-grid" style="margin-top:8px;grid-template-columns:1fr;">
@@ -8562,6 +8800,10 @@ function computeTeamIntelligencePanel(db, teamId){
         <div class="fl-card">
           <div class="fl-muted">${league?.name || "Liga"} • ${match.date || "sin fecha"}</div>
           <div style="font-size:28px;font-weight:900;margin-top:4px;">${home?.name || "Local"} ${match.homeGoals}-${match.awayGoals} ${away?.name || "Visitante"}</div>
+          <div class="fl-row" style="margin-top:8px;gap:8px;">
+            <span class="chip" title="${oppTooltip(homeOpp)}">OAS ${home?.name || "Local"}: ${homeOpp?.blend?.strength01 ?? "-"}</span>
+            <span class="chip" title="${oppTooltip(awayOpp)}">OAS ${away?.name || "Visitante"}: ${awayOpp?.blend?.strength01 ?? "-"}</span>
+          </div>
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">Estadísticas</div>
@@ -10755,12 +10997,16 @@ passes: 425"></textarea>
           };
         }
         saveDb(db);
-        const result = versusModel(db, homeId, awayId, { leagueId: selectedLeagueId, matchday: db.versus.matchday, tableContextTrust: db.versus.tableContextTrust });
-        const market = clean1x2Probs(
-          document.getElementById("vsOddH").value,
-          document.getElementById("vsOddD").value,
-          document.getElementById("vsOddA").value
-        );
+        const oddH = document.getElementById("vsOddH").value;
+        const oddD = document.getElementById("vsOddD").value;
+        const oddA = document.getElementById("vsOddA").value;
+        const market = clean1x2Probs(oddH, oddD, oddA);
+        const result = versusModel(db, homeId, awayId, {
+          leagueId: selectedLeagueId,
+          matchday: db.versus.matchday,
+          tableContextTrust: db.versus.tableContextTrust,
+          marketOdds: { oddH, oddD, oddA }
+        });
         const baseLambdaHome = result.lHome;
         const baseLambdaAway = result.lAway;
 
