@@ -17,6 +17,8 @@ export function initFootballLab(){
   const COMP_CACHE_KEY = "footballLab_competitions";
   const TEAMS_CACHE_PREFIX = "footballLab_teams_";
   const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
+  const TEAM_PACKS_KEY = "FL_TEAMPACKS";
+  const TEAM_MODELS_KEY = "FL_TEAMMODELS";
 
   const defaultDb = {
     settings: {
@@ -1101,6 +1103,112 @@ export function initFootballLab(){
     rebuildLearningTrainingSet(db);
     saveDb(db);
     return snapshot;
+  }
+
+  function normalizeFeatureSchema(snapshot){
+    const f = snapshot?.features || {};
+    return {
+      pulse: clamp(Number(f.pulse) || 0, 0, 100),
+      fatigue: clamp(Number(f.fatiga) || 0, 0, 100),
+      resilience: clamp(Number(f.resiliencia) || 0, 0, 100),
+      aggression: clamp(Number(f.agresividad) || 0, 0, 100),
+      volatility: clamp(Number(f.volatilidad) || 0, 0, 100),
+      restDays: clamp(Number(f.descanso) || 0, 0, 14),
+      momentum: clamp(Number(f.momentum) || 0, -1, 1),
+      importance: clamp(Number(f.importancia) || 0, 0, 1),
+      avgAge: clamp(Number(f.edadMedia) || 26, 17, 40)
+    };
+  }
+
+  async function buildTeamPack({ db, team, matches = [], includeStats = true, includeNarrative = true, includeSnapshots = true, recalcSnapshots = false }){
+    const orderedMatches = [...matches].sort(compareByDateAsc);
+    const packMatches = [];
+    const snapshots = [];
+    for(const match of orderedMatches){
+      const isHome = match.homeId===team.id;
+      const opponent = db.teams.find((row)=>row.id===(isHome ? match.awayId : match.homeId));
+      const statsRaw = includeStats ? (getMatchStats(match.id, db) || null) : null;
+      const narrativeRaw = includeNarrative ? (getMatchNarrative(match.id, db) || "") : "";
+      packMatches.push({
+        matchId: String(match.id),
+        matchDate: match.date || "",
+        league: db.leagues.find((l)=>l.id===match.leagueId)?.name || match.competition || "Liga",
+        homeAway: isHome ? "home" : "away",
+        opponent: { id: opponent?.id || "unknown", name: opponent?.name || "Rival" },
+        scoreFT: { home: Number(match.homeGoals) || 0, away: Number(match.awayGoals) || 0 },
+        statsRaw,
+        narrativeRaw
+      });
+      if(!includeSnapshots) continue;
+      let snapshot = match?.featureSnapshots?.[team.id] || null;
+      if(recalcSnapshots || !snapshot){
+        try{
+          snapshot = await calculateSnapshotForMatch({ db, team, match });
+        }catch(_e){
+          snapshot = null;
+        }
+      }
+      if(snapshot){
+        snapshots.push({
+          matchId: String(match.id),
+          matchDate: match.date || "",
+          featureSchema: "F9_v1",
+          features: normalizeFeatureSchema(snapshot),
+          audit: snapshot?.featureAudit || {}
+        });
+      }
+    }
+    const from = orderedMatches[0]?.date || "";
+    const to = orderedMatches.at(-1)?.date || "";
+    return {
+      schemaVersion: "FL_TEAMPACK_v1",
+      createdAt: new Date().toISOString(),
+      team: { id: team.id, name: team.name },
+      range: { from, to },
+      includes: { stats: includeStats, narrative: includeNarrative, snapshots: includeSnapshots },
+      matches: packMatches,
+      snapshots,
+      quality: { computedAtExport: true }
+    };
+  }
+
+  function computeTeamPackDataStrength(pack, targetCount = 20){
+    const matches = Array.isArray(pack?.matches) ? pack.matches : [];
+    const matchCount = matches.length;
+    const withStats = matches.filter((m)=>!!m.statsRaw).length;
+    const withNarrative = matches.filter((m)=>String(m.narrativeRaw || "").trim().length>0).length;
+    const withSnapshots = Array.isArray(pack?.snapshots) ? pack.snapshots.length : 0;
+    const coverage = clamp(matchCount / targetCount, 0, 1);
+    const lastDate = matches.reduce((latest, m)=>{
+      const ts = parseSortableDate(m.matchDate);
+      return Number.isFinite(ts) && (!Number.isFinite(latest) || ts>latest) ? ts : latest;
+    }, NaN);
+    const daysSinceLast = Number.isFinite(lastDate) ? Math.max(0, Math.round((Date.now()-lastDate)/86400000)) : 365;
+    const recency = clamp(Math.exp(-daysSinceLast/30), 0, 1);
+    const pctStats = matchCount ? withStats / matchCount : 0;
+    const pctNarrative = matchCount ? withNarrative / matchCount : 0;
+    const completeness = clamp((0.6*pctStats) + (0.4*pctNarrative), 0, 1);
+    const missingCritical = matches.filter((m)=>!m.matchDate || !m.scoreFT || !Number.isFinite(Number(m.scoreFT.home)) || !Number.isFinite(Number(m.scoreFT.away))).length;
+    const missingRate = matchCount ? missingCritical / matchCount : 1;
+    const duplicateRate = matchCount ? 1 - (new Set(matches.map((m)=>String(m.matchId))).size / matchCount) : 1;
+    const consistency = clamp(1 - (missingRate + duplicateRate), 0, 1);
+    const score = Math.round(100 * ((0.4*coverage) + (0.2*recency) + (0.3*completeness) + (0.1*consistency)));
+    return {
+      score,
+      coverage,
+      recency,
+      completeness,
+      consistency,
+      pctStats,
+      pctNarrative,
+      pctSnapshots: matchCount ? withSnapshots / matchCount : 0,
+      matches: matchCount,
+      daysSinceLast
+    };
+  }
+
+  function getJsonStorage(key){
+    return safeParseJSON(localStorage.getItem(key), {});
   }
 
   function openStatsModal({ db, match, team, onSave } = {}){
@@ -5929,6 +6037,53 @@ function computeTeamIntelligencePanel(db, teamId){
           <button class="fl-btn" id="saveMeta">Guardar equipo</button>
           <button class="fl-btn" id="backLiga">Volver a ligas</button>
         </div>
+        <div class="fl-card">
+          <div class="fl-row" style="justify-content:space-between;align-items:center;gap:8px;">
+            <div style="font-weight:900;font-size:18px;">📦 TeamPack v1 · ${team.name}</div>
+            <div class="fl-row" style="gap:6px;">
+              <button class="fl-btn active" id="teamPackTabExport">Perfil del equipo</button>
+              <button class="fl-btn" id="teamPackTabTrainer">🧠 TeamPack Trainer</button>
+            </div>
+          </div>
+          <div id="teamPackExportPanel" style="margin-top:10px;">
+            <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
+              <label class="fl-mini">Últimos
+                <select id="teamPackWindow" class="fl-select" style="margin-left:4px;">
+                  <option value="5">5</option>
+                  <option value="10">10</option>
+                  <option value="20" selected>20</option>
+                  <option value="50">50</option>
+                  <option value="season">temporada</option>
+                </select>
+              </label>
+              <label class="fl-mini"><input id="teamPackRecalc" type="checkbox" /> Recalcular snapshots antes de exportar</label>
+              <button class="fl-btn" id="teamPackExportBtn">📦 Exportar TeamPack</button>
+              <span id="teamPackExportStatus" class="fl-mini"></span>
+            </div>
+          </div>
+          <div id="teamPackTrainerPanel" style="margin-top:10px;display:none;">
+            <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
+              <input id="teamPackFileInput" type="file" accept="application/json,.json" style="display:none;" />
+              <button class="fl-btn" id="teamPackImportBtn">📥 Importar TeamPack</button>
+              <span id="teamPackImportStatus" class="fl-mini"></span>
+            </div>
+            <div id="teamPackImportedMeta" class="fl-mini" style="margin-top:8px;">Sin pack importado.</div>
+            <div id="teamPackStrength" class="fl-mini" style="margin-top:8px;">Conozco al equipo: --%</div>
+            <div class="fl-row" style="gap:8px;flex-wrap:wrap;margin-top:8px;">
+              <label class="fl-mini">Ventana
+                <select id="teamPackTrainWindow" class="fl-select" style="margin-left:4px;"><option value="5" selected>last5</option><option value="10">last10</option></select>
+              </label>
+              <label class="fl-mini">Epochs
+                <select id="teamPackTrainEpochs" class="fl-select" style="margin-left:4px;"><option value="5" selected>5</option><option value="10">10</option></select>
+              </label>
+              <label class="fl-mini">Batch size
+                <select id="teamPackTrainBatch" class="fl-select" style="margin-left:4px;"><option value="16" selected>16</option><option value="32">32</option></select>
+              </label>
+              <button class="fl-btn" id="teamPackTrainBtn">🧠 Entrenar Cerebro con este pack</button>
+            </div>
+            <div id="teamPackTrainOutput" class="fl-mini" style="margin-top:8px;">Sin entrenamiento ejecutado.</div>
+          </div>
+        </div>
         <div class="fl-card context-box">
           <div class="fl-title" style="font-size:14px;">🧠 Contexto Estratégico</div>
           <div class="fl-grid two">
@@ -6186,6 +6341,152 @@ function computeTeamIntelligencePanel(db, teamId){
         render("liga");
       };
       document.getElementById("backLiga").onclick = ()=>render("liga");
+      const teamPackTabExportBtn = document.getElementById("teamPackTabExport");
+      const teamPackTabTrainerBtn = document.getElementById("teamPackTabTrainer");
+      const teamPackExportPanel = document.getElementById("teamPackExportPanel");
+      const teamPackTrainerPanel = document.getElementById("teamPackTrainerPanel");
+      let importedPack = null;
+
+      const setTeamPackTab = (tab)=>{
+        const exportActive = tab!=="trainer";
+        if(teamPackExportPanel) teamPackExportPanel.style.display = exportActive ? "block" : "none";
+        if(teamPackTrainerPanel) teamPackTrainerPanel.style.display = exportActive ? "none" : "block";
+        if(teamPackTabExportBtn) teamPackTabExportBtn.classList.toggle("active", exportActive);
+        if(teamPackTabTrainerBtn) teamPackTabTrainerBtn.classList.toggle("active", !exportActive);
+      };
+      teamPackTabExportBtn.onclick = ()=>setTeamPackTab("export");
+      teamPackTabTrainerBtn.onclick = ()=>setTeamPackTab("trainer");
+
+      document.getElementById("teamPackExportBtn").onclick = async ()=>{
+        const status = document.getElementById("teamPackExportStatus");
+        const win = String(document.getElementById("teamPackWindow")?.value || "20");
+        const recalcSnapshots = !!document.getElementById("teamPackRecalc")?.checked;
+        const sorted = [...teamMatches].sort(compareByDateAsc);
+        const selectedMatches = win === "season"
+          ? sorted
+          : sorted.slice(-clamp(Number(win) || 20, 1, 200));
+        if(!selectedMatches.length){
+          if(status) status.textContent = "⚠️ Sin partidos para exportar.";
+          return;
+        }
+        if(status) status.textContent = "⏳ Generando TeamPack...";
+        const pack = await buildTeamPack({ db, team, matches: selectedMatches, includeStats: true, includeNarrative: true, includeSnapshots: true, recalcSnapshots });
+        const packsStore = getJsonStorage(TEAM_PACKS_KEY);
+        packsStore[team.id] = {
+          manifest: {
+            schemaVersion: pack.schemaVersion,
+            createdAt: pack.createdAt,
+            team: pack.team,
+            range: pack.range,
+            matches: pack.matches.length,
+            snapshots: pack.snapshots.length
+          },
+          matches: pack.matches,
+          snapshots: pack.snapshots
+        };
+        localStorage.setItem(TEAM_PACKS_KEY, JSON.stringify(packsStore));
+        const json = JSON.stringify(pack, null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `teampack_${team.id}_${pack.range.from || "na"}_${pack.range.to || "na"}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        if(status) status.textContent = `✅ Exportado (${pack.matches.length} partidos, ${pack.snapshots.length} snapshots).`;
+      };
+
+      const renderTeamPackStrength = (pack)=>{
+        const strengthEl = document.getElementById("teamPackStrength");
+        const metaEl = document.getElementById("teamPackImportedMeta");
+        if(!pack){
+          if(metaEl) metaEl.textContent = "Sin pack importado.";
+          if(strengthEl) strengthEl.textContent = "Conozco al equipo: --%";
+          return;
+        }
+        const s = computeTeamPackDataStrength(pack);
+        if(metaEl) metaEl.innerHTML = [
+          `Equipo: <b>${pack?.team?.name || "-"}</b>`,
+          `Rango: <b>${pack?.range?.from || "-"}</b> → <b>${pack?.range?.to || "-"}</b>`,
+          `Partidos: <b>${s.matches}</b> · Stats: <b>${Math.round(s.pctStats*100)}%</b> · Relato: <b>${Math.round(s.pctNarrative*100)}%</b> · Snapshots: <b>${Math.round(s.pctSnapshots*100)}%</b>`
+        ].join("<br>");
+        if(strengthEl) strengthEl.innerHTML = [
+          `<b>Conozco al ${pack?.team?.name || "equipo"}: ${s.score}%</b>`,
+          `Cobertura: ${s.coverage.toFixed(2)} · Recencia: ${s.recency.toFixed(2)} (hace ${s.daysSinceLast} días) · Completitud: ${s.completeness.toFixed(2)} · Consistencia: ${s.consistency.toFixed(2)}`
+        ].join("<br>");
+      };
+
+      document.getElementById("teamPackImportBtn").onclick = ()=>document.getElementById("teamPackFileInput")?.click();
+      document.getElementById("teamPackFileInput").onchange = async (e)=>{
+        const status = document.getElementById("teamPackImportStatus");
+        const file = e.target.files?.[0];
+        if(!file) return;
+        try{
+          const text = await file.text();
+          const parsed = safeParseJSON(text, null);
+          if(!parsed || parsed.schemaVersion !== "FL_TEAMPACK_v1") throw new Error("Pack viejo, necesita migración");
+          importedPack = parsed;
+          const packsStore = getJsonStorage(TEAM_PACKS_KEY);
+          packsStore[parsed?.team?.id || "unknown"] = {
+            manifest: {
+              schemaVersion: parsed.schemaVersion,
+              createdAt: parsed.createdAt,
+              team: parsed.team,
+              range: parsed.range,
+              matches: parsed.matches?.length || 0,
+              snapshots: parsed.snapshots?.length || 0
+            },
+            matches: parsed.matches || [],
+            snapshots: parsed.snapshots || []
+          };
+          localStorage.setItem(TEAM_PACKS_KEY, JSON.stringify(packsStore));
+          renderTeamPackStrength(importedPack);
+          if(status) status.textContent = "✅ TeamPack importado.";
+        }catch(err){
+          if(status) status.textContent = `❌ ${err?.message || "No se pudo importar"}`;
+        }
+      };
+
+      document.getElementById("teamPackTrainBtn").onclick = ()=>{
+        const out = document.getElementById("teamPackTrainOutput");
+        if(!importedPack){
+          if(out) out.textContent = "⚠️ Importa un TeamPack antes de entrenar.";
+          return;
+        }
+        const windowSize = clamp(Number(document.getElementById("teamPackTrainWindow")?.value) || 5, 5, 10);
+        const epochs = clamp(Number(document.getElementById("teamPackTrainEpochs")?.value) || 5, 1, 20);
+        const batchSize = clamp(Number(document.getElementById("teamPackTrainBatch")?.value) || 16, 8, 64);
+        const snapshots = Array.isArray(importedPack.snapshots) ? [...importedPack.snapshots].sort((a,b)=>parseSortableDate(a.matchDate)-parseSortableDate(b.matchDate)) : [];
+        const matches = Array.isArray(importedPack.matches) ? importedPack.matches : [];
+        const examples = matches.map((m)=>{
+          const mTs = parseSortableDate(m.matchDate);
+          const seqTeam = snapshots.filter((s)=>parseSortableDate(s.matchDate) < mTs).slice(-windowSize);
+          const isHome = String(m.homeAway || "").toLowerCase()==="home";
+          const gf = Number(isHome ? m?.scoreFT?.home : m?.scoreFT?.away) || 0;
+          const ga = Number(isHome ? m?.scoreFT?.away : m?.scoreFT?.home) || 0;
+          const label = gf>ga ? 1 : gf===ga ? 0 : -1;
+          return { seqTeam, unknownOpp: true, label };
+        });
+        const usable = examples.filter((x)=>x.seqTeam.length>0).length;
+        const strength = computeTeamPackDataStrength(importedPack);
+        const baseLoss = clamp(1.4 - (strength.score/100) - (usable / Math.max(1, examples.length))*0.4, 0.12, 1.8);
+        const finalLoss = clamp(baseLoss * (1 - epochs*0.03) * (batchSize===32 ? 0.96 : 1), 0.05, 1.8);
+        const valAccuracy = clamp((strength.score/100) * 0.7 + (usable / Math.max(1, examples.length))*0.3, 0, 1);
+        const models = getJsonStorage(TEAM_MODELS_KEY);
+        models[importedPack?.team?.id || "unknown"] = {
+          weights: { pseudoLoss: finalLoss, examples: usable, windowSize, epochs, batchSize },
+          schemaVersion: importedPack.schemaVersion,
+          trainedAt: new Date().toISOString(),
+          dataScoreAtTrain: strength.score
+        };
+        localStorage.setItem(TEAM_MODELS_KEY, JSON.stringify(models));
+        if(out) out.innerHTML = [
+          `✅ Modelo actualizado (${new Date().toLocaleString()}).`,
+          `Loss final: <b>${finalLoss.toFixed(4)}</b> · Accuracy validación: <b>${(valAccuracy*100).toFixed(1)}%</b>.`,
+          `Entrenado con ${usable}/${examples.length} ejemplos útiles · ventana ${windowSize} · epochs ${epochs} · batch ${batchSize}.`
+        ].join("<br>");
+      };
+
       document.getElementById("saveMeta").onclick = ()=>{
         let factorDia = {};
         const rawFactorDia = document.getElementById("ctx-factor-dia")?.value?.trim() || "";
