@@ -417,15 +417,6 @@ export function initFootballLab(){
     pushReason("big_chances_advantage", home.big_chance - away.big_chance, 0.5, 3, "Ventaja en chances claras", events.filter((e)=>e.type==="big_chance").map((e)=>e.minute));
     pushReason("finishing_edge", (home.goal / Math.max(1, home.big_chance)) - (away.goal / Math.max(1, away.big_chance)), 0.05, 0.6, "Mejor definición de cara al gol", events.filter((e)=>e.type==="goal").map((e)=>e.minute));
     pushReason("momentum_control", Object.values(momentumByPhase).reduce((acc, v)=>acc + Number(v), 0), 1, 8, "Dominio territorial por fases", Object.entries(momentumByPhase).filter(([,v])=>v>0).map(([phase])=>BRAIN_V2_PHASES.find((p)=>p.key===phase)?.max || 0));
-    if(!reasons.length){
-      const goals = events.filter((e)=>e.type === "goal").map((e)=>e.minute).slice(0, 4);
-      reasons.push({
-        tag: "game_state_shift",
-        strength: 0.35,
-        evidence: goals.length ? goals : [90],
-        note: "El guion cambió por estado de partido, aunque el relato tenga baja señal."
-      });
-    }
     return reasons.sort((a,b)=>b.strength-a.strength).slice(0, 4);
   }
 
@@ -474,19 +465,6 @@ export function initFootballLab(){
       },
       reasonTagRates
     };
-  }
-
-  function ensureBrainV2RowSummary(row = {}, fallbackTeamName = "Local"){
-    const hasSummary = row?.summary && typeof row.summary === "object";
-    const hasReasons = hasSummary && Array.isArray(row.summary.reasons) && row.summary.reasons.length > 0;
-    if(hasReasons) return row.summary;
-    const summary = buildBrainV2MatchSummary({
-      row,
-      teamName: row?.teamName || fallbackTeamName,
-      opponentName: row?.opponent || "Rival"
-    });
-    row.summary = summary;
-    return summary;
   }
 
   function buildBrainV2Vision({ homeSummary, awaySummary, odds, homeProfile = null, awayProfile = null }){
@@ -7766,18 +7744,10 @@ function computeTeamIntelligencePanel(db, teamId){
       const selectedTeamName = db.teams.find((t)=>t.id===selectedTeamId)?.name || "Local";
       const teamOptions = sortedTeams.map((t)=>`<option value="${t.id}" ${selectedTeamId===t.id?"selected":""}>${t.name}</option>`).join("");
       const teamMemories = (brainV2.memories[selectedTeamId] || []).slice().sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date));
-      let touchedSummaries = false;
-      teamMemories.forEach((row)=>{
-        const before = Array.isArray(row?.summary?.reasons) ? row.summary.reasons.length : 0;
-        ensureBrainV2RowSummary(row, selectedTeamName);
-        const after = Array.isArray(row?.summary?.reasons) ? row.summary.reasons.length : 0;
-        if(!before || after!==before) touchedSummaries = true;
-      });
-      if(touchedSummaries) saveBrainV2(brainV2);
       const memoryRows = teamMemories.slice(0, 8).map((m)=>{
         const story = m?.summary?.story || (m.narrative || "").slice(0, 90);
         const tags = (m?.summary?.reasons || []).slice(0, 2).map((r)=>`${r.tag} ${(r.strength*100).toFixed(0)}%`).join(" · ");
-        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${story}<div class="fl-mini">${tags || "Razón base aplicada"}</div></td><td style="display:flex;gap:6px;flex-wrap:wrap;"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">¿Por qué?</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></td></tr>`;
+        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${story}<div class="fl-mini">${tags || "Sin razones"}</div></td><td><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></td></tr>`;
       }).join("");
       const selectedTeamSummary = summarizeTeamMemory(teamMemories);
       const selectedTeamHasBrain = selectedTeamSummary.samples > 0;
