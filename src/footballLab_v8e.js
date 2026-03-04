@@ -9062,6 +9062,19 @@ function computeTeamIntelligencePanel(db, teamId){
           Ingresa las métricas de dos equipos para construir sus Vectores de Estado normalizados.
           El cerebro procesa ambos y calcula una ventaja relativa (duelo de vectores) en tiempo real.
         </div>
+        <div class="fl-card" style="margin-bottom:12px;padding:10px;border-left:4px solid #58a6ff;background:#0d1117;">
+          <div style="font-weight:800;margin-bottom:6px;">✅ Proceso recomendado (modo simple)</div>
+          <ol class="fl-mini" style="margin:0;padding-left:16px;line-height:1.6;">
+            <li><b>Pega</b> un pack JSON en <i>"JSON de entrenamiento"</i>.</li>
+            <li><b>Build Dataset</b> para convertir partidos en ejemplos de aprendizaje.</li>
+            <li><b>Train</b> para entrenar el modelo híbrido y guardarlo automáticamente.</li>
+            <li><b>Pre/Live Predict</b> para ver pronóstico pre-partido vs en vivo.</li>
+            <li><b>Explain</b> para entender qué variables/tokens movieron la predicción.</li>
+          </ol>
+          <div class="fl-mini" style="margin-top:8px;color:#8b949e;line-height:1.5;">
+            Sugerencia: usa solo <b>Cerebro Real v2 — Híbrido</b> como sistema principal. Los módulos de abajo quedan como apoyo/diagnóstico.
+          </div>
+        </div>
         <div class="fl-card" style="margin-bottom:12px;padding:10px;border-left:4px solid #3fb950;background:#0d1117;">
           <div style="font-weight:800;margin-bottom:8px;">🧠 Cerebro Real v2 — Híbrido (tabular + secuencias)</div>
           <div class="fl-grid two" style="gap:10px;">
@@ -9241,8 +9254,9 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>
         </div>
       </div>
-      <div class="fl-card" style="margin-top:12px;">
-        <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Cerebelo — Capa de Refinamiento</div>
+      <details class="fl-card" style="margin-top:12px;">
+        <summary style="font-weight:900;font-size:18px;margin-bottom:8px;cursor:pointer;">🧠 Sistemas de apoyo (legacy/experimental)</summary>
+        <div style="font-weight:900;font-size:16px;margin:8px 0;">🧠 Cerebelo — Capa de Refinamiento</div>
         <div class="fl-muted" style="margin-bottom:12px;">
           Ingresa la predicción del Córtex (Capa 3) y el resultado del Simulador Estadístico.
           El Cerebelo compara ambas fuentes y emite un veredicto refinado con indicador de coherencia.
@@ -9276,7 +9290,7 @@ function computeTeamIntelligencePanel(db, teamId){
             <div id="cerebeloDetalle" style="font-size:12px;color:#c9d1d9;line-height:1.6;"></div>
           </div>
         </div>
-      </div>
+      </details>
     `;
 
 
