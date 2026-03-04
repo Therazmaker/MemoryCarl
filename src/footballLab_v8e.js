@@ -1244,7 +1244,8 @@ export function initFootballLab(){
   }
 
   function getJsonStorage(key){
-    return safeParseJSON(localStorage.getItem(key), {});
+    const parsed = safeParseJSON(localStorage.getItem(key), {});
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   }
 
   function saveTeamBrainFeatures(teamId, snapshots = []){
@@ -5258,6 +5259,61 @@ function computeTeamIntelligencePanel(db, teamId){
     return transformed.map(row=>row.map(cell=>cell/sum));
   }
 
+  function getTeamDnaSnapshotBlend(db, teamId, horizon=6){
+    const matches = (db.tracker || [])
+      .filter((m)=>(m.homeId===teamId || m.awayId===teamId))
+      .slice()
+      .sort(compareByDateAsc)
+      .slice(-clamp(Number(horizon) || 6, 3, 20));
+    const rows = matches
+      .map((m)=>normalizeFeatureSchema(m?.featureSnapshots?.[teamId] || {}))
+      .filter((f)=>f && (f.pulse>0 || f.aggression>0 || f.resilience>0 || Math.abs(f.momentum)>0));
+    if(!rows.length){
+      const brainRows = getTeamBrainFeatures(teamId).map((row)=>normalizeFeatureSchema(row?.features || {}));
+      if(brainRows.length) rows.push(...brainRows);
+    }
+    const avg = (arr, fallback)=>arr.length ? arr.reduce((acc,v)=>acc + v, 0) / arr.length : fallback;
+    return {
+      pulse: avg(rows.map((f)=>f.pulse), 50),
+      aggression: avg(rows.map((f)=>f.aggression), 50),
+      resilience: avg(rows.map((f)=>f.resilience), 50),
+      volatility: avg(rows.map((f)=>f.volatility), 50),
+      momentum: avg(rows.map((f)=>f.momentum), 0),
+      sample: rows.length
+    };
+  }
+
+  function dnaStrengthFromSnapshot(dna){
+    const pulseN = clamp((Number(dna?.pulse) || 50) / 100, 0, 1);
+    const aggressionN = clamp((Number(dna?.aggression) || 50) / 100, 0, 1);
+    const momentumN = clamp(((Number(dna?.momentum) || 0) + 1) / 2, 0, 1);
+    const resilienceN = clamp((Number(dna?.resilience) || 50) / 100, 0, 1);
+    const volatilityN = clamp((Number(dna?.volatility) || 50) / 100, 0, 1);
+    const attackStrength = clamp(0.7 + (0.4*pulseN + 0.3*aggressionN + 0.3*momentumN) * 0.75, 0.72, 1.45);
+    const defenseStrength = clamp(0.7 + (resilienceN - volatilityN*0.55 + 0.35) * 0.55, 0.65, 1.35);
+    const defenseWeakness = clamp(2.02 - defenseStrength, 0.72, 1.5);
+    return { attackStrength, defenseStrength, defenseWeakness };
+  }
+
+  function applyChaosToMatrix(matrix, chaos=0){
+    const chaosN = clamp(Number(chaos) || 0, 0, 1);
+    if(chaosN < 0.42) return matrix;
+    const targetsBoost = new Set(["3-2", "2-3", "3-3"]);
+    const targetsCut = new Set(["1-0", "0-1"]);
+    let sum = 0;
+    const adjusted = matrix.map((row,h)=>row.map((cell,a)=>{
+      const key = `${h}-${a}`;
+      let w = 1;
+      if(targetsBoost.has(key)) w += chaosN * 0.48;
+      if(targetsCut.has(key)) w -= chaosN * 0.26;
+      if((h+a)>=5) w += chaosN * 0.1;
+      const v = Math.max(1e-9, cell * clamp(w, 0.55, 1.8));
+      sum += v;
+      return v;
+    }));
+    return sum>0 ? adjusted.map(row=>row.map(cell=>cell/sum)) : matrix;
+  }
+
   function versusModel(db, homeId, awayId, opts={}){
     ensureLearningState(db);
     db.versus ||= {};
@@ -5290,8 +5346,15 @@ function computeTeamIntelligencePanel(db, teamId){
     const attackAway = clamp((baseAwayFor || leagueCtx.avgGoalsAway) / Math.max(0.35, leagueCtx.avgGoalsAway), 0.55, 1.9);
     const defenseHomeWeakness = clamp((baseHomeAgainst || leagueCtx.avgGoalsAway) / Math.max(0.35, leagueCtx.avgGoalsAway), 0.55, 1.9);
 
-    let lHome = leagueCtx.avgGoalsHome * attackHome * defenseAwayWeakness;
-    let lAway = leagueCtx.avgGoalsAway * attackAway * defenseHomeWeakness;
+    const homeDna = getTeamDnaSnapshotBlend(db, homeId, Number(db.versus.sampleSize)||20);
+    const awayDna = getTeamDnaSnapshotBlend(db, awayId, Number(db.versus.sampleSize)||20);
+    const dnaHomeStrength = dnaStrengthFromSnapshot(homeDna);
+    const dnaAwayStrength = dnaStrengthFromSnapshot(awayDna);
+    const tempoFactor = clamp(pace * (0.94 + ((homeDna.momentum + awayDna.momentum + 2) / 4) * 0.16), 0.78, 1.35);
+    const awayAdjustment = clamp(1 - ((homeAdv - 1) * 0.32), 0.88, 1.04);
+
+    let lHome = leagueCtx.avgGoalsHome * attackHome * defenseAwayWeakness * dnaHomeStrength.attackStrength * dnaAwayStrength.defenseWeakness * homeAdv * tempoFactor;
+    let lAway = leagueCtx.avgGoalsAway * attackAway * defenseHomeWeakness * dnaAwayStrength.attackStrength * dnaHomeStrength.defenseWeakness * awayAdjustment * tempoFactor;
 
     lHome *= leagueScale.home * (1 + homeBias.attack) * (1 - awayBias.defense);
     lAway *= leagueScale.away * (1 + awayBias.attack) * (1 - homeBias.defense);
@@ -5299,8 +5362,8 @@ function computeTeamIntelligencePanel(db, teamId){
     const statsHome = homeData.statsImpact || { attack: 1, defenseWeakness: 1, sample: 0 };
     const statsAway = awayData.statsImpact || { attack: 1, defenseWeakness: 1, sample: 0 };
 
-    lHome *= homeAdv * pace * homeStrength * homeForm.momentum;
-    lAway *= pace * awayStrength * awayForm.momentum;
+    lHome *= homeStrength * homeForm.momentum;
+    lAway *= awayStrength * awayForm.momentum;
 
     lHome *= statsHome.attack * statsAway.defenseWeakness;
     lAway *= statsAway.attack * statsHome.defenseWeakness;
@@ -5366,8 +5429,10 @@ function computeTeamIntelligencePanel(db, teamId){
       + (Math.max(0, -homeContext.riskMode) + Math.max(0, -awayContext.riskMode)) * 0.08;
     const drawBoost = clamp(drawBoostBase * trust, 0, 0.25);
 
+    const matchChaos = clamp((homeIntel.psych.volatility + awayIntel.psych.volatility + homeIntel.psych.aggressiveness + awayIntel.psych.aggressiveness) / 400, 0, 1);
     const dist = probsFromLambdas(lHome, lAway, 5);
     dist.matrix = applyDrawBoostToMatrix(dist.matrix, drawBoost);
+    dist.matrix = applyChaosToMatrix(dist.matrix, matchChaos);
     const distSummary = summarizeMatrix(dist.matrix);
     dist.pHome = distSummary.pHome;
     dist.pDraw = distSummary.pDraw;
@@ -5436,11 +5501,19 @@ function computeTeamIntelligencePanel(db, teamId){
             psychBoostHome,
             psychBoostAway,
             momentumWeightHome,
-            momentumWeightAway
+            momentumWeightAway,
+            matchChaos
+          },
+          dna: {
+            home: { ...homeDna, ...dnaHomeStrength },
+            away: { ...awayDna, ...dnaAwayStrength },
+            tempoFactor,
+            awayAdjustment
           }
         }
       },
-      tableContext: { home: homeContext, away: awayContext, drawBoost, matchday, trust }
+      tableContext: { home: homeContext, away: awayContext, drawBoost, matchday, trust },
+      chaos: matchChaos
     };
   }
 
@@ -8562,6 +8635,8 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById("runVs").onclick = ()=>{
         const homeId = document.getElementById("vsHome").value;
         const awayId = document.getElementById("vsAway").value;
+        const homeName = db.teams.find(t=>t.id===homeId)?.name || "Local";
+        const awayName = db.teams.find(t=>t.id===awayId)?.name || "Visitante";
         const selectedLeagueId = document.getElementById("vsLeague")?.value || "";
         db.versus.homeAdvantage = Number(document.getElementById("vsHA").value)||1.1;
         db.versus.paceFactor = Number(document.getElementById("vsPace").value)||1;
@@ -8635,6 +8710,7 @@ function computeTeamIntelligencePanel(db, teamId){
           0.9,
           1.2
         );
+        const matchChaos = clamp((homeIntel.psych.volatility + awayIntel.psych.volatility + homeIntel.psych.aggressiveness + awayIntel.psych.aggressiveness) / 400, 0, 1);
         const riskTilt = clamp((result.tableContext.home.riskMode - result.tableContext.away.riskMode) * 0.05, -0.05, 0.05);
 
         let lHome0 = result.leagueCtx.avgGoalsHome
@@ -8668,6 +8744,7 @@ function computeTeamIntelligencePanel(db, teamId){
         result.lAway = adjusted.lAway;
         const calibrated = probsFromLambdas(result.lHome, result.lAway, result.maxGoals);
         result.matrix = applyVolatilityToMatrix(calibrated.matrix, psychVol);
+        result.matrix = applyChaosToMatrix(result.matrix, matchChaos);
         const distSummary = summarizeMatrix(result.matrix);
         result.pHome = distSummary.pHome;
         result.pDraw = distSummary.pDraw;
@@ -8688,6 +8765,7 @@ function computeTeamIntelligencePanel(db, teamId){
           momentum: { home: momHome, away: momAway },
           drawBoost,
           volatility: psychVol,
+          matchChaos,
           riskTilt,
           confidence: effConf
         };
@@ -8751,6 +8829,20 @@ function computeTeamIntelligencePanel(db, teamId){
         const autoRead = `El ${dominantLabel.replace(/^[^ ]+ /, "").toLowerCase()} es favorito en el agregado (${(Math.max(result.pHome, result.pDraw, result.pAway)*100).toFixed(1)}%), pero ${(result.lAway >= 0.95 ? "el visitante tiene buena probabilidad de marcar" : "el flujo ofensivo está más repartido")}. El ${result.best.h}-${result.best.a} es el marcador individual más frecuente, aunque el conjunto de marcadores ${result.pHome >= result.pAway ? "favorables al local" : "favorables al visitante"} domina la distribución.`;
         const dominantWidth = Math.max(result.pHome, result.pDraw, result.pAway) || 1;
 
+        const teamStrengthHome = Math.round(teamStrength(db, homeId) * 50);
+        const teamStrengthAway = Math.round(teamStrength(db, awayId) * 50);
+        const dominanceDelta = teamStrengthHome - teamStrengthAway;
+        const dominanceLeader = dominanceDelta===0 ? "Empate" : (dominanceDelta>0 ? homeName : awayName);
+        const predictedWinnerName = result.pHome >= result.pDraw && result.pHome >= result.pAway
+          ? homeName
+          : (result.pAway >= result.pDraw ? awayName : "Empate");
+        const predictedWinnerProb = Math.max(result.pHome, result.pDraw, result.pAway);
+        const efficiencyLine = dominanceDelta===0
+          ? "Dominancia neutral"
+          : ((dominanceDelta>0 && predictedWinnerName===homeName) || (dominanceDelta<0 && predictedWinnerName===awayName)
+              ? "Modelo alineado con dominancia"
+              : "Modelo contradice dominancia");
+
         const multiplierLines = [
           `Base liga: ${breakdown.leagueBase.home.toFixed(2)}`,
           `Ataque local: ×${breakdown.homeAttackBoost.toFixed(2)}`,
@@ -8758,7 +8850,7 @@ function computeTeamIntelligencePanel(db, teamId){
           `Bias local: ×${(1 + (breakdown.teamBias.home.attack || 0)).toFixed(2)}`,
           `Stats: ×${((breakdown.statsAttackHome || 1) * (breakdown.statsAttackAway || 1)).toFixed(2)}`,
           `Table draw boost: +${((breakdown.drawBoost || 0)*100).toFixed(1)}%`,
-          `B³ draw/vol: ${(breakdown.b3?.drawBoost*100 || 0).toFixed(1)}% / x${(breakdown.b3?.volatility || 1).toFixed(2)}`,
+          `B³ draw/vol/chaos: ${(breakdown.b3?.drawBoost*100 || 0).toFixed(1)}% / x${(breakdown.b3?.volatility || 1).toFixed(2)} / ${(matchChaos*100).toFixed(0)}%`,
           `Mercado: ×${(breakdown.marketMultiplier || 1).toFixed(2)}`
         ];
 
@@ -8826,6 +8918,13 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-muted" style="margin-top:6px;">Equilibrio del partido: <b>${balanceLabel}</b> (Desbalance λ: ${lambdaGap.toFixed(2)} · Índice: ${(balance*100).toFixed(1)}%)</div>
           <div class="fl-muted" style="margin-top:6px;">Concentración del resultado: ${concentrationTxt}</div>
           <div class="fl-muted" style="margin-top:6px;">Marcadores dominantes: <b>${dominantTxt}</b></div>
+          <div style="margin-top:10px;font-weight:800;">Eficiencia vs Dominancia</div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span>Team Strength</span><b>${teamStrengthHome} · ${teamStrengthAway}</b></div>
+            <div><span>Dominance</span><b>${dominanceDelta>=0?'+':''}${dominanceDelta} ${dominanceLeader}</b></div>
+            <div><span>Predicted winner</span><b>${predictedWinnerName} ${(predictedWinnerProb*100).toFixed(1)}%</b></div>
+          </div>
+          <div class="fl-muted" style="margin-top:6px;">Efficiency: <b>${efficiencyLine}</b></div>
           <div class="fl-muted" style="margin-top:6px;">${bttsTxt}</div>
           <div class="fl-muted" style="margin-top:6px;">Lectura automática: ${autoRead}</div>
           <div class="fl-muted" style="margin-top:6px;">Corners esperados: <b>${result.cornersExpected.toFixed(1)}</b> · Tarjetas esperadas: <b>${result.cardsExpected.toFixed(1)}</b></div>
