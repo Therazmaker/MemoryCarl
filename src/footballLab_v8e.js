@@ -9362,7 +9362,10 @@ function computeTeamIntelligencePanel(db, teamId){
         edadMedia: avg("edadMedia", NaN),
         sampleSize: window.length,
         latestDate: latest?.date || "",
-        latestMatchId: latest?.matchId || ""
+        latestMatchId: latest?.matchId || "",
+        daysSinceLast: Number.isFinite(parseSortableDate(latest?.date))
+          ? Math.max(0, Math.round((Date.now() - parseSortableDate(latest.date)) / 86400000))
+          : 0
       };
     }
 
@@ -9393,6 +9396,37 @@ function computeTeamIntelligencePanel(db, teamId){
         `Pulse plantilla=${Math.round(Number(intel?.psych?.playerPulse) || 0)}; momentum5=${((Number(intel?.metrics?.momentum5) || 0.5) * 100).toFixed(0)}% → input ${momentumSigned.toFixed(2)}.`,
         `Importancia torneo derivada por tipo de competencia: ${competitionType}.`
       ].join(" ");
+    }
+
+    function buildTeamProfileStatusHtml(team, teamId, quality = null){
+      const teamPackIndex = getJsonStorage(TEAM_PACKS_INDEX_KEY);
+      const manifest = teamPackIndex?.[teamId] || {};
+      const rangeFrom = manifest?.range?.from || quality?.rangeFrom || "-";
+      const rangeTo = manifest?.range?.to || quality?.rangeTo || "-";
+      const cutoff = manifest?.cutoffDate || rangeTo || "-";
+      const matches = Number.isFinite(manifest?.matches) ? manifest.matches : (quality?.sampleSize || 0);
+      const pctStats = Number.isFinite(quality?.pctStats) ? quality.pctStats : 1;
+      const pctNarrative = Number.isFinite(quality?.pctNarrative) ? quality.pctNarrative : 1;
+      const pctSnapshots = Number.isFinite(quality?.pctSnapshots) ? quality.pctSnapshots : 1;
+      const score = Number.isFinite(quality?.score) ? quality.score : Math.round((Number(quality?.consistency) || 1) * 100);
+      const coverage = Number.isFinite(quality?.coverage) ? quality.coverage : 1;
+      const recency = Number.isFinite(quality?.recency) ? quality.recency : 1;
+      const daysSinceLast = Number.isFinite(quality?.daysSinceLast) ? quality.daysSinceLast : 0;
+      const completeness = Number.isFinite(quality?.completeness) ? quality.completeness : 1;
+      const consistency = Number.isFinite(quality?.consistency) ? quality.consistency : 1;
+      const missingCriticalRate = Number.isFinite(quality?.missingCriticalRate) ? quality.missingCriticalRate : 0;
+      const duplicateMatchIdRate = Number.isFinite(quality?.duplicateMatchIdRate) ? quality.duplicateMatchIdRate : 0;
+      const unorderedDateRate = Number.isFinite(quality?.unorderedDateRate) ? quality.unorderedDateRate : 0;
+      return [
+        `Equipo: <b>${team?.name || "-"}</b>`,
+        `Rango: <b>${rangeFrom}</b> → <b>${rangeTo}</b>`,
+        `Cutoff: <b>${cutoff}</b>`,
+        `Partidos: <b>${matches}</b> · Stats: <b>${Math.round(pctStats*100)}%</b> · Relato: <b>${Math.round(pctNarrative*100)}%</b> · Snapshots: <b>${Math.round(pctSnapshots*100)}%</b>`,
+        `<b>Conozco al ${team?.name || "equipo"}: ${score}%</b>`,
+        "Estoy usando los datos desde el perfil del equipo.",
+        `Cobertura: ${coverage.toFixed(2)} · Recencia: ${recency.toFixed(2)} (hace ${daysSinceLast} días) · Completitud: ${completeness.toFixed(2)} · Consistencia: ${consistency.toFixed(2)}`,
+        `Checks críticos → missingCriticalRate: ${missingCriticalRate.toFixed(2)} · duplicateMatchIdRate: ${duplicateMatchIdRate.toFixed(2)} · unorderedDateRate: ${unorderedDateRate.toFixed(2)}`
+      ].join("<br>");
     }
 
     function fillBrainMetricsFromTeam(teamId, leagueId, side = "A"){
@@ -9459,14 +9493,36 @@ function computeTeamIntelligencePanel(db, teamId){
       setInputValue(`brainDescanso${side}`, descansoBase);
       setInputValue(`brainMomentum${side}`, momentumBase, 2);
 
-      const snapshotSourceMsg = featuresSummary
-        ? `Métricas únicas activas: promedio de ${featuresSummary.sampleSize} partido(s)${featuresSummary.latestDate ? ` (último ${featuresSummary.latestDate})` : ""}.${featureSource === "team_profile" ? " Estoy usando los datos desde el perfil del equipo." : ""}`
-        : "Métricas únicas: sin snapshots calculados, usando baseline psicométrico.";
-
-      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. ${snapshotSourceMsg} Ajuste contextual -> pulse ${(ajusteContextual.pulse*100).toFixed(0)} pts, resiliencia ${(ajusteContextual.resiliencia*100).toFixed(0)} pts, agresividad ${(ajusteContextual.agresividad*100).toFixed(0)} pts. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned, {
-        tracker: historicalTracker,
-        historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
-      })}`;
+      if(statusEl){
+        if(featuresSummary && featureSource === "team_profile"){
+          const quality = {
+            sampleSize: featuresSummary.sampleSize,
+            rangeFrom: recentFeatureWindow?.[0]?.date || "-",
+            rangeTo: featuresSummary.latestDate || "-",
+            score: Math.round((Number(intel?.metrics?.consistencyScore) || 0)),
+            coverage: clamp((featuresSummary.sampleSize || 0) / 20, 0, 1),
+            recency: clamp(Math.exp(-(Number.isFinite(featuresSummary.daysSinceLast) ? featuresSummary.daysSinceLast : 0) / 30), 0, 1),
+            daysSinceLast: Number.isFinite(featuresSummary.daysSinceLast) ? featuresSummary.daysSinceLast : 0,
+            completeness: 1,
+            consistency: clamp((Number(intel?.metrics?.consistencyScore) || 0) / 100, 0, 1),
+            pctStats: 1,
+            pctNarrative: 1,
+            pctSnapshots: 1,
+            missingCriticalRate: 0,
+            duplicateMatchIdRate: 0,
+            unorderedDateRate: 0
+          };
+          statusEl.innerHTML = buildTeamProfileStatusHtml(team, teamId, quality);
+        }else{
+          const snapshotSourceMsg = featuresSummary
+            ? `Métricas únicas activas: promedio de ${featuresSummary.sampleSize} partido(s)${featuresSummary.latestDate ? ` (último ${featuresSummary.latestDate})` : ""}.`
+            : "Métricas únicas: sin snapshots calculados, usando baseline psicométrico.";
+          statusEl.textContent = `✅ Métricas cargadas para ${team.name}. ${snapshotSourceMsg} Ajuste contextual -> pulse ${(ajusteContextual.pulse*100).toFixed(0)} pts, resiliencia ${(ajusteContextual.resiliencia*100).toFixed(0)} pts, agresividad ${(ajusteContextual.agresividad*100).toFixed(0)} pts. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned, {
+            tracker: historicalTracker,
+            historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
+          })}`;
+        }
+      }
     }
 
     function pickNarrativeVariant(variants, seed = 0){
