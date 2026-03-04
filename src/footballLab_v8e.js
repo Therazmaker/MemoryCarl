@@ -147,6 +147,29 @@ export function initFootballLab(){
     return out;
   }
 
+  function parseBrainV2StatsToStatsRaw(raw = ""){
+    if(!raw) return { kind: "match_stats", stats: [] };
+    const text = String(raw || "").trim();
+    try{
+      const parsed = parseStatsPayload(text);
+      if(Array.isArray(parsed) && parsed.length){
+        return { kind: "match_stats", stats: parsed };
+      }
+    }catch(_err){
+      // fallback: texto libre key: valor
+    }
+    const numeric = parseNumericStats(text);
+    const labelize = (key="")=>String(key || "")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c)=>c.toUpperCase());
+    const stats = Object.entries(numeric).map(([key, value])=>({
+      key: labelize(key),
+      home: String(value),
+      away: "0"
+    }));
+    return { kind: "match_stats", stats };
+  }
+
   function summarizeTeamMemory(matches = []){
     const rows = Array.isArray(matches) ? matches : [];
     const totals = {};
@@ -257,6 +280,29 @@ export function initFootballLab(){
       });
     });
     return { matches };
+  }
+
+  function buildTeamPackFromBrainV2Memories(memories = [], teamName = "Equipo"){
+    const list = Array.isArray(memories) ? memories : [];
+    const matches = list.map((row, idx)=>{
+      const score = String(row?.score || "0-0");
+      const hit = score.match(/(\d+)\s*[-:]\s*(\d+)/);
+      const teamGoals = hit ? Number(hit[1]) : 0;
+      const oppGoals = hit ? Number(hit[2]) : 0;
+      return {
+        matchId: String(row?.id || `b2_${idx}`),
+        matchDate: row?.date || new Date().toISOString().slice(0,10),
+        homeAway: "home",
+        opponent: { name: row?.opponent || "Rival" },
+        scoreFT: { home: teamGoals, away: oppGoals },
+        narrativeRaw: String(row?.narrative || ""),
+        statsRaw: parseBrainV2StatsToStatsRaw(row?.statsRaw || "")
+      };
+    });
+    return {
+      team: { name: teamName || "Equipo" },
+      matches
+    };
   }
 
   const BRAIN_V2_PHASES = [
