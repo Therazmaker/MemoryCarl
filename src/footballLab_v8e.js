@@ -7747,7 +7747,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const memoryRows = teamMemories.slice(0, 8).map((m)=>{
         const story = m?.summary?.story || (m.narrative || "").slice(0, 90);
         const tags = (m?.summary?.reasons || []).slice(0, 2).map((r)=>`${r.tag} ${(r.strength*100).toFixed(0)}%`).join(" · ");
-        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${story}<div class="fl-mini">${tags || "Sin razones"}</div></td><td><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></td></tr>`;
+        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${story}<div class="fl-mini">${tags || "Sin razones"}</div></td><td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Ver por qué</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></div></td></tr>`;
       }).join("");
       const selectedTeamSummary = summarizeTeamMemory(teamMemories);
       const selectedTeamHasBrain = selectedTeamSummary.samples > 0;
