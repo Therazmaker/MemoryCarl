@@ -25,6 +25,7 @@ export function initFootballLab(){
   const TEAM_PACKS_STORE = "packs";
   const TEAM_MODELS_KEY = "FL_TEAMMODELS";
   const TEAM_BRAIN_FEATURES_KEY = "FL_TEAM_BRAIN_FEATURES";
+  const BRAIN_V2_KEY = "FL_BRAIN_V2";
   const hybridBrain = new HybridBrainService();
 
   const defaultDb = {
@@ -92,6 +93,111 @@ export function initFootballLab(){
     }catch(_err){
       return fallback;
     }
+  }
+
+  function loadBrainV2(){
+    const raw = localStorage.getItem(BRAIN_V2_KEY);
+    const parsed = safeParseJSON(raw, {});
+    return {
+      memories: parsed && typeof parsed === "object" && parsed.memories && typeof parsed.memories === "object"
+        ? parsed.memories
+        : {}
+    };
+  }
+
+  function saveBrainV2(state){
+    localStorage.setItem(BRAIN_V2_KEY, JSON.stringify(state || { memories: {} }));
+  }
+
+  function parseNumericStats(raw = ""){
+    const out = {};
+    const text = String(raw || "");
+    const matcher = /([^\n:=]{2,40})\s*[:=]\s*(-?\d+(?:[.,]\d+)?)/g;
+    let hit;
+    while((hit = matcher.exec(text))){
+      const key = String(hit[1] || "").trim().toLowerCase().replace(/\s+/g, "_");
+      const value = Number(String(hit[2] || "").replace(",", "."));
+      if(!key || Number.isNaN(value)) continue;
+      out[key] = value;
+    }
+    return out;
+  }
+
+  function summarizeTeamMemory(matches = []){
+    const rows = Array.isArray(matches) ? matches : [];
+    const totals = {};
+    const counts = {};
+    let positive = 0;
+    let negative = 0;
+    rows.forEach((m)=>{
+      const stats = parseNumericStats(m?.statsRaw || "");
+      Object.entries(stats).forEach(([k,v])=>{
+        totals[k] = (totals[k] || 0) + v;
+        counts[k] = (counts[k] || 0) + 1;
+      });
+      const text = String(m?.narrative || "").toLowerCase();
+      if(/domin|creativ|presion|solido|efectiv|control/.test(text)) positive += 1;
+      if(/error|roja|lesion|fall|debil|desorden|fragil/.test(text)) negative += 1;
+    });
+    const avg = {};
+    Object.keys(totals).forEach((k)=>{
+      avg[k] = totals[k] / Math.max(1, counts[k] || 1);
+    });
+    return { samples: rows.length, avg, positive, negative };
+  }
+
+  function buildBrainV2Vision({ homeSummary, awaySummary, odds }){
+    const get = (s, key, fallback)=>Number(s?.avg?.[key] ?? fallback);
+    const homePower = (get(homeSummary, "xg", 1.2) * 0.45) + (get(homeSummary, "shots", 10) * 0.03) + (get(homeSummary, "possession", 50) * 0.01) + ((homeSummary.positive - homeSummary.negative) * 0.08);
+    const awayPower = (get(awaySummary, "xg", 1.1) * 0.45) + (get(awaySummary, "shots", 9) * 0.03) + (get(awaySummary, "possession", 50) * 0.01) + ((awaySummary.positive - awaySummary.negative) * 0.08);
+    const rawDiff = clamp((homePower - awayPower) * 0.22, -0.65, 0.65);
+    const modelHome = clamp(0.45 + rawDiff, 0.08, 0.85);
+    const modelAway = clamp(0.35 - rawDiff * 0.8, 0.07, 0.78);
+    const modelDraw = clamp(1 - modelHome - modelAway, 0.08, 0.5);
+    const normBase = modelHome + modelDraw + modelAway;
+
+    const cleanOdds = {
+      home: Number(odds?.home),
+      draw: Number(odds?.draw),
+      away: Number(odds?.away)
+    };
+    let blended = {
+      home: modelHome / normBase,
+      draw: modelDraw / normBase,
+      away: modelAway / normBase
+    };
+    const hasOdds = cleanOdds.home > 1 && cleanOdds.draw > 1 && cleanOdds.away > 1;
+    if(hasOdds){
+      const ih = 1 / cleanOdds.home;
+      const id = 1 / cleanOdds.draw;
+      const ia = 1 / cleanOdds.away;
+      const sum = ih + id + ia || 1;
+      const market = { home: ih / sum, draw: id / sum, away: ia / sum };
+      blended = {
+        home: (blended.home * 0.72) + (market.home * 0.28),
+        draw: (blended.draw * 0.72) + (market.draw * 0.28),
+        away: (blended.away * 0.72) + (market.away * 0.28)
+      };
+    }
+
+    const missing = [];
+    if(homeSummary.samples < 3) missing.push("Pocos partidos del local (ideal 5+).");
+    if(awaySummary.samples < 3) missing.push("Pocos partidos del visitante (ideal 5+).");
+    if(!get(homeSummary, "xg", 0) || !get(awaySummary, "xg", 0)) missing.push("Faltan métricas xG en uno de los equipos.");
+
+    const bars = {
+      homeAttack: clamp(Math.round((get(homeSummary, "xg", 1.2) / 2.6) * 100), 15, 98),
+      awayAttack: clamp(Math.round((get(awaySummary, "xg", 1.1) / 2.6) * 100), 15, 98),
+      homeControl: clamp(Math.round(get(homeSummary, "possession", 50)), 15, 95),
+      awayControl: clamp(Math.round(get(awaySummary, "possession", 50)), 15, 95)
+    };
+
+    return {
+      probs: blended,
+      confidence: clamp(0.45 + Math.abs(blended.home - blended.away) * 0.7 + ((homeSummary.samples + awaySummary.samples) / 50), 0.2, 0.96),
+      missing,
+      bars
+    };
   }
 
   function loadDb(){
@@ -5808,7 +5914,7 @@ function computeTeamIntelligencePanel(db, teamId){
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","momentum","bitacora","market"];
+    const tabs = ["home","liga","tracker","versus","brainv2","momentum","bitacora","market"];
     const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
 
     app.innerHTML = `
@@ -7180,6 +7286,141 @@ function computeTeamIntelligencePanel(db, teamId){
       };
       return;
     }
+
+    if(view==="brainv2"){
+      const brainV2 = loadBrainV2();
+      const selectedLeagueId = payload.leagueId || db.settings.selectedLeagueId || db.leagues[0]?.id || "";
+      const leagues = db.leagues.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+      const leagueOptions = leagues.map((l)=>`<option value="${l.id}" ${selectedLeagueId===l.id?"selected":""}>${l.name}</option>`).join("");
+      const leagueTeams = selectedLeagueId ? getTeamsForLeague(db, selectedLeagueId) : db.teams;
+      const sortedTeams = leagueTeams.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+      const selectedTeamId = payload.teamId || sortedTeams[0]?.id || "";
+      const teamOptions = sortedTeams.map((t)=>`<option value="${t.id}" ${selectedTeamId===t.id?"selected":""}>${t.name}</option>`).join("");
+      const teamMemories = (brainV2.memories[selectedTeamId] || []).slice().sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date));
+      const memoryRows = teamMemories.slice(0, 8).map((m)=>`<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${(m.narrative || "").slice(0, 90)}</td></tr>`).join("");
+
+      const allTeams = db.teams.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+      const homeId = payload.homeId || allTeams[0]?.id || "";
+      const awayId = payload.awayId || allTeams[1]?.id || allTeams[0]?.id || "";
+      const teamOptionFull = (chosen="") => allTeams.map((t)=>`<option value="${t.id}" ${chosen===t.id?"selected":""}>${t.name}</option>`).join("");
+
+      content.innerHTML = `
+        <div class="fl-card">
+          <div style="font-size:20px;font-weight:900;">🧠 Brain v2 · Entrenamiento incremental</div>
+          <div class="fl-muted" style="margin-top:4px;">Guarda partidos por equipo (stats + relato) para construir memoria y preparar datasets TensorFlow.</div>
+        </div>
+        <div class="fl-card">
+          <div class="fl-grid two">
+            <div>
+              <label class="fl-muted">Liga</label>
+              <select id="b2League" class="fl-select"><option value="">Todas</option>${leagueOptions}</select>
+            </div>
+            <div>
+              <label class="fl-muted">Equipo</label>
+              <select id="b2Team" class="fl-select"><option value="">Selecciona equipo</option>${teamOptions}</select>
+            </div>
+          </div>
+          <div class="fl-grid two" style="margin-top:10px;">
+            <input id="b2Date" type="date" class="fl-input" value="${new Date().toISOString().slice(0,10)}" />
+            <input id="b2Opponent" class="fl-input" placeholder="Rival" />
+          </div>
+          <textarea id="b2Stats" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="xg: 1.8
+shots: 13
+possession: 57
+passes: 425"></textarea>
+          <textarea id="b2Narrative" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="Relato del partido: ritmo, lesiones, presión, cambios..."></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
+            <span id="b2Status" class="fl-muted"></span>
+          </div>
+          <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Relato</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="3" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
+        </div>
+        <div class="fl-card">
+          <div style="font-size:18px;font-weight:800;">🎯 Simulador visual Local vs Visita</div>
+          <div class="fl-grid two" style="margin-top:8px;">
+            <select id="b2Home" class="fl-select"><option value="">Equipo local</option>${teamOptionFull(homeId)}</select>
+            <select id="b2Away" class="fl-select"><option value="">Equipo visita</option>${teamOptionFull(awayId)}</select>
+          </div>
+          <div class="fl-row" style="margin-top:8px;">
+            <input id="b2OddH" class="fl-input" type="number" step="0.01" placeholder="Cuota Local" style="max-width:150px;" />
+            <input id="b2OddD" class="fl-input" type="number" step="0.01" placeholder="Cuota Empate" style="max-width:150px;" />
+            <input id="b2OddA" class="fl-input" type="number" step="0.01" placeholder="Cuota Visita" style="max-width:150px;" />
+            <button class="fl-btn" id="b2Simulate">Simular visión</button>
+          </div>
+          <div id="b2Vision" class="fl-mini" style="margin-top:10px;">Carga local/visita para ver la simulación visual.</div>
+        </div>
+      `;
+
+      document.getElementById('b2League')?.addEventListener('change', (e)=>{
+        db.settings.selectedLeagueId = e.target.value || "";
+        saveDb(db);
+        render('brainv2', { leagueId: e.target.value || "" });
+      });
+      document.getElementById('b2Team')?.addEventListener('change', (e)=>render('brainv2', { leagueId: selectedLeagueId, teamId: e.target.value || "" }));
+
+      document.getElementById('b2SaveMatch')?.addEventListener('click', ()=>{
+        const status = document.getElementById('b2Status');
+        const teamId = document.getElementById('b2Team')?.value || "";
+        if(!teamId){ status.textContent = 'Selecciona un equipo.'; return; }
+        const row = {
+          id: uid('b2m'),
+          teamId,
+          leagueId: document.getElementById('b2League')?.value || "",
+          date: document.getElementById('b2Date')?.value || new Date().toISOString().slice(0,10),
+          opponent: (document.getElementById('b2Opponent')?.value || '').trim(),
+          statsRaw: (document.getElementById('b2Stats')?.value || '').trim(),
+          narrative: (document.getElementById('b2Narrative')?.value || '').trim(),
+          createdAt: Date.now()
+        };
+        brainV2.memories[teamId] ||= [];
+        brainV2.memories[teamId].push(row);
+        saveBrainV2(brainV2);
+        status.textContent = `✅ Partido guardado. Memoria total: ${brainV2.memories[teamId].length}`;
+        render('brainv2', { leagueId: selectedLeagueId, teamId });
+      });
+
+      document.getElementById('b2Simulate')?.addEventListener('click', ()=>{
+        const homeIdSel = document.getElementById('b2Home')?.value || "";
+        const awayIdSel = document.getElementById('b2Away')?.value || "";
+        const out = document.getElementById('b2Vision');
+        if(!homeIdSel || !awayIdSel || homeIdSel===awayIdSel){ out.textContent = 'Selecciona dos equipos distintos.'; return; }
+        const homeTeam = db.teams.find((t)=>t.id===homeIdSel);
+        const awayTeam = db.teams.find((t)=>t.id===awayIdSel);
+        const homeSummary = summarizeTeamMemory(brainV2.memories[homeIdSel] || []);
+        const awaySummary = summarizeTeamMemory(brainV2.memories[awayIdSel] || []);
+        const vision = buildBrainV2Vision({
+          homeSummary,
+          awaySummary,
+          odds: {
+            home: document.getElementById('b2OddH')?.value,
+            draw: document.getElementById('b2OddD')?.value,
+            away: document.getElementById('b2OddA')?.value
+          }
+        });
+        const pH = (vision.probs.home * 100).toFixed(1);
+        const pD = (vision.probs.draw * 100).toFixed(1);
+        const pA = (vision.probs.away * 100).toFixed(1);
+        const conf = (vision.confidence * 100).toFixed(0);
+        out.innerHTML = `
+          <div style="font-weight:800;">${homeTeam?.name || 'Local'} vs ${awayTeam?.name || 'Visita'}</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
+            <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Local</div><div style="font-size:22px;font-weight:900;">${pH}%</div></div>
+            <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Empate</div><div style="font-size:22px;font-weight:900;">${pD}%</div></div>
+            <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Visita</div><div style="font-size:22px;font-weight:900;">${pA}%</div></div>
+          </div>
+          <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples}</div>
+          <div style="margin-top:10px;display:grid;gap:6px;">
+            <div>⚔️ Ataque local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.homeAttack}%;height:8px;background:#3fb950;border-radius:999px;"></div></div></div>
+            <div>🛡️ Ataque visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.awayAttack}%;height:8px;background:#58a6ff;border-radius:999px;"></div></div></div>
+            <div>🎛️ Control local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.homeControl}%;height:8px;background:#f2cc60;border-radius:999px;"></div></div></div>
+            <div>🧭 Control visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.awayControl}%;height:8px;background:#d2a8ff;border-radius:999px;"></div></div></div>
+          </div>
+          <div class="fl-mini" style="margin-top:8px;">${vision.missing.length ? `⚠️ Falta info: ${vision.missing.join(' · ')}` : '✅ Dataset suficiente para seguir mejorando el modelo TensorFlow.'}</div>
+        `;
+      });
+      return;
+    }
+
 
     if(view==="momentum"){
       const teamOptions = db.teams.map(t=>`<option value="${t.name}">${t.name}</option>`).join("");
