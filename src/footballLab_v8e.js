@@ -4,6 +4,7 @@
  */
 
 import { Cerebelo } from "./Cerebelo.js";
+import { HybridBrainService, inferOutcomeLabel, estimateLiveDelta } from "./HybridBrain.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -23,6 +24,7 @@ export function initFootballLab(){
   const TEAM_PACKS_STORE = "packs";
   const TEAM_MODELS_KEY = "FL_TEAMMODELS";
   const TEAM_BRAIN_FEATURES_KEY = "FL_TEAM_BRAIN_FEATURES";
+  const hybridBrain = new HybridBrainService();
 
   const defaultDb = {
     settings: {
@@ -9059,6 +9061,32 @@ function computeTeamIntelligencePanel(db, teamId){
           Ingresa las métricas de dos equipos para construir sus Vectores de Estado normalizados.
           El cerebro procesa ambos y calcula una ventaja relativa (duelo de vectores) en tiempo real.
         </div>
+        <div class="fl-card" style="margin-bottom:12px;padding:10px;border-left:4px solid #3fb950;background:#0d1117;">
+          <div style="font-weight:800;margin-bottom:8px;">🧠 Cerebro Real v2 — Híbrido (tabular + secuencias)</div>
+          <div class="fl-grid two" style="gap:10px;">
+            <div>
+              <label class="fl-muted">JSON de entrenamiento (matches / teams)
+                <textarea id="hybridBrainJson" class="fl-text" style="min-height:110px;margin-top:4px;" placeholder='{"matches":[...]}'></textarea>
+              </label>
+              <label class="fl-muted">Texto Live / Pre-match para inferencia
+                <textarea id="hybridBrainText" class="fl-text" style="min-height:70px;margin-top:4px;" placeholder="SHOT_ON_TARGET minute 68, BIG_CHANCE, RED_CARD..."></textarea>
+              </label>
+            </div>
+            <div>
+              <label class="fl-muted">Features tabulares (JSON)
+                <textarea id="hybridBrainTabular" class="fl-text" style="min-height:150px;margin-top:4px;" placeholder='{"elo_home":1540,"elo_away":1490,"minute":0,"is_live_slice":0}'></textarea>
+              </label>
+            </div>
+          </div>
+          <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+            <button class="fl-btn" id="hybridBuildDataset">Build Dataset</button>
+            <button class="fl-btn" id="hybridTrain">Train</button>
+            <button class="fl-btn secondary" id="hybridLoad">Load</button>
+            <button class="fl-btn secondary" id="hybridPredict">Pre/Live Predict</button>
+            <button class="fl-btn secondary" id="hybridExplain">Explain</button>
+          </div>
+          <div id="hybridBrainLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Modelo híbrido listo para dataset builder.</div>
+        </div>
         <div class="fl-grid two" style="margin-bottom:12px;">
           <div class="fl-card" style="padding:10px;">
             <div style="font-weight:800;margin-bottom:8px;">Equipo A (Local · ej. Everton)</div>
@@ -9225,6 +9253,101 @@ function computeTeamIntelligencePanel(db, teamId){
         </div>
       </div>
     `;
+
+
+    const hybridLogsEl = document.getElementById("hybridBrainLogs");
+    const hybridJsonEl = document.getElementById("hybridBrainJson");
+    const hybridTextEl = document.getElementById("hybridBrainText");
+    const hybridTabularEl = document.getElementById("hybridBrainTabular");
+
+    function renderHybridStatus(extra=""){
+      if(!hybridLogsEl) return;
+      const status = hybridBrain.modelStatus();
+      const metrics = status.metrics || {};
+      hybridLogsEl.textContent = [
+        `Brain status: ${status.loaded ? "Loaded" : "Not trained"}`,
+        `Features version: ${status.featureSchemaVersion}`,
+        `Total matches: ${hybridBrain.matchIds?.length || 0}`,
+        `Total live slices: ${Math.max(0, (hybridBrain.examples?.length || 0) - (hybridBrain.matchIds?.length || 0))}`,
+        `Samples: ${status.sampleCount || 0}`,
+        `Vocab size: ${status.vocabSize || 0}`,
+        `Val accuracy: ${Number.isFinite(metrics.valAcc) ? metrics.valAcc.toFixed(3) : "-"}`,
+        `Val logloss: ${Number.isFinite(metrics.valLogLoss) ? metrics.valLogLoss.toFixed(3) : "-"}`,
+        `Val goals MAE: ${Number.isFinite(metrics.valGoalsMae) ? metrics.valGoalsMae.toFixed(3) : "-"}`,
+        status.trainedAt ? `Last trained: ${status.trainedAt}` : "Last trained: -",
+        extra
+      ].filter(Boolean).join("\n");
+    }
+
+    if(hybridTabularEl && !hybridTabularEl.value.trim()){
+      hybridTabularEl.value = JSON.stringify({ elo_home: 1540, elo_away: 1490, form_points_home: 11, form_points_away: 7, minute: 0, is_live_slice: 0 }, null, 2);
+    }
+
+    document.getElementById("hybridBuildDataset")?.addEventListener("click", ()=>{
+      try{
+        const pack = HybridBrainService.parsePack(hybridJsonEl?.value || "{}");
+        const meta = hybridBrain.buildDataset(pack);
+        renderHybridStatus(`Dataset construido con ${meta.sampleCount} ejemplos.`);
+      }catch(err){
+        renderHybridStatus(`❌ Build Dataset error: ${err.message}`);
+      }
+    });
+
+    document.getElementById("hybridTrain")?.addEventListener("click", async ()=>{
+      try{
+        renderHybridStatus("⏳ Training...");
+        const metrics = await hybridBrain.train({ epochs: 14, batchSize: 32, trainRatio: 0.8 });
+        await hybridBrain.save();
+        renderHybridStatus(`✅ Train completado · acc=${(metrics.valAcc || 0).toFixed(3)} · logloss=${Number.isFinite(metrics.valLogLoss) ? metrics.valLogLoss.toFixed(3) : "-"}`);
+      }catch(err){
+        renderHybridStatus(`❌ Train error: ${err.message}`);
+      }
+    });
+
+    document.getElementById("hybridLoad")?.addEventListener("click", async ()=>{
+      try{
+        await hybridBrain.load();
+        renderHybridStatus("✅ Modelo híbrido restaurado desde local storage/IndexedDB.");
+      }catch(err){
+        renderHybridStatus(`⚠️ Load warning: ${err.message}`);
+      }
+    });
+
+    document.getElementById("hybridPredict")?.addEventListener("click", async ()=>{
+      try{
+        const tabular = JSON.parse(hybridTabularEl?.value || "{}");
+        const text = hybridTextEl?.value || "";
+        const pre = await hybridBrain.predict({ tabular: { ...tabular, is_live_slice: 0 }, text: "" });
+        const live = await hybridBrain.predict({ tabular: { ...tabular, is_live_slice: 1 }, text });
+        const delta = estimateLiveDelta(pre.probs, live.probs);
+        renderHybridStatus(
+          `🎯 Pre-match: ${inferOutcomeLabel(pre.probs)} | H:${(pre.probs.homeWin*100).toFixed(1)} D:${(pre.probs.draw*100).toFixed(1)} A:${(pre.probs.awayWin*100).toFixed(1)}
+` +
+          `📡 Live: ${inferOutcomeLabel(live.probs)} | H:${(live.probs.homeWin*100).toFixed(1)} D:${(live.probs.draw*100).toFixed(1)} A:${(live.probs.awayWin*100).toFixed(1)}
+` +
+          `⚡ ΔP softmax [H,D,A]: ${delta.map((v)=>v.toFixed(3)).join(", ")}
+` +
+          `⚽ xG esperado pre/live: ${pre.goals.home.toFixed(2)}-${pre.goals.away.toFixed(2)} / ${live.goals.home.toFixed(2)}-${live.goals.away.toFixed(2)}`
+        );
+      }catch(err){
+        renderHybridStatus(`❌ Predict error: ${err.message}`);
+      }
+    });
+
+    document.getElementById("hybridExplain")?.addEventListener("click", async ()=>{
+      try{
+        const tabular = JSON.parse(hybridTabularEl?.value || "{}");
+        const text = hybridTextEl?.value || "";
+        const explanation = await hybridBrain.explainPrediction({ tabular, text });
+        const reasons = explanation.topFeatures.map((row)=>`${row.feature}: ${row.deltaHomeWin>=0?"+":""}${row.deltaHomeWin.toFixed(3)}`).join(" | ");
+        renderHybridStatus(`🧩 Top features: ${reasons}
+🔎 Tokens/eventos: ${(explanation.keywords || []).join(", ") || "none"}`);
+      }catch(err){
+        renderHybridStatus(`❌ Explain error: ${err.message}`);
+      }
+    });
+
+    renderHybridStatus();
 
     const LABELS = [
       "Pulse","Fatiga","Resiliencia","Agresividad",
