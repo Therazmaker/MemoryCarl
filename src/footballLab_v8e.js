@@ -8716,6 +8716,51 @@ function computeTeamIntelligencePanel(db, teamId){
       el.value = decimals > 0 ? next.toFixed(decimals) : String(Math.round(next));
     }
 
+    function getRecentTeamFeatureWindow(teamId, options = {}){
+      const tracker = Array.isArray(options?.tracker) ? options.tracker : db.tracker;
+      const historicalDate = String(options?.historicalDate || "").trim();
+      const referenceTs = parseSortableDate(historicalDate);
+      return tracker
+        .filter((m)=>m.homeId===teamId || m.awayId===teamId)
+        .filter((m)=>{
+          if(!Number.isFinite(referenceTs)) return true;
+          const matchTs = parseSortableDate(m.date);
+          return Number.isFinite(matchTs) && matchTs < referenceTs;
+        })
+        .slice()
+        .sort(compareByDateAsc)
+        .filter((m)=>Boolean(m?.featureSnapshots?.[teamId]?.features))
+        .slice(-3)
+        .map((match)=>({
+          matchId: match.id,
+          date: match.date,
+          features: match?.featureSnapshots?.[teamId]?.features || {}
+        }));
+    }
+
+    function summarizeTeamFeatureWindow(window = []){
+      if(!Array.isArray(window) || !window.length) return null;
+      const avg = (key, fallback)=>{
+        const list = window.map((row)=>Number(row?.features?.[key])).filter(Number.isFinite);
+        return list.length ? average(list, fallback) : fallback;
+      };
+      const latest = window[window.length - 1] || null;
+      return {
+        pulse: avg("pulse", NaN),
+        fatiga: avg("fatiga", NaN),
+        resiliencia: avg("resiliencia", NaN),
+        agresividad: avg("agresividad", NaN),
+        volatilidad: avg("volatilidad", NaN),
+        momentum: avg("momentum", NaN),
+        importancia: avg("importancia", NaN),
+        descanso: avg("descanso", NaN),
+        edadMedia: avg("edadMedia", NaN),
+        sampleSize: window.length,
+        latestDate: latest?.date || "",
+        latestMatchId: latest?.matchId || ""
+      };
+    }
+
     function describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned, options = {}){
       const tracker = Array.isArray(options?.tracker) ? options.tracker : db.tracker;
       const playerCount = db.players.filter((p)=>p.teamId===teamId).length;
@@ -8762,24 +8807,57 @@ function computeTeamIntelligencePanel(db, teamId){
       const intel = computeTeamIntelligencePanel(dbForCalc, teamId);
       const momentumSigned = clamp((Number(intel.metrics?.momentum5) || 0.5) * 2 - 1, -1, 1);
       const ajusteContextual = obtenerAjusteContextual(db, teamId);
-      const pulseAjustado = clamp((intel.psych?.playerPulse ?? 50) + ajusteContextual.pulse * 100, 0, 100);
-      const resilienciaAjustada = clamp((intel.psych?.resilience ?? 50) + ajusteContextual.resiliencia * 100, 0, 100);
-      const agresividadAjustada = clamp((intel.psych?.aggressiveness ?? 50) + ajusteContextual.agresividad * 100, 0, 100);
+
+      const recentFeatureWindow = getRecentTeamFeatureWindow(teamId, {
+        tracker: historicalTracker,
+        historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
+      });
+      const featuresSummary = summarizeTeamFeatureWindow(recentFeatureWindow);
+
+      const pulseBase = Number.isFinite(featuresSummary?.pulse)
+        ? featuresSummary.pulse
+        : (intel.psych?.playerPulse ?? 50);
+      const fatigaBase = Number.isFinite(featuresSummary?.fatiga)
+        ? featuresSummary.fatiga
+        : (intel.psych?.fatigue ?? 40);
+      const resilienciaBase = Number.isFinite(featuresSummary?.resiliencia)
+        ? featuresSummary.resiliencia
+        : (intel.psych?.resilience ?? 50);
+      const agresividadBase = Number.isFinite(featuresSummary?.agresividad)
+        ? featuresSummary.agresividad
+        : (intel.psych?.aggressiveness ?? 50);
+      const volatilidadBase = Number.isFinite(featuresSummary?.volatilidad)
+        ? featuresSummary.volatilidad
+        : (intel.psych?.volatility ?? 50);
+      const descansoBase = Number.isFinite(featuresSummary?.descanso)
+        ? featuresSummary.descanso
+        : restDaysForTeam(teamId, {
+          tracker: historicalTracker,
+          referenceDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
+        });
+      const momentumBase = Number.isFinite(featuresSummary?.momentum)
+        ? featuresSummary.momentum
+        : momentumSigned;
+
+      const pulseAjustado = clamp(pulseBase + ajusteContextual.pulse * 100, 0, 100);
+      const resilienciaAjustada = clamp(resilienciaBase + ajusteContextual.resiliencia * 100, 0, 100);
+      const agresividadAjustada = clamp(agresividadBase + ajusteContextual.agresividad * 100, 0, 100);
 
       setInputValue(`brainPulse${side}`, pulseAjustado);
-      setInputValue(`brainFatiga${side}`, intel.psych?.fatigue ?? 40);
+      setInputValue(`brainFatiga${side}`, fatigaBase);
       setInputValue(`brainResiliencia${side}`, resilienciaAjustada);
       setInputValue(`brainAgresividad${side}`, agresividadAjustada);
-      setInputValue(`brainVolatilidad${side}`, intel.psych?.volatility ?? 50);
-      setInputValue(`brainEdad${side}`, clamp(avgAgeForTeam(teamId), 17, 40));
+      setInputValue(`brainVolatilidad${side}`, volatilidadBase);
+      setInputValue(`brainEdad${side}`, clamp(Number.isFinite(featuresSummary?.edadMedia) ? featuresSummary.edadMedia : avgAgeForTeam(teamId), 17, 40));
       setInputValue(`brainImportancia${side}`, estimatedTournamentImportance(leagueId), 2);
-      setInputValue(`brainDescanso${side}`, restDaysForTeam(teamId, {
-        tracker: historicalTracker,
-        referenceDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
-      }));
-      setInputValue(`brainMomentum${side}`, momentumSigned, 2);
+      setInputValue(`brainDescanso${side}`, descansoBase);
+      setInputValue(`brainMomentum${side}`, momentumBase, 2);
 
-      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. Ajuste contextual -> pulse ${(ajusteContextual.pulse*100).toFixed(0)} pts, resiliencia ${(ajusteContextual.resiliencia*100).toFixed(0)} pts, agresividad ${(ajusteContextual.agresividad*100).toFixed(0)} pts. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned, {
+      const snapshotSourceMsg = featuresSummary
+        ? `Métricas únicas activas: promedio de ${featuresSummary.sampleSize} partido(s)${featuresSummary.latestDate ? ` (último ${featuresSummary.latestDate})` : ""}.`
+        : "Métricas únicas: sin snapshots calculados, usando baseline psicométrico.";
+
+      if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. ${snapshotSourceMsg} Ajuste contextual -> pulse ${(ajusteContextual.pulse*100).toFixed(0)} pts, resiliencia ${(ajusteContextual.resiliencia*100).toFixed(0)} pts, agresividad ${(ajusteContextual.agresividad*100).toFixed(0)} pts. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned, {
         tracker: historicalTracker,
         historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
       })}`;
