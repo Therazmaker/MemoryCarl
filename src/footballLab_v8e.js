@@ -1984,6 +1984,130 @@ export function initFootballLab(){
     };
   }
 
+  function parseTeamPackStatsBySide(match){
+    let statsRaw = match?.statsRaw;
+    if(typeof statsRaw === "string") statsRaw = safeParseJSON(statsRaw, null);
+    const statsList = Array.isArray(statsRaw?.stats)
+      ? statsRaw.stats
+      : Array.isArray(statsRaw)
+        ? statsRaw
+        : [];
+    const normalized = normalizeStatsForMatch({ stats: statsList });
+    const isHome = String(match?.homeAway || "").toLowerCase() === "home";
+    const side = isHome ? "home" : "away";
+    const oppSide = isHome ? "away" : "home";
+    const pick = (regex)=>{
+      const key = Object.keys(normalized).find((k)=>regex.test(k));
+      if(!key) return { own: 0, opp: 0 };
+      return {
+        own: Number(normalized[key]?.[side]) || 0,
+        opp: Number(normalized[key]?.[oppSide]) || 0
+      };
+    };
+    return {
+      shots: pick(/shots\s*on\s*target|tiros?\s*a\s*puerta|remates?\s*a\s*puerta/i),
+      shotsAll: pick(/shots|remates|tiros/i),
+      corners: pick(/corners?|c[oó]rners?/i),
+      possession: pick(/possession|posesi[oó]n/i),
+      bigChances: pick(/big\s*chances?|ocasiones?\s*claras?/i),
+      cards: pick(/cards|tarjetas|amarillas|rojas/i),
+      xg: pick(/(^|\s)xg|goles\s*esperados/i)
+    };
+  }
+
+  function computeTeamPackCompleteness(match){
+    const hasScore = Number.isFinite(Number(match?.scoreFT?.home)) && Number.isFinite(Number(match?.scoreFT?.away));
+    const hasVenue = ["home", "away"].includes(String(match?.homeAway || "").toLowerCase());
+    const hasNarrative = String(match?.narrativeRaw || "").trim().length > 40;
+    const stats = parseTeamPackStatsBySide(match);
+    const hasShots = (stats.shotsAll.own + stats.shotsAll.opp) > 0;
+    const hasCorners = (stats.corners.own + stats.corners.opp) > 0;
+    const hasShotsOT = (stats.shots.own + stats.shots.opp) > 0;
+    const hasPoss = (stats.possession.own + stats.possession.opp) > 0;
+    const hasXg = (stats.xg.own + stats.xg.opp) > 0;
+    const score = clamp(
+      ((hasScore && hasVenue) ? 0.2 : 0)
+      + (hasNarrative ? 0.2 : 0)
+      + ((hasShots && hasCorners) ? 0.3 : 0)
+      + (hasShotsOT ? 0.2 : 0)
+      + ((hasPoss || hasXg) ? 0.1 : 0),
+      0,
+      1
+    );
+    return {
+      score,
+      level: score >= 0.8 ? "alto" : score >= 0.55 ? "medio" : "bajo"
+    };
+  }
+
+  function buildTeamAggregate(teamPack){
+    const matches = Array.isArray(teamPack?.matches) ? [...teamPack.matches].sort((a,b)=>parseSortableDate(a.matchDate)-parseSortableDate(b.matchDate)) : [];
+    const teamName = teamPack?.team?.name || "Equipo";
+    const baseRows = matches.map((m)=>{
+      const stats = parseTeamPackStatsBySide(m);
+      const isHome = String(m?.homeAway || "").toLowerCase() === "home";
+      const gf = Number(isHome ? m?.scoreFT?.home : m?.scoreFT?.away) || 0;
+      const ga = Number(isHome ? m?.scoreFT?.away : m?.scoreFT?.home) || 0;
+      const points = gf>ga ? 3 : gf===ga ? 1 : 0;
+      const reasons = buildRelatoTags(m?.narrativeRaw || "", teamName, m?.opponent?.name || "Rival");
+      const tagMap = Object.fromEntries(reasons.map((r)=>[r.tagId, r]));
+      return {
+        matchId: String(m?.matchId || uid("pkm")),
+        date: m?.matchDate || "-",
+        opponent: m?.opponent?.name || "Rival",
+        venue: isHome ? "H" : "A",
+        gf,
+        ga,
+        outcome: gf>ga ? "W" : gf===ga ? "D" : "L",
+        points,
+        goalDiff: gf-ga,
+        efficiency: gf / Math.max(1, stats.shots.own || stats.shotsAll.own || 1),
+        stats,
+        reasons,
+        tagMap,
+        completeness: computeTeamPackCompleteness(m),
+        narrativeRaw: String(m?.narrativeRaw || ""),
+        statsRaw: m?.statsRaw || null,
+        source: m
+      };
+    });
+    const avg = (arr)=>arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
+    const byVenue = {
+      home: baseRows.filter((r)=>r.venue === "H"),
+      away: baseRows.filter((r)=>r.venue === "A")
+    };
+    const kpisFromRows = (rows)=>{
+      const shotsFor = avg(rows.map((r)=>r.stats.shotsAll.own));
+      const shotsAgainst = avg(rows.map((r)=>r.stats.shotsAll.opp));
+      const shotsOTFor = avg(rows.map((r)=>r.stats.shots.own));
+      const bigFor = avg(rows.map((r)=>r.stats.bigChances.own));
+      const poss = avg(rows.map((r)=>r.stats.possession.own || 50));
+      const cornersDelta = avg(rows.map((r)=>r.stats.corners.own - r.stats.corners.opp));
+      const finishingFail = avg(rows.map((r)=>Number(r.tagMap.finishing_failure?.strength) || 0));
+      const clinical = avg(rows.map((r)=>Number(r.tagMap.clinical_finish?.strength) || 0));
+      const momentum = avg(rows.map((r)=>Number(r.tagMap.momentum_control?.strength || r.tagMap.territorial_pressure?.strength) || 0));
+      const defensiveIssues = avg(rows.map((r)=>Number(r.tagMap.defensive_errors?.strength || r.tagMap.discipline_issues?.strength) || 0));
+      return {
+        attack: clamp(45 + shotsFor*4 + shotsOTFor*6 + bigFor*8 + clinical*18 - finishingFail*16, 0, 100),
+        defense: clamp(70 - shotsAgainst*4 - defensiveIssues*15, 0, 100),
+        control: clamp(35 + (poss-45)*1.2 + cornersDelta*3 + momentum*22, 0, 100),
+        efficiency: clamp(35 + avg(rows.map((r)=>r.efficiency))*130 + clinical*16 - finishingFail*22, 0, 100)
+      };
+    };
+    const kpis = kpisFromRows(baseRows);
+    const confidence = clamp(avg(baseRows.map((r)=>r.completeness.score)), 0, 1);
+    return {
+      teamName,
+      matches: baseRows,
+      byVenue,
+      kpis,
+      radar: { home: kpisFromRows(byVenue.home), away: kpisFromRows(byVenue.away) },
+      confidence,
+      sampleSize: baseRows.length,
+      panelLevel: baseRows.length >= 20 ? "avanzado" : baseRows.length >= 10 ? "completo" : baseRows.length >= 5 ? "basico" : "insuficiente"
+    };
+  }
+
   function getJsonStorage(key){
     const parsed = safeParseJSON(localStorage.getItem(key), {});
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
@@ -7032,6 +7156,7 @@ function computeTeamIntelligencePanel(db, teamId){
               <button class="fl-btn" id="teamPackTrainBtn">🧠 Entrenar Cerebro con este pack</button>
             </div>
             <div id="teamPackTrainOutput" class="fl-mini" style="margin-top:8px;">Sin entrenamiento ejecutado.</div>
+            <div id="teamPackPowerDashboard" class="fl-card" style="margin-top:10px;display:none;"></div>
           </div>
         </div>
         <div class="fl-card context-box">
@@ -7307,6 +7432,176 @@ function computeTeamIntelligencePanel(db, teamId){
       teamPackTabExportBtn.onclick = ()=>setTeamPackTab("export");
       teamPackTabTrainerBtn.onclick = ()=>setTeamPackTab("trainer");
 
+      const openTeamPackMatchModal = (row)=>{
+        if(!row) return;
+        const backdrop = document.createElement("div");
+        backdrop.className = "fl-modal-backdrop";
+        const reasons = (row.reasons || []).slice(0, 8).map((r)=>`<span class="fl-chip">${r.label || r.tagId} ${(Number(r.strength||0)*100).toFixed(0)}%</span>`).join(" ");
+        const statsList = Array.isArray(row?.source?.statsRaw?.stats) ? row.source.statsRaw.stats : [];
+        backdrop.innerHTML = `
+          <div class="fl-modal" style="max-width:920px;">
+            <div class="fl-row" style="justify-content:space-between;align-items:center;">
+              <div><div class="fl-modal-title">${row.date} · vs ${row.opponent} (${row.venue})</div><div class="fl-mini">Marcador ${row.gf}-${row.ga} · Outcome ${row.outcome}</div></div>
+              <button class="fl-btn" data-close>Cerrar</button>
+            </div>
+            <div class="fl-card" style="margin-top:8px;"><b>Relato</b><div class="fl-mini" style="white-space:pre-wrap;max-height:180px;overflow:auto;margin-top:6px;">${(row.narrativeRaw || "Sin relato").replace(/</g,"&lt;")}</div></div>
+            <div class="fl-card" style="margin-top:8px;"><b>Tags auto + manual</b><div class="fl-row" style="margin-top:6px;flex-wrap:wrap;">${reasons || "Sin tags detectados."}</div></div>
+            <div class="fl-card" style="margin-top:8px;"><b>Stats pegadas</b><div class="fl-mini" style="max-height:160px;overflow:auto;margin-top:6px;">${statsList.length ? statsList.slice(0,20).map((st)=>`${st.key}: ${st.home} - ${st.away}`).join("<br>") : "Sin stats base"}</div></div>
+            <div class="fl-grid two" style="margin-top:8px;">
+              <div class="fl-card"><div class="fl-mini">Shots timeline (proxy tags/min)</div><div style="height:160px;"><canvas id="tpModalTimeline"></canvas></div></div>
+              <div class="fl-card"><div class="fl-mini">Corners/xG</div><div style="height:160px;"><canvas id="tpModalMini"></canvas></div></div>
+            </div>
+          </div>`;
+        document.body.appendChild(backdrop);
+        backdrop.querySelector('[data-close]').onclick = ()=>backdrop.remove();
+        backdrop.onclick = (e)=>{ if(e.target===backdrop) backdrop.remove(); };
+        const mins = Array.from({ length: 6 }, (_,i)=>i*15);
+        const bucket = mins.map((m)=> (row.reasons || []).reduce((acc,r)=>acc + (r.mins || []).filter((x)=>Number(x)>=m && Number(x)<m+15).length, 0));
+        renderSimpleLineChart(backdrop.querySelector('#tpModalTimeline'), ["0-15","15-30","30-45","45-60","60-75","75-90"], [{ label:"Eventos tags", data: bucket.map((v)=>clamp(v*20,0,100)), borderColor:"#58a6ff", backgroundColor:"rgba(88,166,255,.2)", tension:0.25 }]);
+        if(typeof Chart === "function"){
+          const mini = backdrop.querySelector('#tpModalMini');
+          if(mini){
+            mini._chart = new Chart(mini.getContext("2d"), {
+              type: "bar",
+              data: { labels:["Shots","ShotsOT","Corners","xG"], datasets:[{ label:"For", data:[row.stats.shotsAll.own,row.stats.shots.own,row.stats.corners.own,row.stats.xg.own*10], backgroundColor:"rgba(31,111,235,.7)" },{ label:"Against", data:[row.stats.shotsAll.opp,row.stats.shots.opp,row.stats.corners.opp,row.stats.xg.opp*10], backgroundColor:"rgba(248,81,73,.7)" }] },
+              options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:"#c9d1d9" } } }, scales:{ x:{ ticks:{ color:"#9ca3af" } }, y:{ ticks:{ color:"#9ca3af" }, grid:{ color:"rgba(255,255,255,.06)" } } } }
+            });
+          }
+        }
+      };
+
+      const renderTeamPackDashboard = (pack)=>{
+        const node = document.getElementById('teamPackPowerDashboard');
+        if(!node) return;
+        const agg = buildTeamAggregate(pack);
+        if(agg.sampleSize < 5){ node.style.display = 'none'; return; }
+        node.style.display = 'block';
+        const confidenceLabel = agg.confidence >= 0.8 ? 'alto' : agg.confidence >= 0.55 ? 'medio' : 'bajo';
+        const timelineRows = agg.matches.slice().reverse().map((m)=>{
+          const tags = m.reasons.slice(0,3).map((r)=>`${r.label || r.tagId} ${(Number(r.strength||0)*100).toFixed(0)}% (${(r.mins||[]).slice(0,2).join(',') || '-'})`).join(' · ');
+          const dot = m.completeness.score >= 0.8 ? '🟢' : m.completeness.score >= 0.55 ? '🟡' : '🔴';
+          return `<tr data-pack-match="${m.matchId}" style="cursor:pointer;"><td>${m.date}</td><td>${m.opponent}</td><td>${m.venue}</td><td>${m.gf}-${m.ga}</td><td>${m.outcome}</td><td class="fl-mini">${tags || 'Sin tags'}</td><td title="${m.completeness.level}">${dot} ${(m.completeness.score*100).toFixed(0)}%</td></tr>`;
+        }).join('');
+        const panelTitle = agg.panelLevel === 'avanzado' ? 'Power Dashboard avanzado' : agg.panelLevel === 'completo' ? 'Power Dashboard completo' : 'Power Dashboard básico';
+        node.innerHTML = `
+          <div style="font-weight:900;font-size:18px;">⚡ ${panelTitle}</div>
+          <div class="fl-mini" style="margin-top:4px;">N=${agg.sampleSize} · Confidence ${confidenceLabel} (${(agg.confidence*100).toFixed(0)}%)</div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span class="fl-mini">Attack Power</span><b>${agg.kpis.attack.toFixed(0)}</b></div>
+            <div><span class="fl-mini">Defense Power</span><b>${agg.kpis.defense.toFixed(0)}</b></div>
+            <div><span class="fl-mini">Control Power</span><b>${agg.kpis.control.toFixed(0)}</b></div>
+            <div><span class="fl-mini">Efficiency Power</span><b>${agg.kpis.efficiency.toFixed(0)}</b></div>
+          </div>
+          <div class="fl-card" style="margin-top:8px;"><b>Timeline de partidos</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>Fecha</th><th>Rival</th><th>H/A</th><th>Marcador</th><th>Outcome</th><th>Top tags</th><th>Data</th></tr></thead><tbody>${timelineRows}</tbody></table></div>
+          <div class="fl-row" style="margin-top:8px;gap:6px;flex-wrap:wrap;">
+            <button class="fl-btn active" data-pw-tab="overview">Overview</button>
+            <button class="fl-btn" data-pw-tab="homeaway">Home/Away</button>
+            <button class="fl-btn" data-pw-tab="reasons">Reasons</button>
+            <button class="fl-btn" data-pw-tab="minutes">Minutes</button>
+            <button class="fl-btn" data-pw-tab="quality">Data Quality</button>
+          </div>
+          <div id="pwTab-overview" style="display:block;margin-top:8px;">
+            <div class="fl-grid two"><div class="fl-card"><div class="fl-mini">Radar Home/Away</div><div style="height:250px;"><canvas id="tpRadar"></canvas></div></div><div class="fl-card"><div class="fl-mini">Tendencia por fecha</div><div style="height:250px;"><canvas id="tpTrend"></canvas></div></div></div><div class="fl-card" style="margin-top:8px;"><div class="fl-mini">Comparador vs fuerza rival (strong/medium/weak)</div><div style="height:220px;"><canvas id="tpBucket"></canvas></div></div>
+          </div>
+          <div id="pwTab-homeaway" style="display:none;margin-top:8px;"><div class="fl-card"><div style="height:260px;"><canvas id="tpMatrix"></canvas></div></div></div>
+          <div id="pwTab-reasons" style="display:none;margin-top:8px;"><div class="fl-card"><div style="height:260px;"><canvas id="tpReasons"></canvas></div></div></div>
+          <div id="pwTab-minutes" style="display:none;margin-top:8px;"><div class="fl-card"><div id="tpHeatmap"></div></div></div>
+          <div id="pwTab-quality" style="display:none;margin-top:8px;"><div class="fl-card"><div id="tpQuality"></div></div></div>
+        `;
+
+        const tabs = node.querySelectorAll('[data-pw-tab]');
+        tabs.forEach((btn)=>btn.onclick = ()=>{
+          tabs.forEach((b)=>b.classList.remove('active'));
+          btn.classList.add('active');
+          ['overview','homeaway','reasons','minutes','quality'].forEach((id)=>{
+            const el = node.querySelector(`#pwTab-${id}`); if(el) el.style.display = id===btn.getAttribute('data-pw-tab') ? 'block' : 'none';
+          });
+        });
+        node.querySelectorAll('[data-pack-match]').forEach((tr)=>tr.onclick = ()=>{
+          const row = agg.matches.find((m)=>m.matchId===tr.getAttribute('data-pack-match'));
+          openTeamPackMatchModal(row);
+        });
+
+        if(typeof Chart === 'function'){
+          const radarCanvas = node.querySelector('#tpRadar');
+          if(radarCanvas){
+            if(radarCanvas._chart){ try{ radarCanvas._chart.destroy(); }catch(_e){} }
+            radarCanvas._chart = new Chart(radarCanvas.getContext('2d'), {
+              type:'radar',
+              data:{ labels:['Ataque','Defensa','Control','Eficiencia'], datasets:[{ label:'Home', data:[agg.radar.home.attack,agg.radar.home.defense,agg.radar.home.control,agg.radar.home.efficiency], borderColor:'#1f6feb', backgroundColor:'rgba(31,111,235,.2)' },{ label:'Away', data:[agg.radar.away.attack,agg.radar.away.defense,agg.radar.away.control,agg.radar.away.efficiency], borderColor:'#f2cc60', backgroundColor:'rgba(242,204,96,.2)' }] },
+              options:{ responsive:true, maintainAspectRatio:false, scales:{ r:{ suggestedMin:0, suggestedMax:100, ticks:{ color:'#9ca3af', backdropColor:'transparent' }, pointLabels:{ color:'#9ca3af' }, grid:{ color:'rgba(255,255,255,.08)' } } }, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } } }
+            });
+          }
+          renderSimpleLineChart(node.querySelector('#tpTrend'), agg.matches.map((m)=>m.date.slice(5)), [
+            { label:'Puntos', data:agg.matches.map((m)=>m.points*33.33), borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,.2)', tension:0.2 },
+            { label:'Dif goles', data:agg.matches.map((m)=>clamp(50 + m.goalDiff*15, 0, 100)), borderColor:'#ff7b72', backgroundColor:'rgba(255,123,114,.2)', tension:0.2 },
+            { label:'Efficiency idx', data:agg.matches.map((m)=>clamp(m.efficiency*100,0,100)), borderColor:'#a371f7', backgroundColor:'rgba(163,113,247,.2)', tension:0.2 }
+          ]);
+
+          const bucketCanvas = node.querySelector('#tpBucket');
+          if(bucketCanvas){
+            const bucketOf = (m)=>{
+              const opp = m?.source?.opponent || {};
+              const pos = Number(opp?.position ?? opp?.tablePosition);
+              const elo = Number(opp?.elo);
+              if(Number.isFinite(pos)) return pos<=6 ? 'Strong' : pos<=14 ? 'Medium' : 'Weak';
+              if(Number.isFinite(elo)) return elo>=1650 ? 'Strong' : elo>=1500 ? 'Medium' : 'Weak';
+              return 'Medium';
+            };
+            const labels = ['Strong','Medium','Weak'];
+            const calc = (rows)=>({
+              attack: rows.length ? rows.reduce((a,m)=>a + clamp(45 + m.stats.shotsAll.own*4 + m.stats.shots.own*5,0,100),0)/rows.length : 0,
+              defense: rows.length ? rows.reduce((a,m)=>a + clamp(70 - m.stats.shotsAll.opp*4,0,100),0)/rows.length : 0,
+              control: rows.length ? rows.reduce((a,m)=>a + clamp(35 + (m.stats.possession.own-45)*1.2,0,100),0)/rows.length : 0,
+              efficiency: rows.length ? rows.reduce((a,m)=>a + clamp(m.efficiency*100,0,100),0)/rows.length : 0
+            });
+            const bucketData = Object.fromEntries(labels.map((label)=>[label, calc(agg.matches.filter((m)=>bucketOf(m)===label))]));
+            if(bucketCanvas._chart){ try{ bucketCanvas._chart.destroy(); }catch(_e){} }
+            bucketCanvas._chart = new Chart(bucketCanvas.getContext('2d'), {
+              type:'bar',
+              data:{ labels, datasets:[
+                { label:'Attack', data:labels.map((l)=>bucketData[l].attack), backgroundColor:'rgba(31,111,235,.7)' },
+                { label:'Defense', data:labels.map((l)=>bucketData[l].defense), backgroundColor:'rgba(63,185,80,.7)' },
+                { label:'Control', data:labels.map((l)=>bucketData[l].control), backgroundColor:'rgba(242,204,96,.7)' },
+                { label:'Efficiency', data:labels.map((l)=>bucketData[l].efficiency), backgroundColor:'rgba(163,113,247,.7)' }
+              ] },
+              options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ x:{ ticks:{ color:'#9ca3af' } }, y:{ min:0, max:100, ticks:{ color:'#9ca3af' } } } }
+            });
+          }
+          const matrix = node.querySelector('#tpMatrix');
+          if(matrix){
+            if(matrix._chart){ try{ matrix._chart.destroy(); }catch(_e){} }
+            const avgSide = (rows, fn)=>rows.length ? rows.reduce((a,r)=>a+fn(r),0)/rows.length : 0;
+            matrix._chart = new Chart(matrix.getContext('2d'), { type:'bar', data:{ labels:['Goles','Tiros','Corners','Cards'], datasets:[
+              { label:'Home For', data:[avgSide(agg.byVenue.home,r=>r.gf),avgSide(agg.byVenue.home,r=>r.stats.shotsAll.own),avgSide(agg.byVenue.home,r=>r.stats.corners.own),avgSide(agg.byVenue.home,r=>r.stats.cards.own)], backgroundColor:'rgba(31,111,235,.7)' },
+              { label:'Home Against', data:[avgSide(agg.byVenue.home,r=>r.ga),avgSide(agg.byVenue.home,r=>r.stats.shotsAll.opp),avgSide(agg.byVenue.home,r=>r.stats.corners.opp),avgSide(agg.byVenue.home,r=>r.stats.cards.opp)], backgroundColor:'rgba(248,81,73,.6)' },
+              { label:'Away For', data:[avgSide(agg.byVenue.away,r=>r.gf),avgSide(agg.byVenue.away,r=>r.stats.shotsAll.own),avgSide(agg.byVenue.away,r=>r.stats.corners.own),avgSide(agg.byVenue.away,r=>r.stats.cards.own)], backgroundColor:'rgba(242,204,96,.7)' },
+              { label:'Away Against', data:[avgSide(agg.byVenue.away,r=>r.ga),avgSide(agg.byVenue.away,r=>r.stats.shotsAll.opp),avgSide(agg.byVenue.away,r=>r.stats.corners.opp),avgSide(agg.byVenue.away,r=>r.stats.cards.opp)], backgroundColor:'rgba(163,113,247,.6)' }
+            ] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ x:{ ticks:{ color:'#9ca3af' }, stacked:false }, y:{ ticks:{ color:'#9ca3af' }, grid:{ color:'rgba(255,255,255,.06)' } } } } });
+          }
+          const reasonCanvas = node.querySelector('#tpReasons');
+          if(reasonCanvas){
+            const tags = ['finishing_failure','momentum_control','counter_strike','wasted_setpieces','discipline_issues'];
+            if(reasonCanvas._chart){ try{ reasonCanvas._chart.destroy(); }catch(_e){} }
+            reasonCanvas._chart = new Chart(reasonCanvas.getContext('2d'), { type:'bar', data:{ labels:agg.matches.map((m)=>m.date.slice(5)), datasets:tags.map((tag,idx)=>({ label:tag, data:agg.matches.map((m)=>clamp((Number(m.tagMap[tag]?.strength)||0)*100,0,100)), backgroundColor:["#1f6feb","#3fb950","#f2cc60","#ff7b72","#a371f7"][idx] })) }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ x:{ stacked:true, ticks:{ color:'#9ca3af' } }, y:{ stacked:true, min:0, max:100, ticks:{ color:'#9ca3af' } } } } });
+          }
+        }
+        const heat = node.querySelector('#tpHeatmap');
+        if(heat){
+          const buckets = [0,15,30,45,60,75];
+          const vals = buckets.map((b)=>agg.matches.reduce((acc,m)=>acc + (m.reasons || []).reduce((rAcc,r)=>rAcc + (r.mins || []).filter((x)=>Number(x)>=b && Number(x)<b+15).length,0),0));
+          const maxV = Math.max(1, ...vals);
+          heat.innerHTML = `<div class="fl-row" style="gap:6px;flex-wrap:wrap;">${vals.map((v,i)=>`<div style="width:94px;padding:10px;border-radius:8px;background:rgba(31,111,235,${(v/maxV).toFixed(2)});border:1px solid rgba(255,255,255,.08);"><div class="fl-mini">${buckets[i]}-${buckets[i]+15}</div><b>${v}</b></div>`).join('')}</div><div class="fl-mini" style="margin-top:6px;">ADN temporal: mayor actividad/tag en bloques más oscuros.</div>`;
+        }
+        const quality = node.querySelector('#tpQuality');
+        if(quality){
+          const avgComp = agg.confidence;
+          const missPoss = agg.matches.filter((m)=>(m.stats.possession.own + m.stats.possession.opp)===0).length;
+          const missShotsOT = agg.matches.filter((m)=>(m.stats.shots.own + m.stats.shots.opp)===0).length;
+          quality.innerHTML = `<div class="fl-mini">Checklist mínimo: resultado/H-A/relato/stats base + opcionales (posesión/xG).</div><div style="margin-top:6px;">Completeness promedio: <b>${(avgComp*100).toFixed(1)}%</b> · Confidence: <b>${confidenceLabel}</b></div><div class="fl-mini" style="margin-top:6px;">Falta posesión en <b>${missPoss}</b> partidos · faltan tiros a puerta en <b>${missShotsOT}</b>.</div>`;
+        }
+      };
+
       document.getElementById("teamPackExportBtn").onclick = async ()=>{
         const status = document.getElementById("teamPackExportStatus");
         const win = String(document.getElementById("teamPackWindow")?.value || "20");
@@ -7370,6 +7665,8 @@ function computeTeamIntelligencePanel(db, teamId){
         if(!pack){
           if(metaEl) metaEl.textContent = "Sin pack importado.";
           if(strengthEl) strengthEl.textContent = "Conozco al equipo: --%";
+          const dashboard = document.getElementById('teamPackPowerDashboard');
+          if(dashboard) dashboard.style.display = 'none';
           return;
         }
         const s = computeTeamPackDataStrength(pack);
@@ -7385,6 +7682,7 @@ function computeTeamIntelligencePanel(db, teamId){
           `Cobertura: ${s.coverage.toFixed(2)} · Recencia: ${s.recency.toFixed(2)} (hace ${s.daysSinceLast} días) · Completitud: ${s.completeness.toFixed(2)} · Consistencia: ${s.consistency.toFixed(2)}`,
           `Checks críticos → missingCriticalRate: ${s.missingCriticalRate.toFixed(2)} · duplicateMatchIdRate: ${s.duplicateMatchIdRate.toFixed(2)} · unorderedDateRate: ${s.unorderedDateRate.toFixed(2)}`
         ].join("<br>");
+        renderTeamPackDashboard(pack);
       };
 
       document.getElementById("teamPackImportBtn").onclick = ()=>document.getElementById("teamPackFileInput")?.click();
@@ -7483,6 +7781,7 @@ function computeTeamIntelligencePanel(db, teamId){
           `Entrenado con ${usable}/${examples.length} ejemplos útiles · ventana ${windowSize} · epochs ${epochs} · batch ${batchSize}.`,
           "Brain sync: snapshots del pack guardados para autoload en pestaña Brain."
         ].join("<br>");
+        renderTeamPackDashboard(importedPack);
       };
 
       loadTeamPackRecord(team.id).then((record)=>{
