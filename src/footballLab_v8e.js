@@ -1296,15 +1296,17 @@ export function initFootballLab(){
   }
 
   async function saveTeamPackRecord(teamId, record){
+    if(!teamId || !record || typeof record !== "object") return false;
+    const safeManifest = (record.manifest && typeof record.manifest === "object") ? record.manifest : {};
     const indexStore = getJsonStorage(TEAM_PACKS_INDEX_KEY);
-    indexStore[teamId] = { ...(indexStore[teamId] || {}), ...(record?.manifest || {}) };
+    indexStore[teamId] = { ...(indexStore[teamId] || {}), ...safeManifest };
     localStorage.setItem(TEAM_PACKS_INDEX_KEY, JSON.stringify(indexStore));
     const db = await openTeamPackDb();
     if(!db){
       const fallback = getJsonStorage(TEAM_PACKS_KEY);
       fallback[teamId] = record;
       localStorage.setItem(TEAM_PACKS_KEY, JSON.stringify(fallback));
-      return;
+      return true;
     }
     await new Promise((resolve)=>{
       const tx = db.transaction(TEAM_PACKS_STORE, "readwrite");
@@ -1313,6 +1315,7 @@ export function initFootballLab(){
       tx.onerror = ()=>resolve();
     });
     db.close();
+    return true;
   }
 
   function openStatsModal({ db, match, team, onSave } = {}){
@@ -6479,41 +6482,46 @@ function computeTeamIntelligencePanel(db, teamId){
           return;
         }
         if(status) status.textContent = "⏳ Generando TeamPack...";
-        const pack = await buildTeamPack({
-          db,
-          team,
-          matches: selectedMatches,
-          includeStats: true,
-          includeNarrative: true,
-          includeSnapshots: true,
-          recalcSnapshots,
-          narrativeMaxChars: compactNarrative ? 2000 : 0,
-          includeFeaturesRaw
-        });
-        await saveTeamPackRecord(team.id, {
-          manifest: {
-            schemaVersion: pack.schemaVersion,
-            createdAt: pack.createdAt,
-            team: pack.team,
-            range: pack.range,
-            cutoffDate: pack.cutoffDate,
-            matches: pack.matches.length,
-            snapshots: pack.snapshots.length,
-            compactNarrative,
+        try{
+          const pack = await buildTeamPack({
+            db,
+            team,
+            matches: selectedMatches,
+            includeStats: true,
+            includeNarrative: true,
+            includeSnapshots: true,
+            recalcSnapshots,
+            narrativeMaxChars: compactNarrative ? 2000 : 0,
             includeFeaturesRaw
-          },
-          matches: pack.matches,
-          snapshots: pack.snapshots
-        });
-        const json = JSON.stringify(pack, null, 2);
-        const blob = new Blob([json], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `teampack_${team.id}_${pack.range.from || "na"}_${pack.range.to || "na"}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        if(status) status.textContent = `✅ Exportado (${pack.matches.length} partidos, ${pack.snapshots.length} snapshots).`;
+          });
+          if(!pack || !pack.team || !pack.team.id) throw new Error("No se pudo generar un TeamPack válido.");
+          await saveTeamPackRecord(team.id, {
+            manifest: {
+              schemaVersion: pack.schemaVersion,
+              createdAt: pack.createdAt,
+              team: pack.team,
+              range: pack.range,
+              cutoffDate: pack.cutoffDate,
+              matches: pack.matches.length,
+              snapshots: pack.snapshots.length,
+              compactNarrative,
+              includeFeaturesRaw
+            },
+            matches: pack.matches,
+            snapshots: pack.snapshots
+          });
+          const json = JSON.stringify(pack, null, 2);
+          const blob = new Blob([json], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `teampack_${team.id}_${pack.range.from || "na"}_${pack.range.to || "na"}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          if(status) status.textContent = `✅ Exportado (${pack.matches.length} partidos, ${pack.snapshots.length} snapshots).`;
+        }catch(err){
+          if(status) status.textContent = `❌ ${err?.message || "No se pudo exportar"}`;
+        }
       };
 
       const renderTeamPackStrength = (pack)=>{
