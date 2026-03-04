@@ -2234,27 +2234,83 @@ export function initFootballLab(){
       const shotsAgainst = avg(rows.map((r)=>r.stats.shotsAll.opp));
       const shotsOTFor = avg(rows.map((r)=>r.stats.shots.own));
       const bigFor = avg(rows.map((r)=>r.stats.bigChances.own));
+      const goalsFor = avg(rows.map((r)=>r.gf));
       const poss = avg(rows.map((r)=>r.stats.possession.own || 50));
       const cornersDelta = avg(rows.map((r)=>r.stats.corners.own - r.stats.corners.opp));
       const finishingFail = avg(rows.map((r)=>Number(r.tagMap.finishing_failure?.strength) || 0));
       const clinical = avg(rows.map((r)=>Number(r.tagMap.clinical_finish?.strength) || 0));
       const momentum = avg(rows.map((r)=>Number(r.tagMap.momentum_control?.strength || r.tagMap.territorial_pressure?.strength) || 0));
+      const territorial = avg(rows.map((r)=>Number(r.tagMap.territorial_pressure?.strength) || 0));
+      const setpieceThreat = avg(rows.map((r)=>Number(r.tagMap.setpiece_threat?.strength) || 0));
+      const disciplineIssues = avg(rows.map((r)=>Number(r.tagMap.discipline_issues?.strength) || 0));
       const defensiveIssues = avg(rows.map((r)=>Number(r.tagMap.defensive_errors?.strength || r.tagMap.discipline_issues?.strength) || 0));
+      const avgEfficiency = avg(rows.map((r)=>r.efficiency));
+      const attackProduction = clamp(30 + shotsFor*3 + shotsOTFor*4 + bigFor*9 + clamp(cornersDelta+2,0,8)*4 + setpieceThreat*16 + territorial*14, 0, 100);
+      const attackConversion = clamp(20 + goalsFor*18 + avgEfficiency*95 + clinical*22 - finishingFail*28, 0, 100);
+      const attack = clamp(attackProduction*0.6 + attackConversion*0.4, 0, 100);
+      const defense = clamp(70 - shotsAgainst*4 - defensiveIssues*15, 0, 100);
+      const control = clamp(35 + (poss-45)*1.2 + cornersDelta*3 + momentum*22, 0, 100);
+      const efficiency = clamp(35 + avgEfficiency*130 + clinical*16 - finishingFail*22, 0, 100);
+      const setpieceStrength = clamp(32 + setpieceThreat*35 + clamp(cornersDelta, -4, 6)*5, 0, 100);
+      const discipline = clamp(72 - avg(rows.map((r)=>r.stats.cards.own))*6 - disciplineIssues*38, 0, 100);
       return {
-        attack: clamp(45 + shotsFor*4 + shotsOTFor*6 + bigFor*8 + clinical*18 - finishingFail*16, 0, 100),
-        defense: clamp(70 - shotsAgainst*4 - defensiveIssues*15, 0, 100),
-        control: clamp(35 + (poss-45)*1.2 + cornersDelta*3 + momentum*22, 0, 100),
-        efficiency: clamp(35 + avg(rows.map((r)=>r.efficiency))*130 + clinical*16 - finishingFail*22, 0, 100)
+        attack,
+        defense,
+        control,
+        efficiency,
+        attackProduction,
+        attackConversion,
+        defenseStability: defense,
+        setpieceStrength,
+        discipline
       };
     };
     const kpis = kpisFromRows(baseRows);
     const confidence = clamp(avg(baseRows.map((r)=>r.completeness.score)), 0, 1);
+    const tagTotals = new Map();
+    baseRows.forEach((row)=>{
+      Object.values(row.tagMap || {}).forEach((tag)=>{
+        const key = String(tag?.tagId || "");
+        if(!key) return;
+        const prev = tagTotals.get(key) || { count: 0, strength: 0, label: tag.label || key };
+        prev.count += 1;
+        prev.strength += Number(tag?.strength) || 0;
+        if(!prev.label && tag?.label) prev.label = tag.label;
+        tagTotals.set(key, prev);
+      });
+    });
+    const teamDNA = [...tagTotals.entries()]
+      .map(([tagId, info])=>({
+        tagId,
+        label: info.label || tagId,
+        count: info.count,
+        presencePct: clamp((info.count / Math.max(1, baseRows.length))*100, 0, 100),
+        intensityPct: clamp((info.strength / Math.max(1, baseRows.length))*100, 0, 100)
+      }))
+      .sort((a,b)=>b.intensityPct-a.intensityPct);
+    const defeatCausesMap = new Map();
+    baseRows.filter((row)=>row.outcome === "L").forEach((row)=>{
+      Object.values(row.tagMap || {}).forEach((tag)=>{
+        const strength = Number(tag?.strength) || 0;
+        if(strength < 0.35) return;
+        const key = String(tag?.tagId || "");
+        if(!key) return;
+        const prev = defeatCausesMap.get(key) || { count: 0, label: tag.label || key };
+        prev.count += 1;
+        defeatCausesMap.set(key, prev);
+      });
+    });
+    const defeatCauses = [...defeatCausesMap.entries()]
+      .map(([tagId, info])=>({ tagId, label: info.label || tagId, count: info.count }))
+      .sort((a,b)=>b.count-a.count);
     return {
       teamName,
       matches: baseRows,
       byVenue,
       kpis,
       radar: { home: kpisFromRows(byVenue.home), away: kpisFromRows(byVenue.away) },
+      teamDNA,
+      defeatCauses,
       confidence,
       sampleSize: baseRows.length,
       panelLevel: baseRows.length >= 20 ? "avanzado" : baseRows.length >= 10 ? "completo" : baseRows.length >= 5 ? "basico" : "insuficiente"
@@ -7631,8 +7687,24 @@ function computeTeamIntelligencePanel(db, teamId){
         const agg = buildTeamAggregate(pack);
         if(agg.sampleSize < 5){ node.style.display = 'none'; return; }
         node.style.display = 'block';
-        const confidenceLabel = agg.confidence >= 0.8 ? 'alto' : agg.confidence >= 0.55 ? 'medio' : 'bajo';
-        const timelineRows = agg.matches.slice().reverse().map((m)=>{
+      const confidenceLabel = agg.confidence >= 0.8 ? 'alto' : agg.confidence >= 0.55 ? 'medio' : 'bajo';
+      const dnaRows = agg.teamDNA.slice(0,5).map((tag)=>`<div class="fl-row" style="justify-content:space-between;"><span>${tag.label}</span><b>${tag.intensityPct.toFixed(0)}%</b></div>`).join('');
+      const defeatRows = agg.defeatCauses.slice(0,5).map((tag)=>`<tr><td>${tag.tagId}</td><td>${tag.count}</td></tr>`).join('');
+      const insightLines = [];
+      if(agg.kpis.attackProduction >= 65 && agg.kpis.attackConversion <= 52){
+        insightLines.push('El equipo genera volumen ofensivo alto, pero su conversión es baja.');
+      }
+      if(agg.kpis.defense <= 40){
+        insightLines.push('La estabilidad defensiva es débil y concede escenarios de gol con frecuencia.');
+      }
+      const latePressure = agg.teamDNA.find((t)=>t.tagId === 'late_pressure');
+      if((latePressure?.intensityPct || 0) >= 55){
+        insightLines.push('Hay presión ofensiva tardía recurrente: los cierres de partido pesan en el resultado.');
+      }
+      if(!insightLines.length){
+        insightLines.push('Perfil equilibrado sin un sesgo extremo detectado en los últimos partidos.');
+      }
+      const timelineRows = agg.matches.slice().reverse().map((m)=>{
           const tags = m.reasons.slice(0,3).map((r)=>`${r.label || r.tagId} ${(Number(r.strength||0)*100).toFixed(0)}% (${(r.mins||[]).slice(0,2).join(',') || '-'})`).join(' · ');
           const dot = m.completeness.score >= 0.8 ? '🟢' : m.completeness.score >= 0.55 ? '🟡' : '🔴';
           return `<tr data-pack-match="${m.matchId}" style="cursor:pointer;"><td>${m.date}</td><td>${m.opponent}</td><td>${m.venue}</td><td>${m.gf}-${m.ga}</td><td>${m.outcome}</td><td class="fl-mini">${tags || 'Sin tags'}</td><td title="${m.completeness.level}">${dot} ${(m.completeness.score*100).toFixed(0)}%</td></tr>`;
@@ -8507,6 +8579,22 @@ passes: 425"></textarea>
         if(agg.sampleSize < 5){ node.style.display = 'none'; return; }
         node.style.display = 'block';
         const confidenceLabel = agg.confidence >= 0.8 ? 'alto' : agg.confidence >= 0.55 ? 'medio' : 'bajo';
+        const dnaRows = agg.teamDNA.slice(0,5).map((tag)=>`<div class="fl-row" style="justify-content:space-between;"><span>${tag.label}</span><b>${tag.intensityPct.toFixed(0)}%</b></div>`).join('');
+        const defeatRows = agg.defeatCauses.slice(0,5).map((tag)=>`<tr><td>${tag.tagId}</td><td>${tag.count}</td></tr>`).join('');
+        const insightLines = [];
+        if(agg.kpis.attackProduction >= 65 && agg.kpis.attackConversion <= 52){
+          insightLines.push('El equipo genera volumen ofensivo alto, pero su conversión es baja.');
+        }
+        if(agg.kpis.defense <= 40){
+          insightLines.push('La estabilidad defensiva es débil y concede escenarios de gol con frecuencia.');
+        }
+        const latePressure = agg.teamDNA.find((t)=>t.tagId === 'late_pressure');
+        if((latePressure?.intensityPct || 0) >= 55){
+          insightLines.push('Hay presión ofensiva tardía recurrente: los cierres de partido pesan en el resultado.');
+        }
+        if(!insightLines.length){
+          insightLines.push('Perfil equilibrado sin un sesgo extremo detectado en los últimos partidos.');
+        }
         const timelineRows = agg.matches.slice().reverse().map((m)=>{
           const tags = m.reasons.slice(0,3).map((r)=>`${r.label || r.tagId} ${(Number(r.strength||0)*100).toFixed(0)}%`).join(' · ');
           const dot = m.completeness.score >= 0.8 ? '🟢' : m.completeness.score >= 0.55 ? '🟡' : '🔴';
@@ -8521,8 +8609,16 @@ passes: 425"></textarea>
             <div><span class="fl-mini">Control Power</span><b>${agg.kpis.control.toFixed(0)}</b></div>
             <div><span class="fl-mini">Efficiency Power</span><b>${agg.kpis.efficiency.toFixed(0)}</b></div>
           </div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span class="fl-mini">Attack Production</span><b>${agg.kpis.attackProduction.toFixed(0)}</b></div>
+            <div><span class="fl-mini">Attack Conversion</span><b>${agg.kpis.attackConversion.toFixed(0)}</b></div>
+            <div><span class="fl-mini">Setpiece Strength</span><b>${agg.kpis.setpieceStrength.toFixed(0)}</b></div>
+            <div><span class="fl-mini">Discipline</span><b>${agg.kpis.discipline.toFixed(0)}</b></div>
+          </div>
+          <div class="fl-card" style="margin-top:8px;"><b>Team Insight</b><div class="fl-mini" style="margin-top:6px;">${insightLines.join('<br>')}</div></div>
           <div class="fl-card" style="margin-top:8px;"><b>Timeline</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>Fecha</th><th>Rival</th><th>H/A</th><th>Marcador</th><th>Outcome</th><th>Top tags</th><th>Data</th></tr></thead><tbody>${timelineRows}</tbody></table></div>
-          <div class="fl-grid two" style="margin-top:8px;"><div class="fl-card"><div class="fl-mini">Radar Home/Away</div><div style="height:220px;"><canvas id="b2PowerRadar"></canvas></div></div><div class="fl-card"><div class="fl-mini">Tendencia</div><div style="height:220px;"><canvas id="b2PowerTrend"></canvas></div></div></div>
+          <div class="fl-grid two" style="margin-top:8px;"><div class="fl-card"><div class="fl-mini">Radar Home/Away (6 ejes)</div><div style="height:240px;"><canvas id="b2PowerRadar"></canvas></div></div><div class="fl-card"><div class="fl-mini">Tendencia</div><div style="height:220px;"><canvas id="b2PowerTrend"></canvas></div></div></div>
+          <div class="fl-grid two" style="margin-top:8px;"><div class="fl-card"><b>TEAM DNA (últimos partidos)</b><div class="fl-mini" style="margin-top:6px;display:grid;gap:6px;">${dnaRows || 'Sin tags suficientes.'}</div></div><div class="fl-card"><b>Causa de derrota (${agg.matches.filter((m)=>m.outcome==='L').length})</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>tag</th><th>conteo</th></tr></thead><tbody>${defeatRows || '<tr><td colspan="2" class="fl-mini">Sin derrotas o sin causas fuertes detectadas.</td></tr>'}</tbody></table></div></div>
         `;
         node.querySelectorAll('[data-b2-match]').forEach((tr)=>tr.onclick = ()=>{
           const row = teamMemories.find((m)=>String(m.id)===String(tr.getAttribute('data-b2-match')));
@@ -8534,9 +8630,9 @@ passes: 425"></textarea>
             if(radar._chart){ try{ radar._chart.destroy(); }catch(_e){} }
             radar._chart = new Chart(radar.getContext('2d'), {
               type:'radar',
-              data:{ labels:['Ataque','Defensa','Control','Eficiencia'], datasets:[
-                { label:'Home', data:[agg.radar.home.attack, agg.radar.home.defense, agg.radar.home.control, agg.radar.home.efficiency], borderColor:'#1f6feb', backgroundColor:'rgba(31,111,235,.2)' },
-                { label:'Away', data:[agg.radar.away.attack, agg.radar.away.defense, agg.radar.away.control, agg.radar.away.efficiency], borderColor:'#f2cc60', backgroundColor:'rgba(242,204,96,.2)' }
+              data:{ labels:['Attack Production','Attack Conversion','Defense Stability','Control','Setpiece Strength','Discipline'], datasets:[
+                { label:'Home', data:[agg.radar.home.attackProduction, agg.radar.home.attackConversion, agg.radar.home.defenseStability, agg.radar.home.control, agg.radar.home.setpieceStrength, agg.radar.home.discipline], borderColor:'#1f6feb', backgroundColor:'rgba(31,111,235,.2)' },
+                { label:'Away', data:[agg.radar.away.attackProduction, agg.radar.away.attackConversion, agg.radar.away.defenseStability, agg.radar.away.control, agg.radar.away.setpieceStrength, agg.radar.away.discipline], borderColor:'#f2cc60', backgroundColor:'rgba(242,204,96,.2)' }
               ] },
               options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ r:{ suggestedMin:0, suggestedMax:100, ticks:{ color:'#9ca3af', backdropColor:'transparent' }, pointLabels:{ color:'#9ca3af' } } } }
             });
