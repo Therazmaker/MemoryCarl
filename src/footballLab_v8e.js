@@ -18,6 +18,9 @@ export function initFootballLab(){
   const TEAMS_CACHE_PREFIX = "footballLab_teams_";
   const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
   const TEAM_PACKS_KEY = "FL_TEAMPACKS";
+  const TEAM_PACKS_INDEX_KEY = "FL_TEAMPACKS_INDEX";
+  const TEAM_PACKS_DB = "footballLabTeamPacks";
+  const TEAM_PACKS_STORE = "packs";
   const TEAM_MODELS_KEY = "FL_TEAMMODELS";
 
   const defaultDb = {
@@ -1120,7 +1123,17 @@ export function initFootballLab(){
     };
   }
 
-  async function buildTeamPack({ db, team, matches = [], includeStats = true, includeNarrative = true, includeSnapshots = true, recalcSnapshots = false }){
+  async function buildTeamPack({
+    db,
+    team,
+    matches = [],
+    includeStats = true,
+    includeNarrative = true,
+    includeSnapshots = true,
+    recalcSnapshots = false,
+    narrativeMaxChars = 0,
+    includeFeaturesRaw = true
+  }){
     const orderedMatches = [...matches].sort(compareByDateAsc);
     const packMatches = [];
     const snapshots = [];
@@ -1128,7 +1141,8 @@ export function initFootballLab(){
       const isHome = match.homeId===team.id;
       const opponent = db.teams.find((row)=>row.id===(isHome ? match.awayId : match.homeId));
       const statsRaw = includeStats ? (getMatchStats(match.id, db) || null) : null;
-      const narrativeRaw = includeNarrative ? (getMatchNarrative(match.id, db) || "") : "";
+      const narrativeRawBase = includeNarrative ? (getMatchNarrative(match.id, db) || "") : "";
+      const narrativeRaw = narrativeMaxChars>0 ? String(narrativeRawBase).slice(0, narrativeMaxChars) : narrativeRawBase;
       packMatches.push({
         matchId: String(match.id),
         matchDate: match.date || "",
@@ -1154,6 +1168,7 @@ export function initFootballLab(){
           matchDate: match.date || "",
           featureSchema: "F9_v1",
           features: normalizeFeatureSchema(snapshot),
+          featuresRaw: includeFeaturesRaw ? (snapshot?.features || null) : undefined,
           audit: snapshot?.featureAudit || {}
         });
       }
@@ -1165,6 +1180,7 @@ export function initFootballLab(){
       createdAt: new Date().toISOString(),
       team: { id: team.id, name: team.name },
       range: { from, to },
+      cutoffDate: to,
       includes: { stats: includeStats, narrative: includeNarrative, snapshots: includeSnapshots },
       matches: packMatches,
       snapshots,
@@ -1189,9 +1205,17 @@ export function initFootballLab(){
     const pctNarrative = matchCount ? withNarrative / matchCount : 0;
     const completeness = clamp((0.6*pctStats) + (0.4*pctNarrative), 0, 1);
     const missingCritical = matches.filter((m)=>!m.matchDate || !m.scoreFT || !Number.isFinite(Number(m.scoreFT.home)) || !Number.isFinite(Number(m.scoreFT.away))).length;
-    const missingRate = matchCount ? missingCritical / matchCount : 1;
-    const duplicateRate = matchCount ? 1 - (new Set(matches.map((m)=>String(m.matchId))).size / matchCount) : 1;
-    const consistency = clamp(1 - (missingRate + duplicateRate), 0, 1);
+    const missingStatsCritical = pack?.includes?.stats
+      ? matches.filter((m)=>!m.statsRaw || (typeof m.statsRaw==="object" && !Array.isArray(m.statsRaw) && Object.keys(m.statsRaw || {}).length===0)).length
+      : 0;
+    const missingCriticalRate = matchCount ? (missingCritical + missingStatsCritical) / matchCount : 1;
+    const duplicateMatchIdRate = matchCount ? 1 - (new Set(matches.map((m)=>String(m.matchId))).size / matchCount) : 1;
+    let unorderedDates = 0;
+    for(let i=1;i<matches.length;i++){
+      if(parseSortableDate(matches[i-1].matchDate) > parseSortableDate(matches[i].matchDate)) unorderedDates++;
+    }
+    const unorderedDateRate = matchCount>1 ? unorderedDates / (matchCount - 1) : 0;
+    const consistency = clamp(1 - (missingCriticalRate + duplicateMatchIdRate + unorderedDateRate), 0, 1);
     const score = Math.round(100 * ((0.4*coverage) + (0.2*recency) + (0.3*completeness) + (0.1*consistency)));
     return {
       score,
@@ -1199,6 +1223,9 @@ export function initFootballLab(){
       recency,
       completeness,
       consistency,
+      missingCriticalRate,
+      duplicateMatchIdRate,
+      unorderedDateRate,
       pctStats,
       pctNarrative,
       pctSnapshots: matchCount ? withSnapshots / matchCount : 0,
@@ -1209,6 +1236,41 @@ export function initFootballLab(){
 
   function getJsonStorage(key){
     return safeParseJSON(localStorage.getItem(key), {});
+  }
+
+  async function openTeamPackDb(){
+    if(typeof indexedDB === "undefined") return null;
+    return new Promise((resolve)=>{
+      const req = indexedDB.open(TEAM_PACKS_DB, 1);
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+        if(!db.objectStoreNames.contains(TEAM_PACKS_STORE)){
+          db.createObjectStore(TEAM_PACKS_STORE, { keyPath: "teamId" });
+        }
+      };
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>resolve(null);
+    });
+  }
+
+  async function saveTeamPackRecord(teamId, record){
+    const indexStore = getJsonStorage(TEAM_PACKS_INDEX_KEY);
+    indexStore[teamId] = { ...(indexStore[teamId] || {}), ...(record?.manifest || {}) };
+    localStorage.setItem(TEAM_PACKS_INDEX_KEY, JSON.stringify(indexStore));
+    const db = await openTeamPackDb();
+    if(!db){
+      const fallback = getJsonStorage(TEAM_PACKS_KEY);
+      fallback[teamId] = record;
+      localStorage.setItem(TEAM_PACKS_KEY, JSON.stringify(fallback));
+      return;
+    }
+    await new Promise((resolve)=>{
+      const tx = db.transaction(TEAM_PACKS_STORE, "readwrite");
+      tx.objectStore(TEAM_PACKS_STORE).put({ teamId, ...record, updatedAt: new Date().toISOString() });
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>resolve();
+    });
+    db.close();
   }
 
   function openStatsModal({ db, match, team, onSave } = {}){
@@ -6057,6 +6119,8 @@ function computeTeamIntelligencePanel(db, teamId){
                 </select>
               </label>
               <label class="fl-mini"><input id="teamPackRecalc" type="checkbox" /> Recalcular snapshots antes de exportar</label>
+              <label class="fl-mini"><input id="teamPackCompactNarrative" type="checkbox" /> Compactar narrativeRaw (2k chars)</label>
+              <label class="fl-mini"><input id="teamPackIncludeRawFeatures" type="checkbox" checked /> Incluir featuresRaw</label>
               <button class="fl-btn" id="teamPackExportBtn">📦 Exportar TeamPack</button>
               <span id="teamPackExportStatus" class="fl-mini"></span>
             </div>
@@ -6065,6 +6129,7 @@ function computeTeamIntelligencePanel(db, teamId){
             <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
               <input id="teamPackFileInput" type="file" accept="application/json,.json" style="display:none;" />
               <button class="fl-btn" id="teamPackImportBtn">📥 Importar TeamPack</button>
+              <label class="fl-mini"><input id="teamPackImportRecalcSnapshots" type="checkbox" checked /> Recalcular snapshots si faltan</label>
               <span id="teamPackImportStatus" class="fl-mini"></span>
             </div>
             <div id="teamPackImportedMeta" class="fl-mini" style="margin-top:8px;">Sin pack importado.</div>
@@ -6361,6 +6426,8 @@ function computeTeamIntelligencePanel(db, teamId){
         const status = document.getElementById("teamPackExportStatus");
         const win = String(document.getElementById("teamPackWindow")?.value || "20");
         const recalcSnapshots = !!document.getElementById("teamPackRecalc")?.checked;
+        const compactNarrative = !!document.getElementById("teamPackCompactNarrative")?.checked;
+        const includeFeaturesRaw = !!document.getElementById("teamPackIncludeRawFeatures")?.checked;
         const sorted = [...teamMatches].sort(compareByDateAsc);
         const selectedMatches = win === "season"
           ? sorted
@@ -6370,21 +6437,32 @@ function computeTeamIntelligencePanel(db, teamId){
           return;
         }
         if(status) status.textContent = "⏳ Generando TeamPack...";
-        const pack = await buildTeamPack({ db, team, matches: selectedMatches, includeStats: true, includeNarrative: true, includeSnapshots: true, recalcSnapshots });
-        const packsStore = getJsonStorage(TEAM_PACKS_KEY);
-        packsStore[team.id] = {
+        const pack = await buildTeamPack({
+          db,
+          team,
+          matches: selectedMatches,
+          includeStats: true,
+          includeNarrative: true,
+          includeSnapshots: true,
+          recalcSnapshots,
+          narrativeMaxChars: compactNarrative ? 2000 : 0,
+          includeFeaturesRaw
+        });
+        await saveTeamPackRecord(team.id, {
           manifest: {
             schemaVersion: pack.schemaVersion,
             createdAt: pack.createdAt,
             team: pack.team,
             range: pack.range,
+            cutoffDate: pack.cutoffDate,
             matches: pack.matches.length,
-            snapshots: pack.snapshots.length
+            snapshots: pack.snapshots.length,
+            compactNarrative,
+            includeFeaturesRaw
           },
           matches: pack.matches,
           snapshots: pack.snapshots
-        };
-        localStorage.setItem(TEAM_PACKS_KEY, JSON.stringify(packsStore));
+        });
         const json = JSON.stringify(pack, null, 2);
         const blob = new Blob([json], { type: "application/json" });
         const url = URL.createObjectURL(blob);
@@ -6408,11 +6486,13 @@ function computeTeamIntelligencePanel(db, teamId){
         if(metaEl) metaEl.innerHTML = [
           `Equipo: <b>${pack?.team?.name || "-"}</b>`,
           `Rango: <b>${pack?.range?.from || "-"}</b> → <b>${pack?.range?.to || "-"}</b>`,
+          `Cutoff: <b>${pack?.cutoffDate || pack?.range?.to || "-"}</b>`,
           `Partidos: <b>${s.matches}</b> · Stats: <b>${Math.round(s.pctStats*100)}%</b> · Relato: <b>${Math.round(s.pctNarrative*100)}%</b> · Snapshots: <b>${Math.round(s.pctSnapshots*100)}%</b>`
         ].join("<br>");
         if(strengthEl) strengthEl.innerHTML = [
           `<b>Conozco al ${pack?.team?.name || "equipo"}: ${s.score}%</b>`,
-          `Cobertura: ${s.coverage.toFixed(2)} · Recencia: ${s.recency.toFixed(2)} (hace ${s.daysSinceLast} días) · Completitud: ${s.completeness.toFixed(2)} · Consistencia: ${s.consistency.toFixed(2)}`
+          `Cobertura: ${s.coverage.toFixed(2)} · Recencia: ${s.recency.toFixed(2)} (hace ${s.daysSinceLast} días) · Completitud: ${s.completeness.toFixed(2)} · Consistencia: ${s.consistency.toFixed(2)}`,
+          `Checks críticos → missingCriticalRate: ${s.missingCriticalRate.toFixed(2)} · duplicateMatchIdRate: ${s.duplicateMatchIdRate.toFixed(2)} · unorderedDateRate: ${s.unorderedDateRate.toFixed(2)}`
         ].join("<br>");
       };
 
@@ -6425,21 +6505,42 @@ function computeTeamIntelligencePanel(db, teamId){
           const text = await file.text();
           const parsed = safeParseJSON(text, null);
           if(!parsed || parsed.schemaVersion !== "FL_TEAMPACK_v1") throw new Error("Pack viejo, necesita migración");
+          const shouldRecalcSnapshots = !!document.getElementById("teamPackImportRecalcSnapshots")?.checked;
+          if((!Array.isArray(parsed.snapshots) || !parsed.snapshots.length) && shouldRecalcSnapshots){
+            const teamId = parsed?.team?.id;
+            const sourceMatches = (db.tracker || []).filter((m)=>m.homeId===teamId || m.awayId===teamId);
+            parsed.snapshots = [];
+            for(const m of sourceMatches){
+              let snapshot = m?.featureSnapshots?.[teamId] || null;
+              if(!snapshot){
+                try{ snapshot = await calculateSnapshotForMatch({ db, team, match: m }); }catch(_e){ snapshot = null; }
+              }
+              if(!snapshot) continue;
+              parsed.snapshots.push({
+                matchId: String(m.id),
+                matchDate: m.date || "",
+                featureSchema: "F9_v1",
+                features: normalizeFeatureSchema(snapshot),
+                featuresRaw: snapshot?.features || null,
+                audit: snapshot?.featureAudit || {}
+              });
+            }
+            parsed.snapshots.sort((a,b)=>parseSortableDate(a.matchDate)-parseSortableDate(b.matchDate));
+          }
           importedPack = parsed;
-          const packsStore = getJsonStorage(TEAM_PACKS_KEY);
-          packsStore[parsed?.team?.id || "unknown"] = {
+          await saveTeamPackRecord(parsed?.team?.id || "unknown", {
             manifest: {
               schemaVersion: parsed.schemaVersion,
               createdAt: parsed.createdAt,
               team: parsed.team,
               range: parsed.range,
+              cutoffDate: parsed.cutoffDate || parsed?.range?.to || "",
               matches: parsed.matches?.length || 0,
               snapshots: parsed.snapshots?.length || 0
             },
             matches: parsed.matches || [],
             snapshots: parsed.snapshots || []
-          };
-          localStorage.setItem(TEAM_PACKS_KEY, JSON.stringify(packsStore));
+          });
           renderTeamPackStrength(importedPack);
           if(status) status.textContent = "✅ TeamPack importado.";
         }catch(err){
@@ -6471,18 +6572,21 @@ function computeTeamIntelligencePanel(db, teamId){
         const strength = computeTeamPackDataStrength(importedPack);
         const baseLoss = clamp(1.4 - (strength.score/100) - (usable / Math.max(1, examples.length))*0.4, 0.12, 1.8);
         const finalLoss = clamp(baseLoss * (1 - epochs*0.03) * (batchSize===32 ? 0.96 : 1), 0.05, 1.8);
-        const valAccuracy = clamp((strength.score/100) * 0.7 + (usable / Math.max(1, examples.length))*0.3, 0, 1);
+        const fitScore = clamp((strength.score/100) * 0.7 + (usable / Math.max(1, examples.length))*0.3, 0, 1);
         const models = getJsonStorage(TEAM_MODELS_KEY);
         models[importedPack?.team?.id || "unknown"] = {
-          weights: { pseudoLoss: finalLoss, examples: usable, windowSize, epochs, batchSize },
+          weights: { pseudoLoss: finalLoss, fitScore, examples: usable, windowSize, epochs, batchSize },
           schemaVersion: importedPack.schemaVersion,
           trainedAt: new Date().toISOString(),
-          dataScoreAtTrain: strength.score
+          dataScoreAtTrain: strength.score,
+          trainedOnRange: { from: importedPack?.range?.from || "", to: importedPack?.range?.to || "" },
+          trainedOnMatchesCount: matches.length,
+          cutoffDate: importedPack?.cutoffDate || importedPack?.range?.to || ""
         };
         localStorage.setItem(TEAM_MODELS_KEY, JSON.stringify(models));
         if(out) out.innerHTML = [
           `✅ Modelo actualizado (${new Date().toLocaleString()}).`,
-          `Loss final: <b>${finalLoss.toFixed(4)}</b> · Accuracy validación: <b>${(valAccuracy*100).toFixed(1)}%</b>.`,
+          `Pseudo-loss final: <b>${finalLoss.toFixed(4)}</b> · Fit score: <b>${(fitScore*100).toFixed(1)}%</b>.`,
           `Entrenado con ${usable}/${examples.length} ejemplos útiles · ventana ${windowSize} · epochs ${epochs} · batch ${batchSize}.`
         ].join("<br>");
       };
