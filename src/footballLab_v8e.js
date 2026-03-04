@@ -22,6 +22,7 @@ export function initFootballLab(){
   const TEAM_PACKS_DB = "footballLabTeamPacks";
   const TEAM_PACKS_STORE = "packs";
   const TEAM_MODELS_KEY = "FL_TEAMMODELS";
+  const TEAM_BRAIN_FEATURES_KEY = "FL_TEAM_BRAIN_FEATURES";
 
   const defaultDb = {
     settings: {
@@ -80,6 +81,14 @@ export function initFootballLab(){
 
   function uid(prefix){
     return `${prefix}_${Math.random().toString(36).slice(2,9)}${Date.now().toString(36).slice(-4)}`;
+  }
+
+  function safeParseJSON(value, fallback){
+    try{
+      return JSON.parse(value);
+    }catch(_err){
+      return fallback;
+    }
   }
 
   function loadDb(){
@@ -1236,6 +1245,39 @@ export function initFootballLab(){
 
   function getJsonStorage(key){
     return safeParseJSON(localStorage.getItem(key), {});
+  }
+
+  function saveTeamBrainFeatures(teamId, snapshots = []){
+    if(!teamId) return;
+    const store = getJsonStorage(TEAM_BRAIN_FEATURES_KEY);
+    store[teamId] = (Array.isArray(snapshots) ? snapshots : [])
+      .filter((row)=>row && typeof row === "object")
+      .map((row)=>({
+        matchId: String(row.matchId || ""),
+        date: String(row.matchDate || row.date || ""),
+        features: normalizeFeatureSchema(row.features || row.featuresRaw || {})
+      }))
+      .filter((row)=>row.date && row.features && Object.keys(row.features).length)
+      .sort((a,b)=>parseSortableDate(a.date)-parseSortableDate(b.date))
+      .slice(-20);
+    localStorage.setItem(TEAM_BRAIN_FEATURES_KEY, JSON.stringify(store));
+  }
+
+  function getTeamBrainFeatures(teamId, historicalDate = ""){
+    if(!teamId) return [];
+    const store = getJsonStorage(TEAM_BRAIN_FEATURES_KEY);
+    const rows = Array.isArray(store?.[teamId]) ? store[teamId] : [];
+    const cutoff = parseSortableDate(historicalDate);
+    return rows
+      .filter((row)=>{
+        const ts = parseSortableDate(row?.date);
+        if(!Number.isFinite(ts)) return false;
+        if(Number.isFinite(cutoff) && ts >= cutoff) return false;
+        return true;
+      })
+      .slice()
+      .sort((a,b)=>parseSortableDate(a.date)-parseSortableDate(b.date))
+      .slice(-3);
   }
 
   async function openTeamPackDb(){
@@ -6584,10 +6626,12 @@ function computeTeamIntelligencePanel(db, teamId){
           cutoffDate: importedPack?.cutoffDate || importedPack?.range?.to || ""
         };
         localStorage.setItem(TEAM_MODELS_KEY, JSON.stringify(models));
+        saveTeamBrainFeatures(importedPack?.team?.id || "", importedPack?.snapshots || []);
         if(out) out.innerHTML = [
           `✅ Modelo actualizado (${new Date().toLocaleString()}).`,
           `Pseudo-loss final: <b>${finalLoss.toFixed(4)}</b> · Fit score: <b>${(fitScore*100).toFixed(1)}%</b>.`,
-          `Entrenado con ${usable}/${examples.length} ejemplos útiles · ventana ${windowSize} · epochs ${epochs} · batch ${batchSize}.`
+          `Entrenado con ${usable}/${examples.length} ejemplos útiles · ventana ${windowSize} · epochs ${epochs} · batch ${batchSize}.`,
+          "Brain sync: snapshots del pack guardados para autoload en pestaña Brain."
         ].join("<br>");
       };
 
@@ -9125,7 +9169,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const tracker = Array.isArray(options?.tracker) ? options.tracker : db.tracker;
       const historicalDate = String(options?.historicalDate || "").trim();
       const referenceTs = parseSortableDate(historicalDate);
-      return tracker
+      const trackerWindow = tracker
         .filter((m)=>m.homeId===teamId || m.awayId===teamId)
         .filter((m)=>{
           if(!Number.isFinite(referenceTs)) return true;
@@ -9141,6 +9185,8 @@ function computeTeamIntelligencePanel(db, teamId){
           date: match.date,
           features: match?.featureSnapshots?.[teamId]?.features || {}
         }));
+      if(trackerWindow.length) return trackerWindow;
+      return getTeamBrainFeatures(teamId, historicalDate);
     }
 
     function summarizeTeamFeatureWindow(window = []){
@@ -9505,14 +9551,6 @@ function computeTeamIntelligencePanel(db, teamId){
       normalized.matchDate = toISODate(raw.matchDate || raw?.meta?.historicalDate || raw?.meta?.matchDate) || resolveMatchDate(raw?.meta || {});
       normalized.capturedAt = Number(raw.capturedAt || raw.createdAt || Date.now()) || Date.now();
       return normalized;
-    }
-
-    function safeParseJSON(value, fallback){
-      try{
-        return JSON.parse(value);
-      }catch(_err){
-        return fallback;
-      }
     }
 
     function getBrainProfileId(){
