@@ -7934,7 +7934,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const memoryRows = teamMemories.slice(0, 8).map((m)=>{
         const story = m?.summary?.story || (m.narrative || "").slice(0, 90);
         const tags = (m?.summary?.reasons || []).slice(0, 2).map((r)=>`${r.tag} ${(r.strength*100).toFixed(0)}%`).join(" · ");
-        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${story}<div class="fl-mini">${tags || "Sin razones"}</div></td><td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Ver por qué</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></div></td></tr>`;
+        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${m.score || "-"}</td><td>${story}<div class="fl-mini">${tags || "Sin razones"}</div></td><td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Ver por qué</button><button class="fl-btn ghost b2EditMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Editar</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></div></td></tr>`;
       }).join("");
       const selectedTeamSummary = summarizeTeamMemory(teamMemories);
       const selectedTeamHasBrain = selectedTeamSummary.samples > 0;
@@ -7996,7 +7996,7 @@ passes: 425"></textarea>
             <span id="b2Status" class="fl-muted"></span>
           </div>
           <div class="fl-mini" style="margin-top:8px;">${selectedTeamBadge}</div>
-          <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Relato</th><th>Acciones</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="4" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
+          <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Relato</th><th>Acciones</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="5" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
         </div>
         <div class="fl-card">
           <div style="font-size:18px;font-weight:800;">🎯 Simulador visual Local vs Visita</div>
@@ -8135,6 +8135,108 @@ passes: 425"></textarea>
           logHybrid(`❌ Preview Vision error (Brain v2): ${err.message}`);
         }
       });
+      function openB2MatchReasonModal({ teamId = "", matchId = "" } = {}){
+        const status = document.getElementById('b2Status');
+        if(!teamId || !matchId || !brainV2.memories[teamId]) return;
+        const row = brainV2.memories[teamId].find((item)=>item.id===matchId);
+        if(!row) return;
+        const teamName = db.teams.find((t)=>t.id===teamId)?.name || row?.teamName || "Local";
+        const buildAndRefreshSummary = ()=>{
+          const manualReasons = (row.summary?.reasons || []).filter((r)=>r && r.auto===false);
+          row.summary = buildBrainV2MatchSummary({ row, teamName: row?.teamName || teamName, opponentName: row?.opponent || 'Rival' });
+          if(manualReasons.length){
+            row.summary.reasons = [...(row.summary.reasons || []), ...manualReasons]
+              .sort((a,b)=>(Number(b?.strength)||0)-(Number(a?.strength)||0))
+              .slice(0, 6);
+          }
+          return ensureBrainV2RowSummary(row, teamName);
+        };
+        const summary = buildAndRefreshSummary();
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'fl-modal-backdrop';
+        backdrop.innerHTML = `
+          <div class="fl-modal" style="max-width:980px;">
+            <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <div><div class="fl-modal-title">🧩 Editar partido y razones</div><div class="fl-mini">${teamName} vs ${row.opponent || 'Rival'} · ajusta resultado, relato y tags.</div></div>
+              <button class="fl-btn" id="b2CloseReasonModal">Cerrar</button>
+            </div>
+            <div class="fl-modal-grid">
+              <div class="fl-field"><label>Fecha</label><input id="b2ModalDate" class="fl-input" type="date" value="${row.date || ''}"></div>
+              <div class="fl-field"><label>Rival</label><input id="b2ModalOpponent" class="fl-input" value="${row.opponent || ''}"></div>
+              <div class="fl-field"><label>Resultado</label><input id="b2ModalScore" class="fl-input" placeholder="2-1" value="${row.score || '0-0'}"></div>
+            </div>
+            <div class="fl-field" style="margin-top:8px;"><label>Relato</label><textarea id="b2ModalNarrative" class="fl-text" style="min-height:130px;">${row.narrative || ''}</textarea></div>
+            <div class="fl-field" style="margin-top:8px;"><label>Stats raw (opcional)</label><textarea id="b2ModalStats" class="fl-text" style="min-height:80px;">${row.statsRaw || ''}</textarea></div>
+            <div class="fl-row" style="justify-content:space-between;align-items:center;margin-top:10px;">
+              <div style="font-weight:700;">Razones detectadas</div>
+              <button class="fl-btn secondary" id="b2ModalRegen">Recalcular tags</button>
+            </div>
+            <div id="b2ModalReasons" style="display:grid;gap:8px;margin-top:8px;"></div>
+            <div class="fl-modal-grid" style="margin-top:10px;">
+              <div class="fl-field"><label>Tag manual</label><input id="b2ManualTag" class="fl-input" placeholder="finishing_failure"></div>
+              <div class="fl-field"><label>Strength 0-1</label><input id="b2ManualStrength" class="fl-input" type="number" step="0.01" min="0" max="1" value="0.5"></div>
+              <div class="fl-field"><label>Mins (csv)</label><input id="b2ManualMins" class="fl-input" placeholder="65,78"></div>
+            </div>
+            <div class="fl-field" style="margin-top:8px;"><label>Nota manual</label><input id="b2ManualNote" class="fl-input" placeholder="Ajuste manual del analista"></div>
+            <div class="fl-row" style="justify-content:space-between;margin-top:12px;">
+              <span id="b2ModalStatus" class="fl-mini"></span>
+              <div class="fl-row"><button class="fl-btn secondary" id="b2AddManualReason">Añadir razón manual</button><button class="fl-btn" id="b2SaveReasonModal">Guardar cambios</button></div>
+            </div>
+          </div>`;
+        document.body.appendChild(backdrop);
+        const close = ()=>backdrop.remove();
+        backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
+        backdrop.querySelector('#b2CloseReasonModal').onclick = close;
+
+        const renderReasons = ()=>{
+          const rows = (row.summary?.reasons || []).map((r, idx)=>{
+            const mins = (r.mins || []).join(', ');
+            const evidence = (Array.isArray(r.evidence) ? r.evidence : []).slice(0, 2).map((e)=>`<div class="fl-mini" style="opacity:.9;">• ${e}</div>`).join('');
+            return `<div style="padding:8px;border:1px solid #2f3d4f;border-radius:10px;background:#0f1620;"><div style="font-weight:700;">#${idx+1} ${r.tagId || r.tag} · ${(Number(r.strength||0)*100).toFixed(0)}%</div><div class="fl-mini">mins: ${mins || '-'}</div><div class="fl-mini" style="margin-top:4px;">${r.note || '-'}</div>${evidence}</div>`;
+          }).join('') || '<div class="fl-mini">Sin razones para este partido.</div>';
+          backdrop.querySelector('#b2ModalReasons').innerHTML = rows;
+        };
+        renderReasons();
+
+        const syncRowFromModal = ()=>{
+          row.date = backdrop.querySelector('#b2ModalDate').value || row.date;
+          row.opponent = (backdrop.querySelector('#b2ModalOpponent').value || '').trim();
+          row.score = (backdrop.querySelector('#b2ModalScore').value || '0-0').trim();
+          row.narrative = (backdrop.querySelector('#b2ModalNarrative').value || '').trim();
+          row.statsRaw = (backdrop.querySelector('#b2ModalStats').value || '').trim();
+        };
+
+        backdrop.querySelector('#b2ModalRegen').onclick = ()=>{
+          syncRowFromModal();
+          buildAndRefreshSummary();
+          renderReasons();
+          backdrop.querySelector('#b2ModalStatus').textContent = '♻️ Tags recalculados con el relato actual.';
+        };
+
+        backdrop.querySelector('#b2AddManualReason').onclick = ()=>{
+          const tag = String(backdrop.querySelector('#b2ManualTag').value || '').trim();
+          const strength = clamp(Number(backdrop.querySelector('#b2ManualStrength').value), 0, 1);
+          const note = String(backdrop.querySelector('#b2ManualNote').value || '').trim();
+          const mins = String(backdrop.querySelector('#b2ManualMins').value || '').split(',').map((v)=>Number(v.trim())).filter((v)=>Number.isFinite(v)).map((v)=>clamp(Math.round(v), 0, 140)).slice(0, 5);
+          if(!tag){ backdrop.querySelector('#b2ModalStatus').textContent = '⚠️ Escribe un tag manual.'; return; }
+          row.summary ||= summary;
+          row.summary.reasons ||= [];
+          row.summary.reasons.push({ tag, tagId: tag, label: RELATO_TAG_LABELS[tag] || tag, strength, mins, evidence: [], note: note || 'Ajuste manual del analista', auto: false });
+          row.summary.reasons = row.summary.reasons.sort((a,b)=>(Number(b.strength)||0)-(Number(a.strength)||0)).slice(0, 6);
+          renderReasons();
+          backdrop.querySelector('#b2ModalStatus').textContent = '🧩 Razón manual añadida.';
+        };
+
+        backdrop.querySelector('#b2SaveReasonModal').onclick = ()=>{
+          syncRowFromModal();
+          buildAndRefreshSummary();
+          saveBrainV2(brainV2);
+          if(status) status.textContent = '✅ Partido actualizado con resultado y razones.';
+          close();
+          render('brainv2', { leagueId: selectedLeagueId, teamId });
+        };
+      }
 
       document.querySelectorAll('.b2DeleteMatch').forEach((btn)=>btn.addEventListener('click', ()=>{
         const status = document.getElementById('b2Status');
