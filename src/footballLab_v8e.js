@@ -7651,6 +7651,7 @@ passes: 425"></textarea>
 
       document.getElementById('b2HybridEvaluate')?.addEventListener('click', async ()=>{
         try{
+          await ensureTensorFlowReady();
           if(!hybridBrain.model){
             await hybridBrain.load();
           }
@@ -7663,7 +7664,7 @@ passes: 425"></textarea>
           const cm = metrics.confusionMatrix.map((row)=>`[${row.join(',')}]`).join(' ');
           logHybrid(`🧪 Evaluate listo\nBrier: ${metrics.brier.toFixed(3)} · ECE: ${metrics.ece.toFixed(3)} · Goals MAE: ${metrics.goalsMae.toFixed(3)}\nCM: ${cm}`);
         }catch(err){
-          logHybrid(`❌ Evaluate error: ${err.message}`);
+          logHybrid(`❌ Evaluate error (Brain v2): ${err.message}`);
         }
       });
 
@@ -7689,7 +7690,7 @@ passes: 425"></textarea>
           const rows = vision.channels.map((row)=>`C${row.channel}: min=${row.min.toFixed(3)} max=${row.max.toFixed(3)} mean=${row.mean.toFixed(3)}`).join('\n');
           logHybrid(`👁️ Vision tensor ${vision.shape.join('x')}\n${rows}`);
         }catch(err){
-          logHybrid(`❌ Preview Vision error: ${err.message}`);
+          logHybrid(`❌ Preview Vision error (Brain v2): ${err.message}`);
         }
       });
 
