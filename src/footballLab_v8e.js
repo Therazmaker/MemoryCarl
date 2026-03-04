@@ -27,6 +27,28 @@ export function initFootballLab(){
   const TEAM_BRAIN_FEATURES_KEY = "FL_TEAM_BRAIN_FEATURES";
   const BRAIN_V2_KEY = "FL_BRAIN_V2";
   const hybridBrain = new HybridBrainService();
+  let tfLoadPromise = null;
+
+  async function ensureTensorFlowReady(){
+    if(typeof window !== "undefined" && window.tf) return window.tf;
+    if(tfLoadPromise) return tfLoadPromise;
+    tfLoadPromise = new Promise((resolve, reject)=>{
+      const existing = document.querySelector('script[data-tfjs="1"]');
+      if(existing){
+        existing.addEventListener("load", ()=>resolve(window.tf));
+        existing.addEventListener("error", ()=>reject(new Error("No se pudo cargar TensorFlow.js")));
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
+      script.async = true;
+      script.dataset.tfjs = "1";
+      script.onload = ()=>resolve(window.tf);
+      script.onerror = ()=>reject(new Error("No se pudo cargar TensorFlow.js"));
+      document.head.appendChild(script);
+    });
+    return tfLoadPromise;
+  }
 
   const defaultDb = {
     settings: {
