@@ -5808,7 +5808,7 @@ function computeTeamIntelligencePanel(db, teamId){
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","momentum","bitacora","market","brain"];
+    const tabs = ["home","liga","tracker","versus","momentum","bitacora","market"];
     const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
 
     app.innerHTML = `
