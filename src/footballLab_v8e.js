@@ -4853,44 +4853,227 @@ function computeTeamIntelligencePanel(db, teamId){
     return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
   }
 
-  function parseMatchNarrative(text, teamHints=[]){
-    const teams = Array.isArray(teamHints) ? teamHints.filter(Boolean) : [];
-    const lines = String(text || "").split(/\n+/).map(line=>line.trim()).filter(Boolean);
-    const minuteRegex = /(\d+)(\+\d+)?\s*'/;
-    const keywordMap = [
-      { type: "goal", regex: /\bgol\b|anota|marca/i },
-      { type: "red", regex: /tarjeta roja|\broja\b|expulsad/i },
-      { type: "yellow", regex: /tarjeta|amonestad/i },
-      { type: "corner", regex: /c[oó]rner/i },
-      { type: "save", regex: /parada|atajad|interviene/i },
-      { type: "big_chance", regex: /ocasi[oó]n clar[ií]sima|mano a mano|clar[ií]sima/i },
-      { type: "shot", regex: /remata|disparo|chut/i },
-      { type: "offside", regex: /fuera de juego/i },
-      { type: "foul", regex: /falta|infracci[oó]n/i },
-      { type: "pressure", regex: /presi[oó]n|asedia|encierra|domina/i }
-    ];
-    const teamNorm = teams.map(name=>({ name, token: normalizeTeamToken(name) })).filter(x=>x.token);
+  const LIVE_MICRO_RULES = [
+    { key: "goal", regex: /\bgol\b|anota|marca/i, weight: 5 },
+    { key: "shot_on_target", regex: /parada|guantes|atajad|salvad|portero|disparo a puerta|remate a puerta/i, weight: 3.3 },
+    { key: "miss", regex: /fuera|por encima|desviad|poste|larguero|travesa[ñn]o/i, weight: 2.1 },
+    { key: "big_chance", regex: /gran ocasi[oó]n|que oportunidad|qu[ée] oportunidad|cerca|ocasi[oó]n clar[ií]sima|mano a mano/i, weight: 3.8 },
+    { key: "shot", regex: /dispara|remata|cabezazo|chut|disparo|tiro/i, weight: 2.2 },
+    { key: "corner", regex: /c[oó]rner/i, weight: 1.5 },
+    { key: "freekick", regex: /tiro libre|falta peligrosa/i, weight: 1.3 },
+    { key: "setpiece_cross", regex: /centro de tiro libre/i, weight: 1.3 },
+    { key: "possession_control", regex: /controla la posesi[oó]n|intercambiando pases/i, weight: 1.1 },
+    { key: "foul", regex: /falta|infracci[oó]n/i, weight: 0.8 },
+    { key: "yellow", regex: /tarjeta amarilla|\bamarilla\b|amonestad/i, weight: 1.1 },
+    { key: "red", regex: /tarjeta roja|\broja\b|expulsad/i, weight: 2.7 },
+    { key: "penalty_awarded", regex: /penalti|penalty|pena m[aá]xima/i, weight: 2.5 },
+    { key: "var_review", regex: /\bvar\b/i, weight: 1.6 },
+    { key: "penalty_cancelled", regex: /revierte|no hubo infracci[oó]n|anulad[oa]\s+por\s+var/i, weight: 2.3 },
+    { key: "var_overturn", regex: /revierte|no hubo infracci[oó]n|anulad[oa]\s+por\s+var/i, weight: 2.3 },
+    { key: "substitution", regex: /sustituci[oó]n|cambio/i, weight: 0.6 },
+    { key: "injury", regex: /lesi[oó]n|no puede continuar|abandona lesionado|se duele/i, weight: 2.1 }
+  ];
+
+  function phaseOf(min){
+    const minute = Number(min);
+    if(!Number.isFinite(minute) || minute < 15) return "0-15";
+    if(minute < 30) return "15-30";
+    if(minute < 45) return "30-45";
+    if(minute < 60) return "45-60";
+    if(minute < 75) return "60-75";
+    return "75-90";
+  }
+
+  function detectTeam(line="", teamHints=[]){
+    const hints = (Array.isArray(teamHints) ? teamHints : []).filter(Boolean);
+    if(!hints.length) return null;
+    const lineNorm = normalizeTeamToken(line);
+    const map = hints.map((name)=>({ name, token: normalizeTeamToken(name) })).filter((row)=>row.token);
+    return map.find((row)=>lineNorm.includes(row.token))?.name || null;
+  }
+
+  function classifyMicroEvents(line=""){
+    const txt = String(line || "");
+    const found = LIVE_MICRO_RULES.filter((row)=>row.regex.test(txt)).map((row)=>row.key);
+    if(found.includes("shot_on_target") && !found.includes("shot")) found.push("shot");
+    return [...new Set(found)];
+  }
+
+  function parseNarrativeLines(text, teamHints=[]){
+    const lines = String(text || "").split(/\n+/).map((line)=>line.trim()).filter(Boolean);
     const events = [];
     let pendingMinute = null;
-
     lines.forEach((line)=>{
-      const minuteMatch = line.match(minuteRegex);
-      if(minuteMatch){
-        pendingMinute = Number(minuteMatch[1]) + Number((minuteMatch[2] || "").replace("+", "") || 0);
-      }
-      const eventType = keywordMap.find(item=>item.regex.test(line))?.type;
-      if(!eventType) return;
-      const lineNorm = normalizeTeamToken(line);
-      const team = teamNorm.find(item=>lineNorm.includes(item.token))?.name;
+      const minuteFound = line.match(/(\d{1,3}\s*\+\s*\d{1,2}|\d{1,3})\s*'/);
+      if(minuteFound) pendingMinute = parseMinuteToken(minuteFound[1]);
+      const minute = Number.isFinite(Number(pendingMinute)) ? Number(pendingMinute) : null;
+      if(minute === null) return;
+      const micro = classifyMicroEvents(line);
+      if(!micro.length) return;
+      const team = detectTeam(line, teamHints);
+      const weight = micro.reduce((acc, key)=>acc + (Number(LIVE_MICRO_RULES.find((row)=>row.key===key)?.weight) || 0), 0);
       events.push({
-        min: pendingMinute ?? null,
-        type: eventType,
+        min: minute,
         team,
-        text: line
+        micro,
+        weight: Number(weight.toFixed(2)),
+        phase: phaseOf(minute),
+        raw: line
       });
     });
+    return events;
+  }
 
-    return { teams, events };
+  function dangerIndex(counters={}){
+    const shotsOT = Number(counters?.shotsOT || 0);
+    const bigChances = Number(counters?.bigChances || 0);
+    const shots = Number(counters?.shots || 0);
+    const corners = Number(counters?.corners || 0);
+    const cards = Number(counters?.cards || 0);
+    return Number((1.2*shotsOT + 0.7*bigChances + 0.35*shots + 0.25*corners - 0.6*cards).toFixed(3));
+  }
+
+  function createLiveCounters(){
+    return { shots: 0, shotsOT: 0, bigChances: 0, corners: 0, danger: 0, cards: 0, reds: 0, varShocks: 0, injuryEvents: 0, goals: 0 };
+  }
+
+  function accumulateCounters(events=[], teams=[]){
+    const phaseKeys = ["0-15", "15-30", "30-45", "45-60", "60-75", "75-90"];
+    const pair = (Array.isArray(teams) ? teams : []).filter(Boolean);
+    const [homeName="home", awayName="away"] = pair;
+    const byPhaseCounters = Object.fromEntries(phaseKeys.map((key)=>[key, { [homeName]: createLiveCounters(), [awayName]: createLiveCounters() }]));
+    const totals = { [homeName]: createLiveCounters(), [awayName]: createLiveCounters() };
+    const register = (bucket, micro=[])=>{
+      if(micro.includes("shot")) bucket.shots += 1;
+      if(micro.includes("shot_on_target")) bucket.shotsOT += 1;
+      if(micro.includes("big_chance")) bucket.bigChances += 1;
+      if(micro.includes("corner")) bucket.corners += 1;
+      if(micro.includes("goal")) bucket.goals += 1;
+      if(micro.includes("yellow")) bucket.cards += 1;
+      if(micro.includes("red")){
+        bucket.cards += 1;
+        bucket.reds += 1;
+      }
+      if(micro.includes("penalty_cancelled") || micro.includes("var_overturn")) bucket.varShocks += 1;
+      if(micro.includes("injury")) bucket.injuryEvents += 1;
+      bucket.danger = dangerIndex(bucket);
+    };
+    (Array.isArray(events) ? events : []).forEach((event)=>{
+      const side = event?.team === awayName ? awayName : homeName;
+      const phase = phaseKeys.includes(event?.phase) ? event.phase : phaseOf(event?.min);
+      register(byPhaseCounters[phase][side], event?.micro || []);
+      register(totals[side], event?.micro || []);
+    });
+    return { byPhaseCounters, totals };
+  }
+
+  function detectTurningPoints(events=[], teams=[]){
+    const safe = (Array.isArray(events) ? events : []).slice().sort((a,b)=>(Number(a?.min)||0) - (Number(b?.min)||0));
+    const [homeName="home", awayName="away"] = (Array.isArray(teams) ? teams : []).filter(Boolean);
+    const points = [];
+    for(let i=0;i<safe.length;i++){
+      const event = safe[i];
+      const micro = event?.micro || [];
+      if(micro.includes("penalty_awarded")){
+        const cancel = safe.slice(i+1, i+7).find((row)=>{
+          const dt = Math.abs((Number(row?.min)||0) - (Number(event?.min)||0));
+          return dt <= 3 && (row?.micro || []).some((m)=>m === "penalty_cancelled" || m === "var_overturn");
+        });
+        if(cancel){
+          const affected = event?.team || null;
+          const rival = affected === homeName ? awayName : homeName;
+          points.push({
+            type: "turning_point_var",
+            min: Number(cancel.min) || Number(event.min) || 0,
+            affectedTeam: affected,
+            rivalTeam: rival,
+            impactWindow: [Number(cancel.min) || Number(event.min), (Number(cancel.min) || Number(event.min)) + 10],
+            effects: { discipline_issues_risk: 0.12, counter_threat_rival: 0.15, frustration_boost: 0.14 }
+          });
+        }
+      }
+      if(micro.includes("goal")){
+        points.push({
+          type: "turning_point_goal",
+          min: Number(event.min) || 0,
+          scorer: event?.team || null,
+          effects: { trailing_late_siege: 0.18, winner_low_block: 0.12 }
+        });
+      }
+    }
+    return points;
+  }
+
+  function parseMatchNarrative(text, teamHints=[]){
+    const teams = Array.isArray(teamHints) ? teamHints.filter(Boolean) : [];
+    const liveSnapshot = parseNarrativeLines(text, teams);
+    const events = liveSnapshot.map((event)=>{
+      const micro = Array.isArray(event.micro) ? event.micro : [];
+      const mapPrimary = micro.includes("goal") ? "goal"
+        : micro.includes("corner") ? "corner"
+          : micro.includes("big_chance") ? "big_chance"
+            : micro.includes("shot") ? "shot"
+              : micro.includes("shot_on_target") ? "save"
+                : micro.includes("yellow") ? "yellow"
+                  : micro.includes("red") ? "red"
+                    : micro.includes("foul") ? "foul"
+                      : micro.includes("possession_control") ? "pressure"
+                        : micro[0] || "event";
+      return { min: event.min, type: mapPrimary, team: event.team, text: event.raw, micro, phase: event.phase, weight: event.weight };
+    });
+    const counters = accumulateCounters(liveSnapshot, teams);
+    const turningPoints = detectTurningPoints(liveSnapshot, teams);
+    return { teams, events, liveSnapshot, byPhaseCounters: counters.byPhaseCounters, liveTotals: counters.totals, turningPoints };
+  }
+
+  function generateNarrative(preMatchPrior={}, byPhaseCounters={}, turningPoints=[], clashes=[]){
+    const phases = ["0-15", "15-30", "30-45", "45-60", "60-75", "75-90"];
+    const phaseCards = phases.map((phase)=>{
+      const counter = byPhaseCounters?.[phase] || {};
+      const [homeKey, awayKey] = Object.keys(counter);
+      const home = counter?.[homeKey] || createLiveCounters();
+      const away = counter?.[awayKey] || createLiveCounters();
+      const totalShots = Number(home.shots || 0) + Number(away.shots || 0);
+      const totalCorners = Number(home.corners || 0) + Number(away.corners || 0);
+      const scenes = [];
+      if((phase === "0-15" || phase === "15-30") && totalShots <= 4 && totalCorners <= 2) scenes.push({ id: "chess_match", text: "Partido táctico, pocas ocasiones claras…", evidence: 0.8 });
+      if(Number(home.corners || 0) >= 2 || Number(away.corners || 0) >= 2) scenes.push({ id: "setpiece_build", text: "Empieza a cargar el balón parado…", evidence: 0.75 });
+      if((Number(home.bigChances || 0) >= 2 && Number(home.goals || 0) === 0) || (Number(away.bigChances || 0) >= 2 && Number(away.goals || 0) === 0)) scenes.push({ id: "frustration_spiral", text: "Se acumula frustración: el plan genera, pero no rompe…", evidence: 0.7 });
+      if(turningPoints.some((tp)=>tp.type === "turning_point_goal" && phaseOf(tp.min) === phase)) scenes.push({ id: "counter_punch", text: "Gol que castiga un momento de dominio…", evidence: 0.72 });
+      if(phase === "75-90" && (totalCorners >= 2 || totalShots >= 3)) scenes.push({ id: "late_siege", text: "Asedio final…", evidence: 0.82 });
+      const sorted = scenes.sort((a,b)=>b.evidence-a.evidence).slice(0, 2);
+      const evidenceScore = sorted.length ? sorted.reduce((acc, item)=>acc+item.evidence, 0)/sorted.length : 0.2;
+      const prior = Number(preMatchPrior?.[phase] || 0.45);
+      const quality = clamp((Object.keys(counter).length || 0) / 2, 0.2, 1);
+      const confidence = clamp(0.35*prior + 0.5*evidenceScore + 0.15*quality, 0.08, 0.95);
+      const conditional = evidenceScore < 0.35;
+      return {
+        phase,
+        scenes: sorted.map((item)=>item.id),
+        text: (sorted[0]?.text || "Podría aparecer un cambio táctico si continúa esta tendencia.") + (conditional ? " Podría romperse si continúa esta tendencia." : ""),
+        matchState: home.danger > (1.25*away.danger)
+          ? "CONTROL_HOME"
+          : away.danger > (1.25*home.danger)
+            ? "CONTROL_AWAY"
+            : "EVEN/CHESS",
+        chaos: Number(home.varShocks || 0) + Number(away.varShocks || 0) + Number(home.reds || 0) + Number(away.reds || 0) + Number(home.injuryEvents || 0) + Number(away.injuryEvents || 0) > 0,
+        evidenceScore: Number(evidenceScore.toFixed(2)),
+        confidence: Number(confidence.toFixed(2)),
+        clashes
+      };
+    });
+    return phaseCards;
+  }
+
+  function liveUpdate(newLine="", state={}){
+    const teams = Array.isArray(state?.teams) ? state.teams : [];
+    const prev = Array.isArray(state?.events) ? state.events : [];
+    const incoming = parseNarrativeLines(newLine, teams);
+    const events = [...prev, ...incoming].sort((a,b)=>(Number(a?.min)||0) - (Number(b?.min)||0));
+    const counters = accumulateCounters(events, teams);
+    const turningPoints = detectTurningPoints(events, teams);
+    const phaseCards = generateNarrative(state?.preMatchPrior || {}, counters.byPhaseCounters, turningPoints, state?.clashes || []);
+    return { ...state, events, byPhaseCounters: counters.byPhaseCounters, liveTotals: counters.totals, turningPoints, phaseCards };
   }
 
   function buildEventTimeline(events=[]){
