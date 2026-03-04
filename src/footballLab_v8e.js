@@ -9502,9 +9502,11 @@ passes: 425"></textarea>
           <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
             <button class="fl-btn" id="hybridBuildDataset">Build Dataset</button>
             <button class="fl-btn" id="hybridTrain">Train</button>
+            <button class="fl-btn secondary" id="hybridEvaluate">Evaluate</button>
             <button class="fl-btn secondary" id="hybridLoad">Load</button>
             <button class="fl-btn secondary" id="hybridPredict">Pre/Live Predict</button>
             <button class="fl-btn secondary" id="hybridExplain">Explain</button>
+            <button class="fl-btn secondary" id="hybridVisionPreview">Preview Vision</button>
           </div>
           <div id="hybridBrainLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Modelo híbrido listo para dataset builder.</div>
         </div>
@@ -9720,7 +9722,11 @@ passes: 425"></textarea>
         `Val accuracy: ${Number.isFinite(metrics.valAcc) ? metrics.valAcc.toFixed(3) : "-"}`,
         `Val logloss: ${Number.isFinite(metrics.valLogLoss) ? metrics.valLogLoss.toFixed(3) : "-"}`,
         `Val goals MAE: ${Number.isFinite(metrics.valGoalsMae) ? metrics.valGoalsMae.toFixed(3) : "-"}`,
+        `Brier score: ${Number.isFinite(metrics.brier) ? metrics.brier.toFixed(3) : "-"}`,
+        `ECE: ${Number.isFinite(metrics.ece) ? metrics.ece.toFixed(3) : "-"}`,
+        `Temperature: ${Number.isFinite(status.temperature) ? status.temperature.toFixed(3) : "-"}`,
         status.trainedAt ? `Last trained: ${status.trainedAt}` : "Last trained: -",
+        status.trainingReport?.datasetStats ? `Report train/val: ${status.trainingReport.datasetStats.nTrain}/${status.trainingReport.datasetStats.nVal}` : "Report train/val: -",
         extra
       ].filter(Boolean).join("\n");
     }
@@ -9744,9 +9750,26 @@ passes: 425"></textarea>
         renderHybridStatus("⏳ Training...");
         const metrics = await hybridBrain.train({ epochs: 14, batchSize: 32, trainRatio: 0.8 });
         await hybridBrain.save();
-        renderHybridStatus(`✅ Train completado · acc=${(metrics.valAcc || 0).toFixed(3)} · logloss=${Number.isFinite(metrics.valLogLoss) ? metrics.valLogLoss.toFixed(3) : "-"}`);
+        renderHybridStatus(`✅ Train completado · acc=${(metrics.valAcc || 0).toFixed(3)} · logloss=${Number.isFinite(metrics.valLogLoss) ? metrics.valLogLoss.toFixed(3) : "-"} · brier=${Number.isFinite(metrics.brier) ? metrics.brier.toFixed(3) : "-"} · ece=${Number.isFinite(metrics.ece) ? metrics.ece.toFixed(3) : "-"}`);
       }catch(err){
         renderHybridStatus(`❌ Train error: ${err.message}`);
+      }
+    });
+
+    document.getElementById("hybridEvaluate")?.addEventListener("click", async ()=>{
+      try{
+        if(!hybridBrain.examples?.length) throw new Error("Primero construye el dataset.");
+        if(!hybridBrain.model) throw new Error("Primero entrena o carga el modelo.");
+        const split = hybridBrain.splitExamplesByMatch(hybridBrain.examples, { trainFrac: 0.8, seed: 1337 });
+        const metrics = await hybridBrain.evaluateSplit(split.val);
+        const cm = metrics.confusionMatrix.map((row)=>row.join(" ")).join(" | ");
+        renderHybridStatus(
+          `🧪 Evaluate val: brier=${metrics.brier.toFixed(3)} · ece=${metrics.ece.toFixed(3)} · goalsMAE=${metrics.goalsMae.toFixed(3)}
+` +
+          `📊 Confusion matrix [H,D,A]: ${cm}`
+        );
+      }catch(err){
+        renderHybridStatus(`❌ Evaluate error: ${err.message}`);
       }
     });
 
@@ -9777,6 +9800,18 @@ passes: 425"></textarea>
         );
       }catch(err){
         renderHybridStatus(`❌ Predict error: ${err.message}`);
+      }
+    });
+
+    document.getElementById("hybridVisionPreview")?.addEventListener("click", ()=>{
+      try{
+        const tabular = JSON.parse(hybridTabularEl?.value || "{}");
+        const text = hybridTextEl?.value || "";
+        const vision = hybridBrain.previewVision({ tabular, text, liveMinute: Number(tabular?.minute || 0) || null });
+        const rows = vision.channels.map((row)=>`C${row.channel}: min=${row.min.toFixed(3)} max=${row.max.toFixed(3)} mean=${row.mean.toFixed(3)}`).join("\n");
+        renderHybridStatus(`👁️ Vision tensor ${vision.shape.join("x")}\n${rows}`);
+      }catch(err){
+        renderHybridStatus(`❌ Vision preview error: ${err.message}`);
       }
     });
 
