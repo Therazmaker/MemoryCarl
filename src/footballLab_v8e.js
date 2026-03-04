@@ -8250,6 +8250,12 @@ passes: 425"></textarea>
         render('brainv2', { leagueId: selectedLeagueId, teamId });
       }));
 
+      document.querySelectorAll('.b2EditMatch').forEach((btn)=>btn.addEventListener('click', ()=>{
+        const teamId = btn.dataset.teamId || "";
+        const matchId = btn.dataset.matchId || "";
+        openB2MatchReasonModal({ teamId, matchId });
+      }));
+
       document.querySelectorAll('.b2WhyMatch').forEach((btn)=>btn.addEventListener('click', ()=>{
         const status = document.getElementById('b2Status');
         const teamId = btn.dataset.teamId || "";
