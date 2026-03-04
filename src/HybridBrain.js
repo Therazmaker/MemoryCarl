@@ -577,9 +577,19 @@ export class HybridBrainService {
   }
 
   previewVision({ tabular={}, text="", matchContext=null, liveMinute=null }={}){
-    const prepared = this.prepareInputs({ tabular, text, matchContext, liveMinute });
-    const tensor = prepared.ex.xVision;
-    tf.dispose([prepared.xTab, prepared.xText, prepared.xVision]);
+    const ex = this.toExample({
+      rawFeatures: tabular,
+      text,
+      yOutcome:[0,1,0],
+      yGoals:[0,0],
+      meta:{
+        timeline: matchContext?.timeline || [],
+        narrativeRaw: matchContext?.narrativeRaw || text,
+        liveAggregates: matchContext?.liveAggregates || {},
+        liveMinute
+      }
+    });
+    const tensor = ex.xVision;
     const channels = VISION_TENSOR_SHAPE.channels;
     const out = [];
     for(let c=0;c<channels;c++){
