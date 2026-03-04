@@ -8405,6 +8405,7 @@ passes: 425"></textarea>
           </div>
           <div class="fl-mini" style="margin-top:8px;">${selectedTeamBadge}</div>
           <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Relato</th><th>Acciones</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="5" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
+          <div id="b2PowerDashboard" class="fl-card" style="margin-top:10px;display:none;"></div>
         </div>
         <div class="fl-card">
           <div style="font-size:18px;font-weight:800;">🎯 Simulador visual Local vs Visita</div>
@@ -8428,6 +8429,80 @@ passes: 425"></textarea>
           <div id="b2Vision" class="fl-mini" style="margin-top:10px;">Carga local/visita para ver la simulación visual.</div>
         </div>
       `;
+
+      const openB2MatchModal = (row)=>{
+        if(!row) return;
+        const summary = ensureBrainV2RowSummary(row, selectedTeamName);
+        const reasons = (summary?.reasons || []).slice(0, 8).map((r)=>`<span class="fl-chip">${r.label || r.tag || r.tagId} ${(Number(r.strength||0)*100).toFixed(0)}%</span>`).join(" ");
+        const statsObj = parseBrainV2StatsToStatsRaw(row?.statsRaw || "");
+        const statsRows = Array.isArray(statsObj?.stats) ? statsObj.stats : [];
+        const backdrop = document.createElement("div");
+        backdrop.className = "fl-modal-backdrop";
+        backdrop.innerHTML = `
+          <div class="fl-modal" style="max-width:900px;">
+            <div class="fl-row" style="justify-content:space-between;align-items:center;">
+              <div><div class="fl-modal-title">${row.date || "-"} · ${selectedTeamName} vs ${row.opponent || "Rival"}</div><div class="fl-mini">Marcador ${row.score || "0-0"}</div></div>
+              <button class="fl-btn" data-close>Cerrar</button>
+            </div>
+            <div class="fl-card" style="margin-top:8px;"><b>Relato</b><div class="fl-mini" style="white-space:pre-wrap;max-height:180px;overflow:auto;margin-top:6px;">${String(row?.narrative || "Sin relato").replace(/</g, "&lt;")}</div></div>
+            <div class="fl-card" style="margin-top:8px;"><b>Tags auto + manual</b><div class="fl-row" style="margin-top:6px;flex-wrap:wrap;">${reasons || "Sin tags detectados"}</div></div>
+            <div class="fl-card" style="margin-top:8px;"><b>Stats pegadas</b><div class="fl-mini" style="max-height:150px;overflow:auto;margin-top:6px;">${statsRows.length ? statsRows.map((s)=>`${s.key}: ${s.home} - ${s.away}`).join("<br>") : "Sin stats"}</div></div>
+          </div>`;
+        document.body.appendChild(backdrop);
+        backdrop.querySelector('[data-close]').onclick = ()=>backdrop.remove();
+        backdrop.onclick = (e)=>{ if(e.target===backdrop) backdrop.remove(); };
+      };
+
+      const renderBrainV2PowerDashboard = ()=>{
+        const node = document.getElementById('b2PowerDashboard');
+        if(!node) return;
+        const pack = buildTeamPackFromBrainV2Memories(teamMemories, selectedTeamName);
+        const agg = buildTeamAggregate(pack);
+        if(agg.sampleSize < 5){ node.style.display = 'none'; return; }
+        node.style.display = 'block';
+        const confidenceLabel = agg.confidence >= 0.8 ? 'alto' : agg.confidence >= 0.55 ? 'medio' : 'bajo';
+        const timelineRows = agg.matches.slice().reverse().map((m)=>{
+          const tags = m.reasons.slice(0,3).map((r)=>`${r.label || r.tagId} ${(Number(r.strength||0)*100).toFixed(0)}%`).join(' · ');
+          const dot = m.completeness.score >= 0.8 ? '🟢' : m.completeness.score >= 0.55 ? '🟡' : '🔴';
+          return `<tr data-b2-match="${m.matchId}" style="cursor:pointer;"><td>${m.date || '-'}</td><td>${m.opponent}</td><td>${m.venue}</td><td>${m.gf}-${m.ga}</td><td>${m.outcome}</td><td class="fl-mini">${tags || 'Sin tags'}</td><td>${dot} ${(m.completeness.score*100).toFixed(0)}%</td></tr>`;
+        }).join('');
+        node.innerHTML = `
+          <div style="font-size:18px;font-weight:900;">⚡ Brain v2 · Power Dashboard (${agg.panelLevel})</div>
+          <div class="fl-mini" style="margin-top:4px;">N=${agg.sampleSize} · Confidence ${confidenceLabel} (${(agg.confidence*100).toFixed(0)}%)</div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span class="fl-mini">Attack Power</span><b>${agg.kpis.attack.toFixed(0)}</b></div>
+            <div><span class="fl-mini">Defense Power</span><b>${agg.kpis.defense.toFixed(0)}</b></div>
+            <div><span class="fl-mini">Control Power</span><b>${agg.kpis.control.toFixed(0)}</b></div>
+            <div><span class="fl-mini">Efficiency Power</span><b>${agg.kpis.efficiency.toFixed(0)}</b></div>
+          </div>
+          <div class="fl-card" style="margin-top:8px;"><b>Timeline</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>Fecha</th><th>Rival</th><th>H/A</th><th>Marcador</th><th>Outcome</th><th>Top tags</th><th>Data</th></tr></thead><tbody>${timelineRows}</tbody></table></div>
+          <div class="fl-grid two" style="margin-top:8px;"><div class="fl-card"><div class="fl-mini">Radar Home/Away</div><div style="height:220px;"><canvas id="b2PowerRadar"></canvas></div></div><div class="fl-card"><div class="fl-mini">Tendencia</div><div style="height:220px;"><canvas id="b2PowerTrend"></canvas></div></div></div>
+        `;
+        node.querySelectorAll('[data-b2-match]').forEach((tr)=>tr.onclick = ()=>{
+          const row = teamMemories.find((m)=>String(m.id)===String(tr.getAttribute('data-b2-match')));
+          openB2MatchModal(row);
+        });
+        if(typeof Chart === 'function'){
+          const radar = node.querySelector('#b2PowerRadar');
+          if(radar){
+            if(radar._chart){ try{ radar._chart.destroy(); }catch(_e){} }
+            radar._chart = new Chart(radar.getContext('2d'), {
+              type:'radar',
+              data:{ labels:['Ataque','Defensa','Control','Eficiencia'], datasets:[
+                { label:'Home', data:[agg.radar.home.attack, agg.radar.home.defense, agg.radar.home.control, agg.radar.home.efficiency], borderColor:'#1f6feb', backgroundColor:'rgba(31,111,235,.2)' },
+                { label:'Away', data:[agg.radar.away.attack, agg.radar.away.defense, agg.radar.away.control, agg.radar.away.efficiency], borderColor:'#f2cc60', backgroundColor:'rgba(242,204,96,.2)' }
+              ] },
+              options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ r:{ suggestedMin:0, suggestedMax:100, ticks:{ color:'#9ca3af', backdropColor:'transparent' }, pointLabels:{ color:'#9ca3af' } } } }
+            });
+          }
+          renderSimpleLineChart(node.querySelector('#b2PowerTrend'), agg.matches.map((m)=>String(m.date || '').slice(5) || '-'), [
+            { label:'Puntos', data:agg.matches.map((m)=>m.points*33.33), borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,.2)', tension:0.2 },
+            { label:'Dif goles', data:agg.matches.map((m)=>clamp(50 + m.goalDiff*15,0,100)), borderColor:'#ff7b72', backgroundColor:'rgba(255,123,114,.2)', tension:0.2 },
+            { label:'Efficiency', data:agg.matches.map((m)=>clamp(m.efficiency*100,0,100)), borderColor:'#a371f7', backgroundColor:'rgba(163,113,247,.2)', tension:0.2 }
+          ]);
+        }
+      };
+      renderBrainV2PowerDashboard();
 
       const paintBrainStatus = ()=>{
         const homeIdSel = document.getElementById('b2Home')?.value || "";
