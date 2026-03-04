@@ -879,6 +879,7 @@ export function initFootballLab(){
   };
 
   const MNE_SCENE_LIBRARY = [
+    { id: "balanced_start", phaseAffinity: ["0-15", "15-30"], side: "neutral", title: "Inicio equilibrado", producesTags: ["momentum_control"], requiredSignals: [({ home, away })=>Math.abs((home.danger_index||0) - (away.danger_index||0)) < 1.2], liveTriggers: [{ if: "early danger diff < 1.2", then: "use balanced_start over away/home accelerate", weight: 0.2 }] },
     { id: "home_early_push", phaseAffinity: ["0-15", "15-30"], side: "home", title: "Arranque de control local", producesTags: ["territorial_pressure", "setpiece_threat"], requiredSignals: [({ home })=>home.control > 58, ({ home })=>home.dna.territorial_pressure > 0.2], liveTriggers: [{ if: "home corners >= 3 by 20'", then: "boost setpiece_threat narrative", weight: 0.12 }] },
     { id: "away_early_push", phaseAffinity: ["0-15", "15-30"], side: "away", title: "Visitante acelera de inicio", producesTags: ["territorial_pressure"], requiredSignals: [({ away })=>away.control > 55, ({ away })=>away.attack_production > 50], liveTriggers: [{ if: "away possession >= 53% by 15'", then: "territorial_pressure away gains confidence", weight: 0.1 }] },
     { id: "away_counter_threat", phaseAffinity: ["15-30", "45-60", "60-75"], side: "away", title: "Riesgo de contra visitante", producesTags: ["counter_strike"], requiredSignals: [({ away })=>away.dna.counter_strike > 0.18, ({ home })=>home.control > 55], liveTriggers: [{ if: "away shotsOT >= 2 by 30'", then: "counter_strike becomes primary", weight: 0.15 }] },
@@ -907,6 +908,13 @@ export function initFootballLab(){
       control: clamp(get(["possession"], 50), 0, 100),
       setpiece_strength: clamp((get(["corners"], 4.5) * 10) + ((tendencies.setPieceDependence || 0) * 28), 0, 100),
       discipline: clamp(100 - ((tendencies.disciplineCostRate || 0) * 95), 0, 100),
+      danger_index: Number((
+        1.2 * get(["shots_on_target", "shotsOnTarget"], get(["shots"], 10) * 0.34) +
+        0.7 * get(["big_chances", "bigChances"], get(["xg"], 1.1) * 1.15) +
+        0.35 * get(["shots"], 10) +
+        0.25 * get(["corners"], 4.5) -
+        0.6 * ((tendencies.disciplineCostRate || 0) * 3)
+      ).toFixed(2)),
       dna: {
         finishing_failure: clamp01(rate.finishing_failure || 0),
         territorial_pressure: clamp01(rate.territorial_pressure || 0),
@@ -944,7 +952,10 @@ export function initFootballLab(){
             return acc + Math.max(homeW, awayW) * 2;
           }, 0);
           const sideBonus = scene.side === "home" ? 0.25 : scene.side === "away" ? 0.2 : 0.18;
-          const base = conditionsMet + affinity + sideBonus + (sceneBoosts[scene.id] || 0);
+          const earlyBalanceBoost = scene.id === "balanced_start" && (phase === "0-15" || phase === "15-30")
+            ? (Math.abs((homeMetrics.danger_index||0) - (awayMetrics.danger_index||0)) < 1.2 ? 0.55 : -0.35)
+            : 0;
+          const base = conditionsMet + affinity + sideBonus + earlyBalanceBoost + (sceneBoosts[scene.id] || 0);
           return { scene, score: base };
         })
         .sort((a,b)=>b.score-a.score);
@@ -4923,6 +4934,135 @@ function computeTeamIntelligencePanel(db, teamId){
     });
     return events;
   }
+<<<<<<< codex/implementar-ajustes-en-match-narrative-engine-trjjop
+
+  function dangerIndex(counters={}){
+    const shotsOT = Number(counters?.shotsOT || 0);
+    const bigChances = Number(counters?.bigChances || 0);
+    const shots = Number(counters?.shots || 0);
+    const corners = Number(counters?.corners || 0);
+    const cards = Number(counters?.cards || 0);
+    return Number((1.2*shotsOT + 0.7*bigChances + 0.35*shots + 0.25*corners - 0.6*cards).toFixed(3));
+  }
+
+  function createLiveCounters(){
+    return { shots: 0, shotsOT: 0, bigChances: 0, corners: 0, danger: 0, cards: 0, reds: 0, varShocks: 0, injuryEvents: 0, goals: 0 };
+  }
+
+  function accumulateCounters(events=[], teams=[]){
+    const phaseKeys = ["0-15", "15-30", "30-45", "45-60", "60-75", "75-90"];
+    const pair = (Array.isArray(teams) ? teams : []).filter(Boolean);
+    const [homeName="home", awayName="away"] = pair;
+    const byPhaseCounters = Object.fromEntries(phaseKeys.map((key)=>[key, { [homeName]: createLiveCounters(), [awayName]: createLiveCounters() }]));
+    const totals = { [homeName]: createLiveCounters(), [awayName]: createLiveCounters() };
+    const register = (bucket, micro=[])=>{
+      if(micro.includes("shot")) bucket.shots += 1;
+      if(micro.includes("shot_on_target")) bucket.shotsOT += 1;
+      if(micro.includes("big_chance")) bucket.bigChances += 1;
+      if(micro.includes("corner")) bucket.corners += 1;
+      if(micro.includes("goal")) bucket.goals += 1;
+      if(micro.includes("yellow")) bucket.cards += 1;
+      if(micro.includes("red")){
+        bucket.cards += 1;
+        bucket.reds += 1;
+      }
+      if(micro.includes("penalty_cancelled") || micro.includes("var_overturn")) bucket.varShocks += 1;
+      if(micro.includes("injury")) bucket.injuryEvents += 1;
+      bucket.danger = dangerIndex(bucket);
+    };
+    (Array.isArray(events) ? events : []).forEach((event)=>{
+      const side = event?.team === awayName ? awayName : homeName;
+      const phase = phaseKeys.includes(event?.phase) ? event.phase : phaseOf(event?.min);
+      register(byPhaseCounters[phase][side], event?.micro || []);
+      register(totals[side], event?.micro || []);
+    });
+    return { byPhaseCounters, totals };
+  }
+
+  function detectTurningPoints(events=[], teams=[]){
+    const safe = (Array.isArray(events) ? events : []).slice().sort((a,b)=>(Number(a?.min)||0) - (Number(b?.min)||0));
+    const [homeName="home", awayName="away"] = (Array.isArray(teams) ? teams : []).filter(Boolean);
+    const points = [];
+    for(let i=0;i<safe.length;i++){
+      const event = safe[i];
+      const micro = event?.micro || [];
+      if(micro.includes("penalty_awarded")){
+        const cancel = safe.slice(i+1, i+7).find((row)=>{
+          const dt = Math.abs((Number(row?.min)||0) - (Number(event?.min)||0));
+          return dt <= 3 && (row?.micro || []).some((m)=>m === "penalty_cancelled" || m === "var_overturn");
+        });
+        if(cancel){
+          const affected = event?.team || null;
+          const rival = affected === homeName ? awayName : homeName;
+          const pivotMin = Number(cancel.min) || Number(event.min) || 0;
+          points.push({
+            type: "turning_point_var",
+            impact: "very_high",
+            min: pivotMin,
+            affectedTeam: affected,
+            rivalTeam: rival,
+            impactWindow: [pivotMin, pivotMin + 10],
+            effects: { discipline_issues_risk: 0.12, counter_threat_rival: 0.15, frustration_boost: 0.14 }
+          });
+          points.push({
+            type: "momentum_shift",
+            min: pivotMin,
+            towards: rival,
+            causedBy: "turning_point_var",
+            impactWindow: [pivotMin, pivotMin + 10]
+          });
+          points.push({
+            type: "counter_strike_risk",
+            min: pivotMin,
+            team: rival,
+            causedBy: "turning_point_var",
+            impactWindow: [pivotMin, pivotMin + 10],
+            boost: 0.15
+          });
+        }
+      }
+      if(micro.includes("goal")){
+        points.push({
+          type: "turning_point_goal",
+          impact: "high",
+          min: Number(event.min) || 0,
+          scorer: event?.team || null,
+          effects: { trailing_late_siege: 0.18, winner_low_block: 0.12 }
+        });
+      }
+      if(micro.includes("red")){
+        points.push({ type: "turning_point_red", impact: "very_high", min: Number(event.min) || 0, team: event?.team || null });
+      }
+      if(micro.includes("injury")){
+        points.push({ type: "turning_point_injury", impact: "medium", min: Number(event.min) || 0, team: event?.team || null });
+      }
+    }
+    return points;
+  }
+
+  function parseMatchNarrative(text, teamHints=[]){
+    const teams = Array.isArray(teamHints) ? teamHints.filter(Boolean) : [];
+    const liveSnapshot = parseNarrativeLines(text, teams);
+    const events = liveSnapshot.map((event)=>{
+      const micro = Array.isArray(event.micro) ? event.micro : [];
+      const mapPrimary = micro.includes("goal") ? "goal"
+        : micro.includes("corner") ? "corner"
+          : micro.includes("big_chance") ? "big_chance"
+            : micro.includes("shot") ? "shot"
+              : micro.includes("shot_on_target") ? "save"
+                : micro.includes("yellow") ? "yellow"
+                  : micro.includes("red") ? "red"
+                    : micro.includes("foul") ? "foul"
+                      : micro.includes("possession_control") ? "pressure"
+                        : micro[0] || "event";
+      return { min: event.min, type: mapPrimary, team: event.team, text: event.raw, micro, phase: event.phase, weight: event.weight };
+    });
+    const counters = accumulateCounters(liveSnapshot, teams);
+    const turningPoints = detectTurningPoints(liveSnapshot, teams);
+    return { teams, events, liveSnapshot, byPhaseCounters: counters.byPhaseCounters, liveTotals: counters.totals, turningPoints };
+  }
+
+=======
 
   function dangerIndex(counters={}){
     const shotsOT = Number(counters?.shotsOT || 0);
@@ -5026,6 +5166,7 @@ function computeTeamIntelligencePanel(db, teamId){
     return { teams, events, liveSnapshot, byPhaseCounters: counters.byPhaseCounters, liveTotals: counters.totals, turningPoints };
   }
 
+>>>>>>> main
   function generateNarrative(preMatchPrior={}, byPhaseCounters={}, turningPoints=[], clashes=[]){
     const phases = ["0-15", "15-30", "30-45", "45-60", "60-75", "75-90"];
     const phaseCards = phases.map((phase)=>{
@@ -5035,6 +5176,44 @@ function computeTeamIntelligencePanel(db, teamId){
       const away = counter?.[awayKey] || createLiveCounters();
       const totalShots = Number(home.shots || 0) + Number(away.shots || 0);
       const totalCorners = Number(home.corners || 0) + Number(away.corners || 0);
+<<<<<<< codex/implementar-ajustes-en-match-narrative-engine-trjjop
+      const totalBig = Number(home.bigChances || 0) + Number(away.bigChances || 0);
+      const totalCards = Number(home.cards || 0) + Number(away.cards || 0);
+      const eventsDetected = totalShots + totalCorners + totalBig + totalCards;
+      const earlyDangerDiff = Math.abs(Number(home.danger || 0) - Number(away.danger || 0));
+      const scenes = [];
+
+      if((phase === "0-15" || phase === "15-30") && earlyDangerDiff < 1.2){
+        scenes.push({ id: "balanced_start", text: "Inicio equilibrado: ambos equipos prueban sin dominio claro.", evidence: 0.9 });
+      }else if((phase === "0-15" || phase === "15-30") && totalShots <= 4 && totalCorners <= 2){
+        scenes.push({ id: "chess_match", text: "Partido táctico, pocas ocasiones claras…", evidence: 0.75 });
+      }
+
+      if(Number(home.corners || 0) >= 2 || Number(away.corners || 0) >= 2) scenes.push({ id: "setpiece_build", text: "Empieza a cargar el balón parado…", evidence: 0.75 });
+      if((Number(home.bigChances || 0) >= 2 && Number(home.goals || 0) === 0) || (Number(away.bigChances || 0) >= 2 && Number(away.goals || 0) === 0)) scenes.push({ id: "frustration_spiral", text: "Se acumula frustración: el plan genera, pero no rompe…", evidence: 0.7 });
+      if(turningPoints.some((tp)=>tp.type === "turning_point_goal" && phaseOf(tp.min) === phase)) scenes.push({ id: "counter_punch", text: "Gol que castiga un momento de dominio…", evidence: 0.72 });
+
+      const varPivotInPhase = turningPoints.some((tp)=>tp.type === "turning_point_var" && phaseOf(tp.min) === phase);
+      const momentumShiftInPhase = turningPoints.some((tp)=>tp.type === "momentum_shift" && phaseOf(tp.min) === phase);
+      if(varPivotInPhase || momentumShiftInPhase){
+        scenes.push({ id: "var_turning_point", text: "Turning point VAR: el penalti anulado cambió el momentum.", evidence: 0.92 });
+      }
+
+      if(phase === "75-90" && (totalCorners >= 2 || totalShots >= 3)) scenes.push({ id: "late_siege", text: "Asedio final…", evidence: 0.82 });
+
+      const sorted = scenes.sort((a,b)=>b.evidence-a.evidence).slice(0, 2);
+      const evidenceComponents = [
+        clamp(totalShots / 4, 0, 1),
+        clamp(totalCorners / 3, 0, 1),
+        clamp(totalBig / 2, 0, 1),
+        clamp(totalCards / 2, 0, 1),
+        clamp(eventsDetected / 8, 0, 1),
+        sorted.length ? sorted[0].evidence : 0
+      ];
+      const evidenceScore = evidenceComponents.reduce((acc, v)=>acc + v, 0) / evidenceComponents.length;
+      const prior = Number(preMatchPrior?.[phase] || 0.45);
+      const confidence = clamp(0.5*prior + 0.5*evidenceScore, 0.08, 0.95);
+=======
       const scenes = [];
       if((phase === "0-15" || phase === "15-30") && totalShots <= 4 && totalCorners <= 2) scenes.push({ id: "chess_match", text: "Partido táctico, pocas ocasiones claras…", evidence: 0.8 });
       if(Number(home.corners || 0) >= 2 || Number(away.corners || 0) >= 2) scenes.push({ id: "setpiece_build", text: "Empieza a cargar el balón parado…", evidence: 0.75 });
@@ -5046,6 +5225,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const prior = Number(preMatchPrior?.[phase] || 0.45);
       const quality = clamp((Object.keys(counter).length || 0) / 2, 0.2, 1);
       const confidence = clamp(0.35*prior + 0.5*evidenceScore + 0.15*quality, 0.08, 0.95);
+>>>>>>> main
       const conditional = evidenceScore < 0.35;
       return {
         phase,
