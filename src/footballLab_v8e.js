@@ -259,7 +259,237 @@ export function initFootballLab(){
     return { matches };
   }
 
-  function buildBrainV2Vision({ homeSummary, awaySummary, odds }){
+  const BRAIN_V2_PHASES = [
+    { key: "0-15", min: 0, max: 15 },
+    { key: "16-30", min: 16, max: 30 },
+    { key: "31-45", min: 31, max: 45 },
+    { key: "46-60", min: 46, max: 60 },
+    { key: "61-75", min: 61, max: 75 },
+    { key: "76-90+", min: 76, max: 140 }
+  ];
+
+  function phaseFromMinute(minute){
+    const safe = clamp(Number(minute) || 0, 0, 140);
+    return BRAIN_V2_PHASES.find((phase)=>safe>=phase.min && safe<=phase.max)?.key || "76-90+";
+  }
+
+  function parseNarrativeEventType(line = ""){
+    const txt = String(line || "").toLowerCase();
+    const rules = [
+      ["goal", /\bgol\b|anota|marca|empata|descuenta/],
+      ["big_chance", /gran oportunidad|ocasion clarisima|mano a mano|a bocajarro|que oportunidad/],
+      ["save", /parada|ataj|salva|tapad/],
+      ["corner", /c[oó]rner|tiro de esquina/],
+      ["yellow", /tarjeta amarilla|amonestad/],
+      ["red", /tarjeta roja|expulsad/],
+      ["injury", /lesi[oó]n|se retira|molestia|tocad/],
+      ["sub", /cambio|sustitu/],
+      ["offside", /fuera de juego|offside/],
+      ["foul", /falta|infracci[oó]n/],
+      ["shot", /disparo|remate|chut|tiro/]
+    ];
+    return rules.find((entry)=>entry[1].test(txt))?.[0] || "pressure";
+  }
+
+  function scoreNarrativeQuality(type, line){
+    const txt = String(line || "").toLowerCase();
+    const base = {
+      shot: 0.34,
+      big_chance: 0.72,
+      goal: 0.95,
+      save: 0.5,
+      corner: 0.26,
+      foul: 0.14,
+      yellow: 0.1,
+      red: 0.18,
+      offside: 0.22,
+      sub: 0.08,
+      injury: 0.2,
+      pressure: 0.2
+    };
+    let value = Number(base[type]) || 0.2;
+    const boosts = [
+      [/(dentro del area|a bocajarro|area pequena|mano a mano)/, 0.2],
+      [/(gran oportunidad|clarisima|que oportunidad)/, 0.18],
+      [/(poste|larguero)/, 0.14],
+      [/(parada brillante|ataj[ae]da reflexiva)/, 0.16]
+    ];
+    const penalties = [
+      [/(desde fuera del area|lejano)/, -0.12],
+      [/(debil|flojo|sin problema|comodo|facil)/, -0.14]
+    ];
+    boosts.forEach(([regex, bonus])=>{ if(regex.test(txt)) value += bonus; });
+    penalties.forEach(([regex, malus])=>{ if(regex.test(txt)) value += malus; });
+    return clamp(value, 0, 1);
+  }
+
+  function parseBrainV2Events(narrativeRaw = "", teamName = "Local", opponentName = "Rival"){
+    const lines = String(narrativeRaw || "").split(/\n+/).map((line)=>String(line || "").trim()).filter(Boolean);
+    const minuteRegex = /(\d{1,3})(?:\s*\+\s*(\d{1,2}))?\s*'?/;
+    const teamToken = normalizeTeamToken(teamName);
+    const oppToken = normalizeTeamToken(opponentName);
+    let pendingMinute = 0;
+    return lines.map((line, idx)=>{
+      const minuteMatch = line.match(minuteRegex);
+      if(minuteMatch){
+        pendingMinute = Number(minuteMatch[1] || 0) + Number(minuteMatch[2] || 0);
+      }
+      const lineNorm = normalizeTeamToken(line);
+      const team = lineNorm.includes(oppToken) || /visitante|rival/.test(lineNorm)
+        ? "away"
+        : (lineNorm.includes(teamToken) || /local/.test(lineNorm) ? "home" : "home");
+      const type = parseNarrativeEventType(line);
+      const minute = clamp(Number(pendingMinute) || 0, 0, 140);
+      return {
+        id: `evt_${idx}_${minute}`,
+        minute,
+        phase: phaseFromMinute(minute),
+        team,
+        type,
+        quality: scoreNarrativeQuality(type, line),
+        text: line
+      };
+    });
+  }
+
+  function buildBrainV2MatchSummary({ row, teamName, opponentName }){
+    const events = parseBrainV2Events(row?.narrative || "", teamName, opponentName);
+    const home = { danger: 0, big_chance: 0, shot: 0, save: 0, corner: 0, yellow: 0, red: 0, goal: 0 };
+    const away = { danger: 0, big_chance: 0, shot: 0, save: 0, corner: 0, yellow: 0, red: 0, goal: 0 };
+    const momentumByPhase = Object.fromEntries(BRAIN_V2_PHASES.map((phase)=>[phase.key, 0]));
+    const dangerWeight = { shot: 1.2, big_chance: 2.1, goal: 2.6, corner: 0.8, pressure: 1, save: 1.2 };
+    events.forEach((event)=>{
+      const box = event.team === "away" ? away : home;
+      if(event.type in box) box[event.type] += 1;
+      box.danger += (event.quality * (dangerWeight[event.type] || 0.7));
+      const phaseSwing = event.quality * (event.team === "home" ? 1 : -1) * (event.type === "goal" ? 2 : 1);
+      momentumByPhase[event.phase] = (momentumByPhase[event.phase] || 0) + phaseSwing;
+    });
+    const finalScore = String(row?.score || "0-0");
+    const scoreHit = finalScore.match(/(\d+)\s*[-:]\s*(\d+)/);
+    const homeGoals = scoreHit ? Number(scoreHit[1]) : home.goal;
+    const awayGoals = scoreHit ? Number(scoreHit[2]) : away.goal;
+    home.goal = homeGoals;
+    away.goal = awayGoals;
+    const outcome = homeGoals>awayGoals ? "homeWin" : homeGoals<awayGoals ? "awayWin" : "draw";
+    const reasons = buildBrainV2ReasonTags({ events, home, away, momentumByPhase });
+    return {
+      matchId: row?.id || uid("b2sum"),
+      homeTeam: teamName || "Local",
+      awayTeam: opponentName || "Rival",
+      finalScore,
+      outcome,
+      features: {
+        danger: { home: Math.round(home.danger * 10), away: Math.round(away.danger * 10) },
+        bigChances: { home: home.big_chance, away: away.big_chance },
+        shots: { home: home.shot, away: away.shot },
+        saves: { home: home.save, away: away.save },
+        corners: { home: home.corner, away: away.corner },
+        discipline: { homeY: home.yellow, awayY: away.yellow, homeR: home.red, awayR: away.red },
+        pressureLate: {
+          home: Math.round(events.filter((e)=>e.team==="home" && e.minute>=80).reduce((acc, e)=>acc + e.quality * 4, 0)),
+          away: Math.round(events.filter((e)=>e.team==="away" && e.minute>=80).reduce((acc, e)=>acc + e.quality * 4, 0))
+        },
+        momentumByPhase: Object.fromEntries(Object.entries(momentumByPhase).map(([k,v])=>[k, Math.round(v)])),
+        efficiency: {
+          homeGoalsPerBigChance: home.big_chance ? Number((homeGoals / home.big_chance).toFixed(2)) : 0,
+          awayGoalsPerBigChance: away.big_chance ? Number((awayGoals / away.big_chance).toFixed(2)) : 0
+        }
+      },
+      reasons,
+      story: buildBrainV2Story({ teamName, opponentName, outcome, finalScore, reasons })
+    };
+  }
+
+  function buildBrainV2ReasonTags({ events = [], home = {}, away = {}, momentumByPhase = {} }){
+    const reasons = [];
+    const pushReason = (tag, metric, threshold, scale, note, evidence=[] )=>{
+      const strength = clamp((metric - threshold) / Math.max(scale, 0.01), 0, 1);
+      if(strength>0){
+        reasons.push({ tag, strength: Number(strength.toFixed(2)), evidence: evidence.slice(0, 4), note });
+      }
+    };
+    const homeLate = events.filter((e)=>e.team==="home" && e.minute>=80);
+    const homeSaves = events.filter((e)=>e.team==="away" && e.type==="save" && e.quality>=0.55);
+    pushReason("set_piece_pressure", home.corner, 5, 4, "Muchos córners y centros peligrosos", events.filter((e)=>e.team==="home" && e.type==="corner").map((e)=>e.minute));
+    pushReason("keeper_impact", homeSaves.length, 1, 2, "Paradas clave cambiaron el marcador", homeSaves.map((e)=>e.minute));
+    pushReason("late_pressure", homeLate.length, 2, 4, "Cierre fuerte con ocasiones al final", homeLate.map((e)=>e.minute));
+    pushReason("big_chances_advantage", home.big_chance - away.big_chance, 0.5, 3, "Ventaja en chances claras", events.filter((e)=>e.type==="big_chance").map((e)=>e.minute));
+    pushReason("finishing_edge", (home.goal / Math.max(1, home.big_chance)) - (away.goal / Math.max(1, away.big_chance)), 0.05, 0.6, "Mejor definición de cara al gol", events.filter((e)=>e.type==="goal").map((e)=>e.minute));
+    pushReason("momentum_control", Object.values(momentumByPhase).reduce((acc, v)=>acc + Number(v), 0), 1, 8, "Dominio territorial por fases", Object.entries(momentumByPhase).filter(([,v])=>v>0).map(([phase])=>BRAIN_V2_PHASES.find((p)=>p.key===phase)?.max || 0));
+    if(!reasons.length){
+      const goals = events.filter((e)=>e.type === "goal").map((e)=>e.minute).slice(0, 4);
+      reasons.push({
+        tag: "game_state_shift",
+        strength: 0.35,
+        evidence: goals.length ? goals : [90],
+        note: "El guion cambió por estado de partido, aunque el relato tenga baja señal."
+      });
+    }
+    return reasons.sort((a,b)=>b.strength-a.strength).slice(0, 4);
+  }
+
+  function buildBrainV2Story({ teamName, opponentName, outcome, finalScore, reasons = [] }){
+    const resultText = outcome === "homeWin" ? `${teamName} ganó ${finalScore}` : outcome === "awayWin" ? `${teamName} perdió ${finalScore}` : `${teamName} empató ${finalScore}`;
+    const top = reasons.slice(0, 2).map((item)=>item.note.toLowerCase());
+    if(!top.length) return `${resultText} en un partido con señales equilibradas.`;
+    return `${resultText} porque ${top.join(" y ")}.`;
+  }
+
+  function buildTeamNarrativeProfileFromMemories(rows = []){
+    const list = (Array.isArray(rows) ? rows : []).slice(-20);
+    if(!list.length){
+      return {
+        lastN: 0,
+        tendencies: { latePressureAvg: 0, setPieceDependence: 0, keeperImpactRate: 0, disciplineCostRate: 0, finishingEfficiency: 0, momentumVolatility: 0 },
+        reasonTagRates: {}
+      };
+    }
+    const reasonHits = {};
+    const agg = list.reduce((acc, row)=>{
+      const sum = row?.summary || buildBrainV2MatchSummary({ row, teamName: row?.teamName || "Local", opponentName: row?.opponent || "Rival" });
+      const f = sum?.features || {};
+      acc.latePressure += Number(f?.pressureLate?.home) || 0;
+      acc.setPiece += Number(f?.corners?.home) || 0;
+      acc.keeper += (sum?.reasons || []).some((r)=>r.tag === "keeper_impact") ? 1 : 0;
+      acc.discipline += ((Number(f?.discipline?.homeY) || 0) + ((Number(f?.discipline?.homeR) || 0) * 2));
+      acc.finishing += Number(f?.efficiency?.homeGoalsPerBigChance) || 0;
+      const momentVals = Object.values(f?.momentumByPhase || {}).map(Number).filter(Number.isFinite);
+      const vol = momentVals.length ? stdDev(momentVals) : 0;
+      acc.volatility += vol;
+      (sum?.reasons || []).forEach((r)=>{ reasonHits[r.tag] = (reasonHits[r.tag] || 0) + 1; });
+      return acc;
+    }, { latePressure: 0, setPiece: 0, keeper: 0, discipline: 0, finishing: 0, volatility: 0 });
+    const n = list.length;
+    const reasonTagRates = Object.fromEntries(Object.entries(reasonHits).map(([k,v])=>[k, Number((v/n).toFixed(2))]));
+    return {
+      lastN: n,
+      tendencies: {
+        latePressureAvg: Number((agg.latePressure / n).toFixed(2)),
+        setPieceDependence: Number((agg.setPiece / Math.max(1, n*10)).toFixed(2)),
+        keeperImpactRate: Number((agg.keeper / n).toFixed(2)),
+        disciplineCostRate: Number((agg.discipline / Math.max(1, n*5)).toFixed(2)),
+        finishingEfficiency: Number((agg.finishing / n).toFixed(2)),
+        momentumVolatility: Number((agg.volatility / n).toFixed(2))
+      },
+      reasonTagRates
+    };
+  }
+
+  function ensureBrainV2RowSummary(row = {}, fallbackTeamName = "Local"){
+    const hasSummary = row?.summary && typeof row.summary === "object";
+    const hasReasons = hasSummary && Array.isArray(row.summary.reasons) && row.summary.reasons.length > 0;
+    if(hasReasons) return row.summary;
+    const summary = buildBrainV2MatchSummary({
+      row,
+      teamName: row?.teamName || fallbackTeamName,
+      opponentName: row?.opponent || "Rival"
+    });
+    row.summary = summary;
+    return summary;
+  }
+
+  function buildBrainV2Vision({ homeSummary, awaySummary, odds, homeProfile = null, awayProfile = null }){
     const get = (s, key, fallback)=>Number(s?.avg?.[key] ?? fallback);
     const getAny = (s, keys = [], fallback = 0)=>{
       for(const key of keys){
@@ -282,7 +512,35 @@ export function initFootballLab(){
     };
 
     const xg = computeExpectedGoals(xgInputHome, xgInputAway);
-    const matrix = scoreMatrix(xg.xg_home, xg.xg_away);
+    const hp = homeProfile?.tendencies || {};
+    const ap = awayProfile?.tendencies || {};
+    const narrativeDeltas = {
+      setPiece: (Number(hp.setPieceDependence) || 0) - (Number(ap.setPieceDependence) || 0),
+      latePressure: (Number(hp.latePressureAvg) || 0) - (Number(ap.latePressureAvg) || 0),
+      finishing: (Number(hp.finishingEfficiency) || 0) - (Number(ap.finishingEfficiency) || 0),
+      discipline: (Number(ap.disciplineCostRate) || 0) - (Number(hp.disciplineCostRate) || 0)
+    };
+    const xgNarrative = {
+      xg_home: clamp(
+        xg.xg_home
+        * (1 + 0.08 * narrativeDeltas.setPiece)
+        * (1 + 0.015 * narrativeDeltas.latePressure)
+        * (1 + 0.08 * narrativeDeltas.finishing)
+        * (1 + 0.06 * narrativeDeltas.discipline),
+        0.2,
+        4.2
+      ),
+      xg_away: clamp(
+        xg.xg_away
+        * (1 - 0.08 * narrativeDeltas.setPiece)
+        * (1 - 0.015 * narrativeDeltas.latePressure)
+        * (1 - 0.08 * narrativeDeltas.finishing)
+        * (1 - 0.06 * narrativeDeltas.discipline),
+        0.2,
+        4.2
+      )
+    };
+    const matrix = scoreMatrix(xgNarrative.xg_home, xgNarrative.xg_away);
     const modelOutcome = matrixToOutcome(matrix);
     const likelyScore = mostLikelyScore(matrix);
 
@@ -339,8 +597,8 @@ export function initFootballLab(){
     );
 
     const expected = {
-      goalsHome: clamp(xg.xg_home, 0.2, 3.9),
-      goalsAway: clamp(xg.xg_away, 0.2, 3.9),
+      goalsHome: clamp(xgNarrative.xg_home, 0.2, 3.9),
+      goalsAway: clamp(xgNarrative.xg_away, 0.2, 3.9),
       cornersHome: clamp(homeCorners + (bars.homeAttack - bars.awayAttack) * 0.03, 1.5, 11.5),
       cornersAway: clamp(awayCorners + (bars.awayAttack - bars.homeAttack) * 0.03, 1.5, 11.5),
       cardsHome: clamp(homeCards + homeFatigue * 0.015, 0.6, 6.2),
@@ -352,6 +610,13 @@ export function initFootballLab(){
       `${homeResistance >= awayResistance ? "🫀 Local muestra más resistencia" : "🫀 Visita muestra más resistencia"} (${Math.round(homeResistance)} vs ${Math.round(awayResistance)}).`,
       `${homeFatigue >= awayFatigue ? "🥵 Local aparece más cargado físicamente" : "🥵 Visita aparece más cargado físicamente"} (${Math.round(homeFatigue)} vs ${Math.round(awayFatigue)}).`
     ];
+
+    const reasonPreview = [
+      { tag: "set_piece_pressure", strength: clamp(Math.abs(narrativeDeltas.setPiece) * 2.4, 0, 1), note: "Diferencia en dependencia de balón parado" },
+      { tag: "late_pressure", strength: clamp(Math.abs(narrativeDeltas.latePressure) * 0.18, 0, 1), note: "Ritmo de presión en tramo final" },
+      { tag: "finishing_edge", strength: clamp(Math.abs(narrativeDeltas.finishing) * 2.1, 0, 1), note: "Eficiencia de definición reciente" },
+      { tag: "discipline_cost", strength: clamp(Math.abs(narrativeDeltas.discipline) * 2.1, 0, 1), note: "Riesgo disciplinario comparado" }
+    ].filter((r)=>r.strength>=0.12).sort((a,b)=>b.strength-a.strength).slice(0, 3);
 
     return {
       probs: blended,
@@ -366,7 +631,9 @@ export function initFootballLab(){
         homeFatigue,
         awayFatigue
       },
-      insights
+      insights,
+      reasonPreview,
+      narrativeDeltas
     };
   }
 
@@ -7496,9 +7763,22 @@ function computeTeamIntelligencePanel(db, teamId){
       const leagueTeams = selectedLeagueId ? getTeamsForLeague(db, selectedLeagueId) : db.teams;
       const sortedTeams = leagueTeams.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
       const selectedTeamId = payload.teamId || sortedTeams[0]?.id || "";
+      const selectedTeamName = db.teams.find((t)=>t.id===selectedTeamId)?.name || "Local";
       const teamOptions = sortedTeams.map((t)=>`<option value="${t.id}" ${selectedTeamId===t.id?"selected":""}>${t.name}</option>`).join("");
       const teamMemories = (brainV2.memories[selectedTeamId] || []).slice().sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date));
-      const memoryRows = teamMemories.slice(0, 8).map((m)=>`<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${(m.narrative || "").slice(0, 90)}</td><td><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></td></tr>`).join("");
+      let touchedSummaries = false;
+      teamMemories.forEach((row)=>{
+        const before = Array.isArray(row?.summary?.reasons) ? row.summary.reasons.length : 0;
+        ensureBrainV2RowSummary(row, selectedTeamName);
+        const after = Array.isArray(row?.summary?.reasons) ? row.summary.reasons.length : 0;
+        if(!before || after!==before) touchedSummaries = true;
+      });
+      if(touchedSummaries) saveBrainV2(brainV2);
+      const memoryRows = teamMemories.slice(0, 8).map((m)=>{
+        const story = m?.summary?.story || (m.narrative || "").slice(0, 90);
+        const tags = (m?.summary?.reasons || []).slice(0, 2).map((r)=>`${r.tag} ${(r.strength*100).toFixed(0)}%`).join(" · ");
+        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${story}<div class="fl-mini">${tags || "Razón base aplicada"}</div></td><td style="display:flex;gap:6px;flex-wrap:wrap;"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">¿Por qué?</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></td></tr>`;
+      }).join("");
       const selectedTeamSummary = summarizeTeamMemory(teamMemories);
       const selectedTeamHasBrain = selectedTeamSummary.samples > 0;
       const selectedTeamBadge = selectedTeamHasBrain
@@ -7548,6 +7828,7 @@ function computeTeamIntelligencePanel(db, teamId){
             <input id="b2Date" type="date" class="fl-input" value="${new Date().toISOString().slice(0,10)}" />
             <input id="b2Opponent" class="fl-input" placeholder="Rival" />
           </div>
+          <input id="b2Score" class="fl-input" style="margin-top:8px;" placeholder="Marcador (ej: 2-1)" />
           <textarea id="b2Stats" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="xg: 1.8
 shots: 13
 possession: 57
@@ -7619,17 +7900,20 @@ passes: 425"></textarea>
         const row = {
           id: uid('b2m'),
           teamId,
+          teamName: db.teams.find((t)=>t.id===teamId)?.name || "Local",
           leagueId: document.getElementById('b2League')?.value || "",
           date: document.getElementById('b2Date')?.value || new Date().toISOString().slice(0,10),
           opponent: (document.getElementById('b2Opponent')?.value || '').trim(),
+          score: (document.getElementById('b2Score')?.value || '0-0').trim(),
           statsRaw: (document.getElementById('b2Stats')?.value || '').trim(),
           narrative: (document.getElementById('b2Narrative')?.value || '').trim(),
           createdAt: Date.now()
         };
+        row.summary = buildBrainV2MatchSummary({ row, teamName: row.teamName, opponentName: row.opponent || "Rival" });
         brainV2.memories[teamId] ||= [];
         brainV2.memories[teamId].push(row);
         saveBrainV2(brainV2);
-        status.textContent = `✅ Partido guardado. Memoria total: ${brainV2.memories[teamId].length}`;
+        status.textContent = `✅ Partido guardado. Memoria total: ${brainV2.memories[teamId].length}.`;
         render('brainv2', { leagueId: selectedLeagueId, teamId });
       });
 
@@ -7707,6 +7991,54 @@ passes: 425"></textarea>
         render('brainv2', { leagueId: selectedLeagueId, teamId });
       }));
 
+      document.querySelectorAll('.b2WhyMatch').forEach((btn)=>btn.addEventListener('click', ()=>{
+        const status = document.getElementById('b2Status');
+        const teamId = btn.dataset.teamId || "";
+        const matchId = btn.dataset.matchId || "";
+        if(!teamId || !matchId || !brainV2.memories[teamId]) return;
+        const row = brainV2.memories[teamId].find((item)=>item.id===matchId);
+        if(!row) return;
+        const teamName = db.teams.find((t)=>t.id===teamId)?.name || row?.teamName || "Local";
+        const summary = ensureBrainV2RowSummary(row, teamName);
+        const reasonsTxt = (summary.reasons || []).map((r, idx)=>`#${idx+1} ${r.tag} ${(r.strength*100).toFixed(0)}% · mins ${(r.evidence||[]).join(',') || '-'} · ${r.note}`).join('\n');
+        const manual = prompt(
+          `Razones de ${row.date || '-'} vs ${row.opponent || 'Rival'}\n\n${reasonsTxt || 'Sin razones'}\n\nIntervención:\n- Escribe "regen" para recalcular\n- O añade manual: tag|strength(0-1)|nota|min1,min2\n- Cancelar para cerrar`,
+          ''
+        );
+        if(manual===null) return;
+        const cmd = String(manual || '').trim();
+        if(!cmd) return;
+        if(cmd.toLowerCase()==='regen'){
+          row.summary = buildBrainV2MatchSummary({ row, teamName: row?.teamName || teamName, opponentName: row?.opponent || 'Rival' });
+          saveBrainV2(brainV2);
+          if(status) status.textContent = '♻️ Razones recalculadas automáticamente.';
+          render('brainv2', { leagueId: selectedLeagueId, teamId });
+          return;
+        }
+        const parts = cmd.split('|').map((p)=>String(p || '').trim());
+        if(parts.length < 3){
+          if(status) status.textContent = '⚠️ Formato inválido. Usa: tag|strength|nota|min1,min2';
+          return;
+        }
+        const [tag, strengthRaw, note, minsRaw=""] = parts;
+        const strength = clamp(Number(strengthRaw), 0, 1);
+        const evidence = String(minsRaw)
+          .split(',')
+          .map((v)=>Number(v.trim()))
+          .filter((v)=>Number.isFinite(v))
+          .map((v)=>clamp(Math.round(v), 0, 140))
+          .slice(0, 5);
+        row.summary ||= summary;
+        row.summary.reasons ||= [];
+        row.summary.reasons.push({ tag: tag || 'manual_override', strength, evidence, note: note || 'Ajuste manual del analista' });
+        row.summary.reasons = row.summary.reasons.sort((a,b)=>(Number(b.strength)||0)-(Number(a.strength)||0)).slice(0, 6);
+        const extra = row.summary.reasons.slice(0, 2).map((r)=>r.note.toLowerCase()).join(' y ');
+        row.summary.story = `${teamName} vs ${row?.opponent || 'Rival'}: ${extra || 'partido con señales mixtas'}.`;
+        saveBrainV2(brainV2);
+        if(status) status.textContent = '🧩 Razón manual aplicada al partido.';
+        render('brainv2', { leagueId: selectedLeagueId, teamId });
+      }));
+
       document.getElementById('b2Simulate')?.addEventListener('click', ()=>{
         const homeIdSel = document.getElementById('b2Home')?.value || "";
         const awayIdSel = document.getElementById('b2Away')?.value || "";
@@ -7716,9 +8048,13 @@ passes: 425"></textarea>
         const awayTeam = db.teams.find((t)=>t.id===awayIdSel);
         const homeSummary = summarizeTeamMemory(brainV2.memories[homeIdSel] || []);
         const awaySummary = summarizeTeamMemory(brainV2.memories[awayIdSel] || []);
+        const homeProfile = buildTeamNarrativeProfileFromMemories(brainV2.memories[homeIdSel] || []);
+        const awayProfile = buildTeamNarrativeProfileFromMemories(brainV2.memories[awayIdSel] || []);
         const vision = buildBrainV2Vision({
           homeSummary,
           awaySummary,
+          homeProfile,
+          awayProfile,
           odds: {
             home: document.getElementById('b2OddH')?.value,
             draw: document.getElementById('b2OddD')?.value,
@@ -7740,6 +8076,7 @@ passes: 425"></textarea>
             <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Visita</div><div style="font-size:22px;font-weight:900;">${pA}%</div></div>
           </div>
           <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples}</div>
+          <div class="fl-mini" style="margin-top:4px;">Perfil narrativo (N=${homeProfile.lastN}/${awayProfile.lastN}) · presión tardía ${homeProfile.tendencies.latePressureAvg.toFixed(1)} vs ${awayProfile.tendencies.latePressureAvg.toFixed(1)}</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px;">
             <div class="fl-card" style="padding:8px;"><div class="fl-mini">⚽ xG esperado</div><div style="font-weight:800;">${exp.goalsHome?.toFixed(2)} - ${exp.goalsAway?.toFixed(2)}</div></div>
             <div class="fl-card" style="padding:8px;"><div class="fl-mini">🎯 Marcador probable</div><div style="font-weight:800;">${score.home}-${score.away} (${(score.prob * 100).toFixed(1)}%)</div></div>
@@ -7758,6 +8095,12 @@ passes: 425"></textarea>
           </div>
           <div class="fl-mini" style="margin-top:8px;display:grid;gap:4px;">
             ${(vision.insights || []).map((line)=>`<div>${line}</div>`).join('')}
+          </div>
+          <div class="fl-card" style="margin-top:10px;padding:10px;">
+            <div style="font-weight:800;">🧠 Por qué este resultado (pre-match)</div>
+            <div class="fl-mini" style="margin-top:6px;display:grid;gap:4px;">
+              ${(vision.reasonPreview || []).map((r, idx)=>`<div>#${idx+1} ${r.tag} · ${(r.strength*100).toFixed(0)}% · ${r.note}</div>`).join('') || '<div>Sin razones fuertes todavía.</div>'}
+            </div>
           </div>
           <div class="fl-mini" style="margin-top:8px;">${vision.missing.length ? `⚠️ Falta info: ${vision.missing.join(' · ')}` : '✅ Dataset suficiente para seguir mejorando el modelo TensorFlow.'}</div>
         `;
