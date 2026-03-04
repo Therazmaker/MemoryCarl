@@ -8250,8 +8250,56 @@ passes: 425"></textarea>
         render('brainv2', { leagueId: selectedLeagueId, teamId });
       }));
 
-      document.querySelectorAll('.b2WhyMatch, .b2EditMatch').forEach((btn)=>btn.addEventListener('click', ()=>{
-        openB2MatchReasonModal({ teamId: btn.dataset.teamId || '', matchId: btn.dataset.matchId || '' });
+      document.querySelectorAll('.b2WhyMatch').forEach((btn)=>btn.addEventListener('click', ()=>{
+        const status = document.getElementById('b2Status');
+        const teamId = btn.dataset.teamId || "";
+        const matchId = btn.dataset.matchId || "";
+        if(!teamId || !matchId || !brainV2.memories[teamId]) return;
+        const row = brainV2.memories[teamId].find((item)=>item.id===matchId);
+        if(!row) return;
+        const teamName = db.teams.find((t)=>t.id===teamId)?.name || row?.teamName || "Local";
+        const summary = ensureBrainV2RowSummary(row, teamName);
+        const reasonsTxt = (summary.reasons || []).map((r, idx)=>{
+          const mins = (r.mins || r.evidence || []).filter((v)=>Number.isFinite(Number(v))).map((v)=>Number(v));
+          const evidenceTxt = Array.isArray(r.evidence) ? r.evidence.filter((v)=>typeof v === 'string') : [];
+          return `#${idx+1} ${r.tagId || r.tag} ${(r.strength*100).toFixed(0)}% · mins ${mins.join(',') || '-'} · ${r.note}${evidenceTxt.length ? `\n   ↳ ${evidenceTxt.slice(0,2).join(' | ')}` : ''}`;
+        }).join('\n');
+        const manual = prompt(
+          `Razones de ${row.date || '-'} vs ${row.opponent || 'Rival'}\n\n${reasonsTxt || 'Sin razones'}\n\nIntervención:\n- Escribe "regen" para recalcular\n- O añade manual: tag|strength(0-1)|nota|min1,min2\n- Cancelar para cerrar`,
+          ''
+        );
+        if(manual===null) return;
+        const cmd = String(manual || '').trim();
+        if(!cmd) return;
+        if(cmd.toLowerCase()==='regen'){
+          row.summary = buildBrainV2MatchSummary({ row, teamName: row?.teamName || teamName, opponentName: row?.opponent || 'Rival' });
+          saveBrainV2(brainV2);
+          if(status) status.textContent = '♻️ Razones recalculadas automáticamente.';
+          render('brainv2', { leagueId: selectedLeagueId, teamId });
+          return;
+        }
+        const parts = cmd.split('|').map((p)=>String(p || '').trim());
+        if(parts.length < 3){
+          if(status) status.textContent = '⚠️ Formato inválido. Usa: tag|strength|nota|min1,min2';
+          return;
+        }
+        const [tag, strengthRaw, note, minsRaw=""] = parts;
+        const strength = clamp(Number(strengthRaw), 0, 1);
+        const evidence = String(minsRaw)
+          .split(',')
+          .map((v)=>Number(v.trim()))
+          .filter((v)=>Number.isFinite(v))
+          .map((v)=>clamp(Math.round(v), 0, 140))
+          .slice(0, 5);
+        row.summary ||= summary;
+        row.summary.reasons ||= [];
+        row.summary.reasons.push({ tag: tag || 'manual_override', tagId: tag || 'manual_override', label: RELATO_TAG_LABELS[tag] || tag || 'manual_override', strength, mins: evidence, evidence: [], note: note || 'Ajuste manual del analista', auto: false });
+        row.summary.reasons = row.summary.reasons.sort((a,b)=>(Number(b.strength)||0)-(Number(a.strength)||0)).slice(0, 6);
+        const extra = row.summary.reasons.slice(0, 2).map((r)=>r.note.toLowerCase()).join(' y ');
+        row.summary.story = `${teamName} vs ${row?.opponent || 'Rival'}: ${extra || 'partido con señales mixtas'}.`;
+        saveBrainV2(brainV2);
+        if(status) status.textContent = '🧩 Razón manual aplicada al partido.';
+        render('brainv2', { leagueId: selectedLeagueId, teamId });
       }));
 
       document.getElementById('b2Simulate')?.addEventListener('click', ()=>{
