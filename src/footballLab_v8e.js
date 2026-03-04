@@ -27,6 +27,28 @@ export function initFootballLab(){
   const TEAM_BRAIN_FEATURES_KEY = "FL_TEAM_BRAIN_FEATURES";
   const BRAIN_V2_KEY = "FL_BRAIN_V2";
   const hybridBrain = new HybridBrainService();
+  let tfLoadPromise = null;
+
+  async function ensureTensorFlowReady(){
+    if(typeof window !== "undefined" && window.tf) return window.tf;
+    if(tfLoadPromise) return tfLoadPromise;
+    tfLoadPromise = new Promise((resolve, reject)=>{
+      const existing = document.querySelector('script[data-tfjs="1"]');
+      if(existing){
+        existing.addEventListener("load", ()=>resolve(window.tf));
+        existing.addEventListener("error", ()=>reject(new Error("No se pudo cargar TensorFlow.js")));
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
+      script.async = true;
+      script.dataset.tfjs = "1";
+      script.onload = ()=>resolve(window.tf);
+      script.onerror = ()=>reject(new Error("No se pudo cargar TensorFlow.js"));
+      document.head.appendChild(script);
+    });
+    return tfLoadPromise;
+  }
 
   const defaultDb = {
     settings: {
@@ -148,6 +170,91 @@ export function initFootballLab(){
       avg[k] = totals[k] / Math.max(1, counts[k] || 1);
     });
     return { samples: rows.length, avg, positive, negative, fatigueNotes, resilienceNotes };
+  }
+
+  function toHybridFeatureSeed(summary = {}, side = "home"){
+    const avg = summary?.avg || {};
+    const pick = (keys = [], fallback = 0)=>{
+      for(const key of keys){
+        const value = Number(avg[key]);
+        if(Number.isFinite(value)) return value;
+      }
+      return fallback;
+    };
+    const xg = pick(["xg", "expected_goals"], 1.2);
+    const shots = pick(["shots", "total_shots"], 10);
+    const against = pick(["shots_against", "shots_allowed"], 9);
+    const poss = pick(["possession"], 50);
+    const cards = pick(["cards", "yellow_cards"], 2.2);
+    const corners = pick(["corners", "corner_kicks"], 4.5);
+    const attacks = pick(["dangerous_attacks", "danger_attacks"], 26);
+    const gf = pick(["goals_for", "goals"], xg);
+    const ga = pick(["goals_against"], Math.max(0.2, 1.2 - (xg - 1)));
+    return {
+      [`elo_${side}`]: 1500 + ((summary.positive || 0) - (summary.negative || 0)) * 8,
+      [`form_points_${side}`]: Math.max(0, Math.min(15, (summary.positive || 0) * 2 + 3)),
+      [`goals_for_${side}`]: gf,
+      [`goals_against_${side}`]: ga,
+      [`xg_for_${side}`]: xg,
+      [`xg_against_${side}`]: Math.max(0.2, ga),
+      [`shots_for_${side}`]: shots,
+      [`shots_against_${side}`]: against,
+      [`possession_${side}`]: poss,
+      [`dangerous_attacks_${side}`]: attacks,
+      [`corners_${side}`]: corners,
+      [`cards_${side}`]: cards
+    };
+  }
+
+  function buildHybridPackFromBrainV2(dbState, memories = {}){
+    const teamsById = new Map((dbState?.teams || []).map((t)=>[String(t.id), t]));
+    const matches = [];
+    Object.entries(memories || {}).forEach(([teamId, rows])=>{
+      const teamName = teamsById.get(String(teamId))?.name || `Team ${teamId}`;
+      (Array.isArray(rows) ? rows : []).forEach((row, idx)=>{
+        const stats = parseNumericStats(row?.statsRaw || "");
+        const xg = Number(stats?.xg || stats?.expected_goals || 1.2);
+        const opponentXg = Math.max(0.2, 2.1 - xg);
+        const finalHomeGoals = Math.max(0, Math.round(xg));
+        const finalAwayGoals = Math.max(0, Math.round(opponentXg));
+        matches.push({
+          matchId: `b2_${teamId}_${idx}_${row?.id || row?.date || Date.now()}`,
+          preMatchFeatures: {
+            elo_home: 1500,
+            elo_away: 1490,
+            form_points_home: 8,
+            form_points_away: 8,
+            goals_for_home: Number(stats?.goals_for || finalHomeGoals),
+            goals_for_away: Number(stats?.goals_against || finalAwayGoals),
+            goals_against_home: Number(stats?.goals_against || finalAwayGoals),
+            goals_against_away: Number(stats?.goals_for || finalHomeGoals),
+            xg_for_home: xg,
+            xg_for_away: opponentXg,
+            xg_against_home: opponentXg,
+            xg_against_away: xg,
+            shots_for_home: Number(stats?.shots || 10),
+            shots_for_away: Number(stats?.shots_against || 9),
+            shots_against_home: Number(stats?.shots_against || 9),
+            shots_against_away: Number(stats?.shots || 10),
+            possession_home: Number(stats?.possession || 50),
+            possession_away: Math.max(20, 100 - Number(stats?.possession || 50)),
+            corners_home: Number(stats?.corners || 4),
+            corners_away: Number(stats?.corners_against || 4),
+            cards_home: Number(stats?.cards || 2),
+            cards_away: Number(stats?.cards_against || 2),
+            dangerous_attacks_home: Number(stats?.dangerous_attacks || 25),
+            dangerous_attacks_away: Number(stats?.dangerous_attacks_against || 22),
+            minute: 0,
+            is_live_slice: 0
+          },
+          preMatchText: `${teamName} vs ${(row?.opponent || "Rival")}. ${row?.narrative || ""}`,
+          finalHomeGoals,
+          finalAwayGoals,
+          timeline: []
+        });
+      });
+    });
+    return { matches };
   }
 
   function buildBrainV2Vision({ homeSummary, awaySummary, odds }){
@@ -7465,6 +7572,14 @@ passes: 425"></textarea>
             <button class="fl-btn" id="b2Simulate">Simular visión</button>
           </div>
           <div id="b2BrainStatus" class="fl-mini" style="margin-top:8px;"></div>
+          <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+            <button class="fl-btn secondary" id="b2HybridSync">Sincronizar dataset híbrido</button>
+            <button class="fl-btn secondary" id="b2HybridTrain">Train Hybrid</button>
+            <button class="fl-btn secondary" id="b2HybridLoad">Load Hybrid</button>
+            <button class="fl-btn secondary" id="b2HybridEvaluate">Evaluate</button>
+            <button class="fl-btn secondary" id="b2HybridVisionPreview">Preview Vision</button>
+          </div>
+          <div id="b2HybridLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Hybrid tools listos.</div>
           <div id="b2Vision" class="fl-mini" style="margin-top:10px;">Carga local/visita para ver la simulación visual.</div>
         </div>
       `;
@@ -7517,6 +7632,100 @@ passes: 425"></textarea>
         saveBrainV2(brainV2);
         status.textContent = `✅ Partido guardado. Memoria total: ${brainV2.memories[teamId].length}`;
         render('brainv2', { leagueId: selectedLeagueId, teamId });
+      });
+
+      const hybridLogs = document.getElementById('b2HybridLogs');
+      const logHybrid = (message="")=>{ if(hybridLogs) hybridLogs.textContent = message; };
+      const syncHybridDataset = ()=>{
+        const pack = buildHybridPackFromBrainV2(db, brainV2.memories);
+        const meta = hybridBrain.buildDataset(pack);
+        return meta;
+      };
+
+      document.getElementById('b2HybridSync')?.addEventListener('click', ()=>{
+        try{
+          const meta = syncHybridDataset();
+          logHybrid(`✅ Dataset sincronizado: ${meta.sampleCount} samples · ${meta.matchCount} matches.`);
+        }catch(err){
+          logHybrid(`❌ Sync error: ${err.message}`);
+        }
+      });
+
+      document.getElementById('b2HybridLoad')?.addEventListener('click', async ()=>{
+        try{
+          await ensureTensorFlowReady();
+          await hybridBrain.load();
+          logHybrid('✅ Modelo híbrido cargado desde localstorage.');
+        }catch(err){
+          logHybrid(`❌ Load Hybrid error: ${err.message}`);
+        }
+      });
+
+      document.getElementById('b2HybridTrain')?.addEventListener('click', async ()=>{
+        try{
+          await ensureTensorFlowReady();
+          if(!hybridBrain.examples?.length) syncHybridDataset();
+          if(!hybridBrain.examples?.length) throw new Error('No hay memoria suficiente para entrenar.');
+          logHybrid('⏳ Entrenando modelo híbrido...');
+          const metrics = await hybridBrain.train({ epochs: 10, batchSize: 24, trainRatio: 0.8 });
+          await hybridBrain.save();
+          logHybrid(`✅ Train listo · acc=${Number(metrics?.valAcc || 0).toFixed(3)} · logloss=${Number.isFinite(metrics?.valLogLoss) ? metrics.valLogLoss.toFixed(3) : '-'} · brier=${Number.isFinite(metrics?.brier) ? metrics.brier.toFixed(3) : '-'}`);
+        }catch(err){
+          logHybrid(`❌ Train Hybrid error: ${err.message}`);
+        }
+      });
+
+      document.getElementById('b2HybridEvaluate')?.addEventListener('click', async ()=>{
+        try{
+          await ensureTensorFlowReady();
+          if(!hybridBrain.model){
+            try{
+              await hybridBrain.load();
+            }catch(_err){
+              if(!hybridBrain.examples?.length) syncHybridDataset();
+              if(!hybridBrain.examples?.length) throw new Error('No hay modelo guardado ni memoria para entrenar/evaluar.');
+              logHybrid('ℹ️ No había modelo guardado. Entrenando rápido para evaluar...');
+              await hybridBrain.train({ epochs: 8, batchSize: 24, trainRatio: 0.8 });
+              await hybridBrain.save();
+            }
+          }
+          if(!hybridBrain.examples?.length){
+            syncHybridDataset();
+          }
+          if(!hybridBrain.examples?.length) throw new Error('No hay memoria suficiente para evaluar.');
+          const split = hybridBrain.splitExamplesByMatch(hybridBrain.examples, { trainFrac: 0.8, seed: 1337 });
+          const metrics = await hybridBrain.evaluateSplit(split.val);
+          const cm = metrics.confusionMatrix.map((row)=>`[${row.join(',')}]`).join(' ');
+          logHybrid(`🧪 Evaluate listo\nBrier: ${metrics.brier.toFixed(3)} · ECE: ${metrics.ece.toFixed(3)} · Goals MAE: ${metrics.goalsMae.toFixed(3)}\nCM: ${cm}`);
+        }catch(err){
+          logHybrid(`❌ Evaluate error: ${err.message}`);
+        }
+      });
+
+      document.getElementById('b2HybridVisionPreview')?.addEventListener('click', ()=>{
+        try{
+          const homeSel = document.getElementById('b2Home')?.value || "";
+          const awaySel = document.getElementById('b2Away')?.value || "";
+          if(!homeSel || !awaySel) throw new Error('Selecciona local y visita.');
+          const homeSummary = summarizeTeamMemory(brainV2.memories[homeSel] || []);
+          const awaySummary = summarizeTeamMemory(brainV2.memories[awaySel] || []);
+          const tabular = {
+            ...toHybridFeatureSeed(homeSummary, 'home'),
+            ...toHybridFeatureSeed(awaySummary, 'away'),
+            elo_diff: (1500 + ((homeSummary.positive || 0) - (homeSummary.negative || 0)) * 8) - (1500 + ((awaySummary.positive || 0) - (awaySummary.negative || 0)) * 8),
+            form_points_diff: Math.max(0, Math.min(15, (homeSummary.positive || 0) * 2 + 3)) - Math.max(0, Math.min(15, (awaySummary.positive || 0) * 2 + 3)),
+            minute: 65,
+            is_live_slice: 1,
+            momentum_index_home: (homeSummary.positive || 0) - (homeSummary.negative || 0),
+            momentum_index_away: (awaySummary.positive || 0) - (awaySummary.negative || 0)
+          };
+          const text = `${document.getElementById('b2Narrative')?.value || ''}`;
+          const vision = hybridBrain.previewVision({ tabular, text, liveMinute: 65 });
+          const rows = vision.channels.map((row)=>`C${row.channel}: min=${row.min.toFixed(3)} max=${row.max.toFixed(3)} mean=${row.mean.toFixed(3)}`).join('\n');
+          logHybrid(`👁️ Vision tensor ${vision.shape.join('x')}\n${rows}`);
+        }catch(err){
+          logHybrid(`❌ Preview Vision error: ${err.message}`);
+        }
       });
 
       document.querySelectorAll('.b2DeleteMatch').forEach((btn)=>btn.addEventListener('click', ()=>{
@@ -9502,9 +9711,11 @@ passes: 425"></textarea>
           <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
             <button class="fl-btn" id="hybridBuildDataset">Build Dataset</button>
             <button class="fl-btn" id="hybridTrain">Train</button>
+            <button class="fl-btn secondary" id="hybridEvaluate">Evaluate</button>
             <button class="fl-btn secondary" id="hybridLoad">Load</button>
             <button class="fl-btn secondary" id="hybridPredict">Pre/Live Predict</button>
             <button class="fl-btn secondary" id="hybridExplain">Explain</button>
+            <button class="fl-btn secondary" id="hybridVisionPreview">Preview Vision</button>
           </div>
           <div id="hybridBrainLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Modelo híbrido listo para dataset builder.</div>
         </div>
@@ -9720,7 +9931,11 @@ passes: 425"></textarea>
         `Val accuracy: ${Number.isFinite(metrics.valAcc) ? metrics.valAcc.toFixed(3) : "-"}`,
         `Val logloss: ${Number.isFinite(metrics.valLogLoss) ? metrics.valLogLoss.toFixed(3) : "-"}`,
         `Val goals MAE: ${Number.isFinite(metrics.valGoalsMae) ? metrics.valGoalsMae.toFixed(3) : "-"}`,
+        `Brier score: ${Number.isFinite(metrics.brier) ? metrics.brier.toFixed(3) : "-"}`,
+        `ECE: ${Number.isFinite(metrics.ece) ? metrics.ece.toFixed(3) : "-"}`,
+        `Temperature: ${Number.isFinite(status.temperature) ? status.temperature.toFixed(3) : "-"}`,
         status.trainedAt ? `Last trained: ${status.trainedAt}` : "Last trained: -",
+        status.trainingReport?.datasetStats ? `Report train/val: ${status.trainingReport.datasetStats.nTrain}/${status.trainingReport.datasetStats.nVal}` : "Report train/val: -",
         extra
       ].filter(Boolean).join("\n");
     }
@@ -9744,9 +9959,26 @@ passes: 425"></textarea>
         renderHybridStatus("⏳ Training...");
         const metrics = await hybridBrain.train({ epochs: 14, batchSize: 32, trainRatio: 0.8 });
         await hybridBrain.save();
-        renderHybridStatus(`✅ Train completado · acc=${(metrics.valAcc || 0).toFixed(3)} · logloss=${Number.isFinite(metrics.valLogLoss) ? metrics.valLogLoss.toFixed(3) : "-"}`);
+        renderHybridStatus(`✅ Train completado · acc=${(metrics.valAcc || 0).toFixed(3)} · logloss=${Number.isFinite(metrics.valLogLoss) ? metrics.valLogLoss.toFixed(3) : "-"} · brier=${Number.isFinite(metrics.brier) ? metrics.brier.toFixed(3) : "-"} · ece=${Number.isFinite(metrics.ece) ? metrics.ece.toFixed(3) : "-"}`);
       }catch(err){
         renderHybridStatus(`❌ Train error: ${err.message}`);
+      }
+    });
+
+    document.getElementById("hybridEvaluate")?.addEventListener("click", async ()=>{
+      try{
+        if(!hybridBrain.examples?.length) throw new Error("Primero construye el dataset.");
+        if(!hybridBrain.model) throw new Error("Primero entrena o carga el modelo.");
+        const split = hybridBrain.splitExamplesByMatch(hybridBrain.examples, { trainFrac: 0.8, seed: 1337 });
+        const metrics = await hybridBrain.evaluateSplit(split.val);
+        const cm = metrics.confusionMatrix.map((row)=>row.join(" ")).join(" | ");
+        renderHybridStatus(
+          `🧪 Evaluate val: brier=${metrics.brier.toFixed(3)} · ece=${metrics.ece.toFixed(3)} · goalsMAE=${metrics.goalsMae.toFixed(3)}
+` +
+          `📊 Confusion matrix [H,D,A]: ${cm}`
+        );
+      }catch(err){
+        renderHybridStatus(`❌ Evaluate error: ${err.message}`);
       }
     });
 
@@ -9777,6 +10009,18 @@ passes: 425"></textarea>
         );
       }catch(err){
         renderHybridStatus(`❌ Predict error: ${err.message}`);
+      }
+    });
+
+    document.getElementById("hybridVisionPreview")?.addEventListener("click", ()=>{
+      try{
+        const tabular = JSON.parse(hybridTabularEl?.value || "{}");
+        const text = hybridTextEl?.value || "";
+        const vision = hybridBrain.previewVision({ tabular, text, liveMinute: Number(tabular?.minute || 0) || null });
+        const rows = vision.channels.map((row)=>`C${row.channel}: min=${row.min.toFixed(3)} max=${row.max.toFixed(3)} mean=${row.mean.toFixed(3)}`).join("\n");
+        renderHybridStatus(`👁️ Vision tensor ${vision.shape.join("x")}\n${rows}`);
+      }catch(err){
+        renderHybridStatus(`❌ Vision preview error: ${err.message}`);
       }
     });
 
