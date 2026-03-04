@@ -3,6 +3,10 @@ const META_STORAGE_KEY = "brain/meta.json";
 const NORMALIZER_STORAGE_KEY = "brain/normalizer.json";
 const VOCAB_STORAGE_KEY = "brain/vocab.json";
 
+import { buildMatchVisionTensor } from "./footballlab/brain/vision/vision_builder.js";
+import { createVisionCnnBranch } from "./footballlab/brain/vision/vision_cnn_model.js";
+import { VISION_TENSOR_SHAPE } from "./footballlab/brain/vision/vision_tensor.js";
+
 export const FEATURE_SCHEMA_VERSION = "2026-03-hybrid-v1";
 
 export const BASE_FEATURES = [
@@ -89,7 +93,7 @@ export class HybridBrainService {
         text: match?.preMatchText || "",
         yOutcome: oneHotOutcome(finalHome, finalAway),
         yGoals: [finalHome, finalAway],
-        meta: { matchId, minute: 0, isLiveSlice: 0 }
+        meta: { matchId, minute: 0, isLiveSlice: 0, timeline: match?.timeline || [], narrativeRaw: match?.narrativeRaw || "", liveAggregates: match?.liveAggregates || {} }
       });
       examples.push(pre);
       const timeline = Array.isArray(match?.timeline) ? match.timeline : [];
@@ -104,7 +108,7 @@ export class HybridBrainService {
           text,
           yOutcome: oneHotOutcome(finalHome, finalAway),
           yGoals: [finalHome, finalAway],
-          meta: { matchId, minute, isLiveSlice: 1 }
+          meta: { matchId, minute, isLiveSlice: 1, timeline: eventsUntil, narrativeRaw: text, liveAggregates: match?.liveAggregates || {}, liveMinute: minute }
         }));
       });
     });
@@ -129,7 +133,12 @@ export class HybridBrainService {
       x.push(value, missing);
     });
     const tokens = tokenize(text);
-    return { xTabular: x, tokens, yOutcome, yGoals, meta };
+    const vision = buildMatchVisionTensor({
+      timeline: meta?.timeline || [],
+      narrativeRaw: meta?.narrativeRaw || text,
+      liveAggregates: meta?.liveAggregates || {}
+    }, meta?.liveMinute!=null ? { liveMinute: meta.liveMinute } : {});
+    return { xTabular: x, tokens, xVision: vision.tensor, yOutcome, yGoals, meta };
   }
 
   buildVocab(tokenBatches=[]){
@@ -189,14 +198,16 @@ export class HybridBrainService {
     txt = tf.layers.globalAveragePooling1d().apply(txt);
     txt = tf.layers.dense({ units: 24, activation: "relu" }).apply(txt);
 
-    let fused = tf.layers.concatenate().apply([tab, txt]);
+    const { input: visionInput, embedding: visionEmbedding } = createVisionCnnBranch(tf, "x_vision");
+
+    let fused = tf.layers.concatenate().apply([tab, txt, visionEmbedding]);
     fused = tf.layers.dense({ units: 48, activation: "relu" }).apply(fused);
     fused = tf.layers.dropout({ rate: 0.2 }).apply(fused);
 
     const outcome = tf.layers.dense({ units: 3, activation: "softmax", name: "outcome" }).apply(fused);
     const goals = tf.layers.dense({ units: 2, activation: "linear", name: "goals" }).apply(fused);
 
-    this.model = tf.model({ inputs: [tabInput, textInput], outputs: [outcome, goals], name: "hybrid_brain" });
+    this.model = tf.model({ inputs: [tabInput, textInput, visionInput], outputs: [outcome, goals], name: "hybrid_brain" });
     this.model.compile({
       optimizer: tf.train.adam(0.001),
       loss: { outcome: "categoricalCrossentropy", goals: tf.losses.huberLoss },
@@ -209,11 +220,13 @@ export class HybridBrainService {
   tensorsFromExamples(examples=[]){
     const xTab = examples.map((e)=>this.normalizeX(e.xTabular));
     const xText = examples.map((e)=>this.encodeTokens(e.tokens));
+    const xVision = examples.map((e)=>e.xVision);
     const yOutcome = examples.map((e)=>e.yOutcome);
     const yGoals = examples.map((e)=>e.yGoals);
     return {
       xTab: tf.tensor2d(xTab),
       xText: tf.tensor2d(xText, [xText.length, this.maxTokens], "int32"),
+      xVision: tf.tensor4d(xVision, [xVision.length, VISION_TENSOR_SHAPE.events, VISION_TENSOR_SHAPE.minutes, VISION_TENSOR_SHAPE.channels]),
       yOutcome: tf.tensor2d(yOutcome),
       yGoals: tf.tensor2d(yGoals)
     };
@@ -227,12 +240,12 @@ export class HybridBrainService {
     const tr = this.tensorsFromExamples(train);
     const va = this.tensorsFromExamples(val);
     const history = await this.model.fit(
-      [tr.xTab, tr.xText],
+      [tr.xTab, tr.xText, tr.xVision],
       { outcome: tr.yOutcome, goals: tr.yGoals },
       {
         epochs,
         batchSize: Math.min(batchSize, train.length),
-        validationData: [[va.xTab, va.xText], { outcome: va.yOutcome, goals: va.yGoals }],
+        validationData: [[va.xTab, va.xText, va.xVision], { outcome: va.yOutcome, goals: va.yGoals }],
         shuffle: true,
         verbose: 0
       }
@@ -273,15 +286,27 @@ export class HybridBrainService {
     return meta;
   }
 
-  async predict({ tabular={}, text="" }={}){
+  async predict({ tabular={}, text="", matchContext=null, liveMinute=null }={}){
     if(!this.model) throw new Error("Modelo no cargado");
-    const ex = this.toExample({ rawFeatures: tabular, text, yOutcome:[0,1,0], yGoals:[0,0], meta:{} });
+    const ex = this.toExample({
+      rawFeatures: tabular,
+      text,
+      yOutcome:[0,1,0],
+      yGoals:[0,0],
+      meta:{
+        timeline: matchContext?.timeline || [],
+        narrativeRaw: matchContext?.narrativeRaw || text,
+        liveAggregates: matchContext?.liveAggregates || {},
+        liveMinute
+      }
+    });
     const xTab = tf.tensor2d([this.normalizeX(ex.xTabular)]);
     const xText = tf.tensor2d([this.encodeTokens(ex.tokens)], [1, this.maxTokens], "int32");
-    const [outcomeTensor, goalsTensor] = this.model.predict([xTab, xText]);
+    const xVision = tf.tensor4d([ex.xVision], [1, VISION_TENSOR_SHAPE.events, VISION_TENSOR_SHAPE.minutes, VISION_TENSOR_SHAPE.channels]);
+    const [outcomeTensor, goalsTensor] = this.model.predict([xTab, xText, xVision]);
     const outcome = await outcomeTensor.data();
     const goals = await goalsTensor.data();
-    tf.dispose([xTab, xText, outcomeTensor, goalsTensor]);
+    tf.dispose([xTab, xText, xVision, outcomeTensor, goalsTensor]);
     return {
       probs: { homeWin: outcome[0], draw: outcome[1], awayWin: outcome[2] },
       goals: { home: goals[0], away: goals[1] },
@@ -312,7 +337,8 @@ export class HybridBrainService {
       sampleCount: this.meta?.sampleCount || 0,
       vocabSize: Object.keys(this.vocab).length,
       metrics: this.meta?.metrics || {},
-      trainedAt: this.meta?.trainedAt || ""
+      trainedAt: this.meta?.trainedAt || "",
+      visionShape: [VISION_TENSOR_SHAPE.events, VISION_TENSOR_SHAPE.minutes, VISION_TENSOR_SHAPE.channels]
     };
   }
 
