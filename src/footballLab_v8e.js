@@ -7574,8 +7574,6 @@ passes: 425"></textarea>
           <div id="b2BrainStatus" class="fl-mini" style="margin-top:8px;"></div>
           <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
             <button class="fl-btn secondary" id="b2HybridSync">Sincronizar dataset híbrido</button>
-            <button class="fl-btn secondary" id="b2HybridTrain">Train Hybrid</button>
-            <button class="fl-btn secondary" id="b2HybridLoad">Load Hybrid</button>
             <button class="fl-btn secondary" id="b2HybridEvaluate">Evaluate</button>
             <button class="fl-btn secondary" id="b2HybridVisionPreview">Preview Vision</button>
           </div>
@@ -7651,43 +7649,10 @@ passes: 425"></textarea>
         }
       });
 
-      document.getElementById('b2HybridLoad')?.addEventListener('click', async ()=>{
-        try{
-          await ensureTensorFlowReady();
-          await hybridBrain.load();
-          logHybrid('✅ Modelo híbrido cargado desde localstorage.');
-        }catch(err){
-          logHybrid(`❌ Load Hybrid error: ${err.message}`);
-        }
-      });
-
-      document.getElementById('b2HybridTrain')?.addEventListener('click', async ()=>{
-        try{
-          await ensureTensorFlowReady();
-          if(!hybridBrain.examples?.length) syncHybridDataset();
-          if(!hybridBrain.examples?.length) throw new Error('No hay memoria suficiente para entrenar.');
-          logHybrid('⏳ Entrenando modelo híbrido...');
-          const metrics = await hybridBrain.train({ epochs: 10, batchSize: 24, trainRatio: 0.8 });
-          await hybridBrain.save();
-          logHybrid(`✅ Train listo · acc=${Number(metrics?.valAcc || 0).toFixed(3)} · logloss=${Number.isFinite(metrics?.valLogLoss) ? metrics.valLogLoss.toFixed(3) : '-'} · brier=${Number.isFinite(metrics?.brier) ? metrics.brier.toFixed(3) : '-'}`);
-        }catch(err){
-          logHybrid(`❌ Train Hybrid error: ${err.message}`);
-        }
-      });
-
       document.getElementById('b2HybridEvaluate')?.addEventListener('click', async ()=>{
         try{
-          await ensureTensorFlowReady();
           if(!hybridBrain.model){
-            try{
-              await hybridBrain.load();
-            }catch(_err){
-              if(!hybridBrain.examples?.length) syncHybridDataset();
-              if(!hybridBrain.examples?.length) throw new Error('No hay modelo guardado ni memoria para entrenar/evaluar.');
-              logHybrid('ℹ️ No había modelo guardado. Entrenando rápido para evaluar...');
-              await hybridBrain.train({ epochs: 8, batchSize: 24, trainRatio: 0.8 });
-              await hybridBrain.save();
-            }
+            await hybridBrain.load();
           }
           if(!hybridBrain.examples?.length){
             syncHybridDataset();
