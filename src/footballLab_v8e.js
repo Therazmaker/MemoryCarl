@@ -352,6 +352,169 @@ export function initFootballLab(){
     });
   }
 
+  const RELATO_TAG_LABELS = {
+    finishing_failure: "Definición ineficiente",
+    clinical_finish: "Definición clínica",
+    counter_strike: "Golpe al contraataque",
+    momentum_control: "Control de ritmo",
+    territorial_pressure: "Presión territorial",
+    wasted_setpieces: "ABP desperdiciadas",
+    setpiece_threat: "Peligro a balón parado",
+    discipline_issues: "Problemas disciplinarios",
+    keeper_heroics: "Portero figura",
+    injury_disruption: "Corte por lesión"
+  };
+
+  const RELATO_PATTERNS = {
+    shot_attempt: [/\bremata\b/i, /\bdispara\b/i, /\btiro\b/i, /\bcabezazo\b/i, /\bshot\b/i],
+    miss: [/se va fuera/i, /por encima/i, /desviado/i, /al poste/i, /\bfuera\b/i],
+    saved: [/\bparada\b/i, /\bataj/i, /salva/i, /guantes del portero/i],
+    big_chance: [/gran ocasi[oó]n/i, /qu[eé] oportunidad/i, /\bcasi\b/i, /mano a mano/i],
+    goal: [/\bgol\b/i],
+    high_quality_finish: [/supera al portero/i, /col[aá]ndose/i],
+    corner: [/c[oó]rner/i, /saque de esquina/i],
+    free_kick_cross: [/tiro libre/i, /falta.*centro/i],
+    cleared: [/despeja/i, /despejado/i, /intercept/i, /no puede sacar provecho/i, /no aprovecha/i],
+    yellow: [/tarjeta amarilla/i],
+    foul: [/\bfalta\b/i],
+    possession_control: [/controla la posesi[oó]n/i, /intercambiando pases/i],
+    var_review: [/\bvar\b/i],
+    var_overturn: [/revierte su decisi[oó]n/i],
+    injury: [/lesi[oó]n/i, /asistencia m[eé]dica/i]
+  };
+
+  const RELATO_MICRO_WEIGHTS = {
+    big_chance: 3,
+    shot_attempt: 1,
+    miss: 2,
+    saved: 2,
+    goal: 5,
+    high_quality_finish: 2,
+    corner: 1,
+    free_kick_cross: 1,
+    cleared: 1,
+    possession_control: 1,
+    yellow: 1,
+    foul: 1,
+    injury: 2,
+    var_review: 0.5,
+    var_overturn: 0.5
+  };
+
+  function parseRelatoEvents(narrativeRaw = "", homeTeam = "Local", awayTeam = "Rival"){
+    const minuteRegex = /(\d{1,3})(?:\s*\+\s*(\d{1,2}))?\s*'?/;
+    const lines = String(narrativeRaw || "").split(/\n+/).map((line)=>String(line || "").trim()).filter(Boolean);
+    let pendingMinute = 0;
+    return lines.map((line, idx)=>{
+      const minuteMatch = line.match(minuteRegex);
+      const base = minuteMatch ? Number(minuteMatch[1] || 0) : pendingMinute;
+      const extra = minuteMatch ? Number(minuteMatch[2] || 0) : 0;
+      pendingMinute = base;
+      const text = line.toLowerCase().replace(/\s+/g, " ").trim();
+      const norm = normalizeTeamToken(line);
+      const homeToken = normalizeTeamToken(homeTeam);
+      const awayToken = normalizeTeamToken(awayTeam);
+      let team = "unknown";
+      if(line.includes(`(${homeTeam})`) || (homeToken && norm.includes(homeToken))) team = "home";
+      else if(line.includes(`(${awayTeam})`) || (awayToken && norm.includes(awayToken))) team = "away";
+      return { id: `rel_${idx}_${base}_${extra}`, idx, min: clamp(base, 0, 140), extra, raw: line, text, team, microEvents: [] };
+    });
+  }
+
+  function classifyRelatoMicroEvents(events = []){
+    return (Array.isArray(events) ? events : []).map((event)=>{
+      const detected = [];
+      Object.entries(RELATO_PATTERNS).forEach(([type, regexes])=>{
+        if(regexes.some((rx)=>rx.test(event.text))){
+          detected.push({ type, weight: Number(RELATO_MICRO_WEIGHTS[type]) || 1 });
+        }
+      });
+      return { ...event, microEvents: detected };
+    });
+  }
+
+  function getRelatoWindow(events = [], idx = 0, backN = 5){
+    const start = Math.max(0, idx - Math.max(1, backN));
+    return events.slice(start, idx);
+  }
+
+  function pushRelatoTagHit(store, tagId, addScore, minute, reason, evidenceLine){
+    const bucket = store[tagId] || { tagId, label: RELATO_TAG_LABELS[tagId] || tagId, score: 0, mins: [], evidence: [], reason };
+    bucket.score += Number(addScore) || 0;
+    if(Number.isFinite(minute)) bucket.mins.push(clamp(Math.round(minute), 0, 140));
+    if(evidenceLine && !bucket.evidence.includes(evidenceLine) && bucket.evidence.length < 8) bucket.evidence.push(evidenceLine);
+    if(reason && !bucket.reason) bucket.reason = reason;
+    store[tagId] = bucket;
+  }
+
+  function buildRelatoTags(narrativeRaw = "", homeTeam = "Local", awayTeam = "Rival"){
+    const events = classifyRelatoMicroEvents(parseRelatoEvents(narrativeRaw, homeTeam, awayTeam));
+    const tags = {};
+    events.forEach((event, idx)=>{
+      const types = new Set((event.microEvents || []).map((m)=>m.type));
+      const has = (type)=>types.has(type);
+      if(has("big_chance") && (has("miss") || has("saved"))){
+        pushRelatoTagHit(tags, "finishing_failure", 4, event.min, "Genera chances claras pero no define", event.raw);
+      }else if(has("shot_attempt") && (has("miss") || has("saved"))){
+        pushRelatoTagHit(tags, "finishing_failure", 2, event.min, "Remates sin premio en secuencia", event.raw);
+      }else if(has("shot_attempt")){
+        pushRelatoTagHit(tags, "territorial_pressure", 1, event.min, "Volumen ofensivo sostenido", event.raw);
+      }
+
+      if(has("goal") && (has("high_quality_finish") || has("big_chance"))){
+        pushRelatoTagHit(tags, "clinical_finish", 3, event.min, "Concreta con alta calidad", event.raw);
+      }
+      if(has("saved")) pushRelatoTagHit(tags, "keeper_heroics", 2, event.min, "El arquero evita goles esperados", event.raw);
+      if(has("yellow") || has("foul")) pushRelatoTagHit(tags, "discipline_issues", 1, event.min, "Faltas y tarjetas cortan el plan", event.raw);
+      if(has("injury")) pushRelatoTagHit(tags, "injury_disruption", 2, event.min, "Parones por lesión alteran el ritmo", event.raw);
+      if(has("corner") || has("free_kick_cross")) pushRelatoTagHit(tags, "setpiece_threat", 1, event.min, "Carga por balón parado", event.raw);
+      if((has("corner") || has("free_kick_cross")) && has("cleared")) pushRelatoTagHit(tags, "wasted_setpieces", 2, event.min, "ABP neutralizada por la defensa", event.raw);
+      if(has("possession_control")) pushRelatoTagHit(tags, "momentum_control", 1.5, event.min, "Secuencias largas de posesión", event.raw);
+
+      if(has("goal")){
+        const window = getRelatoWindow(events, idx, 5);
+        const rival = event.team === "home" ? "away" : event.team === "away" ? "home" : "unknown";
+        const rivalControl = window.some((row)=>{
+          if(rival !== "unknown" && row.team !== rival && row.team !== "unknown") return false;
+          const prevTypes = new Set((row.microEvents || []).map((m)=>m.type));
+          return prevTypes.has("possession_control") || prevTypes.has("corner") || prevTypes.has("big_chance");
+        });
+        const rivalMiss = window.some((row)=>{
+          if(rival !== "unknown" && row.team !== rival && row.team !== "unknown") return false;
+          const prevTypes = new Set((row.microEvents || []).map((m)=>m.type));
+          return prevTypes.has("miss") || prevTypes.has("saved");
+        });
+        if(rivalControl) pushRelatoTagHit(tags, "counter_strike", 4, event.min, "Marca tras absorber presión rival", event.raw);
+        else if(rivalMiss) pushRelatoTagHit(tags, "counter_strike", 2, event.min, "Golpea tras ocasión desperdiciada rival", event.raw);
+      }
+
+      const window3 = getRelatoWindow(events, idx + 1, 3);
+      const cornersNoShot = window3.filter((row)=>{
+        const rowTypes = new Set((row.microEvents || []).map((m)=>m.type));
+        return rowTypes.has("corner") && !rowTypes.has("shot_attempt");
+      });
+      if(cornersNoShot.length >= 2){
+        pushRelatoTagHit(tags, "wasted_setpieces", 3, event.min, "Acumula corners sin remate claro", event.raw);
+      }
+    });
+
+    return Object.values(tags)
+      .map((tag)=>{
+        const score = Number(tag.score) || 0;
+        const strength = score / (score + 8);
+        return {
+          tagId: tag.tagId,
+          label: tag.label,
+          strength: Number(strength.toFixed(2)),
+          mins: Array.from(new Set(tag.mins)).sort((a,b)=>a-b),
+          reason: tag.reason || "Patrón detectado en el relato",
+          evidence: tag.evidence.slice(0, 5)
+        };
+      })
+      .sort((a,b)=>b.strength-a.strength)
+      .slice(0, 6);
+  }
+
   function buildBrainV2MatchSummary({ row, teamName, opponentName }){
     const events = parseBrainV2Events(row?.narrative || "", teamName, opponentName);
     const home = { danger: 0, big_chance: 0, shot: 0, save: 0, corner: 0, yellow: 0, red: 0, goal: 0 };
@@ -372,7 +535,7 @@ export function initFootballLab(){
     home.goal = homeGoals;
     away.goal = awayGoals;
     const outcome = homeGoals>awayGoals ? "homeWin" : homeGoals<awayGoals ? "awayWin" : "draw";
-    const reasons = buildBrainV2ReasonTags({ events, home, away, momentumByPhase });
+    const reasons = buildBrainV2ReasonTags({ events, home, away, momentumByPhase, narrativeRaw: row?.narrative || "", teamName, opponentName });
     return {
       matchId: row?.id || uid("b2sum"),
       homeTeam: teamName || "Local",
@@ -424,12 +587,13 @@ export function initFootballLab(){
     return row.summary;
   }
 
-  function buildBrainV2ReasonTags({ events = [], home = {}, away = {}, momentumByPhase = {} }){
-    const reasons = [];
+  function buildBrainV2ReasonTags({ events = [], home = {}, away = {}, momentumByPhase = {}, narrativeRaw = "", teamName = "Local", opponentName = "Rival" }){
+    const autoTags = buildRelatoTags(narrativeRaw, teamName, opponentName);
+    const reasons = autoTags.map((tag)=>({ tag: tag.tagId, tagId: tag.tagId, label: tag.label, strength: tag.strength, mins: tag.mins, evidence: tag.evidence, note: tag.reason, auto: true }));
     const pushReason = (tag, metric, threshold, scale, note, evidence=[] )=>{
       const strength = clamp((metric - threshold) / Math.max(scale, 0.01), 0, 1);
       if(strength>0){
-        reasons.push({ tag, strength: Number(strength.toFixed(2)), evidence: evidence.slice(0, 4), note });
+        reasons.push({ tag, tagId: tag, label: RELATO_TAG_LABELS[tag] || tag, strength: Number(strength.toFixed(2)), mins: evidence.slice(0, 5), evidence: evidence.slice(0, 4), note });
       }
     };
     const homeLate = events.filter((e)=>e.team==="home" && e.minute>=80);
@@ -440,7 +604,7 @@ export function initFootballLab(){
     pushReason("big_chances_advantage", home.big_chance - away.big_chance, 0.5, 3, "Ventaja en chances claras", events.filter((e)=>e.type==="big_chance").map((e)=>e.minute));
     pushReason("finishing_edge", (home.goal / Math.max(1, home.big_chance)) - (away.goal / Math.max(1, away.big_chance)), 0.05, 0.6, "Mejor definición de cara al gol", events.filter((e)=>e.type==="goal").map((e)=>e.minute));
     pushReason("momentum_control", Object.values(momentumByPhase).reduce((acc, v)=>acc + Number(v), 0), 1, 8, "Dominio territorial por fases", Object.entries(momentumByPhase).filter(([,v])=>v>0).map(([phase])=>BRAIN_V2_PHASES.find((p)=>p.key===phase)?.max || 0));
-    return reasons.sort((a,b)=>b.strength-a.strength).slice(0, 4);
+    return reasons.sort((a,b)=>b.strength-a.strength).slice(0, 6);
   }
 
   function buildBrainV2Story({ teamName, opponentName, outcome, finalScore, reasons = [] }){
@@ -7993,7 +8157,11 @@ passes: 425"></textarea>
         if(!row) return;
         const teamName = db.teams.find((t)=>t.id===teamId)?.name || row?.teamName || "Local";
         const summary = ensureBrainV2RowSummary(row, teamName);
-        const reasonsTxt = (summary.reasons || []).map((r, idx)=>`#${idx+1} ${r.tag} ${(r.strength*100).toFixed(0)}% · mins ${(r.evidence||[]).join(',') || '-'} · ${r.note}`).join('\n');
+        const reasonsTxt = (summary.reasons || []).map((r, idx)=>{
+          const mins = (r.mins || r.evidence || []).filter((v)=>Number.isFinite(Number(v))).map((v)=>Number(v));
+          const evidenceTxt = Array.isArray(r.evidence) ? r.evidence.filter((v)=>typeof v === 'string') : [];
+          return `#${idx+1} ${r.tagId || r.tag} ${(r.strength*100).toFixed(0)}% · mins ${mins.join(',') || '-'} · ${r.note}${evidenceTxt.length ? `\n   ↳ ${evidenceTxt.slice(0,2).join(' | ')}` : ''}`;
+        }).join('\n');
         const manual = prompt(
           `Razones de ${row.date || '-'} vs ${row.opponent || 'Rival'}\n\n${reasonsTxt || 'Sin razones'}\n\nIntervención:\n- Escribe "regen" para recalcular\n- O añade manual: tag|strength(0-1)|nota|min1,min2\n- Cancelar para cerrar`,
           ''
@@ -8023,7 +8191,7 @@ passes: 425"></textarea>
           .slice(0, 5);
         row.summary ||= summary;
         row.summary.reasons ||= [];
-        row.summary.reasons.push({ tag: tag || 'manual_override', strength, evidence, note: note || 'Ajuste manual del analista' });
+        row.summary.reasons.push({ tag: tag || 'manual_override', tagId: tag || 'manual_override', label: RELATO_TAG_LABELS[tag] || tag || 'manual_override', strength, mins: evidence, evidence: [], note: note || 'Ajuste manual del analista', auto: false });
         row.summary.reasons = row.summary.reasons.sort((a,b)=>(Number(b.strength)||0)-(Number(a.strength)||0)).slice(0, 6);
         const extra = row.summary.reasons.slice(0, 2).map((r)=>r.note.toLowerCase()).join(' y ');
         row.summary.story = `${teamName} vs ${row?.opponent || 'Rival'}: ${extra || 'partido con señales mixtas'}.`;
