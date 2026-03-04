@@ -7,6 +7,8 @@ const TRAINING_REPORT_STORAGE_KEY = "brain/training_report.json";
 import { buildMatchVisionTensor } from "./footballlab/brain/vision/vision_builder.js";
 import { createVisionCnnBranch } from "./footballlab/brain/vision/vision_cnn_model.js";
 import { VISION_TENSOR_SHAPE } from "./footballlab/brain/vision/vision_tensor.js";
+import { extractEvents } from "./footballlab/brain/vision/vision_extractor.js";
+import { buildNarrativeBrainInput } from "./footballlab/momentum_engine.js";
 
 export const FEATURE_SCHEMA_VERSION = "2026-03-hybrid-v1";
 
@@ -127,7 +129,7 @@ export class HybridBrainService {
         text: match?.preMatchText || "",
         yOutcome: oneHotOutcome(finalHome, finalAway),
         yGoals: [finalHome, finalAway],
-        meta: { matchId, minute: 0, isLiveSlice: 0, timeline: match?.timeline || [], narrativeRaw: match?.narrativeRaw || "", liveAggregates: match?.liveAggregates || {} }
+        meta: { matchId, minute: 0, isLiveSlice: 0, timeline: match?.timeline || [], narrativeRaw: match?.narrativeRaw || "", liveAggregates: match?.liveAggregates || {}, homeTeam: match?.homeTeam || match?.home || "home", awayTeam: match?.awayTeam || match?.away || "away" }
       });
       examples.push(pre);
       const timeline = Array.isArray(match?.timeline) ? match.timeline : [];
@@ -142,7 +144,7 @@ export class HybridBrainService {
           text,
           yOutcome: oneHotOutcome(finalHome, finalAway),
           yGoals: [finalHome, finalAway],
-          meta: { matchId, minute, isLiveSlice: 1, timeline: eventsUntil, narrativeRaw: text, liveAggregates: match?.liveAggregates || {}, liveMinute: minute }
+          meta: { matchId, minute, isLiveSlice: 1, timeline: eventsUntil, narrativeRaw: text, liveAggregates: match?.liveAggregates || {}, liveMinute: minute, homeTeam: match?.homeTeam || match?.home || "home", awayTeam: match?.awayTeam || match?.away || "away" }
         }));
       });
     });
@@ -160,18 +162,35 @@ export class HybridBrainService {
   }
 
   toExample({ rawFeatures={}, text="", yOutcome=[0,1,0], yGoals=[0,0], meta={} }){
+    const narrativeRaw = meta?.narrativeRaw || text || "";
+    const events = extractEvents(narrativeRaw);
+    const narrativeInput = buildNarrativeBrainInput(events, {
+      homeTeam: meta?.homeTeam || "home",
+      awayTeam: meta?.awayTeam || "away"
+    });
+
+    const enrichedFeatures = {
+      ...rawFeatures,
+      momentum_index_home: Number.isFinite(Number(rawFeatures?.momentum_index_home)) ? Number(rawFeatures.momentum_index_home) : narrativeInput.momentum,
+      momentum_index_away: Number.isFinite(Number(rawFeatures?.momentum_index_away)) ? Number(rawFeatures.momentum_index_away) : -narrativeInput.momentum,
+      dangerous_attacks_home: Number.isFinite(Number(rawFeatures?.dangerous_attacks_home)) ? Number(rawFeatures.dangerous_attacks_home) : narrativeInput.homeDanger,
+      dangerous_attacks_away: Number.isFinite(Number(rawFeatures?.dangerous_attacks_away)) ? Number(rawFeatures.dangerous_attacks_away) : narrativeInput.awayDanger,
+      corners_home: Number.isFinite(Number(rawFeatures?.corners_home)) ? Number(rawFeatures.corners_home) : narrativeInput.homePressure,
+      corners_away: Number.isFinite(Number(rawFeatures?.corners_away)) ? Number(rawFeatures.corners_away) : narrativeInput.awayPressure
+    };
+
     const x = [];
     BASE_FEATURES.forEach((feature)=>{
-      const { value, missing } = pickFeature(rawFeatures, feature);
+      const { value, missing } = pickFeature(enrichedFeatures, feature);
       x.push(value, missing);
     });
     const tokens = tokenize(text);
     const vision = buildMatchVisionTensor({
       timeline: meta?.timeline || [],
-      narrativeRaw: meta?.narrativeRaw || text,
+      narrativeRaw,
       liveAggregates: meta?.liveAggregates || {}
     }, meta?.liveMinute!=null ? { liveMinute: meta.liveMinute } : {});
-    return { xTabular: x, tokens, xVision: vision.tensor, yOutcome, yGoals, meta };
+    return { xTabular: x, tokens, xVision: vision.tensor, yOutcome, yGoals, meta: { ...meta, narrativeSignals: narrativeInput } };
   }
 
   buildVocab(tokenBatches=[]){
