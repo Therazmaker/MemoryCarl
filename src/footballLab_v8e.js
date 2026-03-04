@@ -66,6 +66,7 @@ export function initFootballLab(){
       temperatureByLeague: {},
       metrics: { global: null, byLeague: {} },
       trainingSet: [],
+      matchSnapshots: [],
       marketTrust: 0.35,
       lrLeague: 0.12,
       lrTeam: 0.08
@@ -111,6 +112,7 @@ export function initFootballLab(){
       db.learning.teamBias ||= {};
       db.learning.temperatureByLeague ||= {};
       db.learning.trainingSet ||= [];
+      db.learning.matchSnapshots ||= [];
       db.learning.metrics ||= { global: null, byLeague: {} };
       db.learning.metrics.byLeague ||= {};
       db.learning.marketTrust = clamp(Number(db.learning.marketTrust) || defaultDb.learning.marketTrust, 0, 0.85);
@@ -141,6 +143,10 @@ export function initFootballLab(){
         if(team?.leagueId) ensureLink(team.id, team.leagueId);
       });
       db.tracker.forEach((m)=>{
+        m.stats ||= [];
+        if(typeof m.statsRaw === "undefined") m.statsRaw = null;
+        m.featureSnapshots ||= {};
+        m.featureSnapshotStatus ||= {};
         if(m?.leagueId){
           ensureLink(m.homeId, m.leagueId);
           ensureLink(m.awayId, m.leagueId);
@@ -866,33 +872,299 @@ export function initFootballLab(){
     return stats;
   }
 
-  function openStatsModal({ db, match, onSave } = {}){
+  function parseNumericStat(value){
+    if(typeof value === "number") return value;
+    const raw = String(value || "").trim();
+    if(!raw) return 0;
+    const clean = raw.replace(/,/g, ".");
+    const found = clean.match(/-?\d+(\.\d+)?/);
+    if(!found) return 0;
+    const parsed = Number(found[0]);
+    if(!Number.isFinite(parsed)) return 0;
+    return /%/.test(clean) ? parsed : parsed;
+  }
+
+  function normalizeStatsForMatch(match){
+    const list = Array.isArray(match?.stats) ? match.stats : [];
+    const normalized = {};
+    list.forEach((row)=>{
+      const key = String(row?.key || "").trim().toLowerCase();
+      if(!key) return;
+      normalized[key] = {
+        home: parseNumericStat(row?.home),
+        away: parseNumericStat(row?.away)
+      };
+    });
+    return normalized;
+  }
+
+  function getMatchStats(matchId, db){
+    const match = db?.tracker?.find((row)=>row.id===matchId);
+    if(!match) return null;
+    if(match.statsRaw) return match.statsRaw;
+    if(Array.isArray(match.stats) && match.stats.length){
+      return { kind: "match_stats", stats: match.stats };
+    }
+    return null;
+  }
+
+  function getMatchNarrative(matchId, db){
+    const match = db?.tracker?.find((row)=>row.id===matchId);
+    if(!match) return "";
+    if(Array.isArray(match?.narrativeModule?.pages)){
+      return match.narrativeModule.pages.map((page)=>String(page || "").trim()).filter(Boolean).join("\n");
+    }
+    return String(match?.narrativeModule?.rawText || "").trim();
+  }
+
+  function resolveResultForTeam(match, teamId){
+    const gf = Number(match?.homeId===teamId ? match?.homeGoals : match?.awayGoals) || 0;
+    const ga = Number(match?.homeId===teamId ? match?.awayGoals : match?.homeGoals) || 0;
+    if(gf>ga) return "W";
+    if(gf===ga) return "D";
+    return "L";
+  }
+
+  function calcTeamRestDays(matches=[], teamId, targetDate){
+    const targetTs = parseSortableDate(targetDate);
+    const past = matches
+      .filter((m)=>(m.homeId===teamId || m.awayId===teamId) && parseSortableDate(m.date) < targetTs)
+      .sort(compareByDateAsc);
+    const prev = past.at(-1);
+    if(!prev) return 7;
+    const prevTs = parseSortableDate(prev.date);
+    if(!Number.isFinite(prevTs) || !Number.isFinite(targetTs)) return 7;
+    return clamp(Math.round((targetTs - prevTs) / 86400000), 0, 14);
+  }
+
+  function computeMatchFeatures({ teamId, matchId, matchDate, statsRaw, narrativeRaw, context }){
+    const normalizedStats = normalizeStatsForMatch({ stats: Array.isArray(statsRaw?.stats) ? statsRaw.stats : [] });
+    const parsed = parseMatchNarrative(narrativeRaw, [context.teamName, context.opponentName]);
+    const events = parsed.events || [];
+    const keyByRegex = (regex)=>Object.keys(normalizedStats).find((key)=>regex.test(key));
+    const side = context.isHome ? "home" : "away";
+    const oppSide = context.isHome ? "away" : "home";
+    const pickStat = (regex, fallback=0)=>{
+      const key = keyByRegex(regex);
+      if(!key) return fallback;
+      return Number(normalizedStats[key]?.[side]) || fallback;
+    };
+    const pickOppStat = (regex, fallback=0)=>{
+      const key = keyByRegex(regex);
+      if(!key) return fallback;
+      return Number(normalizedStats[key]?.[oppSide]) || fallback;
+    };
+    const shots = pickStat(/shots|remates|tiros/gi, 8);
+    const xg = pickStat(/xg|goles esperados/gi, 1.1);
+    const cards = pickStat(/yellow|amarillas|roja|tarjetas/gi, 2);
+    const oppShots = pickOppStat(/shots|remates|tiros/gi, 8);
+    const pressureEvents = events.filter((evt)=>evt.type==="pressure").length;
+    const paceEvents = events.filter((evt)=>["shot","big_chance","corner","goal"].includes(evt.type)).length;
+    const cardsEvents = events.filter((evt)=>evt.type==="yellow" || evt.type==="red").length;
+
+    const pulseBase = clamp(30 + shots*2 + xg*12 + pressureEvents*2, 0, 100);
+    const fatigueBase = clamp(55 - context.restDays*4 + cards*4 + Math.max(0, paceEvents-10), 0, 100);
+    const resilBase = clamp(40 + (context.pastPointsPerGame*15) + Math.max(0, shots-oppShots)*1.2, 0, 100);
+    const aggrBase = clamp(28 + cards*8 + pressureEvents*4 + cardsEvents*3, 0, 100);
+    const volBase = clamp(20 + Math.abs(shots-oppShots)*3 + paceEvents*2, 0, 100);
+
+    const importanceAdj = (Number(context.importance) || 0) * 8;
+    const restAdj = (Number(context.restDays) - 4) * 1.5;
+    const momentumAdj = (Number(context.momentum) || 0) * 12;
+
+    const pulse = clamp(pulseBase + importanceAdj + momentumAdj, 0, 100);
+    const fatiga = clamp(fatigueBase - restAdj, 0, 100);
+    const resiliencia = clamp(resilBase + momentumAdj * 0.8, 0, 100);
+    const agresividad = clamp(aggrBase + importanceAdj * 0.6, 0, 100);
+    const volatilidad = clamp(volBase + Math.abs(momentumAdj) * 0.5, 0, 100);
+
+    const features = {
+      pulse,
+      fatiga,
+      resiliencia,
+      agresividad,
+      volatilidad,
+      edadMedia: clamp(Number(context.edadMedia) || 26, 17, 40),
+      descanso: clamp(Number(context.restDays) || 0, 0, 14),
+      momentum: clamp(Number(context.momentum) || 0, -1, 1),
+      importancia: clamp(Number(context.importance) || 0, 0, 1)
+    };
+
+    const featureAudit = {
+      version: "snapshot_v1",
+      base: { pulseBase, fatigueBase, resilBase, aggrBase, volBase },
+      ajustes: { importanceAdj, restAdj, momentumAdj },
+      fuentes: {
+        stats: Object.keys(normalizedStats),
+        narrativeEvents: events.length,
+        matchId,
+        matchDate
+      },
+      pulse: { base: pulseBase, adjContext: importanceAdj + momentumAdj, final: pulse, sources: ["shots", "xg", "narrativePressure"] },
+      fatiga: { base: fatigueBase, adjContext: -restAdj, final: fatiga, sources: ["restDays", "cards", "matchPace"] },
+      resiliencia: { base: resilBase, adjContext: momentumAdj * 0.8, final: resiliencia, sources: ["pastPointsPerGame", "shotDiff"] }
+    };
+
+    return { features, featureAudit };
+  }
+
+  function rebuildLearningTrainingSet(db){
+    const snapshots = Array.isArray(db?.learning?.matchSnapshots) ? db.learning.matchSnapshots : [];
+    const ordered = [...snapshots].sort((a,b)=>parseSortableDate(a.matchDate)-parseSortableDate(b.matchDate));
+    const trainingSet = [];
+    ordered.forEach((snap)=>{
+      const targetTs = parseSortableDate(snap.matchDate);
+      const seqTeam = ordered.filter((s)=>s.teamId===snap.teamId && parseSortableDate(s.matchDate) < targetTs).slice(-5);
+      const seqRival = ordered.filter((s)=>s.teamId===snap.opponentId && parseSortableDate(s.matchDate) < targetTs).slice(-5);
+      if(seqTeam.length<5 || seqRival.length<5) return;
+      trainingSet.push({
+        matchId: snap.matchId,
+        teamId: snap.teamId,
+        opponentId: snap.opponentId,
+        matchDate: snap.matchDate,
+        seqTeam,
+        seqRival,
+        label: snap.result
+      });
+    });
+    db.learning.trainingSet = trainingSet;
+  }
+
+  async function calculateSnapshotForMatch({ db, team, match }){
+    if(!db || !team || !match) throw new Error("Partido inválido");
+    const teamId = team.id;
+    const opponentId = match.homeId===team.id ? match.awayId : match.homeId;
+    const opponent = db.teams.find((row)=>row.id===opponentId);
+    const statsRaw = getMatchStats(match.id, db);
+    const narrativeRaw = getMatchNarrative(match.id, db);
+    if(!statsRaw) throw new Error("Faltan estadísticas");
+    if(!narrativeRaw) throw new Error("Falta relato");
+    const allTeamMatches = db.tracker
+      .filter((m)=>m.homeId===teamId || m.awayId===teamId)
+      .sort(compareByDateAsc);
+    const targetTs = parseSortableDate(match.date);
+    const pastMatches = allTeamMatches.filter((m)=>parseSortableDate(m.date) < targetTs);
+    const last5 = pastMatches.slice(-5);
+    const points = last5.reduce((sum, m)=>{
+      const result = resolveResultForTeam(m, teamId);
+      return sum + (result==="W" ? 3 : result==="D" ? 1 : 0);
+    }, 0);
+    const momentum = last5.length ? clamp(points / (last5.length*3) * 2 - 1, -1, 1) : 0;
+    const players = db.players.filter((p)=>p.teamId===teamId);
+    const avgAge = players.length
+      ? players.reduce((sum, p)=>sum + (Number(p.age) || 26), 0) / players.length
+      : 26;
+    const restDays = calcTeamRestDays(db.tracker, teamId, match.date);
+    const importance = clamp(competitionWeight(db, match), 0, 1);
+    const context = {
+      teamName: team.name,
+      opponentName: opponent?.name || "Rival",
+      isHome: match.homeId===team.id,
+      restDays,
+      momentum,
+      importance,
+      edadMedia: avgAge,
+      pastPointsPerGame: last5.length ? points / (last5.length * 3) : 0.5
+    };
+    const computed = computeMatchFeatures({
+      teamId,
+      matchId: match.id,
+      matchDate: match.date,
+      statsRaw,
+      narrativeRaw,
+      context
+    });
+    const result = resolveResultForTeam(match, teamId);
+    const score = context.isHome
+      ? `${match.homeGoals}-${match.awayGoals}`
+      : `${match.awayGoals}-${match.homeGoals}`;
+    const snapshot = {
+      matchId: match.id,
+      teamId,
+      opponentId,
+      league: db.leagues.find((l)=>l.id===match.leagueId)?.name || "Liga",
+      matchDate: match.date,
+      homeAway: context.isHome ? "GL" : "GV",
+      result,
+      score,
+      statsRaw,
+      narrativeRaw,
+      features: computed.features,
+      featureAudit: computed.featureAudit
+    };
+    match.featureSnapshots ||= {};
+    match.featureSnapshots[teamId] = snapshot;
+    match.featureSnapshotStatus ||= {};
+    match.featureSnapshotStatus[teamId] = { status: "ok", updatedAt: new Date().toISOString() };
+    db.learning.matchSnapshots = (db.learning.matchSnapshots || []).filter((row)=>!(row.matchId===match.id && row.teamId===teamId));
+    db.learning.matchSnapshots.push(snapshot);
+    rebuildLearningTrainingSet(db);
+    saveDb(db);
+    return snapshot;
+  }
+
+  function openStatsModal({ db, match, team, onSave } = {}){
     if(!match) return;
+    const teamSnapshot = team?.id ? match?.featureSnapshots?.[team.id] : null;
+    const featureRows = teamSnapshot?.features
+      ? Object.entries(teamSnapshot.features).map(([key, value])=>`<tr><td>${key}</td><td><b>${typeof value==="number" ? value.toFixed(2) : String(value)}</b></td></tr>`).join("")
+      : "<tr><td colspan='2'>Sin métricas calculadas para este equipo.</td></tr>";
+    const auditRows = teamSnapshot?.featureAudit
+      ? Object.entries(teamSnapshot.featureAudit).map(([key, value])=>`<tr><td>${key}</td><td><pre class='fl-mini' style='white-space:pre-wrap;'>${JSON.stringify(value, null, 2)}</pre></td></tr>`).join("")
+      : "<tr><td colspan='2'>Sin auditoría todavía.</td></tr>";
+
     const backdrop = document.createElement("div");
     backdrop.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;";
     backdrop.innerHTML = `
-      <div class="fl-card" style="width:min(860px,100%);max-height:90vh;overflow:auto;">
+      <div class="fl-card" style="width:min(960px,100%);max-height:90vh;overflow:auto;">
         <div class="fl-row" style="justify-content:space-between;margin-bottom:8px;">
           <div style="font-size:18px;font-weight:900;">Estadísticas del partido</div>
           <button class="fl-btn" id="closeStatsModal">Cerrar</button>
         </div>
-        <div class="fl-muted" style="margin-bottom:8px;">Pega JSON con formato <code>stats</code>, <code>statistics</code> o <code>sections[].stats[]</code>.</div>
-        <textarea id="statsImportModal" class="fl-text" placeholder='{"kind":"match_stats","sections":[{"section":"Estadísticas principales","stats":[{"category":"Posesión","home":{"main":"67%"},"away":{"main":"33%"}}]}]}'></textarea>
-        <div class="fl-row" style="margin-top:8px;">
-          <button class="fl-btn" id="saveStatsModal">Guardar estadísticas</button>
-          <span id="statsModalStatus" class="fl-muted"></span>
+        <div class="fl-row" style="margin-bottom:8px;gap:8px;">
+          <button class="fl-btn" id="tabStatsBtn">Estadísticas</button>
+          <button class="fl-btn" id="tabFeaturesBtn">Métricas calculadas</button>
+        </div>
+        <div id="tabStatsPanel">
+          <div class="fl-muted" style="margin-bottom:8px;">Pega JSON con formato <code>stats</code>, <code>statistics</code> o <code>sections[].stats[]</code>.</div>
+          <textarea id="statsImportModal" class="fl-text" placeholder='{"kind":"match_stats","sections":[{"section":"Estadísticas principales","stats":[{"category":"Posesión","home":{"main":"67%"},"away":{"main":"33%"}}]}]}'></textarea>
+          <div class="fl-row" style="margin-top:8px;">
+            <button class="fl-btn" id="saveStatsModal">Guardar estadísticas</button>
+            <span id="statsModalStatus" class="fl-muted"></span>
+          </div>
+        </div>
+        <div id="tabFeaturesPanel" style="display:none;">
+          <div style="font-weight:800;margin-bottom:6px;">Vector final (features)</div>
+          <table class="fl-table"><thead><tr><th>Métrica</th><th>Valor</th></tr></thead><tbody>${featureRows}</tbody></table>
+          <div style="font-weight:800;margin:10px 0 6px;">Audit (base + ajustes + fuentes usadas)</div>
+          <table class="fl-table"><thead><tr><th>Clave</th><th>Detalle</th></tr></thead><tbody>${auditRows}</tbody></table>
         </div>
       </div>
     `;
     document.body.appendChild(backdrop);
 
+    if(match.statsRaw){
+      const area = backdrop.querySelector("#statsImportModal");
+      area.value = JSON.stringify(match.statsRaw, null, 2);
+    }
+
     const close = ()=>backdrop.remove();
     backdrop.addEventListener("click", (e)=>{ if(e.target===backdrop) close(); });
     backdrop.querySelector("#closeStatsModal").onclick = close;
+    backdrop.querySelector("#tabStatsBtn").onclick = ()=>{
+      backdrop.querySelector("#tabStatsPanel").style.display = "block";
+      backdrop.querySelector("#tabFeaturesPanel").style.display = "none";
+    };
+    backdrop.querySelector("#tabFeaturesBtn").onclick = ()=>{
+      backdrop.querySelector("#tabStatsPanel").style.display = "none";
+      backdrop.querySelector("#tabFeaturesPanel").style.display = "block";
+    };
     backdrop.querySelector("#saveStatsModal").onclick = ()=>{
       const status = backdrop.querySelector("#statsModalStatus");
       try{
-        const stats = parseStatsPayload(backdrop.querySelector("#statsImportModal").value.trim());
+        const rawObj = JSON.parse(backdrop.querySelector("#statsImportModal").value.trim());
+        const stats = parseStatsPayload(rawObj);
+        match.statsRaw = rawObj;
         match.stats = stats;
         saveDb(db);
         status.textContent = `✅ Guardado (${stats.length} métricas)`;
@@ -2752,7 +3024,9 @@ function computeTeamIntelligencePanel(db, teamId){
       }
       if(statsRaw){
         try{
-          match.stats = parseStatsPayload(statsRaw);
+          const rawObj = JSON.parse(statsRaw);
+          match.statsRaw = rawObj;
+          match.stats = parseStatsPayload(rawObj);
         }catch(err){
           status.textContent = `❌ ${String(err.message || err)}`;
           return;
@@ -5598,6 +5872,12 @@ function computeTeamIntelligencePanel(db, teamId){
         const away = db.teams.find(t=>t.id===m.awayId)?.name || "-";
         const moveUpDisabled = idx===0 ? "disabled" : "";
         const moveDownDisabled = idx===teamMatches.length-1 ? "disabled" : "";
+        const calcState = m?.featureSnapshotStatus?.[team.id]?.status || "pendiente";
+        const snap = m?.featureSnapshots?.[team.id];
+        const tooltip = snap?.features
+          ? `Pulse ${Math.round(snap.features.pulse||0)} | Fatiga ${Math.round(snap.features.fatiga||0)} | Res ${Math.round(snap.features.resiliencia||0)} | Mom ${Number(snap.features.momentum||0).toFixed(2)}`
+          : "Sin cálculo";
+        const calcLabel = calcState==="ok" ? "ok ✅" : calcState==="calculando" ? "calculando..." : calcState==="error" ? "error ❌" : "pendiente";
         return `<tr>
           <td>${m.date||"-"}</td>
           <td>${league?.name || "Liga"}</td>
@@ -5608,6 +5888,8 @@ function computeTeamIntelligencePanel(db, teamId){
             <button class="fl-btn" data-move-match="${m.id}" data-move-delta="1" ${moveDownDisabled}>⬇️</button>
             <button class="fl-btn" data-open-stats-modal="${m.id}">Estadísticas</button>
             <button class="fl-btn" data-open-engine-modal="${m.id}">EPA/EMA/HAE</button>
+            <button class="fl-btn" data-calc-match="${m.id}">📊 Calcular métricas</button>
+            <span class="fl-mini" title="${tooltip}">${calcState==="ok"?"✅ Calculado":calcLabel}</span>
             <button class="fl-btn" data-edit-match="${m.id}">Editar</button>
             <button class="fl-btn" data-delete-match="${m.id}">Borrar</button>
           </td>
@@ -5757,6 +6039,8 @@ function computeTeamIntelligencePanel(db, teamId){
             <input id="resAG" type="number" class="fl-input" placeholder="GV" style="width:74px" />
             <select id="resAway" class="fl-select"><option value="">Visitante</option>${resultTeamOptions}</select>
             <button class="fl-btn" id="addResult">Guardar partido</button>
+            <button class="fl-btn" id="calcLast5Btn">Calcular últimos 5</button>
+            <button class="fl-btn" id="calcAllBtn">Calcular todos</button>
             <span id="resultStatus" class="fl-muted"></span>
           </div>
           <table class="fl-table">
@@ -6003,7 +6287,10 @@ function computeTeamIntelligencePanel(db, teamId){
           homeGoals: Number(document.getElementById("resHG").value)||0,
           awayGoals: Number(document.getElementById("resAG").value)||0,
           note: "",
-          stats: []
+          stats: [],
+          statsRaw: null,
+          featureSnapshots: {},
+          featureSnapshotStatus: {}
         });
         saveDb(db);
         render("equipo", { teamId: team.id });
@@ -6036,11 +6323,56 @@ function computeTeamIntelligencePanel(db, teamId){
       );
       content.querySelectorAll("[data-open-stats-modal]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-stats-modal"));
-        openStatsModal({ db, match, onSave: ()=>render("equipo", { teamId: team.id }) });
+        openStatsModal({ db, match, team, onSave: ()=>render("equipo", { teamId: team.id }) });
       });
       content.querySelectorAll("[data-open-engine-modal]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-engine-modal"));
         openTeamEngineModal({ db, match, team, onSave: ()=>render("equipo", { teamId: team.id }) });
+      });
+      const runBulkCalculation = async (matches)=>{
+        const status = document.getElementById("resultStatus");
+        let ok = 0;
+        let fail = 0;
+        for(const match of matches){
+          try{
+            match.featureSnapshotStatus ||= {};
+            match.featureSnapshotStatus[team.id] = { status: "calculando", updatedAt: new Date().toISOString() };
+            saveDb(db);
+            await calculateSnapshotForMatch({ db, team, match });
+            ok += 1;
+          }catch(err){
+            match.featureSnapshotStatus ||= {};
+            match.featureSnapshotStatus[team.id] = { status: "error", error: String(err.message || err), updatedAt: new Date().toISOString() };
+            saveDb(db);
+            fail += 1;
+          }
+        }
+        status.textContent = `Cálculo completado: ${ok} ok / ${fail} error.`;
+        render("equipo", { teamId: team.id });
+      };
+
+      document.getElementById("calcLast5Btn").onclick = async ()=>{
+        const sorted = [...teamMatches].sort(compareByDateAsc);
+        await runBulkCalculation(sorted.slice(-5));
+      };
+      document.getElementById("calcAllBtn").onclick = async ()=>{
+        const sorted = [...teamMatches].sort(compareByDateAsc);
+        await runBulkCalculation(sorted);
+      };
+      content.querySelectorAll("[data-calc-match]").forEach((btn)=>btn.onclick = async ()=>{
+        const match = db.tracker.find((m)=>m.id===btn.getAttribute("data-calc-match"));
+        if(!match) return;
+        match.featureSnapshotStatus ||= {};
+        match.featureSnapshotStatus[team.id] = { status: "calculando", updatedAt: new Date().toISOString() };
+        saveDb(db);
+        render("equipo", { teamId: team.id });
+        try{
+          await calculateSnapshotForMatch({ db, team, match });
+        }catch(err){
+          match.featureSnapshotStatus[team.id] = { status: "error", error: String(err.message || err), updatedAt: new Date().toISOString() };
+          saveDb(db);
+        }
+        render("equipo", { teamId: team.id });
       });
       content.querySelectorAll("[data-move-match]").forEach(btn=>btn.onclick = ()=>{
         const matchId = btn.getAttribute("data-move-match");
@@ -6148,7 +6480,10 @@ function computeTeamIntelligencePanel(db, teamId){
           oddsDraw: pickFirstNumber(document.getElementById("trOddD").value),
           oddsAway: pickFirstNumber(document.getElementById("trOddA").value),
           note: document.getElementById("trNote").value.trim(),
-          stats: []
+          stats: [],
+          statsRaw: null,
+          featureSnapshots: {},
+          featureSnapshotStatus: {}
         });
         saveDb(db);
         render("tracker");
