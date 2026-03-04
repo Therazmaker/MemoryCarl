@@ -1251,14 +1251,23 @@ export function initFootballLab(){
   function saveTeamBrainFeatures(teamId, snapshots = []){
     if(!teamId) return;
     const store = getJsonStorage(TEAM_BRAIN_FEATURES_KEY);
-    store[teamId] = (Array.isArray(snapshots) ? snapshots : [])
+    const prevRows = Array.isArray(store?.[teamId]) ? store[teamId] : [];
+    const incomingRows = (Array.isArray(snapshots) ? snapshots : [])
       .filter((row)=>row && typeof row === "object")
       .map((row)=>({
         matchId: String(row.matchId || ""),
         date: String(row.matchDate || row.date || ""),
         features: normalizeFeatureSchema(row.features || row.featuresRaw || {})
       }))
-      .filter((row)=>row.date && row.features && Object.keys(row.features).length)
+      .filter((row)=>row.date && row.features && Object.keys(row.features).length);
+    const merged = [...prevRows, ...incomingRows];
+    const dedupMap = new Map();
+    merged.forEach((row)=>{
+      const key = `${String(row?.matchId || "")}|${String(row?.date || "")}`;
+      if(!key || key === "|") return;
+      dedupMap.set(key, row);
+    });
+    store[teamId] = [...dedupMap.values()]
       .sort((a,b)=>parseSortableDate(a.date)-parseSortableDate(b.date))
       .slice(-20);
     localStorage.setItem(TEAM_BRAIN_FEATURES_KEY, JSON.stringify(store));
@@ -1317,6 +1326,23 @@ export function initFootballLab(){
     });
     db.close();
     return true;
+  }
+
+  async function loadTeamPackRecord(teamId){
+    if(!teamId) return null;
+    const db = await openTeamPackDb();
+    if(!db){
+      const fallback = getJsonStorage(TEAM_PACKS_KEY);
+      return fallback?.[teamId] || null;
+    }
+    const row = await new Promise((resolve)=>{
+      const tx = db.transaction(TEAM_PACKS_STORE, "readonly");
+      const req = tx.objectStore(TEAM_PACKS_STORE).get(teamId);
+      req.onsuccess = ()=>resolve(req.result || null);
+      req.onerror = ()=>resolve(null);
+    });
+    db.close();
+    return row;
   }
 
   function openStatsModal({ db, match, team, onSave } = {}){
@@ -6614,6 +6640,7 @@ function computeTeamIntelligencePanel(db, teamId){
         ].join("<br>");
         if(strengthEl) strengthEl.innerHTML = [
           `<b>Conozco al ${pack?.team?.name || "equipo"}: ${s.score}%</b>`,
+          "Estoy usando los datos desde el perfil del equipo.",
           `Cobertura: ${s.coverage.toFixed(2)} · Recencia: ${s.recency.toFixed(2)} (hace ${s.daysSinceLast} días) · Completitud: ${s.completeness.toFixed(2)} · Consistencia: ${s.consistency.toFixed(2)}`,
           `Checks críticos → missingCriticalRate: ${s.missingCriticalRate.toFixed(2)} · duplicateMatchIdRate: ${s.duplicateMatchIdRate.toFixed(2)} · unorderedDateRate: ${s.unorderedDateRate.toFixed(2)}`
         ].join("<br>");
@@ -6664,6 +6691,7 @@ function computeTeamIntelligencePanel(db, teamId){
             matches: parsed.matches || [],
             snapshots: parsed.snapshots || []
           });
+          saveTeamBrainFeatures(parsed?.team?.id || "", parsed?.snapshots || []);
           renderTeamPackStrength(importedPack);
           if(status) status.textContent = "✅ TeamPack importado.";
         }catch(err){
@@ -6715,6 +6743,20 @@ function computeTeamIntelligencePanel(db, teamId){
           "Brain sync: snapshots del pack guardados para autoload en pestaña Brain."
         ].join("<br>");
       };
+
+      loadTeamPackRecord(team.id).then((record)=>{
+        if(!record) return;
+        importedPack = {
+          schemaVersion: record?.manifest?.schemaVersion || "FL_TEAMPACK_v1",
+          createdAt: record?.manifest?.createdAt || record?.updatedAt || new Date().toISOString(),
+          team: record?.manifest?.team || team,
+          range: record?.manifest?.range || {},
+          cutoffDate: record?.manifest?.cutoffDate || record?.manifest?.range?.to || "",
+          matches: Array.isArray(record?.matches) ? record.matches : [],
+          snapshots: Array.isArray(record?.snapshots) ? record.snapshots : []
+        };
+        renderTeamPackStrength(importedPack);
+      }).catch(()=>{});
 
       document.getElementById("saveMeta").onclick = ()=>{
         let factorDia = {};
@@ -9292,8 +9334,13 @@ function computeTeamIntelligencePanel(db, teamId){
           date: match.date,
           features: match?.featureSnapshots?.[teamId]?.features || {}
         }));
-      if(trackerWindow.length) return trackerWindow;
-      return getTeamBrainFeatures(teamId, historicalDate);
+      if(trackerWindow.length){
+        trackerWindow._source = "tracker";
+        return trackerWindow;
+      }
+      const profileWindow = getTeamBrainFeatures(teamId, historicalDate);
+      profileWindow._source = "team_profile";
+      return profileWindow;
     }
 
     function summarizeTeamFeatureWindow(window = []){
@@ -9370,6 +9417,7 @@ function computeTeamIntelligencePanel(db, teamId){
         tracker: historicalTracker,
         historicalDate: modeMeta.mode === "historico" ? modeMeta.historicalDate : ""
       });
+      const featureSource = recentFeatureWindow?._source || "baseline";
       const featuresSummary = summarizeTeamFeatureWindow(recentFeatureWindow);
 
       const pulseBase = Number.isFinite(featuresSummary?.pulse)
@@ -9412,7 +9460,7 @@ function computeTeamIntelligencePanel(db, teamId){
       setInputValue(`brainMomentum${side}`, momentumBase, 2);
 
       const snapshotSourceMsg = featuresSummary
-        ? `Métricas únicas activas: promedio de ${featuresSummary.sampleSize} partido(s)${featuresSummary.latestDate ? ` (último ${featuresSummary.latestDate})` : ""}.`
+        ? `Métricas únicas activas: promedio de ${featuresSummary.sampleSize} partido(s)${featuresSummary.latestDate ? ` (último ${featuresSummary.latestDate})` : ""}.${featureSource === "team_profile" ? " Estoy usando los datos desde el perfil del equipo." : ""}`
         : "Métricas únicas: sin snapshots calculados, usando baseline psicométrico.";
 
       if(statusEl) statusEl.textContent = `✅ Métricas cargadas para ${team.name}. ${snapshotSourceMsg} Ajuste contextual -> pulse ${(ajusteContextual.pulse*100).toFixed(0)} pts, resiliencia ${(ajusteContextual.resiliencia*100).toFixed(0)} pts, agresividad ${(ajusteContextual.agresividad*100).toFixed(0)} pts. ${describeBrainAutoloadSources(teamId, leagueId, intel, momentumSigned, {
