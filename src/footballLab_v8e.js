@@ -5,6 +5,7 @@
 
 import { Cerebelo } from "./Cerebelo.js";
 import { HybridBrainService, inferOutcomeLabel, estimateLiveDelta } from "./HybridBrain.js";
+import { buildTrainingDataset, createTensorflowBrainModel, trainTensorflowBrainModel, saveBrainArtifacts, loadBrainArtifacts, inferWithBrain, buildTeamProfile, buildFeatureVectorFromProfiles, extractNarrativeFeatures } from "./footballlab/brain/tensorflow_brain.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -9087,6 +9088,30 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>
           <div id="hybridBrainLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Modelo híbrido listo para dataset builder.</div>
         </div>
+        <div class="fl-card" style="margin-bottom:12px;padding:10px;border-left:4px solid #58a6ff;background:#0d1117;">
+          <div style="font-weight:800;margin-bottom:8px;">🧠 CEREBRO REAL (TensorFlow)</div>
+          <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
+            <button class="fl-btn" id="tfBrainBuildDataset">BUILD DATASET</button>
+            <button class="fl-btn" id="tfBrainTrain">TRAIN BRAIN</button>
+            <button class="fl-btn secondary" id="tfBrainLoad">LOAD BRAIN</button>
+            <button class="fl-btn secondary" id="tfBrainPredict">SIMULAR A vs B</button>
+          </div>
+          <div id="tfBrainStatus" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Estado: listo para construir dataset desde tracker.</div>
+          <div class="fl-grid two" style="margin-top:8px;gap:8px;">
+            <div class="fl-card" style="padding:8px;">
+              <div class="fl-mini">Panel 1 · Brain status</div>
+              <div id="tfBrainMeta" class="fl-mini" style="white-space:pre-wrap;"></div>
+            </div>
+            <div class="fl-card" style="padding:8px;">
+              <div class="fl-mini">Panel 2 · Dataset preview</div>
+              <div id="tfBrainDatasetPreview" class="fl-mini" style="white-space:pre-wrap;"></div>
+            </div>
+          </div>
+          <div class="fl-card" style="margin-top:8px;padding:8px;">
+            <div class="fl-mini">Panel 3/4 · Training console + example reasoning</div>
+            <div id="tfBrainConsole" class="fl-mini" style="white-space:pre-wrap;"></div>
+          </div>
+        </div>
         <div class="fl-grid two" style="margin-bottom:12px;">
           <div class="fl-card" style="padding:10px;">
             <div style="font-weight:800;margin-bottom:8px;">Equipo A (Local · ej. Everton)</div>
@@ -9348,6 +9373,172 @@ function computeTeamIntelligencePanel(db, teamId){
     });
 
     renderHybridStatus();
+
+    let tfBrainModel = null;
+    let tfBrainDataset = { examples: [], featureSchema: [] };
+    let tfBrainMeta = {};
+
+    const tfBrainStatusEl = document.getElementById("tfBrainStatus");
+    const tfBrainMetaEl = document.getElementById("tfBrainMeta");
+    const tfBrainPreviewEl = document.getElementById("tfBrainDatasetPreview");
+    const tfBrainConsoleEl = document.getElementById("tfBrainConsole");
+
+    function tfBrainLog(message = ""){
+      if(tfBrainStatusEl) tfBrainStatusEl.textContent = message;
+    }
+
+    function renderTfBrainPanels(extra = ""){
+      if(tfBrainMetaEl){
+        tfBrainMetaEl.textContent = [
+          `Matches learned: ${tfBrainMeta.samples || 0}`,
+          `Features: ${tfBrainMeta.features || tfBrainDataset.featureSchema.length || 0}`,
+          `Accuracy: ${Number.isFinite(tfBrainMeta.accuracy) ? tfBrainMeta.accuracy.toFixed(3) : "-"}`,
+          `Last trained: ${tfBrainMeta.trainedAt || "-"}`
+        ].join("\n");
+      }
+      if(tfBrainPreviewEl){
+        const sample = tfBrainDataset.examples[0];
+        tfBrainPreviewEl.textContent = sample
+          ? `samples=${tfBrainDataset.examples.length}\nfeatures[0]=${JSON.stringify(sample.features.slice(0, 12))}\nlabel_result=${JSON.stringify(sample.label_result)}\nlabel_goals=${JSON.stringify(sample.label_goals)}`
+          : "Dataset vacío";
+      }
+      if(tfBrainConsoleEl && extra){
+        tfBrainConsoleEl.textContent = `${extra}\n${tfBrainConsoleEl.textContent || ""}`.trim();
+      }
+    }
+
+    function mapTrackerToBrainMatch(match = {}){
+      const statsRows = Array.isArray(match.stats) ? match.stats : [];
+      const findStat = (aliases = [], side = "home")=>{
+        for(const row of statsRows){
+          const category = String(row?.category || row?.label || row?.name || "").toLowerCase();
+          if(!aliases.some((alias)=>category.includes(alias))) continue;
+          const block = row?.[side] || {};
+          return block?.main ?? block?.value ?? row?.[`${side}Value`] ?? row?.[side] ?? 0;
+        }
+        return 0;
+      };
+      return {
+        id: match.id,
+        scoreFT: { home: Number(match.homeGoals) || 0, away: Number(match.awayGoals) || 0 },
+        stats: {
+          home: {
+            xg: Number(match.homeXg ?? match.xgHome ?? findStat(["xg"], "home")) || 0,
+            shots: Number(findStat(["remates totales", "shots total", "shots"], "home")) || 0,
+            shots_on_target: Number(findStat(["remates a puerta", "shot on target"], "home")) || 0,
+            possession: findStat(["posesi", "possession"], "home"),
+            big_chances: Number(findStat(["grandes ocasiones", "big chances"], "home")) || 0,
+            corners: Number(findStat(["córner", "corner"], "home")) || 0,
+            passes: Number(findStat(["pases", "passes"], "home")) || 0,
+            touches_box: Number(findStat(["toques en el área", "touches in box"], "home")) || 0,
+            xa: Number(findStat(["asistencias esperadas", "xa"], "home")) || 0,
+            xgot: Number(findStat(["xgot"], "home")) || 0
+          },
+          away: {
+            xg: Number(match.awayXg ?? match.xgAway ?? findStat(["xg"], "away")) || 0,
+            shots: Number(findStat(["remates totales", "shots total", "shots"], "away")) || 0,
+            shots_on_target: Number(findStat(["remates a puerta", "shot on target"], "away")) || 0,
+            possession: findStat(["posesi", "possession"], "away"),
+            big_chances: Number(findStat(["grandes ocasiones", "big chances"], "away")) || 0,
+            corners: Number(findStat(["córner", "corner"], "away")) || 0,
+            passes: Number(findStat(["pases", "passes"], "away")) || 0,
+            touches_box: Number(findStat(["toques en el área", "touches in box"], "away")) || 0,
+            xa: Number(findStat(["asistencias esperadas", "xa"], "away")) || 0,
+            xgot: Number(findStat(["xgot"], "away")) || 0
+          }
+        },
+        narrative: { home: match.note || "", away: match.noteAway || "" },
+        homeId: match.homeId,
+        awayId: match.awayId
+      };
+    }
+
+    document.getElementById("tfBrainBuildDataset")?.addEventListener("click", ()=>{
+      const mapped = (db.tracker || []).map(mapTrackerToBrainMatch);
+      tfBrainDataset = buildTrainingDataset(mapped, { orientation: "home-away", includeNarrative: true });
+      tfBrainLog(`Dataset listo con ${tfBrainDataset.examples.length} partidos.`);
+      renderTfBrainPanels();
+    });
+
+    document.getElementById("tfBrainTrain")?.addEventListener("click", async ()=>{
+      try{
+        if(typeof tf === "undefined") throw new Error("TensorFlow.js no cargado");
+        if(!tfBrainDataset.examples.length){
+          const mapped = (db.tracker || []).map(mapTrackerToBrainMatch);
+          tfBrainDataset = buildTrainingDataset(mapped, { orientation: "home-away", includeNarrative: true });
+        }
+        if(!tfBrainDataset.examples.length) throw new Error("No hay muestras para entrenar");
+        tfBrainModel = createTensorflowBrainModel(tf, tfBrainDataset.featureSchema.length);
+        tfBrainConsoleEl.textContent = "";
+        const history = await trainTensorflowBrainModel({
+          tfRef: tf,
+          model: tfBrainModel,
+          dataset: tfBrainDataset,
+          epochs: 50,
+          batchSize: 16,
+          learningRate: 0.001,
+          onEpoch: (epoch, logs)=>{
+            const line = `epoch ${epoch+1} · loss=${Number(logs?.loss||0).toFixed(4)} · acc=${Number(logs?.result_accuracy||logs?.result_acc||0).toFixed(4)}`;
+            renderTfBrainPanels(line);
+          }
+        });
+        const accHist = history?.history?.result_accuracy || history?.history?.result_acc || [];
+        const accuracy = accHist.length ? Number(accHist[accHist.length - 1]) : null;
+        tfBrainMeta = {
+          samples: tfBrainDataset.examples.length,
+          teams: new Set((db.tracker || []).flatMap((m)=>[m.homeId, m.awayId]).filter(Boolean)).size,
+          trainedAt: new Date().toISOString(),
+          accuracy: Number.isFinite(accuracy) ? accuracy : null
+        };
+        await saveBrainArtifacts({ model: tfBrainModel, meta: tfBrainMeta, featureSchema: tfBrainDataset.featureSchema, profile: "footballlab_real" });
+        tfBrainLog("✅ Brain entrenado y guardado en IndexedDB.");
+        renderTfBrainPanels();
+      }catch(err){
+        tfBrainLog(`❌ ${err.message}`);
+      }
+    });
+
+    document.getElementById("tfBrainLoad")?.addEventListener("click", async ()=>{
+      try{
+        const payload = await loadBrainArtifacts({ tfRef: tf, profile: "footballlab_real" });
+        tfBrainModel = payload.model;
+        tfBrainMeta = payload.meta || {};
+        tfBrainDataset.featureSchema = payload.featureSchema || [];
+        tfBrainLog("✅ Brain cargado desde IndexedDB.");
+        renderTfBrainPanels();
+      }catch(err){
+        tfBrainLog(`⚠️ ${err.message}`);
+      }
+    });
+
+    document.getElementById("tfBrainPredict")?.addEventListener("click", ()=>{
+      try{
+        if(!tfBrainModel) throw new Error("Entrena o carga el Brain primero");
+        const homeId = brainSelectors?.A?.team?.value;
+        const awayId = brainSelectors?.B?.team?.value;
+        const profileHome = buildTeamProfile((db.tracker || []).map(mapTrackerToBrainMatch), homeId);
+        const profileAway = buildTeamProfile((db.tracker || []).map(mapTrackerToBrainMatch), awayId);
+        const liveNarrative = {
+          home: document.getElementById("brainRelatoA")?.value || "",
+          away: document.getElementById("brainRelatoB")?.value || ""
+        };
+        const vector = buildFeatureVectorFromProfiles(profileHome, profileAway, liveNarrative);
+        const prediction = inferWithBrain({ model: tfBrainModel, featureVector: vector });
+        const nA = extractNarrativeFeatures(liveNarrative.home);
+        const nB = extractNarrativeFeatures(liveNarrative.away);
+        renderTfBrainPanels(
+          `Prediction ${homeId || "Home"} vs ${awayId || "Away"}\n` +
+          `Home win ${(prediction.result[0]*100).toFixed(1)}% · Draw ${(prediction.result[1]*100).toFixed(1)}% · Away win ${(prediction.result[2]*100).toFixed(1)}%\n` +
+          `Expected goals ${prediction.goals.home.toFixed(2)}-${prediction.goals.away.toFixed(2)}\n` +
+          `Top factors: xG diff=${vector[0].toFixed(2)}, shots diff=${vector[1].toFixed(2)}, big chances diff=${vector[4].toFixed(2)}\n` +
+          `Live events Δ: shots=${nA.shot-nB.shot}, corners=${nA.corner-nB.corner}, cards=${(nA.yellow+nA.red)-(nB.yellow+nB.red)}`
+        );
+      }catch(err){
+        tfBrainLog(`❌ ${err.message}`);
+      }
+    });
+
+    renderTfBrainPanels();
 
     const LABELS = [
       "Pulse","Fatiga","Resiliencia","Agresividad",
