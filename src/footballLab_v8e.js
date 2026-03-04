@@ -401,6 +401,29 @@ export function initFootballLab(){
     };
   }
 
+  function ensureBrainV2RowSummary(row, teamName = "Local"){
+    if(!row || typeof row !== "object") return buildBrainV2MatchSummary({ row: {}, teamName, opponentName: "Rival" });
+    if(!row.summary || typeof row.summary !== "object"){
+      row.summary = buildBrainV2MatchSummary({
+        row,
+        teamName: row?.teamName || teamName || "Local",
+        opponentName: row?.opponent || "Rival"
+      });
+      return row.summary;
+    }
+    row.summary.reasons = Array.isArray(row.summary.reasons) ? row.summary.reasons : [];
+    row.summary.story = String(row.summary.story || "");
+    if(!row.summary.reasons.length || !row.summary.story){
+      const rebuilt = buildBrainV2MatchSummary({
+        row,
+        teamName: row?.teamName || teamName || "Local",
+        opponentName: row?.opponent || "Rival"
+      });
+      row.summary = { ...rebuilt, ...row.summary, reasons: row.summary.reasons.length ? row.summary.reasons : rebuilt.reasons, story: row.summary.story || rebuilt.story };
+    }
+    return row.summary;
+  }
+
   function buildBrainV2ReasonTags({ events = [], home = {}, away = {}, momentumByPhase = {} }){
     const reasons = [];
     const pushReason = (tag, metric, threshold, scale, note, evidence=[] )=>{
