@@ -1545,6 +1545,8 @@ export function initFootballLab(){
     ];
     const ifThen = thresholdTable.filter((row)=>(Number(features[row.key]) || 0) < 1).slice(0, 3);
     const maxProb = Math.max(probs.base, probs.trigger, probs.chaos);
+    const topTwo = Object.values(probs).sort((a,b)=>b-a).slice(0,2);
+    const leaderGap = (topTwo[0] || 0) - (topTwo[1] || 0);
     const confidence = clamp(maxProb * (Number(state.calibrator.confScale) || 0.92) * (1 - Math.abs(Number(features.calError) || 0) * 0.25), 0, 1);
     const switchRisk = entropy > 0.95 || Number(features.surprise) >= 0.7 ? "HIGH" : entropy > 0.7 ? "MED" : "LOW";
     return {
@@ -1557,10 +1559,39 @@ export function initFootballLab(){
       },
       confidence: Number(confidence.toFixed(3)),
       switchRisk,
+      entropy: Number(entropy.toFixed(3)),
+      leaderGap: Number(leaderGap.toFixed(3)),
       drivers: drivers.map((row)=>({ ...row, val: Number(row.val.toFixed(3)) })),
       ifThen,
       calibrator: { temp: Number(temp.toFixed(2)), confScale: Number((state.calibrator.confScale || 0.92).toFixed(2)) }
     };
+  }
+
+  function toHuman(driverKey = ""){
+    const map = {
+      balanced: "Partido parejo",
+      calError: "Sistema inseguro (falló antes)",
+      surprise: "Evento inesperado reciente",
+      controlHome: "Local tiene más control",
+      controlAway: "Visita sube fricción del partido",
+      cornersSurgeHome: "Racha de córners del local",
+      cornersSurgeAway: "Racha de córners de la visita",
+      shotsOTSurgeHome: "Tiros a puerta en racha (local)",
+      shotsOTSurgeAway: "Tiros a puerta en racha (visita)",
+      tempoLow: "Ritmo bajo",
+      varShock: "VAR/penal cambió el guion",
+      redCard: "Tarjeta roja condiciona todo"
+    };
+    return map[driverKey] || driverKey;
+  }
+
+  function scenarioLabel(scenario = ""){
+    const map = {
+      base: "Base (control/ritmo)",
+      trigger: "Trigger (asedio/ABP)",
+      chaos: "Chaos (partido roto)"
+    };
+    return map[scenario] || scenario;
   }
 
   function deriveTrueScenario(features = {}){
@@ -11214,12 +11245,89 @@ passes: 425"></textarea>
             const acc10 = acc10rows.length ? acc10rows.filter((r)=>r.predicted===r.truth).length / acc10rows.length : 0;
             const avgBrier = lsfState.stats.forecastsMade ? lsfState.stats.brierSum / lsfState.stats.forecastsMade : 0;
             if(fRec){
-              lsfPanel.innerHTML = `<div style="font-weight:800;">🔮 LIVE SCENARIO FORECAST · Próximos 10-15 min (${fRec.forecastForPhase || '-'})</div>
-                <div class="fl-mini" style="margin-top:4px;">Base ${(Number(fRec.probs?.base||0)*100).toFixed(0)}% | Trigger ${(Number(fRec.probs?.trigger||0)*100).toFixed(0)}% | Chaos ${(Number(fRec.probs?.chaos||0)*100).toFixed(0)}% · Forecast confidence ${(Number(fRec.confidence||0)*100).toFixed(0)}%</div>
-                <div class="fl-mini" style="margin-top:4px;">SWITCH RISK: <b>${fRec.switchRisk || 'MED'}</b></div>
-                <div class="fl-mini" style="margin-top:4px;"><b>Drivers</b>${(fRec.drivers || []).map((d)=>`<div>• ${d.key} (${d.val>0?'+':''}${Number(d.val||0).toFixed(2)} ${d.scenario})</div>`).join('') || '<div>• sin señales fuertes</div>'}</div>
-                <div class="fl-mini" style="margin-top:4px;"><b>If-Then switches</b>${(fRec.ifThen || []).slice(0,2).map((i)=>`<div>• ${i.label} → ${i.scenario} +${i.delta.toFixed(2)}</div>`).join('') || '<div>• sin switches candidatos</div>'}</div>
-                <div class="fl-mini" style="margin-top:6px;"><b>Learning mini panel:</b> forecasts made today ${lsfState.stats.forecastsMade} · accuracy last 10 ${(acc10*100).toFixed(0)}% · brier avg ${avgBrier.toFixed(3)} · weights updated: ${(brainV2.mne.lsfEvalHistory || []).slice(-1)[0]?.updatesCount>0 ? 'yes':'no'}</div>`;
+              const bars = [
+                { scenario: 'base', pct: Math.round((Number(fRec.probs?.base || 0) * 100)) },
+                { scenario: 'trigger', pct: Math.round((Number(fRec.probs?.trigger || 0) * 100)) },
+                { scenario: 'chaos', pct: Math.round((Number(fRec.probs?.chaos || 0) * 100)) }
+              ];
+              const leader = bars.slice().sort((a,b)=>b.pct-a.pct)[0] || { scenario: 'base', pct: 0 };
+              const confPct = Math.round((Number(fRec.confidence || 0) * 100));
+              const confMeta = confPct < 35
+                ? { icon: '🔴', label: 'Baja', color: '#ef4444', desc: 'Baja: partido impredecible' }
+                : confPct < 60
+                  ? { icon: '🟡', label: 'Media', color: '#f59e0b', desc: 'Media: guion probable' }
+                  : { icon: '🟢', label: 'Alta', color: '#22c55e', desc: 'Alta: guion claro' };
+              const switchRiskMeta = (()=>{
+                const entropy = Number(fRec.entropy || 0);
+                const gap = Number(fRec.leaderGap || 0);
+                const nearTie = gap < 0.07;
+                if(entropy > 0.92 || nearTie || String(fRec.switchRisk || '').toUpperCase()==='HIGH') return { icon: '🔴', label: 'Alto', color: '#ef4444', desc: 'El guion puede cambiar con 1 evento.' };
+                if(entropy > 0.7 || String(fRec.switchRisk || '').toUpperCase()==='MED') return { icon: '🟡', label: 'Medio', color: '#f59e0b', desc: 'Hay señales mixtas; atento a los próximos minutos.' };
+                return { icon: '🟢', label: 'Bajo', color: '#22c55e', desc: 'Guion estable salvo evento fuerte.' };
+              })();
+              const driversHuman = (fRec.drivers || []).slice(0,3).map((d)=>({
+                human: toHuman(d.key),
+                pushes: d.scenario,
+                technical: `${d.key} (${d.val>0?'+':''}${Number(d.val || 0).toFixed(2)} ${d.scenario})`
+              }));
+              const switches = (fRec.ifThen || []).slice(0,2).map((i)=>({
+                cond: String(i.label || '').replace(/^Si\s+/i, '').replace('home', 'Local').replace('away', 'Visita').replace('corners', 'córners').replace('shotsOT', 'tiros a puerta'),
+                effect: `${scenarioLabel(i.scenario)} +${Math.round((Number(i.delta || 0) * 100))}%`
+              }));
+              lsfPanel.innerHTML = `<div style="display:grid;gap:10px;">
+                <div class="fl-card" style="padding:10px;">
+                  <div style="font-weight:800;">🔮 Próximos 10–15 min (${fRec.forecastForPhase || '-'})</div>
+                  <div class="fl-mini" style="margin-top:2px;opacity:.85;">Escenario esperado</div>
+                  <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;">
+                    <div style="font-size:20px;font-weight:900;">${scenarioLabel(leader.scenario)}</div>
+                    <span class="fl-pill" style="background:rgba(59,130,246,.2);border:1px solid rgba(59,130,246,.55);font-weight:800;">${leader.pct}%</span>
+                  </div>
+                  <div class="fl-mini" style="margin-top:8px;">Confianza ${confMeta.icon} <b>${confMeta.label}</b> (${confPct}%)</div>
+                  <div style="margin-top:4px;height:8px;border-radius:999px;background:rgba(148,163,184,.25);overflow:hidden;"><div style="width:${confPct}%;height:100%;background:${confMeta.color};"></div></div>
+                  <div class="fl-mini" style="margin-top:6px;">Esto significa: ${confMeta.desc}</div>
+                </div>
+
+                <div class="fl-card" style="padding:10px;">
+                  <div style="font-weight:800;">📊 Mapa de escenarios</div>
+                  <div style="margin-top:8px;display:grid;gap:6px;">${bars.map((b)=>{
+                    const active = b.scenario===leader.scenario;
+                    const color = active ? '#60a5fa' : '#64748b';
+                    return `<div class="fl-mini" style="display:grid;grid-template-columns:130px 1fr 46px;gap:8px;align-items:center;${active?'font-weight:700;':''}">
+                      <span>${scenarioLabel(b.scenario)}</span>
+                      <div style="height:8px;border-radius:999px;background:rgba(148,163,184,.2);overflow:hidden;"><div style="width:${b.pct}%;height:100%;background:${color};"></div></div>
+                      <span>${b.pct}%</span>
+                    </div>`;
+                  }).join('')}</div>
+                </div>
+
+                <div class="fl-card" style="padding:10px;">
+                  <div style="font-weight:800;">🚦 Riesgo de cambio</div>
+                  <div style="margin-top:8px;font-size:20px;font-weight:900;color:${switchRiskMeta.color};">${switchRiskMeta.icon} ${switchRiskMeta.label}</div>
+                  <div class="fl-mini" style="margin-top:6px;">${switchRiskMeta.desc}</div>
+                </div>
+
+                <div class="fl-card" style="padding:10px;">
+                  <div style="font-weight:800;">🧭 Qué lo está empujando</div>
+                  <div style="margin-top:6px;display:grid;gap:4px;">${driversHuman.map((d)=>`<div class="fl-mini">• ${d.human} → empuja a <b>${scenarioLabel(d.pushes)}</b></div>`).join('') || '<div class="fl-mini">Sin señales fuertes todavía.</div>'}</div>
+                  <details style="margin-top:8px;"><summary class="fl-mini" style="cursor:pointer;">Ver técnico</summary><div class="fl-mini" style="margin-top:4px;display:grid;gap:2px;">${driversHuman.map((d)=>`<div>• ${d.technical}</div>`).join('') || '<div>Sin drivers técnicos.</div>'}</div></details>
+                </div>
+
+                <div class="fl-card" style="padding:10px;">
+                  <div style="font-weight:800;">⚑ Qué lo cambia</div>
+                  <div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${switches.map((s)=>`<div class="fl-card" style="padding:8px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);"><div class="fl-mini">Si pasa esto…</div><div><b>${s.cond}</b></div><div class="fl-mini" style="margin-top:4px;">cambia a <b>${s.effect}</b></div></div>`).join('') || '<div class="fl-mini">Sin switches candidatos todavía.</div>'}</div>
+                </div>
+
+                <div class="fl-card" style="padding:10px;">
+                  <div style="font-weight:800;">🧠 Aprendizaje de hoy</div>
+                  <div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;" class="fl-mini">
+                    <div>🧠 Forecasts hoy: <b>${lsfState.stats.forecastsMade}</b></div>
+                    <div>✅ Acierto (últimos 10): <b>${(acc10*100).toFixed(0)}%</b></div>
+                    <div>🎯 Error (Brier): <b>${avgBrier.toFixed(3)}</b></div>
+                    <div>🔄 Ajustó pesos: <b>${(brainV2.mne.lsfEvalHistory || []).slice(-1)[0]?.updatesCount>0 ? 'Sí':'No'}</b></div>
+                  </div>
+                  <div class="fl-mini" style="margin-top:6px;">El sistema está aprendiendo: aún con poca muestra.</div>
+                </div>
+              </div>`;
             }else{
               lsfPanel.innerHTML = '<div class="fl-mini">Aún no hay forecast LSF para esta fase. Usa Compare & Learn para generarlo.</div>';
             }
