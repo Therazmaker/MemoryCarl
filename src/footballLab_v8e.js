@@ -10417,7 +10417,7 @@ passes: 425"></textarea>
           const scenesN = todayUpdates.filter((u)=>u.type==='scene').length;
           const triggersN = todayUpdates.filter((u)=>u.type==='trigger').length;
           const cals = todayUpdates.filter((u)=>u.type==='calibration').map((u)=>Number(u.delta)||0);
-          widget.innerHTML = `<b>Brain is adjusting</b> · Scenes adjusted today: <b>${scenesN}</b> · Triggers adjusted: <b>${triggersN}</b> · Calibration improved: <b>${(Math.max(0, -avg(cals))*100).toFixed(1)}%</b>`;
+          widget.innerHTML = `<b>Brain is adjusting</b> · Scenes adjusted today: <b>${scenesN}</b> · Triggers adjusted: <b>${triggersN}</b> · Calibration improved: <b>${(Math.max(0, -average(cals, 0))*100).toFixed(1)}%</b>`;
         };
 
         const initialPreds = (vision.mne?.narrative || []).map((phaseData)=>buildMnePhasePrediction({ matchId: simMatchId, phaseData }));
