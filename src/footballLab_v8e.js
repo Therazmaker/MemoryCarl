@@ -2145,6 +2145,47 @@ export function initFootballLab(){
       .filter(Boolean);
   }
 
+  function parseLineupShape(raw){
+    if(!raw) return null;
+    if(typeof raw === "object") return raw;
+    try{ return JSON.parse(String(raw)); }catch(_err){ return null; }
+  }
+
+  function listTeamProfilePlayers(db, teamId = ""){
+    if(!teamId) return [];
+    return (db.players || [])
+      .filter((p)=>p && p.teamId===teamId)
+      .map((p)=>({ id: p.id, name: String(p.name || "").trim(), pos: normalizePlayerPos(p.pos) }))
+      .filter((p)=>p.name)
+      .sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity: "base" }));
+  }
+
+  function buildFormationLayout(formation = "4-3-3"){
+    const token = String(formation || "4-3-3").trim();
+    const lines = token.split(/[-\s]+/).map((n)=>Math.max(0, Number(n) || 0)).filter((n)=>n>0);
+    const normalized = lines.length ? lines : [4, 3, 3];
+    const slots = [{ key: "GK", label: "POR", line: 0, x: 50, y: 92 }];
+    const rowCount = normalized.length;
+    normalized.forEach((count, rowIdx)=>{
+      const y = 18 + (rowIdx * (65 / Math.max(1, rowCount - 1)));
+      for(let i = 0; i < count; i += 1){
+        const x = ((i + 1) * 100) / (count + 1);
+        slots.push({ key: `L${rowIdx+1}P${i+1}`, label: `${rowIdx+1}.${i+1}`, line: rowIdx + 1, x, y });
+      }
+    });
+    return { formation: normalized.join("-"), slots };
+  }
+
+  function buildLineupFromShape(shape = null){
+    if(!shape || !Array.isArray(shape.slots)) return [];
+    const assignments = shape.assignments || {};
+    return shape.slots
+      .map((slot)=>String(assignments[slot.key] || "").trim())
+      .filter(Boolean)
+      .slice(0, 11)
+      .reduce((acc, name)=>acc.includes(name) ? acc : [...acc, name], []);
+  }
+
   function getTeamMatchSide(match, teamId){
     if(!match || !teamId) return null;
     if(match.homeId===teamId) return "home";
@@ -2475,6 +2516,12 @@ export function initFootballLab(){
       .fl-modal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
       .fl-field{display:grid;gap:6px}
       .fl-field label{font-size:12px;color:#9ca3af}
+      .fl-lineup-board{position:relative;width:100%;height:420px;border:1px solid #2f3d4f;border-radius:14px;background:linear-gradient(180deg,#1b2633,#141d27);overflow:hidden}
+      .fl-lineup-board::before{content:"";position:absolute;inset:16px;border:2px solid rgba(240,246,252,.2);border-radius:10px}
+      .fl-lineup-board::after{content:"";position:absolute;left:50%;top:16px;bottom:16px;border-left:1px solid rgba(240,246,252,.15)}
+      .fl-lineup-slot{position:absolute;transform:translate(-50%,-50%);display:grid;gap:4px;min-width:130px}
+      .fl-lineup-slot-tag{font-size:10px;font-weight:800;letter-spacing:.05em;color:#9ca3af;text-align:center}
+      .fl-lineup-slot-select{font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #3a4a5f;background:#0d1117;color:#e8edf3}
       .context-box{border-left:4px solid #1f6feb}
     `;
     document.head.appendChild(style);
@@ -10192,7 +10239,14 @@ shots: 13
 possession: 57
 passes: 425"></textarea>
           <textarea id="b2Narrative" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="Relato del partido: ritmo, lesiones, presión, cambios..."></textarea>
-          <input id="b2Lineup" class="fl-input" style="margin-top:8px;" placeholder="XI del día (coma separado)" />
+          <div class="fl-field" style="margin-top:8px;">
+            <label>Composición (XI del día)</label>
+            <div class="fl-row">
+              <input id="b2Lineup" class="fl-input" style="flex:1;min-width:240px;" placeholder="XI del día (coma separado)" />
+              <button class="fl-btn secondary" id="b2OpenLineupComposer" type="button">Abrir pizarra</button>
+            </div>
+            <input id="b2LineupShape" type="hidden" value="" />
+          </div>
           <div class="fl-row" style="margin-top:8px;">
             <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
             <span id="b2Status" class="fl-muted"></span>
@@ -10373,12 +10427,98 @@ passes: 425"></textarea>
       };
       paintBrainStatus();
 
+      const openBrainV2LineupComposer = ({ teamId = "", lineupInput, shapeInput } = {})=>{
+        const status = document.getElementById('b2Status');
+        if(!teamId){ if(status) status.textContent = 'Selecciona un equipo antes de armar la composición.'; return; }
+        const roster = listTeamProfilePlayers(db, teamId);
+        if(!roster.length){ if(status) status.textContent = '⚠️ Este equipo no tiene perfiles de jugadores cargados.'; return; }
+
+        const parsedShape = parseLineupShape(shapeInput?.value || "") || {};
+        let layout = buildFormationLayout(parsedShape.formation || '4-3-3');
+        let assignments = { ...(parsedShape.assignments || {}) };
+        const presetLineup = parseLineupList(lineupInput?.value || '');
+        layout.slots.forEach((slot, idx)=>{
+          if(!assignments[slot.key] && presetLineup[idx]) assignments[slot.key] = presetLineup[idx];
+        });
+
+        const modal = document.createElement('div');
+        modal.className = 'fl-modal-backdrop';
+        modal.innerHTML = `
+          <div class="fl-modal" style="max-width:980px;">
+            <div class="fl-row" style="justify-content:space-between;align-items:center;">
+              <div><div class="fl-modal-title">🧭 Composición del partido</div><div class="fl-mini">Selecciona nombres del perfil de equipo y guárdalos por posición.</div></div>
+              <button class="fl-btn" data-close>Cerrar</button>
+            </div>
+            <div class="fl-row" style="margin-top:10px;justify-content:space-between;align-items:center;">
+              <label class="fl-mini">Formación <input id="b2ComposerFormation" class="fl-input" style="width:120px;margin-left:6px;" value="${layout.formation}"></label>
+              <button class="fl-btn secondary" id="b2ComposerApplyFormation" type="button">Aplicar formación</button>
+            </div>
+            <div id="b2ComposerBoard" class="fl-lineup-board" style="margin-top:10px;"></div>
+            <div class="fl-row" style="margin-top:12px;justify-content:space-between;">
+              <span class="fl-mini" id="b2ComposerStatus"></span>
+              <button class="fl-btn" id="b2ComposerSave" type="button">Guardar composición</button>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
+        const close = ()=>modal.remove();
+        modal.onclick = (e)=>{ if(e.target===modal) close(); };
+        modal.querySelector('[data-close]').onclick = close;
+
+        const renderBoard = ()=>{
+          const board = modal.querySelector('#b2ComposerBoard');
+          if(!board) return;
+          board.innerHTML = layout.slots.map((slot)=>{
+            const selected = String(assignments[slot.key] || '');
+            const options = ['<option value="">-- sin asignar --</option>']
+              .concat(roster.map((p)=>`<option value="${p.name}" ${selected===p.name?'selected':''}>${p.name}</option>`))
+              .join('');
+            return `<div class="fl-lineup-slot" style="left:${slot.x}%;top:${slot.y}%;"><div class="fl-lineup-slot-tag">${slot.label}</div><select class="fl-lineup-slot-select" data-slot="${slot.key}">${options}</select></div>`;
+          }).join('');
+          board.querySelectorAll('select[data-slot]').forEach((select)=>select.addEventListener('change', ()=>{
+            assignments[select.dataset.slot] = select.value || '';
+          }));
+        };
+
+        modal.querySelector('#b2ComposerApplyFormation').onclick = ()=>{
+          const nextFormation = modal.querySelector('#b2ComposerFormation').value || layout.formation;
+          const currentNames = layout.slots.map((slot)=>assignments[slot.key]).filter(Boolean);
+          layout = buildFormationLayout(nextFormation);
+          assignments = {};
+          layout.slots.forEach((slot, idx)=>{ if(currentNames[idx]) assignments[slot.key] = currentNames[idx]; });
+          modal.querySelector('#b2ComposerStatus').textContent = `Formación ${layout.formation} aplicada.`;
+          renderBoard();
+        };
+
+        modal.querySelector('#b2ComposerSave').onclick = ()=>{
+          const shape = {
+            formation: layout.formation,
+            slots: layout.slots.map((slot)=>({ key: slot.key, label: slot.label, line: slot.line, x: slot.x, y: slot.y })),
+            assignments
+          };
+          const lineup = buildLineupFromShape(shape);
+          if(lineupInput) lineupInput.value = lineup.join(', ');
+          if(shapeInput) shapeInput.value = JSON.stringify(shape);
+          if(status) status.textContent = `✅ Composición guardada (${lineup.length} jugadores asignados).`;
+          close();
+        };
+
+        renderBoard();
+      };
+
       document.getElementById('b2League')?.addEventListener('change', (e)=>{
         db.settings.selectedLeagueId = e.target.value || "";
         saveDb(db);
         render('brainv2', { leagueId: e.target.value || "" });
       });
       document.getElementById('b2Team')?.addEventListener('change', (e)=>render('brainv2', { leagueId: selectedLeagueId, teamId: e.target.value || "" }));
+      document.getElementById('b2OpenLineupComposer')?.addEventListener('click', ()=>{
+        const teamId = document.getElementById('b2Team')?.value || "";
+        openBrainV2LineupComposer({
+          teamId,
+          lineupInput: document.getElementById('b2Lineup'),
+          shapeInput: document.getElementById('b2LineupShape')
+        });
+      });
       document.getElementById('b2Home')?.addEventListener('change', paintBrainStatus);
       document.getElementById('b2Away')?.addEventListener('change', paintBrainStatus);
 
@@ -10397,6 +10537,7 @@ passes: 425"></textarea>
           statsRaw: (document.getElementById('b2Stats')?.value || '').trim(),
           narrative: (document.getElementById('b2Narrative')?.value || '').trim(),
           lineup: parseLineupList(document.getElementById('b2Lineup')?.value || ''),
+          lineupShape: parseLineupShape(document.getElementById('b2LineupShape')?.value || ''),
           createdAt: Date.now()
         };
         row.summary = buildBrainV2MatchSummary({ row, teamName: row.teamName, opponentName: row.opponent || "Rival" });
@@ -10499,7 +10640,14 @@ passes: 425"></textarea>
               <div class="fl-field"><label>Rival</label><input id="b2ModalOpponent" class="fl-input" value="${row.opponent || ''}"></div>
               <div class="fl-field"><label>Resultado</label><input id="b2ModalScore" class="fl-input" placeholder="2-1" value="${row.score || '0-0'}"></div>
             </div>
-            <div class="fl-field" style="margin-top:8px;"><label>Composición (XI del día)</label><input id="b2ModalLineup" class="fl-input" value="${parseLineupList(row.lineup || row.startingXI || []).join(', ')}"></div>
+            <div class="fl-field" style="margin-top:8px;">
+              <label>Composición (XI del día)</label>
+              <div class="fl-row">
+                <input id="b2ModalLineup" class="fl-input" style="flex:1;min-width:240px;" value="${parseLineupList(row.lineup || row.startingXI || []).join(', ')}">
+                <button class="fl-btn secondary" id="b2ModalOpenLineup" type="button">Abrir pizarra</button>
+              </div>
+              <input id="b2ModalLineupShape" type="hidden" value='${JSON.stringify(row.lineupShape || {}).replace(/'/g, "&#39;")}'>
+            </div>
             <div class="fl-field" style="margin-top:8px;"><label>Relato</label><textarea id="b2ModalNarrative" class="fl-text" style="min-height:130px;">${row.narrative || ''}</textarea></div>
             <div class="fl-field" style="margin-top:8px;"><label>Stats raw (opcional)</label><textarea id="b2ModalStats" class="fl-text" style="min-height:80px;">${row.statsRaw || ''}</textarea></div>
             <div class="fl-row" style="justify-content:space-between;align-items:center;margin-top:10px;">
@@ -10522,6 +10670,13 @@ passes: 425"></textarea>
         const close = ()=>backdrop.remove();
         backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
         backdrop.querySelector('#b2CloseReasonModal').onclick = close;
+        backdrop.querySelector('#b2ModalOpenLineup')?.addEventListener('click', ()=>{
+          openBrainV2LineupComposer({
+            teamId,
+            lineupInput: backdrop.querySelector('#b2ModalLineup'),
+            shapeInput: backdrop.querySelector('#b2ModalLineupShape')
+          });
+        });
 
         const renderReasons = ()=>{
           const rows = (row.summary?.reasons || []).map((r, idx)=>{
@@ -10538,6 +10693,7 @@ passes: 425"></textarea>
           row.opponent = (backdrop.querySelector('#b2ModalOpponent').value || '').trim();
           row.score = (backdrop.querySelector('#b2ModalScore').value || '0-0').trim();
           row.lineup = parseLineupList(backdrop.querySelector('#b2ModalLineup').value || '');
+          row.lineupShape = parseLineupShape(backdrop.querySelector('#b2ModalLineupShape')?.value || '') || null;
           row.narrative = (backdrop.querySelector('#b2ModalNarrative').value || '').trim();
           row.statsRaw = (backdrop.querySelector('#b2ModalStats').value || '').trim();
         };
