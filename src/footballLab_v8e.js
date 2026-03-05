@@ -10541,15 +10541,97 @@ passes: 425"></textarea>
         const node = document.getElementById('b2GlobalLearningPanel');
         if(!node) return;
         const gp = computeGlobalLearningProgress(brainV2.memories, brainV2.gpe);
-        const tagRows = gp.tagRows.slice(0, 20).map((row)=>{
-          const relPct = Math.round(row.rel * 100);
-          const lifts = `W ${row.liftW>=0?'+':''}${(row.liftW*100).toFixed(1)}% · D ${row.liftD>=0?'+':''}${(row.liftD*100).toFixed(1)}% · L ${row.liftL>=0?'+':''}${(row.liftL*100).toFixed(1)}%`;
-          return `<tr><td>${row.tagId}</td><td>${row.n}</td><td><div style="height:8px;background:#222;border-radius:999px;min-width:90px;"><div style="width:${relPct}%;height:8px;background:#58a6ff;border-radius:999px;"></div></div><div class="fl-mini">${relPct}%</div></td><td class="fl-mini">${lifts}</td><td>${row.impactScore.toFixed(3)}</td><td>${row.badge}</td></tr>`;
-        }).join('');
-        const comboRows = gp.comboRows.slice(0, 18).map((row)=>{
-          const lifts = `W ${row.liftW>=0?'+':''}${(row.liftW*100).toFixed(1)}% · D ${row.liftD>=0?'+':''}${(row.liftD*100).toFixed(1)}% · L ${row.liftL>=0?'+':''}${(row.liftL*100).toFixed(1)}%`;
-          return `<tr><td>${row.comboKey}</td><td>${row.n}</td><td>${Math.round(row.rel*100)}%</td><td class="fl-mini">${lifts}</td><td>${row.impactScore.toFixed(3)}</td><td>${row.badge}</td></tr>`;
-        }).join('');
+        const IMPACT_TABLES_KEY = 'ui_impactTablesExpanded';
+
+        const fmtPct = (x)=>`${x >= 0 ? '+' : ''}${(Number(x || 0) * 100).toFixed(1)}%`;
+        const fmtRel = (rel)=>{
+          const value = Number(rel || 0);
+          const pct = value <= 1 ? value * 100 : value;
+          return `${Math.round(pct)}%`;
+        };
+        const fmtImpact = (impact)=>Number(impact || 0).toFixed(3);
+        const getDominantLift = (item = {})=>{
+          const lifts = [
+            { side: 'W', value: Number(item.liftW || 0) },
+            { side: 'D', value: Number(item.liftD || 0) },
+            { side: 'L', value: Number(item.liftL || 0) }
+          ];
+          return lifts.sort((a,b)=>b.value-a.value)[0] || { side: 'D', value: 0 };
+        };
+        const humanizeTag = (tagId)=>RELATO_TAG_LABELS?.[tagId] || tagId;
+        const humanizeCombo = (comboKey)=>String(comboKey || '').split('|').map((tag)=>humanizeTag(tag)).join(' + ');
+        const sortByImpactDesc = (rows = [])=>rows.slice().sort((a,b)=>Number(b.impactScore || b.impact || 0) - Number(a.impactScore || a.impact || 0));
+
+        const renderImpactTagsTable = (rows = [])=>{
+          const tableRows = rows.slice(0, 20).map((row)=>{
+            const relPct = Math.round(row.rel * 100);
+            const lifts = `W ${fmtPct(row.liftW)} · D ${fmtPct(row.liftD)} · L ${fmtPct(row.liftL)}`;
+            return `<tr><td>${row.tagId}</td><td>${row.n}</td><td><div style="height:8px;background:#222;border-radius:999px;min-width:90px;"><div style="width:${relPct}%;height:8px;background:#58a6ff;border-radius:999px;"></div></div><div class="fl-mini">${relPct}%</div></td><td class="fl-mini">${lifts}</td><td>${fmtImpact(row.impactScore)}</td><td>${row.badge}</td></tr>`;
+          }).join('');
+          return `<div class="fl-card" style="padding:8px;"><b>Top Impact Tags</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>tag</th><th>n</th><th>rel</th><th>lift W/D/L</th><th>impact</th><th>badge</th></tr></thead><tbody>${tableRows || '<tr><td colspan="6" class="fl-mini">Sin tags aún.</td></tr>'}</tbody></table></div>`;
+        };
+
+        const renderImpactCombosTable = (rows = [])=>{
+          const tableRows = rows.slice(0, 18).map((row)=>{
+            const lifts = `W ${fmtPct(row.liftW)} · D ${fmtPct(row.liftD)} · L ${fmtPct(row.liftL)}`;
+            return `<tr><td>${row.comboKey}</td><td>${row.n}</td><td>${fmtRel(row.rel)}</td><td class="fl-mini">${lifts}</td><td>${fmtImpact(row.impactScore)}</td><td>${row.badge}</td></tr>`;
+          }).join('');
+          return `<div class="fl-card" style="padding:8px;"><b>Top Impact Combos</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>combo</th><th>n</th><th>rel</th><th>lift W/D/L</th><th>impact</th><th>badge</th></tr></thead><tbody>${tableRows || '<tr><td colspan="6" class="fl-mini">Sin combos aún.</td></tr>'}</tbody></table></div>`;
+        };
+
+        const renderSummaryRows = ({ rows = [], type = 'tag', max = 5 })=>{
+          const topRows = sortByImpactDesc(rows).slice(0, max);
+          const maxImpact = topRows.reduce((acc, row)=>Math.max(acc, Number(row.impactScore || row.impact || 0)), 0) || 1;
+          if(!topRows.length) return '<div class="fl-mini" style="padding:12px;border:1px dashed #30363d;border-radius:10px;">Sin evidencia suficiente aún</div>';
+          return topRows.map((row)=>{
+            const dominant = getDominantLift(row);
+            const name = type === 'tag' ? humanizeTag(row.tagId) : humanizeCombo(row.comboKey);
+            const impactValue = Number(row.impactScore || row.impact || 0);
+            const barPct = Math.max(8, Math.min(100, (impactValue / maxImpact) * 100));
+            return `
+              <div class="fl-card" style="padding:10px 12px;margin-top:6px;background:#111821;border:1px solid #2d3748;box-shadow:0 1px 6px rgba(0,0,0,.25);">
+                <div style="display:grid;grid-template-columns:minmax(0,1.5fr) minmax(120px,1fr) auto;gap:10px;align-items:center;">
+                  <div style="min-width:0;">
+                    <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">
+                      <div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
+                      <span class="fl-chip" style="font-size:11px;padding:2px 7px;">${row.badge || '-'}</span>
+                    </div>
+                    <div class="fl-mini" style="margin-top:4px;font-size:12px;">n=${row.n} · rel=${fmtRel(row.rel)}</div>
+                  </div>
+                  <div>
+                    <div class="fl-mini" style="font-size:12px;">Impact: ${fmtImpact(impactValue)}</div>
+                    <div style="height:7px;background:#1b2430;border-radius:999px;margin-top:4px;overflow:hidden;"><div style="width:${barPct}%;height:100%;background:linear-gradient(90deg,#58a6ff,#3fb950);"></div></div>
+                  </div>
+                  <div style="text-align:right;min-width:120px;">
+                    <div class="fl-mini" style="font-size:12px;font-weight:700;">Empuja ${dominant.side} (${fmtPct(dominant.value)})</div>
+                  </div>
+                </div>
+              </div>`;
+          }).join('');
+        };
+
+        const renderImpactSummary = (impactTags = [], impactCombos = [])=>{
+          const expanded = localStorage.getItem(IMPACT_TABLES_KEY) === '1';
+          return `
+            <div class="fl-card" style="margin-top:8px;padding:10px;">
+              <div style="font-size:16px;font-weight:800;">Qué está influyendo</div>
+              <div class="fl-grid two" style="margin-top:8px;gap:8px;align-items:start;">
+                <div class="fl-card" style="padding:8px;">
+                  <b>Top señales (Tags)</b>
+                  <div style="margin-top:6px;max-height:360px;overflow:auto;">${renderSummaryRows({ rows: impactTags, type: 'tag', max: 5 })}</div>
+                </div>
+                <div class="fl-card" style="padding:8px;">
+                  <b>Top combinaciones (Combos)</b>
+                  <div style="margin-top:6px;max-height:260px;overflow:auto;">${renderSummaryRows({ rows: impactCombos, type: 'combo', max: 3 })}</div>
+                </div>
+              </div>
+              <button id="b2ImpactToggle" class="fl-btn secondary" type="button" style="margin-top:10px;padding:6px 10px;font-size:12px;">${expanded ? 'Ocultar análisis completo' : 'Ver análisis completo'}</button>
+              <div id="b2ImpactTablesWrap" style="display:${expanded ? 'block' : 'none'};margin-top:8px;max-height:420px;overflow:auto;">
+                <div class="fl-grid two" style="gap:8px;">${renderImpactTagsTable(impactTags)}${renderImpactCombosTable(impactCombos)}</div>
+              </div>
+            </div>`;
+        };
+
         const warnings = gp.warnings.map((line)=>`<div class="fl-mini" style="padding:6px 0;border-bottom:1px solid #30363d;">${line}</div>`).join('');
         node.innerHTML = `
           <div style="font-size:18px;font-weight:900;">🌍 Global Impact Panel (GIE)</div>
@@ -10559,13 +10641,22 @@ passes: 425"></textarea>
             <div><span class="fl-mini">Chaos signals</span><b>${gp.chaosSignals}</b></div>
             <div><span class="fl-mini">Global readiness</span><b>${gp.readiness.toFixed(0)} / 100</b></div>
           </div>
-          <div class="fl-grid two" style="margin-top:8px;gap:8px;">
-            <div class="fl-card" style="padding:8px;"><b>Top Impact Tags</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>tag</th><th>n</th><th>rel</th><th>lift W/D/L</th><th>impact</th><th>badge</th></tr></thead><tbody>${tagRows || '<tr><td colspan="6" class="fl-mini">Sin tags aún.</td></tr>'}</tbody></table></div>
-            <div class="fl-card" style="padding:8px;"><b>Top Impact Combos</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>combo</th><th>n</th><th>rel</th><th>lift W/D/L</th><th>impact</th><th>badge</th></tr></thead><tbody>${comboRows || '<tr><td colspan="6" class="fl-mini">Sin combos aún.</td></tr>'}</tbody></table></div>
-          </div>
+          ${renderImpactSummary(gp.tagRows, gp.comboRows)}
           <div class="fl-card" style="margin-top:8px;padding:8px;"><b>Global Warnings you can trust</b><div style="margin-top:6px;">${warnings || '<div class="fl-mini">Aún no hay señales con rel ≥ 0.60.</div>'}</div></div>
           <div class="fl-mini" style="margin-top:8px;">Baseline global: W ${(gp.baseline.pW*100).toFixed(1)}% · D ${(gp.baseline.pD*100).toFixed(1)}% · L ${(gp.baseline.pL*100).toFixed(1)}% · Matches ${gp.totalMatches}</div>`;
+
+        const toggle = node.querySelector('#b2ImpactToggle');
+        const wrap = node.querySelector('#b2ImpactTablesWrap');
+        if(toggle && wrap){
+          toggle.onclick = ()=>{
+            const open = wrap.style.display === 'none';
+            wrap.style.display = open ? 'block' : 'none';
+            toggle.textContent = open ? 'Ocultar análisis completo' : 'Ver análisis completo';
+            localStorage.setItem(IMPACT_TABLES_KEY, open ? '1' : '0');
+          };
+        }
       };
+
 
       const renderBrainV2PowerDashboard = ()=>{
         const node = document.getElementById('b2PowerDashboard');
