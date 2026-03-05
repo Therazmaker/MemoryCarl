@@ -2386,6 +2386,117 @@ export function initFootballLab(){
     };
   }
 
+  const MRE_TABLE_SCHEMA = [
+    { key: "state", label: "Estado", fmt: "state" },
+    { key: "score", label: "Score", fmt: "pct" },
+    { key: "conf", label: "Confianza", fmt: "pct", path: ["factors", "conf"] },
+    { key: "coh", label: "Cohesión", fmt: "pct", path: ["factors", "coh"] },
+    { key: "xi", label: "Estabilidad XI", fmt: "pct", path: ["factors", "xi"] },
+    { key: "chemistry", label: "Química", fmt: "pct", path: ["factors", "chemistry"] },
+    { key: "coach", label: "DT claridad", fmt: "pct", path: ["factors", "coach"] },
+    { key: "vol", label: "Volatilidad", fmt: "pct", path: ["factors", "vol"] },
+    { key: "delta", label: "Ajuste MRE", fmt: "delta", path: ["adjustments", "deltaReadiness"] },
+    { key: "chaos", label: "Chaos", fmt: "delta", path: ["adjustments", "chaosBoost"] }
+  ];
+
+  const MRE_COMPARE_RULES = {
+    lowerBetterKeys: new Set(["vol"])
+  };
+
+  function toMreTeamModel(team = {}, readiness = {}, adjustments = {}){
+    return {
+      teamId: team.id || "",
+      teamName: team.name || "",
+      label: String(readiness.mentalState || "sin_datos").toUpperCase(),
+      score: Number(readiness.readinessScore) || 0,
+      factors: {
+        conf: Number(readiness.confidence) || 0,
+        coh: Number(readiness.tacticalCohesion) || 0,
+        xi: Number(readiness.lineupStability) || 0,
+        chemistry: Number(readiness.chemistry) || 0,
+        coach: Number(readiness.coachClarity) || 0,
+        vol: Number(readiness.volatility) || 0
+      },
+      adjustments: {
+        deltaReadiness: Number(adjustments.deltaReadiness) || 0,
+        chaosBoost: Number(adjustments.chaosBoost) || 0
+      }
+    };
+  }
+
+  function getPath(obj, path, fallback = null){
+    if(!path) return fallback;
+    let cur = obj;
+    for(const key of path){
+      if(cur == null || !(key in cur)) return fallback;
+      cur = cur[key];
+    }
+    return cur;
+  }
+
+  function formatMreValue(fmt, value, team){
+    if(fmt === "state") return `${team.label} · ${team.score}`;
+    if(value == null) return "—";
+    if(fmt === "pct") return `${Math.round(Number(value) || 0)}%`;
+    if(fmt === "delta"){
+      const n = Number(value) || 0;
+      const sign = n > 0 ? "+" : "";
+      return `${sign}${n.toFixed(1)}%`;
+    }
+    return String(value);
+  }
+
+  function compareMreValue(leftValue, rightValue, key, compareRules = MRE_COMPARE_RULES){
+    if(leftValue == null || rightValue == null) return "none";
+    if(compareRules.lowerBetterKeys?.has(key)){
+      if(leftValue < rightValue) return "left";
+      if(rightValue < leftValue) return "right";
+      return "tie";
+    }
+    if(leftValue > rightValue) return "left";
+    if(rightValue > leftValue) return "right";
+    return "tie";
+  }
+
+  function interpretMreRow(winner){
+    if(winner === "tie") return "igualados";
+    if(winner === "none") return "sin datos";
+    return winner === "home" ? "ventaja local" : "ventaja visita";
+  }
+
+  function buildComparisonRows(schema, leftObj, rightObj, options = {}){
+    const {
+      compareRules = MRE_COMPARE_RULES,
+      formatters = { value: formatMreValue },
+      mapWinner = (winner)=>(winner === "left" ? "home" : winner === "right" ? "away" : winner)
+    } = options;
+    return schema.map((schemaRow)=>{
+      const leftRaw = schemaRow.key === "score"
+        ? leftObj.score
+        : schemaRow.key === "state"
+          ? null
+          : getPath(leftObj, schemaRow.path);
+      const rightRaw = schemaRow.key === "score"
+        ? rightObj.score
+        : schemaRow.key === "state"
+          ? null
+          : getPath(rightObj, schemaRow.path);
+      const rawWinner = compareMreValue(leftRaw, rightRaw, schemaRow.key, compareRules);
+      const winner = mapWinner(rawWinner);
+      return {
+        label: schemaRow.label,
+        homeText: formatters.value(schemaRow.fmt, schemaRow.key === "state" ? 0 : leftRaw, leftObj),
+        awayText: formatters.value(schemaRow.fmt, schemaRow.key === "state" ? 0 : rightRaw, rightObj),
+        winner,
+        interpretation: interpretMreRow(winner)
+      };
+    });
+  }
+
+  function buildMreComparisonRows(homeMre, awayMre){
+    return buildComparisonRows(MRE_TABLE_SCHEMA, homeMre, awayMre);
+  }
+
   function refreshOpponentStrengthSnapshots(db){
     const tableByLeague = new Map();
     const marketRows = [];
@@ -2578,6 +2689,15 @@ export function initFootballLab(){
       .fl-kpi > div{background:#111722;border:1px solid #2d333b;border-radius:10px;padding:8px;text-align:center}
       .fl-kpi b{display:block;font-size:18px;color:#f6f8fa}
       .fl-mini{font-size:12px;color:#9ca3af}
+      .fl-mre-table-wrap{margin-top:8px;border:1px solid #2d333b;border-radius:12px;overflow:hidden}
+      .fl-mre-table{width:100%;border-collapse:collapse;font-size:12px}
+      .fl-mre-table th,.fl-mre-table td{border-bottom:1px solid #2d333b;padding:8px 10px;text-align:left}
+      .fl-mre-table th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;background:#111722}
+      .fl-mre-table tr:last-child td{border-bottom:none}
+      .fl-mre-table td.mre-label{font-weight:700;color:#c9d1d9}
+      .fl-mre-table td.mre-reading{color:#9ca3af}
+      .fl-mre-table td.mre-win-home,.fl-mre-table td.mre-win-away{font-weight:800;color:#3fb950;background:rgba(46,160,67,.12)}
+      .fl-mre-table td.mre-tie{font-weight:700;color:#c9d1d9;background:rgba(139,148,158,.12)}
       .fl-chip{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #2d333b;background:#111722;font-size:12px}
       .fl-chip.ok{border-color:#238636;color:#3fb950}
       .fl-chip.warn{border-color:#d29922;color:#f2cc60}
@@ -10948,6 +11068,25 @@ passes: 425"></textarea>
         const score = vision.score || { home: 0, away: 0, prob: 0 };
         const phy = vision.physical || {};
         const fragilityChaosBoost = homeReadiness.mentalState === "fragil" ? 0.12 : homeReadiness.mentalState === "roto" ? 0.20 : 0;
+        const homeMre = toMreTeamModel(homeTeam, homeReadiness, {
+          deltaReadiness: readinessDelta * 100,
+          chaosBoost: fragilityChaosBoost * 100
+        });
+        const awayMre = toMreTeamModel(awayTeam, awayReadiness, {
+          deltaReadiness: -(readinessDelta * 100),
+          chaosBoost: 0
+        });
+        const mreRows = buildMreComparisonRows(homeMre, awayMre);
+        const mreRowsHtml = mreRows.map((row)=>{
+          const homeClass = row.winner === "home" ? "mre-win-home" : row.winner === "tie" ? "mre-tie" : "";
+          const awayClass = row.winner === "away" ? "mre-win-away" : row.winner === "tie" ? "mre-tie" : "";
+          return `<tr>
+            <td class="mre-label">${row.label}</td>
+            <td class="${homeClass}">${row.homeText}</td>
+            <td class="${awayClass}">${row.awayText}</td>
+            <td class="mre-reading">${row.interpretation}</td>
+          </tr>`;
+        }).join("");
         out.innerHTML = `
           <div style="font-weight:800;">${homeTeam?.name || 'Local'} vs ${awayTeam?.name || 'Visita'}</div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
@@ -10956,10 +11095,18 @@ passes: 425"></textarea>
             <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Visita</div><div style="font-size:22px;font-weight:900;">${pA}%</div></div>
           </div>
           <div style="margin-top:10px;font-weight:800;">⚡ MATCH READINESS CARD</div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
-            <div class="fl-card" style="padding:8px;"><div class="fl-mini">${homeTeam?.name || 'Local'}</div><div style="font-weight:900;">${homeReadiness.mentalState.toUpperCase()} · ${homeReadiness.readinessScore}</div><div class="fl-mini">Conf ${homeReadiness.confidence}% · Coh ${homeReadiness.tacticalCohesion}% · XI ${homeReadiness.lineupStability}% · Química ${homeReadiness.chemistry}% · DT ${homeReadiness.coachClarity}% · Vol ${homeReadiness.volatility}%</div></div>
-            <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Ajuste MRE</div><div style="font-weight:900;">Δ ${(readinessDelta*100).toFixed(1)}%</div><div class="fl-mini">Chaos +${(fragilityChaosBoost*100).toFixed(0)}%</div></div>
-            <div class="fl-card" style="padding:8px;"><div class="fl-mini">${awayTeam?.name || 'Visita'}</div><div style="font-weight:900;">${awayReadiness.mentalState.toUpperCase()} · ${awayReadiness.readinessScore}</div><div class="fl-mini">Conf ${awayReadiness.confidence}% · Coh ${awayReadiness.tacticalCohesion}% · XI ${awayReadiness.lineupStability}% · Química ${awayReadiness.chemistry}% · DT ${awayReadiness.coachClarity}% · Vol ${awayReadiness.volatility}%</div></div>
+          <div class="fl-mre-table-wrap">
+            <table class="fl-mre-table">
+              <thead>
+                <tr>
+                  <th>Factor</th>
+                  <th>${homeMre.teamName || 'Local'}</th>
+                  <th>${awayMre.teamName || 'Visita'}</th>
+                  <th>Lectura</th>
+                </tr>
+              </thead>
+              <tbody>${mreRowsHtml}</tbody>
+            </table>
           </div>
           <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples} · Prob base ${(rawProbs.home*100).toFixed(1)}/${(rawProbs.draw*100).toFixed(1)}/${(rawProbs.away*100).toFixed(1)} → ajustada ${pH}/${pD}/${pA}</div>
           <div class="fl-mini" style="margin-top:4px;">Perfil narrativo (N=${homeProfile.lastN}/${awayProfile.lastN}) · presión tardía ${homeProfile.tendencies.latePressureAvg.toFixed(1)} vs ${awayProfile.tendencies.latePressureAvg.toFixed(1)}</div>
