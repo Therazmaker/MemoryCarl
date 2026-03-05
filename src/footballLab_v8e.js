@@ -2145,8 +2145,6 @@ export function initFootballLab(){
       .filter(Boolean);
   }
 
-<<<<<<< codex/improve-match-readiness-prediction-system-ntbdkm
-=======
   function parseLineupShape(raw){
     if(!raw) return null;
     if(typeof raw === "object") return raw;
@@ -2188,7 +2186,6 @@ export function initFootballLab(){
       .reduce((acc, name)=>acc.includes(name) ? acc : [...acc, name], []);
   }
 
->>>>>>> main
   function getTeamMatchSide(match, teamId){
     if(!match || !teamId) return null;
     if(match.homeId===teamId) return "home";
@@ -10242,9 +10239,6 @@ shots: 13
 possession: 57
 passes: 425"></textarea>
           <textarea id="b2Narrative" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="Relato del partido: ritmo, lesiones, presión, cambios..."></textarea>
-<<<<<<< codex/improve-match-readiness-prediction-system-ntbdkm
-          <input id="b2Lineup" class="fl-input" style="margin-top:8px;" placeholder="XI del día (coma separado)" />
-=======
           <div class="fl-field" style="margin-top:8px;">
             <label>Composición (XI del día)</label>
             <div class="fl-row">
@@ -10253,7 +10247,6 @@ passes: 425"></textarea>
             </div>
             <input id="b2LineupShape" type="hidden" value="" />
           </div>
->>>>>>> main
           <div class="fl-row" style="margin-top:8px;">
             <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
             <span id="b2Status" class="fl-muted"></span>
@@ -10544,10 +10537,7 @@ passes: 425"></textarea>
           statsRaw: (document.getElementById('b2Stats')?.value || '').trim(),
           narrative: (document.getElementById('b2Narrative')?.value || '').trim(),
           lineup: parseLineupList(document.getElementById('b2Lineup')?.value || ''),
-<<<<<<< codex/improve-match-readiness-prediction-system-ntbdkm
-=======
           lineupShape: parseLineupShape(document.getElementById('b2LineupShape')?.value || ''),
->>>>>>> main
           createdAt: Date.now()
         };
         row.summary = buildBrainV2MatchSummary({ row, teamName: row.teamName, opponentName: row.opponent || "Rival" });
@@ -10650,9 +10640,6 @@ passes: 425"></textarea>
               <div class="fl-field"><label>Rival</label><input id="b2ModalOpponent" class="fl-input" value="${row.opponent || ''}"></div>
               <div class="fl-field"><label>Resultado</label><input id="b2ModalScore" class="fl-input" placeholder="2-1" value="${row.score || '0-0'}"></div>
             </div>
-<<<<<<< codex/improve-match-readiness-prediction-system-ntbdkm
-            <div class="fl-field" style="margin-top:8px;"><label>Composición (XI del día)</label><input id="b2ModalLineup" class="fl-input" value="${parseLineupList(row.lineup || row.startingXI || []).join(', ')}"></div>
-=======
             <div class="fl-field" style="margin-top:8px;">
               <label>Composición (XI del día)</label>
               <div class="fl-row">
@@ -10661,7 +10648,6 @@ passes: 425"></textarea>
               </div>
               <input id="b2ModalLineupShape" type="hidden" value='${JSON.stringify(row.lineupShape || {}).replace(/'/g, "&#39;")}'>
             </div>
->>>>>>> main
             <div class="fl-field" style="margin-top:8px;"><label>Relato</label><textarea id="b2ModalNarrative" class="fl-text" style="min-height:130px;">${row.narrative || ''}</textarea></div>
             <div class="fl-field" style="margin-top:8px;"><label>Stats raw (opcional)</label><textarea id="b2ModalStats" class="fl-text" style="min-height:80px;">${row.statsRaw || ''}</textarea></div>
             <div class="fl-row" style="justify-content:space-between;align-items:center;margin-top:10px;">
@@ -10707,10 +10693,7 @@ passes: 425"></textarea>
           row.opponent = (backdrop.querySelector('#b2ModalOpponent').value || '').trim();
           row.score = (backdrop.querySelector('#b2ModalScore').value || '0-0').trim();
           row.lineup = parseLineupList(backdrop.querySelector('#b2ModalLineup').value || '');
-<<<<<<< codex/improve-match-readiness-prediction-system-ntbdkm
-=======
           row.lineupShape = parseLineupShape(backdrop.querySelector('#b2ModalLineupShape')?.value || '') || null;
->>>>>>> main
           row.narrative = (backdrop.querySelector('#b2ModalNarrative').value || '').trim();
           row.statsRaw = (backdrop.querySelector('#b2ModalStats').value || '').trim();
         };
