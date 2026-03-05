@@ -2124,6 +2124,20 @@ export function initFootballLab(){
     match.awayCardsAfterMistake = Math.max(0, Number(match.awayCardsAfterMistake) || 0);
     match.homeConcededAfterMiss = Math.max(0, Number(match.homeConcededAfterMiss) || 0);
     match.awayConcededAfterMiss = Math.max(0, Number(match.awayConcededAfterMiss) || 0);
+    match.homeYellowRateEarly = clamp(Number(match.homeYellowRateEarly) || 0, 0, 1);
+    match.awayYellowRateEarly = clamp(Number(match.awayYellowRateEarly) || 0, 0, 1);
+    match.homeFoulsRateEarly = clamp(Number(match.homeFoulsRateEarly) || 0, 0, 1);
+    match.awayFoulsRateEarly = clamp(Number(match.awayFoulsRateEarly) || 0, 0, 1);
+    match.homeComplaintsRate = clamp(Number(match.homeComplaintsRate) || 0, 0, 1);
+    match.awayComplaintsRate = clamp(Number(match.awayComplaintsRate) || 0, 0, 1);
+    match.homeBigChanceMissReaction = clamp(Number(match.homeBigChanceMissReaction) || 0, 0, 1);
+    match.awayBigChanceMissReaction = clamp(Number(match.awayBigChanceMissReaction) || 0, 0, 1);
+    match.homeLateGoalsConceded = Math.max(0, Number(match.homeLateGoalsConceded) || 0);
+    match.awayLateGoalsConceded = Math.max(0, Number(match.awayLateGoalsConceded) || 0);
+    match.homeErrorsAfterGoal = Math.max(0, Number(match.homeErrorsAfterGoal) || 0);
+    match.awayErrorsAfterGoal = Math.max(0, Number(match.awayErrorsAfterGoal) || 0);
+    match.homeDisciplineAfterGoal = clamp(Number(match.homeDisciplineAfterGoal) || 0, 0, 1);
+    match.awayDisciplineAfterGoal = clamp(Number(match.awayDisciplineAfterGoal) || 0, 0, 1);
     if(match.oddsHome>1 && match.oddsDraw>1 && match.oddsAway>1){
       match.marketOddsSnapshot ||= {
         matchId: match.id,
@@ -2225,6 +2239,13 @@ export function initFootballLab(){
     let confidenceSum = 0;
     let coachChaosSum = 0;
     let rotationNoiseAcc = 0;
+    let emotionalRiskSum = 0;
+    let collapseIndexSum = 0;
+    let redCardRiskAcc = 0;
+    let collapseRiskAcc = 0;
+    let chaosAcc = 0;
+    let lateChaosAcc = 0;
+    let switchRiskAcc = 0;
 
     matches.forEach((m, idx)=>{
       ensureTrackerMatchState(m);
@@ -2241,6 +2262,13 @@ export function initFootballLab(){
       const concededAfterMiss = Number(isHome ? m.homeConcededAfterMiss : m.awayConcededAfterMiss) || 0;
       const earlySubs = Number(isHome ? m.homeEarlySubs : m.awayEarlySubs) || 0;
       const systemChanges = Number(isHome ? m.homeSystemChanges : m.awaySystemChanges) || 0;
+      const yellowRateEarly = clamp(Number(isHome ? m.homeYellowRateEarly : m.awayYellowRateEarly) || (yellows / 4), 0, 1);
+      const foulsRateEarly = clamp(Number(isHome ? m.homeFoulsRateEarly : m.awayFoulsRateEarly) || ((Number(isHome ? m.homeFouls : m.awayFouls) || 9) / 16), 0, 1);
+      const complaintsRate = clamp(Number(isHome ? m.homeComplaintsRate : m.awayComplaintsRate) || (cardsAfterMistake / 3), 0, 1);
+      const bigChanceMissReaction = clamp(Number(isHome ? m.homeBigChanceMissReaction : m.awayBigChanceMissReaction) || (concededAfterMiss / 2), 0, 1);
+      const lateGoalsConceded = Math.max(0, Number(isHome ? m.homeLateGoalsConceded : m.awayLateGoalsConceded) || 0);
+      const errorsAfterGoal = Math.max(0, Number(isHome ? m.homeErrorsAfterGoal : m.awayErrorsAfterGoal) || errorsConcede);
+      const disciplineAfterGoal = clamp(Number(isHome ? m.homeDisciplineAfterGoal : m.awayDisciplineAfterGoal) || ((cardsAfterMistake + yellows * 0.3) / 3), 0, 1);
       const formation = String(isHome ? m.homeFormation : m.awayFormation || "").trim();
       const lineup = parseLineupList(isHome ? m.homeLineup : m.awayLineup);
 
@@ -2256,6 +2284,36 @@ export function initFootballLab(){
 
       const collapse = errorsConcede + cardsAfterMistake + concededAfterMiss;
       collapseSum += collapse;
+      const emotionalRisk = clamp(
+        0.35*yellowRateEarly +
+        0.25*foulsRateEarly +
+        0.20*bigChanceMissReaction +
+        0.20*complaintsRate,
+        0,
+        1
+      );
+      emotionalRiskSum += emotionalRisk;
+      if(emotionalRisk > 0.6){
+        redCardRiskAcc += 0.12;
+        collapseRiskAcc += 0.15;
+        chaosAcc += 0.10;
+      }
+
+      const lateConceded = clamp(lateGoalsConceded / 2, 0, 1);
+      const structureLoss = clamp(errorsAfterGoal / 3, 0, 1);
+      const collapseIndex = clamp(
+        0.4*lateConceded +
+        0.3*disciplineAfterGoal +
+        0.3*structureLoss,
+        0,
+        1
+      );
+      collapseIndexSum += collapseIndex;
+      if(collapseIndex > 0.6){
+        lateChaosAcc += 0.15;
+        switchRiskAcc += 0.12;
+      }
+
       const reaction = gf - ga;
       const finishingFailure = Math.max(0, xg - gf);
       const confidenceRaw = clamp((shotsOT * 8) + (reaction * 12) - (finishingFailure * 10) - (yellows * 4), 0, 100);
@@ -2274,6 +2332,13 @@ export function initFootballLab(){
     const avgCollapse = collapseSum / matches.length;
     const collapseRate = clamp(avgCollapse / 5, 0, 1);
     const confidenceTrend = clamp((confidenceSum / matches.length) / 100, 0, 1);
+    const emotionalRisk = clamp(emotionalRiskSum / matches.length, 0, 1);
+    const collapseIndex = clamp(collapseIndexSum / matches.length, 0, 1);
+    const redCardRisk = clamp(redCardRiskAcc / matches.length, 0, 1);
+    const collapseRisk = clamp((collapseRiskAcc / matches.length) + collapseRate*0.45 + collapseIndex*0.25, 0, 1);
+    const chaos = clamp((chaosAcc / matches.length) + collapseIndex*0.2 + collapseRate*0.15, 0, 1);
+    const lateChaos = clamp((lateChaosAcc / matches.length), 0, 1);
+    const switchRisk = clamp((switchRiskAcc / matches.length), 0, 1);
     const lineupStability = lineupKeys.length > 1
       ? clamp((new Set(lineupKeys).size === 1 ? 1 : 1 - ((new Set(lineupKeys).size - 1) / lineupKeys.length)), 0, 1)
       : 0.5;
@@ -2286,12 +2351,12 @@ export function initFootballLab(){
     const tacticalCohesion = clamp((lineupStability*0.45) + (systemStability*0.35) + (Math.max(0, 1 - (rotationNoise/6))*0.2), 0, 1);
 
     const readiness = (
-      0.22*confidenceTrend +
+      0.30*confidenceTrend +
       0.20*(1-collapseRate) +
       0.18*lineupStability +
-      0.14*chemistryIndex +
-      0.14*coachClarity +
-      0.12*systemStability
+      0.12*chemistryIndex +
+      0.10*coachClarity +
+      0.10*systemStability
     );
     const readinessScore = Math.round(clamp(readiness * 100, 0, 100));
     const volatility = Math.round(clamp((collapseRate*0.45 + (1-lineupStability)*0.25 + (1-coachClarity)*0.3) * 100, 0, 100));
@@ -2308,6 +2373,13 @@ export function initFootballLab(){
       confidence: Math.round(confidenceTrend * 100),
       volatility,
       collapseRate,
+      emotionalRisk,
+      redCardRisk,
+      collapseRisk,
+      chaos,
+      collapseIndex,
+      lateChaos,
+      switchRisk,
       systemStability: Math.round(systemStability * 100),
       verdict,
       rotationNoise: Number(rotationNoise.toFixed(2))
@@ -6880,8 +6952,34 @@ function computeTeamIntelligencePanel(db, teamId){
       return { confidence, composure, frustration, belief, tiltRisk, dom, sterilePressure };
     };
 
+    const computePostGoalBehavior = (teamName, oppName)=>{
+      const timeline = [...events].sort((x,y)=>(Number(x.minute)||0)-(Number(y.minute)||0));
+      let collapseBoost = 0;
+      timeline.forEach((evt)=>{
+        if(evt?.type !== "goal" || evt.team !== oppName) return;
+        const min = Number(evt.minute) || 0;
+        const segment = timeline.filter((row)=>{
+          const rowMin = Number(row.minute) || 0;
+          return rowMin > min && rowMin <= min + 5;
+        });
+        const attacks = segment.filter((row)=>row.team===teamName && ["shot", "shotOnTarget", "bigChance", "corner", "dangerAction"].includes(row.type)).length;
+        const losses = segment.filter((row)=>row.team===teamName && row.type === "loss").length;
+        const fouls = segment.filter((row)=>row.team===teamName && row.type === "foul").length;
+        const shots = segment.filter((row)=>row.team===teamName && ["shot", "shotOnTarget", "bigChance"].includes(row.type)).length;
+        const pressingDrops = attacks <= 1 && losses >= 2;
+        const foulsRise = fouls >= 2;
+        if(pressingDrops && foulsRise) collapseBoost += 0.15;
+        if(shots === 0 && losses >= 2) collapseBoost += 0.05;
+      });
+      return clamp(collapseBoost, 0, 0.4);
+    };
+
     const psychA = psychFor(firstTeam, a, b, iddA, threatA, shockB);
     const psychB = psychFor(secondTeam, b, a, iddB, threatB, shockA);
+    const postGoalCollapseA = computePostGoalBehavior(firstTeam, secondTeam);
+    const postGoalCollapseB = computePostGoalBehavior(secondTeam, firstTeam);
+    psychA.tiltRisk = clamp(psychA.tiltRisk + postGoalCollapseA, 0, 1);
+    psychB.tiltRisk = clamp(psychB.tiltRisk + postGoalCollapseB, 0, 1);
 
     const tagsPsychFor = (selfPsych, threatValue, oppShockRisk)=>{
       const tags = [];
@@ -6989,8 +7087,8 @@ function computeTeamIntelligencePanel(db, teamId){
         [secondTeam]: disciplineB
       },
       psychSignals: {
-        [firstTeam]: { dom: psychA.dom, sterilePressure: psychA.sterilePressure },
-        [secondTeam]: { dom: psychB.dom, sterilePressure: psychB.sterilePressure }
+        [firstTeam]: { dom: psychA.dom, sterilePressure: psychA.sterilePressure, postGoalCollapse: postGoalCollapseA },
+        [secondTeam]: { dom: psychB.dom, sterilePressure: psychB.sterilePressure, postGoalCollapse: postGoalCollapseB }
       }
     };
 
@@ -12724,14 +12822,20 @@ passes: 425"></textarea>
         };
         const pMreSum = pMre.pH + pMre.pD + pMre.pA;
         pMre = { pH: pMre.pH / pMreSum, pD: pMre.pD / pMreSum, pA: pMre.pA / pMreSum };
+        const fragileHome = ["fragil", "roto"].includes(homeReadiness.mentalState);
+        const fragileAway = ["fragil", "roto"].includes(awayReadiness.mentalState);
+        const emotionalTrigger = (fragileHome && homeReadiness.emotionalRisk > 0.6) || (fragileAway && awayReadiness.emotionalRisk > 0.6);
         const fragilityChaosBoost = homeReadiness.mentalState === "fragil" ? 0.12 : homeReadiness.mentalState === "roto" ? 0.20 : 0;
+        const emotionalChaosBoost = emotionalTrigger ? 0.15 : 0;
+        const collapseScenario = emotionalTrigger ? "equilibrio inestable" : "equilibrio base";
 
         const adjusted = adjustLambdasToMatchProbs({ lHome: lHome0, lAway: lAway0 }, pMre, result.maxGoals);
         result.lHome = adjusted.lHome;
         result.lAway = adjusted.lAway;
         const calibrated = probsFromLambdas(result.lHome, result.lAway, result.maxGoals);
         result.matrix = applyVolatilityToMatrix(calibrated.matrix, psychVol);
-        result.matrix = applyChaosToMatrix(result.matrix, matchChaos);
+        const adjustedMatchChaos = clamp(matchChaos + fragilityChaosBoost + emotionalChaosBoost, 0, 1);
+        result.matrix = applyChaosToMatrix(result.matrix, adjustedMatchChaos);
         const distSummary = summarizeMatrix(result.matrix);
         result.pHome = distSummary.pHome;
         result.pDraw = distSummary.pDraw;
@@ -12754,7 +12858,7 @@ passes: 425"></textarea>
           momentum: { home: momHome, away: momAway },
           drawBoost,
           volatility: psychVol,
-          matchChaos,
+          matchChaos: adjustedMatchChaos,
           riskTilt,
           confidence: effConf
         };
@@ -12789,7 +12893,8 @@ passes: 425"></textarea>
         const totalLambda = result.lHome + result.lAway;
         const lambdaGap = Math.abs(result.lHome - result.lAway);
         const balance = totalLambda > 0 ? clamp(1 - (lambdaGap / totalLambda), 0, 1) : 0;
-        const balanceLabel = balance >= 0.72 ? "Alto" : (balance >= 0.45 ? "Medio" : "Bajo");
+        const baseBalanceLabel = balance >= 0.72 ? "Alto" : (balance >= 0.45 ? "Medio" : "Bajo");
+        const balanceLabel = emotionalTrigger ? "Inestable" : baseBalanceLabel;
         const partyProfile = [];
         partyProfile.push(totalLambda > 2.7 ? `Partido abierto (λ total: ${totalLambda.toFixed(2)})` : `Partido controlado (λ total: ${totalLambda.toFixed(2)})`);
         if((result.lHome - result.lAway) > 0.7) partyProfile.push("Local ofensivo fuerte");
@@ -12839,7 +12944,7 @@ passes: 425"></textarea>
           `Bias local: ×${(1 + (breakdown.teamBias.home.attack || 0)).toFixed(2)}`,
           `Stats: ×${((breakdown.statsAttackHome || 1) * (breakdown.statsAttackAway || 1)).toFixed(2)}`,
           `Table draw boost: +${((breakdown.drawBoost || 0)*100).toFixed(1)}%`,
-          `B³ draw/vol/chaos: ${(breakdown.b3?.drawBoost*100 || 0).toFixed(1)}% / x${(breakdown.b3?.volatility || 1).toFixed(2)} / ${(matchChaos*100).toFixed(0)}%`,
+          `B³ draw/vol/chaos: ${(breakdown.b3?.drawBoost*100 || 0).toFixed(1)}% / x${(breakdown.b3?.volatility || 1).toFixed(2)} / ${(adjustedMatchChaos*100).toFixed(0)}%`,
           `Mercado: ×${(breakdown.marketMultiplier || 1).toFixed(2)}`
         ];
 
@@ -12868,7 +12973,7 @@ passes: 425"></textarea>
           pModel,
           pFinal: pMre,
           pMarket: market || null,
-          matchReadiness: { home: homeReadiness, away: awayReadiness, delta: readinessDelta, chaosBoost: fragilityChaosBoost },
+          matchReadiness: { home: homeReadiness, away: awayReadiness, delta: readinessDelta, chaosBoost: fragilityChaosBoost, emotionalChaosBoost, collapseScenario },
           confidence: effConf,
           best: result.best,
           dominant,
@@ -12908,7 +13013,7 @@ passes: 425"></textarea>
           </div>
           <div class="fl-muted" style="margin-top:6px;">${db.teams.find(t=>t.id===homeId)?.name || 'Local'}: confianza ${homeReadiness.confidence}% · cohesión ${homeReadiness.tacticalCohesion}% · XI estable ${homeReadiness.lineupStability}% · química ${homeReadiness.chemistry}% · claridad DT ${homeReadiness.coachClarity}%.</div>
           <div class="fl-muted" style="margin-top:6px;">${db.teams.find(t=>t.id===awayId)?.name || 'Visita'}: confianza ${awayReadiness.confidence}% · cohesión ${awayReadiness.tacticalCohesion}% · XI estable ${awayReadiness.lineupStability}% · química ${awayReadiness.chemistry}% · claridad DT ${awayReadiness.coachClarity}%.</div>
-          <div class="fl-muted" style="margin-top:6px;">Veredicto: ${db.teams.find(t=>t.id===homeId)?.name || 'Local'} ${homeReadiness.verdict} · ${db.teams.find(t=>t.id===awayId)?.name || 'Visita'} ${awayReadiness.verdict}. Ajuste caos MNE local +${(fragilityChaosBoost*100).toFixed(0)}%.</div>
+          <div class="fl-muted" style="margin-top:6px;">Veredicto: ${db.teams.find(t=>t.id===homeId)?.name || 'Local'} ${homeReadiness.verdict} · ${db.teams.find(t=>t.id===awayId)?.name || 'Visita'} ${awayReadiness.verdict}. Ajuste caos MNE local +${(fragilityChaosBoost*100).toFixed(0)}%${emotionalTrigger ? ` · gatillo emocional +${(emotionalChaosBoost*100).toFixed(0)}% (${collapseScenario})` : ""}.</div>
           <div style="margin-top:10px;font-weight:800;">MARCADOR MÁS FRECUENTE INDIVIDUAL</div>
           <div style="margin-top:6px;"><b>${result.best.h} - ${result.best.a}</b> (${(result.best.p*100).toFixed(1)}%)</div>
           <div class="fl-muted" style="margin-top:6px;">⚠ Esto no implica que el empate sea el resultado dominante. Es la celda individual más alta en la matriz.</div>
