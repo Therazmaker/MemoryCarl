@@ -149,6 +149,91 @@ export function initFootballLab(){
     return Number((1 - Math.exp(-(Number(n) || 0) / 20)).toFixed(3));
   }
 
+  function formatIsoShort(value){
+    if(!value) return "-";
+    const d = new Date(value);
+    if(Number.isNaN(d.getTime())) return "-";
+    return d.toISOString().slice(0, 10);
+  }
+
+  function computeGlobalLearningProgress(memories = {}, gpe = null){
+    const safeGpe = normalizeGpeState(gpe);
+    const facts = Object.values(memories || {})
+      .flatMap((rows)=>Array.isArray(rows) ? rows : [])
+      .map((row)=>buildBrainV2MatchFact(row));
+    const totalMatches = Number(safeGpe?.meta?.totalMatches || safeGpe?.meta?.matches || facts.length) || 0;
+    const totalTeams = Number(safeGpe?.meta?.totalTeams || 0) || new Set(facts.map((fact)=>fact.teamId).filter(Boolean)).size;
+    const tagRows = Object.entries(safeGpe.tagStats || {}).map(([tagId, stats])=>{
+      const n = Number(stats?.n) || 0;
+      return {
+        tagId,
+        n,
+        w: Number(stats?.w) || 0,
+        d: Number(stats?.d) || 0,
+        l: Number(stats?.l) || 0,
+        rel: reliabilityFromSample(n),
+        lastUpdated: stats?.lastUpdated || null
+      };
+    }).sort((a,b)=>b.n-a.n || b.rel-a.rel);
+    const comboRows = Object.entries(safeGpe.comboStats || {}).map(([comboKey, stats])=>{
+      const n = Number(stats?.n) || 0;
+      const probs = smoothedProbs(stats);
+      const rel = reliabilityFromSample(n);
+      const trap = rel > 0.6 && probs.pD > 0.4;
+      return {
+        comboKey,
+        n,
+        w: Number(stats?.w) || 0,
+        d: Number(stats?.d) || 0,
+        l: Number(stats?.l) || 0,
+        rel,
+        pD: probs.pD,
+        trap,
+        lastUpdated: stats?.lastUpdated || null
+      };
+    }).sort((a,b)=>b.n-a.n || b.rel-a.rel);
+    const tagsTrained = tagRows.filter((r)=>r.n >= 20).length;
+    const tagsStrong = tagRows.filter((r)=>r.n >= 40).length;
+    const combosTrained = comboRows.filter((r)=>r.n >= 30).length;
+    const combosStrong = comboRows.filter((r)=>r.n >= 60).length;
+    const recent = facts
+      .slice()
+      .sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date))
+      .slice(0, 10);
+    const recentFreq = {};
+    recent.forEach((fact)=>{
+      Object.keys(fact.tags || {}).forEach((tagId)=>{
+        recentFreq[tagId] = (recentFreq[tagId] || 0) + 1;
+      });
+    });
+    const learnNext = Object.entries(recentFreq)
+      .map(([tagId, frequency])=>({
+        tagId,
+        frequency,
+        n: Number(safeGpe.tagStats?.[tagId]?.n) || 0
+      }))
+      .filter((item)=>item.frequency >= 2 && item.n < 20)
+      .sort((a,b)=>b.frequency-a.frequency || a.n-b.n)
+      .slice(0, 6);
+    const relBuckets = [0,0,0,0,0];
+    tagRows.forEach((row)=>{
+      const idx = Math.min(4, Math.max(0, Math.floor((Number(row.rel) || 0) / 0.2)));
+      relBuckets[idx] += 1;
+    });
+    return {
+      totalMatches,
+      totalTeams,
+      tagRows,
+      comboRows,
+      tagsTrained,
+      tagsStrong,
+      combosTrained,
+      combosStrong,
+      learnNext,
+      relBuckets
+    };
+  }
+
   function smoothedProbs({ w = 0, d = 0, l = 0, n = 0 } = {}){
     const base = Math.max(0, Number(n) || 0);
     return {
@@ -204,6 +289,11 @@ export function initFootballLab(){
     facts.forEach((fact)=>{
       const resultKey = fact.result === "W" ? "w" : fact.result === "L" ? "l" : "d";
       const tagEntries = Object.entries(fact.tags || {});
+      const contextKey = `side:${fact?.context?.side || 'unknown'}`;
+      const contextBucket = state.contextStats[contextKey] || { n: 0, w: 0, d: 0, l: 0 };
+      contextBucket.n += 1;
+      contextBucket[resultKey] += 1;
+      state.contextStats[contextKey] = contextBucket;
       tagEntries.forEach(([tagId, strength])=>{
         const bucket = state.tagStats[tagId] || { n: 0, w: 0, d: 0, l: 0, goalsForSum: 0, goalsAgainstSum: 0, strengthSum: 0, lastUpdated: null };
         bucket.n += 1;
@@ -232,7 +322,12 @@ export function initFootballLab(){
       }
     });
 
-    state.meta = { matches: facts.length, updatedAt: new Date().toISOString() };
+    state.meta = {
+      matches: facts.length,
+      totalMatches: facts.length,
+      totalTeams: new Set(facts.map((fact)=>fact.teamId).filter(Boolean)).size,
+      updatedAt: new Date().toISOString()
+    };
     return state;
   }
 
@@ -1217,10 +1312,17 @@ export function initFootballLab(){
     }).filter(Boolean);
     const homeVotes = buildTagVotes(homeTopTags, "home");
     const awayVotes = buildTagVotes(awayTopTags, "away");
+    const combinedVotes = [...homeVotes, ...awayVotes];
+    const eligibleVotes = combinedVotes.filter((vote)=>Number(vote.n) >= 20);
+    const avgRelEligible = eligibleVotes.length
+      ? (eligibleVotes.reduce((acc, item)=>acc + item.reliability, 0) / eligibleVotes.length)
+      : 0;
+    const evidenceOk = eligibleVotes.length >= 3 && avgRelEligible >= 0.55;
+    const votesForBlend = evidenceOk ? eligibleVotes : [];
     const gpeVotes = {
-      home: homeVotes.reduce((acc, item)=>acc + item.delta.w, 0) + awayVotes.reduce((acc, item)=>acc + item.delta.l, 0),
-      draw: [...homeVotes, ...awayVotes].reduce((acc, item)=>acc + item.delta.d, 0),
-      away: homeVotes.reduce((acc, item)=>acc + item.delta.l, 0) + awayVotes.reduce((acc, item)=>acc + item.delta.w, 0)
+      home: votesForBlend.reduce((acc, item)=>acc + (item.side === "home" ? item.delta.w : item.delta.l), 0),
+      draw: votesForBlend.reduce((acc, item)=>acc + item.delta.d, 0),
+      away: votesForBlend.reduce((acc, item)=>acc + (item.side === "home" ? item.delta.l : item.delta.w), 0)
     };
     const gpeShiftRaw = {
       home: 1/3 + gpeVotes.home,
@@ -1233,10 +1335,7 @@ export function initFootballLab(){
       draw: clamp(gpeShiftRaw.draw / gpeShiftSum, 0.02, 0.94),
       away: clamp(gpeShiftRaw.away / gpeShiftSum, 0.02, 0.94)
     };
-    const avgRel = [...homeVotes, ...awayVotes].length
-      ? [...homeVotes, ...awayVotes].reduce((acc, item)=>acc + item.reliability, 0) / ([...homeVotes, ...awayVotes].length)
-      : 0;
-    const alpha = clamp(avgRel * 0.6, 0, 0.35);
+    const alpha = evidenceOk ? clamp(avgRelEligible * 0.6, 0, 0.35) : 0;
     const mixed = {
       home: (blended.home * (1 - alpha)) + (gpeProbs.home * alpha),
       draw: (blended.draw * (1 - alpha)) + (gpeProbs.draw * alpha),
@@ -1248,6 +1347,29 @@ export function initFootballLab(){
       draw: mixed.draw / mixedSum,
       away: mixed.away / mixedSum
     };
+
+    const contributionPreview = votesForBlend
+      .map((item)=>{
+        const shift = {
+          home: item.side === "home" ? item.delta.w : item.delta.l,
+          draw: item.delta.d,
+          away: item.side === "home" ? item.delta.l : item.delta.w
+        };
+        const strongest = Object.entries(shift).sort((a,b)=>Math.abs(b[1]) - Math.abs(a[1]))[0] || ["draw", 0];
+        return {
+          tagId: item.tagId,
+          side: item.side,
+          n: item.n,
+          reliability: item.reliability,
+          impactTarget: strongest[0],
+          impactDelta: Number((strongest[1] * alpha * 100).toFixed(2)),
+          pW: item.pW,
+          pD: item.pD,
+          pL: item.pL
+        };
+      })
+      .sort((a,b)=>Math.abs(b.impactDelta)-Math.abs(a.impactDelta))
+      .slice(0, 3);
 
     const comboStats = gpe?.comboStats || {};
     const trapWarnings = [];
@@ -1327,7 +1449,7 @@ export function initFootballLab(){
       `${homeResistance >= awayResistance ? "🫀 Local muestra más resistencia" : "🫀 Visita muestra más resistencia"} (${Math.round(homeResistance)} vs ${Math.round(awayResistance)}).`,
       `${homeFatigue >= awayFatigue ? "🥵 Local aparece más cargado físicamente" : "🥵 Visita aparece más cargado físicamente"} (${Math.round(homeFatigue)} vs ${Math.round(awayFatigue)}).`
     ];
-    if(alpha > 0.02) insights.push(`🌍 GPE ajustó el pronóstico con α=${alpha.toFixed(2)} (reliability media ${(avgRel*100).toFixed(0)}%).`);
+    if(alpha > 0.02) insights.push(`🌍 GPE ajustó el pronóstico con α=${alpha.toFixed(2)} (reliability media ${(avgRelEligible*100).toFixed(0)}%).`);
     trapWarnings.forEach((warning)=>insights.push(`⚠️ ${warning.reason}`));
 
     const reasonPreview = [
@@ -1352,7 +1474,7 @@ export function initFootballLab(){
 
     return {
       probs: blended,
-      confidence: clamp(0.45 + Math.abs(blended.home - blended.away) * 0.7 + ((homeSummary.samples + awaySummary.samples) / 50) + (avgRel * 0.1), 0.2, 0.96),
+      confidence: clamp(0.45 + Math.abs(blended.home - blended.away) * 0.7 + ((homeSummary.samples + awaySummary.samples) / 50) + (avgRelEligible * 0.1), 0.2, 0.96),
       missing,
       bars,
       expected,
@@ -1367,8 +1489,11 @@ export function initFootballLab(){
       reasonPreview,
       globalEvidence: {
         alpha: Number(alpha.toFixed(3)),
-        avgReliability: Number(avgRel.toFixed(3)),
-        tags: [...homeVotes, ...awayVotes],
+        avgReliability: Number(avgRelEligible.toFixed(3)),
+        tags: votesForBlend,
+        evidenceOk,
+        eligibleCount: eligibleVotes.length,
+        topContributors: contributionPreview,
         trapWarnings
       },
       narrativeDeltas,
@@ -9404,6 +9529,7 @@ function computeTeamIntelligencePanel(db, teamId){
             <div style="font-size:18px;font-weight:800;">${(health.statsCoverage * 100).toFixed(0)}% / ${(health.narrativeCoverage * 100).toFixed(0)}%</div>
           </div>
         </div>
+        <div id="b2GlobalLearningPanel" class="fl-card"></div>
         <div class="fl-card">
           <div class="fl-grid two">
             <div>
@@ -9479,6 +9605,47 @@ passes: 425"></textarea>
         backdrop.onclick = (e)=>{ if(e.target===backdrop) backdrop.remove(); };
       };
 
+      const renderGlobalLearningPanel = ()=>{
+        const node = document.getElementById('b2GlobalLearningPanel');
+        if(!node) return;
+        const gp = computeGlobalLearningProgress(brainV2.memories, brainV2.gpe);
+        const tagTotal = gp.tagRows.length;
+        const comboTotal = gp.comboRows.length;
+        const levelTargets = [60, 120, 250].map((target, idx)=>({
+          label: `Nivel ${idx+1}`,
+          target,
+          progress: clamp((gp.totalMatches / Math.max(1, target)) * 100, 0, 100),
+          missing: Math.max(0, target - gp.totalMatches)
+        }));
+        const tagRows = gp.tagRows.slice(0, 20).map((row)=>{
+          const splitTotal = Math.max(1, row.w + row.d + row.l);
+          const band = row.n >= 40 ? '#2ea043' : row.n >= 20 ? '#3fb950' : row.n >= 10 ? '#f2cc60' : '#8b949e';
+          return `<tr><td>${row.tagId}</td><td><b style="color:${band};">${row.n}</b></td><td><div style="height:8px;background:#222;border-radius:999px;min-width:110px;"><div style="width:${Math.round(row.rel*100)}%;height:8px;background:${band};border-radius:999px;"></div></div><div class="fl-mini">${Math.round(row.rel*100)}%</div></td><td class="fl-mini">W ${Math.round((row.w/splitTotal)*100)}% · D ${Math.round((row.d/splitTotal)*100)}% · L ${Math.round((row.l/splitTotal)*100)}%</td><td class="fl-mini">${formatIsoShort(row.lastUpdated)}</td></tr>`;
+        }).join('');
+        const comboRows = gp.comboRows.slice(0, 18).map((row)=>`<tr><td>${row.comboKey}</td><td>${row.n}</td><td>${Math.round(row.rel*100)}%</td><td>${row.pD > 0.40 ? '⚠️ Sí' : 'No'}</td><td>${row.trap ? '🚨 Trap' : '-'}</td><td class="fl-mini">${formatIsoShort(row.lastUpdated)}</td></tr>`).join('');
+        const learnRows = gp.learnNext.map((row)=>`<div class="fl-mini" style="padding:6px 0;border-bottom:1px solid #30363d;"><b>${row.tagId}</b>: aparece ${row.frequency} veces (últimos 10), pero solo n=${row.n} → registra más partidos con este patrón.</div>`).join('');
+        const bucketLabels = ['0-0.2','0.2-0.4','0.4-0.6','0.6-0.8','0.8-1.0'];
+        const maxBucket = Math.max(1, ...gp.relBuckets);
+        const hist = gp.relBuckets.map((count, idx)=>`<div><div class="fl-mini">${bucketLabels[idx]} (${count})</div><div style="height:10px;background:#222;border-radius:999px;"><div style="width:${Math.round((count/maxBucket)*100)}%;height:10px;background:#58a6ff;border-radius:999px;"></div></div></div>`).join('');
+        node.innerHTML = `
+          <div style="font-size:18px;font-weight:900;">⚡ Global Learning Progress (GPE)</div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span class="fl-mini">Matches globales</span><b>${gp.totalMatches} / 120</b></div>
+            <div><span class="fl-mini">Teams cubiertos</span><b>${gp.totalTeams}</b></div>
+            <div><span class="fl-mini">Tags trained</span><b>${gp.tagsTrained} / ${tagTotal}</b><div class="fl-mini">Strong ${gp.tagsStrong}</div></div>
+            <div><span class="fl-mini">Combos trained</span><b>${gp.combosTrained} / ${comboTotal}</b><div class="fl-mini">Strong ${gp.combosStrong}</div></div>
+          </div>
+          <div style="margin-top:8px;gap:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">${levelTargets.map((lvl)=>`<div class="fl-card" style="padding:8px;"><div style="font-weight:700;">${lvl.label}</div><div class="fl-mini">Meta ${lvl.target}</div><div style="height:8px;background:#222;border-radius:999px;margin-top:4px;"><div style="width:${lvl.progress}%;height:8px;background:#3fb950;border-radius:999px;"></div></div><div class="fl-mini" style="margin-top:4px;">Faltan ${lvl.missing} partidos</div></div>`).join('')}</div>
+          <div class="fl-grid two" style="margin-top:8px;gap:8px;">
+            <div class="fl-card" style="padding:8px;"><b>Tag Coverage Table</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>tag</th><th>n</th><th>rel</th><th>W/D/L</th><th>lastUpdated</th></tr></thead><tbody>${tagRows || '<tr><td colspan="5" class="fl-mini">Sin tags aún.</td></tr>'}</tbody></table></div>
+            <div class="fl-card" style="padding:8px;"><b>Combo Coverage Table</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>combo</th><th>n</th><th>rel</th><th>draw bias</th><th>trap</th><th>lastUpdated</th></tr></thead><tbody>${comboRows || '<tr><td colspan="6" class="fl-mini">Sin combos aún.</td></tr>'}</tbody></table></div>
+          </div>
+          <div class="fl-grid two" style="margin-top:8px;gap:8px;">
+            <div class="fl-card" style="padding:8px;"><b>What to learn next</b><div style="margin-top:6px;">${learnRows || '<div class="fl-mini">No hay tags urgentes: cobertura reciente saludable.</div>'}</div></div>
+            <div class="fl-card" style="padding:8px;"><b>Reliability Distribution</b><div style="display:grid;gap:8px;margin-top:6px;">${hist}</div></div>
+          </div>`;
+      };
+
       const renderBrainV2PowerDashboard = ()=>{
         const node = document.getElementById('b2PowerDashboard');
         if(!node) return;
@@ -9552,6 +9719,7 @@ passes: 425"></textarea>
           ]);
         }
       };
+      renderGlobalLearningPanel();
       renderBrainV2PowerDashboard();
 
       const paintBrainStatus = ()=>{
@@ -9881,12 +10049,10 @@ passes: 425"></textarea>
           <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples}</div>
           <div class="fl-mini" style="margin-top:4px;">Perfil narrativo (N=${homeProfile.lastN}/${awayProfile.lastN}) · presión tardía ${homeProfile.tendencies.latePressureAvg.toFixed(1)} vs ${awayProfile.tendencies.latePressureAvg.toFixed(1)}</div>
           <div class="fl-card" style="margin-top:8px;padding:8px;"><b>Global Evidence</b>
-            ${((vision.globalEvidence?.tags || []).slice(0, 4).map((item)=>{
-              const pLoss = item.side==='home' ? item.pL : item.pW;
-              const rel = Number(item.reliability) || 0;
-              const sem = rel > 0.7 ? '🟢' : rel >= 0.4 ? '🟡' : '⚪';
-              return `<div class="fl-mini">${sem} ${item.tagId} → P(${item.side==='home'?'L':'W'}) ${(pLoss*100).toFixed(0)}% · n=${item.n} · rel=${(rel*100).toFixed(0)}%</div>`;
-            }).join('')) || '<div class="fl-mini">Sin evidencia global suficiente.</div>'}
+            <div class="fl-mini" style="margin-top:4px;">${vision.globalEvidence?.evidenceOk ? '✅ Global Evidence OK' : '❌ Sin evidencia global suficiente'}</div>
+            ${vision.globalEvidence?.evidenceOk
+              ? (vision.globalEvidence?.topContributors || []).map((item)=>`<div class="fl-mini">${item.tagId}: n=${item.n} rel=${(item.reliability*100).toFixed(0)}% → ${item.impactDelta>=0?'+':''}${item.impactDelta.toFixed(1)}% ${item.impactTarget}</div>`).join('')
+              : `<div class="fl-mini">Se requieren al menos 3 tags con n≥20 y reliability media ≥55% (actual: ${vision.globalEvidence?.eligibleCount || 0} tags · ${(Number(vision.globalEvidence?.avgReliability||0)*100).toFixed(0)}%).</div>`}
             ${(vision.globalEvidence?.trapWarnings || []).map((w)=>`<div class="fl-mini">⚠️ ${w.reason} · conf ${(Number(w.confidence||0)*100).toFixed(0)}%</div>`).join('')}
           </div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px;">
