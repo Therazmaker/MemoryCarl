@@ -2441,9 +2441,6 @@ const btnExport = root.querySelector("#btnExport");
   const btnBrainExportInline = root.querySelector("#btnBrainExportInline");
   if(btnBrainExportInline) btnBrainExportInline.addEventListener("click", exportBrainV2);
 
-  const btnBrainExport = root.querySelector("#btnBrainExport");
-  if(btnBrainExport) btnBrainExport.addEventListener("click", exportBrainV2);
-
   const btnNotif = root.querySelector("#btnNotif");
   if(btnNotif) btnNotif.addEventListener("click", enableNotifications);
 
@@ -2471,13 +2468,6 @@ const btnExport = root.querySelector("#btnExport");
   });
   const fileBrainImportInline = root.querySelector("#fileBrainImportInline");
   if(fileBrainImportInline) fileBrainImportInline.addEventListener("change", (e)=>{
-    const f = e.target.files?.[0];
-    if(f) importBrainV2(f);
-    e.target.value = "";
-  });
-
-  const fileBrainImport = root.querySelector("#fileBrainImport");
-  if(fileBrainImport) fileBrainImport.addEventListener("change", (e)=>{
     const f = e.target.files?.[0];
     if(f) importBrainV2(f);
     e.target.value = "";
