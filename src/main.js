@@ -2433,6 +2433,13 @@ if(btnMergeBestReset) btnMergeBestReset.addEventListener("click", ()=>{
 
 const btnExport = root.querySelector("#btnExport");
   if(btnExport) btnExport.addEventListener("click", exportBackup);
+  const btnExportInline = root.querySelector("#btnExportInline");
+  if(btnExportInline) btnExportInline.addEventListener("click", exportBackup);
+
+  const btnBrainExport = root.querySelector("#btnBrainExport");
+  if(btnBrainExport) btnBrainExport.addEventListener("click", exportBrainV2);
+  const btnBrainExportInline = root.querySelector("#btnBrainExportInline");
+  if(btnBrainExportInline) btnBrainExportInline.addEventListener("click", exportBrainV2);
 
   const btnBrainExport = root.querySelector("#btnBrainExport");
   if(btnBrainExport) btnBrainExport.addEventListener("click", exportBrainV2);
@@ -2447,6 +2454,25 @@ const btnExport = root.querySelector("#btnExport");
   if(fileImport) fileImport.addEventListener("change", (e)=>{
     const f = e.target.files?.[0];
     if(f) importBackup(f);
+    e.target.value = "";
+  });
+  const fileImportInline = root.querySelector("#fileImportInline");
+  if(fileImportInline) fileImportInline.addEventListener("change", (e)=>{
+    const f = e.target.files?.[0];
+    if(f) importBackup(f);
+    e.target.value = "";
+  });
+
+  const fileBrainImport = root.querySelector("#fileBrainImport");
+  if(fileBrainImport) fileBrainImport.addEventListener("change", (e)=>{
+    const f = e.target.files?.[0];
+    if(f) importBrainV2(f);
+    e.target.value = "";
+  });
+  const fileBrainImportInline = root.querySelector("#fileBrainImportInline");
+  if(fileBrainImportInline) fileBrainImportInline.addEventListener("change", (e)=>{
+    const f = e.target.files?.[0];
+    if(f) importBrainV2(f);
     e.target.value = "";
   });
 
@@ -3219,7 +3245,22 @@ function viewSettings(){
       <div class="kv">
         <div class="k">Recomendación</div>
         <div class="v">Export semanal o antes de updates</div>
-      
+      </div>
+      <div class="btnRow" style="margin-top:10px;flex-wrap:wrap;gap:10px;">
+        <button class="btn primary" id="btnBrainExportInline">Exportar cerebro</button>
+        <label class="btn" style="cursor:pointer;">
+          Importar cerebro
+          <input id="fileBrainImportInline" type="file" accept="application/json" style="display:none;">
+        </label>
+        <button class="btn" id="btnExportInline">Export backup</button>
+        <label class="btn" style="cursor:pointer;">
+          Import backup
+          <input id="fileImportInline" type="file" accept="application/json" style="display:none;">
+        </label>
+      </div>
+      <div class="note" style="margin-top:10px;">Exportar/Importar cerebro recupera TODO (keys <span class="mono">memorycarl_*</span> + <span class="mono">mc_*</span>) y recarga la app.</div>
+    </div>
+
     <div class="card">
       <div class="cardTop">
         <div>
@@ -3234,11 +3275,8 @@ function viewSettings(){
         <button class="btn ghost" id="btnClearSnap">Limpiar</button>
       </div>
       <div class="note" style="margin-top:10px;">
-        Tip: primero usa <b>Export Backup</b>. Restaurar no usa <span class="mono">eval</span>, solo <span class="mono">JSON.parse</span>.
+        Tip: primero usa <b>Export backup</b>. Restaurar no usa <span class="mono">eval</span>, solo <span class="mono">JSON.parse</span>.
       </div>
-    </div>
-
-</div>
     </div>
 
     <div class="card">
