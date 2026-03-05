@@ -967,18 +967,41 @@ function mcSafeJsonParse(raw){
   try{ return JSON.parse(raw); }catch(e){ return null; }
 }
 function getMcLocalStorageRaw(){
-  // Capture ALL MemoryCarl keys (including settings/creds) so restore can be exact.
+  // Capture ALL MemoryCarl/app keys (including settings/creds) so restore can be exact.
   const out = {};
   try{
     for(let i=0;i<localStorage.length;i++){
       const k = localStorage.key(i);
       if(!k) continue;
-      if(k.startsWith("memorycarl_")){
+      if(k.startsWith("memorycarl_") || k.startsWith("mc_")){
         out[k] = localStorage.getItem(k);
       }
     }
   }catch(e){}
   return out;
+}
+
+function restoreMcLocalStorageRaw(lsRaw){
+  if(!lsRaw || typeof lsRaw !== "object") return false;
+  const incoming = Object.entries(lsRaw).filter(([k])=> typeof k === "string" && (k.startsWith("memorycarl_") || k.startsWith("mc_")));
+  if(!incoming.length) return false;
+  try{
+    const toRemove = [];
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(!k) continue;
+      if(k.startsWith("memorycarl_") || k.startsWith("mc_")) toRemove.push(k);
+    }
+    toRemove.forEach(k=> localStorage.removeItem(k));
+    incoming.forEach(([k,v])=>{
+      if(v === null || v === undefined) return;
+      localStorage.setItem(k, String(v));
+    });
+    return true;
+  }catch(e){
+    console.warn("restoreMcLocalStorageRaw failed", e);
+    return false;
+  }
 }
 function mcLoadAny(key, fallback){
   try{ return load(key, fallback); }catch(e){ return fallback; }
@@ -1543,6 +1566,26 @@ function exportBackup(){
   URL.revokeObjectURL(url);
 }
 
+function exportBrainV2(){
+  const payload = {
+    app: "MemoryCarl",
+    kind: "brain_v2",
+    v: 2,
+    exportedAt: new Date().toISOString(),
+    lsRaw: getMcLocalStorageRaw(),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `memorycarl_brain_v2_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast("Cerebro exportado 🧠✅");
+}
+
 function importBackup(file){
   const reader = new FileReader();
   reader.onload = () => {
@@ -1632,6 +1675,24 @@ function importBackup(file){
   reader.readAsText(file);
 }
 
+function importBrainV2(file){
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const data = JSON.parse(reader.result);
+      if(!data || typeof data !== "object") throw new Error("Invalid file");
+      const lsRaw = (data.lsRaw && typeof data.lsRaw === "object") ? data.lsRaw : null;
+      const ok = restoreMcLocalStorageRaw(lsRaw);
+      if(!ok) throw new Error("Invalid brain payload");
+      toast("Cerebro importado ✅ (recargando)");
+      setTimeout(()=>location.reload(), 220);
+    }catch(e){
+      toast("JSON de cerebro inválido ❌");
+    }
+  };
+  reader.readAsText(file);
+}
+
 
 function restoreFromSnapshotText(rawText){
   const text = (rawText || "").trim();
@@ -1656,24 +1717,12 @@ function restoreFromSnapshotText(rawText){
 // If we have a raw localStorage dump, restore EXACTLY and reload.
 // This fixes the "snapshot vs export" mismatch by bringing back every key.
 if(payload && typeof payload === "object" && payload.lsRaw && typeof payload.lsRaw === "object"){
-  try{
-    const entries = Object.entries(payload.lsRaw);
-    if(entries.length){
-      entries.forEach(([k,v])=>{
-        try{
-          if(typeof k === "string" && k.startsWith("memorycarl_")){
-            if(v === null || v === undefined) localStorage.removeItem(k);
-            else localStorage.setItem(k, String(v));
-          }
-        }catch(e){}
-      });
-    }
-  }catch(e){
-    console.warn("lsRaw restore failed", e);
+  const ok = restoreMcLocalStorageRaw(payload.lsRaw);
+  if(ok){
+    try{ toast("Restore completo aplicado ✅ (recargando)"); }catch(e){}
+    setTimeout(()=>location.reload(), 250);
+    return;
   }
-  try{ toast("Restore completo aplicado ✅ (recargando)"); }catch(e){}
-  setTimeout(()=>location.reload(), 250);
-  return;
 }
 
   // Backup rápido (in-memory) por si el usuario quiere copiarlo
@@ -1939,6 +1988,11 @@ function view(){
         </div>
         <div class="sheetBody">
           <div class="row" style="margin:0;">
+            <button class="btn primary" id="btnBrainExport">Exportar cerebro</button>
+            <label class="btn" style="cursor:pointer;">
+              Importar cerebro
+              <input id="fileBrainImport" type="file" accept="application/json" style="display:none;">
+            </label>
             <button class="btn" id="btnExport">Export</button>
             <button class="btn primary" id="btnNotif">Enable Notifs</button>
             <button class="btn" id="btnCopyToken">Copy Token</button>
@@ -1947,7 +2001,7 @@ function view(){
               <input id="fileImport" type="file" accept="application/json" style="display:none;">
             </label>
           </div>
-          <div class="muted" style="margin-top:10px;">Backup local (JSON). Útil antes de limpiar cache o cambiar de teléfono.</div>
+          <div class="muted" style="margin-top:10px;">Exportar/Importar cerebro guarda TODO (keys <span class="mono">memorycarl_*</span> + <span class="mono">mc_*</span>) y recarga la app.</div>
         </div>
       </section>` : ""}
 
@@ -2380,6 +2434,9 @@ if(btnMergeBestReset) btnMergeBestReset.addEventListener("click", ()=>{
 const btnExport = root.querySelector("#btnExport");
   if(btnExport) btnExport.addEventListener("click", exportBackup);
 
+  const btnBrainExport = root.querySelector("#btnBrainExport");
+  if(btnBrainExport) btnBrainExport.addEventListener("click", exportBrainV2);
+
   const btnNotif = root.querySelector("#btnNotif");
   if(btnNotif) btnNotif.addEventListener("click", enableNotifications);
 
@@ -2390,6 +2447,13 @@ const btnExport = root.querySelector("#btnExport");
   if(fileImport) fileImport.addEventListener("change", (e)=>{
     const f = e.target.files?.[0];
     if(f) importBackup(f);
+    e.target.value = "";
+  });
+
+  const fileBrainImport = root.querySelector("#fileBrainImport");
+  if(fileBrainImport) fileBrainImport.addEventListener("change", (e)=>{
+    const f = e.target.files?.[0];
+    if(f) importBrainV2(f);
     e.target.value = "";
   });
 
