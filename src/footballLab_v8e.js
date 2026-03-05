@@ -135,7 +135,20 @@ export function initFootballLab(){
       memories: parsed && typeof parsed === "object" && parsed.memories && typeof parsed.memories === "object"
         ? parsed.memories
         : {},
-      gpe: normalizeGpeState(parsed?.gpe)
+      gpe: normalizeGpeState(parsed?.gpe),
+      mne: normalizeMneLearningState(parsed?.mne)
+    };
+  }
+
+  function normalizeMneLearningState(raw){
+    const parsed = raw && typeof raw === "object" ? raw : {};
+    return {
+      sceneWeights: parsed.sceneWeights && typeof parsed.sceneWeights === "object" ? parsed.sceneWeights : {},
+      triggerWeights: parsed.triggerWeights && typeof parsed.triggerWeights === "object" ? parsed.triggerWeights : {},
+      confidenceScale: clamp(Number(parsed.confidenceScale) || 1, 0.75, 1.15),
+      phasePredictions: parsed.phasePredictions && typeof parsed.phasePredictions === "object" ? parsed.phasePredictions : {},
+      phaseObservations: parsed.phaseObservations && typeof parsed.phaseObservations === "object" ? parsed.phaseObservations : {},
+      learningLog: Array.isArray(parsed.learningLog) ? parsed.learningLog : []
     };
   }
 
@@ -415,6 +428,7 @@ export function initFootballLab(){
     const next = state && typeof state === "object" ? state : { memories: {} };
     next.memories ||= {};
     next.gpe = buildGlobalPatternEngine(next.memories);
+    next.mne = normalizeMneLearningState(next.mne);
     localStorage.setItem(BRAIN_V2_KEY, JSON.stringify(next));
   }
 
@@ -1213,7 +1227,9 @@ export function initFootballLab(){
     };
   }
 
-  function buildMatchNarrativeEngine({ homeMetrics, awayMetrics, styleClashes = [], sampleSize = 0 }){
+  function buildMatchNarrativeEngine({ homeMetrics, awayMetrics, styleClashes = [], sampleSize = 0, homeTeamId = "", awayTeamId = "", mneLearning = null }){
+    const sceneWeights = mneLearning?.sceneWeights || {};
+    const triggerWeights = mneLearning?.triggerWeights || {};
     const phases = ["0-15", "15-30", "30-45", "45-60", "60-75", "75-90"];
     const sceneBoosts = {};
     styleClashes.forEach((clash)=>{
@@ -1237,14 +1253,21 @@ export function initFootballLab(){
           const earlyBalanceBoost = scene.id === "balanced_start" && (phase === "0-15" || phase === "15-30")
             ? (Math.abs((homeMetrics.danger_index||0) - (awayMetrics.danger_index||0)) < 1.2 ? 0.55 : -0.35)
             : 0;
-          const base = conditionsMet + affinity + sideBonus + earlyBalanceBoost + (sceneBoosts[scene.id] || 0);
+          const teamSceneWeights = scene.side === "away"
+            ? (sceneWeights[awayTeamId] || {})
+            : scene.side === "home"
+              ? (sceneWeights[homeTeamId] || {})
+              : {};
+          const learnedWeight = Number(teamSceneWeights[scene.id]) || 0;
+          const base = conditionsMet + affinity + sideBonus + earlyBalanceBoost + (sceneBoosts[scene.id] || 0) + learnedWeight;
           return { scene, score: base };
         })
         .sort((a,b)=>b.score-a.score);
       const top = ranked.slice(0, 2);
       const score = top.reduce((acc, item)=>acc + item.score, 0);
       const raw = score / (score + 4);
-      const confidence = clamp(Math.sqrt(raw), 0.08, 0.95);
+      const confidenceScale = Number(mneLearning?.confidenceScale) || 1;
+      const confidence = clamp(Math.sqrt(raw) * confidenceScale, 0.08, 0.95);
       const tags = [...new Set(top.flatMap((item)=>item.scene.producesTags || []))];
       const notes = [...(MNE_PHASE_PRIORS[phase]?.bullets || []), ...top.map((item)=>item.scene.title)].slice(0, 2);
       return {
@@ -1270,14 +1293,182 @@ export function initFootballLab(){
     ].sort((a,b)=>b.confidence-a.confidence).slice(0, 3);
 
     const liveTriggers = MNE_SCENE_LIBRARY
-      .flatMap((scene)=>(scene.liveTriggers || []).map((trigger)=>({ ...trigger, sceneId: scene.id })))
+      .flatMap((scene)=>(scene.liveTriggers || []).map((trigger)=>{
+        const triggerId = `${scene.id}:${trigger.if}`;
+        const learnedDelta = Number(triggerWeights[triggerId]) || 0;
+        return { ...trigger, sceneId: scene.id, weight: Number((Number(trigger.weight || 0) + learnedDelta).toFixed(3)) };
+      }))
       .sort((a,b)=>(Number(b.weight)||0)-(Number(a.weight)||0))
       .slice(0, 3);
 
     return { narrative, keyRisks, liveTriggers };
   }
 
-  function buildBrainV2Vision({ homeSummary, awaySummary, odds, homeProfile = null, awayProfile = null, gpe = null }){
+  function buildMnePhasePrediction({ matchId = "", phaseData = {} } = {}){
+    const phase = String(phaseData?.phase || "0-15");
+    const tags = Array.isArray(phaseData?.tags) ? phaseData.tags.slice(0, 3) : [];
+    const confidence = clamp(Number(phaseData?.confidence) || 0, 0, 1);
+    const weightedTags = {};
+    tags.forEach((tag, idx)=>{
+      const rankWeight = idx === 0 ? 1 : idx === 1 ? 0.82 : 0.66;
+      weightedTags[tag] = Number(clamp(confidence * rankWeight, 0, 1).toFixed(2));
+    });
+    return {
+      matchId,
+      phase,
+      predicted: {
+        tags: weightedTags,
+        sceneId: phaseData?.confidenceMeta?.scenes?.[0] || null,
+        confidence: Number(confidence.toFixed(2))
+      }
+    };
+  }
+
+  function buildObservedPhaseFromNarrative({ matchId = "", phase = "0-15", narrativeRaw = "", homeTeam = "Local", awayTeam = "Rival", baseTerritorialDiff = 0 } = {}){
+    const [start, end] = String(phase || "0-15").split("-").map((v)=>Number(v) || 0);
+    const events = classifyRelatoMicroEvents(parseRelatoEvents(narrativeRaw, homeTeam, awayTeam))
+      .filter((evt)=>Number(evt.min) >= start && Number(evt.min) <= Math.max(start, end));
+    const counts = {
+      shot: 0,
+      shot_on_target: 0,
+      miss: 0,
+      big_chance: 0,
+      goal: 0,
+      corner: 0,
+      freekick: 0,
+      foul: 0,
+      yellow: 0,
+      red: 0,
+      var_review: 0,
+      penalty_awarded: 0,
+      penalty_cancelled: 0,
+      possession_control: 0
+    };
+    events.forEach((evt)=>{
+      (evt.microEvents || []).forEach((item)=>{
+        const type = String(item?.type || "");
+        if(type === "shot_attempt") counts.shot += 1;
+        if(type in counts) counts[type] += 1;
+      });
+    });
+    const territorialPressure = clamp(0.20*counts.possession_control + 0.25*counts.corner + 0.25*counts.shot + 0.30*counts.shot_on_target, 0, 1);
+    const setpieceThreat = clamp((0.60*counts.corner + 0.40*counts.freekick) / 3, 0, 1);
+    const finishingFailure = clamp((counts.shot + counts.big_chance) - counts.goal, 0, 6) / 6;
+    const hintCounter = /contraataque|transici[oó]n/.test(String(narrativeRaw || "").toLowerCase()) ? 1 : 0;
+    let counterStrike = 0;
+    if(counts.goal > 0 && Number(baseTerritorialDiff) < -0.05) counterStrike = 1;
+    else counterStrike = clamp(hintCounter * 0.35, 0, 0.4);
+    return {
+      matchId,
+      phase,
+      observed: {
+        tags: {
+          shot: counts.shot,
+          shot_on_target: counts.shot_on_target,
+          miss: counts.miss,
+          big_chance: counts.big_chance,
+          goal: counts.goal,
+          corner: counts.corner,
+          freekick: counts.freekick,
+          foul: counts.foul,
+          yellow: counts.yellow,
+          red: counts.red,
+          var_review: counts.var_review,
+          penalty_awarded: counts.penalty_awarded,
+          penalty_cancelled: counts.penalty_cancelled,
+          possession_control: counts.possession_control
+        },
+        derivedTags: {
+          territorial_pressure: Number(territorialPressure.toFixed(2)),
+          setpiece_threat: Number(setpieceThreat.toFixed(2)),
+          finishing_failure: Number(finishingFailure.toFixed(2)),
+          counter_strike: Number(counterStrike.toFixed(2)),
+          discipline_issues: Number(clamp((counts.foul + counts.yellow + counts.red*2) / 6, 0, 1).toFixed(2)),
+          var_turning_point: Number(clamp((counts.var_review + counts.penalty_cancelled) / 3, 0, 1).toFixed(2))
+        },
+        evidence: {
+          events: events.length,
+          dangerIndexHome: Number(clamp(counts.shot_on_target*0.45 + counts.big_chance*0.55 + counts.goal*0.8 + counts.corner*0.2, 0, 3).toFixed(2)),
+          dangerIndexAway: Number(clamp(counts.foul*0.1 + counts.yellow*0.18 + counts.red*0.3 + counts.var_review*0.2, 0, 3).toFixed(2))
+        }
+      },
+      narrativeRaw: String(narrativeRaw || "")
+    };
+  }
+
+  function compareMnePredictionVsReality(prediction = {}, observation = {}){
+    const predictedTags = Object.entries(prediction?.predicted?.tags || {}).sort((a,b)=>(Number(b[1])||0)-(Number(a[1])||0)).slice(0, 3);
+    const observedDerived = observation?.observed?.derivedTags || {};
+    const observedTop = Object.entries(observedDerived).sort((a,b)=>(Number(b[1])||0)-(Number(a[1])||0)).slice(0, 3);
+    const observedSet = new Set(observedTop.filter(([,v])=>Number(v)>=0.25).map(([k])=>k));
+    const hits = predictedTags.filter(([tag])=>Number(observedDerived[tag]) >= 0.25);
+    const top3ObservedCount = Math.max(1, observedSet.size);
+    const precision = hits.length / 3;
+    const recall = hits.length / top3ObservedCount;
+    const phaseTruthScore = predictedTags.length
+      ? avg(predictedTags.map(([tag])=>Number(observedDerived[tag]) || 0))
+      : 0;
+    const calError = (Number(prediction?.predicted?.confidence) || 0) - phaseTruthScore;
+    const surprise = observedTop.reduce((acc, [tag, val])=>acc + Math.max(0, (Number(val) || 0) - (Number(prediction?.predicted?.tags?.[tag]) || 0)), 0);
+    return {
+      hits: hits.map(([tag])=>tag),
+      misses: predictedTags.map(([tag])=>tag).filter((tag)=>!hits.some(([hit])=>hit===tag)),
+      surprises: observedTop.filter(([tag, val])=>(Number(val) || 0) > (Number(prediction?.predicted?.tags?.[tag]) || 0)).map(([tag])=>tag),
+      metrics: {
+        precision: Number(precision.toFixed(3)),
+        recall: Number(recall.toFixed(3)),
+        phaseTruthScore: Number(phaseTruthScore.toFixed(3)),
+        calibrationError: Number(calError.toFixed(3)),
+        surprise: Number(clamp(surprise, 0, 3).toFixed(3))
+      }
+    };
+  }
+
+  function applyMneLearning({ brainV2, matchId, phase, homeTeamId, awayTeamId, prediction, comparison, evidenceCount = 0 }){
+    brainV2.mne ||= normalizeMneLearningState({});
+    if(evidenceCount < 3) return { updates: [], skipped: "low_evidence" };
+    const lr = 0.05;
+    const log = Array.isArray(brainV2.mne.learningLog) ? brainV2.mne.learningLog : [];
+    const usedBudget = log.filter((row)=>row.matchId===matchId).reduce((acc, row)=>acc + (row.updates || []).reduce((inAcc, up)=>inAcc + Math.abs(Number(up.delta) || 0), 0), 0);
+    let budget = clamp(0.15 - usedBudget, 0, 0.15);
+    if(budget <= 0) return { updates: [], skipped: "match_cap" };
+    const updates = [];
+    const sceneId = prediction?.predicted?.sceneId;
+    const teamId = sceneId && /away/.test(String(sceneId)) ? awayTeamId : homeTeamId;
+    if(sceneId && teamId){
+      brainV2.mne.sceneWeights[teamId] ||= {};
+      const rawDelta = lr * ((Number(comparison?.metrics?.precision) || 0) - 0.5);
+      const delta = clamp(rawDelta, -budget, budget);
+      if(delta !== 0){
+        const prev = Number(brainV2.mne.sceneWeights[teamId][sceneId]) || 0;
+        brainV2.mne.sceneWeights[teamId][sceneId] = Number(clamp(prev + delta, -2, 2).toFixed(3));
+        updates.push({ type: "scene", id: `${teamId}:${sceneId}`, delta: Number(delta.toFixed(3)) });
+        budget = clamp(budget - Math.abs(delta), 0, 0.15);
+      }
+    }
+    const trigger = MNE_SCENE_LIBRARY.find((scene)=>scene.id === sceneId)?.liveTriggers?.[0];
+    if(trigger && budget > 0){
+      const triggerId = `${sceneId}:${trigger.if}`;
+      const raw = lr * (((Number(comparison?.metrics?.precision) || 0) - 0.45) - (Number(comparison?.metrics?.surprise) || 0) * 0.12);
+      const delta = clamp(raw, -budget, budget);
+      const prev = Number(brainV2.mne.triggerWeights[triggerId]) || 0;
+      brainV2.mne.triggerWeights[triggerId] = Number(clamp(prev + delta, -2, 2).toFixed(3));
+      updates.push({ type: "trigger", id: triggerId, delta: Number(delta.toFixed(3)) });
+      budget = clamp(budget - Math.abs(delta), 0, 0.15);
+    }
+    const calError = Number(comparison?.metrics?.calibrationError) || 0;
+    if(Math.abs(calError) >= 0.03 && budget > 0){
+      const scaleDelta = clamp(-0.08 * calError, -0.02, 0.02);
+      const prev = Number(brainV2.mne.confidenceScale) || 1;
+      brainV2.mne.confidenceScale = Number(clamp(prev + scaleDelta, 0.75, 1.15).toFixed(3));
+      updates.push({ type: "calibration", id: "confidenceScale", delta: Number(scaleDelta.toFixed(3)), from: prev, to: brainV2.mne.confidenceScale });
+    }
+    brainV2.mne.learningLog.push({ matchId, phase, ts: new Date().toISOString(), updates });
+    brainV2.mne.learningLog = brainV2.mne.learningLog.slice(-500);
+    return { updates, skipped: null };
+  }
+
+  function buildBrainV2Vision({ homeSummary, awaySummary, odds, homeProfile = null, awayProfile = null, gpe = null, homeTeamId = "", awayTeamId = "", mneLearning = null }){
     const get = (s, key, fallback)=>Number(s?.avg?.[key] ?? fallback);
     const getAny = (s, keys = [], fallback = 0)=>{
       for(const key of keys){
@@ -1319,7 +1510,10 @@ export function initFootballLab(){
       homeMetrics: homeMne,
       awayMetrics: awayMne,
       styleClashes,
-      sampleSize: Math.min(Number(homeProfile?.lastN) || 0, Number(awayProfile?.lastN) || 0)
+      sampleSize: Math.min(Number(homeProfile?.lastN) || 0, Number(awayProfile?.lastN) || 0),
+      homeTeamId,
+      awayTeamId,
+      mneLearning
     });
     const xgNarrative = {
       xg_home: clamp(
@@ -10100,6 +10294,9 @@ passes: 425"></textarea>
           homeProfile,
           awayProfile,
           gpe: brainV2.gpe,
+          homeTeamId: homeIdSel,
+          awayTeamId: awayIdSel,
+          mneLearning: brainV2.mne,
           odds: {
             home: document.getElementById('b2OddH')?.value,
             draw: document.getElementById('b2OddD')?.value,
@@ -10171,8 +10368,84 @@ passes: 425"></textarea>
               <div class="fl-card" style="padding:8px;"><b>Live Triggers</b>${(vision.mne?.liveTriggers || []).map((trigger)=>`<div class="fl-mini">• Si ${trigger.if} → ${trigger.then} (${trigger.weight>0?'+':''}${trigger.weight.toFixed(2)})</div>`).join('') || '<div class="fl-mini">Sin triggers todavía.</div>'}</div>
             </div>
           </div>
+          <div class="fl-card" style="margin-top:10px;padding:10px;">
+            <div style="font-weight:800;">⚡ MNE Live Feedback Loop (LFL)</div>
+            <div class="fl-row" style="margin-top:8px;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+              <div>
+                <div class="fl-mini">Fase</div>
+                <select id="mneLflPhase" class="fl-select">${(vision.mne?.narrative || []).map((p)=>`<option value="${p.phase}">${p.phase}</option>`).join('')}</select>
+              </div>
+              <button class="fl-btn" id="mneLflCompare">Compare & Learn</button>
+              <span id="mneLflStatus" class="fl-mini"></span>
+            </div>
+            <textarea id="mneLflNarrative" class="fl-text" style="margin-top:8px;" placeholder="Pega el relato real del bloque seleccionado..."></textarea>
+            <div id="mneAdjustWidget" class="fl-mini" style="margin-top:8px;"></div>
+            <div id="mneLflTimeline" class="fl-mini" style="margin-top:8px;display:grid;gap:8px;"></div>
+            <div id="mneLearningLog" class="fl-mini" style="margin-top:8px;"></div>
+          </div>
           <div class="fl-mini" style="margin-top:8px;">${vision.missing.length ? `⚠️ Falta info: ${vision.missing.join(' · ')}` : '✅ Dataset suficiente para seguir mejorando el modelo TensorFlow.'}</div>
         `;
+
+        const simMatchId = `sim_${homeIdSel}_${awayIdSel}`;
+        brainV2.mne ||= normalizeMneLearningState({});
+        const renderLfl = ()=>{
+          const timeline = document.getElementById('mneLflTimeline');
+          const logEl = document.getElementById('mneLearningLog');
+          const widget = document.getElementById('mneAdjustWidget');
+          const preds = brainV2.mne.phasePredictions?.[simMatchId] || [];
+          const obs = brainV2.mne.phaseObservations?.[simMatchId] || [];
+          const merged = preds.map((pred)=>{
+            const phaseObs = obs.find((row)=>row.phase===pred.phase);
+            const cmp = phaseObs?.comparison || null;
+            return { pred, phaseObs, cmp };
+          });
+          timeline.innerHTML = merged.map((row)=>{
+            if(!row.phaseObs) return `<div class="fl-card" style="padding:8px;"><b>${row.pred.phase}</b> · pendiente de observación real.</div>`;
+            const m = row.cmp?.metrics || {};
+            return `<div class="fl-card" style="padding:8px;">
+              <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>${row.pred.phase}</b><span>Conf ${Math.round((row.pred.predicted.confidence||0)*100)}%</span></div>
+              <div>Pred: ${Object.keys(row.pred.predicted.tags || {}).join(', ') || '—'}</div>
+              <div>Obs: ${Object.entries(row.phaseObs.observed.derivedTags || {}).map(([k,v])=>`${k}:${(Number(v)||0).toFixed(2)}`).join(' · ')}</div>
+              <div>✅ hits: ${(row.cmp?.hits || []).join(', ') || '—'} · ❌ misses: ${(row.cmp?.misses || []).join(', ') || '—'} · ⚡ surprises: ${(row.cmp?.surprises || []).join(', ') || '—'}</div>
+              <div>Accuracy ${(Number(m.precision||0)*100).toFixed(0)}% · Calibration ${(Number(m.calibrationError||0)).toFixed(2)} · Surprise ${(Number(m.surprise||0)*100).toFixed(0)}%</div>
+            </div>`;
+          }).join('') || '<div class="fl-mini">Sin comparaciones todavía.</div>';
+          const logs = (brainV2.mne.learningLog || []).filter((row)=>row.matchId===simMatchId).slice(-5).reverse();
+          logEl.innerHTML = `<b>Learning Log</b>${logs.map((row)=>`<div>• ${row.phase} · ${(row.updates || []).map((up)=>`${up.type}:${up.id} ${up.delta>0?'+':''}${Number(up.delta||0).toFixed(3)}`).join(' | ') || 'sin cambios'}</div>`).join('') || '<div>Sin ajustes.</div>'}`;
+          const today = new Date().toISOString().slice(0, 10);
+          const todayUpdates = (brainV2.mne.learningLog || []).filter((row)=>String(row.ts || '').startsWith(today)).flatMap((row)=>row.updates || []);
+          const scenesN = todayUpdates.filter((u)=>u.type==='scene').length;
+          const triggersN = todayUpdates.filter((u)=>u.type==='trigger').length;
+          const cals = todayUpdates.filter((u)=>u.type==='calibration').map((u)=>Number(u.delta)||0);
+          widget.innerHTML = `<b>Brain is adjusting</b> · Scenes adjusted today: <b>${scenesN}</b> · Triggers adjusted: <b>${triggersN}</b> · Calibration improved: <b>${(Math.max(0, -avg(cals))*100).toFixed(1)}%</b>`;
+        };
+
+        const initialPreds = (vision.mne?.narrative || []).map((phaseData)=>buildMnePhasePrediction({ matchId: simMatchId, phaseData }));
+        brainV2.mne.phasePredictions[simMatchId] = initialPreds;
+        brainV2.mne.phaseObservations[simMatchId] ||= [];
+        saveBrainV2(brainV2);
+        renderLfl();
+
+        document.getElementById('mneLflCompare')?.addEventListener('click', ()=>{
+          const phase = document.getElementById('mneLflPhase')?.value || '0-15';
+          const raw = String(document.getElementById('mneLflNarrative')?.value || '').trim();
+          const statusEl = document.getElementById('mneLflStatus');
+          if(!raw){ if(statusEl) statusEl.textContent = '⚠️ Pega el relato real de la fase.'; return; }
+          const prediction = (brainV2.mne.phasePredictions[simMatchId] || []).find((row)=>row.phase===phase) || buildMnePhasePrediction({ matchId: simMatchId, phaseData: { phase, tags: [], confidence: 0.1, confidenceMeta: {} } });
+          const baseTerritorialDiff = (homeProfile?.phaseDNA?.territorial_pressure?.[phase] || 0) - (awayProfile?.phaseDNA?.territorial_pressure?.[phase] || 0);
+          const observation = buildObservedPhaseFromNarrative({ matchId: simMatchId, phase, narrativeRaw: raw, homeTeam: homeTeam?.name || 'Local', awayTeam: awayTeam?.name || 'Rival', baseTerritorialDiff });
+          const comparison = compareMnePredictionVsReality(prediction, observation);
+          const learning = applyMneLearning({ brainV2, matchId: simMatchId, phase, homeTeamId: homeIdSel, awayTeamId: awayIdSel, prediction, comparison, evidenceCount: observation?.observed?.evidence?.events || 0 });
+          const list = brainV2.mne.phaseObservations[simMatchId] || [];
+          const nextRow = { ...observation, comparison, learning };
+          const idx = list.findIndex((row)=>row.phase===phase);
+          if(idx >= 0) list[idx] = nextRow;
+          else list.push(nextRow);
+          brainV2.mne.phaseObservations[simMatchId] = list;
+          saveBrainV2(brainV2);
+          if(statusEl) statusEl.textContent = learning.skipped === 'low_evidence' ? '⚠️ Evidencia insuficiente (<3 eventos), sin ajuste.' : `✅ Comparado. Prec ${(comparison.metrics.precision*100).toFixed(0)}% · Δcal ${comparison.metrics.calibrationError.toFixed(2)}.`;
+          renderLfl();
+        });
       });
       return;
     }
