@@ -148,7 +148,47 @@ export function initFootballLab(){
       confidenceScale: clamp(Number(parsed.confidenceScale) || 1, 0.75, 1.15),
       phasePredictions: parsed.phasePredictions && typeof parsed.phasePredictions === "object" ? parsed.phasePredictions : {},
       phaseObservations: parsed.phaseObservations && typeof parsed.phaseObservations === "object" ? parsed.phaseObservations : {},
+      lsfForecasts: parsed.lsfForecasts && typeof parsed.lsfForecasts === "object" ? parsed.lsfForecasts : {},
+      lsfEvalHistory: Array.isArray(parsed.lsfEvalHistory) ? parsed.lsfEvalHistory : [],
+      lsfState: normalizeLsfState(parsed.lsfState),
       learningLog: Array.isArray(parsed.learningLog) ? parsed.learningLog : []
+    };
+  }
+
+  const LSF_FEATURE_KEYS = [
+    "tempoLow", "balanced", "controlHome", "controlAway", "cornersSurgeHome", "cornersSurgeAway",
+    "shotsOTSurgeHome", "shotsOTSurgeAway", "finishingFailureHome", "finishingFailureAway", "varShock", "redCard", "surprise", "calError"
+  ];
+
+  function normalizeLsfWeights(raw = {}, seed = {}){
+    const out = {};
+    LSF_FEATURE_KEYS.forEach((key)=>{ out[key] = Number(raw?.[key]); if(!Number.isFinite(out[key])) out[key] = Number(seed?.[key]) || 0; });
+    return out;
+  }
+
+  function normalizeLsfState(raw){
+    const parsed = raw && typeof raw === "object" ? raw : {};
+    const seed = {
+      base: { tempoLow: 0.18, balanced: 0.12, controlHome: 0.06, controlAway: 0.06, finishingFailureHome: 0.05, finishingFailureAway: 0.05 },
+      trigger: { cornersSurgeHome: 0.22, cornersSurgeAway: 0.22, shotsOTSurgeHome: 0.18, shotsOTSurgeAway: 0.18, finishingFailureHome: 0.08, finishingFailureAway: 0.08 },
+      chaos: { varShock: 0.35, redCard: 0.40, surprise: 0.20, calError: 0.12 }
+    };
+    return {
+      version: 1,
+      weights: {
+        base: normalizeLsfWeights(parsed?.weights?.base, seed.base),
+        trigger: normalizeLsfWeights(parsed?.weights?.trigger, seed.trigger),
+        chaos: normalizeLsfWeights(parsed?.weights?.chaos, seed.chaos)
+      },
+      calibrator: {
+        temp: clamp(Number(parsed?.calibrator?.temp) || 1, 0.85, 1.3),
+        confScale: clamp(Number(parsed?.calibrator?.confScale) || 0.92, 0.75, 1)
+      },
+      stats: {
+        forecastsMade: Math.max(0, Number(parsed?.stats?.forecastsMade) || 0),
+        correct: Math.max(0, Number(parsed?.stats?.correct) || 0),
+        brierSum: Math.max(0, Number(parsed?.stats?.brierSum) || 0)
+      }
     };
   }
 
@@ -626,6 +666,13 @@ export function initFootballLab(){
     if(safe<=60) return "45-60";
     if(safe<=75) return "60-75";
     return "75-90";
+  }
+
+  function nextMnePhase(current = "0-15"){
+    const phases = ["0-15", "15-30", "30-45", "45-60", "60-75", "75-90"];
+    const idx = phases.indexOf(String(current));
+    if(idx < 0) return "15-30";
+    return phases[Math.min(phases.length - 1, idx + 1)];
   }
 
   function buildPhaseCountsFromMinutes(minutes = []){
@@ -1340,15 +1387,26 @@ export function initFootballLab(){
       yellow: 0,
       red: 0,
       var_review: 0,
+      var_overturn: 0,
       penalty_awarded: 0,
       penalty_cancelled: 0,
       possession_control: 0
     };
+    const teamTags = {
+      home: { shot: 0, shot_on_target: 0, goal: 0, corner: 0 },
+      away: { shot: 0, shot_on_target: 0, goal: 0, corner: 0 }
+    };
     events.forEach((evt)=>{
       (evt.microEvents || []).forEach((item)=>{
         const type = String(item?.type || "");
-        if(type === "shot_attempt") counts.shot += 1;
+        if(type === "shot_attempt"){
+          counts.shot += 1;
+          if(evt.team === "home" || evt.team === "away") teamTags[evt.team].shot += 1;
+        }
         if(type in counts) counts[type] += 1;
+        if((type === "corner" || type === "shot_on_target" || type === "goal") && (evt.team === "home" || evt.team === "away")){
+          teamTags[evt.team][type] += 1;
+        }
       });
     });
     const territorialPressure = clamp(0.20*counts.possession_control + 0.25*counts.corner + 0.25*counts.shot + 0.30*counts.shot_on_target, 0, 1);
@@ -1374,6 +1432,7 @@ export function initFootballLab(){
           yellow: counts.yellow,
           red: counts.red,
           var_review: counts.var_review,
+          var_overturn: counts.var_overturn,
           penalty_awarded: counts.penalty_awarded,
           penalty_cancelled: counts.penalty_cancelled,
           possession_control: counts.possession_control
@@ -1384,12 +1443,13 @@ export function initFootballLab(){
           finishing_failure: Number(finishingFailure.toFixed(2)),
           counter_strike: Number(counterStrike.toFixed(2)),
           discipline_issues: Number(clamp((counts.foul + counts.yellow + counts.red*2) / 6, 0, 1).toFixed(2)),
-          var_turning_point: Number(clamp((counts.var_review + counts.penalty_cancelled) / 3, 0, 1).toFixed(2))
+          var_turning_point: Number(clamp((counts.var_review + counts.penalty_cancelled + counts.var_overturn) / 3, 0, 1).toFixed(2))
         },
+        teamTags,
         evidence: {
           events: events.length,
-          dangerIndexHome: Number(clamp(counts.shot_on_target*0.45 + counts.big_chance*0.55 + counts.goal*0.8 + counts.corner*0.2, 0, 3).toFixed(2)),
-          dangerIndexAway: Number(clamp(counts.foul*0.1 + counts.yellow*0.18 + counts.red*0.3 + counts.var_review*0.2, 0, 3).toFixed(2))
+          dangerIndexHome: Number(clamp((teamTags.home.shot_on_target||0)*0.45 + (teamTags.home.goal||0)*0.8 + (teamTags.home.corner||0)*0.2 + counts.big_chance*0.25, 0, 3).toFixed(2)),
+          dangerIndexAway: Number(clamp((teamTags.away.shot_on_target||0)*0.45 + (teamTags.away.goal||0)*0.8 + (teamTags.away.corner||0)*0.2 + counts.var_review*0.15, 0, 3).toFixed(2))
         }
       },
       narrativeRaw: String(narrativeRaw || "")
@@ -1422,6 +1482,133 @@ export function initFootballLab(){
         surprise: Number(clamp(surprise, 0, 3).toFixed(3))
       }
     };
+  }
+
+  function lsfSoftmax(scores = [], temp = 1){
+    const t = Math.max(0.0001, Number(temp) || 1);
+    const maxV = Math.max(...scores);
+    const exps = scores.map((v)=>Math.exp((Number(v) - maxV) / t));
+    const sum = Math.max(0.0001, exps.reduce((acc, val)=>acc + val, 0));
+    return exps.map((v)=>v / sum);
+  }
+
+  function extractLSFFeatures(phaseObserved = {}, prediction = {}, phase = "0-15"){
+    const obsTags = phaseObserved?.observed?.tags || {};
+    const derived = phaseObserved?.observed?.derivedTags || {};
+    const evidence = phaseObserved?.observed?.evidence || {};
+    const byTeam = phaseObserved?.observed?.teamTags || { home: {}, away: {} };
+    const dangerHome = Number(evidence?.dangerIndexHome) || 0;
+    const dangerAway = Number(evidence?.dangerIndexAway) || 0;
+    const phaseLen = (()=>{
+      const [a, b] = String(phase || "0-15").split("-").map((v)=>Number(v) || 0);
+      return Math.max(10, Math.abs(b - a));
+    })();
+    const cornerCut = phaseLen >= 15 ? 3 : 2;
+    return {
+      tempoLow: (Number(evidence?.events) || 0) < 4 ? 1 : 0,
+      balanced: Math.abs(dangerHome - dangerAway) < 0.25 ? 1 : 0,
+      controlHome: clamp(Number(derived?.territorial_pressure) || 0, 0, 1),
+      controlAway: clamp((Number(obsTags?.foul) || 0) * 0.12 + (Number(obsTags?.yellow) || 0) * 0.2, 0, 1),
+      cornersSurgeHome: (Number(byTeam?.home?.corner) || 0) >= cornerCut ? 1 : 0,
+      cornersSurgeAway: (Number(byTeam?.away?.corner) || 0) >= cornerCut ? 1 : 0,
+      shotsOTSurgeHome: (Number(byTeam?.home?.shot_on_target) || 0) >= 2 ? 1 : 0,
+      shotsOTSurgeAway: (Number(byTeam?.away?.shot_on_target) || 0) >= 2 ? 1 : 0,
+      finishingFailureHome: clamp(((Number(byTeam?.home?.shot) || 0) - (Number(byTeam?.home?.goal) || 0)) / 4, 0, 1),
+      finishingFailureAway: clamp(((Number(byTeam?.away?.shot) || 0) - (Number(byTeam?.away?.goal) || 0)) / 4, 0, 1),
+      varShock: (Number(obsTags?.penalty_awarded) > 0 && Number(obsTags?.penalty_cancelled) > 0) || Number(obsTags?.var_overturn) > 0 ? 1 : 0,
+      redCard: Number(obsTags?.red) > 0 ? 1 : 0,
+      surprise: clamp(Number(prediction?.comparison?.metrics?.surprise) || 0, 0, 1),
+      calError: clamp(Number(prediction?.comparison?.metrics?.calibrationError) || 0, -1, 1)
+    };
+  }
+
+  function computeLsfForecast({ lsfState = null, features = {}, forecastForPhase = "" } = {}){
+    const state = normalizeLsfState(lsfState);
+    const baseScore = LSF_FEATURE_KEYS.reduce((acc, key)=>acc + (Number(state.weights.base[key]) || 0) * (Number(features[key]) || 0), 0);
+    const triggerScore = LSF_FEATURE_KEYS.reduce((acc, key)=>acc + (Number(state.weights.trigger[key]) || 0) * (Number(features[key]) || 0), 0);
+    const chaosScore = LSF_FEATURE_KEYS.reduce((acc, key)=>acc + (Number(state.weights.chaos[key]) || 0) * (Number(features[key]) || 0), 0);
+    const entropyRef = lsfSoftmax([baseScore, triggerScore, chaosScore], 1);
+    const entropy = -entropyRef.reduce((acc, p)=>acc + p * Math.log(Math.max(0.0001, p)), 0) / Math.log(3);
+    const temp = entropy > 0.92 ? 1.2 : entropy < 0.55 ? 0.9 : Number(state.calibrator.temp) || 1;
+    const probsArr = lsfSoftmax([baseScore, triggerScore, chaosScore], temp);
+    const probs = { base: probsArr[0], trigger: probsArr[1], chaos: probsArr[2] };
+    const nextScenario = Object.entries(probs).sort((a,b)=>b[1]-a[1])[0]?.[0] || "base";
+    const contributions = ["base", "trigger", "chaos"].flatMap((scenario)=>LSF_FEATURE_KEYS.map((key)=>({ scenario, key, val: (Number(state.weights?.[scenario]?.[key]) || 0) * (Number(features[key]) || 0) })));
+    const drivers = contributions.filter((row)=>Math.abs(row.val) > 0.0001).sort((a,b)=>Math.abs(b.val)-Math.abs(a.val)).slice(0, 3);
+    const thresholdTable = [
+      { key: "cornersSurgeHome", label: "Si home corners >= 2 en 10 min", scenario: "trigger", delta: 0.15 },
+      { key: "cornersSurgeAway", label: "Si away corners >= 2 en 10 min", scenario: "trigger", delta: 0.15 },
+      { key: "shotsOTSurgeHome", label: "Si shotsOT home >= 2", scenario: "trigger", delta: 0.12 },
+      { key: "shotsOTSurgeAway", label: "Si shotsOT away >= 2", scenario: "trigger", delta: 0.12 },
+      { key: "varShock", label: "Si aparece VAR/penal revertido", scenario: "chaos", delta: 0.25 },
+      { key: "tempoLow", label: "Si el tempo sigue bajo", scenario: "base", delta: 0.10 }
+    ];
+    const ifThen = thresholdTable.filter((row)=>(Number(features[row.key]) || 0) < 1).slice(0, 3);
+    const maxProb = Math.max(probs.base, probs.trigger, probs.chaos);
+    const confidence = clamp(maxProb * (Number(state.calibrator.confScale) || 0.92) * (1 - Math.abs(Number(features.calError) || 0) * 0.25), 0, 1);
+    const switchRisk = entropy > 0.95 || Number(features.surprise) >= 0.7 ? "HIGH" : entropy > 0.7 ? "MED" : "LOW";
+    return {
+      forecastForPhase,
+      nextScenario,
+      probs: {
+        base: Number(probs.base.toFixed(3)),
+        trigger: Number(probs.trigger.toFixed(3)),
+        chaos: Number(probs.chaos.toFixed(3))
+      },
+      confidence: Number(confidence.toFixed(3)),
+      switchRisk,
+      drivers: drivers.map((row)=>({ ...row, val: Number(row.val.toFixed(3)) })),
+      ifThen,
+      calibrator: { temp: Number(temp.toFixed(2)), confScale: Number((state.calibrator.confScale || 0.92).toFixed(2)) }
+    };
+  }
+
+  function deriveTrueScenario(features = {}){
+    if(Number(features.varShock) >= 1 || Number(features.redCard) >= 1 || Number(features.surprise) >= 0.75) return "chaos";
+    if(Number(features.cornersSurgeHome) >= 1 || Number(features.cornersSurgeAway) >= 1 || Number(features.shotsOTSurgeHome) >= 1 || Number(features.shotsOTSurgeAway) >= 1) return "trigger";
+    return "base";
+  }
+
+  function applyLsfLearning({ brainV2, matchId, madeAtPhase, forecastRecord = null, observedFeatures = {}, evidenceCount = 0 } = {}){
+    brainV2.mne ||= normalizeMneLearningState({});
+    const lsfState = brainV2.mne.lsfState = normalizeLsfState(brainV2.mne.lsfState);
+    if(!forecastRecord) return { skipped: "missing_forecast", updates: [] };
+    if(evidenceCount < 3) return { skipped: "low_evidence", updates: [] };
+    const truth = deriveTrueScenario(observedFeatures);
+    const y = { base: truth === "base" ? 1 : 0, trigger: truth === "trigger" ? 1 : 0, chaos: truth === "chaos" ? 1 : 0 };
+    const p = forecastRecord.probs || { base: 1/3, trigger: 1/3, chaos: 1/3 };
+    const brier = (p.base-y.base)**2 + (p.trigger-y.trigger)**2 + (p.chaos-y.chaos)**2;
+    const lr = 0.04;
+    const updates = [];
+    ["base", "trigger", "chaos"].forEach((scenario)=>{
+      LSF_FEATURE_KEYS.forEach((key)=>{
+        const f = Number(observedFeatures[key]) || 0;
+        if(f === 0) return;
+        const rawDelta = lr * ((y[scenario] || 0) - (Number(p[scenario]) || 0)) * f;
+        const delta = clamp(rawDelta, -0.03, 0.03);
+        if(delta === 0) return;
+        const prev = Number(lsfState.weights[scenario][key]) || 0;
+        lsfState.weights[scenario][key] = Number(clamp(prev + delta, -1.5, 1.5).toFixed(3));
+        updates.push({ scenario, key, delta: Number(delta.toFixed(3)) });
+      });
+    });
+    lsfState.stats.forecastsMade += 1;
+    if(forecastRecord.nextScenario === truth) lsfState.stats.correct += 1;
+    lsfState.stats.brierSum = Number((Number(lsfState.stats.brierSum || 0) + brier).toFixed(4));
+    if(brier > 0.62 && Math.abs(Number(observedFeatures.calError) || 0) > 0.2){
+      lsfState.calibrator.confScale = Number(clamp((Number(lsfState.calibrator.confScale) || 0.92) * 0.98, 0.75, 1).toFixed(3));
+      brainV2.mne.confidenceScale = Number(clamp((Number(brainV2.mne.confidenceScale) || 1) * 0.99, 0.75, 1.15).toFixed(3));
+    }
+    brainV2.mne.lsfEvalHistory = [...(brainV2.mne.lsfEvalHistory || []), {
+      matchId,
+      phase: madeAtPhase,
+      ts: new Date().toISOString(),
+      truth,
+      predicted: forecastRecord.nextScenario,
+      brier: Number(brier.toFixed(3)),
+      updatesCount: updates.length
+    }].slice(-250);
+    return { skipped: null, truth, brier: Number(brier.toFixed(3)), updates };
   }
 
   function applyMneLearning({ brainV2, matchId, phase, homeTeamId, awayTeamId, prediction, comparison, evidenceCount = 0 }){
@@ -10379,6 +10566,11 @@ passes: 425"></textarea>
               <span id="mneLflStatus" class="fl-mini"></span>
             </div>
             <textarea id="mneLflNarrative" class="fl-text" style="margin-top:8px;" placeholder="Pega el relato real del bloque seleccionado..."></textarea>
+            <div id="mneLsfPanel" class="fl-card" style="margin-top:8px;padding:8px;"></div>
+            <div class="fl-row" style="margin-top:6px;gap:8px;">
+              <button class="fl-btn" id="mneLsfLearnedBtn">What LSF learned</button>
+              <span id="mneLsfLearnStatus" class="fl-mini"></span>
+            </div>
             <div id="mneAdjustWidget" class="fl-mini" style="margin-top:8px;"></div>
             <div id="mneLflTimeline" class="fl-mini" style="margin-top:8px;display:grid;gap:8px;"></div>
             <div id="mneLearningLog" class="fl-mini" style="margin-top:8px;"></div>
@@ -10392,20 +10584,26 @@ passes: 425"></textarea>
           const timeline = document.getElementById('mneLflTimeline');
           const logEl = document.getElementById('mneLearningLog');
           const widget = document.getElementById('mneAdjustWidget');
+          const lsfPanel = document.getElementById('mneLsfPanel');
+          const lsfState = brainV2.mne.lsfState = normalizeLsfState(brainV2.mne.lsfState);
           const preds = brainV2.mne.phasePredictions?.[simMatchId] || [];
           const obs = brainV2.mne.phaseObservations?.[simMatchId] || [];
+          const fRecords = brainV2.mne.lsfForecasts?.[simMatchId] || [];
           const merged = preds.map((pred)=>{
             const phaseObs = obs.find((row)=>row.phase===pred.phase);
             const cmp = phaseObs?.comparison || null;
-            return { pred, phaseObs, cmp };
+            const fc = fRecords.find((row)=>row.madeAtPhase===pred.phase);
+            return { pred, phaseObs, cmp, fc };
           });
           timeline.innerHTML = merged.map((row)=>{
             if(!row.phaseObs) return `<div class="fl-card" style="padding:8px;"><b>${row.pred.phase}</b> · pendiente de observación real.</div>`;
             const m = row.cmp?.metrics || {};
+            const fcRow = row.fc ? `<div>LSF → ${row.fc.nextScenario} (${Math.round((Number(row.fc.probs?.base)||0)*100)} / ${Math.round((Number(row.fc.probs?.trigger)||0)*100)} / ${Math.round((Number(row.fc.probs?.chaos)||0)*100)})</div>` : '';
             return `<div class="fl-card" style="padding:8px;">
               <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>${row.pred.phase}</b><span>Conf ${Math.round((row.pred.predicted.confidence||0)*100)}%</span></div>
               <div>Pred: ${Object.keys(row.pred.predicted.tags || {}).join(', ') || '—'}</div>
               <div>Obs: ${Object.entries(row.phaseObs.observed.derivedTags || {}).map(([k,v])=>`${k}:${(Number(v)||0).toFixed(2)}`).join(' · ')}</div>
+              ${fcRow}
               <div>✅ hits: ${(row.cmp?.hits || []).join(', ') || '—'} · ❌ misses: ${(row.cmp?.misses || []).join(', ') || '—'} · ⚡ surprises: ${(row.cmp?.surprises || []).join(', ') || '—'}</div>
               <div>Accuracy ${(Number(m.precision||0)*100).toFixed(0)}% · Calibration ${(Number(m.calibrationError||0)).toFixed(2)} · Surprise ${(Number(m.surprise||0)*100).toFixed(0)}%</div>
             </div>`;
@@ -10418,11 +10616,32 @@ passes: 425"></textarea>
           const triggersN = todayUpdates.filter((u)=>u.type==='trigger').length;
           const cals = todayUpdates.filter((u)=>u.type==='calibration').map((u)=>Number(u.delta)||0);
           widget.innerHTML = `<b>Brain is adjusting</b> · Scenes adjusted today: <b>${scenesN}</b> · Triggers adjusted: <b>${triggersN}</b> · Calibration improved: <b>${(Math.max(0, -average(cals, 0))*100).toFixed(1)}%</b>`;
+          const phase = document.getElementById('mneLflPhase')?.value || '0-15';
+          const fRec = fRecords.find((r)=>r.madeAtPhase===phase) || fRecords[fRecords.length - 1];
+          if(lsfPanel){
+            const acc10rows = (brainV2.mne.lsfEvalHistory || []).filter((r)=>r.matchId===simMatchId).slice(-10);
+            const acc10 = acc10rows.length ? acc10rows.filter((r)=>r.predicted===r.truth).length / acc10rows.length : 0;
+            const avgBrier = lsfState.stats.forecastsMade ? lsfState.stats.brierSum / lsfState.stats.forecastsMade : 0;
+            if(fRec){
+              lsfPanel.innerHTML = `<div style="font-weight:800;">🔮 LIVE SCENARIO FORECAST · Próximos 10-15 min (${fRec.forecastForPhase || '-'})</div>
+                <div class="fl-mini" style="margin-top:4px;">Base ${(Number(fRec.probs?.base||0)*100).toFixed(0)}% | Trigger ${(Number(fRec.probs?.trigger||0)*100).toFixed(0)}% | Chaos ${(Number(fRec.probs?.chaos||0)*100).toFixed(0)}% · Forecast confidence ${(Number(fRec.confidence||0)*100).toFixed(0)}%</div>
+                <div class="fl-mini" style="margin-top:4px;">SWITCH RISK: <b>${fRec.switchRisk || 'MED'}</b></div>
+                <div class="fl-mini" style="margin-top:4px;"><b>Drivers</b>${(fRec.drivers || []).map((d)=>`<div>• ${d.key} (${d.val>0?'+':''}${Number(d.val||0).toFixed(2)} ${d.scenario})</div>`).join('') || '<div>• sin señales fuertes</div>'}</div>
+                <div class="fl-mini" style="margin-top:4px;"><b>If-Then switches</b>${(fRec.ifThen || []).slice(0,2).map((i)=>`<div>• ${i.label} → ${i.scenario} +${i.delta.toFixed(2)}</div>`).join('') || '<div>• sin switches candidatos</div>'}</div>
+                <div class="fl-mini" style="margin-top:6px;"><b>Learning mini panel:</b> forecasts made today ${lsfState.stats.forecastsMade} · accuracy last 10 ${(acc10*100).toFixed(0)}% · brier avg ${avgBrier.toFixed(3)} · weights updated: ${(brainV2.mne.lsfEvalHistory || []).slice(-1)[0]?.updatesCount>0 ? 'yes':'no'}</div>`;
+            }else{
+              lsfPanel.innerHTML = '<div class="fl-mini">Aún no hay forecast LSF para esta fase. Usa Compare & Learn para generarlo.</div>';
+            }
+          }
         };
+
 
         const initialPreds = (vision.mne?.narrative || []).map((phaseData)=>buildMnePhasePrediction({ matchId: simMatchId, phaseData }));
         brainV2.mne.phasePredictions[simMatchId] = initialPreds;
         brainV2.mne.phaseObservations[simMatchId] ||= [];
+        brainV2.mne.lsfForecasts ||= {};
+        brainV2.mne.lsfForecasts[simMatchId] ||= [];
+        brainV2.mne.lsfState = normalizeLsfState(brainV2.mne.lsfState);
         saveBrainV2(brainV2);
         renderLfl();
 
@@ -10442,9 +10661,87 @@ passes: 425"></textarea>
           if(idx >= 0) list[idx] = nextRow;
           else list.push(nextRow);
           brainV2.mne.phaseObservations[simMatchId] = list;
+
+          const featuresCurrent = extractLSFFeatures(observation, { comparison }, phase);
+          const records = brainV2.mne.lsfForecasts[simMatchId] || [];
+          const pending = records.find((r)=>r.forecastForPhase===phase && !r.evaluatedAt);
+          let lsfResult = null;
+          if(pending){
+            lsfResult = applyLsfLearning({ brainV2, matchId: simMatchId, madeAtPhase: pending.madeAtPhase, forecastRecord: pending, observedFeatures: featuresCurrent, evidenceCount: observation?.observed?.evidence?.events || 0 });
+            pending.evaluatedAt = new Date().toISOString();
+            pending.evaluation = lsfResult;
+          }
+
+          const nextPhase = nextMnePhase(phase);
+          const lsfForecast = computeLsfForecast({ lsfState: brainV2.mne.lsfState, features: featuresCurrent, forecastForPhase: nextPhase });
+          const rec = {
+            matchId: simMatchId,
+            madeAtPhase: phase,
+            madeAtTs: new Date().toISOString(),
+            forecastForPhase: nextPhase,
+            probs: lsfForecast.probs,
+            nextScenario: lsfForecast.nextScenario,
+            confidence: lsfForecast.confidence,
+            switchRisk: lsfForecast.switchRisk,
+            drivers: lsfForecast.drivers,
+            ifThen: lsfForecast.ifThen,
+            featuresSnapshot: featuresCurrent
+          };
+          const recIdx = records.findIndex((r)=>r.madeAtPhase===phase);
+          if(recIdx>=0) records[recIdx] = { ...records[recIdx], ...rec };
+          else records.push(rec);
+          brainV2.mne.lsfForecasts[simMatchId] = records;
+
+          const maxRel = Math.max(lsfForecast.probs.base, lsfForecast.probs.trigger, lsfForecast.probs.chaos);
+          const beta = clamp(0.15 + 0.2 * maxRel, 0.15, 0.35);
+          if(prediction?.predicted?.sceneId){
+            const prev = Number(brainV2.mne.sceneWeights?.[homeIdSel]?.[prediction.predicted.sceneId]) || 0;
+            const mixed = (1-beta) * prev + beta * (lsfForecast.probs.base - lsfForecast.probs.chaos);
+            brainV2.mne.sceneWeights[homeIdSel] ||= {};
+            brainV2.mne.sceneWeights[homeIdSel][prediction.predicted.sceneId] = Number(clamp(mixed, -2, 2).toFixed(3));
+          }
+          const triggerMap = [
+            { feat: 'cornersSurgeHome', id: 'setpiece_threat_boost' },
+            { feat: 'cornersSurgeAway', id: 'setpiece_threat_boost' },
+            { feat: 'varShock', id: 'turning_point_var' }
+          ];
+          triggerMap.forEach((row)=>{
+            const f = Number(featuresCurrent[row.feat]) || 0;
+            if(f<=0) return;
+            const prev = Number(brainV2.mne.triggerWeights[row.id]) || 0;
+            brainV2.mne.triggerWeights[row.id] = Number(clamp(prev + 0.02 * f, -2, 2).toFixed(3));
+          });
+
           saveBrainV2(brainV2);
-          if(statusEl) statusEl.textContent = learning.skipped === 'low_evidence' ? '⚠️ Evidencia insuficiente (<3 eventos), sin ajuste.' : `✅ Comparado. Prec ${(comparison.metrics.precision*100).toFixed(0)}% · Δcal ${comparison.metrics.calibrationError.toFixed(2)}.`;
+          if(statusEl){
+            const lsfTxt = lsfResult && !lsfResult.skipped ? ` · LSF eval ${lsfResult.truth} · brier ${Number(lsfResult.brier||0).toFixed(3)}` : '';
+            statusEl.textContent = learning.skipped === 'low_evidence' ? '⚠️ Evidencia insuficiente (<3 eventos), sin ajuste.' : `✅ Comparado. Prec ${(comparison.metrics.precision*100).toFixed(0)}% · Δcal ${comparison.metrics.calibrationError.toFixed(2)}${lsfTxt}.`;
+          }
           renderLfl();
+        });
+
+        document.getElementById('mneLsfLearnedBtn')?.addEventListener('click', ()=>{
+          const status = document.getElementById('mneLsfLearnStatus');
+          const lsfState = normalizeLsfState(brainV2.mne.lsfState);
+          const topByScenario = (scenario)=>Object.entries(lsfState.weights?.[scenario] || {}).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,5);
+          const hist = (brainV2.mne.lsfEvalHistory || []).filter((row)=>row.matchId===simMatchId);
+          const topWrong = hist.filter((row)=>row.predicted!==row.truth).slice(-20);
+          const modal = document.createElement('div');
+          modal.className = 'fl-modal-backdrop';
+          modal.innerHTML = `<div class="fl-modal" style="max-width:820px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;"><div><div class="fl-modal-title">What LSF learned</div><div class="fl-mini">Pesos actuales, mejoras y disparadores problemáticos.</div></div><button class="fl-btn" id="closeLsfModal">Cerrar</button></div>
+            <div class="fl-mini" style="margin-top:8px;display:grid;gap:6px;">
+              <div><b>base</b>: ${topByScenario('base').map(([k,v])=>`${k} ${v>=0?'+':''}${Number(v).toFixed(2)}`).join(' · ')}</div>
+              <div><b>trigger</b>: ${topByScenario('trigger').map(([k,v])=>`${k} ${v>=0?'+':''}${Number(v).toFixed(2)}`).join(' · ')}</div>
+              <div><b>chaos</b>: ${topByScenario('chaos').map(([k,v])=>`${k} ${v>=0?'+':''}${Number(v).toFixed(2)}`).join(' · ')}</div>
+              <div><b>Most improved this week</b>: ${hist.slice(-15).filter((r)=>r.updatesCount>0).slice(-5).map((r)=>`${r.phase}→${r.truth} (Δw ${r.updatesCount})`).join(' | ') || 'sin cambios'}</div>
+              <div><b>Most wrong triggers</b>: ${topWrong.slice(-5).map((r)=>`${r.phase}: pred ${r.predicted} / truth ${r.truth} (brier ${Number(r.brier).toFixed(3)})`).join(' | ') || 'sin errores recientes'}</div>
+            </div>
+          </div>`;
+          document.body.appendChild(modal);
+          modal.querySelector('#closeLsfModal')?.addEventListener('click', ()=>modal.remove());
+          modal.addEventListener('click', (evt)=>{ if(evt.target===modal) modal.remove(); });
+          if(status) status.textContent = `Mostrando ${hist.length} evaluaciones LSF.`;
         });
       });
       return;
