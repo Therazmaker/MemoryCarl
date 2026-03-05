@@ -30,6 +30,10 @@ export function initFootballLab(){
   const BRAIN_V2_KEY = "FL_BRAIN_V2";
   const GPE_TAG_ON = 0.25;
   const GPE_TOP_TAGS = 3;
+  const GIE_TAG_TRAINED_N = 20;
+  const GIE_TAG_STRONG_N = 40;
+  const GIE_COMBO_TRAINED_N = 30;
+  const GIE_COMBO_STRONG_N = 60;
   const hybridBrain = new HybridBrainService();
   let tfLoadPromise = null;
 
@@ -140,6 +144,8 @@ export function initFootballLab(){
     return {
       tagStats: parsed.tagStats && typeof parsed.tagStats === "object" ? parsed.tagStats : {},
       comboStats: parsed.comboStats && typeof parsed.comboStats === "object" ? parsed.comboStats : {},
+      tagImpact: parsed.tagImpact && typeof parsed.tagImpact === "object" ? parsed.tagImpact : {},
+      comboImpact: parsed.comboImpact && typeof parsed.comboImpact === "object" ? parsed.comboImpact : {},
       contextStats: parsed.contextStats && typeof parsed.contextStats === "object" ? parsed.contextStats : {},
       meta: parsed.meta && typeof parsed.meta === "object" ? parsed.meta : { matches: 0, updatedAt: null }
     };
@@ -147,6 +153,74 @@ export function initFootballLab(){
 
   function reliabilityFromSample(n = 0){
     return Number((1 - Math.exp(-(Number(n) || 0) / 20)).toFixed(3));
+  }
+
+  function reliabilityFromSampleCombo(n = 0){
+    return Number((1 - Math.exp(-(Number(n) || 0) / 30)).toFixed(3));
+  }
+
+  function computeBaseline(meta = {}){
+    const totalN = Math.max(0, Number(meta?.totalN) || Number(meta?.totalMatches) || Number(meta?.matches) || 0);
+    if(!totalN){
+      return { pW: Number((1/3).toFixed(4)), pD: Number((1/3).toFixed(4)), pL: Number((1/3).toFixed(4)), totalN: 0 };
+    }
+    const pW = clamp((Number(meta?.totalW) || 0) / totalN, 0, 1);
+    const pD = clamp((Number(meta?.totalD) || 0) / totalN, 0, 1);
+    const pL = clamp((Number(meta?.totalL) || 0) / totalN, 0, 1);
+    const sum = Math.max(0.0001, pW + pD + pL);
+    return {
+      pW: Number((pW / sum).toFixed(4)),
+      pD: Number((pD / sum).toFixed(4)),
+      pL: Number((pL / sum).toFixed(4)),
+      totalN
+    };
+  }
+
+  function computeImpactCore(stats = {}, baseline = {}, { combo = false } = {}){
+    const n = Math.max(0, Number(stats?.n) || 0);
+    const rel = combo ? reliabilityFromSampleCombo(n) : reliabilityFromSample(n);
+    const probs = smoothedProbs(stats);
+    const liftW = Number((probs.pW - (Number(baseline?.pW) || 0)).toFixed(4));
+    const liftD = Number((probs.pD - (Number(baseline?.pD) || 0)).toFixed(4));
+    const liftL = Number((probs.pL - (Number(baseline?.pL) || 0)).toFixed(4));
+    const effectSize = Number((((Math.abs(liftW) + Math.abs(liftD) + Math.abs(liftL)) / 2)).toFixed(4));
+    const impactScore = Number((rel * effectSize).toFixed(4));
+    const maxAbs = Math.max(Math.abs(liftW), Math.abs(liftD), Math.abs(liftL));
+    let polarity = "mixed";
+    if(effectSize < 0.04) polarity = "none";
+    else if(maxAbs === Math.abs(liftW)) polarity = "W";
+    else if(maxAbs === Math.abs(liftD)) polarity = "D";
+    else if(maxAbs === Math.abs(liftL)) polarity = "L";
+    const volatility = Number((rel * (Math.abs(liftD) + Math.abs(liftW) + Math.abs(liftL))).toFixed(4));
+    const isTrap = rel >= 0.6 && probs.pD >= (Number(baseline?.pD) || 0) + 0.1;
+    const isChaos = rel >= 0.6 && probs.pW >= (Number(baseline?.pW) || 0) + 0.12 && probs.pL >= (Number(baseline?.pL) || 0) + 0.12;
+    const smoke = effectSize < 0.04 || rel < 0.35;
+    return {
+      n,
+      rel,
+      pW: probs.pW,
+      pD: probs.pD,
+      pL: probs.pL,
+      liftW,
+      liftD,
+      liftL,
+      effectSize,
+      impactScore,
+      polarity,
+      volatility,
+      isTrap,
+      isChaos,
+      smoke,
+      lastUpdated: stats?.lastUpdated || null
+    };
+  }
+
+  function computeImpactForTag(stats = {}, baseline = {}){
+    return computeImpactCore(stats, baseline, { combo: false });
+  }
+
+  function computeImpactForCombo(stats = {}, baseline = {}){
+    return computeImpactCore(stats, baseline, { combo: true });
   }
 
   function formatIsoShort(value){
@@ -163,74 +237,59 @@ export function initFootballLab(){
       .map((row)=>buildBrainV2MatchFact(row));
     const totalMatches = Number(safeGpe?.meta?.totalMatches || safeGpe?.meta?.matches || facts.length) || 0;
     const totalTeams = Number(safeGpe?.meta?.totalTeams || 0) || new Set(facts.map((fact)=>fact.teamId).filter(Boolean)).size;
+    const baseline = computeBaseline(safeGpe?.meta || {});
     const tagRows = Object.entries(safeGpe.tagStats || {}).map(([tagId, stats])=>{
-      const n = Number(stats?.n) || 0;
+      const impact = safeGpe.tagImpact?.[tagId] || computeImpactForTag(stats, baseline);
       return {
         tagId,
-        n,
-        w: Number(stats?.w) || 0,
-        d: Number(stats?.d) || 0,
-        l: Number(stats?.l) || 0,
-        rel: reliabilityFromSample(n),
-        lastUpdated: stats?.lastUpdated || null
+        ...impact,
+        badge: impact.smoke ? "HUMO" : impact.isChaos ? "CHAOS" : impact.isTrap ? "TRAP" : impact.polarity === "W" ? "WIN" : impact.polarity === "D" ? "DRAW" : impact.polarity === "L" ? "LOSS" : "MIXED"
       };
-    }).sort((a,b)=>b.n-a.n || b.rel-a.rel);
+    }).sort((a,b)=>b.impactScore-a.impactScore || b.rel-a.rel || b.n-a.n);
     const comboRows = Object.entries(safeGpe.comboStats || {}).map(([comboKey, stats])=>{
-      const n = Number(stats?.n) || 0;
-      const probs = smoothedProbs(stats);
-      const rel = reliabilityFromSample(n);
-      const trap = rel > 0.6 && probs.pD > 0.4;
+      const impact = safeGpe.comboImpact?.[comboKey] || computeImpactForCombo(stats, baseline);
       return {
         comboKey,
-        n,
-        w: Number(stats?.w) || 0,
-        d: Number(stats?.d) || 0,
-        l: Number(stats?.l) || 0,
-        rel,
-        pD: probs.pD,
-        trap,
-        lastUpdated: stats?.lastUpdated || null
+        ...impact,
+        badge: impact.smoke ? "HUMO" : impact.isChaos ? "CHAOS" : impact.isTrap ? "TRAP" : impact.polarity === "W" ? "WIN" : impact.polarity === "D" ? "DRAW" : impact.polarity === "L" ? "LOSS" : "MIXED"
       };
-    }).sort((a,b)=>b.n-a.n || b.rel-a.rel);
-    const tagsTrained = tagRows.filter((r)=>r.n >= 20).length;
-    const tagsStrong = tagRows.filter((r)=>r.n >= 40).length;
-    const combosTrained = comboRows.filter((r)=>r.n >= 30).length;
-    const combosStrong = comboRows.filter((r)=>r.n >= 60).length;
-    const recent = facts
-      .slice()
-      .sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date))
-      .slice(0, 10);
-    const recentFreq = {};
-    recent.forEach((fact)=>{
-      Object.keys(fact.tags || {}).forEach((tagId)=>{
-        recentFreq[tagId] = (recentFreq[tagId] || 0) + 1;
+    }).sort((a,b)=>b.impactScore-a.impactScore || b.rel-a.rel || b.n-a.n);
+    const tagsTrained = tagRows.filter((r)=>r.n >= GIE_TAG_TRAINED_N).length;
+    const tagsStrong = tagRows.filter((r)=>r.n >= GIE_TAG_STRONG_N).length;
+    const combosTrained = comboRows.filter((r)=>r.n >= GIE_COMBO_TRAINED_N).length;
+    const combosStrong = comboRows.filter((r)=>r.n >= GIE_COMBO_STRONG_N).length;
+    const strongSignals = tagRows.filter((r)=>r.rel >= 0.6 && r.effectSize >= 0.08).length;
+    const trapSignals = tagRows.filter((r)=>r.isTrap).length;
+    const chaosSignals = tagRows.filter((r)=>r.isChaos).length;
+    const top5 = tagRows.slice(0,5);
+    const avgRelTop5Tags = top5.length ? top5.reduce((acc, row)=>acc + row.rel, 0) / top5.length : 0;
+    const readiness = clamp(100 * avgRelTop5Tags * (totalMatches / 120), 0, 100);
+    const warnings = tagRows
+      .filter((row)=>row.rel >= 0.6)
+      .slice(0, 6)
+      .map((row)=>{
+        if(row.isChaos) return `🌀 ${row.tagId} produce caos (sube W ${(row.liftW*100).toFixed(1)}% y L ${(row.liftL*100).toFixed(1)}%).`;
+        if(row.isTrap) return `⚠️ ${row.tagId} tiende a aumentar empates (+${(row.liftD*100).toFixed(1)}%) con rel ${row.rel.toFixed(2)}.`;
+        if(row.polarity === "W") return `🔥 ${row.tagId} aumenta wins (${row.liftW>=0?'+':''}${(row.liftW*100).toFixed(1)}%).`;
+        if(row.polarity === "L") return `📉 ${row.tagId} empuja losses (${row.liftL>=0?'+':''}${(row.liftL*100).toFixed(1)}%).`;
+        return `ℹ️ ${row.tagId} mueve draws (${row.liftD>=0?'+':''}${(row.liftD*100).toFixed(1)}%).`;
       });
-    });
-    const learnNext = Object.entries(recentFreq)
-      .map(([tagId, frequency])=>({
-        tagId,
-        frequency,
-        n: Number(safeGpe.tagStats?.[tagId]?.n) || 0
-      }))
-      .filter((item)=>item.frequency >= 2 && item.n < 20)
-      .sort((a,b)=>b.frequency-a.frequency || a.n-b.n)
-      .slice(0, 6);
-    const relBuckets = [0,0,0,0,0];
-    tagRows.forEach((row)=>{
-      const idx = Math.min(4, Math.max(0, Math.floor((Number(row.rel) || 0) / 0.2)));
-      relBuckets[idx] += 1;
-    });
     return {
       totalMatches,
       totalTeams,
+      baseline,
       tagRows,
       comboRows,
       tagsTrained,
       tagsStrong,
       combosTrained,
       combosStrong,
-      learnNext,
-      relBuckets
+      strongSignals,
+      trapSignals,
+      chaosSignals,
+      avgRelTop5Tags,
+      readiness,
+      warnings
     };
   }
 
@@ -286,8 +345,14 @@ export function initFootballLab(){
       .map((row)=>buildBrainV2MatchFact(row))
       .filter((fact)=>Object.keys(fact.tags || {}).length);
 
+    let totalW = 0;
+    let totalD = 0;
+    let totalL = 0;
     facts.forEach((fact)=>{
       const resultKey = fact.result === "W" ? "w" : fact.result === "L" ? "l" : "d";
+      if(resultKey === "w") totalW += 1;
+      else if(resultKey === "d") totalD += 1;
+      else totalL += 1;
       const tagEntries = Object.entries(fact.tags || {});
       const contextKey = `side:${fact?.context?.side || 'unknown'}`;
       const contextBucket = state.contextStats[contextKey] || { n: 0, w: 0, d: 0, l: 0 };
@@ -325,9 +390,24 @@ export function initFootballLab(){
     state.meta = {
       matches: facts.length,
       totalMatches: facts.length,
+      totalN: facts.length,
+      totalW,
+      totalD,
+      totalL,
       totalTeams: new Set(facts.map((fact)=>fact.teamId).filter(Boolean)).size,
       updatedAt: new Date().toISOString()
     };
+    const baseline = computeBaseline(state.meta);
+    const tagImpact = {};
+    Object.entries(state.tagStats || {}).forEach(([tagId, stats])=>{
+      tagImpact[tagId] = computeImpactForTag(stats, baseline);
+    });
+    const comboImpact = {};
+    Object.entries(state.comboStats || {}).forEach(([comboKey, stats])=>{
+      comboImpact[comboKey] = computeImpactForCombo(stats, baseline);
+    });
+    state.tagImpact = tagImpact;
+    state.comboImpact = comboImpact;
     return state;
   }
 
@@ -1277,6 +1357,8 @@ export function initFootballLab(){
       blended = blendOutcomes(blended, market, 0.65);
     }
 
+    const baseline = computeBaseline(gpe?.meta || {});
+    const tagImpactMap = gpe?.tagImpact || {};
     const gpeTagStats = gpe?.tagStats || {};
     const homeTopTags = (homeProfile?.reasonTagRates
       ? Object.entries(homeProfile.reasonTagRates)
@@ -1291,51 +1373,53 @@ export function initFootballLab(){
       .sort((a,b)=>(Number(b[1]) || 0) - (Number(a[1]) || 0))
       .slice(0, GPE_TOP_TAGS);
     const buildTagVotes = (entries = [], side = "home")=>entries.map(([tagId])=>{
-      const stats = gpeTagStats[tagId];
-      if(!stats) return null;
-      const probs = smoothedProbs(stats);
-      const rel = reliabilityFromSample(stats.n);
+      const impact = tagImpactMap[tagId] || (gpeTagStats[tagId] ? computeImpactForTag(gpeTagStats[tagId], baseline) : null);
+      if(!impact) return null;
       return {
         tagId,
         side,
-        n: stats.n,
-        reliability: rel,
-        pW: probs.pW,
-        pD: probs.pD,
-        pL: probs.pL,
-        delta: {
-          w: rel * (probs.pW - 1/3),
-          d: rel * (probs.pD - 1/3),
-          l: rel * (probs.pL - 1/3)
-        }
+        n: impact.n,
+        reliability: impact.rel,
+        pW: impact.pW,
+        pD: impact.pD,
+        pL: impact.pL,
+        liftW: impact.liftW,
+        liftD: impact.liftD,
+        liftL: impact.liftL
       };
     }).filter(Boolean);
     const homeVotes = buildTagVotes(homeTopTags, "home");
     const awayVotes = buildTagVotes(awayTopTags, "away");
     const combinedVotes = [...homeVotes, ...awayVotes];
-    const eligibleVotes = combinedVotes.filter((vote)=>Number(vote.n) >= 20);
-    const avgRelEligible = eligibleVotes.length
-      ? (eligibleVotes.reduce((acc, item)=>acc + item.reliability, 0) / eligibleVotes.length)
+    const reliableVotes = combinedVotes.filter((vote)=>Number(vote.reliability) >= 0.6);
+    const avgRelEligible = reliableVotes.length
+      ? (reliableVotes.reduce((acc, item)=>acc + item.reliability, 0) / reliableVotes.length)
       : 0;
-    const evidenceOk = eligibleVotes.length >= 3 && avgRelEligible >= 0.55;
-    const votesForBlend = evidenceOk ? eligibleVotes : [];
-    const gpeVotes = {
-      home: votesForBlend.reduce((acc, item)=>acc + (item.side === "home" ? item.delta.w : item.delta.l), 0),
-      draw: votesForBlend.reduce((acc, item)=>acc + item.delta.d, 0),
-      away: votesForBlend.reduce((acc, item)=>acc + (item.side === "home" ? item.delta.l : item.delta.w), 0)
-    };
-    const gpeShiftRaw = {
-      home: 1/3 + gpeVotes.home,
-      draw: 1/3 + gpeVotes.draw,
-      away: 1/3 + gpeVotes.away
-    };
-    const gpeShiftSum = Math.max(0.0001, gpeShiftRaw.home + gpeShiftRaw.draw + gpeShiftRaw.away);
+    const evidenceOk = avgRelEligible >= 0.6 && Number(gpe?.meta?.totalMatches || 0) >= 60;
+    const votesForBlend = evidenceOk ? reliableVotes : [];
+    const relSum = votesForBlend.reduce((acc, item)=>acc + item.reliability, 0) || 1;
+    let gW = baseline.pW;
+    let gD = baseline.pD;
+    let gL = baseline.pL;
+    votesForBlend.forEach((item)=>{
+      const wi = item.reliability / relSum;
+      if(item.side === "home"){
+        gW += wi * item.liftW;
+        gD += wi * item.liftD;
+        gL += wi * item.liftL;
+      }else{
+        gW += wi * item.liftL;
+        gD += wi * item.liftD;
+        gL += wi * item.liftW;
+      }
+    });
+    const gRawSum = Math.max(0.0001, gW + gD + gL);
     const gpeProbs = {
-      home: clamp(gpeShiftRaw.home / gpeShiftSum, 0.02, 0.94),
-      draw: clamp(gpeShiftRaw.draw / gpeShiftSum, 0.02, 0.94),
-      away: clamp(gpeShiftRaw.away / gpeShiftSum, 0.02, 0.94)
+      home: clamp(gW / gRawSum, 0.02, 0.94),
+      draw: clamp(gD / gRawSum, 0.02, 0.94),
+      away: clamp(gL / gRawSum, 0.02, 0.94)
     };
-    const alpha = evidenceOk ? clamp(avgRelEligible * 0.6, 0, 0.35) : 0;
+    const alpha = evidenceOk ? clamp(avgRelEligible * 0.25, 0, 0.25) : 0;
     const mixed = {
       home: (blended.home * (1 - alpha)) + (gpeProbs.home * alpha),
       draw: (blended.draw * (1 - alpha)) + (gpeProbs.draw * alpha),
@@ -1351,9 +1435,9 @@ export function initFootballLab(){
     const contributionPreview = votesForBlend
       .map((item)=>{
         const shift = {
-          home: item.side === "home" ? item.delta.w : item.delta.l,
-          draw: item.delta.d,
-          away: item.side === "home" ? item.delta.l : item.delta.w
+          home: item.side === "home" ? item.liftW : item.liftL,
+          draw: item.liftD,
+          away: item.side === "home" ? item.liftL : item.liftW
         };
         const strongest = Object.entries(shift).sort((a,b)=>Math.abs(b[1]) - Math.abs(a[1]))[0] || ["draw", 0];
         return {
@@ -1372,6 +1456,7 @@ export function initFootballLab(){
       .slice(0, 3);
 
     const comboStats = gpe?.comboStats || {};
+    const comboImpact = gpe?.comboImpact || {};
     const trapWarnings = [];
     const checkCombos = (tags = [], side = "home")=>{
       for(let i=0; i<tags.length; i += 1){
@@ -1379,13 +1464,12 @@ export function initFootballLab(){
           const comboKey = [tags[i][0], tags[j][0]].sort().join("|");
           const combo = comboStats[comboKey];
           if(!combo) continue;
-          const probs = smoothedProbs(combo);
-          const rel = reliabilityFromSample(combo.n);
-          if(rel >= 0.5 && (probs.pD >= 0.4 || (probs.pW >= 0.35 && probs.pL >= 0.35))){
+          const impact = comboImpact[comboKey] || computeImpactForCombo(combo, baseline);
+          if(impact.rel >= 0.6 && (impact.isTrap || impact.isChaos)){
             trapWarnings.push({
-              type: "TRAP_MATCH",
-              reason: `Combo ${comboKey} históricamente genera partidos trampa (${probs.pD >= 0.4 ? "alto empate" : "alta varianza"}).`,
-              confidence: Number(rel.toFixed(2)),
+              type: impact.isChaos ? "CHAOS_MATCH" : "TRAP_MATCH",
+              reason: `Combo ${comboKey} ${impact.isChaos ? "aporta caos (sube W y L)" : "tiende a empates trampa"}.`,
+              confidence: Number(impact.rel.toFixed(2)),
               side
             });
           }
@@ -1449,7 +1533,8 @@ export function initFootballLab(){
       `${homeResistance >= awayResistance ? "🫀 Local muestra más resistencia" : "🫀 Visita muestra más resistencia"} (${Math.round(homeResistance)} vs ${Math.round(awayResistance)}).`,
       `${homeFatigue >= awayFatigue ? "🥵 Local aparece más cargado físicamente" : "🥵 Visita aparece más cargado físicamente"} (${Math.round(homeFatigue)} vs ${Math.round(awayFatigue)}).`
     ];
-    if(alpha > 0.02) insights.push(`🌍 GPE ajustó el pronóstico con α=${alpha.toFixed(2)} (reliability media ${(avgRelEligible*100).toFixed(0)}%).`);
+    if(alpha > 0.02) insights.push(`🌍 GIE ajustó el pronóstico con α=${alpha.toFixed(2)} (reliability media ${(avgRelEligible*100).toFixed(0)}%).`);
+    else insights.push("🌍 Sin evidencia global fuerte: se mantiene el modelo local.");
     trapWarnings.forEach((warning)=>insights.push(`⚠️ ${warning.reason}`));
 
     const reasonPreview = [
@@ -1492,7 +1577,7 @@ export function initFootballLab(){
         avgReliability: Number(avgRelEligible.toFixed(3)),
         tags: votesForBlend,
         evidenceOk,
-        eligibleCount: eligibleVotes.length,
+        eligibleCount: reliableVotes.length,
         topContributors: contributionPreview,
         trapWarnings
       },
@@ -9609,41 +9694,30 @@ passes: 425"></textarea>
         const node = document.getElementById('b2GlobalLearningPanel');
         if(!node) return;
         const gp = computeGlobalLearningProgress(brainV2.memories, brainV2.gpe);
-        const tagTotal = gp.tagRows.length;
-        const comboTotal = gp.comboRows.length;
-        const levelTargets = [60, 120, 250].map((target, idx)=>({
-          label: `Nivel ${idx+1}`,
-          target,
-          progress: clamp((gp.totalMatches / Math.max(1, target)) * 100, 0, 100),
-          missing: Math.max(0, target - gp.totalMatches)
-        }));
         const tagRows = gp.tagRows.slice(0, 20).map((row)=>{
-          const splitTotal = Math.max(1, row.w + row.d + row.l);
-          const band = row.n >= 40 ? '#2ea043' : row.n >= 20 ? '#3fb950' : row.n >= 10 ? '#f2cc60' : '#8b949e';
-          return `<tr><td>${row.tagId}</td><td><b style="color:${band};">${row.n}</b></td><td><div style="height:8px;background:#222;border-radius:999px;min-width:110px;"><div style="width:${Math.round(row.rel*100)}%;height:8px;background:${band};border-radius:999px;"></div></div><div class="fl-mini">${Math.round(row.rel*100)}%</div></td><td class="fl-mini">W ${Math.round((row.w/splitTotal)*100)}% · D ${Math.round((row.d/splitTotal)*100)}% · L ${Math.round((row.l/splitTotal)*100)}%</td><td class="fl-mini">${formatIsoShort(row.lastUpdated)}</td></tr>`;
+          const relPct = Math.round(row.rel * 100);
+          const lifts = `W ${row.liftW>=0?'+':''}${(row.liftW*100).toFixed(1)}% · D ${row.liftD>=0?'+':''}${(row.liftD*100).toFixed(1)}% · L ${row.liftL>=0?'+':''}${(row.liftL*100).toFixed(1)}%`;
+          return `<tr><td>${row.tagId}</td><td>${row.n}</td><td><div style="height:8px;background:#222;border-radius:999px;min-width:90px;"><div style="width:${relPct}%;height:8px;background:#58a6ff;border-radius:999px;"></div></div><div class="fl-mini">${relPct}%</div></td><td class="fl-mini">${lifts}</td><td>${row.impactScore.toFixed(3)}</td><td>${row.badge}</td></tr>`;
         }).join('');
-        const comboRows = gp.comboRows.slice(0, 18).map((row)=>`<tr><td>${row.comboKey}</td><td>${row.n}</td><td>${Math.round(row.rel*100)}%</td><td>${row.pD > 0.40 ? '⚠️ Sí' : 'No'}</td><td>${row.trap ? '🚨 Trap' : '-'}</td><td class="fl-mini">${formatIsoShort(row.lastUpdated)}</td></tr>`).join('');
-        const learnRows = gp.learnNext.map((row)=>`<div class="fl-mini" style="padding:6px 0;border-bottom:1px solid #30363d;"><b>${row.tagId}</b>: aparece ${row.frequency} veces (últimos 10), pero solo n=${row.n} → registra más partidos con este patrón.</div>`).join('');
-        const bucketLabels = ['0-0.2','0.2-0.4','0.4-0.6','0.6-0.8','0.8-1.0'];
-        const maxBucket = Math.max(1, ...gp.relBuckets);
-        const hist = gp.relBuckets.map((count, idx)=>`<div><div class="fl-mini">${bucketLabels[idx]} (${count})</div><div style="height:10px;background:#222;border-radius:999px;"><div style="width:${Math.round((count/maxBucket)*100)}%;height:10px;background:#58a6ff;border-radius:999px;"></div></div></div>`).join('');
+        const comboRows = gp.comboRows.slice(0, 18).map((row)=>{
+          const lifts = `W ${row.liftW>=0?'+':''}${(row.liftW*100).toFixed(1)}% · D ${row.liftD>=0?'+':''}${(row.liftD*100).toFixed(1)}% · L ${row.liftL>=0?'+':''}${(row.liftL*100).toFixed(1)}%`;
+          return `<tr><td>${row.comboKey}</td><td>${row.n}</td><td>${Math.round(row.rel*100)}%</td><td class="fl-mini">${lifts}</td><td>${row.impactScore.toFixed(3)}</td><td>${row.badge}</td></tr>`;
+        }).join('');
+        const warnings = gp.warnings.map((line)=>`<div class="fl-mini" style="padding:6px 0;border-bottom:1px solid #30363d;">${line}</div>`).join('');
         node.innerHTML = `
-          <div style="font-size:18px;font-weight:900;">⚡ Global Learning Progress (GPE)</div>
+          <div style="font-size:18px;font-weight:900;">🌍 Global Impact Panel (GIE)</div>
           <div class="fl-kpi" style="margin-top:8px;">
-            <div><span class="fl-mini">Matches globales</span><b>${gp.totalMatches} / 120</b></div>
-            <div><span class="fl-mini">Teams cubiertos</span><b>${gp.totalTeams}</b></div>
-            <div><span class="fl-mini">Tags trained</span><b>${gp.tagsTrained} / ${tagTotal}</b><div class="fl-mini">Strong ${gp.tagsStrong}</div></div>
-            <div><span class="fl-mini">Combos trained</span><b>${gp.combosTrained} / ${comboTotal}</b><div class="fl-mini">Strong ${gp.combosStrong}</div></div>
-          </div>
-          <div style="margin-top:8px;gap:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">${levelTargets.map((lvl)=>`<div class="fl-card" style="padding:8px;"><div style="font-weight:700;">${lvl.label}</div><div class="fl-mini">Meta ${lvl.target}</div><div style="height:8px;background:#222;border-radius:999px;margin-top:4px;"><div style="width:${lvl.progress}%;height:8px;background:#3fb950;border-radius:999px;"></div></div><div class="fl-mini" style="margin-top:4px;">Faltan ${lvl.missing} partidos</div></div>`).join('')}</div>
-          <div class="fl-grid two" style="margin-top:8px;gap:8px;">
-            <div class="fl-card" style="padding:8px;"><b>Tag Coverage Table</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>tag</th><th>n</th><th>rel</th><th>W/D/L</th><th>lastUpdated</th></tr></thead><tbody>${tagRows || '<tr><td colspan="5" class="fl-mini">Sin tags aún.</td></tr>'}</tbody></table></div>
-            <div class="fl-card" style="padding:8px;"><b>Combo Coverage Table</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>combo</th><th>n</th><th>rel</th><th>draw bias</th><th>trap</th><th>lastUpdated</th></tr></thead><tbody>${comboRows || '<tr><td colspan="6" class="fl-mini">Sin combos aún.</td></tr>'}</tbody></table></div>
+            <div><span class="fl-mini">Strong signals</span><b>${gp.strongSignals}</b></div>
+            <div><span class="fl-mini">Trap signals</span><b>${gp.trapSignals}</b></div>
+            <div><span class="fl-mini">Chaos signals</span><b>${gp.chaosSignals}</b></div>
+            <div><span class="fl-mini">Global readiness</span><b>${gp.readiness.toFixed(0)} / 100</b></div>
           </div>
           <div class="fl-grid two" style="margin-top:8px;gap:8px;">
-            <div class="fl-card" style="padding:8px;"><b>What to learn next</b><div style="margin-top:6px;">${learnRows || '<div class="fl-mini">No hay tags urgentes: cobertura reciente saludable.</div>'}</div></div>
-            <div class="fl-card" style="padding:8px;"><b>Reliability Distribution</b><div style="display:grid;gap:8px;margin-top:6px;">${hist}</div></div>
-          </div>`;
+            <div class="fl-card" style="padding:8px;"><b>Top Impact Tags</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>tag</th><th>n</th><th>rel</th><th>lift W/D/L</th><th>impact</th><th>badge</th></tr></thead><tbody>${tagRows || '<tr><td colspan="6" class="fl-mini">Sin tags aún.</td></tr>'}</tbody></table></div>
+            <div class="fl-card" style="padding:8px;"><b>Top Impact Combos</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>combo</th><th>n</th><th>rel</th><th>lift W/D/L</th><th>impact</th><th>badge</th></tr></thead><tbody>${comboRows || '<tr><td colspan="6" class="fl-mini">Sin combos aún.</td></tr>'}</tbody></table></div>
+          </div>
+          <div class="fl-card" style="margin-top:8px;padding:8px;"><b>Global Warnings you can trust</b><div style="margin-top:6px;">${warnings || '<div class="fl-mini">Aún no hay señales con rel ≥ 0.60.</div>'}</div></div>
+          <div class="fl-mini" style="margin-top:8px;">Baseline global: W ${(gp.baseline.pW*100).toFixed(1)}% · D ${(gp.baseline.pD*100).toFixed(1)}% · L ${(gp.baseline.pL*100).toFixed(1)}% · Matches ${gp.totalMatches}</div>`;
       };
 
       const renderBrainV2PowerDashboard = ()=>{
@@ -10049,10 +10123,10 @@ passes: 425"></textarea>
           <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples}</div>
           <div class="fl-mini" style="margin-top:4px;">Perfil narrativo (N=${homeProfile.lastN}/${awayProfile.lastN}) · presión tardía ${homeProfile.tendencies.latePressureAvg.toFixed(1)} vs ${awayProfile.tendencies.latePressureAvg.toFixed(1)}</div>
           <div class="fl-card" style="margin-top:8px;padding:8px;"><b>Global Evidence</b>
-            <div class="fl-mini" style="margin-top:4px;">${vision.globalEvidence?.evidenceOk ? '✅ Global Evidence OK' : '❌ Sin evidencia global suficiente'}</div>
+            <div class="fl-mini" style="margin-top:4px;">${vision.globalEvidence?.evidenceOk ? '✅ Global Evidence OK' : '❌ Sin evidencia global fuerte'}</div>
             ${vision.globalEvidence?.evidenceOk
               ? (vision.globalEvidence?.topContributors || []).map((item)=>`<div class="fl-mini">${item.tagId}: n=${item.n} rel=${(item.reliability*100).toFixed(0)}% → ${item.impactDelta>=0?'+':''}${item.impactDelta.toFixed(1)}% ${item.impactTarget}</div>`).join('')
-              : `<div class="fl-mini">Se requieren al menos 3 tags con n≥20 y reliability media ≥55% (actual: ${vision.globalEvidence?.eligibleCount || 0} tags · ${(Number(vision.globalEvidence?.avgReliability||0)*100).toFixed(0)}%).</div>`}
+              : `<div class="fl-mini">Se requiere avg rel ≥60% y al menos 60 matches globales (actual: ${vision.globalEvidence?.eligibleCount || 0} tags confiables · ${(Number(vision.globalEvidence?.avgReliability||0)*100).toFixed(0)}%).</div>`}
             ${(vision.globalEvidence?.trapWarnings || []).map((w)=>`<div class="fl-mini">⚠️ ${w.reason} · conf ${(Number(w.confidence||0)*100).toFixed(0)}%</div>`).join('')}
           </div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px;">
