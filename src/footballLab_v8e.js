@@ -1406,7 +1406,7 @@ export function initFootballLab(){
     const precision = hits.length / 3;
     const recall = hits.length / top3ObservedCount;
     const phaseTruthScore = predictedTags.length
-      ? avg(predictedTags.map(([tag])=>Number(observedDerived[tag]) || 0))
+      ? predictedTags.reduce((acc, [tag])=>acc + (Number(observedDerived[tag]) || 0), 0) / predictedTags.length
       : 0;
     const calError = (Number(prediction?.predicted?.confidence) || 0) - phaseTruthScore;
     const surprise = observedTop.reduce((acc, [tag, val])=>acc + Math.max(0, (Number(val) || 0) - (Number(prediction?.predicted?.tags?.[tag]) || 0)), 0);
