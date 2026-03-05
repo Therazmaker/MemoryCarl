@@ -2110,6 +2110,20 @@ export function initFootballLab(){
     match.featureSnapshots ||= {};
     match.featureSnapshotStatus ||= {};
     match.opponentStrengthByTeam ||= {};
+    match.homeLineup ||= [];
+    match.awayLineup ||= [];
+    match.homeFormation = String(match.homeFormation || "").trim();
+    match.awayFormation = String(match.awayFormation || "").trim();
+    match.homeEarlySubs = Math.max(0, Number(match.homeEarlySubs) || 0);
+    match.awayEarlySubs = Math.max(0, Number(match.awayEarlySubs) || 0);
+    match.homeSystemChanges = Math.max(0, Number(match.homeSystemChanges) || 0);
+    match.awaySystemChanges = Math.max(0, Number(match.awaySystemChanges) || 0);
+    match.homeErrorsLeadingConcede = Math.max(0, Number(match.homeErrorsLeadingConcede) || 0);
+    match.awayErrorsLeadingConcede = Math.max(0, Number(match.awayErrorsLeadingConcede) || 0);
+    match.homeCardsAfterMistake = Math.max(0, Number(match.homeCardsAfterMistake) || 0);
+    match.awayCardsAfterMistake = Math.max(0, Number(match.awayCardsAfterMistake) || 0);
+    match.homeConcededAfterMiss = Math.max(0, Number(match.homeConcededAfterMiss) || 0);
+    match.awayConcededAfterMiss = Math.max(0, Number(match.awayConcededAfterMiss) || 0);
     if(match.oddsHome>1 && match.oddsDraw>1 && match.oddsAway>1){
       match.marketOddsSnapshot ||= {
         matchId: match.id,
@@ -2121,6 +2135,142 @@ export function initFootballLab(){
       };
     }
     return match;
+  }
+
+  function parseLineupList(raw){
+    if(Array.isArray(raw)) return raw.map((n)=>String(n || "").trim()).filter(Boolean);
+    return String(raw || "")
+      .split(/[\n,;|]+/)
+      .map((n)=>n.trim())
+      .filter(Boolean);
+  }
+
+  function getTeamMatchSide(match, teamId){
+    if(!match || !teamId) return null;
+    if(match.homeId===teamId) return "home";
+    if(match.awayId===teamId) return "away";
+    return null;
+  }
+
+  function getRecentTeamMatches(db, teamId, limit = 5){
+    return (db.tracker || [])
+      .filter((m)=>m.homeId===teamId || m.awayId===teamId)
+      .sort(compareByDateAsc)
+      .slice(-limit);
+  }
+
+  function computeMatchReadinessEngine(db, teamId){
+    const matches = getRecentTeamMatches(db, teamId, 5);
+    if(!matches.length){
+      return {
+        readinessScore: 50,
+        mentalState: "sin_datos",
+        tacticalCohesion: 50,
+        lineupStability: 50,
+        chemistry: 50,
+        coachClarity: 50,
+        confidence: 50,
+        volatility: 50,
+        collapseRate: 0.5,
+        systemStability: 50,
+        verdict: "Sin datos suficientes"
+      };
+    }
+
+    const lineupKeys = [];
+    const formations = [];
+    const chemistryPairs = {};
+    let collapseSum = 0;
+    let confidenceSum = 0;
+    let coachChaosSum = 0;
+    let rotationNoiseAcc = 0;
+
+    matches.forEach((m, idx)=>{
+      ensureTrackerMatchState(m);
+      const side = getTeamMatchSide(m, teamId);
+      if(!side) return;
+      const isHome = side === "home";
+      const gf = Number(isHome ? m.homeGoals : m.awayGoals) || 0;
+      const ga = Number(isHome ? m.awayGoals : m.homeGoals) || 0;
+      const xg = Number(isHome ? m.homeXg : m.awayXg) || 0;
+      const shotsOT = Number(isHome ? m.homeShotsOnTarget : m.awayShotsOnTarget) || 0;
+      const yellows = Number(isHome ? m.homeYellow : m.awayYellow) || 0;
+      const errorsConcede = Number(isHome ? m.homeErrorsLeadingConcede : m.awayErrorsLeadingConcede) || 0;
+      const cardsAfterMistake = Number(isHome ? m.homeCardsAfterMistake : m.awayCardsAfterMistake) || 0;
+      const concededAfterMiss = Number(isHome ? m.homeConcededAfterMiss : m.awayConcededAfterMiss) || 0;
+      const earlySubs = Number(isHome ? m.homeEarlySubs : m.awayEarlySubs) || 0;
+      const systemChanges = Number(isHome ? m.homeSystemChanges : m.awaySystemChanges) || 0;
+      const formation = String(isHome ? m.homeFormation : m.awayFormation || "").trim();
+      const lineup = parseLineupList(isHome ? m.homeLineup : m.awayLineup);
+
+      if(formation) formations.push(formation);
+      if(lineup.length) lineupKeys.push(lineup.map((name)=>name.toLowerCase()).sort().join("|"));
+      lineup.forEach((a, i)=>{
+        for(let j=i+1; j<lineup.length; j++){
+          const b = lineup[j];
+          const key = [a,b].map((n)=>n.toLowerCase()).sort().join("~");
+          chemistryPairs[key] = (chemistryPairs[key] || 0) + 1;
+        }
+      });
+
+      const collapse = errorsConcede + cardsAfterMistake + concededAfterMiss;
+      collapseSum += collapse;
+      const reaction = gf - ga;
+      const finishingFailure = Math.max(0, xg - gf);
+      const confidenceRaw = clamp((shotsOT * 8) + (reaction * 12) - (finishingFailure * 10) - (yellows * 4), 0, 100);
+      confidenceSum += confidenceRaw;
+      coachChaosSum += clamp((earlySubs * 20) + (systemChanges * 25), 0, 100);
+
+      if(idx>0){
+        const prev = matches[idx-1];
+        const prevSide = getTeamMatchSide(prev, teamId);
+        const prevLineup = parseLineupList(prevSide==="home" ? prev.homeLineup : prev.awayLineup);
+        const changes = Math.max(0, lineup.length + prevLineup.length - (2 * prevLineup.filter((p)=>lineup.includes(p)).length));
+        rotationNoiseAcc += changes;
+      }
+    });
+
+    const avgCollapse = collapseSum / matches.length;
+    const collapseRate = clamp(avgCollapse / 5, 0, 1);
+    const confidenceTrend = clamp((confidenceSum / matches.length) / 100, 0, 1);
+    const lineupStability = lineupKeys.length > 1
+      ? clamp((new Set(lineupKeys).size === 1 ? 1 : 1 - ((new Set(lineupKeys).size - 1) / lineupKeys.length)), 0, 1)
+      : 0.5;
+    const rotationNoise = matches.length > 1 ? rotationNoiseAcc / (matches.length - 1) : 0;
+    const systemStability = formations.length > 1
+      ? clamp(1 - ((new Set(formations).size - 1) / formations.length), 0, 1)
+      : 0.6;
+    const chemistryIndex = clamp(Object.values(chemistryPairs).filter((v)=>v>=2).length / Math.max(1, Object.keys(chemistryPairs).length), 0, 1);
+    const coachClarity = clamp(1 - ((coachChaosSum / matches.length) / 100), 0, 1);
+    const tacticalCohesion = clamp((lineupStability*0.45) + (systemStability*0.35) + (Math.max(0, 1 - (rotationNoise/6))*0.2), 0, 1);
+
+    const readiness = (
+      0.22*confidenceTrend +
+      0.20*(1-collapseRate) +
+      0.18*lineupStability +
+      0.14*chemistryIndex +
+      0.14*coachClarity +
+      0.12*systemStability
+    );
+    const readinessScore = Math.round(clamp(readiness * 100, 0, 100));
+    const volatility = Math.round(clamp((collapseRate*0.45 + (1-lineupStability)*0.25 + (1-coachClarity)*0.3) * 100, 0, 100));
+    const mentalState = readinessScore < 30 ? "roto" : readinessScore < 45 ? "fragil" : readinessScore < 60 ? "inestable" : readinessScore < 75 ? "solido" : "enchufado";
+    const verdict = readinessScore > 75 ? "Llega enchufado" : readinessScore >= 60 ? "Llega sólido" : readinessScore >= 45 ? "Llega inestable" : readinessScore >= 30 ? "No llega bien" : "Llega roto";
+
+    return {
+      readinessScore,
+      mentalState,
+      tacticalCohesion: Math.round(tacticalCohesion * 100),
+      lineupStability: Math.round(lineupStability * 100),
+      chemistry: Math.round(chemistryIndex * 100),
+      coachClarity: Math.round(coachClarity * 100),
+      confidence: Math.round(confidenceTrend * 100),
+      volatility,
+      collapseRate,
+      systemStability: Math.round(systemStability * 100),
+      verdict,
+      rotationNoise: Number(rotationNoise.toFixed(2))
+    };
   }
 
   function refreshOpponentStrengthSnapshots(db){
@@ -8751,11 +8901,13 @@ function computeTeamIntelligencePanel(db, teamId){
           ? `Pulse ${Math.round(snap.features.pulse||0)} | Fatiga ${Math.round(snap.features.fatiga||0)} | Res ${Math.round(snap.features.resiliencia||0)} | Mom ${Number(snap.features.momentum||0).toFixed(2)}`
           : "Sin cálculo";
         const calcLabel = calcState==="ok" ? "ok ✅" : calcState==="calculando" ? "calculando..." : calcState==="error" ? "error ❌" : "pendiente";
+        const lineup = parseLineupList(isHome ? m.homeLineup : m.awayLineup);
+        const lineupPreview = lineup.length ? lineup.slice(0, 5).join(", ") + (lineup.length>5 ? "…" : "") : "Sin XI cargado";
         return `<tr>
           <td>${m.date||"-"}</td>
           <td>${league?.name || "Liga"}</td>
           <td>${home} ${m.homeGoals}-${m.awayGoals} ${away}</td>
-          <td>${rival?.name || "-"}</td>
+          <td>${rival?.name || "-"}<div class="fl-mini" style="margin-top:4px;">XI: ${lineupPreview}</div></td>
           <td class="fl-row" style="gap:6px;">
             <button class="fl-btn" data-move-match="${m.id}" data-move-delta="-1" ${moveUpDisabled}>⬆️</button>
             <button class="fl-btn" data-move-match="${m.id}" data-move-delta="1" ${moveDownDisabled}>⬇️</button>
@@ -9720,13 +9872,34 @@ function computeTeamIntelligencePanel(db, teamId){
       content.querySelectorAll("[data-edit-match]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-edit-match"));
         if(!match) return;
+        ensureTrackerMatchState(match);
+        const teamIsHome = match.homeId===team.id;
         const date = prompt("Fecha del partido (YYYY-MM-DD)", match.date || "") || match.date || "";
         const homeGoals = prompt("Goles del local", String(match.homeGoals ?? 0));
         const awayGoals = prompt("Goles del visitante", String(match.awayGoals ?? 0));
         if(homeGoals===null || awayGoals===null) return;
+        const lineupPrompt = prompt("XI titular de este equipo (coma separado)", parseLineupList(teamIsHome ? match.homeLineup : match.awayLineup).join(", "));
+        if(lineupPrompt===null) return;
+        const formationPrompt = prompt("Formación usada (ej. 4-3-3)", teamIsHome ? (match.homeFormation || "") : (match.awayFormation || ""));
+        if(formationPrompt===null) return;
+        const earlySubsPrompt = prompt("Cambios tempranos (0-3)", String(teamIsHome ? (match.homeEarlySubs || 0) : (match.awayEarlySubs || 0)));
+        if(earlySubsPrompt===null) return;
+        const systemChangesPrompt = prompt("Cambios de sistema en partido", String(teamIsHome ? (match.homeSystemChanges || 0) : (match.awaySystemChanges || 0)));
+        if(systemChangesPrompt===null) return;
         match.date = String(date).trim();
         match.homeGoals = Number(homeGoals)||0;
         match.awayGoals = Number(awayGoals)||0;
+        if(teamIsHome){
+          match.homeLineup = parseLineupList(lineupPrompt);
+          match.homeFormation = String(formationPrompt || "").trim();
+          match.homeEarlySubs = Math.max(0, Number(earlySubsPrompt) || 0);
+          match.homeSystemChanges = Math.max(0, Number(systemChangesPrompt) || 0);
+        }else{
+          match.awayLineup = parseLineupList(lineupPrompt);
+          match.awayFormation = String(formationPrompt || "").trim();
+          match.awayEarlySubs = Math.max(0, Number(earlySubsPrompt) || 0);
+          match.awaySystemChanges = Math.max(0, Number(systemChangesPrompt) || 0);
+        }
         saveDb(db);
         render("equipo", { teamId: team.id });
       });
@@ -9959,7 +10132,9 @@ function computeTeamIntelligencePanel(db, teamId){
       const memoryRows = teamMemories.slice(0, 8).map((m)=>{
         const story = m?.summary?.story || (m.narrative || "").slice(0, 90);
         const tags = (m?.summary?.reasons || []).slice(0, 2).map((r)=>`${r.tag} ${(r.strength*100).toFixed(0)}%`).join(" · ");
-        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${m.score || "-"}</td><td>${story}<div class="fl-mini">${tags || "Sin razones"}</div></td><td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Ver por qué</button><button class="fl-btn ghost b2EditMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Editar</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></div></td></tr>`;
+        const lineup = parseLineupList(m?.lineup || m?.startingXI || []);
+        const lineupTxt = lineup.length ? lineup.slice(0, 6).join(', ') + (lineup.length>6 ? '…' : '') : 'Sin composición';
+        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${m.score || "-"}</td><td>${story}<div class="fl-mini">${tags || "Sin razones"}</div><div class="fl-mini">XI: ${lineupTxt}</div></td><td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Ver por qué</button><button class="fl-btn ghost b2EditMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Editar</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></div></td></tr>`;
       }).join("");
       const selectedTeamSummary = summarizeTeamMemory(teamMemories);
       const selectedTeamHasBrain = selectedTeamSummary.samples > 0;
@@ -10017,6 +10192,7 @@ shots: 13
 possession: 57
 passes: 425"></textarea>
           <textarea id="b2Narrative" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="Relato del partido: ritmo, lesiones, presión, cambios..."></textarea>
+          <input id="b2Lineup" class="fl-input" style="margin-top:8px;" placeholder="XI del día (coma separado)" />
           <div class="fl-row" style="margin-top:8px;">
             <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
             <span id="b2Status" class="fl-muted"></span>
@@ -10220,6 +10396,7 @@ passes: 425"></textarea>
           score: (document.getElementById('b2Score')?.value || '0-0').trim(),
           statsRaw: (document.getElementById('b2Stats')?.value || '').trim(),
           narrative: (document.getElementById('b2Narrative')?.value || '').trim(),
+          lineup: parseLineupList(document.getElementById('b2Lineup')?.value || ''),
           createdAt: Date.now()
         };
         row.summary = buildBrainV2MatchSummary({ row, teamName: row.teamName, opponentName: row.opponent || "Rival" });
@@ -10322,6 +10499,7 @@ passes: 425"></textarea>
               <div class="fl-field"><label>Rival</label><input id="b2ModalOpponent" class="fl-input" value="${row.opponent || ''}"></div>
               <div class="fl-field"><label>Resultado</label><input id="b2ModalScore" class="fl-input" placeholder="2-1" value="${row.score || '0-0'}"></div>
             </div>
+            <div class="fl-field" style="margin-top:8px;"><label>Composición (XI del día)</label><input id="b2ModalLineup" class="fl-input" value="${parseLineupList(row.lineup || row.startingXI || []).join(', ')}"></div>
             <div class="fl-field" style="margin-top:8px;"><label>Relato</label><textarea id="b2ModalNarrative" class="fl-text" style="min-height:130px;">${row.narrative || ''}</textarea></div>
             <div class="fl-field" style="margin-top:8px;"><label>Stats raw (opcional)</label><textarea id="b2ModalStats" class="fl-text" style="min-height:80px;">${row.statsRaw || ''}</textarea></div>
             <div class="fl-row" style="justify-content:space-between;align-items:center;margin-top:10px;">
@@ -10359,6 +10537,7 @@ passes: 425"></textarea>
           row.date = backdrop.querySelector('#b2ModalDate').value || row.date;
           row.opponent = (backdrop.querySelector('#b2ModalOpponent').value || '').trim();
           row.score = (backdrop.querySelector('#b2ModalScore').value || '0-0').trim();
+          row.lineup = parseLineupList(backdrop.querySelector('#b2ModalLineup').value || '');
           row.narrative = (backdrop.querySelector('#b2ModalNarrative').value || '').trim();
           row.statsRaw = (backdrop.querySelector('#b2ModalStats').value || '').trim();
         };
@@ -10490,13 +10669,31 @@ passes: 425"></textarea>
             away: document.getElementById('b2OddA')?.value
           }
         });
-        const pH = (vision.probs.home * 100).toFixed(1);
-        const pD = (vision.probs.draw * 100).toFixed(1);
-        const pA = (vision.probs.away * 100).toFixed(1);
+        const homeReadiness = computeMatchReadinessEngine(db, homeIdSel);
+        const awayReadiness = computeMatchReadinessEngine(db, awayIdSel);
+        const readinessDelta = clamp((homeReadiness.readinessScore - awayReadiness.readinessScore) / 100, -0.35, 0.35);
+        const rawProbs = {
+          home: Number(vision.probs?.home) || 0.33,
+          draw: Number(vision.probs?.draw) || 0.34,
+          away: Number(vision.probs?.away) || 0.33
+        };
+        const adjustedProbs = {
+          home: clamp(rawProbs.home + readinessDelta * 0.18, 0.05, 0.9),
+          draw: clamp(rawProbs.draw - Math.abs(readinessDelta) * 0.08, 0.05, 0.6),
+          away: clamp(rawProbs.away - readinessDelta * 0.18, 0.05, 0.9)
+        };
+        const norm = adjustedProbs.home + adjustedProbs.draw + adjustedProbs.away;
+        adjustedProbs.home /= norm;
+        adjustedProbs.draw /= norm;
+        adjustedProbs.away /= norm;
+        const pH = (adjustedProbs.home * 100).toFixed(1);
+        const pD = (adjustedProbs.draw * 100).toFixed(1);
+        const pA = (adjustedProbs.away * 100).toFixed(1);
         const conf = (vision.confidence * 100).toFixed(0);
         const exp = vision.expected || {};
         const score = vision.score || { home: 0, away: 0, prob: 0 };
         const phy = vision.physical || {};
+        const fragilityChaosBoost = homeReadiness.mentalState === "fragil" ? 0.12 : homeReadiness.mentalState === "roto" ? 0.20 : 0;
         out.innerHTML = `
           <div style="font-weight:800;">${homeTeam?.name || 'Local'} vs ${awayTeam?.name || 'Visita'}</div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
@@ -10504,7 +10701,13 @@ passes: 425"></textarea>
             <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Empate</div><div style="font-size:22px;font-weight:900;">${pD}%</div></div>
             <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Visita</div><div style="font-size:22px;font-weight:900;">${pA}%</div></div>
           </div>
-          <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples}</div>
+          <div style="margin-top:10px;font-weight:800;">⚡ MATCH READINESS CARD</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
+            <div class="fl-card" style="padding:8px;"><div class="fl-mini">${homeTeam?.name || 'Local'}</div><div style="font-weight:900;">${homeReadiness.mentalState.toUpperCase()} · ${homeReadiness.readinessScore}</div><div class="fl-mini">Conf ${homeReadiness.confidence}% · Coh ${homeReadiness.tacticalCohesion}% · XI ${homeReadiness.lineupStability}% · Química ${homeReadiness.chemistry}% · DT ${homeReadiness.coachClarity}% · Vol ${homeReadiness.volatility}%</div></div>
+            <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Ajuste MRE</div><div style="font-weight:900;">Δ ${(readinessDelta*100).toFixed(1)}%</div><div class="fl-mini">Chaos +${(fragilityChaosBoost*100).toFixed(0)}%</div></div>
+            <div class="fl-card" style="padding:8px;"><div class="fl-mini">${awayTeam?.name || 'Visita'}</div><div style="font-weight:900;">${awayReadiness.mentalState.toUpperCase()} · ${awayReadiness.readinessScore}</div><div class="fl-mini">Conf ${awayReadiness.confidence}% · Coh ${awayReadiness.tacticalCohesion}% · XI ${awayReadiness.lineupStability}% · Química ${awayReadiness.chemistry}% · DT ${awayReadiness.coachClarity}% · Vol ${awayReadiness.volatility}%</div></div>
+          </div>
+          <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples} · Prob base ${(rawProbs.home*100).toFixed(1)}/${(rawProbs.draw*100).toFixed(1)}/${(rawProbs.away*100).toFixed(1)} → ajustada ${pH}/${pD}/${pA}</div>
           <div class="fl-mini" style="margin-top:4px;">Perfil narrativo (N=${homeProfile.lastN}/${awayProfile.lastN}) · presión tardía ${homeProfile.tendencies.latePressureAvg.toFixed(1)} vs ${awayProfile.tendencies.latePressureAvg.toFixed(1)}</div>
           <div class="fl-card" style="margin-top:8px;padding:8px;"><b>Global Evidence</b>
             <div class="fl-mini" style="margin-top:4px;">${vision.globalEvidence?.evidenceOk ? '✅ Global Evidence OK' : '❌ Sin evidencia global fuerte'}</div>
@@ -12355,7 +12558,19 @@ passes: 425"></textarea>
         const leagueTemperature = getLeagueTemperature(db, b3LeagueId || "global");
         const pFinal = applyTemperatureTo1x2(pBlend, leagueTemperature);
 
-        const adjusted = adjustLambdasToMatchProbs({ lHome: lHome0, lAway: lAway0 }, pFinal, result.maxGoals);
+        const homeReadiness = computeMatchReadinessEngine(db, homeId);
+        const awayReadiness = computeMatchReadinessEngine(db, awayId);
+        const readinessDelta = clamp((homeReadiness.readinessScore - awayReadiness.readinessScore) / 100, -0.35, 0.35);
+        let pMre = {
+          pH: clamp(pFinal.pH + readinessDelta * 0.18, 0.05, 0.9),
+          pD: clamp(pFinal.pD - Math.abs(readinessDelta) * 0.08, 0.05, 0.6),
+          pA: clamp(pFinal.pA - readinessDelta * 0.18, 0.05, 0.9)
+        };
+        const pMreSum = pMre.pH + pMre.pD + pMre.pA;
+        pMre = { pH: pMre.pH / pMreSum, pD: pMre.pD / pMreSum, pA: pMre.pA / pMreSum };
+        const fragilityChaosBoost = homeReadiness.mentalState === "fragil" ? 0.12 : homeReadiness.mentalState === "roto" ? 0.20 : 0;
+
+        const adjusted = adjustLambdasToMatchProbs({ lHome: lHome0, lAway: lAway0 }, pMre, result.maxGoals);
         result.lHome = adjusted.lHome;
         result.lAway = adjusted.lAway;
         const calibrated = probsFromLambdas(result.lHome, result.lAway, result.maxGoals);
@@ -12372,7 +12587,9 @@ passes: 425"></textarea>
           confidence: effConf,
           pModel,
           pFinal,
-          pMarket: market
+          pMre,
+          pMarket: market,
+          readiness: { home: homeReadiness, away: awayReadiness, delta: readinessDelta }
         };
         result.factors.breakdown.b3 = {
           homeRatings,
@@ -12493,8 +12710,9 @@ passes: 425"></textarea>
           pDraw: result.pDraw,
           pAway: result.pAway,
           pModel,
-          pFinal,
+          pFinal: pMre,
           pMarket: market || null,
+          matchReadiness: { home: homeReadiness, away: awayReadiness, delta: readinessDelta, chaosBoost: fragilityChaosBoost },
           confidence: effConf,
           best: result.best,
           dominant,
@@ -12526,6 +12744,15 @@ passes: 425"></textarea>
             <div class="fl-vs-bar"><span>Empate</span><div class="fl-vs-bar-track"><div class="fl-vs-bar-fill" style="width:${(result.pDraw/dominantWidth*100).toFixed(1)}%"></div></div><b>${(result.pDraw*100).toFixed(1)}%</b></div>
             <div class="fl-vs-bar"><span>Visita</span><div class="fl-vs-bar-track"><div class="fl-vs-bar-fill" style="width:${(result.pAway/dominantWidth*100).toFixed(1)}%"></div></div><b>${(result.pAway*100).toFixed(1)}%</b></div>
           </div>
+          <div style="margin-top:10px;font-weight:800;">⚡ MATCH READINESS ENGINE</div>
+          <div class="fl-kpi" style="margin-top:8px;">
+            <div><span>Estado local</span><b>${homeReadiness.mentalState.toUpperCase()} (${homeReadiness.readinessScore})</b></div>
+            <div><span>Estado visita</span><b>${awayReadiness.mentalState.toUpperCase()} (${awayReadiness.readinessScore})</b></div>
+            <div><span>Volatilidad</span><b>${homeReadiness.volatility}/${awayReadiness.volatility}</b></div>
+          </div>
+          <div class="fl-muted" style="margin-top:6px;">${db.teams.find(t=>t.id===homeId)?.name || 'Local'}: confianza ${homeReadiness.confidence}% · cohesión ${homeReadiness.tacticalCohesion}% · XI estable ${homeReadiness.lineupStability}% · química ${homeReadiness.chemistry}% · claridad DT ${homeReadiness.coachClarity}%.</div>
+          <div class="fl-muted" style="margin-top:6px;">${db.teams.find(t=>t.id===awayId)?.name || 'Visita'}: confianza ${awayReadiness.confidence}% · cohesión ${awayReadiness.tacticalCohesion}% · XI estable ${awayReadiness.lineupStability}% · química ${awayReadiness.chemistry}% · claridad DT ${awayReadiness.coachClarity}%.</div>
+          <div class="fl-muted" style="margin-top:6px;">Veredicto: ${db.teams.find(t=>t.id===homeId)?.name || 'Local'} ${homeReadiness.verdict} · ${db.teams.find(t=>t.id===awayId)?.name || 'Visita'} ${awayReadiness.verdict}. Ajuste caos MNE local +${(fragilityChaosBoost*100).toFixed(0)}%.</div>
           <div style="margin-top:10px;font-weight:800;">MARCADOR MÁS FRECUENTE INDIVIDUAL</div>
           <div style="margin-top:6px;"><b>${result.best.h} - ${result.best.a}</b> (${(result.best.p*100).toFixed(1)}%)</div>
           <div class="fl-muted" style="margin-top:6px;">⚠ Esto no implica que el empate sea el resultado dominante. Es la celda individual más alta en la matriz.</div>
