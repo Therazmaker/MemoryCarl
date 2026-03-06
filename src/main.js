@@ -1003,6 +1003,255 @@ function restoreMcLocalStorageRaw(lsRaw){
     return false;
   }
 }
+
+const BRAIN_BACKUP_KIND = "footballlab_brain_backup";
+const BRAIN_BACKUP_VERSION = 1;
+
+function isBrainRelatedLocalStorageKey(key = ""){
+  return (
+    key === "footballDB" ||
+    key.startsWith("footballLab_") ||
+    key.startsWith("FL_") ||
+    key.startsWith("BRAIN_") ||
+    key.startsWith("brain_") ||
+    key.startsWith("hybrid_brain_")
+  );
+}
+
+function hasSensitiveKeyName(key = ""){
+  return /(token|apikey|api_key|secret|auth|bearer|password|credential)/i.test(String(key || ""));
+}
+
+function sanitizeSecrets(input, keyName = ""){
+  if(hasSensitiveKeyName(keyName)) return "[REDACTED]";
+  if(Array.isArray(input)) return input.map((item)=>sanitizeSecrets(item));
+  if(input && typeof input === "object"){
+    const out = {};
+    Object.entries(input).forEach(([key, value])=>{
+      out[key] = sanitizeSecrets(value, key);
+    });
+    return out;
+  }
+  return input;
+}
+
+function openDB(name, version = 1, upgradeCallback){
+  return new Promise((resolve, reject)=>{
+    try{
+      const req = indexedDB.open(name, version);
+      req.onupgradeneeded = ()=>{
+        if(typeof upgradeCallback === "function") upgradeCallback(req.result, req.transaction);
+      };
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error || new Error(`No se pudo abrir IndexedDB: ${name}`));
+    }catch(err){
+      reject(err);
+    }
+  });
+}
+
+function idbGetAll(db, storeName){
+  return new Promise((resolve, reject)=>{
+    try{
+      const tx = db.transaction(storeName, "readonly");
+      const req = tx.objectStore(storeName).getAll();
+      req.onsuccess = ()=>resolve(Array.isArray(req.result) ? req.result : []);
+      req.onerror = ()=>reject(req.error || new Error(`No se pudo leer store ${storeName}`));
+    }catch(err){
+      reject(err);
+    }
+  });
+}
+
+function idbClearStore(db, storeName){
+  return new Promise((resolve, reject)=>{
+    try{
+      const tx = db.transaction(storeName, "readwrite");
+      tx.objectStore(storeName).clear();
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>reject(tx.error || new Error(`No se pudo limpiar store ${storeName}`));
+    }catch(err){
+      reject(err);
+    }
+  });
+}
+
+function idbPutMany(db, storeName, rows = []){
+  return new Promise((resolve, reject)=>{
+    try{
+      const tx = db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+      (Array.isArray(rows) ? rows : []).forEach((row)=>store.put(row));
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>reject(tx.error || new Error(`No se pudo escribir store ${storeName}`));
+    }catch(err){
+      reject(err);
+    }
+  });
+}
+
+async function collectBrainBackupData(){
+  const localStorageDump = {};
+  const localStorageParsed = {};
+  let hasLocal = false;
+
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(!k || !isBrainRelatedLocalStorageKey(k)) continue;
+      const raw = localStorage.getItem(k);
+      localStorageDump[k] = raw;
+      localStorageParsed[k] = mcSafeJsonParse(raw) ?? raw;
+      hasLocal = true;
+    }
+  }catch(_e){}
+
+  const indexedDbDump = {};
+  let hasIndexedDB = false;
+  const dbCandidates = ["footballLabTeamPacks"];
+  try{
+    if(typeof indexedDB !== "undefined" && typeof indexedDB.databases === "function"){
+      const dbList = await indexedDB.databases();
+      (dbList || []).forEach((row)=>{
+        const name = String(row?.name || "");
+        if(name && (name.includes("footballLab") || name.includes("FL_") || name.includes("brain"))){
+          dbCandidates.push(name);
+        }
+      });
+    }
+  }catch(_e){}
+
+  for(const dbName of [...new Set(dbCandidates)].filter(Boolean)){
+    try{
+      const db = await openDB(dbName, 1);
+      const stores = Array.from(db.objectStoreNames || []);
+      const storeDump = {};
+      for(const storeName of stores){
+        const rows = await idbGetAll(db, storeName);
+        if(rows.length){
+          storeDump[storeName] = rows;
+          hasIndexedDB = true;
+        }
+      }
+      db.close();
+      if(Object.keys(storeDump).length) indexedDbDump[dbName] = storeDump;
+    }catch(_e){}
+  }
+
+  const footballDb = localStorageParsed.footballDB && typeof localStorageParsed.footballDB === "object"
+    ? localStorageParsed.footballDB
+    : {};
+  const brainState = localStorageParsed.FL_BRAIN_V2 && typeof localStorageParsed.FL_BRAIN_V2 === "object"
+    ? localStorageParsed.FL_BRAIN_V2
+    : {};
+
+  return {
+    kind: BRAIN_BACKUP_KIND,
+    version: BRAIN_BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    appVersion: (typeof window !== "undefined" && window.__mcBoot?.version) ? String(window.__mcBoot.version) : "unknown",
+    schema: {
+      brainVersion: String(brainState?.schemaVersion || footballDb?.learning?.schemaVersion || "v2"),
+      notes: "Backup completo Brain v2"
+    },
+    data: {
+      brainState,
+      teamPacksIndex: localStorageParsed.FL_TEAMPACKS_INDEX || {},
+      teamPacksStore: indexedDbDump?.footballLabTeamPacks?.packs || localStorageParsed.FL_TEAMPACKS || {},
+      globalPatternEngine: brainState?.gpe || null,
+      settings: sanitizeSecrets(footballDb?.settings || {}),
+      calibration: {
+        learning: footballDb?.learning || {},
+        mne: brainState?.mne || {},
+        trainingReport: localStorageParsed.hybrid_brain_training_report || localStorageParsed.brain_meta_default || {}
+      },
+      localStorageDump,
+      indexedDbDump,
+      meta: {
+        source: "local",
+        storage: hasIndexedDB && hasLocal ? "mixed" : hasIndexedDB ? "indexeddb" : "localstorage"
+      }
+    }
+  };
+}
+
+function downloadJson(filename, obj){
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function restoreBrainData(data){
+  const incomingLocalDump = (data?.localStorageDump && typeof data.localStorageDump === "object") ? data.localStorageDump : {};
+  const incomingIndexedDump = (data?.indexedDbDump && typeof data.indexedDbDump === "object") ? data.indexedDbDump : {};
+  const keysToReplace = Object.keys(incomingLocalDump).filter(isBrainRelatedLocalStorageKey);
+
+  for(let i=0;i<localStorage.length;i++){
+    const key = localStorage.key(i);
+    if(key && isBrainRelatedLocalStorageKey(key) && !keysToReplace.includes(key)) keysToReplace.push(key);
+  }
+
+  keysToReplace.forEach((key)=>{
+    try{ localStorage.removeItem(key); }catch(_e){}
+  });
+
+  Object.entries(incomingLocalDump).forEach(([key, raw])=>{
+    if(!isBrainRelatedLocalStorageKey(key)) return;
+    if(raw === undefined || raw === null) return;
+    localStorage.setItem(key, String(raw));
+  });
+
+  for(const [dbName, stores] of Object.entries(incomingIndexedDump)){
+    const storeNames = Object.keys(stores || {});
+    if(!storeNames.length) continue;
+    const db = await openDB(dbName, 1, (upgradeDb)=>{
+      storeNames.forEach((storeName)=>{
+        if(!upgradeDb.objectStoreNames.contains(storeName)){
+          upgradeDb.createObjectStore(storeName, { keyPath: "teamId" });
+        }
+      });
+    });
+    for(const storeName of storeNames){
+      await idbClearStore(db, storeName);
+      await idbPutMany(db, storeName, stores[storeName]);
+    }
+    db.close();
+  }
+
+  return true;
+}
+
+async function importBrainBackupFromFile(file){
+  const currentSnapshot = await collectBrainBackupData();
+  const text = await file.text();
+  let parsed;
+  try{
+    parsed = JSON.parse(text);
+  }catch(_e){
+    throw new Error("JSON inválido: no se pudo parsear el archivo.");
+  }
+
+  if(parsed?.kind !== BRAIN_BACKUP_KIND) throw new Error("Backup inválido: kind no soportado.");
+  if(Number(parsed?.version) !== BRAIN_BACKUP_VERSION) throw new Error("Backup inválido: versión no soportada.");
+  if(!parsed?.data || typeof parsed.data !== "object" || !parsed.data.brainState){
+    throw new Error("Backup inválido: falta data.brainState.");
+  }
+
+  try{
+    await restoreBrainData(parsed.data);
+    return parsed;
+  }catch(err){
+    await restoreBrainData(currentSnapshot.data);
+    throw err;
+  }
+}
+
 function mcLoadAny(key, fallback){
   try{ return load(key, fallback); }catch(e){ return fallback; }
 }
@@ -1566,24 +1815,18 @@ function exportBackup(){
   URL.revokeObjectURL(url);
 }
 
-function exportBrainV2(){
-  const payload = {
-    app: "MemoryCarl",
-    kind: "brain_v2",
-    v: 2,
-    exportedAt: new Date().toISOString(),
-    lsRaw: getMcLocalStorageRaw(),
-  };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `memorycarl_brain_v2_${new Date().toISOString().slice(0,10)}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  toast("Cerebro exportado 🧠✅");
+async function exportBrainV2(){
+  try{
+    const payload = await collectBrainBackupData();
+    const ts = new Date();
+    const pad = (n)=>String(n).padStart(2, "0");
+    const filename = `footballlab-brain-backup-v1-${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}.json`;
+    downloadJson(filename, payload);
+    toast("Backup descargado ✅");
+  }catch(err){
+    console.error(err);
+    toast("Error al exportar backup ❌");
+  }
 }
 
 function importBackup(file){
@@ -1675,22 +1918,21 @@ function importBackup(file){
   reader.readAsText(file);
 }
 
-function importBrainV2(file){
-  const reader = new FileReader();
-  reader.onload = () => {
-    try{
-      const data = JSON.parse(reader.result);
-      if(!data || typeof data !== "object") throw new Error("Invalid file");
-      const lsRaw = (data.lsRaw && typeof data.lsRaw === "object") ? data.lsRaw : null;
-      const ok = restoreMcLocalStorageRaw(lsRaw);
-      if(!ok) throw new Error("Invalid brain payload");
-      toast("Cerebro importado ✅ (recargando)");
-      setTimeout(()=>location.reload(), 220);
-    }catch(e){
-      toast("JSON de cerebro inválido ❌");
+async function importBrainV2(file){
+  if(!file) return;
+  if(!confirm("Esto reemplazará el cerebro actual. ¿Deseas continuar?")) return;
+  try{
+    const imported = await importBrainBackupFromFile(file);
+    if(String(imported?.schema?.brainVersion || "") !== "v2"){
+      toast("Importado, pero algunos campos pueden ser ignorados ⚠️");
+    }else{
+      toast("Backup restaurado. Recargando datos… ✅");
     }
-  };
-  reader.readAsText(file);
+    setTimeout(()=>location.reload(), 260);
+  }catch(err){
+    console.error(err);
+    alert(err?.message || "No se pudo importar el backup.");
+  }
 }
 
 
@@ -1988,9 +2230,9 @@ function view(){
         </div>
         <div class="sheetBody">
           <div class="row" style="margin:0;">
-            <button class="btn primary" id="btnBrainExport">Exportar cerebro</button>
+            <button class="btn primary" id="btnBrainExport">Exportar cerebro (backup)</button>
             <label class="btn" style="cursor:pointer;">
-              Importar cerebro
+              Importar cerebro (restaurar)
               <input id="fileBrainImport" type="file" accept="application/json" style="display:none;">
             </label>
             <button class="btn" id="btnExport">Export</button>
@@ -2001,7 +2243,7 @@ function view(){
               <input id="fileImport" type="file" accept="application/json" style="display:none;">
             </label>
           </div>
-          <div class="muted" style="margin-top:10px;">Exportar/Importar cerebro guarda TODO (keys <span class="mono">memorycarl_*</span> + <span class="mono">mc_*</span>) y recarga la app.</div>
+          <div class="muted" style="margin-top:10px;">Exportar/Importar cerebro crea un backup completo de FootballLab/Brain v2 (IndexedDB + localStorage) y recarga la app tras restaurar.</div>
         </div>
       </section>` : ""}
 
@@ -3223,7 +3465,7 @@ function viewSettings(){
 <div class="card">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Backup</h2>
+          <h2 class="cardTitle">Backup & Restore (Brain v2)</h2>
           <div class="small">Exporta/Importa tu data local en JSON antes de limpiar cache o cambiar de teléfono.</div>
         </div>
       </div>
@@ -3237,9 +3479,9 @@ function viewSettings(){
         <div class="v">Export semanal o antes de updates</div>
       </div>
       <div class="btnRow" style="margin-top:10px;flex-wrap:wrap;gap:10px;">
-        <button class="btn primary" id="btnBrainExportInline">Exportar cerebro</button>
+        <button class="btn primary" id="btnBrainExportInline">Exportar cerebro (backup)</button>
         <label class="btn" style="cursor:pointer;">
-          Importar cerebro
+          Importar cerebro (restaurar)
           <input id="fileBrainImportInline" type="file" accept="application/json" style="display:none;">
         </label>
         <button class="btn" id="btnExportInline">Export backup</button>
@@ -3248,7 +3490,7 @@ function viewSettings(){
           <input id="fileImportInline" type="file" accept="application/json" style="display:none;">
         </label>
       </div>
-      <div class="note" style="margin-top:10px;">Exportar/Importar cerebro recupera TODO (keys <span class="mono">memorycarl_*</span> + <span class="mono">mc_*</span>) y recarga la app.</div>
+      <div class="note" style="margin-top:10px;">Exportar/Importar cerebro crea un backup completo de FootballLab/Brain v2 (IndexedDB + localStorage) y recarga la app tras restaurar.</div>
     </div>
 
     <div class="card">
