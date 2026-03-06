@@ -2377,7 +2377,69 @@ export function initFootballLab(){
   function saveDb(db){
     rebuildTeamRatings(db);
     refreshOpponentStrengthSnapshots(db);
-    localStorage.setItem(KEY, JSON.stringify(db));
+    const payload = JSON.stringify(db);
+    try{
+      localStorage.setItem(KEY, payload);
+      return true;
+    }catch(err){
+      if(!isQuotaExceededError(err)) throw err;
+    }
+
+    try{
+      pruneFootballLabCacheKeys();
+      localStorage.setItem(KEY, payload);
+      return true;
+    }catch(err){
+      if(!isQuotaExceededError(err)) throw err;
+    }
+
+    try{
+      compactDbForStorage(db);
+      localStorage.setItem(KEY, JSON.stringify(db));
+      return true;
+    }catch(err){
+      if(!isQuotaExceededError(err)) throw err;
+      console.warn("[FootballLab] No se pudo guardar footballDB: almacenamiento lleno.", err);
+      return false;
+    }
+  }
+
+  function isQuotaExceededError(err){
+    if(!err) return false;
+    return err.name === "QuotaExceededError" || err.code === 22 || err.code === 1014;
+  }
+
+  function pruneFootballLabCacheKeys(){
+    const keysToDelete = [];
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(!k) continue;
+      if(
+        k === COMP_CACHE_KEY ||
+        k.startsWith(TEAMS_CACHE_PREFIX) ||
+        k.startsWith("team_profile_") ||
+        k.startsWith("match_events_") ||
+        k.startsWith("match_momentum_") ||
+        k.startsWith("lpe_")
+      ){
+        keysToDelete.push(k);
+      }
+    }
+    keysToDelete.forEach((k)=>localStorage.removeItem(k));
+  }
+
+  function compactDbForStorage(db){
+    if(!db || !Array.isArray(db.tracker)) return;
+    db.tracker.forEach((match)=>{
+      if(!match || typeof match !== "object") return;
+      delete match.featureSnapshots;
+      delete match.featureSnapshotStatus;
+      delete match.opponentStrengthByTeam;
+      if(match.narrativeModule && typeof match.narrativeModule === "object"){
+        const rawText = String(match.narrativeModule.rawText || "");
+        match.narrativeModule = rawText ? { rawText } : null;
+      }
+    });
   }
 
   function ensureTrackerMatchState(match){
