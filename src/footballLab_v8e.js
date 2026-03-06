@@ -9,6 +9,7 @@ import { buildTrainingDataset, createTensorflowBrainModel, trainTensorflowBrainM
 import { computeExpectedGoals } from "./footballlab/xg_engine.js";
 import { scoreMatrix, matrixToOutcome, mostLikelyScore, oddsToMarketProbabilities, blendOutcomes } from "./footballlab/poisson_engine.js";
 import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState, getLatestClaudeFeedback, safeJsonPreview, observeLearningAuditsForMatch } from "./footballlab/mne_claude_exchange.js";
+import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -2632,8 +2633,68 @@ export function initFootballLab(){
       .slice(-limit);
   }
 
-  function computeMatchReadinessEngine(db, teamId){
-    const matches = getRecentTeamMatches(db, teamId, 5);
+  function parseScorePair(score = ""){
+    const hit = String(score || "").match(/(\d+)\s*[-:]\s*(\d+)/);
+    if(!hit) return null;
+    return { gf: Number(hit[1]) || 0, ga: Number(hit[2]) || 0 };
+  }
+
+  function mapBrainMemoryRowToReadinessMatch(row = {}, teamId = ""){
+    const parsed = parseScorePair(row.score);
+    const lineup = parseLineupList(row.lineup || row.startingXI || []);
+    const formation = String(row?.lineupShape?.formation || row?.formation || "").trim();
+    return ensureTrackerMatchState({
+      id: row.id || uid("b2mread"),
+      date: row.date || "",
+      leagueId: row.leagueId || "",
+      homeId: teamId,
+      awayId: `${teamId}_opponent`,
+      homeGoals: parsed?.gf || 0,
+      awayGoals: parsed?.ga || 0,
+      homeLineup: lineup,
+      awayLineup: [],
+      homeFormation: formation,
+      awayFormation: "",
+      source: "brainV2.memories"
+    });
+  }
+
+  function getReadinessEvidenceSummary(evidence = {}, teamName = ""){
+    const aliases = resolveTeamAliases(teamName).slice(0, 3).join(", ");
+    return {
+      source: evidence.source || "brainV2.memories",
+      samplesLabel: `${teamName || "Equipo"}: ${Number(evidence.totalMatches) || 0} juegos en memoria`,
+      selectedLabel: `Muestras usadas: ${Number(evidence.usedMatches) || 0}${Number(evidence.selectedMatches) > Number(evidence.usedMatches) ? ` de ${Number(evidence.selectedMatches)}` : ""}`,
+      filterLabel: evidence.filterLabel || "all competitions",
+      fallbackLabel: evidence.leagueFallback ? "sí (liga→all competitions)" : "no",
+      aliasLabel: aliases || "n/a",
+      raw: evidence
+    };
+  }
+
+  function computeMatchReadinessEngine(db, teamId, options = {}){
+    const brainV2 = options.brainV2 || loadBrainV2();
+    const teamName = options.teamName || db?.teams?.find((t)=>t.id===teamId)?.name || "";
+    const memoryDataset = collectMatchesForTeam({
+      memories: brainV2?.memories || {},
+      teamId,
+      teamName,
+      leagueId: options.leagueId || "",
+      limit: Number(options.limit) || 5
+    });
+    const matches = memoryDataset.rows.length
+      ? memoryDataset.rows.map((row)=>mapBrainMemoryRowToReadinessMatch(row, teamId))
+      : getRecentTeamMatches(db, teamId, 5).map((row)=>ensureTrackerMatchState({ ...row, source: "db.tracker" }));
+    const evidence = memoryDataset.rows.length
+      ? getReadinessEvidenceSummary(memoryDataset.evidence, teamName)
+      : getReadinessEvidenceSummary({
+        source: "db.tracker",
+        totalMatches: matches.length,
+        usedMatches: matches.length,
+        selectedMatches: matches.length,
+        filterLabel: "tracker fallback",
+        leagueFallback: false
+      }, teamName);
     if(!matches.length){
       return {
         readinessScore: 50,
@@ -2646,7 +2707,12 @@ export function initFootballLab(){
         volatility: 50,
         collapseRate: 0.5,
         systemStability: 50,
-        verdict: "Sin datos suficientes"
+        verdict: "Sin datos suficientes",
+        evidence: {
+          ...evidence,
+          reason: "No se encontraron partidos válidos en memoria ni tracker",
+          fallback: true
+        }
       };
     }
 
@@ -2800,7 +2866,11 @@ export function initFootballLab(){
       switchRisk,
       systemStability: Math.round(systemStability * 100),
       verdict,
-      rotationNoise: Number(rotationNoise.toFixed(2))
+      rotationNoise: Number(rotationNoise.toFixed(2)),
+      evidence: {
+        ...evidence,
+        fallback: false
+      }
     };
   }
 
@@ -11674,8 +11744,8 @@ passes: 425"></textarea>
             }
           }
         });
-        const homeReadiness = computeMatchReadinessEngine(db, homeIdSel);
-        const awayReadiness = computeMatchReadinessEngine(db, awayIdSel);
+        const homeReadiness = computeMatchReadinessEngine(db, homeIdSel, { brainV2, teamName: homeTeam?.name || "", leagueId: selectedLeagueId });
+        const awayReadiness = computeMatchReadinessEngine(db, awayIdSel, { brainV2, teamName: awayTeam?.name || "", leagueId: selectedLeagueId });
         const readinessDelta = clamp((homeReadiness.readinessScore - awayReadiness.readinessScore) / 100, -0.35, 0.35);
         const rawProbs = {
           home: Number(vision.probs?.home) || 0.33,
@@ -11740,6 +11810,8 @@ passes: 425"></textarea>
             </table>
           </div>
           <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples} · Prob base ${(rawProbs.home*100).toFixed(1)}/${(rawProbs.draw*100).toFixed(1)}/${(rawProbs.away*100).toFixed(1)} → ajustada ${pH}/${pD}/${pA}</div>
+          <div class="fl-mini" style="margin-top:4px;">Muestras MRE ${homeMre.teamName}: <b>${homeReadiness?.evidence?.raw?.totalMatches ?? 0}</b> · ${awayMre.teamName}: <b>${awayReadiness?.evidence?.raw?.totalMatches ?? 0}</b> · Fuente: <b>${homeReadiness?.evidence?.source || "brainV2.memories"}</b></div>
+          <div class="fl-mini" style="margin-top:4px;">Filtro: <b>${homeReadiness?.evidence?.filterLabel || "all competitions"}</b> · fallback: <b>${homeReadiness?.evidence?.fallback ? "sí" : "no"}</b>${homeReadiness?.evidence?.raw?.leagueFallback ? " (liga→all competitions)" : ""}</div>
           <div class="fl-mini" style="margin-top:4px;">Perfil narrativo (N=${homeProfile.lastN}/${awayProfile.lastN}) · presión tardía ${homeProfile.tendencies.latePressureAvg.toFixed(1)} vs ${awayProfile.tendencies.latePressureAvg.toFixed(1)}</div>
           <div class="fl-card" style="margin-top:8px;padding:8px;"><b>Global Evidence</b>
             <div class="fl-mini" style="margin-top:4px;">${vision.globalEvidence?.evidenceOk ? '✅ Global Evidence OK' : '❌ Sin evidencia global fuerte'}</div>
@@ -13927,8 +13999,9 @@ passes: 425"></textarea>
         const leagueTemperature = getLeagueTemperature(db, b3LeagueId || "global");
         const pFinal = applyTemperatureTo1x2(pBlend, leagueTemperature);
 
-        const homeReadiness = computeMatchReadinessEngine(db, homeId);
-        const awayReadiness = computeMatchReadinessEngine(db, awayId);
+        const brainV2 = loadBrainV2();
+        const homeReadiness = computeMatchReadinessEngine(db, homeId, { brainV2, teamName: db.teams.find((t)=>t.id===homeId)?.name || "", leagueId: b3LeagueId || "" });
+        const awayReadiness = computeMatchReadinessEngine(db, awayId, { brainV2, teamName: db.teams.find((t)=>t.id===awayId)?.name || "", leagueId: b3LeagueId || "" });
         const readinessDelta = clamp((homeReadiness.readinessScore - awayReadiness.readinessScore) / 100, -0.35, 0.35);
         let pMre = {
           pH: clamp(pFinal.pH + readinessDelta * 0.18, 0.05, 0.9),
@@ -14129,6 +14202,7 @@ passes: 425"></textarea>
           <div class="fl-muted" style="margin-top:6px;">${db.teams.find(t=>t.id===homeId)?.name || 'Local'}: confianza ${homeReadiness.confidence}% · cohesión ${homeReadiness.tacticalCohesion}% · XI estable ${homeReadiness.lineupStability}% · química ${homeReadiness.chemistry}% · claridad DT ${homeReadiness.coachClarity}%.</div>
           <div class="fl-muted" style="margin-top:6px;">${db.teams.find(t=>t.id===awayId)?.name || 'Visita'}: confianza ${awayReadiness.confidence}% · cohesión ${awayReadiness.tacticalCohesion}% · XI estable ${awayReadiness.lineupStability}% · química ${awayReadiness.chemistry}% · claridad DT ${awayReadiness.coachClarity}%.</div>
           <div class="fl-muted" style="margin-top:6px;">Veredicto: ${db.teams.find(t=>t.id===homeId)?.name || 'Local'} ${homeReadiness.verdict} · ${db.teams.find(t=>t.id===awayId)?.name || 'Visita'} ${awayReadiness.verdict}. Ajuste caos MNE local +${(fragilityChaosBoost*100).toFixed(0)}%${emotionalTrigger ? ` · gatillo emocional +${(emotionalChaosBoost*100).toFixed(0)}% (${collapseScenario})` : ""}.</div>
+          <div class="fl-mini" style="margin-top:6px;">${db.teams.find(t=>t.id===homeId)?.name || "Local"}: ${homeReadiness?.evidence?.raw?.totalMatches ?? 0} juegos en memoria · ${db.teams.find(t=>t.id===awayId)?.name || "Visita"}: ${awayReadiness?.evidence?.raw?.totalMatches ?? 0} juegos en memoria · fuente ${homeReadiness?.evidence?.source || "brainV2.memories"} · filtro ${homeReadiness?.evidence?.filterLabel || "all competitions"} · fallback ${homeReadiness?.evidence?.fallback ? "sí" : "no"}</div>
           <div style="margin-top:10px;font-weight:800;">MARCADOR MÁS FRECUENTE INDIVIDUAL</div>
           <div style="margin-top:6px;"><b>${result.best.h} - ${result.best.a}</b> (${(result.best.p*100).toFixed(1)}%)</div>
           <div class="fl-muted" style="margin-top:6px;">⚠ Esto no implica que el empate sea el resultado dominante. Es la celda individual más alta en la matriz.</div>
