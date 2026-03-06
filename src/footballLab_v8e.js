@@ -11264,6 +11264,10 @@ passes: 425"></textarea>
             <div id="b2PrematchOut" class="fl-card" style="margin-top:8px;padding:10px;display:none;"></div>
           </div>
 
+          <div class="b2-output-wide">
+            <div id="b2Vision" class="fl-mini b2-vision-card">Carga local/visita para ver la simulación visual.</div>
+          </div>
+
           <div class="b2-bottom">
             <details class="fl-card b2-advanced-tools">
               <summary>⚙ HERRAMIENTAS HÍBRIDAS <span class="fl-chip warn">AVANZADO</span></summary>
