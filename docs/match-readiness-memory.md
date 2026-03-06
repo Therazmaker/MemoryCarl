@@ -21,3 +21,24 @@
 
 ## “Juegos en memoria”
 - Son filas válidas de partidos del equipo dentro de `brainV2.memories`, tras resolver identidad (teamId y/o alias de nombre).
+
+## Índice por equipo en `teamProfiles`
+- `brainV2.memories` sigue siendo la **fuente principal** del partido completo.
+- `brainV2.teamProfiles` actúa como índice liviano por equipo con `matchRefs` (referencias + metadatos mínimos).
+- Cada `matchRef` guarda solo: `memoryId`, `teamId`, `teamName`, `date`, `opponent`, `score`.
+- No se duplican `statsRaw`, `narrative`, ni payloads extensos.
+
+## Sincronización automática
+- Al guardar desde `b2SaveMatch`, el partido se persiste en `brainV2.memories` como antes.
+- En el mismo flujo se indexa automáticamente en `brainV2.teamProfiles` para el equipo principal.
+- Cuando hay rival identificable (`opponent`), también se indexa para ese rival por nombre normalizado/alias.
+
+## Reconstrucción del histórico
+- En `loadBrainV2` / `saveBrainV2` se normaliza estado de `teamProfiles`.
+- Si hay memorias históricas y faltan referencias, se reconstruye el índice defensivamente.
+- También existe reconstrucción explícita al borrar/editar partidos para mantener coherencia del índice.
+
+## Consulta rápida por equipo
+- Helpers disponibles:
+  - `getTeamMatchRefs(...)` para listar referencias de un equipo (con alias).
+  - `resolveTeamMatchesFromRefs(...)` para resolver esas referencias al partido real en `brainV2.memories`.
