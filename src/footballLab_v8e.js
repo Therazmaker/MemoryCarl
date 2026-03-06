@@ -12,6 +12,10 @@ import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState,
 import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
+<<<<<<< codex/implementar-version-2-del-prematch-story-engine-aeual5
+=======
+import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
+>>>>>>> main
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -9635,6 +9639,8 @@ function computeTeamIntelligencePanel(db, teamId){
       const globalRotation = pressureRef.congestionLevel==="🔴" || backToBack>=2 || next14.length>=4 ? "Alta" : next14.length>=2 ? "Media" : "Baja";
       const patterns = buildTeamIntPatterns(db, team);
       const narrativeMetrics = computeTeamNarrativeMetrics(teamMatches);
+      const brainV2ForResultsSync = loadBrainV2();
+      const resultsSync = getResultsSyncSummary({ db, brainV2: brainV2ForResultsSync, team });
       const matchRows = teamMatches.map((m, idx)=>{
         const isHome = m.homeId===team.id;
         const rival = db.teams.find(t=>t.id===(isHome ? m.awayId : m.homeId));
@@ -9857,7 +9863,10 @@ function computeTeamIntelligencePanel(db, teamId){
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
+          <div class="fl-mini" style="margin-bottom:6px;">Hay <b>${resultsSync.totalInMemory}</b> partidos guardados en memoria para <b>${team.name}</b>.</div>
+          <div class="fl-mini" style="margin-bottom:8px;">Y ya hay <b>${resultsSync.alreadySynced}</b> sincronizados en esta tabla.${resultsSync.pendingToSync>0 ? ` Faltan <b>${resultsSync.pendingToSync}</b>.` : " <b>Todo sincronizado.</b>"}</div>
           <div class="fl-row" style="margin-bottom:10px;">
+            <button class="fl-btn" id="syncResultsFromMemory" ${resultsSync.pendingToSync>0 ? '' : 'disabled'}>Sincronizar</button>
             <input id="resDate" type="date" class="fl-input" />
             <select id="resHome" class="fl-select"><option value="">Local</option>${resultTeamOptions}</select>
             <input id="resHG" type="number" class="fl-input" placeholder="GL" style="width:74px" />
@@ -10490,6 +10499,23 @@ function computeTeamIntelligencePanel(db, teamId){
           document.getElementById("squadStatus").textContent = `❌ ${String(err.message||err)}`;
         }
       };
+      document.getElementById("syncResultsFromMemory").onclick = ()=>{
+        const status = document.getElementById("resultStatus");
+        const brainV2 = loadBrainV2();
+        const out = syncMemoryMatchesIntoResultsModule({
+          db,
+          brainV2,
+          team,
+          ensureTrackerMatchState,
+          uid
+        });
+        saveDb(db);
+        status.textContent = out.inserted>0
+          ? `✅ Sincronización completada. Importados: ${out.inserted}.`
+          : "Todo sincronizado. No hay partidos nuevos para importar.";
+        render("equipo", { teamId: team.id });
+      };
+
       document.getElementById("addResult").onclick = ()=>{
         const homeId = document.getElementById("resHome").value;
         const awayId = document.getElementById("resAway").value;
