@@ -8,6 +8,7 @@ import { HybridBrainService, inferOutcomeLabel, estimateLiveDelta } from "./Hybr
 import { buildTrainingDataset, createTensorflowBrainModel, trainTensorflowBrainModel, saveBrainArtifacts, loadBrainArtifacts, inferWithBrain, buildTeamProfile, buildFeatureVectorFromProfiles, extractNarrativeFeatures } from "./footballlab/brain/tensorflow_brain.js";
 import { computeExpectedGoals } from "./footballlab/xg_engine.js";
 import { scoreMatrix, matrixToOutcome, mostLikelyScore, oddsToMarketProbabilities, blendOutcomes } from "./footballlab/poisson_engine.js";
+import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState, getLatestClaudeFeedback, safeJsonPreview } from "./footballlab/mne_claude_exchange.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -174,6 +175,17 @@ export function initFootballLab(){
     };
   }
 
+
+  function normalizeClaudeExchangeState(raw){
+    const parsed = raw && typeof raw === "object" ? raw : {};
+    return {
+      historyByMatch: parsed.historyByMatch && typeof parsed.historyByMatch === "object" ? parsed.historyByMatch : {},
+      candidateRules: Array.isArray(parsed.candidateRules) ? parsed.candidateRules : [],
+      patterns: Array.isArray(parsed.patterns) ? parsed.patterns : [],
+      trainingNotes: Array.isArray(parsed.trainingNotes) ? parsed.trainingNotes : []
+    };
+  }
+
   function normalizeMneLearningState(raw){
     const parsed = raw && typeof raw === "object" ? raw : {};
     return {
@@ -185,7 +197,8 @@ export function initFootballLab(){
       lsfForecasts: parsed.lsfForecasts && typeof parsed.lsfForecasts === "object" ? parsed.lsfForecasts : {},
       lsfEvalHistory: Array.isArray(parsed.lsfEvalHistory) ? parsed.lsfEvalHistory : [],
       lsfState: normalizeLsfState(parsed.lsfState),
-      learningLog: Array.isArray(parsed.learningLog) ? parsed.learningLog : []
+      learningLog: Array.isArray(parsed.learningLog) ? parsed.learningLog : [],
+      claudeExchange: normalizeClaudeExchangeState(parsed.claudeExchange)
     };
   }
 
@@ -11551,6 +11564,24 @@ passes: 425"></textarea>
             </div>
           </div>
           <div class="fl-card" style="margin-top:10px;padding:10px;">
+            <div style="font-weight:800;">🧩 MNE ↔ Claude Offline Learning</div>
+            <div class="fl-row" style="margin-top:8px;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button class="fl-btn" id="mneClaudeExportBtn">Export for Claude</button>
+              <label class="fl-btn" for="mneClaudeFileInput" style="cursor:pointer;">Import Claude Feedback</label>
+              <input type="file" id="mneClaudeFileInput" accept="application/json" style="display:none;" />
+              <span id="mneClaudeStatus" class="fl-mini"></span>
+            </div>
+            <textarea id="mneClaudeImportText" class="fl-text" style="margin-top:8px;" placeholder="O pega aquí el JSON de feedback de Claude..."></textarea>
+            <div class="fl-row" style="margin-top:6px;gap:8px;">
+              <button class="fl-btn" id="mneClaudeImportTextBtn">Import from text</button>
+            </div>
+            <details style="margin-top:8px;">
+              <summary style="cursor:pointer;font-weight:700;">Preview export JSON</summary>
+              <textarea id="mneClaudeExportPreview" class="fl-text" style="margin-top:6px;min-height:160px;" readonly></textarea>
+            </details>
+            <div id="mneClaudeFeedbackSummary" class="fl-mini" style="margin-top:8px;display:grid;gap:6px;"></div>
+          </div>
+          <div class="fl-card" style="margin-top:10px;padding:10px;">
             <div style="font-weight:800;">⚡ MNE Live Feedback Loop (LFL)</div>
             <div class="fl-row" style="margin-top:8px;gap:8px;align-items:flex-end;flex-wrap:wrap;">
               <div>
@@ -11575,6 +11606,113 @@ passes: 425"></textarea>
 
         const simMatchId = `sim_${homeIdSel}_${awayIdSel}`;
         brainV2.mne ||= normalizeMneLearningState({});
+
+        const claudeStatusEl = document.getElementById('mneClaudeStatus');
+        const claudeExportPreviewEl = document.getElementById('mneClaudeExportPreview');
+        const claudeFeedbackSummaryEl = document.getElementById('mneClaudeFeedbackSummary');
+        const setClaudeStatus = (text)=>{ if(claudeStatusEl) claudeStatusEl.textContent = text; };
+        const currentMemoryRows = (brainV2.memories?.[homeIdSel] || []).slice(-5);
+        const buildClaudePayload = ()=>buildMneClaudeExport({
+          match: {
+            id: simMatchId,
+            home: homeTeam?.name || 'Local',
+            away: awayTeam?.name || 'Visitante',
+            competition: db.leagues.find((row)=>row.id===db.settings?.selectedLeagueId)?.name || 'Simulation',
+            date: new Date().toISOString().slice(0, 10),
+            score: { home: Number(vision?.score?.home || 0), away: Number(vision?.score?.away || 0) },
+            status: 'simulation'
+          },
+          vision,
+          memoryRows: currentMemoryRows
+        });
+        const renderClaudeFeedbackSummary = ()=>{
+          const latest = getLatestClaudeFeedback(brainV2.mne?.claudeExchange, simMatchId);
+          if(!claudeFeedbackSummaryEl) return;
+          if(!latest?.feedback){
+            claudeFeedbackSummaryEl.innerHTML = '<div class="fl-mini">Sin feedback importado todavía para este match.</div>';
+            return;
+          }
+          const fb = latest.feedback;
+          const rules = (fb.newRules || []).map((rule)=>`<li>${rule.name} (${Math.round((Number(rule.confidence)||0)*100)}%)</li>`).join('') || '<li>Sin reglas sugeridas.</li>';
+          const missed = (fb.missedSignals || []).map((row)=>`<li>${row.type}: ${row.detail}</li>`).join('') || '<li>Sin señales.</li>';
+          const patterns = (fb.patternInsights || []).map((row)=>`<li>${row.name}: ${row.detail}</li>`).join('') || '<li>Sin patrones.</li>';
+          const notes = (fb.trainingNotes || []).map((n)=>`<li>${n}</li>`).join('') || '<li>Sin notas.</li>';
+          claudeFeedbackSummaryEl.innerHTML = `
+            <div class="fl-card" style="padding:8px;">
+              <div><b>Último import:</b> ${latest.importedAt || 'N/A'}</div>
+              <div>Evaluación: ${fb.evaluation?.summary || 'Sin resumen'} · Accuracy ${(Number(fb.evaluation?.accuracy || 0)*100).toFixed(0)}% · ${fb.evaluation?.agreementLevel || 'medium'}</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
+              <div class="fl-card" style="padding:8px;"><b>Reglas sugeridas</b><ul style="margin:6px 0 0 16px;">${rules}</ul></div>
+              <div class="fl-card" style="padding:8px;"><b>Señales ignoradas</b><ul style="margin:6px 0 0 16px;">${missed}</ul></div>
+              <div class="fl-card" style="padding:8px;"><b>Patrones aprendidos</b><ul style="margin:6px 0 0 16px;">${patterns}</ul></div>
+              <div class="fl-card" style="padding:8px;"><b>Training notes</b><ul style="margin:6px 0 0 16px;">${notes}</ul></div>
+            </div>`;
+        };
+        const refreshClaudeExportPreview = ()=>{
+          const payload = buildClaudePayload();
+          if(claudeExportPreviewEl) claudeExportPreviewEl.value = safeJsonPreview(payload);
+          return payload;
+        };
+        const importClaudeFeedbackText = (rawText)=>{
+          const result = parseClaudeFeedbackText(rawText);
+          if(!result.ok){
+            setClaudeStatus(`❌ ${result.errors.join(' | ')}`);
+            return;
+          }
+          brainV2.mne = updateClaudeMemoryState(brainV2.mne, { matchId: simMatchId, feedback: result.data });
+          saveBrainV2(brainV2);
+          const warnText = (result.warnings || []).length ? ` · ⚠️ ${result.warnings.join(' | ')}` : '';
+          setClaudeStatus(`✅ Feedback importado${warnText}`);
+          renderClaudeFeedbackSummary();
+          refreshClaudeExportPreview();
+        };
+
+        document.getElementById('mneClaudeExportBtn')?.addEventListener('click', ()=>{
+          try{
+            const payload = refreshClaudeExportPreview();
+            const json = safeJsonPreview(payload);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `mne-claude-export-${simMatchId}-${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            setClaudeStatus('✅ Export generado y descargado.');
+          }catch(err){
+            setClaudeStatus(`❌ ${String(err?.message || err)}`);
+          }
+        });
+
+        document.getElementById('mneClaudeImportTextBtn')?.addEventListener('click', ()=>{
+          const raw = String(document.getElementById('mneClaudeImportText')?.value || '').trim();
+          if(!raw){
+            setClaudeStatus('⚠️ Pega un JSON antes de importar.');
+            return;
+          }
+          importClaudeFeedbackText(raw);
+        });
+
+        document.getElementById('mneClaudeFileInput')?.addEventListener('change', async (ev)=>{
+          const file = ev?.target?.files?.[0];
+          if(!file){
+            setClaudeStatus('⚠️ Selecciona un archivo JSON.');
+            return;
+          }
+          try{
+            const text = await file.text();
+            importClaudeFeedbackText(text);
+          }catch(err){
+            setClaudeStatus(`❌ ${String(err?.message || err)}`);
+          }finally{
+            ev.target.value = '';
+          }
+        });
+
+        refreshClaudeExportPreview();
+        renderClaudeFeedbackSummary();
+
         const renderLfl = ()=>{
           const timeline = document.getElementById('mneLflTimeline');
           const logEl = document.getElementById('mneLearningLog');
