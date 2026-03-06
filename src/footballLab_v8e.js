@@ -12,10 +12,7 @@ import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState,
 import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
-<<<<<<< codex/implementar-version-2-del-prematch-story-engine-aeual5
-=======
 import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
->>>>>>> main
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -4592,6 +4589,9 @@ export function initFootballLab(){
         match.statsRaw = rawObj;
         match.stats = stats;
         saveDb(db);
+      if(linkedMemoryMatch){
+        saveBrainV2(linkedBrainV2);
+      }
         status.textContent = `✅ Guardado (${stats.length} métricas)`;
         onSave?.();
         setTimeout(close, 500);
@@ -6388,26 +6388,88 @@ function computeTeamIntelligencePanel(db, teamId){
     });
   }
 
-  function openTeamEngineModal({ db, match, team, onSave } = {}){
+
+  function normalizeScoreToken(value = ""){
+    return String(value || "").trim().replace(/\s+/g, "");
+  }
+
+  function buildTeamPerspectiveScore(match = {}, teamId = ""){
+    if(!teamId) return "";
+    const hg = Number(match?.homeGoals);
+    const ag = Number(match?.awayGoals);
+    if(!Number.isFinite(hg) || !Number.isFinite(ag)) return "";
+    if(match?.homeId===teamId) return `${hg}-${ag}`;
+    if(match?.awayId===teamId) return `${ag}-${hg}`;
+    return "";
+  }
+
+  function findBrainV2MatchForTracker({ brainV2 = null, match = {}, team = {} } = {}){
+    const state = brainV2 || loadBrainV2();
+    const teamId = String(team?.id || "").trim();
+    if(!teamId) return null;
+    const rows = Array.isArray(state?.memories?.[teamId]) ? state.memories[teamId] : [];
+    if(!rows.length) return null;
+    const targetDate = String(match?.date || "").trim();
+    const targetScore = normalizeScoreToken(buildTeamPerspectiveScore(match, teamId));
+    const byDate = targetDate ? rows.filter((row)=>String(row?.date || "").trim()===targetDate) : rows;
+    if(!byDate.length) return null;
+    if(targetScore){
+      const exact = byDate.find((row)=>normalizeScoreToken(row?.score || "")===targetScore);
+      if(exact) return exact;
+    }
+    return byDate[byDate.length - 1] || null;
+  }
+
+  function resolveRivalForTeamMatch({ db, match, team, brainV2 = null } = {}){
+    const isHome = match?.homeId===team?.id;
+    const isAway = match?.awayId===team?.id;
+    const directRivalId = isHome ? match?.awayId : isAway ? match?.homeId : (match?.rivalTeamId || "");
+    const rivalById = directRivalId ? db?.teams?.find((t)=>t.id===directRivalId) : null;
+    if(rivalById) return { id: rivalById.id, name: rivalById.name };
+
+    const fallbackNames = [
+      match?.opponent,
+      match?.opponentName,
+      match?.rival,
+      match?.rivalName,
+      isHome ? match?.awayTeam : isAway ? match?.homeTeam : "",
+      isHome ? match?.away : isAway ? match?.home : ""
+    ].map((v)=>String(v || "").trim()).filter(Boolean);
+    if(fallbackNames.length) return { id: "", name: fallbackNames[0] };
+
+    const memoryRow = findBrainV2MatchForTracker({ brainV2, match, team });
+    const memoryRival = String(memoryRow?.opponent || "").trim();
+    if(memoryRival) return { id: "", name: memoryRival };
+
+    return { id: "", name: "-" };
+  }
+
+  function openTeamEngineModal({ db, match, team, onSave, brainV2 = null } = {}){
     if(!match || !team) return;
+    const linkedBrainV2 = brainV2 || loadBrainV2();
+    const linkedMemoryMatch = findBrainV2MatchForTracker({ brainV2: linkedBrainV2, match, team });
     const inferred = inferEngineMetricsFromMatch(match, team.id);
     const prev = match?.teamEngine?.[team.id] || {};
     const metrics = prev.metrics || inferred;
     const psych = metrics.psych || inferred.psych;
     const epa = clamp(Number(prev.epa) || 0.5, 0, 1);
     const emaIntensity = clamp(Number(prev.emaIntensity) || 0.5, 0, 1);
-    const existingNarrative = match?.narrativeModule?.rawText || "";
+    const existingNarrative = match?.narrativeModule?.rawText || linkedMemoryMatch?.narrative || "";
     const existingStatsJson = match?.stats?.length
       ? JSON.stringify({ stats: match.stats }, null, 2)
-      : "";
-    const homeName = db.teams.find(t=>t.id===match.homeId)?.name || "Local";
-    const awayName = db.teams.find(t=>t.id===match.awayId)?.name || "Visitante";
+      : (linkedMemoryMatch?.statsRaw
+        ? JSON.stringify(parseBrainV2StatsToStatsRaw(linkedMemoryMatch.statsRaw), null, 2)
+        : "");
+    const rival = resolveRivalForTeamMatch({ db, match, team, brainV2: linkedBrainV2 });
+    const homeName = db.teams.find(t=>t.id===match.homeId)?.name || (match.homeId===team.id ? team.name : rival.name) || "Local";
+    const awayName = db.teams.find(t=>t.id===match.awayId)?.name || (match.awayId===team.id ? team.name : rival.name) || "Visitante";
     const backdrop = document.createElement("div");
     backdrop.className = "fl-modal-backdrop";
     backdrop.innerHTML = `
       <div class="fl-modal" style="max-width:920px;max-height:90vh;overflow:auto;">
         <div class="fl-row" style="justify-content:space-between;align-items:center;">
           <div style="font-size:18px;font-weight:900;">EPA + EMA + Localía (${team.name})</div>
+          <div class="fl-mini">Rival detectado: <b>${rival?.name || "-"}</b></div>
           <button class="fl-btn" id="closeEngineModal">Cerrar</button>
         </div>
         <div class="fl-card" style="margin-top:10px;">
@@ -6461,6 +6523,10 @@ function computeTeamIntelligencePanel(db, teamId){
           return;
         }
       }
+      if(linkedMemoryMatch){
+        if(narrativeRaw) linkedMemoryMatch.narrative = narrativeRaw;
+        if(statsRaw) linkedMemoryMatch.statsRaw = statsRaw;
+      }
       const inferredFresh = inferEngineMetricsFromMatch(match, team.id);
       const mergedPsych = {
         ...inferredFresh.psych,
@@ -6485,6 +6551,9 @@ function computeTeamIntelligencePanel(db, teamId){
       match.teamEngine[team.id] = payload;
       recomputeTeamGlobalEngine(db, team.id);
       saveDb(db);
+      if(linkedMemoryMatch){
+        saveBrainV2(linkedBrainV2);
+      }
       status.textContent = `✅ PI ${payload.pi.toFixed(3)} guardado y agregado al motor global.`;
       if(typeof onSave==="function") setTimeout(()=>{ backdrop.remove(); onSave(); }, 320);
     };
@@ -9643,7 +9712,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const resultsSync = getResultsSyncSummary({ db, brainV2: brainV2ForResultsSync, team });
       const matchRows = teamMatches.map((m, idx)=>{
         const isHome = m.homeId===team.id;
-        const rival = db.teams.find(t=>t.id===(isHome ? m.awayId : m.homeId));
+        const rival = resolveRivalForTeamMatch({ db, match: m, team, brainV2: brainV2TeamState });
         const league = db.leagues.find(l=>l.id===m.leagueId);
         const home = db.teams.find(t=>t.id===m.homeId)?.name || "-";
         const away = db.teams.find(t=>t.id===m.awayId)?.name || "-";
@@ -10579,7 +10648,7 @@ function computeTeamIntelligencePanel(db, teamId){
       });
       content.querySelectorAll("[data-open-engine-modal]").forEach(btn=>btn.onclick = ()=>{
         const match = db.tracker.find(m=>m.id===btn.getAttribute("data-open-engine-modal"));
-        openTeamEngineModal({ db, match, team, onSave: ()=>render("equipo", { teamId: team.id }) });
+        openTeamEngineModal({ db, match, team, brainV2: brainV2TeamState, onSave: ()=>render("equipo", { teamId: team.id }) });
       });
       const runBulkCalculation = async (matches)=>{
         const status = document.getElementById("resultStatus");
