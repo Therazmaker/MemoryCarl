@@ -8,7 +8,7 @@ import { HybridBrainService, inferOutcomeLabel, estimateLiveDelta } from "./Hybr
 import { buildTrainingDataset, createTensorflowBrainModel, trainTensorflowBrainModel, saveBrainArtifacts, loadBrainArtifacts, inferWithBrain, buildTeamProfile, buildFeatureVectorFromProfiles, extractNarrativeFeatures } from "./footballlab/brain/tensorflow_brain.js";
 import { computeExpectedGoals } from "./footballlab/xg_engine.js";
 import { scoreMatrix, matrixToOutcome, mostLikelyScore, oddsToMarketProbabilities, blendOutcomes } from "./footballlab/poisson_engine.js";
-import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState, getLatestClaudeFeedback, safeJsonPreview } from "./footballlab/mne_claude_exchange.js";
+import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState, getLatestClaudeFeedback, safeJsonPreview, observeLearningAuditsForMatch } from "./footballlab/mne_claude_exchange.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -178,11 +178,15 @@ export function initFootballLab(){
 
   function normalizeClaudeExchangeState(raw){
     const parsed = raw && typeof raw === "object" ? raw : {};
+    const learningAuditRaw = parsed.learningAudit && typeof parsed.learningAudit === "object" ? parsed.learningAudit : {};
     return {
       historyByMatch: parsed.historyByMatch && typeof parsed.historyByMatch === "object" ? parsed.historyByMatch : {},
       candidateRules: Array.isArray(parsed.candidateRules) ? parsed.candidateRules : [],
       patterns: Array.isArray(parsed.patterns) ? parsed.patterns : [],
-      trainingNotes: Array.isArray(parsed.trainingNotes) ? parsed.trainingNotes : []
+      trainingNotes: Array.isArray(parsed.trainingNotes) ? parsed.trainingNotes : [],
+      learningAudit: {
+        audits: Array.isArray(learningAuditRaw.audits) ? learningAuditRaw.audits : []
+      }
     };
   }
 
@@ -11813,6 +11817,7 @@ passes: 425"></textarea>
               <textarea id="mneClaudeExportPreview" class="fl-text" style="margin-top:6px;min-height:160px;" readonly></textarea>
             </details>
             <div id="mneClaudeFeedbackSummary" class="fl-mini" style="margin-top:8px;display:grid;gap:6px;"></div>
+            <div id="mneLearningAuditSummary" class="fl-mini" style="margin-top:8px;display:grid;gap:6px;"></div>
           </div>
           <div class="fl-card" style="margin-top:10px;padding:10px;">
             <div style="font-weight:800;">⚡ MNE Live Feedback Loop (LFL)</div>
@@ -11843,6 +11848,7 @@ passes: 425"></textarea>
         const claudeStatusEl = document.getElementById('mneClaudeStatus');
         const claudeExportPreviewEl = document.getElementById('mneClaudeExportPreview');
         const claudeFeedbackSummaryEl = document.getElementById('mneClaudeFeedbackSummary');
+        const mneLearningAuditSummaryEl = document.getElementById('mneLearningAuditSummary');
         const setClaudeStatus = (text)=>{ if(claudeStatusEl) claudeStatusEl.textContent = text; };
         const currentMemoryRows = (brainV2.memories?.[homeIdSel] || []).slice(-5);
         const buildClaudePayload = ()=>buildMneClaudeExport({
@@ -11882,6 +11888,32 @@ passes: 425"></textarea>
               <div class="fl-card" style="padding:8px;"><b>Training notes</b><ul style="margin:6px 0 0 16px;">${notes}</ul></div>
             </div>`;
         };
+
+        const renderLearningAuditSummary = ()=>{
+          if(!mneLearningAuditSummaryEl) return;
+          const audits = (brainV2.mne?.claudeExchange?.learningAudit?.audits || []).filter((row)=>String(row?.sourceMatchId || '') === simMatchId).slice(-4).reverse();
+          if(!audits.length){
+            mneLearningAuditSummaryEl.innerHTML = '<div class="fl-card" style="padding:8px;"><b>Learning Audit</b><div class="fl-mini" style="margin-top:4px;">Sin auditorías todavía. Se crean automáticamente al importar feedback Claude.</div></div>';
+            return;
+          }
+          const statusColor = (status)=> status === 'improved' ? '#22c55e' : status === 'regressed' ? '#ef4444' : status === 'mixed' ? '#f59e0b' : '#94a3b8';
+          mneLearningAuditSummaryEl.innerHTML = `<div class="fl-card" style="padding:8px;"><b>Learning Audit</b> · ${audits.length} auditoría(s) activas</div>${audits.map((audit)=>{
+            const tracked = (audit.trackedItems || []).slice(0,6).map((item)=>`<li>${item.kind}: ${item.label || item.key}</li>`).join('') || '<li>Sin items.</li>';
+            const lastObs = (audit.observations || []).slice(-2).reverse().map((obs)=>`<div>• ${obs.observedMatchId || 'N/A'} · ${obs.status} · ${obs.notes || ''}</div>`).join('') || '<div>Sin observaciones aún.</div>';
+            const m = audit.metrics || {};
+            return `<div class="fl-card" style="padding:8px;">
+              <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>Source: ${audit.sourceMatchId || 'N/A'}</b><span class="fl-pill" style="border:1px solid ${statusColor(audit.aggregateStatus)};color:${statusColor(audit.aggregateStatus)};">${audit.aggregateStatus || 'unchanged'}</span></div>
+              <div style="margin-top:4px;">Importado: ${audit.importedAt || 'N/A'}</div>
+              <div style="margin-top:4px;">Observed matches: ${m.totalObservedMatches || 0} · improved ${m.improvements || 0} · unchanged ${m.unchanged || 0} · regressed ${m.regressions || 0} · not_triggered ${m.notTriggered || 0}</div>
+              <div style="margin-top:4px;">Triggered rules: ${m.triggeredRules || 0} · last status: ${m.lastStatus || 'unchanged'}</div>
+              <div style="margin-top:6px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
+                <div><b>Tracked items</b><ul style="margin:6px 0 0 16px;">${tracked}</ul></div>
+                <div><b>Latest evidence</b><div style="margin-top:6px;">${lastObs}</div></div>
+              </div>
+            </div>`;
+          }).join('')}`;
+        };
+
         const refreshClaudeExportPreview = ()=>{
           const payload = buildClaudePayload();
           if(claudeExportPreviewEl) claudeExportPreviewEl.value = safeJsonPreview(payload);
@@ -11898,6 +11930,7 @@ passes: 425"></textarea>
           const warnText = (result.warnings || []).length ? ` · ⚠️ ${result.warnings.join(' | ')}` : '';
           setClaudeStatus(`✅ Feedback importado${warnText}`);
           renderClaudeFeedbackSummary();
+          renderLearningAuditSummary();
           refreshClaudeExportPreview();
         };
 
@@ -11945,6 +11978,7 @@ passes: 425"></textarea>
 
         refreshClaudeExportPreview();
         renderClaudeFeedbackSummary();
+        renderLearningAuditSummary();
 
         const renderLfl = ()=>{
           const timeline = document.getElementById('mneLflTimeline');
@@ -12235,12 +12269,27 @@ passes: 425"></textarea>
               topEngines: Object.entries(orchestratorLive.finalWeights).map(([engine, contribution])=>({ engine, contribution }))
             }
           });
+          brainV2.mne = observeLearningAuditsForMatch(brainV2.mne, {
+            matchId: simMatchId,
+            observedMatch: {
+              matchId: simMatchId,
+              observedAt: new Date().toISOString(),
+              phase,
+              narrative: raw,
+              sceneId: prediction?.predicted?.sceneId || null,
+              triggerIds: (vision?.mne?.liveTriggers || []).map((row)=>`${row.sceneId || ''}:${row.if || ''}`),
+              derivedTags: observation?.observed?.derivedTags || {},
+              evidenceEvents: Number(observation?.observed?.evidence?.events || 0),
+              comparisonMetrics: comparison?.metrics || {}
+            }
+          });
           saveBrainV2(brainV2);
           if(statusEl){
             const lsfTxt = lsfResult && !lsfResult.skipped ? ` · LSF eval ${lsfResult.truth} · brier ${Number(lsfResult.brier||0).toFixed(3)}` : '';
             statusEl.textContent = learning.skipped === 'low_evidence' ? '⚠️ Evidencia insuficiente (<3 eventos), sin ajuste.' : `✅ Comparado. Prec ${(comparison.metrics.precision*100).toFixed(0)}% · Δcal ${comparison.metrics.calibrationError.toFixed(2)}${lsfTxt}.`;
           }
           renderLfl();
+          renderLearningAuditSummary();
         });
 
         document.getElementById('mneLsfLearnedBtn')?.addEventListener('click', ()=>{

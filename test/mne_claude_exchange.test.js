@@ -4,6 +4,9 @@ import {
   buildMneClaudeExport,
   parseClaudeFeedbackText,
   updateClaudeMemoryState,
+  observeAuditAgainstMatch,
+  classifyAuditObservation,
+  createLearningAuditFromFeedback,
   EXPORT_SCHEMA,
   FEEDBACK_SCHEMA
 } from '../src/footballlab/mne_claude_exchange.js';
@@ -61,4 +64,74 @@ test('updateClaudeMemoryState stores history and reusable items', ()=>{
   assert.equal(next.claudeExchange.historyByMatch.sim_1.length, 1);
   assert.equal(next.claudeExchange.candidateRules.length, 1);
   assert.equal(next.claudeExchange.patterns.length, 1);
+});
+
+
+test('createLearningAuditFromFeedback bootstraps tracked items and metrics', ()=>{
+  const feedback = {
+    evaluation: { accuracy: 0.8, agreementLevel: 'medium', summary: 'ok' },
+    missedSignals: [{ type: 'emotional_game_state', detail: 'faltó lectura emocional' }],
+    newRules: [{ id: 'boost_game_state_control', name: 'Control marcador', logic: 'if close game', effect: 'boost control' }],
+    patternInsights: [{ name: 'late_shift', detail: 'cambio en cierre' }]
+  };
+  const audit = createLearningAuditFromFeedback(feedback, { matchId: 'sim_1', importedAt: '2026-01-01T00:00:00.000Z' });
+  assert.equal(audit.sourceMatchId, 'sim_1');
+  assert.equal(audit.observations.length, 0);
+  assert.equal(audit.metrics.totalObservedMatches, 0);
+  assert.ok(audit.trackedItems.length >= 3);
+});
+
+test('observeAuditAgainstMatch classifies improved when signal appears and rule evidence exists', ()=>{
+  const audit = createLearningAuditFromFeedback({
+    missedSignals: [{ type: 'territorial_pressure', detail: 'faltó control territorial' }],
+    newRules: [{ id: 'boost_game_state_control', name: 'Control', logic: 'control', effect: 'territorial' }]
+  }, { matchId: 'sim_seed' });
+  const next = observeAuditAgainstMatch(audit, {
+    matchId: 'sim_2',
+    observedAt: '2026-01-02T00:00:00.000Z',
+    triggerIds: ['boost_game_state_control:if close game'],
+    derivedTags: { territorial_pressure: 0.55 },
+    evidenceEvents: 5,
+    narrative: 'mejor control del cierre'
+  });
+  assert.equal(next.observations.length, 1);
+  assert.equal(next.observations[0].status, 'improved');
+  assert.equal(next.metrics.improvements, 1);
+});
+
+test('observeAuditAgainstMatch yields unchanged/regressed/not_triggered conservatively', ()=>{
+  const audit = createLearningAuditFromFeedback({
+    missedSignals: [{ type: 'finishing_failure', detail: 'sobreuso de finishing_failure' }]
+  }, { matchId: 'sim_seed' });
+
+  const unchanged = observeAuditAgainstMatch(audit, {
+    matchId: 'sim_3',
+    derivedTags: { finishing_failure: 0.35 },
+    evidenceEvents: 4,
+    narrative: 'sin cambios claros'
+  });
+  assert.equal(unchanged.observations[0].status, 'unchanged');
+
+  const regressed = observeAuditAgainstMatch(audit, {
+    matchId: 'sim_4',
+    derivedTags: { finishing_failure: 0.82 },
+    evidenceEvents: 6,
+    narrative: 'múltiples fallos de definición'
+  });
+  assert.equal(regressed.observations[0].status, 'regressed');
+
+  const notTriggered = observeAuditAgainstMatch(audit, {
+    matchId: 'sim_5',
+    derivedTags: {},
+    evidenceEvents: 0,
+    narrative: ''
+  });
+  assert.equal(notTriggered.observations[0].status, 'not_triggered');
+});
+
+test('classifyAuditObservation handles empty and mixed states', ()=>{
+  assert.equal(classifyAuditObservation([]), 'not_triggered');
+  assert.equal(classifyAuditObservation([{ status: 'not_triggered' }, { status: 'unchanged' }]), 'unchanged');
+  assert.equal(classifyAuditObservation([{ status: 'improved' }, { status: 'unchanged' }]), 'improved');
+  assert.equal(classifyAuditObservation([{ status: 'regressed' }, { status: 'improved' }]), 'regressed');
 });

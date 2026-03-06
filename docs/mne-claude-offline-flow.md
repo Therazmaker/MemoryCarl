@@ -12,6 +12,7 @@ Este proyecto soporta un flujo opcional para aprender offline sin API:
 3. Subir ese archivo manualmente a Claude (fuera de la app).
 4. Pegar o cargar en la UI el JSON de respuesta de Claude con **Import Claude Feedback** o **Import from text**.
 5. El import valida el schema y guarda el aprendizaje en memoria persistente (`FL_BRAIN_V2` → `mne.claudeExchange`).
+6. En el mismo import se crea automáticamente un **Learning Audit** en `mne.claudeExchange.learningAudit`.
 
 ## Schema esperado (feedback)
 
@@ -22,7 +23,29 @@ Este proyecto soporta un flujo opcional para aprender offline sin API:
 Si faltan campos opcionales, el sistema rellena defaults.
 Si el schema o JSON son inválidos, se muestra un error legible y no se modifica el estado.
 
+## Learning Audit (evidencia de aprendizaje)
+
+- Se crea **automáticamente** por cada import válido de feedback Claude.
+- Cada auditoría guarda:
+  - `sourceMatchId`, `importedAt`, resumen de feedback,
+  - `trackedItems` (señales omitidas, reglas nuevas, patrones/heurísticas),
+  - `observations` en partidos/simulaciones posteriores,
+  - métricas agregadas (`totalObservedMatches`, `improvements`, `unchanged`, `regressions`, `notTriggered`, `triggeredRules`, último estado/fecha).
+- Al usar **Compare & Learn**, el sistema intenta observar esas auditorías con heurísticas simples sobre tags/rules/narrativa ya estructurada.
+
+### Estados por observación
+
+- `improved`: hay evidencia de mejora (error baja, señal aparece, regla se activa).
+- `unchanged`: no hay diferencia clara.
+- `regressed`: el problema reaparece con más fuerza.
+- `not_triggered`: no hay contexto/evidencia suficiente para evaluar con confianza.
+
+### Estado agregado por auditoría
+
+- `improved`, `mixed`, `unchanged`, `regressed`.
+
 ## Compatibilidad
 
 - Es una capa adicional opcional.
 - Si no se usa import/export de Claude, el MNE sigue con su flujo normal.
+- Si no hay auditorías, la UI muestra un estado compacto sin interferir con el flujo actual.
