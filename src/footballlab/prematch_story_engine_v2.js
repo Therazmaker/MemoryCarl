@@ -1,5 +1,6 @@
 import { collectMatchesForTeam } from './readiness_memory.js';
 import { buildMatchCSI } from './current_strength_index.js';
+import { buildMatchFormSurprise } from './form_surprise_index.js';
 
 const BRAIN_TAG_COPY = {
   territorial_pressure: 'tendencia a empujar al rival hacia atrás',
@@ -170,6 +171,14 @@ export function collectPrematchData({ db = {}, brainV2 = {}, homeId = '', awayId
     N: csiWindow
   });
 
+  const fsi = buildMatchFormSurprise({
+    brainV2,
+    home: homeTeam,
+    away: awayTeam,
+    leagueId: resolvedLeagueId,
+    N: csiWindow
+  });
+
   return {
     match: {
       homeId,
@@ -203,6 +212,7 @@ export function collectPrematchData({ db = {}, brainV2 = {}, homeId = '', awayId
       awayRows: awayMemoryRows
     },
     csi,
+    fsi,
     context: detectCompetitiveContext({
       homeTable,
       awayTable,
@@ -353,6 +363,7 @@ export function buildPrematchInsights(data = {}){
     h2h,
     readiness,
     csi: data?.csi || null,
+    fsi: data?.fsi || null,
     brainSignals: {
       home: homeSignals,
       away: awaySignals,
@@ -460,6 +471,22 @@ export function composePrematchSections(insights = {}){
       key: 'market',
       title: 'Mercado',
       text: `El mercado marca como favorito a ${fav} con un gap ${insights.oddsContext.marketGap}.`
+    });
+  }
+
+  if(insights?.fsi?.home || insights?.fsi?.away){
+    const homeFsi = insights?.fsi?.home;
+    const awayFsi = insights?.fsi?.away;
+    const homeLine = homeFsi
+      ? `${homeFsi.team}: ${Number.isFinite(homeFsi?.FSI) ? `FSI ${homeFsi.FSI} (${homeFsi.status})` : homeFsi.explanation}`
+      : '';
+    const awayLine = awayFsi
+      ? `${awayFsi.team}: ${Number.isFinite(awayFsi?.FSI) ? `FSI ${awayFsi.FSI} (${awayFsi.status})` : awayFsi.explanation}`
+      : '';
+    sections.push({
+      key: 'fsi',
+      title: 'Form Surprise Index (FSI)',
+      text: [homeLine, awayLine, insights?.fsi?.conclusion].filter(Boolean).join(' · ')
     });
   }
 
