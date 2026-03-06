@@ -11,6 +11,8 @@ import { scoreMatrix, matrixToOutcome, mostLikelyScore, oddsToMarketProbabilitie
 import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState, getLatestClaudeFeedback, safeJsonPreview, observeLearningAuditsForMatch } from "./footballlab/mne_claude_exchange.js";
 import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
+import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
+import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -9706,7 +9708,8 @@ function computeTeamIntelligencePanel(db, teamId){
       const globalRotation = pressureRef.congestionLevel==="🔴" || backToBack>=2 || next14.length>=4 ? "Alta" : next14.length>=2 ? "Media" : "Baja";
       const patterns = buildTeamIntPatterns(db, team);
       const narrativeMetrics = computeTeamNarrativeMetrics(teamMatches);
-      const brainV2TeamState = loadBrainV2();
+      const brainV2ForResultsSync = loadBrainV2();
+      const resultsSync = getResultsSyncSummary({ db, brainV2: brainV2ForResultsSync, team });
       const matchRows = teamMatches.map((m, idx)=>{
         const isHome = m.homeId===team.id;
         const rival = resolveRivalForTeamMatch({ db, match: m, team, brainV2: brainV2TeamState });
@@ -9929,7 +9932,10 @@ function computeTeamIntelligencePanel(db, teamId){
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
+          <div class="fl-mini" style="margin-bottom:6px;">Hay <b>${resultsSync.totalInMemory}</b> partidos guardados en memoria para <b>${team.name}</b>.</div>
+          <div class="fl-mini" style="margin-bottom:8px;">Y ya hay <b>${resultsSync.alreadySynced}</b> sincronizados en esta tabla.${resultsSync.pendingToSync>0 ? ` Faltan <b>${resultsSync.pendingToSync}</b>.` : " <b>Todo sincronizado.</b>"}</div>
           <div class="fl-row" style="margin-bottom:10px;">
+            <button class="fl-btn" id="syncResultsFromMemory" ${resultsSync.pendingToSync>0 ? '' : 'disabled'}>Sincronizar</button>
             <input id="resDate" type="date" class="fl-input" />
             <select id="resHome" class="fl-select"><option value="">Local</option>${resultTeamOptions}</select>
             <input id="resHG" type="number" class="fl-input" placeholder="GL" style="width:74px" />
@@ -10562,6 +10568,23 @@ function computeTeamIntelligencePanel(db, teamId){
           document.getElementById("squadStatus").textContent = `❌ ${String(err.message||err)}`;
         }
       };
+      document.getElementById("syncResultsFromMemory").onclick = ()=>{
+        const status = document.getElementById("resultStatus");
+        const brainV2 = loadBrainV2();
+        const out = syncMemoryMatchesIntoResultsModule({
+          db,
+          brainV2,
+          team,
+          ensureTrackerMatchState,
+          uid
+        });
+        saveDb(db);
+        status.textContent = out.inserted>0
+          ? `✅ Sincronización completada. Importados: ${out.inserted}.`
+          : "Todo sincronizado. No hay partidos nuevos para importar.";
+        render("equipo", { teamId: team.id });
+      };
+
       document.getElementById("addResult").onclick = ()=>{
         const homeId = document.getElementById("resHome").value;
         const awayId = document.getElementById("resAway").value;
@@ -11048,6 +11071,11 @@ passes: 425"></textarea>
             <input id="b2OddA" class="fl-input" type="number" step="0.01" placeholder="Cuota Visita" style="max-width:150px;" />
             <button class="fl-btn" id="b2Simulate">Simular visión</button>
           </div>
+          <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+            <button class="fl-btn" id="b2PrematchGenerate">Generar previa editorial</button>
+            <button class="fl-btn" id="b2PrematchRegenerate">Regenerar</button>
+            <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="b2PrematchDebugToggle" /> Ver insights JSON</label>
+          </div>
           <div id="b2BrainStatus" class="fl-mini" style="margin-top:8px;"></div>
           <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
             <button class="fl-btn secondary" id="b2HybridSync">Sincronizar dataset híbrido</button>
@@ -11056,6 +11084,7 @@ passes: 425"></textarea>
           </div>
           <div id="b2HybridLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Hybrid tools listos.</div>
           <div id="b2Vision" class="fl-mini" style="margin-top:10px;">Carga local/visita para ver la simulación visual.</div>
+          <div id="b2PrematchOut" class="fl-card" style="margin-top:8px;padding:10px;display:none;"></div>
         </div>
       `;
 
@@ -11470,6 +11499,68 @@ passes: 425"></textarea>
       });
       document.getElementById('b2Home')?.addEventListener('change', paintBrainStatus);
       document.getElementById('b2Away')?.addEventListener('change', paintBrainStatus);
+
+      let lastBrainPrematchPayload = null;
+      const renderBrainPrematchPreview = (payload = null)=>{
+        const out = document.getElementById('b2PrematchOut');
+        const toggle = document.getElementById('b2PrematchDebugToggle');
+        if(!out) return;
+        if(!payload){
+          out.style.display = 'none';
+          out.innerHTML = '';
+          return;
+        }
+        const editorial = payload.editorial || {};
+        const sections = Array.isArray(editorial.sections) ? editorial.sections : [];
+        const debugOn = Boolean(toggle?.checked);
+        out.style.display = 'block';
+        out.innerHTML = `
+          <div style="font-weight:900;font-size:16px;">📰 ${editorial.headline || 'Previa editorial'}</div>
+          <div class="fl-mini" style="margin-top:8px;display:grid;gap:8px;">
+            ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
+          </div>
+          ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
+        `;
+      };
+
+      const handleBrainPrematchGenerate = ()=>{
+        const homeIdSel = document.getElementById('b2Home')?.value || '';
+        const awayIdSel = document.getElementById('b2Away')?.value || '';
+        const out = document.getElementById('b2PrematchOut');
+        if(!homeIdSel || !awayIdSel || homeIdSel===awayIdSel){
+          if(out){
+            out.style.display = 'block';
+            out.textContent = 'Selecciona local y visita para generar la previa editorial.';
+          }
+          return;
+        }
+        const oddH = document.getElementById('b2OddH')?.value;
+        const oddD = document.getElementById('b2OddD')?.value;
+        const oddA = document.getElementById('b2OddA')?.value;
+        const market = clean1x2Probs(oddH, oddD, oddA);
+        const homeTeam = db.teams.find((t)=>t.id===homeIdSel);
+        const awayTeam = db.teams.find((t)=>t.id===awayIdSel);
+        const leagueIdSel = selectedLeagueId || homeTeam?.leagueId || awayTeam?.leagueId || '';
+        const homeReadiness = computeMatchReadinessEngine(db, homeIdSel, { brainV2, teamName: homeTeam?.name || '', leagueId: leagueIdSel });
+        const awayReadiness = computeMatchReadinessEngine(db, awayIdSel, { brainV2, teamName: awayTeam?.name || '', leagueId: leagueIdSel });
+        const data = collectPrematchData({
+          db,
+          brainV2,
+          homeId: homeIdSel,
+          awayId: awayIdSel,
+          leagueId: leagueIdSel,
+          market: market ? { ...market, oddH, oddD, oddA } : null,
+          readiness: { home: homeReadiness, away: awayReadiness }
+        });
+        const insights = buildPrematchInsights(data);
+        const editorial = composePrematchEditorial(insights);
+        lastBrainPrematchPayload = { insights, editorial };
+        renderBrainPrematchPreview(lastBrainPrematchPayload);
+      };
+
+      document.getElementById('b2PrematchGenerate')?.addEventListener('click', handleBrainPrematchGenerate);
+      document.getElementById('b2PrematchRegenerate')?.addEventListener('click', handleBrainPrematchGenerate);
+      document.getElementById('b2PrematchDebugToggle')?.addEventListener('change', ()=>renderBrainPrematchPreview(lastBrainPrematchPayload));
 
       document.getElementById('b2SaveMatch')?.addEventListener('click', ()=>{
         const status = document.getElementById('b2Status');
@@ -13801,6 +13892,12 @@ passes: 425"></textarea>
               <select id="vsAwayObj" class="fl-select" style="width:140px"><option value="">Obj visita</option><option value="title">title</option><option value="europe">europe</option><option value="mid">mid</option><option value="survival">survival</option><option value="relegation">relegation</option><option value="cupFocus">cupFocus</option></select>
             </div>
             <div id="vsOut" style="margin-top:10px;" class="fl-muted">Selecciona dos equipos.</div>
+            <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+              <button class="fl-btn" id="prematchGenerate">Generar previa editorial</button>
+              <button class="fl-btn" id="prematchRegenerate">Regenerar</button>
+              <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="prematchDebugToggle" /> Ver insights JSON</label>
+            </div>
+            <div id="prematchOut" class="fl-card" style="margin-top:8px;padding:10px;display:none;"></div>
             <div class="fl-row" style="margin-top:8px;">
               <button class="fl-btn" id="runVsV2">Simular v2 (momentum)</button>
               <button class="fl-btn" id="saveVsV2Profile">Guardar v2 en perfiles</button>
@@ -13873,6 +13970,49 @@ passes: 425"></textarea>
 
       let lastSimulation = null;
       let lastSimulationV2 = null;
+      let lastPrematchPayload = null;
+
+      const renderPrematchPreview = (payload = null)=>{
+        const out = document.getElementById('prematchOut');
+        const toggle = document.getElementById('prematchDebugToggle');
+        if(!out) return;
+        if(!payload){
+          out.style.display = 'none';
+          out.innerHTML = '';
+          return;
+        }
+        const editorial = payload.editorial || {};
+        const sections = Array.isArray(editorial.sections) ? editorial.sections : [];
+        const debugOn = Boolean(toggle?.checked);
+        out.style.display = 'block';
+        out.innerHTML = `
+          <div style="font-weight:900;font-size:16px;">📰 ${editorial.headline || 'Previa editorial'}</div>
+          <div class="fl-mini" style="margin-top:8px;display:grid;gap:8px;">
+            ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
+          </div>
+          ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
+        `;
+      };
+
+      const buildPrematchPayload = ({ homeId, awayId, selectedLeagueId, market })=>{
+        const homeTeam = db.teams.find((t)=>t.id===homeId);
+        const awayTeam = db.teams.find((t)=>t.id===awayId);
+        const brainV2State = loadBrainV2();
+        const homeReadiness = computeMatchReadinessEngine(db, homeId, { brainV2: brainV2State, teamName: homeTeam?.name || '', leagueId: selectedLeagueId });
+        const awayReadiness = computeMatchReadinessEngine(db, awayId, { brainV2: brainV2State, teamName: awayTeam?.name || '', leagueId: selectedLeagueId });
+        const baseData = collectPrematchData({
+          db,
+          brainV2: brainV2State,
+          homeId,
+          awayId,
+          leagueId: selectedLeagueId,
+          market,
+          readiness: { home: homeReadiness, away: awayReadiness }
+        });
+        const insights = buildPrematchInsights(baseData);
+        const editorial = composePrematchEditorial(insights);
+        return { insights, editorial };
+      };
 
       const syncTableContextInputs = ()=>{
         const homeId = document.getElementById("vsHome").value;
@@ -13887,6 +14027,30 @@ passes: 425"></textarea>
 
       document.getElementById("vsHome").onchange = syncTableContextInputs;
       document.getElementById("vsAway").onchange = syncTableContextInputs;
+
+      document.getElementById('prematchDebugToggle').onchange = ()=>renderPrematchPreview(lastPrematchPayload);
+      const handlePrematchGenerate = ()=>{
+        const homeId = document.getElementById("vsHome").value;
+        const awayId = document.getElementById("vsAway").value;
+        const selectedLeagueId = document.getElementById("vsLeague")?.value || "";
+        if(!homeId || !awayId || homeId===awayId){
+          const out = document.getElementById('prematchOut');
+          if(out){
+            out.style.display = 'block';
+            out.textContent = 'Selecciona dos equipos distintos para generar la previa.';
+          }
+          return;
+        }
+        const oddH = document.getElementById("vsOddH").value;
+        const oddD = document.getElementById("vsOddD").value;
+        const oddA = document.getElementById("vsOddA").value;
+        const market = clean1x2Probs(oddH, oddD, oddA);
+        const payload = buildPrematchPayload({ homeId, awayId, selectedLeagueId, market: market ? { ...market, oddH, oddD, oddA } : null });
+        lastPrematchPayload = payload;
+        renderPrematchPreview(payload);
+      };
+      document.getElementById('prematchGenerate').onclick = handlePrematchGenerate;
+      document.getElementById('prematchRegenerate').onclick = handlePrematchGenerate;
 
       document.querySelectorAll("button[data-outcome]").forEach((btn)=>{
         btn.onclick = ()=>{
