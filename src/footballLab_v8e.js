@@ -136,7 +136,41 @@ export function initFootballLab(){
         ? parsed.memories
         : {},
       gpe: normalizeGpeState(parsed?.gpe),
-      mne: normalizeMneLearningState(parsed?.mne)
+      mne: normalizeMneLearningState(parsed?.mne),
+      orchestratorLearning: normalizeOrchestratorLearningState(parsed?.orchestratorLearning)
+    };
+  }
+
+  function normalizeOrchestratorLearningState(raw){
+    const parsed = raw && typeof raw === "object" ? raw : {};
+    const buildPerf = (engine)=>{
+      const row = parsed?.enginePerformance?.[engine] || {};
+      return {
+        n: Math.max(0, Number(row.n) || 0),
+        accuracy: clamp(Number(row.accuracy) || 0, 0, 1),
+        brierLike: clamp(Number(row.brierLike) || 0, 0, 1)
+      };
+    };
+    const buildBias = (engine)=>Number(clamp(Number(parsed?.learnedBias?.[engine]) || 0, -0.10, 0.10).toFixed(3));
+    return {
+      version: 1,
+      enginePerformance: {
+        MNE: buildPerf("MNE"),
+        MCE: buildPerf("MCE"),
+        MRE: buildPerf("MRE"),
+        GPE: buildPerf("GPE"),
+        LSF: buildPerf("LSF"),
+        Emotional: buildPerf("Emotional")
+      },
+      learnedBias: {
+        MNE: buildBias("MNE"),
+        MCE: buildBias("MCE"),
+        MRE: buildBias("MRE"),
+        GPE: buildBias("GPE"),
+        LSF: buildBias("LSF"),
+        Emotional: buildBias("Emotional")
+      },
+      updatedAt: parsed?.updatedAt || null
     };
   }
 
@@ -1490,6 +1524,191 @@ export function initFootballLab(){
     const exps = scores.map((v)=>Math.exp((Number(v) - maxV) / t));
     const sum = Math.max(0.0001, exps.reduce((acc, val)=>acc + val, 0));
     return exps.map((v)=>v / sum);
+  }
+
+  const ORCHESTRATOR_ENGINES = ["MNE", "MCE", "MRE", "GPE", "LSF", "Emotional", "PostGoal"];
+
+  function normalizeOrchestratorWeights(raw = {}){
+    const seed = { MNE: 0.2, MCE: 0.18, MRE: 0.16, GPE: 0.14, LSF: 0.2, Emotional: 0.08, PostGoal: 0.04 };
+    const out = {};
+    ORCHESTRATOR_ENGINES.forEach((engine)=>{ out[engine] = Math.max(0, Number(raw?.[engine] ?? seed[engine])); });
+    const sum = ORCHESTRATOR_ENGINES.reduce((acc, engine)=>acc + out[engine], 0) || 1;
+    ORCHESTRATOR_ENGINES.forEach((engine)=>{ out[engine] = Number((out[engine] / sum).toFixed(4)); });
+    return out;
+  }
+
+  function applyDynamicWeights(baseWeights = {}, modifiers = {}){
+    const next = {};
+    ORCHESTRATOR_ENGINES.forEach((engine)=>{
+      next[engine] = Math.max(0.001, (Number(baseWeights?.[engine]) || 0) + (Number(modifiers?.[engine]) || 0));
+    });
+    return normalizeOrchestratorWeights(next);
+  }
+
+  function applyEngineLearningBias(weights = {}, learnedBias = {}){
+    const adjusted = {};
+    ORCHESTRATOR_ENGINES.forEach((engine)=>{
+      const w = Number(weights?.[engine]) || 0;
+      const bias = clamp(Number(learnedBias?.[engine]) || 0, -0.10, 0.10);
+      adjusted[engine] = Math.max(0.001, w * (1 + bias));
+    });
+    return normalizeOrchestratorWeights(adjusted);
+  }
+
+  function computeOrchestratorStateModifiers(matchState = {}){
+    const out = { MNE: 0, MCE: 0, MRE: 0, GPE: 0, LSF: 0, Emotional: 0, PostGoal: 0 };
+    const goalDiff = (Number(matchState.homeGoals) || 0) - (Number(matchState.awayGoals) || 0);
+    if(Math.abs(goalDiff) >= 2){ out.LSF += 0.12; out.MNE -= 0.06; out.MCE -= 0.03; }
+    if(String(matchState.tempo || "").toLowerCase() === "high"){ out.LSF += 0.08; out.MNE += 0.03; }
+    if(Boolean(matchState.chaosDetected)){ out.Emotional += 0.08; out.GPE += 0.05; out.LSF += 0.05; }
+    if((Number(matchState.dominanceHome) || 0) > 0.65 || (Number(matchState.dominanceAway) || 0) > 0.65){ out.MNE += 0.06; out.MCE += 0.04; }
+    const balanced = Math.abs((Number(matchState.dominanceHome) || 0) - (Number(matchState.dominanceAway) || 0)) < 0.08;
+    const lowEvents = (Number(matchState.liveEventsCount) || 0) < 4;
+    if(balanced && lowEvents){ out.MCE += 0.05; out.MRE += 0.04; out.LSF -= 0.05; }
+    return out;
+  }
+
+  function computeLiveEvidenceStrength(liveState = {}){
+    const raw =
+      0.15 * Math.min((Number(liveState.liveEventsCount) || 0) / 10, 1) +
+      0.20 * Math.min(((Number(liveState.shots) || 0) + (Number(liveState.corners) || 0)) / 12, 1) +
+      0.20 * Math.min((Number(liveState.shotsOT) || 0) / 4, 1) +
+      0.20 * (liveState.hasGoal ? 1 : 0) +
+      0.15 * ((liveState.hasRed || liveState.hasVar) ? 1 : 0) +
+      0.10 * clamp(Number(liveState.completeness) || 0, 0, 1);
+    const score = clamp(raw, 0, 1);
+    return { score: Number(score.toFixed(3)), label: score < 0.35 ? "weak" : score < 0.65 ? "moderate" : "strong" };
+  }
+
+  function computeEmotionalImpactScore(events = [], windowMinutes = 5){
+    const list = Array.isArray(events) ? events : [];
+    const maxMinute = Math.max(0, ...list.map((e)=>Number(e?.minute) || 0));
+    const windowStart = maxMinute - Math.max(1, Number(windowMinutes) || 5);
+    const recent = list.filter((e)=>{
+      const minute = Number(e?.minute);
+      return Number.isFinite(minute) && minute >= windowStart;
+    });
+    const count = (matcher)=>recent.filter(matcher).length;
+    const goal = count((e)=>String(e?.type || "").includes("goal"));
+    const bigChance = count((e)=>String(e?.type || "") === "big_chance");
+    const redCard = count((e)=>String(e?.type || "") === "red");
+    const yellows = count((e)=>String(e?.type || "") === "yellow");
+    const fouls = count((e)=>String(e?.type || "") === "foul");
+    const criticalSave = count((e)=>String(e?.type || "") === "save" && (Number(e?.quality) || 0) >= 0.75);
+    const penaltyAwarded = count((e)=>String(e?.type || "") === "penalty_awarded");
+    const varOverturn = count((e)=>["penalty_cancelled", "var_overturn"].includes(String(e?.type || "")));
+    const missedBigChance = count((e)=>String(e?.type || "") === "missed_big_chance");
+    const yellowCluster = yellows >= 2 ? 1 : 0;
+    const foulCluster = fouls >= 3 ? 1 : 0;
+    const score =
+      1.0 * goal +
+      0.7 * bigChance +
+      1.2 * redCard +
+      0.4 * yellowCluster +
+      0.6 * criticalSave +
+      0.85 * penaltyAwarded +
+      0.95 * varOverturn +
+      0.5 * missedBigChance +
+      0.45 * foulCluster;
+    const triggeredBy = [];
+    if(goal) triggeredBy.push("goal");
+    if(bigChance) triggeredBy.push("big_chance");
+    if(redCard) triggeredBy.push("red_card");
+    if(yellowCluster) triggeredBy.push("yellow_card_cluster");
+    if(criticalSave) triggeredBy.push("critical_save");
+    if(penaltyAwarded) triggeredBy.push("penalty_awarded");
+    if(varOverturn) triggeredBy.push("penalty_cancelled_or_var_overturn");
+    if(missedBigChance) triggeredBy.push("missed_big_chance");
+    if(foulCluster) triggeredBy.push("foul_cluster");
+    const level = score < 0.8 ? "low" : score < 1.4 ? "medium" : score < 2.2 ? "high" : "extreme";
+    return { score: Number(score.toFixed(3)), level, triggeredBy, thresholdPassed: score >= 1.4 };
+  }
+
+  function computeMomentumScore(recentWindow = {}){
+    const read = (side, key)=>Number(recentWindow?.[side]?.[key]) || 0;
+    const calc = (side)=>
+      0.30 * read(side, "corners") +
+      0.40 * read(side, "shots") +
+      0.60 * read(side, "bigChances") +
+      0.50 * read(side, "shotsOT") +
+      0.20 * read(side, "pressureEvents");
+    const homeMomentum = calc("home");
+    const awayMomentum = calc("away");
+    const swing = Math.abs(homeMomentum - awayMomentum);
+    const dominantSide = homeMomentum > awayMomentum * 1.25 ? "home" : awayMomentum > homeMomentum * 1.25 ? "away" : "none";
+    const label = swing < 0.8 ? "flat" : swing < 1.8 ? "building" : "strong";
+    return {
+      homeMomentum: Number(homeMomentum.toFixed(3)),
+      awayMomentum: Number(awayMomentum.toFixed(3)),
+      dominantSide,
+      swing: Number(swing.toFixed(3)),
+      label
+    };
+  }
+
+  function orchestrateBrainV2Decision(context = {}){
+    const phase = String(context.phase || "60-90");
+    const phaseBase = {
+      "0-30": { MNE: 0.23, MCE: 0.2, MRE: 0.17, GPE: 0.16, LSF: 0.14, Emotional: 0.06, PostGoal: 0.04 },
+      "30-60": { MNE: 0.21, MCE: 0.18, MRE: 0.16, GPE: 0.14, LSF: 0.2, Emotional: 0.07, PostGoal: 0.04 },
+      "60-90": { MNE: 0.18, MCE: 0.16, MRE: 0.16, GPE: 0.13, LSF: 0.25, Emotional: 0.08, PostGoal: 0.04 }
+    };
+    const baseWeights = normalizeOrchestratorWeights(phaseBase[phase] || phaseBase["60-90"]);
+    const momentum = computeMomentumScore(context.recentWindow);
+    const emotional = computeEmotionalImpactScore(context.recentEvents, context.emotionalWindowMinutes || 5);
+    const evidence = computeLiveEvidenceStrength(context.liveState);
+    const matchState = { ...(context.matchState || {}), momentumHome: momentum.homeMomentum, momentumAway: momentum.awayMomentum, chaosDetected: context.matchState?.chaosDetected || emotional.thresholdPassed };
+    const modifiers = computeOrchestratorStateModifiers(matchState);
+    let weights = applyDynamicWeights(baseWeights, modifiers);
+    weights = applyEngineLearningBias(weights, context.learnedBias || {});
+    if(evidence.label === "weak"){
+      weights.LSF = Math.min(weights.LSF, 0.18);
+      if(weights.LSF >= Math.max(...Object.values(weights))) weights.MNE += 0.03;
+      weights = normalizeOrchestratorWeights(weights);
+    }
+    const lsf = context.lsfForecast?.probs || { base: 1/3, trigger: 1/3, chaos: 1/3 };
+    const momentumEdge = clamp((momentum.homeMomentum - momentum.awayMomentum) / 8, -0.18, 0.18);
+    const chaosBoost = emotional.thresholdPassed ? 0.06 : 0;
+    const probs = {
+      home: clamp(0.33 + momentumEdge + (lsf.base - lsf.chaos) * 0.05, 0.05, 0.9),
+      draw: clamp(0.34 - Math.abs(momentumEdge) * 0.45 - chaosBoost * 0.25, 0.05, 0.7),
+      away: clamp(0.33 - momentumEdge + (lsf.chaos - lsf.base) * 0.05, 0.05, 0.9)
+    };
+    const norm = probs.home + probs.draw + probs.away || 1;
+    probs.home /= norm; probs.draw /= norm; probs.away /= norm;
+    const scenario = lsf.chaos >= lsf.trigger && lsf.chaos >= lsf.base ? "chaos" : lsf.trigger >= lsf.base ? "trigger" : "base";
+    const confidence = clamp(0.34 + evidence.score * 0.25 + Math.max(lsf.base, lsf.trigger, lsf.chaos) * 0.25 + (emotional.thresholdPassed ? 0.05 : 0), 0.2, 0.92);
+    const explanation = [];
+    explanation.push(evidence.label === "weak" ? "LSF limitado por evidencia live débil" : evidence.label === "moderate" ? "LSF moderado: evidencia live suficiente pero no dominante" : "LSF con evidencia live fuerte, puede liderar");
+    if(momentum.dominantSide !== "none") explanation.push(`Momentum ${momentum.dominantSide==='home'?'local':'visitante'} en ${momentum.label}`);
+    if(emotional.triggeredBy.length) explanation.push(`Impacto emocional ${emotional.level} por ${emotional.triggeredBy.join(', ')}`);
+    return {
+      finalWeights: weights,
+      finalDecision: { scenario, probs: { home: Number(probs.home.toFixed(3)), draw: Number(probs.draw.toFixed(3)), away: Number(probs.away.toFixed(3)) }, confidence: Number(confidence.toFixed(3)) },
+      contextFlags: { emotionalLevel: emotional.level, liveEvidence: evidence.label, momentumLabel: momentum.label },
+      advancedSignals: { modifiers, emotional, evidence, momentum },
+      explanation
+    };
+  }
+
+  function updateOrchestratorLearning({ state = null, result = {} } = {}){
+    const next = normalizeOrchestratorLearningState(state);
+    const contributors = (Array.isArray(result.topEngines) ? result.topEngines : []).filter((row)=>Number(row?.contribution) >= 0.2).map((row)=>String(row.engine || ""));
+    const correct = result.actualOutcome && result.predictedOutcome ? result.actualOutcome === result.predictedOutcome : false;
+    contributors.forEach((engine)=>{
+      if(!next.enginePerformance[engine] || !next.learnedBias.hasOwnProperty(engine)) return;
+      const perf = next.enginePerformance[engine];
+      perf.n += 1;
+      const accObs = correct ? 1 : 0;
+      perf.accuracy = Number((((perf.accuracy * (perf.n - 1)) + accObs) / perf.n).toFixed(4));
+      const conf = clamp(Number(result.confidence) || 0.5, 0, 1);
+      const brierLikeObs = (conf - accObs) ** 2;
+      perf.brierLike = Number((((perf.brierLike * (perf.n - 1)) + brierLikeObs) / perf.n).toFixed(4));
+      const delta = correct ? 0.01 : -0.01;
+      next.learnedBias[engine] = Number(clamp((Number(next.learnedBias[engine]) || 0) + delta, -0.10, 0.10).toFixed(3));
+    });
+    next.updatedAt = new Date().toISOString();
+    return next;
   }
 
   function extractLSFFeatures(phaseObserved = {}, prediction = {}, phase = "0-15"){
@@ -11152,6 +11371,59 @@ passes: 425"></textarea>
             away: document.getElementById('b2OddA')?.value
           }
         });
+        const learnedState = normalizeOrchestratorLearningState(brainV2.orchestratorLearning);
+        const momentumWindow = {
+          home: {
+            corners: Number(homeSummary?.avg?.corners || 0),
+            shots: Number(homeSummary?.avg?.shots || 0),
+            shotsOT: Number(homeSummary?.avg?.shots_on_target || homeSummary?.avg?.shots_target || 0),
+            bigChances: Number(homeSummary?.avg?.big_chances || homeSummary?.avg?.bigChances || 0),
+            pressureEvents: Number(homeSummary?.avg?.danger_attacks || homeSummary?.avg?.dangerAttacks || 0) / 6
+          },
+          away: {
+            corners: Number(awaySummary?.avg?.corners || 0),
+            shots: Number(awaySummary?.avg?.shots || 0),
+            shotsOT: Number(awaySummary?.avg?.shots_on_target || awaySummary?.avg?.shots_target || 0),
+            bigChances: Number(awaySummary?.avg?.big_chances || awaySummary?.avg?.bigChances || 0),
+            pressureEvents: Number(awaySummary?.avg?.danger_attacks || awaySummary?.avg?.dangerAttacks || 0) / 6
+          }
+        };
+        const matchState = {
+          minute: 65,
+          homeGoals: Number(vision?.score?.home || 0),
+          awayGoals: Number(vision?.score?.away || 0),
+          tempo: Number((homeSummary?.avg?.shots || 0) + (awaySummary?.avg?.shots || 0)) > 20 ? 'high' : 'medium',
+          chaosDetected: false,
+          dominanceHome: clamp((Number(vision?.bars?.homeControl || 50)) / 100, 0, 1),
+          dominanceAway: clamp((Number(vision?.bars?.awayControl || 50)) / 100, 0, 1),
+          liveEventsCount: Math.round((Number(homeSummary?.samples || 0) + Number(awaySummary?.samples || 0)) / 4),
+          surpriseIndex: clamp(Math.abs((Number(vision?.probs?.home || 0.33) - Number(vision?.probs?.away || 0.33))), 0, 1)
+        };
+        const orchestrator = orchestrateBrainV2Decision({
+          phase: '60-90',
+          matchState,
+          learnedBias: learnedState.learnedBias,
+          recentWindow: momentumWindow,
+          recentEvents: [],
+          liveState: {
+            minute: 65,
+            liveEventsCount: matchState.liveEventsCount,
+            shots: Number(homeSummary?.avg?.shots || 0) + Number(awaySummary?.avg?.shots || 0),
+            shotsOT: Number(momentumWindow.home.shotsOT || 0) + Number(momentumWindow.away.shotsOT || 0),
+            corners: Number(momentumWindow.home.corners || 0) + Number(momentumWindow.away.corners || 0),
+            hasGoal: Number(vision?.score?.home || 0) + Number(vision?.score?.away || 0) > 0,
+            hasRed: false,
+            hasVar: false,
+            completeness: clamp((Number(homeSummary?.samples || 0) + Number(awaySummary?.samples || 0)) / 60, 0, 1)
+          },
+          lsfForecast: {
+            probs: {
+              base: 0.34,
+              trigger: 0.33,
+              chaos: 0.33
+            }
+          }
+        });
         const homeReadiness = computeMatchReadinessEngine(db, homeIdSel);
         const awayReadiness = computeMatchReadinessEngine(db, awayIdSel);
         const readinessDelta = clamp((homeReadiness.readinessScore - awayReadiness.readinessScore) / 100, -0.35, 0.35);
@@ -11232,6 +11504,16 @@ passes: 425"></textarea>
             <div class="fl-card" style="padding:8px;"><div class="fl-mini">🚩 Córners</div><div style="font-weight:800;">${exp.cornersHome?.toFixed(1)} - ${exp.cornersAway?.toFixed(1)}</div></div>
             <div class="fl-card" style="padding:8px;"><div class="fl-mini">🟨 Tarjetas</div><div style="font-weight:800;">${exp.cardsHome?.toFixed(1)} - ${exp.cardsAway?.toFixed(1)}</div></div>
           </div>
+          <details style="margin-top:10px;" open>
+            <summary style="font-weight:800;cursor:pointer;">Advanced Orchestrator Signals</summary>
+            <div class="fl-card" style="margin-top:8px;padding:8px;display:grid;gap:8px;">
+              <div class="fl-mini"><b>Dynamic Weights:</b> ${Object.entries(orchestrator.finalWeights).map(([k,v])=>`${k} ${(Number(v)*100).toFixed(1)}%`).join(' · ')}</div>
+              <div class="fl-mini"><b>Live Evidence Strength:</b> ${orchestrator.advancedSignals.evidence.label} (${(Number(orchestrator.advancedSignals.evidence.score)*100).toFixed(0)}%)</div>
+              <div class="fl-mini"><b>Emotional Impact:</b> ${orchestrator.advancedSignals.emotional.level} · score ${Number(orchestrator.advancedSignals.emotional.score).toFixed(2)} · triggers ${(orchestrator.advancedSignals.emotional.triggeredBy || []).join(', ') || 'none'}</div>
+              <div class="fl-mini"><b>Momentum:</b> home ${Number(orchestrator.advancedSignals.momentum.homeMomentum).toFixed(2)} vs away ${Number(orchestrator.advancedSignals.momentum.awayMomentum).toFixed(2)} · ${orchestrator.advancedSignals.momentum.label}</div>
+              <div class="fl-mini">${(orchestrator.explanation || []).map((r)=>`• ${r}`).join(' ')}</div>
+            </div>
+          </details>
           <div style="margin-top:10px;display:grid;gap:6px;">
             <div>⚔️ Ataque local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.homeAttack}%;height:8px;background:#3fb950;border-radius:999px;"></div></div></div>
             <div>🛡️ Ataque visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.awayAttack}%;height:8px;background:#58a6ff;border-radius:999px;"></div></div></div>
@@ -11418,6 +11700,18 @@ passes: 425"></textarea>
                   </div>
                   <div class="fl-mini" style="margin-top:6px;">El sistema está aprendiendo: aún con poca muestra.</div>
                 </div>
+
+                <details class="fl-card" style="padding:10px;" open>
+                  <summary style="font-weight:800;cursor:pointer;">Advanced Orchestrator Signals</summary>
+                  <div class="fl-mini" style="margin-top:8px;display:grid;gap:4px;">${fRec.orchestrator
+                    ? `<div><b>Dynamic Weights</b>: ${Object.entries(fRec.orchestrator.finalWeights || {}).map(([k,v])=>`${k} ${(Number(v)*100).toFixed(1)}%`).join(' · ')}</div>
+                       <div><b>Live Evidence</b>: ${fRec.orchestrator?.advancedSignals?.evidence?.label || '-'} (${(Number(fRec.orchestrator?.advancedSignals?.evidence?.score || 0)*100).toFixed(0)}%)</div>
+                       <div><b>Emotional Impact</b>: ${(Number(fRec.orchestrator?.advancedSignals?.emotional?.score || 0)).toFixed(2)} · ${fRec.orchestrator?.advancedSignals?.emotional?.level || 'low'} · ${(fRec.orchestrator?.advancedSignals?.emotional?.triggeredBy || []).join(', ') || 'none'}</div>
+                       <div><b>Momentum</b>: home ${(Number(fRec.orchestrator?.advancedSignals?.momentum?.homeMomentum || 0)).toFixed(2)} vs away ${(Number(fRec.orchestrator?.advancedSignals?.momentum?.awayMomentum || 0)).toFixed(2)} · ${fRec.orchestrator?.advancedSignals?.momentum?.label || 'flat'}</div>
+                       <div>${(fRec.orchestrator?.explanation || []).map((x)=>`• ${x}`).join(' ')}</div>`
+                    : 'Sin señales avanzadas aún.'}
+                  </div>
+                </details>
               </div>`;
             }else{
               lsfPanel.innerHTML = '<div class="fl-mini">Aún no hay forecast LSF para esta fase. Usa Compare & Learn para generarlo.</div>';
@@ -11464,6 +11758,58 @@ passes: 425"></textarea>
 
           const nextPhase = nextMnePhase(phase);
           const lsfForecast = computeLsfForecast({ lsfState: brainV2.mne.lsfState, features: featuresCurrent, forecastForPhase: nextPhase });
+          const liveEventsLite = [];
+          Object.entries(observation?.observed?.tags || {}).forEach(([key, n])=>{
+            const qty = Math.max(0, Number(n) || 0);
+            for(let i=0;i<qty;i+=1) liveEventsLite.push({ type: key, minute: 60 + i, quality: 0.8 });
+          });
+          const liveState = {
+            minute: Number(String(phase || '0-15').split('-')[1]) || 60,
+            liveEventsCount: Number(observation?.observed?.evidence?.events || 0),
+            shots: Number(observation?.observed?.tags?.shot || 0),
+            shotsOT: Number(observation?.observed?.tags?.shot_on_target || 0),
+            corners: Number(observation?.observed?.tags?.corner || 0),
+            hasGoal: Number(observation?.observed?.tags?.goal || 0) > 0,
+            hasRed: Number(observation?.observed?.tags?.red || 0) > 0,
+            hasVar: Number(observation?.observed?.tags?.var_review || 0) > 0 || Number(observation?.observed?.tags?.var_overturn || 0) > 0,
+            completeness: clamp((Number(observation?.observed?.evidence?.events || 0)) / 10, 0, 1)
+          };
+          const momentumWindowLive = {
+            home: {
+              corners: Number(observation?.observed?.teamTags?.home?.corner || 0),
+              shots: Number(observation?.observed?.teamTags?.home?.shot || 0),
+              shotsOT: Number(observation?.observed?.teamTags?.home?.shot_on_target || 0),
+              bigChances: Number(observation?.observed?.teamTags?.home?.big_chance || 0),
+              pressureEvents: Number(observation?.observed?.derivedTags?.territorial_pressure || 0) * 4
+            },
+            away: {
+              corners: Number(observation?.observed?.teamTags?.away?.corner || 0),
+              shots: Number(observation?.observed?.teamTags?.away?.shot || 0),
+              shotsOT: Number(observation?.observed?.teamTags?.away?.shot_on_target || 0),
+              bigChances: Number(observation?.observed?.teamTags?.away?.big_chance || 0),
+              pressureEvents: Number(observation?.observed?.derivedTags?.counter_strike || 0) * 4
+            }
+          };
+          const learnedStateLive = normalizeOrchestratorLearningState(brainV2.orchestratorLearning);
+          const orchestratorLive = orchestrateBrainV2Decision({
+            phase,
+            matchState: {
+              minute: liveState.minute,
+              homeGoals: Number(observation?.observed?.teamTags?.home?.goal || 0),
+              awayGoals: Number(observation?.observed?.teamTags?.away?.goal || 0),
+              tempo: Number(observation?.observed?.evidence?.events || 0) >= 6 ? 'high' : 'medium',
+              chaosDetected: Number(comparison?.metrics?.surprise || 0) > 0.5,
+              dominanceHome: clamp(Number(observation?.observed?.evidence?.dangerIndexHome || 0) / 3, 0, 1),
+              dominanceAway: clamp(Number(observation?.observed?.evidence?.dangerIndexAway || 0) / 3, 0, 1),
+              liveEventsCount: liveState.liveEventsCount,
+              surpriseIndex: clamp(Number(comparison?.metrics?.surprise || 0), 0, 1)
+            },
+            learnedBias: learnedStateLive.learnedBias,
+            recentWindow: momentumWindowLive,
+            recentEvents: liveEventsLite,
+            liveState,
+            lsfForecast
+          });
           const rec = {
             matchId: simMatchId,
             madeAtPhase: phase,
@@ -11475,7 +11821,8 @@ passes: 425"></textarea>
             switchRisk: lsfForecast.switchRisk,
             drivers: lsfForecast.drivers,
             ifThen: lsfForecast.ifThen,
-            featuresSnapshot: featuresCurrent
+            featuresSnapshot: featuresCurrent,
+            orchestrator: orchestratorLive
           };
           const recIdx = records.findIndex((r)=>r.madeAtPhase===phase);
           if(recIdx>=0) records[recIdx] = { ...records[recIdx], ...rec };
@@ -11502,6 +11849,21 @@ passes: 425"></textarea>
             brainV2.mne.triggerWeights[row.id] = Number(clamp(prev + 0.02 * f, -2, 2).toFixed(3));
           });
 
+          const predictedOutcome = orchestratorLive.finalDecision.probs.home >= orchestratorLive.finalDecision.probs.draw && orchestratorLive.finalDecision.probs.home >= orchestratorLive.finalDecision.probs.away
+            ? 'home'
+            : orchestratorLive.finalDecision.probs.away >= orchestratorLive.finalDecision.probs.draw ? 'away' : 'draw';
+          const actualOutcome = Number(observation?.observed?.teamTags?.home?.goal || 0) === Number(observation?.observed?.teamTags?.away?.goal || 0)
+            ? 'draw'
+            : Number(observation?.observed?.teamTags?.home?.goal || 0) > Number(observation?.observed?.teamTags?.away?.goal || 0) ? 'home' : 'away';
+          brainV2.orchestratorLearning = updateOrchestratorLearning({
+            state: brainV2.orchestratorLearning,
+            result: {
+              predictedOutcome,
+              actualOutcome,
+              confidence: orchestratorLive.finalDecision.confidence,
+              topEngines: Object.entries(orchestratorLive.finalWeights).map(([engine, contribution])=>({ engine, contribution }))
+            }
+          });
           saveBrainV2(brainV2);
           if(statusEl){
             const lsfTxt = lsfResult && !lsfResult.skipped ? ` · LSF eval ${lsfResult.truth} · brier ${Number(lsfResult.brier||0).toFixed(3)}` : '';
