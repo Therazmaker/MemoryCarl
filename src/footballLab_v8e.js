@@ -13,6 +13,7 @@ import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readine
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
 import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
+import { buildBitacoraPerformanceLab, normalizePickRecord } from "./footballlab/bitacora_performance.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -13380,6 +13381,28 @@ passes: 425"></textarea>
       `).join("");
 
       const progressColor = plan.progressPct >= 1 ? "#3fb950" : (plan.progressPct >= 0.6 ? "#f2cc60" : "#ff7b72");
+      const perfLab = buildBitacoraPerformanceLab(st.entries, { rollingWindow: 20 });
+      const perfRangeRows = [
+        { label: "Global", data: perfLab.portfolio.global },
+        { label: "Últimos 7 días", data: perfLab.portfolio.last7d },
+        { label: "Últimos 30 picks", data: perfLab.portfolio.last30 }
+      ];
+      const perfOverviewCards = [
+        { label: "Picks", value: `${perfLab.portfolio.global.picks}` },
+        { label: "Win rate", value: `${(perfLab.portfolio.global.winRate*100).toFixed(1)}%` },
+        { label: "ROI", value: perfLab.portfolio.global.roi===null ? "-" : `${(perfLab.portfolio.global.roi*100).toFixed(2)}%`, tone: (perfLab.portfolio.global.roi||0)>=0 ? "#3fb950" : "#ff7b72" },
+        { label: "CLV promedio", value: perfLab.portfolio.global.clvAverage===null ? "-" : `${(perfLab.portfolio.global.clvAverage*100).toFixed(2)} pp`, tone: (perfLab.portfolio.global.clvAverage||0)>=0 ? "#3fb950" : "#ff7b72" },
+        { label: "EV acumulado", value: `${perfLab.portfolio.global.evCumulative>=0?'+':''}${perfLab.portfolio.global.evCumulative.toFixed(2)}`, tone: perfLab.portfolio.global.evCumulative>=0 ? "#3fb950" : "#ff7b72" },
+        { label: "Yield", value: perfLab.portfolio.global.yieldPct===null ? "-" : `${(perfLab.portfolio.global.yieldPct*100).toFixed(2)}%` }
+      ].map((row)=>`<div><div class="fl-mini">${row.label}</div><b style="font-size:20px;color:${row.tone||'#f6f8fa'};">${row.value}</b></div>`).join('');
+      const perfRangeTable = perfRangeRows.map((row)=>`<tr><td>${row.label}</td><td>${row.data.picks}</td><td>${(row.data.winRate*100).toFixed(1)}%</td><td>${row.data.roi===null?'-':`${(row.data.roi*100).toFixed(2)}%`}</td><td>${row.data.clvAverage===null?'-':`${(row.data.clvAverage*100).toFixed(2)} pp`}</td><td>${row.data.evCumulative.toFixed(2)}</td></tr>`).join('');
+      const perfLabels = perfLab.charts.map((p)=>p.label);
+      const perfEquity = perfLab.charts.map((p)=>p.equity);
+      const perfEv = perfLab.charts.map((p)=>p.ev);
+      const perfClv = perfLab.charts.map((p)=>p.clv===null?null:Number((p.clv*100).toFixed(3)));
+      const perfRolling = perfLab.rolling.map((p)=>p.roi===null?null:Number((p.roi*100).toFixed(3)));
+      const renderBreakRows = (rows=[])=>rows.slice(0,6).map((row)=>`<tr><td>${row.key}</td><td>${row.picks}</td><td>${(row.winRate*100).toFixed(1)}%</td><td>${row.roi===null?'-':`${(row.roi*100).toFixed(2)}%`}</td><td>${row.clv===null?'-':`${(row.clv*100).toFixed(2)} pp`}</td></tr>`).join('') || '<tr><td colspan="5" class="fl-mini">Sin datos suficientes.</td></tr>';
+      const perfInsights = perfLab.insights.length ? perfLab.insights.map((txt)=>`<li>${txt}</li>`).join('') : '<li>Sin señales suficientes todavía.</li>';
 
       content.innerHTML = `
         <div class="fl-card">
@@ -13403,6 +13426,38 @@ passes: 425"></textarea>
           </div>
           <div id="bkPilot" class="fl-mini" style="margin-top:8px;">
             🧠 Plan de hoy (Día ${dayIndex}/${plan.targetDays}): ${onTrack?"✅ Vas en ruta":"⚠️ Debes acelerar"} · avance ${plan.progressProfit>=0?"+":""}S/${plan.progressProfit.toFixed(2)} desde inicio · faltan S/${plan.remainingToTarget.toFixed(2)} para meta · odds ${plan.profile.oddsMin.toFixed(2)}-${plan.profile.oddsMax.toFixed(2)} · p mínima ${(plan.pRequired*100).toFixed(1)}% · EV mínima +${(plan.evGate*100).toFixed(1)}%.
+          </div>
+        </div>
+
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">🧪 Performance Lab</div>
+          <div class="fl-kpi" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:10px;">${perfOverviewCards}</div>
+          <div class="fl-mre-table-wrap" style="margin-bottom:10px;">
+            <table class="fl-mre-table"><thead><tr><th>Ventana</th><th>Picks</th><th>Win rate</th><th>ROI</th><th>CLV</th><th>EV acum.</th></tr></thead><tbody>${perfRangeTable}</tbody></table>
+          </div>
+          <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
+            <div class="fl-card" style="margin:0;padding:8px;">
+              <div class="fl-mini">Equity real vs EV acumulado</div>
+              <div style="height:180px;"><canvas id="bitacoraEquityVsEvChart"></canvas></div>
+            </div>
+            <div class="fl-card" style="margin:0;padding:8px;">
+              <div class="fl-mini">CLV timeline (pp)</div>
+              <div style="height:180px;"><canvas id="bitacoraClvChart"></canvas></div>
+            </div>
+            <div class="fl-card" style="margin:0;padding:8px;">
+              <div class="fl-mini">ROI rolling 20 picks (%)</div>
+              <div style="height:180px;"><canvas id="bitacoraRollingRoiChart"></canvas></div>
+            </div>
+          </div>
+          <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:10px;">
+            <div class="fl-mre-table-wrap"><table class="fl-mre-table"><thead><tr><th>Tipo</th><th>Picks</th><th>WR</th><th>ROI</th><th>CLV</th></tr></thead><tbody>${renderBreakRows(perfLab.breakdowns.byType)}</tbody></table></div>
+            <div class="fl-mre-table-wrap"><table class="fl-mre-table"><thead><tr><th>Cuota</th><th>Picks</th><th>WR</th><th>ROI</th><th>CLV</th></tr></thead><tbody>${renderBreakRows(perfLab.breakdowns.byOdds)}</tbody></table></div>
+            <div class="fl-mre-table-wrap"><table class="fl-mre-table"><thead><tr><th>Liga</th><th>Picks</th><th>WR</th><th>ROI</th><th>CLV</th></tr></thead><tbody>${renderBreakRows(perfLab.breakdowns.byLeague)}</tbody></table></div>
+            <div class="fl-mre-table-wrap"><table class="fl-mre-table"><thead><tr><th>Tag</th><th>Picks</th><th>WR</th><th>ROI</th><th>CLV</th></tr></thead><tbody>${renderBreakRows(perfLab.breakdowns.byTag)}</tbody></table></div>
+          </div>
+          <div class="fl-card" style="margin-top:10px;padding:10px;background:#0d1117;border:1px solid #2d333b;">
+            <div style="font-weight:700;">Lecturas automáticas</div>
+            <ul style="margin:8px 0 0 16px;padding:0;display:grid;gap:5px;">${perfInsights}</ul>
           </div>
         </div>
 
@@ -13473,6 +13528,11 @@ passes: 425"></textarea>
               <input id="logStake" class="fl-input" type="number" step="0.5" min="${st.minUnit}" value="${plan.stepStakes[0]}" style="width:90px" placeholder="Stake" />
               <input id="logOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:90px" />
               <input id="logProb" class="fl-input" type="number" step="0.01" min="0.01" max="0.99" placeholder="pFinal" style="width:90px" />
+              <input id="logCloseOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota cierre" style="width:105px" />
+              <input id="logEV" class="fl-input" type="number" step="0.01" placeholder="EV pick" style="width:90px" />
+              <input id="logTag" class="fl-input" type="text" placeholder="Tag" style="width:90px" />
+              <input id="logLeague" class="fl-input" type="text" placeholder="Liga" style="width:110px" />
+              <input id="logConfidence" class="fl-input" type="number" step="0.01" min="0" max="1" placeholder="Conf" style="width:75px" />
               <select id="logPickType" class="fl-select" style="width:140px"><option>1X2</option><option>DNB</option><option>Doble oportunidad</option><option>Under/Over</option></select>
               <select id="logResult" class="fl-select" style="width:90px"><option value="win">win</option><option value="loss">loss</option><option value="push">push</option></select>
               <button class="fl-btn" id="saveLog">Guardar</button>
@@ -13481,6 +13541,16 @@ passes: 425"></textarea>
           </div>
         </div>
       `;
+
+      if(typeof Chart === "function"){
+        const eqCanvas = document.getElementById("bitacoraEquityVsEvChart");
+        const clvCanvas = document.getElementById("bitacoraClvChart");
+        const roiCanvas = document.getElementById("bitacoraRollingRoiChart");
+        const baseOpts = { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ x:{ ticks:{ color:'#9ca3af', maxRotation:0, autoSkip:true }, grid:{ color:'rgba(255,255,255,.05)' } }, y:{ ticks:{ color:'#9ca3af' }, grid:{ color:'rgba(255,255,255,.07)' } } } };
+        if(eqCanvas){ if(eqCanvas._chart){ try{ eqCanvas._chart.destroy(); }catch(_e){} } eqCanvas._chart = new Chart(eqCanvas.getContext('2d'), { type:'line', data:{ labels: perfLabels, datasets:[{ label:'Equity real', data: perfEquity, borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,.16)', tension:0.22, spanGaps:true }, { label:'EV acumulado', data: perfEv, borderColor:'#58a6ff', backgroundColor:'rgba(88,166,255,.15)', tension:0.22, spanGaps:true }] }, options: baseOpts }); }
+        if(clvCanvas){ if(clvCanvas._chart){ try{ clvCanvas._chart.destroy(); }catch(_e){} } clvCanvas._chart = new Chart(clvCanvas.getContext('2d'), { type:'line', data:{ labels: perfLabels, datasets:[{ label:'CLV (pp)', data: perfClv, borderColor:'#f2cc60', backgroundColor:'rgba(242,204,96,.18)', tension:0.2, spanGaps:true }] }, options: baseOpts }); }
+        if(roiCanvas){ if(roiCanvas._chart){ try{ roiCanvas._chart.destroy(); }catch(_e){} } roiCanvas._chart = new Chart(roiCanvas.getContext('2d'), { type:'line', data:{ labels: perfLabels.slice(0, perfRolling.length), datasets:[{ label:'ROI rolling %', data: perfRolling, borderColor:'#ff7b72', backgroundColor:'rgba(255,123,114,.14)', tension:0.2, spanGaps:true }] }, options: baseOpts }); }
+      }
 
       document.getElementById("bkBuildPlan").onclick = ()=>{
         st.bank = Math.max(1, Number(document.getElementById("bkBank").value) || st.bank);
@@ -13541,16 +13611,31 @@ passes: 425"></textarea>
         const profit = result==="win" ? stake * (odds - 1) : (result==="loss" ? -stake : 0);
         const bankBefore = st.bank;
         st.bank = Math.max(0, st.bank + profit);
+        const closingOdds = pickFirstNumber(document.getElementById("logCloseOdds")?.value);
+        const tag = pickFirstString(document.getElementById("logTag")?.value, "Sin etiqueta") || "Sin etiqueta";
+        const league = pickFirstString(document.getElementById("logLeague")?.value, "Sin liga") || "Sin liga";
+        const confidence = pickFirstNumber(document.getElementById("logConfidence")?.value);
+        const evValue = pickFirstNumber(document.getElementById("logEV")?.value, calc.ev);
+        const normalizedPreview = normalizePickRecord({ odds, closingOdds, stake, result, probability, evValue });
         const entry = {
           id: uid("bet"),
           date: new Date().toISOString(),
           stake,
           odds,
+          closingOdds,
+          impliedCloseProb: normalizedPreview.impliedCloseProb,
           probability,
           pickType,
+          league,
+          tag,
+          confidence,
           pMkt: 1/odds,
           result,
           ev: calc.ev,
+          evValue,
+          clvDelta: normalizedPreview.clvDelta,
+          roiContribution: normalizedPreview.roiContribution,
+          resultNormalized: normalizedPreview.resultNormalized,
           profit,
           bankBefore,
           bankAfter: st.bank,
@@ -13585,6 +13670,12 @@ passes: 425"></textarea>
           entry.probability = probability;
           entry.profit = profit;
           entry.ev = (probability * odds) - 1;
+          entry.evValue = Number.isFinite(Number(entry.evValue)) ? Number(entry.evValue) : entry.ev;
+          const normalized = normalizePickRecord(entry, idx);
+          entry.resultNormalized = normalized.resultNormalized;
+          entry.roiContribution = normalized.roiContribution;
+          entry.clvDelta = normalized.clvDelta;
+          entry.impliedCloseProb = normalized.impliedCloseProb;
           entry.bankBefore = running;
           running += profit;
           entry.bankAfter = running;
@@ -13614,6 +13705,11 @@ passes: 425"></textarea>
               <div class="fl-field"><label>Cuota</label><input id="editBetOdds" type="number" min="1.01" step="0.01" class="fl-input" value="${Number(entry.odds||1.5).toFixed(2)}"></div>
               <div class="fl-field"><label>pFinal</label><input id="editBetProb" type="number" min="0.01" max="0.99" step="0.01" class="fl-input" value="${clamp(Number(entry.probability)||0.5,0.01,0.99).toFixed(2)}"></div>
               <div class="fl-field"><label>Resultado</label><select id="editBetResult" class="fl-select"><option value="win">win</option><option value="loss">loss</option><option value="push">push</option></select></div>
+              <div class="fl-field"><label>Cuota cierre</label><input id="editBetCloseOdds" type="number" min="1.01" step="0.01" class="fl-input" value="${Number(entry.closingOdds||0).toFixed(2)}"></div>
+              <div class="fl-field"><label>EV pick</label><input id="editBetEv" type="number" step="0.01" class="fl-input" value="${Number(entry.evValue ?? entry.ev ?? 0).toFixed(3)}"></div>
+              <div class="fl-field"><label>Liga</label><input id="editBetLeague" type="text" class="fl-input" value="${entry.league || ""}"></div>
+              <div class="fl-field"><label>Tag</label><input id="editBetTag" type="text" class="fl-input" value="${entry.tag || ""}"></div>
+              <div class="fl-field"><label>Confianza (0-1)</label><input id="editBetConfidence" type="number" min="0" max="1" step="0.01" class="fl-input" value="${Number(entry.confidence || 0).toFixed(2)}"></div>
             </div>
             <div class="fl-row" style="justify-content:space-between;margin-top:12px;">
               <button class="fl-btn" id="deleteEditBet" style="border-color:#da3633;color:#ff7b72;">Borrar</button>
@@ -13638,6 +13734,11 @@ passes: 425"></textarea>
           entry.odds = Math.max(1.01, Number(backdrop.querySelector("#editBetOdds").value) || 1.01);
           entry.probability = clamp(Number(backdrop.querySelector("#editBetProb").value) || 0.5, 0.01, 0.99);
           entry.result = backdrop.querySelector("#editBetResult").value || "push";
+          entry.closingOdds = pickFirstNumber(backdrop.querySelector("#editBetCloseOdds")?.value);
+          entry.evValue = pickFirstNumber(backdrop.querySelector("#editBetEv")?.value, entry.ev);
+          entry.league = pickFirstString(backdrop.querySelector("#editBetLeague")?.value, entry.league, 'Sin liga') || 'Sin liga';
+          entry.tag = pickFirstString(backdrop.querySelector("#editBetTag")?.value, entry.tag, 'Sin etiqueta') || 'Sin etiqueta';
+          entry.confidence = pickFirstNumber(backdrop.querySelector("#editBetConfidence")?.value);
           recalcBitacoraBanks();
           saveDb(db);
           close();
