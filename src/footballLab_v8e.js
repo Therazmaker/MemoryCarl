@@ -3262,6 +3262,74 @@ export function initFootballLab(){
       .fl-lineup-slot-tag{font-size:10px;font-weight:800;letter-spacing:.05em;color:#9ca3af;text-align:center}
       .fl-lineup-slot-select{font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #3a4a5f;background:#0d1117;color:#e8edf3}
       .context-box{border-left:4px solid #1f6feb}
+      :root{
+        --color-bg-base:#0d0f14;
+        --color-bg-surface:#151820;
+        --color-bg-elevated:#1a1f2e;
+        --color-border:#1e2330;
+        --color-accent-green:#22d3a3;
+        --color-accent-blue:#60a5fa;
+        --color-accent-amber:#f59e0b;
+        --color-accent-red:#ef4444;
+        --space-xs:6px;
+        --space-sm:12px;
+        --space-md:20px;
+        --space-lg:32px;
+      }
+      .b2-layout{display:grid;grid-template-columns:340px 1fr 400px;grid-template-rows:auto 1fr auto;gap:var(--space-md);min-height:100vh;background:var(--color-bg-base);padding:var(--space-md)}
+      .b2-topbar{grid-column:1 / -1}
+      .b2-col-a{grid-column:1}
+      .b2-col-b{grid-column:2;min-width:0}
+      .b2-col-c{grid-column:3}
+      .b2-bottom{grid-column:1 / -1}
+      .b2-card{background:var(--color-bg-surface);border:1px solid var(--color-border);border-radius:12px;padding:var(--space-sm);box-shadow:0 4px 24px rgba(0,0,0,.4)}
+      .b2-card-header{padding:10px 12px;border-bottom:1px solid var(--color-border);font-weight:800;text-transform:uppercase;letter-spacing:.06em;font-size:11px;color:#8892a0}
+      .b2-card-body{padding:12px}
+      .b2-title{font-size:20px;font-weight:800;letter-spacing:.04em}
+      .b2-topbar-main{display:flex;align-items:center;justify-content:space-between;gap:12px}
+      .b2-health-pill{padding:6px 10px;border-radius:999px;border:1px solid var(--color-border);font-size:11px;font-weight:700}
+      .b2-health-pill.is-active{background:rgba(34,211,163,.12);color:var(--color-accent-green);animation:b2Pulse 2s infinite}
+      .b2-health-pill.is-empty{background:rgba(245,158,11,.12);color:var(--color-accent-amber)}
+      .b2-kpi-strip{margin-top:10px;display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:8px}
+      .b2-stat-pill{border:1px solid var(--color-border);background:var(--color-bg-elevated);border-radius:8px;padding:8px;display:grid;gap:4px}
+      .b2-stat-pill b{font-size:28px;line-height:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+      .b2-capture-card{position:sticky;top:72px}
+      .b2-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#6b7280}
+      .b2-mt-xs{margin-top:var(--space-xs)}
+      .b2-mt-sm{margin-top:var(--space-sm)}
+      .b2-odd-input{max-width:110px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+      .b2-memory-table{display:grid;gap:8px}
+      .b2-memory-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;background:var(--color-bg-surface);border:1px solid var(--color-border);border-radius:10px;padding:10px;transition:all .15s ease}
+      .b2-memory-row:hover{background:var(--color-bg-elevated);border-left:2px solid var(--color-accent-green)}
+      .b2-memory-actions{display:flex;gap:6px;flex-wrap:wrap;opacity:0;transform:translateX(6px);transition:all .15s ease}
+      .b2-memory-row:hover .b2-memory-actions{opacity:1;transform:translateX(0)}
+      .b2-memory-meta{display:flex;gap:8px;flex-wrap:wrap;font-size:12px;color:#8892a0}
+      .b2-score-chip{padding:2px 6px;border-radius:6px;border:1px solid var(--color-border);background:#0d0f14}
+      .b2-hybrid-panel .b2-bottom-toggle{width:100%;background:transparent;border:1px solid var(--color-border);border-radius:8px;color:#f0f0f0;padding:8px;text-align:left;font-weight:700;cursor:pointer}
+      .b2-bottom-body{max-height:0;overflow:hidden;opacity:0;transition:max-height .3s ease,opacity .2s ease}
+      .b2-bottom-body.is-open{max-height:360px;opacity:1}
+      #b2HybridLogs{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;line-height:1.5}
+      #b2SaveMatch.is-loading,#b2Simulate.is-loading,#b2PrematchGenerate.is-loading,#b2PrematchRegenerate.is-loading{position:relative;pointer-events:none;opacity:.8}
+      #b2SaveMatch.is-loading::after,#b2Simulate.is-loading::after,#b2PrematchGenerate.is-loading::after,#b2PrematchRegenerate.is-loading::after{content:"";width:14px;height:14px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;display:inline-block;margin-left:6px;animation:b2Spin .8s linear infinite;vertical-align:middle}
+      #b2Vision.b2-vision-ready{border:2px solid var(--color-accent-green);border-radius:10px;padding:12px;background:var(--color-bg-elevated);animation:b2FadeIn .4s ease}
+      #b2PowerDashboard .fl-kpi{grid-template-columns:repeat(5,minmax(88px,1fr))}
+      #b2PowerDashboard .fl-kpi b{font-size:28px}
+      #b2PowerDashboard [id="b2PowerRadar"],#b2PowerDashboard [id="b2PowerTrend"]{animation:b2FadeIn .3s ease}
+      @keyframes b2Spin{to{transform:rotate(360deg)}}
+      @keyframes b2FadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes b2Pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,211,163,.15)}50%{box-shadow:0 0 0 8px rgba(34,211,163,0)}}
+      @media (max-width:1279px){
+        .b2-layout{grid-template-columns:1fr 1fr}
+        .b2-col-a{grid-column:1}
+        .b2-col-c{grid-column:1}
+        .b2-col-b{grid-column:2;grid-row:2 / span 2}
+      }
+      @media (max-width:768px){
+        .b2-layout{grid-template-columns:1fr}
+        .b2-col-a,.b2-col-b,.b2-col-c,.b2-bottom{grid-column:1}
+        .b2-col-a{order:1}.b2-col-c{order:2}.b2-col-b{order:3}
+        .b2-kpi-strip{grid-template-columns:repeat(2,minmax(120px,1fr))}
+      }
     `;
     document.head.appendChild(style);
   }
@@ -5910,6 +5978,7 @@ function computeTeamIntelligencePanel(db, teamId){
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        animation: { duration: 800, easing: "easeOutQuart" },
         scales: {
           x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
           y: { min: 0, max: 100, ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } }
@@ -5930,6 +5999,7 @@ function computeTeamIntelligencePanel(db, teamId){
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        animation: { duration: 800, easing: "easeOutQuart" },
         plugins: { legend: { labels: { color: "#c9d1d9" } } },
         scales: { r: { suggestedMin: 0, suggestedMax: 100, angleLines: { color: "rgba(255,255,255,.1)" }, grid: { color: "rgba(255,255,255,.09)" }, pointLabels: { color: "#9ca3af" }, ticks: { color: "#9ca3af", backdropColor: "transparent" } } }
       }
@@ -6443,6 +6513,7 @@ function computeTeamIntelligencePanel(db, teamId){
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        animation: { duration: 800, easing: "easeOutQuart" },
         scales: {
           x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
           y: { min: 0, max: 100, ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } }
@@ -11090,7 +11161,7 @@ function computeTeamIntelligencePanel(db, teamId){
         const tags = (m?.summary?.reasons || []).slice(0, 2).map((r)=>`${r.tag} ${(r.strength*100).toFixed(0)}%`).join(" · ");
         const lineup = parseLineupList(m?.lineup || m?.startingXI || []);
         const lineupTxt = lineup.length ? lineup.slice(0, 6).join(', ') + (lineup.length>6 ? '…' : '') : 'Sin composición';
-        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${m.score || "-"}</td><td>${story}<div class="fl-mini">${tags || "Sin razones"}</div><div class="fl-mini">XI: ${lineupTxt}</div></td><td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Ver por qué</button><button class="fl-btn ghost b2EditMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Editar</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></div></td></tr>`;
+        return `<div class="b2-memory-row"><div class="b2-memory-main"><div class="b2-memory-meta"><span>${m.date || "-"}</span><span>${m.opponent || "-"}</span><span class="b2-score-chip">${m.score || "-"}</span></div><div>${story}</div><div class="fl-mini">${tags || "Sin razones"}</div><div class="fl-mini">XI: ${lineupTxt}</div></div><div class="b2-memory-actions"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Ver por qué</button><button class="fl-btn ghost b2EditMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Editar</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></div></div>`;
       }).join("");
       const selectedTeamSummary = summarizeTeamMemory(teamMemories);
       const selectedTeamHasBrain = selectedTeamSummary.samples > 0;
@@ -11105,98 +11176,120 @@ function computeTeamIntelligencePanel(db, teamId){
       const teamOptionFull = (chosen="") => allTeams.map((t)=>`<option value="${t.id}" ${chosen===t.id?"selected":""}>${t.name}</option>`).join("");
 
       content.innerHTML = `
-        <div class="fl-card">
-          <div style="font-size:20px;font-weight:900;">🧠 Brain v2 · Entrenamiento incremental</div>
-          <div class="fl-muted" style="margin-top:4px;">Guarda partidos por equipo (stats + relato) para construir memoria y preparar datasets TensorFlow.</div>
-        </div>
-        <div class="fl-card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
-          <div>
-            <div class="fl-mini">Team learned</div>
-            <div style="font-size:26px;font-weight:900;">${health.teamsLearned}</div>
-          </div>
-          <div>
-            <div class="fl-mini">Matches learned</div>
-            <div style="font-size:26px;font-weight:900;">${health.matchesLearned}</div>
-          </div>
-          <div>
-            <div class="fl-mini">Confianza</div>
-            <div style="font-size:26px;font-weight:900;">${(health.confidence * 100).toFixed(0)}%</div>
-          </div>
-          <div>
-            <div class="fl-mini">Cobertura stats / relato</div>
-            <div style="font-size:18px;font-weight:800;">${(health.statsCoverage * 100).toFixed(0)}% / ${(health.narrativeCoverage * 100).toFixed(0)}%</div>
-          </div>
-        </div>
-        <div id="b2GlobalLearningPanel" class="fl-card"></div>
-        <div class="fl-card">
-          <div class="fl-grid two">
-            <div>
-              <label class="fl-muted">Liga</label>
-              <select id="b2League" class="fl-select"><option value="">Todas</option>${leagueOptions}</select>
+        <div class="b2-layout">
+          <div class="b2-topbar b2-card">
+            <div class="b2-topbar-main">
+              <div>
+                <div class="b2-title">🧠 Brain V2</div>
+                <div class="fl-muted">Guarda partidos por equipo (stats + relato) para construir memoria y preparar datasets TensorFlow.</div>
+              </div>
+              <div class="b2-health-pill ${health.matchesLearned > 0 ? 'is-active' : 'is-empty'}">${health.matchesLearned > 0 ? 'CEREBRO ACTIVO' : 'SIN MEMORIA'}</div>
             </div>
-            <div>
-              <label class="fl-muted">Equipo</label>
-              <select id="b2Team" class="fl-select"><option value="">Selecciona equipo</option>${teamOptions}</select>
+            <div class="b2-kpi-strip">
+              <div class="b2-stat-pill"><span class="fl-mini">Team learned</span><b class="b2-counter" data-target="${health.teamsLearned}">0</b></div>
+              <div class="b2-stat-pill"><span class="fl-mini">Matches learned</span><b class="b2-counter" data-target="${health.matchesLearned}">0</b></div>
+              <div class="b2-stat-pill"><span class="fl-mini">Confianza</span><b class="b2-counter" data-target="${Math.round(health.confidence * 100)}">0</b>%</div>
+              <div class="b2-stat-pill"><span class="fl-mini">Cobertura</span><b>${(health.statsCoverage * 100).toFixed(0)}% / ${(health.narrativeCoverage * 100).toFixed(0)}%</b></div>
             </div>
           </div>
-          <div class="fl-grid two" style="margin-top:10px;">
-            <input id="b2Date" type="date" class="fl-input" value="${new Date().toISOString().slice(0,10)}" />
-            <input id="b2Opponent" class="fl-input" placeholder="Rival" />
-          </div>
-          <input id="b2Score" class="fl-input" style="margin-top:8px;" placeholder="Marcador (ej: 2-1)" />
-          <textarea id="b2Stats" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="xg: 1.8
+
+          <div class="b2-col-a">
+            <div class="b2-card b2-capture-card">
+              <div class="b2-card-header">Captura de partido</div>
+              <div class="b2-card-body">
+                <div class="fl-grid two">
+                  <div>
+                    <label class="b2-label">Liga</label>
+                    <select id="b2League" class="fl-select"><option value="">Todas</option>${leagueOptions}</select>
+                  </div>
+                  <div>
+                    <label class="b2-label">Equipo</label>
+                    <select id="b2Team" class="fl-select"><option value="">Selecciona equipo</option>${teamOptions}</select>
+                  </div>
+                </div>
+                <div class="fl-grid two b2-mt-sm">
+                  <input id="b2Date" type="date" class="fl-input" value="${new Date().toISOString().slice(0,10)}" />
+                  <input id="b2Opponent" class="fl-input" placeholder="Rival" />
+                </div>
+                <input id="b2Score" class="fl-input b2-mt-xs" placeholder="Marcador (ej: 2-1)" />
+                <textarea id="b2Stats" class="fl-text b2-mt-xs" placeholder="xg: 1.8
 shots: 13
 possession: 57
 passes: 425"></textarea>
-          <textarea id="b2Narrative" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="Relato del partido: ritmo, lesiones, presión, cambios..."></textarea>
-          <div class="fl-field" style="margin-top:8px;">
-            <label>Composición (XI del día)</label>
-            <div class="fl-row">
-              <input id="b2Lineup" class="fl-input" style="flex:1;min-width:240px;" placeholder="XI del día (coma separado)" />
-              <button class="fl-btn secondary" id="b2OpenLineupComposer" type="button">Abrir pizarra</button>
+                <textarea id="b2Narrative" class="fl-text b2-mt-xs" placeholder="Relato del partido: ritmo, lesiones, presión, cambios..."></textarea>
+                <div class="fl-field b2-mt-xs">
+                  <label class="b2-label">Composición (XI del día)</label>
+                  <div class="fl-row">
+                    <input id="b2Lineup" class="fl-input" style="flex:1;min-width:240px;" placeholder="XI del día (coma separado)" />
+                    <button class="fl-btn secondary" id="b2OpenLineupComposer" type="button">Abrir pizarra</button>
+                  </div>
+                  <input id="b2LineupShape" type="hidden" value="" />
+                </div>
+                <div class="fl-row b2-mt-xs" style="gap:8px;flex-wrap:wrap;">
+                  <button class="fl-btn secondary" id="b2ImportMatchpack" type="button">Importar JSON</button>
+                  <input id="b2ImportMatchpackFile" type="file" accept="application/json,.json" style="display:none;" />
+                  <span id="b2ImportStatus" class="fl-mini"></span>
+                </div>
+                <div class="fl-row b2-mt-xs">
+                  <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
+                  <span id="b2Status" class="fl-muted"></span>
+                </div>
+              </div>
             </div>
-            <input id="b2LineupShape" type="hidden" value="" />
           </div>
-          <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
-            <button class="fl-btn secondary" id="b2ImportMatchpack" type="button">Importar JSON</button>
-            <input id="b2ImportMatchpackFile" type="file" accept="application/json,.json" style="display:none;" />
-            <span id="b2ImportStatus" class="fl-mini"></span>
+
+          <div class="b2-col-b">
+            <div class="b2-card">
+              <div class="b2-card-header">Memoria del equipo</div>
+              <div class="b2-card-body">
+                <div class="fl-mini">${selectedTeamBadge}</div>
+                <div class="fl-mini b2-mt-xs">Partidos indexados (teamProfiles): <b>${indexedCount}</b></div>
+                <div class="b2-memory-table b2-mt-sm">${memoryRows || '<div class="fl-muted">Sin partidos guardados.</div>'}</div>
+              </div>
+            </div>
+            <div id="b2PowerDashboard" class="b2-card" style="display:none;"></div>
+            <div id="b2GlobalLearningPanel" class="b2-card"></div>
           </div>
-          <div class="fl-row" style="margin-top:8px;">
-            <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
-            <span id="b2Status" class="fl-muted"></span>
+
+          <div class="b2-col-c">
+            <div class="b2-card">
+              <div class="b2-card-header">🎯 Simulación</div>
+              <div class="b2-card-body">
+                <div class="fl-grid two">
+                  <select id="b2Home" class="fl-select"><option value="">Equipo local</option>${teamOptionFull(homeId)}</select>
+                  <select id="b2Away" class="fl-select"><option value="">Equipo visita</option>${teamOptionFull(awayId)}</select>
+                </div>
+                <div class="fl-row b2-mt-xs">
+                  <input id="b2OddH" class="fl-input b2-odd-input" type="number" step="0.01" placeholder="Cuota Local" />
+                  <input id="b2OddD" class="fl-input b2-odd-input" type="number" step="0.01" placeholder="Cuota Empate" />
+                  <input id="b2OddA" class="fl-input b2-odd-input" type="number" step="0.01" placeholder="Cuota Visita" />
+                  <button class="fl-btn" id="b2Simulate">Simular visión</button>
+                </div>
+                <div id="b2BrainStatus" class="fl-mini b2-mt-xs"></div>
+                <div id="b2Vision" class="fl-mini b2-mt-sm">Carga local/visita para ver la simulación visual.</div>
+                <div class="fl-row b2-mt-sm" style="gap:8px;flex-wrap:wrap;">
+                  <button class="fl-btn" id="b2PrematchGenerate">Generar previa editorial</button>
+                  <button class="fl-btn" id="b2PrematchRegenerate">Regenerar</button>
+                  <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="b2PrematchDebugToggle" /> Ver insights JSON</label>
+                </div>
+                <div id="b2PrematchOut" class="b2-card b2-mt-xs" style="display:none;"></div>
+              </div>
+            </div>
           </div>
-          <div class="fl-mini" style="margin-top:8px;">${selectedTeamBadge}</div>
-          <div class="fl-mini" style="margin-top:4px;">Partidos indexados (teamProfiles): <b>${indexedCount}</b></div>
-          <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Relato</th><th>Acciones</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="5" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
-          <div id="b2PowerDashboard" class="fl-card" style="margin-top:10px;display:none;"></div>
-        </div>
-        <div class="fl-card">
-          <div style="font-size:18px;font-weight:800;">🎯 Simulador visual Local vs Visita</div>
-          <div class="fl-grid two" style="margin-top:8px;">
-            <select id="b2Home" class="fl-select"><option value="">Equipo local</option>${teamOptionFull(homeId)}</select>
-            <select id="b2Away" class="fl-select"><option value="">Equipo visita</option>${teamOptionFull(awayId)}</select>
+
+          <div class="b2-bottom">
+            <div class="b2-card b2-hybrid-panel">
+              <button id="b2HybridToggle" class="b2-bottom-toggle" type="button">⚙ Herramientas híbridas</button>
+              <div id="b2HybridBody" class="b2-bottom-body is-open">
+                <div class="fl-row b2-mt-xs" style="gap:8px;flex-wrap:wrap;">
+                  <button class="fl-btn secondary" id="b2HybridSync">Sincronizar dataset híbrido</button>
+                  <button class="fl-btn secondary" id="b2HybridEvaluate">Evaluate</button>
+                  <button class="fl-btn secondary" id="b2HybridVisionPreview">Preview Vision</button>
+                </div>
+                <div id="b2HybridLogs" class="fl-mini b2-mt-xs">Hybrid tools listos.</div>
+              </div>
+            </div>
           </div>
-          <div class="fl-row" style="margin-top:8px;">
-            <input id="b2OddH" class="fl-input" type="number" step="0.01" placeholder="Cuota Local" style="max-width:150px;" />
-            <input id="b2OddD" class="fl-input" type="number" step="0.01" placeholder="Cuota Empate" style="max-width:150px;" />
-            <input id="b2OddA" class="fl-input" type="number" step="0.01" placeholder="Cuota Visita" style="max-width:150px;" />
-            <button class="fl-btn" id="b2Simulate">Simular visión</button>
-          </div>
-          <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
-            <button class="fl-btn" id="b2PrematchGenerate">Generar previa editorial</button>
-            <button class="fl-btn" id="b2PrematchRegenerate">Regenerar</button>
-            <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="b2PrematchDebugToggle" /> Ver insights JSON</label>
-          </div>
-          <div id="b2BrainStatus" class="fl-mini" style="margin-top:8px;"></div>
-          <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
-            <button class="fl-btn secondary" id="b2HybridSync">Sincronizar dataset híbrido</button>
-            <button class="fl-btn secondary" id="b2HybridEvaluate">Evaluate</button>
-            <button class="fl-btn secondary" id="b2HybridVisionPreview">Preview Vision</button>
-          </div>
-          <div id="b2HybridLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Hybrid tools listos.</div>
-          <div id="b2Vision" class="fl-mini" style="margin-top:10px;">Carga local/visita para ver la simulación visual.</div>
-          <div id="b2PrematchOut" class="fl-card" style="margin-top:8px;padding:10px;display:none;"></div>
         </div>
       `;
 
@@ -11407,7 +11500,7 @@ passes: 425"></textarea>
                 { label:'Home', data:[agg.radar.home.attackProduction, agg.radar.home.attackConversion, agg.radar.home.defenseStability, agg.radar.home.control, agg.radar.home.setpieceStrength, agg.radar.home.discipline], borderColor:'#1f6feb', backgroundColor:'rgba(31,111,235,.2)' },
                 { label:'Away', data:[agg.radar.away.attackProduction, agg.radar.away.attackConversion, agg.radar.away.defenseStability, agg.radar.away.control, agg.radar.away.setpieceStrength, agg.radar.away.discipline], borderColor:'#f2cc60', backgroundColor:'rgba(242,204,96,.2)' }
               ] },
-              options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ r:{ suggestedMin:0, suggestedMax:100, ticks:{ color:'#9ca3af', backdropColor:'transparent' }, pointLabels:{ color:'#9ca3af' } } } }
+              options:{ responsive:true, maintainAspectRatio:false, animation:{ duration:800, easing:'easeOutQuart' }, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ r:{ suggestedMin:0, suggestedMax:100, ticks:{ color:'#9ca3af', backdropColor:'transparent' }, pointLabels:{ color:'#9ca3af' } } } }
             });
           }
           renderSimpleLineChart(node.querySelector('#b2PowerTrend'), agg.matches.map((m)=>String(m.date || '').slice(5) || '-'), [
@@ -11419,6 +11512,44 @@ passes: 425"></textarea>
       };
       renderGlobalLearningPanel();
       renderBrainV2PowerDashboard();
+
+      const runB2Counters = ()=>{
+        document.querySelectorAll('.b2-counter').forEach((el, idx)=>{
+          const target = Number(el.dataset.target || 0);
+          const start = performance.now() + idx * 80;
+          const dur = 600;
+          const tick = (now)=>{
+            const t = Math.max(0, Math.min(1, (now - start) / dur));
+            const eased = 1 - Math.pow(1 - t, 3);
+            el.textContent = String(Math.round(target * eased));
+            if(t < 1) requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+      };
+      runB2Counters();
+
+      const toggleHybrid = document.getElementById('b2HybridToggle');
+      const hybridBody = document.getElementById('b2HybridBody');
+      if(toggleHybrid && hybridBody){
+        toggleHybrid.addEventListener('click', ()=>{
+          hybridBody.classList.toggle('is-open');
+        });
+      }
+
+      const withLoading = (id, callback)=>{
+        const btn = document.getElementById(id);
+        if(!btn || btn.dataset.b2LoadingBound==='1') return;
+        btn.dataset.b2LoadingBound = '1';
+        btn.addEventListener('click', ()=>{
+          btn.classList.add('is-loading');
+          setTimeout(()=>btn.classList.remove('is-loading'), callback());
+        });
+      };
+      withLoading('b2SaveMatch', ()=>900);
+      withLoading('b2Simulate', ()=>700);
+      withLoading('b2PrematchGenerate', ()=>700);
+      withLoading('b2PrematchRegenerate', ()=>700);
 
       const paintBrainStatus = ()=>{
         const homeIdSel = document.getElementById('b2Home')?.value || "";
@@ -11746,6 +11877,7 @@ passes: 425"></textarea>
         const sections = Array.isArray(editorial.sections) ? editorial.sections : [];
         const debugOn = Boolean(toggle?.checked);
         out.style.display = 'block';
+        out.classList.add('b2-vision-ready');
         out.innerHTML = `
           <div style="font-weight:900;font-size:16px;">📰 ${editorial.headline || 'Previa editorial'}</div>
           <div class="fl-mini" style="margin-top:8px;display:grid;gap:8px;">
@@ -12086,7 +12218,7 @@ passes: 425"></textarea>
         const homeIdSel = document.getElementById('b2Home')?.value || "";
         const awayIdSel = document.getElementById('b2Away')?.value || "";
         const out = document.getElementById('b2Vision');
-        if(!homeIdSel || !awayIdSel || homeIdSel===awayIdSel){ out.textContent = 'Selecciona dos equipos distintos.'; return; }
+        if(!homeIdSel || !awayIdSel || homeIdSel===awayIdSel){ out.classList.remove('b2-vision-ready'); out.textContent = 'Selecciona dos equipos distintos.'; return; }
         const homeTeam = db.teams.find((t)=>t.id===homeIdSel);
         const awayTeam = db.teams.find((t)=>t.id===awayIdSel);
         const homeSummary = summarizeTeamMemory(brainV2.memories[homeIdSel] || []);
@@ -12205,6 +12337,7 @@ passes: 425"></textarea>
             <td class="mre-reading">${row.interpretation}</td>
           </tr>`;
         }).join("");
+        out.classList.add('b2-vision-ready');
         out.innerHTML = `
           <div style="font-weight:800;">${homeTeam?.name || 'Local'} vs ${awayTeam?.name || 'Visita'}</div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
