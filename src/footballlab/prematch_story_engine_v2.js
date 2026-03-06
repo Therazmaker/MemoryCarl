@@ -1,4 +1,5 @@
 import { collectMatchesForTeam } from './readiness_memory.js';
+import { buildMatchCSI } from './current_strength_index.js';
 
 const BRAIN_TAG_COPY = {
   territorial_pressure: 'tendencia a empujar al rival hacia atrás',
@@ -126,7 +127,7 @@ function detectCompetitiveContext({ homeTable, awayTable, tableRows, homeName, a
   return { stakes: 'midtable_low_pressure', confidence: 'medium' };
 }
 
-export function collectPrematchData({ db = {}, brainV2 = {}, homeId = '', awayId = '', leagueId = '', market = null, readiness = null, matchDate = '' } = {}){
+export function collectPrematchData({ db = {}, brainV2 = {}, homeId = '', awayId = '', leagueId = '', market = null, readiness = null, matchDate = '', csiWindow = 5 } = {}){
   const tracker = Array.isArray(db?.tracker) ? db.tracker : [];
   const teams = Array.isArray(db?.teams) ? db.teams : [];
   const leagues = Array.isArray(db?.leagues) ? db.leagues : [];
@@ -161,6 +162,14 @@ export function collectPrematchData({ db = {}, brainV2 = {}, homeId = '', awayId
     limit: 10
   }).rows;
 
+  const csi = buildMatchCSI({
+    brainV2,
+    home: { id: homeId, name: homeTeam?.name || 'Local' },
+    away: { id: awayId, name: awayTeam?.name || 'Visitante' },
+    leagueId: resolvedLeagueId,
+    N: csiWindow
+  });
+
   return {
     match: {
       homeId,
@@ -193,6 +202,7 @@ export function collectPrematchData({ db = {}, brainV2 = {}, homeId = '', awayId
       homeRows: homeMemoryRows,
       awayRows: awayMemoryRows
     },
+    csi,
     context: detectCompetitiveContext({
       homeTable,
       awayTable,
@@ -342,6 +352,7 @@ export function buildPrematchInsights(data = {}){
     },
     h2h,
     readiness,
+    csi: data?.csi || null,
     brainSignals: {
       home: homeSignals,
       away: awaySignals,

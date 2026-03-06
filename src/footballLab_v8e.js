@@ -11564,6 +11564,42 @@ passes: 425"></textarea>
       document.getElementById('b2Away')?.addEventListener('change', paintBrainStatus);
 
       let lastBrainPrematchPayload = null;
+      const renderCSIBlock = (csi = null)=>{
+        if(!csi || !csi.home || !csi.away) return '';
+        const labels = { pressure: 'Pressure', control: 'Control', stability: 'Stability', momentum: 'Momentum', cohesion: 'Cohesion' };
+        const leaderText = csi.leader === 'even'
+          ? 'Llegan igual de fuertes ahora'
+          : `${csi.leader === 'home' ? csi.home.team : csi.away.team} llega más fuerte ahora`;
+        const buildBars = (label, homeValue, awayValue)=>`
+          <div class="fl-mini" style="display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center;">
+            <span>${label}</span>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+              <div style="background:rgba(31,111,235,.25);height:8px;border-radius:999px;position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:${Math.max(3, homeValue)}%;background:#1f6feb;border-radius:999px;"></span></div>
+              <div style="background:rgba(248,81,73,.25);height:8px;border-radius:999px;position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:${Math.max(3, awayValue)}%;background:#f85149;border-radius:999px;"></span></div>
+            </div>
+          </div>
+        `;
+        const lines = Object.keys(labels).map((key)=>buildBars(labels[key], Number(csi.home.subscores?.[key]) || 0, Number(csi.away.subscores?.[key]) || 0)).join('');
+        const limitations = [
+          ...(Array.isArray(csi.home?.explanation?.limitations) ? csi.home.explanation.limitations : []),
+          ...(Array.isArray(csi.away?.explanation?.limitations) ? csi.away.explanation.limitations : [])
+        ].filter((v, idx, arr)=>v && arr.indexOf(v)===idx);
+        return `
+          <div style="margin-top:10px;padding:10px;border:1px solid rgba(99,110,123,.35);border-radius:10px;">
+            <div style="font-weight:800;">🔹 Current Strength (N=${csi.N || 5})</div>
+            <div class="fl-mini" style="margin-top:6px;display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:6px;">
+              <div>${csi.home.team}: <b>${csi.home.CSI}</b></div>
+              <div>${csi.away.team}: <b>${csi.away.CSI}</b></div>
+            </div>
+            <div class="fl-mini" style="margin-top:6px;">👉 ${leaderText}</div>
+            <div class="fl-mini" style="margin-top:8px;font-weight:700;">🔹 Breakdown visual</div>
+            <div style="margin-top:6px;display:grid;gap:6px;">${lines}</div>
+            <div class="fl-mini" style="margin-top:8px;">👉 ${csi.leader === 'home' ? csi.home.explanation?.summary : csi.leader === 'away' ? csi.away.explanation?.summary : 'No hay edge claro en fuerza reciente.'}</div>
+            ${limitations.length ? `<div class="fl-mini" style="margin-top:6px;color:#8b949e;">Limitaciones: ${limitations.join(' · ')}</div>` : ''}
+          </div>
+        `;
+      };
+
       const renderBrainPrematchPreview = (payload = null)=>{
         const out = document.getElementById('b2PrematchOut');
         const toggle = document.getElementById('b2PrematchDebugToggle');
@@ -11582,6 +11618,7 @@ passes: 425"></textarea>
           <div class="fl-mini" style="margin-top:8px;display:grid;gap:8px;">
             ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
           </div>
+          ${renderCSIBlock(payload.insights?.csi || null)}
           ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;
       };
@@ -14153,6 +14190,7 @@ passes: 425"></textarea>
           <div class="fl-mini" style="margin-top:8px;display:grid;gap:8px;">
             ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
           </div>
+          ${renderCSIBlock(payload.insights?.csi || null)}
           ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;
       };

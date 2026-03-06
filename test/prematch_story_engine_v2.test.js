@@ -107,3 +107,20 @@ test('translates MNE tags from memory reasons', ()=>{
   assert.ok(brainSection.text.includes('empujar al rival'));
   assert.ok(brainSection.text.includes('inconsistencia en la definición'));
 });
+
+test('collectPrematchData incluye bloque CSI', ()=>{
+  const db = buildDb();
+  const brainV2 = {
+    memories: {
+      psg: [
+        { id: 'bp1', teamId: 'psg', teamName: 'PSG', date: '2026-01-01', score: '2-0', opponent: 'Monaco', statsRaw: 'xg: 1.8\nshots: 13\npossession: 57' }
+      ],
+      mon: [
+        { id: 'bm1', teamId: 'mon', teamName: 'Monaco', date: '2026-01-01', score: '0-2', opponent: 'PSG', statsRaw: 'xg: 0.8\nshots: 8\npossession: 43' }
+      ]
+    }
+  };
+  const data = collectPrematchData({ db, brainV2, homeId: 'psg', awayId: 'mon', leagueId: 'L1' });
+  assert.equal(typeof data.csi?.home?.CSI, 'number');
+  assert.equal(typeof data.csi?.away?.CSI, 'number');
+});
