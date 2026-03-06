@@ -3267,8 +3267,6 @@ export function initFootballLab(){
       /* ═══════════════════════════════════════════════════
          BRAIN v2 · PREMIUM CARD SYSTEM
       ═══════════════════════════════════════════════════ */
-      @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
       :root{
         --b2-bg:#070A0F;
         --b2-surface:#0C1017;
