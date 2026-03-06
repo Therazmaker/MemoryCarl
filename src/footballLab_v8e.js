@@ -3263,7 +3263,7 @@ export function initFootballLab(){
       .fl-lineup-slot-tag{font-size:10px;font-weight:800;letter-spacing:.05em;color:#9ca3af;text-align:center}
       .fl-lineup-slot-select{font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #3a4a5f;background:#0d1117;color:#e8edf3}
       .context-box{border-left:4px solid #1f6feb}
-      .b2-layout{display:grid;grid-template-columns:340px 1fr 400px;grid-template-rows:auto 1fr auto;min-height:100vh;gap:14px;background:#0d0f14;padding:14px;border-radius:14px}
+      .b2-layout{display:grid;grid-template-columns:minmax(290px,340px) minmax(560px,1fr) minmax(480px,1.15fr);grid-template-rows:auto 1fr auto;min-height:100vh;gap:14px;background:#0d0f14;padding:14px;border-radius:14px}
       .b2-topbar{grid-column:1/-1;position:sticky;top:0;z-index:5;background:#0d0f14;border:1px solid #1e2330;border-radius:12px;padding:12px;display:grid;gap:10px}
       .b2-topbar-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
       .b2-brand{font-size:20px;font-weight:900;letter-spacing:.02em}
@@ -3274,6 +3274,7 @@ export function initFootballLab(){
       .b2-health.active{background:rgba(34,211,163,.16);border:1px solid rgba(34,211,163,.4);color:#22d3a3;animation:b2Pulse 2s ease-in-out infinite}
       .b2-health.warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);color:#f59e0b}
       .b2-col-a{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c{grid-column:3}.b2-bottom{grid-column:1/-1}
+      .b2-col-b,.b2-col-c{display:grid;gap:10px;align-content:start}
       .b2-card{background:#151820;border:1px solid #1e2330;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.3)}
       .b2-card-header{padding:10px 12px;border-bottom:1px solid #1e2330;font-size:12px;font-weight:800;letter-spacing:.08em;color:#8892a0}
       .b2-card-body{padding:12px}
@@ -3296,6 +3297,19 @@ export function initFootballLab(){
       .b2-score-chip.draw{color:#9ca3af;border-color:#3b4252;background:rgba(148,163,184,.08)}
       .b2-vision-card{background:#151820;border:1px solid #1e2330;border-radius:12px;padding:12px}
       .b2-vision-card.b2-hero-show{border:2px solid #22d3a3}
+      .b2-prob-grid{display:grid;grid-template-columns:repeat(3,minmax(90px,1fr));gap:10px;margin-top:10px}
+      .b2-prob-card{padding:10px;border-radius:12px;border:1px solid #283244;background:linear-gradient(165deg,#151b27,#0f1520);text-align:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.02)}
+      .b2-prob-card b{display:block;font-size:26px;line-height:1.05;margin-top:5px;color:#f8fafc}
+      .b2-prob-card.home{border-color:rgba(34,211,163,.45);box-shadow:0 8px 24px rgba(34,211,163,.12)}
+      .b2-prob-card.draw{border-color:rgba(96,165,250,.35)}
+      .b2-prob-card.away{border-color:rgba(168,85,247,.35)}
+      .b2-metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px;margin-top:10px}
+      .b2-metric-card{padding:9px;border-radius:11px;border:1px solid #243045;background:#101724}
+      .b2-bars-grid{margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+      .b2-bar-card{border:1px solid #233047;background:#101722;border-radius:11px;padding:8px}
+      .b2-bar-head{display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:#d5dcea;margin-bottom:6px}
+      .b2-bar-track{height:9px;background:#1e293b;border-radius:999px;overflow:hidden}
+      .b2-bar-fill{height:100%;border-radius:999px}
       .b2-hero-enter{opacity:0;transform:translateY(8px) scale(.98);transition:all .4s ease}
       .b2-hero-show{opacity:1;transform:translateY(0) scale(1)}
       .b2-status-show{animation:b2Fade .25s ease}
@@ -3311,7 +3325,8 @@ export function initFootballLab(){
       @keyframes b2Spin{to{transform:rotate(360deg)}}
       @keyframes b2Fade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
       @keyframes b2Pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,211,163,.18)}50%{box-shadow:0 0 0 6px rgba(34,211,163,0)}}
-      @media (max-width:1279px){.b2-layout{grid-template-columns:minmax(320px,1fr) minmax(320px,1fr)}.b2-col-a{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c{grid-column:1}.b2-col-c-sticky,.b2-sticky-panel{position:static}}
+      @media (max-width:1420px){.b2-layout{grid-template-columns:minmax(280px,320px) minmax(420px,1fr) minmax(400px,1fr)}}
+      @media (max-width:1279px){.b2-layout{grid-template-columns:minmax(320px,1fr) minmax(320px,1fr)}.b2-col-a{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c{grid-column:1}.b2-col-c-sticky,.b2-sticky-panel{position:static}.b2-bars-grid{grid-template-columns:1fr}}
       @media (max-width:767px){.b2-layout{grid-template-columns:1fr;padding:10px}.b2-col-a,.b2-col-b,.b2-col-c,.b2-bottom,.b2-topbar{grid-column:1}.b2-kpi-strip{grid-template-columns:repeat(2,minmax(120px,1fr))}}
       
     `;
@@ -12358,14 +12373,14 @@ passes: 425"></textarea>
         }).join("");
         applyHeroReveal(out);
         out.innerHTML = `
-          <div style="font-weight:800;">${homeTeam?.name || 'Local'} vs ${awayTeam?.name || 'Visita'}</div>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
-            <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Local</div><div style="font-size:22px;font-weight:900;">${pH}%</div></div>
-            <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Empate</div><div style="font-size:22px;font-weight:900;">${pD}%</div></div>
-            <div class="fl-card" style="padding:8px;text-align:center;"><div class="fl-mini">Visita</div><div style="font-size:22px;font-weight:900;">${pA}%</div></div>
+          <div style="font-weight:900;font-size:19px;letter-spacing:.01em;">${homeTeam?.name || 'Local'} <span class="fl-mini" style="font-size:13px;">vs</span> ${awayTeam?.name || 'Visita'}</div>
+          <div class="b2-prob-grid">
+            <div class="b2-prob-card home"><span class="fl-mini">Local</span><b>${pH}%</b></div>
+            <div class="b2-prob-card draw"><span class="fl-mini">Empate</span><b>${pD}%</b></div>
+            <div class="b2-prob-card away"><span class="fl-mini">Visita</span><b>${pA}%</b></div>
           </div>
-          <div style="margin-top:10px;font-weight:800;">⚡ MATCH READINESS CARD</div>
-          <div class="fl-mre-table-wrap">
+          <div style="margin-top:12px;font-weight:900;font-size:14px;letter-spacing:.04em;">⚡ MATCH READINESS CARD</div>
+          <div class="fl-mre-table-wrap" style="margin-top:6px;">
             <table class="fl-mre-table">
               <thead>
                 <tr>
@@ -12382,18 +12397,18 @@ passes: 425"></textarea>
           <div class="fl-mini" style="margin-top:4px;">Muestras MRE ${homeMre.teamName}: <b>${homeReadiness?.evidence?.raw?.totalMatches ?? 0}</b> · ${awayMre.teamName}: <b>${awayReadiness?.evidence?.raw?.totalMatches ?? 0}</b> · Fuente: <b>${homeReadiness?.evidence?.source || "brainV2.memories"}</b></div>
           <div class="fl-mini" style="margin-top:4px;">Filtro: <b>${homeReadiness?.evidence?.filterLabel || "all competitions"}</b> · fallback: <b>${homeReadiness?.evidence?.fallback ? "sí" : "no"}</b>${homeReadiness?.evidence?.raw?.leagueFallback ? " (liga→all competitions)" : ""}</div>
           <div class="fl-mini" style="margin-top:4px;">Perfil narrativo (N=${homeProfile.lastN}/${awayProfile.lastN}) · presión tardía ${homeProfile.tendencies.latePressureAvg.toFixed(1)} vs ${awayProfile.tendencies.latePressureAvg.toFixed(1)}</div>
-          <div class="fl-card" style="margin-top:8px;padding:8px;"><b>Global Evidence</b>
+          <div class="fl-card" style="margin-top:10px;padding:10px;border-color:#2a3850;"><b>Global Evidence</b>
             <div class="fl-mini" style="margin-top:4px;">${vision.globalEvidence?.evidenceOk ? '✅ Global Evidence OK' : '❌ Sin evidencia global fuerte'}</div>
             ${vision.globalEvidence?.evidenceOk
               ? (vision.globalEvidence?.topContributors || []).map((item)=>`<div class="fl-mini">${item.tagId}: n=${item.n} rel=${(item.reliability*100).toFixed(0)}% → ${item.impactDelta>=0?'+':''}${item.impactDelta.toFixed(1)}% ${item.impactTarget}</div>`).join('')
               : `<div class="fl-mini">Se requiere avg rel ≥60% y al menos 60 matches globales (actual: ${vision.globalEvidence?.eligibleCount || 0} tags confiables · ${(Number(vision.globalEvidence?.avgReliability||0)*100).toFixed(0)}%).</div>`}
             ${(vision.globalEvidence?.trapWarnings || []).map((w)=>`<div class="fl-mini">⚠️ ${w.reason} · conf ${(Number(w.confidence||0)*100).toFixed(0)}%</div>`).join('')}
           </div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px;">
-            <div class="fl-card" style="padding:8px;"><div class="fl-mini">⚽ xG esperado</div><div style="font-weight:800;">${exp.goalsHome?.toFixed(2)} - ${exp.goalsAway?.toFixed(2)}</div></div>
-            <div class="fl-card" style="padding:8px;"><div class="fl-mini">🎯 Marcador probable</div><div style="font-weight:800;">${score.home}-${score.away} (${(score.prob * 100).toFixed(1)}%)</div></div>
-            <div class="fl-card" style="padding:8px;"><div class="fl-mini">🚩 Córners</div><div style="font-weight:800;">${exp.cornersHome?.toFixed(1)} - ${exp.cornersAway?.toFixed(1)}</div></div>
-            <div class="fl-card" style="padding:8px;"><div class="fl-mini">🟨 Tarjetas</div><div style="font-weight:800;">${exp.cardsHome?.toFixed(1)} - ${exp.cardsAway?.toFixed(1)}</div></div>
+          <div class="b2-metric-grid">
+            <div class="b2-metric-card"><div class="fl-mini">⚽ xG esperado</div><div style="font-weight:800;font-size:18px;">${exp.goalsHome?.toFixed(2)} - ${exp.goalsAway?.toFixed(2)}</div></div>
+            <div class="b2-metric-card"><div class="fl-mini">🎯 Marcador probable</div><div style="font-weight:800;font-size:18px;">${score.home}-${score.away} <span class="fl-mini">(${(score.prob * 100).toFixed(1)}%)</span></div></div>
+            <div class="b2-metric-card"><div class="fl-mini">🚩 Córners</div><div style="font-weight:800;font-size:18px;">${exp.cornersHome?.toFixed(1)} - ${exp.cornersAway?.toFixed(1)}</div></div>
+            <div class="b2-metric-card"><div class="fl-mini">🟨 Tarjetas</div><div style="font-weight:800;font-size:18px;">${exp.cardsHome?.toFixed(1)} - ${exp.cardsAway?.toFixed(1)}</div></div>
           </div>
           <details style="margin-top:10px;" open>
             <summary style="font-weight:800;cursor:pointer;">Advanced Orchestrator Signals</summary>
@@ -12405,15 +12420,15 @@ passes: 425"></textarea>
               <div class="fl-mini">${(orchestrator.explanation || []).map((r)=>`• ${r}`).join(' ')}</div>
             </div>
           </details>
-          <div style="margin-top:10px;display:grid;gap:6px;">
-            <div>⚔️ Ataque local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.homeAttack}%;height:8px;background:#3fb950;border-radius:999px;"></div></div></div>
-            <div>🛡️ Ataque visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.awayAttack}%;height:8px;background:#58a6ff;border-radius:999px;"></div></div></div>
-            <div>🎛️ Control local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.homeControl}%;height:8px;background:#f2cc60;border-radius:999px;"></div></div></div>
-            <div>🧭 Control visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${vision.bars.awayControl}%;height:8px;background:#d2a8ff;border-radius:999px;"></div></div></div>
-            <div>🫀 Resistencia local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${Math.round(phy.homeResistance || 0)}%;height:8px;background:#2ea043;border-radius:999px;"></div></div></div>
-            <div>🫀 Resistencia visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${Math.round(phy.awayResistance || 0)}%;height:8px;background:#1f6feb;border-radius:999px;"></div></div></div>
-            <div>🥵 Cansancio local <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${Math.round(phy.homeFatigue || 0)}%;height:8px;background:#ff7b72;border-radius:999px;"></div></div></div>
-            <div>🥵 Cansancio visita <div style="height:8px;background:#222;border-radius:999px;"><div style="width:${Math.round(phy.awayFatigue || 0)}%;height:8px;background:#ffa657;border-radius:999px;"></div></div></div>
+          <div class="b2-bars-grid">
+            <div class="b2-bar-card"><div class="b2-bar-head"><span>⚔️ Ataque local</span><span>${vision.bars.homeAttack}%</span></div><div class="b2-bar-track"><div class="b2-bar-fill" style="width:${vision.bars.homeAttack}%;background:#3fb950;"></div></div></div>
+            <div class="b2-bar-card"><div class="b2-bar-head"><span>🛡️ Ataque visita</span><span>${vision.bars.awayAttack}%</span></div><div class="b2-bar-track"><div class="b2-bar-fill" style="width:${vision.bars.awayAttack}%;background:#58a6ff;"></div></div></div>
+            <div class="b2-bar-card"><div class="b2-bar-head"><span>🎛️ Control local</span><span>${vision.bars.homeControl}%</span></div><div class="b2-bar-track"><div class="b2-bar-fill" style="width:${vision.bars.homeControl}%;background:#f2cc60;"></div></div></div>
+            <div class="b2-bar-card"><div class="b2-bar-head"><span>🧭 Control visita</span><span>${vision.bars.awayControl}%</span></div><div class="b2-bar-track"><div class="b2-bar-fill" style="width:${vision.bars.awayControl}%;background:#d2a8ff;"></div></div></div>
+            <div class="b2-bar-card"><div class="b2-bar-head"><span>🫀 Resistencia local</span><span>${Math.round(phy.homeResistance || 0)}%</span></div><div class="b2-bar-track"><div class="b2-bar-fill" style="width:${Math.round(phy.homeResistance || 0)}%;background:#2ea043;"></div></div></div>
+            <div class="b2-bar-card"><div class="b2-bar-head"><span>🫀 Resistencia visita</span><span>${Math.round(phy.awayResistance || 0)}%</span></div><div class="b2-bar-track"><div class="b2-bar-fill" style="width:${Math.round(phy.awayResistance || 0)}%;background:#1f6feb;"></div></div></div>
+            <div class="b2-bar-card"><div class="b2-bar-head"><span>🥵 Cansancio local</span><span>${Math.round(phy.homeFatigue || 0)}%</span></div><div class="b2-bar-track"><div class="b2-bar-fill" style="width:${Math.round(phy.homeFatigue || 0)}%;background:#ff7b72;"></div></div></div>
+            <div class="b2-bar-card"><div class="b2-bar-head"><span>🥵 Cansancio visita</span><span>${Math.round(phy.awayFatigue || 0)}%</span></div><div class="b2-bar-track"><div class="b2-bar-fill" style="width:${Math.round(phy.awayFatigue || 0)}%;background:#ffa657;"></div></div></div>
           </div>
           <div class="fl-mini" style="margin-top:8px;display:grid;gap:4px;">
             ${(vision.insights || []).map((line)=>`<div>${line}</div>`).join('')}
