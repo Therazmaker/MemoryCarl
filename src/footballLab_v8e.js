@@ -10,6 +10,7 @@ import { computeExpectedGoals } from "./footballlab/xg_engine.js";
 import { scoreMatrix, matrixToOutcome, mostLikelyScore, oddsToMarketProbabilities, blendOutcomes } from "./footballlab/poisson_engine.js";
 import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState, getLatestClaudeFeedback, safeJsonPreview, observeLearningAuditsForMatch } from "./footballlab/mne_claude_exchange.js";
 import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
+import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -133,14 +134,19 @@ export function initFootballLab(){
   function loadBrainV2(){
     const raw = localStorage.getItem(BRAIN_V2_KEY);
     const parsed = safeParseJSON(raw, {});
-    return {
+    const normalized = {
       memories: parsed && typeof parsed === "object" && parsed.memories && typeof parsed.memories === "object"
         ? parsed.memories
+        : {},
+      teamProfiles: parsed && typeof parsed === "object" && parsed.teamProfiles && typeof parsed.teamProfiles === "object"
+        ? parsed.teamProfiles
         : {},
       gpe: normalizeGpeState(parsed?.gpe),
       mne: normalizeMneLearningState(parsed?.mne),
       orchestratorLearning: normalizeOrchestratorLearningState(parsed?.orchestratorLearning)
     };
+    normalizeTeamProfilesState(normalized, { rebuildIfMissing: true });
+    return normalized;
   }
 
   function normalizeOrchestratorLearningState(raw){
@@ -519,6 +525,7 @@ export function initFootballLab(){
   function saveBrainV2(state){
     const next = state && typeof state === "object" ? state : { memories: {} };
     next.memories ||= {};
+    normalizeTeamProfilesState(next, { rebuildIfMissing: true });
     next.gpe = buildGlobalPatternEngine(next.memories);
     next.mne = normalizeMneLearningState(next.mne);
     localStorage.setItem(BRAIN_V2_KEY, JSON.stringify(next));
@@ -10869,6 +10876,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const selectedTeamName = db.teams.find((t)=>t.id===selectedTeamId)?.name || "Local";
       const teamOptions = sortedTeams.map((t)=>`<option value="${t.id}" ${selectedTeamId===t.id?"selected":""}>${t.name}</option>`).join("");
       const teamMemories = (brainV2.memories[selectedTeamId] || []).slice().sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date));
+      const teamMatchRefs = getTeamMatchRefs(brainV2, { teamId: selectedTeamId, teamName: selectedTeamName });
       const memoryRows = teamMemories.slice(0, 8).map((m)=>{
         const story = m?.summary?.story || (m.narrative || "").slice(0, 90);
         const tags = (m?.summary?.reasons || []).slice(0, 2).map((r)=>`${r.tag} ${(r.strength*100).toFixed(0)}%`).join(" · ");
@@ -10878,6 +10886,7 @@ function computeTeamIntelligencePanel(db, teamId){
       }).join("");
       const selectedTeamSummary = summarizeTeamMemory(teamMemories);
       const selectedTeamHasBrain = selectedTeamSummary.samples > 0;
+      const indexedCount = teamMatchRefs.length;
       const selectedTeamBadge = selectedTeamHasBrain
         ? `🧠 Cerebro activo para este equipo · ${selectedTeamSummary.samples} partidos (${selectedTeamSummary.positive} positivos / ${selectedTeamSummary.negative} alertas).`
         : "⚠️ Este equipo aún no tiene memoria en Brain v2. Guarda partidos para activar el cerebro.";
@@ -10950,6 +10959,7 @@ passes: 425"></textarea>
             <span id="b2Status" class="fl-muted"></span>
           </div>
           <div class="fl-mini" style="margin-top:8px;">${selectedTeamBadge}</div>
+          <div class="fl-mini" style="margin-top:4px;">Partidos indexados (teamProfiles): <b>${indexedCount}</b></div>
           <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Relato</th><th>Acciones</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="5" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
           <div id="b2PowerDashboard" class="fl-card" style="margin-top:10px;display:none;"></div>
         </div>
@@ -11409,6 +11419,12 @@ passes: 425"></textarea>
         row.summary = buildBrainV2MatchSummary({ row, teamName: row.teamName, opponentName: row.opponent || "Rival" });
         brainV2.memories[teamId] ||= [];
         brainV2.memories[teamId].push(row);
+        indexMemoryMatchIntoTeamProfiles(brainV2, row, {
+          includeOpponent: true,
+          primaryTeamId: teamId,
+          primaryTeamName: row.teamName,
+          opponentTeamName: row.opponent || ''
+        });
         saveBrainV2(brainV2);
         status.textContent = `✅ Partido guardado. Memoria total: ${brainV2.memories[teamId].length}.`;
         render('brainv2', { leagueId: selectedLeagueId, teamId });
@@ -11588,6 +11604,7 @@ passes: 425"></textarea>
         backdrop.querySelector('#b2SaveReasonModal').onclick = ()=>{
           syncRowFromModal();
           buildAndRefreshSummary();
+          rebuildTeamProfileIndex(brainV2, { replace: true, includeOpponent: true });
           saveBrainV2(brainV2);
           if(status) status.textContent = '✅ Partido actualizado con resultado y razones.';
           close();
@@ -11602,6 +11619,7 @@ passes: 425"></textarea>
         if(!teamId || !matchId || !brainV2.memories[teamId]) return;
         if(!confirm('¿Borrar este partido de la memoria?')) return;
         brainV2.memories[teamId] = brainV2.memories[teamId].filter((row)=>row.id !== matchId);
+        rebuildTeamProfileIndex(brainV2, { replace: true, includeOpponent: true });
         saveBrainV2(brainV2);
         if(status) status.textContent = '🗑️ Partido eliminado de la memoria.';
         render('brainv2', { leagueId: selectedLeagueId, teamId });
