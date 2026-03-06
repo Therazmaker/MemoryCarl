@@ -2428,6 +2428,157 @@ export function initFootballLab(){
     try{ return JSON.parse(String(raw)); }catch(_err){ return null; }
   }
 
+  function normalizeTeamName(value = ""){
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  function parseFootballLabMatchpack(raw = ""){
+    const parsed = typeof raw === "string" ? safeParseJSON(raw, null) : raw;
+    if(!parsed || typeof parsed !== "object") throw new Error("JSON inválido o vacío.");
+    if(parsed.schemaVersion !== "footballlab_matchpack_v1") throw new Error("schemaVersion no soportado. Se esperaba footballlab_matchpack_v1.");
+    if(!parsed.match || typeof parsed.match !== "object") throw new Error("Falta bloque match en el JSON.");
+    if(!String(parsed.match.home || "").trim() || !String(parsed.match.away || "").trim()) throw new Error("Faltan match.home o match.away.");
+    return parsed;
+  }
+
+  function matchpackDateToInput(value = ""){
+    const raw = String(value || "").trim();
+    if(!raw) return "";
+    const full = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2}))?$/);
+    if(full) return `${full[3]}-${full[2]}-${full[1]}`;
+    const exact = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(exact) return `${exact[1]}-${exact[2]}-${exact[3]}`;
+    const parsedTs = Date.parse(raw);
+    if(!Number.isFinite(parsedTs)) return "";
+    return new Date(parsedTs).toISOString().slice(0, 10);
+  }
+
+  function inferFocusTeamFromMatchpack(matchpack, currentTeamName = ""){
+    const home = String(matchpack?.match?.home || "").trim();
+    const away = String(matchpack?.match?.away || "").trim();
+    const currentNorm = normalizeTeamName(currentTeamName);
+    if(currentNorm && currentNorm===normalizeTeamName(home)) return { teamName: home, side: "home", inferred: false };
+    if(currentNorm && currentNorm===normalizeTeamName(away)) return { teamName: away, side: "away", inferred: false };
+    const selectedSide = String(matchpack?.lineup?.selectedSide || "").toLowerCase();
+    if(selectedSide === "home") return { teamName: home, side: "home", inferred: true };
+    if(selectedSide === "away") return { teamName: away, side: "away", inferred: true };
+    return { teamName: home, side: "home", inferred: true };
+  }
+
+  function buildScoreForForm(matchpack, focusSide = "home"){
+    const homeGoals = Number(matchpack?.match?.score?.home);
+    const awayGoals = Number(matchpack?.match?.score?.away);
+    if(!Number.isFinite(homeGoals) || !Number.isFinite(awayGoals)) return "";
+    if(focusSide === "away") return `${awayGoals}-${homeGoals}`;
+    return `${homeGoals}-${awayGoals}`;
+  }
+
+  function getFocusedStatsFromMatchpack(matchpack, focusSide = "home"){
+    const normalized = matchpack?.stats?.normalized;
+    if(!normalized || typeof normalized !== "object") return {};
+    const side = focusSide === "away" ? "away" : "home";
+    const sideStats = normalized[side];
+    if(sideStats && typeof sideStats === "object") return sideStats;
+    const out = {};
+    Object.entries(normalized).forEach(([key, value])=>{
+      if(!value || typeof value !== "object") return;
+      if(Object.prototype.hasOwnProperty.call(value, side)) out[key] = value[side];
+    });
+    return out;
+  }
+
+  function buildStatsTextareaFromMatchpack(matchpack, focusSide = "home"){
+    const stats = getFocusedStatsFromMatchpack(matchpack, focusSide);
+    const metricDefs = [
+      ["xg", ["xg", "expectedGoals"]],
+      ["shots", ["shots", "totalShots"]],
+      ["shotsOnTarget", ["shotsOnTarget", "shots_on_target"]],
+      ["possession", ["possession", "ballPossession"]],
+      ["corners", ["corners", "cornerKicks"]],
+      ["bigChances", ["bigChances", "big_chances"]],
+      ["passes", ["passes", "totalPasses"]],
+      ["yellowCards", ["yellowCards", "yellow_cards"]],
+      ["fouls", ["fouls", "foulsCommitted"]],
+      ["dangerousAttacks", ["dangerousAttacks", "danger_attacks"]]
+    ];
+    const lines = [];
+    metricDefs.forEach(([label, keys])=>{
+      for(const key of keys){
+        if(!Object.prototype.hasOwnProperty.call(stats, key)) continue;
+        const value = stats[key];
+        if(value===null || value===undefined || value==="") continue;
+        lines.push(`${label}: ${value}`);
+        break;
+      }
+    });
+    return lines.slice(0, 12).join("\n");
+  }
+
+  function extractEventMinute(item = {}, idx = 0){
+    const minuteCandidates = [item.minute, item.min, item.time, item.minuteLabel, item.clock];
+    for(const candidate of minuteCandidates){
+      const raw = String(candidate || "").trim();
+      if(!raw) continue;
+      const hit = raw.match(/\d{1,3}(?:\+\d{1,2})?/);
+      if(hit) return hit[0];
+    }
+    return idx===0 ? "" : `${Math.max(1, idx)}'`;
+  }
+
+  function buildNarrativeTextareaFromMatchpack(matchpack){
+    const items = Array.isArray(matchpack?.commentary?.items) ? matchpack.commentary.items : [];
+    if(!items.length) return "";
+    const relevant = items
+      .map((item, idx)=>{
+        const text = String(item?.text || item?.label || item?.description || item?.event || "").trim();
+        const type = String(item?.type || item?.kind || item?.eventType || "").toLowerCase();
+        return { minute: extractEventMinute(item, idx), text, type, idx };
+      })
+      .filter((row)=>row.text)
+      .filter((row)=>/gol|goal|var|penal|penalty|tarjet|card|ocasi[oó]n|chance|cambio|substitut|inicio|descanso|final|anulad/i.test(`${row.type} ${row.text}`))
+      .slice(0, 16)
+      .map((row)=>`${row.minute ? `${row.minute}' ` : ""}${row.text.replace(/\s+/g, " ")}`.trim());
+    return relevant.join("\n");
+  }
+
+  function buildXiStringFromMatchpack(matchpack){
+    const players = Array.isArray(matchpack?.lineup?.players) ? [...matchpack.lineup.players] : [];
+    if(!players.length) return "";
+    players.sort((a,b)=>{
+      const lineDiff = (Number(a?.line) || 0) - (Number(b?.line) || 0);
+      if(lineDiff) return lineDiff;
+      const slotDiff = (Number(a?.slot) || 0) - (Number(b?.slot) || 0);
+      if(slotDiff) return slotDiff;
+      return String(a?.gridKey || "").localeCompare(String(b?.gridKey || ""));
+    });
+    return players.map((p)=>String(p?.name || p?.player || "").trim()).filter(Boolean).slice(0, 11).join(", ");
+  }
+
+  function buildLineupShapeFromMatchpack(matchpack){
+    const formation = String(matchpack?.lineup?.formation || "").trim() || "4-3-3";
+    const players = Array.isArray(matchpack?.lineup?.players) ? [...matchpack.lineup.players] : [];
+    if(!players.length) return null;
+    players.sort((a,b)=>{
+      const lineDiff = (Number(a?.line) || 0) - (Number(b?.line) || 0);
+      if(lineDiff) return lineDiff;
+      return (Number(a?.slot) || 0) - (Number(b?.slot) || 0);
+    });
+    const layout = buildFormationLayout(formation);
+    const assignments = {};
+    layout.slots.forEach((slot, idx)=>{
+      const player = players[idx];
+      if(!player) return;
+      const name = String(player?.name || player?.player || "").trim();
+      if(name) assignments[slot.key] = name;
+    });
+    return { formation: layout.formation, slots: layout.slots, assignments };
+  }
+
   function listTeamProfilePlayers(db, teamId = ""){
     if(!teamId) return [];
     return (db.players || [])
@@ -10715,6 +10866,11 @@ passes: 425"></textarea>
             </div>
             <input id="b2LineupShape" type="hidden" value="" />
           </div>
+          <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+            <button class="fl-btn secondary" id="b2ImportMatchpack" type="button">Importar JSON</button>
+            <input id="b2ImportMatchpackFile" type="file" accept="application/json,.json" style="display:none;" />
+            <span id="b2ImportStatus" class="fl-mini"></span>
+          </div>
           <div class="fl-row" style="margin-top:8px;">
             <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
             <span id="b2Status" class="fl-muted"></span>
@@ -11077,6 +11233,83 @@ passes: 425"></textarea>
           lineupInput: document.getElementById('b2Lineup'),
           shapeInput: document.getElementById('b2LineupShape')
         });
+      });
+      document.getElementById('b2ImportMatchpack')?.addEventListener('click', ()=>{
+        document.getElementById('b2ImportMatchpackFile')?.click();
+      });
+      document.getElementById('b2ImportMatchpackFile')?.addEventListener('change', async (ev)=>{
+        const status = document.getElementById('b2ImportStatus');
+        const file = ev?.target?.files?.[0];
+        if(!file) return;
+        try{
+          const raw = await file.text();
+          const matchpack = parseFootballLabMatchpack(raw);
+          const currentTeamId = document.getElementById('b2Team')?.value || "";
+          const currentTeamName = db.teams.find((t)=>t.id===currentTeamId)?.name || "";
+          const focus = inferFocusTeamFromMatchpack(matchpack, currentTeamName);
+          const warnings = [];
+
+          const allTeamsByNorm = new Map(db.teams.map((t)=>[normalizeTeamName(t.name), t.id]));
+          const homeName = String(matchpack?.match?.home || "").trim();
+          const awayName = String(matchpack?.match?.away || "").trim();
+          const focusName = focus.side === "away" ? awayName : homeName;
+          const rivalName = focus.side === "away" ? homeName : awayName;
+
+          const teamSelect = document.getElementById('b2Team');
+          const teamAlreadyChosen = !!currentTeamId;
+          if(!teamAlreadyChosen){
+            const inferredTeamId = allTeamsByNorm.get(normalizeTeamName(focusName));
+            if(inferredTeamId){
+              teamSelect.value = inferredTeamId;
+            }else{
+              warnings.push(`No se encontró equipo local para "${focusName}"; se mantiene selección actual.`);
+            }
+          }
+
+          const dateValue = matchpackDateToInput(matchpack?.match?.date || matchpack?.match?.kickoff || "");
+          if(dateValue) document.getElementById('b2Date').value = dateValue;
+          else warnings.push('Fecha no reconocida; se conserva valor actual.');
+
+          if(rivalName) document.getElementById('b2Opponent').value = rivalName;
+
+          const score = buildScoreForForm(matchpack, focus.side);
+          if(score) document.getElementById('b2Score').value = score;
+
+          const statsTxt = buildStatsTextareaFromMatchpack(matchpack, focus.side);
+          if(statsTxt) document.getElementById('b2Stats').value = statsTxt;
+          else warnings.push('Sin stats.normalized utilizables; campo stats no se tocó.');
+
+          const narrativeTxt = buildNarrativeTextareaFromMatchpack(matchpack);
+          if(narrativeTxt) document.getElementById('b2Narrative').value = narrativeTxt;
+          else warnings.push('Sin commentary.items relevantes; relato no se tocó.');
+
+          const xi = buildXiStringFromMatchpack(matchpack);
+          if(xi) document.getElementById('b2Lineup').value = xi;
+          else warnings.push('Sin lineup.players; XI no se tocó.');
+
+          const lineupShape = buildLineupShapeFromMatchpack(matchpack);
+          if(lineupShape) document.getElementById('b2LineupShape').value = JSON.stringify(lineupShape);
+
+          const competition = String(matchpack?.match?.competition || "").trim();
+          if(competition){
+            const hitLeague = db.leagues.find((l)=>normalizeTeamName(l?.name || "")===normalizeTeamName(competition));
+            if(hitLeague){
+              const leagueSelect = document.getElementById('b2League');
+              leagueSelect.value = hitLeague.id;
+            }else{
+              warnings.push(`Liga "${competition}" no coincide con una liga existente.`);
+            }
+          }
+
+          const autoText = warnings.length
+            ? `✅ JSON importado con avisos: ${warnings.join(' ')}`
+            : '✅ JSON importado correctamente. Revisa y edita antes de guardar.';
+          if(status) status.textContent = autoText;
+        }catch(err){
+          if(status) status.textContent = `❌ Error al importar: ${String(err?.message || err)}`;
+        }finally{
+          ev.target.value = '';
+        }
       });
       document.getElementById('b2Home')?.addEventListener('change', paintBrainStatus);
       document.getElementById('b2Away')?.addEventListener('change', paintBrainStatus);
