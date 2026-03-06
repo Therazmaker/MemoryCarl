@@ -12,7 +12,10 @@ import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState,
 import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
+<<<<<<< codex/implementar-version-2-del-prematch-story-engine-aeual5
+=======
 import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
+>>>>>>> main
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -10999,6 +11002,11 @@ passes: 425"></textarea>
             <input id="b2OddA" class="fl-input" type="number" step="0.01" placeholder="Cuota Visita" style="max-width:150px;" />
             <button class="fl-btn" id="b2Simulate">Simular visión</button>
           </div>
+          <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+            <button class="fl-btn" id="b2PrematchGenerate">Generar previa editorial</button>
+            <button class="fl-btn" id="b2PrematchRegenerate">Regenerar</button>
+            <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="b2PrematchDebugToggle" /> Ver insights JSON</label>
+          </div>
           <div id="b2BrainStatus" class="fl-mini" style="margin-top:8px;"></div>
           <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
             <button class="fl-btn secondary" id="b2HybridSync">Sincronizar dataset híbrido</button>
@@ -11007,6 +11015,7 @@ passes: 425"></textarea>
           </div>
           <div id="b2HybridLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Hybrid tools listos.</div>
           <div id="b2Vision" class="fl-mini" style="margin-top:10px;">Carga local/visita para ver la simulación visual.</div>
+          <div id="b2PrematchOut" class="fl-card" style="margin-top:8px;padding:10px;display:none;"></div>
         </div>
       `;
 
@@ -11421,6 +11430,68 @@ passes: 425"></textarea>
       });
       document.getElementById('b2Home')?.addEventListener('change', paintBrainStatus);
       document.getElementById('b2Away')?.addEventListener('change', paintBrainStatus);
+
+      let lastBrainPrematchPayload = null;
+      const renderBrainPrematchPreview = (payload = null)=>{
+        const out = document.getElementById('b2PrematchOut');
+        const toggle = document.getElementById('b2PrematchDebugToggle');
+        if(!out) return;
+        if(!payload){
+          out.style.display = 'none';
+          out.innerHTML = '';
+          return;
+        }
+        const editorial = payload.editorial || {};
+        const sections = Array.isArray(editorial.sections) ? editorial.sections : [];
+        const debugOn = Boolean(toggle?.checked);
+        out.style.display = 'block';
+        out.innerHTML = `
+          <div style="font-weight:900;font-size:16px;">📰 ${editorial.headline || 'Previa editorial'}</div>
+          <div class="fl-mini" style="margin-top:8px;display:grid;gap:8px;">
+            ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
+          </div>
+          ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
+        `;
+      };
+
+      const handleBrainPrematchGenerate = ()=>{
+        const homeIdSel = document.getElementById('b2Home')?.value || '';
+        const awayIdSel = document.getElementById('b2Away')?.value || '';
+        const out = document.getElementById('b2PrematchOut');
+        if(!homeIdSel || !awayIdSel || homeIdSel===awayIdSel){
+          if(out){
+            out.style.display = 'block';
+            out.textContent = 'Selecciona local y visita para generar la previa editorial.';
+          }
+          return;
+        }
+        const oddH = document.getElementById('b2OddH')?.value;
+        const oddD = document.getElementById('b2OddD')?.value;
+        const oddA = document.getElementById('b2OddA')?.value;
+        const market = clean1x2Probs(oddH, oddD, oddA);
+        const homeTeam = db.teams.find((t)=>t.id===homeIdSel);
+        const awayTeam = db.teams.find((t)=>t.id===awayIdSel);
+        const leagueIdSel = selectedLeagueId || homeTeam?.leagueId || awayTeam?.leagueId || '';
+        const homeReadiness = computeMatchReadinessEngine(db, homeIdSel, { brainV2, teamName: homeTeam?.name || '', leagueId: leagueIdSel });
+        const awayReadiness = computeMatchReadinessEngine(db, awayIdSel, { brainV2, teamName: awayTeam?.name || '', leagueId: leagueIdSel });
+        const data = collectPrematchData({
+          db,
+          brainV2,
+          homeId: homeIdSel,
+          awayId: awayIdSel,
+          leagueId: leagueIdSel,
+          market: market ? { ...market, oddH, oddD, oddA } : null,
+          readiness: { home: homeReadiness, away: awayReadiness }
+        });
+        const insights = buildPrematchInsights(data);
+        const editorial = composePrematchEditorial(insights);
+        lastBrainPrematchPayload = { insights, editorial };
+        renderBrainPrematchPreview(lastBrainPrematchPayload);
+      };
+
+      document.getElementById('b2PrematchGenerate')?.addEventListener('click', handleBrainPrematchGenerate);
+      document.getElementById('b2PrematchRegenerate')?.addEventListener('click', handleBrainPrematchGenerate);
+      document.getElementById('b2PrematchDebugToggle')?.addEventListener('change', ()=>renderBrainPrematchPreview(lastBrainPrematchPayload));
 
       document.getElementById('b2SaveMatch')?.addEventListener('click', ()=>{
         const status = document.getElementById('b2Status');
