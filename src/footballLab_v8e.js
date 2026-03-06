@@ -9708,8 +9708,8 @@ function computeTeamIntelligencePanel(db, teamId){
       const globalRotation = pressureRef.congestionLevel==="🔴" || backToBack>=2 || next14.length>=4 ? "Alta" : next14.length>=2 ? "Media" : "Baja";
       const patterns = buildTeamIntPatterns(db, team);
       const narrativeMetrics = computeTeamNarrativeMetrics(teamMatches);
-      const brainV2ForResultsSync = loadBrainV2();
-      const resultsSync = getResultsSyncSummary({ db, brainV2: brainV2ForResultsSync, team });
+      const brainV2TeamState = loadBrainV2();
+      const resultsSync = getResultsSyncSummary({ db, brainV2: brainV2TeamState, team });
       const matchRows = teamMatches.map((m, idx)=>{
         const isHome = m.homeId===team.id;
         const rival = resolveRivalForTeamMatch({ db, match: m, team, brainV2: brainV2TeamState });
