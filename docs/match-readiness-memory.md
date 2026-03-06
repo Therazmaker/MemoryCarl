@@ -42,3 +42,16 @@
 - Helpers disponibles:
   - `getTeamMatchRefs(...)` para listar referencias de un equipo (con alias).
   - `resolveTeamMatchesFromRefs(...)` para resolver esas referencias al partido real en `brainV2.memories`.
+
+## Módulo de RESULTADOS · sincronización manual desde memoria
+- En la vista de equipo (`RESULTADOS (clic para estadísticas)`), ahora se calcula un resumen de sincronización usando `brainV2.memories` como fuente principal.
+- La UI muestra:
+  - cuántos partidos existen en memoria para el equipo seleccionado,
+  - cuántos ya están sincronizados en la tabla (`db.tracker`),
+  - cuántos faltan.
+- Si faltan partidos, aparece el botón **Sincronizar**.
+- Al sincronizar:
+  - se importan solo partidos pendientes,
+  - se evita duplicar por `brainMemoryId` cuando existe,
+  - y además se protege con una firma estable (`fecha + equipo + rival + score + liga`) para memorias antiguas o parciales.
+- Si no hay pendientes, la UI muestra **Todo sincronizado** y el botón queda deshabilitado.
