@@ -3193,6 +3193,7 @@ export function initFootballLab(){
     style.id = "fl-clean-styles";
     style.textContent = `
       .fl-wrap{max-width:1100px;margin:18px auto;padding:0 12px;color:#e8edf3;font-family:Inter,system-ui,sans-serif}
+      .fl-wrap-brainv2{max-width:min(1820px,calc(100vw - 24px));margin:10px auto 18px;padding:0 6px}
       .fl-card{background:#161b22;border:1px solid #2d333b;border-radius:14px;padding:14px;margin-bottom:12px}
       .fl-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
       .fl-grid{display:grid;gap:10px}
@@ -3262,7 +3263,66 @@ export function initFootballLab(){
       .fl-lineup-slot-tag{font-size:10px;font-weight:800;letter-spacing:.05em;color:#9ca3af;text-align:center}
       .fl-lineup-slot-select{font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #3a4a5f;background:#0d1117;color:#e8edf3}
       .context-box{border-left:4px solid #1f6feb}
-      .b2-layout{display:grid;grid-template-columns:340px 1fr 400px;grid-template-rows:auto 1fr auto;min-height:100vh}
+      .b2-layout{display:grid;grid-template-columns:minmax(320px,360px) minmax(620px,1fr) minmax(360px,430px);grid-template-rows:auto 1fr auto;min-height:100vh;gap:12px;background:#0d0f14;padding:12px;border-radius:14px}
+      .b2-topbar{grid-column:1/-1;position:sticky;top:0;z-index:5;background:#0d0f14;border:1px solid #1e2330;border-radius:12px;padding:12px;display:grid;gap:10px}
+      .b2-topbar-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
+      .b2-brand{font-size:20px;font-weight:900;letter-spacing:.02em}
+      .b2-kpi-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}
+      .b2-stat-pill{background:#151820;border:1px solid #1e2330;border-radius:10px;padding:8px 10px;display:grid;gap:2px}
+      .b2-stat-pill b{font-size:24px;line-height:1;color:#f0f0f0}
+      .b2-health{border-radius:10px;padding:8px 10px;font-size:12px;font-weight:800;letter-spacing:.08em;display:flex;align-items:center;justify-content:center}
+      .b2-health.active{background:rgba(34,211,163,.16);border:1px solid rgba(34,211,163,.4);color:#22d3a3;animation:b2Pulse 2s ease-in-out infinite}
+      .b2-health.warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);color:#f59e0b}
+      .b2-col-a{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c{grid-column:3}.b2-output-wide{grid-column:1/-1}.b2-bottom{grid-column:1/-1}
+      .b2-card{background:#151820;border:1px solid #1e2330;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.3)}
+      .b2-card-header{padding:10px 12px;border-bottom:1px solid #1e2330;font-size:12px;font-weight:800;letter-spacing:.08em;color:#8892a0}
+      .b2-card-body{padding:12px}
+      .b2-label{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:#6b7280}
+      .b2-sticky-panel{position:sticky;top:94px}
+      .b2-col-c-sticky{position:sticky;top:94px}
+      .b2-btn-primary{width:100%;background:#22d3a3;color:#0d0f14;border-color:#1cc99b}
+      .b2-btn-sim{background:#60a5fa;border-color:#528fdd}
+      .b2-btn-sim:hover,.b2-btn-primary:hover{transform:translateY(-1px)}
+      .b2-memory-list{display:grid;gap:8px;margin-top:10px}
+      .b2-memory-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;background:#151820;border:1px solid #1e2330;border-radius:10px;padding:10px;transition:all .15s ease}
+      .b2-memory-row:hover{background:#1a1f2e;border-left:2px solid #22d3a3}
+      .b2-memory-meta{display:flex;gap:8px;align-items:center;font-size:12px;color:#8892a0}
+      .b2-memory-title{font-weight:700;margin:2px 0}
+      .b2-memory-actions{display:flex;gap:6px;opacity:0;transform:translateX(6px);transition:all .15s ease}
+      .b2-memory-row:hover .b2-memory-actions{opacity:1;transform:translateX(0)}
+      .b2-score-chip{padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid #1e2330}
+      .b2-score-chip.win{color:#22d3a3;border-color:rgba(34,211,163,.5);background:rgba(34,211,163,.12)}
+      .b2-score-chip.loss{color:#ef4444;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.12)}
+      .b2-score-chip.draw{color:#9ca3af;border-color:#3b4252;background:rgba(148,163,184,.08)}
+      .b2-vision-card{background:#151820;border:1px solid #1e2330;border-radius:12px;padding:12px}
+      .b2-output-wide .b2-vision-card{min-height:46vh}
+      .b2-output-wide #b2Vision{font-size:13px;line-height:1.5}
+      .b2-output-wide #b2Vision .fl-card{background:#111722!important;border:1px solid #1e2330!important;color:#dbe3ec}
+      .b2-output-wide #b2Vision .fl-mini{color:#9fb0c3!important}
+      .b2-output-wide #b2Vision table,.b2-output-wide #b2Vision th,.b2-output-wide #b2Vision td{border-color:#1e2330!important;background:transparent;color:#dbe3ec}
+      .b2-output-wide #b2Vision .fl-btn:hover{background:#1a2130}
+      .b2-layout *, .b2-layout *::before, .b2-layout *::after{animation:none!important;transition:none!important}
+
+      .b2-vision-card.b2-hero-show{border:2px solid #22d3a3}
+      .b2-hero-enter{opacity:0;transform:translateY(8px) scale(.98);transition:all .4s ease}
+      .b2-hero-show{opacity:1;transform:translateY(0) scale(1)}
+      .b2-status-show{animation:b2Fade .25s ease}
+      .b2-collapse{max-height:0;overflow:hidden;opacity:0;transition:max-height .25s ease,opacity .2s ease}
+      .b2-collapse.is-open{max-height:1000px;opacity:1}
+      .b2-btn-loading{position:relative;color:transparent!important;pointer-events:none}
+      .b2-btn-loading::after{content:'';position:absolute;left:50%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border:2px solid rgba(255,255,255,.55);border-top-color:#fff;border-radius:50%;animation:b2Spin .8s linear infinite}
+      .b2-btn-success{box-shadow:0 0 0 2px rgba(34,211,163,.35) inset;background:#22d3a3!important;color:#09120f!important}
+      .b2-advanced-tools summary{cursor:pointer;list-style:none;font-weight:800;display:flex;justify-content:space-between;align-items:center}
+      .b2-advanced-tools summary::-webkit-details-marker{display:none}
+      .b2-col-b #b2GlobalLearningPanel details{margin-top:8px}
+      .b2-col-b #b2GlobalLearningPanel summary{cursor:pointer;font-weight:800;padding:8px;border:1px solid #1e2330;border-radius:8px;background:#111722}
+      @keyframes b2Spin{to{transform:rotate(360deg)}}
+      @keyframes b2Fade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes b2Pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,211,163,.18)}50%{box-shadow:0 0 0 6px rgba(34,211,163,0)}}
+      @media (max-width:1439px){.b2-layout{grid-template-columns:320px minmax(520px,1fr) 370px}}
+      @media (max-width:1279px){.b2-layout{grid-template-columns:minmax(360px,1fr) minmax(420px,1fr)}.b2-col-a{grid-column:1}.b2-col-c{grid-column:1}.b2-col-b{grid-column:2}.b2-output-wide{grid-column:1/-1}.b2-col-c-sticky,.b2-sticky-panel{position:static}}
+      @media (max-width:767px){.fl-wrap-brainv2{max-width:100%;padding:0 4px}.b2-layout{grid-template-columns:1fr;padding:10px}.b2-col-a,.b2-col-b,.b2-col-c,.b2-output-wide,.b2-bottom,.b2-topbar{grid-column:1}.b2-kpi-strip{grid-template-columns:repeat(2,minmax(120px,1fr))}}
+      
     `;
     document.head.appendChild(style);
   }
@@ -9405,9 +9465,10 @@ function computeTeamIntelligencePanel(db, teamId){
 
     const tabs = ["home","liga","tracker","versus","brainv2","momentum","bitacora","market"];
     const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
+    const wrapClass = view === "brainv2" ? "fl-wrap fl-wrap-brainv2" : "fl-wrap";
 
     app.innerHTML = `
-      <div class="fl-wrap">
+      <div class="${wrapClass}">
         <div class="fl-row fl-card">
           <div class="fl-title">⚽ Football Lab limpio</div>
           ${nav}
@@ -11095,7 +11156,11 @@ function computeTeamIntelligencePanel(db, teamId){
         const tags = (m?.summary?.reasons || []).slice(0, 2).map((r)=>`${r.tag} ${(r.strength*100).toFixed(0)}%`).join(" · ");
         const lineup = parseLineupList(m?.lineup || m?.startingXI || []);
         const lineupTxt = lineup.length ? lineup.slice(0, 6).join(', ') + (lineup.length>6 ? '…' : '') : 'Sin composición';
-        return `<tr><td>${m.date || "-"}</td><td>${m.opponent || "-"}</td><td>${m.score || "-"}</td><td>${story}<div class="fl-mini">${tags || "Sin razones"}</div><div class="fl-mini">XI: ${lineupTxt}</div></td><td><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Ver por qué</button><button class="fl-btn ghost b2EditMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Editar</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></div></td></tr>`;
+        const [gfRaw, gaRaw] = String(m.score || '').split('-').map((v)=>Number(v));
+        const scoreClass = Number.isFinite(gfRaw) && Number.isFinite(gaRaw)
+          ? (gfRaw > gaRaw ? 'win' : gfRaw < gaRaw ? 'loss' : 'draw')
+          : 'draw';
+        return `<article class="b2-memory-row"><div class="b2-memory-main"><div class="b2-memory-meta"><span class="b2-memory-date">${m.date || "-"}</span><span class="b2-score-chip ${scoreClass}">${m.score || "-"}</span></div><div class="b2-memory-title">vs ${m.opponent || "-"}</div><div class="fl-mini">${story}</div><div class="fl-mini">${tags || "Sin razones"} · XI: ${lineupTxt}</div></div><div class="b2-memory-actions"><button class="fl-btn ghost b2WhyMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">¿Por qué?</button><button class="fl-btn ghost b2EditMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Editar</button><button class="fl-btn ghost b2DeleteMatch" data-match-id="${m.id}" data-team-id="${selectedTeamId}">Borrar</button></div></article>`;
       }).join("");
       const selectedTeamSummary = summarizeTeamMemory(teamMemories);
       const selectedTeamHasBrain = selectedTeamSummary.samples > 0;
@@ -11112,40 +11177,30 @@ function computeTeamIntelligencePanel(db, teamId){
       content.innerHTML = `
         <div class="b2-layout">
           <div class="b2-topbar">
-            <div class="fl-card">
-              <div style="font-size:20px;font-weight:900;">🧠 Brain v2 · Entrenamiento incremental</div>
-              <div class="fl-muted" style="margin-top:4px;">Guarda partidos por equipo (stats + relato) para construir memoria y preparar datasets TensorFlow.</div>
+            <div class="b2-topbar-head">
+              <div class="b2-brand">🧠 Brain v2</div>
+              <div class="fl-mini">${selectedLeagueId ? (db.leagues.find((l)=>l.id===selectedLeagueId)?.name || 'Todas') : 'Todas las ligas'} · ${selectedTeamName}</div>
             </div>
-            <div class="fl-card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
-              <div>
-                <div class="fl-mini">Team learned</div>
-                <div style="font-size:26px;font-weight:900;">${health.teamsLearned}</div>
-              </div>
-              <div>
-                <div class="fl-mini">Matches learned</div>
-                <div style="font-size:26px;font-weight:900;">${health.matchesLearned}</div>
-              </div>
-              <div>
-                <div class="fl-mini">Confianza</div>
-                <div style="font-size:26px;font-weight:900;">${(health.confidence * 100).toFixed(0)}%</div>
-              </div>
-              <div>
-                <div class="fl-mini">Cobertura stats / relato</div>
-                <div style="font-size:18px;font-weight:800;">${(health.statsCoverage * 100).toFixed(0)}% / ${(health.narrativeCoverage * 100).toFixed(0)}%</div>
-              </div>
+            <div class="b2-kpi-strip">
+              <div class="b2-stat-pill"><span class="fl-mini">Teams</span><b data-b2-counter data-b2-value="${health.teamsLearned}">0</b></div>
+              <div class="b2-stat-pill"><span class="fl-mini">Matches</span><b data-b2-counter data-b2-value="${health.matchesLearned}">0</b></div>
+              <div class="b2-stat-pill"><span class="fl-mini">Confianza</span><b data-b2-counter data-b2-value="${Math.round(health.confidence * 100)}" data-b2-suffix="%">0%</b></div>
+              <div class="b2-stat-pill"><span class="fl-mini">Cobertura</span><b>${(health.statsCoverage * 100).toFixed(0)}% / ${(health.narrativeCoverage * 100).toFixed(0)}%</b></div>
+              <div class="b2-health ${selectedTeamHasBrain ? 'active' : 'warn'}">${selectedTeamHasBrain ? 'CEREBRO ACTIVO' : 'SIN MEMORIA'}</div>
             </div>
-            <div class="fl-card"><div class="fl-mini">${selectedTeamBadge}</div></div>
           </div>
 
           <div class="b2-col-a">
-            <div class="fl-card">
+            <div class="fl-card b2-card b2-sticky-panel">
+              <div class="b2-card-header">CAPTURA DE PARTIDO</div>
+              <div class="b2-card-body">
               <div class="fl-grid two">
                 <div>
-                  <label class="fl-muted">Liga</label>
+                  <label class="b2-label">Liga</label>
                   <select id="b2League" class="fl-select"><option value="">Todas</option>${leagueOptions}</select>
                 </div>
                 <div>
-                  <label class="fl-muted">Equipo</label>
+                  <label class="b2-label">Equipo</label>
                   <select id="b2Team" class="fl-select"><option value="">Selecciona equipo</option>${teamOptions}</select>
                 </div>
               </div>
@@ -11173,24 +11228,29 @@ passes: 425"></textarea>
                 <span id="b2ImportStatus" class="fl-mini"></span>
               </div>
               <div class="fl-row" style="margin-top:8px;">
-                <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
+                <button class="fl-btn b2-btn-primary" id="b2SaveMatch">Guardar partido en memoria</button>
                 <span id="b2Status" class="fl-muted"></span>
+              </div>
               </div>
             </div>
           </div>
 
           <div class="b2-col-b">
-            <div class="fl-card">
-              <div class="fl-mini" style="margin-top:4px;">Partidos indexados (teamProfiles): <b>${indexedCount}</b></div>
-              <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Relato</th><th>Acciones</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="5" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
+            <div class="fl-card b2-card">
+              <div class="b2-card-header">MEMORIA DEL EQUIPO <span class="fl-chip">${teamMemories.length} partidos</span></div>
+              <div class="b2-card-body">
+                <div class="fl-mini" style="margin-top:4px;">Partidos indexados (teamProfiles): <b>${indexedCount}</b></div>
+                <div class="b2-memory-list">${memoryRows || '<div class="fl-mini">Sin partidos guardados.</div>'}</div>
+              </div>
             </div>
             <div id="b2PowerDashboard" class="fl-card" style="margin-top:10px;display:none;"></div>
             <div id="b2GlobalLearningPanel" class="fl-card"></div>
           </div>
 
           <div class="b2-col-c">
-            <div class="fl-card">
-              <div style="font-size:18px;font-weight:800;">🎯 Simulador visual Local vs Visita</div>
+            <div class="fl-card b2-card b2-col-c-sticky">
+              <div class="b2-card-header">🎯 SIMULACIÓN</div>
+              <div class="b2-card-body">
               <div class="fl-grid two" style="margin-top:8px;">
                 <select id="b2Home" class="fl-select"><option value="">Equipo local</option>${teamOptionFull(homeId)}</select>
                 <select id="b2Away" class="fl-select"><option value="">Equipo visita</option>${teamOptionFull(awayId)}</select>
@@ -11199,7 +11259,7 @@ passes: 425"></textarea>
                 <input id="b2OddH" class="fl-input" type="number" step="0.01" placeholder="Cuota Local" style="max-width:150px;" />
                 <input id="b2OddD" class="fl-input" type="number" step="0.01" placeholder="Cuota Empate" style="max-width:150px;" />
                 <input id="b2OddA" class="fl-input" type="number" step="0.01" placeholder="Cuota Visita" style="max-width:150px;" />
-                <button class="fl-btn" id="b2Simulate">Simular visión</button>
+                <button class="fl-btn b2-btn-sim" id="b2Simulate">Simular visión</button>
               </div>
               <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
                 <button class="fl-btn" id="b2PrematchGenerate">Generar previa editorial</button>
@@ -11208,19 +11268,24 @@ passes: 425"></textarea>
               </div>
               <div id="b2BrainStatus" class="fl-mini" style="margin-top:8px;"></div>
             </div>
-            <div id="b2Vision" class="fl-mini" style="margin-top:10px;">Carga local/visita para ver la simulación visual.</div>
+            </div>
             <div id="b2PrematchOut" class="fl-card" style="margin-top:8px;padding:10px;display:none;"></div>
           </div>
 
+          <div class="b2-output-wide">
+            <div id="b2Vision" class="fl-mini b2-vision-card">Carga local/visita para ver la simulación visual.</div>
+          </div>
+
           <div class="b2-bottom">
-            <div class="fl-card">
+            <details class="fl-card b2-advanced-tools">
+              <summary>⚙ HERRAMIENTAS HÍBRIDAS <span class="fl-chip warn">AVANZADO</span></summary>
               <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
                 <button class="fl-btn secondary" id="b2HybridSync">Sincronizar dataset híbrido</button>
                 <button class="fl-btn secondary" id="b2HybridEvaluate">Evaluate</button>
                 <button class="fl-btn secondary" id="b2HybridVisionPreview">Preview Vision</button>
               </div>
               <div id="b2HybridLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Hybrid tools listos.</div>
-            </div>
+            </details>
           </div>
         </div>
             `;
@@ -11345,8 +11410,10 @@ passes: 425"></textarea>
 
         const warnings = gp.warnings.map((line)=>`<div class="fl-mini" style="padding:6px 0;border-bottom:1px solid #30363d;">${line}</div>`).join('');
         node.innerHTML = `
-          <div style="font-size:18px;font-weight:900;">🌍 Global Impact Panel (GIE)</div>
-          <div class="fl-kpi" style="margin-top:8px;">
+          <details>
+            <summary>🌐 Aprendizaje Global — ${gp.totalTeams} equipos · ${gp.totalMatches} partidos</summary>
+            <div style="font-size:18px;font-weight:900;margin-top:8px;">🌍 Global Impact Panel (GIE)</div>
+            <div class="fl-kpi" style="margin-top:8px;">
             <div><span class="fl-mini">Strong signals</span><b>${gp.strongSignals}</b></div>
             <div><span class="fl-mini">Trap signals</span><b>${gp.trapSignals}</b></div>
             <div><span class="fl-mini">Chaos signals</span><b>${gp.chaosSignals}</b></div>
@@ -11354,7 +11421,8 @@ passes: 425"></textarea>
           </div>
           ${renderImpactSummary(gp.tagRows, gp.comboRows)}
           <div class="fl-card" style="margin-top:8px;padding:8px;"><b>Global Warnings you can trust</b><div style="margin-top:6px;">${warnings || '<div class="fl-mini">Aún no hay señales con rel ≥ 0.60.</div>'}</div></div>
-          <div class="fl-mini" style="margin-top:8px;">Baseline global: W ${(gp.baseline.pW*100).toFixed(1)}% · D ${(gp.baseline.pD*100).toFixed(1)}% · L ${(gp.baseline.pL*100).toFixed(1)}% · Matches ${gp.totalMatches}</div>`;
+            <div class="fl-mini" style="margin-top:8px;">Baseline global: W ${(gp.baseline.pW*100).toFixed(1)}% · D ${(gp.baseline.pD*100).toFixed(1)}% · L ${(gp.baseline.pL*100).toFixed(1)}% · Matches ${gp.totalMatches}</div>
+          </details>`;
 
         const toggle = node.querySelector('#b2ImpactToggle');
         const wrap = node.querySelector('#b2ImpactTablesWrap');
