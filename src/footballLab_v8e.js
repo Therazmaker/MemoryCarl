@@ -9993,6 +9993,26 @@ function computeTeamIntelligencePanel(db, teamId){
             <div><span class="fl-mini">Travel Tilt</span><b>${(Number(engine?.haTraits?.travelTilt)||0).toFixed(2)}</b></div>
           </div>
         </div>
+        
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">📐 Base estructural temporada (manual)</div>
+          <div class="fl-mini" style="margin-bottom:8px;">Define PJ, G, E, P, GF, GC, DG y PTS como referencia estructural del equipo.</div>
+          <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
+            <input id="teamSeasonBasePj" class="fl-input" type="number" min="0" placeholder="PJ" style="width:86px;" value="${team?.intProfile?.seasonBase?.pj ?? ''}" />
+            <input id="teamSeasonBaseG" class="fl-input" type="number" min="0" placeholder="G" style="width:72px;" value="${team?.intProfile?.seasonBase?.g ?? ''}" />
+            <input id="teamSeasonBaseE" class="fl-input" type="number" min="0" placeholder="E" style="width:72px;" value="${team?.intProfile?.seasonBase?.e ?? ''}" />
+            <input id="teamSeasonBaseP" class="fl-input" type="number" min="0" placeholder="P" style="width:72px;" value="${team?.intProfile?.seasonBase?.p ?? ''}" />
+            <input id="teamSeasonBaseGf" class="fl-input" type="number" min="0" placeholder="GF" style="width:72px;" value="${team?.intProfile?.seasonBase?.gf ?? ''}" />
+            <input id="teamSeasonBaseGc" class="fl-input" type="number" min="0" placeholder="GC" style="width:72px;" value="${team?.intProfile?.seasonBase?.gc ?? ''}" />
+            <input id="teamSeasonBaseDg" class="fl-input" type="number" placeholder="DG" style="width:72px;" value="${team?.intProfile?.seasonBase?.dg ?? ''}" />
+            <input id="teamSeasonBasePts" class="fl-input" type="number" min="0" placeholder="PTS" style="width:80px;" value="${team?.intProfile?.seasonBase?.pts ?? ''}" />
+            <input id="teamSeasonBasePos" class="fl-input" type="number" min="1" placeholder="Pos" style="width:72px;" value="${team?.intProfile?.seasonBase?.position ?? ''}" />
+          </div>
+          <div class="fl-row" style="margin-top:8px;gap:8px;align-items:center;">
+            <button class="fl-btn" id="saveTeamSeasonBaseBtn">Guardar base temporada</button>
+            <div id="teamSeasonBaseStatus" class="fl-mini"></div>
+          </div>
+        </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
           <div class="fl-mini" style="margin-bottom:6px;">Hay <b>${resultsSync.totalInMemory}</b> partidos guardados en memoria para <b>${team.name}</b>.</div>
@@ -10052,6 +10072,35 @@ function computeTeamIntelligencePanel(db, teamId){
         </div>
         ${sections}
       `;
+      const saveSeasonBaseBtn = document.getElementById("saveTeamSeasonBaseBtn");
+      if(saveSeasonBaseBtn) saveSeasonBaseBtn.onclick = ()=>{
+        team.intProfile ||= {};
+        const read = (id)=>{
+          const raw = document.getElementById(id)?.value;
+          if(raw === '' || raw === null || typeof raw === 'undefined') return null;
+          const n = Number(raw);
+          return Number.isFinite(n) ? n : null;
+        };
+        const seasonBase = {
+          pj: read('teamSeasonBasePj'),
+          g: read('teamSeasonBaseG'),
+          e: read('teamSeasonBaseE'),
+          p: read('teamSeasonBaseP'),
+          gf: read('teamSeasonBaseGf'),
+          gc: read('teamSeasonBaseGc'),
+          dg: read('teamSeasonBaseDg'),
+          pts: read('teamSeasonBasePts'),
+          position: read('teamSeasonBasePos')
+        };
+        if(Number.isFinite(seasonBase.gf) && Number.isFinite(seasonBase.gc) && !Number.isFinite(seasonBase.dg)){
+          seasonBase.dg = seasonBase.gf - seasonBase.gc;
+        }
+        team.intProfile.seasonBase = seasonBase;
+        saveDb(db);
+        const statusEl = document.getElementById('teamSeasonBaseStatus');
+        if(statusEl) statusEl.textContent = '✅ Base estructural guardada.';
+      };
+
       document.getElementById("teamIntConfigBtn").onclick = ()=>{
         const profile = team.intProfile || {};
         const priorityCompetition = prompt("Competición prioridad A (Liga/UCL/Copa)", profile.priorityCompetition || "Liga");
@@ -11600,6 +11649,36 @@ passes: 425"></textarea>
         `;
       };
 
+
+      const renderFSIBlock = (fsi = null)=>{
+        if(!fsi || (!fsi.home && !fsi.away)) return '';
+        const renderTeam = (row)=>{
+          if(!row) return '';
+          if(!Number.isFinite(row?.FSI)){
+            return `<div style="padding:8px;border:1px dashed #30363d;border-radius:8px;"><b>${row.team}</b>: ${row?.explanation || 'Sin datos suficientes.'}</div>`;
+          }
+          return `
+            <div style="padding:8px;border:1px solid rgba(99,110,123,.35);border-radius:8px;">
+              <div style="font-weight:700;">${row.team}</div>
+              <div class="fl-mini">Base temporada: ${row.seasonBase.ppg} ppg · GF ${row.seasonBase.gfpg} · GC ${row.seasonBase.gcpg} · DG ${row.seasonBase.dgpg}</div>
+              <div class="fl-mini">Forma reciente: ${row.recentForm.ppg} ppg · GF ${row.recentForm.gfpg} · GC ${row.recentForm.gcpg} · DG ${row.recentForm.dgpg}</div>
+              <div class="fl-mini">FSI <b>${row.FSI}</b> · <b>${row.status}</b></div>
+              <div class="fl-mini">${row.explanation || ''}</div>
+            </div>
+          `;
+        };
+        return `
+          <div style="margin-top:10px;padding:10px;border:1px solid rgba(99,110,123,.35);border-radius:10px;">
+            <div style="font-weight:800;">🧭 Form Surprise Index (FSI)</div>
+            <div class="fl-mini" style="margin-top:6px;display:grid;gap:8px;">
+              ${renderTeam(fsi.home)}
+              ${renderTeam(fsi.away)}
+            </div>
+            <div class="fl-mini" style="margin-top:8px;">👉 ${fsi.conclusion || 'Sin conclusión.'}</div>
+          </div>
+        `;
+      };
+
       const renderBrainPrematchPreview = (payload = null)=>{
         const out = document.getElementById('b2PrematchOut');
         const toggle = document.getElementById('b2PrematchDebugToggle');
@@ -11619,6 +11698,7 @@ passes: 425"></textarea>
             ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
           </div>
           ${renderCSIBlock(payload.insights?.csi || null)}
+          ${renderFSIBlock(payload.insights?.fsi || null)}
           ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;
       };
@@ -14191,6 +14271,7 @@ passes: 425"></textarea>
             ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
           </div>
           ${renderCSIBlock(payload.insights?.csi || null)}
+          ${renderFSIBlock(payload.insights?.fsi || null)}
           ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;
       };
