@@ -3322,12 +3322,49 @@ export function initFootballLab(){
       .b2-advanced-tools summary::-webkit-details-marker{display:none}
       .b2-col-b #b2GlobalLearningPanel details{margin-top:8px}
       .b2-col-b #b2GlobalLearningPanel summary{cursor:pointer;font-weight:800;padding:8px;border:1px solid #1e2330;border-radius:8px;background:#111722}
+      .b2-fsi-wrap{margin-top:12px;display:grid;gap:10px}
+      .b2-fsi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+      .b2-fsi-card{--accent:#7d8590;--accent-rgb:125,133,144;position:relative;background:
+        radial-gradient(circle at 10% 8%,rgba(var(--accent-rgb),.16),transparent 48%),
+        radial-gradient(circle at 90% 100%,rgba(76,124,255,.09),transparent 52%),
+        #080B10;border:1px solid rgba(255,255,255,.07);border-top:2px solid var(--accent);border-radius:12px;padding:14px 14px 12px;overflow:visible;
+        transition:transform .3s ease,box-shadow .3s ease}
+      .b2-fsi-card.positive{--accent:#00E87A;--accent-rgb:0,232,122}
+      .b2-fsi-card.negative{--accent:#FF3D5A;--accent-rgb:255,61,90}
+      .b2-fsi-card:hover{transform:translateY(-3px);box-shadow:0 14px 34px rgba(0,0,0,.46),0 0 0 1px rgba(var(--accent-rgb),.17)}
+      .b2-fsi-badge{position:absolute;top:-10px;left:12px;padding:5px 10px 4px;background:var(--accent);color:#04130a;font:700 9px/1 "DM Sans",system-ui,sans-serif;letter-spacing:.18em;text-transform:uppercase;clip-path:polygon(0 0,92% 0,100% 100%,0 100%)}
+      .b2-fsi-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:flex-end;gap:10px}
+      .b2-fsi-team{font:400 28px/1 "Bebas Neue","Arial Narrow",sans-serif;color:#fff;letter-spacing:.04em;text-transform:uppercase}
+      .b2-fsi-score-wrap{text-align:right;display:grid;gap:2px;justify-items:end}
+      .b2-fsi-score-label{font:600 9px/1 "DM Sans",system-ui,sans-serif;color:rgba(195,205,221,.62);letter-spacing:.42em;text-transform:uppercase}
+      .b2-fsi-score{font:400 38px/.92 "Bebas Neue","Arial Narrow",sans-serif;color:var(--accent)}
+      .b2-fsi-verdict{display:inline-flex;border:1px solid rgba(var(--accent-rgb),.65);border-radius:999px;padding:2px 8px 1px;color:var(--accent);font:700 9px/1 "DM Sans",system-ui,sans-serif;letter-spacing:.15em;text-transform:uppercase}
+      .b2-fsi-stats{margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .b2-fsi-box{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);border-radius:0;padding:8px 8px 6px}
+      .b2-fsi-box-title{font:700 9px/1 "DM Sans",system-ui,sans-serif;color:rgba(183,197,216,.66);letter-spacing:.32em;text-transform:uppercase;margin-bottom:8px}
+      .b2-fsi-metric{display:flex;justify-content:space-between;gap:8px;margin:3px 0;font:600 11.5px/1.3 "JetBrains Mono","SFMono-Regular",Consolas,monospace;color:#dde6f6}
+      .b2-fsi-metric span{color:rgba(191,205,226,.75)}
+      .b2-fsi-metric b{color:#f8fbff;font-weight:700}
+      .b2-fsi-delta{margin-top:12px;position:relative;padding-top:8px;border-top:1px solid rgba(255,255,255,.08)}
+      .b2-fsi-delta-track{position:relative;height:4px;background:rgba(255,255,255,.08)}
+      .b2-fsi-delta-track::before{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:rgba(228,236,248,.3)}
+      .b2-fsi-delta-fill{position:absolute;top:0;bottom:0;width:0;transition:width 1s ease;background:linear-gradient(90deg,rgba(var(--accent-rgb),.4),var(--accent))}
+      .b2-fsi-delta-fill.left{right:50%;background:linear-gradient(90deg,var(--accent),rgba(var(--accent-rgb),.35))}
+      .b2-fsi-delta-fill.right{left:50%}
+      .b2-fsi-delta-meta{display:flex;justify-content:space-between;margin-top:6px;font:700 10px/1 "JetBrains Mono","SFMono-Regular",Consolas,monospace;color:rgba(163,179,201,.68);letter-spacing:.16em;text-transform:uppercase}
+      .b2-fsi-delta-meta strong{color:var(--accent)}
+      .b2-fsi-insight{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font:300 11.5px/1.5 "DM Sans",system-ui,sans-serif;color:rgba(200,214,231,.76)}
+      .b2-fsi-insight b{font-weight:700;color:#f5fbff}
+      .b2-fsi-foot{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);display:flex;justify-content:space-between;align-items:center}
+      .b2-fsi-foot-label{font:700 9px/1 "JetBrains Mono","SFMono-Regular",Consolas,monospace;color:rgba(154,172,196,.5);letter-spacing:.32em;text-transform:uppercase}
+      .b2-fsi-pulse{width:7px;height:7px;border-radius:999px;background:var(--accent);box-shadow:0 0 0 0 rgba(var(--accent-rgb),.55);animation:b2FsiPulse 2s ease-in-out infinite}
       @keyframes b2Spin{to{transform:rotate(360deg)}}
       @keyframes b2Fade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
       @keyframes b2Pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,211,163,.18)}50%{box-shadow:0 0 0 6px rgba(34,211,163,0)}}
+      @keyframes b2FsiPulse{0%,100%{opacity:1;transform:scale(1);box-shadow:0 0 0 0 rgba(var(--accent-rgb),.45)}50%{opacity:.45;transform:scale(1.35);box-shadow:0 0 0 9px rgba(var(--accent-rgb),0)}}
       @media (max-width:1420px){.b2-layout{grid-template-columns:minmax(280px,320px) minmax(420px,1fr) minmax(400px,1fr)}}
       @media (max-width:1279px){.b2-layout{grid-template-columns:minmax(320px,1fr) minmax(320px,1fr)}.b2-col-a{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c{grid-column:1}.b2-col-c-sticky,.b2-sticky-panel{position:static}.b2-bars-grid{grid-template-columns:1fr}}
-      @media (max-width:767px){.b2-layout{grid-template-columns:1fr;padding:10px}.b2-col-a,.b2-col-b,.b2-col-c,.b2-bottom,.b2-topbar{grid-column:1}.b2-kpi-strip{grid-template-columns:repeat(2,minmax(120px,1fr))}}
+      @media (max-width:767px){.b2-layout{grid-template-columns:1fr;padding:10px}.b2-col-a,.b2-col-b,.b2-col-c,.b2-bottom,.b2-topbar{grid-column:1}.b2-kpi-strip{grid-template-columns:repeat(2,minmax(120px,1fr))}.b2-fsi-stats{grid-template-columns:1fr}}
       
     `;
     document.head.appendChild(style);
@@ -11866,31 +11903,81 @@ passes: 425"></textarea>
         `;
       };
 
+      const animateFSIDeltaBars = (container)=>{
+        if(!container) return;
+        requestAnimationFrame(()=>{
+          container.querySelectorAll('.b2-fsi-delta-fill[data-width]').forEach((bar)=>{
+            bar.style.width = bar.dataset.width || '0%';
+          });
+        });
+      };
+
       const renderFSIBlock = (fsi = null)=>{
         if(!fsi || (!fsi.home && !fsi.away)) return '';
+        const verdictLabel = (status = '')=>String(status || 'normal').replaceAll('_',' ');
+        const emphasize = (text = '')=>String(text || '')
+          .replace(/\b(\+?\-?\d+(?:\.\d+)?\s*(?:pts\/partido|ppg|FSI)?)/gi, '<b>$1</b>')
+          .replace(/\b(por encima|por debajo|mejor|caída competitiva|normal|expectation|habitual|fuerte|débil)\b/gi, '<b>$1</b>');
         const renderTeam = (row)=>{
           if(!row) return '';
           if(!Number.isFinite(row?.FSI)){
             return `<div style="padding:8px;border:1px dashed #30363d;border-radius:8px;"><b>${row.team}</b>: ${row?.explanation || 'Sin datos suficientes.'}</div>`;
           }
+          const signClass = row.FSI > 0 ? 'positive' : row.FSI < 0 ? 'negative' : '';
+          const fsiScore = `${row.FSI > 0 ? '+' : ''}${row.FSI}`;
+          const basePpg = Number(row?.seasonBase?.ppg) || 0;
+          const recentPpg = Number(row?.recentForm?.ppg) || 0;
+          const delta = recentPpg - basePpg;
+          const deltaWidth = `${Math.max(3, Math.min(100, Math.abs(delta) * 50)).toFixed(1)}%`;
+          const deltaDirection = delta >= 0 ? 'right' : 'left';
           return `
-            <div style="padding:8px;border:1px solid rgba(99,110,123,.35);border-radius:8px;">
-              <div style="font-weight:700;">${row.team}</div>
-              <div class="fl-mini">Base temporada: ${row.seasonBase.ppg} ppg · GF ${row.seasonBase.gfpg} · GC ${row.seasonBase.gcpg} · DG ${row.seasonBase.dgpg}</div>
-              <div class="fl-mini">Forma reciente: ${row.recentForm.ppg} ppg · GF ${row.recentForm.gfpg} · GC ${row.recentForm.gcpg} · DG ${row.recentForm.dgpg}</div>
-              <div class="fl-mini">FSI <b>${row.FSI}</b> · <b>${row.status}</b></div>
-              <div class="fl-mini">${row.explanation || ''}</div>
-            </div>
+            <article class="b2-fsi-card ${signClass}">
+              <span class="b2-fsi-badge">FSI ANÁLISIS</span>
+              <header class="b2-fsi-head">
+                <div class="b2-fsi-team">${row.team}</div>
+                <div class="b2-fsi-score-wrap">
+                  <span class="b2-fsi-score-label">FSI SCORE</span>
+                  <div class="b2-fsi-score">${fsiScore}</div>
+                  <span class="b2-fsi-verdict">${verdictLabel(row.status)}</span>
+                </div>
+              </header>
+              <section class="b2-fsi-stats">
+                <div class="b2-fsi-box">
+                  <div class="b2-fsi-box-title">Base Temporada</div>
+                  <div class="b2-fsi-metric"><span>PPG</span><b>${row?.seasonBase?.ppg ?? '-'}</b></div>
+                  <div class="b2-fsi-metric"><span>GF</span><b>${row?.seasonBase?.gfpg ?? '-'}</b></div>
+                  <div class="b2-fsi-metric"><span>GC</span><b>${row?.seasonBase?.gcpg ?? '-'}</b></div>
+                  <div class="b2-fsi-metric"><span>DG</span><b>${row?.seasonBase?.dgpg ?? '-'}</b></div>
+                </div>
+                <div class="b2-fsi-box">
+                  <div class="b2-fsi-box-title">Forma Reciente</div>
+                  <div class="b2-fsi-metric"><span>PPG</span><b>${row?.recentForm?.ppg ?? '-'}</b></div>
+                  <div class="b2-fsi-metric"><span>GF</span><b>${row?.recentForm?.gfpg ?? '-'}</b></div>
+                  <div class="b2-fsi-metric"><span>GC</span><b>${row?.recentForm?.gcpg ?? '-'}</b></div>
+                  <div class="b2-fsi-metric"><span>DG</span><b>${row?.recentForm?.dgpg ?? '-'}</b></div>
+                </div>
+              </section>
+              <div class="b2-fsi-delta">
+                <div class="b2-fsi-delta-track">
+                  <span class="b2-fsi-delta-fill ${deltaDirection}" data-width="${deltaWidth}"></span>
+                </div>
+                <div class="b2-fsi-delta-meta"><strong>${delta >= 0 ? '+' : ''}${delta.toFixed(2)} PPG DELTA</strong><span>vs BASE</span></div>
+              </div>
+              <p class="b2-fsi-insight">${emphasize(row.explanation || '')}</p>
+              <footer class="b2-fsi-foot">
+                <span class="b2-fsi-foot-label">BRAIN V2 · PRE-MATCH</span>
+                <span class="b2-fsi-pulse" aria-hidden="true"></span>
+              </footer>
+            </article>
           `;
         };
         return `
-          <div style="margin-top:10px;padding:10px;border:1px solid rgba(99,110,123,.35);border-radius:10px;">
-            <div style="font-weight:800;">🧭 Form Surprise Index (FSI)</div>
-            <div class="fl-mini" style="margin-top:6px;display:grid;gap:8px;">
+          <div class="b2-fsi-wrap">
+            <div class="b2-fsi-grid">
               ${renderTeam(fsi.home)}
               ${renderTeam(fsi.away)}
             </div>
-            <div class="fl-mini" style="margin-top:8px;">👉 ${fsi.conclusion || 'Sin conclusión.'}</div>
+            <div class="fl-mini" style="margin-top:2px;">👉 ${fsi.conclusion || 'Sin conclusión.'}</div>
           </div>
         `;
       };
@@ -11921,6 +12008,7 @@ passes: 425"></textarea>
           ${renderFSIBlock(payload.insights?.fsi || null)}
           ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;
+        animateFSIDeltaBars(out);
         requestAnimationFrame(()=>out.classList.add('b2-reveal-show'));
       };
 
@@ -14500,6 +14588,7 @@ passes: 425"></textarea>
           ${renderFSIBlock(payload.insights?.fsi || null)}
           ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;
+        animateFSIDeltaBars(out);
       };
 
       const buildPrematchPayload = ({ homeId, awayId, selectedLeagueId, market })=>{
