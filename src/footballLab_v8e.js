@@ -5266,6 +5266,7 @@ export function initFootballLab(){
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        animation: { duration: 800, easing: "easeOutQuart" },
         scales: {
           x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
           y: { position: "left", ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } },
@@ -5911,6 +5912,7 @@ function computeTeamIntelligencePanel(db, teamId){
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        animation: { duration: 800, easing: "easeOutQuart" },
         scales: {
           x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
           y: { min: 0, max: 100, ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } }
@@ -5932,6 +5934,7 @@ function computeTeamIntelligencePanel(db, teamId){
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        animation: { duration: 800, easing: "easeOutQuart" },
         scales: { r: { suggestedMin: 0, suggestedMax: 100, angleLines: { color: "rgba(255,255,255,.1)" }, grid: { color: "rgba(255,255,255,.09)" }, pointLabels: { color: "#9ca3af" }, ticks: { color: "#9ca3af", backdropColor: "transparent" } } }
       }
     });
@@ -6444,6 +6447,7 @@ function computeTeamIntelligencePanel(db, teamId){
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { labels: { color: "#c9d1d9" } } },
+        animation: { duration: 800, easing: "easeOutQuart" },
         scales: {
           x: { ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }, grid: { color: "rgba(255,255,255,.05)" } },
           y: { min: 0, max: 100, ticks: { color: "#9ca3af" }, grid: { color: "rgba(255,255,255,.06)" } }
@@ -11333,7 +11337,7 @@ passes: 425"></textarea>
                 </div>
               </div>
               <button id="b2ImpactToggle" class="fl-btn secondary" type="button" style="margin-top:10px;padding:6px 10px;font-size:12px;">${expanded ? 'Ocultar análisis completo' : 'Ver análisis completo'}</button>
-              <div id="b2ImpactTablesWrap" style="display:${expanded ? 'block' : 'none'};margin-top:8px;max-height:420px;overflow:auto;">
+              <div id="b2ImpactTablesWrap" class="b2-collapse ${expanded ? 'is-open' : ''}" style="margin-top:8px;">
                 <div class="fl-grid two" style="gap:8px;">${renderImpactTagsTable(impactTags)}${renderImpactCombosTable(impactCombos)}</div>
               </div>
             </div>`;
@@ -11356,8 +11360,8 @@ passes: 425"></textarea>
         const wrap = node.querySelector('#b2ImpactTablesWrap');
         if(toggle && wrap){
           toggle.onclick = ()=>{
-            const open = wrap.style.display === 'none';
-            wrap.style.display = open ? 'block' : 'none';
+            const open = !wrap.classList.contains('is-open');
+            wrap.classList.toggle('is-open', open);
             toggle.textContent = open ? 'Ocultar análisis completo' : 'Ver análisis completo';
             localStorage.setItem(IMPACT_TABLES_KEY, open ? '1' : '0');
           };
@@ -11428,7 +11432,7 @@ passes: 425"></textarea>
                 { label:'Home', data:[agg.radar.home.attackProduction, agg.radar.home.attackConversion, agg.radar.home.defenseStability, agg.radar.home.control, agg.radar.home.setpieceStrength, agg.radar.home.discipline], borderColor:'#1f6feb', backgroundColor:'rgba(31,111,235,.2)' },
                 { label:'Away', data:[agg.radar.away.attackProduction, agg.radar.away.attackConversion, agg.radar.away.defenseStability, agg.radar.away.control, agg.radar.away.setpieceStrength, agg.radar.away.discipline], borderColor:'#f2cc60', backgroundColor:'rgba(242,204,96,.2)' }
               ] },
-              options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ r:{ suggestedMin:0, suggestedMax:100, ticks:{ color:'#9ca3af', backdropColor:'transparent' }, pointLabels:{ color:'#9ca3af' } } } }
+              options:{ responsive:true, maintainAspectRatio:false, animation:{ duration:800, easing:'easeOutQuart' }, plugins:{ legend:{ labels:{ color:'#c9d1d9' } } }, scales:{ r:{ suggestedMin:0, suggestedMax:100, ticks:{ color:'#9ca3af', backdropColor:'transparent' }, pointLabels:{ color:'#9ca3af' } } } }
             });
           }
           renderSimpleLineChart(node.querySelector('#b2PowerTrend'), agg.matches.map((m)=>String(m.date || '').slice(5) || '-'), [
@@ -11441,6 +11445,66 @@ passes: 425"></textarea>
       renderGlobalLearningPanel();
       renderBrainV2PowerDashboard();
 
+      const animateTopbarCounters = ()=>{
+        const nodes = Array.from(document.querySelectorAll('[data-b2-counter]'));
+        nodes.forEach((node, idx)=>{
+          const target = Number(node.getAttribute('data-b2-value') || 0);
+          const suffix = node.getAttribute('data-b2-suffix') || '';
+          const start = performance.now() + idx * 60;
+          const duration = 600;
+          const tick = (now)=>{
+            const t = Math.max(0, Math.min(1, (now - start) / duration));
+            const eased = 1 - Math.pow(1 - t, 3);
+            node.textContent = `${Math.round(target * eased)}${suffix}`;
+            if(t < 1) requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+      };
+      animateTopbarCounters();
+
+      const bindVisualButtonFeedback = ()=>{
+        const setup = (id, { statusNodeId = '', successMatch = /✅|guardad|generad|simulación/i, wait = 1200 } = {})=>{
+          const btn = document.getElementById(id);
+          if(!btn || btn.dataset.b2FxBound==='1') return;
+          btn.dataset.b2FxBound = '1';
+          btn.addEventListener('click', ()=>{
+            btn.classList.remove('b2-btn-success');
+            btn.classList.add('b2-btn-loading');
+            setTimeout(()=>btn.classList.remove('b2-btn-loading'), wait);
+          }, { capture: true });
+          if(statusNodeId){
+            const statusNode = document.getElementById(statusNodeId);
+            if(!statusNode) return;
+            const obs = new MutationObserver(()=>{
+              const txt = String(statusNode.textContent || '').trim();
+              if(!txt) return;
+              btn.classList.remove('b2-btn-loading');
+              if(successMatch.test(txt)){
+                btn.classList.add('b2-btn-success');
+                setTimeout(()=>btn.classList.remove('b2-btn-success'), 900);
+              }
+            });
+            obs.observe(statusNode, { childList: true, subtree: true, characterData: true });
+          }
+        };
+
+        setup('b2SaveMatch', { statusNodeId:'b2Status', successMatch:/✅|guardado/i, wait:1400 });
+        setup('b2Simulate', { statusNodeId:'b2BrainStatus', successMatch:/✅|🧠|simulación/i, wait:1000 });
+        setup('b2PrematchGenerate', { statusNodeId:'b2PrematchOut', successMatch:/📰|<div/i, wait:1100 });
+        setup('b2PrematchRegenerate', { statusNodeId:'b2PrematchOut', successMatch:/📰|<div/i, wait:1100 });
+      };
+      bindVisualButtonFeedback();
+
+      const applyHeroReveal = (node)=>{
+        if(!node) return;
+        node.classList.remove('b2-hero-show');
+        node.classList.add('b2-hero-enter');
+        requestAnimationFrame(()=>{
+          node.classList.add('b2-hero-show');
+        });
+      };
+
       const paintBrainStatus = ()=>{
         const homeIdSel = document.getElementById('b2Home')?.value || "";
         const awayIdSel = document.getElementById('b2Away')?.value || "";
@@ -11448,6 +11512,7 @@ passes: 425"></textarea>
         if(!node) return;
         if(!homeIdSel || !awayIdSel){
           node.textContent = 'Selecciona local y visita para validar si el cerebro tiene memoria para ambos.';
+          node.classList.add('b2-status-show');
           return;
         }
         const homeName = db.teams.find((t)=>t.id===homeIdSel)?.name || 'Local';
@@ -11458,6 +11523,7 @@ passes: 425"></textarea>
         const awayState = awaySamples ? `✅ ${awayName}: ${awaySamples} partidos en memoria` : `⚠️ ${awayName}: sin memoria`;
         const ready = homeSamples > 0 && awaySamples > 0;
         node.textContent = `${homeState} · ${awayState}${ready ? ' · 🧠 Simulación usando cerebro entrenado.' : ' · 🔄 Entrena ambos equipos para una señal más confiable.'}`;
+        node.classList.add('b2-status-show');
       };
       paintBrainStatus();
 
@@ -11760,6 +11826,7 @@ passes: 425"></textarea>
         if(!out) return;
         if(!payload){
           out.style.display = 'none';
+          out.classList.remove('b2-reveal-enter','b2-reveal-show');
           out.innerHTML = '';
           return;
         }
@@ -11767,6 +11834,8 @@ passes: 425"></textarea>
         const sections = Array.isArray(editorial.sections) ? editorial.sections : [];
         const debugOn = Boolean(toggle?.checked);
         out.style.display = 'block';
+        out.classList.remove('b2-reveal-show');
+        out.classList.add('b2-reveal-enter');
         out.innerHTML = `
           <div style="font-weight:900;font-size:16px;">📰 ${editorial.headline || 'Previa editorial'}</div>
           <div class="fl-mini" style="margin-top:8px;display:grid;gap:8px;">
@@ -11777,6 +11846,7 @@ passes: 425"></textarea>
           ${renderFSIBlock(payload.insights?.fsi || null)}
           ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;
+        requestAnimationFrame(()=>out.classList.add('b2-reveal-show'));
       };
 
       const handleBrainPrematchGenerate = ()=>{
@@ -12226,6 +12296,7 @@ passes: 425"></textarea>
             <td class="mre-reading">${row.interpretation}</td>
           </tr>`;
         }).join("");
+        applyHeroReveal(out);
         out.innerHTML = `
           <div style="font-weight:800;">${homeTeam?.name || 'Local'} vs ${awayTeam?.name || 'Visita'}</div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
@@ -14334,6 +14405,7 @@ passes: 425"></textarea>
         if(!out) return;
         if(!payload){
           out.style.display = 'none';
+          out.classList.remove('b2-reveal-enter','b2-reveal-show');
           out.innerHTML = '';
           return;
         }
@@ -14341,6 +14413,8 @@ passes: 425"></textarea>
         const sections = Array.isArray(editorial.sections) ? editorial.sections : [];
         const debugOn = Boolean(toggle?.checked);
         out.style.display = 'block';
+        out.classList.remove('b2-reveal-show');
+        out.classList.add('b2-reveal-enter');
         out.innerHTML = `
           <div style="font-weight:900;font-size:16px;">📰 ${editorial.headline || 'Previa editorial'}</div>
           <div class="fl-mini" style="margin-top:8px;display:grid;gap:8px;">
