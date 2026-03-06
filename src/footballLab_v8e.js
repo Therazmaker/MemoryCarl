@@ -11650,6 +11650,60 @@ passes: 425"></textarea>
       };
 
 
+
+      const renderRQIBlock = (rqi = null)=>{
+        if(!rqi || !rqi.home || !rqi.away) return '';
+        const labels = {
+          resultStrength: 'Result strength',
+          dominance: 'Dominance',
+          fragility: 'Fragility resistance',
+          efficiencyAlert: 'Efficiency sustainability',
+          controlConviction: 'Control / conviction'
+        };
+        const leaderText = rqi.leader === 'even'
+          ? 'Racha de calidad muy similar entre ambos'
+          : `${rqi.leader === 'home' ? rqi.home.team : rqi.away.team} trae una racha más convincente`;
+        const buildBars = (label, homeValue, awayValue)=>`
+          <div class="fl-mini" style="display:grid;grid-template-columns:160px 1fr;gap:8px;align-items:center;">
+            <span>${label}</span>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+              <div style="background:rgba(31,111,235,.25);height:8px;border-radius:999px;position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:${Math.max(3, homeValue)}%;background:#1f6feb;border-radius:999px;"></span></div>
+              <div style="background:rgba(248,81,73,.25);height:8px;border-radius:999px;position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:${Math.max(3, awayValue)}%;background:#f85149;border-radius:999px;"></span></div>
+            </div>
+          </div>
+        `;
+        const lines = Object.keys(labels)
+          .map((key)=>buildBars(labels[key], Number(rqi.home.subscores?.[key]) || 0, Number(rqi.away.subscores?.[key]) || 0))
+          .join('');
+        const homeFlags = Array.isArray(rqi.home?.interpretation?.flags) ? rqi.home.interpretation.flags : [];
+        const awayFlags = Array.isArray(rqi.away?.interpretation?.flags) ? rqi.away.interpretation.flags : [];
+        const limitations = [
+          ...(Array.isArray(rqi.home?.interpretation?.limitations) ? rqi.home.interpretation.limitations : []),
+          ...(Array.isArray(rqi.away?.interpretation?.limitations) ? rqi.away.interpretation.limitations : [])
+        ].filter((v, idx, arr)=>v && arr.indexOf(v)===idx);
+        const renderFlags = (teamLabel, flags)=>{
+          if(!flags.length) return '';
+          return `<div class="fl-mini" style="margin-top:4px;"><b>${teamLabel} flags:</b> ${flags.map((f)=>`• ${f}`).join(' · ')}</div>`;
+        };
+        return `
+          <div style="margin-top:10px;padding:10px;border:1px solid rgba(99,110,123,.35);border-radius:10px;">
+            <div style="font-weight:800;">📊 Result Quality Index (N=${rqi.N || 5})</div>
+            <div class="fl-mini" style="margin-top:6px;display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:6px;">
+              <div>${rqi.home.team}: <b>${rqi.home.RQI}</b> → ${rqi.home.statusLabel || rqi.home.status}</div>
+              <div>${rqi.away.team}: <b>${rqi.away.RQI}</b> → ${rqi.away.statusLabel || rqi.away.status}</div>
+            </div>
+            <div class="fl-mini" style="margin-top:6px;">👉 ${leaderText}</div>
+            <div class="fl-mini" style="margin-top:8px;font-weight:700;">🔹 Subscores</div>
+            <div style="margin-top:6px;display:grid;gap:6px;">${lines}</div>
+            <div class="fl-mini" style="margin-top:8px;">${rqi.home.team}: ${rqi.home.interpretation?.summary || ''}</div>
+            <div class="fl-mini">${rqi.away.team}: ${rqi.away.interpretation?.summary || ''}</div>
+            ${renderFlags(rqi.home.team, homeFlags)}
+            ${renderFlags(rqi.away.team, awayFlags)}
+            ${limitations.length ? `<div class="fl-mini" style="margin-top:6px;color:#8b949e;">Limitaciones RQI: ${limitations.join(' · ')}</div>` : ''}
+          </div>
+        `;
+      };
+
       const renderFSIBlock = (fsi = null)=>{
         if(!fsi || (!fsi.home && !fsi.away)) return '';
         const renderTeam = (row)=>{
@@ -11698,6 +11752,7 @@ passes: 425"></textarea>
             ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
           </div>
           ${renderCSIBlock(payload.insights?.csi || null)}
+          ${renderRQIBlock(payload.insights?.rqi || null)}
           ${renderFSIBlock(payload.insights?.fsi || null)}
           ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;
@@ -14271,6 +14326,7 @@ passes: 425"></textarea>
             ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
           </div>
           ${renderCSIBlock(payload.insights?.csi || null)}
+          ${renderRQIBlock(payload.insights?.rqi || null)}
           ${renderFSIBlock(payload.insights?.fsi || null)}
           ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;

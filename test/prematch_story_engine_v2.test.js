@@ -108,7 +108,7 @@ test('translates MNE tags from memory reasons', ()=>{
   assert.ok(brainSection.text.includes('inconsistencia en la definición'));
 });
 
-test('collectPrematchData incluye bloque CSI', ()=>{
+test('collectPrematchData incluye bloques CSI y RQI', ()=>{
   const db = buildDb();
   const brainV2 = {
     memories: {
@@ -123,4 +123,6 @@ test('collectPrematchData incluye bloque CSI', ()=>{
   const data = collectPrematchData({ db, brainV2, homeId: 'psg', awayId: 'mon', leagueId: 'L1' });
   assert.equal(typeof data.csi?.home?.CSI, 'number');
   assert.equal(typeof data.csi?.away?.CSI, 'number');
+  assert.equal(typeof data.rqi?.home?.RQI, 'number');
+  assert.equal(typeof data.rqi?.away?.RQI, 'number');
 });

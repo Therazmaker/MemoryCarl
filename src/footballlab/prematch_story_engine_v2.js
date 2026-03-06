@@ -1,5 +1,6 @@
 import { collectMatchesForTeam } from './readiness_memory.js';
 import { buildMatchCSI } from './current_strength_index.js';
+import { buildMatchRQI } from './result_quality_index.js';
 import { buildMatchFormSurprise } from './form_surprise_index.js';
 
 const BRAIN_TAG_COPY = {
@@ -179,6 +180,14 @@ export function collectPrematchData({ db = {}, brainV2 = {}, homeId = '', awayId
     N: csiWindow
   });
 
+  const rqi = buildMatchRQI({
+    brainV2,
+    home: { id: homeId, name: homeTeam?.name || 'Local' },
+    away: { id: awayId, name: awayTeam?.name || 'Visitante' },
+    leagueId: resolvedLeagueId,
+    N: csiWindow
+  });
+
   return {
     match: {
       homeId,
@@ -212,6 +221,7 @@ export function collectPrematchData({ db = {}, brainV2 = {}, homeId = '', awayId
       awayRows: awayMemoryRows
     },
     csi,
+    rqi,
     fsi,
     context: detectCompetitiveContext({
       homeTable,
