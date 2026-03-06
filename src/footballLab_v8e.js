@@ -3263,6 +3263,155 @@ export function initFootballLab(){
       .fl-lineup-slot-tag{font-size:10px;font-weight:800;letter-spacing:.05em;color:#9ca3af;text-align:center}
       .fl-lineup-slot-select{font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #3a4a5f;background:#0d1117;color:#e8edf3}
       .context-box{border-left:4px solid #1f6feb}
+
+      /* ═══════════════════════════════════════════════════
+         BRAIN v2 · PREMIUM CARD SYSTEM
+      ═══════════════════════════════════════════════════ */
+      @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+      :root{
+        --b2-bg:#070A0F;
+        --b2-surface:#0C1017;
+        --b2-surface2:#111820;
+        --b2-surface3:#161E28;
+        --b2-border:rgba(255,255,255,0.06);
+        --b2-border2:rgba(255,255,255,0.10);
+        --b2-text:rgba(255,255,255,0.90);
+        --b2-text2:rgba(255,255,255,0.55);
+        --b2-text3:rgba(255,255,255,0.28);
+        --b2-blue:#3B82F6;
+        --b2-blue-dim:rgba(59,130,246,0.12);
+        --b2-red:#EF4444;
+        --b2-red-dim:rgba(239,68,68,0.10);
+        --b2-green:#10B981;
+        --b2-green-dim:rgba(16,185,129,0.10);
+        --b2-amber:#F59E0B;
+        --b2-amber-dim:rgba(245,158,11,0.10);
+        --b2-cyan:#06B6D4;
+        --b2-purple:#8B5CF6;
+      }
+
+      /* ── Shared premium card shell ── */
+      .b2p-card{
+        background:var(--b2-surface);
+        border:1px solid var(--b2-border);
+        border-radius:3px;
+        overflow:hidden;
+        position:relative;
+        margin-bottom:12px;
+        transition:transform .25s ease,box-shadow .25s ease;
+        font-family:'DM Sans',sans-serif;
+      }
+      .b2p-card:hover{transform:translateY(-2px);box-shadow:0 16px 48px rgba(0,0,0,.45)}
+      .b2p-accent{height:2px;width:100%}
+      .b2p-card-header{
+        display:flex;align-items:center;justify-content:space-between;
+        padding:12px 16px 10px;border-bottom:1px solid var(--b2-border);
+      }
+      .b2p-title{
+        display:flex;align-items:center;gap:8px;
+        font-family:'Bebas Neue',sans-serif;font-size:14px;
+        letter-spacing:2px;color:var(--b2-text);
+      }
+      .b2p-nbadge{
+        font-family:'JetBrains Mono',monospace;font-size:8px;
+        color:var(--b2-text3);background:var(--b2-surface3);
+        border:1px solid var(--b2-border);padding:2px 6px;border-radius:1px;letter-spacing:1px;
+      }
+      .b2p-body{padding:14px 16px}
+      .b2p-footer{
+        display:flex;justify-content:space-between;align-items:center;
+        padding:8px 16px 10px;border-top:1px solid var(--b2-border);
+      }
+      .b2p-footer-tag{font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:2px;color:var(--b2-text3)}
+      .b2p-pulse{width:5px;height:5px;border-radius:50%;animation:b2pBlink 2s ease-in-out infinite}
+      @keyframes b2pBlink{0%,100%{opacity:1}50%{opacity:.3}}
+      .b2p-insight{font-size:11.5px;color:var(--b2-text2);font-weight:300;line-height:1.65;border-top:1px solid var(--b2-border);padding-top:10px;margin-top:10px}
+      .b2p-insight strong{color:var(--b2-text);font-weight:500}
+
+      /* ── FSI ── */
+      .b2p-fsi-teams{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+      .b2p-fsi-team{padding:12px 14px;border-radius:2px;border:1px solid;position:relative;overflow:hidden}
+      .b2p-fsi-team::before{content:'';position:absolute;inset:0;opacity:.05;background:currentColor}
+      .b2p-fsi-team.neg{border-color:rgba(239,68,68,.3);color:var(--b2-red)}
+      .b2p-fsi-team.pos{border-color:rgba(16,185,129,.3);color:var(--b2-green)}
+      .b2p-fsi-name{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1.5px;color:var(--b2-text);line-height:1;margin-bottom:2px}
+      .b2p-fsi-score{font-family:'Bebas Neue',sans-serif;font-size:34px;line-height:1;text-shadow:0 0 18px currentColor}
+      .b2p-fsi-verdict{font-size:8.5px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;margin-top:4px;opacity:.85}
+      .b2p-fsi-stats{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1px;background:var(--b2-border);border:1px solid var(--b2-border);border-radius:2px;overflow:hidden;margin-bottom:12px}
+      .b2p-fsi-cell{background:var(--b2-surface2);padding:8px 10px}
+      .b2p-fsi-cell-lbl{font-size:7.5px;letter-spacing:2px;color:var(--b2-text3);text-transform:uppercase;font-family:'JetBrains Mono',monospace;margin-bottom:3px}
+      .b2p-fsi-vals{display:flex;gap:6px;align-items:baseline}
+      .b2p-fsi-va{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--b2-blue)}
+      .b2p-fsi-vb{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--b2-red)}
+
+      /* ── CSI ── */
+      .b2p-csi-scores{display:flex;align-items:center;padding:14px 16px 12px;border-bottom:1px solid var(--b2-border)}
+      .b2p-csi-block{flex:1}
+      .b2p-csi-block.right{text-align:right}
+      .b2p-csi-lbl{font-size:8px;letter-spacing:3px;text-transform:uppercase;color:var(--b2-text3);font-weight:600;margin-bottom:2px}
+      .b2p-csi-num{font-family:'Bebas Neue',sans-serif;font-size:48px;line-height:1;letter-spacing:1px}
+      .b2p-csi-num.home{color:var(--b2-blue);text-shadow:0 0 22px rgba(59,130,246,.4)}
+      .b2p-csi-num.away{color:var(--b2-red);text-shadow:0 0 22px rgba(239,68,68,.4)}
+      .b2p-csi-sub{font-size:10px;color:var(--b2-text3);font-weight:300;margin-top:1px}
+      .b2p-csi-vs{font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:4px;color:var(--b2-border2);padding:0 18px;margin-top:12px}
+      .b2p-dim-rows{padding:12px 16px;display:grid;gap:8px}
+      .b2p-dim-row{display:grid;grid-template-columns:70px 1fr 36px 1fr;align-items:center;gap:8px}
+      .b2p-dim-lbl{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--b2-text3)}
+      .b2p-dbar{position:relative;height:4px;background:rgba(255,255,255,.04);border-radius:2px;overflow:hidden}
+      .b2p-dbar-fill{position:absolute;top:0;bottom:0;border-radius:2px;transition:width .8s cubic-bezier(.4,0,.2,1)}
+      .b2p-dbar.home .b2p-dbar-fill{right:0;background:linear-gradient(270deg,var(--b2-blue),rgba(59,130,246,.3))}
+      .b2p-dbar.away .b2p-dbar-fill{left:0;background:linear-gradient(90deg,var(--b2-red),rgba(239,68,68,.3))}
+      .b2p-dbar.home.win .b2p-dbar-fill{box-shadow:0 0 6px rgba(59,130,246,.5)}
+      .b2p-dbar.away.win .b2p-dbar-fill{box-shadow:0 0 6px rgba(239,68,68,.5)}
+      .b2p-dim-mid{font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--b2-text3);text-align:center}
+
+      /* ── RQI ── */
+      .b2p-rqi-row{display:grid;grid-template-columns:1fr 1px 1fr;border-bottom:1px solid var(--b2-border)}
+      .b2p-rqi-sep{background:var(--b2-border)}
+      .b2p-rqi-team{padding:14px 16px}
+      .b2p-rqi-team.right{text-align:right}
+      .b2p-rqi-lbl{font-size:8px;letter-spacing:3px;text-transform:uppercase;color:var(--b2-text3);font-weight:600;margin-bottom:4px}
+      .b2p-rqi-num{font-family:'Bebas Neue',sans-serif;font-size:42px;line-height:1}
+      .b2p-rqi-status{display:inline-block;font-size:8.5px;letter-spacing:1.5px;font-weight:700;text-transform:uppercase;padding:3px 8px;border-radius:1px;margin-top:4px}
+      .b2p-rqi-status.strong{background:var(--b2-green-dim);color:var(--b2-green);border:1px solid rgba(16,185,129,.25)}
+      .b2p-rqi-status.average{background:var(--b2-amber-dim);color:var(--b2-amber);border:1px solid rgba(245,158,11,.25)}
+      .b2p-rqi-status.weak{background:var(--b2-red-dim);color:var(--b2-red);border:1px solid rgba(239,68,68,.25)}
+      .b2p-rqi-sum{font-size:11px;color:var(--b2-text2);margin-top:4px;font-weight:300;line-height:1.5}
+      .b2p-rqi-dim-rows{padding:12px 16px;display:grid;gap:7px}
+      .b2p-rqi-dim-row{display:grid;grid-template-columns:140px 1fr 36px 1fr;align-items:center;gap:8px}
+
+      /* ── Power Dashboard KPIs ── */
+      .b2p-kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--b2-border);border:1px solid var(--b2-border);border-radius:2px;overflow:hidden;margin-bottom:12px}
+      .b2p-kpi-cell{background:var(--b2-surface2);padding:10px 12px}
+      .b2p-kpi-lbl{font-size:7.5px;letter-spacing:2px;color:var(--b2-text3);text-transform:uppercase;font-family:'JetBrains Mono',monospace;margin-bottom:4px}
+      .b2p-kpi-val{font-family:'Bebas Neue',sans-serif;font-size:26px;line-height:1;color:var(--b2-text)}
+      .b2p-kpi-bar{height:2px;background:var(--b2-border);border-radius:1px;margin-top:5px;overflow:hidden}
+      .b2p-kpi-fill{height:100%;border-radius:1px}
+
+      /* ── Editorial headline ── */
+      .b2p-headline{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:var(--b2-text);line-height:1.25;padding:14px 16px 10px;border-bottom:1px solid var(--b2-border)}
+      .b2p-ed-sections{padding:12px 16px;display:grid;gap:10px}
+      .b2p-ed-section-title{font-size:8px;letter-spacing:3px;color:var(--b2-blue);text-transform:uppercase;font-weight:700;margin-bottom:4px}
+      .b2p-ed-text{font-size:12px;color:var(--b2-text2);font-weight:300;line-height:1.65}
+      .b2p-prob-wrap{padding:12px 16px;border-top:1px solid var(--b2-border)}
+      .b2p-prob-lbl{font-size:8px;letter-spacing:2px;color:var(--b2-text3);text-transform:uppercase;margin-bottom:7px;font-family:'JetBrains Mono',monospace}
+      .b2p-prob-track{height:7px;border-radius:2px;overflow:hidden;display:flex;gap:1px}
+      .b2p-prob-home{background:var(--b2-blue);border-radius:2px 0 0 2px}
+      .b2p-prob-draw{background:rgba(255,255,255,.14)}
+      .b2p-prob-away{background:var(--b2-red);border-radius:0 2px 2px 0}
+      .b2p-prob-labels{display:flex;justify-content:space-between;margin-top:6px}
+      .b2p-prob-item{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--b2-text3)}
+      .b2p-prob-item span{color:var(--b2-text2);font-weight:600;margin-left:4px}
+
+      /* ── Limits banner ── */
+      .b2p-limits{background:rgba(0,0,0,.2);padding:8px 16px 10px}
+      .b2p-limits-lbl{font-size:8px;letter-spacing:2px;color:var(--b2-text3);text-transform:uppercase;margin-bottom:5px;font-family:'JetBrains Mono',monospace}
+      .b2p-limits-text{font-size:10.5px;color:rgba(255,255,255,.22);font-weight:300;line-height:1.6}
+
+      /* ── Prematch wrapper ── */
+      .b2p-prematch-wrap{display:grid;gap:10px;padding:4px 0}
+
       .b2-layout{display:grid;grid-template-columns:minmax(290px,340px) minmax(560px,1fr) minmax(480px,1.15fr);grid-template-rows:auto 1fr auto;min-height:100vh;gap:14px;background:#0d0f14;padding:14px;border-radius:14px}
       .b2-topbar{grid-column:1/-1;position:sticky;top:0;z-index:5;background:#0d0f14;border:1px solid #1e2330;border-radius:12px;padding:12px;display:grid;gap:10px}
       .b2-topbar-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
@@ -11476,17 +11625,15 @@ passes: 425"></textarea>
         node.innerHTML = `
           <div style="font-size:18px;font-weight:900;">⚡ Brain v2 · Power Dashboard (${agg.panelLevel})</div>
           <div class="fl-mini" style="margin-top:4px;">N=${agg.sampleSize} · Confidence ${confidenceLabel} (${(agg.confidence*100).toFixed(0)}%)</div>
-          <div class="fl-kpi" style="margin-top:8px;">
-            <div><span class="fl-mini">Attack Power</span><b>${agg.kpis.attack.toFixed(0)}</b></div>
-            <div><span class="fl-mini">Defense Power</span><b>${agg.kpis.defense.toFixed(0)}</b></div>
-            <div><span class="fl-mini">Control Power</span><b>${agg.kpis.control.toFixed(0)}</b></div>
-            <div><span class="fl-mini">Efficiency Power</span><b>${agg.kpis.efficiency.toFixed(0)}</b></div>
-          </div>
-          <div class="fl-kpi" style="margin-top:8px;">
-            <div><span class="fl-mini">Attack Production</span><b>${agg.kpis.attackProduction.toFixed(0)}</b></div>
-            <div><span class="fl-mini">Attack Conversion</span><b>${agg.kpis.attackConversion.toFixed(0)}</b></div>
-            <div><span class="fl-mini">Setpiece Strength</span><b>${agg.kpis.setpieceStrength.toFixed(0)}</b></div>
-            <div><span class="fl-mini">Discipline</span><b>${agg.kpis.discipline.toFixed(0)}</b></div>
+          <div class="b2p-kpi-grid" style="margin-top:8px;">
+            <div class="b2p-kpi-cell"><div class="b2p-kpi-lbl">Attack Power</div><div class="b2p-kpi-val" style="color:#3B82F6;">${agg.kpis.attack.toFixed(0)}</div><div class="b2p-kpi-bar"><div class="b2p-kpi-fill" style="width:${agg.kpis.attack.toFixed(0)}%;background:#3B82F6;"></div></div></div>
+            <div class="b2p-kpi-cell"><div class="b2p-kpi-lbl">Defense Power</div><div class="b2p-kpi-val" style="color:#10B981;">${agg.kpis.defense.toFixed(0)}</div><div class="b2p-kpi-bar"><div class="b2p-kpi-fill" style="width:${agg.kpis.defense.toFixed(0)}%;background:#10B981;"></div></div></div>
+            <div class="b2p-kpi-cell"><div class="b2p-kpi-lbl">Control Power</div><div class="b2p-kpi-val" style="color:#F59E0B;">${agg.kpis.control.toFixed(0)}</div><div class="b2p-kpi-bar"><div class="b2p-kpi-fill" style="width:${agg.kpis.control.toFixed(0)}%;background:#F59E0B;"></div></div></div>
+            <div class="b2p-kpi-cell"><div class="b2p-kpi-lbl">Efficiency</div><div class="b2p-kpi-val" style="color:#8B5CF6;">${agg.kpis.efficiency.toFixed(0)}</div><div class="b2p-kpi-bar"><div class="b2p-kpi-fill" style="width:${agg.kpis.efficiency.toFixed(0)}%;background:#8B5CF6;"></div></div></div>
+            <div class="b2p-kpi-cell"><div class="b2p-kpi-lbl">Attack Prod.</div><div class="b2p-kpi-val" style="color:#06B6D4;">${agg.kpis.attackProduction.toFixed(0)}</div><div class="b2p-kpi-bar"><div class="b2p-kpi-fill" style="width:${agg.kpis.attackProduction.toFixed(0)}%;background:#06B6D4;"></div></div></div>
+            <div class="b2p-kpi-cell"><div class="b2p-kpi-lbl">Conversion</div><div class="b2p-kpi-val" style="color:#3B82F6;">${agg.kpis.attackConversion.toFixed(0)}</div><div class="b2p-kpi-bar"><div class="b2p-kpi-fill" style="width:${agg.kpis.attackConversion.toFixed(0)}%;background:#3B82F6;"></div></div></div>
+            <div class="b2p-kpi-cell"><div class="b2p-kpi-lbl">Setpiece Str.</div><div class="b2p-kpi-val" style="color:#10B981;">${agg.kpis.setpieceStrength.toFixed(0)}</div><div class="b2p-kpi-bar"><div class="b2p-kpi-fill" style="width:${agg.kpis.setpieceStrength.toFixed(0)}%;background:#10B981;"></div></div></div>
+            <div class="b2p-kpi-cell"><div class="b2p-kpi-lbl">Discipline</div><div class="b2p-kpi-val" style="color:#F59E0B;">${agg.kpis.discipline.toFixed(0)}</div><div class="b2p-kpi-bar"><div class="b2p-kpi-fill" style="width:${agg.kpis.discipline.toFixed(0)}%;background:#F59E0B;"></div></div></div>
           </div>
           <div class="fl-card" style="margin-top:8px;"><b>Team Insight</b><div class="fl-mini" style="margin-top:6px;">${insightLines.join('<br>')}</div></div>
           <div class="fl-card" style="margin-top:8px;"><b>Timeline</b><table class="fl-table" style="margin-top:6px;"><thead><tr><th>Fecha</th><th>Rival</th><th>H/A</th><th>Marcador</th><th>Outcome</th><th>Top tags</th><th>Data</th></tr></thead><tbody>${timelineRows}</tbody></table></div>
@@ -11781,34 +11928,53 @@ passes: 425"></textarea>
         const leaderText = csi.leader === 'even'
           ? 'Llegan igual de fuertes ahora'
           : `${csi.leader === 'home' ? csi.home.team : csi.away.team} llega más fuerte ahora`;
-        const buildBars = (label, homeValue, awayValue)=>`
-          <div class="fl-mini" style="display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center;">
-            <span>${label}</span>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-              <div style="background:rgba(31,111,235,.25);height:8px;border-radius:999px;position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:${Math.max(3, homeValue)}%;background:#1f6feb;border-radius:999px;"></span></div>
-              <div style="background:rgba(248,81,73,.25);height:8px;border-radius:999px;position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:${Math.max(3, awayValue)}%;background:#f85149;border-radius:999px;"></span></div>
-            </div>
-          </div>
-        `;
-        const lines = Object.keys(labels).map((key)=>buildBars(labels[key], Number(csi.home.subscores?.[key]) || 0, Number(csi.away.subscores?.[key]) || 0)).join('');
+        const buildDimRow = (label, homeValue, awayValue)=>{
+          const h = Math.max(3, Number(homeValue)||0);
+          const a = Math.max(3, Number(awayValue)||0);
+          const homeWin = h >= a ? 'win' : '';
+          const awayWin = a > h ? 'win' : '';
+          return `
+            <div class="b2p-dim-row">
+              <div class="b2p-dim-lbl">${label}</div>
+              <div class="b2p-dbar home ${homeWin}"><div class="b2p-dbar-fill" style="width:${h}%;"></div></div>
+              <div class="b2p-dim-mid">${h}·${a}</div>
+              <div class="b2p-dbar away ${awayWin}"><div class="b2p-dbar-fill" style="width:${a}%;"></div></div>
+            </div>`;
+        };
+        const lines = Object.keys(labels).map((key)=>buildDimRow(labels[key], Number(csi.home.subscores?.[key])||0, Number(csi.away.subscores?.[key])||0)).join('');
         const limitations = [
           ...(Array.isArray(csi.home?.explanation?.limitations) ? csi.home.explanation.limitations : []),
           ...(Array.isArray(csi.away?.explanation?.limitations) ? csi.away.explanation.limitations : [])
         ].filter((v, idx, arr)=>v && arr.indexOf(v)===idx);
+        const summaryText = csi.leader === 'home' ? csi.home.explanation?.summary : csi.leader === 'away' ? csi.away.explanation?.summary : 'No hay edge claro en fuerza reciente.';
         return `
-          <div style="margin-top:10px;padding:10px;border:1px solid rgba(99,110,123,.35);border-radius:10px;">
-            <div style="font-weight:800;">🔹 Current Strength (N=${csi.N || 5})</div>
-            <div class="fl-mini" style="margin-top:6px;display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:6px;">
-              <div>${csi.home.team}: <b>${csi.home.CSI}</b></div>
-              <div>${csi.away.team}: <b>${csi.away.CSI}</b></div>
+          <div class="b2p-card">
+            <div class="b2p-accent" style="background:linear-gradient(90deg,#3B82F6,#EF4444);"></div>
+            <div class="b2p-card-header">
+              <div class="b2p-title">🔹 Current Strength</div>
+              <div class="b2p-nbadge">CSI · N=${csi.N || 5}</div>
             </div>
-            <div class="fl-mini" style="margin-top:6px;">👉 ${leaderText}</div>
-            <div class="fl-mini" style="margin-top:8px;font-weight:700;">🔹 Breakdown visual</div>
-            <div style="margin-top:6px;display:grid;gap:6px;">${lines}</div>
-            <div class="fl-mini" style="margin-top:8px;">👉 ${csi.leader === 'home' ? csi.home.explanation?.summary : csi.leader === 'away' ? csi.away.explanation?.summary : 'No hay edge claro en fuerza reciente.'}</div>
-            ${limitations.length ? `<div class="fl-mini" style="margin-top:6px;color:#8b949e;">Limitaciones: ${limitations.join(' · ')}</div>` : ''}
-          </div>
-        `;
+            <div class="b2p-csi-scores">
+              <div class="b2p-csi-block">
+                <div class="b2p-csi-lbl">${csi.home.team} · Local</div>
+                <div class="b2p-csi-num home">${csi.home.CSI}</div>
+                <div class="b2p-csi-sub">${csi.leader==='home' ? leaderText : 'Sin ventaja en fuerza'}</div>
+              </div>
+              <div class="b2p-csi-vs">VS</div>
+              <div class="b2p-csi-block right">
+                <div class="b2p-csi-lbl">${csi.away.team} · Visita</div>
+                <div class="b2p-csi-num away">${csi.away.CSI}</div>
+                <div class="b2p-csi-sub">${csi.leader==='away' ? leaderText : 'Sin ventaja en fuerza'}</div>
+              </div>
+            </div>
+            <div class="b2p-dim-rows">${lines}</div>
+            ${summaryText ? `<div class="b2p-body" style="padding-top:0;"><div class="b2p-insight">${summaryText}</div></div>` : ''}
+            ${limitations.length ? `<div class="b2p-limits"><div class="b2p-limits-lbl">Limitaciones</div><div class="b2p-limits-text">${limitations.join(' · ')}</div></div>` : ''}
+            <div class="b2p-footer">
+              <span class="b2p-footer-tag">BRAIN V2 · CSI ENGINE</span>
+              <div class="b2p-pulse" style="background:#3B82F6;box-shadow:0 0 6px #3B82F6;"></div>
+            </div>
+          </div>`;
       };
 
 
@@ -11816,83 +11982,131 @@ passes: 425"></textarea>
       const renderRQIBlock = (rqi = null)=>{
         if(!rqi || !rqi.home || !rqi.away) return '';
         const labels = {
-          resultStrength: 'Result strength',
+          resultStrength: 'Result Strength',
           dominance: 'Dominance',
-          fragility: 'Fragility resistance',
-          efficiencyAlert: 'Efficiency sustainability',
-          controlConviction: 'Control / conviction'
+          fragility: 'Fragility Resistance',
+          efficiencyAlert: 'Efficiency Sust.',
+          controlConviction: 'Control / Conviction'
         };
         const leaderText = rqi.leader === 'even'
           ? 'Racha de calidad muy similar entre ambos'
           : `${rqi.leader === 'home' ? rqi.home.team : rqi.away.team} trae una racha más convincente`;
-        const buildBars = (label, homeValue, awayValue)=>`
-          <div class="fl-mini" style="display:grid;grid-template-columns:160px 1fr;gap:8px;align-items:center;">
-            <span>${label}</span>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-              <div style="background:rgba(31,111,235,.25);height:8px;border-radius:999px;position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:${Math.max(3, homeValue)}%;background:#1f6feb;border-radius:999px;"></span></div>
-              <div style="background:rgba(248,81,73,.25);height:8px;border-radius:999px;position:relative;"><span style="position:absolute;left:0;top:0;bottom:0;width:${Math.max(3, awayValue)}%;background:#f85149;border-radius:999px;"></span></div>
-            </div>
-          </div>
-        `;
-        const lines = Object.keys(labels)
-          .map((key)=>buildBars(labels[key], Number(rqi.home.subscores?.[key]) || 0, Number(rqi.away.subscores?.[key]) || 0))
-          .join('');
+        const buildDimRow = (label, homeValue, awayValue)=>{
+          const h = Math.max(3, Number(homeValue)||0);
+          const a = Math.max(3, Number(awayValue)||0);
+          const homeWin = h >= a ? 'win' : '';
+          const awayWin = a > h ? 'win' : '';
+          return `
+            <div class="b2p-rqi-dim-row">
+              <div class="b2p-dim-lbl">${label}</div>
+              <div class="b2p-dbar home ${homeWin}"><div class="b2p-dbar-fill" style="width:${h}%;"></div></div>
+              <div class="b2p-dim-mid">${h}·${a}</div>
+              <div class="b2p-dbar away ${awayWin}"><div class="b2p-dbar-fill" style="width:${a}%;"></div></div>
+            </div>`;
+        };
+        const lines = Object.keys(labels).map((key)=>buildDimRow(labels[key], Number(rqi.home.subscores?.[key])||0, Number(rqi.away.subscores?.[key])||0)).join('');
         const homeFlags = Array.isArray(rqi.home?.interpretation?.flags) ? rqi.home.interpretation.flags : [];
         const awayFlags = Array.isArray(rqi.away?.interpretation?.flags) ? rqi.away.interpretation.flags : [];
         const limitations = [
           ...(Array.isArray(rqi.home?.interpretation?.limitations) ? rqi.home.interpretation.limitations : []),
           ...(Array.isArray(rqi.away?.interpretation?.limitations) ? rqi.away.interpretation.limitations : [])
         ].filter((v, idx, arr)=>v && arr.indexOf(v)===idx);
-        const renderFlags = (teamLabel, flags)=>{
-          if(!flags.length) return '';
-          return `<div class="fl-mini" style="margin-top:4px;"><b>${teamLabel} flags:</b> ${flags.map((f)=>`• ${f}`).join(' · ')}</div>`;
+        const getStatusClass = (status)=>{
+          const s = String(status||'').toLowerCase();
+          if(s.includes('strong')||s.includes('alto')||s.includes('high')) return 'strong';
+          if(s.includes('weak')||s.includes('bajo')||s.includes('low')||s.includes('poor')) return 'weak';
+          return 'average';
         };
+        const renderFlagsHtml = (flags)=>flags.length ? `<div style="font-size:10.5px;color:rgba(255,255,255,.35);margin-top:4px;">${flags.map(f=>`· ${f}`).join(' ')}</div>` : '';
         return `
-          <div style="margin-top:10px;padding:10px;border:1px solid rgba(99,110,123,.35);border-radius:10px;">
-            <div style="font-weight:800;">📊 Result Quality Index (N=${rqi.N || 5})</div>
-            <div class="fl-mini" style="margin-top:6px;display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:6px;">
-              <div>${rqi.home.team}: <b>${rqi.home.RQI}</b> → ${rqi.home.statusLabel || rqi.home.status}</div>
-              <div>${rqi.away.team}: <b>${rqi.away.RQI}</b> → ${rqi.away.statusLabel || rqi.away.status}</div>
+          <div class="b2p-card">
+            <div class="b2p-accent" style="background:linear-gradient(90deg,#F59E0B,#06B6D4);"></div>
+            <div class="b2p-card-header">
+              <div class="b2p-title">📊 Result Quality Index</div>
+              <div class="b2p-nbadge">RQI · N=${rqi.N || 5}</div>
             </div>
-            <div class="fl-mini" style="margin-top:6px;">👉 ${leaderText}</div>
-            <div class="fl-mini" style="margin-top:8px;font-weight:700;">🔹 Subscores</div>
-            <div style="margin-top:6px;display:grid;gap:6px;">${lines}</div>
-            <div class="fl-mini" style="margin-top:8px;">${rqi.home.team}: ${rqi.home.interpretation?.summary || ''}</div>
-            <div class="fl-mini">${rqi.away.team}: ${rqi.away.interpretation?.summary || ''}</div>
-            ${renderFlags(rqi.home.team, homeFlags)}
-            ${renderFlags(rqi.away.team, awayFlags)}
-            ${limitations.length ? `<div class="fl-mini" style="margin-top:6px;color:#8b949e;">Limitaciones RQI: ${limitations.join(' · ')}</div>` : ''}
-          </div>
-        `;
+            <div class="b2p-rqi-row">
+              <div class="b2p-rqi-team">
+                <div class="b2p-rqi-lbl">${rqi.home.team} · Local</div>
+                <div class="b2p-rqi-num" style="color:#3B82F6;">${rqi.home.RQI}</div>
+                <div class="b2p-rqi-status ${getStatusClass(rqi.home.statusLabel||rqi.home.status)}">${rqi.home.statusLabel || rqi.home.status}</div>
+                <div class="b2p-rqi-sum">${rqi.home.interpretation?.summary||''}</div>
+                ${renderFlagsHtml(homeFlags)}
+              </div>
+              <div class="b2p-rqi-sep"></div>
+              <div class="b2p-rqi-team right">
+                <div class="b2p-rqi-lbl">${rqi.away.team} · Visita</div>
+                <div class="b2p-rqi-num" style="color:#EF4444;">${rqi.away.RQI}</div>
+                <div class="b2p-rqi-status ${getStatusClass(rqi.away.statusLabel||rqi.away.status)}">${rqi.away.statusLabel || rqi.away.status}</div>
+                <div class="b2p-rqi-sum">${rqi.away.interpretation?.summary||''}</div>
+                ${renderFlagsHtml(awayFlags)}
+              </div>
+            </div>
+            <div class="b2p-rqi-dim-rows">${lines}</div>
+            <div class="b2p-body" style="padding-top:0;"><div class="b2p-insight">${leaderText}</div></div>
+            ${limitations.length ? `<div class="b2p-limits"><div class="b2p-limits-lbl">Limitaciones RQI</div><div class="b2p-limits-text">${limitations.join(' · ')}</div></div>` : ''}
+            <div class="b2p-footer">
+              <span class="b2p-footer-tag">BRAIN V2 · RQI ENGINE</span>
+              <div class="b2p-pulse" style="background:#F59E0B;box-shadow:0 0 6px #F59E0B;"></div>
+            </div>
+          </div>`;
       };
 
       const renderFSIBlock = (fsi = null)=>{
         if(!fsi || (!fsi.home && !fsi.away)) return '';
-        const renderTeam = (row)=>{
+        const getFsiClass = (score)=> Number(score) >= 0 ? 'pos' : 'neg';
+        const getVerdict = (status)=>{
+          const s = String(status||'').toLowerCase();
+          if(s.includes('below')) return '⬇ ' + status;
+          if(s.includes('above')) return '⬆ ' + status;
+          return status;
+        };
+        const renderTeamBlock = (row)=>{
           if(!row) return '';
           if(!Number.isFinite(row?.FSI)){
-            return `<div style="padding:8px;border:1px dashed #30363d;border-radius:8px;"><b>${row.team}</b>: ${row?.explanation || 'Sin datos suficientes.'}</div>`;
+            return `<div class="b2p-fsi-team" style="border-color:rgba(255,255,255,.1);color:rgba(255,255,255,.4);"><div class="b2p-fsi-name">${row.team}</div><div style="font-size:11px;margin-top:4px;font-family:'DM Sans',sans-serif;font-weight:300;">${row?.explanation||'Sin datos suficientes.'}</div></div>`;
           }
           return `
-            <div style="padding:8px;border:1px solid rgba(99,110,123,.35);border-radius:8px;">
-              <div style="font-weight:700;">${row.team}</div>
-              <div class="fl-mini">Base temporada: ${row.seasonBase.ppg} ppg · GF ${row.seasonBase.gfpg} · GC ${row.seasonBase.gcpg} · DG ${row.seasonBase.dgpg}</div>
-              <div class="fl-mini">Forma reciente: ${row.recentForm.ppg} ppg · GF ${row.recentForm.gfpg} · GC ${row.recentForm.gcpg} · DG ${row.recentForm.dgpg}</div>
-              <div class="fl-mini">FSI <b>${row.FSI}</b> · <b>${row.status}</b></div>
-              <div class="fl-mini">${row.explanation || ''}</div>
-            </div>
-          `;
+            <div class="b2p-fsi-team ${getFsiClass(row.FSI)}">
+              <div class="b2p-fsi-name">${row.team}</div>
+              <div class="b2p-fsi-score">${row.FSI > 0 ? '+' : ''}${row.FSI}</div>
+              <div class="b2p-fsi-verdict">${getVerdict(row.status)}</div>
+            </div>`;
         };
+        const home = fsi.home;
+        const away = fsi.away;
+        const buildStatGrid = (h, a)=>{
+          if(!h || !a || !Number.isFinite(h.FSI) || !Number.isFinite(a.FSI)) return '';
+          return `
+            <div class="b2p-fsi-stats">
+              <div class="b2p-fsi-cell"><div class="b2p-fsi-cell-lbl">PPG</div><div class="b2p-fsi-vals"><span class="b2p-fsi-va">${h.recentForm?.ppg??'—'}</span><span class="b2p-fsi-vb">${a.recentForm?.ppg??'—'}</span></div></div>
+              <div class="b2p-fsi-cell"><div class="b2p-fsi-cell-lbl">GF/pg</div><div class="b2p-fsi-vals"><span class="b2p-fsi-va">${h.recentForm?.gfpg??'—'}</span><span class="b2p-fsi-vb">${a.recentForm?.gfpg??'—'}</span></div></div>
+              <div class="b2p-fsi-cell"><div class="b2p-fsi-cell-lbl">GC/pg</div><div class="b2p-fsi-vals"><span class="b2p-fsi-va">${h.recentForm?.gcpg??'—'}</span><span class="b2p-fsi-vb">${a.recentForm?.gcpg??'—'}</span></div></div>
+              <div class="b2p-fsi-cell"><div class="b2p-fsi-cell-lbl">DG</div><div class="b2p-fsi-vals"><span class="b2p-fsi-va">${h.recentForm?.dgpg??'—'}</span><span class="b2p-fsi-vb">${a.recentForm?.dgpg??'—'}</span></div></div>
+            </div>`;
+        };
+        const gradLeft = (home && Number.isFinite(home.FSI) && home.FSI < 0) ? '#EF4444' : '#10B981';
+        const gradRight = (away && Number.isFinite(away.FSI) && away.FSI < 0) ? '#EF4444' : '#10B981';
         return `
-          <div style="margin-top:10px;padding:10px;border:1px solid rgba(99,110,123,.35);border-radius:10px;">
-            <div style="font-weight:800;">🧭 Form Surprise Index (FSI)</div>
-            <div class="fl-mini" style="margin-top:6px;display:grid;gap:8px;">
-              ${renderTeam(fsi.home)}
-              ${renderTeam(fsi.away)}
+          <div class="b2p-card">
+            <div class="b2p-accent" style="background:linear-gradient(90deg,${gradLeft},transparent 50%,${gradRight});"></div>
+            <div class="b2p-card-header">
+              <div class="b2p-title">🧭 Form Surprise Index</div>
+              <div class="b2p-nbadge">FSI</div>
             </div>
-            <div class="fl-mini" style="margin-top:8px;">👉 ${fsi.conclusion || 'Sin conclusión.'}</div>
-          </div>
-        `;
+            <div class="b2p-body">
+              <div class="b2p-fsi-teams">
+                ${renderTeamBlock(home)}
+                ${renderTeamBlock(away)}
+              </div>
+              ${buildStatGrid(home, away)}
+              ${fsi.conclusion ? `<div class="b2p-insight">${fsi.conclusion}</div>` : ''}
+            </div>
+            <div class="b2p-footer">
+              <span class="b2p-footer-tag">BRAIN V2 · FSI ENGINE</span>
+              <div class="b2p-pulse" style="background:#10B981;box-shadow:0 0 6px #10B981;"></div>
+            </div>
+          </div>`;
       };
 
       const renderBrainPrematchPreview = (payload = null)=>{
@@ -11912,14 +12126,23 @@ passes: 425"></textarea>
         out.classList.remove('b2-reveal-show');
         out.classList.add('b2-reveal-enter');
         out.innerHTML = `
-          <div style="font-weight:900;font-size:16px;">📰 ${editorial.headline || 'Previa editorial'}</div>
-          <div class="fl-mini" style="margin-top:8px;display:grid;gap:8px;">
-            ${sections.map((section)=>`<div><b>${section.title}</b><div>${section.text}</div></div>`).join('')}
+          <div class="b2p-card" style="margin-bottom:0;">
+            <div class="b2p-accent" style="background:linear-gradient(90deg,#3B82F6,#8B5CF6,#EF4444);"></div>
+            <div class="b2p-headline">📰 ${editorial.headline || 'Previa editorial'}</div>
+            <div class="b2p-ed-sections">
+              ${sections.map((section)=>`<div><div class="b2p-ed-section-title">${section.title}</div><div class="b2p-ed-text">${section.text}</div></div>`).join('')}
+            </div>
+            <div class="b2p-footer">
+              <span class="b2p-footer-tag">BRAIN V2 · EDITORIAL ENGINE</span>
+              <div class="b2p-pulse" style="background:#8B5CF6;box-shadow:0 0 6px #8B5CF6;"></div>
+            </div>
           </div>
-          ${renderCSIBlock(payload.insights?.csi || null)}
-          ${renderRQIBlock(payload.insights?.rqi || null)}
-          ${renderFSIBlock(payload.insights?.fsi || null)}
-          ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;">Insights JSON</summary><pre class="fl-mini" style="white-space:pre-wrap;overflow:auto;max-height:280px;">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
+          <div class="b2p-prematch-wrap">
+            ${renderCSIBlock(payload.insights?.csi || null)}
+            ${renderRQIBlock(payload.insights?.rqi || null)}
+            ${renderFSIBlock(payload.insights?.fsi || null)}
+          </div>
+          ${debugOn ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,.3);">Insights JSON</summary><pre style="font-size:11px;white-space:pre-wrap;overflow:auto;max-height:280px;color:rgba(255,255,255,.4);">${JSON.stringify(payload.insights || {}, null, 2)}</pre></details>` : ''}
         `;
         requestAnimationFrame(()=>out.classList.add('b2-reveal-show'));
       };
