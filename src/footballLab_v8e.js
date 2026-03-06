@@ -3263,7 +3263,7 @@ export function initFootballLab(){
       .fl-lineup-slot-tag{font-size:10px;font-weight:800;letter-spacing:.05em;color:#9ca3af;text-align:center}
       .fl-lineup-slot-select{font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #3a4a5f;background:#0d1117;color:#e8edf3}
       .context-box{border-left:4px solid #1f6feb}
-      .b2-layout{display:grid;grid-template-columns:minmax(320px,360px) minmax(620px,1fr) minmax(360px,430px);grid-template-rows:auto 1fr auto;min-height:100vh;gap:12px;background:#0d0f14;padding:12px;border-radius:14px}
+      .b2-layout{display:grid;grid-template-columns:340px 1fr 400px;grid-template-rows:auto 1fr auto;min-height:100vh;gap:14px;background:#0d0f14;padding:14px;border-radius:14px}
       .b2-topbar{grid-column:1/-1;position:sticky;top:0;z-index:5;background:#0d0f14;border:1px solid #1e2330;border-radius:12px;padding:12px;display:grid;gap:10px}
       .b2-topbar-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
       .b2-brand{font-size:20px;font-weight:900;letter-spacing:.02em}
@@ -3273,7 +3273,7 @@ export function initFootballLab(){
       .b2-health{border-radius:10px;padding:8px 10px;font-size:12px;font-weight:800;letter-spacing:.08em;display:flex;align-items:center;justify-content:center}
       .b2-health.active{background:rgba(34,211,163,.16);border:1px solid rgba(34,211,163,.4);color:#22d3a3;animation:b2Pulse 2s ease-in-out infinite}
       .b2-health.warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);color:#f59e0b}
-      .b2-col-a{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c{grid-column:3}.b2-output-wide{grid-column:1/-1}.b2-bottom{grid-column:1/-1}
+      .b2-col-a{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c{grid-column:3}.b2-bottom{grid-column:1/-1}
       .b2-card{background:#151820;border:1px solid #1e2330;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.3)}
       .b2-card-header{padding:10px 12px;border-bottom:1px solid #1e2330;font-size:12px;font-weight:800;letter-spacing:.08em;color:#8892a0}
       .b2-card-body{padding:12px}
@@ -3295,14 +3295,6 @@ export function initFootballLab(){
       .b2-score-chip.loss{color:#ef4444;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.12)}
       .b2-score-chip.draw{color:#9ca3af;border-color:#3b4252;background:rgba(148,163,184,.08)}
       .b2-vision-card{background:#151820;border:1px solid #1e2330;border-radius:12px;padding:12px}
-      .b2-output-wide .b2-vision-card{min-height:46vh}
-      .b2-output-wide #b2Vision{font-size:13px;line-height:1.5}
-      .b2-output-wide #b2Vision .fl-card{background:#111722!important;border:1px solid #1e2330!important;color:#dbe3ec}
-      .b2-output-wide #b2Vision .fl-mini{color:#9fb0c3!important}
-      .b2-output-wide #b2Vision table,.b2-output-wide #b2Vision th,.b2-output-wide #b2Vision td{border-color:#1e2330!important;background:transparent;color:#dbe3ec}
-      .b2-output-wide #b2Vision .fl-btn:hover{background:#1a2130}
-      .b2-layout *, .b2-layout *::before, .b2-layout *::after{animation:none!important;transition:none!important}
-
       .b2-vision-card.b2-hero-show{border:2px solid #22d3a3}
       .b2-hero-enter{opacity:0;transform:translateY(8px) scale(.98);transition:all .4s ease}
       .b2-hero-show{opacity:1;transform:translateY(0) scale(1)}
@@ -3319,9 +3311,8 @@ export function initFootballLab(){
       @keyframes b2Spin{to{transform:rotate(360deg)}}
       @keyframes b2Fade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
       @keyframes b2Pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,211,163,.18)}50%{box-shadow:0 0 0 6px rgba(34,211,163,0)}}
-      @media (max-width:1439px){.b2-layout{grid-template-columns:320px minmax(520px,1fr) 370px}}
-      @media (max-width:1279px){.b2-layout{grid-template-columns:minmax(360px,1fr) minmax(420px,1fr)}.b2-col-a{grid-column:1}.b2-col-c{grid-column:1}.b2-col-b{grid-column:2}.b2-output-wide{grid-column:1/-1}.b2-col-c-sticky,.b2-sticky-panel{position:static}}
-      @media (max-width:767px){.fl-wrap-brainv2{max-width:100%;padding:0 4px}.b2-layout{grid-template-columns:1fr;padding:10px}.b2-col-a,.b2-col-b,.b2-col-c,.b2-output-wide,.b2-bottom,.b2-topbar{grid-column:1}.b2-kpi-strip{grid-template-columns:repeat(2,minmax(120px,1fr))}}
+      @media (max-width:1279px){.b2-layout{grid-template-columns:minmax(320px,1fr) minmax(320px,1fr)}.b2-col-a{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c{grid-column:1}.b2-col-c-sticky,.b2-sticky-panel{position:static}}
+      @media (max-width:767px){.b2-layout{grid-template-columns:1fr;padding:10px}.b2-col-a,.b2-col-b,.b2-col-c,.b2-bottom,.b2-topbar{grid-column:1}.b2-kpi-strip{grid-template-columns:repeat(2,minmax(120px,1fr))}}
       
     `;
     document.head.appendChild(style);
@@ -11269,6 +11260,7 @@ passes: 425"></textarea>
               <div id="b2BrainStatus" class="fl-mini" style="margin-top:8px;"></div>
             </div>
             </div>
+            <div id="b2Vision" class="fl-mini b2-vision-card" style="margin-top:10px;">Carga local/visita para ver la simulación visual.</div>
             <div id="b2PrematchOut" class="fl-card" style="margin-top:8px;padding:10px;display:none;"></div>
           </div>
 
