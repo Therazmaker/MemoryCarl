@@ -3193,6 +3193,7 @@ export function initFootballLab(){
     style.id = "fl-clean-styles";
     style.textContent = `
       .fl-wrap{max-width:1100px;margin:18px auto;padding:0 12px;color:#e8edf3;font-family:Inter,system-ui,sans-serif}
+      .fl-wrap-brainv2{max-width:min(1820px,calc(100vw - 24px));margin:10px auto 18px;padding:0 6px}
       .fl-card{background:#161b22;border:1px solid #2d333b;border-radius:14px;padding:14px;margin-bottom:12px}
       .fl-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
       .fl-grid{display:grid;gap:10px}
@@ -9455,9 +9456,10 @@ function computeTeamIntelligencePanel(db, teamId){
 
     const tabs = ["home","liga","tracker","versus","brainv2","momentum","bitacora","market"];
     const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
+    const wrapClass = view === "brainv2" ? "fl-wrap fl-wrap-brainv2" : "fl-wrap";
 
     app.innerHTML = `
-      <div class="fl-wrap">
+      <div class="${wrapClass}">
         <div class="fl-row fl-card">
           <div class="fl-title">⚽ Football Lab limpio</div>
           ${nav}
