@@ -3263,54 +3263,6 @@ export function initFootballLab(){
       .fl-lineup-slot-select{font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #3a4a5f;background:#0d1117;color:#e8edf3}
       .context-box{border-left:4px solid #1f6feb}
       .b2-layout{display:grid;grid-template-columns:340px 1fr 400px;grid-template-rows:auto 1fr auto;min-height:100vh}
-      .b2-layout{background:var(--b2-bg-base);gap:12px;padding:12px;color:var(--b2-text-primary)}
-      .b2-layout{--b2-bg-base:#0d0f14;--b2-bg-surface:#151820;--b2-border:#1e2330;--b2-text-primary:#f0f0f0;--b2-text-secondary:#8892a0;--b2-accent-blue:#60a5fa;--b2-accent-green:#22d3a3;--b2-accent-amber:#f59e0b;--b2-accent-red:#ef4444;--b2-space:12px;--b2-radius:12px}
-      .b2-topbar,.b2-bottom{grid-column:1 / -1}
-      .b2-col-a{grid-column:1}
-      .b2-col-b{grid-column:2;min-width:0}
-      .b2-col-c{grid-column:3}
-      .b2-card{background:var(--b2-bg-surface);border:1px solid var(--b2-border);border-radius:var(--b2-radius);margin-bottom:var(--b2-space)}
-      .b2-card-header{padding:10px 12px;border-bottom:1px solid var(--b2-border);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--b2-text-secondary);font-weight:700}
-      .b2-card-body{padding:12px}
-      .b2-topbar .b2-card{margin-bottom:10px}
-      .b2-topbar-title{font-size:20px;font-weight:900}
-      .b2-topbar-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
-      .b2-kpi-value{font-size:26px;font-weight:900;line-height:1.1}
-      .b2-kpi-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--b2-text-secondary)}
-      .b2-priority-high{border-color:#27466c}
-      .b2-priority-medium{border-color:#24473f}
-      .b2-priority-low{border-color:#4d3b1b}
-      .b2-col-a .fl-input,.b2-col-a .fl-select,.b2-col-a .fl-text,.b2-col-a .fl-btn{border-radius:8px}
-      .b2-col-a .fl-input,.b2-col-a .fl-select,.b2-col-a .fl-text{border-color:var(--b2-border);background:var(--b2-bg-base);color:var(--b2-text-primary);padding:9px 10px}
-      .b2-col-a .fl-input:focus,.b2-col-a .fl-select:focus,.b2-col-a .fl-text:focus{outline:2px solid #22303f;outline-offset:1px}
-      .b2-col-b .fl-table{border-collapse:separate;border-spacing:0 6px}
-      .b2-col-b .fl-table thead th{color:var(--b2-text-secondary);font-size:11px;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--b2-border)}
-      .b2-col-b .fl-table tbody tr{background:#121722}
-      .b2-col-b .fl-table tbody td{border-top:1px solid var(--b2-border);border-bottom:1px solid var(--b2-border);padding:8px}
-      .b2-col-b .fl-table tbody td:first-child{border-left:1px solid var(--b2-border);border-top-left-radius:8px;border-bottom-left-radius:8px}
-      .b2-col-b .fl-table tbody td:last-child{border-right:1px solid var(--b2-border);border-top-right-radius:8px;border-bottom-right-radius:8px}
-      .b2-col-b .fl-btn.ghost{border-color:var(--b2-border);background:#0f141d}
-      .b2-col-c #b2Vision,.b2-col-c #b2PrematchOut{background:var(--b2-bg-surface);border:1px solid var(--b2-border);border-radius:var(--b2-radius);padding:10px}
-      .b2-bottom #b2HybridLogs{color:var(--b2-text-secondary)}
-      .b2-topbar .b2-kpi-value{transition:color .2s ease-out}
-      .b2-col-b .fl-table tbody tr{transition:background-color .15s ease-out}
-      .b2-col-b .fl-table tbody tr:hover{background:#1a2230}
-      .b2-col-b .fl-table tbody td:last-child > div{opacity:.62;transition:opacity .15s ease-out}
-      .b2-col-b .fl-table tbody tr:hover td:last-child > div{opacity:1}
-      .b2-btn-loading{opacity:.82;pointer-events:none}
-      .b2-btn-loading::after{content:"";display:inline-block;width:12px;height:12px;margin-left:6px;border-radius:999px;border:2px solid rgba(240,240,240,.35);border-top-color:#f0f0f0;animation:b2Spin .7s linear infinite;vertical-align:middle}
-      .b2-btn-success{box-shadow:0 0 0 1px rgba(34,211,163,.55) inset}
-      #b2BrainStatus{opacity:0;transform:translateY(4px);transition:opacity .2s ease-out,transform .2s ease-out}
-      #b2BrainStatus.b2-status-show{opacity:1;transform:translateY(0)}
-      #b2Vision{opacity:1;transition:opacity .22s ease-out,transform .22s ease-out}
-      #b2Vision.b2-hero-enter{opacity:0;transform:translateY(8px) scale(.995)}
-      #b2Vision.b2-hero-show{opacity:1;transform:translateY(0) scale(1)}
-      #b2PrematchOut{opacity:1;transition:opacity .22s ease-out,transform .22s ease-out}
-      #b2PrematchOut.b2-reveal-enter{opacity:0;transform:translateY(6px)}
-      #b2PrematchOut.b2-reveal-show{opacity:1;transform:translateY(0)}
-      #b2ImpactTablesWrap.b2-collapse{display:block !important;max-height:0;opacity:0;overflow:hidden;transition:max-height .25s ease-in-out,opacity .2s ease-out}
-      #b2ImpactTablesWrap.b2-collapse.is-open{max-height:420px;opacity:1}
-      @keyframes b2Spin{to{transform:rotate(360deg)}}
     `;
     document.head.appendChild(style);
   }
@@ -11160,132 +11112,114 @@ function computeTeamIntelligencePanel(db, teamId){
       content.innerHTML = `
         <div class="b2-layout">
           <div class="b2-topbar">
-            <div class="b2-card">
-              <div class="b2-card-body">
-                <div class="b2-topbar-title">🧠 Brain v2 · Entrenamiento incremental</div>
-                <div class="fl-muted" style="margin-top:4px;">Guarda partidos por equipo (stats + relato) para construir memoria y preparar datasets TensorFlow.</div>
+            <div class="fl-card">
+              <div style="font-size:20px;font-weight:900;">🧠 Brain v2 · Entrenamiento incremental</div>
+              <div class="fl-muted" style="margin-top:4px;">Guarda partidos por equipo (stats + relato) para construir memoria y preparar datasets TensorFlow.</div>
+            </div>
+            <div class="fl-card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+              <div>
+                <div class="fl-mini">Team learned</div>
+                <div style="font-size:26px;font-weight:900;">${health.teamsLearned}</div>
+              </div>
+              <div>
+                <div class="fl-mini">Matches learned</div>
+                <div style="font-size:26px;font-weight:900;">${health.matchesLearned}</div>
+              </div>
+              <div>
+                <div class="fl-mini">Confianza</div>
+                <div style="font-size:26px;font-weight:900;">${(health.confidence * 100).toFixed(0)}%</div>
+              </div>
+              <div>
+                <div class="fl-mini">Cobertura stats / relato</div>
+                <div style="font-size:18px;font-weight:800;">${(health.statsCoverage * 100).toFixed(0)}% / ${(health.narrativeCoverage * 100).toFixed(0)}%</div>
               </div>
             </div>
-            <div class="b2-card">
-              <div class="b2-card-body b2-topbar-kpis">
-                <div>
-                  <div class="b2-kpi-label">Team learned</div>
-                  <div class="b2-kpi-value" data-b2-counter data-b2-value="${health.teamsLearned}">${health.teamsLearned}</div>
-                </div>
-                <div>
-                  <div class="b2-kpi-label">Matches learned</div>
-                  <div class="b2-kpi-value" data-b2-counter data-b2-value="${health.matchesLearned}">${health.matchesLearned}</div>
-                </div>
-                <div>
-                  <div class="b2-kpi-label">Confianza</div>
-                  <div class="b2-kpi-value" data-b2-counter data-b2-value="${(health.confidence * 100).toFixed(0)}" data-b2-suffix="%">${(health.confidence * 100).toFixed(0)}%</div>
-                </div>
-                <div>
-                  <div class="b2-kpi-label">Cobertura stats / relato</div>
-                  <div style="font-size:18px;font-weight:800;">${(health.statsCoverage * 100).toFixed(0)}% / ${(health.narrativeCoverage * 100).toFixed(0)}%</div>
-                </div>
-              </div>
-            </div>
-            <div class="b2-card">
-              <div class="b2-card-body"><div class="fl-mini">${selectedTeamBadge}</div></div>
-            </div>
+            <div class="fl-card"><div class="fl-mini">${selectedTeamBadge}</div></div>
           </div>
 
           <div class="b2-col-a">
-            <div class="b2-card b2-priority-medium">
-              <div class="b2-card-header">Captura de partido</div>
-              <div class="b2-card-body">
-                <div class="fl-grid two">
-                  <div>
-                    <label class="fl-muted">Liga</label>
-                    <select id="b2League" class="fl-select"><option value="">Todas</option>${leagueOptions}</select>
-                  </div>
-                  <div>
-                    <label class="fl-muted">Equipo</label>
-                    <select id="b2Team" class="fl-select"><option value="">Selecciona equipo</option>${teamOptions}</select>
-                  </div>
+            <div class="fl-card">
+              <div class="fl-grid two">
+                <div>
+                  <label class="fl-muted">Liga</label>
+                  <select id="b2League" class="fl-select"><option value="">Todas</option>${leagueOptions}</select>
                 </div>
-                <div class="fl-grid two" style="margin-top:10px;">
-                  <input id="b2Date" type="date" class="fl-input" value="${new Date().toISOString().slice(0,10)}" />
-                  <input id="b2Opponent" class="fl-input" placeholder="Rival" />
+                <div>
+                  <label class="fl-muted">Equipo</label>
+                  <select id="b2Team" class="fl-select"><option value="">Selecciona equipo</option>${teamOptions}</select>
                 </div>
-                <input id="b2Score" class="fl-input" style="margin-top:8px;" placeholder="Marcador (ej: 2-1)" />
-                <textarea id="b2Stats" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="xg: 1.8
+              </div>
+              <div class="fl-grid two" style="margin-top:10px;">
+                <input id="b2Date" type="date" class="fl-input" value="${new Date().toISOString().slice(0,10)}" />
+                <input id="b2Opponent" class="fl-input" placeholder="Rival" />
+              </div>
+              <input id="b2Score" class="fl-input" style="margin-top:8px;" placeholder="Marcador (ej: 2-1)" />
+              <textarea id="b2Stats" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="xg: 1.8
 shots: 13
 possession: 57
 passes: 425"></textarea>
-                <textarea id="b2Narrative" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="Relato del partido: ritmo, lesiones, presión, cambios..."></textarea>
-                <div class="fl-field" style="margin-top:8px;">
-                  <label>Composición (XI del día)</label>
-                  <div class="fl-row">
-                    <input id="b2Lineup" class="fl-input" style="flex:1;min-width:240px;" placeholder="XI del día (coma separado)" />
-                    <button class="fl-btn secondary" id="b2OpenLineupComposer" type="button">Abrir pizarra</button>
-                  </div>
-                  <input id="b2LineupShape" type="hidden" value="" />
+              <textarea id="b2Narrative" class="fl-text" style="margin-top:8px;min-height:90px;" placeholder="Relato del partido: ritmo, lesiones, presión, cambios..."></textarea>
+              <div class="fl-field" style="margin-top:8px;">
+                <label>Composición (XI del día)</label>
+                <div class="fl-row">
+                  <input id="b2Lineup" class="fl-input" style="flex:1;min-width:240px;" placeholder="XI del día (coma separado)" />
+                  <button class="fl-btn secondary" id="b2OpenLineupComposer" type="button">Abrir pizarra</button>
                 </div>
-                <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
-                  <button class="fl-btn secondary" id="b2ImportMatchpack" type="button">Importar JSON</button>
-                  <input id="b2ImportMatchpackFile" type="file" accept="application/json,.json" style="display:none;" />
-                  <span id="b2ImportStatus" class="fl-mini"></span>
-                </div>
-                <div class="fl-row" style="margin-top:8px;">
-                  <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
-                  <span id="b2Status" class="fl-muted"></span>
-                </div>
+                <input id="b2LineupShape" type="hidden" value="" />
+              </div>
+              <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+                <button class="fl-btn secondary" id="b2ImportMatchpack" type="button">Importar JSON</button>
+                <input id="b2ImportMatchpackFile" type="file" accept="application/json,.json" style="display:none;" />
+                <span id="b2ImportStatus" class="fl-mini"></span>
+              </div>
+              <div class="fl-row" style="margin-top:8px;">
+                <button class="fl-btn" id="b2SaveMatch">Guardar partido en memoria</button>
+                <span id="b2Status" class="fl-muted"></span>
               </div>
             </div>
           </div>
 
           <div class="b2-col-b">
-            <div class="b2-card b2-priority-medium">
-              <div class="b2-card-header">Memoria del equipo</div>
-              <div class="b2-card-body">
-                <div class="fl-mini" style="margin-top:4px;">Partidos indexados (teamProfiles): <b>${indexedCount}</b></div>
-                <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Relato</th><th>Acciones</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="5" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
-              </div>
+            <div class="fl-card">
+              <div class="fl-mini" style="margin-top:4px;">Partidos indexados (teamProfiles): <b>${indexedCount}</b></div>
+              <table class="fl-table" style="margin-top:10px;"><thead><tr><th>Fecha</th><th>Rival</th><th>Resultado</th><th>Relato</th><th>Acciones</th></tr></thead><tbody>${memoryRows || '<tr><td colspan="5" class="fl-muted">Sin partidos guardados.</td></tr>'}</tbody></table>
             </div>
-            <div id="b2PowerDashboard" class="b2-card b2-priority-low" style="margin-top:10px;display:none;"></div>
-            <div id="b2GlobalLearningPanel" class="b2-card b2-priority-low"></div>
+            <div id="b2PowerDashboard" class="fl-card" style="margin-top:10px;display:none;"></div>
+            <div id="b2GlobalLearningPanel" class="fl-card"></div>
           </div>
 
           <div class="b2-col-c">
-            <div class="b2-card b2-priority-high">
-              <div class="b2-card-header">Simulación y salida</div>
-              <div class="b2-card-body">
-                <div style="font-size:18px;font-weight:800;">🎯 Simulador visual Local vs Visita</div>
-                <div class="fl-grid two" style="margin-top:8px;">
-                  <select id="b2Home" class="fl-select"><option value="">Equipo local</option>${teamOptionFull(homeId)}</select>
-                  <select id="b2Away" class="fl-select"><option value="">Equipo visita</option>${teamOptionFull(awayId)}</select>
-                </div>
-                <div class="fl-row" style="margin-top:8px;">
-                  <input id="b2OddH" class="fl-input" type="number" step="0.01" placeholder="Cuota Local" style="max-width:150px;" />
-                  <input id="b2OddD" class="fl-input" type="number" step="0.01" placeholder="Cuota Empate" style="max-width:150px;" />
-                  <input id="b2OddA" class="fl-input" type="number" step="0.01" placeholder="Cuota Visita" style="max-width:150px;" />
-                  <button class="fl-btn" id="b2Simulate">Simular visión</button>
-                </div>
-                <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
-                  <button class="fl-btn" id="b2PrematchGenerate">Generar previa editorial</button>
-                  <button class="fl-btn" id="b2PrematchRegenerate">Regenerar</button>
-                  <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="b2PrematchDebugToggle" /> Ver insights JSON</label>
-                </div>
-                <div id="b2BrainStatus" class="fl-mini" style="margin-top:8px;"></div>
+            <div class="fl-card">
+              <div style="font-size:18px;font-weight:800;">🎯 Simulador visual Local vs Visita</div>
+              <div class="fl-grid two" style="margin-top:8px;">
+                <select id="b2Home" class="fl-select"><option value="">Equipo local</option>${teamOptionFull(homeId)}</select>
+                <select id="b2Away" class="fl-select"><option value="">Equipo visita</option>${teamOptionFull(awayId)}</select>
               </div>
+              <div class="fl-row" style="margin-top:8px;">
+                <input id="b2OddH" class="fl-input" type="number" step="0.01" placeholder="Cuota Local" style="max-width:150px;" />
+                <input id="b2OddD" class="fl-input" type="number" step="0.01" placeholder="Cuota Empate" style="max-width:150px;" />
+                <input id="b2OddA" class="fl-input" type="number" step="0.01" placeholder="Cuota Visita" style="max-width:150px;" />
+                <button class="fl-btn" id="b2Simulate">Simular visión</button>
+              </div>
+              <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+                <button class="fl-btn" id="b2PrematchGenerate">Generar previa editorial</button>
+                <button class="fl-btn" id="b2PrematchRegenerate">Regenerar</button>
+                <label class="fl-mini" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="b2PrematchDebugToggle" /> Ver insights JSON</label>
+              </div>
+              <div id="b2BrainStatus" class="fl-mini" style="margin-top:8px;"></div>
             </div>
             <div id="b2Vision" class="fl-mini" style="margin-top:10px;">Carga local/visita para ver la simulación visual.</div>
             <div id="b2PrematchOut" class="fl-card" style="margin-top:8px;padding:10px;display:none;"></div>
           </div>
 
           <div class="b2-bottom">
-            <div class="b2-card b2-priority-low">
-              <div class="b2-card-header">Hybrid tools</div>
-              <div class="b2-card-body">
-                <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
-                  <button class="fl-btn secondary" id="b2HybridSync">Sincronizar dataset híbrido</button>
-                  <button class="fl-btn secondary" id="b2HybridEvaluate">Evaluate</button>
-                  <button class="fl-btn secondary" id="b2HybridVisionPreview">Preview Vision</button>
-                </div>
-                <div id="b2HybridLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Hybrid tools listos.</div>
+            <div class="fl-card">
+              <div class="fl-row" style="margin-top:8px;gap:8px;flex-wrap:wrap;">
+                <button class="fl-btn secondary" id="b2HybridSync">Sincronizar dataset híbrido</button>
+                <button class="fl-btn secondary" id="b2HybridEvaluate">Evaluate</button>
+                <button class="fl-btn secondary" id="b2HybridVisionPreview">Preview Vision</button>
               </div>
+              <div id="b2HybridLogs" class="fl-mini" style="margin-top:8px;white-space:pre-wrap;line-height:1.5;">Hybrid tools listos.</div>
             </div>
           </div>
         </div>
