@@ -3263,7 +3263,7 @@ export function initFootballLab(){
       .fl-lineup-slot-tag{font-size:10px;font-weight:800;letter-spacing:.05em;color:#9ca3af;text-align:center}
       .fl-lineup-slot-select{font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #3a4a5f;background:#0d1117;color:#e8edf3}
       .context-box{border-left:4px solid #1f6feb}
-      .b2-layout{display:grid;grid-template-columns:minmax(320px,360px) minmax(620px,1fr) minmax(360px,430px);grid-template-rows:auto 1fr auto;min-height:100vh;gap:12px;background:#0d0f14;padding:12px;border-radius:14px}
+      .b2-layout{display:grid;grid-template-columns:340px 1fr 400px;grid-template-rows:auto 1fr auto;min-height:100vh;gap:14px;background:#0d0f14;padding:14px;border-radius:14px}
       .b2-topbar{grid-column:1/-1;position:sticky;top:0;z-index:5;background:#0d0f14;border:1px solid #1e2330;border-radius:12px;padding:12px;display:grid;gap:10px}
       .b2-topbar-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
       .b2-brand{font-size:20px;font-weight:900;letter-spacing:.02em}
@@ -3311,9 +3311,8 @@ export function initFootballLab(){
       @keyframes b2Spin{to{transform:rotate(360deg)}}
       @keyframes b2Fade{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
       @keyframes b2Pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,211,163,.18)}50%{box-shadow:0 0 0 6px rgba(34,211,163,0)}}
-      @media (max-width:1439px){.b2-layout{grid-template-columns:320px minmax(520px,1fr) 370px}}
-      @media (max-width:1279px){.b2-layout{grid-template-columns:minmax(360px,1fr) minmax(420px,1fr)}.b2-col-a{grid-column:1}.b2-col-c{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c-sticky,.b2-sticky-panel{position:static}}
-      @media (max-width:767px){.fl-wrap-brainv2{max-width:100%;padding:0 4px}.b2-layout{grid-template-columns:1fr;padding:10px}.b2-col-a,.b2-col-b,.b2-col-c,.b2-bottom,.b2-topbar{grid-column:1}.b2-kpi-strip{grid-template-columns:repeat(2,minmax(120px,1fr))}}
+      @media (max-width:1279px){.b2-layout{grid-template-columns:minmax(320px,1fr) minmax(320px,1fr)}.b2-col-a{grid-column:1}.b2-col-b{grid-column:2}.b2-col-c{grid-column:1}.b2-col-c-sticky,.b2-sticky-panel{position:static}}
+      @media (max-width:767px){.b2-layout{grid-template-columns:1fr;padding:10px}.b2-col-a,.b2-col-b,.b2-col-c,.b2-bottom,.b2-topbar{grid-column:1}.b2-kpi-strip{grid-template-columns:repeat(2,minmax(120px,1fr))}}
       
     `;
     document.head.appendChild(style);
