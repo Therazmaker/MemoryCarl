@@ -14730,37 +14730,59 @@ function computeTeamIntelligencePanel(db, teamId){
 
             <!-- Heurísticas activas del cerebro -->
             ${(brainV2.mne?.claudeExchange?.candidateRules||[]).length ? `
-            <div style="margin-top:10px;background:#0a0e15;border:1px solid rgba(99,102,241,.25);border-radius:8px;padding:10px;">
-              <div style="font-size:10px;font-weight:700;color:#818cf8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;">🧠 Reglas aprendidas del feedback — activas en esta predicción</div>
-              ${(brainV2.mne.claudeExchange.candidateRules||[]).map(rule=>`
-                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px;gap:8px;">
+            <div style="margin-top:10px;background:#0a0e15;border:1px solid rgba(99,102,241,.3);border-radius:10px;padding:14px;">
+              <div style="font-size:10px;font-weight:700;color:#818cf8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px;">🧠 Reglas aprendidas — activas en esta predicción</div>
+              <div style="display:grid;gap:6px;">
+              ${(brainV2.mne.claudeExchange.candidateRules||[]).map(rule=>{
+                const conf = Math.round(Number(rule.confidence||0)*100);
+                const confColor = conf>=70?'#3fb950':conf>=50?'#e3b341':'#8b949e';
+                const RULE_NAMES = {
+                  'reduce_finishing_failure_when_scoring_enough': 'Ignorar fallo de definición si el dominante ya marcó',
+                  'boost_game_state_control': 'Reforzar control del ritmo tras tomar ventaja',
+                  'form_trend_override': 'La forma reciente pesa más que el promedio histórico',
+                  'bilateral_finishing_failure': 'Ambos equipos desperdician → empate más probable',
+                  'draw_boost_fatigue_bilateral': 'Fatiga bilateral → partido plano, empate probable',
+                  'discipline_cost_draw_boost': 'Tarjetas o tensión → mayor chance de empate',
+                  'possession_sterility': 'Posesión sin gol → lectura de ventaja ajustada',
+                  'counter_strike_efficiency': 'Contraataque efectivo → peligro visitante elevado',
+                  'late_pressure_collapse': 'Presión tardía sin gol → riesgo de contragolpe',
+                  'home_form_inflation': 'Victorias locales solo ante débiles → ventaja inflada',
+                };
+                const name = RULE_NAMES[rule.id] || (rule.name||rule.id||'Regla').replace(/_/g,' ');
+                return `<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:9px 12px;background:#0d1117;border:1px solid #1e2535;border-radius:8px;">
                   <div>
-                    <span style="font-size:10px;font-weight:700;color:#c9d1d9;">${(rule.id||'').replace(/_/g,' ')}</span>
-                    <div style="font-size:9px;color:#6e7681;">${rule.action||rule.effect||rule.description||''}</div>
+                    <div style="font-size:11px;font-weight:700;color:#e6edf3;">${name}</div>
+                    ${rule.action||rule.description?`<div style="font-size:10px;color:#6e7681;margin-top:3px;line-height:1.4;">${rule.action||rule.description}</div>`:''}
                   </div>
-                  <span style="font-size:10px;font-weight:700;color:${Number(rule.confidence||0)>=0.7?'#3fb950':Number(rule.confidence||0)>=0.5?'#e3b341':'#8b949e'};white-space:nowrap;">${Math.round(Number(rule.confidence||0)*100)}%</span>
-                </div>
-              `).join('')}
+                  <div style="text-align:center;min-width:48px;">
+                    <div style="font-size:15px;font-weight:900;color:${confColor};">${conf}%</div>
+                    <div style="margin-top:3px;height:3px;width:100%;background:#21262d;border-radius:2px;overflow:hidden;">
+                      <div style="width:${conf}%;height:100%;background:${confColor};border-radius:2px;"></div>
+                    </div>
+                  </div>
+                </div>`;
+              }).join('')}
+              </div>
             </div>` : ''}
           </div>
-          <div class="fl-card" style="margin-top:10px;padding:10px;">
-            <div style="font-weight:800;">🧩 MNE ↔ Claude Offline Learning</div>
-            <div class="fl-row" style="margin-top:8px;gap:8px;align-items:center;flex-wrap:wrap;">
-              <button class="fl-btn" id="mneClaudeExportBtn">Export for Claude</button>
-              <label class="fl-btn" for="mneClaudeFileInput" style="cursor:pointer;">Import Claude Feedback</label>
+          <div class="fl-card" style="margin-top:10px;padding:14px;">
+            <div style="font-size:11px;font-weight:800;color:#e6edf3;margin-bottom:10px;">📤 Aprendizaje offline con Claude</div>
+            <div class="fl-row" style="gap:8px;align-items:center;flex-wrap:wrap;">
+              <button class="fl-btn" id="mneClaudeExportBtn">⬇️ Exportar partido</button>
+              <label class="fl-btn" for="mneClaudeFileInput" style="cursor:pointer;">⬆️ Importar feedback</label>
               <input type="file" id="mneClaudeFileInput" accept="application/json" style="display:none;" />
               <span id="mneClaudeStatus" class="fl-mini"></span>
             </div>
             <textarea id="mneClaudeImportText" class="fl-text" style="margin-top:8px;" placeholder="O pega aquí el JSON de feedback de Claude..."></textarea>
             <div class="fl-row" style="margin-top:6px;gap:8px;">
-              <button class="fl-btn" id="mneClaudeImportTextBtn">Import from text</button>
+              <button class="fl-btn" id="mneClaudeImportTextBtn">Importar desde texto</button>
             </div>
             <details style="margin-top:8px;">
-              <summary style="cursor:pointer;font-weight:700;">Preview export JSON</summary>
+              <summary style="cursor:pointer;font-weight:700;font-size:11px;color:#6e7681;">▶ Preview export JSON</summary>
               <textarea id="mneClaudeExportPreview" class="fl-text" style="margin-top:6px;min-height:160px;" readonly></textarea>
             </details>
-            <div id="mneClaudeFeedbackSummary" class="fl-mini" style="margin-top:8px;display:grid;gap:6px;"></div>
-            <div id="mneLearningAuditSummary" class="fl-mini" style="margin-top:8px;display:grid;gap:6px;"></div>
+            <div id="mneClaudeFeedbackSummary" style="margin-top:10px;display:grid;gap:8px;"></div>
+            <div id="mneLearningAuditSummary" style="margin-top:10px;display:grid;gap:6px;"></div>
           </div>
           <div class="fl-card" style="margin-top:10px;padding:10px;">
             <div style="font-weight:800;">⚡ MNE Live Feedback Loop (LFL)</div>
@@ -14811,50 +14833,177 @@ function computeTeamIntelligencePanel(db, teamId){
           const latest = getLatestClaudeFeedback(brainV2.mne?.claudeExchange, simMatchId);
           if(!claudeFeedbackSummaryEl) return;
           if(!latest?.feedback){
-            claudeFeedbackSummaryEl.innerHTML = '<div class="fl-mini">Sin feedback importado todavía para este match.</div>';
+            claudeFeedbackSummaryEl.innerHTML = `<div style="padding:14px;background:#0d1117;border:1px solid #21262d;border-radius:8px;text-align:center;font-size:11px;color:#6e7681;">Sin feedback importado todavía. Exporta el partido, pásalo a Claude y reimporta el JSON.</div>`;
             return;
           }
           const fb = latest.feedback;
-          const rules = (fb.newRules || []).map((rule)=>`<li>${rule.name} (${Math.round((Number(rule.confidence)||0)*100)}%)</li>`).join('') || '<li>Sin reglas sugeridas.</li>';
-          const missed = (fb.missedSignals || []).map((row)=>`<li>${row.type}: ${row.detail}</li>`).join('') || '<li>Sin señales.</li>';
-          const patterns = (fb.patternInsights || []).map((row)=>`<li>${row.name}: ${row.detail}</li>`).join('') || '<li>Sin patrones.</li>';
-          const notes = (fb.trainingNotes || []).map((n)=>`<li>${n}</li>`).join('') || '<li>Sin notas.</li>';
+          const acc = Math.round((Number(fb.evaluation?.accuracy||0))*100);
+          const accColor = acc>=70?'#3fb950':acc>=50?'#e3b341':'#f85149';
+          const agreeColor = {'high':'#3fb950','medium':'#e3b341','low':'#f85149'}[fb.evaluation?.agreementLevel||'medium'];
+          const confLabel = {'high':'Alta','medium':'Media','low':'Baja'}[fb.evaluation?.agreementLevel||'medium'];
+
+          const rules = (fb.newRules||[]);
+          const missed = (fb.missedSignals||[]);
+          const patterns = (fb.patternInsights||[]);
+          const notes = (fb.trainingNotes||[]);
+
           claudeFeedbackSummaryEl.innerHTML = `
-            <div class="fl-card" style="padding:8px;">
-              <div><b>Último import:</b> ${latest.importedAt || 'N/A'}</div>
-              <div>Evaluación: ${fb.evaluation?.summary || 'Sin resumen'} · Accuracy ${(Number(fb.evaluation?.accuracy || 0)*100).toFixed(0)}% · ${fb.evaluation?.agreementLevel || 'medium'}</div>
+            <!-- Header del feedback -->
+            <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:14px 16px;margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+                <div style="flex:1;min-width:200px;">
+                  <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Último import · ${(latest.importedAt||'').slice(0,16).replace('T',' ')}</div>
+                  <div style="font-size:11px;color:#c9d1d9;line-height:1.5;">${fb.evaluation?.summary||'Sin resumen.'}</div>
+                </div>
+                <div style="display:flex;gap:8px;flex-shrink:0;">
+                  <div style="text-align:center;padding:8px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;">
+                    <div style="font-size:18px;font-weight:900;color:${accColor};">${acc}%</div>
+                    <div style="font-size:9px;color:#6e7681;margin-top:1px;">Accuracy</div>
+                  </div>
+                  <div style="text-align:center;padding:8px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;">
+                    <div style="font-size:14px;font-weight:700;color:${agreeColor};">${confLabel}</div>
+                    <div style="font-size:9px;color:#6e7681;margin-top:1px;">Acuerdo</div>
+                  </div>
+                </div>
+              </div>
             </div>
+
+            <!-- 4 columnas de info -->
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
-              <div class="fl-card" style="padding:8px;"><b>Reglas sugeridas</b><ul style="margin:6px 0 0 16px;">${rules}</ul></div>
-              <div class="fl-card" style="padding:8px;"><b>Señales ignoradas</b><ul style="margin:6px 0 0 16px;">${missed}</ul></div>
-              <div class="fl-card" style="padding:8px;"><b>Patrones aprendidos</b><ul style="margin:6px 0 0 16px;">${patterns}</ul></div>
-              <div class="fl-card" style="padding:8px;"><b>Training notes</b><ul style="margin:6px 0 0 16px;">${notes}</ul></div>
-            </div>`;
+
+              <!-- Reglas sugeridas -->
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;">
+                <div style="font-size:10px;font-weight:700;color:#818cf8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📐 Reglas sugeridas</div>
+                ${rules.length ? rules.map(r=>{
+                  const conf = Math.round(Number(r.confidence||0)*100);
+                  const col = conf>=70?'#3fb950':conf>=50?'#e3b341':'#8b949e';
+                  return `<div style="margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                      <span style="font-size:11px;font-weight:700;color:#c9d1d9;">${(r.id||r.name||'Regla').replace(/_/g,' ')}</span>
+                      <span style="font-size:11px;font-weight:700;color:${col};">${conf}%</span>
+                    </div>
+                    <div style="font-size:10px;color:#6e7681;margin-top:2px;line-height:1.4;">${r.action||r.effect||r.description||''}</div>
+                    <div style="margin-top:4px;height:3px;background:#21262d;border-radius:2px;overflow:hidden;">
+                      <div style="width:${conf}%;height:100%;background:${col};border-radius:2px;"></div>
+                    </div>
+                  </div>`;
+                }).join('') : '<div style="font-size:11px;color:#6e7681;">Sin reglas aún.</div>'}
+              </div>
+
+              <!-- Señales ignoradas -->
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;">
+                <div style="font-size:10px;font-weight:700;color:#f85149;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🚨 Señales ignoradas</div>
+                ${missed.length ? missed.map(m=>{
+                  const imp = m.importance||m.impactEstimate||0;
+                  const impPct = typeof imp==='number' ? Math.round(imp*100) : imp==='high'?80:imp==='medium'?50:25;
+                  return `<div style="margin-bottom:8px;">
+                    <div style="font-size:11px;font-weight:700;color:#e6edf3;">${(m.tag||m.type||'señal').replace(/_/g,' ')}</div>
+                    <div style="font-size:10px;color:#8b949e;margin-top:2px;line-height:1.4;">${m.description||m.detail||''}</div>
+                    ${impPct?`<div style="font-size:9px;color:#f85149;margin-top:3px;">Impacto estimado: ${impPct}%</div>`:''}
+                  </div>`;
+                }).join('') : '<div style="font-size:11px;color:#6e7681;">Sin señales ignoradas.</div>'}
+              </div>
+
+              <!-- Patrones aprendidos -->
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;">
+                <div style="font-size:10px;font-weight:700;color:#3fb950;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🧩 Patrones aprendidos</div>
+                ${patterns.length ? patterns.map(p=>{
+                  const conf = Math.round(Number(p.confidence||0)*100);
+                  return `<div style="margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                      <span style="font-size:11px;font-weight:700;color:#c9d1d9;">${(p.pattern||p.name||'patrón').replace(/_/g,' ')}</span>
+                      ${conf?`<span style="font-size:10px;color:#3fb950;">${conf}%</span>`:''}
+                    </div>
+                    <div style="font-size:10px;color:#8b949e;margin-top:2px;line-height:1.4;">${p.description||p.detail||''}</div>
+                    ${p.matchEvidence?`<div style="font-size:9px;color:#6e7681;margin-top:3px;font-style:italic;">✓ ${p.matchEvidence}</div>`:''}
+                  </div>`;
+                }).join('') : '<div style="font-size:11px;color:#6e7681;">Sin patrones todavía.</div>'}
+              </div>
+
+              <!-- Notas de entrenamiento -->
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;">
+                <div style="font-size:10px;font-weight:700;color:#e3b341;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📝 Notas del cerebro</div>
+                ${notes.length ? notes.map((n,i)=>`
+                  <div style="display:flex;gap:6px;margin-bottom:7px;align-items:flex-start;">
+                    <span style="font-size:11px;color:#e3b341;font-weight:700;flex-shrink:0;">${i+1}.</span>
+                    <span style="font-size:10px;color:#c9d1d9;line-height:1.5;">${n}</span>
+                  </div>`).join('') : '<div style="font-size:11px;color:#6e7681;">Sin notas todavía.</div>'}
+              </div>
+            </div>
+          `;
         };
 
         const renderLearningAuditSummary = ()=>{
           if(!mneLearningAuditSummaryEl) return;
-          const audits = (brainV2.mne?.claudeExchange?.learningAudit?.audits || []).filter((row)=>String(row?.sourceMatchId || '') === simMatchId).slice(-4).reverse();
+          const audits = (brainV2.mne?.claudeExchange?.learningAudit?.audits||[]).filter(row=>String(row?.sourceMatchId||'')===simMatchId).slice(-4).reverse();
           if(!audits.length){
-            mneLearningAuditSummaryEl.innerHTML = '<div class="fl-card" style="padding:8px;"><b>Learning Audit</b><div class="fl-mini" style="margin-top:4px;">Sin auditorías todavía. Se crean automáticamente al importar feedback Claude.</div></div>';
+            mneLearningAuditSummaryEl.innerHTML = `<div style="padding:12px 16px;background:#0d1117;border:1px solid #21262d;border-radius:8px;font-size:11px;color:#6e7681;">Sin auditorías todavía. Se crean automáticamente al importar feedback de Claude.</div>`;
             return;
           }
-          const statusColor = (status)=> status === 'improved' ? '#22c55e' : status === 'regressed' ? '#ef4444' : status === 'mixed' ? '#f59e0b' : '#94a3b8';
-          mneLearningAuditSummaryEl.innerHTML = `<div class="fl-card" style="padding:8px;"><b>Learning Audit</b> · ${audits.length} auditoría(s) activas</div>${audits.map((audit)=>{
-            const tracked = (audit.trackedItems || []).slice(0,6).map((item)=>`<li>${item.kind}: ${item.label || item.key}</li>`).join('') || '<li>Sin items.</li>';
-            const lastObs = (audit.observations || []).slice(-2).reverse().map((obs)=>`<div>• ${obs.observedMatchId || 'N/A'} · ${obs.status} · ${obs.notes || ''}</div>`).join('') || '<div>Sin observaciones aún.</div>';
-            const m = audit.metrics || {};
-            return `<div class="fl-card" style="padding:8px;">
-              <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>Source: ${audit.sourceMatchId || 'N/A'}</b><span class="fl-pill" style="border:1px solid ${statusColor(audit.aggregateStatus)};color:${statusColor(audit.aggregateStatus)};">${audit.aggregateStatus || 'unchanged'}</span></div>
-              <div style="margin-top:4px;">Importado: ${audit.importedAt || 'N/A'}</div>
-              <div style="margin-top:4px;">Observed matches: ${m.totalObservedMatches || 0} · improved ${m.improvements || 0} · unchanged ${m.unchanged || 0} · regressed ${m.regressions || 0} · not_triggered ${m.notTriggered || 0}</div>
-              <div style="margin-top:4px;">Triggered rules: ${m.triggeredRules || 0} · last status: ${m.lastStatus || 'unchanged'}</div>
-              <div style="margin-top:6px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
-                <div><b>Tracked items</b><ul style="margin:6px 0 0 16px;">${tracked}</ul></div>
-                <div><b>Latest evidence</b><div style="margin-top:6px;">${lastObs}</div></div>
-              </div>
-            </div>`;
-          }).join('')}`;
+          const statusMeta = (s)=>({
+            improved:  { color:'#3fb950', label:'Mejoró',   icon:'📈' },
+            regressed: { color:'#f85149', label:'Regresó',  icon:'📉' },
+            mixed:     { color:'#e3b341', label:'Mixto',    icon:'↕️' },
+            unchanged: { color:'#8b949e', label:'Sin cambio', icon:'➡️' }
+          }[s]||{ color:'#8b949e', label:s||'?', icon:'❓' });
+
+          mneLearningAuditSummaryEl.innerHTML = `
+            <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🔬 Learning Audit · ${audits.length} auditoría(s)</div>
+            ${audits.map(audit=>{
+              const m = audit.metrics||{};
+              const sm = statusMeta(audit.aggregateStatus);
+              const tracked = (audit.trackedItems||[]).slice(0,8);
+              const ruleItems = tracked.filter(t=>t.kind==='rule');
+              const signalItems = tracked.filter(t=>t.kind==='missed_signal');
+              const patternItems = tracked.filter(t=>t.kind==='pattern');
+              return `
+                <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:14px;margin-bottom:8px;">
+                  <!-- Header audit -->
+                  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+                    <div>
+                      <div style="font-size:10px;color:#6e7681;">Importado ${(audit.importedAt||'').slice(0,16).replace('T',' ')}</div>
+                    </div>
+                    <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;background:${sm.color}22;border:1px solid ${sm.color}44;color:${sm.color};">${sm.icon} ${sm.label}</span>
+                  </div>
+
+                  <!-- Métricas en fila -->
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:6px;margin-bottom:12px;">
+                    ${[
+                      ['Observados', m.totalObservedMatches||0, '#8b949e'],
+                      ['Mejoró', m.improvements||0, '#3fb950'],
+                      ['Sin cambio', m.unchanged||0, '#8b949e'],
+                      ['Regresó', m.regressions||0, '#f85149'],
+                      ['Reglas activas', m.triggeredRules||0, '#818cf8'],
+                    ].map(([lbl,val,col])=>`
+                      <div style="text-align:center;padding:6px 4px;background:#161b22;border:1px solid #30363d;border-radius:6px;">
+                        <div style="font-size:15px;font-weight:900;color:${col};">${val}</div>
+                        <div style="font-size:9px;color:#6e7681;margin-top:1px;">${lbl}</div>
+                      </div>`).join('')}
+                  </div>
+
+                  <!-- Items trackeados por tipo -->
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
+                    ${ruleItems.length?`<div>
+                      <div style="font-size:9px;font-weight:700;color:#818cf8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Reglas</div>
+                      ${ruleItems.map(t=>`<div style="font-size:10px;color:#c9d1d9;margin-bottom:3px;">• ${(t.label||t.key||'').replace(/_/g,' ')}</div>`).join('')}
+                    </div>`:''}
+                    ${signalItems.length?`<div>
+                      <div style="font-size:9px;font-weight:700;color:#f85149;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Señales ignoradas</div>
+                      ${signalItems.map(t=>`<div style="font-size:10px;color:#c9d1d9;margin-bottom:3px;">• ${(t.label||t.key||'').replace(/_/g,' ')}</div>`).join('')}
+                    </div>`:''}
+                    ${patternItems.length?`<div>
+                      <div style="font-size:9px;font-weight:700;color:#3fb950;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Patrones</div>
+                      ${patternItems.map(t=>`<div style="font-size:10px;color:#c9d1d9;margin-bottom:3px;">• ${(t.label||t.key||'').replace(/_/g,' ')}</div>`).join('')}
+                    </div>`:''}
+                    <div>
+                      <div style="font-size:9px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Evidencia reciente</div>
+                      ${(audit.observations||[]).slice(-2).reverse().map(obs=>`
+                        <div style="font-size:10px;color:#8b949e;margin-bottom:3px;">${obs.notes||obs.status||'Sin observaciones'}</div>`).join('')||'<div style="font-size:10px;color:#6e7681;">Sin observaciones aún.</div>'}
+                    </div>
+                  </div>
+                </div>`;
+            }).join('')}
+          `;
         };
 
         const refreshClaudeExportPreview = ()=>{
