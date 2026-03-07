@@ -12638,8 +12638,7 @@ function computeTeamIntelligencePanel(db, teamId){
             </div>`;
           };
 
-          const typeBreakdown = Object.entries(byType).map(([t,[_,data]])=>{
-            const d = byType[t];
+          const typeBreakdown = Object.entries(byType).map(([t,d])=>{
             return `<div style="display:flex;flex-direction:column;gap:3px;">
               <span style="font-size:10px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;">${t}</span>
               ${wrBar(d.won,d.lost)}
