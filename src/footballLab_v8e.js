@@ -3472,6 +3472,79 @@ export function initFootballLab(){
       .fl-radar-badge-clean{background:rgba(46,160,67,.12);color:#3fb950;border-color:rgba(63,185,80,.45)}
       .fl-radar-badge-tension{background:rgba(210,153,34,.14);color:#e3b341;border-color:rgba(227,179,65,.45)}
       .fl-radar-badge-chaos{background:rgba(239,68,68,.14);color:#ff7b72;border-color:rgba(255,123,114,.45)}
+      /* === RADAR PRO === */
+      .rdx-wrap{display:flex;flex-direction:column;gap:16px}
+      .rdx-form-card{background:linear-gradient(135deg,#0d1117 0%,#161b22 100%);border:1px solid #21262d;border-radius:16px;padding:20px}
+      .rdx-form-title{font-size:15px;font-weight:800;letter-spacing:-.3px;color:#e6edf3;margin-bottom:4px}
+      .rdx-form-sub{font-size:12px;color:#6e7681;margin-bottom:16px}
+      .rdx-form-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+      .rdx-group{display:flex;flex-direction:column;gap:4px}
+      .rdx-label{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#6e7681}
+      .rdx-select,.rdx-input{background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;padding:8px 12px;font-size:13px;font-family:inherit;outline:none;transition:border-color .15s}
+      .rdx-select:focus,.rdx-input:focus{border-color:#388bfd}
+      .rdx-input{width:80px}
+      .rdx-btn-add{background:linear-gradient(135deg,#1f6feb,#388bfd);border:none;border-radius:8px;color:#fff;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:-.2px;transition:opacity .15s;white-space:nowrap}
+      .rdx-btn-add:hover{opacity:.85}
+      .rdx-btn-sm{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#8b949e;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s}
+      .rdx-btn-sm:hover{background:#30363d;color:#e6edf3}
+      .rdx-btn-danger{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.3);color:#f85149}
+      .rdx-btn-danger:hover{background:rgba(248,81,73,.22)}
+      .rdx-btn-hist{background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.35);color:#818cf8;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:-.1px;transition:all .15s}
+      .rdx-btn-hist:hover{background:rgba(99,102,241,.22)}
+      .rdx-list-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+      .rdx-list-title{font-size:15px;font-weight:800;letter-spacing:-.3px;color:#e6edf3}
+      .rdx-empty{text-align:center;padding:48px 20px;color:#6e7681;font-size:13px}
+      .rdx-empty-icon{font-size:32px;margin-bottom:8px}
+      .rdx-match-card{background:#0d1117;border:1px solid #21262d;border-radius:12px;padding:14px 16px;transition:border-color .15s,box-shadow .15s;position:relative}
+      .rdx-match-card:hover{border-color:#30363d;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+      .rdx-match-card.type-clean{border-left:3px solid #3fb950}
+      .rdx-match-card.type-tension{border-left:3px solid #e3b341}
+      .rdx-match-card.type-chaos{border-left:3px solid #f85149}
+      .rdx-match-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap}
+      .rdx-match-teams{font-size:15px;font-weight:800;letter-spacing:-.3px;color:#e6edf3}
+      .rdx-match-vs{color:#6e7681;font-weight:500;margin:0 6px}
+      .rdx-match-meta{font-size:11px;color:#6e7681;margin-top:2px}
+      .rdx-match-badges{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+      .rdx-match-body{margin-top:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+      .rdx-metric{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:8px 10px}
+      .rdx-metric-label{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#6e7681;font-weight:700}
+      .rdx-metric-value{font-size:18px;font-weight:800;line-height:1.1;margin-top:2px;color:#e6edf3}
+      .rdx-metric-value.positive{color:#3fb950}
+      .rdx-metric-value.negative{color:#f85149}
+      .rdx-metric-value.neutral{color:#e3b341}
+      .rdx-bar-wrap{margin-top:5px;height:4px;background:#21262d;border-radius:999px;overflow:hidden}
+      .rdx-bar{height:100%;border-radius:999px;transition:width .4s ease}
+      .rdx-fsi-bar-h{background:linear-gradient(90deg,#1f6feb,#388bfd)}
+      .rdx-fsi-bar-a{background:linear-gradient(90deg,#e3b341,#f59e0b)}
+      .rdx-score-ring{display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;border:2px solid;flex-shrink:0;font-size:16px;font-weight:900}
+      .rdx-score-ring.high{border-color:#3fb950;color:#3fb950;background:rgba(63,185,80,.08)}
+      .rdx-score-ring.mid{border-color:#e3b341;color:#e3b341;background:rgba(227,179,65,.08)}
+      .rdx-score-ring.low{border-color:#f85149;color:#f85149;background:rgba(248,81,73,.08)}
+      .rdx-flags{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+      .rdx-flag{font-size:10px;background:#161b22;border:1px solid #21262d;border-radius:4px;padding:2px 6px;color:#8b949e;font-weight:600;letter-spacing:.3px}
+      .rdx-flag.alert{background:rgba(248,81,73,.1);border-color:rgba(248,81,73,.3);color:#f85149}
+      .rdx-match-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+      .rdx-btn-sim{background:linear-gradient(135deg,#1f6feb,#388bfd);border:none;border-radius:7px;color:#fff;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;transition:opacity .15s}
+      .rdx-btn-sim:hover{opacity:.8}
+      .rdx-odds-pill{background:#161b22;border:1px solid #21262d;border-radius:6px;padding:3px 8px;font-size:12px;color:#8b949e;font-weight:600}
+      .rdx-sort-row{display:flex;gap:6px;align-items:center}
+      /* HISTORICO */
+      .rdx-hist-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(6px)}
+      .rdx-hist-modal{background:#0d1117;border:1px solid #21262d;border-radius:18px;padding:24px;max-width:860px;width:calc(100vw - 32px);max-height:calc(100vh - 60px);overflow-y:auto}
+      .rdx-hist-title{font-size:18px;font-weight:900;letter-spacing:-.4px;color:#e6edf3;margin-bottom:4px}
+      .rdx-hist-sub{font-size:12px;color:#6e7681;margin-bottom:16px}
+      .rdx-hist-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:20px}
+      .rdx-hist-stat{background:#161b22;border:1px solid #21262d;border-radius:10px;padding:12px;text-align:center}
+      .rdx-hist-stat-val{font-size:26px;font-weight:900;color:#e6edf3}
+      .rdx-hist-stat-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#6e7681;margin-top:2px}
+      .rdx-hist-row{display:flex;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid #21262d;flex-wrap:wrap}
+      .rdx-hist-teams{font-size:13px;font-weight:700;color:#e6edf3;flex:1;min-width:180px}
+      .rdx-hist-result-btn{background:#21262d;border:1px solid #30363d;border-radius:6px;color:#8b949e;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
+      .rdx-hist-result-btn.won{background:rgba(63,185,80,.15);border-color:rgba(63,185,80,.4);color:#3fb950}
+      .rdx-hist-result-btn.lost{background:rgba(248,81,73,.12);border-color:rgba(248,81,73,.35);color:#f85149}
+      .rdx-hist-result-btn.pending{background:#21262d;border-color:#30363d;color:#6e7681}
+      .rdx-verdict-select{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;padding:4px 8px;font-size:12px;font-family:inherit;outline:none}
+      .rdx-verdict-select:focus{border-color:#388bfd}
       .b2-score-chip{padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid #1e2330}
       .b2-score-chip.win{color:#22d3a3;border-color:rgba(34,211,163,.5);background:rgba(34,211,163,.12)}
       .b2-score-chip.loss{color:#ef4444;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.12)}
@@ -11351,8 +11424,14 @@ function computeTeamIntelligencePanel(db, teamId){
 
     if(view==="radar"){
       const brainV2 = loadBrainV2();
+      // Ensure radar historic structure
+      db.radar ||= { matches: [], historic: [] };
+      db.radar.matches = Array.isArray(db.radar.matches) ? db.radar.matches : [];
+      db.radar.historic = Array.isArray(db.radar.historic) ? db.radar.historic : [];
+
       radarState.matches = buildRadarMatches({ db, payload, brainV2 });
       const sorted = sortRadarMatches(radarState.matches, radarState.sortBy || 'studyScore');
+
       const leagues = db.leagues.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), 'es', { sensitivity:'base' }));
       const fallbackLeagueId = leagues[0]?.id || '';
       const selectedLeagueId = radarState.filters.manualLeagueId || db.settings.selectedLeagueId || fallbackLeagueId;
@@ -11361,117 +11440,176 @@ function computeTeamIntelligencePanel(db, teamId){
       const sortedManualTeams = manualTeams.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), 'es', { sensitivity:'base' }));
       const leagueOptions = leagues.map((l)=>`<option value="${l.id}" ${l.id===selectedLeagueId?'selected':''}>${l.name}</option>`).join('');
       const teamOptions = sortedManualTeams.map((t)=>`<option value="${t.id}">${t.name}</option>`).join('');
-      const manualMatches = (db.radar?.matches || []).slice().sort((a,b)=>parseSortableDate(b.date || b.createdAt || '')-parseSortableDate(a.date || a.createdAt || ''));
-      const manualRows = manualMatches.map((row)=>{
-        const leagueName = db.leagues.find((l)=>l.id===row.leagueId)?.name || '-';
-        const homeName = db.teams.find((t)=>t.id===row.homeId)?.name || '-';
-        const awayName = db.teams.find((t)=>t.id===row.awayId)?.name || '-';
-        const oddsTxt = [row.oddsHome, row.oddsDraw, row.oddsAway]
-          .map((odd)=>Number.isFinite(Number(odd)) ? Number(odd).toFixed(2) : '-')
-          .join(' / ');
-        return `
-          <tr>
-            <td>${formatDate(row.date || '')}</td>
-            <td>${leagueName}</td>
-            <td>${homeName}</td>
-            <td>${awayName}</td>
-            <td>${oddsTxt}</td>
-            <td><button class="fl-btn" data-radar-delete-manual="${row.id}">Borrar</button></td>
-          </tr>
-        `;
-      }).join('');
-      const typeBadge = (type)=>`<span class="fl-radar-badge fl-radar-badge-${type}">${type}</span>`;
-      const rows = sorted.map((m)=>`
-        <tr>
-          <td>${m.league}</td>
-          <td>${formatRadarKickoff(m.kickoff)}</td>
-          <td>${m.home}</td>
-          <td>${m.away}</td>
-          <td>${m.strengthHome}</td>
-          <td>${m.strengthAway}</td>
-          <td>${m.strengthGap}</td>
-          <td>${m.fsiHome}</td>
-          <td>${m.fsiAway}</td>
-          <td>${m.avgFSI}</td>
-          <td><b>${m.studyScore}</b></td>
-          <td>${typeBadge(m.type)}</td>
-          <td>
-            <button class="fl-btn" data-radar-open-sim="${m.id}">Abrir simulación</button>
-            ${m.flags.length ? `<div class="fl-mini" style="margin-top:4px;">${m.flags.join(' · ')}</div>` : ''}
-          </td>
-        </tr>
-      `).join('');
 
-      content.innerHTML = `
-        <div class="fl-card fl-radar-card">
-          <div style="font-weight:800;">Registrar partido manual</div>
-          <div class="fl-mini" style="margin-top:4px;">Guarda partidos con liga, local, visitante y cuotas para tenerlos listos en el radar.</div>
-          <div class="fl-row" style="margin-top:10px;gap:8px;flex-wrap:wrap;">
-            <select id="radarManualLeague" class="fl-select" style="min-width:180px;">
-              <option value="">Liga</option>
-              ${leagueOptions}
-            </select>
-            <select id="radarManualHome" class="fl-select" style="min-width:180px;">
-              <option value="">Local</option>
-              ${teamOptions}
-            </select>
-            <select id="radarManualAway" class="fl-select" style="min-width:180px;">
-              <option value="">Visitante</option>
-              ${teamOptions}
-            </select>
-            <input id="radarManualOddH" type="number" step="0.01" class="fl-input" placeholder="Cuota 1" style="width:90px;" />
-            <input id="radarManualOddD" type="number" step="0.01" class="fl-input" placeholder="Cuota X" style="width:90px;" />
-            <input id="radarManualOddA" type="number" step="0.01" class="fl-input" placeholder="Cuota 2" style="width:90px;" />
-            <button class="fl-btn" id="radarManualSave">Registrar</button>
-            <span id="radarManualStatus" class="fl-mini"></span>
+      // ── helpers
+      const scoreRingClass = (s)=> s >= 70 ? 'high' : s >= 45 ? 'mid' : 'low';
+      const fsiColor = (v)=> v >= 18 ? 'positive' : v <= -18 ? 'negative' : 'neutral';
+      const fsiBarPct = (v)=> clamp(((Number(v)||0) + 100) / 2, 0, 100);
+      const typeBadge = (type)=>`<span class="fl-radar-badge fl-radar-badge-${type}">${type}</span>`;
+      const flagAlert = (f)=>{
+        const alerts = ['STRONG_FAVORITE_UNSTABLE','HIGH_FSI_AWAY'];
+        return alerts.includes(f) ? 'alert' : '';
+      };
+
+      // ── build match cards (unified — form + analysis in one list)
+      const matchCards = sorted.length === 0 ? `
+        <div class="rdx-empty">
+          <div class="rdx-empty-icon">📡</div>
+          <div>No hay partidos registrados hoy.</div>
+          <div style="margin-top:4px;font-size:11px;">Usa el formulario de arriba para agregar partidos manualmente.</div>
+        </div>
+      ` : sorted.map((m)=>{
+        const oddsStr = [m.odds?.home, m.odds?.draw, m.odds?.away]
+          .map((o)=>Number.isFinite(Number(o)) ? Number(o).toFixed(2) : '-').join(' / ');
+        const hasOdds = [m.odds?.home, m.odds?.draw, m.odds?.away].some((o)=>Number.isFinite(Number(o)));
+        const fsiHPct = fsiBarPct(m.fsiHome);
+        const fsiAPct = fsiBarPct(m.fsiAway);
+        const ringCls = scoreRingClass(m.studyScore);
+        return `
+        <div class="rdx-match-card type-${m.type}">
+          <div class="rdx-match-top">
+            <div>
+              <div class="rdx-match-teams">
+                <span>${m.home}</span>
+                <span class="rdx-match-vs">vs</span>
+                <span>${m.away}</span>
+              </div>
+              <div class="rdx-match-meta">${m.league} · ${formatRadarKickoff(m.kickoff) !== '-' ? formatRadarKickoff(m.kickoff) : formatDate(m.kickoff)}
+                ${hasOdds ? `· <span class="rdx-odds-pill">1: ${m.odds?.home?.toFixed(2)||'-'}  X: ${m.odds?.draw?.toFixed(2)||'-'}  2: ${m.odds?.away?.toFixed(2)||'-'}</span>` : ''}
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+              ${typeBadge(m.type)}
+              <div class="rdx-score-ring ${ringCls}" title="Study Score — qué tan interesante es estudiar este partido">${m.studyScore}</div>
+            </div>
           </div>
-          <div style="overflow:auto;margin-top:10px;">
-            <table class="fl-table">
-              <thead>
-                <tr><th>Fecha</th><th>Liga</th><th>Local</th><th>Visitante</th><th>Cuotas (1/X/2)</th><th></th></tr>
-              </thead>
-              <tbody>${manualRows || '<tr><td colspan="6" class="fl-muted">Sin partidos manuales guardados todavía.</td></tr>'}</tbody>
-            </table>
+
+          <div class="rdx-match-body">
+            <div class="rdx-metric">
+              <div class="rdx-metric-label">Fuerza Local</div>
+              <div class="rdx-metric-value">${m.strengthHome}</div>
+              <div class="rdx-bar-wrap"><div class="rdx-bar rdx-fsi-bar-h" style="width:${clamp(m.strengthHome,0,100)}%"></div></div>
+            </div>
+            <div class="rdx-metric">
+              <div class="rdx-metric-label">Fuerza Visit.</div>
+              <div class="rdx-metric-value">${m.strengthAway}</div>
+              <div class="rdx-bar-wrap"><div class="rdx-bar rdx-fsi-bar-a" style="width:${clamp(m.strengthAway,0,100)}%"></div></div>
+            </div>
+            <div class="rdx-metric">
+              <div class="rdx-metric-label">Gap Fuerza</div>
+              <div class="rdx-metric-value ${m.strengthGap >= 25 ? 'positive' : 'neutral'}">${m.strengthGap}</div>
+            </div>
+            <div class="rdx-metric">
+              <div class="rdx-metric-label">FSI Local</div>
+              <div class="rdx-metric-value ${fsiColor(m.fsiHome)}">${m.fsiHome > 0 ? '+' : ''}${m.fsiHome}</div>
+              <div class="rdx-bar-wrap"><div class="rdx-bar rdx-fsi-bar-h" style="width:${fsiHPct}%"></div></div>
+            </div>
+            <div class="rdx-metric">
+              <div class="rdx-metric-label">FSI Visitante</div>
+              <div class="rdx-metric-value ${fsiColor(m.fsiAway)}">${m.fsiAway > 0 ? '+' : ''}${m.fsiAway}</div>
+              <div class="rdx-bar-wrap"><div class="rdx-bar rdx-fsi-bar-a" style="width:${fsiAPct}%"></div></div>
+            </div>
+            <div class="rdx-metric">
+              <div class="rdx-metric-label">FSI Promedio</div>
+              <div class="rdx-metric-value ${fsiColor(m.avgFSI)}">${m.avgFSI > 0 ? '+' : ''}${m.avgFSI}</div>
+            </div>
+          </div>
+
+          ${m.flags.length ? `<div class="rdx-flags">${m.flags.map((f)=>`<span class="rdx-flag ${flagAlert(f)}">${f.replaceAll('_',' ')}</span>`).join('')}</div>` : ''}
+
+          <div class="rdx-match-actions">
+            <button class="rdx-btn-sim" data-radar-open-sim="${m.id}">⚡ Simular</button>
+            <button class="rdx-btn-sm rdx-btn-danger" data-radar-delete-manual="${m.id}">Eliminar</button>
           </div>
         </div>
-        <div class="fl-card fl-radar-card">
-          <div class="fl-row" style="justify-content:space-between;align-items:flex-end;">
-            <div>
-              <div style="font-weight:800;">Radar del Día</div>
-              <div class="fl-mini">Capa rápida de exploración para priorizar qué partidos estudiar primero.</div>
+        `;
+      }).join('');
+
+      content.innerHTML = `
+        <div class="rdx-wrap">
+
+          <!-- FORM CARD -->
+          <div class="rdx-form-card">
+            <div class="rdx-form-title">➕ Agregar partido al Radar</div>
+            <div class="rdx-form-sub">Selecciona liga, equipos y cuotas — el análisis FSI/RSI aparece automáticamente abajo.</div>
+            <div class="rdx-form-row">
+              <div class="rdx-group">
+                <span class="rdx-label">Liga</span>
+                <select id="radarManualLeague" class="rdx-select" style="min-width:160px;">
+                  <option value="">— Liga —</option>
+                  ${leagueOptions}
+                </select>
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Local</span>
+                <select id="radarManualHome" class="rdx-select" style="min-width:160px;">
+                  <option value="">— Local —</option>
+                  ${teamOptions}
+                </select>
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Visitante</span>
+                <select id="radarManualAway" class="rdx-select" style="min-width:160px;">
+                  <option value="">— Visitante —</option>
+                  ${teamOptions}
+                </select>
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Cuota 1</span>
+                <input id="radarManualOddH" type="number" step="0.01" class="rdx-input" placeholder="1.85" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Cuota X</span>
+                <input id="radarManualOddD" type="number" step="0.01" class="rdx-input" placeholder="3.40" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Cuota 2</span>
+                <input id="radarManualOddA" type="number" step="0.01" class="rdx-input" placeholder="4.20" />
+              </div>
+              <div class="rdx-group" style="justify-content:flex-end;">
+                <button class="rdx-btn-add" id="radarManualSave">Agregar al Radar</button>
+                <span id="radarManualStatus" style="font-size:11px;color:#f85149;margin-top:4px;"></span>
+              </div>
             </div>
-            <div class="fl-row">
-              <label class="fl-mini">Ordenar por</label>
-              <select id="radarSortBy" class="fl-select">
-                <option value="studyScore" ${radarState.sortBy==='studyScore'?'selected':''}>Study Score</option>
+          </div>
+
+          <!-- LIST HEADER -->
+          <div class="rdx-list-header">
+            <div>
+              <div class="rdx-list-title">📡 Radar del Día <span style="font-weight:400;font-size:13px;color:#6e7681;">(${sorted.length} partido${sorted.length!==1?'s':''})</span></div>
+              <div style="font-size:11px;color:#6e7681;margin-top:2px;">FSI + RSI detectan si los equipos están realmente bien — no si son favoritos en papel.</div>
+            </div>
+            <div class="rdx-sort-row">
+              <button class="rdx-btn-hist" id="rdxOpenHistoric">📋 Histórico</button>
+              <select id="radarSortBy" class="rdx-select" style="font-size:12px;">
+                <option value="studyScore" ${radarState.sortBy==='studyScore'?'selected':''}>Study Score ↓</option>
                 <option value="kickoff" ${radarState.sortBy==='kickoff'?'selected':''}>Hora</option>
                 <option value="league" ${radarState.sortBy==='league'?'selected':''}>Liga</option>
               </select>
             </div>
           </div>
-          <div style="overflow:auto;margin-top:10px;">
-            <table class="fl-table fl-radar-table">
-              <thead>
-                <tr>
-                  <th>Liga</th><th>Hora</th><th>Local</th><th>Visitante</th>
-                  <th>Current Strength L</th><th>Current Strength V</th><th>Strength Gap</th>
-                  <th>FSI L</th><th>FSI V</th><th>Avg FSI</th><th>Study Score</th><th>Tipo</th><th>Acción</th>
-                </tr>
-              </thead>
-              <tbody>${rows || '<tr><td colspan="13" class="fl-muted">Sin partidos para hoy en la fuente actual.</td></tr>'}</tbody>
-            </table>
+
+          <!-- MATCH CARDS -->
+          <div id="rdxMatchList" style="display:flex;flex-direction:column;gap:10px;">
+            ${matchCards}
           </div>
+
         </div>
       `;
 
+      // ── SORT
       document.getElementById('radarSortBy')?.addEventListener('change', (ev)=>{
         radarState.sortBy = ev.target.value || 'studyScore';
         render('radar', payload);
       });
+
+      // ── LEAGUE CHANGE → refresh team list
       document.getElementById('radarManualLeague')?.addEventListener('change', (ev)=>{
         radarState.filters.manualLeagueId = ev.target.value || '';
         render('radar', payload);
       });
+
+      // ── SAVE MATCH
       document.getElementById('radarManualSave')?.addEventListener('click', ()=>{
         const leagueId = document.getElementById('radarManualLeague')?.value || '';
         const homeId = document.getElementById('radarManualHome')?.value || '';
@@ -11481,6 +11619,7 @@ function computeTeamIntelligencePanel(db, teamId){
           if(status) status.textContent = '⚠️ Elige liga, local y visitante válidos.';
           return;
         }
+        if(status) status.textContent = '';
         const manualMatch = {
           id: uid('rm'),
           createdAt: new Date().toISOString(),
@@ -11492,24 +11631,141 @@ function computeTeamIntelligencePanel(db, teamId){
           oddsDraw: pickFirstNumber(document.getElementById('radarManualOddD')?.value),
           oddsAway: pickFirstNumber(document.getElementById('radarManualOddA')?.value)
         };
-        db.radar ||= { matches: [] };
-        db.radar.matches = Array.isArray(db.radar.matches) ? db.radar.matches : [];
         db.radar.matches.unshift(manualMatch);
         saveDb(db);
         render('radar', payload);
       });
+
+      // ── DELETE MATCH
       content.querySelectorAll('[data-radar-delete-manual]').forEach((btn)=>btn.onclick = ()=>{
         const id = btn.getAttribute('data-radar-delete-manual');
-        db.radar.matches = (db.radar.matches || []).filter((row)=>row.id!==id);
+        db.radar.matches = db.radar.matches.filter((row)=>row.id!==id);
         saveDb(db);
         render('radar', payload);
       });
+
+      // ── OPEN SIMULATION
       content.querySelectorAll('[data-radar-open-sim]').forEach((btn)=>btn.onclick = ()=>{
         const match = radarState.matches.find((row)=>row.id===btn.getAttribute('data-radar-open-sim'));
         if(!match) return;
         radarState.selectedMatchId = match.id;
         render('versus', { homeId: match.homeId, awayId: match.awayId, leagueId: match.leagueId });
       });
+
+      // ── HISTORIC MODAL
+      document.getElementById('rdxOpenHistoric')?.addEventListener('click', ()=>{
+        // build historic from radar matches that have a verdict
+        const hist = (db.radar.historic || []).slice().sort((a,b)=>parseSortableDate(b.date||'')-parseSortableDate(a.date||''));
+        const total = hist.length;
+        const won = hist.filter((h)=>h.verdict==='won').length;
+        const lost = hist.filter((h)=>h.verdict==='lost').length;
+        const pending = hist.filter((h)=>!h.verdict||h.verdict==='pending').length;
+        const pct = total > 0 ? Math.round((won / (won+lost||1)) * 100) : '-';
+
+        const histRows = hist.length === 0 ? `<div style="text-align:center;padding:32px 0;color:#6e7681;font-size:13px;">Sin histórico todavía. Agrega partidos al radar y registra resultados aquí.</div>` :
+          hist.map((h)=>{
+            const hName = db.teams.find((t)=>t.id===h.homeId)?.name || h.home || '-';
+            const aName = db.teams.find((t)=>t.id===h.awayId)?.name || h.away || '-';
+            const lName = db.leagues.find((l)=>l.id===h.leagueId)?.name || h.league || '-';
+            const v = h.verdict || 'pending';
+            const vLabel = {won:'✅ Acertó', lost:'❌ Falló', pending:'⏳ Pendiente'}[v] || '⏳ Pendiente';
+            return `
+              <div class="rdx-hist-row">
+                <div>
+                  <div class="rdx-hist-teams">${hName} vs ${aName}</div>
+                  <div style="font-size:11px;color:#6e7681;">${lName} · ${formatDate(h.date||'')} · Score: <b style="color:#e6edf3;">${h.studyScore??'-'}</b> · ${(h.type||'').toUpperCase()}</div>
+                </div>
+                <select class="rdx-verdict-select" data-hist-id="${h.id}" data-hist-verdict="${v}">
+                  <option value="pending" ${v==='pending'?'selected':''}>⏳ Pendiente</option>
+                  <option value="won" ${v==='won'?'selected':''}>✅ Acertó</option>
+                  <option value="lost" ${v==='lost'?'selected':''}>❌ Falló</option>
+                </select>
+              </div>
+            `;
+          }).join('');
+
+        // also let user add current matches to historic
+        const todayMatches = sorted.filter((m)=>!hist.find((h)=>h.sourceId===m.id));
+        const addToHistRows = todayMatches.length === 0 ? '' : `
+          <div style="margin-top:16px;border-top:1px solid #21262d;padding-top:16px;">
+            <div style="font-size:12px;font-weight:700;color:#8b949e;margin-bottom:8px;">AGREGAR AL HISTÓRICO</div>
+            ${todayMatches.map((m)=>`
+              <div class="rdx-hist-row">
+                <div style="flex:1;">
+                  <div class="rdx-hist-teams">${m.home} vs ${m.away}</div>
+                  <div style="font-size:11px;color:#6e7681;">${m.league} · Score ${m.studyScore} · ${m.type.toUpperCase()}</div>
+                </div>
+                <button class="rdx-btn-sm" data-add-hist="${m.id}">+ Agregar</button>
+              </div>
+            `).join('')}
+          </div>
+        `;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'rdx-hist-backdrop';
+        backdrop.innerHTML = `
+          <div class="rdx-hist-modal">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+              <div>
+                <div class="rdx-hist-title">📋 Histórico del Radar</div>
+                <div class="rdx-hist-sub">Mide qué tan bien detecta el sistema partidos interesantes.</div>
+              </div>
+              <button id="rdxCloseHist" style="background:none;border:none;color:#6e7681;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
+            </div>
+            <div class="rdx-hist-stats">
+              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val">${total}</div><div class="rdx-hist-stat-lbl">Total</div></div>
+              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#3fb950;">${won}</div><div class="rdx-hist-stat-lbl">Acertados</div></div>
+              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#f85149;">${lost}</div><div class="rdx-hist-stat-lbl">Fallidos</div></div>
+              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#6e7681;">${pending}</div><div class="rdx-hist-stat-lbl">Pendientes</div></div>
+              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#e3b341;">${pct}${pct!=='-'?'%':''}</div><div class="rdx-hist-stat-lbl">% Acierto</div></div>
+            </div>
+            <div id="rdxHistList">${histRows}${addToHistRows}</div>
+          </div>
+        `;
+        document.body.appendChild(backdrop);
+
+        backdrop.querySelector('#rdxCloseHist')?.addEventListener('click', ()=>backdrop.remove());
+        backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backdrop.remove(); });
+
+        // verdict change
+        backdrop.querySelectorAll('[data-hist-id]').forEach((sel)=>{
+          sel.addEventListener('change', ()=>{
+            const id = sel.getAttribute('data-hist-id');
+            const rec = db.radar.historic.find((h)=>h.id===id);
+            if(rec){ rec.verdict = sel.value; saveDb(db); }
+          });
+        });
+
+        // add to historic
+        backdrop.querySelectorAll('[data-add-hist]').forEach((btn)=>{
+          btn.addEventListener('click', ()=>{
+            const matchId = btn.getAttribute('data-add-hist');
+            const m = radarState.matches.find((r)=>r.id===matchId);
+            if(!m) return;
+            db.radar.historic.unshift({
+              id: uid('rh'),
+              sourceId: m.id,
+              date: new Date().toISOString().slice(0,10),
+              leagueId: m.leagueId,
+              league: m.league,
+              homeId: m.homeId,
+              home: m.home,
+              awayId: m.awayId,
+              away: m.away,
+              studyScore: m.studyScore,
+              type: m.type,
+              fsiHome: m.fsiHome,
+              fsiAway: m.fsiAway,
+              verdict: 'pending'
+            });
+            saveDb(db);
+            backdrop.remove();
+            // reopen
+            document.getElementById('rdxOpenHistoric')?.click();
+          });
+        });
+      });
+
       return;
     }
 
