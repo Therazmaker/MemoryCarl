@@ -10312,73 +10312,126 @@ function computeTeamIntelligencePanel(db, teamId){
     return playerEvents;
   }
 
-  // Acumula PSI de un jugador a través de los últimos N partidos del tracker
+  // Mapa: tag del partido → rol afectado + impacto PSI
+  const PSI_TAG_ROLE_MAP = {
+    keeper_heroics:       { roles: ['keeper'],                              psi: +3.0, label: 'Portero figura' },
+    finishing_edge:       { roles: ['forward','winger'],                    psi: +2.0, label: 'Definición clínica' },
+    clinical_finish:      { roles: ['forward','winger'],                    psi: +2.5, label: 'Clínico en el gol' },
+    momentum_control:     { roles: ['mid'],                                 psi: +1.5, label: 'Control del juego' },
+    territorial_pressure: { roles: ['all'],                                 psi: +1.0, label: 'Dominio territorial' },
+    counter_strike:       { roles: ['forward','winger'],                    psi: +1.5, label: 'Peligroso al contragolpe' },
+    setpiece_threat:      { roles: ['all'],                                 psi: +0.8, label: 'Pelota parada efectiva' },
+    low_block_resistance: { roles: ['defender','keeper'],                   psi: +1.2, label: 'Resistencia defensiva' },
+    finishing_failure:    { roles: ['forward','winger'],                    psi: -2.5, label: 'Falla ocasiones' },
+    discipline_issues:    { roles: ['all'],                                 psi: -2.0, label: 'Problemas disciplinarios' },
+    injury_disruption:    { roles: ['all'],                                 psi: -1.5, label: 'Lesión' },
+    defensive_errors:     { roles: ['defender','keeper'],                   psi: -2.0, label: 'Errores defensivos' },
+    var_turning_point:    { roles: ['all'],                                 psi: -1.0, label: 'Afectado por VAR' },
+  };
+
+  function inferRoleFromLineupIndex(idx){
+    if(idx === 0) return 'keeper';
+    if(idx <= 4)  return 'defender';
+    if(idx <= 7)  return 'mid';
+    return 'forward';
+  }
+
+  // Extrae tags relevantes del diagnóstico del partido para un equipo
+  function extractMatchTagsForTeam(match, teamId){
+    const isHome = match.homeId === teamId;
+    const diag   = match.narrativeModule?.diagnostic?.diagnostic || match.narrativeModule?.diagnostic || null;
+    const labels  = diag?.labels || {};
+    const myGoals  = Number(isHome ? match.homeGoals : match.awayGoals) || 0;
+    const oppGoals = Number(isHome ? match.awayGoals : match.homeGoals) || 0;
+    const won = myGoals > oppGoals;
+    const lost = myGoals < oppGoals;
+    const result = {};
+    if(labels.keeper_saves_impact > 0.4 && !won)        result['keeper_heroics']       = clamp(labels.keeper_saves_impact, 0, 1);
+    if(labels.control_without_conversion > 0.45)        result['finishing_failure']    = clamp(labels.control_without_conversion, 0, 1);
+    if(won && (labels.control_without_conversion||0)<0.4) result['finishing_edge']     = 0.7;
+    if(labels.discipline_impact > 0.4)                  result['discipline_issues']    = clamp(labels.discipline_impact, 0, 1);
+    if(labels.territorial_dominance > 0.5 && won)       result['momentum_control']     = clamp(labels.territorial_dominance, 0, 1);
+    if(labels.transition_punished > 0.5 && won)         result['counter_strike']       = clamp(labels.transition_punished, 0, 1);
+    if(labels.defensive_fragility > 0.5 && lost)        result['defensive_errors']     = clamp(labels.defensive_fragility, 0, 1);
+    if(!lost && (labels.low_block_resistance||0) > 0.5) result['low_block_resistance'] = clamp(labels.low_block_resistance, 0, 1);
+    if(labels.injury_disruption > 0.4)                  result['injury_disruption']    = clamp(labels.injury_disruption, 0, 1);
+    return result;
+  }
+
+  // Acumula PSI desde XI + tags del diagnóstico (no necesita relato crudo)
   function computePlayerPSI(db, playerName, teamId, limit = 5){
     if(!playerName || !teamId) return null;
     const nameLower = playerName.toLowerCase().trim();
+    const nameParts = nameLower.split(' ').filter(p => p.length > 3);
 
-    // Buscar partidos del equipo con relato
     const teamMatches = (db.tracker || [])
-      .filter(m => (m.homeId === teamId || m.awayId === teamId) && m.narrativeModule?.rawText)
+      .filter(m => {
+        const isHome = m.homeId === teamId;
+        const isAway = m.awayId === teamId;
+        if(!isHome && !isAway) return false;
+        const lineup = isHome ? (m.homeLineup||[]) : (m.awayLineup||[]);
+        return lineup.length > 0;
+      })
       .sort(compareByDateAsc)
       .slice(-limit);
 
     if(!teamMatches.length) return null;
 
-    let totalPsi = 0;
-    let totalEvents = 0;
-    const tagCounts = {};
-    const matchHistory = []; // para tendencia
+    const matchHistory = [];
+    const tagTotals = {};
+    let gamesFound = 0;
 
     for(const match of teamMatches){
-      const homeName = db.teams.find(t => t.id === match.homeId)?.name || '';
-      const awayName = db.teams.find(t => t.id === match.awayId)?.name || '';
-      const events = extractPlayerEventsFromNarrative(
-        match.narrativeModule.rawText, homeName, awayName
-      );
+      const isHome = match.homeId === teamId;
+      const lineup = isHome ? (match.homeLineup||[]) : (match.awayLineup||[]);
 
-      // Buscar al jugador por nombre (fuzzy: contiene el apellido)
-      const playerKey = Object.keys(events).find(k =>
-        k.toLowerCase().includes(nameLower) || nameLower.includes(k.toLowerCase().split(' ').slice(-1)[0])
-      );
-
-      if(!playerKey) continue;
-
-      const pData = events[playerKey];
-      const matchPsi = pData.events.reduce((s, e) => s + e.psi, 0);
-      totalPsi += matchPsi;
-      totalEvents += pData.events.length;
-      matchHistory.push(matchPsi);
-      pData.events.forEach(e => {
-        tagCounts[e.tag] = (tagCounts[e.tag] || 0) + 1;
+      const playerIdx = lineup.findIndex(n => {
+        const nLower = String(n||'').toLowerCase();
+        return nLower.includes(nameLower) ||
+          nameParts.some(part => nLower.includes(part));
       });
+      if(playerIdx === -1) continue;
+      gamesFound++;
+
+      const role     = inferRoleFromLineupIndex(playerIdx);
+      const tags     = extractMatchTagsForTeam(match, teamId);
+      const myGoals  = Number(isHome ? match.homeGoals : match.awayGoals) || 0;
+      const oppGoals = Number(isHome ? match.awayGoals : match.homeGoals) || 0;
+
+      let matchPsi = myGoals > oppGoals ? 1.0 : myGoals === oppGoals ? 0.2 : -0.8;
+      for(const [tagKey, tagStrength] of Object.entries(tags)){
+        const rule = PSI_TAG_ROLE_MAP[tagKey];
+        if(!rule) continue;
+        const affected = rule.roles.includes('all') || rule.roles.includes(role);
+        if(!affected) continue;
+        const delta = rule.psi * clamp(Number(tagStrength)||0.5, 0.1, 1);
+        matchPsi += delta;
+        if(delta !== 0) tagTotals[tagKey] = (tagTotals[tagKey]||0) + Math.abs(delta);
+      }
+      matchHistory.push(matchPsi);
     }
 
     if(!matchHistory.length) return null;
 
-    // Normalizar PSI a escala -100..100
-    const rawAvg = totalPsi / matchHistory.length;
-    const normalizedPsi = clamp(rawAvg * 12, -100, 100);
-
-    // Tendencia: última mitad vs primera mitad
-    const half = Math.floor(matchHistory.length / 2);
-    const recentAvg = matchHistory.slice(-half || -1).reduce((s,v)=>s+v,0) / (half||1);
-    const oldAvg    = matchHistory.slice(0, half||1).reduce((s,v)=>s+v,0) / (half||1);
+    const rawAvg = matchHistory.reduce((s,v)=>s+v,0) / matchHistory.length;
+    const normalizedPsi = clamp(rawAvg * 10, -100, 100);
+    const half = Math.max(1, Math.floor(matchHistory.length / 2));
+    const recentAvg = matchHistory.slice(-half).reduce((s,v)=>s+v,0) / half;
+    const oldAvg    = matchHistory.slice(0, half).reduce((s,v)=>s+v,0) / half;
     const trend = recentAvg > oldAvg + 0.3 ? 'rising' : recentAvg < oldAvg - 0.3 ? 'falling' : 'stable';
-
-    // Estado
     const state = normalizedPsi >= 20 ? 'hot' : normalizedPsi >= -10 ? 'ok' : 'struggling';
-    const dominantTag = Object.entries(tagCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+    const dominantTag = Object.entries(tagTotals).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
 
     return {
       name: playerName,
       psi: Number(normalizedPsi.toFixed(1)),
-      state,   // 'hot' | 'ok' | 'struggling'
-      trend,   // 'rising' | 'falling' | 'stable'
+      state,
+      trend,
       dominantTag,
-      tagCounts,
+      dominantTagLabel: PSI_TAG_ROLE_MAP[dominantTag]?.label || dominantTag || '',
+      tagCounts: tagTotals,
       matchHistory,
-      gamesAnalyzed: matchHistory.length
+      gamesAnalyzed: gamesFound
     };
   }
 
@@ -12241,7 +12294,7 @@ function computeTeamIntelligencePanel(db, teamId){
                       <tr>
                         <td class="rdx-psi-state">${psiStateIcon(p.psi.state)}</td>
                         <td class="rdx-psi-name" title="${p.name}">${p.name.split(' ').slice(-1)[0]}, ${p.name.split(' ')[0]}</td>
-                        <td class="rdx-psi-tag">${psiTagLabel(p.psi.dominantTag)} ${psiTrendIcon(p.psi.trend)}</td>
+                        <td class="rdx-psi-tag">${p.psi.dominantTagLabel || ''} ${psiTrendIcon(p.psi.trend)}</td>
                         <td><div class="rdx-psi-bar-wrap"><div class="rdx-psi-bar" style="width:${psiBarWidth(p.psi.psi)}%;background:${psiBarColor(p.psi.psi)}"></div></div></td>
                         <td class="rdx-psi-val">${p.psi.psi>0?'+':''}${p.psi.psi}</td>
                       </tr>
@@ -12501,6 +12554,7 @@ function computeTeamIntelligencePanel(db, teamId){
           prediction: m.prediction || '',
           formHomeSeq: m.formHome?.sequenceStr || '',
           formAwaySeq: m.formAway?.sequenceStr || '',
+          odds: m.prediction==='home' ? (m.oddsHome||null) : m.prediction==='away' ? (m.oddsAway||null) : m.prediction==='draw' ? (m.oddsDraw||null) : null,
           verdict: 'pending'
         });
         saveDb(db);
@@ -12510,81 +12564,224 @@ function computeTeamIntelligencePanel(db, teamId){
 
       // ── HISTORIC MODAL
       document.getElementById('rdxOpenHistoric')?.addEventListener('click', ()=>{
-        // build historic from radar matches that have a verdict
-        const hist = (db.radar.historic || []).slice().sort((a,b)=>parseSortableDate(b.date||'')-parseSortableDate(a.date||''));
-        const total = hist.length;
-        const won = hist.filter((h)=>h.verdict==='won').length;
-        const lost = hist.filter((h)=>h.verdict==='lost').length;
-        const pending = hist.filter((h)=>!h.verdict||h.verdict==='pending').length;
-        const pct = total > 0 ? Math.round((won / (won+lost||1)) * 100) : '-';
+        const openHistModal = () => {
+          const hist = (db.radar.historic || []).slice().sort((a,b)=>parseSortableDate(b.date||'')-parseSortableDate(a.date||''));
+          const total   = hist.length;
+          const resolved = hist.filter(h => h.verdict==='won' || h.verdict==='lost');
+          const won     = hist.filter(h => h.verdict==='won').length;
+          const lost    = hist.filter(h => h.verdict==='lost').length;
+          const pending = hist.filter(h => !h.verdict || h.verdict==='pending').length;
+          const pct     = resolved.length > 0 ? Math.round((won / resolved.length) * 100) : '-';
 
-        const histRows = hist.length === 0 ? `<div style="text-align:center;padding:32px 0;color:#6e7681;font-size:13px;">Sin histórico todavía. Usa el botón "Al histórico" en cada partido.</div>` :
-          hist.map((h)=>{
-            const hName = db.teams.find((t)=>t.id===h.homeId)?.name || h.home || '-';
-            const aName = db.teams.find((t)=>t.id===h.awayId)?.name || h.away || '-';
-            const lName = db.leagues.find((l)=>l.id===h.leagueId)?.name || h.league || '-';
-            const v = h.verdict || 'pending';
-            const predLabel = {'home':'1 Local','draw':'X Empate','away':'2 Visitante','home_draw':'1X','away_draw':'X2'}[h.prediction||''] || '';
-            const predHtml = predLabel ? `<span style="font-size:10px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);color:#818cf8;border-radius:4px;padding:1px 6px;font-weight:700;">${predLabel}</span>` : '';
-            const formHtml = h.formHomeSeq || h.formAwaySeq ? `<span style="font-family:monospace;font-size:10px;color:#6e7681;">${h.formHomeSeq||'?'} vs ${h.formAwaySeq||'?'}</span>` : '';
-            return `
-              <div class="rdx-hist-row">
-                <div style="flex:1;min-width:200px;">
-                  <div class="rdx-hist-teams">${hName} vs ${aName}</div>
-                  <div style="font-size:11px;color:#6e7681;margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-                    <span>${lName} · ${formatDate(h.date||'')}</span>
-                    <span>Score: <b style="color:#e6edf3;">${h.studyScore??'-'}</b></span>
-                    <span>${(h.type||'').toUpperCase()}</span>
-                    ${predHtml}
-                    ${formHtml}
-                  </div>
-                </div>
-                <select class="rdx-verdict-select" data-hist-id="${h.id}">
-                  <option value="pending" ${v==='pending'?'selected':''}>⏳ Pendiente</option>
-                  <option value="won" ${v==='won'?'selected':''}>✅ Acertó</option>
-                  <option value="lost" ${v==='lost'?'selected':''}>❌ Falló</option>
-                </select>
+          // ROI teórico: cada partido apostado 1u, ganancia = cuota-1, pérdida = -1
+          const staked   = resolved.length;
+          const returned = hist.reduce((s,h) => {
+            if(h.verdict==='won')  return s + (Number(h.odds||0) > 1 ? Number(h.odds) : 1);
+            if(h.verdict==='lost') return s + 0;
+            return s;
+          }, 0);
+          const profit = returned - staked;
+          const roi    = staked > 0 ? ((profit / staked) * 100).toFixed(1) : '-';
+          const yield_ = staked > 0 ? ((profit / staked) * 100).toFixed(1) : '-';
+
+          // Racha actual
+          const sortedForStreak = hist.filter(h=>h.verdict==='won'||h.verdict==='lost');
+          let currentStreak = 0, currentStreakType = '';
+          if(sortedForStreak.length){
+            currentStreakType = sortedForStreak[0].verdict;
+            for(const h of sortedForStreak){
+              if(h.verdict === currentStreakType) currentStreak++;
+              else break;
+            }
+          }
+          // Mejor racha ganadora
+          let bestStreak = 0, tmpStreak = 0;
+          for(const h of [...sortedForStreak].reverse()){
+            if(h.verdict==='won'){ tmpStreak++; bestStreak = Math.max(bestStreak, tmpStreak); }
+            else tmpStreak = 0;
+          }
+
+          // Winrate por tipo (CLEAN/TENSION/CHAOS)
+          const byType = {};
+          hist.filter(h=>h.verdict==='won'||h.verdict==='lost').forEach(h=>{
+            const t = (h.type||'unknown').toLowerCase();
+            byType[t] = byType[t] || {won:0,lost:0};
+            byType[t][h.verdict==='won'?'won':'lost']++;
+          });
+
+          // Winrate por liga
+          const byLeague = {};
+          hist.filter(h=>h.verdict==='won'||h.verdict==='lost').forEach(h=>{
+            const l = h.league || h.leagueId || 'Sin liga';
+            byLeague[l] = byLeague[l] || {won:0,lost:0};
+            byLeague[l][h.verdict==='won'?'won':'lost']++;
+          });
+
+          // Winrate por predicción
+          const byPred = {};
+          hist.filter(h=>h.verdict==='won'||h.verdict==='lost').forEach(h=>{
+            const p = h.prediction || 'sin pred';
+            byPred[p] = byPred[p] || {won:0,lost:0};
+            byPred[p][h.verdict==='won'?'won':'lost']++;
+          });
+
+          const predLabel = (k) => ({'home':'1 Local','draw':'X Empate','away':'2 Visit.','home_draw':'1X','away_draw':'X2'}[k]||k);
+          const wrBar = (w,l) => {
+            const tot = w+l; if(!tot) return '';
+            const pct = Math.round(w/tot*100);
+            const col = pct>=60?'#3fb950':pct>=45?'#e3b341':'#f85149';
+            return `<div style="display:flex;align-items:center;gap:6px;">
+              <div style="flex:1;height:5px;background:#21262d;border-radius:3px;overflow:hidden;">
+                <div style="width:${pct}%;height:100%;background:${col};border-radius:3px;"></div>
               </div>
-            `;
+              <span style="font-size:10px;color:${col};min-width:32px;">${pct}% (${w}/${tot})</span>
+            </div>`;
+          };
+
+          const typeBreakdown = Object.entries(byType).map(([t,[_,data]])=>{
+            const d = byType[t];
+            return `<div style="display:flex;flex-direction:column;gap:3px;">
+              <span style="font-size:10px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;">${t}</span>
+              ${wrBar(d.won,d.lost)}
+            </div>`;
           }).join('');
 
-        // also let user add current matches to historic — now handled via card button
-        const addToHistRows = '';
+          const leagueBreakdown = Object.entries(byLeague).map(([l,d])=>`
+            <div style="display:flex;flex-direction:column;gap:3px;">
+              <span style="font-size:10px;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${l}">${l}</span>
+              ${wrBar(d.won,d.lost)}
+            </div>`).join('');
 
-        const backdrop = document.createElement('div');
-        backdrop.className = 'rdx-hist-backdrop';
-        backdrop.innerHTML = `
-          <div class="rdx-hist-modal">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
-              <div>
-                <div class="rdx-hist-title">📋 Histórico del Radar</div>
-                <div class="rdx-hist-sub">Mide qué tan bien detecta el sistema partidos interesantes.</div>
+          const predBreakdown = Object.entries(byPred).map(([p,d])=>`
+            <div style="display:flex;flex-direction:column;gap:3px;">
+              <span style="font-size:10px;font-weight:700;color:#818cf8;">${predLabel(p)}</span>
+              ${wrBar(d.won,d.lost)}
+            </div>`).join('');
+
+          const streakColor = currentStreakType==='won'?'#3fb950':'#f85149';
+          const streakIcon  = currentStreakType==='won'?'🔥':'❌';
+
+          // Rows
+          const histRows = hist.length === 0
+            ? `<div style="text-align:center;padding:32px 0;color:#6e7681;font-size:13px;">Sin histórico todavía. Usa el botón "Al histórico" en cada partido.</div>`
+            : hist.map(h => {
+                const hName = db.teams.find(t=>t.id===h.homeId)?.name || h.home || '-';
+                const aName = db.teams.find(t=>t.id===h.awayId)?.name || h.away || '-';
+                const lName = db.leagues.find(l=>l.id===h.leagueId)?.name || h.league || '-';
+                const v = h.verdict || 'pending';
+                const pL = predLabel(h.prediction||'');
+                const predHtml = pL ? `<span style="font-size:10px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);color:#818cf8;border-radius:4px;padding:1px 6px;font-weight:700;">${pL}</span>` : '';
+                const formHtml = h.formHomeSeq||h.formAwaySeq ? `<span style="font-family:monospace;font-size:10px;color:#6e7681;">${h.formHomeSeq||'?'} vs ${h.formAwaySeq||'?'}</span>` : '';
+                const oddsHtml = h.odds ? `<span style="font-size:10px;color:#e3b341;">@${Number(h.odds).toFixed(2)}</span>` : '';
+                const verdictColor = v==='won'?'#3fb950':v==='lost'?'#f85149':'#6e7681';
+                const roiVal = v==='won' && h.odds ? `+${(Number(h.odds)-1).toFixed(2)}u` : v==='lost' ? '-1.00u' : '';
+                const roiColor = v==='won'?'#3fb950':'#f85149';
+                return `
+                  <div class="rdx-hist-row" data-hist-id="${h.id}">
+                    <div style="flex:1;min-width:160px;">
+                      <div class="rdx-hist-teams">${hName} vs ${aName}</div>
+                      <div style="font-size:11px;color:#6e7681;margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                        <span>${lName} · ${formatDate(h.date||'')}</span>
+                        <span>Score: <b style="color:#e6edf3;">${h.studyScore??'-'}</b></span>
+                        <span style="text-transform:uppercase;font-size:10px;">${(h.type||'').toUpperCase()}</span>
+                        ${predHtml} ${oddsHtml}
+                        ${formHtml}
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                      ${roiVal ? `<span style="font-size:11px;font-weight:700;color:${roiColor};">${roiVal}</span>` : ''}
+                      <div style="display:flex;gap:4px;">
+                        <button class="fl-btn rdx-verdict-btn ${v==='won'?'rdx-verdict-active-won':''}" data-hist-id="${h.id}" data-verdict="won" style="padding:4px 10px;font-size:11px;font-weight:700;border-radius:6px;background:${v==='won'?'rgba(63,185,80,.2)':'rgba(63,185,80,.05)'};border:1px solid ${v==='won'?'#3fb950':'rgba(63,185,80,.2)'};color:${v==='won'?'#3fb950':'#4a614e'};cursor:pointer;">✅ Acertó</button>
+                        <button class="fl-btn rdx-verdict-btn ${v==='lost'?'rdx-verdict-active-lost':''}" data-hist-id="${h.id}" data-verdict="lost" style="padding:4px 10px;font-size:11px;font-weight:700;border-radius:6px;background:${v==='lost'?'rgba(248,81,73,.2)':'rgba(248,81,73,.05)'};border:1px solid ${v==='lost'?'#f85149':'rgba(248,81,73,.2)'};color:${v==='lost'?'#f85149':'#614a4a'};cursor:pointer;">❌ Falló</button>
+                        ${v==='won' && !h.odds ? `<button class="fl-btn rdx-add-odds-btn" data-hist-id="${h.id}" style="padding:4px 8px;font-size:10px;background:rgba(227,179,65,.08);border:1px solid rgba(227,179,65,.25);color:#e3b341;border-radius:6px;cursor:pointer;">+ cuota</button>` : ''}
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join('');
+
+          const roiColor = Number(roi) > 0 ? '#3fb950' : Number(roi) < 0 ? '#f85149' : '#8b949e';
+
+          const backdrop = document.createElement('div');
+          backdrop.className = 'rdx-hist-backdrop';
+          backdrop.innerHTML = `
+            <div class="rdx-hist-modal" style="max-width:680px;width:100%;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+                <div>
+                  <div class="rdx-hist-title">📋 Histórico del Radar</div>
+                  <div class="rdx-hist-sub">Mide qué tan bien detecta el sistema partidos interesantes.</div>
+                </div>
+                <button id="rdxCloseHist" style="background:none;border:none;color:#6e7681;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
               </div>
-              <button id="rdxCloseHist" style="background:none;border:none;color:#6e7681;font-size:20px;cursor:pointer;padding:0 4px;">✕</button>
-            </div>
-            <div class="rdx-hist-stats">
-              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val">${total}</div><div class="rdx-hist-stat-lbl">Total</div></div>
-              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#3fb950;">${won}</div><div class="rdx-hist-stat-lbl">Acertados</div></div>
-              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#f85149;">${lost}</div><div class="rdx-hist-stat-lbl">Fallidos</div></div>
-              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#6e7681;">${pending}</div><div class="rdx-hist-stat-lbl">Pendientes</div></div>
-              <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#e3b341;">${pct}${pct!=='-'?'%':''}</div><div class="rdx-hist-stat-lbl">% Acierto</div></div>
-            </div>
-            <div id="rdxHistList">${histRows}${addToHistRows}</div>
-          </div>
-        `;
-        document.body.appendChild(backdrop);
 
-        backdrop.querySelector('#rdxCloseHist')?.addEventListener('click', ()=>backdrop.remove());
-        backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backdrop.remove(); });
+              <!-- KPIs principales -->
+              <div class="rdx-hist-stats" style="grid-template-columns:repeat(auto-fit,minmax(90px,1fr));">
+                <div class="rdx-hist-stat"><div class="rdx-hist-stat-val">${total}</div><div class="rdx-hist-stat-lbl">Total</div></div>
+                <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#3fb950;">${won}</div><div class="rdx-hist-stat-lbl">Acertados</div></div>
+                <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#f85149;">${lost}</div><div class="rdx-hist-stat-lbl">Fallidos</div></div>
+                <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#6e7681;">${pending}</div><div class="rdx-hist-stat-lbl">Pendientes</div></div>
+                <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#e3b341;">${pct}${pct!=='-'?'%':''}</div><div class="rdx-hist-stat-lbl">% Acierto</div></div>
+                <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:${roiColor};">${roi!=='-'?(Number(roi)>0?'+':'')+roi+'%':'-'}</div><div class="rdx-hist-stat-lbl">ROI</div></div>
+                <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:${profit>=0?'#3fb950':'#f85149'};">${staked>0?(profit>=0?'+':'')+profit.toFixed(2)+'u':'-'}</div><div class="rdx-hist-stat-lbl">Beneficio</div></div>
+                <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:${streakColor};">${currentStreak>0?`${streakIcon} ${currentStreak}`:'-'}</div><div class="rdx-hist-stat-lbl">Racha actual</div></div>
+                <div class="rdx-hist-stat"><div class="rdx-hist-stat-val" style="color:#3fb950;">🔥 ${bestStreak||'-'}</div><div class="rdx-hist-stat-lbl">Mejor racha</div></div>
+              </div>
 
-        // verdict change
-        backdrop.querySelectorAll('[data-hist-id]').forEach((sel)=>{
-          sel.addEventListener('change', ()=>{
-            const id = sel.getAttribute('data-hist-id');
-            const rec = db.radar.historic.find((h)=>h.id===id);
-            if(rec){ rec.verdict = sel.value; saveDb(db); }
+              <!-- Breakdowns -->
+              ${resolved.length >= 2 ? `
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;padding:12px;background:#0a0e15;border:1px solid #21262d;border-radius:8px;">
+                <div>
+                  <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Por tipo</div>
+                  <div style="display:flex;flex-direction:column;gap:8px;">${typeBreakdown||'<span style="font-size:11px;color:#6e7681;">Sin datos</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Por liga</div>
+                  <div style="display:flex;flex-direction:column;gap:8px;">${leagueBreakdown||'<span style="font-size:11px;color:#6e7681;">Sin datos</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Por predicción</div>
+                  <div style="display:flex;flex-direction:column;gap:8px;">${predBreakdown||'<span style="font-size:11px;color:#6e7681;">Sin datos</span>'}</div>
+                </div>
+              </div>` : ''}
+
+              <!-- Lista de partidos -->
+              <div id="rdxHistList">${histRows}</div>
+            </div>
+          `;
+          document.body.appendChild(backdrop);
+
+          backdrop.querySelector('#rdxCloseHist')?.addEventListener('click', ()=>backdrop.remove());
+          backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) backdrop.remove(); });
+
+          // Botones Acertó / Falló
+          backdrop.querySelectorAll('.rdx-verdict-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+              const id      = btn.getAttribute('data-hist-id');
+              const verdict = btn.getAttribute('data-verdict');
+              const rec     = db.radar.historic.find(h => h.id === id);
+              if(!rec) return;
+              // Toggle: si ya tiene este verdict, volver a pending
+              rec.verdict = rec.verdict === verdict ? 'pending' : verdict;
+              saveDb(db);
+              backdrop.remove();
+              openHistModal();
+            });
           });
-        });
+
+          // Botón + cuota
+          backdrop.querySelectorAll('.rdx-add-odds-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+              const id  = btn.getAttribute('data-hist-id');
+              const rec = db.radar.historic.find(h => h.id === id);
+              if(!rec) return;
+              const val = prompt('Introduce la cuota a la que apostaste (ej: 2.10):');
+              const num = Number(val?.replace(',','.'));
+              if(num > 1){ rec.odds = num; saveDb(db); backdrop.remove(); openHistModal(); }
+            });
+          });
+        };
+
+        openHistModal();
       });
 
       return;
