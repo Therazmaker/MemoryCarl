@@ -10236,7 +10236,7 @@ function computeTeamIntelligencePanel(db, teamId){
             <div><span class="fl-mini">Travel Tilt</span><b>${(Number(engine?.haTraits?.travelTilt)||0).toFixed(2)}</b></div>
           </div>
         </div>
-        
+
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">📐 Base estructural temporada (manual)</div>
           <div class="fl-mini" style="margin-bottom:8px;">Define PJ, G, E, P, GF, GC, DG y PTS como referencia estructural del equipo.</div>
