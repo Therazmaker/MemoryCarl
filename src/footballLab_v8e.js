@@ -11465,41 +11465,41 @@ function computeTeamIntelligencePanel(db, teamId){
               </div>
 
               <div class="b2x-sidebar-section">Módulos</div>
-              <div class="b2x-sidebar-item">
+              <div class="b2x-sidebar-item" id="b2xNavFSI">
                 <span class="b2x-sidebar-icon">🧭</span>
                 Form Surprise (FSI)
                 <span class="b2x-sidebar-badge">ON</span>
               </div>
-              <div class="b2x-sidebar-item">
+              <div class="b2x-sidebar-item" id="b2xNavCSI">
                 <span class="b2x-sidebar-icon">💎</span>
                 Current Strength
                 <span class="b2x-sidebar-badge">ON</span>
               </div>
-              <div class="b2x-sidebar-item">
+              <div class="b2x-sidebar-item" id="b2xNavRQI">
                 <span class="b2x-sidebar-icon">📊</span>
                 Result Quality (RQI)
                 <span class="b2x-sidebar-badge">ON</span>
               </div>
-              <div class="b2x-sidebar-item">
+              <div class="b2x-sidebar-item" id="b2xNavMomentum">
                 <span class="b2x-sidebar-icon">🌊</span>
                 Momentum Engine
                 <span class="b2x-sidebar-badge">ON</span>
               </div>
-              <div class="b2x-sidebar-item">
+              <div class="b2x-sidebar-item" id="b2xNavPoisson">
                 <span class="b2x-sidebar-icon">🎯</span>
                 Poisson Engine
               </div>
-              <div class="b2x-sidebar-item">
+              <div class="b2x-sidebar-item" id="b2xNavXG">
                 <span class="b2x-sidebar-icon">🔮</span>
                 xG Engine
               </div>
 
               <div class="b2x-sidebar-section">Memoria</div>
-              <div class="b2x-sidebar-item">
+              <div class="b2x-sidebar-item" id="b2xNavTimeline">
                 <span class="b2x-sidebar-icon">📅</span>
                 Timeline Partidos
               </div>
-              <div class="b2x-sidebar-item">
+              <div class="b2x-sidebar-item" id="b2xNavDNA">
                 <span class="b2x-sidebar-icon">🧬</span>
                 Team DNA
               </div>
@@ -11511,7 +11511,7 @@ function computeTeamIntelligencePanel(db, teamId){
               <span id="b2ImportStatus" class="b2x-sidebar-item" style="font-size:10px;padding:4px 16px;color:var(--b2-green);"></span>
 
               <div class="b2x-sidebar-section" style="margin-top:8px;">Captura</div>
-              <div style="padding:12px 14px;">
+              <div id="b2CapturePanel" style="padding:12px 14px;">
                 <div class="b2x-field-row">
                   <div class="b2x-field">
                     <label class="b2x-field-lbl">Fecha</label>
@@ -11976,19 +11976,98 @@ function computeTeamIntelligencePanel(db, teamId){
       });
 
       // ── Sidebar navigation ──
-      document.querySelectorAll('.b2x-sidebar-item[id]').forEach(item => {
-        item.addEventListener('click', () => {
-          document.querySelectorAll('.b2x-sidebar-item[id]').forEach(i => i.classList.remove('active'));
-          item.classList.add('active');
-          if (item.id === 'b2xNavDashboard') {
+      const hidePanel = (node)=>{ if(node && node.style.display !== 'none') node.style.display = 'none'; };
+      const showPanel = (node)=>{ if(node && node.style.display === 'none') node.style.display = 'block'; };
+      const scrollToNode = (node)=>node?.scrollIntoView({ behavior:'smooth', block:'start' });
+      const ensurePrematchVisible = (onReady)=>{
+        const out = document.getElementById('b2PrematchOut');
+        if(!out) return;
+        if(out.style.display !== 'none' && String(out.innerHTML || '').trim()){
+          if(typeof onReady === 'function') onReady(out);
+          return;
+        }
+        document.getElementById('b2PrematchGenerate')?.click();
+        setTimeout(()=>{ if(typeof onReady === 'function') onReady(out); }, 420);
+      };
+      const scrollPrematchModule = (needle)=>{
+        ensurePrematchVisible((out)=>{
+          const titles = Array.from(out.querySelectorAll('.b2p-title'));
+          const target = titles.find((el)=>String(el.textContent || '').toLowerCase().includes(needle)) || out;
+          scrollToNode(target);
+        });
+      };
+
+      const sidebarActions = {
+        b2xNavDashboard: {
+          close: ()=>hidePanel(document.getElementById('b2PowerDashboard')),
+          open: ()=>{
             const dash = document.getElementById('b2PowerDashboard');
-            if (dash && dash.style.display !== 'none') dash.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if(!dash) return;
+            showPanel(dash);
+            scrollToNode(dash);
           }
-          if (item.id === 'b2xNavEditorial' || item.id === 'b2xNavInsights') {
-            const out = document.getElementById('b2PrematchOut');
-            if (out && out.style.display !== 'none') out.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            else document.getElementById('b2PrematchGenerate')?.click();
+        },
+        b2xNavEditorial: {
+          close: ()=>hidePanel(document.getElementById('b2PrematchOut')),
+          open: ()=>ensurePrematchVisible((out)=>scrollToNode(out))
+        },
+        b2xNavInsights: {
+          close: ()=>hidePanel(document.getElementById('b2PrematchOut')),
+          open: ()=>ensurePrematchVisible((out)=>scrollToNode(out))
+        },
+        b2xNavFSI: {
+          close: ()=>hidePanel(document.getElementById('b2PrematchOut')),
+          open: ()=>scrollPrematchModule('form surprise')
+        },
+        b2xNavCSI: {
+          close: ()=>hidePanel(document.getElementById('b2PrematchOut')),
+          open: ()=>scrollPrematchModule('current strength')
+        },
+        b2xNavRQI: {
+          close: ()=>hidePanel(document.getElementById('b2PrematchOut')),
+          open: ()=>scrollPrematchModule('result quality')
+        },
+        b2xNavMomentum: {
+          close: ()=>hidePanel(document.getElementById('b2PrematchOut')),
+          open: ()=>ensurePrematchVisible((out)=>scrollToNode(out))
+        },
+        b2xNavPoisson: {
+          close: ()=>hidePanel(document.getElementById('b2PrematchOut')),
+          open: ()=>ensurePrematchVisible((out)=>scrollToNode(out))
+        },
+        b2xNavXG: {
+          close: ()=>hidePanel(document.getElementById('b2PrematchOut')),
+          open: ()=>ensurePrematchVisible((out)=>scrollToNode(out))
+        },
+        b2xNavTimeline: {
+          open: ()=>scrollToNode(document.querySelector('.b2x-memory-list'))
+        },
+        b2xNavDNA: {
+          open: ()=>scrollToNode(document.getElementById('b2GlobalLearningPanel'))
+        },
+        b2ImportMatchpack: {
+          keepActive: false,
+          open: ()=>document.getElementById('b2ImportMatchpackFile')?.click()
+        }
+      };
+
+      const navItems = Array.from(document.querySelectorAll('.b2x-sidebar-item[id]')).filter((item)=>item.id !== 'b2ImportStatus');
+      navItems.forEach((item)=>{
+        item.addEventListener('click', ()=>{
+          const action = sidebarActions[item.id];
+          if(!action) return;
+          const isActive = item.classList.contains('active');
+          if(action.keepActive === false){
+            action.open?.();
+            return;
           }
+          navItems.forEach((i)=>i.classList.remove('active'));
+          if(isActive){
+            action.close?.();
+            return;
+          }
+          item.classList.add('active');
+          action.open?.();
         });
       });
       document.getElementById('b2Team')?.addEventListener('change', (e)=>render('brainv2', { leagueId: selectedLeagueId, teamId: e.target.value || "" }));
@@ -11999,9 +12078,6 @@ function computeTeamIntelligencePanel(db, teamId){
           lineupInput: document.getElementById('b2Lineup'),
           shapeInput: document.getElementById('b2LineupShape')
         });
-      });
-      document.getElementById('b2ImportMatchpack')?.addEventListener('click', ()=>{
-        document.getElementById('b2ImportMatchpackFile')?.click();
       });
       document.getElementById('b2ImportMatchpackFile')?.addEventListener('change', async (ev)=>{
         const status = document.getElementById('b2ImportStatus');
