@@ -9705,9 +9705,8 @@ function computeTeamIntelligencePanel(db, teamId){
   function buildRadarMatches({ db, payload = {}, brainV2 = {} }){
     const today = new Date().toISOString().slice(0, 10);
     const provided = Array.isArray(payload?.matches) ? payload.matches : null;
-    const savedRadar = Array.isArray(db?.radar?.matches) ? db.radar.matches : [];
     const trackerToday = (Array.isArray(db?.tracker) ? db.tracker : []).filter((m)=>String(m?.date || '').slice(0, 10) === today);
-    const sourceMatches = provided || (savedRadar.length ? savedRadar : trackerToday);
+    const sourceMatches = provided || trackerToday;
     return sourceMatches
       .filter((m)=>m?.homeId && m?.awayId)
       .map((m)=>{
@@ -9739,11 +9738,7 @@ function computeTeamIntelligencePanel(db, teamId){
           away: away.name || 'Visitante',
           homeId: home.id,
           awayId: away.id,
-          odds: m.odds || {
-            home: Number(m?.oddsHome) || null,
-            draw: Number(m?.oddsDraw) || null,
-            away: Number(m?.oddsAway) || null
-          },
+          odds: null,
           strengthHome,
           strengthAway,
           strengthGap: Number(scorePack.strengthGap.toFixed(1)),
@@ -9760,12 +9755,7 @@ function computeTeamIntelligencePanel(db, teamId){
   function sortRadarMatches(rows = [], sortBy = 'studyScore'){
     const list = rows.slice();
     if(sortBy === 'kickoff'){
-      return list.sort((a,b)=>{
-        const aTs = parseSortableDate(a.kickoff);
-        const bTs = parseSortableDate(b.kickoff);
-        if(Number.isFinite(aTs) && Number.isFinite(bTs)) return aTs - bTs;
-        return String(formatRadarKickoff(a.kickoff)).localeCompare(String(formatRadarKickoff(b.kickoff)), 'es', { sensitivity:'base' });
-      });
+      return list.sort((a,b)=>parseSortableDate(a.kickoff) - parseSortableDate(b.kickoff));
     }
     if(sortBy === 'league'){
       return list.sort((a,b)=>String(a.league || '').localeCompare(String(b.league || ''), 'es', { sensitivity:'base' }) || parseSortableDate(a.kickoff) - parseSortableDate(b.kickoff));
@@ -11331,32 +11321,15 @@ function computeTeamIntelligencePanel(db, teamId){
 
     if(view==="radar"){
       const brainV2 = loadBrainV2();
-      const leagues = db.leagues.slice().sort((a,b)=>String(a.name || '').localeCompare(String(b.name || ''), 'es', { sensitivity:'base' }));
-      const defaultLeagueId = radarState.filters?.leagueId || db.settings.selectedLeagueId || leagues[0]?.id || '';
-      const selectedLeagueId = payload?.leagueId || defaultLeagueId;
-      const leagueTeams = selectedLeagueId ? getTeamsForLeague(db, selectedLeagueId) : db.teams;
-      const sortedTeams = leagueTeams.slice().sort((a,b)=>String(a.name || '').localeCompare(String(b.name || ''), 'es', { sensitivity:'base' }));
-      const homeDefault = sortedTeams[0]?.id || '';
-      const awayDefault = sortedTeams[1]?.id || sortedTeams[0]?.id || '';
-
-      radarState.filters = { ...(radarState.filters || {}), leagueId: selectedLeagueId };
       radarState.matches = buildRadarMatches({ db, payload, brainV2 });
       const sorted = sortRadarMatches(radarState.matches, radarState.sortBy || 'studyScore');
       const typeBadge = (type)=>`<span class="fl-radar-badge fl-radar-badge-${type}">${type}</span>`;
-      const oddsText = (odds)=>{
-        const homeOdd = Number(odds?.home);
-        const drawOdd = Number(odds?.draw);
-        const awayOdd = Number(odds?.away);
-        if(!Number.isFinite(homeOdd) && !Number.isFinite(drawOdd) && !Number.isFinite(awayOdd)) return '-';
-        return [homeOdd, drawOdd, awayOdd].map((v)=>Number.isFinite(v) ? v.toFixed(2) : '-').join(' / ');
-      };
       const rows = sorted.map((m)=>`
         <tr>
           <td>${m.league}</td>
           <td>${formatRadarKickoff(m.kickoff)}</td>
           <td>${m.home}</td>
           <td>${m.away}</td>
-          <td>${oddsText(m.odds)}</td>
           <td>${m.strengthHome}</td>
           <td>${m.strengthAway}</td>
           <td>${m.strengthGap}</td>
@@ -11367,33 +11340,12 @@ function computeTeamIntelligencePanel(db, teamId){
           <td>${typeBadge(m.type)}</td>
           <td>
             <button class="fl-btn" data-radar-open-sim="${m.id}">Abrir simulación</button>
-            <button class="fl-btn" data-radar-remove="${m.id}" style="margin-top:6px;">Quitar</button>
             ${m.flags.length ? `<div class="fl-mini" style="margin-top:4px;">${m.flags.join(' · ')}</div>` : ''}
           </td>
         </tr>
       `).join('');
 
       content.innerHTML = `
-        <div class="fl-card fl-radar-card">
-          <div style="font-weight:800;margin-bottom:8px;">Agregar partido al Radar del Día</div>
-          <div class="fl-row">
-            <select id="radarLeagueSel" class="fl-select" style="min-width:220px;">
-              ${leagues.map((l)=>`<option value="${l.id}" ${l.id===selectedLeagueId?'selected':''}>${l.name}</option>`).join('')}
-            </select>
-            <select id="radarHomeSel" class="fl-select" style="min-width:220px;">
-              ${sortedTeams.map((t)=>`<option value="${t.id}" ${t.id===homeDefault?'selected':''}>${t.name}</option>`).join('')}
-            </select>
-            <select id="radarAwaySel" class="fl-select" style="min-width:220px;">
-              ${sortedTeams.map((t)=>`<option value="${t.id}" ${t.id===awayDefault?'selected':''}>${t.name}</option>`).join('')}
-            </select>
-            <input id="radarKickoff" class="fl-input" type="datetime-local" title="Kickoff" />
-            <input id="radarOddH" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota Local" style="max-width:130px;" />
-            <input id="radarOddD" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota Empate" style="max-width:130px;" />
-            <input id="radarOddA" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota Visitante" style="max-width:130px;" />
-            <button class="fl-btn" id="radarAddMatchBtn">Agregar</button>
-            <span id="radarStatus" class="fl-mini"></span>
-          </div>
-        </div>
         <div class="fl-card fl-radar-card">
           <div class="fl-row" style="justify-content:space-between;align-items:flex-end;">
             <div>
@@ -11413,74 +11365,26 @@ function computeTeamIntelligencePanel(db, teamId){
             <table class="fl-table fl-radar-table">
               <thead>
                 <tr>
-                  <th>Liga</th><th>Hora</th><th>Local</th><th>Visitante</th><th>Cuotas 1/X/2</th>
+                  <th>Liga</th><th>Hora</th><th>Local</th><th>Visitante</th>
                   <th>Current Strength L</th><th>Current Strength V</th><th>Strength Gap</th>
                   <th>FSI L</th><th>FSI V</th><th>Avg FSI</th><th>Study Score</th><th>Tipo</th><th>Acción</th>
                 </tr>
               </thead>
-              <tbody>${rows || '<tr><td colspan="14" class="fl-muted">Sin partidos cargados en Radar del Día.</td></tr>'}</tbody>
+              <tbody>${rows || '<tr><td colspan="13" class="fl-muted">Sin partidos para hoy en la fuente actual.</td></tr>'}</tbody>
             </table>
           </div>
         </div>
       `;
 
-      document.getElementById('radarLeagueSel')?.addEventListener('change', (ev)=>{
-        radarState.filters = { ...(radarState.filters || {}), leagueId: ev.target.value || '' };
-        render('radar', { ...payload, leagueId: ev.target.value || '' });
-      });
       document.getElementById('radarSortBy')?.addEventListener('change', (ev)=>{
         radarState.sortBy = ev.target.value || 'studyScore';
         render('radar', payload);
-      });
-      document.getElementById('radarAddMatchBtn')?.addEventListener('click', ()=>{
-        const status = document.getElementById('radarStatus');
-        const leagueId = document.getElementById('radarLeagueSel')?.value || '';
-        const homeId = document.getElementById('radarHomeSel')?.value || '';
-        const awayId = document.getElementById('radarAwaySel')?.value || '';
-        const kickoff = document.getElementById('radarKickoff')?.value || '';
-        const oddsHome = Number(document.getElementById('radarOddH')?.value);
-        const oddsDraw = Number(document.getElementById('radarOddD')?.value);
-        const oddsAway = Number(document.getElementById('radarOddA')?.value);
-
-        if(!leagueId || !homeId || !awayId){
-          if(status) status.textContent = '⚠️ Selecciona liga, local y visitante.';
-          return;
-        }
-        if(homeId===awayId){
-          if(status) status.textContent = '⚠️ Local y visitante deben ser distintos.';
-          return;
-        }
-
-        db.radar ||= { matches: [] };
-        db.radar.matches ||= [];
-        db.radar.matches.push({
-          id: uid('radar'),
-          leagueId,
-          homeId,
-          awayId,
-          kickoff,
-          odds: {
-            home: Number.isFinite(oddsHome) ? oddsHome : null,
-            draw: Number.isFinite(oddsDraw) ? oddsDraw : null,
-            away: Number.isFinite(oddsAway) ? oddsAway : null
-          },
-          createdAt: Date.now()
-        });
-        saveDb(db);
-        render('radar', { ...payload, leagueId });
       });
       content.querySelectorAll('[data-radar-open-sim]').forEach((btn)=>btn.onclick = ()=>{
         const match = radarState.matches.find((row)=>row.id===btn.getAttribute('data-radar-open-sim'));
         if(!match) return;
         radarState.selectedMatchId = match.id;
         render('versus', { homeId: match.homeId, awayId: match.awayId, leagueId: match.leagueId });
-      });
-      content.querySelectorAll('[data-radar-remove]').forEach((btn)=>btn.onclick = ()=>{
-        const matchId = btn.getAttribute('data-radar-remove');
-        db.radar ||= { matches: [] };
-        db.radar.matches = (db.radar.matches || []).filter((m)=>m.id!==matchId);
-        saveDb(db);
-        render('radar', payload);
       });
       return;
     }
