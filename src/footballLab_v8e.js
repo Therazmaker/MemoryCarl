@@ -3268,8 +3268,8 @@ export function initFootballLab(){
       .b2x-debug-lbl{font-size:10px;color:var(--b2-text3);display:flex;align-items:center;gap:5px;cursor:pointer;font-family:var(--b2-font-mono);white-space:nowrap;}
 
       /* ── 3-col layout ── */
-      .b2x-body{display:grid;grid-template-columns:300px 1fr 440px;flex:1;overflow:hidden;border-top:1px solid var(--b2-border);}
-      .b2x-col{overflow-y:auto;height:calc(100vh - 54px - 58px);}
+      .b2x-body{display:grid;grid-template-columns:300px 1fr 440px;flex:1;overflow:hidden;border-top:1px solid var(--b2-border);transition:grid-template-columns .25s ease;}
+      .b2x-col{overflow-y:auto;height:calc(100vh - 54px - 58px);transition:all .25s ease;}
       .b2x-col::-webkit-scrollbar{width:4px;}
       .b2x-col::-webkit-scrollbar-track{background:transparent;}
       .b2x-col::-webkit-scrollbar-thumb{background:rgba(255,255,255,.08);border-radius:2px;}
@@ -3277,6 +3277,10 @@ export function initFootballLab(){
       .b2x-col-left{background:var(--b2-surface);border-right:1px solid var(--b2-border);}
       .b2x-col-center{background:var(--b2-bg);padding:16px;}
       .b2x-col-right{background:var(--b2-surface);border-left:1px solid var(--b2-border);padding:14px;display:flex;flex-direction:column;gap:12px;}
+      .b2x-shell.b2x-vision-focus .b2x-body{grid-template-columns:1fr 300px;}
+      .b2x-shell.b2x-vision-focus .b2x-col-left{display:none;}
+      .b2x-shell.b2x-vision-focus .b2x-col-right{padding:10px;gap:8px;}
+      .b2x-shell.b2x-vision-focus #b2Vision{box-shadow:0 0 0 1px rgba(88,166,255,.35),0 0 24px rgba(88,166,255,.1);}
 
       /* ── Sidebar nav (left col) ── */
       .b2x-sidebar-section{padding:12px 16px 4px;font-size:7.5px;letter-spacing:3px;color:var(--b2-text3);text-transform:uppercase;font-family:var(--b2-font-mono);}
@@ -11976,6 +11980,9 @@ function computeTeamIntelligencePanel(db, teamId){
       });
 
       // ── Sidebar navigation ──
+      const setVisionFocusMode = (enabled)=>{
+        document.querySelector('.b2x-shell')?.classList.toggle('b2x-vision-focus', !!enabled);
+      };
       const hidePanel = (node)=>{ if(node && node.style.display !== 'none') node.style.display = 'none'; };
       const showPanel = (node)=>{ if(node && node.style.display === 'none') node.style.display = 'block'; };
       const scrollToNode = (node)=>node?.scrollIntoView({ behavior:'smooth', block:'start' });
@@ -12054,6 +12061,7 @@ function computeTeamIntelligencePanel(db, teamId){
       const navItems = Array.from(document.querySelectorAll('.b2x-sidebar-item[id]')).filter((item)=>item.id !== 'b2ImportStatus');
       navItems.forEach((item)=>{
         item.addEventListener('click', ()=>{
+          setVisionFocusMode(false);
           const action = sidebarActions[item.id];
           if(!action) return;
           const isActive = item.classList.contains('active');
@@ -12071,6 +12079,8 @@ function computeTeamIntelligencePanel(db, teamId){
         });
       });
       document.getElementById('b2Team')?.addEventListener('change', (e)=>render('brainv2', { leagueId: selectedLeagueId, teamId: e.target.value || "" }));
+      document.getElementById('b2PrematchGenerate')?.addEventListener('click', ()=>setVisionFocusMode(false));
+      document.getElementById('b2PrematchRegenerate')?.addEventListener('click', ()=>setVisionFocusMode(false));
       document.getElementById('b2OpenLineupComposer')?.addEventListener('click', ()=>{
         const teamId = document.getElementById('b2Team')?.value || "";
         openBrainV2LineupComposer({
@@ -12711,6 +12721,7 @@ function computeTeamIntelligencePanel(db, teamId){
         const awayIdSel = document.getElementById('b2Away')?.value || "";
         const out = document.getElementById('b2Vision');
         if(!homeIdSel || !awayIdSel || homeIdSel===awayIdSel){ out.textContent = 'Selecciona dos equipos distintos.'; return; }
+        setVisionFocusMode(true);
         const homeTeam = db.teams.find((t)=>t.id===homeIdSel);
         const awayTeam = db.teams.find((t)=>t.id===awayIdSel);
         const homeSummary = summarizeTeamMemory(brainV2.memories[homeIdSel] || []);
