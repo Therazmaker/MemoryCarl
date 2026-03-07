@@ -9722,11 +9722,19 @@ function computeTeamIntelligencePanel(db, teamId){
 
   function buildRadarMatches({ db, payload = {}, brainV2 = {} }){
     const today = new Date().toISOString().slice(0, 10);
-    const provided = Array.isArray(payload?.matches) ? payload.matches : null;
+    const provided = Array.isArray(payload?.matches) ? payload.matches : [];
     const trackerToday = (Array.isArray(db?.tracker) ? db.tracker : []).filter((m)=>String(m?.date || '').slice(0, 10) === today);
-    const sourceMatches = provided || trackerToday;
+    const manualToday = (Array.isArray(db?.radar?.matches) ? db.radar.matches : []).filter((m)=>String(m?.date || '').slice(0, 10) === today);
+    const sourceMatches = [...provided, ...trackerToday, ...manualToday];
+    const seen = new Set();
     return sourceMatches
-      .filter((m)=>m?.homeId && m?.awayId)
+      .filter((m)=>{
+        if(!m?.homeId || !m?.awayId) return false;
+        const key = `${m.homeId}::${m.awayId}::${String(m.date || '').slice(0, 10)}::${m.leagueId || ''}`;
+        if(seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
       .map((m)=>{
         const home = db.teams.find((t)=>t.id===m.homeId) || { id: m.homeId, name: m.home || 'Local' };
         const away = db.teams.find((t)=>t.id===m.awayId) || { id: m.awayId, name: m.away || 'Visitante' };
@@ -9756,7 +9764,11 @@ function computeTeamIntelligencePanel(db, teamId){
           away: away.name || 'Visitante',
           homeId: home.id,
           awayId: away.id,
-          odds: null,
+          odds: {
+            home: pickFirstNumber(m.oddsHome),
+            draw: pickFirstNumber(m.oddsDraw),
+            away: pickFirstNumber(m.oddsAway)
+          },
           strengthHome,
           strengthAway,
           strengthGap: Number(scorePack.strengthGap.toFixed(1)),
