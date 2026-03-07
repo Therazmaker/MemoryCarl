@@ -3545,6 +3545,13 @@ export function initFootballLab(){
       .rdx-hist-result-btn.pending{background:#21262d;border-color:#30363d;color:#6e7681}
       .rdx-verdict-select{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;padding:4px 8px;font-size:12px;font-family:inherit;outline:none}
       .rdx-verdict-select:focus{border-color:#388bfd}
+      /* NARRATIVE */
+      .rdx-narrative{margin-top:10px;padding:10px 14px;background:rgba(31,111,235,.06);border:1px solid rgba(31,111,235,.15);border-radius:8px;display:flex;flex-direction:column;gap:5px}
+      .rdx-narrative-line{font-size:12.5px;color:#c9d1d9;line-height:1.55}
+      .rdx-narrative-line b{color:#e6edf3}
+      .rdx-narrative.verdict-high{background:rgba(63,185,80,.06);border-color:rgba(63,185,80,.2)}
+      .rdx-narrative.verdict-mid{background:rgba(227,179,65,.06);border-color:rgba(227,179,65,.2)}
+      .rdx-narrative.verdict-low{background:rgba(139,148,158,.05);border-color:rgba(139,148,158,.15)}
       .b2-score-chip{padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid #1e2330}
       .b2-score-chip.win{color:#22d3a3;border-color:rgba(34,211,163,.5);background:rgba(34,211,163,.12)}
       .b2-score-chip.loss{color:#ef4444;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.12)}
@@ -9793,6 +9800,80 @@ function computeTeamIntelligencePanel(db, teamId){
     return flags;
   }
 
+  function buildRadarNarrative({ home, away, strengthHome, strengthAway, strengthGap, fsiHome, fsiAway, avgFSI, studyScore, type, flags = [], odds = {} }){
+    const lines = [];
+    const strongerTeam = strengthHome >= strengthAway ? home : away;
+    const weakerTeam = strengthHome >= strengthAway ? away : home;
+    const strongerFsi = strengthHome >= strengthAway ? fsiHome : fsiAway;
+    const weakerFsi = strengthHome >= strengthAway ? fsiAway : fsiHome;
+    const strongerStrength = Math.max(strengthHome, strengthAway);
+    const weakerStrength = Math.min(strengthHome, strengthAway);
+
+    // ── VEREDICTO principal
+    if(studyScore >= 70){
+      lines.push(`🔥 <b>Vale la pena estudiarlo.</b>`);
+    } else if(studyScore >= 45){
+      lines.push(`👀 <b>Tiene matices interesantes</b>, no es obvio.`);
+    } else {
+      lines.push(`😐 <b>Partido plano</b> en papel — poco conflicto sistémico detectado.`);
+    }
+
+    // ── EQUILIBRIO de fuerzas
+    if(strengthGap <= 5){
+      lines.push(`Los equipos están prácticamente igualados en fuerza (${strengthHome} vs ${strengthAway}) — ninguno domina en papel.`);
+    } else if(strengthGap <= 15){
+      lines.push(`${strongerTeam} tiene una ventaja de fuerza moderada (${strongerStrength} vs ${weakerStrength}), pero no es aplastante.`);
+    } else if(strengthGap <= 28){
+      lines.push(`${strongerTeam} es el favorito claro en fuerza (${strongerStrength} vs ${weakerStrength}).`);
+    } else {
+      lines.push(`${strongerTeam} domina ampliamente en fuerza (${strongerStrength} vs ${weakerStrength}) — en papel no hay historia.`);
+    }
+
+    // ── FSI: momento actual de cada equipo
+    const fsiDesc = (fsi, name) => {
+      if(fsi >= 35) return `${name} llega en estado excepcional (FSI +${fsi.toFixed(1)})`;
+      if(fsi >= 18) return `${name} llega en buen momento (FSI +${fsi.toFixed(1)})`;
+      if(fsi >= 5)  return `${name} está estable (FSI +${fsi.toFixed(1)})`;
+      if(fsi >= -5) return `${name} llega neutro (FSI ${fsi.toFixed(1)})`;
+      if(fsi >= -18) return `${name} llega con dudas (FSI ${fsi.toFixed(1)})`;
+      return `${name} llega en mal momento (FSI ${fsi.toFixed(1)})`;
+    };
+    lines.push(`${fsiDesc(fsiHome, home)}, ${fsiDesc(fsiAway, away).replace(/^./, c => c.toLowerCase())}.`);
+
+    // ── EL CONFLICTO: favorito debilitado vs underdog en forma
+    if(flags.includes('STRONG_FAVORITE_UNSTABLE')){
+      lines.push(`⚠️ <b>Alerta clave:</b> ${strongerTeam} llega como favorito en fuerza pero con FSI negativo (${strongerFsi.toFixed(1)}) — el sistema detecta inestabilidad en quien debería ganar. Esto es exactamente el patrón de sorpresa.`);
+    } else if(strongerFsi <= -10 && weakerFsi >= 10){
+      lines.push(`⚠️ El favorito (${strongerTeam}) llega apagado mientras el underdog (${weakerTeam}) está encendido. El mercado puede estar equivocado.`);
+    } else if(strongerFsi >= 18 && weakerFsi <= -10){
+      lines.push(`El favorito confirma su rol — llega bien y el rival está en baja. El resultado esperado tiene respaldo sistémico.`);
+    }
+
+    // ── LECTURA DE CUOTAS si hay datos
+    const hasOdds = Number.isFinite(odds.home) && Number.isFinite(odds.away);
+    if(hasOdds){
+      const impliedHome = 1 / odds.home;
+      const impliedAway = 1 / odds.away;
+      const mktFavorite = impliedHome > impliedAway ? home : away;
+      const mktFavProb = Math.round(Math.max(impliedHome, impliedAway) * 100);
+      const sysFavorite = strengthHome >= strengthAway ? home : away;
+      if(mktFavorite !== sysFavorite){
+        lines.push(`📊 El mercado favorece a ${mktFavorite} (${mktFavProb}% implícito) pero el sistema pone a ${sysFavorite} con mayor fuerza — hay desacuerdo entre mercado y sistema.`);
+      } else if(mktFavProb >= 65 && strongerFsi <= -8){
+        lines.push(`📊 El mercado confía mucho en ${mktFavorite} (${mktFavProb}% implícito) pero su FSI es bajo — la cuota puede no reflejar su estado real.`);
+      }
+    }
+
+    // ── TIPO de partido
+    if(type === 'chaos'){
+      lines.push(`Los dos equipos llegan con alta tensión emocional — partido impredecible, cualquier resultado es posible.`);
+    } else if(type === 'clean' && strengthGap >= 20){
+      lines.push(`Escenario ordenado: favorito sólido, rival débil, sin señales de alarma. El resultado lógico tiene alta probabilidad.`);
+    }
+
+    return lines;
+  }
+
   function buildRadarMatches({ db, payload = {}, brainV2 = {} }){
     const today = new Date().toISOString().slice(0, 10);
     const provided = Array.isArray(payload?.matches) ? payload.matches : [];
@@ -9850,7 +9931,25 @@ function computeTeamIntelligencePanel(db, teamId){
           avgFSI: Number(scorePack.avgFSI.toFixed(1)),
           studyScore: scorePack.studyScore,
           type,
-          flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway })
+          flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
+          narrative: buildRadarNarrative({
+            home: home.name || 'Local',
+            away: away.name || 'Visitante',
+            strengthHome,
+            strengthAway,
+            strengthGap: scorePack.strengthGap,
+            fsiHome,
+            fsiAway,
+            avgFSI: scorePack.avgFSI,
+            studyScore: scorePack.studyScore,
+            type,
+            flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
+            odds: {
+              home: pickFirstNumber(m.oddsHome),
+              draw: pickFirstNumber(m.oddsDraw),
+              away: pickFirstNumber(m.oddsAway)
+            }
+          })
         };
       });
   }
@@ -11516,6 +11615,11 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>
 
           ${m.flags.length ? `<div class="rdx-flags">${m.flags.map((f)=>`<span class="rdx-flag ${flagAlert(f)}">${f.replaceAll('_',' ')}</span>`).join('')}</div>` : ''}
+
+          ${m.narrative && m.narrative.length ? `
+          <div class="rdx-narrative ${m.studyScore >= 70 ? 'verdict-high' : m.studyScore >= 45 ? 'verdict-mid' : 'verdict-low'}">
+            ${m.narrative.map(line => `<div class="rdx-narrative-line">${line}</div>`).join('')}
+          </div>` : ''}
 
           <div class="rdx-match-actions">
             <button class="rdx-btn-sim" data-radar-open-sim="${m.id}">⚡ Simular</button>
