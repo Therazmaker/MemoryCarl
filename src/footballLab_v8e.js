@@ -9664,6 +9664,20 @@ function computeTeamIntelligencePanel(db, teamId){
     return new Date(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
   }
 
+  function formatDate(value = ''){
+    const raw = String(value || '').trim();
+    if(!raw) return '-';
+    const exact = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(exact) return `${exact[3]}/${exact[2]}/${exact[1]}`;
+    const ts = Date.parse(raw);
+    if(!Number.isFinite(ts)) return raw;
+    return new Date(ts).toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+  }
+
   function classifyRadarMatch({ strengthGap = 0, fsiHome = null, fsiAway = null, avgFSI = 0 } = {}){
     const absHome = Math.abs(Number(fsiHome) || 0);
     const absAway = Math.abs(Number(fsiAway) || 0);
