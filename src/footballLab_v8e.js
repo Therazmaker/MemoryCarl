@@ -11890,16 +11890,24 @@ function computeTeamIntelligencePanel(db, teamId){
                 <input id="radarFormHome" type="text" maxlength="5" class="rdx-input rdx-input-form" placeholder="PGPPP" style="width:90px;text-transform:uppercase;font-family:monospace;letter-spacing:3px;font-weight:800;" />
               </div>
               <div class="rdx-group">
-                <span class="rdx-label">GA Local / partido <span style="font-weight:400;opacity:.6;">goles recibidos</span></span>
-                <input id="radarGaHome" type="number" step="0.01" min="0" class="rdx-input" placeholder="1.7" style="width:80px;" />
+                <span class="rdx-label">Goles recibidos Local</span>
+                <input id="radarGaGoalsHome" type="number" min="0" step="1" class="rdx-input" placeholder="41" style="width:70px;" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">En # partidos</span>
+                <input id="radarGaGamesHome" type="number" min="1" step="1" class="rdx-input" placeholder="24" style="width:70px;" />
               </div>
               <div class="rdx-group">
                 <span class="rdx-label">Forma Visitante (últ. 5)</span>
                 <input id="radarFormAway" type="text" maxlength="5" class="rdx-input rdx-input-form" placeholder="PPPGG" style="width:90px;text-transform:uppercase;font-family:monospace;letter-spacing:3px;font-weight:800;" />
               </div>
               <div class="rdx-group">
-                <span class="rdx-label">GA Visitante / partido</span>
-                <input id="radarGaAway" type="number" step="0.01" min="0" class="rdx-input" placeholder="1.2" style="width:80px;" />
+                <span class="rdx-label">Goles recibidos Visit.</span>
+                <input id="radarGaGoalsAway" type="number" min="0" step="1" class="rdx-input" placeholder="30" style="width:70px;" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">En # partidos</span>
+                <input id="radarGaGamesAway" type="number" min="1" step="1" class="rdx-input" placeholder="24" style="width:70px;" />
               </div>
               <div class="rdx-group">
                 <span class="rdx-label">Mi predicción</span>
@@ -11987,9 +11995,17 @@ function computeTeamIntelligencePanel(db, teamId){
           oddsAway:   pickFirstNumber(document.getElementById('radarManualOddA')?.value),
           // Forma manual
           manualFormHome: formHomeSeq,
-          manualGaHome:   pickFirstNumber(document.getElementById('radarGaHome')?.value),
+          manualGaHome:   (() => {
+            const g = pickFirstNumber(document.getElementById('radarGaGoalsHome')?.value);
+            const n = pickFirstNumber(document.getElementById('radarGaGamesHome')?.value);
+            return (Number.isFinite(g) && Number.isFinite(n) && n > 0) ? Number((g/n).toFixed(2)) : null;
+          })(),
           manualFormAway: formAwaySeq,
-          manualGaAway:   pickFirstNumber(document.getElementById('radarGaAway')?.value),
+          manualGaAway:   (() => {
+            const g = pickFirstNumber(document.getElementById('radarGaGoalsAway')?.value);
+            const n = pickFirstNumber(document.getElementById('radarGaGamesAway')?.value);
+            return (Number.isFinite(g) && Number.isFinite(n) && n > 0) ? Number((g/n).toFixed(2)) : null;
+          })(),
           // Predicción del usuario
           prediction: document.getElementById('radarPrediction')?.value || ''
         };
