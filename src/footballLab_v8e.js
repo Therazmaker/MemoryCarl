@@ -14548,41 +14548,52 @@ function computeTeamIntelligencePanel(db, teamId){
         });
         const mreRows = buildMreComparisonRows(homeMre, awayMre);
         const mreRowsHtml = mreRows.map((row)=>{
-          const homeClass = row.winner === "home" ? "mre-win-home" : row.winner === "tie" ? "mre-tie" : "";
-          const awayClass = row.winner === "away" ? "mre-win-away" : row.winner === "tie" ? "mre-tie" : "";
-          return `<tr>
-            <td class="mre-label">${row.label}</td>
-            <td class="${homeClass}">${row.homeText}</td>
-            <td class="${awayClass}">${row.awayText}</td>
-            <td class="mre-reading">${row.interpretation}</td>
+          const homeWin  = row.winner === 'home';
+          const awayWin  = row.winner === 'away';
+          const tie      = row.winner === 'tie';
+          const homeCol  = homeWin ? '#3fb950' : tie ? '#8b949e' : '#6e7681';
+          const awayCol  = awayWin ? '#3fb950' : tie ? '#8b949e' : '#6e7681';
+          const readCol  = row.interpretation?.includes('ventaja') ? '#e3b341' : '#6e7681';
+          return `<tr style="border-bottom:1px solid #161b22;">
+            <td style="padding:6px 10px;font-size:11px;color:#8b949e;font-weight:600;white-space:nowrap;">${row.label}</td>
+            <td style="padding:6px 10px;font-size:12px;font-weight:700;color:${homeCol};text-align:center;">${row.homeText}</td>
+            <td style="padding:6px 10px;font-size:12px;font-weight:700;color:${awayCol};text-align:center;">${row.awayText}</td>
+            <td style="padding:6px 10px;font-size:10px;color:${readCol};text-align:right;white-space:nowrap;">${row.interpretation}</td>
           </tr>`;
-        }).join("");
+        }).join('');
         applyHeroReveal(out);
         out.innerHTML = `
-          <div style="font-weight:900;font-size:19px;letter-spacing:.01em;">${homeTeam?.name || 'Local'} <span class="fl-mini" style="font-size:13px;">vs</span> ${awayTeam?.name || 'Visita'}</div>
+          <div style="font-weight:900;font-size:19px;letter-spacing:.01em;">${homeTeam?.name || 'Local'} <span style="font-size:13px;color:#6e7681;font-weight:400;">vs</span> ${awayTeam?.name || 'Visita'}</div>
           <div class="b2-prob-grid">
             <div class="b2-prob-card home"><span class="fl-mini">Local</span><b>${pH}%</b></div>
             <div class="b2-prob-card draw"><span class="fl-mini">Empate</span><b>${pD}%</b></div>
             <div class="b2-prob-card away"><span class="fl-mini">Visita</span><b>${pA}%</b></div>
           </div>
-          <div style="margin-top:12px;font-weight:900;font-size:14px;letter-spacing:.04em;">⚡ MATCH READINESS CARD</div>
-          <div class="fl-mre-table-wrap" style="margin-top:6px;">
-            <table class="fl-mre-table">
+
+          <!-- MATCH READINESS CARD -->
+          <div style="margin-top:14px;margin-bottom:6px;font-size:11px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.7px;">⚡ Match Readiness Card</div>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;overflow:hidden;">
+            <table style="width:100%;border-collapse:collapse;">
               <thead>
-                <tr>
-                  <th>Factor</th>
-                  <th>${homeMre.teamName || 'Local'}</th>
-                  <th>${awayMre.teamName || 'Visita'}</th>
-                  <th>Lectura</th>
+                <tr style="background:#161b22;border-bottom:1px solid #30363d;">
+                  <th style="padding:8px 10px;font-size:10px;font-weight:700;color:#6e7681;text-align:left;text-transform:uppercase;letter-spacing:.5px;">Factor</th>
+                  <th style="padding:8px 10px;font-size:10px;font-weight:700;color:#58a6ff;text-align:center;text-transform:uppercase;letter-spacing:.5px;">${homeMre.teamName || 'Local'}</th>
+                  <th style="padding:8px 10px;font-size:10px;font-weight:700;color:#d2a8ff;text-align:center;text-transform:uppercase;letter-spacing:.5px;">${awayMre.teamName || 'Visita'}</th>
+                  <th style="padding:8px 10px;font-size:10px;font-weight:700;color:#6e7681;text-align:right;text-transform:uppercase;letter-spacing:.5px;">Lectura</th>
                 </tr>
               </thead>
               <tbody>${mreRowsHtml}</tbody>
             </table>
           </div>
-          <div class="fl-mini" style="margin-top:8px;">Confianza estimada: <b>${conf}%</b> · muestras ${homeSummary.samples}/${awaySummary.samples} · Prob base ${(rawProbs.home*100).toFixed(1)}/${(rawProbs.draw*100).toFixed(1)}/${(rawProbs.away*100).toFixed(1)} → ajustada ${pH}/${pD}/${pA}</div>
-          <div class="fl-mini" style="margin-top:4px;">Muestras MRE ${homeMre.teamName}: <b>${homeReadiness?.evidence?.raw?.totalMatches ?? 0}</b> · ${awayMre.teamName}: <b>${awayReadiness?.evidence?.raw?.totalMatches ?? 0}</b> · Fuente: <b>${homeReadiness?.evidence?.source || "brainV2.memories"}</b></div>
-          <div class="fl-mini" style="margin-top:4px;">Filtro: <b>${homeReadiness?.evidence?.filterLabel || "all competitions"}</b> · fallback: <b>${homeReadiness?.evidence?.fallback ? "sí" : "no"}</b>${homeReadiness?.evidence?.raw?.leagueFallback ? " (liga→all competitions)" : ""}</div>
-          <div class="fl-mini" style="margin-top:4px;">Perfil narrativo (N=${homeProfile.lastN}/${awayProfile.lastN}) · presión tardía ${homeProfile.tendencies.latePressureAvg.toFixed(1)} vs ${awayProfile.tendencies.latePressureAvg.toFixed(1)}</div>
+
+          <!-- Meta info compacta -->
+          <div style="margin-top:8px;padding:8px 12px;background:#0d1117;border:1px solid #21262d;border-radius:8px;display:flex;flex-wrap:wrap;gap:12px;">
+            <span style="font-size:10px;color:#6e7681;">Confianza <b style="color:#e6edf3;">${conf}%</b></span>
+            <span style="font-size:10px;color:#6e7681;">Muestras <b style="color:#e6edf3;">${homeSummary.samples}/${awaySummary.samples}</b></span>
+            <span style="font-size:10px;color:#6e7681;">Prob base <b style="color:#e6edf3;">${(rawProbs.home*100).toFixed(1)} / ${(rawProbs.draw*100).toFixed(1)} / ${(rawProbs.away*100).toFixed(1)}</b></span>
+            <span style="font-size:10px;color:#6e7681;">Ajustada <b style="color:#58a6ff;">${pH} / ${pD} / ${pA}</b></span>
+            <span style="font-size:10px;color:#6e7681;">Fuente <b style="color:#e6edf3;">${homeReadiness?.evidence?.source || 'brainV2.memories'}</b></span>
+          </div>
           <div class="fl-card" style="margin-top:10px;padding:10px;border-color:#2a3850;"><b>Global Evidence</b>
             <div class="fl-mini" style="margin-top:4px;">${vision.globalEvidence?.evidenceOk ? '✅ Global Evidence OK' : '❌ Sin evidencia global fuerte'}</div>
             ${vision.globalEvidence?.evidenceOk
