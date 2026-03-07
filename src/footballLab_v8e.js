@@ -1843,11 +1843,24 @@ export function initFootballLab(){
 
   function scenarioLabel(scenario = ""){
     const map = {
-      base: "Base (control/ritmo)",
-      trigger: "Trigger (asedio/ABP)",
-      chaos: "Chaos (partido roto)"
+      base:    "El partido sigue su guion",
+      trigger: "Dominio y presión",
+      chaos:   "Cualquier cosa puede pasar"
     };
     return map[scenario] || scenario;
+  }
+
+  function scenarioIcon(scenario = ""){
+    return { base: "⚖️", trigger: "🔥", chaos: "💥" }[scenario] || "❓";
+  }
+
+  function scenarioDescription(scenario = ""){
+    const map = {
+      base:    "Sin sorpresas — el marcador refleja el juego",
+      trigger: "Un equipo presiona y puede romper el partido",
+      chaos:   "El partido está roto — un evento cambia todo"
+    };
+    return map[scenario] || "";
   }
 
   function deriveTrueScenario(features = {}){
@@ -14954,71 +14967,84 @@ function computeTeamIntelligencePanel(db, teamId){
                 cond: String(i.label || '').replace(/^Si\s+/i, '').replace('home', 'Local').replace('away', 'Visita').replace('corners', 'córners').replace('shotsOT', 'tiros a puerta'),
                 effect: `${scenarioLabel(i.scenario)} +${Math.round((Number(i.delta || 0) * 100))}%`
               }));
-              lsfPanel.innerHTML = `<div style="display:grid;gap:10px;">
-                <div class="fl-card" style="padding:10px;">
-                  <div style="font-weight:800;">🔮 Próximos 10–15 min (${fRec.forecastForPhase || '-'})</div>
-                  <div class="fl-mini" style="margin-top:2px;opacity:.85;">Escenario esperado</div>
-                  <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;">
-                    <div style="font-size:20px;font-weight:900;">${scenarioLabel(leader.scenario)}</div>
-                    <span class="fl-pill" style="background:rgba(59,130,246,.2);border:1px solid rgba(59,130,246,.55);font-weight:800;">${leader.pct}%</span>
+              lsfPanel.innerHTML = `<div style="display:grid;gap:8px;">
+
+                <!-- Escenario principal -->
+                <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:14px 16px;">
+                  <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px;">🔮 Próximos 10–15 min · ${fRec.forecastForPhase || '-'}'</div>
+                  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <div style="font-size:28px;">${scenarioIcon(leader.scenario)}</div>
+                    <div>
+                      <div style="font-size:17px;font-weight:900;color:#e6edf3;">${scenarioLabel(leader.scenario)}</div>
+                      <div style="font-size:11px;color:#8b949e;margin-top:2px;">${scenarioDescription(leader.scenario)}</div>
+                    </div>
+                    <div style="margin-left:auto;text-align:right;">
+                      <div style="font-size:22px;font-weight:900;color:${confMeta.color};">${leader.pct}%</div>
+                      <div style="font-size:10px;color:#6e7681;">probabilidad</div>
+                    </div>
                   </div>
-                  <div class="fl-mini" style="margin-top:8px;">Confianza ${confMeta.icon} <b>${confMeta.label}</b> (${confPct}%)</div>
-                  <div style="margin-top:4px;height:8px;border-radius:999px;background:rgba(148,163,184,.25);overflow:hidden;"><div style="width:${confPct}%;height:100%;background:${confMeta.color};"></div></div>
-                  <div class="fl-mini" style="margin-top:6px;">Esto significa: ${confMeta.desc}</div>
+                  <!-- barra de confianza -->
+                  <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+                    <div style="flex:1;height:5px;border-radius:3px;background:#21262d;overflow:hidden;">
+                      <div style="width:${confPct}%;height:100%;background:${confMeta.color};border-radius:3px;"></div>
+                    </div>
+                    <span style="font-size:10px;color:${confMeta.color};font-weight:700;">${confMeta.icon} ${confMeta.label} (${confPct}%)</span>
+                  </div>
                 </div>
 
-                <div class="fl-card" style="padding:10px;">
-                  <div style="font-weight:800;">📊 Mapa de escenarios</div>
-                  <div style="margin-top:8px;display:grid;gap:6px;">${bars.map((b)=>{
-                    const active = b.scenario===leader.scenario;
-                    const color = active ? '#60a5fa' : '#64748b';
-                    return `<div class="fl-mini" style="display:grid;grid-template-columns:130px 1fr 46px;gap:8px;align-items:center;${active?'font-weight:700;':''}">
-                      <span>${scenarioLabel(b.scenario)}</span>
-                      <div style="height:8px;border-radius:999px;background:rgba(148,163,184,.2);overflow:hidden;"><div style="width:${b.pct}%;height:100%;background:${color};"></div></div>
-                      <span>${b.pct}%</span>
+                <!-- Los tres escenarios como cards -->
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+                  ${bars.map((b)=>{
+                    const active = b.scenario === leader.scenario;
+                    const icon = scenarioIcon(b.scenario);
+                    const label = scenarioLabel(b.scenario);
+                    const col = active ? '#58a6ff' : '#30363d';
+                    const bg = active ? 'rgba(88,166,255,.08)' : '#0d1117';
+                    return `<div style="background:${bg};border:1px solid ${col};border-radius:8px;padding:10px;text-align:center;">
+                      <div style="font-size:18px;margin-bottom:4px;">${icon}</div>
+                      <div style="font-size:10px;color:${active?'#e6edf3':'#6e7681'};font-weight:${active?'700':'400'};line-height:1.3;">${label}</div>
+                      <div style="font-size:16px;font-weight:900;color:${active?'#58a6ff':'#6e7681'};margin-top:4px;">${b.pct}%</div>
                     </div>`;
-                  }).join('')}</div>
+                  }).join('')}
                 </div>
 
-                <div class="fl-card" style="padding:10px;">
-                  <div style="font-weight:800;">🚦 Riesgo de cambio</div>
-                  <div style="margin-top:8px;font-size:20px;font-weight:900;color:${switchRiskMeta.color};">${switchRiskMeta.icon} ${switchRiskMeta.label}</div>
-                  <div class="fl-mini" style="margin-top:6px;">${switchRiskMeta.desc}</div>
-                </div>
-
-                <div class="fl-card" style="padding:10px;">
-                  <div style="font-weight:800;">🧭 Qué lo está empujando</div>
-                  <div style="margin-top:6px;display:grid;gap:4px;">${driversHuman.map((d)=>`<div class="fl-mini">• ${d.human} → empuja a <b>${scenarioLabel(d.pushes)}</b></div>`).join('') || '<div class="fl-mini">Sin señales fuertes todavía.</div>'}</div>
-                  <details style="margin-top:8px;"><summary class="fl-mini" style="cursor:pointer;">Ver técnico</summary><div class="fl-mini" style="margin-top:4px;display:grid;gap:2px;">${driversHuman.map((d)=>`<div>• ${d.technical}</div>`).join('') || '<div>Sin drivers técnicos.</div>'}</div></details>
-                </div>
-
-                <div class="fl-card" style="padding:10px;">
-                  <div style="font-weight:800;">⚑ Qué lo cambia</div>
-                  <div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">${switches.map((s)=>`<div class="fl-card" style="padding:8px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);"><div class="fl-mini">Si pasa esto…</div><div><b>${s.cond}</b></div><div class="fl-mini" style="margin-top:4px;">cambia a <b>${s.effect}</b></div></div>`).join('') || '<div class="fl-mini">Sin switches candidatos todavía.</div>'}</div>
-                </div>
-
-                <div class="fl-card" style="padding:10px;">
-                  <div style="font-weight:800;">🧠 Aprendizaje de hoy</div>
-                  <div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;" class="fl-mini">
-                    <div>🧠 Forecasts hoy: <b>${lsfState.stats.forecastsMade}</b></div>
-                    <div>✅ Acierto (últimos 10): <b>${(acc10*100).toFixed(0)}%</b></div>
-                    <div>🎯 Error (Brier): <b>${avgBrier.toFixed(3)}</b></div>
-                    <div>🔄 Ajustó pesos: <b>${(brainV2.mne.lsfEvalHistory || []).slice(-1)[0]?.updatesCount>0 ? 'Sí':'No'}</b></div>
+                <!-- Riesgo de cambio + señales en una fila -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;">
+                    <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">¿Puede cambiar?</div>
+                    <div style="font-size:22px;font-weight:900;color:${switchRiskMeta.color};">${switchRiskMeta.icon} ${switchRiskMeta.label}</div>
+                    <div style="font-size:11px;color:#8b949e;margin-top:4px;">${switchRiskMeta.desc}</div>
                   </div>
-                  <div class="fl-mini" style="margin-top:6px;">El sistema está aprendiendo: aún con poca muestra.</div>
+                  <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;">
+                    <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">¿Qué lo mueve?</div>
+                    ${driversHuman.length
+                      ? driversHuman.map(d=>`<div style="font-size:11px;color:#c9d1d9;margin-bottom:4px;">→ ${d.human}</div>`).join('')
+                      : '<div style="font-size:11px;color:#6e7681;">Sin señales fuertes aún.</div>'}
+                  </div>
                 </div>
 
-                <details class="fl-card" style="padding:10px;" open>
-                  <summary style="font-weight:800;cursor:pointer;">Advanced Orchestrator Signals</summary>
-                  <div class="fl-mini" style="margin-top:8px;display:grid;gap:4px;">${fRec.orchestrator
-                    ? `<div><b>Dynamic Weights</b>: ${Object.entries(fRec.orchestrator.finalWeights || {}).map(([k,v])=>`${k} ${(Number(v)*100).toFixed(1)}%`).join(' · ')}</div>
-                       <div><b>Live Evidence</b>: ${fRec.orchestrator?.advancedSignals?.evidence?.label || '-'} (${(Number(fRec.orchestrator?.advancedSignals?.evidence?.score || 0)*100).toFixed(0)}%)</div>
-                       <div><b>Emotional Impact</b>: ${(Number(fRec.orchestrator?.advancedSignals?.emotional?.score || 0)).toFixed(2)} · ${fRec.orchestrator?.advancedSignals?.emotional?.level || 'low'} · ${(fRec.orchestrator?.advancedSignals?.emotional?.triggeredBy || []).join(', ') || 'none'}</div>
-                       <div><b>Momentum</b>: home ${(Number(fRec.orchestrator?.advancedSignals?.momentum?.homeMomentum || 0)).toFixed(2)} vs away ${(Number(fRec.orchestrator?.advancedSignals?.momentum?.awayMomentum || 0)).toFixed(2)} · ${fRec.orchestrator?.advancedSignals?.momentum?.label || 'flat'}</div>
-                       <div>${(fRec.orchestrator?.explanation || []).map((x)=>`• ${x}`).join(' ')}</div>`
-                    : 'Sin señales avanzadas aún.'}
+                <!-- Qué lo cambia: cards de trigger -->
+                ${switches.length ? `
+                <div style="background:#0d1117;border:1px solid rgba(227,179,65,.2);border-radius:8px;padding:12px;">
+                  <div style="font-size:10px;font-weight:700;color:#e3b341;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">⚡ Si pasa esto, el guion cambia</div>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">
+                    ${switches.map(s=>`
+                      <div style="background:rgba(227,179,65,.06);border:1px solid rgba(227,179,65,.2);border-radius:6px;padding:10px;">
+                        <div style="font-size:11px;color:#8b949e;margin-bottom:4px;">Si ocurre…</div>
+                        <div style="font-size:12px;font-weight:700;color:#e6edf3;">${s.cond}</div>
+                        <div style="font-size:11px;color:#e3b341;margin-top:5px;">→ ${s.effect}</div>
+                      </div>`).join('')}
                   </div>
-                </details>
+                </div>` : ''}
+
+                <!-- Aprendizaje compacto -->
+                <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:10px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
+                  <div style="font-size:10px;color:#6e7681;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">🧠 Aprendizaje</div>
+                  <div style="font-size:11px;color:#c9d1d9;">Predicciones: <b>${lsfState.stats.forecastsMade}</b></div>
+                  <div style="font-size:11px;color:#c9d1d9;">Acierto: <b style="color:${acc10>=0.6?'#3fb950':acc10>=0.45?'#e3b341':'#f85149'}">${(acc10*100).toFixed(0)}%</b></div>
+                  <div style="font-size:11px;color:#c9d1d9;">Error Brier: <b>${avgBrier.toFixed(3)}</b></div>
+                </div>
+
               </div>`;
             }else{
               lsfPanel.innerHTML = '<div class="fl-mini">Aún no hay forecast LSF para esta fase. Usa Compare & Learn para generarlo.</div>';
