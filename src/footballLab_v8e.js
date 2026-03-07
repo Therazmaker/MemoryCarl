@@ -81,6 +81,9 @@ export function initFootballLab(){
     teamCompetitions: [],
     players: [],
     tracker: [],
+    radar: {
+      matches: []
+    },
     diagProfiles: {},
     versus: {
       homeAdvantage: 1.1,
@@ -2311,6 +2314,8 @@ export function initFootballLab(){
       db.teamCompetitions ||= [];
       db.players ||= [];
       db.tracker ||= [];
+      db.radar ||= { matches: [] };
+      db.radar.matches = Array.isArray(db.radar.matches) ? db.radar.matches : [];
       db.diagProfiles ||= {};
       db.versus ||= { homeAdvantage: 1.1 };
       db.versus.paceFactor = clamp(Number(db.versus.paceFactor) || 1, 0.82, 1.35);
