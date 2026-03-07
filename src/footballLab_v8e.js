@@ -11327,6 +11327,33 @@ function computeTeamIntelligencePanel(db, teamId){
       const brainV2 = loadBrainV2();
       radarState.matches = buildRadarMatches({ db, payload, brainV2 });
       const sorted = sortRadarMatches(radarState.matches, radarState.sortBy || 'studyScore');
+      const leagues = db.leagues.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), 'es', { sensitivity:'base' }));
+      const fallbackLeagueId = leagues[0]?.id || '';
+      const selectedLeagueId = radarState.filters.manualLeagueId || db.settings.selectedLeagueId || fallbackLeagueId;
+      radarState.filters.manualLeagueId = selectedLeagueId;
+      const manualTeams = selectedLeagueId ? getTeamsForLeague(db, selectedLeagueId) : db.teams;
+      const sortedManualTeams = manualTeams.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), 'es', { sensitivity:'base' }));
+      const leagueOptions = leagues.map((l)=>`<option value="${l.id}" ${l.id===selectedLeagueId?'selected':''}>${l.name}</option>`).join('');
+      const teamOptions = sortedManualTeams.map((t)=>`<option value="${t.id}">${t.name}</option>`).join('');
+      const manualMatches = (db.radar?.matches || []).slice().sort((a,b)=>parseSortableDate(b.date || b.createdAt || '')-parseSortableDate(a.date || a.createdAt || ''));
+      const manualRows = manualMatches.map((row)=>{
+        const leagueName = db.leagues.find((l)=>l.id===row.leagueId)?.name || '-';
+        const homeName = db.teams.find((t)=>t.id===row.homeId)?.name || '-';
+        const awayName = db.teams.find((t)=>t.id===row.awayId)?.name || '-';
+        const oddsTxt = [row.oddsHome, row.oddsDraw, row.oddsAway]
+          .map((odd)=>Number.isFinite(Number(odd)) ? Number(odd).toFixed(2) : '-')
+          .join(' / ');
+        return `
+          <tr>
+            <td>${formatDate(row.date || '')}</td>
+            <td>${leagueName}</td>
+            <td>${homeName}</td>
+            <td>${awayName}</td>
+            <td>${oddsTxt}</td>
+            <td><button class="fl-btn" data-radar-delete-manual="${row.id}">Borrar</button></td>
+          </tr>
+        `;
+      }).join('');
       const typeBadge = (type)=>`<span class="fl-radar-badge fl-radar-badge-${type}">${type}</span>`;
       const rows = sorted.map((m)=>`
         <tr>
@@ -11350,6 +11377,37 @@ function computeTeamIntelligencePanel(db, teamId){
       `).join('');
 
       content.innerHTML = `
+        <div class="fl-card fl-radar-card">
+          <div style="font-weight:800;">Registrar partido manual</div>
+          <div class="fl-mini" style="margin-top:4px;">Guarda partidos con liga, local, visitante y cuotas para tenerlos listos en el radar.</div>
+          <div class="fl-row" style="margin-top:10px;gap:8px;flex-wrap:wrap;">
+            <select id="radarManualLeague" class="fl-select" style="min-width:180px;">
+              <option value="">Liga</option>
+              ${leagueOptions}
+            </select>
+            <select id="radarManualHome" class="fl-select" style="min-width:180px;">
+              <option value="">Local</option>
+              ${teamOptions}
+            </select>
+            <select id="radarManualAway" class="fl-select" style="min-width:180px;">
+              <option value="">Visitante</option>
+              ${teamOptions}
+            </select>
+            <input id="radarManualOddH" type="number" step="0.01" class="fl-input" placeholder="Cuota 1" style="width:90px;" />
+            <input id="radarManualOddD" type="number" step="0.01" class="fl-input" placeholder="Cuota X" style="width:90px;" />
+            <input id="radarManualOddA" type="number" step="0.01" class="fl-input" placeholder="Cuota 2" style="width:90px;" />
+            <button class="fl-btn" id="radarManualSave">Registrar</button>
+            <span id="radarManualStatus" class="fl-mini"></span>
+          </div>
+          <div style="overflow:auto;margin-top:10px;">
+            <table class="fl-table">
+              <thead>
+                <tr><th>Fecha</th><th>Liga</th><th>Local</th><th>Visitante</th><th>Cuotas (1/X/2)</th><th></th></tr>
+              </thead>
+              <tbody>${manualRows || '<tr><td colspan="6" class="fl-muted">Sin partidos manuales guardados todavía.</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
         <div class="fl-card fl-radar-card">
           <div class="fl-row" style="justify-content:space-between;align-items:flex-end;">
             <div>
@@ -11382,6 +11440,42 @@ function computeTeamIntelligencePanel(db, teamId){
 
       document.getElementById('radarSortBy')?.addEventListener('change', (ev)=>{
         radarState.sortBy = ev.target.value || 'studyScore';
+        render('radar', payload);
+      });
+      document.getElementById('radarManualLeague')?.addEventListener('change', (ev)=>{
+        radarState.filters.manualLeagueId = ev.target.value || '';
+        render('radar', payload);
+      });
+      document.getElementById('radarManualSave')?.addEventListener('click', ()=>{
+        const leagueId = document.getElementById('radarManualLeague')?.value || '';
+        const homeId = document.getElementById('radarManualHome')?.value || '';
+        const awayId = document.getElementById('radarManualAway')?.value || '';
+        const status = document.getElementById('radarManualStatus');
+        if(!leagueId || !homeId || !awayId || homeId===awayId){
+          if(status) status.textContent = '⚠️ Elige liga, local y visitante válidos.';
+          return;
+        }
+        const manualMatch = {
+          id: uid('rm'),
+          createdAt: new Date().toISOString(),
+          date: new Date().toISOString().slice(0,10),
+          leagueId,
+          homeId,
+          awayId,
+          oddsHome: pickFirstNumber(document.getElementById('radarManualOddH')?.value),
+          oddsDraw: pickFirstNumber(document.getElementById('radarManualOddD')?.value),
+          oddsAway: pickFirstNumber(document.getElementById('radarManualOddA')?.value)
+        };
+        db.radar ||= { matches: [] };
+        db.radar.matches = Array.isArray(db.radar.matches) ? db.radar.matches : [];
+        db.radar.matches.unshift(manualMatch);
+        saveDb(db);
+        render('radar', payload);
+      });
+      content.querySelectorAll('[data-radar-delete-manual]').forEach((btn)=>btn.onclick = ()=>{
+        const id = btn.getAttribute('data-radar-delete-manual');
+        db.radar.matches = (db.radar.matches || []).filter((row)=>row.id!==id);
+        saveDb(db);
         render('radar', payload);
       });
       content.querySelectorAll('[data-radar-open-sim]').forEach((btn)=>btn.onclick = ()=>{
