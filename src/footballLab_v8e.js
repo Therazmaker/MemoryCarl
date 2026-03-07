@@ -3270,6 +3270,10 @@ export function initFootballLab(){
       /* ── 3-col layout ── */
       .b2x-body{display:grid;grid-template-columns:300px 1fr 440px;flex:1;overflow:hidden;border-top:1px solid var(--b2-border);}
       .b2x-col{overflow-y:auto;height:calc(100vh - 54px - 58px);}
+      .b2x-col::-webkit-scrollbar{width:4px;}
+      .b2x-col::-webkit-scrollbar-track{background:transparent;}
+      .b2x-col::-webkit-scrollbar-thumb{background:rgba(255,255,255,.08);border-radius:2px;}
+      .b2x-col::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.18);}
       .b2x-col-left{background:var(--b2-surface);border-right:1px solid var(--b2-border);}
       .b2x-col-center{background:var(--b2-bg);padding:16px;}
       .b2x-col-right{background:var(--b2-surface);border-left:1px solid var(--b2-border);padding:14px;display:flex;flex-direction:column;gap:12px;}
@@ -11969,6 +11973,23 @@ function computeTeamIntelligencePanel(db, teamId){
         db.settings.selectedLeagueId = e.target.value || "";
         saveDb(db);
         render('brainv2', { leagueId: e.target.value || "" });
+      });
+
+      // ── Sidebar navigation ──
+      document.querySelectorAll('.b2x-sidebar-item[id]').forEach(item => {
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.b2x-sidebar-item[id]').forEach(i => i.classList.remove('active'));
+          item.classList.add('active');
+          if (item.id === 'b2xNavDashboard') {
+            const dash = document.getElementById('b2PowerDashboard');
+            if (dash && dash.style.display !== 'none') dash.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+          if (item.id === 'b2xNavEditorial' || item.id === 'b2xNavInsights') {
+            const out = document.getElementById('b2PrematchOut');
+            if (out && out.style.display !== 'none') out.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            else document.getElementById('b2PrematchGenerate')?.click();
+          }
+        });
       });
       document.getElementById('b2Team')?.addEventListener('change', (e)=>render('brainv2', { leagueId: selectedLeagueId, teamId: e.target.value || "" }));
       document.getElementById('b2OpenLineupComposer')?.addEventListener('click', ()=>{
