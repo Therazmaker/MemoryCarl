@@ -2716,6 +2716,70 @@ export function initFootballLab(){
       .slice(-limit);
   }
 
+  // ── Calcula perfil de forma real para el Radar
+  function computeTeamFormProfile(db, teamId, limit = 5){
+    const matches = getRecentTeamMatches(db, teamId, limit);
+    if(!matches.length) return null;
+
+    let wins = 0, draws = 0, losses = 0;
+    let gf = 0, ga = 0;
+    const sequence = []; // últimos primero al final → más reciente al final
+
+    for(const m of matches){
+      const isHome = m.homeId === teamId;
+      const myGoals  = Number(isHome ? m.homeGoals : m.awayGoals) || 0;
+      const oppGoals = Number(isHome ? m.awayGoals : m.homeGoals) || 0;
+      gf += myGoals;
+      ga += oppGoals;
+      if(myGoals > oppGoals){ wins++;  sequence.push('G'); }
+      else if(myGoals === oppGoals){ draws++; sequence.push('E'); }
+      else { losses++; sequence.push('P'); }
+    }
+
+    const n = matches.length;
+    const pts = wins * 3 + draws;
+    const maxPts = n * 3;
+
+    // Tendencia: puntaje ponderado (más reciente = más peso)
+    // últimos 5: pesos [1,1.5,2,2.5,3] del más antiguo al más reciente
+    const weights = [1, 1.5, 2, 2.5, 3].slice(-n);
+    let weightedPts = 0;
+    let totalWeight = 0;
+    for(let i = 0; i < n; i++){
+      const r = sequence[i];
+      const p = r === 'G' ? 3 : r === 'E' ? 1 : 0;
+      weightedPts += p * weights[i];
+      totalWeight += weights[i] * 3;
+    }
+    const trendScore = totalWeight > 0 ? weightedPts / totalWeight : 0; // 0..1
+
+    // Dirección de tendencia: compara primera mitad vs segunda mitad
+    const half = Math.floor(n / 2);
+    const recentHalf = sequence.slice(n - half);
+    const oldHalf    = sequence.slice(0, half);
+    const ptsHalf = (arr) => arr.reduce((s, r) => s + (r==='G'?3:r==='E'?1:0), 0);
+    const recentPts = ptsHalf(recentHalf);
+    const oldPts    = ptsHalf(oldHalf);
+    let trend = 'stable'; // 'rising' | 'falling' | 'stable'
+    if(half >= 2){
+      if(recentPts > oldPts) trend = 'rising';
+      else if(recentPts < oldPts) trend = 'falling';
+    }
+
+    return {
+      sequence,             // ['P','G','P','P','P']
+      sequenceStr: sequence.join(''), // 'PGPPP'
+      wins, draws, losses,
+      gfPerGame: Number((gf / n).toFixed(2)),
+      gaPerGame: Number((ga / n).toFixed(2)),
+      pts,
+      ptsPerGame: Number((pts / n).toFixed(2)),
+      trendScore,           // 0..1 ponderado reciente
+      trend,                // 'rising' | 'falling' | 'stable'
+      n
+    };
+  }
+
   function parseScorePair(score = ""){
     const hit = String(score || "").match(/(\d+)\s*[-:]\s*(\d+)/);
     if(!hit) return null;
@@ -9800,75 +9864,139 @@ function computeTeamIntelligencePanel(db, teamId){
     return flags;
   }
 
-  function buildRadarNarrative({ home, away, strengthHome, strengthAway, strengthGap, fsiHome, fsiAway, avgFSI, studyScore, type, flags = [], odds = {} }){
+  function buildRadarNarrative({ home, away, strengthHome, strengthAway, strengthGap, fsiHome, fsiAway, avgFSI, studyScore, type, flags = [], odds = {}, formHome = null, formAway = null }){
     const lines = [];
-    const strongerTeam = strengthHome >= strengthAway ? home : away;
-    const weakerTeam = strengthHome >= strengthAway ? away : home;
-    const strongerFsi = strengthHome >= strengthAway ? fsiHome : fsiAway;
-    const weakerFsi = strengthHome >= strengthAway ? fsiAway : fsiHome;
+    const strongerTeam  = strengthHome >= strengthAway ? home : away;
+    const weakerTeam    = strengthHome >= strengthAway ? away : home;
+    const strongerFsi   = strengthHome >= strengthAway ? fsiHome : fsiAway;
+    const weakerFsi     = strengthHome >= strengthAway ? fsiAway : fsiHome;
     const strongerStrength = Math.max(strengthHome, strengthAway);
-    const weakerStrength = Math.min(strengthHome, strengthAway);
+    const weakerStrength   = Math.min(strengthHome, strengthAway);
+    const fH = formHome;
+    const fA = formAway;
 
-    // ── VEREDICTO principal
-    if(studyScore >= 70){
+    // ── helpers de forma
+    const trendLabel  = (f) => f?.trend === 'rising' ? '📈 subiendo' : f?.trend === 'falling' ? '📉 cayendo' : '➡️ estable';
+    const seqHtml     = (f) => (f?.sequence || []).map(r => {
+      const c = r==='G' ? '#3fb950' : r==='E' ? '#e3b341' : '#f85149';
+      return `<b style="color:${c}">${r}</b>`;
+    }).join(' ');
+    const hasForm     = fH && fA && fH.n >= 3 && fA.n >= 3;
+
+    // ── VEREDICTO principal — ahora pondera también la forma
+    let verdictLevel = studyScore >= 70 ? 'high' : studyScore >= 45 ? 'mid' : 'low';
+    // Si la forma sugiere sorpresa, elevar el nivel
+    if(verdictLevel === 'low' && hasForm){
+      if((fH.trend === 'falling' && fA.trend === 'rising') ||
+         (fH.trend === 'rising'  && fA.trend === 'falling')) verdictLevel = 'mid';
+    }
+
+    if(verdictLevel === 'high'){
       lines.push(`🔥 <b>Vale la pena estudiarlo.</b>`);
-    } else if(studyScore >= 45){
+    } else if(verdictLevel === 'mid'){
       lines.push(`👀 <b>Tiene matices interesantes</b>, no es obvio.`);
     } else {
       lines.push(`😐 <b>Partido plano</b> en papel — poco conflicto sistémico detectado.`);
     }
 
-    // ── EQUILIBRIO de fuerzas
-    if(strengthGap <= 5){
-      lines.push(`Los equipos están prácticamente igualados en fuerza (${strengthHome} vs ${strengthAway}) — ninguno domina en papel.`);
-    } else if(strengthGap <= 15){
-      lines.push(`${strongerTeam} tiene una ventaja de fuerza moderada (${strongerStrength} vs ${weakerStrength}), pero no es aplastante.`);
-    } else if(strengthGap <= 28){
-      lines.push(`${strongerTeam} es el favorito claro en fuerza (${strongerStrength} vs ${weakerStrength}).`);
-    } else {
-      lines.push(`${strongerTeam} domina ampliamente en fuerza (${strongerStrength} vs ${weakerStrength}) — en papel no hay historia.`);
-    }
+    // ── FORMA reciente (secuencia visual + tendencia)
+    if(hasForm){
+      const hSeq = seqHtml(fH);
+      const aSeq = seqHtml(fA);
+      lines.push(`Forma reciente → ${home}: ${hSeq} (${trendLabel(fH)}) · ${away}: ${aSeq} (${trendLabel(fA)})`);
 
-    // ── FSI: momento actual de cada equipo
-    const fsiDesc = (fsi, name) => {
-      if(fsi >= 35) return `${name} llega en estado excepcional (FSI +${fsi.toFixed(1)})`;
-      if(fsi >= 18) return `${name} llega en buen momento (FSI +${fsi.toFixed(1)})`;
-      if(fsi >= 5)  return `${name} está estable (FSI +${fsi.toFixed(1)})`;
-      if(fsi >= -5) return `${name} llega neutro (FSI ${fsi.toFixed(1)})`;
-      if(fsi >= -18) return `${name} llega con dudas (FSI ${fsi.toFixed(1)})`;
-      return `${name} llega en mal momento (FSI ${fsi.toFixed(1)})`;
-    };
-    lines.push(`${fsiDesc(fsiHome, home)}, ${fsiDesc(fsiAway, away).replace(/^./, c => c.toLowerCase())}.`);
+      // Divergencia de tendencia — el caso clave que señalaste
+      if(fH.trend === 'falling' && fA.trend === 'rising'){
+        lines.push(`⚠️ <b>Tendencias opuestas:</b> ${home} está cayendo mientras ${away} viene en ascenso. El favorito en papel puede no reflejar el momento real.`);
+      } else if(fH.trend === 'rising' && fA.trend === 'falling'){
+        lines.push(`✅ ${home} confirma su tendencia — llega subiendo mientras ${away} cae.`);
+      }
 
-    // ── EL CONFLICTO: favorito debilitado vs underdog en forma
-    if(flags.includes('STRONG_FAVORITE_UNSTABLE')){
-      lines.push(`⚠️ <b>Alerta clave:</b> ${strongerTeam} llega como favorito en fuerza pero con FSI negativo (${strongerFsi.toFixed(1)}) — el sistema detecta inestabilidad en quien debería ganar. Esto es exactamente el patrón de sorpresa.`);
-    } else if(strongerFsi <= -10 && weakerFsi >= 10){
-      lines.push(`⚠️ El favorito (${strongerTeam}) llega apagado mientras el underdog (${weakerTeam}) está encendido. El mercado puede estar equivocado.`);
-    } else if(strongerFsi >= 18 && weakerFsi <= -10){
-      lines.push(`El favorito confirma su rol — llega bien y el rival está en baja. El resultado esperado tiene respaldo sistémico.`);
-    }
-
-    // ── LECTURA DE CUOTAS si hay datos
-    const hasOdds = Number.isFinite(odds.home) && Number.isFinite(odds.away);
-    if(hasOdds){
-      const impliedHome = 1 / odds.home;
-      const impliedAway = 1 / odds.away;
-      const mktFavorite = impliedHome > impliedAway ? home : away;
-      const mktFavProb = Math.round(Math.max(impliedHome, impliedAway) * 100);
-      const sysFavorite = strengthHome >= strengthAway ? home : away;
-      if(mktFavorite !== sysFavorite){
-        lines.push(`📊 El mercado favorece a ${mktFavorite} (${mktFavProb}% implícito) pero el sistema pone a ${sysFavorite} con mayor fuerza — hay desacuerdo entre mercado y sistema.`);
-      } else if(mktFavProb >= 65 && strongerFsi <= -8){
-        lines.push(`📊 El mercado confía mucho en ${mktFavorite} (${mktFavProb}% implícito) pero su FSI es bajo — la cuota puede no reflejar su estado real.`);
+      // Diferencia de puntos por partido
+      const ptsDiff = Math.abs(fH.ptsPerGame - fA.ptsPerGame);
+      if(ptsDiff >= 0.8){
+        const betterForm = fH.ptsPerGame >= fA.ptsPerGame ? home : away;
+        const worseForm  = fH.ptsPerGame >= fA.ptsPerGame ? away : home;
+        const betterPpg  = Math.max(fH.ptsPerGame, fA.ptsPerGame);
+        const worsePpg   = Math.min(fH.ptsPerGame, fA.ptsPerGame);
+        lines.push(`${betterForm} rinde mejor en los últimos ${fH.n} juegos (${betterPpg} pts/j vs ${worsePpg} de ${worseForm}).`);
       }
     }
 
-    // ── TIPO de partido
+    // ── DEFENSA: goles recibidos por partido
+    if(hasForm){
+      const gaDiff = Math.abs(fH.gaPerGame - fA.gaPerGame);
+      if(gaDiff >= 0.4){
+        const betterDef  = fH.gaPerGame <= fA.gaPerGame ? home : away;
+        const worseAttOf = fH.gaPerGame <= fA.gaPerGame ? away : home;
+        const betterGa   = Math.min(fH.gaPerGame, fA.gaPerGame);
+        const worseGa    = Math.max(fH.gaPerGame, fA.gaPerGame);
+        lines.push(`🛡️ Diferencia defensiva: ${betterDef} recibe ${betterGa} goles/j, ${worseAttOf} recibe ${worseGa}/j. La solidez de ${betterDef} es un factor real.`);
+      } else {
+        // Si son similares en defensa, menciona el ataque relativo
+        const gfDiff = Math.abs(fH.gfPerGame - fA.gfPerGame);
+        if(gfDiff < 0.3 && gaDiff < 0.4){
+          lines.push(`Ambos equipos producen y conceden de forma similar — el marcador final depende de detalles puntuales.`);
+        }
+      }
+    }
+
+    // ── EQUILIBRIO de fuerzas (CSI)
+    if(strengthGap <= 5){
+      lines.push(`Los equipos están prácticamente igualados en fuerza acumulada (${strengthHome} vs ${strengthAway}).`);
+    } else if(strengthGap <= 15){
+      lines.push(`${strongerTeam} tiene ventaja de fuerza moderada (${strongerStrength} vs ${weakerStrength}), pero no es determinante.`);
+    } else if(strengthGap <= 28){
+      lines.push(`${strongerTeam} es el favorito en fuerza histórica (${strongerStrength} vs ${weakerStrength}).`);
+    } else {
+      lines.push(`${strongerTeam} domina ampliamente en fuerza acumulada (${strongerStrength} vs ${weakerStrength}).`);
+    }
+
+    // ── FSI: estado de forma sistémico
+    const fsiDesc = (fsi, name) => {
+      if(fsi >= 35)  return `${name} en estado excepcional (FSI +${fsi.toFixed(1)})`;
+      if(fsi >= 18)  return `${name} en buen momento sistémico (FSI +${fsi.toFixed(1)})`;
+      if(fsi >= 5)   return `${name} estable (FSI +${fsi.toFixed(1)})`;
+      if(fsi >= -5)  return `${name} neutro (FSI ${fsi.toFixed(1)})`;
+      if(fsi >= -18) return `${name} con dudas (FSI ${fsi.toFixed(1)})`;
+      return `${name} en mal momento sistémico (FSI ${fsi.toFixed(1)})`;
+    };
+    lines.push(`${fsiDesc(fsiHome, home)}, ${fsiDesc(fsiAway, away).replace(/^./, c => c.toLowerCase())}.`);
+
+    // ── CONFLICTO CLAVE: favorito débil vs underdog en ascenso
+    if(flags.includes('STRONG_FAVORITE_UNSTABLE')){
+      lines.push(`⚠️ <b>Señal de sorpresa:</b> ${strongerTeam} es favorito en papel pero llega inestable (FSI ${strongerFsi.toFixed(1)}). El sistema detecta el patrón donde el resultado lógico falla.`);
+    } else if(strongerFsi <= -10 && weakerFsi >= 10){
+      lines.push(`⚠️ El favorito (${strongerTeam}) llega apagado mientras el underdog (${weakerTeam}) está encendido. El mercado puede estar equivocado.`);
+    } else if(strongerFsi >= 18 && weakerFsi <= -10){
+      lines.push(`El favorito (${strongerTeam}) confirma su rol con FSI positivo y rival en baja.`);
+    }
+
+    // ── CUOTAS vs sistema
+    const hasOdds = Number.isFinite(odds.home) && Number.isFinite(odds.away);
+    if(hasOdds){
+      const impliedHome   = 1 / odds.home;
+      const impliedAway   = 1 / odds.away;
+      const mktFavorite   = impliedHome > impliedAway ? home : away;
+      const mktFavProb    = Math.round(Math.max(impliedHome, impliedAway) * 100);
+      const sysFavorite   = strengthHome >= strengthAway ? home : away;
+      const formFavorite  = (hasForm && fH.trendScore !== fA.trendScore)
+        ? (fH.trendScore >= fA.trendScore ? home : away) : null;
+
+      if(mktFavorite !== sysFavorite){
+        lines.push(`📊 Mercado favorece a ${mktFavorite} (${mktFavProb}% implícito) pero el sistema posiciona a ${sysFavorite} con mayor fuerza acumulada — hay desacuerdo.`);
+      } else if(formFavorite && formFavorite !== mktFavorite){
+        lines.push(`📊 La forma reciente apunta a ${formFavorite}, pero el mercado prefiere a ${mktFavorite} (${mktFavProb}% implícito). Vale revisar.`);
+      } else if(mktFavProb >= 65 && strongerFsi <= -8){
+        lines.push(`📊 El mercado confía mucho en ${mktFavorite} (${mktFavProb}% implícito) pero su FSI es bajo — cuota puede no reflejar estado real.`);
+      }
+    }
+
+    // ── TIPO
     if(type === 'chaos'){
-      lines.push(`Los dos equipos llegan con alta tensión emocional — partido impredecible, cualquier resultado es posible.`);
+      lines.push(`Alta tensión en ambos equipos — resultado impredecible, cualquier marcador es posible.`);
     } else if(type === 'clean' && strengthGap >= 20){
-      lines.push(`Escenario ordenado: favorito sólido, rival débil, sin señales de alarma. El resultado lógico tiene alta probabilidad.`);
+      lines.push(`Escenario ordenado: favorito sólido, sin señales de alarma. El resultado lógico tiene respaldo sistémico.`);
     }
 
     return lines;
@@ -9909,6 +10037,8 @@ function computeTeamIntelligencePanel(db, teamId){
         const fsiAway = Number.isFinite(Number(prematch?.fsi?.away?.FSI)) ? Number(prematch.fsi.away.FSI) : 0;
         const scorePack = computeRadarStudyScore({ strengthHome, strengthAway, fsiHome, fsiAway });
         const type = classifyRadarMatch({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, avgFSI: scorePack.avgFSI });
+        const formHome = computeTeamFormProfile(db, home.id, 5);
+        const formAway = computeTeamFormProfile(db, away.id, 5);
         return {
           id: m.id || uid('radar'),
           league,
@@ -9932,6 +10062,8 @@ function computeTeamIntelligencePanel(db, teamId){
           studyScore: scorePack.studyScore,
           type,
           flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
+          formHome,
+          formAway,
           narrative: buildRadarNarrative({
             home: home.name || 'Local',
             away: away.name || 'Visitante',
@@ -9944,6 +10076,8 @@ function computeTeamIntelligencePanel(db, teamId){
             studyScore: scorePack.studyScore,
             type,
             flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
+            formHome,
+            formAway,
             odds: {
               home: pickFirstNumber(m.oddsHome),
               draw: pickFirstNumber(m.oddsDraw),
@@ -11612,6 +11746,27 @@ function computeTeamIntelligencePanel(db, teamId){
               <div class="rdx-metric-label">FSI Promedio</div>
               <div class="rdx-metric-value ${fsiColor(m.avgFSI)}">${m.avgFSI > 0 ? '+' : ''}${m.avgFSI}</div>
             </div>
+            ${m.formHome && m.formHome.n >= 3 ? `
+            <div class="rdx-metric" style="grid-column:span 2;">
+              <div class="rdx-metric-label">Forma ${m.home} (últ. ${m.formHome.n})</div>
+              <div style="display:flex;gap:5px;margin-top:4px;align-items:center;flex-wrap:wrap;">
+                ${m.formHome.sequence.map(r=>{
+                  const c = r==='G'?'#3fb950':r==='E'?'#e3b341':'#f85149';
+                  return `<span style="width:22px;height:22px;border-radius:5px;background:${c}22;border:1px solid ${c}55;color:${c};font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;">${r}</span>`;
+                }).join('')}
+                <span style="font-size:11px;color:${m.formHome.trend==='rising'?'#3fb950':m.formHome.trend==='falling'?'#f85149':'#8b949e'};margin-left:4px;">${m.formHome.trend==='rising'?'↑':m.formHome.trend==='falling'?'↓':'→'} ${m.formHome.ptsPerGame}pts/j · GA ${m.formHome.gaPerGame}/j</span>
+              </div>
+            </div>
+            <div class="rdx-metric" style="grid-column:span 2;">
+              <div class="rdx-metric-label">Forma ${m.away} (últ. ${m.formAway?.n||0})</div>
+              <div style="display:flex;gap:5px;margin-top:4px;align-items:center;flex-wrap:wrap;">
+                ${(m.formAway?.sequence||[]).map(r=>{
+                  const c = r==='G'?'#3fb950':r==='E'?'#e3b341':'#f85149';
+                  return `<span style="width:22px;height:22px;border-radius:5px;background:${c}22;border:1px solid ${c}55;color:${c};font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;">${r}</span>`;
+                }).join('')}
+                <span style="font-size:11px;color:${m.formAway?.trend==='rising'?'#3fb950':m.formAway?.trend==='falling'?'#f85149':'#8b949e'};margin-left:4px;">${m.formAway?.trend==='rising'?'↑':m.formAway?.trend==='falling'?'↓':'→'} ${m.formAway?.ptsPerGame||'-'}pts/j · GA ${m.formAway?.gaPerGame||'-'}/j</span>
+              </div>
+            </div>` : ''}
           </div>
 
           ${m.flags.length ? `<div class="rdx-flags">${m.flags.map((f)=>`<span class="rdx-flag ${flagAlert(f)}">${f.replaceAll('_',' ')}</span>`).join('')}</div>` : ''}
