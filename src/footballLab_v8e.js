@@ -3283,10 +3283,14 @@ export function initFootballLab(){
       .b2x-col-left{background:var(--b2-surface);border-right:1px solid var(--b2-border);}
       .b2x-col-center{background:var(--b2-bg);padding:16px;}
       .b2x-col-right{background:var(--b2-surface);border-left:1px solid var(--b2-border);padding:14px;display:flex;flex-direction:column;gap:12px;}
-      .b2x-shell.b2x-vision-focus .b2x-body{grid-template-columns:1fr 300px;}
+      .b2x-shell.b2x-vision-focus .b2x-body{grid-template-columns:300px minmax(540px,1fr);}
       .b2x-shell.b2x-vision-focus .b2x-col-left{display:none;}
+      .b2x-shell.b2x-vision-focus .b2x-col-center{padding:10px;opacity:.72;}
       .b2x-shell.b2x-vision-focus .b2x-col-right{padding:10px;gap:8px;}
-      .b2x-shell.b2x-vision-focus #b2Vision{box-shadow:0 0 0 1px rgba(88,166,255,.35),0 0 24px rgba(88,166,255,.1);}
+      .b2x-shell.b2x-vision-focus #b2Vision{box-shadow:0 0 0 1px rgba(88,166,255,.45),0 0 36px rgba(88,166,255,.2);}
+      .b2x-menu-restore{display:none;align-items:center;gap:6px;padding:8px 10px;border:1px solid rgba(88,166,255,.4);background:rgba(13,17,23,.88);color:#dbeafe;font-family:var(--b2-font-mono);font-size:10px;letter-spacing:1px;border-radius:6px;cursor:pointer;max-width:max-content;}
+      .b2x-menu-restore:hover{border-color:rgba(96,165,250,.8);color:#fff;}
+      .b2x-shell.b2x-vision-focus .b2x-menu-restore{display:inline-flex;}
 
       /* ── Sidebar nav (left col) ── */
       .b2x-sidebar-section{padding:12px 16px 4px;font-size:7.5px;letter-spacing:3px;color:var(--b2-text3);text-transform:uppercase;font-family:var(--b2-font-mono);}
@@ -11646,7 +11650,7 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="b2x-body">
 
             <!-- LEFT: SIDEBAR + CAPTURE -->
-            <div class="b2x-col b2x-col-left">
+            <div class="b2x-col b2x-col-left" id="b2SidebarMenu">
               <div class="b2x-sidebar-section">Análisis</div>
               <div class="b2x-sidebar-item active" id="b2xNavDashboard">
                 <span class="b2x-sidebar-icon">⚡</span>
@@ -11775,6 +11779,7 @@ function computeTeamIntelligencePanel(db, teamId){
 
             <!-- RIGHT: VISION + OUTPUT -->
             <div class="b2x-col b2x-col-right">
+              <button id="b2RestoreMenu" class="b2x-menu-restore" type="button">☰ Mostrar menú</button>
               <div id="b2BrainStatus" class="b2x-brain-info"></div>
               <div id="b2Vision" class="b2x-vision-placeholder b2-hero-enter">
                 Selecciona local y visita → presiona Generar Análisis
@@ -12175,7 +12180,10 @@ function computeTeamIntelligencePanel(db, teamId){
 
       // ── Sidebar navigation ──
       const setVisionFocusMode = (enabled)=>{
-        document.querySelector('.b2x-shell')?.classList.toggle('b2x-vision-focus', !!enabled);
+        const shell = document.querySelector('.b2x-shell');
+        const menu = document.getElementById('b2SidebarMenu');
+        shell?.classList.toggle('b2x-vision-focus', !!enabled);
+        if(menu) menu.setAttribute('aria-hidden', enabled ? 'true' : 'false');
       };
       const hidePanel = (node)=>{ if(node && node.style.display !== 'none') node.style.display = 'none'; };
       const showPanel = (node)=>{ if(node && node.style.display === 'none') node.style.display = 'block'; };
@@ -12275,6 +12283,7 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById('b2Team')?.addEventListener('change', (e)=>render('brainv2', { leagueId: selectedLeagueId, teamId: e.target.value || "" }));
       document.getElementById('b2PrematchGenerate')?.addEventListener('click', ()=>setVisionFocusMode(false));
       document.getElementById('b2PrematchRegenerate')?.addEventListener('click', ()=>setVisionFocusMode(false));
+      document.getElementById('b2RestoreMenu')?.addEventListener('click', ()=>setVisionFocusMode(false));
       document.getElementById('b2OpenLineupComposer')?.addEventListener('click', ()=>{
         const teamId = document.getElementById('b2Team')?.value || "";
         openBrainV2LineupComposer({
