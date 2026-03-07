@@ -13042,9 +13042,10 @@ function computeTeamIntelligencePanel(db, teamId){
         ? `🧠 Cerebro activo para este equipo · ${selectedTeamSummary.samples} partidos (${selectedTeamSummary.positive} positivos / ${selectedTeamSummary.negative} alertas).`
         : "⚠️ Este equipo aún no tiene memoria en Brain v2. Guarda partidos para activar el cerebro.";
 
-      const allTeams = db.teams.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
-      const homeId = payload.homeId || allTeams[0]?.id || "";
-      const awayId = payload.awayId || allTeams[1]?.id || allTeams[0]?.id || "";
+      const allTeams = (selectedLeagueId ? getTeamsForLeague(db, selectedLeagueId) : db.teams)
+        .slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
+      const homeId = payload.homeId || (allTeams.find(t=>t.id!==payload.awayId)?.id) || allTeams[0]?.id || "";
+      const awayId = payload.awayId || (allTeams.find(t=>t.id!==homeId)?.id) || allTeams[1]?.id || "";
       const teamOptionFull = (chosen="") => allTeams.map((t)=>`<option value="${t.id}" ${chosen===t.id?"selected":""}>${t.name}</option>`).join("");
 
       content.innerHTML = `
@@ -13864,8 +13865,24 @@ function computeTeamIntelligencePanel(db, teamId){
           ev.target.value = '';
         }
       });
-      document.getElementById('b2Home')?.addEventListener('change', paintBrainStatus);
-      document.getElementById('b2Away')?.addEventListener('change', paintBrainStatus);
+      document.getElementById('b2Home')?.addEventListener('change', (e)=>{
+        paintBrainStatus();
+        // Si Away tiene el mismo equipo, cambiarlo al primero disponible
+        const awayEl = document.getElementById('b2Away');
+        if(awayEl && awayEl.value === e.target.value){
+          const other = Array.from(awayEl.options).find(o => o.value && o.value !== e.target.value);
+          if(other) awayEl.value = other.value;
+        }
+      });
+      document.getElementById('b2Away')?.addEventListener('change', (e)=>{
+        paintBrainStatus();
+        // Si Home tiene el mismo equipo, cambiarlo al primero disponible
+        const homeEl = document.getElementById('b2Home');
+        if(homeEl && homeEl.value === e.target.value){
+          const other = Array.from(homeEl.options).find(o => o.value && o.value !== e.target.value);
+          if(other) homeEl.value = other.value;
+        }
+      });
 
       let lastBrainPrematchPayload = null;
       const renderCSIBlock = (csi = null)=>{
