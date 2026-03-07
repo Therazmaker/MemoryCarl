@@ -1942,6 +1942,92 @@ export function initFootballLab(){
     return { updates, skipped: null };
   }
 
+  // ═══════════════════════════════════════════════════════
+  // HEURISTIC ENGINE — aplica reglas del feedback de Claude a las probabilidades
+  // ═══════════════════════════════════════════════════════
+  function applyClaudeHeuristics(probs, { mneLearning = null, homeProfile = null, awayProfile = null, homeSummary = null, awaySummary = null } = {}){
+    const rules = mneLearning?.claudeExchange?.candidateRules || [];
+    const heuristics = mneLearning?.claudeExchange?.reusableHeuristics || [];
+    if(!rules.length && !heuristics.length) return probs;
+
+    let { home, draw, away } = { ...probs };
+    const log = [];
+
+    // Helper: leer tag dominante del perfil de equipo
+    const dominantTag = (profile) => {
+      if(!profile?.dna) return null;
+      return Object.entries(profile.dna).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+    };
+
+    const homeTag = dominantTag(homeProfile);
+    const awayTag = dominantTag(awayProfile);
+    const homeFatigue = Number(homeSummary?.avg?.fatigue || homeSummary?.physical?.homeFatigue || 0);
+    const awayFatigue = Number(awaySummary?.avg?.fatigue || awaySummary?.physical?.awayFatigue || 0);
+    const homeControl = Number(homeSummary?.avg?.possession || homeSummary?.bars?.homeControl || 50);
+    const awayControl = Number(awaySummary?.avg?.possession || awaySummary?.bars?.awayControl || 50);
+
+    // Aplicar cada regla según su condición
+    for(const rule of rules){
+      const conf = Number(rule.confidence || 0);
+      if(conf < 0.60) continue; // solo reglas con suficiente confianza
+      const id = String(rule.id || '');
+      const action = String(rule.action || rule.effect || '');
+      const lr = conf * 0.08; // learning rate máximo por regla: 8%
+
+      // bilateral_finishing_failure: si ambos tienen finishing_failure alto
+      if(id === 'bilateral_finishing_failure'){
+        if(homeTag === 'finishing_failure' && awayTag === 'finishing_failure'){
+          draw  = clamp(draw + lr * 0.8, 0, 0.65);
+          home  = clamp(home - lr * 0.4, 0.05, 0.9);
+          away  = clamp(away - lr * 0.4, 0.05, 0.9);
+          log.push(`bilateral_finishing_failure → draw +${(lr*0.8*100).toFixed(1)}%`);
+        }
+      }
+      // draw_boost_fatigue_bilateral
+      if(id === 'draw_boost_fatigue_bilateral'){
+        if(homeFatigue > 70 && awayFatigue > 70 && Math.abs(homeControl - awayControl) < 5){
+          draw = clamp(draw + lr, 0, 0.65);
+          home = clamp(home - lr * 0.5, 0.05, 0.9);
+          away = clamp(away - lr * 0.5, 0.05, 0.9);
+          log.push(`bilateral_fatigue_draw → draw +${(lr*100).toFixed(1)}%`);
+        }
+      }
+      // discipline_cost_draw_boost
+      if(id === 'discipline_cost_draw_boost'){
+        if(homeTag === 'discipline_issues' || awayTag === 'discipline_issues'){
+          const boost = lr * 0.6;
+          draw = clamp(draw + boost, 0, 0.65);
+          home = clamp(home - boost * 0.5, 0.05, 0.9);
+          away = clamp(away - boost * 0.5, 0.05, 0.9);
+          log.push(`discipline_cost_draw → draw +${(boost*100).toFixed(1)}%`);
+        }
+      }
+      // form_trend_override (de Nantes vs Angers)
+      if(id === 'form_trend_override'){
+        // se aplica externamente si se pasan los perfiles de forma
+        // aquí solo registramos que existe
+      }
+      // Reglas genéricas por action string
+      if(action.includes('draw_probability += 0.08')){
+        draw = clamp(draw + lr * 0.8, 0, 0.65);
+        home = clamp(home - lr * 0.4, 0.05, 0.9);
+        away = clamp(away - lr * 0.4, 0.05, 0.9);
+        log.push(`${id} → draw +${(lr*0.8*100).toFixed(1)}%`);
+      } else if(action.includes('draw_probability += 0.05')){
+        draw = clamp(draw + lr * 0.5, 0, 0.65);
+        home = clamp(home - lr * 0.25, 0.05, 0.9);
+        away = clamp(away - lr * 0.25, 0.05, 0.9);
+        log.push(`${id} → draw +${(lr*0.5*100).toFixed(1)}%`);
+      }
+    }
+
+    // Renormalizar
+    const total = home + draw + away;
+    if(total > 0){ home /= total; draw /= total; away /= total; }
+
+    return { home: Number(home.toFixed(4)), draw: Number(draw.toFixed(4)), away: Number(away.toFixed(4)), _heuristicLog: log };
+  }
+
   function buildBrainV2Vision({ homeSummary, awaySummary, odds, homeProfile = null, awayProfile = null, gpe = null, homeTeamId = "", awayTeamId = "", mneLearning = null }){
     const get = (s, key, fallback)=>Number(s?.avg?.[key] ?? fallback);
     const getAny = (s, keys = [], fallback = 0)=>{
@@ -12638,7 +12724,8 @@ function computeTeamIntelligencePanel(db, teamId){
             </div>`;
           };
 
-          const typeBreakdown = Object.entries(byType).map(([t,d])=>{
+          const typeBreakdown = Object.entries(byType).map(([t,[_,data]])=>{
+            const d = byType[t];
             return `<div style="display:flex;flex-direction:column;gap:3px;">
               <span style="font-size:10px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;">${t}</span>
               ${wrBar(d.won,d.lost)}
@@ -14410,6 +14497,22 @@ function computeTeamIntelligencePanel(db, teamId){
           draw: clamp(rawProbs.draw - Math.abs(readinessDelta) * 0.08, 0.05, 0.6),
           away: clamp(rawProbs.away - readinessDelta * 0.18, 0.05, 0.9)
         };
+
+        // ── Heurísticas aprendidas del feedback de Claude
+        const heuristicProbs = applyClaudeHeuristics(adjustedProbs, {
+          mneLearning: brainV2.mne,
+          homeProfile,
+          awayProfile,
+          homeSummary,
+          awaySummary
+        });
+        adjustedProbs.home = heuristicProbs.home;
+        adjustedProbs.draw = heuristicProbs.draw;
+        adjustedProbs.away = heuristicProbs.away;
+        if(heuristicProbs._heuristicLog?.length){
+          console.log('[HeuristicEngine]', heuristicProbs._heuristicLog.join(' | '));
+        }
+
         const norm = adjustedProbs.home + adjustedProbs.draw + adjustedProbs.away;
         adjustedProbs.home /= norm;
         adjustedProbs.draw /= norm;
@@ -14509,22 +14612,95 @@ function computeTeamIntelligencePanel(db, teamId){
               ${(vision.reasonPreview || []).map((r, idx)=>`<div>#${idx+1} ${r.tag} · ${(r.strength*100).toFixed(0)}% · ${r.note}</div>`).join('') || '<div>Sin razones fuertes todavía.</div>'}
             </div>
           </div>
-          <div class="fl-card" style="margin-top:10px;padding:10px;">
-            <div style="font-weight:800;">📜 Match Narrative Engine (MNE)</div>
-            <div class="fl-mini" style="margin-top:6px;display:grid;gap:8px;">
-              ${(vision.mne?.narrative || []).map((phase)=>`
-                <div class="fl-card" style="padding:8px;">
-                  <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>${phase.phase} · ${phase.title}</b><span>${Math.round((phase.confidence || 0)*100)}%</span></div>
-                  <div style="margin-top:4px;">Tags: ${(phase.tags || []).join(', ') || 'sin tags'}</div>
-                  <ul style="margin:4px 0 0 16px;">${(phase.notes || []).slice(0,2).map((note)=>`<li>${note}</li>`).join('')}</ul>
-                  <div style="margin-top:4px;">Data: N=${phase.confidenceMeta?.N || 0} · Completeness=${Math.round((phase.confidenceMeta?.completeness || 0)*100)}% ${phase.confidenceMeta?.lowConfidence ? '· ⚠️ low confidence' : ''}</div>
+          <div class="fl-card" style="margin-top:10px;padding:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+              <div style="font-weight:800;font-size:13px;letter-spacing:.5px;">📜 MATCH NARRATIVE ENGINE</div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <span style="font-size:10px;color:#6e7681;background:#161b22;border:1px solid #30363d;border-radius:4px;padding:2px 8px;">N=${vision.mne?.narrative?.[0]?.confidenceMeta?.N || 0} partidos</span>
+                <span style="font-size:10px;color:${Number(vision.confidence||0)>=0.7?'#3fb950':Number(vision.confidence||0)>=0.5?'#e3b341':'#f85149'};background:#161b22;border:1px solid #30363d;border-radius:4px;padding:2px 8px;">Confianza global ${Math.round((Number(vision.confidence||0))*100)}%</span>
+                ${(brainV2.mne?.claudeExchange?.candidateRules||[]).length ? `<span style="font-size:10px;color:#818cf8;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);border-radius:4px;padding:2px 8px;">🧠 ${(brainV2.mne.claudeExchange.candidateRules||[]).length} reglas activas</span>` : ''}
+              </div>
+            </div>
+
+            <!-- Timeline de segmentos -->
+            <div style="display:grid;gap:6px;">
+              ${(vision.mne?.narrative || []).map((phase)=>{
+                const conf = Number(phase.confidence || 0);
+                const confColor = conf>=0.7?'#3fb950':conf>=0.5?'#e3b341':'#f85149';
+                const confBg = conf>=0.7?'rgba(63,185,80,.1)':conf>=0.5?'rgba(227,179,65,.1)':'rgba(248,81,73,.08)';
+                const density = Number(phase.confidenceMeta?.completeness || 0);
+                const tags = (phase.tags || []);
+                const TAG_COLORS = {
+                  finishing_failure:'#f85149', clinical_finish:'#3fb950', keeper_heroics:'#58a6ff',
+                  counter_strike:'#e3b341', momentum_control:'#d2a8ff', territorial_pressure:'#79c0ff',
+                  discipline_issues:'#ffa657', setpiece_threat:'#56d364', injury_disruption:'#ff7b72',
+                  finishing_edge:'#3fb950', defensive_errors:'#f85149', low_block_resistance:'#8b949e'
+                };
+                return `
+                  <div style="display:grid;grid-template-columns:80px 1fr auto;gap:10px;align-items:start;padding:8px 10px;background:#0d1117;border:1px solid #21262d;border-radius:8px;border-left:3px solid ${confColor};">
+                    <div>
+                      <div style="font-size:11px;font-weight:800;color:#e6edf3;font-family:monospace;">${phase.phase}'</div>
+                      <div style="font-size:9px;color:#6e7681;margin-top:2px;line-height:1.3;">${phase.title||''}</div>
+                    </div>
+                    <div>
+                      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px;">
+                        ${tags.map(t=>`<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:${(TAG_COLORS[t]||'#8b949e')}22;border:1px solid ${(TAG_COLORS[t]||'#8b949e')}44;color:${TAG_COLORS[t]||'#8b949e'};text-transform:uppercase;letter-spacing:.3px;">${t.replace(/_/g,' ')}</span>`).join('')}
+                      </div>
+                      <div style="font-size:10px;color:#6e7681;line-height:1.4;">${(phase.notes||[]).slice(0,2).join(' · ')||phase.summary||''}</div>
+                      <div style="margin-top:5px;display:flex;gap:8px;align-items:center;">
+                        <div style="flex:1;height:3px;background:#21262d;border-radius:2px;overflow:hidden;max-width:80px;">
+                          <div style="width:${Math.round(density*100)}%;height:100%;background:#30363d;border-radius:2px;"></div>
+                        </div>
+                        <span style="font-size:9px;color:#6e7681;">Data ${Math.round(density*100)}%${phase.confidenceMeta?.lowConfidence?' · ⚠️ baja confianza':''}</span>
+                      </div>
+                    </div>
+                    <div style="text-align:right;">
+                      <div style="font-size:14px;font-weight:900;color:${confColor};">${Math.round(conf*100)}%</div>
+                      <div style="font-size:9px;color:#6e7681;margin-top:1px;">conf.</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+
+            <!-- Key Risks + Live Triggers compactos -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:10px;">
+                <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;">⚠️ Key Risks</div>
+                ${(vision.mne?.keyRisks || []).map(risk=>{
+                  const rColor = risk.confidence>=0.8?'#f85149':risk.confidence>=0.5?'#e3b341':'#8b949e';
+                  return `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;gap:6px;">
+                    <span style="font-size:10px;color:#c9d1d9;font-weight:600;">${risk.tag?.replace(/_/g,' ')||''} <span style="color:#6e7681;font-weight:400;">(${risk.side==='home'?'🏠':'✈️'})</span></span>
+                    <span style="font-size:9px;color:${rColor};white-space:nowrap;">${Math.round((risk.confidence||0)*100)}%</span>
+                  </div>
+                  <div style="font-size:9px;color:#6e7681;margin-bottom:6px;">${risk.impact||''}</div>`;
+                }).join('')||'<div style="font-size:10px;color:#6e7681;">Sin riesgos dominantes.</div>'}
+              </div>
+              <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:10px;">
+                <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;">⚡ Live Triggers</div>
+                ${(vision.mne?.liveTriggers || []).slice(0,3).map(t=>`
+                  <div style="margin-bottom:6px;">
+                    <div style="font-size:9px;color:#8b949e;">Si <span style="color:#c9d1d9;">${t.if||''}</span></div>
+                    <div style="font-size:9px;color:#58a6ff;">→ ${t.then||''} <span style="color:#e3b341;">(${t.weight>0?'+':''}${Number(t.weight||0).toFixed(2)})</span></div>
+                  </div>
+                `).join('')||'<div style="font-size:10px;color:#6e7681;">Sin triggers todavía.</div>'}
+              </div>
+            </div>
+
+            <!-- Heurísticas activas del cerebro -->
+            ${(brainV2.mne?.claudeExchange?.candidateRules||[]).length ? `
+            <div style="margin-top:10px;background:#0a0e15;border:1px solid rgba(99,102,241,.25);border-radius:8px;padding:10px;">
+              <div style="font-size:10px;font-weight:700;color:#818cf8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;">🧠 Reglas aprendidas del feedback — activas en esta predicción</div>
+              ${(brainV2.mne.claudeExchange.candidateRules||[]).map(rule=>`
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px;gap:8px;">
+                  <div>
+                    <span style="font-size:10px;font-weight:700;color:#c9d1d9;">${(rule.id||'').replace(/_/g,' ')}</span>
+                    <div style="font-size:9px;color:#6e7681;">${rule.action||rule.effect||rule.description||''}</div>
+                  </div>
+                  <span style="font-size:10px;font-weight:700;color:${Number(rule.confidence||0)>=0.7?'#3fb950':Number(rule.confidence||0)>=0.5?'#e3b341':'#8b949e'};white-space:nowrap;">${Math.round(Number(rule.confidence||0)*100)}%</span>
                 </div>
               `).join('')}
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px;">
-              <div class="fl-card" style="padding:8px;"><b>Key Risks</b>${(vision.mne?.keyRisks || []).map((risk)=>`<div class="fl-mini">• ${risk.tag} (${risk.side}) · ${risk.impact} · ${Math.round((risk.confidence||0)*100)}%</div>`).join('') || '<div class="fl-mini">Sin riesgos dominantes.</div>'}</div>
-              <div class="fl-card" style="padding:8px;"><b>Live Triggers</b>${(vision.mne?.liveTriggers || []).map((trigger)=>`<div class="fl-mini">• Si ${trigger.if} → ${trigger.then} (${trigger.weight>0?'+':''}${trigger.weight.toFixed(2)})</div>`).join('') || '<div class="fl-mini">Sin triggers todavía.</div>'}</div>
-            </div>
+            </div>` : ''}
           </div>
           <div class="fl-card" style="margin-top:10px;padding:10px;">
             <div style="font-weight:800;">🧩 MNE ↔ Claude Offline Learning</div>
