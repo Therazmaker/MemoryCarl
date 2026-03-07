@@ -1035,10 +1035,12 @@ function sanitizeSecrets(input, keyName = ""){
   return input;
 }
 
-function openDB(name, version = 1, upgradeCallback){
+function openDB(name, version, upgradeCallback){
   return new Promise((resolve, reject)=>{
     try{
-      const req = indexedDB.open(name, version);
+      const req = (version === undefined || version === null)
+        ? indexedDB.open(name)
+        : indexedDB.open(name, version);
       req.onupgradeneeded = ()=>{
         if(typeof upgradeCallback === "function") upgradeCallback(req.result, req.transaction);
       };
@@ -1048,6 +1050,25 @@ function openDB(name, version = 1, upgradeCallback){
       reject(err);
     }
   });
+}
+
+async function openDBWithRequiredStores(dbName, storeNames = []){
+  let db = await openDB(dbName);
+  const missingStores = storeNames.filter((storeName)=>!db.objectStoreNames.contains(storeName));
+  if(!missingStores.length) return db;
+
+  const nextVersion = Number(db.version || 1) + 1;
+  db.close();
+
+  db = await openDB(dbName, nextVersion, (upgradeDb)=>{
+    missingStores.forEach((storeName)=>{
+      if(!upgradeDb.objectStoreNames.contains(storeName)){
+        upgradeDb.createObjectStore(storeName, { keyPath: "teamId" });
+      }
+    });
+  });
+
+  return db;
 }
 
 function idbGetAll(db, storeName){
@@ -1123,7 +1144,7 @@ async function collectBrainBackupData(){
 
   for(const dbName of [...new Set(dbCandidates)].filter(Boolean)){
     try{
-      const db = await openDB(dbName, 1);
+      const db = await openDB(dbName);
       const stores = Array.from(db.objectStoreNames || []);
       const storeDump = {};
       for(const storeName of stores){
@@ -1210,13 +1231,7 @@ async function restoreBrainData(data){
   for(const [dbName, stores] of Object.entries(incomingIndexedDump)){
     const storeNames = Object.keys(stores || {});
     if(!storeNames.length) continue;
-    const db = await openDB(dbName, 1, (upgradeDb)=>{
-      storeNames.forEach((storeName)=>{
-        if(!upgradeDb.objectStoreNames.contains(storeName)){
-          upgradeDb.createObjectStore(storeName, { keyPath: "teamId" });
-        }
-      });
-    });
+    const db = await openDBWithRequiredStores(dbName, storeNames);
     for(const storeName of storeNames){
       await idbClearStore(db, storeName);
       await idbPutMany(db, storeName, stores[storeName]);
