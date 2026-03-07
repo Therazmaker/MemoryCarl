@@ -3613,6 +3613,23 @@ export function initFootballLab(){
       .rdx-input-form{font-size:14px!important}
       .rdx-btn-hist-card{background:rgba(99,102,241,.1);border-color:rgba(99,102,241,.3);color:#818cf8}
       .rdx-btn-hist-card:hover{background:rgba(99,102,241,.2)}
+      /* PSI */
+      .rdx-psi-section{margin-top:10px;padding:10px 12px;background:#0a0e15;border:1px solid #21262d;border-radius:8px}
+      .rdx-psi-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px}
+      .rdx-psi-title{font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:#6e7681}
+      .rdx-psi-team-score{font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px}
+      .rdx-psi-team-score.hot{background:rgba(63,185,80,.12);color:#3fb950;border:1px solid rgba(63,185,80,.3)}
+      .rdx-psi-team-score.ok{background:rgba(139,148,158,.08);color:#8b949e;border:1px solid #30363d}
+      .rdx-psi-team-score.struggling{background:rgba(248,81,73,.1);color:#f85149;border:1px solid rgba(248,81,73,.3)}
+      .rdx-psi-table{width:100%;border-collapse:collapse}
+      .rdx-psi-table td{padding:4px 6px;font-size:11.5px;border-bottom:1px solid #161b22;vertical-align:middle}
+      .rdx-psi-table tr:last-child td{border-bottom:none}
+      .rdx-psi-name{color:#c9d1d9;font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .rdx-psi-tag{font-size:10px;color:#6e7681;font-style:italic}
+      .rdx-psi-state{font-size:13px;text-align:center;width:24px}
+      .rdx-psi-bar-wrap{width:60px;height:4px;background:#21262d;border-radius:2px;overflow:hidden}
+      .rdx-psi-bar{height:100%;border-radius:2px}
+      .rdx-psi-val{font-size:10px;color:#6e7681;text-align:right;min-width:32px}
       /* NARRATIVE */
       .rdx-narrative{margin-top:10px;padding:10px 14px;background:rgba(31,111,235,.06);border:1px solid rgba(31,111,235,.15);border-radius:8px;display:flex;flex-direction:column;gap:5px}
       .rdx-narrative-line{font-size:12.5px;color:#c9d1d9;line-height:1.55}
@@ -9868,7 +9885,7 @@ function computeTeamIntelligencePanel(db, teamId){
     return flags;
   }
 
-  function buildRadarNarrative({ home, away, strengthHome, strengthAway, strengthGap, fsiHome, fsiAway, avgFSI, studyScore, type, flags = [], odds = {}, formHome = null, formAway = null }){
+  function buildRadarNarrative({ home, away, strengthHome, strengthAway, strengthGap, fsiHome, fsiAway, avgFSI, studyScore, type, flags = [], odds = {}, formHome = null, formAway = null, psiHome = null, psiAway = null }){
     const lines = [];
     const strongerTeam  = strengthHome >= strengthAway ? home : away;
     const weakerTeam    = strengthHome >= strengthAway ? away : home;
@@ -10037,6 +10054,47 @@ function computeTeamIntelligencePanel(db, teamId){
       lines.push(`Escenario ordenado: favorito sólido, sin señales de alarma. El resultado lógico tiene respaldo sistémico.`);
     }
 
+    // ── PSI — estado psicológico del equipo (solo si es relevante para la predicción)
+    if(psiHome || psiAway){
+      const psiStateLabel = (s) => s === 'hot' ? '🔥 en forma' : s === 'struggling' ? '📉 en baja' : '➡️ estable';
+
+      // Solo mencionar si hay diferencia notable entre equipos
+      if(psiHome && psiAway){
+        const psiDiff = Math.abs(psiHome.teamPsi - psiAway.teamPsi);
+        if(psiDiff >= 15){
+          const betterPsi  = psiHome.teamPsi >= psiAway.teamPsi ? home : away;
+          const worsePsi   = psiHome.teamPsi >= psiAway.teamPsi ? away : home;
+          const betterData = psiHome.teamPsi >= psiAway.teamPsi ? psiHome : psiAway;
+          const worseData  = psiHome.teamPsi >= psiAway.teamPsi ? psiAway : psiHome;
+          lines.push(`🧠 Estado del once: ${betterPsi} ${psiStateLabel(betterData.teamState)} (PSI ${betterData.teamPsi > 0?'+':''}${betterData.teamPsi}) vs ${worsePsi} ${psiStateLabel(worseData.teamState)} (PSI ${worseData.teamPsi > 0?'+':''}${worseData.teamPsi}).`);
+        }
+      }
+
+      // Jugadores clave — solo si son muy relevantes
+      const homeStrugglers = psiHome?.struggling || [];
+      const awayHot        = psiAway?.hot || [];
+      const homeHot        = psiHome?.hot || [];
+      const awayStrugglers = psiAway?.struggling || [];
+
+      // Caso: goleador del visitante en racha positiva
+      if(awayHot.length && awayHot[0].psi.dominantTag && ['goal','assist','shot_danger'].includes(awayHot[0].psi.dominantTag)){
+        lines.push(`⚡ ${awayHot[0].name} (${away}) llega en buen momento psicológico — protagonista ofensivo en los últimos partidos.`);
+      }
+      // Caso: delantero local fallando sistemáticamente
+      const homeStrugglingFwd = homeStrugglers.find(p => p.psi.dominantTag === 'miss' || p.psi.dominantTag === 'miss_header');
+      if(homeStrugglingFwd){
+        lines.push(`⚠️ ${homeStrugglingFwd.name} (${home}) acumula fallos consecutivos — patrón de ${homeStrugglingFwd.psi.tagCounts?.['miss']||homeStrugglingFwd.psi.tagCounts?.['miss_header']||0} ocasiones desperdiciadas en los últimos partidos.`);
+      }
+      // Caso: portero en racha
+      const homeHotKeeper = homeHot.find(p => p.psi.dominantTag === 'save_key' || p.psi.dominantTag === 'save');
+      const awayHotKeeper = awayHot.find(p => p.psi.dominantTag === 'save_key' || p.psi.dominantTag === 'save');
+      if(awayHotKeeper){
+        lines.push(`🧤 ${awayHotKeeper.name} (${away}) está en un momento excepcional bajo palos — factor de riesgo real para el local.`);
+      } else if(homeHotKeeper){
+        lines.push(`🧤 ${homeHotKeeper.name} (${home}) llega en buen nivel — puede compensar las carencias ofensivas del equipo.`);
+      }
+    }
+
     return lines;
   }
 
@@ -10188,6 +10246,182 @@ function computeTeamIntelligencePanel(db, teamId){
     };
   }
 
+  // ═══════════════════════════════════════════════════════
+  // PSI — Player State Index
+  // Extrae el estado psicológico de cada jugador desde los relatos
+  // ═══════════════════════════════════════════════════════
+
+  // Tags positivos y negativos que se pueden inferir del relato por jugador
+  const PSI_EVENT_RULES = [
+    // POSITIVOS
+    { pattern: /\bgol\b|anota|marca(?! un gol en contra)|descuenta/i,           tag: 'goal',             psi: +3.0 },
+    { pattern: /asistencia|pase.*gol|habilitó|asiste/i,                          tag: 'assist',           psi: +2.0 },
+    { pattern: /gran parada|parada brillante|salva|ataja|para con agilidad|detenido por|para el disparo/i, tag: 'save_key',  psi: +2.0 },
+    { pattern: /parada|ataj|tapad/i,                                              tag: 'save',             psi: +1.0 },
+    { pattern: /gran oportunidad|que oportunidad|oportunidad de marcar/i,         tag: 'big_chance',       psi: +0.5 },
+    { pattern: /disparo.*peligro|remate.*peligro|dispara con peligro/i,           tag: 'shot_danger',      psi: +0.8 },
+    { pattern: /carrera en solitario|gran acción individual|se libra/i,           tag: 'dribble',          psi: +0.6 },
+    // NEGATIVOS
+    { pattern: /desaprovecha|gran ocasión.*sin marcar|falla|disparo.*desviado|remate.*desviado|se marcha.*alto|se marcha.*afuera|muy desviado|tiro.*alto/i, tag: 'miss',        psi: -1.5 },
+    { pattern: /cabezazo.*alto|cabecea.*alto|cabecea.*afuera/i,                   tag: 'miss_header',      psi: -1.2 },
+    { pattern: /tarjeta amarilla|amonestad/i,                                     tag: 'yellow',           psi: -1.0 },
+    { pattern: /tarjeta roja|expulsad/i,                                          tag: 'red',              psi: -3.0 },
+    { pattern: /lesión|no puede continuar|se retira lesionado/i,                  tag: 'injury',           psi: -2.0 },
+    { pattern: /pase.*interceptado|interceptado.*su pase|pierde el balón/i,       tag: 'turnover',         psi: -0.5 },
+    { pattern: /entra.*agresiv|entrada.*brusca|entrada.*temeraria|dura entrada/i, tag: 'foul_danger',      psi: -0.7 },
+    { pattern: /pita falta.*de\b|falta de\b/i,                                   tag: 'foul',             psi: -0.3 },
+    { pattern: /fuera de juego|offside/i,                                         tag: 'offside',          psi: -0.2 },
+  ];
+
+  // Extrae nombre del jugador de una línea del relato
+  // Formato típico: "Nombre Apellido (Equipo) hace algo..."
+  function extractPlayerFromLine(line = ''){
+    const match = line.match(/^([A-ZÁÉÍÓÚÜÑÀÈÌÒÙÂÊÎÔÛ][a-záéíóúüñàèìòùâêîôû]+(?:\s+[A-ZÁÉÍÓÚÜÑÀÈÌÒÙÂÊÎÔÛ][a-záéíóúüñàèìòùâêîôû]+){1,3})\s*\(([^)]+)\)/);
+    if(!match) return null;
+    return { name: match[1].trim(), team: match[2].trim() };
+  }
+
+  // Procesa el relato de UN partido y retorna eventos por jugador
+  function extractPlayerEventsFromNarrative(rawText = '', homeName = '', awayName = ''){
+    const lines = String(rawText || '').split(/\n+/).map(l => l.trim()).filter(Boolean);
+    const playerEvents = {}; // { 'Nombre Jugador': { team, events: [{tag, psi, minute, line}] } }
+
+    let currentMinute = 0;
+    for(const line of lines){
+      const minMatch = line.match(/^(\d{1,3})(?:\s*\+\s*\d{1,2})?\s*[''´`]?/);
+      if(minMatch) currentMinute = Number(minMatch[1]) || currentMinute;
+
+      const player = extractPlayerFromLine(line);
+      if(!player) continue;
+
+      for(const rule of PSI_EVENT_RULES){
+        if(rule.pattern.test(line)){
+          if(!playerEvents[player.name]){
+            playerEvents[player.name] = { team: player.team, events: [] };
+          }
+          playerEvents[player.name].events.push({
+            tag: rule.tag,
+            psi: rule.psi,
+            minute: currentMinute,
+            line: line.slice(0, 80)
+          });
+          break; // un tag por línea
+        }
+      }
+    }
+    return playerEvents;
+  }
+
+  // Acumula PSI de un jugador a través de los últimos N partidos del tracker
+  function computePlayerPSI(db, playerName, teamId, limit = 5){
+    if(!playerName || !teamId) return null;
+    const nameLower = playerName.toLowerCase().trim();
+
+    // Buscar partidos del equipo con relato
+    const teamMatches = (db.tracker || [])
+      .filter(m => (m.homeId === teamId || m.awayId === teamId) && m.narrativeModule?.rawText)
+      .sort(compareByDateAsc)
+      .slice(-limit);
+
+    if(!teamMatches.length) return null;
+
+    let totalPsi = 0;
+    let totalEvents = 0;
+    const tagCounts = {};
+    const matchHistory = []; // para tendencia
+
+    for(const match of teamMatches){
+      const homeName = db.teams.find(t => t.id === match.homeId)?.name || '';
+      const awayName = db.teams.find(t => t.id === match.awayId)?.name || '';
+      const events = extractPlayerEventsFromNarrative(
+        match.narrativeModule.rawText, homeName, awayName
+      );
+
+      // Buscar al jugador por nombre (fuzzy: contiene el apellido)
+      const playerKey = Object.keys(events).find(k =>
+        k.toLowerCase().includes(nameLower) || nameLower.includes(k.toLowerCase().split(' ').slice(-1)[0])
+      );
+
+      if(!playerKey) continue;
+
+      const pData = events[playerKey];
+      const matchPsi = pData.events.reduce((s, e) => s + e.psi, 0);
+      totalPsi += matchPsi;
+      totalEvents += pData.events.length;
+      matchHistory.push(matchPsi);
+      pData.events.forEach(e => {
+        tagCounts[e.tag] = (tagCounts[e.tag] || 0) + 1;
+      });
+    }
+
+    if(!matchHistory.length) return null;
+
+    // Normalizar PSI a escala -100..100
+    const rawAvg = totalPsi / matchHistory.length;
+    const normalizedPsi = clamp(rawAvg * 12, -100, 100);
+
+    // Tendencia: última mitad vs primera mitad
+    const half = Math.floor(matchHistory.length / 2);
+    const recentAvg = matchHistory.slice(-half || -1).reduce((s,v)=>s+v,0) / (half||1);
+    const oldAvg    = matchHistory.slice(0, half||1).reduce((s,v)=>s+v,0) / (half||1);
+    const trend = recentAvg > oldAvg + 0.3 ? 'rising' : recentAvg < oldAvg - 0.3 ? 'falling' : 'stable';
+
+    // Estado
+    const state = normalizedPsi >= 20 ? 'hot' : normalizedPsi >= -10 ? 'ok' : 'struggling';
+    const dominantTag = Object.entries(tagCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+
+    return {
+      name: playerName,
+      psi: Number(normalizedPsi.toFixed(1)),
+      state,   // 'hot' | 'ok' | 'struggling'
+      trend,   // 'rising' | 'falling' | 'stable'
+      dominantTag,
+      tagCounts,
+      matchHistory,
+      gamesAnalyzed: matchHistory.length
+    };
+  }
+
+  // Construye el perfil PSI del equipo completo desde el lineup
+  function buildTeamPSIProfile(db, teamId, lineup = [], limit = 5){
+    if(!lineup.length) return null;
+
+    const players = lineup.map(name => ({
+      name,
+      psi: computePlayerPSI(db, name, teamId, limit)
+    })).filter(p => p.psi !== null);
+
+    if(!players.length) return null;
+
+    // PSI del equipo = promedio ponderado (titulares con datos)
+    const teamPsi = players.reduce((s, p) => s + p.psi.psi, 0) / players.length;
+
+    // Jugadores destacados para mostrar en radar
+    const hot        = players.filter(p => p.psi.state === 'hot').sort((a,b) => b.psi.psi - a.psi.psi);
+    const struggling = players.filter(p => p.psi.state === 'struggling').sort((a,b) => a.psi.psi - b.psi.psi);
+    const risingStars = players.filter(p => p.psi.trend === 'rising' && p.psi.state !== 'struggling');
+    const fallingPlayers = players.filter(p => p.psi.trend === 'falling');
+
+    // Jugadores clave para la narrativa (solo si son muy relevantes)
+    const keyPlayers = [
+      ...hot.slice(0,2),
+      ...struggling.slice(0,2)
+    ].filter((p,i,arr) => arr.findIndex(x=>x.name===p.name)===i);
+
+    return {
+      teamPsi: Number(teamPsi.toFixed(1)),
+      teamState: teamPsi >= 15 ? 'hot' : teamPsi >= -10 ? 'ok' : 'struggling',
+      players,
+      hot,
+      struggling,
+      risingStars,
+      fallingPlayers,
+      keyPlayers,
+      analyzed: players.length,
+      total: lineup.length
+    };
+  }
+
   function buildRadarMatches({ db, payload = {}, brainV2 = {} }){
     const today = new Date().toISOString().slice(0, 10);
     const provided = Array.isArray(payload?.matches) ? payload.matches : [];
@@ -10228,6 +10462,14 @@ function computeTeamIntelligencePanel(db, teamId){
         // Si el tracker no tiene datos, usar los manuales del registro
         const resolvedFormHome = formHome || (m.manualFormHome ? buildFormFromSequence(m.manualFormHome, m.manualGaHome) : null);
         const resolvedFormAway = formAway || (m.manualFormAway ? buildFormFromSequence(m.manualFormAway, m.manualGaAway) : null);
+
+        // PSI — buscar último partido del equipo con lineup para saber los titulares
+        const lastHomeMatch = (db.tracker||[]).filter(t=>(t.homeId===home.id||t.awayId===home.id)&&(t.homeLineup?.length||t.awayLineup?.length)).sort(compareByDateAsc).slice(-1)[0];
+        const lastAwayMatch = (db.tracker||[]).filter(t=>(t.homeId===away.id||t.awayId===away.id)&&(t.homeLineup?.length||t.awayLineup?.length)).sort(compareByDateAsc).slice(-1)[0];
+        const lineupHome = lastHomeMatch ? (lastHomeMatch.homeId===home.id ? lastHomeMatch.homeLineup : lastHomeMatch.awayLineup) : [];
+        const lineupAway = lastAwayMatch ? (lastAwayMatch.homeId===away.id ? lastAwayMatch.homeLineup : lastAwayMatch.awayLineup) : [];
+        const psiHome = buildTeamPSIProfile(db, home.id, lineupHome, 5);
+        const psiAway = buildTeamPSIProfile(db, away.id, lineupAway, 5);
         return {
           id: m.id || uid('radar'),
           league,
@@ -10253,6 +10495,8 @@ function computeTeamIntelligencePanel(db, teamId){
           flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
           formHome: resolvedFormHome,
           formAway: resolvedFormAway,
+          psiHome,
+          psiAway,
           prediction: m.prediction || '',
           narrative: buildRadarNarrative({
             home: home.name || 'Local',
@@ -10268,6 +10512,8 @@ function computeTeamIntelligencePanel(db, teamId){
             flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
             formHome: resolvedFormHome,
             formAway: resolvedFormAway,
+            psiHome,
+            psiAway,
             odds: {
               home: pickFirstNumber(m.oddsHome),
               draw: pickFirstNumber(m.oddsDraw),
@@ -11966,6 +12212,56 @@ function computeTeamIntelligencePanel(db, teamId){
               </div>
             </div>` : ''}
           </div>
+
+          ${(m.psiHome || m.psiAway) ? (() => {
+            const psiStateIcon  = (s) => s==='hot'?'🔥':s==='struggling'?'📉':'⚠️';
+            const psiStateClass = (s) => s==='hot'?'hot':s==='struggling'?'struggling':'ok';
+            const psiTrendIcon  = (t) => t==='rising'?'↑':t==='falling'?'↓':'→';
+            const psiTagLabel   = (tag) => ({'goal':'Goleador','assist':'Asistidor','save_key':'Paradas clave','save':'Guardameta sólido','miss':'Falla ocasiones','miss_header':'Falla de cabeza','yellow':'Tarjetas','foul':'Faltas','injury':'Lesión','turnover':'Pierde balón','dribble':'Desborde'}[tag]||tag||'');
+            const psiBarColor   = (psi) => psi>=15?'#3fb950':psi>=-10?'#e3b341':'#f85149';
+            const psiBarWidth   = (psi) => Math.round(clamp((psi+100)/2,0,100));
+
+            const renderSide = (psiData, teamName) => {
+              if(!psiData || !psiData.players.length) return '';
+              // Mostrar: hot primero, luego struggling, máx 5 jugadores
+              const toShow = [
+                ...psiData.hot.slice(0,2),
+                ...psiData.struggling.slice(0,2),
+                ...psiData.players.filter(p=>p.psi.state==='ok').slice(0,1)
+              ].filter((p,i,arr)=>arr.findIndex(x=>x.name===p.name)===i).slice(0,5);
+
+              return `
+                <div style="flex:1;min-width:200px;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <span style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.5px;">${teamName}</span>
+                    <span class="rdx-psi-team-score ${psiStateClass(psiData.teamState)}">${psiStateIcon(psiData.teamState)} PSI ${psiData.teamPsi>0?'+':''}${psiData.teamPsi}</span>
+                  </div>
+                  <table class="rdx-psi-table">
+                    ${toShow.map(p=>`
+                      <tr>
+                        <td class="rdx-psi-state">${psiStateIcon(p.psi.state)}</td>
+                        <td class="rdx-psi-name" title="${p.name}">${p.name.split(' ').slice(-1)[0]}, ${p.name.split(' ')[0]}</td>
+                        <td class="rdx-psi-tag">${psiTagLabel(p.psi.dominantTag)} ${psiTrendIcon(p.psi.trend)}</td>
+                        <td><div class="rdx-psi-bar-wrap"><div class="rdx-psi-bar" style="width:${psiBarWidth(p.psi.psi)}%;background:${psiBarColor(p.psi.psi)}"></div></div></td>
+                        <td class="rdx-psi-val">${p.psi.psi>0?'+':''}${p.psi.psi}</td>
+                      </tr>
+                    `).join('')}
+                  </table>
+                  ${psiData.analyzed < psiData.total ? `<div style="font-size:10px;color:#6e7681;margin-top:4px;">${psiData.analyzed}/${psiData.total} jugadores con datos</div>` : ''}
+                </div>
+              `;
+            };
+
+            return `
+              <div class="rdx-psi-section">
+                <div class="rdx-psi-title">🧠 Estado psicológico del once</div>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;">
+                  ${renderSide(m.psiHome, m.home)}
+                  ${renderSide(m.psiAway, m.away)}
+                </div>
+              </div>
+            `;
+          })() : ''}
 
           ${m.flags.length ? `<div class="rdx-flags">${m.flags.map((f)=>`<span class="rdx-flag ${flagAlert(f)}">${f.replaceAll('_',' ')}</span>`).join('')}</div>` : ''}
 
