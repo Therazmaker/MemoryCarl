@@ -1,4 +1,4 @@
-import { initFootballLab } from "./footballLab_v8e.js?v=1013";
+import { initFootballLab } from "./footballLab_v8e.js?v=1014";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
