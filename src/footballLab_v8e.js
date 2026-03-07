@@ -3609,6 +3609,10 @@ export function initFootballLab(){
       .rdx-hist-result-btn.pending{background:#21262d;border-color:#30363d;color:#6e7681}
       .rdx-verdict-select{background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;padding:4px 8px;font-size:12px;font-family:inherit;outline:none}
       .rdx-verdict-select:focus{border-color:#388bfd}
+      .rdx-prediction-pill{display:inline-flex;align-items:center;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.4);color:#818cf8;letter-spacing:.2px}
+      .rdx-input-form{font-size:14px!important}
+      .rdx-btn-hist-card{background:rgba(99,102,241,.1);border-color:rgba(99,102,241,.3);color:#818cf8}
+      .rdx-btn-hist-card:hover{background:rgba(99,102,241,.2)}
       /* NARRATIVE */
       .rdx-narrative{margin-top:10px;padding:10px 14px;background:rgba(31,111,235,.06);border:1px solid rgba(31,111,235,.15);border-radius:8px;display:flex;flex-direction:column;gap:5px}
       .rdx-narrative-line{font-size:12.5px;color:#c9d1d9;line-height:1.55}
@@ -10002,6 +10006,50 @@ function computeTeamIntelligencePanel(db, teamId){
     return lines;
   }
 
+  // Construye un perfil de forma a partir de una secuencia manual ['P','G','P','P','P']
+  function buildFormFromSequence(sequence = [], gaPerGame = null){
+    if(!sequence || sequence.length < 3) return null;
+    const n = sequence.length;
+    let wins = 0, draws = 0, losses = 0;
+    for(const r of sequence){
+      if(r==='G') wins++;
+      else if(r==='E') draws++;
+      else losses++;
+    }
+    const pts = wins * 3 + draws;
+    const weights = [1, 1.5, 2, 2.5, 3].slice(-n);
+    let weightedPts = 0, totalWeight = 0;
+    for(let i = 0; i < n; i++){
+      const r = sequence[i];
+      const p = r==='G' ? 3 : r==='E' ? 1 : 0;
+      weightedPts += p * weights[i];
+      totalWeight += weights[i] * 3;
+    }
+    const trendScore = totalWeight > 0 ? weightedPts / totalWeight : 0;
+    const half = Math.floor(n / 2);
+    const recentHalf = sequence.slice(n - half);
+    const oldHalf    = sequence.slice(0, half);
+    const ptsHalf = (arr) => arr.reduce((s, r) => s + (r==='G'?3:r==='E'?1:0), 0);
+    let trend = 'stable';
+    if(half >= 2){
+      if(ptsHalf(recentHalf) > ptsHalf(oldHalf)) trend = 'rising';
+      else if(ptsHalf(recentHalf) < ptsHalf(oldHalf)) trend = 'falling';
+    }
+    return {
+      sequence,
+      sequenceStr: sequence.join(''),
+      wins, draws, losses,
+      gfPerGame: null,
+      gaPerGame: Number.isFinite(Number(gaPerGame)) ? Number(gaPerGame) : null,
+      pts,
+      ptsPerGame: Number((pts / n).toFixed(2)),
+      trendScore,
+      trend,
+      n,
+      isManual: true
+    };
+  }
+
   function buildRadarMatches({ db, payload = {}, brainV2 = {} }){
     const today = new Date().toISOString().slice(0, 10);
     const provided = Array.isArray(payload?.matches) ? payload.matches : [];
@@ -10039,6 +10087,9 @@ function computeTeamIntelligencePanel(db, teamId){
         const type = classifyRadarMatch({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, avgFSI: scorePack.avgFSI });
         const formHome = computeTeamFormProfile(db, home.id, 5);
         const formAway = computeTeamFormProfile(db, away.id, 5);
+        // Si el tracker no tiene datos, usar los manuales del registro
+        const resolvedFormHome = formHome || (m.manualFormHome ? buildFormFromSequence(m.manualFormHome, m.manualGaHome) : null);
+        const resolvedFormAway = formAway || (m.manualFormAway ? buildFormFromSequence(m.manualFormAway, m.manualGaAway) : null);
         return {
           id: m.id || uid('radar'),
           league,
@@ -10062,8 +10113,9 @@ function computeTeamIntelligencePanel(db, teamId){
           studyScore: scorePack.studyScore,
           type,
           flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
-          formHome,
-          formAway,
+          formHome: resolvedFormHome,
+          formAway: resolvedFormAway,
+          prediction: m.prediction || '',
           narrative: buildRadarNarrative({
             home: home.name || 'Local',
             away: away.name || 'Visitante',
@@ -10076,8 +10128,8 @@ function computeTeamIntelligencePanel(db, teamId){
             studyScore: scorePack.studyScore,
             type,
             flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
-            formHome,
-            formAway,
+            formHome: resolvedFormHome,
+            formAway: resolvedFormAway,
             odds: {
               home: pickFirstNumber(m.oddsHome),
               draw: pickFirstNumber(m.oddsDraw),
@@ -11778,6 +11830,8 @@ function computeTeamIntelligencePanel(db, teamId){
 
           <div class="rdx-match-actions">
             <button class="rdx-btn-sim" data-radar-open-sim="${m.id}">⚡ Simular</button>
+            ${m.prediction ? `<span class="rdx-prediction-pill" title="Tu predicción">${{'home':'1 Local','draw':'X Empate','away':'2 Visitante','home_draw':'1X No pierde Local','away_draw':'X2 No pierde Visit.'}[m.prediction]||m.prediction}</span>` : ''}
+            <button class="rdx-btn-sm rdx-btn-hist-card" data-radar-to-hist="${m.id}" title="Registrar en histórico y marcar resultado">📋 Al histórico</button>
             <button class="rdx-btn-sm rdx-btn-danger" data-radar-delete-manual="${m.id}">Eliminar</button>
           </div>
         </div>
@@ -11790,25 +11844,27 @@ function computeTeamIntelligencePanel(db, teamId){
           <!-- FORM CARD -->
           <div class="rdx-form-card">
             <div class="rdx-form-title">➕ Agregar partido al Radar</div>
-            <div class="rdx-form-sub">Selecciona liga, equipos y cuotas — el análisis FSI/RSI aparece automáticamente abajo.</div>
-            <div class="rdx-form-row">
+            <div class="rdx-form-sub">Liga, equipos y cuotas. La forma y predicción son opcionales pero mejoran el análisis.</div>
+
+            <!-- Fila 1: Liga + Equipos + Cuotas -->
+            <div class="rdx-form-row" style="margin-bottom:10px;">
               <div class="rdx-group">
                 <span class="rdx-label">Liga</span>
-                <select id="radarManualLeague" class="rdx-select" style="min-width:160px;">
+                <select id="radarManualLeague" class="rdx-select" style="min-width:150px;">
                   <option value="">— Liga —</option>
                   ${leagueOptions}
                 </select>
               </div>
               <div class="rdx-group">
                 <span class="rdx-label">Local</span>
-                <select id="radarManualHome" class="rdx-select" style="min-width:160px;">
+                <select id="radarManualHome" class="rdx-select" style="min-width:150px;">
                   <option value="">— Local —</option>
                   ${teamOptions}
                 </select>
               </div>
               <div class="rdx-group">
                 <span class="rdx-label">Visitante</span>
-                <select id="radarManualAway" class="rdx-select" style="min-width:160px;">
+                <select id="radarManualAway" class="rdx-select" style="min-width:150px;">
                   <option value="">— Visitante —</option>
                   ${teamOptions}
                 </select>
@@ -11824,6 +11880,37 @@ function computeTeamIntelligencePanel(db, teamId){
               <div class="rdx-group">
                 <span class="rdx-label">Cuota 2</span>
                 <input id="radarManualOddA" type="number" step="0.01" class="rdx-input" placeholder="4.20" />
+              </div>
+            </div>
+
+            <!-- Fila 2: Forma + GA -->
+            <div class="rdx-form-row" style="margin-bottom:10px;padding-top:10px;border-top:1px solid #21262d;">
+              <div class="rdx-group">
+                <span class="rdx-label">Forma Local (últ. 5) <span style="font-weight:400;opacity:.6;">ej: PGPPP</span></span>
+                <input id="radarFormHome" type="text" maxlength="5" class="rdx-input rdx-input-form" placeholder="PGPPP" style="width:90px;text-transform:uppercase;font-family:monospace;letter-spacing:3px;font-weight:800;" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">GA Local / partido <span style="font-weight:400;opacity:.6;">goles recibidos</span></span>
+                <input id="radarGaHome" type="number" step="0.01" min="0" class="rdx-input" placeholder="1.7" style="width:80px;" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Forma Visitante (últ. 5)</span>
+                <input id="radarFormAway" type="text" maxlength="5" class="rdx-input rdx-input-form" placeholder="PPPGG" style="width:90px;text-transform:uppercase;font-family:monospace;letter-spacing:3px;font-weight:800;" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">GA Visitante / partido</span>
+                <input id="radarGaAway" type="number" step="0.01" min="0" class="rdx-input" placeholder="1.2" style="width:80px;" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Mi predicción</span>
+                <select id="radarPrediction" class="rdx-select">
+                  <option value="">— Sin predicción —</option>
+                  <option value="home">1 Gana Local</option>
+                  <option value="draw">X Empate</option>
+                  <option value="away">2 Gana Visitante</option>
+                  <option value="home_draw">1X Local no pierde</option>
+                  <option value="away_draw">X2 Visitante no pierde</option>
+                </select>
               </div>
               <div class="rdx-group" style="justify-content:flex-end;">
                 <button class="rdx-btn-add" id="radarManualSave">Agregar al Radar</button>
@@ -11871,14 +11958,23 @@ function computeTeamIntelligencePanel(db, teamId){
       // ── SAVE MATCH
       document.getElementById('radarManualSave')?.addEventListener('click', ()=>{
         const leagueId = document.getElementById('radarManualLeague')?.value || '';
-        const homeId = document.getElementById('radarManualHome')?.value || '';
-        const awayId = document.getElementById('radarManualAway')?.value || '';
-        const status = document.getElementById('radarManualStatus');
+        const homeId   = document.getElementById('radarManualHome')?.value || '';
+        const awayId   = document.getElementById('radarManualAway')?.value || '';
+        const status   = document.getElementById('radarManualStatus');
         if(!leagueId || !homeId || !awayId || homeId===awayId){
           if(status) status.textContent = '⚠️ Elige liga, local y visitante válidos.';
           return;
         }
         if(status) status.textContent = '';
+
+        // Parsear forma: "PGPPP" → ['P','G','P','P','P']
+        const parseForm = (str) => {
+          const clean = String(str||'').toUpperCase().replace(/[^GEP]/g,'').slice(0,5);
+          return clean.length >= 3 ? clean.split('') : null;
+        };
+        const formHomeSeq = parseForm(document.getElementById('radarFormHome')?.value);
+        const formAwaySeq = parseForm(document.getElementById('radarFormAway')?.value);
+
         const manualMatch = {
           id: uid('rm'),
           createdAt: new Date().toISOString(),
@@ -11886,9 +11982,16 @@ function computeTeamIntelligencePanel(db, teamId){
           leagueId,
           homeId,
           awayId,
-          oddsHome: pickFirstNumber(document.getElementById('radarManualOddH')?.value),
-          oddsDraw: pickFirstNumber(document.getElementById('radarManualOddD')?.value),
-          oddsAway: pickFirstNumber(document.getElementById('radarManualOddA')?.value)
+          oddsHome:   pickFirstNumber(document.getElementById('radarManualOddH')?.value),
+          oddsDraw:   pickFirstNumber(document.getElementById('radarManualOddD')?.value),
+          oddsAway:   pickFirstNumber(document.getElementById('radarManualOddA')?.value),
+          // Forma manual
+          manualFormHome: formHomeSeq,
+          manualGaHome:   pickFirstNumber(document.getElementById('radarGaHome')?.value),
+          manualFormAway: formAwaySeq,
+          manualGaAway:   pickFirstNumber(document.getElementById('radarGaAway')?.value),
+          // Predicción del usuario
+          prediction: document.getElementById('radarPrediction')?.value || ''
         };
         db.radar.matches.unshift(manualMatch);
         saveDb(db);
@@ -11911,6 +12014,42 @@ function computeTeamIntelligencePanel(db, teamId){
         render('versus', { homeId: match.homeId, awayId: match.awayId, leagueId: match.leagueId });
       });
 
+      // ── SEND TO HISTORIC (from card button)
+      content.querySelectorAll('[data-radar-to-hist]').forEach((btn)=>btn.onclick = ()=>{
+        const matchId = btn.getAttribute('data-radar-to-hist');
+        const m = radarState.matches.find((r)=>r.id===matchId);
+        if(!m) return;
+        // No duplicar
+        const alreadyIn = (db.radar.historic||[]).find((h)=>h.sourceId===m.id);
+        if(alreadyIn){
+          // Abrir modal de histórico directamente
+          document.getElementById('rdxOpenHistoric')?.click();
+          return;
+        }
+        db.radar.historic.unshift({
+          id: uid('rh'),
+          sourceId: m.id,
+          date: new Date().toISOString().slice(0,10),
+          leagueId: m.leagueId,
+          league: m.league,
+          homeId: m.homeId,
+          home: m.home,
+          awayId: m.awayId,
+          away: m.away,
+          studyScore: m.studyScore,
+          type: m.type,
+          fsiHome: m.fsiHome,
+          fsiAway: m.fsiAway,
+          prediction: m.prediction || '',
+          formHomeSeq: m.formHome?.sequenceStr || '',
+          formAwaySeq: m.formAway?.sequenceStr || '',
+          verdict: 'pending'
+        });
+        saveDb(db);
+        // Abrir modal para registrar resultado
+        document.getElementById('rdxOpenHistoric')?.click();
+      });
+
       // ── HISTORIC MODAL
       document.getElementById('rdxOpenHistoric')?.addEventListener('click', ()=>{
         // build historic from radar matches that have a verdict
@@ -11921,20 +12060,28 @@ function computeTeamIntelligencePanel(db, teamId){
         const pending = hist.filter((h)=>!h.verdict||h.verdict==='pending').length;
         const pct = total > 0 ? Math.round((won / (won+lost||1)) * 100) : '-';
 
-        const histRows = hist.length === 0 ? `<div style="text-align:center;padding:32px 0;color:#6e7681;font-size:13px;">Sin histórico todavía. Agrega partidos al radar y registra resultados aquí.</div>` :
+        const histRows = hist.length === 0 ? `<div style="text-align:center;padding:32px 0;color:#6e7681;font-size:13px;">Sin histórico todavía. Usa el botón "Al histórico" en cada partido.</div>` :
           hist.map((h)=>{
             const hName = db.teams.find((t)=>t.id===h.homeId)?.name || h.home || '-';
             const aName = db.teams.find((t)=>t.id===h.awayId)?.name || h.away || '-';
             const lName = db.leagues.find((l)=>l.id===h.leagueId)?.name || h.league || '-';
             const v = h.verdict || 'pending';
-            const vLabel = {won:'✅ Acertó', lost:'❌ Falló', pending:'⏳ Pendiente'}[v] || '⏳ Pendiente';
+            const predLabel = {'home':'1 Local','draw':'X Empate','away':'2 Visitante','home_draw':'1X','away_draw':'X2'}[h.prediction||''] || '';
+            const predHtml = predLabel ? `<span style="font-size:10px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);color:#818cf8;border-radius:4px;padding:1px 6px;font-weight:700;">${predLabel}</span>` : '';
+            const formHtml = h.formHomeSeq || h.formAwaySeq ? `<span style="font-family:monospace;font-size:10px;color:#6e7681;">${h.formHomeSeq||'?'} vs ${h.formAwaySeq||'?'}</span>` : '';
             return `
               <div class="rdx-hist-row">
-                <div>
+                <div style="flex:1;min-width:200px;">
                   <div class="rdx-hist-teams">${hName} vs ${aName}</div>
-                  <div style="font-size:11px;color:#6e7681;">${lName} · ${formatDate(h.date||'')} · Score: <b style="color:#e6edf3;">${h.studyScore??'-'}</b> · ${(h.type||'').toUpperCase()}</div>
+                  <div style="font-size:11px;color:#6e7681;margin-top:2px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                    <span>${lName} · ${formatDate(h.date||'')}</span>
+                    <span>Score: <b style="color:#e6edf3;">${h.studyScore??'-'}</b></span>
+                    <span>${(h.type||'').toUpperCase()}</span>
+                    ${predHtml}
+                    ${formHtml}
+                  </div>
                 </div>
-                <select class="rdx-verdict-select" data-hist-id="${h.id}" data-hist-verdict="${v}">
+                <select class="rdx-verdict-select" data-hist-id="${h.id}">
                   <option value="pending" ${v==='pending'?'selected':''}>⏳ Pendiente</option>
                   <option value="won" ${v==='won'?'selected':''}>✅ Acertó</option>
                   <option value="lost" ${v==='lost'?'selected':''}>❌ Falló</option>
@@ -11943,22 +12090,8 @@ function computeTeamIntelligencePanel(db, teamId){
             `;
           }).join('');
 
-        // also let user add current matches to historic
-        const todayMatches = sorted.filter((m)=>!hist.find((h)=>h.sourceId===m.id));
-        const addToHistRows = todayMatches.length === 0 ? '' : `
-          <div style="margin-top:16px;border-top:1px solid #21262d;padding-top:16px;">
-            <div style="font-size:12px;font-weight:700;color:#8b949e;margin-bottom:8px;">AGREGAR AL HISTÓRICO</div>
-            ${todayMatches.map((m)=>`
-              <div class="rdx-hist-row">
-                <div style="flex:1;">
-                  <div class="rdx-hist-teams">${m.home} vs ${m.away}</div>
-                  <div style="font-size:11px;color:#6e7681;">${m.league} · Score ${m.studyScore} · ${m.type.toUpperCase()}</div>
-                </div>
-                <button class="rdx-btn-sm" data-add-hist="${m.id}">+ Agregar</button>
-              </div>
-            `).join('')}
-          </div>
-        `;
+        // also let user add current matches to historic — now handled via card button
+        const addToHistRows = '';
 
         const backdrop = document.createElement('div');
         backdrop.className = 'rdx-hist-backdrop';
@@ -11992,35 +12125,6 @@ function computeTeamIntelligencePanel(db, teamId){
             const id = sel.getAttribute('data-hist-id');
             const rec = db.radar.historic.find((h)=>h.id===id);
             if(rec){ rec.verdict = sel.value; saveDb(db); }
-          });
-        });
-
-        // add to historic
-        backdrop.querySelectorAll('[data-add-hist]').forEach((btn)=>{
-          btn.addEventListener('click', ()=>{
-            const matchId = btn.getAttribute('data-add-hist');
-            const m = radarState.matches.find((r)=>r.id===matchId);
-            if(!m) return;
-            db.radar.historic.unshift({
-              id: uid('rh'),
-              sourceId: m.id,
-              date: new Date().toISOString().slice(0,10),
-              leagueId: m.leagueId,
-              league: m.league,
-              homeId: m.homeId,
-              home: m.home,
-              awayId: m.awayId,
-              away: m.away,
-              studyScore: m.studyScore,
-              type: m.type,
-              fsiHome: m.fsiHome,
-              fsiAway: m.fsiAway,
-              verdict: 'pending'
-            });
-            saveDb(db);
-            backdrop.remove();
-            // reopen
-            document.getElementById('rdxOpenHistoric')?.click();
           });
         });
       });
