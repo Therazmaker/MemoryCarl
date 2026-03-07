@@ -42,6 +42,12 @@ export function initFootballLab(){
   const GIE_COMBO_STRONG_N = 60;
   const hybridBrain = new HybridBrainService();
   let tfLoadPromise = null;
+  const radarState = {
+    matches: [],
+    filters: {},
+    sortBy: 'studyScore',
+    selectedMatchId: null
+  };
 
   async function ensureTensorFlowReady(){
     if(typeof window !== "undefined" && window.tf) return window.tf;
@@ -3452,6 +3458,11 @@ export function initFootballLab(){
       .fl-chip.warn{background:rgba(245,158,11,.12);color:#f59e0b;border-color:rgba(245,158,11,.3)}
       .fl-table{width:100%;border-collapse:collapse}
       .fl-table td,.fl-table th{border-bottom:1px solid #2d333b;padding:6px;text-align:left;font-size:13px}
+      .fl-radar-card .fl-table th{white-space:nowrap}
+      .fl-radar-badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;border:1px solid transparent}
+      .fl-radar-badge-clean{background:rgba(46,160,67,.12);color:#3fb950;border-color:rgba(63,185,80,.45)}
+      .fl-radar-badge-tension{background:rgba(210,153,34,.14);color:#e3b341;border-color:rgba(227,179,65,.45)}
+      .fl-radar-badge-chaos{background:rgba(239,68,68,.14);color:#ff7b72;border-color:rgba(255,123,114,.45)}
       .b2-score-chip{padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid #1e2330}
       .b2-score-chip.win{color:#22d3a3;border-color:rgba(34,211,163,.5);background:rgba(34,211,163,.12)}
       .b2-score-chip.loss{color:#ef4444;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.12)}
@@ -9634,14 +9645,127 @@ function computeTeamIntelligencePanel(db, teamId){
     `;
   }
 
+  function formatRadarKickoff(value = ''){
+    const raw = String(value || '').trim();
+    if(!raw) return '-';
+    const directTime = raw.match(/\b(\d{1,2}:\d{2})\b/);
+    if(directTime) return directTime[1];
+    const ts = Date.parse(raw);
+    if(!Number.isFinite(ts)) return raw;
+    return new Date(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function classifyRadarMatch({ strengthGap = 0, fsiHome = null, fsiAway = null, avgFSI = 0 } = {}){
+    const absHome = Math.abs(Number(fsiHome) || 0);
+    const absAway = Math.abs(Number(fsiAway) || 0);
+    if(strengthGap >= 26 && avgFSI < 15) return 'clean';
+    if(avgFSI >= 45 || (absHome >= 35 && absAway >= 35)) return 'chaos';
+    return 'tension';
+  }
+
+  function computeRadarStudyScore({ strengthHome = 50, strengthAway = 50, fsiHome = null, fsiAway = null } = {}){
+    const strengthGap = Math.abs((Number(strengthHome) || 0) - (Number(strengthAway) || 0));
+    const avgFSI = ((Number(fsiHome) || 0) + (Number(fsiAway) || 0)) / 2;
+    // CSI viene en escala 0-100, por eso el gap se normaliza sobre 100.
+    const normalizedGap = clamp(strengthGap / 100, 0, 1);
+    const balanceScore = clamp(1 - normalizedGap, 0, 1);
+    // FSI viene en escala -100..100, se lleva a 0..1 para combinar con balance.
+    const avgFSINorm = clamp((avgFSI + 100) / 200, 0, 1);
+    const strongerSide = (Number(strengthHome) || 0) >= (Number(strengthAway) || 0) ? 'home' : 'away';
+    const strongerFsi = strongerSide === 'home' ? (Number(fsiHome) || 0) : (Number(fsiAway) || 0);
+    const weakerFsi = strongerSide === 'home' ? (Number(fsiAway) || 0) : (Number(fsiHome) || 0);
+    let conflictBonus = 0;
+    if(strongerFsi >= 18) conflictBonus += 0.6;
+    if(strongerFsi <= -10 && weakerFsi >= 18) conflictBonus += 1;
+    conflictBonus = clamp(conflictBonus, 0, 1);
+    const studyScore = (avgFSINorm * 0.5) + (balanceScore * 0.3) + (conflictBonus * 0.2);
+    return {
+      strengthGap,
+      avgFSI,
+      studyScore: Number((studyScore * 100).toFixed(1))
+    };
+  }
+
+  function buildRadarFlags({ strengthGap = 0, fsiHome = null, fsiAway = null, strengthHome = 50, strengthAway = 50 } = {}){
+    const flags = [];
+    if((Number(fsiHome) || 0) >= 18) flags.push('HIGH_FSI_HOME');
+    if((Number(fsiAway) || 0) >= 18) flags.push('HIGH_FSI_AWAY');
+    if(strengthGap <= 10) flags.push('BALANCED_STRENGTH');
+    const strongerIsHome = (Number(strengthHome) || 0) >= (Number(strengthAway) || 0);
+    const strongerFsi = strongerIsHome ? (Number(fsiHome) || 0) : (Number(fsiAway) || 0);
+    if(strengthGap >= 20 && strongerFsi <= -18) flags.push('STRONG_FAVORITE_UNSTABLE');
+    return flags;
+  }
+
+  function buildRadarMatches({ db, payload = {}, brainV2 = {} }){
+    const today = new Date().toISOString().slice(0, 10);
+    const provided = Array.isArray(payload?.matches) ? payload.matches : null;
+    const trackerToday = (Array.isArray(db?.tracker) ? db.tracker : []).filter((m)=>String(m?.date || '').slice(0, 10) === today);
+    const sourceMatches = provided || trackerToday;
+    return sourceMatches
+      .filter((m)=>m?.homeId && m?.awayId)
+      .map((m)=>{
+        const home = db.teams.find((t)=>t.id===m.homeId) || { id: m.homeId, name: m.home || 'Local' };
+        const away = db.teams.find((t)=>t.id===m.awayId) || { id: m.awayId, name: m.away || 'Visitante' };
+        const leagueId = m.leagueId || home.leagueId || away.leagueId || db.settings.selectedLeagueId || '';
+        const league = db.leagues.find((l)=>l.id===leagueId)?.name || m.league || 'Sin liga';
+        const prematch = collectPrematchData({
+          db,
+          brainV2,
+          homeId: home.id,
+          awayId: away.id,
+          leagueId,
+          matchDate: m.date || '',
+          csiWindow: 5
+        });
+        const strengthHome = Number(prematch?.csi?.home?.CSI) || 50;
+        const strengthAway = Number(prematch?.csi?.away?.CSI) || 50;
+        const fsiHome = Number.isFinite(Number(prematch?.fsi?.home?.FSI)) ? Number(prematch.fsi.home.FSI) : 0;
+        const fsiAway = Number.isFinite(Number(prematch?.fsi?.away?.FSI)) ? Number(prematch.fsi.away.FSI) : 0;
+        const scorePack = computeRadarStudyScore({ strengthHome, strengthAway, fsiHome, fsiAway });
+        const type = classifyRadarMatch({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, avgFSI: scorePack.avgFSI });
+        return {
+          id: m.id || uid('radar'),
+          league,
+          leagueId,
+          kickoff: m.kickoff || m.date || '',
+          home: home.name || 'Local',
+          away: away.name || 'Visitante',
+          homeId: home.id,
+          awayId: away.id,
+          odds: null,
+          strengthHome,
+          strengthAway,
+          strengthGap: Number(scorePack.strengthGap.toFixed(1)),
+          fsiHome: Number(fsiHome.toFixed(1)),
+          fsiAway: Number(fsiAway.toFixed(1)),
+          avgFSI: Number(scorePack.avgFSI.toFixed(1)),
+          studyScore: scorePack.studyScore,
+          type,
+          flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway })
+        };
+      });
+  }
+
+  function sortRadarMatches(rows = [], sortBy = 'studyScore'){
+    const list = rows.slice();
+    if(sortBy === 'kickoff'){
+      return list.sort((a,b)=>parseSortableDate(a.kickoff) - parseSortableDate(b.kickoff));
+    }
+    if(sortBy === 'league'){
+      return list.sort((a,b)=>String(a.league || '').localeCompare(String(b.league || ''), 'es', { sensitivity:'base' }) || parseSortableDate(a.kickoff) - parseSortableDate(b.kickoff));
+    }
+    return list.sort((a,b)=>Number(b.studyScore || 0) - Number(a.studyScore || 0));
+  }
+
   function render(view="home", payload={}){
     ensureStyles();
     const app = document.getElementById("app");
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","brainv2","momentum","bitacora","market"];
-    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t.toUpperCase()}</button>`).join("");
+    const tabs = ["home","liga","tracker","versus","radar","brainv2","momentum","bitacora","market"];
+    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t === 'radar' ? 'Radar del Día' : t.toUpperCase()}</button>`).join("");
     const wrapClass = view === "brainv2" ? "fl-wrap fl-wrap-brainv2" : "fl-wrap";
 
     app.innerHTML = `
@@ -11187,6 +11311,76 @@ function computeTeamIntelligencePanel(db, teamId){
         render("tracker");
       };
       content.querySelectorAll("[data-open-match]").forEach(btn=>btn.onclick = ()=>render("match", { matchId: btn.getAttribute("data-open-match") }));
+      return;
+    }
+
+    if(view==="radar"){
+      const brainV2 = loadBrainV2();
+      radarState.matches = buildRadarMatches({ db, payload, brainV2 });
+      const sorted = sortRadarMatches(radarState.matches, radarState.sortBy || 'studyScore');
+      const typeBadge = (type)=>`<span class="fl-radar-badge fl-radar-badge-${type}">${type}</span>`;
+      const rows = sorted.map((m)=>`
+        <tr>
+          <td>${m.league}</td>
+          <td>${formatRadarKickoff(m.kickoff)}</td>
+          <td>${m.home}</td>
+          <td>${m.away}</td>
+          <td>${m.strengthHome}</td>
+          <td>${m.strengthAway}</td>
+          <td>${m.strengthGap}</td>
+          <td>${m.fsiHome}</td>
+          <td>${m.fsiAway}</td>
+          <td>${m.avgFSI}</td>
+          <td><b>${m.studyScore}</b></td>
+          <td>${typeBadge(m.type)}</td>
+          <td>
+            <button class="fl-btn" data-radar-open-sim="${m.id}">Abrir simulación</button>
+            ${m.flags.length ? `<div class="fl-mini" style="margin-top:4px;">${m.flags.join(' · ')}</div>` : ''}
+          </td>
+        </tr>
+      `).join('');
+
+      content.innerHTML = `
+        <div class="fl-card fl-radar-card">
+          <div class="fl-row" style="justify-content:space-between;align-items:flex-end;">
+            <div>
+              <div style="font-weight:800;">Radar del Día</div>
+              <div class="fl-mini">Capa rápida de exploración para priorizar qué partidos estudiar primero.</div>
+            </div>
+            <div class="fl-row">
+              <label class="fl-mini">Ordenar por</label>
+              <select id="radarSortBy" class="fl-select">
+                <option value="studyScore" ${radarState.sortBy==='studyScore'?'selected':''}>Study Score</option>
+                <option value="kickoff" ${radarState.sortBy==='kickoff'?'selected':''}>Hora</option>
+                <option value="league" ${radarState.sortBy==='league'?'selected':''}>Liga</option>
+              </select>
+            </div>
+          </div>
+          <div style="overflow:auto;margin-top:10px;">
+            <table class="fl-table fl-radar-table">
+              <thead>
+                <tr>
+                  <th>Liga</th><th>Hora</th><th>Local</th><th>Visitante</th>
+                  <th>Current Strength L</th><th>Current Strength V</th><th>Strength Gap</th>
+                  <th>FSI L</th><th>FSI V</th><th>Avg FSI</th><th>Study Score</th><th>Tipo</th><th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>${rows || '<tr><td colspan="13" class="fl-muted">Sin partidos para hoy en la fuente actual.</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('radarSortBy')?.addEventListener('change', (ev)=>{
+        radarState.sortBy = ev.target.value || 'studyScore';
+        render('radar', payload);
+      });
+      content.querySelectorAll('[data-radar-open-sim]').forEach((btn)=>btn.onclick = ()=>{
+        const match = radarState.matches.find((row)=>row.id===btn.getAttribute('data-radar-open-sim'));
+        if(!match) return;
+        radarState.selectedMatchId = match.id;
+        render('versus', { homeId: match.homeId, awayId: match.awayId, leagueId: match.leagueId });
+      });
       return;
     }
 
