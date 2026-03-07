@@ -9903,27 +9903,61 @@ function computeTeamIntelligencePanel(db, teamId){
       lines.push(`😐 <b>Partido plano</b> en papel — poco conflicto sistémico detectado.`);
     }
 
-    // ── FORMA reciente (secuencia visual + tendencia)
+    // ── FORMA reciente (secuencia visual + tendencia + calidad rival)
     if(hasForm){
       const hSeq = seqHtml(fH);
       const aSeq = seqHtml(fA);
       lines.push(`Forma reciente → ${home}: ${hSeq} (${trendLabel(fH)}) · ${away}: ${aSeq} (${trendLabel(fA)})`);
 
-      // Divergencia de tendencia — el caso clave que señalaste
+      // Calidad de la forma — ponderada por rival
+      const hQ = fH.qualityScore != null ? fH.qualityScore : fH.trendScore;
+      const aQ = fA.qualityScore != null ? fA.qualityScore : fA.trendScore;
+      const qDiff = Math.abs(hQ - aQ);
+
+      if(qDiff >= 0.15){
+        const betterQ = hQ >= aQ ? home : away;
+        const worseQ  = hQ >= aQ ? away : home;
+        const betterScore = Math.round(Math.max(hQ, aQ) * 100);
+        const worseScore  = Math.round(Math.min(hQ, aQ) * 100);
+        lines.push(`📊 Forma ponderada por rival: ${betterQ} tiene mejor calidad de resultados (${betterScore} vs ${worseScore}) — no todos los partidos valen igual.`);
+      }
+
+      // Victorias infladas por rivales débiles
+      if(fH.winsVsBottom != null && fH.wins > 0 && fH.winsVsBottom === fH.wins){
+        lines.push(`⚠️ Todas las victorias recientes de ${home} fueron ante rivales del tercio inferior — la forma puede estar inflada.`);
+      } else if(fA.winsVsBottom != null && fA.wins > 0 && fA.winsVsBottom === fA.wins){
+        lines.push(`⚠️ Todas las victorias recientes de ${away} fueron ante rivales débiles — hay que descontarlas.`);
+      }
+
+      // Victorias ante rivales fuertes — forma real
+      if(fH.winsVsTop >= 2){
+        lines.push(`✅ ${home} ganó ${fH.winsVsTop} veces ante rivales del tercio superior — forma con respaldo real.`);
+      }
+      if(fA.winsVsTop >= 2){
+        lines.push(`✅ ${away} ganó ${fA.winsVsTop} veces ante rivales del tercio superior — forma con respaldo real.`);
+      }
+
+      // Derrotas ante rivales débiles — señal de alarma seria
+      if(fH.lossesVsBot >= 1){
+        lines.push(`🚨 ${home} perdió ante rivales del tercio inferior recientemente — señal de fragilidad real independientemente de su posición.`);
+      }
+      if(fA.lossesVsBot >= 1){
+        lines.push(`🚨 ${away} perdió ante rivales débiles — su forma ascendente puede ser parcialmente engañosa.`);
+      }
+
+      // Divergencia de tendencia
       if(fH.trend === 'falling' && fA.trend === 'rising'){
         lines.push(`⚠️ <b>Tendencias opuestas:</b> ${home} está cayendo mientras ${away} viene en ascenso. El favorito en papel puede no reflejar el momento real.`);
       } else if(fH.trend === 'rising' && fA.trend === 'falling'){
         lines.push(`✅ ${home} confirma su tendencia — llega subiendo mientras ${away} cae.`);
       }
 
-      // Diferencia de puntos por partido
+      // Puntos por partido
       const ptsDiff = Math.abs(fH.ptsPerGame - fA.ptsPerGame);
       if(ptsDiff >= 0.8){
         const betterForm = fH.ptsPerGame >= fA.ptsPerGame ? home : away;
         const worseForm  = fH.ptsPerGame >= fA.ptsPerGame ? away : home;
-        const betterPpg  = Math.max(fH.ptsPerGame, fA.ptsPerGame);
-        const worsePpg   = Math.min(fH.ptsPerGame, fA.ptsPerGame);
-        lines.push(`${betterForm} rinde mejor en los últimos ${fH.n} juegos (${betterPpg} pts/j vs ${worsePpg} de ${worseForm}).`);
+        lines.push(`${betterForm} rinde mejor en los últimos ${fH.n} juegos (${Math.max(fH.ptsPerGame,fA.ptsPerGame)} pts/j vs ${Math.min(fH.ptsPerGame,fA.ptsPerGame)} de ${worseForm}).`);
       }
     }
 
@@ -10006,6 +10040,110 @@ function computeTeamIntelligencePanel(db, teamId){
     return lines;
   }
 
+  // Calcula forma ponderada por calidad del rival usando la tabla calculada del tracker
+  function computeWeightedFormProfile(db, teamId, limit = 5){
+    const matches = getRecentTeamMatches(db, teamId, limit);
+    if(!matches.length) return null;
+
+    // Construir tabla de la liga para saber el rank de cada rival
+    const leagueId = matches[0]?.leagueId || db.settings?.selectedLeagueId || '';
+    const table = buildLeagueTableSnapshot(db, leagueId, new Date().toISOString().slice(0,10));
+    const totalTeams = Math.max(2, table.rows.length);
+
+    const getRivalRank = (rivalId) => {
+      const row = table.rows.find(r => r.teamId === rivalId);
+      return row ? row.rank : Math.ceil(totalTeams / 2); // fallback al medio
+    };
+
+    // Peso del rival: ganar al líder vale más que ganar al último
+    // rank 1 → weight 2.0, rank medio → 1.0, último → 0.4
+    const rivalWeight = (rank) => {
+      const norm = (rank - 1) / Math.max(1, totalTeams - 1); // 0=líder, 1=último
+      return 2.0 - (1.6 * norm); // 2.0 → 0.4
+    };
+
+    let wins = 0, draws = 0, losses = 0;
+    let gf = 0, ga = 0;
+    let weightedPts = 0, totalWeight = 0;
+    const sequence = [];
+    const matchDetails = []; // para narrative
+
+    // Pesos temporales: más reciente = más peso [1,1.5,2,2.5,3]
+    const timeWeights = [1, 1.5, 2, 2.5, 3].slice(-matches.length);
+
+    for(let i = 0; i < matches.length; i++){
+      const m = matches[i];
+      const isHome = m.homeId === teamId;
+      const rivalId = isHome ? m.awayId : m.homeId;
+      const myGoals  = Number(isHome ? m.homeGoals : m.awayGoals) || 0;
+      const oppGoals = Number(isHome ? m.awayGoals : m.homeGoals) || 0;
+      gf += myGoals;
+      ga += oppGoals;
+
+      let result, pts;
+      if(myGoals > oppGoals){ result = 'G'; pts = 3; wins++; }
+      else if(myGoals === oppGoals){ result = 'E'; pts = 1; draws++; }
+      else { result = 'P'; pts = 0; losses++; }
+      sequence.push(result);
+
+      const rRank   = getRivalRank(rivalId);
+      const rWeight = rivalWeight(rRank);
+      const tWeight = timeWeights[i];
+      const combined = rWeight * tWeight;
+
+      weightedPts  += pts * combined;
+      totalWeight  += 3 * combined; // máximo posible con ese peso
+
+      matchDetails.push({
+        result,
+        rivalId,
+        rivalRank: rRank,
+        rivalName: db.teams.find(t => t.id === rivalId)?.name || '?',
+        rivalWeight: Number(rWeight.toFixed(2)),
+        myGoals,
+        oppGoals
+      });
+    }
+
+    const n = matches.length;
+    const pts = wins * 3 + draws;
+    const qualityScore = totalWeight > 0 ? weightedPts / totalWeight : 0; // 0..1
+
+    // Tendencia: mitad reciente vs mitad antigua (sin ponderar por rival)
+    const half = Math.floor(n / 2);
+    const recentSeq = sequence.slice(n - half);
+    const oldSeq    = sequence.slice(0, half);
+    const ptsOf     = arr => arr.reduce((s, r) => s + (r==='G'?3:r==='E'?1:0), 0);
+    let trend = 'stable';
+    if(half >= 2){
+      if(ptsOf(recentSeq) > ptsOf(oldSeq)) trend = 'rising';
+      else if(ptsOf(recentSeq) < ptsOf(oldSeq)) trend = 'falling';
+    }
+
+    // Detectar si victorias/derrotas fueron contra rivales débiles o fuertes
+    const winsVsTop    = matchDetails.filter(m => m.result==='G' && m.rivalRank <= Math.ceil(totalTeams * 0.33)).length;
+    const lossesVsBot  = matchDetails.filter(m => m.result==='P' && m.rivalRank >= Math.ceil(totalTeams * 0.67)).length;
+    const winsVsBottom = matchDetails.filter(m => m.result==='G' && m.rivalRank >= Math.ceil(totalTeams * 0.67)).length;
+
+    return {
+      sequence,
+      sequenceStr: sequence.join(''),
+      wins, draws, losses,
+      gfPerGame: Number((gf / n).toFixed(2)),
+      gaPerGame: Number((ga / n).toFixed(2)),
+      pts,
+      ptsPerGame: Number((pts / n).toFixed(2)),
+      qualityScore,           // 0..1 ponderado por rival + tiempo
+      trend,
+      n,
+      matchDetails,
+      winsVsTop,             // victorias ante equipos del tercio superior
+      lossesVsBot,           // derrotas ante equipos del tercio inferior (señal de alarma)
+      winsVsBottom,          // victorias ante equipos débiles (infla la forma)
+      totalTeams
+    };
+  }
+
   // Construye un perfil de forma a partir de una secuencia manual ['P','G','P','P','P']
   function buildFormFromSequence(sequence = [], gaPerGame = null){
     if(!sequence || sequence.length < 3) return null;
@@ -10085,8 +10223,8 @@ function computeTeamIntelligencePanel(db, teamId){
         const fsiAway = Number.isFinite(Number(prematch?.fsi?.away?.FSI)) ? Number(prematch.fsi.away.FSI) : 0;
         const scorePack = computeRadarStudyScore({ strengthHome, strengthAway, fsiHome, fsiAway });
         const type = classifyRadarMatch({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, avgFSI: scorePack.avgFSI });
-        const formHome = computeTeamFormProfile(db, home.id, 5);
-        const formAway = computeTeamFormProfile(db, away.id, 5);
+        const formHome = computeWeightedFormProfile(db, home.id, 5);
+        const formAway = computeWeightedFormProfile(db, away.id, 5);
         // Si el tracker no tiene datos, usar los manuales del registro
         const resolvedFormHome = formHome || (m.manualFormHome ? buildFormFromSequence(m.manualFormHome, m.manualGaHome) : null);
         const resolvedFormAway = formAway || (m.manualFormAway ? buildFormFromSequence(m.manualFormAway, m.manualGaAway) : null);
@@ -11799,24 +11937,32 @@ function computeTeamIntelligencePanel(db, teamId){
               <div class="rdx-metric-value ${fsiColor(m.avgFSI)}">${m.avgFSI > 0 ? '+' : ''}${m.avgFSI}</div>
             </div>
             ${m.formHome && m.formHome.n >= 3 ? `
-            <div class="rdx-metric" style="grid-column:span 2;">
-              <div class="rdx-metric-label">Forma ${m.home} (últ. ${m.formHome.n})</div>
+            <div class="rdx-metric" style="grid-column:span 3;">
+              <div class="rdx-metric-label">Forma ${m.home} (últ. ${m.formHome.n}) ${m.formHome.qualityScore != null ? `· Calidad <b style="color:${m.formHome.qualityScore>=0.6?'#3fb950':m.formHome.qualityScore>=0.35?'#e3b341':'#f85149'}">${Math.round(m.formHome.qualityScore*100)}</b>/100` : ''}</div>
               <div style="display:flex;gap:5px;margin-top:4px;align-items:center;flex-wrap:wrap;">
-                ${m.formHome.sequence.map(r=>{
+                ${m.formHome.sequence.map((r,i)=>{
                   const c = r==='G'?'#3fb950':r==='E'?'#e3b341':'#f85149';
-                  return `<span style="width:22px;height:22px;border-radius:5px;background:${c}22;border:1px solid ${c}55;color:${c};font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;">${r}</span>`;
+                  const detail = m.formHome.matchDetails?.[i];
+                  const rivalInfo = detail ? ` title="vs ${detail.rivalName} (#${detail.rivalRank}) ${detail.myGoals}-${detail.oppGoals}"` : '';
+                  return `<span${rivalInfo} style="width:22px;height:22px;border-radius:5px;background:${c}22;border:1px solid ${c}55;color:${c};font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;cursor:default;">${r}</span>`;
                 }).join('')}
                 <span style="font-size:11px;color:${m.formHome.trend==='rising'?'#3fb950':m.formHome.trend==='falling'?'#f85149':'#8b949e'};margin-left:4px;">${m.formHome.trend==='rising'?'↑':m.formHome.trend==='falling'?'↓':'→'} ${m.formHome.ptsPerGame}pts/j · GA ${m.formHome.gaPerGame}/j</span>
+                ${m.formHome.winsVsBottom===m.formHome.wins && m.formHome.wins>0 ? `<span style="font-size:10px;color:#f85149;margin-left:4px;">⚠️ solo vs débiles</span>` : ''}
+                ${m.formHome.winsVsTop>=2 ? `<span style="font-size:10px;color:#3fb950;margin-left:4px;">✅ ganó vs top</span>` : ''}
               </div>
             </div>
-            <div class="rdx-metric" style="grid-column:span 2;">
-              <div class="rdx-metric-label">Forma ${m.away} (últ. ${m.formAway?.n||0})</div>
+            <div class="rdx-metric" style="grid-column:span 3;">
+              <div class="rdx-metric-label">Forma ${m.away} (últ. ${m.formAway?.n||0}) ${m.formAway?.qualityScore != null ? `· Calidad <b style="color:${m.formAway.qualityScore>=0.6?'#3fb950':m.formAway.qualityScore>=0.35?'#e3b341':'#f85149'}">${Math.round(m.formAway.qualityScore*100)}</b>/100` : ''}</div>
               <div style="display:flex;gap:5px;margin-top:4px;align-items:center;flex-wrap:wrap;">
-                ${(m.formAway?.sequence||[]).map(r=>{
+                ${(m.formAway?.sequence||[]).map((r,i)=>{
                   const c = r==='G'?'#3fb950':r==='E'?'#e3b341':'#f85149';
-                  return `<span style="width:22px;height:22px;border-radius:5px;background:${c}22;border:1px solid ${c}55;color:${c};font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;">${r}</span>`;
+                  const detail = m.formAway?.matchDetails?.[i];
+                  const rivalInfo = detail ? ` title="vs ${detail.rivalName} (#${detail.rivalRank}) ${detail.myGoals}-${detail.oppGoals}"` : '';
+                  return `<span${rivalInfo} style="width:22px;height:22px;border-radius:5px;background:${c}22;border:1px solid ${c}55;color:${c};font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;cursor:default;">${r}</span>`;
                 }).join('')}
                 <span style="font-size:11px;color:${m.formAway?.trend==='rising'?'#3fb950':m.formAway?.trend==='falling'?'#f85149':'#8b949e'};margin-left:4px;">${m.formAway?.trend==='rising'?'↑':m.formAway?.trend==='falling'?'↓':'→'} ${m.formAway?.ptsPerGame||'-'}pts/j · GA ${m.formAway?.gaPerGame||'-'}/j</span>
+                ${m.formAway?.winsVsBottom===m.formAway?.wins && m.formAway?.wins>0 ? `<span style="font-size:10px;color:#f85149;margin-left:4px;">⚠️ solo vs débiles</span>` : ''}
+                ${m.formAway?.winsVsTop>=2 ? `<span style="font-size:10px;color:#3fb950;margin-left:4px;">✅ ganó vs top</span>` : ''}
               </div>
             </div>` : ''}
           </div>
