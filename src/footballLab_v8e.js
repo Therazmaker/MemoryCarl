@@ -3895,6 +3895,17 @@ export function initFootballLab(){
       @media(max-width:1100px){.b2x-body{grid-template-columns:240px 1fr 360px}}
       @media(max-width:900px){.b2x-body{grid-template-columns:1fr}.b2x-col-left,.b2x-col-right{border:none;border-top:1px solid var(--b2-border)}.b2x-col{height:auto}}
 
+      /* ── Fase Escalera: animación nodo activo ── */
+      @keyframes fl-phase-pulse{
+        0%,100%{box-shadow:0 0 8px rgba(242,204,96,0.5);}
+        50%{box-shadow:0 0 18px rgba(242,204,96,0.9);}
+      }
+      @keyframes fl-phase-node-enter{
+        from{opacity:0;transform:scale(0.6);}
+        to{opacity:1;transform:scale(1);}
+      }
+      #phaseEscaleraContainer > div{animation:fl-phase-node-enter 0.35s ease both;}
+
     `;
     document.head.appendChild(style);
   }
@@ -16698,28 +16709,135 @@ function computeTeamIntelligencePanel(db, teamId){
       const totalSteps = selectedPhaseCampaign?.steps?.length || 0;
       const autoStakeNow = selectedPhaseCampaign?.status === "active" ? selectedPhaseCampaign.bankroll : 0;
       const phaseTarget = selectedPhaseCampaign ? `Completar F${selectedPhaseCampaign.currentPhase} (${selectedPhaseCampaign.phases[selectedPhaseCampaign.currentPhase-1]?.picks || 1} pasos)` : "-";
-      const phaseHeaderHtml = selectedPhaseCampaign ? `
-        <div class="fl-kpi" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:10px;">
-          <div><div class="fl-mini">Bankroll inicial</div><div style="font-size:21px;font-weight:900;">S/${selectedPhaseCampaign.initialUnit.toFixed(2)}</div></div>
-          <div><div class="fl-mini">Bankroll actual</div><div style="font-size:21px;font-weight:900;">S/${selectedPhaseCampaign.bankroll.toFixed(2)}</div></div>
-          <div><div class="fl-mini">Fase actual</div><div style="font-size:21px;font-weight:900;">F${selectedPhaseCampaign.currentPhase}</div></div>
-          <div><div class="fl-mini">Paso actual</div><div style="font-size:21px;font-weight:900;">${currentStepLabel}</div></div>
-          <div><div class="fl-mini">Pasos completados</div><div style="font-size:21px;font-weight:900;">${selectedPhaseCampaign.stepsCompleted || 0}/${totalSteps}</div></div>
-          <div><div class="fl-mini">Stake automático</div><div style="font-size:21px;font-weight:900;">S/${autoStakeNow.toFixed(2)}</div></div>
-          <div><div class="fl-mini">Objetivo de fase</div><div style="font-size:17px;font-weight:900;">${phaseTarget}</div></div>
-          <div><div class="fl-mini">Estado campaña</div><div style="font-size:17px;font-weight:900;color:${selectedPhaseCampaign.status==='failed'?'#ff7b72':(selectedPhaseCampaign.status==='completed'?'#3fb950':'#f2cc60')};">${selectedPhaseCampaign.status.toUpperCase()}</div></div>
-          <div><div class="fl-mini">Multiplicador</div><div style="font-size:21px;font-weight:900;color:#3fb950;">x${phaseMetrics.multiplier.toFixed(2)}</div></div>
-        </div>
-      ` : '<div class="fl-mini">No hay campañas creadas todavía.</div>';
-      const phaseTimelineHtml = selectedPhaseCampaign && selectedPhaseCampaign.steps?.length
-        ? selectedPhaseCampaign.steps.map((step)=>{
-          const done = (selectedPhaseCampaign.stepsCompleted || 0) >= step.order;
-          const active = selectedPhaseCampaign.status === "active" && (selectedPhaseCampaign.stepsCompleted || 0) + 1 === step.order;
-          const failed = selectedPhaseCampaign.status === "failed" && selectedPhaseCampaign.failedAt?.stepOrder === step.order;
-          const icon = failed ? "⛔" : (done ? "✅" : (active ? "🔄" : "⏳"));
-          return `<div class="fl-chip">F${step.phase} P${step.pickNumber} ${icon}</div>`;
-        }).join(' ➜ ')
-        : '<span class="fl-mini">Sin timeline aún.</span>';
+
+      // ── NUEVA FUNCIÓN: visualización escalera de fases ──────────────────────
+      function buildPhaseEscaleraHtml(campaign){
+        if(!campaign) return '<div style="color:#6e7681;font-size:12px;padding:20px;text-align:center;">Crea una campaña para ver la escalera de fases.</div>';
+        const phases = campaign.phases || [];
+        const picks = campaign.picks || [];
+        const status = campaign.status;
+        const stepsCompleted = campaign.stepsCompleted || 0;
+        // Calcula proyección de stakes para cada paso dentro de cada fase
+        // Regla: dentro de fase, stake[n] = stake[n-1] * odds[n-1] (reinversión total)
+        // Al inicio de cada fase, el stake se reinicia al unit de esa fase (o al bankroll acumulado)
+        const phaseColors = ['#58a6ff','#3fb950','#f2cc60','#d2a8ff','#ffa657'];
+        const phaseColorsDim = ['rgba(88,166,255,0.13)','rgba(63,185,80,0.13)','rgba(242,204,96,0.13)','rgba(210,168,255,0.13)','rgba(255,166,87,0.13)'];
+        let stepOrder = 0;
+        let html = '';
+        html += '<div style="display:flex;flex-direction:column;gap:0;margin:0;">';
+        // Header con status y multiplicador
+        const mult = campaign.bankroll / Math.max(0.01, campaign.initialUnit);
+        const statusColor = status==='failed'?'#ff7b72':(status==='completed'?'#3fb950':'#f2cc60');
+        const statusIcon = status==='failed'?'💥':(status==='completed'?'🏆':'⚡');
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding:10px 14px;background:#0d1117;border:1px solid #21262d;border-radius:8px;">
+          <div style="display:flex;gap:20px;align-items:center;">
+            <div><div style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Bankroll</div><div style="font-size:22px;font-weight:900;color:#f6f8fa;">S/${campaign.bankroll.toFixed(2)}</div></div>
+            <div><div style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Inicial</div><div style="font-size:18px;font-weight:700;color:#8b949e;">S/${campaign.initialUnit.toFixed(2)}</div></div>
+            <div><div style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Multiplicador</div><div style="font-size:22px;font-weight:900;color:#3fb950;">×${mult.toFixed(2)}</div></div>
+            <div><div style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Pasos</div><div style="font-size:18px;font-weight:700;color:#8b949e;">${stepsCompleted}/${campaign.steps?.length||0}</div></div>
+          </div>
+          <div style="font-size:14px;font-weight:800;color:${statusColor};">${statusIcon} ${status.toUpperCase()}</div>
+        </div>`;
+        // Escalera por fases
+        html += '<div style="display:flex;flex-direction:column;gap:6px;">';
+        phases.forEach((phase, phIdx)=>{
+          const color = phaseColors[phIdx % phaseColors.length];
+          const bgColor = phaseColorsDim[phIdx % phaseColorsDim.length];
+          const totalPicks = Math.max(1, phase.picks);
+          // Picks de esta fase
+          const phasePicks = picks.filter(p=>p.phase===phase.id);
+          // Simula proyección de stakes
+          const projStakes = [];
+          let simStake = campaign.initialUnit; // base
+          // Usa stake real del primer pick de la fase si existe
+          for(let i=0;i<totalPicks;i++){
+            const realPick = phasePicks[i];
+            if(realPick){
+              projStakes.push(realPick.autoStake);
+              if(realPick.result==='win') simStake = realPick.autoStake * realPick.odds;
+              else simStake = 0;
+            } else {
+              projStakes.push(simStake > 0 ? simStake : campaign.initialUnit);
+            }
+          }
+          html += `<div style="background:${bgColor};border:1px solid ${color}33;border-left:3px solid ${color};border-radius:6px;padding:10px 12px;">`;
+          html += `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div style="font-size:11px;font-weight:800;color:${color};text-transform:uppercase;letter-spacing:1.5px;">${phase.name}</div>
+            <div style="font-size:10px;color:#6e7681;">${phase.minOdds?.toFixed(2)||'1.35'} – ${phase.maxOdds?.toFixed(2)||'1.45'}</div>
+          </div>`;
+          // Nodos de picks horizontales
+          html += '<div style="display:flex;align-items:center;gap:0;overflow-x:auto;padding-bottom:4px;">';
+          for(let i=0;i<totalPicks;i++){
+            stepOrder++;
+            const realPick = phasePicks[i];
+            const isDone = stepsCompleted >= stepOrder;
+            const isActive = status==='active' && stepsCompleted+1===stepOrder;
+            const isFailed = status==='failed' && campaign.failedAt?.stepOrder===stepOrder;
+            const projStake = projStakes[i];
+            let nodeBg, nodeBorder, nodeText, nodeIcon, profitText='';
+            if(isFailed){
+              nodeBg='rgba(255,123,114,0.15)'; nodeBorder='#ff7b72'; nodeText='#ff7b72'; nodeIcon='✕';
+              profitText = realPick ? `–S/${Math.abs(realPick.profit).toFixed(1)}` : '';
+            } else if(isDone){
+              nodeBg='rgba(63,185,80,0.15)'; nodeBorder='#3fb950'; nodeText='#3fb950'; nodeIcon='✓';
+              profitText = realPick ? `+S/${realPick.profit.toFixed(1)}` : '';
+            } else if(isActive){
+              nodeBg='rgba(242,204,96,0.18)'; nodeBorder='#f2cc60'; nodeText='#f2cc60'; nodeIcon='→';
+            } else {
+              nodeBg='rgba(139,148,158,0.08)'; nodeBorder='#30363d'; nodeText='#6e7681'; nodeIcon=String(i+1);
+            }
+            // Conector
+            if(i>0){
+              const connColor = stepsCompleted>=(stepOrder-1) ? color : '#21262d';
+              html += `<div style="flex:1;min-width:16px;max-width:32px;height:2px;background:${connColor};margin-top:0;"></div>`;
+            }
+            // Nodo
+            html += `<div style="display:flex;flex-direction:column;align-items:center;min-width:72px;">
+              <div style="width:44px;height:44px;border-radius:50%;background:${nodeBg};border:2px solid ${nodeBorder};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:${nodeText};position:relative;${isActive?'box-shadow:0 0 10px '+nodeBorder+'66;':''}">
+                ${nodeIcon}
+                ${isActive?'<div style="position:absolute;top:-4px;right:-4px;width:10px;height:10px;border-radius:50%;background:#f2cc60;"></div>':''}
+              </div>
+              <div style="margin-top:4px;font-size:10px;color:#8b949e;white-space:nowrap;">S/${projStake.toFixed(1)}</div>
+              ${profitText?`<div style="font-size:9px;color:${nodeText};white-space:nowrap;">${profitText}</div>`:''}
+              ${realPick?.odds?`<div style="font-size:9px;color:#6e7681;">@${realPick.odds.toFixed(2)}</div>`:(isActive||!isDone?`<div style="font-size:9px;color:#30363d;">${phase.minOdds?.toFixed(2)||'~1.40'}</div>`:'')}
+            </div>`;
+          }
+          // Nodo objetivo de fase (resultado si completa todos)
+          const lastProj = projStakes[totalPicks-1];
+          const lastOdds = phase.maxOdds||1.44;
+          const phaseTargetVal = lastProj * lastOdds;
+          html += `<div style="flex:1;min-width:16px;max-width:32px;height:2px;background:${status!=='active'&&stepsCompleted>=stepOrder?color:'#21262d'};"></div>`;
+          const faseCompleted = phasePicks.filter(p=>p.result==='win').length === totalPicks;
+          html += `<div style="display:flex;flex-direction:column;align-items:center;min-width:64px;">
+            <div style="width:38px;height:38px;border-radius:6px;background:${faseCompleted?'rgba(63,185,80,0.2)':'rgba(139,148,158,0.06)'};border:1.5px dashed ${faseCompleted?color:'#30363d'};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${faseCompleted?color:'#30363d'};">
+              ${faseCompleted?'🏁':'⬜'}
+            </div>
+            <div style="margin-top:4px;font-size:10px;color:${faseCompleted?color:'#30363d'};white-space:nowrap;">S/${phaseTargetVal.toFixed(1)}</div>
+            <div style="font-size:9px;color:#6e7681;">meta F${phase.id}</div>
+          </div>`;
+          html += '</div>'; // end picks row
+          html += '</div>'; // end phase card
+        });
+        html += '</div>'; // end phases column
+        // Si hay alerta de fallo
+        if(status==='failed' && campaign.failedAt){
+          html += `<div style="margin-top:10px;padding:8px 12px;background:rgba(255,123,114,0.1);border:1px solid #ff7b72;border-radius:6px;font-size:11px;color:#ff7b72;">
+            💥 Campaña fallida en F${campaign.failedAt.phase} Paso ${campaign.failedAt.pickNumber} — Reinicia una nueva campaña
+          </div>`;
+        }
+        if(status==='completed'){
+          html += `<div style="margin-top:10px;padding:8px 12px;background:rgba(63,185,80,0.1);border:1px solid #3fb950;border-radius:6px;font-size:11px;color:#3fb950;">
+            🏆 ¡Campaña completada! Ganancia total: S/${(campaign.bankroll - campaign.initialUnit).toFixed(2)} (×${mult.toFixed(2)})
+          </div>`;
+        }
+        html += '</div>'; // end container
+        return html;
+      }
+      const phaseEscaleraHtml = buildPhaseEscaleraHtml(selectedPhaseCampaign);
+      // ────────────────────────────────────────────────────────────────────────
+
+      const phaseHeaderHtml = ''; // reemplazado por phaseEscaleraHtml
+      const phaseTimelineHtml = ''; // reemplazado por phaseEscaleraHtml
       const phasePickRows = selectedPhaseCampaign && selectedPhaseCampaign.picks.length
         ? selectedPhaseCampaign.picks.map((pick)=>`<tr><td>F${pick.phase}</td><td>P${pick.pickNumber}</td><td>${(pick.date||"").replace("T"," ").slice(0,16)}</td><td>${pick.match}</td><td>${pick.odds.toFixed(2)}</td><td>S/${pick.autoStake.toFixed(2)}</td><td>${pick.result}</td><td>S/${(pick.bankrollBefore||0).toFixed(2)}</td><td>S/${pick.bankrollAfter.toFixed(2)}</td><td><button class="fl-btn" style="padding:4px 8px;" data-phase-pick="${pick.id}">Ver</button></td></tr>`).join('')
         : "<tr><td colspan='10'>Sin picks registrados.</td></tr>";
@@ -16798,39 +16916,47 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>
         </div>
 
-        <div class="fl-card">
-          <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <div style="font-weight:800;">🧩 Modo Fases (Sistema Progresivo)</div>
-            <div class="fl-row">
-              <select id="phaseCampaignSelect" class="fl-select" style="width:250px;"><option value="">Seleccionar campaña</option>${campaignOptions}</select>
-              <button class="fl-btn" id="phaseNewCampaign">Nueva campaña</button>
+        <div class="fl-card" style="background:#161b22;border-color:#30363d;">
+          <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:14px;">
+            <div style="font-weight:900;font-size:15px;letter-spacing:0.5px;">⚡ Sistema de Fases Progresivas</div>
+            <div class="fl-row" style="gap:6px;">
+              <select id="phaseCampaignSelect" class="fl-select" style="width:220px;"><option value="">Seleccionar campaña</option>${campaignOptions}</select>
+              <button class="fl-btn" id="phaseNewCampaign">+ Nueva</button>
             </div>
           </div>
-          ${phaseHeaderHtml}
-          <div class="fl-card" style="margin:0 0 10px 0;padding:8px;background:#0d1117;border:1px solid #2d333b;">
-            <div style="font-weight:700;margin-bottom:6px;">Timeline de fases</div>
-            <div class="fl-row" style="flex-wrap:wrap;gap:6px;">${phaseTimelineHtml}</div>
-            <div style="margin-top:8px;">${phaseSummaryRows}</div>
+          <div id="phaseEscaleraContainer">
+            ${phaseEscaleraHtml}
           </div>
-          <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
-            <input id="phaseInitialUnit" class="fl-input" type="number" min="0.5" step="0.5" value="${st.bank.toFixed(2)}" style="width:140px" placeholder="Bankroll inicial" />
-            <input id="phaseLeague" class="fl-input" type="text" placeholder="Liga" style="width:110px" />
-            <input id="phaseMatch" class="fl-input" type="text" placeholder="Partido" style="width:150px" />
-            <input id="phaseMarket" class="fl-input" type="text" placeholder="Mercado" style="width:110px" />
-            <input id="phaseSelection" class="fl-input" type="text" placeholder="Selección" style="width:120px" />
-            <input id="phaseOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:90px" />
-            <select id="phaseResult" class="fl-select" style="width:105px"><option value="win">win</option><option value="loss">loss</option><option value="void">void</option><option value="pending">pending</option></select>
-            <label class="fl-mini"><input id="phaseVoidAdvance" type="checkbox" ${selectedPhaseCampaign?.allowVoidAdvance?"checked":""} /> void avanza paso</label><span class="fl-chip">Stake auto = bankroll actual</span>
-            <input id="phaseNarrative" class="fl-input" type="number" step="1" min="0" max="100" placeholder="Narrativa" style="width:95px" />
-            <label class="fl-mini"><input id="phaseEmotional" type="checkbox" /> emocional</label>
-            <label class="fl-mini"><input id="phaseMarketConsistent" type="checkbox" checked /> mercado consistente</label>
-            <button class="fl-btn" id="phaseSavePick">Guardar pick fase</button>
+          <div style="margin-top:14px;padding:12px;background:#0d1117;border:1px solid #21262d;border-radius:8px;">
+            <div style="font-size:11px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Registrar pick</div>
+            <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
+              <input id="phaseInitialUnit" class="fl-input" type="number" min="0.5" step="0.5" value="${st.bank.toFixed(2)}" style="width:130px" placeholder="Bankroll inicial" title="Bankroll inicial de la campaña" />
+              <input id="phaseLeague" class="fl-input" type="text" placeholder="Liga" style="width:100px" />
+              <input id="phaseMatch" class="fl-input" type="text" placeholder="Partido" style="width:150px" />
+              <input id="phaseMarket" class="fl-input" type="text" placeholder="Mercado" style="width:100px" />
+              <input id="phaseSelection" class="fl-input" type="text" placeholder="Selección" style="width:115px" />
+              <input id="phaseOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:85px" />
+              <select id="phaseResult" class="fl-select" style="width:100px">
+                <option value="win">✅ win</option>
+                <option value="loss">❌ loss</option>
+                <option value="void">↩️ void</option>
+                <option value="pending">⏳ pending</option>
+              </select>
+              <input id="phaseNarrative" class="fl-input" type="number" step="1" min="0" max="100" placeholder="Narrativa 0-100" style="width:105px" title="Puntuación narrativa del pick" />
+              <label class="fl-mini" style="display:flex;align-items:center;gap:4px;"><input id="phaseVoidAdvance" type="checkbox" ${selectedPhaseCampaign?.allowVoidAdvance?"checked":""} /> void avanza</label>
+              <label class="fl-mini" style="display:flex;align-items:center;gap:4px;"><input id="phaseEmotional" type="checkbox" /> emocional</label>
+              <label class="fl-mini" style="display:flex;align-items:center;gap:4px;"><input id="phaseMarketConsistent" type="checkbox" checked /> mercado OK</label>
+              <button class="fl-btn active" id="phaseSavePick" style="min-width:120px;">💾 Guardar pick</button>
+            </div>
+            <div id="phaseOut" class="fl-mini" style="margin-top:8px;color:#f2cc60;">${failedAtText}</div>
+            <div class="fl-row" style="flex-wrap:wrap;gap:6px;margin-top:8px;">${phaseFlagHtml}</div>
           </div>
-          <div id="phaseOut" class="fl-mini" style="margin-top:8px;">${failedAtText}</div>
-          <div class="fl-row" style="flex-wrap:wrap;gap:6px;margin-top:8px;">${phaseFlagHtml}</div>
-          <div class="fl-mre-table-wrap" style="margin-top:10px;">
-            <table class="fl-mre-table"><thead><tr><th>Fase</th><th>Paso</th><th>Fecha</th><th>Partido</th><th>Cuota</th><th>Stake</th><th>Resultado</th><th>Bankroll antes</th><th>Bankroll después</th><th>Detalle</th></tr></thead><tbody>${phasePickRows}</tbody></table>
-          </div>
+          <details style="margin-top:10px;">
+            <summary style="cursor:pointer;font-size:11px;color:#6e7681;font-weight:700;padding:4px 0;">▶ Historial de picks de la campaña</summary>
+            <div class="fl-mre-table-wrap" style="margin-top:8px;">
+              <table class="fl-mre-table"><thead><tr><th>Fase</th><th>Paso</th><th>Fecha</th><th>Partido</th><th>Cuota</th><th>Stake</th><th>Resultado</th><th>Antes</th><th>Después</th><th></th></tr></thead><tbody>${phasePickRows}</tbody></table>
+            </div>
+          </details>
         </div>
 
         <div class="fl-card">
