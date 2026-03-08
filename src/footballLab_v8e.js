@@ -10939,8 +10939,8 @@ function computeTeamIntelligencePanel(db, teamId){
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","radar","brainv2","momentum","bitacora","market"];
-    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t === 'radar' ? 'Radar del Día' : t.toUpperCase()}</button>`).join("");
+    const tabs = ["home","liga","tracker","versus","radar","brainv2","momentum","bitacora","market","halftime"];
+    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t === 'radar' ? 'Radar del Día' : t === 'halftime' ? '⚡ MEDIO TIEMPO' : t.toUpperCase()}</button>`).join("");
     const wrapClass = view === "brainv2" ? "fl-wrap fl-wrap-brainv2" : "fl-wrap";
 
     app.innerHTML = `
@@ -20255,6 +20255,421 @@ function computeTeamIntelligencePanel(db, teamId){
         `<b>Confianza:</b> ${veredicto.confianza}<br>` +
         `<b>Tipo de discrepancia:</b> ${veredicto.tipoDiscrepancia}<br>` +
         `<b>Filtro de ruido:</b> ${aprendizajeMsg}`;
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ⚡ MEDIO TIEMPO — Análisis en vivo + Predicción con aprendizaje
+    // ═══════════════════════════════════════════════════════════════════
+    if(view==="halftime"){
+      // ── Storage key para predicciones HT ──
+      const HT_STORE_KEY = "FL_HT_PREDICTIONS";
+      function loadHtPredictions(){ return safeParseJSON(localStorage.getItem(HT_STORE_KEY), []); }
+      function saveHtPredictions(arr){ localStorage.setItem(HT_STORE_KEY, JSON.stringify(arr)); }
+
+      // ── Modelo Poisson bivariado para segunda parte ──
+      function poissonP(lambda, k){
+        if(k < 0 || !Number.isFinite(lambda) || lambda <= 0) return k===0 ? 1 : 0;
+        let p = Math.exp(-lambda);
+        for(let i=1;i<=k;i++) p *= lambda/i;
+        return p;
+      }
+      function predictHalfTime({ xgH, xgA, scoreH, scoreA, possH, clearA, shotsH, shotsA, bigChancesH, bigChancesA, htBias }){
+        // Bias aprendido: ajuste acumulado de partidos anteriores
+        const biasH = Number(htBias?.home || 0);
+        const biasA = Number(htBias?.away || 0);
+        // Lambda 2ª parte: xG 1ª parte como base + momentum de posesión + bias aprendido
+        const possMult = Math.max(0.75, Math.min(1.25, (possH / 50)));
+        // Paris FC con muchos despejes → comprime xG en 2ª parte
+        const defensiveMult = clearA > 15 ? 0.92 : 1.0;
+        const lH = Math.max(0.05, xgH * possMult * defensiveMult + biasH);
+        const lA = Math.max(0.05, xgA * (1/Math.max(0.75,possMult)) + biasA);
+        const maxG = 5;
+        let pH=0, pD=0, pA=0;
+        const scoreDist = [];
+        for(let gh=0;gh<=maxG;gh++){
+          for(let ga=0;ga<=maxG;ga++){
+            const p = poissonP(lH,gh)*poissonP(lA,ga);
+            const fh=scoreH+gh, fa=scoreA+ga;
+            scoreDist.push({score:`${fh}-${fa}`,p,fh,fa});
+            if(fh>fa) pH+=p; else if(fh===fa) pD+=p; else pA+=p;
+          }
+        }
+        const total=pH+pD+pA;
+        scoreDist.sort((a,b)=>b.p-a.p);
+        return {
+          pHome: pH/total, pDraw: pD/total, pAway: pA/total,
+          lambdaHome: lH, lambdaAway: lA,
+          topScores: scoreDist.slice(0,8),
+          raw: { lH, lA, biasH, biasA, possMult, defensiveMult }
+        };
+      }
+
+      // ── Aprendizaje: actualiza bias cuando se conoce resultado ──
+      function resolveHtPrediction(predId, actualResult, actualHome, actualAway){
+        const preds = loadHtPredictions();
+        const pred = preds.find(p=>p.id===predId);
+        if(!pred || pred.resolved) return null;
+        const LR = 0.08; // learning rate conservador
+        const errH = actualHome - pred.lambdaHome;
+        const errA = actualAway - pred.lambdaAway;
+        // Brier score del resultado
+        const actual = actualHome > actualAway ? "home" : actualHome===actualAway ? "draw" : "away";
+        const brier = ((pred.pHome-(actual==="home"?1:0))**2
+          +(pred.pDraw-(actual==="draw"?1:0))**2
+          +(pred.pAway-(actual==="away"?1:0))**2)/3;
+        pred.resolved = true;
+        pred.actual = { result: actual, home: actualHome, away: actualAway };
+        pred.brierScore = Number(brier.toFixed(4));
+        pred.lambdaError = { home: Number(errH.toFixed(3)), away: Number(errA.toFixed(3)) };
+        // Actualiza bias global en brainV2
+        const brainV2 = loadBrainV2();
+        brainV2.mne = brainV2.mne || {};
+        brainV2.mne.htBias = brainV2.mne.htBias || { home: 0, away: 0, n: 0, brierSum: 0 };
+        const ht = brainV2.mne.htBias;
+        ht.home = Number((ht.home + LR * errH).toFixed(4));
+        ht.away = Number((ht.away + LR * errA).toFixed(4));
+        ht.n = (ht.n || 0) + 1;
+        ht.brierSum = Number(((ht.brierSum||0) + brier).toFixed(4));
+        ht.lastUpdated = new Date().toISOString();
+        saveBrainV2(brainV2);
+        preds[preds.findIndex(p=>p.id===predId)] = pred;
+        saveHtPredictions(preds);
+        return { brier, errH, errA, ht };
+      }
+
+      // ── Estado actual ──
+      const brainV2Ht = loadBrainV2();
+      const htBias = brainV2Ht?.mne?.htBias || { home:0, away:0, n:0, brierSum:0 };
+      const htPreds = loadHtPredictions();
+      const resolvedPreds = htPreds.filter(p=>p.resolved);
+      const avgBrier = resolvedPreds.length ? (resolvedPreds.reduce((s,p)=>s+(p.brierScore||0),0)/resolvedPreds.length).toFixed(3) : null;
+      const htAccuracy = resolvedPreds.length ? (() => {
+        const correct = resolvedPreds.filter(p=>p.actual?.result === (p.pHome>p.pDraw&&p.pHome>p.pAway?"home":p.pDraw>p.pAway?"draw":"away")).length;
+        return (correct/resolvedPreds.length*100).toFixed(1);
+      })() : null;
+
+      content.innerHTML = `
+        <div style="background:#08090c;min-height:100vh;font-family:'Barlow Condensed',sans-serif;">
+
+          <!-- ── TOP STATS BAR ── -->
+          <div style="display:flex;gap:10px;padding:14px 16px 0;flex-wrap:wrap;">
+            <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:10px 16px;flex:1;min-width:140px;">
+              <div style="font-size:9px;letter-spacing:2px;color:#4a5568;text-transform:uppercase;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">Partidos analizados</div>
+              <div style="font-size:26px;font-weight:900;color:#f0f2f7;">${htPreds.length}</div>
+            </div>
+            <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:10px 16px;flex:1;min-width:140px;">
+              <div style="font-size:9px;letter-spacing:2px;color:#4a5568;text-transform:uppercase;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">Resueltos</div>
+              <div style="font-size:26px;font-weight:900;color:#f0f2f7;">${resolvedPreds.length}</div>
+            </div>
+            <div style="background:#0f1117;border:1px solid ${avgBrier ? (parseFloat(avgBrier)<0.2?'rgba(34,197,94,0.4)':'rgba(245,158,11,0.4)') : 'rgba(255,255,255,0.07)'};border-radius:8px;padding:10px 16px;flex:1;min-width:140px;">
+              <div style="font-size:9px;letter-spacing:2px;color:#4a5568;text-transform:uppercase;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">Brier Score</div>
+              <div style="font-size:26px;font-weight:900;color:${avgBrier ? (parseFloat(avgBrier)<0.2?'#22c55e':'#f59e0b') : '#4a5568'};">${avgBrier || '—'}</div>
+            </div>
+            <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:10px 16px;flex:1;min-width:140px;">
+              <div style="font-size:9px;letter-spacing:2px;color:#4a5568;text-transform:uppercase;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">Precisión</div>
+              <div style="font-size:26px;font-weight:900;color:${htAccuracy ? (parseFloat(htAccuracy)>55?'#22c55e':'#f59e0b') : '#4a5568'};">${htAccuracy ? htAccuracy+'%' : '—'}</div>
+            </div>
+            <div style="background:#0f1117;border:1px solid rgba(245,200,66,0.25);border-radius:8px;padding:10px 16px;flex:1;min-width:160px;">
+              <div style="font-size:9px;letter-spacing:2px;color:#4a5568;text-transform:uppercase;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">Bias aprendido λH / λA</div>
+              <div style="font-size:20px;font-weight:900;color:#f5c842;font-family:'JetBrains Mono',monospace;">${(htBias.home>=0?'+':'')}${htBias.home.toFixed(3)} / ${(htBias.away>=0?'+':'')}${htBias.away.toFixed(3)}</div>
+            </div>
+          </div>
+
+          <!-- ── IMPORT MATCHPACK ── -->
+          <div style="margin:14px 16px 0;background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 20px;">
+            <div style="font-size:13px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:12px;">📥 Importar Matchpack al Descanso</div>
+            <textarea id="htMatchpackInput" style="width:100%;height:80px;background:#08090c;border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:10px;resize:vertical;" placeholder='Pega aquí el JSON del matchpack (schemaVersion: "footballlab_matchpack_v1") ...'></textarea>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+              <button id="htAnalyzeBtn" style="background:#d4322c;border:none;color:white;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;letter-spacing:1.5px;padding:10px 22px;border-radius:6px;cursor:pointer;text-transform:uppercase;">⚡ Analizar y Predecir</button>
+              <button id="htClearBtn" style="background:#161922;border:1px solid rgba(255,255,255,0.1);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;padding:10px 16px;border-radius:6px;cursor:pointer;">Limpiar</button>
+            </div>
+            <div id="htParseError" style="font-size:11px;color:#ef4444;margin-top:8px;font-family:'JetBrains Mono',monospace;"></div>
+          </div>
+
+          <!-- ── PANEL DE ANÁLISIS (se genera al analizar) ── -->
+          <div id="htAnalysisPanel" style="margin:0 16px;"></div>
+
+          <!-- ── HISTORIAL DE PREDICCIONES ── -->
+          <div style="margin:14px 16px 24px;background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 20px;">
+            <div style="font-size:13px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:12px;">🧠 Historial de Predicciones HT · Aprendizaje del Modelo</div>
+            ${htPreds.length === 0
+              ? '<div style="color:#4a5568;font-size:12px;font-family:\'JetBrains Mono\',monospace;">Sin predicciones aún. Importa un matchpack al descanso para empezar.</div>'
+              : `<div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                  <thead><tr style="color:#4a5568;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:1px;border-bottom:1px solid rgba(255,255,255,0.07);">
+                    <th style="text-align:left;padding:6px 8px;">PARTIDO</th>
+                    <th style="padding:6px 8px;">PRED H%</th>
+                    <th style="padding:6px 8px;">PRED X%</th>
+                    <th style="padding:6px 8px;">PRED A%</th>
+                    <th style="padding:6px 8px;">RESULTADO</th>
+                    <th style="padding:6px 8px;">BRIER</th>
+                    <th style="padding:6px 8px;">ACCIÓN</th>
+                  </tr></thead>
+                  <tbody>
+                    ${htPreds.slice().reverse().slice(0,20).map(p=>{
+                      const predLabel = p.pHome>p.pDraw&&p.pHome>p.pAway ? '1' : p.pDraw>p.pAway ? 'X' : '2';
+                      const actualLabel = p.actual ? (p.actual.result==='home'?'1':p.actual.result==='draw'?'X':'2') : '—';
+                      const correct = p.resolved && actualLabel===predLabel;
+                      return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);color:#f0f2f7;">
+                        <td style="padding:8px;font-size:11px;">${p.matchLabel||p.id.slice(-8)}</td>
+                        <td style="padding:8px;text-align:center;color:#d4322c;font-weight:700;">${(p.pHome*100).toFixed(1)}%</td>
+                        <td style="padding:8px;text-align:center;color:#f5c842;font-weight:700;">${(p.pDraw*100).toFixed(1)}%</td>
+                        <td style="padding:8px;text-align:center;color:#1a56c4;font-weight:700;">${(p.pAway*100).toFixed(1)}%</td>
+                        <td style="padding:8px;text-align:center;">
+                          ${p.resolved
+                            ? `<span style="font-weight:900;color:${correct?'#22c55e':'#ef4444'};">${p.actual.home}-${p.actual.away} ${correct?'✓':'✗'}</span>`
+                            : `<div style="display:flex;gap:4px;align-items:center;">
+                                <input type="number" min="0" max="20" value="0" id="htResH_${p.id}" style="width:36px;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;border-radius:3px;padding:2px 4px;font-size:11px;" />
+                                <span style="color:#4a5568;">-</span>
+                                <input type="number" min="0" max="20" value="0" id="htResA_${p.id}" style="width:36px;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;border-radius:3px;padding:2px 4px;font-size:11px;" />
+                                <button data-resolve="${p.id}" style="background:#1a56c4;border:none;color:white;font-size:10px;padding:3px 8px;border-radius:3px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-weight:700;">OK</button>
+                              </div>`
+                          }
+                        </td>
+                        <td style="padding:8px;text-align:center;font-family:'JetBrains Mono',monospace;color:${p.resolved?(p.brierScore<0.2?'#22c55e':p.brierScore<0.3?'#f59e0b':'#ef4444'):'#4a5568'};">${p.resolved?p.brierScore.toFixed(3):'—'}</td>
+                        <td style="padding:8px;text-align:center;">
+                          <button data-ht-show="${p.id}" style="background:#161922;border:1px solid rgba(255,255,255,0.1);color:#8892a4;font-size:10px;padding:3px 8px;border-radius:3px;cursor:pointer;">Ver</button>
+                        </td>
+                      </tr>`;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>`
+            }
+          </div>
+        </div>
+      `;
+
+      // ── EVENT HANDLERS ──
+      document.getElementById('htClearBtn').onclick = () => {
+        document.getElementById('htMatchpackInput').value = '';
+        document.getElementById('htAnalysisPanel').innerHTML = '';
+        document.getElementById('htParseError').textContent = '';
+      };
+
+      document.getElementById('htAnalyzeBtn').onclick = () => {
+        const raw = document.getElementById('htMatchpackInput').value.trim();
+        const errEl = document.getElementById('htParseError');
+        errEl.textContent = '';
+        if(!raw){ errEl.textContent = 'Pega un JSON de matchpack primero.'; return; }
+        let mp;
+        try { mp = parseFootballLabMatchpack(raw); }
+        catch(e){ errEl.textContent = '⚠️ ' + e.message; return; }
+
+        const n = mp.stats?.normalized || {};
+        const xgH = Number(n.xg?.home) || 0;
+        const xgA = Number(n.xg?.away) || 0;
+        const scoreH = Number(mp.match?.score?.home) || 0;
+        const scoreA = Number(mp.match?.score?.away) || 0;
+        const possH = Number(n.possession?.home) || 50;
+        const clearA = Number(n.clearances?.away) || 0;
+        const shotsH = Number(n.shotsTotal?.home) || 0;
+        const shotsA = Number(n.shotsTotal?.away) || 0;
+        const bigH = Number(n.grandes_ocasiones?.home) || 0;
+        const bigA = Number(n.grandes_ocasiones?.away) || 0;
+        const xgotH = Number(n.xg_on_target?.home ?? mp.stats?.sections?.find(s=>s.name==='Remates')?.rows?.find(r=>r.label?.includes('xGOT'))?.home?.parsed ?? 0);
+        const xgotA = Number(n.xg_on_target?.away ?? mp.stats?.sections?.find(s=>s.name==='Remates')?.rows?.find(r=>r.label?.includes('xGOT'))?.away?.parsed ?? 0);
+        const touchesH = Number(n.toques_en_el_area_rival?.home) || 0;
+        const touchesA = Number(n.toques_en_el_area_rival?.away) || 0;
+        const yellowH = Number(n.yellowCards?.home) || 0;
+        const yellowA = Number(n.yellowCards?.away) || 0;
+        const interceptH = Number(n.intercepciones?.home) || 0;
+        const savesA = Number(n.saves?.away) || 0;
+        const errorsA = Number(n.errores_conducentes_a_remate?.away) || 0;
+
+        const brV2 = loadBrainV2();
+        const htBiasNow = brV2?.mne?.htBias || { home:0, away:0, n:0 };
+        const pred = predictHalfTime({ xgH, xgA, scoreH, scoreA, possH, clearA, shotsH, shotsA, bigChancesH: bigH, bigChancesA: bigA, htBias: htBiasNow });
+
+        // Genera señales contextuales
+        const signals = [];
+        if(xgH > xgA * 1.8) signals.push({ type:'positive', title:`${mp.match.home} domina en xG`, desc:`${xgH.toFixed(2)} vs ${xgA.toFixed(2)} — sigue siendo el equipo más peligroso de largo.` });
+        if(clearA > 15) signals.push({ type:'info', title:`${mp.match.away} en bloque bajo`, desc:`${clearA} despejes revelan un equipo defensivo. Vulnerables a transiciones rápidas.` });
+        if(yellowH >= 1) signals.push({ type:'warn', title:`Tarjeta amarilla en ${mp.match.home}`, desc:`Riesgo de reducción a 10 en segunda parte si hay segunda amonestación.` });
+        if(shotsH > 0 && (shotsH === 0 || (Number(n.shotsOnTarget?.home)||0)/shotsH < 0.2)) signals.push({ type:'warn', title:`Ineficiencia en remates — ${mp.match.home}`, desc:`Solo ${Number(n.shotsOnTarget?.home)||0} de ${shotsH} remates a puerta. xGOT: ${xgotH.toFixed(2)}. Necesita mejorar calidad.` });
+        if(bigA > 0 && xgA < 0.3) signals.push({ type:'danger', title:`${mp.match.away} peligroso por contra`, desc:`${bigA} gran(des) ocasión(es) pese a bajo xG total. Contraataque efectivo.` });
+        if(touchesA > touchesH) signals.push({ type:'info', title:`Más toques en área de ${mp.match.home}`, desc:`${mp.match.away} tuvo ${touchesA} toques en área rival vs ${touchesH}. Más presencia física de lo que indica el xG.` });
+
+        // Determina veredicto principal
+        const dominant = pred.pHome > pred.pAway + 0.15 ? mp.match.home : pred.pAway > pred.pHome + 0.15 ? mp.match.away : null;
+        const verdictText = dominant
+          ? `${dominant} es el favorito claro para llevarse los 3 puntos`
+          : pred.pDraw > 0.40
+          ? `El empate es el resultado más probable — partido muy cerrado`
+          : `Partido equilibrado — cualquier resultado es posible`;
+        const verdictColor = pred.pHome > pred.pAway + 0.15 ? '#d4322c' : pred.pAway > pred.pHome + 0.15 ? '#1a56c4' : '#f5c842';
+        const topLabel = pred.pHome > pred.pDraw && pred.pHome > pred.pAway ? 'GANA ' + mp.match.home.toUpperCase() : pred.pDraw > pred.pAway ? 'EMPATE' : 'GANA ' + mp.match.away.toUpperCase();
+
+        // Calidad del modelo
+        const nObs = htBiasNow.n || 0;
+        const avgBrierNow = nObs > 0 ? (htBiasNow.brierSum / nObs).toFixed(3) : null;
+        const modelNote = nObs === 0
+          ? 'Primera predicción — el modelo irá ajustando con cada resultado.'
+          : nObs < 5
+          ? `Modelo con ${nObs} obs. — bias inicial aplicado (λH${(htBiasNow.home>=0?'+':'')}${htBiasNow.home.toFixed(3)}, λA${(htBiasNow.away>=0?'+':'')}${htBiasNow.away.toFixed(3)}).`
+          : `Modelo calibrado con ${nObs} partidos · Brier promedio: ${avgBrierNow} · Bias ajustado (λH${(htBiasNow.home>=0?'+':'')}${htBiasNow.home.toFixed(3)}, λA${(htBiasNow.away>=0?'+':'')}${htBiasNow.away.toFixed(3)}).`;
+
+        const panelHtml = `
+          <div style="padding:0;animation:fl-phase-node-enter 0.4s ease both;">
+
+            <!-- HEADER SCOREBOARD -->
+            <div style="text-align:center;padding:24px 16px 16px;border-bottom:1px solid rgba(255,255,255,0.06);">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:3px;color:#f5c842;margin-bottom:12px;">⚡ DESCANSO · ANÁLISIS EN VIVO</div>
+              <div style="display:flex;align-items:center;justify-content:center;gap:0;">
+                <div style="font-size:38px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:#d4322c;min-width:180px;text-align:right;">${mp.match.home}</div>
+                <div style="background:#161922;border:1px solid rgba(255,255,255,0.13);padding:8px 24px;margin:0 14px;border-radius:6px;text-align:center;">
+                  <div style="font-size:44px;font-weight:900;letter-spacing:8px;color:#f0f2f7;line-height:1;">${scoreH} · ${scoreA}</div>
+                  <div style="font-size:9px;color:#4a5568;letter-spacing:2px;margin-top:3px;font-family:'JetBrains Mono',monospace;">HT · 45'</div>
+                </div>
+                <div style="font-size:38px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:#1a56c4;min-width:180px;text-align:left;">${mp.match.away}</div>
+              </div>
+              <div style="margin-top:12px;font-size:11px;color:#8892a4;">${mp.match.competition||'Partido'} · ${mp.match.date||''}</div>
+            </div>
+
+            <!-- VEREDICTO -->
+            <div style="margin:14px 0 0;background:linear-gradient(135deg,rgba(212,50,44,0.08) 0%,rgba(8,9,12,0) 40%,rgba(8,9,12,0) 60%,rgba(26,86,196,0.05) 100%);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:16px 20px;display:flex;align-items:center;gap:16px;">
+              <div style="font-size:28px;">⚡</div>
+              <div style="flex:1;">
+                <div style="font-size:20px;font-weight:800;letter-spacing:0.5px;color:#f0f2f7;margin-bottom:3px;">${verdictText}</div>
+                <div style="font-size:11px;color:#8892a4;">${modelNote}</div>
+              </div>
+              <div style="background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.3);color:#f5c842;font-size:12px;font-weight:800;letter-spacing:1px;padding:7px 16px;border-radius:4px;white-space:nowrap;">${topLabel}</div>
+            </div>
+
+            <!-- PROBABILIDADES -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px;">
+              ${[
+                { label:'Gana '+mp.match.home, team:mp.match.home, pct:pred.pHome, color:'#d4322c', scores: pred.topScores.filter(s=>s.fh>s.fa).slice(0,2).map(s=>s.score).join(' · ') },
+                { label:'Empate', team:'X', pct:pred.pDraw, color:'#f5c842', scores: pred.topScores.filter(s=>s.fh===s.fa).slice(0,2).map(s=>s.score).join(' · ') },
+                { label:'Gana '+mp.match.away, team:mp.match.away, pct:pred.pAway, color:'#1a56c4', scores: pred.topScores.filter(s=>s.fh<s.fa).slice(0,2).map(s=>s.score).join(' · ') }
+              ].map(c=>`
+                <div style="background:#0f1117;border:1px solid ${c.pct===Math.max(pred.pHome,pred.pDraw,pred.pAway)?c.color+'44':'rgba(255,255,255,0.07)'};border-radius:10px;padding:16px;text-align:center;${c.pct===Math.max(pred.pHome,pred.pDraw,pred.pAway)?'background:linear-gradient(160deg,'+c.color+'11,#0f1117 60%);':''}" >
+                  <div style="font-size:9px;letter-spacing:2px;color:#4a5568;font-family:'JetBrains Mono',monospace;margin-bottom:6px;">GANA</div>
+                  <div style="font-size:15px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:${c.color};margin-bottom:8px;">${c.team}</div>
+                  <div style="font-size:40px;font-weight:900;line-height:1;color:${c.color};margin-bottom:8px;">${(c.pct*100).toFixed(1)}%</div>
+                  <div style="height:3px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden;margin-bottom:7px;"><div style="height:100%;width:${(c.pct*100).toFixed(1)}%;background:${c.color};border-radius:2px;"></div></div>
+                  <div style="font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${c.scores||'—'}</div>
+                </div>
+              `).join('')}
+            </div>
+
+            <!-- XG + STATS BARS -->
+            <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 20px;margin-top:10px;">
+              <div style="font-size:11px;font-weight:800;letter-spacing:2.5px;color:#4a5568;text-transform:uppercase;margin-bottom:14px;">Métricas avanzadas 1ª parte</div>
+              ${[
+                { label:'xG total', h:xgH, a:xgA, fmt:v=>v.toFixed(2) },
+                { label:'Posesión %', h:possH, a:100-possH, fmt:v=>v.toFixed(0)+'%' },
+                { label:'Remates', h:shotsH, a:shotsA, fmt:v=>v },
+                { label:'A puerta', h:Number(n.shotsOnTarget?.home)||0, a:Number(n.shotsOnTarget?.away)||0, fmt:v=>v },
+                { label:'Despejes', h:Number(n.clearances?.home)||0, a:Number(n.clearances?.away)||0, fmt:v=>v },
+                { label:'Toques área rival', h:touchesH, a:touchesA, fmt:v=>v },
+              ].map(row=>{
+                const tot = row.h + row.a || 1;
+                const pctH = (row.h/tot*50);
+                const pctA = (row.a/tot*50);
+                return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;">
+                  <div style="font-size:10px;color:#8892a4;width:110px;flex-shrink:0;font-family:'JetBrains Mono',monospace;">${row.label}</div>
+                  <div style="flex:1;display:flex;align-items:center;gap:4px;">
+                    <div style="height:24px;background:#d4322c;border-radius:3px 0 0 3px;width:${pctH}%;min-width:${row.h>0?'20px':'0'};display:flex;align-items:center;justify-content:flex-end;padding-right:6px;font-size:12px;font-weight:800;color:white;white-space:nowrap;overflow:hidden;transition:width 1s;">${row.fmt(row.h)}</div>
+                    <div style="width:2px;height:24px;background:#08090c;flex-shrink:0;"></div>
+                    <div style="height:24px;background:#1a56c4;border-radius:0 3px 3px 0;width:${pctA}%;min-width:${row.a>0?'20px':'0'};display:flex;align-items:center;padding-left:6px;font-size:12px;font-weight:800;color:white;white-space:nowrap;overflow:hidden;transition:width 1s;">${row.fmt(row.a)}</div>
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>
+
+            <!-- SEÑALES TÁCTICAS -->
+            ${signals.length > 0 ? `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px;margin-top:10px;">
+              ${signals.map(s=>{
+                const colors = { positive:'rgba(34,197,94,0.35)', warn:'rgba(245,158,11,0.35)', danger:'rgba(239,68,68,0.35)', info:'rgba(99,179,237,0.25)' };
+                const bgs = { positive:'rgba(34,197,94,0.05)', warn:'rgba(245,158,11,0.04)', danger:'rgba(239,68,68,0.04)', info:'rgba(99,179,237,0.03)' };
+                return `<div style="background:${bgs[s.type]};border:1px solid ${colors[s.type]};border-radius:8px;padding:12px 14px;display:flex;gap:10px;">
+                  <div style="width:7px;height:7px;border-radius:50%;background:${colors[s.type].replace('0.35','1').replace('0.25','1')};margin-top:5px;flex-shrink:0;"></div>
+                  <div>
+                    <div style="font-size:13px;font-weight:800;color:#f0f2f7;margin-bottom:3px;">${s.title}</div>
+                    <div style="font-size:11px;color:#8892a4;line-height:1.4;">${s.desc}</div>
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>` : ''}
+
+            <!-- SCORES MÁS PROBABLES -->
+            <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 20px;margin-top:10px;">
+              <div style="font-size:11px;font-weight:800;letter-spacing:2.5px;color:#4a5568;text-transform:uppercase;margin-bottom:12px;">Marcadores finales más probables · Poisson bivariado</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${pred.topScores.map((s,i)=>`
+                  <div style="background:${i<2?'rgba(245,200,66,0.09)':i<4?'rgba(245,158,11,0.05)':'#161922'};border:1px solid ${i<2?'rgba(245,200,66,0.35)':i<4?'rgba(245,158,11,0.2)':'rgba(255,255,255,0.07)'};border-radius:6px;padding:8px 14px;text-align:center;min-width:68px;">
+                    <div style="font-size:20px;font-weight:900;letter-spacing:2px;color:#f0f2f7;">${s.score}</div>
+                    <div style="font-size:10px;color:#8892a4;font-family:'JetBrains Mono',monospace;margin-top:2px;">${(s.p*100).toFixed(1)}%</div>
+                  </div>
+                `).join('')}
+              </div>
+              <div style="margin-top:10px;font-size:9px;color:#4a5568;font-family:'JetBrains Mono',monospace;">λ proyectado 2ª parte: ${mp.match.home} ${pred.raw.lH.toFixed(3)} · ${mp.match.away} ${pred.raw.lA.toFixed(3)} · Bias aplicado: ${(htBiasNow.home>=0?'+':'')}${htBiasNow.home.toFixed(3)} / ${(htBiasNow.away>=0?'+':'')}${htBiasNow.away.toFixed(3)}</div>
+            </div>
+
+            <!-- GUARDAR PREDICCIÓN -->
+            <div style="background:#0f1117;border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:14px 18px;margin-top:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+              <div style="flex:1;">
+                <div style="font-size:12px;font-weight:800;color:#22c55e;letter-spacing:1px;margin-bottom:2px;">💾 Guardar predicción para aprendizaje</div>
+                <div style="font-size:11px;color:#4a5568;">Después del partido, introduce el resultado final y el modelo aprenderá de este partido.</div>
+              </div>
+              <button id="htSavePredBtn" style="background:#22c55e;border:none;color:#08090c;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900;letter-spacing:1px;padding:10px 20px;border-radius:6px;cursor:pointer;text-transform:uppercase;white-space:nowrap;">Guardar</button>
+            </div>
+
+          </div>
+        `;
+
+        document.getElementById('htAnalysisPanel').innerHTML = panelHtml;
+
+        // Guardar predicción en memoria para el botón
+        window.__htCurrentPred__ = {
+          id: 'ht_' + Date.now(),
+          matchLabel: mp.match.home + ' vs ' + mp.match.away,
+          matchDate: mp.match.date || new Date().toISOString(),
+          pHome: pred.pHome, pDraw: pred.pDraw, pAway: pred.pAway,
+          lambdaHome: pred.raw.lH, lambdaAway: pred.raw.lA,
+          xgH, xgA, scoreH, scoreA,
+          htBiasApplied: { ...htBiasNow },
+          resolved: false, actual: null,
+          savedAt: new Date().toISOString()
+        };
+
+        document.getElementById('htSavePredBtn').onclick = () => {
+          const existing = loadHtPredictions();
+          // Evitar duplicados del mismo partido
+          const already = existing.find(p=>p.matchLabel===window.__htCurrentPred__.matchLabel && !p.resolved);
+          if(!already){
+            existing.push(window.__htCurrentPred__);
+            saveHtPredictions(existing);
+            document.getElementById('htSavePredBtn').textContent = '✅ Guardado';
+            document.getElementById('htSavePredBtn').style.background = '#4a5568';
+          } else {
+            document.getElementById('htSavePredBtn').textContent = 'Ya guardado';
+          }
+        };
+      };
+
+      // Resolve buttons en historial
+      content.querySelectorAll('[data-resolve]').forEach(btn=>{
+        btn.onclick = () => {
+          const predId = btn.dataset.resolve;
+          const rH = parseInt(document.getElementById('htResH_'+predId)?.value||0);
+          const rA = parseInt(document.getElementById('htResA_'+predId)?.value||0);
+          const outcome = resolveHtPrediction(predId, rA < rH ? 'home' : rH===rA ? 'draw' : 'away', rH, rA);
+          if(outcome){ render('halftime'); }
+        };
+      });
+
+      // Show detail buttons
+      content.querySelectorAll('[data-ht-show]').forEach(btn=>{
+        btn.onclick = () => {
+          const p = loadHtPredictions().find(x=>x.id===btn.dataset.htShow);
+          if(!p) return;
+          alert(`${p.matchLabel}\nHome: ${(p.pHome*100).toFixed(1)}% · X: ${(p.pDraw*100).toFixed(1)}% · Away: ${(p.pAway*100).toFixed(1)}%\nλ: ${p.lambdaHome?.toFixed(3)} / ${p.lambdaAway?.toFixed(3)}\n${p.resolved ? 'Resultado: '+p.actual.home+'-'+p.actual.away+' · Brier: '+p.brierScore : 'Sin resolver'}`);
+        };
+      });
+    }
+
     };
   }
 
