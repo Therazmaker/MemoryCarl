@@ -10097,7 +10097,7 @@ function computeTeamIntelligencePanel(db, teamId){
     };
   }
 
-  function buildRadarFlags({ strengthGap = 0, fsiHome = null, fsiAway = null, strengthHome = 50, strengthAway = 50 } = {}){
+  function buildRadarFlags({ strengthGap = 0, fsiHome = null, fsiAway = null, strengthHome = 50, strengthAway = 50, odds = {}, formHome = null, formAway = null } = {}){
     const flags = [];
     if((Number(fsiHome) || 0) >= 18) flags.push('HIGH_FSI_HOME');
     if((Number(fsiAway) || 0) >= 18) flags.push('HIGH_FSI_AWAY');
@@ -10105,6 +10105,29 @@ function computeTeamIntelligencePanel(db, teamId){
     const strongerIsHome = (Number(strengthHome) || 0) >= (Number(strengthAway) || 0);
     const strongerFsi = strongerIsHome ? (Number(fsiHome) || 0) : (Number(fsiAway) || 0);
     if(strengthGap >= 20 && strongerFsi <= -18) flags.push('STRONG_FAVORITE_UNSTABLE');
+    // ── MARKET_BLIND_DEFENSE: mercado sobrevalora favorito sin ver la defensa del rival
+    const hasOdds = Number.isFinite(Number(odds.home)) && Number.isFinite(Number(odds.away));
+    if(hasOdds){
+      const impliedH = 1 / Number(odds.home);
+      const impliedA = 1 / Number(odds.away);
+      const mktFavIsHome = impliedH > impliedA;
+      const mktFavProb = Math.max(impliedH, impliedA);
+      if(mktFavProb >= 0.62){ // mercado da >62% al favorito
+        const underdogForm = mktFavIsHome ? formAway : formHome;
+        const favoriteForm = mktFavIsHome ? formHome : formAway;
+        const underdogGa = underdogForm?.gaPerGame ?? 99;
+        const favoriteGf = favoriteForm?.gfPerGame ?? 0;
+        const favoriteQuality = favoriteForm?.qualityScore ?? 0.5;
+        // Underdog defiende bien Y favorito no convierte de forma sólida
+        if(underdogGa <= 1.0 && favoriteGf <= 1.4 && favoriteQuality < 0.55){
+          flags.push('MARKET_BLIND_DEFENSE');
+        }
+        // Si además el favorito tiene mala forma vs rivals fuertes
+        if(mktFavProb >= 0.68 && underdogGa <= 1.2 && (favoriteForm?.winsVsTop || 0) === 0){
+          flags.push('FAVORITE_UNPROVEN_VS_DEFENSE');
+        }
+      }
+    }
     return flags;
   }
 
@@ -10248,6 +10271,20 @@ function computeTeamIntelligencePanel(db, teamId){
       lines.push(`⚠️ El favorito (${strongerTeam}) llega apagado mientras el underdog (${weakerTeam}) está encendido. El mercado puede estar equivocado.`);
     } else if(strongerFsi >= 18 && weakerFsi <= -10){
       lines.push(`El favorito (${strongerTeam}) confirma su rol con FSI positivo y rival en baja.`);
+    }
+    // ── MARKET BLIND DEFENSE: el patrón que descubriste
+    if(flags.includes('MARKET_BLIND_DEFENSE')){
+      const favIsHome2 = strengthHome >= strengthAway;
+      const mktFavName = favIsHome2 ? home : away;
+      const mktUndName = favIsHome2 ? away : home;
+      const undGa = favIsHome2 ? fA?.gaPerGame : fH?.gaPerGame;
+      const favGf = favIsHome2 ? fH?.gfPerGame : fA?.gfPerGame;
+      lines.push(`🔍 <b>Patrón: Mercado ciego a la defensa.</b> Las casas dan mucha probabilidad a ${mktFavName} pero ${mktUndName} concede poco (${undGa != null ? undGa.toFixed(2)+' goles/j' : 'defensa sólida'}) y ${mktFavName} no convierte de forma consistente (${favGf != null ? favGf.toFixed(2)+' goles/j' : 'baja conversión'}). El empate o la sorpresa tienen valor real aquí.`);
+    }
+    if(flags.includes('FAVORITE_UNPROVEN_VS_DEFENSE')){
+      const favIsHome2 = strengthHome >= strengthAway;
+      const mktFavName = favIsHome2 ? home : away;
+      lines.push(`🚨 <b>Favorito sin prueba real:</b> ${mktFavName} cotiza alto pero no tiene victorias contra equipos sólidos en su forma reciente. El precio no refleja ese riesgo.`);
     }
 
     // ── CUOTAS vs sistema
@@ -10768,13 +10805,65 @@ function computeTeamIntelligencePanel(db, teamId){
           avgFSI: Number(scorePack.avgFSI.toFixed(1)),
           studyScore: scorePack.studyScore,
           type,
-          flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
+          flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway, odds: { home: pickFirstNumber(m.oddsHome), draw: pickFirstNumber(m.oddsDraw), away: pickFirstNumber(m.oddsAway) }, formHome: resolvedFormHome, formAway: resolvedFormAway }),
           formHome: resolvedFormHome,
           formAway: resolvedFormAway,
           psiHome,
           psiAway,
           prediction: m.prediction || '',
           radarAnalysis: m.radarAnalysis || null,
+          // ── Market Blind Defense scores ──
+          marketBlind: (()=>{
+            const hasOdds = Number.isFinite(Number(m.oddsHome)) && Number.isFinite(Number(m.oddsAway));
+            if(!hasOdds) return null;
+            const impliedH = 1 / Number(m.oddsHome);
+            const impliedA = 1 / Number(m.oddsAway);
+            const mktFavIsHome = impliedH > impliedA;
+            const mktFavProb = Math.round(Math.max(impliedH, impliedA) * 100);
+            const favName = mktFavIsHome ? home.name : away.name;
+            const underdogName = mktFavIsHome ? away.name : home.name;
+            const favForm = mktFavIsHome ? resolvedFormHome : resolvedFormAway;
+            const underdogForm = mktFavIsHome ? resolvedFormAway : resolvedFormHome;
+            // Defensa del no-favorito: score 0-100
+            const undGa = underdogForm?.gaPerGame ?? null;
+            const undWins = underdogForm?.n ? (underdogForm.wins / underdogForm.n) : null;
+            const undTrend = underdogForm?.trend || 'stable';
+            const defenseScore = undGa != null ? clamp(
+              100 - (undGa * 40) // 0 ga/j = 100, 2 ga/j = 20
+              + (undWins != null ? undWins * 15 : 0)
+              + (undTrend === 'rising' ? 8 : undTrend === 'falling' ? -8 : 0)
+            , 0, 100) : null;
+            // Penetración del favorito: score 0-100
+            const favGf = favForm?.gfPerGame ?? null;
+            const favQuality = favForm?.qualityScore ?? null;
+            const favWinsVsTop = favForm?.winsVsTop ?? 0;
+            const favTrend = favForm?.trend || 'stable';
+            const penetrationScore = favGf != null ? clamp(
+              (favGf * 35)
+              + (favQuality != null ? favQuality * 40 : 20)
+              + (favWinsVsTop * 8)
+              + (favTrend === 'rising' ? 6 : favTrend === 'falling' ? -6 : 0)
+            , 0, 100) : null;
+            // Risk score: cuánto riesgo real hay de que el favorito falle
+            const riskScore = (defenseScore != null && penetrationScore != null)
+              ? clamp(defenseScore * 0.55 + (100 - penetrationScore) * 0.45, 0, 100)
+              : null;
+            const riskLevel = riskScore == null ? null
+              : riskScore >= 65 ? 'HIGH'
+              : riskScore >= 45 ? 'MEDIUM'
+              : 'LOW';
+            const valueSignal = riskScore != null && mktFavProb >= 62 && riskScore >= 55
+              ? (riskScore >= 70 ? 'STRONG_X_OR_UPSET' : 'LEAN_X_OR_UPSET')
+              : null;
+            return {
+              mktFavProb, mktFavIsHome, favName, underdogName,
+              defenseScore: defenseScore != null ? Math.round(defenseScore) : null,
+              penetrationScore: penetrationScore != null ? Math.round(penetrationScore) : null,
+              riskScore: riskScore != null ? Math.round(riskScore) : null,
+              riskLevel, valueSignal,
+              undGa, favGf, favWinsVsTop, undTrend, favTrend
+            };
+          })(),
           narrative: buildRadarNarrative({
             home: home.name || 'Local',
             away: away.name || 'Visitante',
@@ -10786,7 +10875,7 @@ function computeTeamIntelligencePanel(db, teamId){
             avgFSI: scorePack.avgFSI,
             studyScore: scorePack.studyScore,
             type,
-            flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway }),
+            flags: buildRadarFlags({ strengthGap: scorePack.strengthGap, fsiHome, fsiAway, strengthHome, strengthAway, odds: { home: pickFirstNumber(m.oddsHome), draw: pickFirstNumber(m.oddsDraw), away: pickFirstNumber(m.oddsAway) }, formHome: resolvedFormHome, formAway: resolvedFormAway }),
             formHome: resolvedFormHome,
             formAway: resolvedFormAway,
             psiHome,
@@ -12672,6 +12761,35 @@ function computeTeamIntelligencePanel(db, teamId){
           </div>` : ''}
 
           ${m.radarAnalysis ? `<div class="rdx-analysis-preview">🎯 Insight IA: ${m.radarAnalysis.insight?.valueLevel || 'MEDIO'} · Consistencia ${m.radarAnalysis.comparison?.consistency || 'MEDIA'}</div>` : ''}
+
+          ${m.marketBlind && m.marketBlind.riskScore != null ? `
+          <div style="margin:10px 0 0;background:${m.marketBlind.riskLevel==='HIGH'?'rgba(239,68,68,0.04)':m.marketBlind.riskLevel==='MEDIUM'?'rgba(245,158,11,0.03)':'rgba(255,255,255,0.02)'};border:1px solid ${m.marketBlind.riskLevel==='HIGH'?'rgba(239,68,68,0.4)':m.marketBlind.riskLevel==='MEDIUM'?'rgba(245,158,11,0.3)':'rgba(255,255,255,0.07)'};border-radius:8px;padding:12px 14px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+              <span style="font-size:9px;font-weight:800;letter-spacing:2px;color:${m.marketBlind.riskLevel==='HIGH'?'#ef4444':m.marketBlind.riskLevel==='MEDIUM'?'#f59e0b':'#6e7681'};text-transform:uppercase;">🔍 Mercado vs Defensa</span>
+              ${m.marketBlind.valueSignal ? `<span style="background:${m.marketBlind.valueSignal==='STRONG_X_OR_UPSET'?'rgba(239,68,68,0.15)':'rgba(245,158,11,0.12)'};border:1px solid ${m.marketBlind.valueSignal==='STRONG_X_OR_UPSET'?'rgba(239,68,68,0.5)':'rgba(245,158,11,0.4)'};color:${m.marketBlind.valueSignal==='STRONG_X_OR_UPSET'?'#ef4444':'#f59e0b'};font-size:9px;font-weight:900;letter-spacing:1px;padding:2px 8px;border-radius:4px;">${m.marketBlind.valueSignal==='STRONG_X_OR_UPSET'?'⚡ VALUE: X / SORPRESA':'👀 LEAN: X / SORPRESA'}</span>` : ''}
+              <span style="margin-left:auto;font-size:10px;color:#6e7681;">Fav. mkt: <b style="color:#e6edf3;">${m.marketBlind.favName}</b> <b style="color:#e3b341;">${m.marketBlind.mktFavProb}%</b></span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+              <div style="background:#0d1117;border-radius:5px;padding:8px 10px;">
+                <div style="font-size:8px;letter-spacing:1px;color:#6e7681;text-transform:uppercase;margin-bottom:4px;">🛡️ Defensa ${m.marketBlind.underdogName.split(' ')[0]}</div>
+                <div style="font-size:20px;font-weight:900;color:${m.marketBlind.defenseScore>=65?'#3fb950':m.marketBlind.defenseScore>=40?'#e3b341':'#f85149'};">${m.marketBlind.defenseScore}<span style="font-size:11px;color:#6e7681;">/100</span></div>
+                <div style="height:2px;background:#21262d;border-radius:2px;margin:4px 0;"><div style="height:100%;width:${m.marketBlind.defenseScore}%;background:${m.marketBlind.defenseScore>=65?'#3fb950':m.marketBlind.defenseScore>=40?'#e3b341':'#f85149'};border-radius:2px;"></div></div>
+                <div style="font-size:9px;color:#6e7681;">${m.marketBlind.undGa!=null?m.marketBlind.undGa.toFixed(2)+' GA/j':''} ${m.marketBlind.undTrend==='rising'?'↑':m.marketBlind.undTrend==='falling'?'↓':'→'}</div>
+              </div>
+              <div style="background:#0d1117;border-radius:5px;padding:8px 10px;">
+                <div style="font-size:8px;letter-spacing:1px;color:#6e7681;text-transform:uppercase;margin-bottom:4px;">⚔️ Penetra ${m.marketBlind.favName.split(' ')[0]}</div>
+                <div style="font-size:20px;font-weight:900;color:${m.marketBlind.penetrationScore>=65?'#3fb950':m.marketBlind.penetrationScore>=40?'#e3b341':'#f85149'};">${m.marketBlind.penetrationScore}<span style="font-size:11px;color:#6e7681;">/100</span></div>
+                <div style="height:2px;background:#21262d;border-radius:2px;margin:4px 0;"><div style="height:100%;width:${m.marketBlind.penetrationScore}%;background:${m.marketBlind.penetrationScore>=65?'#3fb950':m.marketBlind.penetrationScore>=40?'#e3b341':'#f85149'};border-radius:2px;"></div></div>
+                <div style="font-size:9px;color:#6e7681;">${m.marketBlind.favGf!=null?m.marketBlind.favGf.toFixed(2)+' GF/j':''} ${m.marketBlind.favWinsVsTop>0?'✅ vs top':''}</div>
+              </div>
+              <div style="background:#0d1117;border-radius:5px;padding:8px 10px;border:1px solid ${m.marketBlind.riskLevel==='HIGH'?'rgba(248,81,73,0.25)':m.marketBlind.riskLevel==='MEDIUM'?'rgba(227,179,65,0.2)':'transparent'};">
+                <div style="font-size:8px;letter-spacing:1px;color:#6e7681;text-transform:uppercase;margin-bottom:4px;">🎯 Riesgo Sorpresa</div>
+                <div style="font-size:20px;font-weight:900;color:${m.marketBlind.riskLevel==='HIGH'?'#f85149':m.marketBlind.riskLevel==='MEDIUM'?'#e3b341':'#3fb950'};">${m.marketBlind.riskScore}<span style="font-size:11px;color:#6e7681;">/100</span></div>
+                <div style="height:2px;background:#21262d;border-radius:2px;margin:4px 0;"><div style="height:100%;width:${m.marketBlind.riskScore}%;background:${m.marketBlind.riskLevel==='HIGH'?'#f85149':m.marketBlind.riskLevel==='MEDIUM'?'#e3b341':'#3fb950'};border-radius:2px;"></div></div>
+                <div style="font-size:9px;font-weight:800;color:${m.marketBlind.riskLevel==='HIGH'?'#f85149':m.marketBlind.riskLevel==='MEDIUM'?'#e3b341':'#3fb950'};">${m.marketBlind.riskLevel}</div>
+              </div>
+            </div>
+          </div>` : ''}
 
           <div class="rdx-match-actions">
             <button class="rdx-btn-sim" data-radar-open-sim="${m.id}">⚡ Simular</button>
