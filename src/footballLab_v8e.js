@@ -3712,6 +3712,33 @@ export function initFootballLab(){
       .rdx-input-form{font-size:14px!important}
       .rdx-btn-hist-card{background:rgba(99,102,241,.1);border-color:rgba(99,102,241,.3);color:#818cf8}
       .rdx-btn-hist-card:hover{background:rgba(99,102,241,.2)}
+      .rdx-btn-analysis{background:rgba(31,111,235,.12);border-color:rgba(56,139,253,.35);color:#58a6ff}
+      .rdx-btn-analysis:hover{background:rgba(31,111,235,.22)}
+      .rdx-analysis-level{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.35px;border:1px solid transparent}
+      .rdx-analysis-level.high{background:rgba(63,185,80,.12);color:#3fb950;border-color:rgba(63,185,80,.35)}
+      .rdx-analysis-level.mid{background:rgba(227,179,65,.13);color:#e3b341;border-color:rgba(227,179,65,.35)}
+      .rdx-analysis-level.low{background:rgba(248,81,73,.12);color:#f85149;border-color:rgba(248,81,73,.35)}
+      .rdx-analysis-preview{margin-top:8px;padding:8px 10px;border-radius:8px;border:1px solid #263246;background:#111a28;color:#c9d1d9;font-size:12px}
+      .rdx-analysis-modal{max-width:1200px;width:calc(100vw - 36px);max-height:calc(100vh - 36px)}
+      .rdx-analysis-shell{display:grid;grid-template-columns:1.15fr .85fr;gap:12px;margin-top:10px}
+      .rdx-analysis-card{background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:10px}
+      .rdx-analysis-title{font-size:11px;font-weight:800;letter-spacing:.7px;color:#8b949e;text-transform:uppercase;margin-bottom:8px}
+      .rdx-analysis-input{width:100%;min-height:180px;resize:vertical;background:#0a0e14;border:1px solid #30363d;border-radius:8px;color:#e6edf3;padding:10px;font-size:13px;line-height:1.5}
+      .rdx-analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+      .rdx-analysis-field label{font-size:10px;color:#8b949e;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+      .rdx-analysis-field input{margin-top:4px;width:100%;background:#0a0e14;border:1px solid #30363d;border-radius:7px;color:#e6edf3;padding:7px 8px;font-size:12px}
+      .rdx-analysis-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+      .rdx-analysis-ghost,.rdx-analysis-save,.rdx-analysis-process{border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
+      .rdx-analysis-ghost{background:#21262d;color:#c9d1d9;border:1px solid #30363d}
+      .rdx-analysis-process{background:linear-gradient(135deg,#1f6feb,#388bfd);color:#fff}
+      .rdx-analysis-save{background:rgba(63,185,80,.16);color:#3fb950;border:1px solid rgba(63,185,80,.36)}
+      .rdx-signal-list{display:flex;flex-direction:column;gap:6px}
+      .rdx-signal-item{display:flex;justify-content:space-between;gap:8px;padding:6px 8px;background:#0a0e14;border:1px solid #21262d;border-radius:7px;font-size:12px;color:#c9d1d9}
+      .rdx-score-badge{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:800;border:1px solid #30363d;color:#e6edf3;background:#141a24}
+      .rdx-score-badge.high{color:#3fb950;border-color:rgba(63,185,80,.5)}
+      .rdx-score-badge.mid{color:#e3b341;border-color:rgba(227,179,65,.5)}
+      .rdx-score-badge.low{color:#f85149;border-color:rgba(248,81,73,.5)}
+      @media (max-width:980px){.rdx-analysis-shell{grid-template-columns:1fr}}
       /* PSI */
       .rdx-psi-section{margin-top:10px;padding:10px 12px;background:#0a0e15;border:1px solid #21262d;border-radius:8px}
       .rdx-psi-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px}
@@ -10650,6 +10677,7 @@ function computeTeamIntelligencePanel(db, teamId){
           psiHome,
           psiAway,
           prediction: m.prediction || '',
+          radarAnalysis: m.radarAnalysis || null,
           narrative: buildRadarNarrative({
             home: home.name || 'Local',
             away: away.name || 'Visitante',
@@ -10685,6 +10713,127 @@ function computeTeamIntelligencePanel(db, teamId){
       return list.sort((a,b)=>String(a.league || '').localeCompare(String(b.league || ''), 'es', { sensitivity:'base' }) || parseSortableDate(a.kickoff) - parseSortableDate(b.kickoff));
     }
     return list.sort((a,b)=>Number(b.studyScore || 0) - Number(a.studyScore || 0));
+  }
+
+  function escapeHtml(text = ''){
+    return String(text || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function radarEmptyStructured(){
+    return {
+      matchContext: '',
+      recentForm: '',
+      psychologicalNarrative: '',
+      tacticalFactors: '',
+      streaks: '',
+      newsEnvironment: '',
+      keyPlayers: '',
+      absences: ''
+    };
+  }
+
+  function parseRadarAnalysis({ match = {}, rawText = '', structured = {} } = {}){
+    const text = String(rawText || '').toLowerCase();
+    const count = (terms = [])=>terms.reduce((acc, term)=>acc + ((text.match(new RegExp(`\\b${escapeRegexToken(term)}\\b`, 'gi')) || []).length), 0);
+    const mentions = (terms = [])=>terms.some((term)=>text.includes(term));
+    const formHits = count(['gano','ganó','perdio','perdió','racha','invicto','victoria','derrota']);
+    const psychHits = count(['necesita','presion','presión','confianza','motivacion','motivación','ansiedad']);
+    const contextHits = count(['pelea por','permanencia','posicion','posición','clasificación','descenso']);
+    const homeHits = count(['en casa','local','fortaleza local']);
+    const awayHits = count(['visitante','fuera de casa']);
+    const drawHits = count(['empate','igualado','parejo']);
+    const upsetHits = count(['sorpresa','upset','batacazo','compite','dificil','difícil']);
+    const emotionalHits = count(['presion','presión','emocional','nervios','ansiedad','confianza']);
+
+    const homeName = String(match.home || '').toLowerCase();
+    const awayName = String(match.away || '').toLowerCase();
+    const favorWords = ['favorito','ventaja','domina','superior'];
+    let narrativeAdvantage = 0;
+    if(homeName && favorWords.some((w)=>text.includes(`${homeName} ${w}`) || text.includes(`${w} ${homeName}`))) narrativeAdvantage += 1;
+    if(awayName && favorWords.some((w)=>text.includes(`${awayName} ${w}`) || text.includes(`${w} ${awayName}`))) narrativeAdvantage -= 1;
+    narrativeAdvantage += homeHits > awayHits ? 1 : awayHits > homeHits ? -1 : 0;
+    narrativeAdvantage = clamp(narrativeAdvantage, -2, 2);
+
+    const momentum = clamp(Math.round((formHits * 0.35) + (psychHits * 0.2) - (upsetHits * 0.15)) - 1, -2, 2);
+    const upsetRisk = clamp(Math.round((upsetHits * 0.6) + (Math.abs(Number(match.strengthGap) || 0) <= 12 ? 1 : 0)), 0, 2);
+    const drawProbability = clamp(Math.round((drawHits * 0.7) + ((Number(match.strengthGap) || 0) <= 10 ? 1 : 0) + (Math.abs(Number(match.fsiHome) - Number(match.fsiAway)) <= 8 ? 1 : 0)), 0, 2);
+
+    const dataFavours = (Number(match.strengthHome) || 0) >= (Number(match.strengthAway) || 0) ? 'home' : 'away';
+    const narrativeFavours = narrativeAdvantage > 0 ? 'home' : narrativeAdvantage < 0 ? 'away' : 'neutral';
+    const consistency = narrativeFavours === 'neutral'
+      ? 'MEDIA'
+      : narrativeFavours === dataFavours
+        ? (Math.abs(narrativeAdvantage) >= 2 || Math.abs(Number(match.strengthGap) || 0) >= 20 ? 'ALTA' : 'MEDIA')
+        : 'BAJA';
+    const conflict = consistency === 'ALTA' ? 'BAJO' : consistency === 'MEDIA' ? 'MEDIO' : 'ALTO';
+
+    const contextClarity = clamp((contextHits > 0 ? 1 : 0) + (mentions(['pelea por','permanencia','clasificación']) ? 1 : 0), 0, 2);
+    const strongSignals = clamp((Math.abs(momentum) >= 1 ? 1 : 0) + (Math.abs(narrativeAdvantage) >= 1 ? 1 : 0) + (drawProbability >= 1 ? 1 : 0), 0, 3);
+    const valueScore = (consistency === 'ALTA' ? 2 : consistency === 'MEDIA' ? 1 : 0) + contextClarity + (strongSignals >= 2 ? 1 : 0);
+    const valueLevel = valueScore >= 4 ? 'ALTO' : valueScore >= 2 ? 'MEDIO' : 'BAJO';
+
+    const sideName = (side)=>side === 'home' ? (match.home || 'Local') : side === 'away' ? (match.away || 'Visitante') : 'Neutral';
+    const scoreLabel = (value)=>value >= 2 ? 'ALTO' : value >= 1 ? 'MEDIO' : value <= -2 ? 'MUY BAJO' : value <= -1 ? 'BAJO' : 'NEUTRO';
+    const riskLabel = (value)=>value >= 2 ? 'ALTO' : value >= 1 ? 'MEDIO' : 'BAJO';
+
+    const extractedStructured = {
+      matchContext: structured.matchContext || (mentions(['pelea por','permanencia','clasificación']) ? 'Hay contexto competitivo explícito.' : ''),
+      recentForm: structured.recentForm || (formHits ? 'Se mencionan rachas/resultados recientes.' : ''),
+      psychologicalNarrative: structured.psychologicalNarrative || (psychHits ? 'Hay señales psicológicas (presión/confianza).' : ''),
+      tacticalFactors: structured.tacticalFactors || (mentions(['tactico','bloque','transicion','presion alta']) ? 'Se detectan factores tácticos en el texto.' : ''),
+      streaks: structured.streaks || (mentions(['racha','invicto']) ? 'Se identifican rachas activas.' : ''),
+      newsEnvironment: structured.newsEnvironment || (mentions(['lesion','sancion','entorno','noticia']) ? 'Hay noticias/entorno relevante.' : ''),
+      keyPlayers: structured.keyPlayers || (mentions(['jugador clave','goleador','once']) ? 'Se mencionan jugadores influyentes.' : ''),
+      absences: structured.absences || (mentions(['baja','lesion','sancion']) ? 'Se detectan posibles bajas.' : '')
+    };
+
+    return {
+      rawText,
+      extracted: {
+        structured: extractedStructured,
+        signals: {
+          narrativeFavoritism: sideName(narrativeFavours),
+          psychologicalMomentum: scoreLabel(momentum),
+          homeStrengthSignal: riskLabel(clamp(Math.round((homeHits + ((Number(match.strengthHome) || 0) > (Number(match.strengthAway) || 0) ? 1 : 0))), 0, 2)),
+          awayStrengthSignal: riskLabel(clamp(Math.round((awayHits + ((Number(match.strengthAway) || 0) >= (Number(match.strengthHome) || 0) ? 1 : 0))), 0, 2)),
+          drawSignal: riskLabel(drawProbability),
+          upsetAlert: riskLabel(upsetRisk),
+          emotionalFactors: riskLabel(clamp(Math.round(emotionalHits / 2), 0, 2))
+        }
+      },
+      scores: {
+        momentum,
+        narrativeAdvantage,
+        upsetRisk,
+        drawProbability
+      },
+      comparison: {
+        narrativeFavours: sideName(narrativeFavours),
+        dataFavours: `${sideName(dataFavours)} (${(Number(match.strengthHome)||0)} vs ${(Number(match.strengthAway)||0)})`,
+        fsiView: `FSI ${match.home || 'Local'} ${Number(match.fsiHome)||0} · ${match.away || 'Visitante'} ${Number(match.fsiAway)||0}`,
+        formView: `${match.formHome?.sequenceStr || '-'} vs ${match.formAway?.sequenceStr || '-'}`,
+        consistency,
+        conflict
+      },
+      insight: {
+        valueLevel,
+        summary: [
+          `✔ ${consistency === 'ALTA' ? 'Coincide narrativa + data' : consistency === 'MEDIA' ? 'Coincidencia parcial entre narrativa y data' : 'Narrativa choca contra los números'}`,
+          `✔ Gap de fuerza: ${Number(match.strengthGap) || 0}`,
+          `✔ Contexto competitivo: ${contextHits ? 'claro' : 'difuso'}`
+        ],
+        risks: [
+          `⚠ Riesgo upset: ${riskLabel(upsetRisk)}`,
+          `⚠ Empate posible: ${riskLabel(drawProbability)}`
+        ]
+      },
+      updatedAt: new Date().toISOString()
+    };
   }
 
   function render(view="home", payload={}){
@@ -12271,6 +12420,8 @@ function computeTeamIntelligencePanel(db, teamId){
         const alerts = ['STRONG_FAVORITE_UNSTABLE','HIGH_FSI_AWAY'];
         return alerts.includes(f) ? 'alert' : '';
       };
+      const radarValueClass = (level='')=> level==='ALTO' ? 'high' : level==='MEDIO' ? 'mid' : 'low';
+      const radarValueEmoji = (level='')=> level==='ALTO' ? '🟢' : level==='MEDIO' ? '🟡' : '🔴';
 
       // ── build match cards (unified — form + analysis in one list)
       const matchCards = sorted.length === 0 ? `
@@ -12301,6 +12452,7 @@ function computeTeamIntelligencePanel(db, teamId){
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
               ${typeBadge(m.type)}
+              ${m.radarAnalysis?.insight?.valueLevel ? `<span class="rdx-analysis-level ${radarValueClass(m.radarAnalysis.insight.valueLevel)}">${radarValueEmoji(m.radarAnalysis.insight.valueLevel)} ${m.radarAnalysis.insight.valueLevel} VALOR</span>` : ''}
               <div class="rdx-score-ring ${ringCls}" title="Study Score — qué tan interesante es estudiar este partido">${m.studyScore}</div>
             </div>
           </div>
@@ -12422,8 +12574,11 @@ function computeTeamIntelligencePanel(db, teamId){
             ${m.narrative.map(line => `<div class="rdx-narrative-line">${line}</div>`).join('')}
           </div>` : ''}
 
+          ${m.radarAnalysis ? `<div class="rdx-analysis-preview">🎯 Insight IA: ${m.radarAnalysis.insight?.valueLevel || 'MEDIO'} · Consistencia ${m.radarAnalysis.comparison?.consistency || 'MEDIA'}</div>` : ''}
+
           <div class="rdx-match-actions">
             <button class="rdx-btn-sim" data-radar-open-sim="${m.id}">⚡ Simular</button>
+            <button class="rdx-btn-sm rdx-btn-analysis" data-radar-open-analysis="${m.id}">📝 Analizar</button>
             ${m.prediction ? `<span class="rdx-prediction-pill" title="Tu predicción">${{'home':'1 Local','draw':'X Empate','away':'2 Visitante','home_draw':'1X No pierde Local','away_draw':'X2 No pierde Visit.'}[m.prediction]||m.prediction}</span>` : ''}
             <button class="rdx-btn-sm rdx-btn-hist-card" data-radar-to-hist="${m.id}" title="Registrar en histórico y marcar resultado">📋 Al histórico</button>
             <button class="rdx-btn-sm rdx-btn-danger" data-radar-delete-manual="${m.id}">Eliminar</button>
@@ -12545,6 +12700,163 @@ function computeTeamIntelligencePanel(db, teamId){
         </div>
       `;
 
+      const radarFields = [
+        { key:'matchContext', label:'Contexto del partido' },
+        { key:'recentForm', label:'Forma reciente' },
+        { key:'psychologicalNarrative', label:'Narrativa psicológica' },
+        { key:'tacticalFactors', label:'Factores tácticos' },
+        { key:'streaks', label:'Rachas' },
+        { key:'newsEnvironment', label:'Noticias/entorno' },
+        { key:'keyPlayers', label:'Jugadores clave' },
+        { key:'absences', label:'Bajas' }
+      ];
+
+      const upsertRadarMatchAnalysis = (match, analysis)=>{
+        if(!match || !analysis) return;
+        const idx = db.radar.matches.findIndex((row)=>row.id===match.id);
+        if(idx>=0){
+          db.radar.matches[idx].radarAnalysis = analysis;
+          db.radar.matches[idx].updatedAt = new Date().toISOString();
+          return;
+        }
+        db.radar.matches.unshift({
+          id: match.id || uid('rm'),
+          createdAt: new Date().toISOString(),
+          date: new Date().toISOString().slice(0,10),
+          leagueId: match.leagueId || '',
+          homeId: match.homeId || '',
+          awayId: match.awayId || '',
+          prediction: match.prediction || '',
+          radarAnalysis: analysis
+        });
+      };
+
+      const openRadarAnalysisModal = (match)=>{
+        if(!match) return;
+        const analysis = match.radarAnalysis || { rawText:'', extracted:{ structured: radarEmptyStructured(), signals:{} }, scores:{}, comparison:{}, insight:{} };
+        const structured = { ...radarEmptyStructured(), ...(analysis.extracted?.structured || {}) };
+        const backdrop = document.createElement('div');
+        backdrop.className = 'fl-modal-backdrop';
+        const signalRows = ()=>{
+          const sig = analysis.extracted?.signals || {};
+          const items = [
+            ['Favoritismo narrativo', sig.narrativeFavoritism || '-'],
+            ['Momentum psicológico', sig.psychologicalMomentum || '-'],
+            ['Fortaleza local', sig.homeStrengthSignal || '-'],
+            ['Fortaleza visitante', sig.awayStrengthSignal || '-'],
+            ['Señales de empate', sig.drawSignal || '-'],
+            ['Alertas de upset', sig.upsetAlert || '-'],
+            ['Factores emocionales', sig.emotionalFactors || '-']
+          ];
+          return items.map(([k,v])=>`<div class="rdx-signal-item"><span>${k}</span><b>${escapeHtml(v)}</b></div>`).join('');
+        };
+        const scoreCls = (v)=> v==='ALTA'||v==='ALTO' ? 'high' : v==='MEDIA'||v==='MEDIO' ? 'mid' : 'low';
+        backdrop.innerHTML = `
+          <div class="fl-modal rdx-analysis-modal">
+            <div class="fl-row" style="justify-content:space-between;align-items:center;">
+              <div><div class="fl-modal-title">📝 Radar Analysis Editor</div><div class="fl-mini">${match.home} vs ${match.away} · ${match.league}</div></div>
+              <button class="fl-btn" data-close>✖ Cerrar</button>
+            </div>
+            <div class="rdx-analysis-shell">
+              <div class="rdx-analysis-card">
+                <div class="rdx-analysis-title">Texto original</div>
+                <textarea id="rdAnalysisInput" class="rdx-analysis-input">${escapeHtml(analysis.rawText || '')}</textarea>
+                <div class="rdx-analysis-actions">
+                  <button class="rdx-analysis-ghost" id="rdAnalysisPaste">📥 Pegar</button>
+                  <button class="rdx-analysis-process" id="rdAnalysisProcess">✨ Procesar</button>
+                  <button class="rdx-analysis-save" id="rdAnalysisSave">💾 Guardar</button>
+                </div>
+                <div class="rdx-analysis-title" style="margin-top:10px;">Campos estructurados</div>
+                <div class="rdx-analysis-grid">
+                  ${radarFields.map((f)=>`<div class="rdx-analysis-field"><label>${f.label}</label><input data-radar-field="${f.key}" value="${escapeHtml(structured[f.key] || '')}" /></div>`).join('')}
+                </div>
+              </div>
+              <div class="rdx-analysis-card">
+                <div class="rdx-analysis-title">Señales extraídas</div>
+                <div id="rdxSignalBlock" class="rdx-signal-list">${signalRows()}</div>
+                <div class="rdx-analysis-title" style="margin-top:12px;">Comparación con datos del sistema</div>
+                <div id="rdxCmp" class="rdx-signal-list">
+                  <div class="rdx-signal-item"><span>Narrativa favorece</span><b>${escapeHtml(analysis.comparison?.narrativeFavours || '-')}</b></div>
+                  <div class="rdx-signal-item"><span>Datos favorecen</span><b>${escapeHtml(analysis.comparison?.dataFavours || '-')}</b></div>
+                  <div class="rdx-signal-item"><span>Consistencia</span><span class="rdx-score-badge ${scoreCls(analysis.comparison?.consistency || 'MEDIA')}">${escapeHtml(analysis.comparison?.consistency || 'MEDIA')}</span></div>
+                  <div class="rdx-signal-item"><span>Conflicto</span><span class="rdx-score-badge ${scoreCls(analysis.comparison?.conflict || 'MEDIO')}">${escapeHtml(analysis.comparison?.conflict || 'MEDIO')}</span></div>
+                </div>
+                <div class="rdx-analysis-title" style="margin-top:12px;">Insight Radar Final</div>
+                <div id="rdxInsight" class="rdx-analysis-preview">🎯 Valor para estudio: ${escapeHtml(analysis.insight?.valueLevel || 'MEDIO')}</div>
+              </div>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(backdrop);
+
+        const close = ()=>backdrop.remove();
+        backdrop.querySelector('[data-close]')?.addEventListener('click', close);
+        backdrop.addEventListener('click', (ev)=>{ if(ev.target===backdrop) close(); });
+
+        const collectStructured = ()=>{
+          const obj = radarEmptyStructured();
+          backdrop.querySelectorAll('[data-radar-field]').forEach((el)=>{ obj[el.getAttribute('data-radar-field')] = el.value || ''; });
+          return obj;
+        };
+        const renderFromAnalysis = (next)=>{
+          const sig = next.extracted?.signals || {};
+          const signalEl = backdrop.querySelector('#rdxSignalBlock');
+          if(signalEl){
+            signalEl.innerHTML = [
+              ['Favoritismo narrativo', sig.narrativeFavoritism || '-'],
+              ['Momentum psicológico', sig.psychologicalMomentum || '-'],
+              ['Fortaleza local', sig.homeStrengthSignal || '-'],
+              ['Fortaleza visitante', sig.awayStrengthSignal || '-'],
+              ['Señales de empate', sig.drawSignal || '-'],
+              ['Alertas de upset', sig.upsetAlert || '-'],
+              ['Factores emocionales', sig.emotionalFactors || '-']
+            ].map(([k,v])=>`<div class="rdx-signal-item"><span>${k}</span><b>${escapeHtml(v)}</b></div>`).join('');
+          }
+          const cmp = backdrop.querySelector('#rdxCmp');
+          if(cmp){
+            cmp.innerHTML = `
+              <div class="rdx-signal-item"><span>Narrativa favorece</span><b>${escapeHtml(next.comparison?.narrativeFavours || '-')}</b></div>
+              <div class="rdx-signal-item"><span>Datos favorecen</span><b>${escapeHtml(next.comparison?.dataFavours || '-')}</b></div>
+              <div class="rdx-signal-item"><span>Consistencia</span><span class="rdx-score-badge ${scoreCls(next.comparison?.consistency || 'MEDIA')}">${escapeHtml(next.comparison?.consistency || 'MEDIA')}</span></div>
+              <div class="rdx-signal-item"><span>Conflicto</span><span class="rdx-score-badge ${scoreCls(next.comparison?.conflict || 'MEDIO')}">${escapeHtml(next.comparison?.conflict || 'MEDIO')}</span></div>
+            `;
+          }
+          const insight = backdrop.querySelector('#rdxInsight');
+          if(insight){
+            const checks = (next.insight?.summary || []).map((x)=>`<div>${escapeHtml(x)}</div>`).join('');
+            const risks = (next.insight?.risks || []).map((x)=>`<div>${escapeHtml(x)}</div>`).join('');
+            insight.innerHTML = `<div><b>🎯 Valor para estudio: ${escapeHtml(next.insight?.valueLevel || 'MEDIO')}</b></div>${checks}${risks}`;
+          }
+        };
+
+        backdrop.querySelector('#rdAnalysisPaste')?.addEventListener('click', async ()=>{
+          const input = backdrop.querySelector('#rdAnalysisInput');
+          if(!input) return;
+          try{
+            if(navigator.clipboard?.readText){
+              const clip = await navigator.clipboard.readText();
+              if(clip) input.value = clip;
+            }
+          }catch(_e){}
+        });
+
+        backdrop.querySelector('#rdAnalysisProcess')?.addEventListener('click', ()=>{
+          const rawText = backdrop.querySelector('#rdAnalysisInput')?.value || '';
+          const next = parseRadarAnalysis({ match, rawText, structured: collectStructured() });
+          match.radarAnalysis = next;
+          renderFromAnalysis(next);
+        });
+
+        backdrop.querySelector('#rdAnalysisSave')?.addEventListener('click', ()=>{
+          const rawText = backdrop.querySelector('#rdAnalysisInput')?.value || '';
+          const finalAnalysis = parseRadarAnalysis({ match, rawText, structured: collectStructured() });
+          upsertRadarMatchAnalysis(match, finalAnalysis);
+          saveDb(db);
+          close();
+          render('radar', payload);
+        });
+      };
+
       // ── SORT
       document.getElementById('radarSortBy')?.addEventListener('change', (ev)=>{
         radarState.sortBy = ev.target.value || 'studyScore';
@@ -12622,6 +12934,12 @@ function computeTeamIntelligencePanel(db, teamId){
         if(!match) return;
         radarState.selectedMatchId = match.id;
         render('versus', { homeId: match.homeId, awayId: match.awayId, leagueId: match.leagueId });
+      });
+
+      content.querySelectorAll('[data-radar-open-analysis]').forEach((btn)=>btn.onclick = ()=>{
+        const match = radarState.matches.find((row)=>row.id===btn.getAttribute('data-radar-open-analysis'));
+        if(!match) return;
+        openRadarAnalysisModal(match);
       });
 
       // ── SEND TO HISTORIC (from card button)
