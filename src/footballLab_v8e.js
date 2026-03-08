@@ -16611,32 +16611,44 @@ function computeTeamIntelligencePanel(db, teamId){
       const phaseMetrics = selectedPhaseCampaign ? calcPhaseMetrics(selectedPhaseCampaign) : null;
       const phaseFlags = selectedPhaseCampaign ? phaseAlertFlags(selectedPhaseCampaign) : [];
       const phaseAnalysis = buildPhasePostAnalysis(phaseCampaigns);
+      const campaignOptions = phaseCampaigns.map((camp)=>`<option value="${camp.id}" ${camp.id===selectedCampaignId?"selected":""}>${camp.id.slice(-6)} · ${camp.status} · S/${camp.bankroll.toFixed(2)}</option>`).join('');
+      const currentStepLabel = selectedPhaseCampaign ? `F${selectedPhaseCampaign.currentPhase} Paso ${selectedPhaseCampaign.currentPick}/${selectedPhaseCampaign.phases[selectedPhaseCampaign.currentPhase-1]?.picks || 1}` : "-";
+      const totalSteps = selectedPhaseCampaign?.steps?.length || 0;
+      const autoStakeNow = selectedPhaseCampaign?.status === "active" ? selectedPhaseCampaign.bankroll : 0;
+      const phaseTarget = selectedPhaseCampaign ? `Completar F${selectedPhaseCampaign.currentPhase} (${selectedPhaseCampaign.phases[selectedPhaseCampaign.currentPhase-1]?.picks || 1} pasos)` : "-";
       const phaseHeaderHtml = selectedPhaseCampaign ? `
         <div class="fl-kpi" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:10px;">
+          <div><div class="fl-mini">Bankroll inicial</div><div style="font-size:21px;font-weight:900;">S/${selectedPhaseCampaign.initialUnit.toFixed(2)}</div></div>
           <div><div class="fl-mini">Bankroll actual</div><div style="font-size:21px;font-weight:900;">S/${selectedPhaseCampaign.bankroll.toFixed(2)}</div></div>
-          <div><div class="fl-mini">Fase actual</div><div style="font-size:21px;font-weight:900;">${selectedPhaseCampaign.currentPhase}</div></div>
-          <div><div class="fl-mini">Pick actual</div><div style="font-size:21px;font-weight:900;">${selectedPhaseCampaign.currentPick}</div></div>
+          <div><div class="fl-mini">Fase actual</div><div style="font-size:21px;font-weight:900;">F${selectedPhaseCampaign.currentPhase}</div></div>
+          <div><div class="fl-mini">Paso actual</div><div style="font-size:21px;font-weight:900;">${currentStepLabel}</div></div>
+          <div><div class="fl-mini">Pasos completados</div><div style="font-size:21px;font-weight:900;">${selectedPhaseCampaign.stepsCompleted || 0}/${totalSteps}</div></div>
+          <div><div class="fl-mini">Stake automático</div><div style="font-size:21px;font-weight:900;">S/${autoStakeNow.toFixed(2)}</div></div>
+          <div><div class="fl-mini">Objetivo de fase</div><div style="font-size:17px;font-weight:900;">${phaseTarget}</div></div>
+          <div><div class="fl-mini">Estado campaña</div><div style="font-size:17px;font-weight:900;color:${selectedPhaseCampaign.status==='failed'?'#ff7b72':(selectedPhaseCampaign.status==='completed'?'#3fb950':'#f2cc60')};">${selectedPhaseCampaign.status.toUpperCase()}</div></div>
           <div><div class="fl-mini">Multiplicador</div><div style="font-size:21px;font-weight:900;color:#3fb950;">x${phaseMetrics.multiplier.toFixed(2)}</div></div>
-          <div><div class="fl-mini">ROI</div><div style="font-size:21px;font-weight:900;color:${phaseMetrics.roi>=0?"#3fb950":"#ff7b72"};">${(phaseMetrics.roi*100).toFixed(2)}%</div></div>
         </div>
       ` : '<div class="fl-mini">No hay campañas creadas todavía.</div>';
-      const phaseTimelineHtml = selectedPhaseCampaign ? selectedPhaseCampaign.phases.map((phase)=>{
-        const status = selectedPhaseCampaign.status === "failed" && phase.id >= selectedPhaseCampaign.currentPhase
-          ? "⛔"
-          : (phase.id < selectedPhaseCampaign.currentPhase ? "✅" : (phase.id===selectedPhaseCampaign.currentPhase ? "🔄" : "⏳"));
-        return `<div class="fl-chip">${phase.name} ${status} · ${phase.picks} picks · cuota ${phase.minOdds.toFixed(2)}-${phase.maxOdds.toFixed(2)}</div>`;
-      }).join(' ') : '<span class="fl-mini">Sin timeline aún.</span>';
+      const phaseTimelineHtml = selectedPhaseCampaign && selectedPhaseCampaign.steps?.length
+        ? selectedPhaseCampaign.steps.map((step)=>{
+          const done = (selectedPhaseCampaign.stepsCompleted || 0) >= step.order;
+          const active = selectedPhaseCampaign.status === "active" && (selectedPhaseCampaign.stepsCompleted || 0) + 1 === step.order;
+          const failed = selectedPhaseCampaign.status === "failed" && selectedPhaseCampaign.failedAt?.stepOrder === step.order;
+          const icon = failed ? "⛔" : (done ? "✅" : (active ? "🔄" : "⏳"));
+          return `<div class="fl-chip">F${step.phase} P${step.pickNumber} ${icon}</div>`;
+        }).join(' ➜ ')
+        : '<span class="fl-mini">Sin timeline aún.</span>';
       const phasePickRows = selectedPhaseCampaign && selectedPhaseCampaign.picks.length
-        ? selectedPhaseCampaign.picks.map((pick)=>`<tr><td>${pick.phase}</td><td>${pick.pickNumber}</td><td>${pick.match}</td><td>${pick.odds.toFixed(2)}</td><td>S/${pick.autoStake.toFixed(2)}</td><td>${pick.result}</td><td>S/${pick.bankrollAfter.toFixed(2)}</td><td><button class="fl-btn" style="padding:4px 8px;" data-phase-pick="${pick.id}">Ver</button></td></tr>`).join('')
-        : "<tr><td colspan='8'>Sin picks registrados.</td></tr>";
+        ? selectedPhaseCampaign.picks.map((pick)=>`<tr><td>F${pick.phase}</td><td>P${pick.pickNumber}</td><td>${(pick.date||"").replace("T"," ").slice(0,16)}</td><td>${pick.match}</td><td>${pick.odds.toFixed(2)}</td><td>S/${pick.autoStake.toFixed(2)}</td><td>${pick.result}</td><td>S/${(pick.bankrollBefore||0).toFixed(2)}</td><td>S/${pick.bankrollAfter.toFixed(2)}</td><td><button class="fl-btn" style="padding:4px 8px;" data-phase-pick="${pick.id}">Ver</button></td></tr>`).join('')
+        : "<tr><td colspan='10'>Sin picks registrados.</td></tr>";
       const phaseFlagHtml = phaseFlags.length
         ? phaseFlags.map((flag)=>`<span class="fl-chip bad">⚠️ ${flag}</span>`).join(' ')
         : '<span class="fl-chip ok">Sin alertas activas</span>';
-      const campaignOptions = phaseCampaigns.map((camp)=>`<option value="${camp.id}" ${camp.id===selectedCampaignId?"selected":""}>${camp.id.slice(-6)} · ${camp.status} · S/${camp.bankroll.toFixed(2)}</option>`).join('');
       const phaseSummaryRows = selectedPhaseCampaign ? selectedPhaseCampaign.phases.map((phase)=>{
-        const done = selectedPhaseCampaign.picks.filter((pick)=>pick.phase===phase.id).length;
-        return `<div class="fl-mini">${phase.name}: ${done}/${phase.picks} picks</div>`;
+        const done = selectedPhaseCampaign.picks.filter((pick)=>pick.phase===phase.id && ["win","loss"].includes(pick.result)).length;
+        return `<div class="fl-mini">${phase.name}: ${done}/${phase.picks} pasos cerrados</div>`;
       }).join('') : '';
+      const failedAtText = selectedPhaseCampaign?.failedAt ? `Falló en F${selectedPhaseCampaign.failedAt.phase} Paso ${selectedPhaseCampaign.failedAt.pickNumber}` : '';
       const topMarkets = phaseAnalysis.topMarket.length
         ? phaseAnalysis.topMarket.map((row)=>`<li>${row.market} · WR ${(row.wr*100).toFixed(1)}% (${row.wins}/${row.picks})</li>`).join('')
         : '<li>Sin mercados suficientes.</li>';
@@ -16719,23 +16731,23 @@ function computeTeamIntelligencePanel(db, teamId){
             <div style="margin-top:8px;">${phaseSummaryRows}</div>
           </div>
           <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
-            <input id="phaseInitialUnit" class="fl-input" type="number" min="0.5" step="0.5" value="${st.bank.toFixed(2)}" style="width:120px" placeholder="Unidad inicial" />
+            <input id="phaseInitialUnit" class="fl-input" type="number" min="0.5" step="0.5" value="${st.bank.toFixed(2)}" style="width:140px" placeholder="Bankroll inicial" />
             <input id="phaseLeague" class="fl-input" type="text" placeholder="Liga" style="width:110px" />
             <input id="phaseMatch" class="fl-input" type="text" placeholder="Partido" style="width:150px" />
             <input id="phaseMarket" class="fl-input" type="text" placeholder="Mercado" style="width:110px" />
             <input id="phaseSelection" class="fl-input" type="text" placeholder="Selección" style="width:120px" />
             <input id="phaseOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:90px" />
-            <select id="phaseResult" class="fl-select" style="width:90px"><option value="win">win</option><option value="loss">loss</option></select>
-            <input id="phaseManualStake" class="fl-input" type="number" step="0.01" min="0" placeholder="Stake manual" style="width:110px" />
+            <select id="phaseResult" class="fl-select" style="width:105px"><option value="win">win</option><option value="loss">loss</option><option value="void">void</option><option value="pending">pending</option></select>
+            <label class="fl-mini"><input id="phaseVoidAdvance" type="checkbox" ${selectedPhaseCampaign?.allowVoidAdvance?"checked":""} /> void avanza paso</label><span class="fl-chip">Stake auto = bankroll actual</span>
             <input id="phaseNarrative" class="fl-input" type="number" step="1" min="0" max="100" placeholder="Narrativa" style="width:95px" />
             <label class="fl-mini"><input id="phaseEmotional" type="checkbox" /> emocional</label>
             <label class="fl-mini"><input id="phaseMarketConsistent" type="checkbox" checked /> mercado consistente</label>
             <button class="fl-btn" id="phaseSavePick">Guardar pick fase</button>
           </div>
-          <div id="phaseOut" class="fl-mini" style="margin-top:8px;"></div>
+          <div id="phaseOut" class="fl-mini" style="margin-top:8px;">${failedAtText}</div>
           <div class="fl-row" style="flex-wrap:wrap;gap:6px;margin-top:8px;">${phaseFlagHtml}</div>
           <div class="fl-mre-table-wrap" style="margin-top:10px;">
-            <table class="fl-mre-table"><thead><tr><th>Fase</th><th># Pick</th><th>Partido</th><th>Cuota</th><th>Stake</th><th>Resultado</th><th>Bankroll</th><th>Detalle</th></tr></thead><tbody>${phasePickRows}</tbody></table>
+            <table class="fl-mre-table"><thead><tr><th>Fase</th><th>Paso</th><th>Fecha</th><th>Partido</th><th>Cuota</th><th>Stake</th><th>Resultado</th><th>Bankroll antes</th><th>Bankroll después</th><th>Detalle</th></tr></thead><tbody>${phasePickRows}</tbody></table>
           </div>
         </div>
 
@@ -17091,9 +17103,18 @@ function computeTeamIntelligencePanel(db, teamId){
             if(out) out.textContent = "❌ Cuota inválida.";
             return;
           }
-          const manualStakeRaw = Number(document.getElementById("phaseManualStake")?.value);
-          const manualStake = Number.isFinite(manualStakeRaw) && manualStakeRaw > 0 ? manualStakeRaw : null;
-          const result = document.getElementById("phaseResult")?.value === "loss" ? "loss" : "win";
+          const result = document.getElementById("phaseResult")?.value || "pending";
+          campaign.allowVoidAdvance = !!document.getElementById("phaseVoidAdvance")?.checked;
+          const allowedResults = ["win","loss","void","pending"];
+          if(!allowedResults.includes(result)){
+            if(out) out.textContent = "❌ Resultado inválido.";
+            return;
+          }
+          const lastPick = campaign.picks?.[campaign.picks.length - 1];
+          if(lastPick && lastPick.result === "pending"){
+            if(out) out.textContent = "❌ Ya existe un pick pendiente en el paso actual.";
+            return;
+          }
           const phase = campaign.currentPhase;
           const pickNumber = campaign.currentPick;
           campaign.picks.push({
@@ -17105,7 +17126,7 @@ function computeTeamIntelligencePanel(db, teamId){
             selection: pickFirstString(document.getElementById("phaseSelection")?.value, "Selección") || "Selección",
             odds,
             autoStake: campaign.bankroll,
-            manualStake,
+            manualStake: null,
             result,
             notes: "",
             phase,
@@ -17122,8 +17143,14 @@ function computeTeamIntelligencePanel(db, teamId){
           persistPhaseMode();
           saveDb(db);
           if(out) out.textContent = recalculated.status === "failed"
-            ? "⛔ Campaña terminada por pérdida."
-            : (recalculated.status === "completed" ? "🏁 Campaña completada." : `✅ Pick guardado. Bankroll S/${recalculated.bankroll.toFixed(2)}`);
+            ? `⛔ Campaña FALLIDA en F${recalculated.failedAt?.phase || phase} Paso ${recalculated.failedAt?.pickNumber || pickNumber}.`
+            : (recalculated.status === "completed"
+              ? `🏁 Campaña COMPLETADA. Multiplicador final x${(recalculated.bankroll/Math.max(0.01,recalculated.initialUnit)).toFixed(2)}`
+              : (result === "pending"
+                ? "⏳ Pick pendiente guardado. No se avanza de paso."
+                : (result === "void" && !recalculated.allowVoidAdvance
+                  ? "➖ Pick void guardado. Se mantiene el mismo paso."
+                  : `✅ Paso cerrado. Bankroll S/${recalculated.bankroll.toFixed(2)}`)));
           setTimeout(()=>render("bitacora"), 180);
         };
       }
@@ -17149,8 +17176,8 @@ function computeTeamIntelligencePanel(db, teamId){
               </div>
               <div class="fl-card" style="margin-top:10px;padding:10px;background:#0d1117;border:1px solid #2d333b;">
                 <div style="font-weight:700;">Evolución bankroll</div>
-                <div class="fl-mini" style="margin-top:6px;">Stake auto: S/${pick.autoStake.toFixed(2)} · Stake usado: S/${usedStake.toFixed(2)} · Cuota: ${pick.odds.toFixed(2)} · Bankroll resultante: S/${pick.bankrollAfter.toFixed(2)}</div>
-                <div class="fl-mini" style="margin-top:6px;">Explicación matemática: ${pick.result==="win" ? `bankroll = stake × cuota = ${usedStake.toFixed(2)} × ${pick.odds.toFixed(2)} = ${pick.bankrollAfter.toFixed(2)}` : `al perder se liquida la campaña: bankroll = 0`}</div>
+                <div class="fl-mini" style="margin-top:6px;">Stake auto: S/${pick.autoStake.toFixed(2)} · Cuota: ${pick.odds.toFixed(2)} · Bankroll antes: S/${(pick.bankrollBefore||0).toFixed(2)} · Bankroll después: S/${pick.bankrollAfter.toFixed(2)}</div>
+                <div class="fl-mini" style="margin-top:6px;">Explicación matemática: ${pick.result==="win" ? `bankroll = stake × cuota = ${usedStake.toFixed(2)} × ${pick.odds.toFixed(2)} = ${pick.bankrollAfter.toFixed(2)}` : (pick.result==="loss" ? `al perder se liquida la campaña: bankroll = 0` : (pick.result==="void" ? `void: bankroll se mantiene sin avance automático` : `pending: paso bloqueado hasta resolución`))}</div>
               </div>
             </div>
           `;
