@@ -14,6 +14,7 @@ import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMa
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
 import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
 import { buildBitacoraPerformanceLab, normalizePickRecord } from "./footballlab/bitacora_performance.js";
+import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calcPhaseMetrics, phaseAlertFlags, buildPhasePostAnalysis } from "./footballlab/bitacora_phase_mode.js";
 
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
@@ -115,7 +116,8 @@ export function initFootballLab(){
       stopWin: 1,
       maxBetsPerDay: 3,
       maxConsecutiveLosses: 2,
-      entries: []
+      entries: [],
+      phaseMode: ensurePhaseModeState(null)
     },
     learning: {
       schemaVersion: 2,
@@ -3837,7 +3839,8 @@ export function initFootballLab(){
       planStartDate: "",
       planTargetBank: null,
       pickCandidates: [],
-      entries: []
+      entries: [],
+      phaseMode: ensurePhaseModeState(null)
     };
     const st = { ...base, ...(raw || {}) };
     st.bank = Math.max(1, Number(st.bank) || base.bank);
@@ -3861,6 +3864,7 @@ export function initFootballLab(){
     st.planTargetBank = Number.isFinite(Number(st.planTargetBank)) ? Math.max(1, Number(st.planTargetBank)) : null;
     st.pickCandidates = Array.isArray(st.pickCandidates) ? st.pickCandidates : [];
     st.entries = Array.isArray(st.entries) ? st.entries : [];
+    st.phaseMode = ensurePhaseModeState(st.phaseMode);
     return st;
   }
 
@@ -16464,6 +16468,9 @@ function computeTeamIntelligencePanel(db, teamId){
     if(view==="bitacora"){
       db.bitacora = ensureBitacoraState(db.bitacora);
       const st = db.bitacora;
+      const phaseStorage = safeParseJson(localStorage.getItem("futbollab_phase_campaigns_v1") || "null");
+      st.phaseMode = ensurePhaseModeState(phaseStorage || st.phaseMode);
+      db.bitacora.phaseMode = st.phaseMode;
       const today = new Date().toISOString().slice(0,10);
       const todayEntries = st.entries.filter(e=>(e.date||"").slice(0,10)===today);
       const todayProfit = todayEntries.reduce((s,e)=>s+(Number(e.profit)||0),0);
@@ -16595,6 +16602,51 @@ function computeTeamIntelligencePanel(db, teamId){
       const renderBreakRows = (rows=[])=>rows.slice(0,6).map((row)=>`<tr><td>${row.key}</td><td>${row.picks}</td><td>${(row.winRate*100).toFixed(1)}%</td><td>${row.roi===null?'-':`${(row.roi*100).toFixed(2)}%`}</td><td>${row.clv===null?'-':`${(row.clv*100).toFixed(2)} pp`}</td></tr>`).join('') || '<tr><td colspan="5" class="fl-mini">Sin datos suficientes.</td></tr>';
       const perfInsights = perfLab.insights.length ? perfLab.insights.map((txt)=>`<li>${txt}</li>`).join('') : '<li>Sin señales suficientes todavía.</li>';
 
+      st.phaseMode = ensurePhaseModeState(st.phaseMode);
+      const phaseMode = st.phaseMode;
+      const phaseCampaigns = Array.isArray(phaseMode.campaigns) ? phaseMode.campaigns : [];
+      const activePhaseCampaign = phaseCampaigns.find((camp)=>camp.status === "active") || null;
+      const selectedCampaignId = st.phaseMode.selectedCampaignId || activePhaseCampaign?.id || phaseCampaigns[0]?.id || "";
+      const selectedPhaseCampaign = phaseCampaigns.find((camp)=>camp.id===selectedCampaignId) || null;
+      const phaseMetrics = selectedPhaseCampaign ? calcPhaseMetrics(selectedPhaseCampaign) : null;
+      const phaseFlags = selectedPhaseCampaign ? phaseAlertFlags(selectedPhaseCampaign) : [];
+      const phaseAnalysis = buildPhasePostAnalysis(phaseCampaigns);
+      const phaseHeaderHtml = selectedPhaseCampaign ? `
+        <div class="fl-kpi" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:10px;">
+          <div><div class="fl-mini">Bankroll actual</div><div style="font-size:21px;font-weight:900;">S/${selectedPhaseCampaign.bankroll.toFixed(2)}</div></div>
+          <div><div class="fl-mini">Fase actual</div><div style="font-size:21px;font-weight:900;">${selectedPhaseCampaign.currentPhase}</div></div>
+          <div><div class="fl-mini">Pick actual</div><div style="font-size:21px;font-weight:900;">${selectedPhaseCampaign.currentPick}</div></div>
+          <div><div class="fl-mini">Multiplicador</div><div style="font-size:21px;font-weight:900;color:#3fb950;">x${phaseMetrics.multiplier.toFixed(2)}</div></div>
+          <div><div class="fl-mini">ROI</div><div style="font-size:21px;font-weight:900;color:${phaseMetrics.roi>=0?"#3fb950":"#ff7b72"};">${(phaseMetrics.roi*100).toFixed(2)}%</div></div>
+        </div>
+      ` : '<div class="fl-mini">No hay campañas creadas todavía.</div>';
+      const phaseTimelineHtml = selectedPhaseCampaign ? selectedPhaseCampaign.phases.map((phase)=>{
+        const status = selectedPhaseCampaign.status === "failed" && phase.id >= selectedPhaseCampaign.currentPhase
+          ? "⛔"
+          : (phase.id < selectedPhaseCampaign.currentPhase ? "✅" : (phase.id===selectedPhaseCampaign.currentPhase ? "🔄" : "⏳"));
+        return `<div class="fl-chip">${phase.name} ${status} · ${phase.picks} picks · cuota ${phase.minOdds.toFixed(2)}-${phase.maxOdds.toFixed(2)}</div>`;
+      }).join(' ') : '<span class="fl-mini">Sin timeline aún.</span>';
+      const phasePickRows = selectedPhaseCampaign && selectedPhaseCampaign.picks.length
+        ? selectedPhaseCampaign.picks.map((pick)=>`<tr><td>${pick.phase}</td><td>${pick.pickNumber}</td><td>${pick.match}</td><td>${pick.odds.toFixed(2)}</td><td>S/${pick.autoStake.toFixed(2)}</td><td>${pick.result}</td><td>S/${pick.bankrollAfter.toFixed(2)}</td><td><button class="fl-btn" style="padding:4px 8px;" data-phase-pick="${pick.id}">Ver</button></td></tr>`).join('')
+        : "<tr><td colspan='8'>Sin picks registrados.</td></tr>";
+      const phaseFlagHtml = phaseFlags.length
+        ? phaseFlags.map((flag)=>`<span class="fl-chip bad">⚠️ ${flag}</span>`).join(' ')
+        : '<span class="fl-chip ok">Sin alertas activas</span>';
+      const campaignOptions = phaseCampaigns.map((camp)=>`<option value="${camp.id}" ${camp.id===selectedCampaignId?"selected":""}>${camp.id.slice(-6)} · ${camp.status} · S/${camp.bankroll.toFixed(2)}</option>`).join('');
+      const phaseSummaryRows = selectedPhaseCampaign ? selectedPhaseCampaign.phases.map((phase)=>{
+        const done = selectedPhaseCampaign.picks.filter((pick)=>pick.phase===phase.id).length;
+        return `<div class="fl-mini">${phase.name}: ${done}/${phase.picks} picks</div>`;
+      }).join('') : '';
+      const topMarkets = phaseAnalysis.topMarket.length
+        ? phaseAnalysis.topMarket.map((row)=>`<li>${row.market} · WR ${(row.wr*100).toFixed(1)}% (${row.wins}/${row.picks})</li>`).join('')
+        : '<li>Sin mercados suficientes.</li>';
+      const topFails = phaseAnalysis.topFails.length
+        ? phaseAnalysis.topFails.map((row)=>`<li>${row[0]} · ${row[1]} casos</li>`).join('')
+        : '<li>Sin patrones detectados.</li>';
+      const failPhaseText = Object.keys(phaseAnalysis.failByPhase).length
+        ? Object.entries(phaseAnalysis.failByPhase).map(([phase,total])=>`Fase ${phase}: ${total}`).join(' · ')
+        : 'Sin fallos registrados';
+
       content.innerHTML = `
         <div class="fl-card">
           <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));">
@@ -16649,6 +16701,51 @@ function computeTeamIntelligencePanel(db, teamId){
           <div class="fl-card" style="margin-top:10px;padding:10px;background:#0d1117;border:1px solid #2d333b;">
             <div style="font-weight:700;">Lecturas automáticas</div>
             <ul style="margin:8px 0 0 16px;padding:0;display:grid;gap:5px;">${perfInsights}</ul>
+          </div>
+        </div>
+
+        <div class="fl-card">
+          <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-weight:800;">🧩 Modo Fases (Sistema Progresivo)</div>
+            <div class="fl-row">
+              <select id="phaseCampaignSelect" class="fl-select" style="width:250px;"><option value="">Seleccionar campaña</option>${campaignOptions}</select>
+              <button class="fl-btn" id="phaseNewCampaign">Nueva campaña</button>
+            </div>
+          </div>
+          ${phaseHeaderHtml}
+          <div class="fl-card" style="margin:0 0 10px 0;padding:8px;background:#0d1117;border:1px solid #2d333b;">
+            <div style="font-weight:700;margin-bottom:6px;">Timeline de fases</div>
+            <div class="fl-row" style="flex-wrap:wrap;gap:6px;">${phaseTimelineHtml}</div>
+            <div style="margin-top:8px;">${phaseSummaryRows}</div>
+          </div>
+          <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
+            <input id="phaseInitialUnit" class="fl-input" type="number" min="0.5" step="0.5" value="${st.bank.toFixed(2)}" style="width:120px" placeholder="Unidad inicial" />
+            <input id="phaseLeague" class="fl-input" type="text" placeholder="Liga" style="width:110px" />
+            <input id="phaseMatch" class="fl-input" type="text" placeholder="Partido" style="width:150px" />
+            <input id="phaseMarket" class="fl-input" type="text" placeholder="Mercado" style="width:110px" />
+            <input id="phaseSelection" class="fl-input" type="text" placeholder="Selección" style="width:120px" />
+            <input id="phaseOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:90px" />
+            <select id="phaseResult" class="fl-select" style="width:90px"><option value="win">win</option><option value="loss">loss</option></select>
+            <input id="phaseManualStake" class="fl-input" type="number" step="0.01" min="0" placeholder="Stake manual" style="width:110px" />
+            <input id="phaseNarrative" class="fl-input" type="number" step="1" min="0" max="100" placeholder="Narrativa" style="width:95px" />
+            <label class="fl-mini"><input id="phaseEmotional" type="checkbox" /> emocional</label>
+            <label class="fl-mini"><input id="phaseMarketConsistent" type="checkbox" checked /> mercado consistente</label>
+            <button class="fl-btn" id="phaseSavePick">Guardar pick fase</button>
+          </div>
+          <div id="phaseOut" class="fl-mini" style="margin-top:8px;"></div>
+          <div class="fl-row" style="flex-wrap:wrap;gap:6px;margin-top:8px;">${phaseFlagHtml}</div>
+          <div class="fl-mre-table-wrap" style="margin-top:10px;">
+            <table class="fl-mre-table"><thead><tr><th>Fase</th><th># Pick</th><th>Partido</th><th>Cuota</th><th>Stake</th><th>Resultado</th><th>Bankroll</th><th>Detalle</th></tr></thead><tbody>${phasePickRows}</tbody></table>
+          </div>
+        </div>
+
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:8px;">🧬 Radiografía del intento</div>
+          <div class="fl-mini">Fase donde falla más: ${failPhaseText}</div>
+          <div class="fl-mini" style="margin-top:4px;">Promedio cuotas ganadoras: ${phaseAnalysis.avgWinnerOdds ? phaseAnalysis.avgWinnerOdds.toFixed(2) : "-"}</div>
+          <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:8px;">
+            <div class="fl-card" style="margin:0;padding:8px;"><div style="font-weight:700;">Mercados más sólidos</div><ul style="margin:6px 0 0 16px;">${topMarkets}</ul></div>
+            <div class="fl-card" style="margin:0;padding:8px;"><div style="font-weight:700;">Patrones de fallo</div><ul style="margin:6px 0 0 16px;">${topFails}</ul></div>
           </div>
         </div>
 
@@ -16947,6 +17044,121 @@ function computeTeamIntelligencePanel(db, teamId){
 
       content.querySelectorAll("[data-edit-log]").forEach(btn=>{
         btn.onclick = ()=>openBitacoraEditModal(btn.getAttribute("data-edit-log"));
+      });
+
+      const persistPhaseMode = ()=>{
+        localStorage.setItem("futbollab_phase_campaigns_v1", JSON.stringify(st.phaseMode));
+      };
+      const phaseSelect = document.getElementById("phaseCampaignSelect");
+      if(phaseSelect){
+        phaseSelect.onchange = ()=>{
+          st.phaseMode.selectedCampaignId = phaseSelect.value || "";
+          db.bitacora.phaseMode = st.phaseMode;
+          persistPhaseMode();
+          saveDb(db);
+          render("bitacora");
+        };
+      }
+      const phaseNewCampaignBtn = document.getElementById("phaseNewCampaign");
+      if(phaseNewCampaignBtn){
+        phaseNewCampaignBtn.onclick = ()=>{
+          const initialUnit = Math.max(0.5, Number(document.getElementById("phaseInitialUnit")?.value) || st.bank || 1);
+          const campaign = createPhaseCampaign({ initialUnit, phases: st.phaseMode.config.phases });
+          st.phaseMode.campaigns.unshift(campaign);
+          st.phaseMode.selectedCampaignId = campaign.id;
+          db.bitacora.phaseMode = st.phaseMode;
+          persistPhaseMode();
+          saveDb(db);
+          render("bitacora");
+        };
+      }
+      const phaseSavePickBtn = document.getElementById("phaseSavePick");
+      if(phaseSavePickBtn){
+        phaseSavePickBtn.onclick = ()=>{
+          const out = document.getElementById("phaseOut");
+          const selectedId = document.getElementById("phaseCampaignSelect")?.value || selectedCampaignId;
+          const campaign = st.phaseMode.campaigns.find((camp)=>camp.id===selectedId) || st.phaseMode.campaigns.find((camp)=>camp.status==="active");
+          if(!campaign){
+            if(out) out.textContent = "❌ Crea o selecciona una campaña primero.";
+            return;
+          }
+          if(campaign.status !== "active"){
+            if(out) out.textContent = "❌ La campaña seleccionada no está activa.";
+            return;
+          }
+          const odds = Math.max(1.01, Number(document.getElementById("phaseOdds")?.value) || 0);
+          if(!(odds>1)){
+            if(out) out.textContent = "❌ Cuota inválida.";
+            return;
+          }
+          const manualStakeRaw = Number(document.getElementById("phaseManualStake")?.value);
+          const manualStake = Number.isFinite(manualStakeRaw) && manualStakeRaw > 0 ? manualStakeRaw : null;
+          const result = document.getElementById("phaseResult")?.value === "loss" ? "loss" : "win";
+          const phase = campaign.currentPhase;
+          const pickNumber = campaign.currentPick;
+          campaign.picks.push({
+            id: uid("phase_pick"),
+            date: new Date().toISOString(),
+            league: pickFirstString(document.getElementById("phaseLeague")?.value, "Sin liga") || "Sin liga",
+            match: pickFirstString(document.getElementById("phaseMatch")?.value, "Partido sin definir") || "Partido sin definir",
+            market: pickFirstString(document.getElementById("phaseMarket")?.value, "Mercado") || "Mercado",
+            selection: pickFirstString(document.getElementById("phaseSelection")?.value, "Selección") || "Selección",
+            odds,
+            autoStake: campaign.bankroll,
+            manualStake,
+            result,
+            notes: "",
+            phase,
+            pickNumber,
+            narrativeScore: clamp(Number(document.getElementById("phaseNarrative")?.value) || 0, 0, 100),
+            emotionalFlag: !!document.getElementById("phaseEmotional")?.checked,
+            marketConsistent: !!document.getElementById("phaseMarketConsistent")?.checked
+          });
+          const recalculated = recomputePhaseCampaign(campaign);
+          const idx = st.phaseMode.campaigns.findIndex((camp)=>camp.id===campaign.id);
+          if(idx>=0) st.phaseMode.campaigns[idx] = recalculated;
+          st.phaseMode.selectedCampaignId = campaign.id;
+          db.bitacora.phaseMode = st.phaseMode;
+          persistPhaseMode();
+          saveDb(db);
+          if(out) out.textContent = recalculated.status === "failed"
+            ? "⛔ Campaña terminada por pérdida."
+            : (recalculated.status === "completed" ? "🏁 Campaña completada." : `✅ Pick guardado. Bankroll S/${recalculated.bankroll.toFixed(2)}`);
+          setTimeout(()=>render("bitacora"), 180);
+        };
+      }
+
+      content.querySelectorAll("[data-phase-pick]").forEach((btn)=>{
+        btn.onclick = ()=>{
+          const pickId = btn.getAttribute("data-phase-pick");
+          const selectedId = document.getElementById("phaseCampaignSelect")?.value || selectedCampaignId;
+          const campaign = st.phaseMode.campaigns.find((camp)=>camp.id===selectedId) || st.phaseMode.campaigns[0];
+          const pick = campaign?.picks?.find((row)=>row.id===pickId);
+          if(!campaign || !pick) return;
+          const backdrop = document.createElement("div");
+          backdrop.className = "fl-modal-backdrop";
+          const usedStake = pick.manualStake != null ? pick.manualStake : pick.autoStake;
+          backdrop.innerHTML = `
+            <div class="fl-modal" style="max-width:680px;">
+              <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:10px;"><div><div class="fl-modal-title">Detalle pick · ${campaign.id.slice(-6)}</div><div class="fl-mini">Modal Modo Fases</div></div><button class="fl-btn" id="phasePickClose">Cerrar</button></div>
+              <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;">
+                <div class="fl-card" style="margin:0;padding:8px;"><div class="fl-mini">Fecha</div><div>${(pick.date||"").replace("T"," ").slice(0,16)}</div></div>
+                <div class="fl-card" style="margin:0;padding:8px;"><div class="fl-mini">Liga / Partido</div><div>${pick.league}<br/>${pick.match}</div></div>
+                <div class="fl-card" style="margin:0;padding:8px;"><div class="fl-mini">Mercado</div><div>${pick.market} · ${pick.selection}</div></div>
+                <div class="fl-card" style="margin:0;padding:8px;"><div class="fl-mini">Resultado</div><div>${pick.result}</div></div>
+              </div>
+              <div class="fl-card" style="margin-top:10px;padding:10px;background:#0d1117;border:1px solid #2d333b;">
+                <div style="font-weight:700;">Evolución bankroll</div>
+                <div class="fl-mini" style="margin-top:6px;">Stake auto: S/${pick.autoStake.toFixed(2)} · Stake usado: S/${usedStake.toFixed(2)} · Cuota: ${pick.odds.toFixed(2)} · Bankroll resultante: S/${pick.bankrollAfter.toFixed(2)}</div>
+                <div class="fl-mini" style="margin-top:6px;">Explicación matemática: ${pick.result==="win" ? `bankroll = stake × cuota = ${usedStake.toFixed(2)} × ${pick.odds.toFixed(2)} = ${pick.bankrollAfter.toFixed(2)}` : `al perder se liquida la campaña: bankroll = 0`}</div>
+              </div>
+            </div>
+          `;
+          document.body.appendChild(backdrop);
+          const close = ()=>backdrop.remove();
+          backdrop.addEventListener("click", (ev)=>{ if(ev.target===backdrop) close(); });
+          backdrop.querySelector("#phasePickClose").onclick = close;
+        };
       });
       return;
     }
