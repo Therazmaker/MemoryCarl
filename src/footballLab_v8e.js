@@ -16,6 +16,88 @@ import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./foo
 import { buildBitacoraPerformanceLab, normalizePickRecord } from "./footballlab/bitacora_performance.js";
 import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calcPhaseMetrics, phaseAlertFlags, buildPhasePostAnalysis } from "./footballlab/bitacora_phase_mode.js";
 
+// ─── Claude window.storage shim ──────────────────────────────────────────────
+// window.storage is async but the app uses localStorage synchronously.
+// This shim keeps a synchronous in-memory cache populated from window.storage
+// on startup, and flushes every write back to window.storage in the background.
+(function installLocalStorageShim(){
+  if(window.__localStorageShimInstalled) return;
+  window.__localStorageShimInstalled = true;
+
+  // Only patch if window.storage is available (Claude.ai artifact environment)
+  if(typeof window.storage === "undefined") return;
+
+  const cache = new Map();
+  let shimReady = false;
+
+  // Preload all persisted keys from window.storage into cache synchronously
+  // (runs async, but loadDb() is called after DOMContentLoaded so there's time)
+  window.__storageShimReady = (async ()=>{
+    try {
+      const listed = await window.storage.list("");
+      const keys = listed?.keys || [];
+      await Promise.all(keys.map(async (k)=>{
+        try {
+          const res = await window.storage.get(k);
+          if(res && res.value != null) cache.set(k, res.value);
+        } catch(_){}
+      }));
+    } catch(_){}
+    shimReady = true;
+  })();
+
+  const _realLS = window.localStorage;
+
+  const shimLS = {
+    getItem(key){
+      if(cache.has(key)) return cache.get(key);
+      // fallback to real localStorage if shim not ready yet
+      try { return _realLS ? _realLS.getItem(key) : null; } catch(_){ return null; }
+    },
+    setItem(key, value){
+      cache.set(key, value);
+      // Async flush to window.storage (fire and forget)
+      try { window.storage.set(key, value).catch(()=>{}); } catch(_){}
+      // Also mirror to real localStorage as fallback (may fail silently)
+      try { if(_realLS) _realLS.setItem(key, value); } catch(_){}
+    },
+    removeItem(key){
+      cache.delete(key);
+      try { window.storage.delete(key).catch(()=>{}); } catch(_){}
+      try { if(_realLS) _realLS.removeItem(key); } catch(_){}
+    },
+    get length(){
+      return cache.size;
+    },
+    key(i){
+      return [...cache.keys()][i] ?? null;
+    },
+    clear(){
+      [...cache.keys()].forEach(k=>{
+        try { window.storage.delete(k).catch(()=>{}); } catch(_){}
+      });
+      cache.clear();
+      try { if(_realLS) _realLS.clear(); } catch(_){}
+    }
+  };
+
+  // Override localStorage on window
+  try {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get(){ return shimLS; }
+    });
+  } catch(_){
+    // If we can't redefine, at least patch the methods directly
+    try {
+      window.localStorage.getItem  = shimLS.getItem.bind(shimLS);
+      window.localStorage.setItem  = shimLS.setItem.bind(shimLS);
+      window.localStorage.removeItem = shimLS.removeItem.bind(shimLS);
+    } catch(__) {}
+  }
+})();
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function initFootballLab(){
   if(window.__footballLabInitialized && window.__FOOTBALL_LAB__?.open){
     return window.__FOOTBALL_LAB__;
@@ -20063,10 +20145,16 @@ function computeTeamIntelligencePanel(db, teamId){
 
 window.initFootballLab = initFootballLab;
 
-try{
-  if(!window.__FOOTBALL_LAB__?.open){
-    initFootballLab();
+// Wait for the storage shim to preload all persisted keys before rendering
+(async ()=>{
+  try {
+    if(window.__storageShimReady) await window.__storageShimReady;
+  } catch(_){}
+  try{
+    if(!window.__FOOTBALL_LAB__?.open){
+      initFootballLab();
+    }
+  }catch(e){
+    console.warn("FootballLab auto-init failed", e);
   }
-}catch(e){
-  console.warn("FootballLab auto-init failed", e);
-}
+})();
