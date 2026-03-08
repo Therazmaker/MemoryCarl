@@ -13207,7 +13207,7 @@ function computeTeamIntelligencePanel(db, teamId){
                 <span class="b2x-sidebar-icon">📥</span>
                 Importar Matchpack
               </div>
-              <input id="b2ImportMatchpackFile" type="file" accept="application/json,.json" style="display:none;" />
+              <input id="b2ImportMatchpackFile" type="file" accept="application/json,.json" multiple style="display:none;" />
               <span id="b2ImportStatus" class="b2x-sidebar-item" style="font-size:10px;padding:4px 16px;color:var(--b2-green);"></span>
 
               <div class="b2x-sidebar-section" style="margin-top:8px;">Captura</div>
@@ -13790,74 +13790,160 @@ function computeTeamIntelligencePanel(db, teamId){
           shapeInput: document.getElementById('b2LineupShape')
         });
       });
+      const draftBrainV2RowFromMatchpack = ({ matchpack, fallbackTeamId = "" } = {})=>{
+        const currentTeamId = fallbackTeamId || "";
+        const currentTeamName = db.teams.find((t)=>t.id===currentTeamId)?.name || "";
+        const focus = inferFocusTeamFromMatchpack(matchpack, currentTeamName);
+        const warnings = [];
+
+        const allTeamsByNorm = new Map(db.teams.map((t)=>[normalizeTeamName(t.name), t.id]));
+        const homeName = String(matchpack?.match?.home || "").trim();
+        const awayName = String(matchpack?.match?.away || "").trim();
+        const focusName = focus.side === "away" ? awayName : homeName;
+        const rivalName = focus.side === "away" ? homeName : awayName;
+
+        let teamId = currentTeamId;
+        if(!teamId){
+          const inferredTeamId = allTeamsByNorm.get(normalizeTeamName(focusName));
+          if(inferredTeamId){
+            teamId = inferredTeamId;
+          }else{
+            warnings.push(`No se encontró equipo local para "${focusName}"; partido omitido.`);
+          }
+        }
+
+        const dateValue = matchpackDateToInput(matchpack?.match?.date || matchpack?.match?.kickoff || "");
+        if(!dateValue) warnings.push('Fecha no reconocida; se usará hoy.');
+
+        const statsTxt = buildStatsTextareaFromMatchpack(matchpack, focus.side);
+        if(!statsTxt) warnings.push('Sin stats.normalized utilizables; stats vacío.');
+
+        const narrativeTxt = buildNarrativeTextareaFromMatchpack(matchpack);
+        if(!narrativeTxt) warnings.push('Sin commentary.items relevantes; relato vacío.');
+
+        const xi = buildXiStringFromMatchpack(matchpack);
+        if(!xi) warnings.push('Sin lineup.players; XI vacío.');
+
+        const lineupShape = buildLineupShapeFromMatchpack(matchpack);
+        const score = buildScoreForForm(matchpack, focus.side);
+
+        const competition = String(matchpack?.match?.competition || "").trim();
+        let leagueId = document.getElementById('b2League')?.value || selectedLeagueId || "";
+        if(competition){
+          const hitLeague = db.leagues.find((l)=>normalizeTeamName(l?.name || "")===normalizeTeamName(competition));
+          if(hitLeague){
+            leagueId = hitLeague.id;
+          }else{
+            warnings.push(`Liga "${competition}" no coincide con una liga existente.`);
+          }
+        }
+
+        return {
+          teamId,
+          teamName: db.teams.find((t)=>t.id===teamId)?.name || "Local",
+          leagueId,
+          date: dateValue || new Date().toISOString().slice(0,10),
+          opponent: rivalName,
+          score,
+          statsRaw: statsTxt,
+          narrative: narrativeTxt,
+          lineup: parseLineupList(xi || ''),
+          lineupShape,
+          warnings
+        };
+      };
+
+      const applyDraftToBrainV2CaptureForm = (draft)=>{
+        if(!draft) return;
+        if(draft.teamId) document.getElementById('b2Team').value = draft.teamId;
+        if(draft.leagueId) document.getElementById('b2League').value = draft.leagueId;
+        if(draft.date) document.getElementById('b2Date').value = draft.date;
+        if(draft.opponent) document.getElementById('b2Opponent').value = draft.opponent;
+        if(draft.score) document.getElementById('b2Score').value = draft.score;
+        if(draft.statsRaw) document.getElementById('b2Stats').value = draft.statsRaw;
+        if(draft.narrative) document.getElementById('b2Narrative').value = draft.narrative;
+        if(Array.isArray(draft.lineup) && draft.lineup.length) document.getElementById('b2Lineup').value = draft.lineup.join(', ');
+        if(draft.lineupShape) document.getElementById('b2LineupShape').value = JSON.stringify(draft.lineupShape);
+      };
+
       document.getElementById('b2ImportMatchpackFile')?.addEventListener('change', async (ev)=>{
         const status = document.getElementById('b2ImportStatus');
-        const file = ev?.target?.files?.[0];
-        if(!file) return;
+        const files = Array.from(ev?.target?.files || []);
+        if(!files.length) return;
         try{
-          const raw = await file.text();
-          const matchpack = parseFootballLabMatchpack(raw);
-          const currentTeamId = document.getElementById('b2Team')?.value || "";
-          const currentTeamName = db.teams.find((t)=>t.id===currentTeamId)?.name || "";
-          const focus = inferFocusTeamFromMatchpack(matchpack, currentTeamName);
-          const warnings = [];
+          if(files.length === 1){
+            const raw = await files[0].text();
+            const matchpack = parseFootballLabMatchpack(raw);
+            const draft = draftBrainV2RowFromMatchpack({
+              matchpack,
+              fallbackTeamId: document.getElementById('b2Team')?.value || ""
+            });
+            applyDraftToBrainV2CaptureForm(draft);
+            const autoText = draft.warnings.length
+              ? `✅ JSON importado con avisos: ${draft.warnings.join(' ')}`
+              : '✅ JSON importado correctamente. Revisa y edita antes de guardar.';
+            if(status) status.textContent = autoText;
+          }else{
+            let imported = 0;
+            let skipped = 0;
+            const warnings = [];
+            const errors = [];
+            let lastTeamId = document.getElementById('b2Team')?.value || "";
 
-          const allTeamsByNorm = new Map(db.teams.map((t)=>[normalizeTeamName(t.name), t.id]));
-          const homeName = String(matchpack?.match?.home || "").trim();
-          const awayName = String(matchpack?.match?.away || "").trim();
-          const focusName = focus.side === "away" ? awayName : homeName;
-          const rivalName = focus.side === "away" ? homeName : awayName;
-
-          const teamSelect = document.getElementById('b2Team');
-          const teamAlreadyChosen = !!currentTeamId;
-          if(!teamAlreadyChosen){
-            const inferredTeamId = allTeamsByNorm.get(normalizeTeamName(focusName));
-            if(inferredTeamId){
-              teamSelect.value = inferredTeamId;
-            }else{
-              warnings.push(`No se encontró equipo local para "${focusName}"; se mantiene selección actual.`);
+            for(const file of files){
+              try{
+                const raw = await file.text();
+                const matchpack = parseFootballLabMatchpack(raw);
+                const draft = draftBrainV2RowFromMatchpack({ matchpack, fallbackTeamId: "" });
+                warnings.push(...draft.warnings.map((w)=>`${file.name}: ${w}`));
+                if(!draft.teamId){
+                  skipped += 1;
+                  continue;
+                }
+                const row = {
+                  id: uid('b2m'),
+                  teamId: draft.teamId,
+                  teamName: draft.teamName,
+                  leagueId: draft.leagueId,
+                  date: draft.date,
+                  opponent: draft.opponent,
+                  score: (draft.score || '0-0').trim(),
+                  statsRaw: (draft.statsRaw || '').trim(),
+                  narrative: (draft.narrative || '').trim(),
+                  lineup: draft.lineup,
+                  lineupShape: draft.lineupShape,
+                  createdAt: Date.now()
+                };
+                row.summary = buildBrainV2MatchSummary({ row, teamName: row.teamName, opponentName: row.opponent || "Rival" });
+                brainV2.memories[row.teamId] ||= [];
+                brainV2.memories[row.teamId].push(row);
+                indexMemoryMatchIntoTeamProfiles(brainV2, row, {
+                  includeOpponent: true,
+                  primaryTeamId: row.teamId,
+                  primaryTeamName: row.teamName,
+                  opponentTeamName: row.opponent || ''
+                });
+                imported += 1;
+                lastTeamId = row.teamId;
+              }catch(err){
+                skipped += 1;
+                errors.push(`${file.name}: ${String(err?.message || err)}`);
+              }
+            }
+            if(imported){
+              saveBrainV2(brainV2);
+              render('brainv2', { leagueId: selectedLeagueId, teamId: lastTeamId || selectedTeamId });
+            }
+            const resumeWarnings = warnings.slice(0, 3).join(' ');
+            const resumeErrors = errors.slice(0, 2).join(' · ');
+            const extraWarnings = warnings.length > 3 ? ` (+${warnings.length - 3} avisos)` : '';
+            const extraErrors = errors.length > 2 ? ` (+${errors.length - 2} errores)` : '';
+            if(status){
+              status.textContent = imported
+                ? `✅ Importación por lotes: ${imported}/${files.length} JSON guardados.${skipped ? ` Omitidos: ${skipped}.` : ''} ${resumeWarnings}${extraWarnings}${resumeErrors ? ` ${resumeErrors}${extraErrors}` : ''}`.trim()
+                : `❌ No se pudo importar ningún JSON. ${resumeErrors || 'Revisa el formato de los archivos.'}`;
             }
           }
-
-          const dateValue = matchpackDateToInput(matchpack?.match?.date || matchpack?.match?.kickoff || "");
-          if(dateValue) document.getElementById('b2Date').value = dateValue;
-          else warnings.push('Fecha no reconocida; se conserva valor actual.');
-
-          if(rivalName) document.getElementById('b2Opponent').value = rivalName;
-
-          const score = buildScoreForForm(matchpack, focus.side);
-          if(score) document.getElementById('b2Score').value = score;
-
-          const statsTxt = buildStatsTextareaFromMatchpack(matchpack, focus.side);
-          if(statsTxt) document.getElementById('b2Stats').value = statsTxt;
-          else warnings.push('Sin stats.normalized utilizables; campo stats no se tocó.');
-
-          const narrativeTxt = buildNarrativeTextareaFromMatchpack(matchpack);
-          if(narrativeTxt) document.getElementById('b2Narrative').value = narrativeTxt;
-          else warnings.push('Sin commentary.items relevantes; relato no se tocó.');
-
-          const xi = buildXiStringFromMatchpack(matchpack);
-          if(xi) document.getElementById('b2Lineup').value = xi;
-          else warnings.push('Sin lineup.players; XI no se tocó.');
-
-          const lineupShape = buildLineupShapeFromMatchpack(matchpack);
-          if(lineupShape) document.getElementById('b2LineupShape').value = JSON.stringify(lineupShape);
-
-          const competition = String(matchpack?.match?.competition || "").trim();
-          if(competition){
-            const hitLeague = db.leagues.find((l)=>normalizeTeamName(l?.name || "")===normalizeTeamName(competition));
-            if(hitLeague){
-              const leagueSelect = document.getElementById('b2League');
-              leagueSelect.value = hitLeague.id;
-            }else{
-              warnings.push(`Liga "${competition}" no coincide con una liga existente.`);
-            }
-          }
-
-          const autoText = warnings.length
-            ? `✅ JSON importado con avisos: ${warnings.join(' ')}`
-            : '✅ JSON importado correctamente. Revisa y edita antes de guardar.';
-          if(status) status.textContent = autoText;
         }catch(err){
           if(status) status.textContent = `❌ Error al importar: ${String(err?.message || err)}`;
         }finally{
