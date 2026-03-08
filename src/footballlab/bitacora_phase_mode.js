@@ -4,6 +4,27 @@ const DEFAULT_PHASES = [
   { id: 3, name: "FASE 3", picks: 4, minOdds: 1.35, maxOdds: 1.45 }
 ];
 
+const RESULT_VALUES = ["win", "loss", "void", "pending"];
+
+function buildCampaignSteps(phases = DEFAULT_PHASES){
+  const defs = Array.isArray(phases) && phases.length ? phases : DEFAULT_PHASES;
+  const steps = [];
+  let order = 1;
+  defs.forEach((phase)=>{
+    const total = Math.max(1, Number(phase?.picks) || 1);
+    for(let pickNumber=1; pickNumber<=total; pickNumber+=1){
+      steps.push({
+        order,
+        phase: Number(phase.id) || 1,
+        pickNumber,
+        label: `F${Number(phase.id) || 1} Paso ${pickNumber}/${total}`
+      });
+      order += 1;
+    }
+  });
+  return steps;
+}
+
 export function ensurePhaseModeState(raw){
   const base = {
     config: { phases: DEFAULT_PHASES },
@@ -41,8 +62,14 @@ export function ensurePhaseCampaign(raw, phases = DEFAULT_PHASES){
     currentPick: 1,
     status: raw?.status === "failed" || raw?.status === "completed" ? raw.status : "active",
     picks,
-    phases: phases.map(p=>({ ...p }))
+    phases: phases.map(p=>({ ...p })),
+    allowVoidAdvance: !!raw?.allowVoidAdvance,
+    failedAt: raw?.failedAt || null,
+    steps: buildCampaignSteps(phases),
+    stepsCompleted: 0,
+    lastResolvedStep: null
   };
+  if(!firstPhase) camp.currentPhase = 1;
   return recomputePhaseCampaign(camp);
 }
 
@@ -57,8 +84,9 @@ function ensurePhasePick(raw){
     odds: Math.max(1.01, Number(raw?.odds) || 1.01),
     autoStake: Math.max(0, Number(raw?.autoStake) || 0),
     manualStake: raw?.manualStake == null ? null : Math.max(0, Number(raw.manualStake) || 0),
-    result: ["win","loss"].includes(raw?.result) ? raw.result : "loss",
+    result: RESULT_VALUES.includes(raw?.result) ? raw.result : "loss",
     profit: Number(raw?.profit) || 0,
+    bankrollBefore: Math.max(0, Number(raw?.bankrollBefore) || 0),
     bankrollAfter: Math.max(0, Number(raw?.bankrollAfter) || 0),
     notes: String(raw?.notes || ""),
     phase: Math.max(1, Number(raw?.phase) || 1),
@@ -71,43 +99,75 @@ function ensurePhasePick(raw){
 
 export function recomputePhaseCampaign(campaign){
   const camp = { ...campaign, phases: (campaign.phases || DEFAULT_PHASES).map(p=>({ ...p })) };
+  camp.steps = buildCampaignSteps(camp.phases);
+  camp.allowVoidAdvance = !!camp.allowVoidAdvance;
   let bankroll = Math.max(0.5, Number(camp.initialUnit) || 1);
   let status = "active";
-  let phaseCursor = 1;
-  let pickCursor = 1;
-  camp.picks = (camp.picks || []).map((pickRaw)=>{
+  let stepCursor = 0;
+  let failedAt = null;
+  let lastResolvedStep = null;
+  let blockedByPending = false;
+  camp.picks = (camp.picks || []).map((pickRaw, idx)=>{
     const pick = ensurePhasePick(pickRaw);
-    const phaseDef = camp.phases[pick.phase - 1] || camp.phases[camp.phases.length - 1] || DEFAULT_PHASES[0];
+    const currentStep = camp.steps[Math.min(stepCursor, camp.steps.length - 1)] || camp.steps[camp.steps.length - 1];
+    if(!currentStep || status !== "active" || blockedByPending){
+      pick.invalidSequence = true;
+      return pick;
+    }
+    pick.phase = currentStep.phase;
+    pick.pickNumber = currentStep.pickNumber;
+    pick.sequence = idx + 1;
+    pick.invalidSequence = false;
+    pick.bankrollBefore = bankroll;
     pick.autoStake = bankroll;
-    const usedStake = pick.manualStake != null ? pick.manualStake : pick.autoStake;
+    pick.manualStake = null;
+    const usedStake = pick.autoStake;
     if(pick.result === "win"){
       bankroll = usedStake * pick.odds;
       pick.profit = bankroll - usedStake;
       pick.bankrollAfter = bankroll;
-    }else{
+      stepCursor += 1;
+      lastResolvedStep = currentStep.order;
+    }else if(pick.result === "loss"){
       bankroll = 0;
       pick.profit = -usedStake;
       pick.bankrollAfter = 0;
       status = "failed";
-    }
-    phaseCursor = pick.phase;
-    pickCursor = pick.pickNumber + 1;
-    if(pick.pickNumber >= phaseDef.picks){
-      phaseCursor = pick.phase + 1;
-      pickCursor = 1;
+      failedAt = { phase: currentStep.phase, pickNumber: currentStep.pickNumber, stepOrder: currentStep.order };
+      lastResolvedStep = currentStep.order;
+    }else if(pick.result === "void"){
+      bankroll = usedStake;
+      pick.profit = 0;
+      pick.bankrollAfter = bankroll;
+      if(camp.allowVoidAdvance){
+        stepCursor += 1;
+        lastResolvedStep = currentStep.order;
+      }
+    }else{
+      bankroll = usedStake;
+      pick.profit = 0;
+      pick.bankrollAfter = bankroll;
+      blockedByPending = true;
     }
     return pick;
   });
-  const totalPhases = camp.phases.length;
-  if(status === "active" && phaseCursor > totalPhases){
+  const nextStep = camp.steps[Math.min(stepCursor, camp.steps.length - 1)] || null;
+  if(status === "active" && stepCursor >= camp.steps.length){
     status = "completed";
-    phaseCursor = totalPhases;
-    pickCursor = camp.phases[totalPhases - 1]?.picks || 1;
   }
+  const totalPhases = camp.phases.length;
   camp.bankroll = bankroll;
   camp.status = status;
-  camp.currentPhase = Math.max(1, Math.min(totalPhases, phaseCursor));
-  camp.currentPick = Math.max(1, pickCursor);
+  camp.currentPhase = status === "completed"
+    ? totalPhases
+    : Math.max(1, Math.min(totalPhases, nextStep?.phase || totalPhases));
+  camp.currentPick = status === "completed"
+    ? (camp.phases[totalPhases - 1]?.picks || 1)
+    : Math.max(1, nextStep?.pickNumber || 1);
+  camp.failedAt = failedAt;
+  camp.stepsCompleted = Math.max(0, Math.min(camp.steps.length, stepCursor));
+  camp.lastResolvedStep = lastResolvedStep;
+  camp.blockedByPending = blockedByPending;
   return camp;
 }
 
@@ -131,7 +191,7 @@ export function calcPhaseMetrics(campaign){
   let streak = 0;
   for(const pick of campaign.picks || []){
     if(pick.result === "win") streak += 1;
-    else streak = 0;
+    else if(pick.result === "loss") streak = 0;
   }
   return { profit, roi, multiplier, growth, impliedAcc, cleanStreak: streak };
 }
@@ -142,7 +202,8 @@ export function phaseAlertFlags(campaign){
   if(!last) return flags;
   const phase = campaign.phases[last.phase - 1];
   if(phase && (last.odds < phase.minOdds || last.odds > phase.maxOdds)) flags.push("Cuota fuera del rango recomendado");
-  if(last.manualStake != null && Math.abs(last.manualStake - last.autoStake) > 0.0001) flags.push("Stake manual alterado");
+  if(last.result === "pending") flags.push("Pick pendiente: la campaña no puede avanzar");
+  if(last.result === "void" && !campaign.allowVoidAdvance) flags.push("Pick void: mismo paso hasta resolver");
   if((last.narrativeScore || 0) < 55) flags.push("Narrativa débil");
   if(last.emotionalFlag) flags.push("Pick emocional");
   if(last.marketConsistent === false) flags.push("Mercado inconsistente");
