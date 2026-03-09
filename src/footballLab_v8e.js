@@ -12263,8 +12263,8 @@ RESPONDE SOLO CON JSON usando este schema:
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","radar","brainv2","momentum","bitacora","market","halftime"];
-    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t === 'radar' ? 'Radar del Día' : t === 'halftime' ? '⚡ MEDIO TIEMPO' : t.toUpperCase()}</button>`).join("");
+    const tabs = ["home","liga","tracker","versus","radar","champions","brainv2","momentum","bitacora","market","halftime"];
+    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t === 'radar' ? 'Radar del Día' : t === 'champions' ? '🏆 CHAMPIONS' : t === 'halftime' ? '⚡ MEDIO TIEMPO' : t.toUpperCase()}</button>`).join("");
     const wrapClass = view === "brainv2" ? "fl-wrap fl-wrap-brainv2" : "fl-wrap";
 
     app.innerHTML = `
@@ -13856,7 +13856,8 @@ RESPONDE SOLO CON JSON usando este schema:
       return;
     }
 
-    if(view==="radar"){
+    if(view==="radar" || view==="champions"){
+      const championsOnly = view === "champions";
       const brainV2 = loadBrainV2();
       // Ensure radar historic structure
       db.radar ||= { matches: [], historic: [] };
@@ -13864,7 +13865,10 @@ RESPONDE SOLO CON JSON usando este schema:
       db.radar.historic = Array.isArray(db.radar.historic) ? db.radar.historic : [];
 
       radarState.matches = buildRadarMatches({ db, payload, brainV2 });
-      const sorted = sortRadarMatches(radarState.matches, radarState.sortBy || 'studyScore');
+      const scopedMatches = championsOnly
+        ? radarState.matches.filter((m)=>m?.competitionMode === 'ucl_knockout' || /champions|uefa\s*champions|ucl/i.test(String(m?.league || '')))
+        : radarState.matches;
+      const sorted = sortRadarMatches(scopedMatches, radarState.sortBy || 'studyScore');
 
       const leagues = db.leagues.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), 'es', { sensitivity:'base' }));
       const fallbackLeagueId = leagues[0]?.id || '';
@@ -13891,8 +13895,8 @@ RESPONDE SOLO CON JSON usando este schema:
       const matchCards = sorted.length === 0 ? `
         <div class="rdx-empty">
           <div class="rdx-empty-icon">📡</div>
-          <div>No hay partidos registrados hoy.</div>
-          <div style="margin-top:4px;font-size:11px;">Usa el formulario de arriba para agregar partidos manualmente.</div>
+          <div>${championsOnly ? 'No hay partidos de Champions detectados hoy.' : 'No hay partidos registrados hoy.'}</div>
+          <div style="margin-top:4px;font-size:11px;">${championsOnly ? 'Carga partidos con liga UEFA Champions League y fase eliminatoria para activar este panel.' : 'Usa el formulario de arriba para agregar partidos manualmente.'}</div>
         </div>
       ` : sorted.map((m)=>{
         const oddsStr = [m.odds?.home, m.odds?.draw, m.odds?.away]
@@ -14277,7 +14281,7 @@ RESPONDE SOLO CON JSON usando este schema:
           <!-- LIST HEADER -->
           <div class="rdx-list-header">
             <div>
-              <div class="rdx-list-title">📡 Radar del Día <span style="font-weight:400;font-size:13px;color:#6e7681;">(${sorted.length} partido${sorted.length!==1?'s':''})</span></div>
+              <div class="rdx-list-title">${championsOnly ? '🏆 Champions Radar' : '📡 Radar del Día'} <span style="font-weight:400;font-size:13px;color:#6e7681;">(${sorted.length} partido${sorted.length!==1?'s':''})</span></div>
               <div style="font-size:11px;color:#6e7681;margin-top:2px;">FSI + RSI detectan si los equipos están realmente bien — no si son favoritos en papel.</div>
               <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                 <span style="font-size:11px;background:rgba(31,111,235,0.12);border:1px solid rgba(31,111,235,0.35);color:#58a6ff;padding:2px 8px;border-radius:4px;cursor:default;" title="Número de partidos usados para calcular CSI y FSI de cada equipo">📊 N = ${Number(db.versus?.sampleSize)||20} partidos</span>
