@@ -118,6 +118,9 @@ export function initFootballLab(){
   const TEAM_MODELS_KEY = "FL_TEAMMODELS";
   const TEAM_BRAIN_FEATURES_KEY = "FL_TEAM_BRAIN_FEATURES";
   const BRAIN_V2_KEY = "FL_BRAIN_V2";
+  const BRAIN_V2_META_KEY = "FL_BRAIN_V2_META";
+  const BRAIN_V2_DB_NAME = "FootballLabBrainV2";
+  const BRAIN_V2_DB_VERSION = 1;
   const RADAR_TRAINING_DB_KEY = SCHEMA_TRAINING_KEY; // "FL_RADAR_TRAINING"
   const GPE_TAG_ON = 0.25;
   const GPE_TOP_TAGS = 3;
@@ -126,6 +129,7 @@ export function initFootballLab(){
   const GIE_COMBO_TRAINED_N = 30;
   const GIE_COMBO_STRONG_N = 60;
   const hybridBrain = new HybridBrainService();
+  let brainV2HydrationPromise = null;
   let tfLoadPromise = null;
   const radarState = {
     matches: [],
@@ -243,9 +247,7 @@ export function initFootballLab(){
   }
   // ───────────────────────────────────────────────────────────────────────────
 
-  function loadBrainV2(){
-    const raw = localStorage.getItem(BRAIN_V2_KEY);
-    const parsed = safeParseJSON(raw, {});
+  function normalizeBrainV2LoadedState(parsed = {}){
     const normalized = {
       memories: parsed && typeof parsed === "object" && parsed.memories && typeof parsed.memories === "object"
         ? parsed.memories
@@ -259,6 +261,136 @@ export function initFootballLab(){
     };
     normalizeTeamProfilesState(normalized, { rebuildIfMissing: true });
     return normalized;
+  }
+
+  function openBrainV2DB(){
+    return new Promise((resolve, reject)=>{
+      if(typeof indexedDB === "undefined"){
+        reject(new Error("No se pudo abrir IndexedDB"));
+        return;
+      }
+      const req = indexedDB.open(BRAIN_V2_DB_NAME, BRAIN_V2_DB_VERSION);
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+        if(!db.objectStoreNames.contains("memories")) db.createObjectStore("memories", { keyPath: "id" });
+        if(!db.objectStoreNames.contains("teamProfiles")) db.createObjectStore("teamProfiles", { keyPath: "key" });
+        if(!db.objectStoreNames.contains("meta")) db.createObjectStore("meta", { keyPath: "key" });
+      };
+      req.onsuccess = ()=>{ console.info("[BrainV2/IDB] DB opened"); resolve(req.result); };
+      req.onerror = ()=>reject(req.error || new Error("No se pudo abrir IndexedDB"));
+    });
+  }
+
+  async function withBrainV2Store(storeName, mode, callback){
+    const db = await openBrainV2DB();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(storeName, mode);
+      const store = tx.objectStore(storeName);
+      const req = callback(store);
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error || tx.error);
+    }).finally(()=>db.close());
+  }
+
+  async function idbPut(storeName, value, key){ return withBrainV2Store(storeName, "readwrite", (s)=>s.put(value, key)); }
+  async function idbGet(storeName, key){ return withBrainV2Store(storeName, "readonly", (s)=>s.get(key)); }
+  async function idbGetAll(storeName){ return withBrainV2Store(storeName, "readonly", (s)=>s.getAll()); }
+  async function idbDelete(storeName, key){ return withBrainV2Store(storeName, "readwrite", (s)=>s.delete(key)); }
+  async function idbClear(storeName){ return withBrainV2Store(storeName, "readwrite", (s)=>s.clear()); }
+
+  async function persistBrainV2HeavyToIndexedDB(state){
+    const safeState = normalizeBrainV2LoadedState(state);
+    try{
+      await idbClear("memories");
+      for(const rows of Object.values(safeState.memories || {})){
+        if(!Array.isArray(rows)) continue;
+        for(const row of rows){
+          const normalized = normalizeBrainMemoryEntry(row, row?.teamId || "");
+          if(normalized) await idbPut("memories", { ...normalized, updatedAt: Date.now() });
+        }
+      }
+      await idbClear("teamProfiles");
+      for(const [key, profile] of Object.entries(safeState.teamProfiles || {})){
+        if(!profile || typeof profile !== "object") continue;
+        await idbPut("teamProfiles", { ...profile, key, updatedAt: Date.now() });
+      }
+      const counters = {
+        teams: Object.keys(safeState.teamProfiles || {}).length,
+        matches: Object.values(safeState.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0)
+      };
+      const meta = { key: "brainMeta", version: 2, storage: "indexeddb", counters, updatedAt: Date.now() };
+      await idbPut("meta", meta);
+      localStorage.setItem(BRAIN_V2_META_KEY, JSON.stringify(meta));
+      console.info("[BrainV2/IDB] Migration completed");
+    }catch(err){
+      console.error("[BrainV2/IDB] Failed to write", err);
+      throw err;
+    }
+  }
+
+  async function migrateBrainV2LocalStorageToIndexedDB(){
+    const meta = safeParseJSON(localStorage.getItem(BRAIN_V2_META_KEY), {});
+    if(meta?.migratedFromLegacy) return;
+    const legacy = safeParseJSON(localStorage.getItem(BRAIN_V2_KEY), {});
+    if(!legacy || typeof legacy !== "object" || legacy.storage === "indexeddb") return;
+    await persistBrainV2HeavyToIndexedDB(legacy);
+    const compact = {
+      version: 2,
+      storage: "indexeddb",
+      meta: { ...meta, migratedFromLegacy: true, updatedAt: Date.now() },
+      teamProfilesLite: legacy.teamProfiles || {},
+      memories: {}
+    };
+    localStorage.setItem(BRAIN_V2_KEY, JSON.stringify(compact));
+    localStorage.setItem(BRAIN_V2_META_KEY, JSON.stringify({ ...compact.meta, key: "brainMeta" }));
+  }
+
+  async function hydrateBrainV2FromIndexedDB(){
+    try{
+      const memories = await idbGetAll("memories");
+      const teamProfiles = await idbGetAll("teamProfiles");
+      if(!Array.isArray(memories) || !Array.isArray(teamProfiles)) return null;
+      const next = normalizeBrainV2LoadedState({ memories: {}, teamProfiles: {} });
+      memories.forEach((row)=>{
+        const normalized = normalizeBrainMemoryEntry(row, row?.teamId || "");
+        if(!normalized) return;
+        next.memories[normalized.teamId] ||= [];
+        next.memories[normalized.teamId].push(normalized);
+      });
+      teamProfiles.forEach((profile)=>{
+        const key = String(profile?.key || profile?.teamId || "").trim();
+        if(!key) return;
+        next.teamProfiles[key] = profile;
+      });
+      return next;
+    }catch(err){
+      console.error("[BrainV2/IDB] Failed to load", err);
+      return null;
+    }
+  }
+
+  function loadBrainV2(){
+    const raw = localStorage.getItem(BRAIN_V2_KEY);
+    const parsed = safeParseJSON(raw, {});
+    const normalized = normalizeBrainV2LoadedState(parsed);
+    window.FL_BRAIN_V2 = { storage: "indexeddb", meta: safeParseJSON(localStorage.getItem(BRAIN_V2_META_KEY), {}), teamProfilesLite: normalized.teamProfiles, memories: {} };
+    window.__brainV2Cache ||= { currentTeamId: null, memoriesByTeam: new Map(), teamProfiles: null };
+    if(!brainV2HydrationPromise){
+      brainV2HydrationPromise = (async ()=>{
+        try{
+          await migrateBrainV2LocalStorageToIndexedDB();
+          const hydrated = await hydrateBrainV2FromIndexedDB();
+          if(hydrated){
+            window.__brainV2HydratedState = hydrated;
+            window.__brainV2Cache.teamProfiles = hydrated.teamProfiles || {};
+            window.__brainV2Cache.memoriesByTeam = new Map(Object.entries(hydrated.memories || {}));
+          }
+        }catch(err){
+          console.error("[BrainV2/IDB] Failed to hydrate", err);
+        }
+      })();
+    }
+    return window.__brainV2HydratedState || normalized;
   }
 
   function normalizeOrchestratorLearningState(raw){
@@ -660,36 +792,61 @@ export function initFootballLab(){
     normalizeTeamProfilesState(next, { rebuildIfMissing: true });
     next.gpe = buildGlobalPatternEngine(next.memories);
     next.mne = normalizeMneLearningState(next.mne);
-    const payload = JSON.stringify(next);
+    const compact = {
+      version: 2,
+      storage: "indexeddb",
+      teamProfiles: next.teamProfiles || {},
+      memories: {},
+      gpe: next.gpe,
+      mne: next.mne,
+      orchestratorLearning: next.orchestratorLearning || normalizeOrchestratorLearningState(null),
+      updatedAt: Date.now()
+    };
     try{
-      localStorage.setItem(BRAIN_V2_KEY, payload);
-      return next;
+      localStorage.setItem(BRAIN_V2_KEY, JSON.stringify(compact));
+      const counters = {
+        teams: Object.keys(next.teamProfiles || {}).length,
+        matches: Object.values(next.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0)
+      };
+      localStorage.setItem(BRAIN_V2_META_KEY, JSON.stringify({ key: "brainMeta", version: 2, storage: "indexeddb", counters, updatedAt: Date.now() }));
     }catch(err){
       if(!isQuotaExceededError(err)) throw err;
+      console.warn("[BrainV2/IDB] localStorage compact write failed", err);
     }
-
-    try{
-      pruneFootballLabCacheKeys();
-      localStorage.setItem(BRAIN_V2_KEY, payload);
-      return next;
-    }catch(err){
-      if(!isQuotaExceededError(err)) throw err;
-    }
-
-    const compactLimits = [100, 80, 60, 40, 25, 15, 10, 5, 0];
-    for(const limit of compactLimits){
-      try{
-        const compacted = compactBrainV2StateForStorage(next, limit);
-        localStorage.setItem(BRAIN_V2_KEY, JSON.stringify(compacted));
-        console.warn(`[BrainV2 Import] Storage compacted automatically (limit=${limit})`);
-        return compacted;
-      }catch(err){
-        if(!isQuotaExceededError(err)) throw err;
-      }
-    }
-
-    throw new Error("No hay espacio suficiente para guardar FL_BRAIN_V2.");
+    window.__brainV2Cache ||= { currentTeamId: null, memoriesByTeam: new Map(), teamProfiles: null };
+    window.__brainV2Cache.teamProfiles = next.teamProfiles || {};
+    window.__brainV2Cache.memoriesByTeam = new Map(Object.entries(next.memories || {}));
+    persistBrainV2HeavyToIndexedDB(next).catch((err)=>{
+      console.error("[BrainV2/IDB] Failed to write", err);
+    });
+    window.FL_BRAIN_V2 = { storage: "indexeddb", meta: safeParseJSON(localStorage.getItem(BRAIN_V2_META_KEY), {}), teamProfilesLite: next.teamProfiles || {}, memories: {} };
+    return next;
   }
+
+  window.brainV2DebugDump = async function () {
+    return {
+      memories: await idbGetAll("memories"),
+      teamProfiles: await idbGetAll("teamProfiles"),
+      meta: await idbGet("meta", "brainMeta")
+    };
+  };
+
+  window.brainV2DebugClearIDB = async function () {
+    await idbClear("memories");
+    await idbClear("teamProfiles");
+    await idbClear("meta");
+    console.info("[BrainV2/IDB] Cleared by debug helper");
+  };
+
+  window.brainV2DebugStats = async function () {
+    const memories = await idbGetAll("memories");
+    const teamProfiles = await idbGetAll("teamProfiles");
+    return {
+      memories: memories.length,
+      teamsWithMemory: new Set(memories.map((row)=>String(row?.teamId || ""))).size,
+      teamProfiles: teamProfiles.length
+    };
+  };
 
   function parseNumericStats(raw = ""){
     const out = {};
@@ -10006,6 +10163,26 @@ function computeTeamIntelligencePanel(db, teamId){
     return normalized;
   }
 
+  function buildMemoryFromMatchRef(ref, profile){
+    return {
+      id: ref?.memoryId || uid("b2m"),
+      teamId: profile?.teamId || ref?.teamId || "",
+      teamName: profile?.teamName || ref?.teamName || "",
+      date: ref?.date || "",
+      opponent: ref?.opponent || "",
+      score: ref?.score || "",
+      narrative: `Partido reconstruido vs ${ref?.opponent || "Rival"} (${ref?.score || "sin marcador"})`,
+      summary: {
+        reconstructed: true,
+        source: "matchRef",
+        finalScore: ref?.score || "",
+        opponent: ref?.opponent || ""
+      },
+      statsRaw: "",
+      createdAt: Date.now()
+    };
+  }
+
   function extractBrainV2MemoriesFromBackup(payload){
     const candidates = [
       ["data.brainState.memories", payload?.data?.brainState?.memories],
@@ -10017,8 +10194,17 @@ function computeTeamIntelligencePanel(db, teamId){
     ];
     const found = candidates.find(([, value])=>value && typeof value === "object" && !Array.isArray(value));
     const rawMemories = found?.[1] || {};
+    const profileCandidates = [
+      payload?.data?.brainState?.teamProfiles,
+      payload?.brainState?.teamProfiles,
+      payload?.data?.brain?.teamProfiles,
+      payload?.brain?.teamProfiles,
+      payload?.teamProfiles
+    ];
+    const rawProfiles = profileCandidates.find((v)=>v && typeof v === "object" && !Array.isArray(v)) || {};
     const normalizedMemories = {};
     let skipped = 0;
+    let reconstructed = 0;
     Object.entries(rawMemories).forEach(([teamId, rows])=>{
       if(!Array.isArray(rows)) return;
       const cleanRows = [];
@@ -10036,12 +10222,31 @@ function computeTeamIntelligencePanel(db, teamId){
         normalizedMemories[teamId] = cleanRows;
       }
     });
+
+    if(!Object.keys(normalizedMemories).length){
+      Object.values(rawProfiles).forEach((profile)=>{
+        const refs = Array.isArray(profile?.matchRefs) ? profile.matchRefs : [];
+        refs.forEach((ref)=>{
+          const row = normalizeBrainMemoryEntry(buildMemoryFromMatchRef(ref, profile), profile?.teamId || ref?.teamId || "");
+          if(!row) return;
+          const key = row.teamId || profile?.teamId || "";
+          if(!key) return;
+          normalizedMemories[key] ||= [];
+          normalizedMemories[key].push(row);
+          reconstructed += 1;
+        });
+      });
+      if(reconstructed) console.warn("[BrainV2/Import] Reconstructed from matchRefs");
+    }
+
     return {
       memories: normalizedMemories,
+      teamProfiles: rawProfiles,
       meta: {
-        backupDetected: Boolean(found),
+        backupDetected: Boolean(found) || Object.keys(rawProfiles || {}).length > 0,
         path: found?.[0] || null,
         skipped,
+        reconstructed,
         kind: payload?.kind || null,
         brainVersion: String(payload?.schema?.brainVersion || payload?.schema?.brain?.version || "")
       }
@@ -10058,6 +10263,7 @@ function computeTeamIntelligencePanel(db, teamId){
     if(importedBrainState.mne) next.mne = normalizeMneLearningState(importedBrainState.mne);
     if(importedBrainState.orchestratorLearning) next.orchestratorLearning = normalizeOrchestratorLearningState(importedBrainState.orchestratorLearning);
     if(importedBrainState.teamProfiles && typeof importedBrainState.teamProfiles === "object") next.teamProfiles = importedBrainState.teamProfiles;
+    if(payload?.teamProfiles && typeof payload.teamProfiles === "object") next.teamProfiles = payload.teamProfiles;
     rebuildTeamProfileIndex(next, { replace: true, includeOpponent: true });
     saveBrainV2(next);
     return next;
@@ -10122,12 +10328,12 @@ function computeTeamIntelligencePanel(db, teamId){
     let nextState = null;
     if(payload?.kind === "brain_v2_section" && payload?.brain && typeof payload.brain === "object"){
       const brain = payload.brain;
-      const extracted = extractBrainV2MemoriesFromBackup({ memories: brain.memories || {} });
+      const extracted = extractBrainV2MemoriesFromBackup({ memories: brain.memories || {}, teamProfiles: brain.teamProfiles || {} });
       nextState = hydrateBrainV2StateFromImport(extracted.memories, {
         brainState: {
           mne: brain.mne,
           orchestratorLearning: brain.orchestratorLearning,
-          teamProfiles: brain.teamProfiles
+          teamProfiles: extracted.teamProfiles || brain.teamProfiles
         }
       });
       if(brain.gpe) nextState.gpe = normalizeGpeState(brain.gpe);
@@ -10138,7 +10344,8 @@ function computeTeamIntelligencePanel(db, teamId){
     } else {
       const extracted = extractBrainV2MemoriesFromBackup(payload);
       if(!extracted.meta?.backupDetected) throw new Error("No se detectó memoria de Brain V2 en el archivo.");
-      nextState = hydrateBrainV2StateFromImport(extracted.memories, payload);
+      if(!Object.keys(extracted.memories || {}).length && !Object.keys(extracted.teamProfiles || {}).length) throw new Error("No se encontraron memorias válidas");
+      nextState = hydrateBrainV2StateFromImport(extracted.memories, { ...payload, teamProfiles: extracted.teamProfiles });
       console.info("[BrainV2 Import] Backup detected");
       console.info("[BrainV2 Import] Teams loaded:", Object.keys(nextState.memories || {}).length);
       console.info("[BrainV2 Import] Memories loaded:", Object.values(nextState.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0));
