@@ -10274,6 +10274,120 @@ function computeTeamIntelligencePanel(db, teamId){
     render("brainv2", { leagueId, teamId });
   }
 
+  async function buildBrainV2RuntimeFromIndexedDB(){
+    const hydrated = await hydrateBrainV2FromIndexedDB();
+    const compactState = normalizeBrainV2LoadedState(safeParseJSON(localStorage.getItem(BRAIN_V2_KEY), {}));
+    const runtime = normalizeBrainV2LoadedState({
+      ...compactState,
+      memories: hydrated?.memories || {},
+      teamProfiles: hydrated?.teamProfiles || compactState.teamProfiles || {}
+    });
+    if(!Object.keys(runtime.teamProfiles || {}).length) rebuildTeamProfileIndex(runtime, { replace: true, includeOpponent: true });
+    const counters = {
+      teams: Object.keys(runtime.teamProfiles || {}).length,
+      matches: Object.values(runtime.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0)
+    };
+    const meta = {
+      ...(safeParseJSON(localStorage.getItem(BRAIN_V2_META_KEY), {}) || {}),
+      key: "brainMeta",
+      version: 2,
+      storage: "indexeddb",
+      counters,
+      updatedAt: Date.now()
+    };
+    localStorage.setItem(BRAIN_V2_META_KEY, JSON.stringify(meta));
+    window.__brainV2HydratedState = runtime;
+    window.__brainV2Cache ||= { currentTeamId: null, memoriesByTeam: new Map(), teamProfiles: null };
+    window.__brainV2Cache.teamProfiles = runtime.teamProfiles || {};
+    window.__brainV2Cache.memoriesByTeam = new Map(Object.entries(runtime.memories || {}));
+    console.info("[BrainV2/UI] Runtime rebuilt from IDB");
+    return {
+      ...runtime,
+      storage: "indexeddb",
+      meta,
+      teamProfilesLite: runtime.teamProfiles || {},
+      memories: runtime.memories || {}
+    };
+  }
+
+  function pickFirstImportedBrainTarget(db, brainRuntime){
+    const teams = Array.isArray(db?.teams) ? db.teams : [];
+    const teamsById = new Map(teams.map((team)=>[String(team?.id || ""), team]));
+    const teamNameMap = new Map(teams.map((team)=>[normalizeTeamName(team?.name || ""), team]));
+    const resolveTeam = (candidateId = "", candidateName = "")=>{
+      const id = String(candidateId || "").trim();
+      if(id && teamsById.has(id)) return teamsById.get(id) || null;
+      const nameKey = normalizeTeamName(candidateName || "");
+      if(nameKey && teamNameMap.has(nameKey)) return teamNameMap.get(nameKey) || null;
+      return null;
+    };
+
+    const matches = [];
+    Object.entries(brainRuntime?.memories || {}).forEach(([memoryTeamKey, rows])=>{
+      (Array.isArray(rows) ? rows : []).forEach((row)=>{
+        const matched = resolveTeam(row?.teamId || memoryTeamKey, row?.teamName || memoryTeamKey);
+        if(!matched) return;
+        matches.push({
+          teamId: String(matched.id || ""),
+          teamName: matched.name || row?.teamName || "",
+          leagueId: String(matched.leagueId || row?.leagueId || ""),
+          memoryCount: 1
+        });
+      });
+    });
+
+    if(!matches.length){
+      Object.entries(brainRuntime?.teamProfilesLite || brainRuntime?.teamProfiles || {}).forEach(([profileKey, profile])=>{
+        const matched = resolveTeam(profile?.teamId || profileKey, profile?.teamName || profileKey);
+        if(!matched) return;
+        matches.push({
+          teamId: String(matched.id || ""),
+          teamName: matched.name || profile?.teamName || "",
+          leagueId: String(matched.leagueId || profile?.leagueId || ""),
+          memoryCount: Number(profile?.matches || profile?.totalMatches || 0)
+        });
+      });
+    }
+
+    if(!matches.length){
+      console.info("[BrainV2/UI] No valid imported team matched current DB");
+      return null;
+    }
+
+    const byTeam = new Map();
+    matches.forEach((row)=>{
+      const current = byTeam.get(row.teamId) || { ...row, memoryCount: 0 };
+      current.memoryCount += Math.max(1, Number(row.memoryCount) || 0);
+      if(!current.leagueId && row.leagueId) current.leagueId = row.leagueId;
+      byTeam.set(row.teamId, current);
+    });
+    const ranked = Array.from(byTeam.values()).sort((a,b)=>b.memoryCount-a.memoryCount);
+    const best = ranked[0] || null;
+    if(best?.teamName) console.info(`[BrainV2/UI] Auto-focused imported team: ${best.teamName}`);
+    return best ? { leagueId: best.leagueId || "", teamId: best.teamId || "" } : null;
+  }
+
+  async function refreshBrainV2AfterImport(db){
+    const runtime = await buildBrainV2RuntimeFromIndexedDB();
+    window.FL_BRAIN_V2 = {
+      storage: "indexeddb",
+      meta: runtime.meta || {},
+      teamProfilesLite: runtime.teamProfilesLite || {},
+      memories: runtime.memories || {}
+    };
+    const target = pickFirstImportedBrainTarget(db, runtime);
+    if(target?.leagueId){
+      db.settings.selectedLeagueId = target.leagueId;
+      saveDb(db);
+    }
+    render("brainv2", {
+      leagueId: target?.leagueId || db.settings.selectedLeagueId || "",
+      teamId: target?.teamId || ""
+    });
+    console.info("[BrainV2/UI] Render refreshed after import");
+    return target;
+  }
+
 
   function buildBrainV2SectionExportPayload(brainV2State){
     const state = brainV2State && typeof brainV2State === "object" ? brainV2State : loadBrainV2();
@@ -10351,7 +10465,12 @@ function computeTeamIntelligencePanel(db, teamId){
       console.info("[BrainV2 Import] Memories loaded:", Object.values(nextState.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0));
     }
 
+    await persistBrainV2HeavyToIndexedDB(nextState);
     const targetTeamId = preferredTeamId || findBestBrainV2ImportedTeamId(dbState, nextState?.memories || {});
+    if(view === "brainv2" && dbState) {
+      const target = await refreshBrainV2AfterImport(dbState);
+      return { state: nextState, targetTeamId: target?.teamId || targetTeamId, targetLeagueId: target?.leagueId || leagueId || "" };
+    }
     refreshBrainV2UIAfterImport({ view, leagueId, teamId: targetTeamId });
     return { state: nextState, targetTeamId };
   }
