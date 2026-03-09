@@ -1018,6 +1018,104 @@ function isBrainRelatedLocalStorageKey(key = ""){
   );
 }
 
+function isQuotaExceededError(err){
+  if(!err) return false;
+  return err.name === "QuotaExceededError" || err.code === 22 || err.code === 1014;
+}
+
+function pruneFootballLabCacheKeysForImport(){
+  const keysToDelete = [];
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if(!k) continue;
+    if(
+      k === "footballLab_competitions" ||
+      k.startsWith("footballLab_teams_") ||
+      k.startsWith("team_profile_") ||
+      k.startsWith("match_events_") ||
+      k.startsWith("match_momentum_") ||
+      k.startsWith("lpe_")
+    ){
+      keysToDelete.push(k);
+    }
+  }
+  keysToDelete.forEach((k)=>{
+    try{ localStorage.removeItem(k); }catch(_e){}
+  });
+}
+
+function buildCompactBrainStateCandidates(raw){
+  const parsed = mcSafeJsonParse(raw);
+  if(!parsed || typeof parsed !== "object") return [];
+
+  const base = {
+    ...parsed,
+    mne: {
+      ...(parsed.mne && typeof parsed.mne === "object" ? parsed.mne : {}),
+      phasePredictions: {},
+      phaseObservations: {},
+      lsfForecasts: {},
+      learningLog: Array.isArray(parsed?.mne?.learningLog) ? parsed.mne.learningLog.slice(-100) : [],
+      lsfEvalHistory: Array.isArray(parsed?.mne?.lsfEvalHistory) ? parsed.mne.lsfEvalHistory.slice(-120) : [],
+      claudeExchange: {
+        ...(parsed?.mne?.claudeExchange && typeof parsed.mne.claudeExchange === "object" ? parsed.mne.claudeExchange : {}),
+        trainingNotes: Array.isArray(parsed?.mne?.claudeExchange?.trainingNotes) ? parsed.mne.claudeExchange.trainingNotes.slice(-60) : [],
+        patterns: Array.isArray(parsed?.mne?.claudeExchange?.patterns) ? parsed.mne.claudeExchange.patterns.slice(-80) : [],
+        candidateRules: Array.isArray(parsed?.mne?.claudeExchange?.candidateRules) ? parsed.mne.claudeExchange.candidateRules.slice(-80) : [],
+        learningAudit: {
+          audits: Array.isArray(parsed?.mne?.claudeExchange?.learningAudit?.audits) ? parsed.mne.claudeExchange.learningAudit.audits.slice(-120) : []
+        }
+      }
+    }
+  };
+
+  const memories = parsed.memories && typeof parsed.memories === "object" ? parsed.memories : {};
+  const teams = Object.keys(memories);
+  const limits = [100, 60, 40, 25, 15, 10, 5];
+  const candidates = [];
+
+  limits.forEach((limit)=>{
+    const compactedMemories = {};
+    teams.forEach((teamId)=>{
+      const rows = Array.isArray(memories[teamId]) ? memories[teamId] : [];
+      compactedMemories[teamId] = rows.slice(-limit);
+    });
+    candidates.push(JSON.stringify({ ...base, memories: compactedMemories }));
+  });
+
+  candidates.push(JSON.stringify({ ...base, memories: {} }));
+  return candidates;
+}
+
+function restoreBrainLocalStorageKeyWithFallback(key, raw){
+  try{
+    localStorage.setItem(key, String(raw));
+    return { compacted: false, attempted: false };
+  }catch(err){
+    if(!isQuotaExceededError(err) || key !== "FL_BRAIN_V2") throw err;
+  }
+
+  pruneFootballLabCacheKeysForImport();
+  try{
+    localStorage.setItem(key, String(raw));
+    return { compacted: false, attempted: true };
+  }catch(err){
+    if(!isQuotaExceededError(err)) throw err;
+  }
+
+  const compactCandidates = buildCompactBrainStateCandidates(raw);
+  for(const candidate of compactCandidates){
+    try{
+      localStorage.setItem(key, candidate);
+      return { compacted: true, attempted: true };
+    }catch(err){
+      if(!isQuotaExceededError(err)) throw err;
+    }
+  }
+
+  throw new Error("No hay espacio suficiente para restaurar FL_BRAIN_V2 incluso con compactación automática.");
+}
+
 function hasSensitiveKeyName(key = ""){
   return /(token|apikey|api_key|secret|auth|bearer|password|credential)/i.test(String(key || ""));
 }
@@ -1222,10 +1320,12 @@ async function restoreBrainData(data){
     try{ localStorage.removeItem(key); }catch(_e){}
   });
 
+  let brainCompacted = false;
   Object.entries(incomingLocalDump).forEach(([key, raw])=>{
     if(!isBrainRelatedLocalStorageKey(key)) return;
     if(raw === undefined || raw === null) return;
-    localStorage.setItem(key, String(raw));
+    const result = restoreBrainLocalStorageKeyWithFallback(key, raw);
+    if(result?.compacted) brainCompacted = true;
   });
 
   for(const [dbName, stores] of Object.entries(incomingIndexedDump)){
@@ -1239,7 +1339,7 @@ async function restoreBrainData(data){
     db.close();
   }
 
-  return true;
+  return { compacted: brainCompacted };
 }
 
 async function importBrainBackupFromFile(file){
@@ -1259,8 +1359,13 @@ async function importBrainBackupFromFile(file){
   }
 
   try{
-    await restoreBrainData(parsed.data);
-    return parsed;
+    const restoreResult = await restoreBrainData(parsed.data);
+    return {
+      ...parsed,
+      restoreMeta: {
+        compacted: Boolean(restoreResult?.compacted)
+      }
+    };
   }catch(err){
     await restoreBrainData(currentSnapshot.data);
     throw err;
@@ -1938,7 +2043,9 @@ async function importBrainV2(file){
   if(!confirm("Esto reemplazará el cerebro actual. ¿Deseas continuar?")) return;
   try{
     const imported = await importBrainBackupFromFile(file);
-    if(String(imported?.schema?.brainVersion || "") !== "v2"){
+    if(imported?.restoreMeta?.compacted){
+      toast("Backup restaurado con compactación por espacio limitado ⚠️");
+    }else if(String(imported?.schema?.brainVersion || "") !== "v2"){
       toast("Importado, pero algunos campos pueden ser ignorados ⚠️");
     }else{
       toast("Backup restaurado. Recargando datos… ✅");
