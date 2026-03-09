@@ -15721,6 +15721,34 @@ RESPONDE SOLO CON JSON usando este schema:
         if(draft.lineupShape) document.getElementById('b2LineupShape').value = JSON.stringify(draft.lineupShape);
       };
 
+      const persistDraftIntoBrainV2Memories = (draft)=>{
+        if(!draft?.teamId) return false;
+        const row = {
+          id: uid('b2m'),
+          teamId: draft.teamId,
+          teamName: draft.teamName,
+          leagueId: draft.leagueId,
+          date: draft.date,
+          opponent: draft.opponent,
+          score: (draft.score || '0-0').trim(),
+          statsRaw: (draft.statsRaw || '').trim(),
+          narrative: (draft.narrative || '').trim(),
+          lineup: draft.lineup,
+          lineupShape: draft.lineupShape,
+          createdAt: Date.now()
+        };
+        row.summary = buildBrainV2MatchSummary({ row, teamName: row.teamName, opponentName: row.opponent || "Rival" });
+        brainV2.memories[row.teamId] ||= [];
+        brainV2.memories[row.teamId].push(row);
+        indexMemoryMatchIntoTeamProfiles(brainV2, row, {
+          includeOpponent: true,
+          primaryTeamId: row.teamId,
+          primaryTeamName: row.teamName,
+          opponentTeamName: row.opponent || ''
+        });
+        return true;
+      };
+
       document.getElementById('b2ImportMatchpackFile')?.addEventListener('change', async (ev)=>{
         const status = document.getElementById('b2ImportStatus');
         const files = Array.from(ev?.target?.files || []);
@@ -15734,9 +15762,17 @@ RESPONDE SOLO CON JSON usando este schema:
               fallbackTeamId: document.getElementById('b2Team')?.value || ""
             });
             applyDraftToBrainV2CaptureForm(draft);
+            const persisted = persistDraftIntoBrainV2Memories(draft);
+            if(persisted){
+              saveBrainV2(brainV2);
+              render('brainv2', { leagueId: selectedLeagueId, teamId: draft.teamId || selectedTeamId });
+            }
+            const suffix = persisted
+              ? 'Partido guardado en memoria automáticamente.'
+              : 'No se pudo guardar en memoria (equipo no identificado).';
             const autoText = draft.warnings.length
-              ? `✅ JSON importado con avisos: ${draft.warnings.join(' ')}`
-              : '✅ JSON importado correctamente. Revisa y edita antes de guardar.';
+              ? `✅ JSON importado con avisos: ${draft.warnings.join(' ')} ${suffix}`
+              : `✅ JSON importado correctamente. ${suffix}`;
             if(status) status.textContent = autoText;
           }else{
             let imported = 0;
@@ -15755,31 +15791,12 @@ RESPONDE SOLO CON JSON usando este schema:
                   skipped += 1;
                   continue;
                 }
-                const row = {
-                  id: uid('b2m'),
-                  teamId: draft.teamId,
-                  teamName: draft.teamName,
-                  leagueId: draft.leagueId,
-                  date: draft.date,
-                  opponent: draft.opponent,
-                  score: (draft.score || '0-0').trim(),
-                  statsRaw: (draft.statsRaw || '').trim(),
-                  narrative: (draft.narrative || '').trim(),
-                  lineup: draft.lineup,
-                  lineupShape: draft.lineupShape,
-                  createdAt: Date.now()
-                };
-                row.summary = buildBrainV2MatchSummary({ row, teamName: row.teamName, opponentName: row.opponent || "Rival" });
-                brainV2.memories[row.teamId] ||= [];
-                brainV2.memories[row.teamId].push(row);
-                indexMemoryMatchIntoTeamProfiles(brainV2, row, {
-                  includeOpponent: true,
-                  primaryTeamId: row.teamId,
-                  primaryTeamName: row.teamName,
-                  opponentTeamName: row.opponent || ''
-                });
-                imported += 1;
-                lastTeamId = row.teamId;
+                if(persistDraftIntoBrainV2Memories(draft)){
+                  imported += 1;
+                  lastTeamId = draft.teamId;
+                }else{
+                  skipped += 1;
+                }
               }catch(err){
                 skipped += 1;
                 errors.push(`${file.name}: ${String(err?.message || err)}`);
