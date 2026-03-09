@@ -707,6 +707,32 @@ export function initFootballLab(){
     return { samples: rows.length, avg, positive, negative, fatigueNotes, resilienceNotes };
   }
 
+  function getBrainMemoriesForTeam(memories = {}, { teamId = "", teamName = "" } = {}){
+    const byTeamId = Array.isArray(memories?.[teamId]) ? memories[teamId] : null;
+    if(byTeamId) return byTeamId;
+
+    const targetName = normalizeTeamName(teamName);
+    if(!targetName) return [];
+
+    const byKeyName = Object.entries(memories || {}).find(([key, rows])=>{
+      if(!Array.isArray(rows) || !rows.length) return false;
+      return normalizeTeamName(key) === targetName;
+    });
+    if(byKeyName) return byKeyName[1];
+
+    const recovered = [];
+    Object.values(memories || {}).forEach((rows)=>{
+      if(!Array.isArray(rows)) return;
+      rows.forEach((row)=>{
+        if(!row || typeof row !== "object") return;
+        const rowTeamId = String(row.teamId || "").trim();
+        const rowTeamName = normalizeTeamName(row.teamName || "");
+        if((rowTeamId && rowTeamId===teamId) || (rowTeamName && rowTeamName===targetName)) recovered.push(row);
+      });
+    });
+    return recovered;
+  }
+
   function toHybridFeatureSeed(summary = {}, side = "home"){
     const avg = summary?.avg || {};
     const pick = (keys = [], fallback = 0)=>{
@@ -14850,7 +14876,7 @@ RESPONDE SOLO CON JSON usando este schema:
       const selectedTeamId = payload.teamId || sortedTeams[0]?.id || "";
       const selectedTeamName = db.teams.find((t)=>t.id===selectedTeamId)?.name || "Local";
       const teamOptions = sortedTeams.map((t)=>`<option value="${t.id}" ${selectedTeamId===t.id?"selected":""}>${t.name}</option>`).join("");
-      const teamMemories = (brainV2.memories[selectedTeamId] || []).slice().sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date));
+      const teamMemories = getBrainMemoriesForTeam(brainV2.memories, { teamId: selectedTeamId, teamName: selectedTeamName }).slice().sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date));
       const teamMatchRefs = getTeamMatchRefs(brainV2, { teamId: selectedTeamId, teamName: selectedTeamName });
       const memoryRows = teamMemories.slice(0, 8).map((m)=>{
         const story = m?.summary?.story || (m.narrative || "").slice(0, 90);
@@ -15411,8 +15437,8 @@ RESPONDE SOLO CON JSON usando este schema:
         }
         const homeName = db.teams.find((t)=>t.id===homeIdSel)?.name || 'Local';
         const awayName = db.teams.find((t)=>t.id===awayIdSel)?.name || 'Visita';
-        const homeSamples = (brainV2.memories[homeIdSel] || []).length;
-        const awaySamples = (brainV2.memories[awayIdSel] || []).length;
+        const homeSamples = getBrainMemoriesForTeam(brainV2.memories, { teamId: homeIdSel, teamName: db.teams.find((t)=>t.id===homeIdSel)?.name || '' }).length;
+        const awaySamples = getBrainMemoriesForTeam(brainV2.memories, { teamId: awayIdSel, teamName: db.teams.find((t)=>t.id===awayIdSel)?.name || '' }).length;
         const homeState = homeSamples ? `✅ ${homeName}: ${homeSamples} partidos en memoria` : `⚠️ ${homeName}: sin memoria`;
         const awayState = awaySamples ? `✅ ${awayName}: ${awaySamples} partidos en memoria` : `⚠️ ${awayName}: sin memoria`;
         const ready = homeSamples > 0 && awaySamples > 0;
