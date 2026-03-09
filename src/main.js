@@ -1432,6 +1432,9 @@ finance_payment_sources: mcLoadAny("memorycarl_v2_finance_payment_sources", []),
 finance_transactions: mcLoadAny("memorycarl_v2_finance_transactions", []),
 finance_internal_balances: mcLoadAny("memorycarl_v2_finance_internal_balances", []),
 finance_insights: mcLoadAny("memorycarl_v2_finance_insights", []),
+finance_commitment_templates: mcLoadAny("memorycarl_v2_finance_commitment_templates", []),
+finance_commitment_instances: mcLoadAny("memorycarl_v2_finance_commitment_instances", []),
+finance_loan_usage_ledger: mcLoadAny("memorycarl_v2_finance_loan_usage_ledger", []),
 finance_schema_version: mcLoadAny("memorycarl_v2_finance_schema_version", 1),
 finance_categories: mcLoadAny("memorycarl_v2_finance_categories", []),
 finance_meta: mcLoadAny("memorycarl_v2_finance_meta", null),
@@ -1906,6 +1909,9 @@ function persist(){
     if(LS.financeInternalBalances) save(LS.financeInternalBalances, state.financeInternalBalances||[]);
     if(LS.financeInsights) save(LS.financeInsights, state.financeInsights||[]);
     if(LS.financeSchemaVersion) save(LS.financeSchemaVersion, Number(state.financeSchemaVersion||2));
+    if(LS.financeCommitmentTemplates) save(LS.financeCommitmentTemplates, state.financeCommitmentTemplates||[]);
+    if(LS.financeCommitmentInstances) save(LS.financeCommitmentInstances, state.financeCommitmentInstances||[]);
+    if(LS.financeLoanUsageLedger) save(LS.financeLoanUsageLedger, state.financeLoanUsageLedger||[]);
     if(LS.financeMeta) save(LS.financeMeta, state.financeMeta||{});
   }catch(e){}
 }
@@ -1940,6 +1946,9 @@ function exportBackup(){
     financeInternalBalances: state.financeInternalBalances,
     financeInsights: state.financeInsights,
     financeSchemaVersion: state.financeSchemaVersion,
+    financeCommitmentTemplates: state.financeCommitmentTemplates,
+    financeCommitmentInstances: state.financeCommitmentInstances,
+    financeLoanUsageLedger: state.financeLoanUsageLedger,
     financeMeta: state.financeMeta
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -1995,6 +2004,9 @@ function importBackup(file){
       const financeTransactions = Array.isArray(data.financeTransactions) ? data.financeTransactions : [];
       const financeInternalBalances = Array.isArray(data.financeInternalBalances) ? data.financeInternalBalances : [];
       const financeInsights = Array.isArray(data.financeInsights) ? data.financeInsights : [];
+      const financeCommitmentTemplates = Array.isArray(data.financeCommitmentTemplates) ? data.financeCommitmentTemplates : [];
+      const financeCommitmentInstances = Array.isArray(data.financeCommitmentInstances) ? data.financeCommitmentInstances : [];
+      const financeLoanUsageLedger = Array.isArray(data.financeLoanUsageLedger) ? data.financeLoanUsageLedger : [];
       const financeSchemaVersion = Number(data.financeSchemaVersion || 1);
       const financeMeta = (data.financeMeta && typeof data.financeMeta==="object") ? data.financeMeta : {};
 
@@ -2044,6 +2056,9 @@ function importBackup(file){
       state.financeTransactions = financeTransactions;
       state.financeInternalBalances = financeInternalBalances;
       state.financeInsights = financeInsights;
+      state.financeCommitmentTemplates = financeCommitmentTemplates;
+      state.financeCommitmentInstances = financeCommitmentInstances;
+      state.financeLoanUsageLedger = financeLoanUsageLedger;
       state.financeSchemaVersion = financeSchemaVersion;
       state.financeMeta = financeMeta;
       try{ financeRecomputeBalances(); }catch(_e){}
@@ -2170,6 +2185,9 @@ if(payload.finance_payment_sources !== undefined) finApplyRaw("memorycarl_v2_fin
 if(payload.finance_transactions !== undefined) finApplyRaw("memorycarl_v2_finance_transactions", payload.finance_transactions);
 if(payload.finance_internal_balances !== undefined) finApplyRaw("memorycarl_v2_finance_internal_balances", payload.finance_internal_balances);
 if(payload.finance_insights !== undefined) finApplyRaw("memorycarl_v2_finance_insights", payload.finance_insights);
+if(payload.finance_commitment_templates !== undefined) finApplyRaw("memorycarl_v2_finance_commitment_templates", payload.finance_commitment_templates);
+if(payload.finance_commitment_instances !== undefined) finApplyRaw("memorycarl_v2_finance_commitment_instances", payload.finance_commitment_instances);
+if(payload.finance_loan_usage_ledger !== undefined) finApplyRaw("memorycarl_v2_finance_loan_usage_ledger", payload.finance_loan_usage_ledger);
 if(payload.finance_schema_version !== undefined) finApplyRaw("memorycarl_v2_finance_schema_version", payload.finance_schema_version);
 if(payload.finance_categories !== undefined) finApplyRaw("memorycarl_v2_finance_categories", payload.finance_categories);
 if(payload.finance_meta !== undefined) finApplyRaw("memorycarl_v2_finance_meta", payload.finance_meta);
@@ -11328,6 +11346,9 @@ LS.financeTransactions = "memorycarl_v2_finance_transactions";
 LS.financeInternalBalances = "memorycarl_v2_finance_internal_balances";
 LS.financeInsights = "memorycarl_v2_finance_insights";
 LS.financeSchemaVersion = "memorycarl_v2_finance_schema_version";
+LS.financeCommitmentTemplates = "memorycarl_v2_finance_commitment_templates";
+LS.financeCommitmentInstances = "memorycarl_v2_finance_commitment_instances";
+LS.financeLoanUsageLedger = "memorycarl_v2_finance_loan_usage_ledger";
 
 state.financeLedger = load(LS.financeLedger, []);
 state.financeAccounts = load(LS.financeAccounts, []);
@@ -11340,6 +11361,9 @@ state.financeTransactions = load(LS.financeTransactions, []);
 state.financeInternalBalances = load(LS.financeInternalBalances, []);
 state.financeInsights = load(LS.financeInsights, []);
 state.financeSchemaVersion = load(LS.financeSchemaVersion, 1);
+state.financeCommitmentTemplates = load(LS.financeCommitmentTemplates, []);
+state.financeCommitmentInstances = load(LS.financeCommitmentInstances, []);
+state.financeLoanUsageLedger = load(LS.financeLoanUsageLedger, []);
 
 
 // Quick finance wipe via URL: ?finreset=1 (useful when you want to start clean)
@@ -11370,6 +11394,9 @@ persist = function(){
   try{ save(LS.financeInternalBalances, state.financeInternalBalances||[]); }catch(_e){}
   try{ save(LS.financeInsights, state.financeInsights||[]); }catch(_e){}
   try{ save(LS.financeSchemaVersion, Number(state.financeSchemaVersion||2)); }catch(_e){}
+  try{ save(LS.financeCommitmentTemplates, state.financeCommitmentTemplates||[]); }catch(_e){}
+  try{ save(LS.financeCommitmentInstances, state.financeCommitmentInstances||[]); }catch(_e){}
+  try{ save(LS.financeLoanUsageLedger, state.financeLoanUsageLedger||[]); }catch(_e){}
   try{ save(LS.financeMeta, state.financeMeta); }catch(_e){}
   try{ save(LS.financeCategories, state.financeCategories); }catch(_e){}
   try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(state.financeProjectionMode||"normal")); }catch(_e){}
@@ -11415,6 +11442,10 @@ function financeMigrateV2(){
     if(!d.status) d.status = (Number(d.balance||0) <= 0 ? "closed" : "active");
     if(!d.createdAt) d.createdAt = new Date().toISOString();
   });
+
+  if(!Array.isArray(state.financeCommitmentTemplates)) state.financeCommitmentTemplates = [];
+  if(!Array.isArray(state.financeCommitmentInstances)) state.financeCommitmentInstances = [];
+  if(!Array.isArray(state.financeLoanUsageLedger)) state.financeLoanUsageLedger = [];
 
   persist();
 }
@@ -11471,7 +11502,7 @@ function financeEnsureMissionControlStructures(){
     }));
   }
 
-  state.financeSchemaVersion = 2;
+  state.financeSchemaVersion = 3;
 }
 
 function financeGetMonthKeyFromIso(iso){
@@ -13077,8 +13108,105 @@ function financeDebtProgress(d){
 
 // ===== Finance Commitments (Servicios / gastos fijos) + Pillars =====
 function financeEnsureCommitments(){
-  if(!state.financeCommitments) state.financeCommitments = [];
-  if(!state.financeCommitmentGroups) state.financeCommitmentGroups = ["Hogar","Servicios","Suscripciones","Salud","Otros"];
+  if(!Array.isArray(state.financeCommitments)) state.financeCommitments = [];
+  if(!Array.isArray(state.financeCommitmentGroups)) state.financeCommitmentGroups = ["Hogar","Servicios","Suscripciones","Salud","Otros"];
+  if(!Array.isArray(state.financeCommitmentTemplates)) state.financeCommitmentTemplates = [];
+  if(!Array.isArray(state.financeCommitmentInstances)) state.financeCommitmentInstances = [];
+  if(!Array.isArray(state.financeLoanUsageLedger)) state.financeLoanUsageLedger = [];
+
+  (state.financePaymentSources||[]).forEach(s=>{
+    if(s.isDebtInstrument === undefined){
+      s.isDebtInstrument = ["loan","credit_card","third_party"].includes(String(s.sourceType||""));
+    }
+  });
+
+  if(!(state.financeCommitmentTemplates||[]).length && (state.financeCommitments||[]).length){
+    state.financeCommitmentTemplates = state.financeCommitments.map(c=>({
+      id: c.id || uid("ctpl"),
+      legacyCommitmentId: c.id || null,
+      name: c.name || "Compromiso",
+      category: c.group || "Otros",
+      recurrence: "monthly",
+      dueDay: Math.max(1, Math.min(31, Number(c.dueDay||1))),
+      amountMode: "fixed",
+      baseAmount: Number(c.amount||0),
+      lastKnownAmount: Number(c.amount||0),
+      autoCreateMonthly: true,
+      isActive: c.active!==false,
+      notes: c.note || "",
+      createdAt: c.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  const monthKey = getCurrentMonthKey();
+  const now = new Date();
+  for(const t of (state.financeCommitmentTemplates||[])){
+    if(t.isActive===false || t.autoCreateMonthly===false) continue;
+    const exists = (state.financeCommitmentInstances||[]).some(i=>i.templateId===t.id && i.periodKey===monthKey);
+    if(exists) continue;
+    const expected = String(t.amountMode||"fixed")==="variable" ? Number(t.lastKnownAmount||t.baseAmount||0) : Number(t.baseAmount||0);
+    state.financeCommitmentInstances.unshift({
+      id: uid("cmi"),
+      templateId: t.id,
+      periodKey: monthKey,
+      label: `${t.name} ${monthKey}`,
+      expectedAmount: expected,
+      actualAmount: null,
+      dueDate: `${monthKey}-${String(Math.max(1, Math.min(31, Number(t.dueDay||1)))).padStart(2,'0')}`,
+      status: "pending",
+      paidAmount: 0,
+      paidAt: null,
+      paymentSourceId: null,
+      linkedDebtId: null,
+      notes: "",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    });
+  }
+
+  // Backward compatibility: seed legacy list from templates if empty.
+  if(!(state.financeCommitments||[]).length && (state.financeCommitmentTemplates||[]).length){
+    state.financeCommitments = state.financeCommitmentTemplates.map(t=>({
+      id: t.legacyCommitmentId || t.id,
+      name: t.name,
+      group: t.category,
+      amount: Number(t.baseAmount||0),
+      dueDay: Number(t.dueDay||1),
+      note: t.notes || "",
+      createdAt: t.createdAt || new Date().toISOString(),
+      active: t.isActive!==false
+    }));
+  }
+}
+
+function financeCommitmentTemplateById(id){
+  return (state.financeCommitmentTemplates||[]).find(x=>x.id===id);
+}
+
+function financeCommitmentStatusChip(st){
+  const v = String(st||"pending");
+  const map = {
+    pending:["⏳","Pendiente"], paid:["✅","Pagado"], partial:["🟡","Parcial"], overdue:["⚠️","Vencido"], postponed:["⏭️","Postergado"], covered_by_debt:["💳","Cubierto con deuda"], cancelled:["⛔","Cancelado"]
+  };
+  const [ico,label] = map[v] || map.pending;
+  return `<span class="chip chipWarn">${ico} ${label}</span>`;
+}
+
+function financeCommitmentMonthModel(monthKey){
+  financeEnsureCommitments();
+  const mk = monthKey || getCurrentMonthKey();
+  const instances = (state.financeCommitmentInstances||[])
+    .filter(i=>i.periodKey===mk)
+    .map(i=> ({...i, template: financeCommitmentTemplateById(i.templateId)}))
+    .sort((a,b)=> new Date(a.dueDate)-new Date(b.dueDate));
+  const total = instances.reduce((s,i)=>s+Number(i.expectedAmount||0),0);
+  const paid = instances.reduce((s,i)=>s+Number(i.paidAmount||0),0);
+  const pending = instances.filter(i=>["pending","partial","overdue","postponed"].includes(String(i.status||"pending"))).reduce((s,i)=>s+Math.max(0, Number(i.expectedAmount||0)-Number(i.paidAmount||0)),0);
+  const overdue = instances.filter(i=>String(i.status||"")==="overdue").reduce((s,i)=>s+Math.max(0, Number(i.expectedAmount||0)-Number(i.paidAmount||0)),0);
+  const coveredByDebt = instances.filter(i=>String(i.status||"")==="covered_by_debt").reduce((s,i)=>s+Number(i.paidAmount||0),0);
+  const resolved = instances.filter(i=>["paid","covered_by_debt","cancelled"].includes(String(i.status||""))).length;
+  return {mk,instances,total,paid,pending,overdue,coveredByDebt,resolutionPct: instances.length?Math.round((resolved/instances.length)*100):0};
 }
 
 function financeComputePillars(monthKey){
@@ -13094,7 +13222,6 @@ function financeComputePillars(monthKey){
     }catch(e){ return false; }
   };
 
-  // 1) Real expenses from ledger
   let market=0, services=0, debts=0, other=0;
   for(const e of ledger){
     if(e.archived) continue;
@@ -13104,28 +13231,15 @@ function financeComputePillars(monthKey){
     const cat = String(e.category||"").toLowerCase();
     const kind = String(e.kind||"").toLowerCase();
 
-    if(cat==="mercado" || cat==="market" || kind==="shopping_auto"){
-      market += Number(e.amount||0);
-    }else if(cat==="deudas" || kind==="debt_payment"){
-      debts += Number(e.amount||0);
-    }else if(cat==="servicios" || cat==="compromisos" || kind==="commitment_payment"){
-      services += Number(e.amount||0);
-    }else{
-      other += Number(e.amount||0);
-    }
+    if(cat==="mercado" || cat==="market" || kind==="shopping_auto") market += Number(e.amount||0);
+    else if(cat==="deudas" || kind==="debt_payment") debts += Number(e.amount||0);
+    else if(cat==="servicios" || cat==="compromisos" || kind==="commitment_payment") services += Number(e.amount||0);
+    else other += Number(e.amount||0);
   }
 
-  // 2) Planned monthly amounts from Deudas + Compromisos (even if not paid yet)
-  // This makes them visible in "Pilares del mes" card.
   try{
-    const plannedDebts = (state.financeDebts||[])
-      .filter(d=>String(d.status||"active")!=="closed")
-      .reduce((sum,d)=> sum + (Number(d.monthlyDue||0) || 0), 0);
-
-    const plannedCommitments = (state.financeCommitments||[])
-      .filter(c=>c && (c.active!==false))
-      .reduce((sum,c)=> sum + (Number(c.amount||0) || 0), 0);
-
+    const plannedDebts = (state.financeDebts||[]).filter(d=>String(d.status||"active")!=="closed").reduce((sum,d)=> sum + (Number(d.monthlyDue||0) || 0), 0);
+    const plannedCommitments = financeCommitmentMonthModel(mk).instances.reduce((sum,i)=>sum + Number(i.expectedAmount||0),0);
     debts += plannedDebts;
     services += plannedCommitments;
   }catch(_e){}
@@ -13133,314 +13247,161 @@ function financeComputePillars(monthKey){
   return {market, services, debts, other};
 }
 
-
 function openFinanceCommitmentModal(existing){
   financeEnsureCommitments();
-  const c = existing || {
-    id: uid("cmt"),
-    name: "",
-    group: "Hogar",
-    amount: 0,
-    dueDay: 1,
-    note: "",
-    createdAt: new Date().toISOString(),
-    active: true
-  };
-
-  const groups = (state.financeCommitmentGroups||["Hogar","Servicios","Otros"]).map(g=>`<option ${c.group===g?'selected':''}>${escapeHtml(g)}</option>`).join("");
-
-  const html = `
-    <div class="modalOverlay" onclick="closeModal(event)">
-      <div class="modal modalBig" onclick="event.stopPropagation()">
-        <div class="modalHeader">
-          <div class="modalTitle">${existing ? "Editar compromiso" : "Nuevo compromiso"}</div>
-          <button class="iconBtn" onclick="closeModal()">✕</button>
-        </div>
-
-        <div class="modalBody modalScroll">
-          <label class="fieldLabel">Nombre</label>
-          <input id="cmtName" class="textInput" value="${escapeAttr(c.name||"")}" placeholder="Alquiler, Luz, Internet..." />
-
-          <div class="row" style="gap:10px; margin-top:10px">
-            <div style="flex:1">
-              <label class="fieldLabel">Grupo</label>
-              <select id="cmtGroup" class="textInput">${groups}</select>
-            </div>
-            <div style="width:140px">
-              <label class="fieldLabel">Día de pago</label>
-              <input id="cmtDay" type="number" min="1" max="31" class="textInput" value="${Number(c.dueDay||1)}" />
-            </div>
-          </div>
-
-          <label class="fieldLabel" style="margin-top:10px">Monto mensual</label>
-          <input id="cmtAmount" type="number" step="0.01" class="textInput" value="${Number(c.amount||0)}" />
-
-          <label class="fieldLabel" style="margin-top:10px">Nota</label>
-          <textarea id="cmtNote" class="textInput" rows="3" placeholder="Detalles, proveedor, contrato...">${escapeHtml(c.note||"")}</textarea>
-
-          <div class="row" style="gap:10px; margin-top:10px; align-items:center">
-            <input id="cmtActive" type="checkbox" ${c.active!==false?'checked':''} />
-            <div>Activa</div>
-          </div>
-        </div>
-
-        <div class="modalFooter">
-          ${existing ? `<button class="btn danger" onclick="deleteFinanceCommitment('${c.id}')">Eliminar</button>` : `<div></div>`}
-          <button class="btn primary" onclick="saveFinanceCommitment('${c.id}')">Guardar</button>
-        </div>
-      </div>
-    </div>
-  `;
+  const t = existing || { id: uid("ctpl"), name:"", category:"Hogar", dueDay:1, amountMode:"fixed", baseAmount:0, lastKnownAmount:0, notes:"", isActive:true, autoCreateMonthly:true };
+  const groups = (state.financeCommitmentGroups||["Hogar","Servicios","Otros"]).map(g=>`<option ${t.category===g?'selected':''}>${escapeHtml(g)}</option>`).join("");
+  const html = `<div class="modalOverlay" onclick="closeModal(event)"><div class="modal modalBig" onclick="event.stopPropagation()"><div class="modalHeader"><div class="modalTitle">${existing?"Editar plantilla":"Nuevo compromiso recurrente"}</div><button class="iconBtn" onclick="closeModal()">✕</button></div><div class="modalBody modalScroll"><label class="fieldLabel">Nombre</label><input id="cmtName" class="textInput" value="${escapeAttr(t.name||"")}" /><div class="row" style="gap:10px;margin-top:10px"><div style="flex:1"><label class="fieldLabel">Categoría</label><select id="cmtGroup" class="textInput">${groups}</select></div><div style="width:140px"><label class="fieldLabel">Día venc.</label><input id="cmtDay" type="number" min="1" max="31" class="textInput" value="${Number(t.dueDay||1)}" /></div></div><div class="row" style="gap:10px;margin-top:10px"><div style="flex:1"><label class="fieldLabel">Modo monto</label><select id="cmtAmountMode" class="textInput"><option value="fixed" ${String(t.amountMode)==='fixed'?'selected':''}>Fijo</option><option value="variable" ${String(t.amountMode)==='variable'?'selected':''}>Variable</option></select></div><div style="flex:1"><label class="fieldLabel">Monto base</label><input id="cmtAmount" type="number" step="0.01" class="textInput" value="${Number(t.baseAmount||0)}" /></div></div><label class="fieldLabel" style="margin-top:10px">Nota</label><textarea id="cmtNote" class="textInput" rows="3">${escapeHtml(t.notes||"")}</textarea><div class="row" style="gap:10px;margin-top:10px;align-items:center"><input id="cmtActive" type="checkbox" ${t.isActive!==false?'checked':''} /><div>Activa</div><input id="cmtAuto" type="checkbox" ${t.autoCreateMonthly!==false?'checked':''} /><div>Auto-crear mensual</div></div></div><div class="modalFooter">${existing?`<button class="btn danger" onclick="deleteFinanceCommitment('${t.id}')">Eliminar</button>`:"<div></div>"}<button class="btn primary" onclick="saveFinanceCommitment('${t.id}')">Guardar</button></div></div></div>`;
   showModal(html);
 }
 
 function saveFinanceCommitment(id){
   financeEnsureCommitments();
   const name = (document.querySelector("#cmtName")?.value||"").trim();
+  if(!name){ alert("Ponle un nombre al compromiso."); return; }
   const group = (document.querySelector("#cmtGroup")?.value||"Otros").trim();
   const dueDay = Math.max(1, Math.min(31, Number(document.querySelector("#cmtDay")?.value||1)));
-  const amount = Number(document.querySelector("#cmtAmount")?.value||0);
-  const note = (document.querySelector("#cmtNote")?.value||"").trim();
-  const active = !!document.querySelector("#cmtActive")?.checked;
+  const amountMode = (document.querySelector("#cmtAmountMode")?.value||"fixed");
+  const baseAmount = Number(document.querySelector("#cmtAmount")?.value||0);
+  const notes = (document.querySelector("#cmtNote")?.value||"").trim();
+  const isActive = !!document.querySelector("#cmtActive")?.checked;
+  const autoCreateMonthly = !!document.querySelector("#cmtAuto")?.checked;
 
-  if(!name){
-    alert("Ponle un nombre al compromiso.");
-    return;
-  }
-
-  const arr = state.financeCommitments;
+  const arr = state.financeCommitmentTemplates;
   const i = arr.findIndex(x=>x.id===id);
   const nowIso = new Date().toISOString();
   const base = (i>=0 ? arr[i] : {id, createdAt: nowIso});
-  const obj = {
-    ...base,
-    name,
-    group,
-    dueDay,
-    amount,
-    note,
-    active
-  };
+  const obj = {...base, name, category:group, recurrence:"monthly", dueDay, amountMode, baseAmount, lastKnownAmount:Number(base.lastKnownAmount??baseAmount), autoCreateMonthly, isActive, notes, updatedAt: nowIso};
   if(i>=0) arr[i]=obj; else arr.unshift(obj);
-  persist();
-  closeModal();
-  view();
+
+  const legacy = (state.financeCommitments||[]);
+  const li = legacy.findIndex(x=>x.id===id || x.id===obj.legacyCommitmentId);
+  const legacyObj = { id: obj.legacyCommitmentId || obj.id, name, group, dueDay, amount: baseAmount, note: notes, active:isActive, createdAt: base.createdAt || nowIso };
+  if(li>=0) legacy[li]=legacyObj; else legacy.unshift(legacyObj);
+  obj.legacyCommitmentId = legacyObj.id;
+
+  persist(); closeModal(); view();
 }
 
 function deleteFinanceCommitment(id){
   if(!confirm("¿Eliminar este compromiso?")) return;
   financeEnsureCommitments();
+  state.financeCommitmentTemplates = (state.financeCommitmentTemplates||[]).filter(x=>x.id!==id);
   state.financeCommitments = (state.financeCommitments||[]).filter(x=>x.id!==id);
+  persist(); closeModal(); view();
+}
+
+function financeCommitmentPaidInMonth(commitmentId, monthKey){
+  const mk = monthKey || getCurrentMonthKey();
+  return (state.financeCommitmentInstances||[]).some(i=>i.periodKey===mk && i.templateId===commitmentId && ["paid","covered_by_debt"].includes(String(i.status||"")));
+}
+
+function openFinanceCommitmentPayModal(id){
+  const model = financeCommitmentMonthModel(getCurrentMonthKey());
+  const c = model.instances.find(i=>i.id===id || i.templateId===id);
+  if(!c) return;
+  const tmpl = c.template || {name:"Compromiso"};
+  const srcOptions = (state.financePaymentSources||[]).filter(s=>s.isActive!==false).map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+  const statuses = ["pending","paid","partial","overdue","postponed","covered_by_debt","cancelled"];
+  const hist = (state.financeCommitmentInstances||[]).filter(i=>i.templateId===c.templateId && i.id!==c.id).sort((a,b)=> String(b.periodKey).localeCompare(String(a.periodKey))).slice(0,6).map(h=>`<div class="dueRow"><div>${h.periodKey} · S/ ${_financeFmt(h.expectedAmount||0)}</div><div class="muted">${h.status} · pagado S/ ${_financeFmt(h.paidAmount||0)}</div></div>`).join("") || `<div class="muted">Sin historial.</div>`;
+  const html = `<div class="modalOverlay" onclick="closeModal(event)"><div class="modal modalBig" onclick="event.stopPropagation()"><div class="modalHeader"><div class="modalTitle">${escapeHtml(tmpl.name)} · ${c.periodKey}</div><button class="iconBtn" onclick="closeModal()">✕</button></div><div class="modalBody modalScroll"><div class="muted">Último monto conocido: S/ ${_financeFmt(tmpl.lastKnownAmount||tmpl.baseAmount||0)}</div><label class="fieldLabel" style="margin-top:10px">Monto esperado mes</label><input id="cmtInstExpected" type="number" step="0.01" class="textInput" value="${Number(c.expectedAmount||0)}" /><label class="fieldLabel" style="margin-top:10px">Monto pagado</label><input id="cmtPayAmt" type="number" step="0.01" class="textInput" value="${Number(c.paidAmount||0)}" /><div class="row" style="gap:10px;margin-top:10px"><div style="flex:1"><label class="fieldLabel">Estado</label><select id="cmtPayStatus" class="textInput">${statuses.map(st=>`<option value="${st}" ${String(c.status)===st?'selected':''}>${st}</option>`).join("")}</select></div><div style="flex:1"><label class="fieldLabel">Fuente</label><select id="cmtPaySource" class="textInput"><option value="">—</option>${srcOptions}</select></div></div><label class="fieldLabel" style="margin-top:10px">Fecha pago</label><input id="cmtPayDate" type="date" class="textInput" value="${(c.paidAt||new Date().toISOString()).slice(0,10)}" /><label class="fieldLabel" style="margin-top:10px">Nota</label><textarea id="cmtPayNote" class="textInput" rows="3">${escapeHtml(c.notes||"")}</textarea><div class="hr" style="margin:12px 0"></div><div><strong>Historial reciente</strong></div>${hist}</div><div class="modalFooter"><div></div><button class="btn primary" onclick="saveFinanceCommitmentPayment('${c.id}')">Guardar</button></div></div></div>`;
+  showModal(html);
+  setTimeout(()=>{ const el=document.querySelector('#cmtPaySource'); if(el) el.value=c.paymentSourceId||""; },0);
+}
+
+function saveFinanceCommitmentPayment(instanceId){
+  financeEnsureCommitments();
+  const inst = (state.financeCommitmentInstances||[]).find(x=>x.id===instanceId);
+  if(!inst) return;
+  const expectedAmount = Number(document.querySelector("#cmtInstExpected")?.value||inst.expectedAmount||0);
+  const paidAmount = Number(document.querySelector("#cmtPayAmt")?.value||0);
+  const date = document.querySelector("#cmtPayDate")?.value || new Date().toISOString().slice(0,10);
+  const status = (document.querySelector("#cmtPayStatus")?.value||"pending");
+  const sourceId = document.querySelector("#cmtPaySource")?.value || null;
+  const noteExtra = (document.querySelector("#cmtPayNote")?.value||"").trim();
+  const src = (state.financePaymentSources||[]).find(s=>s.id===sourceId);
+  const t = financeCommitmentTemplateById(inst.templateId);
+
+  inst.expectedAmount = expectedAmount;
+  inst.actualAmount = paidAmount || inst.actualAmount;
+  inst.paidAmount = paidAmount;
+  inst.paidAt = paidAmount>0 ? new Date(`${date}T12:00:00`).toISOString() : null;
+  inst.paymentSourceId = sourceId;
+  inst.notes = noteExtra;
+  inst.status = status;
+  inst.updatedAt = new Date().toISOString();
+
+  if(t){ t.lastKnownAmount = expectedAmount || t.lastKnownAmount || t.baseAmount; t.updatedAt = new Date().toISOString(); }
+
+  if(paidAmount>0){
+    addFinanceEntry({
+      type: "expense",
+      amount: paidAmount,
+      accountId: state.financeLastAccountId || (state.financeAccounts||[])[0]?.id,
+      category: "Servicios",
+      reason: "planificado",
+      note: `Compromisos · ${(t?.name||'Compromiso')}${noteExtra?(" · "+noteExtra):""}`,
+      date: new Date(`${date}T12:00:00`).toISOString(),
+      kind: "commitment_payment",
+      commitmentId: inst.templateId,
+      commitmentInstanceId: inst.id,
+      paymentSourceId: sourceId,
+      usedDebtSource: !!(src && (src.isDebtInstrument || src.sourceType==="loan"))
+    });
+  }
+
+  if(paidAmount>0 && src && (src.isDebtInstrument || src.sourceType==="loan")){
+    inst.status = (status==="paid" || paidAmount>=expectedAmount) ? "covered_by_debt" : status;
+    state.financeLoanUsageLedger.unshift({
+      id: uid("loanuse"),
+      sourceId: src.id,
+      commitmentInstanceId: inst.id,
+      amount: paidAmount,
+      date: new Date(`${date}T12:00:00`).toISOString(),
+      usageType: "bill_payment",
+      note: noteExtra || ""
+    });
+  }
+
   persist();
   closeModal();
   view();
 }
 
-function _financeNextDueDate(dueDay){
+function renderFinanceCommitmentsTab(){
+  const fmt = _financeFmt;
+  const model = financeCommitmentMonthModel(getCurrentMonthKey());
   const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const candidate = new Date(y, m, dueDay, 12, 0, 0);
-  if(candidate < now){
-    return new Date(y, m+1, dueDay, 12, 0, 0);
-  }
-  return candidate;
-}
 
-function financeCommitmentPaidInMonth(commitmentId, monthKey){
-  const mk = monthKey || getCurrentMonthKey();
-  const ledger = financeActiveLedger();
-  for(const e of ledger){
-    if(e.archived) continue;
-    if(String(e.kind||"")!=="commitment_payment") continue;
-    if(e.commitmentId!==commitmentId) continue;
-    const d = new Date(e.date);
-    const y = d.getFullYear();
-    const m = String(d.getMonth()+1).padStart(2,"0");
-    if(`${y}-${m}`===mk) return true;
-  }
-  return false;
-}
-
-function openFinanceCommitmentPayModal(id){
-  financeEnsureCommitments();
-  const c = (state.financeCommitments||[]).find(x=>x.id===id);
-  if(!c) return;
-
-  if(!(state.financeAccounts||[]).length){
-    alert("Crea una cuenta primero en Finanzas.");
-    return;
-  }
-
-  const accId = state.financeLastAccountId || state.financeAccounts[0].id;
-  const accOptions = (state.financeAccounts||[]).map(a=>`<option value="${a.id}" ${a.id===accId?'selected':''}>${escapeHtml(a.name)}</option>`).join("");
-
-  const today = new Date();
-  const isoDate = today.toISOString().slice(0,10);
-  const isoTime = today.toTimeString().slice(0,5);
-
-  const html = `
-    <div class="modalOverlay" onclick="closeModal(event)">
-      <div class="modal modalBig" onclick="event.stopPropagation()">
-        <div class="modalHeader">
-          <div class="modalTitle">Registrar pago</div>
-          <button class="iconBtn" onclick="closeModal()">✕</button>
-        </div>
-        <div class="modalBody modalScroll">
-          <div class="muted">Compromiso: <strong>${escapeHtml(c.name)}</strong></div>
-
-          <div class="row" style="gap:10px; margin-top:10px">
-            <div style="flex:1">
-              <label class="fieldLabel">Cuenta</label>
-              <select id="cmtPayAcc" class="textInput">${accOptions}</select>
-            </div>
-            <div style="width:160px">
-              <label class="fieldLabel">Monto</label>
-              <input id="cmtPayAmt" type="number" step="0.01" class="textInput" value="${Number(c.amount||0)}" />
-            </div>
-          </div>
-
-          <div class="row" style="gap:10px; margin-top:10px">
-            <div style="flex:1">
-              <label class="fieldLabel">Fecha</label>
-              <input id="cmtPayDate" type="date" class="textInput" value="${isoDate}" />
-            </div>
-            <div style="width:160px">
-              <label class="fieldLabel">Hora</label>
-              <input id="cmtPayTime" type="time" class="textInput" value="${isoTime}" />
-            </div>
-          </div>
-
-          <label class="fieldLabel" style="margin-top:10px">Nota</label>
-          <input id="cmtPayNote" class="textInput" placeholder="Opcional" value="" />
-        </div>
-        <div class="modalFooter">
-          <div></div>
-          <button class="btn primary" onclick="saveFinanceCommitmentPayment('${c.id}')">Guardar</button>
-        </div>
-      </div>
-    </div>
-  `;
-  showModal(html);
-}
-
-function saveFinanceCommitmentPayment(commitmentId){
-  const c = (state.financeCommitments||[]).find(x=>x.id===commitmentId);
-  if(!c) return;
-
-  const accountId = document.querySelector("#cmtPayAcc")?.value;
-  const amount = Number(document.querySelector("#cmtPayAmt")?.value||0);
-  const date = document.querySelector("#cmtPayDate")?.value || new Date().toISOString().slice(0,10);
-  const time = document.querySelector("#cmtPayTime")?.value || "12:00";
-  const noteExtra = (document.querySelector("#cmtPayNote")?.value||"").trim();
-
-  const iso = new Date(`${date}T${time}:00`).toISOString();
-  addFinanceEntry({
-    type: "expense",
-    amount,
-    accountId,
-    category: "Servicios",
-    reason: "planificado",
-    note: `Compromisos · ${c.name}${noteExtra?(" · "+noteExtra):""}`,
-    date: iso,
-    kind: "commitment_payment",
-    commitmentId
+  const byDue = {today:[], week:[], month:[]};
+  model.instances.forEach(i=>{
+    const due = new Date(`${i.dueDate}T12:00:00`);
+    const diff = Math.floor((due-now)/(24*60*60*1000));
+    if(diff===0) byDue.today.push(i);
+    else if(diff>0 && diff<=7) byDue.week.push(i);
+    else byDue.month.push(i);
+    if(["pending","partial"].includes(String(i.status||"pending")) && due < now) i.status = "overdue";
   });
 
-  closeModal();
-  view();
-}
+  const row = (i)=>`<div class="finDebtItem" style="cursor:pointer" onclick="openFinanceCommitmentPayModal('${i.id}')"><div class="finDebtLeft"><div class="finDebtName">${escapeHtml(i.template?.name||i.label)}</div><div class="finDebtMeta">${escapeHtml(i.template?.category||"Otros")} · Vence ${i.dueDate}</div><div class="finDebtMeta">Fuente: ${escapeHtml(((state.financePaymentSources||[]).find(s=>s.id===i.paymentSourceId)?.name)||"—")}</div></div><div class="finDebtRight"><div class="finDebtPay">S/ ${fmt(i.expectedAmount||0)}</div><div class="finDebtMeta">Pagado S/ ${fmt(i.paidAmount||0)}</div><div>${financeCommitmentStatusChip(i.status)}</div></div></div>`;
 
-function renderFinanceCommitmentsTab(){
-  financeEnsureCommitments();
-  const fmt = _financeFmt;
-  const monthKey = getCurrentMonthKey();
+  const list = model.instances.map(row).join("") || `<div class="muted">Aún no tienes compromisos. Crea uno con “＋ Nuevo”.</div>`;
+  const dueHtml = (arr, empty)=>arr.map(i=>`<div class="dueRow"><div>${escapeHtml(i.template?.name||i.label)}</div><div class="muted">${i.dueDate} · S/ ${fmt(i.expectedAmount||0)}</div></div>`).join("") || `<div class="muted">${empty}</div>`;
 
-  const list = (state.financeCommitments||[])
-    .filter(x=>x.active!==false)
-    .sort((a,b)=>(Number(a.dueDay||1)-Number(b.dueDay||1)))
-    .map(c=>{
-      const paid = financeCommitmentPaidInMonth(c.id, monthKey);
-      return `
-        <div class="finDebtItem" style="cursor:pointer" onclick="openFinanceCommitmentModalById('${c.id}')">
-          <div class="finDebtLeft">
-            <div class="finDebtName">${escapeHtml(c.name)}</div>
-            <div class="finDebtMeta">${escapeHtml(c.group||"")} · Día ${Number(c.dueDay||1)}</div>
-          </div>
-          <div class="finDebtRight">
-            <div class="finDebtPay">S/ ${fmt(c.amount||0)}</div>
-            <div class="finDebtMeta">${paid ? "✅ Pagado este mes" : "⏳ Pendiente"}</div>
-          </div>
-        </div>
-      `;
-    }).join("") || `<div class="muted">Aún no tienes compromisos. Crea uno con “＋ Nuevo”.</div>`;
+  const loanSources = (state.financePaymentSources||[]).filter(s=>s.isDebtInstrument || s.sourceType==="loan");
+  const loanSummary = loanSources.map(s=>{
+    const uses = (state.financeLoanUsageLedger||[]).filter(u=>u.sourceId===s.id && String((u.date||"").slice(0,7))===model.mk);
+    const used = uses.reduce((a,b)=>a+Number(b.amount||0),0);
+    return `<div class="dueRow"><div>${escapeHtml(s.name)} · usado S/ ${fmt(used)}</div><div class="muted">${uses.slice(0,3).map(u=>{ const ci=(state.financeCommitmentInstances||[]).find(i=>i.id===u.commitmentInstanceId); const t=financeCommitmentTemplateById(ci?.templateId); return `${escapeHtml(t?.name||'Compromiso')} S/ ${fmt(u.amount||0)}`; }).join(' · ') || 'Sin movimientos'}</div></div>`;
+  }).join("") || `<div class="muted">Sin fuentes de deuda configuradas.</div>`;
 
-  // Due lists
-  const now = new Date();
-  const inDays = (n)=> new Date(now.getTime() + n*24*60*60*1000);
-  const endWeek = inDays(7);
+  const insight = `${model.instances.filter(i=>["paid","covered_by_debt"].includes(i.status)).length} de ${model.instances.length} compromisos resueltos. ${model.overdue>0?"Tienes compromisos vencidos.":"Sin vencidos por ahora."}`;
 
-  const dueThisWeek = (state.financeCommitments||[]).filter(c=>{
-    if(c.active===false) return false;
-    const d = _financeNextDueDate(Number(c.dueDay||1));
-    return d >= now && d <= endWeek;
-  }).sort((a,b)=>_financeNextDueDate(a.dueDay)-_financeNextDueDate(b.dueDay));
-
-  const y= now.getFullYear(); const m= now.getMonth();
-  const monthStart = new Date(y,m,1,0,0,0);
-  const monthEnd = new Date(y,m+1,0,23,59,59);
-  const dueThisMonth = (state.financeCommitments||[]).filter(c=>{
-    if(c.active===false) return false;
-    const d = new Date(y,m, Number(c.dueDay||1), 12,0,0);
-    return d>=monthStart && d<=monthEnd;
-  }).sort((a,b)=>Number(a.dueDay||1)-Number(b.dueDay||1));
-
-  const dueWeekHtml = dueThisWeek.map(c=>{
-    const d = _financeNextDueDate(Number(c.dueDay||1));
-    const label = d.toLocaleDateString("es-PE",{weekday:"short", day:"2-digit", month:"short"});
-    return `<div class="dueRow">
-      <div>📌 ${escapeHtml(c.name)}</div>
-      <div class="muted">${label} · S/ ${fmt(c.amount||0)}</div>
-    </div>`;
-  }).join("") || `<div class="muted">Nada vence en los próximos 7 días.</div>`;
-
-  const dueMonthHtml = dueThisMonth.map(c=>{
-    return `<div class="dueRow">
-      <div>📆 ${escapeHtml(c.name)}</div>
-      <div class="muted">Día ${String(Number(c.dueDay||1)).padStart(2,'0')} · S/ ${fmt(c.amount||0)}</div>
-    </div>`;
-  }).join("") || `<div class="muted">Nada programado este mes.</div>`;
-
-  return `
-    <section class="card homeCard homeWide">
-      <div class="cardTop">
-        <h2 class="cardTitle">Compromisos</h2>
-        <button class="iconBtn" onclick="openFinanceCommitmentModal()">＋</button>
-      </div>
-      <div class="hr"></div>
-
-      <div class="row" style="gap:12px; flex-wrap:wrap">
-        <div class="miniCard">
-          <div class="miniTitle">Esta semana</div>
-          <div class="miniBody">${dueWeekHtml}</div>
-        </div>
-        <div class="miniCard">
-          <div class="miniTitle">Este mes</div>
-          <div class="miniBody">${dueMonthHtml}</div>
-        </div>
-      </div>
-
-      <div class="hr" style="margin-top:12px"></div>
-      <div class="cardTop" style="margin-top:2px">
-        <h3 class="cardTitle" style="font-size:14px">Lista</h3>
-      </div>
-      <div class="finDebtList">${list}</div>
-    </section>
-  `;
+  return `<section class="card homeCard homeWide"><div class="cardTop"><h2 class="cardTitle">Compromisos</h2><button class="iconBtn" onclick="openFinanceCommitmentModal()">＋</button></div><div class="hr"></div><div class="row" style="gap:8px;flex-wrap:wrap"><div class="miniCard"><div class="miniTitle">Total mes</div><div class="miniBody">S/ ${fmt(model.total)}</div></div><div class="miniCard"><div class="miniTitle">Pagado</div><div class="miniBody">S/ ${fmt(model.paid)}</div></div><div class="miniCard"><div class="miniTitle">Pendiente</div><div class="miniBody">S/ ${fmt(model.pending)}</div></div><div class="miniCard"><div class="miniTitle">Vencido</div><div class="miniBody">S/ ${fmt(model.overdue)}</div></div><div class="miniCard"><div class="miniTitle">Cubierto con deuda</div><div class="miniBody">S/ ${fmt(model.coveredByDebt)}</div></div><div class="miniCard"><div class="miniTitle">Resuelto</div><div class="miniBody">${model.resolutionPct}%</div></div></div><div class="finDebtHint" style="margin-top:10px">💡 ${insight}</div><div class="hr" style="margin-top:12px"></div><div class="row" style="gap:12px;flex-wrap:wrap"><div class="miniCard"><div class="miniTitle">Por vencer hoy</div><div class="miniBody">${dueHtml(byDue.today,'Nada para hoy.')}</div></div><div class="miniCard"><div class="miniTitle">Próximos 7 días</div><div class="miniBody">${dueHtml(byDue.week,'Nada en 7 días.')}</div></div><div class="miniCard"><div class="miniTitle">Resto del mes</div><div class="miniBody">${dueHtml(byDue.month,'Sin más vencimientos.')}</div></div></div><div class="hr" style="margin-top:12px"></div><div class="miniCard"><div class="miniTitle">Uso de préstamos</div><div class="miniBody">${loanSummary}</div></div><div class="hr" style="margin-top:12px"></div><div class="cardTop" style="margin-top:2px"><h3 class="cardTitle" style="font-size:14px">Este mes</h3></div><div class="finDebtList">${list}</div></section>`;
 }
 
 function openFinanceCommitmentModalById(id){
-  const c = (state.financeCommitments||[]).find(x=>x.id===id);
+  const c = (state.financeCommitmentTemplates||[]).find(x=>x.id===id);
   if(!c) return;
   openFinanceCommitmentModal(c);
 }
