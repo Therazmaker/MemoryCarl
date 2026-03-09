@@ -20514,6 +20514,8 @@ function computeTeamIntelligencePanel(db, teamId){
         `<b>Confianza:</b> ${veredicto.confianza}<br>` +
         `<b>Tipo de discrepancia:</b> ${veredicto.tipoDiscrepancia}<br>` +
         `<b>Filtro de ruido:</b> ${aprendizajeMsg}`;
+    };
+  }
 
     // ═══════════════════════════════════════════════════════════════════
     // ⚡ MEDIO TIEMPO — Análisis en vivo + Predicción con aprendizaje
@@ -20928,9 +20930,6 @@ function computeTeamIntelligencePanel(db, teamId){
         };
       });
     }
-
-    };
-  }
 
   }
 
