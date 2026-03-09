@@ -432,7 +432,7 @@ function evaluateMarkets(aiPrediction, manualAdjustments, actual){
       hits,
       matchAccuracy,
       brierScore,
-      valuableAlert: !!record?.aiPrediction?.valueAlert
+      valuableAlert: !!aiPrediction?.valueAlert
     }
   };
 }
