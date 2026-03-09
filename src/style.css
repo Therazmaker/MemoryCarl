@@ -2067,3 +2067,9 @@ body{
 
 /* Football Lab */
 #fbModalBackdrop .modal{max-width:820px;}
+
+.finSummaryGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.finSummaryCard{padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.1);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02));display:grid;gap:4px}
+.finSummaryCard span{font-size:12px;opacity:.75;text-transform:uppercase;letter-spacing:.04em}
+.finSummaryCard strong{font-size:18px;font-weight:900}
+.finMissionControl .cardTitle{font-size:20px}

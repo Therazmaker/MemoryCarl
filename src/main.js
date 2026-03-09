@@ -1427,6 +1427,12 @@ finance_accounts: mcLoadAny("memorycarl_v2_finance_accounts", []),
 finance_ledger: mcLoadAny("memorycarl_v2_finance_ledger", []),
 finance_debts: mcLoadAny("memorycarl_v2_finance_debts", []),
 finance_commitments: mcLoadAny("memorycarl_v2_finance_commitments", []),
+finance_obligations: mcLoadAny("memorycarl_v2_finance_obligations", []),
+finance_payment_sources: mcLoadAny("memorycarl_v2_finance_payment_sources", []),
+finance_transactions: mcLoadAny("memorycarl_v2_finance_transactions", []),
+finance_internal_balances: mcLoadAny("memorycarl_v2_finance_internal_balances", []),
+finance_insights: mcLoadAny("memorycarl_v2_finance_insights", []),
+finance_schema_version: mcLoadAny("memorycarl_v2_finance_schema_version", 1),
 finance_categories: mcLoadAny("memorycarl_v2_finance_categories", []),
 finance_meta: mcLoadAny("memorycarl_v2_finance_meta", null),
 finance_projection_mode: localStorage.getItem("memorycarl_v2_finance_projection_mode") || "",
@@ -1894,6 +1900,12 @@ function persist(){
     if(LS.financeResetAt) save(LS.financeResetAt, state.financeResetAt||null);
     if(LS.financeDebts) save(LS.financeDebts, state.financeDebts||[]);
     if(LS.financeCommitments) save(LS.financeCommitments, state.financeCommitments||[]);
+    if(LS.financeObligations) save(LS.financeObligations, state.financeObligations||[]);
+    if(LS.financePaymentSources) save(LS.financePaymentSources, state.financePaymentSources||[]);
+    if(LS.financeTransactions) save(LS.financeTransactions, state.financeTransactions||[]);
+    if(LS.financeInternalBalances) save(LS.financeInternalBalances, state.financeInternalBalances||[]);
+    if(LS.financeInsights) save(LS.financeInsights, state.financeInsights||[]);
+    if(LS.financeSchemaVersion) save(LS.financeSchemaVersion, Number(state.financeSchemaVersion||2));
     if(LS.financeMeta) save(LS.financeMeta, state.financeMeta||{});
   }catch(e){}
 }
@@ -1922,6 +1934,12 @@ function exportBackup(){
     financeLedger: state.financeLedger,
     financeDebts: state.financeDebts,
     financeCommitments: state.financeCommitments,
+    financeObligations: state.financeObligations,
+    financePaymentSources: state.financePaymentSources,
+    financeTransactions: state.financeTransactions,
+    financeInternalBalances: state.financeInternalBalances,
+    financeInsights: state.financeInsights,
+    financeSchemaVersion: state.financeSchemaVersion,
     financeMeta: state.financeMeta
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -1972,6 +1990,12 @@ function importBackup(file){
       const financeLedger = Array.isArray(data.financeLedger) ? data.financeLedger : [];
       const financeDebts = Array.isArray(data.financeDebts) ? data.financeDebts : [];
       const financeCommitments = Array.isArray(data.financeCommitments) ? data.financeCommitments : [];
+      const financeObligations = Array.isArray(data.financeObligations) ? data.financeObligations : [];
+      const financePaymentSources = Array.isArray(data.financePaymentSources) ? data.financePaymentSources : [];
+      const financeTransactions = Array.isArray(data.financeTransactions) ? data.financeTransactions : [];
+      const financeInternalBalances = Array.isArray(data.financeInternalBalances) ? data.financeInternalBalances : [];
+      const financeInsights = Array.isArray(data.financeInsights) ? data.financeInsights : [];
+      const financeSchemaVersion = Number(data.financeSchemaVersion || 1);
       const financeMeta = (data.financeMeta && typeof data.financeMeta==="object") ? data.financeMeta : {};
 
 
@@ -2015,6 +2039,12 @@ function importBackup(file){
       if(financeLedger.length) state.financeLedger = financeSanitizeImportedLedger(financeLedger, { detachAccounts:true });
       state.financeDebts = financeDebts;
       state.financeCommitments = financeCommitments;
+      state.financeObligations = financeObligations;
+      state.financePaymentSources = financePaymentSources;
+      state.financeTransactions = financeTransactions;
+      state.financeInternalBalances = financeInternalBalances;
+      state.financeInsights = financeInsights;
+      state.financeSchemaVersion = financeSchemaVersion;
       state.financeMeta = financeMeta;
       try{ financeRecomputeBalances(); }catch(_e){}
 
@@ -2135,6 +2165,12 @@ if(payload.finance_accounts !== undefined) finApplyRaw("memorycarl_v2_finance_ac
 if(payload.finance_ledger !== undefined) finApplyRaw("memorycarl_v2_finance_ledger", payload.finance_ledger);
 if(payload.finance_debts !== undefined) finApplyRaw("memorycarl_v2_finance_debts", payload.finance_debts);
 if(payload.finance_commitments !== undefined) finApplyRaw("memorycarl_v2_finance_commitments", payload.finance_commitments);
+if(payload.finance_obligations !== undefined) finApplyRaw("memorycarl_v2_finance_obligations", payload.finance_obligations);
+if(payload.finance_payment_sources !== undefined) finApplyRaw("memorycarl_v2_finance_payment_sources", payload.finance_payment_sources);
+if(payload.finance_transactions !== undefined) finApplyRaw("memorycarl_v2_finance_transactions", payload.finance_transactions);
+if(payload.finance_internal_balances !== undefined) finApplyRaw("memorycarl_v2_finance_internal_balances", payload.finance_internal_balances);
+if(payload.finance_insights !== undefined) finApplyRaw("memorycarl_v2_finance_insights", payload.finance_insights);
+if(payload.finance_schema_version !== undefined) finApplyRaw("memorycarl_v2_finance_schema_version", payload.finance_schema_version);
 if(payload.finance_categories !== undefined) finApplyRaw("memorycarl_v2_finance_categories", payload.finance_categories);
 if(payload.finance_meta !== undefined) finApplyRaw("memorycarl_v2_finance_meta", payload.finance_meta);
 if(payload.finance_projection_mode !== undefined) try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(payload.finance_projection_mode||"")); }catch(e){}
@@ -11286,12 +11322,24 @@ LS.financeAccounts = "memorycarl_v2_finance_accounts";
 LS.financeResetAt = "memorycarl_v2_finance_resetAt";
 LS.financeDebts = "memorycarl_v2_finance_debts";
 LS.financeCommitments = "memorycarl_v2_finance_commitments";
+LS.financeObligations = "memorycarl_v2_finance_obligations";
+LS.financePaymentSources = "memorycarl_v2_finance_payment_sources";
+LS.financeTransactions = "memorycarl_v2_finance_transactions";
+LS.financeInternalBalances = "memorycarl_v2_finance_internal_balances";
+LS.financeInsights = "memorycarl_v2_finance_insights";
+LS.financeSchemaVersion = "memorycarl_v2_finance_schema_version";
 
 state.financeLedger = load(LS.financeLedger, []);
 state.financeAccounts = load(LS.financeAccounts, []);
 state.financeResetAt = load(LS.financeResetAt, null);
 state.financeDebts = load(LS.financeDebts, []);
 state.financeCommitments = load(LS.financeCommitments, []);
+state.financeObligations = load(LS.financeObligations, []);
+state.financePaymentSources = load(LS.financePaymentSources, []);
+state.financeTransactions = load(LS.financeTransactions, []);
+state.financeInternalBalances = load(LS.financeInternalBalances, []);
+state.financeInsights = load(LS.financeInsights, []);
+state.financeSchemaVersion = load(LS.financeSchemaVersion, 1);
 
 
 // Quick finance wipe via URL: ?finreset=1 (useful when you want to start clean)
@@ -11316,6 +11364,12 @@ persist = function(){
   save(LS.financeAccounts, state.financeAccounts);
   save(LS.financeResetAt, state.financeResetAt);
   try{ save(LS.financeDebts, state.financeDebts); }catch(_e){}
+  try{ save(LS.financeObligations, state.financeObligations||[]); }catch(_e){}
+  try{ save(LS.financePaymentSources, state.financePaymentSources||[]); }catch(_e){}
+  try{ save(LS.financeTransactions, state.financeTransactions||[]); }catch(_e){}
+  try{ save(LS.financeInternalBalances, state.financeInternalBalances||[]); }catch(_e){}
+  try{ save(LS.financeInsights, state.financeInsights||[]); }catch(_e){}
+  try{ save(LS.financeSchemaVersion, Number(state.financeSchemaVersion||2)); }catch(_e){}
   try{ save(LS.financeMeta, state.financeMeta); }catch(_e){}
   try{ save(LS.financeCategories, state.financeCategories); }catch(_e){}
   try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(state.financeProjectionMode||"normal")); }catch(_e){}
@@ -11365,6 +11419,170 @@ function financeMigrateV2(){
   persist();
 }
 
+function financeEnsureMissionControlStructures(){
+  if(!Array.isArray(state.financeObligations)) state.financeObligations = [];
+  if(!Array.isArray(state.financePaymentSources)) state.financePaymentSources = [];
+  if(!Array.isArray(state.financeTransactions)) state.financeTransactions = [];
+  if(!Array.isArray(state.financeInternalBalances)) state.financeInternalBalances = [];
+  if(!Array.isArray(state.financeInsights)) state.financeInsights = [];
+
+  if(!(state.financePaymentSources||[]).length){
+    state.financePaymentSources = [
+      { id: uid("fps"), name:"Efectivo", sourceType:"cash", owner:"me", affectsMyCashflow:true, createsInternalDebt:false, isActive:true },
+      { id: uid("fps"), name:"Cuenta bancaria", sourceType:"bank", owner:"me", affectsMyCashflow:true, createsInternalDebt:false, isActive:true },
+      { id: uid("fps"), name:"Tarjeta propia", sourceType:"credit_card", owner:"me", affectsMyCashflow:false, createsInternalDebt:false, isActive:true },
+      { id: uid("fps"), name:"Tarjeta esposa", sourceType:"credit_card", owner:"wife", affectsMyCashflow:false, createsInternalDebt:true, isActive:true },
+      { id: uid("fps"), name:"Tercero", sourceType:"third_party", owner:"other", affectsMyCashflow:false, createsInternalDebt:true, isActive:true }
+    ];
+  }
+
+  if(!(state.financeObligations||[]).length && Array.isArray(state.financeCommitments)){
+    state.financeObligations = state.financeCommitments.map(c=>({
+      id: c.id || uid("obl"),
+      name: c.name || "Compromiso",
+      category: c.group || "General",
+      type: "essential_fixed",
+      amountExpected: Number(c.amount||0),
+      dueDate: Number(c.dueDay||1),
+      recurrence: "monthly",
+      priority: "high",
+      isActive: c.active!==false,
+      status: "pending",
+      notes: c.note || "",
+      legacyCommitmentId: c.id || null
+    }));
+  }
+
+  if(!(state.financeTransactions||[]).length && Array.isArray(state.financeLedger)){
+    state.financeTransactions = state.financeLedger.map(e=>({
+      id: e.id || uid("txn"),
+      date: e.date || new Date().toISOString(),
+      amount: Number(e.amount||0),
+      direction: e.type === "income" ? "inflow" : "outflow",
+      obligationId: null,
+      sourceId: null,
+      paidBy: "me",
+      responsibleParty: "me",
+      impactMode: e.type === "income" ? "income" : "direct_expense",
+      notes: e.note || "",
+      tags: [],
+      archived: !!e.archived,
+      legacyLedgerId: e.id || null
+    }));
+  }
+
+  state.financeSchemaVersion = 2;
+}
+
+function financeGetMonthKeyFromIso(iso){
+  const d = new Date(iso || Date.now());
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  return `${y}-${m}`;
+}
+
+function financeMissionControlModel(monthKey){
+  financeEnsureMissionControlStructures();
+  const mk = monthKey || getCurrentMonthKey();
+  const tx = (state.financeTransactions||[]).filter(t=> financeGetMonthKeyFromIso(t.date)===mk && !t.archived);
+  const incomeConfirmed = tx.filter(t=>t.direction==='inflow').reduce((s,t)=>s+Number(t.amount||0),0);
+  const paidNow = tx.filter(t=>t.direction==='outflow').reduce((s,t)=>s+Number(t.amount||0),0);
+  const obligations = (state.financeObligations||[]).filter(o=>o.isActive!==false);
+  const obligationsMonth = obligations.reduce((s,o)=>s+Number(o.amountExpected||0),0);
+  const pending = Math.max(0, obligationsMonth - paidNow);
+  const foreignUse = tx.filter(t=>String(t.impactMode||'').includes('internal_debt')).reduce((s,t)=>s+Number(t.amount||0),0);
+  const internalDebt = (state.financeInternalBalances||[]).filter(b=>b.balanceType==='owed_by_me').reduce((s,b)=>s+Number(b.currentAmount||0),0);
+  const realAvailable = (state.financeAccounts||[]).reduce((s,a)=>s+Number(a.balance||0),0);
+  const essential = obligations.filter(o=>String(o.type||'').includes('essential') || String(o.type||'').includes('debt')).reduce((s,o)=>s+Number(o.amountExpected||0),0);
+  const margin = incomeConfirmed - essential;
+  const riskScore = pending > incomeConfirmed ? 'ALTO' : (pending > incomeConfirmed*0.6 ? 'MEDIO' : 'BAJO');
+
+  const upcoming = obligations.map(o=>{
+    const day = Number(o.dueDate||1);
+    const due = new Date(`${mk}-${String(Math.max(1,Math.min(31,day))).padStart(2,'0')}T12:00:00`);
+    const diff = Math.ceil((due.getTime()-Date.now())/(24*60*60*1000));
+    const bucket = diff<=0 ? 'hoy' : (diff<=7?'esta semana':(diff<=14?'urgente':'postergable'));
+    return {...o, due, bucket};
+  }).sort((a,b)=>a.due-b.due);
+
+  return {mk,incomeConfirmed,obligationsMonth,paidNow,pending,realAvailable,foreignUse,internalDebt,margin,riskScore,upcoming,tx};
+}
+
+function financeGenerateInsights(monthKey){
+  const m = financeMissionControlModel(monthKey);
+  const list = [];
+  if(m.upcoming.length){
+    const u = m.upcoming[0];
+    list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:'warning', title:'Prioridad inmediata', message:`Esta semana tu prioridad es cubrir ${u.name} (S/ ${_financeFmt(u.amountExpected)}).`, relatedIds:[u.id], status:'open' });
+  }
+  if(m.foreignUse>0){
+    list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:'urgent', title:'Uso de dinero ajeno', message:`Ya cargaste S/ ${_financeFmt(m.foreignUse)} a fuentes de terceros este mes.`, relatedIds:[], status:'open' });
+  }
+  list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:(m.margin<0?'urgent':'info'), title:'Margen real del mes', message:`Tu margen real después de esenciales es S/ ${_financeFmt(m.margin)}.`, relatedIds:[], status:'open' });
+  state.financeInsights = list;
+  return list;
+}
+
+function financePreviewImpact({amount,impactMode,sourceId,responsibleParty}){
+  const src = (state.financePaymentSources||[]).find(s=>s.id===sourceId);
+  const amt = Number(amount||0);
+  if((impactMode==='internal_debt') || (src && src.createsInternalDebt) || (responsibleParty && responsibleParty!=='me')){
+    return `Esto NO reducirá tu caja real ahora, pero aumentará tu deuda interna en S/ ${_financeFmt(amt)}.`;
+  }
+  if(impactMode==='income') return `Esto aumentará tu caja real en S/ ${_financeFmt(amt)}.`;
+  return `Esto reducirá tu caja real en S/ ${_financeFmt(amt)}.`;
+}
+
+function financeUpsertInternalBalance(personKey, delta){
+  if(!personKey || !delta) return;
+  const idx = (state.financeInternalBalances||[]).findIndex(b=>b.personKey===personKey && b.balanceType==='owed_by_me');
+  if(idx===-1){
+    state.financeInternalBalances.unshift({ id:uid('ib'), personKey, balanceType:'owed_by_me', currentAmount:Number(delta||0), updatedAt:new Date().toISOString(), notes:'' });
+  }else{
+    state.financeInternalBalances[idx].currentAmount = Number(state.financeInternalBalances[idx].currentAmount||0)+Number(delta||0);
+    state.financeInternalBalances[idx].updatedAt = new Date().toISOString();
+  }
+}
+
+function financeAddUnifiedTransaction(tx){
+  financeEnsureMissionControlStructures();
+  const item = {
+    id: uid('txn'),
+    date: tx.date || new Date().toISOString(),
+    amount: financeParseAmount(tx.amount),
+    direction: tx.direction || 'outflow',
+    obligationId: tx.obligationId || null,
+    sourceId: tx.sourceId || null,
+    paidBy: tx.paidBy || 'me',
+    responsibleParty: tx.responsibleParty || 'me',
+    impactMode: tx.impactMode || (tx.direction==='inflow'?'income':'direct_expense'),
+    notes: tx.notes || '',
+    tags: Array.isArray(tx.tags)?tx.tags:[],
+    archived:false
+  };
+  state.financeTransactions.unshift(item);
+  if(item.direction==='outflow' && item.impactMode==='internal_debt'){
+    const person = item.paidBy==='wife' ? 'wife' : (item.paidBy||'other');
+    financeUpsertInternalBalance(person, item.amount);
+  }
+  persist();
+  return item;
+}
+
+function financeSyncLedgerToUnified(entry){
+  if(!entry || entry.__skipUnifiedSync) return;
+  financeAddUnifiedTransaction({
+    id: uid('txn'),
+    date: entry.date,
+    amount: entry.amount,
+    direction: entry.type==='income'?'inflow':'outflow',
+    paidBy:'me',
+    responsibleParty:'me',
+    impactMode: entry.type==='income'?'income':'direct_expense',
+    notes: entry.note || '',
+    tags:[entry.category||'']
+  });
+}
 
 function financeParseAmount(raw){
   // Robust parse for mobile/desktop:
@@ -11535,7 +11753,7 @@ function financeHardResetAllConfirm(){
 
 
 // run migration once
-try{ financeMigrateV2(); financeRecomputeBalances(); }catch(e){ console.warn("[Finance] migrate/recompute fail", e); }
+try{ financeMigrateV2(); financeEnsureMissionControlStructures(); financeRecomputeBalances(); }catch(e){ console.warn("[Finance] migrate/recompute fail", e); }
 
 /* ===== Finance CRUD ===== */
 
@@ -11583,6 +11801,7 @@ function addFinanceEntry({type, amount, accountId, category, reason, note, date}
   if(String(category||"").toLowerCase()==="mercado") state.financeLastMarketAccountId = accountId;
 
   financeRecomputeBalances();
+  financeSyncLedgerToUnified(entry);
   persist();
   view();
   return entry;
@@ -11751,6 +11970,7 @@ function openFinanceAccountEdit(accountId){
 }
 
 function openFinanceEntryModal(existingId=null){
+  financeEnsureMissionControlStructures();
   if(!(state.financeAccounts||[]).length){
     alert("Primero crea una cuenta");
     return;
@@ -11785,6 +12005,10 @@ function openFinanceEntryModal(existingId=null){
     category: (existing?.category) || "Otros",
     reason: (existing?.reason) || "normal",
     accountId: (existing?.accountId) || (state.financeAccounts||[])[0]?.id,
+    sourceId: (state.financePaymentSources||[])[0]?.id || "",
+    paidBy: "me",
+    responsibleParty: "me",
+    impactMode: ((existing?.type)==="income"?"income":"direct_expense"),
     note: existingSplit.note
   };
 
@@ -11889,6 +12113,47 @@ function openFinanceEntryModal(existingId=null){
           </div>
         </div>
 
+        <div class="finEntryPickRow">
+          <div class="finEntryPickIcon">🏦</div>
+          <div class="finEntryPickText">
+            <div class="finEntryPickLabel">Fuente de pago</div>
+            <div class="finEntryPickValue">
+              <select id="finEntrySource">
+                ${(state.financePaymentSources||[]).filter(s=>s.isActive!==false).map(s=>`<option value="${s.id}">${escapeHtml(s.name)} (${s.owner})</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="row" style="gap:10px">
+          <div class="finEntryField" style="flex:1">
+            <label class="fieldLabel">Quién pagó</label>
+            <select id="finEntryPaidBy" class="textInput">
+              <option value="me">Yo</option><option value="wife">Esposa</option><option value="shared">Compartido</option><option value="other">Otro</option>
+            </select>
+          </div>
+          <div class="finEntryField" style="flex:1">
+            <label class="fieldLabel">Responsabilidad real</label>
+            <select id="finEntryResponsible" class="textInput">
+              <option value="me">Yo</option><option value="wife">Esposa</option><option value="shared">Compartido</option><option value="other">Otro</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="finEntryField" style="margin-top:8px">
+          <label class="fieldLabel">Tipo de impacto</label>
+          <select id="finEntryImpact" class="textInput">
+            <option value="direct_expense">Gasto directo</option>
+            <option value="internal_debt">Deuda interna</option>
+            <option value="shared_expense">Gasto compartido</option>
+            <option value="reimbursement">Reembolso</option>
+            <option value="debt_payment">Pago de deuda</option>
+            <option value="income">Ingreso</option>
+          </select>
+        </div>
+
+        <div class="finDebtHint" id="finImpactPreview" style="margin-top:8px"></div>
+
         <div class="finEntryNote">
           <textarea id="finEntryNote" placeholder="Nota">${escapeHtml(draft.note)}</textarea>
         </div>
@@ -11971,6 +12236,29 @@ function openFinanceEntryModal(existingId=null){
     });
   });
 
+  const sourceSel = backdrop.querySelector('#finEntrySource');
+  const paidBySel = backdrop.querySelector('#finEntryPaidBy');
+  const responsibleSel = backdrop.querySelector('#finEntryResponsible');
+  const impactSel = backdrop.querySelector('#finEntryImpact');
+  const amountEl = backdrop.querySelector('#finEntryAmount');
+  if(sourceSel) sourceSel.value = draft.sourceId || sourceSel.value;
+  if(paidBySel) paidBySel.value = draft.paidBy || 'me';
+  if(responsibleSel) responsibleSel.value = draft.responsibleParty || 'me';
+  if(impactSel) impactSel.value = draft.impactMode || (draft.type==='income'?'income':'direct_expense');
+  function refreshImpactPreview(){
+    const target = backdrop.querySelector('#finImpactPreview');
+    if(!target) return;
+    const amt = financeParseAmount(amountEl?.value||0);
+    target.textContent = financePreviewImpact({
+      amount: amt,
+      impactMode: impactSel?.value || draft.impactMode,
+      sourceId: sourceSel?.value || draft.sourceId,
+      responsibleParty: responsibleSel?.value || draft.responsibleParty
+    });
+  }
+  [sourceSel,paidBySel,responsibleSel,impactSel,amountEl].forEach(el=> el && el.addEventListener('input', refreshImpactPreview));
+  refreshImpactPreview();
+
   // save
 backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
@@ -11980,6 +12268,10 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const reason = (backdrop.querySelector('#finEntryReason')?.value||'normal');
   const accountId = (backdrop.querySelector('#finEntryAccount')?.value||draft.accountId);
   const noteText = (backdrop.querySelector('#finEntryNote')?.value||'').trim();
+  const sourceId = (backdrop.querySelector('#finEntrySource')?.value||'');
+  const paidBy = (backdrop.querySelector('#finEntryPaidBy')?.value||'me');
+  const responsibleParty = (backdrop.querySelector('#finEntryResponsible')?.value||'me');
+  const impactMode = (backdrop.querySelector('#finEntryImpact')?.value|| (draft.type==='income'?'income':'direct_expense'));
 
   if(!amount || amount<=0){
     console.warn('[Finance] invalid amount', { rawAmount, amount });
@@ -12004,6 +12296,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
       note,
       date: dateISO
     });
+    financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
     toast('Actualizado ✅');
   }else{
     addFinanceEntry({
@@ -12015,6 +12308,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
       note,
       date: dateISO
     });
+    financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
     toast('Guardado ✅');
   }
   close();
@@ -14168,7 +14462,58 @@ try{
   window.openFinanceDebtPayModal = openFinanceDebtPayModal;
 }catch(e){}
 
+function renderFinanceMissionControl(){
+  const m = financeMissionControlModel(getCurrentMonthKey());
+  const insights = financeGenerateInsights(m.mk);
+  const fmt = _financeFmt;
+  const sourceRows = (state.financePaymentSources||[]).filter(s=>s.isActive!==false).map(s=>`
+    <div class="budgetRow"><div>${escapeHtml(s.name)}</div><div class="muted">${escapeHtml(s.sourceType)} · ${escapeHtml(s.owner)}</div></div>
+  `).join('') || '<div class="muted">Sin fuentes configuradas</div>';
 
+  const priorityRows = (m.upcoming||[]).slice(0,6).map(o=>`
+    <div class="finDueRow">
+      <div class="finDueLeft"><div class="finDueTitle">${escapeHtml(o.name)}</div><div class="muted">${escapeHtml(o.category||'General')} · ${escapeHtml(o.bucket)}</div></div>
+      <div class="finDueAmt">S/ ${fmt(o.amountExpected||0)}</div>
+    </div>
+  `).join('') || '<div class="muted">Sin obligaciones activas.</div>';
+
+  const insightRows = (insights||[]).map(i=>`<div class="finDebtHint ${i.level==='urgent'?'bad':'good'}"><strong>${escapeHtml(i.title)}:</strong> ${escapeHtml(i.message)}</div>`).join('');
+
+  return `
+    <section class="card homeCard homeWide finMissionControl">
+      <div class="cardTop"><h2 class="cardTitle">Mission Control · ${escapeHtml(m.mk)}</h2></div>
+      <div class="hr"></div>
+      <div class="finSummaryGrid">
+        <div class="finSummaryCard"><span>Ingreso confirmado</span><strong>S/ ${fmt(m.incomeConfirmed)}</strong></div>
+        <div class="finSummaryCard"><span>Obligaciones del mes</span><strong>S/ ${fmt(m.obligationsMonth)}</strong></div>
+        <div class="finSummaryCard"><span>Pagado hasta ahora</span><strong>S/ ${fmt(m.paidNow)}</strong></div>
+        <div class="finSummaryCard"><span>Pendiente</span><strong>S/ ${fmt(m.pending)}</strong></div>
+        <div class="finSummaryCard"><span>Disponible real</span><strong>S/ ${fmt(m.realAvailable)}</strong></div>
+        <div class="finSummaryCard"><span>Uso dinero ajeno</span><strong>S/ ${fmt(m.foreignUse)}</strong></div>
+        <div class="finSummaryCard"><span>Deuda interna</span><strong>S/ ${fmt(m.internalDebt)}</strong></div>
+        <div class="finSummaryCard"><span>Riesgo del mes</span><strong>${escapeHtml(m.riskScore)}</strong></div>
+      </div>
+    </section>
+
+    <section class="card homeCard homeWide">
+      <div class="cardTop"><h2 class="cardTitle">Prioridades inmediatas</h2></div>
+      <div class="hr"></div>
+      <div class="finDueWrap">${priorityRows}</div>
+    </section>
+
+    <section class="card homeCard homeWide">
+      <div class="cardTop"><h2 class="cardTitle">Fuentes de pago</h2></div>
+      <div class="hr"></div>
+      ${sourceRows}
+    </section>
+
+    <section class="card homeCard homeWide">
+      <div class="cardTop"><h2 class="cardTitle">Asistente</h2></div>
+      <div class="hr"></div>
+      <div style="display:grid;gap:10px">${insightRows}</div>
+    </section>
+  `;
+}
 
 
 
@@ -14185,6 +14530,7 @@ function viewFinance(){
   const topTabs = `
     <div class="finTopTabs">
       <button class="finTopTab ${state.financeSubTab==="main"?"active":""}" onclick="setFinanceSubTab('main')">Principal</button>
+      <button class="finTopTab ${state.financeSubTab==="mission"?"active":""}" onclick="setFinanceSubTab('mission')">Mission Control</button>
       <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
       <button class="finTopTab ${state.financeSubTab==="reminders"?"active":""}" onclick="setFinanceSubTab('reminders')">Recordatorios</button>
       <button class="finTopTab ${state.financeSubTab==="debts"?"active":""}" onclick="setFinanceSubTab('debts')">Deudas</button>
@@ -14331,11 +14677,14 @@ function viewFinance(){
     ${renderFinanceCommitmentsTab()}
   `;
 
+  const missionHtml = renderFinanceMissionControl();
+
   const body = (state.financeSubTab==="movements")
     ? movList
     : (state.financeSubTab==="reminders" ? remindersHtml
       : (state.financeSubTab==="debts" ? debtsHtml
-        : (state.financeSubTab==="commitments" ? commitmentsHtml : principalHtml)));
+        : (state.financeSubTab==="commitments" ? commitmentsHtml
+          : (state.financeSubTab==="mission" ? missionHtml : principalHtml))));
 
   return `
     ${topTabs}
@@ -14438,9 +14787,15 @@ function importFinanceSeed(data){
     if(data.financeLedger) state.financeLedger = financeSanitizeImportedLedger(data.financeLedger, { detachAccounts:true });
     if(data.financeDebts) state.financeDebts = Array.isArray(data.financeDebts) ? data.financeDebts : state.financeDebts;
     if(data.financeCommitments) state.financeCommitments = Array.isArray(data.financeCommitments) ? data.financeCommitments : state.financeCommitments;
+    if(data.financeObligations) state.financeObligations = Array.isArray(data.financeObligations) ? data.financeObligations : state.financeObligations;
+    if(data.financePaymentSources) state.financePaymentSources = Array.isArray(data.financePaymentSources) ? data.financePaymentSources : state.financePaymentSources;
+    if(data.financeTransactions) state.financeTransactions = Array.isArray(data.financeTransactions) ? data.financeTransactions : state.financeTransactions;
+    if(data.financeInternalBalances) state.financeInternalBalances = Array.isArray(data.financeInternalBalances) ? data.financeInternalBalances : state.financeInternalBalances;
+    if(data.financeInsights) state.financeInsights = Array.isArray(data.financeInsights) ? data.financeInsights : state.financeInsights;
+    if(data.financeSchemaVersion) state.financeSchemaVersion = Number(data.financeSchemaVersion || state.financeSchemaVersion || 2);
 
     // ensure new fields exist
-    try{ financeMigrateV2(); }catch(_e){}
+    try{ financeMigrateV2(); financeEnsureMissionControlStructures(); }catch(_e){}
     try{ financeRecomputeBalances(); }catch(_e){}
 
     persist();
