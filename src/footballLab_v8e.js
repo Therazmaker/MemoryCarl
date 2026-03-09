@@ -10069,6 +10069,87 @@ function computeTeamIntelligencePanel(db, teamId){
   }
 
 
+  function buildBrainV2SectionExportPayload(brainV2State){
+    const state = brainV2State && typeof brainV2State === "object" ? brainV2State : loadBrainV2();
+    return {
+      kind: "brain_v2_section",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      brain: {
+        memories: state?.memories && typeof state.memories === "object" ? state.memories : {},
+        teamProfiles: state?.teamProfiles && typeof state.teamProfiles === "object" ? state.teamProfiles : {},
+        gpe: normalizeGpeState(state?.gpe),
+        mne: normalizeMneLearningState(state?.mne),
+        orchestratorLearning: normalizeOrchestratorLearningState(state?.orchestratorLearning)
+      }
+    };
+  }
+
+  function downloadBrainV2SectionFile(brainV2State){
+    const payload = buildBrainV2SectionExportPayload(brainV2State);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `brain-v2-section-${stamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    requestAnimationFrame(()=>{
+      link.remove();
+      URL.revokeObjectURL(url);
+    });
+    return payload;
+  }
+
+  function findBestBrainV2ImportedTeamId(dbState, memoriesMap = {}){
+    const teams = Array.isArray(dbState?.teams) ? dbState.teams : [];
+    const teamNameMap = new Map(teams.map((team)=>[normalizeTeamName(team?.name || ""), String(team?.id || "")]));
+    for(const [teamId, rows] of Object.entries(memoriesMap || {})){
+      if(teamId && teams.some((team)=>String(team.id) === String(teamId))) return String(teamId);
+      const sample = Array.isArray(rows) ? rows.find((row)=>row && typeof row === "object") : null;
+      const sampleName = normalizeTeamName(sample?.teamName || "");
+      if(sampleName && teamNameMap.has(sampleName)) return teamNameMap.get(sampleName) || "";
+    }
+    return "";
+  }
+
+  async function importBrainV2SectionFromFile(file, { dbState = null, view = "brainv2", leagueId = "", preferredTeamId = "" } = {}){
+    const rawText = await file.text();
+    const payload = safeParseJSON(rawText, null);
+    if(!payload || typeof payload !== "object") throw new Error("JSON inválido o vacío.");
+
+    let nextState = null;
+    if(payload?.kind === "brain_v2_section" && payload?.brain && typeof payload.brain === "object"){
+      const brain = payload.brain;
+      const extracted = extractBrainV2MemoriesFromBackup({ memories: brain.memories || {} });
+      nextState = hydrateBrainV2StateFromImport(extracted.memories, {
+        brainState: {
+          mne: brain.mne,
+          orchestratorLearning: brain.orchestratorLearning,
+          teamProfiles: brain.teamProfiles
+        }
+      });
+      if(brain.gpe) nextState.gpe = normalizeGpeState(brain.gpe);
+      nextState = saveBrainV2(nextState);
+      console.info("[BrainV2 Import] Section detected");
+      console.info("[BrainV2 Import] Teams loaded:", Object.keys(nextState.memories || {}).length);
+      console.info("[BrainV2 Import] Memories loaded:", Object.values(nextState.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0));
+    } else {
+      const extracted = extractBrainV2MemoriesFromBackup(payload);
+      if(!extracted.meta?.backupDetected) throw new Error("No se detectó memoria de Brain V2 en el archivo.");
+      nextState = hydrateBrainV2StateFromImport(extracted.memories, payload);
+      console.info("[BrainV2 Import] Backup detected");
+      console.info("[BrainV2 Import] Teams loaded:", Object.keys(nextState.memories || {}).length);
+      console.info("[BrainV2 Import] Memories loaded:", Object.values(nextState.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0));
+    }
+
+    const targetTeamId = preferredTeamId || findBestBrainV2ImportedTeamId(dbState, nextState?.memories || {});
+    refreshBrainV2UIAfterImport({ view, leagueId, teamId: targetTeamId });
+    return { state: nextState, targetTeamId };
+  }
+
+
   function sectionToPos(section){
     const sec = String(section||"").toLowerCase();
     if(sec.includes("portero")) return "GK";
@@ -15184,6 +15265,9 @@ RESPONDE SOLO CON JSON usando este schema:
             <div class="b2x-actions">
               <button class="b2x-btn-cta" id="b2PrematchGenerate">⚡ Generar Análisis</button>
               <button class="b2x-btn-sec" id="b2Simulate">Simular visión</button>
+              <button class="b2x-btn-sec" id="b2ExportBrainSection" title="Exportar solo cerebro V2">🧠⬇️ Exportar cerebro</button>
+              <button class="b2x-btn-sec" id="b2ImportBrainSection" title="Importar solo cerebro V2">🧠⬆️ Importar cerebro</button>
+              <input type="file" id="b2ImportBrainSectionFile" accept=".json,application/json" style="display:none" />
               <button class="b2x-btn-ico" id="b2PrematchRegenerate" title="Regenerar">↻</button>
               <label class="b2x-debug-lbl">
                 <input type="checkbox" id="b2PrematchDebugToggle" /> JSON
@@ -16297,6 +16381,49 @@ RESPONDE SOLO CON JSON usando este schema:
       document.getElementById('b2PrematchGenerate')?.addEventListener('click', handleBrainPrematchGenerate);
       document.getElementById('b2PrematchRegenerate')?.addEventListener('click', handleBrainPrematchGenerate);
       document.getElementById('b2PrematchDebugToggle')?.addEventListener('change', ()=>renderBrainPrematchPreview(lastBrainPrematchPayload));
+
+      document.getElementById('b2ExportBrainSection')?.addEventListener('click', ()=>{
+        const status = document.getElementById('b2Status');
+        try{
+          const payload = downloadBrainV2SectionFile(brainV2);
+          const teamCount = Object.keys(payload?.brain?.memories || {}).length;
+          const memoryCount = Object.values(payload?.brain?.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0);
+          if(status) status.textContent = `🧠 Export listo: ${teamCount} equipos · ${memoryCount} memorias.`;
+        }catch(err){
+          console.error('[BrainV2 Export] Failed', err);
+          if(status) status.textContent = `❌ Error exportando cerebro: ${err.message}`;
+        }
+      });
+
+      document.getElementById('b2ImportBrainSection')?.addEventListener('click', ()=>{
+        document.getElementById('b2ImportBrainSectionFile')?.click();
+      });
+
+      document.getElementById('b2ImportBrainSectionFile')?.addEventListener('change', async (ev)=>{
+        const status = document.getElementById('b2Status');
+        const file = ev?.target?.files?.[0];
+        if(!file) return;
+        try{
+          if(status) status.textContent = `📥 Importando ${file.name}…`;
+          const preferredTeamId = document.getElementById('b2Team')?.value || '';
+          const leagueIdForImport = document.getElementById('b2League')?.value || selectedLeagueId || '';
+          const result = await importBrainV2SectionFromFile(file, {
+            dbState: db,
+            view: 'brainv2',
+            leagueId: leagueIdForImport,
+            preferredTeamId
+          });
+          const teamCount = Object.keys(result?.state?.memories || {}).length;
+          const memoryCount = Object.values(result?.state?.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0);
+          if(status) status.textContent = `✅ Cerebro importado: ${teamCount} equipos · ${memoryCount} memorias.`;
+        }catch(err){
+          console.error('[BrainV2 Import] Failed to hydrate', err);
+          if(status) status.textContent = `❌ Error importando cerebro: ${err.message}`;
+          alert(`Error importando cerebro: ${err.message}`);
+        }finally{
+          if(ev?.target) ev.target.value = '';
+        }
+      });
 
       document.getElementById('b2SaveMatch')?.addEventListener('click', ()=>{
         const status = document.getElementById('b2Status');
