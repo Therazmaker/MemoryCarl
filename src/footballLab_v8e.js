@@ -634,13 +634,61 @@ export function initFootballLab(){
     return state;
   }
 
+  function compactBrainV2StateForStorage(state, memoryLimit = 80){
+    const source = state && typeof state === "object" ? state : { memories: {} };
+    const compacted = structuredClone(source);
+    const compactedMemories = {};
+    Object.entries(source.memories || {}).forEach(([teamId, rows])=>{
+      const safeRows = Array.isArray(rows) ? rows.slice(-memoryLimit) : [];
+      compactedMemories[teamId] = safeRows;
+    });
+    compacted.memories = compactedMemories;
+    compacted.mne = normalizeMneLearningState(compacted.mne);
+    if(Array.isArray(compacted?.mne?.claudeExchange?.trainingNotes)) compacted.mne.claudeExchange.trainingNotes = compacted.mne.claudeExchange.trainingNotes.slice(-60);
+    if(Array.isArray(compacted?.mne?.claudeExchange?.patterns)) compacted.mne.claudeExchange.patterns = compacted.mne.claudeExchange.patterns.slice(-80);
+    if(Array.isArray(compacted?.mne?.claudeExchange?.candidateRules)) compacted.mne.claudeExchange.candidateRules = compacted.mne.claudeExchange.candidateRules.slice(-80);
+    if(Array.isArray(compacted?.mne?.lsfEvalHistory)) compacted.mne.lsfEvalHistory = compacted.mne.lsfEvalHistory.slice(-120);
+    if(Array.isArray(compacted?.mne?.forecastLog)) compacted.mne.forecastLog = compacted.mne.forecastLog.slice(-80);
+    normalizeTeamProfilesState(compacted, { rebuildIfMissing: true });
+    compacted.gpe = buildGlobalPatternEngine(compacted.memories);
+    return compacted;
+  }
+
   function saveBrainV2(state){
     const next = state && typeof state === "object" ? state : { memories: {} };
     next.memories ||= {};
     normalizeTeamProfilesState(next, { rebuildIfMissing: true });
     next.gpe = buildGlobalPatternEngine(next.memories);
     next.mne = normalizeMneLearningState(next.mne);
-    localStorage.setItem(BRAIN_V2_KEY, JSON.stringify(next));
+    const payload = JSON.stringify(next);
+    try{
+      localStorage.setItem(BRAIN_V2_KEY, payload);
+      return next;
+    }catch(err){
+      if(!isQuotaExceededError(err)) throw err;
+    }
+
+    try{
+      pruneFootballLabCacheKeys();
+      localStorage.setItem(BRAIN_V2_KEY, payload);
+      return next;
+    }catch(err){
+      if(!isQuotaExceededError(err)) throw err;
+    }
+
+    const compactLimits = [100, 80, 60, 40, 25, 15, 10, 5, 0];
+    for(const limit of compactLimits){
+      try{
+        const compacted = compactBrainV2StateForStorage(next, limit);
+        localStorage.setItem(BRAIN_V2_KEY, JSON.stringify(compacted));
+        console.warn(`[BrainV2 Import] Storage compacted automatically (limit=${limit})`);
+        return compacted;
+      }catch(err){
+        if(!isQuotaExceededError(err)) throw err;
+      }
+    }
+
+    throw new Error("No hay espacio suficiente para guardar FL_BRAIN_V2.");
   }
 
   function parseNumericStats(raw = ""){
@@ -9929,45 +9977,10 @@ function computeTeamIntelligencePanel(db, teamId){
     );
   }
 
-  function inferBrainMemoryTeamName(entry = {}, fallbackTeamId = ""){
-    const direct = String(entry.teamName || entry.team || "").trim();
-    if(direct) return direct;
-    const summary = entry.summary && typeof entry.summary === "object" ? entry.summary : null;
-    const summaryTeam = String(summary?.teamName || summary?.focusTeam || summary?.subjectTeam || "").trim();
-    if(summaryTeam) return summaryTeam;
-    const entryTeamId = String(entry.teamId || fallbackTeamId || "").trim();
-    const homeTeam = String(entry.homeTeam || summary?.homeTeam || "").trim();
-    const awayTeam = String(entry.awayTeam || summary?.awayTeam || "").trim();
-    if(homeTeam && awayTeam){
-      const normalizedKey = normalizeTeamName(entryTeamId);
-      if(normalizedKey){
-        if(normalizeTeamName(homeTeam)===normalizedKey) return homeTeam;
-        if(normalizeTeamName(awayTeam)===normalizedKey) return awayTeam;
-      }
-      return homeTeam;
-    }
-    return homeTeam || awayTeam || "";
-  }
-
-  function inferBrainMemoryOpponent(entry = {}, teamName = ""){
-    const direct = String(entry.opponent || entry.rival || "").trim();
-    if(direct) return direct;
-    const summary = entry.summary && typeof entry.summary === "object" ? entry.summary : null;
-    const homeTeam = String(entry.homeTeam || summary?.homeTeam || "").trim();
-    const awayTeam = String(entry.awayTeam || summary?.awayTeam || "").trim();
-    const target = normalizeTeamName(teamName || inferBrainMemoryTeamName(entry, entry.teamId || ""));
-    if(homeTeam && awayTeam && target){
-      if(normalizeTeamName(homeTeam)===target) return awayTeam || "Rival";
-      if(normalizeTeamName(awayTeam)===target) return homeTeam || "Rival";
-    }
-    return awayTeam || homeTeam || "Rival";
-  }
-
   function normalizeBrainMemoryEntry(entry, teamId = ""){
     if(!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
     const id = String(entry.id || entry.matchId || "").trim() || uid("b2m");
-    const inferredTeamName = inferBrainMemoryTeamName(entry, teamId);
-    const normalizedTeamId = String(entry.teamId || teamId || inferredTeamName || "").trim();
+    const normalizedTeamId = String(entry.teamId || teamId || "").trim();
     if(!normalizedTeamId) return null;
     const createdAtRaw = Number(entry.createdAt);
     const createdAt = Number.isFinite(createdAtRaw)
@@ -9976,16 +9989,16 @@ function computeTeamIntelligencePanel(db, teamId){
     const normalized = {
       id,
       teamId: normalizedTeamId,
-      teamName: inferredTeamName,
-      leagueId: String(entry.leagueId || entry.competitionId || "").trim(),
-      date: String(entry.date || entry.matchDate || "").trim() || new Date(createdAt).toISOString().slice(0,10),
-      opponent: inferBrainMemoryOpponent(entry, inferredTeamName),
+      teamName: String(entry.teamName || "").trim(),
+      leagueId: String(entry.leagueId || "").trim(),
+      date: String(entry.date || "").trim() || new Date(createdAt).toISOString().slice(0,10),
+      opponent: String(entry.opponent || entry.rival || entry.awayTeam || "Rival").trim(),
       statsRaw: typeof entry.statsRaw === "string"
         ? entry.statsRaw
         : (entry.statsRaw && typeof entry.statsRaw === "object" ? JSON.stringify(entry.statsRaw) : ""),
-      narrative: String(entry.narrative || entry.story || entry.summary?.story || "").trim(),
+      narrative: String(entry.narrative || entry.story || "").trim(),
       summary: entry.summary && typeof entry.summary === "object" ? entry.summary : null,
-      score: String(entry.score || entry.finalScore || entry.summary?.finalScore || "0-0").trim() || "0-0",
+      score: String(entry.score || entry.finalScore || "0-0").trim() || "0-0",
       createdAt
     };
     if(Array.isArray(entry.lineup)) normalized.lineup = entry.lineup.slice(0, 18).map((p)=>String(p || "").trim()).filter(Boolean);
@@ -10035,75 +10048,11 @@ function computeTeamIntelligencePanel(db, teamId){
     };
   }
 
-  function resolveBestBrainV2Focus(memories = {}, dbState = null, { preferredTeamId = "", preferredLeagueId = "" } = {}){
-    const db = dbState || loadDb();
-    const allTeams = Array.isArray(db?.teams) ? db.teams : [];
-    const leagueByTeamId = new Map();
-    (db?.teamCompetitions || []).forEach((row)=>{
-      if(!row?.teamId || !row?.leagueId || leagueByTeamId.has(row.teamId)) return;
-      leagueByTeamId.set(row.teamId, row.leagueId);
-    });
-    allTeams.forEach((team)=>{
-      if(!team?.id || leagueByTeamId.has(team.id) || !team.leagueId) return;
-      leagueByTeamId.set(team.id, team.leagueId);
-    });
-    const preferredName = normalizeTeamName(allTeams.find((team)=>team.id===preferredTeamId)?.name || "");
-    let best = { teamId: preferredTeamId || "", leagueId: preferredLeagueId || "", matches: -1 };
-    Object.entries(memories || {}).forEach(([teamId, rows])=>{
-      const count = Array.isArray(rows) ? rows.length : 0;
-      if(!count) return;
-      const team = allTeams.find((row)=>row.id===teamId);
-      const rowName = normalizeTeamName(rows?.[0]?.teamName || team?.name || "");
-      const score = (preferredTeamId && teamId===preferredTeamId ? 100000 : 0)
-        + (preferredName && rowName===preferredName ? 50000 : 0)
-        + count;
-      const bestScore = (best.teamId===preferredTeamId ? 100000 : 0)
-        + ((preferredName && normalizeTeamName(allTeams.find((row)=>row.id===best.teamId)?.name || memories?.[best.teamId]?.[0]?.teamName || "")===preferredName) ? 50000 : 0)
-        + Math.max(0, best.matches);
-      if(score > bestScore){
-        best = { teamId, leagueId: leagueByTeamId.get(teamId) || "", matches: count };
-      }
-    });
-    if(best.teamId) return { teamId: best.teamId, leagueId: best.leagueId || preferredLeagueId || "" };
-    return { teamId: preferredTeamId || "", leagueId: preferredLeagueId || "" };
-  }
-
   function hydrateBrainV2StateFromImport(memoriesMap = {}, payload = null){
     const current = loadBrainV2();
-    const db = loadDb();
-    const normalizedMemories = {};
-    let dbChanged = false;
-    Object.entries(memoriesMap && typeof memoriesMap === "object" ? memoriesMap : {}).forEach(([rawTeamId, rows])=>{
-      (Array.isArray(rows) ? rows : []).forEach((entry)=>{
-        const inferredName = String(entry?.teamName || inferBrainMemoryTeamName(entry, rawTeamId) || "").trim();
-        const safeName = inferredName || String(rawTeamId || "").trim();
-        if(!safeName) return;
-        let team = getOrCreateTeamByName(db, safeName, { aliases: [rawTeamId].filter(Boolean) });
-        if(!team) return;
-        if(!Array.isArray(team.aliases)) team.aliases = [];
-        if(rawTeamId && !team.aliases.some((alias)=>normalizeTeamName(alias)===normalizeTeamName(rawTeamId))){
-          team.aliases.push(rawTeamId);
-          dbChanged = true;
-        }
-        const normalizedLeagueId = String(entry?.leagueId || "").trim();
-        if(normalizedLeagueId && db.leagues.some((league)=>league.id===normalizedLeagueId)){
-          ensureTeamInLeague(db, team.id, normalizedLeagueId);
-          dbChanged = true;
-        }
-        const normalizedEntry = normalizeBrainMemoryEntry({ ...entry, teamId: team.id, teamName: team.name }, team.id);
-        if(!normalizedEntry) return;
-        normalizedEntry.teamId = team.id;
-        normalizedEntry.teamName = team.name;
-        normalizedEntry.opponent = inferBrainMemoryOpponent(normalizedEntry, team.name);
-        normalizedMemories[team.id] ||= [];
-        normalizedMemories[team.id].push(normalizedEntry);
-      });
-    });
-    Object.values(normalizedMemories).forEach((rows)=>rows.sort((a,b)=>Number(a.createdAt || 0) - Number(b.createdAt || 0)));
-    if(dbChanged) saveDb(db);
     const next = {
       ...current,
-      memories: normalizedMemories
+      memories: memoriesMap && typeof memoriesMap === "object" ? memoriesMap : {}
     };
     const importedBrainState = payload?.data?.brainState || payload?.brainState || {};
     if(importedBrainState.mne) next.mne = normalizeMneLearningState(importedBrainState.mne);
@@ -10115,14 +10064,8 @@ function computeTeamIntelligencePanel(db, teamId){
   }
 
   function refreshBrainV2UIAfterImport({ view = "", leagueId = "", teamId = "" } = {}){
-    const db = loadDb();
-    const brainV2 = loadBrainV2();
-    const focus = resolveBestBrainV2Focus(brainV2.memories, db, { preferredTeamId: teamId, preferredLeagueId: leagueId });
-    if(db?.settings){
-      db.settings.selectedLeagueId = focus.leagueId || "";
-      saveDb(db);
-    }
-    render("brainv2", { leagueId: focus.leagueId || "", teamId: focus.teamId || "" });
+    if(view !== "brainv2") return;
+    render("brainv2", { leagueId, teamId });
   }
 
 
@@ -11914,14 +11857,10 @@ RESPONDE SOLO CON JSON usando este schema:
           <div style="font-weight:800;margin-bottom:8px;">Backup completo de Football Lab</div>
           <div class="fl-muted">Exporta e importa <b>todos</b> los datos guardados en footballDB para recuperar tu estado completo.</div>
           <textarea id="jsonBackup" class="fl-text" placeholder='{"settings":{},"leagues":[],"teams":[],"players":[],"tracker":[]}'></textarea>
-          <input id="backupFilePicker" type="file" accept=".json,application/json" style="display:none;" />
-          <input id="brainBackupFilePicker" type="file" accept=".json,application/json" style="display:none;" />
-          <div class="fl-row" style="margin-top:8px;flex-wrap:wrap;gap:8px;">
+          <div class="fl-row" style="margin-top:8px;">
             <button class="fl-btn" id="fillBackup">Cargar backup actual</button>
             <button class="fl-btn" id="downloadBackup">Descargar .json</button>
-            <button class="fl-btn" id="pickBackupFile">Abrir archivo</button>
             <button class="fl-btn" id="runBackupImport">Importar backup completo</button>
-            <button class="fl-btn" id="pickBrainBackupFile">Importar cerebro (.json)</button>
             <span id="backupStatus" class="fl-muted"></span>
           </div>
         </div>
@@ -11936,16 +11875,7 @@ RESPONDE SOLO CON JSON usando este schema:
       `;
       const backupEl = document.getElementById("jsonBackup");
       const backupStatusEl = document.getElementById("backupStatus");
-      const backupFilePickerEl = document.getElementById("backupFilePicker");
-      const brainBackupFilePickerEl = document.getElementById("brainBackupFilePicker");
       const setBackupStatus = (msg)=>{ backupStatusEl.textContent = msg; };
-      const readJsonFile = (file)=>new Promise((resolve, reject)=>{
-        if(!file) return reject(new Error("No se seleccionó archivo."));
-        const reader = new FileReader();
-        reader.onload = ()=>resolve(String(reader.result || ""));
-        reader.onerror = ()=>reject(new Error("No se pudo leer el archivo."));
-        reader.readAsText(file, "utf-8");
-      });
 
       const fillBackupTextarea = ()=>{
         backupEl.value = JSON.stringify(loadDb(), null, 2);
@@ -11973,36 +11903,6 @@ RESPONDE SOLO CON JSON usando este schema:
           setBackupStatus(`❌ ${String(err.message || err)}`);
         }
       };
-
-      document.getElementById("pickBackupFile").onclick = ()=>backupFilePickerEl?.click();
-      document.getElementById("pickBrainBackupFile").onclick = ()=>brainBackupFilePickerEl?.click();
-
-      backupFilePickerEl?.addEventListener("change", async (e)=>{
-        try{
-          const file = e.target?.files?.[0];
-          const raw = await readJsonFile(file);
-          backupEl.value = raw;
-          setBackupStatus(`✅ Archivo cargado: ${file?.name || 'backup.json'}. Ahora pulsa importar.`);
-        }catch(err){
-          setBackupStatus(`❌ ${String(err.message || err)}`);
-        }finally{
-          if(e.target) e.target.value = "";
-        }
-      });
-
-      brainBackupFilePickerEl?.addEventListener("change", async (e)=>{
-        try{
-          const file = e.target?.files?.[0];
-          const raw = await readJsonFile(file);
-          backupEl.value = raw;
-          document.getElementById("runBackupImport")?.click();
-          setBackupStatus(`✅ Archivo de cerebro cargado: ${file?.name || 'brain-backup.json'}.`);
-        }catch(err){
-          setBackupStatus(`❌ ${String(err.message || err)}`);
-        }finally{
-          if(e.target) e.target.value = "";
-        }
-      });
 
       document.getElementById("runBackupImport").onclick = ()=>{
         try{
@@ -15160,13 +15060,12 @@ RESPONDE SOLO CON JSON usando este schema:
     if(view==="brainv2"){
       const brainV2 = loadBrainV2();
       const health = computeBrainV2Health(brainV2.memories);
-      const preferredFocus = resolveBestBrainV2Focus(brainV2.memories, db, { preferredTeamId: payload.teamId || "", preferredLeagueId: payload.leagueId || db.settings.selectedLeagueId || "" });
-      const selectedLeagueId = payload.leagueId || preferredFocus.leagueId || db.settings.selectedLeagueId || db.leagues[0]?.id || "";
+      const selectedLeagueId = payload.leagueId || db.settings.selectedLeagueId || db.leagues[0]?.id || "";
       const leagues = db.leagues.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
       const leagueOptions = leagues.map((l)=>`<option value="${l.id}" ${selectedLeagueId===l.id?"selected":""}>${l.name}</option>`).join("");
       const leagueTeams = selectedLeagueId ? getTeamsForLeague(db, selectedLeagueId) : db.teams;
       const sortedTeams = leagueTeams.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name), "es", { sensitivity:"base" }));
-      const selectedTeamId = payload.teamId || preferredFocus.teamId || sortedTeams[0]?.id || "";
+      const selectedTeamId = payload.teamId || sortedTeams[0]?.id || "";
       const selectedTeamName = db.teams.find((t)=>t.id===selectedTeamId)?.name || "Local";
       const teamOptions = sortedTeams.map((t)=>`<option value="${t.id}" ${selectedTeamId===t.id?"selected":""}>${t.name}</option>`).join("");
       const teamMemories = getBrainMemoriesForTeam(brainV2.memories, { teamId: selectedTeamId, teamName: selectedTeamName }).slice().sort((a,b)=>parseSortableDate(b.date)-parseSortableDate(a.date));
@@ -15817,28 +15716,6 @@ RESPONDE SOLO CON JSON usando este schema:
 
         renderBoard();
       };
-
-      document.getElementById('b2ImportBrainBtn')?.addEventListener('click', ()=>document.getElementById('b2ImportBrainFile')?.click());
-      document.getElementById('b2ImportBrainFile')?.addEventListener('change', async (e)=>{
-        const status = document.getElementById('b2Status');
-        try{
-          const file = e.target?.files?.[0];
-          if(!file) throw new Error('No se seleccionó archivo');
-          const raw = await file.text();
-          const parsed = JSON.parse(raw);
-          const extractedBrain = extractBrainV2MemoriesFromBackup(parsed);
-          if(!Object.keys(extractedBrain.memories || {}).length) throw new Error('El archivo no trae memorias de Brain V2');
-          const hydrated = hydrateBrainV2StateFromImport(extractedBrain.memories, parsed);
-          const focus = resolveBestBrainV2Focus(hydrated.memories, loadDb(), {});
-          if(status) status.textContent = `✅ Cerebro importado: ${file.name}`;
-          refreshBrainV2UIAfterImport({ leagueId: focus.leagueId || '', teamId: focus.teamId || '' });
-        }catch(err){
-          console.error('[BrainV2 Import] Failed to hydrate', err);
-          if(status) status.textContent = `❌ ${String(err?.message || err)}`;
-        }finally{
-          if(e.target) e.target.value = '';
-        }
-      });
 
       document.getElementById('b2League')?.addEventListener('change', (e)=>{
         db.settings.selectedLeagueId = e.target.value || "";
