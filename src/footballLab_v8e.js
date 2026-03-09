@@ -18938,19 +18938,61 @@ RESPONDE SOLO CON JSON usando este schema:
       const phaseEscaleraHtml = buildPhaseEscaleraHtml(selectedPhaseCampaign);
       // ────────────────────────────────────────────────────────────────────────
 
-      const phaseHeaderHtml = ''; // reemplazado por phaseEscaleraHtml
-      const phaseTimelineHtml = ''; // reemplazado por phaseEscaleraHtml
-      const phasePickRows = selectedPhaseCampaign && selectedPhaseCampaign.picks.length
-        ? selectedPhaseCampaign.picks.map((pick)=>`<tr><td>F${pick.phase}</td><td>P${pick.pickNumber}</td><td>${(pick.date||"").replace("T"," ").slice(0,16)}</td><td>${pick.match}</td><td>${pick.odds.toFixed(2)}</td><td>S/${pick.autoStake.toFixed(2)}</td><td>${pick.result}</td><td>S/${(pick.bankrollBefore||0).toFixed(2)}</td><td>S/${pick.bankrollAfter.toFixed(2)}</td><td><button class="fl-btn" style="padding:4px 8px;" data-phase-pick="${pick.id}">Ver</button></td></tr>`).join('')
-        : "<tr><td colspan='10'>Sin picks registrados.</td></tr>";
+      const phaseHeaderHtml = '';
+      const phaseTimelineHtml = '';
+      // ── Tabla fiel al Excel: agrupada por fase, con Ganancias / Brutas / Netas / %
+      const phaseColors3 = ['#58a6ff','#3fb950','#f2cc60'];
+      const phasePickRows = (() => {
+        if(!selectedPhaseCampaign || !selectedPhaseCampaign.picks.length)
+          return "<tr><td colspan='11' style='text-align:center;color:#6e7681;padding:20px;'>Sin picks registrados aún.</td></tr>";
+        const unit = selectedPhaseCampaign.initialUnit;
+        const phaseGroups = {};
+        selectedPhaseCampaign.picks.forEach(p => {
+          if(!phaseGroups[p.phase]) phaseGroups[p.phase] = [];
+          phaseGroups[p.phase].push(p);
+        });
+        let rows = '';
+        for(const [phaseId, picks] of Object.entries(phaseGroups)){
+          const phase = selectedPhaseCampaign.phases.find(ph => ph.id === Number(phaseId));
+          const color = phaseColors3[(Number(phaseId)-1) % phaseColors3.length];
+          rows += `<tr><td colspan="11" style="background:${color}18;border-left:3px solid ${color};padding:5px 10px;font-size:10px;font-weight:800;color:${color};text-transform:uppercase;letter-spacing:1px;">${phase?.name || 'FASE '+phaseId}</td></tr>`;
+          rows += `<tr style="font-size:10px;color:#6e7681;border-bottom:1px solid #21262d;"><td>#</td><td>Fecha</td><td>Partido</td><td>Cuota</td><td>Apuesta</td><td>V/X</td><td>Ganancias</td><td>Brutas</td><td>Netas</td><td>%</td><td></td></tr>`;
+          picks.forEach(pick => {
+            const stake     = pick.stakeUsed || pick.bankrollBefore || 0;
+            const ganancias = pick.result === 'win' ? pick.profit : pick.result === 'loss' ? -stake : 0;
+            const brutas    = pick.bankrollAfter || 0;
+            const netas     = pick.netFromUnit !== undefined ? pick.netFromUnit : (brutas - unit);
+            const pct       = pick.pctFromUnit !== undefined ? pick.pctFromUnit : ((brutas/Math.max(0.01,unit)-1)*100);
+            const resIcon   = pick.result==='win'?'✅':pick.result==='loss'?'❌':pick.result==='void'?'↩️':'⏳';
+            const ganColor  = ganancias >= 0 ? '#3fb950' : '#f85149';
+            const netColor  = netas >= 0 ? '#3fb950' : '#f85149';
+            rows += `<tr style="font-size:11px;border-bottom:1px solid #21262d22;">
+              <td style="color:#6e7681;">${pick.stepOrder||'-'}</td>
+              <td style="color:#8b949e;white-space:nowrap;">${(pick.date||'').slice(0,10)}</td>
+              <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${pick.match||''}">${pick.match||'–'}</td>
+              <td>${pick.odds.toFixed(2)}</td>
+              <td style="font-weight:700;">S/${stake.toFixed(2)}</td>
+              <td style="font-size:14px;">${resIcon}</td>
+              <td style="color:${ganColor};font-weight:700;">${ganancias>=0?'+':''}S/${ganancias.toFixed(2)}</td>
+              <td style="font-weight:700;">S/${brutas.toFixed(2)}</td>
+              <td style="color:${netColor};font-weight:700;">${netas>=0?'+':''}S/${netas.toFixed(2)}</td>
+              <td style="color:${netColor};">${pct>=0?'+':''}${pct.toFixed(0)}%</td>
+              <td><button class="fl-btn" style="padding:2px 7px;font-size:10px;background:rgba(248,81,73,0.08);border-color:rgba(248,81,73,0.3);color:#f85149;" data-phase-pick="${pick.id}">✕</button></td>
+            </tr>`;
+          });
+        }
+        return rows;
+      })();
       const phaseFlagHtml = phaseFlags.length
         ? phaseFlags.map((flag)=>`<span class="fl-chip bad">⚠️ ${flag}</span>`).join(' ')
         : '<span class="fl-chip ok">Sin alertas activas</span>';
       const phaseSummaryRows = selectedPhaseCampaign ? selectedPhaseCampaign.phases.map((phase)=>{
-        const done = selectedPhaseCampaign.picks.filter((pick)=>pick.phase===phase.id && ["win","loss"].includes(pick.result)).length;
+        const done = selectedPhaseCampaign.picks.filter((pick)=>pick.phase===phase.id && ['win','loss'].includes(pick.result)).length;
         return `<div class="fl-mini">${phase.name}: ${done}/${phase.picks} pasos cerrados</div>`;
       }).join('') : '';
-      const failedAtText = selectedPhaseCampaign?.failedAt ? `Falló en F${selectedPhaseCampaign.failedAt.phase} Paso ${selectedPhaseCampaign.failedAt.pickNumber}` : '';
+      const failedAtText = selectedPhaseCampaign?.failedAt
+        ? `💥 Falló en ${selectedPhaseCampaign.failedAt.phaseName||'F?'} Paso ${selectedPhaseCampaign.failedAt.pickNumber} — perdido S/${(selectedPhaseCampaign.failedAt.lostStake||0).toFixed(2)}`
+        : '';
       const topMarkets = phaseAnalysis.topMarket.length
         ? phaseAnalysis.topMarket.map((row)=>`<li>${row.market} · WR ${(row.wr*100).toFixed(1)}% (${row.wins}/${row.picks})</li>`).join('')
         : '<li>Sin mercados suficientes.</li>';
@@ -19018,47 +19060,79 @@ RESPONDE SOLO CON JSON usando este schema:
           </div>
         </div>
 
-        <div class="fl-card" style="background:#161b22;border-color:#30363d;">
-          <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:14px;">
-            <div style="font-weight:900;font-size:15px;letter-spacing:0.5px;">⚡ Sistema de Fases Progresivas</div>
-            <div class="fl-row" style="gap:6px;">
-              <select id="phaseCampaignSelect" class="fl-select" style="width:220px;"><option value="">Seleccionar campaña</option>${campaignOptions}</select>
-              <button class="fl-btn" id="phaseNewCampaign">+ Nueva</button>
+        <div class="fl-card" style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:0;overflow:hidden;">
+          <!-- Header -->
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #21262d;background:#161b22;">
+            <div style="font-weight:900;font-size:15px;letter-spacing:0.5px;color:#e6edf3;">⚡ Sistema de Fases Progresivas</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <select id="phaseCampaignSelect" class="fl-select" style="max-width:200px;">
+                <option value="">— Seleccionar campaña —</option>${campaignOptions}
+              </select>
+              <button class="fl-btn" id="phaseNewCampaign" style="white-space:nowrap;">+ Nueva campaña</button>
+              ${selectedPhaseCampaign?.status==='failed' ? `<button class="fl-btn" id="phaseRestartCampaign" style="background:rgba(248,81,73,0.1);border-color:rgba(248,81,73,0.4);color:#f85149;white-space:nowrap;">🔄 Reiniciar</button>` : ''}
             </div>
           </div>
-          <div id="phaseEscaleraContainer">
+          <!-- Escalera visual -->
+          <div style="padding:16px 18px;border-bottom:1px solid #21262d;">
             ${phaseEscaleraHtml}
           </div>
-          <div style="margin-top:14px;padding:12px;background:#0d1117;border:1px solid #21262d;border-radius:8px;">
-            <div style="font-size:11px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Registrar pick</div>
-            <div class="fl-row" style="gap:8px;flex-wrap:wrap;">
-              <input id="phaseInitialUnit" class="fl-input" type="number" min="0.5" step="0.5" value="${st.bank.toFixed(2)}" style="width:130px" placeholder="Bankroll inicial" title="Bankroll inicial de la campaña" />
-              <input id="phaseLeague" class="fl-input" type="text" placeholder="Liga" style="width:100px" />
-              <input id="phaseMatch" class="fl-input" type="text" placeholder="Partido" style="width:150px" />
-              <input id="phaseMarket" class="fl-input" type="text" placeholder="Mercado" style="width:100px" />
-              <input id="phaseSelection" class="fl-input" type="text" placeholder="Selección" style="width:115px" />
-              <input id="phaseOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="Cuota" style="width:85px" />
-              <select id="phaseResult" class="fl-select" style="width:100px">
-                <option value="win">✅ win</option>
-                <option value="loss">❌ loss</option>
-                <option value="void">↩️ void</option>
-                <option value="pending">⏳ pending</option>
-              </select>
-              <input id="phaseNarrative" class="fl-input" type="number" step="1" min="0" max="100" placeholder="Narrativa 0-100" style="width:105px" title="Puntuación narrativa del pick" />
-              <label class="fl-mini" style="display:flex;align-items:center;gap:4px;"><input id="phaseVoidAdvance" type="checkbox" ${selectedPhaseCampaign?.allowVoidAdvance?"checked":""} /> void avanza</label>
-              <label class="fl-mini" style="display:flex;align-items:center;gap:4px;"><input id="phaseEmotional" type="checkbox" /> emocional</label>
-              <label class="fl-mini" style="display:flex;align-items:center;gap:4px;"><input id="phaseMarketConsistent" type="checkbox" checked /> mercado OK</label>
-              <button class="fl-btn active" id="phaseSavePick" style="min-width:120px;">💾 Guardar pick</button>
+          <!-- Alertas -->
+          ${phaseFlags.length ? `<div style="padding:8px 18px;background:rgba(248,81,73,0.05);border-bottom:1px solid #21262d;display:flex;gap:6px;flex-wrap:wrap;">${phaseFlagHtml}</div>` : ''}
+          ${failedAtText ? `<div style="padding:10px 18px;background:rgba(248,81,73,0.08);border-bottom:1px solid rgba(248,81,73,0.3);color:#f85149;font-size:12px;font-weight:700;">${failedAtText}</div>` : ''}
+          <!-- Registrar pick -->
+          <div style="padding:14px 18px;border-bottom:1px solid #21262d;background:#161b22;">
+            <div style="font-size:10px;font-weight:800;color:#8b949e;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">📝 Registrar pick</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+              <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Unidad inicial (S/)</label>
+                <input id="phaseInitialUnit" class="fl-input" type="number" min="0.5" step="0.5" value="${st.bank.toFixed(2)}" style="width:110px;" />
+              </div>
+              <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Liga</label>
+                <input id="phaseLeague" class="fl-input" type="text" placeholder="Liga" style="width:90px;" />
+              </div>
+              <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Partido</label>
+                <input id="phaseMatch" class="fl-input" type="text" placeholder="Local vs Visitante" style="width:160px;" />
+              </div>
+              <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Mercado</label>
+                <input id="phaseMarket" class="fl-input" type="text" placeholder="1X2, BTTS…" style="width:90px;" />
+              </div>
+              <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Cuota</label>
+                <input id="phaseOdds" class="fl-input" type="number" step="0.01" min="1.01" placeholder="1.44" style="width:75px;" />
+              </div>
+              <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Resultado</label>
+                <select id="phaseResult" class="fl-select" style="width:105px;">
+                  <option value="win">✅ Ganó</option>
+                  <option value="loss">❌ Perdió</option>
+                  <option value="void">↩️ Void</option>
+                  <option value="pending">⏳ Pendiente</option>
+                </select>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:3px;">
+                <label style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Narrativa</label>
+                <input id="phaseNarrative" class="fl-input" type="number" step="1" min="0" max="100" placeholder="0-100" style="width:70px;" />
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px;padding-bottom:2px;">
+                <label style="font-size:9px;color:#6e7681;display:flex;align-items:center;gap:4px;"><input id="phaseVoidAdvance" type="checkbox" ${selectedPhaseCampaign?.allowVoidAdvance?"checked":""} /> Void avanza</label>
+                <label style="font-size:9px;color:#6e7681;display:flex;align-items:center;gap:4px;"><input id="phaseEmotional" type="checkbox" /> Emocional</label>
+              </div>
+              <button class="fl-btn active" id="phaseSavePick" style="min-width:120px;height:36px;font-size:13px;font-weight:800;">💾 Guardar pick</button>
             </div>
-            <div id="phaseOut" class="fl-mini" style="margin-top:8px;color:#f2cc60;">${failedAtText}</div>
-            <div class="fl-row" style="flex-wrap:wrap;gap:6px;margin-top:8px;">${phaseFlagHtml}</div>
+            <div id="phaseOut" style="margin-top:8px;font-size:11px;min-height:14px;color:#f2cc60;"></div>
           </div>
-          <details style="margin-top:10px;">
-            <summary style="cursor:pointer;font-size:11px;color:#6e7681;font-weight:700;padding:4px 0;">▶ Historial de picks de la campaña</summary>
-            <div class="fl-mre-table-wrap" style="margin-top:8px;">
-              <table class="fl-mre-table"><thead><tr><th>Fase</th><th>Paso</th><th>Fecha</th><th>Partido</th><th>Cuota</th><th>Stake</th><th>Resultado</th><th>Antes</th><th>Después</th><th></th></tr></thead><tbody>${phasePickRows}</tbody></table>
+          <!-- Tabla de picks estilo Excel -->
+          <div style="padding:0 18px 18px;">
+            <div style="font-size:10px;font-weight:800;color:#6e7681;text-transform:uppercase;letter-spacing:1.5px;padding:12px 0 8px;">📊 Escalera de picks</div>
+            <div class="fl-mre-table-wrap">
+              <table class="fl-mre-table" style="font-size:11px;">
+                <tbody>${phasePickRows}</tbody>
+              </table>
             </div>
-          </details>
+          </div>
         </div>
 
         <div class="fl-card">
@@ -19384,8 +19458,9 @@ RESPONDE SOLO CON JSON usando este schema:
       const phaseNewCampaignBtn = document.getElementById("phaseNewCampaign");
       if(phaseNewCampaignBtn){
         phaseNewCampaignBtn.onclick = ()=>{
-          const initialUnit = Math.max(0.5, Number(document.getElementById("phaseInitialUnit")?.value) || st.bank || 1);
-          const campaign = createPhaseCampaign({ initialUnit, phases: st.phaseMode.config.phases });
+          const initialUnit = Math.max(0.5, Number(document.getElementById("phaseInitialUnit")?.value) || st.bank || 25);
+          const name = prompt('Nombre de la campaña (opcional):', `Campaña ${new Date().toLocaleDateString('es-PE')}`) ?? '';
+          const campaign = createPhaseCampaign({ initialUnit, phases: st.phaseMode.config.phases, name });
           st.phaseMode.campaigns.unshift(campaign);
           st.phaseMode.selectedCampaignId = campaign.id;
           db.bitacora.phaseMode = st.phaseMode;
@@ -19394,6 +19469,22 @@ RESPONDE SOLO CON JSON usando este schema:
           render("bitacora");
         };
       }
+
+      // ── Reiniciar campaña fallida
+      document.getElementById("phaseRestartCampaign")?.addEventListener("click", ()=>{
+        const selectedId = document.getElementById("phaseCampaignSelect")?.value || selectedCampaignId;
+        const prev = st.phaseMode.campaigns.find(c => c.id === selectedId);
+        const unit = prev?.initialUnit || st.bank || 25;
+        const name = prompt('Nombre de la nueva campaña:', `Campaña ${new Date().toLocaleDateString('es-PE')}`) ?? '';
+        const campaign = createPhaseCampaign({ initialUnit: unit, phases: st.phaseMode.config.phases, name });
+        st.phaseMode.campaigns.unshift(campaign);
+        st.phaseMode.selectedCampaignId = campaign.id;
+        db.bitacora.phaseMode = st.phaseMode;
+        persistPhaseMode();
+        saveDb(db);
+        render("bitacora");
+      });
+
       const phaseSavePickBtn = document.getElementById("phaseSavePick");
       if(phaseSavePickBtn){
         phaseSavePickBtn.onclick = ()=>{
@@ -19405,7 +19496,7 @@ RESPONDE SOLO CON JSON usando este schema:
             return;
           }
           if(campaign.status !== "active"){
-            if(out) out.textContent = "❌ La campaña seleccionada no está activa.";
+            if(out) out.textContent = `❌ Campaña ${campaign.status === 'failed' ? 'fallida' : 'completada'} — crea una nueva campaña.`;
             return;
           }
           const odds = Math.max(1.01, Number(document.getElementById("phaseOdds")?.value) || 0);
@@ -19422,28 +19513,22 @@ RESPONDE SOLO CON JSON usando este schema:
           }
           const lastPick = campaign.picks?.[campaign.picks.length - 1];
           if(lastPick && lastPick.result === "pending"){
-            if(out) out.textContent = "❌ Ya existe un pick pendiente en el paso actual.";
+            if(out) out.textContent = "❌ Ya existe un pick pendiente — resuelve antes de continuar.";
             return;
           }
-          const phase = campaign.currentPhase;
-          const pickNumber = campaign.currentPick;
           campaign.picks.push({
             id: uid("phase_pick"),
-            date: new Date().toISOString(),
-            league: pickFirstString(document.getElementById("phaseLeague")?.value, "Sin liga") || "Sin liga",
-            match: pickFirstString(document.getElementById("phaseMatch")?.value, "Partido sin definir") || "Partido sin definir",
-            market: pickFirstString(document.getElementById("phaseMarket")?.value, "Mercado") || "Mercado",
-            selection: pickFirstString(document.getElementById("phaseSelection")?.value, "Selección") || "Selección",
+            date: new Date().toISOString().slice(0,10),
+            league: document.getElementById("phaseLeague")?.value || "Sin liga",
+            match: document.getElementById("phaseMatch")?.value || "Partido sin definir",
+            market: document.getElementById("phaseMarket")?.value || "Mercado",
+            selection: document.getElementById("phaseSelection")?.value || "Selección",
             odds,
-            autoStake: campaign.bankroll,
-            manualStake: null,
             result,
             notes: "",
-            phase,
-            pickNumber,
-            narrativeScore: clamp(Number(document.getElementById("phaseNarrative")?.value) || 0, 0, 100),
+            narrativeScore: Math.max(0, Math.min(100, Number(document.getElementById("phaseNarrative")?.value) || 0)),
             emotionalFlag: !!document.getElementById("phaseEmotional")?.checked,
-            marketConsistent: !!document.getElementById("phaseMarketConsistent")?.checked
+            marketConsistent: true
           });
           const recalculated = recomputePhaseCampaign(campaign);
           const idx = st.phaseMode.campaigns.findIndex((camp)=>camp.id===campaign.id);
@@ -19452,15 +19537,19 @@ RESPONDE SOLO CON JSON usando este schema:
           db.bitacora.phaseMode = st.phaseMode;
           persistPhaseMode();
           saveDb(db);
-          if(out) out.textContent = recalculated.status === "failed"
-            ? `⛔ Campaña FALLIDA en F${recalculated.failedAt?.phase || phase} Paso ${recalculated.failedAt?.pickNumber || pickNumber}.`
-            : (recalculated.status === "completed"
-              ? `🏁 Campaña COMPLETADA. Multiplicador final x${(recalculated.bankroll/Math.max(0.01,recalculated.initialUnit)).toFixed(2)}`
-              : (result === "pending"
-                ? "⏳ Pick pendiente guardado. No se avanza de paso."
-                : (result === "void" && !recalculated.allowVoidAdvance
-                  ? "➖ Pick void guardado. Se mantiene el mismo paso."
-                  : `✅ Paso cerrado. Bankroll S/${recalculated.bankroll.toFixed(2)}`)));
+          if(recalculated.status === "failed"){
+            const lostStake = recalculated.failedAt?.lostStake || 0;
+            if(out) out.textContent = `💥 Campaña FALLIDA — perdiste S/${lostStake.toFixed(2)}. Usa "Reiniciar" para empezar de nuevo.`;
+          } else if(recalculated.status === "completed"){
+            const gain = recalculated.netProfit || (recalculated.bankroll - recalculated.initialUnit);
+            if(out) out.textContent = `🏆 ¡COMPLETADA! Ganancia neta: +S/${gain.toFixed(2)} (×${(recalculated.bankroll/Math.max(0.01,recalculated.initialUnit)).toFixed(2)})`;
+          } else if(result === "pending"){
+            if(out) out.textContent = "⏳ Pick pendiente guardado.";
+          } else if(result === "void"){
+            if(out) out.textContent = recalculated.allowVoidAdvance ? "↩️ Void — avanza al siguiente paso." : "↩️ Void — se mantiene el mismo paso.";
+          } else {
+            if(out) out.textContent = `✅ Ganó. Bankroll: S/${recalculated.bankroll.toFixed(2)} (+S/${recalculated.netProfit.toFixed(2)} neto)`;
+          }
           setTimeout(()=>render("bitacora"), 180);
         };
       }
@@ -19470,31 +19559,18 @@ RESPONDE SOLO CON JSON usando este schema:
           const pickId = btn.getAttribute("data-phase-pick");
           const selectedId = document.getElementById("phaseCampaignSelect")?.value || selectedCampaignId;
           const campaign = st.phaseMode.campaigns.find((camp)=>camp.id===selectedId) || st.phaseMode.campaigns[0];
-          const pick = campaign?.picks?.find((row)=>row.id===pickId);
-          if(!campaign || !pick) return;
-          const backdrop = document.createElement("div");
-          backdrop.className = "fl-modal-backdrop";
-          const usedStake = pick.manualStake != null ? pick.manualStake : pick.autoStake;
-          backdrop.innerHTML = `
-            <div class="fl-modal" style="max-width:680px;">
-              <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:10px;"><div><div class="fl-modal-title">Detalle pick · ${campaign.id.slice(-6)}</div><div class="fl-mini">Modal Modo Fases</div></div><button class="fl-btn" id="phasePickClose">Cerrar</button></div>
-              <div class="fl-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;">
-                <div class="fl-card" style="margin:0;padding:8px;"><div class="fl-mini">Fecha</div><div>${(pick.date||"").replace("T"," ").slice(0,16)}</div></div>
-                <div class="fl-card" style="margin:0;padding:8px;"><div class="fl-mini">Liga / Partido</div><div>${pick.league}<br/>${pick.match}</div></div>
-                <div class="fl-card" style="margin:0;padding:8px;"><div class="fl-mini">Mercado</div><div>${pick.market} · ${pick.selection}</div></div>
-                <div class="fl-card" style="margin:0;padding:8px;"><div class="fl-mini">Resultado</div><div>${pick.result}</div></div>
-              </div>
-              <div class="fl-card" style="margin-top:10px;padding:10px;background:#0d1117;border:1px solid #2d333b;">
-                <div style="font-weight:700;">Evolución bankroll</div>
-                <div class="fl-mini" style="margin-top:6px;">Stake auto: S/${pick.autoStake.toFixed(2)} · Cuota: ${pick.odds.toFixed(2)} · Bankroll antes: S/${(pick.bankrollBefore||0).toFixed(2)} · Bankroll después: S/${pick.bankrollAfter.toFixed(2)}</div>
-                <div class="fl-mini" style="margin-top:6px;">Explicación matemática: ${pick.result==="win" ? `bankroll = stake × cuota = ${usedStake.toFixed(2)} × ${pick.odds.toFixed(2)} = ${pick.bankrollAfter.toFixed(2)}` : (pick.result==="loss" ? `al perder se liquida la campaña: bankroll = 0` : (pick.result==="void" ? `void: bankroll se mantiene sin avance automático` : `pending: paso bloqueado hasta resolución`))}</div>
-              </div>
-            </div>
-          `;
-          document.body.appendChild(backdrop);
-          const close = ()=>backdrop.remove();
-          backdrop.addEventListener("click", (ev)=>{ if(ev.target===backdrop) close(); });
-          backdrop.querySelector("#phasePickClose").onclick = close;
+          if(!campaign) return;
+          const pickIdx = campaign.picks.findIndex(p => p.id === pickId);
+          if(pickIdx < 0) return;
+          if(!confirm(`¿Eliminar el pick "${campaign.picks[pickIdx].match || 'este pick'}"? La escalera se recalculará.`)) return;
+          campaign.picks.splice(pickIdx, 1);
+          const recalculated = recomputePhaseCampaign(campaign);
+          const idx = st.phaseMode.campaigns.findIndex(c => c.id === campaign.id);
+          if(idx >= 0) st.phaseMode.campaigns[idx] = recalculated;
+          db.bitacora.phaseMode = st.phaseMode;
+          persistPhaseMode();
+          saveDb(db);
+          render("bitacora");
         };
       });
       return;
