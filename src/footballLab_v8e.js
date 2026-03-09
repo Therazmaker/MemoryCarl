@@ -10066,6 +10066,421 @@ function computeTeamIntelligencePanel(db, teamId){
     });
   }
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // ██  RADAR INTELLIGENCE v2 — Favorito real + Defensa real + Export JSON  ██
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Índice de Presión del Favorito — cuánto "mete presión y hace goles de verdad"
+   * No basta con tener muchos goles; importa hacerlos bajo presión (vs rivales top),
+   * la consistencia de marcar (no solo 1 partido inflado), y el scoring rate general.
+   */
+  function computeFavoritePressureIndex(form, strength = 50){
+    if(!form || !Number.isFinite(form.n) || form.n < 2) return null;
+
+    const gfPerGame = Number(form.gfPerGame) || 0;
+    const ptsPerGame = Number(form.ptsPerGame) || 0;
+    const winsVsTop = Number(form.winsVsTop) || 0;
+    const qualityScore = Number(form.qualityScore) || 0;
+    const trend = form.trend || 'stable';
+    const wins = Number(form.wins) || 0;
+    const n = Number(form.n) || 1;
+    const winsVsBottom = Number(form.winsVsBottom) || 0;
+
+    // ── Scoring rate: goles/partido normalizado (>2 goles/j = muy alto)
+    const scoringRate = clamp(gfPerGame / 2.5, 0, 1); // 0..1
+
+    // ── Consistencia: cuántas victorias vs las que deberían tener por n
+    const winRate = clamp(wins / n, 0, 1);
+
+    // ── Calidad de victorias: gana vs rivales fuertes
+    const vsTopScore = winsVsTop >= 2 ? 1.0 : winsVsTop === 1 ? 0.6 : 0.15;
+
+    // ── Penalización por victorias infladas (solo ganó vs débiles)
+    const inflationPenalty = (wins > 0 && winsVsBottom === wins) ? 0.25 : 0;
+
+    // ── Bonus tendencia
+    const trendBonus = trend === 'rising' ? 0.08 : trend === 'falling' ? -0.1 : 0;
+
+    // ── CSI bonus: fuerza acumulada confirma
+    const csiBonus = clamp((strength - 50) / 100, -0.15, 0.2);
+
+    const raw = (
+      (scoringRate       * 0.30) +
+      (winRate           * 0.20) +
+      (vsTopScore        * 0.25) +
+      (qualityScore      * 0.15) +
+      (ptsPerGame / 3    * 0.10)
+    ) - inflationPenalty + trendBonus + csiBonus;
+
+    const score = clamp(raw * 100, 0, 100);
+
+    // Nivel de presión real
+    const level = score >= 70 ? 'ALTO' : score >= 45 ? 'MEDIO' : 'BAJO';
+
+    // Fuentes de datos para transparencia
+    const sources = [];
+    if(Number.isFinite(form.gfPerGame)) sources.push(`GF/j: ${form.gfPerGame} (últimos ${form.n} partidos)`);
+    if(winsVsTop > 0) sources.push(`Ganó ${winsVsTop}x vs top`);
+    if(inflationPenalty > 0) sources.push(`⚠️ Victorias solo vs débiles`);
+    if(trend !== 'stable') sources.push(`Tendencia: ${trend === 'rising' ? '↑' : '↓'}`);
+
+    return {
+      score: Math.round(score),
+      level,
+      gfPerGame,
+      winsVsTop,
+      winRate: Number(winRate.toFixed(2)),
+      vsTopScore: Number(vsTopScore.toFixed(2)),
+      inflationPenalty: Number(inflationPenalty.toFixed(2)),
+      trend,
+      sources,
+      dataWindow: form.n,
+      dataSource: form.n ? `tracker (${form.n} partidos)` : 'manual'
+    };
+  }
+
+  /**
+   * Índice de Defensa Real del No-favorito
+   * Cuán fuerte es la defensa del underdog — más allá de los goles recibidos:
+   * portería a cero, solidez vs equipos de ataque, tendencia defensiva.
+   */
+  function computeUnderdogDefenseIndex(form, strength = 50){
+    if(!form || !Number.isFinite(form.n) || form.n < 2) return null;
+
+    const gaPerGame = Number(form.gaPerGame);
+    const n = Number(form.n) || 1;
+    const qualityScore = Number(form.qualityScore) || 0;
+    const ptsPerGame = Number(form.ptsPerGame) || 0;
+    const winsVsTop = Number(form.winsVsTop) || 0;
+    const lossesVsBot = Number(form.lossesVsBot) || 0;
+    const draws = Number(form.draws) || 0;
+    const wins = Number(form.wins) || 0;
+    const trend = form.trend || 'stable';
+
+    // ── GA/partido: escala inversa (0 GA = 100, 3+ GA = 0)
+    const gaScore = Number.isFinite(gaPerGame) ? clamp(1 - (gaPerGame / 3), 0, 1) : null;
+
+    // ── Porcentaje de resultados sin perder (W+D)
+    const unbeatenRate = clamp((wins + draws) / n, 0, 1);
+
+    // ── Portería a cero estimada (partidos con 0 GA)
+    // Calculamos via matchDetails si existen, sino estimación
+    let cleanSheetRate = null;
+    if(Array.isArray(form.matchDetails) && form.matchDetails.length > 0){
+      const cleanSheets = form.matchDetails.filter(m => Number(m.oppGoals) === 0).length;
+      cleanSheetRate = cleanSheets / form.matchDetails.length;
+    }
+
+    // ── Solidez vs rivales fuertes: aguantó sin perder ante tops
+    const solidVsTop = winsVsTop >= 1 ? 0.8 : (qualityScore >= 0.5 ? 0.5 : 0.2);
+
+    // ── Penalización: perdió vs débiles (defensa frágil)
+    const fragilitPenalty = lossesVsBot >= 2 ? 0.2 : lossesVsBot === 1 ? 0.1 : 0;
+
+    // ── Bonus tendencia
+    const trendBonus = trend === 'rising' ? 0.06 : trend === 'falling' ? -0.08 : 0;
+
+    // ── CSI: fuerza acumulada del underdog (si es menos de 50, la defensa es más meritoria)
+    const csiPenalty = clamp((50 - strength) / 200, 0, 0.1); // pequeño boost si es débil
+
+    const components = [];
+    if(gaScore !== null) components.push({ v: gaScore, w: 0.40 });
+    components.push({ v: unbeatenRate, w: 0.20 });
+    components.push({ v: solidVsTop, w: 0.20 });
+    components.push({ v: qualityScore, w: 0.10 });
+    components.push({ v: clamp(ptsPerGame / 3, 0, 1), w: 0.10 });
+    if(cleanSheetRate !== null) components.push({ v: cleanSheetRate, w: 0.15 });
+
+    let totalW = 0, weightedSum = 0;
+    for(const c of components){
+      weightedSum += c.v * c.w;
+      totalW += c.w;
+    }
+
+    const raw = totalW > 0 ? (weightedSum / totalW) - fragilitPenalty + trendBonus + csiPenalty : null;
+    if(raw === null) return null;
+
+    const score = clamp(raw * 100, 0, 100);
+    const level = score >= 68 ? 'SÓLIDA' : score >= 45 ? 'MODERADA' : 'PERMEABLE';
+
+    // Portería a cero en primer tiempo — señal especial para apuesta CS/HT
+    const htCleanSheetSignal = gaScore !== null && gaScore >= 0.7 && unbeatenRate >= 0.6;
+
+    // Fuentes
+    const sources = [];
+    if(Number.isFinite(gaPerGame)) sources.push(`GA/j: ${gaPerGame} (últimos ${n} partidos)`);
+    if(cleanSheetRate !== null) sources.push(`CS estimado: ${Math.round(cleanSheetRate * 100)}%`);
+    if(lossesVsBot > 0) sources.push(`⚠️ ${lossesVsBot}x perdió vs débiles`);
+    if(trend !== 'stable') sources.push(`Tendencia: ${trend === 'rising' ? '↑' : '↓'}`);
+
+    return {
+      score: Math.round(score),
+      level,
+      gaPerGame: Number.isFinite(gaPerGame) ? gaPerGame : null,
+      unbeatenRate: Number(unbeatenRate.toFixed(2)),
+      cleanSheetRate: cleanSheetRate !== null ? Number(cleanSheetRate.toFixed(2)) : null,
+      solidVsTop: Number(solidVsTop.toFixed(2)),
+      htCleanSheetSignal,
+      trend,
+      sources,
+      dataWindow: n,
+      dataSource: n ? `tracker (${n} partidos)` : 'manual'
+    };
+  }
+
+  /**
+   * Índice de Empate — cuán probable es un empate basado en datos reales
+   */
+  function computeDrawIndex({ strengthGap = 0, fsiHome = 0, fsiAway = 0, formHome = null, formAway = null, odds = {} } = {}){
+    const signals = [];
+    let score = 0;
+    let sources = [];
+
+    // Fuerza similar → más empates
+    if(strengthGap <= 8){ score += 25; signals.push('Fuerzas equilibradas'); }
+    else if(strengthGap <= 18){ score += 12; }
+
+    // FSI similar → menos dirección
+    const fsiDiff = Math.abs((Number(fsiHome)||0) - (Number(fsiAway)||0));
+    if(fsiDiff <= 10){ score += 20; signals.push('FSI similar'); }
+    else if(fsiDiff <= 20){ score += 8; }
+
+    // Historial de empates en la forma reciente
+    if(formHome && formAway){
+      const hDrawRate = formHome.n > 0 ? (formHome.draws || 0) / formHome.n : 0;
+      const aDrawRate = formAway.n > 0 ? (formAway.draws || 0) / formAway.n : 0;
+      const avgDrawRate = (hDrawRate + aDrawRate) / 2;
+      if(avgDrawRate >= 0.3){ score += 20; signals.push(`Alta tasa de empates (${Math.round(avgDrawRate*100)}% promedio)`); }
+      else if(avgDrawRate >= 0.2){ score += 10; }
+      sources.push(`Draw rate H: ${Math.round(hDrawRate*100)}% A: ${Math.round(aDrawRate*100)}%`);
+    }
+
+    // GA/partido bajo en ambos → posible 0-0 o 1-1
+    if(formHome && formAway){
+      const avgGa = ((formHome.gaPerGame||2) + (formAway.gaPerGame||2)) / 2;
+      if(avgGa <= 1.0){ score += 15; signals.push('Ambas defensas sólidas'); }
+      else if(avgGa <= 1.5){ score += 8; }
+    }
+
+    // Cuotas del mercado: si X ≤ 3.2 el mercado ya lo ve probable
+    const drawOdds = Number(odds?.draw);
+    if(Number.isFinite(drawOdds)){
+      if(drawOdds <= 2.8){ score += 15; signals.push(`Cuota X baja: ${drawOdds}`); }
+      else if(drawOdds <= 3.3){ score += 8; }
+      sources.push(`Odds X: ${drawOdds}`);
+    }
+
+    const level = score >= 65 ? 'ALTO' : score >= 40 ? 'MEDIO' : 'BAJO';
+
+    return { score: clamp(score, 0, 100), level, signals, sources };
+  }
+
+  /**
+   * Señales de portería a cero en primer tiempo (HT CS)
+   */
+  function computeHTCleanSheetSignal({ formHome = null, formAway = null, strengthHome = 50, strengthAway = 50 } = {}){
+    const signals = [];
+    let score = 0;
+
+    if(formHome){
+      const gaH = Number(formHome.gaPerGame) || 3;
+      if(gaH <= 0.8){ score += 25; signals.push(`${formHome.n ? `últimos ${formHome.n}j` : ''}: GA/j bajo (${gaH})`); }
+      else if(gaH <= 1.2){ score += 12; }
+    }
+    if(formAway){
+      const gaA = Number(formAway.gaPerGame) || 3;
+      if(gaA <= 0.8){ score += 25; signals.push(`Visitante GA/j: ${gaA}`); }
+      else if(gaA <= 1.2){ score += 12; }
+    }
+
+    // Ambas defensas sólidas
+    const avgGa = ((formHome?.gaPerGame||2) + (formAway?.gaPerGame||2)) / 2;
+    if(avgGa <= 0.9){ score += 20; signals.push('Promedio GA/j < 1'); }
+
+    // Fuerza equilibrada (juegos tensos, menos goles)
+    const strengthGap = Math.abs(strengthHome - strengthAway);
+    if(strengthGap <= 10){ score += 10; }
+
+    const level = score >= 55 ? 'PROBABLE' : score >= 35 ? 'POSIBLE' : 'POCO_PROBABLE';
+    return { score: clamp(score, 0, 100), level, signals };
+  }
+
+  /**
+   * Construye el export JSON del Radar del Día con prompt + schema
+   * Para usar con Claude u otros LLMs y garantizar respuesta estructurada.
+   */
+  function buildRadarDayExport({ matches = [], db = {}, generatedAt = null } = {}){
+    const sampleSize = Number(db?.versus?.sampleSize) || 20;
+
+    const SCHEMA = {
+      schemaVersion: 'radar_day_export_v2',
+      description: 'Export del Radar del Día de FutbolLab para análisis con IA',
+      fields: {
+        match_id: 'string — identificador único',
+        home: 'string — equipo local',
+        away: 'string — equipo visitante',
+        league: 'string — liga',
+        kickoff: 'string ISO — hora del partido',
+        odds: '{ home, draw, away } — cuotas decimales',
+        strengthHome: 'number 0-100 — CSI acumulado local (fuente: tracker)',
+        strengthAway: 'number 0-100 — CSI acumulado visitante (fuente: tracker)',
+        strengthGap: 'number — diferencia de fuerza',
+        fsiHome: 'number -100..100 — Form Surprise Index local',
+        fsiAway: 'number -100..100 — Form Surprise Index visitante',
+        studyScore: 'number 0-100 — qué tan interesante es estudiar este partido',
+        type: 'string: clean | tension | chaos',
+        favoritePressureIndex: '{ score, level, gfPerGame, winsVsTop, sources } — favorito real',
+        underdogDefenseIndex: '{ score, level, gaPerGame, cleanSheetRate, htCleanSheetSignal, sources } — defensa del no-favorito',
+        drawIndex: '{ score, level, signals } — probabilidad de empate',
+        htCleanSheetSignal: '{ score, level, signals } — portería a cero 1er tiempo',
+        formHome: '{ n, sequence, gfPerGame, gaPerGame, ptsPerGame, winsVsTop, trend, qualityScore }',
+        formAway: '{ n, sequence, gfPerGame, gaPerGame, ptsPerGame, winsVsTop, trend, qualityScore }',
+        flags: 'string[] — alertas del sistema',
+        narrative: 'string[] — narrativa generada',
+        dataWindow: `número de partidos usado para CSI/FSI: ${sampleSize}`,
+        marketDefense: '{ verdict, defenseScoreUnderdog, attackPenetrationFavorite, upsetRiskScore }'
+      }
+    };
+
+    const PROMPT = `Eres un analista experto en fútbol. Tu tarea es analizar los partidos del Radar del Día de FutbolLab y generar predicciones para múltiples mercados de apuestas.
+
+CONTEXTO DEL SISTEMA:
+- CSI (Current Strength Index): fuerza acumulada del equipo 0-100 basada en ${sampleSize} partidos del tracker
+- FSI (Form Surprise Index): estado de forma sistémico -100..100 (positivo = mejor de lo esperado)
+- FavoritePressureIndex: cuán real es la amenaza goleadora del favorito (presión + goles vs rivales top)
+- UnderdogDefenseIndex: solidez real de la defensa del no-favorito
+- DrawIndex: señales objetivas de empate
+- HTCleanSheetSignal: señal de portería a cero en primer tiempo
+
+DATOS DE LOS PARTIDOS:
+{{MATCH_DATA}}
+
+INSTRUCCIONES:
+1. Para CADA partido, evalúa:
+   a) ¿El favorito realmente mete presión y hace goles vs rivales de nivel? (FavoritePressureIndex)
+   b) ¿La defensa del no-favorito puede aguantar? (UnderdogDefenseIndex)
+   c) ¿Hay señales reales de empate? (DrawIndex)
+   d) ¿Es probable la portería a cero en el primer tiempo? (HTCleanSheetSignal)
+
+2. Detecta INCONGRUENCIAS entre los datos y ajusta la predicción:
+   - Si el favorito tiene PressureIndex BAJO pero odds bajas → posible valor en X o sorpresa
+   - Si UnderdogDefenseIndex es ALTA pero mercado ignora → value en no-gana-favorito
+   - Si DrawIndex ALTO y odds X > 3.0 → value en empate
+
+3. Para cada partido genera predicciones para estos mercados:
+   - 1X2 (resultado final)
+   - Ambos marcan (BTTS)
+   - Total goles +1.5 / +2.5
+   - Portería a cero (ya sea local o visitante)
+   - Primer tiempo sin goles (0-0 HT)
+   - Resultado al descanso
+
+RESPONDE SOLO CON JSON usando este schema:
+{
+  "schemaVersion": "radar_ai_prediction_v2",
+  "generatedAt": "ISO timestamp",
+  "predictions": [
+    {
+      "matchId": "string",
+      "home": "string",
+      "away": "string",
+      "confidence": 0.0-1.0,
+      "incongruencias": ["string — señales que no encajan entre datos y mercado"],
+      "markets": {
+        "result": { "pick": "home|draw|away", "confidence": 0.0-1.0, "reasoning": "string" },
+        "btts": { "pick": "yes|no", "confidence": 0.0-1.0, "reasoning": "string" },
+        "over15": { "pick": "yes|no", "confidence": 0.0-1.0, "reasoning": "string" },
+        "over25": { "pick": "yes|no", "confidence": 0.0-1.0, "reasoning": "string" },
+        "cleanSheet": { "team": "home|away|none", "confidence": 0.0-1.0, "reasoning": "string" },
+        "htCleanSheet": { "pick": "yes|no", "confidence": 0.0-1.0, "reasoning": "string" },
+        "htResult": { "pick": "home|draw|away", "confidence": 0.0-1.0, "reasoning": "string" }
+      },
+      "drawWarning": "string|null — si hay señales fuertes de empate que el mercado ignora",
+      "valueAlert": "string|null — apuesta con valor detectada",
+      "summary": "string — 2-3 líneas de análisis principal"
+    }
+  ],
+  "systemNotes": "string — observaciones generales del radar del día"
+}`;
+
+    const matchData = matches.map(m => ({
+      match_id: m.id,
+      home: m.home,
+      away: m.away,
+      league: m.league,
+      kickoff: m.kickoff,
+      odds: m.odds,
+      strengthHome: m.strengthHome,
+      strengthAway: m.strengthAway,
+      strengthGap: m.strengthGap,
+      fsiHome: m.fsiHome,
+      fsiAway: m.fsiAway,
+      studyScore: m.studyScore,
+      type: m.type,
+      favoritePressureIndex: m.favoritePressureIndex || null,
+      underdogDefenseIndex: m.underdogDefenseIndex || null,
+      drawIndex: m.drawIndex || null,
+      htCleanSheetSignal: m.htCleanSheetSignal || null,
+      formHome: m.formHome ? {
+        n: m.formHome.n,
+        sequence: m.formHome.sequenceStr || m.formHome.sequence?.join(''),
+        gfPerGame: m.formHome.gfPerGame,
+        gaPerGame: m.formHome.gaPerGame,
+        ptsPerGame: m.formHome.ptsPerGame,
+        winsVsTop: m.formHome.winsVsTop,
+        lossesVsBot: m.formHome.lossesVsBot,
+        trend: m.formHome.trend,
+        qualityScore: m.formHome.qualityScore
+      } : null,
+      formAway: m.formAway ? {
+        n: m.formAway.n,
+        sequence: m.formAway.sequenceStr || m.formAway.sequence?.join(''),
+        gfPerGame: m.formAway.gfPerGame,
+        gaPerGame: m.formAway.gaPerGame,
+        ptsPerGame: m.formAway.ptsPerGame,
+        winsVsTop: m.formAway.winsVsTop,
+        lossesVsBot: m.formAway.lossesVsBot,
+        trend: m.formAway.trend,
+        qualityScore: m.formAway.qualityScore
+      } : null,
+      flags: m.flags,
+      dataWindow: sampleSize,
+      marketDefense: m.marketDefense ? {
+        verdict: m.marketDefense.verdict,
+        defenseScoreUnderdog: m.marketDefense.defenseScoreUnderdog,
+        attackPenetrationFavorite: m.marketDefense.attackPenetrationFavorite,
+        upsetRiskScore: m.marketDefense.upsetRiskScore
+      } : null
+    }));
+
+    const filledPrompt = PROMPT.replace('{{MATCH_DATA}}', JSON.stringify(matchData, null, 2));
+
+    return {
+      schemaVersion: 'radar_day_export_v2',
+      generatedAt: generatedAt || new Date().toISOString(),
+      config: {
+        dataWindow: sampleSize,
+        homeAdvantage: db?.versus?.homeAdvantage || 1.1,
+        marketBlend: db?.versus?.marketBlend || 0.35,
+        matchday: db?.versus?.matchday || 20
+      },
+      schema: SCHEMA,
+      prompt: filledPrompt,
+      matchData,
+      meta: {
+        totalMatches: matches.length,
+        matchesWithForm: matches.filter(m => m.formHome && m.formAway).length,
+        matchesWithOdds: matches.filter(m => m.odds?.home && m.odds?.draw && m.odds?.away).length,
+        matchesWithPressureIndex: matches.filter(m => m.favoritePressureIndex).length
+      }
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // FIN RADAR INTELLIGENCE v2
+  // ══════════════════════════════════════════════════════════════════════════════
+
   function classifyRadarMatch({ strengthGap = 0, fsiHome = null, fsiAway = null, avgFSI = 0 } = {}){
     const absHome = Math.abs(Number(fsiHome) || 0);
     const absAway = Math.abs(Number(fsiAway) || 0);
@@ -10982,6 +11397,50 @@ function computeTeamIntelligencePanel(db, teamId){
           formHome: resolvedFormHome,
           formAway: resolvedFormAway
         });
+
+        // ── Determinar favorito del mercado o de fuerza para los índices
+        const mktFavIsHome = marketDefense?.mktFavIsHome !== undefined
+          ? marketDefense.mktFavIsHome
+          : strengthHome >= strengthAway;
+        const favoriteForm = mktFavIsHome ? resolvedFormHome : resolvedFormAway;
+        const underdogForm = mktFavIsHome ? resolvedFormAway : resolvedFormHome;
+        const favoriteStrength = mktFavIsHome ? strengthHome : strengthAway;
+        const underdogStrength = mktFavIsHome ? strengthAway : strengthHome;
+        const favoriteName = mktFavIsHome ? (home.name || 'Local') : (away.name || 'Visitante');
+        const underdogName = mktFavIsHome ? (away.name || 'Visitante') : (home.name || 'Local');
+
+        // ── Nuevos índices de inteligencia
+        const favoritePressureIndex = computeFavoritePressureIndex(favoriteForm, favoriteStrength);
+        const underdogDefenseIndex = computeUnderdogDefenseIndex(underdogForm, underdogStrength);
+        const drawIndex = computeDrawIndex({
+          strengthGap: scorePack.strengthGap,
+          fsiHome,
+          fsiAway,
+          formHome: resolvedFormHome,
+          formAway: resolvedFormAway,
+          odds: resolvedOdds
+        });
+        const htCleanSheetSignal = computeHTCleanSheetSignal({
+          formHome: resolvedFormHome,
+          formAway: resolvedFormAway,
+          strengthHome,
+          strengthAway
+        });
+
+        // ── Flags adicionales basados en nuevos índices
+        if(favoritePressureIndex && favoritePressureIndex.level === 'BAJO'){
+          radarFlags.push('FAVORITE_LOW_PRESSURE');
+        }
+        if(underdogDefenseIndex && underdogDefenseIndex.level === 'SÓLIDA'){
+          radarFlags.push('UNDERDOG_SOLID_DEFENSE');
+        }
+        if(drawIndex && drawIndex.level === 'ALTO'){
+          radarFlags.push('HIGH_DRAW_SIGNAL');
+        }
+        if(htCleanSheetSignal && htCleanSheetSignal.level === 'PROBABLE'){
+          radarFlags.push('HT_CLEAN_SHEET_LIKELY');
+        }
+
         return {
           id: m.id || uid('radar'),
           league,
@@ -11008,6 +11467,15 @@ function computeTeamIntelligencePanel(db, teamId){
           prediction: m.prediction || '',
           radarAnalysis: m.radarAnalysis || null,
           marketDefense,
+          // ── Nuevos índices v2
+          favoritePressureIndex,
+          underdogDefenseIndex,
+          drawIndex,
+          htCleanSheetSignal,
+          favoriteName,
+          underdogName,
+          mktFavIsHome,
+          dataWindow: Number(db?.versus?.sampleSize) || 20,
           narrative: buildRadarNarrative({
             home: home.name || 'Local',
             away: away.name || 'Visitante',
@@ -12902,6 +13370,71 @@ function computeTeamIntelligencePanel(db, teamId){
 
           ${m.radarAnalysis ? `<div class="rdx-analysis-preview">🎯 Insight IA: ${m.radarAnalysis.insight?.valueLevel || 'MEDIO'} · Consistencia ${m.radarAnalysis.comparison?.consistency || 'MEDIA'}</div>` : ''}
 
+          ${(m.favoritePressureIndex || m.underdogDefenseIndex || m.drawIndex || m.htCleanSheetSignal) ? `
+          <div style="margin:10px 0 0;background:rgba(30,40,60,0.6);border:1px solid rgba(88,166,255,0.15);border-radius:8px;padding:12px 14px;">
+            <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#58a6ff;text-transform:uppercase;margin-bottom:10px;">🧠 Inteligencia del Partido <span style="font-weight:400;font-size:9px;color:#6e7681;letter-spacing:0;"> · N=${m.dataWindow||20} partidos</span></div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;">
+
+              ${m.favoritePressureIndex ? (() => {
+                const pi = m.favoritePressureIndex;
+                const c = pi.level==='ALTO'?'#3fb950':pi.level==='MEDIO'?'#e3b341':'#f85149';
+                return `
+                <div style="background:#0d1117;border-radius:6px;padding:8px 10px;">
+                  <div style="font-size:8px;letter-spacing:1px;color:#6e7681;text-transform:uppercase;margin-bottom:3px;">💥 Presión del Favorito</div>
+                  <div style="font-size:9px;color:#8b949e;margin-bottom:4px;">${escapeHtml(m.favoriteName||'Favorito')}</div>
+                  <div style="font-size:22px;font-weight:900;color:${c};line-height:1;">${pi.score}<span style="font-size:10px;color:#6e7681;">/100</span></div>
+                  <div style="height:2px;background:#21262d;border-radius:2px;margin:4px 0;"><div style="height:100%;width:${pi.score}%;background:${c};border-radius:2px;"></div></div>
+                  <div style="font-size:9px;font-weight:700;color:${c};">${pi.level}</div>
+                  <div style="font-size:9px;color:#6e7681;margin-top:3px;">${pi.gfPerGame} GF/j · ${pi.winsVsTop}x vs top</div>
+                  <div style="font-size:8px;color:#484f58;margin-top:4px;">${pi.sources.slice(0,2).map(s=>escapeHtml(s)).join(' · ')}</div>
+                </div>`;
+              })() : ''}
+
+              ${m.underdogDefenseIndex ? (() => {
+                const di = m.underdogDefenseIndex;
+                const c = di.level==='SÓLIDA'?'#3fb950':di.level==='MODERADA'?'#e3b341':'#f85149';
+                return `
+                <div style="background:#0d1117;border-radius:6px;padding:8px 10px;">
+                  <div style="font-size:8px;letter-spacing:1px;color:#6e7681;text-transform:uppercase;margin-bottom:3px;">🛡️ Defensa No-Favorito</div>
+                  <div style="font-size:9px;color:#8b949e;margin-bottom:4px;">${escapeHtml(m.underdogName||'Underdog')}</div>
+                  <div style="font-size:22px;font-weight:900;color:${c};line-height:1;">${di.score}<span style="font-size:10px;color:#6e7681;">/100</span></div>
+                  <div style="height:2px;background:#21262d;border-radius:2px;margin:4px 0;"><div style="height:100%;width:${di.score}%;background:${c};border-radius:2px;"></div></div>
+                  <div style="font-size:9px;font-weight:700;color:${c};">${di.level}</div>
+                  <div style="font-size:9px;color:#6e7681;margin-top:3px;">${di.gaPerGame!=null?di.gaPerGame+' GA/j':''} ${di.cleanSheetRate!=null?'· CS: '+Math.round(di.cleanSheetRate*100)+'%':''}</div>
+                  ${di.htCleanSheetSignal ? `<div style="font-size:9px;color:#3fb950;margin-top:2px;">🔒 Señal CS 1T</div>` : ''}
+                  <div style="font-size:8px;color:#484f58;margin-top:4px;">${di.sources.slice(0,2).map(s=>escapeHtml(s)).join(' · ')}</div>
+                </div>`;
+              })() : ''}
+
+              ${m.drawIndex ? (() => {
+                const dx = m.drawIndex;
+                const c = dx.level==='ALTO'?'#e3b341':dx.level==='MEDIO'?'#58a6ff':'#6e7681';
+                return `
+                <div style="background:#0d1117;border-radius:6px;padding:8px 10px;">
+                  <div style="font-size:8px;letter-spacing:1px;color:#6e7681;text-transform:uppercase;margin-bottom:3px;">🤝 Señal de Empate</div>
+                  <div style="font-size:22px;font-weight:900;color:${c};line-height:1;margin-bottom:2px;">${dx.score}<span style="font-size:10px;color:#6e7681;">/100</span></div>
+                  <div style="height:2px;background:#21262d;border-radius:2px;margin:4px 0;"><div style="height:100%;width:${dx.score}%;background:${c};border-radius:2px;"></div></div>
+                  <div style="font-size:9px;font-weight:700;color:${c};">${dx.level}</div>
+                  <div style="font-size:8px;color:#6e7681;margin-top:3px;">${(dx.signals||[]).slice(0,2).map(s=>escapeHtml(s)).join(' · ')}</div>
+                </div>`;
+              })() : ''}
+
+              ${m.htCleanSheetSignal ? (() => {
+                const ht = m.htCleanSheetSignal;
+                const c = ht.level==='PROBABLE'?'#3fb950':ht.level==='POSIBLE'?'#e3b341':'#6e7681';
+                return `
+                <div style="background:#0d1117;border-radius:6px;padding:8px 10px;">
+                  <div style="font-size:8px;letter-spacing:1px;color:#6e7681;text-transform:uppercase;margin-bottom:3px;">🔒 Portería a 0 (1T)</div>
+                  <div style="font-size:22px;font-weight:900;color:${c};line-height:1;margin-bottom:2px;">${ht.score}<span style="font-size:10px;color:#6e7681;">/100</span></div>
+                  <div style="height:2px;background:#21262d;border-radius:2px;margin:4px 0;"><div style="height:100%;width:${ht.score}%;background:${c};border-radius:2px;"></div></div>
+                  <div style="font-size:9px;font-weight:700;color:${c};">${ht.level}</div>
+                  <div style="font-size:8px;color:#6e7681;margin-top:3px;">${(ht.signals||[]).slice(0,2).map(s=>escapeHtml(s)).join(' · ')}</div>
+                </div>`;
+              })() : ''}
+
+            </div>
+          </div>` : ''}
+
           ${m.marketDefense && m.marketDefense.ready ? `
           <div style="margin:10px 0 0;background:${m.marketDefense.riskLevel==='HIGH'?'rgba(239,68,68,0.04)':m.marketDefense.riskLevel==='MEDIUM'?'rgba(245,158,11,0.03)':'rgba(255,255,255,0.02)'};border:1px solid ${m.marketDefense.riskLevel==='HIGH'?'rgba(239,68,68,0.4)':m.marketDefense.riskLevel==='MEDIUM'?'rgba(245,158,11,0.3)':'rgba(255,255,255,0.07)'};border-radius:8px;padding:12px 14px;">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
@@ -13037,6 +13570,11 @@ function computeTeamIntelligencePanel(db, teamId){
             <div>
               <div class="rdx-list-title">📡 Radar del Día <span style="font-weight:400;font-size:13px;color:#6e7681;">(${sorted.length} partido${sorted.length!==1?'s':''})</span></div>
               <div style="font-size:11px;color:#6e7681;margin-top:2px;">FSI + RSI detectan si los equipos están realmente bien — no si son favoritos en papel.</div>
+              <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-size:11px;background:rgba(31,111,235,0.12);border:1px solid rgba(31,111,235,0.35);color:#58a6ff;padding:2px 8px;border-radius:4px;cursor:default;" title="Número de partidos usados para calcular CSI y FSI de cada equipo">📊 N = ${Number(db.versus?.sampleSize)||20} partidos</span>
+                <button id="rdxEditN" style="font-size:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:#8b949e;padding:2px 8px;border-radius:4px;cursor:pointer;" title="Ajustar el número de partidos de muestra">✏️ Ajustar N</button>
+                <button id="rdxExportJSON" style="font-size:10px;background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.3);color:#3fb950;padding:2px 8px;border-radius:4px;cursor:pointer;" title="Exportar JSON con prompt + schema para análisis con IA">⬇️ Export IA JSON</button>
+              </div>
             </div>
             <div class="rdx-sort-row">
               <button class="rdx-btn-hist" id="rdxOpenHistoric">📋 Histórico</button>
@@ -13217,6 +13755,90 @@ function computeTeamIntelligencePanel(db, teamId){
       document.getElementById('radarSortBy')?.addEventListener('change', (ev)=>{
         radarState.sortBy = ev.target.value || 'studyScore';
         render('radar', payload);
+      });
+
+      // ── EDIT N — acceso directo para ajustar el número de partidos
+      document.getElementById('rdxEditN')?.addEventListener('click', ()=>{
+        const currentN = Number(db.versus?.sampleSize) || 20;
+        const newN = prompt(`Número de partidos de muestra para CSI/FSI\n(actual: ${currentN}, recomendado: 10-30)`, currentN);
+        if(newN === null) return;
+        const parsed = parseInt(newN, 10);
+        if(!Number.isFinite(parsed) || parsed < 3 || parsed > 50){
+          alert('Valor inválido. Debe ser entre 3 y 50 partidos.');
+          return;
+        }
+        db.versus = db.versus || {};
+        db.versus.sampleSize = parsed;
+        saveDb(db);
+        render('radar', payload);
+      });
+
+      // ── EXPORT JSON con prompt + schema para análisis IA
+      document.getElementById('rdxExportJSON')?.addEventListener('click', ()=>{
+        const exportPayload = buildRadarDayExport({
+          matches: radarState.matches,
+          db,
+          generatedAt: new Date().toISOString()
+        });
+        const jsonStr = JSON.stringify(exportPayload, null, 2);
+
+        // Modal de export
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+        modal.innerHTML = `
+          <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:760px;width:100%;max-height:85vh;display:flex;flex-direction:column;">
+            <div style="padding:16px 20px;border-bottom:1px solid #21262d;display:flex;align-items:center;justify-content:space-between;">
+              <div>
+                <div style="font-weight:700;color:#e6edf3;">⬇️ Export IA — Radar del Día</div>
+                <div style="font-size:11px;color:#6e7681;margin-top:3px;">${exportPayload.meta.totalMatches} partido(s) · N=${exportPayload.config.dataWindow} partidos · schema v2</div>
+              </div>
+              <button id="rdxCloseExport" style="background:none;border:none;color:#6e7681;cursor:pointer;font-size:20px;">✕</button>
+            </div>
+            <div style="padding:12px 20px;border-bottom:1px solid #21262d;display:flex;gap:8px;flex-wrap:wrap;">
+              <button id="rdxCopyPrompt" style="background:rgba(31,111,235,0.15);border:1px solid rgba(31,111,235,0.4);color:#58a6ff;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;">📋 Copiar Prompt</button>
+              <button id="rdxCopyFull" style="background:rgba(63,185,80,0.1);border:1px solid rgba(63,185,80,0.3);color:#3fb950;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;">📥 Copiar JSON completo</button>
+              <button id="rdxDownloadJSON" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:#c9d1d9;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;">💾 Descargar .json</button>
+              <span id="rdxCopyStatus" style="font-size:11px;color:#3fb950;align-self:center;"></span>
+            </div>
+            <div style="padding:12px 20px;overflow-y:auto;flex:1;">
+              <div style="font-size:10px;color:#6e7681;margin-bottom:6px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Vista previa del JSON</div>
+              <pre style="font-size:10px;color:#c9d1d9;background:#0d1117;border-radius:6px;padding:12px;overflow-x:auto;max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;">${escapeHtml(jsonStr.slice(0, 6000))}${jsonStr.length > 6000 ? '\n\n... (truncado en preview, usa Copiar para el JSON completo)' : ''}</pre>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        modal.querySelector('#rdxCloseExport').onclick = ()=>modal.remove();
+        modal.addEventListener('click', (e)=>{ if(e.target===modal) modal.remove(); });
+
+        const setStatus = (txt)=>{
+          const el = modal.querySelector('#rdxCopyStatus');
+          if(el){ el.textContent = txt; setTimeout(()=>{ if(el) el.textContent=''; }, 2000); }
+        };
+
+        modal.querySelector('#rdxCopyPrompt').onclick = async ()=>{
+          try{
+            await navigator.clipboard.writeText(exportPayload.prompt);
+            setStatus('✓ Prompt copiado');
+          }catch(_){ setStatus('⚠️ Error al copiar'); }
+        };
+
+        modal.querySelector('#rdxCopyFull').onclick = async ()=>{
+          try{
+            await navigator.clipboard.writeText(jsonStr);
+            setStatus('✓ JSON copiado');
+          }catch(_){ setStatus('⚠️ Error al copiar'); }
+        };
+
+        modal.querySelector('#rdxDownloadJSON').onclick = ()=>{
+          const blob = new Blob([jsonStr], { type:'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `radar-dia-${new Date().toISOString().slice(0,10)}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          setStatus('✓ Descargando...');
+        };
       });
 
       // ── LEAGUE CHANGE → refresh team list
