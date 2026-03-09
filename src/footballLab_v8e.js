@@ -20523,7 +20523,10 @@ function computeTeamIntelligencePanel(db, teamId){
     if(view==="halftime"){
       // ── Storage key para predicciones HT ──
       const HT_STORE_KEY = "FL_HT_PREDICTIONS";
-      function loadHtPredictions(){ return safeParseJSON(localStorage.getItem(HT_STORE_KEY), []); }
+      function loadHtPredictions(){
+        const parsed = safeParseJSON(localStorage.getItem(HT_STORE_KEY), []);
+        return Array.isArray(parsed) ? parsed : [];
+      }
       function saveHtPredictions(arr){ localStorage.setItem(HT_STORE_KEY, JSON.stringify(arr)); }
 
       // ── Modelo Poisson bivariado para segunda parte ──
