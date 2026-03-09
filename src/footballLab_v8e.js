@@ -9919,6 +9919,107 @@ function computeTeamIntelligencePanel(db, teamId){
     };
   }
 
+  function isLikelyFootballDbBackup(payload){
+    if(!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+    return (
+      Object.prototype.hasOwnProperty.call(payload, "settings") ||
+      Object.prototype.hasOwnProperty.call(payload, "leagues") ||
+      Object.prototype.hasOwnProperty.call(payload, "teams") ||
+      Object.prototype.hasOwnProperty.call(payload, "tracker")
+    );
+  }
+
+  function normalizeBrainMemoryEntry(entry, teamId = ""){
+    if(!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+    const id = String(entry.id || entry.matchId || "").trim() || uid("b2m");
+    const normalizedTeamId = String(entry.teamId || teamId || "").trim();
+    if(!normalizedTeamId) return null;
+    const createdAtRaw = Number(entry.createdAt);
+    const createdAt = Number.isFinite(createdAtRaw)
+      ? createdAtRaw
+      : Date.parse(entry.date || "") || Date.now();
+    const normalized = {
+      id,
+      teamId: normalizedTeamId,
+      teamName: String(entry.teamName || "").trim(),
+      leagueId: String(entry.leagueId || "").trim(),
+      date: String(entry.date || "").trim() || new Date(createdAt).toISOString().slice(0,10),
+      opponent: String(entry.opponent || entry.rival || entry.awayTeam || "Rival").trim(),
+      statsRaw: typeof entry.statsRaw === "string"
+        ? entry.statsRaw
+        : (entry.statsRaw && typeof entry.statsRaw === "object" ? JSON.stringify(entry.statsRaw) : ""),
+      narrative: String(entry.narrative || entry.story || "").trim(),
+      summary: entry.summary && typeof entry.summary === "object" ? entry.summary : null,
+      score: String(entry.score || entry.finalScore || "0-0").trim() || "0-0",
+      createdAt
+    };
+    if(Array.isArray(entry.lineup)) normalized.lineup = entry.lineup.slice(0, 18).map((p)=>String(p || "").trim()).filter(Boolean);
+    if(entry.lineupShape && typeof entry.lineupShape === "object") normalized.lineupShape = entry.lineupShape;
+    return normalized;
+  }
+
+  function extractBrainV2MemoriesFromBackup(payload){
+    const candidates = [
+      ["data.brainState.memories", payload?.data?.brainState?.memories],
+      ["brainState.memories", payload?.brainState?.memories],
+      ["data.brain.memories", payload?.data?.brain?.memories],
+      ["brain.memories", payload?.brain?.memories],
+      ["data.memories", payload?.data?.memories],
+      ["memories", payload?.memories]
+    ];
+    const found = candidates.find(([, value])=>value && typeof value === "object" && !Array.isArray(value));
+    const rawMemories = found?.[1] || {};
+    const normalizedMemories = {};
+    let skipped = 0;
+    Object.entries(rawMemories).forEach(([teamId, rows])=>{
+      if(!Array.isArray(rows)) return;
+      const cleanRows = [];
+      rows.forEach((entry)=>{
+        const normalized = normalizeBrainMemoryEntry(entry, teamId);
+        if(!normalized){
+          skipped += 1;
+          console.warn("[BrainV2 Import] Skipped invalid memory", entry);
+          return;
+        }
+        cleanRows.push(normalized);
+      });
+      if(cleanRows.length){
+        cleanRows.sort((a,b)=>Number(a.createdAt || 0) - Number(b.createdAt || 0));
+        normalizedMemories[teamId] = cleanRows;
+      }
+    });
+    return {
+      memories: normalizedMemories,
+      meta: {
+        backupDetected: Boolean(found),
+        path: found?.[0] || null,
+        skipped,
+        kind: payload?.kind || null,
+        brainVersion: String(payload?.schema?.brainVersion || payload?.schema?.brain?.version || "")
+      }
+    };
+  }
+
+  function hydrateBrainV2StateFromImport(memoriesMap = {}, payload = null){
+    const current = loadBrainV2();
+    const next = {
+      ...current,
+      memories: memoriesMap && typeof memoriesMap === "object" ? memoriesMap : {}
+    };
+    const importedBrainState = payload?.data?.brainState || payload?.brainState || {};
+    if(importedBrainState.mne) next.mne = normalizeMneLearningState(importedBrainState.mne);
+    if(importedBrainState.orchestratorLearning) next.orchestratorLearning = normalizeOrchestratorLearningState(importedBrainState.orchestratorLearning);
+    if(importedBrainState.teamProfiles && typeof importedBrainState.teamProfiles === "object") next.teamProfiles = importedBrainState.teamProfiles;
+    rebuildTeamProfileIndex(next, { replace: true, includeOpponent: true });
+    saveBrainV2(next);
+    return next;
+  }
+
+  function refreshBrainV2UIAfterImport({ view = "", leagueId = "", teamId = "" } = {}){
+    if(view !== "brainv2") return;
+    render("brainv2", { leagueId, teamId });
+  }
+
 
   function sectionToPos(section){
     const sec = String(section||"").toLowerCase();
@@ -11763,12 +11864,55 @@ RESPONDE SOLO CON JSON usando este schema:
           if(!parsed || typeof parsed !== "object" || Array.isArray(parsed)){
             throw new Error("El backup debe ser un objeto JSON válido.");
           }
+
+          const extractedBrain = extractBrainV2MemoriesFromBackup(parsed);
+          const hasBrainMemories = Object.keys(extractedBrain.memories || {}).length > 0;
+          const looksBrainBackup = parsed?.kind === "footballlab_brain_backup"
+            || String(parsed?.schema?.brainVersion || "") === "2"
+            || extractedBrain.meta.backupDetected;
+
+          if(looksBrainBackup && hasBrainMemories){
+            console.info("[BrainV2 Import] Backup detected");
+            const hydrated = hydrateBrainV2StateFromImport(extractedBrain.memories, parsed);
+            const teamCount = Object.keys(hydrated.memories || {}).length;
+            const memoryCount = Object.values(hydrated.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0);
+            console.info("[BrainV2 Import] Teams loaded:", teamCount);
+            console.info("[BrainV2 Import] Memories loaded:", memoryCount);
+            refreshBrainV2UIAfterImport({
+              view,
+              leagueId: db.settings?.selectedLeagueId || "",
+              teamId: Object.keys(hydrated.memories || {})[0] || ""
+            });
+            setBackupStatus("✅ Backup de Brain V2 importado. Memoria restaurada.");
+            return;
+          }
+
+          if(!isLikelyFootballDbBackup(parsed) && !hasBrainMemories){
+            throw new Error("Backup no reconocido: falta estructura de footballDB y de Brain V2.");
+          }
+
           saveDb(parsed);
           const normalized = loadDb();
           saveDb(normalized);
+
+          if(hasBrainMemories){
+            console.info("[BrainV2 Import] Backup detected");
+            const hydrated = hydrateBrainV2StateFromImport(extractedBrain.memories, parsed);
+            const teamCount = Object.keys(hydrated.memories || {}).length;
+            const memoryCount = Object.values(hydrated.memories || {}).reduce((acc, rows)=>acc + (Array.isArray(rows) ? rows.length : 0), 0);
+            console.info("[BrainV2 Import] Teams loaded:", teamCount);
+            console.info("[BrainV2 Import] Memories loaded:", memoryCount);
+            refreshBrainV2UIAfterImport({
+              view,
+              leagueId: normalized.settings?.selectedLeagueId || "",
+              teamId: Object.keys(hydrated.memories || {})[0] || ""
+            });
+          }
+
           backupEl.value = JSON.stringify(normalized, null, 2);
           setBackupStatus("✅ Backup importado. Football Lab quedó restaurado.");
         }catch(err){
+          console.error("[BrainV2 Import] Failed to hydrate", err);
           setBackupStatus(`❌ ${String(err.message || err)}`);
         }
       };
