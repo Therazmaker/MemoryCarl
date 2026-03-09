@@ -9,7 +9,7 @@ import { buildTrainingDataset, createTensorflowBrainModel, trainTensorflowBrainM
 import { computeExpectedGoals } from "./footballlab/xg_engine.js";
 import { scoreMatrix, matrixToOutcome, mostLikelyScore, oddsToMarketProbabilities, blendOutcomes } from "./footballlab/poisson_engine.js";
 import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState, getLatestClaudeFeedback, safeJsonPreview, observeLearningAuditsForMatch } from "./footballlab/mne_claude_exchange.js";
-import { defaultTrainingState, loadTrainingState, parseAIPredictionJSON, createTrainingRecord, registerActualResult, recomputeTrainingMetrics, buildTrainingReport, RADAR_TRAINING_VERSION, SCHEMA_TRAINING_KEY, MARKET_KEYS, SIGNAL_KEYS } from "./footballlab/radar_training_engine.js";
+import { defaultTrainingState, loadTrainingState, parseAIPredictionJSON, createTrainingRecord, registerActualResult, recomputeTrainingMetrics, buildTrainingReport, RADAR_TRAINING_VERSION, SCHEMA_TRAINING_KEY, MARKET_KEYS, SIGNAL_KEYS } from "./radar_training_engine.js";
 import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
