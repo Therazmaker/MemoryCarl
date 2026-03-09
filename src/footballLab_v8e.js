@@ -9,6 +9,7 @@ import { buildTrainingDataset, createTensorflowBrainModel, trainTensorflowBrainM
 import { computeExpectedGoals } from "./footballlab/xg_engine.js";
 import { scoreMatrix, matrixToOutcome, mostLikelyScore, oddsToMarketProbabilities, blendOutcomes } from "./footballlab/poisson_engine.js";
 import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState, getLatestClaudeFeedback, safeJsonPreview, observeLearningAuditsForMatch } from "./footballlab/mne_claude_exchange.js";
+import { defaultTrainingState, loadTrainingState, parseAIPredictionJSON, createTrainingRecord, registerActualResult, recomputeTrainingMetrics, buildTrainingReport, RADAR_TRAINING_VERSION, SCHEMA_TRAINING_KEY, MARKET_KEYS, SIGNAL_KEYS } from "./footballlab/radar_training_engine.js";
 import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
@@ -117,6 +118,7 @@ export function initFootballLab(){
   const TEAM_MODELS_KEY = "FL_TEAMMODELS";
   const TEAM_BRAIN_FEATURES_KEY = "FL_TEAM_BRAIN_FEATURES";
   const BRAIN_V2_KEY = "FL_BRAIN_V2";
+  const RADAR_TRAINING_DB_KEY = SCHEMA_TRAINING_KEY; // "FL_RADAR_TRAINING"
   const GPE_TAG_ON = 0.25;
   const GPE_TOP_TAGS = 3;
   const GIE_TAG_TRAINED_N = 20;
@@ -226,6 +228,20 @@ export function initFootballLab(){
       return fallback;
     }
   }
+
+  // ── Radar Training ──────────────────────────────────────────────────────────
+  function loadRadarTraining(){
+    const raw = localStorage.getItem(RADAR_TRAINING_DB_KEY);
+    const parsed = safeParseJSON(raw, {});
+    return loadTrainingState(parsed);
+  }
+
+  function saveRadarTraining(state){
+    try {
+      localStorage.setItem(RADAR_TRAINING_DB_KEY, JSON.stringify(state));
+    } catch(_){}
+  }
+  // ───────────────────────────────────────────────────────────────────────────
 
   function loadBrainV2(){
     const raw = localStorage.getItem(BRAIN_V2_KEY);
@@ -13469,6 +13485,7 @@ RESPONDE SOLO CON JSON usando este schema:
             <button class="rdx-btn-sim" data-radar-open-sim="${m.id}">⚡ Simular</button>
             <button class="rdx-btn-sm rdx-btn-analysis" data-radar-open-analysis="${m.id}">📝 Analizar</button>
             ${m.prediction ? `<span class="rdx-prediction-pill" title="Tu predicción">${{'home':'1 Local','draw':'X Empate','away':'2 Visitante','home_draw':'1X No pierde Local','away_draw':'X2 No pierde Visit.'}[m.prediction]||m.prediction}</span>` : ''}
+            <button class="rdx-btn-sm" style="background:rgba(138,99,210,0.1);border:1px solid rgba(138,99,210,0.35);color:#a78bfa;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;font-weight:700;" data-radar-import-ai="${m.id}" title="Importar predicción IA + registrar resultado real para entrenar el sistema">🧪 Importar IA</button>
             <button class="rdx-btn-sm rdx-btn-hist-card" data-radar-to-hist="${m.id}" title="Registrar en histórico y marcar resultado">📋 Al histórico</button>
             <button class="rdx-btn-sm rdx-btn-danger" data-radar-delete-manual="${m.id}">Eliminar</button>
           </div>
@@ -13574,6 +13591,7 @@ RESPONDE SOLO CON JSON usando este schema:
                 <span style="font-size:11px;background:rgba(31,111,235,0.12);border:1px solid rgba(31,111,235,0.35);color:#58a6ff;padding:2px 8px;border-radius:4px;cursor:default;" title="Número de partidos usados para calcular CSI y FSI de cada equipo">📊 N = ${Number(db.versus?.sampleSize)||20} partidos</span>
                 <button id="rdxEditN" style="font-size:10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:#8b949e;padding:2px 8px;border-radius:4px;cursor:pointer;" title="Ajustar el número de partidos de muestra">✏️ Ajustar N</button>
                 <button id="rdxExportJSON" style="font-size:10px;background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.3);color:#3fb950;padding:2px 8px;border-radius:4px;cursor:pointer;" title="Exportar JSON con prompt + schema para análisis con IA">⬇️ Export IA JSON</button>
+                <button id="rdxOpenTraining" style="font-size:10px;background:rgba(138,99,210,0.1);border:1px solid rgba(138,99,210,0.35);color:#a78bfa;padding:2px 8px;border-radius:4px;cursor:pointer;" title="Panel de entrenamiento — importar predicciones IA y registrar resultados">🧪 Entrenar Radar</button>
               </div>
             </div>
             <div class="rdx-sort-row">
@@ -13841,7 +13859,522 @@ RESPONDE SOLO CON JSON usando este schema:
         };
       });
 
-      // ── LEAGUE CHANGE → refresh team list
+      // ── IMPORT AI PREDICTION (por tarjeta)
+      content.querySelectorAll('[data-radar-import-ai]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const matchId = btn.getAttribute('data-radar-import-ai');
+          const match = radarState.matches.find(r => r.id === matchId);
+          if(!match) return;
+          openImportAIModal(match);
+        });
+      });
+
+      // ── TRAINING PANEL (header)
+      document.getElementById('rdxOpenTraining')?.addEventListener('click', () => {
+        openTrainingPanel();
+      });
+
+      // ─────────────────────────────────────────────────────────────────────────
+      // MODAL: Importar predicción IA + registrar resultado
+      // ─────────────────────────────────────────────────────────────────────────
+      function openImportAIModal(match){
+        const training = loadRadarTraining();
+        // Buscar si ya existe un record para este partido
+        const existing = training.records.find(r => r.match?.id === match.id);
+
+        const marketLabel = { result:'1X2 Resultado',btts:'BTTS (ambos marcan)',over15:'+1.5 Goles',over25:'+2.5 Goles',cleanSheet:'Portería a cero',htCleanSheet:'CS Primer tiempo',htResult:'Resultado 1T' };
+        const pickOptions = {
+          result:      [['','— sin pick —'],['home','1 Local'],['draw','X Empate'],['away','2 Visitante']],
+          btts:        [['','— sin pick —'],['yes','Sí'],['no','No']],
+          over15:      [['','— sin pick —'],['yes','Sí +1.5'],['no','No -1.5']],
+          over25:      [['','— sin pick —'],['yes','Sí +2.5'],['no','No -2.5']],
+          cleanSheet:  [['','— sin pick —'],['home','Local'],['away','Visitante'],['none','Ninguno']],
+          htCleanSheet:[['','— sin pick —'],['yes','Sí'],['no','No']],
+          htResult:    [['','— sin pick —'],['home','1 Local'],['draw','X Empate'],['away','2 Visitante']]
+        };
+
+        const aiPred = existing?.aiPrediction;
+        const actualResult = existing?.actualResult;
+        const hasResult = existing?.status === 'resolved';
+
+        const backdrop = document.createElement('div');
+        backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto;';
+
+        backdrop.innerHTML = `
+          <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:700px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
+
+            <!-- Header -->
+            <div style="padding:16px 20px;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:flex-start;">
+              <div>
+                <div style="font-weight:800;font-size:15px;color:#e6edf3;">🧪 Entrenamiento del Radar</div>
+                <div style="font-size:12px;color:#8b949e;margin-top:2px;">${escapeHtml(match.home)} vs ${escapeHtml(match.away)} · ${match.league}</div>
+              </div>
+              <button id="trImportClose" style="background:none;border:none;color:#6e7681;font-size:20px;cursor:pointer;">✕</button>
+            </div>
+
+            <!-- Steps tab bar -->
+            <div style="display:flex;border-bottom:1px solid #21262d;padding:0 20px;">
+              <button class="tr-tab tr-tab-active" data-tab="step1" style="padding:10px 14px;font-size:12px;font-weight:700;background:none;border:none;border-bottom:2px solid #a78bfa;color:#a78bfa;cursor:pointer;">1 Predicción IA</button>
+              <button class="tr-tab" data-tab="step2" style="padding:10px 14px;font-size:12px;font-weight:700;background:none;border:none;border-bottom:2px solid transparent;color:#6e7681;cursor:pointer;">2 Contexto manual</button>
+              <button class="tr-tab" data-tab="step3" style="padding:10px 14px;font-size:12px;font-weight:700;background:none;border:none;border-bottom:2px solid transparent;color:#6e7681;cursor:pointer;">3 Resultado real</button>
+              <button class="tr-tab" data-tab="step4" style="padding:10px 14px;font-size:12px;font-weight:700;background:none;border:none;border-bottom:2px solid transparent;color:#6e7681;cursor:pointer;">📊 Evaluación</button>
+            </div>
+
+            <div style="overflow-y:auto;flex:1;padding:20px;">
+
+              <!-- STEP 1: Pegar JSON de predicción IA -->
+              <div id="tr-step1">
+                <div style="font-size:12px;color:#8b949e;margin-bottom:12px;">Pega aquí la respuesta JSON de la IA (el JSON con "predictions" que generaste con el Export IA JSON).</div>
+                <textarea id="trAIJsonInput" style="width:100%;height:180px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;font-size:11px;font-family:monospace;padding:10px;resize:vertical;box-sizing:border-box;" placeholder='{ "schemaVersion": "radar_ai_prediction_v2", "predictions": [...] }'>${aiPred ? JSON.stringify({schemaVersion:'radar_ai_prediction_v2',predictions:[{matchId:match.id,home:match.home,away:match.away,...aiPred}]}, null, 2) : ''}</textarea>
+                <div id="trAIParseStatus" style="font-size:11px;margin-top:6px;min-height:16px;"></div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                  <button id="trParseBtn" style="background:#a78bfa;color:#fff;border:none;padding:7px 18px;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px;">Parsear JSON</button>
+                  <button id="trPasteBtn" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:#8b949e;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:12px;">📋 Pegar portapapeles</button>
+                </div>
+
+                <!-- Preview de mercados si ya hay datos -->
+                <div id="trMarketsPreview" style="margin-top:16px;"></div>
+              </div>
+
+              <!-- STEP 2: Contexto manual (cosas que el sistema no ve) -->
+              <div id="tr-step2" style="display:none;">
+                <div style="font-size:12px;color:#8b949e;margin-bottom:12px;">Agrega contexto que el sistema no puede ver (lesiones de último momento, clima, motivación, etc.) y ajusta picks si lo ves necesario.</div>
+
+                <textarea id="trManualNotes" style="width:100%;height:100px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;font-size:12px;padding:10px;resize:vertical;box-sizing:border-box;" placeholder="Ej: El portero titular está lesionado, partido de alta presión por posición en tabla, estadio con lluvia intensa...">${existing?.manualNotes || ''}</textarea>
+
+                <div style="font-size:11px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin-top:16px;margin-bottom:8px;">Ajustes manuales de picks (opcional)</div>
+                <div id="trManualPicks" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  ${MARKET_KEYS.map(k => {
+                    const opts = pickOptions[k] || [];
+                    const existingPick = existing?.manualAdjustments?.[k]?.pick || '';
+                    return `<div style="background:#0d1117;border-radius:6px;padding:8px 10px;">
+                      <div style="font-size:10px;color:#6e7681;margin-bottom:4px;">${escapeHtml(marketLabel[k] || k)}</div>
+                      <select data-manual-pick="${k}" style="width:100%;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:4px 6px;font-size:11px;">
+                        ${opts.map(([v,l]) => `<option value="${v}" ${v===existingPick?'selected':''}>${escapeHtml(l)}</option>`).join('')}
+                      </select>
+                    </div>`;
+                  }).join('')}
+                </div>
+              </div>
+
+              <!-- STEP 3: Resultado real -->
+              <div id="tr-step3" style="display:none;">
+                <div style="font-size:12px;color:#8b949e;margin-bottom:12px;">Ingresa el resultado real del partido para calcular la precisión del sistema.</div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                  <div style="background:#0d1117;border-radius:8px;padding:12px;">
+                    <div style="font-size:10px;color:#6e7681;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">Resultado final</div>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                      <div>
+                        <div style="font-size:10px;color:#6e7681;margin-bottom:3px;">${escapeHtml(match.home)}</div>
+                        <input id="trHG" type="number" min="0" max="20" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:6px;font-size:18px;font-weight:900;text-align:center;" value="${actualResult?.homeGoals ?? ''}" placeholder="0" />
+                      </div>
+                      <span style="color:#6e7681;font-size:18px;font-weight:700;">–</span>
+                      <div>
+                        <div style="font-size:10px;color:#6e7681;margin-bottom:3px;">${escapeHtml(match.away)}</div>
+                        <input id="trAG" type="number" min="0" max="20" style="width:60px;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:4px;padding:6px;font-size:18px;font-weight:900;text-align:center;" value="${actualResult?.awayGoals ?? ''}" placeholder="0" />
+                      </div>
+                    </div>
+                  </div>
+                  <div style="background:#0d1117;border-radius:8px;padding:12px;">
+                    <div style="font-size:10px;color:#6e7681;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">Resultado al descanso (opcional)</div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <input id="trHTHG" type="number" min="0" max="20" style="width:55px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:5px;font-size:16px;text-align:center;" value="${actualResult?.htHomeGoals ?? ''}" placeholder="?" />
+                      <span style="color:#6e7681;">–</span>
+                      <input id="trHTAG" type="number" min="0" max="20" style="width:55px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:5px;font-size:16px;text-align:center;" value="${actualResult?.htAwayGoals ?? ''}" placeholder="?" />
+                    </div>
+                  </div>
+                </div>
+
+                <div style="background:#0d1117;border-radius:8px;padding:12px;">
+                  <div style="font-size:10px;color:#6e7681;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Notas del partido (opcional)</div>
+                  <input id="trResultNotes" type="text" style="width:100%;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;padding:7px;font-size:12px;box-sizing:border-box;" placeholder="Ej: expulsión min 55, penalti polémico, portero suplente..." value="${actualResult?.notes || ''}" />
+                </div>
+
+                <div id="trResultStatus" style="font-size:11px;color:#f85149;margin-top:8px;min-height:16px;"></div>
+                <button id="trRegisterResult" style="margin-top:12px;background:#3fb950;color:#0d1117;border:none;padding:8px 20px;border-radius:6px;font-weight:900;cursor:pointer;font-size:13px;">✅ Registrar resultado</button>
+              </div>
+
+              <!-- STEP 4: Evaluación -->
+              <div id="tr-step4" style="display:none;">
+                <div id="trEvalContent">
+                  ${hasResult && existing?.evaluation ? buildEvaluationHTML(existing, match) : '<div style="color:#6e7681;font-size:12px;text-align:center;padding:32px 0;">Registra el resultado real para ver la evaluación.</div>'}
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Footer -->
+            <div style="padding:12px 20px;border-top:1px solid #21262d;display:flex;gap:8px;justify-content:flex-end;">
+              <button id="trSaveRecord" style="background:#a78bfa;color:#fff;border:none;padding:7px 20px;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px;">💾 Guardar registro</button>
+              <button id="trImportClose2" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:#8b949e;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:12px;">Cerrar</button>
+            </div>
+          </div>
+        `;
+
+        document.body.appendChild(backdrop);
+
+        // Estado local del modal
+        let currentAIPred = aiPred ? { markets: aiPred.markets, ...aiPred } : null;
+        let currentRecord = existing ? { ...existing } : null;
+
+        // ── Tab switching
+        const tabs = backdrop.querySelectorAll('.tr-tab');
+        const steps = ['step1','step2','step3','step4'];
+        const switchTab = (tabId) => {
+          tabs.forEach(t => {
+            const active = t.getAttribute('data-tab') === tabId;
+            t.style.borderBottomColor = active ? '#a78bfa' : 'transparent';
+            t.style.color = active ? '#a78bfa' : '#6e7681';
+          });
+          steps.forEach(s => {
+            backdrop.querySelector(`#tr-${s}`).style.display = s === tabId ? 'block' : 'none';
+          });
+        };
+        tabs.forEach(t => t.addEventListener('click', () => switchTab(t.getAttribute('data-tab'))));
+
+        // ── Parsear JSON
+        const parseStatus = backdrop.querySelector('#trAIParseStatus');
+        const marketsPreview = backdrop.querySelector('#trMarketsPreview');
+
+        const renderMarketsPreview = (pred) => {
+          if(!pred || !pred.markets) { marketsPreview.innerHTML = ''; return; }
+          const rows = MARKET_KEYS.map(k => {
+            const m = pred.markets[k];
+            if(!m || !m.pick) return '';
+            const confPct = Math.round((m.confidence || 0.5) * 100);
+            const confColor = confPct >= 70 ? '#3fb950' : confPct >= 55 ? '#e3b341' : '#8b949e';
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #21262d;">
+              <span style="font-size:11px;color:#8b949e;">${escapeHtml(marketLabel[k] || k)}</span>
+              <span style="font-size:11px;font-weight:700;color:#c9d1d9;">${escapeHtml(m.pick)}</span>
+              <span style="font-size:11px;color:${confColor};">${confPct}% conf</span>
+            </div>`;
+          }).join('');
+
+          const incongruencias = (pred.incongruencias || []).map(i => `<div style="font-size:10px;color:#e3b341;padding:3px 0;">⚡ ${escapeHtml(i)}</div>`).join('');
+          const valueAlert = pred.valueAlert ? `<div style="background:rgba(63,185,80,0.08);border:1px solid rgba(63,185,80,0.25);border-radius:6px;padding:8px 10px;margin-top:8px;font-size:11px;color:#3fb950;">💡 ${escapeHtml(pred.valueAlert)}</div>` : '';
+
+          marketsPreview.innerHTML = `
+            <div style="background:#0d1117;border-radius:8px;padding:12px;">
+              <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Mercados del partido</div>
+              ${rows}
+              ${incongruencias ? `<div style="margin-top:8px;">${incongruencias}</div>` : ''}
+              ${valueAlert}
+              ${pred.summary ? `<div style="font-size:11px;color:#8b949e;margin-top:8px;padding-top:8px;border-top:1px solid #21262d;">${escapeHtml(pred.summary)}</div>` : ''}
+            </div>`;
+        };
+
+        if(currentAIPred) renderMarketsPreview(currentAIPred);
+
+        backdrop.querySelector('#trPasteBtn')?.addEventListener('click', async () => {
+          try {
+            const clip = await navigator.clipboard.readText();
+            if(clip) backdrop.querySelector('#trAIJsonInput').value = clip;
+          } catch(_){}
+        });
+
+        backdrop.querySelector('#trParseBtn')?.addEventListener('click', () => {
+          const raw = backdrop.querySelector('#trAIJsonInput').value;
+          const result = parseAIPredictionJSON(raw);
+          if(!result.ok){
+            parseStatus.style.color = '#f85149';
+            parseStatus.textContent = '❌ ' + result.errors.join(' | ');
+            return;
+          }
+          // Buscar el partido que corresponde
+          const pred = result.data.predictions.find(p =>
+            p.matchId === match.id ||
+            (p.home?.toLowerCase() === match.home?.toLowerCase() && p.away?.toLowerCase() === match.away?.toLowerCase())
+          ) || result.data.predictions[0];
+
+          if(!pred){
+            parseStatus.style.color = '#f85149';
+            parseStatus.textContent = '❌ No se encontró predicción para este partido en el JSON.';
+            return;
+          }
+          currentAIPred = pred;
+          parseStatus.style.color = '#3fb950';
+          parseStatus.textContent = `✅ Predicción cargada — ${Object.keys(pred.markets || {}).filter(k => pred.markets[k]?.pick).length} mercados`;
+          renderMarketsPreview(pred);
+        });
+
+        // ── Registrar resultado
+        backdrop.querySelector('#trRegisterResult')?.addEventListener('click', () => {
+          const hg = parseInt(backdrop.querySelector('#trHG').value, 10);
+          const ag = parseInt(backdrop.querySelector('#trAG').value, 10);
+          if(!Number.isFinite(hg) || !Number.isFinite(ag)){
+            backdrop.querySelector('#trResultStatus').textContent = '⚠️ Ingresa los goles de ambos equipos.';
+            return;
+          }
+          const htHg = backdrop.querySelector('#trHTHG').value !== '' ? parseInt(backdrop.querySelector('#trHTHG').value, 10) : undefined;
+          const htAg = backdrop.querySelector('#trHTAG').value !== '' ? parseInt(backdrop.querySelector('#trHTAG').value, 10) : undefined;
+          const notes = backdrop.querySelector('#trResultNotes').value;
+
+          if(!currentRecord || !currentRecord.aiPrediction){
+            backdrop.querySelector('#trResultStatus').textContent = '⚠️ Primero parsea e importa la predicción IA (paso 1).';
+            return;
+          }
+
+          const res = registerActualResult(currentRecord, { homeGoals: hg, awayGoals: ag, htHomeGoals: htHg, htAwayGoals: htAg, notes });
+          if(!res.ok){
+            backdrop.querySelector('#trResultStatus').textContent = '❌ ' + res.error;
+            return;
+          }
+          currentRecord = res.updatedRecord;
+          backdrop.querySelector('#trResultStatus').style.color = '#3fb950';
+          backdrop.querySelector('#trResultStatus').textContent = `✅ Resultado registrado — precisión: ${Math.round((res.updatedRecord.evaluation?.summary?.matchAccuracy || 0) * 100)}%`;
+
+          // Actualizar evaluación
+          backdrop.querySelector('#trEvalContent').innerHTML = buildEvaluationHTML(currentRecord, match);
+          switchTab('step4');
+        });
+
+        // ── Guardar registro completo
+        backdrop.querySelector('#trSaveRecord')?.addEventListener('click', () => {
+          if(!currentAIPred){
+            alert('Primero importa la predicción IA en el paso 1.');
+            return;
+          }
+
+          // Recopilar ajustes manuales
+          const manualPicks = {};
+          backdrop.querySelectorAll('[data-manual-pick]').forEach(sel => {
+            const key = sel.getAttribute('data-manual-pick');
+            if(sel.value) manualPicks[key] = { pick: sel.value, overrides: true };
+          });
+          const manualNotes = backdrop.querySelector('#trManualNotes')?.value || '';
+
+          let training = loadRadarTraining();
+
+          if(currentRecord && currentRecord.status === 'resolved'){
+            // Actualizar existente
+            const idx = training.records.findIndex(r => r.id === currentRecord.id || r.match?.id === match.id);
+            if(idx >= 0) training.records[idx] = currentRecord;
+            else training.records.unshift(currentRecord);
+          } else {
+            // Crear nuevo
+            const created = createTrainingRecord({
+              matchData: match,
+              aiPrediction: currentAIPred,
+              manualNotes,
+              manualAdjustments: manualPicks
+            });
+            if(!created.ok){ alert(created.error); return; }
+            currentRecord = { ...created.record, manualAdjustments: manualPicks, manualNotes };
+
+            // Si ya hay resultado, aplicarlo
+            if(currentRecord && backdrop.querySelector('#trHG')?.value !== ''){
+              const hg = parseInt(backdrop.querySelector('#trHG')?.value, 10);
+              const ag = parseInt(backdrop.querySelector('#trAG')?.value, 10);
+              if(Number.isFinite(hg) && Number.isFinite(ag)){
+                const htHg = backdrop.querySelector('#trHTHG').value !== '' ? parseInt(backdrop.querySelector('#trHTHG').value, 10) : undefined;
+                const htAg = backdrop.querySelector('#trHTAG').value !== '' ? parseInt(backdrop.querySelector('#trHTAG').value, 10) : undefined;
+                const notes = backdrop.querySelector('#trResultNotes').value;
+                const res = registerActualResult(currentRecord, { homeGoals: hg, awayGoals: ag, htHomeGoals: htHg, htAwayGoals: htAg, notes });
+                if(res.ok) currentRecord = res.updatedRecord;
+              }
+            }
+
+            // Eliminar record anterior del mismo partido si existe
+            training.records = training.records.filter(r => r.match?.id !== match.id);
+            training.records.unshift(currentRecord);
+          }
+
+          // Recomputar métricas
+          training = recomputeTrainingMetrics(training);
+          saveRadarTraining(training);
+          backdrop.remove();
+
+          // Feedback visual
+          const feedbackEl = document.createElement('div');
+          feedbackEl.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#a78bfa;color:#fff;padding:10px 18px;border-radius:8px;font-weight:700;font-size:13px;z-index:9999;';
+          feedbackEl.textContent = '🧪 Registro de entrenamiento guardado';
+          document.body.appendChild(feedbackEl);
+          setTimeout(() => feedbackEl.remove(), 2500);
+        });
+
+        [backdrop.querySelector('#trImportClose'), backdrop.querySelector('#trImportClose2')].forEach(b => {
+          b?.addEventListener('click', () => backdrop.remove());
+        });
+        backdrop.addEventListener('click', (e) => { if(e.target === backdrop) backdrop.remove(); });
+      }
+
+      // ─────────────────────────────────────────────────────────────────────────
+      // Helper: HTML de evaluación de un record
+      // ─────────────────────────────────────────────────────────────────────────
+      function buildEvaluationHTML(record, match){
+        if(!record?.evaluation || !record?.actualResult) return '<div style="color:#6e7681;">Sin evaluación todavía.</div>';
+        const ev = record.evaluation;
+        const ar = record.actualResult;
+        const marketLabel = { result:'1X2',btts:'BTTS',over15:'+1.5',over25:'+2.5',cleanSheet:'CS',htCleanSheet:'CS 1T',htResult:'HT' };
+
+        const scoreStr = `${ar.homeGoals} – ${ar.awayGoals}`;
+        const htStr = (ar.htHomeGoals !== null && ar.htHomeGoals !== undefined) ? ` (1T: ${ar.htHomeGoals}-${ar.htAwayGoals})` : '';
+        const accPct = ev.summary?.matchAccuracy !== null ? Math.round(ev.summary.matchAccuracy * 100) : null;
+        const accColor = accPct >= 65 ? '#3fb950' : accPct >= 45 ? '#e3b341' : '#f85149';
+
+        const marketRows = Object.entries(ev.markets || {}).map(([k, m]) => {
+          const hitColor = m.hit ? '#3fb950' : '#f85149';
+          const hitIcon = m.hit ? '✅' : '❌';
+          const manualTag = m.wasManual ? '<span style="font-size:9px;color:#a78bfa;margin-left:4px;">[manual]</span>' : '';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #21262d;">
+            <span style="font-size:11px;color:#8b949e;">${marketLabel[k]||k}</span>
+            <span style="font-size:11px;color:#c9d1d9;">${escapeHtml(m.pick||'-')} → <b style="color:${hitColor};">${escapeHtml(m.actual||'-')}</b>${manualTag}</span>
+            <span style="font-size:13px;">${hitIcon}</span>
+          </div>`;
+        }).join('');
+
+        return `
+          <div style="text-align:center;margin-bottom:16px;">
+            <div style="font-size:32px;font-weight:900;color:#e6edf3;">${scoreStr}<span style="font-size:14px;color:#6e7681;">${htStr}</span></div>
+            ${ar.notes ? `<div style="font-size:11px;color:#8b949e;margin-top:4px;">${escapeHtml(ar.notes)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+            <div style="flex:1;background:#0d1117;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:28px;font-weight:900;color:${accColor};">${accPct !== null ? accPct+'%' : '-'}</div>
+              <div style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Precisión mercados</div>
+            </div>
+            <div style="flex:1;background:#0d1117;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:28px;font-weight:900;color:#e3b341;">${ev.summary?.hits || 0}/${ev.summary?.total || 0}</div>
+              <div style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Mercados acertados</div>
+            </div>
+            ${ev.summary?.brierScore !== null ? `
+            <div style="flex:1;background:#0d1117;border-radius:8px;padding:12px;text-align:center;">
+              <div style="font-size:28px;font-weight:900;color:#8b949e;">${ev.summary.brierScore.toFixed(2)}</div>
+              <div style="font-size:10px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Brier Score</div>
+            </div>` : ''}
+          </div>
+          <div style="background:#0d1117;border-radius:8px;padding:12px;">
+            <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Detalle por mercado</div>
+            ${marketRows}
+          </div>
+          ${record.aiPrediction?.incongruencias?.length ? `
+          <div style="margin-top:12px;background:rgba(227,179,65,0.06);border:1px solid rgba(227,179,65,0.2);border-radius:8px;padding:12px;">
+            <div style="font-size:10px;font-weight:700;color:#e3b341;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">⚡ Incongruencias detectadas por IA</div>
+            ${record.aiPrediction.incongruencias.map(i => `<div style="font-size:11px;color:#c9d1d9;padding:2px 0;">${escapeHtml(i)}</div>`).join('')}
+          </div>` : ''}
+        `;
+      }
+
+      // ─────────────────────────────────────────────────────────────────────────
+      // PANEL: Dashboard de entrenamiento del Radar
+      // ─────────────────────────────────────────────────────────────────────────
+      function openTrainingPanel(){
+        const training = loadRadarTraining();
+        const report = buildTrainingReport(training);
+
+        const backdrop = document.createElement('div');
+        backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto;';
+
+        const accColor = report.summary.overallAccuracy === null ? '#6e7681'
+          : report.summary.overallAccuracy >= 65 ? '#3fb950'
+          : report.summary.overallAccuracy >= 50 ? '#e3b341' : '#f85149';
+
+        const marketRows = report.marketInsights.map(mi => {
+          const ac = mi.accuracy === null ? '#6e7681' : mi.accuracy >= 65 ? '#3fb950' : mi.accuracy >= 50 ? '#e3b341' : '#f85149';
+          const calColor = mi.calibration === null ? '#6e7681' : Math.abs(mi.calibration) <= 0.08 ? '#3fb950' : '#e3b341';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #21262d;">
+            <span style="font-size:11px;color:#8b949e;min-width:120px;">${mi.market}</span>
+            <span style="font-size:12px;font-weight:700;color:${ac};">${mi.accuracy !== null ? mi.accuracy+'%' : '-'}</span>
+            <span style="font-size:10px;color:${calColor};">${mi.calibration !== null ? (mi.calibration > 0 ? '+' : '')+Math.round(mi.calibration*100)+'%' : '-'} cal</span>
+            <span style="font-size:10px;color:#6e7681;">${mi.n} partidos</span>
+            <span style="font-size:11px;">${mi.verdict}</span>
+          </div>`;
+        }).join('');
+
+        const signalRows = report.signalInsights.map(si => {
+          const pwColor = si.predictivePower === null ? '#6e7681' : si.predictivePower >= 0.1 ? '#3fb950' : si.predictivePower >= 0 ? '#e3b341' : '#f85149';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #21262d;flex-wrap:wrap;gap:4px;">
+            <span style="font-size:10px;color:#8b949e;font-family:monospace;">${si.signal}</span>
+            <span style="font-size:10px;color:${pwColor};font-weight:700;">${si.predictivePower !== null ? (si.predictivePower > 0 ? '+' : '')+Math.round(si.predictivePower*100)+'%' : '-'}</span>
+            <span style="font-size:9px;color:#6e7681;">w:${si.weight?.toFixed(2)||'-'} · n:${si.n}</span>
+            <span style="font-size:10px;">${si.verdict}</span>
+          </div>`;
+        }).join('');
+
+        const recentRows = training.records.slice(0,10).map(r => {
+          const ev = r.evaluation;
+          const ar = r.actualResult;
+          const statusColor = r.status === 'resolved' ? (ev?.summary?.matchAccuracy >= 0.6 ? '#3fb950' : '#f85149') : '#6e7681';
+          const accStr = ev?.summary?.matchAccuracy !== null ? Math.round((ev?.summary?.matchAccuracy||0)*100)+'%' : 'pendiente';
+          const scoreStr = ar ? `${ar.homeGoals}-${ar.awayGoals}` : '?-?';
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #21262d;gap:8px;flex-wrap:wrap;">
+            <span style="font-size:11px;color:#c9d1d9;flex:1;min-width:120px;">${escapeHtml(r.match?.home||'')} vs ${escapeHtml(r.match?.away||'')}</span>
+            <span style="font-size:10px;color:#6e7681;">${r.match?.league||''}</span>
+            <span style="font-size:11px;color:#8b949e;">${scoreStr}</span>
+            <span style="font-size:12px;font-weight:700;color:${statusColor};">${accStr}</span>
+          </div>`;
+        }).join('') || '<div style="color:#6e7681;font-size:12px;text-align:center;padding:20px 0;">Sin registros todavía.</div>';
+
+        backdrop.innerHTML = `
+          <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;">
+            <div style="padding:16px 20px;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <div style="font-weight:800;font-size:15px;color:#e6edf3;">🧪 Dashboard de Entrenamiento del Radar</div>
+                <div style="font-size:11px;color:#6e7681;margin-top:2px;">Aprende de cada predicción IA y resultado real</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <button id="trPanelReset" style="font-size:10px;background:rgba(248,81,73,0.08);border:1px solid rgba(248,81,73,0.25);color:#f85149;padding:4px 10px;border-radius:5px;cursor:pointer;">🗑️ Reset</button>
+                <button id="trPanelClose" style="background:none;border:none;color:#6e7681;font-size:20px;cursor:pointer;">✕</button>
+              </div>
+            </div>
+
+            <div style="overflow-y:auto;flex:1;padding:20px;display:flex;flex-direction:column;gap:16px;">
+
+              <!-- KPIs -->
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;">
+                <div style="background:#0d1117;border-radius:8px;padding:12px;text-align:center;">
+                  <div style="font-size:26px;font-weight:900;color:#e6edf3;">${report.summary.totalRecords}</div>
+                  <div style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Registros</div>
+                </div>
+                <div style="background:#0d1117;border-radius:8px;padding:12px;text-align:center;">
+                  <div style="font-size:26px;font-weight:900;color:#3fb950;">${report.summary.resolvedRecords}</div>
+                  <div style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Evaluados</div>
+                </div>
+                <div style="background:#0d1117;border-radius:8px;padding:12px;text-align:center;">
+                  <div style="font-size:26px;font-weight:900;color:#6e7681;">${report.summary.pendingRecords}</div>
+                  <div style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Pendientes</div>
+                </div>
+                <div style="background:#0d1117;border-radius:8px;padding:12px;text-align:center;">
+                  <div style="font-size:26px;font-weight:900;color:${accColor};">${report.summary.overallAccuracy !== null ? report.summary.overallAccuracy+'%' : '-'}</div>
+                  <div style="font-size:9px;color:#6e7681;text-transform:uppercase;letter-spacing:1px;">Precisión global</div>
+                </div>
+              </div>
+
+              <!-- Precisión por mercado -->
+              ${report.marketInsights.some(m => m.n > 0) ? `
+              <div style="background:#0a0e15;border:1px solid #21262d;border-radius:8px;padding:14px;">
+                <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">📊 Precisión por mercado</div>
+                ${marketRows}
+              </div>` : ''}
+
+              <!-- Poder predictivo de señales -->
+              ${report.signalInsights.length > 0 ? `
+              <div style="background:#0a0e15;border:1px solid #21262d;border-radius:8px;padding:14px;">
+                <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">🔬 Poder predictivo de señales del sistema</div>
+                <div style="font-size:10px;color:#6e7681;margin-bottom:8px;">Diferencia de precisión cuando la señal está activa vs cuando no lo está. +10% = señal útil.</div>
+                ${signalRows}
+              </div>` : ''}
+
+              <!-- Últimos registros -->
+              <div style="background:#0a0e15;border:1px solid #21262d;border-radius:8px;padding:14px;">
+                <div style="font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">🕒 Últimos registros</div>
+                ${recentRows}
+              </div>
+
+            </div>
+          </div>
+        `;
+
+        document.body.appendChild(backdrop);
+        backdrop.querySelector('#trPanelClose')?.addEventListener('click', () => backdrop.remove());
+        backdrop.addEventListener('click', (e) => { if(e.target === backdrop) backdrop.remove(); });
+        backdrop.querySelector('#trPanelReset')?.addEventListener('click', () => {
+          if(!confirm('¿Borrar todos los registros de entrenamiento? Esta acción no se puede deshacer.')) return;
+          saveRadarTraining(defaultTrainingState());
+          backdrop.remove();
+        });
+      }
       document.getElementById('radarManualLeague')?.addEventListener('change', (ev)=>{
         radarState.filters.manualLeagueId = ev.target.value || '';
         render('radar', payload);
