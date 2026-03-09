@@ -10657,17 +10657,27 @@ function computeTeamIntelligencePanel(db, teamId){
       if(ptsHalf(recentHalf) > ptsHalf(oldHalf)) trend = 'rising';
       else if(ptsHalf(recentHalf) < ptsHalf(oldHalf)) trend = 'falling';
     }
+    // Estima gfPerGame si no se tiene: victorias ~2.0 goles, empates ~1.0, derrotas ~0.5
+    const estimatedGf = (wins * 2.0 + draws * 1.0 + losses * 0.5) / n;
+    // qualityScore estimado desde trendScore (ya pondera recencia)
+    const estimatedQuality = trendScore;
+    // winsVsTop/Bottom no disponibles en modo manual — usamos 0
     return {
       sequence,
       sequenceStr: sequence.join(''),
       wins, draws, losses,
-      gfPerGame: null,
+      gfPerGame: Number.isFinite(Number(gaPerGame)) ? estimatedGf : null,
       gaPerGame: Number.isFinite(Number(gaPerGame)) ? Number(gaPerGame) : null,
       pts,
       ptsPerGame: Number((pts / n).toFixed(2)),
       trendScore,
+      qualityScore: Number(estimatedQuality.toFixed(3)),
       trend,
       n,
+      winsVsTop: 0,
+      winsVsBottom: wins,
+      lossesVsBot: 0,
+      matchDetails: [],
       isManual: true
     };
   }
