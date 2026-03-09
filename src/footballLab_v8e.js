@@ -13,6 +13,7 @@ import { defaultTrainingState, loadTrainingState, parseAIPredictionJSON, createT
 import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
+import { buildChampionsAnalysisPayload } from "./footballlab/champions_knockout_engine.js";
 import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
 import { buildBitacoraPerformanceLab, normalizePickRecord } from "./footballlab/bitacora_performance.js";
 import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calcPhaseMetrics, phaseAlertFlags, buildPhasePostAnalysis } from "./footballlab/bitacora_phase_mode.js";
@@ -11953,6 +11954,7 @@ RESPONDE SOLO CON JSON usando este schema:
           matchDate: m.date || '',
           csiWindow: 5
         });
+        const competitionMode = m.competitionMode || m.mode || 'auto';
         const strengthHome = Number(prematch?.csi?.home?.CSI) || 50;
         const strengthAway = Number(prematch?.csi?.away?.CSI) || 50;
         const fsiHome = Number.isFinite(Number(prematch?.fsi?.home?.FSI)) ? Number(prematch.fsi.home.FSI) : 0;
@@ -11995,6 +11997,31 @@ RESPONDE SOLO CON JSON usando este schema:
           formHome: resolvedFormHome,
           formAway: resolvedFormAway
         });
+
+        const championsAnalysis = buildChampionsAnalysisPayload({
+          match: {
+            competition: league,
+            league,
+            stage: m.stage || m.phase || '',
+            leg: m.leg || m.roundLeg || '',
+            home: home.name || 'Local',
+            away: away.name || 'Visitante'
+          },
+          prematch,
+          formHome: resolvedFormHome,
+          formAway: resolvedFormAway,
+          strengthHome,
+          strengthAway,
+          fsiHome,
+          fsiAway,
+          market: resolvedOdds,
+          manualMode: competitionMode === 'auto' ? null : competitionMode
+        });
+        if(championsAnalysis?.active){
+          radarFlags.push('UCL_KNOCKOUT_MODE');
+          radarFlags.push(championsAnalysis?.championsSurpriseIndex?.visualTag || 'UCL_ALERT');
+          console.info('[UCL/UI] Champions analysis rendered', { match: `${home.name || 'Local'} vs ${away.name || 'Visitante'}` });
+        }
 
         // ── Determinar favorito del mercado o de fuerza para los índices
         const mktFavIsHome = marketDefense?.mktFavIsHome !== undefined
@@ -12073,6 +12100,8 @@ RESPONDE SOLO CON JSON usando este schema:
           favoriteName,
           underdogName,
           mktFavIsHome,
+          championsAnalysis,
+          competitionMode: championsAnalysis?.competitionMode || 'league',
           dataWindow: Number(db?.versus?.sampleSize) || 20,
           narrative: buildRadarNarrative({
             home: home.name || 'Local',
@@ -14106,6 +14135,28 @@ RESPONDE SOLO CON JSON usando este schema:
             </div>
           </div>` : ''}
 
+          ${m.championsAnalysis?.active ? `
+          <div style="margin:10px 0 0;background:rgba(88,166,255,0.06);border:1px solid rgba(56,139,253,0.26);border-radius:8px;padding:12px 14px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <span style="font-size:9px;font-weight:900;letter-spacing:1.5px;color:#58a6ff;text-transform:uppercase;">🏆 Champions Mode · UCL Knockout Analysis</span>
+              <span style="font-size:10px;background:rgba(227,179,65,0.12);border:1px solid rgba(227,179,65,0.35);color:#e3b341;padding:2px 8px;border-radius:999px;">${m.championsAnalysis?.championsSurpriseIndex?.visualTag || 'UCL'}</span>
+              <span style="margin-left:auto;font-size:10px;color:#8b949e;">Confianza: <b style="color:#e6edf3;">${Math.round((Number(m.championsAnalysis?.confidence)||0)*100)}%</b></span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:7px;">
+              <div class="rdx-metric"><div class="rdx-metric-label">European Maturity</div><div class="rdx-metric-value">${m.championsAnalysis.ratings.europeanMaturity.home.score} / ${m.championsAnalysis.ratings.europeanMaturity.away.score}</div></div>
+              <div class="rdx-metric"><div class="rdx-metric-label">Underdog Resistance</div><div class="rdx-metric-value ${m.championsAnalysis.ratings.underdogResistance.score>=65?'positive':'neutral'}">${m.championsAnalysis.ratings.underdogResistance.score}</div></div>
+              <div class="rdx-metric"><div class="rdx-metric-label">Favorite Fragility</div><div class="rdx-metric-value ${m.championsAnalysis.ratings.favoriteConversionFragility.score>=60?'negative':'neutral'}">${m.championsAnalysis.ratings.favoriteConversionFragility.score}</div></div>
+              <div class="rdx-metric"><div class="rdx-metric-label">First Leg Cage</div><div class="rdx-metric-value">${m.championsAnalysis.ratings.firstLegCage.score} (${m.championsAnalysis.ratings.firstLegCage.label})</div></div>
+            </div>
+            <div style="margin-top:8px;font-size:12px;color:#c9d1d9;line-height:1.45;">
+              <b>CSI ${m.championsAnalysis.championsSurpriseIndex.score}</b> · ${m.championsAnalysis.championsSurpriseIndex.label} · Script: <b>${m.championsAnalysis.matchScript.primaryScript}</b>
+            </div>
+            <div style="margin-top:4px;font-size:11px;color:#8b949e;">${m.championsAnalysis.editorial || ''}</div>
+            <ul style="margin:6px 0 0 16px;padding:0;color:#9fb3c8;font-size:11px;line-height:1.4;">
+              ${(m.championsAnalysis?.championsSurpriseIndex?.reasons || []).slice(0,3).map((r)=>`<li>${escapeHtml(r)}</li>`).join('')}
+            </ul>
+          </div>` : ''}
+
           <div class="rdx-match-actions">
             <button class="rdx-btn-sim" data-radar-open-sim="${m.id}">⚡ Simular</button>
             <button class="rdx-btn-sm rdx-btn-analysis" data-radar-open-analysis="${m.id}">📝 Analizar</button>
@@ -14160,6 +14211,22 @@ RESPONDE SOLO CON JSON usando este schema:
               <div class="rdx-group">
                 <span class="rdx-label">Cuota 2</span>
                 <input id="radarManualOddA" type="number" step="0.01" class="rdx-input" placeholder="4.20" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Competition Mode</span>
+                <select id="radarCompetitionMode" class="rdx-select" style="min-width:150px;">
+                  <option value="auto">Auto</option>
+                  <option value="league">League</option>
+                  <option value="ucl_knockout">UCL Knockout</option>
+                </select>
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Fase / KO</span>
+                <input id="radarStage" type="text" class="rdx-input" placeholder="Quarter-final" style="width:130px;" />
+              </div>
+              <div class="rdx-group">
+                <span class="rdx-label">Leg</span>
+                <input id="radarLeg" type="text" class="rdx-input" placeholder="Ida" style="width:88px;" />
               </div>
             </div>
 
@@ -15032,6 +15099,9 @@ RESPONDE SOLO CON JSON usando este schema:
           leagueId,
           homeId,
           awayId,
+          competitionMode: document.getElementById('radarCompetitionMode')?.value || 'auto',
+          stage: document.getElementById('radarStage')?.value || '',
+          leg: document.getElementById('radarLeg')?.value || '',
           oddsHome:   pickFirstNumber(document.getElementById('radarManualOddH')?.value),
           oddsDraw:   pickFirstNumber(document.getElementById('radarManualOddD')?.value),
           oddsAway:   pickFirstNumber(document.getElementById('radarManualOddA')?.value),
