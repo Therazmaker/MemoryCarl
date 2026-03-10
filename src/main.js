@@ -3931,6 +3931,23 @@ function normalizeSleepEntry(e){
 }
 
 // ====================== MOOD SPRITES (Daily Emotion) ======================
+// ── Mood SVG Faces ──────────────────────────────────────────────────────────
+const _MOOD_SVGS = {
+  incredible: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#FFD93D" stroke="#F4B800" stroke-width="1.5"/><circle cx="16" cy="19" r="3.5" fill="#1a1a2e"/><circle cx="32" cy="19" r="3.5" fill="#1a1a2e"/><circle cx="17.5" cy="17.5" r="1.2" fill="white"/><circle cx="33.5" cy="17.5" r="1.2" fill="white"/><path d="M13 29 Q24 40 35 29" stroke="#1a1a2e" stroke-width="2.2" stroke-linecap="round" fill="rgba(255,255,255,.25)"/><path d="M12 22 Q14 19 17 21" stroke="#1a1a2e" stroke-width="1.5" stroke-linecap="round" fill="none"/><path d="M36 22 Q34 19 31 21" stroke="#1a1a2e" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>`,
+  good: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#A8E6CF" stroke="#6BCB9E" stroke-width="1.5"/><circle cx="16" cy="20" r="3" fill="#1a1a2e"/><circle cx="32" cy="20" r="3" fill="#1a1a2e"/><circle cx="17.2" cy="18.8" r="1" fill="white"/><circle cx="33.2" cy="18.8" r="1" fill="white"/><path d="M15 29 Q24 37 33 29" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round" fill="none"/></svg>`,
+  meh: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#B8C5D6" stroke="#8EA3BA" stroke-width="1.5"/><circle cx="16" cy="20" r="3" fill="#2d3561"/><circle cx="32" cy="20" r="3" fill="#2d3561"/><circle cx="17.2" cy="18.8" r="1" fill="white"/><circle cx="33.2" cy="18.8" r="1" fill="white"/><line x1="15" y1="31" x2="33" y2="31" stroke="#2d3561" stroke-width="2.2" stroke-linecap="round"/><path d="M14 23 Q16 20.5 18 22" stroke="#2d3561" stroke-width="1.3" stroke-linecap="round" fill="none"/><path d="M34 23 Q32 20.5 30 22" stroke="#2d3561" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>`,
+  bad: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#9BB5E8" stroke="#6B90D4" stroke-width="1.5"/><circle cx="16" cy="21" r="3" fill="#1a1a2e"/><circle cx="32" cy="21" r="3" fill="#1a1a2e"/><circle cx="17.2" cy="19.8" r="1" fill="white"/><circle cx="33.2" cy="19.8" r="1" fill="white"/><path d="M15 33 Q24 26 33 33" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round" fill="none"/><path d="M13 17 Q15.5 19.5 18 17" stroke="#1a1a2e" stroke-width="1.5" stroke-linecap="round" fill="none"/><path d="M35 17 Q32.5 19.5 30 17" stroke="#1a1a2e" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>`,
+  horrible: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#E88A8A" stroke="#D45C5C" stroke-width="1.5"/><circle cx="16" cy="20" r="3.5" fill="#1a1a2e"/><circle cx="32" cy="20" r="3.5" fill="#1a1a2e"/><circle cx="17.5" cy="18.5" r="1.2" fill="white"/><circle cx="33.5" cy="18.5" r="1.2" fill="white"/><path d="M13 15 L18 19" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round"/><path d="M35 15 L30 19" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round"/><path d="M14 34 Q24 25 34 34" stroke="#1a1a2e" stroke-width="2.2" stroke-linecap="round" fill="rgba(0,0,0,.12)"/></svg>`,
+};
+const _MOOD_SVG_MINI = {
+  incredible: `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#FFD93D"/><circle cx="7" cy="8.5" r="1.4" fill="#1a1a2e"/><circle cx="13" cy="8.5" r="1.4" fill="#1a1a2e"/><path d="M6 13 Q10 17 14 13" stroke="#1a1a2e" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>`,
+  good:       `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#A8E6CF"/><circle cx="7" cy="8.5" r="1.3" fill="#1a1a2e"/><circle cx="13" cy="8.5" r="1.3" fill="#1a1a2e"/><path d="M6.5 13 Q10 16 13.5 13" stroke="#1a1a2e" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>`,
+  meh:        `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#B8C5D6"/><circle cx="7" cy="8.5" r="1.3" fill="#2d3561"/><circle cx="13" cy="8.5" r="1.3" fill="#2d3561"/><line x1="6.5" y1="13.5" x2="13.5" y2="13.5" stroke="#2d3561" stroke-width="1.2" stroke-linecap="round"/></svg>`,
+  bad:        `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#9BB5E8"/><circle cx="7" cy="8.5" r="1.3" fill="#1a1a2e"/><circle cx="13" cy="8.5" r="1.3" fill="#1a1a2e"/><path d="M6.5 15 Q10 11 13.5 15" stroke="#1a1a2e" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>`,
+  horrible:   `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#E88A8A"/><circle cx="7" cy="8.5" r="1.4" fill="#1a1a2e"/><circle cx="13" cy="8.5" r="1.4" fill="#1a1a2e"/><path d="M6 15.5 Q10 11 14 15.5" stroke="#1a1a2e" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>`,
+};
+function _getMoodSvg(id, mini=false){ return (mini ? _MOOD_SVG_MINI : _MOOD_SVGS)[id] || (mini ? _MOOD_SVG_MINI : _MOOD_SVGS)["meh"] || ""; }
+
 const DEFAULT_MOOD_PRESETS = [
   // "Face" selector (like your reference app)
   // Each preset can have multiple labels (shown as dots under the face)
@@ -4075,60 +4092,61 @@ function openMoodPickerModal(iso, opts={}){
   ];
 
   backdrop.innerHTML = `
-    <div class="modal moodPickerModal v2" role="dialog" aria-label="Mood check-in">
-      <div class="modalTop">
+    <div class="djp-backdrop" style="position:static;background:none;backdrop-filter:none;padding:0;display:block">
+    <div class="djp-mood-modal" role="dialog" aria-label="Mood check-in">
+      <div class="djp-mood-header">
         <div>
-          <div class="modalTitle">¿Cómo estás?</div>
-          <div class="modalSub">${escapeHtml(iso)} · rápido y sin drama</div>
+          <div class="djp-title" style="font-size:22px">¿Cómo estás?</div>
+          <div class="djp-sub">${escapeHtml(iso)}</div>
         </div>
-        <div class="moodTopActions">
-          <button class="iconBtn" id="btnMoodMonth" aria-label="Ver historial">Historial</button>
-          <button class="iconBtn" data-close aria-label="Cerrar">✕</button>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="djp-hist-action-btn" id="btnMoodMonth">Historial</button>
+          <button class="djp-close" data-close>✕</button>
         </div>
       </div>
 
-      <div class="moodFaceRow" id="moodFaceRow">
+      <div class="djp-mood-face-row" id="moodFaceRow">
         ${faces.map(f=>{
           const labels = Array.isArray(f.labels) ? f.labels : [];
           const main = labels[0] || f.id;
-          const dots = labels.length>1 ? `<div class="moodDots">${labels.map(_=>`<span class="dot"></span>`).join("")}</div>` : `<div class="moodDots"></div>`;
+          const faceIds2 = ["incredible","good","meh","bad","horrible"];
           return `
-            <button class="moodFace ${String(f.id)===String(selectedId)?"active":""}" data-face="${escapeHtml(f.id)}" title="${escapeHtml(main)}">
-              <img src="${escapeHtml(f.src)}" alt="${escapeHtml(main)}"/>
-              <div class="moodFaceLabel">${escapeHtml(main)}</div>
-              ${dots}
+            <button class="djp-mood-face ${String(f.id)===String(selectedId)?"active":""}" data-face="${escapeHtml(f.id)}" title="${escapeHtml(main)}">
+              <div class="djp-mood-face-svg">${_getMoodSvg(f.id, false)}</div>
+              <div class="djp-mood-face-label">${escapeHtml(main)}</div>
             </button>
           `;
         }).join("")}
       </div>
 
-      <div class="moodLabelRow" id="moodLabelRow"></div>
+      <div id="moodLabelRow" style="margin-bottom:6px"></div>
 
-      <div class="moodTags">
-        <div class="muted" style="margin-bottom:6px;">Tema (opcional)</div>
-        <div class="chipRow" id="moodTagChips">
+      <div class="djp-section" style="margin-bottom:14px">
+        <div class="djp-label">Tema (opcional)</div>
+        <div class="djp-pill-grid" id="moodTagChips">
           ${TAG_PRESETS.map(t=>`
-            <button class="chip ${tags.has(t.id)?"active":""}" data-tag="${escapeHtml(t.id)}">${escapeHtml(t.icon)} ${escapeHtml(t.label)}</button>
+            <button class="djp-pill ${tags.has(t.id)?"active":""}" data-tag="${escapeHtml(t.id)}">${escapeHtml(t.icon)} ${escapeHtml(t.label)}</button>
           `).join("")}
         </div>
-        <div class="row" style="margin-top:8px;gap:8px;">
-          <input class="input" id="moodTagInput" placeholder="Agregar tema (ej: ansiedad, pelea, calma)" />
-          <button class="btn ghost" id="btnAddMoodTag">＋</button>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <input class="djp-symbol-input" id="moodTagInput" placeholder="Tema personalizado..." style="font-size:12px"/>
+          <button class="djp-symbol-add" id="btnAddMoodTag" style="font-size:13px;padding:8px 12px">＋</button>
         </div>
       </div>
 
-      <div class="field" style="margin-top:10px;">
-        <label>Nota (opcional)</label>
-        <textarea id="moodNote" class="input" rows="3" placeholder="Ej: me siento triste y no sé por qué...">${escapeHtml(note)}</textarea>
+      <div class="djp-section" style="margin-bottom:14px">
+        <div class="djp-label">Nota (opcional)</div>
+        <textarea class="djp-narrative" id="moodNote" rows="3" placeholder="¿Qué está pasando hoy?...">${escapeHtml(note)}</textarea>
       </div>
 
-      <div class="row" style="justify-content:space-between;margin-top:12px;">
-        <button class="btn ghost" id="btnMoodClear">Quitar</button>
-        <div class="row" style="gap:8px;">
-          <button class="btn" data-close>Cancel</button>
-          <button class="btn primary" id="btnMoodSave">Guardar</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+        <button class="djp-btn" id="btnMoodClear" style="color:rgba(255,100,100,.8);border-color:rgba(255,100,100,.2)">Quitar</button>
+        <div style="display:flex;gap:8px">
+          <button class="djp-btn" data-close>Cancelar</button>
+          <button class="djp-btn primary" id="btnMoodSave">Guardar ✓</button>
         </div>
       </div>
+    </div>
     </div>
   `;
 
@@ -4155,24 +4173,16 @@ function openMoodPickerModal(iso, opts={}){
   const renderLabels = ()=>{
     const f = getFace(selectedId);
     const labels = Array.isArray(f?.labels) ? f.labels : [];
-    if(!labels.length){
-      labelRow.innerHTML = "";
-      return;
-    }
+    if(!labels.length){ labelRow.innerHTML = ""; return; }
     if(!selectedLabel) selectedLabel = labels[0];
     labelRow.innerHTML = `
-      <div class="muted" style="margin-bottom:6px;">Matiz</div>
-      <div class="chipRow">
-        ${labels.map(l=>`
-          <button class="chip ${String(l)===String(selectedLabel)?"active":""}" data-label="${escapeHtml(l)}">${escapeHtml(l)}</button>
-        `).join("")}
+      <div class="djp-label" style="margin-bottom:8px">Matiz</div>
+      <div class="djp-pill-grid" style="margin-bottom:10px">
+        ${labels.map(l=>`<button class="djp-pill ${String(l)===String(selectedLabel)?"active":""}" data-label="${escapeHtml(l)}">${escapeHtml(l)}</button>`).join("")}
       </div>
     `;
     labelRow.querySelectorAll("[data-label]").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        selectedLabel = btn.getAttribute("data-label") || "";
-        renderLabels();
-      });
+      btn.addEventListener("click", ()=>{ selectedLabel = btn.getAttribute("data-label")||""; renderLabels(); });
     });
   };
 
@@ -4862,16 +4872,15 @@ function viewHome(){
   const getMoodMini = (iso)=>{
     const e = moodMap[String(iso||"")];
     if(!e || !e.spriteId) return "";
-    const sp = getMoodSpriteById(e.spriteId);
-    if(!sp) return "";
-    return `<img class="dayMoodMini" src="${escapeHtml(sp.src)}" alt="mood" />`;
+    const svg = _getMoodSvg(e.spriteId, true);
+    if(!svg) return "";
+    return `<div class="dayMoodMini djp-mood-mini">${svg}</div>`;
   };
 
   const todayIso = isoDate(now);
   const todayMoodEntry = moodMap[todayIso];
-  const todayMood = todayMoodEntry ? getMoodSpriteById(todayMoodEntry.spriteId) : null;
-  const moodPillInner = todayMood
-    ? `<img class="moodPillImg" src="${escapeHtml(todayMood.src)}" alt="Mood" />`
+  const moodPillInner = todayMoodEntry?.spriteId
+    ? `<div class="djp-mood-pill-face">${_getMoodSvg(todayMoodEntry.spriteId, false)}</div>`
     : `<div class="moodPillPlus">＋</div>`;
 
   const weekHtml = days.map(x=>`
