@@ -3932,21 +3932,99 @@ function normalizeSleepEntry(e){
 
 // ====================== MOOD SPRITES (Daily Emotion) ======================
 // ── Mood SVG Faces ──────────────────────────────────────────────────────────
+// Color palette per emotion
+const _MOOD_COLORS = {
+  incredible: { bg:"#FFCE47", ring:"#F5A800", pupil:"#1C1433", shine:"#fff" },
+  good:       { bg:"#5DDBA8", ring:"#28B982", pupil:"#0F3D2C", shine:"#fff" },
+  meh:        { bg:"#8FA8C8", ring:"#5B7FA8", pupil:"#1E2D42", shine:"rgba(255,255,255,.7)" },
+  bad:        { bg:"#7B8FD4", ring:"#4A5FBB", pupil:"#0F1A3D", shine:"rgba(255,255,255,.6)" },
+  horrible:   { bg:"#E8604A", ring:"#C0382A", pupil:"#2A0A04", shine:"rgba(255,255,255,.5)" },
+};
+
+function _buildMoodSvg(id, size=48){
+  const c = _MOOD_COLORS[id] || _MOOD_COLORS.meh;
+  const s = size;
+  const cx = s/2, cy = s/2, r = s/2 - 1.5;
+  // Eye positions scaled
+  const ex = s*0.335, ey = s*0.4, er = s*0.075;
+  const ex2 = s - ex;
+  const shine = er * 0.38;
+  // Mouth
+  const my = s*0.645;
+  const mw = s*0.26;
+
+  let mouthPath = "";
+  if(id === "incredible"){
+    // Big open smile
+    mouthPath = `<path d="M${cx-mw*1.1} ${my} Q${cx} ${my+mw*1.3} ${cx+mw*1.1} ${my}" stroke="${c.pupil}" stroke-width="${s*0.048}" stroke-linecap="round" fill="rgba(255,255,255,.2)"/>`;
+  } else if(id === "good"){
+    // Smile
+    mouthPath = `<path d="M${cx-mw} ${my} Q${cx} ${my+mw*0.9} ${cx+mw} ${my}" stroke="${c.pupil}" stroke-width="${s*0.045}" stroke-linecap="round" fill="none"/>`;
+  } else if(id === "meh"){
+    // Flat
+    mouthPath = `<line x1="${cx-mw}" y1="${my+s*0.02}" x2="${cx+mw}" y2="${my+s*0.02}" stroke="${c.pupil}" stroke-width="${s*0.045}" stroke-linecap="round"/>`;
+  } else if(id === "bad"){
+    // Frown
+    mouthPath = `<path d="M${cx-mw} ${my+s*0.05} Q${cx} ${my-s*0.06} ${cx+mw} ${my+s*0.05}" stroke="${c.pupil}" stroke-width="${s*0.045}" stroke-linecap="round" fill="none"/>`;
+  } else if(id === "horrible"){
+    // Deep frown + teeth hint
+    mouthPath = `<path d="M${cx-mw*1.1} ${my+s*0.06} Q${cx} ${my-s*0.1} ${cx+mw*1.1} ${my+s*0.06}" stroke="${c.pupil}" stroke-width="${s*0.048}" stroke-linecap="round" fill="rgba(0,0,0,.15)"/>`;
+  }
+
+  // Eyebrows
+  let brows = "";
+  if(id === "incredible"){
+    brows = `<path d="M${ex-er*1.5} ${ey-er*2.8} Q${ex} ${ey-er*3.5} ${ex+er*1.5} ${ey-er*2.8}" stroke="${c.pupil}" stroke-width="${s*0.04}" stroke-linecap="round" fill="none"/>
+             <path d="M${ex2-er*1.5} ${ey-er*2.8} Q${ex2} ${ey-er*3.5} ${ex2+er*1.5} ${ey-er*2.8}" stroke="${c.pupil}" stroke-width="${s*0.04}" stroke-linecap="round" fill="none"/>`;
+  } else if(id === "bad" || id === "horrible"){
+    brows = `<path d="M${ex-er*1.4} ${ey-er*2.4} L${ex+er*1.4} ${ey-er*3.4}" stroke="${c.pupil}" stroke-width="${s*0.04}" stroke-linecap="round" fill="none"/>
+             <path d="M${ex2+er*1.4} ${ey-er*2.4} L${ex2-er*1.4} ${ey-er*3.4}" stroke="${c.pupil}" stroke-width="${s*0.04}" stroke-linecap="round" fill="none"/>`;
+  } else if(id === "meh"){
+    brows = `<line x1="${ex-er*1.3}" y1="${ey-er*2.8}" x2="${ex+er*1.3}" y2="${ey-er*2.8}" stroke="${c.pupil}" stroke-width="${s*0.035}" stroke-linecap="round"/>
+             <line x1="${ex2-er*1.3}" y1="${ey-er*2.8}" x2="${ex2+er*1.3}" y2="${ey-er*2.8}" stroke="${c.pupil}" stroke-width="${s*0.035}" stroke-linecap="round"/>`;
+  }
+
+  // Cheeks for good/incredible
+  let cheeks = "";
+  if(id === "incredible"){
+    cheeks = `<circle cx="${cx-mw*0.95}" cy="${my-s*0.03}" r="${s*0.065}" fill="rgba(255,150,80,.28)"/>
+              <circle cx="${cx+mw*0.95}" cy="${my-s*0.03}" r="${s*0.065}" fill="rgba(255,150,80,.28)"/>`;
+  } else if(id === "good"){
+    cheeks = `<circle cx="${cx-mw*0.85}" cy="${my-s*0.04}" r="${s*0.055}" fill="rgba(255,150,100,.2)"/>
+              <circle cx="${cx+mw*0.85}" cy="${my-s*0.04}" r="${s*0.055}" fill="rgba(255,150,100,.2)"/>`;
+  }
+
+  return `<svg viewBox="0 0 ${s} ${s}" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="${c.bg}" stroke="${c.ring}" stroke-width="1.5"/>
+    ${cheeks}
+    <circle cx="${ex}" cy="${ey}" r="${er}" fill="${c.pupil}"/>
+    <circle cx="${ex2}" cy="${ey}" r="${er}" fill="${c.pupil}"/>
+    <circle cx="${ex+shine}" cy="${ey-shine}" r="${shine}" fill="${c.shine}"/>
+    <circle cx="${ex2+shine}" cy="${ey-shine}" r="${shine}" fill="${c.shine}"/>
+    ${brows}
+    ${mouthPath}
+  </svg>`;
+}
+
 const _MOOD_SVGS = {
-  incredible: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#FFD93D" stroke="#F4B800" stroke-width="1.5"/><circle cx="16" cy="19" r="3.5" fill="#1a1a2e"/><circle cx="32" cy="19" r="3.5" fill="#1a1a2e"/><circle cx="17.5" cy="17.5" r="1.2" fill="white"/><circle cx="33.5" cy="17.5" r="1.2" fill="white"/><path d="M13 29 Q24 40 35 29" stroke="#1a1a2e" stroke-width="2.2" stroke-linecap="round" fill="rgba(255,255,255,.25)"/><path d="M12 22 Q14 19 17 21" stroke="#1a1a2e" stroke-width="1.5" stroke-linecap="round" fill="none"/><path d="M36 22 Q34 19 31 21" stroke="#1a1a2e" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>`,
-  good: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#A8E6CF" stroke="#6BCB9E" stroke-width="1.5"/><circle cx="16" cy="20" r="3" fill="#1a1a2e"/><circle cx="32" cy="20" r="3" fill="#1a1a2e"/><circle cx="17.2" cy="18.8" r="1" fill="white"/><circle cx="33.2" cy="18.8" r="1" fill="white"/><path d="M15 29 Q24 37 33 29" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round" fill="none"/></svg>`,
-  meh: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#B8C5D6" stroke="#8EA3BA" stroke-width="1.5"/><circle cx="16" cy="20" r="3" fill="#2d3561"/><circle cx="32" cy="20" r="3" fill="#2d3561"/><circle cx="17.2" cy="18.8" r="1" fill="white"/><circle cx="33.2" cy="18.8" r="1" fill="white"/><line x1="15" y1="31" x2="33" y2="31" stroke="#2d3561" stroke-width="2.2" stroke-linecap="round"/><path d="M14 23 Q16 20.5 18 22" stroke="#2d3561" stroke-width="1.3" stroke-linecap="round" fill="none"/><path d="M34 23 Q32 20.5 30 22" stroke="#2d3561" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>`,
-  bad: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#9BB5E8" stroke="#6B90D4" stroke-width="1.5"/><circle cx="16" cy="21" r="3" fill="#1a1a2e"/><circle cx="32" cy="21" r="3" fill="#1a1a2e"/><circle cx="17.2" cy="19.8" r="1" fill="white"/><circle cx="33.2" cy="19.8" r="1" fill="white"/><path d="M15 33 Q24 26 33 33" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round" fill="none"/><path d="M13 17 Q15.5 19.5 18 17" stroke="#1a1a2e" stroke-width="1.5" stroke-linecap="round" fill="none"/><path d="M35 17 Q32.5 19.5 30 17" stroke="#1a1a2e" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>`,
-  horrible: `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="22" fill="#E88A8A" stroke="#D45C5C" stroke-width="1.5"/><circle cx="16" cy="20" r="3.5" fill="#1a1a2e"/><circle cx="32" cy="20" r="3.5" fill="#1a1a2e"/><circle cx="17.5" cy="18.5" r="1.2" fill="white"/><circle cx="33.5" cy="18.5" r="1.2" fill="white"/><path d="M13 15 L18 19" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round"/><path d="M35 15 L30 19" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round"/><path d="M14 34 Q24 25 34 34" stroke="#1a1a2e" stroke-width="2.2" stroke-linecap="round" fill="rgba(0,0,0,.12)"/></svg>`,
+  incredible: _buildMoodSvg("incredible", 48),
+  good:       _buildMoodSvg("good", 48),
+  meh:        _buildMoodSvg("meh", 48),
+  bad:        _buildMoodSvg("bad", 48),
+  horrible:   _buildMoodSvg("horrible", 48),
 };
 const _MOOD_SVG_MINI = {
-  incredible: `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#FFD93D"/><circle cx="7" cy="8.5" r="1.4" fill="#1a1a2e"/><circle cx="13" cy="8.5" r="1.4" fill="#1a1a2e"/><path d="M6 13 Q10 17 14 13" stroke="#1a1a2e" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>`,
-  good:       `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#A8E6CF"/><circle cx="7" cy="8.5" r="1.3" fill="#1a1a2e"/><circle cx="13" cy="8.5" r="1.3" fill="#1a1a2e"/><path d="M6.5 13 Q10 16 13.5 13" stroke="#1a1a2e" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>`,
-  meh:        `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#B8C5D6"/><circle cx="7" cy="8.5" r="1.3" fill="#2d3561"/><circle cx="13" cy="8.5" r="1.3" fill="#2d3561"/><line x1="6.5" y1="13.5" x2="13.5" y2="13.5" stroke="#2d3561" stroke-width="1.2" stroke-linecap="round"/></svg>`,
-  bad:        `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#9BB5E8"/><circle cx="7" cy="8.5" r="1.3" fill="#1a1a2e"/><circle cx="13" cy="8.5" r="1.3" fill="#1a1a2e"/><path d="M6.5 15 Q10 11 13.5 15" stroke="#1a1a2e" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>`,
-  horrible:   `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="9" fill="#E88A8A"/><circle cx="7" cy="8.5" r="1.4" fill="#1a1a2e"/><circle cx="13" cy="8.5" r="1.4" fill="#1a1a2e"/><path d="M6 15.5 Q10 11 14 15.5" stroke="#1a1a2e" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>`,
+  incredible: _buildMoodSvg("incredible", 20),
+  good:       _buildMoodSvg("good", 20),
+  meh:        _buildMoodSvg("meh", 20),
+  bad:        _buildMoodSvg("bad", 20),
+  horrible:   _buildMoodSvg("horrible", 20),
 };
-function _getMoodSvg(id, mini=false){ return (mini ? _MOOD_SVG_MINI : _MOOD_SVGS)[id] || (mini ? _MOOD_SVG_MINI : _MOOD_SVGS)["meh"] || ""; }
+function _getMoodSvg(id, mini=false){ 
+  const map = mini ? _MOOD_SVG_MINI : _MOOD_SVGS;
+  const faceId = ["incredible","good","meh","bad","horrible"].includes(id) ? id : "meh";
+  return map[faceId] || map["meh"] || ""; 
+}
 
 const DEFAULT_MOOD_PRESETS = [
   // "Face" selector (like your reference app)
@@ -4037,6 +4115,239 @@ function readFilesAsDataUrls(fileList, cb){
 }
 
 function openMoodPickerModal(iso, opts={}){
+  const host = document.querySelector("#app");
+  const backdrop = document.createElement("div");
+  backdrop.className = "modalBackdrop";
+
+  const existing = getMoodEntry(iso);
+  const all = getAllMoodSprites();
+  const faceIds = ["incredible","good","meh","bad","horrible"];
+  const faces = faceIds.map(id => all.find(s=>String(s.id)===id)).filter(Boolean);
+
+  let selectedId = existing?.spriteId || "";
+  let selectedLabel = existing?.label || "";
+  let note = existing?.note || "";
+  let tags = new Set(Array.isArray(existing?.tags) ? existing.tags : []);
+  let energy = existing?.energy ?? 5; // 1-10
+
+  // Map legacy ids to face ids
+  if(selectedId && !faceIds.includes(String(selectedId))){
+    const sc = getMoodScoreById(selectedId);
+    if(sc!=null){
+      const best = faces.map(f=>({id:f.id,d:Math.abs((getMoodScoreById(f.id)||5)-sc)})).sort((a,b)=>a.d-b.d)[0];
+      if(best?.id) selectedId = best.id;
+    } else { selectedId = "meh"; }
+  }
+  if(!selectedId) selectedId = "meh";
+
+  const getFace = (id)=>faces.find(f=>String(f.id)===String(id))||null;
+  const ensureLabel = ()=>{
+    const f = getFace(selectedId);
+    const labels = Array.isArray(f?.labels) ? f.labels : [];
+    if(!selectedLabel) selectedLabel = labels[0]||String(f?.id||"");
+    else if(labels.length && !labels.includes(selectedLabel)) selectedLabel = labels[0];
+  };
+  ensureLabel();
+
+  const TAG_PRESETS = [
+    { id:"sleep",  label:"Sueño",    icon:"🌙" },
+    { id:"debts",  label:"Deudas",   icon:"💸" },
+    { id:"work",   label:"Trabajo",  icon:"💼" },
+    { id:"family", label:"Familia",  icon:"🏠" },
+    { id:"health", label:"Salud",    icon:"🌿" },
+    { id:"money",  label:"Dinero",   icon:"💰" },
+    { id:"love",   label:"Amor",     icon:"💜" },
+    { id:"social", label:"Social",   icon:"🫂" },
+  ];
+
+  const FACE_COLORS = {
+    incredible:"#FFCE47", good:"#5DDBA8", meh:"#8FA8C8", bad:"#7B8FD4", horrible:"#E8604A"
+  };
+
+  const render = ()=>{
+    const dateLabel = (() => {
+      const d = new Date(iso+"T00:00:00");
+      return d.toLocaleDateString("es-PE",{weekday:"long",day:"numeric",month:"long"});
+    })();
+
+    backdrop.innerHTML = `
+      <div class="mpm-panel" role="dialog" aria-label="Mood check-in">
+        <div class="mpm-header">
+          <div>
+            <div class="mpm-title">¿Cómo estás?</div>
+            <div class="mpm-date">${escapeHtml(dateLabel)}</div>
+          </div>
+          <div class="mpm-header-actions">
+            <button class="mpm-ghost-btn" id="btnMoodMonth">Historial</button>
+            <button class="mpm-icon-btn" data-close>✕</button>
+          </div>
+        </div>
+
+        <!-- FACE SELECTOR -->
+        <div class="mpm-faces" id="mpmFaces">
+          ${faces.map(f=>{
+            const color = FACE_COLORS[f.id]||"#888";
+            return `<button class="mpm-face ${String(f.id)===String(selectedId)?"active":""}" 
+              data-face="${escapeHtml(f.id)}"
+              style="--face-color:${color}">
+              <div class="mpm-face-art">${_getMoodSvg(f.id, false)}</div>
+            </button>`;
+          }).join("")}
+        </div>
+
+        <!-- SELECTED LABEL -->
+        <div class="mpm-selected-label" id="mpmSelectedLabel">
+          ${escapeHtml(selectedLabel || selectedId)}
+        </div>
+
+        <!-- ENERGY LEVEL -->
+        <div class="mpm-section">
+          <div class="mpm-section-label">Energía del día</div>
+          <div class="mpm-energy-row" id="mpmEnergyRow">
+            ${Array.from({length:10},(_,i)=>{
+              const v = i+1;
+              const isActive = v <= energy;
+              const color = v <= 3 ? "#E8604A" : v <= 6 ? "#8FA8C8" : v <= 8 ? "#5DDBA8" : "#FFCE47";
+              return `<button class="mpm-energy-dot ${isActive?"active":""}" data-energy="${v}" style="--ec:${color}" title="${v}/10"></button>`;
+            }).join("")}
+            <span class="mpm-energy-val">${energy}/10</span>
+          </div>
+        </div>
+
+        <!-- TAGS -->
+        <div class="mpm-section">
+          <div class="mpm-section-label">¿Qué influyó hoy?</div>
+          <div class="mpm-tag-grid" id="mpmTagGrid">
+            ${TAG_PRESETS.map(t=>`
+              <button class="mpm-tag ${tags.has(t.id)?"active":""}" data-tag="${escapeHtml(t.id)}">
+                <span>${t.icon}</span><span>${escapeHtml(t.label)}</span>
+              </button>
+            `).join("")}
+          </div>
+          <div class="mpm-custom-tag-row">
+            <input class="mpm-input" id="mpmTagInput" placeholder="Otro factor..."/>
+            <button class="mpm-add-btn" id="mpmAddTag">＋</button>
+          </div>
+        </div>
+
+        <!-- NOTE -->
+        <div class="mpm-section">
+          <div class="mpm-section-label">Nota libre <span class="mpm-optional">opcional</span></div>
+          <textarea class="mpm-textarea" id="mpmNote" rows="3" placeholder="¿Algo en especial hoy?...">${escapeHtml(note)}</textarea>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="mpm-footer">
+          <button class="mpm-clear-btn" id="mpmClear">Limpiar</button>
+          <div class="mpm-footer-right">
+            <button class="mpm-ghost-btn" data-close>Cancelar</button>
+            <button class="mpm-save-btn" id="mpmSave">Guardar</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    wire();
+  };
+
+  const close = ()=>{
+    if(typeof window.anime==="function") animateSleepModalOut(backdrop,()=>backdrop.remove());
+    else backdrop.remove();
+  };
+
+  const wire = ()=>{
+    backdrop.addEventListener("click", e=>{ if(e.target===backdrop) close(); if(e.target?.closest("[data-close]")) close(); });
+
+    // Faces
+    backdrop.querySelectorAll("[data-face]").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        selectedId = btn.getAttribute("data-face")||"meh";
+        selectedLabel=""; ensureLabel();
+        backdrop.querySelectorAll("[data-face]").forEach(b=>b.classList.toggle("active",b.getAttribute("data-face")===selectedId));
+        const sl = backdrop.querySelector("#mpmSelectedLabel");
+        if(sl) sl.textContent = selectedLabel||selectedId;
+        // Update color ring
+        const color = FACE_COLORS[selectedId]||"#888";
+        backdrop.querySelectorAll("[data-face]").forEach(b=>{
+          if(b.getAttribute("data-face")===selectedId) b.style.setProperty("--face-color",color);
+        });
+      });
+    });
+
+    // Energy
+    backdrop.querySelectorAll("[data-energy]").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        energy = Number(btn.getAttribute("data-energy"))||5;
+        backdrop.querySelectorAll("[data-energy]").forEach(b=>{
+          b.classList.toggle("active", Number(b.getAttribute("data-energy"))<=energy);
+        });
+        const ev = backdrop.querySelector(".mpm-energy-val");
+        if(ev) ev.textContent = energy+"/10";
+      });
+    });
+
+    // Tags
+    backdrop.querySelectorAll("[data-tag]").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        const id=btn.getAttribute("data-tag")||"";
+        if(tags.has(id)) tags.delete(id); else tags.add(id);
+        btn.classList.toggle("active",tags.has(id));
+      });
+    });
+
+    // Custom tag
+    const addTag = ()=>{
+      const inp=backdrop.querySelector("#mpmTagInput");
+      const v=(inp?.value||"").trim();
+      if(!v) return;
+      const id=v.toLowerCase().replace(/\s+/g,"_").slice(0,40);
+      tags.add(id);
+      const chip=document.createElement("button");
+      chip.className="mpm-tag active"; chip.setAttribute("data-tag",id);
+      chip.innerHTML=`<span>🏷️</span><span>${escapeHtml(v)}</span>`;
+      chip.addEventListener("click",()=>{ if(tags.has(id)) tags.delete(id); else tags.add(id); chip.classList.toggle("active",tags.has(id)); });
+      backdrop.querySelector("#mpmTagGrid")?.appendChild(chip);
+      if(inp) inp.value="";
+    };
+    backdrop.querySelector("#mpmAddTag")?.addEventListener("click",addTag);
+    backdrop.querySelector("#mpmTagInput")?.addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault();addTag();} });
+
+    backdrop.querySelector("#mpmNote")?.addEventListener("input",e=>{ note=e.target.value||""; });
+
+    backdrop.querySelector("#mpmClear")?.addEventListener("click",()=>{
+      selectedId="meh"; selectedLabel=""; note=""; tags=new Set(); energy=5;
+      render();
+    });
+
+    backdrop.querySelector("#mpmSave")?.addEventListener("click",()=>{
+      // Store energy in the entry by extending setMoodEntry
+      const key = String(iso||"");
+      state.moodDaily = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
+      if(!selectedId){
+        delete state.moodDaily[key];
+      } else {
+        state.moodDaily[key] = {
+          spriteId: String(selectedId),
+          label: String(selectedLabel||""),
+          tags: Array.from(tags).map(String).filter(Boolean),
+          note: String(note||""),
+          energy: Number(energy)||5,
+          ts: new Date().toISOString()
+        };
+      }
+      persist(); view();
+      if(typeof opts.onSaved==="function") opts.onSaved({ iso, spriteId:selectedId, label:selectedLabel, tags:Array.from(tags), note, energy });
+      toast(selectedId ? "Mood guardado ✅" : "Mood eliminado 🧼");
+      close();
+    });
+
+    backdrop.querySelector("#btnMoodMonth")?.addEventListener("click",()=>{ close(); openMoodMonthModal(iso); });
+  };
+
+  render();
+  host.appendChild(backdrop);
+  if(typeof window.anime==="function") animateSleepModalIn(backdrop);
+}){
   const host = document.querySelector("#app");
   const backdrop = document.createElement("div");
   backdrop.className = "modalBackdrop";
@@ -4303,10 +4614,11 @@ function openMoodMonthModal(initialIso){
       if(!iso) return `<div class="moodCalCell empty"></div>`;
       const e = map[iso];
       const sp = e ? getMoodSpriteById(e.spriteId) : null;
+      const svgFace = sp ? _getMoodSvg(sp.id, true) : "";
       return `
-        <button class="moodCalCell" data-iso="${escapeHtml(iso)}">
+        <button class="moodCalCell ${sp?"has-mood":""}" data-iso="${escapeHtml(iso)}">
           <div class="moodCalNum">${escapeHtml(String(Number(iso.slice(8,10))))}</div>
-          ${sp ? `<img class="moodCalImg" src="${escapeHtml(sp.src)}" alt="" />` : `<div class="moodCalEmpty">＋</div>`}
+          ${svgFace ? `<div class="moodCalSvg">${svgFace}</div>` : `<div class="moodCalEmpty">＋</div>`}
         </button>
       `;
     }).join("");
@@ -4314,30 +4626,26 @@ function openMoodMonthModal(initialIso){
     // History cards for this month (new solid mood log)
     const monthKey = `${y}-${String(m+1).padStart(2,"0")}`;
     const monthEntries = Object.keys(map).filter(k=>String(k).startsWith(monthKey)).sort((a,b)=>String(b).localeCompare(String(a)));
+    const TAG_LABEL_MAP = {sleep:"🌙 Sueño",debts:"💸 Deudas",work:"💼 Trabajo",family:"🏠 Familia",health:"🌿 Salud",money:"💰 Dinero",love:"💜 Amor",social:"🫂 Social"};
     const cardsHtml = monthEntries.slice(0, 31).map(iso=>{
       const e = map[iso] || {};
       const sp = getMoodSpriteById(e.spriteId);
-      const tags = Array.isArray(e.tags) ? e.tags : [];
-      const tagText = tags.map(t=>{
-        if(t==="sleep") return "🛏️ Sueño malo";
-        if(t==="debts") return "💸 Deudas";
-        if(t==="work") return "🧰 Trabajo";
-        if(t==="family") return "🏠 Familia";
-        if(t==="health") return "🩺 Salud";
-        if(t==="money") return "💰 Dinero";
-        return "🏷️ " + String(t);
-      }).slice(0,4).join(" · ");
+      const entryTags = Array.isArray(e.tags) ? e.tags : [];
+      const en = Number(e.energy)||0;
+      const svgFace = sp ? _getMoodSvg(sp.id, false) : "";
+      const enDots = en > 0 ? Array.from({length:10},(_,i)=>`<div class="mml-en-dot ${i<en?"on":""}" style="${i<en?"--ec:"+(i<3?"#E8604A":i<6?"#8FA8C8":i<8?"#5DDBA8":"#FFCE47"):""}"></div>`).join("") : "";
       return `
-        <div class="moodLogCard" data-iso="${escapeHtml(iso)}">
-          <div class="moodLogHead">
-            ${sp ? `<img class="moodLogImg" src="${escapeHtml(sp.src)}" alt=""/>` : `<div class="moodLogImg ph">＋</div>`}
-            <div class="moodLogMeta">
-              <div class="moodLogTitle">${escapeHtml((e.label||sp?.labels?.[0]||sp?.id||"").toString()||"")}</div>
-              <div class="moodLogSub">${escapeHtml(iso)}</div>
+        <div class="moodLogCard mml-card" data-iso="${escapeHtml(iso)}">
+          <div class="mml-head">
+            <div class="mml-face">${svgFace}</div>
+            <div class="mml-meta">
+              <div class="mml-label">${escapeHtml((e.label||sp?.labels?.[0]||sp?.id||"—").toString())}</div>
+              <div class="mml-date">${escapeHtml(iso)}</div>
+              ${en>0?`<div class="mml-energy-row">${enDots}<span class="mml-en-num">${en}/10</span></div>`:""}
             </div>
           </div>
-          ${tagText ? `<div class="moodLogTags">${escapeHtml(tagText)}</div>` : ``}
-          ${e.note ? `<div class="moodLogNote">${escapeHtml(String(e.note))}</div>` : ``}
+          ${entryTags.length?`<div class="mml-tags">${entryTags.slice(0,5).map(t=>`<span class="mml-tag-chip">${TAG_LABEL_MAP[t]||"🏷️ "+t}</span>`).join("")}</div>`:""}
+          ${e.note?`<div class="mml-note">${escapeHtml(String(e.note))}</div>`:""}
         </div>
       `;
     }).join("");
