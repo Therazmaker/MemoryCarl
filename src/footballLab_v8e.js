@@ -14,6 +14,7 @@ import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readine
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
 import { buildChampionsAnalysisPayload } from "./footballlab/champions_knockout_engine.js";
+import { saveUclMatch } from "./footballlab/ucl_memory_layer.js";
 import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
 import { buildBitacoraPerformanceLab, normalizePickRecord } from "./footballlab/bitacora_performance.js";
 import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calcPhaseMetrics, phaseAlertFlags, buildPhasePostAnalysis } from "./footballlab/bitacora_phase_mode.js";
@@ -12926,7 +12927,7 @@ RESPONDE SOLO CON JSON usando este schema:
           <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
           <div class="fl-mini" style="margin-bottom:6px;">Hay <b>${resultsSync.totalInMemory}</b> partidos guardados en memoria para <b>${team.name}</b>.</div>
           <div class="fl-mini" style="margin-bottom:8px;">Y ya hay <b>${resultsSync.alreadySynced}</b> sincronizados en esta tabla.${resultsSync.pendingToSync>0 ? ` Faltan <b>${resultsSync.pendingToSync}</b>.` : " <b>Todo sincronizado.</b>"}</div>
-          <div class="fl-row" style="margin-bottom:10px;">
+          <div class="fl-row" style="margin-bottom:10px;flex-wrap:wrap;gap:6px;">
             <button class="fl-btn" id="syncResultsFromMemory" ${resultsSync.pendingToSync>0 ? '' : 'disabled'}>Sincronizar</button>
             <input id="resDate" type="date" class="fl-input" />
             <select id="resHome" class="fl-select"><option value="">Local</option>${resultTeamOptions}</select>
@@ -12937,6 +12938,36 @@ RESPONDE SOLO CON JSON usando este schema:
             <button class="fl-btn" id="calcLast5Btn">Calcular últimos 5</button>
             <button class="fl-btn" id="calcAllBtn">Calcular todos</button>
             <span id="resultStatus" class="fl-muted"></span>
+          </div>
+          <div id="uclExtraFields" style="display:none;background:rgba(31,111,235,.08);border:1px solid rgba(31,111,235,.25);border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+            <div style="font-size:11px;font-weight:700;color:#58a6ff;margin-bottom:8px;">🏆 Campos Champions League</div>
+            <div class="fl-row" style="gap:8px;flex-wrap:wrap;align-items:center;">
+              <div>
+                <div style="font-size:10px;color:#8b949e;margin-bottom:3px;">Fase</div>
+                <select id="uclStage" class="fl-select" style="width:160px;">
+                  <option value="">— Fase —</option>
+                  <option value="group">Fase de grupos</option>
+                  <option value="qualifier">Playoff / Previa</option>
+                  <option value="r16">Octavos de final</option>
+                  <option value="quarter">Cuartos de final</option>
+                  <option value="semi">Semifinal</option>
+                  <option value="final">Final</option>
+                </select>
+              </div>
+              <div>
+                <div style="font-size:10px;color:#8b949e;margin-bottom:3px;">Partido</div>
+                <select id="uclLeg" class="fl-select" style="width:130px;">
+                  <option value="">— Ida/Vuelta —</option>
+                  <option value="ida">Ida</option>
+                  <option value="vuelta">Vuelta</option>
+                  <option value="unico">Partido único</option>
+                </select>
+              </div>
+              <div>
+                <div style="font-size:10px;color:#8b949e;margin-bottom:3px;">Temporada</div>
+                <input id="uclSeason" class="fl-input" placeholder="2024-25" style="width:100px;" />
+              </div>
+            </div>
           </div>
           <table class="fl-table">
             <thead><tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Rival</th><th>Acciones</th></tr></thead>
@@ -13606,6 +13637,22 @@ RESPONDE SOLO CON JSON usando este schema:
         render("equipo", { teamId: team.id });
       };
 
+      // ── Mostrar campos UCL si la liga activa es Champions ──────
+      (()=>{
+        const _activLeagueName = db.leagues.find(l=>l.id===(db.settings.selectedLeagueId||""))?.name||"";
+        const _uclFields = document.getElementById("uclExtraFields");
+        if(_uclFields && /champions|ucl/i.test(_activLeagueName)){
+          _uclFields.style.display = "block";
+          // Pre-rellenar temporada si está vacía
+          const _uclSeasonInput = document.getElementById("uclSeason");
+          if(_uclSeasonInput && !_uclSeasonInput.value){
+            const _y = new Date().getFullYear();
+            _uclSeasonInput.value = `${_y-1}-${String(_y).slice(2)}`;
+          }
+        }
+      })();
+      // ────────────────────────────────────────────────────────────
+
       document.getElementById("addResult").onclick = ()=>{
         const homeId = document.getElementById("resHome").value;
         const awayId = document.getElementById("resAway").value;
@@ -13634,6 +13681,52 @@ RESPONDE SOLO CON JSON usando este schema:
           featureSnapshotStatus: {}
         });
         db.tracker.push(newMatch);
+
+        // ── UCL AUTO-HOOK: guardar en uclMemory para AMBOS equipos ──
+        const _uclLeagueName = db.leagues.find(l=>l.id===leagueId)?.name||"";
+        if(/champions|ucl/i.test(_uclLeagueName)){
+          const homeTeam   = db.teams.find(t=>t.id===homeId);
+          const awayTeam   = db.teams.find(t=>t.id===awayId);
+          const _uclStage  = document.getElementById("uclStage")?.value  || "";
+          const _uclLeg    = document.getElementById("uclLeg")?.value    || "";
+          const _uclSeason = document.getElementById("uclSeason")?.value || "";
+          const _baseUcl   = {
+            competition: _uclLeagueName,
+            stage:       _uclStage,
+            leg:         _uclLeg,
+            season:      _uclSeason,
+            date:        newMatch.date,
+            score:       `${newMatch.homeGoals}-${newMatch.awayGoals}`
+          };
+          // Guardar para el equipo LOCAL
+          if(homeTeam){
+            saveUclMatch(brainV2TeamState, {
+              ..._baseUcl,
+              id:       `${newMatch.id}_home`,
+              teamId:   homeTeam.id,
+              teamName: homeTeam.name,
+              opponent: awayTeam?.name || awayId,
+              isHome:   true
+            });
+          }
+          // Guardar para el equipo VISITANTE
+          if(awayTeam){
+            saveUclMatch(brainV2TeamState, {
+              ..._baseUcl,
+              id:       `${newMatch.id}_away`,
+              teamId:   awayTeam.id,
+              teamName: awayTeam.name,
+              opponent: homeTeam?.name || homeId,
+              isHome:   false,
+              // invertir marcador para el visitante
+              score:    `${newMatch.awayGoals}-${newMatch.homeGoals}`
+            });
+          }
+          saveBrainV2(brainV2TeamState);
+          status.textContent = `✅ Guardado en Champions para ${homeTeam?.name||homeId} y ${awayTeam?.name||awayId}`;
+        }
+        // ─────────────────────────────────────────────────────────────
+
         saveDb(db);
         render("equipo", { teamId: team.id });
       };
