@@ -3909,7 +3909,8 @@ function normalizeSleepEntry(e){
   if(!e || typeof e !== "object") return null;
   const date = String(e.date || "").slice(0,10);
   const totalMinutes = Number(e.totalMinutes ?? e.total_minutes ?? 0);
-  if(!date || !Number.isFinite(totalMinutes) || totalMinutes <= 0) return null;
+  if(!date || !Number.isFinite(totalMinutes)) return null;
+  if(totalMinutes <= 0 && !e.narrative && !e.dreamType) return null;
   return {
     id: String(e.id || uid()),
     ts: String(e.ts || new Date().toISOString()),
@@ -3919,7 +3920,13 @@ function normalizeSleepEntry(e){
     note: String(e.note || ""),
     mode: String(e.mode || "simple"),
     start: e.start ? String(e.start) : "",
-    end: e.end ? String(e.end) : ""
+    end: e.end ? String(e.end) : "",
+    dreamType: e.dreamType ? String(e.dreamType) : "",
+    wakeEmotion: e.wakeEmotion ? String(e.wakeEmotion) : "",
+    narrative: String(e.narrative || ""),
+    symbols: Array.isArray(e.symbols) ? e.symbols.map(String) : [],
+    clarity: (e.clarity === undefined || e.clarity === null || e.clarity === "") ? null : Number(e.clarity),
+    lucidMoment: Boolean(e.lucidMoment),
   };
 }
 
