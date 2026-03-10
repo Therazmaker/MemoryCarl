@@ -18,7 +18,7 @@
  * ─────────────────────────────────────────────────────────────────
  */
 
-import { normalizeTeamIdentity, resolveTeamAliases } from './readiness_memory.js';
+import { normalizeTeamIdentity, resolveTeamAliases } from './footballlab/readiness_memory.js';
 
 // ─── Constantes ───────────────────────────────────────────────────
 
