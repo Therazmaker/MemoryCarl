@@ -5185,423 +5185,622 @@ function animateSleepModalOut(backdrop, done){
   if(!anim) done();
 }
 
-function openSleepModal(opts = {}){
-  const host = document.querySelector("#app");
-  const modal = document.createElement("div");
-  modal.className = "modalBackdrop";
+// ─── Dream Journal Pro: openSleepModal ────────────────────────────────────
 
-  const editId = opts && opts.editId ? String(opts.editId) : "";
-  const existingRaw = editId ? (state.sleepLog || []).find(x=>String(x.id||"")===editId) : null;
-  const existing = normalizeSleepEntry(existingRaw);
+const _DJP_TYPES = [
+  { id:"normal",    label:"Normal",    icon:"🌙" },
+  { id:"lucid",     label:"Lúcido",    icon:"✨" },
+  { id:"nightmare", label:"Pesadilla", icon:"😨" },
+  { id:"recurring", label:"Recurrente",icon:"🔄" },
+  { id:"vivid",     label:"Vívido",    icon:"🎨" },
+  { id:"prophetic", label:"Profético", icon:"🔮" },
+];
+const _DJP_EMOTIONS = [
+  { id:"calm",       label:"Calma",       icon:"🌊" },
+  { id:"anxious",    label:"Ansioso",     icon:"😰" },
+  { id:"happy",      label:"Feliz",       icon:"😊" },
+  { id:"confused",   label:"Confundido",  icon:"🌀" },
+  { id:"energized",  label:"Energizado",  icon:"⚡" },
+  { id:"melancholy", label:"Melancólico", icon:"🌧️" },
+  { id:"inspired",   label:"Inspirado",   icon:"💡" },
+  { id:"scared",     label:"Asustado",    icon:"😱" },
+];
+const _DJP_CLARITY = [
+  {v:1,label:"Borroso"},{v:2,label:"Parcial"},{v:3,label:"Claro"},
+  {v:4,label:"Vívido"},{v:5,label:"Hiper-real"},
+];
+const _DJP_SYMBOLS = [
+  "agua","fuego","vuelo","caída","persecución","casa","muerte",
+  "animal","luz","oscuridad","transformación","viaje","persona desconocida",
+  "perderse","dientes","examen","dinero","amor","guerra","naturaleza",
+];
 
-  const today = existing?.date || isoDate(new Date());
-  const defaultMode = existing?.mode === "advanced" ? "advanced" : "simple";
-  const defaultHours = existing ? (existing.totalMinutes / 60).toFixed(2).replace(/\.00$/,"") : "";
-  const defaultQuality = existing?.quality ? String(existing.quality) : "";
-  const defaultStart = existing?.start || "";
-  const defaultEnd = existing?.end || "";
-  const defaultNote = existing?.note || "";
-
-  modal.innerHTML = `
-    <div class="modal" role="dialog" aria-label="Registrar sueño">
-      <div class="modalTop">
-        <div>
-          <div class="modalTitle">${existing ? "Editar sueño" : "Registrar sueño"}</div>
-          <div class="modalSub">Simple o avanzado. Guardado local + sync cuando cierre.</div>
-        </div>
-        <button class="iconBtn" data-close aria-label="Close">✕</button>
-      </div>
-
-      <div class="sleepTabs">
-        <button class="sleepTab ${defaultMode === "simple" ? "active" : ""}" data-mode="simple">Simple</button>
-        <button class="sleepTab ${defaultMode === "advanced" ? "active" : ""}" data-mode="advanced">Avanzado</button>
-      </div>
-
-      <div class="field">
-        <label>Fecha</label>
-        <input id="sleepDate" type="date" value="${today}">
-      </div>
-
-      <div id="sleepSimple" style="display:${defaultMode==="simple" ? "" : "none"};">
-        <div class="sleepFormRow">
-          <div class="field">
-            <label>Horas (ej: 7.5)</label>
-            <input id="sleepHours" type="number" inputmode="decimal" step="0.25" min="0" max="24" placeholder="7.5" value="${escapeHtml(defaultHours)}">
-          </div>
-          <div class="field">
-            <label>Calidad (1-5)</label>
-            <select id="sleepQuality">
-              <option value="">-</option>
-              <option value="1" ${defaultQuality==="1"?"selected":""}>1</option>
-              <option value="2" ${defaultQuality==="2"?"selected":""}>2</option>
-              <option value="3" ${defaultQuality==="3"?"selected":""}>3</option>
-              <option value="4" ${defaultQuality==="4"?"selected":""}>4</option>
-              <option value="5" ${defaultQuality==="5"?"selected":""}>5</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div id="sleepAdvanced" style="display:${defaultMode==="advanced" ? "" : "none"};">
-        <div class="sleepFormRow">
-          <div class="field">
-            <label>Inicio</label>
-            <input id="sleepStart" type="time" value="${escapeHtml(defaultStart)}">
-          </div>
-          <div class="field">
-            <label>Fin</label>
-            <input id="sleepEnd" type="time" value="${escapeHtml(defaultEnd)}">
-          </div>
-          <div class="field">
-            <label>Calidad (1-5)</label>
-            <select id="sleepQuality2">
-              <option value="">-</option>
-              <option value="1" ${defaultQuality==="1"?"selected":""}>1</option>
-              <option value="2" ${defaultQuality==="2"?"selected":""}>2</option>
-              <option value="3" ${defaultQuality==="3"?"selected":""}>3</option>
-              <option value="4" ${defaultQuality==="4"?"selected":""}>4</option>
-              <option value="5" ${defaultQuality==="5"?"selected":""}>5</option>
-            </select>
-          </div>
-        </div>
-        <div class="muted" style="margin-top:6px;">Tip: si el fin es menor que el inicio, asumimos que fue al día siguiente.</div>
-      </div>
-
-      <div class="field">
-        <label>Nota (opcional)</label>
-        <textarea id="sleepNote" rows="2" placeholder="Ej: café tarde, sueño ligero, etc.">${escapeHtml(defaultNote)}</textarea>
-      </div>
-
-      <div class="row" style="justify-content:flex-end;margin-top:12px;">
-        <button class="btn" data-close>Cancel</button>
-        <button class="btn primary" id="btnSaveSleep">${existing ? "Guardar cambios" : "Guardar"}</button>
-      </div>
-    </div>
+function _djpInjectStyles(){
+  if(document.getElementById("djp-styles")) return;
+  const s = document.createElement("style");
+  s.id = "djp-styles";
+  s.textContent = `
+.djp-backdrop{position:fixed;inset:0;z-index:1200;background:rgba(6,5,15,.82);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:12px}
+.djp-panel{width:100%;max-width:520px;max-height:92vh;overflow-y:auto;background:#0d0c1a;border:1px solid rgba(124,92,255,.22);border-radius:20px;padding:24px 22px 28px;box-shadow:0 24px 80px rgba(0,0,0,.7);scrollbar-width:thin;scrollbar-color:rgba(124,92,255,.3) transparent;opacity:0;transform:translateY(18px);transition:opacity .22s ease,transform .22s ease}
+.djp-panel.visible{opacity:1;transform:translateY(0)}
+.djp-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px}
+.djp-title{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:1.5px;color:#fff;line-height:1}
+.djp-sub{font-size:12px;color:rgba(255,255,255,.4);margin-top:4px;font-family:'JetBrains Mono',monospace}
+.djp-close{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);border-radius:10px;width:32px;height:32px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:background .15s;flex-shrink:0}
+.djp-close:hover{background:rgba(255,255,255,.12);color:#fff}
+.djp-section{margin-bottom:18px}
+.djp-label{font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(124,92,255,.8);margin-bottom:8px;font-family:'JetBrains Mono',monospace}
+.djp-pill-grid{display:flex;flex-wrap:wrap;gap:7px}
+.djp-pill{padding:7px 13px;border-radius:20px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:rgba(255,255,255,.75);font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px;white-space:nowrap}
+.djp-pill:hover{border-color:rgba(124,92,255,.4);background:rgba(124,92,255,.1)}
+.djp-pill.active{border-color:rgba(124,92,255,.7);background:rgba(124,92,255,.22);color:#fff}
+.djp-clarity-row{display:flex;gap:6px}
+.djp-clarity-btn{flex:1;padding:8px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.5);font-size:10px;font-weight:700;text-align:center;cursor:pointer;transition:all .15s;line-height:1.3}
+.djp-clarity-btn:hover{border-color:rgba(124,92,255,.4)}
+.djp-clarity-btn.active{border-color:rgba(124,92,255,.7);background:rgba(124,92,255,.22);color:#fff}
+.djp-symbol-input-row{display:flex;gap:8px;margin-bottom:8px}
+.djp-symbol-input{flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:9px 12px;color:#fff;font-size:13px;outline:none;transition:border-color .15s}
+.djp-symbol-input:focus{border-color:rgba(124,92,255,.5)}
+.djp-symbol-add{background:rgba(124,92,255,.2);border:1px solid rgba(124,92,255,.4);border-radius:10px;padding:9px 14px;color:#fff;font-weight:700;cursor:pointer;font-size:16px;transition:background .15s}
+.djp-symbol-add:hover{background:rgba(124,92,255,.35)}
+.djp-symbol-tag{padding:5px 10px;border-radius:14px;background:rgba(124,92,255,.15);border:1px solid rgba(124,92,255,.3);color:rgba(255,255,255,.8);font-size:11px;font-weight:600;display:flex;align-items:center;gap:5px}
+.djp-symbol-remove{background:none;border:none;color:rgba(255,255,255,.4);cursor:pointer;font-size:13px;padding:0;line-height:1;transition:color .12s}
+.djp-symbol-remove:hover{color:#ff6b6b}
+.djp-preset-hint{font-size:10px;color:rgba(255,255,255,.3);margin-bottom:6px}
+.djp-preset-grid{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+.djp-preset-chip{padding:4px 9px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.45);font-size:10px;cursor:pointer;transition:all .12s}
+.djp-preset-chip:hover{background:rgba(124,92,255,.12);border-color:rgba(124,92,255,.3);color:rgba(255,255,255,.8)}
+.djp-narrative{width:100%;min-height:90px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:11px 13px;color:#fff;font-size:13px;line-height:1.55;resize:none;outline:none;box-sizing:border-box;transition:border-color .15s;font-family:'DM Sans',sans-serif}
+.djp-narrative:focus{border-color:rgba(124,92,255,.5)}
+.djp-timing-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.djp-field label{display:block;font-size:10px;color:rgba(255,255,255,.45);margin-bottom:5px;font-family:'JetBrains Mono',monospace;font-weight:600;letter-spacing:.8px}
+.djp-field input,.djp-field select{width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:9px 11px;color:#fff;font-size:13px;outline:none;box-sizing:border-box;transition:border-color .15s;-webkit-appearance:none}
+.djp-field input:focus,.djp-field select:focus{border-color:rgba(124,92,255,.5)}
+.djp-field select option{background:#1a1828}
+.djp-field input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6)}
+.djp-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:22px}
+.djp-btn{padding:10px 20px;border-radius:12px;font-weight:700;font-size:13px;cursor:pointer;transition:all .15s;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff}
+.djp-btn:hover{background:rgba(255,255,255,.12)}
+.djp-btn.primary{background:rgba(124,92,255,.3);border-color:rgba(124,92,255,.6);color:#fff}
+.djp-btn.primary:hover{background:rgba(124,92,255,.5)}
+.djp-lucid-toggle{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);cursor:pointer;transition:all .15s}
+.djp-lucid-toggle:hover{border-color:rgba(124,92,255,.3);background:rgba(124,92,255,.07)}
+.djp-lucid-toggle.active{border-color:rgba(124,92,255,.6);background:rgba(124,92,255,.15)}
+.djp-lucid-icon{font-size:18px}
+.djp-lucid-text{flex:1}
+.djp-lucid-title{font-weight:700;font-size:13px;color:#fff}
+.djp-lucid-desc{font-size:11px;color:rgba(255,255,255,.4);margin-top:2px}
+.djp-lucid-check{width:20px;height:20px;border-radius:6px;border:1px solid rgba(124,92,255,.4);background:rgba(124,92,255,.1);display:flex;align-items:center;justify-content:center;font-size:12px;color:rgba(124,92,255,.8)}
+.djp-lucid-toggle.active .djp-lucid-check{background:rgba(124,92,255,.4);color:#fff}
+.djp-divider{height:1px;background:rgba(255,255,255,.07);margin:18px 0}
+.djp-hist-panel{width:100%;max-width:580px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;background:#0d0c1a;border:1px solid rgba(124,92,255,.22);border-radius:20px;box-shadow:0 24px 80px rgba(0,0,0,.7);opacity:0;transform:translateY(18px);transition:opacity .22s ease,transform .22s ease}
+.djp-hist-panel.visible{opacity:1;transform:translateY(0)}
+.djp-hist-top{padding:20px 22px 0;flex-shrink:0}
+.djp-hist-scroll{flex:1;overflow-y:auto;padding:16px 22px 24px;scrollbar-width:thin;scrollbar-color:rgba(124,92,255,.3) transparent}
+.djp-hist-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}
+.djp-hist-actions{display:flex;gap:8px;align-items:center}
+.djp-hist-action-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:6px 12px;color:rgba(255,255,255,.7);font-size:11px;font-weight:700;cursor:pointer;transition:background .15s}
+.djp-hist-action-btn:hover{background:rgba(255,255,255,.12)}
+.djp-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.djp-stat{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px;text-align:center}
+.djp-stat-val{font-size:16px;font-weight:900;color:#fff;font-family:'Bebas Neue',sans-serif;letter-spacing:.5px;line-height:1}
+.djp-stat-lbl{font-size:9px;color:rgba(255,255,255,.4);margin-top:3px;font-family:'JetBrains Mono',monospace;letter-spacing:.8px;text-transform:uppercase}
+.djp-tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:10px}
+.djp-tab{padding:7px 14px;border-radius:10px;border:1px solid transparent;background:transparent;color:rgba(255,255,255,.45);font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;font-family:'JetBrains Mono',monospace}
+.djp-tab:hover{color:rgba(255,255,255,.8)}
+.djp-tab.active{background:rgba(124,92,255,.2);border-color:rgba(124,92,255,.45);color:#fff}
+.djp-chart-wrap{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:14px;margin-bottom:14px}
+.djp-chart-controls{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.djp-range-btn{padding:5px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:transparent;color:rgba(255,255,255,.5);font-size:10px;font-weight:700;cursor:pointer;font-family:'JetBrains Mono',monospace;transition:all .15s}
+.djp-range-btn.active{background:rgba(124,92,255,.22);border-color:rgba(124,92,255,.5);color:#fff}
+.djp-pattern-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.djp-pattern-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:12px}
+.djp-pattern-title{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(124,92,255,.7);font-family:'JetBrains Mono',monospace;margin-bottom:10px}
+.djp-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.djp-bar-label{font-size:10px;color:rgba(255,255,255,.6);width:60px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.djp-bar-fill-wrap{flex:1;height:6px;background:rgba(255,255,255,.07);border-radius:4px;overflow:hidden}
+.djp-bar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,rgba(124,92,255,.7),rgba(124,92,255,1))}
+.djp-bar-count{font-size:10px;color:rgba(255,255,255,.4);width:18px;text-align:right;flex-shrink:0}
+.djp-hist-list{display:flex;flex-direction:column;gap:8px}
+.djp-hist-row{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:12px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;transition:border-color .15s}
+.djp-hist-row:hover{border-color:rgba(124,92,255,.25)}
+.djp-hist-main{flex:1;min-width:0}
+.djp-hist-date{font-weight:900;font-size:13px;color:#fff;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.djp-hist-type-badge{font-size:10px;padding:2px 7px;border-radius:8px;background:rgba(124,92,255,.18);border:1px solid rgba(124,92,255,.3);color:rgba(124,92,255,.9);font-weight:700}
+.djp-hist-meta{font-size:11px;color:rgba(255,255,255,.45);margin-top:3px}
+.djp-hist-symbols{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.djp-hist-symbol{font-size:9px;padding:2px 7px;border-radius:8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.5)}
+.djp-hist-narrative{font-size:11px;color:rgba(255,255,255,.6);margin-top:6px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.djp-hist-row-actions{display:flex;gap:5px}
+.djp-icon-btn{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.6);transition:all .15s}
+.djp-icon-btn:hover{background:rgba(255,255,255,.12);color:#fff}
+.djp-icon-btn.del:hover{background:rgba(255,60,60,.15);border-color:rgba(255,60,60,.3);color:#ff6b6b}
+.djp-search{width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:9px 13px;color:#fff;font-size:12px;outline:none;box-sizing:border-box;margin-bottom:12px;transition:border-color .15s}
+.djp-search:focus{border-color:rgba(124,92,255,.5)}
+.djp-empty{text-align:center;padding:28px 0;color:rgba(255,255,255,.25);font-size:13px}
+@media(max-width:480px){.djp-stats-grid{grid-template-columns:repeat(2,1fr)}.djp-pattern-grid{grid-template-columns:1fr}.djp-timing-row{grid-template-columns:1fr}}
   `;
-
-  const close = () => {
-    animateSleepModalOut(modal, ()=>modal.remove());
-  };
-
-  modal.addEventListener("click", (e)=>{
-    if (e.target === modal) close();
-    if (e.target && e.target.closest("[data-close]")) close();
-  });
-
-  // Tabs
-  let mode = defaultMode;
-  const tabs = modal.querySelectorAll(".sleepTab");
-  const simpleEl = modal.querySelector("#sleepSimple");
-  const advEl = modal.querySelector("#sleepAdvanced");
-
-  tabs.forEach(t=>{
-    t.addEventListener("click", ()=>{
-      tabs.forEach(x=>x.classList.remove("active"));
-      t.classList.add("active");
-      mode = t.getAttribute("data-mode") || "simple";
-      simpleEl.style.display = (mode==="simple") ? "" : "none";
-      advEl.style.display = (mode==="advanced") ? "" : "none";
-    });
-  });
-
-  const calcMinutesAdvanced = (dateStr, startStr, endStr) => {
-    if(!dateStr || !startStr || !endStr) return 0;
-    const [sh, sm] = startStr.split(":").map(Number);
-    const [eh, em] = endStr.split(":").map(Number);
-    if([sh,sm,eh,em].some(n=>Number.isNaN(n))) return 0;
-
-    const start = new Date(dateStr + "T00:00:00");
-    start.setHours(sh, sm, 0, 0);
-
-    const end = new Date(dateStr + "T00:00:00");
-    end.setHours(eh, em, 0, 0);
-
-    if(end <= start) end.setDate(end.getDate()+1); // cross midnight
-    return Math.round((end - start) / 60000);
-  };
-
-  modal.querySelector("#btnSaveSleep")?.addEventListener("click", ()=>{
-    const date = (modal.querySelector("#sleepDate").value || "").trim();
-    const note = String(modal.querySelector("#sleepNote").value || "").trim();
-
-    let totalMinutes = 0;
-    let quality = null;
-    let start = "";
-    let end = "";
-
-    if(mode === "simple"){
-      const hrs = Number(modal.querySelector("#sleepHours").value || 0);
-      if(Number.isFinite(hrs) && hrs > 0) totalMinutes = Math.round(hrs * 60);
-      const qv = (modal.querySelector("#sleepQuality").value || "").trim();
-      quality = qv ? Number(qv) : null;
-    } else {
-      start = (modal.querySelector("#sleepStart").value || "").trim();
-      end = (modal.querySelector("#sleepEnd").value || "").trim();
-      totalMinutes = calcMinutesAdvanced(date, start, end);
-      const qv = (modal.querySelector("#sleepQuality2").value || "").trim();
-      quality = qv ? Number(qv) : null;
-    }
-
-    if(!date){
-      toast("Elige una fecha 📅");
-      return;
-    }
-    if(!totalMinutes || totalMinutes <= 0){
-      toast(mode==="simple" ? "Pon horas válidas 🕒" : "Pon inicio y fin válidos ⏱");
-      return;
-    }
-    if(totalMinutes > 24*60){
-      toast("Eso es más de 24h 😅 Revisa");
-      return;
-    }
-
-    const entry = {
-      id: existing?.id || uid(),
-      ts: new Date().toISOString(),
-      date,
-      totalMinutes,
-      quality,
-      note,
-      mode,
-      start,
-      end
-    };
-
-    state.sleepLog = Array.isArray(state.sleepLog) ? state.sleepLog : [];
-    if(existing){
-      const idx = state.sleepLog.findIndex(x=>String(x.id||"") === existing.id);
-      if(idx >= 0) state.sleepLog[idx] = entry;
-      else state.sleepLog.push(entry);
-    }else{
-      state.sleepLog.push(entry);
-    }
-    // keep it sane
-    if(state.sleepLog.length > 1500) state.sleepLog = state.sleepLog.slice(-1500);
-
-    persist();
-    view();
-    if(typeof opts.onSaved === "function") opts.onSaved(entry);
-    toast(existing ? "Sueño actualizado ✅" : "Sueño guardado ✅");
-    close();
-  });
-
-  host.appendChild(modal);
-  animateSleepModalIn(modal);
+  document.head.appendChild(s);
 }
 
-function openSleepHistoryModal(){
-  const host = document.querySelector("#app");
-  const backdrop = document.createElement("div");
-  backdrop.className = "modalBackdrop";
-  backdrop.innerHTML = `
-    <div class="modal sleepHistoryModal" role="dialog" aria-label="Histórico de sueño">
-      <div class="modalTop">
-        <div>
-          <div class="modalTitle">Histórico de sueño</div>
-          <div class="modalSub">Visualiza, busca, edita y exporta tus noches.</div>
+function _djpCalcMinutes(dateStr, startStr, endStr){
+  if(!dateStr||!startStr||!endStr) return 0;
+  const [sh,sm]=startStr.split(":").map(Number);
+  const [eh,em]=endStr.split(":").map(Number);
+  if([sh,sm,eh,em].some(n=>Number.isNaN(n))) return 0;
+  const s=new Date(`${dateStr}T00:00:00`); s.setHours(sh,sm,0,0);
+  const e=new Date(`${dateStr}T00:00:00`); e.setHours(eh,em,0,0);
+  if(e<=s) e.setDate(e.getDate()+1);
+  return Math.round((e-s)/60000);
+}
+
+function openSleepModal(opts={}){
+  _djpInjectStyles();
+  const host=document.querySelector("#app")||document.body;
+  const editId=opts?.editId?String(opts.editId):"";
+  const existingRaw=editId?(state?.sleepLog||[]).find(x=>String(x.id||"")===editId):null;
+  const ex=existingRaw?normalizeSleepEntry(existingRaw):null;
+  const today=ex?.date||isoDate(new Date());
+
+  const form={
+    date:today,
+    quality:ex?.quality?String(ex.quality):"",
+    start:ex?.start||"",
+    end:ex?.end||"",
+    note:ex?.note||"",
+    narrative:ex?.narrative||"",
+    dreamType:ex?.dreamType||"",
+    wakeEmotion:ex?.wakeEmotion||"",
+    symbols:[...(ex?.symbols||[])],
+    clarity:ex?.clarity||null,
+    lucidMoment:ex?.lucidMoment||false,
+  };
+
+  const backdrop=document.createElement("div");
+  backdrop.className="djp-backdrop";
+
+  const renderForm=()=>{
+    backdrop.innerHTML=`
+      <div class="djp-panel" id="djpPanel">
+        <div class="djp-header">
+          <div>
+            <div class="djp-title">${ex?"Editar Sueño":"Registrar Sueño"}</div>
+            <div class="djp-sub">Dream Journal · ${escapeHtml(form.date)}</div>
+          </div>
+          <button class="djp-close" id="djpClose">✕</button>
         </div>
-        <div class="sleepHistoryTopActions">
-          <button class="iconBtn" id="btnSleepCsv" aria-label="Exportar CSV">CSV</button>
-          <button class="iconBtn" id="btnSleepAdd" aria-label="Agregar">＋</button>
-          <button class="iconBtn" data-close aria-label="Cerrar">✕</button>
+
+        <div class="djp-section">
+          <div class="djp-label">Tipo de sueño</div>
+          <div class="djp-pill-grid">
+            ${_DJP_TYPES.map(t=>`<button class="djp-pill ${form.dreamType===t.id?"active":""}" data-type="${t.id}">${t.icon} ${escapeHtml(t.label)}</button>`).join("")}
+          </div>
+        </div>
+
+        <div class="djp-section">
+          <div class="djp-label">Emoción al despertar</div>
+          <div class="djp-pill-grid">
+            ${_DJP_EMOTIONS.map(e=>`<button class="djp-pill ${form.wakeEmotion===e.id?"active":""}" data-emotion="${e.id}">${e.icon} ${escapeHtml(e.label)}</button>`).join("")}
+          </div>
+        </div>
+
+        <div class="djp-section">
+          <div class="djp-label">Claridad del recuerdo</div>
+          <div class="djp-clarity-row">
+            ${_DJP_CLARITY.map(c=>`<button class="djp-clarity-btn ${form.clarity===c.v?"active":""}" data-clarity="${c.v}">${c.v}<br><span style="font-size:9px">${escapeHtml(c.label)}</span></button>`).join("")}
+          </div>
+        </div>
+
+        <div class="djp-section">
+          <div class="djp-lucid-toggle ${form.lucidMoment?"active":""}" id="djpLucid">
+            <div class="djp-lucid-icon">✨</div>
+            <div class="djp-lucid-text">
+              <div class="djp-lucid-title">Momento de lucidez</div>
+              <div class="djp-lucid-desc">Hubo consciencia dentro del sueño</div>
+            </div>
+            <div class="djp-lucid-check">${form.lucidMoment?"✓":""}</div>
+          </div>
+        </div>
+
+        <div class="djp-section">
+          <div class="djp-label">Narrativa del sueño</div>
+          <textarea class="djp-narrative" id="djpNarrative" rows="4" placeholder="Describe lo que recordás... lugares, personas, sensaciones, secuencias...">${escapeHtml(form.narrative)}</textarea>
+        </div>
+
+        <div class="djp-section">
+          <div class="djp-label">Símbolos y arquetipos</div>
+          <div class="djp-preset-hint">Atajos rápidos:</div>
+          <div class="djp-preset-grid">
+            ${_DJP_SYMBOLS.map(s=>`<button class="djp-preset-chip" data-preset="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join("")}
+          </div>
+          <div class="djp-symbol-input-row">
+            <input class="djp-symbol-input" id="djpSymInput" placeholder="Símbolo personalizado..."/>
+            <button class="djp-symbol-add" id="djpSymAdd">＋</button>
+          </div>
+          <div class="djp-pill-grid" id="djpSymTags">
+            ${form.symbols.map(s=>`<span class="djp-symbol-tag">${escapeHtml(s)}<button class="djp-symbol-remove" data-rm="${escapeHtml(s)}">×</button></span>`).join("")}
+          </div>
+        </div>
+
+        <div class="djp-divider"></div>
+
+        <div class="djp-section">
+          <div class="djp-label">Duración y calidad</div>
+          <div class="djp-timing-row">
+            <div class="djp-field"><label>Fecha</label><input type="date" id="djpDate" value="${escapeHtml(form.date)}"></div>
+            <div class="djp-field"><label>Calidad (1–5)</label>
+              <select id="djpQuality">
+                <option value="">—</option>
+                ${[1,2,3,4,5].map(n=>`<option value="${n}" ${form.quality===String(n)?"selected":""}>${n}</option>`).join("")}
+              </select>
+            </div>
+            <div class="djp-field"><label>Hora inicio</label><input type="time" id="djpStart" value="${escapeHtml(form.start)}"></div>
+            <div class="djp-field"><label>Hora fin</label><input type="time" id="djpEnd" value="${escapeHtml(form.end)}"></div>
+          </div>
+          <div class="djp-field" style="margin-top:10px;">
+            <label>Nota rápida</label>
+            <input type="text" id="djpNote" placeholder="café tarde, ruido, calor..." value="${escapeHtml(form.note)}">
+          </div>
+        </div>
+
+        <div class="djp-footer">
+          <button class="djp-btn" id="djpCancel">Cancelar</button>
+          <button class="djp-btn primary" id="djpSave">${ex?"Guardar cambios":"Guardar sueño 🌙"}</button>
         </div>
       </div>
-      <div id="sleepHistoryContent"></div>
+    `;
+    requestAnimationFrame(()=>{ backdrop.querySelector("#djpPanel")?.classList.add("visible"); });
+    wireForm();
+  };
+
+  const close=()=>{
+    const p=backdrop.querySelector("#djpPanel");
+    if(p){ p.style.transition="opacity .18s,transform .18s"; p.style.opacity="0"; p.style.transform="translateY(14px)"; }
+    setTimeout(()=>backdrop.remove(),200);
+  };
+
+  const refreshSymTags=()=>{
+    const c=backdrop.querySelector("#djpSymTags");
+    if(!c) return;
+    c.innerHTML=form.symbols.map(s=>`<span class="djp-symbol-tag">${escapeHtml(s)}<button class="djp-symbol-remove" data-rm="${escapeHtml(s)}">×</button></span>`).join("");
+    c.querySelectorAll("[data-rm]").forEach(b=>b.addEventListener("click",()=>{ form.symbols=form.symbols.filter(x=>x!==b.getAttribute("data-rm")); refreshSymTags(); }));
+  };
+
+  const wireForm=()=>{
+    const g=id=>backdrop.querySelector(`#${id}`);
+
+    g("djpClose")?.addEventListener("click",close);
+    g("djpCancel")?.addEventListener("click",close);
+    backdrop.addEventListener("click",e=>{ if(e.target===backdrop) close(); });
+
+    backdrop.querySelectorAll("[data-type]").forEach(b=>b.addEventListener("click",()=>{
+      form.dreamType=form.dreamType===b.getAttribute("data-type")?"":b.getAttribute("data-type");
+      backdrop.querySelectorAll("[data-type]").forEach(x=>x.classList.toggle("active",x.getAttribute("data-type")===form.dreamType));
+    }));
+
+    backdrop.querySelectorAll("[data-emotion]").forEach(b=>b.addEventListener("click",()=>{
+      form.wakeEmotion=form.wakeEmotion===b.getAttribute("data-emotion")?"":b.getAttribute("data-emotion");
+      backdrop.querySelectorAll("[data-emotion]").forEach(x=>x.classList.toggle("active",x.getAttribute("data-emotion")===form.wakeEmotion));
+    }));
+
+    backdrop.querySelectorAll("[data-clarity]").forEach(b=>b.addEventListener("click",()=>{
+      const v=Number(b.getAttribute("data-clarity"));
+      form.clarity=form.clarity===v?null:v;
+      backdrop.querySelectorAll("[data-clarity]").forEach(x=>x.classList.toggle("active",Number(x.getAttribute("data-clarity"))===form.clarity));
+    }));
+
+    const lucid=g("djpLucid");
+    lucid?.addEventListener("click",()=>{
+      form.lucidMoment=!form.lucidMoment;
+      lucid.classList.toggle("active",form.lucidMoment);
+      const chk=lucid.querySelector(".djp-lucid-check");
+      if(chk) chk.textContent=form.lucidMoment?"✓":"";
+    });
+
+    backdrop.querySelectorAll("[data-preset]").forEach(b=>b.addEventListener("click",()=>{
+      const s=b.getAttribute("data-preset");
+      if(s&&!form.symbols.includes(s)){ form.symbols.push(s); refreshSymTags(); }
+    }));
+
+    const symInput=g("djpSymInput");
+    const addSym=()=>{
+      const s=(symInput?.value||"").trim().toLowerCase();
+      if(s&&!form.symbols.includes(s)){ form.symbols.push(s); refreshSymTags(); if(symInput) symInput.value=""; }
+    };
+    g("djpSymAdd")?.addEventListener("click",addSym);
+    symInput?.addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault();addSym();} });
+
+    // attach initial symbol remove buttons
+    refreshSymTags();
+
+    g("djpSave")?.addEventListener("click",()=>{
+      const date=(g("djpDate")?.value||"").trim();
+      const quality=(g("djpQuality")?.value||"").trim();
+      const start=(g("djpStart")?.value||"").trim();
+      const end=(g("djpEnd")?.value||"").trim();
+      const note=(g("djpNote")?.value||"").trim();
+      const narrative=(g("djpNarrative")?.value||"").trim();
+
+      if(!date){ toast("Elige una fecha 📅"); return; }
+
+      let totalMinutes=0;
+      if(start&&end) totalMinutes=_djpCalcMinutes(date,start,end);
+      if(!totalMinutes&&!narrative&&!form.dreamType){ toast("Agrega hora inicio/fin, o escribe algo del sueño 🌙"); return; }
+      if(totalMinutes>24*60){ toast("Más de 24h 😅 Revisa"); return; }
+
+      const entry={
+        id:ex?.id||uid(),
+        ts:new Date().toISOString(),
+        date,
+        totalMinutes:totalMinutes||(ex?.totalMinutes||0),
+        quality:quality?Number(quality):null,
+        note,
+        mode:"advanced",
+        start,
+        end,
+        narrative,
+        dreamType:form.dreamType,
+        wakeEmotion:form.wakeEmotion,
+        symbols:[...form.symbols],
+        clarity:form.clarity,
+        lucidMoment:form.lucidMoment,
+      };
+
+      state.sleepLog=Array.isArray(state.sleepLog)?state.sleepLog:[];
+      if(ex){
+        const idx=state.sleepLog.findIndex(x=>String(x.id||"")===ex.id);
+        if(idx>=0) state.sleepLog[idx]=entry;
+        else state.sleepLog.push(entry);
+      } else {
+        state.sleepLog.push(entry);
+      }
+      if(state.sleepLog.length>1500) state.sleepLog=state.sleepLog.slice(-1500);
+      persist(); view();
+      if(typeof opts.onSaved==="function") opts.onSaved(entry);
+      toast(ex?"Sueño actualizado ✅":"Sueño guardado 🌙");
+      close();
+    });
+  };
+
+  renderForm();
+  host.appendChild(backdrop);
+}
+
+// ─── Dream Journal Pro: openSleepHistoryModal ──────────────────────────────
+
+function openSleepHistoryModal(){
+  _djpInjectStyles();
+  const host=document.querySelector("#app")||document.body;
+  const backdrop=document.createElement("div");
+  backdrop.className="djp-backdrop";
+
+  backdrop.innerHTML=`
+    <div class="djp-hist-panel" id="djpHistPanel">
+      <div class="djp-hist-top">
+        <div class="djp-hist-header">
+          <div>
+            <div class="djp-title">Dream Journal</div>
+            <div class="djp-sub">Historial · Patrones · Análisis</div>
+          </div>
+          <div class="djp-hist-actions">
+            <button class="djp-hist-action-btn" id="djpHistCsv">CSV</button>
+            <button class="djp-hist-action-btn" id="djpHistAdd">＋ Nuevo</button>
+            <button class="djp-close" id="djpHistClose">✕</button>
+          </div>
+        </div>
+        <div class="djp-stats-grid" id="djpStatGrid"></div>
+        <div class="djp-tabs">
+          <button class="djp-tab active" data-tab="log">📋 Registros</button>
+          <button class="djp-tab" data-tab="patterns">🔮 Patrones</button>
+          <button class="djp-tab" data-tab="chart">📈 Gráfico</button>
+        </div>
+      </div>
+      <div class="djp-hist-scroll" id="djpHistContent"></div>
     </div>
   `;
 
   host.appendChild(backdrop);
-  animateSleepModalIn(backdrop);
+  requestAnimationFrame(()=>{ backdrop.querySelector("#djpHistPanel")?.classList.add("visible"); });
 
-  const close = ()=> animateSleepModalOut(backdrop, ()=>backdrop.remove());
-  backdrop.addEventListener("click", (e)=>{
-    if(e.target === backdrop) close();
-    if(e.target && e.target.closest("[data-close]")) close();
-  });
-
-  const stateView = { range: "30", metric: "hours", query: "" };
-  const content = backdrop.querySelector("#sleepHistoryContent");
-
-  const getLog = ()=> (state.sleepLog || [])
-    .map(normalizeSleepEntry)
-    .filter(Boolean)
-    .sort((a,b)=> (a.date === b.date ? (b.ts || "").localeCompare(a.ts || "") : b.date.localeCompare(a.date)));
-
-  const serializeCsv = (rows)=>{
-    const esc = (v)=>`"${String(v ?? "").replaceAll('"','""')}"`;
-    const head = ["fecha","horas","minutos","calidad","modo","inicio","fin","nota"];
-    const body = rows.map(r=>[
-      r.date,
-      (r.totalMinutes/60).toFixed(2),
-      r.totalMinutes,
-      r.quality ?? "",
-      r.mode,
-      r.start || "",
-      r.end || "",
-      r.note || ""
-    ]);
-    return [head, ...body].map(row=>row.map(esc).join(",")).join("\n");
+  const close=()=>{
+    const p=backdrop.querySelector("#djpHistPanel");
+    if(p){ p.style.transition="opacity .18s,transform .18s"; p.style.opacity="0"; p.style.transform="translateY(14px)"; }
+    setTimeout(()=>backdrop.remove(),200);
   };
 
-  const downloadCsv = (rows)=>{
-    if(!rows.length){
-      toast("No hay registros para exportar 📭");
-      return;
-    }
-    const csv = serializeCsv(rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `sleep-history-${isoDate(new Date())}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    toast("CSV exportado ✅");
+  backdrop.querySelector("#djpHistClose")?.addEventListener("click",close);
+  backdrop.addEventListener("click",e=>{ if(e.target===backdrop) close(); });
+
+  const uiSt={tab:"log",range:"30",query:""};
+
+  const getLog=()=>(state?.sleepLog||[]).map(normalizeSleepEntry).filter(Boolean).sort((a,b)=>b.date.localeCompare(a.date));
+
+  const getFiltered=()=>{
+    const full=getLog();
+    const q=uiSt.query.trim().toLowerCase();
+    const filt=q?full.filter(x=>x.date.includes(q)||(x.note||"").toLowerCase().includes(q)||(x.narrative||"").toLowerCase().includes(q)||x.symbols.some(s=>s.toLowerCase().includes(q))):full;
+    if(uiSt.range==="all") return filt;
+    const days=Number(uiSt.range)||30;
+    const from=new Date(); from.setDate(from.getDate()-(days-1)); from.setHours(0,0,0,0);
+    return filt.filter(x=>new Date(x.date+"T00:00:00")>=from);
   };
 
-  const render = ()=>{
-    const full = getLog();
-    const q = stateView.query.trim().toLowerCase();
-    const filteredBySearch = q
-      ? full.filter(x=>x.date.toLowerCase().includes(q) || (x.note || "").toLowerCase().includes(q))
-      : full;
+  const renderStats=()=>{
+    const all=getLog();
+    const rec=getFiltered().filter(x=>x.totalMinutes>0);
+    const avg=rec.length?rec.reduce((s,x)=>s+x.totalMinutes,0)/rec.length:0;
+    const lucidAll=all.filter(x=>x.lucidMoment);
+    const uniqueDates=new Set(all.map(x=>x.date));
+    let streak=0; const cur=new Date(); cur.setDate(cur.getDate()-1);
+    while(true){ const ds=isoDate(cur); if(!uniqueDates.has(ds)) break; streak++; cur.setDate(cur.getDate()-1); }
+    const g=backdrop.querySelector("#djpStatGrid");
+    if(!g) return;
+    g.innerHTML=[
+      {v:all.length,l:"Total"},
+      {v:formatSleepDuration(avg),l:"Prom. horas"},
+      {v:`${streak}🔥`,l:"Racha"},
+      {v:lucidAll.length,l:"Lúcidos"},
+    ].map(s=>`<div class="djp-stat"><div class="djp-stat-val">${escapeHtml(String(s.v))}</div><div class="djp-stat-lbl">${escapeHtml(s.l)}</div></div>`).join("");
+  };
 
-    const ranged = stateView.range === "all" ? filteredBySearch : filteredBySearch.filter(x=>{
-      const d = parseIsoDate(x.date);
-      if(!d) return false;
-      const now = new Date();
-      now.setHours(0,0,0,0);
-      const days = Number(stateView.range) || 30;
-      const from = new Date(now);
-      from.setDate(from.getDate() - (days - 1));
-      return d >= from && d <= now;
-    });
-
-    const yesterday = getYesterdayIso();
-    const upToYesterday = full.filter(x=>x.date <= yesterday);
-    const yesterdayEntry = upToYesterday.find(x=>x.date === yesterday) || null;
-    const best = upToYesterday.reduce((acc, x)=> (!acc || x.totalMinutes > acc.totalMinutes) ? x : acc, null);
-    const shortest = upToYesterday.reduce((acc, x)=> (!acc || x.totalMinutes < acc.totalMinutes) ? x : acc, null);
-    const uniqueSet = new Set(upToYesterday.map(x=>x.date));
-    let streak = 0;
-    const cursor = parseIsoDate(yesterday);
-    while(cursor){
-      const ds = isoDate(cursor);
-      if(!uniqueSet.has(ds)) break;
-      streak += 1;
-      cursor.setDate(cursor.getDate()-1);
-    }
-
-    const recentAsc = [...ranged].sort((a,b)=>a.date.localeCompare(b.date));
-    const points = recentAsc.map(x=> stateView.metric === "quality" ? Number(x.quality || 0) : (x.totalMinutes / 60));
-    const maxVal = stateView.metric === "quality" ? 5 : Math.max(8, ...points, 1);
-    const minVal = stateView.metric === "quality" ? 0 : 0;
-    const chartW = 460;
-    const chartH = 160;
-    const px = (idx, len)=> len <= 1 ? 18 : Math.round(18 + ((chartW - 36) * idx / (len - 1)));
-    const py = (v)=> {
-      const ratio = (v - minVal) / Math.max(0.0001, (maxVal - minVal));
-      return Math.round(chartH - 18 - ratio * (chartH - 36));
-    };
-
-    const chartPoints = recentAsc.map((r,idx)=>({
-      x: px(idx, recentAsc.length),
-      y: py(points[idx] || 0),
-      label: r.date,
-      v: points[idx] || 0
-    }));
-    let dPath = "";
-    if(chartPoints.length){
-      dPath = `M ${chartPoints[0].x} ${chartPoints[0].y}`;
-      for(let i=1;i<chartPoints.length;i++){
-        const p0 = chartPoints[i-1];
-        const p1 = chartPoints[i];
-        const cx = Math.round((p0.x + p1.x)/2);
-        dPath += ` Q ${cx} ${p0.y}, ${p1.x} ${p1.y}`;
-      }
-    }
-
-    const chips = [
-      { label: "Última noche", value: yesterdayEntry ? formatSleepDuration(yesterdayEntry.totalMinutes) : "—" },
-      { label: "Racha", value: `${streak} noches` },
-      { label: "Mejor", value: best ? formatSleepDuration(best.totalMinutes) : "—" },
-      { label: "Más corta", value: shortest ? formatSleepDuration(shortest.totalMinutes) : "—" }
-    ];
-
-    const rows = ranged.map(x=>`
-      <div class="sleepHistoryRow">
-        <div class="sleepHistoryRowMain">
-          <div class="sleepHistoryDate">${escapeHtml(x.date)}</div>
-          <div class="sleepHistoryMeta">${escapeHtml(formatSleepDuration(x.totalMinutes))}${x.quality ? ` · Calidad ${escapeHtml(x.quality)}/5` : ""}</div>
-          ${(x.note || "").trim() ? `<div class="sleepHistoryNote">${escapeHtml(x.note)}</div>` : ""}
-        </div>
-        <div class="sleepHistoryRowActions">
-          <button class="iconBtn" data-edit-sleep="${escapeHtml(x.id)}" aria-label="Editar">✎</button>
-          <button class="iconBtn" data-del-sleep="${escapeHtml(x.id)}" aria-label="Eliminar">🗑</button>
-        </div>
+  const renderLog=()=>{
+    const rows=getFiltered();
+    const c=backdrop.querySelector("#djpHistContent");
+    if(!c) return;
+    const tMap=Object.fromEntries(_DJP_TYPES.map(t=>[t.id,t]));
+    const eMap=Object.fromEntries(_DJP_EMOTIONS.map(e=>[e.id,e]));
+    c.innerHTML=`
+      <div class="djp-chart-controls" style="margin-bottom:10px;">
+        ${[["7","7D"],["30","30D"],["90","90D"],["all","Todo"]].map(([v,t])=>`<button class="djp-range-btn ${uiSt.range===v?"active":""}" data-range="${v}">${t}</button>`).join("")}
       </div>
-    `).join("");
-
-    content.innerHTML = `
-      <div class="sleepStatsChips">
-        ${chips.map(ch=>`<div class="sleepStatChip"><span>${escapeHtml(ch.label)}</span><strong>${escapeHtml(ch.value)}</strong></div>`).join("")}
-      </div>
-
-      <div class="sleepHistoryControls">
-        <div class="sleepControlGroup" data-group="range">
-          ${[["7","7D"],["30","30D"],["90","90D"],["all","Todo"]].map(([v,t])=>`<button class="sleepPill ${stateView.range===v?"active":""}" data-range="${v}">${t}</button>`).join("")}
-        </div>
-        <div class="sleepControlGroup" data-group="metric">
-          ${[["hours","Horas"],["quality","Calidad"]].map(([v,t])=>`<button class="sleepPill ${stateView.metric===v?"active":""}" data-metric="${v}">${t}</button>`).join("")}
-        </div>
-      </div>
-
-      <div class="sleepCurveWrap">
-        <svg viewBox="0 0 ${chartW} ${chartH}" class="sleepCurveSvg" aria-label="Gráfico de sueño">
-          <line x1="14" y1="${chartH-18}" x2="${chartW-14}" y2="${chartH-18}" class="sleepAxis" />
-          ${dPath ? `<path d="${dPath}" class="sleepCurvePath" />` : ""}
-          ${chartPoints.map(pt=>`<circle cx="${pt.x}" cy="${pt.y}" r="4" class="sleepCurveDot"><title>${escapeHtml(pt.label)} · ${escapeHtml(pt.v.toFixed(stateView.metric==="quality"?0:1))}${stateView.metric==="quality"?"/5":"h"}</title></circle>`).join("")}
-        </svg>
-      </div>
-
-      <div class="field" style="margin-top:10px;">
-        <label>Buscar</label>
-        <input id="sleepHistorySearch" class="input" placeholder="Busca por fecha o nota..." value="${escapeHtml(stateView.query)}" />
-      </div>
-
-      <div class="sleepHistoryList">
-        ${rows || `<div class="muted" style="padding:8px 2px;">Sin registros para este filtro.</div>`}
+      <input class="djp-search" id="djpSearch" placeholder="Buscar por fecha, nota, símbolo..." value="${escapeHtml(uiSt.query)}">
+      <div class="djp-hist-list">
+        ${rows.length?rows.map(r=>{
+          const ti=tMap[r.dreamType]; const ei=eMap[r.wakeEmotion];
+          return `<div class="djp-hist-row">
+            <div class="djp-hist-main">
+              <div class="djp-hist-date">
+                ${escapeHtml(r.date)}
+                ${ti?`<span class="djp-hist-type-badge">${ti.icon} ${escapeHtml(ti.label)}</span>`:""}
+                ${r.lucidMoment?`<span class="djp-hist-type-badge">✨ Lúcido</span>`:""}
+              </div>
+              <div class="djp-hist-meta">
+                ${r.totalMinutes?formatSleepDuration(r.totalMinutes):"Sin duración"}
+                ${r.quality?` · Q${r.quality}/5`:""}
+                ${ei?` · ${ei.icon} ${escapeHtml(ei.label)}`:""}
+                ${r.clarity?` · Claridad ${r.clarity}/5`:""}
+              </div>
+              ${r.symbols.length?`<div class="djp-hist-symbols">${r.symbols.map(s=>`<span class="djp-hist-symbol">${escapeHtml(s)}</span>`).join("")}</div>`:""}
+              ${r.narrative?`<div class="djp-hist-narrative">${escapeHtml(r.narrative)}</div>`:""}
+            </div>
+            <div class="djp-hist-row-actions">
+              <button class="djp-icon-btn" data-edit="${escapeHtml(r.id)}">✎</button>
+              <button class="djp-icon-btn del" data-del="${escapeHtml(r.id)}">🗑</button>
+            </div>
+          </div>`;
+        }).join(""):`<div class="djp-empty">Sin registros para este período.</div>`}
       </div>
     `;
-
-    content.querySelectorAll("[data-range]").forEach(btn=>btn.addEventListener("click", ()=>{ stateView.range = btn.getAttribute("data-range") || "30"; render(); }));
-    content.querySelectorAll("[data-metric]").forEach(btn=>btn.addEventListener("click", ()=>{ stateView.metric = btn.getAttribute("data-metric") || "hours"; render(); }));
-    content.querySelector("#sleepHistorySearch")?.addEventListener("input", (e)=>{ stateView.query = e.target.value || ""; render(); });
-
-    content.querySelectorAll("[data-edit-sleep]").forEach(btn=>btn.addEventListener("click", ()=>{
-      const id = btn.getAttribute("data-edit-sleep") || "";
-      openSleepModal({ editId: id, onSaved: ()=>render() });
-    }));
-
-    content.querySelectorAll("[data-del-sleep]").forEach(btn=>btn.addEventListener("click", ()=>{
-      const id = btn.getAttribute("data-del-sleep") || "";
-      const next = (state.sleepLog || []).filter(x=>String(x.id||"") !== id);
-      if(next.length === (state.sleepLog || []).length) return;
-      state.sleepLog = next;
-      persist();
-      view();
-      toast("Registro eliminado 🗑");
-      render();
+    c.querySelectorAll("[data-range]").forEach(b=>b.addEventListener("click",()=>{ uiSt.range=b.getAttribute("data-range")||"30"; renderLog(); renderStats(); }));
+    c.querySelector("#djpSearch")?.addEventListener("input",e=>{ uiSt.query=e.target.value||""; renderLog(); });
+    c.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>{ openSleepModal({editId:b.getAttribute("data-edit"),onSaved:()=>{ renderStats(); renderActive(); }}); }));
+    c.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{
+      state.sleepLog=(state.sleepLog||[]).filter(x=>String(x.id||"")!==b.getAttribute("data-del"));
+      persist(); view(); toast("Registro eliminado 🗑"); renderStats(); renderActive();
     }));
   };
 
-  backdrop.querySelector("#btnSleepCsv")?.addEventListener("click", ()=> downloadCsv(getLog()));
-  backdrop.querySelector("#btnSleepAdd")?.addEventListener("click", ()=> openSleepModal({ onSaved: ()=>render() }));
+  const renderPatterns=()=>{
+    const all=getLog();
+    const c=backdrop.querySelector("#djpHistContent");
+    if(!c) return;
+    const symCount={};
+    all.forEach(r=>r.symbols.forEach(s=>{ symCount[s]=(symCount[s]||0)+1; }));
+    const topSym=Object.entries(symCount).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    const typeCount={};
+    all.forEach(r=>{ if(r.dreamType) typeCount[r.dreamType]=(typeCount[r.dreamType]||0)+1; });
+    const tMap=Object.fromEntries(_DJP_TYPES.map(t=>[t.id,t]));
+    const topTypes=Object.entries(typeCount).sort((a,b)=>b[1]-a[1]);
+    const emCount={};
+    all.forEach(r=>{ if(r.wakeEmotion) emCount[r.wakeEmotion]=(emCount[r.wakeEmotion]||0)+1; });
+    const eMap=Object.fromEntries(_DJP_EMOTIONS.map(e=>[e.id,e]));
+    const topEm=Object.entries(emCount).sort((a,b)=>b[1]-a[1]);
+    const maxS=topSym[0]?.[1]||1; const maxT=topTypes[0]?.[1]||1; const maxE=topEm[0]?.[1]||1;
+    const lucid=all.filter(x=>x.lucidMoment);
+    c.innerHTML=`
+      <div class="djp-pattern-grid">
+        <div class="djp-pattern-card">
+          <div class="djp-pattern-title">🔮 Símbolos frecuentes</div>
+          ${topSym.length?topSym.map(([s,n])=>`<div class="djp-bar-row"><div class="djp-bar-label" title="${escapeHtml(s)}">${escapeHtml(s)}</div><div class="djp-bar-fill-wrap"><div class="djp-bar-fill" style="width:${Math.round((n/maxS)*100)}%"></div></div><div class="djp-bar-count">${n}</div></div>`).join(""):`<div style="color:rgba(255,255,255,.3);font-size:11px">Sin datos aún</div>`}
+        </div>
+        <div class="djp-pattern-card">
+          <div class="djp-pattern-title">🌙 Tipos de sueño</div>
+          ${topTypes.length?topTypes.map(([id,n])=>`<div class="djp-bar-row"><div class="djp-bar-label">${tMap[id]?.icon||""} ${escapeHtml(tMap[id]?.label||id)}</div><div class="djp-bar-fill-wrap"><div class="djp-bar-fill" style="width:${Math.round((n/maxT)*100)}%"></div></div><div class="djp-bar-count">${n}</div></div>`).join(""):`<div style="color:rgba(255,255,255,.3);font-size:11px">Sin datos aún</div>`}
+        </div>
+        <div class="djp-pattern-card">
+          <div class="djp-pattern-title">💫 Emociones al despertar</div>
+          ${topEm.length?topEm.slice(0,6).map(([id,n])=>`<div class="djp-bar-row"><div class="djp-bar-label">${eMap[id]?.icon||""} ${escapeHtml(eMap[id]?.label||id)}</div><div class="djp-bar-fill-wrap"><div class="djp-bar-fill" style="width:${Math.round((n/maxE)*100)}%"></div></div><div class="djp-bar-count">${n}</div></div>`).join(""):`<div style="color:rgba(255,255,255,.3);font-size:11px">Sin datos aún</div>`}
+        </div>
+        <div class="djp-pattern-card">
+          <div class="djp-pattern-title">📊 Resumen global</div>
+          <div class="djp-bar-row" style="margin-bottom:10px"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">Total sueños</div><div style="font-weight:900;font-size:15px;color:#fff">${all.length}</div></div>
+          <div class="djp-bar-row" style="margin-bottom:10px"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">Lúcidos</div><div style="font-weight:900;font-size:15px;color:rgba(124,92,255,.9)">${lucid.length} <span style="font-size:10px;opacity:.6">(${all.length?((lucid.length/all.length)*100).toFixed(0):0}%)</span></div></div>
+          <div class="djp-bar-row" style="margin-bottom:10px"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">Pesadillas</div><div style="font-weight:900;font-size:15px;color:rgba(255,100,100,.8)">${all.filter(r=>r.dreamType==="nightmare").length}</div></div>
+          <div class="djp-bar-row"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">Con narrativa</div><div style="font-weight:900;font-size:15px;color:rgba(80,200,140,.8)">${all.filter(r=>r.narrative).length}</div></div>
+        </div>
+      </div>
+    `;
+  };
 
-  render();
+  const renderChart=()=>{
+    const c=backdrop.querySelector("#djpHistContent");
+    if(!c) return;
+    const rows=getFiltered().filter(x=>x.totalMinutes>0).reverse();
+    const W=460,H=150;
+    const maxH=Math.max(8*60,...rows.map(x=>x.totalMinutes),1);
+    const px=(i,len)=>len<=1?W/2:Math.round(18+((W-36)*i/(len-1)));
+    const py=v=>Math.round(H-18-((v/maxH)*(H-36)));
+    const pts=rows.map((r,i)=>({x:px(i,rows.length),y:py(r.totalMinutes),r}));
+    let path="";
+    if(pts.length>1){
+      path=`M ${pts[0].x} ${pts[0].y}`;
+      for(let i=1;i<pts.length;i++){ const cx=Math.round((pts[i-1].x+pts[i].x)/2); path+=` Q ${cx} ${pts[i-1].y}, ${pts[i].x} ${pts[i].y}`; }
+    }
+    c.innerHTML=`
+      <div class="djp-chart-controls">
+        ${[["7","7D"],["30","30D"],["90","90D"],["all","Todo"]].map(([v,t])=>`<button class="djp-range-btn ${uiSt.range===v?"active":""}" data-range="${v}">${t}</button>`).join("")}
+      </div>
+      <div class="djp-chart-wrap">
+        ${rows.length?`
+          <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
+            <defs><linearGradient id="djpGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="rgba(124,92,255,.3)"/>
+              <stop offset="100%" stop-color="rgba(124,92,255,0)"/>
+            </linearGradient></defs>
+            <line x1="14" y1="${H-18}" x2="${W-14}" y2="${H-18}" stroke="rgba(255,255,255,.15)" stroke-width="1"/>
+            ${path?`<path d="${path} L ${pts[pts.length-1].x} ${H-18} L ${pts[0].x} ${H-18} Z" fill="url(#djpGrad)"/>
+            <path d="${path}" fill="none" stroke="rgba(124,92,255,.9)" stroke-width="2.5" stroke-linecap="round"/>`:``}
+            ${pts.map(pt=>`<circle cx="${pt.x}" cy="${pt.y}" r="3.5" fill="#fff" stroke="rgba(124,92,255,.9)" stroke-width="2"><title>${escapeHtml(pt.r.date)} · ${formatSleepDuration(pt.r.totalMinutes)}</title></circle>`).join("")}
+          </svg>
+        `:`<div class="djp-empty">Sin datos con duración en este período.</div>`}
+      </div>
+    `;
+    c.querySelectorAll("[data-range]").forEach(b=>b.addEventListener("click",()=>{ uiSt.range=b.getAttribute("data-range")||"30"; renderChart(); renderStats(); }));
+  };
+
+  const renderActive=()=>{
+    if(uiSt.tab==="log") renderLog();
+    else if(uiSt.tab==="patterns") renderPatterns();
+    else renderChart();
+  };
+
+  backdrop.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>{
+    backdrop.querySelectorAll("[data-tab]").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    uiSt.tab=b.getAttribute("data-tab")||"log";
+    renderActive();
+  }));
+
+  backdrop.querySelector("#djpHistCsv")?.addEventListener("click",()=>{
+    const rows=getLog();
+    if(!rows.length){ toast("No hay registros 📭"); return; }
+    const esc=v=>`"${String(v??"")}"`; 
+    const head=["fecha","horas","minutos","calidad","tipo","emocion","claridad","lucido","simbolos","narrativa","nota","inicio","fin"];
+    const body=rows.map(r=>[r.date,(r.totalMinutes/60).toFixed(2),r.totalMinutes,r.quality??"",r.dreamType,r.wakeEmotion,r.clarity??"",r.lucidMoment?"si":"no",r.symbols.join("|"),r.narrative,r.note,r.start,r.end]);
+    const csv=[head,...body].map(row=>row.map(esc).join(",")).join("\n");
+    const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=`dream-journal-${isoDate(new Date())}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    toast("CSV exportado ✅");
+  });
+
+  backdrop.querySelector("#djpHistAdd")?.addEventListener("click",()=>{ openSleepModal({onSaved:()=>{ renderStats(); renderActive(); }}); });
+
+  renderStats();
+  renderActive();
 }
+
 
 
 function openMusicModal(){
