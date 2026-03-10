@@ -494,22 +494,112 @@ body{
   .homeGrid > section{grid-column:span 6;}
 }
 
-/* Sleep chart: 7 fixed columns so bars always line up with their day label */
-.sleepChart{
+/* ── Sleep Card (Dream Journal Pro) ── */
+.djp-sleep-card{
+  background: linear-gradient(135deg, rgba(14,11,30,1) 0%, rgba(20,14,42,1) 100%);
+  border: 1px solid rgba(124,92,255,.18);
+  position: relative;
+  overflow: hidden;
+}
+.djp-sleep-card::before{
+  content:"";
+  position:absolute;
+  top:-40px; right:-40px;
+  width:130px; height:130px;
+  border-radius:50%;
+  background: radial-gradient(circle, rgba(124,92,255,.12) 0%, transparent 70%);
+  pointer-events:none;
+}
+.djp-sc-header{
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;
+}
+.djp-sc-icon{
+  font-size:20px;line-height:1;flex-shrink:0;
+  filter: drop-shadow(0 0 6px rgba(124,92,255,.5));
+}
+.djp-sc-title-block{flex:1;min-width:0}
+.djp-sc-title{
+  font-size:14px;font-weight:800;color:#fff;line-height:1;
+  letter-spacing:.3px;
+}
+.djp-sc-sub{
+  font-size:10px;color:rgba(255,255,255,.35);margin-top:3px;
+  font-family:'JetBrains Mono',monospace;letter-spacing:.5px;
+}
+.djp-sc-add-btn{
+  width:28px;height:28px;border-radius:8px;
+  border:1px solid rgba(124,92,255,.35);
+  background:rgba(124,92,255,.12);
+  color:rgba(124,92,255,.9);
+  font-size:17px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .15s;flex-shrink:0;
+  font-weight:300;
+}
+.djp-sc-add-btn:hover{background:rgba(124,92,255,.28);color:#fff;}
+
+/* Meta row */
+.djp-sc-meta{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;margin-bottom:12px;
+}
+.djp-sc-big{
+  font-family:'Bebas Neue',sans-serif;
+  font-size:32px;color:#fff;line-height:1;letter-spacing:1px;
+}
+.djp-sc-unit{font-size:18px;opacity:.6;margin-left:1px}
+.djp-sc-meta-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.djp-sc-badge{
+  font-size:10px;font-weight:700;padding:3px 8px;
+  border-radius:8px;letter-spacing:.5px;
+  font-family:'JetBrains Mono',monospace;
+}
+.djp-sc-badge.good{background:rgba(54,211,153,.15);border:1px solid rgba(54,211,153,.3);color:rgba(54,211,153,.9)}
+.djp-sc-badge.mid{background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);color:rgba(251,191,36,.9)}
+.djp-sc-badge.low{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:rgba(239,68,68,.8)}
+.djp-sc-avg{font-size:10px;color:rgba(255,255,255,.3);font-family:'JetBrains Mono',monospace}
+
+/* Bar chart */
+.djp-sc-chart{
   display:grid;
-  grid-template-columns:repeat(7, minmax(0, 1fr));
-  gap:10px;
-  align-items:end;
-  margin:6px 0 6px;
-  height:78px;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  gap:6px;align-items:end;height:60px;
 }
+.djp-sc-col{
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:flex-end;gap:4px;
+}
+.djp-sc-bar{
+  width:100%;max-width:22px;
+  border-radius:4px 4px 3px 3px;
+  height:var(--bh,4px);
+  background:rgba(124,92,255,.3);
+  border-top:1px solid rgba(124,92,255,.5);
+  transition:height .3s ease;
+}
+.djp-sc-bar.empty{
+  background:rgba(255,255,255,.06);
+  border-top:1px solid rgba(255,255,255,.1);
+  border-radius:3px;
+}
+.djp-sc-bar.good{
+  background:linear-gradient(180deg,rgba(54,211,153,.7),rgba(124,92,255,.5));
+  border-top:1px solid rgba(54,211,153,.6);
+}
+.djp-sc-lbl{
+  font-size:9px;color:rgba(255,255,255,.3);line-height:1;
+  font-family:'JetBrains Mono',monospace;
+}
+.djp-sc-empty{
+  grid-column:1/-1;text-align:center;
+  color:rgba(255,255,255,.2);font-size:11px;
+  align-self:center;
+}
+
+/* Legacy classes kept for compat */
+.sleepChart{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;align-items:end;margin:6px 0 6px;height:78px}
 .sleepCol{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
-.sleepBar{
-  width:12px;border-radius:999px;
-  background:linear-gradient(180deg, rgba(54,211,153,.85), rgba(124,92,255,.65));
-  opacity:.75;
-  height:var(--h, 40px);
-}
+.sleepBar{width:12px;border-radius:999px;background:linear-gradient(180deg,rgba(54,211,153,.85),rgba(124,92,255,.65));opacity:.75;height:var(--h,40px)}
 .sleepLbl{color:rgba(255,255,255,.55);font-size:10px;line-height:1}
 
 

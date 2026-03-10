@@ -4464,44 +4464,42 @@ function getSleepWeekSeries(){
 
 function renderSleepBars(series){
   const items = series?.items || [];
-  if(!items.length){
-    return `<div class="muted">Registra tu sueño para ver el gráfico 😴</div>`;
-  }
-  const maxM = series.maxMinutes || 480;
-  const toPx = (minutes) => {
-    const minH = 14, maxH = 68;
-    const ratio = Math.max(0, Math.min(1, minutes / maxM));
-    return Math.round(minH + ratio * (maxH - minH));
-  };
+  const maxM = series?.maxMinutes || 480;
+  const avgH = (series?.avgMinutes || 0) / 60;
+  const lastH = (series?.lastMinutes || 0) / 60;
 
-  // Keep weekday letters stable and aligned with the 7 columns
-  const dayLetters = ["D","L","M","M","J","V","S"]; // Domingo..Sábado
-  const cols = items.map((x)=>{
-    const h = toPx(x.minutes);
-    const hrs = (x.minutes/60);
-    const label = x.minutes ? `${hrs.toFixed(1)}h` : "0h";
+  const qualityIcon = avgH >= 7 ? "✦" : (avgH >= 5.5 ? "◈" : "◇");
+  const qualityLabel = avgH >= 7 ? "Bien" : (avgH >= 5.5 ? "Regular" : "Bajo");
+
+  const dayLetters = ["D","L","M","M","J","V","S"];
+
+  const maxBarH = 52, minBarH = 4;
+
+  const cols = items.map((x) => {
+    const ratio = maxM > 0 ? Math.max(0, Math.min(1, x.minutes / maxM)) : 0;
+    const barH = x.minutes > 0 ? Math.round(minBarH + ratio * (maxBarH - minBarH)) : minBarH;
+    const hrs = (x.minutes / 60).toFixed(1);
     const d = new Date(x.date + "T00:00:00");
     const ch = dayLetters[d.getDay()] || "·";
+    const isEmpty = x.minutes === 0;
+    const isGood = x.minutes >= 7 * 60;
     return `
-      <div class="sleepCol" title="${escapeHtml(x.date)} • ${escapeHtml(label)}">
-        <div class="sleepBar" style="--h:${h}px"></div>
-        <div class="sleepLbl">${escapeHtml(ch)}</div>
+      <div class="djp-sc-col" title="${escapeHtml(x.date)} · ${escapeHtml(hrs)}h">
+        <div class="djp-sc-bar ${isEmpty ? "empty" : isGood ? "good" : ""}" style="--bh:${barH}px"></div>
+        <div class="djp-sc-lbl">${escapeHtml(ch)}</div>
       </div>
     `;
   }).join("");
 
-  const avgH = (series.avgMinutes || 0) / 60;
-  const lastH = (series.lastMinutes || 0) / 60;
-
   return `
-    <div class="sleepMetaRow">
-      <div>
-        <div class="big">${escapeHtml(lastH ? lastH.toFixed(1) : "0.0")}h</div>
-        <div class="small">Última noche · Prom ${escapeHtml(avgH.toFixed(1))}h</div>
+    <div class="djp-sc-meta">
+      <div class="djp-sc-big">${escapeHtml(lastH > 0 ? lastH.toFixed(1) : "0.0")}<span class="djp-sc-unit">h</span></div>
+      <div class="djp-sc-meta-right">
+        <div class="djp-sc-badge ${avgH >= 7 ? "good" : avgH >= 5.5 ? "mid" : "low"}">${qualityIcon} ${qualityLabel}</div>
+        <div class="djp-sc-avg">Prom ${escapeHtml(avgH.toFixed(1))}h / noche</div>
       </div>
-      <div class="chip">${avgH >= 7 ? "✅" : (avgH >= 6 ? "⚠️" : "🔥")}</div>
     </div>
-    <div class="sleepChart" aria-hidden="true">${cols}</div>
+    <div class="djp-sc-chart">${cols || `<div class="djp-sc-empty">Sin datos esta semana</div>`}</div>
   `;
 }
 
@@ -4905,15 +4903,15 @@ const sleepBars = renderSleepBars(sleepSeries);
     </div>
 
     <div class="homeGrid">
-      <section class="card homeCard" id="homeSleepCard">
-        <div class="cardTop">
-          <div>
-            <h2 class="cardTitle">Sueño</h2>
-            <div class="small">7 días</div>
+      <section class="card homeCard djp-sleep-card" id="homeSleepCard">
+        <div class="djp-sc-header">
+          <div class="djp-sc-icon">🌙</div>
+          <div class="djp-sc-title-block">
+            <div class="djp-sc-title">Sueño</div>
+            <div class="djp-sc-sub">7 días</div>
           </div>
-          <button class="iconBtn" id="btnAddSleep" aria-label="Add sleep">＋</button>
+          <button class="djp-sc-add-btn" id="btnAddSleep" aria-label="Add sleep">＋</button>
         </div>
-        <div class="hr"></div>
         ${sleepBars}
       </section>
 
