@@ -14,7 +14,7 @@ import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readine
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
 import { buildChampionsAnalysisPayload } from "./footballlab/champions_knockout_engine.js";
-import { saveUclMatch } from "./footballlab/ucl_memory_layer.js";
+import { saveUclMatch } from "./ucl_memory_layer.js";
 import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
 import { buildBitacoraPerformanceLab, normalizePickRecord } from "./footballlab/bitacora_performance.js";
 import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calcPhaseMetrics, phaseAlertFlags, buildPhasePostAnalysis } from "./footballlab/bitacora_phase_mode.js";
