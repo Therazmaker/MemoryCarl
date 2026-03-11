@@ -8652,7 +8652,7 @@ if(btn.dataset.invCat !== undefined){
 }
 
 // Inventory item actions (new)
-const invActBtn = e.target.closest("[data-inv-act]");
+const invActBtn = btn.closest("[data-inv-act]");
 if(invActBtn){
   const invAct = invActBtn.dataset.invAct;
   if(invAct==="toList"){ addInventoryToList(invActBtn.dataset.iid); return; }
