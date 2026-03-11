@@ -2397,7 +2397,7 @@ body{
   display: flex; align-items: center; justify-content: center;
 }
 .djp-mood-mini svg { width: 100%; height: 100%; display: block; }
-.dayMoodMini { display: none; }
+/* .dayMoodMini img legacy hidden */
 
 /* Mood pill */
 .djp-mood-pill-face { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; }
@@ -2432,3 +2432,117 @@ body{
   .mpm-energy-pills { gap: 5px; }
   .mpm-epill { min-width: 44px; padding: 8px 6px; }
 }
+
+/* ══════════════════════════════════════════════════════
+   MOOD HISTORY MODAL — tabs + charts
+   ══════════════════════════════════════════════════════ */
+.mmh-panel {
+  width: 100%; max-width: 480px;
+  background: #0b0a18;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 24px;
+  max-height: 92vh; overflow: hidden;
+  display: flex; flex-direction: column;
+  margin: 12px auto;
+  box-shadow: 0 40px 100px rgba(0,0,0,.8);
+}
+.mmh-top {
+  display: flex; align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 18px 14px; flex-shrink: 0;
+}
+.mmh-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 26px; letter-spacing: 1.5px; color: #fff; line-height:1;
+}
+.mmh-sub {
+  font-size: 11px; color: rgba(255,255,255,.3);
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: capitalize; margin-top: 3px;
+}
+.mmh-tabs {
+  display: flex; gap: 6px; padding: 0 14px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.07); flex-shrink: 0;
+}
+.mmh-tab {
+  flex: 1; padding: 8px 6px; border-radius: 11px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.03);
+  color: rgba(255,255,255,.4); font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: all .15s;
+  font-family: 'JetBrains Mono', monospace;
+}
+.mmh-tab.active {
+  background: rgba(124,92,255,.22);
+  border-color: rgba(124,92,255,.45); color: #fff;
+}
+.mmh-body {
+  flex: 1; overflow-y: auto; padding: 14px;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.08) transparent;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.mmh-empty { color: rgba(255,255,255,.3); text-align: center; padding: 30px; font-size:13px; }
+
+/* Calendar tab extras */
+.mmcal-tip { font-size: 10px; color: rgba(255,255,255,.2); text-align: center; margin-top: 6px; font-family: 'JetBrains Mono', monospace; }
+.mmcal-en { height: 3px; border-radius: 2px; margin-top: 2px; transition: width .2s; }
+
+/* Chart cards */
+.mmchart-card {
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 16px; padding: 14px;
+}
+.mmchart-title {
+  font-size: 11px; font-weight: 700; letter-spacing: .8px;
+  color: rgba(255,255,255,.45); font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase; margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.mmchart-stat {
+  font-size: 13px; color: #fff; font-family: 'Bebas Neue', sans-serif;
+  letter-spacing: 1px;
+}
+.mmchart-svg { width: 100%; height: 80px; display: block; }
+.mmchart-axis {
+  display: flex; justify-content: space-between;
+  font-size: 9px; color: rgba(255,255,255,.25);
+  font-family: 'JetBrains Mono', monospace; margin-top: 4px;
+}
+.mmchart-yaxis {
+  display: flex; flex-direction: column-reverse; gap: 0;
+  position: absolute; left: 14px;
+}
+.mmchart-yface { width: 16px; height: 16px; }
+.mmchart-yface svg { width: 100%; height: 100%; }
+
+/* Frequency bars */
+.mmfreq-row { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.mmfreq-face { width: 22px; height: 22px; flex-shrink: 0; }
+.mmfreq-face svg { width: 100%; height: 100%; display: block; }
+.mmfreq-track { flex: 1; height: 10px; background: rgba(255,255,255,.07); border-radius: 99px; overflow: hidden; }
+.mmfreq-fill { height: 100%; border-radius: 99px; transition: width .4s; }
+.mmfreq-count { font-size: 10px; color: rgba(255,255,255,.4); font-family: 'JetBrains Mono', monospace; width: 22px; text-align: right; }
+
+/* Activity grid */
+.mmact-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.mmact-item {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: rgba(255,255,255,.05); border-radius: 10px;
+  padding: 8px 10px; min-width: 44px;
+}
+.mmact-icon { font-size: 18px; line-height: 1; }
+.mmact-n {
+  font-size: 10px; font-weight: 700; color: rgba(255,255,255,.5);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Streak card */
+.mmstreak-card { padding: 12px 14px; }
+.mmstreak-row { display: flex; gap: 0; }
+.mmstreak-block { flex: 1; text-align: center; padding: 4px; }
+.mmstreak-num {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 32px; line-height: 1; color: #fff; letter-spacing: 1px;
+}
+.mmstreak-lbl { font-size: 9px; color: rgba(255,255,255,.3); font-family: 'JetBrains Mono', monospace; margin-top: 3px; }

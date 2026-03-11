@@ -4404,129 +4404,289 @@ function openMoodMonthModal(initialIso){
   const start = initialIso ? new Date(initialIso+"T00:00:00") : new Date();
   if(Number.isNaN(start.getTime())) start.setTime(Date.now());
   start.setHours(0,0,0,0);
-  let cursor = new Date(start);
-  cursor.setDate(1);
+  let cursor = new Date(start); cursor.setDate(1);
+  let activeTab = "calendar";
 
-  const close = ()=> {
-    if(typeof window.anime==="function"){
-      animateSleepModalOut(backdrop, ()=>backdrop.remove());
-    }else{
-      backdrop.remove();
-    }
+  const FACE_SCORE = {incredible:5,good:4,meh:3,bad:2,horrible:1};
+  const FACE_COLOR = {incredible:"#4ADE80",good:"#86EFAC",meh:"#60A5FA",bad:"#FBBF24",horrible:"#F87171"};
+  const FACE_LABEL = {incredible:"Increíble",good:"Bien",meh:"Meh",bad:"Mal",horrible:"Horrible"};
+  const ENERGY_COLORS = ["","#F87171","#FBBF24","#60A5FA","#86EFAC","#4ADE80"];
+
+  const close = ()=>{
+    if(typeof window.anime==="function") animateSleepModalOut(backdrop,()=>backdrop.remove());
+    else backdrop.remove();
+  };
+
+  const getMonthEntries = (y,m)=>{
+    const map = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
+    const monthKey = `${y}-${String(m+1).padStart(2,"0")}`;
+    return Object.keys(map)
+      .filter(k=>String(k).startsWith(monthKey))
+      .sort()
+      .map(iso=>({ iso, ...map[iso] }));
   };
 
   const render = ()=>{
     const y = cursor.getFullYear();
-    const m = cursor.getMonth(); // 0-based
-    const first = new Date(y, m, 1);
-    const last = new Date(y, m+1, 0);
-    const daysInMonth = last.getDate();
-    const startDow = (first.getDay()+6)%7; // Monday=0
-    const cells = [];
-    for(let i=0;i<startDow;i++) cells.push(null);
-    for(let d=1; d<=daysInMonth; d++){
-      const dd = new Date(y,m,d);
-      cells.push(isoDate(dd));
-    }
-    while(cells.length % 7 !== 0) cells.push(null);
-
-    const title = first.toLocaleDateString("es-PE", { month:"long", year:"numeric" });
+    const m = cursor.getMonth();
+    const first = new Date(y,m,1);
+    const title = first.toLocaleDateString("es-PE",{month:"long",year:"numeric"});
     const map = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
+    const entries = getMonthEntries(y,m);
 
-    const cellHtml = cells.map(iso=>{
-      if(!iso) return `<div class="moodCalCell empty"></div>`;
-      const e = map[iso];
-      const sp = e ? getMoodSpriteById(e.spriteId) : null;
-      const svgFace = sp ? _getMoodSvg(sp.id, true) : "";
-      return `
-        <button class="moodCalCell ${sp?"has-mood":""}" data-iso="${escapeHtml(iso)}">
+    // ── Calendar tab ──
+    const calHtml = ()=>{
+      const last = new Date(y,m+1,0);
+      const daysInMonth = last.getDate();
+      const startDow = (first.getDay()+6)%7;
+      const cells = [];
+      for(let i=0;i<startDow;i++) cells.push(null);
+      for(let d=1;d<=daysInMonth;d++) cells.push(isoDate(new Date(y,m,d)));
+      while(cells.length%7!==0) cells.push(null);
+
+      const cellHtml = cells.map(iso=>{
+        if(!iso) return `<div class="moodCalCell empty"></div>`;
+        const e = map[iso];
+        const sp = e ? getMoodSpriteById(e.spriteId) : null;
+        const svgFace = sp ? _getMoodSvg(sp.id,true) : "";
+        const en = e?.energy||0;
+        const enBar = en>0 ? `<div class="mmcal-en" style="width:${en*20}%;background:${ENERGY_COLORS[en]||'#60A5FA'}"></div>` : "";
+        return `<button class="moodCalCell ${sp?"has-mood":""}" data-iso="${escapeHtml(iso)}">
           <div class="moodCalNum">${escapeHtml(String(Number(iso.slice(8,10))))}</div>
-          ${svgFace ? `<div class="moodCalSvg">${svgFace}</div>` : `<div class="moodCalEmpty">＋</div>`}
-        </button>
-      `;
-    }).join("");
+          ${svgFace?`<div class="moodCalSvg">${svgFace}</div>`:`<div class="moodCalEmpty">＋</div>`}
+          ${enBar}
+        </button>`;
+      }).join("");
 
-    // History cards for this month (new solid mood log)
-    const monthKey = `${y}-${String(m+1).padStart(2,"0")}`;
-    const monthEntries = Object.keys(map).filter(k=>String(k).startsWith(monthKey)).sort((a,b)=>String(b).localeCompare(String(a)));
-    const TAG_LABEL_MAP = {sleep:"🌙 Sueño",debts:"💸 Deudas",work:"💼 Trabajo",family:"🏠 Familia",health:"🌿 Salud",money:"💰 Dinero",love:"💜 Amor",social:"🫂 Social"};
-    const cardsHtml = monthEntries.slice(0, 31).map(iso=>{
-      const e = map[iso] || {};
-      const sp = getMoodSpriteById(e.spriteId);
-      const entryTags = Array.isArray(e.tags) ? e.tags : [];
-      const en = Number(e.energy)||0;
-      const svgFace = sp ? _getMoodSvg(sp.id, false) : "";
-      const enDots = en > 0 ? Array.from({length:10},(_,i)=>`<div class="mml-en-dot ${i<en?"on":""}" style="${i<en?"--ec:"+(i<3?"#E8604A":i<6?"#8FA8C8":i<8?"#5DDBA8":"#FFCE47"):""}"></div>`).join("") : "";
       return `
-        <div class="moodLogCard mml-card" data-iso="${escapeHtml(iso)}">
-          <div class="mml-head">
-            <div class="mml-face">${svgFace}</div>
-            <div class="mml-meta">
-              <div class="mml-label">${escapeHtml((e.label||sp?.labels?.[0]||sp?.id||"—").toString())}</div>
-              <div class="mml-date">${escapeHtml(iso)}</div>
-              ${en>0?`<div class="mml-energy-row">${enDots}<span class="mml-en-num">${en}/10</span></div>`:""}
+        <div class="moodCalHeader">${["L","M","M","J","V","S","D"].map(x=>`<div>${x}</div>`).join("")}</div>
+        <div class="moodCalGrid">${cellHtml}</div>
+        <div class="mmcal-tip">Toca un día para editar su emoción</div>
+      `;
+    };
+
+    // ── Gráficos tab ──
+    const chartsHtml = ()=>{
+      if(!entries.length) return `<div class="mmh-empty">Sin registros este mes.</div>`;
+
+      // 1. Mood line chart (SVG)
+      const scored = entries.map(e=>({ iso:e.iso, sc:FACE_SCORE[e.spriteId]||3, color:FACE_COLOR[e.spriteId]||"#60A5FA", en:Number(e.energy)||0 }));
+      const W=320, H=80, PAD=10;
+      const scMin=1, scMax=5;
+      const pts = scored.map((d,i)=>({
+        x: PAD + i*(W-PAD*2)/(Math.max(scored.length-1,1)),
+        y: PAD + (scMax-d.sc)/(scMax-scMin)*(H-PAD*2)
+      }));
+      const polyline = pts.map(p=>`${p.x},${p.y}`).join(" ");
+      // fill area
+      const area = pts.length>1
+        ? `M${pts[0].x},${H-PAD} `+pts.map(p=>`L${p.x},${p.y}`).join(" ")+` L${pts[pts.length-1].x},${H-PAD} Z`
+        : "";
+      const moodLineSvg = `
+        <svg viewBox="0 0 ${W} ${H}" class="mmchart-svg" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="mlGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#7C5CFF" stop-opacity=".35"/>
+              <stop offset="100%" stop-color="#7C5CFF" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          ${area?`<path d="${area}" fill="url(#mlGrad)"/>`:""}
+          ${pts.length>1?`<polyline points="${polyline}" fill="none" stroke="#7C5CFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`:""}
+          ${pts.map((p,i)=>`<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${scored[i].color}" stroke="#0b0a18" stroke-width="1.5"/>`).join("")}
+        </svg>
+        <div class="mmchart-axis">
+          ${[0,Math.floor((entries.length-1)/2),entries.length-1].map(i=>entries[i]?`<span>${entries[i].iso.slice(8)}</span>`:"").join("")}
+        </div>
+      `;
+
+      // 2. Mood frequency donut-ish (horizontal bars)
+      const counts = {};
+      entries.forEach(e=>{ const id=e.spriteId||"meh"; counts[id]=(counts[id]||0)+1; });
+      const total = entries.length;
+      const freqBars = Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([id,n])=>`
+        <div class="mmfreq-row">
+          <div class="mmfreq-face">${_getMoodSvg(id,true)}</div>
+          <div class="mmfreq-track">
+            <div class="mmfreq-fill" style="width:${Math.round(n/total*100)}%;background:${FACE_COLOR[id]||'#888'}"></div>
+          </div>
+          <div class="mmfreq-count">${n}×</div>
+        </div>
+      `).join("");
+
+      // 3. Energy avg per day (bar chart SVG)
+      const enData = entries.filter(e=>e.energy>0);
+      let energySection = "";
+      if(enData.length>0){
+        const EW=320, EH=60, EP=8;
+        const bw = Math.max(4, (EW-EP*2)/Math.max(enData.length,1) - 3);
+        const bars = enData.map((e,i)=>{
+          const bh = (e.energy/5)*(EH-EP*2);
+          const bx = EP + i*((EW-EP*2)/Math.max(enData.length,1));
+          const by = EH-EP-bh;
+          return `<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="3" fill="${ENERGY_COLORS[e.energy]||'#60A5FA'}" opacity=".85"/>`;
+        }).join("");
+        const avgEn = enData.reduce((s,e)=>s+e.energy,0)/enData.length;
+        energySection = `
+          <div class="mmchart-card">
+            <div class="mmchart-title">⚡ Energía promedio <span class="mmchart-stat">${avgEn.toFixed(1)}/5</span></div>
+            <svg viewBox="0 0 ${EW} ${EH}" class="mmchart-svg" style="height:60px" preserveAspectRatio="none">
+              ${bars}
+            </svg>
+          </div>
+        `;
+      }
+
+      // 4. Activities top
+      const actCount = {};
+      entries.forEach(e=>{ (Array.isArray(e.activities)?e.activities:[]).forEach(a=>{ actCount[a]=(actCount[a]||0)+1; }); });
+      const topActs = Object.entries(actCount).sort((a,b)=>b[1]-a[1]).slice(0,8);
+      const actSection = topActs.length ? `
+        <div class="mmchart-card">
+          <div class="mmchart-title">🏃 Actividades del mes</div>
+          <div class="mmact-grid">
+            ${topActs.map(([id,n])=>{
+              const allItems = [
+                {id:"tarot",icon:"🔮"},{id:"dibujo",icon:"🎨"},{id:"fergis",icon:"💜"},
+                {id:"trading",icon:"📈"},{id:"musica",icon:"🎵"},{id:"tiktok",icon:"📱"},
+                {id:"lectura",icon:"📖"},{id:"meditacion",icon:"🧘"},{id:"work",icon:"💼"},
+                {id:"claims",icon:"🗂️"},{id:"clases",icon:"📚"},{id:"upwork",icon:"💻"},
+                {id:"deudas",icon:"💸"},{id:"itinerario",icon:"🗺️"},{id:"buen_sueno",icon:"😴"},
+                {id:"sueno_malo",icon:"😵"},{id:"sueno_temprano",icon:"🌛"},{id:"sueno_tarde",icon:"🌜"},
+                {id:"ejercicio",icon:"🏃"},{id:"comer_rico",icon:"🥗"},{id:"agua",icon:"💧"},
+                {id:"enfermedad",icon:"🤒"},{id:"descanso",icon:"🛋️"},{id:"limpiar",icon:"🧹"},
+                {id:"cocinar",icon:"🍳"},{id:"compras",icon:"🛒"},{id:"familia",icon:"👨‍👩‍👧"},
+                {id:"parrilla",icon:"🥩"},{id:"videojuegos",icon:"🎮"},{id:"serie",icon:"📺"},
+                {id:"salir",icon:"🚶"},{id:"estoico",icon:"📜"},{id:"nuevo_alquiler",icon:"🏡"},
+              ];
+              const item = allItems.find(x=>x.id===id)||{icon:"🏷️"};
+              return `<div class="mmact-item">
+                <div class="mmact-icon">${item.icon}</div>
+                <div class="mmact-n">${n}</div>
+              </div>`;
+            }).join("")}
+          </div>
+        </div>
+      ` : "";
+
+      // 5. Streak calc
+      const allDays = Object.keys(map).sort();
+      let streak=0, maxStreak=0, cur=0;
+      const today = isoDate(new Date());
+      // count backward from today
+      let d=new Date(); 
+      while(true){
+        const iso=isoDate(d);
+        if(map[iso]?.spriteId){ streak++; d.setDate(d.getDate()-1); }
+        else break;
+      }
+      // max streak
+      let prev=null, ms=0;
+      allDays.forEach(iso=>{ if(map[iso]?.spriteId){ ms++; maxStreak=Math.max(maxStreak,ms); } else ms=0; });
+      const streakSection = `
+        <div class="mmchart-card mmstreak-card">
+          <div class="mmstreak-row">
+            <div class="mmstreak-block">
+              <div class="mmstreak-num">${streak}</div>
+              <div class="mmstreak-lbl">🔥 Racha actual</div>
+            </div>
+            <div class="mmstreak-block">
+              <div class="mmstreak-num">${maxStreak}</div>
+              <div class="mmstreak-lbl">🏆 Mejor racha</div>
+            </div>
+            <div class="mmstreak-block">
+              <div class="mmstreak-num">${entries.length}</div>
+              <div class="mmstreak-lbl">📅 Este mes</div>
             </div>
           </div>
-          ${entryTags.length?`<div class="mml-tags">${entryTags.slice(0,5).map(t=>`<span class="mml-tag-chip">${TAG_LABEL_MAP[t]||"🏷️ "+t}</span>`).join("")}</div>`:""}
-          ${e.note?`<div class="mml-note">${escapeHtml(String(e.note))}</div>`:""}
         </div>
       `;
-    }).join("");
+
+      return `
+        ${streakSection}
+        <div class="mmchart-card">
+          <div class="mmchart-title">📈 Estado de ánimo</div>
+          <div class="mmchart-yaxis">
+            ${["incredible","good","meh","bad","horrible"].map(id=>`<div class="mmchart-yface">${_getMoodSvg(id,true)}</div>`).join("")}
+          </div>
+          ${moodLineSvg}
+        </div>
+        <div class="mmchart-card">
+          <div class="mmchart-title">📊 Frecuencia del mes</div>
+          ${freqBars}
+        </div>
+        ${energySection}
+        ${actSection}
+      `;
+    };
+
+    // ── Registro tab ──
+    const registroHtml = ()=>{
+      if(!entries.length) return `<div class="mmh-empty">Sin registros este mes.</div>`;
+      return entries.slice().reverse().map(e=>{
+        const sp = getMoodSpriteById(e.spriteId);
+        const svgFace = sp?_getMoodSvg(sp.id,false):"";
+        const en = Number(e.energy)||0;
+        const enDots = en>0?Array.from({length:5},(_,i)=>`<div class="mml-en-dot ${i<en?"on":""}" style="${i<en?"--ec:"+ENERGY_COLORS[en]:""}"></div>`).join(""):"";
+        const acts = Array.isArray(e.activities)?e.activities:[];
+        const allItems2 = [{id:"tarot",icon:"🔮",label:"Tarot"},{id:"dibujo",icon:"🎨",label:"Dibujos"},{id:"fergis",icon:"💜",label:"Fergis"},{id:"trading",icon:"📈",label:"Trading"},{id:"musica",icon:"🎵",label:"Música"},{id:"tiktok",icon:"📱",label:"TikTok"},{id:"lectura",icon:"📖",label:"Lectura"},{id:"meditacion",icon:"🧘",label:"Meditación"},{id:"work",icon:"💼",label:"Trabajo"},{id:"claims",icon:"🗂️",label:"Claims"},{id:"clases",icon:"📚",label:"Clases"},{id:"upwork",icon:"💻",label:"Upwork"},{id:"deudas",icon:"💸",label:"Deudas"},{id:"itinerario",icon:"🗺️",label:"Itinerario"},{id:"buen_sueno",icon:"😴",label:"Buen sueño"},{id:"sueno_malo",icon:"😵",label:"Sueño malo"},{id:"sueno_temprano",icon:"🌛",label:"Sueño temprano"},{id:"sueno_tarde",icon:"🌜",label:"Sueño tarde"},{id:"ejercicio",icon:"🏃",label:"Ejercicio"},{id:"comer_rico",icon:"🥗",label:"Comer rico"},{id:"agua",icon:"💧",label:"Agua"},{id:"enfermedad",icon:"🤒",label:"Enfermedad"},{id:"descanso",icon:"🛋️",label:"Descanso"},{id:"limpiar",icon:"🧹",label:"Limpiar"},{id:"cocinar",icon:"🍳",label:"Cocinar"},{id:"compras",icon:"🛒",label:"Compras"},{id:"familia",icon:"👨‍👩‍👧",label:"Familia"},{id:"parrilla",icon:"🥩",label:"Parrilla"},{id:"videojuegos",icon:"🎮",label:"Videojuegos"},{id:"serie",icon:"📺",label:"Serie"},{id:"salir",icon:"🚶",label:"Salir"},{id:"estoico",icon:"📜",label:"Estoico"},{id:"nuevo_alquiler",icon:"🏡",label:"Nuevo Alquiler"}];
+        const actChips = acts.slice(0,6).map(a=>{ const it=allItems2.find(x=>x.id===a)||{icon:"🏷️",label:a}; return `<span class="mml-tag-chip">${it.icon} ${escapeHtml(it.label)}</span>`; }).join("");
+        const dateLabel = (()=>{ try{ return new Date(e.iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short"}); }catch{return e.iso;} })();
+        return `
+          <div class="moodLogCard mml-card" data-iso="${escapeHtml(e.iso)}">
+            <div class="mml-head">
+              <div class="mml-face">${svgFace}</div>
+              <div class="mml-meta">
+                <div class="mml-label" style="color:${FACE_COLOR[e.spriteId]||'#fff'}">${escapeHtml(FACE_LABEL[e.spriteId]||e.label||"—")}</div>
+                <div class="mml-date">${escapeHtml(dateLabel)}</div>
+                ${en>0?`<div class="mml-energy-row">${enDots}<span class="mml-en-num">⚡${en}/5</span></div>`:""}
+              </div>
+            </div>
+            ${actChips?`<div class="mml-tags">${actChips}</div>`:""}
+            ${e.note?`<div class="mml-note">"${escapeHtml(String(e.note))}"</div>`:""}
+          </div>
+        `;
+      }).join("");
+    };
+
+    const TABS = [{id:"calendar",label:"📅 Mes"},{id:"charts",label:"📊 Stats"},{id:"registro",label:"📋 Log"}];
 
     backdrop.innerHTML = `
-      <div class="modal moodMonthModal" role="dialog" aria-label="Emociones del mes">
-        <div class="modalTop">
+      <div class="mmh-panel" role="dialog">
+        <div class="mmh-top">
           <div>
-            <div class="modalTitle">Emociones</div>
-            <div class="modalSub">${escapeHtml(title)}</div>
+            <div class="mmh-title">Emociones</div>
+            <div class="mmh-sub">${escapeHtml(title)}</div>
           </div>
-          <div class="moodTopActions">
-            <button class="iconBtn" id="mPrev" aria-label="Prev">‹</button>
-            <button class="iconBtn" id="mNext" aria-label="Next">›</button>
-            <button class="iconBtn" data-close aria-label="Cerrar">✕</button>
+          <div style="display:flex;gap:7px;align-items:center">
+            <button class="mpm-icon-btn" id="mmPrev">‹</button>
+            <button class="mpm-icon-btn" id="mmNext">›</button>
+            <button class="mpm-icon-btn" data-close>✕</button>
           </div>
         </div>
-
-        <div class="moodCalHeader">
-          ${["L","M","M","J","V","S","D"].map(x=>`<div>${x}</div>`).join("")}
+        <div class="mmh-tabs">
+          ${TABS.map(t=>`<button class="mmh-tab ${t.id===activeTab?"active":""}" data-tab="${t.id}">${t.label}</button>`).join("")}
         </div>
-        <div class="moodCalGrid">
-          ${cellHtml}
-        </div>
-
-        <div class="muted" style="margin-top:10px;">Tip: toca un día para elegir/editar su emoción.</div>
-
-        <div class="moodLogSection">
-          <div class="moodLogSectionTitle">Registro del mes</div>
-          <div class="moodLogList">${cardsHtml || `<div class="muted">Aún no hay registros este mes.</div>`}</div>
+        <div class="mmh-body" id="mmhBody">
+          ${activeTab==="calendar" ? calHtml() : activeTab==="charts" ? chartsHtml() : registroHtml()}
         </div>
       </div>
     `;
 
-    backdrop.querySelector("#mPrev")?.addEventListener("click", ()=>{ cursor = new Date(y, m-1, 1); render(); });
-    backdrop.querySelector("#mNext")?.addEventListener("click", ()=>{ cursor = new Date(y, m+1, 1); render(); });
-
+    backdrop.querySelector("#mmPrev")?.addEventListener("click",()=>{ cursor=new Date(y,m-1,1); render(); });
+    backdrop.querySelector("#mmNext")?.addEventListener("click",()=>{ cursor=new Date(y,m+1,1); render(); });
+    backdrop.querySelectorAll("[data-tab]").forEach(btn=>{
+      btn.addEventListener("click",()=>{ activeTab=btn.getAttribute("data-tab")||"calendar"; render(); });
+    });
     backdrop.querySelectorAll("[data-iso]").forEach(btn=>{
-      btn.addEventListener("click", ()=>{
-        const iso = btn.getAttribute("data-iso") || "";
-        openMoodPickerModal(iso, { onSaved: ()=>render() });
-      });
+      btn.addEventListener("click",()=>{ openMoodPickerModal(btn.getAttribute("data-iso")||"",{onSaved:()=>render()}); });
     });
-
-    backdrop.addEventListener("click", (e)=>{
-      if(e.target===backdrop) close();
-      if(e.target && e.target.closest("[data-close]")) close();
-    });
+    backdrop.addEventListener("click",e=>{ if(e.target===backdrop) close(); if(e.target?.closest("[data-close]")) close(); });
   };
 
   host.appendChild(backdrop);
   if(typeof window.anime==="function") animateSleepModalIn(backdrop);
   render();
 }
-// ====================== /MOOD SPRITES ======================
-
-
-
 
 function getSleepSeries(days=7){
   const n = Math.max(1, Math.min(31, Number(days)||7));
