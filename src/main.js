@@ -8613,7 +8613,7 @@ function openCalendarDrawModal(dateIso){
 
 function wireActions(root){
   root.querySelectorAll("[data-act]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
+    btn.addEventListener("click", (e)=>{
       const act = btn.dataset.act;
 
       if(act==="fbOpenLab"){
