@@ -15753,6 +15753,7 @@ view = function(){
 /* ===== Finance: expose handlers for inline onclick (module scope -> window) ===== */
 try{
   Object.assign(window, {
+    openFinishLotModal,
     openFinanceImport,
     openFinanceMetaModal,
     openFinanceAccountModal,
