@@ -8644,28 +8644,8 @@ if(act==="invTab"){
   return;
 }
 
-// Inventory category filter (new)
-if(btn.dataset.invCat !== undefined){
-  state.invCat = btn.dataset.invCat;
-  view();
-  return;
-}
-
-// Inventory item actions (new)
-const invActBtn = e.target.closest("[data-inv-act]");
-if(invActBtn){
-  const invAct = invActBtn.dataset.invAct;
-  if(invAct==="toList"){ addInventoryToList(invActBtn.dataset.iid); return; }
-  if(invAct==="finish"){ openFinishLotModal(invActBtn.dataset.pkey); return; }
-  if(invAct==="edit"){ editInventoryItem(invActBtn.dataset.iid); return; }
-  if(invAct==="setPct"){ openInvPctModal(invActBtn.dataset.iid); return; }
-  if(invAct==="addFromLib"){ openInvAddFromLibModal(); return; }
-  if(invAct==="filterUrgent"){
-    state.invQuery=""; state.invCat="";
-    state.invShowUrgentOnly=true;
-    view(); return;
-  }
-}
+// Note: data-inv-act and data-inv-cat are handled by the delegated
+// document listener at the bottom of the file — not here.
 if(act==="invHistPreset"){
   state.inventoryHistPreset = btn.dataset.preset || "30d";
   state.inventorySubtab = "history";
@@ -9940,7 +9920,7 @@ function inventoryFindByProductId(productId){
 function addInventoryFromProduct(productId){
   ensureInventory();
   ensureInventoryLots();
-  state.inventorySubtab = state.inventorySubtab || "stock";
+  state.inventorySubtab = state.inventorySubtab || "actual";
   const p = state.products.find(x=>x.id===productId);
   if(!p) return;
   const existing = inventoryFindByProductId(productId);
@@ -10599,7 +10579,7 @@ function viewInventory(){
     </div>
   ` : `<div class="invBanner invBannerGreen">✅ Todo el inventario en orden</div>`;
 
-  const subtab = state.inventorySubtab || "stock";
+  const subtab = state.inventorySubtab || "actual";
 
   return `
     <div class="sectionTitle">
@@ -10608,7 +10588,7 @@ function viewInventory(){
     </div>
 
     <div class="invTabRow">
-      <button class="invTab ${subtab==="stock"?"invTabActive":""}" data-act="invTab" data-tab="stock">Stock</button>
+      <button class="invTab ${subtab==="actual"?"invTabActive":""}" data-act="invTab" data-tab="actual">Actual</button>
       <button class="invTab ${subtab==="history"?"invTabActive":""}" data-act="invTab" data-tab="history">Historial</button>
       <button class="invTab ${subtab==="calendar"?"invTabActive":""}" data-act="invTab" data-tab="calendar">Calendario</button>
     </div>
@@ -11902,6 +11882,38 @@ document.addEventListener("click", function(e){
   if(btn){
     openMergeGameFull();
   }
+});
+
+// ====================== INVENTORY DELEGATED EVENTS ======================
+// Handles data-inv-act, data-inv-cat, data-inv-pick — these have no data-act
+// so wireActions never catches them. This listener covers the whole document.
+document.addEventListener("click", function(e){
+
+  // --- Category chips (slCat buttons with data-inv-cat) ---
+  const catBtn = e.target.closest("[data-inv-cat]");
+  if(catBtn){
+    state.invCat = catBtn.dataset.invCat;
+    view();
+    return;
+  }
+
+  // --- Action buttons inside inventory cards (data-inv-act) ---
+  const actBtn = e.target.closest("[data-inv-act]");
+  if(actBtn){
+    const act = actBtn.dataset.invAct;
+    if(act==="toList"){   addInventoryToList(actBtn.dataset.iid); return; }
+    if(act==="finish"){   openFinishLotModal(actBtn.dataset.pkey); return; }
+    if(act==="edit"){     editInventoryItem(actBtn.dataset.iid); return; }
+    if(act==="setPct"){   openInvPctModal(actBtn.dataset.iid); return; }
+    if(act==="addFromLib"){ openInvAddFromLibModal(); return; }
+    if(act==="filterUrgent"){
+      state.invQuery=""; state.invCat="";
+      view(); return;
+    }
+  }
+
+  // --- Product picker inside openInvAddFromLibModal (data-inv-pick) ---
+  // (handled inside the modal itself, no action needed here)
 });
 
 // ====================== END MERGE GAME ======================
