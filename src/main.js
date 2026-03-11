@@ -9992,38 +9992,88 @@ function editInventoryItem(invId){
   ensureInventory();
   const it = state.inventory.find(x=>x.id===invId);
   if(!it) return;
-  openPromptModal({
-    title:"Editar inventario",
-    fields:[
-      {key:"name", label:"Nombre", value: it.name || ""},
-      {key:"category", label:"Categoría", value: it.category || ""},
-      {key:"qty", label:"Cantidad", type:"number", value: String(it.qty ?? 0)},
-      {key:"unit", label:"Unidad", value: it.unit || "u"},
-      {key:"minQty", label:"Mínimo", type:"number", value: String(it.minQty ?? 0)},
-      {key:"essential", label:"Esencial (1/0)", value: it.essential ? "1" : "0"},
-      {key:"notes", label:"Notas", value: it.notes || ""},
-      {key:"levelPct", label:"% actual (0-100)", type:"number", value: String((it.levelPct===0||it.levelPct)?it.levelPct:"")},
-      {key:"refillPointPct", label:"% para alerta", type:"number", value: String(it.refillPointPct ?? 25)},
-    ],
-    onSubmit: ({name, category, qty, unit, minQty, essential, notes, levelPct, refillPointPct})=>{
-      const n = (name||"").trim();
-      if(!n) return;
-      it.name = n;
-      it.category = (category||"").trim();
-      it.qty = Number(qty||0) || 0;
-      it.unit = (unit||"u").trim() || "u";
-      it.minQty = Number(minQty||0) || 0;
-      it.essential = String(essential||"").trim() !== "0";
-      it.notes = (notes||"").trim();
-      const pctRaw = String(levelPct||"").trim();
-      it.levelPct = pctRaw==="" ? "" : Math.max(0, Math.min(100, Number(pctRaw)));
-      it.refillPointPct = Number(refillPointPct||25) || 25;
-      if(it.levelPct!=="" && !Number.isNaN(Number(it.levelPct))){
-        it.lastCheck = new Date().toISOString().slice(0,10);
-      }
-      persist();
-      view();
+
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop slBackdrop";
+
+  b.innerHTML = `
+    <div class="modal slModal" style="padding:20px;gap:0;">
+      <div class="slHeader" style="padding:0 0 14px;">
+        <div class="slTitle">✏️ Editar producto</div>
+        <button class="slCloseBtn" id="eiClose">✕</button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
+        <div>
+          <div style="font-size:11px;color:rgba(255,255,255,.4);margin-bottom:4px;">Nombre</div>
+          <input id="eiName" class="textInput" value="${escapeHtml(it.name||"")}" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:11px;color:rgba(255,255,255,.4);margin-bottom:4px;">Categoría</div>
+            <input id="eiCat" class="textInput" value="${escapeHtml(it.category||"")}" style="width:100%;box-sizing:border-box;">
+          </div>
+          <div>
+            <div style="font-size:11px;color:rgba(255,255,255,.4);margin-bottom:4px;">Unidad</div>
+            <input id="eiUnit" class="textInput" value="${escapeHtml(it.unit||"u")}" style="width:100%;box-sizing:border-box;">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:11px;color:rgba(255,255,255,.4);margin-bottom:4px;">% actual</div>
+            <input id="eiPct" type="number" min="0" max="100" class="textInput" value="${(it.levelPct===0||it.levelPct)?it.levelPct:""}" style="width:100%;box-sizing:border-box;">
+          </div>
+          <div>
+            <div style="font-size:11px;color:rgba(255,255,255,.4);margin-bottom:4px;">% alerta</div>
+            <input id="eiRefill" type="number" min="0" max="100" class="textInput" value="${it.refillPointPct??25}" style="width:100%;box-sizing:border-box;">
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;background:rgba(255,255,255,.04);border-radius:12px;">
+          <input id="eiEssential" type="checkbox" ${it.essential?"checked":""} style="width:18px;height:18px;accent-color:#7c5cff;">
+          <span style="font-size:14px;font-weight:700;">⭐ Esencial</span>
+        </label>
+      </div>
+
+      <div class="slQPActions" style="justify-content:space-between;">
+        <button id="eiDelete" style="background:rgba(248,113,113,.15);border:1.5px solid rgba(248,113,113,.4);color:#f87171;border-radius:12px;padding:12px 16px;font-weight:800;font-size:14px;cursor:pointer;">🗑 Eliminar</button>
+        <div style="display:flex;gap:8px;">
+          <button class="slQPCancel" id="eiCancel">Cancelar</button>
+          <button class="slQPConfirm" id="eiSave">Guardar</button>
+        </div>
+      </div>
+    </div>`;
+
+  host.appendChild(b);
+
+  b.querySelector("#eiClose").addEventListener("click", ()=>b.remove());
+  b.querySelector("#eiCancel").addEventListener("click", ()=>b.remove());
+
+  b.querySelector("#eiDelete").addEventListener("click", ()=>{
+    if(!confirm(`¿Eliminar "${it.name}" de la cocina?`)) return;
+    state.inventory = state.inventory.filter(x=>x.id!==invId);
+    persist();
+    b.remove();
+    toast("Eliminado ✅");
+    view();
+  });
+
+  b.querySelector("#eiSave").addEventListener("click", ()=>{
+    const name = b.querySelector("#eiName").value.trim();
+    if(!name){ toast("Ponle un nombre"); return; }
+    it.name = name;
+    it.category = b.querySelector("#eiCat").value.trim();
+    it.unit = b.querySelector("#eiUnit").value.trim() || "u";
+    it.essential = b.querySelector("#eiEssential").checked;
+    const pctRaw = b.querySelector("#eiPct").value.trim();
+    it.levelPct = pctRaw==="" ? "" : Math.max(0, Math.min(100, Number(pctRaw)));
+    it.refillPointPct = Number(b.querySelector("#eiRefill").value||25)||25;
+    if(it.levelPct!=="" && !Number.isNaN(Number(it.levelPct))){
+      it.lastCheck = new Date().toISOString().slice(0,10);
     }
+    persist();
+    b.remove();
+    view();
   });
 }
 
@@ -10584,7 +10634,10 @@ function viewInventory(){
   return `
     <div class="sectionTitle">
       <div>🏠 Cocina</div>
-      <button class="btn" data-act="backToShoppingLists">← Volver</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" style="background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.3);color:#f87171;font-size:12px;" data-inv-act="clearCocina">🗑 Limpiar</button>
+        <button class="btn" data-act="backToShoppingLists">← Volver</button>
+      </div>
     </div>
 
     <div class="invTabRow">
@@ -11906,6 +11959,15 @@ document.addEventListener("click", function(e){
     if(act==="edit"){     editInventoryItem(actBtn.dataset.iid); return; }
     if(act==="setPct"){   openInvPctModal(actBtn.dataset.iid); return; }
     if(act==="addFromLib"){ openInvAddFromLibModal(); return; }
+    if(act==="clearCocina"){
+      if(!confirm("¿Limpiar toda la cocina? Esto borra todos los productos y lotes. No se puede deshacer.")) return;
+      state.inventory = [];
+      state.inventoryLots = [];
+      persist();
+      toast("Cocina limpia 🧹");
+      view();
+      return;
+    }
     if(act==="filterUrgent"){
       state.invQuery=""; state.invCat="";
       view(); return;
