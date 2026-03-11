@@ -9324,29 +9324,34 @@ function openSmartAddItem(listId){
 
   const host = document.querySelector("#app");
   const modal = document.createElement("div");
-  modal.className = "modalBackdrop";
+  modal.className = "modalBackdrop slBackdrop";
 
   const products = (state.products||[]).slice();
 
+  // Build category chips from products
+  const cats = [...new Set(products.map(p=>(p.category||"").trim()).filter(Boolean))].sort();
+
   modal.innerHTML = `
-    <div class="modal">
-      <h2>Agregar item</h2>
-
-      <div class="row" style="gap:8px; margin-bottom:10px;">
-        <input id="smartItemSearch" class="inp" style="flex:1; min-width:160px;" placeholder="Escribe para buscar… (ej: arroz)" />
-        <button class="btn ghost" id="smartItemClose">Cerrar</button>
+    <div class="modal slModal">
+      <div class="slHeader">
+        <div class="slTitle">Agregar a lista</div>
+        <button class="slCloseBtn" id="smartItemClose">✕</button>
       </div>
 
-      <div class="small" style="opacity:0.8; margin-bottom:8px;">
-        Tip: escribe 2-3 letras y toca una sugerencia. Si el producto es por kg, te pedirá gramos.
+      <div class="slSearchRow">
+        <span class="slSearchIcon">🔍</span>
+        <input id="smartItemSearch" class="slSearchInput" placeholder="Buscar producto…" autocomplete="off" />
       </div>
 
-      <div id="smartItemResults" class="list"></div>
+      <div class="slCatRow" id="slCatRow">
+        <button class="slCat slCatActive" data-cat="">Todo</button>
+        ${cats.map(c=>`<button class="slCat" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join("")}
+      </div>
 
-      <div class="hr"></div>
+      <div id="smartItemResults" class="slResults"></div>
 
-      <div class="row" style="margin-top:12px; gap:8px;">
-        <button class="btn primary" id="smartItemManual">+ Manual</button>
+      <div class="slManualRow">
+        <button class="slManualBtn" id="smartItemManual">＋ Añadir manual</button>
       </div>
     </div>
   `;
@@ -9355,40 +9360,44 @@ function openSmartAddItem(listId){
 
   const search = modal.querySelector("#smartItemSearch");
   const results = modal.querySelector("#smartItemResults");
+  const catRow = modal.querySelector("#slCatRow");
 
-  function renderResults(q){
+  let activeCat = "";
+
+  function renderResults(q, cat){
     const query = String(q||"").trim().toLowerCase();
     let matches = products;
 
+    if(cat){
+      matches = matches.filter(p=> (p.category||"").trim() === cat);
+    }
     if(query){
-      matches = products.filter(p=>{
+      matches = matches.filter(p=>{
         const n = String(p.name||"").toLowerCase();
         const c = String(p.category||"").toLowerCase();
         return n.includes(query) || c.includes(query);
       });
     }
 
-    matches = matches.slice(0, 10);
-
     if(matches.length===0){
-      results.innerHTML = `<div class="small" style="padding:10px; opacity:0.8;">No encontré nada. Usa Manual 👇</div>`;
+      results.innerHTML = `<div class="slEmpty">No encontré nada<br><span>Usa "Añadir manual" 👇</span></div>`;
       return;
     }
 
     results.innerHTML = matches.map(p=>{
       const u = (p.unit||"u").toLowerCase();
-      const isKg = (u.includes("kg"));
+      const isKg = u.includes("kg");
       const priceLabel = isKg ? `${money(p.price)}/kg` : money(p.price);
+      const cat = p.category ? `<span class="slItemCat">${escapeHtml(p.category)}</span>` : "";
+      const ess = p.essential ? `<span class="slEss">⭐</span>` : "";
       return `
-        <div class="item">
-          <div class="left">
-            <div class="name">${escapeHtml(p.name)}</div>
-            <div class="meta">${priceLabel}${p.category?` · ${escapeHtml(p.category)}`:""}</div>
+        <button class="slItem" data-pick="${p.id}">
+          <div class="slItemInfo">
+            <div class="slItemName">${ess}${escapeHtml(p.name)}</div>
+            <div class="slItemMeta">${priceLabel}${cat ? " · " : ""}${cat}</div>
           </div>
-          <div class="row">
-            <button class="btn primary" data-pick="${p.id}">Elegir</button>
-          </div>
-        </div>
+          <div class="slItemAdd">+</div>
+        </button>
       `;
     }).join("");
   }
@@ -9397,10 +9406,19 @@ function openSmartAddItem(listId){
     modal.remove();
   }
 
-  // initial
-  renderResults("");
+  // initial render
+  renderResults("", "");
 
-  search.addEventListener("input", ()=> renderResults(search.value));
+  search.addEventListener("input", ()=> renderResults(search.value, activeCat));
+
+  catRow.addEventListener("click", (e)=>{
+    const btn = e.target.closest(".slCat");
+    if(!btn) return;
+    activeCat = btn.dataset.cat;
+    catRow.querySelectorAll(".slCat").forEach(b=> b.classList.toggle("slCatActive", b===btn));
+    renderResults(search.value, activeCat);
+  });
+
   modal.querySelector("#smartItemClose").addEventListener("click", close);
 
   results.addEventListener("click", (e)=>{
@@ -9413,57 +9431,92 @@ function openSmartAddItem(listId){
     const u = String(p.unit||"u").toLowerCase();
     const isKg = u.includes("kg");
 
-    if(isKg){
-      openPromptModal({
-        title:`${p.name} (por kg)`,
-        fields:[
-          {key:"grams", label:"Gramos", type:"number", value:"500"},
-        ],
-        onSubmit: ({grams})=>{
-          const g = Math.max(1, Number(grams||0));
-          const price = calcPriceFromKg(p.price, g);
-          list.items.push({
-            id: uid("i"),
-            name: p.name,
-            price: Number(price.toFixed(2)),
-            qty: 1,
-            bought: false,
-            productId: p.id,
-            category: p.category || "",
-            essential: !!p.essential,
-            weight_g: g,
-            pricePerKg: Number(p.price||0),
-            unit: "g"
-          });
-          persist(); view(); close();
-        }
-      });
-      return;
-    }
+    // Show inline quick-add panel
+    const existing = modal.querySelector(".slQuickPanel");
+    if(existing) existing.remove();
 
-    // Unit product
-    openPromptModal({
-      title:`${p.name}`,
-      fields:[
-        {key:"qty", label:"Cantidad", type:"number", value:"1"},
-        {key:"price", label:"Precio (por unidad)", type:"number", value:String(p.price||0)}
-      ],
-      onSubmit: ({qty, price})=>{
-        const qn = Math.max(1, Number(qty||1));
-        const pr = Number(price||0);
-        list.items.push({
-          id: uid("i"),
-          name: p.name,
-          price: pr,
-          qty: qn,
-          bought: false,
-          productId: p.id,
-          category: p.category || "",
-          essential: !!p.essential
+    const panel = document.createElement("div");
+    panel.className = "slQuickPanel";
+    if(isKg){
+      panel.innerHTML = `
+        <div class="slQPTitle">${escapeHtml(p.name)} <span class="slQPSub">${money(p.price)}/kg</span></div>
+        <div class="slQPRow">
+          <label class="slQPLabel">Gramos</label>
+          <div class="slQPCounter">
+            <button class="slQPBtn" data-step="-100">−</button>
+            <input class="slQPInput" id="qpVal" type="number" value="500" min="50" step="50" />
+            <button class="slQPBtn" data-step="100">+</button>
+          </div>
+          <div class="slQPCalc" id="qpCalc">${money(calcPriceFromKg(p.price,500))}</div>
+        </div>
+        <div class="slQPActions">
+          <button class="slQPCancel" id="qpCancel">Cancelar</button>
+          <button class="slQPConfirm" id="qpConfirm">Añadir ✓</button>
+        </div>
+      `;
+      modal.querySelector(".slModal").appendChild(panel);
+      const inp = panel.querySelector("#qpVal");
+      const calc = panel.querySelector("#qpCalc");
+      panel.querySelectorAll("[data-step]").forEach(b=>{
+        b.addEventListener("click",()=>{
+          inp.value = Math.max(50, (Number(inp.value)||500) + Number(b.dataset.step));
+          calc.textContent = money(calcPriceFromKg(p.price, Number(inp.value)));
         });
-        persist(); view(); close();
-      }
-    });
+      });
+      inp.addEventListener("input",()=>{
+        calc.textContent = money(calcPriceFromKg(p.price, Number(inp.value)||0));
+      });
+      panel.querySelector("#qpCancel").addEventListener("click",()=> panel.remove());
+      panel.querySelector("#qpConfirm").addEventListener("click",()=>{
+        const g = Math.max(1, Number(inp.value||0));
+        const price = calcPriceFromKg(p.price, g);
+        list.items.push({ id:uid("i"), name:p.name, price:Number(price.toFixed(2)), qty:1, bought:false, productId:p.id, category:p.category||"", essential:!!p.essential, weight_g:g, pricePerKg:Number(p.price||0), unit:"g" });
+        persist(); view();
+        panel.remove();
+        toast(`${p.name} añadido ✅`);
+      });
+    } else {
+      panel.innerHTML = `
+        <div class="slQPTitle">${escapeHtml(p.name)} <span class="slQPSub">${money(p.price)} c/u</span></div>
+        <div class="slQPRow">
+          <label class="slQPLabel">Cantidad</label>
+          <div class="slQPCounter">
+            <button class="slQPBtn" data-step="-1">−</button>
+            <input class="slQPInput" id="qpQty" type="number" value="1" min="1" step="1" />
+            <button class="slQPBtn" data-step="1">+</button>
+          </div>
+          <div class="slQPCalc" id="qpCalc">${money(p.price)}</div>
+        </div>
+        <div class="slQPRow">
+          <label class="slQPLabel">Precio</label>
+          <input class="slQPInput slQPPriceInput" id="qpPrice" type="number" value="${p.price||0}" min="0" step="0.01" />
+        </div>
+        <div class="slQPActions">
+          <button class="slQPCancel" id="qpCancel">Cancelar</button>
+          <button class="slQPConfirm" id="qpConfirm">Añadir ✓</button>
+        </div>
+      `;
+      modal.querySelector(".slModal").appendChild(panel);
+      const qtyInp = panel.querySelector("#qpQty");
+      const priceInp = panel.querySelector("#qpPrice");
+      const calc = panel.querySelector("#qpCalc");
+      const updateCalc = ()=> calc.textContent = money((Number(priceInp.value)||0) * (Number(qtyInp.value)||1));
+      panel.querySelectorAll("[data-step]").forEach(b=>{
+        b.addEventListener("click",()=>{ qtyInp.value = Math.max(1,(Number(qtyInp.value)||1)+Number(b.dataset.step)); updateCalc(); });
+      });
+      priceInp.addEventListener("input", updateCalc);
+      qtyInp.addEventListener("input", updateCalc);
+      panel.querySelector("#qpCancel").addEventListener("click",()=> panel.remove());
+      panel.querySelector("#qpConfirm").addEventListener("click",()=>{
+        const qn = Math.max(1, Number(qtyInp.value||1));
+        const pr = Number(priceInp.value||0);
+        list.items.push({ id:uid("i"), name:p.name, price:pr, qty:qn, bought:false, productId:p.id, category:p.category||"", essential:!!p.essential });
+        persist(); view();
+        panel.remove();
+        toast(`${p.name} ×${qn} añadido ✅`);
+      });
+    }
+    panel.scrollIntoView({ behavior:"smooth", block:"nearest" });
   });
 
   modal.querySelector("#smartItemManual").addEventListener("click", ()=>{
@@ -9485,31 +9538,16 @@ function openSmartAddItem(listId){
         if(m.includes("kg")){
           const g = Math.max(1, Number(grams||0));
           const calc = calcPriceFromKg(pr, g);
-          list.items.push({
-            id: uid("i"),
-            name: n,
-            price: Number(calc.toFixed(2)),
-            qty: 1,
-            bought:false,
-            weight_g: g,
-            pricePerKg: pr,
-            unit: "g"
-          });
+          list.items.push({ id:uid("i"), name:n, price:Number(calc.toFixed(2)), qty:1, bought:false, weight_g:g, pricePerKg:pr, unit:"g" });
         }else{
-          list.items.push({
-            id: uid("i"),
-            name: n,
-            price: pr,
-            qty: Math.max(1, Number(qty||1)),
-            bought:false
-          });
+          list.items.push({ id:uid("i"), name:n, price:pr, qty:Math.max(1,Number(qty||1)), bought:false });
         }
         persist(); view(); close();
       }
     });
   });
 
-  // focus
+  // focus search
   setTimeout(()=> search.focus(), 80);
 }
 
@@ -9618,40 +9656,123 @@ function addProductToShoppingList(listId, productId){
 function openProductLibrary(){
   const host = document.querySelector("#app");
   const sheet = document.createElement("div");
-  sheet.className = "modalBackdrop";
+  sheet.className = "modalBackdrop libBackdrop";
 
-  sheet.innerHTML = `
-    <div class="modal">
-      <h2>Biblioteca</h2>
+  const cats = [...new Set((state.products||[]).map(p=>(p.category||"").trim()).filter(Boolean))].sort();
 
-      <div class="row">
-        <button class="btn good" onclick="openNewProduct()">+ Nuevo</button>
-      </div>
+  function buildHTML(q, cat){
+    const query = String(q||"").trim().toLowerCase();
+    let prods = state.products || [];
+    if(cat) prods = prods.filter(p=>(p.category||"").trim()===cat);
+    if(query) prods = prods.filter(p=> (p.name||"").toLowerCase().includes(query) || (p.category||"").toLowerCase().includes(query));
 
-      <div class="list" style="margin-top:12px;">
-        ${state.products.map(p=>{
+    const catChips = `
+      <button class="slCat ${!cat?"slCatActive":""}" data-libcat="">Todo <span class="slCatCount">${(state.products||[]).length}</span></button>
+      ${cats.map(c=>{
+        const n = (state.products||[]).filter(p=>(p.category||"").trim()===c).length;
+        return `<button class="slCat ${cat===c?"slCatActive":""}" data-libcat="${escapeHtml(c)}">${escapeHtml(c)} <span class="slCatCount">${n}</span></button>`;
+      }).join("")}
+    `;
+
+    const cards = prods.length === 0
+      ? `<div class="libEmpty">Sin productos<br><span>Crea el primero 👆</span></div>`
+      : prods.map(p=>{
           const trend = priceTrend(p);
+          const trendHtml = trend
+            ? (trend.diff > 0
+                ? `<span class="libTrendUp">▲ ${trend.percent}%</span>`
+                : trend.diff < 0
+                  ? `<span class="libTrendDown">▼ ${Math.abs(trend.percent)}%</span>`
+                  : ``)
+            : ``;
+          const ess = p.essential ? `<span class="libEss">⭐</span>` : ``;
+          const u = String(p.unit||"u").toLowerCase();
+          const isKg = u.includes("kg");
+          const priceLabel = isKg ? `${money(p.price)}/kg` : money(p.price);
           return `
-            <div class="item">
-              <div class="left">
-                <div class="name">${escapeHtml(p.name)}</div>
-                <div class="meta">${money(p.price)} ${p.unit?`· ${escapeHtml(p.unit)}`:""} ${p.category?`· ${escapeHtml(p.category)}`:""}</div>
+            <div class="libCard">
+              <div class="libCardTop">
+                <div class="libCardName">${ess}${escapeHtml(p.name)}</div>
+                ${trendHtml}
               </div>
-              <div class="row">
-                <button class="btn" onclick="openProductChart('${p.id}')">📈</button>
-                <button class="btn" onclick="editProductDetails('${p.id}')">✏️</button>
+              <div class="libCardMeta">${priceLabel}${p.unit?` · ${escapeHtml(p.unit)}`:""}${p.store?` · ${escapeHtml(p.store)}`:""}</div>
+              ${p.category?`<div class="libCardCat">${escapeHtml(p.category)}</div>`:""}
+              <div class="libCardActions">
+                <button class="libActBtn libActChart" data-lib-chart="${p.id}">📈</button>
+                <button class="libActBtn libActEdit" data-lib-edit="${p.id}">✏️ Editar</button>
               </div>
             </div>
           `;
+        }).join("");
+
+    return { catChips, cards, count: prods.length };
+  }
+
+  sheet.innerHTML = `
+    <div class="modal libModal">
+      <div class="slHeader">
+        <div class="slTitle">📦 Biblioteca</div>
+        <button class="slCloseBtn" id="libClose">✕</button>
+      </div>
+
+      <div class="libToolbar">
+        <div class="libSearchWrap">
+          <span class="slSearchIcon">🔍</span>
+          <input id="libSearch" class="slSearchInput" placeholder="Buscar producto…" autocomplete="off" />
+        </div>
+        <button class="libNewBtn" id="libNewBtn">＋ Nuevo</button>
+      </div>
+
+      <div class="slCatRow" id="libCatRow">
+        <button class="slCat slCatActive" data-libcat="">Todo <span class="slCatCount">${(state.products||[]).length}</span></button>
+        ${cats.map(c=>{
+          const n = (state.products||[]).filter(p=>(p.category||"").trim()===c).length;
+          return `<button class="slCat" data-libcat="${escapeHtml(c)}">${escapeHtml(c)} <span class="slCatCount">${n}</span></button>`;
         }).join("")}
       </div>
 
-      <div class="row" style="margin-top:12px;">
-        <button class="btn ghost" onclick="this.closest('.modalBackdrop').remove()">Cerrar</button>
-      </div>
+      <div id="libCards" class="libGrid"></div>
     </div>
   `;
+
   host.appendChild(sheet);
+
+  let activeCat = "";
+  const searchEl = sheet.querySelector("#libSearch");
+  const cardsEl = sheet.querySelector("#libCards");
+  const catRow = sheet.querySelector("#libCatRow");
+
+  function render(){
+    const { catChips, cards } = buildHTML(searchEl.value, activeCat);
+    catRow.innerHTML = catChips;
+    catRow.querySelectorAll("[data-libcat]").forEach(b=>{
+      b.classList.toggle("slCatActive", b.dataset.libcat===activeCat);
+    });
+    cardsEl.innerHTML = cards;
+  }
+
+  render();
+
+  searchEl.addEventListener("input", render);
+
+  catRow.addEventListener("click", e=>{
+    const b = e.target.closest("[data-libcat]");
+    if(!b) return;
+    activeCat = b.dataset.libcat;
+    render();
+  });
+
+  sheet.querySelector("#libClose").addEventListener("click", ()=> sheet.remove());
+  sheet.querySelector("#libNewBtn").addEventListener("click", ()=>{ openNewProduct(); });
+
+  cardsEl.addEventListener("click", e=>{
+    const chartBtn = e.target.closest("[data-lib-chart]");
+    if(chartBtn){ openProductChart(chartBtn.dataset.libChart); return; }
+    const editBtn = e.target.closest("[data-lib-edit]");
+    if(editBtn){ editProductDetails(editBtn.dataset.libEdit); render(); return; }
+  });
+
+  setTimeout(()=> searchEl.focus(), 80);
 }
 
 // ====================== INVENTORY (Home stock) ======================
