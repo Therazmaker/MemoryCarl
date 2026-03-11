@@ -2960,3 +2960,287 @@ body{
   font-size: 14px;
   line-height: 1.8;
 }
+
+/* ====================== INVENTARIO v2 (Mobile-first, smart) ====================== */
+
+.invTabRow {
+  display: flex;
+  gap: 0;
+  margin-bottom: 14px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 16px;
+  padding: 4px;
+  border: 1.5px solid rgba(255,255,255,0.08);
+}
+.invTab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-radius: 12px;
+  color: rgba(255,255,255,0.45);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.invTabActive {
+  background: rgba(124,92,255,0.25);
+  color: #fff;
+  border: 1px solid rgba(124,92,255,0.4);
+}
+
+/* ---- Banner de alertas ---- */
+.invBanner {
+  border-radius: 16px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.invBannerRed { background: rgba(248,113,113,0.1); border: 1.5px solid rgba(248,113,113,0.3); color: #fca5a5; }
+.invBannerYellow { background: rgba(251,191,36,0.1); border: 1.5px solid rgba(251,191,36,0.3); color: #fde68a; }
+.invBannerGreen { background: rgba(52,211,153,0.08); border: 1.5px solid rgba(52,211,153,0.2); color: rgba(52,211,153,0.8); }
+.invBannerAction {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.8;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* ---- Top bar ---- */
+.invTopBar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.invSearchWrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.05);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: rgba(255,255,255,.4);
+}
+.invSearchIn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 15px;
+  outline: none;
+}
+.invSearchIn::placeholder { color: rgba(255,255,255,0.3); }
+.invAddBtn {
+  flex-shrink: 0;
+  background: rgba(54,211,153,0.15);
+  border: 1.5px solid rgba(54,211,153,0.4);
+  border-radius: 14px;
+  color: rgba(54,211,153,0.95);
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.invAddBtn:active { background: rgba(54,211,153,0.3); }
+
+/* ---- Cards grid ---- */
+.invGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 24px;
+}
+
+.invCard2 {
+  border-radius: 18px;
+  border: 1.5px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  padding: 14px;
+  transition: border-color 0.15s;
+}
+.invC-out { border-color: rgba(248,113,113,0.45) !important; background: rgba(248,113,113,0.05) !important; }
+.invC-low { border-color: rgba(251,191,36,0.35) !important; background: rgba(251,191,36,0.04) !important; }
+.invC-ok  { border-color: rgba(52,211,153,0.2); }
+
+.invC2Top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.invC2Left { flex: 1; min-width: 0; }
+.invC2Name {
+  font-size: 16px;
+  font-weight: 900;
+  color: #fff;
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.invC2Sub { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 6px; }
+.invC2Stats { display: flex; gap: 5px; flex-wrap: wrap; }
+.invStatChip {
+  background: rgba(255,255,255,0.07);
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.5);
+  white-space: nowrap;
+}
+.invStatLot { background: rgba(124,92,255,0.15); color: rgba(124,92,255,0.9); }
+.invStatEss { background: rgba(251,191,36,0.15); color: rgba(251,191,36,0.9); }
+
+.invC2Right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.invPctBadge {
+  border: 2px solid;
+  border-radius: 10px;
+  padding: 3px 10px;
+  font-size: 14px;
+  font-weight: 900;
+}
+.invC2Status { font-size: 18px; }
+.invC-outLabel::after { content:"⛔"; }
+.invC-lowLabel::after { content:"⚠️"; }
+.invC-okLabel::after  { content:"✓"; color:#34d399; font-size:16px; font-weight:900; }
+
+/* Durability bar */
+.invDurRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.invDurBar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.invDurFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.invDurLabel {
+  font-size: 12px;
+  font-weight: 900;
+  min-width: 38px;
+  text-align: right;
+}
+
+/* Action row */
+.invC2Actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+.invA {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  color: rgba(255,255,255,0.7);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.invA:active { background: rgba(124,92,255,0.25); }
+.invA-list { font-size: 16px; padding: 8px 12px; }
+.invA-fin { flex: 1; background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.2); color: #fca5a5; }
+.invA-pct { background: rgba(124,92,255,0.1); border-color: rgba(124,92,255,0.25); color: rgba(124,92,255,0.9); }
+
+.invEmpty {
+  text-align: center;
+  padding: 40px 16px;
+  color: rgba(255,255,255,0.3);
+  font-size: 14px;
+  line-height: 1.8;
+}
+.invEmpty span { font-size: 12px; }
+
+/* ---- % Slider modal ---- */
+.invPctSliderWrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.invPctSlider {
+  flex: 1;
+  height: 6px;
+  accent-color: rgba(124,92,255,0.9);
+  cursor: pointer;
+}
+.invPctSliderVal {
+  font-size: 22px;
+  font-weight: 900;
+  color: rgba(124,92,255,1);
+  min-width: 52px;
+  text-align: right;
+}
+.invPctQuickRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.invPctQ {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  color: rgba(255,255,255,0.7);
+  padding: 10px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+.invPctQ:active { background: rgba(124,92,255,0.25); border-color: rgba(124,92,255,0.5); }
+
+/* ---- Smart restock modal ---- */
+.invRestockBtn {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 18px;
+  padding: 16px;
+  cursor: pointer;
+  text-align: left;
+  color: #fff;
+  width: 100%;
+  transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.invRestockRepon { border-color: rgba(52,211,153,0.35); background: rgba(52,211,153,0.07); }
+.invRestockRepon:active { background: rgba(52,211,153,0.18); }
+.invRestockAdd { border-color: rgba(124,92,255,0.3); background: rgba(124,92,255,0.07); }
+.invRestockAdd:active { background: rgba(124,92,255,0.18); }

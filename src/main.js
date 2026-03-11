@@ -8643,6 +8643,29 @@ if(act==="invTab"){
   view();
   return;
 }
+
+// Inventory category filter (new)
+if(btn.dataset.invCat !== undefined){
+  state.invCat = btn.dataset.invCat;
+  view();
+  return;
+}
+
+// Inventory item actions (new)
+const invActBtn = e.target.closest("[data-inv-act]");
+if(invActBtn){
+  const invAct = invActBtn.dataset.invAct;
+  if(invAct==="toList"){ addInventoryToList(invActBtn.dataset.iid); return; }
+  if(invAct==="finish"){ openFinishLotModal(invActBtn.dataset.pkey); return; }
+  if(invAct==="edit"){ editInventoryItem(invActBtn.dataset.iid); return; }
+  if(invAct==="setPct"){ openInvPctModal(invActBtn.dataset.iid); return; }
+  if(invAct==="addFromLib"){ openInvAddFromLibModal(); return; }
+  if(invAct==="filterUrgent"){
+    state.invQuery=""; state.invCat="";
+    state.invShowUrgentOnly=true;
+    view(); return;
+  }
+}
 if(act==="invHistPreset"){
   state.inventoryHistPreset = btn.dataset.preset || "30d";
   state.inventorySubtab = "history";
@@ -10396,258 +10419,500 @@ window.openFinishLotModal = openFinishLotModal;
 function viewInventory(){
   ensureInventory();
   ensureInventoryLots();
-
-  // UI state
-  if(state.invViewMode!=="compact" && state.invViewMode!=="cards") state.invViewMode = "compact";
   if(!state.invQuery) state.invQuery = "";
-  if(!state.invFilters) state.invFilters = { low:false, out:false, lot:false, nolot:false, fav:false };
+  if(!state.invCat) state.invCat = "";
 
   const inv = (state.inventory||[]);
   const lots = (state.inventoryLots||[]);
+  const stats = invGetConsumptionStats_(lots);
 
-  const linked = inv.filter(x=>!!x.productId).length;
+  // ---- helpers ----
+  function pkey_(it){ return it.productId ? ("pid:"+String(it.productId)) : ("nm:"+normName_(it.name)); }
+  function hasActiveLot_(it){ return (lots||[]).some(l=>!l.finishedAt && lotProductKey_(l)===pkey_(it)); }
 
-  // Counts should respect % tracking when available
-  function stockStatusQuick_(it){
-    const pctRaw = (it.levelPct===0 || it.levelPct) ? Number(it.levelPct) : null;
-    const pct = (pctRaw===null || Number.isNaN(pctRaw)) ? null : pctRaw;
-    const refill = Number(it.refillPointPct ?? it.refillPct ?? 25);
-    if(pct != null){
-      if(pct<=0) return "out";
-      if(refill>0 && pct<=refill) return "low";
-      return "ok";
-    }
-    const qty = Number(it.qty||0);
-    const min = Number(it.minQty||0);
-    if(qty<=0) return "out";
-    if(min>0 && qty<=min) return "low";
-    return "ok";
-  }
-
-  const lowCount = inv.filter(x=>stockStatusQuick_(x)==="low").length;
-  const outCount = inv.filter(x=>stockStatusQuick_(x)==="out").length;
-  const lotCount = inv.filter(x=>{
-    const pkey = x.productId ? ("pid:"+String(x.productId)) : ("nm:"+normName_(x.name));
-    return lots.some(l=>!l.finishedAt && lotProductKey_(l)===pkey);
-  }).length;
-
-  const pickRows = (state.products||[]).map(p=>
-    `<button class="btn" onclick="addInventoryFromProduct('${p.id}')">+ ${escapeHtml(p.name)} · ${money(p.price||0)}</button>`
-  ).join("") || `<div class="muted">No hay productos en Biblioteca.</div>`;
-
-  const q = String(state.invQuery||"").trim().toLowerCase();
-  const f = state.invFilters || {};
-
-  function hasActiveLot_(it){
-    const pkey = it.productId ? ("pid:"+String(it.productId)) : ("nm:"+normName_(it.name));
-    return (state.inventoryLots||[]).some(l=>!l.finishedAt && lotProductKey_(l)===pkey);
-  }
   function stockStatus_(it){
-    const qty = Number(it.qty||0);
-    const min = Number(it.minQty||0);
-    if(qty<=0) return "out";
-    if(min>0 && qty<=min) return "low";
-    return "ok";
+    const pctRaw = (it.levelPct===0||it.levelPct) ? Number(it.levelPct) : null;
+    const pct = (pctRaw===null||Number.isNaN(pctRaw)) ? null : pctRaw;
+    const refill = Number(it.refillPointPct??it.refillPct??25);
+    if(pct!=null){ if(pct<=0) return "out"; if(refill>0&&pct<=refill) return "low"; return "ok"; }
+    const qty = Number(it.qty||0); const min = Number(it.minQty||0);
+    if(qty<=0) return "out"; if(min>0&&qty<=min) return "low"; return "ok";
   }
-  function matches_(it){
-    if(q){
-      const hay = `${it.name||""} ${it.category||""} ${it.unit||""}`.toLowerCase();
-      if(!hay.includes(q)) return false;
-    }
-    const status = stockStatus_(it);
-    const lot = hasActiveLot_(it);
-    const fav = !!it.essential;
 
-    if(f.low && status!=="low") return false;
-    if(f.out && status!=="out") return false;
-    if(f.lot && !lot) return false;
-    if(f.nolot && lot) return false;
-    if(f.fav && !fav) return false;
+  function avgDays_(it){
+    const s = stats.get(pkey_(it));
+    return s?.avgDays ?? null;
+  }
 
+  function daysLeft_(it){
+    const avg = avgDays_(it);
+    const s = (stats.get(pkey_(it)));
+    if(!avg || !s?.lastBoughtAt) return null;
+    const boughtMs = Date.parse(s.lastBoughtAt);
+    if(!isFinite(boughtMs)) return null;
+    const elapsed = (Date.now()-boughtMs)/(1000*60*60*24);
+    const left = avg - elapsed;
+    return Math.max(0, Math.round(left));
+  }
+
+  // ---- filter ----
+  const q = String(state.invQuery||"").trim().toLowerCase();
+  const activeCat = String(state.invCat||"").trim();
+  const allCats = [...new Set(inv.map(x=>(x.category||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"es",{sensitivity:"base"}));
+
+  const filtered = inv.filter(it=>{
+    if(activeCat && (it.category||"").trim()!==activeCat) return false;
+    if(q){ const hay=`${it.name||""} ${it.category||""}`.toLowerCase(); if(!hay.includes(q)) return false; }
     return true;
-  }
-
-  const filtered = inv.filter(matches_);
-
-  // Group by category (collapsible)
-  const groups = {};
-  filtered.forEach(it=>{
-    const cat = String(it.category||"Sin categoría");
-    (groups[cat] ||= []).push(it);
   });
 
-  // Sorting: out -> low -> ok, then fav, then name
-  const statusRank = { out:0, low:1, ok:2 };
-  const sortItems = (a,b)=>{
-    const ra=statusRank[stockStatus_(a)] ?? 9;
-    const rb=statusRank[stockStatus_(b)] ?? 9;
+  // Status summary
+  const outN = inv.filter(x=>stockStatus_(x)==="out").length;
+  const lowN = inv.filter(x=>stockStatus_(x)==="low").length;
+  const urgentN = outN+lowN;
+
+  // Sort: out first, low second, then by days-left asc, then name
+  const statusRank = {out:0,low:1,ok:2};
+  const sorted = filtered.slice().sort((a,b)=>{
+    const ra=statusRank[stockStatus_(a)]??9, rb=statusRank[stockStatus_(b)]??9;
     if(ra!==rb) return ra-rb;
-    const fa=(a.essential?0:1), fb=(b.essential?0:1);
-    if(fa!==fb) return fa-fb;
-    return String(a.name||"").localeCompare(String(b.name||""), "es", { sensitivity:"base" });
-  };
+    const da=daysLeft_(a)??999, db=daysLeft_(b)??999;
+    if(da!==db) return da-db;
+    return String(a.name||"").localeCompare(String(b.name||""),"es",{sensitivity:"base"});
+  });
 
-  const catNames = Object.keys(groups).sort((a,b)=> a.localeCompare(b,"es",{sensitivity:"base"}));
-  const sections = catNames.map(cat=>{
-    const items = groups[cat].sort(sortItems);
-    const total = items.length;
-    const outN = items.filter(x=>stockStatus_(x)==="out").length;
-    const lowN = items.filter(x=>stockStatus_(x)==="low").length;
+  // ---- render each item card ----
+  function renderCard(it){
+    const status = stockStatus_(it);
+    const lot = hasActiveLot_(it);
+    const avg = avgDays_(it);
+    const left = daysLeft_(it);
+    const pk = pkey_(it);
+    const linked = !!it.productId;
 
-    // default open if has alerts, else keep previous
-    state.invCatOpen ||= {};
-    if(state.invCatOpen[cat] == null){
-      state.invCatOpen[cat] = (outN+lowN) > 0; // open urgent cats by default
+    const pct = (it.levelPct===0||it.levelPct) ? Number(it.levelPct) : null;
+
+    // Status color class
+    const cc = status==="out" ? "invC-out" : status==="low" ? "invC-low" : "invC-ok";
+
+    // Durability bar
+    let durBar = "";
+    if(avg && left!==null){
+      const pctBar = Math.min(100, Math.round((left/avg)*100));
+      const barColor = left<=2 ? "#f87171" : left<=5 ? "#fbbf24" : "#34d399";
+      durBar = `
+        <div class="invDurRow">
+          <div class="invDurBar">
+            <div class="invDurFill" style="width:${pctBar}%;background:${barColor}"></div>
+          </div>
+          <div class="invDurLabel" style="color:${barColor}">${left===0?"Hoy":"~"+left+"d"}</div>
+        </div>`;
     }
-    const open = !!state.invCatOpen[cat];
 
-    const rows = items.map(it=>{
-      const status = stockStatus_(it);
-      const isLow = status==="low";
-      const isOut = status==="out";
-      const lot = hasActiveLot_(it);
-      const badgeStatus = isOut
-        ? `<span class="invPill invPillRed">AGOTADO</span>`
-        : (isLow ? `<span class="invPill invPillYellow">BAJO</span>` : `<span class="invPill invPillGreen">OK</span>`);
-      const badgeLot = lot
-        ? `<span class="invBadge invBadgeLot">🧾 LOTE</span>`
-        : `<span class="invBadge invBadgeNoLot">◻️ Sin lote</span>`;
+    // Level pct arc display
+    let levelDisp = "";
+    if(pct!==null){
+      const pctColor = pct<=10?"#f87171":pct<=30?"#fbbf24":"#34d399";
+      levelDisp = `<div class="invPctBadge" style="border-color:${pctColor};color:${pctColor}">${Math.round(pct)}%</div>`;
+    }
 
-      const link = it.productId ? `🔗` : `📝`;
-      const qty = Number(it.qty||0);
-      const min = Number(it.minQty||0);
-      const minTxt = min>0 ? ` · min ${min}` : "";
-      const pctDisp = ((it.levelPct===0 || it.levelPct) ? ` · <b>${Number(it.levelPct)}%</b>` : "");
-      const subtitle = `${escapeHtml(it.category||"-")} · <b>${qty}${escapeHtml(it.unit||"u")}</b>${pctDisp}${minTxt}`;
-
-      const pkey = it.productId ? ("pid:"+String(it.productId)) : ("nm:"+normName_(it.name));
-
-      if(state.invViewMode==="cards"){
-        return `
-          <section class="invCard ${isOut?"invCardOut":(isLow?"invCardLow":"")}">
-            <div class="invCardTop">
-              <div class="invCardTitle">${link} ${it.essential?"⭐":""} ${escapeHtml(it.name)}</div>
-              <div class="invCardBadges">${badgeStatus}${badgeLot}</div>
-              <div class="invPctEdit invPctEditCard">
-                <span class="invPctLabel">%</span>
-                <input class="input invPctInput" type="number" min="0" max="100"
-                       value="${(it.levelPct===0||it.levelPct)?Number(it.levelPct):""}"
-                       placeholder="—"
-                       onchange="updateInventoryPct('${it.id}', this.value)" />
-                <button class="btn ghost invPctToday" title="Marcar revisado hoy" onclick="markInventoryChecked('${it.id}')">✅</button>
-              </div>
-            </div>
-            <div class="invCardMeta">${subtitle}</div>
-            <div class="invCardActions">
-              <button class="btn" onclick="addInventoryToList('${it.id}')">➕ Lista</button>
-              <button class="btn" onclick="openFinishLotModal('${escapeHtml(pkey)}')">Se acabó</button>
-              <button class="btn" onclick="editInventoryItem('${it.id}')">✏️</button>
-              <button class="btn danger" onclick="deleteInventoryItem('${it.id}')">🗑️</button>
-            </div>
-          </section>
-        `;
-      }
-
-      // compact row
-      return `
-        <div class="invRow ${isOut?"invRowOut":(isLow?"invRowLow":"")}">
-          <div class="invLeft">
-            <div class="invName">${link} ${it.essential?"⭐":""} ${escapeHtml(it.name)}</div>
-            <div class="invMeta">${subtitle}</div>
-            <div class="invBadges">${badgeStatus}${badgeLot}</div>
-            <div class="invPctEdit">
-              <span class="invPctLabel">%</span>
-              <input class="input invPctInput" type="number" min="0" max="100"
-                     value="${(it.levelPct===0||it.levelPct)?Number(it.levelPct):""}"
-                     placeholder="—"
-                     onchange="updateInventoryPct('${it.id}', this.value)" />
-              <button class="btn ghost invPctToday" title="Marcar revisado hoy" onclick="markInventoryChecked('${it.id}')">✅</button>
-            </div>
-          </div>
-          <div class="invActions">
-            <button class="btn" title="Añadir a lista" onclick="addInventoryToList('${it.id}')">➕</button>
-            <button class="btn" title="Marcar lote como acabado" onclick="openFinishLotModal('${escapeHtml(pkey)}')">⛔</button>
-            <button class="btn" title="Editar" onclick="editInventoryItem('${it.id}')">✏️</button>
-            <button class="btn danger" title="Eliminar" onclick="deleteInventoryItem('${it.id}')">🗑️</button>
-          </div>
-        </div>
-      `;
-    }).join("") || "";
+    // Stats line
+    let statsLine = "";
+    if(avg){ statsLine = `<span class="invStatChip">⏱ ${Math.round(avg)}d avg</span>`; }
+    if(lot){ statsLine += `<span class="invStatChip invStatLot">🧾 lote</span>`; }
+    if(it.essential){ statsLine += `<span class="invStatChip invStatEss">⭐ esencial</span>`; }
 
     return `
-      <section class="card invGroup" data-inv-cat="${escapeHtml(cat)}">
-        <div class="invGroupHead" data-act="invToggleCat" data-cat="${escapeHtml(cat)}">
-          <div class="row" style="gap:10px; align-items:center;">
-            <div class="tag">${open ? "▾" : "▸"}</div>
-            <div style="min-width:0">
-              <div class="invGroupTitle">${escapeHtml(cat)}</div>
-              <div class="small">${outN?`🔴 ${outN} agotado · `:""}${lowN?`🟡 ${lowN} bajo · `:""}${total} items</div>
-            </div>
+      <div class="invCard2 ${cc}" data-inv-id="${it.id}">
+        <div class="invC2Top">
+          <div class="invC2Left">
+            <div class="invC2Name">${escapeHtml(it.name)}</div>
+            <div class="invC2Sub">${escapeHtml(it.category||"")}${it.unit?` · ${escapeHtml(it.unit)}`:""}</div>
+            ${statsLine ? `<div class="invC2Stats">${statsLine}</div>` : ""}
           </div>
-          <div class="chip">${total}</div>
+          <div class="invC2Right">
+            ${levelDisp}
+            <div class="invC2Status ${cc}Label">${status==="out"?"⛔":"status"==="low"?"⚠️":"✓"}</div>
+          </div>
         </div>
-        ${open ? `<div class="invGroupBody">${rows || `<div class="muted">Vacío</div>`}</div>` : ``}
-      </section>
+        ${durBar}
+        <div class="invC2Actions">
+          <button class="invA invA-list" data-inv-act="toList" data-iid="${it.id}" title="Añadir a lista">🛒</button>
+          <button class="invA invA-fin" data-inv-act="finish" data-pkey="${escapeHtml(pk)}" title="Se acabó">Se acabó</button>
+          <button class="invA invA-pct" data-inv-act="setPct" data-iid="${it.id}" title="Actualizar nivel">%</button>
+          <button class="invA invA-edit" data-inv-act="edit" data-iid="${it.id}" title="Editar">✏️</button>
+        </div>
+      </div>
     `;
-  }).join("");
+  }
 
-  const filterBtn = (key, label, active) =>
-    `<button class="chipBtn ${active?"on":""}" data-act="invFilter" data-key="${key}">${label}</button>`;
+  // ---- cat chips ----
+  const catChips = `
+    <button class="slCat ${!activeCat?"slCatActive":""}" data-inv-cat="">Todo <span class="slCatCount">${inv.length}</span></button>
+    ${allCats.map(c=>{
+      const cn = inv.filter(x=>(x.category||"").trim()===c).length;
+      const hasAlert = inv.filter(x=>(x.category||"").trim()===c&&stockStatus_(x)!=="ok").length>0;
+      return `<button class="slCat ${activeCat===c?"slCatActive":""}" data-inv-cat="${escapeHtml(c)}">${hasAlert?"🔴 ":""}${escapeHtml(c)} <span class="slCatCount">${cn}</span></button>`;
+    }).join("")}
+  `;
+
+  // ---- summary banner ----
+  const banner = urgentN>0 ? `
+    <div class="invBanner ${outN>0?"invBannerRed":"invBannerYellow"}">
+      ${outN>0?`<span>⛔ ${outN} agotado</span>`:""}
+      ${lowN>0?`<span>⚠️ ${lowN} bajo stock</span>`:""}
+      <span class="invBannerAction" data-inv-act="filterUrgent">Ver urgentes →</span>
+    </div>
+  ` : `<div class="invBanner invBannerGreen">✅ Todo el inventario en orden</div>`;
+
+  const subtab = state.inventorySubtab || "stock";
 
   return `
     <div class="sectionTitle">
-      <div>Inventario</div>
+      <div>🏠 Cocina</div>
       <button class="btn" data-act="backToShoppingLists">← Volver</button>
     </div>
 
-    <div class="row" style="gap:8px; margin:0 0 12px;">
-      <button class="btn ${state.inventorySubtab==="stock"?"primary":""}" data-act="invTab" data-tab="stock">📦 Stock</button>
-      <button class="btn ${state.inventorySubtab==="history"?"primary":""}" data-act="invTab" data-tab="history">🗓️ Histórico</button>
-      <button class="btn ${state.inventorySubtab==="calendar"?"primary":""}" data-act="invTab" data-tab="calendar">📅 Calendario</button>
+    <div class="invTabRow">
+      <button class="invTab ${subtab==="stock"?"invTabActive":""}" data-act="invTab" data-tab="stock">Stock</button>
+      <button class="invTab ${subtab==="history"?"invTabActive":""}" data-act="invTab" data-tab="history">Historial</button>
+      <button class="invTab ${subtab==="calendar"?"invTabActive":""}" data-act="invTab" data-tab="calendar">Calendario</button>
     </div>
 
-    ${state.inventorySubtab==="history" ? viewInventoryHistory() : (state.inventorySubtab==="calendar" ? viewInventoryCalendar() : `
-      <section class="card" style="margin-bottom:12px;">
-        <div class="invToolbar">
-          <input class="input" placeholder="Buscar (nombre, categoría…)" value="${escapeHtml(state.invQuery||"")}"
-                 oninput="setInvQuery(this.value)" />
-          <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:10px;">
-            ${filterBtn("low", `🟡 Bajo (${lowCount})`, !!f.low)}
-            ${filterBtn("out", `🔴 Agotado (${outCount})`, !!f.out)}
-            ${filterBtn("lot", `🧾 Con lote (${lotCount})`, !!f.lot)}
-            ${filterBtn("nolot", `◻️ Sin lote (${Math.max(0,(inv.length-lotCount))})`, !!f.nolot)}
-            ${filterBtn("fav", `⭐ Fav`, !!f.fav)}
-            <span class="chip" style="margin-left:auto">${filtered.length}/${inv.length}</span>
-            <button class="btn ${state.invViewMode==="compact"?"primary":""}" data-act="invMode" data-mode="compact">Compacta</button>
-            <button class="btn ${state.invViewMode==="cards"?"primary":""}" data-act="invMode" data-mode="cards">Tarjetas</button>
-          </div>
-        </div>
-      </section>
+    ${subtab==="history" ? viewInventoryHistory() : subtab==="calendar" ? viewInventoryCalendar() : `
 
-      <div class="row" style="margin:0 0 12px; gap:8px;">
-        <div class="chip">${inv.length} items</div>
-        <div class="chip">${linked} link</div>
-        <div class="chip">🧾 ${lotCount} con lote</div>
-        <button class="btn good" onclick="addInventoryManual()">+ Manual</button>
+    ${banner}
+
+    <div class="invTopBar">
+      <div class="invSearchWrap">
+        <span>🔍</span>
+        <input class="invSearchIn" placeholder="Buscar…" value="${escapeHtml(state.invQuery||"")}" oninput="setInvQuery(this.value)" />
       </div>
+      <button class="invAddBtn" data-inv-act="addFromLib">＋ Agregar</button>
+    </div>
 
-      <section class="card">
-        <div class="cardTop">
-          <div>
-            <h3 class="cardTitle">Agregar desde Biblioteca</h3>
-            <div class="small">Conecta inventario con precios</div>
-          </div>
-        </div>
-        <div class="hr"></div>
-        <div class="grid">${pickRows}</div>
-      </section>
+    <div class="slCatRow" id="invCatRow">
+      ${catChips}
+    </div>
 
-      <div style="height:12px"></div>
-      ${sections || `<div class="muted">No hay items que coincidan con tu filtro.</div>`}
-    `)}
+    <div class="invGrid" id="invGrid">
+      ${sorted.length ? sorted.map(renderCard).join("") : `<div class="invEmpty">Sin items${q||activeCat?" con ese filtro":""}<br><span>Toca ＋ Agregar para añadir</span></div>`}
+    </div>
 
+    `}
   `;
 }
+/* ====================== SMART INVENTORY HELPERS ====================== */
+
+// Modal: update % level for an inventory item
+function openInvPctModal(invId){
+  ensureInventory();
+  const it = (state.inventory||[]).find(x=>x.id===invId);
+  if(!it) return;
+
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop slBackdrop";
+
+  const curPct = (it.levelPct===0||it.levelPct) ? Number(it.levelPct) : 100;
+
+  b.innerHTML = `
+    <div class="modal slModal" style="padding:20px;">
+      <div class="slHeader" style="padding:0 0 16px;">
+        <div class="slTitle">📊 ${escapeHtml(it.name)}</div>
+        <button class="slCloseBtn" id="invPctClose">✕</button>
+      </div>
+      <div style="font-size:13px;color:rgba(255,255,255,.5);margin-bottom:16px;">¿Cuánto queda? Desliza o toca los botones.</div>
+      <div class="invPctSliderWrap">
+        <input type="range" min="0" max="100" step="5" value="${curPct}" class="invPctSlider" id="invPctSlider" />
+        <div class="invPctSliderVal" id="invPctVal">${curPct}%</div>
+      </div>
+      <div class="invPctQuickRow">
+        <button class="invPctQ" data-v="0">⛔ Vacío</button>
+        <button class="invPctQ" data-v="25">25%</button>
+        <button class="invPctQ" data-v="50">50%</button>
+        <button class="invPctQ" data-v="75">75%</button>
+        <button class="invPctQ" data-v="100">🆕 Lleno</button>
+      </div>
+      <div class="slQPActions" style="margin-top:18px;">
+        <button class="slQPCancel" id="invPctCancel">Cancelar</button>
+        <button class="slQPConfirm" id="invPctSave">Guardar ✓</button>
+      </div>
+    </div>
+  `;
+  host.appendChild(b);
+
+  const slider = b.querySelector("#invPctSlider");
+  const valEl = b.querySelector("#invPctVal");
+  const close = ()=>b.remove();
+
+  slider.addEventListener("input",()=>{ valEl.textContent=slider.value+"%"; });
+  b.querySelectorAll(".invPctQ").forEach(q=>{
+    q.addEventListener("click",()=>{ slider.value=q.dataset.v; valEl.textContent=slider.value+"%"; });
+  });
+  b.querySelector("#invPctClose").addEventListener("click", close);
+  b.querySelector("#invPctCancel").addEventListener("click", close);
+  b.querySelector("#invPctSave").addEventListener("click",()=>{
+    it.levelPct = Number(slider.value);
+    it.lastCheck = new Date().toISOString().slice(0,10);
+
+    // If went from >0 to 0, offer to mark lot as finished
+    if(it.levelPct===0){
+      const pk = it.productId ? ("pid:"+String(it.productId)) : ("nm:"+normName_(it.name));
+      const hasLot = (state.inventoryLots||[]).some(l=>!l.finishedAt && lotProductKey_(l)===pk);
+      if(hasLot){
+        persist(); close();
+        openFinishLotModal(pk);
+        return;
+      }
+    }
+    persist();
+    toast(`${it.name}: ${it.levelPct}% ✅`);
+    close();
+    view();
+  });
+}
+window.openInvPctModal = openInvPctModal;
+
+// Modal: Add to inventory from biblioteca (with smart "reponer vs nuevo lote" flow)
+function openInvAddFromLibModal(){
+  ensureInventory();
+  ensureInventoryLots();
+
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop libBackdrop";
+
+  const products = (state.products||[]).slice();
+  const cats = [...new Set(products.map(p=>(p.category||"").trim()).filter(Boolean))].sort();
+  let activeCat = "";
+
+  function buildRows(q, cat){
+    let prods = products;
+    if(cat) prods = prods.filter(p=>(p.category||"").trim()===cat);
+    if(q) prods = prods.filter(p=>(p.name||"").toLowerCase().includes(q.toLowerCase())||
+                                   (p.category||"").toLowerCase().includes(q.toLowerCase()));
+    if(!prods.length) return `<div class="invEmpty">Sin resultados<br><span>Crea productos en Biblioteca primero</span></div>`;
+    return prods.map(p=>{
+      const inv = (state.inventory||[]).find(x=>x.productId===p.id);
+      const inInv = !!inv;
+      const pct = (inv?.levelPct===0||inv?.levelPct) ? Number(inv.levelPct) : null;
+      const pctTxt = pct!==null ? `<span class="invStatChip" style="margin-left:4px">${Math.round(pct)}%</span>` : "";
+      const statusBadge = inInv
+        ? `<span class="invStatChip ${pct===0||pct<=10?"invStatLot":""}">En cocina${pctTxt}</span>`
+        : `<span class="invStatChip" style="opacity:.5">Nuevo</span>`;
+      return `
+        <button class="slItem" data-inv-pick="${p.id}">
+          <div class="slItemInfo">
+            <div class="slItemName">${p.essential?"⭐":""} ${escapeHtml(p.name)}</div>
+            <div class="slItemMeta">${money(p.price||0)}${p.unit?` · ${escapeHtml(p.unit)}`:""}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            ${statusBadge}
+            <div class="slItemAdd">+</div>
+          </div>
+        </button>`;
+    }).join("");
+  }
+
+  b.innerHTML = `
+    <div class="modal libModal">
+      <div class="slHeader">
+        <div class="slTitle">🏠 Agregar a cocina</div>
+        <button class="slCloseBtn" id="invLibClose">✕</button>
+      </div>
+      <div class="slSearchRow">
+        <span class="slSearchIcon">🔍</span>
+        <input id="invLibSearch" class="slSearchInput" placeholder="Buscar producto…" autocomplete="off" />
+      </div>
+      <div class="slCatRow" id="invLibCatRow">
+        <button class="slCat slCatActive" data-il-cat="">Todo</button>
+        ${cats.map(c=>`<button class="slCat" data-il-cat="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join("")}
+      </div>
+      <div id="invLibResults" class="slResults"></div>
+    </div>
+  `;
+  host.appendChild(b);
+
+  const searchEl = b.querySelector("#invLibSearch");
+  const resultsEl = b.querySelector("#invLibResults");
+  const catRow = b.querySelector("#invLibCatRow");
+  const close = ()=>b.remove();
+
+  function render(){ resultsEl.innerHTML = buildRows(searchEl.value, activeCat); }
+  render();
+
+  searchEl.addEventListener("input", render);
+  b.querySelector("#invLibClose").addEventListener("click", close);
+
+  catRow.addEventListener("click", e=>{
+    const btn = e.target.closest("[data-il-cat]");
+    if(!btn) return;
+    activeCat = btn.dataset.ilCat;
+    catRow.querySelectorAll("[data-il-cat]").forEach(x=>x.classList.toggle("slCatActive", x===btn));
+    render();
+  });
+
+  resultsEl.addEventListener("click", e=>{
+    const btn = e.target.closest("[data-inv-pick]");
+    if(!btn) return;
+    const pid = btn.dataset.invPick;
+    const p = products.find(x=>x.id===pid);
+    if(!p) return;
+
+    const existing = (state.inventory||[]).find(x=>x.productId===pid);
+    const pkey = "pid:"+pid;
+    const hasActiveLot = (state.inventoryLots||[]).some(l=>!l.finishedAt && l.productId===pid);
+    const curPct = (existing?.levelPct===0||existing?.levelPct) ? Number(existing.levelPct) : null;
+
+    // Smart flow: if product already in inventory with low/0 level → ask
+    if(existing && curPct!==null && curPct<=30 && !hasActiveLot){
+      // Show smart dialog: reponer o nuevo lote?
+      openInvSmartRestockModal({ p, existing, pkey, onDone: ()=>{ close(); view(); } });
+      return;
+    }
+
+    // Default: open pct panel
+    openInvPickQtyModal({ p, existing, pkey, onDone: ()=>{ close(); view(); } });
+  });
+
+  setTimeout(()=>searchEl.focus(), 80);
+}
+window.openInvAddFromLibModal = openInvAddFromLibModal;
+
+// Panel: pick qty & level when adding to inventory
+function openInvPickQtyModal({ p, existing, pkey, onDone }){
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop slBackdrop";
+
+  b.innerHTML = `
+    <div class="modal slModal" style="padding:20px;">
+      <div class="slHeader" style="padding:0 0 14px;">
+        <div class="slTitle">➕ ${escapeHtml(p.name)}</div>
+        <button class="slCloseBtn" id="invQClose">✕</button>
+      </div>
+      <div class="slQPRow">
+        <label class="slQPLabel">Nivel</label>
+        <div class="slQPCounter">
+          <button class="slQPBtn" data-step="-10">−</button>
+          <input class="slQPInput" id="invQPct" type="number" min="0" max="100" step="10" value="100" />
+          <button class="slQPBtn" data-step="10">+</button>
+        </div>
+        <div class="slQPCalc" id="invQPctVal">100%</div>
+      </div>
+      <div class="invPctQuickRow" style="margin-top:10px;">
+        <button class="invPctQ" data-v="100">🆕 Lleno</button>
+        <button class="invPctQ" data-v="75">75%</button>
+        <button class="invPctQ" data-v="50">Mitad</button>
+      </div>
+      <div class="slQPActions" style="margin-top:18px;">
+        <button class="slQPCancel" id="invQCancel">Cancelar</button>
+        <button class="slQPConfirm" id="invQSave">Añadir ✓</button>
+      </div>
+    </div>`;
+  host.appendChild(b);
+
+  const inp = b.querySelector("#invQPct");
+  const valEl = b.querySelector("#invQPctVal");
+  const close = ()=>b.remove();
+
+  const update = ()=>{ valEl.textContent=(Number(inp.value)||0)+"%"; };
+  b.querySelectorAll("[data-step]").forEach(bt=>{
+    bt.addEventListener("click",()=>{ inp.value=Math.max(0,Math.min(100,(Number(inp.value)||0)+Number(bt.dataset.step))); update(); });
+  });
+  b.querySelectorAll(".invPctQ").forEach(q=>{ q.addEventListener("click",()=>{ inp.value=q.dataset.v; update(); }); });
+  inp.addEventListener("input", update);
+  b.querySelector("#invQClose").addEventListener("click", close);
+  b.querySelector("#invQCancel").addEventListener("click", close);
+  b.querySelector("#invQSave").addEventListener("click",()=>{
+    const pct = Math.max(0,Math.min(100,Number(inp.value)||100));
+    const now = new Date().toISOString();
+    if(existing){
+      existing.levelPct = pct;
+      existing.lastCheck = now.slice(0,10);
+    } else {
+      state.inventory.unshift({
+        id: uid("inv"), productId: p.id, name: p.name,
+        category: p.category||"", qty:1, unit: p.unit||"u",
+        minQty:0, essential:!!p.essential, notes:"",
+        levelPct: pct, refillPointPct:25, lastCheck: now.slice(0,10)
+      });
+    }
+    // Create lot
+    state.inventoryLots.unshift({
+      id: uid("lot"), productId: p.id, name: p.name,
+      category: p.category||"", qty:1, unit: p.unit||"u",
+      boughtAt: now, finishedAt: null, source:"manual", store:"", note:""
+    });
+    persist();
+    toast(`${p.name} en cocina ✅`);
+    close();
+    onDone?.();
+  });
+}
+
+// Smart restock modal: ¿repones (sigue el lote) o es un producto nuevo (nuevo lote)?
+function openInvSmartRestockModal({ p, existing, pkey, onDone }){
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop slBackdrop";
+
+  const curPct = (existing?.levelPct===0||existing?.levelPct) ? Math.round(Number(existing.levelPct)) : 0;
+
+  b.innerHTML = `
+    <div class="modal slModal" style="padding:20px;">
+      <div class="slHeader" style="padding:0 0 14px;">
+        <div class="slTitle">🤔 ${escapeHtml(p.name)}</div>
+        <button class="slCloseBtn" id="invRClose">✕</button>
+      </div>
+      <div style="font-size:13px;color:rgba(255,255,255,.6);margin-bottom:20px;line-height:1.6;">
+        Tienes este producto en cocina al <b style="color:#fbbf24">${curPct}%</b>.<br>
+        ¿Compraste más?
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button class="invRestockBtn invRestockRepon" id="invRRepon">
+          <div style="font-size:18px">🔄</div>
+          <div>
+            <div style="font-weight:900;font-size:15px;">Repuse / Abrí un nuevo paquete</div>
+            <div style="font-size:12px;opacity:.7;margin-top:2px;">Cierra el lote anterior y empieza uno nuevo.<br>Esto mejora la predicción de duración.</div>
+          </div>
+        </button>
+        <button class="invRestockBtn invRestockAdd" id="invRAdd">
+          <div style="font-size:18px">➕</div>
+          <div>
+            <div style="font-weight:900;font-size:15px;">Solo actualizo el nivel</div>
+            <div style="font-size:12px;opacity:.7;margin-top:2px;">El lote actual continúa. Solo cambio el %.</div>
+          </div>
+        </button>
+      </div>
+    </div>`;
+  host.appendChild(b);
+
+  const close = ()=>b.remove();
+  b.querySelector("#invRClose").addEventListener("click", close);
+
+  b.querySelector("#invRRepon").addEventListener("click",()=>{
+    // Close old lots, open new one
+    const now = new Date().toISOString();
+    (state.inventoryLots||[]).filter(l=>!l.finishedAt && l.productId===p.id).forEach(l=>{ l.finishedAt = now; });
+    state.inventoryLots.unshift({
+      id:uid("lot"), productId:p.id, name:p.name,
+      category:p.category||"", qty:1, unit:p.unit||"u",
+      boughtAt:now, finishedAt:null, source:"restock", store:"", note:""
+    });
+    if(existing){ existing.levelPct=100; existing.lastCheck=now.slice(0,10); }
+    persist();
+    toast(`${p.name} repuesto ✅ — lote nuevo`);
+    close(); onDone?.();
+  });
+
+  b.querySelector("#invRAdd").addEventListener("click",()=>{
+    close();
+    openInvPickQtyModal({ p, existing, pkey, onDone });
+  });
+}
+window.openInvSmartRestockModal = openInvSmartRestockModal;
 
 // Expose inventory functions for inline onclick
 window.addInventoryFromProduct = addInventoryFromProduct;
