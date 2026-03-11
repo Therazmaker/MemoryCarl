@@ -15624,7 +15624,9 @@ function viewFinance(){
         <div class="finProjItem"><span class="finProjLabel">Proyectado</span><span class="finProjVal">S/ ${fmt(d.projected)}</span></div>
         <div class="finProjItem"><span class="finProjLabel">Balance proy.</span><span class="finProjVal ${(d.income-d.projected)>=0?'finAccPos':'finAccNeg'}">S/ ${fmt(d.income - d.projected)}</span></div>
       </div>
-      <canvas id="financeChart" height="130" style="width:100%;max-width:100%;display:block;margin-top:8px;"></canvas>
+      <div class="finProjectionChartWrap">
+        <canvas id="financeChart" class="finProjectionChart" height="130"></canvas>
+      </div>
     </section>
 
     <!-- ANÁLISIS SEMANAL -->
@@ -15711,6 +15713,74 @@ function openFinanceMetaModal(){
 }
 
 let _financeMonthChart = null;
+let _financeMonthChartCanvas = null;
+let _financeMonthChartObserver = null;
+let _financeMonthChartResizeRaf = 0;
+let _financeMonthChartWindowResize = null;
+let _financeMonthChartLastSize = { width: 0, height: 0 };
+
+function financeProjectionCleanupObserver(){
+  try{
+    if(_financeMonthChartResizeRaf){
+      cancelAnimationFrame(_financeMonthChartResizeRaf);
+      _financeMonthChartResizeRaf = 0;
+    }
+    if(_financeMonthChartObserver){
+      _financeMonthChartObserver.disconnect();
+      _financeMonthChartObserver = null;
+      console.debug("[ProjectionChart] observer disconnected");
+    }
+    if(_financeMonthChartWindowResize){
+      window.removeEventListener("resize", _financeMonthChartWindowResize);
+      _financeMonthChartWindowResize = null;
+      console.debug("[ProjectionChart] observer disconnected");
+    }
+  }catch(_e){}
+}
+
+function financeProjectionDestroyChart(){
+  financeProjectionCleanupObserver();
+  try{
+    if(_financeMonthChart){
+      _financeMonthChart.destroy();
+      _financeMonthChart = null;
+      console.debug("[ProjectionChart] destroyed old instance");
+    }
+  }catch(_e){}
+  _financeMonthChartCanvas = null;
+  _financeMonthChartLastSize = { width: 0, height: 0 };
+}
+
+function financeProjectionRequestResize(canvas){
+  if(!_financeMonthChart || !canvas) return;
+  if(_financeMonthChartResizeRaf) cancelAnimationFrame(_financeMonthChartResizeRaf);
+  _financeMonthChartResizeRaf = requestAnimationFrame(()=>{
+    _financeMonthChartResizeRaf = 0;
+    const host = canvas.parentElement || canvas;
+    const width = Math.max(0, Math.round(host.clientWidth || 0));
+    const height = Math.max(0, Math.round(host.clientHeight || canvas.height || 0));
+    if(!width || !height) return;
+    if(_financeMonthChartLastSize.width === width && _financeMonthChartLastSize.height === height){
+      console.debug("[ProjectionChart] resize ignored same size");
+      return;
+    }
+    _financeMonthChartLastSize = { width, height };
+    _financeMonthChart.resize(width, height);
+    console.debug("[ProjectionChart] resize applied", { width, height });
+  });
+}
+
+function financeProjectionBindResize(canvas){
+  financeProjectionCleanupObserver();
+  if(typeof ResizeObserver === "function"){
+    _financeMonthChartObserver = new ResizeObserver(()=> financeProjectionRequestResize(canvas));
+    _financeMonthChartObserver.observe(canvas.parentElement || canvas);
+  }else{
+    _financeMonthChartWindowResize = ()=> financeProjectionRequestResize(canvas);
+    window.addEventListener("resize", _financeMonthChartWindowResize);
+  }
+  financeProjectionRequestResize(canvas);
+}
 
 function financeDrawMonthChart(){
   const canvas = document.getElementById("financeChart");
@@ -15722,9 +15792,24 @@ function financeDrawMonthChart(){
   try{
     canvas.style.maxWidth = "100%";
     canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.display = "block";
   }catch(_e){}
 
-  try{ if(_financeMonthChart){ _financeMonthChart.destroy(); _financeMonthChart = null; } }catch(e){}
+  if(_financeMonthChart && _financeMonthChartCanvas === canvas){
+    _financeMonthChart.data.labels = labels;
+    _financeMonthChart.data.datasets[0].data = d.accExpense;
+    _financeMonthChart.data.datasets[1].data = d.accProjected;
+    _financeMonthChart.data.datasets[2].data = d.accIncome;
+    _financeMonthChart.update("none");
+    console.debug("[ProjectionChart] skipped re-init");
+    financeProjectionRequestResize(canvas);
+    return;
+  }
+
+  if(_financeMonthChart){
+    financeProjectionDestroyChart();
+  }
 
   _financeMonthChart = new Chart(canvas.getContext("2d"), {
     type: "line",
@@ -15761,7 +15846,7 @@ function financeDrawMonthChart(){
       ]
     },
     options: {
-      responsive: true,
+      responsive: false,
       maintainAspectRatio: false,
       plugins: {
         legend: {
@@ -15784,6 +15869,9 @@ function financeDrawMonthChart(){
       }
     }
   });
+  _financeMonthChartCanvas = canvas;
+  console.debug("[ProjectionChart] init");
+  financeProjectionBindResize(canvas);
 }
 
 const _viewFinanceWrap = view;
@@ -15799,6 +15887,8 @@ view = function(){
         try{ if(state.financeSubTab==='debts') financeDrawDebtChart(); }catch(_e){}
         try{ if(state.financeSubTab==='debts') financeBindDebtIncomeInput(); }catch(_e){}
       }, 0);
+    }else{
+      financeProjectionDestroyChart();
     }
   }catch(e){}
 };
