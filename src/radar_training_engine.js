@@ -22,6 +22,39 @@ function toArr(v){ return Array.isArray(v) ? v : []; }
 function now(){ return new Date().toISOString(); }
 function uid(prefix = 'rt'){ return `${prefix}_${Math.random().toString(36).slice(2,8)}${Date.now().toString(36).slice(-4)}`; }
 
+// ─── S/R manual context ──────────────────────────────────────────────────────
+export function normalizeSrContext(raw){
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return {
+    nearSupport: !!src.nearSupport,
+    nearResistance: !!src.nearResistance,
+    srComment: safeStr(src.srComment || '')
+  };
+}
+
+export function buildSrContextFromQuickAdd(raw){
+  return normalizeSrContext(raw);
+}
+
+export function updateSignalSrContext(signal = {}, srContext = {}){
+  return {
+    ...signal,
+    srContext: normalizeSrContext(srContext)
+  };
+}
+
+function getSrContextFromSignal(signal = {}){
+  return normalizeSrContext(signal?.srContext);
+}
+
+function normalizeTrainingRecord(raw){
+  const record = raw && typeof raw === 'object' ? raw : {};
+  return {
+    ...record,
+    srContext: normalizeSrContext(record.srContext)
+  };
+}
+
 // ─── Mercados reconocidos ─────────────────────────────────────────────────────
 const MARKET_KEYS = ['result','btts','over15','over25','cleanSheet','htCleanSheet','htResult'];
 
@@ -81,7 +114,7 @@ export function loadTrainingState(rawJson){
     schemaVersion: RADAR_TRAINING_VERSION,
     createdAt: safeStr(parsed.createdAt || now()),
     updatedAt: safeStr(parsed.updatedAt || now()),
-    records: toArr(parsed.records),
+    records: toArr(parsed.records).map(normalizeTrainingRecord),
     signalWeights: { ...defaultSignalWeights(), ...(parsed.signalWeights || {}) },
     marketWeights: { ...defaultMarketWeights(), ...(parsed.marketWeights || {}) },
     globalMetrics: {
@@ -172,7 +205,8 @@ export function createTrainingRecord({
   matchData,        // objeto del radar (buildRadarMatches output)
   aiPrediction,     // objeto de predicción de 1 partido (normalizado)
   manualNotes = '', // texto libre del usuario
-  manualAdjustments = {} // ajustes manuales por mercado { result: 'draw', ... }
+  manualAdjustments = {}, // ajustes manuales por mercado { result: 'draw', ... }
+  srContext = null
 }){
   if(!matchData || !aiPrediction){
     return { ok: false, error: 'matchData y aiPrediction son requeridos.' };
@@ -223,6 +257,7 @@ export function createTrainingRecord({
       // ── Ajustes manuales (usuario puede sobreescribir picks)
       manualAdjustments: normalizeManualAdjustments(manualAdjustments),
       manualNotes: safeStr(manualNotes),
+      srContext: normalizeSrContext(srContext),
 
       // ── Resultado final (se llena después)
       actualResult: null,
@@ -439,12 +474,14 @@ function evaluateMarkets(aiPrediction, manualAdjustments, actual){
 
 // ─── Recomputar métricas globales y pesos de señales ─────────────────────────
 export function recomputeTrainingMetrics(state){
-  const resolved = state.records.filter(r => r.status === 'resolved' && r.evaluation);
+  const normalizedRecords = toArr(state.records).map(normalizeTrainingRecord);
+  const resolved = normalizedRecords.filter(r => r.status === 'resolved' && r.evaluation);
 
   if(!resolved.length){
     return {
       ...state,
-      globalMetrics: { ...state.globalMetrics, resolvedRecords: 0, overallAccuracy: null, lastRecomputed: now() }
+      globalMetrics: { ...state.globalMetrics, resolvedRecords: 0, overallAccuracy: null, lastRecomputed: now() },
+      records: normalizedRecords
     };
   }
 
@@ -504,13 +541,102 @@ export function recomputeTrainingMetrics(state){
     signalWeights,
     marketWeights,
     globalMetrics: {
-      totalRecords:     state.records.length,
+      totalRecords:     normalizedRecords.length,
       resolvedRecords:  resolved.length,
       overallAccuracy,
       lastRecomputed:   now()
     },
+    records: normalizedRecords,
     updatedAt: now()
   };
+}
+
+export function filterSignalsBySr(signals = [], filter = {}){
+  const mode = {
+    nearSupport: filter?.nearSupport || 'all',
+    nearResistance: filter?.nearResistance || 'all'
+  };
+  return toArr(signals).filter((signal)=>{
+    const sr = getSrContextFromSignal(signal);
+    const supportOk = mode.nearSupport === 'all'
+      || (mode.nearSupport === 'only' && sr.nearSupport)
+      || (mode.nearSupport === 'exclude' && !sr.nearSupport);
+    const resistanceOk = mode.nearResistance === 'all'
+      || (mode.nearResistance === 'only' && sr.nearResistance)
+      || (mode.nearResistance === 'exclude' && !sr.nearResistance);
+    return supportOk && resistanceOk;
+  });
+}
+
+function computeWinLossBucket(records = []){
+  const reviewed = toArr(records).filter(r => r.status === 'resolved' && r.evaluation);
+  const wins = reviewed.filter(r => Number(r.evaluation?.summary?.matchAccuracy || 0) >= 0.5).length;
+  const losses = reviewed.length - wins;
+  return {
+    total: toArr(records).length,
+    reviewed: reviewed.length,
+    wins,
+    losses,
+    winrate: reviewed.length ? wins / reviewed.length : null
+  };
+}
+
+export function computeSrStats(records = []){
+  const normalized = toArr(records).map(normalizeTrainingRecord);
+  const baseline = computeWinLossBucket(normalized);
+  const nearSupport = normalized.filter(r => r.srContext.nearSupport);
+  const nearResistance = normalized.filter(r => r.srContext.nearResistance);
+  const supportOnly = normalized.filter(r => r.srContext.nearSupport && !r.srContext.nearResistance);
+  const resistanceOnly = normalized.filter(r => !r.srContext.nearSupport && r.srContext.nearResistance);
+  const neither = normalized.filter(r => !r.srContext.nearSupport && !r.srContext.nearResistance);
+  const both = normalized.filter(r => r.srContext.nearSupport && r.srContext.nearResistance);
+
+  return {
+    baseline,
+    nearSupport: computeWinLossBucket(nearSupport),
+    nearResistance: computeWinLossBucket(nearResistance),
+    combined: {
+      supportOnly: computeWinLossBucket(supportOnly),
+      resistanceOnly: computeWinLossBucket(resistanceOnly),
+      neither: computeWinLossBucket(neither),
+      both: computeWinLossBucket(both)
+    }
+  };
+}
+
+export function buildSrInsights(srStats){
+  const stats = srStats && typeof srStats === 'object' ? srStats : computeSrStats([]);
+  const base = Number(stats.baseline?.winrate);
+  const support = Number(stats.nearSupport?.winrate);
+  const resistance = Number(stats.nearResistance?.winrate);
+  const baseValid = Number.isFinite(base);
+  const supportValid = Number.isFinite(support);
+  const resistanceValid = Number.isFinite(resistance);
+  const insights = [];
+
+  if(baseValid && supportValid){
+    if(support > base){
+      insights.push('Las señales cerca de soporte muestran mejor rendimiento que el baseline.');
+    } else if(support < base){
+      insights.push('Las señales cerca de soporte rinden por debajo del baseline en esta muestra.');
+    }
+  }
+
+  if(baseValid && resistanceValid){
+    if(resistance < base){
+      insights.push('El patrón parece degradarse cerca de resistencia en los datos actuales.');
+    } else if(resistance > base){
+      insights.push('Las señales cerca de resistencia muestran mejora relativa frente al baseline, con cautela.');
+    }
+  }
+
+  const lowSample = [stats.nearSupport?.reviewed || 0, stats.nearResistance?.reviewed || 0].some(n => n < 5);
+  if(lowSample){
+    insights.push('La muestra con contexto S/R todavía es baja.');
+  }
+  insights.push('La mejora observada aún necesita más evidencia antes de tomarla como regla fija.');
+
+  return insights;
 }
 
 function avgAccuracy(records){
@@ -522,6 +648,8 @@ function avgAccuracy(records){
 
 // ─── Generar reporte de aprendizaje ──────────────────────────────────────────
 export function buildTrainingReport(state){
+  const srStats = computeSrStats(state.records || []);
+  const srInsights = buildSrInsights(srStats);
   const resolved = state.records.filter(r => r.status === 'resolved');
   const pending  = state.records.filter(r => r.status === 'pending');
 
@@ -574,6 +702,10 @@ export function buildTrainingReport(state){
     },
     signalInsights,
     marketInsights,
+    srContextAnalysis: {
+      ...srStats,
+      insights: srInsights
+    },
     topSignals: signalInsights.slice(0, 3),
     worstSignals: [...signalInsights].sort((a, b) => (a.predictivePower || 0) - (b.predictivePower || 0)).slice(0, 3)
   };
