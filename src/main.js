@@ -8639,7 +8639,7 @@ function wireActions(root){
       // Shopping dashboard navigation
 // Inventory tabs
 if(act==="invTab"){
-  state.inventorySubtab = (btn.dataset.tab === "history") ? "history" : (btn.dataset.tab === "calendar" ? "calendar" : "stock");
+  state.inventorySubtab = (btn.dataset.tab === "history") ? "history" : (btn.dataset.tab === "calendar" ? "calendar" : "actual");
   view();
   return;
 }
@@ -8652,7 +8652,7 @@ if(btn.dataset.invCat !== undefined){
 }
 
 // Inventory item actions (new)
-const invActBtn = btn.closest("[data-inv-act]");
+const invActBtn = e.target.closest("[data-inv-act]");
 if(invActBtn){
   const invAct = invActBtn.dataset.invAct;
   if(invAct==="toList"){ addInventoryToList(invActBtn.dataset.iid); return; }
@@ -8868,6 +8868,35 @@ if(act==="invMode"){
           return;
         }
 if(act==="savePurchase"){
+  // SMART INVENTORY CHECK: before saving, detect items already in Actual
+  ensureInventory();
+  ensureInventoryLots();
+  const listItemsForCheck = (list.items||[]);
+  const itemsInCocina = listItemsForCheck.filter(it=>{
+    const pid = (it.productId||"").trim();
+    if(pid) return (state.inventory||[]).some(inv=>inv.productId===pid);
+    const nk = normName_(it.name);
+    return (state.inventory||[]).some(inv=>!inv.productId && normName_(inv.name)===nk);
+  });
+
+  if(itemsInCocina.length > 0){
+    // Show smart dialog before saving
+    openSmartPurchaseInventoryModal({
+      items: itemsInCocina,
+      onContinue: (decisions)=>{
+        // decisions: [{it, action: "restock"|"add"|"skip"}]
+        doSavePurchase_({list, decisions});
+      }
+    });
+    return;
+  }
+
+  // No items in cocina → save directly
+  doSavePurchase_({list, decisions:[]});
+  return;
+}
+
+function doSavePurchase_({list, decisions}){
   const d = isoDate();
   const defaultAccountId = state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "";
   openShoppingSavePurchaseModal({
@@ -8878,6 +8907,7 @@ if(act==="savePurchase"){
     onSubmit: ({date, store, notes, mkfin, accountId})=>{
       const safeDate = (date||"").trim() || d;
       const sourceListId = `L-${Date.now()}`;
+      const now = new Date().toISOString();
       const items = (list.items||[]).map(it=>({
         id: uid("i"),
         name: it.name,
@@ -8900,25 +8930,53 @@ if(act==="savePurchase"){
         totals
       });
 
-      // Stack to inventory (qty increases or new items created)
-      applyItemsToInventory_(items);
-      applyItemsToInventoryLots_(items, { boughtAtISO: new Date().toISOString(), sourceListId, store:(store||"").trim() });
+      // Apply smart inventory decisions
+      ensureInventory();
+      ensureInventoryLots();
+      for(const item of items){
+        const pid = item.productId;
+        const decision = decisions.find(d=>{
+          const dpid = (d.it.productId||"").trim();
+          if(dpid && pid) return dpid === pid;
+          return normName_(d.it.name)===normName_(item.name);
+        });
+        const action = decision?.action || "add";
 
-      // Optional: mark current list as bought to reflect it was committed
+        const existing = pid
+          ? (state.inventory||[]).find(inv=>inv.productId===pid)
+          : (state.inventory||[]).find(inv=>!inv.productId && normName_(inv.name)===normName_(item.name));
+
+        if(action==="restock"){
+          // Close old lots → open new one → reset level to 100%
+          (state.inventoryLots||[]).filter(l=>!l.finishedAt && (pid ? l.productId===pid : normName_(l.name)===normName_(item.name))).forEach(l=>{ l.finishedAt = now; });
+          if(existing){ existing.levelPct=100; existing.lastCheck=now.slice(0,10); }
+          state.inventoryLots.unshift({ id:uid("lot"), productId:pid||"", name:item.name, category:item.category||"", qty:item.qty, unit:item.unit||"u", boughtAt:now, finishedAt:null, source:"shopping", sourceListId, store:(store||"").trim(), note:"" });
+        } else if(action==="add"){
+          // Normal: increment qty, add lot
+          if(existing){ existing.qty = Number(existing.qty||0) + item.qty; }
+          else {
+            state.inventory.unshift({ id:uid("inv"), productId:pid||"", name:item.name, category:item.category||"", qty:item.qty, unit:item.unit||"u", minQty:0, essential:!!item.essential, notes:"", levelPct:"", refillPointPct:25, lastCheck:"" });
+          }
+          state.inventoryLots.unshift({ id:uid("lot"), productId:pid||"", name:item.name, category:item.category||"", qty:item.qty, unit:item.unit||"u", boughtAt:now, finishedAt:null, source:"shopping", sourceListId, store:(store||"").trim(), note:"" });
+        }
+        // "skip" → no inventory change
+      }
+
+      // For items NOT in decisions (not in cocina previously), apply normally
+      const decidedNames = new Set(decisions.map(d=>(d.it.productId||normName_(d.it.name))));
+      const undecided = items.filter(it=>{
+        const key = it.productId || normName_(it.name);
+        return !decidedNames.has(key);
+      });
+      applyItemsToInventory_(undecided);
+      applyItemsToInventoryLots_(undecided, { boughtAtISO: now, sourceListId, store:(store||"").trim() });
+
       (list.items||[]).forEach(it=>{ it.bought = true; });
 
-      // Phase 4: Create finance expense automatically (Mercado)
       if(mkfin && (state.financeAccounts||[]).length){
         const accId = accountId || defaultAccountId;
         const dateISO = `${safeDate}T12:00:00`;
-        financeEnsureShoppingExpense_({
-          sourceListId,
-          dateISO,
-          amount: totals.total,
-          accountId: accId,
-          store: (store||"").trim(),
-          notes: (notes||"").trim()
-        });
+        financeEnsureShoppingExpense_({ sourceListId, dateISO, amount: totals.total, accountId: accId, store:(store||"").trim(), notes:(notes||"").trim() });
       }
 
       persist();
@@ -8927,7 +8985,70 @@ if(act==="savePurchase"){
       view();
     }
   });
-  return;
+}
+
+// Smart modal: asks what to do with items already in Actual
+function openSmartPurchaseInventoryModal({ items, onContinue }){
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop slBackdrop";
+
+  // Default decision: restock (most common scenario)
+  const decisions = items.map(it=>({ it, action:"restock" }));
+
+  function render(){
+    b.innerHTML = `
+      <div class="modal slModal" style="padding:20px;gap:0;">
+        <div class="slHeader" style="padding:0 0 12px;">
+          <div class="slTitle">🤔 Detecté reposiciones</div>
+          <button class="slCloseBtn" id="spiClose">✕</button>
+        </div>
+        <div style="font-size:13px;color:rgba(255,255,255,.55);margin-bottom:16px;line-height:1.6;">
+          Compraste ${items.length} producto${items.length>1?"s que ya están":"que ya está"} en tu cocina.<br>
+          ¿Qué hago con cada uno?
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;">
+          ${decisions.map((dec,i)=>{
+            const inv = (state.inventory||[]).find(inv=> dec.it.productId ? inv.productId===dec.it.productId : normName_(inv.name)===normName_(dec.it.name));
+            const curPct = (inv?.levelPct===0||inv?.levelPct) ? Math.round(Number(inv.levelPct)) : null;
+            const pctTxt = curPct!==null ? ` · cocina al ${curPct}%` : "";
+            return `
+              <div class="spiItem">
+                <div class="spiItemName">${escapeHtml(dec.it.name)}<span class="spiItemSub">${pctTxt}</span></div>
+                <div class="spiActions">
+                  <button class="spiBtn ${dec.action==="restock"?"spiActive":""}" data-spi-i="${i}" data-spi-act="restock">
+                    🔄 Repuse<span class="spiBtnSub">Nuevo paquete</span>
+                  </button>
+                  <button class="spiBtn ${dec.action==="add"?"spiActive":""}" data-spi-i="${i}" data-spi-act="add">
+                    ➕ Añadí más<span class="spiBtnSub">Suma al lote</span>
+                  </button>
+                  <button class="spiBtn ${dec.action==="skip"?"spiActive":""}" data-spi-i="${i}" data-spi-act="skip">
+                    ⏭ Ignorar<span class="spiBtnSub">Sin cambio</span>
+                  </button>
+                </div>
+              </div>`;
+          }).join("")}
+        </div>
+        <div class="slQPActions">
+          <button class="slQPCancel" id="spiCancel">Cancelar</button>
+          <button class="slQPConfirm" id="spiContinue">Continuar →</button>
+        </div>
+      </div>`;
+
+    b.querySelectorAll("[data-spi-act]").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        const idx = Number(btn.dataset.spiI);
+        decisions[idx].action = btn.dataset.spiAct;
+        render();
+      });
+    });
+    b.querySelector("#spiClose").addEventListener("click",()=>b.remove());
+    b.querySelector("#spiCancel").addEventListener("click",()=>b.remove());
+    b.querySelector("#spiContinue").addEventListener("click",()=>{ b.remove(); onContinue(decisions); });
+  }
+
+  host.appendChild(b);
+  render();
 }
 
 
@@ -10222,199 +10343,112 @@ function openFinishLotModal(productKey){
 }
 
 function viewInventoryCalendar(){
-  ensureInventory();
   ensureInventoryLots();
-
-  // month navigation
-  state.inventoryCalOffset = Number(state.inventoryCalOffset||0);
-  const base = new Date();
-  const m = new Date(base.getFullYear(), base.getMonth() + state.inventoryCalOffset, 1);
-  const year = m.getFullYear();
-  const monthIdx = m.getMonth();
-  const monthName = m.toLocaleString("es-ES",{month:"long", year:"numeric"});
-
-  const { days } = invMonthGrid_(year, monthIdx);
-  const ymdMonth = String(year)+"-"+String(monthIdx+1).padStart(2,"0");
+  ensureInventory();
 
   const lots = (state.inventoryLots||[]);
   const stats = invGetConsumptionStats_(lots);
 
-  // Build day markers
-  const dayMap = new Map(); // ymd -> {buys:[], fins:[]}
-  const pushDay = (ymd, kind, lot)=>{
-    const cur = dayMap.get(ymd) || { buys:[], fins:[] };
-    cur[kind].push(lot);
-    dayMap.set(ymd, cur);
-  };
-  for(const l of lots){
-    if(l?.boughtAt){
-      const ymd = String(l.boughtAt).slice(0,10);
-      pushDay(ymd,"buys", l);
-    }
-    if(l?.finishedAt){
-      const ymd = String(l.finishedAt).slice(0,10);
-      pushDay(ymd,"fins", l);
-    }
-  }
+  // All closed lots sorted by finish date (newest first)
+  const closed = lots.filter(l=>l?.boughtAt && l?.finishedAt)
+    .sort((a,b)=>String(b.finishedAt||"").localeCompare(String(a.finishedAt||"")));
 
-  // Predictions list (active lots)
+  // Active lots with predictions
   const activeLots = lots.filter(l=>l?.boughtAt && !l.finishedAt);
-  const predictRows = activeLots.map(l=>{
+
+  // Group closed by product for timeline
+  const byProduct = new Map();
+  for(const l of closed){
     const key = lotProductKey_(l);
-    const st = stats.get(key);
-    if(!st?.avgDays) return null;
-    const ba = Date.parse(l.boughtAt);
-    if(!isFinite(ba)) return null;
-    const pred = new Date(ba + st.avgDays*24*60*60*1000);
-    const daysLeft = Math.round((pred.getTime() - Date.now())/(24*60*60*1000));
-    return {
-      key,
-      name: l.name || "Item",
-      unit: l.unit || "u",
-      predYmd: fmtYMD_(pred),
-      daysLeft
-    };
-  }).filter(Boolean)
-    .sort((a,b)=>a.daysLeft-b.daysLeft)
-    .slice(0, 10);
-
-  // Monthly suggestions (simple)
-  const essentials = (state.inventory||[]).filter(x=>x.essential);
-  const plan = [];
-  for(const it of essentials){
-    const key = it.productId ? `pid:${String(it.productId).trim()}` : `nm:${normName_(it.name)}`;
-    const st = stats.get(key);
-    if(!st?.avgDays) continue;
-    // next buy = predicted finish of latest active lot minus 2 days
-    const act = activeLots.filter(l=>lotProductKey_(l)===key).sort((a,b)=>String(b.boughtAt||"").localeCompare(String(a.boughtAt||"")));
-    const latest = act[0];
-    if(!latest) continue;
-    const ba = Date.parse(latest.boughtAt);
-    if(!isFinite(ba)) continue;
-    const predFin = new Date(ba + st.avgDays*24*60*60*1000);
-    const buyAt = new Date(predFin.getTime() - 2*24*60*60*1000);
-    plan.push({
-      key,
-      name: it.name,
-      when: fmtYMD_(buyAt),
-      note: `dura ~${Math.round(st.avgDays)}d (${st.samples} muestras)`
-    });
+    if(!byProduct.has(key)) byProduct.set(key, { name:l.name||"Item", lots:[] });
+    byProduct.get(key).lots.push(l);
   }
-  plan.sort((a,b)=>String(a.when).localeCompare(String(b.when)));
 
-  const dayCells = days.map(d=>{
-    const ymd = fmtYMD_(d);
-    const inMonth = d.getMonth()===monthIdx;
-    const ev = dayMap.get(ymd);
-    const buys = ev?.buys?.length || 0;
-    const fins = ev?.fins?.length || 0;
-    const dots = `
-      <div class="calDots">
-        ${buys?`<span class="dot buy" title="Compras: ${buys}"></span>`:""}
-        ${fins?`<span class="dot fin" title="Se acabó: ${fins}"></span>`:""}
-      </div>
-    `;
+  // For each product build a row with bars
+  // We'll show a simple swimlane: each lot = a pill with duration
+  const productRows = [...byProduct.entries()].slice(0, 20).map(([key, data])=>{
+    const st = stats.get(key);
+    const avgDays = st?.avgDays ? Math.round(st.avgDays) : null;
+    const samples = st?.samples || 0;
+
+    const pills = data.lots.slice(0,6).map(l=>{
+      const ba = Date.parse(l.boughtAt);
+      const fa = Date.parse(l.finishedAt);
+      const days = isFinite(ba)&&isFinite(fa) ? Math.round((fa-ba)/(1000*60*60*24)) : null;
+      const startLabel = String(l.boughtAt||"").slice(5,10); // MM-DD
+      const color = days===null ? "#555" : days <= (avgDays||999)*0.7 ? "#34d399" : days >= (avgDays||0)*1.3 ? "#f87171" : "#7c5cff";
+      return `<div class="calLot" style="border-color:${color};color:${color}" title="${escapeHtml(startLabel)}">
+        ${days!==null ? days+"d" : "?"}<span class="calLotDate">${escapeHtml(startLabel)}</span>
+      </div>`;
+    }).join("");
+
+    const avgBadge = avgDays ? `<span class="invStatChip" style="background:rgba(124,92,255,.2);color:rgba(124,92,255,.9)">~${avgDays}d avg · ${samples} muestras</span>` : "";
+
+    // Active lot prediction
+    const activePred = activeLots.filter(l=>lotProductKey_(l)===key).map(l=>{
+      if(!st?.avgDays) return "";
+      const ba = Date.parse(l.boughtAt);
+      if(!isFinite(ba)) return "";
+      const pred = new Date(ba + st.avgDays*24*60*60*1000);
+      const dLeft = Math.round((pred.getTime()-Date.now())/(1000*60*60*1000)); // hours
+      const dDays = Math.round(dLeft/24);
+      const color = dDays<=0?"#f87171":dDays<=3?"#fbbf24":"#34d399";
+      const label = dDays<=0?"⛔ ya debería acabar":`~${dDays}d restantes`;
+      return `<span class="calActivePred" style="color:${color}">📦 ${escapeHtml(label)}</span>`;
+    }).join("");
+
     return `
-      <div class="calCell ${inMonth?"":"dim"}">
-        <div class="calDayNum">${d.getDate()}</div>
-        ${dots}
+      <div class="calProductRow">
+        <div class="calProductHead">
+          <div class="calProductName">${escapeHtml(data.name)}</div>
+          ${avgBadge}
+          ${activePred}
+        </div>
+        <div class="calLots">${pills || '<span style="opacity:.4;font-size:12px">Sin historial cerrado aún</span>'}</div>
       </div>
     `;
-  }).join("");
+  }).join("") || `<div class="invEmpty">Sin historial de duración aún<br><span>Registra productos en Actual y marca "Se acabó" cuando terminen</span></div>`;
 
-  const topPredict = predictRows.map(r=>{
-    const warn = r.daysLeft<=2 ? "chip danger" : (r.daysLeft<=5 ? "chip warn" : "chip");
-    const label = r.daysLeft<0 ? `pasado (${Math.abs(r.daysLeft)}d)` : `${r.daysLeft}d`;
-    return `
-      <div class="item">
-        <div class="left">
-          <div class="name">${escapeHtml(r.name)}</div>
-          <div class="meta">Predicción fin: <b>${escapeHtml(r.predYmd)}</b> · <span class="${warn}">${escapeHtml(label)}</span></div>
-        </div>
-        <div class="row">
-          <button class="btn" onclick="openFinishLotModal('${escapeHtml(r.key)}')">Se acabó</button>
-        </div>
-      </div>
-    `;
-  }).join("") || `<div class="muted">Aún no hay predicciones. Necesitas cerrar algunos lotes con “Se acabó”.</div>`;
-
-  const planRows = plan.slice(0,12).map(p=>`
-    <div class="item">
-      <div class="left">
-        <div class="name">${escapeHtml(p.name)}</div>
-        <div class="meta">Comprar aprox: <b>${escapeHtml(p.when)}</b> · ${escapeHtml(p.note)}</div>
-      </div>
-      <div class="row">
-        <button class="btn" onclick="openFinishLotModal('${escapeHtml(p.key)}')">Cerrar lote</button>
-      </div>
-    </div>
-  `).join("") || `<div class="muted">Sin plan aún. Marca “Se acabó” en varios productos para que aprenda tu ritmo.</div>`;
-
-  // open lots grouped quick actions
+  // Quick close buttons for active lots
   const openGroups = new Map();
   for(const l of activeLots){
     const key = lotProductKey_(l);
     const cur = openGroups.get(key) || { name:l.name||"Item", count:0 };
-    cur.count += 1;
+    cur.count++;
     openGroups.set(key, cur);
   }
-  const openBtns = [...openGroups.entries()].slice(0,12).map(([k,v])=>
-    `<button class="btn" onclick="openFinishLotModal('${escapeHtml(k)}')">Se acabó · ${escapeHtml(v.name)}</button>`
-  ).join("") || `<div class="muted">No hay lotes activos.</div>`;
+  const closeBtns = [...openGroups.entries()].slice(0,10).map(([k,v])=>
+    `<button class="invA invA-fin" style="flex:none;margin-bottom:4px;" onclick="openFinishLotModal('${escapeHtml(k)}')">⛔ Se acabó · ${escapeHtml(v.name)}</button>`
+  ).join("") || `<div class="invEmpty" style="padding:14px">Sin lotes activos</div>`;
 
   return `
-    <section class="card">
+    <section class="card" style="margin-bottom:12px;">
       <div class="cardTop">
         <div>
-          <h3 class="cardTitle">Calendario de Inventario</h3>
-          <div class="small">Compras (•) y “se acabó” (•). Tu consumo se vuelve visible.</div>
-        </div>
-        <div class="row">
-          <button class="btn" data-act="invCalNav" data-dir="-1">◀</button>
-          <div class="chip">${escapeHtml(monthName)}</div>
-          <button class="btn" data-act="invCalNav" data-dir="1">▶</button>
+          <h3 class="cardTitle">⛔ Marcar como "Se acabó"</h3>
+          <div class="small">¿Terminaste algo hoy?</div>
         </div>
       </div>
       <div class="hr"></div>
-
-      <div class="calGrid">
-        <div class="calHead">L</div><div class="calHead">M</div><div class="calHead">X</div><div class="calHead">J</div><div class="calHead">V</div><div class="calHead">S</div><div class="calHead">D</div>
-        ${dayCells}
-      </div>
-
-      <div class="hr" style="margin-top:12px;"></div>
-      <div class="small">Accesos rápidos: cerrar un lote (cuando se termina)</div>
-      <div class="grid" style="grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px;">
-        ${openBtns}
+      <div style="display:flex;flex-wrap:wrap;gap:8px;padding-top:4px;">
+        ${closeBtns}
       </div>
     </section>
 
     <section class="card">
       <div class="cardTop">
         <div>
-          <h3 class="cardTitle">Predicción: ¿cuándo se acaba?</h3>
-          <div class="small">Basado en duración promedio de lotes cerrados.</div>
+          <h3 class="cardTitle">⏱ Duración por producto</h3>
+          <div class="small">Cada píldora = un lote. Verde = duró menos, rojo = duró más de lo normal.</div>
         </div>
       </div>
       <div class="hr"></div>
-      <div class="list">${topPredict}</div>
-    </section>
-
-    <section class="card">
-      <div class="cardTop">
-        <div>
-          <h3 class="cardTitle">Plan sugerido (mes)</h3>
-          <div class="small">Para esenciales con historial suficiente.</div>
-        </div>
+      <div class="calTimeline">
+        ${productRows}
       </div>
-      <div class="hr"></div>
-      <div class="list">${planRows}</div>
     </section>
   `;
 }
-
-// expose
-window.openFinishLotModal = openFinishLotModal;
 
 function viewInventory(){
   ensureInventory();
