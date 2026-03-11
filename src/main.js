@@ -15596,7 +15596,9 @@ function viewFinance(){
       <div class="finSectionHead">
         <div class="finSectionTitle">📅 Últimos 7 días</div>
       </div>
-      <canvas id="dailyExpenseChart" height="110" style="width:100%;max-width:100%;display:block;"></canvas>
+      <div style="height:110px;min-height:110px;max-height:110px;overflow:hidden;">
+        <canvas id="dailyExpenseChart" height="110" style="width:100%;max-width:100%;display:block;"></canvas>
+      </div>
     </section>
 
     <!-- PILARES -->
@@ -15874,8 +15876,19 @@ let _dailyExpenseChart = null;
 
 function renderDailyExpenseChart(){
   const ctx = document.getElementById("dailyExpenseChart");
-  if(!ctx) return;
-  
+  if(!ctx || typeof Chart === "undefined") return;
+
+  // Hard-lock render size and use non-responsive chart mode to avoid
+  // resize feedback loops that can expand this section indefinitely.
+  try{
+    const parentW = Math.max(1, Math.round((ctx.parentElement?.clientWidth || ctx.clientWidth || 320)));
+    ctx.style.width = "100%";
+    ctx.style.maxWidth = "100%";
+    ctx.style.height = "110px";
+    ctx.width = parentW;
+    ctx.height = 110;
+  }catch(_e){}
+
   const d = getLast7DaysExpenseData();
 
   try{ if(_dailyExpenseChart){ _dailyExpenseChart.destroy(); _dailyExpenseChart = null; } }catch(_e){}
@@ -15894,8 +15907,8 @@ function renderDailyExpenseChart(){
       }]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: false,
+      maintainAspectRatio: true,
       plugins: {
         legend: { display: false },
         tooltip: {
