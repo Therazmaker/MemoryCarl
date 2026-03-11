@@ -15497,93 +15497,143 @@ function viewFinance(){
     </div>
   `;
 
-  // Principal content (reusa tus cards actuales)
-  const accountsHtml = (state.financeAccounts||[]).map(a=>`
-    <div class="budgetRow" style="cursor:pointer" onclick="openFinanceAccountEdit('${a.id}')">
-      <div>${escapeHtml(a.name)}</div>
-      <div>S/ ${fmt(a.balance)}</div>
-    </div>
-  `).join("") || `<div class="muted">Sin cuentas</div>`;
+  // Principal content — redesigned
+  const totalBalance = (state.financeAccounts||[]).reduce((s,a)=>s+Number(a.balance||0),0);
+  const savings = d.income - d.expense;
+  const savingsPct = meta.expectedIncome > 0 ? Math.round((savings / meta.expectedIncome) * 100) : null;
+  const spentPct = meta.expectedIncome > 0 ? Math.min(100, Math.round((d.expense / meta.expectedIncome) * 100)) : null;
+
+  const accountCards = (state.financeAccounts||[]).map(a=>{
+    const bal = Number(a.balance||0);
+    const isPos = bal >= 0;
+    return `
+      <div class="finAccCard" onclick="openFinanceAccountEdit('${a.id}')">
+        <div class="finAccName">${escapeHtml(a.name)}</div>
+        <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">S/ ${fmt(bal)}</div>
+      </div>`;
+  }).join("") || `<div class="finAccEmpty">Sin cuentas · <span onclick="openFinanceAccountModal()" style="color:#7c5cff;cursor:pointer">Agregar +</span></div>`;
+
+  const pillarsData = [
+    { icon:"🛒", label:"Mercado",   val: finPillars.market   },
+    { icon:"🧾", label:"Servicios", val: finPillars.services  },
+    { icon:"💳", label:"Deudas",    val: finPillars.debts     },
+    { icon:"📦", label:"Otros",     val: finPillars.other     },
+  ];
+  const pillarsTotal = pillarsData.reduce((s,p)=>s+p.val,0) || 1;
+  const pillarsRows = pillarsData.map(p=>{
+    const pct = Math.round((p.val/pillarsTotal)*100);
+    const w = Math.max(4, pct);
+    return `
+      <div class="finPillarRow">
+        <div class="finPillarLeft">
+          <span class="finPillarIcon">${p.icon}</span>
+          <span class="finPillarLabel">${p.label}</span>
+        </div>
+        <div class="finPillarBar">
+          <div class="finPillarFill" style="width:${w}%"></div>
+        </div>
+        <div class="finPillarVal">S/ ${fmt(p.val)}</div>
+      </div>`;
+  }).join("");
 
   const principalHtml = `
-    <section class="card homeCard homeWide">
-      <div class="cardTop"><h2 class="cardTitle">Resumen Diario</h2><button class="iconBtn" onclick="openFinanceImport()">⬆️</button></div>
-      <div class="hr"></div>
-      <canvas id="dailyExpenseChart" height="120"></canvas>
 
-      <div class="cardTop" style="margin-top:10px">
-        <h2 class="cardTitle">Meta mensual</h2>
-        <button class="iconBtn" onclick="openFinanceMetaModal()">⚙️</button>
-      </div>
-      <div class="hr"></div>
-      <div>Ingreso esperado: <strong>S/ ${fmt(meta.expectedIncome)}</strong></div>
-      <div>Ahorro meta: <strong>S/ ${fmt(meta.targetSavings)}</strong></div>
-      <div>Ingreso real: <strong>S/ ${fmt(d.income)}</strong></div>
-      <div>Diferencia ingreso: <strong>S/ ${fmt(d.income - meta.expectedIncome)}</strong></div>
-    </section>
-
-
-    <section class="card homeCard homeWide">
-      <div class="cardTop">
-        <h2 class="cardTitle">Pilares del mes</h2>
-        <button class="iconBtn" onclick="setFinanceSubTab('commitments')">⚡</button>
-      </div>
-      <div class="hr"></div>
-      <div class="row" style="gap:10px; flex-wrap:wrap">
-        <div class="chipStat">🛒 Mercado: <strong>S/ ${_financeFmt(finPillars.market)}</strong></div>
-        <div class="chipStat">🧾 Servicios: <strong>S/ ${_financeFmt(finPillars.services)}</strong></div>
-        <div class="chipStat">💳 Deudas: <strong>S/ ${_financeFmt(finPillars.debts)}</strong></div>
-        <div class="chipStat">📦 Otros: <strong>S/ ${_financeFmt(finPillars.other)}</strong></div>
-      </div>
-      <div style="margin-top:10px">
-        <canvas id="financePillarsChart" height="140"></canvas>
-      </div>
-      <div class="muted" style="margin-top:8px">Esto se calcula desde tus movimientos del mes actual.</div>
-    </section>
-
-    <section class="card homeCard homeWide">
-      <div class="cardTop">
-        <h2 class="cardTitle">Proyección</h2>
-        <div class="row" style="gap:8px">
-          <button class="chipBtn ${state.financeProjectionMode==='conservative'?'active':''}" onclick="financeSetProjectionMode('conservative')">Conservador</button>
-          <button class="chipBtn ${(!state.financeProjectionMode || state.financeProjectionMode==='normal')?'active':''}" onclick="financeSetProjectionMode('normal')">Normal</button>
-          <button class="chipBtn ${state.financeProjectionMode==='realistic'?'active':''}" onclick="financeSetProjectionMode('realistic')">Realista</button>
+    <!-- CUENTAS TOP -->
+    <section class="finSection">
+      <div class="finSectionHead">
+        <div class="finSectionTitle">💳 Cuentas</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="finIconBtn" title="Mes anterior" onclick="financeShiftMonth(-1)">◀</button>
+          <button class="finIconBtn" title="Mes actual" onclick="financeResetMonth()">●</button>
+          <button class="finIconBtn" title="Mes siguiente" onclick="financeShiftMonth(1)">▶</button>
+          <button class="finIconBtn" title="Agregar cuenta" onclick="openFinanceAccountModal()">＋</button>
+          <button class="finIconBtn" title="Más opciones" onclick="openFinanceImport()">⬆</button>
         </div>
       </div>
-      <div class="hr"></div>
-      <div>Gasto real: <strong>S/ ${fmt(d.expense)}</strong></div>
-      <div>Gasto proyectado: <strong>S/ ${fmt(d.projected)}</strong></div>
-      <div>Balance proyectado: <strong>S/ ${fmt(d.income - d.projected)}</strong></div>
-      <canvas id="financeChart" height="140"></canvas>
+      <div class="finAccGrid">
+        ${accountCards}
+      </div>
+      <div class="finTotalRow">
+        <span class="finTotalLabel">Total</span>
+        <span class="finTotalVal ${totalBalance>=0?'finAccPos':'finAccNeg'}">S/ ${fmt(totalBalance)}</span>
+      </div>
     </section>
 
-    
-<section class="card homeCard homeWide">
-  <div class="cardTop">
-    <h2 class="cardTitle">Análisis semanal</h2>
-    <div class="row" style="gap:8px">
-      <button class="iconBtn" title="Generar ahora" onclick="financeWeeklyGenerateNow()">✨</button>
-    </div>
-  </div>
-  <div class="hr"></div>
-  ${renderFinanceWeeklyCard()}
-</section>
-
-<section class="card homeCard homeWide">
-      <div class="cardTop">
-        <h2 class="cardTitle">Cuentas</h2>
-        <div class="row" style="gap:8px">
-          <button class="iconBtn" title="Mes anterior" onclick="financeShiftMonth(-1)">◀</button>
-          <button class="iconBtn" title="Mes actual" onclick="financeResetMonth()">●</button>
-          <button class="iconBtn" title="Mes siguiente" onclick="financeShiftMonth(1)">▶</button>
-          <button class="iconBtn" title="Usar saldos actuales como inicio" onclick="financeSetCurrentAsBaselineConfirm()">⟲</button>
-          <button class="iconBtn" title="Reiniciar a cero (archiva historial)" onclick="financeResetToZeroConfirm()">↺</button>
-          <button class="iconBtn" title="Borrar TODO (inicio limpio)" onclick="financeHardResetAllConfirm()">🧨</button>
-          <button class="iconBtn" title="Agregar cuenta" onclick="openFinanceAccountModal()">＋</button>
+    <!-- RESUMEN DEL MES -->
+    <section class="finSection">
+      <div class="finSectionHead">
+        <div class="finSectionTitle">📊 Este mes</div>
+        <button class="finIconBtn" onclick="openFinanceMetaModal()">⚙️</button>
+      </div>
+      <div class="finStatsGrid">
+        <div class="finStatBox finStatIncome">
+          <div class="finStatIcon">📥</div>
+          <div class="finStatVal">S/ ${fmt(d.income)}</div>
+          <div class="finStatLabel">Ingreso</div>
+        </div>
+        <div class="finStatBox finStatExpense">
+          <div class="finStatIcon">📤</div>
+          <div class="finStatVal">S/ ${fmt(d.expense)}</div>
+          <div class="finStatLabel">Gasto</div>
+        </div>
+        <div class="finStatBox ${savings>=0?'finStatSavings':'finStatNeg'}">
+          <div class="finStatIcon">${savings>=0?'💰':'⚠️'}</div>
+          <div class="finStatVal">S/ ${fmt(Math.abs(savings))}</div>
+          <div class="finStatLabel">${savings>=0?'Ahorro':'Déficit'}</div>
         </div>
       </div>
-      <div class="hr"></div>
-      ${accountsHtml}
+      ${spentPct!==null ? `
+      <div class="finBudgetBar">
+        <div class="finBudgetBarInner">
+          <div class="finBudgetFill ${spentPct>90?'finBudgetDanger':spentPct>70?'finBudgetWarn':''}" style="width:${spentPct}%"></div>
+        </div>
+        <div class="finBudgetMeta">${spentPct}% del presupuesto · meta S/ ${fmt(meta.expectedIncome)}</div>
+      </div>` : ""}
+    </section>
+
+    <!-- GASTOS DIARIOS (7d) -->
+    <section class="finSection">
+      <div class="finSectionHead">
+        <div class="finSectionTitle">📅 Últimos 7 días</div>
+      </div>
+      <canvas id="dailyExpenseChart" height="110" style="width:100%;max-width:100%;display:block;"></canvas>
+    </section>
+
+    <!-- PILARES -->
+    <section class="finSection">
+      <div class="finSectionHead">
+        <div class="finSectionTitle">🏛 Pilares del mes</div>
+        <button class="finIconBtn" onclick="setFinanceSubTab('commitments')">⚡</button>
+      </div>
+      ${pillarsRows}
+      <canvas id="financePillarsChart" height="0" style="display:none"></canvas>
+    </section>
+
+    <!-- PROYECCIÓN -->
+    <section class="finSection">
+      <div class="finSectionHead">
+        <div class="finSectionTitle">📈 Proyección</div>
+        <div style="display:flex;gap:4px;">
+          <button class="finModeBtn ${state.financeProjectionMode==='conservative'?'finModeBtnActive':''}" onclick="financeSetProjectionMode('conservative')">Cons.</button>
+          <button class="finModeBtn ${(!state.financeProjectionMode||state.financeProjectionMode==='normal')?'finModeBtnActive':''}" onclick="financeSetProjectionMode('normal')">Normal</button>
+          <button class="finModeBtn ${state.financeProjectionMode==='realistic'?'finModeBtnActive':''}" onclick="financeSetProjectionMode('realistic')">Real</button>
+        </div>
+      </div>
+      <div class="finProjRow">
+        <div class="finProjItem"><span class="finProjLabel">Gasto real</span><span class="finProjVal">S/ ${fmt(d.expense)}</span></div>
+        <div class="finProjItem"><span class="finProjLabel">Proyectado</span><span class="finProjVal">S/ ${fmt(d.projected)}</span></div>
+        <div class="finProjItem"><span class="finProjLabel">Balance proy.</span><span class="finProjVal ${(d.income-d.projected)>=0?'finAccPos':'finAccNeg'}">S/ ${fmt(d.income - d.projected)}</span></div>
+      </div>
+      <canvas id="financeChart" height="130" style="width:100%;max-width:100%;display:block;margin-top:8px;"></canvas>
+    </section>
+
+    <!-- ANÁLISIS SEMANAL -->
+    <section class="finSection">
+      <div class="finSectionHead">
+        <div class="finSectionTitle">🧠 Análisis semanal</div>
+        <button class="finIconBtn" onclick="financeWeeklyGenerateNow()">✨</button>
+      </div>
+      ${renderFinanceWeeklyCard()}
     </section>
   `;
 
@@ -15681,19 +15731,56 @@ function financeDrawMonthChart(){
     data: {
       labels,
       datasets: [
-        { label: "Gasto acumulado real", data: d.accExpense, tension: 0.25, pointRadius: 0 },
-        { label: "Proyección", data: d.accProjected, tension: 0.25, pointRadius: 0, borderDash: [6,4] },
-        { label: "Ingreso acumulado", data: d.accIncome, tension: 0.25, pointRadius: 0 }
+        {
+          label: "Gasto real",
+          data: d.accExpense,
+          tension: 0.3,
+          pointRadius: 0,
+          borderColor: "rgba(248,113,113,0.9)",
+          backgroundColor: "rgba(248,113,113,0.08)",
+          fill: true,
+          borderWidth: 2,
+        },
+        {
+          label: "Proyección",
+          data: d.accProjected,
+          tension: 0.3,
+          pointRadius: 0,
+          borderDash: [5,4],
+          borderColor: "rgba(251,191,36,0.7)",
+          borderWidth: 2,
+        },
+        {
+          label: "Ingreso",
+          data: d.accIncome,
+          tension: 0.3,
+          pointRadius: 0,
+          borderColor: "rgba(52,211,153,0.8)",
+          borderWidth: 2,
+        }
       ]
     },
     options: {
-      // keep non-responsive to avoid runaway ResizeObserver loops
-      responsive: false,
+      responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: true } },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: "rgba(255,255,255,0.5)", font: { size: 11 }, boxWidth: 12, padding: 12 }
+        }
+      },
       scales: {
-        x: { ticks: { maxTicksLimit: 10 } },
-        y: { beginAtZero: true }
+        x: {
+          ticks: { maxTicksLimit: 8, color: "rgba(255,255,255,0.3)", font: { size: 10 } },
+          grid: { color: "rgba(255,255,255,0.04)" },
+          border: { display: false }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { color: "rgba(255,255,255,0.3)", font: { size: 10 }, callback: v => `S/${v}` },
+          grid: { color: "rgba(255,255,255,0.05)" },
+          border: { display: false }
+        }
       }
     }
   });
@@ -15793,20 +15880,39 @@ function renderDailyExpenseChart(){
 
   try{ if(_dailyExpenseChart){ _dailyExpenseChart.destroy(); _dailyExpenseChart = null; } }catch(_e){}
 
+  const maxVal = Math.max(...d.values, 1);
   _dailyExpenseChart = new Chart(ctx, {
     type: "bar",
     data: {
       labels: d.labels,
       datasets: [{
-        label: "Gastos diarios",
-        data: d.values
+        label: "Gastos",
+        data: d.values,
+        backgroundColor: d.values.map(v => v === maxVal ? "rgba(248,113,113,0.85)" : "rgba(124,92,255,0.55)"),
+        borderRadius: 8,
+        borderSkipped: false,
       }]
     },
     options: {
-      responsive:false,
-      maintainAspectRatio:false,
-      plugins:{
-        legend:{display:false}
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: ctx => `S/ ${ctx.raw.toFixed(2)}` }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: "rgba(255,255,255,0.4)", font: { size: 11, weight: "700" } },
+          border: { display: false }
+        },
+        y: {
+          grid: { color: "rgba(255,255,255,0.05)" },
+          ticks: { color: "rgba(255,255,255,0.3)", font: { size: 10 }, callback: v => `S/${v}` },
+          border: { display: false }
+        }
       }
     }
   });

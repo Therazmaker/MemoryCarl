@@ -3354,3 +3354,227 @@ body{
   font-size: 12px;
   font-weight: 800;
 }
+
+/* ====================== FINANCE PRINCIPAL REDESIGN ====================== */
+
+.finSection {
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid rgba(255,255,255,0.08);
+  border-radius: 20px;
+  padding: 18px 16px;
+  margin-bottom: 12px;
+}
+
+.finSectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.finSectionTitle {
+  font-size: 14px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.9);
+  letter-spacing: 0.01em;
+}
+
+.finIconBtn {
+  background: rgba(255,255,255,0.07);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  color: rgba(255,255,255,0.6);
+  padding: 6px 9px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.finIconBtn:active { transform: scale(0.94); background: rgba(124,92,255,0.2); }
+
+/* --- Accounts --- */
+.finAccGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.finAccCard {
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 14px 12px;
+  cursor: pointer;
+  transition: all 0.14s;
+  -webkit-tap-highlight-color: transparent;
+}
+.finAccCard:active { transform: scale(0.97); border-color: rgba(124,92,255,0.5); }
+
+.finAccName {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.finAccBal {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+.finAccPos { color: #34d399; }
+.finAccNeg { color: #f87171; }
+
+.finAccEmpty {
+  font-size: 13px;
+  color: rgba(255,255,255,0.35);
+  padding: 10px 0;
+}
+
+.finTotalRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.finTotalLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.finTotalVal {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+/* --- Stats grid --- */
+.finStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.finStatBox {
+  border-radius: 14px;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+.finStatIncome  { background: rgba(52,211,153,0.1);  border: 1.5px solid rgba(52,211,153,0.2);  }
+.finStatExpense { background: rgba(248,113,113,0.1); border: 1.5px solid rgba(248,113,113,0.2); }
+.finStatSavings { background: rgba(124,92,255,0.12); border: 1.5px solid rgba(124,92,255,0.25); }
+.finStatNeg     { background: rgba(251,191,36,0.1);  border: 1.5px solid rgba(251,191,36,0.25); }
+
+.finStatIcon { font-size: 18px; }
+.finStatVal  { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: -0.02em; }
+.finStatLabel { font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* --- Budget progress bar --- */
+.finBudgetBar { margin-top: 4px; }
+.finBudgetBarInner {
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 5px;
+}
+.finBudgetFill {
+  height: 100%;
+  background: #7c5cff;
+  border-radius: 99px;
+  transition: width 0.4s cubic-bezier(.22,.68,0,1.2);
+}
+.finBudgetFill.finBudgetWarn   { background: #fbbf24; }
+.finBudgetFill.finBudgetDanger { background: #f87171; }
+.finBudgetMeta { font-size: 11px; color: rgba(255,255,255,0.35); }
+
+/* --- Pillars --- */
+.finPillarRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.finPillarRow:last-child { margin-bottom: 0; }
+
+.finPillarLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 90px;
+}
+.finPillarIcon  { font-size: 16px; }
+.finPillarLabel { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.6); }
+
+.finPillarBar {
+  flex: 1;
+  height: 8px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.finPillarFill {
+  height: 100%;
+  background: linear-gradient(90deg, #7c5cff, #a78bfa);
+  border-radius: 99px;
+  transition: width 0.5s cubic-bezier(.22,.68,0,1.2);
+}
+
+.finPillarVal {
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.8);
+  min-width: 70px;
+  text-align: right;
+}
+
+/* --- Projection row --- */
+.finProjRow {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.finProjItem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+  padding: 10px 8px;
+  text-align: center;
+}
+.finProjLabel { font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 0.05em; }
+.finProjVal   { font-size: 14px; font-weight: 900; color: #fff; }
+
+/* --- Mode buttons --- */
+.finModeBtn {
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 9px;
+  color: rgba(255,255,255,0.45);
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.finModeBtn.finModeBtnActive {
+  background: rgba(124,92,255,0.2);
+  border-color: rgba(124,92,255,0.5);
+  color: #fff;
+}
