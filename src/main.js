@@ -4120,234 +4120,282 @@ function openMoodPickerModal(iso, opts={}){
   backdrop.className = "modalBackdrop";
 
   const existing = getMoodEntry(iso);
-  const all = getAllMoodSprites();
   const faceIds = ["incredible","good","meh","bad","horrible"];
-  const faces = faceIds.map(id => all.find(s=>String(s.id)===id)).filter(Boolean);
+  const all = getAllMoodSprites();
+  const faces = faceIds.map(id=>all.find(s=>String(s.id)===id)).filter(Boolean);
 
-  let selectedId = existing?.spriteId || "";
-  let selectedLabel = existing?.label || "";
-  let note = existing?.note || "";
-  let tags = new Set(Array.isArray(existing?.tags) ? existing.tags : []);
-  let energy = existing?.energy ?? 5; // 1-10
+  let selectedId  = existing?.spriteId || "";
+  let activities  = new Set(Array.isArray(existing?.activities) ? existing.activities : []);
+  let energy      = existing?.energy ?? 0;   // 0 = not set, 1-5
+  let note        = existing?.note || "";
 
-  // Map legacy ids to face ids
-  if(selectedId && !faceIds.includes(String(selectedId))){
+  // Map legacy ids → face ids
+  if(selectedId && !faceIds.includes(selectedId)){
     const sc = getMoodScoreById(selectedId);
     if(sc!=null){
       const best = faces.map(f=>({id:f.id,d:Math.abs((getMoodScoreById(f.id)||5)-sc)})).sort((a,b)=>a.d-b.d)[0];
-      if(best?.id) selectedId = best.id;
-    } else { selectedId = "meh"; }
+      selectedId = best?.id || "meh";
+    } else selectedId="meh";
   }
-  if(!selectedId) selectedId = "meh";
-
-  const getFace = (id)=>faces.find(f=>String(f.id)===String(id))||null;
-  const ensureLabel = ()=>{
-    const f = getFace(selectedId);
-    const labels = Array.isArray(f?.labels) ? f.labels : [];
-    if(!selectedLabel) selectedLabel = labels[0]||String(f?.id||"");
-    else if(labels.length && !labels.includes(selectedLabel)) selectedLabel = labels[0];
-  };
-  ensureLabel();
-
-  const TAG_PRESETS = [
-    { id:"sleep",  label:"Sueño",    icon:"🌙" },
-    { id:"debts",  label:"Deudas",   icon:"💸" },
-    { id:"work",   label:"Trabajo",  icon:"💼" },
-    { id:"family", label:"Familia",  icon:"🏠" },
-    { id:"health", label:"Salud",    icon:"🌿" },
-    { id:"money",  label:"Dinero",   icon:"💰" },
-    { id:"love",   label:"Amor",     icon:"💜" },
-    { id:"social", label:"Social",   icon:"🫂" },
-  ];
 
   const FACE_COLORS = {
-    incredible:"#FFCE47", good:"#5DDBA8", meh:"#8FA8C8", bad:"#7B8FD4", horrible:"#E8604A"
+    incredible:"#4ADE80", good:"#86EFAC", meh:"#60A5FA", bad:"#FBBF24", horrible:"#F87171"
+  };
+  const FACE_LABELS = {
+    incredible:"increíble", good:"bien", meh:"meh", bad:"mal", horrible:"horrible"
   };
 
-  const render = ()=>{
-    const dateLabel = (() => {
-      const d = new Date(iso+"T00:00:00");
-      return d.toLocaleDateString("es-PE",{weekday:"long",day:"numeric",month:"long"});
-    })();
+  // Activity categories — mirrors your Daylio setup
+  const ACTIVITY_CATS = [
+    {
+      id:"rutina", label:"Rutina", icon:"⭐",
+      items:[
+        {id:"tarot",      icon:"🔮", label:"Tarot"},
+        {id:"dibujo",     icon:"🎨", label:"Dibujos"},
+        {id:"fergis",     icon:"💜", label:"Fergis"},
+        {id:"trading",    icon:"📈", label:"Trading"},
+        {id:"musica",     icon:"🎵", label:"Música"},
+        {id:"tiktok",     icon:"📱", label:"TikTok"},
+        {id:"lectura",    icon:"📖", label:"Lectura"},
+        {id:"meditacion", icon:"🧘", label:"Meditación"},
+      ]
+    },
+    {
+      id:"trabajo", label:"Trabajo", icon:"💼",
+      items:[
+        {id:"work",       icon:"💼", label:"Trabajo"},
+        {id:"claims",     icon:"🗂️", label:"Claims"},
+        {id:"clases",     icon:"📚", label:"Clases"},
+        {id:"upwork",     icon:"💻", label:"Upwork"},
+        {id:"deudas",     icon:"💸", label:"Deudas"},
+        {id:"itinerario", icon:"🗺️", label:"Itinerario"},
+      ]
+    },
+    {
+      id:"sueno", label:"Sueño", icon:"🌙",
+      items:[
+        {id:"buen_sueno",       icon:"😴", label:"Buen sueño"},
+        {id:"sueno_malo",       icon:"😵", label:"Sueño malo"},
+        {id:"sueno_temprano",   icon:"🌛", label:"Sueño temprano"},
+        {id:"sueno_tarde",      icon:"🌜", label:"Sueño tarde"},
+      ]
+    },
+    {
+      id:"salud", label:"Salud", icon:"🌿",
+      items:[
+        {id:"ejercicio",  icon:"🏃", label:"Ejercicio"},
+        {id:"comer_rico", icon:"🥗", label:"Comer rico"},
+        {id:"agua",       icon:"💧", label:"Agua"},
+        {id:"enfermedad", icon:"🤒", label:"Enfermedad"},
+        {id:"descanso",   icon:"🛋️", label:"Descanso"},
+      ]
+    },
+    {
+      id:"hogar", label:"Hogar", icon:"🏠",
+      items:[
+        {id:"limpiar",   icon:"🧹", label:"Limpiar"},
+        {id:"cocinar",   icon:"🍳", label:"Cocinar"},
+        {id:"compras",   icon:"🛒", label:"Compras"},
+        {id:"familia",   icon:"👨‍👩‍👧", label:"Familia"},
+        {id:"parrilla",  icon:"🥩", label:"Parrilla"},
+      ]
+    },
+    {
+      id:"ocio", label:"Ocio", icon:"🎮",
+      items:[
+        {id:"videojuegos",icon:"🎮", label:"Videojuegos"},
+        {id:"serie",      icon:"📺", label:"Serie/Película"},
+        {id:"salir",      icon:"🚶", label:"Salir"},
+        {id:"estoico",    icon:"📜", label:"Diario Estoico"},
+        {id:"nuevo_alquiler",icon:"🏡",label:"Nuevo Alquiler"},
+      ]
+    },
+  ];
 
-    backdrop.innerHTML = `
-      <div class="mpm-panel" role="dialog" aria-label="Mood check-in">
-        <div class="mpm-header">
-          <div>
-            <div class="mpm-title">¿Cómo estás?</div>
-            <div class="mpm-date">${escapeHtml(dateLabel)}</div>
-          </div>
-          <div class="mpm-header-actions">
-            <button class="mpm-ghost-btn" id="btnMoodMonth">Historial</button>
-            <button class="mpm-icon-btn" data-close>✕</button>
-          </div>
-        </div>
-
-        <!-- FACE SELECTOR -->
-        <div class="mpm-faces" id="mpmFaces">
-          ${faces.map(f=>{
-            const color = FACE_COLORS[f.id]||"#888";
-            return `<button class="mpm-face ${String(f.id)===String(selectedId)?"active":""}" 
-              data-face="${escapeHtml(f.id)}"
-              style="--face-color:${color}">
-              <div class="mpm-face-art">${_getMoodSvg(f.id, false)}</div>
-            </button>`;
-          }).join("")}
-        </div>
-
-        <!-- SELECTED LABEL -->
-        <div class="mpm-selected-label" id="mpmSelectedLabel">
-          ${escapeHtml(selectedLabel || selectedId)}
-        </div>
-
-        <!-- ENERGY LEVEL -->
-        <div class="mpm-section">
-          <div class="mpm-section-label">Energía del día</div>
-          <div class="mpm-energy-row" id="mpmEnergyRow">
-            ${Array.from({length:10},(_,i)=>{
-              const v = i+1;
-              const isActive = v <= energy;
-              const color = v <= 3 ? "#E8604A" : v <= 6 ? "#8FA8C8" : v <= 8 ? "#5DDBA8" : "#FFCE47";
-              return `<button class="mpm-energy-dot ${isActive?"active":""}" data-energy="${v}" style="--ec:${color}" title="${v}/10"></button>`;
-            }).join("")}
-            <span class="mpm-energy-val">${energy}/10</span>
-          </div>
-        </div>
-
-        <!-- TAGS -->
-        <div class="mpm-section">
-          <div class="mpm-section-label">¿Qué influyó hoy?</div>
-          <div class="mpm-tag-grid" id="mpmTagGrid">
-            ${TAG_PRESETS.map(t=>`
-              <button class="mpm-tag ${tags.has(t.id)?"active":""}" data-tag="${escapeHtml(t.id)}">
-                <span>${t.icon}</span><span>${escapeHtml(t.label)}</span>
-              </button>
-            `).join("")}
-          </div>
-          <div class="mpm-custom-tag-row">
-            <input class="mpm-input" id="mpmTagInput" placeholder="Otro factor..."/>
-            <button class="mpm-add-btn" id="mpmAddTag">＋</button>
-          </div>
-        </div>
-
-        <!-- NOTE -->
-        <div class="mpm-section">
-          <div class="mpm-section-label">Nota libre <span class="mpm-optional">opcional</span></div>
-          <textarea class="mpm-textarea" id="mpmNote" rows="3" placeholder="¿Algo en especial hoy?...">${escapeHtml(note)}</textarea>
-        </div>
-
-        <!-- FOOTER -->
-        <div class="mpm-footer">
-          <button class="mpm-clear-btn" id="mpmClear">Limpiar</button>
-          <div class="mpm-footer-right">
-            <button class="mpm-ghost-btn" data-close>Cancelar</button>
-            <button class="mpm-save-btn" id="mpmSave">Guardar</button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    wire();
-  };
+  const ENERGY_LABELS = ["","Agotado","Bajo","Regular","Bueno","Al 100"];
+  const ENERGY_COLORS = ["","#F87171","#FBBF24","#60A5FA","#86EFAC","#4ADE80"];
 
   const close = ()=>{
     if(typeof window.anime==="function") animateSleepModalOut(backdrop,()=>backdrop.remove());
     else backdrop.remove();
   };
 
-  const wire = ()=>{
-    backdrop.addEventListener("click", e=>{ if(e.target===backdrop) close(); if(e.target?.closest("[data-close]")) close(); });
+  // ── STEP 1: Face selector ─────────────────────────────────────────────────
+  const renderStep1 = ()=>{
+    const dateLabel = (()=>{
+      try{ return new Date(iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"long",day:"numeric",month:"long"}); }
+      catch{ return iso; }
+    })();
 
-    // Faces
+    backdrop.innerHTML = `
+      <div class="mpm-panel mpm-s1" role="dialog">
+        <div class="mpm-s1-top">
+          <button class="mpm-icon-btn" id="mpmHistBtn">📋</button>
+          <button class="mpm-icon-btn" data-close>✕</button>
+        </div>
+        <div class="mpm-s1-title">¿Cómo estás?</div>
+        <div class="mpm-s1-date">${escapeHtml(dateLabel)}</div>
+        <div class="mpm-s1-faces" id="mpmS1Faces">
+          ${faces.map(f=>`
+            <button class="mpm-s1-face ${selectedId===f.id?"active":""}"
+              data-face="${f.id}"
+              style="--fc:${FACE_COLORS[f.id]||'#888'}">
+              <div class="mpm-s1-face-svg">${_getMoodSvg(f.id,false)}</div>
+              <div class="mpm-s1-face-lbl">${FACE_LABELS[f.id]||f.id}</div>
+            </button>
+          `).join("")}
+        </div>
+      </div>
+    `;
+
+    backdrop.addEventListener("click", e=>{ if(e.target===backdrop) close(); if(e.target?.closest("[data-close]")) close(); });
+    backdrop.querySelector("#mpmHistBtn")?.addEventListener("click",()=>{ close(); openMoodMonthModal(iso); });
+
     backdrop.querySelectorAll("[data-face]").forEach(btn=>{
       btn.addEventListener("click",()=>{
         selectedId = btn.getAttribute("data-face")||"meh";
-        selectedLabel=""; ensureLabel();
-        backdrop.querySelectorAll("[data-face]").forEach(b=>b.classList.toggle("active",b.getAttribute("data-face")===selectedId));
-        const sl = backdrop.querySelector("#mpmSelectedLabel");
-        if(sl) sl.textContent = selectedLabel||selectedId;
-        // Update color ring
-        const color = FACE_COLORS[selectedId]||"#888";
-        backdrop.querySelectorAll("[data-face]").forEach(b=>{
-          if(b.getAttribute("data-face")===selectedId) b.style.setProperty("--face-color",color);
-        });
+        renderStep2();
+      });
+    });
+  };
+
+  // ── STEP 2: Activities + Energy + Note ───────────────────────────────────
+  const renderStep2 = ()=>{
+    const color = FACE_COLORS[selectedId]||"#888";
+    const label = FACE_LABELS[selectedId]||selectedId;
+
+    backdrop.innerHTML = `
+      <div class="mpm-panel mpm-s2" role="dialog">
+
+        <!-- Top bar -->
+        <div class="mpm-s2-top">
+          <button class="mpm-s2-back" id="mpmBack">
+            <div class="mpm-s2-back-face" style="--fc:${color}">${_getMoodSvg(selectedId,false)}</div>
+            <span class="mpm-s2-back-lbl" style="color:${color}">${escapeHtml(label)}</span>
+          </button>
+          <button class="mpm-s2-save" id="mpmSave">Guardar ✓</button>
+        </div>
+
+        <div class="mpm-s2-subtitle">¿Qué hiciste hoy?</div>
+
+        <!-- Activity categories -->
+        <div class="mpm-cats" id="mpmCats">
+          ${ACTIVITY_CATS.map(cat=>`
+            <div class="mpm-cat" data-cat="${cat.id}">
+              <div class="mpm-cat-header">
+                <span class="mpm-cat-icon">${cat.icon}</span>
+                <span class="mpm-cat-label">${escapeHtml(cat.label)}</span>
+                <button class="mpm-cat-toggle" data-toggle="${cat.id}">▾</button>
+              </div>
+              <div class="mpm-cat-grid" id="mpmCatGrid_${cat.id}">
+                ${cat.items.map(it=>`
+                  <button class="mpm-act ${activities.has(it.id)?"active":""}"
+                    data-act="${it.id}"
+                    style="${activities.has(it.id)?`--ac:${color}`:''}">
+                    <span class="mpm-act-icon">${it.icon}</span>
+                    <span class="mpm-act-lbl">${escapeHtml(it.label)}</span>
+                  </button>
+                `).join("")}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+
+        <!-- Energy -->
+        <div class="mpm-s2-section">
+          <div class="mpm-s2-section-title">⚡ Energía</div>
+          <div class="mpm-energy-pills" id="mpmEnergyPills">
+            ${ENERGY_LABELS.slice(1).map((lbl,i)=>{
+              const v=i+1;
+              const ec=ENERGY_COLORS[v];
+              return `<button class="mpm-epill ${energy===v?"active":""}" data-ev="${v}" style="--ec:${ec}">
+                <span class="mpm-epill-num">${v}</span>
+                <span class="mpm-epill-lbl">${lbl}</span>
+              </button>`;
+            }).join("")}
+          </div>
+        </div>
+
+        <!-- Note -->
+        <div class="mpm-s2-section">
+          <div class="mpm-s2-section-title">📝 Nota <span class="mpm-optional">opcional</span></div>
+          <textarea class="mpm-textarea" id="mpmNote" rows="3" placeholder="¿Algo en especial hoy?...">${escapeHtml(note)}</textarea>
+        </div>
+
+        <div style="height:8px"></div>
+      </div>
+    `;
+
+    backdrop.addEventListener("click", e=>{ if(e.target===backdrop) close(); if(e.target?.closest("[data-close]")) close(); });
+
+    // Back
+    backdrop.querySelector("#mpmBack")?.addEventListener("click", renderStep1);
+
+    // Activity toggles
+    backdrop.querySelectorAll("[data-act]").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        const id=btn.getAttribute("data-act")||"";
+        if(activities.has(id)) activities.delete(id); else activities.add(id);
+        btn.classList.toggle("active",activities.has(id));
+        btn.style.setProperty("--ac", activities.has(id)?color:"");
+      });
+    });
+
+    // Category collapse
+    backdrop.querySelectorAll("[data-toggle]").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        const catId=btn.getAttribute("data-toggle")||"";
+        const grid=backdrop.querySelector(`#mpmCatGrid_${catId}`);
+        const catEl=btn.closest(".mpm-cat");
+        if(!grid) return;
+        const collapsed=catEl?.classList.toggle("collapsed");
+        btn.textContent = collapsed?"▸":"▾";
       });
     });
 
     // Energy
-    backdrop.querySelectorAll("[data-energy]").forEach(btn=>{
+    backdrop.querySelectorAll("[data-ev]").forEach(btn=>{
       btn.addEventListener("click",()=>{
-        energy = Number(btn.getAttribute("data-energy"))||5;
-        backdrop.querySelectorAll("[data-energy]").forEach(b=>{
-          b.classList.toggle("active", Number(b.getAttribute("data-energy"))<=energy);
+        const v=Number(btn.getAttribute("data-ev")||0);
+        energy = energy===v?0:v;
+        backdrop.querySelectorAll("[data-ev]").forEach(b=>{
+          b.classList.toggle("active",Number(b.getAttribute("data-ev"))===energy);
         });
-        const ev = backdrop.querySelector(".mpm-energy-val");
-        if(ev) ev.textContent = energy+"/10";
       });
     });
 
-    // Tags
-    backdrop.querySelectorAll("[data-tag]").forEach(btn=>{
-      btn.addEventListener("click",()=>{
-        const id=btn.getAttribute("data-tag")||"";
-        if(tags.has(id)) tags.delete(id); else tags.add(id);
-        btn.classList.toggle("active",tags.has(id));
-      });
-    });
-
-    // Custom tag
-    const addTag = ()=>{
-      const inp=backdrop.querySelector("#mpmTagInput");
-      const v=(inp?.value||"").trim();
-      if(!v) return;
-      const id=v.toLowerCase().replace(/\s+/g,"_").slice(0,40);
-      tags.add(id);
-      const chip=document.createElement("button");
-      chip.className="mpm-tag active"; chip.setAttribute("data-tag",id);
-      chip.innerHTML=`<span>🏷️</span><span>${escapeHtml(v)}</span>`;
-      chip.addEventListener("click",()=>{ if(tags.has(id)) tags.delete(id); else tags.add(id); chip.classList.toggle("active",tags.has(id)); });
-      backdrop.querySelector("#mpmTagGrid")?.appendChild(chip);
-      if(inp) inp.value="";
-    };
-    backdrop.querySelector("#mpmAddTag")?.addEventListener("click",addTag);
-    backdrop.querySelector("#mpmTagInput")?.addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault();addTag();} });
-
+    // Note
     backdrop.querySelector("#mpmNote")?.addEventListener("input",e=>{ note=e.target.value||""; });
 
-    backdrop.querySelector("#mpmClear")?.addEventListener("click",()=>{
-      selectedId="meh"; selectedLabel=""; note=""; tags=new Set(); energy=5;
-      render();
-    });
-
+    // Save
     backdrop.querySelector("#mpmSave")?.addEventListener("click",()=>{
-      // Store energy in the entry by extending setMoodEntry
-      const key = String(iso||"");
       state.moodDaily = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
-      if(!selectedId){
-        delete state.moodDaily[key];
-      } else {
-        state.moodDaily[key] = {
-          spriteId: String(selectedId),
-          label: String(selectedLabel||""),
-          tags: Array.from(tags).map(String).filter(Boolean),
-          note: String(note||""),
-          energy: Number(energy)||5,
+      const key=String(iso||"");
+      if(!selectedId){ delete state.moodDaily[key]; }
+      else {
+        state.moodDaily[key]={
+          spriteId: selectedId,
+          label: FACE_LABELS[selectedId]||selectedId,
+          activities: Array.from(activities),
+          energy,
+          note,
           ts: new Date().toISOString()
         };
       }
       persist(); view();
-      if(typeof opts.onSaved==="function") opts.onSaved({ iso, spriteId:selectedId, label:selectedLabel, tags:Array.from(tags), note, energy });
-      toast(selectedId ? "Mood guardado ✅" : "Mood eliminado 🧼");
+      if(typeof opts.onSaved==="function") opts.onSaved({iso,spriteId:selectedId,activities:Array.from(activities),energy,note});
+      toast("Mood guardado ✅");
       close();
     });
-
-    backdrop.querySelector("#btnMoodMonth")?.addEventListener("click",()=>{ close(); openMoodMonthModal(iso); });
   };
 
-  render();
+  // Start
+  if(selectedId) renderStep2(); else renderStep1();
+
   host.appendChild(backdrop);
   if(typeof window.anime==="function") animateSleepModalIn(backdrop);
 }
+
 function openMoodMonthModal(initialIso){
   const host = document.querySelector("#app");
   const backdrop = document.createElement("div");
