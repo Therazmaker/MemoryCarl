@@ -15596,7 +15596,7 @@ function viewFinance(){
       <div class="finSectionHead">
         <div class="finSectionTitle">📅 Últimos 7 días</div>
       </div>
-      <canvas id="dailyExpenseChart" height="110" style="width:100%;max-width:100%;display:block;"></canvas>
+      <canvas id="dailyExpenseChart" height="110" style="width:100%;max-width:100%;height:110px;display:block;"></canvas>
     </section>
 
     <!-- PILARES -->
@@ -15874,7 +15874,16 @@ let _dailyExpenseChart = null;
 
 function renderDailyExpenseChart(){
   const ctx = document.getElementById("dailyExpenseChart");
-  if(!ctx) return;
+  if(!ctx || typeof Chart === "undefined") return;
+
+  // Lock canvas height to avoid responsive resize loops that can make this
+  // section grow infinitely on some mobile layout passes.
+  try{
+    ctx.style.width = "100%";
+    ctx.style.maxWidth = "100%";
+    ctx.style.height = "110px";
+    ctx.height = 110;
+  }catch(_e){}
   
   const d = getLast7DaysExpenseData();
 
