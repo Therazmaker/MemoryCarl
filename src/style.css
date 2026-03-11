@@ -3561,6 +3561,22 @@ body{
 .finProjLabel { font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 0.05em; }
 .finProjVal   { font-size: 14px; font-weight: 900; color: #fff; }
 
+.finProjectionChartWrap {
+  position: relative;
+  width: 100%;
+  height: 130px;
+  max-height: 160px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.finProjectionChart {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+}
+
 /* --- Mode buttons --- */
 .finModeBtn {
   background: rgba(255,255,255,0.06);
