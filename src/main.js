@@ -13542,7 +13542,7 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
         display:flex;align-items:flex-end;justify-content:center;
         background:rgba(0,0,0,.6);
         backdrop-filter:blur(6px);
-        padding:0;
+        padding:0 0 var(--navH,68px);
         animation:fcFadeIn .18s ease;
       }
       .fc-sheet{
@@ -13553,7 +13553,8 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
         box-shadow:0 -20px 60px rgba(0,0,0,.6);
         overflow:hidden;
         animation:fcSlideUp .24s cubic-bezier(.34,1.4,.64,1);
-        max-height:92vh;display:flex;flex-direction:column;
+        max-height:calc(92vh - var(--navH,68px));
+        display:flex;flex-direction:column;
       }
       .fc-drag{
         width:40px;height:4px;border-radius:2px;
@@ -14772,7 +14773,7 @@ function openFinanceCommitmentModal(existing){
   const overlay = document.createElement('div');
   overlay.className = 'fc-overlay';
   overlay.innerHTML = `
-    <div class="fc-sheet" style="max-height:95vh">
+    <div class="fc-sheet" style="max-height:calc(95vh - var(--navH,68px))">
       <div class="fc-drag"></div>
       <div class="fc-sh-head">
         <div class="fc-sh-title">${existing ? '✏️ Editar compromiso' : '📋 Nuevo compromiso'}</div>
