@@ -243,6 +243,7 @@ const LS = {
   house: "memorycarl_v2_house",
   moodDaily: "memorycarl_v2_mood_daily",
   moodSpritesCustom: "memorycarl_v2_mood_sprites_custom",
+  moodActivityCats: "memorycarl_v2_mood_activity_cats",
 
   // NeuroClaw
   neuroclawFeedback: "memorycarl_v2_neuroclaw_feedback",
@@ -1850,6 +1851,7 @@ let state = {
   // Mood (daily sprite + note)
   moodDaily: load(LS.moodDaily, {}),
   moodSpritesCustom: load(LS.moodSpritesCustom, []),
+  moodActivityCats: load(LS.moodActivityCats, null),
   house: load(LS.house, seedHouse()),
   // Insights UI
   insightsMonthOffset: 0,
@@ -1879,6 +1881,7 @@ function persist(){
   // Mood
   save(LS.moodDaily, state.moodDaily);
   save(LS.moodSpritesCustom, state.moodSpritesCustom);
+  if(state.moodActivityCats) save(LS.moodActivityCats, state.moodActivityCats);
 
   // House
   save(LS.house, state.house);
@@ -4145,8 +4148,8 @@ function openMoodPickerModal(iso, opts={}){
     incredible:"increíble", good:"bien", meh:"meh", bad:"mal", horrible:"horrible"
   };
 
-  // Activity categories — mirrors your Daylio setup
-  const ACTIVITY_CATS = [
+  // Activity categories — mirrors your Daylio setup (loaded from state or default)
+  const ACTIVITY_CATS_DEFAULT = [
     {
       id:"rutina", label:"Rutina", icon:"⭐",
       items:[
@@ -4211,6 +4214,16 @@ function openMoodPickerModal(iso, opts={}){
       ]
     },
   ];
+
+  // Use persisted categories (deep-cloned so edits don't affect the default)
+  let ACTIVITY_CATS = state.moodActivityCats
+    ? JSON.parse(JSON.stringify(state.moodActivityCats))
+    : JSON.parse(JSON.stringify(ACTIVITY_CATS_DEFAULT));
+
+  const saveActivityCats = () => {
+    state.moodActivityCats = JSON.parse(JSON.stringify(ACTIVITY_CATS));
+    save(LS.moodActivityCats, state.moodActivityCats);
+  };
 
   const ENERGY_LABELS = ["","Agotado","Bajo","Regular","Bueno","Al 100"];
   const ENERGY_COLORS = ["","#F87171","#FBBF24","#60A5FA","#86EFAC","#4ADE80"];
@@ -4285,6 +4298,7 @@ function openMoodPickerModal(iso, opts={}){
               <div class="mpm-cat-header">
                 <span class="mpm-cat-icon">${cat.icon}</span>
                 <span class="mpm-cat-label">${escapeHtml(cat.label)}</span>
+                <button class="mpm-cat-add-item" data-add-item="${cat.id}" title="Agregar categoría">＋</button>
                 <button class="mpm-cat-toggle" data-toggle="${cat.id}">▾</button>
               </div>
               <div class="mpm-cat-grid" id="mpmCatGrid_${cat.id}">
@@ -4297,8 +4311,23 @@ function openMoodPickerModal(iso, opts={}){
                   </button>
                 `).join("")}
               </div>
+              <div class="mpm-new-item-form" id="mpmNewItemForm_${cat.id}" style="display:none">
+                <input class="mpm-new-item-icon" data-icon-input="${cat.id}" type="text" maxlength="4" placeholder="🌟" value="">
+                <input class="mpm-new-item-label" data-label-input="${cat.id}" type="text" maxlength="30" placeholder="Nombre...">
+                <button class="mpm-new-item-confirm" data-confirm-item="${cat.id}">✓</button>
+                <button class="mpm-new-item-cancel" data-cancel-item="${cat.id}">✕</button>
+              </div>
             </div>
           `).join("")}
+
+          <!-- New group button -->
+          <button class="mpm-add-group-btn" id="mpmAddGroupBtn">＋ Nuevo grupo</button>
+          <div class="mpm-new-group-form" id="mpmNewGroupForm" style="display:none">
+            <input class="mpm-new-item-icon" id="mpmNewGroupIcon" type="text" maxlength="4" placeholder="🏷️" value="">
+            <input class="mpm-new-item-label" id="mpmNewGroupLabel" type="text" maxlength="30" placeholder="Nombre del grupo...">
+            <button class="mpm-new-item-confirm" id="mpmNewGroupConfirm">✓</button>
+            <button class="mpm-new-item-cancel" id="mpmNewGroupCancel">✕</button>
+          </div>
         </div>
 
         <!-- Energy -->
@@ -4351,6 +4380,81 @@ function openMoodPickerModal(iso, opts={}){
         const collapsed=catEl?.classList.toggle("collapsed");
         btn.textContent = collapsed?"▸":"▾";
       });
+    });
+
+    // Add item to category — show inline form
+    const hideAllForms = () => {
+      backdrop.querySelectorAll(".mpm-new-item-form, .mpm-new-group-form").forEach(f=>{ f.style.display="none"; });
+    };
+    const mkId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+
+    backdrop.querySelectorAll("[data-add-item]").forEach(btn=>{
+      btn.addEventListener("click", e=>{
+        e.stopPropagation();
+        const catId=btn.getAttribute("data-add-item")||"";
+        // Hide all other open forms first
+        hideAllForms();
+        const form=backdrop.querySelector(`#mpmNewItemForm_${catId}`);
+        if(form){
+          form.style.display="flex";
+          form.querySelector("[data-icon-input]")?.focus();
+        }
+      });
+    });
+
+    // Confirm add item
+    backdrop.querySelectorAll("[data-confirm-item]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const catId=btn.getAttribute("data-confirm-item")||"";
+        const form=backdrop.querySelector(`#mpmNewItemForm_${catId}`);
+        const iconEl=form?.querySelector("[data-icon-input]");
+        const labelEl=form?.querySelector("[data-label-input]");
+        const icon=(iconEl?.value||"").trim()||"⭐";
+        const label=(labelEl?.value||"").trim();
+        if(!label){ labelEl?.focus(); return; }
+        const id=mkId("custom_"+catId);
+        const cat=ACTIVITY_CATS.find(c=>c.id===catId);
+        if(cat){ cat.items.push({id, icon, label}); }
+        saveActivityCats();
+        renderStep2();
+      });
+    });
+
+    // Cancel add item
+    backdrop.querySelectorAll("[data-cancel-item]").forEach(btn=>{
+      btn.addEventListener("click", ()=>{
+        const catId=btn.getAttribute("data-cancel-item")||"";
+        const form=backdrop.querySelector(`#mpmNewItemForm_${catId}`);
+        if(form){ form.style.display="none"; }
+      });
+    });
+
+    // Show new group form
+    backdrop.querySelector("#mpmAddGroupBtn")?.addEventListener("click", e=>{
+      e.stopPropagation();
+      hideAllForms();
+      const form=backdrop.querySelector("#mpmNewGroupForm");
+      if(form){
+        form.style.display="flex";
+        backdrop.querySelector("#mpmNewGroupIcon")?.focus();
+      }
+    });
+
+    // Confirm new group
+    backdrop.querySelector("#mpmNewGroupConfirm")?.addEventListener("click", ()=>{
+      const icon=(backdrop.querySelector("#mpmNewGroupIcon")?.value||"").trim()||"🏷️";
+      const label=(backdrop.querySelector("#mpmNewGroupLabel")?.value||"").trim();
+      if(!label){ backdrop.querySelector("#mpmNewGroupLabel")?.focus(); return; }
+      const id=mkId("grp");
+      ACTIVITY_CATS.push({id, icon, label, items:[]});
+      saveActivityCats();
+      renderStep2();
+    });
+
+    // Cancel new group
+    backdrop.querySelector("#mpmNewGroupCancel")?.addEventListener("click", ()=>{
+      const form=backdrop.querySelector("#mpmNewGroupForm");
+      if(form){ form.style.display="none"; }
     });
 
     // Energy
