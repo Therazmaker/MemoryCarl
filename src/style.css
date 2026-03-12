@@ -3594,3 +3594,18 @@ body{
   border-color: rgba(124,92,255,0.5);
   color: #fff;
 }
+
+/* ===== PatternLab V4 Context ===== */
+.v4-context-card,.v4-dash-card,.v4-dashboard-empty{background:#141823;border:1px solid #2a3144;border-radius:14px;padding:14px;color:#dbe5ff}
+.v4-context-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.v4-context-head h3{margin:0;font-size:15px}
+.v4-semaphore{font-weight:700}
+.v4-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:10px}
+.v4-why,.v4-historical{margin:10px 0 0 0;color:#b7c3e1}
+.v4-reasoning{margin-top:10px}
+.v4-pill{display:inline-flex;padding:4px 8px;border-radius:999px;background:#28324a;color:#cdd9f7;font-size:12px}
+.v4-caution{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+.v4-dashboard{display:grid;grid-template-columns:1fr;gap:10px}
+.v4-dash-card h4{margin:0 0 8px 0;font-size:14px}
+.v4-dash-card table{width:100%;border-collapse:collapse;font-size:12px}
+.v4-dash-card th,.v4-dash-card td{padding:6px;border-bottom:1px solid #293147;text-align:left}
