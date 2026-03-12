@@ -14765,10 +14765,160 @@ function financeComputePillars(monthKey){
 
 function openFinanceCommitmentModal(existing){
   financeEnsureCommitments();
-  const t = existing || { id: uid("ctpl"), name:"", category:"Hogar", dueDay:1, amountMode:"fixed", baseAmount:0, lastKnownAmount:0, notes:"", isActive:true, autoCreateMonthly:true };
-  const groups = (state.financeCommitmentGroups||["Hogar","Servicios","Otros"]).map(g=>`<option ${t.category===g?'selected':''}>${escapeHtml(g)}</option>`).join("");
-  const html = `<div class="modalOverlay" onclick="closeModal(event)"><div class="modal modalBig" onclick="event.stopPropagation()"><div class="modalHeader"><div class="modalTitle">${existing?"Editar plantilla":"Nuevo compromiso recurrente"}</div><button class="iconBtn" onclick="closeModal()">✕</button></div><div class="modalBody modalScroll"><label class="fieldLabel">Nombre</label><input id="cmtName" class="textInput" value="${escapeAttr(t.name||"")}" /><div class="row" style="gap:10px;margin-top:10px"><div style="flex:1"><label class="fieldLabel">Categoría</label><select id="cmtGroup" class="textInput">${groups}</select></div><div style="width:140px"><label class="fieldLabel">Día venc.</label><input id="cmtDay" type="number" min="1" max="31" class="textInput" value="${Number(t.dueDay||1)}" /></div></div><div class="row" style="gap:10px;margin-top:10px"><div style="flex:1"><label class="fieldLabel">Modo monto</label><select id="cmtAmountMode" class="textInput"><option value="fixed" ${String(t.amountMode)==='fixed'?'selected':''}>Fijo</option><option value="variable" ${String(t.amountMode)==='variable'?'selected':''}>Variable</option></select></div><div style="flex:1"><label class="fieldLabel">Monto base</label><input id="cmtAmount" type="number" step="0.01" class="textInput" value="${Number(t.baseAmount||0)}" /></div></div><label class="fieldLabel" style="margin-top:10px">Nota</label><textarea id="cmtNote" class="textInput" rows="3">${escapeHtml(t.notes||"")}</textarea><div class="row" style="gap:10px;margin-top:10px;align-items:center"><input id="cmtActive" type="checkbox" ${t.isActive!==false?'checked':''} /><div>Activa</div><input id="cmtAuto" type="checkbox" ${t.autoCreateMonthly!==false?'checked':''} /><div>Auto-crear mensual</div></div></div><div class="modalFooter">${existing?`<button class="btn danger" onclick="deleteFinanceCommitment('${t.id}')">Eliminar</button>`:"<div></div>"}<button class="btn primary" onclick="saveFinanceCommitment('${t.id}')">Guardar</button></div></div></div>`;
-  showModal(html);
+  const t = existing || { id: uid("ctpl"), name:"", category:"Hogar", dueDay:1, amountMode:"fixed", baseAmount:0, lastKnownAmount:0, notes:"", isActive:true, autoCreateMonthly:true, recurrence:"monthly" };
+  const groups = (state.financeCommitmentGroups||["Hogar","Servicios","Salud","Transporte","Suscripciones","Otros"]);
+  const REC_OPTS = [['monthly','Mensual'],['weekly','Semanal'],['bimonthly','Quincenal'],['once','Una vez']];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'fc-overlay';
+  overlay.innerHTML = `
+    <div class="fc-sheet" style="max-height:95vh">
+      <div class="fc-drag"></div>
+      <div class="fc-sh-head">
+        <div class="fc-sh-title">${existing ? '✏️ Editar compromiso' : '📋 Nuevo compromiso'}</div>
+        <button class="fc-sh-close" id="cmtShClose">✕</button>
+      </div>
+      <div class="fc-sh-body" style="overflow-y:auto">
+
+        <div class="cmt-field">
+          <div class="cmt-field-label">Nombre</div>
+          <input class="cmt-inp" id="cmtName" placeholder="ej: Alquiler, Netflix, Luz…" value="${escapeAttr(t.name||'')}" maxlength="48">
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="cmt-field">
+            <div class="cmt-field-label">Categoría</div>
+            <select class="cmt-inp" id="cmtGroup" style="appearance:auto">
+              ${groups.map(g=>`<option value="${escapeAttr(g)}" ${t.category===g?'selected':''}>${escapeHtml(g)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="cmt-field">
+            <div class="cmt-field-label">Día de vencimiento</div>
+            <input class="cmt-inp" id="cmtDay" type="number" min="1" max="31" value="${Number(t.dueDay||1)}" placeholder="1-31">
+          </div>
+        </div>
+
+        <div class="cmt-field">
+          <div class="cmt-field-label">Frecuencia</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap" id="cmtRecWrap">
+            ${REC_OPTS.map(([v,l])=>`<button type="button" class="cmt-rec-opt ${String(t.recurrence||'monthly')===v?'active':''}" data-rec="${v}">${l}</button>`).join('')}
+          </div>
+          <input type="hidden" id="cmtRecurrence" value="${escapeAttr(t.recurrence||'monthly')}">
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="cmt-field">
+            <div class="cmt-field-label">Monto</div>
+            <select class="cmt-inp" id="cmtAmountMode" style="appearance:auto">
+              <option value="fixed" ${String(t.amountMode||'fixed')==='fixed'?'selected':''}>Fijo</option>
+              <option value="variable" ${String(t.amountMode||'fixed')==='variable'?'selected':''}>Variable</option>
+            </select>
+          </div>
+          <div class="cmt-field">
+            <div class="cmt-field-label">Monto base (S/)</div>
+            <input class="cmt-inp" id="cmtAmount" type="number" step="0.01" min="0" value="${Number(t.baseAmount||0)}" placeholder="0.00">
+          </div>
+        </div>
+
+        <div class="cmt-field">
+          <div class="cmt-field-label">Nota (opcional)</div>
+          <textarea class="cmt-inp" id="cmtNote" rows="2" placeholder="Detalles, cuenta, referencia…" style="resize:vertical">${escapeHtml(t.notes||'')}</textarea>
+        </div>
+
+        <div style="display:flex;gap:18px;margin-bottom:14px">
+          <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:rgba(255,255,255,.6);cursor:pointer">
+            <input type="checkbox" id="cmtActive" ${t.isActive!==false?'checked':''} style="accent-color:#7c5cff;width:15px;height:15px">
+            Activo
+          </label>
+          <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:rgba(255,255,255,.6);cursor:pointer">
+            <input type="checkbox" id="cmtAuto" ${t.autoCreateMonthly!==false?'checked':''} style="accent-color:#7c5cff;width:15px;height:15px">
+            Auto-crear cada mes
+          </label>
+        </div>
+
+      </div>
+      <div class="fc-sh-footer" style="${existing?'justify-content:space-between':''}">
+        ${existing ? `<button class="fc-btn-sec" id="cmtDelBtn" style="color:#fb7185;border-color:rgba(251,113,133,.3)">🗑️ Eliminar</button>` : ''}
+        <button class="fc-btn-pri" id="cmtSaveBtn" style="flex:2">Guardar</button>
+      </div>
+    </div>
+  `;
+
+  // Inject cmt-field styles if needed (reuses fc-sheet styles already in DOM)
+  if(!document.getElementById('cmtModalStyles')){
+    const s = document.createElement('style');
+    s.id = 'cmtModalStyles';
+    s.textContent = `
+      .cmt-field{ margin-bottom:14px }
+      .cmt-field-label{ font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:6px }
+      .cmt-inp{ width:100%;padding:11px 13px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.11);border-radius:12px;color:#fff;font-size:14px;outline:none;transition:border .15s }
+      .cmt-inp:focus{ border-color:rgba(124,92,255,.6) }
+      .cmt-inp::placeholder{ color:rgba(255,255,255,.25) }
+      .cmt-inp.err{ border-color:#fb7185 }
+      .cmt-rec-opt{ padding:7px 13px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:rgba(255,255,255,.6);font-size:12px;font-weight:600;cursor:pointer;transition:all .13s }
+      .cmt-rec-opt.active{ background:rgba(124,92,255,.2);border-color:rgba(124,92,255,.5);color:#a78bfa }
+    `;
+    document.head.appendChild(s);
+  }
+
+  document.body.appendChild(overlay);
+
+  const closeSheet = ()=> overlay.remove();
+  overlay.querySelector('#cmtShClose').addEventListener('click', closeSheet);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
+
+  // Recurrence buttons
+  overlay.querySelector('#cmtRecWrap').addEventListener('click', e=>{
+    const btn = e.target.closest('.cmt-rec-opt');
+    if(!btn) return;
+    overlay.querySelectorAll('.cmt-rec-opt').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    overlay.querySelector('#cmtRecurrence').value = btn.dataset.rec;
+  });
+
+  // Delete
+  overlay.querySelector('#cmtDelBtn')?.addEventListener('click', ()=>{
+    if(!confirm('¿Eliminar este compromiso?')) return;
+    financeEnsureCommitments();
+    state.financeCommitmentTemplates = (state.financeCommitmentTemplates||[]).filter(x=>x.id!==t.id);
+    state.financeCommitments = (state.financeCommitments||[]).filter(x=>x.id!==t.id);
+    persist(); closeSheet(); view();
+  });
+
+  // Save
+  overlay.querySelector('#cmtSaveBtn').addEventListener('click', ()=>{
+    const nameEl = overlay.querySelector('#cmtName');
+    const name = (nameEl.value||'').trim();
+    if(!name){ nameEl.classList.add('err'); nameEl.focus(); return; }
+    nameEl.classList.remove('err');
+
+    const group = (overlay.querySelector('#cmtGroup').value||'Otros').trim();
+    const dueDay = Math.max(1, Math.min(31, Number(overlay.querySelector('#cmtDay').value||1)));
+    const recurrence = overlay.querySelector('#cmtRecurrence').value || 'monthly';
+    const amountMode = overlay.querySelector('#cmtAmountMode').value || 'fixed';
+    const baseAmount = Number(overlay.querySelector('#cmtAmount').value||0);
+    const notes = (overlay.querySelector('#cmtNote').value||'').trim();
+    const isActive = !!overlay.querySelector('#cmtActive').checked;
+    const autoCreateMonthly = !!overlay.querySelector('#cmtAuto').checked;
+
+    const arr = state.financeCommitmentTemplates;
+    const idx = arr.findIndex(x=>x.id===t.id);
+    const nowIso = new Date().toISOString();
+    const base = (idx>=0 ? arr[idx] : {id:t.id, createdAt:nowIso});
+    const obj = {...base, name, category:group, recurrence, dueDay, amountMode, baseAmount, lastKnownAmount:Number(base.lastKnownAmount??baseAmount), autoCreateMonthly, isActive, notes, updatedAt:nowIso};
+    if(idx>=0) arr[idx]=obj; else arr.unshift(obj);
+
+    // legacy sync
+    const legacy = (state.financeCommitments||[]);
+    const li = legacy.findIndex(x=>x.id===t.id || x.id===obj.legacyCommitmentId);
+    const legacyObj = { id: obj.legacyCommitmentId || obj.id, name, group, dueDay, amount:baseAmount, note:notes, active:isActive, createdAt:base.createdAt||nowIso };
+    if(li>=0) legacy[li]=legacyObj; else legacy.unshift(legacyObj);
+    obj.legacyCommitmentId = legacyObj.id;
+
+    persist(); closeSheet(); view();
+  });
+
+  setTimeout(()=> overlay.querySelector('#cmtName')?.focus(), 100);
 }
 
 function saveFinanceCommitment(id){
@@ -14889,31 +15039,129 @@ function renderFinanceCommitmentsTab(){
   const model = financeCommitmentMonthModel(getCurrentMonthKey());
   const now = new Date();
 
-  const byDue = {today:[], week:[], month:[]};
+  // Inject styles once
+  if(!document.getElementById('cmtStyles')){
+    const s = document.createElement('style');
+    s.id = 'cmtStyles';
+    s.textContent = `
+      .cmt-wrap{ display:flex;flex-direction:column;gap:12px;padding-bottom:20px }
+      .cmt-summary{ display:grid;grid-template-columns:repeat(3,1fr);gap:8px }
+      .cmt-sum-card{ background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px 12px }
+      .cmt-sum-val{ font-size:16px;font-weight:800;margin-bottom:2px }
+      .cmt-sum-lbl{ font-size:10px;color:rgba(255,255,255,.4);letter-spacing:.3px }
+      .cmt-sum-card.c-green .cmt-sum-val{ color:#36d399 }
+      .cmt-sum-card.c-yellow .cmt-sum-val{ color:#fbbf24 }
+      .cmt-sum-card.c-red .cmt-sum-val{ color:#fb7185 }
+      .cmt-sum-card.c-purple .cmt-sum-val{ color:#7c5cff }
+      .cmt-prog-wrap{ background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:12px 14px }
+      .cmt-prog-top{ display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px }
+      .cmt-prog-pct{ font-weight:700;color:#7c5cff }
+      .cmt-prog-track{ height:8px;background:rgba(255,255,255,.07);border-radius:4px;overflow:hidden }
+      .cmt-prog-fill{ height:100%;border-radius:4px;background:linear-gradient(90deg,#7c5cff,#36d399);transition:width .4s }
+      .cmt-group-head{ font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:rgba(255,255,255,.35);font-weight:700;padding:4px 0 8px }
+      .cmt-card{ background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;overflow:hidden;margin-bottom:8px }
+      .cmt-card:last-child{ margin-bottom:0 }
+      .cmt-card-main{ display:flex;align-items:center;gap:12px;padding:13px 14px;cursor:pointer;transition:background .13s }
+      .cmt-card-main:hover{ background:rgba(255,255,255,.03) }
+      .cmt-card-left{ display:flex;align-items:center;gap:10px;flex:1;min-width:0 }
+      .cmt-status-dot{ width:10px;height:10px;border-radius:50%;flex-shrink:0 }
+      .cmt-info{ flex:1;min-width:0 }
+      .cmt-name{ font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
+      .cmt-meta{ font-size:11px;color:rgba(255,255,255,.38);margin-top:2px }
+      .cmt-right{ text-align:right;flex-shrink:0 }
+      .cmt-amt{ font-size:14px;font-weight:800 }
+      .cmt-paid{ font-size:10px;color:rgba(255,255,255,.35);margin-top:1px }
+      .cmt-card-actions{ display:flex;border-top:1px solid rgba(255,255,255,.06) }
+      .cmt-action-btn{ flex:1;padding:9px;font-size:11px;font-weight:600;background:none;border:none;color:rgba(255,255,255,.5);cursor:pointer;transition:background .13s,color .13s;letter-spacing:.2px }
+      .cmt-action-btn:hover{ background:rgba(255,255,255,.05);color:#fff }
+      .cmt-action-btn.pay{ color:#7c5cff }
+      .cmt-action-btn.pay:hover{ background:rgba(124,92,255,.1) }
+      .cmt-action-btn.edit{ border-left:1px solid rgba(255,255,255,.06) }
+      .cmt-action-btn.del{ color:#fb7185;border-left:1px solid rgba(255,255,255,.06) }
+      .cmt-action-btn.del:hover{ background:rgba(251,113,133,.08) }
+      .cmt-rec-badge{ font-size:9px;font-weight:700;letter-spacing:.4px;padding:2px 6px;border-radius:6px;display:inline-block;background:rgba(124,92,255,.15);color:#a78bfa;border:1px solid rgba(124,92,255,.2);margin-left:6px;vertical-align:middle }
+      .cmt-add-btn{ width:100%;padding:13px;border-radius:14px;border:1.5px dashed rgba(124,92,255,.35);background:rgba(124,92,255,.05);color:rgba(124,92,255,.9);font-size:13px;font-weight:600;cursor:pointer;transition:background .14s,border-color .14s }
+      .cmt-add-btn:hover{ background:rgba(124,92,255,.1);border-color:rgba(124,92,255,.55) }
+    `;
+    document.head.appendChild(s);
+  }
+
+  const statusColor = st => {
+    if(st==='paid'||st==='covered_by_debt') return '#36d399';
+    if(st==='overdue') return '#fb7185';
+    if(st==='partial') return '#fbbf24';
+    return 'rgba(255,255,255,.25)';
+  };
+  const statusLabel = st => {
+    const map = {paid:'Pagado',covered_by_debt:'Con deuda',overdue:'Vencido',partial:'Parcial',pending:'Pendiente',postponed:'Postergado',cancelled:'Cancelado'};
+    return map[st]||st;
+  };
+
+  const bucketOrder = ['hoy','esta semana','urgente','postergable'];
+  const buckets = {};
   model.instances.forEach(i=>{
     const due = new Date(`${i.dueDate}T12:00:00`);
     const diff = Math.floor((due-now)/(24*60*60*1000));
-    if(diff===0) byDue.today.push(i);
-    else if(diff>0 && diff<=7) byDue.week.push(i);
-    else byDue.month.push(i);
     if(["pending","partial"].includes(String(i.status||"pending")) && due < now) i.status = "overdue";
+    const b = diff<=0?'hoy':(diff<=7?'esta semana':(diff<=14?'urgente':'postergable'));
+    if(!buckets[b]) buckets[b]=[];
+    buckets[b].push(i);
   });
 
-  const row = (i)=>`<div class="finDebtItem" style="cursor:pointer" onclick="openFinanceCommitmentPayModal('${i.id}')"><div class="finDebtLeft"><div class="finDebtName">${escapeHtml(i.template?.name||i.label)}</div><div class="finDebtMeta">${escapeHtml(i.template?.category||"Otros")} · Vence ${i.dueDate}</div><div class="finDebtMeta">Fuente: ${escapeHtml(((state.financePaymentSources||[]).find(s=>s.id===i.paymentSourceId)?.name)||"—")}</div></div><div class="finDebtRight"><div class="finDebtPay">S/ ${fmt(i.expectedAmount||0)}</div><div class="finDebtMeta">Pagado S/ ${fmt(i.paidAmount||0)}</div><div>${financeCommitmentStatusChip(i.status)}</div></div></div>`;
+  const bucketLabel = {'hoy':'\uD83D\uDCC5 Para hoy','esta semana':'\u26A1 Esta semana','urgente':'\u23F0 Pr\u00F3ximos 14 d\u00EDas','postergable':'\uD83D\uDCC6 Resto del mes'};
 
-  const list = model.instances.map(row).join("") || `<div class="muted">Aún no tienes compromisos. Crea uno con “＋ Nuevo”.</div>`;
-  const dueHtml = (arr, empty)=>arr.map(i=>`<div class="dueRow"><div>${escapeHtml(i.template?.name||i.label)}</div><div class="muted">${i.dueDate} · S/ ${fmt(i.expectedAmount||0)}</div></div>`).join("") || `<div class="muted">${empty}</div>`;
+  const instRows = bucketOrder.filter(b=>buckets[b]?.length).map(b=>`
+    <div class="cmt-group-head">${bucketLabel[b]}</div>
+    ${buckets[b].map(i=>{
+      const tmpl = i.template||{};
+      const recLabel = tmpl.recurrence==='monthly'?'mensual':(tmpl.recurrence==='weekly'?'semanal':(tmpl.recurrence||''));
+      const tplId = escapeAttr(i.templateId||i.id||'');
+      return `
+        <div class="cmt-card">
+          <div class="cmt-card-main" onclick="openFinanceCommitmentPayModal('${i.id}')">
+            <div class="cmt-card-left">
+              <div class="cmt-status-dot" style="background:${statusColor(i.status)}"></div>
+              <div class="cmt-info">
+                <div class="cmt-name">${escapeHtml(tmpl.name||i.label||'Compromiso')}${recLabel?`<span class="cmt-rec-badge">${recLabel}</span>`:''}</div>
+                <div class="cmt-meta">${escapeHtml(tmpl.category||'General')} &middot; d&iacute;a ${Number(tmpl.dueDay||1)} &middot; ${statusLabel(i.status)}</div>
+              </div>
+            </div>
+            <div class="cmt-right">
+              <div class="cmt-amt" style="color:${statusColor(i.status)}">S/ ${fmt(i.expectedAmount||0)}</div>
+              <div class="cmt-paid">pagado S/ ${fmt(i.paidAmount||0)}</div>
+            </div>
+          </div>
+          <div class="cmt-card-actions">
+            <button class="cmt-action-btn pay" onclick="event.stopPropagation();openFinanceCommitmentPayModal('${i.id}')">&#x1F4B3; Pagar</button>
+            <button class="cmt-action-btn edit" onclick="event.stopPropagation();openFinanceCommitmentModalById('${tplId}')">&#x270F;&#xFE0F; Editar</button>
+            <button class="cmt-action-btn del" onclick="event.stopPropagation();deleteFinanceCommitment('${tplId}')">&#x1F5D1;&#xFE0F;</button>
+          </div>
+        </div>
+      `;
+    }).join('')}
+  `).join('');
 
-  const loanSources = (state.financePaymentSources||[]).filter(s=>s.isDebtInstrument || s.sourceType==="loan");
-  const loanSummary = loanSources.map(s=>{
-    const uses = (state.financeLoanUsageLedger||[]).filter(u=>u.sourceId===s.id && String((u.date||"").slice(0,7))===model.mk);
-    const used = uses.reduce((a,b)=>a+Number(b.amount||0),0);
-    return `<div class="dueRow"><div>${escapeHtml(s.name)} · usado S/ ${fmt(used)}</div><div class="muted">${uses.slice(0,3).map(u=>{ const ci=(state.financeCommitmentInstances||[]).find(i=>i.id===u.commitmentInstanceId); const t=financeCommitmentTemplateById(ci?.templateId); return `${escapeHtml(t?.name||'Compromiso')} S/ ${fmt(u.amount||0)}`; }).join(' · ') || 'Sin movimientos'}</div></div>`;
-  }).join("") || `<div class="muted">Sin fuentes de deuda configuradas.</div>`;
+  const resolvedPct = model.resolutionPct||0;
 
-  const insight = `${model.instances.filter(i=>["paid","covered_by_debt"].includes(i.status)).length} de ${model.instances.length} compromisos resueltos. ${model.overdue>0?"Tienes compromisos vencidos.":"Sin vencidos por ahora."}`;
-
-  return `<section class="card homeCard homeWide"><div class="cardTop"><h2 class="cardTitle">Compromisos</h2><button class="iconBtn" onclick="openFinanceCommitmentModal()">＋</button></div><div class="hr"></div><div class="row" style="gap:8px;flex-wrap:wrap"><div class="miniCard"><div class="miniTitle">Total mes</div><div class="miniBody">S/ ${fmt(model.total)}</div></div><div class="miniCard"><div class="miniTitle">Pagado</div><div class="miniBody">S/ ${fmt(model.paid)}</div></div><div class="miniCard"><div class="miniTitle">Pendiente</div><div class="miniBody">S/ ${fmt(model.pending)}</div></div><div class="miniCard"><div class="miniTitle">Vencido</div><div class="miniBody">S/ ${fmt(model.overdue)}</div></div><div class="miniCard"><div class="miniTitle">Cubierto con deuda</div><div class="miniBody">S/ ${fmt(model.coveredByDebt)}</div></div><div class="miniCard"><div class="miniTitle">Resuelto</div><div class="miniBody">${model.resolutionPct}%</div></div></div><div class="finDebtHint" style="margin-top:10px">💡 ${insight}</div><div class="hr" style="margin-top:12px"></div><div class="row" style="gap:12px;flex-wrap:wrap"><div class="miniCard"><div class="miniTitle">Por vencer hoy</div><div class="miniBody">${dueHtml(byDue.today,'Nada para hoy.')}</div></div><div class="miniCard"><div class="miniTitle">Próximos 7 días</div><div class="miniBody">${dueHtml(byDue.week,'Nada en 7 días.')}</div></div><div class="miniCard"><div class="miniTitle">Resto del mes</div><div class="miniBody">${dueHtml(byDue.month,'Sin más vencimientos.')}</div></div></div><div class="hr" style="margin-top:12px"></div><div class="miniCard"><div class="miniTitle">Uso de préstamos</div><div class="miniBody">${loanSummary}</div></div><div class="hr" style="margin-top:12px"></div><div class="cardTop" style="margin-top:2px"><h3 class="cardTitle" style="font-size:14px">Este mes</h3></div><div class="finDebtList">${list}</div></section>`;
+  return `
+    <div class="cmt-wrap">
+      <div class="cmt-summary">
+        <div class="cmt-sum-card c-purple"><div class="cmt-sum-val">S/ ${fmt(model.total)}</div><div class="cmt-sum-lbl">Total mes</div></div>
+        <div class="cmt-sum-card c-green"><div class="cmt-sum-val">S/ ${fmt(model.paid)}</div><div class="cmt-sum-lbl">Pagado</div></div>
+        <div class="cmt-sum-card ${model.pending>0?'c-yellow':''}"><div class="cmt-sum-val">S/ ${fmt(model.pending)}</div><div class="cmt-sum-lbl">Pendiente</div></div>
+        <div class="cmt-sum-card ${(model.overdue||0)>0?'c-red':''}"><div class="cmt-sum-val">S/ ${fmt(model.overdue||0)}</div><div class="cmt-sum-lbl">Vencido</div></div>
+        <div class="cmt-sum-card"><div class="cmt-sum-val">S/ ${fmt(model.coveredByDebt)}</div><div class="cmt-sum-lbl">Con deuda</div></div>
+        <div class="cmt-sum-card c-green"><div class="cmt-sum-val">${resolvedPct}%</div><div class="cmt-sum-lbl">Resuelto</div></div>
+      </div>
+      <div class="cmt-prog-wrap">
+        <div class="cmt-prog-top"><span>Compromisos resueltos este mes</span><span class="cmt-prog-pct">${resolvedPct}%</span></div>
+        <div class="cmt-prog-track"><div class="cmt-prog-fill" style="width:${resolvedPct}%"></div></div>
+      </div>
+      ${instRows || '<div style="text-align:center;padding:32px 16px;color:rgba(255,255,255,.3)"><div style="font-size:36px;margin-bottom:10px">&#x1F4CB;</div><div style="font-size:13px">Sin compromisos para este mes.</div></div>'}
+      <button class="cmt-add-btn" onclick="openFinanceCommitmentModal()">&#xFF0B; Nuevo compromiso</button>
+    </div>
+  `;
+}
 }
 
 function openFinanceCommitmentModalById(id){
@@ -15943,52 +16191,244 @@ function renderFinanceMissionControl(){
   const m = financeMissionControlModel(getCurrentMonthKey());
   const insights = financeGenerateInsights(m.mk);
   const fmt = _financeFmt;
-  const sourceRows = (state.financePaymentSources||[]).filter(s=>s.isActive!==false).map(s=>`
-    <div class="budgetRow"><div>${escapeHtml(s.name)}</div><div class="muted">${escapeHtml(s.sourceType)} · ${escapeHtml(s.owner)}</div></div>
-  `).join('') || '<div class="muted">Sin fuentes configuradas</div>';
 
-  const priorityRows = (m.upcoming||[]).slice(0,6).map(o=>`
-    <div class="finDueRow">
-      <div class="finDueLeft"><div class="finDueTitle">${escapeHtml(o.name)}</div><div class="muted">${escapeHtml(o.category||'General')} · ${escapeHtml(o.bucket)}</div></div>
-      <div class="finDueAmt">S/ ${fmt(o.amountExpected||0)}</div>
+  // Inject styles once
+  if(!document.getElementById('mcStyles')){
+    const s = document.createElement('style');
+    s.id = 'mcStyles';
+    s.textContent = `
+      .mc-wrap{ display:flex;flex-direction:column;gap:14px;padding-bottom:16px; }
+
+      /* ── Header card ── */
+      .mc-hero{
+        background:linear-gradient(135deg,rgba(124,92,255,.25),rgba(54,211,153,.12));
+        border:1px solid rgba(124,92,255,.3);
+        border-radius:20px;padding:18px 16px 14px;
+      }
+      .mc-hero-top{ display:flex;align-items:center;justify-content:space-between;margin-bottom:14px }
+      .mc-hero-label{ font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600 }
+      .mc-risk{
+        font-size:11px;font-weight:700;letter-spacing:.5px;
+        padding:4px 10px;border-radius:20px;
+      }
+      .mc-risk.low{ background:rgba(54,211,153,.18);color:#36d399;border:1px solid rgba(54,211,153,.3) }
+      .mc-risk.mid{ background:rgba(251,191,36,.18);color:#fbbf24;border:1px solid rgba(251,191,36,.3) }
+      .mc-risk.high{ background:rgba(251,113,133,.18);color:#fb7185;border:1px solid rgba(251,113,133,.3) }
+
+      .mc-balance{ font-size:32px;font-weight:800;letter-spacing:-1px;margin-bottom:4px }
+      .mc-balance-sub{ font-size:12px;color:rgba(255,255,255,.4) }
+
+      .mc-stats{ display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px }
+      .mc-stat{
+        background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+        border-radius:13px;padding:10px 10px 8px;text-align:center;
+      }
+      .mc-stat-val{ font-size:15px;font-weight:700;margin-bottom:2px }
+      .mc-stat-lbl{ font-size:10px;color:rgba(255,255,255,.4);letter-spacing:.3px }
+      .mc-stat.accent .mc-stat-val{ color:#7c5cff }
+      .mc-stat.good .mc-stat-val{ color:#36d399 }
+      .mc-stat.warn .mc-stat-val{ color:#fb7185 }
+
+      /* Progress bar */
+      .mc-progress-wrap{ margin-top:14px }
+      .mc-progress-label{
+        display:flex;justify-content:space-between;
+        font-size:11px;color:rgba(255,255,255,.45);margin-bottom:6px;
+      }
+      .mc-progress-track{
+        height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;
+      }
+      .mc-progress-fill{
+        height:100%;border-radius:3px;
+        background:linear-gradient(90deg,#7c5cff,#36d399);
+        transition:width .4s ease;
+      }
+
+      /* ── Priority list ── */
+      .mc-section{
+        background:rgba(255,255,255,.04);
+        border:1px solid rgba(255,255,255,.08);
+        border-radius:18px;overflow:hidden;
+      }
+      .mc-section-head{
+        display:flex;align-items:center;justify-content:space-between;
+        padding:13px 16px;border-bottom:1px solid rgba(255,255,255,.06);
+      }
+      .mc-section-title{ font-size:13px;font-weight:700;letter-spacing:.2px }
+      .mc-section-action{
+        font-size:11px;color:#7c5cff;cursor:pointer;
+        padding:4px 10px;border-radius:10px;
+        background:rgba(124,92,255,.12);border:1px solid rgba(124,92,255,.2);
+        font-weight:600;transition:background .14s;
+      }
+      .mc-section-action:hover{ background:rgba(124,92,255,.22) }
+
+      .mc-priority-item{
+        display:flex;align-items:center;gap:12px;
+        padding:12px 16px;
+        border-bottom:1px solid rgba(255,255,255,.05);
+        cursor:pointer;transition:background .14s;
+      }
+      .mc-priority-item:last-child{ border-bottom:none }
+      .mc-priority-item:hover{ background:rgba(255,255,255,.04) }
+      .mc-priority-dot{
+        width:10px;height:10px;border-radius:50%;flex-shrink:0;
+      }
+      .mc-priority-info{ flex:1;min-width:0 }
+      .mc-priority-name{ font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
+      .mc-priority-meta{ font-size:11px;color:rgba(255,255,255,.4);margin-top:1px }
+      .mc-priority-amt{ font-size:14px;font-weight:700;white-space:nowrap }
+      .mc-priority-badge{
+        font-size:10px;font-weight:700;letter-spacing:.3px;
+        padding:2px 7px;border-radius:8px;white-space:nowrap;
+      }
+      .badge-hoy{ background:rgba(251,113,133,.2);color:#fb7185 }
+      .badge-semana{ background:rgba(251,191,36,.2);color:#fbbf24 }
+      .badge-urgente{ background:rgba(251,191,36,.12);color:#fbbf24 }
+      .badge-post{ background:rgba(255,255,255,.07);color:rgba(255,255,255,.4) }
+
+      /* ── Sources grid ── */
+      .mc-sources{ display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:12px 14px; }
+      .mc-source-item{
+        background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
+        border-radius:12px;padding:10px 12px;
+      }
+      .mc-source-name{ font-size:12px;font-weight:600;margin-bottom:2px }
+      .mc-source-meta{ font-size:10px;color:rgba(255,255,255,.35) }
+
+      /* ── Insights ── */
+      .mc-insight{
+        display:flex;gap:10px;align-items:flex-start;
+        padding:11px 14px;
+        border-bottom:1px solid rgba(255,255,255,.05);
+      }
+      .mc-insight:last-child{ border-bottom:none }
+      .mc-insight-dot{ width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px }
+      .mc-insight-title{ font-size:12px;font-weight:700;margin-bottom:2px }
+      .mc-insight-msg{ font-size:11px;color:rgba(255,255,255,.5);line-height:1.5 }
+    `;
+    document.head.appendChild(s);
+  }
+
+  const riskClass = m.riskScore==='BAJO' ? 'low' : (m.riskScore==='MEDIO' ? 'mid' : 'high');
+  const paidPct = m.obligationsMonth > 0 ? Math.min(100, Math.round((m.paidNow/m.obligationsMonth)*100)) : 0;
+  const marginColor = m.margin >= 0 ? '#36d399' : '#fb7185';
+
+  const bucketDot = b => b==='hoy'?'#fb7185':(b==='esta semana'?'#fbbf24':'#7c5cff');
+  const bucketBadge = b => {
+    if(b==='hoy') return '<span class="mc-priority-badge badge-hoy">HOY</span>';
+    if(b==='esta semana') return '<span class="mc-priority-badge badge-semana">ESTA SEMANA</span>';
+    if(b==='urgente') return '<span class="mc-priority-badge badge-urgente">URGENTE</span>';
+    return '<span class="mc-priority-badge badge-post">DESPUÉS</span>';
+  };
+
+  const priorityItems = (m.upcoming||[]).slice(0,8).map(o=>`
+    <div class="mc-priority-item" onclick="setFinanceSubTab('commitments')" title="Ver compromisos">
+      <div class="mc-priority-dot" style="background:${bucketDot(o.bucket)}"></div>
+      <div class="mc-priority-info">
+        <div class="mc-priority-name">${escapeHtml(o.name)}</div>
+        <div class="mc-priority-meta">${escapeHtml(o.category||'General')} · día ${Number(o.dueDate||1)}</div>
+      </div>
+      ${bucketBadge(o.bucket)}
+      <div class="mc-priority-amt" style="color:${bucketDot(o.bucket)}">S/ ${fmt(o.amountExpected||0)}</div>
     </div>
-  `).join('') || '<div class="muted">Sin obligaciones activas.</div>';
+  `).join('') || `<div style="padding:20px 16px;text-align:center;color:rgba(255,255,255,.3);font-size:13px">Sin obligaciones activas.<br><span style="font-size:11px">Crea compromisos en la pestaña Compromisos.</span></div>`;
 
-  const insightRows = (insights||[]).map(i=>`<div class="finDebtHint ${i.level==='urgent'?'bad':'good'}"><strong>${escapeHtml(i.title)}:</strong> ${escapeHtml(i.message)}</div>`).join('');
+  const insightItems = (insights||[]).map(i=>{
+    const col = i.level==='urgent'?'#fb7185':(i.level==='warning'?'#fbbf24':'#7c5cff');
+    return `
+      <div class="mc-insight">
+        <div class="mc-insight-dot" style="background:${col}"></div>
+        <div>
+          <div class="mc-insight-title">${escapeHtml(i.title)}</div>
+          <div class="mc-insight-msg">${escapeHtml(i.message)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const sourceItems = (state.financePaymentSources||[]).filter(s=>s.isActive!==false).map(s=>`
+    <div class="mc-source-item">
+      <div class="mc-source-name">${escapeHtml(s.name)}</div>
+      <div class="mc-source-meta">${escapeHtml(s.sourceType)} · ${escapeHtml(s.owner)}</div>
+    </div>
+  `).join('') || `<div style="padding:12px 16px;color:rgba(255,255,255,.3);font-size:12px">Sin fuentes configuradas</div>`;
 
   return `
-    <section class="card homeCard homeWide finMissionControl">
-      <div class="cardTop"><h2 class="cardTitle">Mission Control · ${escapeHtml(m.mk)}</h2></div>
-      <div class="hr"></div>
-      <div class="finSummaryGrid">
-        <div class="finSummaryCard"><span>Ingreso confirmado</span><strong>S/ ${fmt(m.incomeConfirmed)}</strong></div>
-        <div class="finSummaryCard"><span>Obligaciones del mes</span><strong>S/ ${fmt(m.obligationsMonth)}</strong></div>
-        <div class="finSummaryCard"><span>Pagado hasta ahora</span><strong>S/ ${fmt(m.paidNow)}</strong></div>
-        <div class="finSummaryCard"><span>Pendiente</span><strong>S/ ${fmt(m.pending)}</strong></div>
-        <div class="finSummaryCard"><span>Disponible real</span><strong>S/ ${fmt(m.realAvailable)}</strong></div>
-        <div class="finSummaryCard"><span>Uso dinero ajeno</span><strong>S/ ${fmt(m.foreignUse)}</strong></div>
-        <div class="finSummaryCard"><span>Deuda interna</span><strong>S/ ${fmt(m.internalDebt)}</strong></div>
-        <div class="finSummaryCard"><span>Riesgo del mes</span><strong>${escapeHtml(m.riskScore)}</strong></div>
+    <div class="mc-wrap">
+
+      <!-- Hero card -->
+      <div class="mc-hero">
+        <div class="mc-hero-top">
+          <div class="mc-hero-label">🛰 Mission Control · ${escapeHtml(m.mk)}</div>
+          <div class="mc-risk ${riskClass}">RIESGO ${escapeHtml(m.riskScore)}</div>
+        </div>
+        <div class="mc-balance" style="color:${marginColor}">S/ ${fmt(Math.abs(m.margin))}</div>
+        <div class="mc-balance-sub">${m.margin>=0?'margen disponible después de esenciales':'déficit estimado del mes'}</div>
+        <div class="mc-stats">
+          <div class="mc-stat good">
+            <div class="mc-stat-val">S/ ${fmt(m.incomeConfirmed)}</div>
+            <div class="mc-stat-lbl">Ingreso</div>
+          </div>
+          <div class="mc-stat accent">
+            <div class="mc-stat-val">S/ ${fmt(m.obligationsMonth)}</div>
+            <div class="mc-stat-lbl">Obligaciones</div>
+          </div>
+          <div class="mc-stat warn">
+            <div class="mc-stat-val">S/ ${fmt(m.pending)}</div>
+            <div class="mc-stat-lbl">Pendiente</div>
+          </div>
+          <div class="mc-stat">
+            <div class="mc-stat-val">S/ ${fmt(m.paidNow)}</div>
+            <div class="mc-stat-lbl">Pagado</div>
+          </div>
+          <div class="mc-stat">
+            <div class="mc-stat-val">S/ ${fmt(m.realAvailable)}</div>
+            <div class="mc-stat-lbl">Disponible</div>
+          </div>
+          <div class="mc-stat ${m.internalDebt>0?'warn':''}">
+            <div class="mc-stat-val">S/ ${fmt(m.internalDebt)}</div>
+            <div class="mc-stat-lbl">Deuda int.</div>
+          </div>
+        </div>
+        <div class="mc-progress-wrap">
+          <div class="mc-progress-label">
+            <span>Compromisos pagados</span>
+            <span>${paidPct}%</span>
+          </div>
+          <div class="mc-progress-track">
+            <div class="mc-progress-fill" style="width:${paidPct}%"></div>
+          </div>
+        </div>
       </div>
-    </section>
 
-    <section class="card homeCard homeWide">
-      <div class="cardTop"><h2 class="cardTitle">Prioridades inmediatas</h2></div>
-      <div class="hr"></div>
-      <div class="finDueWrap">${priorityRows}</div>
-    </section>
+      <!-- Prioridades inmediatas -->
+      <div class="mc-section">
+        <div class="mc-section-head">
+          <div class="mc-section-title">⚡ Prioridades inmediatas</div>
+          <div class="mc-section-action" onclick="setFinanceSubTab('commitments')">Ver todos →</div>
+        </div>
+        ${priorityItems}
+      </div>
 
-    <section class="card homeCard homeWide">
-      <div class="cardTop"><h2 class="cardTitle">Fuentes de pago</h2></div>
-      <div class="hr"></div>
-      ${sourceRows}
-    </section>
+      <!-- Asistente -->
+      ${insightItems ? `
+      <div class="mc-section">
+        <div class="mc-section-head">
+          <div class="mc-section-title">💡 Asistente</div>
+        </div>
+        ${insightItems}
+      </div>` : ''}
 
-    <section class="card homeCard homeWide">
-      <div class="cardTop"><h2 class="cardTitle">Asistente</h2></div>
-      <div class="hr"></div>
-      <div style="display:grid;gap:10px">${insightRows}</div>
-    </section>
+      <!-- Fuentes de pago -->
+      <div class="mc-section">
+        <div class="mc-section-head">
+          <div class="mc-section-title">💳 Fuentes de pago</div>
+        </div>
+        <div class="mc-sources">${sourceItems}</div>
+      </div>
+
+    </div>
   `;
 }
 
