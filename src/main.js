@@ -14659,6 +14659,22 @@ function financeEnsureCommitments(){
     }));
   }
 
+  // Clean up orphaned instances whose template has been deleted (run after migrations)
+  const _knownTplIds = new Set((state.financeCommitmentTemplates||[]).map(t=>t.id));
+  state.financeCommitmentInstances = (state.financeCommitmentInstances||[]).filter(i=>_knownTplIds.has(i.templateId));
+
+  // Clean up orphaned obligations whose commitment template has been deleted
+  if(Array.isArray(state.financeObligations) && state.financeObligations.length){
+    const _oblAllowedIds = new Set();
+    (state.financeCommitmentTemplates||[]).forEach(t=>{
+      _oblAllowedIds.add(t.id);
+      if(t.legacyCommitmentId) _oblAllowedIds.add(t.legacyCommitmentId);
+    });
+    state.financeObligations = state.financeObligations.filter(o =>
+      _oblAllowedIds.has(o.id) || (o.legacyCommitmentId && _oblAllowedIds.has(o.legacyCommitmentId))
+    );
+  }
+
   const monthKey = getCurrentMonthKey();
   const now = new Date();
   for(const t of (state.financeCommitmentTemplates||[])){
@@ -14887,6 +14903,9 @@ function openFinanceCommitmentModal(existing){
     financeEnsureCommitments();
     state.financeCommitmentTemplates = (state.financeCommitmentTemplates||[]).filter(x=>x.id!==t.id);
     state.financeCommitments = (state.financeCommitments||[]).filter(x=>x.id!==t.id);
+    state.financeCommitmentInstances = (state.financeCommitmentInstances||[]).filter(x=>x.templateId!==t.id);
+    const legacyId = t.legacyCommitmentId;
+    state.financeObligations = (state.financeObligations||[]).filter(o=>o.id!==t.id && o.id!==legacyId && o.legacyCommitmentId!==t.id && o.legacyCommitmentId!==legacyId);
     persist(); closeSheet(); view();
   });
 
@@ -14920,6 +14939,13 @@ function openFinanceCommitmentModal(existing){
     if(li>=0) legacy[li]=legacyObj; else legacy.unshift(legacyObj);
     obj.legacyCommitmentId = legacyObj.id;
 
+    // sync obligations so Mission Control stays up to date
+    if(!Array.isArray(state.financeObligations)) state.financeObligations = [];
+    const oblId = legacyObj.id;
+    const oblIdx = (state.financeObligations).findIndex(o=>o.id===oblId || o.id===obj.id || o.legacyCommitmentId===oblId);
+    const oblObj = { id: oblId, name, category:group, type:'essential_fixed', amountExpected:Number(baseAmount||0), dueDate:Number(dueDay||1), recurrence, priority:'high', isActive, status:'pending', notes, legacyCommitmentId:oblId };
+    if(oblIdx>=0) state.financeObligations[oblIdx]=oblObj; else state.financeObligations.push(oblObj);
+
     persist(); closeSheet(); view();
   });
 
@@ -14951,14 +14977,25 @@ function saveFinanceCommitment(id){
   if(li>=0) legacy[li]=legacyObj; else legacy.unshift(legacyObj);
   obj.legacyCommitmentId = legacyObj.id;
 
+  // sync obligations so Mission Control stays up to date
+  if(!Array.isArray(state.financeObligations)) state.financeObligations = [];
+  const oblId = legacyObj.id;
+  const oblIdx = (state.financeObligations).findIndex(o=>o.id===oblId || o.id===obj.id || o.legacyCommitmentId===oblId);
+  const oblObj = { id: oblId, name, category:group, type:'essential_fixed', amountExpected:Number(baseAmount||0), dueDate:Number(dueDay||1), recurrence:'monthly', priority:'high', isActive, status:'pending', notes, legacyCommitmentId:oblId };
+  if(oblIdx>=0) state.financeObligations[oblIdx]=oblObj; else state.financeObligations.push(oblObj);
+
   persist(); closeModal(); view();
 }
 
 function deleteFinanceCommitment(id){
   if(!confirm("¿Eliminar este compromiso?")) return;
   financeEnsureCommitments();
+  const tpl = (state.financeCommitmentTemplates||[]).find(x=>x.id===id);
   state.financeCommitmentTemplates = (state.financeCommitmentTemplates||[]).filter(x=>x.id!==id);
   state.financeCommitments = (state.financeCommitments||[]).filter(x=>x.id!==id);
+  state.financeCommitmentInstances = (state.financeCommitmentInstances||[]).filter(x=>x.templateId!==id);
+  const legacyId = tpl?.legacyCommitmentId;
+  state.financeObligations = (state.financeObligations||[]).filter(o=>o.id!==id && o.id!==legacyId && o.legacyCommitmentId!==id && o.legacyCommitmentId!==legacyId);
   persist(); closeModal(); view();
 }
 
