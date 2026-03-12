@@ -13416,72 +13416,333 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop finCatBackdrop';
 
+  // ── Shared palette & icons constants ──────────────────────────────────
+  const FC_PALETTE = [
+    '#7c5cff','#36d399','#fb7185','#fbbf24','#38bdf8',
+    '#f472b6','#a3e635','#fb923c','#e879f9','#34d399',
+    '#60a5fa','#f87171','#4ade80','#facc15','#a78bfa'
+  ];
+  const FC_ICONS = ['🏠','🍔','🚗','🎮','💊','📚','✈️','🎁','💡','👗','🐾','💪','🎵','📱','🛒','💸','🏋️','🎨','🧴','🏥','🔧','📦','🍺','☕','🌿','🧾','🎓','🏦'];
+
+  // ── Shared CSS (injected once) ─────────────────────────────────────────
+  if(!document.getElementById('fcStyles')){
+    const s = document.createElement('style');
+    s.id = 'fcStyles';
+    s.textContent = `
+      @keyframes fcFadeIn{from{opacity:0}to{opacity:1}}
+      @keyframes fcSlideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes fcPop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+
+      /* ── Main picker screen ── */
+      .finCatBackdrop{
+        position:fixed;inset:0;z-index:900;
+        background:#0b0f19;
+        display:flex;flex-direction:column;
+        animation:fcFadeIn .16s ease;
+      }
+      .fcp-topbar{
+        display:flex;align-items:center;gap:12px;
+        padding:14px 16px 10px;
+        border-bottom:1px solid rgba(255,255,255,.08);
+        position:sticky;top:0;z-index:2;
+        background:rgba(11,15,25,.95);
+        backdrop-filter:blur(10px);
+      }
+      .fcp-back{
+        width:36px;height:36px;border-radius:50%;
+        border:1px solid rgba(255,255,255,.12);
+        background:rgba(255,255,255,.05);
+        color:rgba(255,255,255,.8);cursor:pointer;
+        font-size:18px;display:flex;align-items:center;justify-content:center;
+        transition:background .14s;flex-shrink:0;
+      }
+      .fcp-back:hover{background:rgba(255,255,255,.12)}
+      .fcp-title{font-size:16px;font-weight:600;flex:1}
+      .fcp-new-btn{
+        padding:8px 14px;border-radius:20px;border:none;
+        background:linear-gradient(135deg,#7c5cff,#5b3fd4);
+        color:#fff;font-size:13px;font-weight:600;cursor:pointer;
+        box-shadow:0 3px 10px rgba(124,92,255,.35);
+        transition:opacity .14s,transform .1s;white-space:nowrap;
+      }
+      .fcp-new-btn:hover{opacity:.88;transform:translateY(-1px)}
+
+      .fcp-search-wrap{
+        padding:12px 16px 8px;
+        position:sticky;top:60px;z-index:1;
+        background:rgba(11,15,25,.9);
+        backdrop-filter:blur(8px);
+      }
+      .fcp-search{
+        display:flex;align-items:center;gap:8px;
+        background:rgba(255,255,255,.07);
+        border:1px solid rgba(255,255,255,.1);
+        border-radius:14px;padding:9px 13px;
+        transition:border .15s;
+      }
+      .fcp-search:focus-within{border-color:rgba(124,92,255,.5)}
+      .fcp-search input{
+        background:none;border:none;outline:none;
+        color:#fff;font-size:14px;flex:1;
+      }
+      .fcp-search input::placeholder{color:rgba(255,255,255,.3)}
+
+      .fcp-body{
+        flex:1;overflow-y:auto;padding:4px 16px 100px;
+      }
+      .fcp-group-block{margin-bottom:6px}
+      .fcp-group-header{
+        display:flex;align-items:center;justify-content:space-between;
+        padding:14px 2px 8px;
+      }
+      .fcp-group-name{
+        font-size:11px;letter-spacing:.8px;text-transform:uppercase;
+        color:rgba(255,255,255,.4);font-weight:600;
+      }
+      .fcp-group-count{
+        font-size:11px;color:rgba(255,255,255,.25);
+      }
+      .fcp-grid{
+        display:grid;grid-template-columns:repeat(4,1fr);gap:8px;
+      }
+      .fcp-item{
+        display:flex;flex-direction:column;align-items:center;gap:6px;
+        padding:12px 6px 10px;
+        background:rgba(255,255,255,.04);
+        border:1px solid rgba(255,255,255,.07);
+        border-radius:16px;cursor:pointer;
+        transition:background .14s,border-color .14s,transform .12s;
+        text-align:center;
+      }
+      .fcp-item:hover{
+        background:rgba(255,255,255,.09);
+        border-color:rgba(255,255,255,.15);
+        transform:translateY(-2px);
+      }
+      .fcp-item:active{transform:scale(.95)}
+      .fcp-icon{
+        width:46px;height:46px;border-radius:14px;
+        display:flex;align-items:center;justify-content:center;
+        font-size:22px;
+        box-shadow:0 4px 12px rgba(0,0,0,.3);
+      }
+      .fcp-label{
+        font-size:11px;color:rgba(255,255,255,.75);
+        line-height:1.2;word-break:break-word;max-width:70px;
+      }
+      .fcp-empty{
+        text-align:center;padding:48px 16px;
+        color:rgba(255,255,255,.3);font-size:14px;
+      }
+      .fcp-empty-icon{font-size:36px;margin-bottom:10px}
+
+      /* ── Floating modal (nueva cat / nuevo grupo) ── */
+      .fc-overlay{
+        position:fixed;inset:0;z-index:9999;
+        display:flex;align-items:flex-end;justify-content:center;
+        background:rgba(0,0,0,.6);
+        backdrop-filter:blur(6px);
+        padding:0;
+        animation:fcFadeIn .18s ease;
+      }
+      .fc-sheet{
+        background:linear-gradient(180deg,rgba(30,24,50,.98),rgba(15,12,28,.99));
+        border:1px solid rgba(255,255,255,.12);
+        border-radius:24px 24px 0 0;
+        width:100%;max-width:480px;
+        box-shadow:0 -20px 60px rgba(0,0,0,.6);
+        overflow:hidden;
+        animation:fcSlideUp .24s cubic-bezier(.34,1.4,.64,1);
+        max-height:92vh;display:flex;flex-direction:column;
+      }
+      .fc-drag{
+        width:40px;height:4px;border-radius:2px;
+        background:rgba(255,255,255,.2);
+        margin:10px auto 0;
+      }
+      .fc-sh-head{
+        display:flex;align-items:center;justify-content:space-between;
+        padding:14px 18px 12px;
+        border-bottom:1px solid rgba(255,255,255,.07);
+      }
+      .fc-sh-title{font-size:15px;font-weight:700;letter-spacing:.1px}
+      .fc-sh-close{
+        width:28px;height:28px;border-radius:50%;
+        border:none;background:rgba(255,255,255,.08);
+        color:rgba(255,255,255,.6);cursor:pointer;font-size:15px;
+        display:flex;align-items:center;justify-content:center;
+        transition:background .14s;
+      }
+      .fc-sh-close:hover{background:rgba(255,255,255,.16)}
+      .fc-sh-body{padding:16px 18px;overflow-y:auto;}
+      .fc-lbl{
+        font-size:10px;color:rgba(255,255,255,.4);
+        letter-spacing:.7px;text-transform:uppercase;
+        margin-bottom:6px;margin-top:14px;
+      }
+      .fc-lbl:first-child{margin-top:0}
+      .fc-inp{
+        width:100%;padding:11px 13px;
+        background:rgba(255,255,255,.07);
+        border:1px solid rgba(255,255,255,.11);
+        border-radius:13px;color:#fff;font-size:14px;
+        outline:none;transition:border .15s,background .15s;
+      }
+      .fc-inp:focus{border-color:rgba(124,92,255,.6);background:rgba(124,92,255,.07)}
+      .fc-inp::placeholder{color:rgba(255,255,255,.25)}
+      .fc-inp.err{border-color:#fb7185 !important}
+
+      /* Group dropdown */
+      .fc-grp-select{
+        width:100%;padding:11px 13px;
+        background:rgba(255,255,255,.07);
+        border:1px solid rgba(255,255,255,.11);
+        border-radius:13px;color:#fff;font-size:14px;
+        outline:none;cursor:pointer;
+        appearance:none;-webkit-appearance:none;
+        background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='rgba(255,255,255,0.4)' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        background-repeat:no-repeat;
+        background-position:right 13px center;
+        padding-right:36px;
+        transition:border .15s;
+      }
+      .fc-grp-select:focus{border-color:rgba(124,92,255,.6)}
+      .fc-grp-select option{background:#1a1530;color:#fff}
+
+      /* Preview */
+      .fc-preview{
+        display:flex;align-items:center;gap:12px;
+        background:rgba(255,255,255,.04);
+        border:1px solid rgba(255,255,255,.08);
+        border-radius:15px;padding:12px 14px;margin-bottom:14px;
+      }
+      .fc-prev-icon{
+        width:46px;height:46px;border-radius:14px;
+        display:flex;align-items:center;justify-content:center;
+        font-size:24px;transition:all .18s;flex-shrink:0;
+        box-shadow:0 4px 12px rgba(0,0,0,.3);
+      }
+      .fc-prev-name{font-size:14px;font-weight:600}
+      .fc-prev-grp{font-size:11px;color:rgba(255,255,255,.4);margin-top:2px}
+
+      /* Icon grid */
+      .fc-icon-grid{
+        display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:4px;
+      }
+      .fc-ic-btn{
+        aspect-ratio:1;border-radius:11px;border:1.5px solid transparent;
+        background:rgba(255,255,255,.06);cursor:pointer;font-size:19px;
+        display:flex;align-items:center;justify-content:center;
+        transition:all .13s;
+      }
+      .fc-ic-btn:hover{background:rgba(255,255,255,.13);transform:scale(1.1)}
+      .fc-ic-btn.active{
+        border-color:var(--fc-acc,#7c5cff);
+        background:rgba(124,92,255,.2);
+        transform:scale(1.12);
+      }
+
+      /* Color palette */
+      .fc-palette{display:flex;gap:8px;flex-wrap:wrap;}
+      .fc-dot{
+        width:28px;height:28px;border-radius:50%;cursor:pointer;
+        border:2.5px solid transparent;transition:all .13s;
+        box-shadow:0 2px 6px rgba(0,0,0,.35);
+      }
+      .fc-dot:hover{transform:scale(1.18)}
+      .fc-dot.active{border-color:#fff;transform:scale(1.22)}
+
+      /* Sheet footer */
+      .fc-sh-footer{
+        display:flex;gap:10px;
+        padding:12px 18px 20px;
+        border-top:1px solid rgba(255,255,255,.06);
+        background:rgba(15,12,28,.98);
+      }
+      .fc-btn-sec{
+        flex:1;padding:12px;border-radius:13px;
+        border:1px solid rgba(255,255,255,.1);
+        background:rgba(255,255,255,.04);color:rgba(255,255,255,.65);
+        font-size:14px;cursor:pointer;transition:background .14s;
+      }
+      .fc-btn-sec:hover{background:rgba(255,255,255,.09)}
+      .fc-btn-pri{
+        flex:2;padding:12px;border-radius:13px;border:none;
+        background:linear-gradient(135deg,#7c5cff,#5b3fd4);
+        color:#fff;font-size:14px;font-weight:700;cursor:pointer;
+        box-shadow:0 4px 16px rgba(124,92,255,.4);
+        transition:opacity .14s,transform .1s;
+      }
+      .fc-btn-pri:hover{opacity:.88;transform:translateY(-1px)}
+      .fc-btn-pri:active{transform:scale(.97)}
+    `;
+    document.head.appendChild(s);
+  }
+
+  // ── Main screen HTML ───────────────────────────────────────────────────
   backdrop.innerHTML = `
-    <div class="modal finCatModal" role="dialog" aria-label="${escapeHtml(title)}">
-      <div class="finCatTop">
-        <button class="iconBtn" id="finCatClose">←</button>
-        <div class="finCatTitle">${escapeHtml(title)}</div>
-        <div style="width:38px"></div>
-      </div>
-
-      <div class="finCatPanel">
-        <div class="finCatSearchRow">
-          <div class="finCatSearch">
-            <span class="finCatSearchIcon">🔎</span>
-            <input id="finCatSearchInput" placeholder="Buscar" />
-          </div>
-          ${allowNew ? `<button class="finCatNewBtn" id="finCatNewBtn">Nuevo</button>` : ``}
-        </div>
-
-        <div id="finCatBody" class="finCatBody"></div>
+    <div class="fcp-topbar">
+      <button class="fcp-back" id="finCatClose">←</button>
+      <div class="fcp-title">${escapeHtml(title)}</div>
+      ${allowNew ? `<button class="fcp-new-btn" id="finCatNewBtn">＋ Nueva</button>` : ''}
+    </div>
+    <div class="fcp-search-wrap">
+      <div class="fcp-search">
+        <span style="font-size:15px;opacity:.5">🔎</span>
+        <input id="finCatSearchInput" placeholder="Buscar categoría…">
       </div>
     </div>
+    <div class="fcp-body" id="finCatBody"></div>
   `;
 
   host.appendChild(backdrop);
   const close = ()=> backdrop.remove();
-  backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
   backdrop.querySelector('#finCatClose')?.addEventListener('click', close);
 
-  const body = backdrop.querySelector('#finCatBody');
+  const body  = backdrop.querySelector('#finCatBody');
   const input = backdrop.querySelector('#finCatSearchInput');
 
+  // ── Render main grid ───────────────────────────────────────────────────
   function render(filter=""){
     const f = String(filter||"").trim().toLowerCase();
     const groups = (state.financeCategories.groups||[]).map(g=>{
-      const items = (g.items||[]).filter(it=>{
-        if(!f) return true;
-        return String(it.name||"").toLowerCase().includes(f);
-      });
+      const items = (g.items||[]).filter(it=>
+        !f || String(it.name||"").toLowerCase().includes(f)
+      );
       return {g, items};
     }).filter(x=>x.items.length);
 
     if(!groups.length){
-      body.innerHTML = `<div class="muted" style="padding:12px">Sin resultados.</div>`;
+      body.innerHTML = `
+        <div class="fcp-empty">
+          <div class="fcp-empty-icon">🗂️</div>
+          ${f ? 'Sin resultados para "'+escapeHtml(f)+'"' : 'Aún no hay categorías.<br>Toca <b>＋ Nueva</b> para empezar.'}
+        </div>`;
       return;
     }
 
-    body.innerHTML = groups.map(({g,items})=>{
-      return `
-        <div class="finCatGroup">
-          <div class="finCatGroupTitle">${escapeHtml(g.name)}</div>
-          <div class="finCatGrid">
-            ${items.map(it=>`
-              <button class="finCatItem" data-name="${escapeHtml(it.name)}" title="${escapeHtml(it.name)}">
-                <div class="finCatIcon" style="background:${escapeHtml(it.color||'#ff4d4d')}">${escapeHtml(it.icon||'●')}</div>
-                <div class="finCatLabel">${escapeHtml(it.name)}</div>
-              </button>
-            `).join('')}
-          </div>
+    body.innerHTML = groups.map(({g,items})=>`
+      <div class="fcp-group-block">
+        <div class="fcp-group-header">
+          <div class="fcp-group-name">${escapeHtml(g.name)}</div>
+          <div class="fcp-group-count">${items.length} ${items.length===1?'categoría':'categorías'}</div>
         </div>
-      `;
-    }).join('');
+        <div class="fcp-grid">
+          ${items.map(it=>`
+            <button class="fcp-item" data-name="${escapeHtml(it.name)}">
+              <div class="fcp-icon" style="background:${escapeHtml(it.color||'#7c5cff')}">${escapeHtml(it.icon||'●')}</div>
+              <div class="fcp-label">${escapeHtml(it.name)}</div>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `).join('');
 
-    body.querySelectorAll('.finCatItem').forEach(btn=>{
+    body.querySelectorAll('.fcp-item').forEach(btn=>{
       btn.addEventListener('click', ()=>{
-        const nm = btn.getAttribute('data-name') || '';
-        const cat = financeFindCategoryByName(nm) || {name:nm, icon:'●'};
-        try{ onPick && onPick(cat); }catch(_e){}
+        const nm = btn.getAttribute('data-name')||'';
+        const cat = financeFindCategoryByName(nm)||{name:nm,icon:'●'};
+        try{ onPick && onPick(cat); }catch(_){}
         close();
       });
     });
@@ -13490,252 +13751,282 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
   input?.addEventListener('input', ()=> render(input.value));
   render("");
 
-  backdrop.querySelector('#finCatNewBtn')?.addEventListener('click', ()=>{
-    // ── Modal de nueva categoría ─────────────────────────────────────────
-    const PALETTE = [
-      '#7c5cff','#36d399','#fb7185','#fbbf24','#38bdf8',
-      '#f472b6','#a3e635','#fb923c','#e879f9','#34d399'
-    ];
-    const QUICK_ICONS = ['🏠','🍔','🚗','🎮','💊','📚','✈️','🎁','💡','👗','🐾','💪','🎵','📱','🛒','💸'];
-    const SUGGESTED_GROUPS = ['Casa','Comida','Salud','Transporte','Ocio','Ropa','Ahorro','Otros'];
+  // ── Open "Nueva Categoría" sheet ───────────────────────────────────────
+  if(allowNew){
+    backdrop.querySelector('#finCatNewBtn')?.addEventListener('click', ()=>{
+      openNewCategorySheet({ onSaved: ()=> render(input?.value||'') });
+    });
+  }
+}
 
-    // Existing groups for datalist
-    const existingGroups = (state.financeCategories.groups||[]).map(g=>g.name);
+// ── Modal: Nueva Categoría (bottom sheet) ─────────────────────────────────
+function openNewCategorySheet({ onSaved }={}){
+  const PALETTE = [
+    '#7c5cff','#36d399','#fb7185','#fbbf24','#38bdf8',
+    '#f472b6','#a3e635','#fb923c','#e879f9','#34d399',
+    '#60a5fa','#f87171','#4ade80','#facc15','#a78bfa'
+  ];
+  const ICONS = ['🏠','🍔','🚗','🎮','💊','📚','✈️','🎁','💡','👗','🐾','💪','🎵','📱','🛒','💸','🏋️','🎨','🧴','🏥','🔧','📦','🍺','☕','🌿','🧾','🎓','🏦'];
 
-    const overlay = document.createElement('div');
-    overlay.style.cssText = `
-      position:fixed;inset:0;z-index:9999;
-      display:flex;align-items:center;justify-content:center;
-      background:rgba(0,0,0,.65);
-      backdrop-filter:blur(6px);
-      padding:16px;
-      animation:fcFadeIn .18s ease;
-    `;
+  let selColor = PALETTE[0];
+  let selIcon  = ICONS[0];
 
-    let selectedColor = PALETTE[0];
-    let selectedIcon = QUICK_ICONS[0];
+  const overlay = document.createElement('div');
+  overlay.className = 'fc-overlay';
 
-    overlay.innerHTML = `
-      <style>
-        @keyframes fcFadeIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
-        @keyframes fcSlideIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
-        .fc-modal{
-          background:linear-gradient(160deg,rgba(255,255,255,.10),rgba(255,255,255,.05));
-          border:1px solid rgba(255,255,255,.14);
-          border-radius:22px;
-          padding:0;
-          width:100%;max-width:360px;
-          box-shadow:0 24px 60px rgba(0,0,0,.5);
-          overflow:hidden;
-          animation:fcSlideIn .22s cubic-bezier(.34,1.56,.64,1);
-        }
-        .fc-head{
-          display:flex;align-items:center;justify-content:space-between;
-          padding:16px 18px 12px;
-          border-bottom:1px solid rgba(255,255,255,.08);
-        }
-        .fc-head-title{font-size:15px;font-weight:600;letter-spacing:.2px}
-        .fc-head-close{
-          width:30px;height:30px;border-radius:50%;
-          border:none;background:rgba(255,255,255,.08);
-          color:rgba(255,255,255,.7);cursor:pointer;
-          font-size:16px;display:flex;align-items:center;justify-content:center;
-          transition:background .15s;
-        }
-        .fc-head-close:hover{background:rgba(255,255,255,.15)}
-        .fc-body{padding:18px;}
-        .fc-label{font-size:11px;color:rgba(255,255,255,.5);letter-spacing:.6px;text-transform:uppercase;margin-bottom:7px}
-        .fc-input{
-          width:100%;padding:10px 12px;
-          background:rgba(255,255,255,.07);
-          border:1px solid rgba(255,255,255,.12);
-          border-radius:12px;color:#fff;font-size:14px;
-          outline:none;transition:border .15s;
-        }
-        .fc-input:focus{border-color:rgba(124,92,255,.7);background:rgba(124,92,255,.08)}
-        .fc-input::placeholder{color:rgba(255,255,255,.28)}
-        .fc-preview{
-          display:flex;align-items:center;gap:12px;
-          background:rgba(255,255,255,.05);
-          border:1px solid rgba(255,255,255,.09);
-          border-radius:14px;padding:12px 14px;margin-bottom:16px;
-        }
-        .fc-prev-icon{
-          width:44px;height:44px;border-radius:13px;
-          display:flex;align-items:center;justify-content:center;
-          font-size:22px;transition:all .2s;flex-shrink:0;
-        }
-        .fc-prev-text{flex:1}
-        .fc-prev-name{font-size:14px;font-weight:500}
-        .fc-prev-group{font-size:11px;color:rgba(255,255,255,.45);margin-top:2px}
-        .fc-icon-grid{
-          display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-bottom:16px;
-        }
-        .fc-icon-btn{
-          aspect-ratio:1;border-radius:10px;border:1.5px solid transparent;
-          background:rgba(255,255,255,.07);cursor:pointer;font-size:18px;
-          display:flex;align-items:center;justify-content:center;
-          transition:all .14s;
-        }
-        .fc-icon-btn:hover{background:rgba(255,255,255,.13);transform:scale(1.08)}
-        .fc-icon-btn.active{border-color:var(--fc-sel,#7c5cff);background:rgba(124,92,255,.18);transform:scale(1.1)}
-        .fc-palette{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px;}
-        .fc-color-dot{
-          width:26px;height:26px;border-radius:50%;cursor:pointer;
-          border:2px solid transparent;transition:all .14s;
-          box-shadow:0 2px 6px rgba(0,0,0,.3);
-        }
-        .fc-color-dot:hover{transform:scale(1.15)}
-        .fc-color-dot.active{border-color:#fff;transform:scale(1.2)}
-        .fc-datalist-wrap{position:relative}
-        .fc-footer{
-          display:flex;gap:10px;
-          padding:12px 18px 16px;
-          border-top:1px solid rgba(255,255,255,.07);
-        }
-        .fc-btn-cancel{
-          flex:1;padding:11px;border-radius:12px;border:1px solid rgba(255,255,255,.12);
-          background:rgba(255,255,255,.05);color:rgba(255,255,255,.7);
-          font-size:14px;cursor:pointer;transition:background .15s;
-        }
-        .fc-btn-cancel:hover{background:rgba(255,255,255,.1)}
-        .fc-btn-save{
-          flex:2;padding:11px;border-radius:12px;border:none;
-          background:linear-gradient(135deg,#7c5cff,#5b3fd4);
-          color:#fff;font-size:14px;font-weight:600;cursor:pointer;
-          box-shadow:0 4px 14px rgba(124,92,255,.35);
-          transition:opacity .15s,transform .1s;
-        }
-        .fc-btn-save:hover{opacity:.9;transform:translateY(-1px)}
-        .fc-btn-save:active{transform:translateY(0)}
-      </style>
+  const getGroups = ()=> (state.financeCategories.groups||[]);
+  const buildGroupOptions = ()=> getGroups().map(g=>
+    `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`
+  ).join('') + `<option value="__new__">＋ Crear nuevo grupo…</option>`;
 
-      <div class="fc-modal">
-        <div class="fc-head">
-          <div class="fc-head-title">✨ Nueva Categoría</div>
-          <button class="fc-head-close" id="fcClose">✕</button>
-        </div>
-
-        <div class="fc-body">
-
-          <!-- Preview live -->
-          <div class="fc-preview" id="fcPreview">
-            <div class="fc-prev-icon" id="fcPrevIcon" style="background:${selectedColor}">
-              ${selectedIcon}
-            </div>
-            <div class="fc-prev-text">
-              <div class="fc-prev-name" id="fcPrevName">Nombre de categoría</div>
-              <div class="fc-prev-group" id="fcPrevGroup">Grupo · Casa</div>
-            </div>
-          </div>
-
-          <!-- Nombre -->
-          <div class="fc-label">Nombre</div>
-          <input class="fc-input" id="fcName" placeholder="ej: Delivery, Netflix, Gasolina…" maxlength="32" style="margin-bottom:16px">
-
-          <!-- Grupo -->
-          <div class="fc-label">Grupo</div>
-          <div class="fc-datalist-wrap" style="margin-bottom:16px">
-            <input class="fc-input" id="fcGroup" placeholder="ej: Comida, Casa, Ocio…" list="fcGroupList" maxlength="24">
-            <datalist id="fcGroupList">
-              ${[...new Set([...SUGGESTED_GROUPS, ...existingGroups])].map(g=>`<option value="${escapeHtml(g)}">`).join('')}
-            </datalist>
-          </div>
-
-          <!-- Icono -->
-          <div class="fc-label">Icono</div>
-          <div class="fc-icon-grid" id="fcIconGrid">
-            ${QUICK_ICONS.map((ic,i)=>`
-              <button class="fc-icon-btn${i===0?' active':''}" data-icon="${ic}" title="${ic}">${ic}</button>
-            `).join('')}
-          </div>
-
-          <!-- Color -->
-          <div class="fc-label">Color</div>
-          <div class="fc-palette" id="fcPalette">
-            ${PALETTE.map((c,i)=>`
-              <div class="fc-color-dot${i===0?' active':''}" data-color="${c}" style="background:${c}" title="${c}"></div>
-            `).join('')}
-          </div>
-
-        </div>
-
-        <div class="fc-footer">
-          <button class="fc-btn-cancel" id="fcCancel">Cancelar</button>
-          <button class="fc-btn-save" id="fcSave">Guardar categoría</button>
-        </div>
+  overlay.innerHTML = `
+    <div class="fc-sheet">
+      <div class="fc-drag"></div>
+      <div class="fc-sh-head">
+        <div class="fc-sh-title">✨ Nueva Categoría</div>
+        <button class="fc-sh-close" id="fcShClose">✕</button>
       </div>
-    `;
+      <div class="fc-sh-body">
 
-    document.body.appendChild(overlay);
+        <!-- Preview -->
+        <div class="fc-preview">
+          <div class="fc-prev-icon" id="fcPrevIcon" style="background:${selColor}">${selIcon}</div>
+          <div>
+            <div class="fc-prev-name" id="fcPrevName">Nombre de categoría</div>
+            <div class="fc-prev-grp" id="fcPrevGrp">Sin grupo</div>
+          </div>
+        </div>
 
-    // ── Logic ──────────────────────────────────────────────────────────
-    const fcClose  = overlay.querySelector('#fcClose');
-    const fcCancel = overlay.querySelector('#fcCancel');
-    const fcSave   = overlay.querySelector('#fcSave');
-    const fcName   = overlay.querySelector('#fcName');
-    const fcGroup  = overlay.querySelector('#fcGroup');
-    const fcPrevName  = overlay.querySelector('#fcPrevName');
-    const fcPrevGroup = overlay.querySelector('#fcPrevGroup');
-    const fcPrevIcon  = overlay.querySelector('#fcPrevIcon');
+        <!-- Nombre -->
+        <div class="fc-lbl">Nombre</div>
+        <input class="fc-inp" id="fcName" placeholder="ej: Delivery, Netflix, Gasolina…" maxlength="32">
 
-    const closeOverlay = ()=> overlay.remove();
-    fcClose.addEventListener('click', closeOverlay);
-    fcCancel.addEventListener('click', closeOverlay);
-    overlay.addEventListener('click', e=>{ if(e.target===overlay) closeOverlay(); });
+        <!-- Grupo (dropdown) -->
+        <div class="fc-lbl" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Grupo</span>
+        </div>
+        <select class="fc-grp-select" id="fcGroupSel">
+          ${buildGroupOptions()}
+        </select>
 
-    // Live preview
-    const updatePreview = ()=>{
-      fcPrevName.textContent  = fcName.value.trim()  || 'Nombre de categoría';
-      fcPrevGroup.textContent = 'Grupo · ' + (fcGroup.value.trim() || 'Casa');
-      fcPrevIcon.style.background = selectedColor;
-      fcPrevIcon.textContent = selectedIcon;
-    };
-    fcName.addEventListener('input', updatePreview);
-    fcGroup.addEventListener('input', updatePreview);
+        <!-- Icono -->
+        <div class="fc-lbl">Icono</div>
+        <div class="fc-icon-grid" id="fcIconGrid">
+          ${ICONS.map((ic,i)=>`
+            <button class="fc-ic-btn${i===0?' active':''}" data-icon="${ic}">${ic}</button>
+          `).join('')}
+        </div>
 
-    // Icon selection
-    overlay.querySelector('#fcIconGrid').addEventListener('click', e=>{
-      const btn = e.target.closest('.fc-icon-btn');
-      if(!btn) return;
-      overlay.querySelectorAll('.fc-icon-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      selectedIcon = btn.dataset.icon;
+        <!-- Color -->
+        <div class="fc-lbl">Color</div>
+        <div class="fc-palette" id="fcPalette" style="margin-bottom:8px">
+          ${PALETTE.map((c,i)=>`
+            <div class="fc-dot${i===0?' active':''}" data-color="${c}" style="background:${c}"></div>
+          `).join('')}
+        </div>
+
+      </div>
+      <div class="fc-sh-footer">
+        <button class="fc-btn-sec" id="fcShCancel">Cancelar</button>
+        <button class="fc-btn-pri" id="fcShSave">Guardar</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const closeSheet = ()=> overlay.remove();
+  overlay.querySelector('#fcShClose').addEventListener('click', closeSheet);
+  overlay.querySelector('#fcShCancel').addEventListener('click', closeSheet);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
+
+  const elName    = overlay.querySelector('#fcName');
+  const elGrpSel  = overlay.querySelector('#fcGroupSel');
+  const elPrevIcon= overlay.querySelector('#fcPrevIcon');
+  const elPrevName= overlay.querySelector('#fcPrevName');
+  const elPrevGrp = overlay.querySelector('#fcPrevGrp');
+
+  const updatePreview = ()=>{
+    elPrevIcon.style.background = selColor;
+    elPrevIcon.textContent = selIcon;
+    elPrevName.textContent = elName.value.trim() || 'Nombre de categoría';
+    const selOpt = elGrpSel.options[elGrpSel.selectedIndex];
+    elPrevGrp.textContent = (selOpt && selOpt.value !== '__new__') ? selOpt.text : 'Sin grupo';
+  };
+
+  elName.addEventListener('input', updatePreview);
+
+  // Group dropdown — intercept "＋ Crear nuevo grupo…"
+  elGrpSel.addEventListener('change', ()=>{
+    if(elGrpSel.value === '__new__'){
+      elGrpSel.value = getGroups()[0]?.id || '__new__'; // reset while modal opens
+      openNewGroupSheet({
+        onSaved: (newGrp)=>{
+          // Rebuild options and select new group
+          const opts = getGroups().map(g=>
+            `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`
+          ).join('') + `<option value="__new__">＋ Crear nuevo grupo…</option>`;
+          elGrpSel.innerHTML = opts;
+          elGrpSel.value = newGrp.id;
+          updatePreview();
+        }
+      });
+    } else {
       updatePreview();
-    });
-
-    // Color selection
-    overlay.querySelector('#fcPalette').addEventListener('click', e=>{
-      const dot = e.target.closest('.fc-color-dot');
-      if(!dot) return;
-      overlay.querySelectorAll('.fc-color-dot').forEach(d=>d.classList.remove('active'));
-      dot.classList.add('active');
-      selectedColor = dot.dataset.color;
-      overlay.style.setProperty('--fc-sel', selectedColor);
-      updatePreview();
-    });
-
-    // Save
-    fcSave.addEventListener('click', ()=>{
-      const nm = (fcName.value||'').trim();
-      if(!nm){ fcName.focus(); fcName.style.borderColor='#fb7185'; return; }
-      const gKey = (fcGroup.value||'Otros').trim();
-
-      let grp = (state.financeCategories.groups||[]).find(g=> String(g.name).toLowerCase()===gKey.toLowerCase());
-      if(!grp){
-        grp = { id: 'g_' + Date.now(), name: gKey, items: [] };
-        state.financeCategories.groups.push(grp);
-      }
-      grp.items = grp.items || [];
-      grp.items.push({ id: 'c_' + Date.now(), name: nm, icon: selectedIcon, color: selectedColor });
-      persist();
-      render(input?.value||'');
-      closeOverlay();
-    });
-
-    // Focus
-    setTimeout(()=> fcName.focus(), 80);
+    }
   });
+
+  // Icon selection
+  overlay.querySelector('#fcIconGrid').addEventListener('click', e=>{
+    const btn = e.target.closest('.fc-ic-btn');
+    if(!btn) return;
+    overlay.querySelectorAll('.fc-ic-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    selIcon = btn.dataset.icon;
+    updatePreview();
+  });
+
+  // Color selection
+  overlay.querySelector('#fcPalette').addEventListener('click', e=>{
+    const dot = e.target.closest('.fc-dot');
+    if(!dot) return;
+    overlay.querySelectorAll('.fc-dot').forEach(d=>d.classList.remove('active'));
+    dot.classList.add('active');
+    selColor = dot.dataset.color;
+    overlay.style.setProperty('--fc-acc', selColor);
+    updatePreview();
+  });
+
+  // Save
+  overlay.querySelector('#fcShSave').addEventListener('click', ()=>{
+    const nm = (elName.value||'').trim();
+    if(!nm){ elName.classList.add('err'); elName.focus(); return; }
+    elName.classList.remove('err');
+
+    const selVal = elGrpSel.value;
+    let grp = getGroups().find(g=> g.id === selVal);
+    if(!grp){
+      // Fallback: create "Otros"
+      grp = { id:'g_'+Date.now(), name:'Otros', items:[] };
+      state.financeCategories.groups.push(grp);
+    }
+    grp.items = grp.items||[];
+    grp.items.push({ id:'c_'+Date.now(), name:nm, icon:selIcon, color:selColor });
+    persist();
+    if(onSaved) onSaved();
+    closeSheet();
+  });
+
+  setTimeout(()=> elName.focus(), 100);
+}
+
+// ── Modal: Nuevo Grupo (bottom sheet) ─────────────────────────────────────
+function openNewGroupSheet({ onSaved }={}){
+  const GRP_PALETTE = [
+    '#7c5cff','#36d399','#fb7185','#fbbf24','#38bdf8',
+    '#f472b6','#a3e635','#fb923c','#e879f9','#60a5fa'
+  ];
+  const GRP_ICONS = ['🏠','🍽️','💊','🚌','🎉','👔','💰','📦','🌟','🎯','📁','🔑'];
+
+  let selColor = GRP_PALETTE[0];
+  let selIcon  = GRP_ICONS[0];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'fc-overlay';
+  overlay.style.zIndex = '10000';
+
+  overlay.innerHTML = `
+    <div class="fc-sheet">
+      <div class="fc-drag"></div>
+      <div class="fc-sh-head">
+        <div class="fc-sh-title">📁 Nuevo Grupo</div>
+        <button class="fc-sh-close" id="fgClose">✕</button>
+      </div>
+      <div class="fc-sh-body">
+
+        <div class="fc-preview">
+          <div class="fc-prev-icon" id="fgPrevIcon" style="background:${selColor};border-radius:50%">${selIcon}</div>
+          <div>
+            <div class="fc-prev-name" id="fgPrevName">Nombre del grupo</div>
+            <div class="fc-prev-grp">Agrupa tus categorías</div>
+          </div>
+        </div>
+
+        <div class="fc-lbl">Nombre del grupo</div>
+        <input class="fc-inp" id="fgName" placeholder="ej: Casa, Comida, Salud…" maxlength="24">
+
+        <div class="fc-lbl">Icono representativo</div>
+        <div class="fc-icon-grid" id="fgIconGrid" style="grid-template-columns:repeat(6,1fr)">
+          ${GRP_ICONS.map((ic,i)=>`
+            <button class="fc-ic-btn${i===0?' active':''}" data-icon="${ic}">${ic}</button>
+          `).join('')}
+        </div>
+
+        <div class="fc-lbl">Color del grupo</div>
+        <div class="fc-palette" id="fgPalette" style="margin-bottom:8px">
+          ${GRP_PALETTE.map((c,i)=>`
+            <div class="fc-dot${i===0?' active':''}" data-color="${c}" style="background:${c}"></div>
+          `).join('')}
+        </div>
+
+      </div>
+      <div class="fc-sh-footer">
+        <button class="fc-btn-sec" id="fgCancel">Cancelar</button>
+        <button class="fc-btn-pri" id="fgSave">Crear grupo</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const closeSheet = ()=> overlay.remove();
+  overlay.querySelector('#fgClose').addEventListener('click', closeSheet);
+  overlay.querySelector('#fgCancel').addEventListener('click', closeSheet);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) closeSheet(); });
+
+  const elName    = overlay.querySelector('#fgName');
+  const elPrevIcon= overlay.querySelector('#fgPrevIcon');
+  const elPrevName= overlay.querySelector('#fgPrevName');
+
+  const updatePreview = ()=>{
+    elPrevIcon.style.background = selColor;
+    elPrevIcon.textContent = selIcon;
+    elPrevName.textContent = elName.value.trim() || 'Nombre del grupo';
+  };
+  elName.addEventListener('input', updatePreview);
+
+  overlay.querySelector('#fgIconGrid').addEventListener('click', e=>{
+    const btn = e.target.closest('.fc-ic-btn');
+    if(!btn) return;
+    overlay.querySelectorAll('#fgIconGrid .fc-ic-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    selIcon = btn.dataset.icon;
+    updatePreview();
+  });
+
+  overlay.querySelector('#fgPalette').addEventListener('click', e=>{
+    const dot = e.target.closest('.fc-dot');
+    if(!dot) return;
+    overlay.querySelectorAll('#fgPalette .fc-dot').forEach(d=>d.classList.remove('active'));
+    dot.classList.add('active');
+    selColor = dot.dataset.color;
+    updatePreview();
+  });
+
+  overlay.querySelector('#fgSave').addEventListener('click', ()=>{
+    const nm = (elName.value||'').trim();
+    if(!nm){ elName.classList.add('err'); elName.focus(); return; }
+    elName.classList.remove('err');
+
+    const newGrp = { id:'g_'+Date.now(), name:nm, icon:selIcon, color:selColor, items:[] };
+    state.financeCategories.groups = state.financeCategories.groups||[];
+    state.financeCategories.groups.push(newGrp);
+    persist();
+    if(onSaved) onSaved(newGrp);
+    closeSheet();
+  });
+
+  setTimeout(()=> elName.focus(), 100);
 }
 
 function setFinanceMeta(month, expectedIncome, targetSavings){
