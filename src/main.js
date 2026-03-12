@@ -13575,7 +13575,7 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
         transition:background .14s;
       }
       .fc-sh-close:hover{background:rgba(255,255,255,.16)}
-      .fc-sh-body{padding:16px 18px;overflow-y:auto;}
+      .fc-sh-body{padding:16px 18px;overflow-y:auto;flex:1;min-height:0;}
       .fc-lbl{
         font-size:10px;color:rgba(255,255,255,.4);
         letter-spacing:.7px;text-transform:uppercase;
@@ -14779,7 +14779,7 @@ function openFinanceCommitmentModal(existing){
         <div class="fc-sh-title">${existing ? '✏️ Editar compromiso' : '📋 Nuevo compromiso'}</div>
         <button class="fc-sh-close" id="cmtShClose">✕</button>
       </div>
-      <div class="fc-sh-body" style="overflow-y:auto">
+      <div class="fc-sh-body" style="overflow-y:auto;flex:1;min-height:0">
 
         <div class="cmt-field">
           <div class="cmt-field-label">Nombre</div>
