@@ -15162,7 +15162,6 @@ function renderFinanceCommitmentsTab(){
     </div>
   `;
 }
-}
 
 function openFinanceCommitmentModalById(id){
   const c = (state.financeCommitmentTemplates||[]).find(x=>x.id===id);
