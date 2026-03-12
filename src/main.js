@@ -13491,23 +13491,250 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
   render("");
 
   backdrop.querySelector('#finCatNewBtn')?.addEventListener('click', ()=>{
-    const nm = prompt('Nombre de la categoría:');
-    if(!nm) return;
-    const groupName = prompt('Grupo (ej: Casa, Comida, Salud, Otros):', 'Casa') || 'Otros';
-    const icon = prompt('Icono (emoji o símbolo):', '●') || '●';
-    const color = prompt('Color HEX (opcional, ej #ff4d4d):', '#ff4d4d') || '#ff4d4d';
+    // ── Modal de nueva categoría ─────────────────────────────────────────
+    const PALETTE = [
+      '#7c5cff','#36d399','#fb7185','#fbbf24','#38bdf8',
+      '#f472b6','#a3e635','#fb923c','#e879f9','#34d399'
+    ];
+    const QUICK_ICONS = ['🏠','🍔','🚗','🎮','💊','📚','✈️','🎁','💡','👗','🐾','💪','🎵','📱','🛒','💸'];
+    const SUGGESTED_GROUPS = ['Casa','Comida','Salud','Transporte','Ocio','Ropa','Ahorro','Otros'];
 
-    const gKey = String(groupName).trim();
-    if(!gKey) return;
-    let grp = (state.financeCategories.groups||[]).find(g=> String(g.name).toLowerCase()===gKey.toLowerCase());
-    if(!grp){
-      grp = { id: 'g_' + Date.now(), name: gKey, items: [] };
-      state.financeCategories.groups.push(grp);
-    }
-    grp.items = grp.items || [];
-    grp.items.push({ id: 'c_' + Date.now(), name: String(nm).trim(), icon: String(icon).trim().slice(0,4), color: String(color).trim() });
-    persist();
-    render(input?.value||"");
+    // Existing groups for datalist
+    const existingGroups = (state.financeCategories.groups||[]).map(g=>g.name);
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position:fixed;inset:0;z-index:9999;
+      display:flex;align-items:center;justify-content:center;
+      background:rgba(0,0,0,.65);
+      backdrop-filter:blur(6px);
+      padding:16px;
+      animation:fcFadeIn .18s ease;
+    `;
+
+    let selectedColor = PALETTE[0];
+    let selectedIcon = QUICK_ICONS[0];
+
+    overlay.innerHTML = `
+      <style>
+        @keyframes fcFadeIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+        @keyframes fcSlideIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+        .fc-modal{
+          background:linear-gradient(160deg,rgba(255,255,255,.10),rgba(255,255,255,.05));
+          border:1px solid rgba(255,255,255,.14);
+          border-radius:22px;
+          padding:0;
+          width:100%;max-width:360px;
+          box-shadow:0 24px 60px rgba(0,0,0,.5);
+          overflow:hidden;
+          animation:fcSlideIn .22s cubic-bezier(.34,1.56,.64,1);
+        }
+        .fc-head{
+          display:flex;align-items:center;justify-content:space-between;
+          padding:16px 18px 12px;
+          border-bottom:1px solid rgba(255,255,255,.08);
+        }
+        .fc-head-title{font-size:15px;font-weight:600;letter-spacing:.2px}
+        .fc-head-close{
+          width:30px;height:30px;border-radius:50%;
+          border:none;background:rgba(255,255,255,.08);
+          color:rgba(255,255,255,.7);cursor:pointer;
+          font-size:16px;display:flex;align-items:center;justify-content:center;
+          transition:background .15s;
+        }
+        .fc-head-close:hover{background:rgba(255,255,255,.15)}
+        .fc-body{padding:18px;}
+        .fc-label{font-size:11px;color:rgba(255,255,255,.5);letter-spacing:.6px;text-transform:uppercase;margin-bottom:7px}
+        .fc-input{
+          width:100%;padding:10px 12px;
+          background:rgba(255,255,255,.07);
+          border:1px solid rgba(255,255,255,.12);
+          border-radius:12px;color:#fff;font-size:14px;
+          outline:none;transition:border .15s;
+        }
+        .fc-input:focus{border-color:rgba(124,92,255,.7);background:rgba(124,92,255,.08)}
+        .fc-input::placeholder{color:rgba(255,255,255,.28)}
+        .fc-preview{
+          display:flex;align-items:center;gap:12px;
+          background:rgba(255,255,255,.05);
+          border:1px solid rgba(255,255,255,.09);
+          border-radius:14px;padding:12px 14px;margin-bottom:16px;
+        }
+        .fc-prev-icon{
+          width:44px;height:44px;border-radius:13px;
+          display:flex;align-items:center;justify-content:center;
+          font-size:22px;transition:all .2s;flex-shrink:0;
+        }
+        .fc-prev-text{flex:1}
+        .fc-prev-name{font-size:14px;font-weight:500}
+        .fc-prev-group{font-size:11px;color:rgba(255,255,255,.45);margin-top:2px}
+        .fc-icon-grid{
+          display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-bottom:16px;
+        }
+        .fc-icon-btn{
+          aspect-ratio:1;border-radius:10px;border:1.5px solid transparent;
+          background:rgba(255,255,255,.07);cursor:pointer;font-size:18px;
+          display:flex;align-items:center;justify-content:center;
+          transition:all .14s;
+        }
+        .fc-icon-btn:hover{background:rgba(255,255,255,.13);transform:scale(1.08)}
+        .fc-icon-btn.active{border-color:var(--fc-sel,#7c5cff);background:rgba(124,92,255,.18);transform:scale(1.1)}
+        .fc-palette{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px;}
+        .fc-color-dot{
+          width:26px;height:26px;border-radius:50%;cursor:pointer;
+          border:2px solid transparent;transition:all .14s;
+          box-shadow:0 2px 6px rgba(0,0,0,.3);
+        }
+        .fc-color-dot:hover{transform:scale(1.15)}
+        .fc-color-dot.active{border-color:#fff;transform:scale(1.2)}
+        .fc-datalist-wrap{position:relative}
+        .fc-footer{
+          display:flex;gap:10px;
+          padding:12px 18px 16px;
+          border-top:1px solid rgba(255,255,255,.07);
+        }
+        .fc-btn-cancel{
+          flex:1;padding:11px;border-radius:12px;border:1px solid rgba(255,255,255,.12);
+          background:rgba(255,255,255,.05);color:rgba(255,255,255,.7);
+          font-size:14px;cursor:pointer;transition:background .15s;
+        }
+        .fc-btn-cancel:hover{background:rgba(255,255,255,.1)}
+        .fc-btn-save{
+          flex:2;padding:11px;border-radius:12px;border:none;
+          background:linear-gradient(135deg,#7c5cff,#5b3fd4);
+          color:#fff;font-size:14px;font-weight:600;cursor:pointer;
+          box-shadow:0 4px 14px rgba(124,92,255,.35);
+          transition:opacity .15s,transform .1s;
+        }
+        .fc-btn-save:hover{opacity:.9;transform:translateY(-1px)}
+        .fc-btn-save:active{transform:translateY(0)}
+      </style>
+
+      <div class="fc-modal">
+        <div class="fc-head">
+          <div class="fc-head-title">✨ Nueva Categoría</div>
+          <button class="fc-head-close" id="fcClose">✕</button>
+        </div>
+
+        <div class="fc-body">
+
+          <!-- Preview live -->
+          <div class="fc-preview" id="fcPreview">
+            <div class="fc-prev-icon" id="fcPrevIcon" style="background:${selectedColor}">
+              ${selectedIcon}
+            </div>
+            <div class="fc-prev-text">
+              <div class="fc-prev-name" id="fcPrevName">Nombre de categoría</div>
+              <div class="fc-prev-group" id="fcPrevGroup">Grupo · Casa</div>
+            </div>
+          </div>
+
+          <!-- Nombre -->
+          <div class="fc-label">Nombre</div>
+          <input class="fc-input" id="fcName" placeholder="ej: Delivery, Netflix, Gasolina…" maxlength="32" style="margin-bottom:16px">
+
+          <!-- Grupo -->
+          <div class="fc-label">Grupo</div>
+          <div class="fc-datalist-wrap" style="margin-bottom:16px">
+            <input class="fc-input" id="fcGroup" placeholder="ej: Comida, Casa, Ocio…" list="fcGroupList" maxlength="24">
+            <datalist id="fcGroupList">
+              ${[...new Set([...SUGGESTED_GROUPS, ...existingGroups])].map(g=>`<option value="${escapeHtml(g)}">`).join('')}
+            </datalist>
+          </div>
+
+          <!-- Icono -->
+          <div class="fc-label">Icono</div>
+          <div class="fc-icon-grid" id="fcIconGrid">
+            ${QUICK_ICONS.map((ic,i)=>`
+              <button class="fc-icon-btn${i===0?' active':''}" data-icon="${ic}" title="${ic}">${ic}</button>
+            `).join('')}
+          </div>
+
+          <!-- Color -->
+          <div class="fc-label">Color</div>
+          <div class="fc-palette" id="fcPalette">
+            ${PALETTE.map((c,i)=>`
+              <div class="fc-color-dot${i===0?' active':''}" data-color="${c}" style="background:${c}" title="${c}"></div>
+            `).join('')}
+          </div>
+
+        </div>
+
+        <div class="fc-footer">
+          <button class="fc-btn-cancel" id="fcCancel">Cancelar</button>
+          <button class="fc-btn-save" id="fcSave">Guardar categoría</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // ── Logic ──────────────────────────────────────────────────────────
+    const fcClose  = overlay.querySelector('#fcClose');
+    const fcCancel = overlay.querySelector('#fcCancel');
+    const fcSave   = overlay.querySelector('#fcSave');
+    const fcName   = overlay.querySelector('#fcName');
+    const fcGroup  = overlay.querySelector('#fcGroup');
+    const fcPrevName  = overlay.querySelector('#fcPrevName');
+    const fcPrevGroup = overlay.querySelector('#fcPrevGroup');
+    const fcPrevIcon  = overlay.querySelector('#fcPrevIcon');
+
+    const closeOverlay = ()=> overlay.remove();
+    fcClose.addEventListener('click', closeOverlay);
+    fcCancel.addEventListener('click', closeOverlay);
+    overlay.addEventListener('click', e=>{ if(e.target===overlay) closeOverlay(); });
+
+    // Live preview
+    const updatePreview = ()=>{
+      fcPrevName.textContent  = fcName.value.trim()  || 'Nombre de categoría';
+      fcPrevGroup.textContent = 'Grupo · ' + (fcGroup.value.trim() || 'Casa');
+      fcPrevIcon.style.background = selectedColor;
+      fcPrevIcon.textContent = selectedIcon;
+    };
+    fcName.addEventListener('input', updatePreview);
+    fcGroup.addEventListener('input', updatePreview);
+
+    // Icon selection
+    overlay.querySelector('#fcIconGrid').addEventListener('click', e=>{
+      const btn = e.target.closest('.fc-icon-btn');
+      if(!btn) return;
+      overlay.querySelectorAll('.fc-icon-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedIcon = btn.dataset.icon;
+      updatePreview();
+    });
+
+    // Color selection
+    overlay.querySelector('#fcPalette').addEventListener('click', e=>{
+      const dot = e.target.closest('.fc-color-dot');
+      if(!dot) return;
+      overlay.querySelectorAll('.fc-color-dot').forEach(d=>d.classList.remove('active'));
+      dot.classList.add('active');
+      selectedColor = dot.dataset.color;
+      overlay.style.setProperty('--fc-sel', selectedColor);
+      updatePreview();
+    });
+
+    // Save
+    fcSave.addEventListener('click', ()=>{
+      const nm = (fcName.value||'').trim();
+      if(!nm){ fcName.focus(); fcName.style.borderColor='#fb7185'; return; }
+      const gKey = (fcGroup.value||'Otros').trim();
+
+      let grp = (state.financeCategories.groups||[]).find(g=> String(g.name).toLowerCase()===gKey.toLowerCase());
+      if(!grp){
+        grp = { id: 'g_' + Date.now(), name: gKey, items: [] };
+        state.financeCategories.groups.push(grp);
+      }
+      grp.items = grp.items || [];
+      grp.items.push({ id: 'c_' + Date.now(), name: nm, icon: selectedIcon, color: selectedColor });
+      persist();
+      render(input?.value||'');
+      closeOverlay();
+    });
+
+    // Focus
+    setTimeout(()=> fcName.focus(), 80);
   });
 }
 
