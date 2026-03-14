@@ -24286,7 +24286,7 @@ RESPONDE SOLO CON JSON usando este schema:
 
     }
 
-
+  }
 
   window.__FOOTBALL_LAB__ = {
     open(view="home", payload={}){ render(view, payload); },
@@ -24312,5 +24312,3 @@ window.initFootballLab = initFootballLab;
     console.warn("FootballLab auto-init failed", e);
   }
 })();
-
-}
