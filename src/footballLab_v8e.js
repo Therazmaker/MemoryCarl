@@ -24300,3 +24300,5 @@ window.initFootballLab = initFootballLab;
     console.warn("FootballLab auto-init failed", e);
   }
 })();
+
+}
