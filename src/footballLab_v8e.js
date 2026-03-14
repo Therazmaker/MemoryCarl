@@ -12404,8 +12404,8 @@ RESPONDE SOLO CON JSON usando este schema:
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","radar","champions","brainv2","momentum","bitacora","market","halftime"];
-    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t === 'radar' ? 'Radar del Día' : t === 'champions' ? '🏆 CHAMPIONS' : t === 'halftime' ? '⚡ MEDIO TIEMPO' : t.toUpperCase()}</button>`).join("");
+    const tabs = ["home","liga","tracker","versus","radar","champions","brainv2","momentum","bitacora","market","halftime","vscout"];
+    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t === 'radar' ? 'Radar del Día' : t === 'champions' ? '🏆 CHAMPIONS' : t === 'halftime' ? '⚡ MEDIO TIEMPO' : t === 'vscout' ? '🎬 VIDEO SCOUT' : t.toUpperCase()}</button>`).join("");
     const wrapClass = view === "brainv2" ? "fl-wrap fl-wrap-brainv2" : "fl-wrap";
 
     app.innerHTML = `
@@ -23668,7 +23668,613 @@ RESPONDE SOLO CON JSON usando este schema:
       });
     }
 
-  }
+    // ═══════════════════════════════════════════════════════════════════
+    // 🎬 VIDEO SCOUT — Registro táctico desde highlights por equipo
+    // ═══════════════════════════════════════════════════════════════════
+    if(view==="vscout"){
+
+      const VS_KEY = 'FL_VIDEO_SCOUT';
+
+      function loadVsData(){ return safeParseJSON(localStorage.getItem(VS_KEY), {}); }
+      function saveVsData(d){ localStorage.setItem(VS_KEY, JSON.stringify(d)); }
+
+      // Obtener registros de un equipo
+      function getTeamScoutRecords(teamId){
+        const d = loadVsData();
+        return Array.isArray(d[teamId]) ? d[teamId] : [];
+      }
+
+      // Guardar un registro nuevo para un equipo
+      function saveScoutRecord(teamId, record){
+        const d = loadVsData();
+        d[teamId] = Array.isArray(d[teamId]) ? d[teamId] : [];
+        // dedup por id
+        d[teamId] = d[teamId].filter(r => r.id !== record.id);
+        d[teamId].push(record);
+        // Máximo 30 registros por equipo, más reciente primero
+        d[teamId].sort((a,b) => (b.date||'').localeCompare(a.date||''));
+        d[teamId] = d[teamId].slice(0, 30);
+        saveVsData(d);
+      }
+
+      function deleteScoutRecord(teamId, recordId){
+        const d = loadVsData();
+        if(!Array.isArray(d[teamId])) return;
+        d[teamId] = d[teamId].filter(r => r.id !== recordId);
+        saveVsData(d);
+      }
+
+      // ── Tipos de acción con zona esperada y peso de peligro
+      const VS_ACTION_TYPES = [
+        { id:'shot_box',      label:'Remate en área',         zone:'att_box', danger:5, icon:'🎯' },
+        { id:'shot_outside',  label:'Remate fuera área',      zone:'att',     danger:2, icon:'💨' },
+        { id:'cross',         label:'Centro al área',         zone:'att',     danger:3, icon:'↗' },
+        { id:'big_chance',    label:'Gran ocasión',           zone:'att_box', danger:5, icon:'⚡' },
+        { id:'through_ball',  label:'Pase filtrado',          zone:'mid',     danger:4, icon:'→' },
+        { id:'press_high',    label:'Presión alta',           zone:'mid',     danger:2, icon:'⬆' },
+        { id:'recovery',      label:'Recuperación',           zone:'mid',     danger:1, icon:'🔄' },
+        { id:'corner',        label:'Córner',                 zone:'att_box', danger:3, icon:'⚑' },
+        { id:'free_kick',     label:'Tiro libre peligroso',   zone:'att',     danger:3, icon:'🎯' },
+        { id:'buildup_sterile', label:'Posesión estéril',     zone:'mid',     danger:0, icon:'⭕' },
+      ];
+
+      const VS_OUTCOMES = [
+        { id:'goal',    label:'Gol',       color:'#22c55e' },
+        { id:'saved',   label:'Parada',    color:'#f59e0b' },
+        { id:'blocked', label:'Bloqueado', color:'#8892a4' },
+        { id:'off_target', label:'Fuera',  color:'#ef4444' },
+        { id:'corner',  label:'Córner',    color:'#1a56c4' },
+        { id:'lost',    label:'Pérdida',   color:'#4a5568' },
+      ];
+
+      // ── Perfil táctico acumulado del equipo
+      function computeTeamScoutProfile(records){
+        if(!records.length) return null;
+        const allActions = records.flatMap(r => Array.isArray(r.actions) ? r.actions : []);
+        if(!allActions.length) return null;
+
+        const n = allActions.length;
+        const byZone = { def:0, mid:0, att:0, att_box:0 };
+        const byType = {};
+        const byOutcome = {};
+        let totalDanger = 0;
+        let sterileCount = 0;
+
+        allActions.forEach(a => {
+          byZone[a.zone] = (byZone[a.zone]||0) + 1;
+          byType[a.type] = (byType[a.type]||0) + 1;
+          byOutcome[a.outcome] = (byOutcome[a.outcome]||0) + 1;
+          const typeDef = VS_ACTION_TYPES.find(t=>t.id===a.type);
+          totalDanger += typeDef ? typeDef.danger : 1;
+          if(a.type === 'buildup_sterile') sterileCount++;
+        });
+
+        const shots = (byType.shot_box||0) + (byType.shot_outside||0);
+        const goals = byOutcome.goal || 0;
+        const bigChances = byType.big_chance || 0;
+        const fieldTiltPct = ((byZone.att||0) + (byZone.att_box||0)) / n;
+        const pressureZonePct = (byZone.att_box||0) / n;
+        const avgDanger = totalDanger / n;
+        const sterileRate = sterileCount / n;
+        const shotsOnTarget = (byOutcome.saved||0) + (byOutcome.goal||0);
+        const conversionRate = shots > 0 ? goals / shots : 0;
+
+        // Zona de ataque preferida (flanco)
+        const leftActions  = allActions.filter(a=>a.side==='left').length;
+        const rightActions = allActions.filter(a=>a.side==='right').length;
+        const centerActions = allActions.filter(a=>a.side==='center').length;
+        const preferredSide = leftActions>rightActions && leftActions>centerActions ? 'left'
+          : rightActions>leftActions && rightActions>centerActions ? 'right' : 'center';
+
+        // SPI — Sterile Possession Index
+        const SPI = Number(sterileRate.toFixed(3));
+
+        // Danger Index — peligrosidad real por acción
+        const DI = Number(avgDanger.toFixed(2));
+
+        return {
+          sessions: records.length,
+          totalActions: n,
+          fieldTiltPct:    Number(fieldTiltPct.toFixed(3)),
+          pressureZonePct: Number(pressureZonePct.toFixed(3)),
+          avgDanger:       DI,
+          sterileRate:     SPI,
+          conversionRate:  Number(conversionRate.toFixed(3)),
+          shotsPerSession: Number((shots / records.length).toFixed(2)),
+          bigChancesPerSession: Number((bigChances / records.length).toFixed(2)),
+          goalsPerSession: Number((goals / records.length).toFixed(2)),
+          preferredSide,
+          byZone,
+          byType,
+          byOutcome,
+          // Clasificación táctica
+          tacticalStyle:
+            SPI > 0.35 ? 'Posesión estéril' :
+            fieldTiltPct > 0.55 && DI > 3 ? 'Presión alta efectiva' :
+            fieldTiltPct > 0.55 ? 'Dominante sin mordiente' :
+            DI > 3.5 ? 'Directo y peligroso' :
+            'Equilibrado'
+        };
+      }
+
+      // ── Generar features para saveTeamBrainFeatures desde el perfil scout
+      function scoutProfileToFeatures(profile){
+        if(!profile) return {};
+        return {
+          pulse:      Math.round(profile.fieldTiltPct * 100),
+          aggression: Math.round(profile.pressureZonePct * 100),
+          resilience: Math.round((1 - profile.sterileRate) * 100),
+          volatility: Math.round(profile.avgDanger * 20),
+          momentum:   Number(((profile.conversionRate * 2) - 1).toFixed(2))
+        };
+      }
+
+      // ── Estado local de la sesión de registro activa
+      let vsTeamId    = null;
+      let vsTeamName  = '';
+      let vsLeagueId  = '';
+      let vsMatchLabel = '';
+      let vsMatchDate  = '';
+      let vsActions   = [];   // acciones de la sesión actual
+      let vsActiveType = VS_ACTION_TYPES[0].id;
+      let vsActiveOutcome = VS_OUTCOMES[0].id;
+      let vsActiveSide = 'center';
+
+      // Helpers de campo
+      function vsZoneFromX(nx){
+        if(nx < 0.33) return 'def';
+        if(nx < 0.55) return 'mid';
+        if(nx < 0.78) return 'att';
+        return 'att_box';
+      }
+
+      function vsBuildFieldSVG(actions = [], isSmall = false){
+        const W = isSmall ? 320 : 580;
+        const H = isSmall ? 100 : 160;
+        const X0 = 20, Y0 = 15;
+        const FW = W - 40, FH = H - 30;
+
+        // Heat por zona
+        const n = actions.length || 1;
+        const def_n     = actions.filter(a=>a.zone==='def').length / n;
+        const mid_n     = actions.filter(a=>a.zone==='mid').length / n;
+        const att_n     = actions.filter(a=>a.zone==='att').length / n;
+        const attbox_n  = actions.filter(a=>a.zone==='att_box').length / n;
+
+        const alpha = v => Math.min(0.5, v * 0.9).toFixed(2);
+
+        // Dots coloreados por peligro
+        const dots = actions.map((a,i) => {
+          const typeDef = VS_ACTION_TYPES.find(t=>t.id===a.type);
+          const danger  = typeDef ? typeDef.danger : 1;
+          const color   = danger >= 5 ? '#22c55e' : danger >= 3 ? '#f5c842' : danger >= 2 ? '#f59e0b' : '#4a5568';
+          const cx = X0 + a.nx * FW;
+          const cy = Y0 + a.ny * FH;
+          const r  = isSmall ? 3 : Math.max(4, danger + 2);
+          return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" opacity="0.85" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>
+                  ${!isSmall && a.label ? `<text x="${cx}" y="${cy-r-2}" text-anchor="middle" font-size="7" fill="${color}" font-family="JetBrains Mono,monospace">${a.label||''}</text>` : ''}`;
+        }).join('');
+
+        return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="border-radius:6px;cursor:crosshair;display:block;">
+          <rect x="${X0}" y="${Y0}" width="${FW}" height="${FH}" rx="5" fill="#1a2e1a" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+          <!-- Heat zonas -->
+          <rect x="${X0}" y="${Y0}" width="${FW*0.33}" height="${FH}" fill="rgba(26,86,196,${alpha(def_n)})" rx="4"/>
+          <rect x="${X0+FW*0.33}" y="${Y0}" width="${FW*0.22}" height="${FH}" fill="rgba(245,200,66,${alpha(mid_n)})"/>
+          <rect x="${X0+FW*0.55}" y="${Y0}" width="${FW*0.23}" height="${FH}" fill="rgba(212,50,44,${alpha(att_n)})"/>
+          <rect x="${X0+FW*0.78}" y="${Y0}" width="${FW*0.22}" height="${FH}" fill="rgba(212,50,44,${Math.min(0.6,parseFloat(alpha(attbox_n))*1.5).toFixed(2)})" rx="0 4 4 0"/>
+          <!-- Línea central -->
+          <line x1="${X0+FW*0.5}" y1="${Y0}" x2="${X0+FW*0.5}" y2="${Y0+FH}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+          <!-- Área grande -->
+          <rect x="${X0+FW*0.78}" y="${Y0+FH*0.2}" width="${FW*0.15}" height="${FH*0.6}" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+          <!-- Portería -->
+          <rect x="${X0+FW-3}" y="${Y0+FH*0.35}" width="5" height="${FH*0.3}" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/>
+          <!-- Etiquetas -->
+          ${!isSmall ? `
+          <text x="${X0+FW*0.17}" y="${Y0+FH+12}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.25)" font-family="JetBrains Mono,monospace">DEF</text>
+          <text x="${X0+FW*0.44}" y="${Y0+FH+12}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.25)" font-family="JetBrains Mono,monospace">MEDIO</text>
+          <text x="${X0+FW*0.67}" y="${Y0+FH+12}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.25)" font-family="JetBrains Mono,monospace">ATQ</text>
+          <text x="${X0+FW*0.89}" y="${Y0+FH+12}" text-anchor="middle" font-size="8" fill="rgba(212,50,44,0.7)" font-family="JetBrains Mono,monospace">ÁREA</text>` : ''}
+          ${dots}
+          <!-- Último dot resaltado -->
+          ${actions.length ? `<circle cx="${X0+actions[actions.length-1].nx*FW}" cy="${Y0+actions[actions.length-1].ny*FH}" r="${isSmall?5:10}" fill="none" stroke="#f5c842" stroke-width="1.5" opacity="0.8"/>` : ''}
+        </svg>`;
+      }
+
+      // ── Perfil visual compacto de un equipo
+      function vsRenderTeamCard(teamId, teamName){
+        const records = getTeamScoutRecords(teamId);
+        const profile = computeTeamScoutProfile(records);
+        if(!profile) return `<div style="color:#4a5568;font-size:11px;font-family:'JetBrains Mono',monospace;">Sin datos scout.</div>`;
+
+        const allActions = records.flatMap(r=>r.actions||[]);
+        const miniSvg = vsBuildFieldSVG(allActions, true);
+
+        const styleColor = profile.tacticalStyle.includes('estéril') ? '#ef4444'
+          : profile.tacticalStyle.includes('alta efectiva') ? '#22c55e'
+          : profile.tacticalStyle.includes('Directo') ? '#f59e0b'
+          : '#8892a4';
+
+        return `
+          <div style="display:grid;grid-template-columns:1fr 180px;gap:12px;align-items:start;">
+            <div>
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+                <span style="background:${styleColor}22;border:1px solid ${styleColor}55;color:${styleColor};font-size:11px;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:1px;">${profile.tacticalStyle.toUpperCase()}</span>
+                <span style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${profile.sessions} sesión${profile.sessions!==1?'es':''} · ${profile.totalActions} acciones</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">
+                ${[
+                  { label:'Field tilt', val: Math.round(profile.fieldTiltPct*100)+'%', color:'#f5c842' },
+                  { label:'Presión área', val: Math.round(profile.pressureZonePct*100)+'%', color:'#d4322c' },
+                  { label:'Peligro/acción', val: profile.avgDanger.toFixed(1)+'/5', color:'#f59e0b' },
+                  { label:'SPI estéril', val: Math.round(profile.sterileRate*100)+'%', color: profile.sterileRate>0.3?'#ef4444':'#22c55e' },
+                  { label:'Conversión', val: Math.round(profile.conversionRate*100)+'%', color:'#22c55e' },
+                  { label:'Flanco pref.', val: profile.preferredSide==='left'?'IZQ':profile.preferredSide==='right'?'DER':'CENTRO', color:'#8892a4' },
+                ].map(m=>`
+                  <div style="background:#161922;border-radius:5px;padding:6px 8px;">
+                    <div style="font-size:9px;color:#4a5568;font-family:'JetBrains Mono',monospace;letter-spacing:0.5px;">${m.label}</div>
+                    <div style="font-size:16px;font-weight:900;color:${m.color};">${m.val}</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div>${miniSvg}</div>
+          </div>
+        `;
+      }
+
+      // ── HTML principal
+      const allTeams = (db.teams||[]).filter(t=>t.id&&t.name);
+      const vsData   = loadVsData();
+      const teamsWithData = allTeams.filter(t=>Array.isArray(vsData[t.id])&&vsData[t.id].length>0);
+
+      content.innerHTML = `
+        <div style="background:#08090c;min-height:100vh;font-family:'Barlow Condensed',sans-serif;">
+
+          <!-- HEADER -->
+          <div style="padding:16px 16px 0;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:0;">
+            <div style="font-size:22px;font-weight:900;letter-spacing:2px;color:#f0f2f7;margin-bottom:4px;">🎬 VIDEO SCOUT</div>
+            <div style="font-size:12px;color:#4a5568;font-family:'JetBrains Mono',monospace;margin-bottom:14px;">Registra acciones del highlight · construye el perfil táctico del equipo · alimenta el Radar del Día</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 340px;gap:0;min-height:calc(100vh - 80px);">
+
+            <!-- COLUMNA IZQUIERDA: REGISTRAR SESIÓN -->
+            <div style="padding:14px 16px;border-right:1px solid rgba(255,255,255,0.06);">
+
+              <!-- SELECTOR DE EQUIPO + PARTIDO -->
+              <div style="background:#0f1117;border:1px solid rgba(245,200,66,0.2);border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+                <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#f5c842;text-transform:uppercase;margin-bottom:10px;">Equipo y partido</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                  <div>
+                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">EQUIPO</div>
+                    <select id="vs-team-sel" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 10px;border-radius:5px;">
+                      <option value="">— Seleccionar equipo —</option>
+                      ${allTeams.map(t=>`<option value="${t.id}" data-name="${t.name}">${t.name}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">LIGA</div>
+                    <select id="vs-league-sel" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 10px;border-radius:5px;">
+                      <option value="">— Liga —</option>
+                      ${(db.leagues||[]).map(l=>`<option value="${l.id}">${l.name}</option>`).join('')}
+                    </select>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;">
+                  <div>
+                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">PARTIDO (ej: Lorient vs Lens)</div>
+                    <input id="vs-match-label" type="text" placeholder="Local vs Visitante" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 10px;border-radius:5px;"/>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">FECHA</div>
+                    <input id="vs-match-date" type="date" value="${new Date().toISOString().slice(0,10)}" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 10px;border-radius:5px;"/>
+                  </div>
+                </div>
+              </div>
+
+              <!-- TIPO DE ACCIÓN -->
+              <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+                <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:10px;">Tipo de acción</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;" id="vs-type-btns">
+                  ${VS_ACTION_TYPES.map(t=>`
+                    <button data-vs-type="${t.id}" style="background:${t.id===vsActiveType?'rgba(245,200,66,0.15)':'#161922'};border:1px solid ${t.id===vsActiveType?'rgba(245,200,66,0.5)':'rgba(255,255,255,0.08)'};color:${t.id===vsActiveType?'#f5c842':'#8892a4'};font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;letter-spacing:0.5px;">
+                      ${t.icon} ${t.label}
+                    </button>
+                  `).join('')}
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <div>
+                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">RESULTADO</div>
+                    <div style="display:flex;gap:5px;" id="vs-outcome-btns">
+                      ${VS_OUTCOMES.map(o=>`
+                        <button data-vs-outcome="${o.id}" style="background:${o.id===vsActiveOutcome?o.color+'33':'#161922'};border:1px solid ${o.id===vsActiveOutcome?o.color:'rgba(255,255,255,0.08)'};color:${o.id===vsActiveOutcome?o.color:'#8892a4'};font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;padding:4px 9px;border-radius:5px;cursor:pointer;">${o.label}</button>
+                      `).join('')}
+                    </div>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">FLANCO</div>
+                    <div style="display:flex;gap:5px;" id="vs-side-btns">
+                      ${['left','center','right'].map(s=>`
+                        <button data-vs-side="${s}" style="background:${s===vsActiveSide?'rgba(255,255,255,0.1)':'#161922'};border:1px solid ${s===vsActiveSide?'rgba(255,255,255,0.3)':'rgba(255,255,255,0.08)'};color:${s===vsActiveSide?'#f0f2f7':'#8892a4'};font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;padding:4px 9px;border-radius:5px;cursor:pointer;">${s==='left'?'IZQ':s==='right'?'DER':'CTR'}</button>
+                      `).join('')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- CAMPO -->
+              <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px 16px;margin-bottom:12px;">
+                <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:8px;">
+                  Campo · click para registrar acción
+                  <span style="font-weight:400;color:#4a5568;margin-left:8px;">Porta rival →</span>
+                </div>
+                <div id="vs-field-wrap">${vsBuildFieldSVG([], false)}</div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+                  <span id="vs-action-count" style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">0 acciones registradas</span>
+                  <button id="vs-undo-btn" style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:5px 12px;border-radius:5px;cursor:pointer;">↩ Deshacer</button>
+                </div>
+              </div>
+
+              <!-- ACCIONES REGISTRADAS EN ESTA SESIÓN -->
+              <div id="vs-actions-list" style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px 16px;margin-bottom:12px;max-height:180px;overflow-y:auto;">
+                <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:8px;">Acciones de esta sesión</div>
+                <div id="vs-actions-inner" style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">Sin acciones aún. Haz clic en el campo.</div>
+              </div>
+
+              <!-- GUARDAR -->
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button id="vs-save-btn" style="background:#d4322c;border:none;color:white;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;letter-spacing:1.5px;padding:10px 28px;border-radius:7px;cursor:pointer;text-transform:uppercase;">💾 Guardar sesión</button>
+                <button id="vs-clear-btn" style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;padding:10px 16px;border-radius:7px;cursor:pointer;">Limpiar</button>
+                <span id="vs-save-msg" style="font-size:11px;color:#22c55e;font-family:'JetBrains Mono',monospace;"></span>
+              </div>
+            </div>
+
+            <!-- COLUMNA DERECHA: PERFILES DE EQUIPOS -->
+            <div style="padding:14px 14px;overflow-y:auto;">
+              <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:10px;">Perfiles scout · ${teamsWithData.length} equipo${teamsWithData.length!==1?'s':''}</div>
+
+              ${teamsWithData.length === 0
+                ? `<div style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">Guarda sesiones para ver perfiles aquí.</div>`
+                : teamsWithData.map(t => {
+                    const records = getTeamScoutRecords(t.id);
+                    const profile = computeTeamScoutProfile(records);
+                    return `
+                      <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                          <div>
+                            <div style="font-size:14px;font-weight:800;color:#f0f2f7;">${t.name}</div>
+                            <div style="font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${records.length} sesión${records.length!==1?'es':''} · ${records.flatMap(r=>r.actions||[]).length} acciones</div>
+                          </div>
+                          <button data-vs-sync="${t.id}" style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#22c55e;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;padding:4px 10px;border-radius:5px;cursor:pointer;">⬆ Sync Radar</button>
+                        </div>
+                        ${vsRenderTeamCard(t.id, t.name)}
+                        <!-- Historial de sesiones -->
+                        <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,0.05);padding-top:8px;">
+                          ${records.slice(0,5).map(r=>`
+                            <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
+                              <span style="font-size:10px;color:#8892a4;font-family:'JetBrains Mono',monospace;flex:1;">${r.matchLabel||r.id} · ${r.date?.slice(0,10)||''}</span>
+                              <span style="font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${(r.actions||[]).length} acc.</span>
+                              <button data-vs-del-team="${t.id}" data-vs-del-rec="${r.id}" style="background:none;border:none;color:#4a5568;cursor:pointer;font-size:11px;padding:0 4px;">✕</button>
+                            </div>
+                          `).join('')}
+                        </div>
+                      </div>
+                    `;
+                  }).join('')
+              }
+            </div>
+          </div>
+        </div>
+      `;
+
+      // ══════════════════════════════════════════════
+      // EVENT HANDLERS DE VIDEO SCOUT
+      // ══════════════════════════════════════════════
+
+      function vsRebindField(){
+        const svg = document.querySelector('#vs-field-wrap svg');
+        if(!svg) return;
+        svg.onclick = (e) => {
+          if(!vsTeamId){ document.getElementById('vs-save-msg').textContent = '⚠️ Selecciona un equipo primero.'; return; }
+          const rect = svg.getBoundingClientRect();
+          const vbW = 580, vbH = 160;
+          const scaleX = vbW / rect.width;
+          const scaleY = vbH / rect.height;
+          const vx = (e.clientX - rect.left) * scaleX;
+          const vy = (e.clientY - rect.top)  * scaleY;
+          const nx = Math.max(0, Math.min(1, (vx - 20) / (vbW - 40)));
+          const ny = Math.max(0, Math.min(1, (vy - 15) / (vbH - 30)));
+          if(vx < 20 || vx > vbW-20 || vy < 15 || vy > vbH-15) return;
+
+          const typeDef = VS_ACTION_TYPES.find(t=>t.id===vsActiveType);
+          const action = {
+            id:      'a_' + Date.now(),
+            type:    vsActiveType,
+            outcome: vsActiveOutcome,
+            side:    vsActiveSide,
+            zone:    vsZoneFromX(nx),
+            nx:      Number(nx.toFixed(3)),
+            ny:      Number(ny.toFixed(3)),
+            label:   typeDef?.icon || '',
+            t:       Date.now()
+          };
+          vsActions.push(action);
+          vsUpdateField();
+        };
+      }
+
+      function vsUpdateField(){
+        const wrap = document.querySelector('#vs-field-wrap');
+        if(wrap) wrap.innerHTML = vsBuildFieldSVG(vsActions, false);
+        vsRebindField();
+
+        // Contador
+        const cnt = document.getElementById('vs-action-count');
+        if(cnt) cnt.textContent = `${vsActions.length} acción${vsActions.length!==1?'es':''} registrada${vsActions.length!==1?'s':''}`;
+
+        // Lista de acciones
+        const inner = document.getElementById('vs-actions-inner');
+        if(inner){
+          if(!vsActions.length){
+            inner.innerHTML = '<span style="color:#4a5568;">Sin acciones aún.</span>';
+          } else {
+            inner.innerHTML = vsActions.slice().reverse().slice(0,15).map((a,i)=>{
+              const typeDef = VS_ACTION_TYPES.find(t=>t.id===a.type);
+              const outDef  = VS_OUTCOMES.find(o=>o.id===a.outcome);
+              const dangerColor = (typeDef?.danger||0) >= 5 ? '#22c55e' : (typeDef?.danger||0) >= 3 ? '#f5c842' : '#8892a4';
+              return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
+                <span style="color:${dangerColor};font-weight:700;">${typeDef?.icon||'·'}</span>
+                <span style="color:#f0f2f7;flex:1;">${typeDef?.label||a.type}</span>
+                <span style="color:${outDef?.color||'#8892a4'};">${outDef?.label||a.outcome}</span>
+                <span style="color:#4a5568;">${a.zone}</span>
+                <span style="color:#4a5568;">${a.side==='left'?'IZQ':a.side==='right'?'DER':'CTR'}</span>
+                <button data-vs-del-action="${a.id}" style="background:none;border:none;color:#4a5568;cursor:pointer;font-size:10px;">✕</button>
+              </div>`;
+            }).join('');
+
+            // Bind delete action buttons
+            inner.querySelectorAll('[data-vs-del-action]').forEach(btn=>{
+              btn.onclick = ()=>{
+                vsActions = vsActions.filter(a=>a.id!==btn.dataset.vsDelAction);
+                vsUpdateField();
+              };
+            });
+          }
+        }
+      }
+
+      // Bind inicial del campo
+      vsRebindField();
+
+      // Selector equipo
+      document.getElementById('vs-team-sel').onchange = (e) => {
+        vsTeamId   = e.target.value;
+        vsTeamName = e.target.options[e.target.selectedIndex]?.dataset?.name || '';
+      };
+      document.getElementById('vs-league-sel').onchange = (e) => { vsLeagueId = e.target.value; };
+      document.getElementById('vs-match-label').oninput  = (e) => { vsMatchLabel = e.target.value.trim(); };
+      document.getElementById('vs-match-date').onchange  = (e) => { vsMatchDate  = e.target.value; };
+
+      // Botones de tipo de acción
+      content.querySelectorAll('[data-vs-type]').forEach(btn=>{
+        btn.onclick = ()=>{
+          vsActiveType = btn.dataset.vsType;
+          content.querySelectorAll('[data-vs-type]').forEach(b=>{
+            const active = b.dataset.vsType === vsActiveType;
+            b.style.background   = active ? 'rgba(245,200,66,0.15)' : '#161922';
+            b.style.borderColor  = active ? 'rgba(245,200,66,0.5)'  : 'rgba(255,255,255,0.08)';
+            b.style.color        = active ? '#f5c842' : '#8892a4';
+          });
+        };
+      });
+
+      // Botones de outcome
+      content.querySelectorAll('[data-vs-outcome]').forEach(btn=>{
+        btn.onclick = ()=>{
+          vsActiveOutcome = btn.dataset.vsOutcome;
+          const outDef = VS_OUTCOMES.find(o=>o.id===vsActiveOutcome);
+          content.querySelectorAll('[data-vs-outcome]').forEach(b=>{
+            const active = b.dataset.vsOutcome === vsActiveOutcome;
+            const od = VS_OUTCOMES.find(o=>o.id===b.dataset.vsOutcome);
+            b.style.background  = active ? (od?.color||'#888')+'33' : '#161922';
+            b.style.borderColor = active ? (od?.color||'#888')       : 'rgba(255,255,255,0.08)';
+            b.style.color       = active ? (od?.color||'#888')       : '#8892a4';
+          });
+        };
+      });
+
+      // Botones de flanco
+      content.querySelectorAll('[data-vs-side]').forEach(btn=>{
+        btn.onclick = ()=>{
+          vsActiveSide = btn.dataset.vsSide;
+          content.querySelectorAll('[data-vs-side]').forEach(b=>{
+            const active = b.dataset.vsSide === vsActiveSide;
+            b.style.background  = active ? 'rgba(255,255,255,0.1)' : '#161922';
+            b.style.borderColor = active ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.08)';
+            b.style.color       = active ? '#f0f2f7' : '#8892a4';
+          });
+        };
+      });
+
+      // Deshacer
+      document.getElementById('vs-undo-btn').onclick = ()=>{
+        vsActions.pop();
+        vsUpdateField();
+      };
+
+      // Limpiar sesión
+      document.getElementById('vs-clear-btn').onclick = ()=>{
+        vsActions = [];
+        vsUpdateField();
+        document.getElementById('vs-save-msg').textContent = '';
+      };
+
+      // Guardar sesión
+      document.getElementById('vs-save-btn').onclick = ()=>{
+        const msg = document.getElementById('vs-save-msg');
+        if(!vsTeamId){ msg.textContent = '⚠️ Selecciona un equipo.'; return; }
+        if(vsActions.length < 3){ msg.textContent = '⚠️ Registra al menos 3 acciones.'; return; }
+
+        const record = {
+          id:          'vs_' + Date.now(),
+          teamId:      vsTeamId,
+          teamName:    vsTeamName,
+          leagueId:    vsLeagueId,
+          matchLabel:  vsMatchLabel || 'Partido sin nombre',
+          date:        vsMatchDate  || new Date().toISOString().slice(0,10),
+          actions:     vsActions.slice(),
+          savedAt:     new Date().toISOString()
+        };
+
+        saveScoutRecord(vsTeamId, record);
+
+        // Sincronizar automáticamente con brainFeatures del equipo
+        const allRecords = getTeamScoutRecords(vsTeamId);
+        const profile    = computeTeamScoutProfile(allRecords);
+        if(profile){
+          const features = scoutProfileToFeatures(profile);
+          saveTeamBrainFeatures(vsTeamId, [{
+            matchId:   record.id,
+            date:      record.date,
+            features
+          }]);
+        }
+
+        msg.textContent = `✅ Guardado · ${record.matchLabel}`;
+        vsActions = [];
+        setTimeout(()=>render('vscout'), 1200);
+      };
+
+      // Sync manual al Radar
+      content.querySelectorAll('[data-vs-sync]').forEach(btn=>{
+        btn.onclick = ()=>{
+          const tid = btn.dataset.vsSync;
+          const records = getTeamScoutRecords(tid);
+          const profile = computeTeamScoutProfile(records);
+          if(!profile){ alert('Sin datos suficientes para sincronizar.'); return; }
+          const features = scoutProfileToFeatures(profile);
+          saveTeamBrainFeatures(tid, [{
+            matchId: 'vscout_sync_' + Date.now(),
+            date:    new Date().toISOString().slice(0,10),
+            features
+          }]);
+          btn.textContent = '✅ Sincronizado';
+          btn.style.background = 'rgba(34,197,94,0.2)';
+          setTimeout(()=>{ btn.textContent = '⬆ Sync Radar'; btn.style.background = 'rgba(34,197,94,0.1)'; }, 2000);
+        };
+      });
+
+      // Borrar registros individuales
+      content.querySelectorAll('[data-vs-del-team]').forEach(btn=>{
+        btn.onclick = ()=>{
+          deleteScoutRecord(btn.dataset.vsDelTeam, btn.dataset.vsDelRec);
+          render('vscout');
+        };
+      });
+
+    }
+
+
 
   window.__FOOTBALL_LAB__ = {
     open(view="home", payload={}){ render(view, payload); },
