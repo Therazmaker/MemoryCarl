@@ -10675,6 +10675,104 @@ function computeTeamIntelligencePanel(db, teamId){
    * No basta con tener muchos goles; importa hacerlos bajo presión (vs rivales top),
    * la consistencia de marcar (no solo 1 partido inflado), y el scoring rate general.
    */
+  /**
+   * Goalkeeper Reliance Index (GKI)
+   * Mide qué tan dependiente es el underdog de su portero para sobrevivir.
+   * Si el portero históricamente evita más goles de los esperados → señal de valor en sorpresa.
+   * Fuente: matchDetails con xgotEnfrentado y golesEvitados de partidos anteriores.
+   */
+  function computeGoalkeeperRelianceIndex(underdogForm, underdogStrength = 50){
+    if(!underdogForm || !Array.isArray(underdogForm.matchDetails) || underdogForm.matchDetails.length < 2) return null;
+
+    const details = underdogForm.matchDetails;
+
+    // Estimar goles evitados por el portero: partidos donde oppGoals < gaPerGame histórico
+    // Proxy: partidos donde el equipo recibió 0 goles (clean sheets) con opponent que suele anotar
+    const cleanSheets = details.filter(m => Number(m.oppGoals) === 0).length;
+    const cleanSheetRate = cleanSheets / details.length;
+
+    // Proxy de rendimiento del portero: si la defensa concede poco VS rivales que atacan mucho
+    // Usamos el gaPerGame del form vs el promedio de rival rank (si rank bajo = rival fuerte)
+    const gaPerGame = Number(underdogForm.gaPerGame) || 2;
+    const avgRivalRank = details.reduce((s, m) => s + (Number(m.rivalRank) || 10), 0) / details.length;
+    const totalTeams = Number(underdogForm.totalTeams) || 20;
+    const rivalStrengthRatio = 1 - (avgRivalRank / totalTeams); // 0=débiles, 1=fuertes
+
+    // Si recibe pocos goles jugando contra rivales relativamente fuertes → portero aporta
+    const keeperContribution = clamp((rivalStrengthRatio * 0.5) + ((1 - gaPerGame / 3) * 0.5), 0, 1);
+
+    // CSI bajo + clean sheet rate alto = más mérito del portero (no de la defensa de campo)
+    const underdogBonus = underdogStrength < 40 && cleanSheetRate >= 0.3 ? 0.15 : 0;
+
+    const raw = (keeperContribution * 0.60) + (cleanSheetRate * 0.40) + underdogBonus;
+    const score = clamp(raw * 100, 0, 100);
+    const level = score >= 65 ? 'PORTERO_FIGURA' : score >= 40 ? 'MODERADO' : 'BAJO';
+
+    const sources = [
+      `CS rate: ${Math.round(cleanSheetRate * 100)}% (${details.length} partidos)`,
+      `GA/j: ${gaPerGame} vs rivales rank ~${Math.round(avgRivalRank)}`
+    ];
+    if(underdogBonus > 0) sources.push('⚠️ CSI bajo + CS alto → mérito del portero');
+
+    return {
+      score: Math.round(score),
+      level,
+      cleanSheetRate: Number(cleanSheetRate.toFixed(2)),
+      gaPerGame,
+      avgRivalRank: Number(avgRivalRank.toFixed(1)),
+      sources,
+      dataWindow: details.length
+    };
+  }
+
+  /**
+   * Conversion Efficiency Index (CEI)
+   * Mide si el underdog convierte sus pocas ocasiones a una tasa inusualmente alta.
+   * Un underdog clínico (pocos remates, muchos goles) tiene valor de sorpresa real.
+   * Fuente: gfPerGame + estimación de eficiencia por ratio goles/ocasiones.
+   */
+  function computeConversionEfficiencyIndex(underdogForm, underdogStrength = 50){
+    if(!underdogForm || !Number.isFinite(underdogForm.n) || underdogForm.n < 2) return null;
+
+    const gfPerGame = Number(underdogForm.gfPerGame) || 0;
+    const winsVsTop = Number(underdogForm.winsVsTop) || 0;
+    const qualityScore = Number(underdogForm.qualityScore) || 0;
+    const n = Number(underdogForm.n) || 1;
+
+    // Proxy de eficiencia: si marca goles pese a tener CSI bajo → es clínico
+    // Un equipo con CSI < 40 que anota > 1.2 GF/j es inusualmente eficiente
+    const expectedGfForStrength = 0.5 + (underdogStrength / 100) * 2.0; // 0.5 a 2.5 según CSI
+    const efficiencyRatio = gfPerGame / Math.max(0.1, expectedGfForStrength);
+
+    // Bonus si ganó vs rivales top con poco dominio esperado
+    const clutchBonus = winsVsTop >= 2 ? 0.15 : winsVsTop === 1 ? 0.08 : 0;
+
+    // Penalty si tiene calidad de victorias alta (puede que no sea sorpresa real)
+    const qualityPenalty = qualityScore >= 0.6 ? 0.1 : 0;
+
+    const raw = clamp((efficiencyRatio * 0.65) + (qualityScore * 0.20) + clutchBonus - qualityPenalty, 0, 1.2);
+    const score = clamp(raw * 70, 0, 100); // normalizado a 100
+
+    const level = score >= 65 ? 'CLÍNICO' : score >= 38 ? 'NORMAL' : 'INEFICIENTE';
+
+    const sources = [
+      `GF/j: ${gfPerGame} (esperado para CSI ${underdogStrength}: ${expectedGfForStrength.toFixed(1)})`,
+      `Eficiencia ratio: ${efficiencyRatio.toFixed(2)}`
+    ];
+    if(clutchBonus > 0) sources.push(`✅ Ganó ${winsVsTop}x vs top con CSI bajo`);
+
+    return {
+      score: Math.round(score),
+      level,
+      gfPerGame,
+      expectedGfForStrength: Number(expectedGfForStrength.toFixed(2)),
+      efficiencyRatio: Number(efficiencyRatio.toFixed(2)),
+      winsVsTop,
+      sources,
+      dataWindow: n
+    };
+  }
+
   function computeFavoritePressureIndex(form, strength = 50){
     if(!form || !Number.isFinite(form.n) || form.n < 2) return null;
 
@@ -10848,12 +10946,21 @@ function computeTeamIntelligencePanel(db, teamId){
 
     // Historial de empates en la forma reciente
     if(formHome && formAway){
-      const hDrawRate = formHome.n > 0 ? (formHome.draws || 0) / formHome.n : 0;
-      const aDrawRate = formAway.n > 0 ? (formAway.draws || 0) / formAway.n : 0;
+      const hDrawRate = formHome.drawRate !== undefined ? formHome.drawRate : (formHome.n > 0 ? (formHome.draws || 0) / formHome.n : 0);
+      const aDrawRate = formAway.drawRate !== undefined ? formAway.drawRate : (formAway.n > 0 ? (formAway.draws || 0) / formAway.n : 0);
       const avgDrawRate = (hDrawRate + aDrawRate) / 2;
       if(avgDrawRate >= 0.3){ score += 20; signals.push(`Alta tasa de empates (${Math.round(avgDrawRate*100)}% promedio)`); }
       else if(avgDrawRate >= 0.2){ score += 10; }
       sources.push(`Draw rate H: ${Math.round(hDrawRate*100)}% A: ${Math.round(aDrawRate*100)}%`);
+
+      // ── Boost adicional si el LOCAL tiene draw rate histórico muy alto (>= 50%)
+      // Esto captura el patrón "Lorient empata 60% en casa" que el índice calculado ignoraba
+      if(hDrawRate >= 0.5){
+        score += 18;
+        signals.push(`Draw rate local histórico alto: ${Math.round(hDrawRate*100)}%`);
+      } else if(hDrawRate >= 0.35){
+        score += 8;
+      }
     }
 
     // GA/partido bajo en ambos → posible 0-0 o 1-1
@@ -10934,8 +11041,10 @@ function computeTeamIntelligencePanel(db, teamId){
         underdogDefenseIndex: '{ score, level, gaPerGame, cleanSheetRate, htCleanSheetSignal, sources } — defensa del no-favorito',
         drawIndex: '{ score, level, signals } — probabilidad de empate',
         htCleanSheetSignal: '{ score, level, signals } — portería a cero 1er tiempo',
-        formHome: '{ n, sequence, gfPerGame, gaPerGame, ptsPerGame, winsVsTop, trend, qualityScore }',
-        formAway: '{ n, sequence, gfPerGame, gaPerGame, ptsPerGame, winsVsTop, trend, qualityScore }',
+        goalkeeperRelianceIndex: '{ score, level, cleanSheetRate, gaPerGame, sources } — dependencia del portero del underdog (PORTERO_FIGURA | MODERADO | BAJO)',
+        conversionEfficiencyIndex: '{ score, level, gfPerGame, expectedGfForStrength, efficiencyRatio, sources } — eficiencia clínica del underdog (CLÍNICO | NORMAL | INEFICIENTE)',
+        formHome: '{ n, sequence, gfPerGame, gaPerGame, ptsPerGame, winsVsTop, trend, qualityScore, drawRate }',
+        formAway: '{ n, sequence, gfPerGame, gaPerGame, ptsPerGame, winsVsTop, trend, qualityScore, drawRate }',
         flags: 'string[] — alertas del sistema',
         narrative: 'string[] — narrativa generada',
         dataWindow: `número de partidos usado para CSI/FSI: ${sampleSize}`,
@@ -10950,8 +11059,10 @@ CONTEXTO DEL SISTEMA:
 - FSI (Form Surprise Index): estado de forma sistémico -100..100 (positivo = mejor de lo esperado)
 - FavoritePressureIndex: cuán real es la amenaza goleadora del favorito (presión + goles vs rivales top)
 - UnderdogDefenseIndex: solidez real de la defensa del no-favorito
-- DrawIndex: señales objetivas de empate
+- DrawIndex: señales objetivas de empate (ahora incluye drawRate histórico local)
 - HTCleanSheetSignal: señal de portería a cero en primer tiempo
+- GoalkeeperRelianceIndex (GKI): dependencia del underdog de su portero — si es PORTERO_FIGURA significa que históricamente el portero salva más de lo esperado para su nivel de CSI, lo que eleva el riesgo de sorpresa
+- ConversionEfficiencyIndex (CEI): eficiencia clínica del underdog — si es CLÍNICO significa que marca más goles de los que su CSI predice, señal estructural de upset potencial
 
 DATOS DE LOS PARTIDOS:
 {{MATCH_DATA}}
@@ -10960,13 +11071,18 @@ INSTRUCCIONES:
 1. Para CADA partido, evalúa:
    a) ¿El favorito realmente mete presión y hace goles vs rivales de nivel? (FavoritePressureIndex)
    b) ¿La defensa del no-favorito puede aguantar? (UnderdogDefenseIndex)
-   c) ¿Hay señales reales de empate? (DrawIndex)
+   c) ¿Hay señales reales de empate? (DrawIndex — atención especial si drawRate local >= 0.5)
    d) ¿Es probable la portería a cero en el primer tiempo? (HTCleanSheetSignal)
+   e) ¿El portero del underdog es un factor diferencial? (GoalkeeperRelianceIndex)
+   f) ¿El underdog convierte sus pocas ocasiones de forma inusual? (ConversionEfficiencyIndex)
 
 2. Detecta INCONGRUENCIAS entre los datos y ajusta la predicción:
    - Si el favorito tiene PressureIndex BAJO pero odds bajas → posible valor en X o sorpresa
    - Si UnderdogDefenseIndex es ALTA pero mercado ignora → value en no-gana-favorito
    - Si DrawIndex ALTO y odds X > 3.0 → value en empate
+   - Si GKI = PORTERO_FIGURA + CEI = CLÍNICO → flag UPSET_RISK_HIGH, reducir confianza en victoria del favorito y buscar value en 1X o X2
+   - Si GKI = PORTERO_FIGURA pero CEI = INEFICIENTE → el underdog puede resistir pero no marcar (apostar a baja producción del favorito, no a sorpresa)
+   - Si formHome.drawRate >= 0.5 y DrawIndex < MEDIO → incongruencia real, el mercado subestima el empate
 
 3. Para cada partido genera predicciones para estos mercados:
    - 1X2 (resultado final)
@@ -11022,6 +11138,8 @@ RESPONDE SOLO CON JSON usando este schema:
       underdogDefenseIndex: m.underdogDefenseIndex || null,
       drawIndex: m.drawIndex || null,
       htCleanSheetSignal: m.htCleanSheetSignal || null,
+      goalkeeperRelianceIndex: m.goalkeeperRelianceIndex || null,
+      conversionEfficiencyIndex: m.conversionEfficiencyIndex || null,
       formHome: m.formHome ? {
         n: m.formHome.n,
         sequence: m.formHome.sequenceStr || m.formHome.sequence?.join(''),
@@ -11639,7 +11757,8 @@ RESPONDE SOLO CON JSON usando este schema:
       winsVsTop,             // victorias ante equipos del tercio superior
       lossesVsBot,           // derrotas ante equipos del tercio inferior (señal de alarma)
       winsVsBottom,          // victorias ante equipos débiles (infla la forma)
-      totalTeams
+      totalTeams,
+      drawRate: Number((draws / n).toFixed(2)) // tasa histórica de empates en la muestra
     };
   }
 
@@ -12053,6 +12172,10 @@ RESPONDE SOLO CON JSON usando este schema:
           strengthAway
         });
 
+        // ── Índices v3: sorpresa estructural del underdog
+        const goalkeeperRelianceIndex = computeGoalkeeperRelianceIndex(underdogForm, underdogStrength);
+        const conversionEfficiencyIndex = computeConversionEfficiencyIndex(underdogForm, underdogStrength);
+
         // ── Flags adicionales basados en nuevos índices
         if(favoritePressureIndex && favoritePressureIndex.level === 'BAJO'){
           radarFlags.push('FAVORITE_LOW_PRESSURE');
@@ -12065,6 +12188,20 @@ RESPONDE SOLO CON JSON usando este schema:
         }
         if(htCleanSheetSignal && htCleanSheetSignal.level === 'PROBABLE'){
           radarFlags.push('HT_CLEAN_SHEET_LIKELY');
+        }
+        // ── Flags v3: sorpresa estructural
+        if(goalkeeperRelianceIndex && goalkeeperRelianceIndex.level === 'PORTERO_FIGURA'){
+          radarFlags.push('UNDERDOG_KEEPER_RELIANCE');
+        }
+        if(conversionEfficiencyIndex && conversionEfficiencyIndex.level === 'CLÍNICO'){
+          radarFlags.push('UNDERDOG_CLINICAL_FINISH');
+        }
+        // Combinación de ambos: máxima alerta de sorpresa
+        if(
+          goalkeeperRelianceIndex?.level === 'PORTERO_FIGURA' &&
+          conversionEfficiencyIndex?.level === 'CLÍNICO'
+        ){
+          radarFlags.push('UPSET_RISK_HIGH');
         }
 
         return {
@@ -12098,6 +12235,9 @@ RESPONDE SOLO CON JSON usando este schema:
           underdogDefenseIndex,
           drawIndex,
           htCleanSheetSignal,
+          // ── Nuevos índices v3: sorpresa estructural del underdog
+          goalkeeperRelianceIndex,
+          conversionEfficiencyIndex,
           favoriteName,
           underdogName,
           mktFavIsHome,
@@ -22604,8 +22744,205 @@ RESPONDE SOLO CON JSON usando este schema:
   }
 
     // ═══════════════════════════════════════════════════════════════════
-    // ⚡ MEDIO TIEMPO — Análisis en vivo + Predicción con aprendizaje
+    // 🏟️ BALL POSITION TRACKER — Registro de posición por bloques de 15'
+    // Captura clics en campo SVG → field tilt, presión, control por liga
     // ═══════════════════════════════════════════════════════════════════
+
+    const BPT_SESSIONS_KEY = 'FL_BALL_SESSIONS';
+    const BPT_DRAFT_KEY    = 'FL_BALL_DRAFT';
+
+    function loadBptSessions(){
+      const p = safeParseJSON(localStorage.getItem(BPT_SESSIONS_KEY), []);
+      return Array.isArray(p) ? p : [];
+    }
+    function saveBptSessions(arr){ localStorage.setItem(BPT_SESSIONS_KEY, JSON.stringify(arr)); }
+    function loadBptDraft(){ return safeParseJSON(localStorage.getItem(BPT_DRAFT_KEY), null); }
+    function saveBptDraft(d){ localStorage.setItem(BPT_DRAFT_KEY, d ? JSON.stringify(d) : null); }
+    function clearBptDraft(){ localStorage.removeItem(BPT_DRAFT_KEY); }
+
+    // ── Zonas del campo (3 filas × 3 cols, lado atacante = derecha)
+    // x: 0=portería propia .. 1=portería rival (normalizado)
+    // Zona 0-2=def, 3-5=mid, 6-7=att, 8=att_box
+    function classifyZone(nx){
+      if(nx < 0.33) return 'def';
+      if(nx < 0.55) return 'mid';
+      if(nx < 0.78) return 'att';
+      return 'att_box';
+    }
+
+    function computeBlockMetrics(clicks = []){
+      if(!clicks.length) return { fieldTilt:0, midControl:0, pressureZone:0, dominantZone:'mid', clicks:0 };
+      const n = clicks.length;
+      const def      = clicks.filter(c => classifyZone(c.x) === 'def').length;
+      const mid      = clicks.filter(c => classifyZone(c.x) === 'mid').length;
+      const att      = clicks.filter(c => classifyZone(c.x) === 'att').length;
+      const attBox   = clicks.filter(c => classifyZone(c.x) === 'att_box').length;
+      const fieldTilt    = (att + attBox) / n;
+      const midControl   = mid / n;
+      const pressureZone = attBox / n;
+      const zoneCounts   = { def, mid, att, att_box: attBox };
+      const dominantZone = Object.entries(zoneCounts).sort((a,b)=>b[1]-a[1])[0][0];
+      return {
+        fieldTilt:    Number(fieldTilt.toFixed(3)),
+        midControl:   Number(midControl.toFixed(3)),
+        pressureZone: Number(pressureZone.toFixed(3)),
+        dominantZone,
+        clicks: n,
+        zoneCounts
+      };
+    }
+
+    // ── Perfil acumulado por liga
+    function computeLeagueProfile(leagueId, side = 'home'){
+      const sessions = loadBptSessions().filter(s => s.leagueId === leagueId);
+      if(!sessions.length) return null;
+      const relevant = sessions.filter(s => s.side === side || !s.side);
+      if(!relevant.length) return null;
+      const allBlocks = relevant.flatMap(s => s.blocks.filter(b => b.clicks > 0));
+      if(!allBlocks.length) return null;
+      const avg = arr => arr.reduce((a,b)=>a+b,0) / arr.length;
+      return {
+        sessions: relevant.length,
+        avgFieldTilt:    Number(avg(allBlocks.map(b=>b.fieldTilt)).toFixed(3)),
+        avgMidControl:   Number(avg(allBlocks.map(b=>b.midControl)).toFixed(3)),
+        avgPressureZone: Number(avg(allBlocks.map(b=>b.pressureZone)).toFixed(3)),
+      };
+    }
+
+    // ── Genera HTML del campo SVG clicable
+    function buildFieldSVG(blockIdx, activeClicks = [], isReplay = false){
+      const BLOCK_RANGES = ['0-15','15-30','30-45','45-60','60-75','75-90'];
+      const range = BLOCK_RANGES[blockIdx] || '';
+
+      // Dots de clics registrados
+      const dots = activeClicks.map((c,i) => {
+        const cx = 40 + c.x * 540;  // campo: x=40..580
+        const cy = 30 + c.y * 140;  // campo: y=30..170
+        const age = activeClicks.length - i;
+        const opacity = Math.max(0.15, 1 - age * 0.06);
+        return `<circle cx="${cx}" cy="${cy}" r="5" fill="#f5c842" opacity="${opacity}" class="bpt-dot"/>`;
+      }).join('');
+
+      // Heat overlay por zonas
+      const n = activeClicks.length || 1;
+      const zoneData = {
+        def:     activeClicks.filter(c=>classifyZone(c.x)==='def').length / n,
+        mid:     activeClicks.filter(c=>classifyZone(c.x)==='mid').length / n,
+        att:     activeClicks.filter(c=>classifyZone(c.x)==='att').length / n,
+        att_box: activeClicks.filter(c=>classifyZone(c.x)==='att_box').length / n,
+      };
+
+      const zoneAlpha = (v) => Math.min(0.45, v * 0.9);
+
+      return `<svg id="bpt-field-${blockIdx}" viewBox="0 0 620 200" width="100%" style="cursor:${isReplay?'default':'crosshair'};border-radius:8px;display:block;">
+        <!-- Fondo campo -->
+        <rect x="40" y="30" width="540" height="140" rx="6" fill="#1a2e1a" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"/>
+
+        <!-- Franjas de césped -->
+        ${[0,1,2,3,4].map(i=>`<rect x="${40+i*108}" y="30" width="108" height="140" fill="${i%2===0?'rgba(0,0,0,0)':'rgba(255,255,255,0.02)'}"/>`).join('')}
+
+        <!-- Heat overlay zonas -->
+        <rect x="40"  y="30" width="178" height="140" fill="rgba(26,86,196,${zoneAlpha(zoneData.def).toFixed(2)})" rx="4"/>
+        <rect x="218" y="30" width="118" height="140" fill="rgba(245,200,66,${zoneAlpha(zoneData.mid).toFixed(2)})"/>
+        <rect x="336" y="30" width="136" height="140" fill="rgba(212,50,44,${zoneAlpha(zoneData.att).toFixed(2)})"/>
+        <rect x="472" y="30" width="108" height="140" fill="rgba(212,50,44,${Math.min(0.65, zoneAlpha(zoneData.att_box)*1.6).toFixed(2)})" rx="0 4 4 0"/>
+
+        <!-- Líneas del campo -->
+        <!-- Línea central -->
+        <line x1="310" y1="30" x2="310" y2="170" stroke="rgba(255,255,255,0.25)" stroke-width="1.5"/>
+        <!-- Círculo central -->
+        <circle cx="310" cy="100" r="28" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
+        <circle cx="310" cy="100" r="3" fill="rgba(255,255,255,0.4)"/>
+        <!-- Área grande local (izq) -->
+        <rect x="40" y="62" width="70" height="76" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+        <!-- Área pequeña local (izq) -->
+        <rect x="40" y="82" width="28" height="36" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+        <!-- Área grande rival (der) -->
+        <rect x="510" y="62" width="70" height="76" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+        <!-- Área pequeña rival (der) -->
+        <rect x="552" y="82" width="28" height="36" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+        <!-- Punto penal local -->
+        <circle cx="76" cy="100" r="2.5" fill="rgba(255,255,255,0.3)"/>
+        <!-- Punto penal rival -->
+        <circle cx="544" cy="100" r="2.5" fill="rgba(255,255,255,0.3)"/>
+        <!-- Porterías -->
+        <rect x="33" y="85" width="7" height="30" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>
+        <rect x="580" y="85" width="7" height="30" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>
+
+        <!-- Etiquetas de zona -->
+        <text x="129" y="192" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.3)" font-family="JetBrains Mono,monospace" letter-spacing="1">DEF ${Math.round(zoneData.def*100)}%</text>
+        <text x="277" y="192" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.3)" font-family="JetBrains Mono,monospace" letter-spacing="1">MEDIO ${Math.round(zoneData.mid*100)}%</text>
+        <text x="404" y="192" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.3)" font-family="JetBrains Mono,monospace" letter-spacing="1">ATQ ${Math.round(zoneData.att*100)}%</text>
+        <text x="526" y="192" text-anchor="middle" font-size="9" fill="rgba(212,50,44,0.8)" font-family="JetBrains Mono,monospace" letter-spacing="1">ÁREA ${Math.round(zoneData.att_box*100)}%</text>
+
+        <!-- Dirección de ataque -->
+        <text x="310" y="22" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono,monospace">← DEFENSA · ATAQUE →</text>
+
+        <!-- Dots de clicks -->
+        ${dots}
+
+        <!-- Último click resaltado -->
+        ${activeClicks.length ? `<circle cx="${40 + activeClicks[activeClicks.length-1].x * 540}" cy="${30 + activeClicks[activeClicks.length-1].y * 140}" r="9" fill="none" stroke="#f5c842" stroke-width="2" opacity="0.9"/>` : ''}
+
+        <!-- Contador -->
+        <rect x="562" y="33" width="45" height="18" rx="4" fill="rgba(0,0,0,0.6)"/>
+        <text x="584" y="45" text-anchor="middle" font-size="10" fill="#f5c842" font-family="JetBrains Mono,monospace" font-weight="700">${activeClicks.length} clics</text>
+      </svg>`;
+    }
+
+    // ── Reproduce una sesión bloque a bloque animado
+    function replaySession(sessionId){
+      const sessions = loadBptSessions();
+      const session  = sessions.find(s => s.id === sessionId);
+      if(!session) return;
+
+      // Almacenamos en window para gestionar el intervalo
+      if(window.__bptReplay__) clearInterval(window.__bptReplay__.interval);
+
+      const BLOCK_RANGES = ['0-15','15-30','30-45','45-60','60-75','75-90'];
+      let blockIdx  = 0;
+      let clickIdx  = 0;
+      const panel   = document.getElementById('bpt-replay-panel');
+      if(!panel) return;
+
+      function renderReplayFrame(){
+        const block = session.blocks[blockIdx];
+        if(!block){ clearInterval(window.__bptReplay__.interval); return; }
+        const shownClicks = block.clicks.slice(0, clickIdx + 1);
+        const fieldHtml   = buildFieldSVG(blockIdx, shownClicks, true);
+        panel.innerHTML = `
+          <div style="font-size:9px;letter-spacing:2px;color:#f5c842;font-family:'JetBrains Mono',monospace;margin-bottom:8px;">
+            ▶ REPRODUCIENDO · ${session.matchLabel} · BLOQUE ${BLOCK_RANGES[blockIdx]}
+          </div>
+          ${fieldHtml}
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            ${session.blocks.map((b,i)=>`
+              <div style="flex:1;height:4px;border-radius:2px;background:${i<blockIdx?'#22c55e':i===blockIdx?'#f5c842':'rgba(255,255,255,0.1)'};"></div>
+            `).join('')}
+          </div>
+        `;
+        clickIdx++;
+        if(clickIdx >= block.clicks.length){
+          setTimeout(()=>{
+            blockIdx++;
+            clickIdx = 0;
+            if(blockIdx >= session.blocks.length){
+              clearInterval(window.__bptReplay__.interval);
+              panel.innerHTML += `<div style="margin-top:10px;font-size:11px;color:#22c55e;font-family:'JetBrains Mono',monospace;">✅ Reproducción completada</div>`;
+            }
+          }, 800);
+        }
+      }
+
+      window.__bptReplay__ = {
+        interval: setInterval(renderReplayFrame, 80)
+      };
+      renderReplayFrame();
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // ⚡ MEDIO TIEMPO — Análisis en vivo + Predicción con aprendizaje
+    // ════════════════════════════════════════════════════════════════════
     if(view==="halftime"){
       // ── Storage key para predicciones HT ──
       const HT_STORE_KEY = "FL_HT_PREDICTIONS";
@@ -22738,7 +23075,139 @@ RESPONDE SOLO CON JSON usando este schema:
           <!-- ── PANEL DE ANÁLISIS (se genera al analizar) ── -->
           <div id="htAnalysisPanel" style="margin:0 16px;"></div>
 
+          <!-- ── BALL POSITION TRACKER ── -->
+          <div style="margin:14px 16px 0;background:#0f1117;border:1px solid rgba(245,200,66,0.18);border-radius:10px;padding:18px 20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+              <div>
+                <div style="font-size:13px;font-weight:800;letter-spacing:2px;color:#f5c842;text-transform:uppercase;">🏟️ Ball Position Tracker</div>
+                <div style="font-size:11px;color:#4a5568;margin-top:3px;font-family:'JetBrains Mono',monospace;">Registra posición del balón por bloques de 15 min · click en el campo</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <select id="bpt-league-sel" style="background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 10px;border-radius:5px;">
+                  <option value="">— Liga —</option>
+                  ${(db.leagues||[]).map(l=>`<option value="${l.id}">${l.name}</option>`).join('')}
+                </select>
+                <input id="bpt-match-label" type="text" placeholder="Local vs Visitante" style="background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 10px;border-radius:5px;width:180px;"/>
+                <select id="bpt-side-sel" style="background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 10px;border-radius:5px;">
+                  <option value="home">Local (→)</option>
+                  <option value="away">Visitante (←)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- BLOQUES DE TIEMPO -->
+            <div id="bpt-blocks-nav" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
+              ${['0-15','15-30','30-45','45-60','60-75','75-90'].map((r,i)=>`
+                <button data-bpt-block="${i}" style="background:${i===0?'rgba(245,200,66,0.15)':'#161922'};border:1px solid ${i===0?'rgba(245,200,66,0.4)':'rgba(255,255,255,0.08)'};color:${i===0?'#f5c842':'#8892a4'};font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;padding:6px 12px;border-radius:5px;cursor:pointer;letter-spacing:1px;" data-bpt-range="${r}">${r}'</button>
+              `).join('')}
+            </div>
+
+            <!-- CAMPO SVG -->
+            <div id="bpt-field-wrap" style="position:relative;margin-bottom:12px;">
+              ${buildFieldSVG(0, [], false)}
+            </div>
+
+            <!-- MÉTRICAS DEL BLOQUE ACTIVO -->
+            <div id="bpt-metrics-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
+              <div style="background:#161922;border-radius:6px;padding:8px 10px;text-align:center;">
+                <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;">FIELD TILT</div>
+                <div id="bpt-m-tilt" style="font-size:22px;font-weight:900;color:#f5c842;">0%</div>
+              </div>
+              <div style="background:#161922;border-radius:6px;padding:8px 10px;text-align:center;">
+                <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;">MID CONTROL</div>
+                <div id="bpt-m-mid" style="font-size:22px;font-weight:900;color:#8892a4;">0%</div>
+              </div>
+              <div style="background:#161922;border-radius:6px;padding:8px 10px;text-align:center;">
+                <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;">PRESIÓN ÁREA</div>
+                <div id="bpt-m-press" style="font-size:22px;font-weight:900;color:#d4322c;">0%</div>
+              </div>
+              <div style="background:#161922;border-radius:6px;padding:8px 10px;text-align:center;">
+                <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;">ZONA DOM.</div>
+                <div id="bpt-m-dom" style="font-size:16px;font-weight:900;color:#f0f2f7;margin-top:4px;">—</div>
+              </div>
+            </div>
+
+            <!-- BARRA DE PROGRESO DE BLOQUES -->
+            <div style="display:flex;gap:4px;margin-bottom:12px;" id="bpt-progress-bar">
+              ${['0-15','15-30','30-45','45-60','60-75','75-90'].map((_,i)=>`
+                <div id="bpt-prog-${i}" style="flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,0.07);"></div>
+              `).join('')}
+            </div>
+
+            <!-- ACCIONES -->
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button id="bpt-undo-btn" style="background:#161922;border:1px solid rgba(255,255,255,0.1);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;padding:8px 16px;border-radius:6px;cursor:pointer;">↩ Deshacer</button>
+              <button id="bpt-clear-block-btn" style="background:#161922;border:1px solid rgba(255,255,255,0.1);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;padding:8px 16px;border-radius:6px;cursor:pointer;">🗑 Limpiar bloque</button>
+              <button id="bpt-save-session-btn" style="background:#d4322c;border:none;color:white;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;letter-spacing:1.5px;padding:8px 22px;border-radius:6px;cursor:pointer;text-transform:uppercase;">💾 Guardar sesión</button>
+              <div id="bpt-save-msg" style="font-size:11px;color:#22c55e;padding:8px 0;font-family:'JetBrains Mono',monospace;"></div>
+            </div>
+          </div>
+
+          <!-- ── PERFIL POR LIGA ── -->
+          <div style="margin:10px 16px 0;background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 20px;">
+            <div style="font-size:13px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:12px;">📊 Perfil Territorial por Liga</div>
+            <div id="bpt-league-profiles" style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">
+              ${(()=>{
+                const sessions = loadBptSessions();
+                if(!sessions.length) return 'Sin sesiones aún. Registra partidos para construir el perfil de liga.';
+                const byLeague = {};
+                sessions.forEach(s => {
+                  if(!byLeague[s.leagueId]) byLeague[s.leagueId] = { name: s.leagueName, sessions:[], home:[], away:[] };
+                  byLeague[s.leagueId].sessions.push(s);
+                  const blocks = s.blocks.filter(b=>b.clicks>0);
+                  if(s.side==='home') byLeague[s.leagueId].home.push(...blocks);
+                  else byLeague[s.leagueId].away.push(...blocks);
+                });
+                const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
+                return Object.entries(byLeague).map(([lid, ld])=>{
+                  const hTilt = avg(ld.home.map(b=>b.fieldTilt));
+                  const aTilt = avg(ld.away.map(b=>b.fieldTilt));
+                  const hPress = avg(ld.home.map(b=>b.pressureZone));
+                  const aPress = avg(ld.away.map(b=>b.pressureZone));
+                  return `<div style="background:#161922;border-radius:8px;padding:12px 14px;margin-bottom:8px;">
+                    <div style="font-size:12px;font-weight:800;color:#f0f2f7;margin-bottom:8px;">${ld.name} <span style="color:#4a5568;font-weight:400;">(${ld.sessions.length} sesión${ld.sessions.length!==1?'es':''})</span></div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                      <div>
+                        <div style="color:#d4322c;font-size:10px;letter-spacing:1px;margin-bottom:4px;">LOCAL (→)</div>
+                        <div style="font-size:11px;">Field tilt: <b style="color:#f5c842;">${(hTilt*100).toFixed(1)}%</b> · Presión área: <b style="color:#d4322c;">${(hPress*100).toFixed(1)}%</b></div>
+                      </div>
+                      <div>
+                        <div style="color:#1a56c4;font-size:10px;letter-spacing:1px;margin-bottom:4px;">VISITANTE (←)</div>
+                        <div style="font-size:11px;">Field tilt: <b style="color:#f5c842;">${(aTilt*100).toFixed(1)}%</b> · Presión área: <b style="color:#d4322c;">${(aPress*100).toFixed(1)}%</b></div>
+                      </div>
+                    </div>
+                  </div>`;
+                }).join('');
+              })()}
+            </div>
+          </div>
+
+          <!-- ── SESIONES GUARDADAS + REPLAY ── -->
+          <div style="margin:10px 16px 0;background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 20px;">
+            <div style="font-size:13px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:12px;">▶ Sesiones guardadas</div>
+            <div id="bpt-replay-panel" style="margin-bottom:12px;"></div>
+            ${(()=>{
+              const sessions = loadBptSessions();
+              if(!sessions.length) return '<div style="font-size:11px;color:#4a5568;font-family:\'JetBrains Mono\',monospace;">Sin sesiones guardadas.</div>';
+              return `<div style="display:flex;flex-direction:column;gap:6px;">
+                ${sessions.slice().reverse().slice(0,10).map(s=>{
+                  const totalClicks = s.blocks.reduce((sum,b)=>sum+b.clicks,0);
+                  const avgTilt = s.blocks.filter(b=>b.clicks>0).reduce((sum,b,_,arr)=>sum+b.fieldTilt/arr.length,0);
+                  return `<div style="background:#161922;border:1px solid rgba(255,255,255,0.07);border-radius:7px;padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <div style="flex:1;">
+                      <div style="font-size:12px;font-weight:700;color:#f0f2f7;">${s.matchLabel||s.id}</div>
+                      <div style="font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${s.leagueName||s.leagueId||'—'} · ${s.date?.slice(0,10)||''} · ${totalClicks} clics · Tilt prom: ${(avgTilt*100).toFixed(1)}%</div>
+                    </div>
+                    <button data-bpt-replay="${s.id}" style="background:#161922;border:1px solid rgba(245,200,66,0.3);color:#f5c842;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:6px 14px;border-radius:5px;cursor:pointer;">▶ Replay</button>
+                    <button data-bpt-del="${s.id}" style="background:#161922;border:1px solid rgba(239,68,68,0.2);color:#ef4444;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:6px 10px;border-radius:5px;cursor:pointer;">✕</button>
+                  </div>`;
+                }).join('')}
+              </div>`;
+            })()}
+          </div>
+
           <!-- ── HISTORIAL DE PREDICCIONES ── -->
+
           <div style="margin:14px 16px 24px;background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 20px;">
             <div style="font-size:13px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:12px;">🧠 Historial de Predicciones HT · Aprendizaje del Modelo</div>
             ${htPreds.length === 0
@@ -22789,11 +23258,190 @@ RESPONDE SOLO CON JSON usando este schema:
         </div>
       `;
 
+      // ══════════════════════════════════════════════════════════════
+      // 🏟️ BALL POSITION TRACKER — event handlers
+      // ══════════════════════════════════════════════════════════════
+      (()=>{
+        // Estado interno del tracker
+        let bptActiveBlock = 0;
+        // blocks: array de 6, cada uno con { clicks:[], fieldTilt, midControl, pressureZone, dominantZone }
+        let bptBlocks = Array.from({length:6}, ()=>({ clicks:[], fieldTilt:0, midControl:0, pressureZone:0, dominantZone:'mid' }));
+
+        // Restaurar draft si existe
+        const draft = loadBptDraft();
+        if(draft && draft.blocks){
+          bptBlocks = draft.blocks;
+          bptActiveBlock = draft.activeBlock || 0;
+        }
+
+        function bptUpdateMetrics(){
+          const block = bptBlocks[bptActiveBlock];
+          const m = computeBlockMetrics(block.clicks);
+          block.fieldTilt    = m.fieldTilt;
+          block.midControl   = m.midControl;
+          block.pressureZone = m.pressureZone;
+          block.dominantZone = m.dominantZone;
+          block.clicks_count = m.clicks;
+
+          // Actualizar métricas en pantalla
+          const tiltEl   = document.getElementById('bpt-m-tilt');
+          const midEl    = document.getElementById('bpt-m-mid');
+          const pressEl  = document.getElementById('bpt-m-press');
+          const domEl    = document.getElementById('bpt-m-dom');
+          if(tiltEl)  tiltEl.textContent  = Math.round(m.fieldTilt*100)+'%';
+          if(midEl)   midEl.textContent   = Math.round(m.midControl*100)+'%';
+          if(pressEl) pressEl.textContent = Math.round(m.pressureZone*100)+'%';
+          if(domEl)   domEl.textContent   = m.dominantZone.replace('_',' ').toUpperCase();
+
+          // Actualizar barras de progreso
+          bptBlocks.forEach((b, i)=>{
+            const bar = document.getElementById('bpt-prog-'+i);
+            if(!bar) return;
+            const cnt = b.clicks.length;
+            bar.style.background = cnt > 0
+              ? (i === bptActiveBlock ? '#f5c842' : '#22c55e')
+              : 'rgba(255,255,255,0.07)';
+            bar.style.width = cnt > 0 ? '100%' : '100%';
+          });
+
+          // Redibujar campo
+          const wrap = document.getElementById('bpt-field-wrap');
+          if(wrap) wrap.innerHTML = buildFieldSVG(bptActiveBlock, block.clicks, false);
+
+          // Re-bind clic en el nuevo SVG
+          bptBindFieldClick();
+
+          // Guardar draft
+          saveBptDraft({ blocks: bptBlocks, activeBlock: bptActiveBlock });
+        }
+
+        function bptBindFieldClick(){
+          const svg = document.querySelector('#bpt-field-wrap svg');
+          if(!svg) return;
+          svg.onclick = (e)=>{
+            const rect = svg.getBoundingClientRect();
+            // Campo dentro del SVG: x=40..580 (540px), y=30..170 (140px), viewBox 620x200
+            const vbW = 620, vbH = 200;
+            const scaleX = vbW / rect.width;
+            const scaleY = vbH / rect.height;
+            const vx = (e.clientX - rect.left) * scaleX;
+            const vy = (e.clientY - rect.top)  * scaleY;
+            // Normalizar dentro del campo (x:40-580, y:30-170)
+            const nx = Math.max(0, Math.min(1, (vx - 40) / 540));
+            const ny = Math.max(0, Math.min(1, (vy - 30) / 140));
+            // Solo registrar si el clic está dentro del campo
+            if(vx < 40 || vx > 580 || vy < 30 || vy > 170) return;
+            bptBlocks[bptActiveBlock].clicks.push({ x: nx, y: ny, t: Date.now() });
+            bptUpdateMetrics();
+          };
+        }
+
+        // Bind inicial
+        bptBindFieldClick();
+        bptUpdateMetrics();
+
+        // Navegación entre bloques
+        content.querySelectorAll('[data-bpt-block]').forEach(btn=>{
+          btn.onclick = ()=>{
+            bptActiveBlock = parseInt(btn.dataset.bptBlock);
+            // Actualizar estilos de botones
+            content.querySelectorAll('[data-bpt-block]').forEach(b=>{
+              const active = parseInt(b.dataset.bptBlock) === bptActiveBlock;
+              b.style.background = active ? 'rgba(245,200,66,0.15)' : '#161922';
+              b.style.borderColor = active ? 'rgba(245,200,66,0.4)' : 'rgba(255,255,255,0.08)';
+              b.style.color = active ? '#f5c842' : '#8892a4';
+            });
+            bptUpdateMetrics();
+          };
+        });
+
+        // Deshacer
+        const undoBtn = document.getElementById('bpt-undo-btn');
+        if(undoBtn) undoBtn.onclick = ()=>{
+          if(bptBlocks[bptActiveBlock].clicks.length > 0){
+            bptBlocks[bptActiveBlock].clicks.pop();
+            bptUpdateMetrics();
+          }
+        };
+
+        // Limpiar bloque
+        const clearBlockBtn = document.getElementById('bpt-clear-block-btn');
+        if(clearBlockBtn) clearBlockBtn.onclick = ()=>{
+          bptBlocks[bptActiveBlock].clicks = [];
+          bptUpdateMetrics();
+        };
+
+        // Guardar sesión
+        const saveBtn = document.getElementById('bpt-save-session-btn');
+        const saveMsg = document.getElementById('bpt-save-msg');
+        if(saveBtn) saveBtn.onclick = ()=>{
+          const leagueId   = document.getElementById('bpt-league-sel')?.value || '';
+          const leagueName = document.getElementById('bpt-league-sel')?.options[document.getElementById('bpt-league-sel').selectedIndex]?.text || '';
+          const matchLabel = document.getElementById('bpt-match-label')?.value.trim() || 'Partido sin nombre';
+          const side       = document.getElementById('bpt-side-sel')?.value || 'home';
+
+          const totalClicks = bptBlocks.reduce((s,b)=>s+b.clicks.length, 0);
+          if(totalClicks < 5){
+            if(saveMsg) saveMsg.textContent = '⚠️ Registra al menos 5 clics antes de guardar.';
+            return;
+          }
+
+          // Calcular bloques con métricas
+          const blocksData = bptBlocks.map((b, i)=>{
+            const RANGES = ['0-15','15-30','30-45','45-60','60-75','75-90'];
+            const m = computeBlockMetrics(b.clicks);
+            return {
+              range: RANGES[i],
+              clicks: b.clicks,
+              ...m
+            };
+          });
+
+          const leagueProfile = computeLeagueProfile(leagueId, side);
+
+          const session = {
+            id: 'bpt_' + Date.now(),
+            matchLabel,
+            leagueId,
+            leagueName: leagueName === '— Liga —' ? '' : leagueName,
+            side,
+            date: new Date().toISOString(),
+            blocks: blocksData,
+            totalClicks,
+            replay: true,
+            leagueProfile
+          };
+
+          const sessions = loadBptSessions();
+          sessions.push(session);
+          saveBptSessions(sessions);
+          clearBptDraft();
+
+          if(saveMsg) saveMsg.textContent = '✅ Sesión guardada · ' + matchLabel;
+          setTimeout(()=>render('halftime'), 1200);
+        };
+
+        // Replay de sesiones guardadas
+        content.querySelectorAll('[data-bpt-replay]').forEach(btn=>{
+          btn.onclick = ()=> replaySession(btn.dataset.bptReplay);
+        });
+
+        // Borrar sesiones
+        content.querySelectorAll('[data-bpt-del]').forEach(btn=>{
+          btn.onclick = ()=>{
+            const sessions = loadBptSessions().filter(s=>s.id!==btn.dataset.bptDel);
+            saveBptSessions(sessions);
+            render('halftime');
+          };
+        });
+      })();
+
       // ── EVENT HANDLERS ──
       document.getElementById('htClearBtn').onclick = () => {
         document.getElementById('htMatchpackInput').value = '';
         document.getElementById('htAnalysisPanel').innerHTML = '';
         document.getElementById('htParseError').textContent = '';
+
       };
 
       document.getElementById('htAnalyzeBtn').onclick = () => {
