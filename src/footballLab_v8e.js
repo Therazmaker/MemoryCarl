@@ -23682,7 +23682,7 @@ RESPONDE SOLO CON JSON usando este schema:
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 🎬 VIDEO SCOUT — Registro táctico desde highlights por equipo
+    // 🎬 VIDEO SCOUT v2 — Jugadas multi-clic con trayectorias
     // ═══════════════════════════════════════════════════════════════════
     if(view==="vscout"){
 
@@ -23690,150 +23690,46 @@ RESPONDE SOLO CON JSON usando este schema:
 
       function loadVsData(){ return safeParseJSON(localStorage.getItem(VS_KEY), {}); }
       function saveVsData(d){ localStorage.setItem(VS_KEY, JSON.stringify(d)); }
-
-      // Obtener registros de un equipo
-      function getTeamScoutRecords(teamId){
-        const d = loadVsData();
-        return Array.isArray(d[teamId]) ? d[teamId] : [];
-      }
-
-      // Guardar un registro nuevo para un equipo
+      function getTeamScoutRecords(teamId){ const d=loadVsData(); return Array.isArray(d[teamId])?d[teamId]:[]; }
       function saveScoutRecord(teamId, record){
-        const d = loadVsData();
-        d[teamId] = Array.isArray(d[teamId]) ? d[teamId] : [];
-        // dedup por id
-        d[teamId] = d[teamId].filter(r => r.id !== record.id);
+        const d=loadVsData();
+        d[teamId]=Array.isArray(d[teamId])?d[teamId]:[];
+        d[teamId]=d[teamId].filter(r=>r.id!==record.id);
         d[teamId].push(record);
-        // Máximo 30 registros por equipo, más reciente primero
-        d[teamId].sort((a,b) => (b.date||'').localeCompare(a.date||''));
-        d[teamId] = d[teamId].slice(0, 30);
+        d[teamId].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+        d[teamId]=d[teamId].slice(0,30);
         saveVsData(d);
       }
-
       function deleteScoutRecord(teamId, recordId){
-        const d = loadVsData();
+        const d=loadVsData();
         if(!Array.isArray(d[teamId])) return;
-        d[teamId] = d[teamId].filter(r => r.id !== recordId);
+        d[teamId]=d[teamId].filter(r=>r.id!==recordId);
         saveVsData(d);
       }
 
-      // ── Tipos de acción con zona esperada y peso de peligro
-      const VS_ACTION_TYPES = [
-        { id:'shot_box',      label:'Remate en área',         zone:'att_box', danger:5, icon:'🎯' },
-        { id:'shot_outside',  label:'Remate fuera área',      zone:'att',     danger:2, icon:'💨' },
-        { id:'cross',         label:'Centro al área',         zone:'att',     danger:3, icon:'↗' },
-        { id:'big_chance',    label:'Gran ocasión',           zone:'att_box', danger:5, icon:'⚡' },
-        { id:'through_ball',  label:'Pase filtrado',          zone:'mid',     danger:4, icon:'→' },
-        { id:'press_high',    label:'Presión alta',           zone:'mid',     danger:2, icon:'⬆' },
-        { id:'recovery',      label:'Recuperación',           zone:'mid',     danger:1, icon:'🔄' },
-        { id:'corner',        label:'Córner',                 zone:'att_box', danger:3, icon:'⚑' },
-        { id:'free_kick',     label:'Tiro libre peligroso',   zone:'att',     danger:3, icon:'🎯' },
-        { id:'buildup_sterile', label:'Posesión estéril',     zone:'mid',     danger:0, icon:'⭕' },
+      // ── Tipos de jugada (etiquetan la jugada completa, no cada punto)
+      const VS_PLAY_TYPES = [
+        { id:'attack_build',   label:'Construcción',      danger:1, icon:'🔵', color:'#1a56c4' },
+        { id:'counter',        label:'Contraataque',      danger:4, icon:'⚡', color:'#f5c842' },
+        { id:'press_recover',  label:'Presión/Robo',      danger:2, icon:'⬆', color:'#8892a4' },
+        { id:'set_piece',      label:'Pelota parada',     danger:3, icon:'⚑', color:'#f59e0b' },
+        { id:'cross_sequence', label:'Secuencia de centro', danger:3, icon:'↗', color:'#f59e0b' },
+        { id:'through_run',    label:'Pase filtrado',     danger:4, icon:'→', color:'#f5c842' },
+        { id:'shot_sequence',  label:'Llegada a remate',  danger:5, icon:'🎯', color:'#22c55e' },
+        { id:'sterile_cycle',  label:'Posesión estéril',  danger:0, icon:'⭕', color:'#4a5568' },
       ];
 
       const VS_OUTCOMES = [
-        { id:'goal',    label:'Gol',       color:'#22c55e' },
-        { id:'saved',   label:'Parada',    color:'#f59e0b' },
-        { id:'blocked', label:'Bloqueado', color:'#8892a4' },
-        { id:'off_target', label:'Fuera',  color:'#ef4444' },
-        { id:'corner',  label:'Córner',    color:'#1a56c4' },
-        { id:'lost',    label:'Pérdida',   color:'#4a5568' },
+        { id:'goal',       label:'Gol',        color:'#22c55e' },
+        { id:'saved',      label:'Parada',     color:'#f59e0b' },
+        { id:'blocked',    label:'Bloqueado',  color:'#8892a4' },
+        { id:'off_target', label:'Fuera',      color:'#ef4444' },
+        { id:'corner',     label:'Córner',     color:'#1a56c4' },
+        { id:'lost',       label:'Pérdida',    color:'#4a5568' },
+        { id:'foul',       label:'Falta',      color:'#f59e0b' },
       ];
 
-      // ── Perfil táctico acumulado del equipo
-      function computeTeamScoutProfile(records){
-        if(!records.length) return null;
-        const allActions = records.flatMap(r => Array.isArray(r.actions) ? r.actions : []);
-        if(!allActions.length) return null;
-
-        const n = allActions.length;
-        const byZone = { def:0, mid:0, att:0, att_box:0 };
-        const byType = {};
-        const byOutcome = {};
-        let totalDanger = 0;
-        let sterileCount = 0;
-
-        allActions.forEach(a => {
-          byZone[a.zone] = (byZone[a.zone]||0) + 1;
-          byType[a.type] = (byType[a.type]||0) + 1;
-          byOutcome[a.outcome] = (byOutcome[a.outcome]||0) + 1;
-          const typeDef = VS_ACTION_TYPES.find(t=>t.id===a.type);
-          totalDanger += typeDef ? typeDef.danger : 1;
-          if(a.type === 'buildup_sterile') sterileCount++;
-        });
-
-        const shots = (byType.shot_box||0) + (byType.shot_outside||0);
-        const goals = byOutcome.goal || 0;
-        const bigChances = byType.big_chance || 0;
-        const fieldTiltPct = ((byZone.att||0) + (byZone.att_box||0)) / n;
-        const pressureZonePct = (byZone.att_box||0) / n;
-        const avgDanger = totalDanger / n;
-        const sterileRate = sterileCount / n;
-        const shotsOnTarget = (byOutcome.saved||0) + (byOutcome.goal||0);
-        const conversionRate = shots > 0 ? goals / shots : 0;
-
-        // Zona de ataque preferida (flanco)
-        const leftActions  = allActions.filter(a=>a.side==='left').length;
-        const rightActions = allActions.filter(a=>a.side==='right').length;
-        const centerActions = allActions.filter(a=>a.side==='center').length;
-        const preferredSide = leftActions>rightActions && leftActions>centerActions ? 'left'
-          : rightActions>leftActions && rightActions>centerActions ? 'right' : 'center';
-
-        // SPI — Sterile Possession Index
-        const SPI = Number(sterileRate.toFixed(3));
-
-        // Danger Index — peligrosidad real por acción
-        const DI = Number(avgDanger.toFixed(2));
-
-        return {
-          sessions: records.length,
-          totalActions: n,
-          fieldTiltPct:    Number(fieldTiltPct.toFixed(3)),
-          pressureZonePct: Number(pressureZonePct.toFixed(3)),
-          avgDanger:       DI,
-          sterileRate:     SPI,
-          conversionRate:  Number(conversionRate.toFixed(3)),
-          shotsPerSession: Number((shots / records.length).toFixed(2)),
-          bigChancesPerSession: Number((bigChances / records.length).toFixed(2)),
-          goalsPerSession: Number((goals / records.length).toFixed(2)),
-          preferredSide,
-          byZone,
-          byType,
-          byOutcome,
-          // Clasificación táctica
-          tacticalStyle:
-            SPI > 0.35 ? 'Posesión estéril' :
-            fieldTiltPct > 0.55 && DI > 3 ? 'Presión alta efectiva' :
-            fieldTiltPct > 0.55 ? 'Dominante sin mordiente' :
-            DI > 3.5 ? 'Directo y peligroso' :
-            'Equilibrado'
-        };
-      }
-
-      // ── Generar features para saveTeamBrainFeatures desde el perfil scout
-      function scoutProfileToFeatures(profile){
-        if(!profile) return {};
-        return {
-          pulse:      Math.round(profile.fieldTiltPct * 100),
-          aggression: Math.round(profile.pressureZonePct * 100),
-          resilience: Math.round((1 - profile.sterileRate) * 100),
-          volatility: Math.round(profile.avgDanger * 20),
-          momentum:   Number(((profile.conversionRate * 2) - 1).toFixed(2))
-        };
-      }
-
-      // ── Estado local de la sesión de registro activa
-      let vsTeamId    = null;
-      let vsTeamName  = '';
-      let vsLeagueId  = '';
-      let vsMatchLabel = '';
-      let vsMatchDate  = '';
-      let vsActions   = [];   // acciones de la sesión actual
-      let vsActiveType = VS_ACTION_TYPES[0].id;
-      let vsActiveOutcome = VS_OUTCOMES[0].id;
-      let vsActiveSide = 'center';
-
-      // Helpers de campo
+      // ── Zona desde coordenada X normalizada
       function vsZoneFromX(nx){
         if(nx < 0.33) return 'def';
         if(nx < 0.55) return 'mid';
@@ -23841,238 +23737,423 @@ RESPONDE SOLO CON JSON usando este schema:
         return 'att_box';
       }
 
-      function vsBuildFieldSVG(actions = [], isSmall = false){
-        const W = isSmall ? 320 : 580;
-        const H = isSmall ? 100 : 160;
-        const X0 = 20, Y0 = 15;
-        const FW = W - 40, FH = H - 30;
+      // ── Métricas de una jugada (array de puntos)
+      function computePlayMetrics(points){
+        if(!points||points.length<1) return null;
+        const n = points.length;
+        // Progresión neta: último punto X - primer punto X
+        const netProgress = points[n-1].nx - points[0].nx;
+        // Distancia total recorrida (suma de segmentos)
+        let dist = 0;
+        for(let i=1;i<n;i++){
+          const dx=points[i].nx-points[i-1].nx, dy=points[i].ny-points[i-1].ny;
+          dist += Math.sqrt(dx*dx+dy*dy);
+        }
+        // Retrocesos: segmentos donde X decrece
+        const backpasses = points.slice(1).filter((p,i)=>p.nx < points[i].nx).length;
+        // Zona de inicio y fin
+        const startZone = vsZoneFromX(points[0].nx);
+        const endZone   = vsZoneFromX(points[n-1].nx);
+        // Zona dominante (moda)
+        const zoneCounts={def:0,mid:0,att:0,att_box:0};
+        points.forEach(p=>{ zoneCounts[vsZoneFromX(p.nx)]++; });
+        const dominantZone = Object.entries(zoneCounts).sort((a,b)=>b[1]-a[1])[0][0];
+        // Flanco dominante (Y: 0=arriba/izq, 1=abajo/der, 0.5=centro)
+        const avgY = points.reduce((s,p)=>s+p.ny,0)/n;
+        const side = avgY < 0.35 ? 'left' : avgY > 0.65 ? 'right' : 'center';
+        return {
+          touches: n,
+          netProgress: Number(netProgress.toFixed(3)),
+          totalDist:   Number(dist.toFixed(3)),
+          backpasses,
+          startZone, endZone, dominantZone, side
+        };
+      }
 
-        // Heat por zona
-        const n = actions.length || 1;
-        const def_n     = actions.filter(a=>a.zone==='def').length / n;
-        const mid_n     = actions.filter(a=>a.zone==='mid').length / n;
-        const att_n     = actions.filter(a=>a.zone==='att').length / n;
-        const attbox_n  = actions.filter(a=>a.zone==='att_box').length / n;
+      // ── Perfil táctico acumulado desde jugadas
+      function computeTeamScoutProfile(records){
+        if(!records.length) return null;
+        const allPlays = records.flatMap(r=>Array.isArray(r.plays)?r.plays:[]);
+        if(!allPlays.length) return null;
+        const n = allPlays.length;
 
-        const alpha = v => Math.min(0.5, v * 0.9).toFixed(2);
+        // Métricas agregadas
+        const avgTouches    = allPlays.reduce((s,p)=>s+(p.metrics?.touches||1),0)/n;
+        const avgProgress   = allPlays.reduce((s,p)=>s+(p.metrics?.netProgress||0),0)/n;
+        const avgBackpasses = allPlays.reduce((s,p)=>s+(p.metrics?.backpasses||0),0)/n;
 
-        // Dots coloreados por peligro
-        const dots = actions.map((a,i) => {
-          const typeDef = VS_ACTION_TYPES.find(t=>t.id===a.type);
-          const danger  = typeDef ? typeDef.danger : 1;
-          const color   = danger >= 5 ? '#22c55e' : danger >= 3 ? '#f5c842' : danger >= 2 ? '#f59e0b' : '#4a5568';
-          const cx = X0 + a.nx * FW;
-          const cy = Y0 + a.ny * FH;
-          const r  = isSmall ? 3 : Math.max(4, danger + 2);
-          return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" opacity="0.85" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>
-                  ${!isSmall && a.label ? `<text x="${cx}" y="${cy-r-2}" text-anchor="middle" font-size="7" fill="${color}" font-family="JetBrains Mono,monospace">${a.label||''}</text>` : ''}`;
+        // Zonas de inicio y fin
+        const startZones={def:0,mid:0,att:0,att_box:0};
+        const endZones  ={def:0,mid:0,att:0,att_box:0};
+        allPlays.forEach(p=>{
+          if(p.metrics?.startZone) startZones[p.metrics.startZone]=(startZones[p.metrics.startZone]||0)+1;
+          if(p.metrics?.endZone)   endZones[p.metrics.endZone]    =(endZones[p.metrics.endZone]||0)+1;
+        });
+
+        // Outcomes
+        const byOutcome={};
+        allPlays.forEach(p=>{ byOutcome[p.outcome]=(byOutcome[p.outcome]||0)+1; });
+        const goals   = byOutcome.goal||0;
+        const shots   = (byOutcome.goal||0)+(byOutcome.saved||0)+(byOutcome.blocked||0)+(byOutcome.off_target||0);
+        const conversionRate = shots>0 ? goals/shots : 0;
+
+        // Tipos de jugada
+        const byType={};
+        allPlays.forEach(p=>{ byType[p.type]=(byType[p.type]||0)+1; });
+        const sterileCount = byType.sterile_cycle||0;
+        const sterileRate  = sterileCount/n;
+
+        // Field tilt: jugadas que terminan en att o att_box
+        const fieldTiltPct    = ((endZones.att||0)+(endZones.att_box||0))/n;
+        const pressureZonePct = (endZones.att_box||0)/n;
+
+        // Peligro promedio
+        const avgDanger = allPlays.reduce((s,p)=>{
+          const td=VS_PLAY_TYPES.find(t=>t.id===p.type);
+          return s+(td?td.danger:1);
+        },0)/n;
+
+        // Flanco preferido
+        const sideCount={left:0,center:0,right:0};
+        allPlays.forEach(p=>{ if(p.metrics?.side) sideCount[p.metrics.side]++; });
+        const preferredSide=Object.entries(sideCount).sort((a,b)=>b[1]-a[1])[0][0];
+
+        // Patron de construcción: jugadas con > 4 toques antes de llegar a att_box
+        const deepBuildPlays = allPlays.filter(p=>(p.metrics?.touches||0)>4 && p.metrics?.endZone==='att_box').length;
+        const directPlays    = allPlays.filter(p=>(p.metrics?.touches||0)<=2 && (p.metrics?.endZone==='att'||p.metrics?.endZone==='att_box')).length;
+
+        const SPI = Number(sterileRate.toFixed(3));
+        const DI  = Number(avgDanger.toFixed(2));
+
+        return {
+          sessions: records.length,
+          totalPlays: n,
+          avgTouches:      Number(avgTouches.toFixed(2)),
+          avgProgress:     Number(avgProgress.toFixed(3)),
+          avgBackpasses:   Number(avgBackpasses.toFixed(2)),
+          fieldTiltPct:    Number(fieldTiltPct.toFixed(3)),
+          pressureZonePct: Number(pressureZonePct.toFixed(3)),
+          avgDanger:       DI,
+          sterileRate:     SPI,
+          conversionRate:  Number(conversionRate.toFixed(3)),
+          goalsPerSession: Number((goals/records.length).toFixed(2)),
+          preferredSide,
+          deepBuildPlays, directPlays,
+          byOutcome, byType, startZones, endZones,
+          tacticalStyle:
+            SPI > 0.35 ? 'Posesión estéril' :
+            directPlays/n > 0.4 ? 'Directo y vertical' :
+            fieldTiltPct > 0.55 && DI > 3 ? 'Presión alta efectiva' :
+            avgTouches > 5 && avgProgress > 0.2 ? 'Construcción profunda' :
+            fieldTiltPct > 0.55 ? 'Dominante sin mordiente' :
+            'Equilibrado'
+        };
+      }
+
+      function scoutProfileToFeatures(profile){
+        if(!profile) return {};
+        return {
+          pulse:      Math.round(profile.fieldTiltPct*100),
+          aggression: Math.round(profile.pressureZonePct*100),
+          resilience: Math.round((1-profile.sterileRate)*100),
+          volatility: Math.round(profile.avgDanger*20),
+          momentum:   Number(((profile.conversionRate*2)-1).toFixed(2))
+        };
+      }
+
+      // ── Dibuja el campo con jugadas completas (trayectorias)
+      function vsBuildFieldSVG(plays=[], pendingPoints=[], isSmall=false){
+        const W=isSmall?320:600, H=isSmall?110:200;
+        const X0=20, Y0=20, FW=W-40, FH=H-40;
+
+        // Heat por zona de INICIO de jugadas
+        const np = plays.length||1;
+        const ez={def:0,mid:0,att:0,att_box:0};
+        plays.forEach(p=>{ if(p.metrics?.endZone) ez[p.metrics.endZone]=(ez[p.metrics.endZone]||0)+1; });
+        const alpha=v=>Math.min(0.45,v*0.85/np).toFixed(2);
+
+        // Trayectorias de jugadas completadas
+        const trajectories = plays.map(play=>{
+          const pts = Array.isArray(play.points)?play.points:[];
+          if(pts.length<1) return '';
+          const td  = VS_PLAY_TYPES.find(t=>t.id===play.type);
+          const col = td?.color||'#8892a4';
+          const outDef = VS_OUTCOMES.find(o=>o.id===play.outcome);
+          const endCol = outDef?.color||col;
+
+          if(pts.length===1){
+            const cx=X0+pts[0].nx*FW, cy=Y0+pts[0].ny*FH;
+            return `<circle cx="${cx}" cy="${cy}" r="${isSmall?3:5}" fill="${col}" opacity="0.7"/>`;
+          }
+
+          // Líneas entre puntos
+          const lines = pts.slice(1).map((p,i)=>{
+            const x1=X0+pts[i].nx*FW, y1=Y0+pts[i].ny*FH;
+            const x2=X0+p.nx*FW,      y2=Y0+p.ny*FH;
+            const progress=(i+1)/(pts.length-1);
+            // Color interpolado: empieza en col del tipo, termina en col del outcome
+            return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${col}" stroke-width="${isSmall?1:1.8}" opacity="${0.4+progress*0.5}" stroke-linecap="round"/>`;
+          }).join('');
+
+          // Puntos intermedios pequeños
+          const dots = pts.slice(0,-1).map((p,i)=>{
+            const cx=X0+p.nx*FW, cy=Y0+p.ny*FH;
+            return `<circle cx="${cx}" cy="${cy}" r="${isSmall?2:3}" fill="${col}" opacity="0.6"/>`;
+          }).join('');
+
+          // Punto final destacado (resultado)
+          const last=pts[pts.length-1];
+          const ex=X0+last.nx*FW, ey=Y0+last.ny*FH;
+          const endDot = `<circle cx="${ex}" cy="${ey}" r="${isSmall?4:7}" fill="${endCol}" opacity="0.9" stroke="rgba(0,0,0,0.5)" stroke-width="0.5"/>`;
+
+          // Ícono del tipo (solo en campo normal)
+          const icon = !isSmall && td ? `<text x="${X0+pts[0].nx*FW}" y="${Y0+pts[0].ny*FH-8}" text-anchor="middle" font-size="9" fill="${col}">${td.icon}</text>` : '';
+
+          return lines+dots+endDot+icon;
         }).join('');
 
-        return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="border-radius:6px;cursor:crosshair;display:block;">
-          <rect x="${X0}" y="${Y0}" width="${FW}" height="${FH}" rx="5" fill="#1a2e1a" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
-          <!-- Heat zonas -->
-          <rect x="${X0}" y="${Y0}" width="${FW*0.33}" height="${FH}" fill="rgba(26,86,196,${alpha(def_n)})" rx="4"/>
-          <rect x="${X0+FW*0.33}" y="${Y0}" width="${FW*0.22}" height="${FH}" fill="rgba(245,200,66,${alpha(mid_n)})"/>
-          <rect x="${X0+FW*0.55}" y="${Y0}" width="${FW*0.23}" height="${FH}" fill="rgba(212,50,44,${alpha(att_n)})"/>
-          <rect x="${X0+FW*0.78}" y="${Y0}" width="${FW*0.22}" height="${FH}" fill="rgba(212,50,44,${Math.min(0.6,parseFloat(alpha(attbox_n))*1.5).toFixed(2)})" rx="0 4 4 0"/>
-          <!-- Línea central -->
-          <line x1="${X0+FW*0.5}" y1="${Y0}" x2="${X0+FW*0.5}" y2="${Y0+FH}" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-          <!-- Área grande -->
-          <rect x="${X0+FW*0.78}" y="${Y0+FH*0.2}" width="${FW*0.15}" height="${FH*0.6}" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-          <!-- Portería -->
-          <rect x="${X0+FW-3}" y="${Y0+FH*0.35}" width="5" height="${FH*0.3}" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/>
-          <!-- Etiquetas -->
-          ${!isSmall ? `
-          <text x="${X0+FW*0.17}" y="${Y0+FH+12}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.25)" font-family="JetBrains Mono,monospace">DEF</text>
-          <text x="${X0+FW*0.44}" y="${Y0+FH+12}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.25)" font-family="JetBrains Mono,monospace">MEDIO</text>
-          <text x="${X0+FW*0.67}" y="${Y0+FH+12}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.25)" font-family="JetBrains Mono,monospace">ATQ</text>
-          <text x="${X0+FW*0.89}" y="${Y0+FH+12}" text-anchor="middle" font-size="8" fill="rgba(212,50,44,0.7)" font-family="JetBrains Mono,monospace">ÁREA</text>` : ''}
-          ${dots}
-          <!-- Último dot resaltado -->
-          ${actions.length ? `<circle cx="${X0+actions[actions.length-1].nx*FW}" cy="${Y0+actions[actions.length-1].ny*FH}" r="${isSmall?5:10}" fill="none" stroke="#f5c842" stroke-width="1.5" opacity="0.8"/>` : ''}
+        // Trayectoria en curso (pendingPoints) — amarillo punteado
+        const pending = pendingPoints.length>0 ? (()=>{
+          const lines = pendingPoints.slice(1).map((p,i)=>{
+            const x1=X0+pendingPoints[i].nx*FW, y1=Y0+pendingPoints[i].ny*FH;
+            const x2=X0+p.nx*FW, y2=Y0+p.ny*FH;
+            return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#f5c842" stroke-width="2" stroke-dasharray="4 3" opacity="0.9"/>`;
+          }).join('');
+          const dots = pendingPoints.map((p,i)=>{
+            const cx=X0+p.nx*FW, cy=Y0+p.ny*FH;
+            const isLast=i===pendingPoints.length-1;
+            return isLast
+              ? `<circle cx="${cx}" cy="${cy}" r="9" fill="none" stroke="#f5c842" stroke-width="2" opacity="0.9"/><circle cx="${cx}" cy="${cy}" r="4" fill="#f5c842" opacity="0.95"/>`
+              : `<circle cx="${cx}" cy="${cy}" r="3" fill="#f5c842" opacity="0.8"/>`;
+          }).join('');
+          return lines+dots;
+        })() : '';
+
+        // Número de la jugada en curso
+        const playNum = plays.length+1;
+
+        return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="border-radius:8px;cursor:crosshair;display:block;background:#0d1a0d;">
+          <defs>
+            <marker id="arr-vs" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M1 1L7 4L1 7" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round"/>
+            </marker>
+          </defs>
+          <!-- Campo -->
+          <rect x="${X0}" y="${Y0}" width="${FW}" height="${FH}" rx="4" fill="#152815" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+          <!-- Heat zonas fin de jugada -->
+          <rect x="${X0}" y="${Y0}" width="${FW*0.33}" height="${FH}" fill="rgba(26,86,196,${alpha(ez.def)})" rx="3"/>
+          <rect x="${X0+FW*0.33}" y="${Y0}" width="${FW*0.22}" height="${FH}" fill="rgba(245,200,66,${alpha(ez.mid)})"/>
+          <rect x="${X0+FW*0.55}" y="${Y0}" width="${FW*0.23}" height="${FH}" fill="rgba(212,50,44,${alpha(ez.att)})"/>
+          <rect x="${X0+FW*0.78}" y="${Y0}" width="${FW*0.22}" height="${FH}" fill="rgba(212,50,44,${Math.min(0.55,(ez.att_box/np*0.85)).toFixed(2)})" rx="0 3 3 0"/>
+          <!-- Líneas campo -->
+          <line x1="${X0+FW*0.5}" y1="${Y0}" x2="${X0+FW*0.5}" y2="${Y0+FH}" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+          <circle cx="${X0+FW*0.5}" cy="${Y0+FH*0.5}" r="${FH*0.18}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+          <rect x="${X0+FW*0.78}" y="${Y0+FH*0.18}" width="${FW*0.15}" height="${FH*0.64}" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+          <rect x="${X0+FW*0.91}" y="${Y0+FH*0.33}" width="${FW*0.09}" height="${FH*0.34}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+          <rect x="${X0}" y="${Y0+FH*0.18}" width="${FW*0.15}" height="${FH*0.64}" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+          <rect x="${X0}" y="${Y0+FH*0.33}" width="${FW*0.09}" height="${FH*0.34}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+          <!-- Porterías -->
+          <rect x="${X0+FW-2}" y="${Y0+FH*0.35}" width="4" height="${FH*0.3}" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/>
+          <rect x="${X0-2}" y="${Y0+FH*0.35}" width="4" height="${FH*0.3}" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+          <!-- Etiquetas zona -->
+          ${!isSmall?`
+          <text x="${X0+FW*0.17}" y="${Y0+FH+14}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono,monospace">DEF</text>
+          <text x="${X0+FW*0.44}" y="${Y0+FH+14}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono,monospace">MEDIO</text>
+          <text x="${X0+FW*0.67}" y="${Y0+FH+14}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono,monospace">ATQ</text>
+          <text x="${X0+FW*0.89}" y="${Y0+FH+14}" text-anchor="middle" font-size="8" fill="rgba(212,50,44,0.6)" font-family="JetBrains Mono,monospace">ÁREA</text>
+          <text x="${X0+FW}" y="${Y0-6}" text-anchor="end" font-size="8" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono,monospace">→ portería rival</text>
+          <text x="${X0+FW/2}" y="${Y0-6}" text-anchor="middle" font-size="9" fill="rgba(245,200,66,0.6)" font-family="JetBrains Mono,monospace">jugada #${playNum} en curso · ${pendingPoints.length} toque${pendingPoints.length!==1?'s':''}</text>`:''}
+          <!-- Trayectorias guardadas -->
+          ${trajectories}
+          <!-- Jugada en curso -->
+          ${pending}
         </svg>`;
       }
 
-      // ── Perfil visual compacto de un equipo
-      function vsRenderTeamCard(teamId, teamName){
+      // ── Mini campo para perfil de equipo (solo heat + trayectorias resumidas)
+      function vsBuildMiniSVG(records){
+        const allPlays = records.flatMap(r=>r.plays||[]);
+        return vsBuildFieldSVG(allPlays.slice(-20), [], true);
+      }
+
+      // ── Perfil compacto de equipo para columna derecha
+      function vsRenderTeamCard(teamId){
         const records = getTeamScoutRecords(teamId);
         const profile = computeTeamScoutProfile(records);
         if(!profile) return `<div style="color:#4a5568;font-size:11px;font-family:'JetBrains Mono',monospace;">Sin datos scout.</div>`;
-
-        const allActions = records.flatMap(r=>r.actions||[]);
-        const miniSvg = vsBuildFieldSVG(allActions, true);
-
-        const styleColor = profile.tacticalStyle.includes('estéril') ? '#ef4444'
-          : profile.tacticalStyle.includes('alta efectiva') ? '#22c55e'
-          : profile.tacticalStyle.includes('Directo') ? '#f59e0b'
-          : '#8892a4';
-
+        const styleColor = profile.tacticalStyle.includes('estéril')?'#ef4444':profile.tacticalStyle.includes('efectiva')?'#22c55e':profile.tacticalStyle.includes('Directo')?'#f59e0b':'#8892a4';
         return `
-          <div style="display:grid;grid-template-columns:1fr 180px;gap:12px;align-items:start;">
-            <div>
-              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
-                <span style="background:${styleColor}22;border:1px solid ${styleColor}55;color:${styleColor};font-size:11px;font-weight:700;padding:3px 10px;border-radius:4px;letter-spacing:1px;">${profile.tacticalStyle.toUpperCase()}</span>
-                <span style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${profile.sessions} sesión${profile.sessions!==1?'es':''} · ${profile.totalActions} acciones</span>
+          <div>
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+              <span style="background:${styleColor}22;border:1px solid ${styleColor}55;color:${styleColor};font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px;">${profile.tacticalStyle.toUpperCase()}</span>
+              <span style="font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${profile.sessions} ses · ${profile.totalPlays} jugadas · ${profile.avgTouches} toques/j</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:8px;">
+              ${[
+                {l:'Field tilt',    v:Math.round(profile.fieldTiltPct*100)+'%',   c:'#f5c842'},
+                {l:'Área',          v:Math.round(profile.pressureZonePct*100)+'%',c:'#d4322c'},
+                {l:'Peligro',       v:profile.avgDanger.toFixed(1)+'/5',           c:'#f59e0b'},
+                {l:'SPI estéril',   v:Math.round(profile.sterileRate*100)+'%',     c:profile.sterileRate>0.3?'#ef4444':'#22c55e'},
+                {l:'Conversión',    v:Math.round(profile.conversionRate*100)+'%',  c:'#22c55e'},
+                {l:'Flanco',        v:profile.preferredSide==='left'?'IZQ':profile.preferredSide==='right'?'DER':'CTR', c:'#8892a4'},
+              ].map(m=>`<div style="background:#161922;border-radius:4px;padding:5px 7px;"><div style="font-size:8px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${m.l}</div><div style="font-size:14px;font-weight:900;color:${m.c};">${m.v}</div></div>`).join('')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:5px;margin-bottom:8px;">
+              <div style="background:#161922;border-radius:4px;padding:5px 7px;">
+                <div style="font-size:8px;color:#4a5568;font-family:'JetBrains Mono',monospace;">PROGRESIÓN NETA/j</div>
+                <div style="font-size:13px;font-weight:900;color:${profile.avgProgress>0.1?'#22c55e':'#ef4444'};">${profile.avgProgress>0?'+':''}${(profile.avgProgress*100).toFixed(0)}%</div>
               </div>
-              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">
-                ${[
-                  { label:'Field tilt', val: Math.round(profile.fieldTiltPct*100)+'%', color:'#f5c842' },
-                  { label:'Presión área', val: Math.round(profile.pressureZonePct*100)+'%', color:'#d4322c' },
-                  { label:'Peligro/acción', val: profile.avgDanger.toFixed(1)+'/5', color:'#f59e0b' },
-                  { label:'SPI estéril', val: Math.round(profile.sterileRate*100)+'%', color: profile.sterileRate>0.3?'#ef4444':'#22c55e' },
-                  { label:'Conversión', val: Math.round(profile.conversionRate*100)+'%', color:'#22c55e' },
-                  { label:'Flanco pref.', val: profile.preferredSide==='left'?'IZQ':profile.preferredSide==='right'?'DER':'CENTRO', color:'#8892a4' },
-                ].map(m=>`
-                  <div style="background:#161922;border-radius:5px;padding:6px 8px;">
-                    <div style="font-size:9px;color:#4a5568;font-family:'JetBrains Mono',monospace;letter-spacing:0.5px;">${m.label}</div>
-                    <div style="font-size:16px;font-weight:900;color:${m.color};">${m.val}</div>
-                  </div>
-                `).join('')}
+              <div style="background:#161922;border-radius:4px;padding:5px 7px;">
+                <div style="font-size:8px;color:#4a5568;font-family:'JetBrains Mono',monospace;">PASES ATRÁS/j</div>
+                <div style="font-size:13px;font-weight:900;color:#8892a4;">${profile.avgBackpasses.toFixed(1)}</div>
               </div>
             </div>
-            <div>${miniSvg}</div>
-          </div>
-        `;
+            ${vsBuildMiniSVG(records)}
+          </div>`;
       }
 
+      // ══════════════════════════════════════════════
+      // ESTADO DE LA SESIÓN ACTIVA
+      // ══════════════════════════════════════════════
+      let vsTeamId     = null;
+      let vsTeamName   = '';
+      let vsLeagueId   = '';
+      let vsMatchLabel = '';
+      let vsMatchDate  = '';
+      let vsPlays      = [];          // jugadas completadas
+      let vsPending    = [];          // puntos de la jugada en curso
+      let vsActiveType    = VS_PLAY_TYPES[0].id;
+      let vsActiveOutcome = VS_OUTCOMES[0].id;
+
       // ── HTML principal
-      const allTeams = (db.teams||[]).filter(t=>t.id&&t.name);
-      const vsData   = loadVsData();
+      const allTeams      = (db.teams||[]).filter(t=>t.id&&t.name);
+      const vsData        = loadVsData();
       const teamsWithData = allTeams.filter(t=>Array.isArray(vsData[t.id])&&vsData[t.id].length>0);
 
       content.innerHTML = `
         <div style="background:#08090c;min-height:100vh;font-family:'Barlow Condensed',sans-serif;">
 
           <!-- HEADER -->
-          <div style="padding:16px 16px 0;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:0;">
-            <div style="font-size:22px;font-weight:900;letter-spacing:2px;color:#f0f2f7;margin-bottom:4px;">🎬 VIDEO SCOUT</div>
-            <div style="font-size:12px;color:#4a5568;font-family:'JetBrains Mono',monospace;margin-bottom:14px;">Registra acciones del highlight · construye el perfil táctico del equipo · alimenta el Radar del Día</div>
+          <div style="padding:14px 16px 0;">
+            <div style="font-size:20px;font-weight:900;letter-spacing:2px;color:#f0f2f7;margin-bottom:2px;">🎬 VIDEO SCOUT <span style="font-size:12px;font-weight:400;color:#4a5568;letter-spacing:1px;">v2 · trayectorias multi-clic</span></div>
+            <div style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;margin-bottom:12px;">Traza cada jugada clic a clic → Enter para cerrarla → perfil táctico acumulado por equipo</div>
           </div>
 
-          <div style="display:grid;grid-template-columns:1fr 340px;gap:0;min-height:calc(100vh - 80px);">
+          <div style="display:grid;grid-template-columns:1fr 320px;gap:0;min-height:calc(100vh - 70px);">
 
-            <!-- COLUMNA IZQUIERDA: REGISTRAR SESIÓN -->
-            <div style="padding:14px 16px;border-right:1px solid rgba(255,255,255,0.06);">
+            <!-- ── COLUMNA IZQUIERDA ── -->
+            <div style="padding:0 16px 16px;border-right:1px solid rgba(255,255,255,0.06);">
 
-              <!-- SELECTOR DE EQUIPO + PARTIDO -->
-              <div style="background:#0f1117;border:1px solid rgba(245,200,66,0.2);border-radius:10px;padding:14px 16px;margin-bottom:12px;">
-                <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#f5c842;text-transform:uppercase;margin-bottom:10px;">Equipo y partido</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+              <!-- Equipo + partido -->
+              <div style="background:#0f1117;border:1px solid rgba(245,200,66,0.2);border-radius:9px;padding:12px 14px;margin-bottom:10px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 2fr 1fr;gap:8px;">
                   <div>
-                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">EQUIPO</div>
-                    <select id="vs-team-sel" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 10px;border-radius:5px;">
-                      <option value="">— Seleccionar equipo —</option>
+                    <div style="font-size:9px;color:#4a5568;margin-bottom:3px;font-family:'JetBrains Mono',monospace;">EQUIPO</div>
+                    <select id="vs-team-sel" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 8px;border-radius:5px;">
+                      <option value="">— Equipo —</option>
                       ${allTeams.map(t=>`<option value="${t.id}" data-name="${t.name}">${t.name}</option>`).join('')}
                     </select>
                   </div>
                   <div>
-                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">LIGA</div>
-                    <select id="vs-league-sel" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 10px;border-radius:5px;">
+                    <div style="font-size:9px;color:#4a5568;margin-bottom:3px;font-family:'JetBrains Mono',monospace;">LIGA</div>
+                    <select id="vs-league-sel" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 8px;border-radius:5px;">
                       <option value="">— Liga —</option>
                       ${(db.leagues||[]).map(l=>`<option value="${l.id}">${l.name}</option>`).join('')}
                     </select>
                   </div>
-                </div>
-                <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;">
                   <div>
-                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">PARTIDO (ej: Lorient vs Lens)</div>
-                    <input id="vs-match-label" type="text" placeholder="Local vs Visitante" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 10px;border-radius:5px;"/>
+                    <div style="font-size:9px;color:#4a5568;margin-bottom:3px;font-family:'JetBrains Mono',monospace;">PARTIDO</div>
+                    <input id="vs-match-label" type="text" placeholder="Local vs Visitante" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 8px;border-radius:5px;"/>
                   </div>
                   <div>
-                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">FECHA</div>
-                    <input id="vs-match-date" type="date" value="${new Date().toISOString().slice(0,10)}" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 10px;border-radius:5px;"/>
+                    <div style="font-size:9px;color:#4a5568;margin-bottom:3px;font-family:'JetBrains Mono',monospace;">FECHA</div>
+                    <input id="vs-match-date" type="date" value="${new Date().toISOString().slice(0,10)}" style="width:100%;background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 8px;border-radius:5px;"/>
                   </div>
                 </div>
               </div>
 
-              <!-- TIPO DE ACCIÓN -->
-              <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px 16px;margin-bottom:12px;">
-                <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:10px;">Tipo de acción</div>
-                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;" id="vs-type-btns">
-                  ${VS_ACTION_TYPES.map(t=>`
-                    <button data-vs-type="${t.id}" style="background:${t.id===vsActiveType?'rgba(245,200,66,0.15)':'#161922'};border:1px solid ${t.id===vsActiveType?'rgba(245,200,66,0.5)':'rgba(255,255,255,0.08)'};color:${t.id===vsActiveType?'#f5c842':'#8892a4'};font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;letter-spacing:0.5px;">
-                      ${t.icon} ${t.label}
-                    </button>
-                  `).join('')}
-                </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <div>
-                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">RESULTADO</div>
-                    <div style="display:flex;gap:5px;" id="vs-outcome-btns">
-                      ${VS_OUTCOMES.map(o=>`
-                        <button data-vs-outcome="${o.id}" style="background:${o.id===vsActiveOutcome?o.color+'33':'#161922'};border:1px solid ${o.id===vsActiveOutcome?o.color:'rgba(255,255,255,0.08)'};color:${o.id===vsActiveOutcome?o.color:'#8892a4'};font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;padding:4px 9px;border-radius:5px;cursor:pointer;">${o.label}</button>
-                      `).join('')}
-                    </div>
-                  </div>
-                  <div>
-                    <div style="font-size:10px;color:#4a5568;margin-bottom:4px;font-family:'JetBrains Mono',monospace;">FLANCO</div>
-                    <div style="display:flex;gap:5px;" id="vs-side-btns">
-                      ${['left','center','right'].map(s=>`
-                        <button data-vs-side="${s}" style="background:${s===vsActiveSide?'rgba(255,255,255,0.1)':'#161922'};border:1px solid ${s===vsActiveSide?'rgba(255,255,255,0.3)':'rgba(255,255,255,0.08)'};color:${s===vsActiveSide?'#f0f2f7':'#8892a4'};font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;padding:4px 9px;border-radius:5px;cursor:pointer;">${s==='left'?'IZQ':s==='right'?'DER':'CTR'}</button>
-                      `).join('')}
-                    </div>
+              <!-- Tipo de jugada + resultado -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+                <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:9px;padding:10px 12px;">
+                  <div style="font-size:9px;color:#4a5568;margin-bottom:6px;font-family:'JetBrains Mono',monospace;letter-spacing:1px;">TIPO DE JUGADA</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:5px;" id="vs-type-btns">
+                    ${VS_PLAY_TYPES.map(t=>`
+                      <button data-vs-type="${t.id}" style="background:${t.id===vsActiveType?t.color+'22':'#161922'};border:1px solid ${t.id===vsActiveType?t.color:'rgba(255,255,255,0.07)'};color:${t.id===vsActiveType?t.color:'#8892a4'};font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:4px 9px;border-radius:4px;cursor:pointer;">
+                        ${t.icon} ${t.label}
+                      </button>`).join('')}
                   </div>
                 </div>
-              </div>
-
-              <!-- CAMPO -->
-              <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px 16px;margin-bottom:12px;">
-                <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:8px;">
-                  Campo · click para registrar acción
-                  <span style="font-weight:400;color:#4a5568;margin-left:8px;">Porta rival →</span>
-                </div>
-                <div id="vs-field-wrap">${vsBuildFieldSVG([], false)}</div>
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-                  <span id="vs-action-count" style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">0 acciones registradas</span>
-                  <button id="vs-undo-btn" style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:5px 12px;border-radius:5px;cursor:pointer;">↩ Deshacer</button>
+                <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:9px;padding:10px 12px;">
+                  <div style="font-size:9px;color:#4a5568;margin-bottom:6px;font-family:'JetBrains Mono',monospace;letter-spacing:1px;">RESULTADO DE LA JUGADA</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:5px;" id="vs-outcome-btns">
+                    ${VS_OUTCOMES.map(o=>`
+                      <button data-vs-outcome="${o.id}" style="background:${o.id===vsActiveOutcome?o.color+'33':'#161922'};border:1px solid ${o.id===vsActiveOutcome?o.color:'rgba(255,255,255,0.07)'};color:${o.id===vsActiveOutcome?o.color:'#8892a4'};font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:4px 9px;border-radius:4px;cursor:pointer;">${o.label}</button>`).join('')}
+                  </div>
+                  <div style="margin-top:8px;font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">Selecciona antes de cerrar la jugada</div>
                 </div>
               </div>
 
-              <!-- ACCIONES REGISTRADAS EN ESTA SESIÓN -->
-              <div id="vs-actions-list" style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:14px 16px;margin-bottom:12px;max-height:180px;overflow-y:auto;">
-                <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:8px;">Acciones de esta sesión</div>
-                <div id="vs-actions-inner" style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">Sin acciones aún. Haz clic en el campo.</div>
+              <!-- CAMPO PRINCIPAL -->
+              <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:9px;padding:12px 14px;margin-bottom:10px;">
+                <div id="vs-field-wrap" style="margin-bottom:10px;"></div>
+
+                <!-- Status de jugada en curso -->
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                  <div id="vs-play-status" style="flex:1;font-size:12px;color:#f5c842;font-family:'JetBrains Mono',monospace;">
+                    Clic en el campo para trazar jugada #1
+                  </div>
+                  <button id="vs-close-play-btn" style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.4);color:#22c55e;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;padding:7px 16px;border-radius:5px;cursor:pointer;letter-spacing:0.5px;">
+                    ✓ Cerrar jugada (Enter)
+                  </button>
+                  <button id="vs-cancel-play-btn" style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:7px 12px;border-radius:5px;cursor:pointer;">
+                    ✕ Cancelar
+                  </button>
+                  <button id="vs-undo-point-btn" style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:7px 12px;border-radius:5px;cursor:pointer;">
+                    ↩ Punto
+                  </button>
+                </div>
               </div>
 
-              <!-- GUARDAR -->
+              <!-- Lista de jugadas de la sesión -->
+              <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:9px;padding:10px 12px;margin-bottom:10px;max-height:200px;overflow-y:auto;">
+                <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:6px;">Jugadas de esta sesión</div>
+                <div id="vs-plays-inner" style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">Sin jugadas. Traza la primera en el campo.</div>
+              </div>
+
+              <!-- Guardar -->
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <button id="vs-save-btn" style="background:#d4322c;border:none;color:white;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;letter-spacing:1.5px;padding:10px 28px;border-radius:7px;cursor:pointer;text-transform:uppercase;">💾 Guardar sesión</button>
-                <button id="vs-clear-btn" style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;padding:10px 16px;border-radius:7px;cursor:pointer;">Limpiar</button>
+                <button id="vs-clear-btn" style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;padding:10px 14px;border-radius:7px;cursor:pointer;">Limpiar todo</button>
                 <span id="vs-save-msg" style="font-size:11px;color:#22c55e;font-family:'JetBrains Mono',monospace;"></span>
               </div>
             </div>
 
-            <!-- COLUMNA DERECHA: PERFILES DE EQUIPOS -->
-            <div style="padding:14px 14px;overflow-y:auto;">
-              <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#8892a4;text-transform:uppercase;margin-bottom:10px;">Perfiles scout · ${teamsWithData.length} equipo${teamsWithData.length!==1?'s':''}</div>
-
-              ${teamsWithData.length === 0
-                ? `<div style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">Guarda sesiones para ver perfiles aquí.</div>`
-                : teamsWithData.map(t => {
-                    const records = getTeamScoutRecords(t.id);
-                    const profile = computeTeamScoutProfile(records);
-                    return `
-                      <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                          <div>
-                            <div style="font-size:14px;font-weight:800;color:#f0f2f7;">${t.name}</div>
-                            <div style="font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${records.length} sesión${records.length!==1?'es':''} · ${records.flatMap(r=>r.actions||[]).length} acciones</div>
-                          </div>
-                          <button data-vs-sync="${t.id}" style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#22c55e;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:700;padding:4px 10px;border-radius:5px;cursor:pointer;">⬆ Sync Radar</button>
+            <!-- ── COLUMNA DERECHA: PERFILES ── -->
+            <div style="padding:0 14px 16px;overflow-y:auto;">
+              <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#4a5568;text-transform:uppercase;margin-bottom:10px;padding-top:14px;">${teamsWithData.length} equipo${teamsWithData.length!==1?'s':''} con datos</div>
+              ${teamsWithData.length===0
+                ? `<div style="font-size:11px;color:#4a5568;font-family:'JetBrains Mono',monospace;">Guarda sesiones para ver perfiles.</div>`
+                : teamsWithData.map(t=>{
+                    const recs = getTeamScoutRecords(t.id);
+                    const totalPlays = recs.reduce((s,r)=>s+(r.plays||[]).length,0);
+                    return `<div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:9px;padding:10px 12px;margin-bottom:10px;">
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <div>
+                          <div style="font-size:13px;font-weight:800;color:#f0f2f7;">${t.name}</div>
+                          <div style="font-size:9px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${recs.length} ses · ${totalPlays} jugadas</div>
                         </div>
-                        ${vsRenderTeamCard(t.id, t.name)}
-                        <!-- Historial de sesiones -->
-                        <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,0.05);padding-top:8px;">
-                          ${records.slice(0,5).map(r=>`
-                            <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
-                              <span style="font-size:10px;color:#8892a4;font-family:'JetBrains Mono',monospace;flex:1;">${r.matchLabel||r.id} · ${r.date?.slice(0,10)||''}</span>
-                              <span style="font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">${(r.actions||[]).length} acc.</span>
-                              <button data-vs-del-team="${t.id}" data-vs-del-rec="${r.id}" style="background:none;border:none;color:#4a5568;cursor:pointer;font-size:11px;padding:0 4px;">✕</button>
-                            </div>
-                          `).join('')}
-                        </div>
+                        <button data-vs-sync="${t.id}" style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#22c55e;font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;cursor:pointer;">⬆ Sync</button>
                       </div>
-                    `;
+                      ${vsRenderTeamCard(t.id)}
+                      <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.04);padding-top:6px;">
+                        ${recs.slice(0,4).map(r=>`
+                          <div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
+                            <span style="font-size:9px;color:#8892a4;font-family:'JetBrains Mono',monospace;flex:1;">${r.matchLabel||r.id} · ${r.date?.slice(0,10)||''}</span>
+                            <span style="font-size:9px;color:#4a5568;">${(r.plays||[]).length}j</span>
+                            <button data-vs-del-team="${t.id}" data-vs-del-rec="${r.id}" style="background:none;border:none;color:#4a5568;cursor:pointer;font-size:10px;padding:0 2px;">✕</button>
+                          </div>`).join('')}
+                      </div>
+                    </div>`;
                   }).join('')
               }
             </div>
@@ -24080,209 +24161,186 @@ RESPONDE SOLO CON JSON usando este schema:
         </div>
       `;
 
-      // ══════════════════════════════════════════════
-      // EVENT HANDLERS DE VIDEO SCOUT
-      // ══════════════════════════════════════════════
+      // ══════════════════════════════════════════════════
+      // EVENT HANDLERS — Video Scout v2
+      // ══════════════════════════════════════════════════
 
-      function vsRebindField(){
-        const svg = document.querySelector('#vs-field-wrap svg');
-        if(!svg) return;
-        svg.onclick = (e) => {
-          if(!vsTeamId){ document.getElementById('vs-save-msg').textContent = '⚠️ Selecciona un equipo primero.'; return; }
-          const rect = svg.getBoundingClientRect();
-          const vbW = 580, vbH = 160;
-          const scaleX = vbW / rect.width;
-          const scaleY = vbH / rect.height;
-          const vx = (e.clientX - rect.left) * scaleX;
-          const vy = (e.clientY - rect.top)  * scaleY;
-          const nx = Math.max(0, Math.min(1, (vx - 20) / (vbW - 40)));
-          const ny = Math.max(0, Math.min(1, (vy - 15) / (vbH - 30)));
-          if(vx < 20 || vx > vbW-20 || vy < 15 || vy > vbH-15) return;
-
-          const typeDef = VS_ACTION_TYPES.find(t=>t.id===vsActiveType);
-          const action = {
-            id:      'a_' + Date.now(),
-            type:    vsActiveType,
-            outcome: vsActiveOutcome,
-            side:    vsActiveSide,
-            zone:    vsZoneFromX(nx),
-            nx:      Number(nx.toFixed(3)),
-            ny:      Number(ny.toFixed(3)),
-            label:   typeDef?.icon || '',
-            t:       Date.now()
-          };
-          vsActions.push(action);
-          vsUpdateField();
-        };
-      }
-
-      function vsUpdateField(){
-        const wrap = document.querySelector('#vs-field-wrap');
-        if(wrap) wrap.innerHTML = vsBuildFieldSVG(vsActions, false);
-        vsRebindField();
-
-        // Contador
-        const cnt = document.getElementById('vs-action-count');
-        if(cnt) cnt.textContent = `${vsActions.length} acción${vsActions.length!==1?'es':''} registrada${vsActions.length!==1?'s':''}`;
-
-        // Lista de acciones
-        const inner = document.getElementById('vs-actions-inner');
-        if(inner){
-          if(!vsActions.length){
-            inner.innerHTML = '<span style="color:#4a5568;">Sin acciones aún.</span>';
+      // Redibuja el campo completo
+      function vsRedraw(){
+        const wrap = document.getElementById('vs-field-wrap');
+        if(wrap) wrap.innerHTML = vsBuildFieldSVG(vsPlays, vsPending, false);
+        vsBindField();
+        // Status
+        const status = document.getElementById('vs-play-status');
+        if(status){
+          if(vsPending.length===0){
+            status.textContent = `Clic en el campo para trazar jugada #${vsPlays.length+1}`;
+            status.style.color = '#f5c842';
           } else {
-            inner.innerHTML = vsActions.slice().reverse().slice(0,15).map((a,i)=>{
-              const typeDef = VS_ACTION_TYPES.find(t=>t.id===a.type);
-              const outDef  = VS_OUTCOMES.find(o=>o.id===a.outcome);
-              const dangerColor = (typeDef?.danger||0) >= 5 ? '#22c55e' : (typeDef?.danger||0) >= 3 ? '#f5c842' : '#8892a4';
-              return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
-                <span style="color:${dangerColor};font-weight:700;">${typeDef?.icon||'·'}</span>
-                <span style="color:#f0f2f7;flex:1;">${typeDef?.label||a.type}</span>
-                <span style="color:${outDef?.color||'#8892a4'};">${outDef?.label||a.outcome}</span>
-                <span style="color:#4a5568;">${a.zone}</span>
-                <span style="color:#4a5568;">${a.side==='left'?'IZQ':a.side==='right'?'DER':'CTR'}</span>
-                <button data-vs-del-action="${a.id}" style="background:none;border:none;color:#4a5568;cursor:pointer;font-size:10px;">✕</button>
+            status.textContent = `Jugada #${vsPlays.length+1} · ${vsPending.length} toque${vsPending.length!==1?'s':''} · Enter o "✓ Cerrar" para guardarla`;
+            status.style.color = '#22c55e';
+          }
+        }
+        // Lista de jugadas
+        const inner = document.getElementById('vs-plays-inner');
+        if(inner){
+          if(!vsPlays.length){
+            inner.innerHTML = '<span>Sin jugadas. Traza la primera en el campo.</span>';
+          } else {
+            inner.innerHTML = vsPlays.slice().reverse().map((play,i)=>{
+              const td = VS_PLAY_TYPES.find(t=>t.id===play.type);
+              const od = VS_OUTCOMES.find(o=>o.id===play.outcome);
+              const idx = vsPlays.length-1-i;
+              return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
+                <span style="color:${td?.color||'#888'};">${td?.icon||'·'}</span>
+                <span style="color:#f0f2f7;flex:1;">${td?.label||play.type}</span>
+                <span style="color:${od?.color||'#888'};">${od?.label||play.outcome}</span>
+                <span style="color:#4a5568;">${play.points?.length||0}t</span>
+                <span style="color:#4a5568;font-size:9px;">${play.metrics?.startZone||'?'}→${play.metrics?.endZone||'?'}</span>
+                <button data-vs-del-play="${idx}" style="background:none;border:none;color:#4a5568;cursor:pointer;font-size:10px;">✕</button>
               </div>`;
             }).join('');
-
-            // Bind delete action buttons
-            inner.querySelectorAll('[data-vs-del-action]').forEach(btn=>{
-              btn.onclick = ()=>{
-                vsActions = vsActions.filter(a=>a.id!==btn.dataset.vsDelAction);
-                vsUpdateField();
+            inner.querySelectorAll('[data-vs-del-play]').forEach(btn=>{
+              btn.onclick=()=>{
+                vsPlays.splice(parseInt(btn.dataset.vsDelPlay),1);
+                vsRedraw();
               };
             });
           }
         }
       }
 
-      // Bind inicial del campo
-      vsRebindField();
+      function vsBindField(){
+        const svg = document.querySelector('#vs-field-wrap svg');
+        if(!svg) return;
+        svg.onclick = (e) => {
+          if(!vsTeamId){ document.getElementById('vs-save-msg').textContent='⚠️ Selecciona un equipo primero.'; return; }
+          const rect = svg.getBoundingClientRect();
+          const vbW=600, vbH=200;
+          const vx=(e.clientX-rect.left)*(vbW/rect.width);
+          const vy=(e.clientY-rect.top) *(vbH/rect.height);
+          const nx=Math.max(0,Math.min(1,(vx-20)/(vbW-40)));
+          const ny=Math.max(0,Math.min(1,(vy-20)/(vbH-40)));
+          if(vx<20||vx>vbW-20||vy<20||vy>vbH-20) return;
+          vsPending.push({ nx:Number(nx.toFixed(3)), ny:Number(ny.toFixed(3)), t:Date.now() });
+          vsRedraw();
+        };
+      }
 
-      // Selector equipo
-      document.getElementById('vs-team-sel').onchange = (e) => {
-        vsTeamId   = e.target.value;
-        vsTeamName = e.target.options[e.target.selectedIndex]?.dataset?.name || '';
-      };
-      document.getElementById('vs-league-sel').onchange = (e) => { vsLeagueId = e.target.value; };
-      document.getElementById('vs-match-label').oninput  = (e) => { vsMatchLabel = e.target.value.trim(); };
-      document.getElementById('vs-match-date').onchange  = (e) => { vsMatchDate  = e.target.value; };
+      // Cerrar jugada actual
+      function vsClosePlay(){
+        if(vsPending.length===0) return;
+        const metrics = computePlayMetrics(vsPending);
+        vsPlays.push({
+          id:      'p_'+Date.now(),
+          type:    vsActiveType,
+          outcome: vsActiveOutcome,
+          points:  vsPending.slice(),
+          metrics
+        });
+        vsPending = [];
+        vsRedraw();
+      }
 
-      // Botones de tipo de acción
+      // Bind inicial
+      vsRedraw();
+
+      // Enter = cerrar jugada
+      const vsKeyHandler = (e) => { if(e.key==='Enter') vsClosePlay(); };
+      document.addEventListener('keydown', vsKeyHandler);
+      // Limpiar listener cuando se cambie de vista
+      const vsOrigRender = window.__vsCleanup__;
+      window.__vsCleanup__ = () => { document.removeEventListener('keydown', vsKeyHandler); if(vsOrigRender) vsOrigRender(); };
+
+      // Botón cerrar jugada
+      document.getElementById('vs-close-play-btn').onclick = vsClosePlay;
+
+      // Cancelar jugada en curso
+      document.getElementById('vs-cancel-play-btn').onclick = ()=>{ vsPending=[]; vsRedraw(); };
+
+      // Deshacer último punto
+      document.getElementById('vs-undo-point-btn').onclick = ()=>{ vsPending.pop(); vsRedraw(); };
+
+      // Selectores
+      document.getElementById('vs-team-sel').onchange   = (e)=>{ vsTeamId=e.target.value; vsTeamName=e.target.options[e.target.selectedIndex]?.dataset?.name||''; };
+      document.getElementById('vs-league-sel').onchange = (e)=>{ vsLeagueId=e.target.value; };
+      document.getElementById('vs-match-label').oninput  = (e)=>{ vsMatchLabel=e.target.value.trim(); };
+      document.getElementById('vs-match-date').onchange  = (e)=>{ vsMatchDate=e.target.value; };
+
+      // Tipo de jugada
       content.querySelectorAll('[data-vs-type]').forEach(btn=>{
-        btn.onclick = ()=>{
-          vsActiveType = btn.dataset.vsType;
+        btn.onclick=()=>{
+          vsActiveType=btn.dataset.vsType;
           content.querySelectorAll('[data-vs-type]').forEach(b=>{
-            const active = b.dataset.vsType === vsActiveType;
-            b.style.background   = active ? 'rgba(245,200,66,0.15)' : '#161922';
-            b.style.borderColor  = active ? 'rgba(245,200,66,0.5)'  : 'rgba(255,255,255,0.08)';
-            b.style.color        = active ? '#f5c842' : '#8892a4';
+            const td=VS_PLAY_TYPES.find(t=>t.id===b.dataset.vsType);
+            const act=b.dataset.vsType===vsActiveType;
+            b.style.background  = act?(td?.color||'#888')+'22':'#161922';
+            b.style.borderColor = act?(td?.color||'#888')    :'rgba(255,255,255,0.07)';
+            b.style.color       = act?(td?.color||'#888')    :'#8892a4';
           });
         };
       });
 
-      // Botones de outcome
+      // Outcome
       content.querySelectorAll('[data-vs-outcome]').forEach(btn=>{
-        btn.onclick = ()=>{
-          vsActiveOutcome = btn.dataset.vsOutcome;
-          const outDef = VS_OUTCOMES.find(o=>o.id===vsActiveOutcome);
+        btn.onclick=()=>{
+          vsActiveOutcome=btn.dataset.vsOutcome;
           content.querySelectorAll('[data-vs-outcome]').forEach(b=>{
-            const active = b.dataset.vsOutcome === vsActiveOutcome;
-            const od = VS_OUTCOMES.find(o=>o.id===b.dataset.vsOutcome);
-            b.style.background  = active ? (od?.color||'#888')+'33' : '#161922';
-            b.style.borderColor = active ? (od?.color||'#888')       : 'rgba(255,255,255,0.08)';
-            b.style.color       = active ? (od?.color||'#888')       : '#8892a4';
+            const od=VS_OUTCOMES.find(o=>o.id===b.dataset.vsOutcome);
+            const act=b.dataset.vsOutcome===vsActiveOutcome;
+            b.style.background  = act?(od?.color||'#888')+'33':'#161922';
+            b.style.borderColor = act?(od?.color||'#888')     :'rgba(255,255,255,0.07)';
+            b.style.color       = act?(od?.color||'#888')     :'#8892a4';
           });
         };
       });
 
-      // Botones de flanco
-      content.querySelectorAll('[data-vs-side]').forEach(btn=>{
-        btn.onclick = ()=>{
-          vsActiveSide = btn.dataset.vsSide;
-          content.querySelectorAll('[data-vs-side]').forEach(b=>{
-            const active = b.dataset.vsSide === vsActiveSide;
-            b.style.background  = active ? 'rgba(255,255,255,0.1)' : '#161922';
-            b.style.borderColor = active ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.08)';
-            b.style.color       = active ? '#f0f2f7' : '#8892a4';
-          });
-        };
-      });
-
-      // Deshacer
-      document.getElementById('vs-undo-btn').onclick = ()=>{
-        vsActions.pop();
-        vsUpdateField();
-      };
-
-      // Limpiar sesión
-      document.getElementById('vs-clear-btn').onclick = ()=>{
-        vsActions = [];
-        vsUpdateField();
-        document.getElementById('vs-save-msg').textContent = '';
-      };
+      // Limpiar
+      document.getElementById('vs-clear-btn').onclick=()=>{ vsPlays=[]; vsPending=[]; vsRedraw(); document.getElementById('vs-save-msg').textContent=''; };
 
       // Guardar sesión
-      document.getElementById('vs-save-btn').onclick = ()=>{
-        const msg = document.getElementById('vs-save-msg');
-        if(!vsTeamId){ msg.textContent = '⚠️ Selecciona un equipo.'; return; }
-        if(vsActions.length < 3){ msg.textContent = '⚠️ Registra al menos 3 acciones.'; return; }
+      document.getElementById('vs-save-btn').onclick=()=>{
+        const msg=document.getElementById('vs-save-msg');
+        if(!vsTeamId){ msg.textContent='⚠️ Selecciona un equipo.'; return; }
+        if(vsPlays.length<1){ msg.textContent='⚠️ Registra al menos 1 jugada.'; return; }
+        // Cerrar jugada pendiente si la hay
+        if(vsPending.length>0) vsClosePlay();
 
-        const record = {
-          id:          'vs_' + Date.now(),
-          teamId:      vsTeamId,
-          teamName:    vsTeamName,
-          leagueId:    vsLeagueId,
-          matchLabel:  vsMatchLabel || 'Partido sin nombre',
-          date:        vsMatchDate  || new Date().toISOString().slice(0,10),
-          actions:     vsActions.slice(),
-          savedAt:     new Date().toISOString()
+        const record={
+          id:         'vs_'+Date.now(),
+          teamId:     vsTeamId,
+          teamName:   vsTeamName,
+          leagueId:   vsLeagueId,
+          matchLabel: vsMatchLabel||'Partido sin nombre',
+          date:       vsMatchDate||new Date().toISOString().slice(0,10),
+          plays:      vsPlays.slice(),
+          savedAt:    new Date().toISOString()
         };
-
         saveScoutRecord(vsTeamId, record);
-
-        // Sincronizar automáticamente con brainFeatures del equipo
-        const allRecords = getTeamScoutRecords(vsTeamId);
-        const profile    = computeTeamScoutProfile(allRecords);
+        const allRecs=getTeamScoutRecords(vsTeamId);
+        const profile=computeTeamScoutProfile(allRecs);
         if(profile){
-          const features = scoutProfileToFeatures(profile);
-          saveTeamBrainFeatures(vsTeamId, [{
-            matchId:   record.id,
-            date:      record.date,
-            features
-          }]);
+          saveTeamBrainFeatures(vsTeamId,[{ matchId:record.id, date:record.date, features:scoutProfileToFeatures(profile) }]);
         }
-
-        msg.textContent = `✅ Guardado · ${record.matchLabel}`;
-        vsActions = [];
-        setTimeout(()=>render('vscout'), 1200);
+        msg.textContent=`✅ Guardado · ${record.matchLabel} · ${record.plays.length} jugadas`;
+        vsPlays=[]; vsPending=[];
+        setTimeout(()=>render('vscout'),1400);
       };
 
-      // Sync manual al Radar
+      // Sync manual
       content.querySelectorAll('[data-vs-sync]').forEach(btn=>{
-        btn.onclick = ()=>{
-          const tid = btn.dataset.vsSync;
-          const records = getTeamScoutRecords(tid);
-          const profile = computeTeamScoutProfile(records);
-          if(!profile){ alert('Sin datos suficientes para sincronizar.'); return; }
-          const features = scoutProfileToFeatures(profile);
-          saveTeamBrainFeatures(tid, [{
-            matchId: 'vscout_sync_' + Date.now(),
-            date:    new Date().toISOString().slice(0,10),
-            features
-          }]);
-          btn.textContent = '✅ Sincronizado';
-          btn.style.background = 'rgba(34,197,94,0.2)';
-          setTimeout(()=>{ btn.textContent = '⬆ Sync Radar'; btn.style.background = 'rgba(34,197,94,0.1)'; }, 2000);
+        btn.onclick=()=>{
+          const tid=btn.dataset.vsSync;
+          const profile=computeTeamScoutProfile(getTeamScoutRecords(tid));
+          if(!profile){ alert('Sin datos suficientes.'); return; }
+          saveTeamBrainFeatures(tid,[{ matchId:'vscout_sync_'+Date.now(), date:new Date().toISOString().slice(0,10), features:scoutProfileToFeatures(profile) }]);
+          btn.textContent='✅'; setTimeout(()=>{ btn.textContent='⬆ Sync'; },2000);
         };
       });
 
-      // Borrar registros individuales
+      // Borrar sesiones
       content.querySelectorAll('[data-vs-del-team]').forEach(btn=>{
-        btn.onclick = ()=>{
-          deleteScoutRecord(btn.dataset.vsDelTeam, btn.dataset.vsDelRec);
-          render('vscout');
-        };
+        btn.onclick=()=>{ deleteScoutRecord(btn.dataset.vsDelTeam,btn.dataset.vsDelRec); render('vscout'); };
       });
 
     }
