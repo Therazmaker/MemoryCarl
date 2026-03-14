@@ -50,24 +50,36 @@ import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calc
   })();
 
   const _realLS = window.localStorage;
+  const nativeGetItem = (_realLS && typeof _realLS.getItem === "function")
+    ? _realLS.getItem.bind(_realLS)
+    : null;
+  const nativeSetItem = (_realLS && typeof _realLS.setItem === "function")
+    ? _realLS.setItem.bind(_realLS)
+    : null;
+  const nativeRemoveItem = (_realLS && typeof _realLS.removeItem === "function")
+    ? _realLS.removeItem.bind(_realLS)
+    : null;
+  const nativeClear = (_realLS && typeof _realLS.clear === "function")
+    ? _realLS.clear.bind(_realLS)
+    : null;
 
   const shimLS = {
     getItem(key){
       if(cache.has(key)) return cache.get(key);
       // fallback to real localStorage if shim not ready yet
-      try { return _realLS ? _realLS.getItem(key) : null; } catch(_){ return null; }
+      try { return nativeGetItem ? nativeGetItem(key) : null; } catch(_){ return null; }
     },
     setItem(key, value){
       cache.set(key, value);
       // Async flush to window.storage (fire and forget)
       try { window.storage.set(key, value).catch(()=>{}); } catch(_){}
       // Also mirror to real localStorage as fallback (may fail silently)
-      try { if(_realLS) _realLS.setItem(key, value); } catch(_){}
+      try { if(nativeSetItem) nativeSetItem(key, value); } catch(_){}
     },
     removeItem(key){
       cache.delete(key);
       try { window.storage.delete(key).catch(()=>{}); } catch(_){}
-      try { if(_realLS) _realLS.removeItem(key); } catch(_){}
+      try { if(nativeRemoveItem) nativeRemoveItem(key); } catch(_){}
     },
     get length(){
       return cache.size;
@@ -80,7 +92,7 @@ import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calc
         try { window.storage.delete(k).catch(()=>{}); } catch(_){}
       });
       cache.clear();
-      try { if(_realLS) _realLS.clear(); } catch(_){}
+      try { if(nativeClear) nativeClear(); } catch(_){}
     }
   };
 
