@@ -240,6 +240,7 @@ export function initFootballLab(){
   }
 
   function safeParseJSON(value, fallback){
+    if(value == null) return fallback;
     try{
       return JSON.parse(value);
     }catch(_err){
