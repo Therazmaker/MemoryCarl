@@ -22784,7 +22784,7 @@ RESPONDE SOLO CON JSON usando este schema:
     }
 
     function computeBlockMetrics(clicks = []){
-      if(!clicks.length) return { fieldTilt:0, midControl:0, pressureZone:0, dominantZone:'mid', clicks:0 };
+      if(!clicks.length) return { fieldTilt:0, midControl:0, pressureZone:0, dominantZone:'mid', clicks:0, homePoss:0, awayPoss:0, events:{} };
       const n = clicks.length;
       const def      = clicks.filter(c => classifyZone(c.x) === 'def').length;
       const mid      = clicks.filter(c => classifyZone(c.x) === 'mid').length;
@@ -22795,13 +22795,25 @@ RESPONDE SOLO CON JSON usando este schema:
       const pressureZone = attBox / n;
       const zoneCounts   = { def, mid, att, att_box: attBox };
       const dominantZone = Object.entries(zoneCounts).sort((a,b)=>b[1]-a[1])[0][0];
+      // Posesión por equipo
+      const homeClicks = clicks.filter(c => (c.team || 'home') === 'home').length;
+      const awayClicks = n - homeClicks;
+      const homePoss = Number((homeClicks / n).toFixed(3));
+      const awayPoss = Number((awayClicks / n).toFixed(3));
+      // Conteo de eventos especiales
+      const BPT_EVENTS = ['attack','dangerous_attack','corner','goal','free_kick','foul','offside','save'];
+      const events = {};
+      BPT_EVENTS.forEach(ev => { events[ev] = clicks.filter(c => c.event === ev).length; });
       return {
         fieldTilt:    Number(fieldTilt.toFixed(3)),
         midControl:   Number(midControl.toFixed(3)),
         pressureZone: Number(pressureZone.toFixed(3)),
         dominantZone,
         clicks: n,
-        zoneCounts
+        zoneCounts,
+        homePoss,
+        awayPoss,
+        events
       };
     }
 
@@ -22823,21 +22835,51 @@ RESPONDE SOLO CON JSON usando este schema:
     }
 
     // ── Genera HTML del campo SVG clicable
-    function buildFieldSVG(blockIdx, activeClicks = [], isReplay = false){
+    // activeSide: 'home'|'away' — equipo que actualmente tiene el balón (para highlight)
+    // activeEvent: tipo de evento activo (para resaltar último click con estilo especial)
+    function buildFieldSVG(blockIdx, activeClicks = [], isReplay = false, activeSide = 'home', activeEvent = 'normal'){
       const BLOCK_RANGES = ['0-15','15-30','30-45','45-60','60-75','75-90'];
-      const range = BLOCK_RANGES[blockIdx] || '';
 
-      // Dots de clics registrados
+      // Colores por equipo
+      const HOME_COLOR = '#f5c842';
+      const AWAY_COLOR = '#3b82f6';
+
+      // Configuración visual por tipo de evento
+      const EVENT_STYLE = {
+        normal:           { r: 5,  stroke: null,      strokeW: 0,   label: null },
+        attack:           { r: 6,  stroke: '#fb923c', strokeW: 2,   label: '▶' },
+        dangerous_attack: { r: 8,  stroke: '#ef4444', strokeW: 2.5, label: '⚡' },
+        corner:           { r: 6,  stroke: '#facc15', strokeW: 2,   label: 'C' },
+        goal:             { r: 9,  stroke: '#22c55e', strokeW: 3,   label: '⚽' },
+        free_kick:        { r: 5,  stroke: '#a78bfa', strokeW: 2,   label: 'F' },
+        foul:             { r: 5,  stroke: '#f87171', strokeW: 2,   label: 'X' },
+        offside:          { r: 5,  stroke: '#fb923c', strokeW: 2,   label: 'OS' },
+        save:             { r: 7,  stroke: '#34d399', strokeW: 2,   label: 'S' },
+      };
+
+      // Dots de clics registrados (coloreados por equipo y evento)
       const dots = activeClicks.map((c,i) => {
-        const cx = 40 + c.x * 540;  // campo: x=40..580
-        const cy = 30 + c.y * 140;  // campo: y=30..170
+        const cx = 40 + c.x * 540;
+        const cy = 30 + c.y * 140;
         const age = activeClicks.length - i;
-        const opacity = Math.max(0.15, 1 - age * 0.06);
-        return `<circle cx="${cx}" cy="${cy}" r="5" fill="#f5c842" opacity="${opacity}" class="bpt-dot"/>`;
+        const opacity = Math.max(0.2, 1 - age * 0.055);
+        const team  = c.team  || 'home';
+        const evKey = c.event || 'normal';
+        const fill  = team === 'home' ? HOME_COLOR : AWAY_COLOR;
+        const style = EVENT_STYLE[evKey] || EVENT_STYLE.normal;
+        const r = style.r;
+        const strokeAttr = style.stroke ? `stroke="${style.stroke}" stroke-width="${style.strokeW}"` : '';
+        return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="${fill}" opacity="${opacity.toFixed(2)}" ${strokeAttr} class="bpt-dot"/>`;
       }).join('');
 
-      // Heat overlay por zonas
+      // Heat overlay separado por equipo
       const n = activeClicks.length || 1;
+      const homeClicks = activeClicks.filter(c=>(c.team||'home')==='home');
+      const awayClicks = activeClicks.filter(c=>(c.team||'home')==='away');
+      const hn = homeClicks.length || 1;
+      const an = awayClicks.length || 1;
+
+      // Zona data basada en clics de ambos equipos
       const zoneData = {
         def:     activeClicks.filter(c=>classifyZone(c.x)==='def').length / n,
         mid:     activeClicks.filter(c=>classifyZone(c.x)==='mid').length / n,
@@ -22845,9 +22887,33 @@ RESPONDE SOLO CON JSON usando este schema:
         att_box: activeClicks.filter(c=>classifyZone(c.x)==='att_box').length / n,
       };
 
+      // Posesión por equipo para barra
+      const homePct = Math.round(homeClicks.length / n * 100);
+      const awayPct = 100 - homePct;
+
       const zoneAlpha = (v) => Math.min(0.45, v * 0.9);
 
-      return `<svg id="bpt-field-${blockIdx}" viewBox="0 0 620 200" width="100%" style="cursor:${isReplay?'default':'crosshair'};border-radius:8px;display:block;">
+      // Icono de portería SVG
+      const goalLeft  = `<rect x="33" y="85" width="7" height="30" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>`;
+      const goalRight = `<rect x="580" y="85" width="7" height="30" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="2"/>`;
+
+      // Barra de posesión en la parte superior del SVG (encima del campo)
+      const possBarHomeW = Math.round(homePct * 5.4);  // proporción de 540px total
+      const possBarLabel = activeClicks.length > 0
+        ? `<rect x="40" y="14" width="${possBarHomeW}" height="6" rx="3" fill="${HOME_COLOR}" opacity="0.8"/>
+           <rect x="${40 + possBarHomeW}" y="14" width="${540 - possBarHomeW}" height="6" rx="3" fill="${AWAY_COLOR}" opacity="0.8"/>
+           <text x="${40 + possBarHomeW/2}" y="12" text-anchor="middle" font-size="8" fill="${HOME_COLOR}" font-family="JetBrains Mono,monospace" font-weight="700">${homePct}%</text>
+           <text x="${40 + possBarHomeW + (540-possBarHomeW)/2}" y="12" text-anchor="middle" font-size="8" fill="${AWAY_COLOR}" font-family="JetBrains Mono,monospace" font-weight="700">${awayPct}%</text>`
+        : '';
+
+      // Etiqueta de equipos en las porterías
+      const homeLabel = `<text x="36" y="79" text-anchor="middle" font-size="8" fill="${HOME_COLOR}" font-family="JetBrains Mono,monospace" transform="rotate(-90,36,79)">LOCAL</text>`;
+      const awayLabel = `<text x="584" y="79" text-anchor="middle" font-size="8" fill="${AWAY_COLOR}" font-family="JetBrains Mono,monospace" transform="rotate(90,584,79)">VISIT</text>`;
+
+      return `<svg id="bpt-field-${blockIdx}" viewBox="0 0 620 210" width="100%" style="cursor:${isReplay?'default':'crosshair'};border-radius:8px;display:block;">
+        <!-- Barra de posesión -->
+        ${possBarLabel}
+
         <!-- Fondo campo -->
         <rect x="40" y="30" width="540" height="140" rx="6" fill="#1a2e1a" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"/>
 
@@ -22858,48 +22924,39 @@ RESPONDE SOLO CON JSON usando este schema:
         <rect x="40"  y="30" width="178" height="140" fill="rgba(26,86,196,${zoneAlpha(zoneData.def).toFixed(2)})" rx="4"/>
         <rect x="218" y="30" width="118" height="140" fill="rgba(245,200,66,${zoneAlpha(zoneData.mid).toFixed(2)})"/>
         <rect x="336" y="30" width="136" height="140" fill="rgba(212,50,44,${zoneAlpha(zoneData.att).toFixed(2)})"/>
-        <rect x="472" y="30" width="108" height="140" fill="rgba(212,50,44,${Math.min(0.65, zoneAlpha(zoneData.att_box)*1.6).toFixed(2)})" rx="0 4 4 0"/>
+        <rect x="472" y="30" width="108" height="140" fill="rgba(212,50,44,${Math.min(0.65, zoneAlpha(zoneData.att_box)*1.6).toFixed(2)})" rx="4"/>
 
         <!-- Líneas del campo -->
-        <!-- Línea central -->
         <line x1="310" y1="30" x2="310" y2="170" stroke="rgba(255,255,255,0.25)" stroke-width="1.5"/>
-        <!-- Círculo central -->
         <circle cx="310" cy="100" r="28" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1.5"/>
         <circle cx="310" cy="100" r="3" fill="rgba(255,255,255,0.4)"/>
-        <!-- Área grande local (izq) -->
         <rect x="40" y="62" width="70" height="76" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
-        <!-- Área pequeña local (izq) -->
         <rect x="40" y="82" width="28" height="36" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
-        <!-- Área grande rival (der) -->
         <rect x="510" y="62" width="70" height="76" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
-        <!-- Área pequeña rival (der) -->
         <rect x="552" y="82" width="28" height="36" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
-        <!-- Punto penal local -->
         <circle cx="76" cy="100" r="2.5" fill="rgba(255,255,255,0.3)"/>
-        <!-- Punto penal rival -->
         <circle cx="544" cy="100" r="2.5" fill="rgba(255,255,255,0.3)"/>
-        <!-- Porterías -->
-        <rect x="33" y="85" width="7" height="30" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>
-        <rect x="580" y="85" width="7" height="30" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>
+        ${goalLeft}${goalRight}
+        ${homeLabel}${awayLabel}
 
         <!-- Etiquetas de zona -->
-        <text x="129" y="192" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.3)" font-family="JetBrains Mono,monospace" letter-spacing="1">DEF ${Math.round(zoneData.def*100)}%</text>
-        <text x="277" y="192" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.3)" font-family="JetBrains Mono,monospace" letter-spacing="1">MEDIO ${Math.round(zoneData.mid*100)}%</text>
-        <text x="404" y="192" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.3)" font-family="JetBrains Mono,monospace" letter-spacing="1">ATQ ${Math.round(zoneData.att*100)}%</text>
-        <text x="526" y="192" text-anchor="middle" font-size="9" fill="rgba(212,50,44,0.8)" font-family="JetBrains Mono,monospace" letter-spacing="1">ÁREA ${Math.round(zoneData.att_box*100)}%</text>
+        <text x="129" y="200" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.3)" font-family="JetBrains Mono,monospace" letter-spacing="1">DEF ${Math.round(zoneData.def*100)}%</text>
+        <text x="277" y="200" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.3)" font-family="JetBrains Mono,monospace" letter-spacing="1">MEDIO ${Math.round(zoneData.mid*100)}%</text>
+        <text x="404" y="200" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.3)" font-family="JetBrains Mono,monospace" letter-spacing="1">ATQ ${Math.round(zoneData.att*100)}%</text>
+        <text x="526" y="200" text-anchor="middle" font-size="9" fill="rgba(212,50,44,0.8)" font-family="JetBrains Mono,monospace" letter-spacing="1">ÁREA ${Math.round(zoneData.att_box*100)}%</text>
 
         <!-- Dirección de ataque -->
-        <text x="310" y="22" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono,monospace">← DEFENSA · ATAQUE →</text>
+        <text x="310" y="27" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono,monospace">← DEFENSA · ATAQUE →</text>
 
         <!-- Dots de clicks -->
         ${dots}
 
-        <!-- Último click resaltado -->
-        ${activeClicks.length ? `<circle cx="${40 + activeClicks[activeClicks.length-1].x * 540}" cy="${30 + activeClicks[activeClicks.length-1].y * 140}" r="9" fill="none" stroke="#f5c842" stroke-width="2" opacity="0.9"/>` : ''}
+        <!-- Último click resaltado con anillo del equipo activo -->
+        ${activeClicks.length ? `<circle cx="${(40 + activeClicks[activeClicks.length-1].x * 540).toFixed(1)}" cy="${(30 + activeClicks[activeClicks.length-1].y * 140).toFixed(1)}" r="12" fill="none" stroke="${(activeClicks[activeClicks.length-1].team||'home')==='home'?HOME_COLOR:AWAY_COLOR}" stroke-width="2.5" opacity="0.85"/>` : ''}
 
         <!-- Contador -->
         <rect x="562" y="33" width="45" height="18" rx="4" fill="rgba(0,0,0,0.6)"/>
-        <text x="584" y="45" text-anchor="middle" font-size="10" fill="#f5c842" font-family="JetBrains Mono,monospace" font-weight="700">${activeClicks.length} clics</text>
+        <text x="584" y="45" text-anchor="middle" font-size="10" fill="#f5c842" font-family="JetBrains Mono,monospace" font-weight="700">${activeClicks.length} reg.</text>
       </svg>`;
     }
 
@@ -23093,7 +23150,7 @@ RESPONDE SOLO CON JSON usando este schema:
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
               <div>
                 <div style="font-size:13px;font-weight:800;letter-spacing:2px;color:#f5c842;text-transform:uppercase;">🏟️ Ball Position Tracker</div>
-                <div style="font-size:11px;color:#4a5568;margin-top:3px;font-family:'JetBrains Mono',monospace;">Registra posición del balón por bloques de 15 min · click en el campo</div>
+                <div style="font-size:11px;color:#4a5568;margin-top:3px;font-family:'JetBrains Mono',monospace;">Registra quién tiene el balón y qué pasa · click en el campo</div>
               </div>
               <div style="display:flex;gap:8px;align-items:center;">
                 <select id="bpt-league-sel" style="background:#161922;border:1px solid rgba(255,255,255,0.1);color:#f0f2f7;font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 10px;border-radius:5px;">
@@ -23105,6 +23162,31 @@ RESPONDE SOLO CON JSON usando este schema:
                   <option value="home">Local (→)</option>
                   <option value="away">Visitante (←)</option>
                 </select>
+              </div>
+            </div>
+
+            <!-- POSESIÓN — quién tiene el balón ahora -->
+            <div style="margin-bottom:12px;">
+              <div style="font-size:9px;color:#4a5568;letter-spacing:2px;font-family:'JetBrains Mono',monospace;margin-bottom:6px;">¿QUIÉN TIENE EL BALÓN?</div>
+              <div style="display:flex;gap:6px;">
+                <button id="bpt-team-home" data-bpt-team="home" style="flex:1;background:rgba(245,200,66,0.15);border:2px solid rgba(245,200,66,0.6);color:#f5c842;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:800;padding:9px 14px;border-radius:7px;cursor:pointer;letter-spacing:1px;transition:all 0.15s;">⬤ LOCAL</button>
+                <button id="bpt-team-away" data-bpt-team="away" style="flex:1;background:#161922;border:2px solid rgba(59,130,246,0.2);color:#4a5568;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:800;padding:9px 14px;border-radius:7px;cursor:pointer;letter-spacing:1px;transition:all 0.15s;">⬤ VISITANTE</button>
+              </div>
+            </div>
+
+            <!-- TIPO DE EVENTO -->
+            <div style="margin-bottom:12px;">
+              <div style="font-size:9px;color:#4a5568;letter-spacing:2px;font-family:'JetBrains Mono',monospace;margin-bottom:6px;">TIPO DE ACCIÓN</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap;" id="bpt-event-btns">
+                <button data-bpt-event="normal"           style="background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;">● Posesión</button>
+                <button data-bpt-event="attack"           style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;">▶ Ataque</button>
+                <button data-bpt-event="dangerous_attack" style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;">⚡ Atq. Peligroso</button>
+                <button data-bpt-event="corner"           style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;">⚑ Corner</button>
+                <button data-bpt-event="goal"             style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;">⚽ Gol</button>
+                <button data-bpt-event="free_kick"        style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;">🟡 Tiro Libre</button>
+                <button data-bpt-event="foul"             style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;">✕ Falta</button>
+                <button data-bpt-event="offside"          style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;">🚩 Fuera Juego</button>
+                <button data-bpt-event="save"             style="background:#161922;border:1px solid rgba(255,255,255,0.08);color:#8892a4;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;">🧤 Parada</button>
               </div>
             </div>
 
@@ -23120,15 +23202,21 @@ RESPONDE SOLO CON JSON usando este schema:
               ${buildFieldSVG(0, [], false)}
             </div>
 
+            <!-- LOG DE EVENTOS DEL BLOQUE ACTIVO -->
+            <div id="bpt-event-log" style="margin-bottom:12px;background:#161922;border-radius:6px;padding:8px 10px;min-height:28px;max-height:80px;overflow-y:auto;">
+              <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;margin-bottom:4px;">REGISTRO DEL BLOQUE</div>
+              <div id="bpt-event-log-list" style="font-size:10px;color:#8892a4;font-family:'JetBrains Mono',monospace;">Sin registros aún.</div>
+            </div>
+
             <!-- MÉTRICAS DEL BLOQUE ACTIVO -->
             <div id="bpt-metrics-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
               <div style="background:#161922;border-radius:6px;padding:8px 10px;text-align:center;">
-                <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;">FIELD TILT</div>
-                <div id="bpt-m-tilt" style="font-size:22px;font-weight:900;color:#f5c842;">0%</div>
+                <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;">POSESIÓN LOCAL</div>
+                <div id="bpt-m-home-poss" style="font-size:22px;font-weight:900;color:#f5c842;">0%</div>
               </div>
               <div style="background:#161922;border-radius:6px;padding:8px 10px;text-align:center;">
-                <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;">MID CONTROL</div>
-                <div id="bpt-m-mid" style="font-size:22px;font-weight:900;color:#8892a4;">0%</div>
+                <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;">POSESIÓN VISIT.</div>
+                <div id="bpt-m-away-poss" style="font-size:22px;font-weight:900;color:#3b82f6;">0%</div>
               </div>
               <div style="background:#161922;border-radius:6px;padding:8px 10px;text-align:center;">
                 <div style="font-size:9px;color:#4a5568;letter-spacing:1px;font-family:'JetBrains Mono',monospace;">PRESIÓN ÁREA</div>
@@ -23277,14 +23365,96 @@ RESPONDE SOLO CON JSON usando este schema:
       (()=>{
         // Estado interno del tracker
         let bptActiveBlock = 0;
-        // blocks: array de 6, cada uno con { clicks:[], fieldTilt, midControl, pressureZone, dominantZone }
-        let bptBlocks = Array.from({length:6}, ()=>({ clicks:[], fieldTilt:0, midControl:0, pressureZone:0, dominantZone:'mid' }));
+        let bptActiveSide  = 'home';   // equipo que actualmente tiene el balón
+        let bptActiveEvent = 'normal'; // tipo de acción activa
+
+        // Labels para el log de eventos
+        const BPT_EVENT_LABELS = {
+          normal:           '● Posesión',
+          attack:           '▶ Ataque',
+          dangerous_attack: '⚡ Atq. Peligroso',
+          corner:           '⚑ Corner',
+          goal:             '⚽ Gol',
+          free_kick:        '🟡 Tiro Libre',
+          foul:             '✕ Falta',
+          offside:          '🚩 Fuera Juego',
+          save:             '🧤 Parada',
+        };
+
+        const BPT_ZONE_LABELS = { def:'DEF', mid:'MEDIO', att:'ATQ', att_box:'ÁREA' };
+
+        // blocks: array de 6, cada uno con { clicks:[], fieldTilt, midControl, pressureZone, dominantZone, homePoss, awayPoss, events:{} }
+        let bptBlocks = Array.from({length:6}, ()=>({ clicks:[], fieldTilt:0, midControl:0, pressureZone:0, dominantZone:'mid', homePoss:0, awayPoss:0, events:{} }));
 
         // Restaurar draft si existe
         const draft = loadBptDraft();
         if(draft && draft.blocks){
-          bptBlocks = draft.blocks;
+          bptBlocks      = draft.blocks;
           bptActiveBlock = draft.activeBlock || 0;
+          bptActiveSide  = draft.activeSide  || 'home';
+          bptActiveEvent = draft.activeEvent || 'normal';
+        }
+
+        // ── Actualiza los estilos de los botones de equipo
+        function bptSyncTeamBtns(){
+          const homeBtn = document.getElementById('bpt-team-home');
+          const awayBtn = document.getElementById('bpt-team-away');
+          if(!homeBtn || !awayBtn) return;
+          const homeActive = bptActiveSide === 'home';
+          homeBtn.style.background   = homeActive ? 'rgba(245,200,66,0.18)' : '#161922';
+          homeBtn.style.borderColor  = homeActive ? 'rgba(245,200,66,0.7)'  : 'rgba(255,255,255,0.08)';
+          homeBtn.style.color        = homeActive ? '#f5c842' : '#4a5568';
+          awayBtn.style.background   = !homeActive ? 'rgba(59,130,246,0.18)' : '#161922';
+          awayBtn.style.borderColor  = !homeActive ? 'rgba(59,130,246,0.7)'  : 'rgba(255,255,255,0.08)';
+          awayBtn.style.color        = !homeActive ? '#3b82f6' : '#4a5568';
+        }
+
+        // ── Actualiza los estilos de los botones de evento
+        function bptSyncEventBtns(){
+          const EVENT_ACTIVE_STYLE = {
+            normal:           { bg:'rgba(245,200,66,0.12)', border:'rgba(245,200,66,0.5)',  color:'#f5c842' },
+            attack:           { bg:'rgba(251,146,60,0.12)', border:'rgba(251,146,60,0.5)',  color:'#fb923c' },
+            dangerous_attack: { bg:'rgba(239,68,68,0.12)',  border:'rgba(239,68,68,0.6)',   color:'#ef4444' },
+            corner:           { bg:'rgba(250,204,21,0.12)', border:'rgba(250,204,21,0.5)',  color:'#facc15' },
+            goal:             { bg:'rgba(34,197,94,0.12)',  border:'rgba(34,197,94,0.6)',   color:'#22c55e' },
+            free_kick:        { bg:'rgba(167,139,250,0.12)',border:'rgba(167,139,250,0.5)', color:'#a78bfa' },
+            foul:             { bg:'rgba(248,113,113,0.12)',border:'rgba(248,113,113,0.5)', color:'#f87171' },
+            offside:          { bg:'rgba(251,146,60,0.12)', border:'rgba(251,146,60,0.5)',  color:'#fb923c' },
+            save:             { bg:'rgba(52,211,153,0.12)', border:'rgba(52,211,153,0.5)',  color:'#34d399' },
+          };
+          content.querySelectorAll('[data-bpt-event]').forEach(btn=>{
+            const evKey = btn.dataset.bptEvent;
+            const isActive = evKey === bptActiveEvent;
+            const s = isActive ? (EVENT_ACTIVE_STYLE[evKey]||EVENT_ACTIVE_STYLE.normal) : null;
+            btn.style.background  = s ? s.bg     : '#161922';
+            btn.style.borderColor = s ? s.border : 'rgba(255,255,255,0.08)';
+            btn.style.color       = s ? s.color  : '#8892a4';
+          });
+        }
+
+        // ── Actualiza el log de eventos del bloque activo
+        function bptUpdateEventLog(){
+          const logEl = document.getElementById('bpt-event-log-list');
+          if(!logEl) return;
+          const clicks = bptBlocks[bptActiveBlock].clicks;
+          // Mostrar solo los eventos no-normales + los últimos 5 normales
+          const specialClicks = clicks.filter(c => c.event && c.event !== 'normal');
+          const recentNormal  = clicks.filter(c => !c.event || c.event === 'normal').slice(-3);
+          const toShow = [...specialClicks, ...recentNormal].sort((a,b) => a.t - b.t).slice(-8);
+
+          if(!toShow.length){ logEl.textContent = 'Sin registros aún.'; return; }
+
+          logEl.innerHTML = toShow.map(c => {
+            const label  = BPT_EVENT_LABELS[c.event||'normal'] || '●';
+            const teamCl = (c.team||'home') === 'home' ? '#f5c842' : '#3b82f6';
+            const teamLb = (c.team||'home') === 'home' ? 'LOCAL' : 'VISIT';
+            const zoneLb = BPT_ZONE_LABELS[classifyZone(c.x)] || '';
+            const time   = new Date(c.t).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+            return `<span style="color:${teamCl};margin-right:4px;">[${teamLb}]</span><span style="color:#f0f2f7;">${label}</span><span style="color:#4a5568;"> · ${zoneLb} · ${time}</span><br/>`;
+          }).join('');
+          // Auto-scroll to bottom
+          const logBox = document.getElementById('bpt-event-log');
+          if(logBox) logBox.scrollTop = logBox.scrollHeight;
         }
 
         function bptUpdateMetrics(){
@@ -23295,16 +23465,19 @@ RESPONDE SOLO CON JSON usando este schema:
           block.pressureZone = m.pressureZone;
           block.dominantZone = m.dominantZone;
           block.clicks_count = m.clicks;
+          block.homePoss     = m.homePoss;
+          block.awayPoss     = m.awayPoss;
+          block.events       = m.events;
 
           // Actualizar métricas en pantalla
-          const tiltEl   = document.getElementById('bpt-m-tilt');
-          const midEl    = document.getElementById('bpt-m-mid');
-          const pressEl  = document.getElementById('bpt-m-press');
-          const domEl    = document.getElementById('bpt-m-dom');
-          if(tiltEl)  tiltEl.textContent  = Math.round(m.fieldTilt*100)+'%';
-          if(midEl)   midEl.textContent   = Math.round(m.midControl*100)+'%';
-          if(pressEl) pressEl.textContent = Math.round(m.pressureZone*100)+'%';
-          if(domEl)   domEl.textContent   = m.dominantZone.replace('_',' ').toUpperCase();
+          const homePossEl = document.getElementById('bpt-m-home-poss');
+          const awayPossEl = document.getElementById('bpt-m-away-poss');
+          const pressEl    = document.getElementById('bpt-m-press');
+          const domEl      = document.getElementById('bpt-m-dom');
+          if(homePossEl) homePossEl.textContent = Math.round(m.homePoss*100)+'%';
+          if(awayPossEl) awayPossEl.textContent = Math.round(m.awayPoss*100)+'%';
+          if(pressEl)    pressEl.textContent    = Math.round(m.pressureZone*100)+'%';
+          if(domEl)      domEl.textContent      = m.dominantZone.replace('_',' ').toUpperCase();
 
           // Actualizar barras de progreso
           bptBlocks.forEach((b, i)=>{
@@ -23314,18 +23487,20 @@ RESPONDE SOLO CON JSON usando este schema:
             bar.style.background = cnt > 0
               ? (i === bptActiveBlock ? '#f5c842' : '#22c55e')
               : 'rgba(255,255,255,0.07)';
-            bar.style.width = cnt > 0 ? '100%' : '100%';
           });
 
           // Redibujar campo
           const wrap = document.getElementById('bpt-field-wrap');
-          if(wrap) wrap.innerHTML = buildFieldSVG(bptActiveBlock, block.clicks, false);
+          if(wrap) wrap.innerHTML = buildFieldSVG(bptActiveBlock, block.clicks, false, bptActiveSide, bptActiveEvent);
 
           // Re-bind clic en el nuevo SVG
           bptBindFieldClick();
 
+          // Actualizar log de eventos
+          bptUpdateEventLog();
+
           // Guardar draft
-          saveBptDraft({ blocks: bptBlocks, activeBlock: bptActiveBlock });
+          saveBptDraft({ blocks: bptBlocks, activeBlock: bptActiveBlock, activeSide: bptActiveSide, activeEvent: bptActiveEvent });
         }
 
         function bptBindFieldClick(){
@@ -23333,8 +23508,8 @@ RESPONDE SOLO CON JSON usando este schema:
           if(!svg) return;
           svg.onclick = (e)=>{
             const rect = svg.getBoundingClientRect();
-            // Campo dentro del SVG: x=40..580 (540px), y=30..170 (140px), viewBox 620x200
-            const vbW = 620, vbH = 200;
+            // Campo dentro del SVG: x=40..580 (540px), y=30..170 (140px), viewBox 620x210
+            const vbW = 620, vbH = 210;
             const scaleX = vbW / rect.width;
             const scaleY = vbH / rect.height;
             const vx = (e.clientX - rect.left) * scaleX;
@@ -23344,14 +23519,37 @@ RESPONDE SOLO CON JSON usando este schema:
             const ny = Math.max(0, Math.min(1, (vy - 30) / 140));
             // Solo registrar si el clic está dentro del campo
             if(vx < 40 || vx > 580 || vy < 30 || vy > 170) return;
-            bptBlocks[bptActiveBlock].clicks.push({ x: nx, y: ny, t: Date.now() });
+            bptBlocks[bptActiveBlock].clicks.push({ x: nx, y: ny, t: Date.now(), team: bptActiveSide, event: bptActiveEvent });
+            // Eventos únicos (gol, corner, etc.) vuelven a "normal" automáticamente
+            if(['goal','corner','free_kick','foul','offside','save'].includes(bptActiveEvent)){
+              bptActiveEvent = 'normal';
+              bptSyncEventBtns();
+            }
             bptUpdateMetrics();
           };
         }
 
         // Bind inicial
+        bptSyncTeamBtns();
+        bptSyncEventBtns();
         bptBindFieldClick();
         bptUpdateMetrics();
+
+        // Botones de equipo (quién tiene el balón)
+        content.querySelectorAll('[data-bpt-team]').forEach(btn=>{
+          btn.onclick = ()=>{
+            bptActiveSide = btn.dataset.bptTeam;
+            bptSyncTeamBtns();
+          };
+        });
+
+        // Botones de tipo de evento
+        content.querySelectorAll('[data-bpt-event]').forEach(btn=>{
+          btn.onclick = ()=>{
+            bptActiveEvent = btn.dataset.bptEvent;
+            bptSyncEventBtns();
+          };
+        });
 
         // Navegación entre bloques
         content.querySelectorAll('[data-bpt-block]').forEach(btn=>{
@@ -23395,7 +23593,7 @@ RESPONDE SOLO CON JSON usando este schema:
 
           const totalClicks = bptBlocks.reduce((s,b)=>s+b.clicks.length, 0);
           if(totalClicks < 5){
-            if(saveMsg) saveMsg.textContent = '⚠️ Registra al menos 5 clics antes de guardar.';
+            if(saveMsg) saveMsg.textContent = '⚠️ Registra al menos 5 registros antes de guardar.';
             return;
           }
 
