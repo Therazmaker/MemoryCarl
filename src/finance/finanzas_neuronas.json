@@ -1,0 +1,80 @@
+[
+  {
+    "id": "ingreso_principal",
+    "tipo": "ingreso",
+    "nombre": "Sueldo Principal",
+    "monto": 0,
+    "peso": 1.0,
+    "metadata": {
+      "fecha_limite": null,
+      "prioridad": "high",
+      "elasticidad": 0.1
+    },
+    "conexiones": ["consumo_madre"]
+  },
+  {
+    "id": "ingreso_secundario",
+    "tipo": "ingreso",
+    "nombre": "Ingresos Extra",
+    "monto": 0,
+    "peso": 0.6,
+    "metadata": {
+      "fecha_limite": null,
+      "prioridad": "low",
+      "elasticidad": 0.8
+    },
+    "conexiones": ["consumo_madre"]
+  },
+  {
+    "id": "consumo_madre",
+    "tipo": "consumo",
+    "nombre": "Consumo",
+    "monto": 0,
+    "peso": 0.8,
+    "metadata": {
+      "fecha_limite": null,
+      "prioridad": "mid",
+      "elasticidad": 0.5
+    },
+    "conexiones": ["consumo_mercado", "consumo_servicios", "consumo_transporte"]
+  },
+  {
+    "id": "consumo_mercado",
+    "tipo": "consumo",
+    "nombre": "Mercado",
+    "monto": 600,
+    "peso": 0.7,
+    "metadata": {
+      "fecha_limite": null,
+      "prioridad": "high",
+      "elasticidad": 0.3
+    },
+    "conexiones": []
+  },
+  {
+    "id": "consumo_servicios",
+    "tipo": "consumo",
+    "nombre": "Servicios",
+    "monto": 200,
+    "peso": 0.6,
+    "metadata": {
+      "fecha_limite": null,
+      "prioridad": "mid",
+      "elasticidad": 0.2
+    },
+    "conexiones": []
+  },
+  {
+    "id": "consumo_transporte",
+    "tipo": "consumo",
+    "nombre": "Transporte",
+    "monto": 150,
+    "peso": 0.5,
+    "metadata": {
+      "fecha_limite": null,
+      "prioridad": "mid",
+      "elasticidad": 0.4
+    },
+    "conexiones": []
+  }
+]
