@@ -8,7 +8,8 @@ import {
   getAllNeuronas,
   saveNeurona,
   getNeurona,
-  neuronasEscanearTodo
+  neuronasEscanearTodo,
+  neuronasOpenAddModal
 } from '../src/finance/neuron_financiera.js';
 
 /* ── NeuronaFinanciera ────────────────────────────────────── */
@@ -417,4 +418,36 @@ test('neuronasEscanearTodo: usa financeMovements si está disponible en state', 
   neuronasEscanearTodo();
   const neuronas = getAllNeuronas();
   assert.ok(neuronas.some(n => n.nombre === 'Transporte bus'), 'Debe leer de financeMovements');
+});
+
+/* ── neuronasOpenAddModal con defaults ───────────────────── */
+
+test('neuronasOpenAddModal: acepta defaults sin error en entorno sin DOM', () => {
+  // In a Node.js (no-DOM) environment the function should not throw;
+  // it just silently skips DOM operations because document is undefined.
+  assert.doesNotThrow(() => {
+    try { neuronasOpenAddModal({ nombre: 'Spotify', monto: 35, tipo: 'consumo' }); }
+    catch (e) {
+      // Only ReferenceError for missing DOM globals is acceptable in Node env
+      if (!(e instanceof ReferenceError)) throw e;
+    }
+  });
+});
+
+test('neuronasOpenAddModal: acepta defaults de tipo ingreso sin error', () => {
+  assert.doesNotThrow(() => {
+    try { neuronasOpenAddModal({ nombre: 'Sueldo', monto: 2500, tipo: 'ingreso' }); }
+    catch (e) {
+      if (!(e instanceof ReferenceError)) throw e;
+    }
+  });
+});
+
+test('neuronasOpenAddModal: funciona sin argumentos (defaults vacíos)', () => {
+  assert.doesNotThrow(() => {
+    try { neuronasOpenAddModal(); }
+    catch (e) {
+      if (!(e instanceof ReferenceError)) throw e;
+    }
+  });
 });

@@ -733,28 +733,42 @@ export function neuronasInitGrafo(filtroEmergencia = false) {
 }
 
 /* ── Modal: agregar neurona ──────────────────────────────── */
-export function neuronasOpenAddModal() {
+/**
+ * @param {object} [defaults]
+ * @param {string} [defaults.nombre]    — pre-filled name
+ * @param {number} [defaults.monto]     — pre-filled amount
+ * @param {string} [defaults.tipo]      — 'ingreso' | 'pasivo' | 'consumo'
+ */
+export function neuronasOpenAddModal(defaults = {}) {
   const existing = document.getElementById('mnAddModal');
   if (existing) existing.remove();
+
+  const defNombre = defaults.nombre || '';
+  const defMonto  = defaults.monto  != null ? String(defaults.monto) : '';
+  const defTipo   = defaults.tipo   || 'consumo';
+
+  const tipoOpts = [
+    { v: 'ingreso', l: 'Ingreso' },
+    { v: 'pasivo',  l: 'Pasivo' },
+    { v: 'consumo', l: 'Consumo' },
+  ].map(o => `<option value="${o.v}"${o.v === defTipo ? ' selected' : ''}>${o.l}</option>`).join('');
 
   const div = document.createElement('div');
   div.id = 'mnAddModal';
   div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
   div.innerHTML = `
     <div style="background:#1a1a2e;border-radius:16px;padding:20px;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.5);max-height:90vh;overflow-y:auto;">
-      <div style="font-weight:700;font-size:16px;margin-bottom:14px;">➕ Nueva Neurona</div>
+      <div style="font-weight:700;font-size:16px;margin-bottom:14px;">🧠 Guardar como Neurona</div>
       <label style="font-size:13px;color:#aaa;">Nombre</label>
-      <input id="mnNombre" type="text" placeholder="Ej: Alquiler, Spotify…"
+      <input id="mnNombre" type="text" placeholder="Ej: Alquiler, Spotify…" value="${defNombre}"
         style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #333;background:#111;color:#fff;margin:4px 0 10px;" />
       <label style="font-size:13px;color:#aaa;">Tipo</label>
       <select id="mnTipo"
         style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #333;background:#111;color:#fff;margin:4px 0 10px;">
-        <option value="ingreso">Ingreso</option>
-        <option value="pasivo">Pasivo</option>
-        <option value="consumo" selected>Consumo</option>
+        ${tipoOpts}
       </select>
       <label style="font-size:13px;color:#aaa;">Monto (S/)</label>
-      <input id="mnMonto" type="number" min="0" placeholder="0"
+      <input id="mnMonto" type="number" min="0" placeholder="0" value="${defMonto}"
         style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #333;background:#111;color:#fff;margin:4px 0 10px;" />
       <label style="font-size:13px;color:#aaa;">Peso (0–1)</label>
       <input id="mnPeso" type="number" min="0" max="1" step="0.01" placeholder="0.5"
@@ -776,7 +790,7 @@ export function neuronasOpenAddModal() {
         </button>
         <button onclick="document.getElementById('mnAddModal').remove()"
           style="flex:1;padding:10px;border-radius:8px;background:#333;color:#fff;border:none;cursor:pointer;">
-          Cancelar
+          Omitir
         </button>
       </div>
     </div>`;
