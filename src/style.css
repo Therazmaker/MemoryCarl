@@ -1575,6 +1575,8 @@ body{
   padding: 0;
   overflow: hidden;
   max-height: 92vh;
+  display: flex;
+  flex-direction: column;
 }
 .finEntryTop{
   display:flex;
@@ -1582,6 +1584,7 @@ body{
   justify-content:space-between;
   padding: 14px 14px 10px;
   border-bottom: 1px solid rgba(255,255,255,.06);
+  flex-shrink: 0;
 }
 .finEntryTopTitle{
   font-weight: 900;
@@ -1590,8 +1593,9 @@ body{
 }
 .finEntryScroll{
   padding: 14px;
-  overflow: auto;
-  max-height: calc(92vh - 120px);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 .finEntryField input,
 .finEntryScroll input,
@@ -1743,6 +1747,7 @@ body{
   padding: 12px 14px;
   border-top: 1px solid rgba(255,255,255,.06);
   background: rgba(0,0,0,.25);
+  flex-shrink: 0;
 }
 .finEntryTypeBtns{
   display:flex;
