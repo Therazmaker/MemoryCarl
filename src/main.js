@@ -109,6 +109,7 @@ window.__MC_VERSION__ = "invcal-v1-2026-02-24a";
 import { computeMoonNow } from "./cosmic_lite.js";
 import { getTransitLiteSignals } from "./transit_lite.js";
 import { getTransitSwissSignals, swissTransitsAvailable, getSwissDailyCached, swissDailyAvailable } from "./transit_swiss.js";
+import "./finance/neuron_financiera.js";
 
 console.log("MemoryCarl loaded");
 // ===== LocalStorage Keys =====
@@ -16601,6 +16602,7 @@ function viewFinance(){
       <button class="finTopTab ${state.financeSubTab==="debts"?"active":""}" onclick="setFinanceSubTab('debts')">Deudas</button>
       <button class="finTopTab ${state.financeSubTab==="commitments"?"active":""}" onclick="setFinanceSubTab('commitments')">Compromisos</button>
       <button class="finTopTab ${state.financeSubTab==="roadmap"?"active":""}" onclick="setFinanceSubTab('roadmap')">🗺️ Hoja de Ruta</button>
+      <button class="finTopTab ${state.financeSubTab==="neuronal"?"active":""}" onclick="setFinanceSubTab('neuronal')">🧠 Mapa Neuronal</button>
     </div>
   `;
 
@@ -16799,13 +16801,16 @@ function viewFinance(){
 
   const roadmapHtml = (typeof renderFinanceRoadmapTab === 'function') ? renderFinanceRoadmapTab() : '';
 
+  const neuronalHtml = (typeof renderMapaNeuronal === 'function') ? renderMapaNeuronal() : '';
+
   const body = (state.financeSubTab==="movements")
     ? movList
     : (state.financeSubTab==="reminders" ? remindersHtml
       : (state.financeSubTab==="debts" ? debtsHtml
         : (state.financeSubTab==="commitments" ? commitmentsHtml
           : (state.financeSubTab==="mission" ? missionHtml
-            : (state.financeSubTab==="roadmap" ? roadmapHtml : principalHtml)))));
+            : (state.financeSubTab==="roadmap" ? roadmapHtml
+              : (state.financeSubTab==="neuronal" ? neuronalHtml : principalHtml))))));
 
   return `
     ${topTabs}
@@ -16996,6 +17001,7 @@ view = function(){
         try{ if(state.financeSubTab==='main') financeDrawPillarsChart(); }catch(_e){}
         try{ if(state.financeSubTab==='debts') financeDrawDebtChart(); }catch(_e){}
         try{ if(state.financeSubTab==='debts') financeBindDebtIncomeInput(); }catch(_e){}
+        try{ if(state.financeSubTab==='neuronal') neuronasInitGrafo(); }catch(_e){}
       }, 0);
     }else{
       financeProjectionDestroyChart();
