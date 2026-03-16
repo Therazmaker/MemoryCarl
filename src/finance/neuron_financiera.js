@@ -332,7 +332,10 @@ export function actualizarSistemaFinanciero(datosDia) {
 
     /* 2a — Si la nota menciona evento futuro, crear neurona de previsión */
     if (contexto.tipo === 'prevision' && nota) {
-      const existePrevision = neuronas.some(n => n.tipo === 'prevision' && n.ultimo_contexto === nota);
+      const existePrevision = neuronas.some(
+        n => n.tipo === 'prevision' &&
+             (n.ultimo_contexto || '').trim().toLowerCase() === nota.trim().toLowerCase()
+      );
       if (!existePrevision) {
         const estr = Math.min(10, Number(estres) || 0);
         const prevNeurona = new NeuronaFinanciera({
@@ -809,7 +812,7 @@ export function neuronasRunDayUpdate() {
       : [];
   const today = new Date().toISOString().slice(0, 10);
   const transacciones = movs
-    .filter(m => (m.date || '').slice(0, 10) === today && m.type === 'expense')
+    .filter(m => String(m.date || '').slice(0, 10) === today && m.type === 'expense')
     .map(m => ({
       nombre: m.category || m.reason || 'Gasto',
       monto: Math.abs(Number(m.amount) || 0),

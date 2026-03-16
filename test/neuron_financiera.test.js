@@ -282,6 +282,21 @@ test('analizarContextoNota: emergencia tiene prioridad sobre ocio', () => {
   assert.equal(r.tipo, 'emergencia', 'Emergencia debe tener mayor prioridad que ocio');
 });
 
+test('analizarContextoNota: emergencia tiene prioridad sobre inversion', () => {
+  const r = analizarContextoNota('curso urgente de salud');
+  assert.equal(r.tipo, 'emergencia', 'Emergencia debe tener mayor prioridad que inversion');
+});
+
+test('analizarContextoNota: inversion tiene prioridad sobre prevision', () => {
+  const r = analizarContextoNota('curso planificado para el mes');
+  assert.equal(r.tipo, 'inversion', 'Inversion debe tener mayor prioridad que prevision');
+});
+
+test('analizarContextoNota: prevision tiene prioridad sobre ocio', () => {
+  const r = analizarContextoNota('anticipo que fue un gusto pagar');
+  assert.equal(r.tipo, 'prevision', 'Prevision debe tener mayor prioridad que ocio');
+});
+
 /* ── actualizarSistemaFinanciero con contexto ────────────── */
 
 test('actualizarSistemaFinanciero: nueva neurona hereda contexto de nota (emergencia)', () => {
