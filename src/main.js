@@ -13447,6 +13447,18 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     });
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
     toast('Guardado ✅');
+    // Auto-update neural map and open neuron modal pre-filled with this movement
+    try {
+      if (typeof window.neuronasRunDayUpdate === 'function') window.neuronasRunDayUpdate();
+    } catch(_e) {}
+    setTimeout(() => {
+      try {
+        if (typeof window.neuronasOpenAddModal === 'function') {
+          const neuronTipo = draft.type === 'income' ? 'ingreso' : draft.type === 'transfer' ? 'pasivo' : 'consumo';
+          window.neuronasOpenAddModal({ nombre: name || category, monto: amount, tipo: neuronTipo });
+        }
+      } catch(_e) {}
+    }, 300);
   }
   close();
 });

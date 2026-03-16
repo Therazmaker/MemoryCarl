@@ -1779,6 +1779,41 @@ body{
 .finEntrySign.expense{ background: rgba(255,70,70,.90); }
 .finEntrySign.income{ background: rgba(70,200,120,.80); }
 
+/* ===== Finance entry modal: mobile fixes ===== */
+@media (max-width: 480px) {
+  /* Bottom bar: wrap so type buttons stack below the save button row on small phones.
+     DOM order is preserved (type buttons first, then save) — no CSS order changes. */
+  .finEntryBottomBar{
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .finEntryTypeBtns{
+    flex: 0 0 100%;
+  }
+  .finEntrySave{
+    margin-left: auto;
+  }
+  /* Shrink type button font so labels fit */
+  .finEntryTypeBtn{
+    font-size: 11px;
+    padding: 10px 6px;
+    letter-spacing: 0;
+  }
+  /* Date row: wrap chips when screen is narrow */
+  .finEntryDateRow{
+    flex-wrap: wrap;
+  }
+  .finEntryDateChip{
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+  .finEntryScheduleBtn{
+    width: 100%;
+    text-align: center;
+  }
+}
+
 
 /* ===== Finance: Account modal (Cuentas) ===== */
 .finAccBackdrop .modal{
