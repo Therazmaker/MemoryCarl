@@ -8,9 +8,14 @@
     "metadata": {
       "fecha_limite": null,
       "prioridad": "high",
-      "elasticidad": 0.1
+      "elasticidad": 0.1,
+      "contexto_tipo": null,
+      "elastica": false
     },
-    "conexiones": ["consumo_madre"]
+    "conexiones": ["consumo_madre"],
+    "ultimo_contexto": null,
+    "contador_emocional": { "necesario": 0, "evitable": 0 },
+    "prediccion_basada_en_nota": null
   },
   {
     "id": "ingreso_secundario",
@@ -21,9 +26,14 @@
     "metadata": {
       "fecha_limite": null,
       "prioridad": "low",
-      "elasticidad": 0.8
+      "elasticidad": 0.8,
+      "contexto_tipo": null,
+      "elastica": false
     },
-    "conexiones": ["consumo_madre"]
+    "conexiones": ["consumo_madre"],
+    "ultimo_contexto": null,
+    "contador_emocional": { "necesario": 0, "evitable": 0 },
+    "prediccion_basada_en_nota": null
   },
   {
     "id": "consumo_madre",
@@ -34,9 +44,14 @@
     "metadata": {
       "fecha_limite": null,
       "prioridad": "mid",
-      "elasticidad": 0.5
+      "elasticidad": 0.5,
+      "contexto_tipo": null,
+      "elastica": false
     },
-    "conexiones": ["consumo_mercado", "consumo_servicios", "consumo_transporte"]
+    "conexiones": ["consumo_mercado", "consumo_servicios", "consumo_transporte"],
+    "ultimo_contexto": null,
+    "contador_emocional": { "necesario": 0, "evitable": 0 },
+    "prediccion_basada_en_nota": null
   },
   {
     "id": "consumo_mercado",
@@ -47,9 +62,14 @@
     "metadata": {
       "fecha_limite": null,
       "prioridad": "high",
-      "elasticidad": 0.3
+      "elasticidad": 0.3,
+      "contexto_tipo": null,
+      "elastica": false
     },
-    "conexiones": []
+    "conexiones": [],
+    "ultimo_contexto": null,
+    "contador_emocional": { "necesario": 0, "evitable": 0 },
+    "prediccion_basada_en_nota": null
   },
   {
     "id": "consumo_servicios",
@@ -60,9 +80,14 @@
     "metadata": {
       "fecha_limite": null,
       "prioridad": "mid",
-      "elasticidad": 0.2
+      "elasticidad": 0.2,
+      "contexto_tipo": null,
+      "elastica": false
     },
-    "conexiones": []
+    "conexiones": [],
+    "ultimo_contexto": null,
+    "contador_emocional": { "necesario": 0, "evitable": 0 },
+    "prediccion_basada_en_nota": null
   },
   {
     "id": "consumo_transporte",
@@ -73,8 +98,13 @@
     "metadata": {
       "fecha_limite": null,
       "prioridad": "mid",
-      "elasticidad": 0.4
+      "elasticidad": 0.4,
+      "contexto_tipo": null,
+      "elastica": false
     },
-    "conexiones": []
+    "conexiones": [],
+    "ultimo_contexto": null,
+    "contador_emocional": { "necesario": 0, "evitable": 0 },
+    "prediccion_basada_en_nota": null
   }
 ]
