@@ -7,7 +7,8 @@ import {
   actualizarSistemaFinanciero,
   getAllNeuronas,
   saveNeurona,
-  getNeurona
+  getNeurona,
+  neuronasEscanearTodo
 } from '../src/finance/neuron_financiera.js';
 
 /* ── NeuronaFinanciera ────────────────────────────────────── */
@@ -362,4 +363,58 @@ test('actualizarSistemaFinanciero: nota en campo note también es procesada', ()
   const nueva = result.nuevas.find(n => n.nombre === 'Herramienta ABC');
   assert.ok(nueva, 'Debe crear neurona nueva');
   assert.equal(nueva.metadata.contexto_tipo, 'inversion');
+});
+
+/* ── neuronasEscanearTodo ────────────────────────────────── */
+
+test('neuronasEscanearTodo: procesa todas las transacciones del estado y crea neuronas', () => {
+  delete _lsStore['memorycarl_neuronas_financieras'];
+  globalThis.state = {
+    financeLedger: [
+      { type: 'expense', amount: -150, category: 'Farmacia XYZ', date: '2024-01-10', note: '' },
+      { type: 'expense', amount: -300, category: 'Supermercado ABC', date: '2024-02-05', note: '' },
+      { type: 'income',  amount: 2000, category: 'Salario',         date: '2024-01-31', note: '' }
+    ]
+  };
+  neuronasEscanearTodo();
+  const neuronas = getAllNeuronas();
+  const nombres = neuronas.map(n => n.nombre);
+  assert.ok(nombres.includes('Farmacia XYZ'),     'Debe haber neurona para Farmacia XYZ');
+  assert.ok(nombres.includes('Supermercado ABC'), 'Debe haber neurona para Supermercado ABC');
+  assert.ok(!nombres.includes('Salario'), 'No debe crear neurona para ingresos');
+});
+
+test('neuronasEscanearTodo: no falla cuando no hay transacciones', () => {
+  delete _lsStore['memorycarl_neuronas_financieras'];
+  globalThis.state = { financeLedger: [] };
+  // Debe ejecutarse sin lanzar error
+  assert.doesNotThrow(() => neuronasEscanearTodo());
+});
+
+test('neuronasEscanearTodo: procesa transacciones de múltiples fechas (no solo hoy)', () => {
+  delete _lsStore['memorycarl_neuronas_financieras'];
+  globalThis.state = {
+    financeLedger: [
+      { type: 'expense', amount: -50,  category: 'Café histórico', date: '2020-06-01', note: '' },
+      { type: 'expense', amount: -800, category: 'Renta histórica', date: '2021-12-15', note: '' }
+    ]
+  };
+  neuronasEscanearTodo();
+  const neuronas = getAllNeuronas();
+  const nombres = neuronas.map(n => n.nombre);
+  assert.ok(nombres.includes('Café histórico'),   'Debe incluir transacciones históricas antiguas');
+  assert.ok(nombres.includes('Renta histórica'),  'Debe incluir transacciones de meses anteriores');
+});
+
+test('neuronasEscanearTodo: usa financeMovements si está disponible en state', () => {
+  delete _lsStore['memorycarl_neuronas_financieras'];
+  globalThis.state = {
+    financeMovements: [
+      { type: 'expense', amount: -90, category: 'Transporte bus', date: '2023-11-01', note: '' }
+    ],
+    financeLedger: []
+  };
+  neuronasEscanearTodo();
+  const neuronas = getAllNeuronas();
+  assert.ok(neuronas.some(n => n.nombre === 'Transporte bus'), 'Debe leer de financeMovements');
 });
