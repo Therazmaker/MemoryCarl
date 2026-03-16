@@ -5,6 +5,7 @@
  * Exports:
  *   NeuronaFinanciera          — clase de nodo neuronal
  *   calcularSimilitud          — función pura de similitud (testeable)
+ *   analizarContextoNota       — análisis de intención por palabras clave
  *   actualizarSistemaFinanciero — lógica de aprendizaje diario
  *   renderMapaNeuronal         — HTML de la pestaña Mapa Neuronal
  *   neuronasInitGrafo          — inicializa vis-Network en el DOM
@@ -23,8 +24,11 @@ const DEFAULT_NEURONAS = [
     nombre: 'Sueldo Principal',
     monto: 0,
     peso: 1.0,
-    metadata: { fecha_limite: null, prioridad: 'high', elasticidad: 0.1 },
-    conexiones: ['consumo_madre']
+    metadata: { fecha_limite: null, prioridad: 'high', elasticidad: 0.1, contexto_tipo: null, elastica: false },
+    conexiones: ['consumo_madre'],
+    ultimo_contexto: null,
+    contador_emocional: { necesario: 0, evitable: 0 },
+    prediccion_basada_en_nota: null
   },
   {
     id: 'ingreso_secundario',
@@ -32,8 +36,11 @@ const DEFAULT_NEURONAS = [
     nombre: 'Ingresos Extra',
     monto: 0,
     peso: 0.6,
-    metadata: { fecha_limite: null, prioridad: 'low', elasticidad: 0.8 },
-    conexiones: ['consumo_madre']
+    metadata: { fecha_limite: null, prioridad: 'low', elasticidad: 0.8, contexto_tipo: null, elastica: false },
+    conexiones: ['consumo_madre'],
+    ultimo_contexto: null,
+    contador_emocional: { necesario: 0, evitable: 0 },
+    prediccion_basada_en_nota: null
   },
   {
     id: 'consumo_madre',
@@ -41,8 +48,11 @@ const DEFAULT_NEURONAS = [
     nombre: 'Consumo',
     monto: 0,
     peso: 0.8,
-    metadata: { fecha_limite: null, prioridad: 'mid', elasticidad: 0.5 },
-    conexiones: ['consumo_mercado', 'consumo_servicios', 'consumo_transporte']
+    metadata: { fecha_limite: null, prioridad: 'mid', elasticidad: 0.5, contexto_tipo: null, elastica: false },
+    conexiones: ['consumo_mercado', 'consumo_servicios', 'consumo_transporte'],
+    ultimo_contexto: null,
+    contador_emocional: { necesario: 0, evitable: 0 },
+    prediccion_basada_en_nota: null
   },
   {
     id: 'consumo_mercado',
@@ -50,8 +60,11 @@ const DEFAULT_NEURONAS = [
     nombre: 'Mercado',
     monto: 600,
     peso: 0.7,
-    metadata: { fecha_limite: null, prioridad: 'high', elasticidad: 0.3 },
-    conexiones: []
+    metadata: { fecha_limite: null, prioridad: 'high', elasticidad: 0.3, contexto_tipo: null, elastica: false },
+    conexiones: [],
+    ultimo_contexto: null,
+    contador_emocional: { necesario: 0, evitable: 0 },
+    prediccion_basada_en_nota: null
   },
   {
     id: 'consumo_servicios',
@@ -59,8 +72,11 @@ const DEFAULT_NEURONAS = [
     nombre: 'Servicios',
     monto: 200,
     peso: 0.6,
-    metadata: { fecha_limite: null, prioridad: 'mid', elasticidad: 0.2 },
-    conexiones: []
+    metadata: { fecha_limite: null, prioridad: 'mid', elasticidad: 0.2, contexto_tipo: null, elastica: false },
+    conexiones: [],
+    ultimo_contexto: null,
+    contador_emocional: { necesario: 0, evitable: 0 },
+    prediccion_basada_en_nota: null
   },
   {
     id: 'consumo_transporte',
@@ -68,8 +84,11 @@ const DEFAULT_NEURONAS = [
     nombre: 'Transporte',
     monto: 150,
     peso: 0.5,
-    metadata: { fecha_limite: null, prioridad: 'mid', elasticidad: 0.4 },
-    conexiones: []
+    metadata: { fecha_limite: null, prioridad: 'mid', elasticidad: 0.4, contexto_tipo: null, elastica: false },
+    conexiones: [],
+    ultimo_contexto: null,
+    contador_emocional: { necesario: 0, evitable: 0 },
+    prediccion_basada_en_nota: null
   }
 ];
 
@@ -85,7 +104,8 @@ export class NeuronaFinanciera {
    * @param {object}  [opts.metadata]
    * @param {string[]}[opts.conexiones]
    */
-  constructor({ id, tipo, nombre, monto, peso = 0.5, metadata = {}, conexiones = [] }) {
+  constructor({ id, tipo, nombre, monto, peso = 0.5, metadata = {}, conexiones = [],
+                ultimo_contexto = null, contador_emocional = null, prediccion_basada_en_nota = null }) {
     this.id = id || NeuronaFinanciera.generateId(nombre);
     this.tipo = tipo;
     this.nombre = nombre;
@@ -94,9 +114,17 @@ export class NeuronaFinanciera {
     this.metadata = {
       fecha_limite: metadata.fecha_limite || null,
       prioridad: metadata.prioridad || 'mid',
-      elasticidad: Number(metadata.elasticidad) || 0.3
+      elasticidad: Number(metadata.elasticidad) || 0.3,
+      contexto_tipo: metadata.contexto_tipo || null,
+      elastica: !!metadata.elastica
     };
     this.conexiones = Array.isArray(conexiones) ? [...conexiones] : [];
+    this.ultimo_contexto = ultimo_contexto || null;
+    this.contador_emocional = {
+      necesario: Number((contador_emocional || {}).necesario) || 0,
+      evitable:  Number((contador_emocional || {}).evitable)  || 0
+    };
+    this.prediccion_basada_en_nota = prediccion_basada_en_nota || null;
   }
 
   /** Genera un id único basado en el nombre y timestamp. */
@@ -118,7 +146,10 @@ export class NeuronaFinanciera {
       monto: this.monto,
       peso: this.peso,
       metadata: { ...this.metadata },
-      conexiones: [...this.conexiones]
+      conexiones: [...this.conexiones],
+      ultimo_contexto: this.ultimo_contexto,
+      contador_emocional: { ...this.contador_emocional },
+      prediccion_basada_en_nota: this.prediccion_basada_en_nota
     };
   }
 }
@@ -190,14 +221,73 @@ export function calcularSimilitud(gasto, neurona) {
   return (textSim * 0.5) + (amountSim * 0.3) + (tipoSim * 0.2);
 }
 
+/* ── analizarContextoNota ────────────────────────────────── */
+/**
+ * Analiza la intención semántica de una nota usando búsqueda de palabras clave.
+ *
+ * Tipos detectados:
+ *  'emergencia' — gasto urgente/imprevisto (se rompió, urgente, salud…)
+ *  'inversion'  — gasto productivo (herramienta, curso, software…)
+ *  'prevision'  — evento futuro planificado (pago inicial, próximo mes…)
+ *  'ocio'       — gasto variable/prescindible (capricho, gusto, salida…)
+ *  null         — sin palabras clave detectadas
+ *
+ * @param {string} nota
+ * @returns {{ tipo: string|null, palabrasClave: string[] }}
+ */
+export function analizarContextoNota(nota) {
+  if (!nota || typeof nota !== 'string') return { tipo: null, palabrasClave: [] };
+  const texto = nota.toLowerCase();
+
+  const KEYWORDS = {
+    emergencia: [
+      'se rompió', 'se rompio', 'urgente', 'urgencia', 'salud', 'emergencia',
+      'accidente', 'hospital', 'médico', 'medico', 'doctor', 'operación', 'operacion',
+      'reparación', 'reparacion', 'rotura', 'enfermedad', 'medicamento', 'farmacia'
+    ],
+    inversion: [
+      'herramienta', 'curso', 'software', 'inversión', 'inversion', 'trabajo',
+      'capacitación', 'capacitacion', 'equipo', 'negocio', 'plataforma',
+      'formación', 'formacion', 'licencia', 'suscripción trabajo', 'mejora'
+    ],
+    prevision: [
+      'pago inicial', 'próximo', 'proximo', 'para el mes', 'siguiente mes',
+      'futuro', 'cada mes sube', 'cuota inicial', 'planificado', 'planificado para',
+      'anticipo', 'reserva', 'separado para'
+    ],
+    ocio: [
+      'capricho', 'gusto', 'salida', 'antojo', 'diversión', 'diversion',
+      'paseo', 'regalo', 'ocio', 'lujo', 'entretenimiento', 'hobby'
+    ]
+  };
+
+  /* Priority: emergencia > inversion > prevision > ocio */
+  const prioridad = ['emergencia', 'inversion', 'prevision', 'ocio'];
+  for (const tipo of prioridad) {
+    const matches = KEYWORDS[tipo].filter(p => texto.includes(p));
+    if (matches.length > 0) return { tipo, palabrasClave: matches };
+  }
+
+  return { tipo: null, palabrasClave: [] };
+}
+
 /* ── actualizarSistemaFinanciero ─────────────────────────── */
 /**
- * Lógica de aprendizaje diario:
+ * Lógica de aprendizaje diario con comprensión de contexto:
  *  1. Ajusta los pesos de neuronas "pasivo" próximas a su fecha límite.
- *  2. Crea nuevas neuronas (mitosis) cuando un gasto no coincide >80%
+ *  2. Analiza la intención de la nota de cada transacción.
+ *  3. Crea nuevas neuronas (mitosis) cuando un gasto no coincide >80%
  *     con ninguna neurona de consumo existente.
+ *  4. Aplica efectos semánticos según contexto de la nota:
+ *     - emergencia → aumenta peso, color rojo brillante
+ *     - inversion  → conecta visualmente a neuronas de ingreso
+ *     - ocio        → marca la neurona como elástica (recortable)
+ *     - prevision  → crea neurona de tipo 'prevision' si menciona evento futuro
+ *  5. Actualiza ultimo_contexto, contador_emocional y prediccion_basada_en_nota.
  *
  * @param {{ transacciones?: object[], estres?: number }} datosDia
+ *   Cada transacción puede incluir:
+ *   { nombre, monto, tipo, notas, note, notes, category, amount }
  * @returns {{ neuronas: object[], nuevas: object[] }}
  */
 export function actualizarSistemaFinanciero(datosDia) {
@@ -206,6 +296,16 @@ export function actualizarSistemaFinanciero(datosDia) {
   const hoy = new Date();
   const UMBRAL_SIMILITUD = 0.80;
   const nuevas = [];
+
+  /* ── Helper: ensure legacy neurons have new fields ── */
+  for (const n of neuronas) {
+    if (!n.ultimo_contexto) n.ultimo_contexto = null;
+    if (!n.contador_emocional) n.contador_emocional = { necesario: 0, evitable: 0 };
+    if (!n.prediccion_basada_en_nota) n.prediccion_basada_en_nota = null;
+    if (!n.metadata) n.metadata = {};
+    if (!('contexto_tipo' in n.metadata)) n.metadata.contexto_tipo = null;
+    if (!('elastica' in n.metadata)) n.metadata.elastica = false;
+  }
 
   /* 1 — Ajustar pesos de pasivos según fecha límite y estrés */
   for (const n of neuronas) {
@@ -224,8 +324,46 @@ export function actualizarSistemaFinanciero(datosDia) {
 
   /* 2 — Procesar transacciones → mitosis si similitud < umbral */
   const consumoNeuronas = () => neuronas.filter(n => n.tipo === 'consumo');
+  const ingresoIds = neuronas.filter(n => n.tipo === 'ingreso').map(n => n.id);
 
   for (const gasto of transacciones) {
+    const nota = String(gasto.notas || gasto.note || gasto.notes || '').trim();
+    const contexto = analizarContextoNota(nota);
+
+    /* 2a — Si la nota menciona evento futuro, crear neurona de previsión */
+    if (contexto.tipo === 'prevision' && nota) {
+      const existePrevision = neuronas.some(
+        n => n.tipo === 'prevision' &&
+             (n.ultimo_contexto || '').trim().toLowerCase() === nota.trim().toLowerCase()
+      );
+      if (!existePrevision) {
+        const estr = Math.min(10, Number(estres) || 0);
+        const prevNeurona = new NeuronaFinanciera({
+          tipo: 'prevision',
+          nombre: (gasto.nombre || gasto.categoria || 'Previsión') + ' (futuro)',
+          monto: Number(gasto.monto || gasto.amount || 0),
+          peso: Math.min(1, 0.3 + (estr / 10) * 0.2),
+          metadata: {
+            fecha_limite: null,
+            prioridad: 'mid',
+            elasticidad: 0.5,
+            contexto_tipo: 'prevision',
+            elastica: false
+          },
+          conexiones: ['consumo_madre'],
+          ultimo_contexto: nota,
+          contador_emocional: { necesario: 1, evitable: 0 },
+          prediccion_basada_en_nota: nota
+        });
+        const madreIdx = neuronas.findIndex(n => n.id === 'consumo_madre');
+        if (madreIdx >= 0 && !neuronas[madreIdx].conexiones.includes(prevNeurona.id)) {
+          neuronas[madreIdx].conexiones.push(prevNeurona.id);
+        }
+        neuronas.push(prevNeurona.toJSON());
+        nuevas.push(prevNeurona.toJSON());
+      }
+    }
+
     const current = consumoNeuronas();
     if (current.length === 0) continue;
 
@@ -239,6 +377,9 @@ export function actualizarSistemaFinanciero(datosDia) {
     if (bestSim < UMBRAL_SIMILITUD) {
       /* Mitosis: crear neurona nueva */
       const estr = Math.min(10, Number(estres) || 0);
+      const esNecesario = contexto.tipo === 'emergencia' || contexto.tipo === 'inversion';
+      const esEvitable  = contexto.tipo === 'ocio';
+
       const nueva = new NeuronaFinanciera({
         tipo: gasto.tipo || 'consumo',
         nombre: gasto.nombre || gasto.categoria || 'Gasto Nuevo',
@@ -247,10 +388,30 @@ export function actualizarSistemaFinanciero(datosDia) {
         metadata: {
           fecha_limite: null,
           prioridad: estr > 7 ? 'high' : estr > 4 ? 'mid' : 'low',
-          elasticidad: 0.5
+          elasticidad: 0.5,
+          contexto_tipo: contexto.tipo,
+          elastica: esEvitable
         },
-        conexiones: ['consumo_madre']
+        conexiones: ['consumo_madre'],
+        ultimo_contexto: nota || null,
+        contador_emocional: {
+          necesario: esNecesario ? 1 : 0,
+          evitable:  esEvitable  ? 1 : 0
+        },
+        prediccion_basada_en_nota: contexto.tipo === 'prevision' ? nota : null
       });
+
+      /* Efectos de contexto en neurona nueva */
+      if (contexto.tipo === 'emergencia') {
+        nueva.peso = Math.min(1, nueva.peso * 1.4);
+        nueva.metadata.contexto_tipo = 'emergencia';
+      }
+      if (contexto.tipo === 'inversion' && ingresoIds.length > 0) {
+        /* Conectar hacia la primera neurona de ingreso */
+        if (!nueva.conexiones.includes(ingresoIds[0])) {
+          nueva.conexiones.push(ingresoIds[0]);
+        }
+      }
 
       /* Conectar madre → nueva */
       const madreIdx = neuronas.findIndex(n => n.id === 'consumo_madre');
@@ -268,6 +429,41 @@ export function actualizarSistemaFinanciero(datosDia) {
         neuronas[idx].monto =
           (1 - alpha) * Number(neuronas[idx].monto || 0) +
           alpha * Number(gasto.monto || gasto.amount || 0);
+
+        /* Actualizar contexto en neurona existente */
+        if (nota) neuronas[idx].ultimo_contexto = nota;
+        if (!neuronas[idx].contador_emocional) {
+          neuronas[idx].contador_emocional = { necesario: 0, evitable: 0 };
+        }
+        if (contexto.tipo === 'emergencia' || contexto.tipo === 'inversion') {
+          neuronas[idx].contador_emocional.necesario =
+            (neuronas[idx].contador_emocional.necesario || 0) + 1;
+        }
+        if (contexto.tipo === 'ocio') {
+          neuronas[idx].contador_emocional.evitable =
+            (neuronas[idx].contador_emocional.evitable || 0) + 1;
+          neuronas[idx].metadata.elastica = true;
+        }
+        if (!neuronas[idx].metadata) neuronas[idx].metadata = {};
+        if (contexto.tipo) neuronas[idx].metadata.contexto_tipo = contexto.tipo;
+
+        /* Emergencia: aumentar peso y marcar tipo */
+        if (contexto.tipo === 'emergencia') {
+          neuronas[idx].peso = Math.min(1, (neuronas[idx].peso || 0.5) * 1.2);
+        }
+
+        /* Inversión: asegurar conexión a ingresos */
+        if (contexto.tipo === 'inversion' && ingresoIds.length > 0) {
+          if (!Array.isArray(neuronas[idx].conexiones)) neuronas[idx].conexiones = [];
+          if (!neuronas[idx].conexiones.includes(ingresoIds[0])) {
+            neuronas[idx].conexiones.push(ingresoIds[0]);
+          }
+        }
+
+        /* Previsión: detectar "Cada mes sube" */
+        if (nota && /cada mes sube/i.test(nota)) {
+          neuronas[idx].prediccion_basada_en_nota = nota;
+        }
       }
     }
   }
@@ -289,6 +485,7 @@ export function renderMapaNeuronal() {
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="finIconBtn" onclick="neuronasOpenAddModal()" title="Agregar neurona">＋</button>
           <button class="finIconBtn" onclick="neuronasRunDayUpdate()" title="Actualizar con transacciones del día">⚡</button>
+          <button class="finIconBtn" id="mnFiltroNotasBtn" onclick="neuronasToggleFiltroNotas()" title="Filtrar por notas de emergencia o importantes">🔍</button>
           <button class="finIconBtn" onclick="neuronasReset()" title="Restablecer datos de ejemplo">↺</button>
         </div>
       </div>
@@ -303,8 +500,17 @@ export function renderMapaNeuronal() {
           <span style="width:12px;height:12px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>Consumo
         </span>
         <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#aaa;">
+          <span style="width:12px;height:12px;border-radius:50%;background:#ff2222;display:inline-block;border:2px solid #ff8888;"></span>Emergencia
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#aaa;">
+          <span style="width:12px;height:12px;border-radius:50%;background:#a78bfa;display:inline-block;"></span>Previsión
+        </span>
+        <span style="display:flex;align-items:center;gap:4px;font-size:12px;color:#aaa;">
           <span style="width:12px;height:12px;border-radius:50%;background:#6b7280;display:inline-block;"></span>Tamaño = Monto
         </span>
+      </div>
+      <div id="mnFiltroNotasBanner" style="display:none;padding:4px 16px;background:#1a1230;font-size:12px;color:#a78bfa;">
+        🔍 Mostrando solo neuronas con notas de <b>Emergencia</b> o <b>Importantes</b>. Haz clic en 🔍 para quitar el filtro.
       </div>
       <div id="mnGrafo" style="width:100%;height:420px;background:#0d0d0d;border-radius:0;position:relative;">
         <div id="mnGrafoPlaceholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#555;font-size:13px;">
@@ -323,7 +529,7 @@ export function renderMapaNeuronal() {
  * Inicializa el grafo vis-Network en el contenedor #mnGrafo.
  * Requiere que vis-Network esté cargado globalmente (window.vis).
  */
-export function neuronasInitGrafo() {
+export function neuronasInitGrafo(filtroEmergencia = false) {
   const container = document.getElementById('mnGrafo');
   if (!container) return;
 
@@ -345,23 +551,77 @@ export function neuronasInitGrafo() {
   const placeholder = document.getElementById('mnGrafoPlaceholder');
   if (placeholder) placeholder.style.display = 'none';
 
-  const neuronas = _neuronasLoad();
+  let neuronas = _neuronasLoad();
+
+  /* Ensure legacy neurons have new fields */
+  for (const n of neuronas) {
+    if (!n.ultimo_contexto) n.ultimo_contexto = null;
+    if (!n.contador_emocional) n.contador_emocional = { necesario: 0, evitable: 0 };
+    if (!n.prediccion_basada_en_nota) n.prediccion_basada_en_nota = null;
+    if (!n.metadata) n.metadata = {};
+    if (!('contexto_tipo' in n.metadata)) n.metadata.contexto_tipo = null;
+    if (!('elastica' in n.metadata)) n.metadata.elastica = false;
+  }
+
+  /* Apply filter: show only emergency/important neurons */
+  if (filtroEmergencia) {
+    neuronas = neuronas.filter(n =>
+      n.metadata?.contexto_tipo === 'emergencia' ||
+      n.metadata?.prioridad === 'high' ||
+      n.tipo === 'pasivo'
+    );
+  }
 
   const COLORS = {
-    ingreso: { background: '#22c55e', border: '#16a34a', font: '#fff' },
-    pasivo:  { background: '#ef4444', border: '#b91c1c', font: '#fff' },
-    consumo: { background: '#f59e0b', border: '#d97706', font: '#111' }
+    ingreso:   { background: '#22c55e', border: '#16a34a', font: '#fff' },
+    pasivo:    { background: '#ef4444', border: '#b91c1c', font: '#fff' },
+    consumo:   { background: '#f59e0b', border: '#d97706', font: '#111' },
+    prevision: { background: '#a78bfa', border: '#7c5cff', font: '#fff' }
   };
+
+  /* Emergency override colors */
+  const EMERGENCY_COLOR = { background: '#ff2222', border: '#ff8888', font: '#fff' };
+  /* Investment overlay (green tint) */
+  const INVERSION_COLOR = { background: '#34d399', border: '#059669', font: '#111' };
+  /* Elastic (ocio) overlay */
+  const OCIO_COLOR = { background: '#fbbf24', border: '#f59e0b', font: '#111' };
 
   const maxMonto = Math.max(...neuronas.map(n => Number(n.monto) || 0), 1);
 
+  const esc = typeof escapeHtml === 'function' ? escapeHtml : _escapeHtml;
+
   const nodesArr = neuronas.map(n => {
-    const color = COLORS[n.tipo] || { background: '#6b7280', border: '#4b5563', font: '#fff' };
+    let color = COLORS[n.tipo] || { background: '#6b7280', border: '#4b5563', font: '#fff' };
+
+    /* Override color based on semantic context */
+    if (n.metadata?.contexto_tipo === 'emergencia') {
+      color = EMERGENCY_COLOR;
+    } else if (n.metadata?.contexto_tipo === 'inversion') {
+      color = INVERSION_COLOR;
+    } else if (n.metadata?.contexto_tipo === 'ocio' || n.metadata?.elastica) {
+      color = OCIO_COLOR;
+    }
+
     const size = 10 + (Number(n.monto || 0) / maxMonto) * 40;
+
+    /* Build tooltip with last note context */
+    const ultimaRazon = n.ultimo_contexto
+      ? `\nÚltima razón: ${n.ultimo_contexto}`
+      : '';
+    const elasticaLabel = n.metadata?.elastica ? '\n⚡ Neurona Elástica (recortable)' : '';
+    const prediccion = n.prediccion_basada_en_nota
+      ? `\n📅 Predicción: ${n.prediccion_basada_en_nota}`
+      : '';
+    const emocional = n.contador_emocional
+      ? `\n✅ Necesario: ${n.contador_emocional.necesario} | ✂️ Evitable: ${n.contador_emocional.evitable}`
+      : '';
+
+    const tooltip = `${n.nombre}\nMonto: S/ ${Number(n.monto || 0).toFixed(2)}\nPeso: ${Number(n.peso || 0).toFixed(2)}\nTipo: ${n.tipo}${ultimaRazon}${elasticaLabel}${prediccion}${emocional}`;
+
     return {
       id: n.id,
       label: n.nombre,
-      title: `${n.nombre}\nMonto: S/ ${Number(n.monto || 0).toFixed(2)}\nPeso: ${Number(n.peso || 0).toFixed(2)}\nTipo: ${n.tipo}`,
+      title: tooltip,
       color: {
         background: color.background,
         border: color.border,
@@ -369,15 +629,20 @@ export function neuronasInitGrafo() {
       },
       font: { color: color.font, size: 12 },
       size,
-      opacity: Math.max(0.3, Number(n.peso) || 0.5),
+      opacity: n.metadata?.contexto_tipo === 'emergencia' ? 1 : Math.max(0.3, Number(n.peso) || 0.5),
+      /* Dashed border for elastic neurons */
+      borderDashes: n.metadata?.elastica ? [5, 5] : false,
       _data: n
     };
   });
 
   const edgesArr = [];
   const edgeSet = new Set();
+  const nodeIds = new Set(nodesArr.map(nd => nd.id));
   for (const n of neuronas) {
     for (const targetId of (n.conexiones || [])) {
+      /* Only draw edges between visible nodes */
+      if (!nodeIds.has(targetId)) continue;
       const key = [n.id, targetId].sort().join('--');
       if (!edgeSet.has(key)) {
         edgeSet.add(key);
@@ -426,7 +691,18 @@ export function neuronasInitGrafo() {
       const node = nodesArr.find(nd => nd.id === nodeId);
       if (node && node._data) {
         const nd = node._data;
-        const esc = typeof escapeHtml === 'function' ? escapeHtml : _escapeHtml;
+        const ultimaRazonHtml = nd.ultimo_contexto
+          ? `<div style="font-size:12px;color:#a78bfa;margin-top:4px;">💬 <b>Última razón:</b> ${esc(nd.ultimo_contexto)}</div>`
+          : '';
+        const elasticaHtml = nd.metadata?.elastica
+          ? `<div style="font-size:12px;color:#fbbf24;">⚡ Neurona Elástica (recortable)</div>`
+          : '';
+        const prediccionHtml = nd.prediccion_basada_en_nota
+          ? `<div style="font-size:12px;color:#60a5fa;">📅 <b>Predicción:</b> ${esc(nd.prediccion_basada_en_nota)}</div>`
+          : '';
+        const emocionalHtml = nd.contador_emocional
+          ? `<div style="font-size:12px;color:#6b7280;">✅ Necesario: ${nd.contador_emocional.necesario} &nbsp;|&nbsp; ✂️ Evitable: ${nd.contador_emocional.evitable}</div>`
+          : '';
         panel.innerHTML = `
           <div style="display:flex;flex-direction:column;gap:4px;">
             <div style="font-weight:700;font-size:15px;">${esc(nd.nombre)}</div>
@@ -443,6 +719,10 @@ export function neuronasInitGrafo() {
             <div style="font-size:12px;color:#555;">
               <b>Conexiones:</b> ${(nd.conexiones || []).map(c => esc(c)).join(', ') || 'ninguna'}
             </div>
+            ${ultimaRazonHtml}
+            ${elasticaHtml}
+            ${prediccionHtml}
+            ${emocionalHtml}
           </div>`;
       }
     } else {
@@ -527,14 +807,17 @@ export function neuronasConfirmAdd() {
 export function neuronasRunDayUpdate() {
   const movs = (typeof state !== 'undefined' && Array.isArray(state.financeMovements))
     ? state.financeMovements
-    : [];
+    : (typeof state !== 'undefined' && Array.isArray(state.financeLedger))
+      ? state.financeLedger
+      : [];
   const today = new Date().toISOString().slice(0, 10);
   const transacciones = movs
-    .filter(m => m.date === today && m.type === 'expense')
+    .filter(m => String(m.date || '').slice(0, 10) === today && m.type === 'expense')
     .map(m => ({
       nombre: m.category || m.reason || 'Gasto',
       monto: Math.abs(Number(m.amount) || 0),
-      tipo: 'consumo'
+      tipo: 'consumo',
+      notas: m.note || m.notes || m.notas || ''
     }));
 
   const result = actualizarSistemaFinanciero({ transacciones, estres: 5 });
@@ -545,12 +828,32 @@ export function neuronasRunDayUpdate() {
   if (typeof toast === 'function') toast(msg);
   else console.info('[NeuronaFinanciera]', msg);
 
-  setTimeout(() => { try { neuronasInitGrafo(); } catch (_e) { /* ignore */ } }, 100);
+  setTimeout(() => {
+    try {
+      const c = document.getElementById('mnGrafo');
+      neuronasInitGrafo(c ? !!c.__mnFiltroActivo : false);
+    } catch (_e) { /* ignore */ }
+  }, 100);
+}
+
+export function neuronasToggleFiltroNotas() {
+  const container = document.getElementById('mnGrafo');
+  const banner = document.getElementById('mnFiltroNotasBanner');
+  const btn = document.getElementById('mnFiltroNotasBtn');
+  const activo = container ? !container.__mnFiltroActivo : false;
+  if (container) container.__mnFiltroActivo = activo;
+  if (banner) banner.style.display = activo ? 'block' : 'none';
+  if (btn) btn.style.background = activo ? '#a78bfa33' : '';
+  try { neuronasInitGrafo(activo); } catch (_e) { /* ignore */ }
 }
 
 export function neuronasReset() {
   if (!confirm('¿Restablecer las neuronas a los datos de ejemplo? Se perderán los cambios.')) return;
   try { localStorage.removeItem(NEURONAS_LS_KEY); } catch (_e) { /* ignore */ }
+  const container = document.getElementById('mnGrafo');
+  if (container) container.__mnFiltroActivo = false;
+  const banner = document.getElementById('mnFiltroNotasBanner');
+  if (banner) banner.style.display = 'none';
   setTimeout(() => { try { neuronasInitGrafo(); } catch (_e) { /* ignore */ } }, 100);
 }
 
@@ -568,11 +871,13 @@ if (typeof window !== 'undefined') {
   window.NeuronaFinanciera = NeuronaFinanciera;
   window.actualizarSistemaFinanciero = actualizarSistemaFinanciero;
   window.calcularSimilitud = calcularSimilitud;
+  window.analizarContextoNota = analizarContextoNota;
   window.renderMapaNeuronal = renderMapaNeuronal;
   window.neuronasInitGrafo = neuronasInitGrafo;
   window.neuronasOpenAddModal = neuronasOpenAddModal;
   window.neuronasConfirmAdd = neuronasConfirmAdd;
   window.neuronasRunDayUpdate = neuronasRunDayUpdate;
+  window.neuronasToggleFiltroNotas = neuronasToggleFiltroNotas;
   window.neuronasReset = neuronasReset;
   window.getAllNeuronas = getAllNeuronas;
   window.getNeurona = getNeurona;

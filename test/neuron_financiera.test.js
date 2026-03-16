@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   NeuronaFinanciera,
   calcularSimilitud,
+  analizarContextoNota,
   actualizarSistemaFinanciero,
   getAllNeuronas,
   saveNeurona,
@@ -43,6 +44,27 @@ test('NeuronaFinanciera: metadata tiene valores por defecto', () => {
   assert.equal(n.metadata.prioridad, 'mid');
   assert.equal(n.metadata.fecha_limite, null);
   assert.ok(typeof n.metadata.elasticidad === 'number');
+  assert.equal(n.metadata.contexto_tipo, null);
+  assert.equal(n.metadata.elastica, false);
+});
+
+test('NeuronaFinanciera: nuevos campos en constructor y toJSON', () => {
+  const n = new NeuronaFinanciera({
+    tipo: 'consumo',
+    nombre: 'Test',
+    monto: 100,
+    ultimo_contexto: 'se rompió el celular',
+    contador_emocional: { necesario: 2, evitable: 1 },
+    prediccion_basada_en_nota: 'cada mes sube'
+  });
+  assert.equal(n.ultimo_contexto, 'se rompió el celular');
+  assert.deepEqual(n.contador_emocional, { necesario: 2, evitable: 1 });
+  assert.equal(n.prediccion_basada_en_nota, 'cada mes sube');
+
+  const json = n.toJSON();
+  assert.equal(json.ultimo_contexto, 'se rompió el celular');
+  assert.deepEqual(json.contador_emocional, { necesario: 2, evitable: 1 });
+  assert.equal(json.prediccion_basada_en_nota, 'cada mes sube');
 });
 
 test('NeuronaFinanciera: toJSON devuelve objeto plano', () => {
@@ -213,4 +235,131 @@ test('getAllNeuronas: devuelve array no vacío', () => {
   const all = getAllNeuronas();
   assert.ok(Array.isArray(all));
   assert.ok(all.length > 0, 'El seed por defecto debe tener neuronas');
+});
+
+/* ── analizarContextoNota ────────────────────────────────── */
+
+test('analizarContextoNota: detecta emergencia por palabras clave', () => {
+  const r = analizarContextoNota('Se rompió el celular y fue urgente repararlo');
+  assert.equal(r.tipo, 'emergencia');
+  assert.ok(r.palabrasClave.length > 0);
+});
+
+test('analizarContextoNota: detecta inversión/trabajo', () => {
+  const r = analizarContextoNota('Compré un curso de programación para mejorar');
+  assert.equal(r.tipo, 'inversion');
+  assert.ok(r.palabrasClave.includes('curso'));
+});
+
+test('analizarContextoNota: detecta previsión/futuro', () => {
+  const r = analizarContextoNota('Pago inicial para el departamento del próximo mes');
+  assert.equal(r.tipo, 'prevision');
+  assert.ok(r.palabrasClave.length > 0);
+});
+
+test('analizarContextoNota: detecta ocio/variable', () => {
+  const r = analizarContextoNota('Compré esto por capricho, fue un gusto');
+  assert.equal(r.tipo, 'ocio');
+  assert.ok(r.palabrasClave.includes('capricho'));
+});
+
+test('analizarContextoNota: retorna null cuando no hay coincidencias', () => {
+  const r = analizarContextoNota('Compra normal del día');
+  assert.equal(r.tipo, null);
+  assert.equal(r.palabrasClave.length, 0);
+});
+
+test('analizarContextoNota: maneja nota vacía o nula sin error', () => {
+  assert.doesNotThrow(() => analizarContextoNota(''));
+  assert.doesNotThrow(() => analizarContextoNota(null));
+  assert.doesNotThrow(() => analizarContextoNota(undefined));
+  const r = analizarContextoNota(null);
+  assert.equal(r.tipo, null);
+});
+
+test('analizarContextoNota: emergencia tiene prioridad sobre ocio', () => {
+  const r = analizarContextoNota('urgente capricho del momento');
+  assert.equal(r.tipo, 'emergencia', 'Emergencia debe tener mayor prioridad que ocio');
+});
+
+test('analizarContextoNota: emergencia tiene prioridad sobre inversion', () => {
+  const r = analizarContextoNota('curso urgente de salud');
+  assert.equal(r.tipo, 'emergencia', 'Emergencia debe tener mayor prioridad que inversion');
+});
+
+test('analizarContextoNota: inversion tiene prioridad sobre prevision', () => {
+  const r = analizarContextoNota('curso planificado para el mes');
+  assert.equal(r.tipo, 'inversion', 'Inversion debe tener mayor prioridad que prevision');
+});
+
+test('analizarContextoNota: prevision tiene prioridad sobre ocio', () => {
+  const r = analizarContextoNota('anticipo que fue un gusto pagar');
+  assert.equal(r.tipo, 'prevision', 'Prevision debe tener mayor prioridad que ocio');
+});
+
+/* ── actualizarSistemaFinanciero con contexto ────────────── */
+
+test('actualizarSistemaFinanciero: nueva neurona hereda contexto de nota (emergencia)', () => {
+  delete _lsStore['memorycarl_neuronas_financieras'];
+  const result = actualizarSistemaFinanciero({
+    transacciones: [{ nombre: 'Médico Urgente XYZ', monto: 300, tipo: 'consumo', notas: 'Se rompió urgente' }],
+    estres: 3
+  });
+  const nueva = result.nuevas.find(n => n.nombre === 'Médico Urgente XYZ');
+  assert.ok(nueva, 'Debe haber creado neurona nueva');
+  assert.equal(nueva.metadata.contexto_tipo, 'emergencia');
+  assert.equal(nueva.ultimo_contexto, 'Se rompió urgente');
+  assert.equal(nueva.contador_emocional.necesario, 1);
+  assert.equal(nueva.contador_emocional.evitable, 0);
+});
+
+test('actualizarSistemaFinanciero: nueva neurona marcada como elástica por nota de ocio', () => {
+  delete _lsStore['memorycarl_neuronas_financieras'];
+  const result = actualizarSistemaFinanciero({
+    transacciones: [{ nombre: 'Capricho GamingXYZ', monto: 50, tipo: 'consumo', notas: 'capricho del momento' }],
+    estres: 1
+  });
+  const nueva = result.nuevas.find(n => n.nombre === 'Capricho GamingXYZ');
+  assert.ok(nueva, 'Debe haber creado neurona nueva');
+  assert.equal(nueva.metadata.elastica, true, 'Neurona de ocio debe ser elástica');
+  assert.equal(nueva.contador_emocional.evitable, 1);
+});
+
+test('actualizarSistemaFinanciero: neurona de previsión creada cuando nota menciona evento futuro', () => {
+  delete _lsStore['memorycarl_neuronas_financieras'];
+  const result = actualizarSistemaFinanciero({
+    transacciones: [{ nombre: 'Departamento', monto: 1000, tipo: 'consumo', notas: 'pago inicial para el depa' }],
+    estres: 2
+  });
+  const prevision = result.nuevas.find(n => n.tipo === 'prevision');
+  assert.ok(prevision, 'Debe haber creado neurona de previsión');
+  assert.ok(prevision.prediccion_basada_en_nota, 'Debe tener predicción guardada');
+});
+
+test('actualizarSistemaFinanciero: nota con "cada mes sube" almacena predicción en neurona existente', () => {
+  delete _lsStore['memorycarl_neuronas_financieras'];
+  /* Primera pasada: crear neurona para Mercado */
+  actualizarSistemaFinanciero({
+    transacciones: [{ nombre: 'Mercado', monto: 600, tipo: 'consumo' }],
+    estres: 0
+  });
+  /* Segunda pasada con nota de predicción */
+  const result = actualizarSistemaFinanciero({
+    transacciones: [{ nombre: 'Mercado', monto: 650, tipo: 'consumo', notas: 'Cada mes sube el precio' }],
+    estres: 0
+  });
+  const mercado = result.neuronas.find(n => n.nombre === 'Mercado');
+  assert.ok(mercado, 'Neurona Mercado debe seguir existiendo');
+  assert.ok(mercado.prediccion_basada_en_nota, 'Debe almacenar predicción por nota "cada mes sube"');
+});
+
+test('actualizarSistemaFinanciero: nota en campo note también es procesada', () => {
+  delete _lsStore['memorycarl_neuronas_financieras'];
+  const result = actualizarSistemaFinanciero({
+    transacciones: [{ nombre: 'Herramienta ABC', monto: 200, tipo: 'consumo', note: 'compré herramienta para el trabajo' }],
+    estres: 2
+  });
+  const nueva = result.nuevas.find(n => n.nombre === 'Herramienta ABC');
+  assert.ok(nueva, 'Debe crear neurona nueva');
+  assert.equal(nueva.metadata.contexto_tipo, 'inversion');
 });
