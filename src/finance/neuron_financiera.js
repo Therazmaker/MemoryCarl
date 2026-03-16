@@ -485,6 +485,7 @@ export function renderMapaNeuronal() {
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="finIconBtn" onclick="neuronasOpenAddModal()" title="Agregar neurona">＋</button>
           <button class="finIconBtn" onclick="neuronasRunDayUpdate()" title="Actualizar con transacciones del día">⚡</button>
+          <button class="finIconBtn" onclick="neuronasEscanearTodo()" title="Escanear todos los registros existentes">🔄</button>
           <button class="finIconBtn" id="mnFiltroNotasBtn" onclick="neuronasToggleFiltroNotas()" title="Filtrar por notas de emergencia o importantes">🔍</button>
           <button class="finIconBtn" onclick="neuronasReset()" title="Restablecer datos de ejemplo">↺</button>
         </div>
@@ -836,6 +837,44 @@ export function neuronasRunDayUpdate() {
   }, 100);
 }
 
+export function neuronasEscanearTodo() {
+  const movs = (typeof state !== 'undefined' && Array.isArray(state.financeMovements))
+    ? state.financeMovements
+    : (typeof state !== 'undefined' && Array.isArray(state.financeLedger))
+      ? state.financeLedger
+      : [];
+  const transacciones = movs
+    .filter(m => m.type === 'expense')
+    .map(m => ({
+      nombre: m.category || m.reason || 'Gasto',
+      monto: Math.abs(Number(m.amount) || 0),
+      tipo: 'consumo',
+      notas: m.note || m.notes || m.notas || ''
+    }));
+
+  if (transacciones.length === 0) {
+    const msg = '⚠️ No hay transacciones registradas para escanear';
+    if (typeof toast === 'function') toast(msg);
+    else console.info('[NeuronaFinanciera]', msg);
+    return;
+  }
+
+  const result = actualizarSistemaFinanciero({ transacciones, estres: 5 });
+  const msg = result.nuevas.length > 0
+    ? `🔄 Escaneo completo: ${transacciones.length} registro(s) procesado(s), ${result.nuevas.length} nueva(s) neurona(s) detectada(s)`
+    : `🔄 Escaneo completo: ${transacciones.length} registro(s) procesado(s), sin nuevas neuronas`;
+
+  if (typeof toast === 'function') toast(msg);
+  else console.info('[NeuronaFinanciera]', msg);
+
+  setTimeout(() => {
+    try {
+      const c = document.getElementById('mnGrafo');
+      neuronasInitGrafo(c ? !!c.__mnFiltroActivo : false);
+    } catch (_e) { /* ignore */ }
+  }, 100);
+}
+
 export function neuronasToggleFiltroNotas() {
   const container = document.getElementById('mnGrafo');
   const banner = document.getElementById('mnFiltroNotasBanner');
@@ -877,6 +916,7 @@ if (typeof window !== 'undefined') {
   window.neuronasOpenAddModal = neuronasOpenAddModal;
   window.neuronasConfirmAdd = neuronasConfirmAdd;
   window.neuronasRunDayUpdate = neuronasRunDayUpdate;
+  window.neuronasEscanearTodo = neuronasEscanearTodo;
   window.neuronasToggleFiltroNotas = neuronasToggleFiltroNotas;
   window.neuronasReset = neuronasReset;
   window.getAllNeuronas = getAllNeuronas;
