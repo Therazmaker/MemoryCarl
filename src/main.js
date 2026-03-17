@@ -13106,7 +13106,37 @@ function openFinanceAccountEdit(accountId){
   });
 }
 
-function openFinanceEntryModal(existingId=null){
+function openFinanceTypeModal(){
+  const host = document.querySelector('#app') || document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modalBackdrop finTypeBackdrop';
+  backdrop.innerHTML = `
+    <div class="modal finTypeModal" role="dialog" aria-label="Tipo de movimiento">
+      <div class="finEntryTop">
+        <button class="iconBtn" id="finTypeClose" aria-label="Cerrar">←</button>
+        <div class="finEntryTopTitle">¿Qué tipo de movimiento?</div>
+      </div>
+      <div class="finTypeBtnsRow">
+        <button class="finTypeChoiceBtn expense" id="finTypeExpense">
+          <span class="finTypeIcon">💸</span>
+          <span>Gasto</span>
+        </button>
+        <button class="finTypeChoiceBtn income" id="finTypeIncome">
+          <span class="finTypeIcon">💰</span>
+          <span>Ingreso</span>
+        </button>
+      </div>
+    </div>
+  `;
+  host.appendChild(backdrop);
+  const close = ()=> backdrop.remove();
+  backdrop.querySelector('#finTypeClose').addEventListener('click', close);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  backdrop.querySelector('#finTypeExpense').addEventListener('click', ()=>{ close(); openFinanceEntryModal(null, 'expense'); });
+  backdrop.querySelector('#finTypeIncome').addEventListener('click', ()=>{ close(); openFinanceEntryModal(null, 'income'); });
+}
+
+function openFinanceEntryModal(existingId=null, typeOverride=null){
   financeEnsureMissionControlStructures();
   if(!(state.financeAccounts||[]).length){
     alert("Primero crea una cuenta");
@@ -13132,7 +13162,7 @@ function openFinanceEntryModal(existingId=null){
 
   // default draft
   const draft = {
-    type: (existing?.type) || (state.financeMovTab || "expense"),
+    type: (existing?.type) || typeOverride || "expense",
     name: existingSplit.name,
     amount: existing ? String(Number(existing.amount||0)) : "",
     currency: "PEN",
@@ -14300,7 +14330,10 @@ function _financeWeekdayUpperShort(date){
 }
 
 function _financeDateHeader(dateStr){
-  const d = new Date(dateStr);
+  // Append T00:00:00 so the date is parsed as local time, not UTC midnight
+  // (browsers parse bare YYYY-MM-DD strings as UTC, causing off-by-one errors
+  // for users in negative UTC offsets).
+  const d = new Date(dateStr + "T00:00:00");
   if(isNaN(d.getTime())) return String(dateStr||"");
   const wd = _financeWeekdayUpperShort(d);
   const rest = d.toLocaleDateString("es-PE",{day:"2-digit", month:"long", year:"numeric"});
@@ -14360,11 +14393,10 @@ function _financeGroupByDay(entries){
     .map(k=>({day:k, items: _financeSortLedgerNewToOld(groups[k])}));
 }
 
-function renderFinanceMovements(type){
+function renderFinanceMovements(){
   const fmt = _financeFmt;
 
   const all = _financeSortLedgerNewToOld(financeActiveLedger()||[]);
-  const filtered = all.filter(e=>e.type===type);
 
   const afterMap = _financeBalanceAfterMap(all);
   const accName = (id)=>{
@@ -14372,21 +14404,23 @@ function renderFinanceMovements(type){
     return a ? a.name : "Cuenta";
   };
 
-  const groups = _financeGroupByDay(filtered);
+  const groups = _financeGroupByDay(all);
 
   if(!groups.length){
-    return `<div class="muted">Sin ${type==="expense"?"gastos":"ingresos"} todavía.</div>`;
+    return `<div class="muted">Sin movimientos todavía.</div>`;
   }
 
   return groups.map(g=>{
-    const total = g.items.reduce((s,e)=>s+Number(e.amount||0),0);
-    const totalSigned = (type==="expense" ? -total : total);
-    const totalCls = (type==="expense" ? "negative" : "positive");
+    const netDay = g.items.reduce((s,e)=>{
+      const amt = Number(e.amount||0);
+      return s + (e.type==="income" ? amt : -amt);
+    }, 0);
+    const totalCls = netDay >= 0 ? "positive" : "negative";
     return `
       <div class="finDayGroup">
         <div class="finDayHeader">
           <span>${_financeDateHeader(g.day)}</span>
-          <span class="finDayTotal ${totalCls}">${totalSigned<0?"-":""}S/. ${fmt(Math.abs(totalSigned))}</span>
+          <span class="finDayTotal ${totalCls}">${netDay<0?"-":""}S/. ${fmt(Math.abs(netDay))}</span>
         </div>
 
         ${g.items.map(e=>{
@@ -16760,32 +16794,17 @@ function viewFinance(){
     </section>
   `;
 
-  // Movimientos content (dos pestañas: Gastos / Ingresos)
-  if(!state.financeMovTab) state.financeMovTab = "expense";
-  function setFinanceMovTab(t){
-    state.financeMovTab = t;
-    persist();
-    view();
-  }
-  try{ window.setFinanceMovTab = setFinanceMovTab; }catch(e){}
-
-  const movTabs = `
-    <div class="finMovTabs">
-      <button class="finMovTab ${state.financeMovTab==="expense"?"active":""}" onclick="setFinanceMovTab('expense')">Gastos</button>
-      <button class="finMovTab ${state.financeMovTab==="income"?"active":""}" onclick="setFinanceMovTab('income')">Ingresos</button>
-    </div>
-  `;
+  // Movimientos content (lista unificada: ingresos y gastos juntos)
 
   const movList = `
     <section class="card homeCard homeWide finMovCard">
       <div class="cardTop">
         <h2 class="cardTitle">Movimientos</h2>
-        <button class="iconBtn" onclick="openFinanceEntryModal()">＋</button>
+        <button class="iconBtn" onclick="openFinanceTypeModal()">＋</button>
       </div>
       <div class="hr"></div>
-      ${movTabs}
       <div id="financeMovementsList" class="finMovList">
-        ${renderFinanceMovements(state.financeMovTab)}
+        ${renderFinanceMovements()}
       </div>
     </section>
   `;
@@ -17181,6 +17200,7 @@ try{
   window.openFinanceAccountModal = openFinanceAccountModal;
   window.openFinanceAccountEdit = openFinanceAccountEdit;
   window.openFinanceEntryModal = openFinanceEntryModal;
+  window.openFinanceTypeModal = openFinanceTypeModal;
 }catch(e){}
 
 

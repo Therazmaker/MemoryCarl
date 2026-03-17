@@ -1480,7 +1480,44 @@ body{
   border-color:rgba(255,255,255,.18);
 }
 
-.finMovList{display:grid;gap:14px;padding-top:2px;}
+/* Finance type-selection modal */
+.finTypeModal{
+  padding: 0;
+  overflow: hidden;
+  max-width: 320px;
+  width: 92%;
+}
+.finTypeBtnsRow{
+  display: flex;
+  gap: 16px;
+  padding: 28px 20px;
+  justify-content: center;
+}
+.finTypeChoiceBtn{
+  appearance: none;
+  border: 1.5px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.05);
+  color: #fff;
+  border-radius: 18px;
+  padding: 22px 28px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 15px;
+  flex: 1;
+  transition: background .15s, border-color .15s;
+}
+.finTypeChoiceBtn:hover{ background: rgba(255,255,255,.10); }
+.finTypeChoiceBtn.expense{ border-color: rgba(255,100,100,.35); }
+.finTypeChoiceBtn.expense:hover{ background: rgba(255,70,70,.18); border-color: rgba(255,70,70,.6); }
+.finTypeChoiceBtn.income{ border-color: rgba(70,200,120,.35); }
+.finTypeChoiceBtn.income:hover{ background: rgba(70,200,120,.18); border-color: rgba(70,200,120,.6); }
+.finTypeIcon{ font-size: 36px; line-height: 1; }
+
+
 .finDayGroup{display:grid;gap:10px;}
 .finDayHeader{
   display:flex;
