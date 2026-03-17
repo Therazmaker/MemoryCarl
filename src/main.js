@@ -17740,8 +17740,9 @@ try{
 
 function _roadmapStyles(){
   if(document.getElementById('_rmStyles')) return '';
-  return `
-  <style id="_rmStyles">
+  const s = document.createElement('style');
+  s.id = '_rmStyles';
+  s.textContent = `
   .rmWrap { padding-bottom: 20px; }
   .rmIncomePanel {
     background: rgba(124,92,255,.08);
@@ -17910,6 +17911,7 @@ function _roadmapStyles(){
   .rmFreeAmt { font-size: 28px; font-weight: 800; letter-spacing: -1px; }
   .rmFreeGood .rmFreeAmt { color: #36d399; }
   .rmFreeBad  .rmFreeAmt { color: #fb7185; }
-  </style>
   `;
+  document.head.appendChild(s);
+  return '';
 }
