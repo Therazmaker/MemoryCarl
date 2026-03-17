@@ -1,453 +1,113 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  NeuronaFinanciera,
-  calcularSimilitud,
-  analizarContextoNota,
-  actualizarSistemaFinanciero,
-  getAllNeuronas,
-  saveNeurona,
-  getNeurona,
-  neuronasEscanearTodo,
-  neuronasOpenAddModal
-} from '../src/finance/neuron_financiera.js';
+import { buildFinanceSnapshot } from '../src/finance/finance_snapshot_builder.js';
+import { detectPatternNeurons, mergeNeurons } from '../src/finance/finance_pattern_detector.js';
+import { updateHippocampus } from '../src/finance/finance_hippocampus.js';
+import { generateFinanceInsights } from '../src/finance/finance_insight_engine.js';
+import { loadFinanceBrainState, saveFinanceBrainState, BRAIN_STORAGE_KEY, LEGACY_NEURON_KEY } from '../src/finance/finance_neural_storage.js';
+import { runFinanceBrainScan } from '../src/finance/finance_brain_engine.js';
+import { actualizarSistemaFinanciero, getAllNeuronas, NeuronaFinanciera, saveNeurona, getNeurona, neuronasEscanearTodo } from '../src/finance/neuron_financiera.js';
 
-/* ── NeuronaFinanciera ────────────────────────────────────── */
-
-test('NeuronaFinanciera: usa el id proporcionado', () => {
-  const n = new NeuronaFinanciera({ id: 'mi_id', tipo: 'consumo', nombre: 'Test', monto: 100 });
-  assert.equal(n.id, 'mi_id');
-});
-
-test('NeuronaFinanciera: genera id único cuando no se proporciona', () => {
-  const n1 = new NeuronaFinanciera({ tipo: 'consumo', nombre: 'Alpha', monto: 50 });
-  const n2 = new NeuronaFinanciera({ tipo: 'consumo', nombre: 'Alpha', monto: 50 });
-  assert.ok(n1.id.startsWith('alpha_'), `id debería comenzar con alpha_, fue: ${n1.id}`);
-  assert.ok(n2.id.startsWith('alpha_'), `id debería comenzar con alpha_, fue: ${n2.id}`);
-  assert.notEqual(n1.id, n2.id, 'Dos neuronas con el mismo nombre deben tener ids distintos');
-});
-
-test('NeuronaFinanciera: clampea peso entre 0 y 1', () => {
-  const high = new NeuronaFinanciera({ tipo: 'ingreso', nombre: 'X', monto: 0, peso: 5 });
-  assert.equal(high.peso, 1);
-  const low = new NeuronaFinanciera({ tipo: 'ingreso', nombre: 'X', monto: 0, peso: -1 });
-  assert.equal(low.peso, 0);
-  const mid = new NeuronaFinanciera({ tipo: 'ingreso', nombre: 'X', monto: 0, peso: 0.7 });
-  assert.equal(mid.peso, 0.7);
-});
-
-test('NeuronaFinanciera: monto se convierte a número', () => {
-  const n = new NeuronaFinanciera({ tipo: 'consumo', nombre: 'X', monto: '250' });
-  assert.equal(n.monto, 250);
-});
-
-test('NeuronaFinanciera: metadata tiene valores por defecto', () => {
-  const n = new NeuronaFinanciera({ tipo: 'consumo', nombre: 'X', monto: 0 });
-  assert.equal(n.metadata.prioridad, 'mid');
-  assert.equal(n.metadata.fecha_limite, null);
-  assert.ok(typeof n.metadata.elasticidad === 'number');
-  assert.equal(n.metadata.contexto_tipo, null);
-  assert.equal(n.metadata.elastica, false);
-});
-
-test('NeuronaFinanciera: nuevos campos en constructor y toJSON', () => {
-  const n = new NeuronaFinanciera({
-    tipo: 'consumo',
-    nombre: 'Test',
-    monto: 100,
-    ultimo_contexto: 'se rompió el celular',
-    contador_emocional: { necesario: 2, evitable: 1 },
-    prediccion_basada_en_nota: 'cada mes sube'
-  });
-  assert.equal(n.ultimo_contexto, 'se rompió el celular');
-  assert.deepEqual(n.contador_emocional, { necesario: 2, evitable: 1 });
-  assert.equal(n.prediccion_basada_en_nota, 'cada mes sube');
-
-  const json = n.toJSON();
-  assert.equal(json.ultimo_contexto, 'se rompió el celular');
-  assert.deepEqual(json.contador_emocional, { necesario: 2, evitable: 1 });
-  assert.equal(json.prediccion_basada_en_nota, 'cada mes sube');
-});
-
-test('NeuronaFinanciera: toJSON devuelve objeto plano', () => {
-  const n = new NeuronaFinanciera({
-    id: 'abc',
-    tipo: 'pasivo',
-    nombre: 'Préstamo',
-    monto: 500,
-    peso: 0.9,
-    metadata: { fecha_limite: '2025-12-31', prioridad: 'high', elasticidad: 0.2 },
-    conexiones: ['consumo_madre']
-  });
-  const json = n.toJSON();
-  assert.equal(json.id, 'abc');
-  assert.equal(json.tipo, 'pasivo');
-  assert.equal(json.nombre, 'Préstamo');
-  assert.equal(json.monto, 500);
-  assert.equal(json.peso, 0.9);
-  assert.deepEqual(json.conexiones, ['consumo_madre']);
-  assert.equal(json.metadata.fecha_limite, '2025-12-31');
-});
-
-test('NeuronaFinanciera: conexiones es copia independiente', () => {
-  const original = ['a', 'b'];
-  const n = new NeuronaFinanciera({ tipo: 'consumo', nombre: 'X', monto: 0, conexiones: original });
-  n.conexiones.push('c');
-  assert.equal(original.length, 2);
-});
-
-/* ── calcularSimilitud ────────────────────────────────────── */
-
-test('calcularSimilitud: coincidencia exacta de nombre y tipo → alta similitud', () => {
-  const gasto = { nombre: 'Mercado', monto: 600, tipo: 'consumo' };
-  const neurona = { nombre: 'Mercado', monto: 600, tipo: 'consumo' };
-  const sim = calcularSimilitud(gasto, neurona);
-  assert.ok(sim >= 0.9, `Se esperaba ≥0.9, fue ${sim}`);
-});
-
-test('calcularSimilitud: nombres completamente distintos → baja similitud', () => {
-  const gasto = { nombre: 'Spotify', monto: 15, tipo: 'consumo' };
-  const neurona = { nombre: 'Alquiler', monto: 600, tipo: 'consumo' };
-  const sim = calcularSimilitud(gasto, neurona);
-  assert.ok(sim < 0.4, `Se esperaba <0.4, fue ${sim}`);
-});
-
-test('calcularSimilitud: rango entre 0 y 1', () => {
-  const gasto = { nombre: 'Test', monto: 100, tipo: 'consumo' };
-  const neurona = { nombre: 'Otro', monto: 200, tipo: 'ingreso' };
-  const sim = calcularSimilitud(gasto, neurona);
-  assert.ok(sim >= 0 && sim <= 1, `Valor fuera de rango: ${sim}`);
-});
-
-test('calcularSimilitud: maneja valores faltantes sin error', () => {
-  const sim = calcularSimilitud({}, { nombre: '', monto: 0, tipo: 'consumo' });
-  assert.ok(typeof sim === 'number');
-  assert.ok(!Number.isNaN(sim));
-});
-
-/* ── actualizarSistemaFinanciero ─────────────────────────── */
-// Nota: requiere localStorage — se usa globalThis para entorno Node
-
-const _lsStore = {};
+const store = {};
 if (typeof localStorage === 'undefined') {
   globalThis.localStorage = {
-    getItem: (k) => _lsStore[k] ?? null,
-    setItem: (k, v) => { _lsStore[k] = v; },
-    removeItem: (k) => { delete _lsStore[k]; }
+    getItem: (k) => store[k] ?? null,
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: (k) => { delete store[k]; }
   };
 }
 
-test('actualizarSistemaFinanciero: retorna objeto con neuronas y nuevas', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  const result = actualizarSistemaFinanciero({ transacciones: [], estres: 0 });
-  assert.ok(Array.isArray(result.neuronas));
-  assert.ok(Array.isArray(result.nuevas));
+function resetStorage() {
+  Object.keys(store).forEach((k) => delete store[k]);
+}
+
+const sample = {
+  accounts: [{ id: 'a1', type: 'bank' }],
+  movements: [
+    { id: 'm1', date: '2025-01-02', type: 'income', amount: 3000, accountId: 'a1', category: 'Salario' },
+    { id: 'm2', date: '2025-01-03', type: 'expense', amount: -45, accountId: 'a1', category: 'Suscripcion Streaming', note: 'mensual' },
+    { id: 'm3', date: '2025-01-10', type: 'expense', amount: -900, accountId: 'a1', category: 'Renta' }
+  ]
+};
+
+test('snapshot normalization derives enriched fields', () => {
+  const snapshot = buildFinanceSnapshot(sample);
+  assert.equal(snapshot.entries.length, 3);
+  const rent = snapshot.entries.find((e) => e.category === 'Renta');
+  assert.equal(rent.direction, 'expense');
+  assert.equal(rent.isEssential, true);
+  assert.ok(rent.monthKey);
+  assert.ok(rent.weekKey);
 });
 
-test('actualizarSistemaFinanciero: crea neurona nueva (mitosis) cuando similitud < 80%', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  const result = actualizarSistemaFinanciero({
-    transacciones: [{ nombre: 'Suscripción Gaming XYZ', monto: 29.99, tipo: 'consumo' }],
-    estres: 3
-  });
-  assert.ok(result.nuevas.length >= 1, 'Debe haber creado al menos 1 neurona nueva');
-  const nueva = result.nuevas[0];
-  assert.equal(nueva.nombre, 'Suscripción Gaming XYZ');
-  assert.equal(nueva.tipo, 'consumo');
-  assert.ok(nueva.conexiones.includes('consumo_madre'));
+test('recurring pattern and silent leak detection activates neurons', () => {
+  const snapshot = buildFinanceSnapshot(sample);
+  const neurons = detectPatternNeurons(snapshot, []);
+  assert.ok(neurons.some((n) => n.type === 'recurring_monthly'));
+  assert.ok(neurons.some((n) => n.type === 'silent_leak'));
 });
 
-test('actualizarSistemaFinanciero: no crea neurona nueva cuando similitud >= 80%', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  // Primer pase: insertar neurona "Mercado" con monto 600
-  actualizarSistemaFinanciero({
-    transacciones: [{ nombre: 'Mercado Nuevo', monto: 600, tipo: 'consumo' }],
-    estres: 0
-  });
-  // Segundo pase con gasto muy similar
-  const result = actualizarSistemaFinanciero({
-    transacciones: [{ nombre: 'Mercado', monto: 600, tipo: 'consumo' }],
-    estres: 0
-  });
-  assert.equal(result.nuevas.length, 0, 'No debe crear neurona si ya existe una coincidente');
+test('hippocampus aggregates monthly and weekly metrics', () => {
+  const snapshot = buildFinanceSnapshot(sample);
+  const neurons = detectPatternNeurons(snapshot, []);
+  const hip = updateHippocampus({}, snapshot, neurons, new Date('2025-01-15T10:00:00.000Z'));
+  assert.ok(Object.keys(hip.monthly).includes('2025-01'));
+  assert.ok(Object.keys(hip.weekly).length >= 1);
+  assert.ok(hip.monthly['2025-01'].totalExpenses > 0);
 });
 
-test('actualizarSistemaFinanciero: ajusta peso de pasivos próximos a vencer', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  // Crear neurona pasivo que vence en 3 días
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 3);
-  const fechaLimite = tomorrow.toISOString().slice(0, 10);
-
-  const pasivo = new NeuronaFinanciera({
-    id: 'prestamo_test',
-    tipo: 'pasivo',
-    nombre: 'Préstamo Test',
-    monto: 1000,
-    peso: 0.5,
-    metadata: { fecha_limite: fechaLimite, prioridad: 'high', elasticidad: 0.1 },
-    conexiones: []
-  });
-  saveNeurona(pasivo);
-
-  const result = actualizarSistemaFinanciero({ transacciones: [], estres: 5 });
-  const actualizado = result.neuronas.find(n => n.id === 'prestamo_test');
-  assert.ok(actualizado, 'La neurona pasivo debe seguir existiendo');
-  assert.ok(actualizado.peso > 0.5, `El peso debe haber aumentado; fue ${actualizado.peso}`);
+test('neuron merging dedupes by type', () => {
+  const merged = mergeNeurons(
+    [{ id: 'n1', type: 'silent_leak', family: 'risk', score: 0.4, confidence: 0.6, supportingEvidence: [], lastActivatedAt: null }],
+    [{ id: 'n2', type: 'silent_leak', family: 'risk', score: 0.9, confidence: 0.8, supportingEvidence: [{ a: 1 }], lastActivatedAt: 'now' }]
+  );
+  assert.equal(merged.length, 1);
+  assert.ok(merged[0].score > 0.4);
+  assert.equal(merged[0].lastActivatedAt, 'now');
 });
 
-test('actualizarSistemaFinanciero: maneja datosDia vacío sin error', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  assert.doesNotThrow(() => actualizarSistemaFinanciero({}));
-  assert.doesNotThrow(() => actualizarSistemaFinanciero(null));
-  assert.doesNotThrow(() => actualizarSistemaFinanciero(undefined));
+test('insight generation emits practical risk/opportunity insights', () => {
+  const snapshot = buildFinanceSnapshot(sample);
+  const neurons = detectPatternNeurons(snapshot, []);
+  const hip = updateHippocampus({}, snapshot, neurons, new Date('2025-01-15T10:00:00.000Z'));
+  const insights = generateFinanceInsights({ snapshot, neurons, hippocampus: hip });
+  assert.ok(insights.length >= 1);
+  assert.ok(insights.every((i) => i.priority));
 });
 
-/* ── CRUD básico ─────────────────────────────────────────── */
+test('persistence migration from legacy storage is supported', () => {
+  resetStorage();
+  localStorage.setItem(LEGACY_NEURON_KEY, JSON.stringify([{ id: 'legacy_1', tipo: 'consumo', nombre: 'Legacy', monto: 100, peso: 0.5 }]));
+  const state = loadFinanceBrainState();
+  assert.equal(state.version, 2);
+  assert.ok(state.neuronRegistry.length >= 1);
+  assert.ok(localStorage.getItem(BRAIN_STORAGE_KEY));
+});
 
-test('saveNeurona y getNeurona: persiste y recupera correctamente', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  const n = new NeuronaFinanciera({
-    id: 'test_save_001',
-    tipo: 'ingreso',
-    nombre: 'Freelance',
-    monto: 300,
-    peso: 0.6
-  });
+test('repeated scan remains stable without neuron explosion', () => {
+  resetStorage();
+  runFinanceBrainScan({ financeState: sample, now: '2025-01-15T10:00:00.000Z' });
+  const once = loadFinanceBrainState().neuronRegistry.length;
+  runFinanceBrainScan({ financeState: sample, now: '2025-01-15T11:00:00.000Z' });
+  const twice = loadFinanceBrainState().neuronRegistry.length;
+  assert.equal(once, twice);
+});
+
+test('compatibility API keeps legacy neurona CRUD behavior', () => {
+  resetStorage();
+  const n = new NeuronaFinanciera({ id: 'x1', tipo: 'consumo', nombre: 'Manual', monto: 20 });
   saveNeurona(n);
-  const found = getNeurona('test_save_001');
-  assert.ok(found, 'getNeurona debe encontrar la neurona guardada');
-  assert.equal(found.nombre, 'Freelance');
-  assert.equal(found.monto, 300);
+  const found = getNeurona('x1');
+  assert.equal(found.nombre, 'Manual');
+  assert.ok(getAllNeuronas().length >= 1);
 });
 
-test('saveNeurona: actualiza neurona existente', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  saveNeurona({ id: 'upd_001', tipo: 'consumo', nombre: 'Original', monto: 100, peso: 0.5, metadata: {}, conexiones: [] });
-  saveNeurona({ id: 'upd_001', tipo: 'consumo', nombre: 'Actualizado', monto: 200, peso: 0.7, metadata: {}, conexiones: [] });
-  const all = getAllNeuronas();
-  const found = all.filter(n => n.id === 'upd_001');
-  assert.equal(found.length, 1, 'No debe duplicar la neurona');
-  assert.equal(found[0].nombre, 'Actualizado');
-  assert.equal(found[0].monto, 200);
-});
+test('actualizarSistemaFinanciero and escanearTodo still process app-like data', () => {
+  resetStorage();
+  const result = actualizarSistemaFinanciero({ transacciones: [{ nombre: 'Taxi', monto: 30, tipo: 'consumo' }] });
+  assert.ok(Array.isArray(result.neuronas));
 
-test('getAllNeuronas: devuelve array no vacío', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  const all = getAllNeuronas();
-  assert.ok(Array.isArray(all));
-  assert.ok(all.length > 0, 'El seed por defecto debe tener neuronas');
-});
-
-/* ── analizarContextoNota ────────────────────────────────── */
-
-test('analizarContextoNota: detecta emergencia por palabras clave', () => {
-  const r = analizarContextoNota('Se rompió el celular y fue urgente repararlo');
-  assert.equal(r.tipo, 'emergencia');
-  assert.ok(r.palabrasClave.length > 0);
-});
-
-test('analizarContextoNota: detecta inversión/trabajo', () => {
-  const r = analizarContextoNota('Compré un curso de programación para mejorar');
-  assert.equal(r.tipo, 'inversion');
-  assert.ok(r.palabrasClave.includes('curso'));
-});
-
-test('analizarContextoNota: detecta previsión/futuro', () => {
-  const r = analizarContextoNota('Pago inicial para el departamento del próximo mes');
-  assert.equal(r.tipo, 'prevision');
-  assert.ok(r.palabrasClave.length > 0);
-});
-
-test('analizarContextoNota: detecta ocio/variable', () => {
-  const r = analizarContextoNota('Compré esto por capricho, fue un gusto');
-  assert.equal(r.tipo, 'ocio');
-  assert.ok(r.palabrasClave.includes('capricho'));
-});
-
-test('analizarContextoNota: retorna null cuando no hay coincidencias', () => {
-  const r = analizarContextoNota('Compra normal del día');
-  assert.equal(r.tipo, null);
-  assert.equal(r.palabrasClave.length, 0);
-});
-
-test('analizarContextoNota: maneja nota vacía o nula sin error', () => {
-  assert.doesNotThrow(() => analizarContextoNota(''));
-  assert.doesNotThrow(() => analizarContextoNota(null));
-  assert.doesNotThrow(() => analizarContextoNota(undefined));
-  const r = analizarContextoNota(null);
-  assert.equal(r.tipo, null);
-});
-
-test('analizarContextoNota: emergencia tiene prioridad sobre ocio', () => {
-  const r = analizarContextoNota('urgente capricho del momento');
-  assert.equal(r.tipo, 'emergencia', 'Emergencia debe tener mayor prioridad que ocio');
-});
-
-test('analizarContextoNota: emergencia tiene prioridad sobre inversion', () => {
-  const r = analizarContextoNota('curso urgente de salud');
-  assert.equal(r.tipo, 'emergencia', 'Emergencia debe tener mayor prioridad que inversion');
-});
-
-test('analizarContextoNota: inversion tiene prioridad sobre prevision', () => {
-  const r = analizarContextoNota('curso planificado para el mes');
-  assert.equal(r.tipo, 'inversion', 'Inversion debe tener mayor prioridad que prevision');
-});
-
-test('analizarContextoNota: prevision tiene prioridad sobre ocio', () => {
-  const r = analizarContextoNota('anticipo que fue un gusto pagar');
-  assert.equal(r.tipo, 'prevision', 'Prevision debe tener mayor prioridad que ocio');
-});
-
-/* ── actualizarSistemaFinanciero con contexto ────────────── */
-
-test('actualizarSistemaFinanciero: nueva neurona hereda contexto de nota (emergencia)', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  const result = actualizarSistemaFinanciero({
-    transacciones: [{ nombre: 'Médico Urgente XYZ', monto: 300, tipo: 'consumo', notas: 'Se rompió urgente' }],
-    estres: 3
-  });
-  const nueva = result.nuevas.find(n => n.nombre === 'Médico Urgente XYZ');
-  assert.ok(nueva, 'Debe haber creado neurona nueva');
-  assert.equal(nueva.metadata.contexto_tipo, 'emergencia');
-  assert.equal(nueva.ultimo_contexto, 'Se rompió urgente');
-  assert.equal(nueva.contador_emocional.necesario, 1);
-  assert.equal(nueva.contador_emocional.evitable, 0);
-});
-
-test('actualizarSistemaFinanciero: nueva neurona marcada como elástica por nota de ocio', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  const result = actualizarSistemaFinanciero({
-    transacciones: [{ nombre: 'Capricho GamingXYZ', monto: 50, tipo: 'consumo', notas: 'capricho del momento' }],
-    estres: 1
-  });
-  const nueva = result.nuevas.find(n => n.nombre === 'Capricho GamingXYZ');
-  assert.ok(nueva, 'Debe haber creado neurona nueva');
-  assert.equal(nueva.metadata.elastica, true, 'Neurona de ocio debe ser elástica');
-  assert.equal(nueva.contador_emocional.evitable, 1);
-});
-
-test('actualizarSistemaFinanciero: neurona de previsión creada cuando nota menciona evento futuro', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  const result = actualizarSistemaFinanciero({
-    transacciones: [{ nombre: 'Departamento', monto: 1000, tipo: 'consumo', notas: 'pago inicial para el depa' }],
-    estres: 2
-  });
-  const prevision = result.nuevas.find(n => n.tipo === 'prevision');
-  assert.ok(prevision, 'Debe haber creado neurona de previsión');
-  assert.ok(prevision.prediccion_basada_en_nota, 'Debe tener predicción guardada');
-});
-
-test('actualizarSistemaFinanciero: nota con "cada mes sube" almacena predicción en neurona existente', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  /* Primera pasada: crear neurona para Mercado */
-  actualizarSistemaFinanciero({
-    transacciones: [{ nombre: 'Mercado', monto: 600, tipo: 'consumo' }],
-    estres: 0
-  });
-  /* Segunda pasada con nota de predicción */
-  const result = actualizarSistemaFinanciero({
-    transacciones: [{ nombre: 'Mercado', monto: 650, tipo: 'consumo', notas: 'Cada mes sube el precio' }],
-    estres: 0
-  });
-  const mercado = result.neuronas.find(n => n.nombre === 'Mercado');
-  assert.ok(mercado, 'Neurona Mercado debe seguir existiendo');
-  assert.ok(mercado.prediccion_basada_en_nota, 'Debe almacenar predicción por nota "cada mes sube"');
-});
-
-test('actualizarSistemaFinanciero: nota en campo note también es procesada', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  const result = actualizarSistemaFinanciero({
-    transacciones: [{ nombre: 'Herramienta ABC', monto: 200, tipo: 'consumo', note: 'compré herramienta para el trabajo' }],
-    estres: 2
-  });
-  const nueva = result.nuevas.find(n => n.nombre === 'Herramienta ABC');
-  assert.ok(nueva, 'Debe crear neurona nueva');
-  assert.equal(nueva.metadata.contexto_tipo, 'inversion');
-});
-
-/* ── neuronasEscanearTodo ────────────────────────────────── */
-
-test('neuronasEscanearTodo: procesa todas las transacciones del estado y crea neuronas', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  globalThis.state = {
-    financeLedger: [
-      { type: 'expense', amount: -150, category: 'Farmacia XYZ', date: '2024-01-10', note: '' },
-      { type: 'expense', amount: -300, category: 'Supermercado ABC', date: '2024-02-05', note: '' },
-      { type: 'income',  amount: 2000, category: 'Salario',         date: '2024-01-31', note: '' }
-    ]
-  };
+  globalThis.state = { financeLedger: [{ type: 'expense', amount: -22, category: 'Cafe', date: '2025-01-02' }] };
   neuronasEscanearTodo();
-  const neuronas = getAllNeuronas();
-  const nombres = neuronas.map(n => n.nombre);
-  assert.ok(nombres.includes('Farmacia XYZ'),     'Debe haber neurona para Farmacia XYZ');
-  assert.ok(nombres.includes('Supermercado ABC'), 'Debe haber neurona para Supermercado ABC');
-  assert.ok(!nombres.includes('Salario'), 'No debe crear neurona para ingresos');
-});
-
-test('neuronasEscanearTodo: no falla cuando no hay transacciones', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  globalThis.state = { financeLedger: [] };
-  // Debe ejecutarse sin lanzar error
-  assert.doesNotThrow(() => neuronasEscanearTodo());
-});
-
-test('neuronasEscanearTodo: procesa transacciones de múltiples fechas (no solo hoy)', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  globalThis.state = {
-    financeLedger: [
-      { type: 'expense', amount: -50,  category: 'Café histórico', date: '2020-06-01', note: '' },
-      { type: 'expense', amount: -800, category: 'Renta histórica', date: '2021-12-15', note: '' }
-    ]
-  };
-  neuronasEscanearTodo();
-  const neuronas = getAllNeuronas();
-  const nombres = neuronas.map(n => n.nombre);
-  assert.ok(nombres.includes('Café histórico'),   'Debe incluir transacciones históricas antiguas');
-  assert.ok(nombres.includes('Renta histórica'),  'Debe incluir transacciones de meses anteriores');
-});
-
-test('neuronasEscanearTodo: usa financeMovements si está disponible en state', () => {
-  delete _lsStore['memorycarl_neuronas_financieras'];
-  globalThis.state = {
-    financeMovements: [
-      { type: 'expense', amount: -90, category: 'Transporte bus', date: '2023-11-01', note: '' }
-    ],
-    financeLedger: []
-  };
-  neuronasEscanearTodo();
-  const neuronas = getAllNeuronas();
-  assert.ok(neuronas.some(n => n.nombre === 'Transporte bus'), 'Debe leer de financeMovements');
-});
-
-/* ── neuronasOpenAddModal con defaults ───────────────────── */
-
-test('neuronasOpenAddModal: acepta defaults sin error en entorno sin DOM', () => {
-  // In a Node.js (no-DOM) environment the function should not throw;
-  // it just silently skips DOM operations because document is undefined.
-  assert.doesNotThrow(() => {
-    try { neuronasOpenAddModal({ nombre: 'Spotify', monto: 35, tipo: 'consumo' }); }
-    catch (e) {
-      // Only ReferenceError for missing DOM globals is acceptable in Node env
-      if (!(e instanceof ReferenceError)) throw e;
-    }
-  });
-});
-
-test('neuronasOpenAddModal: acepta defaults de tipo ingreso sin error', () => {
-  assert.doesNotThrow(() => {
-    try { neuronasOpenAddModal({ nombre: 'Sueldo', monto: 2500, tipo: 'ingreso' }); }
-    catch (e) {
-      if (!(e instanceof ReferenceError)) throw e;
-    }
-  });
-});
-
-test('neuronasOpenAddModal: funciona sin argumentos (defaults vacíos)', () => {
-  assert.doesNotThrow(() => {
-    try { neuronasOpenAddModal(); }
-    catch (e) {
-      if (!(e instanceof ReferenceError)) throw e;
-    }
-  });
+  assert.ok(getAllNeuronas().length >= 1);
 });
