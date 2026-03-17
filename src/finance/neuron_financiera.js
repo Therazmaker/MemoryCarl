@@ -104,11 +104,210 @@ export function actualizarSistemaFinanciero(datosDia) {
   return { neuronas: getAllNeuronas(), nuevas: legacyFromNeurons };
 }
 
-export function renderMapaNeuronal() {
-  return `<section class="finCard"><h3>Mapa Neuronal Financiero</h3><div id="mnGrafo">Neural finance active</div></section>`;
+const MN_FAMILY_COLOR = {
+  flow:        { bg: '#7c5cff', border: '#9d82ff', font: '#fff' },
+  habit:       { bg: '#2dd4bf', border: '#5eead4', font: '#0f2524' },
+  risk:        { bg: '#f87171', border: '#fca5a5', font: '#3b0000' },
+  opportunity: { bg: '#f59e0b', border: '#fcd34d', font: '#2c1a00' },
+  ingreso:     { bg: '#34d399', border: '#6ee7b7', font: '#052e16' },
+  consumo:     { bg: '#fb923c', border: '#fdba74', font: '#1c0500' },
+  pasivo:      { bg: '#e879f9', border: '#f0abfc', font: '#1e001e' },
+};
+
+function _mnColorFor(n) {
+  if (n.family && MN_FAMILY_COLOR[n.family]) return MN_FAMILY_COLOR[n.family];
+  if (n.tipo && MN_FAMILY_COLOR[n.tipo]) return MN_FAMILY_COLOR[n.tipo];
+  return { bg: '#6b7280', border: '#9ca3af', font: '#fff' };
 }
 
-export function neuronasInitGrafo() { return null; }
+function _mnPriorityBadge(p) {
+  if (!p) return '';
+  const map = { critical: 'high', high: 'high', medium: 'med', low: 'low' };
+  const cls = map[p] || 'low';
+  const label = { critical: 'Crítico', high: 'Alto', medium: 'Medio', low: 'Bajo' }[p] || p;
+  return `<span class="neuroBadge ${cls}">${label}</span>`;
+}
+
+function _mnFamilyLabel(f) {
+  return { flow: 'Flujo', habit: 'Hábito', risk: 'Riesgo', opportunity: 'Oportunidad' }[f] || f || '';
+}
+
+function _mnTypeLabel(t) {
+  const map = {
+    income_fixed: 'Ingreso Fijo', income_variable: 'Ingreso Variable',
+    expense_essential: 'Gasto Esencial', expense_discretionary: 'Gasto Discrecional',
+    debt_outflow: 'Salida Deuda', recurring_monthly: 'Recurrente Mensual',
+    silent_leak: 'Filtración Silenciosa', impulse_spend: 'Gasto Impulsivo',
+    easy_cut_candidate: 'Candidato a Cortar', savings_window: 'Ventana de Ahorro',
+    deteriorating_margin: 'Margen Deteriorado', overdraft_risk: 'Riesgo Sobregiro',
+  };
+  return map[t] || (t || '').replace(/_/g, ' ');
+}
+
+export function renderMapaNeuronal() {
+  const brainState = loadFinanceBrainState();
+  const neurons = brainState.neuronRegistry || [];
+  const legacy = brainState.legacyNeuronas || [];
+  const insights = brainState.insights || [];
+  const lastScan = brainState.lastScanAt;
+  const summary = brainState.latestScanSummary || {};
+
+  const activeCount = neurons.length;
+  const insightCount = insights.length;
+
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const monthData = (brainState.hippocampus?.monthly || {})[monthKey] || {};
+  const pressureRaw = Math.round((monthData.pressureScore || 0) * 100);
+  const leakRaw     = Math.round((monthData.leakScore || 0) * 100);
+  const pressureColor = pressureRaw > 70 ? '#f87171' : pressureRaw > 40 ? '#fbbf24' : '#34d399';
+  const leakColor     = leakRaw > 30 ? '#f87171' : leakRaw > 10 ? '#fbbf24' : '#34d399';
+
+  const scanLabel = lastScan
+    ? `Último escaneo: ${new Date(lastScan).toLocaleString('es-PE', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}`
+    : 'Sin escaneo previo';
+
+  const metricsHtml = `
+    <div class="mnMetricsGrid">
+      <div class="mnMetric">
+        <div class="mnMetricVal">${activeCount}</div>
+        <div class="mnMetricLabel">Neuronas activas</div>
+      </div>
+      <div class="mnMetric">
+        <div class="mnMetricVal">${insightCount}</div>
+        <div class="mnMetricLabel">Insights</div>
+      </div>
+      <div class="mnMetric">
+        <div class="mnMetricVal" style="color:${pressureColor}">${pressureRaw}%</div>
+        <div class="mnMetricLabel">Presión</div>
+      </div>
+      <div class="mnMetric">
+        <div class="mnMetricVal" style="color:${leakColor}">${leakRaw}%</div>
+        <div class="mnMetricLabel">Filtración</div>
+      </div>
+    </div>`;
+
+  const insightsHtml = insights.length ? `
+    <div class="mnSubTitle">💡 Insights</div>
+    <div class="neuroList">
+      ${insights.map(i => `
+        <div class="neuroItem">
+          <div class="neuroRow">
+            <div class="neuroMsg"><b>${i.title || ''}</b><br><span style="font-size:11px;opacity:.7">${i.message || ''}</span></div>
+            ${_mnPriorityBadge(i.priority)}
+          </div>
+        </div>`).join('')}
+    </div>` : `<div class="mnEmpty">Sin insights aún. Pulsa <b>Escanear</b> para analizar.</div>`;
+
+  const neuronsListHtml = neurons.length ? `
+    <div class="mnSubTitle" style="margin-top:14px">🔮 Neuronas detectadas</div>
+    <div class="mnNeuronsList">
+      ${neurons.map(n => {
+        const c = _mnColorFor(n);
+        const pct = Math.round((n.score || 0) * 100);
+        return `<div class="mnNeuronChip" style="border-color:${c.border};background:${c.bg}22">
+          <span class="mnNeuronDot" style="background:${c.bg}"></span>
+          <span class="mnNeuronName">${_mnTypeLabel(n.type)}</span>
+          <span class="mnNeuronScore">${pct}%</span>
+          <span class="mnNeuronFamily">${_mnFamilyLabel(n.family)}</span>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
+  const legendHtml = `
+    <div class="mnLegend">
+      ${Object.entries({ Flujo: '#7c5cff', Hábito: '#2dd4bf', Riesgo: '#f87171', Oportunidad: '#f59e0b' }).map(
+        ([l, c]) => `<div class="mnLegendItem"><span class="mnLegendDot" style="background:${c}"></span>${l}</div>`
+      ).join('')}
+    </div>`;
+
+  const isEmpty = activeCount === 0 && insightCount === 0;
+
+  return `
+    <section class="finSection">
+      <div class="finSectionHead">
+        <div class="finSectionTitle">🧠 Sistema Neuronal Financiero</div>
+        <div style="display:flex;gap:6px">
+          <button class="finIconBtn" onclick="neuronasRunScan()" title="Escanear">⚡ Escanear</button>
+          <button class="finIconBtn" onclick="neuronasReset();neuronasRunScan()" title="Reiniciar">🔄</button>
+        </div>
+      </div>
+      <div class="mnScanLabel">${scanLabel}</div>
+      ${metricsHtml}
+      <div class="mnGrafoWrap">
+        <div id="mnGrafo" class="mnGrafo">${isEmpty ? '<div class="mnEmpty" style="padding:40px 0">Pulsa ⚡ Escanear para activar el mapa neuronal</div>' : ''}</div>
+        ${legendHtml}
+      </div>
+      ${insightsHtml}
+      ${neuronsListHtml}
+    </section>`;
+}
+
+export function neuronasInitGrafo() {
+  const container = typeof document !== 'undefined' ? document.getElementById('mnGrafo') : null;
+  if (!container) return null;
+
+  const brainState = loadFinanceBrainState();
+  const patternNeurons = brainState.neuronRegistry || [];
+  const legacyNeurons = brainState.legacyNeuronas || [];
+
+  if (!patternNeurons.length && !legacyNeurons.length) return null;
+
+  const vis = (typeof window !== 'undefined' && window.vis) ? window.vis : null;
+  if (!vis) return null;
+
+  const nodes = [];
+  const edges = [];
+
+  patternNeurons.forEach(n => {
+    const c = _mnColorFor(n);
+    const pct = Math.round((n.score || 0) * 100);
+    nodes.push({
+      id: n.id,
+      label: `${_mnTypeLabel(n.type)}\n${pct}%`,
+      color: { background: c.bg, border: c.border, highlight: { background: c.bg, border: '#fff' } },
+      font: { color: c.font, size: 11, face: 'system-ui, sans-serif' },
+      size: 18 + Math.round((n.score || 0) * 18),
+      shape: n.family === 'risk' ? 'diamond' : n.family === 'opportunity' ? 'star' : 'ellipse',
+      title: `${_mnTypeLabel(n.type)} (${_mnFamilyLabel(n.family)})\nScore: ${pct}%\nConfianza: ${Math.round((n.confidence || 0) * 100)}%`,
+    });
+  });
+
+  legacyNeurons.forEach(n => {
+    if (nodes.find(x => x.id === n.id)) return;
+    const c = _mnColorFor(n);
+    nodes.push({
+      id: n.id,
+      label: (n.nombre || n.id).slice(0, 18),
+      color: { background: c.bg, border: c.border, highlight: { background: c.bg, border: '#fff' } },
+      font: { color: c.font, size: 11, face: 'system-ui, sans-serif' },
+      size: 14 + Math.round((n.peso || 0.5) * 12),
+      shape: 'box',
+      title: `${n.nombre || n.id} (${n.tipo || ''})\nMonto: ${n.monto || 0}`,
+    });
+    (n.conexiones || []).forEach(targetId => {
+      if (nodes.find(x => x.id === targetId) || legacyNeurons.find(x => x.id === targetId)) {
+        edges.push({ from: n.id, to: targetId, color: { color: c.bg + '88' }, width: 2 });
+      }
+    });
+  });
+
+  container.innerHTML = '';
+  container.style.height = '260px';
+
+  try {
+    new vis.Network(container, { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) }, {
+      physics: { enabled: true, stabilization: { iterations: 80 }, barnesHut: { gravitationalConstant: -4000, springLength: 95 } },
+      interaction: { dragNodes: true, zoomView: true, tooltipDelay: 100 },
+      edges: { smooth: { type: 'continuous' }, arrows: { to: { enabled: true, scaleFactor: 0.5 } } },
+      layout: { improvedLayout: true },
+    });
+  } catch (_e) {
+    container.innerHTML = '<div class="mnEmpty">No se pudo renderizar el grafo. Actualiza la página e intenta de nuevo.</div>';
+  }
+
+  return null;
+}
+
 export function neuronasOpenAddModal() { return null; }
 export function neuronasConfirmAdd() { return null; }
 
@@ -133,8 +332,31 @@ export function neuronasEscanearTodo() {
 }
 
 export function neuronasToggleFiltroNotas() { return null; }
-export function neuronasReset() { persistLegacy(JSON.parse(JSON.stringify(DEFAULT_NEURONAS))); }
+export function neuronasReset() {
+  const state = loadFinanceBrainState();
+  state.legacyNeuronas = JSON.parse(JSON.stringify(DEFAULT_NEURONAS));
+  state.neuronRegistry = [];
+  state.insights = [];
+  state.hippocampus = { daily: {}, weekly: {}, monthly: {}, patternHistory: [], neuronHistory: [] };
+  state.lastScanAt = null;
+  state.latestScanSummary = null;
+  saveFinanceBrainState(state);
+  try { localStorage.setItem(NEURONAS_LS_KEY, JSON.stringify(state.legacyNeuronas)); } catch (_e) {}
+}
 export function getFinanceBrainSummary() { return runFinanceBrainScan({}).summary; }
+
+export function neuronasRunScan() {
+  const g = typeof globalThis !== 'undefined' ? globalThis : {};
+  const movements = Array.isArray(g.state?.financeLedger) ? g.state.financeLedger
+    : Array.isArray(g.state?.financeMovements) ? g.state.financeMovements : [];
+  const accounts = Array.isArray(g.state?.financeAccounts) ? g.state.financeAccounts : [];
+  runFinanceBrainScan({ financeState: { movements, accounts } });
+  if (typeof g.view === 'function') {
+    g.view();
+    // Wait one tick for view() to flush the DOM before re-initializing the graph
+    setTimeout(() => { try { neuronasInitGrafo(); } catch (_e) {} }, 50);
+  }
+}
 
 if (typeof window !== 'undefined') {
   window.actualizarSistemaFinanciero = actualizarSistemaFinanciero;
@@ -146,5 +368,6 @@ if (typeof window !== 'undefined') {
   window.neuronasEscanearTodo = neuronasEscanearTodo;
   window.neuronasToggleFiltroNotas = neuronasToggleFiltroNotas;
   window.neuronasReset = neuronasReset;
+  window.neuronasRunScan = neuronasRunScan;
   window.getAllNeuronas = getAllNeuronas;
 }

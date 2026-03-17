@@ -3707,3 +3707,141 @@ body{
 .v4-dash-card h4{margin:0 0 8px 0;font-size:14px}
 .v4-dash-card table{width:100%;border-collapse:collapse;font-size:12px}
 .v4-dash-card th,.v4-dash-card td{padding:6px;border-bottom:1px solid #293147;text-align:left}
+
+/* ==================== MAPA NEURONAL FINANCIERO ==================== */
+
+.mnScanLabel {
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+  margin-bottom: 12px;
+}
+
+.mnMetricsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.mnMetric {
+  background: rgba(255,255,255,0.05);
+  border: 1.5px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  padding: 10px 6px;
+  text-align: center;
+}
+
+.mnMetricVal {
+  font-size: 18px;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+
+.mnMetricLabel {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-top: 3px;
+}
+
+.mnGrafoWrap {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.mnGrafo {
+  width: 100%;
+  min-height: 60px;
+  background: rgba(255,255,255,0.03);
+  border: 1.5px solid rgba(255,255,255,0.07);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mnEmpty {
+  font-size: 12px;
+  color: rgba(255,255,255,0.3);
+  text-align: center;
+  padding: 20px 16px;
+  line-height: 1.5;
+}
+
+.mnSubTitle {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 8px;
+}
+
+.mnLegend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.mnLegendItem {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.45);
+  font-weight: 700;
+}
+
+.mnLegendDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mnNeuronsList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.mnNeuronChip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 99px;
+  border: 1.5px solid;
+  font-size: 11px;
+}
+
+.mnNeuronDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mnNeuronName {
+  font-weight: 700;
+  color: rgba(255,255,255,0.85);
+}
+
+.mnNeuronScore {
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(255,255,255,0.5);
+  min-width: 28px;
+}
+
+.mnNeuronFamily {
+  font-size: 9px;
+  color: rgba(255,255,255,0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
