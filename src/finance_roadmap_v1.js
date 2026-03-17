@@ -494,8 +494,9 @@ try{
 /* ── Styles ─────────────────────────────────────────────── */
 function _roadmapStyles(){
   if(document.getElementById('_rmStyles')) return '';
-  return `
-  <style id="_rmStyles">
+  const s = document.createElement('style');
+  s.id = '_rmStyles';
+  s.textContent = `
   /* ── Wrap ── */
   .rmWrap { padding-bottom: 20px; }
 
@@ -696,6 +697,7 @@ function _roadmapStyles(){
   .rmFreeAmt { font-size: 28px; font-weight: 800; letter-spacing: -1px; }
   .rmFreeGood .rmFreeAmt { color: #36d399; }
   .rmFreeBad  .rmFreeAmt { color: #fb7185; }
-  </style>
   `;
+  document.head.appendChild(s);
+  return '';
 }
