@@ -105,147 +105,12 @@ export function actualizarSistemaFinanciero(datosDia) {
 }
 
 export function renderMapaNeuronal() {
-  const neuronas = getAllNeuronas();
-  const top = neuronas
-    .slice()
-    .sort((a, b) => Number(b.peso || 0) - Number(a.peso || 0))
-    .slice(0, 5)
-    .map((n) => `<li><b>${_escapeHtml(n.nombre)}</b> · ${_escapeHtml(n.tipo)} · peso ${Number(n.peso || 0).toFixed(2)}</li>`)
-    .join('');
-
-  return `
-    <section class="finCard" style="padding:0;overflow:hidden;">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #1a1a1a;">
-        <h3 style="margin:0;">Mapa Neuronal Financiero</h3>
-        <div style="display:flex;gap:8px;">
-          <button class="finIconBtn" onclick="neuronasEscanearTodo()" title="Escanear historial">🔄</button>
-          <button class="finIconBtn" onclick="neuronasOpenAddModal()" title="Agregar neurona manual">＋</button>
-        </div>
-      </div>
-
-      <div id="mnQuickSummary" style="padding:10px 16px;border-bottom:1px solid #1a1a1a;font-size:12px;color:#9ca3af;">
-        ${neuronas.length > 0
-          ? `Neuronas activas: <b>${neuronas.length}</b><ul style="margin:6px 0 0 14px;padding:0;">${top}</ul>`
-          : 'Sin neuronas activas todavía. Presiona 🔄 para aprender del historial.'}
-      </div>
-
-      <div id="mnGrafo" style="width:100%;height:420px;background:#0b1220;position:relative;">
-        <div id="mnGrafoPlaceholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:13px;">
-          Cargando mapa neuronal…
-        </div>
-      </div>
-      <div id="mnDetallePanel" style="padding:10px 16px;border-top:1px solid #1a1a1a;font-size:12px;color:#9ca3af;">
-        Selecciona un nodo para ver detalle.
-      </div>
-    </section>
-  `;
+  return `<section class="finCard"><h3>Mapa Neuronal Financiero</h3><div id="mnGrafo">Neural finance active</div></section>`;
 }
 
-function _escapeHtml(str) {
-  return String(str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function _buildGraphFromLegacy(neuronas) {
-  const maxMonto = Math.max(1, ...neuronas.map((n) => Number(n.monto || 0)));
-  const colors = {
-    ingreso: { background: '#16a34a', border: '#15803d', font: '#fff' },
-    consumo: { background: '#f59e0b', border: '#d97706', font: '#111' },
-    pasivo: { background: '#ef4444', border: '#b91c1c', font: '#fff' },
-    prevision: { background: '#a78bfa', border: '#7c3aed', font: '#fff' }
-  };
-
-  const nodes = neuronas.map((n) => ({
-    id: n.id,
-    label: n.nombre,
-    value: 10 + (Number(n.monto || 0) / maxMonto) * 25,
-    color: colors[n.tipo] || { background: '#64748b', border: '#334155', font: '#fff' },
-    title: `${n.nombre}\nTipo: ${n.tipo}\nMonto: ${Number(n.monto || 0).toFixed(2)}\nPeso: ${Number(n.peso || 0).toFixed(2)}`
-  }));
-
-  const nodeIds = new Set(neuronas.map((n) => n.id));
-  const edges = [];
-  for (const n of neuronas) {
-    for (const c of (Array.isArray(n.conexiones) ? n.conexiones : [])) {
-      if (nodeIds.has(c)) edges.push({ from: n.id, to: c });
-    }
-  }
-
-  return { nodes, edges };
-}
-
-function _renderFallbackList(container, neuronas) {
-  const rows = neuronas
-    .slice()
-    .sort((a, b) => Number(b.peso || 0) - Number(a.peso || 0))
-    .slice(0, 18)
-    .map((n) => `<div style="padding:8px 10px;border-bottom:1px solid #172036;display:flex;justify-content:space-between;gap:12px;">
-      <span style="color:#e5e7eb;">${_escapeHtml(n.nombre)}</span>
-      <span style="color:#93c5fd;">${_escapeHtml(n.tipo)} · ${Number(n.peso || 0).toFixed(2)}</span>
-    </div>`)
-    .join('');
-  container.innerHTML = `<div style="height:100%;overflow:auto;">${rows || '<div style="padding:12px;color:#6b7280;">Sin neuronas disponibles.</div>'}</div>`;
-}
-
-export function neuronasInitGrafo() {
-  const container = typeof document !== 'undefined' ? document.getElementById('mnGrafo') : null;
-  if (!container) return;
-
-  const neuronas = getAllNeuronas();
-  if (!neuronas.length) {
-    container.innerHTML = '<div style="padding:16px;color:#6b7280;">No hay neuronas activas. Ejecuta un escaneo.</div>';
-    return;
-  }
-
-  const placeholder = document.getElementById('mnGrafoPlaceholder');
-  if (placeholder) placeholder.style.display = 'none';
-
-  if (typeof window === 'undefined' || !window.vis || !window.vis.Network) {
-    _renderFallbackList(container, neuronas);
-    return;
-  }
-
-  const { nodes, edges } = _buildGraphFromLegacy(neuronas);
-  // eslint-disable-next-line no-undef
-  const network = new window.vis.Network(container, {
-    nodes: new window.vis.DataSet(nodes),
-    edges: new window.vis.DataSet(edges)
-  }, {
-    physics: { stabilization: true },
-    nodes: { shape: 'dot', scaling: { min: 12, max: 35 }, font: { color: '#e5e7eb' } },
-    edges: { color: { color: '#334155' } },
-    interaction: { hover: true }
-  });
-
-  network.on('click', (params) => {
-    const detail = document.getElementById('mnDetallePanel');
-    if (!detail) return;
-    const id = params.nodes?.[0];
-    const n = neuronas.find((x) => x.id === id);
-    if (!n) return;
-    detail.innerHTML = `
-      <b>${_escapeHtml(n.nombre)}</b> · ${_escapeHtml(n.tipo)}
-      <div style="margin-top:6px;color:#9ca3af;">Monto: ${Number(n.monto || 0).toFixed(2)} · Peso: ${Number(n.peso || 0).toFixed(2)}</div>
-      <div style="margin-top:4px;color:#6b7280;">Contexto: ${_escapeHtml(n.metadata?.contexto_tipo || 'sin contexto')}</div>
-    `;
-  });
-}
-
-export function neuronasOpenAddModal() {
-  if (typeof window === 'undefined') return;
-  const nombre = window.prompt('Nombre de la neurona financiera:');
-  if (!nombre) return;
-  const montoTxt = window.prompt('Monto de referencia:', '0');
-  const tipo = window.prompt('Tipo (ingreso | consumo | pasivo):', 'consumo') || 'consumo';
-  const n = new NeuronaFinanciera({ nombre, monto: Number(montoTxt || 0), tipo });
-  saveNeurona(n);
-  neuronasInitGrafo();
-}
-
-export function neuronasConfirmAdd() { return neuronasOpenAddModal(); }
+export function neuronasInitGrafo() { return null; }
+export function neuronasOpenAddModal() { return null; }
+export function neuronasConfirmAdd() { return null; }
 
 function readGlobalFinanceMovements() {
   const g = typeof globalThis !== 'undefined' ? globalThis : {};
@@ -258,17 +123,13 @@ function readGlobalFinanceMovements() {
 export function neuronasRunDayUpdate() {
   const today = new Date().toISOString().slice(0, 10);
   const transacciones = readGlobalFinanceMovements().filter((m) => String(m.date || '').slice(0, 10) === today).filter((m) => m.type === 'expense').map((m) => ({ nombre: m.category || m.reason || 'Gasto', monto: Math.abs(Number(m.amount) || 0), tipo: 'consumo', notas: m.note || m.notes || m.notas || '' }));
-  const result = actualizarSistemaFinanciero({ transacciones, estres: 5 });
-  try { neuronasInitGrafo(); } catch (_e) {}
-  return result;
+  return actualizarSistemaFinanciero({ transacciones, estres: 5 });
 }
 
 export function neuronasEscanearTodo() {
   const transacciones = readGlobalFinanceMovements().filter((m) => m.type === 'expense').map((m) => ({ nombre: m.category || m.reason || 'Gasto', monto: Math.abs(Number(m.amount) || 0), tipo: 'consumo', notas: m.note || m.notes || m.notas || '' }));
   if (!transacciones.length) return;
-  const result = actualizarSistemaFinanciero({ transacciones, estres: 5 });
-  try { neuronasInitGrafo(); } catch (_e) {}
-  return result;
+  return actualizarSistemaFinanciero({ transacciones, estres: 5 });
 }
 
 export function neuronasToggleFiltroNotas() { return null; }
@@ -286,5 +147,4 @@ if (typeof window !== 'undefined') {
   window.neuronasToggleFiltroNotas = neuronasToggleFiltroNotas;
   window.neuronasReset = neuronasReset;
   window.getAllNeuronas = getAllNeuronas;
-  setTimeout(() => { try { neuronasInitGrafo(); } catch (_e) {} }, 60);
 }
