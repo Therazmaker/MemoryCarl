@@ -13674,21 +13674,21 @@ function _ensureFcStyles(){if(!document.getElementById('fcStyles')){
     /* ── Floating modal (nueva cat / nuevo grupo) ── */
     .fc-overlay{
       position:fixed;inset:0;z-index:9999;
-      display:flex;align-items:flex-end;justify-content:center;
+      display:flex;align-items:center;justify-content:center;
       background:rgba(0,0,0,.6);
       backdrop-filter:blur(6px);
-      padding:0 0 var(--navH,68px);
+      padding:16px;
       animation:fcFadeIn .18s ease;
     }
     .fc-sheet{
       background:linear-gradient(180deg,rgba(30,24,50,.98),rgba(15,12,28,.99));
       border:1px solid rgba(255,255,255,.12);
-      border-radius:24px 24px 0 0;
+      border-radius:24px;
       width:100%;max-width:480px;
-      box-shadow:0 -20px 60px rgba(0,0,0,.6);
+      box-shadow:0 20px 60px rgba(0,0,0,.6);
       overflow:hidden;
       animation:fcSlideUp .24s cubic-bezier(.34,1.4,.64,1);
-      max-height:calc(92vh - var(--navH,68px));
+      max-height:85vh;
       display:flex;flex-direction:column;
     }
     .fc-drag{
@@ -14947,7 +14947,7 @@ function openFinanceCommitmentModal(existing){
   const overlay = document.createElement('div');
   overlay.className = 'fc-overlay';
   overlay.innerHTML = `
-    <div class="fc-sheet" style="max-height:calc(95vh - var(--navH,68px))">
+    <div class="fc-sheet" style="max-height:85vh">
       <div class="fc-drag"></div>
       <div class="fc-sh-head">
         <div class="fc-sh-title">${existing ? '✏️ Editar compromiso' : '📋 Nuevo compromiso'}</div>
