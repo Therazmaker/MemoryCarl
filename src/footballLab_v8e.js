@@ -18,6 +18,7 @@ import { saveUclMatch } from "./ucl_memory_layer.js";
 import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule, syncTrackerMatchesIntoBrainV2 } from "./footballlab/results_memory_sync.js";
 import { buildBitacoraPerformanceLab, normalizePickRecord } from "./footballlab/bitacora_performance.js";
 import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calcPhaseMetrics, phaseAlertFlags, buildPhasePostAnalysis } from "./footballlab/bitacora_phase_mode.js";
+import { buildVideoScoutLayer } from "./footballlab/video_scout_integration.js";
 
 // ─── Claude window.storage shim ──────────────────────────────────────────────
 // window.storage is async but the app uses localStorage synchronously.
@@ -12217,6 +12218,45 @@ RESPONDE SOLO CON JSON usando este schema:
           radarFlags.push('UPSET_RISK_HIGH');
         }
 
+        // ── Video Scout Integration Layer ─────────────────────────────────────
+        const vsRecordsHome = vsGetTeamRecords(home.id);
+        const vsRecordsAway = vsGetTeamRecords(away.id);
+        const scoutHome     = vsComputeProfile(vsRecordsHome);
+        const scoutAway     = vsComputeProfile(vsRecordsAway);
+
+        const radarCtxForScout = {
+          strengthGap:          scorePack.strengthGap,
+          mktFavIsHome,
+          favoritePressureIndex,
+          underdogDefenseIndex,
+          htCleanSheetSignal,
+          type,
+          strengthHome,
+          strengthAway,
+          favoriteName,
+          underdogName,
+          home: home.name || 'Local',
+          away: away.name || 'Visitante',
+        };
+
+        const videoScout = buildVideoScoutLayer({
+          vsRecordsHome,
+          vsRecordsAway,
+          scoutHome,
+          scoutAway,
+          radarCtx: radarCtxForScout,
+        });
+
+        // Añadir flags del scout a los flags del radar (sin duplicados)
+        if(videoScout.available && Array.isArray(videoScout.flags)){
+          videoScout.flags.forEach(f => { if(!radarFlags.includes(f)) radarFlags.push(f); });
+        }
+
+        // Ajustar studyScore según tacticalMismatchScore (partidos con desajuste táctico suben)
+        const mismatch = videoScout.available ? (videoScout.tacticalMismatchScore || 0) : 0;
+        const mismatchBonus = mismatch >= 50 ? Math.round((mismatch - 50) * 0.3) : 0;
+        const adjustedStudyScore = Math.min(100, scorePack.studyScore + mismatchBonus);
+
         return {
           id: m.id || uid('radar'),
           league,
@@ -12233,7 +12273,7 @@ RESPONDE SOLO CON JSON usando este schema:
           fsiHome: Number(fsiHome.toFixed(1)),
           fsiAway: Number(fsiAway.toFixed(1)),
           avgFSI: Number(scorePack.avgFSI.toFixed(1)),
-          studyScore: scorePack.studyScore,
+          studyScore: adjustedStudyScore,
           type,
           flags: radarFlags,
           formHome: resolvedFormHome,
@@ -12266,7 +12306,7 @@ RESPONDE SOLO CON JSON usando este schema:
             fsiHome,
             fsiAway,
             avgFSI: scorePack.avgFSI,
-            studyScore: scorePack.studyScore,
+            studyScore: adjustedStudyScore,
             type,
             flags: radarFlags,
             formHome: resolvedFormHome,
@@ -12275,8 +12315,10 @@ RESPONDE SOLO CON JSON usando este schema:
             psiAway,
             odds: resolvedOdds
           }),
-          scoutHome: vsComputeProfile(vsGetTeamRecords(home.id)),
-          scoutAway: vsComputeProfile(vsGetTeamRecords(away.id))
+          scoutHome,
+          scoutAway,
+          // ── Video Scout Integration (v4)
+          videoScout,
         };
       });
   }
@@ -14540,7 +14582,98 @@ RESPONDE SOLO CON JSON usando este schema:
 
           ${m.flags.length ? `<div class="rdx-flags">${m.flags.map((f)=>`<span class="rdx-flag ${flagAlert(f)}">${f.replaceAll('_',' ')}</span>`).join('')}</div>` : ''}
 
-          ${(m.scoutHome || m.scoutAway) ? `
+          ${m.videoScout?.available ? (() => {
+            const vs = m.videoScout;
+            const coverageLabel = vs.coverage.home && vs.coverage.away ? 'BOTH' : vs.coverage.home ? 'HOME ONLY' : 'AWAY ONLY';
+            const coverageColor = vs.coverage.home && vs.coverage.away ? '#3fb950' : '#e3b341';
+            const mismatchColor = vs.tacticalMismatchScore >= 75 ? '#f85149' : vs.tacticalMismatchScore >= 50 ? '#f59e0b' : vs.tacticalMismatchScore >= 25 ? '#e3b341' : '#6e7681';
+            const reliabilityLabel = (r) => r >= 0.65 ? 'alta' : r >= 0.40 ? 'media' : 'baja';
+            const levelIcon = (l) => l === 'high' ? '🟢' : l === 'medium' ? '🟡' : '🔴';
+            const halfIcon  = (l) => l === 'high' ? '⬆' : l === 'medium' ? '→' : '⬇';
+
+            const renderMiniProfile = (profile, teamName, reliability) => {
+              if(!profile) return `<div style="color:#4a5568;font-size:10px;padding:8px 0;">Sin scout · ${escapeHtml(teamName)}</div>`;
+              const tagBg = '#1a1f2e';
+              const topTags = (profile.tags || []).slice(0, 3);
+              return `
+                <div style="flex:1;min-width:160px;">
+                  <div style="font-size:9px;font-weight:700;color:#6e7681;text-transform:uppercase;margin-bottom:5px;">${escapeHtml(teamName)} <span style="color:#484f58;font-weight:400;">fiabilidad: ${reliabilityLabel(reliability)}</span></div>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px;">
+                    <span style="font-size:9px;background:#0d1117;border-radius:3px;padding:2px 5px;">Dominio: <b style="color:${levelIcon(profile.dominance)==='🟢'?'#3fb950':levelIcon(profile.dominance)==='🟡'?'#e3b341':'#f85149'}">${profile.dominance}</b></span>
+                    <span style="font-size:9px;background:#0d1117;border-radius:3px;padding:2px 5px;">Amenaza: <b style="color:${levelIcon(profile.threat)==='🟢'?'#3fb950':levelIcon(profile.threat)==='🟡'?'#e3b341':'#f85149'}">${profile.threat}</b></span>
+                    <span style="font-size:9px;background:#0d1117;border-radius:3px;padding:2px 5px;">Progresión: <b style="color:${profile.progression==='strong'?'#3fb950':profile.progression==='weak'?'#f85149':'#e3b341'}">${profile.progression}</b></span>
+                  </div>
+                  ${profile.temporalRisk && profile.temporalRisk !== 'unknown' ? `<div style="font-size:9px;color:#8892a4;margin-bottom:4px;">⏱ ${profile.temporalRisk.replaceAll('_',' ')}</div>` : ''}
+                  <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                    ${topTags.map(t=>`<span style="font-size:8px;background:${tagBg};border:1px solid #30363d;color:#8892a4;border-radius:3px;padding:1px 5px;">${t.replaceAll('_',' ')}</span>`).join('')}
+                  </div>
+                </div>`;
+            };
+
+            const scoutFlagLabels = {
+              'FAVORITE_FALSE_CONTROL':     { label: 'Favorite False Control',     color: '#f85149' },
+              'FAVORITE_LOW_REAL_THREAT':   { label: 'Favorite Low Real Threat',   color: '#f59e0b' },
+              'UNDERDOG_TRANSITION_LIVE':   { label: 'Underdog Transition Live',   color: '#e3b341' },
+              'UNDERDOG_MATCHUP_LIVE_RISK': { label: 'Underdog Matchup Live Risk', color: '#f85149' },
+              'CLEAN_TYPE_MAY_BE_DECEPTIVE':{ label: 'Clean Type May Be Deceptive',color: '#f59e0b' },
+              'LIVE_VOLATILITY_RISK':       { label: 'Live Volatility Risk',        color: '#f85149' },
+              'HT_UNDER_VALUE_CANDIDATE':   { label: 'HT Under Candidate',          color: '#3fb950' },
+              'LATE_GOAL_RISK':             { label: 'Late Goal Risk',               color: '#f59e0b' },
+              'SECOND_HALF_OPENING_PATTERN':{ label: '2H Opening Pattern',           color: '#e3b341' },
+              'FAKE_STERILE_DOMINANCE':     { label: 'Fake Sterile Dominance',       color: '#f59e0b' },
+              'PRESSURE_ACCUMULATION_RISK': { label: 'Pressure Accumulation Risk',   color: '#e3b341' },
+            };
+
+            const scoutFlagsHtml = (vs.flags || []).filter(f => scoutFlagLabels[f]).map(f => {
+              const def = scoutFlagLabels[f];
+              return `<span style="font-size:9px;font-weight:700;background:${def.color}18;border:1px solid ${def.color}44;color:${def.color};border-radius:3px;padding:2px 7px;">${def.label}</span>`;
+            }).join('');
+
+            const hp = vs.halfProfile;
+            const halfHtml = hp ? `
+              <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+                <div style="background:#0d1117;border-radius:4px;padding:5px 8px;flex:1;min-width:100px;">
+                  <div style="font-size:8px;color:#6e7681;margin-bottom:3px;">1T PERFIL</div>
+                  <div style="font-size:10px;color:#8892a4;">Estabilidad: <b>${hp.firstHalf.stability}</b></div>
+                  <div style="font-size:10px;color:#8892a4;">Riesgo gol: <b style="color:${hp.firstHalf.goalRisk==='high'?'#f85149':hp.firstHalf.goalRisk==='low'?'#3fb950':'#e3b341'};">${hp.firstHalf.goalRisk}</b></div>
+                </div>
+                <div style="background:#0d1117;border-radius:4px;padding:5px 8px;flex:1;min-width:100px;">
+                  <div style="font-size:8px;color:#6e7681;margin-bottom:3px;">2T PERFIL</div>
+                  <div style="font-size:10px;color:#8892a4;">Estabilidad: <b>${hp.secondHalf.stability}</b></div>
+                  <div style="font-size:10px;color:#8892a4;">Riesgo gol: <b style="color:${hp.secondHalf.goalRisk==='high'?'#f85149':hp.secondHalf.goalRisk==='low'?'#3fb950':'#e3b341'};">${hp.secondHalf.goalRisk}</b></div>
+                </div>
+              </div>` : '';
+
+            const adjustmentsHtml = vs.adjustments?.scoutAdjustmentSummary?.length ? `
+              <div style="margin-top:8px;padding:6px 8px;background:#0d1117;border-radius:4px;border-left:2px solid #f5c842;">
+                ${vs.adjustments.scoutAdjustmentSummary.map(s=>`<div style="font-size:9px;color:#8892a4;margin-bottom:2px;">→ ${escapeHtml(s)}</div>`).join('')}
+                ${vs.adjustments.tacticalValueNote ? `<div style="font-size:9px;font-weight:700;color:#f5c842;margin-top:3px;">${escapeHtml(vs.adjustments.tacticalValueNote)}</div>` : ''}
+              </div>` : '';
+
+            const insightsHtml = (vs.insights || []).length ? `
+              <div style="margin-top:8px;">
+                ${vs.insights.map(i=>`<div style="font-size:9px;color:#6e7681;margin-bottom:3px;">• ${escapeHtml(i)}</div>`).join('')}
+              </div>` : '';
+
+            return `
+            <div style="margin:10px 0 0;background:rgba(30,20,5,0.7);border:1px solid rgba(245,200,66,0.2);border-radius:8px;padding:12px 14px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#f5c842;text-transform:uppercase;">🎬 Video Scout</div>
+                <span style="font-size:9px;font-weight:700;background:${coverageColor}18;border:1px solid ${coverageColor}44;color:${coverageColor};border-radius:3px;padding:1px 6px;">${coverageLabel}</span>
+                ${vs.tacticalMismatchScore > 0 ? `<span style="font-size:9px;font-weight:700;background:${mismatchColor}18;border:1px solid ${mismatchColor}44;color:${mismatchColor};border-radius:3px;padding:1px 6px;" title="Desajuste entre radar estructural y scout táctico">MISMATCH ${vs.tacticalMismatchScore} · ${(vs.mismatchLabel||'').toUpperCase()}</span>` : ''}
+                <span style="font-size:8px;color:#484f58;margin-left:auto;" title="Video Scout usa highlights registrados manualmente. Es una capa táctica contextual, no una métrica absoluta.">ℹ️ capa contextual</span>
+              </div>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:${scoutFlagsHtml||hp||insightsHtml?'8px':'0'};">
+                ${renderMiniProfile(vs.profiles?.home, m.home, vs.reliability?.home || 0)}
+                ${renderMiniProfile(vs.profiles?.away, m.away, vs.reliability?.away || 0)}
+              </div>
+              ${scoutFlagsHtml ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;">${scoutFlagsHtml}</div>` : ''}
+              ${halfHtml}
+              ${adjustmentsHtml}
+              ${insightsHtml}
+              <div style="font-size:8px;color:#484f58;margin-top:8px;border-top:1px solid #21262d;padding-top:6px;">ℹ️ Video Scout usa highlights registrados manualmente. Capa táctica contextual — no es métrica absoluta de fuerza.</div>
+            </div>`;
+          })() : (m.scoutHome || m.scoutAway) ? `
           <div style="margin:10px 0 0;background:rgba(30,20,5,0.7);border:1px solid rgba(245,200,66,0.2);border-radius:8px;padding:12px 14px;">
             <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#f5c842;text-transform:uppercase;margin-bottom:10px;">🎬 Scout Táctico · Video Scout</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
