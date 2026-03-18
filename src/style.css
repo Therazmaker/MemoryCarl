@@ -2947,6 +2947,9 @@ body{
   display: flex;
   gap: 10px;
   margin-top: 6px;
+  flex-shrink: 0;
+  padding: 16px 20px 20px;
+  border-top: 1px solid rgba(255,255,255,0.08);
 }
 .slQPCancel {
   flex: 1;
@@ -2972,6 +2975,7 @@ body{
   transition: all 0.12s;
 }
 .slQPConfirm:active { background: rgba(54,211,153,0.35); }
+.spiSaveTop { flex: none !important; font-size: 13px !important; padding: 7px 14px !important; border-radius: 12px !important; }
 
 /* ====================== BIBLIOTECA MODAL ====================== */
 
