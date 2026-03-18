@@ -12903,6 +12903,30 @@ RESPONDE SOLO CON JSON usando este schema:
           return Number.isFinite(d) && d>=0 && d<=21;
         })
         .sort((a,b)=>compareByDateAsc(a,b));
+      const farFutureMatches = (team.futureMatches || [])
+        .filter(m=>{
+          const d = diffDaysFromToday(m.date);
+          return Number.isFinite(d) && d>21;
+        })
+        .sort((a,b)=>compareByDateAsc(a,b));
+      const farFutureCards = farFutureMatches.map(match=>{
+        const rival = db.teams.find(t=>t.id===match.rivalTeamId);
+        const d = Math.round(diffDaysFromToday(match.date));
+        return `
+          <div class="fl-card" style="margin-bottom:8px;background:#0d1117;">
+            <div class="fl-row" style="justify-content:space-between;align-items:flex-start;gap:8px;">
+              <div>
+                <div style="font-weight:800;">${team.name} vs ${rival?.name || "Rival"}</div>
+                <div class="fl-mini">${match.competition || "Liga"} • ${match.date || "-"} • ${match.isHome ? "Local" : "Visitante"} • en ${d} días</div>
+              </div>
+              <span class="fl-chip">${match.importanceTag || "Programado"}</span>
+            </div>
+            <div class="fl-row" style="margin-top:8px;gap:8px;">
+              <button class="fl-btn" data-edit-future-match="${match.id}">Editar partido</button>
+            </div>
+          </div>
+        `;
+      }).join("");
       const intRows = futureMatches.map(match=>{
         const rival = db.teams.find(t=>t.id===match.rivalTeamId);
         const out = calculateInterestSignals({ team, rival, match, allFutureMatches: team.futureMatches || [], db });
@@ -13301,6 +13325,13 @@ RESPONDE SOLO CON JSON usando este schema:
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">1) Agenda Próxima (7–21 días)</div>
           ${agendaCards || "<div class='fl-muted'>Sin partidos futuros en ventana 21 días.</div>"}
+        </div>
+        <div class="fl-card">
+          <div class="fl-row" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-weight:800;">📋 Calendario Registrado (+21 días)</div>
+            <div class="fl-mini" style="opacity:.7;">Los partidos aparecerán en Agenda Próxima al entrar en la ventana de 21 días</div>
+          </div>
+          ${farFutureCards || "<div class='fl-muted'>Sin partidos programados más allá de 21 días. Usa «+ Próximo partido» para agregar.</div>"}
         </div>
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">2) Matriz por partido (heatmap)</div>
