@@ -12873,6 +12873,21 @@ RESPONDE SOLO CON JSON usando este schema:
         .map(t=>`<option value="${t.id}" ${t.id===team.id?"selected":""}>${t.name}</option>`)
         .join("");
 
+      const leagueTableHTML = (()=>{
+        const leagueId = teamCompetitions.length ? teamCompetitions[0].id : "";
+        const tableData = buildLeagueTableSnapshot(db, leagueId, new Date().toISOString().slice(0,10));
+        const allTeamsMap = new Map(db.teams.map(t=>[t.id, t.name]));
+        if(!tableData.rows.length) return "<tr><td colspan='7' class='fl-muted'>Sin datos de clasificación. Añade resultados de partidos para generar la tabla.</td></tr>";
+        return tableData.rows.map(row=>{
+          const name = allTeamsMap.get(row.teamId) || row.teamId;
+          const gd = row.gf - row.ga;
+          const highlight = row.teamId === team.id;
+          return `<tr style="${highlight?'background:rgba(31,111,235,.18);font-weight:700;':''}">`
+            + `<td>${row.rank}</td><td>${name}${highlight?' ★':''}</td><td>${row.played}</td>`
+            + `<td>${row.gf}</td><td>${row.ga}</td><td>${gd>=0?'+':''}${gd}</td><td>${row.points}</td></tr>`;
+        }).join("");
+      })();
+
       content.innerHTML = `
         <div class="fl-card">
           <div class="fl-row" style="justify-content:space-between;align-items:center;gap:10px;">
@@ -12894,15 +12909,15 @@ RESPONDE SOLO CON JSON usando este schema:
             <button class="fl-btn" id="confirmLinkLeague">Guardar vínculo</button>
             <span class="fl-mini" id="linkLeagueStatus"></span>
           </div>
-          <div class="fl-row" style="margin-top:8px;">${["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"].map(t=>`<span class="fl-muted" style="padding:4px 6px;border-bottom:${t==='PLANTILLA'?'2px solid #ff3b69':'2px solid transparent'};">${t}</span>`).join("")}</div>
+          <div class="fl-row" id="teamProfileTabs" style="margin-top:8px;gap:2px;flex-wrap:wrap;">${["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"].map(t=>`<button class="fl-btn ${t==='PLANTILLA'?'active':''}" data-team-tab="${t}" style="font-size:11px;padding:4px 8px;">${t}</button>`).join("")}</div>
         </div>
+        <div id="teamTabPanel-RESUMEN" style="display:none">
         <div class="fl-card fl-row">
           <input id="teamStadium" class="fl-input" placeholder="Estadio" value="${team.meta.stadium || ''}">
           <input id="teamCity" class="fl-input" placeholder="Ciudad" value="${team.meta.city || ''}">
           <input id="teamCapacity" class="fl-input" placeholder="Capacidad" value="${team.meta.capacity || ''}">
           <button class="fl-btn" id="saveMeta">Guardar equipo</button>
           <button class="fl-btn" id="backLiga">Volver a ligas</button>
-        </div>
         <div class="fl-card">
           <div class="fl-row" style="justify-content:space-between;align-items:center;gap:8px;">
             <div style="font-weight:900;font-size:18px;">📦 TeamPack v1 · ${team.name}</div>
@@ -12953,32 +12968,6 @@ RESPONDE SOLO CON JSON usando este schema:
             <div id="teamPackTrainOutput" class="fl-mini" style="margin-top:8px;">Sin entrenamiento ejecutado.</div>
             <div id="teamPackPowerDashboard" class="fl-card" style="margin-top:10px;display:none;"></div>
           </div>
-        </div>
-        <div class="fl-card context-box">
-          <div class="fl-title" style="font-size:14px;">🧠 Contexto Estratégico</div>
-          <div class="fl-grid two">
-            <div class="fl-field">
-              <label>Racha/Tendencia Actual</label>
-              <input type="text" class="fl-input" id="ctx-racha" placeholder="Ej: 5 partidos sin ganar en casa" value="${contexto.rachaLocal || ''}">
-            </div>
-            <div class="fl-field">
-              <label>Bajas Sensibles</label>
-              <input type="text" class="fl-input" id="ctx-bajas" placeholder="Jugadores lesionados" value="${(contexto.ausenciasClave || []).join(', ')}">
-            </div>
-          </div>
-          <div class="fl-field" style="margin-top:10px;">
-            <label>Patrones Detectados (Insight)</label>
-            <textarea class="fl-text" id="ctx-insights" style="min-height:60px;" placeholder="Ej: Solo 1 de los últimos 12 tuvo +1 gol en el 1T">${(contexto.patrones || []).join(', ')}</textarea>
-          </div>
-          <div class="fl-field" style="margin-top:10px;">
-            <label>Factor por día (JSON opcional)</label>
-            <input type="text" class="fl-input" id="ctx-factor-dia" placeholder='{"Tuesday": -0.2}' value='${JSON.stringify(contexto.factorDia || {})}'>
-          </div>
-        </div>
-        <div class="fl-card">
-          <div style="font-weight:800;margin-bottom:6px;">Importar plantilla (JSON o texto pegado)</div>
-          <textarea id="squadImport" class="fl-text" placeholder='Pega JSON o texto copiado (#, Name, Age, MIN...)'></textarea>
-          <div class="fl-row" style="margin-top:8px;"><button class="fl-btn" id="runSquadImport">Importar plantilla</button><span id="squadStatus" class="fl-muted"></span></div>
         </div>
         <div class="fl-card">
           <div style="font-weight:900;font-size:18px;margin-bottom:8px;">🧠 Team Intelligence Panel v2</div>
@@ -13076,6 +13065,31 @@ RESPONDE SOLO CON JSON usando este schema:
             <div id="teamSeasonBaseStatus" class="fl-mini"></div>
           </div>
         </div>
+        </div>
+        <div id="teamTabPanel-NOTICIAS" style="display:none">
+        <div class="fl-card context-box">
+          <div class="fl-title" style="font-size:14px;">🧠 Contexto Estratégico</div>
+          <div class="fl-grid two">
+            <div class="fl-field">
+              <label>Racha/Tendencia Actual</label>
+              <input type="text" class="fl-input" id="ctx-racha" placeholder="Ej: 5 partidos sin ganar en casa" value="${contexto.rachaLocal || ''}">
+            </div>
+            <div class="fl-field">
+              <label>Bajas Sensibles</label>
+              <input type="text" class="fl-input" id="ctx-bajas" placeholder="Jugadores lesionados" value="${(contexto.ausenciasClave || []).join(', ')}">
+            </div>
+          </div>
+          <div class="fl-field" style="margin-top:10px;">
+            <label>Patrones Detectados (Insight)</label>
+            <textarea class="fl-text" id="ctx-insights" style="min-height:60px;" placeholder="Ej: Solo 1 de los últimos 12 tuvo +1 gol en el 1T">${(contexto.patrones || []).join(', ')}</textarea>
+          </div>
+          <div class="fl-field" style="margin-top:10px;">
+            <label>Factor por día (JSON opcional)</label>
+            <input type="text" class="fl-input" id="ctx-factor-dia" placeholder='{"Tuesday": -0.2}' value='${JSON.stringify(contexto.factorDia || {})}'>
+          </div>
+        </div>
+        </div>
+        <div id="teamTabPanel-RESULTADOS" style="display:none">
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
           <div class="fl-mini" style="margin-bottom:6px;">Hay <b>${resultsSync.totalInMemory}</b> partidos guardados en memoria para <b>${team.name}</b>.</div>
@@ -13127,6 +13141,8 @@ RESPONDE SOLO CON JSON usando este schema:
             <tbody>${matchRows || "<tr><td colspan='5'>Sin partidos todavía</td></tr>"}</tbody>
           </table>
         </div>
+        </div>
+        <div id="teamTabPanel-PARTIDOS" style="display:none">
         <div class="fl-card">
           <div class="fl-row" style="justify-content:space-between;align-items:center;">
             <div style="font-weight:900;font-size:18px;">🎯 Interés & Prioridades (INT)</div>
@@ -13163,8 +13179,46 @@ RESPONDE SOLO CON JSON usando este schema:
             <div class="fl-mini">Drop low-stakes: ${patterns.drop} • Varianza: ${patterns.variance} • Pre-big dip: ${patterns.preBigDrop}</div>
           </div>
         </div>
-        ${sections}
+        </div>
+        <div id="teamTabPanel-CLASIFICACION" style="display:none">
+          <div class="fl-card">
+            <div style="font-weight:800;margin-bottom:8px;">📊 Tabla de Clasificación</div>
+            <div class="fl-mini" style="margin-bottom:8px;">Calculada automáticamente desde los resultados registrados · ${teamCompetitions.length ? teamCompetitions[0].name : "Sin liga vinculada"}</div>
+            <table class="fl-table">
+              <thead><tr><th>#</th><th>Equipo</th><th>PJ</th><th>GF</th><th>GC</th><th>DG</th><th>PTS</th></tr></thead>
+              <tbody>${leagueTableHTML}</tbody>
+            </table>
+          </div>
+        </div>
+        <div id="teamTabPanel-TRASPASOS" style="display:none">
+          <div class="fl-card"><div class="fl-muted" style="padding:8px;">Sección de traspasos en construcción.</div></div>
+        </div>
+        <div id="teamTabPanel-PLANTILLA">
+        <div class="fl-card">
+          <div style="font-weight:800;margin-bottom:6px;">Importar plantilla (JSON o texto pegado)</div>
+          <textarea id="squadImport" class="fl-text" placeholder='Pega JSON o texto copiado (#, Name, Age, MIN...)'></textarea>
+          <div class="fl-row" style="margin-top:8px;"><button class="fl-btn" id="runSquadImport">Importar plantilla</button><span id="squadStatus" class="fl-muted"></span></div>
+        </div>
+          ${sections}
+        </div>
       `;
+      // Team profile tab switching
+      (()=>{
+        const panels = ["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"];
+        const showTeamTab = (active)=>{
+          panels.forEach(t=>{
+            const id = "teamTabPanel-" + (t==="CLASIFICACIÓN"?"CLASIFICACION":t);
+            const el = document.getElementById(id);
+            if(el) el.style.display = t===active ? "block" : "none";
+          });
+          content.querySelectorAll("#teamProfileTabs [data-team-tab]").forEach(b=>{
+            b.classList.toggle("active", b.getAttribute("data-team-tab")===active);
+          });
+        };
+        content.querySelectorAll("#teamProfileTabs [data-team-tab]").forEach(btn=>{
+          btn.onclick = ()=>showTeamTab(btn.getAttribute("data-team-tab"));
+        });
+      })();
       const saveSeasonBaseBtn = document.getElementById("saveTeamSeasonBaseBtn");
       if(saveSeasonBaseBtn) saveSeasonBaseBtn.onclick = ()=>{
         team.intProfile ||= {};
