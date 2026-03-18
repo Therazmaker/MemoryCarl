@@ -12918,6 +12918,7 @@ RESPONDE SOLO CON JSON usando este schema:
           <input id="teamCapacity" class="fl-input" placeholder="Capacidad" value="${team.meta.capacity || ''}">
           <button class="fl-btn" id="saveMeta">Guardar equipo</button>
           <button class="fl-btn" id="backLiga">Volver a ligas</button>
+        </div>
         <div class="fl-card">
           <div class="fl-row" style="justify-content:space-between;align-items:center;gap:8px;">
             <div style="font-weight:900;font-size:18px;">📦 TeamPack v1 · ${team.name}</div>
