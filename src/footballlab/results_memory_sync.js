@@ -141,4 +141,71 @@ export function syncMemoryMatchesIntoResultsModule({ db = {}, brainV2 = {}, team
   };
 }
 
+function buildTrackerMemorySignature(match = {}, { db = {}, teamId = '' } = {}){
+  const teamById = new Map((db?.teams || []).map((row) => [row.id, row.name]));
+  const isHome = match?.homeId === teamId;
+  const opponentId = isHome ? match?.awayId : match?.homeId;
+  const opponentName = teamById.get(opponentId) || (isHome ? match?.awayName : match?.homeName) || '';
+  const teamName = teamById.get(teamId) || '';
+  const homeGoals = Number(match?.homeGoals) || 0;
+  const awayGoals = Number(match?.awayGoals) || 0;
+  const score = isHome ? `${homeGoals}-${awayGoals}` : `${awayGoals}-${homeGoals}`;
+  const date = normalizeDate(match?.date || '');
+  const league = normalizeTeamIdentity(String(match?.leagueId || '').trim());
+  return `${date}|${normalizeTeamIdentity(teamName)}|${normalizeTeamIdentity(opponentName)}|${score}|${league}`;
+}
+
+function mapTrackerMatchToMemory(match = {}, { teamId = '', db = {}, uid } = {}){
+  const teamById = new Map((db?.teams || []).map((row) => [row.id, row.name]));
+  const isHome = match?.homeId === teamId;
+  const opponentId = isHome ? match?.awayId : match?.homeId;
+  const opponentName = teamById.get(opponentId) || (isHome ? match?.awayName : match?.homeName) || '';
+  const teamName = teamById.get(teamId) || '';
+  const homeGoals = Number(match?.homeGoals) || 0;
+  const awayGoals = Number(match?.awayGoals) || 0;
+  const score = isHome ? `${homeGoals}-${awayGoals}` : `${awayGoals}-${homeGoals}`;
+  const id = typeof uid === 'function' ? uid('b2m') : `b2m_${Date.now()}`;
+  return {
+    id,
+    teamId,
+    teamName,
+    leagueId: String(match?.leagueId || '').trim(),
+    date: normalizeDate(match?.date || ''),
+    opponent: opponentName,
+    score,
+    statsRaw: match?.statsRaw || '',
+    narrative: '',
+    summary: null,
+    createdAt: Date.now(),
+    source: 'tracker'
+  };
+}
+
+export function syncTrackerMatchesIntoBrainV2({ db = {}, brainV2 = {}, team = {}, uid } = {}){
+  brainV2.memories ||= {};
+  const teamId = team?.id || '';
+  if(!teamId) return { inserted: 0 };
+
+  const teamMatches = (db?.tracker || []).filter((m) => m?.homeId === teamId || m?.awayId === teamId);
+  const existingMemories = Array.isArray(brainV2.memories[teamId]) ? brainV2.memories[teamId] : [];
+  const byTrackerMatchId = new Set(existingMemories.map((row) => String(row?.trackerMatchId || '').trim()).filter(Boolean));
+  const existingSignatures = new Set(existingMemories.map((row) => buildMemoryMatchSignature(row, { teamName: team?.name || '' })));
+
+  let inserted = 0;
+  teamMatches.forEach((match) => {
+    const matchId = String(match?.id || '').trim();
+    const signature = buildTrackerMemorySignature(match, { db, teamId });
+    if((matchId && byTrackerMatchId.has(matchId)) || existingSignatures.has(signature)) return;
+    const memoryEntry = mapTrackerMatchToMemory(match, { teamId, db, uid });
+    memoryEntry.trackerMatchId = matchId;
+    brainV2.memories[teamId] ||= [];
+    brainV2.memories[teamId].push(memoryEntry);
+    if(matchId) byTrackerMatchId.add(matchId);
+    existingSignatures.add(signature);
+    inserted += 1;
+  });
+
+  return { inserted };
+}
+
 export { buildMemoryMatchSignature, buildTrackerMatchSignature };
