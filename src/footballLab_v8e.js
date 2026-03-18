@@ -12417,8 +12417,8 @@ RESPONDE SOLO CON JSON usando este schema:
     if(!app) return;
     const db = loadDb();
 
-    const tabs = ["home","liga","tracker","versus","radar","champions","brainv2","momentum","bitacora","market","halftime","vscout"];
-    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t === 'radar' ? 'Radar del Día' : t === 'champions' ? '🏆 CHAMPIONS' : t === 'halftime' ? '⚡ MEDIO TIEMPO' : t === 'vscout' ? '🎬 VIDEO SCOUT' : t.toUpperCase()}</button>`).join("");
+    const tabs = ["home","liga","tracker","versus","radar","champions","brainv2","momentum","bitacora","market","halftime","vscout","calendario"];
+    const nav = tabs.map(t=>`<button class="fl-btn ${view===t?"active":""}" data-tab="${t}">${t === 'radar' ? 'Radar del Día' : t === 'champions' ? '🏆 CHAMPIONS' : t === 'halftime' ? '⚡ MEDIO TIEMPO' : t === 'vscout' ? '🎬 VIDEO SCOUT' : t === 'calendario' ? '📅 Calendario' : t.toUpperCase()}</button>`).join("");
     const wrapClass = view === "brainv2" ? "fl-wrap fl-wrap-brainv2" : "fl-wrap";
 
     app.innerHTML = `
@@ -24539,6 +24539,195 @@ RESPONDE SOLO CON JSON usando este schema:
       // Borrar sesiones
       content.querySelectorAll('[data-vs-del-team]').forEach(btn=>{
         btn.onclick=()=>{ deleteScoutRecord(btn.dataset.vsDelTeam,btn.dataset.vsDelRec); render('vscout'); };
+      });
+
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 📅 CALENDARIO — Vista de partidos futuros y registro de resultados
+    // ═══════════════════════════════════════════════════════════════════
+    if(view==="calendario"){
+
+      // ── helpers de fecha ──────────────────────────────────────────────
+      function todayIsoStr(){
+        const n = new Date();
+        return `${n.getUTCFullYear()}-${String(n.getUTCMonth()+1).padStart(2,'0')}-${String(n.getUTCDate()).padStart(2,'0')}`;
+      }
+      function isoAddDays(iso, delta){
+        const ts = parseSortableDate(iso);
+        if(!Number.isFinite(ts)) return iso;
+        const d = new Date(ts + delta*86400000);
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+      }
+      function formatDateLabel(iso){
+        const ts = parseSortableDate(iso);
+        if(!Number.isFinite(ts)) return iso;
+        return new Date(ts).toLocaleDateString('es-MX',{ weekday:'long', year:'numeric', month:'long', day:'numeric', timeZone:'UTC' });
+      }
+
+      const calDate = (payload.calDate) || todayIsoStr();
+      const todayStr = todayIsoStr();
+      const todayTs  = parseSortableDate(todayStr);
+      const selTs    = parseSortableDate(calDate);
+      const isPast   = Number.isFinite(selTs) && selTs <= todayTs;
+
+      // ── recolectar todos los partidos únicos para el día seleccionado ──
+      const seenKeys = new Set();
+      const calMatches = []; // { homeTeam, awayTeam, fm, originTeam }
+      db.teams.forEach(team=>{
+        (team.futureMatches||[]).forEach(fm=>{
+          if(fm.date !== calDate) return;
+          const rivalTeam = db.teams.find(t=>t.id===fm.rivalTeamId) || { id: fm.rivalTeamId, name: fm.rivalTeamId };
+          const homeTeam  = fm.isHome ? team : rivalTeam;
+          const awayTeam  = fm.isHome ? rivalTeam : team;
+          const key = [calDate, homeTeam.id, awayTeam.id].sort().join('::');
+          if(seenKeys.has(key)) return;
+          seenKeys.add(key);
+          calMatches.push({ homeTeam, awayTeam, fm, originTeam: team });
+        });
+      });
+
+      // ── detectar qué partidos ya tienen resultado en tracker ──────────
+      function findTrackerResult(homeId, awayId, date){
+        return (db.tracker||[]).find(m=>
+          m.date===date && (
+            (m.homeId===homeId && m.awayId===awayId) ||
+            (m.homeId===awayId && m.awayId===homeId)
+          )
+        ) || null;
+      }
+
+      // ── renderizar tarjetas ────────────────────────────────────────────
+      const cards = calMatches.map((entry,idx)=>{
+        const { homeTeam, awayTeam, fm } = entry;
+        const existingResult = findTrackerResult(homeTeam.id, awayTeam.id, calDate);
+        const comp = fm.competition || "—";
+        const stage = fm.stage || "";
+        const resultBadge = existingResult
+          ? `<span style="background:#22c55e;color:#0d1117;padding:2px 10px;border-radius:8px;font-weight:800;font-size:1rem;">
+               ${existingResult.homeId===homeTeam.id
+                 ? `${existingResult.homeGoals} – ${existingResult.awayGoals}`
+                 : `${existingResult.awayGoals} – ${existingResult.homeGoals}`}
+             </span>`
+          : "";
+        const registerBtn = (!existingResult && isPast)
+          ? `<button class="fl-btn cal-reg-btn" data-cal-idx="${idx}" style="background:#1f6feb;">⚽ Registrar resultado</button>`
+          : "";
+        const formSection = `
+          <div id="cal-form-${idx}" style="display:none;margin-top:8px;">
+            <div class="fl-row" style="align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:.85rem;color:#8892a4;">${homeTeam.name}</span>
+              <input id="cal-hg-${idx}" type="number" min="0" max="30" value="0"
+                style="width:52px;text-align:center;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:4px;">
+              <span style="color:#8892a4;">–</span>
+              <input id="cal-ag-${idx}" type="number" min="0" max="30" value="0"
+                style="width:52px;text-align:center;background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:4px;">
+              <span style="font-size:.85rem;color:#8892a4;">${awayTeam.name}</span>
+              <button class="fl-btn cal-save-btn" data-cal-idx="${idx}"
+                data-home-id="${homeTeam.id}" data-away-id="${awayTeam.id}"
+                data-fm-id="${fm.id}" data-origin-team-id="${entry.originTeam.id}"
+                data-competition-id="${fm.competitionId||''}"
+                style="background:#238636;">Guardar</button>
+              <button class="fl-btn cal-cancel-btn" data-cal-idx="${idx}" style="background:#30363d;">Cancelar</button>
+              <span id="cal-status-${idx}" style="color:#8892a4;font-size:.8rem;"></span>
+            </div>
+          </div>`;
+        return `
+          <div class="fl-card" style="display:flex;flex-direction:column;gap:6px;">
+            <div class="fl-row" style="align-items:center;gap:10px;flex-wrap:wrap;">
+              <span style="background:#30363d;border-radius:6px;padding:2px 8px;font-size:.8rem;color:#8892a4;">${comp}${stage ? " · "+stage : ""}</span>
+              <span style="font-weight:800;font-size:1rem;">${homeTeam.name}</span>
+              <span style="color:#8892a4;font-size:.9rem;">vs</span>
+              <span style="font-weight:800;font-size:1rem;">${awayTeam.name}</span>
+              ${resultBadge}
+              ${registerBtn}
+            </div>
+            ${formSection}
+          </div>`;
+      }).join("");
+
+      const emptyMsg = calMatches.length===0
+        ? `<div class="fl-card fl-muted">No hay partidos programados para este día.</div>`
+        : "";
+
+      content.innerHTML = `
+        <div class="fl-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <button class="fl-btn" id="calPrev">◀ Día anterior</button>
+          <input type="date" id="calDatePicker" value="${calDate}"
+            style="background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:6px 10px;font-size:.95rem;">
+          <button class="fl-btn" id="calNext">Día siguiente ▶</button>
+          <button class="fl-btn" id="calToday" style="background:#30363d;">Hoy</button>
+          <span style="color:#8892a4;font-size:.85rem;">${formatDateLabel(calDate)}</span>
+        </div>
+        <div style="margin-top:4px;margin-bottom:4px;color:#8892a4;font-size:.82rem;padding:0 4px;">
+          ${calMatches.length} partido${calMatches.length!==1?'s':''} · ${isPast ? 'Partidos pasados o de hoy — puedes registrar resultados.' : 'Partidos futuros.'}
+        </div>
+        ${cards}
+        ${emptyMsg}
+      `;
+
+      // ── navegación de fechas ──────────────────────────────────────────
+      document.getElementById("calPrev").onclick = ()=>render("calendario",{ calDate: isoAddDays(calDate,-1) });
+      document.getElementById("calNext").onclick = ()=>render("calendario",{ calDate: isoAddDays(calDate,1) });
+      document.getElementById("calToday").onclick = ()=>render("calendario",{ calDate: todayStr });
+      document.getElementById("calDatePicker").onchange = function(){ render("calendario",{ calDate: this.value }); };
+
+      // ── toggle formulario de registro ─────────────────────────────────
+      content.querySelectorAll(".cal-reg-btn").forEach(btn=>{
+        btn.onclick = ()=>{
+          const idx = btn.dataset.calIdx;
+          const form = document.getElementById(`cal-form-${idx}`);
+          if(form) form.style.display = form.style.display==="none" ? "block" : "none";
+        };
+      });
+
+      content.querySelectorAll(".cal-cancel-btn").forEach(btn=>{
+        btn.onclick = ()=>{
+          const form = document.getElementById(`cal-form-${btn.dataset.calIdx}`);
+          if(form) form.style.display = "none";
+        };
+      });
+
+      // ── guardar resultado ─────────────────────────────────────────────
+      content.querySelectorAll(".cal-save-btn").forEach(btn=>{
+        btn.onclick = ()=>{
+          const idx        = btn.dataset.calIdx;
+          const homeId     = btn.dataset.homeId;
+          const awayId     = btn.dataset.awayId;
+          const fmId       = btn.dataset.fmId;
+          const compId     = btn.dataset.competitionId || db.settings.selectedLeagueId || "";
+          const statusEl   = document.getElementById(`cal-status-${idx}`);
+
+          const homeGoals = Number(document.getElementById(`cal-hg-${idx}`).value)||0;
+          const awayGoals = Number(document.getElementById(`cal-ag-${idx}`).value)||0;
+
+          // Verificar duplicado
+          if(findTrackerResult(homeId, awayId, calDate)){
+            statusEl.textContent = "⚠️ Ya existe un resultado para este partido.";
+            return;
+          }
+
+          const newMatch = ensureTrackerMatchState({
+            id: uid("tr"),
+            leagueId: compId,
+            date: calDate,
+            homeId, awayId, homeGoals, awayGoals,
+            note: "", stats: [], statsRaw: null,
+            featureSnapshots: {}, featureSnapshotStatus: {}
+          });
+          db.tracker.push(newMatch);
+
+          // Quitar de futureMatches de todos los equipos involucrados (por ID y espejo)
+          db.teams.forEach(t=>{
+            t.futureMatches = (t.futureMatches||[]).filter(m=>
+              m.id !== fmId && m.mirrorOf !== fmId
+            );
+          });
+
+          saveDb(db);
+          statusEl.textContent = "✅ Guardado";
+          setTimeout(()=>render("calendario",{ calDate }), 600);
+        };
       });
 
     }
