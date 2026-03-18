@@ -9083,16 +9083,19 @@ function openSmartPurchaseInventoryModal({ items, onContinue }){
 
   function render(){
     b.innerHTML = `
-      <div class="modal slModal" style="padding:20px;gap:0;">
-        <div class="slHeader" style="padding:0 0 12px;">
+      <div class="modal slModal" style="padding:0;gap:0;">
+        <div class="slHeader" style="padding:16px 20px 12px;">
           <div class="slTitle">🤔 Detecté reposiciones</div>
-          <button class="slCloseBtn" id="spiClose">✕</button>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="slQPConfirm spiSaveTop" id="spiContinueTop">Guardar ✓</button>
+            <button class="slCloseBtn" id="spiClose">✕</button>
+          </div>
         </div>
-        <div style="font-size:13px;color:rgba(255,255,255,.55);margin-bottom:16px;line-height:1.6;">
+        <div style="font-size:13px;color:rgba(255,255,255,.55);padding:0 20px 12px;line-height:1.6;flex-shrink:0;">
           Compraste ${items.length} producto${items.length>1?"s que ya están":"que ya está"} en tu cocina.<br>
           ¿Qué hago con cada uno?
         </div>
-        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;">
+        <div style="display:flex;flex-direction:column;gap:10px;padding:0 20px 10px;overflow-y:auto;flex:1 1 0;min-height:0;">
           ${decisions.map((dec,i)=>{
             const inv = (state.inventory||[]).find(inv=> dec.it.productId ? inv.productId===dec.it.productId : normName_(inv.name)===normName_(dec.it.name));
             const curPct = (inv?.levelPct===0||inv?.levelPct) ? Math.round(Number(inv.levelPct)) : null;
@@ -9130,6 +9133,7 @@ function openSmartPurchaseInventoryModal({ items, onContinue }){
     b.querySelector("#spiClose").addEventListener("click",()=>b.remove());
     b.querySelector("#spiCancel").addEventListener("click",()=>b.remove());
     b.querySelector("#spiContinue").addEventListener("click",()=>{ b.remove(); onContinue(decisions); });
+    b.querySelector("#spiContinueTop").addEventListener("click",()=>{ b.remove(); onContinue(decisions); });
   }
 
   host.appendChild(b);
