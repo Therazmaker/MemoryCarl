@@ -12274,7 +12274,9 @@ RESPONDE SOLO CON JSON usando este schema:
             psiHome,
             psiAway,
             odds: resolvedOdds
-          })
+          }),
+          scoutHome: vsComputeProfile(vsGetTeamRecords(home.id)),
+          scoutAway: vsComputeProfile(vsGetTeamRecords(away.id))
         };
       });
   }
@@ -12409,6 +12411,116 @@ RESPONDE SOLO CON JSON usando este schema:
       },
       updatedAt: new Date().toISOString()
     };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 🎬 VIDEO SCOUT — helpers de nivel módulo (reutilizables desde
+  //    cualquier vista: equipo, radar, vscout)
+  // ═══════════════════════════════════════════════════════════════════
+  const VS_STORAGE_KEY = 'FL_VIDEO_SCOUT';
+  const VS_PLAY_TYPES_DEF = [
+    { id:'attack_build',   label:'Construcción',        danger:1, icon:'🔵', color:'#1a56c4' },
+    { id:'counter',        label:'Contraataque',        danger:4, icon:'⚡', color:'#f5c842' },
+    { id:'press_recover',  label:'Presión/Robo',        danger:2, icon:'⬆',  color:'#8892a4' },
+    { id:'set_piece',      label:'Pelota parada',       danger:3, icon:'⚑',  color:'#f59e0b' },
+    { id:'cross_sequence', label:'Secuencia de centro', danger:3, icon:'↗',  color:'#f59e0b' },
+    { id:'through_run',    label:'Pase filtrado',       danger:4, icon:'→',  color:'#f5c842' },
+    { id:'shot_sequence',  label:'Llegada a remate',    danger:5, icon:'🎯', color:'#22c55e' },
+    { id:'sterile_cycle',  label:'Posesión estéril',    danger:0, icon:'⭕', color:'#4a5568' },
+  ];
+
+  function vsLoadAllData(){ return safeParseJSON(localStorage.getItem(VS_STORAGE_KEY), {}); }
+  function vsGetTeamRecords(teamId){ const d=vsLoadAllData(); return Array.isArray(d[teamId])?d[teamId]:[]; }
+
+  function vsComputeProfile(records){
+    if(!records||!records.length) return null;
+    const allPlays = records.flatMap(r=>Array.isArray(r.plays)?r.plays:[]);
+    if(!allPlays.length) return null;
+    const n = allPlays.length;
+    const avgTouches    = allPlays.reduce((s,p)=>s+(p.metrics?.touches||1),0)/n;
+    const avgProgress   = allPlays.reduce((s,p)=>s+(p.metrics?.netProgress||0),0)/n;
+    const avgBackpasses = allPlays.reduce((s,p)=>s+(p.metrics?.backpasses||0),0)/n;
+    const startZones={def:0,mid:0,att:0,att_box:0};
+    const endZones  ={def:0,mid:0,att:0,att_box:0};
+    allPlays.forEach(p=>{
+      if(p.metrics?.startZone) startZones[p.metrics.startZone]=(startZones[p.metrics.startZone]||0)+1;
+      if(p.metrics?.endZone)   endZones[p.metrics.endZone]    =(endZones[p.metrics.endZone]||0)+1;
+    });
+    const byOutcome={};
+    allPlays.forEach(p=>{ byOutcome[p.outcome]=(byOutcome[p.outcome]||0)+1; });
+    const goals = byOutcome.goal||0;
+    const shots = (byOutcome.goal||0)+(byOutcome.saved||0)+(byOutcome.blocked||0)+(byOutcome.off_target||0);
+    const conversionRate = shots>0 ? goals/shots : 0;
+    const byType={};
+    allPlays.forEach(p=>{ byType[p.type]=(byType[p.type]||0)+1; });
+    const sterileRate  = (byType.sterile_cycle||0)/n;
+    const fieldTiltPct    = ((endZones.att||0)+(endZones.att_box||0))/n;
+    const pressureZonePct = (endZones.att_box||0)/n;
+    const avgDanger = allPlays.reduce((s,p)=>{
+      const td=VS_PLAY_TYPES_DEF.find(t=>t.id===p.type);
+      return s+(td?td.danger:1);
+    },0)/n;
+    const sideCount={left:0,center:0,right:0};
+    allPlays.forEach(p=>{ if(p.metrics?.side) sideCount[p.metrics.side]++; });
+    const preferredSide=Object.entries(sideCount).sort((a,b)=>b[1]-a[1])[0][0];
+    const directPlays = allPlays.filter(p=>(p.metrics?.touches||0)<=2&&(p.metrics?.endZone==='att'||p.metrics?.endZone==='att_box')).length;
+    const SPI = Number(sterileRate.toFixed(3));
+    const DI  = Number(avgDanger.toFixed(2));
+    return {
+      sessions: records.length,
+      totalPlays: n,
+      avgTouches:      Number(avgTouches.toFixed(2)),
+      avgProgress:     Number(avgProgress.toFixed(3)),
+      avgBackpasses:   Number(avgBackpasses.toFixed(2)),
+      fieldTiltPct:    Number(fieldTiltPct.toFixed(3)),
+      pressureZonePct: Number(pressureZonePct.toFixed(3)),
+      avgDanger:       DI,
+      sterileRate:     SPI,
+      conversionRate:  Number(conversionRate.toFixed(3)),
+      goalsPerSession: Number((goals/records.length).toFixed(2)),
+      preferredSide,
+      byOutcome, byType, startZones, endZones, directPlays,
+      tacticalStyle:
+        SPI > 0.35 ? 'Posesión estéril' :
+        directPlays/n > 0.4 ? 'Directo y vertical' :
+        fieldTiltPct > 0.55 && DI > 3 ? 'Presión alta efectiva' :
+        avgTouches > 5 && avgProgress > 0.2 ? 'Construcción profunda' :
+        fieldTiltPct > 0.55 ? 'Dominante sin mordiente' :
+        'Equilibrado'
+    };
+  }
+
+  // Tarjeta de perfil táctica compacta (HTML) — sin campo SVG
+  function vsRenderProfileCard(profile, teamName=''){
+    if(!profile) return `<div style="color:#4a5568;font-size:11px;font-family:'JetBrains Mono',monospace;padding:8px;">Sin datos scout registrados para ${teamName||'este equipo'}.</div>`;
+    const styleColor = profile.tacticalStyle.includes('estéril')?'#ef4444':profile.tacticalStyle.includes('efectiva')?'#22c55e':profile.tacticalStyle.includes('Directo')?'#f59e0b':'#8892a4';
+    return `
+      <div style="font-family:'JetBrains Mono',monospace;">
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+          <span style="background:${styleColor}22;border:1px solid ${styleColor}55;color:${styleColor};font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px;">${profile.tacticalStyle.toUpperCase()}</span>
+          <span style="font-size:10px;color:#4a5568;">${profile.sessions} ses · ${profile.totalPlays} jugadas · ${profile.avgTouches} toques/j</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:8px;">
+          ${[
+            {l:'Field tilt',  v:Math.round(profile.fieldTiltPct*100)+'%',  c:'#f5c842'},
+            {l:'Área',        v:Math.round(profile.pressureZonePct*100)+'%',c:'#d4322c'},
+            {l:'Peligro',     v:profile.avgDanger.toFixed(1)+'/5',          c:'#f59e0b'},
+            {l:'SPI estéril', v:Math.round(profile.sterileRate*100)+'%',    c:profile.sterileRate>0.3?'#ef4444':'#22c55e'},
+            {l:'Conversión',  v:Math.round(profile.conversionRate*100)+'%', c:'#22c55e'},
+            {l:'Flanco',      v:profile.preferredSide==='left'?'IZQ':profile.preferredSide==='right'?'DER':'CTR', c:'#8892a4'},
+          ].map(m=>`<div style="background:#161922;border-radius:4px;padding:5px 7px;"><div style="font-size:8px;color:#4a5568;">${m.l}</div><div style="font-size:14px;font-weight:900;color:${m.c};">${m.v}</div></div>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:5px;">
+          <div style="background:#161922;border-radius:4px;padding:5px 7px;">
+            <div style="font-size:8px;color:#4a5568;">PROGRESIÓN NETA/j</div>
+            <div style="font-size:13px;font-weight:900;color:${profile.avgProgress>0.1?'#22c55e':'#ef4444'};">${profile.avgProgress>0?'+':''}${(profile.avgProgress*100).toFixed(0)}%</div>
+          </div>
+          <div style="background:#161922;border-radius:4px;padding:5px 7px;">
+            <div style="font-size:8px;color:#4a5568;">PASES ATRÁS/j</div>
+            <div style="font-size:13px;font-weight:900;color:#8892a4;">${profile.avgBackpasses.toFixed(1)}</div>
+          </div>
+        </div>
+      </div>`;
   }
 
   function render(view="home", payload={}){
@@ -12938,7 +13050,7 @@ RESPONDE SOLO CON JSON usando este schema:
             <button class="fl-btn" id="confirmLinkLeague">Guardar vínculo</button>
             <span class="fl-mini" id="linkLeagueStatus"></span>
           </div>
-          <div class="fl-row" id="teamProfileTabs" style="margin-top:8px;gap:2px;flex-wrap:wrap;">${["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"].map(t=>`<button class="fl-btn ${t==='PLANTILLA'?'active':''}" data-team-tab="${t}" style="font-size:11px;padding:4px 8px;">${t}</button>`).join("")}</div>
+          <div class="fl-row" id="teamProfileTabs" style="margin-top:8px;gap:2px;flex-wrap:wrap;">${["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","VIDEO SCOUT","PLANTILLA"].map(t=>`<button class="fl-btn ${t==='PLANTILLA'?'active':''}" data-team-tab="${t}" style="font-size:11px;padding:4px 8px;">${t==='VIDEO SCOUT'?'🎬 VIDEO SCOUT':t}</button>`).join("")}</div>
         </div>
         <div id="teamTabPanel-RESUMEN" style="display:none">
         <div class="fl-card fl-row">
@@ -13225,6 +13337,17 @@ RESPONDE SOLO CON JSON usando este schema:
         <div id="teamTabPanel-TRASPASOS" style="display:none">
           <div class="fl-card"><div class="fl-muted" style="padding:8px;">Sección de traspasos en construcción.</div></div>
         </div>
+        <div id="teamTabPanel-VSCOUT" style="display:none">
+          <div class="fl-card" style="background:#08090c;">
+            <div style="font-size:14px;font-weight:900;letter-spacing:1px;color:#f5c842;margin-bottom:10px;">🎬 Perfil táctico · Video Scout acumulado</div>
+            ${(()=>{
+              const recs = vsGetTeamRecords(team.id);
+              const prof = vsComputeProfile(recs);
+              if(!prof) return `<div style="color:#4a5568;font-size:12px;padding:8px;">Sin sesiones registradas para <b>${team.name}</b> en Video Scout. Ve a la pestaña 🎬 VIDEO SCOUT para comenzar a registrar jugadas.</div>`;
+              return vsRenderProfileCard(prof, team.name);
+            })()}
+          </div>
+        </div>
         <div id="teamTabPanel-PLANTILLA">
         <div class="fl-card">
           <div style="font-weight:800;margin-bottom:6px;">Importar plantilla (JSON o texto pegado)</div>
@@ -13236,10 +13359,10 @@ RESPONDE SOLO CON JSON usando este schema:
       `;
       // Team profile tab switching
       (()=>{
-        const panels = ["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","PLANTILLA"];
+        const panels = ["RESUMEN","NOTICIAS","RESULTADOS","PARTIDOS","CLASIFICACIÓN","TRASPASOS","VIDEO SCOUT","PLANTILLA"];
         const showTeamTab = (active)=>{
           panels.forEach(t=>{
-            const id = "teamTabPanel-" + (t==="CLASIFICACIÓN"?"CLASIFICACION":t);
+            const id = "teamTabPanel-" + (t==="CLASIFICACIÓN"?"CLASIFICACION":t==="VIDEO SCOUT"?"VSCOUT":t);
             const el = document.getElementById(id);
             if(el) el.style.display = t===active ? "block" : "none";
           });
@@ -14385,6 +14508,15 @@ RESPONDE SOLO CON JSON usando este schema:
           })() : ''}
 
           ${m.flags.length ? `<div class="rdx-flags">${m.flags.map((f)=>`<span class="rdx-flag ${flagAlert(f)}">${f.replaceAll('_',' ')}</span>`).join('')}</div>` : ''}
+
+          ${(m.scoutHome || m.scoutAway) ? `
+          <div style="margin:10px 0 0;background:rgba(30,20,5,0.7);border:1px solid rgba(245,200,66,0.2);border-radius:8px;padding:12px 14px;">
+            <div style="font-size:9px;font-weight:800;letter-spacing:2px;color:#f5c842;text-transform:uppercase;margin-bottom:10px;">🎬 Scout Táctico · Video Scout</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              ${m.scoutHome ? `<div><div style="font-size:9px;font-weight:700;color:#6e7681;text-transform:uppercase;margin-bottom:6px;">${escapeHtml(m.home)}</div>${vsRenderProfileCard(m.scoutHome, m.home)}</div>` : `<div style="color:#4a5568;font-size:10px;padding:8px;">Sin datos scout · ${escapeHtml(m.home)}</div>`}
+              ${m.scoutAway ? `<div><div style="font-size:9px;font-weight:700;color:#6e7681;text-transform:uppercase;margin-bottom:6px;">${escapeHtml(m.away)}</div>${vsRenderProfileCard(m.scoutAway, m.away)}</div>` : `<div style="color:#4a5568;font-size:10px;padding:8px;">Sin datos scout · ${escapeHtml(m.away)}</div>`}
+            </div>
+          </div>` : ''}
 
           ${m.narrative && m.narrative.length ? `
           <div class="rdx-narrative ${m.studyScore >= 70 ? 'verdict-high' : m.studyScore >= 45 ? 'verdict-mid' : 'verdict-low'}">
