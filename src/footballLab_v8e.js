@@ -10,12 +10,12 @@ import { computeExpectedGoals } from "./footballlab/xg_engine.js";
 import { scoreMatrix, matrixToOutcome, mostLikelyScore, oddsToMarketProbabilities, blendOutcomes } from "./footballlab/poisson_engine.js";
 import { buildMneClaudeExport, parseClaudeFeedbackText, updateClaudeMemoryState, getLatestClaudeFeedback, safeJsonPreview, observeLearningAuditsForMatch } from "./footballlab/mne_claude_exchange.js";
 import { defaultTrainingState, loadTrainingState, parseAIPredictionJSON, createTrainingRecord, registerActualResult, recomputeTrainingMetrics, buildTrainingReport, RADAR_TRAINING_VERSION, SCHEMA_TRAINING_KEY, MARKET_KEYS, SIGNAL_KEYS } from "./radar_training_engine.js";
-import { resolveTeamAliases, collectMatchesForTeam } from "./footballlab/readiness_memory.js";
+import { resolveTeamAliases, collectMatchesForTeam, normalizeTeamIdentity } from "./footballlab/readiness_memory.js";
 import { normalizeTeamProfilesState, indexMemoryMatchIntoTeamProfiles, getTeamMatchRefs, rebuildTeamProfileIndex } from "./footballlab/team_memory_index.js";
 import { collectPrematchData, buildPrematchInsights, composePrematchEditorial } from "./footballlab/prematch_story_engine_v2.js";
 import { buildChampionsAnalysisPayload } from "./footballlab/champions_knockout_engine.js";
 import { saveUclMatch } from "./ucl_memory_layer.js";
-import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule } from "./footballlab/results_memory_sync.js";
+import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule, syncTrackerMatchesIntoBrainV2 } from "./footballlab/results_memory_sync.js";
 import { buildBitacoraPerformanceLab, normalizePickRecord } from "./footballlab/bitacora_performance.js";
 import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calcPhaseMetrics, phaseAlertFlags, buildPhasePostAnalysis } from "./footballlab/bitacora_phase_mode.js";
 
@@ -12836,6 +12836,35 @@ RESPONDE SOLO CON JSON usando este schema:
       const narrativeMetrics = computeTeamNarrativeMetrics(teamMatches);
       const brainV2TeamState = loadBrainV2();
       const resultsSync = getResultsSyncSummary({ db, brainV2: brainV2TeamState, team });
+      const trackerToBrainSync = (() => {
+        const teamId = team?.id || '';
+        const existingMemories = Array.isArray(brainV2TeamState?.memories?.[teamId]) ? brainV2TeamState.memories[teamId] : [];
+        const existingTrackerIds = new Set(existingMemories.map((row) => String(row?.trackerMatchId || '').trim()).filter(Boolean));
+        const teamById = new Map((db?.teams || []).map((row) => [row.id, row.name]));
+        const leagueById = new Map((db?.leagues || []).map((row) => [row.id, row.name]));
+        const existingSignatures = new Set(existingMemories.map((row) => {
+          const date = String(row?.date || '').trim().slice(0, 10);
+          const opp = normalizeTeamIdentity(row?.opponent || '');
+          const score = String(row?.score || '').replace(/\s/g, '');
+          const league = normalizeTeamIdentity(leagueById.get(row?.leagueId) || row?.leagueId || '');
+          return `${date}|${opp}|${score}|${league}`;
+        }));
+        let pending = 0;
+        teamMatches.forEach((m) => {
+          if(existingTrackerIds.has(String(m?.id || ''))) return;
+          const isHome = m?.homeId === teamId;
+          const opponentId = isHome ? m?.awayId : m?.homeId;
+          const opponentName = teamById.get(opponentId) || '';
+          const homeGoals = Number(m?.homeGoals) || 0;
+          const awayGoals = Number(m?.awayGoals) || 0;
+          const score = isHome ? `${homeGoals}-${awayGoals}` : `${awayGoals}-${homeGoals}`;
+          const date = String(m?.date || '').trim().slice(0, 10);
+          const league = normalizeTeamIdentity(leagueById.get(m?.leagueId) || m?.leagueId || '');
+          const sig = `${date}|${normalizeTeamIdentity(opponentName)}|${score}|${league}`;
+          if(!existingSignatures.has(sig)) pending += 1;
+        });
+        return { total: teamMatches.length, pending };
+      })();
       const matchRows = teamMatches.map((m, idx)=>{
         const isHome = m.homeId===team.id;
         const rival = resolveRivalForTeamMatch({ db, match: m, team, brainV2: brainV2TeamState });
@@ -13095,8 +13124,10 @@ RESPONDE SOLO CON JSON usando este schema:
           <div style="font-weight:800;margin-bottom:8px;">RESULTADOS (clic para estadísticas)</div>
           <div class="fl-mini" style="margin-bottom:6px;">Hay <b>${resultsSync.totalInMemory}</b> partidos guardados en memoria para <b>${team.name}</b>.</div>
           <div class="fl-mini" style="margin-bottom:8px;">Y ya hay <b>${resultsSync.alreadySynced}</b> sincronizados en esta tabla.${resultsSync.pendingToSync>0 ? ` Faltan <b>${resultsSync.pendingToSync}</b>.` : " <b>Todo sincronizado.</b>"}</div>
+          <div class="fl-mini" style="margin-bottom:8px;">Partidos en esta tabla pendientes de enviar al Brain V2: <b>${trackerToBrainSync.pending}</b>.${trackerToBrainSync.pending===0 ? " <b>Todo sincronizado.</b>" : ""}</div>
           <div class="fl-row" style="margin-bottom:10px;flex-wrap:wrap;gap:6px;">
-            <button class="fl-btn" id="syncResultsFromMemory" ${resultsSync.pendingToSync>0 ? '' : 'disabled'}>Sincronizar</button>
+            <button class="fl-btn" id="syncResultsFromMemory" ${resultsSync.pendingToSync>0 ? '' : 'disabled'}>Sincronizar desde Brain V2</button>
+            <button class="fl-btn" id="syncResultsToBrain" ${trackerToBrainSync.pending>0 ? '' : 'disabled'}>Enviar al Brain V2</button>
             <input id="resDate" type="date" class="fl-input" />
             <select id="resHome" class="fl-select"><option value="">Local</option>${resultTeamOptions}</select>
             <input id="resHG" type="number" class="fl-input" placeholder="GL" style="width:74px" />
@@ -13845,6 +13876,17 @@ RESPONDE SOLO CON JSON usando este schema:
         render("equipo", { teamId: team.id });
       };
 
+      document.getElementById("syncResultsToBrain").onclick = ()=>{
+        const status = document.getElementById("resultStatus");
+        const brainV2 = loadBrainV2();
+        const out = syncTrackerMatchesIntoBrainV2({ db, brainV2, team, uid });
+        saveBrainV2(brainV2);
+        status.textContent = out.inserted>0
+          ? `✅ Enviados al Brain V2: ${out.inserted} partidos.`
+          : "Todo sincronizado. No hay partidos nuevos para enviar al Brain V2.";
+        render("equipo", { teamId: team.id });
+      };
+
       // ── Mostrar campos UCL si la liga activa es Champions ──────
       (()=>{
         const _activLeagueName = db.leagues.find(l=>l.id===(db.settings.selectedLeagueId||""))?.name||"";
@@ -13933,6 +13975,12 @@ RESPONDE SOLO CON JSON usando este schema:
           saveBrainV2(brainV2TeamState);
           status.textContent = `✅ Guardado en Champions para ${homeTeam?.name||homeId} y ${awayTeam?.name||awayId}`;
         }
+        // ─────────────────────────────────────────────────────────────
+
+        // ── Auto-sync new match to Brain V2 for both teams involved ──
+        syncTrackerMatchesIntoBrainV2({ db, brainV2: brainV2TeamState, team: { id: homeId, name: db.teams.find(t=>t.id===homeId)?.name||"" }, uid });
+        syncTrackerMatchesIntoBrainV2({ db, brainV2: brainV2TeamState, team: { id: awayId, name: db.teams.find(t=>t.id===awayId)?.name||"" }, uid });
+        saveBrainV2(brainV2TeamState);
         // ─────────────────────────────────────────────────────────────
 
         saveDb(db);
