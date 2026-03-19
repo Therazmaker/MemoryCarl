@@ -88,8 +88,13 @@ function renderDetail() {
   </div>`;
 }
 
+function sel(current, value) { return current === value ? " selected" : ""; }
+
 export function viewContextWindow() {
   const items = getFiltered();
+  const fc = state.filters.category;
+  const fp = state.filters.priority;
+  const fn = state.filters.pinned;
   return `<div class="cwWrap"><style>
     .cwLayout{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}.cwCards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
     .cwCard{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);padding:10px;border-radius:10px;text-align:left;color:inherit}
@@ -99,9 +104,9 @@ export function viewContextWindow() {
   </style>
   <div class="cwTop">
     <input id="cwSearch" placeholder="Buscar context neuron" value="${esc(state.query)}" />
-    <select id="cwFilterCategory"><option value="">category</option><option value="people">people</option><option value="work">work</option><option value="hobbies">hobbies</option><option value="projects">projects</option><option value="preferences">preferences</option><option value="places">places</option><option value="identity">identity</option></select>
-    <select id="cwFilterPriority"><option value="">priority</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
-    <select id="cwFilterPinned"><option value="">pinned?</option><option value="1">pinned</option><option value="0">not pinned</option></select>
+    <select id="cwFilterCategory"><option value=""${sel(fc,"")}>category</option><option value="people"${sel(fc,"people")}>people</option><option value="work"${sel(fc,"work")}>work</option><option value="hobbies"${sel(fc,"hobbies")}>hobbies</option><option value="projects"${sel(fc,"projects")}>projects</option><option value="preferences"${sel(fc,"preferences")}>preferences</option><option value="places"${sel(fc,"places")}>places</option><option value="identity"${sel(fc,"identity")}>identity</option></select>
+    <select id="cwFilterPriority"><option value=""${sel(fp,"")}>priority</option><option value="low"${sel(fp,"low")}>low</option><option value="medium"${sel(fp,"medium")}>medium</option><option value="high"${sel(fp,"high")}>high</option></select>
+    <select id="cwFilterPinned"><option value=""${sel(fn,"")}>pinned?</option><option value="1"${sel(fn,"1")}>pinned</option><option value="0"${sel(fn,"0")}>not pinned</option></select>
     <button id="cwQuickAdd">Add Starter Context</button>
   </div>
   <div class="cwLayout">
@@ -115,17 +120,12 @@ export function viewContextWindow() {
   </div></div>`;
 }
 
-export function wireContextWindow(root) {
-  const rerender = () => {
-    const wrap = root.querySelector(".nchatWrap");
-    if (!wrap) return;
-    wrap.outerHTML = root.querySelector(".nchatWrap") ? root.querySelector(".nchatWrap").outerHTML : "";
-  };
-  root.querySelectorAll(".cwCard").forEach((el) => el.addEventListener("click", () => { state.selectedId = el.dataset.id; state.editingId = null; location.reload(); }));
-  root.querySelector("#cwSearch")?.addEventListener("input", (e) => { state.query = e.target.value; location.reload(); });
-  root.querySelector("#cwFilterCategory")?.addEventListener("change", (e) => { state.filters.category = e.target.value; location.reload(); });
-  root.querySelector("#cwFilterPriority")?.addEventListener("change", (e) => { state.filters.priority = e.target.value; location.reload(); });
-  root.querySelector("#cwFilterPinned")?.addEventListener("change", (e) => { state.filters.pinned = e.target.value; location.reload(); });
+export function wireContextWindow(root, rerender) {
+  root.querySelectorAll(".cwCard").forEach((el) => el.addEventListener("click", () => { state.selectedId = el.dataset.id; state.editingId = null; rerender(); }));
+  root.querySelector("#cwSearch")?.addEventListener("input", (e) => { state.query = e.target.value; rerender(); });
+  root.querySelector("#cwFilterCategory")?.addEventListener("change", (e) => { state.filters.category = e.target.value; rerender(); });
+  root.querySelector("#cwFilterPriority")?.addEventListener("change", (e) => { state.filters.priority = e.target.value; rerender(); });
+  root.querySelector("#cwFilterPinned")?.addEventListener("change", (e) => { state.filters.pinned = e.target.value; rerender(); });
 
   root.querySelector("#cwQuickAdd")?.addEventListener("click", async () => {
     const key = prompt(`Template (${Object.keys(QUICK_CONTEXT_TEMPLATES).join(", ")})`, "person");
@@ -134,7 +134,7 @@ export function wireContextWindow(root) {
     const template = applyQuickTemplate(key, concept || "");
     if (!template) return;
     await createContextWindowNeuron(template);
-    location.reload();
+    rerender();
   });
 
   root.querySelector("#cwForm")?.addEventListener("submit", async (e) => {
@@ -145,23 +145,23 @@ export function wireContextWindow(root) {
     if (state.editingId) await updateContextWindowNeuron(state.editingId, payload);
     else await createContextWindowNeuron(payload);
     state.editingId = null;
-    location.reload();
+    rerender();
   });
 
-  root.querySelector("#cwCancelEdit")?.addEventListener("click", () => { state.editingId = null; location.reload(); });
-  root.querySelector("#cwEdit")?.addEventListener("click", () => { state.editingId = state.selectedId; location.reload(); });
-  root.querySelector("#cwDelete")?.addEventListener("click", async () => { if (!state.selectedId) return; await deleteContextWindowNeuron(state.selectedId); state.selectedId = null; location.reload(); });
-  root.querySelector("#cwDuplicate")?.addEventListener("click", async () => { if (!state.selectedId) return; await duplicateContextWindowNeuron(state.selectedId); location.reload(); });
+  root.querySelector("#cwCancelEdit")?.addEventListener("click", () => { state.editingId = null; rerender(); });
+  root.querySelector("#cwEdit")?.addEventListener("click", () => { state.editingId = state.selectedId; rerender(); });
+  root.querySelector("#cwDelete")?.addEventListener("click", async () => { if (!state.selectedId) return; await deleteContextWindowNeuron(state.selectedId); state.selectedId = null; rerender(); });
+  root.querySelector("#cwDuplicate")?.addEventListener("click", async () => { if (!state.selectedId) return; await duplicateContextWindowNeuron(state.selectedId); rerender(); });
   root.querySelector("#cwTogglePin")?.addEventListener("click", async () => {
     const neuron = listContextWindowNeurons().find((n) => n.id === state.selectedId);
     if (!neuron) return;
     await updateContextWindowNeuron(neuron.id, { ...neuron, pin: !neuron.meta?.pin });
-    location.reload();
+    rerender();
   });
   root.querySelector("#cwAddLink")?.addEventListener("click", () => {
     const targetId = root.querySelector("#cwLinkTarget")?.value?.trim();
     if (state.selectedId && targetId) createManualLink(state.selectedId, targetId);
-    location.reload();
+    rerender();
   });
-  root.querySelectorAll(".cwLinkBtn").forEach((btn) => btn.addEventListener("click", () => { if (state.selectedId) removeManualLink(state.selectedId, btn.dataset.unlink); location.reload(); }));
+  root.querySelectorAll(".cwLinkBtn").forEach((btn) => btn.addEventListener("click", () => { if (state.selectedId) removeManualLink(state.selectedId, btn.dataset.unlink); rerender(); }));
 }

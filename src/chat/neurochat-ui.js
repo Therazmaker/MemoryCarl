@@ -584,7 +584,7 @@ function wireNeuroChatInner(root) {
     wireNeuroGraph(root, uiState.sessionState);
   }
   if (uiState.activeTab === "context") {
-    wireContextWindow(root);
+    wireContextWindow(root, rerender);
   }
 
   // ---- Settings button ----
