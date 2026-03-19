@@ -224,3 +224,13 @@ test("remaining = limit - used", () => {
   const s = getPremiumUsageState();
   assert.equal(s.remaining, 12);
 });
+
+test("usageState reports bootstrap spending profile", () => {
+  resetStorage();
+  const strong = getPremiumUsageState({ bootstrapState: { enabled: true, level: "strong" } });
+  const normal = getPremiumUsageState({ bootstrapState: { enabled: true, level: "normal" } });
+  const off = getPremiumUsageState({ bootstrapState: { enabled: false, level: "off" } });
+  assert.equal(strong.bootstrapSpendingProfile, "aggressive");
+  assert.equal(normal.bootstrapSpendingProfile, "balanced");
+  assert.equal(off.bootstrapSpendingProfile, "conservative");
+});

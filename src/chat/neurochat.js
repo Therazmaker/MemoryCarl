@@ -1,9 +1,5 @@
 /**
  * neurochat.js — Lógica de estado y sesión del módulo NeuroChat
- * MemoryCarl
- *
- * Gestiona el historial de conversación, llama al motor neurocore
- * y expone una API limpia para la UI.
  */
 
 import { processNeuroInput } from "../neuro/neurocore.js";
@@ -11,9 +7,7 @@ import { getAllNeurons, saveNeuron, deleteNeuron } from "../neuro/neuronStore.js
 import { createNeuron } from "../neuro/schemas.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
-const MAX_HISTORY  = 50;
-
-// ---- Historial de conversación ----
+const MAX_HISTORY = 50;
 
 function loadHistory() {
   try {
@@ -28,10 +22,7 @@ function saveHistory(history) {
   catch (_e) {}
 }
 
-// ---- Sesión activa ----
-
-let _history = null; // se inicializa lazy
-
+let _history = null;
 function getHistory() {
   if (!_history) _history = loadHistory();
   return _history;
@@ -44,74 +35,33 @@ function appendMessage(role, content, meta = {}) {
   return msg;
 }
 
-// ---- API pública ----
-
-/**
- * Envía un mensaje del usuario y devuelve la respuesta completa del sistema.
- *
- * @param {string} userInput
- * @returns {Promise<NeuroChatResult>}
- */
-export async function sendMessage(userInput) {
+export async function sendMessage(userInput, options = {}) {
   const trimmed = (userInput || "").trim();
   if (!trimmed) throw new Error("Input vacío");
+  const mode = options.mode || "chat";
 
-  // Registrar mensaje del usuario
-  appendMessage("user", trimmed);
+  appendMessage("user", trimmed, { mode });
 
-  // Procesar con el motor
   const result = await processNeuroInput(trimmed, {
     history: getHistory().slice(-10),
+    mode,
+    premiumOptions: options.premiumOptions,
   });
 
-  // Registrar respuesta del sistema
   appendMessage("assistant", result.reply, {
     activated: result.activated.length,
     generated: result.generated.length,
-    coverage:  result.missingAnalysis.coverage,
+    coverage: result.missingAnalysis.coverage,
+    mode,
+    bootstrapLevel: result.bootstrapState?.level,
+    premiumUsed: result.premiumDecision?.usePremium || false,
   });
 
   return result;
 }
 
-/**
- * Devuelve el historial completo de conversación.
- * @returns {ChatMessage[]}
- */
-export function getChatHistory() {
-  return getHistory();
-}
-
-/**
- * Limpia el historial de conversación.
- */
-export function clearChatHistory() {
-  _history = [];
-  saveHistory([]);
-}
-
-/**
- * Devuelve todas las neuronas almacenadas.
- * @returns {Neuron[]}
- */
-export function getNeurons() {
-  return getAllNeurons();
-}
-
-/**
- * Crea y guarda una neurona manualmente.
- * @param {Partial<Neuron>} data
- * @returns {Neuron|null}
- */
-export function addNeuron(data) {
-  return saveNeuron(createNeuron(data));
-}
-
-/**
- * Elimina una neurona por ID.
- * @param {string} id
- * @returns {boolean}
- */
-export function removeNeuron(id) {
-  return deleteNeuron(id);
-}
+export function getChatHistory() { return getHistory(); }
+export function clearChatHistory() { _history = []; saveHistory([]); }
+export function getNeurons() { return getAllNeurons(); }
+export function addNeuron(data) { return saveNeuron(createNeuron(data)); }
+export function removeNeuron(id) { return deleteNeuron(id); }
