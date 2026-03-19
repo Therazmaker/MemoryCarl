@@ -30,6 +30,7 @@ const uiState = {
   settingsOpen:    false,
   settingsMsg:     null,
   settingsApiKeyVisible: false,
+  currentMode: "chat",
   // IDs de neuronas de la sesión actual para resaltado en grafo
   sessionState: {
     lastActivatedIds: [],
@@ -37,6 +38,13 @@ const uiState = {
     lastMergedIds:    [],
   },
 };
+
+const MODE_OPTIONS = [
+  { value: "chat", label: "Chat" },
+  { value: "journal", label: "Diario emocional" },
+  { value: "autobiography", label: "Autobiografía" },
+  { value: "exercise", label: "Ejercicio psicológico" },
+];
 
 // ---- Helpers ----
 function esc(str) {
@@ -115,7 +123,7 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false) {
 
 function renderPremiumPanel() {
   const r = uiState.lastResult;
-  const usageState = getPremiumUsageState();
+  const usageState = getPremiumUsageState({ bootstrapState: r?.bootstrapState });
 
   // Build usage bar
   const usedPct    = usageState.limit > 0 ? Math.round((usageState.used / usageState.limit) * 100) : 0;
@@ -128,13 +136,13 @@ function renderPremiumPanel() {
   if (r) {
     const pd = r.premiumDecision;
     const ds = r.dedupeSummary;
+    const summary = summarizePremiumDecision(r);
 
     if (pd) {
       if (pd.usePremium) {
-        decisionBadge = `<span class="ncPremiumBadge ncPremiumUsed">⚡ Premium learning used</span>`;
+        decisionBadge = `<span class="ncPremiumBadge ncPremiumUsed">${esc(summary.badge)}</span>`;
       } else {
-        const reason = pd.reasons?.[0] || "policy";
-        decisionBadge = `<span class="ncPremiumBadge ncPremiumSkipped" title="${esc(pd.reasons?.join(" · "))}">Skipped premium: ${esc(reason)}</span>`;
+        decisionBadge = `<span class="ncPremiumBadge ncPremiumSkipped" title="${esc(pd.reasons?.join(" · "))}">${esc(summary.badge)}</span>`;
       }
     }
 
@@ -158,8 +166,26 @@ function renderPremiumPanel() {
         <div class="ncPremiumBarFill" style="width:${usedPct}%;background:${usageColor}"></div>
       </div>
       ${decisionBadge ? `<div class="ncPremiumDecision">${decisionBadge}</div>` : ""}
+      ${r?.bootstrapState ? `<div class="ncPremiumDecisionMeta">Modo semilla: <b>${esc(r.bootstrapState.level)}</b> · modo input: <b>${esc(r.mode || "chat")}</b></div>` : ""}
+      ${r?.premiumDecision?.rulePath ? `<div class="ncPremiumDecisionMeta">Ruta policy: ${esc(r.premiumDecision.rulePath)} · perfil: ${esc(usageState.bootstrapSpendingProfile)}</div>` : ""}
       ${dedupeBadge   ? `<div class="ncDedupeRow">${dedupeBadge}</div>` : ""}
     </div>`;
+}
+
+export function summarizePremiumDecision(result) {
+  const pd = result?.premiumDecision;
+  if (!pd) return { badge: "Sin decisión premium", details: [] };
+  if (pd.usePremium) {
+    const badge = pd.bootstrapState?.enabled
+      ? "Aprendizaje premium activado por modo semilla"
+      : "Aprendizaje premium activado";
+    return { badge, details: pd.reasons || [] };
+  }
+  const first = pd.reasons?.[0] || "criterios insuficientes";
+  return {
+    badge: `Aprendizaje premium omitido: ${first}`,
+    details: pd.reasons || [],
+  };
 }
 
 function renderSidePanel() {
@@ -364,6 +390,9 @@ function nchatInner() {
         </div>
 
         <div class="ncInputBar">
+          <select class="ncModeSelect" id="ncModeSelect" ${uiState.loading ? "disabled" : ""}>
+            ${MODE_OPTIONS.map((m) => `<option value="${m.value}" ${uiState.currentMode === m.value ? "selected" : ""}>${m.label}</option>`).join("")}
+          </select>
           <textarea
             class="ncInput"
             id="ncInput"
@@ -446,7 +475,7 @@ function wireNeuroChatInner(root) {
     uiState.error   = null;
     rerender();
     try {
-      const result = await sendMessage(text);
+      const result = await sendMessage(text, { mode: uiState.currentMode });
       uiState.lastResult = result;
       uiState.loading    = false;
       // Actualizar estado de sesión para resaltado en grafo
@@ -474,6 +503,12 @@ function wireNeuroChatInner(root) {
     inputEl.addEventListener("input", () => {
       inputEl.style.height = "auto";
       inputEl.style.height = Math.min(inputEl.scrollHeight, MAX_INPUT_HEIGHT_PX) + "px";
+    });
+  }
+  const modeSelect = root.querySelector("#ncModeSelect");
+  if (modeSelect) {
+    modeSelect.addEventListener("change", () => {
+      uiState.currentMode = modeSelect.value || "chat";
     });
   }
 
@@ -737,6 +772,16 @@ function ncCss() {
     color: inherit; font-size: 14px; font-family: inherit;
     resize: none; max-height: 140px; /* MAX_INPUT_HEIGHT_PX */ line-height: 1.5;
   }
+  .ncModeSelect {
+    background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 10px;
+    color: inherit;
+    font-size: 12px;
+    padding: 8px 10px;
+    max-width: 180px;
+  }
+  .ncPremiumDecisionMeta { font-size: 11px; opacity: .7; margin-top: 6px; line-height: 1.35; }
   .ncInput::placeholder { opacity: .4; }
   .ncSendBtn {
     background: rgba(124,92,255,.8); border: none; border-radius: 10px;
