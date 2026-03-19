@@ -4160,6 +4160,28 @@ export function initFootballLab(){
       .b2-status-show{animation:b2Fade .25s ease}
       .b2-collapse{max-height:0;overflow:hidden;opacity:0;transition:max-height .25s ease,opacity .2s ease}
       .b2-collapse.is-open{max-height:1000px;opacity:1}
+      /* ── Collapsible radar sections ── */
+      .rdx-collapse{max-height:0;overflow:hidden;opacity:0;transition:max-height .35s ease,opacity .25s ease}
+      .rdx-collapse.is-open{max-height:5000px;opacity:1}
+      .rdx-sec-hdr{display:flex;align-items:center;gap:8px;padding:5px 10px;margin-top:8px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.07);border-radius:6px;cursor:pointer;user-select:none}
+      .rdx-sec-hdr:hover{background:rgba(255,255,255,.04)}
+      .rdx-sec-label{font-size:9.5px;font-weight:800;letter-spacing:1.2px;color:#6e7681;text-transform:uppercase;flex:1}
+      .rdx-sec-arrow{font-size:10px;color:#484f58;transition:transform .2s;display:inline-block;line-height:1}
+      .rdx-sec-arrow.open{transform:rotate(180deg)}
+      /* ── Inline edit panel ── */
+      .rdx-edit-panel{display:none;margin:8px 0;padding:12px 14px;background:rgba(10,15,26,.97);border:1px solid rgba(99,102,241,.35);border-radius:8px}
+      .rdx-edit-panel.is-open{display:block}
+      .rdx-edit-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:flex-end}
+      .rdx-edit-group{display:flex;flex-direction:column;gap:3px}
+      .rdx-edit-label{font-size:9px;color:#6e7681;font-weight:700;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+      .rdx-edit-input,.rdx-edit-select{background:#0a0e14;border:1px solid #30363d;border-radius:6px;color:#e6edf3;padding:5px 8px;font-size:12px;width:88px}
+      .rdx-edit-input:focus,.rdx-edit-select:focus{outline:none;border-color:rgba(99,102,241,.6)}
+      .rdx-edit-input-form{width:88px;text-transform:uppercase;font-family:monospace;letter-spacing:3px;font-weight:800}
+      .rdx-edit-save{background:rgba(63,185,80,.16);color:#3fb950;border:1px solid rgba(63,185,80,.36);border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer}
+      .rdx-edit-save:hover{background:rgba(63,185,80,.25)}
+      .rdx-btn-edit{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);color:#8b949e;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;font-weight:700}
+      .rdx-btn-edit:hover{background:rgba(255,255,255,.1);color:#c9d1d9}
+      .mie-header{cursor:pointer;user-select:none}
       .b2-prob-grid{display:grid;grid-template-columns:repeat(3,minmax(90px,1fr));gap:10px;margin-top:10px}
       .b2-prob-card{padding:10px;border-radius:12px;border:1px solid #283244;background:linear-gradient(165deg,#151b27,#0f1520);text-align:center}
       .b2-prob-card b{display:block;font-size:26px;line-height:1.05;margin-top:5px;color:#f8fafc}
@@ -14511,6 +14533,11 @@ RESPONDE SOLO CON JSON usando este schema:
             </div>
           </div>
 
+          <div class="rdx-sec-hdr" data-rdx-sec="${m.id}-metrics">
+            <span class="rdx-sec-label">📊 Métricas del partido</span>
+            <span class="rdx-sec-arrow" id="rdx-arr-${m.id}-metrics">▾</span>
+          </div>
+          <div class="rdx-collapse" id="rdx-sec-${m.id}-metrics">
           <div class="rdx-match-body">
             <div class="rdx-metric">
               <div class="rdx-metric-label">Fuerza Local</div>
@@ -14622,7 +14649,9 @@ RESPONDE SOLO CON JSON usando este schema:
           })() : ''}
 
           ${m.flags.length ? `<div class="rdx-flags">${m.flags.map((f)=>`<span class="rdx-flag ${flagAlert(f)}">${f.replaceAll('_',' ')}</span>`).join('')}</div>` : ''}
+          </div><!-- /metrics collapse -->
 
+          ${(m.videoScout?.available || m.scoutHome || m.scoutAway) ? `<div class="rdx-sec-hdr" data-rdx-sec="${m.id}-scout"><span class="rdx-sec-label">🎬 Scout táctico</span><span class="rdx-sec-arrow" id="rdx-arr-${m.id}-scout">▾</span></div><div class="rdx-collapse" id="rdx-sec-${m.id}-scout">` : ''}
           ${m.videoScout?.available ? (() => {
             const vs = m.videoScout;
             const coverageLabel = vs.coverage.home && vs.coverage.away ? 'BOTH' : vs.coverage.home ? 'HOME ONLY' : 'AWAY ONLY';
@@ -14722,11 +14751,14 @@ RESPONDE SOLO CON JSON usando este schema:
               ${m.scoutAway ? `<div><div style="font-size:9px;font-weight:700;color:#6e7681;text-transform:uppercase;margin-bottom:6px;">${escapeHtml(m.away)}</div>${vsRenderProfileCard(m.scoutAway, m.away)}</div>` : `<div style="color:#4a5568;font-size:10px;padding:8px;">Sin datos scout · ${escapeHtml(m.away)}</div>`}
             </div>
           </div>` : ''}
+          ${(m.videoScout?.available || m.scoutHome || m.scoutAway) ? `</div>` : ''}
 
+          ${m.narrative && m.narrative.length ? `<div class="rdx-sec-hdr" data-rdx-sec="${m.id}-narr"><span class="rdx-sec-label">💬 Narrativa</span><span class="rdx-sec-arrow" id="rdx-arr-${m.id}-narr">▾</span></div><div class="rdx-collapse" id="rdx-sec-${m.id}-narr">` : ''}
           ${m.narrative && m.narrative.length ? `
           <div class="rdx-narrative ${m.studyScore >= 70 ? 'verdict-high' : m.studyScore >= 45 ? 'verdict-mid' : 'verdict-low'}">
             ${m.narrative.map(line => `<div class="rdx-narrative-line">${line}</div>`).join('')}
           </div>` : ''}
+          ${m.narrative && m.narrative.length ? `</div>` : ''}
 
           ${m.matchIntelligence ? (() => {
             const mie = m.matchIntelligence;
@@ -14747,12 +14779,13 @@ RESPONDE SOLO CON JSON usando este schema:
 
             return `
           <div class="mie-block">
-            <div class="mie-header">
+            <div class="mie-header" data-rdx-sec="${m.id}-mie">
               <span class="mie-title">⚡ Match Intelligence Engine</span>
               <span class="mie-thesis-badge">${escapeHtml(thesis.thesisLabel)}</span>
               <span class="mie-confidence-chip">Confianza: <b style="color:${confColor}">${confPct}%</b></span>
+              <span class="rdx-sec-arrow open" id="rdx-arr-${m.id}-mie">▾</span>
             </div>
-            <div class="mie-body">
+            <div class="mie-body rdx-collapse is-open" id="rdx-sec-${m.id}-mie">
 
               <!-- A. TESIS + ONE-LINER -->
               <div class="mie-oneliner">${escapeHtml(thesis.oneLiner)}</div>
@@ -14835,6 +14868,7 @@ RESPONDE SOLO CON JSON usando este schema:
           </div>`;
           })() : ''}
 
+          ${(m.radarAnalysis || m.favoritePressureIndex || m.underdogDefenseIndex || m.drawIndex || m.htCleanSheetSignal || m.marketDefense?.ready) ? `<div class="rdx-sec-hdr" data-rdx-sec="${m.id}-intel"><span class="rdx-sec-label">🧠 Inteligencia del partido</span><span class="rdx-sec-arrow" id="rdx-arr-${m.id}-intel">▾</span></div><div class="rdx-collapse" id="rdx-sec-${m.id}-intel">` : ''}
           ${m.radarAnalysis ? `<div class="rdx-analysis-preview">🎯 Insight IA: ${m.radarAnalysis.insight?.valueLevel || 'MEDIO'} · Consistencia ${m.radarAnalysis.comparison?.consistency || 'MEDIA'}</div>` : ''}
 
           ${(m.favoritePressureIndex || m.underdogDefenseIndex || m.drawIndex || m.htCleanSheetSignal) ? `
@@ -14931,7 +14965,9 @@ RESPONDE SOLO CON JSON usando este schema:
               </div>
             </div>
           </div>` : ''}
+          ${(m.radarAnalysis || m.favoritePressureIndex || m.underdogDefenseIndex || m.drawIndex || m.htCleanSheetSignal || m.marketDefense?.ready) ? `</div>` : ''}
 
+          ${m.championsAnalysis?.active ? `<div class="rdx-sec-hdr" data-rdx-sec="${m.id}-champ"><span class="rdx-sec-label">🏆 Champions Mode</span><span class="rdx-sec-arrow" id="rdx-arr-${m.id}-champ">▾</span></div><div class="rdx-collapse" id="rdx-sec-${m.id}-champ">` : ''}
           ${m.championsAnalysis?.active ? `
           <div style="margin:10px 0 0;background:rgba(88,166,255,0.06);border:1px solid rgba(56,139,253,0.26);border-radius:8px;padding:12px 14px;">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
@@ -14953,6 +14989,72 @@ RESPONDE SOLO CON JSON usando este schema:
               ${(m.championsAnalysis?.championsSurpriseIndex?.reasons || []).slice(0,3).map((r)=>`<li>${escapeHtml(r)}</li>`).join('')}
             </ul>
           </div>` : ''}
+          ${m.championsAnalysis?.active ? `</div>` : ''}
+
+          <!-- Edit panel -->
+          <div class="rdx-edit-panel" id="rdx-edit-${m.id}">
+            <div style="font-size:10px;font-weight:800;color:#818cf8;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;">✏️ Editar partido</div>
+            <div class="rdx-edit-row">
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Cuota 1</span>
+                <input class="rdx-edit-input" data-ef="oddsHome" type="number" step="0.01" placeholder="1.85" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Cuota X</span>
+                <input class="rdx-edit-input" data-ef="oddsDraw" type="number" step="0.01" placeholder="3.40" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Cuota 2</span>
+                <input class="rdx-edit-input" data-ef="oddsAway" type="number" step="0.01" placeholder="4.20" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Pos. local (#)</span>
+                <input class="rdx-edit-input" data-ef="rankHome" type="number" min="1" placeholder="3" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Pos. visitante (#)</span>
+                <input class="rdx-edit-input" data-ef="rankAway" type="number" min="1" placeholder="12" />
+              </div>
+            </div>
+            <div class="rdx-edit-row">
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Forma local (últ. 5)</span>
+                <input class="rdx-edit-input rdx-edit-input-form" data-ef="formHome" type="text" maxlength="5" placeholder="GGGPG" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Goles rec. local</span>
+                <input class="rdx-edit-input" data-ef="gaGoalsHome" type="number" min="0" placeholder="41" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">En # partidos</span>
+                <input class="rdx-edit-input" data-ef="gaGamesHome" type="number" min="1" placeholder="24" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Forma visit. (últ. 5)</span>
+                <input class="rdx-edit-input rdx-edit-input-form" data-ef="formAway" type="text" maxlength="5" placeholder="GEPEG" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Goles rec. visit.</span>
+                <input class="rdx-edit-input" data-ef="gaGoalsAway" type="number" min="0" placeholder="30" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">En # partidos</span>
+                <input class="rdx-edit-input" data-ef="gaGamesAway" type="number" min="1" placeholder="24" />
+              </div>
+              <div class="rdx-edit-group">
+                <span class="rdx-edit-label">Predicción</span>
+                <select class="rdx-edit-select" data-ef="prediction" style="width:150px;">
+                  <option value="">— Sin predicción —</option>
+                  <option value="home">1 Gana Local</option>
+                  <option value="draw">X Empate</option>
+                  <option value="away">2 Gana Visitante</option>
+                  <option value="home_draw">1X Local no pierde</option>
+                  <option value="away_draw">X2 Visitante no pierde</option>
+                </select>
+              </div>
+            </div>
+            <button class="rdx-edit-save" data-rdx-save="${m.id}">💾 Guardar cambios</button>
+          </div>
 
           <div class="rdx-match-actions">
             <button class="rdx-btn-sim" data-radar-open-sim="${m.id}">⚡ Simular</button>
@@ -14960,6 +15062,7 @@ RESPONDE SOLO CON JSON usando este schema:
             ${m.prediction ? `<span class="rdx-prediction-pill" title="Tu predicción">${{'home':'1 Local','draw':'X Empate','away':'2 Visitante','home_draw':'1X No pierde Local','away_draw':'X2 No pierde Visit.'}[m.prediction]||m.prediction}</span>` : ''}
             <button class="rdx-btn-sm" style="background:rgba(138,99,210,0.1);border:1px solid rgba(138,99,210,0.35);color:#a78bfa;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;font-weight:700;" data-radar-import-ai="${m.id}" title="Importar predicción IA + registrar resultado real para entrenar el sistema">🧪 Importar IA</button>
             <button class="rdx-btn-sm rdx-btn-hist-card" data-radar-to-hist="${m.id}" title="Registrar en histórico y marcar resultado">📋 Al histórico</button>
+            <button class="rdx-btn-sm rdx-btn-edit" data-rdx-edit="${m.id}" title="Editar cuotas, clasificación y datos iniciales">✏️ Editar</button>
             <button class="rdx-btn-sm rdx-btn-danger" data-radar-delete-manual="${m.id}">Eliminar</button>
           </div>
         </div>
@@ -15904,12 +16007,16 @@ RESPONDE SOLO CON JSON usando este schema:
           oddsAway:   pickFirstNumber(document.getElementById('radarManualOddA')?.value),
           // Forma manual
           manualFormHome: formHomeSeq,
+          manualGaGoalsHome: pickFirstNumber(document.getElementById('radarGaGoalsHome')?.value),
+          manualGaGamesHome: pickFirstNumber(document.getElementById('radarGaGamesHome')?.value),
           manualGaHome:   (() => {
             const g = pickFirstNumber(document.getElementById('radarGaGoalsHome')?.value);
             const n = pickFirstNumber(document.getElementById('radarGaGamesHome')?.value);
             return (Number.isFinite(g) && Number.isFinite(n) && n > 0) ? Number((g/n).toFixed(2)) : null;
           })(),
           manualFormAway: formAwaySeq,
+          manualGaGoalsAway: pickFirstNumber(document.getElementById('radarGaGoalsAway')?.value),
+          manualGaGamesAway: pickFirstNumber(document.getElementById('radarGaGamesAway')?.value),
           manualGaAway:   (() => {
             const g = pickFirstNumber(document.getElementById('radarGaGoalsAway')?.value);
             const n = pickFirstNumber(document.getElementById('radarGaGamesAway')?.value);
@@ -15929,6 +16036,83 @@ RESPONDE SOLO CON JSON usando este schema:
         db.radar.matches = db.radar.matches.filter((row)=>row.id!==id);
         saveDb(db);
         render('radar', payload);
+      });
+
+      // ── SECTION TOGGLES (event delegation on match list)
+      content.addEventListener('click', (e) => {
+        const hdr = e.target.closest('[data-rdx-sec]');
+        if (!hdr) return;
+        const secId = hdr.dataset.rdxSec;
+        const body = document.getElementById(`rdx-sec-${secId}`);
+        const arrow = document.getElementById(`rdx-arr-${secId}`);
+        if (!body) return;
+        const isOpen = body.classList.toggle('is-open');
+        if (arrow) arrow.classList.toggle('open', isOpen);
+      });
+
+      // ── EDIT BUTTON — toggle panel and pre-fill fields
+      content.querySelectorAll('[data-rdx-edit]').forEach((btn) => {
+        btn.onclick = () => {
+          const matchId = btn.dataset.rdxEdit;
+          const panel = document.getElementById(`rdx-edit-${matchId}`);
+          if (!panel) return;
+          const rawMatch = db.radar.matches.find((r) => r.id === matchId);
+          if (rawMatch) {
+            panel.querySelector('[data-ef="oddsHome"]').value = rawMatch.oddsHome ?? '';
+            panel.querySelector('[data-ef="oddsDraw"]').value = rawMatch.oddsDraw ?? '';
+            panel.querySelector('[data-ef="oddsAway"]').value = rawMatch.oddsAway ?? '';
+            panel.querySelector('[data-ef="rankHome"]').value = rawMatch.manualRankHome ?? '';
+            panel.querySelector('[data-ef="rankAway"]').value = rawMatch.manualRankAway ?? '';
+            panel.querySelector('[data-ef="formHome"]').value = (rawMatch.manualFormHome || []).join('');
+            panel.querySelector('[data-ef="gaGoalsHome"]').value = rawMatch.manualGaGoalsHome ?? '';
+            panel.querySelector('[data-ef="gaGamesHome"]').value = rawMatch.manualGaGamesHome ?? '';
+            panel.querySelector('[data-ef="formAway"]').value = (rawMatch.manualFormAway || []).join('');
+            panel.querySelector('[data-ef="gaGoalsAway"]').value = rawMatch.manualGaGoalsAway ?? '';
+            panel.querySelector('[data-ef="gaGamesAway"]').value = rawMatch.manualGaGamesAway ?? '';
+            panel.querySelector('[data-ef="prediction"]').value = rawMatch.prediction ?? '';
+          }
+          panel.classList.toggle('is-open');
+        };
+      });
+
+      // ── SAVE EDIT
+      content.querySelectorAll('[data-rdx-save]').forEach((btn) => {
+        btn.onclick = () => {
+          const matchId = btn.dataset.rdxSave;
+          const panel = document.getElementById(`rdx-edit-${matchId}`);
+          if (!panel) return;
+          const rawIdx = db.radar.matches.findIndex((r) => r.id === matchId);
+          if (rawIdx < 0) return;
+          const parseForm = (str) => {
+            const clean = String(str || '').toUpperCase().replace(/[^GEP]/g, '').slice(0, 5);
+            return clean.length >= 3 ? clean.split('') : null;
+          };
+          const getVal = (field) => panel.querySelector(`[data-ef="${field}"]`)?.value;
+          const gaGoalsHome  = pickFirstNumber(getVal('gaGoalsHome'));
+          const gaGamesHome  = pickFirstNumber(getVal('gaGamesHome'));
+          const gaGoalsAway  = pickFirstNumber(getVal('gaGoalsAway'));
+          const gaGamesAway  = pickFirstNumber(getVal('gaGamesAway'));
+          const rankH = pickFirstNumber(getVal('rankHome'));
+          const rankA = pickFirstNumber(getVal('rankAway'));
+          Object.assign(db.radar.matches[rawIdx], {
+            oddsHome:         pickFirstNumber(getVal('oddsHome')),
+            oddsDraw:         pickFirstNumber(getVal('oddsDraw')),
+            oddsAway:         pickFirstNumber(getVal('oddsAway')),
+            manualRankHome:   Number.isFinite(rankH) ? rankH : null,
+            manualRankAway:   Number.isFinite(rankA) ? rankA : null,
+            manualFormHome:   parseForm(getVal('formHome')),
+            manualGaGoalsHome: Number.isFinite(gaGoalsHome) ? gaGoalsHome : null,
+            manualGaGamesHome: Number.isFinite(gaGamesHome) ? gaGamesHome : null,
+            manualGaHome:     (Number.isFinite(gaGoalsHome) && Number.isFinite(gaGamesHome) && gaGamesHome > 0) ? Number((gaGoalsHome / gaGamesHome).toFixed(2)) : db.radar.matches[rawIdx].manualGaHome,
+            manualFormAway:   parseForm(getVal('formAway')),
+            manualGaGoalsAway: Number.isFinite(gaGoalsAway) ? gaGoalsAway : null,
+            manualGaGamesAway: Number.isFinite(gaGamesAway) ? gaGamesAway : null,
+            manualGaAway:     (Number.isFinite(gaGoalsAway) && Number.isFinite(gaGamesAway) && gaGamesAway > 0) ? Number((gaGoalsAway / gaGamesAway).toFixed(2)) : db.radar.matches[rawIdx].manualGaAway,
+            prediction:       getVal('prediction') || '',
+          });
+          saveDb(db);
+          render('radar', payload);
+        };
       });
 
       // ── OPEN SIMULATION
