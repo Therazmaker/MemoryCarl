@@ -10,8 +10,8 @@ import { tokenize, neuronTokenSet } from "./utils.js";
 import { requestNeuronGeneration } from "../services/neuroclawClient.js";
 import { sanitizeNeuron } from "./schemas.js";
 
-// Umbral de coverage por debajo del cual se activa la generación
-const LOW_COVERAGE_THRESHOLD = 0.45;
+// Umbral mínimo de coverage aceptable; por debajo se activa la generación
+const MIN_ACCEPTABLE_COVERAGE = 0.45;
 // Mínimo de neuronas activadas para considerar cobertura suficiente
 const MIN_ACTIVATED_FOR_COVERAGE = 3;
 
@@ -43,7 +43,7 @@ export function detectMissingConcepts(userInput, activatedNeurons) {
     if (activatedNeurons.length < MIN_ACTIVATED_FOR_COVERAGE) {
       reasons.push("pocas neuronas activadas");
     }
-    if (coverage < LOW_COVERAGE_THRESHOLD) {
+    if (coverage < MIN_ACCEPTABLE_COVERAGE) {
       reasons.push(`cobertura de tokens baja (${Math.round(coverage * 100)}%)`);
     }
     // Score promedio bajo
@@ -61,7 +61,7 @@ export function detectMissingConcepts(userInput, activatedNeurons) {
   const missing = queryTokens.filter((t) => !allCovered.has(t) && t.length > 3);
   const missingConcepts = [...new Set(missing)].slice(0, 10);
 
-  const needsGeneration = reasons.length > 0 || coverage < LOW_COVERAGE_THRESHOLD;
+  const needsGeneration = reasons.length > 0 || coverage < MIN_ACCEPTABLE_COVERAGE;
 
   return {
     coverage: Math.round(coverage * 100) / 100,

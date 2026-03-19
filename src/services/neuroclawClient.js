@@ -56,8 +56,7 @@ async function fetchWithTimeout(url, opts, timeoutMs = DEFAULT_TIMEOUT_MS) {
 async function safeJson(res) {
   try { return await res.json(); }
   catch (_e) {
-    const text = await res.text().catch(() => "");
-    console.error("[neuroclawClient] Respuesta no-JSON:", text.slice(0, 300));
+    console.error("[neuroclawClient] Respuesta no-JSON del servidor (ver Network en DevTools).");
     return null;
   }
 }

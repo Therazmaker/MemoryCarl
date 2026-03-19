@@ -160,7 +160,7 @@ export async function processNeuroInput(userInput, options = {}) {
       reply = await requestChatReply({
         userInput,
         context,
-        history: (options.history || []).slice(-6), // últimos 6 mensajes
+        history: (options.history || []).slice(-6), // últimos 6 mensajes individuales (rol user o assistant)
         missingConcepts: missingAnalysis.missingConcepts,
       });
     } catch (err) {

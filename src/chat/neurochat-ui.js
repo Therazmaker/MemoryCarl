@@ -11,7 +11,8 @@
 import { sendMessage, getChatHistory, clearChatHistory, getNeurons } from "./neurochat.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 
-// ---- Estado UI local ----
+// ---- Constantes UI ----
+const MAX_INPUT_HEIGHT_PX = 140;
 const uiState = {
   loading:        false,
   error:          null,
@@ -268,7 +269,7 @@ function wireNeuroChatInner(root) {
     // Auto-grow
     inputEl.addEventListener("input", () => {
       inputEl.style.height = "auto";
-      inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
+      inputEl.style.height = Math.min(inputEl.scrollHeight, MAX_INPUT_HEIGHT_PX) + "px";
     });
   }
 
@@ -417,7 +418,7 @@ function ncCss() {
   .ncInput {
     flex: 1; background: transparent; border: none; outline: none;
     color: inherit; font-size: 14px; font-family: inherit;
-    resize: none; max-height: 140px; line-height: 1.5;
+    resize: none; max-height: 140px; /* MAX_INPUT_HEIGHT_PX */ line-height: 1.5;
   }
   .ncInput::placeholder { opacity: .4; }
   .ncSendBtn {
