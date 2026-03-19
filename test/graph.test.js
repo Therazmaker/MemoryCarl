@@ -323,3 +323,16 @@ test("buildNeuronGraph: integración completa con sessionState", () => {
   assert.equal(byId.n3.status, "merged");
   assert.equal(byId.n4.status, "normal");
 });
+
+test("buildNeuronGraph incluye metadata manual y filtros manuales", () => {
+  const manual = makeNeuron({ id: "m1", type: "person", concept: "Fergis" });
+  manual.source = { kind: "manual", ref: "context_window" };
+  manual.meta = { aliases: ["mi esposa"], priority: "high", pin: true, manualCategory: "people", notes: "importante" };
+  const auto = makeNeuron({ id: "a1", concept: "Trabajo" });
+  const g = buildNeuronGraph([manual, auto]);
+  const mNode = g.nodes.find((n) => n.id === "m1");
+  assert.equal(mNode.isManual, true);
+  assert.equal(mNode.pin, true);
+  const filtered = filterGraphNodes(g, { sourceKind: "manual", pinned: true, manualCategory: "people" });
+  assert.equal(filtered.nodes.length, 1);
+});

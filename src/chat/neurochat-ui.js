@@ -17,6 +17,7 @@ import {
 } from "../settings/neurochatSettings.js";
 import { isGeminiPremiumConfigured } from "../services/geminiPremiumClient.js";
 import { viewNeuroGraph, wireNeuroGraph } from "./neurograph-ui.js";
+import { viewContextWindow, wireContextWindow } from "./context-window-ui.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
@@ -26,7 +27,7 @@ const uiState = {
   lastResult:      null,  // NeuroCoreResult
   traceExpanded:   false,
   neuronsExpanded: false,
-  activeTab:       "chat",   // "chat" | "graph"
+  activeTab:       "chat",   // "chat" | "graph" | "context"
   settingsOpen:    false,
   settingsMsg:     null,
   settingsApiKeyVisible: false,
@@ -376,6 +377,7 @@ function nchatInner() {
 
   const tabChat  = uiState.activeTab === "chat";
   const tabGraph = uiState.activeTab === "graph";
+  const tabContext = uiState.activeTab === "context";
 
   const settingsModal = uiState.settingsOpen ? renderSettingsModal() : "";
 
@@ -413,6 +415,9 @@ function nchatInner() {
   const graphContent = tabGraph
     ? viewNeuroGraph(uiState.sessionState)
     : "";
+  const contextContent = tabContext
+    ? viewContextWindow()
+    : "";
 
   return `
     <div class="nchatWrap">
@@ -439,11 +444,13 @@ function nchatInner() {
       <div class="ncTabs">
         <button class="ncTab ${tabChat  ? "ncTab--active" : ""}" id="btnTabChat">💬 Chat</button>
         <button class="ncTab ${tabGraph ? "ncTab--active" : ""}" id="btnTabGraph">🕸️ Neuron Graph</button>
+        <button class="ncTab ${tabContext ? "ncTab--active" : ""}" id="btnTabContext">🗂️ Context Window</button>
       </div>
 
       <!-- Contenido del tab activo -->
       ${chatContent}
       ${graphContent}
+      ${contextContent}
 
       <!-- Settings modal -->
       ${settingsModal}
@@ -550,14 +557,20 @@ function wireNeuroChatInner(root) {
   root.querySelector("#btnTabGraph")?.addEventListener("click", () => {
     uiState.activeTab = "graph";
     rerender();
-    // Wirear el grafo después del rerender
     const graphRoot = root.querySelector(".nchatWrap");
     if (graphRoot) wireNeuroGraph(graphRoot.closest("#app") || root, uiState.sessionState);
+  });
+  root.querySelector("#btnTabContext")?.addEventListener("click", () => {
+    uiState.activeTab = "context";
+    rerender();
   });
 
   // Si el tab activo es el grafo, wirear
   if (uiState.activeTab === "graph") {
     wireNeuroGraph(root, uiState.sessionState);
+  }
+  if (uiState.activeTab === "context") {
+    wireContextWindow(root);
   }
 
   // ---- Settings button ----

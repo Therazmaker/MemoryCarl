@@ -40,6 +40,17 @@ const EMOTION_COLORS = {
   neutral:   "#94a3b8",
 };
 
+
+const MANUAL_CATEGORY_COLORS = {
+  people: "#f472b6",
+  work: "#60a5fa",
+  hobbies: "#34d399",
+  projects: "#fbbf24",
+  preferences: "#a78bfa",
+  places: "#fb923c",
+  identity: "#e879f9",
+  other: "#94a3b8",
+};
 /**
  * Devuelve el mapa de colores por dominio.
  * @returns {Record<string, string>}
@@ -104,7 +115,9 @@ export function buildNeuronGraph(neurons, options = {}) {
   // ---- Construir nodos ----
   const nodes = neurons.map((n) => {
     const key      = colorBy === "emotion" ? (n.emotion || "neutral") : (n.core?.domain || "general");
-    const color    = colorMap[key] || "#94a3b8";
+    const manualCategory = n.meta?.manualCategory || null;
+    const isManual = n.source?.kind === "manual";
+    const color    = isManual ? (n.meta?.colorTag || MANUAL_CATEGORY_COLORS[manualCategory] || "#94a3b8") : (colorMap[key] || "#94a3b8");
     const size     = computeNodeSize(n, { minSize: options.minSize, maxSize: options.maxSize });
     const isHighlight = highlightIds.has(n.id);
     const isNew       = newIds.has(n.id);
@@ -129,6 +142,13 @@ export function buildNeuronGraph(neurons, options = {}) {
       triggers:          Array.isArray(n.triggers)   ? n.triggers   : [],
       evidence:          Array.isArray(n.evidence)   ? n.evidence   : [],
       connections:       Array.isArray(n.connections) ? n.connections : [],
+      aliases:           Array.isArray(n.meta?.aliases) ? n.meta.aliases : [],
+      priority:          n.meta?.priority || "medium",
+      pin:               Boolean(n.meta?.pin),
+      manualCategory,
+      notes:             n.meta?.notes || "",
+      sourceKind:        n.source?.kind || "user",
+      isManual,
       color,
       size,
       status,  // "normal" | "active" | "new" | "merged"
@@ -152,6 +172,7 @@ export function buildNeuronGraph(neurons, options = {}) {
         id:     edgeKey,
         source: n.id,
         target: targetId,
+        connectionSource: n.linkMeta?.[targetId]?.connectionSource || "auto",
       });
     }
   }
@@ -190,12 +211,26 @@ export function filterGraphNodes(graph, filters = {}) {
       return ts >= cutoff;
     });
   }
+  if (filters.sourceKind) {
+    if (filters.sourceKind === "manual") nodes = nodes.filter((n) => n.isManual);
+    else if (filters.sourceKind === "auto") nodes = nodes.filter((n) => !n.isManual);
+  }
+  if (filters.manualCategory) {
+    nodes = nodes.filter((n) => n.manualCategory === filters.manualCategory);
+  }
+  if (filters.pinned != null) {
+    nodes = nodes.filter((n) => Boolean(n.pin) === Boolean(filters.pinned));
+  }
+  if (filters.type) {
+    nodes = nodes.filter((n) => n.type === filters.type);
+  }
   if (filters.search && filters.search.trim()) {
     const lower = filters.search.trim().toLowerCase();
     nodes = nodes.filter((n) =>
       n.label.toLowerCase().includes(lower) ||
       n.summary.toLowerCase().includes(lower) ||
-      n.triggers.some((t) => t.toLowerCase().includes(lower))
+      n.triggers.some((t) => t.toLowerCase().includes(lower)) ||
+      n.aliases.some((a) => a.toLowerCase().includes(lower))
     );
   }
 

@@ -4,13 +4,56 @@
  */
 
 /** Tipos de neurona permitidos */
-export const NEURON_TYPES = ["memory", "pattern", "belief", "rule", "event", "identity"];
+export const NEURON_TYPES = [
+  "memory", "pattern", "belief", "rule", "event", "identity",
+  "person", "relationship", "work_context", "hobby", "project",
+  "preference", "life_area", "place", "identity_anchor", "manual_context",
+];
+
+export const MANUAL_CATEGORIES = ["people", "work", "hobbies", "projects", "preferences", "places", "identity", "other"];
+export const MANUAL_PRIORITIES = ["low", "medium", "high"];
 
 /** Emociones reconocidas */
 export const EMOTION_VALUES = [
   "joy", "sadness", "anger", "fear", "surprise", "disgust",
   "curiosity", "pride", "shame", "love", "neutral"
 ];
+
+function normalizeAliases(aliases) {
+  if (!Array.isArray(aliases)) return [];
+  const seen = new Set();
+  return aliases
+    .map((a) => String(a || "").trim().toLowerCase())
+    .filter(Boolean)
+    .filter((a) => {
+      if (seen.has(a)) return false;
+      seen.add(a);
+      return true;
+    })
+    .slice(0, 30);
+}
+
+function sanitizeMeta(meta = {}) {
+  const aliases = normalizeAliases(meta.aliases);
+  const priority = MANUAL_PRIORITIES.includes(meta.priority) ? meta.priority : "medium";
+  const manualCategory = MANUAL_CATEGORIES.includes(meta.manualCategory) ? meta.manualCategory : "other";
+  const pin = Boolean(meta.pin);
+  const notes = String(meta.notes || "").slice(0, 600);
+  const colorTag = meta.colorTag ? String(meta.colorTag).slice(0, 60) : "";
+
+  if (!aliases.length && !pin && manualCategory === "other" && !notes && !colorTag && priority === "medium") {
+    return undefined;
+  }
+
+  return {
+    aliases,
+    priority,
+    pin,
+    manualCategory,
+    notes,
+    ...(colorTag ? { colorTag } : {}),
+  };
+}
 
 /**
  * Crea una neurona con valores por defecto, mezclando el objeto dado.
@@ -19,6 +62,7 @@ export const EMOTION_VALUES = [
  */
 export function createNeuron(data = {}) {
   const now = new Date().toISOString();
+  const sanitizedMeta = sanitizeMeta(data.meta || {});
   return {
     id:           data.id           || generateId(),
     type:         data.type         || "memory",
@@ -41,6 +85,7 @@ export function createNeuron(data = {}) {
       kind:  data.source?.kind  || "user",
       ref:   data.source?.ref   || "",
     },
+    ...(sanitizedMeta ? { meta: sanitizedMeta } : {}),
   };
 }
 
@@ -62,9 +107,26 @@ export function validateNeuron(n) {
   }
   if (!Array.isArray(n.triggers))                errs.push("triggers no es array");
   if (!Array.isArray(n.connections))             errs.push("connections no es array");
-  if (typeof n.weight !== "number")              errs.push("weight inválido");
+  if (typeof n.weight !== "number")             errs.push("weight inválido");
   if (!Array.isArray(n.evidence))               errs.push("evidence no es array");
   if (!Array.isArray(n.embedding))              errs.push("embedding no es array");
+
+  if (n.source && typeof n.source === "object") {
+    if (n.source.kind != null && typeof n.source.kind !== "string") errs.push("source.kind inválido");
+    if (n.source.ref != null && typeof n.source.ref !== "string") errs.push("source.ref inválido");
+  }
+
+  if (n.meta != null) {
+    if (!n.meta || typeof n.meta !== "object") {
+      errs.push("meta inválido");
+    } else {
+      if (n.meta.aliases != null && !Array.isArray(n.meta.aliases)) errs.push("meta.aliases inválido");
+      if (Array.isArray(n.meta.aliases) && n.meta.aliases.some((a) => typeof a !== "string")) errs.push("meta.aliases debe contener strings");
+      if (n.meta.priority != null && !MANUAL_PRIORITIES.includes(n.meta.priority)) errs.push("meta.priority inválido");
+      if (n.meta.pin != null && typeof n.meta.pin !== "boolean") errs.push("meta.pin inválido");
+      if (n.meta.manualCategory != null && !MANUAL_CATEGORIES.includes(n.meta.manualCategory)) errs.push("meta.manualCategory inválido");
+    }
+  }
   return errs;
 }
 
@@ -90,6 +152,11 @@ export function sanitizeNeuron(raw) {
   n.triggers    = n.triggers.map(String).filter(Boolean).slice(0, 20);
   n.connections = n.connections.map(String).filter(Boolean).slice(0, 30);
   n.evidence    = n.evidence.map(String).filter(Boolean).slice(0, 20);
+
+  const sanitizedMeta = sanitizeMeta(raw.meta || n.meta || {});
+  if (sanitizedMeta) n.meta = sanitizedMeta;
+  else delete n.meta;
+
   return n;
 }
 

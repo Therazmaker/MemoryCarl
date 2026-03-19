@@ -35,6 +35,40 @@ function buildContext(activatedNeurons) {
   }));
 }
 
+
+function buildEnrichedContext(userInput, activatedNeurons) {
+  const manual = activatedNeurons.filter((a) => a.neuron?.source?.kind === "manual");
+  const lowerInput = String(userInput || "").toLowerCase();
+
+  const explicitManual = manual.filter(({ neuron }) => {
+    const concept = String(neuron.core?.concept || "").toLowerCase();
+    const aliases = neuron.meta?.aliases || [];
+    return (concept && lowerInput.includes(concept)) || aliases.some((a) => lowerInput.includes(String(a).toLowerCase()));
+  });
+
+  const activatedIds = new Set(activatedNeurons.map((a) => a.neuron.id));
+  const relatedPinned = manual
+    .filter(({ neuron }) => neuron.meta?.pin)
+    .filter(({ neuron }) => (neuron.connections || []).some((id) => activatedIds.has(id)));
+
+  const selected = [...explicitManual, ...relatedPinned, ...manual]
+    .filter((entry, idx, arr) => arr.findIndex((x) => x.neuron.id === entry.neuron.id) === idx)
+    .slice(0, 4);
+
+  const activatedManual = selected.map(({ neuron, score }) => ({
+    id: neuron.id,
+    concept: neuron.core?.concept,
+    aliases: neuron.meta?.aliases || [],
+    category: neuron.meta?.manualCategory || "other",
+    priority: neuron.meta?.priority || "medium",
+    pin: Boolean(neuron.meta?.pin),
+    score: Math.round((score || 0) * 100) / 100,
+  }));
+
+  const contextEntities = activatedManual.map((m) => m.concept).filter(Boolean);
+  return { activatedManual, contextEntities };
+}
+
 export async function processNeuroInput(userInput, options = {}) {
   const trace = createTrace();
   const t0 = Date.now();
@@ -211,11 +245,14 @@ export async function processNeuroInput(userInput, options = {}) {
 
   if (isNeuroclawConfigured()) {
     try {
+      const enriched = buildEnrichedContext(userInput, finalActivated);
       reply = await requestChatReply({
         userInput,
         context,
         history: (options.history || []).slice(-6),
         missingConcepts: missingAnalysis.missingConcepts,
+        activatedManual: enriched.activatedManual,
+        contextEntities: enriched.contextEntities,
       });
     } catch (err) {
       console.warn("[neurocore] Error al pedir reply:", err);
@@ -234,9 +271,13 @@ export async function processNeuroInput(userInput, options = {}) {
   recordTiming(trace, "total", Date.now() - t0);
   const traceResult = finalizeTrace(trace);
 
+  const enrichedContext = buildEnrichedContext(userInput, finalActivated);
+
   return {
     reply,
     activated: finalActivated,
+    activatedManual: enrichedContext.activatedManual,
+    contextEntities: enrichedContext.contextEntities,
     generated,
     trace: traceResult,
     missingAnalysis,
