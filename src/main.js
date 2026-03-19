@@ -1,4 +1,5 @@
 import { initFootballLab } from "./footballLab_v8e.js?v=2001";
+import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -2363,6 +2364,7 @@ function renderMoreModal(){
           ${mk("learn","🧠","Aprender","Mini contenido")}
           ${mk("insights","📊","Insights","Todo por día")}
           ${mk("football","⚽","Football Lab","Equipos, jugadores, ratings")}
+          ${mk("neurochat","💬","NeuroChat","Conversación con memoria viva")}
           ${mk("settings","⚙️","Ajustes","Backup, sync, etc")}
         </div>
       </div>
@@ -2396,6 +2398,7 @@ function view(){
         ${state.tab==="finance" ? viewFinance() : ""}
         ${state.tab==="settings" ? viewSettings() : ""}
         ${state.tab==="football" ? viewFootball() : ""}
+        ${state.tab==="neurochat" ? viewNeuroChat() : ""}
       </main>
 
       ${state.tab==="settings" ? `
@@ -2804,10 +2807,14 @@ function view(){
   if(state.tab==="football"){
     try{ initFootballTab(root); }catch(e){ console.error(e); }
   }
+  // NeuroChat tab init
+  if(state.tab==="neurochat"){
+    try{ wireNeuroChat(root); }catch(e){ console.error(e); }
+  }
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
   if(fab){
-    fab.style.display = (state.tab==="learn" || state.tab==="settings") ? "none" : "flex";
+    fab.style.display = (state.tab==="learn" || state.tab==="settings" || state.tab==="neurochat") ? "none" : "flex";
     fab.addEventListener("click", ()=>{
     if(state.tab==="home") openMusicModal();
     if(state.tab==="routines") openRoutineModal();
