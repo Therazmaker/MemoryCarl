@@ -11,15 +11,31 @@
 import { sendMessage, getChatHistory, clearChatHistory, getNeurons } from "./neurochat.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
+import {
+  getNeuroChatSettings, saveNeuroChatSettings, resetNeuroChatSettings,
+  validateNeuroChatSettings, maskApiKey,
+} from "../settings/neurochatSettings.js";
+import { isGeminiPremiumConfigured } from "../services/geminiPremiumClient.js";
+import { viewNeuroGraph, wireNeuroGraph } from "./neurograph-ui.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
 const uiState = {
-  loading:        false,
-  error:          null,
-  lastResult:     null,  // NeuroCoreResult
-  traceExpanded:  false,
+  loading:         false,
+  error:           null,
+  lastResult:      null,  // NeuroCoreResult
+  traceExpanded:   false,
   neuronsExpanded: false,
+  activeTab:       "chat",   // "chat" | "graph"
+  settingsOpen:    false,
+  settingsMsg:     null,
+  settingsApiKeyVisible: false,
+  // IDs de neuronas de la sesión actual para resaltado en grafo
+  sessionState: {
+    lastActivatedIds: [],
+    lastGeneratedIds: [],
+    lastMergedIds:    [],
+  },
 };
 
 // ---- Helpers ----
@@ -213,6 +229,102 @@ function renderSidePanel() {
     </div>`;
 }
 
+// ---- Settings Modal ----
+
+function renderSettingsModal() {
+  const s       = getNeuroChatSettings();
+  const maskedKey = s.apiKey ? maskApiKey(s.apiKey) : "";
+  const keyPlaceholder = s.apiKey
+    ? `${maskedKey} (escribe para reemplazar)`
+    : "AIza… (tu API key de Gemini)";
+  const premiumConfigured = isGeminiPremiumConfigured();
+
+  const statusBadge = premiumConfigured
+    ? `<span class="ncSettingsBadge ncSettingsBadgeOn">✓ Premium activo</span>`
+    : `<span class="ncSettingsBadge ncSettingsBadgeOff">Sin API key configurada</span>`;
+
+  return `
+    <div class="ncSettingsOverlay" id="ncSettingsOverlay">
+      <div class="ncSettingsModal">
+        <div class="ncSettingsHeader">
+          <div class="ncSettingsTitle">⚙️ Configuración NeuroChat</div>
+          <button class="ncIconBtn" id="btnSettingsClose">✕</button>
+        </div>
+
+        <div class="ncSettingsStatus">
+          ${statusBadge}
+          <span class="ncSettingsStatusSub">${s.enabled ? "Generación premium habilitada" : "Generación premium deshabilitada"}</span>
+        </div>
+
+        ${uiState.settingsMsg ? `<div class="ncSettingsMsg ncSettingsMsgType--${uiState.settingsMsg.type}">${esc(uiState.settingsMsg.text)}</div>` : ""}
+
+        <form id="ncSettingsForm" autocomplete="off">
+          <!-- Toggle premium -->
+          <label class="ncSettingsRow ncSettingsToggleRow">
+            <span class="ncSettingsLabel">Activar generación premium Gemini</span>
+            <input type="checkbox" id="ncsPremiumEnabled" ${s.enabled ? "checked" : ""} />
+          </label>
+
+          <!-- API Key -->
+          <div class="ncSettingsField">
+            <label class="ncSettingsLabel" for="ncsApiKey">Gemini API key</label>
+            <div class="ncSettingsKeyRow">
+              <input
+                type="${uiState.settingsApiKeyVisible ? "text" : "password"}"
+                id="ncsApiKey"
+                class="ncSettingsInput"
+                placeholder="${esc(keyPlaceholder)}"
+                autocomplete="new-password"
+                value=""
+              />
+              <button type="button" class="ncIconBtn" id="btnToggleApiKeyVisibility">
+                ${uiState.settingsApiKeyVisible ? "🙈" : "👁"}
+              </button>
+            </div>
+            <div class="ncSettingsHint">La key se guarda solo en tu navegador (localStorage). No se envía a ningún servidor de MemoryCarl.</div>
+          </div>
+
+          <!-- Modelo -->
+          <div class="ncSettingsField">
+            <label class="ncSettingsLabel" for="ncsModel">Modelo Gemini</label>
+            <input type="text" id="ncsModel" class="ncSettingsInput" value="${esc(s.model)}" placeholder="gemini-2.5-flash" />
+          </div>
+
+          <!-- Daily limit -->
+          <div class="ncSettingsField">
+            <label class="ncSettingsLabel" for="ncsDailyLimit">Límite diario de llamadas premium</label>
+            <input type="number" id="ncsDailyLimit" class="ncSettingsInput ncSettingsInputSm" value="${s.dailyLimit}" min="1" max="100" />
+          </div>
+
+          <!-- Timeout -->
+          <div class="ncSettingsField">
+            <label class="ncSettingsLabel" for="ncsTimeout">Timeout (ms)</label>
+            <input type="number" id="ncsTimeout" class="ncSettingsInput ncSettingsInputSm" value="${s.timeoutMs}" min="1000" max="60000" step="1000" />
+          </div>
+
+          <!-- Temperature -->
+          <div class="ncSettingsField">
+            <label class="ncSettingsLabel" for="ncsTemp">Temperatura (0 – 2)</label>
+            <input type="number" id="ncsTemp" class="ncSettingsInput ncSettingsInputSm" value="${s.temperature}" min="0" max="2" step="0.1" />
+          </div>
+
+          <!-- Max output tokens -->
+          <div class="ncSettingsField">
+            <label class="ncSettingsLabel" for="ncsMaxTokens">Max output tokens</label>
+            <input type="number" id="ncsMaxTokens" class="ncSettingsInput ncSettingsInputSm" value="${s.maxOutputTokens}" min="256" max="8192" step="256" />
+          </div>
+
+          <!-- Botones -->
+          <div class="ncSettingsBtns">
+            <button type="submit" class="ncSettingsSaveBtn" id="btnSettingsSave">Guardar</button>
+            <button type="button" class="ncSettingsTestBtn" id="btnSettingsTest">Probar conexión</button>
+            <button type="button" class="ncSettingsResetBtn" id="btnSettingsReset">Restaurar por defecto</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+}
+
 function nchatInner() {
   const history = getChatHistory();
   const configured = isNeuroclawConfigured();
@@ -231,50 +343,81 @@ function nchatInner() {
       </div>`;
 
   const totalNeurons = getNeurons().length;
+  const premiumConfigured = isGeminiPremiumConfigured();
+  const premiumDot = premiumConfigured
+    ? `<span class="ncPremiumDot ncPremiumDotOn" title="Gemini premium activo">⚡</span>`
+    : `<span class="ncPremiumDot" title="Gemini premium no configurado">○</span>`;
+
+  const tabChat  = uiState.activeTab === "chat";
+  const tabGraph = uiState.activeTab === "graph";
+
+  const settingsModal = uiState.settingsOpen ? renderSettingsModal() : "";
+
+  const chatContent = tabChat ? `
+    <div class="ncLayout">
+      <!-- Panel principal de chat -->
+      <div class="ncMain">
+        <div class="ncMessages" id="ncMessages">
+          ${messagesHtml}
+          ${uiState.loading ? `<div class="ncLoading"><span class="ncDot"></span><span class="ncDot"></span><span class="ncDot"></span></div>` : ""}
+          ${uiState.error   ? `<div class="ncError">⚠️ ${esc(uiState.error)}</div>` : ""}
+        </div>
+
+        <div class="ncInputBar">
+          <textarea
+            class="ncInput"
+            id="ncInput"
+            placeholder="Escribe algo…"
+            rows="1"
+            ${uiState.loading ? "disabled" : ""}
+          ></textarea>
+          <button class="ncSendBtn" id="btnNcSend" ${uiState.loading ? "disabled" : ""}>
+            ${uiState.loading ? "…" : "↑"}
+          </button>
+        </div>
+      </div>
+
+      <!-- Panel lateral con neuronas + trace -->
+      ${renderSidePanel()}
+    </div>` : "";
+
+  const graphContent = tabGraph
+    ? viewNeuroGraph(uiState.sessionState)
+    : "";
+
   return `
     <div class="nchatWrap">
       ${ncCss()}
       ${configWarning}
-      <div class="ncLayout">
-        <!-- Panel principal de chat -->
-        <div class="ncMain">
-          <div class="ncHeader">
-            <div class="ncHeaderLeft">
-              <span class="ncHeaderIcon">🧠</span>
-              <div>
-                <div class="ncHeaderTitle">NeuroChat</div>
-                <div class="ncHeaderSub">${totalNeurons} neuronas · ${history.filter(m => m.role === "user").length} conversaciones</div>
-              </div>
-            </div>
-            <div class="ncHeaderActions">
-              <button class="ncIconBtn" id="btnNcToggleNeurons" title="Ver neuronas">${uiState.neuronsExpanded ? "🧠▾" : "🧠"}</button>
-              <button class="ncIconBtn" id="btnNcClear" title="Limpiar chat">🗑</button>
-            </div>
-          </div>
 
-          <div class="ncMessages" id="ncMessages">
-            ${messagesHtml}
-            ${uiState.loading ? `<div class="ncLoading"><span class="ncDot"></span><span class="ncDot"></span><span class="ncDot"></span></div>` : ""}
-            ${uiState.error   ? `<div class="ncError">⚠️ ${esc(uiState.error)}</div>` : ""}
-          </div>
-
-          <div class="ncInputBar">
-            <textarea
-              class="ncInput"
-              id="ncInput"
-              placeholder="Escribe algo…"
-              rows="1"
-              ${uiState.loading ? "disabled" : ""}
-            ></textarea>
-            <button class="ncSendBtn" id="btnNcSend" ${uiState.loading ? "disabled" : ""}>
-              ${uiState.loading ? "…" : "↑"}
-            </button>
+      <!-- Header -->
+      <div class="ncHeader">
+        <div class="ncHeaderLeft">
+          <span class="ncHeaderIcon">🧠</span>
+          <div>
+            <div class="ncHeaderTitle">NeuroChat ${premiumDot}</div>
+            <div class="ncHeaderSub">${totalNeurons} neuronas · ${history.filter(m => m.role === "user").length} conversaciones</div>
           </div>
         </div>
-
-        <!-- Panel lateral con neuronas + trace -->
-        ${renderSidePanel()}
+        <div class="ncHeaderActions">
+          <button class="ncIconBtn" id="btnNcToggleNeurons" title="Ver neuronas">${uiState.neuronsExpanded ? "🧠▾" : "🧠"}</button>
+          <button class="ncIconBtn" id="btnNcClear" title="Limpiar chat">🗑</button>
+          <button class="ncIconBtn" id="btnNcSettings" title="Configuración">⚙️</button>
+        </div>
       </div>
+
+      <!-- Tabs -->
+      <div class="ncTabs">
+        <button class="ncTab ${tabChat  ? "ncTab--active" : ""}" id="btnTabChat">💬 Chat</button>
+        <button class="ncTab ${tabGraph ? "ncTab--active" : ""}" id="btnTabGraph">🕸️ Neuron Graph</button>
+      </div>
+
+      <!-- Contenido del tab activo -->
+      ${chatContent}
+      ${graphContent}
+
+      <!-- Settings modal -->
+      ${settingsModal}
     </div>`;
 }
 
@@ -306,6 +449,14 @@ function wireNeuroChatInner(root) {
       const result = await sendMessage(text);
       uiState.lastResult = result;
       uiState.loading    = false;
+      // Actualizar estado de sesión para resaltado en grafo
+      if (result) {
+        uiState.sessionState.lastActivatedIds = (result.activated || [])
+          .map((a) => a.neuron?.id || a.id).filter(Boolean);
+        uiState.sessionState.lastGeneratedIds = (result.generated || [])
+          .map((n) => n.id).filter(Boolean);
+        uiState.sessionState.lastMergedIds    = (result.dedupeSummary?.mergedIds || []);
+      }
     } catch (err) {
       console.error("[NeuroChat]", err);
       uiState.error   = err.message || "Error desconocido";
@@ -356,8 +507,121 @@ function wireNeuroChatInner(root) {
     });
   }
 
+  // ---- Tabs ----
+  root.querySelector("#btnTabChat")?.addEventListener("click", () => {
+    uiState.activeTab = "chat";
+    rerender();
+  });
+  root.querySelector("#btnTabGraph")?.addEventListener("click", () => {
+    uiState.activeTab = "graph";
+    rerender();
+    // Wirear el grafo después del rerender
+    const graphRoot = root.querySelector(".nchatWrap");
+    if (graphRoot) wireNeuroGraph(graphRoot.closest("#app") || root, uiState.sessionState);
+  });
+
+  // Si el tab activo es el grafo, wirear
+  if (uiState.activeTab === "graph") {
+    wireNeuroGraph(root, uiState.sessionState);
+  }
+
+  // ---- Settings button ----
+  root.querySelector("#btnNcSettings")?.addEventListener("click", () => {
+    uiState.settingsOpen = true;
+    uiState.settingsMsg  = null;
+    rerender();
+  });
+
+  // Settings modal wiring
+  wireSettingsModal(root);
+
   // Focus en input
-  if (inputEl && !uiState.loading) inputEl.focus();
+  if (inputEl && !uiState.loading && uiState.activeTab === "chat") inputEl.focus();
+}
+
+function wireSettingsModal(root) {
+  const overlay = root.querySelector("#ncSettingsOverlay");
+  if (!overlay) return;
+
+  // Cerrar modal
+  const closeModal = () => {
+    uiState.settingsOpen  = false;
+    uiState.settingsMsg   = null;
+    uiState.settingsApiKeyVisible = false;
+    rerender();
+  };
+
+  root.querySelector("#btnSettingsClose")?.addEventListener("click", closeModal);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeModal();
+  });
+
+  // Toggle API key visibility
+  root.querySelector("#btnToggleApiKeyVisibility")?.addEventListener("click", () => {
+    uiState.settingsApiKeyVisible = !uiState.settingsApiKeyVisible;
+    rerender();
+  });
+
+  // Guardar
+  root.querySelector("#ncSettingsForm")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const apiKeyInput = root.querySelector("#ncsApiKey");
+    const patch = {
+      enabled:         root.querySelector("#ncsPremiumEnabled")?.checked ?? true,
+      model:           root.querySelector("#ncsModel")?.value?.trim() || "gemini-2.5-flash",
+      dailyLimit:      parseInt(root.querySelector("#ncsDailyLimit")?.value, 10) || 20,
+      timeoutMs:       parseInt(root.querySelector("#ncsTimeout")?.value,    10) || 20000,
+      temperature:     parseFloat(root.querySelector("#ncsTemp")?.value)    || 0.4,
+      maxOutputTokens: parseInt(root.querySelector("#ncsMaxTokens")?.value, 10) || 4096,
+      premiumOnlyForGeneration: true,
+    };
+    // Solo actualizar apiKey si el usuario escribió algo
+    const newKey = apiKeyInput?.value?.trim();
+    if (newKey) patch.apiKey = newKey;
+
+    try {
+      saveNeuroChatSettings(patch);
+      uiState.settingsMsg = { type: "success", text: "✓ Configuración guardada" };
+    } catch (err) {
+      uiState.settingsMsg = { type: "error", text: err.message };
+    }
+    rerender();
+  });
+
+  // Reset
+  root.querySelector("#btnSettingsReset")?.addEventListener("click", () => {
+    if (!confirm("¿Restaurar configuración por defecto? (La API key no se borrará)")) return;
+    resetNeuroChatSettings({ keepApiKey: true });
+    uiState.settingsMsg = { type: "success", text: "✓ Configuración restaurada" };
+    rerender();
+  });
+
+  // Test conexión
+  root.querySelector("#btnSettingsTest")?.addEventListener("click", async () => {
+    const { isGeminiPremiumConfigured: configured, getGeminiPremiumSettings: getSettings } =
+      await import("../services/geminiPremiumClient.js");
+    if (!configured()) {
+      uiState.settingsMsg = { type: "error", text: "Sin API key configurada. Guarda primero la key." };
+      rerender();
+      return;
+    }
+    const s = getSettings();
+    uiState.settingsMsg = { type: "info", text: "Probando conexión con Gemini…" };
+    rerender();
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model || "gemini-2.5-flash")}?key=${s.apiKey}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        uiState.settingsMsg = { type: "success", text: `✓ Conexión OK con ${s.model}` };
+      } else {
+        const txt = await res.text().catch(() => "");
+        uiState.settingsMsg = { type: "error", text: `Error ${res.status}: ${txt.slice(0, 100)}` };
+      }
+    } catch (err) {
+      uiState.settingsMsg = { type: "error", text: `Error de red: ${err.message}` };
+    }
+    rerender();
+  });
 }
 
 /**
@@ -557,5 +821,95 @@ function ncCss() {
     display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 6px;
     background: rgba(52,211,153,.15); color: #34d399; font-weight: 600;
   }
+
+  /* Premium dot in header */
+  .ncPremiumDot    { font-size: 12px; margin-left: 4px; opacity: .5; }
+  .ncPremiumDotOn  { opacity: 1; color: #fbbf24; }
+
+  /* Tabs */
+  .ncTabs {
+    display: flex; gap: 4px; margin: 10px 0 12px;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 12px; padding: 4px;
+  }
+  .ncTab {
+    flex: 1; background: none; border: none; cursor: pointer;
+    color: inherit; font-size: 13px; font-weight: 600; padding: 7px 12px;
+    border-radius: 9px; transition: background .12s;
+    opacity: .55;
+  }
+  .ncTab:hover      { background: rgba(255,255,255,.08); opacity: .8; }
+  .ncTab--active    { background: rgba(124,92,255,.25); color: #a78bfa; opacity: 1; }
+
+  /* Settings modal overlay */
+  .ncSettingsOverlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    z-index: 1000; display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .ncSettingsModal {
+    background: #1a1a2e; border: 1px solid rgba(255,255,255,.12);
+    border-radius: 20px; padding: 24px; max-width: 500px; width: 100%;
+    max-height: 90vh; overflow-y: auto;
+  }
+  .ncSettingsHeader {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .ncSettingsTitle { font-size: 16px; font-weight: 800; }
+  .ncSettingsStatus {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    background: rgba(255,255,255,.04); border-radius: 10px;
+    padding: 8px 12px; margin-bottom: 14px;
+  }
+  .ncSettingsStatusSub { font-size: 11px; opacity: .5; }
+  .ncSettingsBadge {
+    font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 700;
+  }
+  .ncSettingsBadgeOn  { background: rgba(52,211,153,.2);  color: #34d399; }
+  .ncSettingsBadgeOff { background: rgba(255,255,255,.07); color: rgba(255,255,255,.4); }
+  .ncSettingsMsg {
+    border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 12px;
+  }
+  .ncSettingsMsgType--success { background: rgba(52,211,153,.12);  color: #34d399; border: 1px solid rgba(52,211,153,.25); }
+  .ncSettingsMsgType--error   { background: rgba(251,113,133,.12); color: #fb7185; border: 1px solid rgba(251,113,133,.25); }
+  .ncSettingsMsgType--info    { background: rgba(96,165,250,.12);  color: #60a5fa; border: 1px solid rgba(96,165,250,.25); }
+
+  .ncSettingsField    { margin-bottom: 12px; }
+  .ncSettingsRow      { display: flex; flex-direction: column; gap: 5px; }
+  .ncSettingsToggleRow { flex-direction: row; align-items: center; justify-content: space-between;
+    background: rgba(255,255,255,.04); border-radius: 10px; padding: 10px 14px;
+    margin-bottom: 12px; cursor: pointer;
+  }
+  .ncSettingsLabel    { font-size: 12px; opacity: .75; font-weight: 600; }
+  .ncSettingsInput {
+    width: 100%; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 8px; padding: 8px 10px; color: inherit; font-size: 13px;
+    outline: none; font-family: inherit; box-sizing: border-box;
+  }
+  .ncSettingsInput:focus { border-color: rgba(124,92,255,.5); }
+  .ncSettingsInputSm  { max-width: 140px; }
+  .ncSettingsKeyRow   { display: flex; gap: 6px; align-items: center; }
+  .ncSettingsKeyRow .ncSettingsInput { flex: 1; }
+  .ncSettingsHint     { font-size: 10px; opacity: .4; margin-top: 4px; }
+  .ncSettingsBtns     { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .ncSettingsSaveBtn {
+    background: rgba(124,92,255,.8); border: none; border-radius: 10px;
+    padding: 9px 18px; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer;
+    transition: background .12s;
+  }
+  .ncSettingsSaveBtn:hover { background: rgba(124,92,255,1); }
+  .ncSettingsTestBtn {
+    background: rgba(52,211,153,.15); border: 1px solid rgba(52,211,153,.3);
+    border-radius: 10px; padding: 9px 14px; color: #34d399;
+    font-size: 13px; cursor: pointer; transition: background .12s;
+  }
+  .ncSettingsTestBtn:hover { background: rgba(52,211,153,.25); }
+  .ncSettingsResetBtn {
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 10px; padding: 9px 14px; color: rgba(255,255,255,.6);
+    font-size: 13px; cursor: pointer; transition: background .12s;
+  }
+  .ncSettingsResetBtn:hover { background: rgba(255,255,255,.12); }
   </style>`;
 }

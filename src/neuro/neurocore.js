@@ -17,7 +17,7 @@
 
 import { getAllNeurons, saveManyNeurons }     from "./neuronStore.js";
 import { activateNeurons }                    from "./activation.js";
-import { detectMissingConcepts, generateMissingNeurons } from "./generator.js";
+import { detectMissingConcepts, generateMissingNeurons, generateMissingNeuronsPremium } from "./generator.js";
 import { findRelatedNeurons, attachConnections }          from "./connections.js";
 import { getEmbedding }                       from "./embeddings.js";
 import { createTrace, addStep, recordTiming, finalizeTrace } from "./trace.js";
@@ -117,14 +117,32 @@ export async function processNeuroInput(userInput, options = {}) {
     const t3 = Date.now();
     try {
       // --- 5a. Generación (normal o premium) ---
-      // TODO (API premium): cuando usePremium=true, llamar aquí a
-      //   generateMissingNeuronsPremium({ userInput, activatedNeurons: activated, missingAnalysis })
-      //   implementado en generator.js apuntando al endpoint premium.
-      //   Por ahora ambas vías usan el mismo generador NeuroClaw.
-      const rawGenerated = await generateMissingNeurons({ userInput, activatedNeurons: activated, missingAnalysis });
-      recordTiming(trace, "generation", Date.now() - t3);
+      let rawGenerated = [];
+      let premiumSucceeded = false;
 
       if (premiumDecision.usePremium) {
+        try {
+          rawGenerated = await generateMissingNeuronsPremium({
+            userInput,
+            activatedNeurons: activated,
+            missingAnalysis,
+            history: options.history || [],
+          });
+          premiumSucceeded = true;
+          addStep(trace, "premium_generation_succeeded", { count: rawGenerated.length });
+        } catch (premiumErr) {
+          addStep(trace, "premium_generation_failed", { error: String(premiumErr) });
+          console.warn("[neurocore] Gemini premium falló, haciendo fallback a NeuroClaw:", premiumErr);
+          // Fallback a generación normal
+          rawGenerated = await generateMissingNeurons({ userInput, activatedNeurons: activated, missingAnalysis });
+          addStep(trace, "generation_fallback_used");
+        }
+      } else {
+        rawGenerated = await generateMissingNeurons({ userInput, activatedNeurons: activated, missingAnalysis });
+      }
+      recordTiming(trace, "generation", Date.now() - t3);
+
+      if (premiumDecision.usePremium && premiumSucceeded) {
         // Registrar el uso premium SOLO si la generación fue exitosa
         incrementPremiumUsage({
           reason:       "premium_neuron_generation",

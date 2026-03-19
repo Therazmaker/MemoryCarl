@@ -9,6 +9,10 @@
 import { tokenize, neuronTokenSet } from "./utils.js";
 import { requestNeuronGeneration } from "../services/neuroclawClient.js";
 import { sanitizeNeuron } from "./schemas.js";
+import {
+  isGeminiPremiumConfigured,
+  requestGeminiPremiumNeuronGeneration,
+} from "../services/geminiPremiumClient.js";
 
 // Umbral mínimo de coverage aceptable; por debajo se activa la generación
 const MIN_ACCEPTABLE_COVERAGE = 0.45;
@@ -123,4 +127,36 @@ export async function generateMissingNeurons({ userInput, activatedNeurons, miss
     .slice(0, 10); // máximo 10 neuronas nuevas por llamada
 
   return generated;
+}
+
+// ---- Generación Premium (Gemini) ----
+
+/**
+ * Genera nuevas neuronas usando Gemini Premium (alta calidad).
+ * Si Gemini no está configurado o falla, lanza un error para que neurocore
+ * pueda hacer fallback al generador normal.
+ *
+ * @param {{
+ *   userInput: string,
+ *   activatedNeurons: ActivatedNeuron[],
+ *   missingAnalysis: MissingConceptsResult,
+ *   history?: ChatMessage[],
+ * }} params
+ * @returns {Promise<Neuron[]>}
+ */
+export async function generateMissingNeuronsPremium({ userInput, activatedNeurons, missingAnalysis, history = [] }) {
+  if (!missingAnalysis.needsGeneration) return [];
+
+  if (!isGeminiPremiumConfigured()) {
+    throw new Error("Gemini premium no configurado: sin apiKey o deshabilitado");
+  }
+
+  const neurons = await requestGeminiPremiumNeuronGeneration({
+    userInput,
+    activatedNeurons: activatedNeurons.slice(0, 5),
+    missingAnalysis,
+    history,
+  });
+
+  return neurons;
 }
