@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { summarizePremiumDecision } from "../src/chat/neurochat-ui.js";
+import { summarizePremiumDecision, isNeuronFeedbackLocked } from "../src/chat/neurochat-ui.js";
 import { renderInsightsPanel } from "../src/chat/insight-ui.js";
 import { viewContextWindow } from "../src/chat/context-window-ui.js";
 
@@ -51,4 +51,10 @@ test("context window UI renderiza filtros temporales", () => {
   assert.match(html, /cwFilterTimeContext/i);
   assert.match(html, /cwFilterDateFrom/i);
   assert.match(html, /Importación histórica batch/i);
+});
+
+test("UI bloquea feedback duplicado por neurona y mensaje", () => {
+  const map = { n1: "like" };
+  assert.equal(isNeuronFeedbackLocked(map, "n1"), true);
+  assert.equal(isNeuronFeedbackLocked(map, "n2"), false);
 });

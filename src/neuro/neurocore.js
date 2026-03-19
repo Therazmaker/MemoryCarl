@@ -100,6 +100,7 @@ export async function processNeuroInput(userInput, options = {}) {
   const t0 = Date.now();
   const mode = options.mode || "chat";
   const interpretationMode = options.interpretationMode || "default";
+  const messageId = options.messageId || null;
 
   addStep(trace, "load_neurons");
   const t1 = Date.now();
@@ -268,6 +269,34 @@ export async function processNeuroInput(userInput, options = {}) {
   const context = buildContext(finalActivated);
   const enrichedContext = buildEnrichedContext(userInput, finalActivated);
 
+  const feedbackSummary = finalActivated.reduce((acc, item) => {
+    const stats = item.neuron?.feedbackStats || {};
+    const learning = item.neuron?.activationLearning || {};
+    const dislikes = Number(stats.dislikes) || 0;
+    const likes = Number(stats.likes) || 0;
+    const netScore = Number(stats.netScore) || (likes - dislikes);
+    const falsePositiveCount = Number(learning.falsePositiveCount) || 0;
+    acc.totalLikes += likes;
+    acc.totalDislikes += dislikes;
+    if (netScore <= -3 || falsePositiveCount >= 3) {
+      acc.strongDislikeNeurons.push({
+        id: item.neuron.id,
+        concept: item.neuron.core?.concept || "",
+        netScore,
+        dislikes,
+        falsePositiveCount,
+        feedbackAdjustedActivationScore: Number((item.score || 0).toFixed(3)),
+      });
+    }
+    return acc;
+  }, { totalLikes: 0, totalDislikes: 0, strongDislikeNeurons: [] });
+  trace.feedbackSummary = feedbackSummary;
+  addStep(trace, "feedback_summary_collected", {
+    totalLikes: feedbackSummary.totalLikes,
+    totalDislikes: feedbackSummary.totalDislikes,
+    strongDislikeNeurons: feedbackSummary.strongDislikeNeurons.length,
+  });
+
   addStep(trace, "run_insight_engine");
   const insightResult = await runInsightEngine({
     activated: finalActivated,
@@ -344,5 +373,6 @@ export async function processNeuroInput(userInput, options = {}) {
     bootstrapState,
     mode,
     totalNeurons,
+    messageId,
   };
 }

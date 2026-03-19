@@ -132,6 +132,26 @@ export function computeEmotionMatch(userInput, neuronEmotion) {
   return (emotionKeywords[neuronEmotion] || []).some((kw) => lower.includes(kw)) ? 1.0 : 0.2;
 }
 
+export function computeNeuronFeedbackBoost(neuron) {
+  const stats = neuron?.feedbackStats || {};
+  const learning = neuron?.activationLearning || {};
+  const likes = Math.max(0, Number(stats.likes) || 0);
+  const dislikes = Math.max(0, Number(stats.dislikes) || 0);
+  const usefulCount = Math.max(0, Number(learning.usefulCount) || 0);
+  const falsePositiveCount = Math.max(0, Number(learning.falsePositiveCount) || 0);
+
+  const totalVotes = likes + dislikes;
+  const voteSignal = totalVotes > 0 ? (likes - dislikes) / totalVotes : 0;
+  const confidence = Math.min(totalVotes / 10, 1);
+
+  const totalLearning = usefulCount + falsePositiveCount;
+  const learningSignal = totalLearning > 0 ? (usefulCount - falsePositiveCount) / totalLearning : 0;
+
+  let boost = voteSignal * 0.06 * confidence + learningSignal * 0.045;
+  if (dislikes >= 4 && likes === 0) boost -= 0.015;
+  return clamp(boost, -0.08, 0.08);
+}
+
 export function getActivationTuning(totalNeurons, options = {}) {
   const bootstrapState = options.bootstrapState || getBootstrapState(totalNeurons, options.bootstrapOptions);
   const minScore = options.minScore ?? (
@@ -197,6 +217,7 @@ export async function activateNeurons(userInput, neurons, options = {}) {
     const entityMention = isLikelyEntityMention(userInput, neuron);
     const conceptMention = normalizeText(userInput).includes(normalizeText(neuron.core?.concept || ""));
     const manualBoost = getManualNeuronBoost(neuron, { aliasMatch, entityMention, conceptMention });
+    const neuronFeedbackBoost = computeNeuronFeedbackBoost(neuron);
 
     const score = normalizeScore(
       semantic * tuning.weights.semantic +
@@ -205,10 +226,11 @@ export async function activateNeurons(userInput, neurons, options = {}) {
       recency * tuning.weights.recency +
       emotion * tuning.weights.emotion +
       temporalBoost * tuning.weights.temporal +
-      manualBoost
+      manualBoost +
+      neuronFeedbackBoost
     );
 
-    return { neuron, score, components: { semantic, keyword, weight, recency, emotion, temporalBoost, aliasMatch, manualBoost } };
+    return { neuron, score, components: { semantic, keyword, weight, recency, emotion, temporalBoost, aliasMatch, manualBoost, neuronFeedbackBoost } };
   }));
 
   const activated = scored.filter((r) => r.score >= minScore).sort((a, b) => b.score - a.score).slice(0, topK);

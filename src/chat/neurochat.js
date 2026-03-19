@@ -5,6 +5,7 @@
 import { processNeuroInput } from "../neuro/neurocore.js";
 import { getAllNeurons, saveNeuron, deleteNeuron } from "../neuro/neuronStore.js";
 import { createNeuron } from "../neuro/schemas.js";
+import { getMessageFeedbackMap, recordNeuronFeedback } from "../neuro/feedback.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
 const MAX_HISTORY = 50;
@@ -35,22 +36,29 @@ function appendMessage(role, content, meta = {}) {
   return msg;
 }
 
+function generateMessageId() {
+  return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export async function sendMessage(userInput, options = {}) {
   const trimmed = (userInput || "").trim();
   if (!trimmed) throw new Error("Input vacío");
   const mode = options.mode || "chat";
   const interpretationMode = options.interpretationMode || "default";
 
-  appendMessage("user", trimmed, { mode, interpretationMode });
+  const messageId = generateMessageId();
+  appendMessage("user", trimmed, { mode, interpretationMode, messageId });
 
   const result = await processNeuroInput(trimmed, {
     history: getHistory().slice(-10),
     mode,
     interpretationMode,
     premiumOptions: options.premiumOptions,
+    messageId,
   });
 
   appendMessage("assistant", result.reply, {
+    messageId,
     activated: result.activated.length,
     generated: result.generated.length,
     coverage: result.missingAnalysis.coverage,
@@ -60,7 +68,15 @@ export async function sendMessage(userInput, options = {}) {
     premiumUsed: result.premiumDecision?.usePremium || false,
   });
 
-  return result;
+  return {
+    ...result,
+    messageId,
+    feedbackForMessage: getMessageFeedbackMap(messageId),
+  };
+}
+
+export function submitNeuronFeedback({ neuronId, feedback, messageId, inputPreview = "" }) {
+  return recordNeuronFeedback({ neuronId, feedback, messageId, inputPreview });
 }
 
 export function getChatHistory() { return getHistory(); }
