@@ -6,11 +6,13 @@
  *   1. Carga neuronas
  *   2. Activa neuronas relevantes
  *   3. Analiza cobertura / detecta huecos
- *   4. Si coverage < umbral → genera nuevas neuronas via NeuroClaw
- *   5. Conecta y guarda neuronas nuevas
- *   6. Construye contexto final
- *   7. Solicita respuesta final a NeuroClaw (con fallback)
- *   8. Devuelve payload completo para UI
+ *   4. Evalúa política premium (shouldUsePremiumGeneration)
+ *   5. Si coverage < umbral → genera nuevas neuronas via NeuroClaw (normal o premium)
+ *   6. Deduplica candidatos antes de persistir (dedupeGeneratedNeurons)
+ *   7. Conecta y guarda neuronas realmente nuevas; aplica merges
+ *   8. Construye contexto final
+ *   9. Solicita respuesta final a NeuroClaw (con fallback)
+ *  10. Devuelve payload completo para UI (incluye premiumDecision y dedupeSummary)
  */
 
 import { getAllNeurons, saveManyNeurons }     from "./neuronStore.js";
@@ -21,6 +23,9 @@ import { getEmbedding }                       from "./embeddings.js";
 import { createTrace, addStep, recordTiming, finalizeTrace } from "./trace.js";
 import { requestChatReply, isNeuroclawConfigured }        from "../services/neuroclawClient.js";
 import { updateNeuron }                       from "./neuronStore.js";
+import { dedupeGeneratedNeurons, mergeNeuronData }        from "./dedup.js";
+import { shouldUsePremiumGeneration }                     from "./premiumPolicy.js";
+import { incrementPremiumUsage }                          from "./premiumUsage.js";
 
 // ---- Respuesta de fallback cuando NeuroClaw no está disponible ----
 function buildFallbackReply(activatedNeurons, userInput) {
@@ -89,17 +94,48 @@ export async function processNeuroInput(userInput, options = {}) {
     reasons:  missingAnalysis.reasons,
   });
 
-  // ---- 4 & 5. Generar y guardar nuevas neuronas si hace falta ----
+  // ---- 4. Evaluar política premium ----
+  addStep(trace, "evaluate_premium_policy");
+  const premiumDecision = shouldUsePremiumGeneration({
+    userInput,
+    activated,
+    missingAnalysis,
+    history: options.history || [],
+    options: options.premiumOptions || {},
+  });
+  addStep(trace, "premium_policy_evaluated", {
+    usePremium: premiumDecision.usePremium,
+    reasons:    premiumDecision.reasons,
+  });
+
+  // ---- 5. Generar y deduplicar neuronas si hace falta ----
   let generated = [];
+  let dedupeSummary = { saved: 0, merged: 0, discarded: 0 };
+
   if (!options.skipGeneration && missingAnalysis.needsGeneration && isNeuroclawConfigured()) {
-    addStep(trace, "generation_triggered");
+    addStep(trace, "generation_triggered", { premium: premiumDecision.usePremium });
     const t3 = Date.now();
     try {
+      // --- 5a. Generación (normal o premium) ---
+      // TODO (API premium): cuando usePremium=true, llamar aquí a
+      //   generateMissingNeuronsPremium({ userInput, activatedNeurons: activated, missingAnalysis })
+      //   implementado en generator.js apuntando al endpoint premium.
+      //   Por ahora ambas vías usan el mismo generador NeuroClaw.
       const rawGenerated = await generateMissingNeurons({ userInput, activatedNeurons: activated, missingAnalysis });
       recordTiming(trace, "generation", Date.now() - t3);
 
+      if (premiumDecision.usePremium) {
+        // Registrar el uso premium SOLO si la generación fue exitosa
+        incrementPremiumUsage({
+          reason:       "premium_neuron_generation",
+          inputLabel:   premiumDecision.classifier?.label || "unknown",
+          inputPreview: userInput.slice(0, 80),
+        });
+        addStep(trace, "premium_usage_incremented");
+      }
+
       if (rawGenerated.length > 0) {
-        // Precomputar embeddings para las neuronas nuevas
+        // --- 5b. Precomputar embeddings ---
         for (const n of rawGenerated) {
           if (!n.embedding || n.embedding.length === 0) {
             const text = [n.core.concept, n.core.summary, ...n.triggers].join(" ");
@@ -107,31 +143,54 @@ export async function processNeuroInput(userInput, options = {}) {
           }
         }
 
-        // Conectar con neuronas existentes
-        const allAfterActivation = getAllNeurons();
-        for (const n of rawGenerated) {
-          const related = await findRelatedNeurons(n, [...allAfterActivation, ...rawGenerated]);
-          attachConnections(n, related);
-        }
+        // --- 5c. Deduplicar candidatos ---
+        addStep(trace, "dedup_start");
+        const allAtGenTime = getAllNeurons();
+        const dedupeResult = dedupeGeneratedNeurons(rawGenerated, allAtGenTime);
+        dedupeSummary = {
+          saved:     dedupeResult.toSave.length,
+          merged:    dedupeResult.toMerge.length,
+          discarded: dedupeResult.discarded.length,
+        };
+        addStep(trace, "dedup_done", dedupeSummary);
 
-        // Persistir (también actualiza conexiones inversas en store)
-        saveManyNeurons(rawGenerated);
+        // --- 5d. Conectar y persistir solo las nuevas ---
+        if (dedupeResult.toSave.length > 0) {
+          for (const n of dedupeResult.toSave) {
+            const related = await findRelatedNeurons(n, [...allAtGenTime, ...dedupeResult.toSave]);
+            attachConnections(n, related);
+          }
+          saveManyNeurons(dedupeResult.toSave);
 
-        // Actualizar conexiones inversas en las neuronas ya guardadas
-        for (const n of rawGenerated) {
-          for (const connId of n.connections) {
-            try {
-              const existing = allAfterActivation.find((x) => x.id === connId);
-              if (existing && !existing.connections.includes(n.id)) {
-                updateNeuron(connId, { connections: [...existing.connections, n.id] });
-              }
-            } catch (_e) {}
+          // Actualizar conexiones inversas en neuronas ya guardadas
+          for (const n of dedupeResult.toSave) {
+            for (const connId of n.connections) {
+              try {
+                const existing = allAtGenTime.find((x) => x.id === connId);
+                if (existing && !existing.connections.includes(n.id)) {
+                  updateNeuron(connId, { connections: [...existing.connections, n.id] });
+                }
+              } catch (_e) {}
+            }
           }
         }
 
-        generated = rawGenerated;
+        // --- 5e. Aplicar merges ---
+        for (const mergeEntry of dedupeResult.toMerge) {
+          try {
+            updateNeuron(mergeEntry.targetId, mergeEntry.mergedNeuron);
+          } catch (_e) {
+            console.warn("[neurocore] Error aplicando merge:", _e);
+          }
+        }
+
+        generated = dedupeResult.toSave;
         trace.generated = generated.length;
-        addStep(trace, "neurons_generated", { count: generated.length });
+        addStep(trace, "neurons_persisted", {
+          saved:     dedupeSummary.saved,
+          merged:    dedupeSummary.merged,
+          discarded: dedupeSummary.discarded,
+        });
       }
     } catch (err) {
       console.warn("[neurocore] Error en generación:", err);
@@ -143,9 +202,10 @@ export async function processNeuroInput(userInput, options = {}) {
 
   // ---- 6. Construir contexto final ----
   addStep(trace, "build_context");
-  // Re-activar incluyendo neuronas nuevas si las hay
-  const finalNeurons = generated.length > 0 ? getAllNeurons() : allNeurons;
-  const finalActivated = generated.length > 0
+  const finalNeurons = generated.length > 0 || dedupeSummary.merged > 0
+    ? getAllNeurons()
+    : allNeurons;
+  const finalActivated = (generated.length > 0 || dedupeSummary.merged > 0)
     ? await activateNeurons(userInput, finalNeurons, { topK: 8, persistActivation: false })
     : activated;
   const context = buildContext(finalActivated);
@@ -160,7 +220,7 @@ export async function processNeuroInput(userInput, options = {}) {
       reply = await requestChatReply({
         userInput,
         context,
-        history: (options.history || []).slice(-6), // últimos 6 mensajes individuales (rol user o assistant)
+        history: (options.history || []).slice(-6),
         missingConcepts: missingAnalysis.missingConcepts,
       });
     } catch (err) {
@@ -169,7 +229,6 @@ export async function processNeuroInput(userInput, options = {}) {
   }
   recordTiming(trace, "reply", Date.now() - t4);
 
-  // Fallback si NeuroClaw no respondió
   if (!reply) {
     reply = buildFallbackReply(finalActivated, userInput);
     addStep(trace, "fallback_reply_used");
@@ -184,9 +243,11 @@ export async function processNeuroInput(userInput, options = {}) {
   // ---- 8. Payload para UI ----
   return {
     reply,
-    activated: finalActivated,
+    activated:      finalActivated,
     generated,
-    trace:     traceResult,
+    trace:          traceResult,
     missingAnalysis,
+    premiumDecision,
+    dedupeSummary,
   };
 }
