@@ -403,10 +403,7 @@ function nchatInner() {
   const tabChat  = uiState.activeTab === "chat";
   const tabGraph = uiState.activeTab === "graph";
   const tabContext = uiState.activeTab === "context";
-  const isMobileViewport = typeof window !== "undefined"
-    && typeof window.matchMedia === "function"
-    && window.matchMedia("(max-width: 680px)").matches;
-  const showSidePanel = !isMobileViewport || uiState.neuronsExpanded || Boolean(uiState.lastResult);
+  const showSidePanel = uiState.neuronsExpanded || Boolean(uiState.lastResult) || history.length > 0;
 
   const settingsModal = uiState.settingsOpen ? renderSettingsModal() : "";
 
@@ -773,16 +770,12 @@ function ncCss() {
     font-size: 13px; color: #fbbf24;
   }
   /* Layout */
-  .ncLayout { display: flex; gap: 16px; align-items: flex-start; }
-  .ncMain   { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .ncLayout { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
+  .ncMain   { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
   .ncSide   {
-    width: 280px; flex-shrink: 0;
+    width: 100%;
     background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-    border-radius: 16px; padding: 14px; overflow-y: auto; max-height: 80vh;
-  }
-  @media(max-width: 680px){
-    .ncLayout { flex-direction: column; }
-    .ncSide   { width: 100%; max-height: none; }
+    border-radius: 16px; padding: 14px;
   }
 
   /* Header */
