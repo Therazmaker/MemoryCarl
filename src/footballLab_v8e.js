@@ -24621,6 +24621,7 @@ RESPONDE SOLO CON JSON usando este schema:
       let vsPending    = [];          // puntos de la jugada en curso
       let vsActiveType    = VS_PLAY_TYPES[0].id;
       let vsActiveOutcome = VS_OUTCOMES[0].id;
+      let vsActiveSide    = 'home';
 
       // ── HTML principal
       const allTeams      = (db.teams||[]).filter(t=>t.id&&t.name);
@@ -24669,8 +24670,8 @@ RESPONDE SOLO CON JSON usando este schema:
                 </div>
               </div>
 
-              <!-- Tipo de jugada + resultado -->
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+              <!-- Tipo de jugada + resultado + equipo que ejecuta -->
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">
                 <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:9px;padding:10px 12px;">
                   <div style="font-size:9px;color:#4a5568;margin-bottom:6px;font-family:'JetBrains Mono',monospace;letter-spacing:1px;">TIPO DE JUGADA</div>
                   <div style="display:flex;flex-wrap:wrap;gap:5px;" id="vs-type-btns">
@@ -24687,6 +24688,14 @@ RESPONDE SOLO CON JSON usando este schema:
                       <button data-vs-outcome="${o.id}" style="background:${o.id===vsActiveOutcome?o.color+'33':'#161922'};border:1px solid ${o.id===vsActiveOutcome?o.color:'rgba(255,255,255,0.07)'};color:${o.id===vsActiveOutcome?o.color:'#8892a4'};font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:4px 9px;border-radius:4px;cursor:pointer;">${o.label}</button>`).join('')}
                   </div>
                   <div style="margin-top:8px;font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">Selecciona antes de cerrar la jugada</div>
+                </div>
+                <div style="background:#0f1117;border:1px solid rgba(255,255,255,0.07);border-radius:9px;padding:10px 12px;">
+                  <div style="font-size:9px;color:#4a5568;margin-bottom:6px;font-family:'JetBrains Mono',monospace;letter-spacing:1px;">QUIÉN HACE LA JUGADA</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:5px;" id="vs-side-btns">
+                    <button data-vs-side="home" style="background:rgba(56,189,248,0.2);border:1px solid #38bdf8;color:#38bdf8;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:4px 9px;border-radius:4px;cursor:pointer;">🔵 Local</button>
+                    <button data-vs-side="away" style="background:#161922;border:1px solid rgba(255,255,255,0.07);color:#8892a4;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;padding:4px 9px;border-radius:4px;cursor:pointer;">🟣 Rival</button>
+                  </div>
+                  <div style="margin-top:8px;font-size:10px;color:#4a5568;font-family:'JetBrains Mono',monospace;">Se guarda en cada jugada individual</div>
                 </div>
               </div>
 
@@ -24787,11 +24796,14 @@ RESPONDE SOLO CON JSON usando este schema:
             inner.innerHTML = vsPlays.slice().reverse().map((play,i)=>{
               const td = VS_PLAY_TYPES.find(t=>t.id===play.type);
               const od = VS_OUTCOMES.find(o=>o.id===play.outcome);
+              const sideLabel = play.side === 'away' ? 'Rival' : 'Local';
+              const sideColor = play.side === 'away' ? '#c084fc' : '#38bdf8';
               const idx = vsPlays.length-1-i;
               return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
                 <span style="color:${td?.color||'#888'};">${td?.icon||'·'}</span>
                 <span style="color:#f0f2f7;flex:1;">${td?.label||play.type}</span>
                 <span style="color:${od?.color||'#888'};">${od?.label||play.outcome}</span>
+                <span style="color:${sideColor};font-size:10px;">${sideLabel}</span>
                 <span style="color:#4a5568;">${play.points?.length||0}t</span>
                 <span style="color:#4a5568;font-size:9px;">${play.metrics?.startZone||'?'}→${play.metrics?.endZone||'?'}</span>
                 <button data-vs-del-play="${idx}" style="background:none;border:none;color:#4a5568;cursor:pointer;font-size:10px;">✕</button>
@@ -24832,6 +24844,7 @@ RESPONDE SOLO CON JSON usando este schema:
           id:      'p_'+Date.now(),
           type:    vsActiveType,
           outcome: vsActiveOutcome,
+          side:    vsActiveSide,
           points:  vsPending.slice(),
           metrics
         });
@@ -24888,6 +24901,21 @@ RESPONDE SOLO CON JSON usando este schema:
             b.style.background  = act?(od?.color||'#888')+'33':'#161922';
             b.style.borderColor = act?(od?.color||'#888')     :'rgba(255,255,255,0.07)';
             b.style.color       = act?(od?.color||'#888')     :'#8892a4';
+          });
+        };
+      });
+
+      // Quién ejecuta la jugada (Local/Rival)
+      content.querySelectorAll('[data-vs-side]').forEach(btn=>{
+        btn.onclick=()=>{
+          vsActiveSide=btn.dataset.vsSide;
+          content.querySelectorAll('[data-vs-side]').forEach(b=>{
+            const act=b.dataset.vsSide===vsActiveSide;
+            const color=act?(b.dataset.vsSide==='away'?'#c084fc':'#38bdf8'):'#8892a4';
+            const bg=act?(b.dataset.vsSide==='away'?'rgba(192,132,252,0.2)':'rgba(56,189,248,0.2)'):'#161922';
+            b.style.background=bg;
+            b.style.borderColor=act?color:'rgba(255,255,255,0.07)';
+            b.style.color=color;
           });
         };
       });
