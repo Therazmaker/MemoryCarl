@@ -13,6 +13,7 @@ import { dedupeGeneratedNeurons } from "./dedup.js";
 import { shouldUsePremiumGeneration } from "./premiumPolicy.js";
 import { incrementPremiumUsage } from "./premiumUsage.js";
 import { getBootstrapState } from "./bootstrap.js";
+import { runInsightEngine } from "./insightEngine.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -73,6 +74,7 @@ export async function processNeuroInput(userInput, options = {}) {
   const trace = createTrace();
   const t0 = Date.now();
   const mode = options.mode || "chat";
+  const interpretationMode = options.interpretationMode || "default";
 
   addStep(trace, "load_neurons");
   const t1 = Date.now();
@@ -84,6 +86,7 @@ export async function processNeuroInput(userInput, options = {}) {
   trace.totalNeurons = totalNeurons;
   trace.bootstrapState = bootstrapState;
   trace.mode = mode;
+  trace.interpretationMode = interpretationMode;
 
   addStep(trace, "neurons_loaded", { count: totalNeurons, bootstrapState, mode });
 
@@ -238,6 +241,25 @@ export async function processNeuroInput(userInput, options = {}) {
     : activated;
 
   const context = buildContext(finalActivated);
+  const enrichedContext = buildEnrichedContext(userInput, finalActivated);
+
+  addStep(trace, "run_insight_engine");
+  const insightResult = await runInsightEngine({
+    activated: finalActivated,
+    allNeurons: finalNeurons,
+    contextEntities: enrichedContext.contextEntities,
+    options: {
+      interpretationMode,
+      maxInsights: options.maxInsights || 3,
+      minConfidence: options.minInsightConfidence || 0.42,
+      maxHistory: options.maxInsightHistory || 80,
+    },
+  });
+  addStep(trace, "insight_engine_completed", {
+    insights: insightResult.insights.length,
+    clusters: insightResult.clusters.length,
+    patterns: insightResult.patterns.length,
+  });
 
   addStep(trace, "request_reply");
   const t4 = Date.now();
@@ -245,14 +267,16 @@ export async function processNeuroInput(userInput, options = {}) {
 
   if (isNeuroclawConfigured()) {
     try {
-      const enriched = buildEnrichedContext(userInput, finalActivated);
       reply = await requestChatReply({
         userInput,
         context,
         history: (options.history || []).slice(-6),
         missingConcepts: missingAnalysis.missingConcepts,
-        activatedManual: enriched.activatedManual,
-        contextEntities: enriched.contextEntities,
+        activatedManual: enrichedContext.activatedManual,
+        contextEntities: enrichedContext.contextEntities,
+        insights: insightResult.insights,
+        insightSummary: insightResult.insightSummary,
+        interpretationMode,
       });
     } catch (err) {
       console.warn("[neurocore] Error al pedir reply:", err);
@@ -271,13 +295,19 @@ export async function processNeuroInput(userInput, options = {}) {
   recordTiming(trace, "total", Date.now() - t0);
   const traceResult = finalizeTrace(trace);
 
-  const enrichedContext = buildEnrichedContext(userInput, finalActivated);
-
   return {
     reply,
     activated: finalActivated,
     activatedManual: enrichedContext.activatedManual,
     contextEntities: enrichedContext.contextEntities,
+    insights: insightResult.insights,
+    insightSummary: insightResult.insightSummary,
+    insightTrace: {
+      clusters: insightResult.clusters,
+      patterns: insightResult.patterns,
+      trend: insightResult.trend,
+    },
+    interpretationMode,
     generated,
     trace: traceResult,
     missingAnalysis,

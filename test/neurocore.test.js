@@ -58,3 +58,46 @@ test("neurocore includes activatedManual and contextEntities when input mentions
   assert.ok(result.activatedManual.some((m) => m.concept === "Fergis"));
   assert.ok(result.contextEntities.includes("Fergis"));
 });
+
+test("neurocore devuelve insights en payload", async () => {
+  resetStorage();
+  saveManyNeurons([
+    createNeuron({ id: "n1", core: { concept: "saturación", domain: "emocional", summary: "muchas tareas abiertas" }, triggers: ["saturación", "bloqueo"], emotion: "fear", weight: 0.8 }),
+    createNeuron({ id: "n2", core: { concept: "quiero avanzar", domain: "work", summary: "dispersión al iniciar" }, triggers: ["quiero", "avanzar", "dispersión"], emotion: "fear", weight: 0.7 }),
+  ]);
+
+  const result = await processNeuroInput("Quiero avanzar pero tengo demasiadas tareas y me bloqueo", {
+    skipGeneration: true,
+    history: [],
+    interpretationMode: "objective",
+  });
+
+  assert.ok(Array.isArray(result.insights));
+  assert.ok(result.insights.length >= 1);
+  assert.equal(result.interpretationMode, "objective");
+});
+
+test("requestChatReply recibe insights en el payload", async () => {
+  resetStorage();
+  saveManyNeurons([
+    createNeuron({ id: "n1", core: { concept: "bloqueo", domain: "emocional", summary: "inicio frenado" }, triggers: ["bloqueo"], emotion: "fear", weight: 0.8 }),
+    createNeuron({ id: "n2", core: { concept: "Proyecto Atlas", domain: "work", summary: "presión por entrega" }, triggers: ["proyecto", "urgencia"], weight: 0.6 }),
+  ]);
+
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_url", "https://api.example.com");
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_key", "test_key");
+
+  let capturedBody = null;
+  globalThis.fetch = async (_url, opts) => {
+    capturedBody = JSON.parse(opts.body);
+    return {
+      ok: true,
+      json: async () => ({ reply: "ok" }),
+    };
+  };
+
+  const result = await processNeuroInput("Hay urgencia en el proyecto y me bloqueo", { skipGeneration: true, history: [] });
+  assert.equal(result.reply, "ok");
+  assert.ok(Array.isArray(capturedBody.insights));
+  assert.ok(capturedBody.insights.length >= 1);
+});

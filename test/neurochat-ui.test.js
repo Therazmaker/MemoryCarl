@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { summarizePremiumDecision } from "../src/chat/neurochat-ui.js";
+import { renderInsightsPanel } from "../src/chat/insight-ui.js";
 
 test("UI summary reflects bootstrap activation", () => {
   const summary = summarizePremiumDecision({
@@ -23,4 +24,23 @@ test("UI summary explains skipped premium", () => {
   });
   assert.match(summary.badge, /omitido/i);
   assert.match(summary.badge, /trivial/i);
+});
+
+test("insight UI renderiza sección sin romper", () => {
+  const html = renderInsightsPanel([
+    {
+      id: "i1",
+      type: "dominant_pattern",
+      title: "Patrón dominante",
+      summary: "Lo que aparece aquí es una mezcla de urgencia y dispersión.",
+      confidence: 0.78,
+      domains: ["work"],
+      emotion: "fear",
+      basedOnNeurons: ["n1", "n2"],
+      signals: { manualEntities: ["Fergis"] },
+      recurrent: true,
+    },
+  ], "Lectura breve");
+  assert.match(html, /Lectura del momento/i);
+  assert.match(html, /Patrón dominante/i);
 });

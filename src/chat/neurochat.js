@@ -39,12 +39,14 @@ export async function sendMessage(userInput, options = {}) {
   const trimmed = (userInput || "").trim();
   if (!trimmed) throw new Error("Input vacío");
   const mode = options.mode || "chat";
+  const interpretationMode = options.interpretationMode || "default";
 
-  appendMessage("user", trimmed, { mode });
+  appendMessage("user", trimmed, { mode, interpretationMode });
 
   const result = await processNeuroInput(trimmed, {
     history: getHistory().slice(-10),
     mode,
+    interpretationMode,
     premiumOptions: options.premiumOptions,
   });
 
@@ -53,6 +55,7 @@ export async function sendMessage(userInput, options = {}) {
     generated: result.generated.length,
     coverage: result.missingAnalysis.coverage,
     mode,
+    interpretationMode,
     bootstrapLevel: result.bootstrapState?.level,
     premiumUsed: result.premiumDecision?.usePremium || false,
   });
