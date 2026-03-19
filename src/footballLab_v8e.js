@@ -19,6 +19,7 @@ import { getResultsSyncSummary, syncMemoryMatchesIntoResultsModule, syncTrackerM
 import { buildBitacoraPerformanceLab, normalizePickRecord } from "./footballlab/bitacora_performance.js";
 import { ensurePhaseModeState, createPhaseCampaign, recomputePhaseCampaign, calcPhaseMetrics, phaseAlertFlags, buildPhasePostAnalysis } from "./footballlab/bitacora_phase_mode.js";
 import { buildVideoScoutLayer } from "./footballlab/video_scout_integration.js";
+import { runMatchIntelligenceEngine } from "./footballlab/match_intelligence_engine.js";
 
 // ─── Claude window.storage shim ──────────────────────────────────────────────
 // window.storage is async but the app uses localStorage synchronously.
@@ -4110,6 +4111,42 @@ export function initFootballLab(){
       .rdx-narrative.verdict-high{background:rgba(63,185,80,.06);border-color:rgba(63,185,80,.2)}
       .rdx-narrative.verdict-mid{background:rgba(227,179,65,.06);border-color:rgba(227,179,65,.2)}
       .rdx-narrative.verdict-low{background:rgba(139,148,158,.05);border-color:rgba(139,148,158,.15)}
+      /* ── Match Intelligence Engine (MIE) styles ── */
+      .mie-block{margin-top:12px;border-radius:10px;overflow:hidden;border:1px solid rgba(99,102,241,.3)}
+      .mie-header{background:linear-gradient(135deg,rgba(99,102,241,.18),rgba(139,92,246,.10));padding:10px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid rgba(99,102,241,.2)}
+      .mie-title{font-size:9px;font-weight:900;letter-spacing:2px;color:#818cf8;text-transform:uppercase}
+      .mie-thesis-badge{background:rgba(99,102,241,.2);border:1px solid rgba(99,102,241,.4);border-radius:6px;padding:3px 10px;font-size:10px;font-weight:800;color:#a78bfa;letter-spacing:.3px}
+      .mie-confidence-chip{margin-left:auto;font-size:10px;color:#6e7681}
+      .mie-confidence-chip b{color:#e6edf3}
+      .mie-body{background:#0a0d13;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+      .mie-oneliner{font-size:13px;font-weight:700;color:#e6edf3;line-height:1.4;padding:8px 12px;background:rgba(99,102,241,.08);border-left:3px solid #818cf8;border-radius:0 6px 6px 0}
+      .mie-section-title{font-size:9px;font-weight:800;letter-spacing:1.5px;color:#6e7681;text-transform:uppercase;margin-bottom:5px}
+      .mie-why-list{display:flex;flex-direction:column;gap:4px}
+      .mie-why-item{font-size:11.5px;color:#c9d1d9;padding-left:14px;position:relative;line-height:1.4}
+      .mie-why-item::before{content:'→';position:absolute;left:0;color:#818cf8;font-size:10px;top:1px}
+      .mie-conflicts{display:flex;flex-direction:column;gap:4px}
+      .mie-conflict{font-size:11px;color:#c9d1d9;padding:5px 8px;background:rgba(248,81,73,.06);border:1px solid rgba(248,81,73,.2);border-radius:5px;line-height:1.35}
+      .mie-conflict.high{border-color:rgba(248,81,73,.35);background:rgba(248,81,73,.09)}
+      .mie-conflict.medium{border-color:rgba(227,179,65,.3);background:rgba(227,179,65,.06)}
+      .mie-alignment{font-size:11px;color:#c9d1d9;padding:5px 8px;background:rgba(63,185,80,.06);border:1px solid rgba(63,185,80,.2);border-radius:5px;line-height:1.35}
+      .mie-angles-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:6px}
+      .mie-angle{background:#161b22;border:1px solid #21262d;border-radius:6px;padding:6px 10px}
+      .mie-angle-type{font-size:8px;font-weight:900;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:3px}
+      .mie-angle-type.safer{color:#3fb950}.mie-angle-type.tactical{color:#58a6ff}.mie-angle-type.value{color:#e3b341}.mie-angle-type.live{color:#a78bfa}
+      .mie-angle-value{font-size:11px;color:#e6edf3;font-weight:600;line-height:1.3}
+      .mie-temporal{font-size:11.5px;color:#c9d1d9;padding:7px 10px;background:rgba(88,166,255,.06);border:1px solid rgba(88,166,255,.15);border-radius:6px;line-height:1.45}
+      .mie-traps{display:flex;flex-direction:column;gap:4px}
+      .mie-trap{display:flex;align-items:flex-start;gap:6px;padding:5px 8px;border-radius:5px;border:1px solid transparent}
+      .mie-trap.high{background:rgba(248,81,73,.07);border-color:rgba(248,81,73,.3)}
+      .mie-trap.medium{background:rgba(227,179,65,.06);border-color:rgba(227,179,65,.25)}
+      .mie-trap-icon{font-size:11px;flex-shrink:0;margin-top:1px}
+      .mie-trap-msg{font-size:11px;color:#c9d1d9;line-height:1.35}
+      .mie-integration-bar{display:flex;align-items:center;gap:8px;margin-top:2px}
+      .mie-integration-label{font-size:9px;color:#6e7681;letter-spacing:.5px;min-width:120px}
+      .mie-integration-track{flex:1;height:3px;background:#21262d;border-radius:2px;overflow:hidden}
+      .mie-integration-fill{height:100%;border-radius:2px;transition:width .3s}
+      .mie-integration-score{font-size:10px;font-weight:700;min-width:30px;text-align:right}
+      .mie-integration-warning{font-size:10px;color:#e3b341;margin-top:4px}
       .b2-score-chip{padding:2px 8px;border-radius:999px;font-size:11px;border:1px solid #1e2330}
       .b2-score-chip.win{color:#22d3a3;border-color:rgba(34,211,163,.5);background:rgba(34,211,163,.12)}
       .b2-score-chip.loss{color:#ef4444;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.12)}
@@ -12257,7 +12294,7 @@ RESPONDE SOLO CON JSON usando este schema:
         const mismatchBonus = mismatch >= 50 ? Math.round((mismatch - 50) * 0.3) : 0;
         const adjustedStudyScore = Math.min(100, scorePack.studyScore + mismatchBonus);
 
-        return {
+        const radarMatch = {
           id: m.id || uid('radar'),
           league,
           leagueId,
@@ -12320,6 +12357,10 @@ RESPONDE SOLO CON JSON usando este schema:
           // ── Video Scout Integration (v4)
           videoScout,
         };
+
+        // ── Match Intelligence Engine (v5) ─────────────────────────────────
+        radarMatch.matchIntelligence = runMatchIntelligenceEngine(radarMatch);
+        return radarMatch;
       });
   }
 
@@ -14686,6 +14727,113 @@ RESPONDE SOLO CON JSON usando este schema:
           <div class="rdx-narrative ${m.studyScore >= 70 ? 'verdict-high' : m.studyScore >= 45 ? 'verdict-mid' : 'verdict-low'}">
             ${m.narrative.map(line => `<div class="rdx-narrative-line">${line}</div>`).join('')}
           </div>` : ''}
+
+          ${m.matchIntelligence ? (() => {
+            const mie = m.matchIntelligence;
+            const thesis = mie.coreMatchThesis;
+            const conf = mie.confidenceArchitecture;
+            const integ = mie.integrationCompleteness;
+            const angles = mie.bestAngles;
+            const confPct = Math.round((conf.finalConfidence || 0) * 100);
+            const confColor = confPct >= 65 ? '#3fb950' : confPct >= 45 ? '#e3b341' : '#8b949e';
+            const integColor = integ.score >= 75 ? '#3fb950' : integ.score >= 50 ? '#e3b341' : '#f85149';
+
+            // Conflicts (max 3)
+            const topConflicts = (mie.signalConflicts || []).slice(0, 3);
+            // Alignments (max 2)
+            const topAlignments = (mie.signalAlignment || []).slice(0, 2);
+            // Trap warnings (max 3, high priority first)
+            const topTraps = (mie.trapWarnings || []).slice(0, 3);
+
+            return `
+          <div class="mie-block">
+            <div class="mie-header">
+              <span class="mie-title">⚡ Match Intelligence Engine</span>
+              <span class="mie-thesis-badge">${escapeHtml(thesis.thesisLabel)}</span>
+              <span class="mie-confidence-chip">Confianza: <b style="color:${confColor}">${confPct}%</b></span>
+            </div>
+            <div class="mie-body">
+
+              <!-- A. TESIS + ONE-LINER -->
+              <div class="mie-oneliner">${escapeHtml(thesis.oneLiner)}</div>
+
+              <!-- B. POR QUÉ -->
+              ${mie.whyReasons && mie.whyReasons.length ? `
+              <div>
+                <div class="mie-section-title">📌 Por qué</div>
+                <div class="mie-why-list">
+                  ${mie.whyReasons.map(r => `<div class="mie-why-item">${escapeHtml(r)}</div>`).join('')}
+                </div>
+              </div>` : ''}
+
+              <!-- TRAPS + CONFLICTS row -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <!-- C. CONFLICTOS -->
+                ${topConflicts.length ? `
+                <div>
+                  <div class="mie-section-title">⚡ Conflictos</div>
+                  <div class="mie-conflicts">
+                    ${topConflicts.map(c => `<div class="mie-conflict ${c.severity}">${escapeHtml(c.message)}</div>`).join('')}
+                  </div>
+                </div>` : `<div></div>`}
+
+                <!-- ALINEACIONES -->
+                ${topAlignments.length ? `
+                <div>
+                  <div class="mie-section-title">✅ Señales alineadas</div>
+                  <div class="mie-conflicts">
+                    ${topAlignments.map(a => `<div class="mie-alignment">${escapeHtml(a.message)}</div>`).join('')}
+                  </div>
+                </div>` : `<div></div>`}
+              </div>
+
+              <!-- D. MEJORES ÁNGULOS -->
+              <div>
+                <div class="mie-section-title">🎯 Mejores ángulos</div>
+                <div class="mie-angles-grid">
+                  ${angles.safer  ? `<div class="mie-angle"><div class="mie-angle-type safer">Más seguro</div><div class="mie-angle-value">${escapeHtml(angles.safer)}</div></div>` : ''}
+                  ${angles.tactical ? `<div class="mie-angle"><div class="mie-angle-type tactical">Táctico</div><div class="mie-angle-value">${escapeHtml(angles.tactical)}</div></div>` : ''}
+                  ${angles.value  ? `<div class="mie-angle"><div class="mie-angle-type value">Valor</div><div class="mie-angle-value">${escapeHtml(angles.value)}</div></div>` : ''}
+                  ${angles.live   ? `<div class="mie-angle"><div class="mie-angle-type live">En vivo</div><div class="mie-angle-value">${escapeHtml(angles.live)}</div></div>` : ''}
+                </div>
+              </div>
+
+              <!-- E. HISTORIA TEMPORAL -->
+              ${mie.temporalStory ? `
+              <div>
+                <div class="mie-section-title">⏱️ Historia temporal</div>
+                <div class="mie-temporal">${escapeHtml(mie.temporalStory)}</div>
+              </div>` : ''}
+
+              <!-- TRAMPAS -->
+              ${topTraps.length ? `
+              <div>
+                <div class="mie-section-title">🚨 Trampas activas</div>
+                <div class="mie-traps">
+                  ${topTraps.map(t => `
+                  <div class="mie-trap ${t.priority}">
+                    <span class="mie-trap-icon">${t.priority === 'high' ? '🔴' : '🟡'}</span>
+                    <span class="mie-trap-msg">${escapeHtml(t.message)}</span>
+                  </div>`).join('')}
+                </div>
+              </div>` : ''}
+
+              <!-- INTEGRATION COMPLETENESS -->
+              <div>
+                <div class="mie-section-title">📊 Completitud del análisis</div>
+                <div class="mie-integration-bar">
+                  <span class="mie-integration-label">Integración de capas</span>
+                  <div class="mie-integration-track">
+                    <div class="mie-integration-fill" style="width:${integ.score}%;background:${integColor};"></div>
+                  </div>
+                  <span class="mie-integration-score" style="color:${integColor}">${integ.score}/100</span>
+                </div>
+                ${integ.warning ? `<div class="mie-integration-warning">⚠️ ${escapeHtml(integ.warning)}</div>` : ''}
+              </div>
+
+            </div>
+          </div>`;
+          })() : ''}
 
           ${m.radarAnalysis ? `<div class="rdx-analysis-preview">🎯 Insight IA: ${m.radarAnalysis.insight?.valueLevel || 'MEDIO'} · Consistencia ${m.radarAnalysis.comparison?.consistency || 'MEDIA'}</div>` : ''}
 
