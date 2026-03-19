@@ -14,6 +14,8 @@ import { shouldUsePremiumGeneration } from "./premiumPolicy.js";
 import { incrementPremiumUsage } from "./premiumUsage.js";
 import { getBootstrapState } from "./bootstrap.js";
 import { runInsightEngine } from "./insightEngine.js";
+import { detectPastOrPresentOrientation } from "./activation.js";
+import { summarizeTemporalRange } from "./temporal.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -33,7 +35,30 @@ function buildContext(activatedNeurons) {
     weight: neuron.weight,
     score: Math.round(score * 100) / 100,
     triggers: neuron.triggers.slice(0, 5),
+    temporal: neuron.temporal || null,
   }));
+}
+
+function buildTemporalContext(userInput, activated = [], insights = []) {
+  const orientationRaw = detectPastOrPresentOrientation(userInput);
+  const orientation = orientationRaw === "mixed" ? "mixed" : (orientationRaw === "past" ? "past" : "present");
+  const activatedRecent = activated
+    .filter(({ neuron }) => ["current", "recent"].includes(neuron.temporal?.timeContext || "timeless"))
+    .map(({ neuron, score }) => ({ id: neuron.id, concept: neuron.core?.concept, score: Number((score || 0).toFixed(2)) }))
+    .slice(0, 8);
+  const activatedHistorical = activated
+    .filter(({ neuron }) => ["past", "historical"].includes(neuron.temporal?.timeContext || ""))
+    .map(({ neuron, score }) => ({ id: neuron.id, concept: neuron.core?.concept, score: Number((score || 0).toFixed(2)), stage: neuron.temporal?.stage || null }))
+    .slice(0, 8);
+  const temporalSummary = summarizeTemporalRange(activated.map((a) => a.neuron));
+  const trendSignals = insights.filter((i) => ["trend", "resolved_pattern", "recurring_pattern"].includes(i.type)).map((i) => i.summary).slice(0, 3);
+  return {
+    orientation,
+    activatedRecent,
+    activatedHistorical,
+    stageSignals: temporalSummary.stageSignals || [],
+    trendSignals,
+  };
 }
 
 
@@ -260,6 +285,7 @@ export async function processNeuroInput(userInput, options = {}) {
     clusters: insightResult.clusters.length,
     patterns: insightResult.patterns.length,
   });
+  const temporalContext = buildTemporalContext(userInput, finalActivated, insightResult.insights);
 
   addStep(trace, "request_reply");
   const t4 = Date.now();
@@ -276,6 +302,7 @@ export async function processNeuroInput(userInput, options = {}) {
         contextEntities: enrichedContext.contextEntities,
         insights: insightResult.insights,
         insightSummary: insightResult.insightSummary,
+        temporalContext,
         interpretationMode,
       });
     } catch (err) {
@@ -302,6 +329,7 @@ export async function processNeuroInput(userInput, options = {}) {
     contextEntities: enrichedContext.contextEntities,
     insights: insightResult.insights,
     insightSummary: insightResult.insightSummary,
+    temporalContext,
     insightTrace: {
       clusters: insightResult.clusters,
       patterns: insightResult.patterns,

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { summarizePremiumDecision } from "../src/chat/neurochat-ui.js";
 import { renderInsightsPanel } from "../src/chat/insight-ui.js";
+import { viewContextWindow } from "../src/chat/context-window-ui.js";
 
 test("UI summary reflects bootstrap activation", () => {
   const summary = summarizePremiumDecision({
@@ -43,4 +44,11 @@ test("insight UI renderiza sección sin romper", () => {
   ], "Lectura breve");
   assert.match(html, /Lectura del momento/i);
   assert.match(html, /Patrón dominante/i);
+});
+
+test("context window UI renderiza filtros temporales", () => {
+  const html = viewContextWindow();
+  assert.match(html, /cwFilterTimeContext/i);
+  assert.match(html, /cwFilterDateFrom/i);
+  assert.match(html, /Importación histórica batch/i);
 });

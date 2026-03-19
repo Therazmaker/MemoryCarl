@@ -108,6 +108,8 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false) {
     ? `<span class="ncBadge ncBadgeNew">nueva</span>`
     : (score != null ? `<span class="ncBadge">${fmt(score, 2)}</span>` : "");
 
+  const temporal = n.temporal || {};
+  const temporalBadge = `<span class="ncTag">${esc(temporal.timeContext || "timeless")}</span>`;
   return `
     <div class="ncNeuronCard" title="${esc(n.core.summary)}">
       <div class="ncNeuronHead">
@@ -117,6 +119,9 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false) {
       </div>
       <div class="ncNeuronMeta">
         <span class="ncTag">${esc(n.core.domain)}</span>
+        ${temporalBadge}
+        ${temporal.date ? `<span class="ncTag">${esc(temporal.date)}</span>` : ""}
+        ${temporal.stage ? `<span class="ncTag">stage:${esc(temporal.stage)}</span>` : ""}
         <span class="ncNeuronW">w: ${fmt(n.weight, 2)}</span>
         ${n.connections?.length ? `<span class="ncNeuronConn">${n.connections.length} conexiones</span>` : ""}
       </div>

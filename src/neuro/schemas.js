@@ -2,6 +2,7 @@
  * schemas.js — Definición y validación del modelo de datos de neuronas
  * NeuroChat / MemoryCarl
  */
+import { normalizeTemporalMeta, TEMPORAL_CONTEXTS } from "./temporal.js";
 
 /** Tipos de neurona permitidos */
 export const NEURON_TYPES = [
@@ -55,6 +56,38 @@ function sanitizeMeta(meta = {}) {
   };
 }
 
+function isValidDateOnly(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime());
+}
+
+function isValidTimestamp(value) {
+  return typeof value === "string" && !Number.isNaN(new Date(value).getTime());
+}
+
+export function validateTemporalMeta(temporal) {
+  const errs = [];
+  if (temporal == null) return errs;
+  if (!temporal || typeof temporal !== "object") return ["temporal inválido"];
+  if (temporal.date != null && !isValidDateOnly(temporal.date)) errs.push("temporal.date inválido");
+  if (temporal.timestamp != null && !isValidTimestamp(temporal.timestamp)) errs.push("temporal.timestamp inválido");
+  if (temporal.timeContext != null && !TEMPORAL_CONTEXTS.includes(temporal.timeContext)) errs.push("temporal.timeContext inválido");
+  if (temporal.isPast != null && typeof temporal.isPast !== "boolean") errs.push("temporal.isPast inválido");
+  if (temporal.stage != null && typeof temporal.stage !== "string") errs.push("temporal.stage inválido");
+  if (temporal.recencyWeight != null && typeof temporal.recencyWeight !== "number") errs.push("temporal.recencyWeight inválido");
+  if (temporal.sourcePeriod != null) {
+    if (!temporal.sourcePeriod || typeof temporal.sourcePeriod !== "object") errs.push("temporal.sourcePeriod inválido");
+    else {
+      if (temporal.sourcePeriod.start != null && !isValidDateOnly(temporal.sourcePeriod.start)) errs.push("temporal.sourcePeriod.start inválido");
+      if (temporal.sourcePeriod.end != null && !isValidDateOnly(temporal.sourcePeriod.end)) errs.push("temporal.sourcePeriod.end inválido");
+    }
+  }
+  return errs;
+}
+
+export function sanitizeTemporalMeta(input = {}, options = {}) {
+  return normalizeTemporalMeta(input, options);
+}
+
 /**
  * Crea una neurona con valores por defecto, mezclando el objeto dado.
  * @param {Partial<Neuron>} data
@@ -63,6 +96,7 @@ function sanitizeMeta(meta = {}) {
 export function createNeuron(data = {}) {
   const now = new Date().toISOString();
   const sanitizedMeta = sanitizeMeta(data.meta || {});
+  const sanitizedTemporal = sanitizeTemporalMeta(data.temporal || {});
   return {
     id:           data.id           || generateId(),
     type:         data.type         || "memory",
@@ -86,6 +120,7 @@ export function createNeuron(data = {}) {
       ref:   data.source?.ref   || "",
     },
     ...(sanitizedMeta ? { meta: sanitizedMeta } : {}),
+    ...(sanitizedTemporal ? { temporal: sanitizedTemporal } : {}),
   };
 }
 
@@ -127,6 +162,7 @@ export function validateNeuron(n) {
       if (n.meta.manualCategory != null && !MANUAL_CATEGORIES.includes(n.meta.manualCategory)) errs.push("meta.manualCategory inválido");
     }
   }
+  if (n.temporal != null) errs.push(...validateTemporalMeta(n.temporal));
   return errs;
 }
 
@@ -156,6 +192,9 @@ export function sanitizeNeuron(raw) {
   const sanitizedMeta = sanitizeMeta(raw.meta || n.meta || {});
   if (sanitizedMeta) n.meta = sanitizedMeta;
   else delete n.meta;
+  const sanitizedTemporal = sanitizeTemporalMeta(raw.temporal || n.temporal || {});
+  if (sanitizedTemporal) n.temporal = sanitizedTemporal;
+  else delete n.temporal;
 
   return n;
 }

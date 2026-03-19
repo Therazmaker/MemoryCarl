@@ -22,7 +22,7 @@ function confidenceBar(confidence = 0) {
 }
 
 function renderInsightCard(insight) {
-  const recurrent = insight.recurrent ? `<span class="ncInsightRecurrent">patrón recurrente</span>` : "";
+  const recurrent = insight.recurrent || insight.type === "recurring_pattern" ? `<span class="ncInsightRecurrent">patrón recurrente</span>` : "";
   const metaTags = [insight.type, ...(insight.domains || []).slice(0, 2), insight.emotion].filter(Boolean)
     .map((x) => `<span class="ncInsightTag">${esc(x)}</span>`).join("");
 

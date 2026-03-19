@@ -10,12 +10,19 @@ import {
   applyQuickTemplate,
   QUICK_CONTEXT_TEMPLATES,
 } from "../neuro/contextWindow.js";
+import { importHistoricalEntries } from "../neuro/historicalImport.js";
 
 const state = {
   query: "",
-  filters: { category: "", type: "", priority: "", pinned: "", withConnections: "" },
+  filters: { category: "", type: "", priority: "", pinned: "", withConnections: "", timeContext: "", stage: "", dateFrom: "", dateTo: "" },
   selectedId: null,
   editingId: null,
+  importText: "",
+  importMode: "journal",
+  importSource: "",
+  importHistorical: true,
+  importStage: "",
+  importSummary: null,
 };
 
 function esc(str) { return String(str ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }
@@ -29,13 +36,23 @@ function getFiltered() {
     pinned: state.filters.pinned === "" ? undefined : state.filters.pinned === "1",
     withConnections: state.filters.withConnections === "" ? undefined : state.filters.withConnections === "1",
   };
-  return listContextWindowNeurons(options);
+  const rows = listContextWindowNeurons(options);
+  return rows.filter((n) => {
+    const t = n.temporal || {};
+    if (state.filters.timeContext && (t.timeContext || "timeless") !== state.filters.timeContext) return false;
+    if (state.filters.stage && (t.stage || "") !== state.filters.stage) return false;
+    if (state.filters.dateFrom && t.date && t.date < state.filters.dateFrom) return false;
+    if (state.filters.dateTo && t.date && t.date > state.filters.dateTo) return false;
+    return true;
+  });
 }
 
 function renderCard(n) {
+  const temporalBadge = `<span class="cwTemporal cwTemporal--${esc(n.temporal?.timeContext || "timeless")}">${esc(n.temporal?.timeContext || "timeless")}</span>`;
   return `<button class="cwCard" data-id="${esc(n.id)}">
     <div class="cwCardHead"><b>${esc(n.core?.concept || "—")}</b><span>${n.meta?.pin ? "📌" : ""}</span></div>
     <div class="cwMeta">${esc(n.type)} · ${esc(n.meta?.manualCategory || "other")} · ${esc(n.meta?.priority || "medium")}</div>
+    <div class="cwMeta">${temporalBadge}</div>
     <div class="cwSummary">${esc(n.core?.summary || "")}</div>
     <div class="cwAliases">${(n.meta?.aliases || []).slice(0, 3).map((a) => `<span>${esc(a)}</span>`).join("")}</div>
     <div class="cwConn">${(n.connections || []).length} conexiones</div>
@@ -74,6 +91,7 @@ function renderDetail() {
     <div>evidence: ${(neuron.evidence || []).join(", ")}</div>
     <div>notes: ${esc(neuron.meta?.notes || "")}</div>
     <div>connections: ${(neuron.connections || []).join(", ") || "—"}</div>
+    <div>fecha: ${esc(neuron.temporal?.date || "—")} · contexto: ${esc(neuron.temporal?.timeContext || "timeless")} · stage: ${esc(neuron.temporal?.stage || "—")}</div>
     <div class="cwRowBtns">
       <button id="cwEdit">Editar</button>
       <button id="cwDelete">Borrar</button>
@@ -101,12 +119,17 @@ export function viewContextWindow() {
     .cwTop{display:flex;gap:8px;flex-wrap:wrap}.cwTop input,.cwTop select{background:#151924;color:inherit;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:6px}
     .cwForm{display:grid;gap:8px}.cwForm input,.cwForm textarea,.cwForm select{background:#151924;color:inherit;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:7px}
     .cwDetail{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px}
+    .cwTemporal{font-size:11px;padding:2px 6px;border-radius:999px;border:1px solid rgba(255,255,255,.2)}
   </style>
   <div class="cwTop">
     <input id="cwSearch" placeholder="Buscar context neuron" value="${esc(state.query)}" />
     <select id="cwFilterCategory"><option value=""${sel(fc,"")}>category</option><option value="people"${sel(fc,"people")}>people</option><option value="work"${sel(fc,"work")}>work</option><option value="hobbies"${sel(fc,"hobbies")}>hobbies</option><option value="projects"${sel(fc,"projects")}>projects</option><option value="preferences"${sel(fc,"preferences")}>preferences</option><option value="places"${sel(fc,"places")}>places</option><option value="identity"${sel(fc,"identity")}>identity</option></select>
     <select id="cwFilterPriority"><option value=""${sel(fp,"")}>priority</option><option value="low"${sel(fp,"low")}>low</option><option value="medium"${sel(fp,"medium")}>medium</option><option value="high"${sel(fp,"high")}>high</option></select>
     <select id="cwFilterPinned"><option value=""${sel(fn,"")}>pinned?</option><option value="1"${sel(fn,"1")}>pinned</option><option value="0"${sel(fn,"0")}>not pinned</option></select>
+    <select id="cwFilterTimeContext"><option value="">timeContext</option><option value="current">current</option><option value="recent">recent</option><option value="past">past</option><option value="historical">historical</option><option value="timeless">timeless</option></select>
+    <input id="cwFilterStage" placeholder="stage" value="${esc(state.filters.stage)}"/>
+    <input id="cwFilterDateFrom" type="date" value="${esc(state.filters.dateFrom)}"/>
+    <input id="cwFilterDateTo" type="date" value="${esc(state.filters.dateTo)}"/>
     <button id="cwQuickAdd">Add Starter Context</button>
   </div>
   <div class="cwLayout">
@@ -115,6 +138,16 @@ export function viewContextWindow() {
     </div>
     <div>
       ${renderForm(getFiltered().find((n) => n.id === state.editingId))}
+      <div class="cwDetail">
+        <h3>Importación histórica batch</h3>
+        <textarea id="cwImportText" placeholder='JSON array: [{"date":"2025-02-10","text":"..."}]'>${esc(state.importText)}</textarea>
+        <input id="cwImportSource" placeholder="source label" value="${esc(state.importSource)}"/>
+        <select id="cwImportMode"><option value="journal">journal</option><option value="autobiography">autobiography</option><option value="exercise">exercise</option></select>
+        <label><input type="checkbox" id="cwImportHistorical" ${state.importHistorical ? "checked" : ""}/> marcar como histórico</label>
+        <input id="cwImportStage" placeholder="stage aproximada (sin fecha)" value="${esc(state.importStage)}"/>
+        <button id="cwRunImport">Importar batch</button>
+        ${state.importSummary ? `<div>creadas: ${state.importSummary.created} · fusionadas: ${state.importSummary.merged} · descartadas: ${state.importSummary.discarded} · rango: ${esc(state.importSummary.temporalRange ? `${state.importSummary.temporalRange.start}..${state.importSummary.temporalRange.end}` : "—")}</div>` : ""}
+      </div>
       ${renderDetail()}
     </div>
   </div></div>`;
@@ -126,6 +159,10 @@ export function wireContextWindow(root, rerender) {
   root.querySelector("#cwFilterCategory")?.addEventListener("change", (e) => { state.filters.category = e.target.value; rerender(); });
   root.querySelector("#cwFilterPriority")?.addEventListener("change", (e) => { state.filters.priority = e.target.value; rerender(); });
   root.querySelector("#cwFilterPinned")?.addEventListener("change", (e) => { state.filters.pinned = e.target.value; rerender(); });
+  root.querySelector("#cwFilterTimeContext")?.addEventListener("change", (e) => { state.filters.timeContext = e.target.value; rerender(); });
+  root.querySelector("#cwFilterStage")?.addEventListener("input", (e) => { state.filters.stage = e.target.value; rerender(); });
+  root.querySelector("#cwFilterDateFrom")?.addEventListener("change", (e) => { state.filters.dateFrom = e.target.value; rerender(); });
+  root.querySelector("#cwFilterDateTo")?.addEventListener("change", (e) => { state.filters.dateTo = e.target.value; rerender(); });
 
   root.querySelector("#cwQuickAdd")?.addEventListener("click", async () => {
     const key = prompt(`Template (${Object.keys(QUICK_CONTEXT_TEMPLATES).join(", ")})`, "person");
@@ -164,4 +201,21 @@ export function wireContextWindow(root, rerender) {
     rerender();
   });
   root.querySelectorAll(".cwLinkBtn").forEach((btn) => btn.addEventListener("click", () => { if (state.selectedId) removeManualLink(state.selectedId, btn.dataset.unlink); rerender(); }));
+  root.querySelector("#cwRunImport")?.addEventListener("click", () => {
+    try {
+      const mode = root.querySelector("#cwImportMode")?.value || "journal";
+      const source = root.querySelector("#cwImportSource")?.value || "";
+      const forceHistorical = root.querySelector("#cwImportHistorical")?.checked;
+      const stage = root.querySelector("#cwImportStage")?.value || "";
+      const raw = root.querySelector("#cwImportText")?.value || "[]";
+      const parsed = JSON.parse(raw);
+      const entries = Array.isArray(parsed) ? parsed : [parsed];
+      const enriched = entries.map((e) => ({ ...e, mode: e.mode || mode, source: e.source || source, isHistorical: forceHistorical, stage: e.stage || stage }));
+      state.importSummary = importHistoricalEntries(enriched, { batchSize: 20 });
+      rerender();
+    } catch (_e) {
+      state.importSummary = { created: 0, merged: 0, discarded: 0, temporalRange: null };
+      rerender();
+    }
+  });
 }
