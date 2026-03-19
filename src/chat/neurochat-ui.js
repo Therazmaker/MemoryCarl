@@ -10,6 +10,7 @@
 
 import { sendMessage, getChatHistory, clearChatHistory, getNeurons } from "./neurochat.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
+import { getPremiumUsageState } from "../neuro/premiumUsage.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
@@ -96,6 +97,55 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false) {
     </div>`;
 }
 
+function renderPremiumPanel() {
+  const r = uiState.lastResult;
+  const usageState = getPremiumUsageState();
+
+  // Build usage bar
+  const usedPct    = usageState.limit > 0 ? Math.round((usageState.used / usageState.limit) * 100) : 0;
+  const usageColor = usedPct >= 90 ? "#fb7185" : usedPct >= 60 ? "#fbbf24" : "#36d399";
+
+  // Premium decision info from last result
+  let decisionBadge = "";
+  let dedupeBadge   = "";
+
+  if (r) {
+    const pd = r.premiumDecision;
+    const ds = r.dedupeSummary;
+
+    if (pd) {
+      if (pd.usePremium) {
+        decisionBadge = `<span class="ncPremiumBadge ncPremiumUsed">⚡ Premium learning used</span>`;
+      } else {
+        const reason = pd.reasons?.[0] || "policy";
+        decisionBadge = `<span class="ncPremiumBadge ncPremiumSkipped" title="${esc(pd.reasons?.join(" · "))}">Skipped premium: ${esc(reason)}</span>`;
+      }
+    }
+
+    if (ds && (ds.merged > 0 || ds.discarded > 0)) {
+      const parts = [];
+      if (ds.merged   > 0) parts.push(`Merged ${ds.merged}`);
+      if (ds.discarded > 0) parts.push(`Discarded ${ds.discarded}`);
+      if (ds.saved    > 0) parts.push(`Saved ${ds.saved} new`);
+      dedupeBadge = `<span class="ncDedupeBadge">🔀 ${parts.join(" · ")}</span>`;
+    }
+  }
+
+  return `
+    <div class="ncSideSection ncPremiumSection">
+      <div class="ncSideSectionTitle">Premium</div>
+      <div class="ncPremiumUsageRow">
+        <span class="ncPremiumUsageLabel">Hoy: ${usageState.used} / ${usageState.limit}</span>
+        <span class="ncPremiumUsageLeft" style="color:${usageColor}">${usageState.remaining} restantes</span>
+      </div>
+      <div class="ncPremiumBar">
+        <div class="ncPremiumBarFill" style="width:${usedPct}%;background:${usageColor}"></div>
+      </div>
+      ${decisionBadge ? `<div class="ncPremiumDecision">${decisionBadge}</div>` : ""}
+      ${dedupeBadge   ? `<div class="ncDedupeRow">${dedupeBadge}</div>` : ""}
+    </div>`;
+}
+
 function renderSidePanel() {
   const r = uiState.lastResult;
   if (!r) return `<div class="ncSide"><div class="ncSideEmpty">Escribe un mensaje para ver neuronas activadas.</div></div>`;
@@ -132,6 +182,9 @@ function renderSidePanel() {
         <div class="ncCoveragePct" style="color:${covColor}">${covPct}%</div>
         ${missingAnalysis?.reasons?.length ? `<div class="ncMissingList">${missingAnalysis.reasons.map(r => `<div class="ncMissingItem">⚠ ${esc(r)}</div>`).join("")}</div>` : ""}
       </div>
+
+      <!-- Premium status -->
+      ${renderPremiumPanel()}
 
       <!-- Neuronas activadas -->
       <div class="ncSideSection">
@@ -477,5 +530,32 @@ function ncCss() {
   .ncTraceStep { font-size: 10px; font-family: monospace; opacity: .7; }
   .ncTimingSection { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
   .ncTimingRow { display: flex; justify-content: space-between; font-size: 10px; opacity: .55; }
+
+  /* Premium panel */
+  .ncPremiumSection { border-top: 1px solid rgba(255,255,255,.06); padding-top: 10px; }
+  .ncPremiumUsageRow {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; margin-bottom: 4px;
+  }
+  .ncPremiumUsageLabel { opacity: .6; }
+  .ncPremiumUsageLeft  { font-weight: 700; font-size: 11px; }
+  .ncPremiumBar {
+    height: 4px; background: rgba(255,255,255,.08); border-radius: 4px;
+    overflow: hidden; margin-bottom: 6px;
+  }
+  .ncPremiumBarFill { height: 100%; border-radius: 4px; transition: width .4s; }
+  .ncPremiumDecision { margin-top: 4px; }
+  .ncPremiumBadge {
+    display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 6px;
+    font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; cursor: default;
+  }
+  .ncPremiumUsed    { background: rgba(124,92,255,.25); color: #a78bfa; }
+  .ncPremiumSkipped { background: rgba(255,255,255,.07); color: rgba(255,255,255,.45); }
+  .ncDedupeRow  { margin-top: 4px; }
+  .ncDedupeBadge {
+    display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 6px;
+    background: rgba(52,211,153,.15); color: #34d399; font-weight: 600;
+  }
   </style>`;
 }
