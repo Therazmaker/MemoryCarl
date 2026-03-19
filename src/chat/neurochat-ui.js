@@ -406,7 +406,7 @@ function nchatInner() {
   const isMobileViewport = typeof window !== "undefined"
     && typeof window.matchMedia === "function"
     && window.matchMedia("(max-width: 680px)").matches;
-  const showSidePanel = !isMobileViewport || uiState.neuronsExpanded;
+  const showSidePanel = !isMobileViewport || uiState.neuronsExpanded || Boolean(uiState.lastResult);
 
   const settingsModal = uiState.settingsOpen ? renderSettingsModal() : "";
 
