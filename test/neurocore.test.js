@@ -39,3 +39,22 @@ test("neurocore returns bootstrapState and mode in payload", async () => {
   assert.ok(result.trace.bootstrapState);
   assert.ok(result.premiumDecision.rulePath.startsWith("bootstrap_"));
 });
+
+test("neurocore includes activatedManual and contextEntities when input mentions alias", async () => {
+  resetStorage();
+  saveManyNeurons([
+    createNeuron({
+      id: "m_fergis",
+      type: "person",
+      core: { concept: "Fergis", domain: "relationships", summary: "pareja" },
+      source: { kind: "manual", ref: "context_window" },
+      meta: { aliases: ["mi esposa"], manualCategory: "people", priority: "high", pin: true },
+    }),
+    createNeuron({ id: "p1", type: "project", core: { concept: "Proyecto Atlas", domain: "work", summary: "proyecto actual" } }),
+  ]);
+
+  const result = await processNeuroInput("Mi esposa está estresada por el proyecto", { skipGeneration: true, history: [] });
+  assert.ok(Array.isArray(result.activatedManual));
+  assert.ok(result.activatedManual.some((m) => m.concept === "Fergis"));
+  assert.ok(result.contextEntities.includes("Fergis"));
+});

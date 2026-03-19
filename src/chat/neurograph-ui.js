@@ -23,7 +23,7 @@ import {
 // ---- Estado interno del grafo ----
 const graphState = {
   graph:        { nodes: [], edges: [] },
-  filters:      { domain: null, emotion: null, recentDays: null, search: "" },
+  filters:      { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null },
   filtered:     { nodes: [], edges: [] },
   selectedNode: null,
   simulation:   null,
@@ -112,6 +112,7 @@ function renderGraphSVG(width = 700, height = 500) {
     const isSelected = selectedNode?.id === n.id;
     const statusClass = n.status !== "normal" ? ` ngNode--${n.status}` : "";
     const selectedClass = isSelected ? " ngNode--selected" : "";
+    const manualClass = n.isManual ? " ngNode--manual" : "";
 
     // Halo para nodos activos/nuevos
     const halo = (n.status === "active" || n.status === "new")
@@ -127,7 +128,7 @@ function renderGraphSVG(width = 700, height = 500) {
       <circle
         cx="${pos.x}" cy="${pos.y}" r="${n.size}"
         fill="${n.color}"
-        class="ngNode${statusClass}${selectedClass}"
+        class="ngNode${statusClass}${selectedClass}${manualClass}"
         data-id="${esc(n.id)}"
         opacity="${isSelected ? 1 : 0.82}"
       >
@@ -218,6 +219,12 @@ function renderNodeDetail() {
       </div>
 
       <div class="ngDetailSection">
+        <div class="ngDetailSectionTitle">Contexto manual</div>
+        <div style="font-size:12px;opacity:.85">aliases: ${(n.aliases||[]).join(", ") || "—"} · pin: ${n.pin ? "sí" : "no"} · priority: ${esc(n.priority || "medium")} · category: ${esc(n.manualCategory || "—")}</div>
+        ${n.notes ? `<div class="ngEvidenceItem">📝 ${esc(n.notes)}</div>` : ""}
+      </div>
+
+      <div class="ngDetailSection">
         <div class="ngDetailSectionTitle">Triggers</div>
         <div class="ngTagList">${triggersHtml}</div>
       </div>
@@ -263,6 +270,24 @@ function renderFiltersBar() {
         <option value="1"  ${filters.recentDays === 1  ? "selected" : ""}>Hoy</option>
         <option value="7"  ${filters.recentDays === 7  ? "selected" : ""}>Últimos 7d</option>
         <option value="30" ${filters.recentDays === 30 ? "selected" : ""}>Últimos 30d</option>
+      </select>
+      <select class="ngSelect" id="ngFilterSource">
+        <option value="">Manual + auto</option>
+        <option value="manual" ${filters.sourceKind === "manual" ? "selected" : ""}>Solo manuales</option>
+        <option value="auto" ${filters.sourceKind === "auto" ? "selected" : ""}>Solo automáticas</option>
+      </select>
+      <select class="ngSelect" id="ngFilterManualCategory">
+        <option value="">Todas las categorías manuales</option>
+        <option value="people" ${filters.manualCategory === "people" ? "selected" : ""}>people</option>
+        <option value="work" ${filters.manualCategory === "work" ? "selected" : ""}>work</option>
+        <option value="projects" ${filters.manualCategory === "projects" ? "selected" : ""}>projects</option>
+        <option value="hobbies" ${filters.manualCategory === "hobbies" ? "selected" : ""}>hobbies</option>
+        <option value="preferences" ${filters.manualCategory === "preferences" ? "selected" : ""}>preferences</option>
+      </select>
+      <select class="ngSelect" id="ngFilterPinned">
+        <option value="">Pinned y no pinned</option>
+        <option value="1" ${filters.pinned === true ? "selected" : ""}>Solo pinned</option>
+        <option value="0" ${filters.pinned === false ? "selected" : ""}>Solo no pinned</option>
       </select>
       <select class="ngSelect" id="ngColorBy">
         <option value="domain"  ${colorBy === "domain"  ? "selected" : ""}>Color: dominio</option>
@@ -316,6 +341,7 @@ function ngraphInner(sessionState = {}) {
         <span class="ngLegendItem"><span class="ngLegendDot ngLegendDot--active"></span>Activada recientemente</span>
         <span class="ngLegendItem"><span class="ngLegendDot ngLegendDot--new"></span>Generada ahora</span>
         <span class="ngLegendItem"><span class="ngLegendDot ngLegendDot--merged"></span>Mergeada</span>
+        <span class="ngLegendItem"><span class="ngLegendDot" style="background:#f472b6"></span>Manual context</span>
         <span class="ngLegendItem" style="margin-left:8px;opacity:.5">Tamaño = peso · Halo = actividad</span>
       </div>
     </div>`;
@@ -460,12 +486,12 @@ function wireNeuroGraphInner(root, sessionState = {}) {
 
   // Reset filtros
   root.querySelector("#ngBtnReset")?.addEventListener("click", () => {
-    graphState.filters = { domain: null, emotion: null, recentDays: null, search: "" };
+    graphState.filters = { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null };
     const searchEl = root.querySelector("#ngSearch");
     if (searchEl) searchEl.value = "";
     applyFiltersAndRerender(root);
     // Actualizar selectores
-    ["#ngFilterDomain", "#ngFilterEmotion", "#ngFilterRecent"].forEach((sel) => {
+    ["#ngFilterDomain", "#ngFilterEmotion", "#ngFilterRecent", "#ngFilterSource", "#ngFilterManualCategory", "#ngFilterPinned"].forEach((sel) => {
       const el = root.querySelector(sel);
       if (el) el.value = "";
     });
@@ -484,7 +510,21 @@ function wireNeuroGraphInner(root, sessionState = {}) {
     graphState.filters.recentDays = e.target.value ? parseInt(e.target.value, 10) : null;
     applyFiltersAndRerender(root);
   });
-  root.querySelector("#ngColorBy")?.addEventListener("change", (e) => {
+  
+  root.querySelector("#ngFilterSource")?.addEventListener("change", (e) => {
+    graphState.filters.sourceKind = e.target.value || null;
+    applyFiltersAndRerender(root);
+  });
+  root.querySelector("#ngFilterManualCategory")?.addEventListener("change", (e) => {
+    graphState.filters.manualCategory = e.target.value || null;
+    applyFiltersAndRerender(root);
+  });
+  root.querySelector("#ngFilterPinned")?.addEventListener("change", (e) => {
+    if (e.target.value === "") graphState.filters.pinned = null;
+    else graphState.filters.pinned = e.target.value === "1";
+    applyFiltersAndRerender(root);
+  });
+root.querySelector("#ngColorBy")?.addEventListener("change", (e) => {
     graphState.colorBy = e.target.value || "domain";
     rebuildAndRender(root, sessionState);
   });

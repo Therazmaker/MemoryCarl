@@ -4,7 +4,9 @@
  * NeuroChat / MemoryCarl
  */
 
-import { sanitizeNeuron, validateNeuron } from "./schemas.js";
+import { sanitizeNeuron, validateNeuron, createNeuron } from "./schemas.js";
+import { getEmbedding } from "./embeddings.js";
+import { rebuildGraph } from "./connections.js";
 
 const STORE_KEY = "memorycarl_neurochat_neurons";
 
@@ -29,6 +31,42 @@ function writeAll(neurons) {
   } catch (e) {
     console.error("[neuronStore] Error al guardar neuronas:", e);
   }
+}
+
+function isManualNeuron(n) {
+  return n?.source?.kind === "manual";
+}
+
+function tokenizeSearch(query) {
+  return String(query || "").toLowerCase().trim().split(/\s+/).filter(Boolean);
+}
+
+function neuronMatchesQuery(n, tokens) {
+  if (!tokens.length) return true;
+  const haystack = [
+    n.core?.concept,
+    n.core?.summary,
+    ...(n.triggers || []),
+    ...(n.meta?.aliases || []),
+    n.meta?.manualCategory,
+    n.type,
+  ].join(" ").toLowerCase();
+  return tokens.every((t) => haystack.includes(t));
+}
+
+async function ensureNeuronEmbedding(neuron) {
+  if (Array.isArray(neuron.embedding) && neuron.embedding.length > 0) return neuron;
+  const text = [neuron.core?.concept, neuron.core?.summary, ...(neuron.triggers || []), ...(neuron.meta?.aliases || [])]
+    .filter(Boolean)
+    .join(" ");
+  neuron.embedding = await getEmbedding(text);
+  return neuron;
+}
+
+async function reindexAndPersist(neurons) {
+  const rebuilt = await rebuildGraph(neurons);
+  writeAll(rebuilt);
+  return rebuilt;
 }
 
 // ---- API pública ----
@@ -98,7 +136,7 @@ export function updateNeuron(id, patch) {
   const all = readAll();
   const idx = all.findIndex((n) => n.id === id);
   if (idx < 0) return null;
-  const updated = sanitizeNeuron({ ...all[idx], ...patch, id });
+  const updated = sanitizeNeuron({ ...all[idx], ...patch, id, updatedAt: new Date().toISOString() });
   if (!updated) return null;
   all[idx] = updated;
   writeAll(all);
@@ -150,4 +188,92 @@ export function reindexConnections() {
   }
   if (changed) writeAll(all);
   return all;
+}
+
+export function getManualContextNeurons() {
+  return readAll().filter((n) => isManualNeuron(n));
+}
+
+export function getPinnedContextNeurons() {
+  return getManualContextNeurons().filter((n) => Boolean(n.meta?.pin));
+}
+
+export function getContextNeuronsByCategory(category) {
+  return getManualContextNeurons().filter((n) => n.meta?.manualCategory === category);
+}
+
+export function searchManualContextNeurons(query, options = {}) {
+  const tokens = tokenizeSearch(query);
+  return getManualContextNeurons().filter((n) => {
+    if (options.category && n.meta?.manualCategory !== options.category) return false;
+    if (options.type && n.type !== options.type) return false;
+    if (options.priority && n.meta?.priority !== options.priority) return false;
+    if (options.pinned != null && Boolean(n.meta?.pin) !== Boolean(options.pinned)) return false;
+    if (options.withConnections === true && (!Array.isArray(n.connections) || n.connections.length === 0)) return false;
+    if (options.withConnections === false && Array.isArray(n.connections) && n.connections.length > 0) return false;
+    return neuronMatchesQuery(n, tokens);
+  });
+}
+
+export async function createManualContextNeuron(input) {
+  const base = createNeuron({
+    ...input,
+    source: { kind: "manual", ref: "context_window" },
+    type: input?.type || "manual_context",
+    meta: {
+      priority: "medium",
+      manualCategory: "other",
+      pin: false,
+      aliases: [],
+      ...input?.meta,
+    },
+  });
+
+  const sanitized = sanitizeNeuron(base);
+  if (!sanitized) return null;
+  const errs = validateNeuron(sanitized);
+  if (errs.length) return null;
+
+  await ensureNeuronEmbedding(sanitized);
+
+  const all = readAll();
+  all.push(sanitized);
+  await reindexAndPersist(all);
+  return sanitized;
+}
+
+export async function updateManualContextNeuron(id, patch) {
+  const all = readAll();
+  const idx = all.findIndex((n) => n.id === id && isManualNeuron(n));
+  if (idx < 0) return null;
+
+  const mergedMeta = { ...(all[idx].meta || {}), ...(patch.meta || {}) };
+  const updated = sanitizeNeuron({
+    ...all[idx],
+    ...patch,
+    id,
+    source: { kind: "manual", ref: patch?.source?.ref || all[idx].source?.ref || "context_window" },
+    meta: mergedMeta,
+    updatedAt: new Date().toISOString(),
+  });
+  if (!updated) return null;
+
+  const textChanged = ["core", "triggers", "meta", "type"].some((k) => patch[k] != null);
+  if (textChanged) {
+    updated.embedding = [];
+    await ensureNeuronEmbedding(updated);
+  }
+
+  all[idx] = updated;
+  await reindexAndPersist(all);
+  return updated;
+}
+
+export async function deleteManualContextNeuron(id) {
+  const all = readAll();
+  const before = all.length;
+  const next = all.filter((n) => n.id !== id || !isManualNeuron(n));
+  if (next.length === before) return false;
+  await reindexAndPersist(next);
+  return true;
 }

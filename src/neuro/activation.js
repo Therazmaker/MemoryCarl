@@ -15,6 +15,14 @@ export function normalizeScore(score) {
   return clamp(score, 0, 1);
 }
 
+function normalizeText(text) {
+  return String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function computeRecencyBoost(lastActivated) {
   if (!lastActivated) return 0.3;
   const days = daysSince(lastActivated);
@@ -29,6 +37,52 @@ export function computeRecencyBoost(lastActivated) {
 export function computeKeywordMatch(queryTokens, neuron) {
   if (!queryTokens.length) return 0;
   return keywordOverlap(queryTokens, [...neuronTokenSet(neuron)]);
+}
+
+export function computeAliasMatch(input, neuron) {
+  const aliases = neuron?.meta?.aliases || [];
+  if (!aliases.length) return 0;
+
+  const normalizedInput = normalizeText(input);
+  let best = 0;
+
+  for (const alias of aliases) {
+    const a = normalizeText(alias);
+    if (!a) continue;
+    if (normalizedInput === a) best = Math.max(best, 1);
+    const exactPattern = new RegExp(`(^|\\b)${escapeRegExp(a)}(\\b|$)`, "i");
+    if (exactPattern.test(normalizedInput)) best = Math.max(best, 0.92);
+    else if (normalizedInput.includes(a)) best = Math.max(best, 0.72);
+  }
+
+  return best;
+}
+
+export function isLikelyEntityMention(input, neuron) {
+  const concept = normalizeText(neuron?.core?.concept);
+  const normalizedInput = normalizeText(input);
+  if (!concept || !normalizedInput) return false;
+  if (normalizedInput.includes(concept)) return true;
+  return computeAliasMatch(input, neuron) >= 0.9;
+}
+
+export function getManualNeuronBoost(neuron, options = {}) {
+  if (neuron?.source?.kind !== "manual") return 0;
+  const aliasMatch = options.aliasMatch ?? 0;
+  const entityMention = options.entityMention ?? false;
+  const conceptMention = options.conceptMention ?? false;
+  const hasMatchSignal = aliasMatch > 0.38 || entityMention || conceptMention;
+
+  if (!hasMatchSignal) return 0;
+
+  let boost = 0;
+  boost += aliasMatch >= 0.9 ? 0.22 : aliasMatch >= 0.72 ? 0.16 : 0.1;
+  if (entityMention) boost += 0.1;
+  if (neuron.meta?.priority === "high") boost += 0.06;
+  else if (neuron.meta?.priority === "medium") boost += 0.03;
+
+  if (neuron.meta?.pin) boost += 0.04;
+  return clamp(boost, 0, 0.35);
 }
 
 export function computeEmotionMatch(userInput, neuronEmotion) {
@@ -97,7 +151,7 @@ export async function activateNeurons(userInput, neurons, options = {}) {
   const scored = await Promise.all(neurons.map(async (neuron) => {
     let neuronEmbed = neuron.embedding;
     if (!Array.isArray(neuronEmbed) || neuronEmbed.length === 0) {
-      const neuronText = [neuron.core.concept, neuron.core.summary, ...neuron.triggers].join(" ");
+      const neuronText = [neuron.core.concept, neuron.core.summary, ...neuron.triggers, ...(neuron.meta?.aliases || [])].join(" ");
       neuronEmbed = await getEmbedding(neuronText);
     }
 
@@ -106,16 +160,21 @@ export async function activateNeurons(userInput, neurons, options = {}) {
     const weight = clamp(neuron.weight, 0, 1);
     const recency = computeRecencyBoost(neuron.lastActivated);
     const emotion = computeEmotionMatch(userInput, neuron.emotion);
+    const aliasMatch = computeAliasMatch(userInput, neuron);
+    const entityMention = isLikelyEntityMention(userInput, neuron);
+    const conceptMention = normalizeText(userInput).includes(normalizeText(neuron.core?.concept || ""));
+    const manualBoost = getManualNeuronBoost(neuron, { aliasMatch, entityMention, conceptMention });
 
     const score = normalizeScore(
       semantic * tuning.weights.semantic +
       keyword * tuning.weights.keyword +
       weight * tuning.weights.weight +
       recency * tuning.weights.recency +
-      emotion * tuning.weights.emotion
+      emotion * tuning.weights.emotion +
+      manualBoost
     );
 
-    return { neuron, score, components: { semantic, keyword, weight, recency, emotion } };
+    return { neuron, score, components: { semantic, keyword, weight, recency, emotion, aliasMatch, manualBoost } };
   }));
 
   const activated = scored.filter((r) => r.score >= minScore).sort((a, b) => b.score - a.score).slice(0, topK);
