@@ -18,6 +18,7 @@ import {
 import { isGeminiPremiumConfigured } from "../services/geminiPremiumClient.js";
 import { viewNeuroGraph, wireNeuroGraph } from "./neurograph-ui.js";
 import { viewContextWindow, wireContextWindow } from "./context-window-ui.js";
+import { renderInsightsPanel } from "./insight-ui.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
@@ -32,6 +33,7 @@ const uiState = {
   settingsMsg:     null,
   settingsApiKeyVisible: false,
   currentMode: "chat",
+  interpretationMode: "default",
   // IDs de neuronas de la sesión actual para resaltado en grafo
   sessionState: {
     lastActivatedIds: [],
@@ -229,6 +231,8 @@ function renderSidePanel() {
       <!-- Premium status -->
       ${renderPremiumPanel()}
 
+      ${renderInsightsPanel(r.insights || [], r.insightSummary || "")}
+
       <!-- Neuronas activadas -->
       <div class="ncSideSection">
         <div class="ncSideSectionTitle">⚡ Activadas (${activated.length})</div>
@@ -395,6 +399,10 @@ function nchatInner() {
           <select class="ncModeSelect" id="ncModeSelect" ${uiState.loading ? "disabled" : ""}>
             ${MODE_OPTIONS.map((m) => `<option value="${m.value}" ${uiState.currentMode === m.value ? "selected" : ""}>${m.label}</option>`).join("")}
           </select>
+          <select class="ncModeSelect ncInterpretSelect" id="ncInterpretSelect" ${uiState.loading ? "disabled" : ""}>
+            <option value="default" ${uiState.interpretationMode === "default" ? "selected" : ""}>Lectura: default</option>
+            <option value="objective" ${uiState.interpretationMode === "objective" ? "selected" : ""}>Lectura: objetiva</option>
+          </select>
           <textarea
             class="ncInput"
             id="ncInput"
@@ -482,7 +490,7 @@ function wireNeuroChatInner(root) {
     uiState.error   = null;
     rerender();
     try {
-      const result = await sendMessage(text, { mode: uiState.currentMode });
+      const result = await sendMessage(text, { mode: uiState.currentMode, interpretationMode: uiState.interpretationMode });
       uiState.lastResult = result;
       uiState.loading    = false;
       // Actualizar estado de sesión para resaltado en grafo
@@ -516,6 +524,12 @@ function wireNeuroChatInner(root) {
   if (modeSelect) {
     modeSelect.addEventListener("change", () => {
       uiState.currentMode = modeSelect.value || "chat";
+    });
+  }
+  const interpretationSelect = root.querySelector("#ncInterpretSelect");
+  if (interpretationSelect) {
+    interpretationSelect.addEventListener("change", () => {
+      uiState.interpretationMode = interpretationSelect.value || "default";
     });
   }
 
@@ -795,6 +809,25 @@ function ncCss() {
     max-width: 180px;
   }
   .ncPremiumDecisionMeta { font-size: 11px; opacity: .7; margin-top: 6px; line-height: 1.35; }
+  .ncInterpretSelect { max-width: 170px; }
+  .ncInsightSection { border-top: 1px solid rgba(255,255,255,.06); padding-top: 10px; }
+  .ncInsightSummaryTop { font-size: 11px; opacity: .72; line-height: 1.35; margin-bottom: 8px; }
+  .ncInsightList { display: flex; flex-direction: column; gap: 8px; }
+  .ncInsightCard { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 8px; }
+  .ncInsightHead { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .ncInsightTitle { font-size: 12px; font-weight: 700; }
+  .ncInsightSummary { font-size: 11px; opacity: .8; line-height: 1.4; margin-top: 4px; }
+  .ncInsightMeta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+  .ncInsightTag { font-size: 9px; padding: 1px 5px; border-radius: 999px; background: rgba(124,92,255,.2); color: #c4b5fd; }
+  .ncInsightEntities { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+  .ncInsightEntity { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: rgba(52,211,153,.18); color: #34d399; }
+  .ncInsightConfidenceWrap { margin-top: 6px; display: flex; gap: 6px; align-items: center; }
+  .ncInsightConfidenceBar { height: 4px; flex: 1; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
+  .ncInsightConfidenceFill { height: 100%; border-radius: 4px; }
+  .ncInsightConfidencePct { font-size: 10px; opacity: .6; min-width: 30px; text-align: right; }
+  .ncInsightRecurrent { font-size: 9px; color: #fbbf24; text-transform: uppercase; letter-spacing: .3px; }
+  .ncInsightDetails { margin-top: 6px; font-size: 10px; opacity: .55; }
+
   .ncInput::placeholder { opacity: .4; }
   .ncSendBtn {
     background: rgba(124,92,255,.8); border: none; border-radius: 10px;
