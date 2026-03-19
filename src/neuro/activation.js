@@ -6,8 +6,9 @@ import { getEmbedding, cosineSimilarity } from "./embeddings.js";
 import { tokenize, keywordOverlap, clamp, neuronTokenSet, daysSince } from "./utils.js";
 import { updateNeuron } from "./neuronStore.js";
 import { getBootstrapState } from "./bootstrap.js";
+import { computeRecencyWeight, isHistoricalNeuron } from "./temporal.js";
 
-const WEIGHTS = { semantic: 0.45, keyword: 0.20, weight: 0.15, recency: 0.10, emotion: 0.10 };
+const WEIGHTS = { semantic: 0.42, keyword: 0.20, weight: 0.14, recency: 0.08, emotion: 0.08, temporal: 0.08 };
 const DEFAULT_TOP_K = 8;
 const MIN_SCORE = 0.15;
 
@@ -32,6 +33,35 @@ export function computeRecencyBoost(lastActivated) {
   if (days < 30) return 0.40;
   if (days < 90) return 0.20;
   return 0.05;
+}
+
+export function detectPastOrPresentOrientation(input, _options = {}) {
+  const lower = normalizeText(input);
+  const pastHints = ["antes", "cuando era", "hace anos", "hace años", "de niño", "de nina", "infancia", "adolescencia", "en 20"];
+  const presentHints = ["hoy", "ahora", "últimamente", "ultimamente", "esta semana", "me pasa", "actualmente", "en estos dias"];
+  const past = pastHints.some((h) => lower.includes(h));
+  const present = presentHints.some((h) => lower.includes(h));
+  if (past && present) return "mixed";
+  if (past) return "past";
+  return "present";
+}
+
+export function computeTemporalActivationBoost(input, neuron, options = {}) {
+  const orientation = options.orientation || detectPastOrPresentOrientation(input);
+  const temporalWeight = Number(neuron?.temporal?.recencyWeight ?? computeRecencyWeight(neuron?.temporal?.timestamp || neuron?.temporal?.date));
+  const historical = isHistoricalNeuron(neuron);
+  const stage = String(neuron?.temporal?.stage || "").toLowerCase();
+  const lower = normalizeText(input);
+  let boost = 0;
+
+  if (orientation === "past") boost += historical ? 0.18 : -0.08;
+  else if (orientation === "present") boost += historical ? -0.12 : 0.12;
+  else boost += historical ? 0.02 : 0.05;
+
+  if (stage && lower.includes(stage.replaceAll("_", " "))) boost += 0.1;
+  boost += (temporalWeight - 0.5) * 0.18;
+
+  return clamp(boost, -0.22, 0.25);
 }
 
 export function computeKeywordMatch(queryTokens, neuron) {
@@ -147,6 +177,8 @@ export async function activateNeurons(userInput, neurons, options = {}) {
   const queryTokens = tokenize(userInput);
   const queryEmbed = await getEmbedding(userInput);
   const now = new Date().toISOString();
+  const orientation = detectPastOrPresentOrientation(userInput, options);
+  if (options.traceMeta && typeof options.traceMeta === "object") options.traceMeta.temporalOrientation = orientation;
 
   const scored = await Promise.all(neurons.map(async (neuron) => {
     let neuronEmbed = neuron.embedding;
@@ -159,6 +191,7 @@ export async function activateNeurons(userInput, neurons, options = {}) {
     const keyword = computeKeywordMatch(queryTokens, neuron);
     const weight = clamp(neuron.weight, 0, 1);
     const recency = computeRecencyBoost(neuron.lastActivated);
+    const temporalBoost = computeTemporalActivationBoost(userInput, neuron, { orientation, ...options });
     const emotion = computeEmotionMatch(userInput, neuron.emotion);
     const aliasMatch = computeAliasMatch(userInput, neuron);
     const entityMention = isLikelyEntityMention(userInput, neuron);
@@ -171,10 +204,11 @@ export async function activateNeurons(userInput, neurons, options = {}) {
       weight * tuning.weights.weight +
       recency * tuning.weights.recency +
       emotion * tuning.weights.emotion +
+      temporalBoost * tuning.weights.temporal +
       manualBoost
     );
 
-    return { neuron, score, components: { semantic, keyword, weight, recency, emotion, aliasMatch, manualBoost } };
+    return { neuron, score, components: { semantic, keyword, weight, recency, emotion, temporalBoost, aliasMatch, manualBoost } };
   }));
 
   const activated = scored.filter((r) => r.score >= minScore).sort((a, b) => b.score - a.score).slice(0, topK);

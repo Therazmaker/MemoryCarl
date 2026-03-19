@@ -5,6 +5,7 @@
 const INSIGHT_TYPES = new Set([
   "dominant_pattern", "tension", "trend", "contradiction", "anchor",
   "relationship_context", "work_context", "identity_signal", "emerging_pattern",
+  "current_pattern", "past_pattern", "recurring_pattern", "resolved_pattern", "stage_pattern",
 ]);
 
 function uniq(arr = []) { return [...new Set(arr.filter(Boolean))]; }
@@ -24,6 +25,11 @@ function baseTitleByType(type) {
     emerging_pattern: "Patrón emergente",
     trend: "Tendencia",
     identity_signal: "Señal identitaria",
+    current_pattern: "Patrón actual",
+    past_pattern: "Patrón pasado",
+    recurring_pattern: "Patrón recurrente",
+    resolved_pattern: "Patrón resuelto",
+    stage_pattern: "Patrón por etapa",
   };
   return map[type] || "Insight";
 }
@@ -34,6 +40,8 @@ function composeSummary(pattern, mode = "default") {
   if (pattern.type === "tension") return `La tensión está entre impulso y estructura: ${pattern.description}`;
   if (pattern.type === "contradiction") return `Hay una contradicción operativa: ${pattern.description}`;
   if (pattern.type === "emerging_pattern") return `Esto sugiere repetición reciente: ${pattern.description}`;
+  if (pattern.type === "resolved_pattern") return `Se observa evolución: ${pattern.description}`;
+  if (pattern.type === "recurring_pattern") return `Hay recurrencia entre etapas: ${pattern.description}`;
   return pattern.description || "Se detectó una señal consistente en las neuronas activadas.";
 }
 
@@ -52,7 +60,7 @@ export function scoreInsightCandidate(candidate, options = {}) {
   let score = Number(candidate.confidence || 0);
   score += Math.min(0.2, (candidate.signals?.recurrenceScore || 0) * 0.2);
   score += Math.min(0.12, ((candidate.basedOnNeurons || []).length / 10) * 0.12);
-  if (mode === "objective" && ["dominant_pattern", "contradiction", "trend", "emerging_pattern"].includes(candidate.type)) score += 0.12;
+  if (mode === "objective" && ["dominant_pattern", "contradiction", "trend", "emerging_pattern", "resolved_pattern", "recurring_pattern"].includes(candidate.type)) score += 0.12;
   if (mode === "objective" && ["anchor", "relationship_context"].includes(candidate.type)) score -= 0.06;
   return Number(Math.max(0, Math.min(1, score)).toFixed(3));
 }

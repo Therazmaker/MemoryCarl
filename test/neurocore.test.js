@@ -100,4 +100,6 @@ test("requestChatReply recibe insights en el payload", async () => {
   assert.equal(result.reply, "ok");
   assert.ok(Array.isArray(capturedBody.insights));
   assert.ok(capturedBody.insights.length >= 1);
+  assert.ok(capturedBody.temporalContext);
+  assert.ok(["present", "past", "mixed"].includes(capturedBody.temporalContext.orientation));
 });

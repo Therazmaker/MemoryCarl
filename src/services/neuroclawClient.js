@@ -164,6 +164,8 @@ export async function requestChatReply(payload) {
       "Si detectas patrones, menciónalos con naturalidad. " +
       "No inventes recuerdos que no estén en el contexto. " +
       "Usa insights como marco interpretativo sin repetirlos mecánicamente. " +
+      "Distingue patrones actuales vs históricos usando temporalContext. " +
+      "No presentes algo del pasado como identidad actual sin evidencia reciente. " +
       "Si no hay señal suficiente en insights, no extrapoles. " +
       "No uses tono robótico.",
     ...payload,

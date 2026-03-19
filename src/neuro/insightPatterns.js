@@ -116,6 +116,19 @@ function hasAnyWord(terms = [], wordList = []) {
   return wordList.some((w) => blob.includes(` ${String(w).toLowerCase()} `));
 }
 
+function getTemporalStats(activated = []) {
+  const byContext = new Map();
+  const byStage = new Map();
+  for (const e of activated) {
+    const n = e.neuron || e;
+    const t = n.temporal || {};
+    const ctx = t.timeContext || "timeless";
+    byContext.set(ctx, (byContext.get(ctx) || 0) + 1);
+    if (t.stage) byStage.set(t.stage, (byStage.get(t.stage) || 0) + 1);
+  }
+  return { byContext, byStage };
+}
+
 export function detectDominantPattern(clusters = [], options = {}) {
   if (!clusters.length) return null;
   const c = clusters[0];
@@ -252,13 +265,157 @@ export function detectEntityContextPattern(activated = [], options = {}) {
   };
 }
 
+export function detectRecurringAcrossTime(activated = [], historicalMatches = [], _options = {}) {
+  if (!activated.length || !historicalMatches.length) return null;
+  const currentTerms = new Set(topTerms(activated, 8));
+  const historicalTerms = new Set(topTerms(historicalMatches, 8));
+  const overlap = [...currentTerms].filter((t) => historicalTerms.has(t));
+  const ratio = overlap.length / Math.max(1, Math.min(currentTerms.size, historicalTerms.size));
+  if (ratio < 0.28) return null;
+  return {
+    type: "recurring_pattern",
+    confidence: Number(Math.min(0.92, 0.48 + ratio * 0.42).toFixed(2)),
+    basedOnNeurons: uniq([...activated, ...historicalMatches].map((e) => (e.neuron || e).id)),
+    domains: uniq(activated.map((e) => (e.neuron || e).core?.domain)).filter(Boolean),
+    dominantConcepts: overlap.slice(0, 6),
+    formula: "señales similares entre pasado y presente -> recurrencia parcial",
+    description: "Esto no es completamente nuevo; conserva trazas de un patrón previo.",
+    recurrenceScore: Number(ratio.toFixed(2)),
+    tone: "observational",
+  };
+}
+
+export function detectResolvedPattern(neurons = [], options = {}) {
+  const windowDays = options.recentWindowDays || 45;
+  const now = new Date(options.now || Date.now());
+  const historical = [];
+  const recent = [];
+  for (const e of neurons) {
+    const n = e.neuron || e;
+    const t = n.temporal || {};
+    const ref = t.timestamp || t.date;
+    if (!ref) continue;
+    const days = Math.max(0, Math.floor((now.getTime() - new Date(ref).getTime()) / (24 * 3600 * 1000)));
+    if (days <= windowDays) recent.push(e);
+    else historical.push(e);
+  }
+  if (!historical.length || recent.length >= historical.length * 0.8) return null;
+  return {
+    type: "resolved_pattern",
+    confidence: 0.62,
+    basedOnNeurons: uniq(historical.map((e) => (e.neuron || e).id)),
+    domains: uniq(historical.map((e) => (e.neuron || e).core?.domain)).filter(Boolean),
+    dominantConcepts: topTerms(historical, 5),
+    formula: "alta presencia histórica + baja presencia reciente -> patrón posiblemente resuelto",
+    description: "Este patrón fue fuerte en registros pasados, pero no parece dominante ahora.",
+    tone: "observational",
+  };
+}
+
+export function detectTrendPattern(neurons = [], options = {}) {
+  const timed = neurons.filter((e) => {
+    const n = e.neuron || e;
+    return Boolean(n.temporal?.timestamp || n.temporal?.date);
+  });
+  if (timed.length < 3) return null;
+  const sorted = [...timed].sort((a, b) => {
+    const ad = new Date((a.neuron || a).temporal.timestamp || (a.neuron || a).temporal.date).getTime();
+    const bd = new Date((b.neuron || b).temporal.timestamp || (b.neuron || b).temporal.date).getTime();
+    return ad - bd;
+  });
+  const half = Math.floor(sorted.length / 2);
+  const oldAvg = sorted.slice(0, half).reduce((acc, e) => acc + (e.score || 0.4), 0) / Math.max(1, half);
+  const newAvg = sorted.slice(half).reduce((acc, e) => acc + (e.score || 0.4), 0) / Math.max(1, sorted.length - half);
+  const delta = newAvg - oldAvg;
+  let trend = "stable";
+  if (delta > 0.1) trend = "up";
+  if (delta < -0.1) trend = "down";
+  return {
+    type: "trend",
+    confidence: 0.55,
+    basedOnNeurons: uniq(sorted.map((e) => (e.neuron || e).id)),
+    domains: uniq(sorted.map((e) => (e.neuron || e).core?.domain)).filter(Boolean),
+    dominantConcepts: topTerms(sorted, 5),
+    formula: "comparación de intensidad temporal -> tendencia",
+    description: trend === "up" ? "La señal actual parece más intensa que en etapas anteriores."
+      : trend === "down" ? "La señal actual parece más tenue que en el pasado."
+      : "La señal se mantiene relativamente estable en el tiempo.",
+    trendDirection: trend,
+    tone: "observational",
+  };
+}
+
+export function detectStagePattern(neurons = [], _options = {}) {
+  const stats = getTemporalStats(neurons);
+  const top = [...stats.byStage.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (!top || top[1] < 2) return null;
+  return {
+    type: "stage_pattern",
+    confidence: 0.58,
+    basedOnNeurons: uniq(neurons.map((e) => (e.neuron || e).id)),
+    domains: uniq(neurons.map((e) => (e.neuron || e).core?.domain)).filter(Boolean),
+    dominantConcepts: topTerms(neurons, 5),
+    formula: "señales concentradas por etapa -> stage pattern",
+    description: `Este tema aparece sobre todo en la etapa "${top[0]}".`,
+    stage: top[0],
+    tone: "observational",
+  };
+}
+
+export function detectTemporalPattern(activated = [], insightHistory = [], options = {}) {
+  const stats = getTemporalStats(activated);
+  const current = (stats.byContext.get("current") || 0) + (stats.byContext.get("recent") || 0);
+  const historical = (stats.byContext.get("historical") || 0) + (stats.byContext.get("past") || 0);
+  if (!current && !historical) return null;
+  if (current >= historical * 1.4) {
+    return {
+      type: "current_pattern",
+      confidence: 0.6,
+      basedOnNeurons: uniq(activated.map((e) => (e.neuron || e).id)),
+      domains: uniq(activated.map((e) => (e.neuron || e).core?.domain)).filter(Boolean),
+      dominantConcepts: topTerms(activated, 5),
+      formula: "predominio de señales recientes -> patrón actual",
+      description: "La señal principal parece activa en el presente.",
+      tone: "observational",
+    };
+  }
+  if (historical > current * 1.2) {
+    return {
+      type: "past_pattern",
+      confidence: 0.58,
+      basedOnNeurons: uniq(activated.map((e) => (e.neuron || e).id)),
+      domains: uniq(activated.map((e) => (e.neuron || e).core?.domain)).filter(Boolean),
+      dominantConcepts: topTerms(activated, 5),
+      formula: "predominio de señales históricas -> patrón pasado",
+      description: "La mayor parte de la evidencia activada corresponde a contexto histórico.",
+      tone: "observational",
+    };
+  }
+  return detectRecurringAcrossTime(
+    activated.filter((e) => ["current", "recent", "timeless"].includes((e.neuron || e).temporal?.timeContext || "timeless")),
+    activated.filter((e) => ["past", "historical"].includes((e.neuron || e).temporal?.timeContext || "")),
+    options,
+  ) || detectEmergingPattern(activated, insightHistory, options);
+}
+
 export function detectInsightPatterns({ activated = [], clusters = [], insightHistory = [], options = {} } = {}) {
+  const temporalPattern = detectTemporalPattern(activated, insightHistory, options);
+  const recurring = detectRecurringAcrossTime(
+    activated.filter((e) => ["current", "recent", "timeless"].includes((e.neuron || e).temporal?.timeContext || "timeless")),
+    activated.filter((e) => ["past", "historical"].includes((e.neuron || e).temporal?.timeContext || "")),
+    options,
+  );
   const patterns = [
     detectDominantPattern(clusters, options),
     detectTensionPattern(clusters, options),
     detectContradictions(activated, options),
     detectIdentityAnchors(activated, options),
     detectEntityContextPattern(activated, options),
+    temporalPattern,
+    recurring,
+    detectResolvedPattern(activated, options),
+    detectTrendPattern(activated, options),
+    detectStagePattern(activated, options),
     detectEmergingPattern(activated, insightHistory, options),
   ].filter(Boolean);
 
