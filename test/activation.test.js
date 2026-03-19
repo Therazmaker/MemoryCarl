@@ -64,3 +64,28 @@ test("activation prioriza histórico cuando input habla del pasado", async () =>
   const out = await activateNeurons("antes me pasaba ansiedad cuando era niño", neurons, { persistActivation: false, minScore: 0 });
   assert.equal(out[0].neuron.id, "n_hist");
 });
+
+test("activation incorpora calibración por feedback", async () => {
+  const neurons = [
+    createNeuron({
+      id: "n_positive",
+      core: { concept: "estrés laboral", domain: "work", summary: "estrés en trabajo" },
+      triggers: ["estrés", "trabajo"],
+      feedbackStats: { likes: 5, dislikes: 0, netScore: 5, lastFeedbackAt: "2026-03-18T10:00:00.000Z" },
+      activationLearning: { usefulCount: 5, falsePositiveCount: 0 },
+      weight: 0.5,
+    }),
+    createNeuron({
+      id: "n_negative",
+      core: { concept: "estrés laboral", domain: "work", summary: "estrés en trabajo" },
+      triggers: ["estrés", "trabajo"],
+      feedbackStats: { likes: 0, dislikes: 6, netScore: -6, lastFeedbackAt: "2026-03-18T10:00:00.000Z" },
+      activationLearning: { usefulCount: 0, falsePositiveCount: 6 },
+      weight: 0.5,
+    }),
+  ];
+
+  const out = await activateNeurons("tengo estrés en el trabajo", neurons, { persistActivation: false, minScore: 0 });
+  assert.equal(out[0].neuron.id, "n_positive");
+  assert.ok(out[0].components.neuronFeedbackBoost > out[1].components.neuronFeedbackBoost);
+});

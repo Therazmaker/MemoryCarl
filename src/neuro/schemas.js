@@ -64,6 +64,24 @@ function isValidTimestamp(value) {
   return typeof value === "string" && !Number.isNaN(new Date(value).getTime());
 }
 
+function sanitizeFeedbackStats(stats = {}) {
+  const likes = Math.max(0, Number(stats.likes) || 0);
+  const dislikes = Math.max(0, Number(stats.dislikes) || 0);
+  return {
+    likes,
+    dislikes,
+    netScore: likes - dislikes,
+    lastFeedbackAt: isValidTimestamp(stats.lastFeedbackAt) ? stats.lastFeedbackAt : null,
+  };
+}
+
+function sanitizeActivationLearning(learning = {}) {
+  return {
+    usefulCount: Math.max(0, Number(learning.usefulCount) || 0),
+    falsePositiveCount: Math.max(0, Number(learning.falsePositiveCount) || 0),
+  };
+}
+
 export function validateTemporalMeta(temporal) {
   const errs = [];
   if (temporal == null) return errs;
@@ -119,6 +137,8 @@ export function createNeuron(data = {}) {
       kind:  data.source?.kind  || "user",
       ref:   data.source?.ref   || "",
     },
+    feedbackStats: sanitizeFeedbackStats(data.feedbackStats || {}),
+    activationLearning: sanitizeActivationLearning(data.activationLearning || {}),
     ...(sanitizedMeta ? { meta: sanitizedMeta } : {}),
     ...(sanitizedTemporal ? { temporal: sanitizedTemporal } : {}),
   };
@@ -145,6 +165,18 @@ export function validateNeuron(n) {
   if (typeof n.weight !== "number")             errs.push("weight inválido");
   if (!Array.isArray(n.evidence))               errs.push("evidence no es array");
   if (!Array.isArray(n.embedding))              errs.push("embedding no es array");
+  if (!n.feedbackStats || typeof n.feedbackStats !== "object") errs.push("feedbackStats inválido");
+  else {
+    if (typeof n.feedbackStats.likes !== "number") errs.push("feedbackStats.likes inválido");
+    if (typeof n.feedbackStats.dislikes !== "number") errs.push("feedbackStats.dislikes inválido");
+    if (typeof n.feedbackStats.netScore !== "number") errs.push("feedbackStats.netScore inválido");
+    if (n.feedbackStats.lastFeedbackAt != null && !isValidTimestamp(n.feedbackStats.lastFeedbackAt)) errs.push("feedbackStats.lastFeedbackAt inválido");
+  }
+  if (!n.activationLearning || typeof n.activationLearning !== "object") errs.push("activationLearning inválido");
+  else {
+    if (typeof n.activationLearning.usefulCount !== "number") errs.push("activationLearning.usefulCount inválido");
+    if (typeof n.activationLearning.falsePositiveCount !== "number") errs.push("activationLearning.falsePositiveCount inválido");
+  }
 
   if (n.source && typeof n.source === "object") {
     if (n.source.kind != null && typeof n.source.kind !== "string") errs.push("source.kind inválido");
@@ -188,6 +220,8 @@ export function sanitizeNeuron(raw) {
   n.triggers    = n.triggers.map(String).filter(Boolean).slice(0, 20);
   n.connections = n.connections.map(String).filter(Boolean).slice(0, 30);
   n.evidence    = n.evidence.map(String).filter(Boolean).slice(0, 20);
+  n.feedbackStats = sanitizeFeedbackStats(raw.feedbackStats || n.feedbackStats || {});
+  n.activationLearning = sanitizeActivationLearning(raw.activationLearning || n.activationLearning || {});
 
   const sanitizedMeta = sanitizeMeta(raw.meta || n.meta || {});
   if (sanitizedMeta) n.meta = sanitizedMeta;

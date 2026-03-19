@@ -24,6 +24,7 @@ export function createTrace(sessionId) {
     classifier: null,
     premiumRulePath: null,
     activation: null,
+    feedbackSummary: null,
   };
 }
 
@@ -46,6 +47,7 @@ export function finalizeTrace(trace) {
     console.log("Timing:", trace.timing);
     console.log("Coverage:", trace.coverage);
     console.log("Bootstrap:", trace.bootstrapState);
+    console.log("Feedback summary:", trace.feedbackSummary);
     console.groupEnd();
   }
   return {
@@ -61,6 +63,7 @@ export function finalizeTrace(trace) {
     classifier: trace.classifier,
     premiumRulePath: trace.premiumRulePath,
     activation: trace.activation,
+    feedbackSummary: trace.feedbackSummary,
   };
 }
 

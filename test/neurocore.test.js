@@ -103,3 +103,27 @@ test("requestChatReply recibe insights en el payload", async () => {
   assert.ok(capturedBody.temporalContext);
   assert.ok(["present", "past", "mixed"].includes(capturedBody.temporalContext.orientation));
 });
+
+test("neurocore incluye messageId y feedback summary en trace", async () => {
+  resetStorage();
+  saveManyNeurons([
+    createNeuron({
+      id: "n_fb_trace",
+      core: { concept: "foco", domain: "work", summary: "foco profundo" },
+      triggers: ["foco", "trabajo"],
+      feedbackStats: { likes: 2, dislikes: 1, netScore: 1 },
+      activationLearning: { usefulCount: 2, falsePositiveCount: 1 },
+      weight: 0.7,
+    }),
+  ]);
+
+  const result = await processNeuroInput("Necesito foco en el trabajo", {
+    skipGeneration: true,
+    history: [],
+    messageId: "msg_trace_1",
+  });
+
+  assert.equal(result.messageId, "msg_trace_1");
+  assert.ok(result.trace.feedbackSummary);
+  assert.ok(typeof result.trace.feedbackSummary.totalLikes === "number");
+});

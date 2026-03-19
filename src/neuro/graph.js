@@ -148,6 +148,15 @@ export function buildNeuronGraph(neurons, options = {}) {
       manualCategory,
       notes:             n.meta?.notes || "",
       sourceKind:        n.source?.kind || "user",
+      feedbackStats: {
+        likes: Number(n.feedbackStats?.likes) || 0,
+        dislikes: Number(n.feedbackStats?.dislikes) || 0,
+        netScore: Number(n.feedbackStats?.netScore) || ((Number(n.feedbackStats?.likes) || 0) - (Number(n.feedbackStats?.dislikes) || 0)),
+      },
+      activationLearning: {
+        usefulCount: Number(n.activationLearning?.usefulCount) || 0,
+        falsePositiveCount: Number(n.activationLearning?.falsePositiveCount) || 0,
+      },
       isManual,
       color,
       size,

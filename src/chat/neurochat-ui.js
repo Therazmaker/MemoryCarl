@@ -8,7 +8,7 @@
  *   initNeuroChat()   → inicialización del módulo
  */
 
-import { sendMessage, getChatHistory, clearChatHistory, getNeurons } from "./neurochat.js";
+import { sendMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback } from "./neurochat.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
 import {
@@ -40,6 +40,7 @@ const uiState = {
     lastGeneratedIds: [],
     lastMergedIds:    [],
   },
+  feedbackByMessage: {},
 };
 
 const MODE_OPTIONS = [
@@ -100,7 +101,11 @@ function renderMessage(msg) {
     </div>`;
 }
 
-function renderNeuronCard(neuronOrActivated, isGenerated = false) {
+export function isNeuronFeedbackLocked(feedbackMap = {}, neuronId) {
+  return Boolean(feedbackMap && neuronId && feedbackMap[neuronId]);
+}
+
+function renderNeuronCard(neuronOrActivated, isGenerated = false, options = {}) {
   // Acepta tanto {neuron, score} como la neurona directa
   const n = neuronOrActivated.neuron || neuronOrActivated;
   const score = neuronOrActivated.score;
@@ -110,6 +115,14 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false) {
 
   const temporal = n.temporal || {};
   const temporalBadge = `<span class="ncTag">${esc(temporal.timeContext || "timeless")}</span>`;
+  const currentFeedback = options.feedbackMap?.[n.id] || null;
+  const feedbackActions = !isGenerated && options.allowFeedback
+    ? `<div class="ncNeuronFeedbackRow">
+        <button class="ncFeedbackBtn ${currentFeedback === "like" ? "ncFeedbackBtn--active" : ""}" data-feedback-neuron="${esc(n.id)}" data-feedback-type="like" ${currentFeedback ? "disabled" : ""} title="Relevante">👍</button>
+        <button class="ncFeedbackBtn ${currentFeedback === "dislike" ? "ncFeedbackBtn--active ncFeedbackBtn--negative" : "ncFeedbackBtn--negative"}" data-feedback-neuron="${esc(n.id)}" data-feedback-type="dislike" ${currentFeedback ? "disabled" : ""} title="No relevante">👎</button>
+        ${currentFeedback ? `<span class="ncFeedbackState">${currentFeedback === "like" ? "Relevante" : "No relevante"}</span>` : ""}
+      </div>`
+    : "";
   return `
     <div class="ncNeuronCard" title="${esc(n.core.summary)}">
       <div class="ncNeuronHead">
@@ -126,6 +139,7 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false) {
         ${n.connections?.length ? `<span class="ncNeuronConn">${n.connections.length} conexiones</span>` : ""}
       </div>
       ${n.core.summary ? `<div class="ncNeuronSummary">${esc(n.core.summary)}</div>` : ""}
+      ${feedbackActions}
     </div>`;
 }
 
@@ -205,8 +219,10 @@ function renderSidePanel() {
   const covPct   = Math.round(coverage * 100);
   const covColor = covPct >= 70 ? "#36d399" : covPct >= 40 ? "#fbbf24" : "#fb7185";
 
+  const messageId = r.messageId;
+  const feedbackMap = uiState.feedbackByMessage[messageId] || r.feedbackForMessage || {};
   const activatedHtml = activated.length
-    ? activated.map((a) => renderNeuronCard(a, false)).join("")
+    ? activated.map((a) => renderNeuronCard(a, false, { allowFeedback: true, feedbackMap })).join("")
     : `<div class="ncSideEmpty">Sin neuronas activadas</div>`;
 
   const generatedHtml = generated.length
@@ -387,6 +403,10 @@ function nchatInner() {
   const tabChat  = uiState.activeTab === "chat";
   const tabGraph = uiState.activeTab === "graph";
   const tabContext = uiState.activeTab === "context";
+  const isMobileViewport = typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(max-width: 680px)").matches;
+  const showSidePanel = !isMobileViewport || uiState.neuronsExpanded;
 
   const settingsModal = uiState.settingsOpen ? renderSettingsModal() : "";
 
@@ -422,7 +442,7 @@ function nchatInner() {
       </div>
 
       <!-- Panel lateral con neuronas + trace -->
-      ${renderSidePanel()}
+      ${showSidePanel ? renderSidePanel() : ""}
     </div>` : "";
 
   const graphContent = tabGraph
@@ -447,7 +467,7 @@ function nchatInner() {
           </div>
         </div>
         <div class="ncHeaderActions">
-          <button class="ncIconBtn" id="btnNcToggleNeurons" title="Ver neuronas">${uiState.neuronsExpanded ? "🧠▾" : "🧠"}</button>
+          <button class="ncIconBtn" id="btnNcToggleNeurons" title="Ver neuronas">${uiState.neuronsExpanded ? "📱🧠▾" : "📱🧠"}</button>
           <button class="ncIconBtn" id="btnNcClear" title="Limpiar chat">🗑</button>
           <button class="ncIconBtn" id="btnNcSettings" title="Configuración">⚙️</button>
         </div>
@@ -500,6 +520,9 @@ function wireNeuroChatInner(root) {
       uiState.loading    = false;
       // Actualizar estado de sesión para resaltado en grafo
       if (result) {
+        if (result.messageId) {
+          uiState.feedbackByMessage[result.messageId] = { ...(result.feedbackForMessage || {}) };
+        }
         uiState.sessionState.lastActivatedIds = (result.activated || [])
           .map((a) => a.neuron?.id || a.id).filter(Boolean);
         uiState.sessionState.lastGeneratedIds = (result.generated || [])
@@ -558,6 +581,40 @@ function wireNeuroChatInner(root) {
       rerender();
     });
   }
+
+  root.querySelectorAll("[data-feedback-neuron]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const neuronId = btn.getAttribute("data-feedback-neuron");
+      const feedback = btn.getAttribute("data-feedback-type");
+      const messageId = uiState.lastResult?.messageId;
+      if (!neuronId || !messageId || !feedback) return;
+
+      const currentMap = uiState.feedbackByMessage[messageId] || {};
+      if (isNeuronFeedbackLocked(currentMap, neuronId)) return;
+
+      try {
+        const inputPreview = getChatHistory().filter((m) => m.role === "user").slice(-1)[0]?.content || "";
+        const result = submitNeuronFeedback({ neuronId, feedback, messageId, inputPreview });
+        if (result?.record) {
+          uiState.feedbackByMessage[messageId] = {
+            ...(uiState.feedbackByMessage[messageId] || {}),
+            [neuronId]: feedback,
+          };
+          if (uiState.lastResult?.activated) {
+            uiState.lastResult.activated = uiState.lastResult.activated.map((item) => (
+              item.neuron?.id === neuronId
+                ? { ...item, neuron: { ...item.neuron, ...(result.neuron || {}) } }
+                : item
+            ));
+          }
+          uiState.error = null;
+        }
+      } catch (err) {
+        uiState.error = err.message || "No se pudo guardar feedback";
+      }
+      rerender();
+    });
+  });
 
   // Toggle neuronas panel (en mobile el side panel puede colapsarse)
   const btnNeurons = root.querySelector("#btnNcToggleNeurons");
@@ -870,6 +927,16 @@ function ncCss() {
   .ncNeuronMeta   { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .ncNeuronSummary { font-size: 11px; opacity: .6; margin-top: 4px;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ncNeuronFeedbackRow { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+  .ncFeedbackBtn {
+    border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06); color: inherit;
+    border-radius: 8px; padding: 3px 9px; cursor: pointer; font-size: 13px; line-height: 1.4;
+  }
+  .ncFeedbackBtn--negative { border-color: rgba(251,113,133,.35); }
+  .ncFeedbackBtn--active { background: rgba(52,211,153,.22); border-color: rgba(52,211,153,.42); }
+  .ncFeedbackBtn--active.ncFeedbackBtn--negative { background: rgba(251,113,133,.2); border-color: rgba(251,113,133,.4); }
+  .ncFeedbackBtn:disabled { opacity: .65; cursor: default; }
+  .ncFeedbackState { font-size: 10px; opacity: .68; }
   .ncTag { font-size: 10px; padding: 2px 6px; border-radius: 6px;
     background: rgba(124,92,255,.18); color: #a78bfa; font-weight: 600; }
   .ncNeuronW    { font-size: 10px; opacity: .5; }
@@ -1007,5 +1074,21 @@ function ncCss() {
     font-size: 13px; cursor: pointer; transition: background .12s;
   }
   .ncSettingsResetBtn:hover { background: rgba(255,255,255,.12); }
+
+  @media(max-width: 680px){
+    .nchatWrap { padding-bottom: 56px; }
+    .ncHeader { padding: 10px 12px; }
+    .ncHeaderTitle { font-size: 14px; }
+    .ncHeaderSub { font-size: 10px; }
+    .ncTabs { gap: 2px; }
+    .ncTab { font-size: 12px; padding: 7px 8px; }
+    .ncInputBar { flex-wrap: wrap; gap: 6px; }
+    .ncModeSelect, .ncInterpretSelect { max-width: 100%; flex: 1 1 46%; min-width: 130px; }
+    .ncInput { width: 100%; flex-basis: 100%; }
+    .ncSendBtn { min-width: 48px; min-height: 42px; padding: 8px 10px; }
+    .ncMsgBubble { max-width: 92%; }
+    .ncNeuronFeedbackRow { justify-content: flex-start; flex-wrap: wrap; }
+    .ncFeedbackBtn { min-height: 32px; min-width: 38px; }
+  }
   </style>`;
 }

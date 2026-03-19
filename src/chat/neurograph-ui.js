@@ -216,6 +216,26 @@ function renderNodeDetail() {
           <div class="ngDetailItemLabel">Última activación</div>
           <div>${fmtDate(n.lastActivated)}</div>
         </div>
+        <div class="ngDetailItem">
+          <div class="ngDetailItemLabel">Likes</div>
+          <div>${n.feedbackStats?.likes ?? 0}</div>
+        </div>
+        <div class="ngDetailItem">
+          <div class="ngDetailItemLabel">Dislikes</div>
+          <div>${n.feedbackStats?.dislikes ?? 0}</div>
+        </div>
+        <div class="ngDetailItem">
+          <div class="ngDetailItemLabel">Net score</div>
+          <div>${n.feedbackStats?.netScore ?? 0}</div>
+        </div>
+        <div class="ngDetailItem">
+          <div class="ngDetailItemLabel">Useful count</div>
+          <div>${n.activationLearning?.usefulCount ?? 0}</div>
+        </div>
+        <div class="ngDetailItem">
+          <div class="ngDetailItemLabel">False positive</div>
+          <div>${n.activationLearning?.falsePositiveCount ?? 0}</div>
+        </div>
       </div>
 
       <div class="ngDetailSection">
