@@ -51,6 +51,9 @@ import {
 import {
   createTrace, addStep, recordTiming, finalizeTrace,
 } from "../src/neuro/trace.js";
+import { sendMessage, forcePremiumGenerationForMessage } from "../src/chat/neurochat.js";
+import { saveNeuroChatSettings } from "../src/settings/neurochatSettings.js";
+import { getPremiumUsageState } from "../src/neuro/premiumUsage.js";
 
 // ================================================================
 // schemas.js
@@ -394,4 +397,49 @@ test("finalizeTrace returns complete result", () => {
   assert.ok(result.timing.total >= 0);
   assert.equal(result.steps.length, 2);
   assert.equal(result.sessionId, "final_test");
+});
+
+test("manual override no puede spamearse por mismo messageId", async () => {
+  resetStorage();
+  saveNeuroChatSettings({ enabled: true, apiKey: "AIzaTestKey123456789" });
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_url", "https://api.example.com");
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_key", "test_key");
+
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: JSON.stringify({ neurons: [] }) }] } }],
+        }),
+      };
+    }
+    if (opts?.body) return { ok: true, json: async () => [] };
+    return { ok: true, json: async () => ({ reply: "ok" }) };
+  };
+
+  const sent = await sendMessage("Hola, hoy tuve terapia y quiero guardarlo.", { premiumOptions: { coverageThreshold: 0.05 } });
+  await forcePremiumGenerationForMessage(sent.messageId);
+  await assert.rejects(() => forcePremiumGenerationForMessage(sent.messageId), /ya ejecutado/i);
+});
+
+test("override falla y no descuenta calls premium", async () => {
+  resetStorage();
+  saveNeuroChatSettings({ enabled: true, apiKey: "AIzaTestKey123456789" });
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_url", "https://api.example.com");
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_key", "test_key");
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      return { ok: false, status: 500, text: async () => "fail" };
+    }
+    if (opts?.body) return { ok: true, json: async () => [] };
+    return { ok: true, json: async () => ({ reply: "ok" }) };
+  };
+
+  const sent = await sendMessage("Mensaje largo y personal para forzar luego", { premiumOptions: { coverageThreshold: 0.05 } });
+  const before = getPremiumUsageState().used;
+  const res = await forcePremiumGenerationForMessage(sent.messageId);
+  const after = getPremiumUsageState().used;
+  assert.equal(res.premiumForcedSuccess, false);
+  assert.equal(after, before);
 });

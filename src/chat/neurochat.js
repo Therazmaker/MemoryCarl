@@ -24,6 +24,7 @@ function saveHistory(history) {
 }
 
 let _history = null;
+const manualOverrideState = new Map();
 function getHistory() {
   if (!_history) _history = loadHistory();
   return _history;
@@ -66,6 +67,8 @@ export async function sendMessage(userInput, options = {}) {
     interpretationMode,
     bootstrapLevel: result.bootstrapState?.level,
     premiumUsed: result.premiumDecision?.usePremium || false,
+    generatedBy: result.generatedBy || "policy",
+    manualOverrideUsed: Boolean(result.manualOverrideUsed),
   });
 
   return {
@@ -73,6 +76,50 @@ export async function sendMessage(userInput, options = {}) {
     messageId,
     feedbackForMessage: getMessageFeedbackMap(messageId),
   };
+}
+
+export async function forcePremiumGenerationForMessage(messageId, options = {}) {
+  if (!messageId) throw new Error("messageId requerido");
+  if (manualOverrideState.get(messageId) === "running") throw new Error("Override ya en progreso para este mensaje");
+  if (manualOverrideState.get(messageId) === "done" && !options.allowRetry) {
+    throw new Error("Override ya ejecutado para este mensaje");
+  }
+
+  const userMessage = [...getHistory()].reverse().find((m) => m.role === "user" && m.messageId === messageId);
+  if (!userMessage) throw new Error("No se encontró el mensaje del usuario para forzar premium");
+
+  manualOverrideState.set(messageId, "running");
+  try {
+    const result = await processNeuroInput(userMessage.content, {
+      history: getHistory().slice(-10),
+      mode: userMessage.mode || options.mode || "chat",
+      interpretationMode: userMessage.interpretationMode || options.interpretationMode || "default",
+      premiumOptions: options.premiumOptions,
+      messageId,
+      manualPremiumOverride: true,
+      forceGeneration: true,
+    });
+
+    appendMessage("assistant", result.reply, {
+      messageId,
+      overrideOf: messageId,
+      override: true,
+      premiumUsed: Boolean(result.premiumForcedSuccess || result.premiumDecision?.usePremium),
+      generatedBy: result.generatedBy || "manual_override",
+      premiumForcedSuccess: Boolean(result.premiumForcedSuccess),
+      mode: userMessage.mode || "chat",
+      interpretationMode: userMessage.interpretationMode || "default",
+      coverage: result.missingAnalysis?.coverage,
+      activated: result.activated.length,
+      generated: result.generated.length,
+    });
+
+    manualOverrideState.set(messageId, "done");
+    return result;
+  } catch (err) {
+    manualOverrideState.delete(messageId);
+    throw err;
+  }
 }
 
 export function submitNeuronFeedback({ neuronId, feedback, messageId, inputPreview = "" }) {

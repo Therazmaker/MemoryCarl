@@ -16,6 +16,7 @@ import { getBootstrapState } from "./bootstrap.js";
 import { runInsightEngine } from "./insightEngine.js";
 import { detectPastOrPresentOrientation } from "./activation.js";
 import { summarizeTemporalRange } from "./temporal.js";
+import { suggestNeuronActions } from "./neuronSuggestions.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -160,22 +161,66 @@ export async function processNeuroInput(userInput, options = {}) {
     bootstrapState,
   });
 
+  const suggestionResult = suggestNeuronActions({
+    input: userInput,
+    activated,
+    missingAnalysis,
+    options: options.suggestionOptions || {},
+  });
+  trace.neuronSuggestionAnalysis = suggestionResult.analysis || null;
+  trace.hasSuggestion = Boolean(suggestionResult.hasSuggestion);
+  trace.suggestionReasons = suggestionResult.reasons || [];
+  addStep(trace, "neuron_suggestion_analyzed", {
+    hasSuggestion: trace.hasSuggestion,
+    reasons: trace.suggestionReasons,
+  });
+
   let generated = [];
   let dedupeSummary = { saved: 0, merged: 0, discarded: 0 };
+  const manualOverride = Boolean(options.manualPremiumOverride);
+  let premiumGenerationMeta = {
+    manualOverrideUsed: manualOverride,
+    premiumForced: false,
+    premiumForcedSuccess: false,
+    premiumForcedFailure: null,
+    generatedBy: premiumDecision.usePremium ? "policy" : "none",
+  };
 
-  if (!options.skipGeneration && missingAnalysis.needsGeneration && isNeuroclawConfigured()) {
-    addStep(trace, "generation_triggered", { premium: premiumDecision.usePremium, rulePath: premiumDecision.rulePath });
+  const shouldGenerate = Boolean(missingAnalysis.needsGeneration || options.forceGeneration || manualOverride);
+  if (!options.skipGeneration && shouldGenerate && isNeuroclawConfigured()) {
+    const shouldAttemptPremium = premiumDecision.usePremium || manualOverride;
+    addStep(trace, "generation_triggered", {
+      premium: shouldAttemptPremium,
+      rulePath: premiumDecision.rulePath,
+      manualOverride,
+    });
     const t3 = Date.now();
     try {
       let rawGenerated = [];
       let premiumSucceeded = false;
+      let premiumAttempted = false;
 
-      if (premiumDecision.usePremium) {
+      if (shouldAttemptPremium) {
+        premiumAttempted = true;
         try {
           rawGenerated = await generateMissingNeuronsPremium({ userInput, activatedNeurons: activated, missingAnalysis, history: options.history || [] });
           premiumSucceeded = true;
-          addStep(trace, "premium_generation_succeeded", { count: rawGenerated.length });
+          premiumGenerationMeta = {
+            manualOverrideUsed: manualOverride,
+            premiumForced: manualOverride && !premiumDecision.usePremium,
+            premiumForcedSuccess: manualOverride && !premiumDecision.usePremium,
+            premiumForcedFailure: null,
+            generatedBy: manualOverride && !premiumDecision.usePremium ? "manual_override" : "policy",
+          };
+          addStep(trace, "premium_generation_succeeded", { count: rawGenerated.length, manualOverride });
         } catch (premiumErr) {
+          premiumGenerationMeta = {
+            manualOverrideUsed: manualOverride,
+            premiumForced: manualOverride && !premiumDecision.usePremium,
+            premiumForcedSuccess: false,
+            premiumForcedFailure: String(premiumErr),
+            generatedBy: manualOverride && !premiumDecision.usePremium ? "manual_override" : "policy",
+          };
           addStep(trace, "premium_generation_failed", { error: String(premiumErr) });
           console.warn("[neurocore] Gemini premium falló, fallback:", premiumErr);
           rawGenerated = await generateMissingNeurons({ userInput, activatedNeurons: activated, missingAnalysis });
@@ -186,9 +231,9 @@ export async function processNeuroInput(userInput, options = {}) {
       }
       recordTiming(trace, "generation", Date.now() - t3);
 
-      if (premiumDecision.usePremium && premiumSucceeded) {
+      if (premiumAttempted && premiumSucceeded) {
         incrementPremiumUsage({
-          reason: "premium_neuron_generation",
+          reason: manualOverride ? "premium_manual_override" : "premium_neuron_generation",
           inputLabel: premiumDecision.classifier?.label || "unknown",
           inputPreview: userInput.slice(0, 80),
         });
@@ -249,7 +294,7 @@ export async function processNeuroInput(userInput, options = {}) {
       console.warn("[neurocore] Error en generación:", err);
       addStep(trace, "generation_failed", { error: String(err) });
     }
-  } else if (missingAnalysis.needsGeneration) {
+  } else if (shouldGenerate) {
     addStep(trace, "generation_skipped", { reason: "NeuroClaw no configurado o skipGeneration=true" });
   }
 
@@ -349,7 +394,20 @@ export async function processNeuroInput(userInput, options = {}) {
   trace.reply = true;
 
   recordTiming(trace, "total", Date.now() - t0);
+  trace.manualOverrideUsed = premiumGenerationMeta.manualOverrideUsed;
+  trace.premiumForced = premiumGenerationMeta.premiumForced;
+  trace.premiumForcedSuccess = premiumGenerationMeta.premiumForcedSuccess;
+  trace.premiumForcedFailure = premiumGenerationMeta.premiumForcedFailure;
+  trace.generatedBy = premiumGenerationMeta.generatedBy;
   const traceResult = finalizeTrace(trace);
+  traceResult.neuronSuggestionAnalysis = trace.neuronSuggestionAnalysis;
+  traceResult.hasSuggestion = trace.hasSuggestion;
+  traceResult.suggestionReasons = trace.suggestionReasons;
+  traceResult.manualOverrideUsed = premiumGenerationMeta.manualOverrideUsed;
+  traceResult.premiumForced = premiumGenerationMeta.premiumForced;
+  traceResult.premiumForcedSuccess = premiumGenerationMeta.premiumForcedSuccess;
+  traceResult.premiumForcedFailure = premiumGenerationMeta.premiumForcedFailure;
+  traceResult.generatedBy = premiumGenerationMeta.generatedBy;
 
   return {
     reply,
@@ -369,10 +427,16 @@ export async function processNeuroInput(userInput, options = {}) {
     trace: traceResult,
     missingAnalysis,
     premiumDecision,
+    neuronSuggestion: suggestionResult,
     dedupeSummary,
     bootstrapState,
     mode,
     totalNeurons,
     messageId,
+    manualOverrideUsed: premiumGenerationMeta.manualOverrideUsed,
+    premiumForced: premiumGenerationMeta.premiumForced,
+    premiumForcedSuccess: premiumGenerationMeta.premiumForcedSuccess,
+    premiumForcedFailure: premiumGenerationMeta.premiumForcedFailure,
+    generatedBy: premiumGenerationMeta.generatedBy,
   };
 }

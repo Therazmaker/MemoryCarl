@@ -16,6 +16,8 @@ function resetStorage() { Object.keys(store).forEach((k) => delete store[k]); }
 import { processNeuroInput } from "../src/neuro/neurocore.js";
 import { saveManyNeurons } from "../src/neuro/neuronStore.js";
 import { createNeuron } from "../src/neuro/schemas.js";
+import { saveNeuroChatSettings } from "../src/settings/neurochatSettings.js";
+import { getPremiumUsageState } from "../src/neuro/premiumUsage.js";
 
 test("neurocore returns bootstrapState and mode in payload", async () => {
   resetStorage();
@@ -126,4 +128,66 @@ test("neurocore incluye messageId y feedback summary en trace", async () => {
   assert.equal(result.messageId, "msg_trace_1");
   assert.ok(result.trace.feedbackSummary);
   assert.ok(typeof result.trace.feedbackSummary.totalLikes === "number");
+});
+
+test("premiumDecision=false pero manual override=true ejecuta premium y marca trace", async () => {
+  resetStorage();
+  saveNeuroChatSettings({ enabled: true, apiKey: "AIzaTestKey123456789" });
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_url", "https://api.example.com");
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_key", "test_key");
+
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      return {
+        ok: true,
+        json: async () => ({
+          candidates: [{
+            content: { parts: [{ text: JSON.stringify({ neurons: [{ type: "pattern", core: { concept: "Terapia psicológica", domain: "personal", summary: "Proceso terapéutico" }, triggers: ["terapia", "sesión"] }] }) }] },
+          }],
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({ reply: "ok" }) };
+  };
+
+  const before = getPremiumUsageState().used;
+  const result = await processNeuroInput("Tuve una sesión de terapia y aprendí algo fuerte sobre mí.", {
+    history: [],
+    manualPremiumOverride: true,
+    forceGeneration: true,
+    premiumOptions: { coverageThreshold: 0.05 },
+    messageId: "msg_override_1",
+  });
+
+  const after = getPremiumUsageState().used;
+  assert.equal(result.premiumDecision.usePremium, false);
+  assert.equal(result.manualOverrideUsed, true);
+  assert.equal(result.generatedBy, "manual_override");
+  assert.equal(result.trace.generatedBy, "manual_override");
+  assert.equal(after, before + 1);
+});
+
+test("si falla Gemini forzado no incrementa usage", async () => {
+  resetStorage();
+  saveNeuroChatSettings({ enabled: true, apiKey: "AIzaTestKey123456789" });
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_url", "https://api.example.com");
+  localStorage.setItem("memorycarl_v2_neuroclaw_ai_key", "test_key");
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      return { ok: false, status: 500, text: async () => "boom" };
+    }
+    if (opts?.body) return { ok: true, json: async () => ([]) };
+    return { ok: true, json: async () => ({ reply: "ok" }) };
+  };
+
+  const before = getPremiumUsageState().used;
+  const result = await processNeuroInput("Mensaje para forzar premium aunque falle", {
+    history: [],
+    manualPremiumOverride: true,
+    forceGeneration: true,
+    messageId: "msg_override_2",
+  });
+  const after = getPremiumUsageState().used;
+  assert.equal(result.premiumForcedSuccess, false);
+  assert.equal(after, before);
 });

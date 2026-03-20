@@ -8,7 +8,7 @@
  *   initNeuroChat()   → inicialización del módulo
  */
 
-import { sendMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback } from "./neurochat.js";
+import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback } from "./neurochat.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
 import {
@@ -41,6 +41,8 @@ const uiState = {
     lastMergedIds:    [],
   },
   feedbackByMessage: {},
+  forcingByMessage: {},
+  overrideStatus: {},
 };
 
 const MODE_OPTIONS = [
@@ -210,6 +212,59 @@ export function summarizePremiumDecision(result) {
   };
 }
 
+export function shouldShowForcePremiumButton(result) {
+  if (!result || !result.messageId) return false;
+  if (result.premiumDecision?.usePremium) return false;
+  if (result.premiumForcedSuccess) return false;
+  const coverage = result?.missingAnalysis?.coverage ?? 1;
+  const inputLongEnough = (result?.trace?.classifier?.features?.tokenCount || 0) >= 8;
+  return Boolean(
+    result?.neuronSuggestion?.hasSuggestion
+    || coverage < 0.62
+    || inputLongEnough
+  );
+}
+
+export function getOverrideResultLabel(result) {
+  if (!result) return "";
+  if (result.premiumForcedSuccess) {
+    if ((result.generated || []).length > 0) return `Aprendizaje forzado completado. Se creó ${result.generated.length} neurona nueva.`;
+    return "Aprendizaje forzado completado. No se generaron neuronas útiles.";
+  }
+  if (result.manualOverrideUsed && !result.premiumForcedSuccess) {
+    return "Aprendizaje forzado falló o no aportó mejoras.";
+  }
+  return "";
+}
+
+function renderSuggestionPanel(result) {
+  if (!result?.neuronSuggestion?.hasSuggestion) return "";
+  const reasons = (result.neuronSuggestion.reasons || []).slice(0, 2);
+  const firstDraft = result.neuronSuggestion.suggestions?.[0]?.draft || null;
+  const messageId = result.messageId;
+  const forcing = Boolean(uiState.forcingByMessage[messageId]);
+  const done = uiState.overrideStatus[messageId] === "success";
+  const failed = uiState.overrideStatus[messageId] === "error";
+  const canForce = shouldShowForcePremiumButton(result) && !forcing && !done;
+  const draftJson = firstDraft ? esc(JSON.stringify(firstDraft, null, 2)) : "";
+
+  return `
+    <div class="ncSideSection ncSuggestionBox">
+      <div class="ncSideSectionTitle">Sugerencia de memoria</div>
+      <div class="ncSuggestionText">El sistema detectó cobertura floja (${Math.round((result?.missingAnalysis?.coverage || 0) * 100)}%).</div>
+      ${reasons.length ? `<div class="ncMissingList">${reasons.map((r) => `<div class="ncMissingItem">• ${esc(r)}</div>`).join("")}</div>` : ""}
+      <div class="ncSuggestionActions">
+        ${canForce ? `<button class="ncActionBtn ncActionBtnPrimary" data-force-premium="${esc(messageId)}">Forzar Gemini</button>` : ""}
+        ${forcing ? `<button class="ncActionBtn" disabled>Forzando…</button>` : ""}
+        ${firstDraft ? `<button class="ncActionBtn" data-copy-draft="${esc(messageId)}">Copiar borrador JSON</button>` : ""}
+      </div>
+      ${firstDraft ? `<pre class="ncSuggestionDraft">${draftJson}</pre>` : ""}
+      ${done ? `<div class="ncSuccess">${esc(getOverrideResultLabel(result) || "Aprendizaje forzado completado.")}</div>` : ""}
+      ${failed ? `<div class="ncError">No se pudo completar el aprendizaje forzado.</div>` : ""}
+    </div>
+  `;
+}
+
 function renderSidePanel() {
   const r = uiState.lastResult;
   if (!r) return `<div class="ncSide"><div class="ncSideEmpty">Escribe un mensaje para ver neuronas activadas.</div></div>`;
@@ -253,6 +308,7 @@ function renderSidePanel() {
       ${renderPremiumPanel()}
 
       ${renderInsightsPanel(r.insights || [], r.insightSummary || "")}
+      ${renderSuggestionPanel(r)}
 
       <!-- Neuronas activadas -->
       <div class="ncSideSection">
@@ -613,6 +669,46 @@ function wireNeuroChatInner(root) {
     });
   });
 
+  root.querySelectorAll("[data-copy-draft]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const messageId = btn.getAttribute("data-copy-draft");
+      const draft = uiState.lastResult?.neuronSuggestion?.suggestions?.[0]?.draft;
+      if (!messageId || !draft) return;
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(draft, null, 2));
+        uiState.error = null;
+      } catch (_e) {
+        uiState.error = "No se pudo copiar el borrador JSON";
+      }
+      rerender();
+    });
+  });
+
+  root.querySelectorAll("[data-force-premium]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const messageId = btn.getAttribute("data-force-premium");
+      if (!messageId || uiState.forcingByMessage[messageId]) return;
+      uiState.forcingByMessage[messageId] = true;
+      uiState.overrideStatus[messageId] = "running";
+      uiState.error = null;
+      rerender();
+      try {
+        const result = await forcePremiumGenerationForMessage(messageId);
+        uiState.lastResult = result;
+        uiState.overrideStatus[messageId] = "success";
+        if (result.messageId) {
+          uiState.feedbackByMessage[result.messageId] = { ...(result.feedbackForMessage || {}) };
+        }
+      } catch (err) {
+        uiState.overrideStatus[messageId] = "error";
+        uiState.error = err.message || "No se pudo forzar Gemini";
+      } finally {
+        uiState.forcingByMessage[messageId] = false;
+        rerender();
+      }
+    });
+  });
+
   // Toggle neuronas panel (en mobile el side panel puede colapsarse)
   const btnNeurons = root.querySelector("#btnNcToggleNeurons");
   if (btnNeurons) {
@@ -864,6 +960,13 @@ function ncCss() {
     max-width: 180px;
   }
   .ncPremiumDecisionMeta { font-size: 11px; opacity: .7; margin-top: 6px; line-height: 1.35; }
+  .ncSuggestionBox { border-top: 1px solid rgba(255,255,255,.06); padding-top: 10px; }
+  .ncSuggestionText { font-size: 12px; opacity: .85; line-height: 1.4; }
+  .ncSuggestionActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .ncActionBtn { border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.08); color: inherit; border-radius: 10px; padding: 8px 10px; font-size: 12px; }
+  .ncActionBtnPrimary { background: rgba(124,92,255,.45); border-color: rgba(124,92,255,.6); color: #fff; font-weight: 700; }
+  .ncSuggestionDraft { margin-top: 8px; max-height: 120px; overflow: auto; font-size: 10px; padding: 8px; background: rgba(0,0,0,.2); border-radius: 8px; white-space: pre-wrap; }
+  .ncSuccess { margin-top: 8px; font-size: 12px; color: #34d399; }
   .ncInterpretSelect { max-width: 170px; }
   .ncInsightSection { border-top: 1px solid rgba(255,255,255,.06); padding-top: 10px; }
   .ncInsightSummaryTop { font-size: 11px; opacity: .72; line-height: 1.35; margin-bottom: 8px; }

@@ -78,6 +78,7 @@ test("premium blocked for trivial chat even in bootstrap", () => {
   });
   assert.equal(result.usePremium, false);
   assert.match(result.reasons[0], /trivial/i);
+  assert.equal(result.reasonCode, "trivial_input");
 });
 
 test("normal policy path still used outside bootstrap", () => {
@@ -92,4 +93,19 @@ test("normal policy path still used outside bootstrap", () => {
   });
   assert.equal(result.rulePath, "normal");
   assert.equal(result.bootstrapState.level, "off");
+});
+
+test("policy devuelve razón usable cuando coverage es suficiente", () => {
+  resetStorage();
+  setUsedToday(0, 20);
+  const result = shouldUsePremiumGeneration({
+    userInput: "Estoy revisando un proyecto personal y quiero ordenar lo que aprendí hoy.",
+    missingAnalysis: { coverage: 0.9, needsGeneration: false },
+    history: [],
+    mode: "chat",
+    totalNeurons: 30,
+  });
+  assert.equal(result.usePremium, false);
+  assert.equal(result.reasonCode, "enough_coverage");
+  assert.match(result.reasons[0], /parcial|crítico|coverage/i);
 });
