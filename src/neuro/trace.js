@@ -33,6 +33,8 @@ export function createTrace(sessionId) {
     premiumForcedSuccess: false,
     premiumForcedFailure: null,
     generatedBy: "policy",
+    selection: null,
+    bridgeSuggestion: null,
   };
 }
 
@@ -80,6 +82,8 @@ export function finalizeTrace(trace) {
     premiumForcedSuccess: trace.premiumForcedSuccess,
     premiumForcedFailure: trace.premiumForcedFailure,
     generatedBy: trace.generatedBy,
+    selection: trace.selection,
+    bridgeSuggestion: trace.bridgeSuggestion,
   };
 }
 

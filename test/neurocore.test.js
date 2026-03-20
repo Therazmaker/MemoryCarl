@@ -191,3 +191,25 @@ test("si falla Gemini forzado no incrementa usage", async () => {
   assert.equal(result.premiumForcedSuccess, false);
   assert.equal(after, before);
 });
+
+
+test("neurocore limita selección final a top 5 y agrega trace de selección", async () => {
+  resetStorage();
+  const neurons = Array.from({ length: 12 }, (_, i) => createNeuron({
+    id: `sel_${i}`,
+    core: { concept: `concepto ${i}`, domain: "personal", summary: `resumen único ${i}` },
+    triggers: ["ansiedad", "diario", `tag_${i}`, `clave_${i}`],
+    weight: 0.6 - i * 0.01,
+  }));
+  saveManyNeurons(neurons);
+
+  const result = await processNeuroInput("Hoy en mi diario tuve ansiedad y aprendí sobre mi enfoque", {
+    skipGeneration: true,
+    history: [],
+  });
+
+  assert.ok(result.activated.length <= 5);
+  assert.ok(result.trace.selection);
+  assert.equal(typeof result.trace.selection.bridgeSuggested, "boolean");
+  assert.ok(Array.isArray(result.trace.selection.top10));
+});
