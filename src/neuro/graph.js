@@ -1,3 +1,5 @@
+import { getAllRelations, RELATION_TYPE_LABELS } from "./relationStore.js";
+
 /**
  * graph.js — Construcción y utilidades del grafo neuronal
  * NeuroChat / MemoryCarl
@@ -166,24 +168,41 @@ export function buildNeuronGraph(neurons, options = {}) {
     };
   });
 
-  // ---- Construir edges (sin duplicados) ----
-  const seen  = new Set();
+  const seen = new Set();
   const edges = [];
+  const allRelations = (() => {
+    try {
+      return getAllRelations();
+    } catch (_e) {
+      return [];
+    }
+  })();
+  const relationIndex = {};
+  for (const rel of allRelations) {
+    const key = [rel.sourceId, rel.targetId].sort().join("--");
+    if (!relationIndex[key] || rel.strength > relationIndex[key].strength) {
+      relationIndex[key] = rel;
+    }
+  }
 
   for (const n of neurons) {
     if (!Array.isArray(n.connections)) continue;
     for (const targetId of n.connections) {
       const edgeKey = [n.id, targetId].sort().join("--");
       if (seen.has(edgeKey)) continue;
-      // Solo crear edge si ambas neuronas existen
       const targetExists = neurons.some((x) => x.id === targetId);
       if (!targetExists) continue;
       seen.add(edgeKey);
+
+      const relation = relationIndex[edgeKey] || null;
       edges.push({
-        id:     edgeKey,
+        id: edgeKey,
         source: n.id,
         target: targetId,
-        connectionSource: n.linkMeta?.[targetId]?.connectionSource || "auto",
+        connectionSource: relation?.origin || n.linkMeta?.[targetId]?.connectionSource || "auto",
+        relationType: relation?.type || null,
+        relationLabel: relation ? (RELATION_TYPE_LABELS[relation.type] || relation.type) : null,
+        strength: relation?.strength ?? 0.5,
       });
     }
   }

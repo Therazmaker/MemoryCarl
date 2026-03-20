@@ -23,6 +23,8 @@ import { findBestPattern, buildResponseFromPattern } from "./responsePatterns.js
 import { extractResponsePattern as extractResponsePatternV2 } from "./responsePatternExtractor.js";
 import { savePattern as saveResponsePatternV2 } from "./responsePatternsStore.js";
 import { buildLocalReply } from "./localReplyEngine.js";
+import { buildReasoningContext } from "./graphReasoner.js";
+import { generateRelationSuggestions } from "./structuredFeedback.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -384,6 +386,25 @@ export async function processNeuroInput(userInput, options = {}) {
   const context = buildContext(finalActivated);
   const enrichedContext = buildEnrichedContext(userInput, finalActivated);
 
+  addStep(trace, "build_reasoning_context");
+  let reasoningContext = { chains: [], contradictions: [], resolutions: [], graphSummary: "" };
+  try {
+    reasoningContext = buildReasoningContext(finalActivated, finalNeurons);
+    addStep(trace, "reasoning_context_built", {
+      chains: reasoningContext.chains.length,
+      contradictions: reasoningContext.contradictions.length,
+      resolutions: reasoningContext.resolutions.length,
+    });
+  } catch (rErr) {
+    addStep(trace, "reasoning_context_failed", { error: String(rErr) });
+  }
+
+  if (messageId) {
+    try {
+      generateRelationSuggestions({ messageId, activated: finalActivated });
+    } catch (_e) {}
+  }
+
   const feedbackSummary = finalActivated.reduce((acc, item) => {
     const stats = item.neuron?.feedbackStats || {};
     const learning = item.neuron?.activationLearning || {};
@@ -483,6 +504,7 @@ export async function processNeuroInput(userInput, options = {}) {
         mode,
         history: options.history || [],
         missingAnalysis,
+        reasoningContext,
       });
       replySource = "local_engine";
       addStep(trace, "local_engine_reply_used", {
@@ -569,6 +591,7 @@ export async function processNeuroInput(userInput, options = {}) {
     insights: insightResult.insights,
     insightSummary: insightResult.insightSummary,
     temporalContext,
+    reasoningContext,
     insightTrace: {
       clusters: insightResult.clusters,
       patterns: insightResult.patterns,
