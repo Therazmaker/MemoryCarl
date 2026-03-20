@@ -1589,19 +1589,15 @@ function ncCss() {
   @media (max-width: 639px) {
     .ncSide {
       width: 100%;
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.3s ease;
+      max-height: none;
+      overflow: visible;
       border-radius: 12px;
-      padding-top: 0;
-      padding-bottom: 0;
-      border-width: 0;
-    }
-    .ncSide.ncSide--expanded {
-      max-height: 600px;
-      overflow-y: auto;
       padding: 14px;
       border-width: 1px;
+    }
+    .ncSide.ncSide--expanded {
+      max-height: none;
+      overflow: visible;
     }
     .ncMessages { max-height: 55vh; }
   }
