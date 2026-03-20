@@ -19,7 +19,14 @@ import {
   getNeuronSchemaTemplate,
   getNeuronPromptTemplate,
   copyNeuronSchemaAndPrompt,
+  copyNeuronSchemaToClipboard,
+  copyNeuronPromptToClipboard,
 } from "../neuro/importer.js";
+
+const COPY_FEEDBACK_DURATION_MS = 2000;
+const SCHEMA_COPIED_MSG = "Schema copiado 📋";
+const PROMPT_COPIED_MSG = "Prompt copiado 🤖";
+const BOTH_COPIED_MSG = "Schema + prompt copiados 🚀";
 
 const state = {
   query: "",
@@ -40,6 +47,8 @@ const state = {
   jsonImportResult: null,
   jsonImportMsg: "",
   jsonCopyMsg: "",
+  jsonSchemaCopyMsg: "",
+  jsonPromptCopyMsg: "",
 };
 
 function esc(str) { return String(str ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }
@@ -154,10 +163,27 @@ function renderJsonImportTab() {
     ? `<div class="cwImportMsg cwImportMsg--ok">${esc(state.jsonCopyMsg)}</div>`
     : "";
 
+  const schemaCopyMsgHtml = state.jsonSchemaCopyMsg
+    ? `<div class="cwCopyFeedback">${esc(state.jsonSchemaCopyMsg)}</div>`
+    : "";
+
+  const promptCopyMsgHtml = state.jsonPromptCopyMsg
+    ? `<div class="cwCopyFeedback">${esc(state.jsonPromptCopyMsg)}</div>`
+    : "";
+
   return `
     <div class="cwJsonImport">
       <h3 style="margin:0 0 10px;font-size:14px;font-weight:700">📥 Importar Neuronas JSON</h3>
       <p style="font-size:11px;opacity:.6;margin:0 0 10px">Pega una neurona, un array o un objeto con "neurons: [...]". Se acepta JSON con markdown fences.</p>
+
+      <div class="cwCopyBtnRow">
+        <button id="cwCopySchema" class="cwBtn cwBtn--secondary">📋 Copiar schema</button>
+        <button id="cwCopyPrompt" class="cwBtn cwBtn--secondary">🤖 Copiar prompt</button>
+        <button id="cwCopyBoth" class="cwBtn cwBtn--secondary">🚀 Copiar ambos</button>
+      </div>
+      ${schemaCopyMsgHtml}
+      ${promptCopyMsgHtml}
+      ${copyMsgHtml}
 
       <textarea
         id="cwJsonInput"
@@ -181,16 +207,10 @@ function renderJsonImportTab() {
       ${previewHtml}
       ${resultHtml}
 
-      <div style="margin-top:16px;border-top:1px solid rgba(255,255,255,.07);padding-top:14px">
-        <h4 style="margin:0 0 8px;font-size:12px;font-weight:700;opacity:.8">🤖 Generar neuronas con ChatGPT</h4>
-        <p style="font-size:11px;opacity:.5;margin:0 0 8px">Copia el schema y el prompt para generar neuronas compatibles en ChatGPT.</p>
-        <button id="cwCopySchemaPrompt" class="cwBtn cwBtn--secondary">📋 Copiar schema + prompt</button>
-        ${copyMsgHtml}
-        <details style="margin-top:10px">
-          <summary style="font-size:11px;opacity:.5;cursor:pointer">Ver schema…</summary>
-          <pre class="cwSchemaPreview">${esc(getNeuronSchemaTemplate())}</pre>
-        </details>
-      </div>
+      <details style="margin-top:10px">
+        <summary style="font-size:11px;opacity:.5;cursor:pointer">Ver schema…</summary>
+        <pre class="cwSchemaPreview">${esc(getNeuronSchemaTemplate())}</pre>
+      </details>
     </div>`;
 }
 
@@ -269,6 +289,8 @@ export function viewContextWindow() {
     .cwImportMsg{font-size:12px;padding:6px 10px;border-radius:8px;margin-top:8px}
     .cwImportMsg--ok{background:rgba(52,211,153,.12);color:#34d399}.cwImportMsg--err{background:rgba(248,113,113,.12);color:#f87171}
     .cwSchemaPreview{font-size:10px;overflow:auto;max-height:200px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:6px;padding:8px;margin-top:6px}
+    .cwCopyBtnRow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+    .cwCopyFeedback{font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(99,102,241,.15);color:#a5b4fc;margin-bottom:6px;display:inline-block}
   </style>
   ${tabsHtml}
   ${manualTabHtml}
@@ -284,6 +306,8 @@ export function wireContextWindow(root, rerender) {
       state.activeTab = btn.dataset.tab;
       state.jsonImportMsg = "";
       state.jsonCopyMsg = "";
+      state.jsonSchemaCopyMsg = "";
+      state.jsonPromptCopyMsg = "";
       state.jsonImportPreview = null;
       state.jsonImportResult = null;
       rerender();
@@ -412,10 +436,24 @@ export function wireContextWindow(root, rerender) {
     rerender();
   });
 
-  root.querySelector("#cwCopySchemaPrompt")?.addEventListener("click", async () => {
-    const result = await copyNeuronSchemaAndPrompt();
-    state.jsonCopyMsg = result.message;
+  root.querySelector("#cwCopySchema")?.addEventListener("click", async () => {
+    const result = await copyNeuronSchemaToClipboard();
+    state.jsonSchemaCopyMsg = result.success ? SCHEMA_COPIED_MSG : result.message;
     rerender();
-    setTimeout(() => { state.jsonCopyMsg = ""; rerender(); }, 3000);
+    setTimeout(() => { state.jsonSchemaCopyMsg = ""; rerender(); }, COPY_FEEDBACK_DURATION_MS);
+  });
+
+  root.querySelector("#cwCopyPrompt")?.addEventListener("click", async () => {
+    const result = await copyNeuronPromptToClipboard();
+    state.jsonPromptCopyMsg = result.success ? PROMPT_COPIED_MSG : result.message;
+    rerender();
+    setTimeout(() => { state.jsonPromptCopyMsg = ""; rerender(); }, COPY_FEEDBACK_DURATION_MS);
+  });
+
+  root.querySelector("#cwCopyBoth")?.addEventListener("click", async () => {
+    const result = await copyNeuronSchemaAndPrompt();
+    state.jsonCopyMsg = result.success ? BOTH_COPIED_MSG : result.message;
+    rerender();
+    setTimeout(() => { state.jsonCopyMsg = ""; rerender(); }, COPY_FEEDBACK_DURATION_MS);
   });
 }
