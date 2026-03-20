@@ -316,11 +316,19 @@ Ejemplo de neurona válida:
 }
 
 /**
+ * Devuelve schema + prompt en formato estructurado listo para copiar.
+ * @returns {string}
+ */
+export function getCombinedSchemaAndPrompt() {
+  return `=== NEUROCHAT SCHEMA ===\n${getNeuronSchemaTemplate()}\n\n=== PROMPT ===\n${getNeuronPromptTemplate()}`;
+}
+
+/**
  * Copia schema + prompt al portapapeles.
  * @returns {Promise<{ success: boolean, message: string }>}
  */
 export async function copyNeuronSchemaAndPrompt() {
-  const content = `=== SCHEMA DE NEURONA ===\n${getNeuronSchemaTemplate()}\n\n=== PROMPT PARA CHATGPT ===\n${getNeuronPromptTemplate()}`;
+  const content = getCombinedSchemaAndPrompt();
 
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     try {
