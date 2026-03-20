@@ -22,6 +22,7 @@ import { evolveNeuronBatch } from "./evolution.js";
 import { findBestPattern, buildResponseFromPattern } from "./responsePatterns.js";
 import { extractResponsePattern as extractResponsePatternV2 } from "./responsePatternExtractor.js";
 import { savePattern as saveResponsePatternV2 } from "./responsePatternsStore.js";
+import { buildLocalReply } from "./localReplyEngine.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -469,11 +470,37 @@ export async function processNeuroInput(userInput, options = {}) {
   }
   recordTiming(trace, "reply", Date.now() - t4);
 
+  // LOCAL ENGINE — se usa cuando NeuroClaw no responde
+  // pero hay neuronas activadas suficientes (coverage > 0.1 o >= 1 neurona)
+  if (!reply && finalActivated.length > 0) {
+    try {
+      reply = buildLocalReply({
+        userInput,
+        activated: finalActivated,
+        insights: insightResult.insights,
+        insightSummary: insightResult.insightSummary,
+        temporalContext,
+        mode,
+        history: options.history || [],
+        missingAnalysis,
+      });
+      replySource = "local_engine";
+      addStep(trace, "local_engine_reply_used", {
+        intent: "inferred",
+        activatedCount: finalActivated.length,
+        coverage: missingAnalysis.coverage,
+      });
+    } catch (localErr) {
+      console.warn("[neurocore] localReplyEngine falló:", localErr);
+    }
+  }
+
+  // FALLBACK FINAL — solo si no hay neuronas ni local engine
   if (!reply) {
     reply = buildFallbackReply(finalActivated);
     replySource = "fallback";
     addStep(trace, "fallback_reply_used");
-  } else {
+  } else if (replySource === "gemini" || replySource === "local_engine") {
     addStep(trace, "reply_received");
   }
 

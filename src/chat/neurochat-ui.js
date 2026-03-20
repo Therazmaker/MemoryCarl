@@ -300,6 +300,15 @@ function renderSidePanel() {
   const covPct   = Math.round(coverage * 100);
   const covColor = covPct >= 70 ? "#36d399" : covPct >= 40 ? "#fbbf24" : "#fb7185";
 
+  const replySourceBadge = (() => {
+    const src = r?.replySource || "";
+    if (src === "gemini") return `<span class="ncReplySourceBadge ncRSB--gemini">NeuroClaw</span>`;
+    if (src === "local_engine") return `<span class="ncReplySourceBadge ncRSB--local">Motor local</span>`;
+    if (src === "response_pattern") return `<span class="ncReplySourceBadge ncRSB--pattern">Patrón aprendido</span>`;
+    if (src === "fallback") return `<span class="ncReplySourceBadge ncRSB--fallback">Sin contexto</span>`;
+    return "";
+  })();
+
   const messageId = r.messageId;
   const feedbackMap = uiState.feedbackByMessage[messageId] || r.feedbackForMessage || {};
   const activatedHtml = activated.length
@@ -327,6 +336,7 @@ function renderSidePanel() {
           <div class="ncCoverageFill" style="width:${covPct}%;background:${covColor}"></div>
         </div>
         <div class="ncCoveragePct" style="color:${covColor}">${covPct}%</div>
+        ${replySourceBadge ? `<div class="ncReplySource">${replySourceBadge}</div>` : ""}
         ${missingAnalysis?.reasons?.length ? `<div class="ncMissingList">${missingAnalysis.reasons.map(r => `<div class="ncMissingItem">⚠ ${esc(r)}</div>`).join("")}</div>` : ""}
       </div>
 
@@ -1181,6 +1191,12 @@ function ncCss() {
   }
   .ncCoverageFill { height: 100%; border-radius: 4px; transition: width .4s; }
   .ncCoveragePct  { font-size: 18px; font-weight: 800; }
+  .ncReplySource { margin-top: 4px; }
+  .ncReplySourceBadge { font-size: 11px; border-radius: 4px; padding: 2px 7px; font-weight: 500; }
+  .ncRSB--gemini  { background: rgba(56,138,221,.15); color: #378ADD; }
+  .ncRSB--local   { background: rgba(29,158,117,.15); color: #1D9E75; }
+  .ncRSB--pattern { background: rgba(127,119,221,.15); color: #7F77DD; }
+  .ncRSB--fallback{ background: rgba(136,135,128,.15); color: #888780; }
   .ncMissingList  { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
   .ncMissingItem  { font-size: 11px; color: #fbbf24; }
 
