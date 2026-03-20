@@ -9,6 +9,7 @@ import { findRelatedNeurons, attachConnections } from "./connections.js";
 import { getEmbedding } from "./embeddings.js";
 import { createTrace, addStep, recordTiming, finalizeTrace } from "./trace.js";
 import { requestChatReply, isNeuroclawConfigured } from "../services/neuroclawClient.js";
+import { isGeminiPremiumConfigured, requestAssistedReply } from "../services/geminiPremiumClient.js";
 import { dedupeGeneratedNeurons } from "./dedup.js";
 import { shouldUsePremiumGeneration } from "./premiumPolicy.js";
 import { incrementPremiumUsage } from "./premiumUsage.js";
@@ -25,6 +26,9 @@ import { savePattern as saveResponsePatternV2 } from "./responsePatternsStore.js
 import { buildLocalReply } from "./localReplyEngine.js";
 import { buildReasoningContext } from "./graphReasoner.js";
 import { generateRelationSuggestions } from "./structuredFeedback.js";
+import { chooseReplyMode, extractKnowledgeFromGeminiReply, applyTriggerCandidates } from "./activeLearnEngine.js";
+import { upsertRelation, getAllRelations } from "./relationStore.js";
+import { getAllPatterns } from "./responsePatterns.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -452,16 +456,37 @@ export async function processNeuroInput(userInput, options = {}) {
   });
   const temporalContext = buildTemporalContext(userInput, finalActivated, insightResult.insights);
 
+  addStep(trace, "choose_reply_mode");
+  const patternCount = (() => {
+    try { return getAllPatterns().length; } catch (_e) { return 0; }
+  })();
+  const relationCount = (() => {
+    try { return getAllRelations().length; } catch (_e) { return 0; }
+  })();
+  const replyMode = chooseReplyMode({
+    coverage: missingAnalysis.coverage,
+    activatedCount: finalActivated.length,
+    patternCount,
+    relationCount,
+    mode,
+    isNeuroclawConfigured: isNeuroclawConfigured(),
+    isGeminiConfigured: isGeminiPremiumConfigured(),
+  });
+  addStep(trace, "reply_mode_chosen", { replyMode, patternCount, relationCount });
+  trace.replyMode = replyMode;
+
   addStep(trace, "request_reply");
   const t4 = Date.now();
   let reply = null;
   let replySource = "fallback";
+  let localDraft = "";
+  let geminiReplyText = "";
 
   const bestPatternMatch = findBestPattern(userInput, finalActivated.map((a) => a.neuron));
   if (bestPatternMatch?.isGoodMatch && bestPatternMatch.pattern) {
-    const localReply = buildResponseFromPattern(bestPatternMatch.pattern, userInput);
-    if (localReply) {
-      reply = localReply;
+    const patternReply = buildResponseFromPattern(bestPatternMatch.pattern, userInput);
+    if (patternReply) {
+      reply = patternReply;
       replySource = "response_pattern";
       addStep(trace, "response_pattern_used", {
         patternId: bestPatternMatch.pattern.id,
@@ -470,7 +495,51 @@ export async function processNeuroInput(userInput, options = {}) {
     }
   }
 
-  if (!reply && isNeuroclawConfigured()) {
+  if (!reply && finalActivated.length > 0) {
+    try {
+      localDraft = buildLocalReply({
+        userInput,
+        activated: finalActivated,
+        insights: insightResult.insights,
+        insightSummary: insightResult.insightSummary,
+        temporalContext,
+        mode,
+        history: options.history || [],
+        missingAnalysis,
+        reasoningContext,
+      });
+      if (replyMode === "autonomous") {
+        reply = localDraft;
+        replySource = "local_engine";
+        addStep(trace, "local_engine_reply_used_autonomous", { coverage: missingAnalysis.coverage });
+      }
+    } catch (localErr) {
+      console.warn("[neurocore] localReplyEngine falló:", localErr);
+    }
+  }
+
+  if (!reply && replyMode === "assisted" && isGeminiPremiumConfigured()) {
+    try {
+      const assistedReply = await requestAssistedReply({
+        userInput,
+        localDraft,
+        context,
+        history: (options.history || []).slice(-6),
+        insights: insightResult.insights,
+        temporalContext,
+      });
+      if (assistedReply) {
+        geminiReplyText = assistedReply;
+        reply = assistedReply;
+        replySource = "assisted";
+        addStep(trace, "assisted_reply_received", { draftLength: localDraft.length });
+      }
+    } catch (err) {
+      console.warn("[neurocore] assisted reply falló:", err);
+    }
+  }
+
+  if (!reply && replyMode === "delegated" && isNeuroclawConfigured()) {
     try {
       reply = await requestChatReply({
         userInput,
@@ -484,60 +553,80 @@ export async function processNeuroInput(userInput, options = {}) {
         temporalContext,
         interpretationMode,
       });
-      replySource = "gemini";
+      if (reply) {
+        geminiReplyText = reply;
+        replySource = "gemini";
+        addStep(trace, "delegated_reply_received");
+      }
     } catch (err) {
-      console.warn("[neurocore] Error al pedir reply:", err);
-    }
-  }
-  recordTiming(trace, "reply", Date.now() - t4);
-
-  // LOCAL ENGINE — se usa cuando NeuroClaw no responde
-  // pero hay neuronas activadas suficientes (coverage > 0.1 o >= 1 neurona)
-  if (!reply && finalActivated.length > 0) {
-    try {
-      reply = buildLocalReply({
-        userInput,
-        activated: finalActivated,
-        insights: insightResult.insights,
-        insightSummary: insightResult.insightSummary,
-        temporalContext,
-        mode,
-        history: options.history || [],
-        missingAnalysis,
-        reasoningContext,
-      });
-      replySource = "local_engine";
-      addStep(trace, "local_engine_reply_used", {
-        intent: "inferred",
-        activatedCount: finalActivated.length,
-        coverage: missingAnalysis.coverage,
-      });
-    } catch (localErr) {
-      console.warn("[neurocore] localReplyEngine falló:", localErr);
+      console.warn("[neurocore] delegated reply falló:", err);
     }
   }
 
-  // FALLBACK FINAL — solo si no hay neuronas ni local engine
+  if (!reply && localDraft) {
+    reply = localDraft;
+    replySource = "local_engine";
+    addStep(trace, "local_engine_fallback_used");
+  }
+
   if (!reply) {
     reply = buildFallbackReply(finalActivated);
     replySource = "fallback";
     addStep(trace, "fallback_reply_used");
-  } else if (replySource === "gemini" || replySource === "local_engine") {
-    addStep(trace, "reply_received");
+  } else {
+    addStep(trace, "reply_received", { source: replySource });
   }
 
-  if (replySource === "gemini") {
-    const pattern = extractResponsePatternV2({
-      input: userInput,
-      neurons: finalActivated.map((a) => a.neuron),
-      response: reply,
-    });
-    const savedPattern = pattern ? saveResponsePatternV2(pattern) : null;
-    addStep(trace, "response_pattern_learned", {
-      learned: Boolean(savedPattern),
-      patternId: savedPattern?.id || null,
-    });
+  recordTiming(trace, "reply", Date.now() - t4);
+
+  let knowledgeExtracted = { relationHints: [], triggerCandidates: [], quality: "low", delta: 0 };
+  if (geminiReplyText && (replySource === "gemini" || replySource === "assisted")) {
+    try {
+      knowledgeExtracted = extractKnowledgeFromGeminiReply({
+        userInput,
+        geminiReply: geminiReplyText,
+        activated: finalActivated,
+        localDraft,
+      });
+
+      if (knowledgeExtracted.quality !== "low") {
+        const triggersApplied = applyTriggerCandidates({
+          triggerCandidates: knowledgeExtracted.triggerCandidates,
+          minScore: 0.4,
+        });
+        addStep(trace, "triggers_learned", { count: triggersApplied });
+        trace.triggersLearned = triggersApplied;
+      }
+
+      if (knowledgeExtracted.relationHints.length > 0 && messageId) {
+        for (const hint of knowledgeExtracted.relationHints.slice(0, 3)) {
+          try {
+            upsertRelation({ ...hint, origin: "inferred", strength: 0.35 });
+          } catch (_e) {}
+        }
+        addStep(trace, "relation_hints_stored", { count: knowledgeExtracted.relationHints.length });
+      }
+
+      if (knowledgeExtracted.quality === "high") {
+        const pattern = extractResponsePatternV2({
+          input: userInput,
+          neurons: finalActivated.map((a) => a.neuron),
+          response: geminiReplyText,
+        });
+        saveResponsePatternV2(pattern);
+        addStep(trace, "response_pattern_learned_from_gemini");
+      }
+    } catch (learnErr) {
+      console.warn("[neurocore] extracción de conocimiento falló:", learnErr);
+    }
   }
+  trace.replyMode = replyMode;
+  trace.knowledgeExtracted = {
+    relationHints: knowledgeExtracted.relationHints.length,
+    triggerCandidates: knowledgeExtracted.triggerCandidates.length,
+    quality: knowledgeExtracted.quality,
+    delta: knowledgeExtracted.delta,
+  };
   trace.reply = true;
 
   addStep(trace, "post_evolution");
@@ -616,5 +705,11 @@ export async function processNeuroInput(userInput, options = {}) {
     premiumForcedFailure: premiumGenerationMeta.premiumForcedFailure,
     generatedBy: premiumGenerationMeta.generatedBy,
     replySource,
+    replyMode,
+    knowledgeExtracted: {
+      relationHints: trace.knowledgeExtracted?.relationHints || 0,
+      triggerCandidates: trace.knowledgeExtracted?.triggerCandidates || 0,
+      quality: trace.knowledgeExtracted?.quality || "low",
+    },
   };
 }
