@@ -416,10 +416,17 @@ function wireCanvas(root, sessionState = {}) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width  / rect.width;
     const scaleY = canvas.height / rect.height;
-    if (e.touches) {
+    const touchPoint = e.touches?.[0] || e.changedTouches?.[0] || null;
+    if (touchPoint) {
       return {
-        cx: (e.touches[0].clientX - rect.left) * scaleX,
-        cy: (e.touches[0].clientY - rect.top)  * scaleY,
+        cx: (touchPoint.clientX - rect.left) * scaleX,
+        cy: (touchPoint.clientY - rect.top)  * scaleY,
+      };
+    }
+    if (typeof e.clientX !== "number" || typeof e.clientY !== "number") {
+      return {
+        cx: canvas.width / 2,
+        cy: canvas.height / 2,
       };
     }
     return {
