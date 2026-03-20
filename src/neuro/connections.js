@@ -12,6 +12,7 @@
 import { cosineSimilarity, getEmbedding } from "./embeddings.js";
 import { neuronTokenSet, keywordOverlap } from "./utils.js";
 import { getAllNeurons, updateNeuron } from "./neuronStore.js";
+import { upsertRelation } from "./relationStore.js";
 
 const MIN_CONNECTION_SCORE = 0.30;
 const MAX_CONNECTIONS_PER_NEURON = 8;
@@ -115,6 +116,22 @@ export function linkNeurons(sourceId, targetId, options = {}) {
     connections: [...targetConnections],
     linkMeta: { ...(target.linkMeta || {}), [sourceId]: { connectionSource } },
   });
+
+  if (options.relationType) {
+    try {
+      upsertRelation({
+        sourceId,
+        targetId,
+        type: options.relationType,
+        strength: options.strength ?? 0.7,
+        origin: "user",
+        note: options.note || null,
+      });
+    } catch (_e) {
+      // no bloquear si relationStore falla
+    }
+  }
+
   return true;
 }
 

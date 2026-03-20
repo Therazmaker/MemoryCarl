@@ -19,6 +19,14 @@ import { isGeminiPremiumConfigured, streamGeminiNeuronGeneration } from "../serv
 import { viewNeuroGraph, wireNeuroGraph } from "./neurograph-ui.js";
 import { viewContextWindow, wireContextWindow } from "./context-window-ui.js";
 import { renderInsightsPanel } from "./insight-ui.js";
+import { RELATION_TYPE_LABELS } from "../neuro/relationStore.js";
+import {
+  recordResponseFeedback,
+  getPendingRelationSuggestions,
+  confirmRelation,
+  rejectInferredRelation,
+  createUserRelation,
+} from "../neuro/structuredFeedback.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
@@ -45,6 +53,7 @@ const uiState = {
   overrideStatus: {},
   streamingNeuronText: "",
   inputHeightPx: null,
+  pendingSuggestions: [],
 };
 
 const MODE_OPTIONS = [
@@ -117,10 +126,19 @@ function renderMessage(msg) {
   const bodyHtml = isUser
     ? `<div class="ncMsgBubble">${esc(msg.content)}</div>`
     : `<div class="ncMsgBubble ncMsgBubble--md">${renderMarkdown(msg.content)}</div>`;
+
+  const responseFeedback = (!isUser && msg.messageId) ? `
+    <div class="ncResponseFeedback" data-msg-id="${esc(msg.messageId)}">
+      <button class="ncRfBtn" data-rf-rating="useful" data-rf-msg="${esc(msg.messageId)}" title="Útil">Útil</button>
+      <button class="ncRfBtn" data-rf-rating="partial" data-rf-msg="${esc(msg.messageId)}" title="Parcialmente útil">Parcial</button>
+      <button class="ncRfBtn" data-rf-rating="useless" data-rf-msg="${esc(msg.messageId)}" title="No útil">No útil</button>
+    </div>` : "";
+
   return `
-    <div class="ncMsg ${isUser ? "ncMsgUser" : "ncMsgAssistant"}">
+    <div class="ncMsg ${isUser ? "ncMsgUser" : "ncMsgAssistant"}" data-msg-id="${esc(msg.messageId || "")}">
       ${bodyHtml}
       <div class="ncMsgMeta">${time}${msg.coverage != null ? ` · cobertura ${Math.round(msg.coverage * 100)}%` : ""}</div>
+      ${responseFeedback}
     </div>`;
 }
 
@@ -290,6 +308,34 @@ function renderSuggestionPanel(result) {
   `;
 }
 
+function renderRelationSuggestions(suggestions, allNeurons) {
+  if (!suggestions || suggestions.length === 0) return "";
+  const cards = suggestions.map((s) => {
+    const srcNeuron = allNeurons.find((n) => n.id === s.sourceId);
+    const tgtNeuron = allNeurons.find((n) => n.id === s.targetId);
+    if (!srcNeuron || !tgtNeuron) return "";
+    const srcLabel = esc(srcNeuron.core?.concept || s.sourceId);
+    const tgtLabel = esc(tgtNeuron.core?.concept || s.targetId);
+    const typeLabel = esc(RELATION_TYPE_LABELS[s.type] || s.type);
+    return `
+      <div class="ncRelSuggestion">
+        <div class="ncRelSuggestionText">"${srcLabel}" <em>${typeLabel}</em> "${tgtLabel}"</div>
+        <div class="ncRelSuggestionActions">
+          <button class="ncRelBtn ncRelBtn--confirm" data-suggestion-id="${esc(s.id)}" title="Confirmar relación">Confirmar</button>
+          <button class="ncRelBtn ncRelBtn--reject" data-suggestion-id="${esc(s.id)}" data-reject="true" title="Rechazar">No</button>
+        </div>
+      </div>`;
+  }).filter(Boolean).join("");
+
+  if (!cards) return "";
+  return `
+    <div class="ncSideSection ncRelSection">
+      <div class="ncSideSectionTitle">Relaciones detectadas</div>
+      <div class="ncRelHint">¿Estas conexiones tienen sentido?</div>
+      ${cards}
+    </div>`;
+}
+
 function renderSidePanel() {
   const r = uiState.lastResult;
   if (!r) return `<div class="ncSide${uiState.neuronsExpanded ? " ncSide--expanded" : ""}"><div class="ncSideEmpty">Escribe un mensaje para ver neuronas activadas.</div></div>`;
@@ -351,6 +397,8 @@ function renderSidePanel() {
         <div class="ncSideSectionTitle">⚡ Activadas (${activated.length})</div>
         ${activatedHtml}
       </div>
+
+      ${renderRelationSuggestions(uiState.pendingSuggestions || [], getNeurons())}
 
       <!-- Neuronas generadas -->
       ${generated.length > 0 ? `
@@ -692,6 +740,7 @@ async function doSend(root, inputEl) {
     if (result) {
       if (result.messageId) {
         uiState.feedbackByMessage[result.messageId] = { ...(result.feedbackForMessage || {}) };
+        uiState.pendingSuggestions = [];
       }
       uiState.sessionState.lastActivatedIds = (result.activated || [])
         .map((a) => a.neuron?.id || a.id).filter(Boolean);
@@ -778,9 +827,61 @@ function wireMessageEvents(root) {
       rerenderSidePanel(root);
     });
   });
+
+  root.querySelectorAll("[data-rf-rating]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rating = btn.getAttribute("data-rf-rating");
+      const messageId = btn.getAttribute("data-rf-msg");
+      if (!rating || !messageId) return;
+
+      const lastResult = uiState.lastResult;
+      try {
+        recordResponseFeedback({
+          messageId,
+          rating,
+          replySource: lastResult?.replySource || "unknown",
+          activatedIds: (lastResult?.activated || []).map((a) => a.neuron?.id).filter(Boolean),
+        });
+      } catch (_e) {}
+
+      const container = root.querySelector(`[data-msg-id="${messageId}"] .ncResponseFeedback`);
+      if (container) {
+        container.querySelectorAll(".ncRfBtn").forEach((b) => {
+          b.classList.remove("ncRfBtn--active", "ncRfBtn--active-partial", "ncRfBtn--active-useless");
+          b.disabled = true;
+        });
+        const classMap = { useful: "ncRfBtn--active", partial: "ncRfBtn--active-partial", useless: "ncRfBtn--active-useless" };
+        btn.classList.add(classMap[rating] || "ncRfBtn--active");
+      }
+
+      if (rating === "useful" && messageId) {
+        uiState.pendingSuggestions = getPendingRelationSuggestions(messageId);
+        rerenderSidePanel(root);
+      }
+    });
+  });
 }
 
 function wireSidePanelEvents(root) {
+  root.querySelectorAll("[data-suggestion-id]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const suggestionId = btn.getAttribute("data-suggestion-id");
+      const isReject = btn.getAttribute("data-reject") === "true";
+      if (!suggestionId) return;
+      try {
+        if (isReject) {
+          rejectInferredRelation({ suggestionId });
+        } else {
+          confirmRelation({ suggestionId, messageId: uiState.lastResult?.messageId });
+        }
+        uiState.pendingSuggestions = (uiState.pendingSuggestions || []).filter((s) => s.id !== suggestionId);
+        rerenderSidePanel(root);
+      } catch (err) {
+        uiState.error = err.message;
+      }
+    });
+  });
+
   root.querySelectorAll("[data-copy-draft]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const messageId = btn.getAttribute("data-copy-draft");
@@ -1099,6 +1200,12 @@ function ncCss() {
   .ncMsgBubble--md h3.ncH3 { font-size: 14px; font-weight: 700; margin: 8px 0 4px; }
   .ncMsgBubble--md h4.ncH4 { font-size: 13px; font-weight: 600; margin: 6px 0 3px; }
   .ncMsgMeta { font-size: 10px; opacity: .45; margin-top: 3px; }
+  .ncResponseFeedback { display: flex; gap: 4px; margin-top: 4px; }
+  .ncRfBtn { font-size: 11px; border-radius: 4px; padding: 2px 8px; cursor: pointer; border: 0.5px solid var(--color-border-tertiary); background: var(--color-background-secondary); color: var(--color-text-secondary); }
+  .ncRfBtn:hover { background: var(--color-background-tertiary); }
+  .ncRfBtn--active { background: var(--color-background-success); color: var(--color-text-success); border-color: var(--color-border-success); }
+  .ncRfBtn--active-partial { background: var(--color-background-warning); color: var(--color-text-warning); border-color: var(--color-border-warning); }
+  .ncRfBtn--active-useless { background: var(--color-background-danger); color: var(--color-text-danger); border-color: var(--color-border-danger); }
 
   /* Loading dots */
   .ncLoading { display: flex; gap: 5px; padding: 6px; align-items: center; }
@@ -1180,6 +1287,15 @@ function ncCss() {
   /* Side panel */
   .ncSideSection { margin-bottom: 16px; }
   .ncSideSection:last-child { margin-bottom: 0; }
+  .ncRelSection { border-top: 0.5px solid var(--color-border-tertiary); padding-top: 10px; }
+  .ncRelHint { font-size: 11px; color: var(--color-text-tertiary); margin-bottom: 6px; }
+  .ncRelSuggestion { background: var(--color-background-secondary); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+  .ncRelSuggestionText { font-size: 12px; margin-bottom: 6px; }
+  .ncRelSuggestionText em { font-style: normal; color: var(--color-text-info); }
+  .ncRelSuggestionActions { display: flex; gap: 6px; }
+  .ncRelBtn { font-size: 11px; border-radius: 4px; padding: 3px 10px; cursor: pointer; border: 0.5px solid var(--color-border-secondary); background: transparent; }
+  .ncRelBtn--confirm { color: var(--color-text-success); border-color: var(--color-border-success); }
+  .ncRelBtn--reject { color: var(--color-text-secondary); }
   .ncSideSectionTitle { font-size: 11px; font-weight: 800; text-transform: uppercase;
     letter-spacing: .6px; opacity: .55; margin-bottom: 8px; }
   .ncSideEmpty { font-size: 12px; opacity: .4; font-style: italic; }
