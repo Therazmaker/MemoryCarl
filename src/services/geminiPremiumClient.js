@@ -9,6 +9,7 @@
  *   isGeminiPremiumConfigured()
  *   getGeminiPremiumSettings()
  *   requestGeminiPremiumNeuronGeneration(payload)
+ *   requestAssistedReply(payload)
  *   streamGeminiNeuronGeneration(payload, onChunk)
  *   parseGeminiJsonResponse(raw)
  *   sanitizeGeminiNeuronPayload(payload)
@@ -264,6 +265,94 @@ export async function requestGeminiPremiumNeuronGeneration(payload) {
 
   const { neurons: rawNeurons } = parseGeminiJsonResponse(rawText);
   return sanitizeGeminiNeuronPayload(rawNeurons);
+}
+
+/**
+ * Llama a Gemini en modo asistido: recibe un borrador local y lo enriquece.
+ * Más barato que una generación completa — el prompt es más corto.
+ *
+ * @param {{
+ *   userInput: string,
+ *   localDraft: string,
+ *   context: Array<object>,
+ *   history: Array<object>,
+ *   insights: Array<object>,
+ *   temporalContext: object,
+ * }} payload
+ * @returns {Promise<string>} respuesta enriquecida
+ */
+export async function requestAssistedReply(payload = {}) {
+  const settings = getGeminiPremiumSettings();
+  if (!isGeminiPremiumConfigured()) {
+    throw new Error("Gemini no configurado");
+  }
+
+  const {
+    userInput = "",
+    localDraft = "",
+    context = [],
+    insights = [],
+  } = payload;
+
+  const contextSummary = context.slice(0, 4)
+    .map((n) => `- ${n.concept} (${n.domain}): ${n.summary}`)
+    .join("\n");
+
+  const insightLine = insights.slice(0, 1).map((i) => i.summary).join(" ");
+
+  const prompt = `Eres un asistente de memoria personal. Ya se generó este borrador de respuesta:
+
+BORRADOR:
+${localDraft}
+
+El usuario dijo: "${userInput}"
+
+Contexto de memoria relevante:
+${contextSummary || "(sin contexto adicional)"}
+${insightLine ? `\nInsight detectado: ${insightLine}` : ""}
+
+Tu tarea: mejora el borrador. Puedes hacerlo más específico, más empático, o añadir una observación que el borrador no incluye. NO lo hagas más largo de forma innecesaria. Máximo 3 frases adicionales. Mantén el tono del borrador. Responde SOLO con la respuesta mejorada, sin explicaciones.`;
+
+  const model = settings.model || "gemini-2.5-flash";
+  const timeout = settings.timeoutMs || 15000;
+  const url = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent?key=${settings.apiKey}`;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.5,
+      maxOutputTokens: 512,
+    },
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === "AbortError") throw new Error("Gemini assisted timeout");
+    throw new Error(`Error de red: ${err.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    const txt = await response.text().catch(() => "");
+    throw new Error(`Gemini assisted error ${response.status}: ${txt.slice(0, 100)}`);
+  }
+
+  const json = await response.json();
+  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("Gemini assisted: sin contenido en respuesta");
+  return text.trim();
 }
 
 /**

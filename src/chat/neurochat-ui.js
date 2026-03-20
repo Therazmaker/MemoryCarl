@@ -348,11 +348,35 @@ function renderSidePanel() {
 
   const replySourceBadge = (() => {
     const src = r?.replySource || "";
-    if (src === "gemini") return `<span class="ncReplySourceBadge ncRSB--gemini">NeuroClaw</span>`;
-    if (src === "local_engine") return `<span class="ncReplySourceBadge ncRSB--local">Motor local</span>`;
-    if (src === "response_pattern") return `<span class="ncReplySourceBadge ncRSB--pattern">Patrón aprendido</span>`;
-    if (src === "fallback") return `<span class="ncReplySourceBadge ncRSB--fallback">Sin contexto</span>`;
-    return "";
+    const mode = r?.replyMode || "";
+    const modeLabel = { autonomous: "Autónomo", assisted: "Asistido", delegated: "Delegado" }[mode] || "";
+    const srcLabel = {
+      gemini: "NeuroClaw",
+      assisted: "Gemini asistido",
+      local_engine: "Motor local",
+      response_pattern: "Patrón aprendido",
+      fallback: "Sin contexto",
+    }[src] || src;
+
+    if (!srcLabel) return "";
+    const modeTag = modeLabel ? ` <span class="ncRSBMode">${modeLabel}</span>` : "";
+    const cls = {
+      gemini: "ncRSB--gemini",
+      assisted: "ncRSB--assisted",
+      local_engine: "ncRSB--local",
+      response_pattern: "ncRSB--pattern",
+      fallback: "ncRSB--fallback",
+    }[src] || "";
+    return `<span class="ncReplySourceBadge ${cls}">${srcLabel}${modeTag}</span>`;
+  })();
+  const learningBadge = (() => {
+    const ke = r?.knowledgeExtracted;
+    if (!ke || ke.quality === "low") return "";
+    const parts = [];
+    if (ke.triggerCandidates > 0) parts.push(`+${ke.triggerCandidates} triggers`);
+    if (ke.relationHints > 0) parts.push(`${ke.relationHints} relaciones`);
+    if (!parts.length) return "";
+    return `<div class="ncLearningBadge">Aprendido: ${parts.join(" · ")}</div>`;
   })();
 
   const messageId = r.messageId;
@@ -383,6 +407,7 @@ function renderSidePanel() {
         </div>
         <div class="ncCoveragePct" style="color:${covColor}">${covPct}%</div>
         ${replySourceBadge ? `<div class="ncReplySource">${replySourceBadge}</div>` : ""}
+        ${learningBadge ? `<div class="ncLearningRow">${learningBadge}</div>` : ""}
         ${missingAnalysis?.reasons?.length ? `<div class="ncMissingList">${missingAnalysis.reasons.map(r => `<div class="ncMissingItem">⚠ ${esc(r)}</div>`).join("")}</div>` : ""}
       </div>
 
@@ -581,6 +606,7 @@ function nchatInner() {
           </div>
         </div>
         <div class="ncHeaderActions">
+          <button class="ncIconBtn" id="btnNcCloseSession" title="Cerrar sesión y guardar resumen">💾</button>
           <button class="ncIconBtn" id="btnNcToggleNeurons" title="Ver neuronas">${uiState.neuronsExpanded ? "📱🧠▾" : "📱🧠"}</button>
           <button class="ncIconBtn" id="btnNcClear" title="Limpiar chat">🗑</button>
           <button class="ncIconBtn" id="btnNcSettings" title="Configuración">⚙️</button>
@@ -653,9 +679,10 @@ function rerenderMessages(root) {
 
 function rerenderSidePanel(root) {
   const layout = root.querySelector(".ncLayout");
-  if (!layout) return;
-  const activeFeedback = document.activeElement?.getAttribute?.("data-feedback-neuron");
-  const activeType = document.activeElement?.getAttribute?.("data-feedback-type");
+  if (!layout) {
+    fullRerender();
+    return;
+  }
   const shouldShow = uiState.neuronsExpanded || Boolean(uiState.lastResult) || getChatHistory().length > 0;
   const el = layout.querySelector(".ncSide");
   if (!shouldShow) {
@@ -672,6 +699,8 @@ function rerenderSidePanel(root) {
     side.classList.toggle("ncSide--expanded", uiState.neuronsExpanded);
   }
   wireSidePanelEvents(root);
+  const activeFeedback = document.activeElement?.getAttribute?.("data-feedback-neuron");
+  const activeType = document.activeElement?.getAttribute?.("data-feedback-type");
   if (activeFeedback && activeType) {
     root.querySelector(`[data-feedback-neuron="${activeFeedback}"][data-feedback-type="${activeType}"]`)?.focus();
   }
@@ -754,6 +783,11 @@ async function doSend(root, inputEl) {
     uiState.loading = false;
   }
   rerender();
+  const rootEl = document.querySelector("#app");
+  if (rootEl) {
+    wireSidePanelEvents(rootEl);
+    wireMessageEvents(rootEl);
+  }
 }
 
 function wireInputBarEvents(root) {
@@ -961,6 +995,37 @@ function wireNeuroChatInner(root) {
     });
   }
 
+  root.querySelector("#btnNcCloseSession")?.addEventListener("click", async () => {
+    if (!confirm("¿Cerrar sesión y guardar resumen de la conversación?")) return;
+    try {
+      const { buildSessionSummary, saveSessionMemory } = await import("../neuro/sessionMemory.js");
+      const history = getChatHistory();
+      const summary = buildSessionSummary({
+        history,
+        dominantActivated: uiState.lastResult?.activated || [],
+        insights: uiState.lastResult?.insights || [],
+        replyModes: [],
+        relationHintsApplied: uiState.lastResult?.knowledgeExtracted?.relationHints || 0,
+        triggersApplied: uiState.lastResult?.knowledgeExtracted?.triggerCandidates || 0,
+      });
+      if (summary) {
+        saveSessionMemory(summary);
+        uiState.error = null;
+        const wrap = root.querySelector(".nchatWrap");
+        if (wrap) {
+          const toast = document.createElement("div");
+          toast.className = "ncToast";
+          toast.textContent = "Sesión guardada en memoria";
+          wrap.appendChild(toast);
+          setTimeout(() => toast.remove(), 2500);
+        }
+      }
+    } catch (err) {
+      uiState.error = `No se pudo guardar la sesión: ${err.message}`;
+      rerender();
+    }
+  });
+
   // Toggle neuronas panel (en mobile el side panel puede colapsarse)
   const btnNeurons = root.querySelector("#btnNcToggleNeurons");
   if (btnNeurons) {
@@ -1136,7 +1201,7 @@ export function initNeuroChat() {
 // ---- CSS embebido del módulo ----
 function ncCss() {
   return `<style id="nchatStyles">
-  .nchatWrap { max-width: 900px; margin: 0 auto; padding: 0 0 80px; }
+  .nchatWrap { max-width: 900px; margin: 0 auto; padding: 0 0 80px; position: relative; }
   .ncConfigWarn {
     background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.3);
     border-radius: 10px; padding: 10px 14px; margin: 8px 0 14px;
@@ -1310,9 +1375,12 @@ function ncCss() {
   .ncReplySource { margin-top: 4px; }
   .ncReplySourceBadge { font-size: 11px; border-radius: 4px; padding: 2px 7px; font-weight: 500; }
   .ncRSB--gemini  { background: rgba(56,138,221,.15); color: #378ADD; }
+  .ncRSB--assisted { background: rgba(239,159,39,.15); color: #BA7517; }
   .ncRSB--local   { background: rgba(29,158,117,.15); color: #1D9E75; }
   .ncRSB--pattern { background: rgba(127,119,221,.15); color: #7F77DD; }
   .ncRSB--fallback{ background: rgba(136,135,128,.15); color: #888780; }
+  .ncRSBMode { font-size: 10px; opacity: .7; margin-left: 4px; }
+  .ncLearningBadge { font-size: 11px; color: var(--color-text-success); margin-top: 3px; }
   .ncMissingList  { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
   .ncMissingItem  { font-size: 11px; color: #fbbf24; }
 
@@ -1474,6 +1542,15 @@ function ncCss() {
     font-size: 13px; cursor: pointer; transition: background .12s;
   }
   .ncSettingsResetBtn:hover { background: rgba(255,255,255,.12); }
+
+  .ncToast {
+    position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: var(--color-background-success); color: var(--color-text-success);
+    border: 0.5px solid var(--color-border-success); border-radius: 8px;
+    padding: 8px 16px; font-size: 13px; pointer-events: none;
+    animation: ncFadeOut 2.5s forwards;
+  }
+  @keyframes ncFadeOut { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
 
   @media (min-width: 640px) {
     .ncLayout { flex-direction: row; align-items: flex-start; }
