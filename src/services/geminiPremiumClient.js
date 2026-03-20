@@ -9,6 +9,7 @@
  *   isGeminiPremiumConfigured()
  *   getGeminiPremiumSettings()
  *   requestGeminiPremiumNeuronGeneration(payload)
+ *   streamGeminiNeuronGeneration(payload, onChunk)
  *   parseGeminiJsonResponse(raw)
  *   sanitizeGeminiNeuronPayload(payload)
  */
@@ -263,4 +264,95 @@ export async function requestGeminiPremiumNeuronGeneration(payload) {
 
   const { neurons: rawNeurons } = parseGeminiJsonResponse(rawText);
   return sanitizeGeminiNeuronPayload(rawNeurons);
+}
+
+/**
+ * Streaming version of Gemini neuron generation.
+ * @param {{ userInput: string, activatedNeurons: object[], missingAnalysis: object, history?: object[] }} payload
+ * @param {(chunk: string) => void} onChunk
+ * @returns {Promise<string>}
+ */
+export async function streamGeminiNeuronGeneration(payload, onChunk = () => {}) {
+  const settings = getGeminiPremiumSettings();
+  if (!isGeminiPremiumConfigured()) {
+    throw new Error("Gemini premium no configurado");
+  }
+
+  const prompt = buildGenerationPrompt(payload);
+  const model = settings.model || "gemini-2.5-flash";
+  const url = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${settings.apiKey}`;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: settings.temperature ?? 0.4,
+      maxOutputTokens: settings.maxOutputTokens ?? 4096,
+    },
+  };
+
+  const controller = new AbortController();
+  const timeout = settings.timeoutMs || 20000;
+  const timer = setTimeout(() => controller.abort(), timeout);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === "AbortError") throw new Error("Gemini stream timeout");
+    throw new Error(`Error de red: ${err.message}`);
+  }
+
+  if (!response.ok) {
+    clearTimeout(timer);
+    const txt = await response.text().catch(() => "");
+    throw new Error(`Gemini stream error ${response.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    clearTimeout(timer);
+    throw new Error("Gemini stream no soportado por este navegador");
+  }
+
+  const decoder = new TextDecoder();
+  let fullText = "";
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const jsonStr = trimmed.slice(5).trim();
+        if (!jsonStr || jsonStr === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            fullText += text;
+            onChunk(text);
+          }
+        } catch (_err) {
+          // Ignorar líneas SSE incompletas/malformadas
+        }
+      }
+    }
+  } finally {
+    clearTimeout(timer);
+    reader.releaseLock();
+  }
+
+  return fullText;
 }
