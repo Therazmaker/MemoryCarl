@@ -430,8 +430,22 @@ export async function processNeuroInput(userInput, options = {}) {
   addStep(trace, "request_reply");
   const t4 = Date.now();
   let reply = null;
+  let replySource = "fallback";
 
-  if (isNeuroclawConfigured()) {
+  const bestPatternMatch = findBestPattern(userInput, finalActivated.map((a) => a.neuron));
+  if (bestPatternMatch?.isGoodMatch && bestPatternMatch.pattern) {
+    const localReply = buildResponseFromPattern(bestPatternMatch.pattern, userInput);
+    if (localReply) {
+      reply = localReply;
+      replySource = "response_pattern";
+      addStep(trace, "response_pattern_used", {
+        patternId: bestPatternMatch.pattern.id,
+        score: Number((bestPatternMatch.score || 0).toFixed(3)),
+      });
+    }
+  }
+
+  if (!reply && isNeuroclawConfigured()) {
     try {
       reply = await requestChatReply({
         userInput,
@@ -445,6 +459,7 @@ export async function processNeuroInput(userInput, options = {}) {
         temporalContext,
         interpretationMode,
       });
+      replySource = "gemini";
     } catch (err) {
       console.warn("[neurocore] Error al pedir reply:", err);
     }
@@ -453,9 +468,23 @@ export async function processNeuroInput(userInput, options = {}) {
 
   if (!reply) {
     reply = buildFallbackReply(finalActivated);
+    replySource = "fallback";
     addStep(trace, "fallback_reply_used");
   } else {
     addStep(trace, "reply_received");
+  }
+
+  if (replySource === "gemini") {
+    const pattern = extractResponsePattern({
+      input: userInput,
+      neurons: finalActivated.map((a) => a.neuron),
+      response: reply,
+    });
+    const savedPattern = saveResponsePattern(pattern);
+    addStep(trace, "response_pattern_learned", {
+      learned: Boolean(savedPattern),
+      patternId: savedPattern?.id || null,
+    });
   }
   trace.reply = true;
 
@@ -533,5 +562,6 @@ export async function processNeuroInput(userInput, options = {}) {
     premiumForcedSuccess: premiumGenerationMeta.premiumForcedSuccess,
     premiumForcedFailure: premiumGenerationMeta.premiumForcedFailure,
     generatedBy: premiumGenerationMeta.generatedBy,
+    replySource,
   };
 }
