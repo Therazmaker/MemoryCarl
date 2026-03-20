@@ -141,6 +141,7 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false, options = {}) 
         ${n.connections?.length ? `<span class="ncNeuronConn">${n.connections.length} conexiones</span>` : ""}
       </div>
       ${n.core.summary ? `<div class="ncNeuronSummary">${esc(n.core.summary)}</div>` : ""}
+      ${n.evolution ? `<div class="ncNeuronSummary">Evolution · uso:${n.evolution.usageCount || 0} · ok:${n.evolution.successfulActivations || 0} · fail:${n.evolution.failedActivations || 0} · candidatos:${(n.evolution.triggerCandidates || []).filter((c) => !c.rejected && !c.approved).length || 0}</div>` : ""}
       ${feedbackActions}
     </div>`;
 }
@@ -331,6 +332,13 @@ function renderSidePanel() {
         ${uiState.traceExpanded ? `
         <div class="ncTracePanel">
           ${traceSteps}
+          <div class="ncTimingSection">
+            <div class="ncTimingRow"><span>neuronsEvolved</span><span>${trace?.evolution?.neuronsEvolvedCount || 0}</span></div>
+            <div class="ncTimingRow"><span>triggerCandidatesAdded</span><span>${trace?.evolution?.triggerCandidatesAdded || 0}</span></div>
+            <div class="ncTimingRow"><span>triggersApproved</span><span>${trace?.evolution?.triggersApproved || 0}</span></div>
+            <div class="ncTimingRow"><span>triggersPruned</span><span>${trace?.evolution?.triggersPruned || 0}</span></div>
+            <div class="ncTimingRow"><span>weightsAdjusted</span><span>${trace?.evolution?.weightsAdjusted || 0}</span></div>
+          </div>
           <div class="ncTimingSection">${timingEntries}</div>
         </div>` : ""}
       </div>

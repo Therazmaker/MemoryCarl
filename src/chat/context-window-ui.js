@@ -22,6 +22,8 @@ import {
   copyNeuronSchemaToClipboard,
   copyNeuronPromptToClipboard,
 } from "../neuro/importer.js";
+import { updateNeuron } from "../neuro/neuronStore.js";
+import { acceptTriggerCandidate, rejectTriggerCandidate, ensureNeuronEvolution } from "../neuro/evolution.js";
 
 const COPY_FEEDBACK_DURATION_MS = 2000;
 const SCHEMA_COPIED_MSG = "Schema copiado 📋";
@@ -106,7 +108,18 @@ function renderForm(neuron) {
 function renderDetail() {
   const neuron = getFiltered().find((n) => n.id === state.selectedId);
   if (!neuron) return `<div class="cwDetail">Selecciona una neurona manual.</div>`;
+  ensureNeuronEvolution(neuron);
   const connButtons = (neuron.connections || []).map((id) => `<button class="cwLinkBtn" data-unlink="${id}">unlink ${esc(id)}</button>`).join("");
+  const triggerCandidates = (neuron.evolution?.triggerCandidates || []).filter((c) => !c.rejected && !c.approved).slice(0, 5);
+  const candidateHtml = triggerCandidates.length
+    ? triggerCandidates.map((c) => `<div class="cwEvolutionItem">
+      <span><b>${esc(c.trigger)}</b> · f:${c.frequency} · s:${Number(c.score || 0).toFixed(2)}</span>
+      <span>
+        <button class="cwTriggerAction" data-approve-trigger="${esc(c.trigger)}">Aprobar</button>
+        <button class="cwTriggerAction" data-reject-trigger="${esc(c.trigger)}">Rechazar</button>
+      </span>
+    </div>`).join("")
+    : "<div>Sin candidatos pendientes</div>";
   return `<div class="cwDetail">
     <h3>${esc(neuron.core.concept)}</h3>
     <p>${esc(neuron.core.summary || "")}</p>
@@ -118,6 +131,15 @@ function renderDetail() {
     <div>notes: ${esc(neuron.meta?.notes || "")}</div>
     <div>connections: ${(neuron.connections || []).join(", ") || "—"}</div>
     <div>fecha: ${esc(neuron.temporal?.date || "—")} · contexto: ${esc(neuron.temporal?.timeContext || "timeless")} · stage: ${esc(neuron.temporal?.stage || "—")}</div>
+    <div class="cwEvolutionBox">
+      <h4>Evolution</h4>
+      <div>usage: ${neuron.evolution.usageCount} · success: ${neuron.evolution.successfulActivations} · failed: ${neuron.evolution.failedActivations}</div>
+      <div>lastUsedAt: ${esc(neuron.evolution.lastUsedAt || "—")} · weight: ${Number(neuron.weight || 0).toFixed(3)}</div>
+      <div>triggerHistory: ${(neuron.evolution.triggerHistory || []).slice(-3).map((h) => `${h.action}:${h.trigger}`).join(" · ") || "—"}</div>
+      <div>summary suggestion: ${esc(neuron.evolution.summarySuggestion?.suggestedSummary || "—")}</div>
+      <div>candidatos trigger:</div>
+      ${candidateHtml}
+    </div>
     <div class="cwRowBtns">
       <button id="cwEdit">Editar</button>
       <button id="cwDelete">Borrar</button>
@@ -361,6 +383,20 @@ export function wireContextWindow(root, rerender) {
     rerender();
   });
   root.querySelectorAll(".cwLinkBtn").forEach((btn) => btn.addEventListener("click", () => { if (state.selectedId) removeManualLink(state.selectedId, btn.dataset.unlink); rerender(); }));
+  root.querySelectorAll("[data-approve-trigger]").forEach((btn) => btn.addEventListener("click", () => {
+    const neuron = listContextWindowNeurons().find((n) => n.id === state.selectedId);
+    if (!neuron) return;
+    acceptTriggerCandidate(neuron, btn.dataset.approveTrigger, "manual UI approval");
+    updateNeuron(neuron.id, { triggers: neuron.triggers, evolution: neuron.evolution });
+    rerender();
+  }));
+  root.querySelectorAll("[data-reject-trigger]").forEach((btn) => btn.addEventListener("click", () => {
+    const neuron = listContextWindowNeurons().find((n) => n.id === state.selectedId);
+    if (!neuron) return;
+    rejectTriggerCandidate(neuron, btn.dataset.rejectTrigger, "manual UI rejection");
+    updateNeuron(neuron.id, { evolution: neuron.evolution });
+    rerender();
+  }));
   root.querySelector("#cwRunImport")?.addEventListener("click", () => {
     try {
       const mode = root.querySelector("#cwImportMode")?.value || "journal";

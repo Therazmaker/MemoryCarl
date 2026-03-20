@@ -213,3 +213,23 @@ test("neurocore limita selección final a top 5 y agrega trace de selección", a
   assert.equal(typeof result.trace.selection.bridgeSuggested, "boolean");
   assert.ok(Array.isArray(result.trace.selection.top10));
 });
+
+test("neurocore ejecuta evolución ligera post-response", async () => {
+  resetStorage();
+  saveManyNeurons([
+    createNeuron({
+      id: "n_evo_core",
+      core: { concept: "terapia psicológica", domain: "health", summary: "proceso terapéutico" },
+      triggers: ["terapia"],
+      weight: 0.5,
+    }),
+  ]);
+
+  const result = await processNeuroInput("Mi psicólogo me ayudó en esta sesión de terapia", {
+    skipGeneration: true,
+    history: [],
+  });
+
+  assert.ok(result.trace.evolution);
+  assert.ok(result.trace.evolution.neuronsEvolvedCount >= 1);
+});

@@ -157,6 +157,7 @@ export function buildNeuronGraph(neurons, options = {}) {
         usefulCount: Number(n.activationLearning?.usefulCount) || 0,
         falsePositiveCount: Number(n.activationLearning?.falsePositiveCount) || 0,
       },
+      evolution: n.evolution || null,
       isManual,
       color,
       size,
