@@ -17,6 +17,7 @@ import { runInsightEngine } from "./insightEngine.js";
 import { detectPastOrPresentOrientation } from "./activation.js";
 import { summarizeTemporalRange } from "./temporal.js";
 import { suggestNeuronActions } from "./neuronSuggestions.js";
+import { computeFinalNeuronScore, enforceNeuronDiversity, detectBridgeNeuronNeed } from "./neuronSelection.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -301,15 +302,79 @@ export async function processNeuroInput(userInput, options = {}) {
   addStep(trace, "build_context");
   const finalNeurons = generated.length > 0 || dedupeSummary.merged > 0 ? getAllNeurons() : allNeurons;
   const finalActivationMeta = {};
-  const finalActivated = (generated.length > 0 || dedupeSummary.merged > 0)
+  const baseActivated = (generated.length > 0 || dedupeSummary.merged > 0)
     ? await activateNeurons(userInput, finalNeurons, {
-        topK: 8,
+        topK: 12,
         persistActivation: false,
         totalNeurons: finalNeurons.length,
         bootstrapState: getBootstrapState(finalNeurons.length, options.bootstrapOptions),
         traceMeta: finalActivationMeta,
       })
     : activated;
+
+  addStep(trace, "apply_trigger_quality");
+  const scoredActivated = baseActivated
+    .map((entry) => {
+      const finalScoreData = computeFinalNeuronScore(entry, userInput);
+      return {
+        ...entry,
+        scoreFinal: finalScoreData.score,
+        score: finalScoreData.score,
+        quality: finalScoreData,
+      };
+    })
+    .sort((a, b) => b.scoreFinal - a.scoreFinal);
+
+  const topInitial = Number(options.topInitialK) || 10;
+  const topK = Number(options.finalTopK) || 5;
+  const top10 = scoredActivated.slice(0, topInitial);
+
+  addStep(trace, "enforce_diversity", { topInitial: top10.length, topK });
+  const diversityResult = await enforceNeuronDiversity(top10, { topK });
+  const finalActivated = diversityResult.selected.slice(0, topK);
+
+  const bridgeAnalysis = detectBridgeNeuronNeed({
+    input: userInput,
+    activated: scoredActivated,
+    finalSelection: finalActivated,
+    missingAnalysis,
+  });
+
+  trace.selection = {
+    initialActivated: baseActivated.length,
+    afterScoring: scoredActivated.map((item) => ({
+      id: item.neuron.id,
+      concept: item.neuron.core?.concept,
+      score: Number((item.scoreFinal || 0).toFixed(3)),
+      triggerQuality: Number((item.quality?.triggerQualityRaw || 0).toFixed(3)),
+    })),
+    top10: top10.map((item) => ({
+      id: item.neuron.id,
+      concept: item.neuron.core?.concept,
+      score: Number((item.scoreFinal || 0).toFixed(3)),
+    })),
+    finalSelected: finalActivated.map((item) => ({
+      id: item.neuron.id,
+      concept: item.neuron.core?.concept,
+      score: Number((item.scoreFinal || 0).toFixed(3)),
+    })),
+    diversityRemoved: diversityResult.removed,
+    triggerPenalties: scoredActivated
+      .filter((item) => (item.quality?.triggerQualityRaw || 0) < 0)
+      .map((item) => ({
+        id: item.neuron.id,
+        concept: item.neuron.core?.concept,
+        triggerQuality: Number((item.quality.triggerQualityRaw || 0).toFixed(3)),
+      })),
+    bridgeSuggested: bridgeAnalysis.bridgeSuggested,
+  };
+  trace.bridgeSuggestion = bridgeAnalysis.bridgeSuggestion || null;
+
+  addStep(trace, "selection_finalized", {
+    initialActivated: trace.selection.initialActivated,
+    finalSelected: trace.selection.finalSelected.length,
+    bridgeSuggested: bridgeAnalysis.bridgeSuggested,
+  });
 
   const context = buildContext(finalActivated);
   const enrichedContext = buildEnrichedContext(userInput, finalActivated);
@@ -426,6 +491,8 @@ export async function processNeuroInput(userInput, options = {}) {
     generated,
     trace: traceResult,
     missingAnalysis,
+    bridgeSuggestion: bridgeAnalysis.bridgeSuggestion || null,
+    bridgeAnalysis,
     premiumDecision,
     neuronSuggestion: suggestionResult,
     dedupeSummary,
