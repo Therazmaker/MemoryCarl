@@ -144,13 +144,15 @@ export function previewNeuronImport(rawNeurons) {
 
 /** Determina si los errores de validación son corregibles automáticamente */
 function _isFixable(errors) {
-  const unfixable = errors.filter((e) =>
-    !e.includes("type inválido") &&
-    !e.includes("core faltante") &&
-    !e.includes("id inválido") &&
-    !e.includes("neurona no es un objeto")
+  if (!errors.length) return false;
+  const hardErrors = errors.filter((e) =>
+    e.includes("type inválido") ||
+    e.includes("core faltante") ||
+    e.includes("id inválido") ||
+    e.includes("neurona no es un objeto")
   );
-  return unfixable.length === 0 || (errors.length > 0 && unfixable.length < errors.length);
+  // Fixable if there are errors but none are hard/unrecoverable
+  return hardErrors.length === 0;
 }
 
 /**

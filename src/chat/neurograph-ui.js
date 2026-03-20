@@ -215,8 +215,9 @@ function renderNodeDetail() {
   const connectionsHtml = connections.length
     ? connections.slice(0, 8).map((cid) => {
         const cn = graphState.graph.nodes.find((x) => x.id === cid);
+        const label = cn ? cn.label : `[${esc(cid.slice(0, 12))}…]`;
         return `<div class="ngConnItem">
-          <span class="ngTag" style="background:rgba(255,255,255,.07);color:inherit">${esc(cn ? cn.label : cid)}</span>
+          <span class="ngTag" style="background:rgba(255,255,255,.07);color:inherit">${esc(label)}</span>
           <button class="ngIconBtn ngUnlinkBtn" data-source="${esc(n.id)}" data-target="${esc(cid)}" style="padding:2px 6px;font-size:10px" title="Quitar conexión">✕</button>
         </div>`;
       }).join("")

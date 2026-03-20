@@ -236,7 +236,7 @@ test("importNeuronJson: descarta entradas nulas/no-objeto", () => {
   resetStorage();
   const result = importNeuronJson([null, 123, undefined]);
   assert.equal(result.imported, 0);
-  assert.ok(result.discarded >= 2); // null and 123 should be discarded
+  assert.equal(result.discarded, 3);
 });
 
 test("importNeuronJson: devuelve error para entrada no-array", () => {

@@ -280,7 +280,14 @@ export function viewContextWindow() {
 export function wireContextWindow(root, rerender) {
   // Tab switching
   root.querySelectorAll(".cwTab").forEach((btn) => {
-    btn.addEventListener("click", () => { state.activeTab = btn.dataset.tab; state.jsonImportMsg = ""; state.jsonCopyMsg = ""; rerender(); });
+    btn.addEventListener("click", () => {
+      state.activeTab = btn.dataset.tab;
+      state.jsonImportMsg = "";
+      state.jsonCopyMsg = "";
+      state.jsonImportPreview = null;
+      state.jsonImportResult = null;
+      rerender();
+    });
   });
 
   root.querySelectorAll(".cwCard").forEach((el) => el.addEventListener("click", () => { state.selectedId = el.dataset.id; state.editingId = null; rerender(); }));
