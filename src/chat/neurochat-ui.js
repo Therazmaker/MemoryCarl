@@ -1608,6 +1608,9 @@ function ncCss() {
 
   @media(max-width: 680px){
     .nchatWrap { padding-bottom: 56px; }
+    .nchatWrap .ncLayout { display: flex !important; flex-direction: column !important; }
+    .nchatWrap .ncMain { order: 1; }
+    .nchatWrap .ncSide { order: 2; width: 100%; }
     .ncHeader { padding: 10px 12px; }
     .ncHeaderTitle { font-size: 14px; }
     .ncHeaderSub { font-size: 10px; }
