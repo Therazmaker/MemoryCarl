@@ -19,6 +19,9 @@ import { summarizeTemporalRange } from "./temporal.js";
 import { suggestNeuronActions } from "./neuronSuggestions.js";
 import { computeFinalNeuronScore, enforceNeuronDiversity, detectBridgeNeuronNeed } from "./neuronSelection.js";
 import { evolveNeuronBatch } from "./evolution.js";
+import { findBestPattern, buildResponseFromPattern } from "./responsePatterns.js";
+import { extractResponsePattern as extractResponsePatternV2 } from "./responsePatternExtractor.js";
+import { savePattern as saveResponsePatternV2 } from "./responsePatternsStore.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -475,12 +478,12 @@ export async function processNeuroInput(userInput, options = {}) {
   }
 
   if (replySource === "gemini") {
-    const pattern = extractResponsePattern({
+    const pattern = extractResponsePatternV2({
       input: userInput,
       neurons: finalActivated.map((a) => a.neuron),
       response: reply,
     });
-    const savedPattern = saveResponsePattern(pattern);
+    const savedPattern = pattern ? saveResponsePatternV2(pattern) : null;
     addStep(trace, "response_pattern_learned", {
       learned: Boolean(savedPattern),
       patternId: savedPattern?.id || null,
