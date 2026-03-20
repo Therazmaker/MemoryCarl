@@ -18,12 +18,7 @@ import { detectPastOrPresentOrientation } from "./activation.js";
 import { summarizeTemporalRange } from "./temporal.js";
 import { suggestNeuronActions } from "./neuronSuggestions.js";
 import { computeFinalNeuronScore, enforceNeuronDiversity, detectBridgeNeuronNeed } from "./neuronSelection.js";
-import {
-  extractResponsePattern,
-  saveResponsePattern,
-  findBestPattern,
-  buildResponseFromPattern,
-} from "./responsePatterns.js";
+import { evolveNeuronBatch } from "./evolution.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -492,6 +487,33 @@ export async function processNeuroInput(userInput, options = {}) {
     });
   }
   trace.reply = true;
+
+  addStep(trace, "post_evolution");
+  let evolutionMetrics = {
+    neuronsEvolvedCount: 0,
+    triggerCandidatesAdded: 0,
+    triggersApproved: 0,
+    triggersPruned: 0,
+    weightsAdjusted: 0,
+    summarySuggestions: 0,
+    connectionSuggestions: 0,
+  };
+  try {
+    const evolutionResult = evolveNeuronBatch(finalNeurons, {
+      input: userInput,
+      activated: scoredActivated,
+      finalSelection: finalActivated.map((item) => item.neuron),
+      feedbackMap: options.feedbackMap || {},
+    });
+    evolutionMetrics = evolutionResult.metrics;
+    if (evolutionMetrics.neuronsEvolvedCount > 0) {
+      saveManyNeurons(evolutionResult.neurons);
+    }
+    addStep(trace, "post_evolution_done", evolutionMetrics);
+  } catch (evoErr) {
+    addStep(trace, "post_evolution_failed", { error: String(evoErr) });
+  }
+  trace.evolution = evolutionMetrics;
 
   recordTiming(trace, "total", Date.now() - t0);
   trace.manualOverrideUsed = premiumGenerationMeta.manualOverrideUsed;
