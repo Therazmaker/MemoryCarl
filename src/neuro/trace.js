@@ -35,6 +35,15 @@ export function createTrace(sessionId) {
     generatedBy: "policy",
     selection: null,
     bridgeSuggestion: null,
+    evolution: {
+      neuronsEvolvedCount: 0,
+      triggerCandidatesAdded: 0,
+      triggersApproved: 0,
+      triggersPruned: 0,
+      weightsAdjusted: 0,
+      summarySuggestions: 0,
+      connectionSuggestions: 0,
+    },
   };
 }
 
@@ -84,6 +93,7 @@ export function finalizeTrace(trace) {
     generatedBy: trace.generatedBy,
     selection: trace.selection,
     bridgeSuggestion: trace.bridgeSuggestion,
+    evolution: trace.evolution,
   };
 }
 

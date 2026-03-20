@@ -175,3 +175,12 @@ test("applyNeuronFeedbackAndPersist: es alias de recordNeuronFeedback", () => {
   assert.equal(res.applied, true);
   assert.equal(res.neuron.feedbackStats.likes, 1);
 });
+
+test("likes/dislikes ajustan evolution.weightHistory", () => {
+  resetStorage();
+  saveNeuron(createNeuron({ id: "n_evo_feedback", core: { concept: "terapia", domain: "health", summary: "sesiones" }, triggers: ["terapia"], weight: 0.5 }));
+  const likeRes = recordNeuronFeedback({ neuronId: "n_evo_feedback", feedback: "like", inputPreview: "mi psicólogo", messageId: "m_like" });
+  const dislikeRes = recordNeuronFeedback({ neuronId: "n_evo_feedback", feedback: "dislike", inputPreview: "ruido", messageId: "m_dislike" });
+  assert.ok((likeRes.neuron.evolution?.weightHistory || []).length >= 1);
+  assert.ok((dislikeRes.neuron.evolution?.weightHistory || []).length >= 2);
+});

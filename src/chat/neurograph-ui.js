@@ -195,6 +195,7 @@ function renderNodeDetail() {
 
   // Calibración feedback
   const fullNeuron = getNeuronById(n.id) || n;
+  const evolution = fullNeuron.evolution || {};
   const calib = getNeuronCalibrationSummary(fullNeuron);
   const calibBadgeClass = {
     very_positive: "ngCalibBadge--positive",
@@ -287,6 +288,15 @@ function renderNodeDetail() {
       <div class="ngDetailSection">
         <div class="ngDetailSectionTitle">Triggers</div>
         <div class="ngTagList">${triggersHtml}</div>
+      </div>
+      <div class="ngDetailSection">
+        <div class="ngDetailSectionTitle">Evolution</div>
+        <div style="font-size:12px;opacity:.9">
+          usage: ${evolution.usageCount || 0} · success: ${evolution.successfulActivations || 0} · failed: ${evolution.failedActivations || 0}
+        </div>
+        <div style="font-size:12px;opacity:.9">lastUsedAt: ${esc(evolution.lastUsedAt || "—")}</div>
+        <div style="font-size:12px;opacity:.9">trigger candidates: ${(evolution.triggerCandidates || []).filter((c) => !c.rejected && !c.approved).length || 0}</div>
+        <div style="font-size:12px;opacity:.9">summary suggestion: ${esc(evolution.summarySuggestion?.reason || "—")}</div>
       </div>
 
       <div class="ngDetailSection">

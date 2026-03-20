@@ -4,6 +4,7 @@
 
 import { clamp } from "./utils.js";
 import { getNeuronById, updateNeuron } from "./neuronStore.js";
+import { ensureNeuronEvolution, adjustNeuronWeight, updateNeuronEvolution, extractTriggerCandidatesFromInput, appendTriggerCandidate } from "./evolution.js";
 
 const FEEDBACK_STORE_KEY = "memorycarl_neurochat_feedback_history";
 const MAX_FEEDBACK_ITEMS = 5000;
@@ -73,11 +74,25 @@ export function applyNeuronFeedback(neuron, feedback, options = {}) {
     activationLearning: learning,
     updatedAt: now,
   };
+  ensureNeuronEvolution(updated);
 
-  updated.weight = recomputeNeuronWeightFromFeedback(updated, {
+  const recomputedWeight = recomputeNeuronWeightFromFeedback(updated, {
     ...options,
     feedback,
   });
+  const delta = Number((recomputedWeight - updated.weight).toFixed(4));
+  adjustNeuronWeight(updated, delta, feedback === "like" ? "user like feedback" : "user dislike feedback");
+  if (feedback === "like") {
+    updateNeuronEvolution(updated, { likeCount: (updated.evolution.likeCount || 0) + 1 });
+    const candidates = extractTriggerCandidatesFromInput(options.inputPreview || "", updated, { allowLooseMatch: true })
+      .map((c) => ({ ...c, score: clamp((c.score || 0) + 0.12, 0, 1) }));
+    for (const c of candidates) appendTriggerCandidate(updated, c);
+  } else {
+    updateNeuronEvolution(updated, {
+      dislikeCount: (updated.evolution.dislikeCount || 0) + 1,
+      falsePositiveCount: (updated.evolution.falsePositiveCount || 0) + 1,
+    });
+  }
 
   return updated;
 }
@@ -150,6 +165,7 @@ export function recordNeuronFeedback({ neuronId, feedback, inputPreview = "", me
     feedbackStats: updatedNeuron.feedbackStats,
     activationLearning: updatedNeuron.activationLearning,
     weight: updatedNeuron.weight,
+    evolution: updatedNeuron.evolution,
     updatedAt: updatedNeuron.updatedAt,
   });
 
