@@ -148,6 +148,7 @@ export function buildNeuronGraph(neurons, options = {}) {
       manualCategory,
       notes:             n.meta?.notes || "",
       sourceKind:        n.source?.kind || "user",
+      temporal:          n.temporal || null,
       feedbackStats: {
         likes: Number(n.feedbackStats?.likes) || 0,
         dislikes: Number(n.feedbackStats?.dislikes) || 0,

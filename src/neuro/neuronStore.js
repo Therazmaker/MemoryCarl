@@ -7,6 +7,7 @@
 import { sanitizeNeuron, validateNeuron, createNeuron } from "./schemas.js";
 import { getEmbedding } from "./embeddings.js";
 import { rebuildGraph } from "./connections.js";
+import { normalizeTemporalMeta } from "./temporal.js";
 
 const STORE_KEY = "memorycarl_neurochat_neurons";
 
@@ -18,7 +19,18 @@ function readAll() {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    let changed = false;
+    const normalized = parsed
+      .map((n) => {
+        const clean = sanitizeNeuron(n);
+        if (!clean) return null;
+        if (!n.temporal) changed = true;
+        return clean;
+      })
+      .filter(Boolean);
+    if (changed) writeAll(normalized);
+    return normalized;
   } catch (_e) {
     return [];
   }
@@ -137,6 +149,30 @@ export function updateNeuron(id, patch) {
   const idx = all.findIndex((n) => n.id === id);
   if (idx < 0) return null;
   const updated = sanitizeNeuron({ ...all[idx], ...patch, id, updatedAt: new Date().toISOString() });
+  if (!updated) return null;
+  all[idx] = updated;
+  writeAll(all);
+  return updated;
+}
+
+/**
+ * Actualiza únicamente metadata temporal de una neurona.
+ * @param {string} id
+ * @param {Partial<Neuron["temporal"]>} temporalPatch
+ * @returns {Neuron|null}
+ */
+export function updateNeuronTemporal(id, temporalPatch = {}) {
+  const all = readAll();
+  const idx = all.findIndex((n) => n.id === id);
+  if (idx < 0) return null;
+  const currentTemporal = all[idx].temporal || normalizeTemporalMeta({});
+  const mergedTemporal = normalizeTemporalMeta({ ...currentTemporal, ...temporalPatch });
+  const updated = sanitizeNeuron({
+    ...all[idx],
+    temporal: mergedTemporal,
+    id,
+    updatedAt: new Date().toISOString(),
+  });
   if (!updated) return null;
   all[idx] = updated;
   writeAll(all);

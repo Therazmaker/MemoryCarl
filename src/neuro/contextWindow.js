@@ -64,6 +64,12 @@ function toNeuronInput(input) {
       notes: input.notes || "",
       colorTag: input.colorTag || "",
     },
+    temporal: {
+      date: input.date || null,
+      stage: input.stage || null,
+      isHistorical: Boolean(input.isHistorical),
+      source: "manual",
+    },
   };
 }
 
