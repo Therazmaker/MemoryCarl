@@ -35,6 +35,19 @@ function isTrivial(signals = {}) {
   return Boolean(signals.isGreeting || signals.isConfirmation || signals.isShortUtilityMessage || signals.isLogisticsQuestion);
 }
 
+function formatPolicyReason(code, details = "") {
+  const map = {
+    daily_limit_reached: "calls reservadas por policy",
+    trivial_input: "input trivial o utilitario",
+    cooldown_active: "cooldown activo",
+    low_value_input: "input medium sin suficiente señal",
+    enough_coverage: "coverage parcial pero no crítico",
+    bootstrap_conditions: "condiciones bootstrap insuficientes",
+  };
+  const label = map[code] || code;
+  return details ? `${label} (${details})` : label;
+}
+
 export function shouldUsePremiumGeneration({
   userInput,
   activated = [],
@@ -63,7 +76,8 @@ export function shouldUsePremiumGeneration({
     return {
       usePremium: false,
       rulePath: bootstrapState.enabled ? `bootstrap_${bootstrapState.level}` : "normal",
-      reasons: [`límite diario alcanzado (${usageState.used}/${usageState.limit})`],
+      reasons: [formatPolicyReason("daily_limit_reached", `${usageState.used}/${usageState.limit}`)],
+      reasonCode: "daily_limit_reached",
       classifier,
       usageState,
       bootstrapState,
@@ -75,7 +89,8 @@ export function shouldUsePremiumGeneration({
     return {
       usePremium: false,
       rulePath: bootstrapState.enabled ? `bootstrap_${bootstrapState.level}` : "normal",
-      reasons: ["input trivial detectado"],
+      reasons: [formatPolicyReason("trivial_input")],
+      reasonCode: "trivial_input",
       classifier,
       usageState,
       bootstrapState,
@@ -109,6 +124,7 @@ export function shouldUsePremiumGeneration({
           `calls restantes hoy: ${usageState.remaining}`,
         ],
         classifier,
+        reasonCode: "allowed_bootstrap_strong",
         usageState,
         bootstrapState,
         mode: activeMode,
@@ -118,7 +134,8 @@ export function shouldUsePremiumGeneration({
     return {
       usePremium: false,
       rulePath: "bootstrap_strong",
-      reasons: reasons.length ? reasons : ["bootstrap strong: condiciones insuficientes"],
+      reasons: reasons.length ? reasons.map((r) => formatPolicyReason("bootstrap_conditions", r)) : [formatPolicyReason("bootstrap_conditions")],
+      reasonCode: "bootstrap_conditions",
       classifier,
       usageState,
       bootstrapState,
@@ -150,7 +167,8 @@ export function shouldUsePremiumGeneration({
             classifier.label === "high" ? "input high permitido" : "input medium personal permitido",
             `calls restantes hoy: ${usageState.remaining}`,
           ]
-        : (reasons.length ? reasons : ["bootstrap normal: condiciones insuficientes"]),
+        : (reasons.length ? reasons.map((r) => formatPolicyReason("bootstrap_conditions", r)) : [formatPolicyReason("bootstrap_conditions")]),
+      reasonCode: allowed ? "allowed_bootstrap_normal" : "bootstrap_conditions",
       classifier,
       usageState,
       bootstrapState,
@@ -162,23 +180,23 @@ export function shouldUsePremiumGeneration({
   const coverageThreshold = options.coverageThreshold ?? COVERAGE_THRESHOLD_FOR_PREMIUM;
 
   if (coverage >= coverageThreshold) {
-    reasons.push(`cobertura suficiente (${Math.round(coverage * 100)}%) → no requiere premium`);
-    return { usePremium: false, rulePath: "normal", reasons, classifier, usageState, bootstrapState, mode: activeMode };
+    reasons.push(formatPolicyReason("enough_coverage", `${Math.round(coverage * 100)}%`));
+    return { usePremium: false, rulePath: "normal", reasons, classifier, usageState, bootstrapState, mode: activeMode, reasonCode: "enough_coverage" };
   }
 
   if (classifier.label !== "high") {
-    reasons.push(`input de valor ${classifier.label} → no merece premium (policy normal)`);
-    return { usePremium: false, rulePath: "normal", reasons, classifier, usageState, bootstrapState, mode: activeMode };
+    reasons.push(formatPolicyReason("low_value_input", `label ${classifier.label}`));
+    return { usePremium: false, rulePath: "normal", reasons, classifier, usageState, bootstrapState, mode: activeMode, reasonCode: "low_value_input" };
   }
 
   if (hasRecentPremium(history, cooldownTurns)) {
-    reasons.push(`cooldown activo: premium usado en los últimos ${cooldownTurns} turnos`);
-    return { usePremium: false, rulePath: "normal", reasons, classifier, usageState, bootstrapState, mode: activeMode };
+    reasons.push(formatPolicyReason("cooldown_active", `${cooldownTurns} turnos`));
+    return { usePremium: false, rulePath: "normal", reasons, classifier, usageState, bootstrapState, mode: activeMode, reasonCode: "cooldown_active" };
   }
 
   reasons.push(`cobertura baja (${Math.round(coverage * 100)}%)`);
   reasons.push("input de alto valor");
   reasons.push(`calls restantes hoy: ${usageState.remaining}`);
 
-  return { usePremium: true, rulePath: "normal", reasons, classifier, usageState, bootstrapState, mode: activeMode };
+  return { usePremium: true, rulePath: "normal", reasons, classifier, usageState, bootstrapState, mode: activeMode, reasonCode: "allowed_normal" };
 }

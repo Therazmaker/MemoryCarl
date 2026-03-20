@@ -25,6 +25,14 @@ export function createTrace(sessionId) {
     premiumRulePath: null,
     activation: null,
     feedbackSummary: null,
+    neuronSuggestionAnalysis: null,
+    hasSuggestion: false,
+    suggestionReasons: [],
+    manualOverrideUsed: false,
+    premiumForced: false,
+    premiumForcedSuccess: false,
+    premiumForcedFailure: null,
+    generatedBy: "policy",
   };
 }
 
@@ -64,6 +72,14 @@ export function finalizeTrace(trace) {
     premiumRulePath: trace.premiumRulePath,
     activation: trace.activation,
     feedbackSummary: trace.feedbackSummary,
+    neuronSuggestionAnalysis: trace.neuronSuggestionAnalysis,
+    hasSuggestion: trace.hasSuggestion,
+    suggestionReasons: trace.suggestionReasons,
+    manualOverrideUsed: trace.manualOverrideUsed,
+    premiumForced: trace.premiumForced,
+    premiumForcedSuccess: trace.premiumForcedSuccess,
+    premiumForcedFailure: trace.premiumForcedFailure,
+    generatedBy: trace.generatedBy,
   };
 }
 

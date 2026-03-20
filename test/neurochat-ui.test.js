@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { summarizePremiumDecision, isNeuronFeedbackLocked } from "../src/chat/neurochat-ui.js";
+import { summarizePremiumDecision, isNeuronFeedbackLocked, shouldShowForcePremiumButton, getOverrideResultLabel, viewNeuroChat } from "../src/chat/neurochat-ui.js";
 import { renderInsightsPanel } from "../src/chat/insight-ui.js";
 import { viewContextWindow } from "../src/chat/context-window-ui.js";
 
@@ -59,4 +59,25 @@ test("UI bloquea feedback duplicado por neurona y mensaje", () => {
   const map = { n1: "like" };
   assert.equal(isNeuronFeedbackLocked(map, "n1"), true);
   assert.equal(isNeuronFeedbackLocked(map, "n2"), false);
+});
+
+test("UI muestra botón Forzar Gemini cuando aplica", () => {
+  const should = shouldShowForcePremiumButton({
+    messageId: "m1",
+    premiumDecision: { usePremium: false },
+    missingAnalysis: { coverage: 0.3 },
+    neuronSuggestion: { hasSuggestion: true },
+    trace: { classifier: { features: { tokenCount: 12 } } },
+  });
+  assert.equal(should, true);
+});
+
+test("UI puede mostrar estado de aprendizaje forzado completado", () => {
+  const label = getOverrideResultLabel({
+    premiumForcedSuccess: true,
+    generated: [{ id: "n1" }],
+  });
+  assert.match(label, /completado/i);
+  const html = viewNeuroChat();
+  assert.match(html, /NeuroChat/i);
 });
