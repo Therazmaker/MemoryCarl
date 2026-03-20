@@ -15,7 +15,7 @@ import {
   getNeuroChatSettings, saveNeuroChatSettings, resetNeuroChatSettings,
   validateNeuroChatSettings, maskApiKey,
 } from "../settings/neurochatSettings.js";
-import { isGeminiPremiumConfigured } from "../services/geminiPremiumClient.js";
+import { isGeminiPremiumConfigured, streamGeminiNeuronGeneration } from "../services/geminiPremiumClient.js";
 import { viewNeuroGraph, wireNeuroGraph } from "./neurograph-ui.js";
 import { viewContextWindow, wireContextWindow } from "./context-window-ui.js";
 import { renderInsightsPanel } from "./insight-ui.js";
@@ -43,6 +43,8 @@ const uiState = {
   feedbackByMessage: {},
   forcingByMessage: {},
   overrideStatus: {},
+  streamingNeuronText: "",
+  inputHeightPx: null,
 };
 
 const MODE_OPTIONS = [
@@ -82,23 +84,42 @@ function timeSince(ts) {
   return new Date(ts).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
 }
 
-function rerender() {
-  const root = document.querySelector("#app");
-  if (!root) return;
-  const el = root.querySelector(".nchatWrap");
-  if (!el) return;
-  el.outerHTML = nchatInner();
-  wireNeuroChatInner(root);
+function renderMarkdown(raw) {
+  if (!raw) return "";
+  let html = String(raw)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) => `<pre class="ncCode"><code>${code.trim()}</code></pre>`)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/^\d+\. (.+)$/gm, "<li>$1</li>")
+    .replace(/^[*-] (.+)$/gm, "<li>$1</li>")
+    .replace(/^### (.+)$/gm, "<h4 class='ncH4'>$1</h4>")
+    .replace(/^## (.+)$/gm, "<h3 class='ncH3'>$1</h3>")
+    .replace(/(<li>[\s\S]*?<\/li>)/g, "<ul class=\"ncList\">$1</ul>");
+
+  html = html
+    .split(/\n{2,}/)
+    .map((para) => (para.startsWith("<") ? para : `<p>${para.replace(/\n/g, "<br>")}</p>`))
+    .join("\n")
+    .replace(/<\/ul>\s*<ul class="ncList">/g, "");
+
+  return html;
 }
 
 // ---- Renderizado de componentes ----
 
 function renderMessage(msg) {
   const isUser = msg.role === "user";
-  const time   = timeSince(msg.ts);
+  const time = timeSince(msg.ts);
+  const bodyHtml = isUser
+    ? `<div class="ncMsgBubble">${esc(msg.content)}</div>`
+    : `<div class="ncMsgBubble ncMsgBubble--md">${renderMarkdown(msg.content)}</div>`;
   return `
     <div class="ncMsg ${isUser ? "ncMsgUser" : "ncMsgAssistant"}">
-      <div class="ncMsgBubble">${esc(msg.content)}</div>
+      ${bodyHtml}
       <div class="ncMsgMeta">${time}${msg.coverage != null ? ` · cobertura ${Math.round(msg.coverage * 100)}%` : ""}</div>
     </div>`;
 }
@@ -121,8 +142,8 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false, options = {}) 
   const currentFeedback = options.feedbackMap?.[n.id] || null;
   const feedbackActions = !isGenerated && options.allowFeedback
     ? `<div class="ncNeuronFeedbackRow">
-        <button class="ncFeedbackBtn ${currentFeedback === "like" ? "ncFeedbackBtn--active" : ""}" data-feedback-neuron="${esc(n.id)}" data-feedback-type="like" ${currentFeedback ? "disabled" : ""} title="Relevante">👍</button>
-        <button class="ncFeedbackBtn ${currentFeedback === "dislike" ? "ncFeedbackBtn--active ncFeedbackBtn--negative" : "ncFeedbackBtn--negative"}" data-feedback-neuron="${esc(n.id)}" data-feedback-type="dislike" ${currentFeedback ? "disabled" : ""} title="No relevante">👎</button>
+        <button class="ncFeedbackBtn ${currentFeedback === "like" ? "ncFeedbackBtn--active" : ""}" aria-label="Marcar neurona ${esc(n.core.concept || "sin nombre")} como relevante" data-feedback-neuron="${esc(n.id)}" data-feedback-type="like" ${currentFeedback ? "disabled" : ""} title="Relevante">👍</button>
+        <button class="ncFeedbackBtn ${currentFeedback === "dislike" ? "ncFeedbackBtn--active ncFeedbackBtn--negative" : "ncFeedbackBtn--negative"}" aria-label="Marcar neurona ${esc(n.core.concept || "sin nombre")} como no relevante" data-feedback-neuron="${esc(n.id)}" data-feedback-type="dislike" ${currentFeedback ? "disabled" : ""} title="No relevante">👎</button>
         ${currentFeedback ? `<span class="ncFeedbackState">${currentFeedback === "like" ? "Relevante" : "No relevante"}</span>` : ""}
       </div>`
     : "";
@@ -261,6 +282,7 @@ function renderSuggestionPanel(result) {
         ${forcing ? `<button class="ncActionBtn" disabled>Forzando…</button>` : ""}
         ${firstDraft ? `<button class="ncActionBtn" data-copy-draft="${esc(messageId)}">Copiar borrador JSON</button>` : ""}
       </div>
+      ${forcing ? `<div class="ncStreamingIndicator">Gemini streaming… ${uiState.streamingNeuronText.length} chars</div>` : ""}
       ${firstDraft ? `<pre class="ncSuggestionDraft">${draftJson}</pre>` : ""}
       ${done ? `<div class="ncSuccess">${esc(getOverrideResultLabel(result) || "Aprendizaje forzado completado.")}</div>` : ""}
       ${failed ? `<div class="ncError">No se pudo completar el aprendizaje forzado.</div>` : ""}
@@ -270,7 +292,8 @@ function renderSuggestionPanel(result) {
 
 function renderSidePanel() {
   const r = uiState.lastResult;
-  if (!r) return `<div class="ncSide"><div class="ncSideEmpty">Escribe un mensaje para ver neuronas activadas.</div></div>`;
+  if (!r) return `<div class="ncSide${uiState.neuronsExpanded ? " ncSide--expanded" : ""}"><div class="ncSideEmpty">Escribe un mensaje para ver neuronas activadas.</div></div>`;
+  const expandedClass = uiState.neuronsExpanded ? " ncSide--expanded" : "";
 
   const { activated, generated, trace, missingAnalysis } = r;
   const coverage = missingAnalysis?.coverage ?? trace?.coverage ?? 0;
@@ -296,7 +319,7 @@ function renderSidePanel() {
   ).join("");
 
   return `
-    <div class="ncSide">
+    <div class="ncSide${expandedClass}">
       <!-- Coverage -->
       <div class="ncSideSection">
         <div class="ncSideSectionTitle">Cobertura</div>
@@ -452,14 +475,6 @@ function nchatInner() {
       Ve a <b>Ajustes</b> para añadir URL y key de NeuroClaw.
     </div>`;
 
-  const messagesHtml = history.length
-    ? history.map(renderMessage).join("")
-    : `<div class="ncWelcome">
-        <div class="ncWelcomeIcon">🧠</div>
-        <div class="ncWelcomeTitle">NeuroChat</div>
-        <div class="ncWelcomeSub">Conversación con memoria contextual viva.</div>
-      </div>`;
-
   const totalNeurons = getNeurons().length;
   const premiumConfigured = isGeminiPremiumConfigured();
   const premiumDot = premiumConfigured
@@ -477,31 +492,9 @@ function nchatInner() {
     <div class="ncLayout">
       <!-- Panel principal de chat -->
       <div class="ncMain">
-        <div class="ncMessages" id="ncMessages">
-          ${messagesHtml}
-          ${uiState.loading ? `<div class="ncLoading"><span class="ncDot"></span><span class="ncDot"></span><span class="ncDot"></span></div>` : ""}
-          ${uiState.error   ? `<div class="ncError">⚠️ ${esc(uiState.error)}</div>` : ""}
-        </div>
+        <div class="ncMessages" id="ncMessages" role="log" aria-live="polite" aria-label="Historial de conversación">${buildMessagesHtml()}</div>
 
-        <div class="ncInputBar">
-          <select class="ncModeSelect" id="ncModeSelect" ${uiState.loading ? "disabled" : ""}>
-            ${MODE_OPTIONS.map((m) => `<option value="${m.value}" ${uiState.currentMode === m.value ? "selected" : ""}>${m.label}</option>`).join("")}
-          </select>
-          <select class="ncModeSelect ncInterpretSelect" id="ncInterpretSelect" ${uiState.loading ? "disabled" : ""}>
-            <option value="default" ${uiState.interpretationMode === "default" ? "selected" : ""}>Lectura: default</option>
-            <option value="objective" ${uiState.interpretationMode === "objective" ? "selected" : ""}>Lectura: objetiva</option>
-          </select>
-          <textarea
-            class="ncInput"
-            id="ncInput"
-            placeholder="Escribe algo…"
-            rows="1"
-            ${uiState.loading ? "disabled" : ""}
-          ></textarea>
-          <button class="ncSendBtn" id="btnNcSend" ${uiState.loading ? "disabled" : ""}>
-            ${uiState.loading ? "…" : "↑"}
-          </button>
-        </div>
+        <div class="ncInputBar">${buildInputBarHtml()}</div>
       </div>
 
       <!-- Panel lateral con neuronas + trace -->
@@ -553,6 +546,120 @@ function nchatInner() {
     </div>`;
 }
 
+function buildMessagesHtml() {
+  const history = getChatHistory();
+  const messagesHtml = history.length
+    ? history.map(renderMessage).join("")
+    : `<div class="ncWelcome">
+        <div class="ncWelcomeIcon">🧠</div>
+        <div class="ncWelcomeTitle">NeuroChat</div>
+        <div class="ncWelcomeSub">Conversación con memoria contextual viva.</div>
+      </div>`;
+  return `${messagesHtml}
+    ${uiState.loading ? `<div class="ncLoading"><span class="ncDot"></span><span class="ncDot"></span><span class="ncDot"></span></div>` : ""}
+    ${uiState.error ? `<div class="ncError">⚠️ ${esc(uiState.error)}</div>` : ""}`;
+}
+
+function buildInputBarHtml() {
+  const heightStyle = uiState.inputHeightPx ? `style=\"height:${uiState.inputHeightPx}px\"` : "";
+  return `
+    <select class="ncModeSelect" id="ncModeSelect" ${uiState.loading ? "disabled" : ""}>
+      ${MODE_OPTIONS.map((m) => `<option value="${m.value}" ${uiState.currentMode === m.value ? "selected" : ""}>${m.label}</option>`).join("")}
+    </select>
+    <select class="ncModeSelect ncInterpretSelect" id="ncInterpretSelect" ${uiState.loading ? "disabled" : ""}>
+      <option value="default" ${uiState.interpretationMode === "default" ? "selected" : ""}>Lectura: default</option>
+      <option value="objective" ${uiState.interpretationMode === "objective" ? "selected" : ""}>Lectura: objetiva</option>
+    </select>
+    <textarea
+      class="ncInput"
+      id="ncInput"
+      placeholder="Escribe algo…"
+      rows="1"
+      ${heightStyle}
+      ${uiState.loading ? "disabled" : ""}
+    ></textarea>
+    <button class="ncSendBtn" id="btnNcSend" ${uiState.loading ? "disabled" : ""}>
+      ${uiState.loading ? "…" : "↑"}
+    </button>
+  `;
+}
+
+function rerenderMessages(root) {
+  const container = root.querySelector("#ncMessages");
+  if (!container) return;
+  const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+  container.innerHTML = buildMessagesHtml();
+  if (scrollBottom < 80) container.scrollTop = container.scrollHeight;
+  wireMessageEvents(root);
+}
+
+function rerenderSidePanel(root) {
+  const layout = root.querySelector(".ncLayout");
+  if (!layout) return;
+  const activeFeedback = document.activeElement?.getAttribute?.("data-feedback-neuron");
+  const activeType = document.activeElement?.getAttribute?.("data-feedback-type");
+  const shouldShow = uiState.neuronsExpanded || Boolean(uiState.lastResult) || getChatHistory().length > 0;
+  const el = layout.querySelector(".ncSide");
+  if (!shouldShow) {
+    if (el) el.remove();
+    return;
+  }
+  if (!el) {
+    layout.insertAdjacentHTML("beforeend", renderSidePanel());
+  } else {
+    el.outerHTML = renderSidePanel();
+  }
+  const side = root.querySelector(".ncSide");
+  if (side && window.innerWidth < 640) {
+    side.classList.toggle("ncSide--expanded", uiState.neuronsExpanded);
+  }
+  wireSidePanelEvents(root);
+  if (activeFeedback && activeType) {
+    root.querySelector(`[data-feedback-neuron="${activeFeedback}"][data-feedback-type="${activeType}"]`)?.focus();
+  }
+}
+
+function rerenderInputBar(root) {
+  const bar = root.querySelector(".ncInputBar");
+  if (!bar) return;
+  bar.innerHTML = buildInputBarHtml();
+  wireInputBarEvents(root);
+}
+
+function rerenderSettingsModal(root) {
+  root.querySelector("#ncSettingsOverlay")?.remove();
+  const wrap = root.querySelector(".nchatWrap");
+  if (!wrap || !uiState.settingsOpen) return;
+  wrap.insertAdjacentHTML("beforeend", renderSettingsModal());
+  wireSettingsModal(root);
+}
+
+function fullRerender() {
+  const root = document.querySelector("#app");
+  if (!root) return;
+  const wrap = root.querySelector(".nchatWrap");
+  if (!wrap) {
+    root.innerHTML = nchatInner();
+  } else {
+    wrap.outerHTML = nchatInner();
+  }
+  wireNeuroChatInner(root);
+}
+
+function rerender() {
+  const root = document.querySelector("#app");
+  if (!root) return;
+  const wrap = root.querySelector(".nchatWrap");
+  if (!wrap) {
+    fullRerender();
+    return;
+  }
+  rerenderMessages(root);
+  rerenderSidePanel(root);
+  rerenderInputBar(root);
+  rerenderSettingsModal(root);
+}
+
 // ---- Función principal de vista (llamada desde main.js) ----
 export function viewNeuroChat() {
   return nchatInner();
@@ -560,55 +667,48 @@ export function viewNeuroChat() {
 
 // ---- Wiring de eventos ----
 
-function wireNeuroChatInner(root) {
-  // Scroll al final de mensajes
-  const msgs = root.querySelector("#ncMessages");
-  if (msgs) msgs.scrollTop = msgs.scrollHeight;
-
-  // Botón enviar
-  const btnSend  = root.querySelector("#btnNcSend");
-  const inputEl  = root.querySelector("#ncInput");
-
-  async function doSend() {
-    if (!inputEl || uiState.loading) return;
-    const text = inputEl.value.trim();
-    if (!text) return;
-    inputEl.value = "";
-    uiState.loading = true;
-    uiState.error   = null;
-    rerender();
-    try {
-      const result = await sendMessage(text, { mode: uiState.currentMode, interpretationMode: uiState.interpretationMode });
-      uiState.lastResult = result;
-      uiState.loading    = false;
-      // Actualizar estado de sesión para resaltado en grafo
-      if (result) {
-        if (result.messageId) {
-          uiState.feedbackByMessage[result.messageId] = { ...(result.feedbackForMessage || {}) };
-        }
-        uiState.sessionState.lastActivatedIds = (result.activated || [])
-          .map((a) => a.neuron?.id || a.id).filter(Boolean);
-        uiState.sessionState.lastGeneratedIds = (result.generated || [])
-          .map((n) => n.id).filter(Boolean);
-        uiState.sessionState.lastMergedIds    = (result.dedupeSummary?.mergedIds || []);
+async function doSend(root, inputEl) {
+  if (!inputEl || uiState.loading) return;
+  const text = inputEl.value.trim();
+  if (!text) return;
+  inputEl.value = "";
+  uiState.loading = true;
+  uiState.error = null;
+  rerender();
+  try {
+    const result = await sendMessage(text, { mode: uiState.currentMode, interpretationMode: uiState.interpretationMode });
+    uiState.lastResult = result;
+    uiState.loading = false;
+    if (result) {
+      if (result.messageId) {
+        uiState.feedbackByMessage[result.messageId] = { ...(result.feedbackForMessage || {}) };
       }
-    } catch (err) {
-      console.error("[NeuroChat]", err);
-      uiState.error   = err.message || "Error desconocido";
-      uiState.loading = false;
+      uiState.sessionState.lastActivatedIds = (result.activated || [])
+        .map((a) => a.neuron?.id || a.id).filter(Boolean);
+      uiState.sessionState.lastGeneratedIds = (result.generated || [])
+        .map((n) => n.id).filter(Boolean);
+      uiState.sessionState.lastMergedIds = (result.dedupeSummary?.mergedIds || []);
     }
-    rerender();
+  } catch (err) {
+    console.error("[NeuroChat]", err);
+    uiState.error = err.message || "Error desconocido";
+    uiState.loading = false;
   }
+  rerender();
+}
 
-  if (btnSend)  btnSend.addEventListener("click",  doSend);
+function wireInputBarEvents(root) {
+  const btnSend = root.querySelector("#btnNcSend");
+  const inputEl = root.querySelector("#ncInput");
+  if (btnSend) btnSend.addEventListener("click", () => doSend(root, inputEl));
   if (inputEl) {
     inputEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); }
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(root, inputEl); }
     });
-    // Auto-grow
     inputEl.addEventListener("input", () => {
       inputEl.style.height = "auto";
-      inputEl.style.height = Math.min(inputEl.scrollHeight, MAX_INPUT_HEIGHT_PX) + "px";
+      inputEl.style.height = `${Math.min(inputEl.scrollHeight, MAX_INPUT_HEIGHT_PX)}px`;
+      uiState.inputHeightPx = parseInt(inputEl.style.height, 10) || null;
     });
   }
   const modeSelect = root.querySelector("#ncModeSelect");
@@ -623,25 +723,15 @@ function wireNeuroChatInner(root) {
       uiState.interpretationMode = interpretationSelect.value || "default";
     });
   }
+  if (inputEl && !uiState.loading && uiState.activeTab === "chat") inputEl.focus();
+}
 
-  // Limpiar chat
-  const btnClear = root.querySelector("#btnNcClear");
-  if (btnClear) {
-    btnClear.addEventListener("click", () => {
-      if (!confirm("¿Limpiar historial de conversación?")) return;
-      clearChatHistory();
-      uiState.lastResult = null;
-      uiState.error = null;
-      rerender();
-    });
-  }
-
-  // Toggle trace
+function wireMessageEvents(root) {
   const btnTrace = root.querySelector("#btnTraceToggle");
   if (btnTrace) {
     btnTrace.addEventListener("click", () => {
       uiState.traceExpanded = !uiState.traceExpanded;
-      rerender();
+      rerenderSidePanel(root);
     });
   }
 
@@ -675,10 +765,12 @@ function wireNeuroChatInner(root) {
       } catch (err) {
         uiState.error = err.message || "No se pudo guardar feedback";
       }
-      rerender();
+      rerenderSidePanel(root);
     });
   });
+}
 
+function wireSidePanelEvents(root) {
   root.querySelectorAll("[data-copy-draft]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const messageId = btn.getAttribute("data-copy-draft");
@@ -690,7 +782,7 @@ function wireNeuroChatInner(root) {
       } catch (_e) {
         uiState.error = "No se pudo copiar el borrador JSON";
       }
-      rerender();
+      rerenderSidePanel(root);
     });
   });
 
@@ -700,9 +792,28 @@ function wireNeuroChatInner(root) {
       if (!messageId || uiState.forcingByMessage[messageId]) return;
       uiState.forcingByMessage[messageId] = true;
       uiState.overrideStatus[messageId] = "running";
+      uiState.streamingNeuronText = "";
       uiState.error = null;
-      rerender();
+      rerenderSidePanel(root);
       try {
+        const userMessage = [...getChatHistory()].reverse().find((m) => m.role === "user" && m.messageId === messageId);
+        const activatedNeurons = uiState.lastResult?.activated || [];
+        const missingAnalysis = uiState.lastResult?.missingAnalysis || { coverage: 0, missingConcepts: [], reasons: [] };
+        if (userMessage && isGeminiPremiumConfigured()) {
+          try {
+            await streamGeminiNeuronGeneration({
+              userInput: userMessage.content,
+              activatedNeurons,
+              missingAnalysis,
+              history: getChatHistory().slice(-10),
+            }, (chunk) => {
+              uiState.streamingNeuronText += chunk;
+              rerenderSidePanel(root);
+            });
+          } catch (_streamErr) {
+            // fallback: seguir con la llamada bloqueante existente
+          }
+        }
         const result = await forcePremiumGenerationForMessage(messageId);
         uiState.lastResult = result;
         uiState.overrideStatus[messageId] = "success";
@@ -714,34 +825,56 @@ function wireNeuroChatInner(root) {
         uiState.error = err.message || "No se pudo forzar Gemini";
       } finally {
         uiState.forcingByMessage[messageId] = false;
+        uiState.streamingNeuronText = "";
         rerender();
       }
     });
   });
+}
+
+function wireNeuroChatInner(root) {
+  const msgs = root.querySelector("#ncMessages");
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+  wireMessageEvents(root);
+  wireSidePanelEvents(root);
+  wireInputBarEvents(root);
+
+  const btnClear = root.querySelector("#btnNcClear");
+  if (btnClear) {
+    btnClear.addEventListener("click", () => {
+      if (!confirm("¿Limpiar historial de conversación?")) return;
+      clearChatHistory();
+      uiState.lastResult = null;
+      uiState.error = null;
+      rerender();
+    });
+  }
 
   // Toggle neuronas panel (en mobile el side panel puede colapsarse)
   const btnNeurons = root.querySelector("#btnNcToggleNeurons");
   if (btnNeurons) {
     btnNeurons.addEventListener("click", () => {
       uiState.neuronsExpanded = !uiState.neuronsExpanded;
-      rerender();
+      const side = root.querySelector(".ncSide");
+      if (side) side.classList.toggle("ncSide--expanded", uiState.neuronsExpanded);
+      if (window.innerWidth >= 640) fullRerender();
     });
   }
 
   // ---- Tabs ----
   root.querySelector("#btnTabChat")?.addEventListener("click", () => {
     uiState.activeTab = "chat";
-    rerender();
+    fullRerender();
   });
   root.querySelector("#btnTabGraph")?.addEventListener("click", () => {
     uiState.activeTab = "graph";
-    rerender();
+    fullRerender();
     const graphRoot = root.querySelector(".nchatWrap");
     if (graphRoot) wireNeuroGraph(graphRoot.closest("#app") || root, uiState.sessionState);
   });
   root.querySelector("#btnTabContext")?.addEventListener("click", () => {
     uiState.activeTab = "context";
-    rerender();
+    fullRerender();
   });
 
   // Si el tab activo es el grafo, wirear
@@ -756,19 +889,20 @@ function wireNeuroChatInner(root) {
   root.querySelector("#btnNcSettings")?.addEventListener("click", () => {
     uiState.settingsOpen = true;
     uiState.settingsMsg  = null;
-    rerender();
+    rerenderSettingsModal(root);
   });
 
   // Settings modal wiring
   wireSettingsModal(root);
-
-  // Focus en input
-  if (inputEl && !uiState.loading && uiState.activeTab === "chat") inputEl.focus();
 }
 
 function wireSettingsModal(root) {
   const overlay = root.querySelector("#ncSettingsOverlay");
   if (!overlay) return;
+  const modal = overlay.querySelector(".ncSettingsModal");
+  if (!modal) return;
+  const focusableSelectors = "button, input, select, textarea, [tabindex]:not([tabindex=\"-1\"])";
+  const focusables = () => Array.from(modal.querySelectorAll(focusableSelectors));
 
   // Cerrar modal
   const closeModal = () => {
@@ -781,6 +915,28 @@ function wireSettingsModal(root) {
   root.querySelector("#btnSettingsClose")?.addEventListener("click", closeModal);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) closeModal();
+  });
+  requestAnimationFrame(() => {
+    const els = focusables();
+    if (els[0]) els[0].focus();
+  });
+  modal.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeModal();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const els = focusables();
+    if (!els.length) return;
+    const first = els[0];
+    const last = els[els.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   });
 
   // Toggle API key visibility
@@ -878,11 +1034,7 @@ function ncCss() {
   /* Layout */
   .ncLayout { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
   .ncMain   { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-  .ncSide   {
-    width: 100%;
-    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-    border-radius: 16px; padding: 14px;
-  }
+  .ncSide   { width: 100%; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 14px; }
 
   /* Header */
   .ncHeader {
@@ -927,6 +1079,15 @@ function ncCss() {
   .ncMsgAssistant .ncMsgBubble {
     background: rgba(255,255,255,.07); border-bottom-left-radius: 4px;
   }
+  .ncMsgBubble--md p { margin: 0 0 8px; }
+  .ncMsgBubble--md p:last-child { margin: 0; }
+  .ncMsgBubble--md ul.ncList, .ncMsgBubble--md ol { margin: 4px 0 8px 20px; padding: 0; }
+  .ncMsgBubble--md li { margin: 2px 0; }
+  .ncMsgBubble--md code { background: rgba(255,255,255,.1); border-radius: 3px; padding: 1px 5px; font-family: monospace; font-size: 12px; }
+  .ncMsgBubble--md pre.ncCode { background: rgba(0,0,0,.25); border-radius: 8px; padding: 10px 14px; overflow-x: auto; margin: 8px 0; }
+  .ncMsgBubble--md pre.ncCode code { background: none; padding: 0; }
+  .ncMsgBubble--md h3.ncH3 { font-size: 14px; font-weight: 700; margin: 8px 0 4px; }
+  .ncMsgBubble--md h4.ncH4 { font-size: 13px; font-weight: 600; margin: 6px 0 3px; }
   .ncMsgMeta { font-size: 10px; opacity: .45; margin-top: 3px; }
 
   /* Loading dots */
@@ -976,6 +1137,7 @@ function ncCss() {
   .ncActionBtn { border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.08); color: inherit; border-radius: 10px; padding: 8px 10px; font-size: 12px; }
   .ncActionBtnPrimary { background: rgba(124,92,255,.45); border-color: rgba(124,92,255,.6); color: #fff; font-weight: 700; }
   .ncSuggestionDraft { margin-top: 8px; max-height: 120px; overflow: auto; font-size: 10px; padding: 8px; background: rgba(0,0,0,.2); border-radius: 8px; white-space: pre-wrap; }
+  .ncStreamingIndicator { margin-top: 8px; font-size: 11px; opacity: .75; }
   .ncSuccess { margin-top: 8px; font-size: 12px; color: #34d399; }
   .ncInterpretSelect { max-width: 170px; }
   .ncInsightSection { border-top: 1px solid rgba(255,255,255,.06); padding-top: 10px; }
@@ -1180,6 +1342,39 @@ function ncCss() {
     font-size: 13px; cursor: pointer; transition: background .12s;
   }
   .ncSettingsResetBtn:hover { background: rgba(255,255,255,.12); }
+
+  @media (min-width: 640px) {
+    .ncLayout { flex-direction: row; align-items: flex-start; }
+    .ncMain { flex: 1; min-width: 0; }
+    .ncSide {
+      width: 280px;
+      flex-shrink: 0;
+      max-height: calc(100vh - 200px);
+      overflow-y: auto;
+      position: sticky;
+      top: 16px;
+    }
+  }
+
+  @media (max-width: 639px) {
+    .ncSide {
+      width: 100%;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+      border-radius: 12px;
+      padding-top: 0;
+      padding-bottom: 0;
+      border-width: 0;
+    }
+    .ncSide.ncSide--expanded {
+      max-height: 600px;
+      overflow-y: auto;
+      padding: 14px;
+      border-width: 1px;
+    }
+    .ncMessages { max-height: 55vh; }
+  }
 
   @media(max-width: 680px){
     .nchatWrap { padding-bottom: 56px; }

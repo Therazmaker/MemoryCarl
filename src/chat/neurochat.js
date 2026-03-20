@@ -8,7 +8,16 @@ import { createNeuron } from "../neuro/schemas.js";
 import { getMessageFeedbackMap, recordNeuronFeedback } from "../neuro/feedback.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
-const MAX_HISTORY = 50;
+const DB_NAME = "memorycarl_chat";
+const DB_VERSION = 1;
+const STORE_NAME = "messages";
+const MAX_HISTORY_LS = 50;
+const MAX_HISTORY_IDB = 5000;
+
+let _db = null;
+let _history = null;
+const manualOverrideState = new Map();
+let _seededFromLocalStorage = false;
 
 function loadHistory() {
   try {
@@ -19,21 +28,113 @@ function loadHistory() {
 }
 
 function saveHistory(history) {
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-MAX_HISTORY))); }
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-MAX_HISTORY_LS))); }
   catch (_e) {}
 }
 
-let _history = null;
-const manualOverrideState = new Map();
 function getHistory() {
   if (!_history) _history = loadHistory();
   return _history;
+}
+
+async function openDb() {
+  if (typeof indexedDB === "undefined") throw new Error("IndexedDB no disponible");
+  if (_db) return _db;
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: "ts" });
+        store.createIndex("role", "role");
+      }
+    };
+    req.onsuccess = (event) => {
+      _db = event.target.result;
+      resolve(_db);
+    };
+    req.onerror = (event) => reject(event.target.error);
+  });
+}
+
+async function loadHistoryFromIdb() {
+  try {
+    const db = await openDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const req = tx.objectStore(STORE_NAME).getAll();
+      req.onsuccess = () => {
+        const rows = Array.isArray(req.result) ? req.result : [];
+        rows.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        resolve(rows);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function clearHistoryIdb() {
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const req = tx.objectStore(STORE_NAME).clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (_err) {
+    // noop
+  }
+}
+
+async function saveMessageToIdb(msg) {
+  try {
+    const db = await openDb();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    store.put(msg);
+
+    const countReq = store.count();
+    countReq.onsuccess = () => {
+      if (countReq.result <= MAX_HISTORY_IDB) return;
+      let toDelete = countReq.result - MAX_HISTORY_IDB;
+      const cursorReq = store.openCursor();
+      cursorReq.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (!cursor || toDelete <= 0) return;
+        cursor.delete();
+        toDelete--;
+        cursor.continue();
+      };
+    };
+  } catch (err) {
+    console.warn("[neurochat] IndexedDB write failed:", err);
+  }
+}
+
+async function seedIdbFromLocalStorageIfNeeded() {
+  if (_seededFromLocalStorage) return;
+  _seededFromLocalStorage = true;
+  try {
+    const existing = await loadHistoryFromIdb();
+    if (existing.length > 0) return;
+    const local = loadHistory();
+    if (!local.length) return;
+    for (const msg of local) {
+      await saveMessageToIdb(msg);
+    }
+  } catch (_err) {
+    // noop
+  }
 }
 
 function appendMessage(role, content, meta = {}) {
   const msg = { role, content, ts: Date.now(), ...meta };
   getHistory().push(msg);
   saveHistory(getHistory());
+  void saveMessageToIdb(msg);
   return msg;
 }
 
@@ -126,8 +227,22 @@ export function submitNeuronFeedback({ neuronId, feedback, messageId, inputPrevi
   return recordNeuronFeedback({ neuronId, feedback, messageId, inputPreview });
 }
 
-export function getChatHistory() { return getHistory(); }
-export function clearChatHistory() { _history = []; saveHistory([]); }
+export async function getFullChatHistory() {
+  const history = await loadHistoryFromIdb();
+  if (history.length > 0) return history;
+  return loadHistory();
+}
+
+export function getChatHistory() {
+  void seedIdbFromLocalStorageIfNeeded();
+  return getHistory();
+}
+
+export function clearChatHistory() {
+  _history = [];
+  saveHistory([]);
+  void clearHistoryIdb();
+}
 export function getNeurons() { return getAllNeurons(); }
 export function addNeuron(data) { return saveNeuron(createNeuron(data)); }
 export function removeNeuron(id) { return deleteNeuron(id); }
