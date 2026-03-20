@@ -1552,19 +1552,6 @@ function ncCss() {
   }
   @keyframes ncFadeOut { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
 
-  @media (min-width: 640px) {
-    .ncLayout { flex-direction: row; align-items: flex-start; }
-    .ncMain { flex: 1; min-width: 0; }
-    .ncSide {
-      width: 280px;
-      flex-shrink: 0;
-      max-height: calc(100vh - 200px);
-      overflow-y: auto;
-      position: sticky;
-      top: 16px;
-    }
-  }
-
   @media (max-width: 639px) {
     .ncSide {
       width: 100%;
