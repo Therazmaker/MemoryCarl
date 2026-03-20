@@ -84,3 +84,94 @@ test("recomputeNeuronWeightFromFeedback mantiene ajuste suave", () => {
   assert.ok(next > 0.5);
   assert.ok(next < 0.8);
 });
+
+import {
+  getFeedbackAdjustedWeight,
+  getNeuronCalibrationSummary,
+  getRecentNeuronFeedback,
+  applyNeuronFeedbackAndPersist,
+} from "../src/neuro/feedback.js";
+
+test("getFeedbackAdjustedWeight: neurona con muchos likes tiene peso mayor", () => {
+  const n = createNeuron({
+    id: "n_fw_1",
+    core: { concept: "fw", domain: "general", summary: "" },
+    weight: 0.5,
+    feedbackStats: { likes: 10, dislikes: 1, netScore: 9 },
+    activationLearning: { usefulCount: 8, falsePositiveCount: 1 },
+  });
+  const adjusted = getFeedbackAdjustedWeight(n);
+  assert.ok(adjusted > 0.5, `adjusted (${adjusted}) debe ser > 0.5`);
+});
+
+test("getFeedbackAdjustedWeight: neurona con muchos dislikes tiene peso menor", () => {
+  const n = createNeuron({
+    id: "n_fw_2",
+    core: { concept: "fw2", domain: "general", summary: "" },
+    weight: 0.5,
+    feedbackStats: { likes: 1, dislikes: 10, netScore: -9 },
+    activationLearning: { usefulCount: 1, falsePositiveCount: 8 },
+  });
+  const adjusted = getFeedbackAdjustedWeight(n);
+  assert.ok(adjusted < 0.5, `adjusted (${adjusted}) debe ser < 0.5`);
+});
+
+test("getNeuronCalibrationSummary: retorna badge positivo con muchos likes", () => {
+  const n = createNeuron({
+    id: "n_calib_1",
+    core: { concept: "calib", domain: "general", summary: "" },
+    weight: 0.5,
+    feedbackStats: { likes: 8, dislikes: 1, netScore: 7 },
+    activationLearning: { usefulCount: 6, falsePositiveCount: 1 },
+  });
+  const summary = getNeuronCalibrationSummary(n);
+  assert.ok(summary.badge === "very_positive" || summary.badge === "positive");
+  assert.ok(summary.netScore > 0);
+  assert.equal(summary.likes, 8);
+  assert.equal(summary.dislikes, 1);
+});
+
+test("getNeuronCalibrationSummary: retorna badge negativo con muchos dislikes", () => {
+  const n = createNeuron({
+    id: "n_calib_2",
+    core: { concept: "calib2", domain: "general", summary: "" },
+    weight: 0.4,
+    feedbackStats: { likes: 1, dislikes: 8, netScore: -7 },
+    activationLearning: { usefulCount: 1, falsePositiveCount: 6 },
+  });
+  const summary = getNeuronCalibrationSummary(n);
+  assert.ok(summary.badge === "very_negative" || summary.badge === "negative");
+  assert.ok(summary.netScore < 0);
+});
+
+test("getNeuronCalibrationSummary: retorna neutral para neurona sin feedback", () => {
+  const n = createNeuron({
+    id: "n_calib_3",
+    core: { concept: "calib3", domain: "general", summary: "" },
+    weight: 0.5,
+  });
+  const summary = getNeuronCalibrationSummary(n);
+  assert.equal(summary.badge, "neutral");
+  assert.equal(summary.totalVotes, 0);
+});
+
+test("getRecentNeuronFeedback: retorna últimos N feedbacks", () => {
+  resetStorage();
+  saveNeuron(createNeuron({ id: "n_recent_1", core: { concept: "recent", domain: "general", summary: "" }, weight: 0.5 }));
+  recordNeuronFeedback({ neuronId: "n_recent_1", feedback: "like", inputPreview: "msg1", messageId: "msg_1" });
+  recordNeuronFeedback({ neuronId: "n_recent_1", feedback: "dislike", inputPreview: "msg2", messageId: "msg_2" });
+  recordNeuronFeedback({ neuronId: "n_recent_1", feedback: "like", inputPreview: "msg3", messageId: "msg_3" });
+
+  const recent = getRecentNeuronFeedback("n_recent_1", 2);
+  assert.equal(recent.length, 2);
+  // Should be ordered most recent first
+  assert.ok(recent[0].timestamp >= recent[1].timestamp);
+});
+
+test("applyNeuronFeedbackAndPersist: es alias de recordNeuronFeedback", () => {
+  resetStorage();
+  saveNeuron(createNeuron({ id: "n_alias_1", core: { concept: "alias", domain: "general", summary: "" }, weight: 0.5 }));
+  const res = applyNeuronFeedbackAndPersist({ neuronId: "n_alias_1", feedback: "like", inputPreview: "ok", messageId: "msg_alias" });
+  assert.equal(res.applied, true);
+  assert.equal(res.neuron.feedbackStats.likes, 1);
+});

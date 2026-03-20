@@ -188,3 +188,73 @@ export function getMessageFeedbackMap(messageId) {
       return acc;
     }, {});
 }
+
+/**
+ * Devuelve el weight ajustado por feedback sin modificar la neurona.
+ * @param {Neuron} neuron
+ * @returns {number}
+ */
+export function getFeedbackAdjustedWeight(neuron) {
+  if (!neuron) return 0.5;
+  return recomputeNeuronWeightFromFeedback(neuron, {});
+}
+
+/**
+ * Resumen de calibración para mostrar en UI.
+ * @param {Neuron} neuron
+ * @returns {{ label: string, badge: string, netScore: number, totalVotes: number }}
+ */
+export function getNeuronCalibrationSummary(neuron) {
+  const stats = normalizeFeedbackStats(neuron?.feedbackStats);
+  const learning = normalizeActivationLearning(neuron?.activationLearning);
+  const totalVotes = stats.likes + stats.dislikes;
+  const netScore = stats.netScore;
+
+  let label = "Sin feedback";
+  let badge = "neutral";
+
+  if (totalVotes === 0) {
+    label = "Sin feedback aún";
+    badge = "neutral";
+  } else if (netScore >= 5) {
+    label = "Calibración muy positiva";
+    badge = "very_positive";
+  } else if (netScore >= 2) {
+    label = "Calibración positiva";
+    badge = "positive";
+  } else if (netScore <= -5) {
+    label = "Muchos falsos positivos";
+    badge = "very_negative";
+  } else if (netScore <= -2) {
+    label = "Varios falsos positivos";
+    badge = "negative";
+  } else {
+    label = "Calibración neutra";
+    badge = "neutral";
+  }
+
+  if (learning.falsePositiveCount >= 3 && badge !== "very_negative") {
+    label += " · alto FP";
+  }
+
+  return { label, badge, netScore, totalVotes, likes: stats.likes, dislikes: stats.dislikes };
+}
+
+/**
+ * Devuelve los últimos N feedbacks para una neurona.
+ * @param {string} neuronId
+ * @param {number} [limit=5]
+ * @returns {Array}
+ */
+export function getRecentNeuronFeedback(neuronId, limit = 5) {
+  return getNeuronFeedbackHistory(neuronId, { limit: Math.max(1, Number(limit) || 5) });
+}
+
+/**
+ * Aplica feedback y persiste en una sola llamada.
+ * @param {{ neuronId: string, feedback: "like"|"dislike", inputPreview?: string, messageId?: string|null }} params
+ * @returns {{ applied: boolean, duplicate: boolean, neuron: Neuron|null, record?: object }}
+ */
+export function applyNeuronFeedbackAndPersist(params) {
+  return recordNeuronFeedback(params);
+}

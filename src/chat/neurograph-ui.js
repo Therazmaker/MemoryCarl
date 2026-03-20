@@ -10,7 +10,7 @@
  *   wireNeuroGraph(root, sessionState?)
  */
 
-import { getAllNeurons } from "../neuro/neuronStore.js";
+import { getAllNeurons, updateNeuron, getNeuronById } from "../neuro/neuronStore.js";
 import {
   buildNeuronGraph,
   filterGraphNodes,
@@ -19,6 +19,8 @@ import {
   getDomainColors,
   getEmotionColors,
 } from "../neuro/graph.js";
+import { linkNeurons, unlinkNeurons } from "../neuro/connections.js";
+import { getNeuronCalibrationSummary } from "../neuro/feedback.js";
 
 // ---- Estado interno del grafo ----
 const graphState = {
@@ -32,6 +34,8 @@ const graphState = {
   pan:          { x: 0, y: 0 },
   dragging:     null,
   colorBy:      "domain",
+  editorMode:   false,  // true = panel de edición activo
+  editorMsg:    "",     // mensaje de éxito/error tras guardar
 };
 
 // ---- Helpers ----
@@ -168,6 +172,10 @@ function renderNodeDetail() {
     </div>`;
   }
 
+  if (graphState.editorMode) {
+    return renderNodeEditor(n);
+  }
+
   const domainColors = getDomainColors();
   const color = domainColors[n.domain] || "#94a3b8";
 
@@ -185,6 +193,35 @@ function renderNodeDetail() {
       }</span>`
     : "";
 
+  // Calibración feedback
+  const fullNeuron = getNeuronById(n.id) || n;
+  const calib = getNeuronCalibrationSummary(fullNeuron);
+  const calibBadgeClass = {
+    very_positive: "ngCalibBadge--positive",
+    positive:      "ngCalibBadge--positive",
+    very_negative: "ngCalibBadge--negative",
+    negative:      "ngCalibBadge--negative",
+    neutral:       "ngCalibBadge--neutral",
+  }[calib.badge] || "ngCalibBadge--neutral";
+
+  const calibHtml = calib.totalVotes > 0
+    ? `<div class="ngCalibBadge ${calibBadgeClass}">
+        👍 ${calib.likes} · 👎 ${calib.dislikes} · net: ${calib.netScore >= 0 ? "+" : ""}${calib.netScore} · ${esc(calib.label)}
+       </div>`
+    : `<div class="ngCalibBadge ngCalibBadge--neutral" style="opacity:.5">Sin feedback aún</div>`;
+
+  // Conexiones actuales
+  const connections = n.connections || [];
+  const connectionsHtml = connections.length
+    ? connections.slice(0, 8).map((cid) => {
+        const cn = graphState.graph.nodes.find((x) => x.id === cid);
+        return `<div class="ngConnItem">
+          <span class="ngTag" style="background:rgba(255,255,255,.07);color:inherit">${esc(cn ? cn.label : cid)}</span>
+          <button class="ngIconBtn ngUnlinkBtn" data-source="${esc(n.id)}" data-target="${esc(cid)}" style="padding:2px 6px;font-size:10px" title="Quitar conexión">✕</button>
+        </div>`;
+      }).join("")
+    : `<div style="opacity:.4;font-size:11px">Sin conexiones</div>`;
+
   return `
     <div class="ngDetail">
       <div class="ngDetailHeader" style="border-left: 3px solid ${color}">
@@ -194,6 +231,8 @@ function renderNodeDetail() {
       </div>
 
       ${n.summary ? `<div class="ngDetailSummary">${esc(n.summary)}</div>` : ""}
+
+      ${calibHtml}
 
       <div class="ngDetailGrid">
         <div class="ngDetailItem">
@@ -217,11 +256,11 @@ function renderNodeDetail() {
           <div>${fmtDate(n.lastActivated)}</div>
         </div>
         <div class="ngDetailItem">
-          <div class="ngDetailItemLabel">Likes</div>
+          <div class="ngDetailItemLabel">👍 Likes</div>
           <div>${n.feedbackStats?.likes ?? 0}</div>
         </div>
         <div class="ngDetailItem">
-          <div class="ngDetailItemLabel">Dislikes</div>
+          <div class="ngDetailItemLabel">👎 Dislikes</div>
           <div>${n.feedbackStats?.dislikes ?? 0}</div>
         </div>
         <div class="ngDetailItem">
@@ -253,6 +292,66 @@ function renderNodeDetail() {
         <div class="ngDetailSectionTitle">Evidencias</div>
         ${evidenceHtml}
       </div>
+
+      <div class="ngDetailSection">
+        <div class="ngDetailSectionTitle">Conexiones actuales</div>
+        <div class="ngConnList">${connectionsHtml}</div>
+        <div class="ngConnAdd" style="margin-top:8px;display:flex;gap:6px;align-items:center">
+          <input id="ngConnTarget" class="ngSearchInput" style="flex:1;min-width:0" placeholder="ID o concepto a conectar…" />
+          <button class="ngIconBtn" id="ngBtnAddConn" style="white-space:nowrap">+ Conectar</button>
+        </div>
+      </div>
+
+      <div class="ngDetailActions" style="margin-top:12px;display:flex;gap:8px">
+        <button class="ngIconBtn ngBtnEdit" id="ngBtnOpenEditor" style="flex:1">✏️ Editar</button>
+      </div>
+    </div>`;
+}
+
+// ---- Editor de neurona desde el grafo ----
+function renderNodeEditor(n) {
+  const fullNeuron = getNeuronById(n.id) || n;
+  const msg = graphState.editorMsg
+    ? `<div class="ngEditorMsg ${graphState.editorMsg.startsWith("✓") ? "ngEditorMsg--ok" : "ngEditorMsg--err"}">${esc(graphState.editorMsg)}</div>`
+    : "";
+
+  return `
+    <div class="ngDetail ngEditor">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-weight:800;font-size:13px">✏️ Editando: ${esc(n.label)}</div>
+        <button class="ngIconBtn" id="ngBtnCancelEditor" style="padding:4px 8px;font-size:11px">✕ Cancelar</button>
+      </div>
+      ${msg}
+      <form id="ngEditorForm" class="ngEditorForm">
+        <input type="hidden" name="id" value="${esc(n.id)}" />
+        <label class="ngEditorLabel">Concepto</label>
+        <input name="concept" class="ngEditorInput" value="${esc(fullNeuron.core?.concept || "")}" placeholder="Concepto" required />
+        <label class="ngEditorLabel">Summary</label>
+        <textarea name="summary" class="ngEditorInput" rows="2" placeholder="Resumen…">${esc(fullNeuron.core?.summary || "")}</textarea>
+        <label class="ngEditorLabel">Domain</label>
+        <input name="domain" class="ngEditorInput" value="${esc(fullNeuron.core?.domain || "")}" placeholder="domain" />
+        <label class="ngEditorLabel">Emotion</label>
+        <input name="emotion" class="ngEditorInput" value="${esc(fullNeuron.emotion || "neutral")}" placeholder="emotion" />
+        <label class="ngEditorLabel">Triggers (coma)</label>
+        <input name="triggers" class="ngEditorInput" value="${esc((fullNeuron.triggers || []).join(", "))}" placeholder="trigger1, trigger2…" />
+        <label class="ngEditorLabel">Aliases (coma)</label>
+        <input name="aliases" class="ngEditorInput" value="${esc((fullNeuron.meta?.aliases || []).join(", "))}" placeholder="alias1, alias2…" />
+        <label class="ngEditorLabel">Priority</label>
+        <select name="priority" class="ngEditorInput">
+          <option value="low" ${fullNeuron.meta?.priority === "low" ? "selected" : ""}>low</option>
+          <option value="medium" ${(!fullNeuron.meta?.priority || fullNeuron.meta?.priority === "medium") ? "selected" : ""}>medium</option>
+          <option value="high" ${fullNeuron.meta?.priority === "high" ? "selected" : ""}>high</option>
+        </select>
+        <label class="ngEditorLabel" style="display:flex;align-items:center;gap:6px;flex-direction:row">
+          <input type="checkbox" name="pin" ${fullNeuron.meta?.pin ? "checked" : ""} /> Pin
+        </label>
+        <label class="ngEditorLabel">Notes</label>
+        <textarea name="notes" class="ngEditorInput" rows="2" placeholder="Notas internas…">${esc(fullNeuron.meta?.notes || "")}</textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button type="submit" class="ngIconBtn" style="flex:1;background:rgba(99,102,241,.25)">💾 Guardar</button>
+          <button type="button" id="ngBtnCancelEditor2" class="ngIconBtn" style="flex:1">Cancelar</button>
+        </div>
+      </form>
     </div>`;
 }
 
@@ -368,17 +467,18 @@ function ngraphInner(sessionState = {}) {
 }
 
 // ---- Renderizado y re-render ----
-function rerenderGraph(root) {
+function rerenderGraph(root, sessionState = {}) {
   const area        = root.querySelector("#ngGraphArea");
   const detailPanel = root.querySelector("#ngDetailPanel");
   const header      = root.querySelector(".ngHeaderSub");
 
   if (area) {
     area.innerHTML = renderGraphSVG();
-    wireGraphSVG(root);
+    wireGraphSVG(root, sessionState);
   }
   if (detailPanel) {
     detailPanel.innerHTML = renderNodeDetail();
+    wireDetailPanel(root, sessionState);
   }
   if (header) {
     const { graph, filtered } = graphState;
@@ -386,13 +486,13 @@ function rerenderGraph(root) {
   }
 }
 
-function applyFiltersAndRerender(root) {
+function applyFiltersAndRerender(root, sessionState = {}) {
   graphState.filtered = filterGraphNodes(graphState.graph, graphState.filters);
-  rerenderGraph(root);
+  rerenderGraph(root, sessionState);
 }
 
 // ---- Wiring del SVG (nodos clickeables, pan, zoom) ----
-function wireGraphSVG(root) {
+function wireGraphSVG(root, sessionState = {}) {
   const svg = root.querySelector("#ngSvg");
   if (!svg) return;
 
@@ -401,14 +501,18 @@ function wireGraphSVG(root) {
     const nodeEl = e.target.closest("[data-id]");
     if (!nodeEl) {
       graphState.selectedNode = null;
-      rerenderGraph(root);
+      graphState.editorMode   = false;
+      graphState.editorMsg    = "";
+      rerenderGraph(root, sessionState);
       return;
     }
     const id   = nodeEl.dataset.id;
     const node = graphState.filtered.nodes.find((n) => n.id === id);
     if (node) {
       graphState.selectedNode = node;
-      rerenderGraph(root);
+      graphState.editorMode   = false;
+      graphState.editorMsg    = "";
+      rerenderGraph(root, sessionState);
     }
   });
 
@@ -481,21 +585,21 @@ function wireGraphSVG(root) {
 
 // ---- Wiring principal ----
 function wireNeuroGraphInner(root, sessionState = {}) {
-  wireGraphSVG(root);
+  wireGraphSVG(root, sessionState);
 
   // Zoom in/out
   root.querySelector("#ngBtnZoomIn")?.addEventListener("click", () => {
     graphState.zoom = Math.min(graphState.zoom * 1.25, 5);
-    rerenderGraph(root);
+    rerenderGraph(root, sessionState);
   });
   root.querySelector("#ngBtnZoomOut")?.addEventListener("click", () => {
     graphState.zoom = Math.max(graphState.zoom / 1.25, 0.2);
-    rerenderGraph(root);
+    rerenderGraph(root, sessionState);
   });
   root.querySelector("#ngBtnZoomReset")?.addEventListener("click", () => {
     graphState.zoom = 1;
     graphState.pan  = { x: 0, y: 0 };
-    rerenderGraph(root);
+    rerenderGraph(root, sessionState);
   });
 
   // Refrescar
@@ -509,7 +613,7 @@ function wireNeuroGraphInner(root, sessionState = {}) {
     graphState.filters = { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null };
     const searchEl = root.querySelector("#ngSearch");
     if (searchEl) searchEl.value = "";
-    applyFiltersAndRerender(root);
+    applyFiltersAndRerender(root, sessionState);
     // Actualizar selectores
     ["#ngFilterDomain", "#ngFilterEmotion", "#ngFilterRecent", "#ngFilterSource", "#ngFilterManualCategory", "#ngFilterPinned"].forEach((sel) => {
       const el = root.querySelector(sel);
@@ -520,31 +624,31 @@ function wireNeuroGraphInner(root, sessionState = {}) {
   // Filtros
   root.querySelector("#ngFilterDomain")?.addEventListener("change", (e) => {
     graphState.filters.domain = e.target.value || null;
-    applyFiltersAndRerender(root);
+    applyFiltersAndRerender(root, sessionState);
   });
   root.querySelector("#ngFilterEmotion")?.addEventListener("change", (e) => {
     graphState.filters.emotion = e.target.value || null;
-    applyFiltersAndRerender(root);
+    applyFiltersAndRerender(root, sessionState);
   });
   root.querySelector("#ngFilterRecent")?.addEventListener("change", (e) => {
     graphState.filters.recentDays = e.target.value ? parseInt(e.target.value, 10) : null;
-    applyFiltersAndRerender(root);
+    applyFiltersAndRerender(root, sessionState);
   });
   
   root.querySelector("#ngFilterSource")?.addEventListener("change", (e) => {
     graphState.filters.sourceKind = e.target.value || null;
-    applyFiltersAndRerender(root);
+    applyFiltersAndRerender(root, sessionState);
   });
   root.querySelector("#ngFilterManualCategory")?.addEventListener("change", (e) => {
     graphState.filters.manualCategory = e.target.value || null;
-    applyFiltersAndRerender(root);
+    applyFiltersAndRerender(root, sessionState);
   });
   root.querySelector("#ngFilterPinned")?.addEventListener("change", (e) => {
     if (e.target.value === "") graphState.filters.pinned = null;
     else graphState.filters.pinned = e.target.value === "1";
-    applyFiltersAndRerender(root);
+    applyFiltersAndRerender(root, sessionState);
   });
-root.querySelector("#ngColorBy")?.addEventListener("change", (e) => {
+  root.querySelector("#ngColorBy")?.addEventListener("change", (e) => {
     graphState.colorBy = e.target.value || "domain";
     rebuildAndRender(root, sessionState);
   });
@@ -555,9 +659,126 @@ root.querySelector("#ngColorBy")?.addEventListener("change", (e) => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       graphState.filters.search = e.target.value;
-      applyFiltersAndRerender(root);
+      applyFiltersAndRerender(root, sessionState);
     }, 200);
   });
+
+  wireDetailPanel(root, sessionState);
+}
+
+// ---- Wiring del panel de detalle (editor, conexiones) ----
+function wireDetailPanel(root, sessionState = {}) {
+  const panel = root.querySelector("#ngDetailPanel");
+  if (!panel) return;
+
+  // Abrir editor
+  panel.querySelector("#ngBtnOpenEditor")?.addEventListener("click", () => {
+    graphState.editorMode = true;
+    graphState.editorMsg  = "";
+    rerenderDetailPanel(root);
+    wireDetailPanel(root, sessionState);
+  });
+
+  // Cancelar editor
+  ["#ngBtnCancelEditor", "#ngBtnCancelEditor2"].forEach((sel) => {
+    panel.querySelector(sel)?.addEventListener("click", () => {
+      graphState.editorMode = false;
+      graphState.editorMsg  = "";
+      rerenderDetailPanel(root);
+      wireDetailPanel(root, sessionState);
+    });
+  });
+
+  // Guardar edición
+  panel.querySelector("#ngEditorForm")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const id = fd.get("id");
+    if (!id) return;
+
+    const triggers = String(fd.get("triggers") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const aliases  = String(fd.get("aliases")  || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const pin      = fd.get("pin") === "on";
+
+    const patch = {
+      core: {
+        concept: String(fd.get("concept") || "").trim(),
+        domain:  String(fd.get("domain")  || "").trim(),
+        summary: String(fd.get("summary") || "").trim(),
+      },
+      emotion:  String(fd.get("emotion") || "neutral").trim(),
+      triggers,
+      meta: {
+        aliases,
+        priority: fd.get("priority") || "medium",
+        pin,
+        notes: String(fd.get("notes") || "").trim(),
+      },
+    };
+
+    const saved = updateNeuron(id, patch);
+    if (saved) {
+      graphState.editorMsg  = "✓ Cambios guardados";
+      graphState.editorMode = false;
+      // Actualizar el nodo seleccionado en el grafo
+      rebuildAndRender(root, sessionState);
+    } else {
+      graphState.editorMsg = "✗ Error al guardar";
+      rerenderDetailPanel(root);
+      wireDetailPanel(root, sessionState);
+    }
+  });
+
+  // Agregar conexión
+  panel.querySelector("#ngBtnAddConn")?.addEventListener("click", () => {
+    const n = graphState.selectedNode;
+    if (!n) return;
+    const input = panel.querySelector("#ngConnTarget");
+    const rawValue = (input?.value || "").trim();
+    if (!rawValue) return;
+
+    // Buscar por ID o por concepto/alias
+    const all = getAllNeurons();
+    let target = all.find((x) => x.id === rawValue);
+    if (!target) {
+      const lower = rawValue.toLowerCase();
+      target = all.find((x) =>
+        (x.core?.concept || "").toLowerCase() === lower ||
+        (x.meta?.aliases || []).some((a) => a.toLowerCase() === lower)
+      );
+    }
+
+    if (target) {
+      const ok = linkNeurons(n.id, target.id, { connectionSource: "manual" });
+      if (ok) {
+        if (input) input.value = "";
+        rebuildAndRender(root, sessionState);
+        return;
+      }
+    }
+    // Mostrar error inline
+    if (input) {
+      input.style.borderColor = "#f87171";
+      setTimeout(() => { input.style.borderColor = ""; }, 1500);
+    }
+  });
+
+  // Quitar conexión
+  panel.querySelectorAll(".ngUnlinkBtn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sourceId = btn.dataset.source;
+      const targetId = btn.dataset.target;
+      if (sourceId && targetId) {
+        unlinkNeurons(sourceId, targetId);
+        rebuildAndRender(root, sessionState);
+      }
+    });
+  });
+}
+
+function rerenderDetailPanel(root) {
+  const panel = root.querySelector("#ngDetailPanel");
+  if (panel) panel.innerHTML = renderNodeDetail();
 }
 
 function rebuildAndRender(root, sessionState = {}) {
@@ -729,5 +950,35 @@ function ngCss() {
   .ngLegendDot--active { background: #a78bfa; }
   .ngLegendDot--new    { background: #34d399; }
   .ngLegendDot--merged { background: #fbbf24; }
+
+  /* Calibración feedback */
+  .ngCalibBadge {
+    font-size: 11px; padding: 5px 8px; border-radius: 8px; margin: 8px 0;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
+    line-height: 1.4;
+  }
+  .ngCalibBadge--positive { background: rgba(52,211,153,.12); border-color: rgba(52,211,153,.3); color: #34d399; }
+  .ngCalibBadge--negative { background: rgba(248,113,113,.12); border-color: rgba(248,113,113,.3); color: #f87171; }
+  .ngCalibBadge--neutral  { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.08); }
+
+  /* Conexiones */
+  .ngConnList { display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto; }
+  .ngConnItem { display: flex; align-items: center; gap: 6px; }
+
+  /* Editor */
+  .ngEditor { overflow-y: auto; }
+  .ngEditorForm { display: flex; flex-direction: column; gap: 6px; }
+  .ngEditorLabel { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; opacity: .5; margin-top: 4px; }
+  .ngEditorInput {
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 8px; padding: 6px 9px; color: inherit; font-size: 12px;
+    font-family: inherit; outline: none; resize: vertical;
+  }
+  .ngEditorInput:focus { border-color: rgba(99,102,241,.5); }
+  .ngEditorMsg {
+    font-size: 11px; padding: 5px 8px; border-radius: 8px; margin-bottom: 6px;
+  }
+  .ngEditorMsg--ok  { background: rgba(52,211,153,.15); color: #34d399; }
+  .ngEditorMsg--err { background: rgba(248,113,113,.15); color: #f87171; }
   </style>`;
 }

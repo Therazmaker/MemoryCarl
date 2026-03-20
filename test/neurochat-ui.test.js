@@ -50,7 +50,9 @@ test("context window UI renderiza filtros temporales", () => {
   const html = viewContextWindow();
   assert.match(html, /cwFilterTimeContext/i);
   assert.match(html, /cwFilterDateFrom/i);
-  assert.match(html, /Importación histórica batch/i);
+  // Historical import is now in the "Histórico" tab
+  assert.match(html, /Hist/i);
+  assert.match(html, /json_import/i);
 });
 
 test("UI bloquea feedback duplicado por neurona y mensaje", () => {
