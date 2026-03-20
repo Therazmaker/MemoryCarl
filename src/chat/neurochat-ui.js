@@ -336,6 +336,22 @@ function renderRelationSuggestions(suggestions, allNeurons) {
     </div>`;
 }
 
+function renderMobileCoverage() {
+  const r = uiState.lastResult;
+  if (!r) return "";
+  const coverage = r.missingAnalysis?.coverage ?? r.trace?.coverage ?? 0;
+  const covPct   = Math.round(coverage * 100);
+  const covColor = covPct >= 70 ? "#36d399" : covPct >= 40 ? "#fbbf24" : "#fb7185";
+  return `
+    <div class="ncMobileCovRow" id="ncMobileCovRow" aria-label="Cobertura ${covPct}%">
+      <span class="ncMobileCovLabel" aria-hidden="true">Cobertura</span>
+      <div class="ncMobileCovBar" role="progressbar" aria-valuenow="${covPct}" aria-valuemin="0" aria-valuemax="100">
+        <div class="ncMobileCovFill" style="width:${covPct}%;background:${covColor}"></div>
+      </div>
+      <span class="ncMobileCovPct" aria-hidden="true" style="color:${covColor}">${covPct}%</span>
+    </div>`;
+}
+
 function renderSidePanel() {
   const r = uiState.lastResult;
   if (!r) return `<div class="ncSide${uiState.neuronsExpanded ? " ncSide--expanded" : ""}"><div class="ncSideEmpty">Escribe un mensaje para ver neuronas activadas.</div></div>`;
@@ -576,6 +592,8 @@ function nchatInner() {
       <!-- Panel principal de chat -->
       <div class="ncMain">
         <div class="ncMessages" id="ncMessages" role="log" aria-live="polite" aria-label="Historial de conversación">${buildMessagesHtml()}</div>
+
+        ${renderMobileCoverage()}
 
         <div class="ncInputBar">${buildInputBarHtml()}</div>
       </div>
@@ -1247,7 +1265,7 @@ function ncCss() {
   .ncMsgAssistant { align-items: flex-start; }
   .ncMsgBubble {
     max-width: 80%; padding: 10px 14px; border-radius: 14px;
-    font-size: 14px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+    font-size: 14px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;
   }
   .ncMsgUser .ncMsgBubble {
     background: rgba(124,92,255,.3); border-bottom-right-radius: 4px;
@@ -1255,6 +1273,7 @@ function ncCss() {
   .ncMsgAssistant .ncMsgBubble {
     background: rgba(255,255,255,.07); border-bottom-left-radius: 4px;
   }
+  .ncMsgBubble--md { white-space: normal; }
   .ncMsgBubble--md p { margin: 0 0 8px; }
   .ncMsgBubble--md p:last-child { margin: 0; }
   .ncMsgBubble--md ul.ncList, .ncMsgBubble--md ol { margin: 4px 0 8px 20px; padding: 0; }
@@ -1552,6 +1571,21 @@ function ncCss() {
   }
   @keyframes ncFadeOut { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
 
+  /* Mobile coverage row — hidden on desktop (shown in side panel), visible on mobile */
+  .ncMobileCovRow {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 10px;
+  }
+  .ncMobileCovLabel { font-size: 11px; opacity: .6; white-space: nowrap; }
+  .ncMobileCovBar { flex: 1; height: 4px; background: rgba(255,255,255,.1); border-radius: 4px; overflow: hidden; }
+  .ncMobileCovFill { height: 100%; border-radius: 4px; transition: width .4s; }
+  .ncMobileCovPct { font-size: 11px; font-weight: 700; min-width: 32px; text-align: right; }
+
   @media (max-width: 639px) {
     .ncSide {
       width: 100%;
@@ -1586,6 +1620,7 @@ function ncCss() {
     .ncMsgBubble { max-width: 92%; }
     .ncNeuronFeedbackRow { justify-content: flex-start; flex-wrap: wrap; }
     .ncFeedbackBtn { min-height: 32px; min-width: 38px; }
+    .ncMobileCovRow { display: flex; }
   }
   </style>`;
 }
