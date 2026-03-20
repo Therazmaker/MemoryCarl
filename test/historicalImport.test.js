@@ -25,6 +25,9 @@ test("importHistoricalEntries with exact dates", () => {
   assert.equal(out.temporalRange.start, "2025-02-10");
   const all = getAllNeurons();
   assert.ok(all.every((n) => n.temporal?.timeContext));
+  assert.ok(all.every((n) => n.temporal?.isHistorical === true));
+  assert.ok(all.every((n) => n.temporal?.source === "batch_import"));
+  assert.ok(all.every((n) => n.temporal?.confidence === "high"));
 });
 
 test("importHistoricalEntries supports stage without exact date", () => {
@@ -36,4 +39,5 @@ test("importHistoricalEntries supports stage without exact date", () => {
   const imported = getAllNeurons();
   assert.equal(imported[0].temporal.stage, "adolescencia");
   assert.equal(imported[0].temporal.timeContext, "historical");
+  assert.equal(imported[0].temporal.source, "batch_import");
 });

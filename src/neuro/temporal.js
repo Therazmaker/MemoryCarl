@@ -5,6 +5,8 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const TEMPORAL_CONTEXTS = ["current", "recent", "past", "historical", "timeless"];
+export const TEMPORAL_SOURCES = ["batch_import", "manual", "generated", "unknown"];
+export const TEMPORAL_CONFIDENCE = ["low", "medium", "high"];
 
 export const DEFAULT_TEMPORAL_CONFIG = {
   recencyBuckets: {
@@ -64,39 +66,43 @@ function normalizeTimestamp(v) {
 }
 
 export function normalizeTemporalMeta(input, options = {}) {
-  if (!input || typeof input !== "object") return undefined;
-  const date = normalizeDateOnly(input.date);
-  const timestamp = normalizeTimestamp(input.timestamp || input.date);
-  const sourcePeriod = input.sourcePeriod && typeof input.sourcePeriod === "object"
+  const src = (input && typeof input === "object") ? input : {};
+  const date = normalizeDateOnly(src.date);
+  const timestamp = normalizeTimestamp(src.timestamp || src.date);
+  const sourcePeriod = src.sourcePeriod && typeof src.sourcePeriod === "object"
     ? {
-        ...(normalizeDateOnly(input.sourcePeriod.start) ? { start: normalizeDateOnly(input.sourcePeriod.start) } : {}),
-        ...(normalizeDateOnly(input.sourcePeriod.end) ? { end: normalizeDateOnly(input.sourcePeriod.end) } : {}),
+        ...(normalizeDateOnly(src.sourcePeriod.start) ? { start: normalizeDateOnly(src.sourcePeriod.start) } : {}),
+        ...(normalizeDateOnly(src.sourcePeriod.end) ? { end: normalizeDateOnly(src.sourcePeriod.end) } : {}),
       }
     : undefined;
 
   const dateRef = timestamp || (date ? `${date}T00:00:00.000Z` : null);
   const inferredContext = inferTimeContext(dateRef, options);
-  const cleanContext = TEMPORAL_CONTEXTS.includes(input.timeContext) ? input.timeContext : inferredContext;
-  const isPast = typeof input.isPast === "boolean"
-    ? input.isPast
+  const cleanContext = TEMPORAL_CONTEXTS.includes(src.timeContext) ? src.timeContext : inferredContext;
+  const normalizedHistorical = typeof src.isHistorical === "boolean" ? src.isHistorical : undefined;
+  const isPast = typeof src.isPast === "boolean"
+    ? src.isPast
     : (["past", "historical"].includes(cleanContext));
   const recencyWeight = computeRecencyWeight(dateRef, options);
-  const stage = input.stage ? String(input.stage).trim().slice(0, 80) : undefined;
+  const stage = src.stage ? String(src.stage).trim().slice(0, 80) : null;
+  const source = TEMPORAL_SOURCES.includes(src.source) ? src.source : "unknown";
+  const confidence = TEMPORAL_CONFIDENCE.includes(src.confidence) ? src.confidence : undefined;
+  const isHistorical = typeof normalizedHistorical === "boolean"
+    ? normalizedHistorical
+    : (cleanContext === "historical" || isPast);
 
-  const out = {
-    ...(date ? { date } : {}),
+  return {
+    isHistorical,
+    date: date || null,
+    stage,
+    source,
+    ...(confidence ? { confidence } : {}),
     ...(timestamp ? { timestamp } : {}),
     timeContext: cleanContext,
     isPast,
     recencyWeight,
-    ...(stage ? { stage } : {}),
     ...(sourcePeriod && (sourcePeriod.start || sourcePeriod.end) ? { sourcePeriod } : {}),
   };
-
-  if (!out.date && !out.timestamp && !out.stage && !out.sourcePeriod) {
-    return undefined;
-  }
-  return out;
 }
 
 function toTemporal(neuron) {

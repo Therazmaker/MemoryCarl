@@ -49,23 +49,21 @@ export function createHistoricalNeuronsFromEntry(entry = {}, options = {}) {
 }
 
 export function assignTemporalMetadata(neurons = [], entry = {}, options = {}) {
-  const stage = inferStageFromEntry(entry, options) || undefined;
+  const stage = inferStageFromEntry(entry, options) || null;
   const baseTemporal = normalizeTemporalMeta({
+    isHistorical: true,
     date: entry.date,
     timestamp: entry.timestamp,
-    timeContext: entry.isHistorical ? "historical" : entry.timeContext,
+    timeContext: "historical",
     stage,
+    source: "batch_import",
+    confidence: "high",
     sourcePeriod: entry.sourcePeriod,
   }, options.temporalOptions || {});
 
   return neurons.map((n) => sanitizeNeuron({
     ...n,
-    temporal: {
-      ...baseTemporal,
-      ...((!entry.date && !entry.timestamp && stage) ? { timeContext: "historical" } : {}),
-      ...(baseTemporal?.timeContext ? {} : { timeContext: stage ? "historical" : "timeless" }),
-      ...(entry.date || entry.timestamp ? {} : { isPast: Boolean(stage) }),
-    },
+    temporal: baseTemporal,
   })).filter(Boolean);
 }
 

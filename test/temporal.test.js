@@ -9,6 +9,7 @@ test("validate/sanitize temporal meta", () => {
   assert.equal(clean.date, "2025-02-10");
   assert.equal(clean.timeContext, "historical");
   assert.equal(clean.stage, "adolescencia");
+  assert.equal(clean.source, "unknown");
   assert.equal(validateTemporalMeta(clean).length, 0);
   assert.ok(validateTemporalMeta({ date: "2025-99-40" }).length > 0);
 });

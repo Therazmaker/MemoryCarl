@@ -117,6 +117,7 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false, options = {}) 
 
   const temporal = n.temporal || {};
   const temporalBadge = `<span class="ncTag">${esc(temporal.timeContext || "timeless")}</span>`;
+  const temporalLine = [temporal.date, temporal.isHistorical ? "histórico" : "", temporal.stage].filter(Boolean).join(" · ");
   const currentFeedback = options.feedbackMap?.[n.id] || null;
   const feedbackActions = !isGenerated && options.allowFeedback
     ? `<div class="ncNeuronFeedbackRow">
@@ -137,6 +138,7 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false, options = {}) 
         ${temporalBadge}
         ${temporal.date ? `<span class="ncTag">${esc(temporal.date)}</span>` : ""}
         ${temporal.stage ? `<span class="ncTag">stage:${esc(temporal.stage)}</span>` : ""}
+        ${temporalLine ? `<span class="ncTag">🕒 ${esc(temporalLine)}</span>` : ""}
         <span class="ncNeuronW">w: ${fmt(n.weight, 2)}</span>
         ${n.connections?.length ? `<span class="ncNeuronConn">${n.connections.length} conexiones</span>` : ""}
       </div>

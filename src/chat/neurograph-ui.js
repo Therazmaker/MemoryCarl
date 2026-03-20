@@ -10,7 +10,7 @@
  *   wireNeuroGraph(root, sessionState?)
  */
 
-import { getAllNeurons, updateNeuron, getNeuronById } from "../neuro/neuronStore.js";
+import { getAllNeurons, updateNeuron, getNeuronById, updateNeuronTemporal } from "../neuro/neuronStore.js";
 import {
   buildNeuronGraph,
   filterGraphNodes,
@@ -178,6 +178,9 @@ function renderNodeDetail() {
 
   const domainColors = getDomainColors();
   const color = domainColors[n.domain] || "#94a3b8";
+  const temporalInline = [n.temporal?.date, n.temporal?.isHistorical ? "histórico" : "", n.temporal?.stage]
+    .filter(Boolean)
+    .join(" · ");
 
   const triggersHtml = n.triggers.length
     ? n.triggers.map((t) => `<span class="ngTag">${esc(t)}</span>`).join(" ")
@@ -233,6 +236,7 @@ function renderNodeDetail() {
       </div>
 
       ${n.summary ? `<div class="ngDetailSummary">${esc(n.summary)}</div>` : ""}
+      ${temporalInline ? `<div class="ngEvidenceItem">🕒 ${esc(temporalInline)}</div>` : ""}
 
       ${calibHtml}
 
@@ -345,6 +349,13 @@ function renderNodeEditor(n) {
         <input name="emotion" class="ngEditorInput" value="${esc(fullNeuron.emotion || "neutral")}" placeholder="emotion" />
         <label class="ngEditorLabel">Triggers (coma)</label>
         <input name="triggers" class="ngEditorInput" value="${esc((fullNeuron.triggers || []).join(", "))}" placeholder="trigger1, trigger2…" />
+        <label class="ngEditorLabel">Fecha</label>
+        <input type="date" name="date" class="ngEditorInput" value="${esc(fullNeuron.temporal?.date || "")}" />
+        <label class="ngEditorLabel">Stage</label>
+        <input name="stage" class="ngEditorInput" value="${esc(fullNeuron.temporal?.stage || "")}" placeholder="juventud, universidad…" />
+        <label class="ngEditorLabel" style="display:flex;align-items:center;gap:6px;flex-direction:row">
+          <input type="checkbox" name="isHistorical" ${fullNeuron.temporal?.isHistorical ? "checked" : ""} /> Histórico
+        </label>
         <label class="ngEditorLabel">Aliases (coma)</label>
         <input name="aliases" class="ngEditorInput" value="${esc((fullNeuron.meta?.aliases || []).join(", "))}" placeholder="alias1, alias2…" />
         <label class="ngEditorLabel">Priority</label>
@@ -710,6 +721,7 @@ function wireDetailPanel(root, sessionState = {}) {
     const triggers = String(fd.get("triggers") || "").split(",").map((s) => s.trim()).filter(Boolean);
     const aliases  = String(fd.get("aliases")  || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     const pin      = fd.get("pin") === "on";
+    const isHistorical = fd.get("isHistorical") === "on";
 
     const patch = {
       core: {
@@ -729,6 +741,17 @@ function wireDetailPanel(root, sessionState = {}) {
 
     const saved = updateNeuron(id, patch);
     if (saved) {
+      const temporalSaved = updateNeuronTemporal(id, {
+        date: String(fd.get("date") || "").trim() || null,
+        stage: String(fd.get("stage") || "").trim() || null,
+        isHistorical,
+      });
+      if (!temporalSaved) {
+        graphState.editorMsg = "✗ Error al guardar metadata temporal";
+        rerenderDetailPanel(root);
+        wireDetailPanel(root, sessionState);
+        return;
+      }
       graphState.editorMsg  = "✓ Cambios guardados";
       graphState.editorMode = false;
       // Actualizar el nodo seleccionado en el grafo

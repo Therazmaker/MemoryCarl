@@ -77,10 +77,14 @@ function getFiltered() {
 
 function renderCard(n) {
   const temporalBadge = `<span class="cwTemporal cwTemporal--${esc(n.temporal?.timeContext || "timeless")}">${esc(n.temporal?.timeContext || "timeless")}</span>`;
+  const temporalLine = [n.temporal?.date, n.temporal?.isHistorical ? "histórico" : "", n.temporal?.stage]
+    .filter(Boolean)
+    .join(" · ");
   return `<button class="cwCard" data-id="${esc(n.id)}">
     <div class="cwCardHead"><b>${esc(n.core?.concept || "—")}</b><span>${n.meta?.pin ? "📌" : ""}</span></div>
     <div class="cwMeta">${esc(n.type)} · ${esc(n.meta?.manualCategory || "other")} · ${esc(n.meta?.priority || "medium")}</div>
     <div class="cwMeta">${temporalBadge}</div>
+    ${temporalLine ? `<div class="cwMeta">🕒 ${esc(temporalLine)}</div>` : ""}
     <div class="cwSummary">${esc(n.core?.summary || "")}</div>
     <div class="cwAliases">${(n.meta?.aliases || []).slice(0, 3).map((a) => `<span>${esc(a)}</span>`).join("")}</div>
     <div class="cwConn">${(n.connections || []).length} conexiones</div>
@@ -99,6 +103,9 @@ function renderForm(neuron) {
     <label><input type="checkbox" name="pin" ${n.meta?.pin ? "checked" : ""}/> Pin</label>
     <input name="emotion" placeholder="emotion" value="${esc(n.emotion || "neutral")}" />
     <input name="triggers" placeholder="triggers (coma)" value="${esc((n.triggers || []).join(", "))}" />
+    <input name="date" type="date" value="${esc(n.temporal?.date || "")}" />
+    <input name="stage" placeholder="stage" value="${esc(n.temporal?.stage || "")}" />
+    <label><input type="checkbox" name="isHistorical" ${n.temporal?.isHistorical ? "checked" : ""}/> Histórico</label>
     <textarea name="notes" placeholder="notes">${esc(n.meta?.notes || "")}</textarea>
     <input name="colorTag" placeholder="colorTag" value="${esc(n.meta?.colorTag || "")}" />
     <div class="cwFormActions"><button type="submit">${state.editingId ? "Guardar" : "Crear"}</button>${state.editingId ? '<button type="button" id="cwCancelEdit">Cancelar</button>' : ''}</div>
@@ -130,7 +137,7 @@ function renderDetail() {
     <div>evidence: ${(neuron.evidence || []).join(", ")}</div>
     <div>notes: ${esc(neuron.meta?.notes || "")}</div>
     <div>connections: ${(neuron.connections || []).join(", ") || "—"}</div>
-    <div>fecha: ${esc(neuron.temporal?.date || "—")} · contexto: ${esc(neuron.temporal?.timeContext || "timeless")} · stage: ${esc(neuron.temporal?.stage || "—")}</div>
+    <div>fecha: ${esc(neuron.temporal?.date || "—")} · histórico: ${neuron.temporal?.isHistorical ? "sí" : "no"} · contexto: ${esc(neuron.temporal?.timeContext || "timeless")} · stage: ${esc(neuron.temporal?.stage || "—")} · source: ${esc(neuron.temporal?.source || "unknown")}</div>
     <div class="cwEvolutionBox">
       <h4>Evolution</h4>
       <div>usage: ${neuron.evolution.usageCount} · success: ${neuron.evolution.successfulActivations} · failed: ${neuron.evolution.failedActivations}</div>
@@ -361,6 +368,7 @@ export function wireContextWindow(root, rerender) {
     const fd = new FormData(e.currentTarget);
     const payload = Object.fromEntries(fd.entries());
     payload.pin = fd.get("pin") === "on";
+    payload.isHistorical = fd.get("isHistorical") === "on";
     if (state.editingId) await updateContextWindowNeuron(state.editingId, payload);
     else await createContextWindowNeuron(payload);
     state.editingId = null;
