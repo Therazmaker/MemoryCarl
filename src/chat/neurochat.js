@@ -6,6 +6,7 @@ import { processNeuroInput } from "../neuro/neurocore.js";
 import { getAllNeurons, saveNeuron, deleteNeuron } from "../neuro/neuronStore.js";
 import { createNeuron } from "../neuro/schemas.js";
 import { getMessageFeedbackMap, recordNeuronFeedback } from "../neuro/feedback.js";
+import { saveMemory, getAllMemories, searchMemories, detectMemoryEmotion, extractMemoryTags, inferMemoryDate } from "../memory/memoryStore.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
 const DB_NAME = "memorycarl_chat";
@@ -162,6 +163,7 @@ export async function sendMessage(userInput, options = {}) {
   appendMessage("assistant", result.reply, {
     messageId,
     activated: result.activated.length,
+    activatedNeuronIds: (result.activated || []).map((a) => a.neuron?.id).filter(Boolean),
     generated: result.generated.length,
     coverage: result.missingAnalysis.coverage,
     mode,
@@ -246,3 +248,27 @@ export function clearChatHistory() {
 export function getNeurons() { return getAllNeurons(); }
 export function addNeuron(data) { return saveNeuron(createNeuron(data)); }
 export function removeNeuron(id) { return deleteNeuron(id); }
+
+export function saveMemoryFromMessage(messageId, options = {}) {
+  const history = getHistory();
+  const userMessage = [...history].reverse().find((m) => m.role === "user" && (!messageId || m.messageId === messageId));
+  if (!userMessage) throw new Error("No se encontró un mensaje de usuario para guardar");
+  const assistantMessage = [...history].reverse().find((m) => m.role === "assistant" && m.messageId === userMessage.messageId);
+  const linkedNeurons = assistantMessage?.activatedNeuronIds || [];
+  const text = userMessage.content || "";
+  const memory = saveMemory({
+    text,
+    date: inferMemoryDate(text),
+    emotion: detectMemoryEmotion(text),
+    tags: extractMemoryTags(text),
+    context: options.context || `neurochat:${userMessage.mode || "chat"}`,
+    importance: options.importance || "medium",
+    linkedNeurons,
+  });
+  return memory;
+}
+
+export function getMemories(options = {}) {
+  const q = String(options.query || "").trim();
+  return q ? searchMemories(q) : getAllMemories();
+}
