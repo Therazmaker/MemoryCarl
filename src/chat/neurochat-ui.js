@@ -8,7 +8,8 @@
  *   initNeuroChat()   → inicialización del módulo
  */
 
-import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, saveMemoryFromMessage, getMemories } from "./neurochat.js";
+import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
+import { saveMemory, updateMemory, deleteMemory } from "../memory/memoryStore.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
 import {
@@ -57,6 +58,16 @@ const uiState = {
   memoryDraftMessageId: null,
   memorySuggestionText: "",
   memorySearch: "",
+  memoryFilters: {
+    emotion: "",
+    importance: "",
+    stage: "",
+    tags: "",
+    dateFrom: "",
+    dateTo: "",
+  },
+  selectedMemoryId: null,
+  memoryComposerOpen: false,
 };
 
 const MODE_OPTIONS = [
@@ -698,27 +709,114 @@ function buildInputBarHtml() {
   `;
 }
 
-function renderMemoriesTimeline() {
-  const memories = getMemories({ query: uiState.memorySearch || "" });
-  const rows = memories.length
-    ? memories.map((m) => `
-      <div class="ncMemoryCard">
-        <div class="ncMemoryHead">
-          <span class="ncMemoryDate">${esc(m.date || "Sin fecha")}</span>
-          <span class="ncTag">${esc(m.emotion || "neutral")}</span>
-        </div>
-        <div class="ncMemoryText">${esc(m.text || "")}</div>
-        <div class="ncMemoryMeta">tags: ${esc((m.tags || []).join(", ") || "—")} · neuronas vinculadas: ${(m.linkedNeurons || []).length}</div>
-      </div>
-    `).join("")
-    : `<div class="ncWelcomeSub">Aún no hay memorias guardadas.</div>`;
+export function renderMemoriesTimeline() {
+  const filters = {
+    ...uiState.memoryFilters,
+    tags: String(uiState.memoryFilters.tags || "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean),
+  };
+  const memories = getMemories({ query: uiState.memorySearch || "", filters });
+  const selectedMemory = memories.find((m) => m.id === uiState.selectedMemoryId) || memories[memories.length - 1] || null;
+  const rowsByYear = memories.reduce((acc, m) => {
+    const year = String(m.date || "Sin fecha").slice(0, 4) || "Sin fecha";
+    if (!acc[year]) acc[year] = [];
+    acc[year].push(m);
+    return acc;
+  }, {});
+  const rows = Object.keys(rowsByYear).sort().reverse().map((year) => `
+    <div class="ncMemoryGroup">
+      <div class="ncMemoryGroupYear">${esc(year)}</div>
+      ${rowsByYear[year].map((m) => `
+        <button class="ncMemoryCard ${selectedMemory?.id === m.id ? "ncMemoryCard--active" : ""} ${m.isMilestone ? "ncMemoryCard--milestone" : ""}" data-open-memory="${esc(m.id)}">
+          <div class="ncMemoryHead">
+            <span class="ncMemoryDate">${esc(m.date || "Sin fecha")}</span>
+            <span class="ncTag">${esc(m.emotion || "neutral")}</span>
+          </div>
+          <div class="ncMemoryTitle">${m.isMilestone ? "⭐ " : ""}${esc(m.title || "Sin título")}</div>
+          <div class="ncMemoryText">${esc((m.text || "").slice(0, 140))}${(m.text || "").length > 140 ? "…" : ""}</div>
+          <div class="ncMemoryMeta">importancia: ${esc(m.importance || "medium")} · tags: ${esc((m.tags || []).join(", ") || "—")} · neuronas: ${(m.linkedNeurons || []).length}</div>
+        </button>
+      `).join("")}
+    </div>
+  `).join("");
 
   return `
     <div class="ncMemoriesWrap">
       <div class="ncMemoriesToolbar">
         <input class="ncSettingsInput" id="ncMemorySearch" placeholder="Buscar memorias..." value="${esc(uiState.memorySearch)}" />
+        <select class="ncSettingsInput ncSettingsInputSm" id="ncMemoryEmotionFilter">
+          <option value="">Emoción</option>
+          <option value="joy" ${uiState.memoryFilters.emotion === "joy" ? "selected" : ""}>joy</option>
+          <option value="sadness" ${uiState.memoryFilters.emotion === "sadness" ? "selected" : ""}>sadness</option>
+          <option value="fear" ${uiState.memoryFilters.emotion === "fear" ? "selected" : ""}>fear</option>
+          <option value="anger" ${uiState.memoryFilters.emotion === "anger" ? "selected" : ""}>anger</option>
+          <option value="neutral" ${uiState.memoryFilters.emotion === "neutral" ? "selected" : ""}>neutral</option>
+        </select>
+        <select class="ncSettingsInput ncSettingsInputSm" id="ncMemoryImportanceFilter">
+          <option value="">Importancia</option>
+          <option value="high" ${uiState.memoryFilters.importance === "high" ? "selected" : ""}>high</option>
+          <option value="medium" ${uiState.memoryFilters.importance === "medium" ? "selected" : ""}>medium</option>
+          <option value="low" ${uiState.memoryFilters.importance === "low" ? "selected" : ""}>low</option>
+        </select>
+        <input class="ncSettingsInput ncSettingsInputSm" id="ncMemoryTagsFilter" placeholder="tags: trabajo,familia" value="${esc(uiState.memoryFilters.tags)}" />
+        <input class="ncSettingsInput ncSettingsInputSm" id="ncMemoryStageFilter" placeholder="stage (past/present/future)" value="${esc(uiState.memoryFilters.stage)}" />
+        <input class="ncSettingsInput ncSettingsInputSm" id="ncMemoryDateFromFilter" type="date" value="${esc(uiState.memoryFilters.dateFrom)}" />
+        <input class="ncSettingsInput ncSettingsInputSm" id="ncMemoryDateToFilter" type="date" value="${esc(uiState.memoryFilters.dateTo)}" />
+        <button class="ncActionBtn ncActionBtnPrimary" id="btnNewMemory">Nueva memoria</button>
       </div>
-      <div class="ncMemoriesTimeline">${rows}</div>
+      ${uiState.memoryComposerOpen ? renderNewMemoryComposer() : ""}
+      <div class="ncMemoriesLayout">
+        <div class="ncMemoriesTimeline">${rows || `<div class="ncWelcomeSub">Aún no hay memorias guardadas.</div>`}</div>
+        <div class="ncMemoryDetailWrap">${renderMemoryDetail(selectedMemory)}</div>
+      </div>
+    </div>
+  `;
+}
+
+export function __setNeuroChatUiStateForTests(patch = {}) {
+  Object.assign(uiState, patch);
+}
+
+function renderNewMemoryComposer() {
+  return `
+    <div class="ncNewMemoryComposer">
+      <input class="ncSettingsInput" id="ncNewMemoryTitle" placeholder="Título" />
+      <textarea class="ncInput" id="ncNewMemoryText" placeholder="Escribe la memoria..." rows="3"></textarea>
+      <input class="ncSettingsInput ncSettingsInputSm" id="ncNewMemoryDate" type="date" />
+      <input class="ncSettingsInput ncSettingsInputSm" id="ncNewMemoryTags" placeholder="tags separadas por coma" />
+      <button class="ncActionBtn ncActionBtnPrimary" id="btnCreateMemory">Guardar memoria</button>
+    </div>
+  `;
+}
+
+function renderMemoryDetail(memory) {
+  if (!memory) return `<div class="ncWelcomeSub">Selecciona una memoria para ver el detalle.</div>`;
+  const neuronList = (memory.linkedNeurons || []).map((id) => `<li>${esc(id)}</li>`).join("");
+  const relatedInsights = (memory.linkedNeurons || [])
+    .flatMap((id) => getMemoryContextByNeuron(id).insights || [])
+    .slice(-5);
+  const insightsHtml = relatedInsights.length
+    ? relatedInsights.map((i) => `<li><b>${esc(i.title || i.type || "Insight")}</b>: ${esc(i.summary || "")}</li>`).join("")
+    : "<li>Sin insights relacionados aún.</li>";
+  return `
+    <div class="ncMemoryDetail">
+      <div class="ncMemoryDetailHead">
+        <input class="ncSettingsInput" id="ncDetailTitle" value="${esc(memory.title || "")}" />
+        <label><input type="checkbox" id="ncDetailMilestone" ${memory.isMilestone ? "checked" : ""}/> Hito</label>
+      </div>
+      <textarea class="ncInput" id="ncDetailText" rows="8">${esc(memory.text || "")}</textarea>
+      <div class="ncMemoryDetailMeta">Fecha: ${esc(memory.date || "—")} · Emoción: ${esc(memory.emotion || "neutral")} · Importancia: ${esc(memory.importance || "medium")} · Source: ${esc(memory.source || "chat")}</div>
+      <div class="ncMemoryDetailMeta">Temporal stage: ${esc(memory.temporal?.stage || "unknown")} · Contexto: ${esc(memory.context || "chat")}</div>
+      <div class="ncMemoryDetailMeta">Neuronas vinculadas:</div>
+      <ul class="ncMemoryLinkedList">${neuronList || "<li>Sin vínculos.</li>"}</ul>
+      <div class="ncMemoryDetailMeta">Insights relacionados:</div>
+      <ul class="ncMemoryLinkedList">${insightsHtml}</ul>
+      <div class="ncSuggestionActions">
+        <button class="ncActionBtn ncActionBtnPrimary" data-update-memory="${esc(memory.id)}">Guardar cambios</button>
+        <button class="ncActionBtn" data-delete-memory="${esc(memory.id)}">Eliminar</button>
+      </div>
     </div>
   `;
 }
@@ -1138,6 +1236,87 @@ function wireNeuroChatInner(root) {
   root.querySelector("#ncMemorySearch")?.addEventListener("input", (e) => {
     uiState.memorySearch = e.target.value || "";
     fullRerender();
+  });
+  root.querySelector("#ncMemoryEmotionFilter")?.addEventListener("change", (e) => {
+    uiState.memoryFilters.emotion = e.target.value || "";
+    fullRerender();
+  });
+  root.querySelector("#ncMemoryImportanceFilter")?.addEventListener("change", (e) => {
+    uiState.memoryFilters.importance = e.target.value || "";
+    fullRerender();
+  });
+  root.querySelector("#ncMemoryTagsFilter")?.addEventListener("input", (e) => {
+    uiState.memoryFilters.tags = e.target.value || "";
+    fullRerender();
+  });
+  root.querySelector("#ncMemoryStageFilter")?.addEventListener("input", (e) => {
+    uiState.memoryFilters.stage = e.target.value || "";
+    fullRerender();
+  });
+  root.querySelector("#ncMemoryDateFromFilter")?.addEventListener("change", (e) => {
+    uiState.memoryFilters.dateFrom = e.target.value || "";
+    fullRerender();
+  });
+  root.querySelector("#ncMemoryDateToFilter")?.addEventListener("change", (e) => {
+    uiState.memoryFilters.dateTo = e.target.value || "";
+    fullRerender();
+  });
+  root.querySelector("#btnNewMemory")?.addEventListener("click", () => {
+    uiState.memoryComposerOpen = !uiState.memoryComposerOpen;
+    fullRerender();
+  });
+  root.querySelector("#btnCreateMemory")?.addEventListener("click", () => {
+    try {
+      const title = root.querySelector("#ncNewMemoryTitle")?.value || "";
+      const text = root.querySelector("#ncNewMemoryText")?.value || "";
+      const date = root.querySelector("#ncNewMemoryDate")?.value || "";
+      const tags = (root.querySelector("#ncNewMemoryTags")?.value || "").split(",").map((t) => t.trim()).filter(Boolean);
+      const saved = saveMemory({
+        title,
+        text,
+        date,
+        tags,
+        source: "timeline",
+        context: "manual_timeline",
+        temporal: { stage: "past", date },
+      });
+      uiState.selectedMemoryId = saved.id;
+      uiState.memoryComposerOpen = false;
+      uiState.error = null;
+    } catch (err) {
+      uiState.error = err.message || "No se pudo crear la memoria";
+    }
+    fullRerender();
+  });
+  root.querySelectorAll("[data-open-memory]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      uiState.selectedMemoryId = btn.getAttribute("data-open-memory");
+      fullRerender();
+    });
+  });
+  root.querySelectorAll("[data-update-memory]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const memoryId = btn.getAttribute("data-update-memory");
+      try {
+        updateMemory(memoryId, {
+          title: root.querySelector("#ncDetailTitle")?.value || "",
+          text: root.querySelector("#ncDetailText")?.value || "",
+          isMilestone: Boolean(root.querySelector("#ncDetailMilestone")?.checked),
+        });
+      } catch (err) {
+        uiState.error = err.message || "No se pudo editar la memoria";
+      }
+      fullRerender();
+    });
+  });
+  root.querySelectorAll("[data-delete-memory]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const memoryId = btn.getAttribute("data-delete-memory");
+      if (!memoryId) return;
+      deleteMemory(memoryId);
+      if (uiState.selectedMemoryId === memoryId) uiState.selectedMemoryId = null;
+      fullRerender();
+    });
   });
 
   // ---- Settings button ----
@@ -1561,16 +1740,29 @@ function ncCss() {
     background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
     border-radius: 16px; padding: 12px;
   }
-  .ncMemoriesToolbar { margin-bottom: 10px; }
-  .ncMemoriesTimeline { display: flex; flex-direction: column; gap: 8px; }
+  .ncMemoriesToolbar { margin-bottom: 10px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .ncMemoriesLayout { display: grid; gap: 12px; grid-template-columns: minmax(0, 1.2fr) minmax(0, .9fr); }
+  .ncMemoriesTimeline { display: flex; flex-direction: column; gap: 8px; max-height: 64vh; overflow: auto; padding-right: 2px; }
+  .ncMemoryGroup { display: flex; flex-direction: column; gap: 8px; }
+  .ncMemoryGroupYear { font-size: 12px; font-weight: 800; opacity: .75; margin-top: 4px; }
   .ncMemoryCard {
     background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-    border-radius: 10px; padding: 10px;
+    border-radius: 10px; padding: 10px; text-align: left; color: inherit; cursor: pointer; width: 100%;
   }
+  .ncMemoryCard--active { border-color: rgba(124,92,255,.45); box-shadow: inset 0 0 0 1px rgba(124,92,255,.25); }
+  .ncMemoryCard--milestone { border-color: rgba(251,191,36,.4); background: rgba(251,191,36,.08); }
   .ncMemoryHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .ncMemoryTitle { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
   .ncMemoryDate { font-size: 12px; font-weight: 700; opacity: .75; }
   .ncMemoryText { font-size: 14px; line-height: 1.45; }
   .ncMemoryMeta { font-size: 11px; opacity: .6; margin-top: 6px; }
+  .ncMemoryDetailWrap { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px; }
+  .ncMemoryDetailHead { display: flex; gap: 8px; align-items: center; }
+  .ncMemoryDetailMeta { font-size: 11px; opacity: .76; margin-top: 8px; line-height: 1.35; }
+  .ncMemoryLinkedList { margin: 4px 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; opacity: .85; }
+  .ncNewMemoryComposer { margin-bottom: 10px; display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+  .ncNewMemoryComposer .ncInput { min-height: 78px; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 8px; grid-column: 1 / -1; background: rgba(255,255,255,.03); }
+  .ncNewMemoryComposer #btnCreateMemory { justify-self: start; }
 
   /* Settings modal overlay */
   .ncSettingsOverlay {
@@ -1698,6 +1890,9 @@ function ncCss() {
     .ncInput { width: 100%; flex-basis: 100%; }
     .ncSendBtn { min-width: 48px; min-height: 42px; padding: 8px 10px; }
     .ncMemoryBtn { width: 100%; }
+    .ncMemoriesLayout { grid-template-columns: 1fr; }
+    .ncNewMemoryComposer { grid-template-columns: 1fr; }
+    .ncMemoriesToolbar .ncSettingsInputSm { max-width: 100%; width: 100%; }
     .ncMsgBubble { max-width: 92%; }
     .ncNeuronFeedbackRow { justify-content: flex-start; flex-wrap: wrap; }
     .ncFeedbackBtn { min-height: 32px; min-width: 38px; }
