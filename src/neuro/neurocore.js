@@ -29,6 +29,8 @@ import { generateRelationSuggestions } from "./structuredFeedback.js";
 import { chooseReplyMode, extractKnowledgeFromGeminiReply, applyTriggerCandidates } from "./activeLearnEngine.js";
 import { upsertRelation, getAllRelations } from "./relationStore.js";
 import { getAllPatterns } from "./responsePatterns.js";
+import { findRelevantMemories } from "../memory/memoryRecall.js";
+import { getAllMemories } from "../memory/memoryStore.js";
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -485,6 +487,27 @@ export async function processNeuroInput(userInput, options = {}) {
   const memorySuggestion = detectMemoryCandidate(userInput);
   addStep(trace, "memory_candidate_detected", memorySuggestion);
 
+  const recentMemoryRecallIds = (options.history || [])
+    .filter((msg) => msg?.role === "assistant")
+    .flatMap((msg) => msg?.memoryRecallIds || [])
+    .slice(-8);
+
+  const memoryRecallResult = findRelevantMemories(
+    userInput,
+    getAllMemories(),
+    finalActivated,
+    {
+      threshold: options.memoryRecallThreshold ?? 0.65,
+      maxResults: options.memoryRecallMaxResults ?? 3,
+      recentMemoryIds: recentMemoryRecallIds,
+    },
+  );
+  addStep(trace, "memory_recall_evaluated", {
+    threshold: memoryRecallResult.threshold,
+    candidates: memoryRecallResult.ranked.length,
+    topScore: memoryRecallResult.ranked[0]?.score || 0,
+  });
+
   addStep(trace, "choose_reply_mode");
   const patternCount = (() => {
     try { return getAllPatterns().length; } catch (_e) { return 0; }
@@ -606,6 +629,15 @@ export async function processNeuroInput(userInput, options = {}) {
     addStep(trace, "reply_received", { source: replySource });
   }
 
+  if (memoryRecallResult.ranked.length > 0) {
+    const recallText = memoryRecallResult.ranked.map((item) => item.snippet).join("\n\n");
+    reply = `${reply}\n\n${recallText}`;
+    addStep(trace, "memory_recall_attached", {
+      count: memoryRecallResult.ranked.length,
+      topScore: memoryRecallResult.ranked[0]?.score || 0,
+    });
+  }
+
   recordTiming(trace, "reply", Date.now() - t4);
 
   let knowledgeExtracted = { relationHints: [], triggerCandidates: [], quality: "low", delta: 0 };
@@ -710,6 +742,8 @@ export async function processNeuroInput(userInput, options = {}) {
     insightSummary: insightResult.insightSummary,
     temporalContext,
     memorySuggestion,
+    memoryRecall: memoryRecallResult.ranked,
+    memoryRecallThreshold: memoryRecallResult.threshold,
     reasoningContext,
     insightTrace: {
       clusters: insightResult.clusters,

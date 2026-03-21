@@ -204,6 +204,16 @@ export async function sendMessage(userInput, options = {}) {
     premiumUsed: result.premiumDecision?.usePremium || false,
     generatedBy: result.generatedBy || "policy",
     manualOverrideUsed: Boolean(result.manualOverrideUsed),
+    memoryRecall: (result.memoryRecall || []).map((entry) => ({
+      id: entry.memory?.id,
+      title: entry.memory?.title || "Memoria sin título",
+      date: entry.memory?.date || entry.memory?.temporal?.date || "—",
+      emotion: entry.memory?.emotion || "neutral",
+      score: entry.score,
+      insight: entry.insight,
+      snippet: entry.snippet,
+    })),
+    memoryRecallIds: (result.memoryRecall || []).map((entry) => entry.memory?.id).filter(Boolean),
   });
 
   return {
