@@ -135,6 +135,23 @@ function renderMarkdown(raw) {
 
 // ---- Renderizado de componentes ----
 
+function renderMemoryRecallCard(msg) {
+  const recalls = Array.isArray(msg?.memoryRecall) ? msg.memoryRecall.slice(0, 3) : [];
+  if (!recalls.length) return "";
+  const items = recalls.map((recall) => `
+    <button class="ncRecallItem" data-open-memory-timeline="${esc(recall.id || "")}">
+      <div class="ncRecallItemHead">🧠 ${esc(recall.date || "—")} — ${esc(recall.title || "Memoria")}</div>
+      <div class="ncRecallItemMeta">Emoción: ${esc(recall.emotion || "neutral")} · score ${fmt(recall.score || 0, 2)}</div>
+      <div class="ncRecallItemInsight">${esc(recall.insight || "").slice(0, 190)}</div>
+    </button>`).join("");
+
+  return `
+    <details class="ncMemoryRecall">
+      <summary>🧠 Memoria relacionada (${recalls.length})</summary>
+      <div class="ncMemoryRecallList">${items}</div>
+    </details>`;
+}
+
 function renderMessage(msg) {
   const isUser = msg.role === "user";
   const time = timeSince(msg.ts);
@@ -149,9 +166,12 @@ function renderMessage(msg) {
       <button class="ncRfBtn" data-rf-rating="useless" data-rf-msg="${esc(msg.messageId)}" title="No útil">No útil</button>
     </div>` : "";
 
+  const memoryRecall = !isUser ? renderMemoryRecallCard(msg) : "";
+
   return `
     <div class="ncMsg ${isUser ? "ncMsgUser" : "ncMsgAssistant"}" data-msg-id="${esc(msg.messageId || "")}">
       ${bodyHtml}
+      ${memoryRecall}
       <div class="ncMsgMeta">${time}${msg.coverage != null ? ` · cobertura ${Math.round(msg.coverage * 100)}%` : ""}</div>
       ${responseFeedback}
     </div>`;
@@ -1048,6 +1068,16 @@ function wireMessageEvents(root) {
     });
   });
 
+  root.querySelectorAll("[data-open-memory-timeline]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const memoryId = btn.getAttribute("data-open-memory-timeline");
+      if (!memoryId) return;
+      uiState.selectedMemoryId = memoryId;
+      uiState.activeTab = "memories";
+      fullRerender();
+    });
+  });
+
   root.querySelectorAll("[data-rf-rating]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const rating = btn.getAttribute("data-rf-rating");
@@ -1887,6 +1917,34 @@ function ncCss() {
   .ncMobileCovBar { flex: 1; height: 4px; background: rgba(255,255,255,.1); border-radius: 4px; overflow: hidden; }
   .ncMobileCovFill { height: 100%; border-radius: 4px; transition: width .4s; }
   .ncMobileCovPct { font-size: 11px; font-weight: 700; min-width: 32px; text-align: right; }
+
+  .ncMemoryRecall {
+    margin-top: 8px;
+    border: 1px solid rgba(124,92,255,.22);
+    border-radius: 10px;
+    background: rgba(124,92,255,.08);
+    padding: 8px 10px;
+  }
+  .ncMemoryRecall summary {
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255,255,255,.88);
+  }
+  .ncMemoryRecallList { margin-top: 8px; display: grid; gap: 6px; }
+  .ncRecallItem {
+    text-align: left;
+    border: 1px solid rgba(255,255,255,.12);
+    background: rgba(0,0,0,.18);
+    border-radius: 8px;
+    padding: 8px;
+    color: inherit;
+    cursor: pointer;
+  }
+  .ncRecallItem:hover { border-color: rgba(124,92,255,.55); }
+  .ncRecallItemHead { font-size: 12px; font-weight: 700; }
+  .ncRecallItemMeta { font-size: 11px; opacity: .72; margin-top: 4px; }
+  .ncRecallItemInsight { font-size: 11px; opacity: .9; margin-top: 6px; line-height: 1.35; }
 
   @media (max-width: 639px) {
     .ncSide {
