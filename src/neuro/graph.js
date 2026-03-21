@@ -162,6 +162,7 @@ export function buildNeuronGraph(neurons, options = {}) {
       },
       evolution: n.evolution || null,
       isManual,
+      deleted: Boolean(n.deleted),
       color,
       size,
       status,  // "normal" | "active" | "new" | "merged"
@@ -224,6 +225,10 @@ export function buildNeuronGraph(neurons, options = {}) {
  */
 export function filterGraphNodes(graph, filters = {}) {
   let nodes = graph.nodes;
+
+  if (!filters.showDeleted) {
+    nodes = nodes.filter((n) => !n.deleted);
+  }
 
   if (filters.domain) {
     nodes = nodes.filter((n) => n.domain === filters.domain);

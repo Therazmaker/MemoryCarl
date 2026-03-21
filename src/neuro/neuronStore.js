@@ -10,6 +10,8 @@ import { rebuildGraph } from "./connections.js";
 import { normalizeTemporalMeta } from "./temporal.js";
 
 const STORE_KEY = "memorycarl_neurochat_neurons";
+const MEMORY_KEY = "memorycarl_memories_v1";
+const INSIGHT_HISTORY_KEY = "memorycarl_neurochat_insight_history";
 
 // ---- Helpers internos ----
 
@@ -42,6 +44,26 @@ function writeAll(neurons) {
     localStorage.setItem(STORE_KEY, JSON.stringify(neurons));
   } catch (e) {
     console.error("[neuronStore] Error al guardar neuronas:", e);
+  }
+}
+
+function readJsonArray(key) {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem(key);
+    const parsed = JSON.parse(raw || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_e) {
+    return [];
+  }
+}
+
+function writeJsonArray(key, value) {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(key, JSON.stringify(Array.isArray(value) ? value : []));
+  } catch (_e) {
+    // noop
   }
 }
 
@@ -84,8 +106,10 @@ async function reindexAndPersist(neurons) {
 // ---- API pública ----
 
 /** Devuelve todas las neuronas almacenadas. */
-export function getAllNeurons() {
-  return readAll();
+export function getAllNeurons(options = {}) {
+  const all = readAll();
+  if (options.includeDeleted) return all;
+  return all.filter((n) => !n.deleted);
 }
 
 /** Devuelve una neurona por ID o null si no existe. */
@@ -184,11 +208,7 @@ export function updateNeuronTemporal(id, temporalPatch = {}) {
  * @returns {boolean} true si se encontró y eliminó
  */
 export function deleteNeuron(id) {
-  const all = readAll();
-  const next = all.filter((n) => n.id !== id);
-  if (next.length === all.length) return false;
-  writeAll(next);
-  return true;
+  return hardDeleteNeuron(id);
 }
 
 /**
@@ -227,7 +247,7 @@ export function reindexConnections() {
 }
 
 export function getManualContextNeurons() {
-  return readAll().filter((n) => isManualNeuron(n));
+  return readAll().filter((n) => isManualNeuron(n) && !n.deleted);
 }
 
 export function getPinnedContextNeurons() {
@@ -240,10 +260,13 @@ export function getContextNeuronsByCategory(category) {
 
 export function searchManualContextNeurons(query, options = {}) {
   const tokens = tokenizeSearch(query);
-  return getManualContextNeurons().filter((n) => {
+  const source = options.showDeleted ? readAll().filter((n) => isManualNeuron(n)) : getManualContextNeurons();
+  return source.filter((n) => {
     if (options.category && n.meta?.manualCategory !== options.category) return false;
     if (options.type && n.type !== options.type) return false;
     if (options.priority && n.meta?.priority !== options.priority) return false;
+    if (options.deleted === false && n.deleted) return false;
+    if (options.deleted === true && !n.deleted) return false;
     if (options.pinned != null && Boolean(n.meta?.pin) !== Boolean(options.pinned)) return false;
     if (options.withConnections === true && (!Array.isArray(n.connections) || n.connections.length === 0)) return false;
     if (options.withConnections === false && Array.isArray(n.connections) && n.connections.length > 0) return false;
@@ -306,10 +329,114 @@ export async function updateManualContextNeuron(id, patch) {
 }
 
 export async function deleteManualContextNeuron(id) {
+  const target = getNeuronById(id);
+  if (!target || !isManualNeuron(target)) return false;
+  return deleteNeuronSafely(id, { hard: true });
+}
+
+export function removeNeuronFromMemories(neuronId) {
+  if (!neuronId) return 0;
+  const memories = readJsonArray(MEMORY_KEY);
+  let touched = 0;
+  const next = memories.map((m) => {
+    const linked = Array.isArray(m.linkedNeurons) ? m.linkedNeurons : [];
+    const filtered = linked.filter((id) => id !== neuronId);
+    if (filtered.length === linked.length) return m;
+    touched++;
+    const display = Array.isArray(m.linkedNeuronDisplay) ? m.linkedNeuronDisplay.filter((x) => x?.id !== neuronId) : [];
+    return { ...m, linkedNeurons: filtered, linkedNeuronDisplay: display };
+  });
+  if (touched > 0) writeJsonArray(MEMORY_KEY, next);
+  return touched;
+}
+
+export function removeNeuronFromInsights(neuronId) {
+  if (!neuronId) return 0;
+  const history = readJsonArray(INSIGHT_HISTORY_KEY);
+  let touched = 0;
+  const next = history.map((ins) => {
+    const based = Array.isArray(ins.basedOnNeurons) ? ins.basedOnNeurons : [];
+    const filtered = based.filter((id) => id !== neuronId);
+    if (filtered.length === based.length) return ins;
+    touched++;
+    return { ...ins, basedOnNeurons: filtered };
+  });
+  if (touched > 0) writeJsonArray(INSIGHT_HISTORY_KEY, next);
+  return touched;
+}
+
+export function unlinkNeuronFromAllConnections(neuronId) {
+  if (!neuronId) return 0;
+  const all = readAll();
+  let touched = 0;
+  for (const neuron of all) {
+    const before = Array.isArray(neuron.connections) ? neuron.connections.length : 0;
+    neuron.connections = (neuron.connections || []).filter((id) => id !== neuronId);
+    if (neuron.id === neuronId) neuron.connections = [];
+    if (neuron.connections.length !== before || neuron.id === neuronId) touched++;
+  }
+  if (touched > 0) writeAll(all);
+  return touched;
+}
+
+export function getNeuronDeletionImpact(neuronId) {
+  const all = readAll();
+  const target = all.find((n) => n.id === neuronId);
+  if (!target) return null;
+  const connectedNeurons = all.filter((n) => (n.connections || []).includes(neuronId) || (target.connections || []).includes(n.id));
+  const memoryRefs = readJsonArray(MEMORY_KEY).filter((m) => (m.linkedNeurons || []).includes(neuronId));
+  const insightRefs = readJsonArray(INSIGHT_HISTORY_KEY).filter((ins) => (ins.basedOnNeurons || []).includes(neuronId));
+  return {
+    neuronId,
+    exists: true,
+    isManual: isManualNeuron(target),
+    likes: Number(target.feedbackStats?.likes) || 0,
+    connectionsAffected: connectedNeurons.length,
+    memoriesAffected: memoryRefs.length,
+    insightsAffected: insightRefs.length,
+  };
+}
+
+export function softDeleteNeuron(neuronId) {
+  const all = readAll();
+  const idx = all.findIndex((n) => n.id === neuronId);
+  if (idx < 0) return false;
+  all[idx] = sanitizeNeuron({ ...all[idx], deleted: true, updatedAt: new Date().toISOString() });
+  writeAll(all);
+  return true;
+}
+
+export function restoreSoftDeletedNeuron(neuronId) {
+  const all = readAll();
+  const idx = all.findIndex((n) => n.id === neuronId);
+  if (idx < 0) return false;
+  all[idx] = sanitizeNeuron({ ...all[idx], deleted: false, updatedAt: new Date().toISOString() });
+  writeAll(all);
+  return true;
+}
+
+export function hardDeleteNeuron(neuronId) {
+  if (!neuronId) return false;
   const all = readAll();
   const before = all.length;
-  const next = all.filter((n) => n.id !== id || !isManualNeuron(n));
+  const next = all.filter((n) => n.id !== neuronId).map((n) => ({ ...n, connections: (n.connections || []).filter((id) => id !== neuronId) }));
   if (next.length === before) return false;
-  await reindexAndPersist(next);
+  writeAll(next);
+  removeNeuronFromMemories(neuronId);
+  removeNeuronFromInsights(neuronId);
+  if (typeof process !== "undefined" && process?.env?.NODE_ENV !== "production") {
+    console.debug(`[neuronStore] hardDeleteNeuron ${neuronId} aplicado`);
+  }
   return true;
+}
+
+export function deleteNeuronSafely(neuronId, options = {}) {
+  const impact = getNeuronDeletionImpact(neuronId);
+  if (!impact) return { ok: false, reason: "not_found", impact: null };
+  if (options.soft === true) {
+    const ok = softDeleteNeuron(neuronId);
+    return { ok, mode: "soft", impact };
+  }
+  const ok = hardDeleteNeuron(neuronId);
+  return { ok, mode: "hard", impact };
 }

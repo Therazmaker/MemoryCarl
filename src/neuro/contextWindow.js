@@ -4,6 +4,9 @@ import {
   deleteManualContextNeuron,
   searchManualContextNeurons,
   getManualContextNeurons,
+  getNeuronDeletionImpact,
+  deleteNeuronSafely,
+  restoreSoftDeletedNeuron,
 } from "./neuronStore.js";
 import { linkNeurons, unlinkNeurons } from "./connections.js";
 
@@ -99,10 +102,12 @@ export function deleteContextWindowNeuron(id) {
 }
 
 export function listContextWindowNeurons(filters = {}) {
+  const localFilters = { ...filters };
+  if (!localFilters.showDeleted) localFilters.deleted = false;
   if (filters.query || filters.category || filters.type || filters.priority || filters.pinned != null || filters.withConnections != null) {
-    return searchManualContextNeurons(filters.query || "", filters);
+    return searchManualContextNeurons(filters.query || "", localFilters).filter((n) => localFilters.showDeleted || !n.deleted);
   }
-  return getManualContextNeurons();
+  return getManualContextNeurons().filter((n) => localFilters.showDeleted || !n.deleted);
 }
 
 export function applyQuickTemplate(templateKey, concept = "") {
@@ -129,4 +134,16 @@ export function createManualLink(sourceId, targetId) {
 
 export function removeManualLink(sourceId, targetId) {
   return unlinkNeurons(sourceId, targetId);
+}
+
+export function getContextNeuronDeletionImpact(id) {
+  return getNeuronDeletionImpact(id);
+}
+
+export function deleteContextNeuronSafely(id, options = {}) {
+  return deleteNeuronSafely(id, options);
+}
+
+export function restoreContextNeuron(id) {
+  return restoreSoftDeletedNeuron(id);
 }

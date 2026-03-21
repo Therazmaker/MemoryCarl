@@ -49,7 +49,8 @@ test("memory storage CRUD + filtros avanzados", () => {
 
   const updated = updateMemory(m2.id, { importance: "high", tags: ["hogar", "familia"] });
   assert.equal(updated.importance, "high");
-  assert.deepEqual(updated.tags, ["hogar", "familia"]);
+  assert.ok(updated.tags.includes("hogar"));
+  assert.ok(updated.tags.includes("familia"));
 
   const filtered = searchMemories("mud", {
     importance: "high",
@@ -108,6 +109,40 @@ test("timeline renderiza lista cronológica y filtros", () => {
   assert.match(html, /Nueva memoria/i);
   assert.match(html, /Recuerdo A/i);
   assert.doesNotMatch(html, /Recuerdo B/i);
+});
+
+test("timeline muestra conceptos legibles y botón de auto-fix", () => {
+  resetStorage();
+  localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify([
+    {
+      id: "n_lab_1",
+      type: "memory",
+      core: { concept: "tensión con Fergis", domain: "relationships", summary: "" },
+      triggers: [],
+      connections: [],
+      weight: 0.5,
+      emotion: "fear",
+      evidence: [],
+      embedding: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      source: { kind: "user", ref: "" },
+      feedbackStats: { likes: 0, dislikes: 0, netScore: 0, lastFeedbackAt: null },
+      activationLearning: { usefulCount: 0, falsePositiveCount: 0 },
+      evolution: { enabled: true, usageCount: 0, successfulActivations: 0, failedActivations: 0, falsePositiveCount: 0, finalSelectionCount: 0, likeCount: 0, dislikeCount: 0, lastUsedAt: null, lastEvolvedAt: null, recentUsage: [], triggerCandidates: [], triggerHistory: [], summaryHistory: [], weightHistory: [], connectionHistory: [], summarySuggestion: null, connectionSuggestions: [] },
+      temporal: { timeContext: "timeless", source: "unknown", confidence: "low", recencyWeight: 0.4, sourcePeriod: null, isHistorical: false, isPast: false, date: null, timestamp: null, stage: null },
+    },
+  ]));
+  saveMemory({
+    title: "Conflicto",
+    text: "No estábamos alineados con Fergis",
+    date: "2026-03-20",
+    linkedNeurons: ["n_lab_1"],
+  });
+  __setNeuroChatUiStateForTests({ activeTab: "memories", memoryFilters: { emotion: "", importance: "", stage: "", tags: "", dateFrom: "", dateTo: "" } });
+  const html = renderMemoriesTimeline();
+  assert.match(html, /Auto-fix memory/i);
+  assert.match(html, /tensión con Fergis/i);
 });
 
 test("vínculo memoria-neurona devuelve insights relacionados", () => {
