@@ -17,7 +17,7 @@ export const MANUAL_PRIORITIES = ["low", "medium", "high"];
 /** Emociones reconocidas */
 export const EMOTION_VALUES = [
   "joy", "sadness", "anger", "fear", "surprise", "disgust",
-  "curiosity", "pride", "shame", "love", "neutral"
+  "curiosity", "pride", "shame", "love", "neutral", "mixed"
 ];
 
 function normalizeAliases(aliases) {
@@ -179,6 +179,8 @@ export function createNeuron(data = {}) {
     feedbackStats: sanitizeFeedbackStats(data.feedbackStats || {}),
     activationLearning: sanitizeActivationLearning(data.activationLearning || {}),
     evolution: sanitizeEvolution(data.evolution || {}) || sanitizeEvolution({}),
+    deleted: Boolean(data.deleted),
+    deletedAt: data.deletedAt || null,
     ...(sanitizedMeta ? { meta: sanitizedMeta } : {}),
     ...(sanitizedTemporal ? { temporal: sanitizedTemporal } : {}),
   };

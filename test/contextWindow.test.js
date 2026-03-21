@@ -14,7 +14,7 @@ function resetStorage() { Object.keys(store).forEach((k) => delete store[k]); }
 
 import { createManualContextNeuron, getAllNeurons } from "../src/neuro/neuronStore.js";
 import { linkNeurons, unlinkNeurons, suggestContextLinks } from "../src/neuro/connections.js";
-import { applyQuickTemplate } from "../src/neuro/contextWindow.js";
+import { applyQuickTemplate, getContextNeuronDeletionImpact, deleteContextNeuronSafely } from "../src/neuro/contextWindow.js";
 
 test("linkNeurons and unlinkNeurons keep bidirectional links", async () => {
   resetStorage();
@@ -42,4 +42,17 @@ test("quick template and suggestion helpers", () => {
     [{ id: "b", core: { concept: "Proyecto Atlas", summary: "atlas app", domain: "work" }, triggers: [] }],
   );
   assert.equal(suggestions.length, 1);
+});
+
+test("deleteContextNeuronSafely elimina neurona manual y no rompe store", async () => {
+  resetStorage();
+  const a = await createManualContextNeuron({ type: "person", core: { concept: "Fergis", domain: "relationships", summary: "" }, meta: { manualCategory: "people" } });
+  const b = await createManualContextNeuron({ type: "project", core: { concept: "Atlas", domain: "work", summary: "" }, meta: { manualCategory: "projects" } });
+  linkNeurons(a.id, b.id, { connectionSource: "manual" });
+  localStorage.setItem("memorycarl_memories_v1", JSON.stringify([{ id: "m1", linkedNeurons: [a.id], text: "x" }]));
+  const impact = getContextNeuronDeletionImpact(a.id);
+  assert.equal(impact.memoriesAffected, 1);
+  const result = deleteContextNeuronSafely(a.id, { hard: true });
+  assert.equal(result.ok, true);
+  assert.equal(getAllNeurons().some((n) => n.id === a.id), false);
 });

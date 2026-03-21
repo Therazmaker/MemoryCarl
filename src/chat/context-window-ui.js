@@ -9,6 +9,9 @@ import {
   removeManualLink,
   applyQuickTemplate,
   QUICK_CONTEXT_TEMPLATES,
+  getContextNeuronDeletionImpact,
+  deleteContextNeuronSafely,
+  restoreContextNeuron,
 } from "../neuro/contextWindow.js";
 import { importHistoricalEntries } from "../neuro/historicalImport.js";
 import {
@@ -32,7 +35,7 @@ const BOTH_COPIED_MSG = "Schema + prompt copiados 🚀";
 
 const state = {
   query: "",
-  filters: { category: "", type: "", priority: "", pinned: "", withConnections: "", timeContext: "", stage: "", dateFrom: "", dateTo: "" },
+  filters: { category: "", type: "", priority: "", pinned: "", withConnections: "", timeContext: "", stage: "", dateFrom: "", dateTo: "", showDeleted: "" },
   selectedId: null,
   editingId: null,
   importText: "",
@@ -63,6 +66,7 @@ function getFiltered() {
     priority: state.filters.priority || undefined,
     pinned: state.filters.pinned === "" ? undefined : state.filters.pinned === "1",
     withConnections: state.filters.withConnections === "" ? undefined : state.filters.withConnections === "1",
+    showDeleted: state.filters.showDeleted === "1",
   };
   const rows = listContextWindowNeurons(options);
   return rows.filter((n) => {
@@ -82,7 +86,7 @@ function renderCard(n) {
     .join(" · ");
   return `<button class="cwCard" data-id="${esc(n.id)}">
     <div class="cwCardHead"><b>${esc(n.core?.concept || "—")}</b><span>${n.meta?.pin ? "📌" : ""}</span></div>
-    <div class="cwMeta">${esc(n.type)} · ${esc(n.meta?.manualCategory || "other")} · ${esc(n.meta?.priority || "medium")}</div>
+    <div class="cwMeta">${esc(n.type)} · ${esc(n.meta?.manualCategory || "other")} · ${esc(n.meta?.priority || "medium")} ${n.deleted ? "· 🗑️ deleted" : ""}</div>
     <div class="cwMeta">${temporalBadge}</div>
     ${temporalLine ? `<div class="cwMeta">🕒 ${esc(temporalLine)}</div>` : ""}
     <div class="cwSummary">${esc(n.core?.summary || "")}</div>
@@ -149,7 +153,8 @@ function renderDetail() {
     </div>
     <div class="cwRowBtns">
       <button id="cwEdit">Editar</button>
-      <button id="cwDelete">Borrar</button>
+      <button id="cwDelete">Delete neuron</button>
+      ${neuron.deleted ? '<button id="cwRestore">Restore neuron</button>' : ""}
       <button id="cwDuplicate">Duplicar</button>
       <button id="cwTogglePin">${neuron.meta?.pin ? "Unpin" : "Pin"}</button>
     </div>
@@ -262,6 +267,7 @@ export function viewContextWindow() {
       <select id="cwFilterCategory"><option value=""${sel(fc,"")}>category</option><option value="people"${sel(fc,"people")}>people</option><option value="work"${sel(fc,"work")}>work</option><option value="hobbies"${sel(fc,"hobbies")}>hobbies</option><option value="projects"${sel(fc,"projects")}>projects</option><option value="preferences"${sel(fc,"preferences")}>preferences</option><option value="places"${sel(fc,"places")}>places</option><option value="identity"${sel(fc,"identity")}>identity</option></select>
       <select id="cwFilterPriority"><option value=""${sel(fp,"")}>priority</option><option value="low"${sel(fp,"low")}>low</option><option value="medium"${sel(fp,"medium")}>medium</option><option value="high"${sel(fp,"high")}>high</option></select>
       <select id="cwFilterPinned"><option value=""${sel(fn,"")}>pinned?</option><option value="1"${sel(fn,"1")}>pinned</option><option value="0"${sel(fn,"0")}>not pinned</option></select>
+      <select id="cwFilterDeleted"><option value="">deleted?</option><option value="1"${sel(state.filters.showDeleted,"1")}>show deleted</option></select>
       <select id="cwFilterTimeContext"><option value="">timeContext</option><option value="current">current</option><option value="recent">recent</option><option value="past">past</option><option value="historical">historical</option><option value="timeless">timeless</option></select>
       <input id="cwFilterStage" placeholder="stage" value="${esc(state.filters.stage)}"/>
       <input id="cwFilterDateFrom" type="date" value="${esc(state.filters.dateFrom)}"/>
@@ -348,6 +354,7 @@ export function wireContextWindow(root, rerender) {
   root.querySelector("#cwFilterCategory")?.addEventListener("change", (e) => { state.filters.category = e.target.value; rerender(); });
   root.querySelector("#cwFilterPriority")?.addEventListener("change", (e) => { state.filters.priority = e.target.value; rerender(); });
   root.querySelector("#cwFilterPinned")?.addEventListener("change", (e) => { state.filters.pinned = e.target.value; rerender(); });
+  root.querySelector("#cwFilterDeleted")?.addEventListener("change", (e) => { state.filters.showDeleted = e.target.value; rerender(); });
   root.querySelector("#cwFilterTimeContext")?.addEventListener("change", (e) => { state.filters.timeContext = e.target.value; rerender(); });
   root.querySelector("#cwFilterStage")?.addEventListener("input", (e) => { state.filters.stage = e.target.value; rerender(); });
   root.querySelector("#cwFilterDateFrom")?.addEventListener("change", (e) => { state.filters.dateFrom = e.target.value; rerender(); });
@@ -377,7 +384,23 @@ export function wireContextWindow(root, rerender) {
 
   root.querySelector("#cwCancelEdit")?.addEventListener("click", () => { state.editingId = null; rerender(); });
   root.querySelector("#cwEdit")?.addEventListener("click", () => { state.editingId = state.selectedId; rerender(); });
-  root.querySelector("#cwDelete")?.addEventListener("click", async () => { if (!state.selectedId) return; await deleteContextWindowNeuron(state.selectedId); state.selectedId = null; rerender(); });
+  root.querySelector("#cwDelete")?.addEventListener("click", async () => {
+    if (!state.selectedId) return;
+    const impact = getContextNeuronDeletionImpact(state.selectedId);
+    if (!impact) return;
+    const warning = impact.likes >= 5 || impact.connectionsAffected >= 6
+      ? "\\n⚠️ Esta neurona tiene alta relevancia (likes/conexiones)." : "";
+    const msg = `Esta neurona está conectada a ${impact.memoriesAffected} memorias y ${impact.connectionsAffected} neuronas. Insights afectados: ${impact.insightsAffected}. ¿Deseas eliminarla?${warning}`;
+    if (!confirm(msg)) return;
+    await deleteContextNeuronSafely(state.selectedId, { hard: true });
+    state.selectedId = null;
+    rerender();
+  });
+  root.querySelector("#cwRestore")?.addEventListener("click", async () => {
+    if (!state.selectedId) return;
+    await restoreContextNeuron(state.selectedId);
+    rerender();
+  });
   root.querySelector("#cwDuplicate")?.addEventListener("click", async () => { if (!state.selectedId) return; await duplicateContextWindowNeuron(state.selectedId); rerender(); });
   root.querySelector("#cwTogglePin")?.addEventListener("click", async () => {
     const neuron = listContextWindowNeurons().find((n) => n.id === state.selectedId);

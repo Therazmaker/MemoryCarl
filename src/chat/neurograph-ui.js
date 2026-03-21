@@ -11,7 +11,7 @@
  *   wireNeuroGraph(root, sessionState?)
  */
 
-import { getAllNeurons, updateNeuron, getNeuronById, updateNeuronTemporal } from "../neuro/neuronStore.js";
+import { getAllNeurons, updateNeuron, getNeuronById, updateNeuronTemporal, getNeuronDeletionImpact, deleteNeuronSafely, restoreSoftDeletedNeuron } from "../neuro/neuronStore.js";
 import {
   buildNeuronGraph,
   filterGraphNodes,
@@ -65,7 +65,7 @@ const RELATION_COLORS = {
 // ---- Estado interno ----
 const graphState = {
   graph:        { nodes: [], edges: [] },
-  filters:      { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null },
+  filters:      { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null, showDeleted: false },
   filtered:     { nodes: [], edges: [] },
   selectedNode: null,
   simulation:   null,
@@ -639,6 +639,8 @@ function renderNodeDetail() {
 
       <div style="margin-top:12px">
         <button class="ngBtn ngBtn--primary" id="ngBtnOpenEditor" style="width:100%">✏️ Editar neurona</button>
+        <button class="ngBtn" id="ngBtnDeleteNeuron" style="width:100%;margin-top:8px">🗑️ Delete neuron</button>
+        ${n.deleted ? '<button class="ngBtn" id="ngBtnRestoreNeuron" style="width:100%;margin-top:8px">♻️ Restore neuron</button>' : ""}
       </div>
     </div>`;
 }
@@ -729,6 +731,10 @@ function renderFiltersBar() {
         <option value="domain"  ${colorBy === "domain"  ? "selected" : ""}>Color: dominio</option>
         <option value="emotion" ${colorBy === "emotion" ? "selected" : ""}>Color: emoción</option>
       </select>
+      <label style="display:flex;gap:4px;align-items:center;font-size:11px;opacity:.8;padding:0 6px">
+        <input type="checkbox" id="ngFilterShowDeleted" ${filters.showDeleted ? "checked" : ""}/>
+        show deleted
+      </label>
       <button class="ngBtn" id="ngBtnReset" title="Resetear filtros">✕</button>
     </div>`;
 }
@@ -900,6 +906,27 @@ function wireDetailPanel(root, sessionState = {}) {
       rebuildAndRender(root, sessionState);
     });
   });
+
+  panel.querySelector("#ngBtnDeleteNeuron")?.addEventListener("click", () => {
+    const selected = graphState.selectedNode;
+    if (!selected) return;
+    const impact = getNeuronDeletionImpact(selected.id);
+    if (!impact) return;
+    const warning = impact.likes >= 5 || impact.connectionsAffected >= 6
+      ? "\\n⚠️ Alta relevancia detectada (likes/conectividad)." : "";
+    const msg = `Esta neurona está conectada a ${impact.memoriesAffected} memorias y ${impact.connectionsAffected} neuronas. Insights afectados: ${impact.insightsAffected}. ¿Deseas eliminarla de todos modos?${warning}`;
+    if (!confirm(msg)) return;
+    deleteNeuronSafely(selected.id, { hard: true });
+    graphState.selectedNode = null;
+    rebuildAndRender(root, sessionState);
+  });
+
+  panel.querySelector("#ngBtnRestoreNeuron")?.addEventListener("click", () => {
+    const selected = graphState.selectedNode;
+    if (!selected) return;
+    restoreSoftDeletedNeuron(selected.id);
+    rebuildAndRender(root, sessionState);
+  });
 }
 
 // ---- Wiring principal ----
@@ -926,13 +953,15 @@ function wireNeuroGraphInner(root, sessionState = {}) {
     graphState.pan   = { x: 0, y: 0 };
   });
   root.querySelector("#ngBtnReset")?.addEventListener("click", () => {
-    graphState.filters = { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null };
+    graphState.filters = { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null, showDeleted: false };
     const s = root.querySelector("#ngSearch");
     if (s) s.value = "";
     ["#ngFilterDomain","#ngFilterEmotion","#ngFilterRecent","#ngFilterSource","#ngColorBy"].forEach(sel => {
       const el = root.querySelector(sel);
       if (el) el.value = "";
     });
+    const showDeleted = root.querySelector("#ngFilterShowDeleted");
+    if (showDeleted) showDeleted.checked = false;
     applyFiltersAndRerender(root, sessionState);
   });
 
@@ -948,6 +977,10 @@ function wireNeuroGraphInner(root, sessionState = {}) {
       fn(e.target.value);
       applyFiltersAndRerender(root, sessionState);
     });
+  });
+  root.querySelector("#ngFilterShowDeleted")?.addEventListener("change", (e) => {
+    graphState.filters.showDeleted = Boolean(e.target.checked);
+    applyFiltersAndRerender(root, sessionState);
   });
 
   let searchTimer = null;
@@ -987,7 +1020,7 @@ function applyFiltersAndRerender(root, sessionState = {}) {
 }
 
 function rebuildAndRender(root, sessionState = {}) {
-  const neurons = getAllNeurons();
+  const neurons = getAllNeurons({ includeDeleted: true });
   graphState.graph = buildNeuronGraph(neurons, {
     colorBy:      graphState.colorBy,
     highlightIds: sessionState.lastActivatedIds || [],
@@ -1008,7 +1041,7 @@ function rebuildAndRender(root, sessionState = {}) {
 
 // ---- Exports ----
 export function viewNeuroGraph(sessionState = {}) {
-  const neurons = getAllNeurons();
+  const neurons = getAllNeurons({ includeDeleted: true });
   graphState.graph = buildNeuronGraph(neurons, {
     colorBy:      graphState.colorBy,
     highlightIds: sessionState.lastActivatedIds || [],

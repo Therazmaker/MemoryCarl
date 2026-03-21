@@ -9,7 +9,7 @@
  */
 
 import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
-import { saveMemory, updateMemory, deleteMemory } from "../memory/memoryStore.js";
+import { saveMemory, updateMemory, deleteMemory, autoFixMemory, suggestMemoryMilestone } from "../memory/memoryStore.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
 import {
@@ -18,6 +18,7 @@ import {
 } from "../settings/neurochatSettings.js";
 import { isGeminiPremiumConfigured, streamGeminiNeuronGeneration } from "../services/geminiPremiumClient.js";
 import { viewNeuroGraph, wireNeuroGraph } from "./neurograph-ui.js";
+import { renderMemoryLinkedNeurons } from "./memory-timeline-ui.js";
 import { viewContextWindow, wireContextWindow } from "./context-window-ui.js";
 import { renderInsightsPanel } from "./insight-ui.js";
 import { RELATION_TYPE_LABELS } from "../neuro/relationStore.js";
@@ -752,6 +753,13 @@ export function renderMemoriesTimeline() {
           <option value="sadness" ${uiState.memoryFilters.emotion === "sadness" ? "selected" : ""}>sadness</option>
           <option value="fear" ${uiState.memoryFilters.emotion === "fear" ? "selected" : ""}>fear</option>
           <option value="anger" ${uiState.memoryFilters.emotion === "anger" ? "selected" : ""}>anger</option>
+          <option value="curiosity" ${uiState.memoryFilters.emotion === "curiosity" ? "selected" : ""}>curiosity</option>
+          <option value="pride" ${uiState.memoryFilters.emotion === "pride" ? "selected" : ""}>pride</option>
+          <option value="shame" ${uiState.memoryFilters.emotion === "shame" ? "selected" : ""}>shame</option>
+          <option value="love" ${uiState.memoryFilters.emotion === "love" ? "selected" : ""}>love</option>
+          <option value="surprise" ${uiState.memoryFilters.emotion === "surprise" ? "selected" : ""}>surprise</option>
+          <option value="disgust" ${uiState.memoryFilters.emotion === "disgust" ? "selected" : ""}>disgust</option>
+          <option value="mixed" ${uiState.memoryFilters.emotion === "mixed" ? "selected" : ""}>mixed</option>
           <option value="neutral" ${uiState.memoryFilters.emotion === "neutral" ? "selected" : ""}>neutral</option>
         </select>
         <select class="ncSettingsInput ncSettingsInputSm" id="ncMemoryImportanceFilter">
@@ -793,13 +801,20 @@ function renderNewMemoryComposer() {
 
 function renderMemoryDetail(memory) {
   if (!memory) return `<div class="ncWelcomeSub">Selecciona una memoria para ver el detalle.</div>`;
-  const neuronList = (memory.linkedNeurons || []).map((id) => `<li>${esc(id)}</li>`).join("");
+  const neuronList = renderMemoryLinkedNeurons(memory);
   const relatedInsights = (memory.linkedNeurons || [])
     .flatMap((id) => getMemoryContextByNeuron(id).insights || [])
-    .slice(-5);
+    .slice(-12)
+    .filter(Boolean);
+  const dedupedInsights = new Map();
+  for (const insight of relatedInsights) {
+    const key = `${insight.type || "generic"}::${String(insight.summary || insight.title || "").trim().toLowerCase()}`;
+    if (!dedupedInsights.has(key)) dedupedInsights.set(key, insight);
+  }
   const insightsHtml = relatedInsights.length
-    ? relatedInsights.map((i) => `<li><b>${esc(i.title || i.type || "Insight")}</b>: ${esc(i.summary || "")}</li>`).join("")
+    ? [...dedupedInsights.values()].slice(-5).map((i) => `<li><b>${esc(i.title || i.type || "Insight")}</b>: ${esc(i.summary || "")}</li>`).join("")
     : "<li>Sin insights relacionados aún.</li>";
+  const milestoneSuggested = suggestMemoryMilestone(memory);
   return `
     <div class="ncMemoryDetail">
       <div class="ncMemoryDetailHead">
@@ -809,11 +824,13 @@ function renderMemoryDetail(memory) {
       <textarea class="ncInput" id="ncDetailText" rows="8">${esc(memory.text || "")}</textarea>
       <div class="ncMemoryDetailMeta">Fecha: ${esc(memory.date || "—")} · Emoción: ${esc(memory.emotion || "neutral")} · Importancia: ${esc(memory.importance || "medium")} · Source: ${esc(memory.source || "chat")}</div>
       <div class="ncMemoryDetailMeta">Temporal stage: ${esc(memory.temporal?.stage || "unknown")} · Contexto: ${esc(memory.context || "chat")}</div>
+      <div class="ncMemoryDetailMeta">Tags útiles: ${esc((memory.tags || []).join(", ") || "—")} ${milestoneSuggested ? " · sugerido como hito ⭐" : ""}</div>
       <div class="ncMemoryDetailMeta">Neuronas vinculadas:</div>
       <ul class="ncMemoryLinkedList">${neuronList || "<li>Sin vínculos.</li>"}</ul>
       <div class="ncMemoryDetailMeta">Insights relacionados:</div>
       <ul class="ncMemoryLinkedList">${insightsHtml}</ul>
       <div class="ncSuggestionActions">
+        <button class="ncActionBtn" data-autofix-memory="${esc(memory.id)}">Auto-fix memory</button>
         <button class="ncActionBtn ncActionBtnPrimary" data-update-memory="${esc(memory.id)}">Guardar cambios</button>
         <button class="ncActionBtn" data-delete-memory="${esc(memory.id)}">Eliminar</button>
       </div>
@@ -1305,6 +1322,18 @@ function wireNeuroChatInner(root) {
         });
       } catch (err) {
         uiState.error = err.message || "No se pudo editar la memoria";
+      }
+      fullRerender();
+    });
+  });
+  root.querySelectorAll("[data-autofix-memory]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const memoryId = btn.getAttribute("data-autofix-memory");
+      if (!memoryId) return;
+      try {
+        autoFixMemory(memoryId);
+      } catch (err) {
+        uiState.error = err.message || "No se pudo auto-corregir la memoria";
       }
       fullRerender();
     });
