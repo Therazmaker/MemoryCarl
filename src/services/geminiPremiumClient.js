@@ -321,7 +321,7 @@ Tu tarea: mejora el borrador. Puedes hacerlo más específico, más empático, o
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.5,
-      maxOutputTokens: 512,
+      maxOutputTokens: settings.maxOutputTokens ?? 4096,
     },
   };
 
