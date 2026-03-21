@@ -6,7 +6,8 @@ import { processNeuroInput } from "../neuro/neurocore.js";
 import { getAllNeurons, saveNeuron, deleteNeuron } from "../neuro/neuronStore.js";
 import { createNeuron } from "../neuro/schemas.js";
 import { getMessageFeedbackMap, recordNeuronFeedback } from "../neuro/feedback.js";
-import { saveMemory, getAllMemories, searchMemories, detectMemoryEmotion, extractMemoryTags, inferMemoryDate } from "../memory/memoryStore.js";
+import { saveMemory, getAllMemories, searchMemories, detectMemoryEmotion, extractMemoryTags, inferMemoryDate, getMemoriesByNeuron } from "../memory/memoryStore.js";
+import { getInsightHistory } from "../neuro/insightHistory.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
 const DB_NAME = "memorycarl_chat";
@@ -143,6 +144,37 @@ function generateMessageId() {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export function detectImportantMemoryInput(text = "") {
+  const raw = String(text || "").trim();
+  if (!raw) return { suggestSave: false, score: 0, reasons: [] };
+  const lower = raw.toLowerCase();
+  let score = 0;
+  const reasons = [];
+
+  if (raw.length >= 90) {
+    score += 0.2;
+    reasons.push("mensaje largo");
+  }
+  const cues = ["hoy", "ayer", "cuando", "recuerdo", "me pasó", "importante", "aprendí", "decidí", "logré"];
+  if (cues.some((cue) => lower.includes(cue))) {
+    score += 0.45;
+    reasons.push("narrativa autobiográfica");
+  }
+  if (detectMemoryEmotion(raw) !== "neutral") {
+    score += 0.25;
+    reasons.push("carga emocional");
+  }
+  if (/(cumplí|gradu|nací|primer|boda|hijo|hija|mud|trabajo nuevo)/i.test(raw)) {
+    score += 0.3;
+    reasons.push("evento hito");
+  }
+  return {
+    suggestSave: score >= 0.55,
+    score: Number(Math.min(1, score).toFixed(2)),
+    reasons,
+  };
+}
+
 export async function sendMessage(userInput, options = {}) {
   const trimmed = (userInput || "").trim();
   if (!trimmed) throw new Error("Input vacío");
@@ -177,6 +209,9 @@ export async function sendMessage(userInput, options = {}) {
   return {
     ...result,
     messageId,
+    memorySuggestion: result.memorySuggestion?.suggestSave
+      ? result.memorySuggestion
+      : detectImportantMemoryInput(trimmed),
     feedbackForMessage: getMessageFeedbackMap(messageId),
   };
 }
@@ -257,6 +292,7 @@ export function saveMemoryFromMessage(messageId, options = {}) {
   const linkedNeurons = assistantMessage?.activatedNeuronIds || [];
   const text = userMessage.content || "";
   const memory = saveMemory({
+    title: options.title || text.slice(0, 72),
     text,
     date: inferMemoryDate(text),
     emotion: detectMemoryEmotion(text),
@@ -264,11 +300,24 @@ export function saveMemoryFromMessage(messageId, options = {}) {
     context: options.context || `neurochat:${userMessage.mode || "chat"}`,
     importance: options.importance || "medium",
     linkedNeurons,
+    source: options.source || "chat",
+    temporal: options.temporal || { stage: "present", date: inferMemoryDate(text), timeContext: "historical" },
+    isMilestone: Boolean(options.isMilestone),
   });
   return memory;
 }
 
 export function getMemories(options = {}) {
   const q = String(options.query || "").trim();
-  return q ? searchMemories(q) : getAllMemories();
+  return q ? searchMemories(q, options.filters || {}) : getAllMemories({ filters: options.filters || {} });
+}
+
+export function getMemoryContextByNeuron(neuronId) {
+  const memories = getMemoriesByNeuron(neuronId);
+  const insightHistory = getInsightHistory({ maxHistory: 120 });
+  return {
+    neuronId,
+    memories,
+    insights: insightHistory.filter((i) => (i.basedOnNeurons || []).includes(neuronId)).slice(-10),
+  };
 }

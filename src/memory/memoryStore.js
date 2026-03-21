@@ -23,6 +23,11 @@ function normalizeImportance(value) {
   return ["low", "medium", "high"].includes(value) ? value : "medium";
 }
 
+function normalizeStage(value) {
+  const stage = String(value || "").trim().toLowerCase();
+  return stage || "unknown";
+}
+
 function uniqueStrings(list = []) {
   return [...new Set((Array.isArray(list) ? list : []).map((x) => String(x || "").trim()).filter(Boolean))];
 }
@@ -33,6 +38,64 @@ function generateId() {
 
 function toIsoDate(date = new Date()) {
   return new Date(date).toISOString().slice(0, 10);
+}
+
+function normalizeTemporal(temporal = {}, fallbackDate) {
+  if (!temporal || typeof temporal !== "object") {
+    return { stage: "unknown", timeContext: "historical", date: fallbackDate || toIsoDate() };
+  }
+  return {
+    stage: normalizeStage(temporal.stage),
+    timeContext: String(temporal.timeContext || "historical").trim() || "historical",
+    date: String(temporal.date || fallbackDate || toIsoDate()).trim() || toIsoDate(),
+  };
+}
+
+function normalizeMemory(memory = {}) {
+  const text = String(memory.text || "").trim();
+  const date = String(memory.date || inferMemoryDate(text)).trim() || toIsoDate();
+  const createdAt = Number(memory.createdAt) || Date.now();
+  const title = String(memory.title || text.slice(0, 72)).trim();
+  const source = String(memory.source || "chat").trim() || "chat";
+  const context = String(memory.context || "chat").trim() || "chat";
+
+  return {
+    id: memory.id || generateId(),
+    date,
+    title: title || "Memoria sin título",
+    text,
+    emotion: String(memory.emotion || detectMemoryEmotion(text)).trim() || "neutral",
+    context,
+    importance: normalizeImportance(memory.importance),
+    tags: uniqueStrings(memory.tags || extractMemoryTags(text)),
+    linkedNeurons: uniqueStrings(memory.linkedNeurons || []),
+    source,
+    temporal: normalizeTemporal(memory.temporal, date),
+    createdAt,
+    isMilestone: Boolean(memory.isMilestone),
+  };
+}
+
+function applyFilters(memories = [], filters = {}) {
+  const emotion = String(filters.emotion || "").trim().toLowerCase();
+  const importance = String(filters.importance || "").trim().toLowerCase();
+  const stage = String(filters.stage || "").trim().toLowerCase();
+  const tagList = uniqueStrings(filters.tags || []).map((t) => t.toLowerCase());
+  const dateFrom = String(filters.dateFrom || "").trim();
+  const dateTo = String(filters.dateTo || "").trim();
+
+  return memories.filter((m) => {
+    if (emotion && String(m.emotion || "").toLowerCase() !== emotion) return false;
+    if (importance && String(m.importance || "").toLowerCase() !== importance) return false;
+    if (stage && String(m.temporal?.stage || "").toLowerCase() !== stage) return false;
+    if (tagList.length > 0) {
+      const memoryTags = (m.tags || []).map((t) => String(t || "").toLowerCase());
+      if (!tagList.every((t) => memoryTags.includes(t))) return false;
+    }
+    if (dateFrom && String(m.date || "") < dateFrom) return false;
+    if (dateTo && String(m.date || "") > dateTo) return false;
+    return true;
+  });
 }
 
 export function detectMemoryEmotion(text = "") {
@@ -84,17 +147,7 @@ export function inferMemoryDate(text = "", now = new Date()) {
 
 export function saveMemory(memory = {}) {
   const memories = readMemories();
-  const record = {
-    id: memory.id || generateId(),
-    date: memory.date || inferMemoryDate(memory.text || ""),
-    text: String(memory.text || "").trim(),
-    emotion: String(memory.emotion || detectMemoryEmotion(memory.text || "")).trim() || "neutral",
-    context: String(memory.context || "chat").trim(),
-    importance: normalizeImportance(memory.importance),
-    tags: uniqueStrings(memory.tags || extractMemoryTags(memory.text || "")),
-    linkedNeurons: uniqueStrings(memory.linkedNeurons || []),
-    createdAt: Number(memory.createdAt) || Date.now(),
-  };
+  const record = normalizeMemory(memory);
 
   if (!record.text) throw new Error("No se puede guardar una memoria vacía");
 
@@ -107,15 +160,45 @@ export function saveMemory(memory = {}) {
   return record;
 }
 
-export function getAllMemories() {
-  return readMemories();
+export function updateMemory(memoryId, updates = {}) {
+  if (!memoryId) throw new Error("memoryId requerido");
+  const memories = readMemories();
+  const idx = memories.findIndex((m) => m.id === memoryId);
+  if (idx < 0) throw new Error("Memoria no encontrada");
+  const merged = normalizeMemory({
+    ...memories[idx],
+    ...updates,
+    id: memoryId,
+    createdAt: memories[idx].createdAt,
+  });
+  if (!merged.text) throw new Error("No se puede guardar una memoria vacía");
+  memories[idx] = merged;
+  memories.sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0));
+  writeMemories(memories);
+  return merged;
 }
 
-export function searchMemories(query = "") {
+export function deleteMemory(memoryId) {
+  if (!memoryId) throw new Error("memoryId requerido");
+  const memories = readMemories();
+  const idx = memories.findIndex((m) => m.id === memoryId);
+  if (idx < 0) return false;
+  memories.splice(idx, 1);
+  writeMemories(memories);
+  return true;
+}
+
+export function getAllMemories(options = {}) {
+  const base = readMemories();
+  return applyFilters(base, options.filters || {});
+}
+
+export function searchMemories(query = "", filters = {}) {
   const q = String(query || "").toLowerCase().trim();
-  if (!q) return getAllMemories();
-  return readMemories().filter((m) => {
-    const bucket = [m.text, m.context, m.emotion, m.date, ...(m.tags || [])].join(" ").toLowerCase();
+  const filtered = applyFilters(readMemories(), filters);
+  if (!q) return filtered;
+  return filtered.filter((m) => {
+    const bucket = [m.title, m.text, m.context, m.emotion, m.date, m.importance, m.temporal?.stage, ...(m.tags || [])].join(" ").toLowerCase();
     return bucket.includes(q);
   });
 }
@@ -128,4 +211,9 @@ export function linkMemoryToNeurons(memoryId, neuronIds = []) {
   memories[idx].linkedNeurons = uniqueStrings([...(memories[idx].linkedNeurons || []), ...neuronIds]);
   writeMemories(memories);
   return memories[idx];
+}
+
+export function getMemoriesByNeuron(neuronId) {
+  if (!neuronId) return [];
+  return readMemories().filter((m) => (m.linkedNeurons || []).includes(neuronId));
 }
