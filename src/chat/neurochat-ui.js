@@ -8,7 +8,7 @@
  *   initNeuroChat()   → inicialización del módulo
  */
 
-import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback } from "./neurochat.js";
+import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, saveMemoryFromMessage, getMemories } from "./neurochat.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
 import {
@@ -36,7 +36,7 @@ const uiState = {
   lastResult:      null,  // NeuroCoreResult
   traceExpanded:   false,
   neuronsExpanded: false,
-  activeTab:       "chat",   // "chat" | "graph" | "context"
+  activeTab:       "chat",   // "chat" | "graph" | "context" | "memories"
   settingsOpen:    false,
   settingsMsg:     null,
   settingsApiKeyVisible: false,
@@ -54,6 +54,9 @@ const uiState = {
   streamingNeuronText: "",
   inputHeightPx: null,
   pendingSuggestions: [],
+  memoryDraftMessageId: null,
+  memorySuggestionText: "",
+  memorySearch: "",
 };
 
 const MODE_OPTIONS = [
@@ -583,6 +586,7 @@ function nchatInner() {
   const tabChat  = uiState.activeTab === "chat";
   const tabGraph = uiState.activeTab === "graph";
   const tabContext = uiState.activeTab === "context";
+  const tabMemories = uiState.activeTab === "memories";
   const showSidePanel = uiState.neuronsExpanded || Boolean(uiState.lastResult) || history.length > 0;
 
   const settingsModal = uiState.settingsOpen ? renderSettingsModal() : "";
@@ -607,6 +611,9 @@ function nchatInner() {
     : "";
   const contextContent = tabContext
     ? viewContextWindow()
+    : "";
+  const memoriesContent = tabMemories
+    ? renderMemoriesTimeline()
     : "";
 
   return `
@@ -636,12 +643,14 @@ function nchatInner() {
         <button class="ncTab ${tabChat  ? "ncTab--active" : ""}" id="btnTabChat">💬 Chat</button>
         <button class="ncTab ${tabGraph ? "ncTab--active" : ""}" id="btnTabGraph">🕸️ Neuron Graph</button>
         <button class="ncTab ${tabContext ? "ncTab--active" : ""}" id="btnTabContext">🗂️ Context Window</button>
+        <button class="ncTab ${tabMemories ? "ncTab--active" : ""}" id="btnTabMemories">🕰️ Memorias</button>
       </div>
 
       <!-- Contenido del tab activo -->
       ${chatContent}
       ${graphContent}
       ${contextContent}
+      ${memoriesContent}
 
       <!-- Settings modal -->
       ${settingsModal}
@@ -683,6 +692,34 @@ function buildInputBarHtml() {
     <button class="ncSendBtn" id="btnNcSend" ${uiState.loading ? "disabled" : ""}>
       ${uiState.loading ? "…" : "↑"}
     </button>
+    <button class="ncMemoryBtn" id="btnSaveMemory" ${uiState.loading ? "disabled" : ""}>
+      ${esc(uiState.memorySuggestionText || "Guardar como memoria")}
+    </button>
+  `;
+}
+
+function renderMemoriesTimeline() {
+  const memories = getMemories({ query: uiState.memorySearch || "" });
+  const rows = memories.length
+    ? memories.map((m) => `
+      <div class="ncMemoryCard">
+        <div class="ncMemoryHead">
+          <span class="ncMemoryDate">${esc(m.date || "Sin fecha")}</span>
+          <span class="ncTag">${esc(m.emotion || "neutral")}</span>
+        </div>
+        <div class="ncMemoryText">${esc(m.text || "")}</div>
+        <div class="ncMemoryMeta">tags: ${esc((m.tags || []).join(", ") || "—")} · neuronas vinculadas: ${(m.linkedNeurons || []).length}</div>
+      </div>
+    `).join("")
+    : `<div class="ncWelcomeSub">Aún no hay memorias guardadas.</div>`;
+
+  return `
+    <div class="ncMemoriesWrap">
+      <div class="ncMemoriesToolbar">
+        <input class="ncSettingsInput" id="ncMemorySearch" placeholder="Buscar memorias..." value="${esc(uiState.memorySearch)}" />
+      </div>
+      <div class="ncMemoriesTimeline">${rows}</div>
+    </div>
   `;
 }
 
@@ -788,7 +825,9 @@ async function doSend(root, inputEl) {
       if (result.messageId) {
         uiState.feedbackByMessage[result.messageId] = { ...(result.feedbackForMessage || {}) };
         uiState.pendingSuggestions = [];
+        uiState.memoryDraftMessageId = result.messageId;
       }
+      uiState.memorySuggestionText = result?.memorySuggestion?.suggestSave ? "Guardar como memoria" : "";
       uiState.sessionState.lastActivatedIds = (result.activated || [])
         .map((a) => a.neuron?.id || a.id).filter(Boolean);
       uiState.sessionState.lastGeneratedIds = (result.generated || [])
@@ -835,6 +874,20 @@ function wireInputBarEvents(root) {
     });
   }
   if (inputEl && !uiState.loading && uiState.activeTab === "chat") inputEl.focus();
+
+  const btnSaveMemory = root.querySelector("#btnSaveMemory");
+  if (btnSaveMemory) {
+    btnSaveMemory.addEventListener("click", () => {
+      try {
+        const memory = saveMemoryFromMessage(uiState.memoryDraftMessageId || null, { context: `neurochat:${uiState.currentMode}` });
+        uiState.error = null;
+        uiState.memorySuggestionText = `Memoria guardada (${memory.emotion})`;
+      } catch (err) {
+        uiState.error = err.message || "No se pudo guardar la memoria";
+      }
+      rerender();
+    });
+  }
 }
 
 function wireMessageEvents(root) {
@@ -1070,6 +1123,10 @@ function wireNeuroChatInner(root) {
     uiState.activeTab = "context";
     fullRerender();
   });
+  root.querySelector("#btnTabMemories")?.addEventListener("click", () => {
+    uiState.activeTab = "memories";
+    fullRerender();
+  });
 
   // Si el tab activo es el grafo, wirear
   if (uiState.activeTab === "graph") {
@@ -1078,6 +1135,10 @@ function wireNeuroChatInner(root) {
   if (uiState.activeTab === "context") {
     wireContextWindow(root, rerender);
   }
+  root.querySelector("#ncMemorySearch")?.addEventListener("input", (e) => {
+    uiState.memorySearch = e.target.value || "";
+    fullRerender();
+  });
 
   // ---- Settings button ----
   root.querySelector("#btnNcSettings")?.addEventListener("click", () => {
@@ -1367,6 +1428,12 @@ function ncCss() {
   }
   .ncSendBtn:hover:not(:disabled) { background: rgba(124,92,255,1); }
   .ncSendBtn:disabled { opacity: .4; cursor: default; }
+  .ncMemoryBtn {
+    background: rgba(52,211,153,.18); border: 1px solid rgba(52,211,153,.34);
+    border-radius: 10px; padding: 8px 12px; color: #34d399; font-size: 12px; cursor: pointer;
+    white-space: nowrap;
+  }
+  .ncMemoryBtn:disabled { opacity: .45; cursor: default; }
 
   /* Side panel */
   .ncSideSection { margin-bottom: 16px; }
@@ -1490,6 +1557,20 @@ function ncCss() {
   }
   .ncTab:hover      { background: rgba(255,255,255,.08); opacity: .8; }
   .ncTab--active    { background: rgba(124,92,255,.25); color: #a78bfa; opacity: 1; }
+  .ncMemoriesWrap {
+    background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 16px; padding: 12px;
+  }
+  .ncMemoriesToolbar { margin-bottom: 10px; }
+  .ncMemoriesTimeline { display: flex; flex-direction: column; gap: 8px; }
+  .ncMemoryCard {
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 10px; padding: 10px;
+  }
+  .ncMemoryHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .ncMemoryDate { font-size: 12px; font-weight: 700; opacity: .75; }
+  .ncMemoryText { font-size: 14px; line-height: 1.45; }
+  .ncMemoryMeta { font-size: 11px; opacity: .6; margin-top: 6px; }
 
   /* Settings modal overlay */
   .ncSettingsOverlay {
@@ -1616,6 +1697,7 @@ function ncCss() {
     .ncModeSelect, .ncInterpretSelect { max-width: 100%; flex: 1 1 46%; min-width: 130px; }
     .ncInput { width: 100%; flex-basis: 100%; }
     .ncSendBtn { min-width: 48px; min-height: 42px; padding: 8px 10px; }
+    .ncMemoryBtn { width: 100%; }
     .ncMsgBubble { max-width: 92%; }
     .ncNeuronFeedbackRow { justify-content: flex-start; flex-wrap: wrap; }
     .ncFeedbackBtn { min-height: 32px; min-width: 38px; }

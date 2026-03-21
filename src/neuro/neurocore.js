@@ -108,6 +108,33 @@ function buildEnrichedContext(userInput, activatedNeurons) {
   return { activatedManual, contextEntities };
 }
 
+function detectMemoryCandidate(userInput = "") {
+  const text = String(userInput || "");
+  const lower = text.toLowerCase();
+
+  const emotionTokens = ["nunca", "siempre", "llor", "feliz", "triste", "miedo", "ansiedad", "enoj", "rabia", "orgull", "amor", "dolió", "dolio", "trauma"];
+  const timeTokens = ["hoy", "ayer", "anoche", "esta mañana", "esta manana", "primer día", "primer dia", "cuando era", "el año pasado", "la semana pasada", "mi cumpleaños"];
+  const personalTokens = ["yo", "me", "mi ", "con mi", "mi mamá", "mi mama", "mi papá", "mi papa", "mi pareja", "mi hijo", "mi hija", "en mi trabajo", "me pasó", "me paso"];
+
+  const hasEmotion = emotionTokens.some((t) => lower.includes(t));
+  const hasTime = timeTokens.some((t) => lower.includes(t));
+  const hasPersonalEvent = personalTokens.some((t) => lower.includes(t));
+
+  const matchedConditions = [hasEmotion, hasTime, hasPersonalEvent].filter(Boolean).length;
+  const suggestSave = matchedConditions >= 2;
+
+  return {
+    suggestSave,
+    matchedConditions,
+    reasons: {
+      hasEmotion,
+      hasTime,
+      hasPersonalEvent,
+    },
+    message: suggestSave ? "Guardar como memoria" : "",
+  };
+}
+
 export async function processNeuroInput(userInput, options = {}) {
   const trace = createTrace();
   const t0 = Date.now();
@@ -455,6 +482,8 @@ export async function processNeuroInput(userInput, options = {}) {
     patterns: insightResult.patterns.length,
   });
   const temporalContext = buildTemporalContext(userInput, finalActivated, insightResult.insights);
+  const memorySuggestion = detectMemoryCandidate(userInput);
+  addStep(trace, "memory_candidate_detected", memorySuggestion);
 
   addStep(trace, "choose_reply_mode");
   const patternCount = (() => {
@@ -680,6 +709,7 @@ export async function processNeuroInput(userInput, options = {}) {
     insights: insightResult.insights,
     insightSummary: insightResult.insightSummary,
     temporalContext,
+    memorySuggestion,
     reasoningContext,
     insightTrace: {
       clusters: insightResult.clusters,
