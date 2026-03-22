@@ -13,7 +13,7 @@ import {
 } from "./dayStore.js";
 import { summarizeDay, inferDayEmotion, extractDayThemes, aggregateActivatedNeurons } from "./dayAnalyzer.js";
 import { getAllNeurons } from "../neuro/neuronStore.js";
-import { requestDayRefine } from "../services/neuroclawClient.js";
+import { requestGeminiDayRefine } from "../services/geminiPremiumClient.js";
 import { applyDayRefinement } from "./dayRefine.js";
 
 // ---- Estado de la UI de días ----
@@ -576,7 +576,7 @@ export function wireDayDetail(root, rerenderCallback) {
         .filter(Boolean)
         .map((n) => ({ id: n.id, concept: n.core?.concept, domain: n.core?.domain, summary: n.core?.summary }));
 
-      const response = await requestDayRefine({
+      const response = await requestGeminiDayRefine({
         rawChat: day.rawChat || [],
         memories: day.memoryIds || day.memories || [], // memoryIds is the current field; memories is the legacy field name
         linkedNeurons: linkedNeuronsData,
@@ -590,7 +590,7 @@ export function wireDayDetail(root, rerenderCallback) {
       if (response) {
         applyDayRefinement(day.id, response);
       } else {
-        dayUiState.error = "No se pudo refinar con Gemini. Verifica la configuración del backend.";
+        dayUiState.error = "No se pudo refinar con Gemini. Verifica tu API key en Ajustes de NeuroChat.";
       }
     } catch (err) {
       dayUiState.error = `Error al refinar: ${err?.message || "desconocido"}`;
