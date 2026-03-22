@@ -5,7 +5,7 @@
 import { processNeuroInput } from "../neuro/neurocore.js";
 import { getAllNeurons, saveNeuron, deleteNeuron } from "../neuro/neuronStore.js";
 import { createNeuron } from "../neuro/schemas.js";
-import { getMessageFeedbackMap, recordNeuronFeedback } from "../neuro/feedback.js";
+import { getMessageFeedbackMap, recordNeuronFeedback, recordNeuronRemoval } from "../neuro/feedback.js";
 import { saveMemory, getAllMemories, searchMemories, detectMemoryEmotion, extractMemoryTags, inferMemoryDate, getMemoriesByNeuron } from "../memory/memoryStore.js";
 import { getInsightHistory } from "../neuro/insightHistory.js";
 import { appendToCurrentDay, linkDayToNeurons, getCurrentDay } from "../day/dayStore.js";
@@ -286,6 +286,10 @@ export async function forcePremiumGenerationForMessage(messageId, options = {}) 
 
 export function submitNeuronFeedback({ neuronId, feedback, messageId, inputPreview = "" }) {
   return recordNeuronFeedback({ neuronId, feedback, messageId, inputPreview });
+}
+
+export function submitNeuronRemoval({ neuronId, messageId = null }) {
+  return recordNeuronRemoval({ neuronId, messageId });
 }
 
 export async function getFullChatHistory() {

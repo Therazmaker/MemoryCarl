@@ -8,7 +8,7 @@
  *   initNeuroChat()   → inicialización del módulo
  */
 
-import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
+import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
 import { saveMemory, updateMemory, deleteMemory, autoFixMemory, suggestMemoryMilestone } from "../memory/memoryStore.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
@@ -195,11 +195,14 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false, options = {}) 
   const temporalBadge = `<span class="ncTag">${esc(temporal.timeContext || "timeless")}</span>`;
   const temporalLine = [temporal.date, temporal.isHistorical ? "histórico" : "", temporal.stage].filter(Boolean).join(" · ");
   const currentFeedback = options.feedbackMap?.[n.id] || null;
+  const isRemoved = currentFeedback === "remove";
   const feedbackActions = !isGenerated && options.allowFeedback
     ? `<div class="ncNeuronFeedbackRow">
         <button class="ncFeedbackBtn ${currentFeedback === "like" ? "ncFeedbackBtn--active" : ""}" aria-label="Marcar neurona ${esc(n.core.concept || "sin nombre")} como relevante" data-feedback-neuron="${esc(n.id)}" data-feedback-type="like" ${currentFeedback ? "disabled" : ""} title="Relevante">👍</button>
         <button class="ncFeedbackBtn ${currentFeedback === "dislike" ? "ncFeedbackBtn--active ncFeedbackBtn--negative" : "ncFeedbackBtn--negative"}" aria-label="Marcar neurona ${esc(n.core.concept || "sin nombre")} como no relevante" data-feedback-neuron="${esc(n.id)}" data-feedback-type="dislike" ${currentFeedback ? "disabled" : ""} title="No relevante">👎</button>
-        ${currentFeedback ? `<span class="ncFeedbackState">${currentFeedback === "like" ? "Relevante" : "No relevante"}</span>` : ""}
+        <button class="ncFeedbackBtn ncFeedbackBtn--remove ${isRemoved ? "ncFeedbackBtn--active" : ""}" aria-label="Eliminar neurona ${esc(n.core.concept || "sin nombre")}" data-remove-neuron="${esc(n.id)}" ${isRemoved ? "disabled" : ""} title="Remove neuron">❌</button>
+        ${currentFeedback && currentFeedback !== "remove" ? `<span class="ncFeedbackState">${currentFeedback === "like" ? "Relevante" : "No relevante"}</span>` : ""}
+        ${isRemoved ? `<span class="ncFeedbackState ncFeedbackState--removed">Eliminada</span>` : ""}
       </div>`
     : "";
   return `
@@ -1073,6 +1076,37 @@ function wireMessageEvents(root) {
         }
       } catch (err) {
         uiState.error = err.message || "No se pudo guardar feedback";
+      }
+      rerenderSidePanel(root);
+    });
+  });
+
+  root.querySelectorAll("[data-remove-neuron]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const neuronId = btn.getAttribute("data-remove-neuron");
+      const messageId = uiState.lastResult?.messageId;
+      if (!neuronId || !messageId) return;
+
+      const currentMap = uiState.feedbackByMessage[messageId] || {};
+      if (currentMap[neuronId] === "remove") return;
+
+      try {
+        const result = submitNeuronRemoval({ neuronId, messageId });
+        if (result?.applied) {
+          uiState.feedbackByMessage[messageId] = {
+            ...(uiState.feedbackByMessage[messageId] || {}),
+            [neuronId]: "remove",
+          };
+          // Remove the neuron from the activated list immediately
+          if (uiState.lastResult?.activated) {
+            uiState.lastResult.activated = uiState.lastResult.activated.filter(
+              (item) => item.neuron?.id !== neuronId
+            );
+          }
+          uiState.error = null;
+        }
+      } catch (err) {
+        uiState.error = err.message || "No se pudo eliminar la neurona";
       }
       rerenderSidePanel(root);
     });

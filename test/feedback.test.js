@@ -184,3 +184,59 @@ test("likes/dislikes ajustan evolution.weightHistory", () => {
   assert.ok((likeRes.neuron.evolution?.weightHistory || []).length >= 1);
   assert.ok((dislikeRes.neuron.evolution?.weightHistory || []).length >= 2);
 });
+
+import { applyNeuronRemoval, recordNeuronRemoval } from "../src/neuro/feedback.js";
+import { activateNeurons } from "../src/neuro/activation.js";
+import { getNeuronById } from "../src/neuro/neuronStore.js";
+
+test("applyNeuronRemoval marca la neurona como removed", () => {
+  const n = createNeuron({ id: "n_remove_1", core: { concept: "ruido", domain: "general", summary: "irrelevante" }, weight: 0.5 });
+  const updated = applyNeuronRemoval(n);
+  assert.equal(updated.feedbackStats.removed, true);
+  assert.ok(updated.feedbackStats.removedAt);
+  assert.equal(updated.feedbackStats.removalCount, 1);
+});
+
+test("applyNeuronRemoval incrementa removalCount acumulativamente", () => {
+  const n = createNeuron({ id: "n_remove_2", core: { concept: "ruido2", domain: "general", summary: "" }, weight: 0.5, feedbackStats: { likes: 0, dislikes: 0, netScore: 0, lastFeedbackAt: null, removed: true, removedAt: null, removalCount: 2 } });
+  const updated = applyNeuronRemoval(n);
+  assert.equal(updated.feedbackStats.removalCount, 3);
+  assert.equal(updated.feedbackStats.removed, true);
+});
+
+test("recordNeuronRemoval persiste removed=true en neuronStore", () => {
+  resetStorage();
+  saveNeuron(createNeuron({ id: "n_remove_3", core: { concept: "spam", domain: "general", summary: "" }, weight: 0.5 }));
+  const res = recordNeuronRemoval({ neuronId: "n_remove_3", messageId: "msg_remove_1" });
+  assert.equal(res.applied, true);
+  assert.equal(res.record.feedback, "remove");
+  assert.equal(res.neuron.feedbackStats.removed, true);
+  assert.equal(res.neuron.feedbackStats.removalCount, 1);
+});
+
+test("recordNeuronRemoval lanza error si la neurona no existe", () => {
+  resetStorage();
+  assert.throws(() => recordNeuronRemoval({ neuronId: "non_existent_xyz" }), /no encontrada/i);
+});
+
+test("activateNeurons excluye neuronas con removed=true", async () => {
+  resetStorage();
+  const n1 = createNeuron({ id: "n_act_removed_1", core: { concept: "proyecto trabajo", domain: "work", summary: "proyecto importante" }, triggers: ["proyecto", "trabajo"], weight: 0.8 });
+  const n2 = createNeuron({ id: "n_act_removed_2", core: { concept: "ruido irrelevante", domain: "work", summary: "no útil" }, triggers: ["ruido"], weight: 0.8, feedbackStats: { likes: 0, dislikes: 0, netScore: 0, lastFeedbackAt: null, removed: true, removedAt: new Date().toISOString(), removalCount: 1 } });
+  const activated = await activateNeurons("proyecto trabajo", [n1, n2], { persistActivation: false });
+  const ids = activated.map((a) => a.neuron.id);
+  assert.ok(ids.includes("n_act_removed_1"), "neurona activa debe aparecer");
+  assert.ok(!ids.includes("n_act_removed_2"), "neurona removida no debe aparecer");
+});
+
+test("remove no rompe conexiones de otras neuronas", () => {
+  resetStorage();
+  const n1 = createNeuron({ id: "n_conn_1", core: { concept: "A", domain: "general", summary: "" }, connections: ["n_conn_2"], weight: 0.5 });
+  const n2 = createNeuron({ id: "n_conn_2", core: { concept: "B", domain: "general", summary: "" }, connections: ["n_conn_1"], weight: 0.5 });
+  saveNeuron(n1);
+  saveNeuron(n2);
+  recordNeuronRemoval({ neuronId: "n_conn_2", messageId: "msg_conn" });
+  // n_conn_1 debe seguir teniendo la conexión declarada (no se eliminan las referencias)
+  const saved1 = getNeuronById("n_conn_1");
+  assert.ok(saved1.connections.includes("n_conn_2"), "conexión declarada se mantiene");
+});

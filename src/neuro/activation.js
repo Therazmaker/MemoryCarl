@@ -183,7 +183,10 @@ export async function activateNeurons(userInput, neurons, options = {}) {
 
   if (!userInput || !neurons.length) return [];
 
-  const tuning = getActivationTuning(options.totalNeurons ?? neurons.length, options);
+  // Excluir neuronas marcadas como eliminadas
+  const activeNeurons = neurons.filter((n) => !n.feedbackStats?.removed);
+
+  const tuning = getActivationTuning(options.totalNeurons ?? activeNeurons.length, options);
   const minScore = options.minScore ?? tuning.minScore;
 
   if (options.traceMeta && typeof options.traceMeta === "object") {
@@ -200,7 +203,7 @@ export async function activateNeurons(userInput, neurons, options = {}) {
   const orientation = detectPastOrPresentOrientation(userInput, options);
   if (options.traceMeta && typeof options.traceMeta === "object") options.traceMeta.temporalOrientation = orientation;
 
-  const scored = await Promise.all(neurons.map(async (neuron) => {
+  const scored = await Promise.all(activeNeurons.map(async (neuron) => {
     let neuronEmbed = neuron.embedding;
     if (!Array.isArray(neuronEmbed) || neuronEmbed.length === 0) {
       const neuronText = [neuron.core.concept, neuron.core.summary, ...neuron.triggers, ...(neuron.meta?.aliases || [])].join(" ");
