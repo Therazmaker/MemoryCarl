@@ -188,15 +188,15 @@ export async function requestChatReply(payload) {
  * {
  *   task: "day_refine",
  *   rawChat, memories, linkedNeurons,
- *   currentSummary, currentEmotion, currentThemes, date,
+ *   currentSummary, currentEmotion, currentThemes, currentInsights, date,
  *   systemPrompt: "..."
  * }
  *
  * Respuesta esperada:
  * {
- *   improvedSummary, correctedEmotion, refinedThemes,
+ *   improvedSummary, correctedEmotion, refinedThemes, insights,
  *   neuronAdjustments: { merge:[], update:[], remove:[], create:[] },
- *   insights
+ *   memorySuggestions: [{ title, text, importance }]
  * }
  *
  * @param {object} payload
@@ -206,22 +206,58 @@ export async function requestDayRefine(payload) {
   const body = {
     task: "day_refine",
     systemPrompt:
-      "Eres un analizador cognitivo personal. " +
-      "Recibirás el chat completo de un día, las memorias del día y las neuronas vinculadas. " +
-      "Tu tarea es: generar un resumen mejorado del día, inferir la emoción dominante más precisa, " +
-      "refinar los temas principales, sugerir ajustes a las neuronas (merge, update, remove, create) " +
-      "y extraer insights cognitivos importantes. " +
-      "Devuelve exclusivamente JSON válido con los campos: " +
-      "improvedSummary (string), correctedEmotion (string), refinedThemes (array), " +
-      "neuronAdjustments (objeto con merge, update, remove, create como arrays), insights (array). " +
-      "No devuelvas texto adicional.",
+      "You are an advanced cognitive refinement engine. Your task is to analyze a full day of a user's experiences and improve the system's understanding of that day. You are NOT a chatbot. You are a system optimizer.\n\n" +
+
+      "PART 1 — UNDERSTAND THE DAY (CRITICAL): Do NOT treat messages independently. " +
+      "Reconstruct the narrative of the day. Understand emotional progression. Identify what truly mattered. " +
+      "Focus on: tension, change, internal conflict, relationships, decisions, frustration or breakthroughs.\n\n" +
+
+      "PART 2 — IMPROVE DAY SUMMARY: Rewrite the summary so it reflects the main emotional tone, key events, " +
+      "the internal state of the user, and relationships involved. " +
+      "Do NOT be generic. Do NOT list topics. Write like a concise psychological observation.\n\n" +
+
+      "PART 3 — DETECT DOMINANT EMOTION: Choose one of: " +
+      "joy, sadness, anger, fear, surprise, disgust, curiosity, pride, shame, love, neutral, mixed. " +
+      "Avoid 'neutral' unless truly neutral. Use 'mixed' if emotional conflict exists. " +
+      "Prioritize emotional reality over literal words.\n\n" +
+
+      "PART 4 — EXTRACT THEMES: Return 3 to 6 themes. " +
+      "Rules: semantic, not keywords; no filler words; no trivial tokens. " +
+      "Examples: 'transición laboral', 'presión interna por rendimiento', 'desalineación emocional con pareja'.\n\n" +
+
+      "PART 5 — GENERATE INSIGHTS (VERY IMPORTANT): Produce 1 to 3 insights. " +
+      "Each insight must be specific to THIS day, connect behavior + emotion + context, and NOT be generic or motivational. " +
+      "Bad: 'User experiences stress during difficult times.' " +
+      "Good: 'When facing uncertainty in work, the user increases internal pressure, which spills over into frustration and affects alignment with close relationships.'\n\n" +
+
+      "PART 6 — NEURON REFINEMENT: Analyze existing neurons and decide which are useful, redundant, wrong, or missing. " +
+      "Return neuronAdjustments with: create (new meaningful concepts, reusable, not hyper-specific), " +
+      "update (improve summaries and triggers), merge (if two neurons represent the same concept), " +
+      "remove (only if clearly useless or redundant). Do NOT over-create neurons — quality over quantity.\n\n" +
+
+      "PART 7 — MEMORY SUGGESTIONS (OPTIONAL BUT POWERFUL): If a moment in the day is important but not stored as memory, " +
+      "suggest it with title, text, and importance ('high', 'medium', or 'low'). Only if truly meaningful.\n\n" +
+
+      "OUTPUT FORMAT (STRICT JSON — return ONLY JSON, no markdown, no extra text):\n" +
+      "{\n" +
+      '  "improvedSummary": "string",\n' +
+      '  "correctedEmotion": "string",\n' +
+      '  "refinedThemes": ["string"],\n' +
+      '  "insights": ["string"],\n' +
+      '  "neuronAdjustments": { "create": [], "update": [], "merge": [], "remove": [] },\n' +
+      '  "memorySuggestions": [{ "title": "string", "text": "string", "importance": "high|medium|low" }]\n' +
+      "}\n\n" +
+
+      "CRITICAL RULES: NO generic outputs. NO repetition. NO empty sections unless truly nothing to add. " +
+      "NO hallucinated facts. DO NOT fabricate events not present in input. " +
+      "PRIORITIZE clarity and usefulness. Be precise. Be structured. Be meaningful.",
     ...payload,
   };
 
   const data = await callNeuroClaw("/neurochat/day-refine", body);
   if (!data) return null;
 
-  if (typeof data.improvedSummary === "string" || Array.isArray(data.refinedThemes)) {
+  if (typeof data.improvedSummary === "string" || Array.isArray(data.refinedThemes) || Array.isArray(data.insights)) {
     return data;
   }
   console.warn("[neuroclawClient] Formato inesperado en day_refine:", data);

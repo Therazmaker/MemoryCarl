@@ -9,11 +9,12 @@
  */
 
 import {
-  getAllDays, getCurrentDay, closeDay, updateDay, rollbackDay, applyDayRefinement, getDayByDate, reopenDay,
+  getAllDays, getCurrentDay, closeDay, updateDay, rollbackDay, getDayByDate, reopenDay,
 } from "./dayStore.js";
 import { summarizeDay, inferDayEmotion, extractDayThemes, aggregateActivatedNeurons } from "./dayAnalyzer.js";
 import { getAllNeurons } from "../neuro/neuronStore.js";
 import { requestDayRefine } from "../services/neuroclawClient.js";
+import { applyDayRefinement } from "./dayRefine.js";
 
 // ---- Estado de la UI de días ----
 export const dayUiState = {
@@ -410,6 +411,16 @@ export function viewDayDetail(day) {
       <div class="dcInsightList">${day.insights.map((ins) => `<div class="dcInsightItem">💡 ${esc(ins)}</div>`).join("")}</div>
     </div>` : "";
 
+  const memorySuggestionsHtml = (day.memorySuggestions || []).length ? `
+    <div class="dcSection">
+      <div class="dcSectionTitle">Sugerencias de memoria (${day.memorySuggestions.length})</div>
+      <div class="dcInsightList">${day.memorySuggestions.map((s) => `
+        <div class="dcInsightItem">
+          📝 <b>${esc(s.title)}</b>${s.importance === "high" ? " ⭐" : ""}<br>
+          <span style="opacity:.8">${esc(s.text)}</span>
+        </div>`).join("")}</div>
+    </div>` : "";
+
   const timelineHtml = (day.rawChat || []).length ? `
     <div class="dcSection">
       <div class="dcSectionTitle">Timeline (${day.rawChat.length} mensajes)</div>
@@ -475,6 +486,7 @@ export function viewDayDetail(day) {
       ${themesHtml}
       ${neuronsHtml}
       ${insightsHtml}
+      ${memorySuggestionsHtml}
       ${timelineHtml}
     </div>`;
 }
@@ -566,16 +578,17 @@ export function wireDayDetail(root, rerenderCallback) {
 
       const response = await requestDayRefine({
         rawChat: day.rawChat || [],
-        memories: day.memories || [],
+        memories: day.memoryIds || day.memories || [], // memoryIds is the current field; memories is the legacy field name
         linkedNeurons: linkedNeuronsData,
         currentSummary: day.summary,
         currentEmotion: day.dominantEmotion,
         currentThemes: day.dominantThemes,
+        currentInsights: day.insights || [],
         date: day.date,
       });
 
       if (response) {
-        applyDayRefinement(day, response);
+        applyDayRefinement(day.id, response);
       } else {
         dayUiState.error = "No se pudo refinar con Gemini. Verifica la configuración del backend.";
       }
