@@ -40,8 +40,26 @@ export function validateDayRefinement(refinement) {
   if (refinement.insights !== undefined && !Array.isArray(refinement.insights)) {
     errors.push("insights debe ser array");
   }
-  if (refinement.memorySuggestions !== undefined && !Array.isArray(refinement.memorySuggestions)) {
-    errors.push("memorySuggestions debe ser array");
+  if (refinement.memorySuggestions !== undefined) {
+    if (!Array.isArray(refinement.memorySuggestions)) {
+      errors.push("memorySuggestions debe ser array");
+    } else {
+      for (const [i, sug] of refinement.memorySuggestions.entries()) {
+        if (!sug || typeof sug !== "object") {
+          errors.push(`memorySuggestions[${i}] debe ser un objeto`);
+        } else {
+          if (typeof sug.title !== "string" || !sug.title) {
+            errors.push(`memorySuggestions[${i}].title debe ser string no vacío`);
+          }
+          if (typeof sug.text !== "string" || !sug.text) {
+            errors.push(`memorySuggestions[${i}].text debe ser string no vacío`);
+          }
+          if (sug.importance !== undefined && !["high", "medium", "low"].includes(sug.importance)) {
+            errors.push(`memorySuggestions[${i}].importance debe ser 'high', 'medium' o 'low'`);
+          }
+        }
+      }
+    }
   }
 
   // Validar neuronAdjustments
@@ -108,6 +126,9 @@ export function previewDayRefinement(dayId, refinement) {
     neuronAdjustments: refinement.neuronAdjustments
       ? _previewNeuronAdjustments(refinement.neuronAdjustments)
       : null,
+    memorySuggestions: Array.isArray(refinement.memorySuggestions)
+      ? refinement.memorySuggestions.length
+      : null,
   };
 
   return preview;
@@ -151,8 +172,21 @@ function _previewNeuronAdjustments(adj) {
 export function applyDayRefinement(dayId, refinement, options = {}) {
   if (!dayId || !refinement) return null;
 
-  // Validar primero
-  const validation = validateDayRefinement(refinement);
+  // Pre-normalize memorySuggestions to make apply resilient to AI output:
+  // filter out invalid items and normalize importance before strict validation.
+  let normalized = refinement;
+  if (Array.isArray(refinement.memorySuggestions)) {
+    const cleanedSuggestions = refinement.memorySuggestions
+      .filter(_isValidMemorySuggestionItem)
+      .map((s) => ({
+        ...s,
+        importance: ["high", "medium", "low"].includes(s.importance) ? s.importance : "medium",
+      }));
+    normalized = { ...refinement, memorySuggestions: cleanedSuggestions };
+  }
+
+  // Validar con el refinement normalizado
+  const validation = validateDayRefinement(normalized);
   if (!validation.valid) {
     console.warn("[dayRefine] refinement inválido:", validation.errors);
     return null;
@@ -165,25 +199,30 @@ export function applyDayRefinement(dayId, refinement, options = {}) {
   try {
     const updated = { ...day };
 
-    if (typeof refinement.improvedSummary === "string" && refinement.improvedSummary) {
-      updated.summary = refinement.improvedSummary;
+    if (typeof normalized.improvedSummary === "string" && normalized.improvedSummary) {
+      updated.summary = normalized.improvedSummary;
     }
-    if (typeof refinement.correctedEmotion === "string" && refinement.correctedEmotion) {
-      updated.dominantEmotion = refinement.correctedEmotion;
+    if (typeof normalized.correctedEmotion === "string" && normalized.correctedEmotion) {
+      updated.dominantEmotion = normalized.correctedEmotion;
     }
-    if (Array.isArray(refinement.refinedThemes) && refinement.refinedThemes.length > 0) {
-      updated.dominantThemes = refinement.refinedThemes.map(String).filter(Boolean);
+    if (Array.isArray(normalized.refinedThemes) && normalized.refinedThemes.length > 0) {
+      updated.dominantThemes = normalized.refinedThemes.map(String).filter(Boolean);
     }
-    if (Array.isArray(refinement.insights) && refinement.insights.length > 0) {
-      updated.insights = refinement.insights.map(String).filter(Boolean);
+    if (Array.isArray(normalized.insights) && normalized.insights.length > 0) {
+      updated.insights = normalized.insights.map(String).filter(Boolean);
     }
 
     updated.geminiProcessed = true;
     updated.geminiLastProcessedAt = new Date().toISOString();
 
     // Aplicar ajustes de neuronas
-    if (!options.skipNeurons && refinement.neuronAdjustments) {
-      _applyNeuronAdjustments(refinement.neuronAdjustments, updated);
+    if (!options.skipNeurons && normalized.neuronAdjustments) {
+      _applyNeuronAdjustments(normalized.neuronAdjustments, updated);
+    }
+
+    // Almacenar sugerencias de memoria en el día (ya pre-normalizadas)
+    if (!options.skipMemories && Array.isArray(normalized.memorySuggestions) && normalized.memorySuggestions.length > 0) {
+      updated.memorySuggestions = normalized.memorySuggestions;
     }
 
     return updateDay(updated) || updated;
@@ -191,6 +230,18 @@ export function applyDayRefinement(dayId, refinement, options = {}) {
     console.error("[dayRefine] Error aplicando refinamiento:", err);
     return day;
   }
+}
+
+/**
+ * Returns true if a memorySuggestion item has the required shape (title + text as non-empty strings).
+ */
+function _isValidMemorySuggestionItem(s) {
+  return (
+    s !== null &&
+    typeof s === "object" &&
+    typeof s.title === "string" && s.title.length > 0 &&
+    typeof s.text === "string" && s.text.length > 0
+  );
 }
 
 /**

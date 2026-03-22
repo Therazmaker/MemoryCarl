@@ -99,6 +99,60 @@ test("validateDayRefinement acepta neuronAdjustments con arrays vacíos", () => 
   assert.equal(result.valid, true);
 });
 
+test("validateDayRefinement acepta memorySuggestions válidas", () => {
+  const result = validateDayRefinement({
+    memorySuggestions: [
+      { title: "Momento clave", text: "El usuario tomó una decisión importante.", importance: "high" },
+    ],
+  });
+  assert.equal(result.valid, true);
+});
+
+test("validateDayRefinement rechaza memorySuggestions no array", () => {
+  const result = validateDayRefinement({ memorySuggestions: "sugerencia" });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.includes("memorySuggestions")));
+});
+
+test("validateDayRefinement rechaza memorySuggestions con item sin title", () => {
+  const result = validateDayRefinement({ memorySuggestions: [{ text: "texto" }] });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.includes("title")));
+});
+
+test("validateDayRefinement rechaza memorySuggestions con item sin text", () => {
+  const result = validateDayRefinement({ memorySuggestions: [{ title: "Título" }] });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.includes("text")));
+});
+
+test("validateDayRefinement rechaza memorySuggestions con importance inválida", () => {
+  const result = validateDayRefinement({
+    memorySuggestions: [{ title: "T", text: "X", importance: "critical" }],
+  });
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((e) => e.includes("importance")));
+});
+
+test("validateDayRefinement acepta memorySuggestions sin importance (campo opcional)", () => {
+  const result = validateDayRefinement({
+    memorySuggestions: [{ title: "T", text: "X" }],
+  });
+  assert.equal(result.valid, true);
+});
+
+test("validateDayRefinement acepta refinement completo con memorySuggestions", () => {
+  const result = validateDayRefinement({
+    improvedSummary: "Resumen",
+    correctedEmotion: "curiosity",
+    refinedThemes: ["trabajo"],
+    insights: ["Insight valioso"],
+    neuronAdjustments: { create: [], update: [], merge: [], remove: [] },
+    memorySuggestions: [{ title: "Hito", text: "Logro del día", importance: "high" }],
+  });
+  assert.equal(result.valid, true);
+});
+
 // ---- Tests: previewDayRefinement ----
 
 test("previewDayRefinement retorna preview con cambios", () => {
@@ -252,4 +306,91 @@ test("múltiples refinamientos sucesivos se acumulan correctamente", () => {
   assert.equal(final.summary, "primero");
   assert.equal(final.dominantEmotion, "alegría");
   assert.deepEqual(final.dominantThemes, ["tema1", "tema2"]);
+});
+
+// ---- Tests: memorySuggestions ----
+
+test("applyDayRefinement almacena memorySuggestions en el día", () => {
+  resetStorage();
+  const day = getCurrentDay();
+  const refinement = {
+    improvedSummary: "Resumen con memorias",
+    memorySuggestions: [
+      { title: "Momento clave", text: "El usuario tomó una decisión importante.", importance: "high" },
+      { title: "Reflexión", text: "Sentimiento de incertidumbre ante el cambio.", importance: "medium" },
+    ],
+  };
+  const result = applyDayRefinement(day.id, refinement);
+  assert.ok(result);
+  assert.ok(Array.isArray(result.memorySuggestions));
+  assert.equal(result.memorySuggestions.length, 2);
+  assert.equal(result.memorySuggestions[0].title, "Momento clave");
+  assert.equal(result.memorySuggestions[0].importance, "high");
+  assert.equal(result.memorySuggestions[1].title, "Reflexión");
+});
+
+test("applyDayRefinement con skipMemories no almacena memorySuggestions", () => {
+  resetStorage();
+  const day = getCurrentDay();
+  const refinement = {
+    improvedSummary: "Sin memorias",
+    memorySuggestions: [{ title: "T", text: "X", importance: "high" }],
+  };
+  const result = applyDayRefinement(day.id, refinement, { skipMemories: true });
+  assert.ok(result);
+  assert.equal(result.memorySuggestions, undefined);
+});
+
+test("applyDayRefinement descarta memorySuggestions inválidas silenciosamente", () => {
+  resetStorage();
+  const day = getCurrentDay();
+  const refinement = {
+    improvedSummary: "Validación memoria",
+    memorySuggestions: [
+      { title: "Válida", text: "Texto correcto", importance: "low" },
+      null,
+      { text: "Sin título" },
+    ],
+  };
+  const result = applyDayRefinement(day.id, refinement);
+  assert.ok(result);
+  assert.ok(Array.isArray(result.memorySuggestions));
+  assert.equal(result.memorySuggestions.length, 1);
+  assert.equal(result.memorySuggestions[0].title, "Válida");
+});
+
+test("applyDayRefinement normaliza importance desconocida a 'medium'", () => {
+  resetStorage();
+  const day = getCurrentDay();
+  const refinement = {
+    memorySuggestions: [{ title: "T", text: "X", importance: "critical" }],
+  };
+  const result = applyDayRefinement(day.id, refinement);
+  assert.ok(result);
+  assert.ok(Array.isArray(result.memorySuggestions));
+  assert.equal(result.memorySuggestions[0].importance, "medium");
+});
+
+test("previewDayRefinement incluye conteo de memorySuggestions", () => {
+  resetStorage();
+  const day = getCurrentDay();
+  const refinement = {
+    improvedSummary: "Con sugerencias",
+    memorySuggestions: [
+      { title: "A", text: "texto A", importance: "high" },
+      { title: "B", text: "texto B", importance: "low" },
+    ],
+  };
+  const preview = previewDayRefinement(day.id, refinement);
+  assert.ok(preview);
+  assert.equal(preview.valid, true);
+  assert.equal(preview.memorySuggestions, 2);
+});
+
+test("previewDayRefinement muestra null en memorySuggestions si no hay sugerencias", () => {
+  resetStorage();
+  const day = getCurrentDay();
+  const preview = previewDayRefinement(day.id, { improvedSummary: "Sin sugerencias" });
+  assert.ok(preview);
+  assert.equal(preview.memorySuggestions, null);
 });
