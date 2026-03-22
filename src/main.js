@@ -2367,7 +2367,6 @@ function renderMoreModal(){
           ${mk("insights","📊","Insights","Todo por día")}
           ${mk("football","⚽","Football Lab","Equipos, jugadores, ratings")}
           ${mk("neurochat","💬","NeuroChat","Conversación con memoria viva")}
-          ${mk("dayengine","📓","Daily Memory","Diario cognitivo diario")}
           ${mk("settings","⚙️","Ajustes","Backup, sync, etc")}
         </div>
       </div>

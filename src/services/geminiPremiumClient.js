@@ -9,6 +9,7 @@
  *   isGeminiPremiumConfigured()
  *   getGeminiPremiumSettings()
  *   requestGeminiPremiumNeuronGeneration(payload)
+ *   requestGeminiDayRefine(payload)
  *   requestAssistedReply(payload)
  *   streamGeminiNeuronGeneration(payload, onChunk)
  *   parseGeminiJsonResponse(raw)
@@ -265,6 +266,117 @@ export async function requestGeminiPremiumNeuronGeneration(payload) {
 
   const { neurons: rawNeurons } = parseGeminiJsonResponse(rawText);
   return sanitizeGeminiNeuronPayload(rawNeurons);
+}
+
+/**
+ * Refina un día completo usando Gemini API (sin backend NeuroClaw).
+ *
+ * @param {{
+ *   rawChat?: any[],
+ *   memories?: any[],
+ *   linkedNeurons?: any[],
+ *   currentSummary?: string,
+ *   currentEmotion?: string,
+ *   currentThemes?: string[],
+ *   currentInsights?: string[],
+ *   date?: string,
+ * }} payload
+ * @returns {Promise<object>}
+ */
+export async function requestGeminiDayRefine(payload = {}) {
+  const settings = getGeminiPremiumSettings();
+  if (!isGeminiPremiumConfigured()) {
+    throw new Error("Gemini no configurado");
+  }
+
+  const model = settings.model || "gemini-2.5-flash";
+  const timeout = settings.timeoutMs || 20000;
+  const url = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent?key=${settings.apiKey}`;
+
+  const prompt = `You are an advanced cognitive refinement engine. Your task is to analyze a full day of a user's experiences and improve the system's understanding of that day. You are NOT a chatbot. You are a system optimizer.
+
+PART 1 — UNDERSTAND THE DAY (CRITICAL): Do NOT treat messages independently. Reconstruct the narrative of the day. Understand emotional progression. Identify what truly mattered. Focus on: tension, change, internal conflict, relationships, decisions, frustration or breakthroughs.
+
+PART 2 — IMPROVE DAY SUMMARY: Rewrite the summary so it reflects the main emotional tone, key events, the internal state of the user, and relationships involved. Do NOT be generic. Do NOT list topics. Write like a concise psychological observation.
+
+PART 3 — DETECT DOMINANT EMOTION: Choose one of: joy, sadness, anger, fear, surprise, disgust, curiosity, pride, shame, love, neutral, mixed. Avoid 'neutral' unless truly neutral. Use 'mixed' if emotional conflict exists. Prioritize emotional reality over literal words.
+
+PART 4 — EXTRACT THEMES: Return 3 to 6 themes. Rules: semantic, not keywords; no filler words; no trivial tokens.
+
+PART 5 — GENERATE INSIGHTS (VERY IMPORTANT): Produce 1 to 3 insights. Each insight must be specific to THIS day, connect behavior + emotion + context, and NOT be generic or motivational.
+
+PART 6 — NEURON REFINEMENT: Analyze existing neurons and decide which are useful, redundant, wrong, or missing. Return neuronAdjustments with: create, update, merge, remove.
+
+PART 7 — MEMORY SUGGESTIONS (OPTIONAL BUT POWERFUL): If a moment in the day is important but not stored as memory, suggest it with title, text, and importance ('high', 'medium', or 'low').
+
+OUTPUT FORMAT (STRICT JSON — return ONLY JSON, no markdown, no extra text):
+{
+  "improvedSummary": "string",
+  "correctedEmotion": "string",
+  "refinedThemes": ["string"],
+  "insights": ["string"],
+  "neuronAdjustments": { "create": [], "update": [], "merge": [], "remove": [] },
+  "memorySuggestions": [{ "title": "string", "text": "string", "importance": "high|medium|low" }]
+}
+
+CRITICAL RULES: NO generic outputs. NO repetition. NO hallucinated facts. DO NOT fabricate events not present in input.
+
+INPUT DATA:
+${JSON.stringify(payload, null, 2)}
+`;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: settings.temperature ?? 0.4,
+      maxOutputTokens: settings.maxOutputTokens ?? 4096,
+    },
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === "AbortError") throw new Error("Gemini day refine timeout");
+    throw new Error(`Error de red: ${err.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    const txt = await response.text().catch(() => "");
+    throw new Error(`Gemini day refine error ${response.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const json = await response.json();
+  const rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText) throw new Error("Gemini day refine: sin contenido en respuesta");
+
+  let text = rawText.trim();
+  text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) text = jsonMatch[0];
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`Gemini day refine JSON inválido: ${e.message}`);
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Gemini day refine: estructura inválida");
+  }
+
+  return parsed;
 }
 
 /**
