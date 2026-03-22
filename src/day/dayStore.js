@@ -6,14 +6,23 @@
  *
  * Exporta:
  *   getCurrentDay()
+ *   ensureCurrentDay()
  *   getDayByDate(date)
  *   appendToCurrentDay(message)
+ *   saveDay(day)
  *   closeDay(date)
+ *   reopenDay(dayId)
  *   updateDay(day)
  *   getAllDays()
+ *   getDayRange(options)
  *   linkDayToNeurons(dayId, neuronIds)
+ *   addMemoryToDay(dayId, memoryId)
+ *   deleteDay(dayId)
  *   rollbackDay(dayId)
  *   applyDayRefinement(day, refinementResponse)
+ *   getMemoriesForDay(dayId)
+ *   getNeuronConceptsForDay(dayId, neurons)
+ *   inferDayRelatedNeurons(day)
  */
 
 const DAY_STORE_KEY = "memorycarl_days_v1";
@@ -120,8 +129,10 @@ export function closeDay(date) {
   const days = loadDays();
   const idx = days.findIndex((d) => d.date === date);
   if (idx === -1) return null;
+  const now = new Date().toISOString();
   days[idx].status = "closed";
-  days[idx].updatedAt = new Date().toISOString();
+  days[idx].closedAt = now;
+  days[idx].updatedAt = now;
   saveDays(days);
   return days[idx];
 }
@@ -215,9 +226,153 @@ export function applyDayRefinement(day, refinementResponse) {
       updated.insights = refinementResponse.insights.map(String);
     }
     updated.geminiProcessed = true;
+    updated.geminiLastProcessedAt = new Date().toISOString();
     return updateDay(updated) || updated;
   } catch (_err) {
     // No romper el estado si falla la aplicación
     return day;
   }
+}
+
+/**
+ * Alias de getCurrentDay. Garantiza que el día actual exista.
+ */
+export function ensureCurrentDay() {
+  return getCurrentDay();
+}
+
+/**
+ * Guarda (inserta o reemplaza) un día en el store por su id.
+ * Si no existe un día con ese id, lo inserta.
+ * Si existe, lo reemplaza guardando _previousVersion.
+ */
+export function saveDay(day) {
+  if (!day || typeof day !== "object" || !day.id) return null;
+  const days = loadDays();
+  const idx = days.findIndex((d) => d.id === day.id);
+  const now = new Date().toISOString();
+  if (idx === -1) {
+    days.push({ ...day, updatedAt: now });
+    saveDays(days);
+    return days[days.length - 1];
+  }
+  const previous = { ...days[idx] };
+  delete previous._previousVersion;
+  days[idx] = { ...day, _previousVersion: previous, updatedAt: now };
+  saveDays(days);
+  return days[idx];
+}
+
+/**
+ * Reabre un día cerrado (status → "open", closedAt → null).
+ */
+export function reopenDay(dayId) {
+  const days = loadDays();
+  const idx = days.findIndex((d) => d.id === dayId);
+  if (idx === -1) return null;
+  days[idx].status = "open";
+  days[idx].closedAt = null;
+  days[idx].updatedAt = new Date().toISOString();
+  saveDays(days);
+  return days[idx];
+}
+
+/**
+ * Agrega un memoryId al día indicado (union, no reemplazo).
+ */
+export function addMemoryToDay(dayId, memoryId) {
+  if (!memoryId) return null;
+  const days = loadDays();
+  const idx = days.findIndex((d) => d.id === dayId);
+  if (idx === -1) return null;
+  const existing = new Set(days[idx].memoryIds || days[idx].memories || []);
+  existing.add(String(memoryId));
+  // normalise to memoryIds (new field name)
+  days[idx].memoryIds = Array.from(existing);
+  days[idx].updatedAt = new Date().toISOString();
+  saveDays(days);
+  return days[idx];
+}
+
+/**
+ * Elimina el día con el id dado del store.
+ * Retorna true si se eliminó, false si no existía.
+ */
+export function deleteDay(dayId) {
+  const days = loadDays();
+  const idx = days.findIndex((d) => d.id === dayId);
+  if (idx === -1) return false;
+  days.splice(idx, 1);
+  saveDays(days);
+  return true;
+}
+
+/**
+ * Retorna días en un rango de fechas.
+ *
+ * options: {
+ *   from?: string (YYYY-MM-DD, inclusive),
+ *   to?:   string (YYYY-MM-DD, inclusive),
+ *   status?: "open" | "closed",
+ *   limit?: number,
+ * }
+ */
+export function getDayRange(options = {}) {
+  const days = loadDays();
+  let result = [...days];
+  if (options.from) result = result.filter((d) => d.date >= options.from);
+  if (options.to)   result = result.filter((d) => d.date <= options.to);
+  if (options.status) result = result.filter((d) => d.status === options.status);
+  result.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (options.limit && options.limit > 0) result = result.slice(0, options.limit);
+  return result;
+}
+
+/**
+ * Retorna los IDs de memoria asociados al día indicado.
+ */
+export function getMemoriesForDay(dayId) {
+  const days = loadDays();
+  const day = days.find((d) => d.id === dayId);
+  if (!day) return [];
+  return Array.from(new Set([
+    ...(day.memoryIds || []),
+    ...(day.memories || []),
+  ]));
+}
+
+/**
+ * Retorna los conceptos de neuronas vinculadas al día.
+ * Requiere el array de neuronas del neuronStore.
+ *
+ * @param {string} dayId
+ * @param {Array}  neurons — resultado de getAllNeurons()
+ * @returns {string[]}
+ */
+export function getNeuronConceptsForDay(dayId, neurons = []) {
+  const days = loadDays();
+  const day = days.find((d) => d.id === dayId);
+  if (!day) return [];
+  return (day.linkedNeurons || []).map((id) => {
+    const n = neurons.find((nrn) => nrn.id === id);
+    return n?.core?.concept || id;
+  });
+}
+
+/**
+ * Infiere neuronas relacionadas con el día a partir de activatedNeuronIds en rawChat.
+ * Retorna array de IDs únicos.
+ */
+export function inferDayRelatedNeurons(day) {
+  if (!day) return [];
+  const ids = new Set();
+  for (const msg of (day.rawChat || [])) {
+    if (Array.isArray(msg.activatedNeuronIds)) {
+      for (const id of msg.activatedNeuronIds) { if (id) ids.add(id); }
+    }
+    if (Array.isArray(msg.linkedNeurons)) {
+      for (const id of msg.linkedNeurons) { if (id) ids.add(id); }
+    }
+  }
+  return Array.from(ids);
 }

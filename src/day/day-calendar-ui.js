@@ -9,7 +9,7 @@
  */
 
 import {
-  getAllDays, getCurrentDay, closeDay, updateDay, rollbackDay, applyDayRefinement, getDayByDate,
+  getAllDays, getCurrentDay, closeDay, updateDay, rollbackDay, applyDayRefinement, getDayByDate, reopenDay,
 } from "./dayStore.js";
 import { summarizeDay, inferDayEmotion, extractDayThemes, aggregateActivatedNeurons } from "./dayAnalyzer.js";
 import { getAllNeurons } from "../neuro/neuronStore.js";
@@ -171,6 +171,19 @@ function dayCss() {
   }
   .dcDayStatus--open { background: rgba(124,92,255,.18); color: #a78bfa; }
   .dcDayStatus--closed { background: rgba(255,255,255,.07); color: rgba(255,255,255,.4); }
+  .dcMilestoneTag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 20px;
+    background: rgba(250,200,80,.15);
+    border: 1px solid rgba(250,200,80,.3);
+    color: #fac050;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
   .dcEmpty {
     text-align: center;
     padding: 40px 20px;
@@ -327,11 +340,12 @@ export function viewDayCalendar() {
         const statusClass = day.status === "open" ? "dcDayCard--open" : "dcDayCard--closed";
         const statusLabel = day.status === "open" ? "open" : "cerrado";
         const statusCls = day.status === "open" ? "dcDayStatus--open" : "dcDayStatus--closed";
+        const milestoneTag = day.isMilestone ? `<span class="dcMilestoneTag">⭐ Hito</span>` : "";
         return `
           <div class="dcDayCard ${statusClass}" data-day-id="${esc(day.id)}">
             <div class="dcDayEmoIcon">${emoIcon}</div>
             <div class="dcDayMeta">
-              <div class="dcDayDate">${esc(formatDate(day.date))}</div>
+              <div class="dcDayDate">${esc(formatDate(day.date))}${milestoneTag ? " " + milestoneTag : ""}</div>
               <div class="dcDayStats">${msgCount} mensaje${msgCount !== 1 ? "s" : ""} · ${neuronCount} neurona${neuronCount !== 1 ? "s" : ""}${day.geminiProcessed ? " · ✨ Refinado" : ""}</div>
             </div>
             <div class="dcDayStatus ${statusCls}">${statusLabel}</div>
@@ -426,16 +440,20 @@ export function viewDayDetail(day) {
   const loadingBanner = dayUiState.loading ? `<div class="dcLoading">⏳ Procesando…</div>` : "";
 
   const canClose = day.status === "open";
+  const canReopen = day.status === "closed";
   const canRollback = Boolean(day._previousVersion);
+  const milestoneLabel = day.isMilestone ? "Quitar hito" : "⭐ Marcar hito";
 
   const actionButtons = `
     <div class="dcDetailActions">
       ${canClose ? `<button class="dcBtn" id="dcBtnCloseDay">🔒 Cerrar día</button>` : ""}
+      ${canReopen ? `<button class="dcBtn dcBtnSecondary" id="dcBtnReopenDay">🔓 Reabrir día</button>` : ""}
       <button class="dcBtn" id="dcBtnRefineGemini" ${dayUiState.loading ? "disabled" : ""}>✨ Refinar con Gemini</button>
       ${!dayUiState.editingManually
         ? `<button class="dcBtn dcBtnSecondary" id="dcBtnEditManual">✏️ Editar manualmente</button>`
         : `<button class="dcBtn" id="dcBtnSaveManual">💾 Guardar edición</button>
            <button class="dcBtn dcBtnSecondary" id="dcBtnCancelManual">Cancelar</button>`}
+      <button class="dcBtn dcBtnSecondary" id="dcBtnToggleMilestone">${esc(milestoneLabel)}</button>
       ${canRollback ? `<button class="dcBtn dcBtnDanger" id="dcBtnRollback">↩️ Deshacer cambios</button>` : ""}
     </div>`;
 
@@ -606,6 +624,26 @@ export function wireDayDetail(root, rerenderCallback) {
   root.querySelector("#dcBtnCancelManual")?.addEventListener("click", () => {
     dayUiState.editingManually = false;
     dayUiState.manualEdit = null;
+    rerenderCallback();
+  });
+
+  // Botón reabrir día
+  root.querySelector("#dcBtnReopenDay")?.addEventListener("click", () => {
+    const result = reopenDay(dayId);
+    if (!result) {
+      dayUiState.error = "No se pudo reabrir el día.";
+    } else {
+      dayUiState.error = null;
+    }
+    rerenderCallback();
+  });
+
+  // Botón toggle milestone
+  root.querySelector("#dcBtnToggleMilestone")?.addEventListener("click", () => {
+    const days = getAllDays();
+    const day = days.find((d) => d.id === dayId);
+    if (!day) return;
+    updateDay({ ...day, isMilestone: !day.isMilestone });
     rerenderCallback();
   });
 }

@@ -1,5 +1,7 @@
 import { initFootballLab } from "./footballLab_v8e.js?v=2001";
 import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
+import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
+import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -2365,6 +2367,7 @@ function renderMoreModal(){
           ${mk("insights","📊","Insights","Todo por día")}
           ${mk("football","⚽","Football Lab","Equipos, jugadores, ratings")}
           ${mk("neurochat","💬","NeuroChat","Conversación con memoria viva")}
+          ${mk("dayengine","📓","Daily Memory","Diario cognitivo diario")}
           ${mk("settings","⚙️","Ajustes","Backup, sync, etc")}
         </div>
       </div>
@@ -2399,6 +2402,9 @@ function view(){
         ${state.tab==="settings" ? viewSettings() : ""}
         ${state.tab==="football" ? viewFootball() : ""}
         ${state.tab==="neurochat" ? viewNeuroChat() : ""}
+        ${state.tab==="dayengine" ? (dayUiState.view === "detail" && dayUiState.selectedDayId
+          ? viewDayDetail(getDaysForEngine().find(d => d.id === dayUiState.selectedDayId) || null)
+          : viewDayCalendar()) : ""}
       </main>
 
       ${state.tab==="settings" ? `
@@ -2811,10 +2817,21 @@ function view(){
   if(state.tab==="neurochat"){
     try{ wireNeuroChat(root); }catch(e){ console.error(e); }
   }
+  // Daily Memory Engine tab init
+  if(state.tab==="dayengine"){
+    try{
+      const rerender = () => render();
+      if(dayUiState.view === "detail"){
+        wireDayDetail(root, rerender);
+      } else {
+        wireDayCalendar(root, rerender);
+      }
+    }catch(e){ console.error(e); }
+  }
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
   if(fab){
-    fab.style.display = (state.tab==="learn" || state.tab==="settings" || state.tab==="neurochat") ? "none" : "flex";
+    fab.style.display = (state.tab==="learn" || state.tab==="settings" || state.tab==="neurochat" || state.tab==="dayengine") ? "none" : "flex";
     fab.addEventListener("click", ()=>{
     if(state.tab==="home") openMusicModal();
     if(state.tab==="routines") openRoutineModal();
