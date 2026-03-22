@@ -182,6 +182,53 @@ export async function requestChatReply(payload) {
 }
 
 /**
+ * Envía el contenido de un día al backend NeuroClaw para refinamiento con Gemini.
+ *
+ * Payload enviado al backend:
+ * {
+ *   task: "day_refine",
+ *   rawChat, memories, linkedNeurons,
+ *   currentSummary, currentEmotion, currentThemes, date,
+ *   systemPrompt: "..."
+ * }
+ *
+ * Respuesta esperada:
+ * {
+ *   improvedSummary, correctedEmotion, refinedThemes,
+ *   neuronAdjustments: { merge:[], update:[], remove:[], create:[] },
+ *   insights
+ * }
+ *
+ * @param {object} payload
+ * @returns {Promise<object|null>}
+ */
+export async function requestDayRefine(payload) {
+  const body = {
+    task: "day_refine",
+    systemPrompt:
+      "Eres un analizador cognitivo personal. " +
+      "Recibirás el chat completo de un día, las memorias del día y las neuronas vinculadas. " +
+      "Tu tarea es: generar un resumen mejorado del día, inferir la emoción dominante más precisa, " +
+      "refinar los temas principales, sugerir ajustes a las neuronas (merge, update, remove, create) " +
+      "y extraer insights cognitivos importantes. " +
+      "Devuelve exclusivamente JSON válido con los campos: " +
+      "improvedSummary (string), correctedEmotion (string), refinedThemes (array), " +
+      "neuronAdjustments (objeto con merge, update, remove, create como arrays), insights (array). " +
+      "No devuelvas texto adicional.",
+    ...payload,
+  };
+
+  const data = await callNeuroClaw("/neurochat/day-refine", body);
+  if (!data) return null;
+
+  if (typeof data.improvedSummary === "string" || Array.isArray(data.refinedThemes)) {
+    return data;
+  }
+  console.warn("[neuroclawClient] Formato inesperado en day_refine:", data);
+  return null;
+}
+
+/**
  * Comprueba si NeuroClaw está configurado (URL + key presentes).
  * @returns {boolean}
  */
