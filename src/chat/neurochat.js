@@ -8,6 +8,7 @@ import { createNeuron } from "../neuro/schemas.js";
 import { getMessageFeedbackMap, recordNeuronFeedback } from "../neuro/feedback.js";
 import { saveMemory, getAllMemories, searchMemories, detectMemoryEmotion, extractMemoryTags, inferMemoryDate, getMemoriesByNeuron } from "../memory/memoryStore.js";
 import { getInsightHistory } from "../neuro/insightHistory.js";
+import { appendToCurrentDay, linkDayToNeurons, getCurrentDay } from "../day/dayStore.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
 const DB_NAME = "memorycarl_chat";
@@ -182,7 +183,10 @@ export async function sendMessage(userInput, options = {}) {
   const interpretationMode = options.interpretationMode || "default";
 
   const messageId = generateMessageId();
-  appendMessage("user", trimmed, { mode, interpretationMode, messageId });
+  const userMsg = appendMessage("user", trimmed, { mode, interpretationMode, messageId });
+
+  // Guardar mensaje del usuario en el día actual
+  try { appendToCurrentDay(userMsg); } catch (_e) {}
 
   const result = await processNeuroInput(trimmed, {
     history: getHistory().slice(-10),
@@ -192,10 +196,11 @@ export async function sendMessage(userInput, options = {}) {
     messageId,
   });
 
-  appendMessage("assistant", result.reply, {
+  const activatedNeuronIds = (result.activated || []).map((a) => a.neuron?.id).filter(Boolean);
+  const assistantMsg = appendMessage("assistant", result.reply, {
     messageId,
     activated: result.activated.length,
-    activatedNeuronIds: (result.activated || []).map((a) => a.neuron?.id).filter(Boolean),
+    activatedNeuronIds,
     generated: result.generated.length,
     coverage: result.missingAnalysis.coverage,
     mode,
@@ -215,6 +220,15 @@ export async function sendMessage(userInput, options = {}) {
     })),
     memoryRecallIds: (result.memoryRecall || []).map((entry) => entry.memory?.id).filter(Boolean),
   });
+
+  // Guardar respuesta del asistente en el día actual y vincular neuronas activadas
+  try {
+    appendToCurrentDay(assistantMsg);
+    if (activatedNeuronIds.length > 0) {
+      const day = getCurrentDay();
+      if (day) linkDayToNeurons(day.id, activatedNeuronIds);
+    }
+  } catch (_e) {}
 
   return {
     ...result,
