@@ -72,6 +72,9 @@ function sanitizeFeedbackStats(stats = {}) {
     dislikes,
     netScore: likes - dislikes,
     lastFeedbackAt: isValidTimestamp(stats.lastFeedbackAt) ? stats.lastFeedbackAt : null,
+    removed: stats.removed === true,
+    removedAt: isValidTimestamp(stats.removedAt) ? stats.removedAt : null,
+    removalCount: Math.max(0, Number(stats.removalCount) || 0),
   };
 }
 

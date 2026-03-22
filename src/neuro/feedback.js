@@ -49,6 +49,56 @@ function createFeedbackId() {
   return `feedback_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export function applyNeuronRemoval(neuron) {
+  if (!neuron || typeof neuron !== "object") return null;
+  const now = new Date().toISOString();
+  const stats = normalizeFeedbackStats(neuron.feedbackStats);
+  const updated = {
+    ...neuron,
+    feedbackStats: {
+      ...stats,
+      removed: true,
+      removedAt: now,
+      removalCount: (Number(neuron.feedbackStats?.removalCount) || 0) + 1,
+    },
+    updatedAt: now,
+  };
+  return updated;
+}
+
+export function recordNeuronRemoval({ neuronId, messageId = null } = {}) {
+  if (!neuronId) throw new Error("neuronId requerido para remove");
+
+  const history = readHistory();
+  const neuron = getNeuronById(neuronId);
+  if (!neuron) throw new Error(`Neurona no encontrada: ${neuronId}`);
+
+  const record = {
+    id: createFeedbackId(),
+    neuronId,
+    feedback: "remove",
+    timestamp: new Date().toISOString(),
+    inputPreview: "",
+    messageId: messageId || null,
+    reasonContext: "user_removal_feedback",
+  };
+
+  history.push(record);
+  writeHistory(history);
+
+  const updatedNeuron = applyNeuronRemoval(neuron);
+  const persisted = updateNeuron(neuronId, {
+    feedbackStats: updatedNeuron.feedbackStats,
+    updatedAt: updatedNeuron.updatedAt,
+  });
+
+  return {
+    applied: true,
+    record,
+    neuron: persisted || updatedNeuron,
+  };
+}
+
 export function applyNeuronFeedback(neuron, feedback, options = {}) {
   if (!neuron || typeof neuron !== "object") return null;
   if (feedback !== "like" && feedback !== "dislike") return null;

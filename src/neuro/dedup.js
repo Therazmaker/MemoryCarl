@@ -137,6 +137,7 @@ export function findBestNeuronMatch(candidate, existingNeurons, options = {}) {
 
   for (const n of existingNeurons) {
     if (n.id === candidate.id) continue;
+    if (n.feedbackStats?.removed) continue;
     const { score, breakdown } = compareNeuronCandidate(candidate, n, options);
     if (score > bestScore) {
       bestScore = score;
