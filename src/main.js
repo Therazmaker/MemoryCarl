@@ -16334,6 +16334,7 @@ function renderFinanceDebtsTab(){
           <div class="finDebtActions">
             <button class="iconBtn" title="Registrar pago" onclick="openFinanceDebtPayModal('${d.id}')">💸</button>
             <button class="iconBtn" title="Editar" onclick="openFinanceDebtModalById('${d.id}')">✏️</button>
+            <button class="iconBtn" title="Borrar deuda" onclick="deleteFinanceDebt('${d.id}')">🗑️</button>
           </div>
         </div>
       `;
@@ -16403,10 +16404,20 @@ function openFinanceDebtModalById(id){
   openFinanceDebtModal(d);
 }
 
+function deleteFinanceDebt(id){
+  const debt = (state.financeDebts||[]).find(x=>x.id===id);
+  if(!debt) return;
+  if(!confirm(`¿Borrar la deuda "${debt.name}"?`)) return;
+  state.financeDebts = (state.financeDebts||[]).filter(x=>x.id!==id);
+  persist();
+  view();
+}
+
 try{
   window.openFinanceDebtModal = openFinanceDebtModal;
   window.openFinanceDebtModalById = openFinanceDebtModalById;
   window.openFinanceDebtPayModal = openFinanceDebtPayModal;
+  window.deleteFinanceDebt = deleteFinanceDebt;
 }catch(e){}
 
 function renderFinanceMissionControl(){
