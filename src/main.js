@@ -17561,12 +17561,15 @@ function renderFinanceRoadmapTab(){
       ${plan.fergisTarget ? `<div class="rmFergisNote">✅ S/ ${fmt(fergis)} asignado para reforzar el pago de <strong>${escapeHtml((typeof financeDebtsActive==='function' ? financeDebtsActive() : []).find(d=>d.id===plan.fergisTarget)?.name||'')}</strong></div>` : ''}
     </div>
   ` : '';
+  const deferTotal = sim.steps.filter(s=>s.deferrable).reduce((a,s)=>a+s.amount,0);
+  const freeAfterDeferring = sim.remaining + deferTotal;
   const freeColor = sim.remaining >= 0 ? 'rmFreeGood' : 'rmFreeBad';
   const freeSummary = `
     <div class="rmFreeSummary ${freeColor}">
       <div class="rmFreeLabel">${sim.remaining >= 0 ? '✅ Libre después de todo' : '⚠️ Déficit estimado'}</div>
       <div class="rmFreeAmt">S/ ${fmt(Math.abs(sim.remaining))}</div>
       ${sim.remaining < 0 ? `<div class="muted" style="margin-top:4px">Faltan S/ ${fmt(Math.abs(sim.remaining))} para cubrir todos los compromisos.</div>` : `<div class="muted" style="margin-top:4px">Puedes ahorrar, acelerar una deuda o guardarlo.</div>`}
+      ${deferTotal > 0 ? `<div class="rmDeferHint" style="margin-top:8px">Si aplazas los ítems marcados, tu libre quedaría en S/ ${fmt(Math.abs(freeAfterDeferring))}${freeAfterDeferring < 0 ? ' (déficit)' : ''}.</div>` : ''}
     </div>
   `;
   return `
