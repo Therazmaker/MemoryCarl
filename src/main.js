@@ -15240,7 +15240,6 @@ function saveFinanceCommitmentPayment(instanceId){
   }
 
   if(paidAmount>0 && src && (src.isDebtInstrument || src.sourceType==="loan")){
-    inst.status = (status==="paid" || paidAmount>=expectedAmount) ? "covered_by_debt" : status;
     state.financeLoanUsageLedger.unshift({
       id: uid("loanuse"),
       sourceId: src.id,
