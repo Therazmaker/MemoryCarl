@@ -1,5 +1,19 @@
-function mk(id, type, priority, title, message, confidence, evidence, relatedNeuronIds, periodScope) {
-  return { id, type, priority, title, message, confidence, evidence, relatedNeuronIds, periodScope, createdAt: new Date().toISOString() };
+import { getRankedEpisodicNeurons } from './finance_episodic_memory.js';
+
+function mk(id, type, priority, title, message, confidence, evidence, relatedNeuronIds, periodScope, extras = {}) {
+  return {
+    id,
+    type,
+    priority,
+    title,
+    message,
+    confidence,
+    evidence,
+    relatedNeuronIds,
+    periodScope,
+    createdAt: new Date().toISOString(),
+    ...extras,
+  };
 }
 
 export function generateFinanceInsights({ snapshot, neurons, hippocampus }) {
@@ -21,6 +35,63 @@ export function generateFinanceInsights({ snapshot, neurons, hippocampus }) {
   if ((month.marginEstimate || 0) > 0 && (month.fixedVsVariable?.variable || 0) < (month.totalExpenses || 0) * 0.35) {
     insights.push(mk('insight_opportunity', 'opportunity', 'medium', 'Potential debt reduction window', 'Discretionary spending is contained; this may be a good window to reduce debt.', 0.67, month, [], 'monthly'));
   }
+
+  const episodic = getRankedEpisodicNeurons(10);
+  const silentHabits = episodic.filter((n) => (
+    n.stats?.dominantContext === 'habito'
+    && n.stats?.frequency === 'weekly'
+    && n.stats?.dominantEmotion === 'evitable'
+  ));
+  const anomalies = episodic.filter((n) => n.episodes?.slice(-1)?.[0]?.wasAnomaly === true);
+  const growing = episodic.filter((n) => n.stats?.trend === 'growing' && n.family === 'habit');
+
+  silentHabits.slice(0, 2).forEach((n, idx) => {
+    const lastEpisode = n.episodes?.slice(-1)?.[0] || null;
+    insights.push(mk(
+      `episodic_silent_habit_${n.id}_${idx}`,
+      'risk',
+      'medium',
+      `Hábito silencioso: ${n.manualLabel || n.label}`,
+      `La neurona ${n.manualLabel || n.label} se repite semanalmente y suele sentirse evitable.`,
+      0.71,
+      n.stats,
+      [n.id],
+      'episodic',
+      { neuronId: n.id, episodeRef: lastEpisode?.movementId || null }
+    ));
+  });
+
+  anomalies.slice(0, 2).forEach((n, idx) => {
+    const lastEpisode = n.episodes?.slice(-1)?.[0] || null;
+    insights.push(mk(
+      `episodic_anomaly_${n.id}_${idx}`,
+      'risk',
+      'high',
+      `Anomalía detectada en ${n.manualLabel || n.label}`,
+      'El último episodio superó el rango típico de esta neurona episódica.',
+      0.78,
+      lastEpisode,
+      [n.id],
+      'episodic',
+      { neuronId: n.id, episodeRef: lastEpisode?.movementId || null }
+    ));
+  });
+
+  growing.slice(0, 2).forEach((n, idx) => {
+    const lastEpisode = n.episodes?.slice(-1)?.[0] || null;
+    insights.push(mk(
+      `episodic_growing_${n.id}_${idx}`,
+      'risk',
+      'medium',
+      `Neurona en crecimiento: ${n.manualLabel || n.label}`,
+      'Este hábito viene creciendo frente al bloque anterior y podría requerir control.',
+      0.69,
+      n.stats,
+      [n.id],
+      'episodic',
+      { neuronId: n.id, episodeRef: lastEpisode?.movementId || null }
+    ));
+  });
 
   return insights.slice(0, 8);
 }
