@@ -12937,16 +12937,18 @@ function addFinanceAccount({name, type="bank", balance=0, color=null}){
   return acc;
 }
 
-function addFinanceEntry({type, amount, accountId, category, reason, note, date}){
+function addFinanceEntry({type, amount, accountId, category, reason, note, date, neuronRole}){
   const acc = state.financeAccounts.find(a=>a.id===accountId);
   if(!acc) return null;
 
   const amt = financeParseAmount(amount);
   const entryDate = date || new Date().toISOString();
   const tnorm = financeNormalizeType(type);
+  const entryId = uid("fin");
+  const resolvedNeuronRole = String(neuronRole||"auto").trim() || "auto";
 
   const entry = {
-    id: uid("fin"),
+    id: entryId,
     date: entryDate, // ISO string
     type: tnorm, // income | expense
     amount: amt,
@@ -12954,6 +12956,8 @@ function addFinanceEntry({type, amount, accountId, category, reason, note, date}
     category: category||"Otros",
     reason: reason||"normal",
     note: note||"",
+    neuronRole: resolvedNeuronRole,
+    neuronId: `mov_${entryId}`,
     archived: false
   };
 
@@ -12988,6 +12992,7 @@ function updateFinanceEntry(id, patch){
   if(next.category) next.category = String(next.category);
   if(next.reason) next.reason = String(next.reason);
   if(next.note !== undefined) next.note = String(next.note||"");
+  if(next.neuronRole !== undefined) next.neuronRole = String(next.neuronRole||"auto");
 
   state.financeLedger[idx] = next;
   financeRecomputeBalances();
@@ -13203,6 +13208,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     paidBy: "me",
     responsibleParty: "me",
     impactMode: ((existing?.type)==="income"?"income":"direct_expense"),
+    neuronRole: (existing?.neuronRole) || "auto",
     note: existingSplit.note
   };
 
@@ -13304,6 +13310,24 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
           <div class="finEntryPickText">
             <div class="finEntryPickLabel">Etiqueta</div>
             <div class="finEntryPickValue muted">(opcional)</div>
+          </div>
+        </div>
+
+        <div class="finEntryPickRow">
+          <div class="finEntryPickIcon">🧠</div>
+          <div class="finEntryPickText">
+            <div class="finEntryPickLabel">Rol neuronal</div>
+            <div class="finEntryPickValue">
+              <select id="finEntryNeuronRole">
+                ${[
+                  ["auto","Automático"],
+                  ["trigger","Gatillo"],
+                  ["habit","Hábito"],
+                  ["risk","Alerta"],
+                  ["opportunity","Oportunidad"]
+                ].map(r=>`<option value="${r[0]}" ${r[0]===(draft.neuronRole||"auto")?'selected':''}>${r[1]}</option>`).join('')}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -13466,6 +13490,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const paidBy = (backdrop.querySelector('#finEntryPaidBy')?.value||'me');
   const responsibleParty = (backdrop.querySelector('#finEntryResponsible')?.value||'me');
   const impactMode = (backdrop.querySelector('#finEntryImpact')?.value|| (draft.type==='income'?'income':'direct_expense'));
+  const neuronRole = (backdrop.querySelector('#finEntryNeuronRole')?.value || draft.neuronRole || 'auto');
 
   if(!amount || amount<=0){
     console.warn('[Finance] invalid amount', { rawAmount, amount });
@@ -13488,7 +13513,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
       category,
       reason,
       note,
-      date: dateISO
+      date: dateISO,
+      neuronRole
     });
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
     toast('Actualizado ✅');
@@ -13500,7 +13526,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
       category,
       reason,
       note,
-      date: dateISO
+      date: dateISO,
+      neuronRole
     });
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
     toast('Guardado ✅');

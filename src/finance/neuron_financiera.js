@@ -144,7 +144,44 @@ function _mnTypeLabel(t) {
   return map[t] || (t || '').replace(/_/g, ' ');
 }
 
+function readGlobalFinanceAccounts() {
+  const g = typeof globalThis !== 'undefined' ? globalThis : {};
+  if (Array.isArray(g.state?.financeAccounts)) return g.state.financeAccounts;
+  if (Array.isArray(g.window?.FINANCE?.state?.accounts)) return g.window.FINANCE.state.accounts;
+  return [];
+}
+
+function buildMovementNeurons(movements = [], accounts = []) {
+  const accountMap = new Map((accounts || []).map((a) => [a.id, a]));
+  const active = (movements || []).filter((m) => m && !m.archived);
+  return active.map((m, index) => {
+    const rawAmount = Number(m.amount || 0);
+    const amount = Math.abs(rawAmount);
+    const isIncome = String(m.type || '').toLowerCase() === 'income';
+    const acc = accountMap.get(m.accountId);
+    const role = String(m.neuronRole || 'auto');
+    const movementId = String(m.id || `idx_${index}`);
+    const neuronId = String(m.neuronId || `mov_${movementId}`);
+    return {
+      id: neuronId,
+      movementId,
+      label: String(m.category || m.reason || (isIncome ? 'Ingreso' : 'Gasto') || 'Movimiento'),
+      amount,
+      role,
+      family: isIncome ? 'flow' : (role === 'risk' ? 'risk' : role === 'opportunity' ? 'opportunity' : 'habit'),
+      type: isIncome ? 'movement_income' : 'movement_expense',
+      accountId: m.accountId || null,
+      accountName: acc?.name || 'Cuenta',
+      date: String(m.date || '').slice(0, 10),
+      note: m.note || ''
+    };
+  });
+}
+
 export function renderMapaNeuronal() {
+  const movements = readGlobalFinanceMovements();
+  const accounts = readGlobalFinanceAccounts();
+  const movementNeurons = buildMovementNeurons(movements, accounts);
   const brainState = loadFinanceBrainState();
   const neurons = brainState.neuronRegistry || [];
   const legacy = brainState.legacyNeuronas || [];
@@ -152,7 +189,7 @@ export function renderMapaNeuronal() {
   const lastScan = brainState.lastScanAt;
   const summary = brainState.latestScanSummary || {};
 
-  const activeCount = neurons.length;
+  const activeCount = neurons.length + movementNeurons.length;
   const insightCount = insights.length;
 
   const monthKey = new Date().toISOString().slice(0, 7);
@@ -171,6 +208,10 @@ export function renderMapaNeuronal() {
       <div class="mnMetric">
         <div class="mnMetricVal">${activeCount}</div>
         <div class="mnMetricLabel">Neuronas activas</div>
+      </div>
+      <div class="mnMetric">
+        <div class="mnMetricVal">${movementNeurons.length}</div>
+        <div class="mnMetricLabel">Desde movimientos</div>
       </div>
       <div class="mnMetric">
         <div class="mnMetricVal">${insightCount}</div>
@@ -213,6 +254,20 @@ export function renderMapaNeuronal() {
       }).join('')}
     </div>` : '';
 
+  const movementNeuronListHtml = movementNeurons.length ? `
+    <div class="mnSubTitle" style="margin-top:14px">🧾 Neuronas por movimiento</div>
+    <div class="mnNeuronsList">
+      ${movementNeurons.map((n) => {
+        const c = _mnColorFor(n);
+        return `<div class="mnNeuronChip" style="border-color:${c.border};background:${c.bg}22">
+          <span class="mnNeuronDot" style="background:${c.bg}"></span>
+          <span class="mnNeuronName">${n.label}</span>
+          <span class="mnNeuronScore">S/ ${Math.round((n.amount || 0) * 100) / 100}</span>
+          <span class="mnNeuronFamily">${n.date || n.accountName}</span>
+        </div>`;
+      }).join('')}
+    </div>` : '<div class="mnEmpty">Sin movimientos para convertir en neuronas.</div>';
+
   const legendHtml = `
     <div class="mnLegend">
       ${Object.entries({ Flujo: '#7c5cff', Hábito: '#2dd4bf', Riesgo: '#f87171', Oportunidad: '#f59e0b' }).map(
@@ -239,6 +294,7 @@ export function renderMapaNeuronal() {
       </div>
       ${insightsHtml}
       ${neuronsListHtml}
+      ${movementNeuronListHtml}
     </section>`;
 }
 
@@ -249,8 +305,9 @@ export function neuronasInitGrafo() {
   const brainState = loadFinanceBrainState();
   const patternNeurons = brainState.neuronRegistry || [];
   const legacyNeurons = brainState.legacyNeuronas || [];
+  const movementNeurons = buildMovementNeurons(readGlobalFinanceMovements(), readGlobalFinanceAccounts());
 
-  if (!patternNeurons.length && !legacyNeurons.length) return null;
+  if (!patternNeurons.length && !legacyNeurons.length && !movementNeurons.length) return null;
 
   const vis = (typeof window !== 'undefined' && window.vis) ? window.vis : null;
   if (!vis) return null;
@@ -289,6 +346,37 @@ export function neuronasInitGrafo() {
         edges.push({ from: n.id, to: targetId, color: { color: c.bg + '88' }, width: 2 });
       }
     });
+  });
+
+  const accountNodeIds = new Set();
+  movementNeurons.forEach((n) => {
+    const c = _mnColorFor(n);
+    const size = Math.max(12, Math.min(34, 12 + Math.round(Math.log10((n.amount || 1) + 1) * 10)));
+    nodes.push({
+      id: n.id,
+      label: `${n.label}\nS/ ${Math.round((n.amount || 0) * 100) / 100}`,
+      color: { background: c.bg, border: c.border, highlight: { background: c.bg, border: '#fff' } },
+      font: { color: c.font, size: 10, face: 'system-ui, sans-serif' },
+      size,
+      shape: 'dot',
+      title: `${n.label}\nFecha: ${n.date || '-'}\nCuenta: ${n.accountName}\nRol: ${n.role}`,
+    });
+    if (n.accountId) {
+      const accNodeId = `acc_${n.accountId}`;
+      if (!accountNodeIds.has(accNodeId)) {
+        accountNodeIds.add(accNodeId);
+        nodes.push({
+          id: accNodeId,
+          label: n.accountName,
+          color: { background: '#111827', border: '#6b7280', highlight: { background: '#1f2937', border: '#9ca3af' } },
+          font: { color: '#f3f4f6', size: 11, face: 'system-ui, sans-serif' },
+          size: 20,
+          shape: 'box',
+          title: `Cuenta financiera: ${n.accountName}`,
+        });
+      }
+      edges.push({ from: n.id, to: accNodeId, color: { color: '#6b728088' }, width: 1.5 });
+    }
   });
 
   container.innerHTML = '';
