@@ -14335,6 +14335,19 @@ function financeMonthDataAdvanced(){
   };
 }
 
+function financeAccountIncomeFlow(accountId, monthKey){
+  const accId = String(accountId||"");
+  const mk = String(monthKey||"");
+  if(!accId || !mk) return 0;
+
+  return (financeActiveLedger()||[]).reduce((sum, entry)=>{
+    if(String(entry.accountId||"") !== accId) return sum;
+    if(entry.type !== "income") return sum;
+    if(!String(entry.date||"").startsWith(mk)) return sum;
+    return sum + Math.max(0, Number(entry.amount||0));
+  }, 0);
+}
+
 
 /* ===== Finance UI: sub-tabs (Principal / Movimientos / Recordatorios) ===== */
 if(!state.financeSubTab) state.financeSubTab = "main";
@@ -16697,11 +16710,16 @@ function viewFinance(){
 
   const accountCards = (state.financeAccounts||[]).map(a=>{
     const bal = Number(a.balance||0);
-    const isPos = bal >= 0;
+    const isFergisAccount = String(a.name||"").toLowerCase().includes("fergis");
+    const monthIncomeFlow = isFergisAccount ? financeAccountIncomeFlow(a.id, monthKey) : 0;
+    const shownValue = isFergisAccount ? monthIncomeFlow : bal;
+    const isPos = shownValue >= 0;
+    const balanceLabel = isFergisAccount ? "Flujo de ingresos (mes)" : "Saldo";
     return `
       <div class="finAccCard" onclick="openFinanceAccountEdit('${a.id}')">
         <div class="finAccName">${escapeHtml(a.name)}</div>
-        <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">S/ ${fmt(bal)}</div>
+        <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">S/ ${fmt(shownValue)}</div>
+        <div class="finAccHint">${balanceLabel}</div>
       </div>`;
   }).join("") || `<div class="finAccEmpty">Sin cuentas · <span onclick="openFinanceAccountModal()" style="color:#7c5cff;cursor:pointer">Agregar +</span></div>`;
 
