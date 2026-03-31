@@ -1,5 +1,6 @@
 const BRAIN_STORAGE_KEY = 'memorycarl_finance_brain_v2';
 const LEGACY_NEURON_KEY = 'memorycarl_neuronas_financieras';
+const EPISODIC_MEMORY_KEY = 'memorycarl_episodic_memory_v1';
 
 const DEFAULT_BRAIN_STATE = {
   version: 2,
@@ -14,7 +15,8 @@ const DEFAULT_BRAIN_STATE = {
     neuronHistory: []
   },
   insights: [],
-  legacyNeuronas: []
+  legacyNeuronas: [],
+  episodicMemory: []
 };
 
 function clone(value) {
@@ -40,6 +42,7 @@ function normalizeBrainState(raw) {
   merged.neuronRegistry = Array.isArray(raw.neuronRegistry) ? raw.neuronRegistry : [];
   merged.insights = Array.isArray(raw.insights) ? raw.insights : [];
   merged.legacyNeuronas = Array.isArray(raw.legacyNeuronas) ? raw.legacyNeuronas : [];
+  merged.episodicMemory = Array.isArray(raw.episodicMemory) ? raw.episodicMemory : [];
   return merged;
 }
 
@@ -90,4 +93,4 @@ export function upsertLegacyNeurona(neurona) {
   return next;
 }
 
-export { BRAIN_STORAGE_KEY, LEGACY_NEURON_KEY, DEFAULT_BRAIN_STATE };
+export { BRAIN_STORAGE_KEY, LEGACY_NEURON_KEY, EPISODIC_MEMORY_KEY, DEFAULT_BRAIN_STATE };

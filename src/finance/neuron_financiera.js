@@ -1,5 +1,6 @@
 import { runFinanceBrainScan } from './finance_brain_engine.js';
-import { loadFinanceBrainState, saveFinanceBrainState, upsertLegacyNeurona } from './finance_neural_storage.js';
+import { loadFinanceBrainState, saveFinanceBrainState, upsertLegacyNeurona, EPISODIC_MEMORY_KEY } from './finance_neural_storage.js';
+import { loadEpisodicMemory, getRankedEpisodicNeurons } from './finance_episodic_memory.js';
 
 const NEURONAS_LS_KEY = 'memorycarl_neuronas_financieras';
 
@@ -153,6 +154,7 @@ function readGlobalFinanceAccounts() {
 
 function buildMovementNeurons(movements = [], accounts = []) {
   const accountMap = new Map((accounts || []).map((a) => [a.id, a]));
+  const episodicMap = new Map(loadEpisodicMemory().map((n) => [String(n.category || '').toLowerCase(), n]));
   const active = (movements || []).filter((m) => m && !m.archived);
   return active.map((m, index) => {
     const rawAmount = Number(m.amount || 0);
@@ -162,6 +164,10 @@ function buildMovementNeurons(movements = [], accounts = []) {
     const role = String(m.neuronRole || 'auto');
     const movementId = String(m.id || `idx_${index}`);
     const neuronId = String(m.neuronId || `mov_${movementId}`);
+    const episodic = episodicMap.get(String(m.category || '').toLowerCase());
+    const episodicTooltip = episodic
+      ? `\nEpisodios: ${episodic.stats?.episodeCount || 0}\nTendencia: ${episodic.stats?.trend || 'stable'}\nContexto: ${episodic.stats?.dominantContext || 'desconocido'}`
+      : '';
     return {
       id: neuronId,
       movementId,
@@ -173,9 +179,16 @@ function buildMovementNeurons(movements = [], accounts = []) {
       accountId: m.accountId || null,
       accountName: acc?.name || 'Cuenta',
       date: String(m.date || '').slice(0, 10),
-      note: m.note || ''
+      note: m.note || '',
+      episodicTooltip
     };
   });
+}
+
+function trendIcon(trend) {
+  if (trend === 'growing') return '↑';
+  if (trend === 'declining') return '↓';
+  return '→';
 }
 
 export function renderMapaNeuronal() {
@@ -186,6 +199,7 @@ export function renderMapaNeuronal() {
   const neurons = brainState.neuronRegistry || [];
   const legacy = brainState.legacyNeuronas || [];
   const insights = brainState.insights || [];
+  const episodicTop = getRankedEpisodicNeurons(5);
   const lastScan = brainState.lastScanAt;
   const summary = brainState.latestScanSummary || {};
 
@@ -268,6 +282,34 @@ export function renderMapaNeuronal() {
       }).join('')}
     </div>` : '<div class="mnEmpty">Sin movimientos para convertir en neuronas.</div>';
 
+  const episodicHtml = episodicTop.length ? `
+    <div class="mnSubTitle" style="margin-top:14px">🧩 Memoria Episódica</div>
+    <div class="neuroList">
+      ${episodicTop.map((n) => {
+        const detailId = `ep_${n.id}`;
+        const trend = n.stats?.trend || 'stable';
+        const episodes = (n.episodes || []).slice(-5).reverse();
+        return `<div class="mnEpisodicNeuron neuroItem" data-neuron-id="${n.id}">
+          <div class="mnEpisodicHeader neuroRow">
+            <span class="mnEpisodicLabel"><b>${n.manualLabel || n.label}</b></span>
+            <span class="mnEpisodicTrend ${trend}">${trendIcon(trend)}</span>
+            <span class="mnEpisodicCount">${n.stats?.episodeCount || 0} episodios</span>
+            <span class="mnEpisodicAvg">S/ ${Math.round((n.stats?.avgAmount || 0) * 100) / 100} prom.</span>
+            <span class="mnNeuronFamily">${n.stats?.dominantContext || 'desconocido'}</span>
+            <button class="finIconBtn mnEpisodicToggle" onclick="toggleEpisodicDetail('${n.id}')">Ver historial</button>
+          </div>
+          <div class="mnEpisodicDetail" id="${detailId}" style="display:none;padding-top:6px">
+            ${episodes.map((ep) => `<div class="mnEpisodeRow" style="display:grid;grid-template-columns:88px 80px 90px 1fr;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid #ffffff18">
+              <span class="epDate">${String(ep.date || '').slice(0, 10)}</span>
+              <span class="epAmount">S/ ${Math.round((Math.abs(Number(ep.amount) || 0)) * 100) / 100}</span>
+              <span class="epContext">${ep.context || 'desconocido'}</span>
+              <span class="epNote">"${ep.note || ''}"</span>
+            </div>`).join('') || '<div class="mnEmpty">Sin episodios recientes.</div>'}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>` : '<div class="mnEmpty" style="margin-top:14px">🧩 Memoria Episódica vacía. Escanea movimientos para aprender.</div>';
+
   const legendHtml = `
     <div class="mnLegend">
       ${Object.entries({ Flujo: '#7c5cff', Hábito: '#2dd4bf', Riesgo: '#f87171', Oportunidad: '#f59e0b' }).map(
@@ -295,6 +337,7 @@ export function renderMapaNeuronal() {
       ${insightsHtml}
       ${neuronsListHtml}
       ${movementNeuronListHtml}
+      ${episodicHtml}
     </section>`;
 }
 
@@ -359,7 +402,7 @@ export function neuronasInitGrafo() {
       font: { color: c.font, size: 10, face: 'system-ui, sans-serif' },
       size,
       shape: 'dot',
-      title: `${n.label}\nFecha: ${n.date || '-'}\nCuenta: ${n.accountName}\nRol: ${n.role}`,
+      title: `${n.label}\nFecha: ${n.date || '-'}\nCuenta: ${n.accountName}\nRol: ${n.role}${n.episodicTooltip || ''}`,
     });
     if (n.accountId) {
       const accNodeId = `acc_${n.accountId}`;
@@ -428,8 +471,10 @@ export function neuronasReset() {
   state.hippocampus = { daily: {}, weekly: {}, monthly: {}, patternHistory: [], neuronHistory: [] };
   state.lastScanAt = null;
   state.latestScanSummary = null;
+  state.episodicMemory = [];
   saveFinanceBrainState(state);
   try { localStorage.setItem(NEURONAS_LS_KEY, JSON.stringify(state.legacyNeuronas)); } catch (_e) {}
+  try { localStorage.removeItem(EPISODIC_MEMORY_KEY); } catch (_e) {}
 }
 export function getFinanceBrainSummary() { return runFinanceBrainScan({}).summary; }
 
@@ -446,6 +491,13 @@ export function neuronasRunScan() {
   }
 }
 
+export function toggleEpisodicDetail(neuronId) {
+  if (typeof document === 'undefined') return;
+  const el = document.getElementById(`ep_${neuronId}`);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
 if (typeof window !== 'undefined') {
   window.actualizarSistemaFinanciero = actualizarSistemaFinanciero;
   window.renderMapaNeuronal = renderMapaNeuronal;
@@ -458,4 +510,5 @@ if (typeof window !== 'undefined') {
   window.neuronasReset = neuronasReset;
   window.neuronasRunScan = neuronasRunScan;
   window.getAllNeuronas = getAllNeuronas;
+  window.toggleEpisodicDetail = toggleEpisodicDetail;
 }

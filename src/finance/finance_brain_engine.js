@@ -3,6 +3,7 @@ import { detectPatternNeurons } from './finance_pattern_detector.js';
 import { updateHippocampus } from './finance_hippocampus.js';
 import { generateFinanceInsights } from './finance_insight_engine.js';
 import { loadFinanceBrainState, saveFinanceBrainState } from './finance_neural_storage.js';
+import { recordEpisode, loadEpisodicMemory } from './finance_episodic_memory.js';
 
 function resolveFinanceState(explicitState) {
   if (explicitState && typeof explicitState === 'object') return explicitState;
@@ -27,11 +28,22 @@ export function runFinanceBrainScan({ financeState, now } = {}) {
   const resolved = resolveFinanceState(financeState);
   const snapshot = buildFinanceSnapshot(resolved);
   const neurons = detectPatternNeurons(snapshot, state.neuronRegistry, now || new Date().toISOString());
+
+  const accountsMap = new Map((resolved.accounts || []).map((a) => [a.id, a]));
+  const lastScan = state.lastScanAt ? new Date(state.lastScanAt) : new Date(0);
+  const newMovements = (resolved.movements || []).filter((m) => new Date(m.date || m.createdAt || 0) > lastScan);
+  const movementsToRecord = newMovements.length > 500
+    ? newMovements.filter((m) => new Date(m.date || m.createdAt || 0) >= new Date(Date.now() - (90 * 24 * 60 * 60 * 1000)))
+    : newMovements;
+  movementsToRecord.forEach((movement) => recordEpisode(movement, accountsMap));
+
+  const episodicMemory = loadEpisodicMemory();
   const hippocampus = updateHippocampus(state.hippocampus, snapshot, neurons, now ? new Date(now) : new Date());
   const insights = generateFinanceInsights({ snapshot, neurons, hippocampus });
 
   const next = {
     ...state,
+    episodicMemory,
     lastScanAt: now || new Date().toISOString(),
     latestScanSummary: {
       totalEntriesScanned: snapshot.entries.length,
@@ -51,6 +63,7 @@ export function runFinanceBrainScan({ financeState, now } = {}) {
     snapshot,
     neurons,
     insights,
+    episodicMemory,
     summary: {
       status: 'ready',
       lastScanAt: next.lastScanAt,
