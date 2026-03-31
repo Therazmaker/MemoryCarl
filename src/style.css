@@ -3568,6 +3568,11 @@ body{
   font-weight: 900;
   letter-spacing: -0.02em;
 }
+.finAccHint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.48);
+}
 .finAccPos { color: #34d399; }
 .finAccNeg { color: #f87171; }
 
