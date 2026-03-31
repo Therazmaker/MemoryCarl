@@ -444,8 +444,10 @@ export function neuronasConfirmAdd() { return null; }
 
 function readGlobalFinanceMovements() {
   const g = typeof globalThis !== 'undefined' ? globalThis : {};
-  if (Array.isArray(g.state?.financeMovements)) return g.state.financeMovements;
+  // Prefer the v2 ledger (source of truth). Some installs still keep
+  // a legacy `financeMovements` array that can be stale.
   if (Array.isArray(g.state?.financeLedger)) return g.state.financeLedger;
+  if (Array.isArray(g.state?.financeMovements)) return g.state.financeMovements;
   if (Array.isArray(g.window?.FINANCE?.state?.movements)) return g.window.FINANCE.state.movements;
   return [];
 }
