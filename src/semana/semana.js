@@ -1,4 +1,13 @@
+const SEMANA_GEMINI_KEY_LS = "memorycarl_v2_semana_gemini_api_key";
 const GEMINI_API_KEY = import.meta?.env?.VITE_GEMINI_KEY || "";
+
+function getSemanaGeminiApiKey(){
+  try{
+    const fromLs = (localStorage.getItem(SEMANA_GEMINI_KEY_LS) || "").trim();
+    if(fromLs) return fromLs;
+  }catch(_e){}
+  return GEMINI_API_KEY;
+}
 
 const DAYS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
 const MEALS = ["desayuno", "almuerzo", "cena", "snack"];
@@ -164,6 +173,9 @@ export function generarListaCompra(state){
 }
 
 async function generarPlanContingencia(despensa){
+  const apiKey = getSemanaGeminiApiKey();
+  if(!apiKey) throw new Error("SEMANA_GEMINI_API_KEY_MISSING");
+
   const prompt = `
 Eres un asistente de cocina familiar para una familia peruana con niños.
 Tengo estos ingredientes en casa: ${JSON.stringify(despensa)}.
@@ -176,7 +188,7 @@ Responde SOLO en JSON con este formato exacto, sin texto adicional:
   `;
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -593,8 +605,8 @@ export function wireSemana(){
         toast("Sin red: no puedo consultar Gemini ahora.");
         return;
       }
-      if(!GEMINI_API_KEY){
-        toast("Falta VITE_GEMINI_KEY para Plan IA.");
+      if(!getSemanaGeminiApiKey()){
+        toast("Configura la API key de Gemini en Ajustes → Semana IA.");
         return;
       }
       try{
