@@ -2,6 +2,7 @@ import { initFootballLab } from "./footballLab_v8e.js?v=2001";
 import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
+import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -245,6 +246,7 @@ const LS = {
   budgetMonthly: "memorycarl_v2_budget_monthly",
   calDraw: "memorycarl_v2_cal_draw",
   house: "memorycarl_v2_house",
+  semana: "memorycarl_v2_semana",
   moodDaily: "memorycarl_v2_mood_daily",
   moodSpritesCustom: "memorycarl_v2_mood_sprites_custom",
   moodActivityCats: "memorycarl_v2_mood_activity_cats",
@@ -1857,6 +1859,7 @@ let state = {
   moodSpritesCustom: load(LS.moodSpritesCustom, []),
   moodActivityCats: load(LS.moodActivityCats, null),
   house: load(LS.house, seedHouse()),
+  semana: load(LS.semana, seedSemana()),
   // Insights UI
   insightsMonthOffset: 0,
   insightsDayOpen: false,
@@ -1889,6 +1892,7 @@ function persist(){
 
   // House
   save(LS.house, state.house);
+  save(LS.semana, state.semana);
 
   // NeuroClaw
   try{ save(LS.neuroclawFeedback, state.neuroclawFeedback); }catch(e){}
@@ -2329,6 +2333,7 @@ function bottomNav(){
   return `
     <nav class="bottomNav" role="navigation" aria-label="MemoryCarl navigation">
       ${mk("home","🏠","Home")}
+      ${mk("semana","🍽️","Semana")}
       ${mk("house","🧹","Casa")}
       ${mk("routines","📝","Rutinas")}
       ${mk("shopping","🛒","Compras")}
@@ -2379,6 +2384,7 @@ function view(){
   // Keep a fresh global signals bag (used by NeuroBubble and other small agents)
   try{ refreshGlobalSignals(); }catch(e){}
   const root = document.querySelector("#app");
+  window.__MC_WEEK_CTX__ = { state, persist, view, toast };
   root.innerHTML = `
     <div class="app ${state.tab==="settings" ? "hasSheet":""}">
       <header class="header">
@@ -2390,6 +2396,7 @@ function view(){
 
       <main class="content">
         ${state.tab==="home" ? viewHome() : ""}
+        ${state.tab==="semana" ? viewSemana() : ""}
         ${state.tab==="routines" ? viewRoutines() : ""}
         ${state.tab==="shopping" ? viewShopping() : ""}
         ${state.tab==="reminders" ? viewReminders() : ""}
@@ -2827,10 +2834,13 @@ function view(){
       }
     }catch(e){ console.error(e); }
   }
+  if(state.tab==="semana"){
+    try{ wireSemana(); }catch(e){ console.error(e); }
+  }
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
   if(fab){
-    fab.style.display = (state.tab==="learn" || state.tab==="settings" || state.tab==="neurochat" || state.tab==="dayengine") ? "none" : "flex";
+    fab.style.display = (state.tab==="learn" || state.tab==="settings" || state.tab==="neurochat" || state.tab==="dayengine" || state.tab==="semana") ? "none" : "flex";
     fab.addEventListener("click", ()=>{
     if(state.tab==="home") openMusicModal();
     if(state.tab==="routines") openRoutineModal();
