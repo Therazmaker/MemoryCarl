@@ -247,6 +247,7 @@ const LS = {
   calDraw: "memorycarl_v2_cal_draw",
   house: "memorycarl_v2_house",
   semana: "memorycarl_v2_semana",
+  semanaGeminiApiKey: "memorycarl_v2_semana_gemini_api_key",
   moodDaily: "memorycarl_v2_mood_daily",
   moodSpritesCustom: "memorycarl_v2_mood_sprites_custom",
   moodActivityCats: "memorycarl_v2_mood_activity_cats",
@@ -284,6 +285,20 @@ function getSyncUrl(){ return localStorage.getItem(SYNC.urlKey) || ""; }
 function setSyncUrl(u){ localStorage.setItem(SYNC.urlKey, (u||"").trim()); }
 function getSyncApiKey(){ return localStorage.getItem(SYNC.apiKeyKey) || ""; }
 function setSyncApiKey(k){ localStorage.setItem(SYNC.apiKeyKey, (k||"").trim()); }
+
+function getSemanaGeminiApiKey(){
+  try{ return (localStorage.getItem(LS.semanaGeminiApiKey) || "").trim(); }
+  catch(_e){ return ""; }
+}
+function setSemanaGeminiApiKey(k){
+  try{
+    localStorage.setItem(LS.semanaGeminiApiKey, String(k || "").trim());
+    return true;
+  }catch(err){
+    if(isQuotaExceededError(err)) return false;
+    throw err;
+  }
+}
 
 // ---- Astrology (Cosmic Lite) ----
 function loadNatalChart(){
@@ -1982,7 +1997,14 @@ function normalizeHouse(){
 let state = {
   tab: "home",
   moreOpen: false,
-  sheetOpen: (localStorage.getItem("mc_sheet_open")==="1"),
+  sheetOpen: (() => {
+    try{
+      if(localStorage.getItem("mc_sheet_open")==="1") return true;
+      return sessionStorage.getItem("mc_sheet_open")==="1";
+    }catch(_e){
+      return false;
+    }
+  })(),
   routines: load(LS.routines, seedRoutines()),
   shopping: load(LS.shopping, seedShopping()),
   reminders: loadAny([LS.reminders, LS.remindersLegacy], seedReminders()),
@@ -2651,6 +2673,35 @@ function view(){
         resetNeuroAiCallsToday();
         try{ if(typeof toast==="function") toast("Contador reseteado (hoy) ✅"); }catch(e){}
         view();
+      });
+    }
+
+    const semanaKeyInp = root.querySelector("#semanaGeminiApiKey");
+    const btnSemanaKeySave = root.querySelector("#btnSemanaGeminiSave");
+    const btnSemanaKeyClear = root.querySelector("#btnSemanaGeminiClear");
+    if(semanaKeyInp){
+      semanaKeyInp.value = getSemanaGeminiApiKey();
+    }
+    if(btnSemanaKeySave){
+      btnSemanaKeySave.addEventListener("click", ()=>{
+        const next = semanaKeyInp ? String(semanaKeyInp.value || "").trim() : "";
+        const ok = setSemanaGeminiApiKey(next);
+        if(!ok){
+          try{ toast("No pude guardar la key (sin espacio local)."); }catch(_e){}
+          return;
+        }
+        try{ toast(next ? "API key de Semana guardada ✅" : "API key de Semana vaciada"); }catch(_e){}
+      });
+    }
+    if(btnSemanaKeyClear){
+      btnSemanaKeyClear.addEventListener("click", ()=>{
+        const ok = setSemanaGeminiApiKey("");
+        if(semanaKeyInp) semanaKeyInp.value = "";
+        if(!ok){
+          try{ toast("No pude limpiar la key (sin espacio local)."); }catch(_e){}
+          return;
+        }
+        try{ toast("API key de Semana eliminada 🧽"); }catch(_e){}
       });
     }
 
@@ -3733,6 +3784,29 @@ function viewSettings(){
 
       <div class="small" style="margin-top:10px;opacity:.85;">
         Tip: si quieres entrenar, este log guarda <span class="mono">signals_snapshot</span> + respuesta de Gemini + tu rating.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">Semana IA (Gemini)</h2>
+          <div class="small">API key usada por “Plan IA” en la pestaña Semana.</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="kv">
+        <div class="k">API key</div>
+        <div class="v">
+          <input id="semanaGeminiApiKey" class="inp mono" type="password" placeholder="AIza..." autocomplete="off" />
+        </div>
+      </div>
+      <div class="btnRow" style="margin-top:10px;flex-wrap:wrap;gap:10px;">
+        <button class="btn" id="btnSemanaGeminiSave">Guardar key</button>
+        <button class="btn ghost" id="btnSemanaGeminiClear">Limpiar</button>
+      </div>
+      <div class="small" style="margin-top:10px;opacity:.85;">
+        Si está vacía, Semana intentará usar <span class="mono">VITE_GEMINI_KEY</span> (build).
       </div>
     </div>
 
@@ -9562,7 +9636,6 @@ function initBottomSheet(){
   if(!sheet || !handle) return;
 
   const PEEK = 62; // px visible when closed
-  let sheetOpenQuotaWarningShown = false;
 
   function measureClosedY(){
     const h = sheet.getBoundingClientRect().height;
@@ -9575,10 +9648,9 @@ function initBottomSheet(){
       localStorage.setItem("mc_sheet_open", state.sheetOpen ? "1":"0");
     }catch(err){
       if(isQuotaExceededError(err)){
-        if(!sheetOpenQuotaWarningShown){
-          sheetOpenQuotaWarningShown = true;
-          console.warn('[MemoryCarl] localStorage quota exceeded for key "mc_sheet_open".');
-        }
+        try{
+          sessionStorage.setItem("mc_sheet_open", state.sheetOpen ? "1":"0");
+        }catch(_e){}
       }else{
         throw err;
       }
