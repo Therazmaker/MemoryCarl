@@ -1568,11 +1568,6 @@ function save(key, value){
   }
 }
 
-function isQuotaExceededError(err){
-  if(!err || typeof err !== "object") return false;
-  return err.name === "QuotaExceededError" || err.code === 22 || err.code === 1014;
-}
-
 function compactSemanaState(value){
   const fallback = seedSemana();
   const semana = (value && typeof value === "object") ? value : fallback;
