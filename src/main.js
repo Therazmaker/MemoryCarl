@@ -1526,9 +1526,90 @@ window.MemoryCarlSync = {
 // ---- Helpers ----
 function uid(prefix="id"){ return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`; }
 
+// ---- IndexedDB overflow (fallback when localStorage quota is exceeded) ----
+const MC_IDB_FALLBACK = {
+  dbName: "memorycarl_v2_storage",
+  version: 1,
+  store: "kv",
+};
+const mcIdbCache = new Map();
+let mcIdbReady = false;
+
+function mcCanUseIndexedDB(){
+  return typeof indexedDB !== "undefined";
+}
+
+function mcOpenFallbackDb(){
+  return new Promise((resolve, reject) => {
+    if(!mcCanUseIndexedDB()) return reject(new Error("IndexedDB unavailable"));
+    const req = indexedDB.open(MC_IDB_FALLBACK.dbName, MC_IDB_FALLBACK.version);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if(!db.objectStoreNames.contains(MC_IDB_FALLBACK.store)){
+        db.createObjectStore(MC_IDB_FALLBACK.store, { keyPath: "key" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+  });
+}
+
+async function mcIdbPut(key, payload){
+  const db = await mcOpenFallbackDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(MC_IDB_FALLBACK.store, "readwrite");
+    tx.objectStore(MC_IDB_FALLBACK.store).put({ key, payload, updatedAt: Date.now() });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error || new Error("IndexedDB put failed"));
+  });
+  db.close();
+}
+
+async function mcIdbDelete(key){
+  const db = await mcOpenFallbackDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(MC_IDB_FALLBACK.store, "readwrite");
+    tx.objectStore(MC_IDB_FALLBACK.store).delete(key);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error || new Error("IndexedDB delete failed"));
+  });
+  db.close();
+}
+
+async function mcBootstrapIdbCache(){
+  if(!mcCanUseIndexedDB()) return;
+  try{
+    const db = await mcOpenFallbackDb();
+    const rows = await new Promise((resolve, reject) => {
+      const tx = db.transaction(MC_IDB_FALLBACK.store, "readonly");
+      const req = tx.objectStore(MC_IDB_FALLBACK.store).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error || new Error("IndexedDB getAll failed"));
+    });
+    rows.forEach((row) => {
+      if(row && typeof row.key === "string"){
+        mcIdbCache.set(row.key, row.payload);
+      }
+    });
+    db.close();
+    mcIdbReady = true;
+  }catch(err){
+    console.warn("[MemoryCarl] IndexedDB fallback init failed:", err);
+  }
+}
+mcBootstrapIdbCache();
+
 function load(key, fallback){
-  try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
-  catch{ return fallback; }
+  try{
+    const raw = localStorage.getItem(key);
+    if(raw) return JSON.parse(raw);
+  }catch(_err){}
+
+  if(mcIdbReady && mcIdbCache.has(key)){
+    try{ return JSON.parse(mcIdbCache.get(key)); }
+    catch(_err){}
+  }
+  return fallback;
 }
 
 function loadAny(keys, fallback){
@@ -1545,6 +1626,10 @@ function save(key, value){
   const payload = JSON.stringify(value);
   try{
     localStorage.setItem(key, payload);
+    if(mcIdbCache.has(key)){
+      mcIdbCache.delete(key);
+      mcIdbDelete(key).catch(()=>{});
+    }
     // Mark dirty for any MemoryCarl data key (we throttle sends elsewhere).
     if(typeof key === "string" && key.startsWith("memorycarl_")) markDirty();
     return true;
@@ -1556,11 +1641,24 @@ function save(key, value){
       const compactSemana = compactSemanaState(value);
       try{
         localStorage.setItem(key, JSON.stringify(compactSemana));
+        if(mcIdbCache.has(key)){
+          mcIdbCache.delete(key);
+          mcIdbDelete(key).catch(()=>{});
+        }
         if(typeof key === "string" && key.startsWith("memorycarl_")) markDirty();
         return true;
       }catch(err2){
         if(!isQuotaExceededError(err2)) throw err2;
       }
+    }
+
+    if(typeof key === "string" && key.startsWith("memorycarl_") && mcCanUseIndexedDB()){
+      mcIdbCache.set(key, payload);
+      mcIdbPut(key, payload).catch((idbErr)=>{
+        console.warn(`[MemoryCarl] localStorage quota exceeded for key "${key}" and IndexedDB fallback failed.`, idbErr);
+      });
+      markDirty();
+      return true;
     }
 
     console.warn(`[MemoryCarl] localStorage quota exceeded for key "${key}". Save skipped.`);
