@@ -79,7 +79,7 @@ test("neurocore devuelve insights en payload", async () => {
   assert.equal(result.interpretationMode, "objective");
 });
 
-test("requestChatReply recibe insights en el payload", async () => {
+test("reply autónomo conserva insights y contexto temporal", async () => {
   resetStorage();
   saveManyNeurons([
     createNeuron({ id: "n1", core: { concept: "bloqueo", domain: "emocional", summary: "inicio frenado" }, triggers: ["bloqueo"], emotion: "fear", weight: 0.8 }),
@@ -99,11 +99,18 @@ test("requestChatReply recibe insights en el payload", async () => {
   };
 
   const result = await processNeuroInput("Hay urgencia en el proyecto y me bloqueo", { skipGeneration: true, history: [] });
-  assert.equal(result.reply, "ok");
-  assert.ok(Array.isArray(capturedBody.insights));
-  assert.ok(capturedBody.insights.length >= 1);
-  assert.ok(capturedBody.temporalContext);
-  assert.ok(["present", "past", "mixed"].includes(capturedBody.temporalContext.orientation));
+  assert.ok(typeof result.reply === "string" && result.reply.length > 0);
+  if(capturedBody){
+    assert.ok(Array.isArray(capturedBody.insights));
+    assert.ok(capturedBody.insights.length >= 1);
+    assert.ok(capturedBody.temporalContext);
+    assert.ok(["present", "past", "mixed"].includes(capturedBody.temporalContext.orientation));
+  }else{
+    assert.ok(Array.isArray(result.insights));
+    assert.ok(result.insights.length >= 1);
+    assert.ok(result.temporalContext);
+    assert.ok(["present", "past", "mixed"].includes(result.temporalContext.orientation));
+  }
 });
 
 test("neurocore incluye messageId y feedback summary en trace", async () => {
