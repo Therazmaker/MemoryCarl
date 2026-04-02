@@ -42,6 +42,7 @@ test("create/update/delete/search manual context neurons", async () => {
   assert.equal(pinned.length, 1);
 
   const removed = await deleteManualContextNeuron(created.id);
-  assert.equal(removed, true);
+  assert.equal(removed?.ok, true);
+  assert.equal(removed?.mode, "hard");
   assert.equal(searchManualContextNeurons("fergis").length, 0);
 });

@@ -1542,9 +1542,54 @@ function loadAny(keys, fallback){
   return fallback;
 }
 function save(key, value){
-  localStorage.setItem(key, JSON.stringify(value));
-  // Mark dirty for any MemoryCarl data key (we throttle sends elsewhere).
-  if(typeof key === "string" && key.startsWith("memorycarl_")) markDirty();
+  const payload = JSON.stringify(value);
+  try{
+    localStorage.setItem(key, payload);
+    // Mark dirty for any MemoryCarl data key (we throttle sends elsewhere).
+    if(typeof key === "string" && key.startsWith("memorycarl_")) markDirty();
+    return true;
+  }catch(err){
+    if(!isQuotaExceededError(err)) throw err;
+
+    // Fallback: prune heavy weekly planner payload to prevent app crash.
+    if(key === LS.semana){
+      const compactSemana = compactSemanaState(value);
+      try{
+        localStorage.setItem(key, JSON.stringify(compactSemana));
+        if(typeof key === "string" && key.startsWith("memorycarl_")) markDirty();
+        return true;
+      }catch(err2){
+        if(!isQuotaExceededError(err2)) throw err2;
+      }
+    }
+
+    console.warn(`[MemoryCarl] localStorage quota exceeded for key "${key}". Save skipped.`);
+    return false;
+  }
+}
+
+function isQuotaExceededError(err){
+  if(!err || typeof err !== "object") return false;
+  return err.name === "QuotaExceededError" || err.code === 22 || err.code === 1014;
+}
+
+function compactSemanaState(value){
+  const fallback = seedSemana();
+  const semana = (value && typeof value === "object") ? value : fallback;
+  const ui = (semana.ui && typeof semana.ui === "object") ? semana.ui : fallback.ui;
+  return {
+    ...semana,
+    recetas: Array.isArray(semana.recetas) ? semana.recetas.slice(-80) : [],
+    despensa: Array.isArray(semana.despensa) ? semana.despensa.slice(-160) : [],
+    contingencia: Array.isArray(semana.contingencia) ? semana.contingencia.slice(-12) : [],
+    messages: Array.isArray(semana.messages) ? semana.messages.slice(-20) : [],
+    ui: {
+      ...ui,
+      ingredientDrafts: Array.isArray(ui.ingredientDrafts) && ui.ingredientDrafts.length
+        ? ui.ingredientDrafts.slice(0, 4)
+        : [{ nombre: "", cantidad: 1, unidad: "und" }],
+    },
+  };
 }
 
 // ===== Dirty flag (required by save/persist) =====
