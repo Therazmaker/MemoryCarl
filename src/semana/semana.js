@@ -1,5 +1,3 @@
-import "./semana.css";
-
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_KEY || "";
 
 const DAYS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
