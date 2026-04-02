@@ -9562,6 +9562,7 @@ function initBottomSheet(){
   if(!sheet || !handle) return;
 
   const PEEK = 62; // px visible when closed
+  let sheetOpenQuotaWarningShown = false;
 
   function measureClosedY(){
     const h = sheet.getBoundingClientRect().height;
@@ -9570,7 +9571,18 @@ function initBottomSheet(){
 
   function setOpen(open, opts = { animate:true }){
     state.sheetOpen = !!open;
-    localStorage.setItem("mc_sheet_open", state.sheetOpen ? "1":"0");
+    try{
+      localStorage.setItem("mc_sheet_open", state.sheetOpen ? "1":"0");
+    }catch(err){
+      if(isQuotaExceededError(err)){
+        if(!sheetOpenQuotaWarningShown){
+          sheetOpenQuotaWarningShown = true;
+          console.warn('[MemoryCarl] localStorage quota exceeded for key "mc_sheet_open".');
+        }
+      }else{
+        throw err;
+      }
+    }
 
     const closedY = measureClosedY();
     sheet.classList.toggle("open", state.sheetOpen);
