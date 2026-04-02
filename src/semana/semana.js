@@ -1,4 +1,4 @@
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_KEY || "";
+const GEMINI_API_KEY = import.meta?.env?.VITE_GEMINI_KEY || "";
 
 const DAYS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
 const MEALS = ["desayuno", "almuerzo", "cena", "snack"];
