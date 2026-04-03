@@ -6548,13 +6548,22 @@ function navigateMusic(delta){
 }
 
 function wireHome(root){
+  const openSleepEntryModal = (opts={})=>{
+    const fn = (typeof window.openSleepModal === "function") ? window.openSleepModal : openSleepModal;
+    return fn(opts);
+  };
+  const openSleepHistory = ()=>{
+    const fn = (typeof window.openSleepHistoryModal === "function") ? window.openSleepHistoryModal : openSleepHistoryModal;
+    return fn();
+  };
+
   const btnAdd = root.querySelector("#btnAddMusic");
   if(btnAdd) btnAdd.addEventListener("click", openMusicModal);
 
   const btnSleep = root.querySelector("#btnAddSleep");
-  if(btnSleep) btnSleep.addEventListener("click", openSleepModal);
+  if(btnSleep) btnSleep.addEventListener("click", ()=>openSleepEntryModal());
   const sleepCard = root.querySelector("#homeSleepCard");
-  if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepHistoryModal(); });
+  if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepHistory(); });
 
 
   // Mood sprites (daily emotion)
