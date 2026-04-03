@@ -1013,6 +1013,7 @@ window.openSleepHistoryModal = function() {
           <button class="djp-tab active" data-tab="log">📋 Registros</button>
           <button class="djp-tab" data-tab="patterns">🔮 Patrones</button>
           <button class="djp-tab" data-tab="chart">📈 Gráfico</button>
+          <button class="djp-tab" data-tab="radial">🌀 Radial</button>
         </div>
       </div>
       <div class="djp-hist-scroll" id="djpHistContent"></div>
@@ -1366,6 +1367,7 @@ window.openSleepHistoryModal = function() {
     if (uiState.tab === "log") renderLog();
     else if (uiState.tab === "patterns") renderPatterns();
     else if (uiState.tab === "chart") renderChart();
+    else if (uiState.tab === "radial") window.DJP_Radial?.render(content, getFiltered());
   };
 
   backdrop.querySelectorAll("[data-tab]").forEach(btn => {
