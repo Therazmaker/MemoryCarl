@@ -1364,6 +1364,9 @@ window.openSleepHistoryModal = function() {
 
   // ── Tab switching ─────────────────────────────────────────────────────────
   const renderActive = () => {
+    const content = backdrop.querySelector("#djpHistContent");
+    if (!content) return;
+
     if (uiState.tab === "log") renderLog();
     else if (uiState.tab === "patterns") renderPatterns();
     else if (uiState.tab === "chart") renderChart();
