@@ -114,6 +114,8 @@ import { computeMoonNow } from "./cosmic_lite.js";
 import { getTransitLiteSignals } from "./transit_lite.js";
 import { getTransitSwissSignals, swissTransitsAvailable, getSwissDailyCached, swissDailyAvailable } from "./transit_swiss.js";
 import "./finance/neuron_financiera.js";
+import "./sleep_radial_chart.js";
+import "./sleep_journal_pro.js";
 
 console.log("MemoryCarl loaded");
 // ===== LocalStorage Keys =====
