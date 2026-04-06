@@ -2089,6 +2089,13 @@ function persist(){
   }catch(e){}
 }
 
+function exposeWeekCtx(){
+  window.state = state;
+  window.persist = persist;
+  window.view = view;
+  window.__MC_WEEK_CTX__ = { state, persist, view, toast };
+}
+
 // ---- Backup (Export/Import) ----
 function exportBackup(){
   const payload = {
@@ -2546,7 +2553,7 @@ function view(){
   // Keep a fresh global signals bag (used by NeuroBubble and other small agents)
   try{ refreshGlobalSignals(); }catch(e){}
   const root = document.querySelector("#app");
-  window.__MC_WEEK_CTX__ = { state, persist, view, toast };
+  exposeWeekCtx();
   root.innerHTML = `
     <div class="app ${state.tab==="settings" ? "hasSheet":""}">
       <header class="header">
