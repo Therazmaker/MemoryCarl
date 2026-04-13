@@ -1002,9 +1002,9 @@ async function doSend(root, inputEl) {
       uiState.sessionState.lastMergedIds = (result.dedupeSummary?.mergedIds || []);
 
       // ── NeuroProbe: mostrar pregunta si el observe() generó una ──
-      if (result.probeQuestion) {
-        getProbeUI().showFromExternal(result.probeQuestion);
-      }
+      // Actualizar el probe con el resultado (y la entrada del usuario si no viene)
+      result.userInput = result.userInput || text;
+      getProbeUI().update(result);
     }
   } catch (err) {
     console.error("[NeuroChat]", err);
