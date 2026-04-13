@@ -4,6 +4,7 @@
 
 import { processNeuroInput } from "../neuro/neurocore.js";
 import { getAllNeurons, saveNeuron, deleteNeuron } from "../neuro/neuronStore.js";
+import { neuroProbe } from "./neuroprobe.js";
 import { createNeuron } from "../neuro/schemas.js";
 import { getMessageFeedbackMap, recordNeuronFeedback, recordNeuronRemoval } from "../neuro/feedback.js";
 import { saveMemory, getAllMemories, searchMemories, detectMemoryEmotion, extractMemoryTags, inferMemoryDate, getMemoriesByNeuron } from "../memory/memoryStore.js";
@@ -237,6 +238,15 @@ export async function sendMessage(userInput, options = {}) {
       ? result.memorySuggestion
       : detectImportantMemoryInput(trimmed),
     feedbackForMessage: getMessageFeedbackMap(messageId),
+    probeQuestion: (() => {
+      neuroProbe.observe({
+        activated: result.activated || [],
+        generated: result.generated || [],
+        userInput: trimmed,
+        history: getHistory().slice(-6),
+      });
+      return neuroProbe.getPendingQuestion();
+    })(),
   };
 }
 

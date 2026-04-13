@@ -9,6 +9,7 @@
  */
 
 import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
+import { NeuroProbeUI } from "./neuroprobe-ui.js";
 import { saveMemory, updateMemory, deleteMemory, autoFixMemory, suggestMemoryMilestone } from "../memory/memoryStore.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
@@ -34,6 +35,21 @@ import { getAllDays, getDayByDate } from "../day/dayStore.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
+
+// Instancia del probe UI — se crea una sola vez y persiste durante la sesión
+let _probeUI = null;
+function getProbeUI() {
+  if (!_probeUI) {
+    _probeUI = new NeuroProbeUI({
+      onAnswer: (result) => {
+        // Cuando el probe procesa una respuesta, refrescar el side panel
+        const root = document.querySelector("#app");
+        if (root) rerenderSidePanel(root);
+      },
+    });
+  }
+  return _probeUI;
+}
 const uiState = {
   loading:         false,
   error:           null,
@@ -635,6 +651,8 @@ function nchatInner() {
       <div class="ncMain">
         <div class="ncMessages" id="ncMessages" role="log" aria-live="polite" aria-label="Historial de conversación">${buildMessagesHtml()}</div>
 
+        <div id="neuroprobe-area"></div>
+
         ${renderMobileCoverage()}
 
         <div class="ncInputBar">${buildInputBarHtml()}</div>
@@ -676,6 +694,7 @@ function nchatInner() {
         <div class="ncHeaderActions">
           <button class="ncIconBtn" id="btnNcCloseSession" title="Cerrar sesión y guardar resumen">💾</button>
           <button class="ncIconBtn" id="btnNcToggleNeurons" title="Ver neuronas">${uiState.neuronsExpanded ? "📱🧠▾" : "📱🧠"}</button>
+          <button class="ncIconBtn" id="btnNcProbe" title="NeuroProbe: pregúntame algo">🔮</button>
           <button class="ncIconBtn" id="btnNcClear" title="Limpiar chat">🗑</button>
           <button class="ncIconBtn" id="btnNcSettings" title="Configuración">⚙️</button>
         </div>
@@ -981,6 +1000,11 @@ async function doSend(root, inputEl) {
       uiState.sessionState.lastGeneratedIds = (result.generated || [])
         .map((n) => n.id).filter(Boolean);
       uiState.sessionState.lastMergedIds = (result.dedupeSummary?.mergedIds || []);
+
+      // ── NeuroProbe: mostrar pregunta si el observe() generó una ──
+      if (result.probeQuestion) {
+        getProbeUI().showFromExternal(result.probeQuestion);
+      }
     }
   } catch (err) {
     console.error("[NeuroChat]", err);
@@ -1243,6 +1267,16 @@ function wireNeuroChatInner(root) {
   wireMessageEvents(root);
   wireSidePanelEvents(root);
   wireInputBarEvents(root);
+
+  // ── NeuroProbe: asignar contenedor y botón manual ──
+  const probeArea = root.querySelector("#neuroprobe-area");
+  if (probeArea) {
+    const probe = getProbeUI();
+    probe._container = probeArea;
+  }
+  root.querySelector("#btnNcProbe")?.addEventListener("click", () => {
+    getProbeUI().prompt();
+  });
 
   const btnClear = root.querySelector("#btnNcClear");
   if (btnClear) {
