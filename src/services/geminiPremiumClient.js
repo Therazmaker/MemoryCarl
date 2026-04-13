@@ -557,3 +557,83 @@ export async function streamGeminiNeuronGeneration(payload, onChunk = () => {}) 
 
   return fullText;
 }
+
+/**
+ * Llama a Gemini como un Socratic Pattern Weaver para el NeuroProbe.
+ * Recibe el historial de la mini-charla Socrática y el contexto,
+ * y devuelve o bien una nueva pregunta reflexiva, o bien una propuesta de neurona.
+ *
+ * @param {{
+ *   context: object,
+ *   history: Array<{role, content}>,
+ *   recentMemoriesSummary: string
+ * }} payload
+ * @returns {Promise<{ isDraft: boolean, message: string, proposedNeuron?: object }>}
+ */
+export async function requestGeminiSocraticProbe(payload = {}) {
+  const settings = getGeminiPremiumSettings();
+  if (!isGeminiPremiumConfigured()) {
+    throw new Error("Gemini no configurado para Probe premium");
+  }
+
+  const { context = {}, history = [], recentMemoriesSummary = "" } = payload;
+  const historyText = history.map(h => `${h.role}: ${h.content}`).join("\n");
+
+  const prompt = `Eres NeuroProbe, un observador cognitivo socrático. Tu meta es descubrir patrones en la mente del usuario a partir de sus memorias y diálogos, y finalmente formalizarlos en una "Neurona" (concepto).
+
+Contexto inicial (lo que activó la conversación): ${JSON.stringify(context)}
+Resumen memorias recientes: ${recentMemoriesSummary || "Sin contexto reciente"}
+
+Historial de la conversación:
+${historyText || "(Ninguno, inicia tú la conversación basándote en el contexto)"}
+
+REGLAS:
+1. Si necesitas explorar más: Devuelve un mensaje corto y reflexivo, preguntando el "por qué" o haciendo una conexión audaz.
+2. Si consideras que el usuario ya ha revelado un patrón o concepto útil formalizable (típicamente tras 2-3 turnos): Devuelve isDraft = true, un mensaje de conclusión, y una proposedNeuron.
+
+FORMATO DE RESPUESTA (Solo JSON, sin markdown):
+{
+  "isDraft": false/true,
+  "message": "tu respuesta socrática o tu conclusión...",
+  "proposedNeuron": {
+    "type": "pattern",
+    "core": { "concept": "nombre del patron", "domain": "dominio", "summary": "tu resumen" },
+    "triggers": ["palabra1", "palabra2"],
+    "evidence": ["evidencia literal de la charla"]
+  } // Solo si isDraft es true
+}`;
+
+  const model = settings.model || "gemini-2.5-flash";
+  const url = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent?key=${settings.apiKey}`;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.6,
+      maxOutputTokens: 1024,
+    },
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error("Error en NeuroProbe Socratic API");
+  }
+
+  const json = await response.json();
+  const rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+  let text = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) text = match[0];
+  
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error("No se pudo parsear el JSON de SocraticProbe: " + text);
+  }
+}
+

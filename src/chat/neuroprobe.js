@@ -601,8 +601,8 @@ export class NeuroProbe {
   // ── API pública ───────────────────────────────────────────────────────────
 
   /**
-   * Devuelve la pregunta pendiente si la hay, o null.
-   * @returns {{ id, type, text, neuronA?, neuronB?, neuron?, domain? } | null}
+   * Devuelve la pregunta o estado pendiente si la hay, o null.
+   * @returns {{ id, type, text, isDraft?, proposedNeuron?, neuronA?, neuronB?, neuron?, domain? } | null}
    */
   getPendingQuestion() {
     return this._pendingQuestion || null;
@@ -680,24 +680,72 @@ export class NeuroProbe {
 
   /**
    * Procesa la respuesta del usuario a la pregunta del probe.
-   * Crea neuronas, refuerza conexiones, actualiza el grafo.
+   * Usa Socratic Pattern Weaver (Gemini) si está disponible para multi-turno,
+   * de lo contrario usa análisis heurístico local.
    *
    * @param {string} userAnswer
-   * @returns {{
-   *   neuronsCreated: Neuron[],
-   *   connectionsAdded: number,
-   *   strengthenedIds: string[],
-   *   summary: string
-   * }}
+   * @returns {Promise<any>}
    */
   async processAnswer(userAnswer) {
     if (!this._pendingQuestion) {
       return { neuronsCreated: [], connectionsAdded: 0, strengthenedIds: [], summary: "No había pregunta pendiente." };
     }
 
-    const context = { ...this._pendingQuestion };
-    const extracted = extractNeuronsFromAnswer(userAnswer, context);
+    const context = this._pendingQuestion;
+    context.history = context.history || [];
+    context.history.push({ role: "user", content: userAnswer });
 
+    // Intentar Socratic Weaver (Gemini Premium)
+    try {
+      const { requestGeminiSocraticProbe, isGeminiPremiumConfigured } = await import("../services/geminiPremiumClient.js");
+      const { getRecentSessions } = await import("../neuro/sessionMemory.js");
+
+      if (isGeminiPremiumConfigured()) {
+        const recentSessions = getRecentSessions(3).map(s => s.summary).join(" | ");
+        const initContextObj = {
+          type: context.type,
+          originalText: context.text,
+          targetDomain: context.domain,
+          neuronA: context.neuronA?.core?.concept,
+          neuronB: context.neuronB?.core?.concept,
+          neuron: context.neuron?.core?.concept
+        };
+
+        const gRes = await requestGeminiSocraticProbe({
+          context: initContextObj,
+          history: context.history,
+          recentMemoriesSummary: recentSessions
+        });
+
+        if (!gRes.isDraft) {
+          context.history.push({ role: "assistant", content: gRes.message });
+          context.text = gRes.message; // update for UI
+          
+          return {
+            socraticTurn: true,
+            summary: "El probe Socrático está procesando tus ideas...",
+            message: gRes.message
+          };
+        } else {
+          context.isDraft = true;
+          context.proposedNeuron = gRes.proposedNeuron;
+          context.text = gRes.message;
+          context.history.push({ role: "assistant", content: gRes.message });
+
+          return {
+            draftReady: true,
+            summary: "✨ El Probe tiene una propuesta basada en tu patrón.",
+            message: gRes.message,
+            proposedNeuron: gRes.proposedNeuron
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[NeuroProbe] Error Socratic Weaver (usando local fallback):", e);
+    }
+
+    // FALLBACK LOCAL: Single Turn
+    const extracted = extractNeuronsFromAnswer(userAnswer, context);
     const neuronsCreated = [];
     const strengthenedIds = [];
     let connectionsAdded = 0;
@@ -844,7 +892,49 @@ export class NeuroProbe {
   }
 
   /**
-   * Descarta la pregunta pendiente sin procesarla.
+   * Finaliza el draft socrático formalizando la neurona.
+   */
+  async acceptDraft() {
+    if (!this._pendingQuestion || !this._pendingQuestion.isDraft) {
+      return { summary: "No hay draft pendiente para aceptar." };
+    }
+    
+    const context = this._pendingQuestion;
+    const nData = context.proposedNeuron;
+    
+    let neuronsCreated = [];
+    if (nData) {
+      const newNeuron = createNeuron({
+        ...nData,
+        id: generateId(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        source: { kind: "generated", ref: "neuroprobe_socratic" }
+      });
+      saveNeuron(newNeuron);
+      neuronsCreated.push(newNeuron);
+
+      if (context.neuronA) linkNeurons(newNeuron.id, context.neuronA.id, { connectionSource: "socratic", relationType: "probe_socratic" });
+      if (context.neuronB) linkNeurons(newNeuron.id, context.neuronB.id, { connectionSource: "socratic", relationType: "probe_socratic" });
+      if (context.neuron)  linkNeurons(newNeuron.id, context.neuron.id,  { connectionSource: "socratic", relationType: "probe_socratic" });
+    }
+
+    this._state.totalNeuronsCreated = (this._state.totalNeuronsCreated || 0) + neuronsCreated.length;
+    saveState(this._state);
+
+    this._pendingQuestion = null;
+    this._messagesSinceLastProbe = 0;
+    this._lastProbeAt = now();
+
+    return { 
+      draftAccepted: true, 
+      neuronsCreated, 
+      summary: `✦ Creé la neurona patrón: "${nData.core?.concept || 'Draft'}"` 
+    };
+  }
+
+  /**
+   * Descarta la pregunta pendiente o el draft sin procesarla.
    */
   dismiss() {
     if (this._pendingQuestion) {

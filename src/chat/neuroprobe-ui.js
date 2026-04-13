@@ -180,6 +180,35 @@ const PROBE_CSS = `
   color: #3C3489;
   border: 1px solid #d1cef5;
 }
+.neuroprobe-draft-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.neuroprobe-btn-accept {
+  flex: 1;
+  background: #7F77DD;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.neuroprobe-btn-accept:hover { background: #534AB7; }
+.neuroprobe-btn-reject {
+  flex: 1;
+  background: transparent;
+  color: #888;
+  border: 1px solid #ccc;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.neuroprobe-btn-reject:hover { background: rgba(0,0,0,0.05); }
+.dark .neuroprobe-btn-reject { border-color: #555; color: #aaa; }
 `;
 
 function injectCSS() {
@@ -318,16 +347,62 @@ export class NeuroProbeUI {
     try {
       const result = await neuroProbe.processAnswer(text);
 
-      // Reemplazar input con resultado
+      if (result.socraticTurn) {
+        // Multi-turno: actuliazar UI con nueva pregunta interactiva
+        const questionDiv = bubble.querySelector(".neuroprobe-question");
+        questionDiv.textContent = result.message;
+        
+        // Reset input
+        this._textarea.value = "";
+        this._textarea.style.height = "38px";
+        sendBtn.disabled = false;
+        this._textarea.disabled = false;
+        this._textarea.focus();
+        return; 
+      }
+
       const inputRow = bubble.querySelector(".neuroprobe-input-row");
-      inputRow.remove();
+      if (inputRow) inputRow.remove();
 
       const resultDiv = document.createElement("div");
       resultDiv.className = "neuroprobe-result";
 
+      if (result.draftReady) {
+        resultDiv.innerHTML = `
+          <span>${result.summary}</span><br/>
+          <p style="margin: 8px 0; color: #3C3489; font-weight: bold;">
+            Propuesta: "${result.proposedNeuron?.core?.concept}"
+          </p>
+          <div class="neuroprobe-draft-actions">
+            <button class="neuroprobe-btn-reject">Descartar</button>
+            <button class="neuroprobe-btn-accept">Guardar Neurona</button>
+          </div>
+        `;
+        bubble.appendChild(resultDiv);
+
+        const btnAccept = resultDiv.querySelector(".neuroprobe-btn-accept");
+        const btnReject = resultDiv.querySelector(".neuroprobe-btn-reject");
+
+        btnAccept.addEventListener("click", async () => {
+          btnAccept.disabled = true;
+          btnReject.disabled = true;
+          btnAccept.textContent = "Guardando...";
+          const finalRes = await neuroProbe.acceptDraft();
+          resultDiv.innerHTML = `<span>${finalRes.summary}</span>`;
+          setTimeout(() => this._removeBubble(), 3000);
+        });
+
+        btnReject.addEventListener("click", () => {
+          neuroProbe.dismiss();
+          this._removeBubble();
+        });
+        return;
+      }
+
+      // Finalización local clásica
       let html = `<span>${result.summary}</span>`;
 
-      if (result.neuronsCreated.length > 0) {
+      if (result.neuronsCreated && result.neuronsCreated.length > 0) {
         html += `<div class="neuroprobe-neurons-created">`;
         for (const n of result.neuronsCreated) {
           html += `<span class="neuroprobe-neuron-tag">✦ ${n.core.concept}</span>`;
