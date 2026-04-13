@@ -119,17 +119,19 @@ const PROBE_CSS = `
 }
 .neuroprobe-textarea {
   flex: 1;
-  min-height: 36px;
+  height: 38px;
+  min-height: 38px;
   max-height: 120px;
+  box-sizing: border-box;
   resize: none;
   border-radius: 8px;
   border: 1px solid #d1cef5;
   background: white;
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: 16px;
   font-family: inherit;
-  line-height: 1.5;
-  color: inherit;
+  line-height: 1.4;
+  color: #2C2C2A;
   outline: none;
   overflow-y: auto;
 }
@@ -280,7 +282,7 @@ export class NeuroProbeUI {
 
     // Auto-resize
     textarea.addEventListener("input", () => {
-      textarea.style.height = "auto";
+      textarea.style.height = "38px";
       textarea.style.height = Math.min(textarea.scrollHeight, 120) + "px";
     });
 

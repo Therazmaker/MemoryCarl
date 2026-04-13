@@ -1709,7 +1709,8 @@ function ncCss() {
   }
   .ncInput {
     flex: 1; background: transparent; border: none; outline: none;
-    color: inherit; font-size: 14px; font-family: inherit;
+    color: inherit; font-size: 16px; font-family: inherit;
+    box-sizing: border-box;
     resize: none; max-height: 140px; /* MAX_INPUT_HEIGHT_PX */ line-height: 1.5;
   }
   .ncModeSelect {
