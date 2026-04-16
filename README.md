@@ -47,7 +47,7 @@ Análisis visual de tu actividad:
 - **Radar Charts**: Comparativa de múltiples dimensiones del día a día.
 
 ### 💬 NeuroChat
-Interfaz de conversación con una "memoria viva" del sistema, permitiendo interactuar con tus datos de forma natural.
+Interfaz de conversación con una "memoria viva" del sistema, permitiendo interactuar con tus datos de forma natural. (Ver [Documentación Detallada](docs/neurochat-day-context.md)).
 
 ## 🛠️ Stack Tecnológico
 
