@@ -153,6 +153,23 @@ function renderMarkdown(raw) {
 
 // ---- Renderizado de componentes ----
 
+function renderDayRecallCard(msg) {
+  const days = Array.isArray(msg?.relevantDays) ? msg.relevantDays : [];
+  if (!days.length) return "";
+  const items = days.map((day) => `
+    <button class="ncRecallItem" data-open-day-detail="${esc(day.date)}">
+      <div class="ncRecallItemHead">📅 ${esc(day.date)} — ${day.isMilestone ? "⭐ " : ""}${esc(day.summary?.slice(0, 40) || "Día relevante")}...</div>
+      <div class="ncRecallItemMeta">Emoción: ${esc(day.emotion || "neutral")} ${day.isRefined ? "· ✨ Refinado" : ""}</div>
+      <div class="ncRecallItemInsight">${esc(day.summary || "").slice(0, 190)}</div>
+    </button>`).join("");
+
+  return `
+    <details class="ncMemoryRecall ncDayRecall">
+      <summary>📅 Días relacionados (${days.length})</summary>
+      <div class="ncMemoryRecallList">${items}</div>
+    </details>`;
+}
+
 function renderMemoryRecallCard(msg) {
   const recalls = Array.isArray(msg?.memoryRecall) ? msg.memoryRecall.slice(0, 3) : [];
   if (!recalls.length) return "";
@@ -185,11 +202,13 @@ function renderMessage(msg) {
     </div>` : "";
 
   const memoryRecall = !isUser ? renderMemoryRecallCard(msg) : "";
+  const dayRecall = !isUser ? renderDayRecallCard(msg) : "";
 
   return `
     <div class="ncMsg ${isUser ? "ncMsgUser" : "ncMsgAssistant"}" data-msg-id="${esc(msg.messageId || "")}">
       ${bodyHtml}
       ${memoryRecall}
+      ${dayRecall}
       <div class="ncMsgMeta">${time}${msg.coverage != null ? ` · cobertura ${Math.round(msg.coverage * 100)}%` : ""}</div>
       ${responseFeedback}
     </div>`;
@@ -1142,6 +1161,18 @@ function wireMessageEvents(root) {
       if (!memoryId) return;
       uiState.selectedMemoryId = memoryId;
       uiState.activeTab = "memories";
+      fullRerender();
+    });
+  });
+
+  root.querySelectorAll("[data-open-day-detail]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const date = btn.getAttribute("data-open-day-detail");
+      const day = getDayByDate(date);
+      if (!day) return;
+      dayUiState.selectedDayId = day.id;
+      dayUiState.view = "detail";
+      uiState.activeTab = "days";
       fullRerender();
     });
   });

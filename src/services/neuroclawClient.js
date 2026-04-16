@@ -166,6 +166,7 @@ export async function requestChatReply(payload) {
       "Usa insights como marco interpretativo sin repetirlos mecánicamente. " +
       "Distingue patrones actuales vs históricos usando temporalContext. " +
       "No presentes algo del pasado como identidad actual sin evidencia reciente. " +
+      "Si tienes dayContext, úsalo para entender el flujo de días específicos y detectar si hay situaciones que se repiten o evolucionan. " +
       "Si no hay señal suficiente en insights, no extrapoles. " +
       "No uses tono robótico.",
     ...payload,

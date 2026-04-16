@@ -31,6 +31,20 @@ import { upsertRelation, getAllRelations } from "./relationStore.js";
 import { getAllPatterns } from "./responsePatterns.js";
 import { findRelevantMemories } from "../memory/memoryRecall.js";
 import { getAllMemories } from "../memory/memoryStore.js";
+import { findRelevantDays } from "../day/dayStore.js";
+
+function buildDayContext(relevantDays = []) {
+  if (!relevantDays.length) return null;
+  return relevantDays.map((d) => ({
+    date: d.date,
+    summary: d.summary,
+    emotion: d.dominantEmotion,
+    themes: d.dominantThemes,
+    insights: d.insights,
+    isMilestone: d.isMilestone,
+    isRefined: d.geminiProcessed,
+  }));
+}
 
 function buildFallbackReply(activatedNeurons) {
   if (!activatedNeurons.length) return "No encontré recuerdos relacionados con tu mensaje. Cuéntame más para que pueda aprender.";
@@ -508,6 +522,16 @@ export async function processNeuroInput(userInput, options = {}) {
     topScore: memoryRecallResult.ranked[0]?.score || 0,
   });
 
+  addStep(trace, "find_relevant_days");
+  const currentThemes = (missingAnalysis?.missingConcepts || []).concat(enrichedContext.contextEntities);
+  const relevantDays = findRelevantDays(
+    finalActivated.map((a) => a.neuron?.id).filter(Boolean),
+    currentThemes,
+    { limit: 3, excludeCurrent: true }
+  );
+  const dayContext = buildDayContext(relevantDays);
+  addStep(trace, "relevant_days_found", { count: relevantDays.length });
+
   addStep(trace, "choose_reply_mode");
   const patternCount = (() => {
     try { return getAllPatterns().length; } catch (_e) { return 0; }
@@ -579,6 +603,7 @@ export async function processNeuroInput(userInput, options = {}) {
         history: (options.history || []).slice(-6),
         insights: insightResult.insights,
         temporalContext,
+        dayContext,
       });
       if (assistedReply) {
         geminiReplyText = assistedReply;
@@ -604,6 +629,7 @@ export async function processNeuroInput(userInput, options = {}) {
         insightSummary: insightResult.insightSummary,
         temporalContext,
         interpretationMode,
+        dayContext,
       });
       if (reply) {
         geminiReplyText = reply;
@@ -752,6 +778,7 @@ export async function processNeuroInput(userInput, options = {}) {
     },
     interpretationMode,
     generated,
+    relevantDays: dayContext,
     trace: traceResult,
     missingAnalysis,
     bridgeSuggestion: bridgeAnalysis.bridgeSuggestion || null,

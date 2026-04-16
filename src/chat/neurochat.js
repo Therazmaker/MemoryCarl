@@ -220,6 +220,7 @@ export async function sendMessage(userInput, options = {}) {
       snippet: entry.snippet,
     })),
     memoryRecallIds: (result.memoryRecall || []).map((entry) => entry.memory?.id).filter(Boolean),
+    relevantDays: result.relevantDays || [],
   });
 
   // Guardar respuesta del asistente en el día actual y vincular neuronas activadas
