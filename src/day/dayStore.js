@@ -376,3 +376,47 @@ export function inferDayRelatedNeurons(day) {
   }
   return Array.from(ids);
 }
+
+/**
+ * Busca días relevantes para el contexto actual basándose en neuronas activadas
+ * y temas dominantes.
+ *
+ * @param {string[]} activatedNeuronIds - IDs de neuronas activas en el turno.
+ * @param {string[]} currentThemes - Temas detectados en el input actual.
+ * @param {object} options - Filtros (limit, excludeCurrent).
+ * @returns {object[]} Lista de días relevantes ordenados por relevancia y fecha.
+ */
+export function findRelevantDays(activatedNeuronIds = [], currentThemes = [], options = {}) {
+  const days = loadDays();
+  const limit = options.limit || 3;
+  const today = getTodayDate();
+
+  const scored = days
+    .filter((d) => !options.excludeCurrent || d.date !== today)
+    .map((day) => {
+      let score = 0;
+
+      // Coincidencia por neuronas vinculadas (peso alto)
+      const dayNeurons = new Set(day.linkedNeurons || []);
+      const neuronMatches = activatedNeuronIds.filter((id) => dayNeurons.has(id)).length;
+      score += neuronMatches * 0.4;
+
+      // Coincidencia por temas (peso medio)
+      const dayThemes = new Set((day.dominantThemes || []).map((t) => t.toLowerCase()));
+      const themeMatches = currentThemes.filter((t) => dayThemes.has(t.toLowerCase())).length;
+      score += themeMatches * 0.2;
+
+      // Bonus por hito
+      if (day.isMilestone) score += 0.15;
+
+      // Bonus por haber sido refinado por Gemini (calidad del resumen)
+      if (day.geminiProcessed) score += 0.1;
+
+      return { day, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || b.day.date.localeCompare(a.day.date))
+    .slice(0, limit);
+
+  return scored.map((s) => s.day);
+}

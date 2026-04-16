@@ -404,6 +404,7 @@ export async function requestAssistedReply(payload = {}) {
     localDraft = "",
     context = [],
     insights = [],
+    dayContext = null,
   } = payload;
 
   const contextSummary = context.slice(0, 4)
@@ -411,6 +412,10 @@ export async function requestAssistedReply(payload = {}) {
     .join("\n");
 
   const insightLine = insights.slice(0, 1).map((i) => i.summary).join(" ");
+
+  const dayContextPrompt = Array.isArray(dayContext)
+    ? "\nContexto de días previos relacionados:\n" + dayContext.map(d => `- ${d.date}: ${d.summary} (Emoción: ${d.emotion})`).join("\n")
+    : "";
 
   const prompt = `Eres un asistente de memoria personal. Ya se generó este borrador de respuesta:
 
@@ -422,8 +427,9 @@ El usuario dijo: "${userInput}"
 Contexto de memoria relevante:
 ${contextSummary || "(sin contexto adicional)"}
 ${insightLine ? `\nInsight detectado: ${insightLine}` : ""}
+${dayContextPrompt}
 
-Tu tarea: mejora el borrador. Puedes hacerlo más específico, más empático, o añadir una observación que el borrador no incluye. NO lo hagas más largo de forma innecesaria. Máximo 3 frases adicionales. Mantén el tono del borrador. Responde SOLO con la respuesta mejorada, sin explicaciones.`;
+Tu tarea: mejora el borrador. Puedes hacerlo más específico, más empático, o añadir una observación que el borrador no incluye. Úsalo si detectas que situaciones de días previos se están repitiendo. NO lo hagas más largo de forma innecesaria. Máximo 3 frases adicionales. Mantén el tono del borrador. Responde SOLO con la respuesta mejorada, sin explicaciones.`;
 
   const model = settings.model || "gemini-2.5-flash";
   const timeout = settings.timeoutMs || 15000;
