@@ -17,6 +17,39 @@ function emptyDay(){
   return { desayuno: null, almuerzo: null, cena: null, snack: null };
 }
 
+function getSemanaSchemaTemplate() {
+  return {
+    presupuesto: 280,
+    semana: {
+      lunes: { desayuno: "ID_RECETA", almuerzo: "ID_RECETA", cena: "ID_RECETA", snack: "ID_RECETA" },
+      martes: { desayuno: null, almuerzo: null, cena: null, snack: null },
+      miercoles: { desayuno: null, almuerzo: null, cena: null, snack: null },
+      jueves: { desayuno: null, almuerzo: null, cena: null, snack: null },
+      viernes: { desayuno: null, almuerzo: null, cena: null, snack: null },
+      sabado: { desayuno: null, almuerzo: null, cena: null, snack: null },
+      domingo: { desayuno: null, almuerzo: null, cena: null, snack: null }
+    },
+    recetas: [
+      {
+        id: "r_123",
+        nombre: "Ejemplo Receta",
+        porciones: 4,
+        tiempoMin: 30,
+        costoEstimado: 25.5,
+        aptaNinos: true,
+        ingredientes: [
+          { nombre: "Ingrediente 1", cantidad: 500, unidad: "gr" }
+        ]
+      }
+    ],
+    despensa: [
+      { id: "d_123", nombre: "Ingrediente 1", cantidad: 1000, unidad: "gr", venceEn: "2024-12-31" }
+    ],
+    historialCompras: [],
+    contingencia: []
+  };
+}
+
 export function seedSemana(){
   return {
     presupuesto: 280,
@@ -43,6 +76,8 @@ export function seedSemana(){
       ingredientDrafts: [{ nombre: "", cantidad: 1, unidad: "und" }],
       modal: null,
       shoppingListModal: false,
+      importModal: false,
+      importJsonDraft: "",
       assign: { day: "", meal: "" }
     },
     messages: []
@@ -76,6 +111,8 @@ function ensureSemanaShape(root){
   if(!Array.isArray(s.ui.ingredientDrafts) || !s.ui.ingredientDrafts.length){
     s.ui.ingredientDrafts = [{ nombre: "", cantidad: 1, unidad: "und" }];
   }
+  if(s.ui.importModal === undefined) s.ui.importModal = false;
+  if(s.ui.importJsonDraft === undefined) s.ui.importJsonDraft = "";
 }
 
 function escapeHtml(v){
@@ -262,12 +299,12 @@ Responde en texto plano con formato limpio.
   return await callGeminiCached(prompt);
 }
 
-function exportarSemanaJson(semanaState){
-  const blob = new Blob([JSON.stringify(semanaState, null, 2)], { type: "application/json" });
+function exportarSemanaJson(data, filename){
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `semana_${new Date().toISOString().slice(0,10)}.json`;
+  a.download = filename || `semana_${new Date().toISOString().slice(0,10)}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -493,7 +530,7 @@ function renderModals(semanaState){
   return `
     ${rec ? `
       <div class="modalBackdrop" data-act="close-modal">
-        <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal" data-act="modal-content-stop">
           <div class="row" style="justify-content:space-between;align-items:center;"><h3 style="margin:0;">${escapeHtml(rec.nombre)}</h3><button class="iconBtn" data-act="close-modal">Cerrar</button></div>
           <div class="muted">${Number(rec.porciones)} porciones · ${Number(rec.tiempoMin)} min · ${formatMoney(rec.costoEstimado)} ${rec.aptaNinos ? "· 👶" : ""}</div>
           <div class="hr"></div>
@@ -510,7 +547,7 @@ function renderModals(semanaState){
 
     ${semanaState.ui.shoppingListModal ? `
       <div class="modalBackdrop" data-act="close-shopping">
-        <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal" data-act="modal-content-stop">
           <div class="row" style="justify-content:space-between;align-items:center;"><h3 style="margin:0;">Lista de compra</h3><button class="iconBtn" data-act="close-shopping">Cerrar</button></div>
           <div class="muted">Costo plan semanal estimado: ${formatMoney(listCost)}</div>
           <div class="list" style="margin-top:10px; max-height: 40vh; overflow: auto;">
@@ -519,6 +556,27 @@ function renderModals(semanaState){
           <div class="hr"></div>
           <div class="row"><button class="btn good" data-act="save-history" ${buyRows.length ? "" : "disabled"}>Finalizar y Guardar Historial</button></div>
           ${historyHtml ? `<div class="hr"></div><div class="small"><strong>Últimas compras:</strong></div><div class="list" style="max-height: 20vh; overflow: auto;">${historyHtml}</div>` : ""}
+        </div>
+      </div>
+    ` : ""}
+
+    ${semanaState.ui.importModal ? `
+      <div class="modalBackdrop" data-act="close-import">
+        <div class="modal" data-act="modal-content-stop">
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <h3 style="margin:0;">Importar Semana</h3>
+            <button class="iconBtn" data-act="close-import">Cerrar</button>
+          </div>
+          <p class="muted small">Pega el JSON o selecciona un archivo.</p>
+          <textarea
+            class="sem-import-area"
+            placeholder='{ "presupuesto": 280, ... }'
+            data-act="import-draft-input"
+          >${escapeHtml(semanaState.ui.importJsonDraft || "")}</textarea>
+          <div class="row" style="gap:8px; margin-top:10px;">
+            <button class="btn primary" data-act="do-import-paste">Importar JSON</button>
+            <button class="btn" data-act="import-file-trigger">Buscar archivo</button>
+          </div>
         </div>
       </div>
     ` : ""}
@@ -564,6 +622,8 @@ export function wireSemana(){
           if(imported && typeof imported === "object"){
              state.semana = imported;
              ensureSemanaShape(state);
+             state.semana.ui.importModal = false;
+             state.semana.ui.importJsonDraft = "";
              persist();
              view();
              toast("Semana importada ✅");
@@ -590,10 +650,20 @@ export function wireSemana(){
     persist();
   });
 
+  root.addEventListener("input", (e)=>{
+    const el = e.target;
+    if(el.dataset.act === "import-draft-input"){
+      state.semana.ui.importJsonDraft = el.value;
+      persist();
+    }
+  });
+
   root.addEventListener("click", async (e)=>{
     const el = e.target?.closest?.("[data-act]");
     if(!el) return;
     const act = el.dataset.act;
+
+    if(act === "modal-content-stop") return;
 
     if(act === "goto"){
       state.semana.view = el.dataset.view || "planner";
@@ -793,12 +863,48 @@ export function wireSemana(){
     }
 
     if(act === "export-json"){
-      exportarSemanaJson(state.semana);
+      exportarSemanaJson(getSemanaSchemaTemplate(), "semana_schema.json");
       return;
     }
 
     if(act === "import-json-trigger"){
+      state.semana.ui.importModal = true;
+      persist();
+      view();
+      return;
+    }
+
+    if(act === "close-import"){
+      state.semana.ui.importModal = false;
+      persist();
+      view();
+      return;
+    }
+
+    if(act === "import-file-trigger"){
       root.querySelector("#semImportFile")?.click();
+      return;
+    }
+
+    if(act === "do-import-paste"){
+      const raw = state.semana.ui.importJsonDraft || "";
+      console.log("Attempting import with raw:", raw);
+      try {
+        const imported = JSON.parse(raw);
+        if(imported && typeof imported === "object"){
+          state.semana = imported;
+          ensureSemanaShape(state);
+          state.semana.ui.importModal = false;
+          state.semana.ui.importJsonDraft = "";
+          persist();
+          view();
+          toast("Semana importada ✅");
+        } else {
+          toast("JSON inválido ❌");
+        }
+      } catch(err) {
+        toast("Error al parsear JSON ❌");
+      }
       return;
     }
   });
