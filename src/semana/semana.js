@@ -78,7 +78,8 @@ export function seedSemana(){
       shoppingListModal: false,
       importModal: false,
       importJsonDraft: "",
-      assign: { day: "", meal: "" }
+      assign: { day: "", meal: "" },
+      optimized: false
     },
     messages: []
   };
@@ -113,6 +114,7 @@ function ensureSemanaShape(root){
   }
   if(s.ui.importModal === undefined) s.ui.importModal = false;
   if(s.ui.importJsonDraft === undefined) s.ui.importJsonDraft = "";
+  if(s.ui.optimized === undefined) s.ui.optimized = false;
 }
 
 function escapeHtml(v){
@@ -213,6 +215,84 @@ export function generarListaCompra(state){
     }
   });
   return rows.sort((a,b)=>a.nombre.localeCompare(b.nombre));
+}
+
+function optimizeSemana(state) {
+  const s = state.semana;
+  if (!s || !s.semana || !Array.isArray(s.recetas)) return false;
+
+  const virtualPantry = pantryByNameUnidad(s);
+  const recMap = new Map(s.recetas.map(r => [String(r.id), r]));
+
+  // Track recipe usage in the current week to prioritize repetition
+  const usageCount = new Map();
+  DAYS.forEach(d => {
+    MEALS.forEach(m => {
+      const rid = s.semana[d]?.[m];
+      if (rid) usageCount.set(String(rid), (usageCount.get(String(rid)) || 0) + 1);
+    });
+  });
+
+  let changed = false;
+
+  DAYS.forEach(day => {
+    MEALS.forEach(meal => {
+      const currentRid = s.semana[day]?.[meal];
+      const currentRec = currentRid ? recMap.get(String(currentRid)) : null;
+
+      // If there's a recipe, check if it's missing ingredients
+      let missingCount = currentRec ? missingForRecipe(currentRec, virtualPantry).length : 0;
+
+      if (currentRec && missingCount > 0) {
+        // Try to find a better replacement
+        let bestRec = currentRec;
+        let bestMissingCount = missingCount;
+
+        for (const candidate of s.recetas) {
+          // Rule: Respect aptaNinos if current recipe is aptaNinos
+          if (currentRec.aptaNinos && !candidate.aptaNinos) continue;
+
+          const candidateMissing = missingForRecipe(candidate, virtualPantry).length;
+
+          // Optimization: Fewer missing ingredients is better
+          // Tie-break: Prefer recipes already in the week (usageCount)
+          const isBetter = candidateMissing < bestMissingCount ||
+                          (candidateMissing === bestMissingCount && (usageCount.get(String(candidate.id)) || 0) > (usageCount.get(String(bestRec.id)) || 0));
+
+          if (isBetter) {
+            bestRec = candidate;
+            bestMissingCount = candidateMissing;
+          }
+        }
+
+        if (bestRec.id !== currentRec.id) {
+          s.semana[day][meal] = bestRec.id;
+          changed = true;
+          // Update usage count
+          usageCount.set(String(currentRec.id), Math.max(0, (usageCount.get(String(currentRec.id)) || 0) - 1));
+          usageCount.set(String(bestRec.id), (usageCount.get(String(bestRec.id)) || 0) + 1);
+        }
+      }
+
+      // Consume ingredients from virtual pantry for the (potentially new) recipe
+      const finalRid = s.semana[day]?.[meal];
+      const finalRec = finalRid ? recMap.get(String(finalRid)) : null;
+      if (finalRec) {
+        (finalRec.ingredientes || []).forEach(ing => {
+          const name = String(ing.nombre || "").trim().toLowerCase();
+          const unidad = String(ing.unidad || "und").trim().toLowerCase();
+          const key = `${name}__${unidad}`;
+          const currentAmount = virtualPantry.get(key) || 0;
+          virtualPantry.set(key, Math.max(0, currentAmount - Number(ing.cantidad || 0)));
+        });
+      }
+    });
+  });
+
+  if (changed) {
+    s.ui.optimized = true;
+  }
+  return changed;
 }
 
 async function callGeminiCached(prompt, force = false){
@@ -393,6 +473,7 @@ function renderPlanner(semanaState){
     </section>
 
     ${faltantesSemana.length ? `<section class="card sem-alert">⚠ Faltan ${faltantesSemana.length} ingredientes para completar la semana.</section>` : ""}
+    ${semanaState.ui.optimized ? `<section class="card good" style="background:rgba(54,211,153,0.1); border-color:var(--good); color:var(--good); font-size:13px; padding:10px;">✨ Semana optimizada automáticamente para usar lo que tienes</section>` : ""}
     <section class="sem-grid">${dayCards}</section>
 
     ${semanaState.analisisNutricional ? `
@@ -584,9 +665,19 @@ function renderModals(semanaState){
 }
 
 export function viewSemana(){
-  const { state } = getCtx();
+  const { state, persist } = getCtx();
   ensureSemanaShape(state);
   const s = state.semana;
+
+  const missingIngredients = generarListaCompra(state);
+  if (missingIngredients.length > 0) {
+    if (optimizeSemana(state)) {
+      persist();
+    }
+  } else if (s.ui.optimized) {
+    s.ui.optimized = false;
+    persist();
+  }
 
   return `
     <section id="semanaRoot" class="semana-wrap">
