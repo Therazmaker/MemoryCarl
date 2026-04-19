@@ -1692,6 +1692,10 @@ function compactSemanaState(value){
     recetas: Array.isArray(semana.recetas) ? semana.recetas.slice(-80) : [],
     despensa: Array.isArray(semana.despensa) ? semana.despensa.slice(-160) : [],
     contingencia: Array.isArray(semana.contingencia) ? semana.contingencia.slice(-12) : [],
+    historialCompras: Array.isArray(semana.historialCompras) ? semana.historialCompras.slice(-10) : [],
+    geminiCache: (semana.geminiCache && typeof semana.geminiCache === "object")
+      ? Object.fromEntries(Object.entries(semana.geminiCache).slice(-20))
+      : {},
     messages: Array.isArray(semana.messages) ? semana.messages.slice(-20) : [],
     ui: {
       ...ui,

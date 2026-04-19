@@ -33,6 +33,9 @@ export function seedSemana(){
     despensa: [],
     expandedDays: [],
     contingencia: [],
+    historialCompras: [],
+    analisisNutricional: null,
+    geminiCache: {},
     view: "planner",
     ui: {
       showRecipeForm: false,
@@ -65,6 +68,9 @@ function ensureSemanaShape(root){
   if(!Array.isArray(s.despensa)) s.despensa = [];
   if(!Array.isArray(s.expandedDays)) s.expandedDays = [];
   if(!Array.isArray(s.contingencia)) s.contingencia = [];
+  if(!Array.isArray(s.historialCompras)) s.historialCompras = [];
+  if(s.analisisNutricional === undefined) s.analisisNutricional = null;
+  if(!s.geminiCache || typeof s.geminiCache !== "object") s.geminiCache = {};
   if(!s.view) s.view = "planner";
   if(!s.ui || typeof s.ui !== "object") s.ui = seedSemana().ui;
   if(!Array.isArray(s.ui.ingredientDrafts) || !s.ui.ingredientDrafts.length){
@@ -172,20 +178,18 @@ export function generarListaCompra(state){
   return rows.sort((a,b)=>a.nombre.localeCompare(b.nombre));
 }
 
-async function generarPlanContingencia(despensa){
+async function callGeminiCached(prompt, force = false){
+  const { state, persist } = getCtx();
   const apiKey = getSemanaGeminiApiKey();
   if(!apiKey) throw new Error("SEMANA_GEMINI_API_KEY_MISSING");
 
-  const prompt = `
-Eres un asistente de cocina familiar para una familia peruana con niños.
-Tengo estos ingredientes en casa: ${JSON.stringify(despensa)}.
-Sugiere exactamente 3 recetas que pueda preparar HOY con lo que tengo.
-Prioriza ingredientes que venzan pronto.
-Responde SOLO en JSON con este formato exacto, sin texto adicional:
-[
-  { "nombre": "...", "ingredientesUsados": ["...", "..."], "costoEstimado": 0, "aptaNinos": true }
-]
-  `;
+  // Simple hash for prompt
+  const hash = prompt.split("").reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0).toString();
+
+  if(!force && state.semana.geminiCache?.[hash]){
+    console.log("[Semana IA] Cache hit");
+    return state.semana.geminiCache[hash];
+  }
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
@@ -197,9 +201,77 @@ Responde SOLO en JSON con este formato exacto, sin texto adicional:
   );
 
   const data = await res.json();
-  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+  const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  if(!raw) throw new Error("GEMINI_EMPTY_RESPONSE");
+
+  if(!state.semana.geminiCache) state.semana.geminiCache = {};
+  state.semana.geminiCache[hash] = raw;
+  persist();
+
+  return raw;
+}
+
+async function generarPlanContingencia(despensa){
+  const prompt = `
+Eres un asistente de cocina familiar para una familia peruana con niños.
+Tengo estos ingredientes en casa: ${JSON.stringify(despensa)}.
+Sugiere exactamente 3 recetas que pueda preparar HOY con lo que tengo.
+Prioriza ingredientes que venzan pronto.
+Responde SOLO en JSON con este formato exacto, sin texto adicional:
+[
+  { "nombre": "...", "ingredientesUsados": ["...", "..."], "costoEstimado": 0, "aptaNinos": true }
+]
+  `;
+
+  const raw = await callGeminiCached(prompt);
   const clean = raw.replace(/```json|```/g, "").trim();
   return JSON.parse(clean);
+}
+
+async function generarAnalisisNutricional(semanaState){
+  const recMap = new Map((semanaState.recetas||[]).map(r=>[String(r.id), r]));
+  const planInfo = [];
+
+  DAYS.forEach(day => {
+    MEALS.forEach(meal => {
+      const rid = semanaState.semana?.[day]?.[meal];
+      const rec = recMap.get(String(rid || ""));
+      if(rec){
+        planInfo.push({
+          dia: day,
+          comida: meal,
+          nombre: rec.nombre,
+          ingredientes: (rec.ingredientes || []).map(i => `${i.cantidad} ${i.unidad} ${i.nombre}`)
+        });
+      }
+    });
+  });
+
+  if(!planInfo.length) return "No hay platos asignados en la semana para analizar.";
+
+  const prompt = `
+Actúa como un nutricionista experto. Analiza este plan semanal de comidas:
+${JSON.stringify(planInfo)}
+Proporciona un resumen nutricional breve y ameno (máximo 200 palabras) que incluya:
+1. Balance general (proteínas, carbos, vegetales).
+2. Una sugerencia de mejora para hacerlo más saludable o equilibrado.
+3. Un "Semáforo Nutricional" (Verde/Amarillo/Rojo) para la semana.
+Responde en texto plano con formato limpio.
+  `;
+
+  return await callGeminiCached(prompt);
+}
+
+function exportarSemanaJson(semanaState){
+  const blob = new Blob([JSON.stringify(semanaState, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `semana_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function renderPlanner(semanaState){
@@ -273,11 +345,26 @@ function renderPlanner(semanaState){
         <button class="btn primary" data-act="goto" data-view="recetas">+ Receta</button>
         <button class="btn" data-act="open-shopping">Lista de compra</button>
         <button class="btn good" data-act="plan-ia">Plan IA</button>
+        <button class="btn good" data-act="analisis-ia">Análisis Nutricional</button>
+      </div>
+      <div class="row sem-actions" style="margin-top:8px;">
+        <button class="btn" data-act="open-shopping">Historial</button>
+        <button class="btn" data-act="export-json" title="Exportar a JSON">Exportar</button>
+        <button class="btn" data-act="import-json-trigger" title="Importar desde JSON">Importar</button>
+        <input type="file" id="semImportFile" accept="application/json" style="display:none;">
       </div>
     </section>
 
     ${faltantesSemana.length ? `<section class="card sem-alert">⚠ Faltan ${faltantesSemana.length} ingredientes para completar la semana.</section>` : ""}
     <section class="sem-grid">${dayCards}</section>
+
+    ${semanaState.analisisNutricional ? `
+    <section class="card">
+      <h4 class="sectionTitle" style="margin:0 0 8px 0;">Análisis Nutricional IA</h4>
+      <div class="muted" style="white-space: pre-wrap; font-size: 13px;">${escapeHtml(semanaState.analisisNutricional)}</div>
+      <div class="row" style="margin-top:8px;"><button class="btn small" data-act="clear-analisis">Limpiar</button></div>
+    </section>
+    ` : ""}
 
     <section class="card">
       <h4 class="sectionTitle" style="margin:0 0 8px 0;">Plan de contingencia</h4>
@@ -394,6 +481,15 @@ function renderModals(semanaState){
   const recMap = new Map((semanaState.recetas||[]).map(r=>[String(r.id), r]));
   const listCost = DAYS.reduce((acc, d)=>acc + MEALS.reduce((s,m)=>s + Number(recMap.get(String(semanaState.semana?.[d]?.[m]||""))?.costoEstimado || 0),0),0);
 
+  const historyHtml = (semanaState.historialCompras || []).slice(0, 5).map((h) => `
+    <div class="item">
+      <div>
+        <div class="small"><strong>${new Date(h.ts).toLocaleString()}</strong></div>
+        <div class="muted small">${(h.items || []).map(it => `${it.nombre} (${it.cantidad} ${it.unidad})`).join(", ")}</div>
+      </div>
+    </div>
+  `).join("");
+
   return `
     ${rec ? `
       <div class="modalBackdrop" data-act="close-modal">
@@ -417,9 +513,12 @@ function renderModals(semanaState){
         <div class="modal" onclick="event.stopPropagation()">
           <div class="row" style="justify-content:space-between;align-items:center;"><h3 style="margin:0;">Lista de compra</h3><button class="iconBtn" data-act="close-shopping">Cerrar</button></div>
           <div class="muted">Costo plan semanal estimado: ${formatMoney(listCost)}</div>
-          <div class="list" style="margin-top:10px;">
+          <div class="list" style="margin-top:10px; max-height: 40vh; overflow: auto;">
             ${buyRows.length ? buyRows.map((r)=>`<div class="item"><div>${escapeHtml(r.nombre)}</div><div class="muted">${Number(r.cantidad)} ${escapeHtml(r.unidad)}</div></div>`).join("") : '<div class="muted">No faltan ingredientes 🎉</div>'}
           </div>
+          <div class="hr"></div>
+          <div class="row"><button class="btn good" data-act="save-history" ${buyRows.length ? "" : "disabled"}>Finalizar y Guardar Historial</button></div>
+          ${historyHtml ? `<div class="hr"></div><div class="small"><strong>Últimas compras:</strong></div><div class="list" style="max-height: 20vh; overflow: auto;">${historyHtml}</div>` : ""}
         </div>
       </div>
     ` : ""}
@@ -452,6 +551,31 @@ export function wireSemana(){
   const root = document.querySelector("#semanaRoot");
   if(!root || root.dataset.wired === "1") return;
   root.dataset.wired = "1";
+
+  root.addEventListener("change", (e)=>{
+    const el = e.target;
+    if(el.id === "semImportFile"){
+      const file = el.files?.[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const imported = JSON.parse(ev.target.result);
+          if(imported && typeof imported === "object"){
+             state.semana = imported;
+             ensureSemanaShape(state);
+             persist();
+             view();
+             toast("Semana importada ✅");
+          }
+        } catch(err) {
+          toast("Error al importar JSON ❌");
+        }
+      };
+      reader.readAsText(file);
+      el.value = "";
+    }
+  });
 
   root.addEventListener("input", (e)=>{
     const el = e.target;
@@ -600,6 +724,51 @@ export function wireSemana(){
       return;
     }
 
+    if(act === "save-history"){
+      const buyRows = generarListaCompra({ semana: state.semana });
+      if(buyRows.length){
+        state.semana.historialCompras.unshift({
+          ts: Date.now(),
+          items: buyRows
+        });
+        toast("Compra guardada en historial ✅");
+      }
+      state.semana.ui.shoppingListModal = false;
+      persist();
+      view();
+      return;
+    }
+
+    if(act === "analisis-ia"){
+      if(!navigator.onLine){
+        toast("Sin red: no puedo consultar Gemini ahora.");
+        return;
+      }
+      if(!getSemanaGeminiApiKey()){
+        toast("Configura la API key de Gemini en Ajustes → Semana IA.");
+        return;
+      }
+      try{
+        toast("Analizando nutrición...");
+        const analisis = await generarAnalisisNutricional(state.semana);
+        state.semana.analisisNutricional = analisis;
+        persist();
+        view();
+        toast("Análisis nutricional listo ✅");
+      }catch(err){
+        console.error(err);
+        toast("No pude generar el análisis nutricional.");
+      }
+      return;
+    }
+
+    if(act === "clear-analisis"){
+      state.semana.analisisNutricional = null;
+      persist();
+      view();
+      return;
+    }
+
     if(act === "plan-ia"){
       if(!navigator.onLine){
         toast("Sin red: no puedo consultar Gemini ahora.");
@@ -620,6 +789,16 @@ export function wireSemana(){
         console.error(err);
         toast("No pude generar el plan IA.");
       }
+      return;
+    }
+
+    if(act === "export-json"){
+      exportarSemanaJson(state.semana);
+      return;
+    }
+
+    if(act === "import-json-trigger"){
+      root.querySelector("#semImportFile")?.click();
       return;
     }
   });
