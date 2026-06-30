@@ -18,6 +18,9 @@ import {
   validateNeuroChatSettings, maskApiKey,
 } from "../settings/neurochatSettings.js";
 import { isGeminiPremiumConfigured, streamGeminiNeuronGeneration } from "../services/geminiPremiumClient.js";
+import {
+  isOllamaConfigured, getOllamaSettings, saveOllamaSettings, OLLAMA_CLOUD_MODELS,
+} from "../services/ollamaClient.js";
 import { viewNeuroGraph, wireNeuroGraph } from "./neurograph-ui.js";
 import { renderMemoryLinkedNeurons } from "./memory-timeline-ui.js";
 import { viewContextWindow, wireContextWindow } from "./context-window-ui.js";
@@ -440,8 +443,9 @@ function renderSidePanel() {
   const replySourceBadge = (() => {
     const src = r?.replySource || "";
     const mode = r?.replyMode || "";
-    const modeLabel = { autonomous: "Autónomo", assisted: "Asistido", delegated: "Delegado" }[mode] || "";
+    const modeLabel = { ollama: "IA Principal", autonomous: "Autónomo", assisted: "Asistido", delegated: "Delegado" }[mode] || "";
     const srcLabel = {
+      ollama: "Ollama Cloud",
       gemini: "NeuroClaw",
       assisted: "Gemini asistido",
       local_engine: "Motor local",
@@ -452,6 +456,7 @@ function renderSidePanel() {
     if (!srcLabel) return "";
     const modeTag = modeLabel ? ` <span class="ncRSBMode">${modeLabel}</span>` : "";
     const cls = {
+      ollama: "ncRSB--ollama",
       gemini: "ncRSB--gemini",
       assisted: "ncRSB--assisted",
       local_engine: "ncRSB--local",
@@ -554,9 +559,25 @@ function renderSettingsModal() {
     : "AIza… (tu API key de Gemini)";
   const premiumConfigured = isGeminiPremiumConfigured();
 
+  // Ollama settings
+  const ollamaS = getOllamaSettings();
+  const ollamaMaskedKey = ollamaS.apiKey ? maskApiKey(ollamaS.apiKey) : "";
+  const ollamaKeyPlaceholder = ollamaS.apiKey
+    ? `${ollamaMaskedKey} (escribe para reemplazar)`
+    : "cc049e… (tu API key de Ollama Cloud)";
+  const ollamaActive = isOllamaConfigured();
+
+  const ollamaStatusBadge = ollamaActive
+    ? `<span class="ncSettingsBadge ncSettingsBadgeOn">✓ Ollama Cloud activo</span>`
+    : `<span class="ncSettingsBadge ncSettingsBadgeOff">Ollama no configurado</span>`;
+
   const statusBadge = premiumConfigured
-    ? `<span class="ncSettingsBadge ncSettingsBadgeOn">✓ Premium activo</span>`
-    : `<span class="ncSettingsBadge ncSettingsBadgeOff">Sin API key configurada</span>`;
+    ? `<span class="ncSettingsBadge ncSettingsBadgeOn">✓ Gemini Premium activo</span>`
+    : `<span class="ncSettingsBadge ncSettingsBadgeOff">Gemini sin API key</span>`;
+
+  const ollamaModelOptions = OLLAMA_CLOUD_MODELS.map((m) =>
+    `<option value="${esc(m.id)}" ${ollamaS.model === m.id ? "selected" : ""}>${esc(m.label)}</option>`
+  ).join("");
 
   return `
     <div class="ncSettingsOverlay" id="ncSettingsOverlay">
@@ -567,72 +588,126 @@ function renderSettingsModal() {
         </div>
 
         <div class="ncSettingsStatus">
+          ${ollamaStatusBadge}
           ${statusBadge}
-          <span class="ncSettingsStatusSub">${s.enabled ? "Generación premium habilitada" : "Generación premium deshabilitada"}</span>
+          <span class="ncSettingsStatusSub">${ollamaActive ? "Ollama Cloud es el motor principal del chat" : (premiumConfigured ? "Gemini Premium activo" : "Solo modo local")}</span>
         </div>
 
         ${uiState.settingsMsg ? `<div class="ncSettingsMsg ncSettingsMsgType--${uiState.settingsMsg.type}">${esc(uiState.settingsMsg.text)}</div>` : ""}
 
         <form id="ncSettingsForm" autocomplete="off">
-          <!-- Toggle premium -->
-          <label class="ncSettingsRow ncSettingsToggleRow">
-            <span class="ncSettingsLabel">Activar generación premium Gemini</span>
-            <input type="checkbox" id="ncsPremiumEnabled" ${s.enabled ? "checked" : ""} />
-          </label>
 
-          <!-- API Key -->
-          <div class="ncSettingsField">
-            <label class="ncSettingsLabel" for="ncsApiKey">Gemini API key</label>
-            <div class="ncSettingsKeyRow">
-              <input
-                type="${uiState.settingsApiKeyVisible ? "text" : "password"}"
-                id="ncsApiKey"
-                class="ncSettingsInput"
-                placeholder="${esc(keyPlaceholder)}"
-                autocomplete="new-password"
-                value=""
-              />
-              <button type="button" class="ncIconBtn" id="btnToggleApiKeyVisibility">
-                ${uiState.settingsApiKeyVisible ? "🙈" : "👁"}
-              </button>
+          <!-- ════════ OLLAMA CLOUD (MOTOR PRINCIPAL) ════════ -->
+          <div class="ncSettingsSection">
+            <div class="ncSettingsSectionTitle">🤖 Ollama Cloud <span class="ncSettingsSectionBadge">Motor principal</span></div>
+            <div class="ncSettingsSectionDesc">Ollama gestiona el chat y las neuronas automáticamente. Los otros motores actúan como fallback.</div>
+
+            <!-- Toggle Ollama -->
+            <label class="ncSettingsRow ncSettingsToggleRow">
+              <span class="ncSettingsLabel">Activar Ollama Cloud como motor principal</span>
+              <input type="checkbox" id="ncsOllamaEnabled" ${ollamaS.enabled ? "checked" : ""} />
+            </label>
+
+            <!-- API Key Ollama -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsOllamaApiKey">Ollama Cloud API key</label>
+              <div class="ncSettingsKeyRow">
+                <input
+                  type="${uiState.settingsApiKeyVisible ? "text" : "password"}"
+                  id="ncsOllamaApiKey"
+                  class="ncSettingsInput"
+                  placeholder="${esc(ollamaKeyPlaceholder)}"
+                  autocomplete="new-password"
+                  value=""
+                />
+                <button type="button" class="ncIconBtn" id="btnToggleOllamaKeyVisibility">
+                  ${uiState.settingsApiKeyVisible ? "🙈" : "👁"}
+                </button>
+              </div>
+              <div class="ncSettingsHint">Guardada solo en tu navegador (localStorage). Obtenla en <a href="https://ollama.com/settings/keys" target="_blank" style="color:#818cf8">ollama.com/settings/keys</a></div>
             </div>
-            <div class="ncSettingsHint">La key se guarda solo en tu navegador (localStorage). No se envía a ningún servidor de MemoryCarl.</div>
+
+            <!-- Modelo Ollama -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsOllamaModel">Modelo Ollama Cloud</label>
+              <select id="ncsOllamaModel" class="ncSettingsInput">
+                ${ollamaModelOptions}
+              </select>
+            </div>
+
+            <!-- Botones Ollama -->
+            <div class="ncSettingsBtns ncSettingsBtnsSmall">
+              <button type="button" class="ncSettingsTestBtn" id="btnOllamaTest">Probar conexión Ollama</button>
+            </div>
           </div>
 
-          <!-- Modelo -->
-          <div class="ncSettingsField">
-            <label class="ncSettingsLabel" for="ncsModel">Modelo Gemini</label>
-            <input type="text" id="ncsModel" class="ncSettingsInput" value="${esc(s.model)}" placeholder="gemini-2.5-flash" />
+          <!-- ════════ GEMINI PREMIUM (FALLBACK) ════════ -->
+          <div class="ncSettingsSection ncSettingsSectionSecondary">
+            <div class="ncSettingsSectionTitle">⚡ Gemini Premium <span class="ncSettingsSectionBadge ncSettingsSectionBadgeSecondary">Fallback</span></div>
+
+            <!-- Toggle premium -->
+            <label class="ncSettingsRow ncSettingsToggleRow">
+              <span class="ncSettingsLabel">Activar generación premium Gemini</span>
+              <input type="checkbox" id="ncsPremiumEnabled" ${s.enabled ? "checked" : ""} />
+            </label>
+
+            <!-- API Key Gemini -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsApiKey">Gemini API key</label>
+              <div class="ncSettingsKeyRow">
+                <input
+                  type="${uiState.settingsApiKeyVisible ? "text" : "password"}"
+                  id="ncsApiKey"
+                  class="ncSettingsInput"
+                  placeholder="${esc(keyPlaceholder)}"
+                  autocomplete="new-password"
+                  value=""
+                />
+                <button type="button" class="ncIconBtn" id="btnToggleApiKeyVisibility">
+                  ${uiState.settingsApiKeyVisible ? "🙈" : "👁"}
+                </button>
+              </div>
+              <div class="ncSettingsHint">La key se guarda solo en tu navegador (localStorage). No se envía a ningún servidor de MemoryCarl.</div>
+            </div>
+
+            <!-- Modelo Gemini -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsModel">Modelo Gemini</label>
+              <input type="text" id="ncsModel" class="ncSettingsInput" value="${esc(s.model)}" placeholder="gemini-2.5-flash" />
+            </div>
+
+            <!-- Daily limit -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsDailyLimit">Límite diario de llamadas premium</label>
+              <input type="number" id="ncsDailyLimit" class="ncSettingsInput ncSettingsInputSm" value="${s.dailyLimit}" min="1" max="100" />
+            </div>
+
+            <!-- Timeout -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsTimeout">Timeout (ms)</label>
+              <input type="number" id="ncsTimeout" class="ncSettingsInput ncSettingsInputSm" value="${s.timeoutMs}" min="1000" max="60000" step="1000" />
+            </div>
+
+            <!-- Temperature -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsTemp">Temperatura (0 – 2)</label>
+              <input type="number" id="ncsTemp" class="ncSettingsInput ncSettingsInputSm" value="${s.temperature}" min="0" max="2" step="0.1" />
+            </div>
+
+            <!-- Max output tokens -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsMaxTokens">Max output tokens</label>
+              <input type="number" id="ncsMaxTokens" class="ncSettingsInput ncSettingsInputSm" value="${s.maxOutputTokens}" min="256" max="8192" step="256" />
+            </div>
+
+            <div class="ncSettingsBtns ncSettingsBtnsSmall">
+              <button type="button" class="ncSettingsTestBtn" id="btnSettingsTest">Probar conexión Gemini</button>
+            </div>
           </div>
 
-          <!-- Daily limit -->
-          <div class="ncSettingsField">
-            <label class="ncSettingsLabel" for="ncsDailyLimit">Límite diario de llamadas premium</label>
-            <input type="number" id="ncsDailyLimit" class="ncSettingsInput ncSettingsInputSm" value="${s.dailyLimit}" min="1" max="100" />
-          </div>
-
-          <!-- Timeout -->
-          <div class="ncSettingsField">
-            <label class="ncSettingsLabel" for="ncsTimeout">Timeout (ms)</label>
-            <input type="number" id="ncsTimeout" class="ncSettingsInput ncSettingsInputSm" value="${s.timeoutMs}" min="1000" max="60000" step="1000" />
-          </div>
-
-          <!-- Temperature -->
-          <div class="ncSettingsField">
-            <label class="ncSettingsLabel" for="ncsTemp">Temperatura (0 – 2)</label>
-            <input type="number" id="ncsTemp" class="ncSettingsInput ncSettingsInputSm" value="${s.temperature}" min="0" max="2" step="0.1" />
-          </div>
-
-          <!-- Max output tokens -->
-          <div class="ncSettingsField">
-            <label class="ncSettingsLabel" for="ncsMaxTokens">Max output tokens</label>
-            <input type="number" id="ncsMaxTokens" class="ncSettingsInput ncSettingsInputSm" value="${s.maxOutputTokens}" min="256" max="8192" step="256" />
-          </div>
-
-          <!-- Botones -->
+          <!-- Botones principales -->
           <div class="ncSettingsBtns">
-            <button type="submit" class="ncSettingsSaveBtn" id="btnSettingsSave">Guardar</button>
-            <button type="button" class="ncSettingsTestBtn" id="btnSettingsTest">Probar conexión</button>
+            <button type="submit" class="ncSettingsSaveBtn" id="btnSettingsSave">Guardar todo</button>
             <button type="button" class="ncSettingsResetBtn" id="btnSettingsReset">Restaurar por defecto</button>
           </div>
         </form>
@@ -651,9 +726,12 @@ function nchatInner() {
 
   const totalNeurons = getNeurons().length;
   const premiumConfigured = isGeminiPremiumConfigured();
-  const premiumDot = premiumConfigured
-    ? `<span class="ncPremiumDot ncPremiumDotOn" title="Gemini premium activo">⚡</span>`
-    : `<span class="ncPremiumDot" title="Gemini premium no configurado">○</span>`;
+  const ollamaActive = isOllamaConfigured();
+  const aiDot = ollamaActive
+    ? `<span class="ncPremiumDot ncPremiumDotOn" title="Ollama Cloud activo (motor principal)">🤖</span>`
+    : premiumConfigured
+      ? `<span class="ncPremiumDot ncPremiumDotOn" title="Gemini premium activo">⚡</span>`
+      : `<span class="ncPremiumDot" title="Sin IA configurada">○</span>`;
 
   const tabChat  = uiState.activeTab === "chat";
   const tabGraph = uiState.activeTab === "graph";
@@ -706,7 +784,7 @@ function nchatInner() {
         <div class="ncHeaderLeft">
           <span class="ncHeaderIcon">🧠</span>
           <div>
-            <div class="ncHeaderTitle">NeuroChat ${premiumDot}</div>
+            <div class="ncHeaderTitle">NeuroChat ${aiDot}</div>
             <div class="ncHeaderSub">${totalNeurons} neuronas · ${history.filter(m => m.role === "user").length} conversaciones</div>
           </div>
         </div>
@@ -1554,15 +1632,33 @@ function wireSettingsModal(root) {
     }
   });
 
-  // Toggle API key visibility
+  // Toggle Ollama API key visibility
+  root.querySelector("#btnToggleOllamaKeyVisibility")?.addEventListener("click", () => {
+    uiState.settingsApiKeyVisible = !uiState.settingsApiKeyVisible;
+    rerender();
+  });
+
+  // Toggle Gemini API key visibility
   root.querySelector("#btnToggleApiKeyVisibility")?.addEventListener("click", () => {
     uiState.settingsApiKeyVisible = !uiState.settingsApiKeyVisible;
     rerender();
   });
 
-  // Guardar
+  // Guardar todo
   root.querySelector("#ncSettingsForm")?.addEventListener("submit", (e) => {
     e.preventDefault();
+
+    // --- Guardar settings Ollama ---
+    const ollamaKeyInput = root.querySelector("#ncsOllamaApiKey");
+    const ollamaPatch = {
+      enabled: root.querySelector("#ncsOllamaEnabled")?.checked ?? false,
+      model:   root.querySelector("#ncsOllamaModel")?.value?.trim() || "gpt-oss:120b",
+    };
+    const newOllamaKey = ollamaKeyInput?.value?.trim();
+    if (newOllamaKey) ollamaPatch.apiKey = newOllamaKey;
+    saveOllamaSettings(ollamaPatch);
+
+    // --- Guardar settings Gemini ---
     const apiKeyInput = root.querySelector("#ncsApiKey");
     const patch = {
       enabled:         root.querySelector("#ncsPremiumEnabled")?.checked ?? true,
@@ -1573,7 +1669,6 @@ function wireSettingsModal(root) {
       maxOutputTokens: parseInt(root.querySelector("#ncsMaxTokens")?.value, 10) || 4096,
       premiumOnlyForGeneration: true,
     };
-    // Solo actualizar apiKey si el usuario escribió algo
     const newKey = apiKeyInput?.value?.trim();
     if (newKey) patch.apiKey = newKey;
 
@@ -1588,13 +1683,42 @@ function wireSettingsModal(root) {
 
   // Reset
   root.querySelector("#btnSettingsReset")?.addEventListener("click", () => {
-    if (!confirm("¿Restaurar configuración por defecto? (La API key no se borrará)")) return;
+    if (!confirm("¿Restaurar configuración por defecto? (Las API keys no se borrarán)")) return;
     resetNeuroChatSettings({ keepApiKey: true });
     uiState.settingsMsg = { type: "success", text: "✓ Configuración restaurada" };
     rerender();
   });
 
-  // Test conexión
+  // Test Ollama
+  root.querySelector("#btnOllamaTest")?.addEventListener("click", async () => {
+    const { isOllamaConfigured: configured, getOllamaSettings: getSettings } =
+      await import("../services/ollamaClient.js");
+    if (!configured()) {
+      uiState.settingsMsg = { type: "error", text: "Sin API key de Ollama configurada. Guarda primero la key." };
+      rerender();
+      return;
+    }
+    const s = getSettings();
+    uiState.settingsMsg = { type: "info", text: "Probando conexión con Ollama Cloud…" };
+    rerender();
+    try {
+      const baseUrl = (s.baseUrl || "https://ollama.com").replace(/\/+$/, "");
+      const res = await fetch(`${baseUrl}/api/tags`, {
+        headers: { "Authorization": `Bearer ${s.apiKey}` },
+      });
+      if (res.ok) {
+        uiState.settingsMsg = { type: "success", text: `✓ Conexión OK con Ollama Cloud (modelo: ${s.model})` };
+      } else {
+        const txt = await res.text().catch(() => "");
+        uiState.settingsMsg = { type: "error", text: `Error ${res.status}: ${txt.slice(0, 120)}` };
+      }
+    } catch (err) {
+      uiState.settingsMsg = { type: "error", text: `Error de red: ${err.message}` };
+    }
+    rerender();
+  });
+
+  // Test Gemini
   root.querySelector("#btnSettingsTest")?.addEventListener("click", async () => {
     const { isGeminiPremiumConfigured: configured, getGeminiPremiumSettings: getSettings } =
       await import("../services/geminiPremiumClient.js");
@@ -1622,19 +1746,72 @@ function wireSettingsModal(root) {
   });
 }
 
+// ---- wireNeuroChat principal ----
+
 /**
  * Wiring principal del tab NeuroChat.
  * Llamado por main.js tras insertar el HTML.
  */
 export function wireNeuroChat(root) {
   wireNeuroChatInner(root);
+
+  // Listener de streaming de Ollama — actualiza el indicador de carga con texto en tiempo real
+  window.addEventListener("neurochat:ollama:stream", (e) => {
+    const { text, messageId } = e.detail || {};
+    if (!text) return;
+
+    const msgContainer = root.querySelector("#ncMessages");
+    if (!msgContainer) return;
+
+    // 1. Buscar la burbuja específica por messageId (si ya existe en el DOM)
+    let msgEl = root.querySelector(`[data-msg-id="${CSS.escape(messageId || "")}"] .ncMsgBubble`);
+
+    // 2. Si no existe aún, actualizar el indicador de carga (ncLoading) con el streaming
+    if (!msgEl) {
+      let streamDiv = root.querySelector(".ncOllamaLiveStream");
+      if (!streamDiv) {
+        // Crear div de streaming vivo sobre el indicador de carga
+        streamDiv = document.createElement("div");
+        streamDiv.className = "ncMsg ncMsgAssistant ncOllamaLiveStream";
+        streamDiv.style.cssText = "animation: ncMsgIn 0.15s ease;";
+        const loadingEl = root.querySelector(".ncLoading");
+        if (loadingEl) {
+          msgContainer.insertBefore(streamDiv, loadingEl);
+        } else {
+          msgContainer.appendChild(streamDiv);
+        }
+      }
+      streamDiv.innerHTML = `<div class="ncMsgBubble ncMsgBubble--md ncMsgBubble--streaming">${renderMarkdown(text)}<span class="ncOllamaStreaming">▌</span></div>`;
+      msgContainer.scrollTop = msgContainer.scrollHeight;
+      return;
+    }
+
+    // 3. Si la burbuja ya existe, actualizar su contenido
+    msgEl.classList.add("ncMsgBubble--streaming", "ncMsgBubble--md");
+    msgEl.innerHTML = renderMarkdown(text) + `<span class="ncOllamaStreaming">▌</span>`;
+    msgContainer.scrollTop = msgContainer.scrollHeight;
+  });
 }
 
 /**
  * Inicialización del módulo (llamada una vez al montar el tab).
  */
 export function initNeuroChat() {
-  // No hay inicialización pesada necesaria; el estado es lazy.
+  // Pre-cargar la API key de Ollama si el usuario la proporcionó y no está guardada
+  try {
+    const currentSettings = getOllamaSettings();
+    if (!currentSettings.apiKey) {
+      // API key pre-configurada (se puede cambiar desde el panel de settings)
+      saveOllamaSettings({
+        enabled: true,
+        apiKey: "cc049e1d73344bf0a6b129fecf63a6c3.FUJY2X6-jUHGJvo38D7HcR_C",
+        model: "gpt-oss:120b",
+      });
+      console.log("[NeuroChat] Ollama Cloud configurado automáticamente.");
+    }
+  } catch (_e) {
+    // noop — el usuario puede configurarlo manualmente desde settings
+  }
 }
 
 // ---- CSS embebido del módulo ----
@@ -1821,6 +1998,7 @@ function ncCss() {
   .ncCoveragePct  { font-size: 18px; font-weight: 800; }
   .ncReplySource { margin-top: 4px; }
   .ncReplySourceBadge { font-size: 11px; border-radius: 4px; padding: 2px 7px; font-weight: 500; }
+  .ncRSB--ollama  { background: rgba(129,140,248,.2); color: #818cf8; font-weight: 700; }
   .ncRSB--gemini  { background: rgba(56,138,221,.15); color: #378ADD; }
   .ncRSB--assisted { background: rgba(239,159,39,.15); color: #BA7517; }
   .ncRSB--local   { background: rgba(29,158,117,.15); color: #1D9E75; }
@@ -1998,6 +2176,47 @@ function ncCss() {
   .ncSettingsKeyRow .ncSettingsInput { flex: 1; }
   .ncSettingsHint     { font-size: 10px; opacity: .4; margin-top: 4px; }
   .ncSettingsBtns     { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  .ncSettingsBtnsSmall { margin-top: 10px; }
+
+  /* Sections within settings */
+  .ncSettingsSection {
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .ncSettingsSectionSecondary {
+    background: rgba(255,255,255,.01);
+    border-color: rgba(255,255,255,.05);
+    opacity: .85;
+  }
+  .ncSettingsSectionTitle {
+    font-size: 13px; font-weight: 800;
+    margin-bottom: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ncSettingsSectionDesc {
+    font-size: 11px; opacity: .5; margin-bottom: 12px; line-height: 1.45;
+  }
+  .ncSettingsSectionBadge {
+    font-size: 10px; padding: 2px 7px; border-radius: 5px; font-weight: 700;
+    background: rgba(129,140,248,.25); color: #818cf8;
+  }
+  .ncSettingsSectionBadgeSecondary {
+    background: rgba(255,255,255,.08); color: rgba(255,255,255,.5);
+  }
+
+  /* Streaming indicator for Ollama messages */
+  .ncOllamaStreaming {
+    display: inline-block;
+    animation: ncStreamBlink 0.8s steps(1) infinite;
+  }
+  @keyframes ncStreamBlink { 0%,100%{opacity:1} 50%{opacity:0} }
+  .ncMsgBubble--streaming {
+    border-color: rgba(129,140,248,.5);
+    background: rgba(129,140,248,.08);
+  }
   .ncSettingsSaveBtn {
     background: rgba(124,92,255,.8); border: none; border-radius: 10px;
     padding: 9px 18px; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer;

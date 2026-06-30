@@ -29,8 +29,9 @@ const MIN_RELATIONS_FOR_AUTONOMOUS = 3; // y al menos 3 relaciones en el grafo
  *   mode: string,
  *   isNeuroclawConfigured: boolean,
  *   isGeminiConfigured: boolean,
+ *   isOllamaConfigured: boolean,
  * }} params
- * @returns {"autonomous" | "assisted" | "delegated"}
+ * @returns {"ollama" | "autonomous" | "assisted" | "delegated"}
  */
 export function chooseReplyMode({
   coverage = 0,
@@ -40,7 +41,22 @@ export function chooseReplyMode({
   mode = "chat",
   isNeuroclawConfigured = false,
   isGeminiConfigured = false,
+  isOllamaConfigured = false,
 }) {
+  // Ollama es el motor primario: si está configurado, siempre lo usamos
+  // (excepto cuando el sistema local tiene cobertura perfecta y muchos patrones)
+  if (isOllamaConfigured) {
+    // Solo omitir Ollama si el sistema local es verdaderamente autónomo y completo
+    const isFullyAutonomous = (
+      coverage >= AUTONOMOUS_COVERAGE_THRESHOLD
+      && patternCount >= MIN_PATTERNS_FOR_AUTONOMOUS * 2  // umbral más alto para preferir local
+      && relationCount >= MIN_RELATIONS_FOR_AUTONOMOUS * 2
+      && activatedCount >= 5
+    );
+    if (isFullyAutonomous) return "autonomous";
+    return "ollama";
+  }
+
   // Sin ninguna IA disponible → siempre autónomo
   if (!isNeuroclawConfigured && !isGeminiConfigured) return "autonomous";
 
@@ -56,7 +72,7 @@ export function chooseReplyMode({
     return "autonomous";
   }
 
-  // Cobertura media pero hay neuronas activadas → asistido
+  // Cobertura media pero hay neuronas activadas → asistido (Gemini)
   if (
     coverage >= ASSISTED_COVERAGE_THRESHOLD
     && activatedCount >= 1
@@ -65,8 +81,9 @@ export function chooseReplyMode({
     return "assisted";
   }
 
-  // Sin contexto suficiente → delegar si hay Gemini
+  // Sin contexto suficiente → delegar si hay Gemini o NeuroClaw
   if (isGeminiConfigured) return "delegated";
+  if (isNeuroclawConfigured) return "delegated";
 
   // Fallback
   return "autonomous";
