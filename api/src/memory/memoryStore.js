@@ -1,6 +1,6 @@
-import { supabase } from '../services/supabaseClient.js';
+const { supabase } = require('../services/supabaseClient.js');
 
-export async function getAllMemories() {
+async function getAllMemories() {
   const { data, error } = await supabase.from('memories').select('*').order('created_at', { ascending: false });
   if (error) {
     console.error('[memoryStore] Error fetching memories:', error.message);
@@ -9,7 +9,7 @@ export async function getAllMemories() {
   return data;
 }
 
-export async function saveMemory(memory) {
+async function saveMemory(memory) {
   const payload = {
     id: memory.id || `mem_${Date.now()}`,
     title: memory.title || 'Untitled Memory',
@@ -30,3 +30,8 @@ export async function saveMemory(memory) {
   }
   return data;
 }
+
+module.exports = {
+  getAllMemories,
+  saveMemory
+};

@@ -1,6 +1,6 @@
-import { supabase } from '../services/supabaseClient.js';
+const { supabase } = require('../services/supabaseClient.js');
 
-export async function getAllNeurons() {
+async function getAllNeurons() {
   const { data, error } = await supabase.from('neurons').select('*');
   if (error) {
     console.error('[neuronStore] Error fetching neurons:', error.message);
@@ -9,7 +9,7 @@ export async function getAllNeurons() {
   return data;
 }
 
-export async function saveNeuron(neuron) {
+async function saveNeuron(neuron) {
   const { data, error } = await supabase
     .from('neurons')
     .upsert({
@@ -33,7 +33,7 @@ export async function saveNeuron(neuron) {
   return data;
 }
 
-export async function saveManyNeurons(neurons) {
+async function saveManyNeurons(neurons) {
   const payload = neurons.map(n => ({
     id: n.id,
     concept: n.core?.concept || 'Unknown',
@@ -53,7 +53,7 @@ export async function saveManyNeurons(neurons) {
   return data;
 }
 
-export async function deleteNeuron(id) {
+async function deleteNeuron(id) {
   const { error } = await supabase.from('neurons').delete().eq('id', id);
   if (error) {
     console.error('[neuronStore] Error deleting neuron:', error.message);
@@ -61,3 +61,10 @@ export async function deleteNeuron(id) {
   }
   return true;
 }
+
+module.exports = {
+  getAllNeurons,
+  saveNeuron,
+  saveManyNeurons,
+  deleteNeuron
+};

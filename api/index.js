@@ -1,21 +1,13 @@
-import "dotenv/config";
-import express from "express";
-import cors from "cors";
-import { createClient } from "@supabase/supabase-js";
+const express = require("express");
+const cors = require("cors");
 
-import { getAllNeurons } from "./src/neuro/neuronStore.js";
-import { getAllMemories } from "./src/memory/memoryStore.js";
-import { processChat } from "./src/chat/neurochat.js";
+const { getAllNeurons } = require("./src/neuro/neuronStore.js");
+const { getAllMemories } = require("./src/memory/memoryStore.js");
+const { processChat } = require("./src/chat/neurochat.js");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// Inicializar Supabase Cliente (con service_role para tener acceso completo)
-export const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 // Middleware de Autenticación
 const requireAuth = (req, res, next) => {
@@ -49,6 +41,8 @@ app.get('/api/test-db', async (req, res) => {
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
+});
+
 // Endpoints de Neuronas
 app.get('/api/neurons', requireAuth, async (req, res) => {
   try {
@@ -85,7 +79,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
 });
 
 // Exportar para Vercel Serverless Functions
-export default app;
+module.exports = app;
 
 // Iniciar servidor local si se corre directamente
 if (process.argv[1]?.endsWith('index.js')) {

@@ -1,5 +1,5 @@
-import { supabase } from '../services/supabaseClient.js';
-import { getAllNeurons, saveManyNeurons } from '../neuro/neuronStore.js';
+const { supabase } = require('../services/supabaseClient.js');
+const { getAllNeurons, saveManyNeurons } = require('../neuro/neuronStore.js');
 
 // Prompt del sistema para la API backend
 const SYSTEM_PROMPT = `Eres Carl, una inteligencia personal con memoria contextual. Tienes acceso al grafo mental del usuario: neuronas (conceptos, patrones y creencias aprendidas) y memorias.
@@ -29,7 +29,7 @@ Después de responder, indica tu intención conversacional y qué acciones tomar
 
 Si no hay acciones necesarias, devuelve: { "intent": "respond", "actions": [] }`;
 
-export async function processChat(userInput, ollamaUrl = 'https://ollama.com', ollamaKey = '') {
+async function processChat(userInput, ollamaUrl = 'https://ollama.com', ollamaKey = '') {
   // 1. Cargar contexto de Supabase
   const { data: historyData } = await supabase
     .from('chat_history')
@@ -123,3 +123,7 @@ export async function processChat(userInput, ollamaUrl = 'https://ollama.com', o
     neuronsCreated: actionsJson.actions?.length || 0
   };
 }
+
+module.exports = {
+  processChat
+};

@@ -1,7 +1,6 @@
 {
   "name": "memorycarl-push",
   "private": true,
-  "type": "module",
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",
     "cors": "^2.8.6",
