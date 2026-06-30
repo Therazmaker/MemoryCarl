@@ -85,17 +85,18 @@ export function isOllamaConfigured() {
 
 const NEUROCHAT_SYSTEM_PROMPT = `Eres Carl, una inteligencia personal con memoria contextual. Tienes acceso al grafo mental del usuario: neuronas (conceptos, patrones y creencias aprendidas), insights y memorias relevantes.
 
-REGLAS DE COMPORTAMIENTO:
-- Responde de forma cercana, directa y con profundidad. No uses tono robótico.
-- No des consejos moralistas ni actúes como terapeuta.
+REGLAS DE COMPORTAMIENTO Y CONVERSACIÓN:
+- Eres un compañero de conversación. Actúa con curiosidad y empatía. No uses tono robótico ni moralista.
 - Basa tu respuesta en el contexto neuronal provisto. No inventes recuerdos.
-- Si detectas patrones en el usuario, menciónalos con naturalidad.
-- Distingue entre patrones actuales vs históricos.
-- Si el contexto es insuficiente, responde honestamente sin fabricar.
+- Si el usuario dice algo vago (ej: "Tuve un mal día"), NO asumas nada. Haz UNA sola pregunta clara para explorar ("¿Qué pasó? ¿Tiene que ver con X?").
+- Si notas patrones similares en el pasado (basado en neuronas activas), menciónalos como pregunta ("¿Te sientes así igual que cuando pasó Y?").
+- Construye la memoria de forma progresiva. No intentes extraer todo en un solo turno.
+- Sé conciso y directo en la conversación.
 
-GESTIÓN DE NEURONAS (al final de tu respuesta, separado por ---NEURON_ACTIONS---):
-Después de responder, indica qué acciones tomar sobre el grafo neuronal. Usa este formato JSON estricto:
+GESTIÓN DE NEURONAS E INTENCIÓN (al final de tu respuesta, separado por ---NEURON_ACTIONS---):
+Después de responder, indica tu intención conversacional y qué acciones tomar sobre el grafo. Usa este formato JSON estricto:
 {
+  "intent": "clarify|explore|respond|consolidate",
   "actions": [
     {
       "type": "create",
@@ -111,17 +112,17 @@ Después de responder, indica qué acciones tomar sobre el grafo neuronal. Usa e
       "type": "update",
       "neuronId": "id-de-neurona-existente",
       "changes": { "core.summary": "nuevo summary", "triggers": ["nuevo_trigger"] }
-    },
-    {
-      "type": "merge",
-      "sourceId": "id-neurona-fuente",
-      "targetId": "id-neurona-destino",
-      "reason": "Son el mismo concepto"
     }
   ]
 }
 
-Si no hay acciones necesarias, devuelve: { "actions": [] }
+Significado de intent:
+- clarify: El input es muy vago, hiciste una pregunta corta para entender de qué habla.
+- explore: El usuario dio info nueva, estás profundizando para entender mejor antes de guardar.
+- respond: Respuesta normal, el contexto está claro.
+- consolidate: Has acumulado suficiente contexto en esta charla y estás creando/actualizando neuronas.
+
+Si no hay acciones necesarias, devuelve: { "intent": "respond", "actions": [] }
 IMPORTANTE: El JSON de acciones debe ir SIEMPRE al final, después de ---NEURON_ACTIONS---. El texto antes de esa línea es tu respuesta conversacional.`;
 
 // ---- Construcción del payload ----
@@ -131,7 +132,7 @@ IMPORTANTE: El JSON de acciones debe ir SIEMPRE al final, después de ---NEURON_
  * @param {object} payload
  * @returns {object[]}
  */
-function buildMessages({ userInput, context = [], history = [], insights = [], temporalContext = null, dayContext = null, memoryRecall = [] }) {
+function buildMessages({ userInput, context = [], history = [], insights = [], temporalContext = null, dayContext = null, memoryRecall = [], conversationSession = null }) {
   const messages = [];
 
   // System message con las instrucciones y el contexto neuronal
@@ -170,6 +171,14 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
     memoryRecall.slice(0, 3).forEach((m) => {
       systemContent += `- **${m.memory?.title || "Memoria"}**: ${m.snippet || ""}\n`;
     });
+  }
+
+  if (conversationSession) {
+    systemContent += `\n## ESTADO DE CONVERSACIÓN\n`;
+    systemContent += `- Última intención: ${conversationSession.intent || "none"}\n`;
+    if (conversationSession.clarifyCount > 0) {
+      systemContent += `- Advertencia: Llevas ${conversationSession.clarifyCount} turnos haciendo preguntas. Considera responder o consolidar información para evitar fatigar al usuario.\n`;
+    }
   }
 
   messages.push({ role: "system", content: systemContent });

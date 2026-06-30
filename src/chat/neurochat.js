@@ -23,6 +23,13 @@ let _history = null;
 const manualOverrideState = new Map();
 let _seededFromLocalStorage = false;
 
+// Estado para conversación progresiva y memoria fluida
+let conversationSession = {
+  intent: "respond", // clarify, explore, respond, consolidate
+  pendingTopic: null,
+  clarifyCount: 0,
+};
+
 function loadHistory() {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
@@ -190,12 +197,23 @@ export async function sendMessage(userInput, options = {}) {
   try { appendToCurrentDay(userMsg); } catch (_e) {}
 
   const result = await processNeuroInput(trimmed, {
-    history: getHistory().slice(-10),
+    history: getHistory().slice(-16), // Aumentado a 16 turnos para mejor contexto
     mode,
     interpretationMode,
     premiumOptions: options.premiumOptions,
     messageId,
+    conversationSession, // Pasamos el estado de conversación
   });
+
+  // Actualizar estado de sesión según la intención devuelta por el asistente
+  if (result.intent) {
+    conversationSession.intent = result.intent;
+    if (result.intent === "clarify" || result.intent === "explore") {
+      conversationSession.clarifyCount++;
+    } else {
+      conversationSession.clarifyCount = 0; // reset
+    }
+  }
 
   const activatedNeuronIds = (result.activated || []).map((a) => a.neuron?.id).filter(Boolean);
   const assistantMsg = appendMessage("assistant", result.reply, {
@@ -210,6 +228,7 @@ export async function sendMessage(userInput, options = {}) {
     premiumUsed: result.premiumDecision?.usePremium || false,
     generatedBy: result.generatedBy || "policy",
     manualOverrideUsed: Boolean(result.manualOverrideUsed),
+    intent: result.intent || "respond",
     memoryRecall: (result.memoryRecall || []).map((entry) => ({
       id: entry.memory?.id,
       title: entry.memory?.title || "Memoria sin título",

@@ -602,6 +602,7 @@ export async function processNeuroInput(userInput, options = {}) {
   let replySource = "fallback";
   let localDraft = "";
   let geminiReplyText = "";
+  let intent = "respond";
 
   const bestPatternMatch = findBestPattern(userInput, finalActivated.map((a) => a.neuron));
 
@@ -627,11 +628,12 @@ export async function processNeuroInput(userInput, options = {}) {
       const ollamaResult = await requestOllamaChatReply({
         userInput,
         context,
-        history: (options.history || []).slice(-8),
+        history: (options.history || []).slice(-16),
         insights: insightResult.insights,
         temporalContext,
         dayContext,
         memoryRecall: memoryRecallResult.ranked,
+        conversationSession: options.conversationSession, // Pasamos la sesión
       }, ollamaChunkCallback);
 
       if (ollamaResult && ollamaResult.reply) {
@@ -641,7 +643,13 @@ export async function processNeuroInput(userInput, options = {}) {
         addStep(trace, "ollama_reply_received", { length: reply.length });
 
         // Aplicar acciones de neuronas que Ollama decidió
-        const { actions = [] } = ollamaResult.neuronActions || {};
+        const { actions = [], intent: parsedIntent = "respond" } = ollamaResult.neuronActions || {};
+        replySource = `ollama_${parsedIntent}`; // Opcional, para debug
+        
+        // Guardar la intención
+        intent = parsedIntent;
+        ollamaResult.intent = parsedIntent;
+        
         if (actions.length > 0) {
           addStep(trace, "ollama_neuron_actions_start", { count: actions.length });
           const allAtActionTime = getAllNeurons();
@@ -952,6 +960,7 @@ export async function processNeuroInput(userInput, options = {}) {
     generatedBy: premiumGenerationMeta.generatedBy,
     replySource,
     replyMode,
+    intent,
     knowledgeExtracted: {
       relationHints: trace.knowledgeExtracted?.relationHints || 0,
       triggerCandidates: trace.knowledgeExtracted?.triggerCandidates || 0,
