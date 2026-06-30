@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
     "google-auth-library": "^9.11.0"
   }
 }
