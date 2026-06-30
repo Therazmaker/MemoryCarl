@@ -1799,7 +1799,7 @@ function wireSettingsModal(root) {
     btn.disabled = true;
 
     try {
-      const neurons = JSON.parse(localStorage.getItem("memorycarl_neurons_v1") || "[]");
+      const neurons = JSON.parse(localStorage.getItem("memorycarl_neurochat_neurons") || "[]");
       const memories = JSON.parse(localStorage.getItem("memorycarl_memories_v1") || "[]");
 
       const res = await fetch(`${url}/api/sync`, {
