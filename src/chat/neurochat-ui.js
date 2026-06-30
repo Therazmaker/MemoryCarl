@@ -19,7 +19,7 @@ import {
 } from "../settings/neurochatSettings.js";
 import { isGeminiPremiumConfigured, streamGeminiNeuronGeneration } from "../services/geminiPremiumClient.js";
 import {
-  isOllamaConfigured, getOllamaSettings, saveOllamaSettings, OLLAMA_CLOUD_MODELS,
+  isOllamaConfigured, getOllamaSettings, saveOllamaSettings, OLLAMA_CLOUD_MODELS, enhanceMemoryWithOllama
 } from "../services/ollamaClient.js";
 import { viewNeuroGraph, wireNeuroGraph } from "./neurograph-ui.js";
 import { renderMemoryLinkedNeurons } from "./memory-timeline-ui.js";
@@ -687,6 +687,10 @@ function renderSettingsModal() {
               </div>
               <div class="ncSettingsHint">La clave que configuraste en la variable <code>API_SECRET_KEY</code> de Vercel.</div>
             </div>
+
+            <div class="ncSettingsBtns ncSettingsBtnsSmall">
+              <button type="button" class="ncSettingsTestBtn" id="btnSyncSupabase" style="color: #4f46e5; border-color: #4f46e5;">☁️ Sincronizar (Backup) a Supabase</button>
+            </div>
           </div>
 
           <!-- ════════ GEMINI PREMIUM (FALLBACK) ════════ -->
@@ -1027,6 +1031,7 @@ function renderMemoryDetail(memory) {
       <div class="ncMemoryDetailMeta">Insights relacionados:</div>
       <ul class="ncMemoryLinkedList">${insightsHtml}</ul>
       <div class="ncSuggestionActions">
+        ${isOllamaConfigured() ? `<button class="ncActionBtn" data-improve-memory="${esc(memory.id)}">✨ Mejorar con Ollama</button>` : ""}
         <button class="ncActionBtn" data-autofix-memory="${esc(memory.id)}">Auto-fix memory</button>
         <button class="ncActionBtn ncActionBtnPrimary" data-update-memory="${esc(memory.id)}">Guardar cambios</button>
         <button class="ncActionBtn" data-delete-memory="${esc(memory.id)}">Eliminar</button>
@@ -1616,6 +1621,35 @@ function wireNeuroChatInner(root) {
       fullRerender();
     });
   });
+
+  root.querySelectorAll("[data-improve-memory]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const memoryId = btn.getAttribute("data-improve-memory");
+      if (!memoryId) return;
+      const mems = getMemories();
+      const memory = mems.find(m => m.id === memoryId);
+      if (!memory) return;
+
+      const originalText = btn.textContent;
+      btn.textContent = "✨ Mejorando...";
+      btn.disabled = true;
+
+      try {
+        const result = await enhanceMemoryWithOllama(memory);
+        updateMemory(memoryId, { 
+          title: result.title || memory.title, 
+          text: result.text || memory.text, 
+          tags: result.tags || memory.tags 
+        });
+      } catch (err) {
+        uiState.error = err.message || "Error al mejorar con Ollama";
+      } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+        fullRerender();
+      }
+    });
+  });
   root.querySelectorAll("[data-delete-memory]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const memoryId = btn.getAttribute("data-delete-memory");
@@ -1748,6 +1782,49 @@ function wireSettingsModal(root) {
     resetNeuroChatSettings({ keepApiKey: true });
     uiState.settingsMsg = { type: "success", text: "✓ Configuración restaurada" };
     rerender();
+  });
+
+  // Test Ollama
+  root.querySelector("#btnSyncSupabase")?.addEventListener("click", async () => {
+    const url = localStorage.getItem("memorycarl_api_url") || "";
+    const key = localStorage.getItem("memorycarl_api_key") || "";
+    if (!url) {
+      uiState.settingsMsg = { type: "error", text: "Falta configurar la URL del servidor API para poder sincronizar." };
+      rerender();
+      return;
+    }
+    const btn = root.querySelector("#btnSyncSupabase");
+    const originalText = btn.textContent;
+    btn.textContent = "Sincronizando...";
+    btn.disabled = true;
+
+    try {
+      const neurons = JSON.parse(localStorage.getItem("memorycarl_neurons_v1") || "[]");
+      const memories = JSON.parse(localStorage.getItem("memorycarl_memories_v1") || "[]");
+
+      const res = await fetch(`${url}/api/sync`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(key && { "Authorization": `Bearer ${key}` })
+        },
+        body: JSON.stringify({ neurons, memories })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Error del servidor (${res.status})`);
+      }
+
+      const data = await res.json();
+      uiState.settingsMsg = { type: "success", text: `✓ Sincronización exitosa: ${data.data.neuronsSynced} neuronas, ${data.data.memoriesSynced} memorias.` };
+    } catch (e) {
+      uiState.settingsMsg = { type: "error", text: `Error al sincronizar: ${e.message}` };
+    } finally {
+      btn.textContent = originalText;
+      btn.disabled = false;
+      rerender();
+    }
   });
 
   // Test Ollama

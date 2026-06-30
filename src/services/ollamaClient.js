@@ -438,3 +438,59 @@ Máximo 3 neuronas. Si no hay información valiosa, devuelve { "neurons": [] }.`
     return [];
   }
 }
+
+/**
+ * Pide a Ollama que revise y mejore la redacción de una memoria existente.
+ */
+export async function enhanceMemoryWithOllama(memory) {
+  const settings = getOllamaSettings();
+  if (!isOllamaConfigured()) throw new Error("Ollama no está configurado");
+
+  const prompt = `Eres un asistente experto en redacción y memoria personal. 
+Tu tarea es mejorar la redacción de una memoria personal para que sea más clara, concisa y profunda, preservando los hechos y la emoción original. 
+También debes sugerir etiquetas (tags) útiles.
+
+MEMORIA ACTUAL:
+Título: ${memory.title || "Sin título"}
+Texto: ${memory.text || ""}
+Tags actuales: ${(memory.tags || []).join(", ") || "Ninguno"}
+
+Devuelve SOLO un objeto JSON válido (sin formato markdown \`\`\`json) con esta estructura exacta:
+{
+  "title": "Un título corto y descriptivo",
+  "text": "El texto mejorado, claro y literario pero directo",
+  "tags": ["tag1", "tag2", "tag3"]
+}`;
+
+  const baseUrl = (settings.baseUrl || OLLAMA_CLOUD_BASE).replace(/\/+$/, "");
+  const url = `${baseUrl}/api/chat`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${settings.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: settings.model || "gpt-oss:120b",
+      messages: [{ role: "user", content: prompt }],
+      stream: false,
+      options: { temperature: 0.3 },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Error de Ollama (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  const text = data?.message?.content || data?.response || "";
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  
+  if (!jsonMatch) {
+    throw new Error("Ollama no devolvió un JSON válido");
+  }
+  
+  return JSON.parse(jsonMatch[0]);
+}

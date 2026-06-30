@@ -1,9 +1,14 @@
 const express = require("express");
 const cors = require("cors");
+const { createClient } = require("@supabase/supabase-js");
 
 const { getAllNeurons } = require("./src/neuro/neuronStore.js");
 const { getAllMemories } = require("./src/memory/memoryStore.js");
 const { processChat } = require("./src/chat/neurochat.js");
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 const app = express();
 app.use(cors());
@@ -33,12 +38,65 @@ app.get('/api/health', (req, res) => {
 // Endpoint temporal de prueba de Base de Datos
 app.get('/api/test-db', async (req, res) => {
   try {
+    if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
     const { data, error } = await supabase.from('neurons').select('id').limit(1);
     if (error) {
       return res.status(500).json({ status: 'error', error: error.message });
     }
     res.json({ status: 'ok', data });
   } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// Endpoint de Sincronización (Backup a Supabase)
+app.post('/api/sync', requireAuth, async (req, res) => {
+  const { neurons = [], memories = [] } = req.body;
+  if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
+
+  try {
+    const results = { neuronsSynced: 0, memoriesSynced: 0 };
+    
+    if (neurons.length > 0) {
+      const { error: nErr } = await supabase.from('neurons').upsert(
+        neurons.map(n => ({
+          id: n.id,
+          concept: n.core?.concept || 'Sin nombre',
+          domain: n.core?.domain || 'general',
+          summary: n.core?.summary || '',
+          triggers: n.triggers || [],
+          emotion: n.emotion || 'neutral',
+          weight: n.weight || 1.0,
+          temporal: n.temporal || {},
+          updated_at: new Date().toISOString()
+        })), { onConflict: 'id' }
+      );
+      if (nErr) throw new Error('Error guardando neuronas: ' + nErr.message);
+      results.neuronsSynced = neurons.length;
+    }
+
+    if (memories.length > 0) {
+      const { error: mErr } = await supabase.from('memories').upsert(
+        memories.map(m => ({
+          id: m.id,
+          title: m.title || 'Memoria',
+          snippet: (m.text || '').substring(0, 100),
+          text_content: m.text || '',
+          date: m.date || new Date().toISOString().split('T')[0],
+          emotion: m.emotion || 'neutral',
+          tags: m.tags || [],
+          linked_neurons: m.linkedNeurons || [],
+          importance: m.importance || 'medium',
+          temporal: m.temporal || {}
+        })), { onConflict: 'id' }
+      );
+      if (mErr) throw new Error('Error guardando memorias: ' + mErr.message);
+      results.memoriesSynced = memories.length;
+    }
+
+    res.json({ status: 'ok', data: results });
+  } catch (err) {
+    console.error('[Sync Error]', err);
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
