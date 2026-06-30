@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "PatternLab Candle Bridge",
+  "description": "Captura velas OHLC desde TradingView y permite importarlas en PatternLab.",
+  "version": "1.0.0",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.tradingview.com/*",
+    "https://patternlab.example.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "PatternLab Bridge"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.tradingview.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+.semana-wrap{display:flex;flex-direction:column;gap:12px;padding-bottom:20px}
+.sem-subnav{gap:8px;flex-wrap:wrap}
+.sem-budget{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--card2)}
+.sem-budget.ok{box-shadow:inset 0 0 0 1px rgba(54,211,153,.2)}
+.sem-budget.bad{box-shadow:inset 0 0 0 1px rgba(251,113,133,.35)}
+.sem-progress{height:8px;border-radius:999px;background:rgba(255,255,255,.08);margin-top:8px;overflow:hidden}
+.sem-progress span{display:block;height:100%;background:var(--good)}
+.sem-budget.bad .sem-progress span{background:var(--danger)}
+.sem-actions{margin-top:10px;gap:8px;flex-wrap:wrap}
+.sem-grid{display:flex;flex-direction:column;gap:8px}
+.sem-day{padding:10px}
+.sem-day-head{border:0;background:transparent;color:var(--text);padding:0}
+.sem-slots{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.sem-slots.collapsed{display:none}
+.sem-slot{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:var(--text);text-align:left}
+.sem-slot.warn{border-color:var(--danger)}
+.sem-slot-meal{text-transform:capitalize;font-size:11px;color:var(--muted)}
+.sem-slot-name{font-weight:700}
+.sem-slot-meta{display:flex;gap:6px;align-items:center}
+.sem-warn{background:rgba(251,113,133,.16);color:#ffd2dc}
+.sem-alert{border-color:var(--danger);color:#ffd2dc}
+.sem-form{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.sem-input{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px;box-sizing:border-box}
+.sem-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sem-ing-row{gap:6px;align-items:center}
+.sem-receta{width:100%;text-align:left;border:1px solid var(--line);background:var(--card2);color:var(--text)}
+.sem-import-area{width:100%;height:200px;background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px;font-family:monospace;font-size:12px;margin-top:10px;resize:vertical}
+@media (max-width:640px){.sem-grid2{grid-template-columns:1fr}}

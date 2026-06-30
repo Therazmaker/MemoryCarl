@@ -1,0 +1,55 @@
+import fs from "node:fs";
+import { GoogleAuth } from "google-auth-library";
+
+function must(name) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
+
+const projectId = must("FIREBASE_PROJECT_ID");
+const token = must("FCM_TOKEN");
+
+const title = process.env.PUSH_TITLE || "MemoryCarl";
+const body = process.env.PUSH_BODY || "Reminder";
+
+const saPath = "./.tmp_service_account.json";
+fs.writeFileSync(
+  saPath,
+  Buffer.from(must("FCM_SERVICE_ACCOUNT_B64"), "base64").toString("utf8"),
+  "utf8"
+);
+
+const auth = new GoogleAuth({
+  keyFile: saPath,
+  scopes: ["https://www.googleapis.com/auth/firebase.messaging"],
+});
+
+const client = await auth.getClient();
+const accessToken = (await client.getAccessToken()).token;
+
+const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+
+const payload = {
+  message: {
+    token,
+    notification: { title, body },
+    data: { kind: "reminder", ts: new Date().toISOString() },
+  },
+};
+
+const res = await fetch(url, {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(payload),
+});
+
+const json = await res.json();
+if (!res.ok) {
+  console.error("FCM error:", json);
+  process.exit(1);
+}
+console.log("Sent:", json);

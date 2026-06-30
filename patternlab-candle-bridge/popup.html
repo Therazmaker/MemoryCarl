@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PatternLab Bridge</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <h1>PatternLab Bridge</h1>
+
+      <section>
+        <h2>CAPTURED CANDLES</h2>
+        <ul id="candlesList" class="candles-list"></ul>
+        <p id="emptyState" class="empty">No candles captured yet.</p>
+      </section>
+
+      <section class="actions">
+        <button id="sendButton">Send to PatternLab</button>
+        <button id="copyButton">Copy JSON</button>
+        <button id="clearButton" class="danger">Clear</button>
+      </section>
+
+      <p id="status" class="status"></p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

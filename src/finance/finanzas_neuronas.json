@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "neuronFamilies": {
+    "flow": ["income_fixed", "income_variable", "expense_essential", "expense_discretionary", "debt_outflow", "transfer_internal", "hidden_outflow"],
+    "habit": ["recurring_weekly", "recurring_biweekly", "recurring_monthly", "impulse_spend", "replenishment_spend", "maintenance_spend", "stress_spend"],
+    "risk": ["silent_leak", "pre_due_pressure", "overdraft_risk", "uncovered_obligation", "dependency_on_external_funds", "deteriorating_margin", "unstable_cashflow"],
+    "opportunity": ["easy_cut_candidate", "debt_reduction_window", "substitute_expense", "savings_window", "expense_consolidation_candidate"]
+  },
+  "priorityWeights": {
+    "critical": 1,
+    "high": 0.8,
+    "medium": 0.55,
+    "low": 0.3
+  }
+}
