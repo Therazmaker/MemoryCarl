@@ -1799,8 +1799,13 @@ function wireSettingsModal(root) {
     btn.disabled = true;
 
     try {
-      const neurons = JSON.parse(localStorage.getItem("memorycarl_neurochat_neurons") || "[]");
-      const memories = JSON.parse(localStorage.getItem("memorycarl_memories_v1") || "[]");
+      const { getNeurons, getMemories, getChatHistory } = await import("./neurochat.js");
+      const { getAllDays } = await import("../day/dayStore.js");
+
+      const neurons = getNeurons() || [];
+      const memories = getMemories() || [];
+      const chatHistory = getChatHistory() || [];
+      const days = getAllDays() || [];
 
       const res = await fetch(`${url}/api/sync`, {
         method: "POST",
@@ -1808,7 +1813,7 @@ function wireSettingsModal(root) {
           "Content-Type": "application/json",
           ...(key && { "Authorization": `Bearer ${key}` })
         },
-        body: JSON.stringify({ neurons, memories })
+        body: JSON.stringify({ neurons, memories, chatHistory, days })
       });
 
       if (!res.ok) {
@@ -1817,7 +1822,7 @@ function wireSettingsModal(root) {
       }
 
       const data = await res.json();
-      uiState.settingsMsg = { type: "success", text: `✓ Sincronización exitosa: ${data.data.neuronsSynced} neuronas, ${data.data.memoriesSynced} memorias.` };
+      uiState.settingsMsg = { type: "success", text: `✓ Sincronización exitosa: ${data.data.neuronsSynced} neuronas, ${data.data.memoriesSynced} memorias, ${data.data.chatSynced} chats, ${data.data.daysSynced} días.` };
     } catch (e) {
       uiState.settingsMsg = { type: "error", text: `Error al sincronizar: ${e.message}` };
     } finally {

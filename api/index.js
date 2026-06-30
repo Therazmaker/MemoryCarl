@@ -51,11 +51,11 @@ app.get('/api/test-db', async (req, res) => {
 
 // Endpoint de Sincronización (Backup a Supabase)
 app.post('/api/sync', requireAuth, async (req, res) => {
-  const { neurons = [], memories = [] } = req.body;
+  const { neurons = [], memories = [], chatHistory = [], days = [] } = req.body;
   if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
 
   try {
-    const results = { neuronsSynced: 0, memoriesSynced: 0 };
+    const results = { neuronsSynced: 0, memoriesSynced: 0, chatSynced: 0, daysSynced: 0 };
     
     if (neurons.length > 0) {
       const { error: nErr } = await supabase.from('neurons').upsert(
@@ -92,6 +92,36 @@ app.post('/api/sync', requireAuth, async (req, res) => {
       );
       if (mErr) throw new Error('Error guardando memorias: ' + mErr.message);
       results.memoriesSynced = memories.length;
+    }
+
+    if (chatHistory.length > 0) {
+      const { error: cErr } = await supabase.from('chat_history').upsert(
+        chatHistory.map(c => ({
+          id: c.messageId || c.id || Math.random().toString(36).substring(7),
+          message_id: c.messageId || c.id || Math.random().toString(36).substring(7),
+          role: c.role || 'user',
+          content: c.content || c.text || '',
+          meta: c.meta || {}
+        })), { onConflict: 'id' }
+      );
+      if (cErr) throw new Error('Error guardando historial: ' + cErr.message);
+      results.chatSynced = chatHistory.length;
+    }
+
+    if (days.length > 0) {
+      const { error: dErr } = await supabase.from('days').upsert(
+        days.map(d => ({
+          id: d.id || d.date,
+          date: d.date,
+          summary: d.summary || '',
+          dominant_emotion: d.dominantEmotion || 'neutral',
+          dominant_themes: d.dominantThemes || [],
+          insights: d.insights || [],
+          is_milestone: d.isMilestone || false
+        })), { onConflict: 'id' }
+      );
+      if (dErr) throw new Error('Error guardando días: ' + dErr.message);
+      results.daysSynced = days.length;
     }
 
     res.json({ status: 'ok', data: results });

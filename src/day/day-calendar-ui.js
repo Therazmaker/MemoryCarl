@@ -15,6 +15,7 @@ import { summarizeDay, inferDayEmotion, extractDayThemes, aggregateActivatedNeur
 import { getAllNeurons } from "../neuro/neuronStore.js";
 import { requestGeminiDayRefine } from "../services/geminiPremiumClient.js";
 import { applyDayRefinement } from "./dayRefine.js";
+import { isOllamaConfigured, enhanceMemoryWithOllama } from "../services/ollamaClient.js";
 
 // ---- Estado de la UI de días ----
 export const dayUiState = {
@@ -411,13 +412,17 @@ export function viewDayDetail(day) {
       <div class="dcInsightList">${day.insights.map((ins) => `<div class="dcInsightItem">💡 ${esc(ins)}</div>`).join("")}</div>
     </div>` : "";
 
+  const isOllamaConf = typeof isOllamaConfigured === "function" ? isOllamaConfigured() : false;
   const memorySuggestionsHtml = (day.memorySuggestions || []).length ? `
     <div class="dcSection">
       <div class="dcSectionTitle">Sugerencias de memoria (${day.memorySuggestions.length})</div>
-      <div class="dcInsightList">${day.memorySuggestions.map((s) => `
+      <div class="dcInsightList">${day.memorySuggestions.map((s, idx) => `
         <div class="dcInsightItem">
           📝 <b>${esc(s.title)}</b>${s.importance === "high" ? " ⭐" : ""}<br>
           <span style="opacity:.8">${esc(s.text)}</span>
+          <div style="margin-top: 5px;">
+            ${isOllamaConf ? `<button class="dcBtn dcBtnSecondary" style="font-size: 10px; padding: 2px 6px;" data-improve-suggestion="${idx}">✨ Mejorar con Ollama</button>` : ""}
+          </div>
         </div>`).join("")}</div>
     </div>` : "";
 
@@ -504,6 +509,35 @@ export function wireDayCalendar(root, rerenderCallback) {
       dayUiState.editingManually = false;
       dayUiState.manualEdit = null;
       rerenderCallback();
+    });
+  });
+
+  // Botones de Mejorar Sugerencia (Ollama)
+  root.querySelectorAll("[data-improve-suggestion]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const idx = btn.getAttribute("data-improve-suggestion");
+      if (idx === null) return;
+      const day = getDayByDate(dayUiState.selectedDayId);
+      if (!day || !day.memorySuggestions || !day.memorySuggestions[idx]) return;
+
+      const originalText = btn.textContent;
+      btn.textContent = "✨ Mejorando...";
+      btn.disabled = true;
+
+      try {
+        const result = await enhanceMemoryWithOllama(day.memorySuggestions[idx]);
+        day.memorySuggestions[idx].title = result.title || day.memorySuggestions[idx].title;
+        day.memorySuggestions[idx].text = result.text || day.memorySuggestions[idx].text;
+        if (result.tags) day.memorySuggestions[idx].tags = result.tags;
+        
+        updateDay(day.date, { memorySuggestions: day.memorySuggestions });
+      } catch (err) {
+        dayUiState.error = err.message || "Error al mejorar con Ollama";
+      } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+        rerenderCallback();
+      }
     });
   });
 }
