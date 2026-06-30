@@ -627,6 +627,21 @@ function renderSettingsModal() {
               <div class="ncSettingsHint">Guardada solo en tu navegador (localStorage). Obtenla en <a href="https://ollama.com/settings/keys" target="_blank" style="color:#818cf8">ollama.com/settings/keys</a></div>
             </div>
 
+            <!-- Base URL Ollama (CORS/Proxy) -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsOllamaBaseUrl">Base URL (Opcional - útil para CORS/Proxies)</label>
+              <div class="ncSettingsKeyRow">
+                <input
+                  type="text"
+                  id="ncsOllamaBaseUrl"
+                  class="ncSettingsInput"
+                  placeholder="https://ollama.com"
+                  value="${esc(ollamaS.baseUrl || "https://ollama.com")}"
+                />
+              </div>
+              <div class="ncSettingsHint">Usa <strong>https://corsproxy.io/?https://ollama.com</strong> si tienes errores de CORS en el navegador.</div>
+            </div>
+
             <!-- Modelo Ollama -->
             <div class="ncSettingsField">
               <label class="ncSettingsLabel" for="ncsOllamaModel">Modelo Ollama Cloud</label>
@@ -1653,9 +1668,11 @@ function wireSettingsModal(root) {
     const ollamaPatch = {
       enabled: root.querySelector("#ncsOllamaEnabled")?.checked ?? false,
       model:   root.querySelector("#ncsOllamaModel")?.value?.trim() || "gpt-oss:120b",
+      baseUrl: root.querySelector("#ncsOllamaBaseUrl")?.value?.trim() || "https://ollama.com",
     };
     const newOllamaKey = ollamaKeyInput?.value?.trim();
     if (newOllamaKey) ollamaPatch.apiKey = newOllamaKey;
+
     // --- Guardar settings Gemini ---
     const apiKeyInput = root.querySelector("#ncsApiKey");
     const patch = {
@@ -1706,17 +1723,39 @@ function wireSettingsModal(root) {
     rerender();
     try {
       const baseUrl = (s.baseUrl || "https://ollama.com").replace(/\/+$/, "");
-      const res = await fetch(`${baseUrl}/api/tags`, {
-        headers: { "Authorization": `Bearer ${s.apiKey}` },
+      // Test with a minimal chat request (avoids /api/tags CORS issue)
+      const res = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${s.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: s.model || "gpt-oss:120b",
+          messages: [{ role: "user", content: "ping" }],
+          stream: false,
+          options: { num_predict: 1 },
+        }),
+        signal: AbortSignal.timeout(8000),
       });
-      if (res.ok) {
-        uiState.settingsMsg = { type: "success", text: `✓ Conexión OK con Ollama Cloud (modelo: ${s.model})` };
+      if (res.ok || res.status === 400) {
+        // 400 can mean model not found but connection is fine
+        uiState.settingsMsg = { type: "success", text: `✓ Conexión OK con Ollama Cloud (${baseUrl})` };
+      } else if (res.status === 401) {
+        uiState.settingsMsg = { type: "error", text: "Error 401: API Key inválida. Verifica tu key en ollama.com/settings/keys" };
       } else {
         const txt = await res.text().catch(() => "");
         uiState.settingsMsg = { type: "error", text: `Error ${res.status}: ${txt.slice(0, 120)}` };
       }
     } catch (err) {
-      uiState.settingsMsg = { type: "error", text: `Error de red: ${err.message}` };
+      if (err.message?.toLowerCase().includes("cors") || err.message?.toLowerCase().includes("failed to fetch") || err.name === "TypeError") {
+        uiState.settingsMsg = {
+          type: "error",
+          text: "⚠️ Error CORS: El navegador bloquea la petición directa a ollama.com. En el campo 'Base URL' usa: https://corsproxy.io/?https://ollama.com"
+        };
+      } else {
+        uiState.settingsMsg = { type: "error", text: `Error de red: ${err.message}` };
+      }
     }
     rerender();
   });
