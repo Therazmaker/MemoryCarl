@@ -656,6 +656,39 @@ function renderSettingsModal() {
             </div>
           </div>
 
+          <!-- ════════ CARL API BACKEND ════════ -->
+          <div class="ncSettingsSection ncSettingsSectionSecondary">
+            <div class="ncSettingsSectionTitle">🌐 Carl API <span class="ncSettingsSectionBadge ncSettingsSectionBadgeSecondary">Backend en la nube</span></div>
+            <div class="ncSettingsSectionDesc">Conecta tu instancia de MemoryCarl con el servidor backend en Vercel. Cuando está activo, toda la inteligencia corre en la nube y los datos se guardan en Supabase.</div>
+
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsCarlApiUrl">URL del servidor API</label>
+              <input
+                type="text"
+                id="ncsCarlApiUrl"
+                class="ncSettingsInput"
+                placeholder="https://tu-proyecto.vercel.app"
+                value="${esc(localStorage.getItem('memorycarl_api_url') || '')}"
+              />
+              <div class="ncSettingsHint">La URL de tu despliegue en Vercel. Si no tienes una, déjalo vacío para usar el modo local.</div>
+            </div>
+
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsCarlApiKey">API Key del servidor</label>
+              <div class="ncSettingsKeyRow">
+                <input
+                  type="password"
+                  id="ncsCarlApiKey"
+                  class="ncSettingsInput"
+                  placeholder="Tu clave secreta del servidor"
+                  autocomplete="new-password"
+                  value=""
+                />
+              </div>
+              <div class="ncSettingsHint">La clave que configuraste en la variable <code>API_SECRET_KEY</code> de Vercel.</div>
+            </div>
+          </div>
+
           <!-- ════════ GEMINI PREMIUM (FALLBACK) ════════ -->
           <div class="ncSettingsSection ncSettingsSectionSecondary">
             <div class="ncSettingsSectionTitle">⚡ Gemini Premium <span class="ncSettingsSectionBadge ncSettingsSectionBadgeSecondary">Fallback</span></div>
@@ -1686,6 +1719,14 @@ function wireSettingsModal(root) {
     };
     const newKey = apiKeyInput?.value?.trim();
     if (newKey) patch.apiKey = newKey;
+
+    // --- Guardar settings Carl API Backend ---
+    const carlApiUrl = root.querySelector("#ncsCarlApiUrl")?.value?.trim() || "";
+    const carlApiKey = root.querySelector("#ncsCarlApiKey")?.value?.trim();
+    try {
+      localStorage.setItem("memorycarl_api_url", carlApiUrl);
+      if (carlApiKey) localStorage.setItem("memorycarl_api_key", carlApiKey);
+    } catch (_e) {}
 
     try {
       saveOllamaSettings(ollamaPatch);

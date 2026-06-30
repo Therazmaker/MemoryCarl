@@ -23,6 +23,18 @@ let _history = null;
 const manualOverrideState = new Map();
 let _seededFromLocalStorage = false;
 
+// ---- Configuración del Backend API ----
+// Si el usuario configura la URL del servidor en Settings, el chat usará el backend en la nube.
+function getApiSettings() {
+  try {
+    const url = localStorage.getItem("memorycarl_api_url") || "";
+    const key = localStorage.getItem("memorycarl_api_key") || "";
+    return { url: url.replace(/\/+$/, ""), key, enabled: Boolean(url && key) };
+  } catch (_e) {
+    return { url: "", key: "", enabled: false };
+  }
+}
+
 // Estado para conversación progresiva y memoria fluida
 let conversationSession = {
   intent: "respond", // clarify, explore, respond, consolidate
@@ -196,6 +208,55 @@ export async function sendMessage(userInput, options = {}) {
   // Guardar mensaje del usuario en el día actual
   try { appendToCurrentDay(userMsg); } catch (_e) {}
 
+  // ---- Modo API Backend (si está configurado) ----
+  const apiSettings = getApiSettings();
+  if (apiSettings.enabled) {
+    try {
+      const res = await fetch(`${apiSettings.url}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiSettings.key}`,
+        },
+        body: JSON.stringify({ message: trimmed }),
+      });
+
+      if (!res.ok) throw new Error(`Error del servidor API: ${res.status}`);
+      const json = await res.json();
+      const apiReply = json.data?.reply || "(Sin respuesta del servidor)";
+      const apiIntent = json.data?.intent || "respond";
+
+      conversationSession.intent = apiIntent;
+      if (["clarify", "explore"].includes(apiIntent)) conversationSession.clarifyCount++;
+      else conversationSession.clarifyCount = 0;
+
+      const assistantMsg = appendMessage("assistant", apiReply, {
+        messageId, mode, interpretationMode,
+        generatedBy: "api_backend",
+        intent: apiIntent,
+        neuronsCreated: json.data?.neuronsCreated || 0,
+      });
+
+      try { appendToCurrentDay(assistantMsg); } catch (_e) {}
+
+      return {
+        reply: apiReply,
+        messageId,
+        intent: apiIntent,
+        activated: [],
+        generated: [],
+        memorySuggestion: { suggestSave: false },
+        feedbackForMessage: getMessageFeedbackMap(messageId),
+        probeQuestion: null,
+        generatedBy: "api_backend",
+      };
+    } catch (apiErr) {
+      console.warn("[neurochat] API backend falló, usando modo local:", apiErr.message);
+      // Si falla el backend, cae al modo local automáticamente
+    }
+  }
+
+  // ---- Modo Local (fallback o cuando el backend no está configurado) ----
   const result = await processNeuroInput(trimmed, {
     history: getHistory().slice(-16), // Aumentado a 16 turnos para mejor contexto
     mode,
