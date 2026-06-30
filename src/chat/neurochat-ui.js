@@ -1656,8 +1656,6 @@ function wireSettingsModal(root) {
     };
     const newOllamaKey = ollamaKeyInput?.value?.trim();
     if (newOllamaKey) ollamaPatch.apiKey = newOllamaKey;
-    saveOllamaSettings(ollamaPatch);
-
     // --- Guardar settings Gemini ---
     const apiKeyInput = root.querySelector("#ncsApiKey");
     const patch = {
@@ -1673,10 +1671,15 @@ function wireSettingsModal(root) {
     if (newKey) patch.apiKey = newKey;
 
     try {
+      saveOllamaSettings(ollamaPatch);
       saveNeuroChatSettings(patch);
       uiState.settingsMsg = { type: "success", text: "✓ Configuración guardada" };
     } catch (err) {
-      uiState.settingsMsg = { type: "error", text: err.message };
+      if (err.name === "QuotaExceededError" || err.code === 22) {
+        uiState.settingsMsg = { type: "error", text: "Error: Almacenamiento lleno. Por favor borra datos antiguos para guardar." };
+      } else {
+        uiState.settingsMsg = { type: "error", text: err.message || "Error al guardar configuración" };
+      }
     }
     rerender();
   });

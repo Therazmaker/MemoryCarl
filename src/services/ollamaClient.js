@@ -67,6 +67,7 @@ export function saveOllamaSettings(patch) {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
   } catch (e) {
     console.warn("[ollamaClient] Error guardando settings:", e);
+    throw e;
   }
   return updated;
 }
