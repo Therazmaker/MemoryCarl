@@ -110,8 +110,10 @@ app.post('/api/sync', requireAuth, async (req, res) => {
     }
 
     if (days.length > 0) {
-      const { error: dErr } = await supabase.from('days').upsert(
-        days.map(d => ({
+      // Usar un mapa para asegurar que no haya duplicados con la misma fecha en el payload
+      const uniqueDaysMap = new Map();
+      days.forEach(d => {
+        uniqueDaysMap.set(d.date, {
           id: d.id || d.date,
           date: d.date,
           summary: d.summary || '',
@@ -119,10 +121,15 @@ app.post('/api/sync', requireAuth, async (req, res) => {
           dominant_themes: d.dominantThemes || [],
           insights: d.insights || [],
           is_milestone: d.isMilestone || false
-        })), { onConflict: 'id' }
+        });
+      });
+      const uniqueDays = Array.from(uniqueDaysMap.values());
+
+      const { error: dErr } = await supabase.from('days').upsert(
+        uniqueDays, { onConflict: 'date' }
       );
       if (dErr) throw new Error('Error guardando días: ' + dErr.message);
-      results.daysSynced = days.length;
+      results.daysSynced = uniqueDays.length;
     }
 
     res.json({ status: 'ok', data: results });
