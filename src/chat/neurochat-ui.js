@@ -693,6 +693,7 @@ function renderSettingsModal() {
 
             <div class="ncSettingsBtns ncSettingsBtnsSmall">
               <button type="button" class="ncSettingsTestBtn" id="btnSyncSupabase" style="color: #4f46e5; border-color: #4f46e5;">☁️ Sincronizar (Backup) a Supabase</button>
+              <button type="button" class="ncSettingsTestBtn" id="btnRestoreSupabase" style="color: #0891b2; border-color: #0891b2;">⬇️ Restaurar desde Supabase</button>
             </div>
           </div>
 
@@ -1831,6 +1832,88 @@ function wireSettingsModal(root) {
       uiState.settingsMsg = { type: "success", text: `✓ Sincronización exitosa: ${data.data.neuronsSynced} neuronas, ${data.data.memoriesSynced} memorias, ${data.data.chatSynced} chats, ${data.data.daysSynced} días${stateMsg}.` };
     } catch (e) {
       uiState.settingsMsg = { type: "error", text: `Error al sincronizar: ${e.message}` };
+    } finally {
+      btn.textContent = originalText;
+      btn.disabled = false;
+      rerender();
+    }
+  });
+
+  // Restaurar desde Supabase
+  root.querySelector("#btnRestoreSupabase")?.addEventListener("click", async () => {
+    const url = localStorage.getItem("memorycarl_api_url") || "";
+    const key = localStorage.getItem("memorycarl_api_key") || "";
+    if (!url) {
+      uiState.settingsMsg = { type: "error", text: "Falta configurar la URL del servidor API para poder restaurar." };
+      rerender();
+      return;
+    }
+
+    const confirmRestore = window.confirm(
+      "⚠️ ¿Restaurar todo desde Supabase?\n\nEsto sobreescribirá tus neuronas, memorias y estado local con el backup guardado en la nube.\n\nTus datos actuales serán reemplazados."
+    );
+    if (!confirmRestore) return;
+
+    const btn = root.querySelector("#btnRestoreSupabase");
+    const originalText = btn.textContent;
+    btn.textContent = "Restaurando...";
+    btn.disabled = true;
+
+    try {
+      const res = await fetch(`${url}/api/restore`, {
+        method: "GET",
+        headers: { ...(key && { "Authorization": `Bearer ${key}` }) }
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Error del servidor (${res.status})`);
+      }
+
+      const { data } = await res.json();
+
+      // Restaurar neuronas
+      if (data.neurons?.length > 0) {
+        localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(data.neurons));
+      }
+
+      // Restaurar memorias
+      if (data.memories?.length > 0) {
+        localStorage.setItem("memorycarl_memories_v1", JSON.stringify(data.memories));
+      }
+
+      // Restaurar historial de chat
+      if (data.chatHistory?.length > 0) {
+        const { HISTORY_KEY } = await import("./neurochat.js").catch(() => ({ HISTORY_KEY: "memorycarl_neurochat_history" }));
+        localStorage.setItem(HISTORY_KEY || "memorycarl_neurochat_history", JSON.stringify(data.chatHistory));
+      }
+
+      // Restaurar días
+      if (data.days?.length > 0) {
+        const { DAY_STORE_KEY } = await import("../day/dayStore.js").catch(() => ({ DAY_STORE_KEY: "memorycarl_days_v1" }));
+        localStorage.setItem(DAY_STORE_KEY || "memorycarl_days_v1", JSON.stringify(data.days));
+      }
+
+      // Restaurar window.state (sueño, finanzas, emociones, rutinas...)
+      if (data.appState && typeof window !== 'undefined' && window.state) {
+        const keysToRestore = ['sleepLog', 'moodDaily', 'routines', 'shopping', 'reminders',
+          'finance_accounts', 'finance_ledger', 'finance_debts', 'finance_commitments',
+          'finance_transactions', 'finance_insights', 'inventory', 'house', 'musicLog'];
+        keysToRestore.forEach(k => {
+          if (data.appState[k] !== undefined) {
+            window.state[k] = data.appState[k];
+          }
+        });
+        // Llamar a persist() si existe para que guarde el estado en localStorage
+        if (typeof window.persist === 'function') window.persist();
+      }
+
+      uiState.settingsMsg = {
+        type: "success",
+        text: `✓ Restauración exitosa: ${data.neurons?.length || 0} neuronas, ${data.memories?.length || 0} memorias, ${data.days?.length || 0} días, ${data.chatHistory?.length || 0} chats. Recarga la página para ver todos los cambios.`
+      };
+    } catch (e) {
+      uiState.settingsMsg = { type: "error", text: `Error al restaurar: ${e.message}` };
     } finally {
       btn.textContent = originalText;
       btn.disabled = false;

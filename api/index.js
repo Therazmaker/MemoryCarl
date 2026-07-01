@@ -148,6 +148,38 @@ app.post('/api/sync', requireAuth, async (req, res) => {
   }
 });
 
+// Endpoint de Restauración (Supabase → MemoryCarl)
+app.get('/api/restore', requireAuth, async (req, res) => {
+  if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
+
+  try {
+    const [neuronsRes, memoriesRes, chatRes, daysRes, appStateRes] = await Promise.all([
+      supabase.from('neurons').select('*'),
+      supabase.from('memories').select('*'),
+      supabase.from('chat_history').select('*').order('created_at', { ascending: true }),
+      supabase.from('days').select('*').order('date', { ascending: false }),
+      supabase.from('app_state').select('*').eq('id', 'default_user').single(),
+    ]);
+
+    if (neuronsRes.error) throw new Error('Error leyendo neuronas: ' + neuronsRes.error.message);
+    if (memoriesRes.error) throw new Error('Error leyendo memorias: ' + memoriesRes.error.message);
+
+    res.json({
+      status: 'ok',
+      data: {
+        neurons: neuronsRes.data || [],
+        memories: memoriesRes.data || [],
+        chatHistory: chatRes.data || [],
+        days: daysRes.data || [],
+        appState: appStateRes.data?.state_json || null,
+      }
+    });
+  } catch (err) {
+    console.error('[Restore Error]', err);
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
 // Endpoints de Neuronas
 app.get('/api/neurons', requireAuth, async (req, res) => {
   try {
