@@ -212,7 +212,10 @@ function renderMessage(msg) {
       ${bodyHtml}
       ${memoryRecall}
       ${dayRecall}
-      <div class="ncMsgMeta">${time}${msg.coverage != null ? ` · cobertura ${Math.round(msg.coverage * 100)}%` : ""}</div>
+      <div class="ncMsgMeta">
+        ${time}${msg.coverage != null ? ` · cobertura ${Math.round(msg.coverage * 100)}%` : ""}
+        ${msg.generated > 0 ? ` <span style="color: #4ade80; font-weight: bold;">· 🧠 +${msg.generated} neurona${msg.generated > 1 ? "s" : ""} nueva${msg.generated > 1 ? "s" : ""}</span>` : ""}
+      </div>
       ${responseFeedback}
     </div>`;
 }
