@@ -2506,7 +2506,8 @@ function bottomNav(){
   return `
     <nav class="bottomNav" role="navigation" aria-label="MemoryCarl navigation">
       ${mk("home","🏠","Home")}
-      ${mk("semana","🍽️","Semana")}
+      ${mk("neurochat","🧠","NeuroChat")}
+      ${/* mk("semana","🍽️","Semana") — comentado para dar paso a NeuroChat */ ""}
       ${mk("house","🧹","Casa")}
       ${mk("routines","📝","Rutinas")}
       ${mk("shopping","🛒","Compras")}
