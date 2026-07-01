@@ -52,11 +52,11 @@ app.get('/api/test-db', async (req, res) => {
 
 // Endpoint de Sincronización (Backup a Supabase)
 app.post('/api/sync', requireAuth, async (req, res) => {
-  const { neurons = [], memories = [], chatHistory = [], days = [] } = req.body;
+  const { neurons = [], memories = [], chatHistory = [], days = [], appState = null } = req.body;
   if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
 
   try {
-    const results = { neuronsSynced: 0, memoriesSynced: 0, chatSynced: 0, daysSynced: 0 };
+    const results = { neuronsSynced: 0, memoriesSynced: 0, chatSynced: 0, daysSynced: 0, appStateSynced: false };
     
     if (neurons.length > 0) {
       const { error: nErr } = await supabase.from('neurons').upsert(
@@ -130,6 +130,15 @@ app.post('/api/sync', requireAuth, async (req, res) => {
       );
       if (dErr) throw new Error('Error guardando días: ' + dErr.message);
       results.daysSynced = uniqueDays.length;
+    }
+
+    if (appState) {
+      const { error: asErr } = await supabase.from('app_state').upsert(
+        [{ id: 'default_user', state_json: appState, updated_at: new Date().toISOString() }],
+        { onConflict: 'id' }
+      );
+      if (asErr) throw new Error('Error guardando app_state: ' + asErr.message);
+      results.appStateSynced = true;
     }
 
     res.json({ status: 'ok', data: results });

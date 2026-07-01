@@ -1810,13 +1810,15 @@ function wireSettingsModal(root) {
       const chatHistory = getChatHistory() || [];
       const days = getAllDays() || [];
 
+      const appState = (typeof window !== 'undefined' && window.state) ? window.state : null;
+
       const res = await fetch(`${url}/api/sync`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(key && { "Authorization": `Bearer ${key}` })
         },
-        body: JSON.stringify({ neurons, memories, chatHistory, days })
+        body: JSON.stringify({ neurons, memories, chatHistory, days, appState })
       });
 
       if (!res.ok) {
@@ -1825,7 +1827,8 @@ function wireSettingsModal(root) {
       }
 
       const data = await res.json();
-      uiState.settingsMsg = { type: "success", text: `✓ Sincronización exitosa: ${data.data.neuronsSynced} neuronas, ${data.data.memoriesSynced} memorias, ${data.data.chatSynced} chats, ${data.data.daysSynced} días.` };
+      const stateMsg = data.data.appStateSynced ? " + estado de la app (sueño, finanzas, emociones ✓)" : "";
+      uiState.settingsMsg = { type: "success", text: `✓ Sincronización exitosa: ${data.data.neuronsSynced} neuronas, ${data.data.memoriesSynced} memorias, ${data.data.chatSynced} chats, ${data.data.daysSynced} días${stateMsg}.` };
     } catch (e) {
       uiState.settingsMsg = { type: "error", text: `Error al sincronizar: ${e.message}` };
     } finally {

@@ -181,6 +181,66 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
     }
   }
 
+  // ---- ESTADO ACTUAL DEL USUARIO (desde window.state) ----
+  try {
+    const s = (typeof window !== 'undefined' && window.state) ? window.state : null;
+    if (s) {
+      const statusParts = [];
+
+      // --- Sueño (última entrada del sleepLog) ---
+      const sleepLog = Array.isArray(s.sleepLog) ? s.sleepLog : [];
+      const lastSleep = sleepLog.length > 0 ? sleepLog[sleepLog.length - 1] : null;
+      if (lastSleep) {
+        const hrs = lastSleep.hours ?? lastSleep.h ?? lastSleep.sleepHours ?? null;
+        const qual = lastSleep.quality || lastSleep.feel || null;
+        const sleepDate = lastSleep.date || lastSleep.dateStr || '';
+        if (hrs != null) statusParts.push(`🌙 Último sueño (${sleepDate}): ${hrs}h${qual ? `, sensación: ${qual}` : ''}`);
+      }
+
+      // --- Ánimo del día (moodDaily) ---
+      const mood = s.moodDaily;
+      if (mood) {
+        const todayKey = new Date().toISOString().split('T')[0];
+        const todayMood = (typeof mood === 'object' && mood[todayKey]) ? mood[todayKey] : null;
+        if (todayMood) {
+          const val = todayMood.value || todayMood.mood || todayMood.label || todayMood;
+          statusParts.push(`😊 Estado de ánimo hoy: ${val}`);
+        }
+      }
+
+      // --- Finanzas básicas ---
+      const accounts = Array.isArray(s.finance_accounts) ? s.finance_accounts : [];
+      const ledger = Array.isArray(s.finance_ledger) ? s.finance_ledger : [];
+      if (accounts.length > 0) {
+        const totalBalance = accounts.reduce((sum, a) => sum + (Number(a.balance) || 0), 0);
+        statusParts.push(`💰 Balance financiero total: ${totalBalance.toFixed(2)}`);
+      }
+      if (ledger.length > 0) {
+        // Gastos de los últimos 7 días
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const recentExpenses = ledger.filter(t => {
+          const ts = t.date ? new Date(t.date).getTime() : 0;
+          return ts >= sevenDaysAgo && (t.type === 'expense' || t.amount < 0);
+        });
+        const totalExpenses = recentExpenses.reduce((sum, t) => sum + Math.abs(Number(t.amount) || 0), 0);
+        if (totalExpenses > 0) statusParts.push(`📉 Gastos últimos 7 días: ${totalExpenses.toFixed(2)}`);
+      }
+
+      // --- Rutinas pendientes ---
+      const routines = Array.isArray(s.routines) ? s.routines : [];
+      const pendingRoutines = routines.filter(r => !r.done && !r.completed);
+      if (pendingRoutines.length > 0) {
+        statusParts.push(`📋 Rutinas pendientes hoy: ${pendingRoutines.length} (${pendingRoutines.slice(0,3).map(r => r.name || r.title || r.label || '?').join(', ')})`);
+      }
+
+      if (statusParts.length > 0) {
+        systemContent += '\n\n## ESTADO ACTUAL DEL USUARIO\nEsta información es en tiempo real. Úsala para contextualizar tus respuestas de forma natural y empática:\n';
+        statusParts.forEach(p => { systemContent += `- ${p}\n`; });
+        systemContent += '\nIMPORTANTE: Si el usuario habla de cansancio, energía o ánimo, conecta tu respuesta con estos datos reales. Si habla de gastos o dinero, menciona su situación financiera actual.';
+      }
+    }
+  } catch (_e) { /* silencioso */ }
+
   messages.push({ role: "system", content: systemContent });
 
   // Historial de conversación (últimos 8 turnos)
