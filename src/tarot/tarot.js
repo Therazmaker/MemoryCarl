@@ -1,6 +1,7 @@
 /**
  * MemoryCarl - Tarot Module (Vista de página completa)
  */
+import { getOllamaSettings, isOllamaConfigured } from "../services/ollamaClient.js";
 
 const MAJOR_ARCANA = [
   "El Loco", "El Mago", "La Sacerdotisa", "La Emperatriz", "El Emperador",
@@ -262,7 +263,8 @@ Instrucciones:
 1. Analiza las cartas en sus posiciones de Pasado, Presente y Futuro.
 2. Relaciona la lectura con la pregunta del usuario. Si no hay pregunta, haz una lectura general.
 3. Termina con un consejo práctico breve.
-4. Usa un tono reflexivo, profundo y empático. Escribe en Markdown de forma limpia.`;
+4. Usa un tono reflexivo, profundo y empático. Escribe en Markdown de forma limpia.
+No incluyas el bloque JSON de neuronas al final, solo el texto de la lectura.`;
 
       const userPrompt = `Mis cartas son:
 1. ${c1} (Pasado/Base)
@@ -271,22 +273,43 @@ Instrucciones:
 
 Mi pregunta/tema es: ${q || "Lectura general"}`;
 
-      const ollamaUrl = localStorage.getItem("memorycarl_ollama_url") || "http://127.0.0.1:11434";
-      const ollamaModel = localStorage.getItem("memorycarl_ollama_model") || "llama3";
+      // Usar los mismos settings de Ollama Cloud que usa el NeuroChat
+      if (!isOllamaConfigured()) throw new Error("Ollama Cloud no está configurado. Ve a Configuración ⚙️ > Ollama Cloud y activa tu API key.");
 
-      const ollamaRes = await fetch(`${ollamaUrl}/api/chat`, {
+      const settings = getOllamaSettings();
+      const baseUrl = (settings.baseUrl || "https://ollama.com").replace(/\/+$/, "");
+      const url = `${baseUrl}/api/chat`;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), settings.timeoutMs || 60000);
+
+      const ollamaRes = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${settings.apiKey}`
+        },
         body: JSON.stringify({
-          model: ollamaModel,
-          messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-          stream: false
-        })
+          model: settings.model || "gpt-oss:120b",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ],
+          stream: false,
+          options: { temperature: 0.8, num_predict: 1500 }
+        }),
+        signal: controller.signal
       });
+      clearTimeout(timer);
 
-      if (!ollamaRes.ok) throw new Error("No se pudo conectar a Ollama. Verifica que esté abierto y corriendo.");
+      if (!ollamaRes.ok) {
+        let errMsg = `HTTP ${ollamaRes.status}`;
+        try { const d = await ollamaRes.json(); errMsg = d?.error || errMsg; } catch(_e) {}
+        throw new Error(`Error de Ollama Cloud: ${errMsg}`);
+      }
       const ollamaData = await ollamaRes.json();
-      const interpretation = ollamaData.message.content;
+      const interpretation = ollamaData.message?.content || ollamaData.choices?.[0]?.message?.content || "";
+      if (!interpretation) throw new Error("Ollama no devolvió contenido. Intenta de nuevo.");
 
       // Guardar
       const log = getTarotLog();
