@@ -16977,6 +16977,64 @@ function renderFinanceMissionControl(){
 
 
 
+async function financeFetchTelegramPending() {
+  try {
+    const fetchUrl = `https://memory-carl.vercel.app/api/telegram/pending`;
+    // We use basic fetch, you might want to add token auth later if it's protected, 
+    // but right now it looks unprotected or relies on cookies.
+    const res = await fetch(fetchUrl, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
+    });
+
+    if (!res.ok) throw new Error("Error fetching telegram pending");
+    const json = await res.json();
+    
+    if (json.status === 'ok' && json.data && json.data.length > 0) {
+      let addedCount = 0;
+      json.data.forEach(t => {
+        // Resolve accountId
+        let accountId = t.account_id;
+        if (accountId === "default" || accountId === "cash" || accountId === "bank") {
+          const accs = state.financeAccounts || [];
+          if (accs.length > 0) {
+            if (accountId === "cash") {
+              const c = accs.find(a => a.type === "cash" || String(a.name).toLowerCase().includes("efectivo"));
+              accountId = c ? c.id : accs[0].id;
+            } else if (accountId === "bank") {
+              const b = accs.find(a => a.type === "bank" || a.type === "card");
+              accountId = b ? b.id : accs[0].id;
+            } else {
+              accountId = accs[0].id; // Default
+            }
+          }
+        }
+
+        // Add to main.js state using addFinanceEntry
+        const entry = addFinanceEntry({
+          date: t.created_at || new Date().toISOString(),
+          type: t.type,
+          amount: t.amount,
+          accountId: accountId,
+          category: t.category,
+          note: t.note || "Vía Telegram",
+          reason: "telegram",
+          neuronRole: "auto"
+        });
+        
+        if (entry) addedCount++;
+      });
+
+      if (addedCount > 0) {
+        toast(`📥 ${addedCount} transacciones añadidas desde Telegram`);
+        view(); // re-render UI
+      }
+    }
+  } catch (e) {
+    console.error("Telegram Sync Error:", e);
+  }
+}
+
 function viewFinance(){
   const fmt = _financeFmt;
   const d = financeMonthDataAdvanced();
@@ -17385,7 +17443,7 @@ view = function(){
         try{ if(state.financeSubTab==='debts') financeDrawDebtChart(); }catch(_e){}
         try{ if(state.financeSubTab==='debts') financeBindDebtIncomeInput(); }catch(_e){}
         try{ if(state.financeSubTab==='neuronal') neuronasInitGrafo(); }catch(_e){}
-        try{ if(window.FINANCE && typeof window.FINANCE.fetchPendingTelegramTransactions === 'function') window.FINANCE.fetchPendingTelegramTransactions(); }catch(_e){}
+        try{ financeFetchTelegramPending(); }catch(_e){}
       }, 0);
     }else{
       financeProjectionDestroyChart();

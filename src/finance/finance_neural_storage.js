@@ -79,7 +79,11 @@ export function loadFinanceBrainState() {
 export function saveFinanceBrainState(state) {
   if (typeof localStorage === 'undefined') return;
   const normalized = normalizeBrainState(state);
-  localStorage.setItem(BRAIN_STORAGE_KEY, JSON.stringify(normalized));
+  try {
+    localStorage.setItem(BRAIN_STORAGE_KEY, JSON.stringify(normalized));
+  } catch (e) {
+    console.warn("Storage quota exceeded for Brain State, continuing in-memory:", e);
+  }
 }
 
 export function upsertLegacyNeurona(neurona) {
