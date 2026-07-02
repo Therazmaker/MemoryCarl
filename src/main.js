@@ -13409,7 +13409,7 @@ function openFinanceAccountEdit(accountId){
 }
 
 function openFinanceTypeModal(){
-  const host = document.querySelector('#app') || document.body;
+  const host = document.body;
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop finTypeBackdrop';
   backdrop.innerHTML = `
@@ -13482,7 +13482,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     note: existingSplit.note
   };
 
-  const host = document.querySelector('#app') || document.body;
+  const host = document.body;
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop finEntryBackdrop';
   backdrop.innerHTML = `
