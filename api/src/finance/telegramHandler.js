@@ -46,7 +46,7 @@ async function handleTelegramWebhook(req, res) {
     };
 
     // 1. Llamar a Ollama para extraer el JSON
-    const systemPrompt = `Eres un asistente financiero estricto. Tu único objetivo es extraer los detalles de la transacción del mensaje del usuario y responder ÚNICAMENTE con un objeto JSON válido, sin Markdown ni texto adicional.
+    const systemPrompt = `Eres un asistente financiero estricto del usuario peruano. La moneda es el Sol peruano (S/). Tu único objetivo es extraer los detalles de la transacción del mensaje del usuario y responder ÚNICAMENTE con un objeto JSON válido, sin Markdown ni texto adicional.
 Campos esperados en el JSON:
 - "type": "expense" o "income"
 - "amount": número (el valor monetario extraído, siempre positivo)
@@ -101,7 +101,7 @@ Asegúrate de que la respuesta sea 100% JSON parseable. Ejemplo: {"type": "expen
 
     // 3. Responder Éxito
     const icon = parsed.type === 'expense' ? '💸' : '💰';
-    await replyToTelegram(`${icon} Registrado: $${parsed.amount} en ${parsed.category} (${parsed.note})`);
+    await replyToTelegram(`${icon} Registrado: S/ ${parsed.amount} en ${parsed.category} (${parsed.note})`);
     return res.status(200).json({ ok: true });
 
   } catch (error) {
