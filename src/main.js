@@ -6579,6 +6579,12 @@ function wireHome(root){
   const sleepCard = root.querySelector("#homeSleepCard");
   if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepHistory(); });
 
+  const btnNewTarot = root.querySelector("#btnNewTarot");
+  if(btnNewTarot) btnNewTarot.addEventListener("click", () => { if(window.openTarotModal) window.openTarotModal(); });
+  
+  const btnTarotStats = root.querySelector("#btnTarotStats");
+  if(btnTarotStats) btnTarotStats.addEventListener("click", () => { if(window.openTarotStatsModal) window.openTarotStatsModal(); });
+
 
   // Mood sprites (daily emotion)
   const moodPill = root.querySelector("#homeMoodPill");

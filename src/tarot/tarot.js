@@ -50,11 +50,11 @@ export function renderTarotWidget() {
           <div class="djp-sc-title">Tarot Consciente</div>
           <div class="djp-sc-sub">${todayReadings.length} lectura(s) hoy</div>
         </div>
-        <button class="djp-sc-add-btn" onclick="openTarotStatsModal()" style="font-size:16px;" aria-label="Stats">📊</button>
+        <button class="djp-sc-add-btn" id="btnTarotStats" style="font-size:16px;" aria-label="Stats">📊</button>
       </div>
       <div class="tarotWidgetBody" style="padding-top: 10px;">
         <p class="muted" style="margin-bottom: 15px; font-size: 13px;">Saca 3 cartas de tu mazo físico, ingresa tu pregunta y Carl te ayudará a interpretarlas.</p>
-        <button class="btnPrimary" onclick="openTarotModal()" style="width:100%; background-color:#9333ea; border:none;">✨ Nueva Lectura</button>
+        <button class="btnPrimary" id="btnNewTarot" style="width:100%; background-color:#9333ea; border:none;">✨ Nueva Lectura</button>
       </div>
     </section>
   `;
