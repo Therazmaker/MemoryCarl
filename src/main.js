@@ -2555,6 +2555,7 @@ function renderMoreModal(){
 }
 
 function view(){
+  window.renderApp = view; // Expose for other modules to trigger re-renders
   try{ if(window.__mcBoot && !window.__mcBoot.done) window.__mcBoot.done = true; }catch(_e){}
   // Keep a fresh global signals bag (used by NeuroBubble and other small agents)
   try{ refreshGlobalSignals(); }catch(e){}
@@ -6589,7 +6590,7 @@ function wireHome(root){
   if(tarotCard) tarotCard.addEventListener("click", () => {
     state.tab = "tarot";
     injectTarotStyles();
-    if(window.renderApp) window.renderApp();
+    view();
   });
 
   // Mood sprites (daily emotion)
