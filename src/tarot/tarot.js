@@ -64,14 +64,23 @@ window.openTarotModal = function() {
   const optionsHtml = TAROT_CARDS.map(c => `<option value="${c.name}">${c.name}</option>`).join("");
 
   const modalHtml = `
-    <div id="tarotModal" class="modalOverlay" style="display:flex; z-index:9999;">
-      <div class="modalContent" style="max-width: 500px; background: #18181b; border: 1px solid #3f3f46;">
-        <div class="modalHeader" style="border-bottom: 1px solid #3f3f46; padding-bottom:10px; margin-bottom:15px;">
-          <h3 style="color:#c084fc;">🔮 Nueva Lectura</h3>
-          <button class="closeBtn" onclick="document.getElementById('tarotModal').remove()">×</button>
+    <div id="tarotModal" class="modalOverlay" style="display:flex; z-index:9999; align-items:flex-end; padding-bottom: 70px;">
+      <div class="modalContent" style="
+        width: 100%;
+        max-width: 500px;
+        margin: 0 auto;
+        background: #18181b;
+        border: 1px solid #3f3f46;
+        border-radius: 16px 16px 0 0;
+        max-height: calc(100vh - 80px);
+        display: flex;
+        flex-direction: column;
+      ">
+        <div class="modalHeader" style="border-bottom: 1px solid #3f3f46; padding: 16px 16px 12px; flex-shrink: 0; display:flex; align-items:center; justify-content:space-between;">
+          <h3 style="color:#c084fc; margin:0;">🔮 Nueva Lectura</h3>
+          <button class="closeBtn" onclick="document.getElementById('tarotModal').remove()" style="background:none; border:none; color:#a1a1aa; font-size:22px; cursor:pointer; padding:0 4px;">×</button>
         </div>
-        <div class="modalBody">
-        <div class="modalBody">
+        <div class="modalBody" style="overflow-y: auto; flex: 1; padding: 16px;">
           <div id="tarotInputsContainer">
             <label style="display:block; margin-bottom:5px; font-weight:bold; font-size:14px; color:#d4d4d8;">Tu pregunta (opcional)</label>
             <textarea id="tarotQuestion" style="width:100%; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:8px; padding:10px; margin-bottom:20px; font-family:inherit; resize:vertical;" placeholder="¿Qué debo tener en cuenta sobre...?" rows="2"></textarea>
@@ -100,7 +109,7 @@ window.openTarotModal = function() {
           
           <div id="tarotResult" style="display:none; background:#27272a; border-radius:8px; padding:15px; border: 1px solid #3f3f46; margin-bottom:15px;"></div>
           
-          <button id="btnInterpretTarot" class="btnPrimary" style="width:100%; background-color:#9333ea; border:none; padding:12px;">Interpretar con Carl</button>
+          <button id="btnInterpretTarot" class="btnPrimary" style="width:100%; background-color:#9333ea; border:none; padding:12px; position:sticky; bottom:0;">Interpretar con Carl</button>
         </div>
       </div>
     </div>
