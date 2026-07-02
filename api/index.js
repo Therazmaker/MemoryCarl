@@ -5,7 +5,7 @@ const { createClient } = require("@supabase/supabase-js");
 const { getAllNeurons } = require("./src/neuro/neuronStore.js");
 const { getAllMemories } = require("./src/memory/memoryStore.js");
 const { processChat } = require("./src/chat/neurochat.js");
-const { handleTelegramWebhook } = require("./src/finance/telegramHandler.js");
+const { handleTelegramWebhook, getPendingTelegramTransactions } = require("./src/finance/telegramHandler.js");
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -226,6 +226,9 @@ app.post('/api/chat', requireAuth, async (req, res) => {
 
 // Endpoint Telegram Webhook (Sin requireAuth ya que Telegram envía peticiones directamente)
 app.post('/api/telegram', handleTelegramWebhook);
+
+// Endpoint para obtener transacciones pendientes
+app.get('/api/telegram/pending', requireAuth, getPendingTelegramTransactions);
 
 // Exportar para Vercel Serverless Functions
 module.exports = app;

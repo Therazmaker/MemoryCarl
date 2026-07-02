@@ -17385,6 +17385,7 @@ view = function(){
         try{ if(state.financeSubTab==='debts') financeDrawDebtChart(); }catch(_e){}
         try{ if(state.financeSubTab==='debts') financeBindDebtIncomeInput(); }catch(_e){}
         try{ if(state.financeSubTab==='neuronal') neuronasInitGrafo(); }catch(_e){}
+        try{ if(window.FINANCE && typeof window.FINANCE.fetchPendingTelegramTransactions === 'function') window.FINANCE.fetchPendingTelegramTransactions(); }catch(_e){}
       }, 0);
     }else{
       financeProjectionDestroyChart();

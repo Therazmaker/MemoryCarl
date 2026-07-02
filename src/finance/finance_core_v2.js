@@ -207,6 +207,71 @@ window.FINANCE = (function(){
     return `Esta semana destacó ${topCategory[0]} con ${topCategory[1].toFixed(2)}.`;
   }
 
+  /* ===============================
+     TELEGRAM SYNC
+  =============================== */
+
+  async function fetchPendingTelegramTransactions() {
+    try {
+      const urlRaw = localStorage.getItem("memorycarl_script_url");
+      const apiKey = localStorage.getItem("memorycarl_script_api_key");
+      if (!urlRaw || !apiKey) return;
+
+      const url = urlRaw.replace(/\/+$/, "");
+      const res = await fetch(`${url}/api/telegram/pending`, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      if (!res.ok) throw new Error("Error fetching telegram pending");
+      const json = await res.json();
+      if (json.status === 'ok' && json.data && json.data.length > 0) {
+        
+        let addedCount = 0;
+        json.data.forEach(t => {
+          // Intentar encontrar la cuenta si la dedujo (ej: cash, bank). 
+          // Si no, tomar la primera cuenta por defecto.
+          let accountId = t.account_id;
+          if (accountId === "default" || accountId === "cash" || accountId === "bank") {
+            const accs = state.accounts;
+            if (accs.length > 0) {
+              if (accountId === "cash") {
+                const c = accs.find(a => a.type === "cash" || a.name.toLowerCase().includes("efectivo"));
+                accountId = c ? c.id : accs[0].id;
+              } else if (accountId === "bank") {
+                const b = accs.find(a => a.type === "bank" || a.type === "card");
+                accountId = b ? b.id : accs[0].id;
+              } else {
+                accountId = accs[0].id; // Default
+              }
+            }
+          }
+
+          addMovement({
+            date: t.created_at || new Date().toISOString(),
+            type: t.type,
+            amount: t.amount,
+            accountId: accountId,
+            category: t.category,
+            note: t.note || "Vía Telegram",
+            reason: ""
+          });
+          addedCount++;
+        });
+
+        if (addedCount > 0 && typeof window.renderApp === "function") {
+          window.renderApp();
+          if (typeof toast === "function") toast(`📥 ${addedCount} transacciones añadidas desde Telegram`);
+        }
+      }
+    } catch (e) {
+      console.error("Telegram Sync Error:", e);
+    }
+  }
+
   /* =============================== */
 
   load();
@@ -218,7 +283,8 @@ window.FINANCE = (function(){
     deleteMovement,
     getMonthlyData,
     projection,
-    weeklyReview
+    weeklyReview,
+    fetchPendingTelegramTransactions
   };
 
 })();

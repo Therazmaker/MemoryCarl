@@ -103,4 +103,40 @@ Asegúrate de que la respuesta sea 100% JSON parseable. Ejemplo: {"type": "expen
   }
 }
 
-module.exports = { handleTelegramWebhook };
+async function getPendingTelegramTransactions(req, res) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return res.status(500).json({ status: 'error', message: 'Supabase no configurado en servidor.' });
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  try {
+    // Buscar los no procesados
+    const { data, error } = await supabase
+      .from('telegram_inbox')
+      .select('*')
+      .eq('processed', false)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      // Marcarlos como procesados para que no se vuelvan a bajar
+      const ids = data.map(d => d.id);
+      await supabase
+        .from('telegram_inbox')
+        .update({ processed: true })
+        .in('id', ids);
+    }
+
+    res.json({ status: 'ok', data: data || [] });
+  } catch(e) {
+    console.error("Error obteniendo telegram_inbox:", e);
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+}
+
+module.exports = { handleTelegramWebhook, getPendingTelegramTransactions };
