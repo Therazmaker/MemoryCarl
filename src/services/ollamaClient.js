@@ -233,6 +233,15 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
         statusParts.push(`📋 Rutinas pendientes hoy: ${pendingRoutines.length} (${pendingRoutines.slice(0,3).map(r => r.name || r.title || r.label || '?').join(', ')})`);
       }
 
+      // --- Tarot Diario ---
+      const tarotLog = Array.isArray(s.tarotLog) ? s.tarotLog : [];
+      const todayIso = new Date().toISOString().split('T')[0];
+      const todayTarots = tarotLog.filter(t => t.dateIso === todayIso);
+      if (todayTarots.length > 0) {
+        const lastTarot = todayTarots[todayTarots.length - 1];
+        statusParts.push(`🔮 Lectura de Tarot de hoy: Preguntó "${lastTarot.question || "Lectura general"}". Salieron: ${(lastTarot.cards||[]).join(", ")}.`);
+      }
+
       if (statusParts.length > 0) {
         systemContent += '\n\n## ESTADO ACTUAL DEL USUARIO\nEsta información es en tiempo real. Úsala para contextualizar tus respuestas de forma natural y empática:\n';
         statusParts.forEach(p => { systemContent += `- ${p}\n`; });

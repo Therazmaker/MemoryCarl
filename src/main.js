@@ -3,6 +3,7 @@ import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
+import { renderTarotWidget } from "./tarot/tarot.js";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -5578,6 +5579,7 @@ const sleepBars = renderSleepBars(sleepSeries);
         </div>
         ${sleepBars}
       </section>
+      ${renderTarotWidget()}
 
       <section class="card homeCard" id="homeRemindersCard">
         <div class="cardTop">
