@@ -31,7 +31,13 @@ function escapeHtml(unsafe) {
 
 export function getTarotLog() {
   if (!window.state) window.state = {};
-  if (!window.state.tarotLog) window.state.tarotLog = [];
+  if (!window.state.tarotLog) {
+    window.state.tarotLog = [];
+    try {
+      const stored = localStorage.getItem("memorycarl_v2_tarot_log");
+      if (stored) window.state.tarotLog = JSON.parse(stored);
+    } catch(e) {}
+  }
   return window.state.tarotLog;
 }
 
@@ -315,6 +321,11 @@ Mi pregunta/tema es: ${q || "Lectura general"}`;
       const log = getTarotLog();
       const now = new Date();
       log.push({ id: "tarot_" + Date.now(), dateIso: now.toISOString().split('T')[0], timestamp: now.getTime(), question: q, cards: [c1, c2, c3], interpretation });
+      
+      try {
+        localStorage.setItem("memorycarl_v2_tarot_log", JSON.stringify(log));
+      } catch(e) { console.error("Error saving tarot log", e); }
+
       if (window.persist) window.persist();
 
       const htmlContent = (window.marked && window.marked.parse)
