@@ -71,22 +71,25 @@ window.openTarotModal = function() {
           <button class="closeBtn" onclick="document.getElementById('tarotModal').remove()">×</button>
         </div>
         <div class="modalBody">
-          <label style="display:block; margin-bottom:5px; font-weight:bold; font-size:14px; color:#d4d4d8;">Tu pregunta (opcional)</label>
-          <textarea id="tarotQuestion" style="width:100%; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:8px; padding:10px; margin-bottom:20px; font-family:inherit; resize:vertical;" placeholder="¿Qué debo tener en cuenta sobre...?" rows="2"></textarea>
-          
-          <label style="display:block; margin-bottom:10px; font-weight:bold; font-size:14px; color:#d4d4d8;">Cartas extraídas de tu mazo</label>
-          <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:20px;">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="width:80px; font-size:12px; color:#a1a1aa; text-align:right;">1. Pasado</span>
-              <select id="tarotCard1" style="flex:1; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:6px; padding:8px;"><option value="">-- Selecciona carta --</option>${optionsHtml}</select>
-            </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="width:80px; font-size:12px; color:#a1a1aa; text-align:right;">2. Presente</span>
-              <select id="tarotCard2" style="flex:1; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:6px; padding:8px;"><option value="">-- Selecciona carta --</option>${optionsHtml}</select>
-            </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="width:80px; font-size:12px; color:#a1a1aa; text-align:right;">3. Futuro</span>
-              <select id="tarotCard3" style="flex:1; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:6px; padding:8px;"><option value="">-- Selecciona carta --</option>${optionsHtml}</select>
+        <div class="modalBody">
+          <div id="tarotInputsContainer">
+            <label style="display:block; margin-bottom:5px; font-weight:bold; font-size:14px; color:#d4d4d8;">Tu pregunta (opcional)</label>
+            <textarea id="tarotQuestion" style="width:100%; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:8px; padding:10px; margin-bottom:20px; font-family:inherit; resize:vertical;" placeholder="¿Qué debo tener en cuenta sobre...?" rows="2"></textarea>
+            
+            <label style="display:block; margin-bottom:10px; font-weight:bold; font-size:14px; color:#d4d4d8;">Cartas extraídas de tu mazo</label>
+            <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:20px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="width:80px; font-size:12px; color:#a1a1aa; text-align:right;">1. Pasado</span>
+                <select id="tarotCard1" style="flex:1; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:6px; padding:8px;"><option value="">-- Selecciona carta --</option>${optionsHtml}</select>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="width:80px; font-size:12px; color:#a1a1aa; text-align:right;">2. Presente</span>
+                <select id="tarotCard2" style="flex:1; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:6px; padding:8px;"><option value="">-- Selecciona carta --</option>${optionsHtml}</select>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="width:80px; font-size:12px; color:#a1a1aa; text-align:right;">3. Futuro</span>
+                <select id="tarotCard3" style="flex:1; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:6px; padding:8px;"><option value="">-- Selecciona carta --</option>${optionsHtml}</select>
+              </div>
             </div>
           </div>
           
@@ -118,8 +121,10 @@ window.openTarotModal = function() {
     const btn = document.getElementById("btnInterpretTarot");
     const loading = document.getElementById("tarotLoading");
     const resultDiv = document.getElementById("tarotResult");
+    const inputsContainer = document.getElementById("tarotInputsContainer");
     
     btn.style.display = "none";
+    inputsContainer.style.display = "none";
     loading.style.display = "block";
     resultDiv.style.display = "none";
 
@@ -183,13 +188,25 @@ Mi pregunta/tema es: ${q || "Lectura general"}`;
 
       loading.style.display = "none";
       resultDiv.style.display = "block";
+      resultDiv.style.border = "none";
+      resultDiv.style.padding = "0";
+      resultDiv.style.background = "transparent";
       resultDiv.innerHTML = `
-        <div style="text-align:center; margin-bottom:15px; font-size:13px; color:#c084fc;">
-          <span style="background:rgba(192,132,252,0.1); padding:4px 8px; border-radius:12px; margin:0 4px;">${c1}</span>
-          <span style="background:rgba(192,132,252,0.1); padding:4px 8px; border-radius:12px; margin:0 4px;">${c2}</span>
-          <span style="background:rgba(192,132,252,0.1); padding:4px 8px; border-radius:12px; margin:0 4px;">${c3}</span>
+        <div style="text-align:center; margin-bottom:20px; font-size:13px; color:#d8b4fe; display:flex; justify-content:center; gap:8px; flex-wrap:wrap;">
+          <div style="background:rgba(192,132,252,0.1); border:1px solid rgba(192,132,252,0.3); padding:6px 10px; border-radius:8px;">
+            <div style="font-size:10px; text-transform:uppercase; opacity:0.7; margin-bottom:2px;">Pasado</div>
+            <div style="font-weight:bold;">${c1}</div>
+          </div>
+          <div style="background:rgba(192,132,252,0.1); border:1px solid rgba(192,132,252,0.3); padding:6px 10px; border-radius:8px;">
+            <div style="font-size:10px; text-transform:uppercase; opacity:0.7; margin-bottom:2px;">Presente</div>
+            <div style="font-weight:bold;">${c2}</div>
+          </div>
+          <div style="background:rgba(192,132,252,0.1); border:1px solid rgba(192,132,252,0.3); padding:6px 10px; border-radius:8px;">
+            <div style="font-size:10px; text-transform:uppercase; opacity:0.7; margin-bottom:2px;">Futuro</div>
+            <div style="font-weight:bold;">${c3}</div>
+          </div>
         </div>
-        <div class="ncMsgBubble--md" style="font-size:14px; line-height:1.5;">
+        <div style="font-size:15px; line-height:1.6; color:#e4e4e7; max-height: 55vh; overflow-y: auto; padding-right: 5px;">
           ${htmlContent}
         </div>
       `;
@@ -199,6 +216,7 @@ Mi pregunta/tema es: ${q || "Lectura general"}`;
 
     } catch (e) {
       loading.style.display = "none";
+      inputsContainer.style.display = "block";
       btn.style.display = "block";
       alert("Error: " + e.message);
     }
