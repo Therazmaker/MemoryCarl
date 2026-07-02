@@ -96,17 +96,25 @@ app.post('/api/sync', requireAuth, async (req, res) => {
     }
 
     if (chatHistory.length > 0) {
-      const { error: cErr } = await supabase.from('chat_history').upsert(
-        chatHistory.map(c => ({
-          id: c.messageId || c.id || Math.random().toString(36).substring(7),
-          message_id: c.messageId || c.id || Math.random().toString(36).substring(7),
+      // Usar un mapa para asegurar que no haya duplicados con el mismo ID en el payload
+      const uniqueChatMap = new Map();
+      chatHistory.forEach(c => {
+        const derivedId = c.messageId || c.id || Math.random().toString(36).substring(7);
+        uniqueChatMap.set(derivedId, {
+          id: derivedId,
+          message_id: derivedId,
           role: c.role || 'user',
           content: c.content || c.text || '',
           meta: c.meta || {}
-        })), { onConflict: 'id' }
+        });
+      });
+      const uniqueChat = Array.from(uniqueChatMap.values());
+
+      const { error: cErr } = await supabase.from('chat_history').upsert(
+        uniqueChat, { onConflict: 'id' }
       );
       if (cErr) throw new Error('Error guardando historial: ' + cErr.message);
-      results.chatSynced = chatHistory.length;
+      results.chatSynced = uniqueChat.length;
     }
 
     if (days.length > 0) {
