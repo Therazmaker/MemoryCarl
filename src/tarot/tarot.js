@@ -1,5 +1,5 @@
 /**
- * MemoryCarl - Tarot Module
+ * MemoryCarl - Tarot Module (Vista de página completa)
  */
 
 const MAJOR_ARCANA = [
@@ -24,127 +24,245 @@ export const TAROT_CARDS = [
 
 function escapeHtml(unsafe) {
   return (unsafe || "").toString()
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
-function getTarotLog() {
+export function getTarotLog() {
   if (!window.state) window.state = {};
   if (!window.state.tarotLog) window.state.tarotLog = [];
   return window.state.tarotLog;
 }
 
+// ─── WIDGET para la pantalla Home ───────────────────────────────────────────
 export function renderTarotWidget() {
   const log = getTarotLog();
   const todayIso = new Date().toISOString().split('T')[0];
   const todayReadings = log.filter(r => r.dateIso === todayIso);
 
   return `
-    <section class="card homeCard" id="homeTarotCard" style="border-left: 4px solid #a855f7;">
+    <section class="card homeCard" id="homeTarotCard" style="border-left: 4px solid #a855f7; cursor:pointer;">
       <div class="djp-sc-header">
         <div class="djp-sc-icon">🔮</div>
         <div class="djp-sc-title-block">
           <div class="djp-sc-title">Tarot Consciente</div>
           <div class="djp-sc-sub">${todayReadings.length} lectura(s) hoy</div>
         </div>
-        <button class="djp-sc-add-btn" id="btnTarotStats" style="font-size:16px;" aria-label="Stats">📊</button>
+        <span style="color:#a855f7; font-size:20px;">›</span>
       </div>
-      <div class="tarotWidgetBody" style="padding-top: 10px;">
-        <p class="muted" style="margin-bottom: 15px; font-size: 13px;">Saca 3 cartas de tu mazo físico, ingresa tu pregunta y Carl te ayudará a interpretarlas.</p>
-        <button class="btnPrimary" id="btnNewTarot" style="width:100%; background-color:#9333ea; border:none;">✨ Nueva Lectura</button>
+      <div style="padding-top: 10px;">
+        <p class="muted" style="margin-bottom: 0; font-size: 13px;">Toca para abrir tu diario de tarot.</p>
       </div>
     </section>
   `;
 }
 
-window.openTarotModal = function() {
+// ─── VISTA COMPLETA DE TAROT ─────────────────────────────────────────────────
+let tarotViewState = { screen: 'main' }; // 'main' | 'new' | 'reading' | 'stats'
+
+export function viewTarot() {
+  const log = getTarotLog();
+  const todayIso = new Date().toISOString().split('T')[0];
+  const todayReadings = log.filter(r => r.dateIso === todayIso);
   const optionsHtml = TAROT_CARDS.map(c => `<option value="${c.name}">${c.name}</option>`).join("");
 
-  const modalHtml = `
-    <div id="tarotModal" class="modalOverlay" style="display:flex; z-index:9999; align-items:flex-end; padding-bottom: 70px;">
-      <div class="modalContent" style="
-        width: 100%;
-        max-width: 500px;
-        margin: 0 auto;
-        background: #18181b;
-        border: 1px solid #3f3f46;
-        border-radius: 16px 16px 0 0;
-        max-height: calc(100vh - 80px);
-        display: flex;
-        flex-direction: column;
-      ">
-        <div class="modalHeader" style="border-bottom: 1px solid #3f3f46; padding: 16px 16px 12px; flex-shrink: 0; display:flex; align-items:center; justify-content:space-between;">
-          <h3 style="color:#c084fc; margin:0;">🔮 Nueva Lectura</h3>
-          <button class="closeBtn" onclick="document.getElementById('tarotModal').remove()" style="background:none; border:none; color:#a1a1aa; font-size:22px; cursor:pointer; padding:0 4px;">×</button>
+  // ── PANTALLA: NUEVA LECTURA ──
+  if (tarotViewState.screen === 'new') {
+    return `
+      <div class="tarotPage">
+        <div class="tarotPageHeader">
+          <button class="tarotBackBtn" id="btnTarotBack">← Volver</button>
+          <h2 class="tarotPageTitle">✨ Nueva Lectura</h2>
+          <div></div>
         </div>
-        <div class="modalBody" style="overflow-y: auto; flex: 1; padding: 16px;">
-          <div id="tarotInputsContainer">
-            <label style="display:block; margin-bottom:5px; font-weight:bold; font-size:14px; color:#d4d4d8;">Tu pregunta (opcional)</label>
-            <textarea id="tarotQuestion" style="width:100%; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:8px; padding:10px; margin-bottom:20px; font-family:inherit; resize:vertical;" placeholder="¿Qué debo tener en cuenta sobre...?" rows="2"></textarea>
-            
-            <label style="display:block; margin-bottom:10px; font-weight:bold; font-size:14px; color:#d4d4d8;">Cartas extraídas de tu mazo</label>
-            <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:20px;">
-              <div style="display:flex; align-items:center; gap:10px;">
-                <span style="width:80px; font-size:12px; color:#a1a1aa; text-align:right;">1. Pasado</span>
-                <select id="tarotCard1" style="flex:1; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:6px; padding:8px;"><option value="">-- Selecciona carta --</option>${optionsHtml}</select>
+        <div class="tarotPageBody">
+          <div id="tarotInputsContainer" class="tarotForm">
+            <label class="tarotLabel">Tu pregunta o tema (opcional)</label>
+            <textarea id="tarotQuestion" class="tarotTextarea" placeholder="¿Qué debo tener en cuenta sobre...?" rows="3"></textarea>
+
+            <label class="tarotLabel" style="margin-top:20px;">Cartas extraídas de tu mazo</label>
+
+            <div class="tarotCardRow">
+              <div class="tarotCardSlot">
+                <div class="tarotCardLabel">Pasado</div>
+                <select id="tarotCard1" class="tarotSelect"><option value="">-- Carta --</option>${optionsHtml}</select>
               </div>
-              <div style="display:flex; align-items:center; gap:10px;">
-                <span style="width:80px; font-size:12px; color:#a1a1aa; text-align:right;">2. Presente</span>
-                <select id="tarotCard2" style="flex:1; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:6px; padding:8px;"><option value="">-- Selecciona carta --</option>${optionsHtml}</select>
+              <div class="tarotCardSlot">
+                <div class="tarotCardLabel">Presente</div>
+                <select id="tarotCard2" class="tarotSelect"><option value="">-- Carta --</option>${optionsHtml}</select>
               </div>
-              <div style="display:flex; align-items:center; gap:10px;">
-                <span style="width:80px; font-size:12px; color:#a1a1aa; text-align:right;">3. Futuro</span>
-                <select id="tarotCard3" style="flex:1; background:#27272a; color:#fff; border:1px solid #52525b; border-radius:6px; padding:8px;"><option value="">-- Selecciona carta --</option>${optionsHtml}</select>
+              <div class="tarotCardSlot">
+                <div class="tarotCardLabel">Futuro</div>
+                <select id="tarotCard3" class="tarotSelect"><option value="">-- Carta --</option>${optionsHtml}</select>
               </div>
             </div>
+
+            <button id="btnInterpretTarot" class="tarotMainBtn" style="margin-top:30px;">
+              🔮 Interpretar con Carl
+            </button>
           </div>
-          
-          <div id="tarotLoading" style="display:none; text-align:center; padding: 20px;">
-            <div style="color:#c084fc; font-weight:bold; margin-bottom:10px; font-size:18px;">✨</div>
-            <div style="color:#a1a1aa; font-size:14px;">Carl está interpretando los arcanos...</div>
+
+          <div id="tarotLoading" style="display:none; text-align:center; padding: 60px 20px;">
+            <div style="font-size:48px; margin-bottom:16px; animation: pulse 1.5s infinite;">🔮</div>
+            <div style="color:#c084fc; font-size:16px; font-weight:600;">Carl está leyendo los arcanos...</div>
+            <div style="color:#71717a; font-size:13px; margin-top:8px;">Esto puede tardar unos segundos</div>
           </div>
-          
-          <div id="tarotResult" style="display:none; background:#27272a; border-radius:8px; padding:15px; border: 1px solid #3f3f46; margin-bottom:15px;"></div>
-          
-          <button id="btnInterpretTarot" class="btnPrimary" style="width:100%; background-color:#9333ea; border:none; padding:12px; position:sticky; bottom:0;">Interpretar con Carl</button>
+
+          <div id="tarotResult" style="display:none;">
+          </div>
         </div>
+      </div>
+    `;
+  }
+
+  // ── PANTALLA: ESTADÍSTICAS ──
+  if (tarotViewState.screen === 'stats') {
+    const cardCounts = {};
+    log.forEach(r => { (r.cards||[]).forEach(c => { cardCounts[c] = (cardCounts[c] || 0) + 1; }); });
+    const sortedCards = Object.entries(cardCounts).sort((a,b) => b[1]-a[1]).slice(0, 10);
+
+    const historyHtml = log.length === 0
+      ? `<div class="tarotEmpty">Aún no tienes lecturas registradas.</div>`
+      : log.slice().reverse().map(r => `
+        <div class="tarotHistoryCard">
+          <div class="tarotHistoryMeta">
+            <span>${new Date(r.timestamp).toLocaleDateString('es', {weekday:'short', day:'numeric', month:'short'})}</span>
+            <span style="color:#71717a; font-size:11px;">${new Date(r.timestamp).toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit'})}</span>
+          </div>
+          <div class="tarotHistoryQuestion">${escapeHtml(r.question || "Lectura general")}</div>
+          <div class="tarotHistoryCards">${(r.cards||[]).join(" · ")}</div>
+          <details class="tarotHistoryDetails">
+            <summary>Ver interpretación ›</summary>
+            <div class="tarotHistoryText">
+              ${(window.marked && window.marked.parse) ? window.marked.parse(r.interpretation||'') : escapeHtml(r.interpretation||'').replace(/\n/g, '<br>')}
+            </div>
+          </details>
+        </div>
+      `).join("");
+
+    return `
+      <div class="tarotPage">
+        <div class="tarotPageHeader">
+          <button class="tarotBackBtn" id="btnTarotBack">← Volver</button>
+          <h2 class="tarotPageTitle">📊 Mi Tarot</h2>
+          <div></div>
+        </div>
+        <div class="tarotPageBody">
+          ${sortedCards.length > 0 ? `
+            <div class="tarotSection">
+              <div class="tarotSectionTitle">Cartas más frecuentes</div>
+              <div class="tarotFreqGrid">
+                ${sortedCards.map(([name, count]) => `
+                  <div class="tarotFreqChip">
+                    <span class="tarotFreqName">${name}</span>
+                    <span class="tarotFreqCount">×${count}</span>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          ` : ''}
+
+          <div class="tarotSection">
+            <div class="tarotSectionTitle">Historial completo (${log.length} lectura${log.length !== 1 ? 's' : ''})</div>
+            ${historyHtml}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── PANTALLA PRINCIPAL ──
+  const recentReadings = log.slice(-3).reverse();
+  return `
+    <div class="tarotPage">
+      <div class="tarotPageHeader" style="justify-content:center;">
+        <h2 class="tarotPageTitle" style="text-align:center;">🔮 Tarot Consciente</h2>
+      </div>
+      <div class="tarotPageBody">
+        <div class="tarotHero">
+          <div class="tarotHeroIcon">🔮</div>
+          <p class="tarotHeroText">Saca 3 cartas de tu mazo físico.<br>Carl las interpreta con tu contexto personal.</p>
+          <div class="tarotHeroSub">${todayReadings.length} lectura(s) hoy</div>
+        </div>
+
+        <button class="tarotMainBtn" id="btnGoNewReading">✨ Nueva Lectura</button>
+
+        ${recentReadings.length > 0 ? `
+          <div class="tarotSection" style="margin-top:30px;">
+            <div class="tarotSectionTitle">
+              Recientes
+              <button class="tarotLinkBtn" id="btnGoStats">Ver todo ›</button>
+            </div>
+            ${recentReadings.map(r => `
+              <div class="tarotHistoryCard tarotHistoryCardSmall">
+                <div class="tarotHistoryMeta">
+                  <span>${new Date(r.timestamp).toLocaleDateString('es', {weekday:'short', day:'numeric', month:'short'})}</span>
+                </div>
+                <div class="tarotHistoryQuestion">${escapeHtml(r.question || "Lectura general")}</div>
+                <div class="tarotHistoryCards">${(r.cards||[]).join(" · ")}</div>
+              </div>
+            `).join("")}
+          </div>
+        ` : `
+          <div class="tarotEmpty" style="margin-top:30px;">
+            Aún no has hecho ninguna lectura. ¡Prueba con tu primera tirada!
+          </div>
+        `}
       </div>
     </div>
   `;
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
 
-  document.getElementById("btnInterpretTarot").addEventListener("click", async () => {
-    const q = document.getElementById("tarotQuestion").value.trim();
-    const c1 = document.getElementById("tarotCard1").value;
-    const c2 = document.getElementById("tarotCard2").value;
-    const c3 = document.getElementById("tarotCard3").value;
+// ─── WIRING: event listeners de la vista ────────────────────────────────────
+export function wireTarot(root) {
+  // Navegar a nueva lectura
+  root.querySelector('#btnGoNewReading')?.addEventListener('click', () => {
+    tarotViewState.screen = 'new';
+    if (window.renderApp) window.renderApp();
+  });
+
+  // Navegar a estadísticas
+  root.querySelector('#btnGoStats')?.addEventListener('click', () => {
+    tarotViewState.screen = 'stats';
+    if (window.renderApp) window.renderApp();
+  });
+
+  // Volver
+  root.querySelector('#btnTarotBack')?.addEventListener('click', () => {
+    tarotViewState.screen = 'main';
+    if (window.renderApp) window.renderApp();
+  });
+
+  // Interpretar
+  root.querySelector('#btnInterpretTarot')?.addEventListener('click', async () => {
+    const q = root.querySelector('#tarotQuestion')?.value.trim() || '';
+    const c1 = root.querySelector('#tarotCard1')?.value;
+    const c2 = root.querySelector('#tarotCard2')?.value;
+    const c3 = root.querySelector('#tarotCard3')?.value;
 
     if (!c1 || !c2 || !c3) {
       alert("Por favor selecciona las 3 cartas que sacaste de tu mazo.");
       return;
     }
 
-    const btn = document.getElementById("btnInterpretTarot");
-    const loading = document.getElementById("tarotLoading");
-    const resultDiv = document.getElementById("tarotResult");
-    const inputsContainer = document.getElementById("tarotInputsContainer");
-    
-    btn.style.display = "none";
-    inputsContainer.style.display = "none";
-    loading.style.display = "block";
-    resultDiv.style.display = "none";
+    const inputsEl = root.querySelector('#tarotInputsContainer');
+    const loadingEl = root.querySelector('#tarotLoading');
+    const resultEl = root.querySelector('#tarotResult');
+    const btn = root.querySelector('#btnInterpretTarot');
+
+    inputsEl.style.display = 'none';
+    btn.style.display = 'none';
+    loadingEl.style.display = 'block';
+    resultEl.style.display = 'none';
 
     try {
-      const systemPrompt = `Eres Carl, la inteligencia personal del usuario. Actúa como un lector de tarot analítico y psicológico. 
+      const systemPrompt = `Eres Carl, la inteligencia personal del usuario. Actúa como un lector de tarot analítico y psicológico.
 El usuario ha sacado 3 cartas de su mazo físico.
 Instrucciones:
-1. Analiza las cartas sacadas y cómo se relacionan entre sí en posiciones de Pasado, Presente y Futuro/Resultado.
+1. Analiza las cartas en sus posiciones de Pasado, Presente y Futuro.
 2. Relaciona la lectura con la pregunta del usuario. Si no hay pregunta, haz una lectura general.
 3. Termina con un consejo práctico breve.
-4. Usa un tono reflexivo, profundo y empático. Escribe en Markdown de forma limpia y organizada.`;
+4. Usa un tono reflexivo, profundo y empático. Escribe en Markdown de forma limpia.`;
 
       const userPrompt = `Mis cartas son:
 1. ${c1} (Pasado/Base)
@@ -155,136 +273,219 @@ Mi pregunta/tema es: ${q || "Lectura general"}`;
 
       const ollamaUrl = localStorage.getItem("memorycarl_ollama_url") || "http://127.0.0.1:11434";
       const ollamaModel = localStorage.getItem("memorycarl_ollama_model") || "llama3";
-      
+
       const ollamaRes = await fetch(`${ollamaUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: ollamaModel,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ],
+          messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
           stream: false
         })
       });
 
-      if (!ollamaRes.ok) throw new Error("No se pudo conectar a Ollama localmente. Verifica que la aplicación de Ollama esté abierta y corriendo.");
-      
+      if (!ollamaRes.ok) throw new Error("No se pudo conectar a Ollama. Verifica que esté abierto y corriendo.");
       const ollamaData = await ollamaRes.json();
       const interpretation = ollamaData.message.content;
 
-      // Save reading
+      // Guardar
       const log = getTarotLog();
       const now = new Date();
-      const reading = {
-        id: "tarot_" + Date.now(),
-        dateIso: now.toISOString().split('T')[0],
-        timestamp: now.getTime(),
-        question: q,
-        cards: [c1, c2, c3],
-        interpretation
-      };
-      log.push(reading);
+      log.push({ id: "tarot_" + Date.now(), dateIso: now.toISOString().split('T')[0], timestamp: now.getTime(), question: q, cards: [c1, c2, c3], interpretation });
       if (window.persist) window.persist();
-      
-      // Attempt to refresh the home widget stats if we are on the home tab
-      if (window.renderApp) setTimeout(window.renderApp, 100);
 
-      const htmlContent = (window.marked && window.marked.parse) 
-        ? window.marked.parse(interpretation) 
+      const htmlContent = (window.marked && window.marked.parse)
+        ? window.marked.parse(interpretation)
         : escapeHtml(interpretation).replace(/\n/g, '<br>');
 
-      loading.style.display = "none";
-      resultDiv.style.display = "block";
-      resultDiv.style.border = "none";
-      resultDiv.style.padding = "0";
-      resultDiv.style.background = "transparent";
-      resultDiv.innerHTML = `
-        <div style="text-align:center; margin-bottom:20px; font-size:13px; color:#d8b4fe; display:flex; justify-content:center; gap:8px; flex-wrap:wrap;">
-          <div style="background:rgba(192,132,252,0.1); border:1px solid rgba(192,132,252,0.3); padding:6px 10px; border-radius:8px;">
-            <div style="font-size:10px; text-transform:uppercase; opacity:0.7; margin-bottom:2px;">Pasado</div>
-            <div style="font-weight:bold;">${c1}</div>
-          </div>
-          <div style="background:rgba(192,132,252,0.1); border:1px solid rgba(192,132,252,0.3); padding:6px 10px; border-radius:8px;">
-            <div style="font-size:10px; text-transform:uppercase; opacity:0.7; margin-bottom:2px;">Presente</div>
-            <div style="font-weight:bold;">${c2}</div>
-          </div>
-          <div style="background:rgba(192,132,252,0.1); border:1px solid rgba(192,132,252,0.3); padding:6px 10px; border-radius:8px;">
-            <div style="font-size:10px; text-transform:uppercase; opacity:0.7; margin-bottom:2px;">Futuro</div>
-            <div style="font-weight:bold;">${c3}</div>
-          </div>
+      loadingEl.style.display = 'none';
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = `
+        <div class="tarotResultCards">
+          <div class="tarotResultCard"><div class="tarotResultCardPos">Pasado</div><div class="tarotResultCardName">${c1}</div></div>
+          <div class="tarotResultCard"><div class="tarotResultCardPos">Presente</div><div class="tarotResultCardName">${c2}</div></div>
+          <div class="tarotResultCard"><div class="tarotResultCardPos">Futuro</div><div class="tarotResultCardName">${c3}</div></div>
         </div>
-        <div style="font-size:15px; line-height:1.6; color:#e4e4e7; max-height: 55vh; overflow-y: auto; padding-right: 5px;">
-          ${htmlContent}
-        </div>
+        <div class="tarotResultText">${htmlContent}</div>
+        <button class="tarotMainBtn" id="btnBackFromResult" style="margin-top:20px; background:#27272a; border: 1px solid #3f3f46;">← Nueva lectura</button>
       `;
-      btn.style.display = "block";
-      btn.textContent = "Cerrar Lectura";
-      btn.onclick = () => { document.getElementById('tarotModal').remove(); };
+      root.querySelector('#btnBackFromResult')?.addEventListener('click', () => {
+        tarotViewState.screen = 'main';
+        if (window.renderApp) window.renderApp();
+      });
 
     } catch (e) {
-      loading.style.display = "none";
-      inputsContainer.style.display = "block";
-      btn.style.display = "block";
+      loadingEl.style.display = 'none';
+      inputsEl.style.display = 'block';
+      btn.style.display = 'block';
       alert("Error: " + e.message);
     }
   });
-};
+}
 
-window.openTarotStatsModal = function() {
-  const log = getTarotLog();
-  
-  if (log.length === 0) {
-    alert("Aún no tienes lecturas de Tarot registradas.");
-    return;
-  }
-
-  const cardCounts = {};
-  log.forEach(r => {
-    (r.cards||[]).forEach(c => {
-      cardCounts[c] = (cardCounts[c] || 0) + 1;
-    });
-  });
-  
-  const sortedCards = Object.entries(cardCounts).sort((a,b) => b[1] - a[1]).slice(0, 8);
-  
-  const historyHtml = log.slice(-15).reverse().map(r => `
-    <div style="background: #27272a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border:1px solid #3f3f46;">
-      <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-        <div style="font-size: 12px; color: #a1a1aa;">${new Date(r.timestamp).toLocaleString()}</div>
-      </div>
-      <div style="font-weight: bold; margin-bottom: 8px; font-size:14px;">${escapeHtml(r.question || "Lectura general")}</div>
-      <div style="color: #c084fc; font-size: 13px; margin-bottom: 10px;">${(r.cards||[]).join(" • ")}</div>
-      <details style="font-size:13px; color:#d4d4d8;">
-        <summary style="cursor:pointer; outline:none; color:#a1a1aa;">Ver interpretación</summary>
-        <div style="margin-top:10px; line-height:1.5;">
-          ${(window.marked && window.marked.parse) ? window.marked.parse(r.interpretation||'') : escapeHtml(r.interpretation||'').replace(/\n/g, '<br>')}
-        </div>
-      </details>
-    </div>
-  `).join("");
-
-  const statsHtml = `
-    <div id="tarotStatsModal" class="modalOverlay" style="display:flex; z-index:9999;">
-      <div class="modalContent" style="max-width: 550px; background: #18181b; border: 1px solid #3f3f46; max-height: 90vh; overflow-y:auto;">
-        <div class="modalHeader" style="border-bottom: 1px solid #3f3f46; padding-bottom:10px; margin-bottom:15px;">
-          <h3 style="color:#c084fc;">📊 Estadísticas de Tarot</h3>
-          <button class="closeBtn" onclick="document.getElementById('tarotStatsModal').remove()">×</button>
-        </div>
-        <div class="modalBody">
-          <h4 style="margin-bottom:10px; color:#e4e4e7;">Tus cartas más frecuentes</h4>
-          <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom: 25px;">
-            ${sortedCards.map(c => `<div style="background:#27272a; border:1px solid #52525b; padding:6px 12px; border-radius:16px; font-size:13px;">${c[0]} <span style="color:#4ade80; font-weight:bold; margin-left:4px;">x${c[1]}</span></div>`).join("")}
-          </div>
-          
-          <h4 style="margin-bottom:10px; color:#e4e4e7;">Historial Reciente (Últimas 15)</h4>
-          <div>
-            ${historyHtml}
-          </div>
-        </div>
-      </div>
-    </div>
+// ─── CSS inyectado dinámicamente ─────────────────────────────────────────────
+export function injectTarotStyles() {
+  if (document.getElementById('tarot-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'tarot-styles';
+  style.textContent = `
+    .tarotPage {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      background: var(--bg, #0f0f17);
+    }
+    .tarotPageHeader {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid rgba(168,85,247,0.15);
+      flex-shrink: 0;
+    }
+    .tarotPageTitle {
+      font-size: 18px;
+      font-weight: 700;
+      color: #c084fc;
+      margin: 0;
+    }
+    .tarotBackBtn {
+      background: none;
+      border: none;
+      color: #a1a1aa;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 4px 0;
+    }
+    .tarotPageBody {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 16px 100px;
+    }
+    .tarotHero {
+      text-align: center;
+      padding: 30px 0 20px;
+    }
+    .tarotHeroIcon { font-size: 56px; margin-bottom: 12px; }
+    .tarotHeroText { color: #a1a1aa; font-size: 15px; line-height: 1.5; margin: 0 0 8px; }
+    .tarotHeroSub { color: #c084fc; font-size: 13px; font-weight: 600; }
+    .tarotMainBtn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+    }
+    .tarotForm { display: flex; flex-direction: column; }
+    .tarotLabel {
+      font-size: 13px;
+      font-weight: 600;
+      color: #d4d4d8;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .tarotTextarea {
+      width: 100%;
+      background: #1c1c27;
+      color: #fff;
+      border: 1px solid #3f3f46;
+      border-radius: 10px;
+      padding: 12px;
+      font-family: inherit;
+      font-size: 15px;
+      resize: none;
+      box-sizing: border-box;
+    }
+    .tarotCardRow {
+      display: flex;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    .tarotCardSlot { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .tarotCardLabel {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #a855f7;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .tarotSelect {
+      background: #1c1c27;
+      color: #fff;
+      border: 1px solid #3f3f46;
+      border-radius: 8px;
+      padding: 8px 6px;
+      font-size: 13px;
+      width: 100%;
+    }
+    .tarotSection { margin-bottom: 24px; }
+    .tarotSectionTitle {
+      font-size: 13px;
+      font-weight: 700;
+      color: #71717a;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .tarotLinkBtn {
+      background: none;
+      border: none;
+      color: #a855f7;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .tarotHistoryCard {
+      background: #1c1c27;
+      border: 1px solid #2d2d3d;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 10px;
+    }
+    .tarotHistoryMeta { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; color: #71717a; }
+    .tarotHistoryQuestion { font-weight: 600; font-size: 14px; margin-bottom: 6px; color: #e4e4e7; }
+    .tarotHistoryCards { color: #c084fc; font-size: 13px; margin-bottom: 8px; }
+    .tarotHistoryDetails summary { color: #71717a; font-size: 13px; cursor: pointer; }
+    .tarotHistoryText { margin-top: 10px; font-size: 14px; line-height: 1.6; color: #d4d4d8; }
+    .tarotFreqGrid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tarotFreqChip {
+      background: #1c1c27;
+      border: 1px solid #3f3f46;
+      border-radius: 20px;
+      padding: 5px 12px;
+      font-size: 13px;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .tarotFreqName { color: #e4e4e7; }
+    .tarotFreqCount { color: #4ade80; font-weight: 700; }
+    .tarotEmpty { color: #71717a; font-size: 14px; text-align: center; padding: 20px 0; }
+    .tarotResultCards {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
+      justify-content: center;
+    }
+    .tarotResultCard {
+      flex: 1;
+      background: rgba(168,85,247,0.1);
+      border: 1px solid rgba(168,85,247,0.3);
+      border-radius: 10px;
+      padding: 10px 8px;
+      text-align: center;
+    }
+    .tarotResultCardPos { font-size: 10px; text-transform: uppercase; color: #a855f7; font-weight: 700; margin-bottom: 4px; }
+    .tarotResultCardName { font-size: 13px; font-weight: 600; color: #f0e6ff; }
+    .tarotResultText { font-size: 15px; line-height: 1.7; color: #e4e4e7; }
+    @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.8; } }
   `;
-  document.body.insertAdjacentHTML('beforeend', statsHtml);
-};
+  document.head.appendChild(style);
+}

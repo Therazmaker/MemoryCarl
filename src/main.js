@@ -3,7 +3,7 @@ import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
-import { renderTarotWidget } from "./tarot/tarot.js";
+import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -2583,6 +2583,7 @@ function view(){
         ${state.tab==="settings" ? viewSettings() : ""}
         ${state.tab==="football" ? viewFootball() : ""}
         ${state.tab==="neurochat" ? viewNeuroChat() : ""}
+        ${state.tab==="tarot" ? viewTarot() : ""}
         ${state.tab==="dayengine" ? (dayUiState.view === "detail" && dayUiState.selectedDayId
           ? viewDayDetail(getDaysForEngine().find(d => d.id === dayUiState.selectedDayId) || null)
           : viewDayCalendar()) : ""}
@@ -3026,6 +3027,10 @@ function view(){
   // NeuroChat tab init
   if(state.tab==="neurochat"){
     try{ wireNeuroChat(root); }catch(e){ console.error(e); }
+  }
+  // Tarot tab init
+  if(state.tab==="tarot"){
+    try{ injectTarotStyles(); wireTarot(root); }catch(e){ console.error(e); }
   }
   // Daily Memory Engine tab init
   if(state.tab==="dayengine"){
@@ -6579,12 +6584,13 @@ function wireHome(root){
   const sleepCard = root.querySelector("#homeSleepCard");
   if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepHistory(); });
 
-  const btnNewTarot = root.querySelector("#btnNewTarot");
-  if(btnNewTarot) btnNewTarot.addEventListener("click", () => { if(window.openTarotModal) window.openTarotModal(); });
-  
-  const btnTarotStats = root.querySelector("#btnTarotStats");
-  if(btnTarotStats) btnTarotStats.addEventListener("click", () => { if(window.openTarotStatsModal) window.openTarotStatsModal(); });
-
+  // Navegar a la página de Tarot al tocar la card del Home
+  const tarotCard = root.querySelector("#homeTarotCard");
+  if(tarotCard) tarotCard.addEventListener("click", () => {
+    state.tab = "tarot";
+    injectTarotStyles();
+    if(window.renderApp) window.renderApp();
+  });
 
   // Mood sprites (daily emotion)
   const moodPill = root.querySelector("#homeMoodPill");
