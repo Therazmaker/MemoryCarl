@@ -52,7 +52,7 @@ Campos esperados en el JSON:
 - "amount": número (el valor monetario extraído, siempre positivo)
 - "category": Categoría lógica (ej. "Alimentación", "Transporte", "Ingresos", "Vivienda", "Ocio", "Otros")
 - "note": Breve descripción o nota (ej. "Café en Starbucks")
-- "accountId": Intenta deducirlo. Si dice "efectivo", usa "cash". Si dice "tarjeta", "banco", usa "bank". Si no dice nada, usa "default".
+- "accountId": Intenta deducirlo. Si dice "efectivo", usa "cash". Si dice "tarjeta", "banco", usa "bank". Si el gasto es para o de "Fergis", usa "fergis". Si no dice nada, usa "default".
 
 Asegúrate de que la respuesta sea 100% JSON parseable. Ejemplo: {"type": "expense", "amount": 15, "category": "Alimentación", "note": "Café", "accountId": "default"}`;
 

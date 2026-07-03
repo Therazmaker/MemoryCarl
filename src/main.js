@@ -13396,6 +13396,119 @@ function openFinanceAccountModal(prefill=null){
 }
 
 
+function financeAccountStats(accountId) {
+  const ledger = financeActiveLedger() || [];
+  const now = new Date();
+  const currentMonth = now.toISOString().slice(0,7);
+  
+  const getWeekKey = (dStr) => {
+    const d = new Date(dStr);
+    const day = d.getDay() || 7;
+    d.setHours(-24 * (day - 1));
+    return d.toISOString().slice(0,10);
+  };
+  
+  let monthExpense = 0;
+  let monthIncome = 0;
+  let weekStats = {};
+  
+  ledger.forEach(e => {
+    if(e.accountId !== accountId) return;
+    if(!e.date) return;
+    
+    const dStr = String(e.date);
+    const amt = Number(e.amount||0);
+    const isExpense = e.type === "expense";
+    
+    if (dStr.startsWith(currentMonth)) {
+      if(isExpense) monthExpense += amt;
+      else monthIncome += amt;
+      
+      const wKey = getWeekKey(dStr);
+      if(!weekStats[wKey]) weekStats[wKey] = { expense: 0, income: 0 };
+      if(isExpense) weekStats[wKey].expense += amt;
+      else weekStats[wKey].income += amt;
+    }
+  });
+
+  const sortedWeeks = Object.keys(weekStats).sort().reverse().map(wk => ({
+    weekStart: wk,
+    expense: weekStats[wk].expense,
+    income: weekStats[wk].income
+  }));
+
+  return { monthExpense, monthIncome, sortedWeeks, currentMonth };
+}
+
+function openFinanceAccountDetails(accountId) {
+  const acc = (state.financeAccounts||[]).find(a=>a.id===accountId);
+  if(!acc) return;
+  
+  const stats = financeAccountStats(accountId);
+  const isFergis = String(acc.name||"").toLowerCase().includes("fergis");
+  const fmt = _financeFmt;
+  
+  const host = document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modalBackdrop finAccBackdrop';
+  
+  const weeksHtml = stats.sortedWeeks.map((w) => {
+    return `
+      <div class="finAccDetailsRow">
+        <div class="finAccDetailsLabel">Semana del ${w.weekStart}</div>
+        <div class="finAccDetailsValRow">
+          <div class="finAccDetailsVal exp">S/ ${fmt(w.expense)}</div>
+          ${!isFergis ? `<div class="finAccDetailsVal inc">+ S/ ${fmt(w.income)}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  backdrop.innerHTML = `
+    <div class="modal finAccDetailsModal" role="dialog" aria-label="Detalles de Cuenta">
+      <div class="finEntryTop">
+        <button class="iconBtn" id="finAccDetClose" aria-label="Cerrar">←</button>
+        <div class="finEntryTopTitle">${escapeHtml(acc.name)}</div>
+        <button class="iconBtn" id="finAccDetEdit" title="Editar">✏️</button>
+      </div>
+
+      <div class="finEntryScroll">
+        <div class="finAccDetailsHero">
+          <div class="finAccDetailsHeroLabel">${isFergis ? 'Uso este mes' : 'Saldo Actual'}</div>
+          <div class="finAccDetailsHeroVal">S/ ${fmt(isFergis ? stats.monthExpense : acc.balance)}</div>
+        </div>
+
+        ${!isFergis ? `
+        <div class="finAccDetailsStatsRow">
+          <div class="finAccDetailsStat">
+            <div class="statLabel">Ingresos del mes</div>
+            <div class="statVal inc">+ S/ ${fmt(stats.monthIncome)}</div>
+          </div>
+          <div class="finAccDetailsStat">
+            <div class="statLabel">Gastos del mes</div>
+            <div class="statVal exp">- S/ ${fmt(stats.monthExpense)}</div>
+          </div>
+        </div>
+        ` : ''}
+
+        <div class="finAccDetailsTitle">Desglose Semanal</div>
+        <div class="finAccDetailsList">
+          ${weeksHtml || '<div class="muted" style="text-align:center;padding:20px;">Sin movimientos este mes</div>'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(backdrop);
+  const close = ()=> backdrop.remove();
+  backdrop.querySelector('#finAccDetClose').addEventListener('click', close);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
+  backdrop.querySelector('#finAccDetEdit').addEventListener('click', ()=>{ 
+    close(); 
+    openFinanceAccountEdit(accountId); 
+  });
+}
+
 function openFinanceAccountEdit(accountId){
   const acc = (state.financeAccounts||[]).find(a=>a.id===accountId);
   if(!acc) return;
@@ -14640,6 +14753,19 @@ function financeAccountIncomeFlow(accountId, monthKey){
   return (financeActiveLedger()||[]).reduce((sum, entry)=>{
     if(String(entry.accountId||"") !== accId) return sum;
     if(entry.type !== "income") return sum;
+    if(!String(entry.date||"").startsWith(mk)) return sum;
+    return sum + Math.max(0, Number(entry.amount||0));
+  }, 0);
+}
+
+function financeAccountExpenseFlow(accountId, monthKey){
+  const accId = String(accountId||"");
+  const mk = String(monthKey||"");
+  if(!accId || !mk) return 0;
+
+  return (financeActiveLedger()||[]).reduce((sum, entry)=>{
+    if(String(entry.accountId||"") !== accId) return sum;
+    if(entry.type !== "expense") return sum;
     if(!String(entry.date||"").startsWith(mk)) return sum;
     return sum + Math.max(0, Number(entry.amount||0));
   }, 0);
@@ -17066,12 +17192,13 @@ function viewFinance(){
   const accountCards = (state.financeAccounts||[]).map(a=>{
     const bal = Number(a.balance||0);
     const isFergisAccount = String(a.name||"").toLowerCase().includes("fergis");
-    const monthIncomeFlow = isFergisAccount ? financeAccountIncomeFlow(a.id, monthKey) : 0;
-    const shownValue = isFergisAccount ? monthIncomeFlow : bal;
-    const isPos = shownValue >= 0;
-    const balanceLabel = isFergisAccount ? "Flujo de ingresos (mes)" : "Saldo";
+    // Show expenses for Fergis account instead of income, since it's used to track what Carlos spends for her
+    const monthFergisFlow = isFergisAccount ? financeAccountExpenseFlow(a.id, monthKey) : 0;
+    const shownValue = isFergisAccount ? monthFergisFlow : bal;
+    const isPos = isFergisAccount ? true : (shownValue >= 0); // Force positive look (green/neutral) for Fergis flow
+    const balanceLabel = isFergisAccount ? "Uso del mes" : "Saldo";
     return `
-      <div class="finAccCard" onclick="openFinanceAccountEdit('${a.id}')">
+      <div class="finAccCard" onclick="openFinanceAccountDetails('${a.id}')">
         <div class="finAccName">${escapeHtml(a.name)}</div>
         <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">S/ ${fmt(shownValue)}</div>
         <div class="finAccHint">${balanceLabel}</div>
@@ -17609,6 +17736,7 @@ try{
   window.financeShiftMonth = financeShiftMonth;
   window.financeResetMonth = financeResetMonth;
   window.openFinanceAccountModal = openFinanceAccountModal;
+  window.openFinanceAccountDetails = openFinanceAccountDetails;
   window.openFinanceAccountEdit = openFinanceAccountEdit;
   window.openFinanceEntryModal = openFinanceEntryModal;
   window.openFinanceTypeModal = openFinanceTypeModal;

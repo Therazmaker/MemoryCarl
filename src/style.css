@@ -1650,6 +1650,91 @@ body{
   padding: 14px 14px;
   outline: none;
 }
+/* ===== Finance: Account Details Modal ===== */
+.finAccDetailsModal{
+  padding: 0;
+  overflow: hidden;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+.finAccDetailsHero{
+  text-align: center;
+  padding: 24px 20px;
+  background: rgba(255,255,255,.02);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.finAccDetailsHeroLabel{
+  font-size: 12px;
+  color: rgba(255,255,255,.5);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+.finAccDetailsHeroVal{
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: -1px;
+}
+.finAccDetailsStatsRow{
+  display: flex;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.finAccDetailsStat{
+  flex: 1;
+  text-align: center;
+  padding: 16px;
+}
+.finAccDetailsStat:first-child{
+  border-right: 1px solid rgba(255,255,255,.06);
+}
+.statLabel{
+  font-size: 11px;
+  color: rgba(255,255,255,.5);
+  margin-bottom: 4px;
+}
+.statVal{
+  font-size: 16px;
+  font-weight: 700;
+}
+.statVal.inc{ color: #36d399; }
+.statVal.exp{ color: #fb7185; }
+
+.finAccDetailsTitle{
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255,255,255,.5);
+  padding: 20px 20px 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.finAccDetailsList{
+  padding: 0 20px 20px;
+}
+.finAccDetailsRow{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.finAccDetailsRow:last-child{
+  border-bottom: none;
+}
+.finAccDetailsLabel{
+  font-size: 14px;
+  font-weight: 500;
+}
+.finAccDetailsValRow{
+  text-align: right;
+}
+.finAccDetailsVal{
+  font-size: 14px;
+  font-weight: 700;
+}
+.finAccDetailsVal.inc{ color: #36d399; margin-top: 4px; font-size: 12px; }
+.finAccDetailsVal.exp{ color: #fb7185; }
+
 .finEntryScroll select{ padding: 12px 14px; }
 .finEntryName{
   display:flex;
