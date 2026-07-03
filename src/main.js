@@ -4333,18 +4333,30 @@ function getMoodScoreById(id){
   return Number.isFinite(n) ? n : null;
 }
 
-function getMoodEntry(iso){
+function getMoodEntries(iso){
   const map = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
   const e = map[String(iso||"")];
-  if(!e || typeof e!=="object") return null;
-  return {
+  if(!e) return [];
+  
+  // Backward compatibility: if it's a single object (not an array), wrap it
+  const entries = Array.isArray(e) ? e : [e];
+  
+  return entries.map(entry => ({
     iso: String(iso),
-    spriteId: e.spriteId ? String(e.spriteId) : "",
-    label: e.label ? String(e.label) : "",
-    tags: Array.isArray(e.tags) ? e.tags.map(String) : [],
-    note: e.note ? String(e.note) : "",
-    ts: e.ts ? String(e.ts) : ""
-  };
+    spriteId: entry.spriteId ? String(entry.spriteId) : "",
+    label: entry.label ? String(entry.label) : "",
+    tags: Array.isArray(entry.tags) ? entry.tags.map(String) : [],
+    activities: Array.isArray(entry.activities) ? entry.activities.map(String) : [],
+    energy: entry.energy ?? 0,
+    note: entry.note ? String(entry.note) : "",
+    ts: entry.ts ? String(entry.ts) : ""
+  }));
+}
+
+function getMoodEntry(iso){
+  const entries = getMoodEntries(iso);
+  if(entries.length === 0) return null;
+  return entries[entries.length - 1]; // Return the latest one for legacy usage
 }
 
 function setMoodEntry(iso, spriteId, label="", tags=[], note=""){
@@ -4394,10 +4406,11 @@ function openMoodPickerModal(iso, opts={}){
   const all = getAllMoodSprites();
   const faces = faceIds.map(id=>all.find(s=>String(s.id)===id)).filter(Boolean);
 
-  let selectedId  = existing?.spriteId || "";
-  let activities  = new Set(Array.isArray(existing?.activities) ? existing.activities : []);
-  let energy      = existing?.energy ?? 0;   // 0 = not set, 1-5
-  let note        = existing?.note || "";
+  // Always start blank for a new entry in the array
+  let selectedId  = "";
+  let activities  = new Set();
+  let energy      = 0;
+  let note        = "";
 
   // Map legacy ids → face ids
   if(selectedId && !faceIds.includes(selectedId)){
@@ -4742,16 +4755,19 @@ function openMoodPickerModal(iso, opts={}){
     backdrop.querySelector("#mpmSave")?.addEventListener("click",()=>{
       state.moodDaily = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
       const key=String(iso||"");
-      if(!selectedId){ delete state.moodDaily[key]; }
-      else {
-        state.moodDaily[key]={
+      
+      let arr = Array.isArray(state.moodDaily[key]) ? state.moodDaily[key] : (state.moodDaily[key] ? [state.moodDaily[key]] : []);
+      
+      if(selectedId) {
+        arr.push({
           spriteId: selectedId,
           label: FACE_LABELS[selectedId]||selectedId,
           activities: Array.from(activities),
           energy,
           note,
           ts: new Date().toISOString()
-        };
+        });
+        state.moodDaily[key] = arr;
       }
       persist(); view();
       if(typeof opts.onSaved==="function") opts.onSaved({iso,spriteId:selectedId,activities:Array.from(activities),energy,note});
@@ -5530,20 +5546,64 @@ function viewHome(){
     </label>
   `).join("") : `<div class="muted">Sin pendientes 🎈</div>`;
 
-    const moodMap = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
-  const getMoodMini = (iso)=>{
+  const moodMap = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
+  
+  // Get mood entries supporting both old (object) and new (array) format
+  const getEntriesForDay = (iso) => {
     const e = moodMap[String(iso||"")];
-    if(!e || !e.spriteId) return "";
-    const svg = _getMoodSvg(e.spriteId, true);
-    if(!svg) return "";
-    return `<div class="dayMoodMini djp-mood-mini">${svg}</div>`;
+    if(!e) return [];
+    return Array.isArray(e) ? e : [e];
+  };
+
+  const getMoodMini = (iso)=>{
+    const entries = getEntriesForDay(iso);
+    if(!entries.length) return "";
+    // For days with multiple moods, show stacked mini faces
+    const faces = entries.map(e => {
+      const svg = _getMoodSvg(e.spriteId, true);
+      return svg ? svg : "";
+    }).filter(Boolean).slice(0, 2).join(""); // show at most 2 mini faces
+    if(!faces) return "";
+    return `<div class="dayMoodMini djp-mood-mini">${faces}</div>`;
   };
 
   const todayIso = isoDate(now);
-  const todayMoodEntry = moodMap[todayIso];
-  const moodPillInner = todayMoodEntry?.spriteId
-    ? `<div class="djp-mood-pill-face">${_getMoodSvg(todayMoodEntry.spriteId, false)}</div>`
-    : `<div class="moodPillPlus">＋</div>`;
+  const todayEntries = getEntriesForDay(todayIso);
+
+  // Format time from ISO timestamp
+  const fmtTime = (ts) => {
+    if(!ts) return "";
+    try {
+      const d = new Date(ts);
+      return d.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: true });
+    } catch(e){ return ""; }
+  };
+
+  const FACE_COLORS_MAP = {
+    incredible:"#4ADE80", good:"#86EFAC", meh:"#60A5FA", bad:"#FBBF24", horrible:"#F87171"
+  };
+  const FACE_LABEL_MAP = {
+    incredible:"Increíble", good:"Bien", meh:"Meh", bad:"Mal", horrible:"Horrible"
+  };
+
+  // Build timeline rows for today's moods
+  const moodTimelineRows = todayEntries.map(entry => {
+    const svg = _getMoodSvg(entry.spriteId, false);
+    const color = FACE_COLORS_MAP[entry.spriteId] || "#7c5cff";
+    const label = entry.label || FACE_LABEL_MAP[entry.spriteId] || entry.spriteId;
+    const timeStr = fmtTime(entry.ts);
+    const acts = (entry.activities||[]).slice(0,3).join(" · ");
+    return `
+      <div class="moodTimelineRow">
+        <div class="moodTimelineFace" style="--fc:${color}">${svg||"😶"}</div>
+        <div class="moodTimelineInfo">
+          <div class="moodTimelineLabel" style="color:${color}">${escapeHtml(label)}</div>
+          ${acts ? `<div class="moodTimelineActs">${escapeHtml(acts)}</div>` : ""}
+        </div>
+        <div class="moodTimelineTime">${escapeHtml(timeStr)}</div>
+      </div>
+    `;
+  }).join("");
 
   const weekHtml = days.map(x=>`
     <div class="dayPill ${x.isToday ? "today":""}" data-day="${x.iso}">
@@ -5553,10 +5613,11 @@ function viewHome(){
     </div>
   `).join("") + `
     <div class="dayPill moodPill" id="homeMoodPill" data-mood-day="${todayIso}">
-      ${moodPillInner}
+      ${todayEntries.length ? `<div class="djp-mood-pill-face">${_getMoodSvg(todayEntries[todayEntries.length-1].spriteId, false)}</div>` : `<div class="moodPillPlus">＋</div>`}
       <div class="dayAbbr">Mood</div>
     </div>
   `;
+
 
 
 const sleepSeries = getSleepWeekSeries();
@@ -5586,6 +5647,20 @@ const sleepBars = renderSleepBars(sleepSeries);
         ${sleepBars}
       </section>
       ${renderTarotWidget()}
+
+      <section class="card homeCard homeMoodCard" id="homeMoodCard">
+        <div class="cardTop">
+          <div>
+            <h2 class="cardTitle">😊 Emociones</h2>
+            <div class="small">${todayEntries.length ? `${todayEntries.length} registro${todayEntries.length>1?"s":""} hoy` : "Sin registros hoy"}</div>
+          </div>
+          <button class="iconBtn" id="btnAddMoodEntry" title="Registrar emoción">＋</button>
+        </div>
+        <div class="hr"></div>
+        <div class="moodTimeline" id="moodTimeline">
+          ${moodTimelineRows || `<div class="muted" style="text-align:center;padding:16px 0;">Toca ＋ para registrar cómo te sientes</div>`}
+        </div>
+      </section>
 
       <section class="card homeCard" id="homeRemindersCard">
         <div class="cardTop">
@@ -6593,13 +6668,22 @@ function wireHome(root){
     view();
   });
 
-  // Mood sprites (daily emotion)
+  // Mood sprites (daily emotion) — week strip pill
   const moodPill = root.querySelector("#homeMoodPill");
   if(moodPill){
     moodPill.addEventListener("click", (e)=>{
       e.preventDefault();
       const iso = moodPill.getAttribute("data-mood-day") || isoDate(new Date());
-      openMoodPickerModal(iso, { onSaved: ()=>{} });
+      openMoodPickerModal(iso, { onSaved: ()=>view() });
+    });
+  }
+
+  // + button on the mood card
+  const btnAddMoodEntry = root.querySelector("#btnAddMoodEntry");
+  if(btnAddMoodEntry){
+    btnAddMoodEntry.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      openMoodPickerModal(isoDate(new Date()), { onSaved: ()=>view() });
     });
   }
 
@@ -6608,7 +6692,7 @@ function wireHome(root){
     p.addEventListener("click", ()=>{
       const iso = p.getAttribute("data-day") || "";
       if(!iso) return;
-      openMoodPickerModal(iso, { onSaved: ()=>{} });
+      openMoodPickerModal(iso, { onSaved: ()=>view() });
     });
   });
 
