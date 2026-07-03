@@ -13289,7 +13289,12 @@ function financeMonthData(){
   let income = 0;
   let expense = 0;
 
+  const fergisAccountIds = (state.financeAccounts||[])
+    .filter(a => String(a.name||"").toLowerCase().includes("fergis"))
+    .map(a => a.id);
+
   (financeActiveLedger()||[]).forEach(e=>{
+    if(fergisAccountIds.includes(e.accountId)) return; // Exclude Fergis from global stats
     if(String(e.date||"").startsWith(ym)){
       if(e.type==="income") income += Number(e.amount||0);
       if(e.type==="expense") expense += Number(e.amount||0);
@@ -14671,7 +14676,12 @@ function financeMonthDataAdvanced(){
   const dailyIncome = Array(daysInMonth).fill(0);
   const dailyExpense = Array(daysInMonth).fill(0);
 
+  const fergisAccountIds = (state.financeAccounts||[])
+    .filter(a => String(a.name||"").toLowerCase().includes("fergis"))
+    .map(a => a.id);
+
   (financeActiveLedger()||[]).forEach(e=>{
+    if(fergisAccountIds.includes(e.accountId)) return; // Exclude Fergis from global projections
     const ds = String(e.date||"");
     if(ds.startsWith(monthKey)){
       const parts = ds.slice(0,10).split("-");
@@ -15375,9 +15385,14 @@ function financeComputePillars(monthKey){
     }catch(e){ return false; }
   };
 
+  const fergisAccountIds = (state.financeAccounts||[])
+    .filter(a => String(a.name||"").toLowerCase().includes("fergis"))
+    .map(a => a.id);
+
   let market=0, services=0, debts=0, other=0;
   for(const e of ledger){
     if(e.archived) continue;
+    if(fergisAccountIds.includes(e.accountId)) continue; // Exclude from global pillars
     if(e.type!=="expense") continue;
     if(!isInMonth(e.date)) continue;
 
