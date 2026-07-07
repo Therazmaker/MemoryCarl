@@ -254,6 +254,7 @@ const LS = {
   moodDaily: "memorycarl_v2_mood_daily",
   moodSpritesCustom: "memorycarl_v2_mood_sprites_custom",
   moodActivityCats: "memorycarl_v2_mood_activity_cats",
+  lifeTasks: "memorycarl_v2_life_tasks",
 
   // NeuroClaw
   neuroclawFeedback: "memorycarl_v2_neuroclaw_feedback",
@@ -2025,6 +2026,7 @@ let state = {
   moodDaily: load(LS.moodDaily, {}),
   moodSpritesCustom: load(LS.moodSpritesCustom, []),
   moodActivityCats: load(LS.moodActivityCats, null),
+  lifeTasks: load(LS.lifeTasks, []),
   house: load(LS.house, seedHouse()),
   semana: load(LS.semana, seedSemana()),
   // Insights UI
@@ -2056,6 +2058,7 @@ function persist(){
   save(LS.moodDaily, state.moodDaily);
   save(LS.moodSpritesCustom, state.moodSpritesCustom);
   if(state.moodActivityCats) save(LS.moodActivityCats, state.moodActivityCats);
+  if(state.lifeTasks) save(LS.lifeTasks, state.lifeTasks);
 
   // House
   save(LS.house, state.house);
@@ -5410,7 +5413,207 @@ function renderNeuroClawAIBlock(){
     `;
 }
 
+// ===== LIFE TRACKER (TDA & Hábitos Vitales) =====
+
+const LIFE_TRACKER_DEFAULT_TASKS = [
+  { id:"lt_hair",    icon:"💇", title:"Lavar el pelo",      category:"higiene",  freqDays:3,  lastDone:null },
+  { id:"lt_nails",   icon:"💅", title:"Cortar uñas",        category:"higiene",  freqDays:14, lastDone:null },
+  { id:"lt_laundry", icon:"👕", title:"Lavar ropa",         category:"hogar",    freqDays:7,  lastDone:null },
+  { id:"lt_kitchen", icon:"🍽️", title:"Limpiar cocina",     category:"hogar",    freqDays:3,  lastDone:null },
+  { id:"lt_dishes",  icon:"🫧", title:"Fregar",             category:"hogar",    freqDays:1,  lastDone:null },
+  { id:"lt_room",    icon:"🧹", title:"Ordenar cuarto",     category:"hogar",    freqDays:5,  lastDone:null },
+  { id:"lt_shower",  icon:"🚿", title:"Ducha",              category:"higiene",  freqDays:1,  lastDone:null },
+  { id:"lt_teeth",   icon:"🦷", title:"Cepillar dientes",   category:"higiene",  freqDays:0.5,lastDone:null },
+];
+
+function lifeTasksGet() {
+  const tasks = Array.isArray(state.lifeTasks) ? state.lifeTasks : [];
+  if(!tasks.length) {
+    state.lifeTasks = JSON.parse(JSON.stringify(LIFE_TRACKER_DEFAULT_TASKS));
+    persist();
+    return state.lifeTasks;
+  }
+  return tasks;
+}
+
+function lifeTaskMarkDone(id) {
+  const tasks = lifeTasksGet();
+  const t = tasks.find(x=>x.id===id);
+  if(t) { t.lastDone = new Date().toISOString(); persist(); }
+}
+
+function lifeTaskAddCustom(title, icon, freqDays, category) {
+  const tasks = lifeTasksGet();
+  tasks.push({ id:"lt_custom_"+Date.now(), icon: icon||"📌", title, category: category||"otro", freqDays: Number(freqDays)||7, lastDone:null });
+  state.lifeTasks = tasks;
+  persist();
+}
+
+function lifeTaskDelete(id) {
+  state.lifeTasks = (state.lifeTasks||[]).filter(x=>x.id!==id);
+  persist();
+}
+
+function lifeTaskDaysSince(task) {
+  if(!task.lastDone) return Infinity;
+  const ms = Date.now() - new Date(task.lastDone).getTime();
+  return ms / (1000*60*60*24);
+}
+
+function lifeTaskUrgency(task) {
+  const since = lifeTaskDaysSince(task);
+  const ratio = task.freqDays > 0 ? since / task.freqDays : Infinity;
+  if(ratio >= 1.5) return "critical";  // muy atrasado
+  if(ratio >= 1.0) return "due";       // vencido hoy
+  if(ratio >= 0.7) return "soon";      // próximamente
+  return "ok";
+}
+
+function renderLifeTrackerCard() {
+  const tasks = lifeTasksGet();
+  const todayIso = new Date().toISOString().split("T")[0];
+  
+  // Auto-suggest payments from finance ledger
+  const ledger = Array.isArray(state.finance_ledger) ? state.finance_ledger : (Array.isArray(state.financeLedger) ? state.financeLedger : []);
+  const debtCategories = ["deudas","servicios","compromisos","tarjeta","pago","credito","seguro","renta","alquiler"];
+  const paymentTasks = [];
+  const seen = new Set();
+  ledger.forEach(e => {
+    const cat = String(e.category||"").toLowerCase();
+    if(!debtCategories.some(d=>cat.includes(d))) return;
+    const key = e.description ? String(e.description).substring(0,30).toLowerCase() : cat;
+    if(seen.has(key)) return;
+    seen.add(key);
+    // Check if already in lifeTasks
+    const alreadyExists = tasks.some(t=>t.title.toLowerCase().includes(key.substring(0,10)));
+    if(!alreadyExists) paymentTasks.push({ name: e.description||e.category, category: cat });
+  });
+
+  // Sort by urgency
+  const sorted = [...tasks].sort((a,b) => {
+    const order = { critical:0, due:1, soon:2, ok:3 };
+    return order[lifeTaskUrgency(a)] - order[lifeTaskUrgency(b)];
+  });
+
+  const urgencyColor = { critical:"#ef4444", due:"#f97316", soon:"#eab308", ok:"#22c55e" };
+  const urgencyLabel = { critical:"¡Atrasado!", due:"Hoy", soon:"Pronto", ok:"Al día" };
+
+  const taskRows = sorted.map(t => {
+    const urg = lifeTaskUrgency(t);
+    const color = urgencyColor[urg];
+    const sinceStr = t.lastDone ? (() => {
+      const d = lifeTaskDaysSince(t);
+      if(d < 1) return "Hoy";
+      if(d < 2) return "Ayer";
+      return `hace ${Math.floor(d)}d`;
+    })() : "Nunca";
+    return `
+      <div class="lt-task-row lt-${urg}" data-lt-id="${escapeHtml(t.id)}">
+        <div class="lt-task-icon">${t.icon}</div>
+        <div class="lt-task-info">
+          <div class="lt-task-title">${escapeHtml(t.title)}</div>
+          <div class="lt-task-since" style="color:${color}">${urgencyLabel[urg]} · ${escapeHtml(sinceStr)}</div>
+        </div>
+        <button class="lt-done-btn" data-lt-done="${escapeHtml(t.id)}" title="Marcar como hecho" style="border-color:${color};color:${color}">✓</button>
+      </div>
+    `;
+  }).join("");
+
+  const criticalCount = sorted.filter(t=>lifeTaskUrgency(t)==="critical"||lifeTaskUrgency(t)==="due").length;
+
+  return `
+    <section class="card homeCard homeWide lifeTrackerCard" id="homeLifeTracker">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">🧠 Tracker Vital</h2>
+          <div class="small">${criticalCount > 0 ? `<span style="color:#ef4444;font-weight:700">${criticalCount} tarea${criticalCount>1?"s":""} atrasada${criticalCount>1?"s":""}</span>` : "Todo al día ✅"}</div>
+        </div>
+        <button class="iconBtn" id="btnAddLifeTask" title="Agregar tarea">＋</button>
+      </div>
+      <div class="hr"></div>
+      <div class="lt-task-list">
+        ${taskRows}
+      </div>
+      ${paymentTasks.length ? `
+        <div class="lt-suggestions">
+          <div class="lt-sug-title">💡 Carl detectó pagos recurrentes. ¿Agregarlos?</div>
+          ${paymentTasks.slice(0,3).map(p=>`
+            <button class="lt-sug-btn" data-lt-suggest="${escapeHtml(JSON.stringify(p))}">
+              💸 ${escapeHtml(p.name)}
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
+    </section>
+  `;
+}
+
+function wireLifeTracker(root) {
+  // Mark done buttons
+  root.querySelectorAll("[data-lt-done]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      lifeTaskMarkDone(btn.getAttribute("data-lt-done"));
+      view();
+    });
+  });
+
+  // Add custom task
+  const btnAdd = root.querySelector("#btnAddLifeTask");
+  if(btnAdd) btnAdd.addEventListener("click", () => openLifeTaskModal());
+
+  // Suggest from finance
+  root.querySelectorAll("[data-lt-suggest]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      try {
+        const p = JSON.parse(btn.getAttribute("data-lt-suggest"));
+        lifeTaskAddCustom(p.name, "💸", 30, p.category);
+        view();
+      } catch(e){}
+    });
+  });
+}
+
+function openLifeTaskModal() {
+  const host = document.querySelector("#app");
+  const bd = document.createElement("div");
+  bd.className = "modalBackdrop";
+  bd.innerHTML = `
+    <div class="modal" style="max-width:360px">
+      <div class="modalHeader"><span>➕ Nueva Tarea Vital</span><button class="mpm-icon-btn" data-close>✕</button></div>
+      <div class="modalBody" style="display:flex;flex-direction:column;gap:12px">
+        <input class="input" id="ltTitle" placeholder="Ej: Lavar el carro" />
+        <div style="display:flex;gap:8px">
+          <input class="input" id="ltIcon" placeholder="Ícono 🧹" style="width:70px;text-align:center"/>
+          <input class="input" id="ltFreq" type="number" min="1" placeholder="Cada X días" style="flex:1"/>
+        </div>
+        <select class="input" id="ltCat">
+          <option value="higiene">🧴 Higiene</option>
+          <option value="hogar">🏠 Hogar</option>
+          <option value="pago">💸 Pago/Deuda</option>
+          <option value="salud">💊 Salud</option>
+          <option value="otro">📌 Otro</option>
+        </select>
+        <button class="btn primary" id="ltSave">Guardar</button>
+      </div>
+    </div>
+  `;
+  bd.addEventListener("click", e => { if(e.target===bd||e.target.closest("[data-close]")) bd.remove(); });
+  bd.querySelector("#ltSave").addEventListener("click", () => {
+    const title = bd.querySelector("#ltTitle").value.trim();
+    if(!title) return;
+    const icon = bd.querySelector("#ltIcon").value.trim() || "📌";
+    const freq = Number(bd.querySelector("#ltFreq").value) || 7;
+    const cat = bd.querySelector("#ltCat").value;
+    lifeTaskAddCustom(title, icon, freq, cat);
+    bd.remove();
+    view();
+  });
+  host.appendChild(bd);
+}
+
 function renderNeuroClawCard(){
+
   const items = neuroclawTopSuggestions(3);
   const has = items.length>0;
   const loading = !!state?.neuroclawAiLoading;
@@ -5702,6 +5905,7 @@ const sleepBars = renderSleepBars(sleepSeries);
       ${renderSwissAstroCard()}
 
       ${renderNeuroClawCard()}
+      ${renderLifeTrackerCard()}
     </div>
 
     <section class="card homeCard homeWide musicSplitCard" id="homeMusicCard">
@@ -6764,6 +6968,9 @@ function wireHome(root){
   // budget monthly
   const btnBudget = root.querySelector("#btnAddBudgetItem");
   if(btnBudget) btnBudget.addEventListener("click", (e)=>{ e.stopPropagation(); openBudgetModal(); });
+
+  // Life Tracker events
+  wireLifeTracker(root);
 
   const budgetCard = root.querySelector("#homeBudgetCard");
   if(budgetCard) budgetCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddBudgetItem")) return; /* no auto-open, keeps card tappable but safe */ });

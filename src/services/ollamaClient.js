@@ -247,6 +247,32 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
         statusParts.forEach(p => { systemContent += `- ${p}\n`; });
         systemContent += '\nIMPORTANTE: Si el usuario habla de cansancio, energía o ánimo, conecta tu respuesta con estos datos reales. Si habla de gastos o dinero, menciona su situación financiera actual.';
       }
+
+      // --- Life Tracker (TDA Vital Tasks) ---
+      const lifeTasks = Array.isArray(s.lifeTasks) ? s.lifeTasks : [];
+      if (lifeTasks.length > 0) {
+        const getUrgency = (t) => {
+          if (!t.lastDone) return 'critical';
+          const days = (Date.now() - new Date(t.lastDone).getTime()) / (1000*60*60*24);
+          const ratio = t.freqDays > 0 ? days / t.freqDays : Infinity;
+          if (ratio >= 1.5) return 'critical';
+          if (ratio >= 1.0) return 'due';
+          if (ratio >= 0.7) return 'soon';
+          return 'ok';
+        };
+        const overdue = lifeTasks.filter(t => getUrgency(t) === 'critical' || getUrgency(t) === 'due');
+        const soon = lifeTasks.filter(t => getUrgency(t) === 'soon');
+        if (overdue.length > 0 || soon.length > 0) {
+          systemContent += '\n\n## TRACKER VITAL (TDA Hábitos)\nEl usuario tiene un tablero de hábitos vitales. Carlos tiene TDA y puede perder de vista estas tareas:\n';
+          if (overdue.length > 0) {
+            systemContent += `⚠️ ATRASADAS (${overdue.length}): ${overdue.map(t => t.title).join(', ')}\n`;
+          }
+          if (soon.length > 0) {
+            systemContent += `🔜 Pronto vencen: ${soon.map(t => t.title).join(', ')}\n`;
+          }
+          systemContent += '\nCRÍTICO: Si el usuario menciona higiene, limpieza, casa, organización o simplemente pide ayuda para "arrancar el día", menciona sutilmente estas tareas. Si le preguntas "¿qué necesitas hacer?", incluye las tareas atrasadas. No seas pesado, sé empático con el TDA.';
+        }
+      }
     }
   } catch (_e) { /* silencioso */ }
 
