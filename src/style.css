@@ -4164,3 +4164,108 @@ body{
   0%, 100% { transform: scale(1); }
   50%       { transform: scale(1.12); }
 }
+
+/* Section labels */
+.lt-section-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.35);
+  margin-bottom: 8px;
+}
+
+/* Events section */
+.lt-events-section {
+  margin-bottom: 4px;
+}
+.lt-event-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid rgba(255,255,255,0.07);
+  margin-bottom: 8px;
+  transition: transform 0.15s ease;
+}
+.lt-event-row:hover { transform: translateY(-1px); }
+.lt-event-followup {
+  border-color: rgba(167,139,250,0.5);
+  background: rgba(167,139,250,0.07);
+  animation: ltFollowPulse 2.5s ease-in-out infinite;
+}
+@keyframes ltFollowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(167,139,250,0); }
+  50%       { box-shadow: 0 0 0 6px rgba(167,139,250,0.15); }
+}
+.lt-event-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.lt-event-info {
+  flex: 1;
+  min-width: 0;
+}
+.lt-event-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.9);
+}
+.lt-event-date {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.4);
+  margin-top: 2px;
+}
+.lt-evt-done-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.25);
+  background: transparent;
+  color: rgba(255,255,255,0.5);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+.lt-evt-done-btn:hover {
+  border-color: #a78bfa;
+  color: #a78bfa;
+  background: rgba(167,139,250,0.1);
+  transform: scale(1.1);
+}
+
+/* Modal tabs */
+.lt-modal-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: 0;
+}
+.lt-modal-tab {
+  flex: 1;
+  padding: 10px 8px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(255,255,255,0.45);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: -1px;
+}
+.lt-modal-tab.active {
+  color: #a78bfa;
+  border-bottom-color: #a78bfa;
+}
+.lt-modal-tab:hover:not(.active) {
+  color: rgba(255,255,255,0.7);
+}

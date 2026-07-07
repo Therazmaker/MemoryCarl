@@ -5444,7 +5444,25 @@ function lifeTaskMarkDone(id) {
 
 function lifeTaskAddCustom(title, icon, freqDays, category) {
   const tasks = lifeTasksGet();
-  tasks.push({ id:"lt_custom_"+Date.now(), icon: icon||"📌", title, category: category||"otro", freqDays: Number(freqDays)||7, lastDone:null });
+  tasks.push({ id:"lt_custom_"+Date.now(), icon: icon||"📌", title, category: category||"otro", freqDays: Number(freqDays)||7, lastDone:null, type:"habit" });
+  state.lifeTasks = tasks;
+  persist();
+}
+
+function lifeEventAdd(title, icon, dueDate, note, category) {
+  const tasks = lifeTasksGet();
+  tasks.push({
+    id: "lt_evt_"+Date.now(),
+    icon: icon||"📅",
+    title,
+    category: category||"evento",
+    type: "event",
+    dueDate,           // ISO date string "YYYY-MM-DD"
+    note: note||"",
+    done: false,
+    followUpSent: false, // Carl asked how it went
+    lastDone: null
+  });
   state.lifeTasks = tasks;
   persist();
 }
@@ -5472,6 +5490,53 @@ function lifeTaskUrgency(task) {
 function renderLifeTrackerCard() {
   const tasks = lifeTasksGet();
   const todayIso = new Date().toISOString().split("T")[0];
+  const tomorrowIso = new Date(Date.now()+86400000).toISOString().split("T")[0];
+
+  // ── Events (one-time) ──
+  const events = tasks.filter(t => t.type==="event");
+  const habits  = tasks.filter(t => t.type!=="event");
+
+  const upcomingEvents = events
+    .filter(e => !e.done && e.dueDate >= todayIso)
+    .sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  const needFollowUp = events
+    .filter(e => !e.done && !e.followUpSent && e.dueDate < todayIso);
+  const pastDoneEvents = events
+    .filter(e => e.done)
+    .sort((a,b)=>b.dueDate.localeCompare(a.dueDate))
+    .slice(0, 3);
+
+  const evtDateLabel = (iso) => {
+    if(iso===todayIso) return "🔴 Hoy";
+    if(iso===tomorrowIso) return "🟡 Mañana";
+    try{ return new Date(iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short"}); }catch{ return iso; }
+  };
+
+  const eventsHtml = upcomingEvents.length || needFollowUp.length ? `
+    <div class="lt-events-section">
+      <div class="lt-section-title">📅 Eventos & Compromisos</div>
+      ${needFollowUp.map(e => `
+        <div class="lt-event-row lt-event-followup" data-lt-evt-id="${escapeHtml(e.id)}">
+          <div class="lt-event-icon">${e.icon}</div>
+          <div class="lt-event-info">
+            <div class="lt-event-title">${escapeHtml(e.title)}</div>
+            <div class="lt-event-date" style="color:#a78bfa">Carl quiere saber cómo te fue 💜</div>
+          </div>
+          <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Marcar como hecho">✓</button>
+        </div>
+      `).join("")}
+      ${upcomingEvents.map(e => `
+        <div class="lt-event-row" data-lt-evt-id="${escapeHtml(e.id)}">
+          <div class="lt-event-icon">${e.icon}</div>
+          <div class="lt-event-info">
+            <div class="lt-event-title">${escapeHtml(e.title)}</div>
+            <div class="lt-event-date">${escapeHtml(evtDateLabel(e.dueDate))}${e.note ? ` · ${escapeHtml(e.note)}` : ""}</div>
+          </div>
+          <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Hecho">✓</button>
+        </div>
+      `).join("")}
+    </div>
+  ` : "";
   
   // Auto-suggest payments from finance ledger
   const ledger = Array.isArray(state.finance_ledger) ? state.finance_ledger : (Array.isArray(state.financeLedger) ? state.financeLedger : []);
@@ -5489,8 +5554,8 @@ function renderLifeTrackerCard() {
     if(!alreadyExists) paymentTasks.push({ name: e.description||e.category, category: cat });
   });
 
-  // Sort by urgency
-  const sorted = [...tasks].sort((a,b) => {
+  // Sort habits by urgency
+  const sorted = [...habits].sort((a,b) => {
     const order = { critical:0, due:1, soon:2, ok:3 };
     return order[lifeTaskUrgency(a)] - order[lifeTaskUrgency(b)];
   });
@@ -5520,17 +5585,20 @@ function renderLifeTrackerCard() {
   }).join("");
 
   const criticalCount = sorted.filter(t=>lifeTaskUrgency(t)==="critical"||lifeTaskUrgency(t)==="due").length;
+  const totalAlerts = criticalCount + needFollowUp.length;
 
   return `
     <section class="card homeCard homeWide lifeTrackerCard" id="homeLifeTracker">
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">🧠 Tracker Vital</h2>
-          <div class="small">${criticalCount > 0 ? `<span style="color:#ef4444;font-weight:700">${criticalCount} tarea${criticalCount>1?"s":""} atrasada${criticalCount>1?"s":""}</span>` : "Todo al día ✅"}</div>
+          <div class="small">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : "Todo al día ✅"}</div>
         </div>
-        <button class="iconBtn" id="btnAddLifeTask" title="Agregar tarea">＋</button>
+        <button class="iconBtn" id="btnAddLifeTask" title="Agregar">＋</button>
       </div>
       <div class="hr"></div>
+      ${eventsHtml}
+      <div class="lt-section-title" style="margin-top:${eventsHtml?"12px":"0"}">🔁 Hábitos Vitales</div>
       <div class="lt-task-list">
         ${taskRows}
       </div>
@@ -5549,7 +5617,7 @@ function renderLifeTrackerCard() {
 }
 
 function wireLifeTracker(root) {
-  // Mark done buttons
+  // Mark habit done
   root.querySelectorAll("[data-lt-done]").forEach(btn => {
     btn.addEventListener("click", e => {
       e.stopPropagation();
@@ -5558,7 +5626,36 @@ function wireLifeTracker(root) {
     });
   });
 
-  // Add custom task
+  // Mark event done (check/uncheck)
+  root.querySelectorAll("[data-lt-evt-done]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-lt-evt-done");
+      const tasks = lifeTasksGet();
+      const evt = tasks.find(x=>x.id===id);
+      if(evt) {
+        evt.done = true;
+        evt.lastDone = new Date().toISOString();
+        persist();
+        // Open NeuroChat with follow-up prompt
+        const title = evt.title;
+        state.tab = "neurochat";
+        view();
+        setTimeout(() => {
+          const inp = document.querySelector("#neuroChatInput");
+          if(inp) {
+            inp.value = `¿Cómo te fue en: ${title}?`;
+            inp.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          // Auto send
+          const sendBtn = document.querySelector("#neuroChatSend");
+          if(sendBtn) sendBtn.click();
+        }, 600);
+      }
+    });
+  });
+
+  // Add task/event button
   const btnAdd = root.querySelector("#btnAddLifeTask");
   if(btnAdd) btnAdd.addEventListener("click", () => openLifeTaskModal());
 
@@ -5578,36 +5675,76 @@ function openLifeTaskModal() {
   const host = document.querySelector("#app");
   const bd = document.createElement("div");
   bd.className = "modalBackdrop";
+  const todayIso = new Date().toISOString().split("T")[0];
+  const tomorrowIso = new Date(Date.now()+86400000).toISOString().split("T")[0];
   bd.innerHTML = `
-    <div class="modal" style="max-width:360px">
-      <div class="modalHeader"><span>➕ Nueva Tarea Vital</span><button class="mpm-icon-btn" data-close>✕</button></div>
-      <div class="modalBody" style="display:flex;flex-direction:column;gap:12px">
-        <input class="input" id="ltTitle" placeholder="Ej: Lavar el carro" />
-        <div style="display:flex;gap:8px">
-          <input class="input" id="ltIcon" placeholder="Ícono 🧹" style="width:70px;text-align:center"/>
-          <input class="input" id="ltFreq" type="number" min="1" placeholder="Cada X días" style="flex:1"/>
+    <div class="modal" style="max-width:380px">
+      <div class="modalHeader"><span>➕ Agregar al Tracker</span><button class="mpm-icon-btn" data-close>✕</button></div>
+      <div class="modalBody" style="display:flex;flex-direction:column;gap:0">
+        <!-- Tabs -->
+        <div class="lt-modal-tabs">
+          <button class="lt-modal-tab active" data-lttab="habit">🔁 Hábito recurrente</button>
+          <button class="lt-modal-tab" data-lttab="event">📅 Evento único</button>
         </div>
-        <select class="input" id="ltCat">
-          <option value="higiene">🧴 Higiene</option>
-          <option value="hogar">🏠 Hogar</option>
-          <option value="pago">💸 Pago/Deuda</option>
-          <option value="salud">💊 Salud</option>
-          <option value="otro">📌 Otro</option>
-        </select>
-        <button class="btn primary" id="ltSave">Guardar</button>
+
+        <!-- Habit form -->
+        <div id="ltHabitForm" style="display:flex;flex-direction:column;gap:12px;padding-top:16px">
+          <input class="input" id="ltTitle" placeholder="Ej: Lavar el carro" />
+          <div style="display:flex;gap:8px">
+            <input class="input" id="ltIcon" placeholder="Ícono 🧹" style="width:70px;text-align:center"/>
+            <input class="input" id="ltFreq" type="number" min="1" placeholder="Cada X días" style="flex:1"/>
+          </div>
+          <select class="input" id="ltCat">
+            <option value="higiene">🧴 Higiene</option>
+            <option value="hogar">🏠 Hogar</option>
+            <option value="pago">💸 Pago/Deuda</option>
+            <option value="salud">💊 Salud</option>
+            <option value="otro">📌 Otro</option>
+          </select>
+          <button class="btn primary" id="ltSaveHabit">Guardar hábito</button>
+        </div>
+
+        <!-- Event form -->
+        <div id="ltEventForm" style="display:none;flex-direction:column;gap:12px;padding-top:16px">
+          <input class="input" id="ltEvtTitle" placeholder="Ej: Entrevista de trabajo" />
+          <div style="display:flex;gap:8px">
+            <input class="input" id="ltEvtIcon" placeholder="Ícono 💼" style="width:70px;text-align:center"/>
+            <input class="input" id="ltEvtDate" type="date" value="${tomorrowIso}" style="flex:1"/>
+          </div>
+          <input class="input" id="ltEvtNote" placeholder="Nota (opcional): empresa, lugar..." />
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(255,255,255,0.6);cursor:pointer">
+            <input type="checkbox" id="ltEvtFollowup" checked style="width:16px;height:16px"/> Que Carl me pregunte cómo me fue
+          </label>
+          <button class="btn primary" id="ltSaveEvent">Guardar evento</button>
+        </div>
       </div>
     </div>
   `;
+  // Tab switching
+  bd.querySelectorAll(".lt-modal-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      bd.querySelectorAll(".lt-modal-tab").forEach(t=>t.classList.remove("active"));
+      tab.classList.add("active");
+      const which = tab.getAttribute("data-lttab");
+      bd.querySelector("#ltHabitForm").style.display = which==="habit" ? "flex" : "none";
+      bd.querySelector("#ltEventForm").style.display = which==="event" ? "flex" : "none";
+    });
+  });
   bd.addEventListener("click", e => { if(e.target===bd||e.target.closest("[data-close]")) bd.remove(); });
-  bd.querySelector("#ltSave").addEventListener("click", () => {
+  bd.querySelector("#ltSaveHabit").addEventListener("click", () => {
     const title = bd.querySelector("#ltTitle").value.trim();
     if(!title) return;
-    const icon = bd.querySelector("#ltIcon").value.trim() || "📌";
-    const freq = Number(bd.querySelector("#ltFreq").value) || 7;
-    const cat = bd.querySelector("#ltCat").value;
-    lifeTaskAddCustom(title, icon, freq, cat);
-    bd.remove();
-    view();
+    lifeTaskAddCustom(title, bd.querySelector("#ltIcon").value.trim()||"📌", Number(bd.querySelector("#ltFreq").value)||7, bd.querySelector("#ltCat").value);
+    bd.remove(); view();
+  });
+  bd.querySelector("#ltSaveEvent").addEventListener("click", () => {
+    const title = bd.querySelector("#ltEvtTitle").value.trim();
+    const dueDate = bd.querySelector("#ltEvtDate").value;
+    if(!title || !dueDate) return;
+    const t = bd.querySelector("lt_followup") ? bd.querySelector("#ltEvtFollowup").checked : true;
+    lifeEventAdd(title, bd.querySelector("#ltEvtIcon").value.trim()||"📅", dueDate, bd.querySelector("#ltEvtNote").value.trim(), "evento");
+    bd.remove(); view();
+    toast("Evento guardado. Carl te preguntará cómo te fue 💜");
   });
   host.appendChild(bd);
 }

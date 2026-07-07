@@ -273,6 +273,28 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
           systemContent += '\nCRÍTICO: Si el usuario menciona higiene, limpieza, casa, organización o simplemente pide ayuda para "arrancar el día", menciona sutilmente estas tareas. Si le preguntas "¿qué necesitas hacer?", incluye las tareas atrasadas. No seas pesado, sé empático con el TDA.';
         }
       }
+
+      // --- Eventos próximos y seguimiento ---
+      const todayEvtIso = new Date().toISOString().split('T')[0];
+      const events = lifeTasks.filter(t => t.type === 'event');
+      const upcomingEvts = events.filter(e => !e.done && e.dueDate >= todayEvtIso);
+      const followUpEvts = events.filter(e => !e.done && !e.followUpSent && e.dueDate < todayEvtIso);
+      if (upcomingEvts.length > 0) {
+        systemContent += '\n\n## EVENTOS PRÓXIMOS DEL USUARIO\n';
+        upcomingEvts.forEach(e => {
+          const daysUntil = Math.round((new Date(e.dueDate) - new Date()) / (1000*60*60*24));
+          const when = daysUntil === 0 ? 'HOY' : daysUntil === 1 ? 'mañana' : `en ${daysUntil} días`;
+          systemContent += `- 📅 "${e.title}" ${when}${e.note ? ` (${e.note})` : ''}\n`;
+        });
+        systemContent += 'Si el usuario menciona nervios, preparación, o el tema del evento, sé empático y ayúdale a prepararse mentalmente.';
+      }
+      if (followUpEvts.length > 0) {
+        systemContent += '\n\n## SEGUIMIENTO DE EVENTOS PASADOS (MUY IMPORTANTE)\n';
+        followUpEvts.forEach(e => {
+          systemContent += `- "${e.title}" fue el ${e.dueDate} — todavía no sabes cómo le fue.\n`;
+        });
+        systemContent += 'CRÍTICO: Al inicio de la conversación, o cuando sea natural, pregunta brevemente cómo le fue en estos eventos. Hazlo de forma empática y curiosa (ej: "Oye, ¿cómo te fue en la entrevista?"). Cuando el usuario responda, guarda lo que cuente como memoria usando la acción "consolidate".';
+      }
     }
   } catch (_e) { /* silencioso */ }
 
