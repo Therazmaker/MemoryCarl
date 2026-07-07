@@ -255,6 +255,7 @@ const LS = {
   moodSpritesCustom: "memorycarl_v2_mood_sprites_custom",
   moodActivityCats: "memorycarl_v2_mood_activity_cats",
   lifeTasks: "memorycarl_v2_life_tasks",
+  lifeTasksLog: "memorycarl_v2_life_tasks_log",
 
   // NeuroClaw
   neuroclawFeedback: "memorycarl_v2_neuroclaw_feedback",
@@ -2027,6 +2028,7 @@ let state = {
   moodSpritesCustom: load(LS.moodSpritesCustom, []),
   moodActivityCats: load(LS.moodActivityCats, null),
   lifeTasks: load(LS.lifeTasks, []),
+  lifeTasksLog: load(LS.lifeTasksLog, []),
   house: load(LS.house, seedHouse()),
   semana: load(LS.semana, seedSemana()),
   // Insights UI
@@ -2059,6 +2061,7 @@ function persist(){
   save(LS.moodSpritesCustom, state.moodSpritesCustom);
   if(state.moodActivityCats) save(LS.moodActivityCats, state.moodActivityCats);
   if(state.lifeTasks) save(LS.lifeTasks, state.lifeTasks);
+  if(state.lifeTasksLog) save(LS.lifeTasksLog, state.lifeTasksLog);
 
   // House
   save(LS.house, state.house);
@@ -5446,7 +5449,13 @@ function lifeTasksGet() {
 function lifeTaskMarkDone(id) {
   const tasks = lifeTasksGet();
   const t = tasks.find(x=>x.id===id);
-  if(t) { t.lastDone = new Date().toISOString(); persist(); }
+  if(t) { 
+    const ts = new Date().toISOString();
+    t.lastDone = ts; 
+    state.lifeTasksLog = state.lifeTasksLog || [];
+    state.lifeTasksLog.push({ id, ts });
+    persist(); 
+  }
 }
 
 function lifeTaskAddCustom(title, icon, freqDays, category) {
@@ -5601,7 +5610,10 @@ function renderLifeTrackerCard() {
           <h2 class="cardTitle">🧠 Tracker Vital</h2>
           <div class="small">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : "Todo al día ✅"}</div>
         </div>
-        <button class="iconBtn" id="btnAddLifeTask" title="Agregar">＋</button>
+        <div>
+          <button class="iconBtn" id="btnLifeTrackerStats" title="Estadísticas" style="margin-right:8px;font-size:16px;">📊</button>
+          <button class="iconBtn" id="btnAddLifeTask" title="Agregar">＋</button>
+        </div>
       </div>
       <div class="hr"></div>
       ${eventsHtml}
@@ -5641,8 +5653,11 @@ function wireLifeTracker(root) {
       const tasks = lifeTasksGet();
       const evt = tasks.find(x=>x.id===id);
       if(evt) {
+        const ts = new Date().toISOString();
         evt.done = true;
-        evt.lastDone = new Date().toISOString();
+        evt.lastDone = ts;
+        state.lifeTasksLog = state.lifeTasksLog || [];
+        state.lifeTasksLog.push({ id, ts });
         persist();
         // Open NeuroChat with follow-up prompt
         const title = evt.title;
@@ -5665,6 +5680,10 @@ function wireLifeTracker(root) {
   // Add task/event button
   const btnAdd = root.querySelector("#btnAddLifeTask");
   if(btnAdd) btnAdd.addEventListener("click", () => openLifeTaskModal());
+
+  // Stats button
+  const btnStats = root.querySelector("#btnLifeTrackerStats");
+  if(btnStats) btnStats.addEventListener("click", () => openLifeTrackerStatsModal());
 
   // Suggest from finance
   root.querySelectorAll("[data-lt-suggest]").forEach(btn => {
@@ -5753,6 +5772,109 @@ function openLifeTaskModal() {
     bd.remove(); view();
     toast("Evento guardado. Carl te preguntará cómo te fue 💜");
   });
+  host.appendChild(bd);
+}
+
+function openLifeTrackerStatsModal() {
+  const host = document.querySelector("#app");
+  const bd = document.createElement("div");
+  bd.className = "modalBackdrop";
+
+  const tasks = lifeTasksGet();
+  const habits = tasks.filter(t => t.type!=="event");
+  const log = Array.isArray(state.lifeTasksLog) ? state.lifeTasksLog : [];
+
+  // 1. Salud del sistema (Distribución de urgencias)
+  let ok=0, soon=0, due=0, crit=0;
+  habits.forEach(t => {
+    const u = lifeTaskUrgency(t);
+    if(u==="critical") crit++;
+    else if(u==="due") due++;
+    else if(u==="soon") soon++;
+    else ok++;
+  });
+  const total = habits.length || 1;
+  const pctOk = Math.round((ok/total)*100);
+  const healthHtml = `
+    <div class="mmchart-card" style="margin-bottom:12px;">
+      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Salud de Hábitos</div>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="width:60px;height:60px;border-radius:50%;background:conic-gradient(#22c55e ${pctOk}%, #ef4444 0);display:flex;align-items:center;justify-content:center;">
+          <div style="width:48px;height:48px;border-radius:50%;background:#1e1e1e;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;">${pctOk}%</div>
+        </div>
+        <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;">
+          <div style="color:#22c55e">● ${ok} Al día</div>
+          <div style="color:#eab308">● ${soon} Pronto</div>
+          <div style="color:#f97316">● ${due} Hoy</div>
+          <div style="color:#ef4444">● ${crit} Atrasados</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 2. Actividad últimos 7 días (Gráfico de barras simple usando divs)
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const weekData = Array.from({length:7}, (_,i) => {
+    const d = new Date(today.getTime() - (6-i)*86400000);
+    return { iso: isoDate(d), count:0, dateStr: d.toLocaleDateString("es-PE",{weekday:"short"}) };
+  });
+  log.forEach(l => {
+    const iso = String(l.ts).split("T")[0];
+    const wd = weekData.find(w => w.iso === iso);
+    if(wd) wd.count++;
+  });
+  const maxCount = Math.max(1, ...weekData.map(w=>w.count));
+  const weekHtml = `
+    <div class="mmchart-card" style="margin-bottom:12px;">
+      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-weight:700;text-transform:uppercase;">Actividad (7 días)</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;height:80px;padding-top:10px;border-bottom:1px solid rgba(255,255,255,0.1);">
+        ${weekData.map(w => {
+          const h = (w.count / maxCount) * 100;
+          return `
+            <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+              <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;margin-bottom:4px">${w.count>0?w.count:""}</div>
+              <div style="width:14px;background:#a78bfa;border-radius:4px 4px 0 0;height:${h}%;min-height:2px;transition:height 0.3s"></div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;">
+        ${weekData.map(w => `<div style="flex:1;text-align:center;font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;">${w.dateStr}</div>`).join("")}
+      </div>
+    </div>
+  `;
+
+  // 3. Hábito más atrasado (El que tiene el ratio más alto de urgencia)
+  const mostOverdue = [...habits].filter(t=>t.freqDays>0).sort((a,b)=>{
+    const ratioA = lifeTaskDaysSince(a)/a.freqDays;
+    const ratioB = lifeTaskDaysSince(b)/b.freqDays;
+    return ratioB - ratioA;
+  })[0];
+  const overdueHtml = mostOverdue ? `
+    <div class="mmchart-card">
+      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">El más olvidado</div>
+      <div style="display:flex;align-items:center;gap:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);padding:10px;border-radius:12px;">
+        <div style="font-size:24px;">${mostOverdue.icon}</div>
+        <div>
+          <div style="font-size:14px;font-weight:700;color:#ef4444">${escapeHtml(mostOverdue.title)}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.6)">Debería ser cada ${mostOverdue.freqDays} días.</div>
+        </div>
+      </div>
+    </div>
+  ` : "";
+
+  bd.innerHTML = `
+    <div class="modal" style="max-width:380px;background:#1e1e1e">
+      <div class="modalHeader"><span>📊 Stats del Tracker</span><button class="mpm-icon-btn" data-close>✕</button></div>
+      <div class="modalBody" style="display:flex;flex-direction:column;gap:0;">
+        ${healthHtml}
+        ${weekHtml}
+        ${overdueHtml}
+      </div>
+    </div>
+  `;
+  bd.addEventListener("click", e => { if(e.target===bd||e.target.closest("[data-close]")) bd.remove(); });
   host.appendChild(bd);
 }
 
