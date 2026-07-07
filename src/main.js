@@ -4840,7 +4840,8 @@ function openMoodMonthModal(initialIso){
 
       const cellHtml = cells.map(iso=>{
         if(!iso) return `<div class="moodCalCell empty"></div>`;
-        const e = map[iso];
+        const arr = Array.isArray(map[iso]) ? map[iso] : (map[iso] ? [map[iso]] : []);
+        const e = arr.length ? arr[arr.length-1] : null;
         const sp = e ? getMoodSpriteById(e.spriteId) : null;
         const svgFace = sp ? _getMoodSvg(sp.id,true) : "";
         const en = e?.energy||0;
@@ -4966,16 +4967,22 @@ function openMoodMonthModal(initialIso){
       const allDays = Object.keys(map).sort();
       let streak=0, maxStreak=0, cur=0;
       const today = isoDate(new Date());
+      
+      const getIsoEntry = (isoKey) => {
+        const a = Array.isArray(map[isoKey]) ? map[isoKey] : (map[isoKey] ? [map[isoKey]] : []);
+        return a.length ? a[a.length-1] : null;
+      };
+
       // count backward from today
       let d=new Date(); 
       while(true){
         const iso=isoDate(d);
-        if(map[iso]?.spriteId){ streak++; d.setDate(d.getDate()-1); }
+        if(getIsoEntry(iso)?.spriteId){ streak++; d.setDate(d.getDate()-1); }
         else break;
       }
       // max streak
       let prev=null, ms=0;
-      allDays.forEach(iso=>{ if(map[iso]?.spriteId){ ms++; maxStreak=Math.max(maxStreak,ms); } else ms=0; });
+      allDays.forEach(iso=>{ if(getIsoEntry(iso)?.spriteId){ ms++; maxStreak=Math.max(maxStreak,ms); } else ms=0; });
       const streakSection = `
         <div class="mmchart-card mmstreak-card">
           <div class="mmstreak-row">
