@@ -4807,10 +4807,14 @@ function openMoodMonthModal(initialIso){
   const getMonthEntries = (y,m)=>{
     const map = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
     const monthKey = `${y}-${String(m+1).padStart(2,"0")}`;
-    return Object.keys(map)
-      .filter(k=>String(k).startsWith(monthKey))
-      .sort()
-      .map(iso=>({ iso, ...map[iso] }));
+    let out = [];
+    Object.keys(map).forEach(k => {
+      if(String(k).startsWith(monthKey)){
+         const arr = Array.isArray(map[k]) ? map[k] : [map[k]];
+         arr.forEach((e, idx) => out.push({ iso: k, arrayIndex: idx, ...e }));
+      }
+    });
+    return out.sort((a,b)=>a.iso.localeCompare(b.iso) || (a.ts||"").localeCompare(b.ts||""));
   };
 
   const render = ()=>{
@@ -5027,6 +5031,7 @@ function openMoodMonthModal(initialIso){
                 <div class="mml-date">${escapeHtml(dateLabel)}</div>
                 ${en>0?`<div class="mml-energy-row">${enDots}<span class="mml-en-num">⚡${en}/5</span></div>`:""}
               </div>
+              <button class="iconBtn mml-delete-btn" data-del-iso="${escapeHtml(e.iso)}" data-del-idx="${e.arrayIndex}" aria-label="Eliminar" style="margin-left:auto; color:#ef4444; font-size:16px;">🗑️</button>
             </div>
             ${actChips?`<div class="mml-tags">${actChips}</div>`:""}
             ${e.note?`<div class="mml-note">"${escapeHtml(String(e.note))}"</div>`:""}
@@ -5066,6 +5071,24 @@ function openMoodMonthModal(initialIso){
     });
     backdrop.querySelectorAll("[data-iso]").forEach(btn=>{
       btn.addEventListener("click",()=>{ openMoodPickerModal(btn.getAttribute("data-iso")||"",{onSaved:()=>render()}); });
+    });
+    backdrop.querySelectorAll(".mml-delete-btn").forEach(btn=>{
+      btn.addEventListener("click",(e)=>{
+        e.stopPropagation();
+        const iso = btn.getAttribute("data-del-iso");
+        const idx = Number(btn.getAttribute("data-del-idx"));
+        if(!iso || isNaN(idx)) return;
+        if(confirm("¿Estás seguro de que deseas eliminar este registro de emoción?")) {
+          const arr = state.moodDaily[iso];
+          if(Array.isArray(arr)) {
+            arr.splice(idx, 1);
+            if(arr.length === 0) delete state.moodDaily[iso];
+            persist();
+            render();
+            if(typeof window.view === "function") window.view();
+          }
+        }
+      });
     });
     backdrop.addEventListener("click",e=>{ if(e.target===backdrop) close(); if(e.target?.closest("[data-close]")) close(); });
   };
