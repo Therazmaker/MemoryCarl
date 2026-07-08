@@ -181,7 +181,7 @@ export function viewTarot() {
   // ── PANTALLA PRINCIPAL ──
   const recentReadings = log.slice(-3).reverse();
   const k = window.state?.tarotGeminiKey || "";
-  const m = window.state?.tarotGeminiModel || "gemini-1.5-flash";
+  const m = window.state?.tarotGeminiModel || "gemini-1.5-flash-latest";
 
   return `
     <div class="tarotPage">
@@ -195,8 +195,8 @@ export function viewTarot() {
             <div style="font-size:12px; font-weight:700; color:rgba(255,255,255,0.5); text-transform:uppercase; margin-bottom:12px;">Motor de IA (Gemini)</div>
             <input type="password" id="tarotGeminiKey" class="tarotTextarea" placeholder="Google Gemini API Key..." style="height:40px; min-height:40px; margin-bottom:12px;" value="${escapeHtml(k)}">
             <select id="tarotGeminiModel" class="tarotSelect" style="margin-bottom:12px;">
-              <option value="gemini-1.5-flash" ${m==="gemini-1.5-flash"?"selected":""}>Gemini 1.5 Flash (Rápido)</option>
-              <option value="gemini-1.5-pro" ${m==="gemini-1.5-pro"?"selected":""}>Gemini 1.5 Pro (Profundo)</option>
+              <option value="gemini-1.5-flash-latest" ${m==="gemini-1.5-flash-latest"?"selected":""}>Gemini 1.5 Flash (Rápido)</option>
+              <option value="gemini-1.5-pro-latest" ${m==="gemini-1.5-pro-latest"?"selected":""}>Gemini 1.5 Pro (Profundo)</option>
             </select>
             <div style="display:flex; gap:8px;">
               <button id="btnTarotSaveSettings" class="tarotMainBtn" style="flex:1; padding:10px;">Guardar</button>
@@ -330,7 +330,7 @@ Mi pregunta/tema es: ${q || "Lectura general"}`;
 
       // Gemini API Call
       const apiKey = window.state?.tarotGeminiKey;
-      const model = window.state?.tarotGeminiModel || "gemini-1.5-flash";
+      const model = window.state?.tarotGeminiModel || "gemini-1.5-flash-latest";
       
       if (!apiKey) throw new Error("No has configurado tu API Key de Gemini. Toca el ícono ⚙️ en la pantalla principal del Tarot.");
 
