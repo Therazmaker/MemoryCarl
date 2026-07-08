@@ -181,7 +181,7 @@ export function viewTarot() {
   // ── PANTALLA PRINCIPAL ──
   const recentReadings = log.slice(-3).reverse();
   const k = window.state?.tarotGeminiKey || "";
-  const m = window.state?.tarotGeminiModel || "gemini-1.5-flash-latest";
+  const m = window.state?.tarotGeminiModel || "gemini-2.0-flash";
 
   return `
     <div class="tarotPage">
@@ -193,10 +193,11 @@ export function viewTarot() {
         ${tarotViewState.showSettings ? `
           <div style="background:rgba(255,255,255,0.05); padding:16px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); margin-bottom:20px;">
             <div style="font-size:12px; font-weight:700; color:rgba(255,255,255,0.5); text-transform:uppercase; margin-bottom:12px;">Motor de IA (Gemini)</div>
-            <input type="password" id="tarotGeminiKey" class="tarotTextarea" placeholder="Google Gemini API Key..." style="height:40px; min-height:40px; margin-bottom:12px;" value="${escapeHtml(k)}">
+            <input type="password" id="tarotGeminiKey" class="tarotTextarea" placeholder="AIza... (Google Gemini API Key)" style="height:40px; min-height:40px; margin-bottom:12px;" value="${escapeHtml(k)}">
             <select id="tarotGeminiModel" class="tarotSelect" style="margin-bottom:12px;">
-              <option value="gemini-1.5-flash-latest" ${m==="gemini-1.5-flash-latest"?"selected":""}>Gemini 1.5 Flash (Rápido)</option>
-              <option value="gemini-1.5-pro-latest" ${m==="gemini-1.5-pro-latest"?"selected":""}>Gemini 1.5 Pro (Profundo)</option>
+              <option value="gemini-2.0-flash" ${m==="gemini-2.0-flash"?"selected":""}>Gemini 2.0 Flash ⚡ (Rápido, gratis)</option>
+              <option value="gemini-2.5-flash" ${m==="gemini-2.5-flash"?"selected":""}>Gemini 2.5 Flash 🧠 (Inteligente, gratis)</option>
+              <option value="gemini-2.5-pro" ${m==="gemini-2.5-pro"?"selected":""}>Gemini 2.5 Pro 👑 (El mejor, cuota gratis)</option>
             </select>
             <div style="display:flex; gap:8px;">
               <button id="btnTarotSaveSettings" class="tarotMainBtn" style="flex:1; padding:10px;">Guardar</button>
@@ -330,7 +331,7 @@ Mi pregunta/tema es: ${q || "Lectura general"}`;
 
       // Gemini API Call
       const apiKey = window.state?.tarotGeminiKey;
-      const model = window.state?.tarotGeminiModel || "gemini-1.5-flash-latest";
+      const model = window.state?.tarotGeminiModel || "gemini-2.0-flash";
       
       if (!apiKey) throw new Error("No has configurado tu API Key de Gemini. Toca el ícono ⚙️ en la pantalla principal del Tarot.");
 

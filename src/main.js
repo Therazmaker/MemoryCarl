@@ -2047,7 +2047,7 @@ let state = {
   neuroclawLast: load(LS.neuroclawLast, { ts:"", signals:null, suggestions:[] }),
   // Tarot Settings
   tarotGeminiKey: load(LS.tarotGeminiKey, ""),
-  tarotGeminiModel: load(LS.tarotGeminiModel, "gemini-1.5-flash-latest"),
+  tarotGeminiModel: load(LS.tarotGeminiModel, "gemini-2.0-flash"),
 };
 
 normalizeHouse();
