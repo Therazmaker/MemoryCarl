@@ -263,6 +263,10 @@ const LS = {
   neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
   neuroclawAiKey: "memorycarl_v2_neuroclaw_ai_key",
 
+  // Tarot
+  tarotGeminiKey: "memorycarl_v2_tarot_gemini_key",
+  tarotGeminiModel: "memorycarl_v2_tarot_gemini_model",
+
   // Astrology (local-only)
   natalChart: "memorycarl_v2_natal_chart_json",
   astroProvider: "memorycarl_v2_astro_provider", // 'lite' | 'swiss'
@@ -2041,6 +2045,9 @@ let state = {
   // NeuroClaw
   neuroclawFeedback: load(LS.neuroclawFeedback, []),
   neuroclawLast: load(LS.neuroclawLast, { ts:"", signals:null, suggestions:[] }),
+  // Tarot Settings
+  tarotGeminiKey: load(LS.tarotGeminiKey, ""),
+  tarotGeminiModel: load(LS.tarotGeminiModel, "gemini-1.5-flash"),
 };
 
 normalizeHouse();
@@ -2070,6 +2077,10 @@ function persist(){
   // NeuroClaw
   try{ save(LS.neuroclawFeedback, state.neuroclawFeedback); }catch(e){}
   try{ save(LS.neuroclawLast, state.neuroclawLast); }catch(e){}
+
+  // Tarot
+  if(state.tarotGeminiKey !== undefined) save(LS.tarotGeminiKey, state.tarotGeminiKey);
+  if(state.tarotGeminiModel !== undefined) save(LS.tarotGeminiModel, state.tarotGeminiModel);
 
   // Shopping system (added later in file, so guard)
   try{

@@ -65,7 +65,7 @@ export function renderTarotWidget() {
 }
 
 // ─── VISTA COMPLETA DE TAROT ─────────────────────────────────────────────────
-let tarotViewState = { screen: 'main' }; // 'main' | 'new' | 'reading' | 'stats'
+let tarotViewState = { screen: 'main', showSettings: false }; // 'main' | 'new' | 'reading' | 'stats'
 
 export function viewTarot() {
   const log = getTarotLog();
@@ -180,12 +180,30 @@ export function viewTarot() {
 
   // ── PANTALLA PRINCIPAL ──
   const recentReadings = log.slice(-3).reverse();
+  const k = window.state?.tarotGeminiKey || "";
+  const m = window.state?.tarotGeminiModel || "gemini-1.5-flash";
+
   return `
     <div class="tarotPage">
-      <div class="tarotPageHeader" style="justify-content:center;">
+      <div class="tarotPageHeader" style="justify-content:center; position:relative;">
         <h2 class="tarotPageTitle" style="text-align:center;">🔮 Tarot Consciente</h2>
+        <button class="iconBtn" id="btnTarotSettings" style="position:absolute; right:16px; top:12px;">⚙️</button>
       </div>
       <div class="tarotPageBody">
+        ${tarotViewState.showSettings ? `
+          <div style="background:rgba(255,255,255,0.05); padding:16px; border-radius:12px; border:1px solid rgba(255,255,255,0.1); margin-bottom:20px;">
+            <div style="font-size:12px; font-weight:700; color:rgba(255,255,255,0.5); text-transform:uppercase; margin-bottom:12px;">Motor de IA (Gemini)</div>
+            <input type="password" id="tarotGeminiKey" class="tarotTextarea" placeholder="Google Gemini API Key..." style="height:40px; min-height:40px; margin-bottom:12px;" value="${escapeHtml(k)}">
+            <select id="tarotGeminiModel" class="tarotSelect" style="margin-bottom:12px;">
+              <option value="gemini-1.5-flash" ${m==="gemini-1.5-flash"?"selected":""}>Gemini 1.5 Flash (Rápido)</option>
+              <option value="gemini-1.5-pro" ${m==="gemini-1.5-pro"?"selected":""}>Gemini 1.5 Pro (Profundo)</option>
+            </select>
+            <div style="display:flex; gap:8px;">
+              <button id="btnTarotSaveSettings" class="tarotMainBtn" style="flex:1; padding:10px;">Guardar</button>
+            </div>
+          </div>
+        ` : ''}
+
         <div class="tarotHero">
           <div class="tarotHeroIcon">🔮</div>
           <p class="tarotHeroText">Saca 3 cartas de tu mazo físico.<br>Carl las interpreta con tu contexto personal.</p>
@@ -240,6 +258,25 @@ export function wireTarot(root) {
     if (window.renderApp) window.renderApp();
   });
 
+  // Settings
+  root.querySelector('#btnTarotSettings')?.addEventListener('click', () => {
+    tarotViewState.showSettings = !tarotViewState.showSettings;
+    if (window.renderApp) window.renderApp();
+  });
+
+  root.querySelector('#btnTarotSaveSettings')?.addEventListener('click', () => {
+    const k = root.querySelector('#tarotGeminiKey')?.value.trim();
+    const m = root.querySelector('#tarotGeminiModel')?.value;
+    if(window.state) {
+      window.state.tarotGeminiKey = k;
+      window.state.tarotGeminiModel = m;
+      if(window.persist) window.persist();
+    }
+    tarotViewState.showSettings = false;
+    if (window.renderApp) window.renderApp();
+    if(window.toast) window.toast("Ajustes de IA guardados");
+  });
+
   // Interpretar
   root.querySelector('#btnInterpretTarot')?.addEventListener('click', async () => {
     const q = root.querySelector('#tarotQuestion')?.value.trim() || '';
@@ -282,7 +319,7 @@ Reglas de interpretación:
    - Síntesis (Sombra y Luz): Cuál es el Don y el Desafío oculto en esta combinación.
    - Reto de Acción Simbólica: Termina SIEMPRE proponiendo una 'Acción Simbólica' específica y pequeña para las próximas 24 horas ligada al elemento dominante (ej. 'encender una vela', 'escribir una carta que no enviarás', etc.).
 
-5. Limitación: Si una carta aparece invertida, interprétala como un bloqueo que necesita ser canalizado de forma diferente, no como algo 'malo'. Escribe en Markdown de forma limpia. No incluyas ningún bloque JSON de neuronas al final, solo la lectura.`;
+5. Limitación: Si una carta aparece invertida, interprétala como un bloqueo que necesita ser canalizado de forma diferente, no como algo 'malo'. Escribe en Markdown de forma limpia.`;
 
       const userPrompt = `Mis cartas son:
 1. ${c1} (Pasado/Base)
@@ -291,43 +328,38 @@ Reglas de interpretación:
 
 Mi pregunta/tema es: ${q || "Lectura general"}`;
 
-      // Usar los mismos settings de Ollama Cloud que usa el NeuroChat
-      if (!isOllamaConfigured()) throw new Error("Ollama Cloud no está configurado. Ve a Configuración ⚙️ > Ollama Cloud y activa tu API key.");
+      // Gemini API Call
+      const apiKey = window.state?.tarotGeminiKey;
+      const model = window.state?.tarotGeminiModel || "gemini-1.5-flash";
+      
+      if (!apiKey) throw new Error("No has configurado tu API Key de Gemini. Toca el ícono ⚙️ en la pantalla principal del Tarot.");
 
-      const settings = getOllamaSettings();
-      const baseUrl = (settings.baseUrl || "https://ollama.com").replace(/\/+$/, "");
-      const url = `${baseUrl}/api/chat`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: [
+          { role: "user", parts: [{ text: systemPrompt + "\n\n" + userPrompt }] }
+        ],
+        generationConfig: { temperature: 0.7 }
+      };
 
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), settings.timeoutMs || 60000);
+      const timer = setTimeout(() => controller.abort(), 60000);
 
-      const ollamaRes = await fetch(url, {
+      const geminiRes = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${settings.apiKey}`
-        },
-        body: JSON.stringify({
-          model: settings.model || "gpt-oss:120b",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ],
-          stream: false,
-          options: { temperature: 0.8, num_predict: 1500 }
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
         signal: controller.signal
       });
       clearTimeout(timer);
 
-      if (!ollamaRes.ok) {
-        let errMsg = `HTTP ${ollamaRes.status}`;
-        try { const d = await ollamaRes.json(); errMsg = d?.error || errMsg; } catch(_e) {}
-        throw new Error(`Error de Ollama Cloud: ${errMsg}`);
+      if (!geminiRes.ok) {
+        const errText = await geminiRes.text();
+        throw new Error(`Error de Gemini (${geminiRes.status}): ${errText}`);
       }
-      const ollamaData = await ollamaRes.json();
-      const interpretation = ollamaData.message?.content || ollamaData.choices?.[0]?.message?.content || "";
-      if (!interpretation) throw new Error("Ollama no devolvió contenido. Intenta de nuevo.");
+      const data = await geminiRes.json();
+      const interpretation = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!interpretation) throw new Error("Gemini no devolvió contenido. Intenta de nuevo.");
 
       // Guardar
       const log = getTarotLog();
