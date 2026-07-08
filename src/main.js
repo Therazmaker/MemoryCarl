@@ -4789,6 +4789,71 @@ function openMoodPickerModal(iso, opts={}){
   if(typeof window.anime==="function") animateSleepModalIn(backdrop);
 }
 
+function renderGithubHeatmap(year, dataMap) {
+  // dataMap is { '2026-07-07': { color: '#ff0', intensity: 1, label: '3h' }, ... }
+  const start = new Date(year, 0, 1);
+  const end = new Date(year, 11, 31);
+  const startDow = (start.getDay() + 6) % 7; // Lunes=0, Dom=6
+  const cells = [];
+  
+  // Pad beginning
+  for(let i=0; i<startDow; i++) cells.push(null);
+  
+  // Days
+  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
+    cells.push(isoDate(d));
+  }
+  
+  // Pad end
+  while(cells.length % 7 !== 0) cells.push(null);
+  
+  // Build columns (53 weeks)
+  const columns = [];
+  for(let i=0; i<cells.length; i+=7) {
+    columns.push(cells.slice(i, i+7));
+  }
+  
+  // Months row
+  const monthLabels = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+  let curMonth = -1;
+  const monthHtml = columns.map(col => {
+    const firstValid = col.find(d => d);
+    if(firstValid) {
+      const m = Number(firstValid.split("-")[1]) - 1;
+      if(m !== curMonth) {
+        curMonth = m;
+        return `<div class="gh-month-label" style="width:15px;overflow:visible;">${monthLabels[m]}</div>`;
+      }
+    }
+    return `<div class="gh-month-label" style="width:15px;"></div>`;
+  }).join("");
+
+  const gridHtml = columns.map(col => {
+    return col.map(iso => {
+      if(!iso) return `<div class="gh-cell" style="opacity:0"></div>`;
+      const d = dataMap[iso];
+      const color = d?.color || "rgba(255,255,255,0.05)";
+      const title = d?.label ? `${iso}: ${d.label}` : iso;
+      return `<div class="gh-cell" style="background:${color}" title="${title}"></div>`;
+    }).join("");
+  }).join("");
+
+  return `
+    <div class="gh-heatmap-wrapper">
+      <div class="gh-heatmap-title">🔥 Mapa Anual ${year}</div>
+      <div class="gh-heatmap-scroll">
+        <div class="gh-months-row" style="padding-left:12px">${monthHtml}</div>
+        <div style="display:flex;gap:4px">
+          <div style="display:flex;flex-direction:column;justify-content:space-between;font-size:9px;color:rgba(255,255,255,0.3);padding:2px 0;">
+            <div>L</div><div>X</div><div>V</div><div>D</div>
+          </div>
+          <div class="gh-heatmap-grid">${gridHtml}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function openMoodMonthModal(initialIso){
   const host = document.querySelector("#app");
   const backdrop = document.createElement("div");
@@ -4866,6 +4931,21 @@ function openMoodMonthModal(initialIso){
     // ── Gráficos tab ──
     const chartsHtml = ()=>{
       if(!entries.length) return `<div class="mmh-empty">Sin registros este mes.</div>`;
+
+      // 0. Heatmap Anual
+      const heatmapData = {};
+      Object.keys(map).forEach(iso => {
+        if(!iso.startsWith(String(y))) return;
+        const arr = Array.isArray(map[iso]) ? map[iso] : [map[iso]];
+        const last = arr[arr.length-1];
+        if(last && last.spriteId) {
+          heatmapData[iso] = {
+            color: FACE_COLOR[last.spriteId] || "#60A5FA",
+            label: FACE_LABEL[last.spriteId] || last.spriteId
+          };
+        }
+      });
+      const ghHtml = renderGithubHeatmap(y, heatmapData);
 
       // 1. Mood line chart (SVG)
       const scored = entries.map(e=>({ iso:e.iso, sc:FACE_SCORE[e.spriteId]||3, color:FACE_COLOR[e.spriteId]||"#60A5FA", en:Number(e.energy)||0 }));
@@ -5007,6 +5087,7 @@ function openMoodMonthModal(initialIso){
 
       return `
         ${streakSection}
+        ${ghHtml}
         <div class="mmchart-card">
           <div class="mmchart-title">📈 Estado de ánimo</div>
           <div class="mmchart-yaxis">
@@ -6984,11 +7065,32 @@ function openSleepHistoryModal(){
       path=`M ${pts[0].x} ${pts[0].y}`;
       for(let i=1;i<pts.length;i++){ const cx=Math.round((pts[i-1].x+pts[i].x)/2); path+=` Q ${cx} ${pts[i-1].y}, ${pts[i].x} ${pts[i].y}`; }
     }
+    const allLogs = getLog();
+    const heatmapData = {};
+    const year = new Date().getFullYear();
+    allLogs.forEach(r => {
+      if(!r.date.startsWith(String(year))) return;
+      let color = "rgba(124,92,255,0.2)"; // default light purple
+      if(r.totalMinutes > 0) {
+        const h = r.totalMinutes / 60;
+        if(h >= 8) color = "#4ADE80"; // green
+        else if(h >= 6) color = "#86EFAC"; // light green
+        else if(h >= 4) color = "#FBBF24"; // yellow
+        else color = "#F87171"; // red
+      }
+      heatmapData[r.date] = {
+        color,
+        label: r.totalMinutes ? formatSleepDuration(r.totalMinutes) : "Sin duración"
+      };
+    });
+    const ghHtml = renderGithubHeatmap(year, heatmapData);
+
     c.innerHTML=`
       <div class="djp-chart-controls">
         ${[["7","7D"],["30","30D"],["90","90D"],["all","Todo"]].map(([v,t])=>`<button class="djp-range-btn ${uiSt.range===v?"active":""}" data-range="${v}">${t}</button>`).join("")}
       </div>
-      <div class="djp-chart-wrap">
+      <div class="djp-chart-wrap" style="margin-bottom:16px;">
+        <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Curva de sueño</div>
         ${rows.length?`
           <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
             <defs><linearGradient id="djpGrad" x1="0" y1="0" x2="0" y2="1">
@@ -7002,6 +7104,7 @@ function openSleepHistoryModal(){
           </svg>
         `:`<div class="djp-empty">Sin datos con duración en este período.</div>`}
       </div>
+      ${ghHtml}
     `;
     c.querySelectorAll("[data-range]").forEach(b=>b.addEventListener("click",()=>{ uiSt.range=b.getAttribute("data-range")||"30"; renderChart(); renderStats(); }));
   };
