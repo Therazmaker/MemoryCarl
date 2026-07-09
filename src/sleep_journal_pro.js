@@ -1113,10 +1113,31 @@ window.openSleepHistoryModal = function() {
     const content = backdrop.querySelector("#djpHistContent");
     if (!content) return;
 
+    const allLogs = getLog();
+    const heatmapData = {};
+    const year = new Date().getFullYear();
+    allLogs.forEach(r => {
+      if(!r.date.startsWith(String(year))) return;
+      let color = "rgba(124,92,255,0.2)"; 
+      if(r.totalMinutes > 0) {
+        const h = r.totalMinutes / 60;
+        if(h >= 8) color = "#4ADE80";
+        else if(h >= 6) color = "#86EFAC";
+        else if(h >= 4) color = "#FBBF24";
+        else color = "#F87171";
+      }
+      heatmapData[r.date] = {
+        color,
+        label: r.totalMinutes ? _djpFmt(r.totalMinutes) : "Sin duración"
+      };
+    });
+    const ghHtml = typeof window.renderGithubHeatmap === "function" ? window.renderGithubHeatmap(year, heatmapData) : "";
+
     const typeMap = Object.fromEntries(DREAM_TYPES.map(t => [t.id, t]));
     const emotionMap = Object.fromEntries(WAKE_EMOTIONS.map(e => [e.id, e]));
 
     content.innerHTML = `
+      ${ghHtml}
       <div class="djp-chart-controls" style="margin-bottom:10px;">
         ${[["7","7D"],["30","30D"],["90","90D"],["all","Todo"]].map(([v,t]) => `
           <button class="djp-range-btn ${uiState.range === v ? "active" : ""}" data-range="${v}">${t}</button>
@@ -1318,8 +1339,28 @@ window.openSleepHistoryModal = function() {
         path += ` Q ${cx} ${pts[i-1].y}, ${pts[i].x} ${pts[i].y}`;
       }
     }
+    const allLogs = getLog();
+    const heatmapData = {};
+    const year = new Date().getFullYear();
+    allLogs.forEach(r => {
+      if(!r.date.startsWith(String(year))) return;
+      let color = "rgba(124,92,255,0.2)"; 
+      if(r.totalMinutes > 0) {
+        const h = r.totalMinutes / 60;
+        if(h >= 8) color = "#4ADE80";
+        else if(h >= 6) color = "#86EFAC";
+        else if(h >= 4) color = "#FBBF24";
+        else color = "#F87171";
+      }
+      heatmapData[r.date] = {
+        color,
+        label: r.totalMinutes ? _djpFmt(r.totalMinutes) : "Sin duración"
+      };
+    });
+    const ghHtml = typeof window.renderGithubHeatmap === "function" ? window.renderGithubHeatmap(year, heatmapData) : "";
 
     content.innerHTML = `
+      ${ghHtml}
       <div class="djp-chart-controls">
         ${[["7","7D"],["30","30D"],["90","90D"],["all","Todo"]].map(([v,t]) => `
           <button class="djp-range-btn ${uiState.range === v ? "active" : ""}" data-range="${v}">${t}</button>

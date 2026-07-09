@@ -4800,7 +4800,7 @@ function openMoodPickerModal(iso, opts={}){
   if(typeof window.anime==="function") animateSleepModalIn(backdrop);
 }
 
-function renderGithubHeatmap(year, dataMap) {
+window.renderGithubHeatmap = function renderGithubHeatmap(year, dataMap) {
   // dataMap is { '2026-07-07': { color: '#ff0', intensity: 1, label: '3h' }, ... }
   const start = new Date(year, 0, 1);
   const end = new Date(year, 11, 31);
