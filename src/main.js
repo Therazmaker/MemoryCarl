@@ -5630,7 +5630,10 @@ function renderLifeTrackerCard() {
             <div class="lt-event-title">${escapeHtml(e.title)}</div>
             <div class="lt-event-date" style="color:#a78bfa">Carl quiere saber cómo te fue 💜</div>
           </div>
-          <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Marcar como hecho">✓</button>
+          <div style="display:flex;align-items:center;">
+            <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Marcar como hecho">✓</button>
+            <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" title="Eliminar" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 8px;">🗑</button>
+          </div>
         </div>
       `).join("")}
       ${upcomingEvents.map(e => `
@@ -5640,7 +5643,10 @@ function renderLifeTrackerCard() {
             <div class="lt-event-title">${escapeHtml(e.title)}</div>
             <div class="lt-event-date">${escapeHtml(evtDateLabel(e.dueDate))}${e.note ? ` · ${escapeHtml(e.note)}` : ""}</div>
           </div>
-          <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Hecho">✓</button>
+          <div style="display:flex;align-items:center;">
+            <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Hecho">✓</button>
+            <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" title="Eliminar" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 8px;">🗑</button>
+          </div>
         </div>
       `).join("")}
     </div>
@@ -5687,7 +5693,10 @@ function renderLifeTrackerCard() {
           <div class="lt-task-title">${escapeHtml(t.title)}</div>
           <div class="lt-task-since" style="color:${color}">${urgencyLabel[urg]} · ${escapeHtml(sinceStr)}</div>
         </div>
-        <button class="lt-done-btn" data-lt-done="${escapeHtml(t.id)}" title="Marcar como hecho" style="border-color:${color};color:${color}">✓</button>
+        <div style="display:flex;align-items:center;">
+          <button class="lt-done-btn" data-lt-done="${escapeHtml(t.id)}" title="Marcar como hecho" style="border-color:${color};color:${color}">✓</button>
+          <button class="lt-del-btn" data-lt-del="${escapeHtml(t.id)}" title="Eliminar" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 10px;">🗑</button>
+        </div>
       </div>
     `;
   }).join("");
@@ -5734,6 +5743,17 @@ function wireLifeTracker(root) {
       e.stopPropagation();
       lifeTaskMarkDone(btn.getAttribute("data-lt-done"));
       view();
+    });
+  });
+
+  // Delete habit or event
+  root.querySelectorAll("[data-lt-del]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      if(confirm("¿Eliminar este elemento del Tracker Vital?")) {
+        lifeTaskDelete(btn.getAttribute("data-lt-del"));
+        view();
+      }
     });
   });
 
