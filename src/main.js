@@ -4843,9 +4843,10 @@ function renderGithubHeatmap(year, dataMap) {
     return col.map(iso => {
       if(!iso) return `<div class="gh-cell" style="opacity:0"></div>`;
       const d = dataMap[iso];
-      const color = d?.color || "rgba(255,255,255,0.05)";
-      const title = d?.label ? `${iso}: ${d.label}` : iso;
-      return `<div class="gh-cell" style="background:${color}" title="${title}"></div>`;
+      const color = d?.color || "transparent";
+      const border = d?.color ? "none" : "1px solid rgba(255,255,255,0.05)";
+      const title = d?.label ? `${iso}: ${d.label}` : `${iso}: Sin registro`;
+      return `<div class="gh-cell" style="background:${color};border:${border};box-sizing:border-box;" title="${title}"></div>`;
     }).join("");
   }).join("");
 
