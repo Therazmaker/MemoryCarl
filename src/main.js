@@ -4833,14 +4833,14 @@ function renderGithubHeatmap(year, dataMap) {
       const m = Number(firstValid.split("-")[1]) - 1;
       if(m !== curMonth) {
         curMonth = m;
-        return `<div class="gh-month-label" style="width:15px;overflow:visible;">${monthLabels[m]}</div>`;
+        return `<div class="gh-month-label" style="width:15px;flex-shrink:0;overflow:visible;">${monthLabels[m]}</div>`;
       }
     }
-    return `<div class="gh-month-label" style="width:15px;"></div>`;
+    return `<div class="gh-month-label" style="width:15px;flex-shrink:0;"></div>`;
   }).join("");
 
   const gridHtml = columns.map(col => {
-    return col.map(iso => {
+    const cellsHtml = col.map(iso => {
       if(!iso) return `<div class="gh-cell" style="opacity:0"></div>`;
       const d = dataMap[iso];
       const color = d?.color || "transparent";
@@ -4848,18 +4848,19 @@ function renderGithubHeatmap(year, dataMap) {
       const title = d?.label ? `${iso}: ${d.label}` : `${iso}: Sin registro`;
       return `<div class="gh-cell" style="background:${color};border:${border};box-sizing:border-box;" title="${title}"></div>`;
     }).join("");
+    return `<div class="gh-col" style="display:flex;flex-direction:column;gap:3px;width:12px;flex-shrink:0;">${cellsHtml}</div>`;
   }).join("");
 
   return `
     <div class="gh-heatmap-wrapper">
       <div class="gh-heatmap-title">🔥 Mapa Anual ${year}</div>
       <div class="gh-heatmap-scroll">
-        <div class="gh-months-row" style="padding-left:12px">${monthHtml}</div>
+        <div class="gh-months-row" style="display:flex;padding-left:16px;gap:0;">${monthHtml}</div>
         <div style="display:flex;gap:4px">
-          <div style="display:flex;flex-direction:column;justify-content:space-between;font-size:9px;color:rgba(255,255,255,0.3);padding:2px 0;">
+          <div style="display:flex;flex-direction:column;justify-content:space-between;font-size:9px;color:rgba(255,255,255,0.3);padding:2px 0;width:12px;flex-shrink:0;text-align:right;">
             <div>L</div><div>X</div><div>V</div><div>D</div>
           </div>
-          <div class="gh-heatmap-grid">${gridHtml}</div>
+          <div class="gh-heatmap-grid" style="display:flex;gap:3px;">${gridHtml}</div>
         </div>
       </div>
     </div>
