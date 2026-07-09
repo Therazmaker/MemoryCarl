@@ -2908,26 +2908,13 @@ function view(){
     if(next) next.addEventListener("click", ()=>{ state.insightsMonthOffset = (Number(state.insightsMonthOffset)||0) + 1; view(); });
     root.querySelectorAll("[data-ins-day]").forEach(btn=>{
       btn.addEventListener("click", ()=>{
-        state.insightsDay = btn.dataset.insDay || "";
-        state.insightsDayOpen = true;
-        view();
+        const iso = btn.dataset.insDay || "";
+        if(iso) openInsightsDayOverlay(iso);
       });
     });
   }
 
-// Insights day modal wiring
-  if(state.insightsDayOpen){
-    const b = root.querySelector("#insightsDayBackdrop");
-    const c = root.querySelector("#btnInsightsDayClose");
-    // Animate in + draw radar after DOM is ready
-    setTimeout(()=>{ insightsModalIn(); insightsDrawRadar(); }, 0);
-
-    const close = ()=> closeInsightsModalAnimated();
-    if(b){
-      b.addEventListener("click", (e)=>{ if(e.target===b) close(); });
-    }
-    if(c) c.addEventListener("click", close);
-  }
+// Insights day modal wiring — now handled inside openInsightsDayOverlay() DOM overlay
 
   
   // NeuroClaw wiring (Home + Debug modal)
@@ -3615,7 +3602,7 @@ function buildDailySummary(iso){
     if(e && e.spriteId) out.mood = e;
   }catch(e){}
 
-  // Sleep
+  // Sleep / Dream Journal (from sleepLog array)
   try{
     const sl = Array.isArray(state.sleepLog) ? state.sleepLog : [];
     const entry = sl.find(x=>String(x.date)===String(iso));
@@ -3628,16 +3615,18 @@ function buildDailySummary(iso){
     const day = hist.filter(h=>String(h.date)===String(iso));
     if(day.length){
       const total = day.reduce((a,h)=> a + (Number(h?.totals?.total)||0), 0);
-      out.shopping = { total: Number(total.toFixed(2)), entries: day.length, itemsCount: day.reduce((a,h)=>a+(Number(h?.totals?.itemsCount)||0),0) };
+      out.shopping = { total: Number(total.toFixed(2)), entries: day.length, items: day, itemsCount: day.reduce((a,h)=>a+(Number(h?.totals?.itemsCount)||0),0) };
     }
   }catch(e){}
 
-  // Reminders (done that day if we have ts? fallback: count pending)
+  // Reminders for that specific day
   try{
     const rem = Array.isArray(state.reminders) ? state.reminders : [];
-    const total = rem.length;
-    const done = rem.filter(r=>!!r.done).length;
-    out.reminders = { total, done, pending: total-done };
+    const dayRem = rem.filter(r=>String(r.dueDate||r.date||"").startsWith(iso));
+    const allRem = rem;
+    const total = allRem.length;
+    const done = allRem.filter(r=>!!r.done).length;
+    out.reminders = { total, done, pending: total-done, dayItems: dayRem };
   }catch(e){}
 
   // Cleaning sessions (Casa)
@@ -3650,92 +3639,153 @@ function buildDailySummary(iso){
     }
   }catch(e){}
 
+  // Tarot readings
+  try{
+    const tarotLog = Array.isArray(state.tarotLog) ? state.tarotLog : [];
+    const dayTarot = tarotLog.filter(r=>String(r.dateIso||r.date||"").startsWith(iso));
+    if(dayTarot.length) out.tarot = { count: dayTarot.length, readings: dayTarot };
+  }catch(e){}
+
+  // Finance transactions
+  try{
+    const ledger = Array.isArray(state.finance_ledger) ? state.finance_ledger : [];
+    const transactions = Array.isArray(state.finance_transactions) ? state.finance_transactions : [];
+    const allTx = [...ledger, ...transactions];
+    const dayTx = allTx.filter(t=>String(t.date||t.ts||"").startsWith(iso));
+    if(dayTx.length){
+      const income = dayTx.filter(t=>t.type==="income"||t.amount>0).reduce((a,t)=>a+Math.abs(Number(t.amount||0)),0);
+      const expense = dayTx.filter(t=>t.type==="expense"||t.amount<0).reduce((a,t)=>a+Math.abs(Number(t.amount||0)),0);
+      out.finance = { count: dayTx.length, income, expense, items: dayTx.slice(0,10) };
+    }
+  }catch(e){}
+
   return out;
 }
 
-function renderInsightsDayModal(){
-  const iso = String(state.insightsDay||"");
+function openInsightsDayOverlay(iso){
+  // Remove existing overlay if any
+  const existing = document.getElementById("insightsDayOverlay");
+  if(existing) existing.remove();
+
   const sum = buildDailySummary(iso) || { iso };
 
-  const moodName = sum.mood ? (()=>{ const s = getMoodSpriteById(sum.mood.spriteId); return s ? `${s.name}` : sum.mood.spriteId; })() : "Sin datos";
-  const sleepStr = sum.sleep ? `${Math.round((Number(sum.sleep.totalMinutes)||0)/6)/10}h • Q${escapeHtml(String(sum.sleep.quality||""))}` : "Sin datos";
-  const shoppingStr = (sum.shopping && sum.shopping.total>0) ? `${money(sum.shopping.total)} (${sum.shopping.entries} compras)` : "Sin datos";
-  const remindersStr = sum.reminders ? `${sum.reminders.done}/${sum.reminders.total}` : "Sin datos";
-  const cleaningStr = (sum.cleaning && sum.cleaning.totalMinutes>0) ? `${Math.round(sum.cleaning.totalMinutes)} min (${sum.cleaning.count} sesiones)` : "Sin datos";
+  const getMoodLabel = ()=>{
+    if(!sum.mood) return "Sin registro";
+    const s = getMoodSpriteById(sum.mood.spriteId);
+    return s ? s.name : (sum.mood.spriteId || "?");
+  };
 
-  const shopList = (Array.isArray(state.shoppingHistory)? state.shoppingHistory: []).filter(h=>String(h.date)===iso).slice(0,8);
-  const cleanList = (state.house && Array.isArray(state.house.sessionHistory)? state.house.sessionHistory: []).filter(h=>String(h.date)===iso).slice(0,8);
+  const sleepStr = sum.sleep
+    ? `${(Math.round((Number(sum.sleep.totalMinutes)||0)/6)/10).toFixed(1)}h` + (sum.sleep.quality ? ` · Q${sum.sleep.quality}/5` : "")
+    : null;
 
-  // Normalized values 0..100 for radar
-  const v = insightVector(sum);
-  return `
-    <div class="modalBackdrop neuralBackdrop" id="insightsDayBackdrop" aria-label="Día">
-      <div class="neuralModal">
-        <div class="neuralCard" id="insightsNeuralCard">
-          <div class="row" style="justify-content:space-between;align-items:center;">
-            <div>
-              <div class="pill small" style="display:inline-flex;gap:6px;align-items:center;">
-                <span class="dot"></span>
-                <span>Mapa mental diario</span>
-              </div>
-              <h2 style="margin:8px 0 0;">${escapeHtml(iso)}</h2>
-            </div>
-            <button class="iconBtn" id="btnInsightsDayClose">Cerrar</button>
-          </div>
+  const dreamStr = sum.sleep && sum.sleep.narrative ? sum.sleep.narrative.slice(0,120) + (sum.sleep.narrative.length>120?"…":"") : null;
+  const dreamType = sum.sleep && sum.sleep.dreamType ? sum.sleep.dreamType : null;
 
-          <div class="neuralGrid">
-            <div class="neuralChartWrap">
-              <div class="radarBox"><canvas id="insightsRadarCanvas"></canvas></div>
-              <div class="neuralLegend muted">Mood • Sueño • Tasks • Limpieza • Compras</div>
-            </div>
+  const shopList = sum.shopping?.items || [];
+  const cleanList = sum.cleaning?.sessions || [];
+  const tarotList = sum.tarot?.readings || [];
+  const financeItems = sum.finance?.items || [];
 
-            <div class="neuralSummary">
-              <div class="neuralChipRow">
-                <div class="neuralChip"><span>🙂</span><b>${escapeHtml(String(moodName))}</b></div>
-                <div class="neuralChip"><span>😴</span><b>${escapeHtml(String(sleepStr))}</b></div>
-                <div class="neuralChip"><span>✅</span><b>${escapeHtml(String(remindersStr))}</b><span class="muted">rem</span></div>
-                <div class="neuralChip"><span>🧹</span><b>${escapeHtml(String(cleaningStr))}</b></div>
-                <div class="neuralChip"><span>🛒</span><b>${escapeHtml(String(shoppingStr))}</b></div>
-              </div>
+  const section = (icon, title, content) => `
+    <div style="margin-bottom:14px;">
+      <div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(124,92,255,0.8);margin-bottom:8px;font-family:'JetBrains Mono',monospace;">${icon} ${title}</div>
+      ${content}
+    </div>`;
 
-              ${(sum.mood && sum.mood.note) ? `<div class="noteCard"><div class="muted">Nota mood</div><div>${escapeHtml(sum.mood.note)}</div></div>` : ``}
-              ${(sum.sleep && sum.sleep.note) ? `<div class="noteCard"><div class="muted">Nota sueño</div><div>${escapeHtml(sum.sleep.note)}</div></div>` : ``}
-            </div>
-          </div>
+  const chip = (label, val) => val
+    ? `<div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.08);margin-bottom:6px;font-size:13px;"><span style="color:rgba(255,255,255,0.5);">${label}</span><span style="color:#fff;font-weight:700;">${val}</span></div>`
+    : "";
 
-          ${(shopList.length || cleanList.length) ? `
-            <div class="hr"></div>
-            <div class="list">
-              ${shopList.length ? `
-                <div class="muted" style="margin:6px 0 4px;">Compras del día</div>
-                ${shopList.map(h=>`
-                  <div class="item">
-                    <div class="left">
-                      <div class="name">🛒 ${escapeHtml(h.store||"")}</div>
-                      <div class="meta">${money(Number(h?.totals?.total||0))} • ${Number(h?.totals?.itemsCount||0)} items</div>
-                    </div>
-                  </div>
-                `).join("")}
-              `:``}
+  const hasData = sum.mood || sum.sleep || sum.shopping || sum.cleaning || sum.tarot || sum.finance;
 
-              ${cleanList.length ? `
-                <div class="muted" style="margin:10px 0 4px;">Sesiones de limpieza</div>
-                ${cleanList.map(s=>`
-                  <div class="item">
-                    <div class="left">
-                      <div class="name">🧹 ${escapeHtml(String(s.status||"ended"))}</div>
-                      <div class="meta">${Math.round((Number(s.totalSec)||0)/60)} min • ${Array.isArray(s.logs)?s.logs.length:0} pasos</div>
-                    </div>
-                  </div>
-                `).join("")}
-              `:``}
-            </div>
-          `:``}
+  const overlay = document.createElement("div");
+  overlay.id = "insightsDayOverlay";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:1500;background:rgba(6,5,15,0.85);backdrop-filter:blur(8px);display:flex;align-items:flex-end;justify-content:center;padding:0;overflow:hidden;";
 
-        </div>
+  const panel = document.createElement("div");
+  panel.style.cssText = "width:100%;max-width:520px;max-height:90vh;overflow-y:auto;background:#0d0c1a;border:1px solid rgba(124,92,255,0.22);border-radius:20px 20px 0 0;padding:24px 20px 36px;box-shadow:0 -24px 80px rgba(0,0,0,0.7);transform:translateY(30px);opacity:0;transition:transform 0.3s cubic-bezier(0.34,1.56,0.64,1),opacity 0.25s ease;scrollbar-width:thin;scrollbar-color:rgba(124,92,255,0.3) transparent;";
+
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+      <div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(124,92,255,0.8);margin-bottom:4px;font-family:'JetBrains Mono',monospace;">📅 TODO POR DÍA</div>
+        <div style="font-size:24px;font-weight:900;color:#fff;font-family:'Bebas Neue',sans-serif;letter-spacing:1px;">${iso}</div>
       </div>
+      <button id="insOverlayClose" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);border-radius:10px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;">✕ Cerrar</button>
     </div>
+
+    ${!hasData ? `<div style="text-align:center;padding:30px 0;color:rgba(255,255,255,0.3);font-size:14px;">Sin actividad registrada este día 🌙</div>` : ""}
+
+    ${sum.mood ? section("🙂", "Estado de ánimo",
+      chip("Emoción", getMoodLabel()) +
+      chip("Energía", sum.mood.energy ? `${sum.mood.energy}/5` : null) +
+      (sum.mood.note ? `<div style="padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:10px;border:1px solid rgba(255,255,255,0.07);font-size:12px;color:rgba(255,255,255,0.6);margin-top:4px;">${escapeHtml(sum.mood.note)}</div>` : "")
+    ) : ""}
+
+    ${sum.sleep ? section("😴", "Sueño",
+      chip("Duración", sleepStr) +
+      chip("Tipo de sueño", dreamType) +
+      chip("Calidad", sum.sleep.quality ? `${sum.sleep.quality}/5` : null) +
+      chip("Claridad lúcida", sum.sleep.clarity ? `${sum.sleep.clarity}/5` : null) +
+      (sum.sleep.lucidMoment ? `<div style="padding:6px 12px;background:rgba(124,92,255,0.1);border-radius:8px;border:1px solid rgba(124,92,255,0.3);font-size:12px;color:rgba(124,92,255,0.9);margin-bottom:6px;">✨ Sueño lúcido</div>` : "") +
+      (dreamStr ? `<div style="padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:10px;border:1px solid rgba(255,255,255,0.07);font-size:12px;color:rgba(255,255,255,0.6);margin-top:4px;font-style:italic;">${escapeHtml(dreamStr)}</div>` : "")
+    ) : ""}
+
+    ${tarotList.length ? section("🃏", "Tarot",
+      tarotList.map(r=>`
+        <div style="padding:10px 12px;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.08);margin-bottom:6px;">
+          <div style="font-size:12px;font-weight:700;color:#fff;margin-bottom:4px;">${escapeHtml((r.cards||[]).map(c=>c.name||c).join(" · ") || "Tirada")}</div>
+          ${r.interpretation ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);line-height:1.5;">${escapeHtml(r.interpretation.slice(0,150))}${r.interpretation.length>150?"…":""}</div>` : ""}
+        </div>`).join("")
+    ) : ""}
+
+    ${sum.finance ? section("💰", "Finanzas",
+      chip("Ingresos", sum.finance.income > 0 ? money(sum.finance.income) : null) +
+      chip("Gastos", sum.finance.expense > 0 ? money(sum.finance.expense) : null) +
+      financeItems.slice(0,5).map(t=>`
+        <div style="display:flex;justify-content:space-between;padding:6px 12px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:4px;font-size:12px;">
+          <span style="color:rgba(255,255,255,0.6);">${escapeHtml(t.description||t.concept||t.label||"")}</span>
+          <span style="color:${t.amount>0?"#4ADE80":"#F87171"};font-weight:700;">${money(Math.abs(t.amount||0))}</span>
+        </div>`).join("")
+    ) : ""}
+
+    ${shopList.length ? section("🛒", "Compras",
+      shopList.slice(0,6).map(h=>`
+        <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.08);margin-bottom:6px;">
+          <span style="color:rgba(255,255,255,0.8);font-size:13px;">${escapeHtml(h.store||"")}</span>
+          <span style="color:#fff;font-weight:700;font-size:13px;">${money(Number(h?.totals?.total||0))}</span>
+        </div>`).join("")
+    ) : ""}
+
+    ${cleanList.length ? section("🧹", "Limpieza",
+      cleanList.map(s=>`
+        <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.08);margin-bottom:6px;">
+          <span style="color:rgba(255,255,255,0.8);font-size:13px;">${escapeHtml(String(s.status||"Sesión"))}</span>
+          <span style="color:rgba(255,255,255,0.6);font-size:12px;">${Math.round((Number(s.totalSec)||0)/60)} min</span>
+        </div>`).join("")
+    ) : ""}
   `;
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  // Animate in
+  requestAnimationFrame(()=>{ panel.style.transform="translateY(0)"; panel.style.opacity="1"; });
+
+  // Close handlers
+  const close = ()=>{
+    panel.style.transform="translateY(30px)";
+    panel.style.opacity="0";
+    setTimeout(()=>overlay.remove(), 300);
+  };
+  overlay.addEventListener("click", e=>{ if(e.target===overlay) close(); });
+  panel.querySelector("#insOverlayClose")?.addEventListener("click", close);
+}
+
+function renderInsightsDayModal(){
+  // Legacy: now using openInsightsDayOverlay, this is kept for backward compat
+  return "";
 }
 
 function renderHouseHistoryModal(){
