@@ -3030,14 +3030,34 @@ function view(){
         // Set day date if empty
         if(!state.shoppingAiDayDate) state.shoppingAiDayDate = todayISO();
 
-        const newChat = await sendShoppingAiMessage(
+        const result = await sendShoppingAiMessage(
           text,
           Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [],
           products,
           pastDays,
           inventory
         );
-        state.shoppingAiChat = newChat;
+        state.shoppingAiChat = result.newChat;
+        
+        // Handle inventory deduction
+        if (result.actions && Array.isArray(result.actions.consume)) {
+          let deductedMsgs = [];
+          result.actions.consume.forEach(item => {
+            if (!item.name || !item.qty) return;
+            const invItem = inventory.find(i => i.name.toLowerCase() === item.name.toLowerCase());
+            if (invItem) {
+              const currentQty = Number(invItem.qty) || 0;
+              const deductQty = Number(item.qty) || 0;
+              invItem.qty = Math.max(0, currentQty - deductQty);
+              deductedMsgs.push(`${invItem.name} (-${deductQty})`);
+            }
+          });
+          
+          if (deductedMsgs.length > 0) {
+            toast(`Chef AI descontó de inventario: ${deductedMsgs.join(", ")}`);
+          }
+        }
+        
         persist();
       } catch (err) {
         alert("Chef AI: " + err.message);

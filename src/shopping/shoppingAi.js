@@ -102,7 +102,17 @@ TU COMPORTAMIENTO:
 
 5. **Seguimiento de frecuencia:** Usa el historial de días anteriores para detectar patrones ("Esta semana ya es la tercera vez que cenas eso").
 
-6. **Tono:** Español, amigable, directo. Como un amigo chef que también sabe de finanzas y cálculo rápido.`;
+6. **Deducción de Inventario (NIVEL DIOS):** Si Carlos dice explícitamente que comió algo que está en su Despensa, al final de tu respuesta DEBES generar un bloque JSON oculto para que la app reste eso del inventario.
+   - Si no estás 100% seguro de la cantidad o del producto exacto (ej. hay varios arroces), PREGUNTA PRIMERO y NO generes el JSON.
+   - Si estás seguro, pon el JSON al final de tu respuesta así:
+   ---ACTIONS---
+   {
+     "consume": [
+       { "name": "Nombre Exacto del Producto", "qty": 0.25 }
+     ]
+   }
+
+7. **Tono:** Español, amigable, directo. Como un amigo chef que también sabe de finanzas y cálculo rápido.`;
 }
 
 /**
@@ -170,9 +180,23 @@ export async function sendShoppingAiMessage(text, chatHistory, products, pastDay
     ...recentHistory.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }))
   ];
 
-  const aiText = await callOllama(messages);
+  let aiText = await callOllama(messages);
+  
+  // Extract actions if present
+  let extractedActions = null;
+  const splitIdx = aiText.indexOf("---ACTIONS---");
+  if (splitIdx !== -1) {
+    const rawActions = aiText.substring(splitIdx + 13).trim();
+    aiText = aiText.substring(0, splitIdx).trim();
+    try {
+      extractedActions = JSON.parse(rawActions);
+    } catch (e) {
+      console.warn("Chef AI returned invalid JSON actions:", rawActions);
+    }
+  }
+
   const assistantMsg = { role: "assistant", content: aiText, ts: new Date().toISOString() };
-  return [...newHistory, assistantMsg];
+  return { newChat: [...newHistory, assistantMsg], actions: extractedActions };
 }
 
 /**
