@@ -1,6 +1,7 @@
 /**
  * shoppingAi.js — Asistente Chef AI para la sección de Compras
  * Usa el mismo cliente Ollama Cloud que NeuroChat.
+ * Moneda: Soles peruanos (S/)
  */
 
 import { getOllamaSettings, isOllamaConfigured } from "../services/ollamaClient.js";
@@ -8,81 +9,103 @@ import { getOllamaSettings, isOllamaConfigured } from "../services/ollamaClient.
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * Construye el system prompt con la biblioteca de productos del usuario.
- * @param {object[]} library
+ * Construye el system prompt con la biblioteca real de productos del usuario.
+ * @param {object[]} products — state.products
  * @param {object[]} chatHistory
  * @returns {string}
  */
-function buildChefSystemPrompt(library, chatHistory) {
-  const libStr = library.length > 0
-    ? library.map(p => `- ${p.name}${p.cat ? ` [${p.cat}]` : ""}: $${Number(p.price || 0).toFixed(2)}`).join("\n")
-    : "  (Biblioteca vacía — anima al usuario a registrar productos con precios)";
+function buildChefSystemPrompt(products, chatHistory) {
+  // Format the library with all available data
+  const libStr = products.length > 0
+    ? products.map(p => {
+        const unit = p.unit || "u";
+        const unitLabel = unit.toLowerCase().includes("kg") ? "/kg" : "/unidad";
+        return `- ${p.name}${p.category ? ` [${p.category}]` : ""}: S/ ${Number(p.price || 0).toFixed(2)}${unitLabel}`;
+      }).join("\n")
+    : "  (Biblioteca vacía — el usuario aún no ha registrado productos)";
 
-  // Calcular frecuencias de comidas del historial
+  // Calculate food frequency from chat history
   const foodMentions = {};
   chatHistory.forEach(msg => {
     if (msg.role === "user") {
       const content = msg.content.toLowerCase();
-      library.forEach(p => {
+      products.forEach(p => {
         if (content.includes(p.name.toLowerCase())) {
           foodMentions[p.name] = (foodMentions[p.name] || 0) + 1;
         }
       });
     }
   });
-  const freqStr = Object.entries(foodMentions)
+
+  const freqLines = Object.entries(foodMentions)
     .sort((a, b) => b[1] - a[1])
-    .map(([name, count]) => `  - ${name}: mencionado ${count} veces`)
-    .join("\n");
+    .slice(0, 10)
+    .map(([name, count]) => `  - ${name}: ${count} ${count === 1 ? "vez" : "veces"} en el historial`);
 
-  return `Eres "Chef AI", el asistente personal de cocina, compras y nutrición de Carlos.
-Tienes acceso a su biblioteca de productos con precios reales:
+  const freqStr = freqLines.length > 0
+    ? `\n--- FRECUENCIA DE ALIMENTOS (historial) ---\n${freqLines.join("\n")}\n-------------------------------------------\n`
+    : "";
 
---- BIBLIOTECA DE PRODUCTOS ---
+  return `Eres "Chef AI", el asistente personal de cocina, compras y nutrición de Carlos, que vive en Perú.
+La moneda es siempre SOLES PERUANOS (S/). Nunca uses dólares.
+
+Tienes acceso a la biblioteca de productos de Carlos con sus precios reales del supermercado:
+
+--- BIBLIOTECA DE PRODUCTOS (${products.length} productos) ---
 ${libStr}
--------------------------------
+--------------------------------------------------------------
+${freqStr}
+TU COMPORTAMIENTO:
 
-${freqStr ? `--- FRECUENCIA DE ALIMENTOS (historial de conversación) ---\n${freqStr}\n-------------------------------\n` : ""}
+1. **Registro de comidas:** Cuando Carlos te diga qué comió, registra la información y calcula el costo aproximado usando los precios de la biblioteca (en S/). Indica el costo estimado de cada comida y el total del día si ya tienes varios registros.
 
-TU OBJETIVO:
-1. **Registrar comidas:** Cuando el usuario te diga qué comió (desayuno, almuerzo, cena o merienda), registra la información y calcula el costo aproximado basándote en los precios de la biblioteca. Si un ingrediente no está en la biblioteca, haz una estimación razonable e indícalo claramente.
-2. **Seguimiento de patrones:** Llevas cuenta de cuántas veces el usuario ha comido lo mismo. Coméntalo naturalmente cuando sea relevante ("Esta semana ya es la tercera vez que desayunas huevos").
-3. **Sugerencias inteligentes:** Con base en lo que hay en su biblioteca y lo que gasta, sugiere combinaciones de comidas económicas y variadas. Ayúdale a planificar si quiere gastar menos.
-4. **Ajuste de presupuesto:** Si el usuario te pide ajustar, calcula opciones más baratas usando los productos de su biblioteca.
-5. **Idioma y tono:** Responde siempre en español, de forma amigable, directa y sin rodeos. Eres como un amigo chef que también sabe de finanzas.
+2. **Si no sabes la cantidad exacta:** PREGUNTA. Ejemplo: si dice "Comí huevos", pregunta "¿Cuántos huevos? ¿Los compraste en Mass o en otro lado?" Si el precio no está en la biblioteca, estima o pregunta cuánto pagó.
 
-IMPORTANTE: Siempre calcula costos cuando el usuario registre comidas. Usa los precios reales de la biblioteca.`;
+3. **Seguimiento de frecuencia:** Llevas cuenta de cuántas veces Carlos come lo mismo. Coméntalo naturalmente: "Esta semana ya es la tercera vez que desayunas huevos y pan".
+
+4. **Sugerencias inteligentes:** Cuando Carlos te pida ajustar su gasto, sugiere combinaciones de comidas económicas usando los productos que YA tiene en su biblioteca. Compara opciones por costo.
+
+5. **Ayuda proactiva:** Si notas que Carlos come siempre lo mismo y el costo es alto, sugiérele alternativas más económicas de la biblioteca. Si le falta variedad de nutrientes, coméntalo.
+
+6. **Tono:** Responde en español, de forma amigable, directa y concisa. Eres como un amigo que sabe de cocina y de presupuesto. No seas robot ni uses frases formales.
+
+IMPORTANTE: 
+- Usa SIEMPRE S/ para los precios, nunca $
+- Si te preguntan algo que no tiene que ver con comida, compras o nutrición, redirige amablemente la conversación.`;
 }
 
 /**
- * Envía un mensaje al Chef AI usando el cliente Ollama Cloud (igual que NeuroChat).
+ * Envía un mensaje al Chef AI usando Ollama Cloud (igual que NeuroChat).
  * @param {string} text — Mensaje del usuario
  * @param {object[]} chatHistory — Historial completo [{role, content}]
- * @param {object[]} library — Biblioteca de productos de state.shopping
+ * @param {object[]} products — state.products (biblioteca de productos)
  * @returns {Promise<object[]>} — Nuevo historial con la respuesta del asistente
  */
-export async function sendShoppingAiMessage(text, chatHistory, library) {
+export async function sendShoppingAiMessage(text, chatHistory, products) {
   if (!text || !text.trim()) return chatHistory;
 
   if (!isOllamaConfigured()) {
-    throw new Error("Ollama Cloud no está configurado. Ve a NeuroChat → Configuración y agrega tu API Key de Ollama.");
+    throw new Error("Ollama Cloud no está configurado. Ve a NeuroChat → ⚙️ Configuración y activa Ollama con tu API Key.");
   }
 
   const settings = getOllamaSettings();
   const baseUrl = (settings.baseUrl || "https://ollama.com").replace(/\/+$/, "");
   const url = `${baseUrl}/api/chat`;
 
-  const systemPrompt = buildChefSystemPrompt(library, chatHistory);
+  const systemPrompt = buildChefSystemPrompt(products, chatHistory);
 
-  // Nuevo mensaje del usuario
+  // Add user message
   const userMsg = { role: "user", content: text.trim() };
   const newHistory = [...chatHistory, userMsg];
 
-  // Construir mensajes para la API (últimos 12 turnos + system)
-  const recentHistory = newHistory.slice(-12);
+  // Build messages for API (last 14 turns to keep context rich)
+  const recentHistory = newHistory.slice(-14);
   const messages = [
     { role: "system", content: systemPrompt },
-    ...recentHistory.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }))
+    ...recentHistory.map(m => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: m.content
+    }))
   ];
 
   const body = {
@@ -123,8 +146,7 @@ export async function sendShoppingAiMessage(text, chatHistory, library) {
     const data = await res.json();
     const aiText = data?.message?.content || "No pude generar una respuesta. Intenta de nuevo.";
 
-    const assistantMsg = { role: "assistant", content: aiText };
-    return [...newHistory, assistantMsg];
+    return [...newHistory, { role: "assistant", content: aiText }];
 
   } catch (err) {
     clearTimeout(timer);

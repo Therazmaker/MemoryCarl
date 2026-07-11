@@ -3019,20 +3019,13 @@ function view(){
       if(btnSend) btnSend.disabled = true;
 
       try {
-        // Build product library from all shopping lists
-        const library = [];
-        (state.shopping || []).forEach(list => {
-          (list.items || []).forEach(it => {
-            if(it.name && it.price) {
-              library.push({ name: it.name, price: it.price, cat: list.name });
-            }
-          });
-        });
+        // Use state.products — the real Biblioteca de productos with prices in S/
+        const products = Array.isArray(state.products) ? state.products : [];
 
         const newChat = await sendShoppingAiMessage(
           text,
           Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [],
-          library
+          products
         );
         state.shoppingAiChat = newChat;
         persist();
