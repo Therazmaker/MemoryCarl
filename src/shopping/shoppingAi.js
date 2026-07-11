@@ -1,97 +1,136 @@
-export async function sendShoppingAiMessage(text, config, chatHistory, library) {
-  if (!text || !text.trim()) return chatHistory;
+/**
+ * shoppingAi.js — Asistente Chef AI para la sección de Compras
+ * Usa el mismo cliente Ollama Cloud que NeuroChat.
+ */
 
-  const url = config.url ? config.url.trim() : "";
-  const model = config.model ? config.model.trim() : "llama3";
+import { getOllamaSettings, isOllamaConfigured } from "../services/ollamaClient.js";
 
-  if (!url) {
-    throw new Error("Por favor configura la URL de Ollama o la API Key de Gemini arriba.");
-  }
+const DEFAULT_TIMEOUT_MS = 30_000;
 
-  // Detect if it's Gemini or Ollama based on the URL or Key format
-  // If it's a simple key without http, assume Gemini.
-  const isGemini = !url.startsWith("http");
+/**
+ * Construye el system prompt con la biblioteca de productos del usuario.
+ * @param {object[]} library
+ * @param {object[]} chatHistory
+ * @returns {string}
+ */
+function buildChefSystemPrompt(library, chatHistory) {
+  const libStr = library.length > 0
+    ? library.map(p => `- ${p.name}${p.cat ? ` [${p.cat}]` : ""}: $${Number(p.price || 0).toFixed(2)}`).join("\n")
+    : "  (Biblioteca vacía — anima al usuario a registrar productos con precios)";
 
-  // Format library for context
-  const libStr = library.map(p => `- ${p.name} (Cat: ${p.cat}): ${p.price}`).join("\n");
-  
-  const systemPrompt = `Eres "Chef AI", un asistente de compras, finanzas y nutrición personal.
-Conoces la biblioteca de productos del usuario y sus precios actuales:
+  // Calcular frecuencias de comidas del historial
+  const foodMentions = {};
+  chatHistory.forEach(msg => {
+    if (msg.role === "user") {
+      const content = msg.content.toLowerCase();
+      library.forEach(p => {
+        if (content.includes(p.name.toLowerCase())) {
+          foodMentions[p.name] = (foodMentions[p.name] || 0) + 1;
+        }
+      });
+    }
+  });
+  const freqStr = Object.entries(foodMentions)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => `  - ${name}: mencionado ${count} veces`)
+    .join("\n");
+
+  return `Eres "Chef AI", el asistente personal de cocina, compras y nutrición de Carlos.
+Tienes acceso a su biblioteca de productos con precios reales:
+
 --- BIBLIOTECA DE PRODUCTOS ---
 ${libStr}
 -------------------------------
 
-OBJETIVO:
-1. El usuario te dirá lo que ha comido (ej. "Desayuné 2 huevos y un pan").
-2. Debes calcular el costo aproximado de esa comida basándote en los precios de la biblioteca. Si no sabes el precio exacto, haz una estimación razonable o pregúntale al usuario el precio si falta en la biblioteca.
-3. Responde siempre en español, de forma amigable, concisa y directa.
-4. Sugiere comidas o ideas basándote en lo que ya compró o en opciones económicas.
-5. Lleva un seguimiento si el usuario te dice qué come frecuentemente ("que sepa cuantas veces he comido lo mismo"). Como tienes acceso al historial de este chat, usa ese contexto.
-`;
+${freqStr ? `--- FRECUENCIA DE ALIMENTOS (historial de conversación) ---\n${freqStr}\n-------------------------------\n` : ""}
 
-  let userMsg = { role: "user", content: text };
-  let newChat = [...chatHistory, userMsg];
+TU OBJETIVO:
+1. **Registrar comidas:** Cuando el usuario te diga qué comió (desayuno, almuerzo, cena o merienda), registra la información y calcula el costo aproximado basándote en los precios de la biblioteca. Si un ingrediente no está en la biblioteca, haz una estimación razonable e indícalo claramente.
+2. **Seguimiento de patrones:** Llevas cuenta de cuántas veces el usuario ha comido lo mismo. Coméntalo naturalmente cuando sea relevante ("Esta semana ya es la tercera vez que desayunas huevos").
+3. **Sugerencias inteligentes:** Con base en lo que hay en su biblioteca y lo que gasta, sugiere combinaciones de comidas económicas y variadas. Ayúdale a planificar si quiere gastar menos.
+4. **Ajuste de presupuesto:** Si el usuario te pide ajustar, calcula opciones más baratas usando los productos de su biblioteca.
+5. **Idioma y tono:** Responde siempre en español, de forma amigable, directa y sin rodeos. Eres como un amigo chef que también sabe de finanzas.
 
-  if (isGemini) {
-    // Gemini API format
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.0-flash'}:generateContent?key=${url}`;
-    
-    const contents = [];
-    contents.push({ role: "user", parts: [{ text: systemPrompt }] });
-    contents.push({ role: "model", parts: [{ text: "Entendido, soy el Chef AI. ¿En qué te ayudo hoy?" }] });
-    
-    newChat.forEach(msg => {
-      contents.push({
-        role: msg.role === "user" ? "user" : "model",
-        parts: [{ text: msg.content }]
-      });
+IMPORTANTE: Siempre calcula costos cuando el usuario registre comidas. Usa los precios reales de la biblioteca.`;
+}
+
+/**
+ * Envía un mensaje al Chef AI usando el cliente Ollama Cloud (igual que NeuroChat).
+ * @param {string} text — Mensaje del usuario
+ * @param {object[]} chatHistory — Historial completo [{role, content}]
+ * @param {object[]} library — Biblioteca de productos de state.shopping
+ * @returns {Promise<object[]>} — Nuevo historial con la respuesta del asistente
+ */
+export async function sendShoppingAiMessage(text, chatHistory, library) {
+  if (!text || !text.trim()) return chatHistory;
+
+  if (!isOllamaConfigured()) {
+    throw new Error("Ollama Cloud no está configurado. Ve a NeuroChat → Configuración y agrega tu API Key de Ollama.");
+  }
+
+  const settings = getOllamaSettings();
+  const baseUrl = (settings.baseUrl || "https://ollama.com").replace(/\/+$/, "");
+  const url = `${baseUrl}/api/chat`;
+
+  const systemPrompt = buildChefSystemPrompt(library, chatHistory);
+
+  // Nuevo mensaje del usuario
+  const userMsg = { role: "user", content: text.trim() };
+  const newHistory = [...chatHistory, userMsg];
+
+  // Construir mensajes para la API (últimos 12 turnos + system)
+  const recentHistory = newHistory.slice(-12);
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...recentHistory.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }))
+  ];
+
+  const body = {
+    model: settings.model || "gpt-oss:120b",
+    messages,
+    stream: false,
+    options: {
+      temperature: settings.temperature ?? 0.7,
+      num_predict: settings.maxTokens ?? 1024,
+    },
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), settings.timeoutMs || DEFAULT_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${settings.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
     });
 
-    try {
-      const res = await fetch(geminiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents })
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error?.message || "Error al conectar con Gemini");
-      }
-      const data = await res.json();
-      const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Lo siento, no pude generar una respuesta.";
-      
-      newChat.push({ role: "assistant", content: aiText });
-      return newChat;
-    } catch (e) {
-      throw e;
-    }
-  } else {
-    // Ollama API format
-    // Ensure the endpoint is correct (usually /api/chat)
-    const ollamaUrl = url.endsWith("/api/chat") ? url : (url.endsWith("/") ? url + "api/chat" : url + "/api/chat");
-    const messages = [
-      { role: "system", content: systemPrompt },
-      ...newChat.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))
-    ];
+    clearTimeout(timer);
 
-    try {
-      const res = await fetch(ollamaUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: model,
-          messages: messages,
-          stream: false
-        })
-      });
-      if (!res.ok) throw new Error("Error al conectar con Ollama");
-      const data = await res.json();
-      const aiText = data.message?.content || "No hay respuesta.";
-      
-      newChat.push({ role: "assistant", content: aiText });
-      return newChat;
-    } catch (e) {
-      throw e;
+    if (!res.ok) {
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const errData = await res.json();
+        errMsg = errData?.error || errMsg;
+      } catch (_e) {}
+      throw new Error(`Error de Ollama Cloud: ${errMsg}`);
     }
+
+    const data = await res.json();
+    const aiText = data?.message?.content || "No pude generar una respuesta. Intenta de nuevo.";
+
+    const assistantMsg = { role: "assistant", content: aiText };
+    return [...newHistory, assistantMsg];
+
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === "AbortError") {
+      throw new Error("La solicitud tardó demasiado. Revisa tu conexión e intenta de nuevo.");
+    }
+    throw err;
   }
 }

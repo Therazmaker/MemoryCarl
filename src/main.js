@@ -3003,7 +3003,76 @@ function view(){
     });
   }
 
+  // Shopping AI wiring
+  if(state.tab === "shopping" && state.shoppingSubtab === "ai"){
+    const btnSend = root.querySelector("#btnShopAiSend");
+    const btnClear = root.querySelector("#btnShopAiClear");
+    const inp = root.querySelector("#shopAiMsgInp");
+
+    const doSend = async () => {
+      const text = inp ? inp.value.trim() : "";
+      if(!text) return;
+
+      const typing = root.querySelector("#shopAiTyping");
+      if(typing) typing.style.display = "block";
+      if(inp) { inp.value = ""; inp.disabled = true; }
+      if(btnSend) btnSend.disabled = true;
+
+      try {
+        // Build product library from all shopping lists
+        const library = [];
+        (state.shopping || []).forEach(list => {
+          (list.items || []).forEach(it => {
+            if(it.name && it.price) {
+              library.push({ name: it.name, price: it.price, cat: list.name });
+            }
+          });
+        });
+
+        const newChat = await sendShoppingAiMessage(
+          text,
+          Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [],
+          library
+        );
+        state.shoppingAiChat = newChat;
+        persist();
+      } catch (err) {
+        alert("Chef AI: " + err.message);
+      } finally {
+        if(typing) typing.style.display = "none";
+        if(inp) inp.disabled = false;
+        if(btnSend) btnSend.disabled = false;
+        view();
+        setTimeout(() => {
+          const log = document.getElementById("shopAiChatLog");
+          if(log) log.scrollTop = log.scrollHeight;
+        }, 50);
+      }
+    };
+
+    if(btnSend) btnSend.addEventListener("click", doSend);
+    if(inp){
+      inp.addEventListener("keydown", (e) => {
+        if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); doSend(); }
+      });
+    }
+    if(btnClear){
+      btnClear.addEventListener("click", () => {
+        if(confirm("¿Borrar el historial del Chef AI? Perderás el contexto de la conversación.")){
+          state.shoppingAiChat = [];
+          persist();
+          view();
+        }
+      });
+    }
+    setTimeout(() => {
+      const log = document.getElementById("shopAiChatLog");
+      if(log) log.scrollTop = log.scrollHeight;
+    }, 50);
+  }
+
   // Bottom nav wiring
+
   root.querySelectorAll(".bn[data-tab]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       state.tab = btn.dataset.tab;
@@ -12927,46 +12996,59 @@ window.openShoppingCategoryModal = openShoppingCategoryModal;
 
 function viewShoppingAssistant(){
   const chat = Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [];
-  
+
+  // Check if Ollama is configured (same as NeuroChat checks)
+  let ollamaEnabled = false;
+  try {
+    const s = JSON.parse(localStorage.getItem("memorycarl_ollama_settings") || "{}");
+    ollamaEnabled = !!(s.enabled && s.apiKey && s.apiKey.trim().length > 10);
+  } catch(_){}
+
+  const notConfiguredBanner = !ollamaEnabled ? `
+    <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:rgba(245,158,11,0.9);">
+      ⚠️ <b>Ollama Cloud no configurado.</b> Ve a <b>NeuroChat → ⚙️ Configuración</b> y activa Ollama con tu API Key. El Chef AI usa la misma conexión.
+    </div>
+  ` : "";
+
   return `
     <div class="sectionTitle" style="margin-bottom:10px;">
       <div style="display:flex;align-items:center;gap:10px;">
         <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">‹</button>
-        <div>Chef AI</div>
+        <div>🤖 Chef AI</div>
       </div>
-      <div class="chip">Ollama / Gemini</div>
+      <div class="chip" style="background:rgba(124,92,255,0.15);color:#a78bfa;">Ollama Cloud</div>
     </div>
 
-    <div class="card" style="margin-bottom:14px;padding:12px;">
-      <div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:8px;">Configuración API (Ollama URL o Gemini Key)</div>
-      <div style="display:flex;gap:8px;margin-bottom:8px;">
-        <input type="text" id="shopAiUrlInp" class="input" placeholder="http://localhost:11434/api/generate O API Key" value="${escapeHtml(state.shoppingAiUrl||"")}" style="flex:1;">
-        <input type="text" id="shopAiModelInp" class="input" placeholder="Modelo (ej. llama3 o gemini-2.5-flash)" value="${escapeHtml(state.shoppingAiModel||"")}" style="width:140px;">
-        <button class="btn" id="btnShopAiSaveCfg">Guardar</button>
-      </div>
-    </div>
+    ${notConfiguredBanner}
 
-    <div class="card" style="display:flex;flex-direction:column;height:500px;max-height:60vh;padding:0;">
-      <div id="shopAiChatLog" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px;">
+    <div class="card" style="display:flex;flex-direction:column;height:calc(100vh - 200px);max-height:600px;padding:0;overflow:hidden;">
+      <div id="shopAiChatLog" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;">
         ${chat.length === 0 ? `
-          <div style="text-align:center;color:rgba(255,255,255,0.4);margin-top:20px;font-size:14px;">
-            ¡Hola! Soy tu asistente de compras y nutrición. Dime qué has comido o pregúntame por sugerencias basadas en tus compras.
+          <div style="text-align:center;color:rgba(255,255,255,0.35);margin-top:30px;">
+            <div style="font-size:40px;margin-bottom:12px;">🍳</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px;color:rgba(255,255,255,0.6);">Chef AI listo</div>
+            <div style="font-size:13px;line-height:1.5;">Dime qué comiste hoy y calculo el costo.<br>O pídeme un plan de comidas económico.</div>
           </div>
         ` : chat.map(msg => `
           <div style="display:flex;flex-direction:column;align-items:${msg.role==='user'?'flex-end':'flex-start'};">
-            <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;margin-left:4px;margin-right:4px;">${msg.role==='user'?'Tú':'Chef AI'}</div>
-            <div style="background:${msg.role==='user'?'rgba(124,92,255,0.2)':'rgba(255,255,255,0.05)'};border:1px solid ${msg.role==='user'?'rgba(124,92,255,0.4)':'rgba(255,255,255,0.1)'};padding:10px 14px;border-radius:14px;max-width:85%;font-size:14px;line-height:1.4;white-space:pre-wrap;">${escapeHtml(msg.content)}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:3px;padding:0 4px;">${msg.role==='user'?'Tú':'🤖 Chef AI'}</div>
+            <div style="background:${msg.role==='user'?'rgba(124,92,255,0.25)':'rgba(255,255,255,0.06)'};border:1px solid ${msg.role==='user'?'rgba(124,92,255,0.5)':'rgba(255,255,255,0.1)'};padding:10px 13px;border-radius:${msg.role==='user'?'14px 14px 4px 14px':'14px 14px 14px 4px'};max-width:88%;font-size:14px;line-height:1.5;white-space:pre-wrap;">${escapeHtml(msg.content)}</div>
           </div>
         `).join("")}
-        <div id="shopAiTyping" style="display:none;color:rgba(255,255,255,0.5);font-size:12px;padding:4px 14px;">El chef está pensando...</div>
+        <div id="shopAiTyping" style="display:none;color:rgba(255,255,255,0.4);font-size:13px;padding:4px 2px;">🤖 El chef está pensando…</div>
       </div>
-      <div style="padding:10px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:8px;background:rgba(0,0,0,0.2);">
-        <textarea id="shopAiMsgInp" class="input" placeholder="Ej: Hoy desayuné 2 huevos..." style="flex:1;min-height:40px;max-height:100px;resize:vertical;"></textarea>
-        <button class="btn" id="btnShopAiSend" style="align-self:flex-end;">Enviar</button>
+
+      <div style="padding:10px 12px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:8px;align-items:flex-end;background:rgba(0,0,0,0.15);">
+        <textarea id="shopAiMsgInp" class="input" placeholder="Ej: Desayuné 2 huevos y pan bimbo…" style="flex:1;min-height:42px;max-height:120px;resize:none;line-height:1.4;"></textarea>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <button class="btn" id="btnShopAiSend" style="white-space:nowrap;">Enviar ↵</button>
+          ${chat.length > 0 ? `<button class="btn" id="btnShopAiClear" style="font-size:11px;opacity:0.5;">Limpiar</button>` : ""}
+        </div>
       </div>
     </div>
   `;
 }
+
 
 function viewShoppingDashboard(){
   const preset = state.shoppingDashPreset || "7d";
