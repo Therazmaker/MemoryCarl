@@ -4,7 +4,7 @@ import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiSt
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
 import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
-import { sendShoppingAiMessage } from "./shopping/shoppingAi.js";
+import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO } from "./shopping/shoppingAi.js";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -241,8 +241,8 @@ const LS = {
   products: "memorycarl_v2_products",
   shoppingHistory: "memorycarl_v2_shopping_history",
   shoppingAiChat: "memorycarl_v2_shopping_ai_chat",
-  shoppingAiUrl: "memorycarl_v2_shopping_ai_url",
-  shoppingAiModel: "memorycarl_v2_shopping_ai_model",
+  shoppingAiDays: "memorycarl_v2_shopping_ai_days",
+  shoppingAiDayDate: "memorycarl_v2_shopping_ai_day_date",
   inventory: "memorycarl_v2_inventory",
   inventoryLots: "memorycarl_v2_inventory_lots",
 
@@ -2051,8 +2051,8 @@ let state = {
   neuroclawLast: load(LS.neuroclawLast, { ts:"", signals:null, suggestions:[] }),
   // Shopping AI
   shoppingAiChat: load(LS.shoppingAiChat, []),
-  shoppingAiUrl: load(LS.shoppingAiUrl, ""),
-  shoppingAiModel: load(LS.shoppingAiModel, "gemini-2.0-flash"),
+  shoppingAiDays: load(LS.shoppingAiDays, []),
+  shoppingAiDayDate: load(LS.shoppingAiDayDate, ""),
   // Tarot Settings
   tarotGeminiKey: load(LS.tarotGeminiKey, ""),
   tarotGeminiModel: load(LS.tarotGeminiModel, "gemini-2.0-flash"),
@@ -2088,8 +2088,8 @@ function persist(){
 
   // Shopping AI
   if(state.shoppingAiChat !== undefined) save(LS.shoppingAiChat, state.shoppingAiChat);
-  if(state.shoppingAiUrl !== undefined) save(LS.shoppingAiUrl, state.shoppingAiUrl);
-  if(state.shoppingAiModel !== undefined) save(LS.shoppingAiModel, state.shoppingAiModel);
+  if(state.shoppingAiDays !== undefined) save(LS.shoppingAiDays, state.shoppingAiDays);
+  if(state.shoppingAiDayDate !== undefined) save(LS.shoppingAiDayDate, state.shoppingAiDayDate);
 
   // Tarot
   if(state.tarotGeminiKey !== undefined) save(LS.tarotGeminiKey, state.tarotGeminiKey);
@@ -3007,7 +3007,11 @@ function view(){
   if(state.tab === "shopping" && state.shoppingSubtab === "ai"){
     const btnSend = root.querySelector("#btnShopAiSend");
     const btnClear = root.querySelector("#btnShopAiClear");
+    const btnCloseDay = root.querySelector("#btnShopAiCloseDay");
     const inp = root.querySelector("#shopAiMsgInp");
+
+    // Auto-archive check: if date changed, archive old chat?
+    // The user requested to manually close it, so we rely on the button.
 
     const doSend = async () => {
       const text = inp ? inp.value.trim() : "";
@@ -3019,13 +3023,17 @@ function view(){
       if(btnSend) btnSend.disabled = true;
 
       try {
-        // Use state.products — the real Biblioteca de productos with prices in S/
         const products = Array.isArray(state.products) ? state.products : [];
+        const pastDays = Array.isArray(state.shoppingAiDays) ? state.shoppingAiDays : [];
+
+        // Set day date if empty
+        if(!state.shoppingAiDayDate) state.shoppingAiDayDate = todayISO();
 
         const newChat = await sendShoppingAiMessage(
           text,
           Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [],
-          products
+          products,
+          pastDays
         );
         state.shoppingAiChat = newChat;
         persist();
@@ -3053,15 +3061,77 @@ function view(){
       btnClear.addEventListener("click", () => {
         if(confirm("¿Borrar el historial del Chef AI? Perderás el contexto de la conversación.")){
           state.shoppingAiChat = [];
+          state.shoppingAiDayDate = "";
           persist();
           view();
         }
       });
     }
+    if(btnCloseDay){
+      btnCloseDay.addEventListener("click", async () => {
+        if(!confirm("¿Cerrar el registro de este día y guardarlo en el historial?")) return;
+        
+        const btn = btnCloseDay;
+        const oldText = btn.innerHTML;
+        btn.innerHTML = "Generando resumen...";
+        btn.disabled = true;
+
+        try {
+          const chat = state.shoppingAiChat || [];
+          const products = state.products || [];
+          
+          const result = await generateDaySummary(chat, products);
+          
+          const newDay = {
+            date: state.shoppingAiDayDate || todayISO(),
+            closedAt: new Date().toISOString(),
+            messages: chat,
+            summary: result.summary,
+            estimatedCost: result.estimatedCost,
+            editedNotes: ""
+          };
+
+          if(!Array.isArray(state.shoppingAiDays)) state.shoppingAiDays = [];
+          state.shoppingAiDays.push(newDay);
+          
+          // Clear current chat
+          state.shoppingAiChat = [];
+          state.shoppingAiDayDate = "";
+          persist();
+          
+          toast("Día cerrado y guardado en el Historial ✅");
+          state.shoppingSubtab = "history";
+          view();
+        } catch(e) {
+          alert("Error al cerrar el día: " + e.message);
+          btn.innerHTML = oldText;
+          btn.disabled = false;
+        }
+      });
+    }
+
     setTimeout(() => {
       const log = document.getElementById("shopAiChatLog");
       if(log) log.scrollTop = log.scrollHeight;
     }, 50);
+  }
+
+  // Shopping AI History wiring
+  if(state.tab === "shopping" && state.shoppingSubtab === "history"){
+    root.querySelectorAll(".btnSaveDayNote").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const dStr = btn.dataset.date;
+        const txta = root.querySelector(`.shopAiDayNote[data-date="${dStr}"]`);
+        if(!txta) return;
+        
+        const day = state.shoppingAiDays.find(x => x.date === dStr);
+        if(day){
+          day.editedNotes = txta.value.trim();
+          persist();
+          toast("Notas guardadas ✅");
+        }
+      });
+    });
   }
 
   // Bottom nav wiring
@@ -7700,6 +7770,10 @@ function viewShopping(){
     return viewShoppingAssistant();
   }
 
+  if(sub === "history"){
+    return viewShoppingHistory();
+  }
+
   return `
     <div class="sectionTitle">
       <div>Listas de compras</div>
@@ -7711,6 +7785,7 @@ function viewShopping(){
       <button class="btn" data-act="openInventory">🏠 Inventario</button>
       <button class="btn" data-act="openShoppingDashboard">📊 Dashboard</button>
       <button class="btn" data-act="openShoppingAi">🤖 Asistente</button>
+      <button class="btn" data-act="openShoppingHistory">📅 Historial</button>
       <div class="chip">hist: ${histCount}</div>
     </div>
 
@@ -13035,9 +13110,73 @@ function viewShoppingAssistant(){
         <textarea id="shopAiMsgInp" class="input" placeholder="Ej: Desayuné 2 huevos y pan bimbo…" style="flex:1;min-height:42px;max-height:120px;resize:none;line-height:1.4;"></textarea>
         <div style="display:flex;flex-direction:column;gap:6px;">
           <button class="btn" id="btnShopAiSend" style="white-space:nowrap;">Enviar ↵</button>
-          ${chat.length > 0 ? `<button class="btn" id="btnShopAiClear" style="font-size:11px;opacity:0.5;">Limpiar</button>` : ""}
+          ${chat.length > 0 ? `
+            <div style="display:flex;gap:6px;">
+              <button class="btn good" id="btnShopAiCloseDay" style="font-size:11px;flex:1;padding:6px 0;">Cerrar día ✓</button>
+              <button class="btn danger" id="btnShopAiClear" style="font-size:11px;padding:6px 8px;" title="Borrar chat actual">🗑️</button>
+            </div>
+          ` : ""}
         </div>
       </div>
+    </div>
+  `;
+}
+
+function viewShoppingHistory(){
+  const days = Array.isArray(state.shoppingAiDays) ? state.shoppingAiDays : [];
+  
+  if (days.length === 0) {
+    return `
+      <div class="sectionTitle" style="margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">‹</button>
+          <div>📅 Historial del Chef AI</div>
+        </div>
+      </div>
+      <div class="emptyState" style="margin-top:40px;">
+        <div style="font-size:40px;margin-bottom:10px;">📆</div>
+        No hay días guardados aún.<br><br>
+        Usa el Chef AI y toca "Cerrar día ✓" para guardar tu registro diario.
+      </div>
+    `;
+  }
+
+  // Sort newest first
+  const sorted = [...days].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  return `
+    <div class="sectionTitle" style="margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">‹</button>
+        <div>📅 Historial del Chef AI</div>
+      </div>
+      <div class="chip">${days.length} días</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      ${sorted.map((d, i) => `
+        <div class="card" style="padding:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+            <div style="font-weight:600;color:#c084fc;">${formatDayLabel(d.date)}</div>
+            <div style="font-size:13px;font-weight:700;color:rgba(255,255,255,0.8);">S/ ${Number(d.estimatedCost||0).toFixed(2)}</div>
+          </div>
+          
+          <div style="font-size:14px;color:rgba(255,255,255,0.85);margin-bottom:10px;line-height:1.5;">
+            ${escapeHtml(d.summary || "Sin resumen.")}
+          </div>
+
+          <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:4px;">Tus notas o correcciones para el AI:</div>
+          <textarea class="input shopAiDayNote" data-date="${d.date}" placeholder="Ej: No comí 2 huevos, fueron 3..." style="width:100%;min-height:50px;font-size:13px;margin-bottom:8px;">${escapeHtml(d.editedNotes || "")}</textarea>
+          
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:11px;color:rgba(255,255,255,0.4);">${d.messages ? d.messages.length : 0} msgs</div>
+            <div style="display:flex;gap:6px;">
+              <button class="btn danger" style="padding:4px 8px;font-size:11px;" onclick="if(confirm('¿Borrar registro de este día?')) { state.shoppingAiDays.splice(${state.shoppingAiDays.findIndex(x=>x.date===d.date)},1); persist(); view(); }">Borrar</button>
+              <button class="btn good btnSaveDayNote" data-date="${d.date}" style="padding:4px 10px;font-size:11px;">Guardar notas</button>
+            </div>
+          </div>
+        </div>
+      `).join("")}
     </div>
   `;
 }
