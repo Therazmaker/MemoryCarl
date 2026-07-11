@@ -3025,6 +3025,7 @@ function view(){
       try {
         const products = Array.isArray(state.products) ? state.products : [];
         const pastDays = Array.isArray(state.shoppingAiDays) ? state.shoppingAiDays : [];
+        const inventory = Array.isArray(state.inventory) ? state.inventory : [];
 
         // Set day date if empty
         if(!state.shoppingAiDayDate) state.shoppingAiDayDate = todayISO();
@@ -3033,7 +3034,8 @@ function view(){
           text,
           Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [],
           products,
-          pastDays
+          pastDays,
+          inventory
         );
         state.shoppingAiChat = newChat;
         persist();

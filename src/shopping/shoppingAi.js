@@ -23,16 +23,23 @@ export function todayISO() {
 }
 
 /**
- * Build system prompt with product library + past days context.
+ * Build system prompt with product library, inventory + past days context.
  */
-function buildChefSystemPrompt(products, chatHistory, pastDays = []) {
+function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory = []) {
   const libStr = products.length > 0
     ? products.map(p => {
         const unit = (p.unit || "u").toLowerCase();
-        const unitLabel = unit.includes("kg") ? "/kg" : "/u";
-        return `- ${p.name}${p.category ? ` [${p.category}]` : ""}: S/ ${Number(p.price || 0).toFixed(2)}${unitLabel}`;
+        const unitLabel = unit.includes("kg") ? "kg" : "u";
+        return `- ${p.name}${p.category ? ` [${p.category}]` : ""}: S/ ${Number(p.price || 0).toFixed(2)} por ${unitLabel}`;
       }).join("\n")
     : "  (Biblioteca vacía)";
+
+  const invStr = inventory.length > 0
+    ? inventory.map(i => {
+        const qty = i.qty ? ` (Quedan: ${i.qty})` : "";
+        return `  - ${i.name || "Producto"}${qty}`;
+      }).join("\n")
+    : "  (Despensa vacía o no registrada)";
 
   // Past days context (last 7 days)
   let pastCtx = "";
@@ -72,23 +79,30 @@ function buildChefSystemPrompt(products, chatHistory, pastDays = []) {
   return `Eres "Chef AI", el asistente personal de cocina, compras y nutrición de Carlos, en Perú.
 La moneda es siempre SOLES PERUANOS (S/). Nunca uses dólares.
 
---- BIBLIOTECA DE PRODUCTOS (${products.length} productos) ---
+--- BIBLIOTECA DE PRODUCTOS (${products.length} productos con precios base) ---
 ${libStr}
+--------------------------------------------------------------
+--- TU INVENTARIO ACTUAL EN CASA (Despensa) ---
+${invStr}
 --------------------------------------------------------------
 ${pastCtx}${freqStr}
 TU COMPORTAMIENTO:
 
-1. **Registro de comidas:** Cuando Carlos diga qué comió, calcula el costo aproximado en S/ usando la biblioteca. Indica el costo de cada comida y el acumulado del día.
+1. **Sugerencias con Inventario:** Usa los productos que Carlos YA TIENE en su Despensa para sugerirle comidas económicas. Así gastará S/ 0 extra.
 
-2. **Pregunta cantidades:** Si Carlos dice "comí huevos", pregunta cuántos. Si el producto no está en la biblioteca, pregunta cuánto pagó.
+2. **Matemática Fraccional (MUY IMPORTANTE):**
+   - En la biblioteca, los precios están por unidad completa o por kilogramo (kg).
+   - Si la biblioteca dice "Arroz: S/ 4.00 por kg" y Carlos dice "Comí 250g de arroz", **debes calcular la fracción**: (250g / 1000g) * S/ 4.00 = S/ 1.00.
+   - Si la biblioteca dice "Huevos: S/ 15.00 por u" (asumiendo que es una plancha de 30) y él come 2 huevos, haz un estimado razonable del costo unitario.
+   - Suma estos costos fraccionados para darle el costo REAL de su comida, no el precio del paquete entero.
 
-3. **Seguimiento de frecuencia:** Usa el historial de días anteriores para detectar patrones. Coméntalo naturalmente: "Esta semana ya es la tercera vez que desayunas lo mismo."
+3. **Registro de comidas:** Cuando Carlos diga qué comió, calcula el costo aproximado en S/ aplicando la matemática fraccional. Indica el costo de cada ingrediente, el total de la comida y el acumulado del día.
 
-4. **Sugerencias de ahorro:** Si Carlos pide ajustar su gasto, sugiere alternativas económicas de la biblioteca.
+4. **Pregunta cantidades:** Si Carlos dice "comí arroz", pregunta cuántos gramos o qué porción. Para ser exactos necesitas saber la fracción del producto que usó.
 
-5. **Proactivo:** Si notas que el gasto diario está alto o hay poca variedad, coméntalo con empatía.
+5. **Seguimiento de frecuencia:** Usa el historial de días anteriores para detectar patrones ("Esta semana ya es la tercera vez que cenas eso").
 
-6. **Tono:** Español, amigable, directo. Como un amigo chef que también sabe de finanzas.`;
+6. **Tono:** Español, amigable, directo. Como un amigo chef que también sabe de finanzas y cálculo rápido.`;
 }
 
 /**
@@ -140,12 +154,13 @@ async function callOllama(messages) {
  * @param {object[]} chatHistory — today's chat
  * @param {object[]} products — state.products
  * @param {object[]} pastDays — state.shoppingAiDays
+ * @param {object[]} inventory — state.inventory
  * @returns {Promise<object[]>} — updated chat history
  */
-export async function sendShoppingAiMessage(text, chatHistory, products, pastDays = []) {
+export async function sendShoppingAiMessage(text, chatHistory, products, pastDays = [], inventory = []) {
   if (!text || !text.trim()) return chatHistory;
 
-  const systemPrompt = buildChefSystemPrompt(products, chatHistory, pastDays);
+  const systemPrompt = buildChefSystemPrompt(products, chatHistory, pastDays, inventory);
   const userMsg = { role: "user", content: text.trim(), ts: new Date().toISOString() };
   const newHistory = [...chatHistory, userMsg];
 
