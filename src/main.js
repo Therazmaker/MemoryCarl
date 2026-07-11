@@ -4,6 +4,7 @@ import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiSt
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
 import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
+import { sendShoppingAiMessage } from "./shopping/shoppingAi.js";
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -239,6 +240,9 @@ const LS = {
   // Shopping system (library + history)
   products: "memorycarl_v2_products",
   shoppingHistory: "memorycarl_v2_shopping_history",
+  shoppingAiChat: "memorycarl_v2_shopping_ai_chat",
+  shoppingAiUrl: "memorycarl_v2_shopping_ai_url",
+  shoppingAiModel: "memorycarl_v2_shopping_ai_model",
   inventory: "memorycarl_v2_inventory",
   inventoryLots: "memorycarl_v2_inventory_lots",
 
@@ -2045,6 +2049,10 @@ let state = {
   // NeuroClaw
   neuroclawFeedback: load(LS.neuroclawFeedback, []),
   neuroclawLast: load(LS.neuroclawLast, { ts:"", signals:null, suggestions:[] }),
+  // Shopping AI
+  shoppingAiChat: load(LS.shoppingAiChat, []),
+  shoppingAiUrl: load(LS.shoppingAiUrl, ""),
+  shoppingAiModel: load(LS.shoppingAiModel, "gemini-2.0-flash"),
   // Tarot Settings
   tarotGeminiKey: load(LS.tarotGeminiKey, ""),
   tarotGeminiModel: load(LS.tarotGeminiModel, "gemini-2.0-flash"),
@@ -2078,6 +2086,11 @@ function persist(){
   try{ save(LS.neuroclawFeedback, state.neuroclawFeedback); }catch(e){}
   try{ save(LS.neuroclawLast, state.neuroclawLast); }catch(e){}
 
+  // Shopping AI
+  if(state.shoppingAiChat !== undefined) save(LS.shoppingAiChat, state.shoppingAiChat);
+  if(state.shoppingAiUrl !== undefined) save(LS.shoppingAiUrl, state.shoppingAiUrl);
+  if(state.shoppingAiModel !== undefined) save(LS.shoppingAiModel, state.shoppingAiModel);
+
   // Tarot
   if(state.tarotGeminiKey !== undefined) save(LS.tarotGeminiKey, state.tarotGeminiKey);
   if(state.tarotGeminiModel !== undefined) save(LS.tarotGeminiModel, state.tarotGeminiModel);
@@ -2087,7 +2100,6 @@ function persist(){
     if(LS.products) save(LS.products, state.products);
     if(LS.shoppingHistory) save(LS.shoppingHistory, state.shoppingHistory);
     if(LS.inventory) save(LS.inventory, state.inventory);
-  save(LS.inventoryLots, state.inventoryLots||[]);
     if(LS.inventoryLots) save(LS.inventoryLots, state.inventoryLots||[]);
   }catch(e){}
 
@@ -7622,6 +7634,10 @@ function viewShopping(){
     return viewInventory();
   }
 
+  if(sub === "ai"){
+    return viewShoppingAssistant();
+  }
+
   return `
     <div class="sectionTitle">
       <div>Listas de compras</div>
@@ -7632,6 +7648,7 @@ function viewShopping(){
       <button class="btn" onclick="openProductLibrary()">📦 Biblioteca</button>
       <button class="btn" data-act="openInventory">🏠 Inventario</button>
       <button class="btn" data-act="openShoppingDashboard">📊 Dashboard</button>
+      <button class="btn" data-act="openShoppingAi">🤖 Asistente</button>
       <div class="chip">hist: ${histCount}</div>
     </div>
 
@@ -9866,6 +9883,15 @@ if(act==="invMode"){
       if(act==="openShoppingDashboard"){
         state.shoppingSubtab = "dashboard";
         view();
+        return;
+      }
+      if(act==="openShoppingAi"){
+        state.shoppingSubtab = "ai";
+        view();
+        setTimeout(() => {
+          const log = document.getElementById("shopAiChatLog");
+          if(log) log.scrollTop = log.scrollHeight;
+        }, 50);
         return;
       }
       if(act==="openInventory"){
@@ -12898,6 +12924,49 @@ function openShoppingCategoryModal(category, preset){
   modal.addEventListener("click",(e)=>{ if(e.target===modal) modal.remove(); });
 }
 window.openShoppingCategoryModal = openShoppingCategoryModal;
+
+function viewShoppingAssistant(){
+  const chat = Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [];
+  
+  return `
+    <div class="sectionTitle" style="margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">‹</button>
+        <div>Chef AI</div>
+      </div>
+      <div class="chip">Ollama / Gemini</div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;padding:12px;">
+      <div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:8px;">Configuración API (Ollama URL o Gemini Key)</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <input type="text" id="shopAiUrlInp" class="input" placeholder="http://localhost:11434/api/generate O API Key" value="${escapeHtml(state.shoppingAiUrl||"")}" style="flex:1;">
+        <input type="text" id="shopAiModelInp" class="input" placeholder="Modelo (ej. llama3 o gemini-2.5-flash)" value="${escapeHtml(state.shoppingAiModel||"")}" style="width:140px;">
+        <button class="btn" id="btnShopAiSaveCfg">Guardar</button>
+      </div>
+    </div>
+
+    <div class="card" style="display:flex;flex-direction:column;height:500px;max-height:60vh;padding:0;">
+      <div id="shopAiChatLog" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px;">
+        ${chat.length === 0 ? `
+          <div style="text-align:center;color:rgba(255,255,255,0.4);margin-top:20px;font-size:14px;">
+            ¡Hola! Soy tu asistente de compras y nutrición. Dime qué has comido o pregúntame por sugerencias basadas en tus compras.
+          </div>
+        ` : chat.map(msg => `
+          <div style="display:flex;flex-direction:column;align-items:${msg.role==='user'?'flex-end':'flex-start'};">
+            <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px;margin-left:4px;margin-right:4px;">${msg.role==='user'?'Tú':'Chef AI'}</div>
+            <div style="background:${msg.role==='user'?'rgba(124,92,255,0.2)':'rgba(255,255,255,0.05)'};border:1px solid ${msg.role==='user'?'rgba(124,92,255,0.4)':'rgba(255,255,255,0.1)'};padding:10px 14px;border-radius:14px;max-width:85%;font-size:14px;line-height:1.4;white-space:pre-wrap;">${escapeHtml(msg.content)}</div>
+          </div>
+        `).join("")}
+        <div id="shopAiTyping" style="display:none;color:rgba(255,255,255,0.5);font-size:12px;padding:4px 14px;">El chef está pensando...</div>
+      </div>
+      <div style="padding:10px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:8px;background:rgba(0,0,0,0.2);">
+        <textarea id="shopAiMsgInp" class="input" placeholder="Ej: Hoy desayuné 2 huevos..." style="flex:1;min-height:40px;max-height:100px;resize:vertical;"></textarea>
+        <button class="btn" id="btnShopAiSend" style="align-self:flex-end;">Enviar</button>
+      </div>
+    </div>
+  `;
+}
 
 function viewShoppingDashboard(){
   const preset = state.shoppingDashPreset || "7d";
