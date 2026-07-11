@@ -10053,6 +10053,11 @@ if(act==="invMode"){
         }, 50);
         return;
       }
+      if(act==="openShoppingHistory"){
+        state.shoppingSubtab = "history";
+        view();
+        return;
+      }
       if(act==="openInventory"){
         state.shoppingSubtab = "inventory";
         view();
