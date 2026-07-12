@@ -11683,7 +11683,20 @@ function openFinishLotModal(productKey){
   });
 
   if(!openLots.length){
-    toast("No hay lotes activos para este producto.");
+    if (confirm("No hay lotes activos para este producto. ¿Quieres removerlo del inventario actual de todas formas?")) {
+      const idx = (state.inventory||[]).findIndex(it => {
+        const itPkey = it.productId ? ("pid:"+String(it.productId)) : ("nm:"+normName_(it.name||""));
+        return itPkey === productKey;
+      });
+      if (idx !== -1) {
+        state.inventory.splice(idx, 1);
+        persist();
+        toast("Removido del inventario ✅");
+        view();
+      } else {
+        toast("No se encontró en el inventario.");
+      }
+    }
     return;
   }
 
@@ -11993,9 +12006,9 @@ function viewInventory(){
         ${durBar}
         <div class="invC2Actions">
           <button class="invA invA-list" data-inv-act="toList" data-iid="${it.id}" title="Añadir a lista">🛒</button>
-          <button class="invA invA-fin" data-inv-act="finish" data-pkey="${escapeHtml(pk)}" title="Se acabó">Se acabó</button>
+          <button class="invA invA-fin" onclick="openFinishLotModal('${escapeHtml(pk)}')" title="Se acabó">Se acabó</button>
           <button class="invA invA-pct" data-inv-act="setPct" data-iid="${it.id}" title="Actualizar nivel">%</button>
-          <button class="invA invA-edit" data-inv-act="edit" data-iid="${it.id}" title="Editar">✏️</button>
+          <button class="invA invA-edit" onclick="editInventoryItem('${escapeHtml(it.id)}')" title="Editar">✏️</button>
         </div>
       </div>
     `;
@@ -12378,6 +12391,7 @@ window.addInventoryManual = addInventoryManual;
 window.editInventoryItem = editInventoryItem;
 window.deleteInventoryItem = deleteInventoryItem;
 window.addInventoryToList = addInventoryToList;
+window.openFinishLotModal = openFinishLotModal;
 
 // Inventory UI helpers
 function setInvQuery(v){
@@ -13504,23 +13518,28 @@ document.addEventListener("click", function(e){
   const actBtn = e.target.closest("[data-inv-act]");
   if(actBtn){
     const act = actBtn.dataset.invAct;
-    if(act==="toList"){   addInventoryToList(actBtn.dataset.iid); return; }
-    if(act==="finish"){   openFinishLotModal(actBtn.dataset.pkey); return; }
-    if(act==="edit"){     editInventoryItem(actBtn.dataset.iid); return; }
-    if(act==="setPct"){   openInvPctModal(actBtn.dataset.iid); return; }
-    if(act==="addFromLib"){ openInvAddFromLibModal(); return; }
-    if(act==="clearCocina"){
-      if(!confirm("¿Limpiar toda la cocina? Esto borra todos los productos y lotes. No se puede deshacer.")) return;
-      state.inventory = [];
-      state.inventoryLots = [];
-      persist();
-      toast("Cocina limpia 🧹");
-      view();
-      return;
-    }
-    if(act==="filterUrgent"){
-      state.invQuery=""; state.invCat="";
-      view(); return;
+    try {
+      if(act==="toList"){   addInventoryToList(actBtn.dataset.iid); return; }
+      if(act==="finish"){   openFinishLotModal(actBtn.dataset.pkey); return; }
+      if(act==="edit"){     editInventoryItem(actBtn.dataset.iid); return; }
+      if(act==="setPct"){   openInvPctModal(actBtn.dataset.iid); return; }
+      if(act==="addFromLib"){ openInvAddFromLibModal(); return; }
+      if(act==="clearCocina"){
+        if(!confirm("¿Limpiar toda la cocina? Esto borra todos los productos y lotes. No se puede deshacer.")) return;
+        state.inventory = [];
+        state.inventoryLots = [];
+        persist();
+        toast("Cocina limpia 🧹");
+        view();
+        return;
+      }
+      if(act==="filterUrgent"){
+        state.invQuery=""; state.invCat="";
+        view(); return;
+      }
+    } catch(err) {
+      console.error("Inventory action error:", act, err);
+      alert("Error en acción de inventario: " + err.message);
     }
   }
 
