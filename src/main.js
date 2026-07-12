@@ -11743,8 +11743,19 @@ function openFinishLotModal(productKey){
       const lot = (state.inventoryLots||[]).find(x=>x.id===lotId);
       if(lot){
         lot.finishedAt = iso;
+
+        // Eliminar del inventario activo
+        const pkey = lot.productId ? ("pid:"+String(lot.productId)) : ("nm:"+normName_(lot.name||""));
+        const idx = (state.inventory||[]).findIndex(it => {
+            const itPkey = it.productId ? ("pid:"+String(it.productId)) : ("nm:"+normName_(it.name||""));
+            return itPkey === pkey;
+        });
+        if (idx !== -1) {
+            state.inventory.splice(idx, 1);
+        }
+
         persist();
-        toast("Lote cerrado ✅");
+        toast("Producto finalizado y removido ✅");
         b.remove();
         view();
       }
