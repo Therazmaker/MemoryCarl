@@ -13260,6 +13260,45 @@ function viewShoppingDashboard(){
       <div class="kv"><div class="k">Mínimo</div><div class="v"><b>${money(sum.min)}</b> · ${escapeHtml(sum.minDate||"-")}</div></div>
     </section>
 
+    ${(() => {
+      // AI Consumption Stats
+      const aiDays = (state.shoppingAiDays || []).filter(d => d.date >= range.start && d.date <= range.end);
+      if(aiDays.length === 0) return "";
+      
+      const totalEaten = aiDays.reduce((acc, d) => acc + (d.estimatedCost || 0), 0);
+      const avgEaten = totalEaten / aiDays.length;
+      
+      // Compare Eaten vs Bought
+      const totalBought = sum.sum;
+      const difference = totalBought - totalEaten;
+      let diffMsg = "";
+      if (difference > 0) {
+        diffMsg = `<div class="small" style="color:var(--text-ok)">+ ${money(difference)} en despensa</div>`;
+      } else if (difference < 0) {
+        diffMsg = `<div class="small" style="color:var(--text-danger)">${money(Math.abs(difference))} consumido de reservas</div>`;
+      }
+
+      return `
+      <section class="card" style="background:rgba(124,92,255,0.05);border-color:rgba(124,92,255,0.2);">
+        <div class="cardTop">
+          <div>
+            <h3 class="cardTitle" style="color:#c084fc;">🤖 Consumo Real vs Compras</h3>
+            <div class="small">Datos del Chef AI (${aiDays.length} días)</div>
+          </div>
+        </div>
+        <div class="hr"></div>
+        <div class="kv"><div class="k">Gasto Supermercado</div><div class="v"><b>${money(totalBought)}</b></div></div>
+        <div class="kv"><div class="k">Consumo Estimado (AI)</div><div class="v"><b>${money(totalEaten)}</b></div></div>
+        <div class="hr"></div>
+        <div class="kv" style="margin-bottom:8px;">
+          <div class="k">Promedio Diario Consumido</div>
+          <div class="v" style="font-size:16px;color:#c084fc;"><b>${money(avgEaten)}</b>/día</div>
+        </div>
+        ${diffMsg ? `<div style="text-align:right;margin-top:-5px;">${diffMsg}</div>` : ""}
+      </section>
+      `;
+    })()}
+
     <section class="card">
       <div class="cardTop">
         <div>
