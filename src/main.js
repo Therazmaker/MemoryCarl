@@ -10265,6 +10265,27 @@ function doSavePurchase_({list, decisions}){
         unit: (it.unit||"").trim(),
         sourceListId
       }));
+
+      // ── Duplicate detection ─────────────────────────────────────────────
+      // Check if the same list was already saved in the last 24h
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const recentEntries = (state.shoppingHistory||[]).filter(h => {
+        const ms = Date.parse(h.date + "T12:00:00");
+        return ms >= cutoff;
+      });
+      const listItemKeys = items.map(it => normName_(it.name)).sort().join("|");
+      const duplicate = recentEntries.find(h => {
+        const histKeys = (h.items||[]).map(it => normName_(it.name)).sort().join("|");
+        return histKeys === listItemKeys && listItemKeys.length > 0;
+      });
+      if (duplicate) {
+        const dupDate = duplicate.date || "fecha desconocida";
+        if (!confirm(`⚠️ Esta lista parece idéntica a una que ya guardaste el ${dupDate}.\n\n¿Seguro que quieres guardarla de nuevo?`)) {
+          return; // user cancelled – don't save
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────
+
       const totals = calcEntryTotals(items);
       state.shoppingHistory.unshift({
         id: uid("sh"),
@@ -10317,7 +10338,9 @@ function doSavePurchase_({list, decisions}){
       applyItemsToInventory_(undecided);
       applyItemsToInventoryLots_(undecided, { boughtAtISO: now, sourceListId, store:(store||"").trim() });
 
-      (list.items||[]).forEach(it=>{ it.bought = true; });
+      // ── Clear the list after saving ─────────────────────────────────────
+      list.items = [];
+      // ────────────────────────────────────────────────────────────────────
 
       if(mkfin && (state.financeAccounts||[]).length){
         const accId = accountId || defaultAccountId;
@@ -10326,7 +10349,7 @@ function doSavePurchase_({list, decisions}){
       }
 
       persist();
-      toast("Compra guardada ✅");
+      toast("¡Compra guardada! La lista fue limpiada ✅");
       state.shoppingSubtab = "dashboard";
       view();
     }
