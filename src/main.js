@@ -11822,49 +11822,81 @@ function viewInventoryCalendar(){
   }
 
   // For each product build a row with bars
-  // We'll show a simple swimlane: each lot = a pill with duration
+  // We'll show a mini bar chart for each product
   const productRows = [...byProduct.entries()].slice(0, 20).map(([key, data])=>{
     const st = stats.get(key);
     const avgDays = st?.avgDays ? Math.round(st.avgDays) : null;
     const samples = st?.samples || 0;
+    
+    // Skip if not enough samples
+    if (samples < 1) return "";
 
-    const pills = data.lots.slice(0,6).map(l=>{
+    const maxLots = 10;
+    // Reverse so oldest is on left, newest on right
+    const lotsToShow = data.lots.slice(0, maxLots).reverse(); 
+    
+    let maxDays = avgDays || 1;
+    const barData = lotsToShow.map(l => {
       const ba = Date.parse(l.boughtAt);
       const fa = Date.parse(l.finishedAt);
-      const days = isFinite(ba)&&isFinite(fa) ? Math.round((fa-ba)/(1000*60*60*24)) : null;
-      const startLabel = String(l.boughtAt||"").slice(5,10); // MM-DD
-      const color = days===null ? "#555" : days <= (avgDays||999)*0.7 ? "#34d399" : days >= (avgDays||0)*1.3 ? "#f87171" : "#7c5cff";
-      return `<div class="calLot" style="border-color:${color};color:${color}" title="${escapeHtml(startLabel)}">
-        ${days!==null ? days+"d" : "?"}<span class="calLotDate">${escapeHtml(startLabel)}</span>
-      </div>`;
+      const days = isFinite(ba)&&isFinite(fa) ? (fa-ba)/(1000*60*60*24) : null;
+      if (days !== null && days > maxDays) maxDays = days;
+      return { l, days, dateLabel: String(l.boughtAt||"").slice(5,10) };
+    });
+
+    let insightHtml = "";
+    if (samples >= 2 && barData.length > 0) {
+      const last = barData[barData.length - 1];
+      if (last.days !== null && avgDays !== null) {
+        if (last.days <= avgDays * 0.7) {
+          insightHtml = `<span class="calInsightBadge" style="color:#f87171;background:rgba(248,113,113,0.1)">🔴 Acelerado</span>`;
+        } else if (last.days >= avgDays * 1.3) {
+          insightHtml = `<span class="calInsightBadge" style="color:#34d399;background:rgba(52,211,153,0.1)">🟢 Rindió más</span>`;
+        } else {
+          insightHtml = `<span class="calInsightBadge" style="color:#a1a1aa">⚪ Estable</span>`;
+        }
+      }
+    }
+
+    const chartHtml = barData.map(d => {
+      if (d.days === null) return "";
+      const pct = Math.max(5, Math.min(100, (d.days / maxDays) * 100));
+      // Red = consumed too fast (short duration). Green = lasted longer (good savings).
+      const color = d.days <= (avgDays||999)*0.7 ? "#f87171" : d.days >= (avgDays||0)*1.3 ? "#34d399" : "#7c5cff";
+      return `
+        <div class="calBarWrapper" title="${d.days.toFixed(1)}d">
+          <div class="calBarLabel" style="color:${color}">${Math.round(d.days)}d</div>
+          <div class="calBar" style="height:${pct}%; background:${color}"></div>
+          <div class="calBarDate">${escapeHtml(d.dateLabel)}</div>
+        </div>
+      `;
     }).join("");
 
-    const avgBadge = avgDays ? `<span class="invStatChip" style="background:rgba(124,92,255,.2);color:rgba(124,92,255,.9)">~${avgDays}d avg · ${samples} muestras</span>` : "";
+    const avgPct = avgDays ? Math.max(5, Math.min(100, (avgDays / maxDays) * 100)) : null;
+    const avgLineHtml = avgPct ? `
+      <div class="calAvgLine" style="bottom:${avgPct}%">
+        <div class="calAvgLabel">Prom. ${avgDays}d</div>
+      </div>
+    ` : "";
 
-    // Active lot prediction
-    const activePred = activeLots.filter(l=>lotProductKey_(l)===key).map(l=>{
-      if(!st?.avgDays) return "";
-      const ba = Date.parse(l.boughtAt);
-      if(!isFinite(ba)) return "";
-      const pred = new Date(ba + st.avgDays*24*60*60*1000);
-      const dLeft = Math.round((pred.getTime()-Date.now())/(1000*60*60*1000)); // hours
-      const dDays = Math.round(dLeft/24);
-      const color = dDays<=0?"#f87171":dDays<=3?"#fbbf24":"#34d399";
-      const label = dDays<=0?"⛔ ya debería acabar":`~${dDays}d restantes`;
-      return `<span class="calActivePred" style="color:${color}">📦 ${escapeHtml(label)}</span>`;
-    }).join("");
+    const avgBadge = avgDays ? `<span style="font-size:12px;opacity:0.7">~${avgDays}d avg (${samples} uds)</span>` : "";
 
     return `
       <div class="calProductRow">
         <div class="calProductHead">
-          <div class="calProductName">${escapeHtml(data.name)}</div>
-          ${avgBadge}
-          ${activePred}
+          <div>
+            <div class="calProductName">${escapeHtml(data.name)}</div>
+            ${avgBadge}
+          </div>
+          ${insightHtml}
         </div>
-        <div class="calLots">${pills || '<span style="opacity:.4;font-size:12px">Sin historial cerrado aún</span>'}</div>
+        <div class="calChartContainer">
+          ${avgLineHtml}
+          ${chartHtml}
+        </div>
       </div>
     `;
-  }).join("") || `<div class="invEmpty">Sin historial de duración aún<br><span>Registra productos en Actual y marca "Se acabó" cuando terminen</span></div>`;
+  }).filter(Boolean).join("") || `<div class="invEmpty">Sin historial de duración aún<br><span>Registra productos en Actual y marca "Se acabó" cuando terminen</span></div>`;
 
   // Quick close buttons for active lots
   const openGroups = new Map();
@@ -11895,8 +11927,8 @@ function viewInventoryCalendar(){
     <section class="card">
       <div class="cardTop">
         <div>
-          <h3 class="cardTitle">⏱ Duración por producto</h3>
-          <div class="small">Cada píldora = un lote. Verde = duró menos, rojo = duró más de lo normal.</div>
+          <h3 class="cardTitle">📊 Análisis de Consumo</h3>
+          <div class="small">Cada barra es un lote. Verde = ahorraste (duró más). Rojo = consumo acelerado.</div>
         </div>
       </div>
       <div class="hr"></div>
@@ -12070,7 +12102,7 @@ function viewInventory(){
     <div class="invTabRow">
       <button class="invTab ${subtab==="actual"?"invTabActive":""}" data-act="invTab" data-tab="actual">Actual</button>
       <button class="invTab ${subtab==="history"?"invTabActive":""}" data-act="invTab" data-tab="history">Historial</button>
-      <button class="invTab ${subtab==="calendar"?"invTabActive":""}" data-act="invTab" data-tab="calendar">Calendario</button>
+      <button class="invTab ${subtab==="calendar"?"invTabActive":""}" data-act="invTab" data-tab="calendar">Análisis</button>
     </div>
 
     ${subtab==="history" ? viewInventoryHistory() : subtab==="calendar" ? viewInventoryCalendar() : `
