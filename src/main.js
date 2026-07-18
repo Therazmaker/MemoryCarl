@@ -2590,8 +2590,7 @@ function view(){
   try{ refreshGlobalSignals(); }catch(e){}
   const root = document.querySelector("#app");
   exposeWeekCtx();
-  try {
-    root.innerHTML = `
+  root.innerHTML = `
     <div class="app ${state.tab==="settings" ? "hasSheet":""}">
       <header class="header">
         <div class="brand">
@@ -3341,11 +3340,6 @@ const btnExport = root.querySelector("#btnExport");
 
   const syncLbl = root.querySelector("#syncCfgLabel");
   if(syncLbl) syncLbl.textContent = syncCfgLabelText();
-
-  } catch(e) {
-    root.innerHTML = `<div style="padding:20px;color:#f87171;background:#111;height:100vh;overflow:auto"><h1>Render Error in view()</h1><pre style="white-space:pre-wrap;font-size:12px">${e.stack}</pre></div>`;
-    console.error("CRITICAL VIEW ERROR", e);
-  }
 
   wireActions(root);
   if(state.tab==="home") wireHome(root);
