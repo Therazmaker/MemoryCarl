@@ -5759,7 +5759,7 @@ function lifeTaskMarkDone(id) {
   const tasks = lifeTasksGet();
   const t = tasks.find(x=>x.id===id);
   if(t) { 
-    const ts = new Date().toISOString();
+    const ts = localIsoTime();
     t.lastDone = ts; 
     state.lifeTasksLog = state.lifeTasksLog || [];
     state.lifeTasksLog.push({ id, ts });
@@ -5814,8 +5814,8 @@ function lifeTaskUrgency(task) {
 
 function renderLifeTrackerCard() {
   const tasks = lifeTasksGet();
-  const todayIso = new Date().toISOString().split("T")[0];
-  const tomorrowIso = new Date(Date.now()+86400000).toISOString().split("T")[0];
+  const todayIso = isoDate();
+  const tomorrowIso = isoDate(new Date(Date.now()+86400000));
 
   // ── Events (one-time) ──
   const events = tasks.filter(t => t.type==="event");
@@ -5921,11 +5921,14 @@ function renderLifeTrackerCard() {
   const criticalCount = sorted.filter(t=>lifeTaskUrgency(t)==="critical"||lifeTaskUrgency(t)==="due").length;
   const totalAlerts = criticalCount + needFollowUp.length;
 
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString("es-PE", {hour:"2-digit", minute:"2-digit", hour12:true});
+
   return `
     <section class="card homeCard homeWide lifeTrackerCard" id="homeLifeTracker">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">🧠 Tracker Vital</h2>
+          <h2 class="cardTitle">🧠 Tracker Vital <span style="font-size:12px;color:rgba(255,255,255,0.4);font-weight:normal;margin-left:8px;letter-spacing:0.5px;">${timeStr}</span></h2>
           <div class="small">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : "Todo al día ✅"}</div>
         </div>
         <div>
@@ -12649,6 +12652,11 @@ function isoDate(d=new Date()){
   const m=String(d.getMonth()+1).padStart(2,"0");
   const da=String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${da}`;
+}
+
+function localIsoTime(d=new Date()){
+  const pad = n => String(n).padStart(2,"0");
+  return `${isoDate(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function calcEntryTotals(items){
