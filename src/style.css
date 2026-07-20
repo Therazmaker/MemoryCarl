@@ -4089,6 +4089,35 @@ body{
   gap: 10px;
   padding: 4px 0 8px;
 }
+/* ── TDA Banner ── */
+.lt-tda-banner {
+  background: linear-gradient(135deg, rgba(124,92,255,0.12) 0%, rgba(167,139,250,0.08) 100%);
+  border: 1px solid rgba(124,92,255,0.35);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  animation: tdaBannerIn 0.35s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+@keyframes tdaBannerIn {
+  from { opacity:0; transform:translateY(-10px) scale(0.97); }
+  to   { opacity:1; transform:translateY(0) scale(1); }
+}
+.lt-tda-btn {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 20px;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+  white-space: nowrap;
+}
+.lt-tda-btn:active { transform: scale(0.95); }
+.lt-tda-yes   { background: #22c55e; color: #fff; }
+.lt-tda-time  { background: rgba(255,255,255,0.1); color: #e2e8f0; }
+.lt-tda-skip  { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.5); }
+.lt-tda-help  { background: rgba(124,92,255,0.25); color: #a78bfa; }
+
 .lt-task-row {
   display: flex;
   flex-direction: column;

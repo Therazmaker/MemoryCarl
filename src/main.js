@@ -5755,11 +5755,11 @@ function lifeTasksGet() {
   return tasks;
 }
 
-function lifeTaskMarkDone(id) {
+function lifeTaskMarkDone(id, forcedTs) {
   const tasks = lifeTasksGet();
   const t = tasks.find(x=>x.id===id);
   if(t) { 
-    const ts = localIsoTime();
+    const ts = forcedTs || localIsoTime();
     t.lastDone = ts; 
     state.lifeTasksLog = state.lifeTasksLog || [];
     state.lifeTasksLog.push({ id, ts });
@@ -5810,6 +5810,54 @@ function lifeTaskUrgency(task) {
   if(ratio >= 1.0) return "due";       // vencido hoy
   if(ratio >= 0.7) return "soon";      // próximamente
   return "ok";
+}
+
+function getLifeTrackerTdaSuggestion() {
+  const habits = lifeTasksGet().filter(t => t.type !== "event" && t.freqDays > 0);
+  const log = Array.isArray(state.lifeTasksLog) ? state.lifeTasksLog : [];
+  
+  const now = new Date();
+  const currentHour = now.getHours();
+  
+  let candidates = [];
+  
+  habits.forEach(h => {
+    // Ya hecho hoy
+    if (h.lastDone && String(h.lastDone).split("T")[0] === isoDate()) return;
+    
+    // Skipped temporalmente (3 horas)
+    const skipped = state._tdaSkipped || {};
+    if (skipped[h.id] && (Date.now() - skipped[h.id]) < 3*60*60*1000) return;
+    
+    // Buscar historial de horas
+    const myLogs = log.filter(l => l.id === h.id);
+    if (myLogs.length >= 3) {
+      const recent = myLogs.slice(-5);
+      const hours = recent.map(l => new Date(l.ts).getHours());
+      let sum = 0; hours.forEach(hr => sum += hr);
+      let avgHour = sum / hours.length;
+      
+      // Si estamos en la ventana habitual (hasta 4h después de su hora promedio)
+      if (currentHour >= avgHour && currentHour <= avgHour + 4) {
+         candidates.push({ task: h, reason: "time", avgHour });
+      }
+    }
+    
+    // Si está muy atrasado, siempre es candidato
+    if (lifeTaskUrgency(h) === "critical" || lifeTaskUrgency(h) === "due") {
+       if (!candidates.find(c => c.task.id === h.id)) {
+           candidates.push({ task: h, reason: "overdue" });
+       }
+    }
+  });
+  
+  candidates.sort((a,b) => {
+     if (a.reason === "time" && b.reason !== "time") return -1;
+     if (b.reason === "time" && a.reason !== "time") return 1;
+     return (lifeTaskDaysSince(b.task)/b.task.freqDays) - (lifeTaskDaysSince(a.task)/a.task.freqDays);
+  });
+  
+  return candidates.length > 0 ? candidates[0] : null;
 }
 
 function renderLifeTrackerCard() {
@@ -6025,6 +6073,86 @@ function wireLifeTracker(root) {
         lifeTaskAddCustom(p.name, "💸", 30, p.category);
         view();
       } catch(e){}
+    });
+  });
+
+  // ── TDA Banner Actions ──
+  root.querySelectorAll("[data-lt-tda-done]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      lifeTaskMarkDone(btn.getAttribute("data-lt-tda-done"));
+      toast("✅ ¡Marcado! Buen trabajo.");
+      view();
+    });
+  });
+
+  root.querySelectorAll("[data-lt-tda-time]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-lt-tda-time");
+      const tasks = lifeTasksGet();
+      const task = tasks.find(x => x.id === id);
+      const name = task ? task.title : "el hábito";
+      // Mostrar mini modal de hora
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;";
+      overlay.innerHTML = `
+        <div style="background:#1e1e1e;border-radius:16px;padding:24px;max-width:320px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+          <div style="font-weight:700;font-size:15px;color:#e2e8f0;margin-bottom:6px;">¿A qué hora lo hiciste?</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:16px;">${escapeHtml(name)}</div>
+          <input id="tdaTimeInput" type="time" style="width:100%;background:#2d2d2d;border:1px solid rgba(255,255,255,0.15);border-radius:10px;color:#e2e8f0;font-size:18px;padding:10px 14px;text-align:center;" value="${new Date().toTimeString().slice(0,5)}" />
+          <div style="display:flex;gap:10px;margin-top:16px;">
+            <button id="tdaTimeSave" style="flex:1;background:#7c5cff;color:#fff;border:none;border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Guardar</button>
+            <button id="tdaTimeCancel" style="flex:1;background:rgba(255,255,255,0.08);color:#aaa;border:none;border-radius:10px;padding:12px;cursor:pointer;">Cancelar</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      overlay.querySelector("#tdaTimeCancel").addEventListener("click", () => overlay.remove());
+      overlay.querySelector("#tdaTimeSave").addEventListener("click", () => {
+        const val = overlay.querySelector("#tdaTimeInput").value;
+        if (val) {
+          const [hh, mm] = val.split(":");
+          const d = new Date();
+          d.setHours(Number(hh), Number(mm), 0);
+          const forcedTs = `${isoDate(d)}T${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:00`;
+          lifeTaskMarkDone(id, forcedTs);
+          toast(`✅ Registrado a las ${val}`);
+        }
+        overlay.remove();
+        view();
+      });
+    });
+  });
+
+  root.querySelectorAll("[data-lt-tda-skip]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      // Ocultar el banner temporalmente (estado en memoria, no persiste)
+      const id = btn.getAttribute("data-lt-tda-skip");
+      state._tdaSkipped = state._tdaSkipped || {};
+      state._tdaSkipped[id] = Date.now();
+      view();
+    });
+  });
+
+  root.querySelectorAll("[data-lt-tda-help]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const title = btn.getAttribute("data-lt-tda-help");
+      state.tab = "neurochat";
+      state._neuroChatPrefill = `Tengo TDA y me cuesta arrancar con: "${title}". Dame un micro-paso muy sencillo para empezar ahora mismo, algo que tome menos de 2 minutos.`;
+      view();
+      setTimeout(() => {
+        const inp = document.querySelector("#neuroChatInput");
+        if(inp) {
+          inp.value = state._neuroChatPrefill || "";
+          inp.dispatchEvent(new Event("input", { bubbles: true }));
+          const sendBtn = document.querySelector("#neuroChatSend");
+          if(sendBtn) sendBtn.click();
+        }
+        state._neuroChatPrefill = "";
+      }, 500);
     });
   });
 }
