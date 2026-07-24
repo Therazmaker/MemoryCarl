@@ -1942,6 +1942,28 @@ function normalizeHouse(){
   state.house.zones = Array.isArray(state.house.zones) ? state.house.zones : [];
   state.house.tasks = Array.isArray(state.house.tasks) ? state.house.tasks : [];
   state.house.sessionHistory = Array.isArray(state.house.sessionHistory) ? state.house.sessionHistory : [];
+  
+  // Actividades (Nuevo tracker)
+  if (!state.house.actividades || typeof state.house.actividades !== "object") {
+    state.house.actividades = {
+      tipos: [
+        { id: "cocinar", nombre: "Cocinar", categoria: "cocina", icono: "🍳", color: "#F59E0B", activo: true },
+        { id: "barrer", nombre: "Barrer", categoria: "limpieza", icono: "🧹", color: "#8B5CF6", activo: true },
+        { id: "trapear", nombre: "Trapear", categoria: "limpieza", icono: "🪣", color: "#7C3AED", activo: true },
+        { id: "platos", nombre: "Lavar platos", categoria: "cocina", icono: "🫧", color: "#EF4444", activo: true },
+        { id: "ropa", nombre: "Lavar ropa", categoria: "ropa", icono: "👕", color: "#3B82F6", activo: true },
+        { id: "planchar", nombre: "Planchar", categoria: "ropa", icono: "👔", color: "#6366F1", activo: true },
+        { id: "ordenar", nombre: "Ordenar", categoria: "organizacion", icono: "📦", color: "#10B981", activo: true },
+        { id: "basura", nombre: "Sacar basura", categoria: "limpieza", icono: "🗑", color: "#6B7280", activo: true },
+        { id: "plantas", nombre: "Plantas", categoria: "exterior", icono: "🌿", color: "#22C55E", activo: true }
+      ],
+      logs: [],
+      sesiones: [],
+      timerActivo: null,
+      subtab: "actividades"
+    };
+  }
+  
   // UI flags
   if(typeof state.house.historyOpen !== "boolean") state.house.historyOpen = false;
 
@@ -8617,41 +8639,318 @@ function redrawHouseMapSvg(root){
 }
 // -------------------- END HOUSE MAP (Mini game) -------------------
 
+// ==========================================
+// ACTVIDADES DEL HOGAR (Nuevo Tracker)
+// ==========================================
+
+function actsGet() { return state.house.actividades; }
+
+function actLogQuick(tipoId, minutos = 0, notas = "") {
+  const acts = actsGet();
+  acts.logs.push({
+    id: "al_" + Date.now(),
+    tipoId,
+    sessionId: null,
+    inicio: localIsoTime(),
+    fin: localIsoTime(),
+    duracionSeg: minutos * 60,
+    modo: "rapido",
+    notas,
+    createdAt: localIsoTime()
+  });
+  persist();
+  view();
+}
+
+function actTimerToggle(tipoId) {
+  const acts = actsGet();
+  if (acts.timerActivo) {
+    // Si ya hay uno activo, lo detenemos y guardamos si es el mismo, o cancelamos si es otro
+    if (acts.timerActivo.tipoId === tipoId) {
+      const inicioDate = new Date(acts.timerActivo.inicio);
+      const finDate = new Date();
+      const duracionSeg = Math.floor((finDate.getTime() - inicioDate.getTime()) / 1000);
+      acts.logs.push({
+        id: acts.timerActivo.logId,
+        tipoId,
+        sessionId: null,
+        inicio: acts.timerActivo.inicio,
+        fin: localIsoTime(finDate),
+        duracionSeg: duracionSeg,
+        modo: "cronometro",
+        notas: "",
+        createdAt: localIsoTime(finDate)
+      });
+    } else {
+      toast("Se detuvo el timer anterior.");
+    }
+    acts.timerActivo = null;
+  } else {
+    // Iniciar nuevo timer
+    acts.timerActivo = {
+      logId: "al_" + Date.now(),
+      tipoId,
+      inicio: localIsoTime()
+    };
+  }
+  persist();
+  view();
+}
+
+function renderActividadesDashboard() {
+  const acts = actsGet();
+  const hoyStr = isoDate();
+  
+  // Stats rápidos
+  const logsHoy = acts.logs.filter(l => l.inicio.startsWith(hoyStr));
+  const minutosHoy = Math.floor(logsHoy.reduce((acc, l) => acc + (l.duracionSeg || 0), 0) / 60);
+  
+  // Timer activo widget
+  let timerWidget = "";
+  if (acts.timerActivo) {
+    const tipo = acts.tipos.find(t => t.id === acts.timerActivo.tipoId);
+    if (tipo) {
+      const inicio = new Date(acts.timerActivo.inicio).getTime();
+      const minsRunning = Math.floor((Date.now() - inicio) / 60000);
+      timerWidget = `
+        <div class="act-timer-widget" style="background:${tipo.color}20; border:1px solid ${tipo.color}; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:24px;">${tipo.icono}</span>
+              <div>
+                <div style="font-weight:700; color:${tipo.color}; font-size:14px;">${tipo.nombre}</div>
+                <div style="font-size:11px; opacity:0.7;">En curso • ~${minsRunning} min</div>
+              </div>
+            </div>
+            <button class="btn" style="background:${tipo.color}; color:#fff;" data-act-stop="${tipo.id}">Detener</button>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // Grid de actividades
+  const cardsHtml = acts.tipos.filter(t => t.activo).map(t => {
+    // Buscar si es la activa
+    const isActivo = acts.timerActivo && acts.timerActivo.tipoId === t.id;
+    return `
+      <div class="act-card ${isActivo ? 'active' : ''}" style="--act-color: ${t.color};" data-act-id="${t.id}">
+        <div class="act-icon">${t.icono}</div>
+        <div class="act-name">${t.nombre}</div>
+        <div class="act-actions">
+           ${!acts.timerActivo ? `<button class="act-btn btn-quick" data-act-quick="${t.id}" title="Registro rápido (15m)">⚡ 15m</button>` : ''}
+           <button class="act-btn btn-timer" data-act-timer="${t.id}">${isActivo ? '⏹ Detener' : '▶ Iniciar'}</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="card">
+      <div class="row" style="justify-content:space-between; margin-bottom:12px;">
+         <div style="font-weight:700; font-size:16px;">Hoy en casa</div>
+         <div class="pill">${logsHoy.length} acts • ${minutosHoy} min</div>
+      </div>
+      ${timerWidget}
+      <div class="act-grid">
+        ${cardsHtml}
+      </div>
+    </div>
+  `;
+}
+
+function renderActividadesHistorial() {
+  const acts = actsGet();
+  const logs = [...acts.logs].sort((a, b) => b.inicio.localeCompare(a.inicio)).slice(0, 50); // Últimos 50
+  
+  if (logs.length === 0) {
+    return `<div class="card"><div class="muted" style="text-align:center; padding:30px;">No hay actividades registradas aún.</div></div>`;
+  }
+  
+  const listHtml = logs.map(l => {
+    const tipo = acts.tipos.find(t => t.id === l.tipoId) || { nombre: "Desconocido", icono: "❓", color: "#888" };
+    const d = new Date(l.inicio);
+    const dateStr = d.toLocaleDateString("es-PE", { weekday:"short", day:"numeric", month:"short" });
+    const timeStr = d.toLocaleTimeString("es-PE", { hour:"2-digit", minute:"2-digit" });
+    const mins = Math.floor(l.duracionSeg / 60);
+    
+    return `
+      <div class="act-log-row" style="border-left: 4px solid ${tipo.color};">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="font-size:20px;">${tipo.icono}</span>
+          <div>
+            <div style="font-weight:700; font-size:14px;">${tipo.nombre}</div>
+            <div style="font-size:11px; opacity:0.6;">${dateStr} • ${timeStr} ${l.modo==="rapido"?"(Rápido)":""}</div>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-weight:700; font-size:14px;">${mins} min</div>
+          <button class="iconBtn" data-act-del="${l.id}" style="font-size:12px; margin-top:2px;">🗑</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="card" style="padding:0; background:transparent; border:none;">
+      <h3 style="margin-bottom:12px; font-size:16px;">Historial Reciente</h3>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        ${listHtml}
+      </div>
+    </div>
+  `;
+}
+
+// Stats globales
+let _actCharts = [];
+function renderActividadesStats() {
+  const acts = actsGet();
+  return `
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin-bottom:12px;">Actividad últimos 14 días</h3>
+      <div style="height:200px; position:relative;">
+        <canvas id="actChartBar"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:12px;">Distribución (30 días)</h3>
+      <div style="height:200px; position:relative;">
+        <canvas id="actChartDonut"></canvas>
+      </div>
+    </div>
+  `;
+}
+
+function initActividadesStats() {
+  const acts = actsGet();
+  if (!acts || acts.logs.length === 0) return;
+  
+  _actCharts.forEach(c => c && c.destroy && c.destroy());
+  _actCharts = [];
+  
+  const ctxBar = document.getElementById('actChartBar');
+  const ctxDonut = document.getElementById('actChartDonut');
+  
+  if (!ctxBar || !ctxDonut) return;
+  
+  // Preparar datos últimos 14 días
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const days = [];
+  for(let i=13; i>=0; i--){
+    const d = new Date(today.getTime() - i*86400000);
+    days.push(isoDate(d));
+  }
+  
+  // Agrupar por categoría
+  const categorias = [...new Set(acts.tipos.map(t=>t.categoria))];
+  const catColors = {
+    cocina: "#F59E0B", limpieza: "#8B5CF6", ropa: "#3B82F6", 
+    organizacion: "#10B981", exterior: "#22C55E", misc: "#6B7280"
+  };
+  
+  const datasets = categorias.map(cat => {
+    return {
+      label: cat.charAt(0).toUpperCase() + cat.slice(1),
+      backgroundColor: catColors[cat] || "#888",
+      data: days.map(dayIso => {
+        const logsDay = acts.logs.filter(l => l.inicio.startsWith(dayIso));
+        const logsCat = logsDay.filter(l => {
+           const tipo = acts.tipos.find(t=>t.id === l.tipoId);
+           return tipo && tipo.categoria === cat;
+        });
+        // Sumar minutos
+        return Math.floor(logsCat.reduce((acc, l) => acc + (l.duracionSeg || 0), 0) / 60);
+      })
+    };
+  });
+  
+  _actCharts.push(new Chart(ctxBar.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: days.map(d => d.slice(5)), // MM-DD
+      datasets: datasets
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { stacked: true, grid: { color: 'rgba(255,255,255,0.05)' }, title: {display:true, text:'Minutos'} }
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: 'rgba(255,255,255,0.7)', boxWidth:12 } }
+      }
+    }
+  }));
+  
+  // Donut (últimos 30 días)
+  const thirtyDaysAgo = isoDate(new Date(today.getTime() - 30*86400000));
+  const logs30 = acts.logs.filter(l => l.inicio >= thirtyDaysAgo);
+  const dataDonut = categorias.map(cat => {
+    const logsCat = logs30.filter(l => {
+       const tipo = acts.tipos.find(t=>t.id === l.tipoId);
+       return tipo && tipo.categoria === cat;
+    });
+    return Math.floor(logsCat.reduce((acc, l) => acc + (l.duracionSeg || 0), 0) / 60);
+  });
+  
+  _actCharts.push(new Chart(ctxDonut.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: categorias.map(c => c.charAt(0).toUpperCase() + c.slice(1)),
+      datasets: [{
+        data: dataDonut,
+        backgroundColor: categorias.map(cat => catColors[cat] || "#888"),
+        borderWidth: 2, borderColor: '#111'
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '70%',
+      plugins: {
+        legend: { position: 'right', labels: { color: 'rgba(255,255,255,0.7)', boxWidth:12 } }
+      }
+    }
+  }));
+}
+
 function viewHouse(){
   normalizeHouse();
-  const todayStr = isoDate(new Date());
-  const sub = state.house.subtab || "route";
-  const mode = state.house.mode || "light";
-  const sum = houseCardSummary(todayStr);
+  const sub = state.house.actividades.subtab || "actividades";
 
   const mkSeg = (key, label) => `
     <button class="segBtn ${sub===key?"active":""}" data-house-sub="${escapeHtml(key)}">${escapeHtml(label)}</button>
   `;
 
-  const route = buildHouseRoute(todayStr);
-  const session = state.house.session || null;
-  const hasSession = session && session.active && Array.isArray(session.route);
-  const prog = houseSessionProgress(todayStr);
-
-  const totalRouteMins = route.reduce((s,st)=> s + (Number(st.minutes)||0), 0);
-
   return `
-    <section>
+    <section class="act-section">
       <div class="card">
         <div class="cardHead">
           <div>
-            <h2>Casa</h2>
-            <div class="muted">Sistema mínimo funcional. Luego lo convertimos en mini juego 🎮</div>
+            <h2>Casa & Actividades</h2>
+            <div class="muted">Tracker visual de rutinas domésticas</div>
           </div>
-          <div class="pill">${sum.count} pendientes • ~${sum.mins} min</div>
         </div>
-
-        <div class="seg" style="margin-top:10px;">
-          ${mkSeg("route","Ruta")}
-          ${mkSeg("map","Mapa")}
-          ${mkSeg("manage","Config")}
+        <div class="seg" style="margin-top:16px;">
+          ${mkSeg("actividades","Dashboard")}
+          ${mkSeg("historial","Historial")}
+          ${mkSeg("stats","Estadísticas")}
         </div>
       </div>
+
+      ${sub==="actividades" ? renderActividadesDashboard() : ""}
+      ${sub==="historial" ? renderActividadesHistorial() : ""}
+      ${sub==="stats" ? renderActividadesStats() : ""}
+    </section>
+  `;
+}
+
+// ----------------------------------------------------------------------------------
+// (Antiguas funciones de limpieza, temporalmente desactivadas o reemplazadas)
+// ----------------------------------------------------------------------------------
+/*
+function old_viewHouse() {
+
 
       ${sub==="route" ? `
         <div class="card">
@@ -9471,7 +9770,65 @@ function deleteHouseTask(taskId){
   persist(); view(); toast("Tarea borrada 🧼");
 }
 
+*/
+
 function wireHouse(root){
+  // Cambiar tabs
+  root.querySelectorAll("[data-house-sub]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.house.actividades.subtab = btn.getAttribute("data-house-sub");
+      view();
+      if (state.house.actividades.subtab === "stats") {
+        setTimeout(initActividadesStats, 50);
+      }
+    });
+  });
+
+  // Registro Rápido
+  root.querySelectorAll("[data-act-quick]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-act-quick");
+      actLogQuick(id, 15, "Registro rápido");
+      toast("⚡ Actividad registrada (+15m)");
+    });
+  });
+
+  // Iniciar Timer
+  root.querySelectorAll("[data-act-timer]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-act-timer");
+      actTimerToggle(id);
+    });
+  });
+  
+  // Detener Timer (desde widget)
+  root.querySelectorAll("[data-act-stop]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-act-stop");
+      actTimerToggle(id);
+      toast("⏱ Actividad guardada.");
+    });
+  });
+
+  // Eliminar log
+  root.querySelectorAll("[data-act-del]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if(confirm("¿Eliminar este registro?")) {
+        const id = btn.getAttribute("data-act-del");
+        state.house.actividades.logs = state.house.actividades.logs.filter(l => l.id !== id);
+        persist();
+        view();
+      }
+    });
+  });
+}
+/*
+function old_wireHouse(root){
+
   normalizeHouse();
 
   // mode switch (light vs deep)
@@ -9684,6 +10041,8 @@ function wireHouse(root){
 // ====================== END HOUSE CLEANING ======================
 
 
+
+*/
 
 function wireHouseZoneSheet(root){
   normalizeHouse();

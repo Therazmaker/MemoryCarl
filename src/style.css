@@ -4401,3 +4401,108 @@ body{
   /* This width roughly aligns with the weeks, calculated dynamically in JS */
   display: inline-block;
 }
+
+/* ==========================================
+   ACTIVIDADES DEL HOGAR (Nuevo Tracker)
+   ========================================== */
+
+.act-section {
+  animation: fadeIn 0.3s ease;
+}
+
+.act-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.act-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: transform 0.2s, background 0.2s, border-color 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.act-card:hover {
+  background: rgba(255,255,255,0.05);
+  transform: translateY(-2px);
+}
+
+.act-card.active {
+  background: rgba(var(--act-color-rgb, 255,255,255), 0.1);
+  border-color: var(--act-color);
+  animation: actPulse 2s infinite;
+}
+
+@keyframes actPulse {
+  0% { box-shadow: 0 0 0 0 var(--act-color); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.act-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.act-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: #e2e8f0;
+  margin-bottom: 12px;
+}
+
+.act-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.act-btn {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.act-btn:active {
+  transform: scale(0.95);
+}
+
+.act-btn.btn-quick {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.act-btn.btn-timer {
+  background: var(--act-color, #7c5cff);
+  color: #fff;
+}
+
+.act-timer-widget {
+  border-radius: 14px;
+  padding: 16px;
+  animation: slideDown 0.3s cubic-bezier(0.34,1.56,0.64,1);
+}
+
+.act-log-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255,255,255,0.03);
+  padding: 12px 16px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
