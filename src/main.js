@@ -6,6 +6,11 @@ import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
 import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
 import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO } from "./shopping/shoppingAi.js";
 
+try {
+  // Free up quota: remove heavy AI state on boot. It rebuilds automatically.
+  localStorage.removeItem("memorycarl_finance_brain_v2");
+} catch(e) {}
+
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
    https://therazmaker.github.io/MemoryCarl/?reset=1
@@ -1628,21 +1633,26 @@ async function mcBootstrapIdbCache(){
 mcBootstrapIdbCache();
 
 function load(key, fallback){
+  if(mcIdbReady && mcIdbCache.has(key)){
+    try{ return JSON.parse(mcIdbCache.get(key)); }
+    catch(_err){}
+  }
+
   try{
     const raw = localStorage.getItem(key);
     if(raw) return JSON.parse(raw);
   }catch(_err){}
 
-  if(mcIdbReady && mcIdbCache.has(key)){
-    try{ return JSON.parse(mcIdbCache.get(key)); }
-    catch(_err){}
-  }
   return fallback;
 }
 
 function loadAny(keys, fallback){
   for(const k of (keys||[])){
     if(!k) continue;
+    if(mcIdbReady && mcIdbCache.has(k)){
+      try{ return JSON.parse(mcIdbCache.get(k)); }
+      catch(_err){}
+    }
     try{
       const raw = localStorage.getItem(k);
       if(raw) return JSON.parse(raw);
@@ -1685,6 +1695,8 @@ function save(key, value){
       mcIdbPut(key, payload).catch((idbErr)=>{
         console.warn(`[MemoryCarl] localStorage quota exceeded for key "${key}" and IndexedDB fallback failed.`, idbErr);
       });
+      // Force removal from localStorage so load() uses IDB next time
+      try { localStorage.removeItem(key); } catch(e){}
       markDirty();
       return true;
     }
