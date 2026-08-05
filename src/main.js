@@ -16883,16 +16883,54 @@ function financeEnsureCommitments(){
   state.financeCommitmentInstances = (state.financeCommitmentInstances||[]).filter(i=>_knownTplIds.has(i.templateId));
 
   // Clean up orphaned obligations whose commitment template has been deleted
+  // BUT preserve obligations that come from debts (they have _fromDebt flag or match a debt id)
   if(Array.isArray(state.financeObligations) && state.financeObligations.length){
     const _oblAllowedIds = new Set();
     (state.financeCommitmentTemplates||[]).forEach(t=>{
       _oblAllowedIds.add(t.id);
       if(t.legacyCommitmentId) _oblAllowedIds.add(t.legacyCommitmentId);
     });
+    const _debtIds = new Set((state.financeDebts||[]).map(d=>d.id));
     state.financeObligations = state.financeObligations.filter(o =>
       _oblAllowedIds.has(o.id) || (o.legacyCommitmentId && _oblAllowedIds.has(o.legacyCommitmentId))
+      || o._fromDebt || _debtIds.has(o._debtId) || _debtIds.has(o.id)
     );
   }
+
+  // Sync active debts into obligations so Mission Control always shows them
+  const _existingOblIds = new Set((state.financeObligations||[]).map(o=>o._debtId || o.id));
+  (state.financeDebts||[]).filter(d=>String(d.status||'active')==='active').forEach(d=>{
+    if(_existingOblIds.has(d.id)) {
+      // Update existing obligation from debt
+      const obl = state.financeObligations.find(o=>o._debtId===d.id || o.id===d.id);
+      if(obl){
+        obl.name = d.name;
+        obl.amountExpected = Number(d.monthlyDue||0);
+        obl.dueDate = Number(d.dueDay||30);
+        obl.isActive = true;
+      }
+    } else {
+      // Create new obligation from debt
+      state.financeObligations.push({
+        id: uid('obl'),
+        _debtId: d.id,
+        _fromDebt: true,
+        name: d.name,
+        category: 'Deuda',
+        type: 'debt',
+        amountExpected: Number(d.monthlyDue||0),
+        dueDate: Number(d.dueDay||30),
+        recurrence: 'monthly',
+        priority: 'high',
+        isActive: true,
+        status: 'pending',
+        notes: d.provider || ''
+      });
+    }
+  });
+  // Remove obligations for debts that are no longer active
+  const _activeDebtIds = new Set((state.financeDebts||[]).filter(d=>String(d.status||'active')==='active').map(d=>d.id));
+  state.financeObligations = state.financeObligations.filter(o=>!o._fromDebt || _activeDebtIds.has(o._debtId));
 
   const monthKey = getCurrentMonthKey();
   const now = new Date();
