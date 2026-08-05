@@ -14647,13 +14647,34 @@ function financeMissionControlModel(monthKey){
   const margin = incomeConfirmed - essential;
   const riskScore = pending > incomeConfirmed ? 'ALTO' : (pending > incomeConfirmed*0.6 ? 'MEDIO' : 'BAJO');
 
-  const upcoming = obligations.map(o=>{
+  let upcoming = obligations.map(o=>{
     const day = Number(o.dueDate||1);
     const due = new Date(`${mk}-${String(Math.max(1,Math.min(31,day))).padStart(2,'0')}T12:00:00`);
     const diff = Math.ceil((due.getTime()-Date.now())/(24*60*60*1000));
     const bucket = diff<=0 ? 'hoy' : (diff<=7?'esta semana':(diff<=14?'urgente':'postergable'));
-    return {...o, due, bucket};
-  }).sort((a,b)=>a.due-b.due);
+    return {...o, due, bucket, _type: 'commitment'};
+  });
+
+  try {
+    const debU = financeDebtUpcomingItems();
+    const debtsAsUpcoming = (debU.all||[]).map(d => {
+      const diff = Math.ceil((d.dueDate.getTime()-Date.now())/(24*60*60*1000));
+      const bucket = diff<=0 ? 'hoy' : (diff<=7?'esta semana':(diff<=14?'urgente':'postergable'));
+      return {
+        id: d.id,
+        name: d.name,
+        amountExpected: d.amount,
+        dueDate: d.dueDate.getDate(),
+        due: d.dueDate,
+        bucket,
+        category: 'Deuda',
+        _type: 'debt'
+      };
+    });
+    upcoming = upcoming.concat(debtsAsUpcoming);
+  } catch(e) {}
+
+  upcoming.sort((a,b)=>a.due-b.due);
 
   return {mk,incomeConfirmed,obligationsMonth,paidNow,pending,realAvailable,foreignUse,internalDebt,margin,riskScore,upcoming,tx};
 }
@@ -18577,7 +18598,7 @@ function renderFinanceMissionControl(){
   };
 
   const priorityItems = (m.upcoming||[]).slice(0,8).map(o=>`
-    <div class="mc-priority-item" onclick="setFinanceSubTab('commitments')" title="Ver compromisos">
+    <div class="mc-priority-item" onclick="setFinanceSubTab('${o._type==='debt'?'debts':'commitments'}')" title="Ver detalle">
       <div class="mc-priority-dot" style="background:${bucketDot(o.bucket)}"></div>
       <div class="mc-priority-info">
         <div class="mc-priority-name">${escapeHtml(o.name)}</div>
@@ -18586,7 +18607,7 @@ function renderFinanceMissionControl(){
       ${bucketBadge(o.bucket)}
       <div class="mc-priority-amt" style="color:${bucketDot(o.bucket)}">S/ ${fmt(o.amountExpected||0)}</div>
     </div>
-  `).join('') || `<div style="padding:20px 16px;text-align:center;color:rgba(255,255,255,.3);font-size:13px">Sin obligaciones activas.<br><span style="font-size:11px">Crea compromisos en la pestaña Compromisos.</span></div>`;
+  `).join('') || `<div style="padding:20px 16px;text-align:center;color:rgba(255,255,255,.3);font-size:13px">Sin obligaciones activas.</div>`;
 
   const insightItems = (insights||[]).map(i=>{
     const col = i.level==='urgent'?'#fb7185':(i.level==='warning'?'#fbbf24':'#7c5cff');
@@ -18660,7 +18681,10 @@ function renderFinanceMissionControl(){
       <div class="mc-section">
         <div class="mc-section-head">
           <div class="mc-section-title">⚡ Prioridades inmediatas</div>
-          <div class="mc-section-action" onclick="setFinanceSubTab('commitments')">Ver todos →</div>
+          <div style="display:flex;gap:6px;">
+            <div class="mc-section-action" onclick="setFinanceSubTab('debts')">Deudas →</div>
+            <div class="mc-section-action" onclick="setFinanceSubTab('commitments')">Compromisos →</div>
+          </div>
         </div>
         ${priorityItems}
       </div>
