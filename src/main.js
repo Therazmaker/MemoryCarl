@@ -15423,8 +15423,15 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
 
   backdrop.querySelector('#finEntryDelete')?.addEventListener('click', ()=>{
     if(!existing) return;
-  refreshImpactPreview();
+    const ok = confirm('¿Eliminar este movimiento?');
+    if(!ok) return;
+    deleteFinanceEntry(existing.id);
+    toast('Eliminado ✅');
+    close();
+  });
 
+  // No necesitamos refreshImpactPreview aquí porque está escondido en avanzado y no tiene impacto dinámico complejo en la v Pro, pero lo dejamos por si acaso
+  try { if(typeof refreshImpactPreview === 'function') refreshImpactPreview(); } catch(e){}
   // save
 backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
