@@ -1632,6 +1632,12 @@ async function mcBootstrapIdbCache(){
 }
 mcBootstrapIdbCache();
 
+// Expose IDB bridge for external modules (e.g., finance_neural_storage.js)
+try {
+  window.__mcIdbCache = mcIdbCache;
+  window.__mcIdbPut = mcIdbPut;
+} catch(_e) {}
+
 function load(key, fallback){
   if(mcIdbReady && mcIdbCache.has(key)){
     try{ return JSON.parse(mcIdbCache.get(key)); }
