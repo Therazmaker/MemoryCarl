@@ -15373,9 +15373,15 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
               <input type="number" id="finEntryUSDNet" inputmode="decimal" class="textInput" placeholder="18.20" value="${existing?.usdNet||''}" style="width:100%; box-sizing:border-box;">
             </div>
           </div>
-          <div style="margin-bottom:10px;">
-            <div style="font-size:12px; color:#aaa; margin-bottom:4px;">Tipo de Cambio (Ligo)</div>
-            <input type="number" id="finEntryUSDExchange" inputmode="decimal" class="textInput" placeholder="3.75" value="${existing?.usdExchange||''}" style="width:100%; box-sizing:border-box;">
+          <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <div style="flex:1">
+              <div style="font-size:12px; color:#aaa; margin-bottom:4px;">Com. Fija Ligo ($)</div>
+              <input type="number" id="finEntryUSDFixedFee" inputmode="decimal" class="textInput" placeholder="2.00" value="${existing?.usdFixedFee ?? '2.00'}" style="width:100%; box-sizing:border-box;">
+            </div>
+            <div style="flex:1">
+              <div style="font-size:12px; color:#aaa; margin-bottom:4px;">Tipo de Cambio</div>
+              <input type="number" id="finEntryUSDExchange" inputmode="decimal" class="textInput" placeholder="3.75" value="${existing?.usdExchange||''}" style="width:100%; box-sizing:border-box;">
+            </div>
           </div>
           <div style="font-size:12px; color:#888;">La comisión (<span id="finEntryUSDFeeLabel">0.00</span> USD) y el monto en Soles se calculan solos.</div>
         </div>
@@ -15492,6 +15498,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   const usdGross = backdrop.querySelector('#finEntryUSDGross');
   const usdNet = backdrop.querySelector('#finEntryUSDNet');
   const usdExchange = backdrop.querySelector('#finEntryUSDExchange');
+  const usdFixedFee = backdrop.querySelector('#finEntryUSDFixedFee');
   const usdFeeLabel = backdrop.querySelector('#finEntryUSDFeeLabel');
   const mainAmount = backdrop.querySelector('#finEntryAmount');
 
@@ -15514,14 +15521,19 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       const gross = parseFloat(usdGross.value) || 0;
       const net = parseFloat(usdNet.value) || 0;
       const ex = parseFloat(usdExchange.value) || 0;
-      const fee = Math.max(0, gross - net);
-      if (usdFeeLabel) usdFeeLabel.innerText = fee.toFixed(2);
-      const netSoles = net * ex;
+      const fixFee = parseFloat(usdFixedFee.value) || 0;
+      
+      const totalFee = Math.max(0, (gross - net) + fixFee);
+      if (usdFeeLabel) usdFeeLabel.innerText = totalFee.toFixed(2);
+      
+      const finalUSD = Math.max(0, net - fixFee);
+      const netSoles = finalUSD * ex;
       mainAmount.value = netSoles > 0 ? netSoles.toFixed(2) : '';
     };
     usdGross.addEventListener('input', recalcUSD);
     usdNet.addEventListener('input', recalcUSD);
     usdExchange.addEventListener('input', recalcUSD);
+    usdFixedFee.addEventListener('input', recalcUSD);
   }
 
   backdrop.querySelectorAll('.finProCatChip').forEach(chip => {
@@ -15574,7 +15586,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const isUSDChecked = backdrop.querySelector('#finEntryIsUSD')?.checked;
   const usdGross = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDGross')?.value) || 0) : null;
   const usdNet = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDNet')?.value) || 0) : null;
-  const usdFee = isUSDChecked ? Math.max(0, usdGross - usdNet) : null;
+  const usdFixedFee = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDFixedFee')?.value) || 0) : null;
+  const usdFee = isUSDChecked ? Math.max(0, (usdGross - usdNet) + usdFixedFee) : null;
   const usdExchange = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDExchange')?.value) || 0) : null;
   
   const isLoanChecked = backdrop.querySelector('#finEntryIsLoan')?.checked;
@@ -15592,7 +15605,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     usdGross,
     usdNet,
     usdFee,
-    usdExchange
+    usdExchange,
+    usdFixedFee
   };
 
   if(existing){
