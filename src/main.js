@@ -19129,7 +19129,7 @@ function viewFinance(){
       </div>` : ""}
     </section>
 
-    ${receivablesHtml}
+    ${payablesHtml}
     ${usdHtml}
 
     <!-- GASTOS DIARIOS (7d) -->
