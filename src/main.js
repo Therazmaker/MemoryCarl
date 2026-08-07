@@ -15352,6 +15352,35 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <div class="finProTypeBtn transfer ${draft.type==='transfer'?'active':''}" data-type="transfer">Traspaso</div>
       </div>
 
+      <div id="finProIncomeOpts" style="display:${draft.type==='income'?'block':'none'}; margin: 12px 0; background: #1c1c1e; padding: 12px; border-radius: 12px; border: 1px solid #333;">
+        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; cursor:pointer;">
+          <input type="checkbox" id="finEntryIsLoan" ${existing?.isLoan?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
+          <span style="font-size:14px; font-weight:600;">Me prestaron dinero (Generar Deuda)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="finEntryIsUSD" ${existing?.usdGross?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
+          <span style="font-size:14px; font-weight:600;">Ingreso en Dólares (PayPal/Ligo)</span>
+        </label>
+        
+        <div id="finProUSDOpts" style="display:${existing?.usdGross?'block':'none'}; margin-top:12px; padding-top:12px; border-top:1px dashed #444;">
+          <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <div style="flex:1">
+              <div style="font-size:12px; color:#aaa; margin-bottom:4px;">USD Bruto</div>
+              <input type="number" id="finEntryUSDGross" inputmode="decimal" class="textInput" placeholder="20.00" value="${existing?.usdGross||''}" style="width:100%; box-sizing:border-box;">
+            </div>
+            <div style="flex:1">
+              <div style="font-size:12px; color:#aaa; margin-bottom:4px;">USD Neto (PayPal)</div>
+              <input type="number" id="finEntryUSDNet" inputmode="decimal" class="textInput" placeholder="18.20" value="${existing?.usdNet||''}" style="width:100%; box-sizing:border-box;">
+            </div>
+          </div>
+          <div style="margin-bottom:10px;">
+            <div style="font-size:12px; color:#aaa; margin-bottom:4px;">Tipo de Cambio (Ligo)</div>
+            <input type="number" id="finEntryUSDExchange" inputmode="decimal" class="textInput" placeholder="3.75" value="${existing?.usdExchange||''}" style="width:100%; box-sizing:border-box;">
+          </div>
+          <div style="font-size:12px; color:#888;">La comisión (<span id="finEntryUSDFeeLabel">0.00</span> USD) y el monto en Soles se calculan solos.</div>
+        </div>
+      </div>
+
       <div class="finProAmountWrap">
         <span class="finProCurrency">S/</span>
         <input type="text" inputmode="decimal" id="finEntryAmount" class="finProAmountInput" placeholder="0.00" value="${escapeHtml(draft.amount)}">
@@ -15444,13 +15473,56 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     }
   });
 
+  const incomeOpts = backdrop.querySelector('#finProIncomeOpts');
   backdrop.querySelectorAll('.finProTypeBtn').forEach(btn => {
     btn.addEventListener('click', () => {
       backdrop.querySelectorAll('.finProTypeBtn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       draft.type = btn.getAttribute('data-type');
+      if (draft.type === 'income') {
+        if (incomeOpts) incomeOpts.style.display = 'block';
+      } else {
+        if (incomeOpts) incomeOpts.style.display = 'none';
+      }
     });
   });
+
+  const isUSD = backdrop.querySelector('#finEntryIsUSD');
+  const usdOpts = backdrop.querySelector('#finProUSDOpts');
+  const usdGross = backdrop.querySelector('#finEntryUSDGross');
+  const usdNet = backdrop.querySelector('#finEntryUSDNet');
+  const usdExchange = backdrop.querySelector('#finEntryUSDExchange');
+  const usdFeeLabel = backdrop.querySelector('#finEntryUSDFeeLabel');
+  const mainAmount = backdrop.querySelector('#finEntryAmount');
+
+  if (isUSD) {
+    const handleUSDToggle = () => {
+      usdOpts.style.display = isUSD.checked ? 'block' : 'none';
+      if (isUSD.checked) {
+        mainAmount.readOnly = true;
+        mainAmount.style.opacity = '0.5';
+      } else {
+        mainAmount.readOnly = false;
+        mainAmount.style.opacity = '1';
+      }
+    };
+    isUSD.addEventListener('change', handleUSDToggle);
+    handleUSDToggle();
+
+    const recalcUSD = () => {
+      if (!isUSD.checked) return;
+      const gross = parseFloat(usdGross.value) || 0;
+      const net = parseFloat(usdNet.value) || 0;
+      const ex = parseFloat(usdExchange.value) || 0;
+      const fee = Math.max(0, gross - net);
+      if (usdFeeLabel) usdFeeLabel.innerText = fee.toFixed(2);
+      const netSoles = net * ex;
+      mainAmount.value = netSoles > 0 ? netSoles.toFixed(2) : '';
+    };
+    usdGross.addEventListener('input', recalcUSD);
+    usdNet.addEventListener('input', recalcUSD);
+    usdExchange.addEventListener('input', recalcUSD);
+  }
 
   backdrop.querySelectorAll('.finProCatChip').forEach(chip => {
     chip.addEventListener('click', () => {
@@ -15499,31 +15571,58 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   // NOTE: guardamos "Nombre" como parte de note para mantener el esquema simple
   const note = name ? (noteText ? `${name} · ${noteText}` : name) : noteText;
 
+  const isUSDChecked = backdrop.querySelector('#finEntryIsUSD')?.checked;
+  const usdGross = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDGross')?.value) || 0) : null;
+  const usdNet = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDNet')?.value) || 0) : null;
+  const usdFee = isUSDChecked ? Math.max(0, usdGross - usdNet) : null;
+  const usdExchange = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDExchange')?.value) || 0) : null;
+  
+  const isLoanChecked = backdrop.querySelector('#finEntryIsLoan')?.checked;
+
+  const entryPayload = {
+    type: draft.type,
+    amount,
+    accountId,
+    category,
+    reason,
+    note,
+    date: dateISO,
+    neuronRole,
+    isLoan: isLoanChecked,
+    usdGross,
+    usdNet,
+    usdFee,
+    usdExchange
+  };
+
   if(existing){
-    updateFinanceEntry(existing.id, {
-      type: draft.type,
-      amount,
-      accountId,
-      category,
-      reason,
-      note,
-      date: dateISO,
-      neuronRole
-    });
+    updateFinanceEntry(existing.id, entryPayload);
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
     toast('Actualizado ✅');
   }else{
-    addFinanceEntry({
-      type: draft.type,
-      amount,
-      accountId,
-      category,
-      reason,
-      note,
-      date: dateISO,
-      neuronRole
-    });
+    addFinanceEntry(entryPayload);
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
+    
+    // Auto-create debt if it's a loan received
+    if (isLoanChecked && draft.type === 'income') {
+      if (!Array.isArray(state.financeDebts)) state.financeDebts = [];
+      const newDebtId = "debt_" + Date.now() + Math.random().toString(36).substr(2, 5);
+      state.financeDebts.unshift({
+        id: newDebtId,
+        name: name || "Préstamo rápido",
+        provider: "",
+        type: "receivable",
+        originalBalance: amount,
+        balance: amount,
+        monthlyDue: amount,
+        dueDay: new Date(dateISO).getDate(),
+        apr: 0,
+        status: "active",
+        createdAt: new Date().toISOString()
+      });
+      try{ save(LS.financeDebts, state.financeDebts); }catch(_e){}
+    }
+
     toast('Guardado ✅');
     // Auto-update neural map and open neuron modal pre-filled with this movement
     try {
@@ -18899,6 +18998,68 @@ function viewFinance(){
       </div>`;
   }).join("");
 
+  const receivables = (state.financeDebts||[]).filter(d => d.type === 'receivable' && String(d.status||'active') === 'active');
+  let receivablesHtml = '';
+  if (receivables.length > 0) {
+    const totalReceivables = receivables.reduce((s,d) => s + financeDebtSafeNum(d.balance), 0);
+    receivablesHtml = `
+      <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
+        <div class="finSectionHead" style="margin-bottom:12px;">
+          <div class="finSectionTitle" style="color:#34d399;">🤝 Por Cobrar (Préstamos)</div>
+          <div style="font-weight:700; color:#34d399;">S/ ${fmt(totalReceivables)}</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${receivables.map(r => `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#2a2a2c; padding:10px 12px; border-radius:8px;">
+              <div>
+                <div style="font-weight:600; font-size:14px;">${escapeHtml(r.name)}</div>
+                <div style="font-size:12px; color:#aaa;">${r.createdAt ? new Date(r.createdAt).toLocaleDateString() : 'Sin fecha'}</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:12px;">
+                <div style="font-weight:700;">S/ ${fmt(r.balance)}</div>
+                <button class="iconBtn" style="background:#34d39922; color:#34d399; padding:4px 8px; border-radius:6px; font-size:12px;" onclick="openFinanceDebtPayModal('${r.id}')">Cobrar</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </section>
+    `;
+  }
+
+  // Calculate USD Performance for the current month
+  const usdIncomes = (state.financeLedger||[]).filter(m => String(m.date).startsWith(monthKey) && m.usdGross > 0);
+  let usdHtml = '';
+  if (usdIncomes.length > 0) {
+    const totalGross = usdIncomes.reduce((s,m) => s + (m.usdGross||0), 0);
+    const totalFee = usdIncomes.reduce((s,m) => s + (m.usdFee||0), 0);
+    const totalNet = totalGross - totalFee;
+    const feePct = totalGross > 0 ? ((totalFee / totalGross) * 100).toFixed(1) : 0;
+    
+    usdHtml = `
+      <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
+        <div class="finSectionHead" style="margin-bottom:12px;">
+          <div class="finSectionTitle" style="color:#60a5fa;">💵 Rendimiento USD (PayPal/Ligo)</div>
+          <div style="font-weight:700; color:#60a5fa;">Mes actual</div>
+        </div>
+        <div style="display:flex; gap:12px; margin-bottom:12px;">
+          <div style="flex:1; background:#2a2a2c; padding:10px; border-radius:8px; text-align:center;">
+            <div style="font-size:12px; color:#aaa;">Bruto</div>
+            <div style="font-weight:700; color:#fff;">$${fmt(totalGross)}</div>
+          </div>
+          <div style="flex:1; background:#2a2a2c; padding:10px; border-radius:8px; text-align:center;">
+            <div style="font-size:12px; color:#aaa;">Neto</div>
+            <div style="font-weight:700; color:#34d399;">$${fmt(totalNet)}</div>
+          </div>
+          <div style="flex:1; background:#ef444422; padding:10px; border-radius:8px; text-align:center; border:1px solid #ef444455;">
+            <div style="font-size:12px; color:#fca5a5;">Comisiones</div>
+            <div style="font-weight:700; color:#ef4444;">$${fmt(totalFee)}</div>
+          </div>
+        </div>
+        <div style="font-size:12px; color:#aaa; text-align:center;">Estás perdiendo el <b>${feePct}%</b> de tus ingresos en dólares en comisiones este mes.</div>
+      </section>
+    `;
+  }
+
   const principalHtml = `
 
     <!-- CUENTAS TOP -->
@@ -18953,6 +19114,9 @@ function viewFinance(){
         <div class="finBudgetMeta">${spentPct}% del presupuesto · meta S/ ${fmt(meta.expectedIncome)}</div>
       </div>` : ""}
     </section>
+
+    ${receivablesHtml}
+    ${usdHtml}
 
     <!-- GASTOS DIARIOS (7d) -->
     <section class="finSection">
