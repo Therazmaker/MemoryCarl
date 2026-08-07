@@ -15625,7 +15625,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
         id: newDebtId,
         name: name || "Préstamo rápido",
         provider: "",
-        type: "receivable",
+        type: "person_loan",
         originalBalance: amount,
         balance: amount,
         monthlyDue: amount,
@@ -19012,18 +19012,18 @@ function viewFinance(){
       </div>`;
   }).join("");
 
-  const receivables = (state.financeDebts||[]).filter(d => d.type === 'receivable' && String(d.status||'active') === 'active');
-  let receivablesHtml = '';
-  if (receivables.length > 0) {
-    const totalReceivables = receivables.reduce((s,d) => s + financeDebtSafeNum(d.balance), 0);
-    receivablesHtml = `
+  const payables = (state.financeDebts||[]).filter(d => d.type === 'person_loan' && String(d.status||'active') === 'active');
+  let payablesHtml = '';
+  if (payables.length > 0) {
+    const totalPayables = payables.reduce((s,d) => s + financeDebtSafeNum(d.balance), 0);
+    payablesHtml = `
       <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
         <div class="finSectionHead" style="margin-bottom:12px;">
-          <div class="finSectionTitle" style="color:#34d399;">🤝 Por Cobrar (Préstamos)</div>
-          <div style="font-weight:700; color:#34d399;">S/ ${fmt(totalReceivables)}</div>
+          <div class="finSectionTitle" style="color:#fbbf24;">🤝 Préstamos Rápidos (Por Pagar)</div>
+          <div style="font-weight:700; color:#fbbf24;">S/ ${fmt(totalPayables)}</div>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;">
-          ${receivables.map(r => `
+          ${payables.map(r => `
             <div style="display:flex; justify-content:space-between; align-items:center; background:#2a2a2c; padding:10px 12px; border-radius:8px;">
               <div>
                 <div style="font-weight:600; font-size:14px;">${escapeHtml(r.name)}</div>
@@ -19031,7 +19031,7 @@ function viewFinance(){
               </div>
               <div style="display:flex; align-items:center; gap:12px;">
                 <div style="font-weight:700;">S/ ${fmt(r.balance)}</div>
-                <button class="iconBtn" style="background:#34d39922; color:#34d399; padding:4px 8px; border-radius:6px; font-size:12px;" onclick="openFinanceDebtPayModal('${r.id}')">Cobrar</button>
+                <button class="iconBtn" style="background:#fbbf2422; color:#fbbf24; padding:4px 8px; border-radius:6px; font-size:12px;" onclick="openFinanceDebtPayModal('${r.id}')">Pagar</button>
               </div>
             </div>
           `).join('')}
