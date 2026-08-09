@@ -3268,6 +3268,7 @@ function view(){
     if(state.tab==="reminders") openReminderModal();
 		if(state.tab==="house") openHouseTaskModal();
 	    if(state.tab==="calendar") openCalendarDrawModal(isoDate(new Date()));
+	    if(state.tab==="finance") openFinanceTypeModal();
   });
 
   
