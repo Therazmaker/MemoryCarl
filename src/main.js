@@ -14489,6 +14489,7 @@ LS.financeReasons = "memorycarl_v2_finance_reasons";
 
 state.financeLedger = load(LS.financeLedger, []);
 state.financeReasons = load(LS.financeReasons, ["planificado", "impulso", "emergencia", "normal"]);
+state.financePrimaryAccountId = load("memorycarl_v2_finance_primary_account_id", "");
 state.financeAccounts = load(LS.financeAccounts, []);
 state.financeResetAt = load(LS.financeResetAt, null);
 state.financeDebts = load(LS.financeDebts, []);
@@ -15319,7 +15320,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     time: (existing?.date ? String(existing.date).slice(11,16) : `${hh}:${mm}`),
     category: (existing?.category) || "Otros",
     reason: (existing?.reason) || "normal",
-    accountId: (existing?.accountId) || (state.financeAccounts||[])[0]?.id,
+    accountId: (existing?.accountId) || state.financePrimaryAccountId || (state.financeAccounts||[])[0]?.id,
     neuronRole: (existing?.neuronRole) || "auto",
     note: existingSplit.note
   };
@@ -19006,9 +19007,11 @@ function viewFinance(){
     const shownValue = isFergisAccount ? monthFergisFlow : bal;
     const isPos = isFergisAccount ? true : (shownValue >= 0); // Force positive look (green/neutral) for Fergis flow
     const balanceLabel = isFergisAccount ? "Uso del mes" : "Saldo";
+    const isPrimary = state.financePrimaryAccountId === a.id;
     return `
-      <div class="finAccCard" onclick="openFinanceAccountDetails('${a.id}')">
-        <div class="finAccName">${escapeHtml(a.name)}</div>
+      <div class="finAccCard" style="position:relative;" onclick="openFinanceAccountDetails('${a.id}')">
+        <button onclick="event.stopPropagation(); toggleFinancePrimaryAccount('${a.id}')" style="position:absolute; top:8px; right:8px; background:none; border:none; color:${isPrimary?'#f59e0b':'#555'}; font-size:16px; cursor:pointer;" title="Establecer como cuenta principal">${isPrimary?'★':'☆'}</button>
+        <div class="finAccName" style="padding-right:20px;">${escapeHtml(a.name)}</div>
         <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">S/ ${fmt(shownValue)}</div>
         <div class="finAccHint">${balanceLabel}</div>
       </div>`;
@@ -19265,9 +19268,32 @@ function viewFinance(){
 
 
 function renderFinanceStatsTab() {
+  if (!state.financeStatsPeriod) state.financeStatsPeriod = "month";
   const fmt = _financeFmt;
   const monthKey = getCurrentMonthKey();
-  const ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[])).filter(e => String(e.date||'').startsWith(monthKey));
+  
+  let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[])).filter(e => String(e.date||'').startsWith(monthKey));
+  
+  const now = new Date();
+  if (state.financeStatsPeriod === 'week') {
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(now.setDate(diff));
+    monday.setHours(0,0,0,0);
+    ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[])).filter(e => {
+      const d = new Date(e.date);
+      return d >= monday && d <= new Date();
+    });
+  } else if (state.financeStatsPeriod === 'fortnight') {
+    const dayOfMonth = now.getDate();
+    const startDay = dayOfMonth > 15 ? 16 : 1;
+    const startFortnight = new Date(now.getFullYear(), now.getMonth(), startDay, 0,0,0,0);
+    ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[])).filter(e => {
+      const d = new Date(e.date);
+      return d >= startFortnight && d <= new Date();
+    });
+  }
+
   const expenses = ledger.filter(e => e.type === 'expense');
   const incomes  = ledger.filter(e => e.type === 'income');
   const totalExp = expenses.reduce((s,e) => s + Number(e.amount||0), 0);
@@ -19288,16 +19314,16 @@ function renderFinanceStatsTab() {
   const reasonColors = { planificado:'#7c5cff', impulso:'#f59e0b', emergencia:'#ef4444', normal:'#6b7280' };
   const expReasons = [...new Set(expenses.map(e => String(e.reason||'normal')))];
   const byReason = expReasons.map(r => ({ label:r.charAt(0).toUpperCase()+r.slice(1), value:expenses.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:expenses.filter(e=>String(e.reason||'normal')===r).length, color:reasonColors[r]||'#8b5cf6' })).sort((a,b)=>b.value-a.value);
-  const reasonRows = byReason.map(r=>barRow(r.label,r.value,totalExp,r.color,`${r.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos este mes</div>';
+  const reasonRows = byReason.map(r=>barRow(r.label,r.value,totalExp,r.color,`${r.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
 
   const incReasons = [...new Set(incomes.map(e => String(e.reason||'normal')))];
   const incByReason = incReasons.map(r=>({ label:r.charAt(0).toUpperCase()+r.slice(1), value:incomes.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:incomes.filter(e=>String(e.reason||'normal')===r).length })).sort((a,b)=>b.value-a.value);
-  const incReasonRows = incByReason.map(r=>barRow(r.label,r.value,totalInc,'#34d399',`${r.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos este mes</div>';
+  const incReasonRows = incByReason.map(r=>barRow(r.label,r.value,totalInc,'#34d399',`${r.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
 
   const catPalette = ['#7c5cff','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
   const cats = [...new Set(expenses.map(e=>e.category||'Sin categoría'))];
-  const byCat = cats.map(c=>({ label:c, value:expenses.filter(e=>(e.category||'Sin categoría')===c).reduce((s,e)=>s+Number(e.amount||0),0), count:expenses.filter(e=>(e.category||'Sin categoría')===c).length })).sort((a,b)=>b.value-a.value).slice(0,6);
-  const catRows = byCat.map((c,i)=>barRow(c.label,c.value,totalExp,catPalette[i%catPalette.length],`${c.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos este mes</div>';
+  const byCat = cats.map(c=>({ label:c, value:expenses.filter(e=>(e.category||'Sin categoría')===c).reduce((s,e)=>s+Number(e.amount||0),0), count:expenses.filter(e=>(e.category||'Sin categoría')===c).length })).sort((a,b)=>b.value-a.value);
+  const catRows = byCat.map((c,i)=>barRow(c.label,c.value,totalExp,catPalette[i%catPalette.length],`${c.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
 
   const accRows = (state.financeAccounts||[]).map(a=>({ name:a.name, value:expenses.filter(e=>e.accountId===a.id).reduce((s,e)=>s+Number(e.amount||0),0) })).filter(a=>a.value>0).sort((a,b)=>b.value-a.value).map(a=>barRow(a.name,a.value,totalExp,'#60a5fa','')).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin uso registrado</div>';
 
@@ -19305,10 +19331,18 @@ function renderFinanceStatsTab() {
   const usdSection = usdMovs.length>0 ? (()=>{
     const tGross=usdMovs.reduce((s,m)=>s+(m.usdGross||0),0), tFee=usdMovs.reduce((s,m)=>s+(m.usdFee||0),0), tNet=tGross-tFee;
     const feePct=tGross>0?((tFee/tGross)*100).toFixed(1):0;
-    return `<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle" style="color:#60a5fa;">💵 USD — PayPal / Ligo</div></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;"><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Bruto</div><div style="font-weight:700;color:#fff;font-size:15px;">$${fmt(tGross)}</div></div><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Neto real</div><div style="font-weight:700;color:#34d399;font-size:15px;">$${fmt(tNet)}</div></div><div style="background:#ef444422;padding:10px;border-radius:8px;text-align:center;border:1px solid #ef444455;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">Comisiones</div><div style="font-weight:700;color:#ef4444;font-size:15px;">$${fmt(tFee)}</div></div></div>${usdMovs.map(m=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid #2a2a2c;"><div style="color:#ddd;">${m.note?escapeHtml(String(m.note).split('·')[0].trim()):'Ingreso'} <span style="color:#888;">${String(m.date||'').slice(0,10)}</span></div><div style="display:flex;gap:6px;"><span style="color:#aaa;">$${fmt(m.usdGross)}</span><span style="color:#ef4444;">-$${fmt(m.usdFee||0)}</span><span style="color:#34d399;font-weight:700;">=$${fmt((m.usdGross||0)-(m.usdFee||0))}</span></div></div>`).join('')}<div style="margin-top:10px;font-size:12px;color:#888;text-align:center;">Perdiste el <b style="color:#ef4444;">${feePct}%</b> en comisiones este mes.</div></section>`;
+    return `<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle" style="color:#60a5fa;">💵 USD — PayPal / Ligo</div></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;"><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Bruto</div><div style="font-weight:700;color:#fff;font-size:15px;">$${fmt(tGross)}</div></div><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Neto real</div><div style="font-weight:700;color:#34d399;font-size:15px;">$${fmt(tNet)}</div></div><div style="background:#ef444422;padding:10px;border-radius:8px;text-align:center;border:1px solid #ef444455;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">Comisiones</div><div style="font-weight:700;color:#ef4444;font-size:15px;">$${fmt(tFee)}</div></div></div>${usdMovs.map(m=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid #2a2a2c;"><div style="color:#ddd;">${m.note?escapeHtml(String(m.note).split('·')[0].trim()):'Ingreso'} <span style="color:#888;">${String(m.date||'').slice(0,10)}</span></div><div style="display:flex;gap:6px;"><span style="color:#aaa;">$${fmt(m.usdGross)}</span><span style="color:#ef4444;">-$${fmt(m.usdFee||0)}</span><span style="color:#34d399;font-weight:700;">=$${fmt((m.usdGross||0)-(m.usdFee||0))}</span></div></div>`).join('')}<div style="margin-top:10px;font-size:12px;color:#888;text-align:center;">Perdiste el <b style="color:#ef4444;">${feePct}%</b> en comisiones en este período.</div></section>`;
   })():'';
 
-  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas del mes</div><div style="font-size:12px;color:#888;">${monthKey}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:22px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:22px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Top Categorías (Gastos)</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${usdSection}</div>`;
+  const periodPills = `
+    <div style="display:flex;gap:6px;margin-bottom:16px;">
+      <button class="finModeBtn ${state.financeStatsPeriod==='week'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('week')">Esta semana</button>
+      <button class="finModeBtn ${state.financeStatsPeriod==='fortnight'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('fortnight')">15 días</button>
+      <button class="finModeBtn ${state.financeStatsPeriod==='month'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('month')">Este mes</button>
+    </div>
+  `;
+
+  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas</div><div style="font-size:12px;color:#888;">${monthKey}</div></div>${periodPills}<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Gastos por Categoría</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${usdSection}</div>`;
 }
 
 function openFinanceReasonsManager() {
@@ -19337,6 +19371,22 @@ window.financeRemoveReason = function(r) {
   save(LS.financeReasons, state.financeReasons);
   const listEl = document.getElementById('reasonManagerList');
   if (listEl) listEl.innerHTML = (state.financeReasons||[]).map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;background:#2a2a2c;padding:10px 12px;border-radius:8px;margin-bottom:8px;"><span style="font-weight:600;text-transform:capitalize;">${escapeHtml(x)}</span>${['planificado','impulso','emergencia','normal'].includes(x)?'<span style="font-size:11px;color:#888;">Predeterminado</span>':`<button onclick="financeRemoveReason('${escapeHtml(x)}')" style="background:#ef444433;color:#ef4444;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">Eliminar</button>`}</div>`).join('');
+};
+
+window.toggleFinancePrimaryAccount = function(accountId) {
+  if (state.financePrimaryAccountId === accountId) {
+    state.financePrimaryAccountId = "";
+  } else {
+    state.financePrimaryAccountId = accountId;
+  }
+  save("memorycarl_v2_finance_primary_account_id", state.financePrimaryAccountId);
+  view();
+};
+
+window.setFinanceStatsPeriod = function(period) {
+  state.financeStatsPeriod = period;
+  save("memorycarl_v2_finance_stats_period", period);
+  view();
 };
 
 function openFinanceMetaModal(){
