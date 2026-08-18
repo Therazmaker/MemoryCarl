@@ -14622,11 +14622,11 @@ LS.financeCommitmentInstances = "memorycarl_v2_finance_commitment_instances";
 LS.financeLoanUsageLedger = "memorycarl_v2_finance_loan_usage_ledger";
 LS.financeRoadmap = "memorycarl_v2_finance_roadmap";
 LS.financeReasons = "memorycarl_v2_finance_reasons";
-LS.financeCategories = "memorycarl_v2_finance_categories";
+LS.financeEntryCategories = "memorycarl_v3_finance_entry_categories";
 
 state.financeLedger = load(LS.financeLedger, []);
 state.financeReasons = load(LS.financeReasons, ["planificado", "impulso", "emergencia", "normal"]);
-state.financeCategories = load(LS.financeCategories, [
+state.financeEntryCategories = load(LS.financeEntryCategories, [
   { id: "Alimentos", icon: "🛒", name: "Alimentos" },
   { id: "Transporte", icon: "🚕", name: "Transporte" },
   { id: "Hogar", icon: "🏠", name: "Hogar" },
@@ -14685,7 +14685,7 @@ persist = function(){
   try{ save(LS.financeCommitmentInstances, state.financeCommitmentInstances||[]); }catch(_e){}
   try{ save(LS.financeLoanUsageLedger, state.financeLoanUsageLedger||[]); }catch(_e){}
   try{ save(LS.financeMeta, state.financeMeta); }catch(_e){}
-  try{ save(LS.financeCategories, state.financeCategories); }catch(_e){}
+  try{ save(LS.financeEntryCategories, state.financeEntryCategories); }catch(_e){}
   try{ save(LS.financeRoadmap, state.financeRoadmap||{}); }catch(_e){}
   try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(state.financeProjectionMode||"normal")); }catch(_e){}
 };
@@ -15476,7 +15476,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop';
   
-  const topCats = state.financeCategories || [];
+  const topCats = state.financeEntryCategories || [];
 
   backdrop.innerHTML = `
     <div class="finProModal">
@@ -15718,7 +15718,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     });
 
     // Sort all categories by usage descending, take top 6
-    const allCats = state.financeCategories || [];
+    const allCats = state.financeEntryCategories || [];
     const sorted = [...allCats].sort((a, b) => (usageCounts[b.name] || 0) - (usageCounts[a.name] || 0));
     let visible = sorted.slice(0, 6);
 
@@ -15754,11 +15754,11 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
             const emoji = prompt('Emoji para la categoría (opcional):', '🏷️') || '🏷️';
             const cleanEmoji = emoji.trim() || '🏷️';
             
-            if (!state.financeCategories) state.financeCategories = [];
-            const exists = state.financeCategories.some(c => c.name.toLowerCase() === cleanName.toLowerCase());
+            if (!state.financeEntryCategories) state.financeEntryCategories = [];
+            const exists = state.financeEntryCategories.some(c => c.name.toLowerCase() === cleanName.toLowerCase());
             if (!exists) {
-              state.financeCategories.push({ id: cleanName, icon: cleanEmoji, name: cleanName });
-              save(LS.financeCategories, state.financeCategories);
+              state.financeEntryCategories.push({ id: cleanName, icon: cleanEmoji, name: cleanName });
+              save(LS.financeEntryCategories, state.financeEntryCategories);
               draft.category = cleanName;
               renderCatGrid(cleanName);
             } else {
@@ -15781,8 +15781,8 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         e.stopPropagation();
         const id = btn.dataset.id;
         if (confirm(`¿Quieres eliminar la categoría "${id}"?`)) {
-          state.financeCategories = state.financeCategories.filter(c => c.id !== id);
-          save(LS.financeCategories, state.financeCategories);
+          state.financeEntryCategories = state.financeEntryCategories.filter(c => c.id !== id);
+          save(LS.financeEntryCategories, state.financeEntryCategories);
           if (draft.category === id) draft.category = 'Otros';
           renderCatGrid(draft.category);
         }
