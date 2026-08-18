@@ -15573,11 +15573,32 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   const renderCatGrid = (activeCat) => {
     const grid = backdrop.querySelector('#finCatGrid');
     if (!grid) return;
-    grid.innerHTML = (state.financeCategories || []).map(c => `
+
+    // Count usage of each category across the full ledger
+    const usageCounts = {};
+    (state.financeLedger || []).forEach(e => {
+      const cat = e.category || 'Otros';
+      usageCounts[cat] = (usageCounts[cat] || 0) + 1;
+    });
+
+    // Sort all categories by usage descending, take top 6
+    const allCats = state.financeCategories || [];
+    const sorted = [...allCats].sort((a, b) => (usageCounts[b.name] || 0) - (usageCounts[a.name] || 0));
+    let visible = sorted.slice(0, 6);
+
+    // Always keep the currently active category visible
+    if (activeCat && !visible.some(c => c.name === activeCat)) {
+      const activeObj = allCats.find(c => c.name === activeCat);
+      if (activeObj) visible = [...visible.slice(0, 5), activeObj];
+    }
+
+    const DEFAULT_CATS = ["Alimentos", "Transporte", "Hogar", "Ocio", "Salud", "Ropa", "Mascotas", "Otros"];
+
+    grid.innerHTML = visible.map(c => `
       <div class="finProCatChip ${activeCat === c.name ? 'active' : ''}" data-cat="${c.name}" style="position:relative;">
         <div class="finProCatIcon">${c.icon}</div>
         <div class="finProCatName">${c.name}</div>
-        ${!["Alimentos", "Transporte", "Hogar", "Ocio", "Salud", "Ropa", "Mascotas", "Otros"].includes(c.id) ? `
+        ${!DEFAULT_CATS.includes(c.id) ? `
           <button class="deleteCatBtn" data-id="${c.id}" style="position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:900; line-height:16px; text-align:center; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index: 10;">✕</button>
         ` : ""}
       </div>
