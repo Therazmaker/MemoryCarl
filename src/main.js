@@ -1,3 +1,52 @@
+(function mcConsoleLogsInterceptorInit(){
+  if (window.__mcLogsInterceptor) return;
+  window.__mcLogs = [];
+  window.__mcLogsInterceptor = true;
+  const originalLog = console.log;
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  
+  const addLog = (type, args) => {
+    const time = new Date().toTimeString().split(' ')[0];
+    const text = args.map(arg => {
+      if (typeof arg === 'object') {
+        try { return JSON.stringify(arg); } catch (e) { return String(arg); }
+      }
+      return String(arg);
+    }).join(' ');
+    window.__mcLogs.push({ time, type, text });
+    if (window.__mcLogs.length > 200) window.__mcLogs.shift();
+    
+    const logEl = document.getElementById('mcLiveConsoleLogs');
+    if (logEl) {
+      const p = document.createElement('div');
+      p.className = `console-${type}`;
+      p.style.fontSize = '12px';
+      p.style.fontFamily = 'monospace';
+      p.style.whiteSpace = 'pre-wrap';
+      p.style.borderBottom = '1px solid #222';
+      p.style.padding = '4px 0';
+      p.style.color = type === 'error' ? '#f87171' : (type === 'warn' ? '#f59e0b' : '#38bdf8');
+      
+      const esc = (s) => String(s || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      p.innerHTML = `<span style="color:#888;">[${time}]</span> ${esc(text)}`;
+      logEl.appendChild(p);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  };
+
+  console.log = (...args) => { originalLog(...args); addLog('info', args); };
+  console.error = (...args) => { originalError(...args); addLog('error', args); };
+  console.warn = (...args) => { originalWarn(...args); addLog('warn', args); };
+
+  window.addEventListener('error', (e) => {
+    addLog('error', [`Uncaught Error: ${e.message} at ${e.filename}:${e.lineno}:${e.colno}`]);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    addLog('error', [`Unhandled Rejection: ${e.reason}`]);
+  });
+})();
+
 import { initFootballLab } from "./footballLab_v8e.js?v=2001";
 import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
@@ -4210,6 +4259,27 @@ function viewSettings(){
         </label>
       </div>
       <div class="note" style="margin-top:10px;">Exportar/Importar cerebro crea un backup completo de FootballLab/Brain v2 (IndexedDB + localStorage) y recarga la app tras restaurar.</div>
+    </div>
+
+    <div class="card">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">📺 Consola de Depuración</h2>
+          <div class="small">Errores y logs del sistema en tiempo real. Útil para móviles.</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div id="mcLiveConsoleLogs" style="background:#09090b; border:1px solid #333; border-radius:8px; height:200px; overflow-y:auto; padding:10px; margin-bottom:10px; font-family:monospace; display:flex; flex-direction:column; gap:4px; max-height:200px;">
+        ${(window.__mcLogs || []).map(log => `
+          <div style="font-size:11px; white-space:pre-wrap; border-bottom:1px solid #222; padding:3px 0; color:${log.type === 'error' ? '#f87171' : (log.type === 'warn' ? '#f59e0b' : '#38bdf8')};">
+            <span style="color:#888;">[${log.time}]</span> ${escapeHtml(log.text)}
+          </div>
+        `).join('')}
+      </div>
+      <div class="btnRow" style="margin-top:10px; display:flex; gap:10px;">
+        <button class="btn ghost" onclick="document.getElementById('mcLiveConsoleLogs').innerHTML = ''; window.__mcLogs = [];">Limpiar logs</button>
+        <button class="btn" onclick="navigator.clipboard.writeText(JSON.stringify(window.__mcLogs, null, 2)).then(() => toast('Copiado ✅')).catch(() => { const ta = document.createElement('textarea'); ta.value = JSON.stringify(window.__mcLogs, null, 2); document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Copiado ✅'); });">Copiar Logs</button>
+      </div>
     </div>
 
     <div class="card">
