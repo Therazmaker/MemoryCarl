@@ -15446,7 +15446,10 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   const existing = existingId ? (state.financeLedger||[]).find(e=>e.id===existingId) : null;
 
   const now = new Date();
-  const isoDate = now.toISOString().slice(0,10);
+  const yyyy = now.getFullYear();
+  const mmMonth = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const isoDate = `${yyyy}-${mmMonth}-${dd}`;
   const hh = String(now.getHours()).padStart(2,'0');
   const mm = String(now.getMinutes()).padStart(2,'0');
 
@@ -15534,6 +15537,11 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <input type="text" inputmode="decimal" id="finEntryAmount" class="finProAmountInput" placeholder="0.00" value="${escapeHtml(draft.amount)}">
       </div>
 
+      <div class="finEntryDateRow" style="margin-top:12px; margin-bottom:12px; display:flex; gap:10px; justify-content:center;">
+        <div class="finEntryDateChip" style="background:#2a2a2c; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:6px;"><span>📅</span><input id="finEntryDate" type="date" value="${draft.date}" style="background:transparent; color:#fff; border:none; outline:none; font-size:13px; font-family:inherit;" /></div>
+        <div class="finEntryDateChip" style="background:#2a2a2c; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:6px;"><span>🕒</span><input id="finEntryTime" type="time" value="${draft.time}" style="background:transparent; color:#fff; border:none; outline:none; font-size:13px; font-family:inherit;" /></div>
+      </div>
+
       <div class="finProCatGrid" id="finCatGrid">
         ${topCats.map(c => `
           <div class="finProCatChip ${draft.category === c.name ? 'active' : ''}" data-cat="${c.name}" style="position:relative;">
@@ -15552,7 +15560,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
 
       <input type="text" id="finEntryName" class="finProNote" placeholder="Descripción (Ej. Café Starbucks)" value="${escapeHtml(draft.name)}">
       
-      <div class="finProAdvToggle" id="finAdvToggle">Más opciones (Cuentas, Fechas, Notas) ▼</div>
+      <div class="finProAdvToggle" id="finAdvToggle">Más opciones (Cuentas, Notas) ▼</div>
       
       <div class="finProAdvSection" id="finAdvSection">
         <div class="finEntryPickRow">
@@ -15565,11 +15573,6 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
               </select>
             </div>
           </div>
-        </div>
-        
-        <div class="finEntryDateRow" style="margin-top:12px; margin-bottom:12px;">
-          <div class="finEntryDateChip"><span>📅</span><input id="finEntryDate" type="date" value="${draft.date}" /></div>
-          <div class="finEntryDateChip"><span>🕒</span><input id="finEntryTime" type="time" value="${draft.time}" /></div>
         </div>
         
         <textarea id="finEntryNote" class="finProNote" style="height:60px; margin-bottom:12px; font-size:14px;" placeholder="Notas adicionales">${escapeHtml(draft.note)}</textarea>
