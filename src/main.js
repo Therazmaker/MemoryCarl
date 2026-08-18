@@ -14485,8 +14485,10 @@ LS.financeCommitmentTemplates = "memorycarl_v2_finance_commitment_templates";
 LS.financeCommitmentInstances = "memorycarl_v2_finance_commitment_instances";
 LS.financeLoanUsageLedger = "memorycarl_v2_finance_loan_usage_ledger";
 LS.financeRoadmap = "memorycarl_v2_finance_roadmap";
+LS.financeReasons = "memorycarl_v2_finance_reasons";
 
 state.financeLedger = load(LS.financeLedger, []);
+state.financeReasons = load(LS.financeReasons, ["planificado", "impulso", "emergencia", "normal"]);
 state.financeAccounts = load(LS.financeAccounts, []);
 state.financeResetAt = load(LS.financeResetAt, null);
 state.financeDebts = load(LS.financeDebts, []);
@@ -15445,7 +15447,8 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
           <div class="finEntryField" style="flex:1">
             <label class="fieldLabel">Motivo</label>
             <select id="finEntryReason" class="textInput">
-              ${[["planificado","Planificado"],["impulso","Impulso"],["emergencia","Emergencia"],["normal","Normal"]].map(r=>`<option value="${r[0]}" ${r[0]===(draft.reason||"normal")?'selected':''}>${r[1]}</option>`).join('')}
+              ${state.financeReasons.map(r=>`<option value="${r}" ${r===(draft.reason||"normal")?'selected':''}>${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join('')}
+              <option value="__add_new__">＋ Agregar nuevo...</option>
             </select>
           </div>
           <div class="finEntryField" style="flex:1">
@@ -15535,6 +15538,26 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     usdNet.addEventListener('input', recalcUSD);
     usdExchange.addEventListener('input', recalcUSD);
     usdFixedFee.addEventListener('input', recalcUSD);
+  }
+
+  const reasonSelect = backdrop.querySelector('#finEntryReason');
+  if (reasonSelect) {
+    reasonSelect.addEventListener('change', () => {
+      if (reasonSelect.value === '__add_new__') {
+        const newReason = prompt('Ingresa el nuevo motivo/razón:');
+        if (newReason && newReason.trim()) {
+          const cleaned = newReason.trim().toLowerCase();
+          if (!state.financeReasons.includes(cleaned)) {
+            state.financeReasons.push(cleaned);
+            save(LS.financeReasons, state.financeReasons);
+          }
+          reasonSelect.innerHTML = state.financeReasons.map(r => `<option value="${r}" ${r===cleaned?'selected':''}>${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join('') + '<option value="__add_new__">＋ Agregar nuevo...</option>';
+          reasonSelect.value = cleaned;
+        } else {
+          reasonSelect.value = 'normal';
+        }
+      }
+    });
   }
 
   backdrop.querySelectorAll('.finProCatChip').forEach(chip => {
@@ -18958,6 +18981,7 @@ function viewFinance(){
   const topTabs = `
     <div class="finTopTabs">
       <button class="finTopTab ${state.financeSubTab==="main"?"active":""}" onclick="setFinanceSubTab('main')">Principal</button>
+      <button class="finTopTab ${state.financeSubTab==="stats"?"active":""}" onclick="setFinanceSubTab('stats')">📊 Estadísticas</button>
       <button class="finTopTab ${state.financeSubTab==="mission"?"active":""}" onclick="setFinanceSubTab('mission')">Mission Control</button>
       <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
       <button class="finTopTab ${state.financeSubTab==="reminders"?"active":""}" onclick="setFinanceSubTab('reminders')">Recordatorios</button>
@@ -19221,6 +19245,8 @@ function viewFinance(){
 
   const neuronalHtml = (typeof renderMapaNeuronal === 'function') ? renderMapaNeuronal() : '';
 
+  const statsHtml = renderFinanceStatsTab();
+
   const body = (state.financeSubTab==="movements")
     ? movList
     : (state.financeSubTab==="reminders" ? remindersHtml
@@ -19228,7 +19254,8 @@ function viewFinance(){
         : (state.financeSubTab==="commitments" ? commitmentsHtml
           : (state.financeSubTab==="mission" ? missionHtml
             : (state.financeSubTab==="roadmap" ? roadmapHtml
-              : (state.financeSubTab==="neuronal" ? neuronalHtml : principalHtml))))));
+              : (state.financeSubTab==="neuronal" ? neuronalHtml
+                : (state.financeSubTab==="stats" ? statsHtml : principalHtml)))))));
 
   return `
     ${topTabs}
@@ -19236,6 +19263,81 @@ function viewFinance(){
   `;
 }
 
+
+function renderFinanceStatsTab() {
+  const fmt = _financeFmt;
+  const monthKey = getCurrentMonthKey();
+  const ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[])).filter(e => String(e.date||'').startsWith(monthKey));
+  const expenses = ledger.filter(e => e.type === 'expense');
+  const incomes  = ledger.filter(e => e.type === 'income');
+  const totalExp = expenses.reduce((s,e) => s + Number(e.amount||0), 0);
+  const totalInc = incomes.reduce((s,e)  => s + Number(e.amount||0), 0);
+
+  const barRow = (label, value, total, color, sub) => {
+    const pct = total > 0 ? Math.min(100, Math.round((value/total)*100)) : 0;
+    const w = Math.max(3, pct);
+    return `<div style="margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <div style="font-weight:600;font-size:14px;">${label}</div>
+          <div style="display:flex;gap:8px;align-items:center;">${sub?`<span style="font-size:11px;color:#888;">${sub}</span>`:''}<span style="font-weight:700;font-size:14px;">S/ ${fmt(value)}</span><span style="font-size:12px;color:#aaa;min-width:34px;text-align:right;">${pct}%</span></div>
+        </div>
+        <div style="background:#2a2a2c;border-radius:6px;height:8px;overflow:hidden;"><div style="height:100%;width:${w}%;background:${color};border-radius:6px;"></div></div>
+      </div>`;
+  };
+
+  const reasonColors = { planificado:'#7c5cff', impulso:'#f59e0b', emergencia:'#ef4444', normal:'#6b7280' };
+  const expReasons = [...new Set(expenses.map(e => String(e.reason||'normal')))];
+  const byReason = expReasons.map(r => ({ label:r.charAt(0).toUpperCase()+r.slice(1), value:expenses.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:expenses.filter(e=>String(e.reason||'normal')===r).length, color:reasonColors[r]||'#8b5cf6' })).sort((a,b)=>b.value-a.value);
+  const reasonRows = byReason.map(r=>barRow(r.label,r.value,totalExp,r.color,`${r.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos este mes</div>';
+
+  const incReasons = [...new Set(incomes.map(e => String(e.reason||'normal')))];
+  const incByReason = incReasons.map(r=>({ label:r.charAt(0).toUpperCase()+r.slice(1), value:incomes.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:incomes.filter(e=>String(e.reason||'normal')===r).length })).sort((a,b)=>b.value-a.value);
+  const incReasonRows = incByReason.map(r=>barRow(r.label,r.value,totalInc,'#34d399',`${r.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos este mes</div>';
+
+  const catPalette = ['#7c5cff','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
+  const cats = [...new Set(expenses.map(e=>e.category||'Sin categoría'))];
+  const byCat = cats.map(c=>({ label:c, value:expenses.filter(e=>(e.category||'Sin categoría')===c).reduce((s,e)=>s+Number(e.amount||0),0), count:expenses.filter(e=>(e.category||'Sin categoría')===c).length })).sort((a,b)=>b.value-a.value).slice(0,6);
+  const catRows = byCat.map((c,i)=>barRow(c.label,c.value,totalExp,catPalette[i%catPalette.length],`${c.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos este mes</div>';
+
+  const accRows = (state.financeAccounts||[]).map(a=>({ name:a.name, value:expenses.filter(e=>e.accountId===a.id).reduce((s,e)=>s+Number(e.amount||0),0) })).filter(a=>a.value>0).sort((a,b)=>b.value-a.value).map(a=>barRow(a.name,a.value,totalExp,'#60a5fa','')).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin uso registrado</div>';
+
+  const usdMovs = ledger.filter(m=>m.usdGross>0);
+  const usdSection = usdMovs.length>0 ? (()=>{
+    const tGross=usdMovs.reduce((s,m)=>s+(m.usdGross||0),0), tFee=usdMovs.reduce((s,m)=>s+(m.usdFee||0),0), tNet=tGross-tFee;
+    const feePct=tGross>0?((tFee/tGross)*100).toFixed(1):0;
+    return `<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle" style="color:#60a5fa;">💵 USD — PayPal / Ligo</div></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;"><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Bruto</div><div style="font-weight:700;color:#fff;font-size:15px;">$${fmt(tGross)}</div></div><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Neto real</div><div style="font-weight:700;color:#34d399;font-size:15px;">$${fmt(tNet)}</div></div><div style="background:#ef444422;padding:10px;border-radius:8px;text-align:center;border:1px solid #ef444455;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">Comisiones</div><div style="font-weight:700;color:#ef4444;font-size:15px;">$${fmt(tFee)}</div></div></div>${usdMovs.map(m=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid #2a2a2c;"><div style="color:#ddd;">${m.note?escapeHtml(String(m.note).split('·')[0].trim()):'Ingreso'} <span style="color:#888;">${String(m.date||'').slice(0,10)}</span></div><div style="display:flex;gap:6px;"><span style="color:#aaa;">$${fmt(m.usdGross)}</span><span style="color:#ef4444;">-$${fmt(m.usdFee||0)}</span><span style="color:#34d399;font-weight:700;">=$${fmt((m.usdGross||0)-(m.usdFee||0))}</span></div></div>`).join('')}<div style="margin-top:10px;font-size:12px;color:#888;text-align:center;">Perdiste el <b style="color:#ef4444;">${feePct}%</b> en comisiones este mes.</div></section>`;
+  })():'';
+
+  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas del mes</div><div style="font-size:12px;color:#888;">${monthKey}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:22px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:22px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Top Categorías (Gastos)</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${usdSection}</div>`;
+}
+
+function openFinanceReasonsManager() {
+  const host = document.getElementById('modalHost') || document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modalBackdrop';
+  const renderItems = () => (state.financeReasons||[]).map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;background:#2a2a2c;padding:10px 12px;border-radius:8px;margin-bottom:8px;"><span style="font-weight:600;text-transform:capitalize;">${escapeHtml(r)}</span>${['planificado','impulso','emergencia','normal'].includes(r)?'<span style="font-size:11px;color:#888;">Predeterminado</span>':`<button onclick="financeRemoveReason('${escapeHtml(r)}')" style="background:#ef444433;color:#ef4444;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">Eliminar</button>`}</div>`).join('');
+  backdrop.innerHTML = `<div class="modal" style="max-width:420px;width:100%;"><div class="modalHead"><span style="font-weight:700;">⚙️ Gestionar Motivos</span><button class="iconBtn" onclick="this.closest('.modalBackdrop').remove()">✕</button></div><div style="padding:16px;max-height:55vh;overflow-y:auto;" id="reasonManagerList">${renderItems()}</div><div style="padding:0 16px 16px;display:flex;gap:8px;"><input id="newReasonInput" class="textInput" style="flex:1;" placeholder="Nuevo motivo..." /><button class="finProSaveBtn" style="flex:0 0 auto;padding:0 16px;" onclick="financeAddReasonFromManager()">Agregar</button></div></div>`;
+  host.appendChild(backdrop);
+  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) backdrop.remove(); });
+}
+
+window.financeAddReasonFromManager = function() {
+  const input = document.getElementById('newReasonInput');
+  if (!input) return;
+  const val = input.value.trim().toLowerCase();
+  if (!val) return;
+  if (!state.financeReasons.includes(val)) { state.financeReasons.push(val); save(LS.financeReasons, state.financeReasons); }
+  input.value = '';
+  const listEl = document.getElementById('reasonManagerList');
+  if (listEl) listEl.innerHTML = (state.financeReasons||[]).map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;background:#2a2a2c;padding:10px 12px;border-radius:8px;margin-bottom:8px;"><span style="font-weight:600;text-transform:capitalize;">${escapeHtml(r)}</span>${['planificado','impulso','emergencia','normal'].includes(r)?'<span style="font-size:11px;color:#888;">Predeterminado</span>':`<button onclick="financeRemoveReason('${escapeHtml(r)}')" style="background:#ef444433;color:#ef4444;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">Eliminar</button>`}</div>`).join('');
+};
+
+window.financeRemoveReason = function(r) {
+  state.financeReasons = (state.financeReasons||[]).filter(x=>x!==r);
+  save(LS.financeReasons, state.financeReasons);
+  const listEl = document.getElementById('reasonManagerList');
+  if (listEl) listEl.innerHTML = (state.financeReasons||[]).map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;background:#2a2a2c;padding:10px 12px;border-radius:8px;margin-bottom:8px;"><span style="font-weight:600;text-transform:capitalize;">${escapeHtml(x)}</span>${['planificado','impulso','emergencia','normal'].includes(x)?'<span style="font-size:11px;color:#888;">Predeterminado</span>':`<button onclick="financeRemoveReason('${escapeHtml(x)}')" style="background:#ef444433;color:#ef4444;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">Eliminar</button>`}</div>`).join('');
+};
 
 function openFinanceMetaModal(){
   const month = getCurrentMonthKey();
