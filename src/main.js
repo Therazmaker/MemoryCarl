@@ -15597,6 +15597,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
             const emoji = prompt('Emoji para la categoría (opcional):', '🏷️') || '🏷️';
             const cleanEmoji = emoji.trim() || '🏷️';
             
+            if (!state.financeCategories) state.financeCategories = [];
             const exists = state.financeCategories.some(c => c.name.toLowerCase() === cleanName.toLowerCase());
             if (!exists) {
               state.financeCategories.push({ id: cleanName, icon: cleanEmoji, name: cleanName });
