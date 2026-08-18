@@ -14486,9 +14486,20 @@ LS.financeCommitmentInstances = "memorycarl_v2_finance_commitment_instances";
 LS.financeLoanUsageLedger = "memorycarl_v2_finance_loan_usage_ledger";
 LS.financeRoadmap = "memorycarl_v2_finance_roadmap";
 LS.financeReasons = "memorycarl_v2_finance_reasons";
+LS.financeCategories = "memorycarl_v2_finance_categories";
 
 state.financeLedger = load(LS.financeLedger, []);
 state.financeReasons = load(LS.financeReasons, ["planificado", "impulso", "emergencia", "normal"]);
+state.financeCategories = load(LS.financeCategories, [
+  { id: "Alimentos", icon: "🛒", name: "Alimentos" },
+  { id: "Transporte", icon: "🚕", name: "Transporte" },
+  { id: "Hogar", icon: "🏠", name: "Hogar" },
+  { id: "Ocio", icon: "🍿", name: "Ocio" },
+  { id: "Salud", icon: "💊", name: "Salud" },
+  { id: "Ropa", icon: "👕", name: "Ropa" },
+  { id: "Mascotas", icon: "🐾", name: "Mascotas" },
+  { id: "Otros", icon: "📦", name: "Otros" }
+]);
 state.financePrimaryAccountId = load("memorycarl_v2_finance_primary_account_id", "");
 state.financeAccounts = load(LS.financeAccounts, []);
 state.financeResetAt = load(LS.financeResetAt, null);
@@ -15329,16 +15340,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop';
   
-  const topCats = [
-    { id: "Alimentos", icon: "🛒", name: "Alimentos" },
-    { id: "Transporte", icon: "🚕", name: "Transporte" },
-    { id: "Hogar", icon: "🏠", name: "Hogar" },
-    { id: "Ocio", icon: "🍿", name: "Ocio" },
-    { id: "Salud", icon: "💊", name: "Salud" },
-    { id: "Ropa", icon: "👕", name: "Ropa" },
-    { id: "Mascotas", icon: "🐾", name: "Mascotas" },
-    { id: "Otros", icon: "📦", name: "Otros" }
-  ];
+  const topCats = state.financeCategories || [];
 
   backdrop.innerHTML = `
     <div class="finProModal">
@@ -15398,11 +15400,18 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
 
       <div class="finProCatGrid" id="finCatGrid">
         ${topCats.map(c => `
-          <div class="finProCatChip ${draft.category === c.name ? 'active' : ''}" data-cat="${c.name}">
+          <div class="finProCatChip ${draft.category === c.name ? 'active' : ''}" data-cat="${c.name}" style="position:relative;">
             <div class="finProCatIcon">${c.icon}</div>
             <div class="finProCatName">${c.name}</div>
+            ${!["Alimentos", "Transporte", "Hogar", "Ocio", "Salud", "Ropa", "Mascotas", "Otros"].includes(c.id) ? `
+              <button class="deleteCatBtn" data-id="${c.id}" style="position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:900; line-height:16px; text-align:center; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index: 10;">✕</button>
+            ` : ""}
           </div>
         `).join('')}
+        <div class="finProCatChip" id="btnAddCustomCategory" style="border: 1px dashed #7c5cff; background: transparent;">
+          <div class="finProCatIcon" style="color: #7c5cff;">➕</div>
+          <div class="finProCatName" style="color: #7c5cff;">Nuevo</div>
+        </div>
       </div>
 
       <input type="text" id="finEntryName" class="finProNote" placeholder="Descripción (Ej. Café Starbucks)" value="${escapeHtml(draft.name)}">
@@ -15561,13 +15570,69 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     });
   }
 
-  backdrop.querySelectorAll('.finProCatChip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      backdrop.querySelectorAll('.finProCatChip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      draft.category = chip.getAttribute('data-cat');
+  const renderCatGrid = (activeCat) => {
+    const grid = backdrop.querySelector('#finCatGrid');
+    if (!grid) return;
+    grid.innerHTML = (state.financeCategories || []).map(c => `
+      <div class="finProCatChip ${activeCat === c.name ? 'active' : ''}" data-cat="${c.name}" style="position:relative;">
+        <div class="finProCatIcon">${c.icon}</div>
+        <div class="finProCatName">${c.name}</div>
+        ${!["Alimentos", "Transporte", "Hogar", "Ocio", "Salud", "Ropa", "Mascotas", "Otros"].includes(c.id) ? `
+          <button class="deleteCatBtn" data-id="${c.id}" style="position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:900; line-height:16px; text-align:center; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index: 10;">✕</button>
+        ` : ""}
+      </div>
+    `).join('') + `
+      <div class="finProCatChip" id="btnAddCustomCategory" style="border: 1px dashed #7c5cff; background: transparent;">
+        <div class="finProCatIcon" style="color: #7c5cff;">➕</div>
+        <div class="finProCatName" style="color: #7c5cff;">Nuevo</div>
+      </div>
+    `;
+    
+    grid.querySelectorAll('.finProCatChip').forEach(chip => {
+      if (chip.id === 'btnAddCustomCategory') {
+        chip.addEventListener('click', () => {
+          const name = prompt('Nombre de la nueva categoría (Ej. Pepsi, Desayuno):');
+          if (name && name.trim()) {
+            const cleanName = name.trim();
+            const emoji = prompt('Emoji para la categoría (opcional):', '🏷️') || '🏷️';
+            const cleanEmoji = emoji.trim() || '🏷️';
+            
+            const exists = state.financeCategories.some(c => c.name.toLowerCase() === cleanName.toLowerCase());
+            if (!exists) {
+              state.financeCategories.push({ id: cleanName, icon: cleanEmoji, name: cleanName });
+              save(LS.financeCategories, state.financeCategories);
+              draft.category = cleanName;
+              renderCatGrid(cleanName);
+            } else {
+              alert('La categoría ya existe');
+            }
+          }
+        });
+        return;
+      }
+      
+      chip.addEventListener('click', () => {
+        grid.querySelectorAll('.finProCatChip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        draft.category = chip.dataset.cat || chip.getAttribute('data-cat');
+      });
     });
-  });
+
+    grid.querySelectorAll('.deleteCatBtn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        if (confirm(`¿Quieres eliminar la categoría "${id}"?`)) {
+          state.financeCategories = state.financeCategories.filter(c => c.id !== id);
+          save(LS.financeCategories, state.financeCategories);
+          if (draft.category === id) draft.category = 'Otros';
+          renderCatGrid(draft.category);
+        }
+      });
+    });
+  };
+
+  renderCatGrid(draft.category);
 
   backdrop.querySelector('#finEntryDelete')?.addEventListener('click', ()=>{
     if(!existing) return;
