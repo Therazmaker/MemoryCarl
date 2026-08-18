@@ -73,6 +73,70 @@ try {
     return "border:0;border-radius:12px;padding:8px 12px;font-weight:800;cursor:pointer;";
   }
 
+  function openRescueConsoleModal() {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modalBackdrop';
+    backdrop.style.position = 'fixed';
+    backdrop.style.top = '0';
+    backdrop.style.left = '0';
+    backdrop.style.width = '100%';
+    backdrop.style.height = '100%';
+    backdrop.style.background = 'rgba(0,0,0,0.7)';
+    backdrop.style.zIndex = 100000;
+    backdrop.style.display = 'flex';
+    backdrop.style.alignItems = 'center';
+    backdrop.style.justifyContent = 'center';
+    
+    const logsHtml = (window.__mcLogs || []).map(log => {
+      const typeColor = log.type === 'error' ? '#f87171' : (log.type === 'warn' ? '#f59e0b' : '#38bdf8');
+      const esc = (s) => String(s || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return `
+        <div style="font-size:11px; white-space:pre-wrap; border-bottom:1px solid #222; padding:3px 0; color:${typeColor}; font-family:monospace;">
+          <span style="color:#888;">[${log.time}]</span> ${esc(log.text)}
+        </div>
+      `;
+    }).join('') || '<div style="color:#888;font-size:12px;font-family:sans-serif;">Sin logs guardados aún.</div>';
+
+    backdrop.innerHTML = `
+      <div style="max-width:500px; width:90%; background:#1c1c1e; color:#fff; border-radius:14px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,0.5); font-family:system-ui, -apple-system, sans-serif;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <span style="font-weight:700; font-size:15px;">📺 Consola de Rescate</span>
+          <button style="background:none; border:none; color:#fff; font-size:18px; cursor:pointer;" id="mcCloseRescueConsole">✕</button>
+        </div>
+        <div style="background:#09090b; border:1px solid #333; border-radius:8px; height:300px; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:4px; margin-bottom:12px;">
+          ${logsHtml}
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button id="mcCopyRescueLogs" style="flex:1; border:0; border-radius:12px; padding:10px; font-weight:800; background:#2b73ff; color:#fff; cursor:pointer;">Copiar Logs</button>
+          <button id="mcCloseRescueBtn" style="flex:1; border:0; border-radius:12px; padding:10px; font-weight:800; background:#3a3a3c; color:#fff; cursor:pointer;">Cerrar</button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(backdrop);
+    
+    const close = () => backdrop.remove();
+    backdrop.querySelector('#mcCloseRescueConsole').onclick = close;
+    backdrop.querySelector('#mcCloseRescueBtn').onclick = close;
+    
+    backdrop.querySelector('#mcCopyRescueLogs').onclick = () => {
+      const logsText = JSON.stringify(window.__mcLogs, null, 2);
+      navigator.clipboard.writeText(logsText).then(() => {
+        alert('Copiado al portapapeles ✅');
+      }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = logsText;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        alert('Copiado al portapapeles ✅');
+      });
+    };
+    
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+  }
+
   function showRescueBanner(reason){
     try{
       if(document.getElementById('mcRescueBanner')) return;
@@ -91,17 +155,19 @@ try {
       d.style.fontSize = '13px';
       d.style.boxShadow = '0 10px 30px rgba(0,0,0,0.35)';
       d.innerHTML = `
-        <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;">
-          <div style="line-height:1.25;min-width:0">
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="line-height:1.25;">
             <div style="font-weight:900">MemoryCarl: modo rescate</div>
             <div style="opacity:.85;white-space:normal">Si se quedó en “cargando”, prueba limpiar caché primero. ${reason?`<span style="opacity:.7">(${reason})</span>`:''}</div>
           </div>
-          <div style="display:flex;gap:8px;flex-shrink:0">
+          <div style="display:flex;gap:8px;flex-shrink:0;">
+            <button id="mcRescueConsole" style="${cssBtn()}background:#ef4444;color:#fff;">Ver consola</button>
             <button id="mcRescueSoft" style="${cssBtn()}background:#2b73ff;color:#fff;">Reset caché</button>
             <button id="mcRescueHard" style="${cssBtn()}background:#fff;color:#111;">Reset total</button>
           </div>
         </div>`;
       document.body.appendChild(d);
+      document.getElementById('mcRescueConsole').onclick = ()=> openRescueConsoleModal();
       document.getElementById('mcRescueSoft').onclick = ()=> mcSoftResetCache();
       document.getElementById('mcRescueHard').onclick = ()=> mcHardResetAll();
     }catch(_e){}
