@@ -4653,22 +4653,31 @@ body{
 }
 
 .finProCatGrid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-bottom: 24px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding-bottom: 6px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.finProCatGrid::-webkit-scrollbar { display: none; }
 .finProCatChip {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 12px 4px;
+  padding: 10px 6px;
   border-radius: 16px;
   background: rgba(255,255,255,0.03);
   border: 1px solid transparent;
   cursor: pointer;
   transition: all 0.2s;
+  flex-shrink: 0;
+  width: 68px;
+  box-sizing: border-box;
 }
 .finProCatChip:active {
   transform: scale(0.95);

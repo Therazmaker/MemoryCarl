@@ -16035,16 +16035,9 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       usageCounts[cat] = (usageCounts[cat] || 0) + 1;
     });
 
-    // Sort all categories by usage descending, take top 6
+    // Sort all categories by usage descending — show ALL (grid now scrolls)
     const allCats = state.financeEntryCategories || [];
-    const sorted = [...allCats].sort((a, b) => (usageCounts[b.name] || 0) - (usageCounts[a.name] || 0));
-    let visible = sorted.slice(0, 6);
-
-    // Always keep the currently active category visible
-    if (activeCat && !visible.some(c => c.name === activeCat)) {
-      const activeObj = allCats.find(c => c.name === activeCat);
-      if (activeObj) visible = [...visible.slice(0, 5), activeObj];
-    }
+    const visible = [...allCats].sort((a, b) => (usageCounts[b.name] || 0) - (usageCounts[a.name] || 0));
 
     const DEFAULT_CATS = ["Alimentos", "Transporte", "Hogar", "Ocio", "Salud", "Ropa", "Mascotas", "Otros"];
 
@@ -16057,11 +16050,17 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         ` : ""}
       </div>
     `).join('') + `
-      <div class="finProCatChip" id="btnAddCustomCategory" style="border: 1px dashed #7c5cff; background: transparent;">
+      <div class="finProCatChip" id="btnAddCustomCategory" style="border: 1px dashed #7c5cff; background: transparent; flex-shrink:0;">
         <div class="finProCatIcon" style="color: #7c5cff;">➕</div>
         <div class="finProCatName" style="color: #7c5cff;">Nuevo</div>
       </div>
     `;
+
+    // Scroll active chip into view
+    requestAnimationFrame(() => {
+      const activeChip = grid.querySelector('.finProCatChip.active');
+      if (activeChip) activeChip.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    });
     
     grid.querySelectorAll('.finProCatChip').forEach(chip => {
       if (chip.id === 'btnAddCustomCategory') {
