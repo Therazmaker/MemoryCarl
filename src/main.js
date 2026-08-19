@@ -6846,11 +6846,15 @@ const sleepBars = renderSleepBars(sleepSeries);
 
         <div class="musicRight" ${hasMusic && (m.coverUrl||"") ? `` : `data-empty="1"`}>
           ${hasMusic && (m.coverUrl||"") ? `
-            <img class="musicCover" src="${escapeHtml(m.coverUrl)}" alt="Cover" loading="lazy" referrerpolicy="no-referrer" />
+            <img class="musicCover" src="${escapeHtml(m.coverUrl)}" alt="Cover" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+            <div class="musicCoverPlaceholder" style="display:none; width:100%; height:100%;">
+              <div class="musicCoverEmoji">💿</div>
+              <div class="musicCoverText">Error de imagen</div>
+            </div>
           ` : `
             <div class="musicCoverPlaceholder">
               <div class="musicCoverEmoji">🎛️</div>
-              <div class="musicCoverText">Pega un URL de portada</div>
+              <div class="musicCoverText">Sube una portada</div>
             </div>
           `}
         </div>
@@ -7722,33 +7726,77 @@ function openSleepHistoryModal(){
 
 
 
-function openMusicModal(){
+function openMusicModal(existingEntry = null) {
   const host = document.querySelector("#app");
   const modal = document.createElement("div");
   modal.className = "modalBackdrop";
 
   modal.innerHTML = `
-    <div class="modal">
-      <h2>Tema Fav. (registrar)</h2>
-      <div class="grid">
-        <input class="input" id="mcSong" placeholder="Canción (obligatorio)" />
-        <input class="input" id="mcArtist" placeholder="Artista (opcional)" />
-        <input class="input" id="mcAlbum" placeholder="Álbum (opcional)" />
-        <input class="input" id="mcMood" placeholder="Mood tag (opcional) ej: calma, power" />
-        <input class="input" id="mcIntensity" type="number" min="1" max="10" step="1" placeholder="Intensidad (1-10, opcional)" />
-        <input class="input" id="mcCoverUrl" placeholder="Cover URL (opcional)" />
-        <input class="input" id="mcLinkUrl" placeholder="Link (Spotify/YouTube) (opcional)" />
-        <textarea class="input" id="mcNote" placeholder="Nota (opcional)" rows="3"></textarea>
+    <div class="modal" style="max-width:420px; width:95%; background:#1c1c1e; color:#fff; border-radius:14px; padding:16px;">
+      <h2>${existingEntry ? "Editar Tema" : "Registrar Tema Fav."}</h2>
+      <div class="grid" style="display:flex; flex-direction:column; gap:10px; margin-top:12px;">
+        <input class="input" id="mcSong" placeholder="Canción (obligatorio)" value="${existingEntry?.song || ''}" />
+        <input class="input" id="mcArtist" placeholder="Artista (opcional)" value="${existingEntry?.artist || ''}" />
+        <input class="input" id="mcAlbum" placeholder="Álbum (opcional)" value="${existingEntry?.album || ''}" />
+        <input class="input" id="mcMood" placeholder="Mood tag (opcional) ej: calma, power" value="${existingEntry?.mood || ''}" />
+        <input class="input" id="mcIntensity" type="number" min="1" max="10" step="1" placeholder="Intensidad (1-10, opcional)" value="${existingEntry?.intensity !== null && existingEntry?.intensity !== undefined ? existingEntry.intensity : ''}" />
+        
+        <div style="display:flex; flex-direction:column; gap:4px;">
+          <label style="font-size:12px; color:#aaa; font-weight:600;">Portada (URL o Archivo Local):</label>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <input class="input" id="mcCoverUrl" placeholder="https://... o sube archivo" style="flex:1; margin:0;" value="${existingEntry?.coverUrl || ''}" />
+            <label class="btn ghost" style="padding:6px 12px; cursor:pointer; font-size:13px; font-weight:700; margin:0; display:flex; align-items:center; gap:4px; height:38px; box-sizing:border-box;">
+              📷 Subir
+              <input id="fileCoverUpload" type="file" accept="image/*" style="display:none;">
+            </label>
+          </div>
+          <div style="display:flex; justify-content:center; margin-top:8px;">
+            <img id="mcCoverPreview" src="${existingEntry?.coverUrl || ''}" style="max-width:100px; max-height:100px; border-radius:8px; display:${existingEntry?.coverUrl ? 'block' : 'none'}; object-fit:cover; border:1px solid #444;" />
+          </div>
+        </div>
+
+        <input class="input" id="mcLinkUrl" placeholder="Link (Spotify/YouTube) (opcional)" value="${existingEntry?.linkUrl || ''}" />
+        <textarea class="input" id="mcNote" placeholder="Nota (opcional)" rows="3">${existingEntry?.note || ''}</textarea>
       </div>
-      <div class="row" style="margin-top:12px;">
-        <button class="btn ghost" id="btnCancel">Cancelar</button>
-        <button class="btn primary" id="btnSave">Guardar</button>
+      <div class="row" style="margin-top:16px; display:flex; gap:10px;">
+        <button class="btn ghost" id="btnCancel" style="flex:1;">Cancelar</button>
+        <button class="btn primary" id="btnSave" style="flex:1;">Guardar</button>
       </div>
       <div class="muted" style="margin-top:10px;">Tip: si solo pones canción, ya sirve. Lo demás es extra.</div>
     </div>
   `;
 
   host.appendChild(modal);
+
+  const coverUrlInput = modal.querySelector("#mcCoverUrl");
+  const coverPreview = modal.querySelector("#mcCoverPreview");
+  const fileUpload = modal.querySelector("#fileCoverUpload");
+
+  const updatePreview = (src) => {
+    if (src && src.trim()) {
+      coverPreview.src = src.trim();
+      coverPreview.style.display = "block";
+    } else {
+      coverPreview.style.display = "none";
+    }
+  };
+
+  coverUrlInput.addEventListener("input", () => {
+    updatePreview(coverUrlInput.value);
+  });
+
+  fileUpload.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target.result;
+        coverUrlInput.value = dataUrl;
+        updatePreview(dataUrl);
+      };
+      reader.readAsDataURL(file);
+    }
+  });
 
   const close = ()=> modal.remove();
   modal.addEventListener("click", (e)=>{ if(e.target===modal) close(); });
@@ -7773,8 +7821,13 @@ function openMusicModal(){
 
     const normUrl = (u)=>{
       if(!u) return "";
+      if(u.startsWith("data:image")) return u;
+      let test = u.trim();
+      if(!/^https?:\/\//i.test(test)){
+        test = "https://" + test;
+      }
       try{
-        const url = new URL(u);
+        const url = new URL(test);
         return url.toString();
       }catch{
         return "";
@@ -7783,27 +7836,48 @@ function openMusicModal(){
     const coverUrl = normUrl(coverUrlRaw);
     const linkUrl = normUrl(linkUrlRaw);
 
-    const entry = {
-      id: uid("t"),
-      ts: new Date().toISOString(),
-      date: getTodayIso(),
-      song,
-      artist,
-      album,
-      mood,
-      intensity,
-      coverUrl,
-      linkUrl,
-      note
-    };
-
     state.musicLog = Array.isArray(state.musicLog) ? state.musicLog : [];
-    state.musicLog.unshift(entry);
-    state.musicToday = { ...entry, updatedAt: new Date().toISOString() };
-    state.musicCursor = 0;
+
+    if (existingEntry) {
+      const idx = state.musicLog.findIndex(m => m.id === existingEntry.id);
+      if (idx !== -1) {
+        state.musicLog[idx] = {
+          ...existingEntry,
+          song,
+          artist,
+          album,
+          mood,
+          intensity,
+          coverUrl,
+          linkUrl,
+          note
+        };
+        if (state.musicToday && state.musicToday.id === existingEntry.id) {
+          state.musicToday = { ...state.musicLog[idx], updatedAt: new Date().toISOString() };
+        }
+      }
+    } else {
+      const entry = {
+        id: uid("t"),
+        ts: new Date().toISOString(),
+        date: getTodayIso(),
+        song,
+        artist,
+        album,
+        mood,
+        intensity,
+        coverUrl,
+        linkUrl,
+        note
+      };
+      state.musicLog.unshift(entry);
+      state.musicToday = { ...entry, updatedAt: new Date().toISOString() };
+      state.musicCursor = 0;
+    }
+
     persist();
     view();
-    toast("Tema guardado ✅");
+    toast(existingEntry ? "Tema editado ✏️" : "Tema guardado ✅");
     close();
   });
 }
@@ -7814,6 +7888,239 @@ function navigateMusic(delta){
   const next = Math.max(0, Math.min(log.length-1, Number(state.musicCursor||0) + delta));
   state.musicCursor = next;
   view();
+}
+
+function openMusicHubModal() {
+  const host = document.querySelector("#app");
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+  modal.style.zIndex = "9999";
+  
+  let activeTab = "list"; // list or stats
+  let searchQuery = "";
+  
+  const renderContent = () => {
+    const log = Array.isArray(state.musicLog) ? state.musicLog : [];
+    
+    // Calculate Stats
+    const totalSongs = log.length;
+    
+    const artists = {};
+    const moods = {};
+    let totalIntensity = 0;
+    let intensityCount = 0;
+    
+    log.forEach(m => {
+      if (m.artist) artists[m.artist] = (artists[m.artist] || 0) + 1;
+      if (m.mood) moods[m.mood] = (moods[m.mood] || 0) + 1;
+      if (m.intensity !== null && m.intensity !== undefined) {
+        totalIntensity += Number(m.intensity);
+        intensityCount++;
+      }
+    });
+    
+    const avgIntensity = intensityCount > 0 ? (totalIntensity / intensityCount).toFixed(1) : "0.0";
+    
+    const topArtists = Object.entries(artists)
+      .sort((a,b) => b[1] - a[1])
+      .slice(0, 5);
+      
+    const topMoods = Object.entries(moods)
+      .sort((a,b) => b[1] - a[1])
+      .slice(0, 5);
+
+    // Filter list
+    const filteredLog = log.filter(m => {
+      const q = searchQuery.toLowerCase();
+      return (m.song || "").toLowerCase().includes(q) || 
+             (m.artist || "").toLowerCase().includes(q) || 
+             (m.album || "").toLowerCase().includes(q) || 
+             (m.mood || "").toLowerCase().includes(q) || 
+             (m.note || "").toLowerCase().includes(q);
+    });
+
+    const barRow = (label, val, maxVal, color) => {
+      const pct = maxVal > 0 ? Math.min(100, Math.round((val / maxVal) * 100)) : 0;
+      const w = Math.max(3, pct);
+      return `
+        <div style="margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <div style="font-weight:600; font-size:13px; color:#fff;">${label}</div>
+            <div style="font-weight:700; font-size:13px; color:#aaa;">${val} reg.</div>
+          </div>
+          <div style="background:#2a2a2c; border-radius:6px; height:6px; overflow:hidden;">
+            <div style="height:100%; width:${w}%; background:${color}; border-radius:6px;"></div>
+          </div>
+        </div>
+      `;
+    };
+
+    const maxArtistCount = topArtists[0] ? topArtists[0][1] : 0;
+    const maxMoodCount = topMoods[0] ? topMoods[0][1] : 0;
+
+    const listHtml = `
+      <div style="margin-bottom:12px; display:flex; gap:8px;">
+        <input type="text" id="musicHubSearch" class="textInput" placeholder="Buscar por canción, artista o mood..." value="${escapeHtml(searchQuery)}" style="flex:1; margin:0;" />
+      </div>
+      <div style="max-height:50vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;" id="musicHubListContainer">
+        ${filteredLog.map(m => {
+          const hasCover = m.coverUrl && m.coverUrl.trim();
+          return `
+            <div style="background:#2a2a2c; border-radius:12px; padding:12px; display:flex; gap:12px; align-items:center; position:relative;">
+              <div style="width:50px; height:50px; border-radius:8px; overflow:hidden; flex-shrink:0; background:#1c1c1e; display:flex; align-items:center; justify-content:center;">
+                ${hasCover ? `
+                  <img src="${escapeHtml(m.coverUrl)}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                  <div style="display:none; font-size:20px;">💿</div>
+                ` : `
+                  <div style="font-size:20px;">💿</div>
+                `}
+              </div>
+              <div style="flex:1; min-width:0;">
+                <div style="font-weight:700; font-size:14px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(m.song)}</div>
+                <div style="font-size:12px; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                  ${m.artist ? escapeHtml(m.artist) : 'Artista desconocido'} ${m.album ? ` • ${escapeHtml(m.album)}` : ''}
+                </div>
+                <div style="display:flex; gap:6px; align-items:center; margin-top:4px; flex-wrap:wrap;">
+                  ${m.mood ? `<span style="background:#7c5cff33; color:#a78bfa; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">${escapeHtml(m.mood)}</span>` : ''}
+                  ${m.intensity !== null && m.intensity !== undefined ? `<span style="background:#f59e0b22; color:#fbbf24; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">⭐ ${m.intensity}/10</span>` : ''}
+                </div>
+              </div>
+              <div style="display:flex; gap:6px; flex-direction:column; align-items:flex-end;">
+                <div style="font-size:10px; color:#888;">${m.date || ''}</div>
+                <div style="display:flex; gap:6px; margin-top:4px;">
+                  ${m.linkUrl ? `
+                    <button class="iconBtn" onclick="window.open('${escapeHtml(m.linkUrl)}', '_blank', 'noopener,noreferrer')" title="Escuchar" style="background:#10b98122; color:#10b981; border-radius:6px; padding:4px 8px; font-size:12px;">▶ Play</button>
+                  ` : ''}
+                  <button class="iconBtn editSongBtn" data-id="${m.id}" title="Editar" style="background:#3b82f622; color:#3b82f6; border-radius:6px; padding:4px 8px; font-size:12px;">✏️</button>
+                  <button class="iconBtn deleteSongBtn" data-id="${m.id}" title="Eliminar" style="background:#ef444422; color:#ef4444; border-radius:6px; padding:4px 8px; font-size:12px;">🗑️</button>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('') || `<div style="color:#888; text-align:center; padding:20px;">Sin canciones en este filtro.</div>`}
+      </div>
+    `;
+
+    const statsHtml = `
+      <div style="max-height:55vh; overflow-y:auto; display:flex; flex-direction:column; gap:16px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div style="background:#2a2a2c; padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:11px; color:#aaa; margin-bottom:4px;">Total Canciones</div>
+            <div style="font-size:20px; font-weight:800; color:#7c5cff;">${totalSongs}</div>
+          </div>
+          <div style="background:#2a2a2c; padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:11px; color:#aaa; margin-bottom:4px;">Intensidad Promedio</div>
+            <div style="font-size:20px; font-weight:800; color:#f59e0b;">⭐ ${avgIntensity}</div>
+          </div>
+        </div>
+        
+        <div style="background:#2a2a2c; padding:14px; border-radius:12px;">
+          <div style="font-weight:700; font-size:14px; color:#fff; margin-bottom:12px;">🎤 Top Artistas</div>
+          ${topArtists.map(a => barRow(a[0], a[1], maxArtistCount, '#7c5cff')).join('') || '<div style="color:#888; font-size:12px;">Sin datos suficientes</div>'}
+        </div>
+
+        <div style="background:#2a2a2c; padding:14px; border-radius:12px;">
+          <div style="font-weight:700; font-size:14px; color:#fff; margin-bottom:12px;">🧠 Top Moods / Emociones</div>
+          ${topMoods.map(m => barRow(m[0], m[1], maxMoodCount, '#10b981')).join('') || '<div style="color:#888; font-size:12px;">Sin datos suficientes</div>'}
+        </div>
+      </div>
+    `;
+
+    return `
+      <div class="modal" style="max-width:550px; width:95%; background:#1c1c1e; color:#fff; border-radius:16px; padding:16px; display:flex; flex-direction:column; gap:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-weight:800; font-size:18px;">🎵 Historial de Música</span>
+          <button class="iconBtn" id="btnMusicHubClose" style="font-size:18px;">✕</button>
+        </div>
+
+        <div style="display:flex; gap:6px; border-bottom:1px solid #333; padding-bottom:8px;">
+          <button class="finModeBtn ${activeTab==='list'?'finModeBtnActive':''}" id="btnHubTabList" style="flex:1;">Listado 📋</button>
+          <button class="finModeBtn ${activeTab==='stats'?'finModeBtnActive':''}" id="btnHubTabStats" style="flex:1;">Estadísticas 📊</button>
+        </div>
+
+        <div id="musicHubDynamicBody">
+          ${activeTab === 'list' ? listHtml : statsHtml}
+        </div>
+      </div>
+    `;
+  };
+
+  const bindEvents = () => {
+    modal.querySelector("#btnMusicHubClose").addEventListener("click", () => modal.remove());
+    
+    const btnTabList = modal.querySelector("#btnHubTabList");
+    const btnTabStats = modal.querySelector("#btnHubTabStats");
+    
+    btnTabList.addEventListener("click", () => {
+      activeTab = "list";
+      modal.innerHTML = renderContent();
+      bindEvents();
+    });
+    
+    btnTabStats.addEventListener("click", () => {
+      activeTab = "stats";
+      modal.innerHTML = renderContent();
+      bindEvents();
+    });
+
+    if (activeTab === "list") {
+      const searchInput = modal.querySelector("#musicHubSearch");
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
+        searchInput.addEventListener("input", (e) => {
+          searchQuery = e.target.value;
+          const container = modal.querySelector("#musicHubListContainer");
+          if (container) {
+            const temp = document.createElement('div');
+            temp.innerHTML = renderContent();
+            const newContainer = temp.querySelector("#musicHubListContainer");
+            if (newContainer) {
+              container.innerHTML = newContainer.innerHTML;
+              bindItemEvents();
+            }
+          }
+        });
+      }
+      bindItemEvents();
+    }
+  };
+
+  const bindItemEvents = () => {
+    modal.querySelectorAll(".editSongBtn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const entry = (state.musicLog || []).find(m => m.id === id);
+        if (entry) {
+          openMusicModal(entry);
+          modal.remove();
+        }
+      });
+    });
+
+    modal.querySelectorAll(".deleteSongBtn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        if (confirm("¿Quieres eliminar este tema de tu historial?")) {
+          state.musicLog = (state.musicLog || []).filter(m => m.id !== id);
+          if (state.musicToday && state.musicToday.id === id) {
+            state.musicToday = state.musicLog[0] || null;
+          }
+          persist();
+          view();
+          modal.innerHTML = renderContent();
+          bindEvents();
+        }
+      });
+    });
+  };
+
+  modal.innerHTML = renderContent();
+  host.appendChild(modal);
+  bindEvents();
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
 }
 
 function wireHome(root){
@@ -7827,7 +8134,15 @@ function wireHome(root){
   };
 
   const btnAdd = root.querySelector("#btnAddMusic");
-  if(btnAdd) btnAdd.addEventListener("click", openMusicModal);
+  if(btnAdd) btnAdd.addEventListener("click", () => openMusicModal());
+
+  const homeMusicCard = root.querySelector("#homeMusicCard");
+  if(homeMusicCard){
+    homeMusicCard.addEventListener("click", (e)=>{
+      if(e.target.closest("#btnMusicPrev") || e.target.closest("#btnMusicNext") || e.target.closest("#btnMusicPlay") || e.target.closest("#btnAddMusic") || e.target.closest(".musicCover")) return;
+      openMusicHubModal();
+    });
+  }
 
   const btnSleep = root.querySelector("#btnAddSleep");
   if(btnSleep) btnSleep.addEventListener("click", ()=>openSleepEntryModal());
