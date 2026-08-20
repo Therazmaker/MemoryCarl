@@ -19917,11 +19917,16 @@ function renderFinanceStatsTab() {
             const isExp = e.type === 'expense';
             const sign = isExp ? '-' : '+';
             const color = isExp ? '#ef4444' : '#34d399';
-            const noteText = e.note ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(e.note)})</span>` : "";
+            const rawNote = String(e.note || "");
+            const hasSep = rawNote.includes(" · ");
+            const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
+            const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
+            const shownDesc = desc || "Sin descripción";
+            const noteText = noteDetails ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(noteDetails)})</span>` : "";
             return `
               <div style="display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid #2a2a2c; align-items:center;">
                 <div>
-                  <div style="font-weight:700; color:#fff;">${escapeHtml(e.name || "Sin descripción")}</div>
+                  <div style="font-weight:700; color:#fff;">${escapeHtml(shownDesc)}</div>
                   <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} • ${escapeHtml(e.category || "Otros")}${noteText}</div>
                 </div>
                 <div style="font-weight:700; color:${color}; font-size:14px;">${sign} S/ ${fmt(e.amount)}</div>
