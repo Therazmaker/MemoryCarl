@@ -19907,13 +19907,27 @@ function renderFinanceStatsTab() {
 
   let matchesHtml = "";
   if (q) {
+    const searchType = state.financeStatsSearchType || "all";
+    const filteredMatches = ledger.filter(e => {
+      if (searchType === "income") return e.type === "income";
+      if (searchType === "expense") return e.type === "expense";
+      return true;
+    });
+
     matchesHtml = `
       <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
-        <div class="finSectionHead" style="margin-bottom:14px;">
-          <div class="finSectionTitle" style="color:#7c5cff;">📋 Movimientos Coincidentes (${ledger.length})</div>
+        <div class="finSectionHead" style="margin-bottom:10px;">
+          <div class="finSectionTitle" style="color:#7c5cff;">📋 Coincidencias (${filteredMatches.length})</div>
         </div>
+        
+        <div style="display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;">
+          <button class="finModeBtn ${searchType==='all'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('all')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Todos</button>
+          <button class="finModeBtn ${searchType==='income'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('income')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Ingresos</button>
+          <button class="finModeBtn ${searchType==='expense'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('expense')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Egresos</button>
+        </div>
+
         <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;">
-          ${ledger.map(e => {
+          ${filteredMatches.map(e => {
             const isExp = e.type === 'expense';
             const sign = isExp ? '-' : '+';
             const color = isExp ? '#ef4444' : '#34d399';
@@ -19989,6 +20003,11 @@ window.setFinanceStatsPeriod = function(period) {
 
 window.setFinanceStatsSearch = function(q) {
   state.financeStatsSearch = q;
+  view();
+};
+
+window.setFinanceStatsSearchType = function(type) {
+  state.financeStatsSearchType = type;
   view();
 };
 
