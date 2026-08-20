@@ -19876,8 +19876,14 @@ function renderFinanceStatsTab() {
   const incReasonRows = incByReason.map(r=>barRow(r.label,r.value,totalInc,'#34d399',`${r.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
 
   const catPalette = ['#7c5cff','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
-  const cats = [...new Set(expenses.map(e=>e.category||'Sin categoría'))];
-  const byCat = cats.map(c=>({ label:c, value:expenses.filter(e=>(e.category||'Sin categoría')===c).reduce((s,e)=>s+Number(e.amount||0),0), count:expenses.filter(e=>(e.category||'Sin categoría')===c).length })).sort((a,b)=>b.value-a.value);
+  const definedCats = (state.financeEntryCategories || []).map(c => c.name);
+  const ledgerCats = [...new Set(expenses.map(e => e.category || 'Otros'))];
+  const cats = [...new Set([...definedCats, ...ledgerCats])];
+  const byCat = cats.map(c => ({
+    label: c,
+    value: expenses.filter(e => (e.category || 'Otros') === c).reduce((s, e) => s + Number(e.amount || 0), 0),
+    count: expenses.filter(e => (e.category || 'Otros') === c).length
+  })).sort((a, b) => b.value - a.value);
   const catRows = byCat.map((c,i)=>barRow(c.label,c.value,totalExp,catPalette[i%catPalette.length],`${c.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
 
   const accRows = (state.financeAccounts||[]).map(a=>({ name:a.name, value:expenses.filter(e=>e.accountId===a.id).reduce((s,e)=>s+Number(e.amount||0),0) })).filter(a=>a.value>0).sort((a,b)=>b.value-a.value).map(a=>barRow(a.name,a.value,totalExp,'#60a5fa','')).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin uso registrado</div>';
