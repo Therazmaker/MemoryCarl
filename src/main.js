@@ -3502,6 +3502,7 @@ const btnExport = root.querySelector("#btnExport");
   if(state.tab==="house") wireHouse(root);
 	  if(state.tab==="calendar") wireCalendar(root);
   if(state.tab==="insights") wireInsights(root);
+  if(state.tab==="finance") wireFinance(root);
   wireHouseZoneSheet(root);
 
   // Re-open house runner modal after render if it was open
@@ -19809,10 +19810,11 @@ function viewFinance(){
 
 function renderFinanceStatsTab() {
   if (!state.financeStatsPeriod) state.financeStatsPeriod = "month";
+  if (state.financeStatsSearch === undefined) state.financeStatsSearch = "";
   const fmt = _financeFmt;
   const monthKey = getCurrentMonthKey();
   
-  let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[])).filter(e => String(e.date||'').startsWith(monthKey));
+  let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[]));
   
   const now = new Date();
   if (state.financeStatsPeriod === 'week') {
@@ -19820,7 +19822,7 @@ function renderFinanceStatsTab() {
     const diff = now.getDate() - day + (day === 0 ? -6 : 1);
     const monday = new Date(now.setDate(diff));
     monday.setHours(0,0,0,0);
-    ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[])).filter(e => {
+    ledger = ledger.filter(e => {
       const d = new Date(e.date);
       return d >= monday && d <= new Date();
     });
@@ -19828,10 +19830,23 @@ function renderFinanceStatsTab() {
     const dayOfMonth = now.getDate();
     const startDay = dayOfMonth > 15 ? 16 : 1;
     const startFortnight = new Date(now.getFullYear(), now.getMonth(), startDay, 0,0,0,0);
-    ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[])).filter(e => {
+    ledger = ledger.filter(e => {
       const d = new Date(e.date);
       return d >= startFortnight && d <= new Date();
     });
+  } else if (state.financeStatsPeriod === 'month') {
+    ledger = ledger.filter(e => String(e.date||'').startsWith(monthKey));
+  }
+
+  // Apply search query filter
+  const q = (state.financeStatsSearch || "").trim().toLowerCase();
+  if (q) {
+    ledger = ledger.filter(e => 
+      (e.name || "").toLowerCase().includes(q) ||
+      (e.note || "").toLowerCase().includes(q) ||
+      (e.category || "").toLowerCase().includes(q) ||
+      (e.reason || "").toLowerCase().includes(q)
+    );
   }
 
   const expenses = ledger.filter(e => e.type === 'expense');
@@ -19875,14 +19890,52 @@ function renderFinanceStatsTab() {
   })():'';
 
   const periodPills = `
-    <div style="display:flex;gap:6px;margin-bottom:16px;">
+    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
       <button class="finModeBtn ${state.financeStatsPeriod==='week'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('week')">Esta semana</button>
       <button class="finModeBtn ${state.financeStatsPeriod==='fortnight'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('fortnight')">15 días</button>
       <button class="finModeBtn ${state.financeStatsPeriod==='month'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('month')">Este mes</button>
+      <button class="finModeBtn ${state.financeStatsPeriod==='all'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('all')">Todo el historial</button>
     </div>
   `;
 
-  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas</div><div style="font-size:12px;color:#888;">${monthKey}</div></div>${periodPills}<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Gastos por Categoría</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${usdSection}</div>`;
+  const searchBox = `
+    <div style="display:flex; gap:8px; margin-bottom:16px;">
+      <input type="text" id="finStatsSearch" class="textInput" placeholder="🔍 Buscar (Ej. Javier, adelanto...)" value="${escapeHtml(state.financeStatsSearch || '')}" style="flex:1; margin:0;" />
+      ${state.financeStatsSearch ? `<button class="btn ghost" onclick="setFinanceStatsSearch('')" style="margin:0; padding:0 12px; font-size:13px; font-weight:700; height:42px;">Limpiar</button>` : ''}
+    </div>
+  `;
+
+  let matchesHtml = "";
+  if (q) {
+    matchesHtml = `
+      <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
+        <div class="finSectionHead" style="margin-bottom:14px;">
+          <div class="finSectionTitle" style="color:#7c5cff;">📋 Movimientos Coincidentes (${ledger.length})</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;">
+          ${ledger.map(e => {
+            const isExp = e.type === 'expense';
+            const sign = isExp ? '-' : '+';
+            const color = isExp ? '#ef4444' : '#34d399';
+            const noteText = e.note ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(e.note)})</span>` : "";
+            return `
+              <div style="display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid #2a2a2c; align-items:center;">
+                <div>
+                  <div style="font-weight:700; color:#fff;">${escapeHtml(e.name || "Sin descripción")}</div>
+                  <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} • ${escapeHtml(e.category || "Otros")}${noteText}</div>
+                </div>
+                <div style="font-weight:700; color:${color}; font-size:14px;">${sign} S/ ${fmt(e.amount)}</div>
+              </div>
+            `;
+          }).join('') || '<div style="color:#888; font-size:13px; text-align:center; padding:10px 0;">Ningún movimiento coincide</div>'}
+        </div>
+      </section>
+    `;
+  }
+
+  const periodLabel = state.financeStatsPeriod === 'all' ? 'Todo el historial' : monthKey;
+
+  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas</div><div style="font-size:12px;color:#888;">${periodLabel}</div></div>${periodPills}${searchBox}<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div>${matchesHtml}<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Gastos por Categoría</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${usdSection}</div>`;
 }
 
 window.openFinanceReasonsManager = function() {
@@ -19928,6 +19981,28 @@ window.setFinanceStatsPeriod = function(period) {
   save("memorycarl_v2_finance_stats_period", period);
   view();
 };
+
+window.setFinanceStatsSearch = function(q) {
+  state.financeStatsSearch = q;
+  view();
+};
+
+function wireFinance(root) {
+  const searchInput = root.querySelector("#finStatsSearch");
+  if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
+      state.financeStatsSearch = e.target.value;
+      view();
+      setTimeout(() => {
+        const input = document.getElementById("finStatsSearch");
+        if (input) {
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
+      }, 0);
+    });
+  }
+}
 
 function openFinanceMetaModal(){
   const month = getCurrentMonthKey();
