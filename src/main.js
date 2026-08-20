@@ -19854,10 +19854,12 @@ function renderFinanceStatsTab() {
   const totalExp = expenses.reduce((s,e) => s + Number(e.amount||0), 0);
   const totalInc = incomes.reduce((s,e)  => s + Number(e.amount||0), 0);
 
-  const barRow = (label, value, total, color, sub) => {
+  const barRow = (label, value, total, color, sub, type, key) => {
     const pct = total > 0 ? Math.min(100, Math.round((value/total)*100)) : 0;
     const w = Math.max(3, pct);
-    return `<div style="margin-bottom:12px;">
+    const clickAttr = type ? `onclick="openFinanceStatsBreakdownModal('${type}', '${escapeHtml(key)}', '${escapeHtml(label)}')"` : "";
+    const styleAttr = type ? `style="margin-bottom:12px; cursor:pointer;" class="finStatsClickableRow"` : `style="margin-bottom:12px;"`;
+    return `<div ${clickAttr} ${styleAttr}>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
           <div style="font-weight:600;font-size:14px;">${label}</div>
           <div style="display:flex;gap:8px;align-items:center;">${sub?`<span style="font-size:11px;color:#888;">${sub}</span>`:''}<span style="font-weight:700;font-size:14px;">S/ ${fmt(value)}</span><span style="font-size:12px;color:#aaa;min-width:34px;text-align:right;">${pct}%</span></div>
@@ -19869,11 +19871,11 @@ function renderFinanceStatsTab() {
   const reasonColors = { planificado:'#7c5cff', impulso:'#f59e0b', emergencia:'#ef4444', normal:'#6b7280' };
   const expReasons = [...new Set(expenses.map(e => String(e.reason||'normal')))];
   const byReason = expReasons.map(r => ({ label:r.charAt(0).toUpperCase()+r.slice(1), value:expenses.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:expenses.filter(e=>String(e.reason||'normal')===r).length, color:reasonColors[r]||'#8b5cf6' })).sort((a,b)=>b.value-a.value);
-  const reasonRows = byReason.map(r=>barRow(r.label,r.value,totalExp,r.color,`${r.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
+  const reasonRows = byReason.map(r=>barRow(r.label,r.value,totalExp,r.color,`${r.count} mov.`, 'reason_expense', r.label.toLowerCase())).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
 
   const incReasons = [...new Set(incomes.map(e => String(e.reason||'normal')))];
   const incByReason = incReasons.map(r=>({ label:r.charAt(0).toUpperCase()+r.slice(1), value:incomes.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:incomes.filter(e=>String(e.reason||'normal')===r).length })).sort((a,b)=>b.value-a.value);
-  const incReasonRows = incByReason.map(r=>barRow(r.label,r.value,totalInc,'#34d399',`${r.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
+  const incReasonRows = incByReason.map(r=>barRow(r.label,r.value,totalInc,'#34d399',`${r.count} mov.`, 'reason_income', r.label.toLowerCase())).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
 
   const catPalette = ['#7c5cff','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
   const definedCats = (state.financeEntryCategories || []).map(c => c.name);
@@ -19884,9 +19886,9 @@ function renderFinanceStatsTab() {
     value: expenses.filter(e => (e.category || 'Otros') === c).reduce((s, e) => s + Number(e.amount || 0), 0),
     count: expenses.filter(e => (e.category || 'Otros') === c).length
   })).sort((a, b) => b.value - a.value);
-  const catRows = byCat.map((c,i)=>barRow(c.label,c.value,totalExp,catPalette[i%catPalette.length],`${c.count} mov.`)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
+  const catRows = byCat.map((c,i)=>barRow(c.label,c.value,totalExp,catPalette[i%catPalette.length],`${c.count} mov.`, 'category', c.label)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
 
-  const accRows = (state.financeAccounts||[]).map(a=>({ name:a.name, value:expenses.filter(e=>e.accountId===a.id).reduce((s,e)=>s+Number(e.amount||0),0) })).filter(a=>a.value>0).sort((a,b)=>b.value-a.value).map(a=>barRow(a.name,a.value,totalExp,'#60a5fa','')).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin uso registrado</div>';
+  const accRows = (state.financeAccounts||[]).map(a=>({ id:a.id, name:a.name, value:expenses.filter(e=>e.accountId===a.id).reduce((s,e)=>s+Number(e.amount||0),0) })).filter(a=>a.value>0).sort((a,b)=>b.value-a.value).map(a=>barRow(a.name,a.value,totalExp,'#60a5fa','', 'account', a.id)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin uso registrado</div>';
 
   const usdMovs = ledger.filter(m=>m.usdGross>0);
   const usdSection = usdMovs.length>0 ? (()=>{
@@ -20015,6 +20017,104 @@ window.setFinanceStatsSearch = function(q) {
 window.setFinanceStatsSearchType = function(type) {
   state.financeStatsSearchType = type;
   view();
+};
+
+window.openFinanceStatsBreakdownModal = function(type, key, label) {
+  const host = document.getElementById('modalHost') || document.body;
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modalBackdrop';
+  backdrop.style.zIndex = '9999';
+  
+  const fmt = _financeFmt;
+  const period = state.financeStatsPeriod || "month";
+  const searchQ = (state.financeStatsSearch || "").trim().toLowerCase();
+  
+  let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[]));
+  
+  const now = new Date();
+  if (period === 'week') {
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(now.setDate(diff));
+    monday.setHours(0,0,0,0);
+    ledger = ledger.filter(e => {
+      const d = new Date(e.date);
+      return d >= monday && d <= new Date();
+    });
+  } else if (period === 'fortnight') {
+    const dayOfMonth = now.getDate();
+    const startDay = dayOfMonth > 15 ? 16 : 1;
+    const startFortnight = new Date(now.getFullYear(), now.getMonth(), startDay, 0,0,0,0);
+    ledger = ledger.filter(e => {
+      const d = new Date(e.date);
+      return d >= startFortnight && d <= new Date();
+    });
+  } else if (period === 'month') {
+    const monthKey = getCurrentMonthKey();
+    ledger = ledger.filter(e => String(e.date||'').startsWith(monthKey));
+  }
+  
+  if (searchQ) {
+    ledger = ledger.filter(e => 
+      (e.name || "").toLowerCase().includes(searchQ) ||
+      (e.note || "").toLowerCase().includes(searchQ) ||
+      (e.category || "").toLowerCase().includes(searchQ) ||
+      (e.reason || "").toLowerCase().includes(searchQ)
+    );
+  }
+  
+  let filtered = [];
+  if (type === 'category') {
+    filtered = ledger.filter(e => e.type === 'expense' && (e.category || 'Otros') === key);
+  } else if (type === 'reason_expense') {
+    filtered = ledger.filter(e => e.type === 'expense' && (e.reason || 'normal') === key);
+  } else if (type === 'reason_income') {
+    filtered = ledger.filter(e => e.type === 'income' && (e.reason || 'normal') === key);
+  } else if (type === 'account') {
+    filtered = ledger.filter(e => e.type === 'expense' && e.accountId === key);
+  }
+  
+  const total = filtered.reduce((s, e) => s + Number(e.amount || 0), 0);
+  
+  backdrop.innerHTML = `
+    <div class="modal" style="max-width: 480px; width: 95%;">
+      <div class="modalHead">
+        <span style="font-weight: 800; font-size: 16px;">📋 ${escapeHtml(label)}</span>
+        <button class="iconBtn" onclick="this.closest('.modalBackdrop').remove()">✕</button>
+      </div>
+      <div style="padding: 16px; background: #1c1c1e;">
+        <div style="background: rgba(255,255,255,0.03); border-radius: 10px; padding: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 13px; color: #aaa;">Total gastado/recibido</span>
+          <span style="font-size: 18px; font-weight: 800; color: #7c5cff;">S/ ${fmt(total)}</span>
+        </div>
+        <div style="max-height: 45vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+          ${filtered.map(e => {
+            const isExp = e.type === 'expense';
+            const sign = isExp ? '-' : '+';
+            const color = isExp ? '#ef4444' : '#34d399';
+            const rawNote = String(e.note || "");
+            const hasSep = rawNote.includes(" · ");
+            const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
+            const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
+            const shownDesc = desc || "Sin descripción";
+            const noteText = noteDetails ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(noteDetails)})</span>` : "";
+            return `
+              <div style="display:flex; justify-content:space-between; font-size:13px; padding:8px 0; border-bottom:1px solid #2a2a2c; align-items:center;">
+                <div>
+                  <div style="font-weight:700; color:#fff;">${escapeHtml(shownDesc)}</div>
+                  <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} • ${escapeHtml(e.category || "Otros")}${noteText}</div>
+                </div>
+                <div style="font-weight:700; color:${color}; font-size:14px;">${sign} S/ ${fmt(e.amount)}</div>
+              </div>
+            `;
+          }).join('') || `<div style="color: #888; text-align: center; padding: 20px 0;">No hay movimientos en este período</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+  
+  host.appendChild(backdrop);
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
 };
 
 function wireFinance(root) {
