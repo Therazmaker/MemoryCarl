@@ -15140,24 +15140,8 @@ function financeMissionControlModel(monthKey){
     return {...o, due, bucket, _type: 'commitment'};
   });
 
-  try {
-    const debU = financeDebtUpcomingItems();
-    const debtsAsUpcoming = (debU.all||[]).map(d => {
-      const diff = Math.ceil((d.dueDate.getTime()-Date.now())/(24*60*60*1000));
-      const bucket = diff<=0 ? 'hoy' : (diff<=7?'esta semana':(diff<=14?'urgente':'postergable'));
-      return {
-        id: d.id,
-        name: d.name,
-        amountExpected: d.amount,
-        dueDate: d.dueDate.getDate(),
-        due: d.dueDate,
-        bucket,
-        category: 'Deuda',
-        _type: 'debt'
-      };
-    });
-    upcoming = upcoming.concat(debtsAsUpcoming);
-  } catch(e) {}
+  // Disconnected from Mission Control as requested
+
 
   upcoming.sort((a,b)=>a.due-b.due);
 
@@ -18602,6 +18586,7 @@ function financeDebtSimulate({strategy, extraMonthly, externalMonthly, includeIn
     totalInterest: 0,
     totalPaid: 0,
     steps: [],
+    payoffSchedule: [],
     ok: debts0.length>0
   };
   if(!out.ok){
@@ -18648,6 +18633,9 @@ function financeDebtSimulate({strategy, extraMonthly, externalMonthly, includeIn
         // debt paid: free its minimum payment for next months
         freed += Math.max(0, d.due||0);
         d.balance = 0;
+        if(!out.payoffSchedule.find(p=>p.id===d.id)){
+          out.payoffSchedule.push({ id: d.id, name: d.name, month: monthCursor.toISOString().slice(0,7), monthsElapsed: month + 1 });
+        }
       }
     }
 
@@ -18665,6 +18653,9 @@ function financeDebtSimulate({strategy, extraMonthly, externalMonthly, includeIn
       if(target.balance<=0.01){
         freed += Math.max(0, target.due||0);
         target.balance = 0;
+        if(!out.payoffSchedule.find(p=>p.id===target.id)){
+          out.payoffSchedule.push({ id: target.id, name: target.name, month: monthCursor.toISOString().slice(0,7), monthsElapsed: month + 1 });
+        }
       }
     }
 
@@ -18687,6 +18678,13 @@ function financeDebtSimulate({strategy, extraMonthly, externalMonthly, includeIn
 
     // advance month
     monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth()+1, 1);
+  }
+
+  // Ensure any debts paid off at the very end get recorded in the schedule
+  for(const d of debts) {
+    if(d.balance <= 0.01 && !out.payoffSchedule.find(p=>p.id===d.id)) {
+      out.payoffSchedule.push({ id: d.id, name: d.name, month: monthCursor.toISOString().slice(0,7), monthsElapsed: out.months });
+    }
   }
 
   if(!out.finishISO){
@@ -18984,8 +18982,8 @@ function financeDebtPlanUI(){
 
   const targetLine = target
     ? (plan.strategy==='avalanche'
-      ? `Prioridad: <strong>${escapeHtml(target.name)}</strong> (APR más alto)`
-      : `Prioridad: <strong>${escapeHtml(target.name)}</strong> (saldo más pequeño)`)
+      ? `Prioridad: <strong>${escapeHtml(target.name)}</strong> (APR más alto) ⚡`
+      : `Prioridad: <strong>${escapeHtml(target.name)}</strong> (saldo más pequeño) ⛄`)
     : `Sin deudas activas.`;
 
   const finishLbl = (function(){
@@ -19010,6 +19008,32 @@ function financeDebtPlanUI(){
     : `<div class="muted">Simulación sin interés (solo amortización). Útil para tener un estimado rápido.</div>`;
 
   const extHint = `<div class="muted">Tip: el ingreso externo (emprendimiento de Fergis) puede ir directo a cubrir intereses o acelerar la deuda objetivo.</div>`;
+
+  let timelineHtml = "";
+  if (sim.ok && sim.payoffSchedule && sim.payoffSchedule.length > 0) {
+    const symbol = plan.strategy === 'avalanche' ? '⚡' : '⛄';
+    timelineHtml = `
+      <div style="margin-top: 14px; margin-bottom: 14px; background: rgba(124, 92, 255, 0.04); border: 1px solid rgba(124, 92, 255, 0.1); border-radius: 12px; padding: 14px;">
+        <div style="font-weight: 700; font-size: 13px; color: #fff; margin-bottom: 10px;">📅 Cronograma de Liquidación:</div>
+        <div style="display: flex; flex-direction: column; gap: 12px; border-left: 2px dashed rgba(124, 92, 255, 0.3); padding-left: 14px; margin-left: 6px;">
+          ${sim.payoffSchedule.map((p, idx) => {
+            let monthLabel = p.month;
+            try {
+              const d = new Date(p.month + "-02T12:00:00");
+              monthLabel = d.toLocaleDateString('es-PE', { month: 'short', year: 'numeric' });
+            } catch(e) {}
+            return `
+              <div style="position: relative;">
+                <div style="position: absolute; left: -20px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: #7c5cff; border: 2px solid #1c1c1e;"></div>
+                <div style="font-size: 13px; font-weight: 700; color: #fff;">${escapeHtml(p.name)}</div>
+                <div style="font-size: 11px; color: #aaa;">Liquidado en: <strong>${escapeHtml(monthLabel)}</strong> (${p.monthsElapsed} ${p.monthsElapsed === 1 ? 'mes' : 'meses'}) ${symbol}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
 
   return `
     <div class="finPlanBox">
@@ -19051,6 +19075,8 @@ function financeDebtPlanUI(){
       </div>
 
       <div style="margin-top:10px">${interestNote}</div>
+      
+      ${timelineHtml}
 
       <div class="hr" style="margin-top:12px"></div>
       <div class="muted" style="margin-bottom:6px">Vista previa (primeros meses)</div>
@@ -19089,75 +19115,170 @@ function renderFinanceDebtsTab(){
   const monthKey = getCurrentMonthKey();
   const meta = (state.financeMeta||{})[monthKey] || {expectedIncome:0};
 
+  const originalTotal = (state.financeDebts || []).reduce((s, d) => s + financeDebtSafeNum(d.originalBalance ?? d.balance), 0);
   const totalBal = financeDebtTotalBalance();
+  const paidSoFar = Math.max(0, originalTotal - totalBal);
+  const progressPct = originalTotal > 0 ? Math.round((paidSoFar / originalTotal) * 100) : 0;
   const monthly = financeDebtMonthlyTotal();
   const income = financeDebtSafeNum(meta.expectedIncome||0);
   const gap = income - monthly;
 
-  const debts = financeDebtsActive();
-  const list = debts
-    .sort((a,b)=>{
-      const sa = String(a.status||'active');
-      const sb = String(b.status||'active');
-      if(sa!==sb) return sa==='active' ? -1 : 1;
-      return financeDebtSafeNum(b.balance) - financeDebtSafeNum(a.balance);
-    })
-    .map(d=>{
+  const allDebts = (state.financeDebts || []).filter(d => String(d.status || 'active') !== 'archived');
+  const activeDebts = allDebts.filter(d => String(d.status || 'active') === 'active');
+  const paidDebts = allDebts.filter(d => String(d.status || 'active') === 'closed');
+
+  const typeIcons = { loan: '🏢', card: '💳', app: '📱' };
+  
+  const activeListHtml = activeDebts
+    .sort((a, b) => financeDebtSafeNum(b.balance) - financeDebtSafeNum(a.balance))
+    .map(d => {
       const p = financeDebtProgress(d);
       const dueIso = financeDebtNextDueISO(d.dueDay);
       const dueLbl = financeDebtDueLabel(dueIso);
+      const typeIcon = typeIcons[d.type] || '💰';
+      const aprText = d.apr ? ` · ${d.apr}% APR` : '';
       return `
-        <div class="finDebtRow">
-          <div class="finDebtLeft" onclick="openFinanceDebtModalById('${d.id}')" style="cursor:pointer">
-            <div class="finDebtTitle">${escapeHtml(d.name)} ${financeDebtStatusChip(d)}</div>
-            <div class="muted">Pago: S/ ${fmt(d.monthlyDue||0)} · vence: ${escapeHtml(dueLbl)} · saldo: S/ ${fmt(d.balance||0)}</div>
-            <div class="finDebtBar"><div class="finDebtBarFill" style="width:${p.pct}%"></div></div>
+        <div class="finDebtRow" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); padding: 14px; border-radius: 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
+            <div onclick="openFinanceDebtModalById('${d.id}')" style="cursor:pointer; flex:1; min-width:0; padding-right:8px;">
+              <div style="font-weight: 800; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 8px;">
+                <span>${typeIcon}</span>
+                <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(d.name)}</span>
+                ${financeDebtStatusChip(d)}
+              </div>
+              <div style="font-size: 12px; color: #aaa; margin-top: 4px;">
+                Cuota: <strong>S/ ${fmt(d.monthlyDue||0)}</strong> · vence: <strong>${escapeHtml(dueLbl)}</strong>${aprText}
+              </div>
+            </div>
+            <div class="finDebtActions" style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="iconBtn" title="Registrar pago" onclick="openFinanceDebtPayModal('${d.id}')" style="background: rgba(52,211,153,0.15); color: #34d399; padding: 6px; border-radius: 8px; font-size: 13px;">💸</button>
+              <button class="iconBtn" title="Editar" onclick="openFinanceDebtModalById('${d.id}')" style="background: rgba(96,165,250,0.15); color: #60a5fa; padding: 6px; border-radius: 8px; font-size: 13px;">✏️</button>
+              <button class="iconBtn" title="Borrar deuda" onclick="deleteFinanceDebt('${d.id}')" style="background: rgba(248,113,113,0.15); color: #f87171; padding: 6px; border-radius: 8px; font-size: 13px;">🗑️</button>
+            </div>
           </div>
-          <div class="finDebtActions">
-            <button class="iconBtn" title="Registrar pago" onclick="openFinanceDebtPayModal('${d.id}')">💸</button>
-            <button class="iconBtn" title="Editar" onclick="openFinanceDebtModalById('${d.id}')">✏️</button>
-            <button class="iconBtn" title="Borrar deuda" onclick="deleteFinanceDebt('${d.id}')">🗑️</button>
+          
+          <div style="margin-top: 4px;">
+            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-bottom: 4px;">
+              <span>Progreso: ${p.pct}%</span>
+              <span>S/ ${fmt(p.paid)} pagado (queda S/ ${fmt(p.bal)})</span>
+            </div>
+            <div style="background: #2a2a2c; border-radius: 6px; height: 6px; overflow: hidden; width: 100%;">
+              <div style="height: 100%; width: ${p.pct}%; background: linear-gradient(90deg, #7c5cff, #36d399); border-radius: 6px;"></div>
+            </div>
           </div>
         </div>
       `;
-    }).join('') || `<div class="muted">Sin deudas registradas. Agrega tu primera deuda para empezar el plan.</div>`;
+    }).join('') || `<div class="muted" style="text-align:center; padding: 20px 0;">Sin deudas activas. ¡Excelente! 🎉</div>`;
+
+  const paidListHtml = paidDebts.length > 0 ? `
+    <div style="margin-top: 16px; background: rgba(54, 211, 153, 0.05); border: 1px dashed rgba(54, 211, 153, 0.2); border-radius: 12px; padding: 12px;">
+      <div style="font-weight: 700; font-size: 13px; color: #36d399; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+        <span>🎉</span> Victoria Financiera (${paidDebts.length} deudas pagadas)
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        ${paidDebts.map(d => `
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #888;">
+            <span style="text-decoration: line-through;">${escapeHtml(d.name)}</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span>S/ 0.00 saldo</span>
+              <button class="iconBtn" onclick="deleteFinanceDebt('${d.id}')" title="Eliminar de la lista" style="font-size: 10px; background:transparent; padding:0; opacity:0.6;">🗑️</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+
+  const debtNames = (state.financeDebts || []).map(d => d.name.toLowerCase());
+  const paymentLedger = (state.financeLedger || []).filter(e => {
+    if (e.type !== 'expense') return false;
+    const cat = String(e.category || "").toLowerCase();
+    const note = String(e.note || "").toLowerCase();
+    if (cat === "deuda") return true;
+    return debtNames.some(name => note.includes(name) || cat.includes(name));
+  });
+
+  const recentPaymentsHtml = paymentLedger.length > 0 ? `
+    <div class="finPlanBox" style="margin-top: 14px;">
+      <div class="cardTop" style="margin-top:0">
+        <h3 class="cardTitle" style="font-size:14px;">💸 Pagos recientes registrados</h3>
+      </div>
+      <div class="hr"></div>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        ${paymentLedger.slice(0, 5).map(e => {
+          const rawNote = String(e.note || "");
+          const hasSep = rawNote.includes(" · ");
+          const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
+          const shownDesc = desc || "Pago de deuda";
+          return `
+            <div style="display:flex; justify-content:space-between; font-size:12px; color:#ddd; padding:4px 0; border-bottom:1px solid #2a2a2c;">
+              <span>${escapeHtml(shownDesc)} <span class="muted">${e.date ? e.date.slice(0,10) : ''}</span></span>
+              <strong style="color:#34d399;">S/ ${fmt(e.amount)}</strong>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  ` : '';
 
   const hint = (gap<0)
     ? `<div class="finDebtHint bad">Te faltan <strong>S/ ${fmt(Math.abs(gap))}</strong> para cubrir solo deudas este mes. Vamos a usar esto para decidir prioridades y recortar fugas.</div>`
     : `<div class="finDebtHint good">Bien: te sobran <strong>S/ ${fmt(gap)}</strong> después de cubrir deudas. Eso puede ir a acelerar una deuda (snowball/avalancha).</div>`;
 
   return `
-    <section class="card homeCard homeWide">
+    <section class="card homeCard homeWide" style="display: flex; flex-direction: column; gap: 14px;">
       <div class="cardTop">
         <h2 class="cardTitle">Deudas</h2>
         <div class="row" style="gap:8px">
           <button class="iconBtn" title="Nueva deuda" onclick="openFinanceDebtModal()">＋</button>
         </div>
       </div>
-      <div class="hr"></div>
+      <div class="hr" style="margin: 0;"></div>
 
-      <div class="grid2" style="gap:10px">
-        <div class="finDebtStat">
-          <div class="muted">Total deuda</div>
-          <div class="big">S/ ${fmt(totalBal)}</div>
+      <div style="background: rgba(124, 92, 255, 0.08); border: 1px solid rgba(124, 92, 255, 0.15); border-radius: 14px; padding: 14px;">
+        <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:#fff; margin-bottom:6px;">
+          <span>Progreso de Liquidación</span>
+          <span style="color:#36d399;">S/ ${fmt(paidSoFar)} pagado (${progressPct}%)</span>
         </div>
-        <div class="finDebtStat">
-          <div class="muted">Pago mensual total</div>
-          <div class="big">S/ ${fmt(monthly)}</div>
+        <div style="background: rgba(255,255,255,0.08); border-radius: 6px; height: 10px; overflow: hidden; width: 100%;">
+          <div style="height: 100%; width: ${progressPct}%; background: linear-gradient(90deg, #7c5cff, #36d399); border-radius: 6px;"></div>
         </div>
       </div>
 
-      <div style="margin-top:10px">
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 12px; border-radius: 12px; text-align: center;">
+          <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Deuda Total Actual</div>
+          <div style="font-size: 18px; font-weight: 800; color: #fff;">S/ ${fmt(totalBal)}</div>
+          <div style="font-size: 10px; color: #888; margin-top: 4px;">Original: S/ ${fmt(originalTotal)}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 12px; border-radius: 12px; text-align: center;">
+          <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Pago Mínimo Mensual</div>
+          <div style="font-size: 18px; font-weight: 800; color: #7c5cff;">S/ ${fmt(monthly)}</div>
+          <div style="font-size: 10px; color: #888; margin-top: 4px;">Efectivo libre: S/ ${fmt(gap)}</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 2px">
         ${hint}
       </div>
 
-      <div class="hr" style="margin-top:12px"></div>
+      <div class="hr" style="margin: 0;"></div>
+      <div class="cardTop" style="margin-top:2px">
+        <h3 class="cardTitle" style="font-size:14px">Tus deudas activas</h3>
+      </div>
+      <div class="finDebtList" style="display: flex; flex-direction: column; gap: 10px;">
+        ${activeListHtml}
+      </div>
+      
+      ${paidListHtml}
+
+      <div class="hr" style="margin: 0;"></div>
       <div class="cardTop" style="margin-top:2px">
         <h3 class="cardTitle" style="font-size:14px">Ingreso vs pagos</h3>
       </div>
       ${financeDebtIncomeVsPaymentsUI()}
 
-      <div class="hr" style="margin-top:12px"></div>
+      <div class="hr" style="margin: 0;"></div>
       <div class="cardTop" style="margin-top:2px">
         <h3 class="cardTitle" style="font-size:14px">Calendario de vencimientos</h3>
       </div>
@@ -19165,17 +19286,13 @@ function renderFinanceDebtsTab(){
         ${financeDebtRenderUpcoming()}
       </div>
 
-      <div class="hr" style="margin-top:12px"></div>
+      <div class="hr" style="margin: 0;"></div>
       ${renderFinanceDebtSurvivalBox()}
 
-      <div class="hr" style="margin-top:12px"></div>
+      <div class="hr" style="margin: 0;"></div>
       ${financeDebtPlanUI()}
-
-      <div class="hr" style="margin-top:12px"></div>
-      <div class="cardTop" style="margin-top:2px">
-        <h3 class="cardTitle" style="font-size:14px">Tus deudas</h3>
-      </div>
-      <div class="finDebtList">${list}</div>
+      
+      ${recentPaymentsHtml}
     </section>
   `;
 }
