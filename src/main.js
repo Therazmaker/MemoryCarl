@@ -21513,10 +21513,9 @@ window.financeDiagnostic = function() {
 
     if (raw === null) {
       report += `<div style="color:#fb7185;font-weight:700;font-size:16px;margin-bottom:12px;">⛔ localStorage VACÍO</div>`;
-      report += `<p style="color:#94a3b8;font-size:13px;">La clave <code>memorycarl_v2_finance_ledger</code> no existe en localStorage. Los datos se perdieron o nunca se guardaron correctamente.</p>`;
+      report += `<p style="color:#94a3b8;font-size:13px;">La clave <code>memorycarl_v2_finance_ledger</code> no existe en localStorage.</p>`;
     } else if (!Array.isArray(raw)) {
       report += `<div style="color:#fb7185;font-weight:700;">⛔ Datos corruptos</div>`;
-      report += `<p style="font-size:12px;">El valor guardado no es un array. Tipo: ${typeof raw}</p>`;
     } else {
       const total = raw.length;
       const archived = raw.filter(e => e.archived).length;
@@ -21525,17 +21524,13 @@ window.financeDiagnostic = function() {
       const expenses = raw.filter(e => e.type === 'expense' && !e.archived).length;
       const fiados = raw.filter(e => e.isFiado && !e.archived).length;
 
-      // Dates
       const dates = raw.map(e => e.date).filter(Boolean).sort();
       const oldest = dates[0] || '—';
       const newest = dates[dates.length - 1] || '—';
 
-      // State vs localStorage diff
       const stateTotal = stateEntries.length;
       const stateDiff = stateTotal !== total ? `⚠️ Estado en memoria: ${stateTotal} (¡difiere!)` : `✅ Estado en memoria: ${stateTotal} (coincide)`;
-
       const color = active > 0 ? '#36d399' : '#fb7185';
-      const icon = active > 0 ? '✅' : '⛔';
 
       report += `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
@@ -21579,6 +21574,66 @@ window.financeDiagnostic = function() {
       `;
     }
 
+    // 3. Scan ALL finance localStorage keys
+    const financeKeys = [
+      { key: 'memorycarl_v2_finance_ledger', label: '📒 Ledger principal' },
+      { key: 'memorycarl_v2_finance_transactions', label: '🔄 Transactions (copia)' },
+      { key: 'memorycarl_v2_finance_accounts', label: '🏦 Cuentas' },
+      { key: 'memorycarl_v2_finance_internal_balances', label: '⚖️ Balances internos' },
+      { key: 'memorycarl_v2_finance_loan_usage_ledger', label: '💳 Loan ledger' },
+    ];
+    let keysHtml = `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Todas las claves finance</div>`;
+    financeKeys.forEach(function(fk) {
+      try {
+        const val = localStorage.getItem(fk.key);
+        if (val === null) {
+          keysHtml += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.08);font-size:12px;"><span style="color:#475569;">${fk.label}</span><span style="color:#475569;">— vacío</span></div>`;
+        } else {
+          const parsed = JSON.parse(val);
+          const count = Array.isArray(parsed) ? parsed.length : (typeof parsed === 'object' ? Object.keys(parsed).length : 1);
+          const kb = (val.length / 1024).toFixed(1);
+          const c = count > 1 ? '#36d399' : count === 1 ? '#fbbf24' : '#fb7185';
+          keysHtml += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.08);font-size:12px;"><span style="color:#94a3b8;">${fk.label}</span><span style="color:${c};font-weight:700;">${count} items · ${kb}kb</span></div>`;
+        }
+      } catch(e) {
+        keysHtml += `<div style="font-size:12px;color:#fb7185;padding:4px 0;">${fk.label}: error parsing</div>`;
+      }
+    });
+    keysHtml += `</div>`;
+    report += keysHtml;
+
+    // 4. Account balances
+    const accs = state.financeAccounts || [];
+    if (accs.length > 0) {
+      let accHtml = `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🏦 Saldos en cuentas</div>`;
+      accs.forEach(function(acc) {
+        const bal = Number(acc.balance || 0).toFixed(2);
+        const c = Number(bal) > 0 ? '#36d399' : Number(bal) < 0 ? '#fb7185' : '#94a3b8';
+        accHtml += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.08);font-size:12px;"><span style="color:#94a3b8;">${acc.name||acc.id}</span><span style="color:${c};font-weight:700;">S/ ${bal}</span></div>`;
+      });
+      accHtml += `<div style="margin-top:6px;font-size:11px;color:#64748b;">⚠️ Saldo alto con pocos registros = datos perdidos del ledger</div></div>`;
+      report += accHtml;
+    }
+
+    // 5. Transactions recovery hint
+    try {
+      const txStr = localStorage.getItem('memorycarl_v2_finance_transactions');
+      if (txStr) {
+        const txs = JSON.parse(txStr);
+        if (Array.isArray(txs) && txs.length > 1) {
+          report += `
+            <div style="margin-top:12px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);border-radius:10px;padding:12px;font-size:12px;">
+              💡 <strong style="color:#818cf8;">${txs.length} registros en Transactions</strong><br>
+              <span style="color:#94a3b8;">Esta copia puede contener tus movimientos perdidos.</span>
+              <button onclick="window.financeDiagShowTx()" style="margin-top:8px;width:100%;padding:8px;background:rgba(99,102,241,.2);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:12px;cursor:pointer;">
+                👁 Ver primeros 5 registros
+              </button>
+            </div>
+          `;
+        }
+      }
+    } catch(e2) {}
+
     // Show modal
     const overlay = document.createElement('div');
     overlay.style.cssText = `position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:flex-end;justify-content:center;padding:16px;`;
@@ -21618,4 +21673,31 @@ window.financeRestoreArchived = function() {
   } catch(err) {
     toast('Error al restaurar: ' + err.message);
   }
+};
+
+window.financeDiagShowTx = function() {
+  try {
+    const txStr = localStorage.getItem('memorycarl_v2_finance_transactions');
+    if (!txStr) { toast('Sin datos en transactions'); return; }
+    const txs = JSON.parse(txStr);
+    if (!Array.isArray(txs) || !txs.length) { toast('Transactions vacío'); return; }
+    const preview = txs.slice(0, 10).map(function(t) {
+      const dir = t.direction === 'inflow' ? '📥' : '📤';
+      return `<div style="font-size:12px;color:#94a3b8;padding:5px 0;border-bottom:1px solid rgba(148,163,184,.08);">
+        ${dir} <strong style="color:#e2e8f0;">S/ ${Number(t.amount||0).toFixed(2)}</strong>
+        <span style="color:#64748b;margin-left:6px;">${(t.date||'').slice(0,10)}</span>
+        ${t.notes ? `<span style="color:#64748b;"> · ${t.notes}</span>` : ''}
+      </div>`;
+    }).join('');
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.85);display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+    d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:20px;width:100%;max-width:440px;max-height:80vh;overflow-y:auto;">
+      <div style="font-weight:700;color:#818cf8;margin-bottom:4px;">🔄 Transactions — ${txs.length} registros</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:12px;">Primeros 10 de ${txs.length}</div>
+      ${preview}
+      <button onclick="this.closest('div[style]').remove()" style="margin-top:12px;width:100%;padding:10px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:13px;">Cerrar</button>
+    </div>`;
+    document.body.appendChild(d);
+    d.addEventListener('click', function(e){ if(e.target===d) d.remove(); });
+  } catch(e) { toast('Error: ' + e.message); }
 };
