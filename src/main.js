@@ -21633,6 +21633,14 @@ window.financeDiagnostic = function() {
                   🔓 RECUPERAR
                 </button>
               </div>
+              <div style="display:flex;gap:6px;margin-top:6px;">
+                <button onclick="window.financeUndoBadRecovery()" style="flex:1;padding:8px;background:rgba(251,113,133,.1);color:#fb7185;border:1px solid rgba(251,113,133,.3);border-radius:8px;font-size:12px;cursor:pointer;">
+                  ↩️ Deshacer Recuperación
+                </button>
+                <button onclick="window.financeImportManualJson()" style="flex:1;padding:8px;background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;">
+                  📥 Importar JSON Manual
+                </button>
+              </div>
             </div>
           `;
         }
@@ -21783,5 +21791,53 @@ window.financeRecoverFromTransactions = function() {
   } catch(err) {
     toast('Error en recuperación: ' + err.message);
     console.error(err);
+  }
+};
+
+window.financeUndoBadRecovery = function() {
+  const ledger = state.financeLedger || [];
+  const beforeCount = ledger.length;
+  state.financeLedger = ledger.filter(e => !e.__recovered);
+  const afterCount = state.financeLedger.length;
+  
+  if (beforeCount === afterCount) {
+    toast('No hay movimientos recuperados para deshacer');
+    return;
+  }
+  
+  financeRecomputeBalances();
+  persist();
+  view();
+  toast('✅ Recuperación deshecha (' + (beforeCount - afterCount) + ' movimientos borrados)');
+};
+
+window.financeImportManualJson = function() {
+  const jsonStr = prompt("Pega aquí el JSON completo de tus finanzas (financeLedger) o el App_State:");
+  if (!jsonStr) return;
+  try {
+    const data = JSON.parse(jsonStr);
+    let newLedger = null;
+    let newAccounts = null;
+
+    if (Array.isArray(data)) {
+      newLedger = data;
+    } else if (data.financeLedger && Array.isArray(data.financeLedger)) {
+      newLedger = data.financeLedger;
+      if (data.financeAccounts) newAccounts = data.financeAccounts;
+    } else {
+      toast("El JSON no tiene un formato reconocido (se esperaba un array o {financeLedger: []})");
+      return;
+    }
+
+    if (confirm(`¿Reemplazar tu ledger actual con los ${newLedger.length} movimientos de este backup?`)) {
+      state.financeLedger = newLedger;
+      if (newAccounts) state.financeAccounts = newAccounts;
+      financeRecomputeBalances();
+      persist();
+      view();
+      toast("✅ Datos manuales importados correctamente");
+    }
+  } catch(e) {
+    alert("Error procesando el JSON: " + e.message);
   }
 };
