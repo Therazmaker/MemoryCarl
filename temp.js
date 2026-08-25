@@ -1,64 +1,10 @@
-(function mcConsoleLogsInterceptorInit(){
-  if (window.__mcLogsInterceptor) return;
-  window.__mcLogs = [];
-  window.__mcLogsInterceptor = true;
-  const originalLog = console.log;
-  const originalError = console.error;
-  const originalWarn = console.warn;
-  
-  const addLog = (type, args) => {
-    const time = new Date().toTimeString().split(' ')[0];
-    const text = args.map(arg => {
-      if (typeof arg === 'object') {
-        try { return JSON.stringify(arg); } catch (e) { return String(arg); }
-      }
-      return String(arg);
-    }).join(' ');
-    window.__mcLogs.push({ time, type, text });
-    if (window.__mcLogs.length > 200) window.__mcLogs.shift();
-    
-    const logEl = document.getElementById('mcLiveConsoleLogs');
-    if (logEl) {
-      const p = document.createElement('div');
-      p.className = `console-${type}`;
-      p.style.fontSize = '12px';
-      p.style.fontFamily = 'monospace';
-      p.style.whiteSpace = 'pre-wrap';
-      p.style.borderBottom = '1px solid #222';
-      p.style.padding = '4px 0';
-      p.style.color = type === 'error' ? '#f87171' : (type === 'warn' ? '#f59e0b' : '#38bdf8');
-      
-      const esc = (s) => String(s || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      p.innerHTML = `<span style="color:#888;">[${time}]</span> ${esc(text)}`;
-      logEl.appendChild(p);
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-  };
 
-  console.log = (...args) => { originalLog(...args); addLog('info', args); };
-  console.error = (...args) => { originalError(...args); addLog('error', args); };
-  console.warn = (...args) => { originalWarn(...args); addLog('warn', args); };
 
-  window.addEventListener('error', (e) => {
-    addLog('error', [`Uncaught Error: ${e.message} at ${e.filename}:${e.lineno}:${e.colno}`]);
-  });
-  window.addEventListener('unhandledrejection', (e) => {
-    addLog('error', [`Unhandled Rejection: ${e.reason}`]);
-  });
-})();
 
-import { initFootballLab } from "./footballLab_v8e.js?v=2001";
-import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
-import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
-import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
-import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
-import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
-import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO } from "./shopping/shoppingAi.js";
 
-try {
-  // Free up quota: remove heavy AI state on boot. It rebuilds automatically.
-  localStorage.removeItem("memorycarl_finance_brain_v2");
-} catch(e) {}
+
+
+
 
 /* ===== PWA Rescue / Reset =====
    Si la app se queda pegada (cache/estado viejo), abre:
@@ -71,70 +17,6 @@ try {
 
   function cssBtn(){
     return "border:0;border-radius:12px;padding:8px 12px;font-weight:800;cursor:pointer;";
-  }
-
-  function openRescueConsoleModal() {
-    const backdrop = document.createElement('div');
-    backdrop.className = 'modalBackdrop';
-    backdrop.style.position = 'fixed';
-    backdrop.style.top = '0';
-    backdrop.style.left = '0';
-    backdrop.style.width = '100%';
-    backdrop.style.height = '100%';
-    backdrop.style.background = 'rgba(0,0,0,0.7)';
-    backdrop.style.zIndex = 100000;
-    backdrop.style.display = 'flex';
-    backdrop.style.alignItems = 'center';
-    backdrop.style.justifyContent = 'center';
-    
-    const logsHtml = (window.__mcLogs || []).map(log => {
-      const typeColor = log.type === 'error' ? '#f87171' : (log.type === 'warn' ? '#f59e0b' : '#38bdf8');
-      const esc = (s) => String(s || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      return `
-        <div style="font-size:11px; white-space:pre-wrap; border-bottom:1px solid #222; padding:3px 0; color:${typeColor}; font-family:monospace;">
-          <span style="color:#888;">[${log.time}]</span> ${esc(log.text)}
-        </div>
-      `;
-    }).join('') || '<div style="color:#888;font-size:12px;font-family:sans-serif;">Sin logs guardados aún.</div>';
-
-    backdrop.innerHTML = `
-      <div style="max-width:500px; width:90%; background:#1c1c1e; color:#fff; border-radius:14px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,0.5); font-family:system-ui, -apple-system, sans-serif;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <span style="font-weight:700; font-size:15px;">📺 Consola de Rescate</span>
-          <button style="background:none; border:none; color:#fff; font-size:18px; cursor:pointer;" id="mcCloseRescueConsole">✕</button>
-        </div>
-        <div style="background:#09090b; border:1px solid #333; border-radius:8px; height:300px; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:4px; margin-bottom:12px;">
-          ${logsHtml}
-        </div>
-        <div style="display:flex; gap:10px;">
-          <button id="mcCopyRescueLogs" style="flex:1; border:0; border-radius:12px; padding:10px; font-weight:800; background:#2b73ff; color:#fff; cursor:pointer;">Copiar Logs</button>
-          <button id="mcCloseRescueBtn" style="flex:1; border:0; border-radius:12px; padding:10px; font-weight:800; background:#3a3a3c; color:#fff; cursor:pointer;">Cerrar</button>
-        </div>
-      </div>
-    `;
-    
-    document.body.appendChild(backdrop);
-    
-    const close = () => backdrop.remove();
-    backdrop.querySelector('#mcCloseRescueConsole').onclick = close;
-    backdrop.querySelector('#mcCloseRescueBtn').onclick = close;
-    
-    backdrop.querySelector('#mcCopyRescueLogs').onclick = () => {
-      const logsText = JSON.stringify(window.__mcLogs, null, 2);
-      navigator.clipboard.writeText(logsText).then(() => {
-        alert('Copiado al portapapeles ✅');
-      }).catch(() => {
-        const ta = document.createElement('textarea');
-        ta.value = logsText;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        ta.remove();
-        alert('Copiado al portapapeles ✅');
-      });
-    };
-    
-    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
   }
 
   function showRescueBanner(reason){
@@ -155,19 +37,17 @@ try {
       d.style.fontSize = '13px';
       d.style.boxShadow = '0 10px 30px rgba(0,0,0,0.35)';
       d.innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          <div style="line-height:1.25;">
+        <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;">
+          <div style="line-height:1.25;min-width:0">
             <div style="font-weight:900">MemoryCarl: modo rescate</div>
             <div style="opacity:.85;white-space:normal">Si se quedó en “cargando”, prueba limpiar caché primero. ${reason?`<span style="opacity:.7">(${reason})</span>`:''}</div>
           </div>
-          <div style="display:flex;gap:8px;flex-shrink:0;">
-            <button id="mcRescueConsole" style="${cssBtn()}background:#ef4444;color:#fff;">Ver consola</button>
+          <div style="display:flex;gap:8px;flex-shrink:0">
             <button id="mcRescueSoft" style="${cssBtn()}background:#2b73ff;color:#fff;">Reset caché</button>
             <button id="mcRescueHard" style="${cssBtn()}background:#fff;color:#111;">Reset total</button>
           </div>
         </div>`;
       document.body.appendChild(d);
-      document.getElementById('mcRescueConsole').onclick = ()=> openRescueConsoleModal();
       document.getElementById('mcRescueSoft').onclick = ()=> mcSoftResetCache();
       document.getElementById('mcRescueHard').onclick = ()=> mcHardResetAll();
     }catch(_e){}
@@ -232,12 +112,12 @@ try {
 
 window.__MC_VERSION__ = "invcal-v1-2026-02-24a";
 
-import { computeMoonNow } from "./cosmic_lite.js";
-import { getTransitLiteSignals } from "./transit_lite.js";
-import { getTransitSwissSignals, swissTransitsAvailable, getSwissDailyCached, swissDailyAvailable } from "./transit_swiss.js";
-import "./finance/neuron_financiera.js";
-import "./sleep_radial_chart.js";
-import "./sleep_journal_pro.js";
+
+
+
+
+
+
 
 console.log("MemoryCarl loaded");
 // ===== LocalStorage Keys =====
@@ -1747,33 +1627,22 @@ async function mcBootstrapIdbCache(){
 }
 mcBootstrapIdbCache();
 
-// Expose IDB bridge for external modules (e.g., finance_neural_storage.js)
-try {
-  window.__mcIdbCache = mcIdbCache;
-  window.__mcIdbPut = mcIdbPut;
-} catch(_e) {}
-
 function load(key, fallback){
-  if(mcIdbReady && mcIdbCache.has(key)){
-    try{ return JSON.parse(mcIdbCache.get(key)); }
-    catch(_err){}
-  }
-
   try{
     const raw = localStorage.getItem(key);
     if(raw) return JSON.parse(raw);
   }catch(_err){}
 
+  if(mcIdbReady && mcIdbCache.has(key)){
+    try{ return JSON.parse(mcIdbCache.get(key)); }
+    catch(_err){}
+  }
   return fallback;
 }
 
 function loadAny(keys, fallback){
   for(const k of (keys||[])){
     if(!k) continue;
-    if(mcIdbReady && mcIdbCache.has(k)){
-      try{ return JSON.parse(mcIdbCache.get(k)); }
-      catch(_err){}
-    }
     try{
       const raw = localStorage.getItem(k);
       if(raw) return JSON.parse(raw);
@@ -1816,8 +1685,6 @@ function save(key, value){
       mcIdbPut(key, payload).catch((idbErr)=>{
         console.warn(`[MemoryCarl] localStorage quota exceeded for key "${key}" and IndexedDB fallback failed.`, idbErr);
       });
-      // Force removal from localStorage so load() uses IDB next time
-      try { localStorage.removeItem(key); } catch(e){}
       markDirty();
       return true;
     }
@@ -3383,7 +3250,6 @@ function view(){
     if(state.tab==="reminders") openReminderModal();
 		if(state.tab==="house") openHouseTaskModal();
 	    if(state.tab==="calendar") openCalendarDrawModal(isoDate(new Date()));
-	    if(state.tab==="finance") openFinanceTypeModal();
   });
 
   
@@ -3502,7 +3368,6 @@ const btnExport = root.querySelector("#btnExport");
   if(state.tab==="house") wireHouse(root);
 	  if(state.tab==="calendar") wireCalendar(root);
   if(state.tab==="insights") wireInsights(root);
-  if(state.tab==="finance") wireFinance(root);
   wireHouseZoneSheet(root);
 
   // Re-open house runner modal after render if it was open
@@ -4326,27 +4191,6 @@ function viewSettings(){
         </label>
       </div>
       <div class="note" style="margin-top:10px;">Exportar/Importar cerebro crea un backup completo de FootballLab/Brain v2 (IndexedDB + localStorage) y recarga la app tras restaurar.</div>
-    </div>
-
-    <div class="card">
-      <div class="cardTop">
-        <div>
-          <h2 class="cardTitle">📺 Consola de Depuración</h2>
-          <div class="small">Errores y logs del sistema en tiempo real. Útil para móviles.</div>
-        </div>
-      </div>
-      <div class="hr"></div>
-      <div id="mcLiveConsoleLogs" style="background:#09090b; border:1px solid #333; border-radius:8px; height:200px; overflow-y:auto; padding:10px; margin-bottom:10px; font-family:monospace; display:flex; flex-direction:column; gap:4px; max-height:200px;">
-        ${(window.__mcLogs || []).map(log => `
-          <div style="font-size:11px; white-space:pre-wrap; border-bottom:1px solid #222; padding:3px 0; color:${log.type === 'error' ? '#f87171' : (log.type === 'warn' ? '#f59e0b' : '#38bdf8')};">
-            <span style="color:#888;">[${log.time}]</span> ${escapeHtml(log.text)}
-          </div>
-        `).join('')}
-      </div>
-      <div class="btnRow" style="margin-top:10px; display:flex; gap:10px;">
-        <button class="btn ghost" onclick="document.getElementById('mcLiveConsoleLogs').innerHTML = ''; window.__mcLogs = [];">Limpiar logs</button>
-        <button class="btn" onclick="navigator.clipboard.writeText(JSON.stringify(window.__mcLogs, null, 2)).then(() => toast('Copiado ✅')).catch(() => { const ta = document.createElement('textarea'); ta.value = JSON.stringify(window.__mcLogs, null, 2); document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Copiado ✅'); });">Copiar Logs</button>
-      </div>
     </div>
 
     <div class="card">
@@ -6847,15 +6691,11 @@ const sleepBars = renderSleepBars(sleepSeries);
 
         <div class="musicRight" ${hasMusic && (m.coverUrl||"") ? `` : `data-empty="1"`}>
           ${hasMusic && (m.coverUrl||"") ? `
-            <img class="musicCover" src="${escapeHtml(m.coverUrl)}" alt="Cover" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
-            <div class="musicCoverPlaceholder" style="display:none; width:100%; height:100%;">
-              <div class="musicCoverEmoji">💿</div>
-              <div class="musicCoverText">Error de imagen</div>
-            </div>
+            <img class="musicCover" src="${escapeHtml(m.coverUrl)}" alt="Cover" loading="lazy" referrerpolicy="no-referrer" />
           ` : `
             <div class="musicCoverPlaceholder">
               <div class="musicCoverEmoji">🎛️</div>
-              <div class="musicCoverText">Sube una portada</div>
+              <div class="musicCoverText">Pega un URL de portada</div>
             </div>
           `}
         </div>
@@ -7727,77 +7567,33 @@ function openSleepHistoryModal(){
 
 
 
-function openMusicModal(existingEntry = null) {
+function openMusicModal(){
   const host = document.querySelector("#app");
   const modal = document.createElement("div");
   modal.className = "modalBackdrop";
 
   modal.innerHTML = `
-    <div class="modal" style="max-width:420px; width:95%; background:#1c1c1e; color:#fff; border-radius:14px; padding:16px;">
-      <h2>${existingEntry ? "Editar Tema" : "Registrar Tema Fav."}</h2>
-      <div class="grid" style="display:flex; flex-direction:column; gap:10px; margin-top:12px;">
-        <input class="input" id="mcSong" placeholder="Canción (obligatorio)" value="${existingEntry?.song || ''}" />
-        <input class="input" id="mcArtist" placeholder="Artista (opcional)" value="${existingEntry?.artist || ''}" />
-        <input class="input" id="mcAlbum" placeholder="Álbum (opcional)" value="${existingEntry?.album || ''}" />
-        <input class="input" id="mcMood" placeholder="Mood tag (opcional) ej: calma, power" value="${existingEntry?.mood || ''}" />
-        <input class="input" id="mcIntensity" type="number" min="1" max="10" step="1" placeholder="Intensidad (1-10, opcional)" value="${existingEntry?.intensity !== null && existingEntry?.intensity !== undefined ? existingEntry.intensity : ''}" />
-        
-        <div style="display:flex; flex-direction:column; gap:4px;">
-          <label style="font-size:12px; color:#aaa; font-weight:600;">Portada (URL o Archivo Local):</label>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <input class="input" id="mcCoverUrl" placeholder="https://... o sube archivo" style="flex:1; margin:0;" value="${existingEntry?.coverUrl || ''}" />
-            <label class="btn ghost" style="padding:6px 12px; cursor:pointer; font-size:13px; font-weight:700; margin:0; display:flex; align-items:center; gap:4px; height:38px; box-sizing:border-box;">
-              📷 Subir
-              <input id="fileCoverUpload" type="file" accept="image/*" style="display:none;">
-            </label>
-          </div>
-          <div style="display:flex; justify-content:center; margin-top:8px;">
-            <img id="mcCoverPreview" src="${existingEntry?.coverUrl || ''}" style="max-width:100px; max-height:100px; border-radius:8px; display:${existingEntry?.coverUrl ? 'block' : 'none'}; object-fit:cover; border:1px solid #444;" />
-          </div>
-        </div>
-
-        <input class="input" id="mcLinkUrl" placeholder="Link (Spotify/YouTube) (opcional)" value="${existingEntry?.linkUrl || ''}" />
-        <textarea class="input" id="mcNote" placeholder="Nota (opcional)" rows="3">${existingEntry?.note || ''}</textarea>
+    <div class="modal">
+      <h2>Tema Fav. (registrar)</h2>
+      <div class="grid">
+        <input class="input" id="mcSong" placeholder="Canción (obligatorio)" />
+        <input class="input" id="mcArtist" placeholder="Artista (opcional)" />
+        <input class="input" id="mcAlbum" placeholder="Álbum (opcional)" />
+        <input class="input" id="mcMood" placeholder="Mood tag (opcional) ej: calma, power" />
+        <input class="input" id="mcIntensity" type="number" min="1" max="10" step="1" placeholder="Intensidad (1-10, opcional)" />
+        <input class="input" id="mcCoverUrl" placeholder="Cover URL (opcional)" />
+        <input class="input" id="mcLinkUrl" placeholder="Link (Spotify/YouTube) (opcional)" />
+        <textarea class="input" id="mcNote" placeholder="Nota (opcional)" rows="3"></textarea>
       </div>
-      <div class="row" style="margin-top:16px; display:flex; gap:10px;">
-        <button class="btn ghost" id="btnCancel" style="flex:1;">Cancelar</button>
-        <button class="btn primary" id="btnSave" style="flex:1;">Guardar</button>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn ghost" id="btnCancel">Cancelar</button>
+        <button class="btn primary" id="btnSave">Guardar</button>
       </div>
       <div class="muted" style="margin-top:10px;">Tip: si solo pones canción, ya sirve. Lo demás es extra.</div>
     </div>
   `;
 
   host.appendChild(modal);
-
-  const coverUrlInput = modal.querySelector("#mcCoverUrl");
-  const coverPreview = modal.querySelector("#mcCoverPreview");
-  const fileUpload = modal.querySelector("#fileCoverUpload");
-
-  const updatePreview = (src) => {
-    if (src && src.trim()) {
-      coverPreview.src = src.trim();
-      coverPreview.style.display = "block";
-    } else {
-      coverPreview.style.display = "none";
-    }
-  };
-
-  coverUrlInput.addEventListener("input", () => {
-    updatePreview(coverUrlInput.value);
-  });
-
-  fileUpload.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = event.target.result;
-        coverUrlInput.value = dataUrl;
-        updatePreview(dataUrl);
-      };
-      reader.readAsDataURL(file);
-    }
-  });
 
   const close = ()=> modal.remove();
   modal.addEventListener("click", (e)=>{ if(e.target===modal) close(); });
@@ -7822,13 +7618,8 @@ function openMusicModal(existingEntry = null) {
 
     const normUrl = (u)=>{
       if(!u) return "";
-      if(u.startsWith("data:image")) return u;
-      let test = u.trim();
-      if(!/^https?:\/\//i.test(test)){
-        test = "https://" + test;
-      }
       try{
-        const url = new URL(test);
+        const url = new URL(u);
         return url.toString();
       }catch{
         return "";
@@ -7837,48 +7628,27 @@ function openMusicModal(existingEntry = null) {
     const coverUrl = normUrl(coverUrlRaw);
     const linkUrl = normUrl(linkUrlRaw);
 
+    const entry = {
+      id: uid("t"),
+      ts: new Date().toISOString(),
+      date: getTodayIso(),
+      song,
+      artist,
+      album,
+      mood,
+      intensity,
+      coverUrl,
+      linkUrl,
+      note
+    };
+
     state.musicLog = Array.isArray(state.musicLog) ? state.musicLog : [];
-
-    if (existingEntry) {
-      const idx = state.musicLog.findIndex(m => m.id === existingEntry.id);
-      if (idx !== -1) {
-        state.musicLog[idx] = {
-          ...existingEntry,
-          song,
-          artist,
-          album,
-          mood,
-          intensity,
-          coverUrl,
-          linkUrl,
-          note
-        };
-        if (state.musicToday && state.musicToday.id === existingEntry.id) {
-          state.musicToday = { ...state.musicLog[idx], updatedAt: new Date().toISOString() };
-        }
-      }
-    } else {
-      const entry = {
-        id: uid("t"),
-        ts: new Date().toISOString(),
-        date: getTodayIso(),
-        song,
-        artist,
-        album,
-        mood,
-        intensity,
-        coverUrl,
-        linkUrl,
-        note
-      };
-      state.musicLog.unshift(entry);
-      state.musicToday = { ...entry, updatedAt: new Date().toISOString() };
-      state.musicCursor = 0;
-    }
-
+    state.musicLog.unshift(entry);
+    state.musicToday = { ...entry, updatedAt: new Date().toISOString() };
+    state.musicCursor = 0;
     persist();
     view();
-    toast(existingEntry ? "Tema editado ✏️" : "Tema guardado ✅");
+    toast("Tema guardado ✅");
     close();
   });
 }
@@ -7889,239 +7659,6 @@ function navigateMusic(delta){
   const next = Math.max(0, Math.min(log.length-1, Number(state.musicCursor||0) + delta));
   state.musicCursor = next;
   view();
-}
-
-function openMusicHubModal() {
-  const host = document.querySelector("#app");
-  const modal = document.createElement("div");
-  modal.className = "modalBackdrop";
-  modal.style.zIndex = "9999";
-  
-  let activeTab = "list"; // list or stats
-  let searchQuery = "";
-  
-  const renderContent = () => {
-    const log = Array.isArray(state.musicLog) ? state.musicLog : [];
-    
-    // Calculate Stats
-    const totalSongs = log.length;
-    
-    const artists = {};
-    const moods = {};
-    let totalIntensity = 0;
-    let intensityCount = 0;
-    
-    log.forEach(m => {
-      if (m.artist) artists[m.artist] = (artists[m.artist] || 0) + 1;
-      if (m.mood) moods[m.mood] = (moods[m.mood] || 0) + 1;
-      if (m.intensity !== null && m.intensity !== undefined) {
-        totalIntensity += Number(m.intensity);
-        intensityCount++;
-      }
-    });
-    
-    const avgIntensity = intensityCount > 0 ? (totalIntensity / intensityCount).toFixed(1) : "0.0";
-    
-    const topArtists = Object.entries(artists)
-      .sort((a,b) => b[1] - a[1])
-      .slice(0, 5);
-      
-    const topMoods = Object.entries(moods)
-      .sort((a,b) => b[1] - a[1])
-      .slice(0, 5);
-
-    // Filter list
-    const filteredLog = log.filter(m => {
-      const q = searchQuery.toLowerCase();
-      return (m.song || "").toLowerCase().includes(q) || 
-             (m.artist || "").toLowerCase().includes(q) || 
-             (m.album || "").toLowerCase().includes(q) || 
-             (m.mood || "").toLowerCase().includes(q) || 
-             (m.note || "").toLowerCase().includes(q);
-    });
-
-    const barRow = (label, val, maxVal, color) => {
-      const pct = maxVal > 0 ? Math.min(100, Math.round((val / maxVal) * 100)) : 0;
-      const w = Math.max(3, pct);
-      return `
-        <div style="margin-bottom:12px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <div style="font-weight:600; font-size:13px; color:#fff;">${label}</div>
-            <div style="font-weight:700; font-size:13px; color:#aaa;">${val} reg.</div>
-          </div>
-          <div style="background:#2a2a2c; border-radius:6px; height:6px; overflow:hidden;">
-            <div style="height:100%; width:${w}%; background:${color}; border-radius:6px;"></div>
-          </div>
-        </div>
-      `;
-    };
-
-    const maxArtistCount = topArtists[0] ? topArtists[0][1] : 0;
-    const maxMoodCount = topMoods[0] ? topMoods[0][1] : 0;
-
-    const listHtml = `
-      <div style="margin-bottom:12px; display:flex; gap:8px;">
-        <input type="text" id="musicHubSearch" class="textInput" placeholder="Buscar por canción, artista o mood..." value="${escapeHtml(searchQuery)}" style="flex:1; margin:0;" />
-      </div>
-      <div style="max-height:50vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;" id="musicHubListContainer">
-        ${filteredLog.map(m => {
-          const hasCover = m.coverUrl && m.coverUrl.trim();
-          return `
-            <div style="background:#2a2a2c; border-radius:12px; padding:12px; display:flex; gap:12px; align-items:center; position:relative;">
-              <div style="width:50px; height:50px; border-radius:8px; overflow:hidden; flex-shrink:0; background:#1c1c1e; display:flex; align-items:center; justify-content:center;">
-                ${hasCover ? `
-                  <img src="${escapeHtml(m.coverUrl)}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
-                  <div style="display:none; font-size:20px;">💿</div>
-                ` : `
-                  <div style="font-size:20px;">💿</div>
-                `}
-              </div>
-              <div style="flex:1; min-width:0;">
-                <div style="font-weight:700; font-size:14px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(m.song)}</div>
-                <div style="font-size:12px; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                  ${m.artist ? escapeHtml(m.artist) : 'Artista desconocido'} ${m.album ? ` • ${escapeHtml(m.album)}` : ''}
-                </div>
-                <div style="display:flex; gap:6px; align-items:center; margin-top:4px; flex-wrap:wrap;">
-                  ${m.mood ? `<span style="background:#7c5cff33; color:#a78bfa; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">${escapeHtml(m.mood)}</span>` : ''}
-                  ${m.intensity !== null && m.intensity !== undefined ? `<span style="background:#f59e0b22; color:#fbbf24; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">⭐ ${m.intensity}/10</span>` : ''}
-                </div>
-              </div>
-              <div style="display:flex; gap:6px; flex-direction:column; align-items:flex-end;">
-                <div style="font-size:10px; color:#888;">${m.date || ''}</div>
-                <div style="display:flex; gap:6px; margin-top:4px;">
-                  ${m.linkUrl ? `
-                    <button class="iconBtn" onclick="window.open('${escapeHtml(m.linkUrl)}', '_blank', 'noopener,noreferrer')" title="Escuchar" style="background:#10b98122; color:#10b981; border-radius:6px; padding:4px 8px; font-size:12px;">▶ Play</button>
-                  ` : ''}
-                  <button class="iconBtn editSongBtn" data-id="${m.id}" title="Editar" style="background:#3b82f622; color:#3b82f6; border-radius:6px; padding:4px 8px; font-size:12px;">✏️</button>
-                  <button class="iconBtn deleteSongBtn" data-id="${m.id}" title="Eliminar" style="background:#ef444422; color:#ef4444; border-radius:6px; padding:4px 8px; font-size:12px;">🗑️</button>
-                </div>
-              </div>
-            </div>
-          `;
-        }).join('') || `<div style="color:#888; text-align:center; padding:20px;">Sin canciones en este filtro.</div>`}
-      </div>
-    `;
-
-    const statsHtml = `
-      <div style="max-height:55vh; overflow-y:auto; display:flex; flex-direction:column; gap:16px;">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-          <div style="background:#2a2a2c; padding:12px; border-radius:10px; text-align:center;">
-            <div style="font-size:11px; color:#aaa; margin-bottom:4px;">Total Canciones</div>
-            <div style="font-size:20px; font-weight:800; color:#7c5cff;">${totalSongs}</div>
-          </div>
-          <div style="background:#2a2a2c; padding:12px; border-radius:10px; text-align:center;">
-            <div style="font-size:11px; color:#aaa; margin-bottom:4px;">Intensidad Promedio</div>
-            <div style="font-size:20px; font-weight:800; color:#f59e0b;">⭐ ${avgIntensity}</div>
-          </div>
-        </div>
-        
-        <div style="background:#2a2a2c; padding:14px; border-radius:12px;">
-          <div style="font-weight:700; font-size:14px; color:#fff; margin-bottom:12px;">🎤 Top Artistas</div>
-          ${topArtists.map(a => barRow(a[0], a[1], maxArtistCount, '#7c5cff')).join('') || '<div style="color:#888; font-size:12px;">Sin datos suficientes</div>'}
-        </div>
-
-        <div style="background:#2a2a2c; padding:14px; border-radius:12px;">
-          <div style="font-weight:700; font-size:14px; color:#fff; margin-bottom:12px;">🧠 Top Moods / Emociones</div>
-          ${topMoods.map(m => barRow(m[0], m[1], maxMoodCount, '#10b981')).join('') || '<div style="color:#888; font-size:12px;">Sin datos suficientes</div>'}
-        </div>
-      </div>
-    `;
-
-    return `
-      <div class="modal" style="max-width:550px; width:95%; background:#1c1c1e; color:#fff; border-radius:16px; padding:16px; display:flex; flex-direction:column; gap:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-weight:800; font-size:18px;">🎵 Historial de Música</span>
-          <button class="iconBtn" id="btnMusicHubClose" style="font-size:18px;">✕</button>
-        </div>
-
-        <div style="display:flex; gap:6px; border-bottom:1px solid #333; padding-bottom:8px;">
-          <button class="finModeBtn ${activeTab==='list'?'finModeBtnActive':''}" id="btnHubTabList" style="flex:1;">Listado 📋</button>
-          <button class="finModeBtn ${activeTab==='stats'?'finModeBtnActive':''}" id="btnHubTabStats" style="flex:1;">Estadísticas 📊</button>
-        </div>
-
-        <div id="musicHubDynamicBody">
-          ${activeTab === 'list' ? listHtml : statsHtml}
-        </div>
-      </div>
-    `;
-  };
-
-  const bindEvents = () => {
-    modal.querySelector("#btnMusicHubClose").addEventListener("click", () => modal.remove());
-    
-    const btnTabList = modal.querySelector("#btnHubTabList");
-    const btnTabStats = modal.querySelector("#btnHubTabStats");
-    
-    btnTabList.addEventListener("click", () => {
-      activeTab = "list";
-      modal.innerHTML = renderContent();
-      bindEvents();
-    });
-    
-    btnTabStats.addEventListener("click", () => {
-      activeTab = "stats";
-      modal.innerHTML = renderContent();
-      bindEvents();
-    });
-
-    if (activeTab === "list") {
-      const searchInput = modal.querySelector("#musicHubSearch");
-      if (searchInput) {
-        searchInput.focus();
-        searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
-        searchInput.addEventListener("input", (e) => {
-          searchQuery = e.target.value;
-          const container = modal.querySelector("#musicHubListContainer");
-          if (container) {
-            const temp = document.createElement('div');
-            temp.innerHTML = renderContent();
-            const newContainer = temp.querySelector("#musicHubListContainer");
-            if (newContainer) {
-              container.innerHTML = newContainer.innerHTML;
-              bindItemEvents();
-            }
-          }
-        });
-      }
-      bindItemEvents();
-    }
-  };
-
-  const bindItemEvents = () => {
-    modal.querySelectorAll(".editSongBtn").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const id = btn.dataset.id;
-        const entry = (state.musicLog || []).find(m => m.id === id);
-        if (entry) {
-          openMusicModal(entry);
-          modal.remove();
-        }
-      });
-    });
-
-    modal.querySelectorAll(".deleteSongBtn").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const id = btn.dataset.id;
-        if (confirm("¿Quieres eliminar este tema de tu historial?")) {
-          state.musicLog = (state.musicLog || []).filter(m => m.id !== id);
-          if (state.musicToday && state.musicToday.id === id) {
-            state.musicToday = state.musicLog[0] || null;
-          }
-          persist();
-          view();
-          modal.innerHTML = renderContent();
-          bindEvents();
-        }
-      });
-    });
-  };
-
-  modal.innerHTML = renderContent();
-  host.appendChild(modal);
-  bindEvents();
-  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
 }
 
 function wireHome(root){
@@ -8135,15 +7672,7 @@ function wireHome(root){
   };
 
   const btnAdd = root.querySelector("#btnAddMusic");
-  if(btnAdd) btnAdd.addEventListener("click", () => openMusicModal());
-
-  const homeMusicCard = root.querySelector("#homeMusicCard");
-  if(homeMusicCard){
-    homeMusicCard.addEventListener("click", (e)=>{
-      if(e.target.closest("#btnMusicPrev") || e.target.closest("#btnMusicNext") || e.target.closest("#btnMusicPlay") || e.target.closest("#btnAddMusic") || e.target.closest(".musicCover")) return;
-      openMusicHubModal();
-    });
-  }
+  if(btnAdd) btnAdd.addEventListener("click", openMusicModal);
 
   const btnSleep = root.querySelector("#btnAddSleep");
   if(btnSleep) btnSleep.addEventListener("click", ()=>openSleepEntryModal());
@@ -14937,22 +14466,8 @@ LS.financeCommitmentTemplates = "memorycarl_v2_finance_commitment_templates";
 LS.financeCommitmentInstances = "memorycarl_v2_finance_commitment_instances";
 LS.financeLoanUsageLedger = "memorycarl_v2_finance_loan_usage_ledger";
 LS.financeRoadmap = "memorycarl_v2_finance_roadmap";
-LS.financeReasons = "memorycarl_v2_finance_reasons";
-LS.financeEntryCategories = "memorycarl_v3_finance_entry_categories";
 
 state.financeLedger = load(LS.financeLedger, []);
-state.financeReasons = load(LS.financeReasons, ["planificado", "impulso", "emergencia", "normal"]);
-state.financeEntryCategories = load(LS.financeEntryCategories, [
-  { id: "Alimentos", icon: "🛒", name: "Alimentos" },
-  { id: "Transporte", icon: "🚕", name: "Transporte" },
-  { id: "Hogar", icon: "🏠", name: "Hogar" },
-  { id: "Ocio", icon: "🍿", name: "Ocio" },
-  { id: "Salud", icon: "💊", name: "Salud" },
-  { id: "Ropa", icon: "👕", name: "Ropa" },
-  { id: "Mascotas", icon: "🐾", name: "Mascotas" },
-  { id: "Otros", icon: "📦", name: "Otros" }
-]);
-state.financePrimaryAccountId = load("memorycarl_v2_finance_primary_account_id", "");
 state.financeAccounts = load(LS.financeAccounts, []);
 state.financeResetAt = load(LS.financeResetAt, null);
 state.financeDebts = load(LS.financeDebts, []);
@@ -15001,7 +14516,7 @@ persist = function(){
   try{ save(LS.financeCommitmentInstances, state.financeCommitmentInstances||[]); }catch(_e){}
   try{ save(LS.financeLoanUsageLedger, state.financeLoanUsageLedger||[]); }catch(_e){}
   try{ save(LS.financeMeta, state.financeMeta); }catch(_e){}
-  try{ save(LS.financeEntryCategories, state.financeEntryCategories); }catch(_e){}
+  try{ save(LS.financeCategories, state.financeCategories); }catch(_e){}
   try{ save(LS.financeRoadmap, state.financeRoadmap||{}); }catch(_e){}
   try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(state.financeProjectionMode||"normal")); }catch(_e){}
 };
@@ -15132,18 +14647,13 @@ function financeMissionControlModel(monthKey){
   const margin = incomeConfirmed - essential;
   const riskScore = pending > incomeConfirmed ? 'ALTO' : (pending > incomeConfirmed*0.6 ? 'MEDIO' : 'BAJO');
 
-  let upcoming = obligations.map(o=>{
+  const upcoming = obligations.map(o=>{
     const day = Number(o.dueDate||1);
     const due = new Date(`${mk}-${String(Math.max(1,Math.min(31,day))).padStart(2,'0')}T12:00:00`);
     const diff = Math.ceil((due.getTime()-Date.now())/(24*60*60*1000));
     const bucket = diff<=0 ? 'hoy' : (diff<=7?'esta semana':(diff<=14?'urgente':'postergable'));
-    return {...o, due, bucket, _type: 'commitment'};
-  });
-
-  // Disconnected from Mission Control as requested
-
-
-  upcoming.sort((a,b)=>a.due-b.due);
+    return {...o, due, bucket};
+  }).sort((a,b)=>a.due-b.due);
 
   return {mk,incomeConfirmed,obligationsMonth,paidNow,pending,realAvailable,foreignUse,internalDebt,margin,riskScore,upcoming,tx};
 }
@@ -15305,13 +14815,7 @@ function financeRecomputeBalances(){
     if(!accId) return;
     if(sums[accId] === undefined) sums[accId] = 0;
     const amt = Number(e.amount||0);
-    if(e.type === "expense") {
-      if (e.isFiado && e.fiadoStatus !== "paid") {
-        // Ignorar fiados pendientes de pago
-      } else {
-        sums[accId] -= amt;
-      }
-    }
+    if(e.type === "expense") sums[accId] -= amt;
     else if(e.type === "income") sums[accId] += amt;
     // transfers handled elsewhere later
   });
@@ -15419,8 +14923,7 @@ function addFinanceAccount({name, type="bank", balance=0, color=null}){
   return acc;
 }
 
-function addFinanceEntry(payload){
-  const {type, amount, accountId, category, reason, note, date, neuronRole, isFiado, fiadoStatus} = payload;
+function addFinanceEntry({type, amount, accountId, category, reason, note, date, neuronRole}){
   const acc = state.financeAccounts.find(a=>a.id===accountId);
   if(!acc) return null;
 
@@ -15441,15 +14944,7 @@ function addFinanceEntry(payload){
     note: note||"",
     neuronRole: resolvedNeuronRole,
     neuronId: `mov_${entryId}`,
-    archived: false,
-    isFiado: !!isFiado,
-    fiadoStatus: fiadoStatus || null,
-    // carry over usd props if present
-    usdGross: payload.usdGross || null,
-    usdNet: payload.usdNet || null,
-    usdFee: payload.usdFee || null,
-    usdExchange: payload.usdExchange || null,
-    usdFixedFee: payload.usdFixedFee || null
+    archived: false
   };
 
   state.financeLedger.unshift(entry);
@@ -15761,10 +15256,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   const existing = existingId ? (state.financeLedger||[]).find(e=>e.id===existingId) : null;
 
   const now = new Date();
-  const yyyy = now.getFullYear();
-  const mmMonth = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const isoDate = `${yyyy}-${mmMonth}-${dd}`;
+  const isoDate = now.toISOString().slice(0,10);
   const hh = String(now.getHours()).padStart(2,'0');
   const mm = String(now.getMinutes()).padStart(2,'0');
 
@@ -15785,7 +15277,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     time: (existing?.date ? String(existing.date).slice(11,16) : `${hh}:${mm}`),
     category: (existing?.category) || "Otros",
     reason: (existing?.reason) || "normal",
-    accountId: (existing?.accountId) || state.financePrimaryAccountId || (state.financeAccounts||[])[0]?.id,
+    accountId: (existing?.accountId) || (state.financeAccounts||[])[0]?.id,
     neuronRole: (existing?.neuronRole) || "auto",
     note: existingSplit.note
   };
@@ -15794,7 +15286,16 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop';
   
-  const topCats = state.financeEntryCategories || [];
+  const topCats = [
+    { id: "Alimentos", icon: "🛒", name: "Alimentos" },
+    { id: "Transporte", icon: "🚕", name: "Transporte" },
+    { id: "Hogar", icon: "🏠", name: "Hogar" },
+    { id: "Ocio", icon: "🍿", name: "Ocio" },
+    { id: "Salud", icon: "💊", name: "Salud" },
+    { id: "Ropa", icon: "👕", name: "Ropa" },
+    { id: "Mascotas", icon: "🐾", name: "Mascotas" },
+    { id: "Otros", icon: "📦", name: "Otros" }
+  ];
 
   backdrop.innerHTML = `
     <div class="finProModal">
@@ -15812,77 +15313,23 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <div class="finProTypeBtn transfer ${draft.type==='transfer'?'active':''}" data-type="transfer">Traspaso</div>
       </div>
 
-      <div id="finProIncomeOpts" style="display:${draft.type==='income'?'block':'none'}; margin: 12px 0; background: #1c1c1e; padding: 12px; border-radius: 12px; border: 1px solid #333;">
-        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; cursor:pointer;">
-          <input type="checkbox" id="finEntryIsLoan" ${existing?.isLoan?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
-          <span style="font-size:14px; font-weight:600;">Me prestaron dinero (Generar Deuda)</span>
-        </label>
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="checkbox" id="finEntryIsUSD" ${existing?.usdGross?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
-          <span style="font-size:14px; font-weight:600;">Ingreso en Dólares (PayPal/Ligo)</span>
-        </label>
-        
-        <div id="finProUSDOpts" style="display:${existing?.usdGross?'block':'none'}; margin-top:12px; padding-top:12px; border-top:1px dashed #444;">
-          <div style="display:flex; gap:10px; margin-bottom:10px;">
-            <div style="flex:1">
-              <div style="font-size:12px; color:#aaa; margin-bottom:4px;">USD Bruto</div>
-              <input type="number" id="finEntryUSDGross" inputmode="decimal" class="textInput" placeholder="20.00" value="${existing?.usdGross||''}" style="width:100%; box-sizing:border-box;">
-            </div>
-            <div style="flex:1">
-              <div style="font-size:12px; color:#aaa; margin-bottom:4px;">USD Neto (PayPal)</div>
-              <input type="number" id="finEntryUSDNet" inputmode="decimal" class="textInput" placeholder="18.20" value="${existing?.usdNet||''}" style="width:100%; box-sizing:border-box;">
-            </div>
-          </div>
-          <div style="display:flex; gap:10px; margin-bottom:10px;">
-            <div style="flex:1">
-              <div style="font-size:12px; color:#aaa; margin-bottom:4px;">Com. Fija Ligo ($)</div>
-              <input type="number" id="finEntryUSDFixedFee" inputmode="decimal" class="textInput" placeholder="2.00" value="${existing?.usdFixedFee ?? '2.00'}" style="width:100%; box-sizing:border-box;">
-            </div>
-            <div style="flex:1">
-              <div style="font-size:12px; color:#aaa; margin-bottom:4px;">Tipo de Cambio</div>
-              <input type="number" id="finEntryUSDExchange" inputmode="decimal" class="textInput" placeholder="3.75" value="${existing?.usdExchange||''}" style="width:100%; box-sizing:border-box;">
-            </div>
-          </div>
-          <div style="font-size:12px; color:#888;">La comisión (<span id="finEntryUSDFeeLabel">0.00</span> USD) y el monto en Soles se calculan solos.</div>
-        </div>
-      </div>
-
-      <div id="finProExpenseOpts" style="display:${draft.type==='expense'?'block':'none'}; margin: 12px 0; background: #1c1c1e; padding: 12px; border-radius: 12px; border: 1px solid #333;">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="checkbox" id="finEntryIsFiado" ${existing?.isFiado?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
-          <span style="font-size:14px; font-weight:600;">Es un Fiado (Pagar después)</span>
-        </label>
-      </div>
-
       <div class="finProAmountWrap">
         <span class="finProCurrency">S/</span>
         <input type="text" inputmode="decimal" id="finEntryAmount" class="finProAmountInput" placeholder="0.00" value="${escapeHtml(draft.amount)}">
       </div>
 
-      <div class="finEntryDateRow" style="margin-top:12px; margin-bottom:12px; display:flex; gap:10px; justify-content:center;">
-        <div class="finEntryDateChip" style="background:#2a2a2c; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:6px;"><span>📅</span><input id="finEntryDate" type="date" value="${draft.date}" style="background:transparent; color:#fff; border:none; outline:none; font-size:13px; font-family:inherit;" /></div>
-        <div class="finEntryDateChip" style="background:#2a2a2c; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:6px;"><span>🕒</span><input id="finEntryTime" type="time" value="${draft.time}" style="background:transparent; color:#fff; border:none; outline:none; font-size:13px; font-family:inherit;" /></div>
-      </div>
-
       <div class="finProCatGrid" id="finCatGrid">
         ${topCats.map(c => `
-          <div class="finProCatChip ${draft.category === c.name ? 'active' : ''}" data-cat="${c.name}" style="position:relative;">
+          <div class="finProCatChip ${draft.category === c.name ? 'active' : ''}" data-cat="${c.name}">
             <div class="finProCatIcon">${c.icon}</div>
             <div class="finProCatName">${c.name}</div>
-            ${!["Alimentos", "Transporte", "Hogar", "Ocio", "Salud", "Ropa", "Mascotas", "Otros"].includes(c.id) ? `
-              <button class="deleteCatBtn" data-id="${c.id}" style="position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:900; line-height:16px; text-align:center; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index: 10;">✕</button>
-            ` : ""}
           </div>
         `).join('')}
-        <div class="finProCatChip" id="btnAddCustomCategory" style="border: 1px dashed #7c5cff; background: transparent;">
-          <div class="finProCatIcon" style="color: #7c5cff;">➕</div>
-          <div class="finProCatName" style="color: #7c5cff;">Nuevo</div>
-        </div>
       </div>
 
       <input type="text" id="finEntryName" class="finProNote" placeholder="Descripción (Ej. Café Starbucks)" value="${escapeHtml(draft.name)}">
       
-      <div class="finProAdvToggle" id="finAdvToggle">Más opciones (Cuentas, Notas) ▼</div>
+      <div class="finProAdvToggle" id="finAdvToggle">Más opciones (Cuentas, Fechas, Notas) ▼</div>
       
       <div class="finProAdvSection" id="finAdvSection">
         <div class="finEntryPickRow">
@@ -15895,6 +15342,11 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
               </select>
             </div>
           </div>
+        </div>
+        
+        <div class="finEntryDateRow" style="margin-top:12px; margin-bottom:12px;">
+          <div class="finEntryDateChip"><span>📅</span><input id="finEntryDate" type="date" value="${draft.date}" /></div>
+          <div class="finEntryDateChip"><span>🕒</span><input id="finEntryTime" type="time" value="${draft.time}" /></div>
         </div>
         
         <textarea id="finEntryNote" class="finProNote" style="height:60px; margin-bottom:12px; font-size:14px;" placeholder="Notas adicionales">${escapeHtml(draft.note)}</textarea>
@@ -15918,8 +15370,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
           <div class="finEntryField" style="flex:1">
             <label class="fieldLabel">Motivo</label>
             <select id="finEntryReason" class="textInput">
-              ${state.financeReasons.map(r=>`<option value="${r}" ${r===(draft.reason||"normal")?'selected':''}>${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join('')}
-              <option value="__add_new__">＋ Agregar nuevo...</option>
+              ${[["planificado","Planificado"],["impulso","Impulso"],["emergencia","Emergencia"],["normal","Normal"]].map(r=>`<option value="${r[0]}" ${r[0]===(draft.reason||"normal")?'selected':''}>${r[1]}</option>`).join('')}
             </select>
           </div>
           <div class="finEntryField" style="flex:1">
@@ -15954,185 +15405,26 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     }
   });
 
-  const incomeOpts = backdrop.querySelector('#finProIncomeOpts');
-  const expenseOpts = backdrop.querySelector('#finProExpenseOpts');
   backdrop.querySelectorAll('.finProTypeBtn').forEach(btn => {
     btn.addEventListener('click', () => {
       backdrop.querySelectorAll('.finProTypeBtn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       draft.type = btn.getAttribute('data-type');
-      if (draft.type === 'income') {
-        if (incomeOpts) incomeOpts.style.display = 'block';
-        if (expenseOpts) expenseOpts.style.display = 'none';
-      } else if (draft.type === 'expense') {
-        if (incomeOpts) incomeOpts.style.display = 'none';
-        if (expenseOpts) expenseOpts.style.display = 'block';
-      } else {
-        if (incomeOpts) incomeOpts.style.display = 'none';
-        if (expenseOpts) expenseOpts.style.display = 'none';
-      }
     });
   });
 
-  const isUSD = backdrop.querySelector('#finEntryIsUSD');
-  const usdOpts = backdrop.querySelector('#finProUSDOpts');
-  const usdGross = backdrop.querySelector('#finEntryUSDGross');
-  const usdNet = backdrop.querySelector('#finEntryUSDNet');
-  const usdExchange = backdrop.querySelector('#finEntryUSDExchange');
-  const usdFixedFee = backdrop.querySelector('#finEntryUSDFixedFee');
-  const usdFeeLabel = backdrop.querySelector('#finEntryUSDFeeLabel');
-  const mainAmount = backdrop.querySelector('#finEntryAmount');
-
-  if (isUSD) {
-    const handleUSDToggle = () => {
-      usdOpts.style.display = isUSD.checked ? 'block' : 'none';
-      if (isUSD.checked) {
-        mainAmount.readOnly = true;
-        mainAmount.style.opacity = '0.5';
-      } else {
-        mainAmount.readOnly = false;
-        mainAmount.style.opacity = '1';
-      }
-    };
-    isUSD.addEventListener('change', handleUSDToggle);
-    handleUSDToggle();
-
-    const recalcUSD = () => {
-      if (!isUSD.checked) return;
-      const gross = parseFloat(usdGross.value) || 0;
-      const net = parseFloat(usdNet.value) || 0;
-      const ex = parseFloat(usdExchange.value) || 0;
-      const fixFee = parseFloat(usdFixedFee.value) || 0;
-      
-      const totalFee = Math.max(0, (gross - net) + fixFee);
-      if (usdFeeLabel) usdFeeLabel.innerText = totalFee.toFixed(2);
-      
-      const finalUSD = Math.max(0, net - fixFee);
-      const netSoles = finalUSD * ex;
-      mainAmount.value = netSoles > 0 ? netSoles.toFixed(2) : '';
-    };
-    usdGross.addEventListener('input', recalcUSD);
-    usdNet.addEventListener('input', recalcUSD);
-    usdExchange.addEventListener('input', recalcUSD);
-    usdFixedFee.addEventListener('input', recalcUSD);
-  }
-
-  const reasonSelect = backdrop.querySelector('#finEntryReason');
-  if (reasonSelect) {
-    reasonSelect.addEventListener('change', () => {
-      if (reasonSelect.value === '__add_new__') {
-        const newReason = prompt('Ingresa el nuevo motivo/razón:');
-        if (newReason && newReason.trim()) {
-          const cleaned = newReason.trim().toLowerCase();
-          if (!state.financeReasons.includes(cleaned)) {
-            state.financeReasons.push(cleaned);
-            save(LS.financeReasons, state.financeReasons);
-          }
-          reasonSelect.innerHTML = state.financeReasons.map(r => `<option value="${r}" ${r===cleaned?'selected':''}>${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join('') + '<option value="__add_new__">＋ Agregar nuevo...</option>';
-          reasonSelect.value = cleaned;
-        } else {
-          reasonSelect.value = 'normal';
-        }
-      }
+  backdrop.querySelectorAll('.finProCatChip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      backdrop.querySelectorAll('.finProCatChip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      draft.category = chip.getAttribute('data-cat');
     });
-  }
-
-  const renderCatGrid = (activeCat) => {
-    const grid = backdrop.querySelector('#finCatGrid');
-    if (!grid) return;
-
-    // Count usage of each category across the full ledger
-    const usageCounts = {};
-    (state.financeLedger || []).forEach(e => {
-      const cat = e.category || 'Otros';
-      usageCounts[cat] = (usageCounts[cat] || 0) + 1;
-    });
-
-    // Sort all categories by usage descending — show ALL (grid now scrolls)
-    const allCats = state.financeEntryCategories || [];
-    const visible = [...allCats].sort((a, b) => (usageCounts[b.name] || 0) - (usageCounts[a.name] || 0));
-
-    const DEFAULT_CATS = ["Alimentos", "Transporte", "Hogar", "Ocio", "Salud", "Ropa", "Mascotas", "Otros"];
-
-    grid.innerHTML = visible.map(c => `
-      <div class="finProCatChip ${activeCat === c.name ? 'active' : ''}" data-cat="${c.name}" style="position:relative;">
-        <div class="finProCatIcon">${c.icon}</div>
-        <div class="finProCatName">${c.name}</div>
-        ${!DEFAULT_CATS.includes(c.id) ? `
-          <button class="deleteCatBtn" data-id="${c.id}" style="position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:900; line-height:16px; text-align:center; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index: 10;">✕</button>
-        ` : ""}
-      </div>
-    `).join('') + `
-      <div class="finProCatChip" id="btnAddCustomCategory" style="border: 1px dashed #7c5cff; background: transparent; flex-shrink:0;">
-        <div class="finProCatIcon" style="color: #7c5cff;">➕</div>
-        <div class="finProCatName" style="color: #7c5cff;">Nuevo</div>
-      </div>
-    `;
-
-    // Scroll active chip into view
-    requestAnimationFrame(() => {
-      const activeChip = grid.querySelector('.finProCatChip.active');
-      if (activeChip) activeChip.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
-    });
-    
-    grid.querySelectorAll('.finProCatChip').forEach(chip => {
-      if (chip.id === 'btnAddCustomCategory') {
-        chip.addEventListener('click', () => {
-          const name = prompt('Nombre de la nueva categoría (Ej. Pepsi, Desayuno):');
-          if (name && name.trim()) {
-            const cleanName = name.trim();
-            const emoji = prompt('Emoji para la categoría (opcional):', '🏷️') || '🏷️';
-            const cleanEmoji = emoji.trim() || '🏷️';
-            
-            if (!state.financeEntryCategories) state.financeEntryCategories = [];
-            const exists = state.financeEntryCategories.some(c => c.name.toLowerCase() === cleanName.toLowerCase());
-            if (!exists) {
-              state.financeEntryCategories.push({ id: cleanName, icon: cleanEmoji, name: cleanName });
-              save(LS.financeEntryCategories, state.financeEntryCategories);
-              draft.category = cleanName;
-              renderCatGrid(cleanName);
-            } else {
-              alert('La categoría ya existe');
-            }
-          }
-        });
-        return;
-      }
-      
-      chip.addEventListener('click', () => {
-        grid.querySelectorAll('.finProCatChip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        draft.category = chip.dataset.cat || chip.getAttribute('data-cat');
-      });
-    });
-
-    grid.querySelectorAll('.deleteCatBtn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = btn.dataset.id;
-        if (confirm(`¿Quieres eliminar la categoría "${id}"?`)) {
-          state.financeEntryCategories = state.financeEntryCategories.filter(c => c.id !== id);
-          save(LS.financeEntryCategories, state.financeEntryCategories);
-          if (draft.category === id) draft.category = 'Otros';
-          renderCatGrid(draft.category);
-        }
-      });
-    });
-  };
-
-  renderCatGrid(draft.category);
+  });
 
   backdrop.querySelector('#finEntryDelete')?.addEventListener('click', ()=>{
     if(!existing) return;
-    const ok = confirm('¿Eliminar este movimiento?');
-    if(!ok) return;
-    deleteFinanceEntry(existing.id);
-    toast('Eliminado ✅');
-    close();
-  });
+  refreshImpactPreview();
 
-  // No necesitamos refreshImpactPreview aquí porque está escondido en avanzado y no tiene impacto dinámico complejo en la v Pro, pero lo dejamos por si acaso
-  try { if(typeof refreshImpactPreview === 'function') refreshImpactPreview(); } catch(e){}
   // save
 backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
@@ -16161,63 +15453,31 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   // NOTE: guardamos "Nombre" como parte de note para mantener el esquema simple
   const note = name ? (noteText ? `${name} · ${noteText}` : name) : noteText;
 
-  const isUSDChecked = backdrop.querySelector('#finEntryIsUSD')?.checked;
-  const usdGross = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDGross')?.value) || 0) : null;
-  const usdNet = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDNet')?.value) || 0) : null;
-  const usdFixedFee = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDFixedFee')?.value) || 0) : null;
-  const usdFee = isUSDChecked ? Math.max(0, (usdGross - usdNet) + usdFixedFee) : null;
-  const usdExchange = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDExchange')?.value) || 0) : null;
-  
-  const isLoanChecked = backdrop.querySelector('#finEntryIsLoan')?.checked;
-  const isFiadoChecked = !!backdrop.querySelector('#finEntryIsFiado')?.checked;
-
-  const entryPayload = {
-    type: draft.type,
-    amount,
-    accountId,
-    category,
-    reason,
-    note,
-    date: dateISO,
-    neuronRole,
-    isLoan: isLoanChecked,
-    isFiado: isFiadoChecked,
-    fiadoStatus: existing ? (isFiadoChecked ? (existing.fiadoStatus || "pending") : null) : (isFiadoChecked ? "pending" : null),
-    usdGross,
-    usdNet,
-    usdFee,
-    usdExchange,
-    usdFixedFee
-  };
-
   if(existing){
-    updateFinanceEntry(existing.id, entryPayload);
+    updateFinanceEntry(existing.id, {
+      type: draft.type,
+      amount,
+      accountId,
+      category,
+      reason,
+      note,
+      date: dateISO,
+      neuronRole
+    });
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
     toast('Actualizado ✅');
   }else{
-    addFinanceEntry(entryPayload);
+    addFinanceEntry({
+      type: draft.type,
+      amount,
+      accountId,
+      category,
+      reason,
+      note,
+      date: dateISO,
+      neuronRole
+    });
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
-    
-    // Auto-create debt if it's a loan received
-    if (isLoanChecked && draft.type === 'income') {
-      if (!Array.isArray(state.financeDebts)) state.financeDebts = [];
-      const newDebtId = "debt_" + Date.now() + Math.random().toString(36).substr(2, 5);
-      state.financeDebts.unshift({
-        id: newDebtId,
-        name: name || "Préstamo rápido",
-        provider: "",
-        type: "person_loan",
-        originalBalance: amount,
-        balance: amount,
-        monthlyDue: amount,
-        dueDay: new Date(dateISO).getDate(),
-        apr: 0,
-        status: "active",
-        createdAt: new Date().toISOString()
-      });
-      try{ save(LS.financeDebts, state.financeDebts); }catch(_e){}
-    }
-
     toast('Guardado ✅');
     // Auto-update neural map and open neuron modal pre-filled with this movement
     try {
@@ -17595,58 +16855,15 @@ function financeEnsureCommitments(){
   state.financeCommitmentInstances = (state.financeCommitmentInstances||[]).filter(i=>_knownTplIds.has(i.templateId));
 
   // Clean up orphaned obligations whose commitment template has been deleted
-  // BUT preserve obligations that come from debts (they have _fromDebt flag or match a debt id)
   if(Array.isArray(state.financeObligations) && state.financeObligations.length){
     const _oblAllowedIds = new Set();
     (state.financeCommitmentTemplates||[]).forEach(t=>{
       _oblAllowedIds.add(t.id);
       if(t.legacyCommitmentId) _oblAllowedIds.add(t.legacyCommitmentId);
     });
-    const _debtIds = new Set((state.financeDebts||[]).map(d=>d.id));
     state.financeObligations = state.financeObligations.filter(o =>
       _oblAllowedIds.has(o.id) || (o.legacyCommitmentId && _oblAllowedIds.has(o.legacyCommitmentId))
-      || o._fromDebt || _debtIds.has(o._debtId) || _debtIds.has(o.id)
     );
-  }
-
-  // Sync active debts into obligations so Mission Control always shows them
-  try {
-    if(!Array.isArray(state.financeObligations)) state.financeObligations = [];
-    const _existingOblIds = new Set((state.financeObligations||[]).map(o=>o._debtId || o.id));
-    (state.financeDebts||[]).filter(d=>String(d.status||'active')==='active').forEach(d=>{
-      if(_existingOblIds.has(d.id)) {
-        // Update existing obligation from debt
-        const obl = state.financeObligations.find(o=>o._debtId===d.id || o.id===d.id);
-        if(obl){
-          obl.name = d.name;
-          obl.amountExpected = Number(d.monthlyDue||0);
-          obl.dueDate = Number(d.dueDay||30);
-          obl.isActive = true;
-        }
-      } else {
-        // Create new obligation from debt
-        state.financeObligations.push({
-          id: uid('obl'),
-          _debtId: d.id,
-          _fromDebt: true,
-          name: d.name,
-          category: 'Deuda',
-          type: 'debt',
-          amountExpected: Number(d.monthlyDue||0),
-          dueDate: Number(d.dueDay||30),
-          recurrence: 'monthly',
-          priority: 'high',
-          isActive: true,
-          status: 'pending',
-          notes: d.provider || ''
-        });
-      }
-    });
-    // Remove obligations for debts that are no longer active
-    const _activeDebtIds = new Set((state.financeDebts||[]).filter(d=>String(d.status||'active')==='active').map(d=>d.id));
-    state.financeObligations = state.financeObligations.filter(o=>!o._fromDebt || _activeDebtIds.has(o._debtId));
-  } catch(e) {
-    console.error("Failed to sync debts to obligations", e);
   }
 
   const monthKey = getCurrentMonthKey();
@@ -18617,7 +17834,6 @@ function financeDebtSimulate({strategy, extraMonthly, externalMonthly, includeIn
     totalInterest: 0,
     totalPaid: 0,
     steps: [],
-    payoffSchedule: [],
     ok: debts0.length>0
   };
   if(!out.ok){
@@ -18664,9 +17880,6 @@ function financeDebtSimulate({strategy, extraMonthly, externalMonthly, includeIn
         // debt paid: free its minimum payment for next months
         freed += Math.max(0, d.due||0);
         d.balance = 0;
-        if(!out.payoffSchedule.find(p=>p.id===d.id)){
-          out.payoffSchedule.push({ id: d.id, name: d.name, month: monthCursor.toISOString().slice(0,7), monthsElapsed: month + 1 });
-        }
       }
     }
 
@@ -18684,9 +17897,6 @@ function financeDebtSimulate({strategy, extraMonthly, externalMonthly, includeIn
       if(target.balance<=0.01){
         freed += Math.max(0, target.due||0);
         target.balance = 0;
-        if(!out.payoffSchedule.find(p=>p.id===target.id)){
-          out.payoffSchedule.push({ id: target.id, name: target.name, month: monthCursor.toISOString().slice(0,7), monthsElapsed: month + 1 });
-        }
       }
     }
 
@@ -18709,13 +17919,6 @@ function financeDebtSimulate({strategy, extraMonthly, externalMonthly, includeIn
 
     // advance month
     monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth()+1, 1);
-  }
-
-  // Ensure any debts paid off at the very end get recorded in the schedule
-  for(const d of debts) {
-    if(d.balance <= 0.01 && !out.payoffSchedule.find(p=>p.id===d.id)) {
-      out.payoffSchedule.push({ id: d.id, name: d.name, month: monthCursor.toISOString().slice(0,7), monthsElapsed: out.months });
-    }
   }
 
   if(!out.finishISO){
@@ -19013,8 +18216,8 @@ function financeDebtPlanUI(){
 
   const targetLine = target
     ? (plan.strategy==='avalanche'
-      ? `Prioridad: <strong>${escapeHtml(target.name)}</strong> (APR más alto) ⚡`
-      : `Prioridad: <strong>${escapeHtml(target.name)}</strong> (saldo más pequeño) ⛄`)
+      ? `Prioridad: <strong>${escapeHtml(target.name)}</strong> (APR más alto)`
+      : `Prioridad: <strong>${escapeHtml(target.name)}</strong> (saldo más pequeño)`)
     : `Sin deudas activas.`;
 
   const finishLbl = (function(){
@@ -19039,32 +18242,6 @@ function financeDebtPlanUI(){
     : `<div class="muted">Simulación sin interés (solo amortización). Útil para tener un estimado rápido.</div>`;
 
   const extHint = `<div class="muted">Tip: el ingreso externo (emprendimiento de Fergis) puede ir directo a cubrir intereses o acelerar la deuda objetivo.</div>`;
-
-  let timelineHtml = "";
-  if (sim.ok && sim.payoffSchedule && sim.payoffSchedule.length > 0) {
-    const symbol = plan.strategy === 'avalanche' ? '⚡' : '⛄';
-    timelineHtml = `
-      <div style="margin-top: 14px; margin-bottom: 14px; background: rgba(124, 92, 255, 0.04); border: 1px solid rgba(124, 92, 255, 0.1); border-radius: 12px; padding: 14px;">
-        <div style="font-weight: 700; font-size: 13px; color: #fff; margin-bottom: 10px;">📅 Cronograma de Liquidación:</div>
-        <div style="display: flex; flex-direction: column; gap: 12px; border-left: 2px dashed rgba(124, 92, 255, 0.3); padding-left: 14px; margin-left: 6px;">
-          ${sim.payoffSchedule.map((p, idx) => {
-            let monthLabel = p.month;
-            try {
-              const d = new Date(p.month + "-02T12:00:00");
-              monthLabel = d.toLocaleDateString('es-PE', { month: 'short', year: 'numeric' });
-            } catch(e) {}
-            return `
-              <div style="position: relative;">
-                <div style="position: absolute; left: -20px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: #7c5cff; border: 2px solid #1c1c1e;"></div>
-                <div style="font-size: 13px; font-weight: 700; color: #fff;">${escapeHtml(p.name)}</div>
-                <div style="font-size: 11px; color: #aaa;">Liquidado en: <strong>${escapeHtml(monthLabel)}</strong> (${p.monthsElapsed} ${p.monthsElapsed === 1 ? 'mes' : 'meses'}) ${symbol}</div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-    `;
-  }
 
   return `
     <div class="finPlanBox">
@@ -19106,8 +18283,6 @@ function financeDebtPlanUI(){
       </div>
 
       <div style="margin-top:10px">${interestNote}</div>
-      
-      ${timelineHtml}
 
       <div class="hr" style="margin-top:12px"></div>
       <div class="muted" style="margin-bottom:6px">Vista previa (primeros meses)</div>
@@ -19146,170 +18321,75 @@ function renderFinanceDebtsTab(){
   const monthKey = getCurrentMonthKey();
   const meta = (state.financeMeta||{})[monthKey] || {expectedIncome:0};
 
-  const originalTotal = (state.financeDebts || []).reduce((s, d) => s + financeDebtSafeNum(d.originalBalance ?? d.balance), 0);
   const totalBal = financeDebtTotalBalance();
-  const paidSoFar = Math.max(0, originalTotal - totalBal);
-  const progressPct = originalTotal > 0 ? Math.round((paidSoFar / originalTotal) * 100) : 0;
   const monthly = financeDebtMonthlyTotal();
   const income = financeDebtSafeNum(meta.expectedIncome||0);
   const gap = income - monthly;
 
-  const allDebts = (state.financeDebts || []).filter(d => String(d.status || 'active') !== 'archived');
-  const activeDebts = allDebts.filter(d => String(d.status || 'active') === 'active');
-  const paidDebts = allDebts.filter(d => String(d.status || 'active') === 'closed');
-
-  const typeIcons = { loan: '🏢', card: '💳', app: '📱' };
-  
-  const activeListHtml = activeDebts
-    .sort((a, b) => financeDebtSafeNum(b.balance) - financeDebtSafeNum(a.balance))
-    .map(d => {
+  const debts = financeDebtsActive();
+  const list = debts
+    .sort((a,b)=>{
+      const sa = String(a.status||'active');
+      const sb = String(b.status||'active');
+      if(sa!==sb) return sa==='active' ? -1 : 1;
+      return financeDebtSafeNum(b.balance) - financeDebtSafeNum(a.balance);
+    })
+    .map(d=>{
       const p = financeDebtProgress(d);
       const dueIso = financeDebtNextDueISO(d.dueDay);
       const dueLbl = financeDebtDueLabel(dueIso);
-      const typeIcon = typeIcons[d.type] || '💰';
-      const aprText = d.apr ? ` · ${d.apr}% APR` : '';
       return `
-        <div class="finDebtRow" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); padding: 14px; border-radius: 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px;">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
-            <div onclick="openFinanceDebtModalById('${d.id}')" style="cursor:pointer; flex:1; min-width:0; padding-right:8px;">
-              <div style="font-weight: 800; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 8px;">
-                <span>${typeIcon}</span>
-                <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(d.name)}</span>
-                ${financeDebtStatusChip(d)}
-              </div>
-              <div style="font-size: 12px; color: #aaa; margin-top: 4px;">
-                Cuota: <strong>S/ ${fmt(d.monthlyDue||0)}</strong> · vence: <strong>${escapeHtml(dueLbl)}</strong>${aprText}
-              </div>
-            </div>
-            <div class="finDebtActions" style="display:flex; gap:6px; flex-shrink:0;">
-              <button class="iconBtn" title="Registrar pago" onclick="openFinanceDebtPayModal('${d.id}')" style="background: rgba(52,211,153,0.15); color: #34d399; padding: 6px; border-radius: 8px; font-size: 13px;">💸</button>
-              <button class="iconBtn" title="Editar" onclick="openFinanceDebtModalById('${d.id}')" style="background: rgba(96,165,250,0.15); color: #60a5fa; padding: 6px; border-radius: 8px; font-size: 13px;">✏️</button>
-              <button class="iconBtn" title="Borrar deuda" onclick="deleteFinanceDebt('${d.id}')" style="background: rgba(248,113,113,0.15); color: #f87171; padding: 6px; border-radius: 8px; font-size: 13px;">🗑️</button>
-            </div>
+        <div class="finDebtRow">
+          <div class="finDebtLeft" onclick="openFinanceDebtModalById('${d.id}')" style="cursor:pointer">
+            <div class="finDebtTitle">${escapeHtml(d.name)} ${financeDebtStatusChip(d)}</div>
+            <div class="muted">Pago: S/ ${fmt(d.monthlyDue||0)} · vence: ${escapeHtml(dueLbl)} · saldo: S/ ${fmt(d.balance||0)}</div>
+            <div class="finDebtBar"><div class="finDebtBarFill" style="width:${p.pct}%"></div></div>
           </div>
-          
-          <div style="margin-top: 4px;">
-            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-bottom: 4px;">
-              <span>Progreso: ${p.pct}%</span>
-              <span>S/ ${fmt(p.paid)} pagado (queda S/ ${fmt(p.bal)})</span>
-            </div>
-            <div style="background: #2a2a2c; border-radius: 6px; height: 6px; overflow: hidden; width: 100%;">
-              <div style="height: 100%; width: ${p.pct}%; background: linear-gradient(90deg, #7c5cff, #36d399); border-radius: 6px;"></div>
-            </div>
+          <div class="finDebtActions">
+            <button class="iconBtn" title="Registrar pago" onclick="openFinanceDebtPayModal('${d.id}')">💸</button>
+            <button class="iconBtn" title="Editar" onclick="openFinanceDebtModalById('${d.id}')">✏️</button>
+            <button class="iconBtn" title="Borrar deuda" onclick="deleteFinanceDebt('${d.id}')">🗑️</button>
           </div>
         </div>
       `;
-    }).join('') || `<div class="muted" style="text-align:center; padding: 20px 0;">Sin deudas activas. ¡Excelente! 🎉</div>`;
-
-  const paidListHtml = paidDebts.length > 0 ? `
-    <div style="margin-top: 16px; background: rgba(54, 211, 153, 0.05); border: 1px dashed rgba(54, 211, 153, 0.2); border-radius: 12px; padding: 12px;">
-      <div style="font-weight: 700; font-size: 13px; color: #36d399; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-        <span>🎉</span> Victoria Financiera (${paidDebts.length} deudas pagadas)
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 6px;">
-        ${paidDebts.map(d => `
-          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #888;">
-            <span style="text-decoration: line-through;">${escapeHtml(d.name)}</span>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <span>S/ 0.00 saldo</span>
-              <button class="iconBtn" onclick="deleteFinanceDebt('${d.id}')" title="Eliminar de la lista" style="font-size: 10px; background:transparent; padding:0; opacity:0.6;">🗑️</button>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  ` : '';
-
-  const debtNames = (state.financeDebts || []).map(d => d.name.toLowerCase());
-  const paymentLedger = (state.financeLedger || []).filter(e => {
-    if (e.type !== 'expense') return false;
-    const cat = String(e.category || "").toLowerCase();
-    const note = String(e.note || "").toLowerCase();
-    if (cat === "deuda") return true;
-    return debtNames.some(name => note.includes(name) || cat.includes(name));
-  });
-
-  const recentPaymentsHtml = paymentLedger.length > 0 ? `
-    <div class="finPlanBox" style="margin-top: 14px;">
-      <div class="cardTop" style="margin-top:0">
-        <h3 class="cardTitle" style="font-size:14px;">💸 Pagos recientes registrados</h3>
-      </div>
-      <div class="hr"></div>
-      <div style="display:flex; flex-direction:column; gap:6px;">
-        ${paymentLedger.slice(0, 5).map(e => {
-          const rawNote = String(e.note || "");
-          const hasSep = rawNote.includes(" · ");
-          const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
-          const shownDesc = desc || "Pago de deuda";
-          return `
-            <div style="display:flex; justify-content:space-between; font-size:12px; color:#ddd; padding:4px 0; border-bottom:1px solid #2a2a2c;">
-              <span>${escapeHtml(shownDesc)} <span class="muted">${e.date ? e.date.slice(0,10) : ''}</span></span>
-              <strong style="color:#34d399;">S/ ${fmt(e.amount)}</strong>
-            </div>
-          `;
-        }).join('')}
-      </div>
-    </div>
-  ` : '';
+    }).join('') || `<div class="muted">Sin deudas registradas. Agrega tu primera deuda para empezar el plan.</div>`;
 
   const hint = (gap<0)
     ? `<div class="finDebtHint bad">Te faltan <strong>S/ ${fmt(Math.abs(gap))}</strong> para cubrir solo deudas este mes. Vamos a usar esto para decidir prioridades y recortar fugas.</div>`
     : `<div class="finDebtHint good">Bien: te sobran <strong>S/ ${fmt(gap)}</strong> después de cubrir deudas. Eso puede ir a acelerar una deuda (snowball/avalancha).</div>`;
 
   return `
-    <section class="card homeCard homeWide" style="display: flex; flex-direction: column; gap: 14px;">
+    <section class="card homeCard homeWide">
       <div class="cardTop">
         <h2 class="cardTitle">Deudas</h2>
         <div class="row" style="gap:8px">
           <button class="iconBtn" title="Nueva deuda" onclick="openFinanceDebtModal()">＋</button>
         </div>
       </div>
-      <div class="hr" style="margin: 0;"></div>
+      <div class="hr"></div>
 
-      <div style="background: rgba(124, 92, 255, 0.08); border: 1px solid rgba(124, 92, 255, 0.15); border-radius: 14px; padding: 14px;">
-        <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:#fff; margin-bottom:6px;">
-          <span>Progreso de Liquidación</span>
-          <span style="color:#36d399;">S/ ${fmt(paidSoFar)} pagado (${progressPct}%)</span>
+      <div class="grid2" style="gap:10px">
+        <div class="finDebtStat">
+          <div class="muted">Total deuda</div>
+          <div class="big">S/ ${fmt(totalBal)}</div>
         </div>
-        <div style="background: rgba(255,255,255,0.08); border-radius: 6px; height: 10px; overflow: hidden; width: 100%;">
-          <div style="height: 100%; width: ${progressPct}%; background: linear-gradient(90deg, #7c5cff, #36d399); border-radius: 6px;"></div>
+        <div class="finDebtStat">
+          <div class="muted">Pago mensual total</div>
+          <div class="big">S/ ${fmt(monthly)}</div>
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 12px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Deuda Total Actual</div>
-          <div style="font-size: 18px; font-weight: 800; color: #fff;">S/ ${fmt(totalBal)}</div>
-          <div style="font-size: 10px; color: #888; margin-top: 4px;">Original: S/ ${fmt(originalTotal)}</div>
-        </div>
-        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 12px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Pago Mínimo Mensual</div>
-          <div style="font-size: 18px; font-weight: 800; color: #7c5cff;">S/ ${fmt(monthly)}</div>
-          <div style="font-size: 10px; color: #888; margin-top: 4px;">Efectivo libre: S/ ${fmt(gap)}</div>
-        </div>
-      </div>
-
-      <div style="margin-top: 2px">
+      <div style="margin-top:10px">
         ${hint}
       </div>
 
-      <div class="hr" style="margin: 0;"></div>
-      <div class="cardTop" style="margin-top:2px">
-        <h3 class="cardTitle" style="font-size:14px">Tus deudas activas</h3>
-      </div>
-      <div class="finDebtList" style="display: flex; flex-direction: column; gap: 10px;">
-        ${activeListHtml}
-      </div>
-      
-      ${paidListHtml}
-
-      <div class="hr" style="margin: 0;"></div>
+      <div class="hr" style="margin-top:12px"></div>
       <div class="cardTop" style="margin-top:2px">
         <h3 class="cardTitle" style="font-size:14px">Ingreso vs pagos</h3>
       </div>
       ${financeDebtIncomeVsPaymentsUI()}
 
-      <div class="hr" style="margin: 0;"></div>
+      <div class="hr" style="margin-top:12px"></div>
       <div class="cardTop" style="margin-top:2px">
         <h3 class="cardTitle" style="font-size:14px">Calendario de vencimientos</h3>
       </div>
@@ -19317,13 +18397,17 @@ function renderFinanceDebtsTab(){
         ${financeDebtRenderUpcoming()}
       </div>
 
-      <div class="hr" style="margin: 0;"></div>
+      <div class="hr" style="margin-top:12px"></div>
       ${renderFinanceDebtSurvivalBox()}
 
-      <div class="hr" style="margin: 0;"></div>
+      <div class="hr" style="margin-top:12px"></div>
       ${financeDebtPlanUI()}
-      
-      ${recentPaymentsHtml}
+
+      <div class="hr" style="margin-top:12px"></div>
+      <div class="cardTop" style="margin-top:2px">
+        <h3 class="cardTitle" style="font-size:14px">Tus deudas</h3>
+      </div>
+      <div class="finDebtList">${list}</div>
     </section>
   `;
 }
@@ -19486,7 +18570,7 @@ function renderFinanceMissionControl(){
   };
 
   const priorityItems = (m.upcoming||[]).slice(0,8).map(o=>`
-    <div class="mc-priority-item" onclick="setFinanceSubTab('${o._type==='debt'?'debts':'commitments'}')" title="Ver detalle">
+    <div class="mc-priority-item" onclick="setFinanceSubTab('commitments')" title="Ver compromisos">
       <div class="mc-priority-dot" style="background:${bucketDot(o.bucket)}"></div>
       <div class="mc-priority-info">
         <div class="mc-priority-name">${escapeHtml(o.name)}</div>
@@ -19495,7 +18579,7 @@ function renderFinanceMissionControl(){
       ${bucketBadge(o.bucket)}
       <div class="mc-priority-amt" style="color:${bucketDot(o.bucket)}">S/ ${fmt(o.amountExpected||0)}</div>
     </div>
-  `).join('') || `<div style="padding:20px 16px;text-align:center;color:rgba(255,255,255,.3);font-size:13px">Sin obligaciones activas.</div>`;
+  `).join('') || `<div style="padding:20px 16px;text-align:center;color:rgba(255,255,255,.3);font-size:13px">Sin obligaciones activas.<br><span style="font-size:11px">Crea compromisos en la pestaña Compromisos.</span></div>`;
 
   const insightItems = (insights||[]).map(i=>{
     const col = i.level==='urgent'?'#fb7185':(i.level==='warning'?'#fbbf24':'#7c5cff');
@@ -19569,10 +18653,7 @@ function renderFinanceMissionControl(){
       <div class="mc-section">
         <div class="mc-section-head">
           <div class="mc-section-title">⚡ Prioridades inmediatas</div>
-          <div style="display:flex;gap:6px;">
-            <div class="mc-section-action" onclick="setFinanceSubTab('debts')">Deudas →</div>
-            <div class="mc-section-action" onclick="setFinanceSubTab('commitments')">Compromisos →</div>
-          </div>
+          <div class="mc-section-action" onclick="setFinanceSubTab('commitments')">Ver todos →</div>
         </div>
         ${priorityItems}
       </div>
@@ -19671,12 +18752,10 @@ function viewFinance(){
   const topTabs = `
     <div class="finTopTabs">
       <button class="finTopTab ${state.financeSubTab==="main"?"active":""}" onclick="setFinanceSubTab('main')">Principal</button>
-      <button class="finTopTab ${state.financeSubTab==="stats"?"active":""}" onclick="setFinanceSubTab('stats')">📊 Estadísticas</button>
       <button class="finTopTab ${state.financeSubTab==="mission"?"active":""}" onclick="setFinanceSubTab('mission')">Mission Control</button>
       <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
       <button class="finTopTab ${state.financeSubTab==="reminders"?"active":""}" onclick="setFinanceSubTab('reminders')">Recordatorios</button>
       <button class="finTopTab ${state.financeSubTab==="debts"?"active":""}" onclick="setFinanceSubTab('debts')">Deudas</button>
-      <button class="finTopTab ${state.financeSubTab==="fiados"?"active":""}" onclick="setFinanceSubTab('fiados')">🤝 Fiados</button>
       <button class="finTopTab ${state.financeSubTab==="commitments"?"active":""}" onclick="setFinanceSubTab('commitments')">Compromisos</button>
       <button class="finTopTab ${state.financeSubTab==="roadmap"?"active":""}" onclick="setFinanceSubTab('roadmap')">🗺️ Hoja de Ruta</button>
       <button class="finTopTab ${state.financeSubTab==="neuronal"?"active":""}" onclick="setFinanceSubTab('neuronal')">🧠 Mapa Neuronal</button>
@@ -19697,11 +18776,9 @@ function viewFinance(){
     const shownValue = isFergisAccount ? monthFergisFlow : bal;
     const isPos = isFergisAccount ? true : (shownValue >= 0); // Force positive look (green/neutral) for Fergis flow
     const balanceLabel = isFergisAccount ? "Uso del mes" : "Saldo";
-    const isPrimary = state.financePrimaryAccountId === a.id;
     return `
-      <div class="finAccCard" style="position:relative;" onclick="openFinanceAccountDetails('${a.id}')">
-        <button onclick="event.stopPropagation(); toggleFinancePrimaryAccount('${a.id}')" style="position:absolute; top:8px; right:8px; background:none; border:none; color:${isPrimary?'#f59e0b':'#555'}; font-size:16px; cursor:pointer;" title="Establecer como cuenta principal">${isPrimary?'★':'☆'}</button>
-        <div class="finAccName" style="padding-right:20px;">${escapeHtml(a.name)}</div>
+      <div class="finAccCard" onclick="openFinanceAccountDetails('${a.id}')">
+        <div class="finAccName">${escapeHtml(a.name)}</div>
         <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">S/ ${fmt(shownValue)}</div>
         <div class="finAccHint">${balanceLabel}</div>
       </div>`;
@@ -19729,68 +18806,6 @@ function viewFinance(){
         <div class="finPillarVal">S/ ${fmt(p.val)}</div>
       </div>`;
   }).join("");
-
-  const payables = (state.financeDebts||[]).filter(d => d.type === 'person_loan' && String(d.status||'active') === 'active');
-  let payablesHtml = '';
-  if (payables.length > 0) {
-    const totalPayables = payables.reduce((s,d) => s + financeDebtSafeNum(d.balance), 0);
-    payablesHtml = `
-      <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
-        <div class="finSectionHead" style="margin-bottom:12px;">
-          <div class="finSectionTitle" style="color:#fbbf24;">🤝 Préstamos Rápidos (Por Pagar)</div>
-          <div style="font-weight:700; color:#fbbf24;">S/ ${fmt(totalPayables)}</div>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          ${payables.map(r => `
-            <div style="display:flex; justify-content:space-between; align-items:center; background:#2a2a2c; padding:10px 12px; border-radius:8px;">
-              <div>
-                <div style="font-weight:600; font-size:14px;">${escapeHtml(r.name)}</div>
-                <div style="font-size:12px; color:#aaa;">${r.createdAt ? new Date(r.createdAt).toLocaleDateString() : 'Sin fecha'}</div>
-              </div>
-              <div style="display:flex; align-items:center; gap:12px;">
-                <div style="font-weight:700;">S/ ${fmt(r.balance)}</div>
-                <button class="iconBtn" style="background:#fbbf2422; color:#fbbf24; padding:4px 8px; border-radius:6px; font-size:12px;" onclick="openFinanceDebtPayModal('${r.id}')">Pagar</button>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </section>
-    `;
-  }
-
-  // Calculate USD Performance for the current month
-  const usdIncomes = (state.financeLedger||[]).filter(m => String(m.date).startsWith(monthKey) && m.usdGross > 0);
-  let usdHtml = '';
-  if (usdIncomes.length > 0) {
-    const totalGross = usdIncomes.reduce((s,m) => s + (m.usdGross||0), 0);
-    const totalFee = usdIncomes.reduce((s,m) => s + (m.usdFee||0), 0);
-    const totalNet = totalGross - totalFee;
-    const feePct = totalGross > 0 ? ((totalFee / totalGross) * 100).toFixed(1) : 0;
-    
-    usdHtml = `
-      <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
-        <div class="finSectionHead" style="margin-bottom:12px;">
-          <div class="finSectionTitle" style="color:#60a5fa;">💵 Rendimiento USD (PayPal/Ligo)</div>
-          <div style="font-weight:700; color:#60a5fa;">Mes actual</div>
-        </div>
-        <div style="display:flex; gap:12px; margin-bottom:12px;">
-          <div style="flex:1; background:#2a2a2c; padding:10px; border-radius:8px; text-align:center;">
-            <div style="font-size:12px; color:#aaa;">Bruto</div>
-            <div style="font-weight:700; color:#fff;">$${fmt(totalGross)}</div>
-          </div>
-          <div style="flex:1; background:#2a2a2c; padding:10px; border-radius:8px; text-align:center;">
-            <div style="font-size:12px; color:#aaa;">Neto</div>
-            <div style="font-weight:700; color:#34d399;">$${fmt(totalNet)}</div>
-          </div>
-          <div style="flex:1; background:#ef444422; padding:10px; border-radius:8px; text-align:center; border:1px solid #ef444455;">
-            <div style="font-size:12px; color:#fca5a5;">Comisiones</div>
-            <div style="font-weight:700; color:#ef4444;">$${fmt(totalFee)}</div>
-          </div>
-        </div>
-        <div style="font-size:12px; color:#aaa; text-align:center;">Estás perdiendo el <b>${feePct}%</b> de tus ingresos en dólares en comisiones este mes.</div>
-      </section>
-    `;
-  }
 
   const principalHtml = `
 
@@ -19847,9 +18862,6 @@ function viewFinance(){
       </div>` : ""}
     </section>
 
-    ${payablesHtml}
-    ${usdHtml}
-
     <!-- GASTOS DIARIOS (7d) -->
     <section class="finSection">
       <div class="finSectionHead">
@@ -19904,10 +18916,7 @@ function viewFinance(){
     <section class="card homeCard homeWide finMovCard">
       <div class="cardTop">
         <h2 class="cardTitle">Movimientos</h2>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <button class="iconBtn" style="font-size:14px;padding:4px 8px;background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3);border-radius:8px;" onclick="financeDiagnostic()">🔍</button>
-          <button class="iconBtn" onclick="openFinanceTypeModal()">＋</button>
-        </div>
+        <button class="iconBtn" onclick="openFinanceTypeModal()">＋</button>
       </div>
       <div class="hr"></div>
       <div id="financeMovementsList" class="finMovList">
@@ -19941,20 +18950,14 @@ function viewFinance(){
 
   const neuronalHtml = (typeof renderMapaNeuronal === 'function') ? renderMapaNeuronal() : '';
 
-  const statsHtml = renderFinanceStatsTab();
-
-  const fiadosHtml = typeof renderFinanceFiadosTab === 'function' ? renderFinanceFiadosTab() : '';
-
   const body = (state.financeSubTab==="movements")
     ? movList
     : (state.financeSubTab==="reminders" ? remindersHtml
       : (state.financeSubTab==="debts" ? debtsHtml
-        : (state.financeSubTab==="fiados" ? fiadosHtml
-          : (state.financeSubTab==="commitments" ? commitmentsHtml
-            : (state.financeSubTab==="mission" ? missionHtml
-              : (state.financeSubTab==="roadmap" ? roadmapHtml
-                : (state.financeSubTab==="neuronal" ? neuronalHtml
-                  : (state.financeSubTab==="stats" ? statsHtml : principalHtml))))))));
+        : (state.financeSubTab==="commitments" ? commitmentsHtml
+          : (state.financeSubTab==="mission" ? missionHtml
+            : (state.financeSubTab==="roadmap" ? roadmapHtml
+              : (state.financeSubTab==="neuronal" ? neuronalHtml : principalHtml))))));
 
   return `
     ${topTabs}
@@ -19962,471 +18965,6 @@ function viewFinance(){
   `;
 }
 
-
-function renderFinanceStatsTab() {
-  if (!state.financeStatsPeriod) state.financeStatsPeriod = "month";
-  if (state.financeStatsSearch === undefined) state.financeStatsSearch = "";
-  const fmt = _financeFmt;
-  const monthKey = getCurrentMonthKey();
-  
-  let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[]));
-  
-  const now = new Date();
-  if (state.financeStatsPeriod === 'week') {
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(now.setDate(diff));
-    monday.setHours(0,0,0,0);
-    ledger = ledger.filter(e => {
-      const d = new Date(e.date);
-      return d >= monday && d <= new Date();
-    });
-  } else if (state.financeStatsPeriod === 'fortnight') {
-    const dayOfMonth = now.getDate();
-    const startDay = dayOfMonth > 15 ? 16 : 1;
-    const startFortnight = new Date(now.getFullYear(), now.getMonth(), startDay, 0,0,0,0);
-    ledger = ledger.filter(e => {
-      const d = new Date(e.date);
-      return d >= startFortnight && d <= new Date();
-    });
-  } else if (state.financeStatsPeriod === 'month') {
-    ledger = ledger.filter(e => String(e.date||'').startsWith(monthKey));
-  }
-
-  // Apply search query filter
-  const q = (state.financeStatsSearch || "").trim().toLowerCase();
-  if (q) {
-    ledger = ledger.filter(e => 
-      (e.name || "").toLowerCase().includes(q) ||
-      (e.note || "").toLowerCase().includes(q) ||
-      (e.category || "").toLowerCase().includes(q) ||
-      (e.reason || "").toLowerCase().includes(q)
-    );
-  }
-
-  const expenses = ledger.filter(e => e.type === 'expense');
-  const incomes  = ledger.filter(e => e.type === 'income');
-  const totalExp = expenses.reduce((s,e) => s + Number(e.amount||0), 0);
-  const totalInc = incomes.reduce((s,e)  => s + Number(e.amount||0), 0);
-
-  const barRow = (label, value, total, color, sub, type, key) => {
-    const pct = total > 0 ? Math.min(100, Math.round((value/total)*100)) : 0;
-    const w = Math.max(3, pct);
-    const clickAttr = type ? `onclick="openFinanceStatsBreakdownModal('${type}', '${escapeHtml(key)}', '${escapeHtml(label)}')"` : "";
-    const styleAttr = type ? `style="margin-bottom:12px; cursor:pointer;" class="finStatsClickableRow"` : `style="margin-bottom:12px;"`;
-    return `<div ${clickAttr} ${styleAttr}>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-          <div style="font-weight:600;font-size:14px;">${label}</div>
-          <div style="display:flex;gap:8px;align-items:center;">${sub?`<span style="font-size:11px;color:#888;">${sub}</span>`:''}<span style="font-weight:700;font-size:14px;">S/ ${fmt(value)}</span><span style="font-size:12px;color:#aaa;min-width:34px;text-align:right;">${pct}%</span></div>
-        </div>
-        <div style="background:#2a2a2c;border-radius:6px;height:8px;overflow:hidden;"><div style="height:100%;width:${w}%;background:${color};border-radius:6px;"></div></div>
-      </div>`;
-  };
-
-  const reasonColors = { planificado:'#7c5cff', impulso:'#f59e0b', emergencia:'#ef4444', normal:'#6b7280' };
-  const expReasons = [...new Set(expenses.map(e => String(e.reason||'normal')))];
-  const byReason = expReasons.map(r => ({ label:r.charAt(0).toUpperCase()+r.slice(1), value:expenses.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:expenses.filter(e=>String(e.reason||'normal')===r).length, color:reasonColors[r]||'#8b5cf6' })).sort((a,b)=>b.value-a.value);
-  const reasonRows = byReason.map(r=>barRow(r.label,r.value,totalExp,r.color,`${r.count} mov.`, 'reason_expense', r.label.toLowerCase())).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
-
-  const incReasons = [...new Set(incomes.map(e => String(e.reason||'normal')))];
-  const incByReason = incReasons.map(r=>({ label:r.charAt(0).toUpperCase()+r.slice(1), value:incomes.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:incomes.filter(e=>String(e.reason||'normal')===r).length })).sort((a,b)=>b.value-a.value);
-  const incReasonRows = incByReason.map(r=>barRow(r.label,r.value,totalInc,'#34d399',`${r.count} mov.`, 'reason_income', r.label.toLowerCase())).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
-
-  const catPalette = ['#7c5cff','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
-  const definedCats = (state.financeEntryCategories || []).map(c => c.name);
-  const ledgerCats = [...new Set(expenses.map(e => e.category || 'Otros'))];
-  const cats = [...new Set([...definedCats, ...ledgerCats])];
-  const byCat = cats.map(c => ({
-    label: c,
-    value: expenses.filter(e => (e.category || 'Otros') === c).reduce((s, e) => s + Number(e.amount || 0), 0),
-    count: expenses.filter(e => (e.category || 'Otros') === c).length
-  })).sort((a, b) => b.value - a.value);
-  const catRows = byCat.map((c,i)=>barRow(c.label,c.value,totalExp,catPalette[i%catPalette.length],`${c.count} mov.`, 'category', c.label)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
-
-  const accRows = (state.financeAccounts||[]).map(a=>({ id:a.id, name:a.name, value:expenses.filter(e=>e.accountId===a.id).reduce((s,e)=>s+Number(e.amount||0),0) })).filter(a=>a.value>0).sort((a,b)=>b.value-a.value).map(a=>barRow(a.name,a.value,totalExp,'#60a5fa','', 'account', a.id)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin uso registrado</div>';
-
-  const usdMovs = ledger.filter(m=>m.usdGross>0);
-  const usdSection = usdMovs.length>0 ? (()=>{
-    const tGross=usdMovs.reduce((s,m)=>s+(m.usdGross||0),0), tFee=usdMovs.reduce((s,m)=>s+(m.usdFee||0),0), tNet=tGross-tFee;
-    const feePct=tGross>0?((tFee/tGross)*100).toFixed(1):0;
-    return `<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle" style="color:#60a5fa;">💵 USD — PayPal / Ligo</div></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;"><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Bruto</div><div style="font-weight:700;color:#fff;font-size:15px;">$${fmt(tGross)}</div></div><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Neto real</div><div style="font-weight:700;color:#34d399;font-size:15px;">$${fmt(tNet)}</div></div><div style="background:#ef444422;padding:10px;border-radius:8px;text-align:center;border:1px solid #ef444455;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">Comisiones</div><div style="font-weight:700;color:#ef4444;font-size:15px;">$${fmt(tFee)}</div></div></div>${usdMovs.map(m=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid #2a2a2c;"><div style="color:#ddd;">${m.note?escapeHtml(String(m.note).split('·')[0].trim()):'Ingreso'} <span style="color:#888;">${String(m.date||'').slice(0,10)}</span></div><div style="display:flex;gap:6px;"><span style="color:#aaa;">$${fmt(m.usdGross)}</span><span style="color:#ef4444;">-$${fmt(m.usdFee||0)}</span><span style="color:#34d399;font-weight:700;">=$${fmt((m.usdGross||0)-(m.usdFee||0))}</span></div></div>`).join('')}<div style="margin-top:10px;font-size:12px;color:#888;text-align:center;">Perdiste el <b style="color:#ef4444;">${feePct}%</b> en comisiones en este período.</div></section>`;
-  })():'';
-
-  const periodPills = `
-    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
-      <button class="finModeBtn ${state.financeStatsPeriod==='week'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('week')">Esta semana</button>
-      <button class="finModeBtn ${state.financeStatsPeriod==='fortnight'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('fortnight')">15 días</button>
-      <button class="finModeBtn ${state.financeStatsPeriod==='month'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('month')">Este mes</button>
-      <button class="finModeBtn ${state.financeStatsPeriod==='all'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('all')">Todo el historial</button>
-    </div>
-  `;
-
-  const searchBox = `
-    <div style="display:flex; gap:8px; margin-bottom:16px;">
-      <input type="text" id="finStatsSearch" class="textInput" placeholder="🔍 Buscar (Ej. Javier, adelanto...)" value="${escapeHtml(state.financeStatsSearch || '')}" style="flex:1; margin:0;" />
-      ${state.financeStatsSearch ? `<button class="btn ghost" onclick="setFinanceStatsSearch('')" style="margin:0; padding:0 12px; font-size:13px; font-weight:700; height:42px;">Limpiar</button>` : ''}
-    </div>
-  `;
-
-  let matchesHtml = "";
-  if (q) {
-    const searchType = state.financeStatsSearchType || "all";
-    const filteredMatches = ledger.filter(e => {
-      if (searchType === "income") return e.type === "income";
-      if (searchType === "expense") return e.type === "expense";
-      return true;
-    });
-
-    matchesHtml = `
-      <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
-        <div class="finSectionHead" style="margin-bottom:10px;">
-          <div class="finSectionTitle" style="color:#7c5cff;">📋 Coincidencias (${filteredMatches.length})</div>
-        </div>
-        
-        <div style="display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;">
-          <button class="finModeBtn ${searchType==='all'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('all')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Todos</button>
-          <button class="finModeBtn ${searchType==='income'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('income')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Ingresos</button>
-          <button class="finModeBtn ${searchType==='expense'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('expense')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Egresos</button>
-        </div>
-
-        <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;">
-          ${filteredMatches.map(e => {
-            const isExp = e.type === 'expense';
-            const sign = isExp ? '-' : '+';
-            const color = isExp ? '#ef4444' : '#34d399';
-            const rawNote = String(e.note || "");
-            const hasSep = rawNote.includes(" · ");
-            const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
-            const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
-            const shownDesc = desc || "Sin descripción";
-            const noteText = noteDetails ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(noteDetails)})</span>` : "";
-            return `
-              <div style="display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid #2a2a2c; align-items:center;">
-                <div>
-                  <div style="font-weight:700; color:#fff;">${escapeHtml(shownDesc)}</div>
-                  <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} • ${escapeHtml(e.category || "Otros")}${noteText}</div>
-                </div>
-                <div style="font-weight:700; color:${color}; font-size:14px;">${sign} S/ ${fmt(e.amount)}</div>
-              </div>
-            `;
-          }).join('') || '<div style="color:#888; font-size:13px; text-align:center; padding:10px 0;">Ningún movimiento coincide</div>'}
-        </div>
-      </section>
-    `;
-  }
-
-  const periodLabel = state.financeStatsPeriod === 'all' ? 'Todo el historial' : monthKey;
-
-  const periodFiados = ledger.filter(e => e.isFiado);
-  const pendingFiados = periodFiados.filter(e => e.fiadoStatus === "pending");
-  const paidFiados = periodFiados.filter(e => e.fiadoStatus === "paid");
-  
-  const sumPending = pendingFiados.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const sumPaid = paidFiados.reduce((s, e) => s + Number(e.amount || 0), 0);
-  
-  const fiadosSection = periodFiados.length > 0 ? `
-    <section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
-      <div class="finSectionHead" style="margin-bottom:14px;">
-        <div class="finSectionTitle" style="color:#fbbf24;">🤝 Resumen de Fiados</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div style="background:#2a261a;border:1px solid #6c5a2b;padding:10px;border-radius:8px;text-align:center;">
-          <div style="font-size:11px;color:#aaa;margin-bottom:4px;">Pendiente de Pago</div>
-          <div style="font-weight:700;color:#fbbf24;font-size:16px;">S/ ${fmt(sumPending)}</div>
-          <div style="font-size:11px;color:#888;margin-top:2px;">${pendingFiados.length} pendientes</div>
-        </div>
-        <div style="background:#1a2a22;border:1px solid #2b6c4b;padding:10px;border-radius:8px;text-align:center;">
-          <div style="font-size:11px;color:#aaa;margin-bottom:4px;">Pagados (Liquidados)</div>
-          <div style="font-weight:700;color:#34d399;font-size:16px;">S/ ${fmt(sumPaid)}</div>
-          <div style="font-size:11px;color:#888;margin-top:2px;">${paidFiados.length} pagados</div>
-        </div>
-      </div>
-    </section>
-  ` : '';
-
-  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas</div><div style="font-size:12px;color:#888;">${periodLabel}</div></div>${periodPills}${searchBox}<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div>${matchesHtml}<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Gastos por Categoría</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${fiadosSection}${usdSection}</div>`;
-}
-
-function renderFinanceFiadosTab() {
-  const fmt = _financeFmt;
-  
-  const allFiados = (state.financeLedger || []).filter(e => !e.archived && e.isFiado);
-  const pendingFiados = allFiados.filter(e => e.fiadoStatus === "pending");
-  const paidFiados = allFiados.filter(e => e.fiadoStatus === "paid");
-  
-  const totalPending = pendingFiados.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-  const totalPaid = paidFiados.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-  
-  const parseFiadoName = (e) => {
-    const rawNote = String(e.note || "");
-    const hasSep = rawNote.includes(" · ");
-    const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
-    const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
-    return {
-      desc: desc || "Fiado sin descripción",
-      note: noteDetails
-    };
-  };
-
-  const pendingListHtml = pendingFiados.map(e => {
-    const info = parseFiadoName(e);
-    const acc = (state.financeAccounts || []).find(a => a.id === e.accountId);
-    const accName = acc ? acc.name : "Cuenta no encontrada";
-    const noteText = info.note ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(info.note)})</span>` : "";
-    return `
-      <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); padding: 14px; border-radius: 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-        <div style="flex:1; min-width:0; padding-right:12px;">
-          <div style="font-weight: 800; font-size: 15px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            🤝 ${escapeHtml(info.desc)}${noteText}
-          </div>
-          <div style="font-size: 12px; color: #aaa; margin-top: 4px;">
-            Fecha: <strong>${e.date ? e.date.slice(0,10) : ''}</strong> · Categoría: <strong>${escapeHtml(e.category || "Otros")}</strong> · Cuenta: <strong>${escapeHtml(accName)}</strong>
-          </div>
-        </div>
-        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0;">
-          <strong style="color:#fbbf24; font-size:15px;">S/ ${fmt(e.amount)}</strong>
-          <button class="btn primary" onclick="financeFiadoPay('${e.id}')" style="font-size:11px; padding:4px 10px; height:auto; line-height:1; margin:0;">💸 Liquidar</button>
-        </div>
-      </div>
-    `;
-  }).join('') || `<div class="muted" style="text-align:center; padding: 20px 0;">No tienes fiados pendientes. ¡Estás al día! 🙌</div>`;
-
-  const paidListHtml = paidFiados.map(e => {
-    const info = parseFiadoName(e);
-    const acc = (state.financeAccounts || []).find(a => a.id === e.accountId);
-    const accName = acc ? acc.name : "Cuenta";
-    return `
-      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #888; padding: 6px 0; border-bottom: 1px solid #2a2a2c;">
-        <span><span style="text-decoration: line-through;">${escapeHtml(info.desc)}</span> <span class="muted">${e.date ? e.date.slice(0,10) : ''}</span></span>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <span style="color:#888;">S/ ${fmt(e.amount)} (${escapeHtml(accName)})</span>
-          <span style="color:#36d399; font-weight:700; font-size:11px;">Pagado ✅</span>
-        </div>
-      </div>
-    `;
-  }).join('') || `<div class="muted" style="text-align:center; padding: 10px 0; font-size:12px;">No hay fiados liquidados.</div>`;
-
-  return `
-    <section class="card homeCard homeWide" style="display: flex; flex-direction: column; gap: 14px;">
-      <div class="cardTop">
-        <h2 class="cardTitle">🤝 Sistema de Fiados</h2>
-      </div>
-      <div class="hr" style="margin: 0;"></div>
-
-      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-        <div style="background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.15); padding: 12px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 11px; color: #fbbf24; margin-bottom: 4px; font-weight: 700;">🤝 Total Fiado Pendiente</div>
-          <div style="font-size: 18px; font-weight: 800; color: #fbbf24;">S/ ${fmt(totalPending)}</div>
-        </div>
-        <div style="background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.15); padding: 12px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 11px; color: #34d399; margin-bottom: 4px; font-weight: 700;">✅ Total Fiado Pagado</div>
-          <div style="font-size: 18px; font-weight: 800; color: #34d399;">S/ ${fmt(totalPaid)}</div>
-        </div>
-      </div>
-
-      <div class="hr" style="margin: 0;"></div>
-      <div class="cardTop" style="margin-top:2px">
-        <h3 class="cardTitle" style="font-size:14px">Fiados pendientes</h3>
-      </div>
-      <div class="finDebtList" style="display: flex; flex-direction: column; gap: 8px;">
-        ${pendingListHtml}
-      </div>
-
-      <div class="hr" style="margin: 0;"></div>
-      <div class="cardTop" style="margin-top:2px">
-        <h3 class="cardTitle" style="font-size:14px">Historial de fiados liquidados</h3>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; padding-right: 6px;">
-        ${paidListHtml}
-      </div>
-    </section>
-  `;
-}
-
-window.financeFiadoPay = function(id) {
-  const entry = (state.financeLedger || []).find(e => e.id === id);
-  if (!entry) return;
-  if (!confirm(`¿Confirmas que liquidaste el fiado de "S/ ${_financeFmt(entry.amount)}"? Se descontará de la cuenta asignada.`)) return;
-  
-  entry.fiadoStatus = "paid";
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('es-PE');
-  entry.note = entry.note ? `${entry.note} (Liquidado ${dateStr})` : `Liquidado ${dateStr}`;
-  
-  financeRecomputeBalances();
-  persist();
-  view();
-  toast("Fiado liquidado y saldo descontado con éxito ✅");
-};
-
-window.openFinanceReasonsManager = function() {
-  const host = document.getElementById('modalHost') || document.body;
-  const backdrop = document.createElement('div');
-  backdrop.className = 'modalBackdrop';
-  const renderItems = () => (state.financeReasons||[]).map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;background:#2a2a2c;padding:10px 12px;border-radius:8px;margin-bottom:8px;"><span style="font-weight:600;text-transform:capitalize;">${escapeHtml(r)}</span>${['planificado','impulso','emergencia','normal'].includes(r)?'<span style="font-size:11px;color:#888;">Predeterminado</span>':`<button onclick="financeRemoveReason('${escapeHtml(r)}')" style="background:#ef444433;color:#ef4444;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">Eliminar</button>`}</div>`).join('');
-  backdrop.innerHTML = `<div class="modal" style="max-width:420px;width:100%;"><div class="modalHead"><span style="font-weight:700;">⚙️ Gestionar Motivos</span><button class="iconBtn" onclick="this.closest('.modalBackdrop').remove()">✕</button></div><div style="padding:16px;max-height:55vh;overflow-y:auto;" id="reasonManagerList">${renderItems()}</div><div style="padding:0 16px 16px;display:flex;gap:8px;"><input id="newReasonInput" class="textInput" style="flex:1;" placeholder="Nuevo motivo..." /><button class="finProSaveBtn" style="flex:0 0 auto;padding:0 16px;" onclick="financeAddReasonFromManager()">Agregar</button></div></div>`;
-  host.appendChild(backdrop);
-  backdrop.addEventListener('click', e=>{ if(e.target===backdrop) backdrop.remove(); });
-}
-
-window.financeAddReasonFromManager = function() {
-  const input = document.getElementById('newReasonInput');
-  if (!input) return;
-  const val = input.value.trim().toLowerCase();
-  if (!val) return;
-  if (!state.financeReasons.includes(val)) { state.financeReasons.push(val); save(LS.financeReasons, state.financeReasons); }
-  input.value = '';
-  const listEl = document.getElementById('reasonManagerList');
-  if (listEl) listEl.innerHTML = (state.financeReasons||[]).map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;background:#2a2a2c;padding:10px 12px;border-radius:8px;margin-bottom:8px;"><span style="font-weight:600;text-transform:capitalize;">${escapeHtml(r)}</span>${['planificado','impulso','emergencia','normal'].includes(r)?'<span style="font-size:11px;color:#888;">Predeterminado</span>':`<button onclick="financeRemoveReason('${escapeHtml(r)}')" style="background:#ef444433;color:#ef4444;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">Eliminar</button>`}</div>`).join('');
-};
-
-window.financeRemoveReason = function(r) {
-  state.financeReasons = (state.financeReasons||[]).filter(x=>x!==r);
-  save(LS.financeReasons, state.financeReasons);
-  const listEl = document.getElementById('reasonManagerList');
-  if (listEl) listEl.innerHTML = (state.financeReasons||[]).map(x=>`<div style="display:flex;justify-content:space-between;align-items:center;background:#2a2a2c;padding:10px 12px;border-radius:8px;margin-bottom:8px;"><span style="font-weight:600;text-transform:capitalize;">${escapeHtml(x)}</span>${['planificado','impulso','emergencia','normal'].includes(x)?'<span style="font-size:11px;color:#888;">Predeterminado</span>':`<button onclick="financeRemoveReason('${escapeHtml(x)}')" style="background:#ef444433;color:#ef4444;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">Eliminar</button>`}</div>`).join('');
-};
-
-window.toggleFinancePrimaryAccount = function(accountId) {
-  if (state.financePrimaryAccountId === accountId) {
-    state.financePrimaryAccountId = "";
-  } else {
-    state.financePrimaryAccountId = accountId;
-  }
-  save("memorycarl_v2_finance_primary_account_id", state.financePrimaryAccountId);
-  view();
-};
-
-window.setFinanceStatsPeriod = function(period) {
-  state.financeStatsPeriod = period;
-  save("memorycarl_v2_finance_stats_period", period);
-  view();
-};
-
-window.setFinanceStatsSearch = function(q) {
-  state.financeStatsSearch = q;
-  view();
-};
-
-window.setFinanceStatsSearchType = function(type) {
-  state.financeStatsSearchType = type;
-  view();
-};
-
-window.openFinanceStatsBreakdownModal = function(type, key, label) {
-  const host = document.getElementById('modalHost') || document.body;
-  const backdrop = document.createElement('div');
-  backdrop.className = 'modalBackdrop';
-  backdrop.style.zIndex = '9999';
-  
-  const fmt = _financeFmt;
-  const period = state.financeStatsPeriod || "month";
-  const searchQ = (state.financeStatsSearch || "").trim().toLowerCase();
-  
-  let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[]));
-  
-  const now = new Date();
-  if (period === 'week') {
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(now.setDate(diff));
-    monday.setHours(0,0,0,0);
-    ledger = ledger.filter(e => {
-      const d = new Date(e.date);
-      return d >= monday && d <= new Date();
-    });
-  } else if (period === 'fortnight') {
-    const dayOfMonth = now.getDate();
-    const startDay = dayOfMonth > 15 ? 16 : 1;
-    const startFortnight = new Date(now.getFullYear(), now.getMonth(), startDay, 0,0,0,0);
-    ledger = ledger.filter(e => {
-      const d = new Date(e.date);
-      return d >= startFortnight && d <= new Date();
-    });
-  } else if (period === 'month') {
-    const monthKey = getCurrentMonthKey();
-    ledger = ledger.filter(e => String(e.date||'').startsWith(monthKey));
-  }
-  
-  if (searchQ) {
-    ledger = ledger.filter(e => 
-      (e.name || "").toLowerCase().includes(searchQ) ||
-      (e.note || "").toLowerCase().includes(searchQ) ||
-      (e.category || "").toLowerCase().includes(searchQ) ||
-      (e.reason || "").toLowerCase().includes(searchQ)
-    );
-  }
-  
-  let filtered = [];
-  if (type === 'category') {
-    filtered = ledger.filter(e => e.type === 'expense' && (e.category || 'Otros') === key);
-  } else if (type === 'reason_expense') {
-    filtered = ledger.filter(e => e.type === 'expense' && (e.reason || 'normal') === key);
-  } else if (type === 'reason_income') {
-    filtered = ledger.filter(e => e.type === 'income' && (e.reason || 'normal') === key);
-  } else if (type === 'account') {
-    filtered = ledger.filter(e => e.type === 'expense' && e.accountId === key);
-  }
-  
-  const total = filtered.reduce((s, e) => s + Number(e.amount || 0), 0);
-  
-  backdrop.innerHTML = `
-    <div class="modal" style="max-width: 480px; width: 95%;">
-      <div class="modalHead">
-        <span style="font-weight: 800; font-size: 16px;">📋 ${escapeHtml(label)}</span>
-        <button class="iconBtn" onclick="this.closest('.modalBackdrop').remove()">✕</button>
-      </div>
-      <div style="padding: 16px; background: #1c1c1e;">
-        <div style="background: rgba(255,255,255,0.03); border-radius: 10px; padding: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 13px; color: #aaa;">Total gastado/recibido</span>
-          <span style="font-size: 18px; font-weight: 800; color: #7c5cff;">S/ ${fmt(total)}</span>
-        </div>
-        <div style="max-height: 45vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
-          ${filtered.map(e => {
-            const isExp = e.type === 'expense';
-            const sign = isExp ? '-' : '+';
-            const color = isExp ? '#ef4444' : '#34d399';
-            const rawNote = String(e.note || "");
-            const hasSep = rawNote.includes(" · ");
-            const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
-            const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
-            const shownDesc = desc || "Sin descripción";
-            const noteText = noteDetails ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(noteDetails)})</span>` : "";
-            return `
-              <div style="display:flex; justify-content:space-between; font-size:13px; padding:8px 0; border-bottom:1px solid #2a2a2c; align-items:center;">
-                <div>
-                  <div style="font-weight:700; color:#fff;">${escapeHtml(shownDesc)}</div>
-                  <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} • ${escapeHtml(e.category || "Otros")}${noteText}</div>
-                </div>
-                <div style="font-weight:700; color:${color}; font-size:14px;">${sign} S/ ${fmt(e.amount)}</div>
-              </div>
-            `;
-          }).join('') || `<div style="color: #888; text-align: center; padding: 20px 0;">No hay movimientos en este período</div>`}
-        </div>
-      </div>
-    </div>
-  `;
-  
-  host.appendChild(backdrop);
-  backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.remove(); });
-};
-
-function wireFinance(root) {
-  const searchInput = root.querySelector("#finStatsSearch");
-  if (searchInput) {
-    searchInput.addEventListener("input", (e) => {
-      state.financeStatsSearch = e.target.value;
-      view();
-      setTimeout(() => {
-        const input = document.getElementById("finStatsSearch");
-        if (input) {
-          input.focus();
-          input.setSelectionRange(input.value.length, input.value.length);
-        }
-      }, 0);
-    });
-  }
-}
 
 function openFinanceMetaModal(){
   const month = getCurrentMonthKey();
@@ -21498,124 +20036,3 @@ function _roadmapStyles(){
   document.head.appendChild(s);
   return '';
 }
-
-// ─── 🔍 FINANCE DIAGNOSTIC ────────────────────────────────────────────────
-window.financeDiagnostic = function() {
-  try {
-    // 1. Read raw from localStorage
-    const rawStr = localStorage.getItem('memorycarl_v2_finance_ledger');
-    const raw = rawStr ? JSON.parse(rawStr) : null;
-
-    // 2. Also read from current state
-    const stateEntries = state.financeLedger || [];
-
-    let report = '';
-
-    if (raw === null) {
-      report += `<div style="color:#fb7185;font-weight:700;font-size:16px;margin-bottom:12px;">⛔ localStorage VACÍO</div>`;
-      report += `<p style="color:#94a3b8;font-size:13px;">La clave <code>memorycarl_v2_finance_ledger</code> no existe en localStorage. Los datos se perdieron o nunca se guardaron correctamente.</p>`;
-    } else if (!Array.isArray(raw)) {
-      report += `<div style="color:#fb7185;font-weight:700;">⛔ Datos corruptos</div>`;
-      report += `<p style="font-size:12px;">El valor guardado no es un array. Tipo: ${typeof raw}</p>`;
-    } else {
-      const total = raw.length;
-      const archived = raw.filter(e => e.archived).length;
-      const active = total - archived;
-      const incomes = raw.filter(e => e.type === 'income' && !e.archived).length;
-      const expenses = raw.filter(e => e.type === 'expense' && !e.archived).length;
-      const fiados = raw.filter(e => e.isFiado && !e.archived).length;
-
-      // Dates
-      const dates = raw.map(e => e.date).filter(Boolean).sort();
-      const oldest = dates[0] || '—';
-      const newest = dates[dates.length - 1] || '—';
-
-      // State vs localStorage diff
-      const stateTotal = stateEntries.length;
-      const stateDiff = stateTotal !== total ? `⚠️ Estado en memoria: ${stateTotal} (¡difiere!)` : `✅ Estado en memoria: ${stateTotal} (coincide)`;
-
-      const color = active > 0 ? '#36d399' : '#fb7185';
-      const icon = active > 0 ? '✅' : '⛔';
-
-      report += `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-          <div style="background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.25);border-radius:12px;padding:12px;text-align:center;">
-            <div style="font-size:28px;font-weight:800;color:#818cf8;">${total}</div>
-            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;">Total en disco</div>
-          </div>
-          <div style="background:rgba(${active>0?'54,211,153':'251,113,133'},.12);border:1px solid rgba(${active>0?'54,211,153':'251,113,133'},.25);border-radius:12px;padding:12px;text-align:center;">
-            <div style="font-size:28px;font-weight:800;color:${color};">${active}</div>
-            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;">Activos</div>
-          </div>
-          <div style="background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.2);border-radius:12px;padding:12px;text-align:center;">
-            <div style="font-size:28px;font-weight:800;color:#fbbf24;">${archived}</div>
-            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;">Archivados</div>
-          </div>
-          <div style="background:rgba(148,163,184,.08);border:1px solid rgba(148,163,184,.15);border-radius:12px;padding:12px;text-align:center;">
-            <div style="font-size:28px;font-weight:800;color:#94a3b8;">${fiados}</div>
-            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;">Fiados</div>
-          </div>
-        </div>
-        <div style="font-size:12px;color:#94a3b8;line-height:1.8;background:rgba(15,23,42,.4);border-radius:10px;padding:12px;">
-          <div>📥 <strong style="color:#e2e8f0;">Ingresos activos:</strong> ${incomes}</div>
-          <div>📤 <strong style="color:#e2e8f0;">Gastos activos:</strong> ${expenses}</div>
-          <div>📅 <strong style="color:#e2e8f0;">Más antiguo:</strong> ${oldest}</div>
-          <div>📅 <strong style="color:#e2e8f0;">Más reciente:</strong> ${newest}</div>
-          <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,.1);">${stateDiff}</div>
-        </div>
-        ${archived > 0 && active === 0 ? `
-          <div style="margin-top:12px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:10px;padding:10px;font-size:12px;color:#fbbf24;">
-            ⚠️ <strong>TODOS tus movimientos están archivados.</strong> Por eso no aparecen. Podemos restaurarlos.
-          </div>
-          <button onclick="financeRestoreArchived()" style="margin-top:10px;width:100%;padding:12px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;">
-            🔓 Restaurar todos (quitar archivado)
-          </button>
-        ` : ''}
-        ${total === 0 ? `
-          <div style="margin-top:12px;background:rgba(251,113,133,.1);border:1px solid rgba(251,113,133,.3);border-radius:10px;padding:10px;font-size:12px;color:#fb7185;">
-            ⛔ <strong>No hay datos guardados.</strong> Los movimientos fueron borrados del dispositivo.
-          </div>
-        ` : ''}
-      `;
-    }
-
-    // Show modal
-    const overlay = document.createElement('div');
-    overlay.style.cssText = `position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);display:flex;align-items:flex-end;justify-content:center;padding:16px;`;
-    overlay.innerHTML = `
-      <div style="background:#1e293b;border-radius:20px 20px 16px 16px;width:100%;max-width:440px;padding:20px;max-height:85vh;overflow-y:auto;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <h3 style="margin:0;font-size:17px;font-weight:700;color:#e2e8f0;">🔍 Diagnóstico de Movimientos</h3>
-          <button onclick="this.closest('div[style]').remove()" style="background:rgba(148,163,184,.15);border:none;color:#94a3b8;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:14px;">✕</button>
-        </div>
-        ${report}
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.addEventListener('click', (e) => { if(e.target === overlay) overlay.remove(); });
-
-  } catch(err) {
-    toast('Error en diagnóstico: ' + err.message);
-  }
-};
-
-// Restore all archived entries
-window.financeRestoreArchived = function() {
-  try {
-    let changed = 0;
-    (state.financeLedger || []).forEach(e => {
-      if(e.archived) { e.archived = false; changed++; }
-    });
-    if(changed > 0) {
-      persist();
-      view();
-      toast(`✅ ${changed} movimiento(s) restaurados`);
-      // Close any open overlay
-      document.querySelectorAll('div[style*="z-index:9999"]').forEach(el => el.remove());
-    } else {
-      toast('No había movimientos archivados');
-    }
-  } catch(err) {
-    toast('Error al restaurar: ' + err.message);
-  }
-};
