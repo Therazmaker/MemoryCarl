@@ -15305,7 +15305,13 @@ function financeRecomputeBalances(){
     if(!accId) return;
     if(sums[accId] === undefined) sums[accId] = 0;
     const amt = Number(e.amount||0);
-    if(e.type === "expense") sums[accId] -= amt;
+    if(e.type === "expense") {
+      if (e.isFiado && e.fiadoStatus !== "paid") {
+        // Ignorar fiados pendientes de pago
+      } else {
+        sums[accId] -= amt;
+      }
+    }
     else if(e.type === "income") sums[accId] += amt;
     // transfers handled elsewhere later
   });
@@ -15413,7 +15419,8 @@ function addFinanceAccount({name, type="bank", balance=0, color=null}){
   return acc;
 }
 
-function addFinanceEntry({type, amount, accountId, category, reason, note, date, neuronRole}){
+function addFinanceEntry(payload){
+  const {type, amount, accountId, category, reason, note, date, neuronRole, isFiado, fiadoStatus} = payload;
   const acc = state.financeAccounts.find(a=>a.id===accountId);
   if(!acc) return null;
 
@@ -15434,7 +15441,15 @@ function addFinanceEntry({type, amount, accountId, category, reason, note, date,
     note: note||"",
     neuronRole: resolvedNeuronRole,
     neuronId: `mov_${entryId}`,
-    archived: false
+    archived: false,
+    isFiado: !!isFiado,
+    fiadoStatus: fiadoStatus || null,
+    // carry over usd props if present
+    usdGross: payload.usdGross || null,
+    usdNet: payload.usdNet || null,
+    usdFee: payload.usdFee || null,
+    usdExchange: payload.usdExchange || null,
+    usdFixedFee: payload.usdFixedFee || null
   };
 
   state.financeLedger.unshift(entry);
@@ -15832,6 +15847,13 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         </div>
       </div>
 
+      <div id="finProExpenseOpts" style="display:${draft.type==='expense'?'block':'none'}; margin: 12px 0; background: #1c1c1e; padding: 12px; border-radius: 12px; border: 1px solid #333;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="finEntryIsFiado" ${existing?.isFiado?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
+          <span style="font-size:14px; font-weight:600;">Es un Fiado (Pagar después)</span>
+        </label>
+      </div>
+
       <div class="finProAmountWrap">
         <span class="finProCurrency">S/</span>
         <input type="text" inputmode="decimal" id="finEntryAmount" class="finProAmountInput" placeholder="0.00" value="${escapeHtml(draft.amount)}">
@@ -15933,6 +15955,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   });
 
   const incomeOpts = backdrop.querySelector('#finProIncomeOpts');
+  const expenseOpts = backdrop.querySelector('#finProExpenseOpts');
   backdrop.querySelectorAll('.finProTypeBtn').forEach(btn => {
     btn.addEventListener('click', () => {
       backdrop.querySelectorAll('.finProTypeBtn').forEach(b => b.classList.remove('active'));
@@ -15940,8 +15963,13 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       draft.type = btn.getAttribute('data-type');
       if (draft.type === 'income') {
         if (incomeOpts) incomeOpts.style.display = 'block';
+        if (expenseOpts) expenseOpts.style.display = 'none';
+      } else if (draft.type === 'expense') {
+        if (incomeOpts) incomeOpts.style.display = 'none';
+        if (expenseOpts) expenseOpts.style.display = 'block';
       } else {
         if (incomeOpts) incomeOpts.style.display = 'none';
+        if (expenseOpts) expenseOpts.style.display = 'none';
       }
     });
   });
@@ -16141,6 +16169,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const usdExchange = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDExchange')?.value) || 0) : null;
   
   const isLoanChecked = backdrop.querySelector('#finEntryIsLoan')?.checked;
+  const isFiadoChecked = !!backdrop.querySelector('#finEntryIsFiado')?.checked;
 
   const entryPayload = {
     type: draft.type,
@@ -16152,6 +16181,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     date: dateISO,
     neuronRole,
     isLoan: isLoanChecked,
+    isFiado: isFiadoChecked,
+    fiadoStatus: existing ? (isFiadoChecked ? (existing.fiadoStatus || "pending") : null) : (isFiadoChecked ? "pending" : null),
     usdGross,
     usdNet,
     usdFee,
@@ -19645,6 +19676,7 @@ function viewFinance(){
       <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
       <button class="finTopTab ${state.financeSubTab==="reminders"?"active":""}" onclick="setFinanceSubTab('reminders')">Recordatorios</button>
       <button class="finTopTab ${state.financeSubTab==="debts"?"active":""}" onclick="setFinanceSubTab('debts')">Deudas</button>
+      <button class="finTopTab ${state.financeSubTab==="fiados"?"active":""}" onclick="setFinanceSubTab('fiados')">🤝 Fiados</button>
       <button class="finTopTab ${state.financeSubTab==="commitments"?"active":""}" onclick="setFinanceSubTab('commitments')">Compromisos</button>
       <button class="finTopTab ${state.financeSubTab==="roadmap"?"active":""}" onclick="setFinanceSubTab('roadmap')">🗺️ Hoja de Ruta</button>
       <button class="finTopTab ${state.financeSubTab==="neuronal"?"active":""}" onclick="setFinanceSubTab('neuronal')">🧠 Mapa Neuronal</button>
@@ -19908,15 +19940,18 @@ function viewFinance(){
 
   const statsHtml = renderFinanceStatsTab();
 
+  const fiadosHtml = typeof renderFinanceFiadosTab === 'function' ? renderFinanceFiadosTab() : '';
+
   const body = (state.financeSubTab==="movements")
     ? movList
     : (state.financeSubTab==="reminders" ? remindersHtml
       : (state.financeSubTab==="debts" ? debtsHtml
-        : (state.financeSubTab==="commitments" ? commitmentsHtml
-          : (state.financeSubTab==="mission" ? missionHtml
-            : (state.financeSubTab==="roadmap" ? roadmapHtml
-              : (state.financeSubTab==="neuronal" ? neuronalHtml
-                : (state.financeSubTab==="stats" ? statsHtml : principalHtml)))))));
+        : (state.financeSubTab==="fiados" ? fiadosHtml
+          : (state.financeSubTab==="commitments" ? commitmentsHtml
+            : (state.financeSubTab==="mission" ? missionHtml
+              : (state.financeSubTab==="roadmap" ? roadmapHtml
+                : (state.financeSubTab==="neuronal" ? neuronalHtml
+                  : (state.financeSubTab==="stats" ? statsHtml : principalHtml))))))));
 
   return `
     ${topTabs}
@@ -20079,8 +20114,147 @@ function renderFinanceStatsTab() {
 
   const periodLabel = state.financeStatsPeriod === 'all' ? 'Todo el historial' : monthKey;
 
-  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas</div><div style="font-size:12px;color:#888;">${periodLabel}</div></div>${periodPills}${searchBox}<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div>${matchesHtml}<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Gastos por Categoría</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${usdSection}</div>`;
+  const periodFiados = ledger.filter(e => e.isFiado);
+  const pendingFiados = periodFiados.filter(e => e.fiadoStatus === "pending");
+  const paidFiados = periodFiados.filter(e => e.fiadoStatus === "paid");
+  
+  const sumPending = pendingFiados.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const sumPaid = paidFiados.reduce((s, e) => s + Number(e.amount || 0), 0);
+  
+  const fiadosSection = periodFiados.length > 0 ? `
+    <section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+      <div class="finSectionHead" style="margin-bottom:14px;">
+        <div class="finSectionTitle" style="color:#fbbf24;">🤝 Resumen de Fiados</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="background:#2a261a;border:1px solid #6c5a2b;padding:10px;border-radius:8px;text-align:center;">
+          <div style="font-size:11px;color:#aaa;margin-bottom:4px;">Pendiente de Pago</div>
+          <div style="font-weight:700;color:#fbbf24;font-size:16px;">S/ ${fmt(sumPending)}</div>
+          <div style="font-size:11px;color:#888;margin-top:2px;">${pendingFiados.length} pendientes</div>
+        </div>
+        <div style="background:#1a2a22;border:1px solid #2b6c4b;padding:10px;border-radius:8px;text-align:center;">
+          <div style="font-size:11px;color:#aaa;margin-bottom:4px;">Pagados (Liquidados)</div>
+          <div style="font-weight:700;color:#34d399;font-size:16px;">S/ ${fmt(sumPaid)}</div>
+          <div style="font-size:11px;color:#888;margin-top:2px;">${paidFiados.length} pagados</div>
+        </div>
+      </div>
+    </section>
+  ` : '';
+
+  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas</div><div style="font-size:12px;color:#888;">${periodLabel}</div></div>${periodPills}${searchBox}<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div>${matchesHtml}<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Gastos por Categoría</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${fiadosSection}${usdSection}</div>`;
 }
+
+function renderFinanceFiadosTab() {
+  const fmt = _financeFmt;
+  
+  const allFiados = (state.financeLedger || []).filter(e => !e.archived && e.isFiado);
+  const pendingFiados = allFiados.filter(e => e.fiadoStatus === "pending");
+  const paidFiados = allFiados.filter(e => e.fiadoStatus === "paid");
+  
+  const totalPending = pendingFiados.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  const totalPaid = paidFiados.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  
+  const parseFiadoName = (e) => {
+    const rawNote = String(e.note || "");
+    const hasSep = rawNote.includes(" · ");
+    const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
+    const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
+    return {
+      desc: desc || "Fiado sin descripción",
+      note: noteDetails
+    };
+  };
+
+  const pendingListHtml = pendingFiados.map(e => {
+    const info = parseFiadoName(e);
+    const acc = (state.financeAccounts || []).find(a => a.id === e.accountId);
+    const accName = acc ? acc.name : "Cuenta no encontrada";
+    const noteText = info.note ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(info.note)})</span>` : "";
+    return `
+      <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); padding: 14px; border-radius: 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="flex:1; min-width:0; padding-right:12px;">
+          <div style="font-weight: 800; font-size: 15px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            🤝 ${escapeHtml(info.desc)}${noteText}
+          </div>
+          <div style="font-size: 12px; color: #aaa; margin-top: 4px;">
+            Fecha: <strong>${e.date ? e.date.slice(0,10) : ''}</strong> · Categoría: <strong>${escapeHtml(e.category || "Otros")}</strong> · Cuenta: <strong>${escapeHtml(accName)}</strong>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0;">
+          <strong style="color:#fbbf24; font-size:15px;">S/ ${fmt(e.amount)}</strong>
+          <button class="btn primary" onclick="financeFiadoPay('${e.id}')" style="font-size:11px; padding:4px 10px; height:auto; line-height:1; margin:0;">💸 Liquidar</button>
+        </div>
+      </div>
+    `;
+  }).join('') || `<div class="muted" style="text-align:center; padding: 20px 0;">No tienes fiados pendientes. ¡Estás al día! 🙌</div>`;
+
+  const paidListHtml = paidFiados.map(e => {
+    const info = parseFiadoName(e);
+    const acc = (state.financeAccounts || []).find(a => a.id === e.accountId);
+    const accName = acc ? acc.name : "Cuenta";
+    return `
+      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #888; padding: 6px 0; border-bottom: 1px solid #2a2a2c;">
+        <span><span style="text-decoration: line-through;">${escapeHtml(info.desc)}</span> <span class="muted">${e.date ? e.date.slice(0,10) : ''}</span></span>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span style="color:#888;">S/ ${fmt(e.amount)} (${escapeHtml(accName)})</span>
+          <span style="color:#36d399; font-weight:700; font-size:11px;">Pagado ✅</span>
+        </div>
+      </div>
+    `;
+  }).join('') || `<div class="muted" style="text-align:center; padding: 10px 0; font-size:12px;">No hay fiados liquidados.</div>`;
+
+  return `
+    <section class="card homeCard homeWide" style="display: flex; flex-direction: column; gap: 14px;">
+      <div class="cardTop">
+        <h2 class="cardTitle">🤝 Sistema de Fiados</h2>
+      </div>
+      <div class="hr" style="margin: 0;"></div>
+
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+        <div style="background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.15); padding: 12px; border-radius: 12px; text-align: center;">
+          <div style="font-size: 11px; color: #fbbf24; margin-bottom: 4px; font-weight: 700;">🤝 Total Fiado Pendiente</div>
+          <div style="font-size: 18px; font-weight: 800; color: #fbbf24;">S/ ${fmt(totalPending)}</div>
+        </div>
+        <div style="background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.15); padding: 12px; border-radius: 12px; text-align: center;">
+          <div style="font-size: 11px; color: #34d399; margin-bottom: 4px; font-weight: 700;">✅ Total Fiado Pagado</div>
+          <div style="font-size: 18px; font-weight: 800; color: #34d399;">S/ ${fmt(totalPaid)}</div>
+        </div>
+      </div>
+
+      <div class="hr" style="margin: 0;"></div>
+      <div class="cardTop" style="margin-top:2px">
+        <h3 class="cardTitle" style="font-size:14px">Fiados pendientes</h3>
+      </div>
+      <div class="finDebtList" style="display: flex; flex-direction: column; gap: 8px;">
+        ${pendingListHtml}
+      </div>
+
+      <div class="hr" style="margin: 0;"></div>
+      <div class="cardTop" style="margin-top:2px">
+        <h3 class="cardTitle" style="font-size:14px">Historial de fiados liquidados</h3>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; padding-right: 6px;">
+        ${paidListHtml}
+      </div>
+    </section>
+  `;
+}
+
+window.financeFiadoPay = function(id) {
+  const entry = (state.financeLedger || []).find(e => e.id === id);
+  if (!entry) return;
+  if (!confirm(`¿Confirmas que liquidaste el fiado de "S/ ${_financeFmt(entry.amount)}"? Se descontará de la cuenta asignada.`)) return;
+  
+  entry.fiadoStatus = "paid";
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('es-PE');
+  entry.note = entry.note ? `${entry.note} (Liquidado ${dateStr})` : `Liquidado ${dateStr}`;
+  
+  financeRecomputeBalances();
+  persist();
+  view();
+  toast("Fiado liquidado y saldo descontado con éxito ✅");
+};
 
 window.openFinanceReasonsManager = function() {
   const host = document.getElementById('modalHost') || document.body;
