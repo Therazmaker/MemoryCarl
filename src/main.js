@@ -21637,8 +21637,11 @@ window.financeDiagnostic = function() {
                 <button onclick="window.financeUndoBadRecovery()" style="flex:1;padding:8px;background:rgba(251,113,133,.1);color:#fb7185;border:1px solid rgba(251,113,133,.3);border-radius:8px;font-size:12px;cursor:pointer;">
                   ↩️ Deshacer Recuperación
                 </button>
-                <button onclick="window.financeImportManualJson()" style="flex:1;padding:8px;background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;">
-                  📥 Importar JSON Manual
+                <button onclick="window.financeExportDiagnosticJson()" style="flex:1;padding:8px;background:rgba(56,189,248,.1);color:#38bdf8;border:1px solid rgba(56,189,248,.3);border-radius:8px;font-size:12px;cursor:pointer;">
+                  📤 Exportar Todo
+                </button>
+                <button onclick="window.financeImportManualJson()" style="flex:1;padding:8px;background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;display:none;">
+                  📥 Importar
                 </button>
               </div>
             </div>
@@ -21809,6 +21812,30 @@ window.financeUndoBadRecovery = function() {
   persist();
   view();
   toast('✅ Recuperación deshecha (' + (beforeCount - afterCount) + ' movimientos borrados)');
+};
+
+window.financeExportDiagnosticJson = function() {
+  try {
+    const txStr = localStorage.getItem('memorycarl_v2_finance_transactions');
+    const exportData = {
+      financeLedger: state.financeLedger || [],
+      financeAccounts: state.financeAccounts || [],
+      financeTransactions: txStr ? JSON.parse(txStr) : []
+    };
+    const dataStr = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `MemoryCarl_FinanceBackup_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('✅ Archivo de respaldo descargado');
+  } catch(e) {
+    alert('Error al exportar: ' + e.message);
+  }
 };
 
 window.financeImportManualJson = function() {
