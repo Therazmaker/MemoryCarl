@@ -21637,11 +21637,11 @@ window.financeDiagnostic = function() {
                 <button onclick="window.financeUndoBadRecovery()" style="flex:1;padding:8px;background:rgba(251,113,133,.1);color:#fb7185;border:1px solid rgba(251,113,133,.3);border-radius:8px;font-size:12px;cursor:pointer;">
                   ↩️ Deshacer Recuperación
                 </button>
-                <button onclick="window.financeExportDiagnosticJson()" style="flex:1;padding:8px;background:rgba(56,189,248,.1);color:#38bdf8;border:1px solid rgba(56,189,248,.3);border-radius:8px;font-size:12px;cursor:pointer;">
-                  📤 Exportar Todo
+                <button onclick="window.financeApplyHardcodedData()" style="flex:1;padding:8px;background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
+                  ✨ APLICAR DATOS LIMPIOS
                 </button>
-                <button onclick="window.financeImportManualJson()" style="flex:1;padding:8px;background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;display:none;">
-                  📥 Importar
+                <button onclick="window.financeExportDiagnosticJson()" style="flex:1;padding:8px;background:rgba(56,189,248,.1);color:#38bdf8;border:1px solid rgba(56,189,248,.3);border-radius:8px;font-size:12px;cursor:pointer;display:none;">
+                  📤 Exportar Todo
                 </button>
               </div>
             </div>
@@ -21838,33 +21838,25 @@ window.financeExportDiagnosticJson = function() {
   }
 };
 
-window.financeImportManualJson = function() {
-  const jsonStr = prompt("Pega aquí el JSON completo de tus finanzas (financeLedger) o el App_State:");
-  if (!jsonStr) return;
+window.financeApplyHardcodedData = async function() {
   try {
-    const data = JSON.parse(jsonStr);
-    let newLedger = null;
-    let newAccounts = null;
-
-    if (Array.isArray(data)) {
-      newLedger = data;
-    } else if (data.financeLedger && Array.isArray(data.financeLedger)) {
-      newLedger = data.financeLedger;
-      if (data.financeAccounts) newAccounts = data.financeAccounts;
-    } else {
-      toast("El JSON no tiene un formato reconocido (se esperaba un array o {financeLedger: []})");
+    const { recoveryData } = await import('./recovery_data.js');
+    if (!recoveryData || !recoveryData.financeLedger) {
+      toast("Error: No se encontró el archivo de recuperación");
       return;
     }
-
-    if (confirm(`¿Reemplazar tu ledger actual con los ${newLedger.length} movimientos de este backup?`)) {
-      state.financeLedger = newLedger;
-      if (newAccounts) state.financeAccounts = newAccounts;
+    
+    if (confirm(`✨ ¿Aplicar la limpieza de datos?\n\n• Se restaurarán los saldos exactos (BCP: 3017.13, Fergis: 163.88)\n• Se recuperarán ${recoveryData.financeLedger.length} movimientos ordenados y sin duplicados.\n• El ledger actual se reemplazará.\n\n¿Continuar?`)) {
+      state.financeLedger = recoveryData.financeLedger;
+      state.financeAccounts = recoveryData.financeAccounts;
       financeRecomputeBalances();
       persist();
       view();
-      toast("✅ Datos manuales importados correctamente");
+      
+      document.querySelectorAll('div[style*="z-index:9999"]').forEach(function(el){ el.remove(); });
+      toast("✅ Datos limpios aplicados. Tu saldo ahora es correcto.");
     }
   } catch(e) {
-    alert("Error procesando el JSON: " + e.message);
+    alert("Error al cargar los datos limpios: " + e.message);
   }
 };
