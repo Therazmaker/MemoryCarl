@@ -21625,9 +21625,14 @@ window.financeDiagnostic = function() {
             <div style="margin-top:12px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);border-radius:10px;padding:12px;font-size:12px;">
               💡 <strong style="color:#818cf8;">${txs.length} registros en Transactions</strong><br>
               <span style="color:#94a3b8;">Esta copia puede contener tus movimientos perdidos.</span>
-              <button onclick="window.financeDiagShowTx()" style="margin-top:8px;width:100%;padding:8px;background:rgba(99,102,241,.2);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:12px;cursor:pointer;">
-                👁 Ver primeros 5 registros
-              </button>
+              <div style="display:flex;gap:6px;margin-top:8px;">
+                <button onclick="window.financeDiagShowTx()" style="flex:1;padding:8px;background:rgba(99,102,241,.2);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:12px;cursor:pointer;">
+                  👁 Ver 10 reg.
+                </button>
+                <button onclick="window.financeRecoverFromTransactions()" style="flex:1;padding:8px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
+                  🔓 RECUPERAR
+                </button>
+              </div>
             </div>
           `;
         }
@@ -21700,4 +21705,83 @@ window.financeDiagShowTx = function() {
     document.body.appendChild(d);
     d.addEventListener('click', function(e){ if(e.target===d) d.remove(); });
   } catch(e) { toast('Error: ' + e.message); }
+};
+
+// ─── 🔓 RECOVER LEDGER FROM TRANSACTIONS BACKUP ──────────────────────────
+window.financeRecoverFromTransactions = function() {
+  try {
+    const txStr = localStorage.getItem('memorycarl_v2_finance_transactions');
+    if (!txStr) { toast('No hay backup en Transactions'); return; }
+    const txs = JSON.parse(txStr);
+    if (!Array.isArray(txs) || !txs.length) { toast('Transactions vacío'); return; }
+
+    // Find primary account (highest balance or flagged as primary)
+    const accs = state.financeAccounts || [];
+    let primaryAcc = accs.find(a => a.id === state.financePrimaryAccountId);
+    if (!primaryAcc) {
+      primaryAcc = accs.reduce((best, a) => Number(a.balance||0) > Number(best.balance||0) ? a : best, accs[0] || {});
+    }
+    const primaryId = primaryAcc ? primaryAcc.id : (accs[0] ? accs[0].id : '');
+
+    // Build a set of IDs already in the ledger to avoid duplicates
+    const currentLedger = state.financeLedger || [];
+    const existingIds = new Set(currentLedger.map(e => e.id));
+    const existingLegacyIds = new Set(currentLedger.map(e => e.legacyLedgerId).filter(Boolean));
+
+    const recovered = [];
+    txs.forEach(function(t) {
+      // Skip if already present
+      const tid = t.legacyLedgerId || t.id;
+      if (existingIds.has(tid) || existingIds.has(t.id) || existingLegacyIds.has(t.id)) return;
+
+      // Map transaction → ledger entry
+      const entry = {
+        id: t.legacyLedgerId || t.id || ('rec_' + Math.random().toString(36).slice(2)),
+        date: t.date || new Date().toISOString(),
+        amount: Number(t.amount || 0),
+        type: t.direction === 'inflow' ? 'income' : 'expense',
+        accountId: primaryId,
+        category: (Array.isArray(t.tags) && t.tags[0]) || (t.direction === 'inflow' ? 'Ingreso' : 'Gasto'),
+        note: t.notes || '',
+        reason: 'normal',
+        archived: !!t.archived,
+        __recovered: true
+      };
+      recovered.push(entry);
+    });
+
+    if (!recovered.length) {
+      toast('No hay movimientos nuevos para recuperar (ya están en el ledger)');
+      return;
+    }
+
+    const ok = confirm(
+      '🔓 Recuperar ' + recovered.length + ' movimientos del backup?\n\n' +
+      '• Se asignarán a la cuenta: ' + (primaryAcc ? primaryAcc.name : 'principal') + '\n' +
+      '• El saldo inicial de esa cuenta se reseteará a 0\n' +
+      '• Los movimientos actuales se conservan\n\n' +
+      '¿Continuar?'
+    );
+    if (!ok) return;
+
+    // Reset primary account's initialBalance to 0 so recompute gives correct result
+    if (primaryAcc) primaryAcc.initialBalance = 0;
+
+    // Merge: keep existing entries, add recovered at end (sorted later)
+    state.financeLedger = currentLedger.concat(recovered);
+
+    // Recompute balances from fresh
+    financeRecomputeBalances();
+    persist();
+    view();
+
+    // Close any open diagnostic overlay
+    document.querySelectorAll('div[style*="z-index:9999"]').forEach(function(el){ el.remove(); });
+
+    toast('✅ ' + recovered.length + ' movimientos recuperados correctamente');
+
+  } catch(err) {
+    toast('Error en recuperación: ' + err.message);
+    console.error(err);
+  }
 };
