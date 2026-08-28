@@ -15621,7 +15621,7 @@ function openFinanceAccountModal(prefill=null){
 
         <label class="finAccField">
           <div class="finAccLabel">Saldo inicial</div>
-          <input id="finAccBalance" type="number" inputmode="decimal" value="${Number(draft.initialBalance ?? draft.balance || 0)}" />
+          <input id="finAccBalance" type="number" inputmode="decimal" value="${Number(draft.initialBalance !== undefined && draft.initialBalance !== null ? draft.initialBalance : (draft.balance || 0))}" />
           <div class="muted" style="margin-top:6px">Tip: esto define tu “punto cero” real. Luego los movimientos ajustan el saldo.</div>
         </label>
 
