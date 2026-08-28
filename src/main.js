@@ -15004,6 +15004,60 @@ persist = function(){
   try{ save(LS.financeEntryCategories, state.financeEntryCategories); }catch(_e){}
   try{ save(LS.financeRoadmap, state.financeRoadmap||{}); }catch(_e){}
   try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(state.financeProjectionMode||"normal")); }catch(_e){}
+
+  // Auto-backup to IndexedDB
+  try {
+    if (window.financeAutoBackupToIDB) {
+      window.financeAutoBackupToIDB();
+    }
+  } catch(_e) {}
+};
+
+// ─── INDEXED DB AUTO BACKUP SYSTEM ───────────────────────────────────
+window.financeAutoBackupToIDB = function() {
+  const dbName = 'MemoryCarlFinanceBackups';
+  const dbVer = 1;
+  const now = new Date();
+  // Create one backup per hour max to save space, but keep the latest
+  const hourKey = now.toISOString().slice(0, 13); // e.g., "2026-08-28T13"
+  
+  if (window._lastBackupHour === hourKey) return; // Already backed up this hour
+  window._lastBackupHour = hourKey;
+
+  const req = indexedDB.open(dbName, dbVer);
+  req.onupgradeneeded = function(e) {
+    const db = e.target.result;
+    if (!db.objectStoreNames.contains('backups')) {
+      db.createObjectStore('backups', { keyPath: 'hourKey' });
+    }
+  };
+  req.onsuccess = function(e) {
+    const db = e.target.result;
+    const tx = db.transaction('backups', 'readwrite');
+    const store = tx.objectStore('backups');
+    
+    // Copy the exact state
+    const snapshot = {
+      hourKey: hourKey,
+      timestamp: now.getTime(),
+      financeLedger: JSON.parse(JSON.stringify(state.financeLedger || [])),
+      financeAccounts: JSON.parse(JSON.stringify(state.financeAccounts || []))
+    };
+    
+    store.put(snapshot);
+    
+    // Optional: Clean up old backups (keep last 24)
+    const reqAll = store.getAll();
+    reqAll.onsuccess = function() {
+      const all = reqAll.result;
+      if (all.length > 24) {
+        all.sort((a,b) => b.timestamp - a.timestamp);
+        for(let i = 24; i < all.length; i++) {
+          store.delete(all[i].hourKey);
+        }
+      }
+    };
+  };
 };
 
 
@@ -21659,6 +21713,9 @@ window.financeDiagnostic = function() {
           <h3 style="margin:0;font-size:17px;font-weight:700;color:#e2e8f0;">🔍 Diagnóstico de Movimientos</h3>
           <button onclick="this.closest('div[style]').remove()" style="background:rgba(148,163,184,.15);border:none;color:#94a3b8;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:14px;">✕</button>
         </div>
+        <button onclick="window.financeListIDBBackups()" style="width:100%;padding:10px;margin-bottom:12px;background:linear-gradient(135deg,rgba(99,102,241,.3),rgba(139,92,246,.3));border:1px solid rgba(99,102,241,.4);color:#a5b4fc;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;">
+          🕐 Ver Backups Automáticos
+        </button>
         ${report}
       </div>
     `;
@@ -21859,4 +21916,79 @@ window.financeApplyHardcodedData = async function() {
   } catch(e) {
     alert("Error al cargar los datos limpios: " + e.message);
   }
+};
+
+// ─── RESTORE FROM IDB BACKUP ─────────────────────────────────────────
+window.financeListIDBBackups = function() {
+  const dbName = 'MemoryCarlFinanceBackups';
+  const req = indexedDB.open(dbName, 1);
+  req.onupgradeneeded = function(e) {
+    const db = e.target.result;
+    if (!db.objectStoreNames.contains('backups')) db.createObjectStore('backups', { keyPath: 'hourKey' });
+  };
+  req.onsuccess = function(e) {
+    const db = e.target.result;
+    const tx = db.transaction('backups', 'readonly');
+    const store = tx.objectStore('backups');
+    const all = store.getAll();
+    all.onsuccess = function() {
+      const backups = (all.result || []).sort((a,b) => b.timestamp - a.timestamp);
+      if (!backups.length) {
+        toast('No hay backups automáticos guardados todavía');
+        return;
+      }
+      // Build modal
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.85);display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+      let rows = backups.map(function(b) {
+        const dt = new Date(b.timestamp);
+        const label = dt.toLocaleString('es-PE', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+        const ledgerCount = (b.financeLedger || []).filter(function(e){ return !e.archived; }).length;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.1);">
+          <div>
+            <div style="font-size:13px;color:#e2e8f0;font-weight:600;">${label}</div>
+            <div style="font-size:11px;color:#64748b;">${ledgerCount} movimientos activos</div>
+          </div>
+          <button onclick="window.financeRestoreFromIDB('${b.hourKey}')" style="padding:8px 14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">Restaurar</button>
+        </div>`;
+      }).join('');
+      d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:20px;width:100%;max-width:440px;max-height:80vh;overflow-y:auto;">
+        <div style="font-weight:700;color:#e2e8f0;font-size:16px;margin-bottom:4px;">🕐 Backups automáticos</div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:14px;">Se guarda 1 backup por hora. Últimas 24h disponibles.</div>
+        ${rows}
+        <button onclick="this.closest('div[style]').remove()" style="margin-top:14px;width:100%;padding:10px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:13px;">Cerrar</button>
+      </div>`;
+      document.body.appendChild(d);
+      d.addEventListener('click', function(ev){ if(ev.target===d) d.remove(); });
+    };
+  };
+  req.onerror = function() { toast('No se pudo abrir la base de datos de backups'); };
+};
+
+window.financeRestoreFromIDB = function(hourKey) {
+  const dbName = 'MemoryCarlFinanceBackups';
+  const req = indexedDB.open(dbName, 1);
+  req.onsuccess = function(e) {
+    const db = e.target.result;
+    const tx = db.transaction('backups', 'readonly');
+    const store = tx.objectStore('backups');
+    const getReq = store.get(hourKey);
+    getReq.onsuccess = function() {
+      const backup = getReq.result;
+      if (!backup) { toast('Backup no encontrado'); return; }
+      const ledger = backup.financeLedger || [];
+      const accounts = backup.financeAccounts || [];
+      const active = ledger.filter(function(e){ return !e.archived; }).length;
+      const dt = new Date(backup.timestamp).toLocaleString('es-PE');
+      if (!confirm(`¿Restaurar backup del ${dt}?\n\n• ${active} movimientos activos\n• ${accounts.length} cuentas\n\nEsto reemplazará el ledger actual.`)) return;
+      state.financeLedger = ledger;
+      state.financeAccounts = accounts;
+      financeRecomputeBalances();
+      persist();
+      view();
+      document.querySelectorAll('div[style*="z-index:10001"]').forEach(function(el){ el.remove(); });
+      document.querySelectorAll('div[style*="z-index:9999"]').forEach(function(el){ el.remove(); });
+      toast('✅ Backup restaurado correctamente');
+    };
+  };
 };
