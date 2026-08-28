@@ -15621,9 +15621,17 @@ function openFinanceAccountModal(prefill=null){
 
         <label class="finAccField">
           <div class="finAccLabel">Saldo inicial</div>
-          <input id="finAccBalance" type="number" inputmode="decimal" value="${Number(draft.balance||0)}" />
+          <input id="finAccBalance" type="number" inputmode="decimal" value="${Number(draft.initialBalance ?? draft.balance || 0)}" />
           <div class="muted" style="margin-top:6px">Tip: esto define tu “punto cero” real. Luego los movimientos ajustan el saldo.</div>
         </label>
+
+        ${draft.id ? `
+        <label class="finAccField" style="margin-top: 12px; padding: 10px; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.25); border-radius: 8px;">
+          <div class="finAccLabel" style="color: #818cf8; font-weight: bold;">Saldo real actual (Autocalcular saldo inicial)</div>
+          <input id="finAccRealBalance" type="number" inputmode="decimal" placeholder="Ej: 3017.13" />
+          <div class="muted" style="margin-top:4px; font-size:11px;">Escribe el dinero real que tienes hoy en esta cuenta. Esto calculará el saldo inicial automáticamente según tus movimientos registrados.</div>
+        </label>
+        ` : ''}
 
         <label class="finAccField">
           <div class="finAccLabel">Color (opcional)</div>
@@ -15648,8 +15656,10 @@ function openFinanceAccountModal(prefill=null){
   backdrop.querySelector('#finAccSave')?.addEventListener('click', ()=>{
     const name = (backdrop.querySelector('#finAccName')?.value||'').trim();
     const type = (backdrop.querySelector('#finAccType')?.value||'bank').trim();
-    const bal = Number(backdrop.querySelector('#finAccBalance')?.value||0);
+    let bal = Number(backdrop.querySelector('#finAccBalance')?.value||0);
     const color = (backdrop.querySelector('#finAccColor')?.value||'').trim();
+    const realBalInput = backdrop.querySelector('#finAccRealBalance');
+    const realBalVal = realBalInput ? realBalInput.value.trim() : "";
 
     if(!name){ toast("Pon un nombre"); return; }
 
@@ -15659,7 +15669,29 @@ function openFinanceAccountModal(prefill=null){
       acc.name = name;
       acc.type = type;
       acc.color = color || null;
-      acc.initialBalance = bal;
+
+      if(realBalVal !== "") {
+        // Calculate: initialBalance = realBalance - sum(ledger)
+        const realBal = Number(realBalVal);
+        let sumLedger = 0;
+        (financeActiveLedger()||[]).forEach(e => {
+          if(e.accountId !== acc.id) return;
+          const amt = Number(e.amount||0);
+          if(e.type === "expense") {
+            if (e.isFiado && e.fiadoStatus !== "paid") {
+              // ignore
+            } else {
+              sumLedger -= amt;
+            }
+          } else if(e.type === "income") {
+            sumLedger += amt;
+          }
+        });
+        acc.initialBalance = realBal - sumLedger;
+      } else {
+        acc.initialBalance = bal;
+      }
+      
       financeRecomputeBalances();
       persist();
       view();
