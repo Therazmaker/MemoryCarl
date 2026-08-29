@@ -22490,7 +22490,8 @@ window.financePushToSupabase = async function(isManual = false) {
       if (window.__mcLogs) {
         window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Sync Error: ${errText.slice(0, 60)}` });
       }
-      if (isManual) toast("❌ Error al sincronizar con Supabase: " + errText.slice(0,80));
+      // Always show error (manual or not) so user knows sync is failing
+      toast("❌ Error al sincronizar: " + errText.slice(0, 60));
     } else {
       console.log("Supabase Sync Successful");
       if (window.__mcLogs) {
@@ -22539,8 +22540,11 @@ window.financeCheckSupabase = async function() {
     if (!appState || (!appState.financeLedger && !appState.financeAccounts)) {
       d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:24px;width:100%;max-width:440px;">
         <div style="font-size:16px;font-weight:700;color:#fb7185;margin-bottom:8px;">☁️ Sin datos financieros en la nube</div>
-        <div style="font-size:13px;color:#94a3b8;margin-bottom:16px;">No se encontró ningún backup de finanzas en Supabase. Pulsa "📤 Subir a Nube" para guardar el primero.</div>
-        <button onclick="this.closest('div').parentElement.remove()" style="width:100%;padding:12px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:10px;cursor:pointer;">Cerrar</button>
+        <div style="font-size:13px;color:#94a3b8;margin-bottom:16px;">No se encontró ningún backup de finanzas en tu base de datos de Supabase. Pulsa el botón de abajo para subir tus datos locales actuales.</div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="window.financePushToSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:12px;background:#7c5cff;border:none;color:#fff;font-weight:bold;border-radius:10px;cursor:pointer;">📤 Subir mis datos</button>
+          <button onclick="this.closest('div').parentElement.remove()" style="padding:12px 20px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:10px;cursor:pointer;">Cerrar</button>
+        </div>
       </div>`;
     } else {
       const ledger = appState.financeLedger || [];
@@ -22623,45 +22627,45 @@ window.financePullFromSupabase = async function(isManual = false) {
     const json = await res.json();
     const appState = json?.data?.appState;
     if (appState && (appState.financeLedger || appState.financeAccounts)) {
-      let updated = false;
-
-      if (Array.isArray(appState.financeLedger) && appState.financeLedger.length > (state.financeLedger || []).length) {
-        state.financeLedger = appState.financeLedger;
-        updated = true;
+      const localLedgerCount = (state.financeLedger || []).length;
+      const cloudLedgerCount = (appState.financeLedger || []).length;
+      
+      let shouldImport = false;
+      if (isManual) {
+        shouldImport = confirm(`☁️ Datos encontrados en la nube:\n\n` + 
+          `- Movimientos en Nube: ${cloudLedgerCount}\n` + 
+          `- Movimientos en Local: ${localLedgerCount}\n\n` + 
+          `¿Deseas sobreescribir tus datos locales con los de la nube? (Recomendado solo si tu móvil se limpió o deseas restaurar un backup anterior)`);
+      } else {
+        // Auto-pull on boot only overwrites if cloud has strictly more data to avoid loss
+        shouldImport = (cloudLedgerCount > localLedgerCount);
       }
 
-      if (Array.isArray(appState.financeAccounts) && appState.financeAccounts.length > 0) {
-        state.financeAccounts = appState.financeAccounts;
-        updated = true;
-      }
+      if (shouldImport) {
+        state.financeLedger = appState.financeLedger || [];
+        state.financeAccounts = appState.financeAccounts || [];
+        if (appState.financeEntryCategories && appState.financeEntryCategories.length > 0) {
+          state.financeEntryCategories = appState.financeEntryCategories;
+        }
+        if (appState.financeTransactions) {
+          localStorage.setItem('memorycarl_v2_finance_transactions', JSON.stringify(appState.financeTransactions));
+        }
 
-      if (Array.isArray(appState.financeEntryCategories) && appState.financeEntryCategories.length > 0) {
-        state.financeEntryCategories = appState.financeEntryCategories;
-        updated = true;
-      }
-
-      if (appState.financeTransactions) {
-        localStorage.setItem('memorycarl_v2_finance_transactions', JSON.stringify(appState.financeTransactions));
-      }
-
-      if (updated) {
         financeRecomputeBalances();
-        // Save to localStorage without triggering another push
+        
+        // Save to localStorage without triggering a recursive push
         const _tmpPush = window.financePushToSupabase;
         window.financePushToSupabase = null;
         persist();
         window.financePushToSupabase = _tmpPush;
         view();
+
         if (window.__mcLogs) {
-          const count = (state.financeLedger || []).length;
-          window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Descarga exitosa: ${count} movimientos restaurados` });
+          window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Descarga exitosa: ${cloudLedgerCount} movimientos restaurados` });
         }
         toast('☁️ Finanzas sincronizadas desde Supabase');
       } else {
-        if (window.__mcLogs) {
-          window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Sincronización sin cambios (los datos locales ya son los más recientes)` });
-        }
-        if (isManual) toast("✅ Ya tienes los datos más recientes de la nube");
+        if (isManual) toast("Sincronización cancelada o sin cambios");
       }
     } else {
       if (isManual) toast("ℹ️ Sin datos financieros en la nube todavía");
