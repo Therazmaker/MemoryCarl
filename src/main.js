@@ -15767,8 +15767,9 @@ function openFinanceAccountModal(prefill=null){
         <div class="finAccSpacer"></div>
       </div>
 
-      <div class="finAccBottom">
-        <button class="btn" id="finAccSave">${draft.id ? "Guardar" : "Crear cuenta"}</button>
+      <div class="finAccBottom" style="display:flex; justify-content:space-between; gap:10px; padding:16px;">
+        ${draft.id ? `<button class="btn" id="finAccDelete" style="background:#ef4444; color:#fff; border:none; border-radius:8px; padding:10px; cursor:pointer; font-weight:bold; font-size:14px; flex:1;">Eliminar</button>` : ''}
+        <button class="btn" id="finAccSave" style="flex:2;">${draft.id ? "Guardar" : "Crear cuenta"}</button>
       </div>
     </div>
   `;
@@ -15827,6 +15828,18 @@ function openFinanceAccountModal(prefill=null){
       toast("Cuenta creada ✅");
     }
 
+    close();
+  });
+
+  backdrop.querySelector('#finAccDelete')?.addEventListener('click', () => {
+    if(!draft.id) return;
+    const ok = confirm(`¿Estás seguro de que deseas eliminar la cuenta "${draft.name}"?\n\nLos movimientos asociados a esta cuenta se mantendrán pero quedarán sin cuenta asignada.`);
+    if(!ok) return;
+    state.financeAccounts = (state.financeAccounts||[]).filter(a => a.id !== draft.id);
+    financeRecomputeBalances();
+    persist();
+    view();
+    toast("Cuenta eliminada 🗑️");
     close();
   });
 
