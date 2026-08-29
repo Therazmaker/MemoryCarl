@@ -22141,7 +22141,8 @@ window.financePushToSupabase = async function(isManual = false) {
         financeAccounts: state.financeAccounts || [],
         financeTransactions: JSON.parse(localStorage.getItem('memorycarl_v2_finance_transactions') || '[]'),
         financeResetAt: state.financeResetAt || null,
-        financeDebts: state.financeDebts || []
+        financeDebts: state.financeDebts || [],
+        financeEntryCategories: state.financeEntryCategories || []
       }
     };
 
@@ -22303,6 +22304,11 @@ window.financePullFromSupabase = async function(isManual = false) {
 
       if (Array.isArray(appState.financeAccounts) && appState.financeAccounts.length > 0) {
         state.financeAccounts = appState.financeAccounts;
+        updated = true;
+      }
+
+      if (Array.isArray(appState.financeEntryCategories) && appState.financeEntryCategories.length > 0) {
+        state.financeEntryCategories = appState.financeEntryCategories;
         updated = true;
       }
 
