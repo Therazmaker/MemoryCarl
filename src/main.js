@@ -2878,6 +2878,42 @@ function view(){
     }
 
     const semanaKeyInp = root.querySelector("#semanaGeminiApiKey");
+
+    // ── Supabase Sync buttons ────────────────────────────────
+    const btnSaveKey = root.querySelector("#supabaseSaveKey");
+    if (btnSaveKey) {
+      btnSaveKey.addEventListener("click", () => {
+        const inp = root.querySelector("#supabaseApiKeyInput");
+        const k = (inp?.value || "").trim();
+        setSyncApiKey(k);
+        view();
+        try { if(typeof toast === "function") toast(k ? "🔑 API Key guardada ✅" : "🗑️ API Key eliminada"); } catch(e) {}
+      });
+    }
+
+    const btnSupabasePush = root.querySelector("#btnSupabasePush");
+    if (btnSupabasePush) {
+      btnSupabasePush.addEventListener("click", () => {
+        window.financePushToSupabase(true);
+      });
+    }
+
+    const btnSupabasePull = root.querySelector("#btnSupabasePull");
+    if (btnSupabasePull) {
+      btnSupabasePull.addEventListener("click", () => {
+        window.financePullFromSupabase(true);
+      });
+    }
+
+    const btnSupabaseCheck = root.querySelector("#btnSupabaseCheck");
+    if (btnSupabaseCheck) {
+      btnSupabaseCheck.addEventListener("click", () => {
+        window.financeCheckSupabase();
+      });
+    }
+    // ────────────────────────────────────────────────────────
+
+
     const btnSemanaKeySave = root.querySelector("#btnSemanaGeminiSave");
     const btnSemanaKeyClear = root.querySelector("#btnSemanaGeminiClear");
     if(semanaKeyInp){
@@ -4163,7 +4199,44 @@ function viewSettings(){
       <div class="chip">backup • notifs • datos</div>
     </div>
 
-    
+    <div class="card" style="border:1px solid rgba(52,211,153,.3);background:rgba(52,211,153,.04);">
+      <div class="cardTop">
+        <div>
+          <h2 class="cardTitle">☁️ Sincronización con Supabase</h2>
+          <div class="small">Guarda tus finanzas en la nube para que nunca se pierdan.</div>
+        </div>
+        <div id="supabaseSyncStatus" class="chip" style="background:rgba(52,211,153,.15);color:#34d399;">
+          ${getSyncApiKey() ? '🟢 Key activa' : '⚪ Sin key'}
+        </div>
+      </div>
+      <div class="hr"></div>
+
+      <div style="margin-bottom:10px;">
+        <div class="k" style="font-size:12px;color:#64748b;margin-bottom:6px;">API Key del servidor (la misma que configuraste en Vercel):</div>
+        <div style="display:flex;gap:8px;">
+          <input id="supabaseApiKeyInput" type="password" placeholder="Tu API Key..." 
+            value="${getSyncApiKey()}"
+            style="flex:1;padding:10px;background:#0f172a;border:1px solid rgba(52,211,153,.3);border-radius:8px;color:#e2e8f0;font-size:13px;font-family:monospace;" />
+          <button id="supabaseSaveKey" style="padding:10px 16px;background:linear-gradient(135deg,#34d399,#059669);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;white-space:nowrap;">
+            Guardar
+          </button>
+        </div>
+        <div style="font-size:11px;color:#475569;margin-top:4px;">Esta key protege tu servidor. La encuentras en el panel de Vercel &gt; Environment Variables &gt; API_SECRET_KEY</div>
+      </div>
+
+      <div class="btnRow" style="gap:8px;flex-wrap:wrap;">
+        <button id="btnSupabasePush" style="flex:1;min-width:100px;padding:10px;background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:13px;cursor:pointer;font-weight:700;">
+          📤 Subir a Nube
+        </button>
+        <button id="btnSupabasePull" style="flex:1;min-width:100px;padding:10px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:13px;cursor:pointer;font-weight:700;">
+          📥 Descargar Nube
+        </button>
+        <button id="btnSupabaseCheck" style="flex:1;min-width:100px;padding:10px;background:rgba(251,191,36,.1);color:#fbbf24;border:1px solid rgba(251,191,36,.25);border-radius:8px;font-size:13px;cursor:pointer;font-weight:700;">
+          🔍 Verificar Nube
+        </button>
+      </div>
+    </div>
+
     <div class="card">
       <div class="cardTop">
         <div>
@@ -22079,15 +22152,103 @@ window.financePushToSupabase = async function(isManual = false) {
     });
 
     if (!res.ok) {
-      console.warn("Supabase Sync Failed:", await res.text());
-      if (isManual) toast("❌ Error al sincronizar con Supabase");
+      const errText = await res.text();
+      console.warn("Supabase Sync Failed:", errText);
+      if (isManual) toast("❌ Error al sincronizar con Supabase: " + errText.slice(0,80));
     } else {
+      const ledgerCount = (state.financeLedger || []).length;
+      const activeCount = (state.financeLedger || []).filter(e => !e.archived).length;
       console.log("Supabase Sync Successful");
-      if (isManual) toast("✅ Sincronizado en la nube correctamente");
+      if (isManual) toast(`✅ Guardado en la nube: ${activeCount} activos / ${ledgerCount} total`);
     }
   } catch(e) {
     console.error("Supabase Sync Error:", e);
     if (isManual) toast("❌ Error de conexión al sincronizar");
+  }
+};
+
+window.financeCheckSupabase = async function() {
+  try {
+    const key = getSyncApiKey();
+    if (!key) {
+      alert("⚠️ No tienes API Key configurada para la sincronización.\n\nVe a Configuración > Sync y pon tu API Key.");
+      return;
+    }
+
+    toast("🔍 Verificando datos en la nube...");
+
+    const res = await fetch('https://memory-carl.vercel.app/api/restore', {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${key}` }
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      alert("❌ Error al conectar con Supabase:\n\n" + errText);
+      return;
+    }
+
+    const json = await res.json();
+    const appState = json?.data?.appState;
+
+    // Build summary
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.85);display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+
+    if (!appState || (!appState.financeLedger && !appState.financeAccounts)) {
+      d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:24px;width:100%;max-width:440px;">
+        <div style="font-size:16px;font-weight:700;color:#fb7185;margin-bottom:8px;">☁️ Sin datos financieros en la nube</div>
+        <div style="font-size:13px;color:#94a3b8;margin-bottom:16px;">No se encontró ningún backup de finanzas en Supabase. Pulsa "📤 Subir a Nube" para guardar el primero.</div>
+        <button onclick="this.closest('div').parentElement.remove()" style="width:100%;padding:12px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:10px;cursor:pointer;">Cerrar</button>
+      </div>`;
+    } else {
+      const ledger = appState.financeLedger || [];
+      const accounts = appState.financeAccounts || [];
+      const active = ledger.filter(e => !e.archived).length;
+      const archived = ledger.filter(e => e.archived).length;
+      const dates = ledger.map(e => e.date).filter(Boolean).sort();
+      const oldest = dates[0] || '—';
+      const newest = dates[dates.length-1] || '—';
+      const localCount = (state.financeLedger || []).length;
+      const cloudCount = ledger.length;
+      const diff = cloudCount - localCount;
+      const diffLabel = diff > 0 ? `<span style="color:#34d399">+${diff} más en la nube</span>` :
+                        diff < 0 ? `<span style="color:#fb7185">${Math.abs(diff)} más en local</span>` :
+                        `<span style="color:#34d399">✅ Sincronizados</span>`;
+
+      d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:20px;width:100%;max-width:440px;">
+        <div style="font-size:16px;font-weight:700;color:#34d399;margin-bottom:4px;">☁️ Estado en Supabase</div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:16px;">Datos actualmente guardados en la nube</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+          <div style="background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.2);border-radius:10px;padding:12px;text-align:center;">
+            <div style="font-size:26px;font-weight:800;color:#34d399;">${active}</div>
+            <div style="font-size:11px;color:#94a3b8;">Activos en nube</div>
+          </div>
+          <div style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:10px;padding:12px;text-align:center;">
+            <div style="font-size:26px;font-weight:800;color:#818cf8;">${cloudCount}</div>
+            <div style="font-size:11px;color:#94a3b8;">Total en nube</div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#94a3b8;line-height:2;background:rgba(15,23,42,.4);border-radius:8px;padding:10px;">
+          <div>📅 Más antiguo: <strong style="color:#e2e8f0">${oldest}</strong></div>
+          <div>📅 Más reciente: <strong style="color:#e2e8f0">${newest}</strong></div>
+          <div>🏦 Cuentas guardadas: <strong style="color:#e2e8f0">${accounts.length}</strong></div>
+          <div>🗃️ Archivados: <strong style="color:#fbbf24">${archived}</strong></div>
+          <div>📱 Local vs ☁️ Nube: ${diffLabel}</div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button onclick="window.financePullFromSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:10px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">📥 Importar a Local</button>
+          <button onclick="this.closest('div').parentElement.remove()" style="flex:1;padding:10px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:12px;">Cerrar</button>
+        </div>
+      </div>`;
+    }
+
+    document.body.appendChild(d);
+    d.addEventListener('click', ev => { if(ev.target === d) d.remove(); });
+
+  } catch(e) {
+    console.error("Check Supabase Error:", e);
+    alert("❌ Error al verificar Supabase:\n" + e.message);
   }
 };
 
