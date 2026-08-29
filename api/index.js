@@ -172,6 +172,9 @@ app.get('/api/restore', requireAuth, async (req, res) => {
 
     if (neuronsRes.error) throw new Error('Error leyendo neuronas: ' + neuronsRes.error.message);
     if (memoriesRes.error) throw new Error('Error leyendo memorias: ' + memoriesRes.error.message);
+    if (appStateRes.error && appStateRes.error.code !== 'PGRST116') {
+      throw new Error('Error leyendo app_state: ' + appStateRes.error.message);
+    }
 
     res.json({
       status: 'ok',
