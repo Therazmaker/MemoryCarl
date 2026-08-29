@@ -15567,7 +15567,7 @@ function addFinanceAccount({name, type="bank", balance=0, color=null}){
   const acc = {
     id: uid("acc"),
     name: String(name||"Cuenta").trim(),
-    type: (type==="cash"||type==="card"||type==="bank") ? type : "bank",
+    type: (type==="cash"||type==="card"||type==="bank"||type==="crypto") ? type : "bank",
     initialBalance: Number(balance||0),
     balance: Number(balance||0),
     color: color || null,
@@ -15577,6 +15577,25 @@ function addFinanceAccount({name, type="bank", balance=0, color=null}){
   persist();
   view();
   return acc;
+}
+
+// Auto-migrate any existing account with crypto-related name to type 'crypto'
+try {
+  let migrated = false;
+  (state.financeAccounts || []).forEach(a => {
+    const nameLow = String(a.name || "").toLowerCase();
+    if (a.type === "bank" && (nameLow.includes("btc") || nameLow.includes("bitcoin") || nameLow.includes("crypto") || nameLow.includes("binance"))) {
+      a.type = "crypto";
+      migrated = true;
+      console.log(`Auto-migrated account "${a.name}" to crypto type.`);
+    }
+  });
+  if (migrated) {
+    financeRecomputeBalances();
+    persist();
+  }
+} catch(err) {
+  console.warn("Crypto account auto-migration failed:", err);
 }
 
 function addFinanceEntry(payload){
