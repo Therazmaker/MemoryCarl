@@ -21714,10 +21714,10 @@ window.financeDiagnostic = function() {
         ☁️ <strong style="color:#34d399;">Sincronización en la Nube (Supabase)</strong><br>
         <span style="color:#94a3b8;">Guarda tus movimientos financieros directamente en tu servidor.</span>
         <div style="display:flex;gap:6px;margin-top:8px;">
-          <button onclick="window.financePullFromSupabase(); this.closest('div[style]').remove();" style="flex:1;padding:8px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
+          <button onclick="window.financePullFromSupabase(true);" style="flex:1;padding:8px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
             📥 Descargar Nube
           </button>
-          <button onclick="window.financePushToSupabase(); toast('Enviando copia a Supabase...');" style="flex:1;padding:8px;background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
+          <button onclick="window.financePushToSupabase(true);" style="flex:1;padding:8px;background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
             📤 Subir a Nube
           </button>
         </div>
@@ -22049,10 +22049,15 @@ window.financeRestoreFromIDB = function(hourKey) {
 };
 
 // ─── SUPABASE CLOUD SYNC SYSTEM ──────────────────────────────────────
-window.financePushToSupabase = async function() {
+window.financePushToSupabase = async function(isManual = false) {
   try {
     const key = getSyncApiKey();
-    if (!key) return; // No key configured, sync disabled
+    if (!key) {
+      if (isManual) toast("⚠️ Sync no configurado (falta API Key)");
+      return;
+    }
+
+    if (isManual) toast("📤 Enviando copia a Supabase...");
 
     const payload = {
       appState: {
@@ -22075,19 +22080,26 @@ window.financePushToSupabase = async function() {
 
     if (!res.ok) {
       console.warn("Supabase Sync Failed:", await res.text());
+      if (isManual) toast("❌ Error al sincronizar con Supabase");
     } else {
       console.log("Supabase Sync Successful");
+      if (isManual) toast("✅ Sincronizado en la nube correctamente");
     }
   } catch(e) {
     console.error("Supabase Sync Error:", e);
+    if (isManual) toast("❌ Error de conexión al sincronizar");
   }
 };
 
-window.financePullFromSupabase = async function() {
+window.financePullFromSupabase = async function(isManual = false) {
   try {
     const key = getSyncApiKey();
-    if (!key) return; // No key configured, sync disabled
+    if (!key) {
+      if (isManual) toast("⚠️ Sync no configurado (falta API Key)");
+      return;
+    }
 
+    if (isManual) toast("📥 Buscando datos en la nube...");
     console.log("Checking Supabase cloud state...");
     const res = await fetch('https://memory-carl.vercel.app/api/restore', {
       method: 'GET',
@@ -22098,6 +22110,7 @@ window.financePullFromSupabase = async function() {
 
     if (!res.ok) {
       console.warn("Supabase Pull Failed:", await res.text());
+      if (isManual) toast("❌ Error al descargar desde Supabase");
       return;
     }
 
@@ -22105,13 +22118,12 @@ window.financePullFromSupabase = async function() {
     const appState = json?.data?.appState;
     if (appState && (appState.financeLedger || appState.financeAccounts)) {
       let updated = false;
-      
-      // Only import if remote has items and local is empty or older
+
       if (Array.isArray(appState.financeLedger) && appState.financeLedger.length > (state.financeLedger || []).length) {
         state.financeLedger = appState.financeLedger;
         updated = true;
       }
-      
+
       if (Array.isArray(appState.financeAccounts) && appState.financeAccounts.length > 0) {
         state.financeAccounts = appState.financeAccounts;
         updated = true;
@@ -22123,20 +22135,22 @@ window.financePullFromSupabase = async function() {
 
       if (updated) {
         financeRecomputeBalances();
-        const oldPersist = persist;
-        // temporaly bypass push during bootstrap restore
-        persist = function() {
-          const _wrap = oldPersist;
-          _wrap();
-        };
+        // Save to localStorage without triggering another push
+        const _tmpPush = window.financePushToSupabase;
+        window.financePushToSupabase = null;
         persist();
-        persist = oldPersist;
+        window.financePushToSupabase = _tmpPush;
         view();
         toast('☁️ Finanzas sincronizadas desde Supabase');
+      } else {
+        if (isManual) toast("✅ Ya tienes los datos más recientes de la nube");
       }
+    } else {
+      if (isManual) toast("ℹ️ Sin datos financieros en la nube todavía");
     }
   } catch(e) {
     console.error("Supabase Pull Error:", e);
+    if (isManual) toast("❌ Error de conexión al descargar");
   }
 };
 
