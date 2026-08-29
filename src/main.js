@@ -11699,6 +11699,7 @@ function toast(msg){
   ">${escapeHtml(msg)}</div>`;
   toastTimer = setTimeout(()=>{ host.innerHTML = ""; }, 1400);
 }
+window.toast = toast;
 
 function initBottomSheet(){
   const sheet = document.querySelector("#bottomSheet");
@@ -15050,8 +15051,8 @@ window.financeFetchBtcPrice = async function() {
     if (res.ok) {
       const data = await res.json();
       if (data && data.bitcoin) {
-        state.btcPricePen = Number(data.bitcoin.pen);
-        state.btcPriceUsd = Number(data.bitcoin.usd);
+        state.btcPriceUsd = Number(data.bitcoin.usd || 60000);
+        state.btcPricePen = Number(data.bitcoin.pen || (state.btcPriceUsd * 3.76));
         localStorage.setItem("memorycarl_btc_price_pen", state.btcPricePen);
         localStorage.setItem("memorycarl_btc_price_usd", state.btcPriceUsd);
         console.log("BTC price updated:", state.btcPricePen, "PEN /", state.btcPriceUsd, "USD");
