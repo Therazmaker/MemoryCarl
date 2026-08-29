@@ -22474,6 +22474,8 @@ window.financePushToSupabase = async function(isManual = false) {
       }
     };
 
+    console.log("Finance Push Payload Sample (first 3 entries):", (state.financeLedger || []).slice(0, 3));
+
     const res = await fetch('https://memory-carl.vercel.app/api/sync', {
       method: 'POST',
       headers: {

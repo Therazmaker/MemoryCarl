@@ -143,6 +143,7 @@ app.post('/api/sync', requireAuth, async (req, res) => {
 
     if (appState) {
       // 1. Guardar en app_state de seguridad
+      console.log("Sync Payload - Ledger Sample:", appState.financeLedger ? JSON.stringify(appState.financeLedger.slice(0, 3)) : "none");
       const { error: asErr } = await supabase.from('app_state').upsert(
         [{ id: 'default_user', state_json: appState, updated_at: new Date().toISOString() }],
         { onConflict: 'id' }
