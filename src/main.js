@@ -15041,6 +15041,32 @@ state.financeCommitmentInstances = load(LS.financeCommitmentInstances, []);
 state.financeLoanUsageLedger = load(LS.financeLoanUsageLedger, []);
 state.financeRoadmap = load(LS.financeRoadmap, {});
 
+state.btcPricePen = Number(localStorage.getItem("memorycarl_btc_price_pen") || 225000);
+state.btcPriceUsd = Number(localStorage.getItem("memorycarl_btc_price_usd") || 60000);
+
+window.financeFetchBtcPrice = async function() {
+  try {
+    const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,pen");
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.bitcoin) {
+        state.btcPricePen = Number(data.bitcoin.pen);
+        state.btcPriceUsd = Number(data.bitcoin.usd);
+        localStorage.setItem("memorycarl_btc_price_pen", state.btcPricePen);
+        localStorage.setItem("memorycarl_btc_price_usd", state.btcPriceUsd);
+        console.log("BTC price updated:", state.btcPricePen, "PEN /", state.btcPriceUsd, "USD");
+        return true;
+      }
+    }
+  } catch(e) {
+    console.warn("Error fetching BTC price, using offline cache:", e);
+  }
+  return false;
+};
+// Fetch BTC price immediately on boot
+try { window.financeFetchBtcPrice(); } catch(err) {}
+
+
 
 // Quick finance wipe via URL: ?finreset=1 (useful when you want to start clean)
 try{
@@ -15447,13 +15473,13 @@ function financeRecomputeBalances(){
       }
     }
     else if(e.type === "income") sums[accId] += amt;
-    // transfers handled elsewhere later
   });
 
   (state.financeAccounts||[]).forEach(a=>{
     const base = Number(a.initialBalance||0);
     const delta = Number(sums[a.id]||0);
-    a.balance = base + delta;
+    const finalVal = base + delta;
+    a.balance = a.type === "crypto" ? Number(finalVal.toFixed(8)) : Number(finalVal.toFixed(2));
   });
 }
 
@@ -15696,6 +15722,7 @@ function openFinanceAccountModal(prefill=null){
             <option value="bank" ${draft.type==="bank"?"selected":""}>Banco</option>
             <option value="cash" ${draft.type==="cash"?"selected":""}>Efectivo</option>
             <option value="card" ${draft.type==="card"?"selected":""}>Tarjeta</option>
+            <option value="crypto" ${draft.type==="crypto"?"selected":""}>Cripto (BTC)</option>
           </select>
         </label>
 
@@ -19833,10 +19860,11 @@ function viewFinance(){
   const finPillars = financeComputePillars(monthKey);
 
 
-  // header tabs (Principal / Movimientos / Recordatorios / Deudas)
+  // header tabs (Principal / Movimientos / Recordatorios / Deudas / Crypto)
   const topTabs = `
     <div class="finTopTabs">
       <button class="finTopTab ${state.financeSubTab==="main"?"active":""}" onclick="setFinanceSubTab('main')">Principal</button>
+      <button class="finTopTab ${state.financeSubTab==="crypto"?"active":""}" onclick="setFinanceSubTab('crypto')">🪙 Crypto / BTC</button>
       <button class="finTopTab ${state.financeSubTab==="stats"?"active":""}" onclick="setFinanceSubTab('stats')">📊 Estadísticas</button>
       <button class="finTopTab ${state.financeSubTab==="mission"?"active":""}" onclick="setFinanceSubTab('mission')">Mission Control</button>
       <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
@@ -19850,7 +19878,12 @@ function viewFinance(){
   `;
 
   // Principal content — redesigned
-  const totalBalance = (state.financeAccounts||[]).reduce((s,a)=>s+Number(a.balance||0),0);
+  const totalBalance = (state.financeAccounts||[]).reduce((s,a)=>{
+    if (a.type === "crypto") {
+      return s + (Number(a.balance||0) * state.btcPricePen);
+    }
+    return s + Number(a.balance||0);
+  }, 0);
   const savings = d.income - d.expense;
   const savingsPct = meta.expectedIncome > 0 ? Math.round((savings / meta.expectedIncome) * 100) : null;
   const spentPct = meta.expectedIncome > 0 ? Math.min(100, Math.round((d.expense / meta.expectedIncome) * 100)) : null;
@@ -19858,17 +19891,24 @@ function viewFinance(){
   const accountCards = (state.financeAccounts||[]).map(a=>{
     const bal = Number(a.balance||0);
     const isFergisAccount = String(a.name||"").toLowerCase().includes("fergis");
+    const isCrypto = a.type === "crypto";
     // Show expenses for Fergis account instead of income, since it's used to track what Carlos spends for her
     const monthFergisFlow = isFergisAccount ? financeAccountExpenseFlow(a.id, monthKey) : 0;
     const shownValue = isFergisAccount ? monthFergisFlow : bal;
     const isPos = isFergisAccount ? true : (shownValue >= 0); // Force positive look (green/neutral) for Fergis flow
-    const balanceLabel = isFergisAccount ? "Uso del mes" : "Saldo";
+    
+    let balanceLabel = isFergisAccount ? "Uso del mes" : "Saldo";
+    if (isCrypto) {
+      const penValue = bal * state.btcPricePen;
+      balanceLabel = `Est. S/ ${fmt(penValue)}`;
+    }
+    
     const isPrimary = state.financePrimaryAccountId === a.id;
     return `
       <div class="finAccCard" style="position:relative;" onclick="openFinanceAccountDetails('${a.id}')">
         <button onclick="event.stopPropagation(); toggleFinancePrimaryAccount('${a.id}')" style="position:absolute; top:8px; right:8px; background:none; border:none; color:${isPrimary?'#f59e0b':'#555'}; font-size:16px; cursor:pointer;" title="Establecer como cuenta principal">${isPrimary?'★':'☆'}</button>
         <div class="finAccName" style="padding-right:20px;">${escapeHtml(a.name)}</div>
-        <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">S/ ${fmt(shownValue)}</div>
+        <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">${isCrypto ? `₿ ${bal.toFixed(8)}` : `S/ ${fmt(shownValue)}`}</div>
         <div class="finAccHint">${balanceLabel}</div>
       </div>`;
   }).join("") || `<div class="finAccEmpty">Sin cuentas · <span onclick="openFinanceAccountModal()" style="color:#7c5cff;cursor:pointer">Agregar +</span></div>`;
@@ -20111,6 +20151,8 @@ function viewFinance(){
 
   const fiadosHtml = typeof renderFinanceFiadosTab === 'function' ? renderFinanceFiadosTab() : '';
 
+  const cryptoHtml = renderFinanceCryptoTab();
+
   const body = (state.financeSubTab==="movements")
     ? movList
     : (state.financeSubTab==="reminders" ? remindersHtml
@@ -20120,13 +20162,156 @@ function viewFinance(){
             : (state.financeSubTab==="mission" ? missionHtml
               : (state.financeSubTab==="roadmap" ? roadmapHtml
                 : (state.financeSubTab==="neuronal" ? neuronalHtml
-                  : (state.financeSubTab==="stats" ? statsHtml : principalHtml))))))));
+                  : (state.financeSubTab==="stats" ? statsHtml
+                    : (state.financeSubTab==="crypto" ? cryptoHtml : principalHtml)))))))));
 
   return `
     ${topTabs}
     ${body}
   `;
 }
+
+
+function renderFinanceCryptoTab() {
+  const fmt = _financeFmt;
+  const btcPen = state.btcPricePen || 225000;
+  const btcUsd = state.btcPriceUsd || 60000;
+
+  const cryptoAccounts = (state.financeAccounts || []).filter(a => a.type === "crypto");
+  const fiatAccounts = (state.financeAccounts || []).filter(a => a.type !== "crypto");
+
+  let accountsHtml = "";
+  if (cryptoAccounts.length === 0) {
+    accountsHtml = `
+      <div style="background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:12px;padding:16px;text-align:center;margin-bottom:16px;">
+        <div style="font-size:14px;color:#fbbf24;font-weight:600;margin-bottom:8px;">🪙 No tienes una cuenta de Bitcoin creada</div>
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:12px;">Para registrar tus ahorros, primero crea una cuenta de tipo "Cripto (BTC)".</div>
+        <button onclick="openFinanceAccountModal()" style="padding:8px 16px;background:#7c5cff;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">＋ Crear Cuenta Crypto</button>
+      </div>
+    `;
+  } else {
+    accountsHtml = cryptoAccounts.map(a => {
+      const bal = Number(a.balance || 0);
+      const penValue = bal * btcPen;
+      const usdValue = bal * btcUsd;
+      return `
+        <div style="background:#1e293b;border-radius:12px;padding:14px;margin-bottom:10px;border-left:4px solid ${a.color || '#f59e0b'};">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-weight:700;color:#e2e8f0;font-size:14px;">${escapeHtml(a.name)}</div>
+            <div style="font-size:11px;color:#94a3b8;background:rgba(245,158,11,.1);padding:3px 6px;border-radius:6px;border:1px solid rgba(245,158,11,.2);">Billetera BTC</div>
+          </div>
+          <div style="font-size:24px;font-weight:800;color:#f59e0b;margin:8px 0;font-family:monospace;">₿ ${bal.toFixed(8)}</div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:#64748b;">
+            <span>💵 Est. Soles: <strong style="color:#e2e8f0;">S/ ${fmt(penValue)}</strong></span>
+            <span>🇺🇸 Est. USD: <strong style="color:#e2e8f0;">$ ${fmt(usdValue)}</strong></span>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  // Unified Converter Wizard
+  const wizardHtml = `
+    <div class="card homeCard homeWide" style="margin-top:16px;">
+      <h3 style="font-size:15px;font-weight:700;color:#34d399;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+        🪙 Asistente de Compra Bitcoin (Soles ➔ USDT ➔ BTC)
+      </h3>
+      <div class="hr" style="margin-bottom:14px;"></div>
+      
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;">
+            <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">1. Cuenta Origen (Soles)</label>
+            <select id="cryptoWizSrcAcc" style="width:100%;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;font-size:13px;">
+              ${fiatAccounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)} (S/ ${fmt(a.balance)})</option>`).join("")}
+            </select>
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">2. Cuenta Destino (BTC)</label>
+            <select id="cryptoWizDestAcc" style="width:100%;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;font-size:13px;">
+              ${cryptoAccounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;">
+            <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">3. Soles invertidos (PEN)</label>
+            <input type="number" id="cryptoWizPenAmount" placeholder="Ej: 500" style="width:100%;padding:9px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;font-size:13px;box-sizing:border-box;" />
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">4. TC Soles por USDT</label>
+            <input type="number" id="cryptoWizTcUsdt" value="3.78" step="0.001" style="width:100%;padding:9px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;font-size:13px;box-sizing:border-box;" />
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;">
+            <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">5. Precio BTC (USDT)</label>
+            <input type="number" id="cryptoWizBtcPrice" value="${btcUsd}" style="width:100%;padding:9px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;font-size:13px;box-sizing:border-box;" />
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">6. Com. Binance Trade</label>
+            <input type="number" id="cryptoWizBinanceFee" value="0.1" step="0.01" style="width:100%;padding:9px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;font-size:13px;box-sizing:border-box;" />
+          </div>
+        </div>
+
+        <!-- Live calculations preview -->
+        <div style="background:rgba(15,23,42,.6);border:1px solid #334155;border-radius:8px;padding:12px;font-size:12px;line-height:1.6;color:#94a3b8;">
+          <div style="display:flex;justify-content:space-between;">
+            <span>🟢 USDT Bruto estimado:</span>
+            <strong id="wizCalcUsdtGross" style="color:#e2e8f0;">0.00 USDT</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;">
+            <span>✂️ Comisión Binance (Trade):</span>
+            <strong id="wizCalcBinanceFee" style="color:#fb7185;">0.00 USDT</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;border-top:1px dashed #334155;margin-top:6px;padding-top:6px;">
+            <span>🪙 Bitcoin a recibir neto:</span>
+            <strong id="wizCalcBtcNet" style="color:#f59e0b;font-family:monospace;">₿ 0.00000000</strong>
+          </div>
+          <div style="font-size:10px;color:#64748b;margin-top:4px;text-align:right;">
+            Costo promedio: 1 BTC = <span id="wizCalcAveragePrice">0.00</span> PEN
+          </div>
+        </div>
+
+        <button id="btnCryptoWizSave" style="width:100%;padding:12px;background:linear-gradient(135deg,#34d399,#059669);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;margin-top:4px;">
+          💾 Registrar Compra de Bitcoin
+        </button>
+
+      </div>
+    </div>
+  `;
+
+  return `
+    <div style="padding:16px;max-width:480px;margin:0 auto;box-sizing:border-box;">
+      
+      <!-- Market price header card -->
+      <div style="background:linear-gradient(135deg, #1e293b, #0f172a);border:1px solid rgba(245,158,11,.2);border-radius:16px;padding:16px;margin-bottom:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);">
+        <div style="display:flex;justify-content:between;align-items:center;width:100%;">
+          <div style="flex:1;">
+            <div style="font-size:11px;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Precio Bitcoin (CoinGecko)</div>
+            <div style="font-size:24px;font-weight:900;color:#fff;margin-top:2px;">S/ ${fmt(btcPen)}</div>
+            <div style="font-size:13px;color:#94a3b8;">$ ${fmt(btcUsd)} USD</div>
+          </div>
+          <button id="btnCryptoFetchPrice" style="padding:10px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:12px;color:#f59e0b;cursor:pointer;font-size:14px;" title="Actualizar precio de mercado">
+            🔄
+          </button>
+        </div>
+      </div>
+
+      <!-- Account list -->
+      <h3 style="font-size:13px;color:#94a3b8;font-weight:700;margin-bottom:8px;">Tus billeteras</h3>
+      ${accountsHtml}
+
+      <!-- Wizard -->
+      ${wizardHtml}
+
+    </div>
+  `;
+}
+
 
 
 function renderFinanceStatsTab() {
@@ -20591,6 +20776,117 @@ function wireFinance(root) {
         }
       }, 0);
     });
+  }
+
+  // ── Crypto Tab Interactivity ─────────────────────────────
+  if (state.financeSubTab === "crypto") {
+    const btnFetch = root.querySelector("#btnCryptoFetchPrice");
+    if (btnFetch) {
+      btnFetch.addEventListener("click", async () => {
+        btnFetch.style.opacity = "0.5";
+        btnFetch.innerText = "⏳";
+        const ok = await window.financeFetchBtcPrice();
+        btnFetch.style.opacity = "1";
+        btnFetch.innerText = "🔄";
+        if (ok) {
+          toast("📈 Precio de BTC actualizado");
+          view();
+        } else {
+          toast("⚠️ Falló actualizar precio. Usando caché.");
+        }
+      });
+    }
+
+    const penInput = root.querySelector("#cryptoWizPenAmount");
+    const tcInput = root.querySelector("#cryptoWizTcUsdt");
+    const priceInput = root.querySelector("#cryptoWizBtcPrice");
+    const feeInput = root.querySelector("#cryptoWizBinanceFee");
+
+    const calcUsdtGross = root.querySelector("#wizCalcUsdtGross");
+    const calcBinanceFee = root.querySelector("#wizCalcBinanceFee");
+    const calcBtcNet = root.querySelector("#wizCalcBtcNet");
+    const calcAvgPrice = root.querySelector("#wizCalcAveragePrice");
+
+    const recalculateWiz = () => {
+      if (!penInput || !tcInput || !priceInput || !feeInput) return;
+      const pen = parseFloat(penInput.value) || 0;
+      const tc = parseFloat(tcInput.value) || 3.78;
+      const price = parseFloat(priceInput.value) || state.btcPriceUsd;
+      const feePercent = parseFloat(feeInput.value) || 0.1;
+
+      const usdtGross = pen / tc;
+      const binanceFee = usdtGross * (feePercent / 100);
+      const usdtNet = Math.max(0, usdtGross - binanceFee);
+      const btcNet = usdtNet / price;
+      
+      const avgPrice = btcNet > 0 ? (pen / btcNet) : 0;
+
+      if (calcUsdtGross) calcUsdtGross.innerText = `${usdtGross.toFixed(2)} USDT`;
+      if (calcBinanceFee) calcBinanceFee.innerText = `${binanceFee.toFixed(2)} USDT`;
+      if (calcBtcNet) calcBtcNet.innerText = `₿ ${btcNet.toFixed(8)}`;
+      if (calcAvgPrice) calcAvgPrice.innerText = avgPrice.toLocaleString("es-PE", { maximumFractionDigits: 0 });
+    };
+
+    if (penInput) {
+      penInput.addEventListener("input", recalculateWiz);
+      tcInput.addEventListener("input", recalculateWiz);
+      priceInput.addEventListener("input", recalculateWiz);
+      feeInput.addEventListener("input", recalculateWiz);
+    }
+
+    const btnSave = root.querySelector("#btnCryptoWizSave");
+    if (btnSave) {
+      btnSave.addEventListener("click", () => {
+        const srcAccId = root.querySelector("#cryptoWizSrcAcc")?.value;
+        const destAccId = root.querySelector("#cryptoWizDestAcc")?.value;
+        const pen = parseFloat(penInput?.value) || 0;
+        const tc = parseFloat(tcInput?.value) || 3.78;
+        const price = parseFloat(priceInput?.value) || state.btcPriceUsd;
+        const feePercent = parseFloat(feeInput?.value) || 0.1;
+
+        if (!srcAccId || !destAccId) {
+          alert("⚠️ Asegúrate de tener creadas las cuentas de origen y destino.");
+          return;
+        }
+        if (pen <= 0) {
+          alert("⚠️ Ingresa una cantidad de Soles válida.");
+          return;
+        }
+
+        const usdtGross = pen / tc;
+        const binanceFee = usdtGross * (feePercent / 100);
+        const usdtNet = Math.max(0, usdtGross - binanceFee);
+        const btcNet = usdtNet / price;
+
+        const dateISO = new Date().toISOString();
+
+        // 1. Expense in soles (Origen)
+        addFinanceEntry({
+          type: "expense",
+          amount: pen,
+          accountId: srcAccId,
+          category: "Ahorro/Crypto",
+          reason: "normal",
+          note: `Compra BTC P2P (TC: ${tc.toFixed(3)}, Price: $${price.toLocaleString()})`,
+          date: dateISO
+        });
+
+        // 2. Income in BTC (Destino)
+        addFinanceEntry({
+          type: "income",
+          amount: btcNet,
+          accountId: destAccId,
+          category: "Ahorro/Crypto",
+          reason: "normal",
+          note: `BTC neto de compra P2P (Binance Trade)`,
+          date: dateISO
+        });
+
+        toast("🚀 Compra de Bitcoin registrada con éxito!");
+        if (window.financePushToSupabase) window.financePushToSupabase();
+        view();
+      });
+    }
   }
 }
 
