@@ -22132,6 +22132,9 @@ window.financePushToSupabase = async function(isManual = false) {
 
     if (isManual) toast("📤 Enviando copia a Supabase...");
 
+    const ledgerCount = (state.financeLedger || []).length;
+    const activeCount = (state.financeLedger || []).filter(e => !e.archived).length;
+
     const payload = {
       appState: {
         financeLedger: state.financeLedger || [],
@@ -22151,18 +22154,27 @@ window.financePushToSupabase = async function(isManual = false) {
       body: JSON.stringify(payload)
     });
 
+    const ts = new Date().toLocaleTimeString('es-PE');
     if (!res.ok) {
       const errText = await res.text();
       console.warn("Supabase Sync Failed:", errText);
+      if (window.__mcLogs) {
+        window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Sync Error: ${errText.slice(0, 60)}` });
+      }
       if (isManual) toast("❌ Error al sincronizar con Supabase: " + errText.slice(0,80));
     } else {
-      const ledgerCount = (state.financeLedger || []).length;
-      const activeCount = (state.financeLedger || []).filter(e => !e.archived).length;
       console.log("Supabase Sync Successful");
+      if (window.__mcLogs) {
+        window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Sincronización exitosa: ${activeCount} activos enviados` });
+      }
       if (isManual) toast(`✅ Guardado en la nube: ${activeCount} activos / ${ledgerCount} total`);
     }
   } catch(e) {
+    const ts = new Date().toLocaleTimeString('es-PE');
     console.error("Supabase Sync Error:", e);
+    if (window.__mcLogs) {
+      window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Sync Conn Error: ${e.message}` });
+    }
     if (isManual) toast("❌ Error de conexión al sincronizar");
   }
 };
@@ -22269,8 +22281,12 @@ window.financePullFromSupabase = async function(isManual = false) {
       }
     });
 
+    const ts = new Date().toLocaleTimeString('es-PE');
     if (!res.ok) {
       console.warn("Supabase Pull Failed:", await res.text());
+      if (window.__mcLogs) {
+        window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Pull Failed` });
+      }
       if (isManual) toast("❌ Error al descargar desde Supabase");
       return;
     }
@@ -22302,15 +22318,26 @@ window.financePullFromSupabase = async function(isManual = false) {
         persist();
         window.financePushToSupabase = _tmpPush;
         view();
+        if (window.__mcLogs) {
+          const count = (state.financeLedger || []).length;
+          window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Descarga exitosa: ${count} movimientos restaurados` });
+        }
         toast('☁️ Finanzas sincronizadas desde Supabase');
       } else {
+        if (window.__mcLogs) {
+          window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Sincronización sin cambios (los datos locales ya son los más recientes)` });
+        }
         if (isManual) toast("✅ Ya tienes los datos más recientes de la nube");
       }
     } else {
       if (isManual) toast("ℹ️ Sin datos financieros en la nube todavía");
     }
   } catch(e) {
+    const ts = new Date().toLocaleTimeString('es-PE');
     console.error("Supabase Pull Error:", e);
+    if (window.__mcLogs) {
+      window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Pull Conn Error: ${e.message}` });
+    }
     if (isManual) toast("❌ Error de conexión al descargar");
   }
 };

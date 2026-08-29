@@ -1,4 +1,4 @@
-const CACHE_NAME="memorycarl-v2-gemini48";
+const CACHE_NAME="memorycarl-v2-gemini49";
 const ASSETS=["/","/index.html","/src/style.css","/src/main.js","/manifest.webmanifest"];
 
 self.addEventListener("install",e=>{
