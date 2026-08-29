@@ -142,12 +142,50 @@ app.post('/api/sync', requireAuth, async (req, res) => {
     }
 
     if (appState) {
+      // 1. Guardar en app_state de seguridad
       const { error: asErr } = await supabase.from('app_state').upsert(
         [{ id: 'default_user', state_json: appState, updated_at: new Date().toISOString() }],
         { onConflict: 'id' }
       );
       if (asErr) throw new Error('Error guardando app_state: ' + asErr.message);
       results.appStateSynced = true;
+
+      // 2. Guardar cuentas individuales en finance_accounts
+      if (Array.isArray(appState.financeAccounts) && appState.financeAccounts.length > 0) {
+        const { error: accErr } = await supabase.from('finance_accounts').upsert(
+          appState.financeAccounts.map(a => ({
+            id: a.id,
+            name: a.name || 'Cuenta',
+            type: a.type || 'bank',
+            initial_balance: Number(a.initialBalance || 0),
+            balance: Number(a.balance || 0),
+            color: a.color || null,
+            created_at: a.createdAt || new Date().toISOString()
+          })), { onConflict: 'id' }
+        );
+        if (accErr) throw new Error('Error guardando finance_accounts: ' + accErr.message);
+      }
+
+      // 3. Guardar movimientos individuales en finance_ledger
+      if (Array.isArray(appState.financeLedger) && appState.financeLedger.length > 0) {
+        const { error: ledErr } = await supabase.from('finance_ledger').upsert(
+          appState.financeLedger.map(e => ({
+            id: e.id,
+            account_id: e.accountId,
+            type: e.type || 'expense',
+            amount: Number(e.amount || 0),
+            category: e.category || 'Otros',
+            reason: e.reason || 'normal',
+            note: e.note || '',
+            date: e.date || new Date().toISOString(),
+            is_fiado: !!e.isFiado,
+            fiado_status: e.fiadoStatus || null,
+            archived: !!e.archived,
+            created_at: e.createdAt || new Date().toISOString()
+          })), { onConflict: 'id' }
+        );
+        if (ledErr) throw new Error('Error guardando finance_ledger: ' + ledErr.message);
+      }
     }
 
     res.json({ status: 'ok', data: results });
@@ -162,18 +200,54 @@ app.get('/api/restore', requireAuth, async (req, res) => {
   if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
 
   try {
-    const [neuronsRes, memoriesRes, chatRes, daysRes, appStateRes] = await Promise.all([
+    const [neuronsRes, memoriesRes, chatRes, daysRes, appStateRes, accountsRes, ledgerRes] = await Promise.all([
       supabase.from('neurons').select('*'),
       supabase.from('memories').select('*'),
       supabase.from('chat_history').select('*').order('created_at', { ascending: true }),
       supabase.from('days').select('*').order('date', { ascending: false }),
       supabase.from('app_state').select('*').eq('id', 'default_user').single(),
+      supabase.from('finance_accounts').select('*'),
+      supabase.from('finance_ledger').select('*').order('date', { ascending: false })
     ]);
 
     if (neuronsRes.error) throw new Error('Error leyendo neuronas: ' + neuronsRes.error.message);
     if (memoriesRes.error) throw new Error('Error leyendo memorias: ' + memoriesRes.error.message);
     if (appStateRes.error && appStateRes.error.code !== 'PGRST116') {
       throw new Error('Error leyendo app_state: ' + appStateRes.error.message);
+    }
+
+    // Reconstruir el appState prioritariamente desde las tablas dedicadas si tienen datos
+    let reconstructedAppState = appStateRes.data?.state_json || null;
+    
+    if (accountsRes.data && accountsRes.data.length > 0) {
+      if (!reconstructedAppState) reconstructedAppState = {};
+      
+      reconstructedAppState.financeAccounts = accountsRes.data.map(a => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        initialBalance: Number(a.initial_balance),
+        balance: Number(a.balance),
+        color: a.color,
+        createdAt: a.created_at
+      }));
+
+      if (ledgerRes.data) {
+        reconstructedAppState.financeLedger = ledgerRes.data.map(e => ({
+          id: e.id,
+          accountId: e.account_id,
+          type: e.type,
+          amount: Number(e.amount),
+          category: e.category,
+          reason: e.reason,
+          note: e.note,
+          date: e.date,
+          isFiado: !!e.is_fiado,
+          fiadoStatus: e.fiado_status,
+          archived: !!e.archived,
+          createdAt: e.created_at
+        }));
+      }
     }
 
     res.json({
@@ -183,7 +257,7 @@ app.get('/api/restore', requireAuth, async (req, res) => {
         memories: memoriesRes.data || [],
         chatHistory: chatRes.data || [],
         days: daysRes.data || [],
-        appState: appStateRes.data?.state_json || null,
+        appState: reconstructedAppState,
       }
     });
   } catch (err) {
