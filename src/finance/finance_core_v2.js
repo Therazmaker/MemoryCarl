@@ -3,6 +3,12 @@
  * Finance Core v2 - Structured System
  *************************************/
 
+import { classifyMovementWithAI } from './finance_ai_classifier.js';
+
+if (typeof window === 'undefined') {
+  globalThis.window = globalThis;
+}
+
 window.FINANCE = (function(){
 
   const state = {
@@ -25,6 +31,7 @@ window.FINANCE = (function(){
   }
 
   function load(){
+  if (typeof localStorage === "undefined") return;
     const raw = localStorage.getItem("finance_v2_state");
     if(raw){
       Object.assign(state, JSON.parse(raw));
@@ -89,6 +96,19 @@ window.FINANCE = (function(){
 
     state.movements.push(movement);
     save();
+
+    classifyMovementWithAI({
+      category: movement.category,
+      note: movement.note,
+      amount: movement.amount,
+      direction: movement.type
+    }).then(function(aiResult) {
+      if (!aiResult) return;
+      movement.aiClassification = aiResult;
+      save();
+      if (typeof window.renderApp === "function") window.renderApp();
+    });
+
     return movement;
   }
 
