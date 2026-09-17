@@ -1,3 +1,5 @@
+import { getOllamaSettings, isOllamaConfigured } from "../services/ollamaClient.js";
+
 const VALID_LABELS = [
   "fixed_obligation",
   "mobility",
@@ -28,29 +30,33 @@ function isShapeValid(obj) {
 }
 
 export async function classifyMovementWithAI(datos) {
-  const OLLAMA_CLOUD_URL = localStorage.getItem("memorycarl_ollama_url") || "";
-  const OLLAMA_API_KEY = localStorage.getItem("memorycarl_ollama_api_key") || "";
-  const OLLAMA_MODEL = localStorage.getItem("memorycarl_ollama_model") || "llama3.1";
+  if (!isOllamaConfigured()) return null;
 
-  if (!OLLAMA_CLOUD_URL || !OLLAMA_API_KEY) return null;
+  const settings = getOllamaSettings();
+  const baseUrl = (settings.baseUrl || "https://ollama.com").replace(/\/+$/, "");
+  const url = `${baseUrl}/api/chat`;
+
   try {
     var controller = new AbortController();
     var timeout = setTimeout(function(){ controller.abort(); }, 8000);
 
-    var res = await fetch(OLLAMA_CLOUD_URL, {
+    var res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + OLLAMA_API_KEY
+        "Authorization": "Bearer " + settings.apiKey
       },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
+        model: settings.model || "gpt-oss:120b",
         stream: false,
         format: "json",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: buildUserPrompt(datos) }
-        ]
+        ],
+        options: {
+          temperature: 0.3
+        }
       }),
       signal: controller.signal
     });
