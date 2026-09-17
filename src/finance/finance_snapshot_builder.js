@@ -53,7 +53,8 @@ export function buildFinanceSnapshot(input = {}) {
     const amount = Math.abs(amountRaw);
     const category = m.category || m.reason || m.nombre || 'Uncategorized';
     const note = m.note || m.notes || m.notas || '';
-    const labels = inferLabels({ category, note, amount, direction });
+    const ai = m.aiClassification;
+    const labels = ai ? ai.derivedLabels : inferLabels({ category, note, amount, direction });
     const recurringScore = labels.includes('fixed_obligation') ? 0.8 : labels.includes('silent_leak_candidate') ? 0.7 : 0.35;
     const volatilityScore = amount > 0 ? Math.min(1, amount / 1000) : 0;
     const predictabilityScore = labels.includes('fixed_obligation') ? 0.8 : 0.45;
@@ -79,11 +80,11 @@ export function buildFinanceSnapshot(input = {}) {
       sourceKind: m.sourceKind || 'manual',
       counterparty: m.counterparty || null,
       tags: Array.isArray(m.tags) ? m.tags : [],
-      isEssential: labels.includes('fixed_obligation') || labels.includes('maintenance'),
-      isRecurring: recurringScore >= 0.65,
+      isEssential: ai ? ai.isEssential : (labels.includes('fixed_obligation') || labels.includes('maintenance')),
+      isRecurring: ai ? ai.isRecurring : (recurringScore >= 0.65),
       recurringScore,
       recurrencePeriodDays: labels.includes('fixed_obligation') ? 30 : null,
-      isDebtRelated: labels.includes('debt_related'),
+      isDebtRelated: ai ? ai.isDebtRelated : labels.includes('debt_related'),
       isThirdPartyFunded: Boolean(m.thirdPartyFunded),
       affectsCashflow: direction !== 'transfer',
       impactMode: labels.includes('fixed_obligation') ? 'fixed' : 'variable',
