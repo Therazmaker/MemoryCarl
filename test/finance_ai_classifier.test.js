@@ -18,6 +18,17 @@ function resetStorage() {
   Object.keys(store).forEach((k) => delete store[k]);
 }
 
+function setOllamaSettings(settings = {}) {
+  const fullSettings = {
+    enabled: true,
+    apiKey: "test-key-1234567890",
+    model: "llama3.1",
+    baseUrl: "https://ollama.test",
+    ...settings
+  };
+  localStorage.setItem("memorycarl_ollama_settings", JSON.stringify(fullSettings));
+}
+
 import { classifyMovementWithAI } from '../src/finance/finance_ai_classifier.js';
 import { buildFinanceSnapshot } from '../src/finance/finance_snapshot_builder.js';
 import '../src/finance/finance_core_v2.js';
@@ -30,9 +41,7 @@ test('classifyMovementWithAI returns null when credentials missing in localStora
 
 test('classifyMovementWithAI returns classification when API responds with valid JSON', async () => {
   resetStorage();
-  localStorage.setItem("memorycarl_ollama_url", "https://ollama.test/api/chat");
-  localStorage.setItem("memorycarl_ollama_api_key", "test-key");
-  localStorage.setItem("memorycarl_ollama_model", "llama3.1");
+  setOllamaSettings();
 
   const expectedAIResponse = {
     isEssential: true,
@@ -44,9 +53,12 @@ test('classifyMovementWithAI returns classification when API responds with valid
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
     assert.equal(url, "https://ollama.test/api/chat");
-    assert.equal(options.headers["Authorization"], "Bearer test-key");
+    assert.equal(options.headers["Authorization"], "Bearer test-key-1234567890");
     const body = JSON.parse(options.body);
     assert.equal(body.model, "llama3.1");
+    assert.equal(body.stream, false);
+    assert.equal(body.format, "json");
+    assert.equal(body.options.temperature, 0.3);
 
     return {
       ok: true,
@@ -66,8 +78,7 @@ test('classifyMovementWithAI returns classification when API responds with valid
 
 test('classifyMovementWithAI returns null if response contains invalid label outside VALID_LABELS', async () => {
   resetStorage();
-  localStorage.setItem("memorycarl_ollama_url", "https://ollama.test/api/chat");
-  localStorage.setItem("memorycarl_ollama_api_key", "test-key");
+  setOllamaSettings();
 
   const invalidAIResponse = {
     isEssential: true,
@@ -142,8 +153,7 @@ test('buildFinanceSnapshot prefers aiClassification when present and falls back 
 
 test('addMovement in finance_core_v2 triggers background classification without blocking', async () => {
   resetStorage();
-  localStorage.setItem("memorycarl_ollama_url", "https://ollama.test/api/chat");
-  localStorage.setItem("memorycarl_ollama_api_key", "test-key");
+  setOllamaSettings();
 
   let resolveFetch;
   const fetchPromise = new Promise(resolve => { resolveFetch = resolve; });
