@@ -4,6 +4,8 @@
  *************************************/
 
 import { classifyMovementWithAI } from './finance_ai_classifier.js';
+import { updateDebtBalance } from './finance_debt_tracker.js';
+import { resolveSourceLink } from './finance_source_links.js';
 
 if (typeof window === 'undefined') {
   globalThis.window = globalThis;
@@ -65,27 +67,53 @@ window.FINANCE = (function(){
   =============================== */
 
   function addMovement({
+    id,
     date,
     type,
     amount,
     accountId,
     category,
     reason,
-    note
+    note,
+    neuronRole,
+    neuronId,
+    archived,
+    isFiado,
+    fiadoStatus,
+    usdGross,
+    usdNet,
+    usdFee,
+    usdExchange,
+    usdFixedFee,
+    counterparty,
+    sourceLabel
   }){
 
     const acc = getAccount(accountId);
     if(!acc) return;
 
+    const mId = id || uid();
     const movement = {
-      id: uid(),
+      id: mId,
       date: date || new Date().toISOString(),
       type, // income | expense
       amount: Number(amount),
       accountId,
       category,
       reason,
-      note
+      note,
+      neuronRole: neuronRole || "auto",
+      neuronId: neuronId || `mov_${mId}`,
+      archived: !!archived,
+      isFiado: !!isFiado,
+      fiadoStatus: fiadoStatus || null,
+      usdGross: usdGross || null,
+      usdNet: usdNet || null,
+      usdFee: usdFee || null,
+      usdExchange: usdExchange || null,
+      usdFixedFee: usdFixedFee || null,
+      counterparty: counterparty || null,
+      sourceLabel: sourceLabel || null
     };
 
     if(type === "expense"){
@@ -105,11 +133,62 @@ window.FINANCE = (function(){
     }).then(function(aiResult) {
       if (!aiResult) return;
       movement.aiClassification = aiResult;
+
+      // Copy new fields to root — respect manual overrides from FASE 1
+      // counterparty: manual override (set before AI call) wins
+      if (!movement.counterparty && aiResult.counterparty) {
+        movement.counterparty = aiResult.counterparty;
+      }
+      if (aiResult.debtDirection) movement.debtDirection = aiResult.debtDirection;
+      if (aiResult.context) movement.context = aiResult.context;
+      // sourceLabel: manual override wins; sourceRef is AI's suggestion
+      if (!movement.sourceLabel && aiResult.sourceRef) {
+        movement.sourceLabel = aiResult.sourceRef;
+      }
+
+      // Update debt balance ledger (pure arithmetic, no AI)
+      try { updateDebtBalance(movement); } catch(_) {}
+      // Resolve origin link if sourceLabel is set
+      try { resolveSourceLink(movement); } catch(_) {}
+
       save();
       if (typeof window.renderApp === "function") window.renderApp();
     });
 
     return movement;
+  }
+
+  function updateMovement(id, patch){
+    const idx = state.movements.findIndex(m => m.id === id);
+    if(idx === -1) return null;
+
+    const oldMovement = state.movements[idx];
+    const acc = getAccount(oldMovement.accountId);
+
+    // Revert old balance
+    if(acc){
+      if(oldMovement.type === "expense"){
+        acc.balance += oldMovement.amount;
+      }else{
+        acc.balance -= oldMovement.amount;
+      }
+    }
+
+    const updatedMovement = { ...oldMovement, ...patch };
+
+    // Apply new balance
+    const newAcc = getAccount(updatedMovement.accountId);
+    if(newAcc){
+      if(updatedMovement.type === "expense"){
+        newAcc.balance -= updatedMovement.amount;
+      }else{
+        newAcc.balance += updatedMovement.amount;
+      }
+    }
+
+    state.movements[idx] = updatedMovement;
+    save();
+    return updatedMovement;
   }
 
   function deleteMovement(id){
@@ -300,6 +379,7 @@ window.FINANCE = (function(){
     state,
     createAccount,
     addMovement,
+    updateMovement,
     deleteMovement,
     getMonthlyData,
     projection,

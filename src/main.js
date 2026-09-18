@@ -15014,7 +15014,20 @@ LS.financeRoadmap = "memorycarl_v2_finance_roadmap";
 LS.financeReasons = "memorycarl_v2_finance_reasons";
 LS.financeEntryCategories = "memorycarl_v3_finance_entry_categories";
 
-state.financeLedger = load(LS.financeLedger, []);
+const oldLedger = load(LS.financeLedger, []);
+  if (window.FINANCE && window.FINANCE.state.movements.length === 0 && oldLedger.length > 0) {
+      window.FINANCE.state.movements = oldLedger.slice().reverse();
+      if(window.FINANCE.save) window.FINANCE.save();
+  }
+  Object.defineProperty(state, 'financeLedger', {
+      get: function() { return window.FINANCE ? window.FINANCE.state.movements.slice().reverse() : []; },
+      set: function(val) {
+          if (window.FINANCE) {
+              window.FINANCE.state.movements = (val || []).slice().reverse();
+              if(window.FINANCE.save) window.FINANCE.save();
+          }
+      }
+  });
 state.financeReasons = load(LS.financeReasons, ["planificado", "impulso", "emergencia", "normal"]);
 state.financeEntryCategories = load(LS.financeEntryCategories, [
   { id: "Alimentos", icon: "🛒", name: "Alimentos" },
@@ -15673,9 +15686,7 @@ function updateFinanceEntry(id, patch){
 }
 
 function deleteFinanceEntry(id){
-  const idx = (state.financeLedger||[]).findIndex(e=>e.id===id);
-  if(idx===-1) return;
-  state.financeLedger.splice(idx,1);
+  window.FINANCE.deleteMovement(id);
   financeRecomputeBalances();
   persist();
   view();
@@ -16106,7 +16117,19 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         </div>
       </div>
 
-      <input type="text" id="finEntryName" class="finProNote" placeholder="Descripción (Ej. Café Starbucks)" value="${escapeHtml(draft.name)}">
+      <input type="text" id="finEntryName" class="finProNote" placeholder="Ej: le presté 50 a Jhon / pagué cuota tarjeta / antojo de la noche" value="${escapeHtml(draft.name)}">
+
+      <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:4px; align-items:center;">
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; color:#aaa;">
+          <input type="checkbox" id="finEntryHasPerson" style="width:16px;height:16px;accent-color:#7c5cff;" ${existing?.counterparty ? 'checked' : ''}>
+          <span>¿Involucra a alguien?</span>
+        </label>
+      </div>
+      <div id="finEntryPersonWrap" style="display:${existing?.counterparty ? 'block' : 'none'}; margin-bottom:10px;">
+        <input type="text" id="finEntryPerson" class="finProNote" placeholder="Nombre de la persona (Ej: Jhon, María)" value="${escapeHtml(existing?.counterparty || '')}" style="margin-top:4px;">
+      </div>
+
+      <input type="text" id="finEntryOrigin" class="finProNote" placeholder="¿De dónde salió este dinero? (Ej: sueldo, lo de Jhon, venta de pantalones)" value="${escapeHtml(existing?.sourceLabel || '')}" style="margin-bottom:10px;">
       
       <div class="finProAdvToggle" id="finAdvToggle">Más opciones (Cuentas, Notas) ▼</div>
       
@@ -16166,6 +16189,19 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   
   backdrop.querySelector('#finEntryClose')?.addEventListener('click', close);
   backdrop.addEventListener('click', (e)=>{ if(e.target===backdrop) close(); });
+
+  // Wire persona toggle
+  const hasPerson = backdrop.querySelector('#finEntryHasPerson');
+  const personWrap = backdrop.querySelector('#finEntryPersonWrap');
+  if(hasPerson && personWrap) {
+    hasPerson.addEventListener('change', () => {
+      personWrap.style.display = hasPerson.checked ? 'block' : 'none';
+      if(!hasPerson.checked) {
+        const personInput = backdrop.querySelector('#finEntryPerson');
+        if(personInput) personInput.value = '';
+      }
+    });
+  }
   
   const advToggle = backdrop.querySelector('#finAdvToggle');
   const advSection = backdrop.querySelector('#finAdvSection');
@@ -16397,6 +16433,10 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const isLoanChecked = backdrop.querySelector('#finEntryIsLoan')?.checked;
   const isFiadoChecked = !!backdrop.querySelector('#finEntryIsFiado')?.checked;
 
+  // New fields: Persona (counterparty override) and Origen (sourceLabel override)
+  const personVal = (backdrop.querySelector('#finEntryPerson')?.value||'').trim();
+  const originVal = (backdrop.querySelector('#finEntryOrigin')?.value||'').trim();
+
   const entryPayload = {
     type: draft.type,
     amount,
@@ -16413,7 +16453,10 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     usdNet,
     usdFee,
     usdExchange,
-    usdFixedFee
+    usdFixedFee,
+    // Manual overrides — written before AI call so AI won't overwrite them
+    counterparty: personVal || null,
+    sourceLabel: originVal || null
   };
 
   if(existing){
@@ -18699,7 +18742,7 @@ function openFinanceDebtPayModal(debtId){
       kind: 'debt_payment',
       archived: false,
     };
-    state.financeLedger.unshift(entry);
+    window.FINANCE.addMovement(entry);
     financeRecomputeBalances();
     persist();
     close();
