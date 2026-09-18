@@ -4083,155 +4083,176 @@ body{
 .lifeTrackerCard {
   grid-column: 1 / -1;
 }
-.lt-task-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 10px;
-  padding: 4px 0 8px;
-}
-/* ── TDA Banner ── */
-.lt-tda-banner {
-  background: linear-gradient(135deg, rgba(124,92,255,0.12) 0%, rgba(167,139,250,0.08) 100%);
-  border: 1px solid rgba(124,92,255,0.35);
-  border-radius: 14px;
-  padding: 14px 16px;
-  margin-bottom: 14px;
-  animation: tdaBannerIn 0.35s cubic-bezier(0.34,1.56,0.64,1) both;
-}
-@keyframes tdaBannerIn {
-  from { opacity:0; transform:translateY(-10px) scale(0.97); }
-  to   { opacity:1; transform:translateY(0) scale(1); }
-}
-.lt-tda-btn {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 7px 12px;
-  border-radius: 20px;
-  border: none;
-  cursor: pointer;
-  transition: opacity 0.15s, transform 0.15s;
-  white-space: nowrap;
-}
-.lt-tda-btn:active { transform: scale(0.95); }
-.lt-tda-yes   { background: #22c55e; color: #fff; }
-.lt-tda-time  { background: rgba(255,255,255,0.1); color: #e2e8f0; }
-.lt-tda-skip  { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.5); }
-.lt-tda-help  { background: rgba(124,92,255,0.25); color: #a78bfa; }
-
-.lt-task-row {
+.lt-spotlight {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 14px 10px 12px;
-  border-radius: 16px;
   background: rgba(255,255,255,0.04);
-  border: 1.5px solid rgba(255,255,255,0.06);
-  position: relative;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-  cursor: default;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 24px 16px;
+  margin-bottom: 16px;
   text-align: center;
+  position: relative;
+  overflow: hidden;
 }
-.lt-task-row:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+.lt-spotlight-empty {
+  opacity: 0.6;
+  border-style: dashed;
 }
-.lt-critical {
-  border-color: rgba(239,68,68,0.5);
-  background: rgba(239,68,68,0.07);
-}
-.lt-due {
-  border-color: rgba(249,115,22,0.5);
-  background: rgba(249,115,22,0.07);
-}
-.lt-soon {
-  border-color: rgba(234,179,8,0.35);
-  background: rgba(234,179,8,0.05);
-}
-.lt-ok {
+.lt-spotlight-done {
+  background: rgba(34,197,94,0.08);
   border-color: rgba(34,197,94,0.3);
-  background: rgba(34,197,94,0.05);
 }
-.lt-task-icon {
-  font-size: 26px;
+.lt-spotlight-emoji {
+  font-size: 48px;
   line-height: 1;
-  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+  margin-bottom: 12px;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4));
 }
-.lt-task-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: rgba(255,255,255,0.9);
-  line-height: 1.2;
-}
-.lt-task-since {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-.lt-done-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 2px solid;
-  background: transparent;
-  font-size: 12px;
+.lt-spotlight-title {
+  font-size: 20px;
   font-weight: 800;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s ease, transform 0.15s ease;
-  flex-shrink: 0;
+  color: #fff;
+  margin-bottom: 4px;
 }
-.lt-done-btn:hover {
-  transform: scale(1.15);
-  background: rgba(255,255,255,0.1);
-}
-.lt-done-btn:active {
-  transform: scale(0.92);
-}
-.lt-suggestions {
-  margin-top: 12px;
-  padding: 12px;
-  border-radius: 12px;
-  background: rgba(124,92,255,0.08);
-  border: 1px dashed rgba(124,92,255,0.35);
-}
-.lt-sug-title {
-  font-size: 11px;
-  color: rgba(255,255,255,0.5);
-  margin-bottom: 8px;
+.lt-spotlight-sub {
+  font-size: 12px;
   font-weight: 600;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 16px;
 }
-.lt-sug-btn {
-  display: inline-flex;
+.lt-spotlight-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.lt-spot-btn {
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.1s, filter 0.15s;
+}
+.lt-spot-btn:active { transform: scale(0.95); }
+.lt-spot-yes { background: #22c55e; color: #fff; flex: 1; min-width: 120px; }
+.lt-spot-later { background: rgba(255,255,255,0.1); color: #fff; }
+.lt-spot-help { background: rgba(124,92,255,0.2); color: #a78bfa; }
+
+.lt-urg-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 20px;
+  letter-spacing: 0.05em;
+}
+.lt-urg-critical { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); animation: ltPulse 1.5s infinite; }
+.lt-urg-due { background: rgba(249,115,22,0.15); color: #f97316; border: 1px solid rgba(249,115,22,0.3); }
+.lt-urg-soon { background: rgba(234,179,8,0.15); color: #eab308; border: 1px solid rgba(234,179,8,0.3); }
+
+.lt-chip-rail {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+  scrollbar-width: none;
+}
+.lt-chip-rail::-webkit-scrollbar { display: none; }
+
+.lt-chip {
+  display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  margin: 4px 4px 0 0;
-  border-radius: 99px;
-  border: 1.5px solid rgba(124,92,255,0.5);
-  background: rgba(124,92,255,0.1);
-  color: rgba(255,255,255,0.8);
-  font-size: 12px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: transform 0.15s, background 0.15s;
 }
-.lt-sug-btn:hover {
-  background: rgba(124,92,255,0.2);
+.lt-chip:active { transform: scale(0.95); }
+.lt-chip-critical { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.05); }
+.lt-chip-due { border-color: rgba(249,115,22,0.4); background: rgba(249,115,22,0.05); }
+.lt-chip-done {
+  opacity: 0.4;
+  border-color: rgba(34,197,94,0.3);
+  background: rgba(34,197,94,0.05);
 }
-/* Pulse animation for critical tasks */
-.lt-critical .lt-task-icon {
-  animation: ltPulse 1.8s ease-in-out infinite;
+.lt-chip-check {
+  color: #22c55e;
+  font-weight: 800;
 }
+
+.lt-streak-wrap {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.lt-streak-bar-container {
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.lt-streak-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #7c5cff, #a78bfa);
+  border-radius: 4px;
+  transition: width 0.5s ease-out;
+}
+.lt-streak-bar-complete {
+  background: #22c55e;
+  box-shadow: 0 0 10px rgba(34,197,94,0.5);
+}
+.lt-streak-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.lt-streak-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.6);
+}
+.lt-streak-badge {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(249,115,22,0.15);
+  color: #f97316;
+  border: 1px solid rgba(249,115,22,0.3);
+}
+.lt-streak-start {
+  background: rgba(234,179,8,0.15);
+  color: #eab308;
+  border-color: rgba(234,179,8,0.3);
+}
+
+.lt-celebrate {
+  animation: ltCelebrateAnim 0.6s ease-out;
+}
+@keyframes ltCelebrateAnim {
+  0% { transform: scale(1); box-shadow: 0 0 0 rgba(34,197,94,0); }
+  50% { transform: scale(1.02); box-shadow: 0 0 40px rgba(34,197,94,0.3); }
+  100% { transform: scale(1); box-shadow: 0 0 0 rgba(34,197,94,0); }
+}
+
 @keyframes ltPulse {
   0%, 100% { transform: scale(1); }
-  50%       { transform: scale(1.12); }
+  50% { transform: scale(1.05); }
 }
 
 /* Section labels */

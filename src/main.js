@@ -5933,68 +5933,17 @@ function neuroclawTopSuggestions(limit=3){
 
 function neuroclawBadge(p){
   const k = String(p||"low").toLowerCase();
-  if(k==="high") return `<span class="neuroBadge high">Alta</span>`;
-  if(k==="medium") return `<span class="neuroBadge med">Media</span>`;
-  return `<span class="neuroBadge low">Baja</span>`;
-}
-
-
-function renderNeuroClawAIBlock(){
-  const loading = !!state?.neuroclawAiLoading;
-  const ai = state?.neuroclawLast?.ai || null;
-
-  // If we're loading, show a visible block even if we don't have ai content yet.
-  if(loading){
-    return `
-      <div class="hr"></div>
-      <div class="ncAi ncAiLoading">
-        <div class="ncAiHead">
-          <div class="ncAiTitle">NeuroClaw AI</div>
-          <div class="ncAiMeta">Procesando…</div>
-        </div>
-        <div class="ncAiBody">
-          <div class="ncAiText">Estoy leyendo tus señales y armando patrones<span class="ncDots"><span>.</span><span>.</span><span>.</span></span></div>
-        </div>
-      </div>
-    `;
-  }
-
-  if(!ai) return "";
-
-  const human = (ai.human || "").trim();
-  const rawTxt = (!human && ai.raw) ? JSON.stringify(ai.raw, null, 2) : "";
-  if(!human && !rawTxt) return "";
-
-  const tsMs = Number(state?.neuroclawLast?.aiTs || 0) || 0;
-  const stamp = tsMs ? new Date(tsMs).toLocaleString("es-PE",{hour:"2-digit",minute:"2-digit"}) : "";
-  const model = (ai.raw && ai.raw.model) ? String(ai.raw.model) : "";
-  const meta = [stamp, model ? ("🤖 " + model) : ""].filter(Boolean).join(" • ");
-
-  return `
-      <div class="hr"></div>
-      <div class="ncAi">
-        <div class="ncAiHead">
-          <div class="ncAiTitle">NeuroClaw AI</div>
-          <div class="ncAiMeta">${escapeHtml(meta)}</div>
-        </div>
-        <div class="ncAiBody">
-          <div class="ncAiText">${escapeHtml(human || rawTxt).replace(/\n/g,"<br>")}</div>
-        </div>
-      </div>
-    `;
-}
-
-// ===== LIFE TRACKER (TDA & Hábitos Vitales) =====
+  if(k==="high") return `<span class="neuroBadge high">Alta</span>`// ===== LIFE TRACKER (TDAH Command Center) =====
 
 const LIFE_TRACKER_DEFAULT_TASKS = [
-  { id:"lt_hair",    icon:"💇", title:"Lavar el pelo",      category:"higiene",  freqDays:3,  lastDone:null },
-  { id:"lt_nails",   icon:"💅", title:"Cortar uñas",        category:"higiene",  freqDays:14, lastDone:null },
-  { id:"lt_laundry", icon:"👕", title:"Lavar ropa",         category:"hogar",    freqDays:7,  lastDone:null },
-  { id:"lt_kitchen", icon:"🍽️", title:"Limpiar cocina",     category:"hogar",    freqDays:3,  lastDone:null },
-  { id:"lt_dishes",  icon:"🫧", title:"Fregar",             category:"hogar",    freqDays:1,  lastDone:null },
-  { id:"lt_room",    icon:"🧹", title:"Ordenar cuarto",     category:"hogar",    freqDays:5,  lastDone:null },
-  { id:"lt_shower",  icon:"🚿", title:"Ducha",              category:"higiene",  freqDays:1,  lastDone:null },
-  { id:"lt_teeth",   icon:"🦷", title:"Cepillar dientes",   category:"higiene",  freqDays:0.5,lastDone:null },
+  { id:"lt_hair",    icon:"💇", title:"Lavar el pelo",      category:"higiene",  freqDays:3,  lastDone:null, partOfDay:"manana" },
+  { id:"lt_nails",   icon:"💅", title:"Cortar uñas",        category:"higiene",  freqDays:14, lastDone:null, partOfDay:"tarde" },
+  { id:"lt_laundry", icon:"👕", title:"Lavar ropa",         category:"hogar",    freqDays:7,  lastDone:null, partOfDay:"tarde" },
+  { id:"lt_kitchen", icon:"🍽️", title:"Limpiar cocina",     category:"hogar",    freqDays:3,  lastDone:null, partOfDay:"noche" },
+  { id:"lt_dishes",  icon:"🫧", title:"Fregar",             category:"hogar",    freqDays:1,  lastDone:null, partOfDay:"noche" },
+  { id:"lt_room",    icon:"🧹", title:"Ordenar cuarto",     category:"hogar",    freqDays:5,  lastDone:null, partOfDay:"manana" },
+  { id:"lt_shower",  icon:"🚿", title:"Ducha",              category:"higiene",  freqDays:1,  lastDone:null, partOfDay:"manana" },
+  { id:"lt_teeth",   icon:"🦷", title:"Cepillar dientes",   category:"higiene",  freqDays:0.5,lastDone:null, partOfDay:"manana" },
 ];
 
 function lifeTasksGet() {
@@ -6019,9 +5968,9 @@ function lifeTaskMarkDone(id, forcedTs) {
   }
 }
 
-function lifeTaskAddCustom(title, icon, freqDays, category) {
+function lifeTaskAddCustom(title, icon, freqDays, category, partOfDay) {
   const tasks = lifeTasksGet();
-  tasks.push({ id:"lt_custom_"+Date.now(), icon: icon||"📌", title, category: category||"otro", freqDays: Number(freqDays)||7, lastDone:null, type:"habit" });
+  tasks.push({ id:"lt_custom_"+Date.now(), icon: icon||"📌", title, category: category||"otro", freqDays: Number(freqDays)||7, lastDone:null, type:"habit", partOfDay: partOfDay||"cualquier" });
   state.lifeTasks = tasks;
   persist();
 }
@@ -6034,10 +5983,10 @@ function lifeEventAdd(title, icon, dueDate, note, category) {
     title,
     category: category||"evento",
     type: "event",
-    dueDate,           // ISO date string "YYYY-MM-DD"
+    dueDate,
     note: note||"",
     done: false,
-    followUpSent: false, // Carl asked how it went
+    followUpSent: false,
     lastDone: null
   });
   state.lifeTasks = tasks;
@@ -6058,10 +6007,35 @@ function lifeTaskDaysSince(task) {
 function lifeTaskUrgency(task) {
   const since = lifeTaskDaysSince(task);
   const ratio = task.freqDays > 0 ? since / task.freqDays : Infinity;
-  if(ratio >= 1.5) return "critical";  // muy atrasado
-  if(ratio >= 1.0) return "due";       // vencido hoy
-  if(ratio >= 0.7) return "soon";      // próximamente
+  if(ratio >= 1.5) return "critical";
+  if(ratio >= 1.0) return "due";
+  if(ratio >= 0.7) return "soon";
   return "ok";
+}
+
+// Returns how many habits were completed today
+function getHabitsCompletedToday() {
+  return lifeTasksGet().filter(t => t.type !== "event" && t.lastDone && String(t.lastDone).split("T")[0] === isoDate()).length;
+}
+
+// Returns streak in days (consecutive days with ≥1 habit done)
+function getLifeTrackerStreak() {
+  const log = Array.isArray(state.lifeTasksLog) ? state.lifeTasksLog : [];
+  if(!log.length) return 0;
+  // Build set of unique dates
+  const days = new Set(log.map(l => String(l.ts).split("T")[0]));
+  let streak = 0;
+  let d = new Date();
+  while(true) {
+    const ds = isoDate(d);
+    if(days.has(ds)) {
+      streak++;
+      d.setDate(d.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+  return streak;
 }
 
 function getLifeTrackerTdaSuggestion() {
@@ -6070,7 +6044,10 @@ function getLifeTrackerTdaSuggestion() {
   
   const now = new Date();
   const currentHour = now.getHours();
-  
+
+  // Part-of-day mapping
+  const podHours = { manana: [6, 12], tarde: [12, 19], noche: [19, 24], cualquier: [0, 24] };
+
   let candidates = [];
   
   habits.forEach(h => {
@@ -6080,33 +6057,32 @@ function getLifeTrackerTdaSuggestion() {
     // Skipped temporalmente (3 horas)
     const skipped = state._tdaSkipped || {};
     if (skipped[h.id] && (Date.now() - skipped[h.id]) < 3*60*60*1000) return;
-    
-    // Buscar historial de horas
+
+    // Part-of-day filter — but don't filter out critical ones
+    const urgency = lifeTaskUrgency(h);
+    const urgencyCritical = urgency === "critical" || urgency === "due";
+    const podRange = podHours[h.partOfDay || "cualquier"];
+    const inPodWindow = currentHour >= podRange[0] && currentHour < podRange[1];
+
+    // Historical time analysis
     const myLogs = log.filter(l => l.id === h.id);
+    let historyMatch = false;
     if (myLogs.length >= 3) {
       const recent = myLogs.slice(-5);
       const hours = recent.map(l => new Date(l.ts).getHours());
-      let sum = 0; hours.forEach(hr => sum += hr);
-      let avgHour = sum / hours.length;
-      
-      // Si estamos en la ventana habitual (hasta 4h después de su hora promedio)
-      if (currentHour >= avgHour && currentHour <= avgHour + 4) {
-         candidates.push({ task: h, reason: "time", avgHour });
-      }
+      const avgHour = hours.reduce((a,b)=>a+b,0) / hours.length;
+      if (currentHour >= avgHour && currentHour <= avgHour + 4) historyMatch = true;
     }
-    
-    // Si está muy atrasado, siempre es candidato
-    if (lifeTaskUrgency(h) === "critical" || lifeTaskUrgency(h) === "due") {
-       if (!candidates.find(c => c.task.id === h.id)) {
-           candidates.push({ task: h, reason: "overdue" });
-       }
-    }
+
+    if (historyMatch) candidates.push({ task: h, reason: "time" });
+    else if (urgencyCritical) candidates.push({ task: h, reason: "overdue" });
+    else if (inPodWindow) candidates.push({ task: h, reason: "pod" });
   });
   
   candidates.sort((a,b) => {
-     if (a.reason === "time" && b.reason !== "time") return -1;
-     if (b.reason === "time" && a.reason !== "time") return 1;
-     return (lifeTaskDaysSince(b.task)/b.task.freqDays) - (lifeTaskDaysSince(a.task)/a.task.freqDays);
+    const priority = { time: 0, overdue: 1, pod: 2 };
+    if(priority[a.reason] !== priority[b.reason]) return priority[a.reason] - priority[b.reason];
+    return (lifeTaskDaysSince(b.task)/b.task.freqDays) - (lifeTaskDaysSince(a.task)/a.task.freqDays);
   });
   
   return candidates.length > 0 ? candidates[0] : null;
@@ -6116,120 +6092,137 @@ function renderLifeTrackerCard() {
   const tasks = lifeTasksGet();
   const todayIso = isoDate();
   const tomorrowIso = isoDate(new Date(Date.now()+86400000));
-
-  // ── Events (one-time) ──
-  const events = tasks.filter(t => t.type==="event");
   const habits  = tasks.filter(t => t.type!=="event");
+  const events  = tasks.filter(t => t.type==="event");
 
-  const upcomingEvents = events
-    .filter(e => !e.done && e.dueDate >= todayIso)
-    .sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
-  const needFollowUp = events
-    .filter(e => !e.done && !e.followUpSent && e.dueDate < todayIso);
-  const pastDoneEvents = events
-    .filter(e => e.done)
-    .sort((a,b)=>b.dueDate.localeCompare(a.dueDate))
-    .slice(0, 3);
+  // ─── Stats ───
+  const totalHabits = habits.length;
+  const doneToday = getHabitsCompletedToday();
+  const streak = getLifeTrackerStreak();
+  const progressPct = totalHabits > 0 ? Math.round((doneToday / totalHabits) * 100) : 0;
+  const allDoneToday = doneToday >= totalHabits && totalHabits > 0;
 
+  // ─── Spotlight: the ONE task to do next ───
+  const suggestion = getLifeTrackerTdaSuggestion();
+  const spotlightTask = suggestion ? suggestion.task : null;
+
+  const urgencyColor = { critical:"#ef4444", due:"#f97316", soon:"#eab308", ok:"#22c55e" };
+  const urgencyEmoji = { critical:"🔴", due:"🟠", soon:"🟡", ok:"🟢" };
+
+  let spotlightHtml = "";
+  if (allDoneToday) {
+    spotlightHtml = `
+      <div class="lt-spotlight lt-spotlight-done" id="ltSpotlight">
+        <div class="lt-spotlight-emoji">🎉</div>
+        <div class="lt-spotlight-title">¡Todo hecho hoy!</div>
+        <div class="lt-spotlight-sub" style="color:#22c55e;font-size:13px;margin-top:4px;">Eres increíble. Descansa.</div>
+      </div>`;
+  } else if (spotlightTask) {
+    const urg = lifeTaskUrgency(spotlightTask);
+    const color = urgencyColor[urg];
+    const sinceStr = spotlightTask.lastDone ? (() => {
+      const d = lifeTaskDaysSince(spotlightTask);
+      if(d < 1) return "Hoy antes";
+      if(d < 2) return "Ayer";
+      return `hace ${Math.floor(d)} días`;
+    })() : "Nunca lo has hecho";
+    const urgBadge = urg !== "ok" ? `<span class="lt-urg-badge lt-urg-${urg}">${urgencyEmoji[urg]} ${urg === "critical" ? "¡ATRASADO!" : urg === "due" ? "HOY" : "PRONTO"}</span>` : "";
+    spotlightHtml = `
+      <div class="lt-spotlight" id="ltSpotlight" data-spot-id="${escapeHtml(spotlightTask.id)}">
+        ${urgBadge}
+        <div class="lt-spotlight-emoji">${spotlightTask.icon}</div>
+        <div class="lt-spotlight-title">${escapeHtml(spotlightTask.title)}</div>
+        <div class="lt-spotlight-sub">${escapeHtml(sinceStr)}</div>
+        <div class="lt-spotlight-actions">
+          <button class="lt-spot-btn lt-spot-yes" data-lt-done="${escapeHtml(spotlightTask.id)}">✅ Ya lo hice</button>
+          <button class="lt-spot-btn lt-spot-later" data-lt-tda-skip="${escapeHtml(spotlightTask.id)}">⏰ En un rato</button>
+          <button class="lt-spot-btn lt-spot-help" data-lt-tda-help="${escapeHtml(spotlightTask.title)}">🧠 Ayuda</button>
+        </div>
+      </div>`;
+  } else {
+    spotlightHtml = `
+      <div class="lt-spotlight lt-spotlight-empty">
+        <div class="lt-spotlight-emoji">✨</div>
+        <div class="lt-spotlight-title">Sin urgencias ahora</div>
+        <div class="lt-spotlight-sub">Los hábitos de esta hora ya están al día.</div>
+      </div>`;
+  }
+
+  // ─── Chip rail: all habits except spotlight (compact) ───
+  const sortedHabits = [...habits].sort((a,b) => {
+    const order = { critical:0, due:1, soon:2, ok:3 };
+    return order[lifeTaskUrgency(a)] - order[lifeTaskUrgency(b)];
+  });
+  const chipRailHtml = sortedHabits.map(t => {
+    const urg = lifeTaskUrgency(t);
+    const doneToday_ = t.lastDone && String(t.lastDone).split("T")[0] === todayIso;
+    const isSpotlight = spotlightTask && t.id === spotlightTask.id;
+    if (isSpotlight) return ""; // already shown in spotlight
+    return `<div class="lt-chip lt-chip-${urg}${doneToday_ ? " lt-chip-done" : ""}"
+      data-lt-chip-id="${escapeHtml(t.id)}"
+      title="${escapeHtml(t.title)} · ${escapeHtml(urg)}">
+      <span>${t.icon}</span>
+      <span class="lt-chip-label">${escapeHtml(t.title)}</span>
+      ${doneToday_ ? "<span class='lt-chip-check'>✓</span>" : ""}
+    </div>`;
+  }).filter(Boolean).join("");
+
+  // ─── Streak bar ───
+  const streakBadge = streak >= 3 ? `<span class="lt-streak-badge">🔥 Racha ${streak}d</span>` : (streak === 1 ? `<span class="lt-streak-badge lt-streak-start">⚡ ¡Empezando racha!</span>` : "");
+  const streakBarHtml = `
+    <div class="lt-streak-wrap">
+      <div class="lt-streak-bar-container">
+        <div class="lt-streak-bar-fill ${allDoneToday ? "lt-streak-bar-complete" : ""}" style="width:${progressPct}%"></div>
+      </div>
+      <div class="lt-streak-info">
+        <span class="lt-streak-count">${doneToday}/${totalHabits} hoy</span>
+        ${streakBadge}
+      </div>
+    </div>`;
+
+  // ─── Upcoming events (compact) ───
+  const upcomingEvents = events.filter(e => !e.done && e.dueDate >= todayIso)
+    .sort((a,b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 3);
+  const needFollowUp = events.filter(e => !e.done && !e.followUpSent && e.dueDate < todayIso);
   const evtDateLabel = (iso) => {
     if(iso===todayIso) return "🔴 Hoy";
     if(iso===tomorrowIso) return "🟡 Mañana";
-    try{ return new Date(iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short"}); }catch{ return iso; }
+    try { return new Date(iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short"}); } catch { return iso; }
   };
-
-  const eventsHtml = upcomingEvents.length || needFollowUp.length ? `
+  const eventsHtml = (upcomingEvents.length || needFollowUp.length) ? `
     <div class="lt-events-section">
-      <div class="lt-section-title">📅 Eventos & Compromisos</div>
+      <div class="lt-section-title">📅 Eventos</div>
       ${needFollowUp.map(e => `
-        <div class="lt-event-row lt-event-followup" data-lt-evt-id="${escapeHtml(e.id)}">
+        <div class="lt-event-row lt-event-followup">
           <div class="lt-event-icon">${e.icon}</div>
           <div class="lt-event-info">
             <div class="lt-event-title">${escapeHtml(e.title)}</div>
             <div class="lt-event-date" style="color:#a78bfa">Carl quiere saber cómo te fue 💜</div>
           </div>
-          <div style="display:flex;align-items:center;">
-            <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Marcar como hecho">✓</button>
-            <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" title="Eliminar" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 8px;">🗑</button>
-          </div>
-        </div>
-      `).join("")}
+          <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}">✓</button>
+          <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 6px;">🗑</button>
+        </div>`).join("")}
       ${upcomingEvents.map(e => `
-        <div class="lt-event-row" data-lt-evt-id="${escapeHtml(e.id)}">
+        <div class="lt-event-row">
           <div class="lt-event-icon">${e.icon}</div>
           <div class="lt-event-info">
             <div class="lt-event-title">${escapeHtml(e.title)}</div>
             <div class="lt-event-date">${escapeHtml(evtDateLabel(e.dueDate))}${e.note ? ` · ${escapeHtml(e.note)}` : ""}</div>
           </div>
-          <div style="display:flex;align-items:center;">
-            <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Hecho">✓</button>
-            <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" title="Eliminar" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 8px;">🗑</button>
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  ` : "";
-  
-  // Auto-suggest payments from finance ledger
-  const ledger = Array.isArray(state.finance_ledger) ? state.finance_ledger : (Array.isArray(state.financeLedger) ? state.financeLedger : []);
-  const debtCategories = ["deudas","servicios","compromisos","tarjeta","pago","credito","seguro","renta","alquiler"];
-  const paymentTasks = [];
-  const seen = new Set();
-  ledger.forEach(e => {
-    const cat = String(e.category||"").toLowerCase();
-    if(!debtCategories.some(d=>cat.includes(d))) return;
-    const key = e.description ? String(e.description).substring(0,30).toLowerCase() : cat;
-    if(seen.has(key)) return;
-    seen.add(key);
-    // Check if already in lifeTasks
-    const alreadyExists = tasks.some(t=>t.title.toLowerCase().includes(key.substring(0,10)));
-    if(!alreadyExists) paymentTasks.push({ name: e.description||e.category, category: cat });
-  });
+          <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}">✓</button>
+          <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 6px;">🗑</button>
+        </div>`).join("")}
+    </div>` : "";
 
-  // Sort habits by urgency
-  const sorted = [...habits].sort((a,b) => {
-    const order = { critical:0, due:1, soon:2, ok:3 };
-    return order[lifeTaskUrgency(a)] - order[lifeTaskUrgency(b)];
-  });
-
-  const urgencyColor = { critical:"#ef4444", due:"#f97316", soon:"#eab308", ok:"#22c55e" };
-  const urgencyLabel = { critical:"¡Atrasado!", due:"Hoy", soon:"Pronto", ok:"Al día" };
-
-  const taskRows = sorted.map(t => {
-    const urg = lifeTaskUrgency(t);
-    const color = urgencyColor[urg];
-    const sinceStr = t.lastDone ? (() => {
-      const d = lifeTaskDaysSince(t);
-      if(d < 1) return "Hoy";
-      if(d < 2) return "Ayer";
-      return `hace ${Math.floor(d)}d`;
-    })() : "Nunca";
-    return `
-      <div class="lt-task-row lt-${urg}" data-lt-id="${escapeHtml(t.id)}">
-        <div class="lt-task-icon">${t.icon}</div>
-        <div class="lt-task-info">
-          <div class="lt-task-title">${escapeHtml(t.title)}</div>
-          <div class="lt-task-since" style="color:${color}">${urgencyLabel[urg]} · ${escapeHtml(sinceStr)}</div>
-        </div>
-        <div style="display:flex;align-items:center;">
-          <button class="lt-done-btn" data-lt-done="${escapeHtml(t.id)}" title="Marcar como hecho" style="border-color:${color};color:${color}">✓</button>
-          <button class="lt-del-btn" data-lt-del="${escapeHtml(t.id)}" title="Eliminar" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 10px;">🗑</button>
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  const criticalCount = sorted.filter(t=>lifeTaskUrgency(t)==="critical"||lifeTaskUrgency(t)==="due").length;
+  const criticalCount = habits.filter(t => lifeTaskUrgency(t)==="critical"||lifeTaskUrgency(t)==="due").length;
   const totalAlerts = criticalCount + needFollowUp.length;
 
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString("es-PE", {hour:"2-digit", minute:"2-digit", hour12:true});
-
   return `
-    <section class="card homeCard homeWide lifeTrackerCard" id="homeLifeTracker">
+    <section class="card homeCard homeWide lifeTrackerCard${allDoneToday ? " lt-all-done" : ""}" id="homeLifeTracker">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">🧠 Tracker Vital <span style="font-size:12px;color:rgba(255,255,255,0.4);font-weight:normal;margin-left:8px;letter-spacing:0.5px;">${timeStr}</span></h2>
-          <div class="small">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : "Todo al día ✅"}</div>
+          <h2 class="cardTitle">🧠 Tracker Vital</h2>
+          <div class="small">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : allDoneToday ? `<span style="color:#22c55e;font-weight:700">¡Completo! 🎉</span>` : `${doneToday}/${totalHabits} hábitos hoy`}</div>
         </div>
         <div>
           <button class="iconBtn" id="btnLifeTrackerStats" title="Estadísticas" style="margin-right:8px;font-size:16px;">📊</button>
@@ -6237,21 +6230,16 @@ function renderLifeTrackerCard() {
         </div>
       </div>
       <div class="hr"></div>
+
       ${eventsHtml}
-      <div class="lt-section-title" style="margin-top:${eventsHtml?"12px":"0"}">🔁 Hábitos Vitales</div>
-      <div class="lt-task-list">
-        ${taskRows}
-      </div>
-      ${paymentTasks.length ? `
-        <div class="lt-suggestions">
-          <div class="lt-sug-title">💡 Carl detectó pagos recurrentes. ¿Agregarlos?</div>
-          ${paymentTasks.slice(0,3).map(p=>`
-            <button class="lt-sug-btn" data-lt-suggest="${escapeHtml(JSON.stringify(p))}">
-              💸 ${escapeHtml(p.name)}
-            </button>
-          `).join("")}
-        </div>
-      ` : ""}
+
+      <div class="lt-section-title" style="margin-top:${eventsHtml?"12px":"4px"}">🎯 Ahora mismo</div>
+      ${spotlightHtml}
+
+      ${chipRailHtml ? `<div class="lt-section-title" style="margin-top:14px">🔁 Lo demás</div>
+      <div class="lt-chip-rail">${chipRailHtml}</div>` : ""}
+
+      ${streakBarHtml}
     </section>
   `;
 }
@@ -6322,65 +6310,16 @@ function wireLifeTracker(root) {
     btn.addEventListener("click", () => {
       try {
         const p = JSON.parse(btn.getAttribute("data-lt-suggest"));
-        lifeTaskAddCustom(p.name, "💸", 30, p.category);
+        lifeTaskAddCustom(p.name, "💸", 30, p.category, "cualquier");
         view();
       } catch(e){}
     });
   });
 
-  // ── TDA Banner Actions ──
-  root.querySelectorAll("[data-lt-tda-done]").forEach(btn => {
-    btn.addEventListener("click", e => {
-      e.stopPropagation();
-      lifeTaskMarkDone(btn.getAttribute("data-lt-tda-done"));
-      toast("✅ ¡Marcado! Buen trabajo.");
-      view();
-    });
-  });
-
-  root.querySelectorAll("[data-lt-tda-time]").forEach(btn => {
-    btn.addEventListener("click", e => {
-      e.stopPropagation();
-      const id = btn.getAttribute("data-lt-tda-time");
-      const tasks = lifeTasksGet();
-      const task = tasks.find(x => x.id === id);
-      const name = task ? task.title : "el hábito";
-      // Mostrar mini modal de hora
-      const overlay = document.createElement("div");
-      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;";
-      overlay.innerHTML = `
-        <div style="background:#1e1e1e;border-radius:16px;padding:24px;max-width:320px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
-          <div style="font-weight:700;font-size:15px;color:#e2e8f0;margin-bottom:6px;">¿A qué hora lo hiciste?</div>
-          <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:16px;">${escapeHtml(name)}</div>
-          <input id="tdaTimeInput" type="time" style="width:100%;background:#2d2d2d;border:1px solid rgba(255,255,255,0.15);border-radius:10px;color:#e2e8f0;font-size:18px;padding:10px 14px;text-align:center;" value="${new Date().toTimeString().slice(0,5)}" />
-          <div style="display:flex;gap:10px;margin-top:16px;">
-            <button id="tdaTimeSave" style="flex:1;background:#7c5cff;color:#fff;border:none;border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Guardar</button>
-            <button id="tdaTimeCancel" style="flex:1;background:rgba(255,255,255,0.08);color:#aaa;border:none;border-radius:10px;padding:12px;cursor:pointer;">Cancelar</button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(overlay);
-      overlay.querySelector("#tdaTimeCancel").addEventListener("click", () => overlay.remove());
-      overlay.querySelector("#tdaTimeSave").addEventListener("click", () => {
-        const val = overlay.querySelector("#tdaTimeInput").value;
-        if (val) {
-          const [hh, mm] = val.split(":");
-          const d = new Date();
-          d.setHours(Number(hh), Number(mm), 0);
-          const forcedTs = `${isoDate(d)}T${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:00`;
-          lifeTaskMarkDone(id, forcedTs);
-          toast(`✅ Registrado a las ${val}`);
-        }
-        overlay.remove();
-        view();
-      });
-    });
-  });
-
+  // ── Spotlight Actions ──
   root.querySelectorAll("[data-lt-tda-skip]").forEach(btn => {
     btn.addEventListener("click", e => {
       e.stopPropagation();
-      // Ocultar el banner temporalmente (estado en memoria, no persiste)
       const id = btn.getAttribute("data-lt-tda-skip");
       state._tdaSkipped = state._tdaSkipped || {};
       state._tdaSkipped[id] = Date.now();
@@ -6405,6 +6344,33 @@ function wireLifeTracker(root) {
         }
         state._neuroChatPrefill = "";
       }, 500);
+    });
+  });
+
+  // Chip click (moves it to spotlight by clearing skip state if any, and prioritizing it)
+  // Wait, if we click a chip, it's not overdue, but we want to do it now. 
+  // We can just mark it done from the chip itself. But the UI says we want chips to open spotlight.
+  // We can implement marking done directly from chip click.
+  root.querySelectorAll("[data-lt-chip-id]").forEach(chip => {
+    chip.addEventListener("click", e => {
+      e.stopPropagation();
+      if(chip.classList.contains("lt-chip-done")) return; // already done
+      lifeTaskMarkDone(chip.getAttribute("data-lt-chip-id"));
+      // Add celebrate class to root before view
+      const spot = root.querySelector("#homeLifeTracker");
+      if(spot) spot.classList.add("lt-celebrate");
+      setTimeout(() => view(), 600); // small delay to see animation
+    });
+  });
+
+  // Spotlight Done Click
+  root.querySelectorAll(".lt-spot-yes").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      lifeTaskMarkDone(btn.getAttribute("data-lt-done"));
+      const spot = root.querySelector("#ltSpotlight");
+      if(spot) spot.classList.add("lt-celebrate");
+      setTimeout(() => view(), 600);
     });
   });
 }
@@ -6439,6 +6405,12 @@ function openLifeTaskModal() {
             <option value="salud">💊 Salud</option>
             <option value="otro">📌 Otro</option>
           </select>
+          <select class="input" id="ltPod">
+            <option value="cualquier">🕒 En cualquier momento</option>
+            <option value="manana">🌅 Por la mañana (6am-12pm)</option>
+            <option value="tarde">🌇 Por la tarde (12pm-7pm)</option>
+            <option value="noche">🌙 Por la noche (7pm-12am)</option>
+          </select>
           <button class="btn primary" id="ltSaveHabit">Guardar hábito</button>
         </div>
 
@@ -6472,7 +6444,7 @@ function openLifeTaskModal() {
   bd.querySelector("#ltSaveHabit").addEventListener("click", () => {
     const title = bd.querySelector("#ltTitle").value.trim();
     if(!title) return;
-    lifeTaskAddCustom(title, bd.querySelector("#ltIcon").value.trim()||"📌", Number(bd.querySelector("#ltFreq").value)||7, bd.querySelector("#ltCat").value);
+    lifeTaskAddCustom(title, bd.querySelector("#ltIcon").value.trim()||"📌", Number(bd.querySelector("#ltFreq").value)||7, bd.querySelector("#ltCat").value, bd.querySelector("#ltPod").value);
     bd.remove(); view();
   });
   bd.querySelector("#ltSaveEvent").addEventListener("click", () => {
