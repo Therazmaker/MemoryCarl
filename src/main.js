@@ -96,13 +96,13 @@ try {
           <span style="color:#888;">[${log.time}]</span> ${esc(log.text)}
         </div>
       `;
-    }).join('') || '<div style="color:#888;font-size:12px;font-family:sans-serif;">Sin logs guardados aún.</div>';
+    }).join('') || '<div style="color:#888;font-size:12px;font-family:sans-serif;">Sin logs guardados a├║n.</div>';
 
     backdrop.innerHTML = `
       <div style="max-width:500px; width:90%; background:#1c1c1e; color:#fff; border-radius:14px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,0.5); font-family:system-ui, -apple-system, sans-serif;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-          <span style="font-weight:700; font-size:15px;">📺 Consola de Rescate</span>
-          <button style="background:none; border:none; color:#fff; font-size:18px; cursor:pointer;" id="mcCloseRescueConsole">✕</button>
+          <span style="font-weight:700; font-size:15px;">­ƒô║ Consola de Rescate</span>
+          <button style="background:none; border:none; color:#fff; font-size:18px; cursor:pointer;" id="mcCloseRescueConsole">Ô£ò</button>
         </div>
         <div style="background:#09090b; border:1px solid #333; border-radius:8px; height:300px; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:4px; margin-bottom:12px;">
           ${logsHtml}
@@ -123,7 +123,7 @@ try {
     backdrop.querySelector('#mcCopyRescueLogs').onclick = () => {
       const logsText = JSON.stringify(window.__mcLogs, null, 2);
       navigator.clipboard.writeText(logsText).then(() => {
-        alert('Copiado al portapapeles ✅');
+        alert('Copiado al portapapeles Ô£à');
       }).catch(() => {
         const ta = document.createElement('textarea');
         ta.value = logsText;
@@ -131,7 +131,7 @@ try {
         ta.select();
         document.execCommand('copy');
         ta.remove();
-        alert('Copiado al portapapeles ✅');
+        alert('Copiado al portapapeles Ô£à');
       });
     };
     
@@ -159,11 +159,11 @@ try {
         <div style="display:flex;flex-direction:column;gap:8px;">
           <div style="line-height:1.25;">
             <div style="font-weight:900">MemoryCarl: modo rescate</div>
-            <div style="opacity:.85;white-space:normal">Si se quedó en “cargando”, prueba limpiar caché primero. ${reason?`<span style="opacity:.7">(${reason})</span>`:''}</div>
+            <div style="opacity:.85;white-space:normal">Si se qued├│ en ÔÇ£cargandoÔÇØ, prueba limpiar cach├® primero. ${reason?`<span style="opacity:.7">(${reason})</span>`:''}</div>
           </div>
           <div style="display:flex;gap:8px;flex-shrink:0;">
             <button id="mcRescueConsole" style="${cssBtn()}background:#ef4444;color:#fff;">Ver consola</button>
-            <button id="mcRescueSoft" style="${cssBtn()}background:#2b73ff;color:#fff;">Reset caché</button>
+            <button id="mcRescueSoft" style="${cssBtn()}background:#2b73ff;color:#fff;">Reset cach├®</button>
             <button id="mcRescueHard" style="${cssBtn()}background:#fff;color:#111;">Reset total</button>
           </div>
         </div>`;
@@ -241,6 +241,7 @@ import "./sleep_radial_chart.js";
 import "./sleep_journal_pro.js";
 
 console.log("MemoryCarl loaded");
+console.log("MEMORYCARL VERSION: 2044");
 // ===== LocalStorage Keys =====
 const KEYS = {
   neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
@@ -260,7 +261,7 @@ if ("serviceWorker" in navigator) {
     .then(reg => {
       console.log("SW registered:", reg.scope);
 
-      // Si hay una versión nueva esperando, la activa rápido
+      // Si hay una versi├│n nueva esperando, la activa r├ípido
       if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
 
       reg.addEventListener("updatefound", () => {
@@ -329,7 +330,7 @@ async function enableNotifications(){
     });
 
     localStorage.setItem("memorycarl_fcm_token", token);
-    toast("Notifs enabled ✅");
+    toast("Notifs enabled Ô£à");
     console.log("FCM token:", token);
   } catch (err) {
     console.error("Enable notifs error:", err);
@@ -344,7 +345,7 @@ function copyFcmToken(){
     return;
   }
   navigator.clipboard?.writeText(token)
-    .then(()=>toast("Token copied ✅"))
+    .then(()=>toast("Token copied Ô£à"))
     .catch(()=>alert(token));
 }
 // ====================== END NOTIFICATIONS ======================
@@ -565,9 +566,9 @@ async function refreshSwissTransitsUI({forceSpeak=false} = {}){
     if((forceSpeak || (isNew && isTight)) && swiss.transit_hint){
       seen.seen.push(key);
       saveSeenSet(seen);
-      toast(`🪐 Tránsito activo: ${swiss.transit_top}`);
+      toast(`­ƒ¬É Tr├ínsito activo: ${swiss.transit_top}`);
       if(window.NeuroBubble && window.NeuroBubble.say){
-        window.NeuroBubble.say({ mood:"calm", text: swiss.transit_hint, micro:"Micro: respira 3 veces y elige 1 intención." });
+        window.NeuroBubble.say({ mood:"calm", text: swiss.transit_hint, micro:"Micro: respira 3 veces y elige 1 intenci├│n." });
       }
     }
 
@@ -586,7 +587,7 @@ async function refreshSwissTransitsUI({forceSpeak=false} = {}){
         const key2 = (isFullMoon && isSpendHot) ? (mk+"_HOT") : mk;
         seen.seen.push(key2);
         saveSeenSet(seen);
-        toast("🌙 Finanzas lunares: mira a Bubble");
+        toast("­ƒîÖ Finanzas lunares: mira a Bubble");
         window.NeuroBubble.say({ mood:"calm", text: mw, micro:"Micro (2 min): anota 1 gasto y 1 regla para hoy." });
       }
     }
@@ -643,22 +644,22 @@ function openSwissDailyModal(){
   const trans = (d && Array.isArray(d.transits)) ? d.transits : [];
   const body = `
     <div class="sectionTitle">
-      <div>Visión lunar</div>
+      <div>Visi├│n lunar</div>
       <div class="chip">${escapeHtml(d?.date || isoDate(new Date()))}</div>
     </div>
 
     <div class="card">
       <div class="kv">
         <div class="k">Luna</div>
-        <div class="v"><b>${escapeHtml(d?.moon_sign || "—")}</b> <span class="small">${typeof d?.moon_phase==="number" ? `(${Math.round(d.moon_phase*100)}%)` : ""}</span></div>
+        <div class="v"><b>${escapeHtml(d?.moon_sign || "ÔÇö")}</b> <span class="small">${typeof d?.moon_phase==="number" ? `(${Math.round(d.moon_phase*100)}%)` : ""}</span></div>
       </div>
       <div class="kv">
         <div class="k">Mensaje</div>
-        <div class="v">${escapeHtml(d?.message || "—")}</div>
+        <div class="v">${escapeHtml(d?.message || "ÔÇö")}</div>
       </div>
       <div class="hr"></div>
-      <div class="small" style="opacity:.9;margin-bottom:8px;">Tránsitos (top)</div>
-      ${trans.length ? `<ul class="swissList">${trans.map(t=>`<li>${escapeHtml(String(t))}</li>`).join("")}</ul>` : `<div class="muted">Sin tránsitos.</div>`}
+      <div class="small" style="opacity:.9;margin-bottom:8px;">Tr├ínsitos (top)</div>
+      ${trans.length ? `<ul class="swissList">${trans.map(t=>`<li>${escapeHtml(String(t))}</li>`).join("")}</ul>` : `<div class="muted">Sin tr├ínsitos.</div>`}
     </div>
   `;
   openSheet(body);
@@ -718,35 +719,42 @@ function upsertLunarMoneyTodayFromSwiss(swiss){
 
 function renderLunarMoneyCard(){
   const swiss = loadSwissLast() || {};
+  let liteMoon = null, liteTransits = null;
+  try { liteMoon = computeMoonNow(new Date()); liteTransits = getTransitLiteSignals(new Date()); } catch(e) {}
   const spend = getSpend24h();
   const natal = loadNatalChart();
   const house2 = (natal && Array.isArray(natal.houses)) ? natal.houses.find(h=>Number(h.house)===2) : null;
-  const house2Sign = house2?.sign ? String(house2.sign) : "—";
+  const house2Sign = house2 && house2.sign ? String(house2.sign) : "—";
   const regencia = (house2Sign.toLowerCase()==="pisces" || house2Sign.toLowerCase()==="piscis") ? "Neptuno / Júpiter" : "";
 
-  const phase = (swiss.moon_phase_name || "").trim();
-  const msign = (swiss.moon_sign || "").trim();
-  const mhouse = (swiss.transit_moon_house || "").trim();
-  const whisper = (swiss.transit_money_whisper || "").trim();
+  const phase = (swiss.moon_phase_name || (liteMoon && liteMoon.moon_phase_name) || "").trim();
+  const msign = (swiss.moon_sign || (liteMoon && liteMoon.moon_sign) || "").trim();
+  const mhouse = (swiss.transit_moon_house != null ? String(swiss.transit_moon_house) : (liteTransits && liteTransits.transit_moon_house != null ? String(liteTransits.transit_moon_house) : "")).trim();
+  let whisper = (swiss.transit_money_whisper || "").trim();
+  if (!whisper && msign) {
+    const hint = (liteTransits && liteTransits.transit_hint) ? liteTransits.transit_hint : "Observa tus emociones al gastar.";
+    whisper = "La luna transita por " + msign + (mhouse ? " (Casa " + mhouse + ")" : "") + ". " + hint;
+    if (spend > 0) whisper += " Has gastado S/ " + (Math.round(spend*100)/100) + " hoy.";
+  }
 
   const topLine = [
-    phase ? `🌙 ${phase}` : "",
-    msign ? `Luna en ${msign}` : "",
-    mhouse ? `Casa ${mhouse}` : ""
-  ].filter(Boolean).join(" • ") || "Activa Swiss y recalcula para ver tu clima lunar de hoy.";
+    phase ? "🌙 " + phase : "",
+    msign ? "Luna en " + msign : "",
+    mhouse ? "Casa " + mhouse : ""
+  ].filter(Boolean).join(" • ") || "Clima lunar";
 
   const spendLine = `Gasto 24h: <b>S/ ${escapeHtml(String(Math.round(spend*100)/100))}</b>`;
-  const houseLine = `Casa 2: <b>${escapeHtml(house2Sign)}</b>${regencia ? ` <span class=\"muted\">(${escapeHtml(regencia)})</span>` : ""}`;
+  const houseLine = `Casa 2: <b>${escapeHtml(house2Sign)}</b>${regencia ? ` <span class="muted">(${escapeHtml(regencia)})</span>` : ""}`;
 
   return `
     <section class="card homeCard homeWide" id="homeLunarMoneyCard">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Luna & Dinero 🌙💸</h2>
+          <h2 class="cardTitle">Luna &amp; Dinero 🌙💸</h2>
           <div class="small">${topLine}</div>
         </div>
         <div class="row" style="gap:8px;">
-          <button class="iconBtn" id="btnLunarMoneyRefresh" aria-label="Refresh">⟲</button>
+          <button class="iconBtn" id="btnLunarMoneyRefresh" aria-label="Refresh">➲</button>
           <button class="iconBtn" id="btnLunarMoneyHistory" aria-label="History">🗓️</button>
         </div>
       </div>
@@ -761,14 +769,13 @@ function renderLunarMoneyCard(){
 
       ${whisper ? `
         <div style="line-height:1.45">${escapeHtml(whisper).replace(/\n/g,"<br>")}</div>
-        <div class="muted" style="margin-top:10px;">No es consejo financiero. Es lectura simbólica + tu data de gasto.</div>
+        <div class="muted" style="margin-top:10px;">(Lectura lite + tus gastos reales)</div>
       ` : `
-        <div class="muted">Aún no hay whisper. Pulsa ⟲ para recalcular con Swiss.</div>
+        <div class="muted">Configura tu carta natal para ver sugerencias personalizadas.</div>
       `}
     </section>
   `;
 }
-
 function openLunarMoneyHistoryModal(){
   const host = document.querySelector("#app");
   if(!host) return;
@@ -778,15 +785,15 @@ function openLunarMoneyHistoryModal(){
     const d = String(e.day||"");
     const pretty = d.length===8 ? `${d.slice(6,8)}/${d.slice(4,6)}/${d.slice(0,4)}` : d;
     const spend = Number(e.spend_24h||0);
-    const line1 = [e.moon_phase_name?`🌙 ${e.moon_phase_name}`:"", e.moon_sign?`Luna en ${e.moon_sign}`:"", e.moon_house?`Casa ${e.moon_house}`:""]
-      .filter(Boolean).join(" • ");
+    const line1 = [e.moon_phase_name?`­ƒîÖ ${e.moon_phase_name}`:"", e.moon_sign?`Luna en ${e.moon_sign}`:"", e.moon_house?`Casa ${e.moon_house}`:""]
+      .filter(Boolean).join(" ÔÇó ");
     const w = (e.whisper||"").trim();
     return `
       <div class="card" style="margin:10px 0;">
         <div class="cardTop" style="padding:12px 12px 6px;">
           <div>
             <div class="cardTitle" style="font-size:16px;">${escapeHtml(pretty)}</div>
-            <div class="small">${escapeHtml(line1 || "—")}</div>
+            <div class="small">${escapeHtml(line1 || "ÔÇö")}</div>
           </div>
           <div class="chip">S/ ${escapeHtml(String(Math.round(spend*100)/100))}</div>
         </div>
@@ -796,18 +803,18 @@ function openLunarMoneyHistoryModal(){
         </div>
       </div>
     `;
-  }).join("") || `<div class="muted">Aún no hay histórico. Pulsa ⟲ en la card para generar el de hoy.</div>`;
+  }).join("") || `<div class="muted">A├║n no hay hist├│rico. Pulsa Ôƒ▓ en la card para generar el de hoy.</div>`;
 
   const modal = document.createElement("div");
   modal.className = "modalBackdrop";
   modal.innerHTML = `
-    <div class="modal" role="dialog" aria-label="Histórico Lunar & Dinero">
+    <div class="modal" role="dialog" aria-label="Hist├│rico Lunar & Dinero">
       <div class="modalTop">
         <div>
-          <div class="modalTitle">Histórico: Luna & Dinero 🌙💸</div>
-          <div class="modalSub">30 días máx • Seguimiento diario (no consejo financiero)</div>
+          <div class="modalTitle">Hist├│rico: Luna & Dinero ­ƒîÖ­ƒÆ©</div>
+          <div class="modalSub">30 d├¡as m├íx ÔÇó Seguimiento diario (no consejo financiero)</div>
         </div>
-        <button class="iconBtn" id="btnLmClose" aria-label="Close">✕</button>
+        <button class="iconBtn" id="btnLmClose" aria-label="Close">Ô£ò</button>
       </div>
       <div class="hr"></div>
       <div style="max-height:70vh;overflow:auto;padding-right:6px;">${rows}</div>
@@ -832,7 +839,7 @@ function ensureNeuroAiConfig(){
   if(url && key) return { url, key, ok: true };
 
   // Ask user if they want to connect to cloud AI
-  const want = window.confirm("¿Quieres conectar NeuroClaw con tu AI en la nube (Gemini)?\n\nEsto es opcional: si cancelas, NeuroClaw seguirá funcionando solo con reglas locales.");
+  const want = window.confirm("┬┐Quieres conectar NeuroClaw con tu AI en la nube (Gemini)?\n\nEsto es opcional: si cancelas, NeuroClaw seguir├í funcionando solo con reglas locales.");
   if(!want) return { url:"", key:"", ok:false };
 
   url = (window.prompt("Pega tu Cloud Run URL base (sin /insight):", url || "") || "").trim();
@@ -857,7 +864,7 @@ function ensureNeuroAiConfigured(){
   let key = getNeuroAiKey();
   if(url && key) return true;
 
-  const ok = confirm("¿Quieres conectar NeuroClaw a tu AI en la nube (Cloud Run)?\n\nEsto permite insights tipo Gemini. Puedes decir que no y seguir solo con reglas.");
+  const ok = confirm("┬┐Quieres conectar NeuroClaw a tu AI en la nube (Cloud Run)?\n\nEsto permite insights tipo Gemini. Puedes decir que no y seguir solo con reglas.");
   if(!ok) return false;
 
   url = prompt("Pega la URL base de tu servicio Cloud Run (sin /insight):", url || "");
@@ -879,7 +886,7 @@ function ensureSwissAstroConfigured(){
   let key = getSwissAstroKey();
   if(url && key) return true;
 
-  const ok = confirm("Para usar Swiss Astro necesitas conectar tu servicio (Cloud Run).\n\n¿Configurar ahora?");
+  const ok = confirm("Para usar Swiss Astro necesitas conectar tu servicio (Cloud Run).\n\n┬┐Configurar ahora?");
   if(!ok) return false;
 
   url = prompt("Pega la URL base de tu Swiss Astro (Cloud Run), sin ruta extra:", url || "");
@@ -947,7 +954,7 @@ function saveAiLog(arr){
 function appendAiLog(entry){
   const log = getAiLog();
   log.unshift(entry);
-  // límite para no crecer infinito
+  // l├¡mite para no crecer infinito
   if(log.length > 200) log.length = 200;
   saveAiLog(log);
   return entry;
@@ -1062,24 +1069,24 @@ function neuroclawLocalFallbackAI({signals, now} = {}){
 
   // Build reflective narrative (short, calm, actionable)
   const lines = [];
-  lines.push('Hoy entro en modo local: no voy a gastar más llamadas externas, pero sí puedo pensar con lo que ya guardamos.');
+  lines.push('Hoy entro en modo local: no voy a gastar m├ís llamadas externas, pero s├¡ puedo pensar con lo que ya guardamos.');
 
   // Anchor in concrete signals
   const facts = [];
-  if(sleep3!=null) facts.push(`sueño 3d ≈ ${sleep3.toFixed(1)}h`);
-  else if(sleep7!=null) facts.push(`sueño 7d ≈ ${sleep7.toFixed(1)}h`);
-  if(clean7!=null) facts.push(`limpieza 7d ≈ ${Math.round(clean7)} min`);
-  if(spend1!=null) facts.push(`gasto 24h ≈ ${spend1.toFixed(2)}`);
-  else if(spend7!=null) facts.push(`gasto 7d ≈ ${spend7.toFixed(2)}`);
-  if(remOpen!=null) facts.push(`pendientes ≈ ${Math.round(remOpen)}`);
-  if(facts.length) lines.push(`Señales: ${facts.join(' · ')}.`);
+  if(sleep3!=null) facts.push(`sue├▒o 3d Ôëê ${sleep3.toFixed(1)}h`);
+  else if(sleep7!=null) facts.push(`sue├▒o 7d Ôëê ${sleep7.toFixed(1)}h`);
+  if(clean7!=null) facts.push(`limpieza 7d Ôëê ${Math.round(clean7)} min`);
+  if(spend1!=null) facts.push(`gasto 24h Ôëê ${spend1.toFixed(2)}`);
+  else if(spend7!=null) facts.push(`gasto 7d Ôëê ${spend7.toFixed(2)}`);
+  if(remOpen!=null) facts.push(`pendientes Ôëê ${Math.round(remOpen)}`);
+  if(facts.length) lines.push(`Se├▒ales: ${facts.join(' ┬À ')}.`);
 
   // Simple trend notes
   const trendBits = [];
-  if(dClean!=null) trendBits.push(dClean>0 ? 'más constancia en limpieza' : (dClean<0 ? 'menos limpieza que la última vez' : 'limpieza estable'));
-  if(dSpend1!=null) trendBits.push(dSpend1>0 ? 'gasto reciente subió' : (dSpend1<0 ? 'gasto reciente bajó' : 'gasto estable'));
-  if(dRem!=null) trendBits.push(dRem>0 ? 'más pendientes abiertos' : (dRem<0 ? 'menos pendientes abiertos' : 'pendientes estables'));
-  if(trendBits.length) lines.push(`Tendencia vs tu última lectura guardada: ${trendBits.join(' · ')}.`);
+  if(dClean!=null) trendBits.push(dClean>0 ? 'm├ís constancia en limpieza' : (dClean<0 ? 'menos limpieza que la ├║ltima vez' : 'limpieza estable'));
+  if(dSpend1!=null) trendBits.push(dSpend1>0 ? 'gasto reciente subi├│' : (dSpend1<0 ? 'gasto reciente baj├│' : 'gasto estable'));
+  if(dRem!=null) trendBits.push(dRem>0 ? 'm├ís pendientes abiertos' : (dRem<0 ? 'menos pendientes abiertos' : 'pendientes estables'));
+  if(trendBits.length) lines.push(`Tendencia vs tu ├║ltima lectura guardada: ${trendBits.join(' ┬À ')}.`);
 
   // Reuse a tiny excerpt of previous "human" as memory (no long quotes)
   const memorySeeds = recent
@@ -1089,20 +1096,20 @@ function neuroclawLocalFallbackAI({signals, now} = {}){
     .map(t => t.replace(/\s+/g,' ').slice(0, 160));
 
   if(memorySeeds.length){
-    lines.push('Ecos de tus últimas visiones:');
-    memorySeeds.forEach((t,i)=> lines.push(`• ${t}${t.length>=160?'…':''}`));
+    lines.push('Ecos de tus ├║ltimas visiones:');
+    memorySeeds.forEach((t,i)=> lines.push(`ÔÇó ${t}${t.length>=160?'ÔÇª':''}`));
   }
 
   // Gentle prompt / question
   const q = [];
-  if(remOpen!=null && remOpen>=8) q.push('¿Qué 1 cosa pequeña, si la terminas hoy, te devuelve sensación de control?');
-  if(spend1!=null && spend1>0) q.push('Si tuvieras que ponerle un nombre emocional a ese gasto, ¿cuál sería?');
-  if(clean7!=null && clean7>0) q.push('¿Qué parte de la casa se sintió “más liviana” después de limpiar?');
-  if(!q.length) q.push('¿Qué necesitas escuchar hoy: claridad, calma, o impulso?');
+  if(remOpen!=null && remOpen>=8) q.push('┬┐Qu├® 1 cosa peque├▒a, si la terminas hoy, te devuelve sensaci├│n de control?');
+  if(spend1!=null && spend1>0) q.push('Si tuvieras que ponerle un nombre emocional a ese gasto, ┬┐cu├íl ser├¡a?');
+  if(clean7!=null && clean7>0) q.push('┬┐Qu├® parte de la casa se sinti├│ ÔÇ£m├ís livianaÔÇØ despu├®s de limpiar?');
+  if(!q.length) q.push('┬┐Qu├® necesitas escuchar hoy: claridad, calma, o impulso?');
   lines.push(`Pregunta: ${q[0]}`);
 
   // Micro-action
-  lines.push('Micro-acción (3 min): abre tu presupuesto mensual y escribe solo 1 cosa: “lo que más me pesa” y “lo que más me libera”. Nada más.');
+  lines.push('Micro-acci├│n (3 min): abre tu presupuesto mensual y escribe solo 1 cosa: ÔÇ£lo que m├ís me pesaÔÇØ y ÔÇ£lo que m├ís me liberaÔÇØ. Nada m├ís.');
 
   const human = lines.join('\n');
   const ai = {
@@ -1269,7 +1276,7 @@ function restoreBrainLocalStorageKeyWithFallback(key, raw){
     }
   }
 
-  throw new Error("No hay espacio suficiente para restaurar FL_BRAIN_V2 incluso con compactación automática.");
+  throw new Error("No hay espacio suficiente para restaurar FL_BRAIN_V2 incluso con compactaci├│n autom├ítica.");
 }
 
 function hasSensitiveKeyName(key = ""){
@@ -1505,13 +1512,13 @@ async function importBrainBackupFromFile(file){
   try{
     parsed = JSON.parse(text);
   }catch(_e){
-    throw new Error("JSON inválido: no se pudo parsear el archivo.");
+    throw new Error("JSON inv├ílido: no se pudo parsear el archivo.");
   }
 
-  if(parsed?.kind !== BRAIN_BACKUP_KIND) throw new Error("Backup inválido: kind no soportado.");
-  if(Number(parsed?.version) !== BRAIN_BACKUP_VERSION) throw new Error("Backup inválido: versión no soportada.");
+  if(parsed?.kind !== BRAIN_BACKUP_KIND) throw new Error("Backup inv├ílido: kind no soportado.");
+  if(Number(parsed?.version) !== BRAIN_BACKUP_VERSION) throw new Error("Backup inv├ílido: versi├│n no soportada.");
   if(!parsed?.data || typeof parsed.data !== "object" || !parsed.data.brainState){
-    throw new Error("Backup inválido: falta data.brainState.");
+    throw new Error("Backup inv├ílido: falta data.brainState.");
   }
 
   try{
@@ -1994,15 +2001,15 @@ function seedHouse(){
       // Layout (from your sketch): Cocina/Sala at top, then service core, then rooms.
       { id: uid("z"), name: "Sala", order: 1, priority: 4 },
       { id: uid("z"), name: "Cocina", order: 2, priority: 5 },
-      { id: uid("z"), name: "Lavandería", order: 3, priority: 3 },
-      { id: uid("z"), name: "Baño pequeño", order: 4, priority: 5 },
+      { id: uid("z"), name: "Lavander├¡a", order: 3, priority: 3 },
+      { id: uid("z"), name: "Ba├▒o peque├▒o", order: 4, priority: 5 },
       { id: uid("z"), name: "Pasillo", order: 5, priority: 3 },
       { id: uid("z"), name: "Cuarto Mathias", order: 6, priority: 3 },
       { id: uid("z"), name: "Cuarto Frederick", order: 7, priority: 3 },
-      { id: uid("z"), name: "Baño grande", order: 8, priority: 5 },
+      { id: uid("z"), name: "Ba├▒o grande", order: 8, priority: 5 },
       { id: uid("z"), name: "Cuarto Principal", order: 9, priority: 4 },
       // Not a cleanable zone, but useful for the future mini-map (void/open space)
-      { id: uid("z"), name: "Vacío (doble altura)", order: 99, priority: 1 },
+      { id: uid("z"), name: "Vac├¡o (doble altura)", order: 99, priority: 1 },
     ],
     tasks: [
       // Global quick wins
@@ -2017,7 +2024,7 @@ function seedHouse(){
 
       // Cocina
       { id: uid("t"), zoneId: "ZONE_COCINA", name: "Platos + fregadero (reset)", minutes: 10, freqDays: 1, type: "wet", level: "light", priority: 5, lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Mesón/encimera: limpiar + desinfectar", minutes: 6, freqDays: 1, type: "surface", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_COCINA", name: "Mes├│n/encimera: limpiar + desinfectar", minutes: 6, freqDays: 1, type: "surface", level: "light", priority: 5, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_COCINA", name: "Cocina/estufa: limpiar superficie", minutes: 8, freqDays: 3, type: "wet", level: "light", priority: 4, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_COCINA", name: "Nevera: limpiar exterior + agarraderas", minutes: 6, freqDays: 7, type: "surface", level: "deep", priority: 3, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_COCINA", name: "Cocina: piso (barrer/trapear)", minutes: 10, freqDays: 3, type: "floor", level: "light", priority: 4, lastDone: "" },
@@ -2027,14 +2034,14 @@ function seedHouse(){
       { id: uid("t"), zoneId: "ZONE_PASILLO", name: "Pasillo: piso (barrer)", minutes: 6, freqDays: 5, type: "floor", level: "light", priority: 3, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_PASILLO", name: "Pasillo: quitar cosas acumuladas", minutes: 6, freqDays: 7, type: "organize", level: "deep", priority: 3, lastDone: "" },
 
-      // Lavandería
-      { id: uid("t"), zoneId: "ZONE_LAV", name: "Lavandería: ordenar (ropa/insumos)", minutes: 8, freqDays: 7, type: "organize", level: "deep", priority: 3, lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_LAV", name: "Lavandería: limpiar superficie + polvo", minutes: 6, freqDays: 7, type: "surface", level: "deep", priority: 2, lastDone: "" },
+      // Lavander├¡a
+      { id: uid("t"), zoneId: "ZONE_LAV", name: "Lavander├¡a: ordenar (ropa/insumos)", minutes: 8, freqDays: 7, type: "organize", level: "deep", priority: 3, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_LAV", name: "Lavander├¡a: limpiar superficie + polvo", minutes: 6, freqDays: 7, type: "surface", level: "deep", priority: 2, lastDone: "" },
 
-      // Baño pequeño (WC + lavamanos)
-      { id: uid("t"), zoneId: "ZONE_BS", name: "Baño pequeño: lavamanos + espejo (rápido)", minutes: 6, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_BS", name: "Baño pequeño: WC (rápido)", minutes: 6, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_BS", name: "Baño pequeño: deep (paredes/puerta/piso)", minutes: 15, freqDays: 7, type: "deep", level: "deep", priority: 4, lastDone: "" },
+      // Ba├▒o peque├▒o (WC + lavamanos)
+      { id: uid("t"), zoneId: "ZONE_BS", name: "Ba├▒o peque├▒o: lavamanos + espejo (r├ípido)", minutes: 6, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BS", name: "Ba├▒o peque├▒o: WC (r├ípido)", minutes: 6, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BS", name: "Ba├▒o peque├▒o: deep (paredes/puerta/piso)", minutes: 15, freqDays: 7, type: "deep", level: "deep", priority: 4, lastDone: "" },
 
       // Cuarto Frederick (juguetes)
       { id: uid("t"), zoneId: "ZONE_FRED", name: "Juguetes: recoger y dejar ordenado", minutes: 10, freqDays: 1, type: "organize", level: "light", priority: 4, lastDone: "" },
@@ -2049,13 +2056,13 @@ function seedHouse(){
       { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: tender cama", minutes: 3, freqDays: 1, type: "surface", level: "light", priority: 4, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: escritorio (orden + limpiar)", minutes: 8, freqDays: 4, type: "surface", level: "light", priority: 4, lastDone: "" },
       { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: piso (barrer/aspirar)", minutes: 9, freqDays: 7, type: "floor", level: "deep", priority: 2, lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: gabetero/closet (mini organización)", minutes: 15, freqDays: 14, type: "organize", level: "deep", priority: 2, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_MAIN", name: "Principal: gabetero/closet (mini organizaci├│n)", minutes: 15, freqDays: 14, type: "organize", level: "deep", priority: 2, lastDone: "" },
 
-      // Baño grande (con ducha)
-      { id: uid("t"), zoneId: "ZONE_BB", name: "Baño grande: lavamanos + espejo", minutes: 7, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_BB", name: "Baño grande: WC", minutes: 7, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_BB", name: "Baño grande: ducha (paredes/piso)", minutes: 15, freqDays: 7, type: "deep", level: "deep", priority: 5, lastDone: "" },
-      { id: uid("t"), zoneId: "ZONE_BB", name: "Baño grande: piso (trapear)", minutes: 8, freqDays: 7, type: "floor", level: "deep", priority: 4, lastDone: "" },
+      // Ba├▒o grande (con ducha)
+      { id: uid("t"), zoneId: "ZONE_BB", name: "Ba├▒o grande: lavamanos + espejo", minutes: 7, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BB", name: "Ba├▒o grande: WC", minutes: 7, freqDays: 3, type: "wet", level: "light", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BB", name: "Ba├▒o grande: ducha (paredes/piso)", minutes: 15, freqDays: 7, type: "deep", level: "deep", priority: 5, lastDone: "" },
+      { id: uid("t"), zoneId: "ZONE_BB", name: "Ba├▒o grande: piso (trapear)", minutes: 8, freqDays: 7, type: "floor", level: "deep", priority: 4, lastDone: "" },
     ],
     // Mini-map data (Option B: draggable blocks + connections)
     map: {
@@ -2081,15 +2088,15 @@ function normalizeHouse(){
   if (!state.house.actividades || typeof state.house.actividades !== "object") {
     state.house.actividades = {
       tipos: [
-        { id: "cocinar", nombre: "Cocinar", categoria: "cocina", icono: "🍳", color: "#F59E0B", activo: true },
-        { id: "barrer", nombre: "Barrer", categoria: "limpieza", icono: "🧹", color: "#8B5CF6", activo: true },
-        { id: "trapear", nombre: "Trapear", categoria: "limpieza", icono: "🪣", color: "#7C3AED", activo: true },
-        { id: "platos", nombre: "Lavar platos", categoria: "cocina", icono: "🫧", color: "#EF4444", activo: true },
-        { id: "ropa", nombre: "Lavar ropa", categoria: "ropa", icono: "👕", color: "#3B82F6", activo: true },
-        { id: "planchar", nombre: "Planchar", categoria: "ropa", icono: "👔", color: "#6366F1", activo: true },
-        { id: "ordenar", nombre: "Ordenar", categoria: "organizacion", icono: "📦", color: "#10B981", activo: true },
-        { id: "basura", nombre: "Sacar basura", categoria: "limpieza", icono: "🗑", color: "#6B7280", activo: true },
-        { id: "plantas", nombre: "Plantas", categoria: "exterior", icono: "🌿", color: "#22C55E", activo: true }
+        { id: "cocinar", nombre: "Cocinar", categoria: "cocina", icono: "­ƒì│", color: "#F59E0B", activo: true },
+        { id: "barrer", nombre: "Barrer", categoria: "limpieza", icono: "­ƒº╣", color: "#8B5CF6", activo: true },
+        { id: "trapear", nombre: "Trapear", categoria: "limpieza", icono: "­ƒ¬ú", color: "#7C3AED", activo: true },
+        { id: "platos", nombre: "Lavar platos", categoria: "cocina", icono: "­ƒ½º", color: "#EF4444", activo: true },
+        { id: "ropa", nombre: "Lavar ropa", categoria: "ropa", icono: "­ƒæò", color: "#3B82F6", activo: true },
+        { id: "planchar", nombre: "Planchar", categoria: "ropa", icono: "­ƒæö", color: "#6366F1", activo: true },
+        { id: "ordenar", nombre: "Ordenar", categoria: "organizacion", icono: "­ƒôª", color: "#10B981", activo: true },
+        { id: "basura", nombre: "Sacar basura", categoria: "limpieza", icono: "­ƒùæ", color: "#6B7280", activo: true },
+        { id: "plantas", nombre: "Plantas", categoria: "exterior", icono: "­ƒî┐", color: "#22C55E", activo: true }
       ],
       logs: [],
       sesiones: [],
@@ -2106,14 +2113,14 @@ function normalizeHouse(){
   const map = {
     "ZONE_SALA": byName.get("sala") || null,
     "ZONE_COCINA": byName.get("cocina") || null,
-    "ZONE_LAV": byName.get("lavandería") || byName.get("lavanderia") || null,
-    "ZONE_BS": byName.get("baño pequeño") || byName.get("bano pequeño") || byName.get("baño pequeno") || byName.get("bano pequeno") || null,
+    "ZONE_LAV": byName.get("lavander├¡a") || byName.get("lavanderia") || null,
+    "ZONE_BS": byName.get("ba├▒o peque├▒o") || byName.get("bano peque├▒o") || byName.get("ba├▒o pequeno") || byName.get("bano pequeno") || null,
     "ZONE_PASILLO": byName.get("pasillo") || null,
     "ZONE_FRED": byName.get("cuarto frederick") || byName.get("frederick") || null,
     "ZONE_MATH": byName.get("cuarto mathias") || byName.get("mathias") || null,
     "ZONE_MAIN": byName.get("cuarto principal") || byName.get("principal") || null,
-    "ZONE_BB": byName.get("baño grande") || byName.get("bano grande") || null,
-    "ZONE_VOID": byName.get("vacío (doble altura)") || byName.get("vacio (doble altura)") || byName.get("vacío") || byName.get("vacio") || null
+    "ZONE_BB": byName.get("ba├▒o grande") || byName.get("bano grande") || null,
+    "ZONE_VOID": byName.get("vac├¡o (doble altura)") || byName.get("vacio (doble altura)") || byName.get("vac├¡o") || byName.get("vacio") || null
   };
   let changed = false;
   state.house.tasks.forEach(t=>{
@@ -2339,10 +2346,10 @@ async function exportBrainV2(){
     const pad = (n)=>String(n).padStart(2, "0");
     const filename = `footballlab-brain-backup-v1-${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}.json`;
     downloadJson(filename, payload);
-    toast("Backup descargado ✅");
+    toast("Backup descargado Ô£à");
   }catch(err){
     console.error(err);
-    toast("Error al exportar backup ❌");
+    toast("Error al exportar backup ÔØî");
   }
 }
 
@@ -2445,9 +2452,9 @@ function importBackup(file){
 
       persist();
       view();
-      toast("Backup imported ✅");
+      toast("Backup imported Ô£à");
     }catch(e){
-      toast("Invalid backup ❌");
+      toast("Invalid backup ÔØî");
     }
   };
   reader.readAsText(file);
@@ -2455,15 +2462,15 @@ function importBackup(file){
 
 async function importBrainV2(file){
   if(!file) return;
-  if(!confirm("Esto reemplazará el cerebro actual. ¿Deseas continuar?")) return;
+  if(!confirm("Esto reemplazar├í el cerebro actual. ┬┐Deseas continuar?")) return;
   try{
     const imported = await importBrainBackupFromFile(file);
     if(imported?.restoreMeta?.compacted){
-      toast("Backup restaurado con compactación por espacio limitado ⚠️");
+      toast("Backup restaurado con compactaci├│n por espacio limitado ÔÜá´©Å");
     }else if(String(imported?.schema?.brainVersion || "") !== "v2"){
-      toast("Importado, pero algunos campos pueden ser ignorados ⚠️");
+      toast("Importado, pero algunos campos pueden ser ignorados ÔÜá´©Å");
     }else{
-      toast("Backup restaurado. Recargando datos… ✅");
+      toast("Backup restaurado. Recargando datosÔÇª Ô£à");
     }
     setTimeout(()=>location.reload(), 260);
   }catch(err){
@@ -2482,7 +2489,7 @@ function restoreFromSnapshotText(rawText){
     snap = JSON.parse(text);
   }catch(e){
     console.error("restoreFromSnapshotText JSON.parse failed", e);
-    alert("JSON inválido. Asegúrate de pegarlo completo (de { hasta }).");
+    alert("JSON inv├ílido. Aseg├║rate de pegarlo completo (de { hasta }).");
     return;
   }
 
@@ -2498,13 +2505,13 @@ function restoreFromSnapshotText(rawText){
 if(payload && typeof payload === "object" && payload.lsRaw && typeof payload.lsRaw === "object"){
   const ok = restoreMcLocalStorageRaw(payload.lsRaw);
   if(ok){
-    try{ toast("Restore completo aplicado ✅ (recargando)"); }catch(e){}
+    try{ toast("Restore completo aplicado Ô£à (recargando)"); }catch(e){}
     setTimeout(()=>location.reload(), 250);
     return;
   }
 }
 
-  // Backup rápido (in-memory) por si el usuario quiere copiarlo
+  // Backup r├ípido (in-memory) por si el usuario quiere copiarlo
   try{
     window.__mc_last_restore_payload = payload;
   }catch(e){}
@@ -2518,7 +2525,7 @@ if(payload && typeof payload === "object" && payload.lsRaw && typeof payload.lsR
     }catch(e){}
   };
 
-  // Módulos principales
+  // M├│dulos principales
   apply("routines", payload.routines);
   apply("shopping", payload.shopping);
   // Reminders: soportar reminders/reminder
@@ -2534,7 +2541,7 @@ if(payload && typeof payload === "object" && payload.lsRaw && typeof payload.lsR
   apply("moodDaily", payload.moodDaily);
   apply("moodSpritesCustom", payload.moodSpritesCustom);
 
-  // Shopping rebuilt module keys (si existen en esta versión)
+  // Shopping rebuilt module keys (si existen en esta versi├│n)
   if(payload.products !== undefined){ try{ LS.products = LS.products || "memorycarl_v2_products"; }catch(e){} apply("products", payload.products); }
   if(payload.shoppingHistory !== undefined){ try{ LS.shoppingHistory = LS.shoppingHistory || "memorycarl_v2_shopping_history"; }catch(e){} apply("shoppingHistory", payload.shoppingHistory); }
   if(payload.inventory !== undefined){ try{ LS.inventory = LS.inventory || "memorycarl_v2_inventory"; }catch(e){} apply("inventory", payload.inventory); }
@@ -2595,7 +2602,7 @@ if(payload.swissAstroKey !== undefined) try{ localStorage.setItem("memorycarl_v2
     save(evKey, ev);
   }catch(e){}
 
-  try{ toast("Restore aplicado ✅ (recargando)"); }catch(e){}
+  try{ toast("Restore aplicado Ô£à (recargando)"); }catch(e){}
   setTimeout(()=>location.reload(), 250);
 }
 
@@ -2608,8 +2615,8 @@ function syncCfgLabelText(){
   const url = getSyncUrl();
   const key = getSyncApiKey();
   if(!url) return "Sync: (no configurado)";
-  const short = url.length > 44 ? (url.slice(0,34) + "…" + url.slice(-8)) : url;
-  return `Sync: ${short}${key ? " • key✅" : ""}`;
+  const short = url.length > 44 ? (url.slice(0,34) + "ÔÇª" + url.slice(-8)) : url;
+  return `Sync: ${short}${key ? " ÔÇó keyÔ£à" : ""}`;
 }
 
 function openSyncConfig(){
@@ -2633,7 +2640,7 @@ async function fetchLatestSnapshotFromSheet(){
   const url = base + (base.includes("?") ? "&" : "?") + "action=latest_snapshot" + (apiKey ? ("&apiKey=" + encodeURIComponent(apiKey)) : "");
 
   try{
-    toast("Buscando snapshot…");
+    toast("Buscando snapshotÔÇª");
     const res = await fetch(url, { method:"GET", cache:"no-store", mode:"cors" });
     const txt = await res.text();
 
@@ -2649,7 +2656,7 @@ async function fetchLatestSnapshotFromSheet(){
       // Si no pudimos parsear, igual lo dejamos como texto en el textarea para copia manual
       const ta = document.querySelector("#restoreSnapText");
       if(ta) ta.value = txt;
-      alert("No pude detectar un snapshot JSON automático. Igual pegué la respuesta en el cuadro para que lo revises.");
+      alert("No pude detectar un snapshot JSON autom├ítico. Igual pegu├® la respuesta en el cuadro para que lo revises.");
       return;
     }
 
@@ -2657,17 +2664,17 @@ async function fetchLatestSnapshotFromSheet(){
     const ta = document.querySelector("#restoreSnapText");
     if(ta) ta.value = pretty;
 
-    toast("Snapshot cargado ✅");
+    toast("Snapshot cargado Ô£à");
   }catch(e){
     console.warn("fetchLatestSnapshotFromSheet failed", e);
     alert(
       "No pude leer el snapshot desde el Sheet.\n\n" +
       "Causas comunes:\n" +
-      "• Tu Apps Script no está devolviendo CORS (Access-Control-Allow-Origin)\n" +
-      "• El Web App requiere autenticación\n\n" +
-      "Solución rápida:\n" +
-      "1) Abre el Apps Script URL en una pestaña y copia el JSON\n" +
-      "2) Pégalo aquí y dale Restaurar"
+      "ÔÇó Tu Apps Script no est├í devolviendo CORS (Access-Control-Allow-Origin)\n" +
+      "ÔÇó El Web App requiere autenticaci├│n\n\n" +
+      "Soluci├│n r├ípida:\n" +
+      "1) Abre el Apps Script URL en una pesta├▒a y copia el JSON\n" +
+      "2) P├®galo aqu├¡ y dale Restaurar"
     );
   }
 }
@@ -2683,21 +2690,21 @@ function bottomNav(){
   `;
 
   const mkMore = () => `
-    <button class="bn ${(["reminders","calendar","learn","settings"].includes(state.tab) || state.moreOpen) ? "active" : ""}" data-more="1" aria-label="Más">
-      <div class="bnIcon">⋯</div>
-      <div class="bnLabel">Más</div>
+    <button class="bn ${(["reminders","calendar","learn","settings"].includes(state.tab) || state.moreOpen) ? "active" : ""}" data-more="1" aria-label="M├ís">
+      <div class="bnIcon">Ôï»</div>
+      <div class="bnLabel">M├ís</div>
     </button>
   `;
 
   return `
     <nav class="bottomNav" role="navigation" aria-label="MemoryCarl navigation">
-      ${mk("home","🏠","Home")}
-      ${mk("neurochat","🧠","NeuroChat")}
-      ${/* mk("semana","🍽️","Semana") — comentado para dar paso a NeuroChat */ ""}
-      ${mk("house","🧹","Casa")}
-      ${mk("routines","📝","Rutinas")}
-      ${mk("shopping","🛒","Compras")}
-      ${mk("finance","💰","Finanzas")}
+      ${mk("home","­ƒÅá","Home")}
+      ${mk("neurochat","­ƒºá","NeuroChat")}
+      ${/* mk("semana","­ƒì¢´©Å","Semana") ÔÇö comentado para dar paso a NeuroChat */ ""}
+      ${mk("house","­ƒº╣","Casa")}
+      ${mk("routines","­ƒôØ","Rutinas")}
+      ${mk("shopping","­ƒøÆ","Compras")}
+      ${mk("finance","­ƒÆ░","Finanzas")}
       ${mkMore()}
     </nav>
   `;
@@ -2713,26 +2720,26 @@ function renderMoreModal(){
           ${sub ? `<div class="muted" style="margin-top:2px;">${escapeHtml(sub)}</div>` : ``}
         </div>
       </div>
-      <div class="muted">›</div>
+      <div class="muted">ÔÇ║</div>
     </button>
   `;
 
   return `
-    <div class="modalBackdrop" id="moreBackdrop" aria-label="Más">
+    <div class="modalBackdrop" id="moreBackdrop" aria-label="M├ís">
       <div class="modal">
         <div class="row" style="justify-content:space-between;align-items:center;">
-          <h2 style="margin:0;">Más</h2>
+          <h2 style="margin:0;">M├ís</h2>
           <button class="iconBtn" id="btnMoreClose">Cerrar</button>
         </div>
 
         <div class="list" style="margin-top:12px;">
-          ${mk("reminders","⏰","Reminders","Pendientes + notifs")}
-          ${mk("calendar","📅","Calendario","Dibuja X, notas")}
-          ${mk("learn","🧠","Aprender","Mini contenido")}
-          ${mk("insights","📊","Insights","Todo por día")}
-          ${mk("football","⚽","Football Lab","Equipos, jugadores, ratings")}
-          ${mk("neurochat","💬","NeuroChat","Conversación con memoria viva")}
-          ${mk("settings","⚙️","Ajustes","Backup, sync, etc")}
+          ${mk("reminders","ÔÅ░","Reminders","Pendientes + notifs")}
+          ${mk("calendar","­ƒôà","Calendario","Dibuja X, notas")}
+          ${mk("learn","­ƒºá","Aprender","Mini contenido")}
+          ${mk("insights","­ƒôè","Insights","Todo por d├¡a")}
+          ${mk("football","ÔÜ¢","Football Lab","Equipos, jugadores, ratings")}
+          ${mk("neurochat","­ƒÆ¼","NeuroChat","Conversaci├│n con memoria viva")}
+          ${mk("settings","ÔÜÖ´©Å","Ajustes","Backup, sync, etc")}
         </div>
       </div>
     </div>
@@ -2751,7 +2758,7 @@ function view(){
       <header class="header">
         <div class="brand">
           <h1>MemoryCarl</h1>
-          <div class="pill">local • phone-first</div>
+          <div class="pill">local ÔÇó phone-first</div>
         </div>
       </header>
 
@@ -2782,7 +2789,7 @@ function view(){
           <div class="handleBar" aria-hidden="true"></div>
           <div class="sheetHandleRow">
             <div class="sheetTitle">Acciones</div>
-            <button class="iconBtn" id="sheetToggle" aria-label="Toggle actions panel">▴</button>
+            <button class="iconBtn" id="sheetToggle" aria-label="Toggle actions panel">Ôû┤</button>
           </div>
         </div>
         <div class="sheetBody">
@@ -2832,7 +2839,7 @@ function view(){
         const payload = JSON.stringify({ exportedAt: Date.now(), log }, null, 2);
         try{
           await navigator.clipboard.writeText(payload);
-          if(typeof toast==="function") toast("JSON copiado ✅");
+          if(typeof toast==="function") toast("JSON copiado Ô£à");
         }catch(e){
           // Fallback
           try{
@@ -2842,7 +2849,7 @@ function view(){
             ta.select();
             document.execCommand("copy");
             ta.remove();
-            if(typeof toast==="function") toast("JSON copiado ✅");
+            if(typeof toast==="function") toast("JSON copiado Ô£à");
           }catch(_e){
             alert("No pude copiar. Abre consola y usa getAiLog()");
           }
@@ -2865,7 +2872,7 @@ function view(){
         a.click();
         a.remove();
         setTimeout(()=>URL.revokeObjectURL(url), 1500);
-        try{ if(typeof toast==="function") toast("Descargando… 📦"); }catch(e){}
+        try{ if(typeof toast==="function") toast("DescargandoÔÇª ­ƒôª"); }catch(e){}
       });
     }
 
@@ -2873,14 +2880,14 @@ function view(){
     if(btnReset){
       btnReset.addEventListener("click", ()=>{
         resetNeuroAiCallsToday();
-        try{ if(typeof toast==="function") toast("Contador reseteado (hoy) ✅"); }catch(e){}
+        try{ if(typeof toast==="function") toast("Contador reseteado (hoy) Ô£à"); }catch(e){}
         view();
       });
     }
 
     const semanaKeyInp = root.querySelector("#semanaGeminiApiKey");
 
-    // ── Supabase Sync buttons ────────────────────────────────
+    // ÔöÇÔöÇ Supabase Sync buttons ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
     const btnSaveKey = root.querySelector("#supabaseSaveKey");
     if (btnSaveKey) {
       btnSaveKey.addEventListener("click", () => {
@@ -2888,7 +2895,7 @@ function view(){
         const k = (inp?.value || "").trim();
         setSyncApiKey(k);
         view();
-        try { if(typeof toast === "function") toast(k ? "🔑 API Key guardada ✅" : "🗑️ API Key eliminada"); } catch(e) {}
+        try { if(typeof toast === "function") toast(k ? "­ƒöæ API Key guardada Ô£à" : "­ƒùæ´©Å API Key eliminada"); } catch(e) {}
       });
     }
 
@@ -2912,7 +2919,7 @@ function view(){
         window.financeCheckSupabase();
       });
     }
-    // ────────────────────────────────────────────────────────
+    // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 
     const btnSemanaKeySave = root.querySelector("#btnSemanaGeminiSave");
@@ -2928,7 +2935,7 @@ function view(){
           try{ toast("No pude guardar la key (sin espacio local)."); }catch(_e){}
           return;
         }
-        try{ toast(next ? "API key de Semana guardada ✅" : "API key de Semana vaciada"); }catch(_e){}
+        try{ toast(next ? "API key de Semana guardada Ô£à" : "API key de Semana vaciada"); }catch(_e){}
       });
     }
     if(btnSemanaKeyClear){
@@ -2939,7 +2946,7 @@ function view(){
           try{ toast("No pude limpiar la key (sin espacio local)."); }catch(_e){}
           return;
         }
-        try{ toast("API key de Semana eliminada 🧽"); }catch(_e){}
+        try{ toast("API key de Semana eliminada ­ƒº¢"); }catch(_e){}
       });
     }
 
@@ -2957,10 +2964,10 @@ function view(){
       try{
         const txt = await f.text();
         if(taNatal) taNatal.value = txt;
-        try{ toast("JSON cargado. Dale Guardar ✅"); }catch(_e){}
+        try{ toast("JSON cargado. Dale Guardar Ô£à"); }catch(_e){}
       }catch(err){
         console.warn("Natal file read failed", err);
-        try{ toast("No pude leer ese archivo 😅"); }catch(_e){}
+        try{ toast("No pude leer ese archivo ­ƒÿà"); }catch(_e){}
       }
       e.target.value = "";
     });
@@ -2970,7 +2977,7 @@ function view(){
     if(btnNatalSave) btnNatalSave.addEventListener("click", ()=>{
       const raw = (taNatal && taNatal.value) ? taNatal.value.trim() : "";
       if(!raw){
-        try{ toast("Pega un JSON primero ✍️"); }catch(_e){}
+        try{ toast("Pega un JSON primero Ô£ì´©Å"); }catch(_e){}
         return;
       }
       try{
@@ -2978,11 +2985,11 @@ function view(){
         const ok = saveNatalChart(parsed);
         if(!ok) throw new Error("save failed");
         refreshGlobalSignals();
-        if(chipNatal) chipNatal.textContent = "Carta ✅";
-        try{ toast("Carta guardada ✅"); }catch(_e){}
+        if(chipNatal) chipNatal.textContent = "Carta Ô£à";
+        try{ toast("Carta guardada Ô£à"); }catch(_e){}
       }catch(err){
         console.warn("Natal JSON invalid", err);
-        alert("JSON inválido. Revisa comas, llaves y comillas.");
+        alert("JSON inv├ílido. Revisa comas, llaves y comillas.");
       }
     });
 
@@ -2990,7 +2997,7 @@ function view(){
     if(btnNatalDl) btnNatalDl.addEventListener("click", ()=>{
       const natal = loadNatalChart();
       if(!natal){
-        try{ toast("Aún no hay carta guardada"); }catch(_e){}
+        try{ toast("A├║n no hay carta guardada"); }catch(_e){}
         return;
       }
       const payload = JSON.stringify(natal, null, 2);
@@ -3012,18 +3019,18 @@ function view(){
       refreshGlobalSignals();
       if(chipNatal) chipNatal.textContent = "Sin carta";
       if(taNatal) taNatal.value = "";
-      try{ toast("Reseteado 🧽"); }catch(_e){}
+      try{ toast("Reseteado ­ƒº¢"); }catch(_e){}
     });
 
     const btnAstroRefresh = root.querySelector("#btnAstroRefresh");
     if(btnAstroRefresh) btnAstroRefresh.addEventListener("click", async ()=>{
       const sig = refreshGlobalSignals();
       const label = root.querySelector("#astroTodayLabel");
-      if(label) label.textContent = `${sig.moon_phase_name} • Luna en ${sig.moon_sign}`;
+      if(label) label.textContent = `${sig.moon_phase_name} ÔÇó Luna en ${sig.moon_sign}`;
       const tlabel = root.querySelector("#astroTransitLabel");
       if(tlabel) tlabel.textContent = sig.transit_top || "";
       await refreshSwissTransitsUI({ forceSpeak:false });
-      try{ toast("Listo 🌙"); }catch(_e){}
+      try{ toast("Listo ­ƒîÖ"); }catch(_e){}
     });
 
     const btnAstroTestBubble = root.querySelector("#btnAstroTestBubble");
@@ -3033,7 +3040,7 @@ function view(){
       if(el){
         el.dispatchEvent(new MouseEvent("click", { bubbles:true }));
       }else{
-        alert("No encontré Bubble en pantalla. Vuelve a Home y asegúrate que aparece.");
+        alert("No encontr├® Bubble en pantalla. Vuelve a Home y aseg├║rate que aparece.");
       }
 
     });
@@ -3055,7 +3062,7 @@ function view(){
         try{ localStorage.setItem(LS.bubbleFreqMin, v); }catch(e){}
         // legacy key
         try{ localStorage.setItem("mc_bubble_cooldown_min", v); }catch(e){}
-        try{ if(typeof toast==="function") toast("Bubble actualizado 🫧"); }catch(e){}
+        try{ if(typeof toast==="function") toast("Bubble actualizado ­ƒ½º"); }catch(e){}
       });
     }
 
@@ -3068,7 +3075,7 @@ function view(){
     }
     if(swissStatus){
       swissStatus.textContent = swissTransitsAvailable()
-        ? "Swiss listo ✅"
+        ? "Swiss listo Ô£à"
         : "Swiss: configura Swiss Astro URL+Key";
     }
     if(btnProvSave) btnProvSave.addEventListener("click", async ()=>{
@@ -3093,7 +3100,7 @@ function view(){
         const chip = root.querySelector("#chipTransitEngine");
         if(chip) chip.textContent = "lite_v1";
       }
-      try{ toast("Motor guardado ✅"); }catch(_e){}
+      try{ toast("Motor guardado Ô£à"); }catch(_e){}
     });
 
     const btnSwissPing = root.querySelector("#btnAstroSwissPing");
@@ -3118,7 +3125,7 @@ function view(){
     });
   }
 
-// Insights day modal wiring — now handled inside openInsightsDayOverlay() DOM overlay
+// Insights day modal wiring ÔÇö now handled inside openInsightsDayOverlay() DOM overlay
 
   
   // NeuroClaw wiring (Home + Debug modal)
@@ -3142,7 +3149,7 @@ function view(){
         state.neuroclawFeedback = Array.isArray(state.neuroclawFeedback) ? state.neuroclawFeedback : [];
         state.neuroclawFeedback.push({ id, rate, ts: Date.now() });
         persist();
-        try{ toast(rate==="up" ? "Guardado 👍" : "Guardado 👎"); }catch(e){}
+        try{ toast(rate==="up" ? "Guardado ­ƒæì" : "Guardado ­ƒæÄ"); }catch(e){}
       });
     });
   }
@@ -3160,10 +3167,10 @@ function view(){
       try{
         const sig = state.neuroclawLast?.signals || {};
         await navigator.clipboard.writeText(JSON.stringify(sig, null, 2));
-        try{ toast("Señales copiadas ✅"); }catch(e){}
+        try{ toast("Se├▒ales copiadas Ô£à"); }catch(e){}
       }catch(e){
         console.warn("Clipboard failed", e);
-        try{ toast("No pude copiar 😅"); }catch(_){}
+        try{ toast("No pude copiar ­ƒÿà"); }catch(_){}
       }
     });
   }
@@ -3246,7 +3253,7 @@ function view(){
           });
           
           if (deductedMsgs.length > 0) {
-            toast(`Chef AI descontó de inventario: ${deductedMsgs.join(", ")}`);
+            toast(`Chef AI descont├│ de inventario: ${deductedMsgs.join(", ")}`);
           }
         }
         
@@ -3273,7 +3280,7 @@ function view(){
     }
     if(btnClear){
       btnClear.addEventListener("click", () => {
-        if(confirm("¿Borrar el historial del Chef AI? Perderás el contexto de la conversación.")){
+        if(confirm("┬┐Borrar el historial del Chef AI? Perder├ís el contexto de la conversaci├│n.")){
           state.shoppingAiChat = [];
           state.shoppingAiDayDate = "";
           persist();
@@ -3283,7 +3290,7 @@ function view(){
     }
     if(btnCloseDay){
       btnCloseDay.addEventListener("click", async () => {
-        if(!confirm("¿Cerrar el registro de este día y guardarlo en el historial?")) return;
+        if(!confirm("┬┐Cerrar el registro de este d├¡a y guardarlo en el historial?")) return;
         
         const btn = btnCloseDay;
         const oldText = btn.innerHTML;
@@ -3313,11 +3320,11 @@ function view(){
           state.shoppingAiDayDate = "";
           persist();
           
-          toast("Día cerrado y guardado en el Historial ✅");
+          toast("D├¡a cerrado y guardado en el Historial Ô£à");
           state.shoppingSubtab = "history";
           view();
         } catch(e) {
-          alert("Error al cerrar el día: " + e.message);
+          alert("Error al cerrar el d├¡a: " + e.message);
           btn.innerHTML = oldText;
           btn.disabled = false;
         }
@@ -3342,7 +3349,7 @@ function view(){
         if(day){
           day.editedNotes = txta.value.trim();
           persist();
-          toast("Notas guardadas ✅");
+          toast("Notas guardadas Ô£à");
         }
       });
     });
@@ -3430,7 +3437,7 @@ function view(){
   const btnMergeCfgReset = root.querySelector("#btnMergeCfgReset");
   if(btnMergeCfgReset) btnMergeCfgReset.addEventListener("click", ()=>{
     localStorage.removeItem("mc_merge_cfg_override");
-    toast("🧽 Merge config reseteada");
+    toast("­ƒº¢ Merge config reseteada");
   });
 
 
@@ -3447,7 +3454,7 @@ if(btnMergeSprites) btnMergeSprites.addEventListener("click", openMergeSpriteMan
 const btnMergeSpritesReset = root.querySelector("#btnMergeSpritesReset");
 if(btnMergeSpritesReset) btnMergeSpritesReset.addEventListener("click", async ()=>{
   await mcSpriteIdbClear();
-  toast("🧽 Sprites reseteados");
+  toast("­ƒº¢ Sprites reseteados");
 });
 
 const btnMergeBestReset = root.querySelector("#btnMergeBestReset");
@@ -3455,7 +3462,7 @@ if(btnMergeBestReset) btnMergeBestReset.addEventListener("click", ()=>{
   localStorage.removeItem("mc_merge_best_score");
   const el = root.querySelector("#mcMergeBestSettingsVal");
   if(el) el.textContent = "0";
-  toast("🧽 Best reseteado");
+  toast("­ƒº¢ Best reseteado");
 });
 
 
@@ -3512,7 +3519,7 @@ const btnExport = root.querySelector("#btnExport");
   if(btnClearSnap) btnClearSnap.addEventListener("click", ()=>{
     const ta = root.querySelector("#restoreSnapText");
     if(ta) ta.value = "";
-    try{ toast("Limpio ✅"); }catch(e){}
+    try{ toast("Limpio Ô£à"); }catch(e){}
   });
 
   const btnFetchSnap = root.querySelector("#btnFetchLatestSnap");
@@ -3528,7 +3535,7 @@ const btnExport = root.querySelector("#btnExport");
     openSyncConfig();
     const lbl = root.querySelector("#syncCfgLabel");
     if(lbl) lbl.textContent = syncCfgLabelText();
-    toast("Sync guardado ✅");
+    toast("Sync guardado Ô£à");
   });
 
   const syncLbl = root.querySelector("#syncCfgLabel");
@@ -3582,12 +3589,12 @@ const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`)
       <div class="row" style="justify-content:space-between;align-items:center;">
         <div>
           <h2 style="margin:0;">Insights</h2>
-          <div class="muted">Calendario global. Click en un día para ver todo.</div>
+          <div class="muted">Calendario global. Click en un d├¡a para ver todo.</div>
         </div>
         <div class="row" style="gap:8px;">
-          <button class="btn ghost" id="btnInsPrev">‹</button>
+          <button class="btn ghost" id="btnInsPrev">ÔÇ╣</button>
           <div class="pill" style="min-width:160px;text-align:center;">${escapeHtml(monthLabel)}</div>
-          <button class="btn ghost" id="btnInsNext">›</button>
+          <button class="btn ghost" id="btnInsNext">ÔÇ║</button>
         </div>
       </div>
 
@@ -3599,17 +3606,17 @@ const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`)
             <div class="muted">Estado del mes</div>
             <div style="font-weight:800;">Pulso diario (informativo)</div>
           </div>
-          <div class="pill small">Mood • Sueño • Tasks • Limpieza • Compras</div>
+          <div class="pill small">Mood ÔÇó Sue├▒o ÔÇó Tasks ÔÇó Limpieza ÔÇó Compras</div>
         </div>
         <canvas id="insightsMonthChart" height="110"></canvas>
       </div>
 
 
       <div class="row" style="justify-content:space-between;align-items:center;margin-top:10px;">
-        <div class="chip">🔥 Heatmap</div>
+        <div class="chip">­ƒöÑ Heatmap</div>
         <select id="insHeatMode" class="input" style="max-width:220px" onchange="insightsSetHeatMode(this.value)">
           <option value="pulse" ${window.INS_HEAT_MODE==="pulse"?"selected":""}>Pulso</option>
-          <option value="sleep" ${window.INS_HEAT_MODE==="sleep"?"selected":""}>Sueño</option>
+          <option value="sleep" ${window.INS_HEAT_MODE==="sleep"?"selected":""}>Sue├▒o</option>
           <option value="tasks" ${window.INS_HEAT_MODE==="tasks"?"selected":""}>Tasks</option>
           <option value="clean" ${window.INS_HEAT_MODE==="clean"?"selected":""}>Limpieza</option>
           <option value="shop" ${window.INS_HEAT_MODE==="shop"?"selected":""}>Compras</option>
@@ -3622,8 +3629,8 @@ const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`)
           if(c.blank) return `<div class="calDay blank"></div>`;
           const icons = buildInsightIcons(c.sum);
           const dna = buildInsightDNA(c.sum);
-          const moneyStr = (c.sum && c.sum.shopping && c.sum.shopping.total>0) ? `<div class="calMini money">🛒 ${money(c.sum.shopping.total)}</div>` : ``;
-          const cleanStr = (c.sum && c.sum.cleaning && c.sum.cleaning.totalMinutes>0) ? `<div class="calMini">🧹 ${Math.round(c.sum.cleaning.totalMinutes)}m</div>` : ``;
+          const moneyStr = (c.sum && c.sum.shopping && c.sum.shopping.total>0) ? `<div class="calMini money">­ƒøÆ ${money(c.sum.shopping.total)}</div>` : ``;
+          const cleanStr = (c.sum && c.sum.cleaning && c.sum.cleaning.totalMinutes>0) ? `<div class="calMini">­ƒº╣ ${Math.round(c.sum.cleaning.totalMinutes)}m</div>` : ``;
           const heat = insightHeat(c.sum, window.INS_HEAT_MODE, mctx);
           return `
             <button class="calDay ${c.isToday?"today":""} ${heat>0?"heat":""}" style="--heat:${heat.toFixed(3)}" data-ins-day="${c.iso}">
@@ -3643,11 +3650,11 @@ const wk = ["L","M","X","J","V","S","D"].map(x=>`<div class="calWk">${x}</div>`)
 function buildInsightIcons(sum){
   if(!sum) return "";
   let out = "";
-  if(sum.mood && sum.mood.spriteId) out += "🙂";
-  if(sum.sleep && sum.sleep.totalMinutes) out += "😴";
-  if(sum.shopping && sum.shopping.total>0) out += "🛒";
-  if(sum.reminders && (sum.reminders.total>0)) out += "⏰";
-  if(sum.cleaning && sum.cleaning.count>0) out += "🧹";
+  if(sum.mood && sum.mood.spriteId) out += "­ƒÖé";
+  if(sum.sleep && sum.sleep.totalMinutes) out += "­ƒÿ┤";
+  if(sum.shopping && sum.shopping.total>0) out += "­ƒøÆ";
+  if(sum.reminders && (sum.reminders.total>0)) out += "ÔÅ░";
+  if(sum.cleaning && sum.cleaning.count>0) out += "­ƒº╣";
   return out ? `<span>${out}</span>` : "";
 }
 
@@ -3694,13 +3701,13 @@ function buildInsightDNA(sum){
   if(!sum) return "";
   const v = insightVector(sum);
   const bars = [
-    {k:"mood", em:"🙂", v:v.mood},
-    {k:"sleep", em:"😴", v:v.sleep},
-    {k:"tasks", em:"✅", v:v.tasks},
-    {k:"clean", em:"🧹", v:v.cleaning},
-    {k:"shop", em:"🛒", v:v.shopping},
+    {k:"mood", em:"­ƒÖé", v:v.mood},
+    {k:"sleep", em:"­ƒÿ┤", v:v.sleep},
+    {k:"tasks", em:"Ô£à", v:v.tasks},
+    {k:"clean", em:"­ƒº╣", v:v.cleaning},
+    {k:"shop", em:"­ƒøÆ", v:v.shopping},
   ];
-  return `<div class="dna" aria-label="ADN del día">
+  return `<div class="dna" aria-label="ADN del d├¡a">
     ${bars.map(b=>`<i class="dnaBar dna-${b.k}" style="--h:${Math.round(b.v)}" title="${b.em} ${Math.round(b.v)}"></i>`).join("")}
   </div>`;
 }
@@ -3910,9 +3917,9 @@ function insightsDrawRadar(){
   _insightsRadarChart = new Chart(canvas.getContext("2d"), {
     type: "radar",
     data: {
-      labels: ["Mood","Sueño","Tasks","Limpieza","Compras"],
+      labels: ["Mood","Sue├▒o","Tasks","Limpieza","Compras"],
       datasets: [{
-        label: "Día",
+        label: "D├¡a",
         data: [v.mood, v.sleep, v.tasks, v.cleaning, v.shopping],
         borderWidth: 2,
         pointRadius: 2.8,
@@ -4035,10 +4042,10 @@ function openInsightsDayOverlay(iso){
   };
 
   const sleepStr = sum.sleep
-    ? `${(Math.round((Number(sum.sleep.totalMinutes)||0)/6)/10).toFixed(1)}h` + (sum.sleep.quality ? ` · Q${sum.sleep.quality}/5` : "")
+    ? `${(Math.round((Number(sum.sleep.totalMinutes)||0)/6)/10).toFixed(1)}h` + (sum.sleep.quality ? ` ┬À Q${sum.sleep.quality}/5` : "")
     : null;
 
-  const dreamStr = sum.sleep && sum.sleep.narrative ? sum.sleep.narrative.slice(0,120) + (sum.sleep.narrative.length>120?"…":"") : null;
+  const dreamStr = sum.sleep && sum.sleep.narrative ? sum.sleep.narrative.slice(0,120) + (sum.sleep.narrative.length>120?"ÔÇª":"") : null;
   const dreamType = sum.sleep && sum.sleep.dreamType ? sum.sleep.dreamType : null;
 
   const shopList = sum.shopping?.items || [];
@@ -4068,38 +4075,38 @@ function openInsightsDayOverlay(iso){
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
       <div>
-        <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(124,92,255,0.8);margin-bottom:4px;font-family:'JetBrains Mono',monospace;">📅 TODO POR DÍA</div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(124,92,255,0.8);margin-bottom:4px;font-family:'JetBrains Mono',monospace;">­ƒôà TODO POR D├ìA</div>
         <div style="font-size:24px;font-weight:900;color:#fff;font-family:'Bebas Neue',sans-serif;letter-spacing:1px;">${iso}</div>
       </div>
-      <button id="insOverlayClose" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);border-radius:10px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;">✕ Cerrar</button>
+      <button id="insOverlayClose" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);border-radius:10px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;">Ô£ò Cerrar</button>
     </div>
 
-    ${!hasData ? `<div style="text-align:center;padding:30px 0;color:rgba(255,255,255,0.3);font-size:14px;">Sin actividad registrada este día 🌙</div>` : ""}
+    ${!hasData ? `<div style="text-align:center;padding:30px 0;color:rgba(255,255,255,0.3);font-size:14px;">Sin actividad registrada este d├¡a ­ƒîÖ</div>` : ""}
 
-    ${sum.mood ? section("🙂", "Estado de ánimo",
-      chip("Emoción", getMoodLabel()) +
-      chip("Energía", sum.mood.energy ? `${sum.mood.energy}/5` : null) +
+    ${sum.mood ? section("­ƒÖé", "Estado de ├ínimo",
+      chip("Emoci├│n", getMoodLabel()) +
+      chip("Energ├¡a", sum.mood.energy ? `${sum.mood.energy}/5` : null) +
       (sum.mood.note ? `<div style="padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:10px;border:1px solid rgba(255,255,255,0.07);font-size:12px;color:rgba(255,255,255,0.6);margin-top:4px;">${escapeHtml(sum.mood.note)}</div>` : "")
     ) : ""}
 
-    ${sum.sleep ? section("😴", "Sueño",
-      chip("Duración", sleepStr) +
-      chip("Tipo de sueño", dreamType) +
+    ${sum.sleep ? section("­ƒÿ┤", "Sue├▒o",
+      chip("Duraci├│n", sleepStr) +
+      chip("Tipo de sue├▒o", dreamType) +
       chip("Calidad", sum.sleep.quality ? `${sum.sleep.quality}/5` : null) +
-      chip("Claridad lúcida", sum.sleep.clarity ? `${sum.sleep.clarity}/5` : null) +
-      (sum.sleep.lucidMoment ? `<div style="padding:6px 12px;background:rgba(124,92,255,0.1);border-radius:8px;border:1px solid rgba(124,92,255,0.3);font-size:12px;color:rgba(124,92,255,0.9);margin-bottom:6px;">✨ Sueño lúcido</div>` : "") +
+      chip("Claridad l├║cida", sum.sleep.clarity ? `${sum.sleep.clarity}/5` : null) +
+      (sum.sleep.lucidMoment ? `<div style="padding:6px 12px;background:rgba(124,92,255,0.1);border-radius:8px;border:1px solid rgba(124,92,255,0.3);font-size:12px;color:rgba(124,92,255,0.9);margin-bottom:6px;">Ô£¿ Sue├▒o l├║cido</div>` : "") +
       (dreamStr ? `<div style="padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:10px;border:1px solid rgba(255,255,255,0.07);font-size:12px;color:rgba(255,255,255,0.6);margin-top:4px;font-style:italic;">${escapeHtml(dreamStr)}</div>` : "")
     ) : ""}
 
-    ${tarotList.length ? section("🃏", "Tarot",
+    ${tarotList.length ? section("­ƒâÅ", "Tarot",
       tarotList.map(r=>`
         <div style="padding:10px 12px;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.08);margin-bottom:6px;">
-          <div style="font-size:12px;font-weight:700;color:#fff;margin-bottom:4px;">${escapeHtml((r.cards||[]).map(c=>c.name||c).join(" · ") || "Tirada")}</div>
-          ${r.interpretation ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);line-height:1.5;">${escapeHtml(r.interpretation.slice(0,150))}${r.interpretation.length>150?"…":""}</div>` : ""}
+          <div style="font-size:12px;font-weight:700;color:#fff;margin-bottom:4px;">${escapeHtml((r.cards||[]).map(c=>c.name||c).join(" ┬À ") || "Tirada")}</div>
+          ${r.interpretation ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);line-height:1.5;">${escapeHtml(r.interpretation.slice(0,150))}${r.interpretation.length>150?"ÔÇª":""}</div>` : ""}
         </div>`).join("")
     ) : ""}
 
-    ${sum.finance ? section("💰", "Finanzas",
+    ${sum.finance ? section("­ƒÆ░", "Finanzas",
       chip("Ingresos", sum.finance.income > 0 ? money(sum.finance.income) : null) +
       chip("Gastos", sum.finance.expense > 0 ? money(sum.finance.expense) : null) +
       financeItems.slice(0,5).map(t=>`
@@ -4109,7 +4116,7 @@ function openInsightsDayOverlay(iso){
         </div>`).join("")
     ) : ""}
 
-    ${shopList.length ? section("🛒", "Compras",
+    ${shopList.length ? section("­ƒøÆ", "Compras",
       shopList.slice(0,6).map(h=>`
         <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.08);margin-bottom:6px;">
           <span style="color:rgba(255,255,255,0.8);font-size:13px;">${escapeHtml(h.store||"")}</span>
@@ -4117,10 +4124,10 @@ function openInsightsDayOverlay(iso){
         </div>`).join("")
     ) : ""}
 
-    ${cleanList.length ? section("🧹", "Limpieza",
+    ${cleanList.length ? section("­ƒº╣", "Limpieza",
       cleanList.map(s=>`
         <div style="display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.08);margin-bottom:6px;">
-          <span style="color:rgba(255,255,255,0.8);font-size:13px;">${escapeHtml(String(s.status||"Sesión"))}</span>
+          <span style="color:rgba(255,255,255,0.8);font-size:13px;">${escapeHtml(String(s.status||"Sesi├│n"))}</span>
           <span style="color:rgba(255,255,255,0.6);font-size:12px;">${Math.round((Number(s.totalSec)||0)/60)} min</span>
         </div>`).join("")
     ) : ""}
@@ -4161,13 +4168,13 @@ function renderHouseHistoryModal(){
     <div class="modalBackdrop" id="houseHistoryBackdrop" aria-label="Historial de casa">
       <div class="modal">
         <div class="row" style="justify-content:space-between;align-items:center;">
-          <h2 style="margin:0;">Historial 🧹</h2>
+          <h2 style="margin:0;">Historial ­ƒº╣</h2>
           <div class="row" style="gap:8px;">
             <button class="btn danger" data-house-history-clear="1">Borrar</button>
             <button class="iconBtn" id="btnHouseHistoryClose">Cerrar</button>
           </div>
         </div>
-        <div class="muted" style="margin-top:6px;">Últimas sesiones guardadas (local).</div>
+        <div class="muted" style="margin-top:6px;">├Ültimas sesiones guardadas (local).</div>
 
         <div class="list" style="margin-top:12px;">
           ${dates.length ? dates.map(d=>{
@@ -4176,12 +4183,12 @@ function renderHouseHistoryModal(){
             return `
               <div class="item" style="align-items:flex-start;">
                 <div class="left">
-                  <div class="name">${escapeHtml(d)} • <b>${Math.round(totalMin)} min</b></div>
+                  <div class="name">${escapeHtml(d)} ÔÇó <b>${Math.round(totalMin)} min</b></div>
                   <div class="meta">${rows.length} sesiones</div>
                 </div>
               </div>
             `;
-          }).join("") : `<div class="muted">Aún no hay historial.</div>`}
+          }).join("") : `<div class="muted">A├║n no hay historial.</div>`}
         </div>
       </div>
     </div>
@@ -4191,23 +4198,23 @@ function renderHouseHistoryModal(){
 function viewSettings(){
   const token = localStorage.getItem("memorycarl_fcm_token") || "";
   const perm = (window.Notification && Notification.permission) ? Notification.permission : "unsupported";
-  const permLabel = perm === "granted" ? "Enabled ✅" : (perm === "denied" ? "Blocked ⛔" : (perm === "default" ? "Not enabled" : "Unsupported"));
-  const tokenLabel = token ? `${token.slice(0,18)}…${token.slice(-10)}` : "No token yet";
+  const permLabel = perm === "granted" ? "Enabled Ô£à" : (perm === "denied" ? "Blocked Ôøö" : (perm === "default" ? "Not enabled" : "Unsupported"));
+  const tokenLabel = token ? `${token.slice(0,18)}ÔÇª${token.slice(-10)}` : "No token yet";
 
   return `
     <div class="sectionTitle">
       <div>Ajustes</div>
-      <div class="chip">backup • notifs • datos</div>
+      <div class="chip">backup ÔÇó notifs ÔÇó datos</div>
     </div>
 
     <div class="card" style="border:1px solid rgba(52,211,153,.3);background:rgba(52,211,153,.04);">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">☁️ Sincronización con Supabase</h2>
+          <h2 class="cardTitle">Ôÿü´©Å Sincronizaci├│n con Supabase</h2>
           <div class="small">Guarda tus finanzas en la nube para que nunca se pierdan.</div>
         </div>
         <div id="supabaseSyncStatus" class="chip" style="background:rgba(52,211,153,.15);color:#34d399;">
-          ${getSyncApiKey() ? '🟢 Key activa' : '⚪ Sin key'}
+          ${getSyncApiKey() ? '­ƒƒó Key activa' : 'ÔÜ¬ Sin key'}
         </div>
       </div>
       <div class="hr"></div>
@@ -4227,13 +4234,13 @@ function viewSettings(){
 
       <div class="btnRow" style="gap:8px;flex-wrap:wrap;">
         <button id="btnSupabasePush" style="flex:1;min-width:100px;padding:10px;background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:13px;cursor:pointer;font-weight:700;">
-          📤 Subir a Nube
+          ­ƒôñ Subir a Nube
         </button>
         <button id="btnSupabasePull" style="flex:1;min-width:100px;padding:10px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:13px;cursor:pointer;font-weight:700;">
-          📥 Descargar Nube
+          ­ƒôÑ Descargar Nube
         </button>
         <button id="btnSupabaseCheck" style="flex:1;min-width:100px;padding:10px;background:rgba(251,191,36,.1);color:#fbbf24;border:1px solid rgba(251,191,36,.25);border-radius:8px;font-size:13px;cursor:pointer;font-weight:700;">
-          🔍 Verificar Nube
+          ­ƒöì Verificar Nube
         </button>
       </div>
     </div>
@@ -4242,14 +4249,14 @@ function viewSettings(){
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">NeuroClaw AI</h2>
-          <div class="small">Controla cuántas llamadas haces a Gemini y guarda el JSON para aprendizaje.</div>
+          <div class="small">Controla cu├íntas llamadas haces a Gemini y guarda el JSON para aprendizaje.</div>
         </div>
         <div class="chip">${getNeuroAiCallsToday()}/3 hoy</div>
       </div>
       <div class="hr"></div>
       <div class="kv">
-        <div class="k">Límite diario</div>
-        <div class="v">3 llamadas/día (manual)</div>
+        <div class="k">L├¡mite diario</div>
+        <div class="v">3 llamadas/d├¡a (manual)</div>
       </div>
       <div class="kv">
         <div class="k">Llamadas hoy</div>
@@ -4275,7 +4282,7 @@ function viewSettings(){
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">Semana IA (Gemini)</h2>
-          <div class="small">API key usada por “Plan IA” en la pestaña Semana.</div>
+          <div class="small">API key usada por ÔÇ£Plan IAÔÇØ en la pesta├▒a Semana.</div>
         </div>
       </div>
       <div class="hr"></div>
@@ -4290,29 +4297,29 @@ function viewSettings(){
         <button class="btn ghost" id="btnSemanaGeminiClear">Limpiar</button>
       </div>
       <div class="small" style="margin-top:10px;opacity:.85;">
-        Si está vacía, Semana intentará usar <span class="mono">VITE_GEMINI_KEY</span> (build).
+        Si est├í vac├¡a, Semana intentar├í usar <span class="mono">VITE_GEMINI_KEY</span> (build).
       </div>
     </div>
 
     <div class="card">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Astro (Cosmic Lite) 🌙</h2>
-          <div class="small">Nivel 1 (local) + opción Swiss Ephemeris (NeuroClaw) para tránsitos precisos.</div>
+          <h2 class="cardTitle">Astro (Cosmic Lite) ­ƒîÖ</h2>
+          <div class="small">Nivel 1 (local) + opci├│n Swiss Ephemeris (NeuroClaw) para tr├ínsitos precisos.</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
           <div class="chip" id="chipTransitEngine">${escapeHtml((loadSwissLast()?.transit_engine) || "lite_v1")}</div>
-          <div class="chip" id="chipNatalStatus">${loadNatalChart() ? "Carta ✅" : "Sin carta"}</div>
+          <div class="chip" id="chipNatalStatus">${loadNatalChart() ? "Carta Ô£à" : "Sin carta"}</div>
         </div>
       </div>
       <div class="hr"></div>
 
       <div class="kv">
         <div class="k">Hoy</div>
-        <div class="v"><b id="astroTodayLabel">${escapeHtml(`${getCosmicLiteSignals().moon_phase_name} • Luna en ${getCosmicLiteSignals().moon_sign}`)}</b></div>
+        <div class="v"><b id="astroTodayLabel">${escapeHtml(`${getCosmicLiteSignals().moon_phase_name} ÔÇó Luna en ${getCosmicLiteSignals().moon_sign}`)}</b></div>
       </div>
       <div class="kv">
-        <div class="k">Tránsitos</div>
+        <div class="k">Tr├ínsitos</div>
         <div class="v small"><span id="astroTransitLabel">${escapeHtml(getTransitLiteSignals().transit_top || "Activa tu carta natal para ver casas y aspectos.")}</span></div>
       </div>
 
@@ -4348,7 +4355,7 @@ function viewSettings(){
 
       <div class="hr"></div>
       <div class="small" style="margin-bottom:8px;">Carta natal (JSON)</div>
-      <textarea id="natalJsonText" class="ta mono" rows="8" placeholder='Pega aquí tu carta natal en JSON (te crearé el formato).'></textarea>
+      <textarea id="natalJsonText" class="ta mono" rows="8" placeholder='Pega aqu├¡ tu carta natal en JSON (te crear├® el formato).'></textarea>
 
       <div class="btnRow" style="margin-top:10px;flex-wrap:wrap;gap:10px;">
         <label class="btn" style="cursor:pointer;">
@@ -4375,7 +4382,7 @@ function viewSettings(){
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">Backup & Restore (Brain v2)</h2>
-          <div class="small">Exporta/Importa tu data local en JSON antes de limpiar cache o cambiar de teléfono.</div>
+          <div class="small">Exporta/Importa tu data local en JSON antes de limpiar cache o cambiar de tel├®fono.</div>
         </div>
       </div>
       <div class="hr"></div>
@@ -4384,7 +4391,7 @@ function viewSettings(){
         <div class="v">Local (este dispositivo)</div>
       </div>
       <div class="kv">
-        <div class="k">Recomendación</div>
+        <div class="k">Recomendaci├│n</div>
         <div class="v">Export semanal o antes de updates</div>
       </div>
       <div class="btnRow" style="margin-top:10px;flex-wrap:wrap;gap:10px;">
@@ -4405,8 +4412,8 @@ function viewSettings(){
     <div class="card">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">📺 Consola de Depuración</h2>
-          <div class="small">Errores y logs del sistema en tiempo real. Útil para móviles.</div>
+          <h2 class="cardTitle">­ƒô║ Consola de Depuraci├│n</h2>
+          <div class="small">Errores y logs del sistema en tiempo real. ├Ütil para m├│viles.</div>
         </div>
       </div>
       <div class="hr"></div>
@@ -4419,7 +4426,7 @@ function viewSettings(){
       </div>
       <div class="btnRow" style="margin-top:10px; display:flex; gap:10px;">
         <button class="btn ghost" onclick="document.getElementById('mcLiveConsoleLogs').innerHTML = ''; window.__mcLogs = [];">Limpiar logs</button>
-        <button class="btn" onclick="navigator.clipboard.writeText(JSON.stringify(window.__mcLogs, null, 2)).then(() => toast('Copiado ✅')).catch(() => { const ta = document.createElement('textarea'); ta.value = JSON.stringify(window.__mcLogs, null, 2); document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Copiado ✅'); });">Copiar Logs</button>
+        <button class="btn" onclick="navigator.clipboard.writeText(JSON.stringify(window.__mcLogs, null, 2)).then(() => toast('Copiado Ô£à')).catch(() => { const ta = document.createElement('textarea'); ta.value = JSON.stringify(window.__mcLogs, null, 2); document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Copiado Ô£à'); });">Copiar Logs</button>
       </div>
     </div>
 
@@ -4431,7 +4438,7 @@ function viewSettings(){
         </div>
       </div>
       <div class="hr"></div>
-      <textarea id="restoreSnapText" class="ta mono" rows="8" placeholder='Pega aquí el JSON completo (empieza con { y termina con }).'></textarea>
+      <textarea id="restoreSnapText" class="ta mono" rows="8" placeholder='Pega aqu├¡ el JSON completo (empieza con { y termina con }).'></textarea>
       <div class="row" style="margin:10px 0 0;">
         <button class="btn" id="btnRestoreFromSnap">Restaurar</button>
         <button class="btn ghost" id="btnClearSnap">Limpiar</button>
@@ -4467,7 +4474,7 @@ function viewSettings(){
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">Interfaz</h2>
-          <div class="small">Pequeños detalles para que se sienta como app.</div>
+          <div class="small">Peque├▒os detalles para que se sienta como app.</div>
         </div>
       </div>
       <div class="hr"></div>
@@ -4476,7 +4483,7 @@ function viewSettings(){
         <div class="v">Fija (modo app)</div>
       </div>
       <div class="kv">
-        <div class="k">Acciones rápidas</div>
+        <div class="k">Acciones r├ípidas</div>
         <div class="v">Se muestran abajo en este tab</div>
       </div>
     </div>
@@ -4509,7 +4516,7 @@ function viewSettings(){
     <button class="btn" id="btnMergeSpritesReset">Reset sprites</button>
   </div>
   <div class="note" style="margin-top:10px;">
-    Tip: puedes exportar/importar el pack para pasarlo al teléfono.
+    Tip: puedes exportar/importar el pack para pasarlo al tel├®fono.
   </div>
 </div>
 
@@ -4543,8 +4550,8 @@ function viewLearn(){
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center;gap:10px;">
         <div>
-          <div style="font-weight:800;">LearnQuest 🧭</div>
-          <div class="small">Aventura épica para aprender JS/DOM con niveles en JSON</div>
+          <div style="font-weight:800;">LearnQuest ­ƒº¡</div>
+          <div class="small">Aventura ├®pica para aprender JS/DOM con niveles en JSON</div>
         </div>
         <button class="btn" onclick="openLearnQuest()">Abrir</button>
       </div>
@@ -4553,8 +4560,8 @@ function viewLearn(){
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:center;gap:10px;">
         <div>
-          <div style="font-weight:800;">CalcQuest ⚡</div>
-          <div class="small">Hacker-neón: reconstruye HTML/CSS/JS y termina con una calculadora real</div>
+          <div style="font-weight:800;">CalcQuest ÔÜí</div>
+          <div class="small">Hacker-ne├│n: reconstruye HTML/CSS/JS y termina con una calculadora real</div>
         </div>
         <button class="btn" onclick="openCalcQuest()">Abrir</button>
       </div>
@@ -4562,8 +4569,8 @@ function viewLearn(){
 
     <div class="card">
       <div class="small">
-        Este módulo te hace preguntas sobre la estructura de MemoryCarl.
-        Cada respuesta puede abrir una “ficha” para que escribas tu explicación en 1 línea.
+        Este m├│dulo te hace preguntas sobre la estructura de MemoryCarl.
+        Cada respuesta puede abrir una ÔÇ£fichaÔÇØ para que escribas tu explicaci├│n en 1 l├¡nea.
       </div>
       <div class="hr"></div>
 
@@ -4577,7 +4584,7 @@ function viewLearn(){
       </div>
 
       <div class="small" style="margin-top:10px;">
-        Tip: si actualizas el quiz, solo refresca esta pestaña.
+        Tip: si actualizas el quiz, solo refresca esta pesta├▒a.
       </div>
     </div>
   `;
@@ -4592,14 +4599,14 @@ function openLearnQuest(){
   b.innerHTML = `
     <div class="modal" style="max-width:900px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <h2 style="margin:4px 0 10px;">LearnQuest 🧭</h2>
+        <h2 style="margin:4px 0 10px;">LearnQuest ­ƒº¡</h2>
         <button class="btn" id="lqCloseBtn" style="padding:8px 10px;">Cerrar</button>
       </div>
       <div class="learnFrame" style="height:75vh;">
         <iframe title="LearnQuest" src="./learnquest/" loading="lazy" referrerpolicy="no-referrer"></iframe>
       </div>
       <div class="small" style="margin-top:10px;opacity:.8;">
-        Tip: Puedes importar niveles .json desde el botón “📂 Importar nivel” dentro de LearnQuest.
+        Tip: Puedes importar niveles .json desde el bot├│n ÔÇ£­ƒôé Importar nivelÔÇØ dentro de LearnQuest.
       </div>
     </div>
   `;
@@ -4616,14 +4623,14 @@ function openCalcQuest(){
   b.innerHTML = `
     <div class="modal calcquestModal" style="max-width:1000px;max-height:90vh;overflow:auto;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <h2 style="margin:4px 0 10px;">CalcQuest ⚡</h2>
+        <h2 style="margin:4px 0 10px;">CalcQuest ÔÜí</h2>
         <button class="btn" id="cqCloseBtn" style="padding:8px 10px;">Cerrar</button>
       </div>
       <div class="learnFrame" style="height:72vh;min-height:420px;">
         <iframe title="CalcQuest" src="./calcquest/" loading="lazy" referrerpolicy="no-referrer"></iframe>
       </div>
       <div class="small" style="margin-top:10px;opacity:.8;">
-        Tip: Los niveles guardan tu código en localStorage. Usa “EXPORT” para llevarte tu calculadora a un entorno real.
+        Tip: Los niveles guardan tu c├│digo en localStorage. Usa ÔÇ£EXPORTÔÇØ para llevarte tu calculadora a un entorno real.
       </div>
     </div>
   `;
@@ -4685,7 +4692,7 @@ function normalizeSleepEntry(e){
 }
 
 // ====================== MOOD SPRITES (Daily Emotion) ======================
-// ── Mood SVG Faces ──────────────────────────────────────────────────────────
+// ÔöÇÔöÇ Mood SVG Faces ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Color palette per emotion
 const _MOOD_COLORS = {
   incredible: { bg:"#FFCE47", ring:"#F5A800", pupil:"#1C1433", shine:"#fff" },
@@ -4783,7 +4790,7 @@ function _getMoodSvg(id, mini=false){
 const DEFAULT_MOOD_PRESETS = [
   // "Face" selector (like your reference app)
   // Each preset can have multiple labels (shown as dots under the face)
-  { id:"incredible", src:"./src/emotions/Happy.png",   labels:["increíble"], score:9 },
+  { id:"incredible", src:"./src/emotions/Happy.png",   labels:["incre├¡ble"], score:9 },
   { id:"good",      src:"./src/emotions/Pleased.png", labels:["bien","ok","normal"], score:7 },
   { id:"meh",       src:"./src/emotions/Confused.png",labels:["meh"], score:5 },
   { id:"bad",       src:"./src/emotions/Sad.png",     labels:["mal","triste","cansado"], score:3 },
@@ -4896,7 +4903,7 @@ function openMoodPickerModal(iso, opts={}){
   let energy      = 0;
   let note        = "";
 
-  // Map legacy ids → face ids
+  // Map legacy ids ÔåÆ face ids
   if(selectedId && !faceIds.includes(selectedId)){
     const sc = getMoodScoreById(selectedId);
     if(sc!=null){
@@ -4909,72 +4916,72 @@ function openMoodPickerModal(iso, opts={}){
     incredible:"#4ADE80", good:"#86EFAC", meh:"#60A5FA", bad:"#FBBF24", horrible:"#F87171"
   };
   const FACE_LABELS = {
-    incredible:"increíble", good:"bien", meh:"meh", bad:"mal", horrible:"horrible"
+    incredible:"incre├¡ble", good:"bien", meh:"meh", bad:"mal", horrible:"horrible"
   };
 
-  // Activity categories — mirrors your Daylio setup (loaded from state or default)
+  // Activity categories ÔÇö mirrors your Daylio setup (loaded from state or default)
   const ACTIVITY_CATS_DEFAULT = [
     {
-      id:"rutina", label:"Rutina", icon:"⭐",
+      id:"rutina", label:"Rutina", icon:"Ô¡É",
       items:[
-        {id:"tarot",      icon:"🔮", label:"Tarot"},
-        {id:"dibujo",     icon:"🎨", label:"Dibujos"},
-        {id:"fergis",     icon:"💜", label:"Fergis"},
-        {id:"trading",    icon:"📈", label:"Trading"},
-        {id:"musica",     icon:"🎵", label:"Música"},
-        {id:"tiktok",     icon:"📱", label:"TikTok"},
-        {id:"lectura",    icon:"📖", label:"Lectura"},
-        {id:"meditacion", icon:"🧘", label:"Meditación"},
+        {id:"tarot",      icon:"­ƒö«", label:"Tarot"},
+        {id:"dibujo",     icon:"­ƒÄ¿", label:"Dibujos"},
+        {id:"fergis",     icon:"­ƒÆ£", label:"Fergis"},
+        {id:"trading",    icon:"­ƒôê", label:"Trading"},
+        {id:"musica",     icon:"­ƒÄÁ", label:"M├║sica"},
+        {id:"tiktok",     icon:"­ƒô▒", label:"TikTok"},
+        {id:"lectura",    icon:"­ƒôû", label:"Lectura"},
+        {id:"meditacion", icon:"­ƒºÿ", label:"Meditaci├│n"},
       ]
     },
     {
-      id:"trabajo", label:"Trabajo", icon:"💼",
+      id:"trabajo", label:"Trabajo", icon:"­ƒÆ╝",
       items:[
-        {id:"work",       icon:"💼", label:"Trabajo"},
-        {id:"claims",     icon:"🗂️", label:"Claims"},
-        {id:"clases",     icon:"📚", label:"Clases"},
-        {id:"upwork",     icon:"💻", label:"Upwork"},
-        {id:"deudas",     icon:"💸", label:"Deudas"},
-        {id:"itinerario", icon:"🗺️", label:"Itinerario"},
+        {id:"work",       icon:"­ƒÆ╝", label:"Trabajo"},
+        {id:"claims",     icon:"­ƒùé´©Å", label:"Claims"},
+        {id:"clases",     icon:"­ƒôÜ", label:"Clases"},
+        {id:"upwork",     icon:"­ƒÆ╗", label:"Upwork"},
+        {id:"deudas",     icon:"­ƒÆ©", label:"Deudas"},
+        {id:"itinerario", icon:"­ƒù║´©Å", label:"Itinerario"},
       ]
     },
     {
-      id:"sueno", label:"Sueño", icon:"🌙",
+      id:"sueno", label:"Sue├▒o", icon:"­ƒîÖ",
       items:[
-        {id:"buen_sueno",       icon:"😴", label:"Buen sueño"},
-        {id:"sueno_malo",       icon:"😵", label:"Sueño malo"},
-        {id:"sueno_temprano",   icon:"🌛", label:"Sueño temprano"},
-        {id:"sueno_tarde",      icon:"🌜", label:"Sueño tarde"},
+        {id:"buen_sueno",       icon:"­ƒÿ┤", label:"Buen sue├▒o"},
+        {id:"sueno_malo",       icon:"­ƒÿÁ", label:"Sue├▒o malo"},
+        {id:"sueno_temprano",   icon:"­ƒîø", label:"Sue├▒o temprano"},
+        {id:"sueno_tarde",      icon:"­ƒî£", label:"Sue├▒o tarde"},
       ]
     },
     {
-      id:"salud", label:"Salud", icon:"🌿",
+      id:"salud", label:"Salud", icon:"­ƒî┐",
       items:[
-        {id:"ejercicio",  icon:"🏃", label:"Ejercicio"},
-        {id:"comer_rico", icon:"🥗", label:"Comer rico"},
-        {id:"agua",       icon:"💧", label:"Agua"},
-        {id:"enfermedad", icon:"🤒", label:"Enfermedad"},
-        {id:"descanso",   icon:"🛋️", label:"Descanso"},
+        {id:"ejercicio",  icon:"­ƒÅâ", label:"Ejercicio"},
+        {id:"comer_rico", icon:"­ƒÑù", label:"Comer rico"},
+        {id:"agua",       icon:"­ƒÆº", label:"Agua"},
+        {id:"enfermedad", icon:"­ƒñÆ", label:"Enfermedad"},
+        {id:"descanso",   icon:"­ƒøï´©Å", label:"Descanso"},
       ]
     },
     {
-      id:"hogar", label:"Hogar", icon:"🏠",
+      id:"hogar", label:"Hogar", icon:"­ƒÅá",
       items:[
-        {id:"limpiar",   icon:"🧹", label:"Limpiar"},
-        {id:"cocinar",   icon:"🍳", label:"Cocinar"},
-        {id:"compras",   icon:"🛒", label:"Compras"},
-        {id:"familia",   icon:"👨‍👩‍👧", label:"Familia"},
-        {id:"parrilla",  icon:"🥩", label:"Parrilla"},
+        {id:"limpiar",   icon:"­ƒº╣", label:"Limpiar"},
+        {id:"cocinar",   icon:"­ƒì│", label:"Cocinar"},
+        {id:"compras",   icon:"­ƒøÆ", label:"Compras"},
+        {id:"familia",   icon:"­ƒæ¿ÔÇì­ƒæ®ÔÇì­ƒæº", label:"Familia"},
+        {id:"parrilla",  icon:"­ƒÑ®", label:"Parrilla"},
       ]
     },
     {
-      id:"ocio", label:"Ocio", icon:"🎮",
+      id:"ocio", label:"Ocio", icon:"­ƒÄ«",
       items:[
-        {id:"videojuegos",icon:"🎮", label:"Videojuegos"},
-        {id:"serie",      icon:"📺", label:"Serie/Película"},
-        {id:"salir",      icon:"🚶", label:"Salir"},
-        {id:"estoico",    icon:"📜", label:"Diario Estoico"},
-        {id:"nuevo_alquiler",icon:"🏡",label:"Nuevo Alquiler"},
+        {id:"videojuegos",icon:"­ƒÄ«", label:"Videojuegos"},
+        {id:"serie",      icon:"­ƒô║", label:"Serie/Pel├¡cula"},
+        {id:"salir",      icon:"­ƒÜÂ", label:"Salir"},
+        {id:"estoico",    icon:"­ƒô£", label:"Diario Estoico"},
+        {id:"nuevo_alquiler",icon:"­ƒÅí",label:"Nuevo Alquiler"},
       ]
     },
   ];
@@ -4997,7 +5004,7 @@ function openMoodPickerModal(iso, opts={}){
     else backdrop.remove();
   };
 
-  // ── STEP 1: Face selector ─────────────────────────────────────────────────
+  // ÔöÇÔöÇ STEP 1: Face selector ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   const renderStep1 = ()=>{
     const dateLabel = (()=>{
       try{ return new Date(iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"long",day:"numeric",month:"long"}); }
@@ -5007,10 +5014,10 @@ function openMoodPickerModal(iso, opts={}){
     backdrop.innerHTML = `
       <div class="mpm-panel mpm-s1" role="dialog">
         <div class="mpm-s1-top">
-          <button class="mpm-icon-btn" id="mpmHistBtn">📋</button>
-          <button class="mpm-icon-btn" data-close>✕</button>
+          <button class="mpm-icon-btn" id="mpmHistBtn">­ƒôï</button>
+          <button class="mpm-icon-btn" data-close>Ô£ò</button>
         </div>
-        <div class="mpm-s1-title">¿Cómo estás?</div>
+        <div class="mpm-s1-title">┬┐C├│mo est├ís?</div>
         <div class="mpm-s1-date">${escapeHtml(dateLabel)}</div>
         <div class="mpm-s1-faces" id="mpmS1Faces">
           ${faces.map(f=>`
@@ -5036,7 +5043,7 @@ function openMoodPickerModal(iso, opts={}){
     });
   };
 
-  // ── STEP 2: Activities + Energy + Note ───────────────────────────────────
+  // ÔöÇÔöÇ STEP 2: Activities + Energy + Note ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   const renderStep2 = ()=>{
     const color = FACE_COLORS[selectedId]||"#888";
     const label = FACE_LABELS[selectedId]||selectedId;
@@ -5050,10 +5057,10 @@ function openMoodPickerModal(iso, opts={}){
             <div class="mpm-s2-back-face" style="--fc:${color}">${_getMoodSvg(selectedId,false)}</div>
             <span class="mpm-s2-back-lbl" style="color:${color}">${escapeHtml(label)}</span>
           </button>
-          <button class="mpm-s2-save" id="mpmSave">Guardar ✓</button>
+          <button class="mpm-s2-save" id="mpmSave">Guardar Ô£ô</button>
         </div>
 
-        <div class="mpm-s2-subtitle">¿Qué hiciste hoy?</div>
+        <div class="mpm-s2-subtitle">┬┐Qu├® hiciste hoy?</div>
 
         <!-- Activity categories -->
         <div class="mpm-cats" id="mpmCats">
@@ -5062,8 +5069,8 @@ function openMoodPickerModal(iso, opts={}){
               <div class="mpm-cat-header">
                 <span class="mpm-cat-icon">${cat.icon}</span>
                 <span class="mpm-cat-label">${escapeHtml(cat.label)}</span>
-                <button class="mpm-cat-add-item" data-add-item="${cat.id}" title="Agregar categoría">＋</button>
-                <button class="mpm-cat-toggle" data-toggle="${cat.id}">▾</button>
+                <button class="mpm-cat-add-item" data-add-item="${cat.id}" title="Agregar categor├¡a">´╝ï</button>
+                <button class="mpm-cat-toggle" data-toggle="${cat.id}">Ôû¥</button>
               </div>
               <div class="mpm-cat-grid" id="mpmCatGrid_${cat.id}">
                 ${cat.items.map(it=>`
@@ -5076,27 +5083,27 @@ function openMoodPickerModal(iso, opts={}){
                 `).join("")}
               </div>
               <div class="mpm-new-item-form" id="mpmNewItemForm_${cat.id}" style="display:none">
-                <input class="mpm-new-item-icon" data-icon-input="${cat.id}" type="text" maxlength="4" placeholder="🌟" value="">
+                <input class="mpm-new-item-icon" data-icon-input="${cat.id}" type="text" maxlength="4" placeholder="­ƒîƒ" value="">
                 <input class="mpm-new-item-label" data-label-input="${cat.id}" type="text" maxlength="30" placeholder="Nombre...">
-                <button class="mpm-new-item-confirm" data-confirm-item="${cat.id}">✓</button>
-                <button class="mpm-new-item-cancel" data-cancel-item="${cat.id}">✕</button>
+                <button class="mpm-new-item-confirm" data-confirm-item="${cat.id}">Ô£ô</button>
+                <button class="mpm-new-item-cancel" data-cancel-item="${cat.id}">Ô£ò</button>
               </div>
             </div>
           `).join("")}
 
           <!-- New group button -->
-          <button class="mpm-add-group-btn" id="mpmAddGroupBtn">＋ Nuevo grupo</button>
+          <button class="mpm-add-group-btn" id="mpmAddGroupBtn">´╝ï Nuevo grupo</button>
           <div class="mpm-new-group-form" id="mpmNewGroupForm" style="display:none">
-            <input class="mpm-new-item-icon" id="mpmNewGroupIcon" type="text" maxlength="4" placeholder="🏷️" value="">
+            <input class="mpm-new-item-icon" id="mpmNewGroupIcon" type="text" maxlength="4" placeholder="­ƒÅÀ´©Å" value="">
             <input class="mpm-new-item-label" id="mpmNewGroupLabel" type="text" maxlength="30" placeholder="Nombre del grupo...">
-            <button class="mpm-new-item-confirm" id="mpmNewGroupConfirm">✓</button>
-            <button class="mpm-new-item-cancel" id="mpmNewGroupCancel">✕</button>
+            <button class="mpm-new-item-confirm" id="mpmNewGroupConfirm">Ô£ô</button>
+            <button class="mpm-new-item-cancel" id="mpmNewGroupCancel">Ô£ò</button>
           </div>
         </div>
 
         <!-- Energy -->
         <div class="mpm-s2-section">
-          <div class="mpm-s2-section-title">⚡ Energía</div>
+          <div class="mpm-s2-section-title">ÔÜí Energ├¡a</div>
           <div class="mpm-energy-pills" id="mpmEnergyPills">
             ${ENERGY_LABELS.slice(1).map((lbl,i)=>{
               const v=i+1;
@@ -5111,8 +5118,8 @@ function openMoodPickerModal(iso, opts={}){
 
         <!-- Note -->
         <div class="mpm-s2-section">
-          <div class="mpm-s2-section-title">📝 Nota <span class="mpm-optional">opcional</span></div>
-          <textarea class="mpm-textarea" id="mpmNote" rows="3" placeholder="¿Algo en especial hoy?...">${escapeHtml(note)}</textarea>
+          <div class="mpm-s2-section-title">­ƒôØ Nota <span class="mpm-optional">opcional</span></div>
+          <textarea class="mpm-textarea" id="mpmNote" rows="3" placeholder="┬┐Algo en especial hoy?...">${escapeHtml(note)}</textarea>
         </div>
 
         <div style="height:8px"></div>
@@ -5142,11 +5149,11 @@ function openMoodPickerModal(iso, opts={}){
         const catEl=btn.closest(".mpm-cat");
         if(!grid) return;
         const collapsed=catEl?.classList.toggle("collapsed");
-        btn.textContent = collapsed?"▸":"▾";
+        btn.textContent = collapsed?"Ôû©":"Ôû¥";
       });
     });
 
-    // Add item to category — show inline form
+    // Add item to category ÔÇö show inline form
     const hideAllForms = () => {
       backdrop.querySelectorAll(".mpm-new-item-form, .mpm-new-group-form").forEach(f=>{ f.style.display="none"; });
     };
@@ -5173,7 +5180,7 @@ function openMoodPickerModal(iso, opts={}){
         const form=backdrop.querySelector(`#mpmNewItemForm_${catId}`);
         const iconEl=form?.querySelector("[data-icon-input]");
         const labelEl=form?.querySelector("[data-label-input]");
-        const icon=(iconEl?.value||"").trim()||"⭐";
+        const icon=(iconEl?.value||"").trim()||"Ô¡É";
         const label=(labelEl?.value||"").trim();
         if(!label){ labelEl?.focus(); return; }
         const id=mkId("custom_"+catId);
@@ -5206,7 +5213,7 @@ function openMoodPickerModal(iso, opts={}){
 
     // Confirm new group
     backdrop.querySelector("#mpmNewGroupConfirm")?.addEventListener("click", ()=>{
-      const icon=(backdrop.querySelector("#mpmNewGroupIcon")?.value||"").trim()||"🏷️";
+      const icon=(backdrop.querySelector("#mpmNewGroupIcon")?.value||"").trim()||"­ƒÅÀ´©Å";
       const label=(backdrop.querySelector("#mpmNewGroupLabel")?.value||"").trim();
       if(!label){ backdrop.querySelector("#mpmNewGroupLabel")?.focus(); return; }
       const id=mkId("grp");
@@ -5255,7 +5262,7 @@ function openMoodPickerModal(iso, opts={}){
       }
       persist(); view();
       if(typeof opts.onSaved==="function") opts.onSaved({iso,spriteId:selectedId,activities:Array.from(activities),energy,note});
-      toast("Mood guardado ✅");
+      toast("Mood guardado Ô£à");
       close();
     });
   };
@@ -5320,7 +5327,7 @@ window.renderGithubHeatmap = function renderGithubHeatmap(year, dataMap) {
 
   return `
     <div class="gh-heatmap-wrapper">
-      <div class="gh-heatmap-title">🔥 Mapa Anual ${year}</div>
+      <div class="gh-heatmap-title">­ƒöÑ Mapa Anual ${year}</div>
       <div class="gh-heatmap-scroll">
         <div class="gh-months-row" style="display:flex;padding-left:16px;gap:0;">${monthHtml}</div>
         <div style="display:flex;gap:4px">
@@ -5347,7 +5354,7 @@ function openMoodMonthModal(initialIso){
 
   const FACE_SCORE = {incredible:5,good:4,meh:3,bad:2,horrible:1};
   const FACE_COLOR = {incredible:"#4ADE80",good:"#86EFAC",meh:"#60A5FA",bad:"#FBBF24",horrible:"#F87171"};
-  const FACE_LABEL = {incredible:"Increíble",good:"Bien",meh:"Meh",bad:"Mal",horrible:"Horrible"};
+  const FACE_LABEL = {incredible:"Incre├¡ble",good:"Bien",meh:"Meh",bad:"Mal",horrible:"Horrible"};
   const ENERGY_COLORS = ["","#F87171","#FBBF24","#60A5FA","#86EFAC","#4ADE80"];
 
   const close = ()=>{
@@ -5376,7 +5383,7 @@ function openMoodMonthModal(initialIso){
     const map = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
     const entries = getMonthEntries(y,m);
 
-    // ── Calendar tab ──
+    // ÔöÇÔöÇ Calendar tab ÔöÇÔöÇ
     const calHtml = ()=>{
       const last = new Date(y,m+1,0);
       const daysInMonth = last.getDate();
@@ -5396,7 +5403,7 @@ function openMoodMonthModal(initialIso){
         const enBar = en>0 ? `<div class="mmcal-en" style="width:${en*20}%;background:${ENERGY_COLORS[en]||'#60A5FA'}"></div>` : "";
         return `<button class="moodCalCell ${sp?"has-mood":""}" data-iso="${escapeHtml(iso)}">
           <div class="moodCalNum">${escapeHtml(String(Number(iso.slice(8,10))))}</div>
-          ${svgFace?`<div class="moodCalSvg">${svgFace}</div>`:`<div class="moodCalEmpty">＋</div>`}
+          ${svgFace?`<div class="moodCalSvg">${svgFace}</div>`:`<div class="moodCalEmpty">´╝ï</div>`}
           ${enBar}
         </button>`;
       }).join("");
@@ -5404,11 +5411,11 @@ function openMoodMonthModal(initialIso){
       return `
         <div class="moodCalHeader">${["L","M","M","J","V","S","D"].map(x=>`<div>${x}</div>`).join("")}</div>
         <div class="moodCalGrid">${cellHtml}</div>
-        <div class="mmcal-tip">Toca un día para editar su emoción</div>
+        <div class="mmcal-tip">Toca un d├¡a para editar su emoci├│n</div>
       `;
     };
 
-    // ── Gráficos tab ──
+    // ÔöÇÔöÇ Gr├íficos tab ÔöÇÔöÇ
     const chartsHtml = ()=>{
       if(!entries.length) return `<div class="mmh-empty">Sin registros este mes.</div>`;
 
@@ -5467,7 +5474,7 @@ function openMoodMonthModal(initialIso){
           <div class="mmfreq-track">
             <div class="mmfreq-fill" style="width:${Math.round(n/total*100)}%;background:${FACE_COLOR[id]||'#888'}"></div>
           </div>
-          <div class="mmfreq-count">${n}×</div>
+          <div class="mmfreq-count">${n}├ù</div>
         </div>
       `).join("");
 
@@ -5486,7 +5493,7 @@ function openMoodMonthModal(initialIso){
         const avgEn = enData.reduce((s,e)=>s+e.energy,0)/enData.length;
         energySection = `
           <div class="mmchart-card">
-            <div class="mmchart-title">⚡ Energía promedio <span class="mmchart-stat">${avgEn.toFixed(1)}/5</span></div>
+            <div class="mmchart-title">ÔÜí Energ├¡a promedio <span class="mmchart-stat">${avgEn.toFixed(1)}/5</span></div>
             <svg viewBox="0 0 ${EW} ${EH}" class="mmchart-svg" style="height:60px" preserveAspectRatio="none">
               ${bars}
             </svg>
@@ -5500,23 +5507,23 @@ function openMoodMonthModal(initialIso){
       const topActs = Object.entries(actCount).sort((a,b)=>b[1]-a[1]).slice(0,8);
       const actSection = topActs.length ? `
         <div class="mmchart-card">
-          <div class="mmchart-title">🏃 Actividades del mes</div>
+          <div class="mmchart-title">­ƒÅâ Actividades del mes</div>
           <div class="mmact-grid">
             ${topActs.map(([id,n])=>{
               const allItems = [
-                {id:"tarot",icon:"🔮"},{id:"dibujo",icon:"🎨"},{id:"fergis",icon:"💜"},
-                {id:"trading",icon:"📈"},{id:"musica",icon:"🎵"},{id:"tiktok",icon:"📱"},
-                {id:"lectura",icon:"📖"},{id:"meditacion",icon:"🧘"},{id:"work",icon:"💼"},
-                {id:"claims",icon:"🗂️"},{id:"clases",icon:"📚"},{id:"upwork",icon:"💻"},
-                {id:"deudas",icon:"💸"},{id:"itinerario",icon:"🗺️"},{id:"buen_sueno",icon:"😴"},
-                {id:"sueno_malo",icon:"😵"},{id:"sueno_temprano",icon:"🌛"},{id:"sueno_tarde",icon:"🌜"},
-                {id:"ejercicio",icon:"🏃"},{id:"comer_rico",icon:"🥗"},{id:"agua",icon:"💧"},
-                {id:"enfermedad",icon:"🤒"},{id:"descanso",icon:"🛋️"},{id:"limpiar",icon:"🧹"},
-                {id:"cocinar",icon:"🍳"},{id:"compras",icon:"🛒"},{id:"familia",icon:"👨‍👩‍👧"},
-                {id:"parrilla",icon:"🥩"},{id:"videojuegos",icon:"🎮"},{id:"serie",icon:"📺"},
-                {id:"salir",icon:"🚶"},{id:"estoico",icon:"📜"},{id:"nuevo_alquiler",icon:"🏡"},
+                {id:"tarot",icon:"­ƒö«"},{id:"dibujo",icon:"­ƒÄ¿"},{id:"fergis",icon:"­ƒÆ£"},
+                {id:"trading",icon:"­ƒôê"},{id:"musica",icon:"­ƒÄÁ"},{id:"tiktok",icon:"­ƒô▒"},
+                {id:"lectura",icon:"­ƒôû"},{id:"meditacion",icon:"­ƒºÿ"},{id:"work",icon:"­ƒÆ╝"},
+                {id:"claims",icon:"­ƒùé´©Å"},{id:"clases",icon:"­ƒôÜ"},{id:"upwork",icon:"­ƒÆ╗"},
+                {id:"deudas",icon:"­ƒÆ©"},{id:"itinerario",icon:"­ƒù║´©Å"},{id:"buen_sueno",icon:"­ƒÿ┤"},
+                {id:"sueno_malo",icon:"­ƒÿÁ"},{id:"sueno_temprano",icon:"­ƒîø"},{id:"sueno_tarde",icon:"­ƒî£"},
+                {id:"ejercicio",icon:"­ƒÅâ"},{id:"comer_rico",icon:"­ƒÑù"},{id:"agua",icon:"­ƒÆº"},
+                {id:"enfermedad",icon:"­ƒñÆ"},{id:"descanso",icon:"­ƒøï´©Å"},{id:"limpiar",icon:"­ƒº╣"},
+                {id:"cocinar",icon:"­ƒì│"},{id:"compras",icon:"­ƒøÆ"},{id:"familia",icon:"­ƒæ¿ÔÇì­ƒæ®ÔÇì­ƒæº"},
+                {id:"parrilla",icon:"­ƒÑ®"},{id:"videojuegos",icon:"­ƒÄ«"},{id:"serie",icon:"­ƒô║"},
+                {id:"salir",icon:"­ƒÜÂ"},{id:"estoico",icon:"­ƒô£"},{id:"nuevo_alquiler",icon:"­ƒÅí"},
               ];
-              const item = allItems.find(x=>x.id===id)||{icon:"🏷️"};
+              const item = allItems.find(x=>x.id===id)||{icon:"­ƒÅÀ´©Å"};
               return `<div class="mmact-item">
                 <div class="mmact-icon">${item.icon}</div>
                 <div class="mmact-n">${n}</div>
@@ -5551,15 +5558,15 @@ function openMoodMonthModal(initialIso){
           <div class="mmstreak-row">
             <div class="mmstreak-block">
               <div class="mmstreak-num">${streak}</div>
-              <div class="mmstreak-lbl">🔥 Racha actual</div>
+              <div class="mmstreak-lbl">­ƒöÑ Racha actual</div>
             </div>
             <div class="mmstreak-block">
               <div class="mmstreak-num">${maxStreak}</div>
-              <div class="mmstreak-lbl">🏆 Mejor racha</div>
+              <div class="mmstreak-lbl">­ƒÅå Mejor racha</div>
             </div>
             <div class="mmstreak-block">
               <div class="mmstreak-num">${entries.length}</div>
-              <div class="mmstreak-lbl">📅 Este mes</div>
+              <div class="mmstreak-lbl">­ƒôà Este mes</div>
             </div>
           </div>
         </div>
@@ -5569,14 +5576,14 @@ function openMoodMonthModal(initialIso){
         ${streakSection}
         ${ghHtml}
         <div class="mmchart-card">
-          <div class="mmchart-title">📈 Estado de ánimo</div>
+          <div class="mmchart-title">­ƒôê Estado de ├ínimo</div>
           <div class="mmchart-yaxis">
             ${["incredible","good","meh","bad","horrible"].map(id=>`<div class="mmchart-yface">${_getMoodSvg(id,true)}</div>`).join("")}
           </div>
           ${moodLineSvg}
         </div>
         <div class="mmchart-card">
-          <div class="mmchart-title">📊 Frecuencia del mes</div>
+          <div class="mmchart-title">­ƒôè Frecuencia del mes</div>
           ${freqBars}
         </div>
         ${energySection}
@@ -5584,7 +5591,7 @@ function openMoodMonthModal(initialIso){
       `;
     };
 
-    // ── Registro tab ──
+    // ÔöÇÔöÇ Registro tab ÔöÇÔöÇ
     const registroHtml = ()=>{
       if(!entries.length) return `<div class="mmh-empty">Sin registros este mes.</div>`;
       return entries.slice().reverse().map(e=>{
@@ -5593,19 +5600,19 @@ function openMoodMonthModal(initialIso){
         const en = Number(e.energy)||0;
         const enDots = en>0?Array.from({length:5},(_,i)=>`<div class="mml-en-dot ${i<en?"on":""}" style="${i<en?"--ec:"+ENERGY_COLORS[en]:""}"></div>`).join(""):"";
         const acts = Array.isArray(e.activities)?e.activities:[];
-        const allItems2 = [{id:"tarot",icon:"🔮",label:"Tarot"},{id:"dibujo",icon:"🎨",label:"Dibujos"},{id:"fergis",icon:"💜",label:"Fergis"},{id:"trading",icon:"📈",label:"Trading"},{id:"musica",icon:"🎵",label:"Música"},{id:"tiktok",icon:"📱",label:"TikTok"},{id:"lectura",icon:"📖",label:"Lectura"},{id:"meditacion",icon:"🧘",label:"Meditación"},{id:"work",icon:"💼",label:"Trabajo"},{id:"claims",icon:"🗂️",label:"Claims"},{id:"clases",icon:"📚",label:"Clases"},{id:"upwork",icon:"💻",label:"Upwork"},{id:"deudas",icon:"💸",label:"Deudas"},{id:"itinerario",icon:"🗺️",label:"Itinerario"},{id:"buen_sueno",icon:"😴",label:"Buen sueño"},{id:"sueno_malo",icon:"😵",label:"Sueño malo"},{id:"sueno_temprano",icon:"🌛",label:"Sueño temprano"},{id:"sueno_tarde",icon:"🌜",label:"Sueño tarde"},{id:"ejercicio",icon:"🏃",label:"Ejercicio"},{id:"comer_rico",icon:"🥗",label:"Comer rico"},{id:"agua",icon:"💧",label:"Agua"},{id:"enfermedad",icon:"🤒",label:"Enfermedad"},{id:"descanso",icon:"🛋️",label:"Descanso"},{id:"limpiar",icon:"🧹",label:"Limpiar"},{id:"cocinar",icon:"🍳",label:"Cocinar"},{id:"compras",icon:"🛒",label:"Compras"},{id:"familia",icon:"👨‍👩‍👧",label:"Familia"},{id:"parrilla",icon:"🥩",label:"Parrilla"},{id:"videojuegos",icon:"🎮",label:"Videojuegos"},{id:"serie",icon:"📺",label:"Serie"},{id:"salir",icon:"🚶",label:"Salir"},{id:"estoico",icon:"📜",label:"Estoico"},{id:"nuevo_alquiler",icon:"🏡",label:"Nuevo Alquiler"}];
-        const actChips = acts.slice(0,6).map(a=>{ const it=allItems2.find(x=>x.id===a)||{icon:"🏷️",label:a}; return `<span class="mml-tag-chip">${it.icon} ${escapeHtml(it.label)}</span>`; }).join("");
+        const allItems2 = [{id:"tarot",icon:"­ƒö«",label:"Tarot"},{id:"dibujo",icon:"­ƒÄ¿",label:"Dibujos"},{id:"fergis",icon:"­ƒÆ£",label:"Fergis"},{id:"trading",icon:"­ƒôê",label:"Trading"},{id:"musica",icon:"­ƒÄÁ",label:"M├║sica"},{id:"tiktok",icon:"­ƒô▒",label:"TikTok"},{id:"lectura",icon:"­ƒôû",label:"Lectura"},{id:"meditacion",icon:"­ƒºÿ",label:"Meditaci├│n"},{id:"work",icon:"­ƒÆ╝",label:"Trabajo"},{id:"claims",icon:"­ƒùé´©Å",label:"Claims"},{id:"clases",icon:"­ƒôÜ",label:"Clases"},{id:"upwork",icon:"­ƒÆ╗",label:"Upwork"},{id:"deudas",icon:"­ƒÆ©",label:"Deudas"},{id:"itinerario",icon:"­ƒù║´©Å",label:"Itinerario"},{id:"buen_sueno",icon:"­ƒÿ┤",label:"Buen sue├▒o"},{id:"sueno_malo",icon:"­ƒÿÁ",label:"Sue├▒o malo"},{id:"sueno_temprano",icon:"­ƒîø",label:"Sue├▒o temprano"},{id:"sueno_tarde",icon:"­ƒî£",label:"Sue├▒o tarde"},{id:"ejercicio",icon:"­ƒÅâ",label:"Ejercicio"},{id:"comer_rico",icon:"­ƒÑù",label:"Comer rico"},{id:"agua",icon:"­ƒÆº",label:"Agua"},{id:"enfermedad",icon:"­ƒñÆ",label:"Enfermedad"},{id:"descanso",icon:"­ƒøï´©Å",label:"Descanso"},{id:"limpiar",icon:"­ƒº╣",label:"Limpiar"},{id:"cocinar",icon:"­ƒì│",label:"Cocinar"},{id:"compras",icon:"­ƒøÆ",label:"Compras"},{id:"familia",icon:"­ƒæ¿ÔÇì­ƒæ®ÔÇì­ƒæº",label:"Familia"},{id:"parrilla",icon:"­ƒÑ®",label:"Parrilla"},{id:"videojuegos",icon:"­ƒÄ«",label:"Videojuegos"},{id:"serie",icon:"­ƒô║",label:"Serie"},{id:"salir",icon:"­ƒÜÂ",label:"Salir"},{id:"estoico",icon:"­ƒô£",label:"Estoico"},{id:"nuevo_alquiler",icon:"­ƒÅí",label:"Nuevo Alquiler"}];
+        const actChips = acts.slice(0,6).map(a=>{ const it=allItems2.find(x=>x.id===a)||{icon:"­ƒÅÀ´©Å",label:a}; return `<span class="mml-tag-chip">${it.icon} ${escapeHtml(it.label)}</span>`; }).join("");
         const dateLabel = (()=>{ try{ return new Date(e.iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short"}); }catch{return e.iso;} })();
         return `
           <div class="moodLogCard mml-card" data-iso="${escapeHtml(e.iso)}">
             <div class="mml-head">
               <div class="mml-face">${svgFace}</div>
               <div class="mml-meta">
-                <div class="mml-label" style="color:${FACE_COLOR[e.spriteId]||'#fff'}">${escapeHtml(FACE_LABEL[e.spriteId]||e.label||"—")}</div>
+                <div class="mml-label" style="color:${FACE_COLOR[e.spriteId]||'#fff'}">${escapeHtml(FACE_LABEL[e.spriteId]||e.label||"ÔÇö")}</div>
                 <div class="mml-date">${escapeHtml(dateLabel)}</div>
-                ${en>0?`<div class="mml-energy-row">${enDots}<span class="mml-en-num">⚡${en}/5</span></div>`:""}
+                ${en>0?`<div class="mml-energy-row">${enDots}<span class="mml-en-num">ÔÜí${en}/5</span></div>`:""}
               </div>
-              <button class="iconBtn mml-delete-btn" data-del-iso="${escapeHtml(e.iso)}" data-del-idx="${e.arrayIndex}" aria-label="Eliminar" style="margin-left:auto; color:#ef4444; font-size:16px;">🗑️</button>
+              <button class="iconBtn mml-delete-btn" data-del-iso="${escapeHtml(e.iso)}" data-del-idx="${e.arrayIndex}" aria-label="Eliminar" style="margin-left:auto; color:#ef4444; font-size:16px;">­ƒùæ´©Å</button>
             </div>
             ${actChips?`<div class="mml-tags">${actChips}</div>`:""}
             ${e.note?`<div class="mml-note">"${escapeHtml(String(e.note))}"</div>`:""}
@@ -5614,7 +5621,7 @@ function openMoodMonthModal(initialIso){
       }).join("");
     };
 
-    const TABS = [{id:"calendar",label:"📅 Mes"},{id:"charts",label:"📊 Stats"},{id:"registro",label:"📋 Log"}];
+    const TABS = [{id:"calendar",label:"­ƒôà Mes"},{id:"charts",label:"­ƒôè Stats"},{id:"registro",label:"­ƒôï Log"}];
 
     backdrop.innerHTML = `
       <div class="mmh-panel" role="dialog">
@@ -5624,9 +5631,9 @@ function openMoodMonthModal(initialIso){
             <div class="mmh-sub">${escapeHtml(title)}</div>
           </div>
           <div style="display:flex;gap:7px;align-items:center">
-            <button class="mpm-icon-btn" id="mmPrev">‹</button>
-            <button class="mpm-icon-btn" id="mmNext">›</button>
-            <button class="mpm-icon-btn" data-close>✕</button>
+            <button class="mpm-icon-btn" id="mmPrev">ÔÇ╣</button>
+            <button class="mpm-icon-btn" id="mmNext">ÔÇ║</button>
+            <button class="mpm-icon-btn" data-close>Ô£ò</button>
           </div>
         </div>
         <div class="mmh-tabs">
@@ -5652,7 +5659,7 @@ function openMoodMonthModal(initialIso){
         const iso = btn.getAttribute("data-del-iso");
         const idx = Number(btn.getAttribute("data-del-idx"));
         if(!iso || isNaN(idx)) return;
-        if(confirm("¿Estás seguro de que deseas eliminar este registro de emoción?")) {
+        if(confirm("┬┐Est├ís seguro de que deseas eliminar este registro de emoci├│n?")) {
           const arr = state.moodDaily[iso];
           if(Array.isArray(arr)) {
             arr.splice(idx, 1);
@@ -5725,7 +5732,7 @@ function getSleepWeekSeries(){
   const recorded = items.filter(x=>x.minutes > 0);
   const avgMinutes = recorded.length ? (recorded.reduce((s,x)=>s+x.minutes,0) / recorded.length) : 0;
 
-  // "Última noche" = yesterday if present, else most recent recorded night up to today
+  // "├Ültima noche" = yesterday if present, else most recent recorded night up to today
   const todayIso = isoDate(today);
   const y = new Date(today); y.setDate(today.getDate()-1);
   const yIso = isoDate(y);
@@ -5753,7 +5760,7 @@ function renderSleepBars(series){
   const avgH = (series?.avgMinutes || 0) / 60;
   const lastH = (series?.lastMinutes || 0) / 60;
 
-  const qualityIcon = avgH >= 7 ? "✦" : (avgH >= 5.5 ? "◈" : "◇");
+  const qualityIcon = avgH >= 7 ? "Ô£ª" : (avgH >= 5.5 ? "Ôùê" : "Ôùç");
   const qualityLabel = avgH >= 7 ? "Bien" : (avgH >= 5.5 ? "Regular" : "Bajo");
 
   const dayLetters = ["D","L","M","M","J","V","S"];
@@ -5765,11 +5772,11 @@ function renderSleepBars(series){
     const barH = x.minutes > 0 ? Math.round(minBarH + ratio * (maxBarH - minBarH)) : minBarH;
     const hrs = (x.minutes / 60).toFixed(1);
     const d = new Date(x.date + "T00:00:00");
-    const ch = dayLetters[d.getDay()] || "·";
+    const ch = dayLetters[d.getDay()] || "┬À";
     const isEmpty = x.minutes === 0;
     const isGood = x.minutes >= 7 * 60;
     return `
-      <div class="djp-sc-col" title="${escapeHtml(x.date)} · ${escapeHtml(hrs)}h">
+      <div class="djp-sc-col" title="${escapeHtml(x.date)} ┬À ${escapeHtml(hrs)}h">
         <div class="djp-sc-bar ${isEmpty ? "empty" : isGood ? "good" : ""}" style="--bh:${barH}px"></div>
         <div class="djp-sc-lbl">${escapeHtml(ch)}</div>
       </div>
@@ -5810,10 +5817,10 @@ function neuroclawRunNow({ animate=true } = {}){
     const runner = (window.NeuroClaw && window.NeuroClaw.run) ? window.NeuroClaw.run : null;
     if(!runner){
       console.warn("NeuroClaw: engine not loaded (window.NeuroClaw.run missing)");
-      try{ if(typeof toast==="function") toast("NeuroClaw no cargó 😅"); }catch(e){}
+      try{ if(typeof toast==="function") toast("NeuroClaw no carg├│ ­ƒÿà"); }catch(e){}
       return;
     }
-    try{ if(typeof toast==="function") toast("NeuroClaw: analizando…"); }catch(e){}
+    try{ if(typeof toast==="function") toast("NeuroClaw: analizandoÔÇª"); }catch(e){}
 
     const maybePromise = runner({
       sleepLog: state.sleepLog || [],
@@ -5829,7 +5836,7 @@ function neuroclawRunNow({ animate=true } = {}){
       state.neuroclawLastViewedAt = Date.now();
       try{ saveState(); }catch(e){}
       try{ view(); }catch(e){}
-      try{ if(typeof toast==="function") toast("NeuroClaw listo ✅"); }catch(e){}
+      try{ if(typeof toast==="function") toast("NeuroClaw listo Ô£à"); }catch(e){}
 
       // Optional: Cloud AI follow-up (does not replace local rules)
       try{
@@ -5837,7 +5844,7 @@ function neuroclawRunNow({ animate=true } = {}){
         const url = (cfg && cfg.url) ? cfg.url : getNeuroAiUrl();
         const key = (cfg && cfg.key) ? cfg.key : getNeuroAiKey();
         if(url && key && out && out.signals){
-          try{ if(typeof toast==="function") toast("NeuroClaw AI: consultando…"); }catch(e){}
+          try{ if(typeof toast==="function") toast("NeuroClaw AI: consultandoÔÇª"); }catch(e){}
           // Show AI progress directly inside the Home card.
           state.neuroclawAiLoading = true;
           try{ saveState(); }catch(e){}
@@ -5867,7 +5874,7 @@ function neuroclawRunNow({ animate=true } = {}){
 
             try{ saveState(); }catch(e){}
             try{ view(); }catch(e){}
-            try{ if(typeof toast==="function") toast("NeuroClaw AI: límite 3/3, usando memoria local 🧠"); }catch(e){}
+            try{ if(typeof toast==="function") toast("NeuroClaw AI: l├¡mite 3/3, usando memoria local ­ƒºá"); }catch(e){}
             return;
           }
           incNeuroAiCalls();
@@ -5900,14 +5907,14 @@ try{
 
 try{ saveState(); }catch(e){}
 try{ view(); }catch(e){}
-          try{ if(typeof toast==="function") toast("NeuroClaw AI listo 🤖✅"); }catch(e){}
+          try{ if(typeof toast==="function") toast("NeuroClaw AI listo ­ƒñûÔ£à"); }catch(e){}
         }
       }catch(err){
         console.warn(err);
         state.neuroclawAiLoading = false;
         try{ saveState(); }catch(e){}
         try{ view(); }catch(e){}
-        try{ if(typeof toast==="function") toast("NeuroClaw AI falló (ver consola)"); }catch(e){}
+        try{ if(typeof toast==="function") toast("NeuroClaw AI fall├│ (ver consola)"); }catch(e){}
       }
     };
 
@@ -5933,17 +5940,68 @@ function neuroclawTopSuggestions(limit=3){
 
 function neuroclawBadge(p){
   const k = String(p||"low").toLowerCase();
-  if(k==="high") return `<span class="neuroBadge high">Alta</span>`// ===== LIFE TRACKER (TDAH Command Center) =====
+  if(k==="high") return `<span class="neuroBadge high">Alta</span>`;
+  if(k==="medium") return `<span class="neuroBadge med">Media</span>`;
+  return `<span class="neuroBadge low">Baja</span>`;
+}
+
+
+function renderNeuroClawAIBlock(){
+  const loading = !!state?.neuroclawAiLoading;
+  const ai = state?.neuroclawLast?.ai || null;
+
+  // If we're loading, show a visible block even if we don't have ai content yet.
+  if(loading){
+    return `
+      <div class="hr"></div>
+      <div class="ncAi ncAiLoading">
+        <div class="ncAiHead">
+          <div class="ncAiTitle">NeuroClaw AI</div>
+          <div class="ncAiMeta">ProcesandoÔÇª</div>
+        </div>
+        <div class="ncAiBody">
+          <div class="ncAiText">Estoy leyendo tus se├▒ales y armando patrones<span class="ncDots"><span>.</span><span>.</span><span>.</span></span></div>
+        </div>
+      </div>
+    `;
+  }
+
+  if(!ai) return "";
+
+  const human = (ai.human || "").trim();
+  const rawTxt = (!human && ai.raw) ? JSON.stringify(ai.raw, null, 2) : "";
+  if(!human && !rawTxt) return "";
+
+  const tsMs = Number(state?.neuroclawLast?.aiTs || 0) || 0;
+  const stamp = tsMs ? new Date(tsMs).toLocaleString("es-PE",{hour:"2-digit",minute:"2-digit"}) : "";
+  const model = (ai.raw && ai.raw.model) ? String(ai.raw.model) : "";
+  const meta = [stamp, model ? ("­ƒñû " + model) : ""].filter(Boolean).join(" ÔÇó ");
+
+  return `
+      <div class="hr"></div>
+      <div class="ncAi">
+        <div class="ncAiHead">
+          <div class="ncAiTitle">NeuroClaw AI</div>
+          <div class="ncAiMeta">${escapeHtml(meta)}</div>
+        </div>
+        <div class="ncAiBody">
+          <div class="ncAiText">${escapeHtml(human || rawTxt).replace(/\n/g,"<br>")}</div>
+        </div>
+      </div>
+    `;
+}
+
+// ===== LIFE TRACKER (TDA & H├íbitos Vitales) =====
 
 const LIFE_TRACKER_DEFAULT_TASKS = [
-  { id:"lt_hair",    icon:"💇", title:"Lavar el pelo",      category:"higiene",  freqDays:3,  lastDone:null, partOfDay:"manana" },
-  { id:"lt_nails",   icon:"💅", title:"Cortar uñas",        category:"higiene",  freqDays:14, lastDone:null, partOfDay:"tarde" },
-  { id:"lt_laundry", icon:"👕", title:"Lavar ropa",         category:"hogar",    freqDays:7,  lastDone:null, partOfDay:"tarde" },
-  { id:"lt_kitchen", icon:"🍽️", title:"Limpiar cocina",     category:"hogar",    freqDays:3,  lastDone:null, partOfDay:"noche" },
-  { id:"lt_dishes",  icon:"🫧", title:"Fregar",             category:"hogar",    freqDays:1,  lastDone:null, partOfDay:"noche" },
-  { id:"lt_room",    icon:"🧹", title:"Ordenar cuarto",     category:"hogar",    freqDays:5,  lastDone:null, partOfDay:"manana" },
-  { id:"lt_shower",  icon:"🚿", title:"Ducha",              category:"higiene",  freqDays:1,  lastDone:null, partOfDay:"manana" },
-  { id:"lt_teeth",   icon:"🦷", title:"Cepillar dientes",   category:"higiene",  freqDays:0.5,lastDone:null, partOfDay:"manana" },
+  { id:"lt_hair",    icon:"­ƒÆç", title:"Lavar el pelo",      category:"higiene",  freqDays:3,  lastDone:null },
+  { id:"lt_nails",   icon:"­ƒÆà", title:"Cortar u├▒as",        category:"higiene",  freqDays:14, lastDone:null },
+  { id:"lt_laundry", icon:"­ƒæò", title:"Lavar ropa",         category:"hogar",    freqDays:7,  lastDone:null },
+  { id:"lt_kitchen", icon:"­ƒì¢´©Å", title:"Limpiar cocina",     category:"hogar",    freqDays:3,  lastDone:null },
+  { id:"lt_dishes",  icon:"­ƒ½º", title:"Fregar",             category:"hogar",    freqDays:1,  lastDone:null },
+  { id:"lt_room",    icon:"­ƒº╣", title:"Ordenar cuarto",     category:"hogar",    freqDays:5,  lastDone:null },
+  { id:"lt_shower",  icon:"­ƒÜ┐", title:"Ducha",              category:"higiene",  freqDays:1,  lastDone:null },
+  { id:"lt_teeth",   icon:"­ƒªÀ", title:"Cepillar dientes",   category:"higiene",  freqDays:0.5,lastDone:null },
 ];
 
 function lifeTasksGet() {
@@ -5968,9 +6026,9 @@ function lifeTaskMarkDone(id, forcedTs) {
   }
 }
 
-function lifeTaskAddCustom(title, icon, freqDays, category, partOfDay) {
+function lifeTaskAddCustom(title, icon, freqDays, category) {
   const tasks = lifeTasksGet();
-  tasks.push({ id:"lt_custom_"+Date.now(), icon: icon||"📌", title, category: category||"otro", freqDays: Number(freqDays)||7, lastDone:null, type:"habit", partOfDay: partOfDay||"cualquier" });
+  tasks.push({ id:"lt_custom_"+Date.now(), icon: icon||"­ƒôî", title, category: category||"otro", freqDays: Number(freqDays)||7, lastDone:null, type:"habit" });
   state.lifeTasks = tasks;
   persist();
 }
@@ -5979,14 +6037,14 @@ function lifeEventAdd(title, icon, dueDate, note, category) {
   const tasks = lifeTasksGet();
   tasks.push({
     id: "lt_evt_"+Date.now(),
-    icon: icon||"📅",
+    icon: icon||"­ƒôà",
     title,
     category: category||"evento",
     type: "event",
-    dueDate,
+    dueDate,           // ISO date string "YYYY-MM-DD"
     note: note||"",
     done: false,
-    followUpSent: false,
+    followUpSent: false, // Carl asked how it went
     lastDone: null
   });
   state.lifeTasks = tasks;
@@ -6007,35 +6065,10 @@ function lifeTaskDaysSince(task) {
 function lifeTaskUrgency(task) {
   const since = lifeTaskDaysSince(task);
   const ratio = task.freqDays > 0 ? since / task.freqDays : Infinity;
-  if(ratio >= 1.5) return "critical";
-  if(ratio >= 1.0) return "due";
-  if(ratio >= 0.7) return "soon";
+  if(ratio >= 1.5) return "critical";  // muy atrasado
+  if(ratio >= 1.0) return "due";       // vencido hoy
+  if(ratio >= 0.7) return "soon";      // pr├│ximamente
   return "ok";
-}
-
-// Returns how many habits were completed today
-function getHabitsCompletedToday() {
-  return lifeTasksGet().filter(t => t.type !== "event" && t.lastDone && String(t.lastDone).split("T")[0] === isoDate()).length;
-}
-
-// Returns streak in days (consecutive days with ≥1 habit done)
-function getLifeTrackerStreak() {
-  const log = Array.isArray(state.lifeTasksLog) ? state.lifeTasksLog : [];
-  if(!log.length) return 0;
-  // Build set of unique dates
-  const days = new Set(log.map(l => String(l.ts).split("T")[0]));
-  let streak = 0;
-  let d = new Date();
-  while(true) {
-    const ds = isoDate(d);
-    if(days.has(ds)) {
-      streak++;
-      d.setDate(d.getDate() - 1);
-    } else {
-      break;
-    }
-  }
-  return streak;
 }
 
 function getLifeTrackerTdaSuggestion() {
@@ -6044,10 +6077,7 @@ function getLifeTrackerTdaSuggestion() {
   
   const now = new Date();
   const currentHour = now.getHours();
-
-  // Part-of-day mapping
-  const podHours = { manana: [6, 12], tarde: [12, 19], noche: [19, 24], cualquier: [0, 24] };
-
+  
   let candidates = [];
   
   habits.forEach(h => {
@@ -6057,32 +6087,33 @@ function getLifeTrackerTdaSuggestion() {
     // Skipped temporalmente (3 horas)
     const skipped = state._tdaSkipped || {};
     if (skipped[h.id] && (Date.now() - skipped[h.id]) < 3*60*60*1000) return;
-
-    // Part-of-day filter — but don't filter out critical ones
-    const urgency = lifeTaskUrgency(h);
-    const urgencyCritical = urgency === "critical" || urgency === "due";
-    const podRange = podHours[h.partOfDay || "cualquier"];
-    const inPodWindow = currentHour >= podRange[0] && currentHour < podRange[1];
-
-    // Historical time analysis
+    
+    // Buscar historial de horas
     const myLogs = log.filter(l => l.id === h.id);
-    let historyMatch = false;
     if (myLogs.length >= 3) {
       const recent = myLogs.slice(-5);
       const hours = recent.map(l => new Date(l.ts).getHours());
-      const avgHour = hours.reduce((a,b)=>a+b,0) / hours.length;
-      if (currentHour >= avgHour && currentHour <= avgHour + 4) historyMatch = true;
+      let sum = 0; hours.forEach(hr => sum += hr);
+      let avgHour = sum / hours.length;
+      
+      // Si estamos en la ventana habitual (hasta 4h despu├®s de su hora promedio)
+      if (currentHour >= avgHour && currentHour <= avgHour + 4) {
+         candidates.push({ task: h, reason: "time", avgHour });
+      }
     }
-
-    if (historyMatch) candidates.push({ task: h, reason: "time" });
-    else if (urgencyCritical) candidates.push({ task: h, reason: "overdue" });
-    else if (inPodWindow) candidates.push({ task: h, reason: "pod" });
+    
+    // Si est├í muy atrasado, siempre es candidato
+    if (lifeTaskUrgency(h) === "critical" || lifeTaskUrgency(h) === "due") {
+       if (!candidates.find(c => c.task.id === h.id)) {
+           candidates.push({ task: h, reason: "overdue" });
+       }
+    }
   });
   
   candidates.sort((a,b) => {
-    const priority = { time: 0, overdue: 1, pod: 2 };
-    if(priority[a.reason] !== priority[b.reason]) return priority[a.reason] - priority[b.reason];
-    return (lifeTaskDaysSince(b.task)/b.task.freqDays) - (lifeTaskDaysSince(a.task)/a.task.freqDays);
+     if (a.reason === "time" && b.reason !== "time") return -1;
+     if (b.reason === "time" && a.reason !== "time") return 1;
+     return (lifeTaskDaysSince(b.task)/b.task.freqDays) - (lifeTaskDaysSince(a.task)/a.task.freqDays);
   });
   
   return candidates.length > 0 ? candidates[0] : null;
@@ -6092,154 +6123,142 @@ function renderLifeTrackerCard() {
   const tasks = lifeTasksGet();
   const todayIso = isoDate();
   const tomorrowIso = isoDate(new Date(Date.now()+86400000));
+
+  // ÔöÇÔöÇ Events (one-time) ÔöÇÔöÇ
+  const events = tasks.filter(t => t.type==="event");
   const habits  = tasks.filter(t => t.type!=="event");
-  const events  = tasks.filter(t => t.type==="event");
 
-  // ─── Stats ───
-  const totalHabits = habits.length;
-  const doneToday = getHabitsCompletedToday();
-  const streak = getLifeTrackerStreak();
-  const progressPct = totalHabits > 0 ? Math.round((doneToday / totalHabits) * 100) : 0;
-  const allDoneToday = doneToday >= totalHabits && totalHabits > 0;
+  const upcomingEvents = events
+    .filter(e => !e.done && e.dueDate >= todayIso)
+    .sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  const needFollowUp = events
+    .filter(e => !e.done && !e.followUpSent && e.dueDate < todayIso);
+  const pastDoneEvents = events
+    .filter(e => e.done)
+    .sort((a,b)=>b.dueDate.localeCompare(a.dueDate))
+    .slice(0, 3);
 
-  // ─── Spotlight: the ONE task to do next ───
-  const suggestion = getLifeTrackerTdaSuggestion();
-  const spotlightTask = suggestion ? suggestion.task : null;
+  const evtDateLabel = (iso) => {
+    if(iso===todayIso) return "­ƒö┤ Hoy";
+    if(iso===tomorrowIso) return "­ƒƒí Ma├▒ana";
+    try{ return new Date(iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short"}); }catch{ return iso; }
+  };
 
-  const urgencyColor = { critical:"#ef4444", due:"#f97316", soon:"#eab308", ok:"#22c55e" };
-  const urgencyEmoji = { critical:"🔴", due:"🟠", soon:"🟡", ok:"🟢" };
-
-  let spotlightHtml = "";
-  if (allDoneToday) {
-    spotlightHtml = `
-      <div class="lt-spotlight lt-spotlight-done" id="ltSpotlight">
-        <div class="lt-spotlight-emoji">🎉</div>
-        <div class="lt-spotlight-title">¡Todo hecho hoy!</div>
-        <div class="lt-spotlight-sub" style="color:#22c55e;font-size:13px;margin-top:4px;">Eres increíble. Descansa.</div>
-      </div>`;
-  } else if (spotlightTask) {
-    const urg = lifeTaskUrgency(spotlightTask);
-    const color = urgencyColor[urg];
-    const sinceStr = spotlightTask.lastDone ? (() => {
-      const d = lifeTaskDaysSince(spotlightTask);
-      if(d < 1) return "Hoy antes";
-      if(d < 2) return "Ayer";
-      return `hace ${Math.floor(d)} días`;
-    })() : "Nunca lo has hecho";
-    const urgBadge = urg !== "ok" ? `<span class="lt-urg-badge lt-urg-${urg}">${urgencyEmoji[urg]} ${urg === "critical" ? "¡ATRASADO!" : urg === "due" ? "HOY" : "PRONTO"}</span>` : "";
-    spotlightHtml = `
-      <div class="lt-spotlight" id="ltSpotlight" data-spot-id="${escapeHtml(spotlightTask.id)}">
-        ${urgBadge}
-        <div class="lt-spotlight-emoji">${spotlightTask.icon}</div>
-        <div class="lt-spotlight-title">${escapeHtml(spotlightTask.title)}</div>
-        <div class="lt-spotlight-sub">${escapeHtml(sinceStr)}</div>
-        <div class="lt-spotlight-actions">
-          <button class="lt-spot-btn lt-spot-yes" data-lt-done="${escapeHtml(spotlightTask.id)}">✅ Ya lo hice</button>
-          <button class="lt-spot-btn lt-spot-later" data-lt-tda-skip="${escapeHtml(spotlightTask.id)}">⏰ En un rato</button>
-          <button class="lt-spot-btn lt-spot-help" data-lt-tda-help="${escapeHtml(spotlightTask.title)}">🧠 Ayuda</button>
+  const eventsHtml = upcomingEvents.length || needFollowUp.length ? `
+    <div class="lt-events-section">
+      <div class="lt-section-title">­ƒôà Eventos & Compromisos</div>
+      ${needFollowUp.map(e => `
+        <div class="lt-event-row lt-event-followup" data-lt-evt-id="${escapeHtml(e.id)}">
+          <div class="lt-event-icon">${e.icon}</div>
+          <div class="lt-event-info">
+            <div class="lt-event-title">${escapeHtml(e.title)}</div>
+            <div class="lt-event-date" style="color:#a78bfa">Carl quiere saber c├│mo te fue ­ƒÆ£</div>
+          </div>
+          <div style="display:flex;align-items:center;">
+            <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Marcar como hecho">Ô£ô</button>
+            <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" title="Eliminar" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 8px;">­ƒùæ</button>
+          </div>
         </div>
-      </div>`;
-  } else {
-    spotlightHtml = `
-      <div class="lt-spotlight lt-spotlight-empty">
-        <div class="lt-spotlight-emoji">✨</div>
-        <div class="lt-spotlight-title">Sin urgencias ahora</div>
-        <div class="lt-spotlight-sub">Los hábitos de esta hora ya están al día.</div>
-      </div>`;
-  }
+      `).join("")}
+      ${upcomingEvents.map(e => `
+        <div class="lt-event-row" data-lt-evt-id="${escapeHtml(e.id)}">
+          <div class="lt-event-icon">${e.icon}</div>
+          <div class="lt-event-info">
+            <div class="lt-event-title">${escapeHtml(e.title)}</div>
+            <div class="lt-event-date">${escapeHtml(evtDateLabel(e.dueDate))}${e.note ? ` ┬À ${escapeHtml(e.note)}` : ""}</div>
+          </div>
+          <div style="display:flex;align-items:center;">
+            <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}" title="Hecho">Ô£ô</button>
+            <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" title="Eliminar" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 8px;">­ƒùæ</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  ` : "";
+  
+  // Auto-suggest payments from finance ledger
+  const ledger = Array.isArray(state.finance_ledger) ? state.finance_ledger : (Array.isArray(state.financeLedger) ? state.financeLedger : []);
+  const debtCategories = ["deudas","servicios","compromisos","tarjeta","pago","credito","seguro","renta","alquiler"];
+  const paymentTasks = [];
+  const seen = new Set();
+  ledger.forEach(e => {
+    const cat = String(e.category||"").toLowerCase();
+    if(!debtCategories.some(d=>cat.includes(d))) return;
+    const key = e.description ? String(e.description).substring(0,30).toLowerCase() : cat;
+    if(seen.has(key)) return;
+    seen.add(key);
+    // Check if already in lifeTasks
+    const alreadyExists = tasks.some(t=>t.title.toLowerCase().includes(key.substring(0,10)));
+    if(!alreadyExists) paymentTasks.push({ name: e.description||e.category, category: cat });
+  });
 
-  // ─── Chip rail: all habits except spotlight (compact) ───
-  const sortedHabits = [...habits].sort((a,b) => {
+  // Sort habits by urgency
+  const sorted = [...habits].sort((a,b) => {
     const order = { critical:0, due:1, soon:2, ok:3 };
     return order[lifeTaskUrgency(a)] - order[lifeTaskUrgency(b)];
   });
-  const chipRailHtml = sortedHabits.map(t => {
+
+  const urgencyColor = { critical:"#ef4444", due:"#f97316", soon:"#eab308", ok:"#22c55e" };
+  const urgencyLabel = { critical:"┬íAtrasado!", due:"Hoy", soon:"Pronto", ok:"Al d├¡a" };
+
+  const taskRows = sorted.map(t => {
     const urg = lifeTaskUrgency(t);
-    const doneToday_ = t.lastDone && String(t.lastDone).split("T")[0] === todayIso;
-    const isSpotlight = spotlightTask && t.id === spotlightTask.id;
-    if (isSpotlight) return ""; // already shown in spotlight
-    return `<div class="lt-chip lt-chip-${urg}${doneToday_ ? " lt-chip-done" : ""}"
-      data-lt-chip-id="${escapeHtml(t.id)}"
-      title="${escapeHtml(t.title)} · ${escapeHtml(urg)}">
-      <span>${t.icon}</span>
-      <span class="lt-chip-label">${escapeHtml(t.title)}</span>
-      ${doneToday_ ? "<span class='lt-chip-check'>✓</span>" : ""}
-    </div>`;
-  }).filter(Boolean).join("");
-
-  // ─── Streak bar ───
-  const streakBadge = streak >= 3 ? `<span class="lt-streak-badge">🔥 Racha ${streak}d</span>` : (streak === 1 ? `<span class="lt-streak-badge lt-streak-start">⚡ ¡Empezando racha!</span>` : "");
-  const streakBarHtml = `
-    <div class="lt-streak-wrap">
-      <div class="lt-streak-bar-container">
-        <div class="lt-streak-bar-fill ${allDoneToday ? "lt-streak-bar-complete" : ""}" style="width:${progressPct}%"></div>
+    const color = urgencyColor[urg];
+    const sinceStr = t.lastDone ? (() => {
+      const d = lifeTaskDaysSince(t);
+      if(d < 1) return "Hoy";
+      if(d < 2) return "Ayer";
+      return `hace ${Math.floor(d)}d`;
+    })() : "Nunca";
+    return `
+      <div class="lt-task-row lt-${urg}" data-lt-id="${escapeHtml(t.id)}">
+        <div class="lt-task-icon">${t.icon}</div>
+        <div class="lt-task-info">
+          <div class="lt-task-title">${escapeHtml(t.title)}</div>
+          <div class="lt-task-since" style="color:${color}">${urgencyLabel[urg]} ┬À ${escapeHtml(sinceStr)}</div>
+        </div>
+        <div style="display:flex;align-items:center;">
+          <button class="lt-done-btn" data-lt-done="${escapeHtml(t.id)}" title="Marcar como hecho" style="border-color:${color};color:${color}">Ô£ô</button>
+          <button class="lt-del-btn" data-lt-del="${escapeHtml(t.id)}" title="Eliminar" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 10px;">­ƒùæ</button>
+        </div>
       </div>
-      <div class="lt-streak-info">
-        <span class="lt-streak-count">${doneToday}/${totalHabits} hoy</span>
-        ${streakBadge}
-      </div>
-    </div>`;
+    `;
+  }).join("");
 
-  // ─── Upcoming events (compact) ───
-  const upcomingEvents = events.filter(e => !e.done && e.dueDate >= todayIso)
-    .sort((a,b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 3);
-  const needFollowUp = events.filter(e => !e.done && !e.followUpSent && e.dueDate < todayIso);
-  const evtDateLabel = (iso) => {
-    if(iso===todayIso) return "🔴 Hoy";
-    if(iso===tomorrowIso) return "🟡 Mañana";
-    try { return new Date(iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short"}); } catch { return iso; }
-  };
-  const eventsHtml = (upcomingEvents.length || needFollowUp.length) ? `
-    <div class="lt-events-section">
-      <div class="lt-section-title">📅 Eventos</div>
-      ${needFollowUp.map(e => `
-        <div class="lt-event-row lt-event-followup">
-          <div class="lt-event-icon">${e.icon}</div>
-          <div class="lt-event-info">
-            <div class="lt-event-title">${escapeHtml(e.title)}</div>
-            <div class="lt-event-date" style="color:#a78bfa">Carl quiere saber cómo te fue 💜</div>
-          </div>
-          <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}">✓</button>
-          <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 6px;">🗑</button>
-        </div>`).join("")}
-      ${upcomingEvents.map(e => `
-        <div class="lt-event-row">
-          <div class="lt-event-icon">${e.icon}</div>
-          <div class="lt-event-info">
-            <div class="lt-event-title">${escapeHtml(e.title)}</div>
-            <div class="lt-event-date">${escapeHtml(evtDateLabel(e.dueDate))}${e.note ? ` · ${escapeHtml(e.note)}` : ""}</div>
-          </div>
-          <button class="lt-evt-done-btn" data-lt-evt-done="${escapeHtml(e.id)}">✓</button>
-          <button class="lt-del-btn" data-lt-del="${escapeHtml(e.id)}" style="border:none;background:transparent;color:#71717a;font-size:14px;padding:0 0 0 6px;">🗑</button>
-        </div>`).join("")}
-    </div>` : "";
-
-  const criticalCount = habits.filter(t => lifeTaskUrgency(t)==="critical"||lifeTaskUrgency(t)==="due").length;
+  const criticalCount = sorted.filter(t=>lifeTaskUrgency(t)==="critical"||lifeTaskUrgency(t)==="due").length;
   const totalAlerts = criticalCount + needFollowUp.length;
 
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString("es-PE", {hour:"2-digit", minute:"2-digit", hour12:true});
+
   return `
-    <section class="card homeCard homeWide lifeTrackerCard${allDoneToday ? " lt-all-done" : ""}" id="homeLifeTracker">
+    <section class="card homeCard homeWide lifeTrackerCard" id="homeLifeTracker">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">🧠 Tracker Vital</h2>
-          <div class="small">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : allDoneToday ? `<span style="color:#22c55e;font-weight:700">¡Completo! 🎉</span>` : `${doneToday}/${totalHabits} hábitos hoy`}</div>
+          <h2 class="cardTitle">­ƒºá Tracker Vital <span style="font-size:12px;color:rgba(255,255,255,0.4);font-weight:normal;margin-left:8px;letter-spacing:0.5px;">${timeStr}</span></h2>
+          <div class="small">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : "Todo al d├¡a Ô£à"}</div>
         </div>
         <div>
-          <button class="iconBtn" id="btnLifeTrackerStats" title="Estadísticas" style="margin-right:8px;font-size:16px;">📊</button>
-          <button class="iconBtn" id="btnAddLifeTask" title="Agregar">＋</button>
+          <button class="iconBtn" id="btnLifeTrackerStats" title="Estad├¡sticas" style="margin-right:8px;font-size:16px;">­ƒôè</button>
+          <button class="iconBtn" id="btnAddLifeTask" title="Agregar">´╝ï</button>
         </div>
       </div>
       <div class="hr"></div>
-
       ${eventsHtml}
-
-      <div class="lt-section-title" style="margin-top:${eventsHtml?"12px":"4px"}">🎯 Ahora mismo</div>
-      ${spotlightHtml}
-
-      ${chipRailHtml ? `<div class="lt-section-title" style="margin-top:14px">🔁 Lo demás</div>
-      <div class="lt-chip-rail">${chipRailHtml}</div>` : ""}
-
-      ${streakBarHtml}
+      <div class="lt-section-title" style="margin-top:${eventsHtml?"12px":"0"}">­ƒöü H├íbitos Vitales</div>
+      <div class="lt-task-list">
+        ${taskRows}
+      </div>
+      ${paymentTasks.length ? `
+        <div class="lt-suggestions">
+          <div class="lt-sug-title">­ƒÆí Carl detect├│ pagos recurrentes. ┬┐Agregarlos?</div>
+          ${paymentTasks.slice(0,3).map(p=>`
+            <button class="lt-sug-btn" data-lt-suggest="${escapeHtml(JSON.stringify(p))}">
+              ­ƒÆ© ${escapeHtml(p.name)}
+            </button>
+          `).join("")}
+        </div>
+      ` : ""}
     </section>
   `;
 }
@@ -6258,7 +6277,7 @@ function wireLifeTracker(root) {
   root.querySelectorAll("[data-lt-del]").forEach(btn => {
     btn.addEventListener("click", e => {
       e.stopPropagation();
-      if(confirm("¿Eliminar este elemento del Tracker Vital?")) {
+      if(confirm("┬┐Eliminar este elemento del Tracker Vital?")) {
         lifeTaskDelete(btn.getAttribute("data-lt-del"));
         view();
       }
@@ -6286,7 +6305,7 @@ function wireLifeTracker(root) {
         setTimeout(() => {
           const inp = document.querySelector("#neuroChatInput");
           if(inp) {
-            inp.value = `¿Cómo te fue en: ${title}?`;
+            inp.value = `┬┐C├│mo te fue en: ${title}?`;
             inp.dispatchEvent(new Event("input", { bubbles: true }));
           }
           // Auto send
@@ -6310,16 +6329,65 @@ function wireLifeTracker(root) {
     btn.addEventListener("click", () => {
       try {
         const p = JSON.parse(btn.getAttribute("data-lt-suggest"));
-        lifeTaskAddCustom(p.name, "💸", 30, p.category, "cualquier");
+        lifeTaskAddCustom(p.name, "­ƒÆ©", 30, p.category);
         view();
       } catch(e){}
     });
   });
 
-  // ── Spotlight Actions ──
+  // ÔöÇÔöÇ TDA Banner Actions ÔöÇÔöÇ
+  root.querySelectorAll("[data-lt-tda-done]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      lifeTaskMarkDone(btn.getAttribute("data-lt-tda-done"));
+      toast("Ô£à ┬íMarcado! Buen trabajo.");
+      view();
+    });
+  });
+
+  root.querySelectorAll("[data-lt-tda-time]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-lt-tda-time");
+      const tasks = lifeTasksGet();
+      const task = tasks.find(x => x.id === id);
+      const name = task ? task.title : "el h├íbito";
+      // Mostrar mini modal de hora
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;";
+      overlay.innerHTML = `
+        <div style="background:#1e1e1e;border-radius:16px;padding:24px;max-width:320px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+          <div style="font-weight:700;font-size:15px;color:#e2e8f0;margin-bottom:6px;">┬┐A qu├® hora lo hiciste?</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:16px;">${escapeHtml(name)}</div>
+          <input id="tdaTimeInput" type="time" style="width:100%;background:#2d2d2d;border:1px solid rgba(255,255,255,0.15);border-radius:10px;color:#e2e8f0;font-size:18px;padding:10px 14px;text-align:center;" value="${new Date().toTimeString().slice(0,5)}" />
+          <div style="display:flex;gap:10px;margin-top:16px;">
+            <button id="tdaTimeSave" style="flex:1;background:#7c5cff;color:#fff;border:none;border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Guardar</button>
+            <button id="tdaTimeCancel" style="flex:1;background:rgba(255,255,255,0.08);color:#aaa;border:none;border-radius:10px;padding:12px;cursor:pointer;">Cancelar</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      overlay.querySelector("#tdaTimeCancel").addEventListener("click", () => overlay.remove());
+      overlay.querySelector("#tdaTimeSave").addEventListener("click", () => {
+        const val = overlay.querySelector("#tdaTimeInput").value;
+        if (val) {
+          const [hh, mm] = val.split(":");
+          const d = new Date();
+          d.setHours(Number(hh), Number(mm), 0);
+          const forcedTs = `${isoDate(d)}T${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:00`;
+          lifeTaskMarkDone(id, forcedTs);
+          toast(`Ô£à Registrado a las ${val}`);
+        }
+        overlay.remove();
+        view();
+      });
+    });
+  });
+
   root.querySelectorAll("[data-lt-tda-skip]").forEach(btn => {
     btn.addEventListener("click", e => {
       e.stopPropagation();
+      // Ocultar el banner temporalmente (estado en memoria, no persiste)
       const id = btn.getAttribute("data-lt-tda-skip");
       state._tdaSkipped = state._tdaSkipped || {};
       state._tdaSkipped[id] = Date.now();
@@ -6346,33 +6414,6 @@ function wireLifeTracker(root) {
       }, 500);
     });
   });
-
-  // Chip click (moves it to spotlight by clearing skip state if any, and prioritizing it)
-  // Wait, if we click a chip, it's not overdue, but we want to do it now. 
-  // We can just mark it done from the chip itself. But the UI says we want chips to open spotlight.
-  // We can implement marking done directly from chip click.
-  root.querySelectorAll("[data-lt-chip-id]").forEach(chip => {
-    chip.addEventListener("click", e => {
-      e.stopPropagation();
-      if(chip.classList.contains("lt-chip-done")) return; // already done
-      lifeTaskMarkDone(chip.getAttribute("data-lt-chip-id"));
-      // Add celebrate class to root before view
-      const spot = root.querySelector("#homeLifeTracker");
-      if(spot) spot.classList.add("lt-celebrate");
-      setTimeout(() => view(), 600); // small delay to see animation
-    });
-  });
-
-  // Spotlight Done Click
-  root.querySelectorAll(".lt-spot-yes").forEach(btn => {
-    btn.addEventListener("click", e => {
-      e.stopPropagation();
-      lifeTaskMarkDone(btn.getAttribute("data-lt-done"));
-      const spot = root.querySelector("#ltSpotlight");
-      if(spot) spot.classList.add("lt-celebrate");
-      setTimeout(() => view(), 600);
-    });
-  });
 }
 
 function openLifeTaskModal() {
@@ -6383,47 +6424,41 @@ function openLifeTaskModal() {
   const tomorrowIso = new Date(Date.now()+86400000).toISOString().split("T")[0];
   bd.innerHTML = `
     <div class="modal" style="max-width:380px">
-      <div class="modalHeader"><span>➕ Agregar al Tracker</span><button class="mpm-icon-btn" data-close>✕</button></div>
+      <div class="modalHeader"><span>Ô×ò Agregar al Tracker</span><button class="mpm-icon-btn" data-close>Ô£ò</button></div>
       <div class="modalBody" style="display:flex;flex-direction:column;gap:0">
         <!-- Tabs -->
         <div class="lt-modal-tabs">
-          <button class="lt-modal-tab active" data-lttab="habit">🔁 Hábito recurrente</button>
-          <button class="lt-modal-tab" data-lttab="event">📅 Evento único</button>
+          <button class="lt-modal-tab active" data-lttab="habit">­ƒöü H├íbito recurrente</button>
+          <button class="lt-modal-tab" data-lttab="event">­ƒôà Evento ├║nico</button>
         </div>
 
         <!-- Habit form -->
         <div id="ltHabitForm" style="display:flex;flex-direction:column;gap:12px;padding-top:16px">
           <input class="input" id="ltTitle" placeholder="Ej: Lavar el carro" />
           <div style="display:flex;gap:8px">
-            <input class="input" id="ltIcon" placeholder="Ícono 🧹" style="width:70px;text-align:center"/>
-            <input class="input" id="ltFreq" type="number" min="1" placeholder="Cada X días" style="flex:1"/>
+            <input class="input" id="ltIcon" placeholder="├ìcono ­ƒº╣" style="width:70px;text-align:center"/>
+            <input class="input" id="ltFreq" type="number" min="1" placeholder="Cada X d├¡as" style="flex:1"/>
           </div>
           <select class="input" id="ltCat">
-            <option value="higiene">🧴 Higiene</option>
-            <option value="hogar">🏠 Hogar</option>
-            <option value="pago">💸 Pago/Deuda</option>
-            <option value="salud">💊 Salud</option>
-            <option value="otro">📌 Otro</option>
+            <option value="higiene">­ƒº┤ Higiene</option>
+            <option value="hogar">­ƒÅá Hogar</option>
+            <option value="pago">­ƒÆ© Pago/Deuda</option>
+            <option value="salud">­ƒÆè Salud</option>
+            <option value="otro">­ƒôî Otro</option>
           </select>
-          <select class="input" id="ltPod">
-            <option value="cualquier">🕒 En cualquier momento</option>
-            <option value="manana">🌅 Por la mañana (6am-12pm)</option>
-            <option value="tarde">🌇 Por la tarde (12pm-7pm)</option>
-            <option value="noche">🌙 Por la noche (7pm-12am)</option>
-          </select>
-          <button class="btn primary" id="ltSaveHabit">Guardar hábito</button>
+          <button class="btn primary" id="ltSaveHabit">Guardar h├íbito</button>
         </div>
 
         <!-- Event form -->
         <div id="ltEventForm" style="display:none;flex-direction:column;gap:12px;padding-top:16px">
           <input class="input" id="ltEvtTitle" placeholder="Ej: Entrevista de trabajo" />
           <div style="display:flex;gap:8px">
-            <input class="input" id="ltEvtIcon" placeholder="Ícono 💼" style="width:70px;text-align:center"/>
+            <input class="input" id="ltEvtIcon" placeholder="├ìcono ­ƒÆ╝" style="width:70px;text-align:center"/>
             <input class="input" id="ltEvtDate" type="date" value="${tomorrowIso}" style="flex:1"/>
           </div>
           <input class="input" id="ltEvtNote" placeholder="Nota (opcional): empresa, lugar..." />
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(255,255,255,0.6);cursor:pointer">
-            <input type="checkbox" id="ltEvtFollowup" checked style="width:16px;height:16px"/> Que Carl me pregunte cómo me fue
+            <input type="checkbox" id="ltEvtFollowup" checked style="width:16px;height:16px"/> Que Carl me pregunte c├│mo me fue
           </label>
           <button class="btn primary" id="ltSaveEvent">Guardar evento</button>
         </div>
@@ -6444,7 +6479,7 @@ function openLifeTaskModal() {
   bd.querySelector("#ltSaveHabit").addEventListener("click", () => {
     const title = bd.querySelector("#ltTitle").value.trim();
     if(!title) return;
-    lifeTaskAddCustom(title, bd.querySelector("#ltIcon").value.trim()||"📌", Number(bd.querySelector("#ltFreq").value)||7, bd.querySelector("#ltCat").value, bd.querySelector("#ltPod").value);
+    lifeTaskAddCustom(title, bd.querySelector("#ltIcon").value.trim()||"­ƒôî", Number(bd.querySelector("#ltFreq").value)||7, bd.querySelector("#ltCat").value);
     bd.remove(); view();
   });
   bd.querySelector("#ltSaveEvent").addEventListener("click", () => {
@@ -6452,9 +6487,9 @@ function openLifeTaskModal() {
     const dueDate = bd.querySelector("#ltEvtDate").value;
     if(!title || !dueDate) return;
     const t = bd.querySelector("lt_followup") ? bd.querySelector("#ltEvtFollowup").checked : true;
-    lifeEventAdd(title, bd.querySelector("#ltEvtIcon").value.trim()||"📅", dueDate, bd.querySelector("#ltEvtNote").value.trim(), "evento");
+    lifeEventAdd(title, bd.querySelector("#ltEvtIcon").value.trim()||"­ƒôà", dueDate, bd.querySelector("#ltEvtNote").value.trim(), "evento");
     bd.remove(); view();
-    toast("Evento guardado. Carl te preguntará cómo te fue 💜");
+    toast("Evento guardado. Carl te preguntar├í c├│mo te fue ­ƒÆ£");
   });
   host.appendChild(bd);
 }
@@ -6468,7 +6503,7 @@ function openLifeTrackerStatsModal() {
   const habits = tasks.filter(t => t.type!=="event");
   const log = Array.isArray(state.lifeTasksLog) ? state.lifeTasksLog : [];
 
-  // 1. Salud del sistema (Distribución de urgencias)
+  // 1. Salud del sistema (Distribuci├│n de urgencias)
   let ok=0, soon=0, due=0, crit=0;
   habits.forEach(t => {
     const u = lifeTaskUrgency(t);
@@ -6481,22 +6516,22 @@ function openLifeTrackerStatsModal() {
   const pctOk = Math.round((ok/total)*100);
   const healthHtml = `
     <div class="mmchart-card" style="margin-bottom:12px;">
-      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Salud de Hábitos</div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Salud de H├íbitos</div>
       <div style="display:flex;align-items:center;gap:16px;">
         <div style="width:60px;height:60px;border-radius:50%;background:conic-gradient(#22c55e ${pctOk}%, #ef4444 0);display:flex;align-items:center;justify-content:center;">
           <div style="width:48px;height:48px;border-radius:50%;background:#1e1e1e;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;">${pctOk}%</div>
         </div>
         <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;">
-          <div style="color:#22c55e">● ${ok} Al día</div>
-          <div style="color:#eab308">● ${soon} Pronto</div>
-          <div style="color:#f97316">● ${due} Hoy</div>
-          <div style="color:#ef4444">● ${crit} Atrasados</div>
+          <div style="color:#22c55e">ÔùÅ ${ok} Al d├¡a</div>
+          <div style="color:#eab308">ÔùÅ ${soon} Pronto</div>
+          <div style="color:#f97316">ÔùÅ ${due} Hoy</div>
+          <div style="color:#ef4444">ÔùÅ ${crit} Atrasados</div>
         </div>
       </div>
     </div>
   `;
 
-  // 2. Actividad últimos 7 días (Gráfico de barras simple usando divs)
+  // 2. Actividad ├║ltimos 7 d├¡as (Gr├ífico de barras simple usando divs)
   const today = new Date();
   today.setHours(0,0,0,0);
   const weekData = Array.from({length:7}, (_,i) => {
@@ -6511,7 +6546,7 @@ function openLifeTrackerStatsModal() {
   const maxCount = Math.max(1, ...weekData.map(w=>w.count));
   const weekHtml = `
     <div class="mmchart-card" style="margin-bottom:12px;">
-      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-weight:700;text-transform:uppercase;">Actividad (7 días)</div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-weight:700;text-transform:uppercase;">Actividad (7 d├¡as)</div>
       <div style="display:flex;justify-content:space-between;align-items:flex-end;height:80px;padding-top:10px;border-bottom:1px solid rgba(255,255,255,0.1);">
         ${weekData.map(w => {
           const h = (w.count / maxCount) * 100;
@@ -6529,7 +6564,7 @@ function openLifeTrackerStatsModal() {
     </div>
   `;
 
-  // 3. Hábito más atrasado (El que tiene el ratio más alto de urgencia)
+  // 3. H├íbito m├ís atrasado (El que tiene el ratio m├ís alto de urgencia)
   const mostOverdue = [...habits].filter(t=>t.freqDays>0).sort((a,b)=>{
     const ratioA = lifeTaskDaysSince(a)/a.freqDays;
     const ratioB = lifeTaskDaysSince(b)/b.freqDays;
@@ -6537,12 +6572,12 @@ function openLifeTrackerStatsModal() {
   })[0];
   const overdueHtml = mostOverdue ? `
     <div class="mmchart-card">
-      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">El más olvidado</div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">El m├ís olvidado</div>
       <div style="display:flex;align-items:center;gap:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);padding:10px;border-radius:12px;">
         <div style="font-size:24px;">${mostOverdue.icon}</div>
         <div>
           <div style="font-size:14px;font-weight:700;color:#ef4444">${escapeHtml(mostOverdue.title)}</div>
-          <div style="font-size:11px;color:rgba(255,255,255,0.6)">Debería ser cada ${mostOverdue.freqDays} días.</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.6)">Deber├¡a ser cada ${mostOverdue.freqDays} d├¡as.</div>
         </div>
       </div>
     </div>
@@ -6550,7 +6585,7 @@ function openLifeTrackerStatsModal() {
 
   bd.innerHTML = `
     <div class="modal" style="max-width:380px;background:#1e1e1e">
-      <div class="modalHeader"><span>📊 Stats del Tracker</span><button class="mpm-icon-btn" data-close>✕</button></div>
+      <div class="modalHeader"><span>­ƒôè Stats del Tracker</span><button class="mpm-icon-btn" data-close>Ô£ò</button></div>
       <div class="modalBody" style="display:flex;flex-direction:column;gap:0;">
         ${healthHtml}
         ${weekHtml}
@@ -6574,9 +6609,9 @@ function renderNeuroClawCard(){
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">NeuroClaw</h2>
-          <div class="small">${loading ? "Analizando…" : (has ? `Sugerencias • ${escapeHtml(stamp)}` : "Sin señales aún")}</div>
+          <div class="small">${loading ? "AnalizandoÔÇª" : (has ? `Sugerencias ÔÇó ${escapeHtml(stamp)}` : "Sin se├▒ales a├║n")}</div>
         </div>
-        <button class="iconBtn" id="btnNeuroAnalyze" aria-label="Analyze">🧠</button>
+        <button class="iconBtn" id="btnNeuroAnalyze" aria-label="Analyze">­ƒºá</button>
       </div>
       <div class="hr"></div>
       ${has ? `
@@ -6588,14 +6623,14 @@ function renderNeuroClawCard(){
                 ${neuroclawBadge(it.priority)}
               </div>
               <div class="neuroActions">
-                <button class="miniBtn" data-neuro-rate="up" data-neuro-id="${escapeHtml(it.id)}">👍</button>
-                <button class="miniBtn" data-neuro-rate="down" data-neuro-id="${escapeHtml(it.id)}">👎</button>
+                <button class="miniBtn" data-neuro-rate="up" data-neuro-id="${escapeHtml(it.id)}">­ƒæì</button>
+                <button class="miniBtn" data-neuro-rate="down" data-neuro-id="${escapeHtml(it.id)}">­ƒæÄ</button>
               </div>
             </div>
           `).join("")}
         </div>
       ` : `
-        <div class="muted">Registra sueño y mood unos días, y dale 🧠 para analizar.</div>
+        <div class="muted">Registra sue├▒o y mood unos d├¡as, y dale ­ƒºá para analizar.</div>
       `}
     ${renderNeuroClawAIBlock()}
     </section>
@@ -6609,24 +6644,24 @@ function renderSwissAstroCard(){
   const d = state?.swissDaily || null;
 
   const sub = loading
-    ? "Invocando…"
-    : (d ? `${(typeof d.moon_phase==="number" ? Math.round(d.moon_phase*100) + "%" : "—")} • Luna en ${d.moon_sign || "?"}` : (swissDailyAvailable() ? "Listo para hoy" : "Configura Swiss"));
+    ? "InvocandoÔÇª"
+    : (d ? `${(typeof d.moon_phase==="number" ? Math.round(d.moon_phase*100) + "%" : "ÔÇö")} ÔÇó Luna en ${d.moon_sign || "?"}` : (swissDailyAvailable() ? "Listo para hoy" : "Configura Swiss"));
 
   const msg = d ? (d.message || (Array.isArray(d.transits) ? d.transits[0] : "") || "") : "";
   const body = loading
-    ? `<div class="muted">Buscando tu visión lunar del día…</div>`
-    : (err ? `<div class="muted">⚠ ${escapeHtml(err)}</div>` : (msg ? `<div class="swissMsg">${escapeHtml(msg)}</div>` : `<div class="muted">Sin datos aún.</div>`));
+    ? `<div class="muted">Buscando tu visi├│n lunar del d├¡aÔÇª</div>`
+    : (err ? `<div class="muted">ÔÜá ${escapeHtml(err)}</div>` : (msg ? `<div class="swissMsg">${escapeHtml(msg)}</div>` : `<div class="muted">Sin datos a├║n.</div>`));
 
   return `
     <section class="card homeCard" id="homeSwissAstroCard">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">Visión lunar</h2>
+          <h2 class="cardTitle">Visi├│n lunar</h2>
           <div class="small">${escapeHtml(sub)}</div>
         </div>
         <div style="display:flex; gap:8px;">
-          <button class="iconBtn" id="btnSwissRefresh" aria-label="Refresh">⟳</button>
-          <button class="iconBtn" id="btnSwissDetails" aria-label="Details">↗</button>
+          <button class="iconBtn" id="btnSwissRefresh" aria-label="Refresh">Ôƒ│</button>
+          <button class="iconBtn" id="btnSwissDetails" aria-label="Details">Ôåù</button>
         </div>
       </div>
       <div class="hr"></div>
@@ -6649,7 +6684,7 @@ function renderNeuroDebugModal(){
     const v = signals[k];
     const vv = (typeof v==="number") ? (Math.round(v*100)/100) : v;
     return `<div class="neuroDbgRow"><div class="neuroDbgK">${escapeHtml(k)}</div><div class="neuroDbgV">${escapeHtml(String(vv))}</div></div>`;
-  }).join("") : `<div class="muted">${running ? "Aún no hay análisis. Dale 🧠 en Home." : "Sin señales."}</div>`;
+  }).join("") : `<div class="muted">${running ? "A├║n no hay an├ílisis. Dale ­ƒºá en Home." : "Sin se├▒ales."}</div>`;
 
   const sugRows = suggestions.length ? suggestions.map(s=>`
     <div class="neuroDbgSug">
@@ -6659,24 +6694,24 @@ function renderNeuroDebugModal(){
       </div>
       ${s.why ? `<div class="muted">${escapeHtml(String(s.why))}</div>` : ``}
     </div>
-  `).join("") : `<div class="muted">${running ? "" : "Ninguna regla se activó. Eso también es buena señal 😄"}</div>`;
+  `).join("") : `<div class="muted">${running ? "" : "Ninguna regla se activ├│. Eso tambi├®n es buena se├▒al ­ƒÿä"}</div>`;
 
   return `
   <div class="modalBackdrop" id="neuroDbgBackdrop">
     <div class="modal" role="dialog" aria-label="NeuroClaw Debug">
       <div class="modalTop">
         <div>
-          <div class="modalTitle">NeuroClaw: Qué está pensando</div>
-          <div class="modalSub">${stamp ? `Último análisis: ${escapeHtml(stamp)}` : "Ejecuta un análisis para ver señales y reglas."}</div>
+          <div class="modalTitle">NeuroClaw: Qu├® est├í pensando</div>
+          <div class="modalSub">${stamp ? `├Ültimo an├ílisis: ${escapeHtml(stamp)}` : "Ejecuta un an├ílisis para ver se├▒ales y reglas."}</div>
         </div>
-        <button class="iconBtn" id="btnNeuroDbgClose" aria-label="Close">✕</button>
+        <button class="iconBtn" id="btnNeuroDbgClose" aria-label="Close">Ô£ò</button>
       </div>
 
       <div class="hr"></div>
 
       <div class="neuroDbgGrid">
         <div class="neuroDbgCol">
-          <div class="neuroDbgH">Señales</div>
+          <div class="neuroDbgH">Se├▒ales</div>
           <div class="neuroDbgBox">${sigRows}</div>
         </div>
         <div class="neuroDbgCol">
@@ -6686,8 +6721,8 @@ function renderNeuroDebugModal(){
       </div>
 
       <div class="row" style="margin-top:12px;">
-        <button class="btn" id="btnNeuroDbgRerun">Re-analizar 🧠</button>
-        <button class="btn" id="btnNeuroDbgCopy">Copiar señales</button>
+        <button class="btn" id="btnNeuroDbgRerun">Re-analizar ­ƒºá</button>
+        <button class="btn" id="btnNeuroDbgCopy">Copiar se├▒ales</button>
       </div>
     </div>
   </div>
@@ -6720,7 +6755,7 @@ function viewHome(){
       <input type="checkbox" data-rem="${escapeHtml(r.id)}" />
       <span>${escapeHtml(r.text)}</span>
     </label>
-  `).join("") : `<div class="muted">Sin pendientes 🎈</div>`;
+  `).join("") : `<div class="muted">Sin pendientes ­ƒÄê</div>`;
 
   const moodMap = (state.moodDaily && typeof state.moodDaily==="object") ? state.moodDaily : {};
   
@@ -6759,7 +6794,7 @@ function viewHome(){
     incredible:"#4ADE80", good:"#86EFAC", meh:"#60A5FA", bad:"#FBBF24", horrible:"#F87171"
   };
   const FACE_LABEL_MAP = {
-    incredible:"Increíble", good:"Bien", meh:"Meh", bad:"Mal", horrible:"Horrible"
+    incredible:"Incre├¡ble", good:"Bien", meh:"Meh", bad:"Mal", horrible:"Horrible"
   };
 
   // Build timeline rows for today's moods
@@ -6768,10 +6803,10 @@ function viewHome(){
     const color = FACE_COLORS_MAP[entry.spriteId] || "#7c5cff";
     const label = entry.label || FACE_LABEL_MAP[entry.spriteId] || entry.spriteId;
     const timeStr = fmtTime(entry.ts);
-    const acts = (entry.activities||[]).slice(0,3).join(" · ");
+    const acts = (entry.activities||[]).slice(0,3).join(" ┬À ");
     return `
       <div class="moodTimelineRow">
-        <div class="moodTimelineFace" style="--fc:${color}">${svg||"😶"}</div>
+        <div class="moodTimelineFace" style="--fc:${color}">${svg||"­ƒÿÂ"}</div>
         <div class="moodTimelineInfo">
           <div class="moodTimelineLabel" style="color:${color}">${escapeHtml(label)}</div>
           ${acts ? `<div class="moodTimelineActs">${escapeHtml(acts)}</div>` : ""}
@@ -6789,7 +6824,7 @@ function viewHome(){
     </div>
   `).join("") + `
     <div class="dayPill moodPill" id="homeMoodPill" data-mood-day="${todayIso}">
-      ${todayEntries.length ? `<div class="djp-mood-pill-face">${_getMoodSvg(todayEntries[todayEntries.length-1].spriteId, false)}</div>` : `<div class="moodPillPlus">＋</div>`}
+      ${todayEntries.length ? `<div class="djp-mood-pill-face">${_getMoodSvg(todayEntries[todayEntries.length-1].spriteId, false)}</div>` : `<div class="moodPillPlus">´╝ï</div>`}
       <div class="dayAbbr">Mood</div>
     </div>
   `;
@@ -6813,12 +6848,12 @@ const sleepBars = renderSleepBars(sleepSeries);
     <div class="homeGrid">
       <section class="card homeCard djp-sleep-card" id="homeSleepCard">
         <div class="djp-sc-header">
-          <div class="djp-sc-icon">🌙</div>
+          <div class="djp-sc-icon">­ƒîÖ</div>
           <div class="djp-sc-title-block">
-            <div class="djp-sc-title">Sueño</div>
-            <div class="djp-sc-sub">7 días</div>
+            <div class="djp-sc-title">Sue├▒o</div>
+            <div class="djp-sc-sub">7 d├¡as</div>
           </div>
-          <button class="djp-sc-add-btn" id="btnAddSleep" aria-label="Add sleep">＋</button>
+          <button class="djp-sc-add-btn" id="btnAddSleep" aria-label="Add sleep">´╝ï</button>
         </div>
         ${sleepBars}
       </section>
@@ -6827,14 +6862,14 @@ const sleepBars = renderSleepBars(sleepSeries);
       <section class="card homeCard homeMoodCard" id="homeMoodCard">
         <div class="cardTop">
           <div>
-            <h2 class="cardTitle">😊 Emociones</h2>
+            <h2 class="cardTitle">­ƒÿè Emociones</h2>
             <div class="small">${todayEntries.length ? `${todayEntries.length} registro${todayEntries.length>1?"s":""} hoy` : "Sin registros hoy"}</div>
           </div>
-          <button class="iconBtn" id="btnAddMoodEntry" title="Registrar emoción">＋</button>
+          <button class="iconBtn" id="btnAddMoodEntry" title="Registrar emoci├│n">´╝ï</button>
         </div>
         <div class="hr"></div>
         <div class="moodTimeline" id="moodTimeline">
-          ${moodTimelineRows || `<div class="muted" style="text-align:center;padding:16px 0;">Toca ＋ para registrar cómo te sientes</div>`}
+          ${moodTimelineRows || `<div class="muted" style="text-align:center;padding:16px 0;">Toca ´╝ï para registrar c├│mo te sientes</div>`}
         </div>
       </section>
 
@@ -6844,7 +6879,7 @@ const sleepBars = renderSleepBars(sleepSeries);
             <h2 class="cardTitle">Reminders</h2>
             <div class="small">Hoy</div>
           </div>
-          <button class="iconBtn" id="btnGoReminders" aria-label="Go reminders">↗</button>
+          <button class="iconBtn" id="btnGoReminders" aria-label="Go reminders">Ôåù</button>
         </div>
         <div class="hr"></div>
         <div class="homeChecks">
@@ -6863,14 +6898,14 @@ const sleepBars = renderSleepBars(sleepSeries);
         <div class="musicLeft">
           <div class="musicLeftTop">
             <div>
-              <div class="musicKicker">MÚSICA FAVORITA</div>
+              <div class="musicKicker">M├ÜSICA FAVORITA</div>
               <div class="musicHint">${hasMusic ? (music.mode==="log" ? `Historial ${music.cursor+1}/${music.total}` : `Hoy`) : "Toca + para registrar"}</div>
             </div>
             <div class="musicLeftBtns">
-              <button class="musicMini" id="btnMusicPrev" ${music.total<=1 ? "disabled":""} aria-label="Prev">⏮</button>
-              <button class="musicPlay" id="btnMusicPlay" ${hasMusic ? "":"disabled"} aria-label="Play">▶</button>
-              <button class="musicMini" id="btnMusicNext" ${music.total<=1 ? "disabled":""} aria-label="Next">⏭</button>
-              <button class="musicAdd" id="btnAddMusic" aria-label="Add">＋</button>
+              <button class="musicMini" id="btnMusicPrev" ${music.total<=1 ? "disabled":""} aria-label="Prev">ÔÅ«</button>
+              <button class="musicPlay" id="btnMusicPlay" ${hasMusic ? "":"disabled"} aria-label="Play">ÔûÂ</button>
+              <button class="musicMini" id="btnMusicNext" ${music.total<=1 ? "disabled":""} aria-label="Next">ÔÅ¡</button>
+              <button class="musicAdd" id="btnAddMusic" aria-label="Add">´╝ï</button>
             </div>
           </div>
 
@@ -6878,16 +6913,16 @@ const sleepBars = renderSleepBars(sleepSeries);
             <div class="musicBig">${escapeHtml(mTitle)}</div>
             <div class="musicMetaLine">
               ${mArtist ? `<span>${escapeHtml(mArtist)}</span>` : `<span class="muted">Artista</span>`}
-              ${m.album ? `<span class="dot">•</span><span>${escapeHtml(m.album)}</span>` : ``}
+              ${m.album ? `<span class="dot">ÔÇó</span><span>${escapeHtml(m.album)}</span>` : ``}
             </div>
             <div class="musicMetaLine" style="margin-top:6px;">
               ${mMood ? `<span>${escapeHtml(mMood)}</span>` : ``}
-              ${mMood && (mIntensity !== null && !Number.isNaN(mIntensity)) ? `<span class="dot">•</span>` : ``}
+              ${mMood && (mIntensity !== null && !Number.isNaN(mIntensity)) ? `<span class="dot">ÔÇó</span>` : ``}
               ${mIntensity !== null && !Number.isNaN(mIntensity) ? `<span>${escapeHtml(String(mIntensity))}/10</span>` : ``}
             </div>
             ${m.note ? `<div class="musicNote">${escapeHtml(m.note)}</div>` : ``}
           ` : `
-            <div class="musicEmpty">¿Qué canción te está pegando hoy? 🎧</div>
+            <div class="musicEmpty">┬┐Qu├® canci├│n te est├í pegando hoy? ­ƒÄº</div>
           `}
         </div>
 
@@ -6895,12 +6930,12 @@ const sleepBars = renderSleepBars(sleepSeries);
           ${hasMusic && (m.coverUrl||"") ? `
             <img class="musicCover" src="${escapeHtml(m.coverUrl)}" alt="Cover" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
             <div class="musicCoverPlaceholder" style="display:none; width:100%; height:100%;">
-              <div class="musicCoverEmoji">💿</div>
+              <div class="musicCoverEmoji">­ƒÆ┐</div>
               <div class="musicCoverText">Error de imagen</div>
             </div>
           ` : `
             <div class="musicCoverPlaceholder">
-              <div class="musicCoverEmoji">🎛️</div>
+              <div class="musicCoverEmoji">­ƒÄø´©Å</div>
               <div class="musicCoverText">Sube una portada</div>
             </div>
           `}
@@ -6914,7 +6949,7 @@ const sleepBars = renderSleepBars(sleepSeries);
           <h2 class="cardTitle">Presupuesto mensual</h2>
           <div class="small">Pagos de fin de mes</div>
         </div>
-        <button class="iconBtn" id="btnAddBudgetItem" aria-label="Add budget item">＋</button>
+        <button class="iconBtn" id="btnAddBudgetItem" aria-label="Add budget item">´╝ï</button>
       </div>
       <div class="hr"></div>
       ${renderBudgetMonthly()}
@@ -6928,12 +6963,12 @@ const sleepBars = renderSleepBars(sleepSeries);
           <h2 class="cardTitle">Merge Lab <span class="chip">v7.6</span></h2>
           <div class="small">Suelta y fusiona (pantalla completa)</div>
         </div>
-        <button class="iconBtn" id="btnOpenMergeGame" aria-label="Open merge game">🎮</button>
+        <button class="iconBtn" id="btnOpenMergeGame" aria-label="Open merge game">­ƒÄ«</button>
       </div>
       <div class="hr"></div>
       <div class="small" style="line-height:1.35">
         Un mini juego dentro de MemoryCarl: toca para soltar piezas, si se tocan dos iguales se transforman en la siguiente.
-        No hay presión… excepto la línea roja 😅
+        No hay presi├│nÔÇª excepto la l├¡nea roja ­ƒÿà
       </div>
     </section>
 
@@ -6964,14 +6999,14 @@ function renderBudgetMonthly(){
     <div class="budgetRow"  >
       <div class="budgetName">${escapeHtml(x.name)}</div>
       <div class="budgetAmt">S/ ${escapeHtml(fmt(x.amount))}</div>
-      <button class="miniDanger" data-budget-del="${escapeHtml(x.id)}" aria-label="Delete">✕</button>
+      <button class="miniDanger" data-budget-del="${escapeHtml(x.id)}" aria-label="Delete">Ô£ò</button>
     </div>
-  `).join("") : `<div class="muted">Toca ＋ para agregar tus pagos del mes 💸</div>`;
+  `).join("") : `<div class="muted">Toca ´╝ï para agregar tus pagos del mes ­ƒÆ©</div>`;
 
   return `
     <div class="budgetTop">
       <div class="budgetTotal">Total: <strong>S/ ${escapeHtml(fmt(total))}</strong></div>
-      <div class="budgetCount">${items.length ? `${items.length} ítem(s)` : ""}</div>
+      <div class="budgetCount">${items.length ? `${items.length} ├¡tem(s)` : ""}</div>
     </div>
     <div class="budgetList">${list}</div>
   `;
@@ -6989,7 +7024,7 @@ function openBudgetModal(){
           <div class="modalTitle">Agregar pago mensual</div>
           <div class="modalSub">Registra lo que debes pagar a fin de mes. (Local + sync)</div>
         </div>
-        <button class="iconBtn" data-close aria-label="Close">✕</button>
+        <button class="iconBtn" data-close aria-label="Close">Ô£ò</button>
       </div>
 
       <div class="formGrid">
@@ -7004,9 +7039,9 @@ function openBudgetModal(){
         </label>
 
         <label class="field">
-          <div class="label">Día (opcional)</div>
+          <div class="label">D├¡a (opcional)</div>
           <input id="bDay" type="number" min="1" max="31" placeholder="Ej: 30" />
-          <div class="hint">Si lo dejas vacío: fin de mes.</div>
+          <div class="hint">Si lo dejas vac├¡o: fin de mes.</div>
         </label>
 
         <label class="field">
@@ -7043,7 +7078,7 @@ function openBudgetModal(){
     const note = String(elNote?.value||"").trim();
 
     if(!name || !amount){
-      toast("Falta concepto o monto ✍️");
+      toast("Falta concepto o monto Ô£ì´©Å");
       return;
     }
 
@@ -7052,7 +7087,7 @@ function openBudgetModal(){
     state.budgetMonthly = items;
     persist();
     view();
-    toast("Pago agregado ✅");
+    toast("Pago agregado Ô£à");
     close();
   });
 }
@@ -7111,33 +7146,33 @@ function animateSleepModalOut(backdrop, done){
   if(!anim) done();
 }
 
-// ─── Dream Journal Pro: openSleepModal ────────────────────────────────────
+// ÔöÇÔöÇÔöÇ Dream Journal Pro: openSleepModal ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 const _DJP_TYPES = [
-  { id:"normal",    label:"Normal",    icon:"🌙" },
-  { id:"lucid",     label:"Lúcido",    icon:"✨" },
-  { id:"nightmare", label:"Pesadilla", icon:"😨" },
-  { id:"recurring", label:"Recurrente",icon:"🔄" },
-  { id:"vivid",     label:"Vívido",    icon:"🎨" },
-  { id:"prophetic", label:"Profético", icon:"🔮" },
+  { id:"normal",    label:"Normal",    icon:"­ƒîÖ" },
+  { id:"lucid",     label:"L├║cido",    icon:"Ô£¿" },
+  { id:"nightmare", label:"Pesadilla", icon:"­ƒÿ¿" },
+  { id:"recurring", label:"Recurrente",icon:"­ƒöä" },
+  { id:"vivid",     label:"V├¡vido",    icon:"­ƒÄ¿" },
+  { id:"prophetic", label:"Prof├®tico", icon:"­ƒö«" },
 ];
 const _DJP_EMOTIONS = [
-  { id:"calm",       label:"Calma",       icon:"🌊" },
-  { id:"anxious",    label:"Ansioso",     icon:"😰" },
-  { id:"happy",      label:"Feliz",       icon:"😊" },
-  { id:"confused",   label:"Confundido",  icon:"🌀" },
-  { id:"energized",  label:"Energizado",  icon:"⚡" },
-  { id:"melancholy", label:"Melancólico", icon:"🌧️" },
-  { id:"inspired",   label:"Inspirado",   icon:"💡" },
-  { id:"scared",     label:"Asustado",    icon:"😱" },
+  { id:"calm",       label:"Calma",       icon:"­ƒîè" },
+  { id:"anxious",    label:"Ansioso",     icon:"­ƒÿ░" },
+  { id:"happy",      label:"Feliz",       icon:"­ƒÿè" },
+  { id:"confused",   label:"Confundido",  icon:"­ƒîÇ" },
+  { id:"energized",  label:"Energizado",  icon:"ÔÜí" },
+  { id:"melancholy", label:"Melanc├│lico", icon:"­ƒîº´©Å" },
+  { id:"inspired",   label:"Inspirado",   icon:"­ƒÆí" },
+  { id:"scared",     label:"Asustado",    icon:"­ƒÿ▒" },
 ];
 const _DJP_CLARITY = [
   {v:1,label:"Borroso"},{v:2,label:"Parcial"},{v:3,label:"Claro"},
-  {v:4,label:"Vívido"},{v:5,label:"Hiper-real"},
+  {v:4,label:"V├¡vido"},{v:5,label:"Hiper-real"},
 ];
 const _DJP_SYMBOLS = [
-  "agua","fuego","vuelo","caída","persecución","casa","muerte",
-  "animal","luz","oscuridad","transformación","viaje","persona desconocida",
+  "agua","fuego","vuelo","ca├¡da","persecuci├│n","casa","muerte",
+  "animal","luz","oscuridad","transformaci├│n","viaje","persona desconocida",
   "perderse","dientes","examen","dinero","amor","guerra","naturaleza",
 ];
 
@@ -7290,21 +7325,21 @@ function openSleepModal(opts={}){
       <div class="djp-panel" id="djpPanel">
         <div class="djp-header">
           <div>
-            <div class="djp-title">${ex?"Editar Sueño":"Registrar Sueño"}</div>
-            <div class="djp-sub">Dream Journal · ${escapeHtml(form.date)}</div>
+            <div class="djp-title">${ex?"Editar Sue├▒o":"Registrar Sue├▒o"}</div>
+            <div class="djp-sub">Dream Journal ┬À ${escapeHtml(form.date)}</div>
           </div>
-          <button class="djp-close" id="djpClose">✕</button>
+          <button class="djp-close" id="djpClose">Ô£ò</button>
         </div>
 
         <div class="djp-section">
-          <div class="djp-label">Tipo de sueño</div>
+          <div class="djp-label">Tipo de sue├▒o</div>
           <div class="djp-pill-grid">
             ${_DJP_TYPES.map(t=>`<button class="djp-pill ${form.dreamType===t.id?"active":""}" data-type="${t.id}">${t.icon} ${escapeHtml(t.label)}</button>`).join("")}
           </div>
         </div>
 
         <div class="djp-section">
-          <div class="djp-label">Emoción al despertar</div>
+          <div class="djp-label">Emoci├│n al despertar</div>
           <div class="djp-pill-grid">
             ${_DJP_EMOTIONS.map(e=>`<button class="djp-pill ${form.wakeEmotion===e.id?"active":""}" data-emotion="${e.id}">${e.icon} ${escapeHtml(e.label)}</button>`).join("")}
           </div>
@@ -7319,44 +7354,44 @@ function openSleepModal(opts={}){
 
         <div class="djp-section">
           <div class="djp-lucid-toggle ${form.lucidMoment?"active":""}" id="djpLucid">
-            <div class="djp-lucid-icon">✨</div>
+            <div class="djp-lucid-icon">Ô£¿</div>
             <div class="djp-lucid-text">
               <div class="djp-lucid-title">Momento de lucidez</div>
-              <div class="djp-lucid-desc">Hubo consciencia dentro del sueño</div>
+              <div class="djp-lucid-desc">Hubo consciencia dentro del sue├▒o</div>
             </div>
-            <div class="djp-lucid-check">${form.lucidMoment?"✓":""}</div>
+            <div class="djp-lucid-check">${form.lucidMoment?"Ô£ô":""}</div>
           </div>
         </div>
 
         <div class="djp-section">
-          <div class="djp-label">Narrativa del sueño</div>
-          <textarea class="djp-narrative" id="djpNarrative" rows="4" placeholder="Describe lo que recordás... lugares, personas, sensaciones, secuencias...">${escapeHtml(form.narrative)}</textarea>
+          <div class="djp-label">Narrativa del sue├▒o</div>
+          <textarea class="djp-narrative" id="djpNarrative" rows="4" placeholder="Describe lo que record├ís... lugares, personas, sensaciones, secuencias...">${escapeHtml(form.narrative)}</textarea>
         </div>
 
         <div class="djp-section">
-          <div class="djp-label">Símbolos y arquetipos</div>
-          <div class="djp-preset-hint">Atajos rápidos:</div>
+          <div class="djp-label">S├¡mbolos y arquetipos</div>
+          <div class="djp-preset-hint">Atajos r├ípidos:</div>
           <div class="djp-preset-grid">
             ${_DJP_SYMBOLS.map(s=>`<button class="djp-preset-chip" data-preset="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join("")}
           </div>
           <div class="djp-symbol-input-row">
-            <input class="djp-symbol-input" id="djpSymInput" placeholder="Símbolo personalizado..."/>
-            <button class="djp-symbol-add" id="djpSymAdd">＋</button>
+            <input class="djp-symbol-input" id="djpSymInput" placeholder="S├¡mbolo personalizado..."/>
+            <button class="djp-symbol-add" id="djpSymAdd">´╝ï</button>
           </div>
           <div class="djp-pill-grid" id="djpSymTags">
-            ${form.symbols.map(s=>`<span class="djp-symbol-tag">${escapeHtml(s)}<button class="djp-symbol-remove" data-rm="${escapeHtml(s)}">×</button></span>`).join("")}
+            ${form.symbols.map(s=>`<span class="djp-symbol-tag">${escapeHtml(s)}<button class="djp-symbol-remove" data-rm="${escapeHtml(s)}">├ù</button></span>`).join("")}
           </div>
         </div>
 
         <div class="djp-divider"></div>
 
         <div class="djp-section">
-          <div class="djp-label">Duración y calidad</div>
+          <div class="djp-label">Duraci├│n y calidad</div>
           <div class="djp-timing-row">
             <div class="djp-field"><label>Fecha</label><input type="date" id="djpDate" value="${escapeHtml(form.date)}"></div>
-            <div class="djp-field"><label>Calidad (1–5)</label>
+            <div class="djp-field"><label>Calidad (1ÔÇô5)</label>
               <select id="djpQuality">
-                <option value="">—</option>
+                <option value="">ÔÇö</option>
                 ${[1,2,3,4,5].map(n=>`<option value="${n}" ${form.quality===String(n)?"selected":""}>${n}</option>`).join("")}
               </select>
             </div>
@@ -7364,14 +7399,14 @@ function openSleepModal(opts={}){
             <div class="djp-field"><label>Hora fin</label><input type="time" id="djpEnd" value="${escapeHtml(form.end)}"></div>
           </div>
           <div class="djp-field" style="margin-top:10px;">
-            <label>Nota rápida</label>
-            <input type="text" id="djpNote" placeholder="café tarde, ruido, calor..." value="${escapeHtml(form.note)}">
+            <label>Nota r├ípida</label>
+            <input type="text" id="djpNote" placeholder="caf├® tarde, ruido, calor..." value="${escapeHtml(form.note)}">
           </div>
         </div>
 
         <div class="djp-footer">
           <button class="djp-btn" id="djpCancel">Cancelar</button>
-          <button class="djp-btn primary" id="djpSave">${ex?"Guardar cambios":"Guardar sueño 🌙"}</button>
+          <button class="djp-btn primary" id="djpSave">${ex?"Guardar cambios":"Guardar sue├▒o ­ƒîÖ"}</button>
         </div>
       </div>
     `;
@@ -7388,7 +7423,7 @@ function openSleepModal(opts={}){
   const refreshSymTags=()=>{
     const c=backdrop.querySelector("#djpSymTags");
     if(!c) return;
-    c.innerHTML=form.symbols.map(s=>`<span class="djp-symbol-tag">${escapeHtml(s)}<button class="djp-symbol-remove" data-rm="${escapeHtml(s)}">×</button></span>`).join("");
+    c.innerHTML=form.symbols.map(s=>`<span class="djp-symbol-tag">${escapeHtml(s)}<button class="djp-symbol-remove" data-rm="${escapeHtml(s)}">├ù</button></span>`).join("");
     c.querySelectorAll("[data-rm]").forEach(b=>b.addEventListener("click",()=>{ form.symbols=form.symbols.filter(x=>x!==b.getAttribute("data-rm")); refreshSymTags(); }));
   };
 
@@ -7420,7 +7455,7 @@ function openSleepModal(opts={}){
       form.lucidMoment=!form.lucidMoment;
       lucid.classList.toggle("active",form.lucidMoment);
       const chk=lucid.querySelector(".djp-lucid-check");
-      if(chk) chk.textContent=form.lucidMoment?"✓":"";
+      if(chk) chk.textContent=form.lucidMoment?"Ô£ô":"";
     });
 
     backdrop.querySelectorAll("[data-preset]").forEach(b=>b.addEventListener("click",()=>{
@@ -7447,12 +7482,12 @@ function openSleepModal(opts={}){
       const note=(g("djpNote")?.value||"").trim();
       const narrative=(g("djpNarrative")?.value||"").trim();
 
-      if(!date){ toast("Elige una fecha 📅"); return; }
+      if(!date){ toast("Elige una fecha ­ƒôà"); return; }
 
       let totalMinutes=0;
       if(start&&end) totalMinutes=_djpCalcMinutes(date,start,end);
-      if(!totalMinutes&&!narrative&&!form.dreamType){ toast("Agrega hora inicio/fin, o escribe algo del sueño 🌙"); return; }
-      if(totalMinutes>24*60){ toast("Más de 24h 😅 Revisa"); return; }
+      if(!totalMinutes&&!narrative&&!form.dreamType){ toast("Agrega hora inicio/fin, o escribe algo del sue├▒o ­ƒîÖ"); return; }
+      if(totalMinutes>24*60){ toast("M├ís de 24h ­ƒÿà Revisa"); return; }
 
       const entry={
         id:ex?.id||uid(),
@@ -7483,7 +7518,7 @@ function openSleepModal(opts={}){
       if(state.sleepLog.length>1500) state.sleepLog=state.sleepLog.slice(-1500);
       persist(); view();
       if(typeof opts.onSaved==="function") opts.onSaved(entry);
-      toast(ex?"Sueño actualizado ✅":"Sueño guardado 🌙");
+      toast(ex?"Sue├▒o actualizado Ô£à":"Sue├▒o guardado ­ƒîÖ");
       close();
     });
   };
@@ -7492,7 +7527,7 @@ function openSleepModal(opts={}){
   host.appendChild(backdrop);
 }
 
-// ─── Dream Journal Pro: openSleepHistoryModal ──────────────────────────────
+// ÔöÇÔöÇÔöÇ Dream Journal Pro: openSleepHistoryModal ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 function openSleepHistoryModal(){
   _djpInjectStyles();
@@ -7506,19 +7541,19 @@ function openSleepHistoryModal(){
         <div class="djp-hist-header">
           <div>
             <div class="djp-title">Dream Journal</div>
-            <div class="djp-sub">Historial · Patrones · Análisis</div>
+            <div class="djp-sub">Historial ┬À Patrones ┬À An├ílisis</div>
           </div>
           <div class="djp-hist-actions">
             <button class="djp-hist-action-btn" id="djpHistCsv">CSV</button>
-            <button class="djp-hist-action-btn" id="djpHistAdd">＋ Nuevo</button>
-            <button class="djp-close" id="djpHistClose">✕</button>
+            <button class="djp-hist-action-btn" id="djpHistAdd">´╝ï Nuevo</button>
+            <button class="djp-close" id="djpHistClose">Ô£ò</button>
           </div>
         </div>
         <div class="djp-stats-grid" id="djpStatGrid"></div>
         <div class="djp-tabs">
-          <button class="djp-tab active" data-tab="log">📋 Registros</button>
-          <button class="djp-tab" data-tab="patterns">🔮 Patrones</button>
-          <button class="djp-tab" data-tab="chart">📈 Gráfico</button>
+          <button class="djp-tab active" data-tab="log">­ƒôï Registros</button>
+          <button class="djp-tab" data-tab="patterns">­ƒö« Patrones</button>
+          <button class="djp-tab" data-tab="chart">­ƒôê Gr├ífico</button>
         </div>
       </div>
       <div class="djp-hist-scroll" id="djpHistContent"></div>
@@ -7564,8 +7599,8 @@ function openSleepHistoryModal(){
     g.innerHTML=[
       {v:all.length,l:"Total"},
       {v:formatSleepDuration(avg),l:"Prom. horas"},
-      {v:`${streak}🔥`,l:"Racha"},
-      {v:lucidAll.length,l:"Lúcidos"},
+      {v:`${streak}­ƒöÑ`,l:"Racha"},
+      {v:lucidAll.length,l:"L├║cidos"},
     ].map(s=>`<div class="djp-stat"><div class="djp-stat-val">${escapeHtml(String(s.v))}</div><div class="djp-stat-lbl">${escapeHtml(s.l)}</div></div>`).join("");
   };
 
@@ -7589,7 +7624,7 @@ function openSleepHistoryModal(){
       }
       heatmapData[r.date] = {
         color,
-        label: r.totalMinutes ? formatSleepDuration(r.totalMinutes) : "Sin duración"
+        label: r.totalMinutes ? formatSleepDuration(r.totalMinutes) : "Sin duraci├│n"
       };
     });
     const ghHtml = renderGithubHeatmap(year, heatmapData);
@@ -7601,7 +7636,7 @@ function openSleepHistoryModal(){
       <div class="djp-chart-controls" style="margin-bottom:10px;">
         ${[["7","7D"],["30","30D"],["90","90D"],["all","Todo"]].map(([v,t])=>`<button class="djp-range-btn ${uiSt.range===v?"active":""}" data-range="${v}">${t}</button>`).join("")}
       </div>
-      <input class="djp-search" id="djpSearch" placeholder="Buscar por fecha, nota, símbolo..." value="${escapeHtml(uiSt.query)}">
+      <input class="djp-search" id="djpSearch" placeholder="Buscar por fecha, nota, s├¡mbolo..." value="${escapeHtml(uiSt.query)}">
       <div class="djp-hist-list">
         ${rows.length?rows.map(r=>{
           const ti=tMap[r.dreamType]; const ei=eMap[r.wakeEmotion];
@@ -7610,23 +7645,23 @@ function openSleepHistoryModal(){
               <div class="djp-hist-date">
                 ${escapeHtml(r.date)}
                 ${ti?`<span class="djp-hist-type-badge">${ti.icon} ${escapeHtml(ti.label)}</span>`:""}
-                ${r.lucidMoment?`<span class="djp-hist-type-badge">✨ Lúcido</span>`:""}
+                ${r.lucidMoment?`<span class="djp-hist-type-badge">Ô£¿ L├║cido</span>`:""}
               </div>
               <div class="djp-hist-meta">
-                ${r.totalMinutes?formatSleepDuration(r.totalMinutes):"Sin duración"}
-                ${r.quality?` · Q${r.quality}/5`:""}
-                ${ei?` · ${ei.icon} ${escapeHtml(ei.label)}`:""}
-                ${r.clarity?` · Claridad ${r.clarity}/5`:""}
+                ${r.totalMinutes?formatSleepDuration(r.totalMinutes):"Sin duraci├│n"}
+                ${r.quality?` ┬À Q${r.quality}/5`:""}
+                ${ei?` ┬À ${ei.icon} ${escapeHtml(ei.label)}`:""}
+                ${r.clarity?` ┬À Claridad ${r.clarity}/5`:""}
               </div>
               ${r.symbols.length?`<div class="djp-hist-symbols">${r.symbols.map(s=>`<span class="djp-hist-symbol">${escapeHtml(s)}</span>`).join("")}</div>`:""}
               ${r.narrative?`<div class="djp-hist-narrative">${escapeHtml(r.narrative)}</div>`:""}
             </div>
             <div class="djp-hist-row-actions">
-              <button class="djp-icon-btn" data-edit="${escapeHtml(r.id)}">✎</button>
-              <button class="djp-icon-btn del" data-del="${escapeHtml(r.id)}">🗑</button>
+              <button class="djp-icon-btn" data-edit="${escapeHtml(r.id)}">Ô£Ä</button>
+              <button class="djp-icon-btn del" data-del="${escapeHtml(r.id)}">­ƒùæ</button>
             </div>
           </div>`;
-        }).join(""):`<div class="djp-empty">Sin registros para este período.</div>`}
+        }).join(""):`<div class="djp-empty">Sin registros para este per├¡odo.</div>`}
       </div>
     `;
     c.querySelectorAll("[data-range]").forEach(b=>b.addEventListener("click",()=>{ uiSt.range=b.getAttribute("data-range")||"30"; renderLog(); renderStats(); }));
@@ -7634,7 +7669,7 @@ function openSleepHistoryModal(){
     c.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>{ openSleepModal({editId:b.getAttribute("data-edit"),onSaved:()=>{ renderStats(); renderActive(); }}); }));
     c.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{
       state.sleepLog=(state.sleepLog||[]).filter(x=>String(x.id||"")!==b.getAttribute("data-del"));
-      persist(); view(); toast("Registro eliminado 🗑"); renderStats(); renderActive();
+      persist(); view(); toast("Registro eliminado ­ƒùæ"); renderStats(); renderActive();
     }));
   };
 
@@ -7658,21 +7693,21 @@ function openSleepHistoryModal(){
     c.innerHTML=`
       <div class="djp-pattern-grid">
         <div class="djp-pattern-card">
-          <div class="djp-pattern-title">🔮 Símbolos frecuentes</div>
-          ${topSym.length?topSym.map(([s,n])=>`<div class="djp-bar-row"><div class="djp-bar-label" title="${escapeHtml(s)}">${escapeHtml(s)}</div><div class="djp-bar-fill-wrap"><div class="djp-bar-fill" style="width:${Math.round((n/maxS)*100)}%"></div></div><div class="djp-bar-count">${n}</div></div>`).join(""):`<div style="color:rgba(255,255,255,.3);font-size:11px">Sin datos aún</div>`}
+          <div class="djp-pattern-title">­ƒö« S├¡mbolos frecuentes</div>
+          ${topSym.length?topSym.map(([s,n])=>`<div class="djp-bar-row"><div class="djp-bar-label" title="${escapeHtml(s)}">${escapeHtml(s)}</div><div class="djp-bar-fill-wrap"><div class="djp-bar-fill" style="width:${Math.round((n/maxS)*100)}%"></div></div><div class="djp-bar-count">${n}</div></div>`).join(""):`<div style="color:rgba(255,255,255,.3);font-size:11px">Sin datos a├║n</div>`}
         </div>
         <div class="djp-pattern-card">
-          <div class="djp-pattern-title">🌙 Tipos de sueño</div>
-          ${topTypes.length?topTypes.map(([id,n])=>`<div class="djp-bar-row"><div class="djp-bar-label">${tMap[id]?.icon||""} ${escapeHtml(tMap[id]?.label||id)}</div><div class="djp-bar-fill-wrap"><div class="djp-bar-fill" style="width:${Math.round((n/maxT)*100)}%"></div></div><div class="djp-bar-count">${n}</div></div>`).join(""):`<div style="color:rgba(255,255,255,.3);font-size:11px">Sin datos aún</div>`}
+          <div class="djp-pattern-title">­ƒîÖ Tipos de sue├▒o</div>
+          ${topTypes.length?topTypes.map(([id,n])=>`<div class="djp-bar-row"><div class="djp-bar-label">${tMap[id]?.icon||""} ${escapeHtml(tMap[id]?.label||id)}</div><div class="djp-bar-fill-wrap"><div class="djp-bar-fill" style="width:${Math.round((n/maxT)*100)}%"></div></div><div class="djp-bar-count">${n}</div></div>`).join(""):`<div style="color:rgba(255,255,255,.3);font-size:11px">Sin datos a├║n</div>`}
         </div>
         <div class="djp-pattern-card">
-          <div class="djp-pattern-title">💫 Emociones al despertar</div>
-          ${topEm.length?topEm.slice(0,6).map(([id,n])=>`<div class="djp-bar-row"><div class="djp-bar-label">${eMap[id]?.icon||""} ${escapeHtml(eMap[id]?.label||id)}</div><div class="djp-bar-fill-wrap"><div class="djp-bar-fill" style="width:${Math.round((n/maxE)*100)}%"></div></div><div class="djp-bar-count">${n}</div></div>`).join(""):`<div style="color:rgba(255,255,255,.3);font-size:11px">Sin datos aún</div>`}
+          <div class="djp-pattern-title">­ƒÆ½ Emociones al despertar</div>
+          ${topEm.length?topEm.slice(0,6).map(([id,n])=>`<div class="djp-bar-row"><div class="djp-bar-label">${eMap[id]?.icon||""} ${escapeHtml(eMap[id]?.label||id)}</div><div class="djp-bar-fill-wrap"><div class="djp-bar-fill" style="width:${Math.round((n/maxE)*100)}%"></div></div><div class="djp-bar-count">${n}</div></div>`).join(""):`<div style="color:rgba(255,255,255,.3);font-size:11px">Sin datos a├║n</div>`}
         </div>
         <div class="djp-pattern-card">
-          <div class="djp-pattern-title">📊 Resumen global</div>
-          <div class="djp-bar-row" style="margin-bottom:10px"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">Total sueños</div><div style="font-weight:900;font-size:15px;color:#fff">${all.length}</div></div>
-          <div class="djp-bar-row" style="margin-bottom:10px"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">Lúcidos</div><div style="font-weight:900;font-size:15px;color:rgba(124,92,255,.9)">${lucid.length} <span style="font-size:10px;opacity:.6">(${all.length?((lucid.length/all.length)*100).toFixed(0):0}%)</span></div></div>
+          <div class="djp-pattern-title">­ƒôè Resumen global</div>
+          <div class="djp-bar-row" style="margin-bottom:10px"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">Total sue├▒os</div><div style="font-weight:900;font-size:15px;color:#fff">${all.length}</div></div>
+          <div class="djp-bar-row" style="margin-bottom:10px"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">L├║cidos</div><div style="font-weight:900;font-size:15px;color:rgba(124,92,255,.9)">${lucid.length} <span style="font-size:10px;opacity:.6">(${all.length?((lucid.length/all.length)*100).toFixed(0):0}%)</span></div></div>
           <div class="djp-bar-row" style="margin-bottom:10px"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">Pesadillas</div><div style="font-weight:900;font-size:15px;color:rgba(255,100,100,.8)">${all.filter(r=>r.dreamType==="nightmare").length}</div></div>
           <div class="djp-bar-row"><div style="flex:1;font-size:11px;color:rgba(255,255,255,.6)">Con narrativa</div><div style="font-weight:900;font-size:15px;color:rgba(80,200,140,.8)">${all.filter(r=>r.narrative).length}</div></div>
         </div>
@@ -7709,7 +7744,7 @@ function openSleepHistoryModal(){
       }
       heatmapData[r.date] = {
         color,
-        label: r.totalMinutes ? formatSleepDuration(r.totalMinutes) : "Sin duración"
+        label: r.totalMinutes ? formatSleepDuration(r.totalMinutes) : "Sin duraci├│n"
       };
     });
     const ghHtml = renderGithubHeatmap(year, heatmapData);
@@ -7719,7 +7754,7 @@ function openSleepHistoryModal(){
         ${[["7","7D"],["30","30D"],["90","90D"],["all","Todo"]].map(([v,t])=>`<button class="djp-range-btn ${uiSt.range===v?"active":""}" data-range="${v}">${t}</button>`).join("")}
       </div>
       <div class="djp-chart-wrap" style="margin-bottom:16px;">
-        <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Curva de sueño</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Curva de sue├▒o</div>
         ${rows.length?`
           <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
             <defs><linearGradient id="djpGrad" x1="0" y1="0" x2="0" y2="1">
@@ -7729,9 +7764,9 @@ function openSleepHistoryModal(){
             <line x1="14" y1="${H-18}" x2="${W-14}" y2="${H-18}" stroke="rgba(255,255,255,.15)" stroke-width="1"/>
             ${path?`<path d="${path} L ${pts[pts.length-1].x} ${H-18} L ${pts[0].x} ${H-18} Z" fill="url(#djpGrad)"/>
             <path d="${path}" fill="none" stroke="rgba(124,92,255,.9)" stroke-width="2.5" stroke-linecap="round"/>`:``}
-            ${pts.map(pt=>`<circle cx="${pt.x}" cy="${pt.y}" r="3.5" fill="#fff" stroke="rgba(124,92,255,.9)" stroke-width="2"><title>${escapeHtml(pt.r.date)} · ${formatSleepDuration(pt.r.totalMinutes)}</title></circle>`).join("")}
+            ${pts.map(pt=>`<circle cx="${pt.x}" cy="${pt.y}" r="3.5" fill="#fff" stroke="rgba(124,92,255,.9)" stroke-width="2"><title>${escapeHtml(pt.r.date)} ┬À ${formatSleepDuration(pt.r.totalMinutes)}</title></circle>`).join("")}
           </svg>
-        `:`<div class="djp-empty">Sin datos con duración en este período.</div>`}
+        `:`<div class="djp-empty">Sin datos con duraci├│n en este per├¡odo.</div>`}
       </div>
       ${ghHtml}
     `;
@@ -7753,7 +7788,7 @@ function openSleepHistoryModal(){
 
   backdrop.querySelector("#djpHistCsv")?.addEventListener("click",()=>{
     const rows=getLog();
-    if(!rows.length){ toast("No hay registros 📭"); return; }
+    if(!rows.length){ toast("No hay registros ­ƒô¡"); return; }
     const esc=v=>`"${String(v??"")}"`; 
     const head=["fecha","horas","minutos","calidad","tipo","emocion","claridad","lucido","simbolos","narrativa","nota","inicio","fin"];
     const body=rows.map(r=>[r.date,(r.totalMinutes/60).toFixed(2),r.totalMinutes,r.quality??"",r.dreamType,r.wakeEmotion,r.clarity??"",r.lucidMoment?"si":"no",r.symbols.join("|"),r.narrative,r.note,r.start,r.end]);
@@ -7762,7 +7797,7 @@ function openSleepHistoryModal(){
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a"); a.href=url; a.download=`dream-journal-${isoDate(new Date())}.csv`;
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    toast("CSV exportado ✅");
+    toast("CSV exportado Ô£à");
   });
 
   backdrop.querySelector("#djpHistAdd")?.addEventListener("click",()=>{ openSleepModal({onSaved:()=>{ renderStats(); renderActive(); }}); });
@@ -7782,9 +7817,9 @@ function openMusicModal(existingEntry = null) {
     <div class="modal" style="max-width:420px; width:95%; background:#1c1c1e; color:#fff; border-radius:14px; padding:16px;">
       <h2>${existingEntry ? "Editar Tema" : "Registrar Tema Fav."}</h2>
       <div class="grid" style="display:flex; flex-direction:column; gap:10px; margin-top:12px;">
-        <input class="input" id="mcSong" placeholder="Canción (obligatorio)" value="${existingEntry?.song || ''}" />
+        <input class="input" id="mcSong" placeholder="Canci├│n (obligatorio)" value="${existingEntry?.song || ''}" />
         <input class="input" id="mcArtist" placeholder="Artista (opcional)" value="${existingEntry?.artist || ''}" />
-        <input class="input" id="mcAlbum" placeholder="Álbum (opcional)" value="${existingEntry?.album || ''}" />
+        <input class="input" id="mcAlbum" placeholder="├ülbum (opcional)" value="${existingEntry?.album || ''}" />
         <input class="input" id="mcMood" placeholder="Mood tag (opcional) ej: calma, power" value="${existingEntry?.mood || ''}" />
         <input class="input" id="mcIntensity" type="number" min="1" max="10" step="1" placeholder="Intensidad (1-10, opcional)" value="${existingEntry?.intensity !== null && existingEntry?.intensity !== undefined ? existingEntry.intensity : ''}" />
         
@@ -7793,7 +7828,7 @@ function openMusicModal(existingEntry = null) {
           <div style="display:flex; gap:10px; align-items:center;">
             <input class="input" id="mcCoverUrl" placeholder="https://... o sube archivo" style="flex:1; margin:0;" value="${existingEntry?.coverUrl || ''}" />
             <label class="btn ghost" style="padding:6px 12px; cursor:pointer; font-size:13px; font-weight:700; margin:0; display:flex; align-items:center; gap:4px; height:38px; box-sizing:border-box;">
-              📷 Subir
+              ­ƒôÀ Subir
               <input id="fileCoverUpload" type="file" accept="image/*" style="display:none;">
             </label>
           </div>
@@ -7809,7 +7844,7 @@ function openMusicModal(existingEntry = null) {
         <button class="btn ghost" id="btnCancel" style="flex:1;">Cancelar</button>
         <button class="btn primary" id="btnSave" style="flex:1;">Guardar</button>
       </div>
-      <div class="muted" style="margin-top:10px;">Tip: si solo pones canción, ya sirve. Lo demás es extra.</div>
+      <div class="muted" style="margin-top:10px;">Tip: si solo pones canci├│n, ya sirve. Lo dem├ís es extra.</div>
     </div>
   `;
 
@@ -7860,7 +7895,7 @@ function openMusicModal(existingEntry = null) {
     const note = modal.querySelector("#mcNote").value.trim();
 
     if(!song){
-      toast("Falta la canción 🎵");
+      toast("Falta la canci├│n ­ƒÄÁ");
       return;
     }
 
@@ -7924,7 +7959,7 @@ function openMusicModal(existingEntry = null) {
 
     persist();
     view();
-    toast(existingEntry ? "Tema editado ✏️" : "Tema guardado ✅");
+    toast(existingEntry ? "Tema editado Ô£Å´©Å" : "Tema guardado Ô£à");
     close();
   });
 }
@@ -8007,7 +8042,7 @@ function openMusicHubModal() {
 
     const listHtml = `
       <div style="margin-bottom:12px; display:flex; gap:8px;">
-        <input type="text" id="musicHubSearch" class="textInput" placeholder="Buscar por canción, artista o mood..." value="${escapeHtml(searchQuery)}" style="flex:1; margin:0;" />
+        <input type="text" id="musicHubSearch" class="textInput" placeholder="Buscar por canci├│n, artista o mood..." value="${escapeHtml(searchQuery)}" style="flex:1; margin:0;" />
       </div>
       <div style="max-height:50vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;" id="musicHubListContainer">
         ${filteredLog.map(m => {
@@ -8017,29 +8052,29 @@ function openMusicHubModal() {
               <div style="width:50px; height:50px; border-radius:8px; overflow:hidden; flex-shrink:0; background:#1c1c1e; display:flex; align-items:center; justify-content:center;">
                 ${hasCover ? `
                   <img src="${escapeHtml(m.coverUrl)}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
-                  <div style="display:none; font-size:20px;">💿</div>
+                  <div style="display:none; font-size:20px;">­ƒÆ┐</div>
                 ` : `
-                  <div style="font-size:20px;">💿</div>
+                  <div style="font-size:20px;">­ƒÆ┐</div>
                 `}
               </div>
               <div style="flex:1; min-width:0;">
                 <div style="font-weight:700; font-size:14px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(m.song)}</div>
                 <div style="font-size:12px; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                  ${m.artist ? escapeHtml(m.artist) : 'Artista desconocido'} ${m.album ? ` • ${escapeHtml(m.album)}` : ''}
+                  ${m.artist ? escapeHtml(m.artist) : 'Artista desconocido'} ${m.album ? ` ÔÇó ${escapeHtml(m.album)}` : ''}
                 </div>
                 <div style="display:flex; gap:6px; align-items:center; margin-top:4px; flex-wrap:wrap;">
                   ${m.mood ? `<span style="background:#7c5cff33; color:#a78bfa; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">${escapeHtml(m.mood)}</span>` : ''}
-                  ${m.intensity !== null && m.intensity !== undefined ? `<span style="background:#f59e0b22; color:#fbbf24; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">⭐ ${m.intensity}/10</span>` : ''}
+                  ${m.intensity !== null && m.intensity !== undefined ? `<span style="background:#f59e0b22; color:#fbbf24; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">Ô¡É ${m.intensity}/10</span>` : ''}
                 </div>
               </div>
               <div style="display:flex; gap:6px; flex-direction:column; align-items:flex-end;">
                 <div style="font-size:10px; color:#888;">${m.date || ''}</div>
                 <div style="display:flex; gap:6px; margin-top:4px;">
                   ${m.linkUrl ? `
-                    <button class="iconBtn" onclick="window.open('${escapeHtml(m.linkUrl)}', '_blank', 'noopener,noreferrer')" title="Escuchar" style="background:#10b98122; color:#10b981; border-radius:6px; padding:4px 8px; font-size:12px;">▶ Play</button>
+                    <button class="iconBtn" onclick="window.open('${escapeHtml(m.linkUrl)}', '_blank', 'noopener,noreferrer')" title="Escuchar" style="background:#10b98122; color:#10b981; border-radius:6px; padding:4px 8px; font-size:12px;">ÔûÂ Play</button>
                   ` : ''}
-                  <button class="iconBtn editSongBtn" data-id="${m.id}" title="Editar" style="background:#3b82f622; color:#3b82f6; border-radius:6px; padding:4px 8px; font-size:12px;">✏️</button>
-                  <button class="iconBtn deleteSongBtn" data-id="${m.id}" title="Eliminar" style="background:#ef444422; color:#ef4444; border-radius:6px; padding:4px 8px; font-size:12px;">🗑️</button>
+                  <button class="iconBtn editSongBtn" data-id="${m.id}" title="Editar" style="background:#3b82f622; color:#3b82f6; border-radius:6px; padding:4px 8px; font-size:12px;">Ô£Å´©Å</button>
+                  <button class="iconBtn deleteSongBtn" data-id="${m.id}" title="Eliminar" style="background:#ef444422; color:#ef4444; border-radius:6px; padding:4px 8px; font-size:12px;">­ƒùæ´©Å</button>
                 </div>
               </div>
             </div>
@@ -8057,17 +8092,17 @@ function openMusicHubModal() {
           </div>
           <div style="background:#2a2a2c; padding:12px; border-radius:10px; text-align:center;">
             <div style="font-size:11px; color:#aaa; margin-bottom:4px;">Intensidad Promedio</div>
-            <div style="font-size:20px; font-weight:800; color:#f59e0b;">⭐ ${avgIntensity}</div>
+            <div style="font-size:20px; font-weight:800; color:#f59e0b;">Ô¡É ${avgIntensity}</div>
           </div>
         </div>
         
         <div style="background:#2a2a2c; padding:14px; border-radius:12px;">
-          <div style="font-weight:700; font-size:14px; color:#fff; margin-bottom:12px;">🎤 Top Artistas</div>
+          <div style="font-weight:700; font-size:14px; color:#fff; margin-bottom:12px;">­ƒÄñ Top Artistas</div>
           ${topArtists.map(a => barRow(a[0], a[1], maxArtistCount, '#7c5cff')).join('') || '<div style="color:#888; font-size:12px;">Sin datos suficientes</div>'}
         </div>
 
         <div style="background:#2a2a2c; padding:14px; border-radius:12px;">
-          <div style="font-weight:700; font-size:14px; color:#fff; margin-bottom:12px;">🧠 Top Moods / Emociones</div>
+          <div style="font-weight:700; font-size:14px; color:#fff; margin-bottom:12px;">­ƒºá Top Moods / Emociones</div>
           ${topMoods.map(m => barRow(m[0], m[1], maxMoodCount, '#10b981')).join('') || '<div style="color:#888; font-size:12px;">Sin datos suficientes</div>'}
         </div>
       </div>
@@ -8076,13 +8111,13 @@ function openMusicHubModal() {
     return `
       <div class="modal" style="max-width:550px; width:95%; background:#1c1c1e; color:#fff; border-radius:16px; padding:16px; display:flex; flex-direction:column; gap:12px;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-weight:800; font-size:18px;">🎵 Historial de Música</span>
-          <button class="iconBtn" id="btnMusicHubClose" style="font-size:18px;">✕</button>
+          <span style="font-weight:800; font-size:18px;">­ƒÄÁ Historial de M├║sica</span>
+          <button class="iconBtn" id="btnMusicHubClose" style="font-size:18px;">Ô£ò</button>
         </div>
 
         <div style="display:flex; gap:6px; border-bottom:1px solid #333; padding-bottom:8px;">
-          <button class="finModeBtn ${activeTab==='list'?'finModeBtnActive':''}" id="btnHubTabList" style="flex:1;">Listado 📋</button>
-          <button class="finModeBtn ${activeTab==='stats'?'finModeBtnActive':''}" id="btnHubTabStats" style="flex:1;">Estadísticas 📊</button>
+          <button class="finModeBtn ${activeTab==='list'?'finModeBtnActive':''}" id="btnHubTabList" style="flex:1;">Listado ­ƒôï</button>
+          <button class="finModeBtn ${activeTab==='stats'?'finModeBtnActive':''}" id="btnHubTabStats" style="flex:1;">Estad├¡sticas ­ƒôè</button>
         </div>
 
         <div id="musicHubDynamicBody">
@@ -8150,7 +8185,7 @@ function openMusicHubModal() {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         const id = btn.dataset.id;
-        if (confirm("¿Quieres eliminar este tema de tu historial?")) {
+        if (confirm("┬┐Quieres eliminar este tema de tu historial?")) {
           state.musicLog = (state.musicLog || []).filter(m => m.id !== id);
           if (state.musicToday && state.musicToday.id === id) {
             state.musicToday = state.musicLog[0] || null;
@@ -8196,7 +8231,7 @@ function wireHome(root){
   const sleepCard = root.querySelector("#homeSleepCard");
   if(sleepCard) sleepCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddSleep")) return; openSleepHistory(); });
 
-  // Navegar a la página de Tarot al tocar la card del Home
+  // Navegar a la p├ígina de Tarot al tocar la card del Home
   const tarotCard = root.querySelector("#homeTarotCard");
   if(tarotCard) tarotCard.addEventListener("click", () => {
     state.tab = "tarot";
@@ -8204,7 +8239,7 @@ function wireHome(root){
     view();
   });
 
-  // Mood sprites (daily emotion) — week strip pill
+  // Mood sprites (daily emotion) ÔÇö week strip pill
   const moodPill = root.querySelector("#homeMoodPill");
   if(moodPill){
     moodPill.addEventListener("click", (e)=>{
@@ -8247,7 +8282,7 @@ function wireHome(root){
       window.open(link, "_blank", "noopener,noreferrer");
       return;
     }
-    toast("Agrega un link (Spotify/YouTube) en el registro 🎧");
+    toast("Agrega un link (Spotify/YouTube) en el registro ­ƒÄº");
   });
 
   const cover = root.querySelector(".musicCover");
@@ -8288,7 +8323,11 @@ function wireHome(root){
   const btnLmRef = root.querySelector("#btnLunarMoneyRefresh");
   if(btnLmRef) btnLmRef.addEventListener("click", async (e)=>{
     e.stopPropagation();
-    await refreshSwissTransitsUI({ forceSpeak: true });
+    if(getSwissAstroUrl() && getSwissAstroKey()){
+      await refreshSwissTransitsUI({ forceSpeak: true });
+    } else {
+      toast("Calculando astrologia lite...");
+    }
     view();
   });
 
@@ -8313,7 +8352,7 @@ function wireHome(root){
       state.budgetMonthly = getBudgetMonthly().filter(x=>x.id!==id);
       persist();
       view();
-      toast("Eliminado 🧹");
+      toast("Eliminado ­ƒº╣");
     });
   });
 
@@ -8402,7 +8441,7 @@ function viewRoutines(){
 function routineCard(r){
   const done = r.steps.filter(s=>s.done).length;
   const total = r.steps.length;
-  const times = r.times?.length ? r.times.join(" • ") : "No time";
+  const times = r.times?.length ? r.times.join(" ÔÇó ") : "No time";
   const last = r.lastRun ? new Date(r.lastRun).toLocaleString() : "Never";
 
   return `
@@ -8410,7 +8449,7 @@ function routineCard(r){
       <div class="cardTop">
         <div>
           <h3 class="cardTitle">${escapeHtml(r.title)}</h3>
-          <div class="small">🕒 ${escapeHtml(times)} · ✅ ${done}/${total} · 🗓️ ${escapeHtml(last)}</div>
+          <div class="small">­ƒòÆ ${escapeHtml(times)} ┬À Ô£à ${done}/${total} ┬À ­ƒùô´©Å ${escapeHtml(last)}</div>
         </div>
         <div class="chip">${r.active ? "Active" : "Paused"}</div>
       </div>
@@ -8421,7 +8460,7 @@ function routineCard(r){
         ${r.steps.map(s => `
           <div class="item">
             <div class="left">
-              <div class="name">${s.done ? "✅" : "⬜"} ${escapeHtml(s.text)}</div>
+              <div class="name">${s.done ? "Ô£à" : "Ô¼£"} ${escapeHtml(s.text)}</div>
               <div class="meta">${s.done ? "Done" : "Pending"}</div>
             </div>
             <div class="row">
@@ -8472,11 +8511,11 @@ function viewShopping(){
     </div>
 
     <div class="row" style="margin-bottom:12px;">
-      <button class="btn" onclick="openProductLibrary()">📦 Biblioteca</button>
-      <button class="btn" data-act="openInventory">🏠 Inventario</button>
-      <button class="btn" data-act="openShoppingDashboard">📊 Dashboard</button>
-      <button class="btn" data-act="openShoppingAi">🤖 Asistente</button>
-      <button class="btn" data-act="openShoppingHistory">📅 Historial</button>
+      <button class="btn" onclick="openProductLibrary()">­ƒôª Biblioteca</button>
+      <button class="btn" data-act="openInventory">­ƒÅá Inventario</button>
+      <button class="btn" data-act="openShoppingDashboard">­ƒôè Dashboard</button>
+      <button class="btn" data-act="openShoppingAi">­ƒñû Asistente</button>
+      <button class="btn" data-act="openShoppingHistory">­ƒôà Historial</button>
       <div class="chip">hist: ${histCount}</div>
     </div>
 
@@ -8494,11 +8533,11 @@ function shoppingItemMeta(it){
   if(it.weight_g){
     const g = Number(it.weight_g||0);
     const perKg = (it.pricePerKg!=null) ? Number(it.pricePerKg||0) : null;
-    const perTxt = (perKg!=null && perKg>0) ? ` · ${money(perKg)}/kg` : "";
-    return `${money(price)} · ${g}g${perTxt} = <b>${money(total)}</b>`;
+    const perTxt = (perKg!=null && perKg>0) ? ` ┬À ${money(perKg)}/kg` : "";
+    return `${money(price)} ┬À ${g}g${perTxt} = <b>${money(total)}</b>`;
   }
 
-  return `${money(price)} × ${qty} = <b>${money(total)}</b>`;
+  return `${money(price)} ├ù ${qty} = <b>${money(total)}</b>`;
 }
 
 function shoppingCard(list){
@@ -8512,7 +8551,7 @@ function shoppingCard(list){
       <div class="cardTop">
         <div>
           <h3 class="cardTitle">${escapeHtml(list.name)}</h3>
-          <div class="small">Pending: <b>${money(totalPending)}</b> · Total: <b>${money(totalAll)}</b></div>
+          <div class="small">Pending: <b>${money(totalPending)}</b> ┬À Total: <b>${money(totalAll)}</b></div>
         </div>
         <div class="chip">${list.items.length} items</div>
       </div>
@@ -8523,7 +8562,7 @@ function shoppingCard(list){
         ${list.items.map(it => `
           <div class="item">
             <div class="left">
-              <div class="name">${it.bought ? "✅" : "⬜"} ${escapeHtml(it.name)}</div>
+              <div class="name">${it.bought ? "Ô£à" : "Ô¼£"} ${escapeHtml(it.name)}</div>
               <div class="meta">${shoppingItemMeta(it)}</div>
             </div>
             <div class="row">
@@ -8538,7 +8577,7 @@ function shoppingCard(list){
       <div class="row" style="margin-top:12px;">
         <button class="btn primary" data-act="addItem">+ Item</button>
         <button class="btn" data-act="renameList">Rename</button>
-        <button class="btn good" data-act="savePurchase">Guardar día</button>
+        <button class="btn good" data-act="savePurchase">Guardar d├¡a</button>
         <button class="btn danger" data-act="deleteList">Delete list</button>
       </div>
     </section>
@@ -8556,7 +8595,7 @@ function viewReminders(){
       <section class="card" data-reminder-id="${r.id}">
         <div class="cardTop">
           <div>
-            <h3 class="cardTitle">${r.done ? "✅" : "⬜"} ${escapeHtml(r.text)}</h3>
+            <h3 class="cardTitle">${r.done ? "Ô£à" : "Ô¼£"} ${escapeHtml(r.text)}</h3>
             <div class="small">${r.done ? "Completed" : "Pending"}</div>
           </div>
           <div class="row">
@@ -8609,11 +8648,11 @@ function ensureZoneDetails(zoneId){
   if(d.subzones.length===0){
     const zn = getHouseZoneName(zoneId).toLowerCase();
     const seed = (names)=> names.map((nm,i)=>({id:uid('sz'), name:nm, order:i+1}));
-    if(zn.includes('cocina')) d.subzones = seed(["Mesón", "Lavaplatos", "Cocina/Estufa", "Nevera", "Piso"]);
+    if(zn.includes('cocina')) d.subzones = seed(["Mes├│n", "Lavaplatos", "Cocina/Estufa", "Nevera", "Piso"]);
     else if(zn.includes('sala')) d.subzones = seed(["Mesa comedor", "Escritorio", "Piso", "Basura/Recoger"]);
     else if(zn.includes('pasillo')) d.subzones = seed(["Piso", "Paredes", "Puertas"]);
     else if(zn.includes('lavander')) d.subzones = seed(["Lavadora", "Tendedero", "Piso"]);
-    else if(zn.includes('baño') || zn.includes('bano')){
+    else if(zn.includes('ba├▒o') || zn.includes('bano')){
       if(zn.includes('peque')) d.subzones = seed(["WC", "Lavamanos", "Espejo", "Piso"]);
       else d.subzones = seed(["Ducha", "WC", "Lavamanos", "Espejo", "Piso"]);
     }
@@ -8698,7 +8737,7 @@ function renderHouseZoneSheet(){
           <input type="checkbox" data-zone-task-done="${escapeHtml(t.id)}" ${done?'checked':''}>
           <div style="flex:1;">
             <div style="font-weight:700;">${escapeHtml(t.name)}</div>
-            <div class="muted" style="margin-top:2px;">${Number(t.minutes)||0} min • cada ${Number(t.freqDays)||0} días • pri ${Number(t.priority)||0}</div>
+            <div class="muted" style="margin-top:2px;">${Number(t.minutes)||0} min ÔÇó cada ${Number(t.freqDays)||0} d├¡as ÔÇó pri ${Number(t.priority)||0}</div>
           </div>
           <button class="btn ghost" data-zone-edit-task="${escapeHtml(t.id)}">Edit</button>
         </label>
@@ -8715,7 +8754,7 @@ function renderHouseZoneSheet(){
           <button class="btn ghost" data-zone-add-task="${escapeHtml(sz.id)}">+ Tarea</button>
         </div>
         <div class="list" style="margin-top:8px;">
-          ${arr.length? arr.map(renderTask).join('') : `<div class="item"><div class="muted">Sin tareas aquí (aún).</div></div>`}
+          ${arr.length? arr.map(renderTask).join('') : `<div class="item"><div class="muted">Sin tareas aqu├¡ (a├║n).</div></div>`}
         </div>
       </div>
     `;
@@ -8758,7 +8797,7 @@ function renderHouseZoneSheet(){
     </div>
     <div class="zoneSection" style="margin-top:12px;">
       <div style="font-weight:800;margin-bottom:6px;">Notas</div>
-      <textarea class="input" id="zoneNotes" rows="4" placeholder="Tips, productos, reglas…">${escapeHtml(d.notes||'')}</textarea>
+      <textarea class="input" id="zoneNotes" rows="4" placeholder="Tips, productos, reglasÔÇª">${escapeHtml(d.notes||'')}</textarea>
       <div class="row" style="justify-content:flex-end;margin-top:10px;">
         <button class="btn primary" id="btnSaveZoneNotes">Guardar</button>
       </div>
@@ -8783,7 +8822,7 @@ function renderHouseZoneSheet(){
             ${mkTab('deep','Profunda')}
             ${mkTab('details','Detalles')}
           </div>
-          ${tab!=='details' ? `<div class="pill">${prog.done}/${prog.total} • ${prog.pct}%</div>` : ``}
+          ${tab!=='details' ? `<div class="pill">${prog.done}/${prog.total} ÔÇó ${prog.pct}%</div>` : ``}
         </div>
 
         ${tab!=='details' ? `
@@ -8885,7 +8924,7 @@ function buildHouseRoute(todayStr){
 
   // If nothing due, propose a tiny reset
   if(steps.length===0){
-    steps.push({kind:"tip", text:"Hoy estás al día ✅ Si quieres, haz 5 min de reset: basura + ordenar 10 cosas."});
+    steps.push({kind:"tip", text:"Hoy est├ís al d├¡a Ô£à Si quieres, haz 5 min de reset: basura + ordenar 10 cosas."});
   }
 
   return steps;
@@ -8911,14 +8950,14 @@ function ensureHouseMapLayout(){
   const defaults = [
     ["Cocina", 30, 40],
     ["Sala", 220, 40],
-    ["Lavandería", 35, 180],
-    ["Baño pequeño", 145, 180],
+    ["Lavander├¡a", 35, 180],
+    ["Ba├▒o peque├▒o", 145, 180],
     ["Pasillo", 170, 280],
     ["Cuarto Mathias", 45, 315],
     ["Cuarto Frederick", 240, 250],
-    ["Baño grande", 55, 430],
+    ["Ba├▒o grande", 55, 430],
     ["Cuarto Principal", 240, 470],
-    ["Vacío (doble altura)", 240, 360],
+    ["Vac├¡o (doble altura)", 240, 360],
   ];
 
   defaults.forEach(([name,x,y])=>{
@@ -8938,18 +8977,18 @@ function ensureHouseMapLayout(){
     };
     add("Sala","Cocina");
     add("Sala","Pasillo");
-    add("Cocina","Lavandería");
-    add("Lavandería","Baño pequeño");
-    add("Lavandería","Pasillo");
-    add("Baño pequeño","Pasillo");
+    add("Cocina","Lavander├¡a");
+    add("Lavander├¡a","Ba├▒o peque├▒o");
+    add("Lavander├¡a","Pasillo");
+    add("Ba├▒o peque├▒o","Pasillo");
     add("Pasillo","Cuarto Mathias");
     add("Pasillo","Cuarto Frederick");
-    add("Pasillo","Baño grande");
-    add("Baño grande","Cuarto Principal");
+    add("Pasillo","Ba├▒o grande");
+    add("Ba├▒o grande","Cuarto Principal");
     add("Pasillo","Cuarto Principal");
     // The void is just a landmark
-    add("Vacío (doble altura)","Cuarto Frederick");
-    add("Vacío (doble altura)","Baño grande");
+    add("Vac├¡o (doble altura)","Cuarto Frederick");
+    add("Vac├¡o (doble altura)","Ba├▒o grande");
   }
 
   persist();
@@ -9130,7 +9169,7 @@ function renderHouseMap(todayStr){
       </div>
 
       <div class="muted" style="margin-top:10px;">
-        Tip: en Conectar, toca 2 zonas para crear/quitar una conexión.
+        Tip: en Conectar, toca 2 zonas para crear/quitar una conexi├│n.
       </div>
     </div>
   `;
@@ -9218,7 +9257,7 @@ function renderActividadesDashboard() {
   const acts = actsGet();
   const hoyStr = isoDate();
   
-  // Stats rápidos
+  // Stats r├ípidos
   const logsHoy = acts.logs.filter(l => l.inicio.startsWith(hoyStr));
   const minutosHoy = Math.floor(logsHoy.reduce((acc, l) => acc + (l.duracionSeg || 0), 0) / 60);
   
@@ -9236,7 +9275,7 @@ function renderActividadesDashboard() {
               <span style="font-size:24px;">${tipo.icono}</span>
               <div>
                 <div style="font-weight:700; color:${tipo.color}; font-size:14px;">${tipo.nombre}</div>
-                <div style="font-size:11px; opacity:0.7;">En curso • ~${minsRunning} min</div>
+                <div style="font-size:11px; opacity:0.7;">En curso ÔÇó ~${minsRunning} min</div>
               </div>
             </div>
             <button class="btn" style="background:${tipo.color}; color:#fff;" data-act-stop="${tipo.id}">Detener</button>
@@ -9255,8 +9294,8 @@ function renderActividadesDashboard() {
         <div class="act-icon">${t.icono}</div>
         <div class="act-name">${t.nombre}</div>
         <div class="act-actions">
-           ${!acts.timerActivo ? `<button class="act-btn btn-quick" data-act-quick="${t.id}" title="Registro rápido (15m)">⚡ 15m</button>` : ''}
-           <button class="act-btn btn-timer" data-act-timer="${t.id}">${isActivo ? '⏹ Detener' : '▶ Iniciar'}</button>
+           ${!acts.timerActivo ? `<button class="act-btn btn-quick" data-act-quick="${t.id}" title="Registro r├ípido (15m)">ÔÜí 15m</button>` : ''}
+           <button class="act-btn btn-timer" data-act-timer="${t.id}">${isActivo ? 'ÔÅ╣ Detener' : 'ÔûÂ Iniciar'}</button>
         </div>
       </div>
     `;
@@ -9266,7 +9305,7 @@ function renderActividadesDashboard() {
     <div class="card">
       <div class="row" style="justify-content:space-between; margin-bottom:12px;">
          <div style="font-weight:700; font-size:16px;">Hoy en casa</div>
-         <div class="pill">${logsHoy.length} acts • ${minutosHoy} min</div>
+         <div class="pill">${logsHoy.length} acts ÔÇó ${minutosHoy} min</div>
       </div>
       ${timerWidget}
       <div class="act-grid">
@@ -9278,14 +9317,14 @@ function renderActividadesDashboard() {
 
 function renderActividadesHistorial() {
   const acts = actsGet();
-  const logs = [...acts.logs].sort((a, b) => b.inicio.localeCompare(a.inicio)).slice(0, 50); // Últimos 50
+  const logs = [...acts.logs].sort((a, b) => b.inicio.localeCompare(a.inicio)).slice(0, 50); // ├Ültimos 50
   
   if (logs.length === 0) {
-    return `<div class="card"><div class="muted" style="text-align:center; padding:30px;">No hay actividades registradas aún.</div></div>`;
+    return `<div class="card"><div class="muted" style="text-align:center; padding:30px;">No hay actividades registradas a├║n.</div></div>`;
   }
   
   const listHtml = logs.map(l => {
-    const tipo = acts.tipos.find(t => t.id === l.tipoId) || { nombre: "Desconocido", icono: "❓", color: "#888" };
+    const tipo = acts.tipos.find(t => t.id === l.tipoId) || { nombre: "Desconocido", icono: "ÔØô", color: "#888" };
     const d = new Date(l.inicio);
     const dateStr = d.toLocaleDateString("es-PE", { weekday:"short", day:"numeric", month:"short" });
     const timeStr = d.toLocaleTimeString("es-PE", { hour:"2-digit", minute:"2-digit" });
@@ -9297,12 +9336,12 @@ function renderActividadesHistorial() {
           <span style="font-size:20px;">${tipo.icono}</span>
           <div>
             <div style="font-weight:700; font-size:14px;">${tipo.nombre}</div>
-            <div style="font-size:11px; opacity:0.6;">${dateStr} • ${timeStr} ${l.modo==="rapido"?"(Rápido)":""}</div>
+            <div style="font-size:11px; opacity:0.6;">${dateStr} ÔÇó ${timeStr} ${l.modo==="rapido"?"(R├ípido)":""}</div>
           </div>
         </div>
         <div style="text-align:right;">
           <div style="font-weight:700; font-size:14px;">${mins} min</div>
-          <button class="iconBtn" data-act-del="${l.id}" style="font-size:12px; margin-top:2px;">🗑</button>
+          <button class="iconBtn" data-act-del="${l.id}" style="font-size:12px; margin-top:2px;">­ƒùæ</button>
         </div>
       </div>
     `;
@@ -9324,13 +9363,13 @@ function renderActividadesStats() {
   const acts = actsGet();
   return `
     <div class="card" style="margin-bottom:16px;">
-      <h3 style="margin-bottom:12px;">Actividad últimos 14 días</h3>
+      <h3 style="margin-bottom:12px;">Actividad ├║ltimos 14 d├¡as</h3>
       <div style="height:200px; position:relative;">
         <canvas id="actChartBar"></canvas>
       </div>
     </div>
     <div class="card">
-      <h3 style="margin-bottom:12px;">Distribución (30 días)</h3>
+      <h3 style="margin-bottom:12px;">Distribuci├│n (30 d├¡as)</h3>
       <div style="height:200px; position:relative;">
         <canvas id="actChartDonut"></canvas>
       </div>
@@ -9350,7 +9389,7 @@ function initActividadesStats() {
   
   if (!ctxBar || !ctxDonut) return;
   
-  // Preparar datos últimos 14 días
+  // Preparar datos ├║ltimos 14 d├¡as
   const today = new Date();
   today.setHours(0,0,0,0);
   const days = [];
@@ -9359,7 +9398,7 @@ function initActividadesStats() {
     days.push(isoDate(d));
   }
   
-  // Agrupar por categoría
+  // Agrupar por categor├¡a
   const categorias = [...new Set(acts.tipos.map(t=>t.categoria))];
   const catColors = {
     cocina: "#F59E0B", limpieza: "#8B5CF6", ropa: "#3B82F6", 
@@ -9400,7 +9439,7 @@ function initActividadesStats() {
     }
   }));
   
-  // Donut (últimos 30 días)
+  // Donut (├║ltimos 30 d├¡as)
   const thirtyDaysAgo = isoDate(new Date(today.getTime() - 30*86400000));
   const logs30 = acts.logs.filter(l => l.inicio >= thirtyDaysAgo);
   const dataDonut = categorias.map(cat => {
@@ -9445,13 +9484,13 @@ function viewHouse(){
         <div class="cardHead">
           <div>
             <h2>Casa & Actividades</h2>
-            <div class="muted">Tracker visual de rutinas domésticas</div>
+            <div class="muted">Tracker visual de rutinas dom├®sticas</div>
           </div>
         </div>
         <div class="seg" style="margin-top:16px;">
           ${mkSeg("actividades","Dashboard")}
           ${mkSeg("historial","Historial")}
-          ${mkSeg("stats","Estadísticas")}
+          ${mkSeg("stats","Estad├¡sticas")}
         </div>
       </div>
 
@@ -9474,8 +9513,8 @@ function old_viewHouse() {
           <div class="row" style="justify-content:space-between;align-items:flex-end;">
             <div>
               <div class="muted">Hoy (${escapeHtml(todayStr)})</div>
-              <div style="font-weight:700;font-size:18px;margin-top:2px;">Ruta óptima</div>
-              <div class="muted" style="margin-top:4px;">Modo: ${mode==="deep" ? "Profunda semanal" : "Ligera"} • Orden: global → zonas (prioridad + flujo)</div>
+              <div style="font-weight:700;font-size:18px;margin-top:2px;">Ruta ├│ptima</div>
+              <div class="muted" style="margin-top:4px;">Modo: ${mode==="deep" ? "Profunda semanal" : "Ligera"} ÔÇó Orden: global ÔåÆ zonas (prioridad + flujo)</div>
             </div>
             <div class="row">
               <button class="btn" id="btnHouseStart">${hasSession ? "Continuar" : "Iniciar"}</button>
@@ -9495,8 +9534,8 @@ function old_viewHouse() {
           ${prog ? `
           <div style="margin-top:10px;">
             <div class="row" style="justify-content:space-between;align-items:center;">
-              <div class="muted">Progreso sesión</div>
-              <div class="pill">${prog.done}/${prog.total} • ${prog.pct}%</div>
+              <div class="muted">Progreso sesi├│n</div>
+              <div class="pill">${prog.done}/${prog.total} ÔÇó ${prog.pct}%</div>
             </div>
             <div class="progress" aria-label="House progress">
               <div class="progressBar" style="width:${prog.pct}%;"></div>
@@ -9520,7 +9559,7 @@ function old_viewHouse() {
                     <input type="checkbox" data-house-done="${escapeHtml(st.taskId)}" ${done ? "checked":""}>
                     <div style="flex:1;">
                       <div style="font-weight:650;">${escapeHtml(st.text)}</div>
-                      <div class="muted" style="margin-top:2px;">${escapeHtml(getHouseZoneName(st.zoneId))} • ${Number(st.minutes)||0} min • cada ${Number(t.freqDays)||0} días • ${escapeHtml((t.level||"light")==="deep"?"profunda":"ligera")} • pri ${Number(t.priority)||0}</div>
+                      <div class="muted" style="margin-top:2px;">${escapeHtml(getHouseZoneName(st.zoneId))} ÔÇó ${Number(st.minutes)||0} min ÔÇó cada ${Number(t.freqDays)||0} d├¡as ÔÇó ${escapeHtml((t.level||"light")==="deep"?"profunda":"ligera")} ÔÇó pri ${Number(t.priority)||0}</div>
                     </div>
                     <button class="btn ghost" data-house-edit-task="${escapeHtml(st.taskId)}">Edit</button>
                   </label>
@@ -9541,7 +9580,7 @@ function old_viewHouse() {
           <div class="row" style="justify-content:space-between;align-items:center;">
             <div>
               <div style="font-weight:700;font-size:18px;">Zonas</div>
-              <div class="muted">Define tu mapa lógico (luego lo dibujamos)</div>
+              <div class="muted">Define tu mapa l├│gico (luego lo dibujamos)</div>
             </div>
             <button class="btn" id="btnAddZone">+ Zona</button>
           </div>
@@ -9551,7 +9590,7 @@ function old_viewHouse() {
               <div class="item">
                 <div style="flex:1;">
                   <div style="font-weight:650;">${escapeHtml(z.name)}</div>
-                  <div class="muted">Orden: ${Number(z.order)||0} • Priority: ${Number(z.priority)||0}</div>
+                  <div class="muted">Orden: ${Number(z.order)||0} ÔÇó Priority: ${Number(z.priority)||0}</div>
                 </div>
                 <button class="btn ghost" data-house-edit-zone="${escapeHtml(z.id)}">Edit</button>
                 <button class="btn ghost" data-house-del-zone="${escapeHtml(z.id)}">Del</button>
@@ -9589,7 +9628,7 @@ function renderHouseTasksList(){
       <div class="item">
         <div style="flex:1;">
           <div style="font-weight:650;">${escapeHtml(t.name)}</div>
-          <div class="muted">${escapeHtml(getHouseZoneName(t.zoneId))} • ${Number(t.minutes)||0} min • cada ${Number(t.freqDays)||0} días • ${escapeHtml((t.level||"light")==="deep"?"profunda":"ligera")} • pri ${Number(t.priority)||0}</div>
+          <div class="muted">${escapeHtml(getHouseZoneName(t.zoneId))} ÔÇó ${Number(t.minutes)||0} min ÔÇó cada ${Number(t.freqDays)||0} d├¡as ÔÇó ${escapeHtml((t.level||"light")==="deep"?"profunda":"ligera")} ÔÇó pri ${Number(t.priority)||0}</div>
         </div>
         <button class="btn ghost" data-house-edit-task="${escapeHtml(t.id)}">Edit</button>
         <button class="btn ghost" data-house-del-task="${escapeHtml(t.id)}">Del</button>
@@ -9670,7 +9709,7 @@ function openHouseSessionRunnerModal(){
         <div class="row" style="justify-content:space-between;align-items:center;">
           <div class="muted" id="houseRunnerProgress"></div>
           <div class="row" style="gap:8px;">
-            <button class="btn ghost" data-hr="history">Histórico</button>
+            <button class="btn ghost" data-hr="history">Hist├│rico</button>
             <button class="btn ghost" data-hr="end">Terminar</button>
           </div>
         </div>
@@ -9687,7 +9726,7 @@ function openHouseSessionRunnerModal(){
   b.querySelector('[data-hr="end"]').addEventListener("click", ()=>{
     finishHouseSession("manual_end");
     closeHouseSessionRunnerModal(true);
-    toast("Sesión terminada ✅");
+    toast("Sesi├│n terminada Ô£à");
     view();
   });
   b.querySelector('[data-hr="history"]').addEventListener("click", ()=>{
@@ -9797,10 +9836,10 @@ function ensureRunnerForCurrent(){
   }).length;
 
   const sub = document.querySelector("#houseRunnerSub");
-  if(sub) sub.textContent = `${s.date} • ${state.house.mode||"light"}`;
+  if(sub) sub.textContent = `${s.date} ÔÇó ${state.house.mode||"light"}`;
 
   const prog = document.querySelector("#houseRunnerProgress");
-  if(prog) prog.textContent = `${doneCount}/${taskSteps.length} hechas • Paso ${s.idx+1}/${(s.route||[]).length}`;
+  if(prog) prog.textContent = `${doneCount}/${taskSteps.length} hechas ÔÇó Paso ${s.idx+1}/${(s.route||[]).length}`;
 
   // If current step is a task, init timer if changed
   if(cur && cur.kind==="task"){
@@ -9868,7 +9907,7 @@ function houseSessionAdvance({reason, markDone}){
 
   if(s.idx >= (s.route||[]).length){
     finishHouseSession("completed");
-    toast("Ruta completada ✅");
+    toast("Ruta completada Ô£à");
     closeHouseSessionRunnerModal(true);
     view();
     return;
@@ -9951,7 +9990,7 @@ function renderHouseRunnerStage(force=false){
   stage.innerHTML = `
     <div class="houseRunnerCard">
       <div style="font-weight:850;font-size:18px;line-height:1.2;">${escapeHtml(cur.text)}</div>
-      <div class="muted" style="margin-top:6px;">${escapeHtml(getHouseZoneName(cur.zoneId))} • ${Number(cur.minutes)||0} min</div>
+      <div class="muted" style="margin-top:6px;">${escapeHtml(getHouseZoneName(cur.zoneId))} ÔÇó ${Number(cur.minutes)||0} min</div>
 
       <div class="houseRunnerTimer" style="margin-top:12px;">
         <div class="row" style="justify-content:space-between;align-items:center;">
@@ -9969,7 +10008,7 @@ function renderHouseRunnerStage(force=false){
       </div>
 
       <div class="row" style="gap:10px;margin-top:14px;">
-        <button class="btn" data-hr="done">Listo ✅</button>
+        <button class="btn" data-hr="done">Listo Ô£à</button>
         <button class="btn ghost" data-hr="next">Siguiente</button>
       </div>
     </div>
@@ -9979,7 +10018,7 @@ function renderHouseRunnerStage(force=false){
     s.runner.extraSec = Number(s.runner.extraSec||0) + 300;
     persist();
     renderHouseRunnerStage();
-    toast("Extendido +5 min ⏳");
+    toast("Extendido +5 min ÔÅ│");
   });
   stage.querySelector('[data-hr="skip"]').addEventListener("click", ()=>{
     houseSessionAdvance({reason:"skipped", markDone:false});
@@ -10009,17 +10048,17 @@ function openHouseSessionHistoryModal(){
     return `<div class="row" style="justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);">
       <div>
         <div style="font-weight:750;">${escapeHtml(s.date)}</div>
-        <div class="muted">${escapeHtml(status)} • ${min} min • ${Array.isArray(s.logs)?s.logs.length:0} pasos</div>
+        <div class="muted">${escapeHtml(status)} ÔÇó ${min} min ÔÇó ${Array.isArray(s.logs)?s.logs.length:0} pasos</div>
       </div>
     </div>`;
-  }).join("") || `<div class="muted" style="padding:10px 0;">Aún no hay sesiones.</div>`;
+  }).join("") || `<div class="muted" style="padding:10px 0;">A├║n no hay sesiones.</div>`;
 
   b.innerHTML = `
     <div class="modal houseRunner">
       <div class="row" style="justify-content:space-between;align-items:center;">
         <div>
-          <div style="font-weight:800;font-size:16px;">Histórico Casa</div>
-          <div class="muted">Tus últimas sesiones</div>
+          <div style="font-weight:800;font-size:16px;">Hist├│rico Casa</div>
+          <div class="muted">Tus ├║ltimas sesiones</div>
         </div>
         <button class="btn ghost" data-hh="close">Cerrar</button>
       </div>
@@ -10068,8 +10107,8 @@ function renderHouseSession(){
   return `
     <div class="row" style="justify-content:space-between;align-items:center;">
       <div>
-        <div style="font-weight:700;">Mini sesión</div>
-        <div class="muted">${doneCount}/${taskCount} • ${pct}%</div>
+        <div style="font-weight:700;">Mini sesi├│n</div>
+        <div class="muted">${doneCount}/${taskCount} ÔÇó ${pct}%</div>
       </div>
       <button class="btn ghost" id="btnHouseEnd">Terminar</button>
     </div>
@@ -10082,7 +10121,7 @@ function renderHouseSession(){
       ${current.kind==="tip" ? `<div class="muted">${escapeHtml(current.text)}</div>` : ``}
       ${current.kind==="task" ? `
         <div style="font-weight:750;font-size:18px;">${escapeHtml(current.text)}</div>
-        <div class="muted" style="margin-top:4px;">${escapeHtml(getHouseZoneName(current.zoneId))} • ${Number(current.minutes)||0} min</div>
+        <div class="muted" style="margin-top:4px;">${escapeHtml(getHouseZoneName(current.zoneId))} ÔÇó ${Number(current.minutes)||0} min</div>
         <div class="row" style="gap:10px;margin-top:10px;">
           <button class="btn" data-house-session-done="${escapeHtml(current.taskId)}">Marcar hecho</button>
           <button class="btn ghost" data-house-edit-task="${escapeHtml(current.taskId)}">Edit</button>
@@ -10120,7 +10159,7 @@ function openHouseZoneModal(editId=null){
       }else{
         state.house.zones.push({ id: uid("z"), name:n, order:o || (state.house.zones.length+1), priority:p });
       }
-      persist(); view(); toast("Zona guardada ✅");
+      persist(); view(); toast("Zona guardada Ô£à");
     }
   });
 }
@@ -10142,7 +10181,7 @@ function openHouseTaskModal(editId=null, defaults=null){
   const typeOptions = [
     ["global","Global"],
     ["surface","Superficies"],
-    ["wet","Húmedo"],
+    ["wet","H├║medo"],
     ["floor","Piso"],
     ["organize","Organizar"],
     ["deep","Deep"],
@@ -10175,7 +10214,7 @@ function openHouseTaskModal(editId=null, defaults=null){
           <input class="input" id="htMin" type="number" value="${escapeHtml(String(t?.minutes ?? 5))}">
         </div>
         <div>
-          <div class="muted" style="margin:2px 0 6px;">Frecuencia (días)</div>
+          <div class="muted" style="margin:2px 0 6px;">Frecuencia (d├¡as)</div>
           <input class="input" id="htFreq" type="number" value="${escapeHtml(String(t?.freqDays ?? 7))}">
         </div>
         <div>
@@ -10244,7 +10283,7 @@ function openHouseTaskModal(editId=null, defaults=null){
     const priority = Math.min(5, Math.max(1, Number((b.querySelector("#htPri").value||"").trim()) || 3));
 
     if(!name){ toast("Pon un nombre"); return; }
-    if(minutes<0 || freqDays<0){ toast("Valores inválidos"); return; }
+    if(minutes<0 || freqDays<0){ toast("Valores inv├ílidos"); return; }
 
     // If type=global, force zoneId null
     const finalZoneId = (type==="global") ? null : zoneId;
@@ -10257,7 +10296,7 @@ function openHouseTaskModal(editId=null, defaults=null){
     }else{
       state.house.tasks.push({ id: uid("t"), name, zoneId: finalZoneId, subzoneId: finalSubzoneId, type, minutes, freqDays, level: finalLevel, priority, lastDone:"" });
     }
-    persist(); view(); toast("Tarea guardada ✅");
+    persist(); view(); toast("Tarea guardada Ô£à");
     close();
   });
 }
@@ -10274,17 +10313,17 @@ function deleteHouseZone(zoneId){
   if(!z) return;
   const tasks = (state.house.tasks||[]).filter(t=>t.zoneId===zoneId);
   if(tasks.length){
-    const ok = confirm(`Esta zona tiene ${tasks.length} tareas. ¿Borrar todo?`);
+    const ok = confirm(`Esta zona tiene ${tasks.length} tareas. ┬┐Borrar todo?`);
     if(!ok) return;
     state.house.tasks = (state.house.tasks||[]).filter(t=>t.zoneId!==zoneId);
   }
   state.house.zones = (state.house.zones||[]).filter(x=>x.id!==zoneId);
-  persist(); view(); toast("Zona borrada 🧹");
+  persist(); view(); toast("Zona borrada ­ƒº╣");
 }
 
 function deleteHouseTask(taskId){
   state.house.tasks = (state.house.tasks||[]).filter(t=>t.id!==taskId);
-  persist(); view(); toast("Tarea borrada 🧼");
+  persist(); view(); toast("Tarea borrada ­ƒº╝");
 }
 
 */
@@ -10301,13 +10340,13 @@ function wireHouse(root){
     });
   });
 
-  // Registro Rápido
+  // Registro R├ípido
   root.querySelectorAll("[data-act-quick]").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const id = btn.getAttribute("data-act-quick");
-      actLogQuick(id, 15, "Registro rápido");
-      toast("⚡ Actividad registrada (+15m)");
+      actLogQuick(id, 15, "Registro r├ípido");
+      toast("ÔÜí Actividad registrada (+15m)");
     });
   });
 
@@ -10326,7 +10365,7 @@ function wireHouse(root){
       e.stopPropagation();
       const id = btn.getAttribute("data-act-stop");
       actTimerToggle(id);
-      toast("⏱ Actividad guardada.");
+      toast("ÔÅ▒ Actividad guardada.");
     });
   });
 
@@ -10334,7 +10373,7 @@ function wireHouse(root){
   root.querySelectorAll("[data-act-del]").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      if(confirm("¿Eliminar este registro?")) {
+      if(confirm("┬┐Eliminar este registro?")) {
         const id = btn.getAttribute("data-act-del");
         state.house.actividades.logs = state.house.actividades.logs.filter(l => l.id !== id);
         persist();
@@ -10409,7 +10448,7 @@ function old_wireHouse(root){
         persist();
       }
       view();
-      toast("Hecho ✅");
+      toast("Hecho Ô£à");
     });
   });
 
@@ -10420,7 +10459,7 @@ function old_wireHouse(root){
       const todayStr = isoDate(new Date());
       if(cb.checked){
         markHouseTaskDone(taskId, todayStr);
-        toast("Hecho ✅");
+        toast("Hecho Ô£à");
       }else{
         const t = (state.house.tasks||[]).find(x=>x.id===taskId);
         if(t){ t.lastDone = ""; persist(); }
@@ -10463,7 +10502,7 @@ function old_wireHouse(root){
     // Reset positions to defaults and keep edges
     state.house.map.nodes = {};
     ensureHouseMapLayout();
-    toast("Auto layout ✅");
+    toast("Auto layout Ô£à");
     view();
   });
   const btnAnim = root.querySelector("#btnMapAnim");
@@ -10471,7 +10510,7 @@ function old_wireHouse(root){
     const todayStr = isoDate(new Date());
     computeAnimPath(todayStr);
     startHouseMapAnim(todayStr);
-    toast("Animando ruta 🎮");
+    toast("Animando ruta ­ƒÄ«");
   });
   const btnStop = root.querySelector("#btnMapStop");
   if(btnStop) btnStop.addEventListener("click", ()=>{
@@ -10507,7 +10546,7 @@ function old_wireHouse(root){
           state.house.map.selected = null;
           persist();
           view();
-          toast("Conexión actualizada");
+          toast("Conexi├│n actualizada");
           return;
         }
         state.house.map.selected = zoneId;
@@ -10612,7 +10651,7 @@ function wireHouseZoneSheet(root){
       const todayStr = isoDate(new Date());
       if(cb.checked){
         markHouseTaskDone(taskId, todayStr);
-        toast('Hecho ✅');
+        toast('Hecho Ô£à');
       }else{
         const t = (state.house.tasks||[]).find(x=>x.id===taskId);
         if(t){ t.lastDone=''; persist(); }
@@ -10633,7 +10672,7 @@ function wireHouseZoneSheet(root){
       openPromptModal({
         title:'New subzone',
         fields:[
-          {key:'name', label:'Name', placeholder:'Ej: Mesón'},
+          {key:'name', label:'Name', placeholder:'Ej: Mes├│n'},
           {key:'order', label:'Order (1..)', type:'number', placeholder:'1'}
         ],
         onSubmit: ({name, order})=>{
@@ -10641,7 +10680,7 @@ function wireHouseZoneSheet(root){
           if(!n){ toast('Pon un nombre'); return; }
           const d = ensureZoneDetails(zid);
           d.subzones.push({id:uid('sz'), name:n, order:Number(order)|| (d.subzones.length+1)});
-          persist(); view(); toast('Subzona guardada ✅');
+          persist(); view(); toast('Subzona guardada Ô£à');
         }
       });
     });
@@ -10663,7 +10702,7 @@ function wireHouseZoneSheet(root){
           const n=(name||'').trim();
           if(!n){ toast('Pon un nombre'); return; }
           sz.name=n; sz.order=Number(order)||sz.order||1;
-          persist(); view(); toast('Actualizado ✅');
+          persist(); view(); toast('Actualizado Ô£à');
         }
       });
     });
@@ -10675,12 +10714,12 @@ function wireHouseZoneSheet(root){
       const d = ensureZoneDetails(zid);
       const hasTasks = (state.house.tasks||[]).some(t=>t.zoneId===zid && t.subzoneId===sid);
       if(hasTasks){
-        const ok = confirm('Hay tareas en esta subzona. ¿Moverlas a General y borrar?');
+        const ok = confirm('Hay tareas en esta subzona. ┬┐Moverlas a General y borrar?');
         if(!ok) return;
         (state.house.tasks||[]).forEach(t=>{ if(t.zoneId===zid && t.subzoneId===sid) t.subzoneId=null; });
       }
       d.subzones = (d.subzones||[]).filter(x=>x.id!==sid);
-      persist(); view(); toast('Subzona borrada 🧽');
+      persist(); view(); toast('Subzona borrada ­ƒº¢');
     });
   });
 
@@ -10691,7 +10730,7 @@ function wireHouseZoneSheet(root){
       const ta = root.querySelector('#zoneNotes');
       const d = ensureZoneDetails(zid);
       d.notes = (ta?.value||'').trim();
-      persist(); toast('Notas guardadas ✅');
+      persist(); toast('Notas guardadas Ô£à');
     });
   }
 }
@@ -10729,18 +10768,18 @@ function viewCalendar(){
   return `
     <div class="sectionTitle">
       <div>Calendario</div>
-      <div class="chip">dibuja encima ✍️</div>
+      <div class="chip">dibuja encima Ô£ì´©Å</div>
     </div>
 
     <section class="card">
       <div class="calTop">
-        <button class="iconBtn" id="calPrev" aria-label="Prev month">⟵</button>
+        <button class="iconBtn" id="calPrev" aria-label="Prev month">ÔƒÁ</button>
         <div class="calMonth">${escapeHtml(monthName.charAt(0).toUpperCase()+monthName.slice(1))}</div>
-        <button class="iconBtn" id="calNext" aria-label="Next month">⟶</button>
+        <button class="iconBtn" id="calNext" aria-label="Next month">ÔƒÂ</button>
       </div>
       <div class="calDowRow">${dow}</div>
       <div class="calGrid">${grid}</div>
-      <div class="muted" style="margin-top:10px;">Tip: toca un día para abrir el canvas grande. Luego verás el preview mini en la celda.</div>
+      <div class="muted" style="margin-top:10px;">Tip: toca un d├¡a para abrir el canvas grande. Luego ver├ís el preview mini en la celda.</div>
     </section>
   `;
 }
@@ -10751,13 +10790,13 @@ function openCalendarDrawModal(dateIso){
   modal.className = "modalBackdrop";
 
   modal.innerHTML = `
-    <div class="modal modalWide" role="dialog" aria-label="Dibujo del día">
+    <div class="modal modalWide" role="dialog" aria-label="Dibujo del d├¡a">
       <div class="modalTop">
         <div>
           <div class="modalTitle">${escapeHtml(dateIso)}</div>
-          <div class="modalSub">Dibuja con el dedo. Guarda y verás un preview mini en el calendario.</div>
+          <div class="modalSub">Dibuja con el dedo. Guarda y ver├ís un preview mini en el calendario.</div>
         </div>
-        <button class="iconBtn" id="btnCloseCal" aria-label="Close">✕</button>
+        <button class="iconBtn" id="btnCloseCal" aria-label="Close">Ô£ò</button>
       </div>
 
       <div class="calCanvasWrap">
@@ -10776,7 +10815,7 @@ function openCalendarDrawModal(dateIso){
             <button class="dot" data-cal-color="#8b5cf6" title="Morado" style="--dot:#8b5cf6"></button>
             <button class="dot" data-cal-color="#22c55e" title="Verde" style="--dot:#22c55e"></button>
             <button class="dot" data-cal-color="#38bdf8" title="Cian" style="--dot:#38bdf8"></button>
-            <button class="dot" data-cal-color="#f59e0b" title="Ámbar" style="--dot:#f59e0b"></button>
+            <button class="dot" data-cal-color="#f59e0b" title="├ümbar" style="--dot:#f59e0b"></button>
           </div>
           <div class="calSize">
             <span class="small muted">Grosor</span>
@@ -10909,7 +10948,7 @@ function openCalendarDrawModal(dateIso){
     baseImg = null;
     strokes = [];
     renderAll();
-    toast("Borrado 🧽");
+    toast("Borrado ­ƒº¢");
   });
 
   modal.querySelector("#btnCalUndo").addEventListener("click", ()=>{
@@ -10960,11 +10999,11 @@ function openCalendarDrawModal(dateIso){
       state.calDraw[dateIso] = dataUrl;
       persist();
       view();
-      toast("Guardado ✅");
+      toast("Guardado Ô£à");
       close();
     }catch(e){
       console.warn(e);
-      toast("No se pudo guardar ❌");
+      toast("No se pudo guardar ÔØî");
     }
   });
 }
@@ -10988,7 +11027,7 @@ function wireActions(root){
           return;
         }catch(e){
           console.error(e);
-          toast("No pude abrir Football Lab ❌");
+          toast("No pude abrir Football Lab ÔØî");
           return;
         }
       }
@@ -11003,7 +11042,7 @@ if(act==="invTab"){
 }
 
 // Note: data-inv-act and data-inv-cat are handled by the delegated
-// document listener at the bottom of the file — not here.
+// document listener at the bottom of the file ÔÇö not here.
 if(act==="invHistPreset"){
   state.inventoryHistPreset = btn.dataset.preset || "30d";
   state.inventorySubtab = "history";
@@ -11111,7 +11150,7 @@ if(act==="invMode"){
           r.steps.forEach(s=>s.done=false);
           r.lastRun = new Date().toISOString();
           persist(); view();
-          toast("Routine reset ✅");
+          toast("Routine reset Ô£à");
           return;
         }
         if(act==="editRoutine"){
@@ -11127,7 +11166,7 @@ if(act==="invMode"){
               r.title = t;
               r.times = parseTimesCsv(times);
               persist(); view();
-              toast("Updated ✅");
+              toast("Updated Ô£à");
             }
           });
           return;
@@ -11243,7 +11282,7 @@ if(act==="savePurchase"){
     return;
   }
 
-  // No items in cocina → save directly
+  // No items in cocina ÔåÆ save directly
   doSavePurchase_({list, decisions:[]});
   return;
 }
@@ -11272,7 +11311,7 @@ function doSavePurchase_({list, decisions}){
         sourceListId
       }));
 
-      // ── Duplicate detection ─────────────────────────────────────────────
+      // ÔöÇÔöÇ Duplicate detection ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
       // Check if the same list was already saved in the last 24h
       const cutoff = Date.now() - 24 * 60 * 60 * 1000;
       const recentEntries = (state.shoppingHistory||[]).filter(h => {
@@ -11286,11 +11325,11 @@ function doSavePurchase_({list, decisions}){
       });
       if (duplicate) {
         const dupDate = duplicate.date || "fecha desconocida";
-        if (!confirm(`⚠️ Esta lista parece idéntica a una que ya guardaste el ${dupDate}.\n\n¿Seguro que quieres guardarla de nuevo?`)) {
-          return; // user cancelled – don't save
+        if (!confirm(`ÔÜá´©Å Esta lista parece id├®ntica a una que ya guardaste el ${dupDate}.\n\n┬┐Seguro que quieres guardarla de nuevo?`)) {
+          return; // user cancelled ÔÇô don't save
         }
       }
-      // ────────────────────────────────────────────────────────────────────
+      // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
       const totals = calcEntryTotals(items);
       state.shoppingHistory.unshift({
@@ -11320,7 +11359,7 @@ function doSavePurchase_({list, decisions}){
           : (state.inventory||[]).find(inv=>!inv.productId && normName_(inv.name)===normName_(item.name));
 
         if(action==="restock"){
-          // Close old lots → open new one → reset level to 100%
+          // Close old lots ÔåÆ open new one ÔåÆ reset level to 100%
           (state.inventoryLots||[]).filter(l=>!l.finishedAt && (pid ? l.productId===pid : normName_(l.name)===normName_(item.name))).forEach(l=>{ l.finishedAt = now; });
           if(existing){ existing.levelPct=100; existing.lastCheck=now.slice(0,10); }
           state.inventoryLots.unshift({ id:uid("lot"), productId:pid||"", name:item.name, category:item.category||"", qty:item.qty, unit:item.unit||"u", boughtAt:now, finishedAt:null, source:"shopping", sourceListId, store:(store||"").trim(), note:"" });
@@ -11332,7 +11371,7 @@ function doSavePurchase_({list, decisions}){
           }
           state.inventoryLots.unshift({ id:uid("lot"), productId:pid||"", name:item.name, category:item.category||"", qty:item.qty, unit:item.unit||"u", boughtAt:now, finishedAt:null, source:"shopping", sourceListId, store:(store||"").trim(), note:"" });
         }
-        // "skip" → no inventory change
+        // "skip" ÔåÆ no inventory change
       }
 
       // For items NOT in decisions (not in cocina previously), apply normally
@@ -11344,9 +11383,9 @@ function doSavePurchase_({list, decisions}){
       applyItemsToInventory_(undecided);
       applyItemsToInventoryLots_(undecided, { boughtAtISO: now, sourceListId, store:(store||"").trim() });
 
-      // ── Clear the list after saving ─────────────────────────────────────
+      // ÔöÇÔöÇ Clear the list after saving ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
       list.items = [];
-      // ────────────────────────────────────────────────────────────────────
+      // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
       if(mkfin && (state.financeAccounts||[]).length){
         const accId = accountId || defaultAccountId;
@@ -11355,7 +11394,7 @@ function doSavePurchase_({list, decisions}){
       }
 
       persist();
-      toast("¡Compra guardada! La lista fue limpiada ✅");
+      toast("┬íCompra guardada! La lista fue limpiada Ô£à");
       state.shoppingSubtab = "dashboard";
       view();
     }
@@ -11375,33 +11414,33 @@ function openSmartPurchaseInventoryModal({ items, onContinue }){
     b.innerHTML = `
       <div class="modal slModal" style="padding:0;gap:0;">
         <div class="slHeader" style="padding:16px 20px 12px;">
-          <div class="slTitle">🤔 Detecté reposiciones</div>
+          <div class="slTitle">­ƒñö Detect├® reposiciones</div>
           <div style="display:flex;gap:8px;align-items:center;">
-            <button class="slQPConfirm spiSaveTop" id="spiContinueTop">Guardar ✓</button>
-            <button class="slCloseBtn" id="spiClose">✕</button>
+            <button class="slQPConfirm spiSaveTop" id="spiContinueTop">Guardar Ô£ô</button>
+            <button class="slCloseBtn" id="spiClose">Ô£ò</button>
           </div>
         </div>
         <div style="font-size:13px;color:rgba(255,255,255,.55);padding:0 20px 12px;line-height:1.6;flex-shrink:0;">
-          Compraste ${items.length} producto${items.length>1?"s que ya están":"que ya está"} en tu cocina.<br>
-          ¿Qué hago con cada uno?
+          Compraste ${items.length} producto${items.length>1?"s que ya est├ín":"que ya est├í"} en tu cocina.<br>
+          ┬┐Qu├® hago con cada uno?
         </div>
         <div style="display:flex;flex-direction:column;gap:10px;padding:0 20px 10px;overflow-y:auto;flex:1 1 0;min-height:0;">
           ${decisions.map((dec,i)=>{
             const inv = (state.inventory||[]).find(inv=> dec.it.productId ? inv.productId===dec.it.productId : normName_(inv.name)===normName_(dec.it.name));
             const curPct = (inv?.levelPct===0||inv?.levelPct) ? Math.round(Number(inv.levelPct)) : null;
-            const pctTxt = curPct!==null ? ` · cocina al ${curPct}%` : "";
+            const pctTxt = curPct!==null ? ` ┬À cocina al ${curPct}%` : "";
             return `
               <div class="spiItem">
                 <div class="spiItemName">${escapeHtml(dec.it.name)}<span class="spiItemSub">${pctTxt}</span></div>
                 <div class="spiActions">
                   <button class="spiBtn ${dec.action==="restock"?"spiActive":""}" data-spi-i="${i}" data-spi-act="restock">
-                    🔄 Repuse<span class="spiBtnSub">Nuevo paquete</span>
+                    ­ƒöä Repuse<span class="spiBtnSub">Nuevo paquete</span>
                   </button>
                   <button class="spiBtn ${dec.action==="add"?"spiActive":""}" data-spi-i="${i}" data-spi-act="add">
-                    ➕ Añadí más<span class="spiBtnSub">Suma al lote</span>
+                    Ô×ò A├▒ad├¡ m├ís<span class="spiBtnSub">Suma al lote</span>
                   </button>
                   <button class="spiBtn ${dec.action==="skip"?"spiActive":""}" data-spi-i="${i}" data-spi-act="skip">
-                    ⏭ Ignorar<span class="spiBtnSub">Sin cambio</span>
+                    ÔÅ¡ Ignorar<span class="spiBtnSub">Sin cambio</span>
                   </button>
                 </div>
               </div>`;
@@ -11409,7 +11448,7 @@ function openSmartPurchaseInventoryModal({ items, onContinue }){
         </div>
         <div class="slQPActions">
           <button class="slQPCancel" id="spiCancel">Cancelar</button>
-          <button class="slQPConfirm" id="spiContinue">Continuar →</button>
+          <button class="slQPConfirm" id="spiContinue">Continuar ÔåÆ</button>
         </div>
       </div>`;
 
@@ -11501,7 +11540,7 @@ function openPromptModal({title, fields, onSubmit}){
   if(first) first.focus();
 }
 
-// Shopping → Finance connector (Phase 4)
+// Shopping ÔåÆ Finance connector (Phase 4)
 function openShoppingSavePurchaseModal({defaultDate, defaultStore, defaultNotes, defaultAccountId, onSubmit}){
   const host = document.querySelector("#app") || document.body;
   const b = document.createElement("div");
@@ -11534,7 +11573,7 @@ function openShoppingSavePurchaseModal({defaultDate, defaultStore, defaultNotes,
         <div style="grid-column: 1 / -1;">
           <label style="display:flex; align-items:center; gap:10px; user-select:none;">
             <input type="checkbox" data-k="mkfin" ${hasFinance?'checked':''} ${hasFinance?'':'disabled'} />
-            <span>Crear gasto automático en Finanzas (Mercado)</span>
+            <span>Crear gasto autom├ítico en Finanzas (Mercado)</span>
           </label>
           ${hasFinance ? '' : '<div class="muted" style="margin-top:6px;">(Crea una cuenta en Finanzas para activar esto.)</div>'}
         </div>
@@ -11551,7 +11590,7 @@ function openShoppingSavePurchaseModal({defaultDate, defaultStore, defaultNotes,
         <button class="btn ghost" data-m="cancel">Cancelar</button>
         <button class="btn primary" data-m="save">Guardar</button>
       </div>
-      <div class="muted" style="margin-top:10px;">Compra guardada en historial. Si activas Finanzas, también crea el movimiento.</div>
+      <div class="muted" style="margin-top:10px;">Compra guardada en historial. Si activas Finanzas, tambi├®n crea el movimiento.</div>
     </div>
   `;
   host.appendChild(b);
@@ -11587,9 +11626,9 @@ function financeEnsureShoppingExpense_({sourceListId, dateISO, amount, accountId
   if(exists) return null;
 
   const noteParts = [];
-  if(store) noteParts.push(`Shopping · ${store}`);
+  if(store) noteParts.push(`Shopping ┬À ${store}`);
   if(notes) noteParts.push(notes);
-  const note = noteParts.join(" · ");
+  const note = noteParts.join(" ┬À ");
 
   const entry = addFinanceEntry({
     type: "expense",
@@ -11716,7 +11755,7 @@ function initBottomSheet(){
       scrim && (scrim.style.transition = "none");
     }
     sheet.style.transform = `translateY(${y}px)`;
-    if(toggleBtn) toggleBtn.textContent = state.sheetOpen ? "▾" : "▴";
+    if(toggleBtn) toggleBtn.textContent = state.sheetOpen ? "Ôû¥" : "Ôû┤";
   }
 
   // Init position
@@ -11869,12 +11908,12 @@ function openSmartAddItem(listId){
     <div class="modal slModal">
       <div class="slHeader">
         <div class="slTitle">Agregar a lista</div>
-        <button class="slCloseBtn" id="smartItemClose">✕</button>
+        <button class="slCloseBtn" id="smartItemClose">Ô£ò</button>
       </div>
 
       <div class="slSearchRow">
-        <span class="slSearchIcon">🔍</span>
-        <input id="smartItemSearch" class="slSearchInput" placeholder="Buscar producto…" autocomplete="off" />
+        <span class="slSearchIcon">­ƒöì</span>
+        <input id="smartItemSearch" class="slSearchInput" placeholder="Buscar productoÔÇª" autocomplete="off" />
       </div>
 
       <div class="slCatRow" id="slCatRow">
@@ -11885,7 +11924,7 @@ function openSmartAddItem(listId){
       <div id="smartItemResults" class="slResults"></div>
 
       <div class="slManualRow">
-        <button class="slManualBtn" id="smartItemManual">＋ Añadir manual</button>
+        <button class="slManualBtn" id="smartItemManual">´╝ï A├▒adir manual</button>
       </div>
     </div>
   `;
@@ -11914,7 +11953,7 @@ function openSmartAddItem(listId){
     }
 
     if(matches.length===0){
-      results.innerHTML = `<div class="slEmpty">No encontré nada<br><span>Usa "Añadir manual" 👇</span></div>`;
+      results.innerHTML = `<div class="slEmpty">No encontr├® nada<br><span>Usa "A├▒adir manual" ­ƒæç</span></div>`;
       return;
     }
 
@@ -11923,12 +11962,12 @@ function openSmartAddItem(listId){
       const isKg = u.includes("kg");
       const priceLabel = isKg ? `${money(p.price)}/kg` : money(p.price);
       const cat = p.category ? `<span class="slItemCat">${escapeHtml(p.category)}</span>` : "";
-      const ess = p.essential ? `<span class="slEss">⭐</span>` : "";
+      const ess = p.essential ? `<span class="slEss">Ô¡É</span>` : "";
       return `
         <button class="slItem" data-pick="${p.id}">
           <div class="slItemInfo">
             <div class="slItemName">${ess}${escapeHtml(p.name)}</div>
-            <div class="slItemMeta">${priceLabel}${cat ? " · " : ""}${cat}</div>
+            <div class="slItemMeta">${priceLabel}${cat ? " ┬À " : ""}${cat}</div>
           </div>
           <div class="slItemAdd">+</div>
         </button>
@@ -11977,7 +12016,7 @@ function openSmartAddItem(listId){
         <div class="slQPRow">
           <label class="slQPLabel">Gramos</label>
           <div class="slQPCounter">
-            <button class="slQPBtn" data-step="-100">−</button>
+            <button class="slQPBtn" data-step="-100">ÔêÆ</button>
             <input class="slQPInput" id="qpVal" type="number" value="500" min="50" step="50" />
             <button class="slQPBtn" data-step="100">+</button>
           </div>
@@ -11985,7 +12024,7 @@ function openSmartAddItem(listId){
         </div>
         <div class="slQPActions">
           <button class="slQPCancel" id="qpCancel">Cancelar</button>
-          <button class="slQPConfirm" id="qpConfirm">Añadir ✓</button>
+          <button class="slQPConfirm" id="qpConfirm">A├▒adir Ô£ô</button>
         </div>
       `;
       modal.querySelector(".slModal").appendChild(panel);
@@ -12007,7 +12046,7 @@ function openSmartAddItem(listId){
         list.items.push({ id:uid("i"), name:p.name, price:Number(price.toFixed(2)), qty:1, bought:false, productId:p.id, category:p.category||"", essential:!!p.essential, weight_g:g, pricePerKg:Number(p.price||0), unit:"g" });
         persist(); view();
         panel.remove();
-        toast(`${p.name} añadido ✅`);
+        toast(`${p.name} a├▒adido Ô£à`);
       });
     } else {
       panel.innerHTML = `
@@ -12015,7 +12054,7 @@ function openSmartAddItem(listId){
         <div class="slQPRow">
           <label class="slQPLabel">Cantidad</label>
           <div class="slQPCounter">
-            <button class="slQPBtn" data-step="-1">−</button>
+            <button class="slQPBtn" data-step="-1">ÔêÆ</button>
             <input class="slQPInput" id="qpQty" type="number" value="1" min="1" step="1" />
             <button class="slQPBtn" data-step="1">+</button>
           </div>
@@ -12027,7 +12066,7 @@ function openSmartAddItem(listId){
         </div>
         <div class="slQPActions">
           <button class="slQPCancel" id="qpCancel">Cancelar</button>
-          <button class="slQPConfirm" id="qpConfirm">Añadir ✓</button>
+          <button class="slQPConfirm" id="qpConfirm">A├▒adir Ô£ô</button>
         </div>
       `;
       modal.querySelector(".slModal").appendChild(panel);
@@ -12047,7 +12086,7 @@ function openSmartAddItem(listId){
         list.items.push({ id:uid("i"), name:p.name, price:pr, qty:qn, bought:false, productId:p.id, category:p.category||"", essential:!!p.essential });
         persist(); view();
         panel.remove();
-        toast(`${p.name} ×${qn} añadido ✅`);
+        toast(`${p.name} ├ù${qn} a├▒adido Ô£à`);
       });
     }
     panel.scrollIntoView({ behavior:"smooth", block:"nearest" });
@@ -12099,7 +12138,7 @@ function openProductPicker(listId){
       <div class="grid">
         ${state.products.map(p=>`
           <button class="btn" onclick="addProductToShoppingList('${listId}','${p.id}')">
-            ${escapeHtml(p.name)} · ${money(p.price)}
+            ${escapeHtml(p.name)} ┬À ${money(p.price)}
           </button>
         `).join("")}
       </div>
@@ -12209,17 +12248,17 @@ function openProductLibrary(){
     `;
 
     const cards = prods.length === 0
-      ? `<div class="libEmpty">Sin productos<br><span>Crea el primero 👆</span></div>`
+      ? `<div class="libEmpty">Sin productos<br><span>Crea el primero ­ƒæå</span></div>`
       : prods.map(p=>{
           const trend = priceTrend(p);
           const trendHtml = trend
             ? (trend.diff > 0
-                ? `<span class="libTrendUp">▲ ${trend.percent}%</span>`
+                ? `<span class="libTrendUp">Ôû▓ ${trend.percent}%</span>`
                 : trend.diff < 0
-                  ? `<span class="libTrendDown">▼ ${Math.abs(trend.percent)}%</span>`
+                  ? `<span class="libTrendDown">Ôû╝ ${Math.abs(trend.percent)}%</span>`
                   : ``)
             : ``;
-          const ess = p.essential ? `<span class="libEss">⭐</span>` : ``;
+          const ess = p.essential ? `<span class="libEss">Ô¡É</span>` : ``;
           const u = String(p.unit||"u").toLowerCase();
           const isKg = u.includes("kg");
           const priceLabel = isKg ? `${money(p.price)}/kg` : money(p.price);
@@ -12229,11 +12268,11 @@ function openProductLibrary(){
                 <div class="libCardName">${ess}${escapeHtml(p.name)}</div>
                 ${trendHtml}
               </div>
-              <div class="libCardMeta">${priceLabel}${p.unit?` · ${escapeHtml(p.unit)}`:""}${p.store?` · ${escapeHtml(p.store)}`:""}</div>
+              <div class="libCardMeta">${priceLabel}${p.unit?` ┬À ${escapeHtml(p.unit)}`:""}${p.store?` ┬À ${escapeHtml(p.store)}`:""}</div>
               ${p.category?`<div class="libCardCat">${escapeHtml(p.category)}</div>`:""}
               <div class="libCardActions">
-                <button class="libActBtn libActChart" data-lib-chart="${p.id}">📈</button>
-                <button class="libActBtn libActEdit" data-lib-edit="${p.id}">✏️ Editar</button>
+                <button class="libActBtn libActChart" data-lib-chart="${p.id}">­ƒôê</button>
+                <button class="libActBtn libActEdit" data-lib-edit="${p.id}">Ô£Å´©Å Editar</button>
               </div>
             </div>
           `;
@@ -12245,16 +12284,16 @@ function openProductLibrary(){
   sheet.innerHTML = `
     <div class="modal libModal">
       <div class="slHeader">
-        <div class="slTitle">📦 Biblioteca</div>
-        <button class="slCloseBtn" id="libClose">✕</button>
+        <div class="slTitle">­ƒôª Biblioteca</div>
+        <button class="slCloseBtn" id="libClose">Ô£ò</button>
       </div>
 
       <div class="libToolbar">
         <div class="libSearchWrap">
-          <span class="slSearchIcon">🔍</span>
-          <input id="libSearch" class="slSearchInput" placeholder="Buscar producto…" autocomplete="off" />
+          <span class="slSearchIcon">­ƒöì</span>
+          <input id="libSearch" class="slSearchInput" placeholder="Buscar productoÔÇª" autocomplete="off" />
         </div>
-        <button class="libNewBtn" id="libNewBtn">＋ Nuevo</button>
+        <button class="libNewBtn" id="libNewBtn">´╝ï Nuevo</button>
       </div>
 
       <div class="slCatRow" id="libCatRow">
@@ -12337,7 +12376,7 @@ function addInventoryFromProduct(productId){
   if(existing){
     existing.qty = Number(existing.qty||0) + 1;
     persist();
-    toast("Inventario: +1 ✅");
+    toast("Inventario: +1 Ô£à");
     view();
     return;
   }
@@ -12356,7 +12395,7 @@ function addInventoryFromProduct(productId){
     lastCheck: ""
   });
   persist();
-  toast("Agregado al inventario ✅");
+  toast("Agregado al inventario Ô£à");
   view();
 }
 
@@ -12366,10 +12405,10 @@ function addInventoryManual(){
     title:"Nuevo en inventario",
     fields:[
       {key:"name", label:"Nombre"},
-      {key:"category", label:"Categoría (opcional)", value:""},
+      {key:"category", label:"Categor├¡a (opcional)", value:""},
       {key:"qty", label:"Cantidad", type:"number", value:"1"},
       {key:"unit", label:"Unidad (u, kg, L)", value:"u"},
-      {key:"minQty", label:"Mínimo para alerta", type:"number", value:"0"},
+      {key:"minQty", label:"M├¡nimo para alerta", type:"number", value:"0"},
       {key:"essential", label:"Esencial (1/0)", value:"1"},
       {key:"notes", label:"Notas", value:""},
       {key:"levelPct", label:"% actual (0-100)", type:"number", value:""},
@@ -12410,8 +12449,8 @@ function editInventoryItem(invId){
   b.innerHTML = `
     <div class="modal slModal" style="padding:20px;gap:0;">
       <div class="slHeader" style="padding:0 0 14px;">
-        <div class="slTitle">✏️ Editar producto</div>
-        <button class="slCloseBtn" id="eiClose">✕</button>
+        <div class="slTitle">Ô£Å´©Å Editar producto</div>
+        <button class="slCloseBtn" id="eiClose">Ô£ò</button>
       </div>
 
       <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
@@ -12421,7 +12460,7 @@ function editInventoryItem(invId){
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <div>
-            <div style="font-size:11px;color:rgba(255,255,255,.4);margin-bottom:4px;">Categoría</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.4);margin-bottom:4px;">Categor├¡a</div>
             <input id="eiCat" class="textInput" value="${escapeHtml(it.category||"")}" style="width:100%;box-sizing:border-box;">
           </div>
           <div>
@@ -12441,12 +12480,12 @@ function editInventoryItem(invId){
         </div>
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;background:rgba(255,255,255,.04);border-radius:12px;">
           <input id="eiEssential" type="checkbox" ${it.essential?"checked":""} style="width:18px;height:18px;accent-color:#7c5cff;">
-          <span style="font-size:14px;font-weight:700;">⭐ Esencial</span>
+          <span style="font-size:14px;font-weight:700;">Ô¡É Esencial</span>
         </label>
       </div>
 
       <div class="slQPActions" style="justify-content:space-between;">
-        <button id="eiDelete" style="background:rgba(248,113,113,.15);border:1.5px solid rgba(248,113,113,.4);color:#f87171;border-radius:12px;padding:12px 16px;font-weight:800;font-size:14px;cursor:pointer;">🗑 Eliminar</button>
+        <button id="eiDelete" style="background:rgba(248,113,113,.15);border:1.5px solid rgba(248,113,113,.4);color:#f87171;border-radius:12px;padding:12px 16px;font-weight:800;font-size:14px;cursor:pointer;">­ƒùæ Eliminar</button>
         <div style="display:flex;gap:8px;">
           <button class="slQPCancel" id="eiCancel">Cancelar</button>
           <button class="slQPConfirm" id="eiSave">Guardar</button>
@@ -12460,11 +12499,11 @@ function editInventoryItem(invId){
   b.querySelector("#eiCancel").addEventListener("click", ()=>b.remove());
 
   b.querySelector("#eiDelete").addEventListener("click", ()=>{
-    if(!confirm(`¿Eliminar "${it.name}" de la cocina?`)) return;
+    if(!confirm(`┬┐Eliminar "${it.name}" de la cocina?`)) return;
     state.inventory = state.inventory.filter(x=>x.id!==invId);
     persist();
     b.remove();
-    toast("Eliminado ✅");
+    toast("Eliminado Ô£à");
     view();
   });
 
@@ -12523,7 +12562,7 @@ function addInventoryToList(invId){
     essential: !!it.essential
   });
   persist();
-  toast("Agregado a la lista ✅");
+  toast("Agregado a la lista Ô£à");
   view();
 }
 
@@ -12611,8 +12650,8 @@ function viewInventoryHistory(){
     <section class="card">
       <div class="cardTop">
         <div>
-          <h3 class="cardTitle">Histórico de compras</h3>
-          <div class="small">Cuántas veces compraste cada producto en los últimos ${days} días</div>
+          <h3 class="cardTitle">Hist├│rico de compras</h3>
+          <div class="small">Cu├íntas veces compraste cada producto en los ├║ltimos ${days} d├¡as</div>
         </div>
       </div>
       <div class="hr"></div>
@@ -12629,7 +12668,7 @@ function viewInventoryHistory(){
           <div class="item">
             <div class="left">
               <div class="name">${escapeHtml(r.name)}</div>
-              <div class="meta">${escapeHtml(r.category||"-")} · <b>${r.times}</b> veces · qty ${Number(r.qty||0)} · ${money(r.spent)}</div>
+              <div class="meta">${escapeHtml(r.category||"-")} ┬À <b>${r.times}</b> veces ┬À qty ${Number(r.qty||0)} ┬À ${money(r.spent)}</div>
             </div>
           </div>
         `).join("") || `<div class="muted">No hay compras guardadas en este rango.</div>`}
@@ -12713,7 +12752,7 @@ function openFinishLotModal(productKey){
   });
 
   if(!openLots.length){
-    if (confirm("No hay lotes activos para este producto. ¿Quieres removerlo del inventario actual de todas formas?")) {
+    if (confirm("No hay lotes activos para este producto. ┬┐Quieres removerlo del inventario actual de todas formas?")) {
       const idx = (state.inventory||[]).findIndex(it => {
         const itPkey = it.productId ? ("pid:"+String(it.productId)) : ("nm:"+normName_(it.name||""));
         return itPkey === productKey;
@@ -12721,10 +12760,10 @@ function openFinishLotModal(productKey){
       if (idx !== -1) {
         state.inventory.splice(idx, 1);
         persist();
-        toast("Removido del inventario ✅");
+        toast("Removido del inventario Ô£à");
         view();
       } else {
-        toast("No se encontró en el inventario.");
+        toast("No se encontr├│ en el inventario.");
       }
     }
     return;
@@ -12740,8 +12779,8 @@ function openFinishLotModal(productKey){
 
   b.innerHTML = `
     <div class="modal modalWide">
-      <h2>Marcar como “Se acabó”</h2>
-      <div class="small">Selecciona el lote y coloca la fecha/hora real. Esto alimenta la predicción.</div>
+      <h2>Marcar como ÔÇ£Se acab├│ÔÇØ</h2>
+      <div class="small">Selecciona el lote y coloca la fecha/hora real. Esto alimenta la predicci├│n.</div>
       <div class="hr"></div>
 
       <div class="grid" style="grid-template-columns: 1fr 1fr;">
@@ -12749,7 +12788,7 @@ function openFinishLotModal(productKey){
           <div class="muted" style="margin:2px 0 6px;">Lote activo</div>
           <select class="input" id="lotPick">
             ${openLots.map(l=>{
-              const label = `${escapeHtml(l.name||"Item")} · ${Number(l.qty||0)} ${escapeHtml(l.unit||"u")} · comprado ${escapeHtml(String(l.boughtAt||"").slice(0,16).replace("T"," "))}`;
+              const label = `${escapeHtml(l.name||"Item")} ┬À ${Number(l.qty||0)} ${escapeHtml(l.unit||"u")} ┬À comprado ${escapeHtml(String(l.boughtAt||"").slice(0,16).replace("T"," "))}`;
               return `<option value="${escapeHtml(l.id)}">${label}</option>`;
             }).join("")}
           </select>
@@ -12798,7 +12837,7 @@ function openFinishLotModal(productKey){
         }
 
         persist();
-        toast("Producto finalizado y removido ✅");
+        toast("Producto finalizado y removido Ô£à");
         b.remove();
         view();
       }
@@ -12856,11 +12895,11 @@ function viewInventoryCalendar(){
       const last = barData[barData.length - 1];
       if (last.days !== null && avgDays !== null) {
         if (last.days <= avgDays * 0.7) {
-          insightHtml = `<span class="calInsightBadge" style="color:#f87171;background:rgba(248,113,113,0.1)">🔴 Acelerado</span>`;
+          insightHtml = `<span class="calInsightBadge" style="color:#f87171;background:rgba(248,113,113,0.1)">­ƒö┤ Acelerado</span>`;
         } else if (last.days >= avgDays * 1.3) {
-          insightHtml = `<span class="calInsightBadge" style="color:#34d399;background:rgba(52,211,153,0.1)">🟢 Rindió más</span>`;
+          insightHtml = `<span class="calInsightBadge" style="color:#34d399;background:rgba(52,211,153,0.1)">­ƒƒó Rindi├│ m├ís</span>`;
         } else {
-          insightHtml = `<span class="calInsightBadge" style="color:#a1a1aa">⚪ Estable</span>`;
+          insightHtml = `<span class="calInsightBadge" style="color:#a1a1aa">ÔÜ¬ Estable</span>`;
         }
       }
     }
@@ -12903,7 +12942,7 @@ function viewInventoryCalendar(){
         </div>
       </div>
     `;
-  }).filter(Boolean).join("") || `<div class="invEmpty">Sin historial de duración aún<br><span>Registra productos en Actual y marca "Se acabó" cuando terminen</span></div>`;
+  }).filter(Boolean).join("") || `<div class="invEmpty">Sin historial de duraci├│n a├║n<br><span>Registra productos en Actual y marca "Se acab├│" cuando terminen</span></div>`;
 
   // Quick close buttons for active lots
   const openGroups = new Map();
@@ -12914,15 +12953,15 @@ function viewInventoryCalendar(){
     openGroups.set(key, cur);
   }
   const closeBtns = [...openGroups.entries()].slice(0,10).map(([k,v])=>
-    `<button class="invA invA-fin" style="flex:none;margin-bottom:4px;" onclick="openFinishLotModal('${escapeHtml(k)}')">⛔ Se acabó · ${escapeHtml(v.name)}</button>`
+    `<button class="invA invA-fin" style="flex:none;margin-bottom:4px;" onclick="openFinishLotModal('${escapeHtml(k)}')">Ôøö Se acab├│ ┬À ${escapeHtml(v.name)}</button>`
   ).join("") || `<div class="invEmpty" style="padding:14px">Sin lotes activos</div>`;
 
   return `
     <section class="card" style="margin-bottom:12px;">
       <div class="cardTop">
         <div>
-          <h3 class="cardTitle">⛔ Marcar como "Se acabó"</h3>
-          <div class="small">¿Terminaste algo hoy?</div>
+          <h3 class="cardTitle">Ôøö Marcar como "Se acab├│"</h3>
+          <div class="small">┬┐Terminaste algo hoy?</div>
         </div>
       </div>
       <div class="hr"></div>
@@ -12934,8 +12973,8 @@ function viewInventoryCalendar(){
     <section class="card">
       <div class="cardTop">
         <div>
-          <h3 class="cardTitle">📊 Análisis de Consumo</h3>
-          <div class="small">Cada barra es un lote. Verde = ahorraste (duró más). Rojo = consumo acelerado.</div>
+          <h3 class="cardTitle">­ƒôè An├ílisis de Consumo</h3>
+          <div class="small">Cada barra es un lote. Verde = ahorraste (dur├│ m├ís). Rojo = consumo acelerado.</div>
         </div>
       </div>
       <div class="hr"></div>
@@ -13048,29 +13087,29 @@ function viewInventory(){
 
     // Stats line
     let statsLine = "";
-    if(avg){ statsLine = `<span class="invStatChip">⏱ ${Math.round(avg)}d avg</span>`; }
-    if(lot){ statsLine += `<span class="invStatChip invStatLot">🧾 lote</span>`; }
-    if(it.essential){ statsLine += `<span class="invStatChip invStatEss">⭐ esencial</span>`; }
+    if(avg){ statsLine = `<span class="invStatChip">ÔÅ▒ ${Math.round(avg)}d avg</span>`; }
+    if(lot){ statsLine += `<span class="invStatChip invStatLot">­ƒº¥ lote</span>`; }
+    if(it.essential){ statsLine += `<span class="invStatChip invStatEss">Ô¡É esencial</span>`; }
 
     return `
       <div class="invCard2 ${cc}" data-inv-id="${it.id}">
         <div class="invC2Top">
           <div class="invC2Left">
             <div class="invC2Name">${escapeHtml(it.name)}</div>
-            <div class="invC2Sub">${escapeHtml(it.category||"")}${it.unit?` · ${escapeHtml(it.unit)}`:""}</div>
+            <div class="invC2Sub">${escapeHtml(it.category||"")}${it.unit?` ┬À ${escapeHtml(it.unit)}`:""}</div>
             ${statsLine ? `<div class="invC2Stats">${statsLine}</div>` : ""}
           </div>
           <div class="invC2Right">
             ${levelDisp}
-            <div class="invC2Status ${cc}Label">${status==="out"?"⛔":"status"==="low"?"⚠️":"✓"}</div>
+            <div class="invC2Status ${cc}Label">${status==="out"?"Ôøö":"status"==="low"?"ÔÜá´©Å":"Ô£ô"}</div>
           </div>
         </div>
         ${durBar}
         <div class="invC2Actions">
-          <button class="invA invA-list" data-inv-act="toList" data-iid="${it.id}" title="Añadir a lista">🛒</button>
-          <button class="invA invA-fin" onclick="openFinishLotModal('${escapeHtml(pk)}')" title="Se acabó">Se acabó</button>
+          <button class="invA invA-list" data-inv-act="toList" data-iid="${it.id}" title="A├▒adir a lista">­ƒøÆ</button>
+          <button class="invA invA-fin" onclick="openFinishLotModal('${escapeHtml(pk)}')" title="Se acab├│">Se acab├│</button>
           <button class="invA invA-pct" data-inv-act="setPct" data-iid="${it.id}" title="Actualizar nivel">%</button>
-          <button class="invA invA-edit" onclick="editInventoryItem('${escapeHtml(it.id)}')" title="Editar">✏️</button>
+          <button class="invA invA-edit" onclick="editInventoryItem('${escapeHtml(it.id)}')" title="Editar">Ô£Å´©Å</button>
         </div>
       </div>
     `;
@@ -13082,34 +13121,34 @@ function viewInventory(){
     ${allCats.map(c=>{
       const cn = inv.filter(x=>(x.category||"").trim()===c).length;
       const hasAlert = inv.filter(x=>(x.category||"").trim()===c&&stockStatus_(x)!=="ok").length>0;
-      return `<button class="slCat ${activeCat===c?"slCatActive":""}" data-inv-cat="${escapeHtml(c)}">${hasAlert?"🔴 ":""}${escapeHtml(c)} <span class="slCatCount">${cn}</span></button>`;
+      return `<button class="slCat ${activeCat===c?"slCatActive":""}" data-inv-cat="${escapeHtml(c)}">${hasAlert?"­ƒö┤ ":""}${escapeHtml(c)} <span class="slCatCount">${cn}</span></button>`;
     }).join("")}
   `;
 
   // ---- summary banner ----
   const banner = urgentN>0 ? `
     <div class="invBanner ${outN>0?"invBannerRed":"invBannerYellow"}">
-      ${outN>0?`<span>⛔ ${outN} agotado</span>`:""}
-      ${lowN>0?`<span>⚠️ ${lowN} bajo stock</span>`:""}
-      <span class="invBannerAction" data-inv-act="filterUrgent">Ver urgentes →</span>
+      ${outN>0?`<span>Ôøö ${outN} agotado</span>`:""}
+      ${lowN>0?`<span>ÔÜá´©Å ${lowN} bajo stock</span>`:""}
+      <span class="invBannerAction" data-inv-act="filterUrgent">Ver urgentes ÔåÆ</span>
     </div>
-  ` : `<div class="invBanner invBannerGreen">✅ Todo el inventario en orden</div>`;
+  ` : `<div class="invBanner invBannerGreen">Ô£à Todo el inventario en orden</div>`;
 
   const subtab = state.inventorySubtab || "actual";
 
   return `
     <div class="sectionTitle">
-      <div>🏠 Cocina</div>
+      <div>­ƒÅá Cocina</div>
       <div style="display:flex;gap:8px;">
-        <button class="btn" style="background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.3);color:#f87171;font-size:12px;" data-inv-act="clearCocina">🗑 Limpiar</button>
-        <button class="btn" data-act="backToShoppingLists">← Volver</button>
+        <button class="btn" style="background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.3);color:#f87171;font-size:12px;" data-inv-act="clearCocina">­ƒùæ Limpiar</button>
+        <button class="btn" data-act="backToShoppingLists">ÔåÉ Volver</button>
       </div>
     </div>
 
     <div class="invTabRow">
       <button class="invTab ${subtab==="actual"?"invTabActive":""}" data-act="invTab" data-tab="actual">Actual</button>
       <button class="invTab ${subtab==="history"?"invTabActive":""}" data-act="invTab" data-tab="history">Historial</button>
-      <button class="invTab ${subtab==="calendar"?"invTabActive":""}" data-act="invTab" data-tab="calendar">Análisis</button>
+      <button class="invTab ${subtab==="calendar"?"invTabActive":""}" data-act="invTab" data-tab="calendar">An├ílisis</button>
     </div>
 
     ${subtab==="history" ? viewInventoryHistory() : subtab==="calendar" ? viewInventoryCalendar() : `
@@ -13118,10 +13157,10 @@ function viewInventory(){
 
     <div class="invTopBar">
       <div class="invSearchWrap">
-        <span>🔍</span>
-        <input class="invSearchIn" placeholder="Buscar…" value="${escapeHtml(state.invQuery||"")}" oninput="setInvQuery(this.value)" />
+        <span>­ƒöì</span>
+        <input class="invSearchIn" placeholder="BuscarÔÇª" value="${escapeHtml(state.invQuery||"")}" oninput="setInvQuery(this.value)" />
       </div>
-      <button class="invAddBtn" data-inv-act="addFromLib">＋ Agregar</button>
+      <button class="invAddBtn" data-inv-act="addFromLib">´╝ï Agregar</button>
     </div>
 
     <div class="slCatRow" id="invCatRow">
@@ -13129,7 +13168,7 @@ function viewInventory(){
     </div>
 
     <div class="invGrid" id="invGrid">
-      ${sorted.length ? sorted.map(renderCard).join("") : `<div class="invEmpty">Sin items${q||activeCat?" con ese filtro":""}<br><span>Toca ＋ Agregar para añadir</span></div>`}
+      ${sorted.length ? sorted.map(renderCard).join("") : `<div class="invEmpty">Sin items${q||activeCat?" con ese filtro":""}<br><span>Toca ´╝ï Agregar para a├▒adir</span></div>`}
     </div>
 
     `}
@@ -13152,24 +13191,24 @@ function openInvPctModal(invId){
   b.innerHTML = `
     <div class="modal slModal" style="padding:20px;">
       <div class="slHeader" style="padding:0 0 16px;">
-        <div class="slTitle">📊 ${escapeHtml(it.name)}</div>
-        <button class="slCloseBtn" id="invPctClose">✕</button>
+        <div class="slTitle">­ƒôè ${escapeHtml(it.name)}</div>
+        <button class="slCloseBtn" id="invPctClose">Ô£ò</button>
       </div>
-      <div style="font-size:13px;color:rgba(255,255,255,.5);margin-bottom:16px;">¿Cuánto queda? Desliza o toca los botones.</div>
+      <div style="font-size:13px;color:rgba(255,255,255,.5);margin-bottom:16px;">┬┐Cu├ínto queda? Desliza o toca los botones.</div>
       <div class="invPctSliderWrap">
         <input type="range" min="0" max="100" step="5" value="${curPct}" class="invPctSlider" id="invPctSlider" />
         <div class="invPctSliderVal" id="invPctVal">${curPct}%</div>
       </div>
       <div class="invPctQuickRow">
-        <button class="invPctQ" data-v="0">⛔ Vacío</button>
+        <button class="invPctQ" data-v="0">Ôøö Vac├¡o</button>
         <button class="invPctQ" data-v="25">25%</button>
         <button class="invPctQ" data-v="50">50%</button>
         <button class="invPctQ" data-v="75">75%</button>
-        <button class="invPctQ" data-v="100">🆕 Lleno</button>
+        <button class="invPctQ" data-v="100">­ƒåò Lleno</button>
       </div>
       <div class="slQPActions" style="margin-top:18px;">
         <button class="slQPCancel" id="invPctCancel">Cancelar</button>
-        <button class="slQPConfirm" id="invPctSave">Guardar ✓</button>
+        <button class="slQPConfirm" id="invPctSave">Guardar Ô£ô</button>
       </div>
     </div>
   `;
@@ -13200,7 +13239,7 @@ function openInvPctModal(invId){
       }
     }
     persist();
-    toast(`${it.name}: ${it.levelPct}% ✅`);
+    toast(`${it.name}: ${it.levelPct}% Ô£à`);
     close();
     view();
   });
@@ -13237,8 +13276,8 @@ function openInvAddFromLibModal(){
       return `
         <button class="slItem" data-inv-pick="${p.id}">
           <div class="slItemInfo">
-            <div class="slItemName">${p.essential?"⭐":""} ${escapeHtml(p.name)}</div>
-            <div class="slItemMeta">${money(p.price||0)}${p.unit?` · ${escapeHtml(p.unit)}`:""}</div>
+            <div class="slItemName">${p.essential?"Ô¡É":""} ${escapeHtml(p.name)}</div>
+            <div class="slItemMeta">${money(p.price||0)}${p.unit?` ┬À ${escapeHtml(p.unit)}`:""}</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
             ${statusBadge}
@@ -13251,12 +13290,12 @@ function openInvAddFromLibModal(){
   b.innerHTML = `
     <div class="modal libModal">
       <div class="slHeader">
-        <div class="slTitle">🏠 Agregar a cocina</div>
-        <button class="slCloseBtn" id="invLibClose">✕</button>
+        <div class="slTitle">­ƒÅá Agregar a cocina</div>
+        <button class="slCloseBtn" id="invLibClose">Ô£ò</button>
       </div>
       <div class="slSearchRow">
-        <span class="slSearchIcon">🔍</span>
-        <input id="invLibSearch" class="slSearchInput" placeholder="Buscar producto…" autocomplete="off" />
+        <span class="slSearchIcon">­ƒöì</span>
+        <input id="invLibSearch" class="slSearchInput" placeholder="Buscar productoÔÇª" autocomplete="off" />
       </div>
       <div class="slCatRow" id="invLibCatRow">
         <button class="slCat slCatActive" data-il-cat="">Todo</button>
@@ -13298,7 +13337,7 @@ function openInvAddFromLibModal(){
     const hasActiveLot = (state.inventoryLots||[]).some(l=>!l.finishedAt && l.productId===pid);
     const curPct = (existing?.levelPct===0||existing?.levelPct) ? Number(existing.levelPct) : null;
 
-    // Smart flow: if product already in inventory with low/0 level → ask
+    // Smart flow: if product already in inventory with low/0 level ÔåÆ ask
     if(existing && curPct!==null && curPct<=30 && !hasActiveLot){
       // Show smart dialog: reponer o nuevo lote?
       openInvSmartRestockModal({ p, existing, pkey, onDone: ()=>{ close(); view(); } });
@@ -13322,26 +13361,26 @@ function openInvPickQtyModal({ p, existing, pkey, onDone }){
   b.innerHTML = `
     <div class="modal slModal" style="padding:20px;">
       <div class="slHeader" style="padding:0 0 14px;">
-        <div class="slTitle">➕ ${escapeHtml(p.name)}</div>
-        <button class="slCloseBtn" id="invQClose">✕</button>
+        <div class="slTitle">Ô×ò ${escapeHtml(p.name)}</div>
+        <button class="slCloseBtn" id="invQClose">Ô£ò</button>
       </div>
       <div class="slQPRow">
         <label class="slQPLabel">Nivel</label>
         <div class="slQPCounter">
-          <button class="slQPBtn" data-step="-10">−</button>
+          <button class="slQPBtn" data-step="-10">ÔêÆ</button>
           <input class="slQPInput" id="invQPct" type="number" min="0" max="100" step="10" value="100" />
           <button class="slQPBtn" data-step="10">+</button>
         </div>
         <div class="slQPCalc" id="invQPctVal">100%</div>
       </div>
       <div class="invPctQuickRow" style="margin-top:10px;">
-        <button class="invPctQ" data-v="100">🆕 Lleno</button>
+        <button class="invPctQ" data-v="100">­ƒåò Lleno</button>
         <button class="invPctQ" data-v="75">75%</button>
         <button class="invPctQ" data-v="50">Mitad</button>
       </div>
       <div class="slQPActions" style="margin-top:18px;">
         <button class="slQPCancel" id="invQCancel">Cancelar</button>
-        <button class="slQPConfirm" id="invQSave">Añadir ✓</button>
+        <button class="slQPConfirm" id="invQSave">A├▒adir Ô£ô</button>
       </div>
     </div>`;
   host.appendChild(b);
@@ -13379,13 +13418,13 @@ function openInvPickQtyModal({ p, existing, pkey, onDone }){
       boughtAt: now, finishedAt: null, source:"manual", store:"", note:""
     });
     persist();
-    toast(`${p.name} en cocina ✅`);
+    toast(`${p.name} en cocina Ô£à`);
     close();
     onDone?.();
   });
 }
 
-// Smart restock modal: ¿repones (sigue el lote) o es un producto nuevo (nuevo lote)?
+// Smart restock modal: ┬┐repones (sigue el lote) o es un producto nuevo (nuevo lote)?
 function openInvSmartRestockModal({ p, existing, pkey, onDone }){
   const host = document.querySelector("#app");
   const b = document.createElement("div");
@@ -13396,26 +13435,26 @@ function openInvSmartRestockModal({ p, existing, pkey, onDone }){
   b.innerHTML = `
     <div class="modal slModal" style="padding:20px;">
       <div class="slHeader" style="padding:0 0 14px;">
-        <div class="slTitle">🤔 ${escapeHtml(p.name)}</div>
-        <button class="slCloseBtn" id="invRClose">✕</button>
+        <div class="slTitle">­ƒñö ${escapeHtml(p.name)}</div>
+        <button class="slCloseBtn" id="invRClose">Ô£ò</button>
       </div>
       <div style="font-size:13px;color:rgba(255,255,255,.6);margin-bottom:20px;line-height:1.6;">
         Tienes este producto en cocina al <b style="color:#fbbf24">${curPct}%</b>.<br>
-        ¿Compraste más?
+        ┬┐Compraste m├ís?
       </div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <button class="invRestockBtn invRestockRepon" id="invRRepon">
-          <div style="font-size:18px">🔄</div>
+          <div style="font-size:18px">­ƒöä</div>
           <div>
-            <div style="font-weight:900;font-size:15px;">Repuse / Abrí un nuevo paquete</div>
-            <div style="font-size:12px;opacity:.7;margin-top:2px;">Cierra el lote anterior y empieza uno nuevo.<br>Esto mejora la predicción de duración.</div>
+            <div style="font-weight:900;font-size:15px;">Repuse / Abr├¡ un nuevo paquete</div>
+            <div style="font-size:12px;opacity:.7;margin-top:2px;">Cierra el lote anterior y empieza uno nuevo.<br>Esto mejora la predicci├│n de duraci├│n.</div>
           </div>
         </button>
         <button class="invRestockBtn invRestockAdd" id="invRAdd">
-          <div style="font-size:18px">➕</div>
+          <div style="font-size:18px">Ô×ò</div>
           <div>
             <div style="font-weight:900;font-size:15px;">Solo actualizo el nivel</div>
-            <div style="font-size:12px;opacity:.7;margin-top:2px;">El lote actual continúa. Solo cambio el %.</div>
+            <div style="font-size:12px;opacity:.7;margin-top:2px;">El lote actual contin├║a. Solo cambio el %.</div>
           </div>
         </button>
       </div>
@@ -13436,7 +13475,7 @@ function openInvSmartRestockModal({ p, existing, pkey, onDone }){
     });
     if(existing){ existing.levelPct=100; existing.lastCheck=now.slice(0,10); }
     persist();
-    toast(`${p.name} repuesto ✅ — lote nuevo`);
+    toast(`${p.name} repuesto Ô£à ÔÇö lote nuevo`);
     close(); onDone?.();
   });
 
@@ -13470,7 +13509,7 @@ function updateInventoryPct(invId, value){
 
   const pct = Number(String(value||"").trim());
   if(Number.isNaN(pct) || pct<0 || pct>100){
-    toast("Porcentaje inválido (0-100)");
+    toast("Porcentaje inv├ílido (0-100)");
     view();
     return;
   }
@@ -13488,7 +13527,7 @@ function markInventoryChecked(invId){
   if(!it) return;
   it.lastCheck = new Date().toISOString().slice(0,10);
   persist();
-  toast("Revisado hoy ✅");
+  toast("Revisado hoy Ô£à");
   view();
 }
 window.markInventoryChecked = markInventoryChecked;
@@ -13501,7 +13540,7 @@ function openNewProduct(){
       {key:"name", label:"Nombre"},
       {key:"price", label:"Precio", type:"number"},
       {key:"store", label:"Tienda"},
-      {key:"category", label:"Categoría", value:""},
+      {key:"category", label:"Categor├¡a", value:""},
       {key:"unit", label:"Unidad (u, kg, L)", value:"u"},
       {key:"essential", label:"Esencial (1/0)", value:"1"}
     ],
@@ -13551,7 +13590,7 @@ function editProductDetails(productId){
     title:"Editar producto",
     fields:[
       {key:"name", label:"Nombre", value:String(p.name||"")},
-      {key:"category", label:"Categoría", value:String(p.category||"")},
+      {key:"category", label:"Categor├¡a", value:String(p.category||"")},
       {key:"unit", label:"Unidad (u, kg, L)", value:String(p.unit||"u")},
       {key:"price", label:(String(p.unit||"u").toLowerCase().includes("kg") ? "Precio por kg" : "Precio"), type:"number", value:String(p.price||0)},
       {key:"store", label:"Tienda", value:String(p.store||"")},
@@ -14001,7 +14040,7 @@ function drawLineChart(canvas, labels, values){
 
 function _esDowShort(d){
   // d: Date
-  const names = ["dom.","lun.","mar.","mié.","jue.","vie.","sáb."];
+  const names = ["dom.","lun.","mar.","mi├®.","jue.","vie.","s├íb."];
   return names[d.getDay()] || "";
 }
 
@@ -14144,8 +14183,8 @@ function openShoppingCategoryModal(category, preset){
     <div class="modal">
       <div class="cardTop">
         <div>
-          <h2 style="margin:0;">Categoría: ${escapeHtml(category)}</h2>
-          <div class="small">${escapeHtml(start)} → ${escapeHtml(end)}</div>
+          <h2 style="margin:0;">Categor├¡a: ${escapeHtml(category)}</h2>
+          <div class="small">${escapeHtml(start)} ÔåÆ ${escapeHtml(end)}</div>
         </div>
         <button class="btn ghost" data-x="1">Cerrar</button>
       </div>
@@ -14160,18 +14199,18 @@ function openShoppingCategoryModal(category, preset){
             <div class="item">
               <div class="left">
                 <div class="name">${escapeHtml(r.name)}</div>
-                <div class="meta"><b>${money(r.spent)}</b> · ${r.times} regs · qty ${Number(r.qty||0)} ${escapeHtml(r.unit||"")}</div>
+                <div class="meta"><b>${money(r.spent)}</b> ┬À ${r.times} regs ┬À qty ${Number(r.qty||0)} ${escapeHtml(r.unit||"")}</div>
               </div>
               <div class="row">
                 ${canEdit ? `<button class="btn" onclick="editProductDetails('${p.id}')">Editar</button>` : ``}
               </div>
             </div>
           `;
-        }).join("") || `<div class="muted">No hay items en esta categoría.</div>`}
+        }).join("") || `<div class="muted">No hay items en esta categor├¡a.</div>`}
       </div>
 
       <div class="muted" style="margin-top:10px;">
-        Tip: para arreglar cosas en <b>other</b>, entra a Biblioteca y edita la categoría/unidad.
+        Tip: para arreglar cosas en <b>other</b>, entra a Biblioteca y edita la categor├¡a/unidad.
       </div>
     </div>
   `;
@@ -14193,15 +14232,15 @@ function viewShoppingAssistant(){
 
   const notConfiguredBanner = !ollamaEnabled ? `
     <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:rgba(245,158,11,0.9);">
-      ⚠️ <b>Ollama Cloud no configurado.</b> Ve a <b>NeuroChat → ⚙️ Configuración</b> y activa Ollama con tu API Key. El Chef AI usa la misma conexión.
+      ÔÜá´©Å <b>Ollama Cloud no configurado.</b> Ve a <b>NeuroChat ÔåÆ ÔÜÖ´©Å Configuraci├│n</b> y activa Ollama con tu API Key. El Chef AI usa la misma conexi├│n.
     </div>
   ` : "";
 
   return `
     <div class="sectionTitle" style="margin-bottom:10px;">
       <div style="display:flex;align-items:center;gap:10px;">
-        <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">‹</button>
-        <div>🤖 Chef AI</div>
+        <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">ÔÇ╣</button>
+        <div>­ƒñû Chef AI</div>
       </div>
       <div class="chip" style="background:rgba(124,92,255,0.15);color:#a78bfa;">Ollama Cloud</div>
     </div>
@@ -14212,27 +14251,27 @@ function viewShoppingAssistant(){
       <div id="shopAiChatLog" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;">
         ${chat.length === 0 ? `
           <div style="text-align:center;color:rgba(255,255,255,0.35);margin-top:30px;">
-            <div style="font-size:40px;margin-bottom:12px;">🍳</div>
+            <div style="font-size:40px;margin-bottom:12px;">­ƒì│</div>
             <div style="font-size:15px;font-weight:600;margin-bottom:6px;color:rgba(255,255,255,0.6);">Chef AI listo</div>
-            <div style="font-size:13px;line-height:1.5;">Dime qué comiste hoy y calculo el costo.<br>O pídeme un plan de comidas económico.</div>
+            <div style="font-size:13px;line-height:1.5;">Dime qu├® comiste hoy y calculo el costo.<br>O p├¡deme un plan de comidas econ├│mico.</div>
           </div>
         ` : chat.map(msg => `
           <div style="display:flex;flex-direction:column;align-items:${msg.role==='user'?'flex-end':'flex-start'};">
-            <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:3px;padding:0 4px;">${msg.role==='user'?'Tú':'🤖 Chef AI'}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:3px;padding:0 4px;">${msg.role==='user'?'T├║':'­ƒñû Chef AI'}</div>
             <div style="background:${msg.role==='user'?'rgba(124,92,255,0.25)':'rgba(255,255,255,0.06)'};border:1px solid ${msg.role==='user'?'rgba(124,92,255,0.5)':'rgba(255,255,255,0.1)'};padding:10px 13px;border-radius:${msg.role==='user'?'14px 14px 4px 14px':'14px 14px 14px 4px'};max-width:88%;font-size:14px;line-height:1.5;white-space:pre-wrap;">${escapeHtml(msg.content)}</div>
           </div>
         `).join("")}
-        <div id="shopAiTyping" style="display:none;color:rgba(255,255,255,0.4);font-size:13px;padding:4px 2px;">🤖 El chef está pensando…</div>
+        <div id="shopAiTyping" style="display:none;color:rgba(255,255,255,0.4);font-size:13px;padding:4px 2px;">­ƒñû El chef est├í pensandoÔÇª</div>
       </div>
 
       <div style="padding:10px 12px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:8px;align-items:flex-end;background:rgba(0,0,0,0.15);">
-        <textarea id="shopAiMsgInp" class="input" placeholder="Ej: Desayuné 2 huevos y pan bimbo…" style="flex:1;min-height:42px;max-height:120px;resize:none;line-height:1.4;"></textarea>
+        <textarea id="shopAiMsgInp" class="input" placeholder="Ej: Desayun├® 2 huevos y pan bimboÔÇª" style="flex:1;min-height:42px;max-height:120px;resize:none;line-height:1.4;"></textarea>
         <div style="display:flex;flex-direction:column;gap:6px;">
-          <button class="btn" id="btnShopAiSend" style="white-space:nowrap;">Enviar ↵</button>
+          <button class="btn" id="btnShopAiSend" style="white-space:nowrap;">Enviar ÔåÁ</button>
           ${chat.length > 0 ? `
             <div style="display:flex;gap:6px;">
-              <button class="btn good" id="btnShopAiCloseDay" style="font-size:11px;flex:1;padding:6px 0;">Cerrar día ✓</button>
-              <button class="btn danger" id="btnShopAiClear" style="font-size:11px;padding:6px 8px;" title="Borrar chat actual">🗑️</button>
+              <button class="btn good" id="btnShopAiCloseDay" style="font-size:11px;flex:1;padding:6px 0;">Cerrar d├¡a Ô£ô</button>
+              <button class="btn danger" id="btnShopAiClear" style="font-size:11px;padding:6px 8px;" title="Borrar chat actual">­ƒùæ´©Å</button>
             </div>
           ` : ""}
         </div>
@@ -14248,14 +14287,14 @@ function viewShoppingHistory(){
     return `
       <div class="sectionTitle" style="margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:10px;">
-          <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">‹</button>
-          <div>📅 Historial del Chef AI</div>
+          <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">ÔÇ╣</button>
+          <div>­ƒôà Historial del Chef AI</div>
         </div>
       </div>
       <div class="emptyState" style="margin-top:40px;">
-        <div style="font-size:40px;margin-bottom:10px;">📆</div>
-        No hay días guardados aún.<br><br>
-        Usa el Chef AI y toca "Cerrar día ✓" para guardar tu registro diario.
+        <div style="font-size:40px;margin-bottom:10px;">­ƒôå</div>
+        No hay d├¡as guardados a├║n.<br><br>
+        Usa el Chef AI y toca "Cerrar d├¡a Ô£ô" para guardar tu registro diario.
       </div>
     `;
   }
@@ -14266,10 +14305,10 @@ function viewShoppingHistory(){
   return `
     <div class="sectionTitle" style="margin-bottom:10px;">
       <div style="display:flex;align-items:center;gap:10px;">
-        <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">‹</button>
-        <div>📅 Historial del Chef AI</div>
+        <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">ÔÇ╣</button>
+        <div>­ƒôà Historial del Chef AI</div>
       </div>
-      <div class="chip">${days.length} días</div>
+      <div class="chip">${days.length} d├¡as</div>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:12px;">
@@ -14285,12 +14324,12 @@ function viewShoppingHistory(){
           </div>
 
           <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:4px;">Tus notas o correcciones para el AI:</div>
-          <textarea class="input shopAiDayNote" data-date="${d.date}" placeholder="Ej: No comí 2 huevos, fueron 3..." style="width:100%;min-height:50px;font-size:13px;margin-bottom:8px;">${escapeHtml(d.editedNotes || "")}</textarea>
+          <textarea class="input shopAiDayNote" data-date="${d.date}" placeholder="Ej: No com├¡ 2 huevos, fueron 3..." style="width:100%;min-height:50px;font-size:13px;margin-bottom:8px;">${escapeHtml(d.editedNotes || "")}</textarea>
           
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div style="font-size:11px;color:rgba(255,255,255,0.4);">${d.messages ? d.messages.length : 0} msgs</div>
             <div style="display:flex;gap:6px;">
-              <button class="btn danger" style="padding:4px 8px;font-size:11px;" onclick="if(confirm('¿Borrar registro de este día?')) { state.shoppingAiDays.splice(${state.shoppingAiDays.findIndex(x=>x.date===d.date)},1); persist(); view(); }">Borrar</button>
+              <button class="btn danger" style="padding:4px 8px;font-size:11px;" onclick="if(confirm('┬┐Borrar registro de este d├¡a?')) { state.shoppingAiDays.splice(${state.shoppingAiDays.findIndex(x=>x.date===d.date)},1); persist(); view(); }">Borrar</button>
               <button class="btn good btnSaveDayNote" data-date="${d.date}" style="padding:4px 10px;font-size:11px;">Guardar notas</button>
             </div>
           </div>
@@ -14315,16 +14354,16 @@ function viewShoppingDashboard(){
 
   const catRows = Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>{
     const pct = sum.sum ? (v/sum.sum*100) : 0;
-    return `<button class="kvBtn" onclick="openShoppingCategoryModal(\'${escapeHtml(c)}\', \'${preset}\')"><div class="k">${escapeHtml(c)}</div><div class="v"><b>${money(v)}</b> · ${pct.toFixed(0)}%</div></button>`;
+    return `<button class="kvBtn" onclick="openShoppingCategoryModal(\'${escapeHtml(c)}\', \'${preset}\')"><div class="k">${escapeHtml(c)}</div><div class="v"><b>${money(v)}</b> ┬À ${pct.toFixed(0)}%</div></button>`;
   }).join("") || `<div class="muted">No hay datos en este rango.</div>`;
 
   const storeRows = stores.map(([s,c])=>`<div class="kv"><div class="k">${escapeHtml(s)}</div><div class="v">${c} compras</div></div>`).join("") || `<div class="muted">Sin tiendas.</div>`;
-  const prodRows = products.map(p=>`<div class="kv"><div class="k">${escapeHtml(p.name)}</div><div class="v"><b>${money(p.spend)}</b> · ${p.count} u.</div></div>`).join("") || `<div class="muted">Sin productos.</div>`;
+  const prodRows = products.map(p=>`<div class="kv"><div class="k">${escapeHtml(p.name)}</div><div class="v"><b>${money(p.spend)}</b> ┬À ${p.count} u.</div></div>`).join("") || `<div class="muted">Sin productos.</div>`;
 
   return `
     <div class="sectionTitle">
-      <div>Compras · Dashboard</div>
-      <button class="btn" data-act="backToShoppingLists">← Volver</button>
+      <div>Compras ┬À Dashboard</div>
+      <button class="btn" data-act="backToShoppingLists">ÔåÉ Volver</button>
     </div>
 
     <div class="row" style="margin:0 0 12px;">
@@ -14339,17 +14378,17 @@ function viewShoppingDashboard(){
       <div class="cardTop">
         <div>
           <h3 class="cardTitle">Gasto diario</h3>
-          <div class="small">${escapeHtml(range.start)} → ${escapeHtml(range.end)}</div>
+          <div class="small">${escapeHtml(range.start)} ÔåÆ ${escapeHtml(range.end)}</div>
         </div>
-        <div class="chip">${daily.dates.length} días</div>
+        <div class="chip">${daily.dates.length} d├¡as</div>
       </div>
       <div class="hr"></div>
       <canvas id="shopDailyChart" class="shopChart" style="width:100%;height:160px"></canvas>
       <div class="hr"></div>
       <div class="kv"><div class="k">Total</div><div class="v"><b>${money(sum.sum)}</b></div></div>
       <div class="kv"><div class="k">Promedio diario</div><div class="v"><b>${money(sum.avg)}</b></div></div>
-      <div class="kv"><div class="k">Máximo</div><div class="v"><b>${money(sum.max)}</b> · ${escapeHtml(sum.maxDate||"-")}</div></div>
-      <div class="kv"><div class="k">Mínimo</div><div class="v"><b>${money(sum.min)}</b> · ${escapeHtml(sum.minDate||"-")}</div></div>
+      <div class="kv"><div class="k">M├íximo</div><div class="v"><b>${money(sum.max)}</b> ┬À ${escapeHtml(sum.maxDate||"-")}</div></div>
+      <div class="kv"><div class="k">M├¡nimo</div><div class="v"><b>${money(sum.min)}</b> ┬À ${escapeHtml(sum.minDate||"-")}</div></div>
     </section>
 
     ${(() => {
@@ -14374,8 +14413,8 @@ function viewShoppingDashboard(){
       <section class="card" style="background:rgba(124,92,255,0.05);border-color:rgba(124,92,255,0.2);">
         <div class="cardTop">
           <div>
-            <h3 class="cardTitle" style="color:#c084fc;">🤖 Consumo Real vs Compras</h3>
-            <div class="small">Datos del Chef AI (${aiDays.length} días)</div>
+            <h3 class="cardTitle" style="color:#c084fc;">­ƒñû Consumo Real vs Compras</h3>
+            <div class="small">Datos del Chef AI (${aiDays.length} d├¡as)</div>
           </div>
         </div>
         <div class="hr"></div>
@@ -14384,7 +14423,7 @@ function viewShoppingDashboard(){
         <div class="hr"></div>
         <div class="kv" style="margin-bottom:8px;">
           <div class="k">Promedio Diario Consumido</div>
-          <div class="v" style="font-size:16px;color:#c084fc;"><b>${money(avgEaten)}</b>/día</div>
+          <div class="v" style="font-size:16px;color:#c084fc;"><b>${money(avgEaten)}</b>/d├¡a</div>
         </div>
         ${diffMsg ? `<div style="text-align:right;margin-top:-5px;">${diffMsg}</div>` : ""}
       </section>
@@ -14402,18 +14441,18 @@ function viewShoppingDashboard(){
       <div class="hr"></div>
       <div class="kv"><div class="k">Total semanal (rango)</div><div class="v"><b>${money(weeklySum.sum)}</b></div></div>
       <div class="kv"><div class="k">Promedio por semana</div><div class="v"><b>${money(weeklySum.avg)}</b></div></div>
-      <div class="kv"><div class="k">Semana mínima (rango)</div><div class="v"><b>${money(weeklySum.min)}</b> · ${escapeHtml(weeklySum.minDate||"-")}</div></div>
+      <div class="kv"><div class="k">Semana m├¡nima (rango)</div><div class="v"><b>${money(weeklySum.min)}</b> ┬À ${escapeHtml(weeklySum.minDate||"-")}</div></div>
       <div class="hr"></div>
-      <div class="kv"><div class="k">Plan emergencia (mínimo 12 sem)</div><div class="v"><b>${money(emer.min)}</b> · ${escapeHtml(emer.minWeek||"-")}</div></div>
-      <div class="muted" style="margin-top:8px;">Tip: si quieres que el plan sea más estricto, marca ⭐ esenciales en Inventario/Biblioteca.</div>
+      <div class="kv"><div class="k">Plan emergencia (m├¡nimo 12 sem)</div><div class="v"><b>${money(emer.min)}</b> ┬À ${escapeHtml(emer.minWeek||"-")}</div></div>
+      <div class="muted" style="margin-top:8px;">Tip: si quieres que el plan sea m├ís estricto, marca Ô¡É esenciales en Inventario/Biblioteca.</div>
     </section>
 
     <div class="grid2">
       <section class="card">
         <div class="cardTop">
           <div>
-            <h3 class="cardTitle">Categorías</h3>
-            <div class="small">Distribución por monto</div>
+            <h3 class="cardTitle">Categor├¡as</h3>
+            <div class="small">Distribuci├│n por monto</div>
           </div>
         </div>
         <div class="hr"></div>
@@ -14522,9 +14561,9 @@ function openMergeGameFull(){
           <div style="max-width:520px">
             <div style="font-size:18px;font-weight:700;margin-bottom:10px">Merge Lab no pudo cargar</div>
             <div style="opacity:.85;line-height:1.35">
-              Tu navegador bloqueó el motor del juego (Matter.js). En Brave móvil, suele ser por Shields.
+              Tu navegador bloque├│ el motor del juego (Matter.js). En Brave m├│vil, suele ser por Shields.
               <br><br>
-              Prueba: <b>Brave Shields → Off</b> para este sitio, y recarga.
+              Prueba: <b>Brave Shields ÔåÆ Off</b> para este sitio, y recarga.
             </div>
             <div style="margin-top:14px;opacity:.7;font-size:12px">v7.10</div>
           </div>
@@ -14560,7 +14599,7 @@ window.closeMergeGame = closeMergeGameFull;
 function openMergeGame(){ return openMergeGameFull(); }
 function closeMergeGame(){ return closeMergeGameFull(); }
 
-// Event delegation for the Home button 🎮
+// Event delegation for the Home button ­ƒÄ«
 document.addEventListener("click", function(e){
   const btn = e.target.closest("#btnOpenMergeGame");
   if(btn){
@@ -14569,7 +14608,7 @@ document.addEventListener("click", function(e){
 });
 
 // ====================== INVENTORY DELEGATED EVENTS ======================
-// Handles data-inv-act, data-inv-cat, data-inv-pick — these have no data-act
+// Handles data-inv-act, data-inv-cat, data-inv-pick ÔÇö these have no data-act
 // so wireActions never catches them. This listener covers the whole document.
 document.addEventListener("click", function(e){
 
@@ -14592,11 +14631,11 @@ document.addEventListener("click", function(e){
       if(act==="setPct"){   openInvPctModal(actBtn.dataset.iid); return; }
       if(act==="addFromLib"){ openInvAddFromLibModal(); return; }
       if(act==="clearCocina"){
-        if(!confirm("¿Limpiar toda la cocina? Esto borra todos los productos y lotes. No se puede deshacer.")) return;
+        if(!confirm("┬┐Limpiar toda la cocina? Esto borra todos los productos y lotes. No se puede deshacer.")) return;
         state.inventory = [];
         state.inventoryLots = [];
         persist();
-        toast("Cocina limpia 🧹");
+        toast("Cocina limpia ­ƒº╣");
         view();
         return;
       }
@@ -14606,7 +14645,7 @@ document.addEventListener("click", function(e){
       }
     } catch(err) {
       console.error("Inventory action error:", act, err);
-      alert("Error en acción de inventario: " + err.message);
+      alert("Error en acci├│n de inventario: " + err.message);
     }
   }
 
@@ -14628,7 +14667,7 @@ function openMergeCfgModal(){
   backdrop.innerHTML = `
     <div class="modal">
       <h2>Merge Lab Config (JSON)</h2>
-      <div class="small muted">Se aplica al abrir el juego. Si el JSON está mal, se ignora.</div>
+      <div class="small muted">Se aplica al abrir el juego. Si el JSON est├í mal, se ignora.</div>
       <div class="grid" style="margin-top:10px;">
         <textarea id="mergeCfgText" class="input" style="height:260px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;"></textarea>
         <div class="row" style="margin:0; justify-content:flex-end;">
@@ -14666,10 +14705,10 @@ function openMergeCfgModal(){
     try{
       const parsed = JSON.parse(ta.value);
       localStorage.setItem("mc_merge_cfg_override", JSON.stringify(parsed, null, 2));
-      toast("✅ Merge config guardada");
+      toast("Ô£à Merge config guardada");
       close();
     }catch(err){
-      toast("❌ JSON inválido");
+      toast("ÔØî JSON inv├ílido");
     }
   });
 }
@@ -14773,7 +14812,7 @@ async function importSpritePack(file){
     const blob = dataURLToBlob(it.dataURL);
     await mcSpriteIdbPut(String(it.id), blob, it.meta || {});
   }
-  toast("✅ Pack importado");
+  toast("Ô£à Pack importado");
 }
 
 function openMergeSpriteManagerModal(){
@@ -14916,7 +14955,7 @@ function openMergeSpriteManagerModal(){
       }
     }
     renderGrid();
-    toast("📦 Sprites cargados (preview)");
+    toast("­ƒôª Sprites cargados (preview)");
   });
 
   backdrop.querySelector("#mcSprExport").addEventListener("click", exportSpritePack);
@@ -14929,7 +14968,7 @@ function openMergeSpriteManagerModal(){
       await importSpritePack(f);
       await refreshFromDb();
     }catch(e){
-      toast("❌ Pack inválido");
+      toast("ÔØî Pack inv├ílido");
       console.error(e);
     }finally{
       imp.value = "";
@@ -14955,7 +14994,7 @@ function openMergeSpriteManagerModal(){
         localStorage.setItem("mc_merge_cfg_override", JSON.stringify(cfg, null, 2));
       }
     }catch(e){}
-    toast(`✅ Guardado (${saved})`);
+    toast(`Ô£à Guardado (${saved})`);
     close();
     // Suggest reload game to apply
     toast("Tip: cierra y abre el juego para aplicar");
@@ -15003,14 +15042,14 @@ const oldLedger = load(LS.financeLedger, []);
   });
 state.financeReasons = load(LS.financeReasons, ["planificado", "impulso", "emergencia", "normal"]);
 state.financeEntryCategories = load(LS.financeEntryCategories, [
-  { id: "Alimentos", icon: "🛒", name: "Alimentos" },
-  { id: "Transporte", icon: "🚕", name: "Transporte" },
-  { id: "Hogar", icon: "🏠", name: "Hogar" },
-  { id: "Ocio", icon: "🍿", name: "Ocio" },
-  { id: "Salud", icon: "💊", name: "Salud" },
-  { id: "Ropa", icon: "👕", name: "Ropa" },
-  { id: "Mascotas", icon: "🐾", name: "Mascotas" },
-  { id: "Otros", icon: "📦", name: "Otros" }
+  { id: "Alimentos", icon: "­ƒøÆ", name: "Alimentos" },
+  { id: "Transporte", icon: "­ƒÜò", name: "Transporte" },
+  { id: "Hogar", icon: "­ƒÅá", name: "Hogar" },
+  { id: "Ocio", icon: "­ƒì┐", name: "Ocio" },
+  { id: "Salud", icon: "­ƒÆè", name: "Salud" },
+  { id: "Ropa", icon: "­ƒæò", name: "Ropa" },
+  { id: "Mascotas", icon: "­ƒÉ¥", name: "Mascotas" },
+  { id: "Otros", icon: "­ƒôª", name: "Otros" }
 ]);
 state.financePrimaryAccountId = load("memorycarl_v2_finance_primary_account_id", "");
 state.financeAccounts = load(LS.financeAccounts, []);
@@ -15106,7 +15145,7 @@ persist = function(){
   } catch(_e) {}
 };
 
-// ─── INDEXED DB AUTO BACKUP SYSTEM ───────────────────────────────────
+// ÔöÇÔöÇÔöÇ INDEXED DB AUTO BACKUP SYSTEM ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 window.financeAutoBackupToIDB = function() {
   const dbName = 'MemoryCarlFinanceBackups';
   const dbVer = 1;
@@ -15305,7 +15344,7 @@ function financeGenerateInsights(monthKey){
   if(m.foreignUse>0){
     list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:'urgent', title:'Uso de dinero ajeno', message:`Ya cargaste S/ ${_financeFmt(m.foreignUse)} a fuentes de terceros este mes.`, relatedIds:[], status:'open' });
   }
-  list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:(m.margin<0?'urgent':'info'), title:'Margen real del mes', message:`Tu margen real después de esenciales es S/ ${_financeFmt(m.margin)}.`, relatedIds:[], status:'open' });
+  list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:(m.margin<0?'urgent':'info'), title:'Margen real del mes', message:`Tu margen real despu├®s de esenciales es S/ ${_financeFmt(m.margin)}.`, relatedIds:[], status:'open' });
   state.financeInsights = list;
   return list;
 }
@@ -15314,10 +15353,10 @@ function financePreviewImpact({amount,impactMode,sourceId,responsibleParty}){
   const src = (state.financePaymentSources||[]).find(s=>s.id===sourceId);
   const amt = Number(amount||0);
   if((impactMode==='internal_debt') || (src && src.createsInternalDebt) || (responsibleParty && responsibleParty!=='me')){
-    return `Esto NO reducirá tu caja real ahora, pero aumentará tu deuda interna en S/ ${_financeFmt(amt)}.`;
+    return `Esto NO reducir├í tu caja real ahora, pero aumentar├í tu deuda interna en S/ ${_financeFmt(amt)}.`;
   }
-  if(impactMode==='income') return `Esto aumentará tu caja real en S/ ${_financeFmt(amt)}.`;
-  return `Esto reducirá tu caja real en S/ ${_financeFmt(amt)}.`;
+  if(impactMode==='income') return `Esto aumentar├í tu caja real en S/ ${_financeFmt(amt)}.`;
+  return `Esto reducir├í tu caja real en S/ ${_financeFmt(amt)}.`;
 }
 
 function financeUpsertInternalBalance(personKey, delta){
@@ -15483,11 +15522,11 @@ function financeResetToZero(){
   state.financeResetAt = isoDate(new Date());
   persist();
   view();
-  toast("Finanzas reiniciadas a cero ✅ (historial archivado)");
+  toast("Finanzas reiniciadas a cero Ô£à (historial archivado)");
 }
 
 function financeResetToZeroConfirm(){
-  const ok = confirm("¿Reiniciar finanzas a cero?\n\n• NO borra tu historial: lo archiva.\n• Tus cuentas quedan en 0 para que pongas saldo inicial.\n\n¿Continuar?");
+  const ok = confirm("┬┐Reiniciar finanzas a cero?\n\nÔÇó NO borra tu historial: lo archiva.\nÔÇó Tus cuentas quedan en 0 para que pongas saldo inicial.\n\n┬┐Continuar?");
   if(ok) financeResetToZero();
 }
 
@@ -15507,16 +15546,16 @@ function financeSetCurrentAsBaseline(){
   state.financeBaselineAt = isoDate(new Date());
   persist();
   view();
-  toast("Saldos actuales guardados como iniciales ✅ (historial archivado)");
+  toast("Saldos actuales guardados como iniciales Ô£à (historial archivado)");
 }
 
 function financeSetCurrentAsBaselineConfirm(){
   const ok = confirm(
-    "¿Usar los saldos actuales como punto de inicio?\n\n" +
-    "• NO borra historial: lo archiva.\n" +
-    "• Tus saldos actuales se guardan como saldo inicial.\n" +
-    "• Desde aquí, todo lo nuevo se registrará como movimientos.\n\n" +
-    "¿Continuar?"
+    "┬┐Usar los saldos actuales como punto de inicio?\n\n" +
+    "ÔÇó NO borra historial: lo archiva.\n" +
+    "ÔÇó Tus saldos actuales se guardan como saldo inicial.\n" +
+    "ÔÇó Desde aqu├¡, todo lo nuevo se registrar├í como movimientos.\n\n" +
+    "┬┐Continuar?"
   );
   if(ok) financeSetCurrentAsBaseline();
 }
@@ -15531,15 +15570,15 @@ function financeHardResetAll(){
   // keep financeMeta (expected income) by default
   persist();
   view();
-  toast("Finanzas borradas ✅ (inicio limpio)");
+  toast("Finanzas borradas Ô£à (inicio limpio)");
 }
 
 function financeHardResetAllConfirm(){
   const ok = confirm(
-    "⚠️ Borrar TODO en Finanzas y empezar de cero?\n\n" +
-    "• Borra cuentas y movimientos.\n" +
-    "• No se puede deshacer.\n\n" +
-    "¿Continuar?"
+    "ÔÜá´©Å Borrar TODO en Finanzas y empezar de cero?\n\n" +
+    "ÔÇó Borra cuentas y movimientos.\n" +
+    "ÔÇó No se puede deshacer.\n\n" +
+    "┬┐Continuar?"
   );
   if(ok) financeHardResetAll();
 }
@@ -15618,10 +15657,15 @@ function addFinanceEntry(payload){
     usdFixedFee: payload.usdFixedFee || null
   };
 
-  state.financeLedger.unshift(entry);
+  if(window.FINANCE){
+    window.FINANCE.addMovement(entry);
+  } else {
+    const copy = state.financeLedger;
+    copy.unshift(entry);
+    state.financeLedger = copy;
+  }
 
   // Remember last used account(s) for convenience defaults.
-  // (Works even when main.js is loaded as a module.)
   state.financeLastAccountId = accountId;
   if(String(category||"").toLowerCase()==="mercado") state.financeLastMarketAccountId = accountId;
 
@@ -15711,7 +15755,7 @@ function openFinanceAccountModal(prefill=null){
     <div class="modal finAccModal" role="dialog" aria-label="Cuenta">
       <div class="finAccTop">
         <div class="finAccTopTitle">${draft.id ? "Editar cuenta" : "Nueva cuenta"}</div>
-        <button class="iconBtn" id="finAccClose" aria-label="Cerrar">✕</button>
+        <button class="iconBtn" id="finAccClose" aria-label="Cerrar">Ô£ò</button>
       </div>
 
       <div class="finAccScroll">
@@ -15733,14 +15777,14 @@ function openFinanceAccountModal(prefill=null){
         <label class="finAccField">
           <div class="finAccLabel">Saldo inicial</div>
           <input id="finAccBalance" type="number" inputmode="decimal" value="${Number(draft.initialBalance !== undefined && draft.initialBalance !== null ? draft.initialBalance : (draft.balance || 0))}" />
-          <div class="muted" style="margin-top:6px">Tip: esto define tu “punto cero” real. Luego los movimientos ajustan el saldo.</div>
+          <div class="muted" style="margin-top:6px">Tip: esto define tu ÔÇ£punto ceroÔÇØ real. Luego los movimientos ajustan el saldo.</div>
         </label>
 
         ${draft.id ? `
         <label class="finAccField" style="margin-top: 12px; padding: 10px; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.25); border-radius: 8px;">
           <div class="finAccLabel" style="color: #818cf8; font-weight: bold;">Saldo real actual (Autocalcular saldo inicial)</div>
           <input id="finAccRealBalance" type="number" inputmode="decimal" placeholder="Ej: 3017.13" />
-          <div class="muted" style="margin-top:4px; font-size:11px;">Escribe el dinero real que tienes hoy en esta cuenta. Esto calculará el saldo inicial automáticamente según tus movimientos registrados.</div>
+          <div class="muted" style="margin-top:4px; font-size:11px;">Escribe el dinero real que tienes hoy en esta cuenta. Esto calcular├í el saldo inicial autom├íticamente seg├║n tus movimientos registrados.</div>
         </label>
         ` : ''}
 
@@ -15807,10 +15851,10 @@ function openFinanceAccountModal(prefill=null){
       financeRecomputeBalances();
       persist();
       view();
-      toast("Cuenta actualizada ✅");
+      toast("Cuenta actualizada Ô£à");
     }else{
       addFinanceAccount({name, type, balance: bal, color});
-      toast("Cuenta creada ✅");
+      toast("Cuenta creada Ô£à");
     }
 
     close();
@@ -15818,13 +15862,13 @@ function openFinanceAccountModal(prefill=null){
 
   backdrop.querySelector('#finAccDelete')?.addEventListener('click', () => {
     if(!draft.id) return;
-    const ok = confirm(`¿Estás seguro de que deseas eliminar la cuenta "${draft.name}"?\n\nLos movimientos asociados a esta cuenta se mantendrán pero quedarán sin cuenta asignada.`);
+    const ok = confirm(`┬┐Est├ís seguro de que deseas eliminar la cuenta "${draft.name}"?\n\nLos movimientos asociados a esta cuenta se mantendr├ín pero quedar├ín sin cuenta asignada.`);
     if(!ok) return;
     state.financeAccounts = (state.financeAccounts||[]).filter(a => a.id !== draft.id);
     financeRecomputeBalances();
     persist();
     view();
-    toast("Cuenta eliminada 🗑️");
+    toast("Cuenta eliminada ­ƒùæ´©Å");
     close();
   });
 
@@ -15903,9 +15947,9 @@ function openFinanceAccountDetails(accountId) {
   backdrop.innerHTML = `
     <div class="modal finAccDetailsModal" role="dialog" aria-label="Detalles de Cuenta">
       <div class="finEntryTop">
-        <button class="iconBtn" id="finAccDetClose" aria-label="Cerrar">←</button>
+        <button class="iconBtn" id="finAccDetClose" aria-label="Cerrar">ÔåÉ</button>
         <div class="finEntryTopTitle">${escapeHtml(acc.name)}</div>
-        <button class="iconBtn" id="finAccDetEdit" title="Editar">✏️</button>
+        <button class="iconBtn" id="finAccDetEdit" title="Editar">Ô£Å´©Å</button>
       </div>
 
       <div class="finEntryScroll">
@@ -15980,7 +16024,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
 
   const splitNote = (s)=>{
     const txt = String(s||"");
-    const i = txt.indexOf(" · ");
+    const i = txt.indexOf(" ┬À ");
     if(i===-1) return {name: txt, note:""};
     return {name: txt.slice(0,i).trim(), note: txt.slice(i+3).trim()};
   };
@@ -16011,8 +16055,8 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <div style="font-size:18px; font-weight:700;">${existing ? "Editar" : "Nuevo"} Movimiento</div>
         <div style="display:flex; gap:12px;">
-          ${existing ? `<button class="iconBtn" id="finEntryDelete" title="Eliminar" style="color:#ef4444;">🗑️</button>` : ""}
-          <button class="iconBtn" id="finEntryClose" aria-label="Cerrar">✕</button>
+          ${existing ? `<button class="iconBtn" id="finEntryDelete" title="Eliminar" style="color:#ef4444;">­ƒùæ´©Å</button>` : ""}
+          <button class="iconBtn" id="finEntryClose" aria-label="Cerrar">Ô£ò</button>
         </div>
       </div>
 
@@ -16029,7 +16073,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         </label>
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
           <input type="checkbox" id="finEntryIsUSD" ${existing?.usdGross?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
-          <span style="font-size:14px; font-weight:600;">Ingreso en Dólares (PayPal/Ligo)</span>
+          <span style="font-size:14px; font-weight:600;">Ingreso en D├│lares (PayPal/Ligo)</span>
         </label>
         
         <div id="finProUSDOpts" style="display:${existing?.usdGross?'block':'none'}; margin-top:12px; padding-top:12px; border-top:1px dashed #444;">
@@ -16053,14 +16097,14 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
               <input type="number" id="finEntryUSDExchange" inputmode="decimal" class="textInput" placeholder="3.75" value="${existing?.usdExchange||''}" style="width:100%; box-sizing:border-box;">
             </div>
           </div>
-          <div style="font-size:12px; color:#888;">La comisión (<span id="finEntryUSDFeeLabel">0.00</span> USD) y el monto en Soles se calculan solos.</div>
+          <div style="font-size:12px; color:#888;">La comisi├│n (<span id="finEntryUSDFeeLabel">0.00</span> USD) y el monto en Soles se calculan solos.</div>
         </div>
       </div>
 
       <div id="finProExpenseOpts" style="display:${draft.type==='expense'?'block':'none'}; margin: 12px 0; background: #1c1c1e; padding: 12px; border-radius: 12px; border: 1px solid #333;">
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
           <input type="checkbox" id="finEntryIsFiado" ${existing?.isFiado?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
-          <span style="font-size:14px; font-weight:600;">Es un Fiado (Pagar después)</span>
+          <span style="font-size:14px; font-weight:600;">Es un Fiado (Pagar despu├®s)</span>
         </label>
       </div>
 
@@ -16070,8 +16114,8 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       </div>
 
       <div class="finEntryDateRow" style="margin-top:12px; margin-bottom:12px; display:flex; gap:10px; justify-content:center;">
-        <div class="finEntryDateChip" style="background:#2a2a2c; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:6px;"><span>📅</span><input id="finEntryDate" type="date" value="${draft.date}" style="background:transparent; color:#fff; border:none; outline:none; font-size:13px; font-family:inherit;" /></div>
-        <div class="finEntryDateChip" style="background:#2a2a2c; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:6px;"><span>🕒</span><input id="finEntryTime" type="time" value="${draft.time}" style="background:transparent; color:#fff; border:none; outline:none; font-size:13px; font-family:inherit;" /></div>
+        <div class="finEntryDateChip" style="background:#2a2a2c; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:6px;"><span>­ƒôà</span><input id="finEntryDate" type="date" value="${draft.date}" style="background:transparent; color:#fff; border:none; outline:none; font-size:13px; font-family:inherit;" /></div>
+        <div class="finEntryDateChip" style="background:#2a2a2c; padding:6px 10px; border-radius:8px; display:flex; align-items:center; gap:6px;"><span>­ƒòÆ</span><input id="finEntryTime" type="time" value="${draft.time}" style="background:transparent; color:#fff; border:none; outline:none; font-size:13px; font-family:inherit;" /></div>
       </div>
 
       <div class="finProCatGrid" id="finCatGrid">
@@ -16080,35 +16124,35 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
             <div class="finProCatIcon">${c.icon}</div>
             <div class="finProCatName">${c.name}</div>
             ${!["Alimentos", "Transporte", "Hogar", "Ocio", "Salud", "Ropa", "Mascotas", "Otros"].includes(c.id) ? `
-              <button class="deleteCatBtn" data-id="${c.id}" style="position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:900; line-height:16px; text-align:center; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index: 10;">✕</button>
+              <button class="deleteCatBtn" data-id="${c.id}" style="position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:900; line-height:16px; text-align:center; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index: 10;">Ô£ò</button>
             ` : ""}
           </div>
         `).join('')}
         <div class="finProCatChip" id="btnAddCustomCategory" style="border: 1px dashed #7c5cff; background: transparent;">
-          <div class="finProCatIcon" style="color: #7c5cff;">➕</div>
+          <div class="finProCatIcon" style="color: #7c5cff;">Ô×ò</div>
           <div class="finProCatName" style="color: #7c5cff;">Nuevo</div>
         </div>
       </div>
 
-      <input type="text" id="finEntryName" class="finProNote" placeholder="Ej: le presté 50 a Jhon / pagué cuota tarjeta / antojo de la noche" value="${escapeHtml(draft.name)}">
+      <input type="text" id="finEntryName" class="finProNote" placeholder="Ej: le prest├® 50 a Jhon / pagu├® cuota tarjeta / antojo de la noche" value="${escapeHtml(draft.name)}">
 
       <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:4px; align-items:center;">
         <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; color:#aaa;">
           <input type="checkbox" id="finEntryHasPerson" style="width:16px;height:16px;accent-color:#7c5cff;" ${existing?.counterparty ? 'checked' : ''}>
-          <span>¿Involucra a alguien?</span>
+          <span>┬┐Involucra a alguien?</span>
         </label>
       </div>
       <div id="finEntryPersonWrap" style="display:${existing?.counterparty ? 'block' : 'none'}; margin-bottom:10px;">
-        <input type="text" id="finEntryPerson" class="finProNote" placeholder="Nombre de la persona (Ej: Jhon, María)" value="${escapeHtml(existing?.counterparty || '')}" style="margin-top:4px;">
+        <input type="text" id="finEntryPerson" class="finProNote" placeholder="Nombre de la persona (Ej: Jhon, Mar├¡a)" value="${escapeHtml(existing?.counterparty || '')}" style="margin-top:4px;">
       </div>
 
-      <input type="text" id="finEntryOrigin" class="finProNote" placeholder="¿De dónde salió este dinero? (Ej: sueldo, lo de Jhon, venta de pantalones)" value="${escapeHtml(existing?.sourceLabel || '')}" style="margin-bottom:10px;">
+      <input type="text" id="finEntryOrigin" class="finProNote" placeholder="┬┐De d├│nde sali├│ este dinero? (Ej: sueldo, lo de Jhon, venta de pantalones)" value="${escapeHtml(existing?.sourceLabel || '')}" style="margin-bottom:10px;">
       
-      <div class="finProAdvToggle" id="finAdvToggle">Más opciones (Cuentas, Notas) ▼</div>
+      <div class="finProAdvToggle" id="finAdvToggle">M├ís opciones (Cuentas, Notas) Ôû╝</div>
       
       <div class="finProAdvSection" id="finAdvSection">
         <div class="finEntryPickRow">
-          <div class="finEntryPickIcon">💳</div>
+          <div class="finEntryPickIcon">­ƒÆ│</div>
           <div class="finEntryPickText">
             <div class="finEntryPickLabel">Cuenta</div>
             <div class="finEntryPickValue">
@@ -16123,7 +16167,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         
         <div class="row" style="gap:10px">
           <div class="finEntryField" style="flex:1">
-            <label class="fieldLabel">Quién pagó</label>
+            <label class="fieldLabel">Qui├®n pag├│</label>
             <select id="finEntryPaidBy" class="textInput">
               <option value="me">Yo</option><option value="wife">Esposa</option><option value="shared">Compartido</option><option value="other">Otro</option>
             </select>
@@ -16141,13 +16185,13 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
             <label class="fieldLabel">Motivo</label>
             <select id="finEntryReason" class="textInput">
               ${state.financeReasons.map(r=>`<option value="${r}" ${r===(draft.reason||"normal")?'selected':''}>${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join('')}
-              <option value="__add_new__">＋ Agregar nuevo...</option>
+              <option value="__add_new__">´╝ï Agregar nuevo...</option>
             </select>
           </div>
           <div class="finEntryField" style="flex:1">
             <label class="fieldLabel">Rol Neuronal</label>
             <select id="finEntryNeuronRole" class="textInput">
-               ${[["auto","Automático"],["trigger","Gatillo"],["habit","Hábito"],["risk","Alerta"],["opportunity","Oportunidad"]].map(r=>`<option value="${r[0]}" ${r[0]===(draft.neuronRole||"auto")?'selected':''}>${r[1]}</option>`).join('')}
+               ${[["auto","Autom├ítico"],["trigger","Gatillo"],["habit","H├íbito"],["risk","Alerta"],["opportunity","Oportunidad"]].map(r=>`<option value="${r[0]}" ${r[0]===(draft.neuronRole||"auto")?'selected':''}>${r[1]}</option>`).join('')}
             </select>
           </div>
         </div>
@@ -16182,10 +16226,10 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     const isOpen = advSection.classList.contains('open');
     if (isOpen) {
       advSection.classList.remove('open');
-      advToggle.innerHTML = "Más opciones (Cuentas, Fechas, Notas) ▼";
+      advToggle.innerHTML = "M├ís opciones (Cuentas, Fechas, Notas) Ôû╝";
     } else {
       advSection.classList.add('open');
-      advToggle.innerHTML = "Menos opciones ▲";
+      advToggle.innerHTML = "Menos opciones Ôû▓";
     }
   });
 
@@ -16256,14 +16300,14 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
   if (reasonSelect) {
     reasonSelect.addEventListener('change', () => {
       if (reasonSelect.value === '__add_new__') {
-        const newReason = prompt('Ingresa el nuevo motivo/razón:');
+        const newReason = prompt('Ingresa el nuevo motivo/raz├│n:');
         if (newReason && newReason.trim()) {
           const cleaned = newReason.trim().toLowerCase();
           if (!state.financeReasons.includes(cleaned)) {
             state.financeReasons.push(cleaned);
             save(LS.financeReasons, state.financeReasons);
           }
-          reasonSelect.innerHTML = state.financeReasons.map(r => `<option value="${r}" ${r===cleaned?'selected':''}>${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join('') + '<option value="__add_new__">＋ Agregar nuevo...</option>';
+          reasonSelect.innerHTML = state.financeReasons.map(r => `<option value="${r}" ${r===cleaned?'selected':''}>${r.charAt(0).toUpperCase() + r.slice(1)}</option>`).join('') + '<option value="__add_new__">´╝ï Agregar nuevo...</option>';
           reasonSelect.value = cleaned;
         } else {
           reasonSelect.value = 'normal';
@@ -16283,7 +16327,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       usageCounts[cat] = (usageCounts[cat] || 0) + 1;
     });
 
-    // Sort all categories by usage descending — show ALL (grid now scrolls)
+    // Sort all categories by usage descending ÔÇö show ALL (grid now scrolls)
     const allCats = state.financeEntryCategories || [];
     const visible = [...allCats].sort((a, b) => (usageCounts[b.name] || 0) - (usageCounts[a.name] || 0));
 
@@ -16294,12 +16338,12 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <div class="finProCatIcon">${c.icon}</div>
         <div class="finProCatName">${c.name}</div>
         ${!DEFAULT_CATS.includes(c.id) ? `
-          <button class="deleteCatBtn" data-id="${c.id}" style="position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:900; line-height:16px; text-align:center; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index: 10;">✕</button>
+          <button class="deleteCatBtn" data-id="${c.id}" style="position:absolute; top:-4px; right:-4px; background:#ef4444; color:#fff; border:none; border-radius:50%; width:16px; height:16px; font-size:9px; font-weight:900; line-height:16px; text-align:center; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index: 10;">Ô£ò</button>
         ` : ""}
       </div>
     `).join('') + `
       <div class="finProCatChip" id="btnAddCustomCategory" style="border: 1px dashed #7c5cff; background: transparent; flex-shrink:0;">
-        <div class="finProCatIcon" style="color: #7c5cff;">➕</div>
+        <div class="finProCatIcon" style="color: #7c5cff;">Ô×ò</div>
         <div class="finProCatName" style="color: #7c5cff;">Nuevo</div>
       </div>
     `;
@@ -16313,11 +16357,11 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     grid.querySelectorAll('.finProCatChip').forEach(chip => {
       if (chip.id === 'btnAddCustomCategory') {
         chip.addEventListener('click', () => {
-          const name = prompt('Nombre de la nueva categoría (Ej. Pepsi, Desayuno):');
+          const name = prompt('Nombre de la nueva categor├¡a (Ej. Pepsi, Desayuno):');
           if (name && name.trim()) {
             const cleanName = name.trim();
-            const emoji = prompt('Emoji para la categoría (opcional):', '🏷️') || '🏷️';
-            const cleanEmoji = emoji.trim() || '🏷️';
+            const emoji = prompt('Emoji para la categor├¡a (opcional):', '­ƒÅÀ´©Å') || '­ƒÅÀ´©Å';
+            const cleanEmoji = emoji.trim() || '­ƒÅÀ´©Å';
             
             if (!state.financeEntryCategories) state.financeEntryCategories = [];
             const exists = state.financeEntryCategories.some(c => c.name.toLowerCase() === cleanName.toLowerCase());
@@ -16327,7 +16371,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
               draft.category = cleanName;
               renderCatGrid(cleanName);
             } else {
-              alert('La categoría ya existe');
+              alert('La categor├¡a ya existe');
             }
           }
         });
@@ -16345,7 +16389,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = btn.dataset.id;
-        if (confirm(`¿Quieres eliminar la categoría "${id}"?`)) {
+        if (confirm(`┬┐Quieres eliminar la categor├¡a "${id}"?`)) {
           state.financeEntryCategories = state.financeEntryCategories.filter(c => c.id !== id);
           save(LS.financeEntryCategories, state.financeEntryCategories);
           if (draft.category === id) draft.category = 'Otros';
@@ -16359,14 +16403,14 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
 
   backdrop.querySelector('#finEntryDelete')?.addEventListener('click', ()=>{
     if(!existing) return;
-    const ok = confirm('¿Eliminar este movimiento?');
+    const ok = confirm('┬┐Eliminar este movimiento?');
     if(!ok) return;
     deleteFinanceEntry(existing.id);
-    toast('Eliminado ✅');
+    toast('Eliminado Ô£à');
     close();
   });
 
-  // No necesitamos refreshImpactPreview aquí porque está escondido en avanzado y no tiene impacto dinámico complejo en la v Pro, pero lo dejamos por si acaso
+  // No necesitamos refreshImpactPreview aqu├¡ porque est├í escondido en avanzado y no tiene impacto din├ímico complejo en la v Pro, pero lo dejamos por si acaso
   try { if(typeof refreshImpactPreview === 'function') refreshImpactPreview(); } catch(e){}
   // save
 backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
@@ -16385,7 +16429,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
 
   if(!amount || amount<=0){
     console.warn('[Finance] invalid amount', { rawAmount, amount });
-    toast('Pon un monto válido');
+    toast('Pon un monto v├ílido');
     return;
   }
 
@@ -16394,7 +16438,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const dateISO = `${dval}T${tval}:00`;
 
   // NOTE: guardamos "Nombre" como parte de note para mantener el esquema simple
-  const note = name ? (noteText ? `${name} · ${noteText}` : name) : noteText;
+  const note = name ? (noteText ? `${name} ┬À ${noteText}` : name) : noteText;
 
   const isUSDChecked = backdrop.querySelector('#finEntryIsUSD')?.checked;
   const usdGross = isUSDChecked ? (parseFloat(backdrop.querySelector('#finEntryUSDGross')?.value) || 0) : null;
@@ -16427,7 +16471,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     usdFee,
     usdExchange,
     usdFixedFee,
-    // Manual overrides — written before AI call so AI won't overwrite them
+    // Manual overrides ÔÇö written before AI call so AI won't overwrite them
     counterparty: personVal || null,
     sourceLabel: originVal || null
   };
@@ -16435,7 +16479,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   if(existing){
     updateFinanceEntry(existing.id, entryPayload);
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
-    toast('Actualizado ✅');
+    toast('Actualizado Ô£à');
   }else{
     addFinanceEntry(entryPayload);
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
@@ -16446,7 +16490,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
       const newDebtId = "debt_" + Date.now() + Math.random().toString(36).substr(2, 5);
       state.financeDebts.unshift({
         id: newDebtId,
-        name: name || "Préstamo rápido",
+        name: name || "Pr├®stamo r├ípido",
         provider: "",
         type: "person_loan",
         originalBalance: amount,
@@ -16460,7 +16504,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
       try{ save(LS.financeDebts, state.financeDebts); }catch(_e){}
     }
 
-    toast('Guardado ✅');
+    toast('Guardado Ô£à');
     // Auto-update neural map and open neuron modal pre-filled with this movement
     try {
       if (typeof window.neuronasRunDayUpdate === 'function') window.neuronasRunDayUpdate();
@@ -16501,23 +16545,23 @@ function financeInitCategories(){
     v: 1,
     groups: [
       { id:"home", name:"Casa", items:[
-        { id:"rent", name:"Alquiler", icon:"🏢", color:"#ff4d4d" },
-        { id:"school", name:"Colegio", icon:"🎓", color:"#ff4d4d" },
-        { id:"bday", name:"Cumpleaños", icon:"👨‍👩‍👧", color:"#ff4d4d" },
-        { id:"internet", name:"Internet", icon:"📶", color:"#ff4d4d" },
-        { id:"gas", name:"Gas", icon:"🔥", color:"#ff4d4d" }
+        { id:"rent", name:"Alquiler", icon:"­ƒÅó", color:"#ff4d4d" },
+        { id:"school", name:"Colegio", icon:"­ƒÄô", color:"#ff4d4d" },
+        { id:"bday", name:"Cumplea├▒os", icon:"­ƒæ¿ÔÇì­ƒæ®ÔÇì­ƒæº", color:"#ff4d4d" },
+        { id:"internet", name:"Internet", icon:"­ƒôÂ", color:"#ff4d4d" },
+        { id:"gas", name:"Gas", icon:"­ƒöÑ", color:"#ff4d4d" }
       ]},
       { id:"food", name:"Comida", items:[
-        { id:"market", name:"Mercado", icon:"🛒", color:"#ff4d4d" },
-        { id:"bodegas", name:"Bodegas", icon:"🛒", color:"#ff4d4d" },
-        { id:"drinks", name:"Bebidas", icon:"🥤", color:"#ff4d4d" }
+        { id:"market", name:"Mercado", icon:"­ƒøÆ", color:"#ff4d4d" },
+        { id:"bodegas", name:"Bodegas", icon:"­ƒøÆ", color:"#ff4d4d" },
+        { id:"drinks", name:"Bebidas", icon:"­ƒÑñ", color:"#ff4d4d" }
       ]},
       { id:"health", name:"Salud", items:[
-        { id:"meds", name:"Medicamentos", icon:"💊", color:"#ff4d4d" },
-        { id:"therapy", name:"Psicología", icon:"🧠", color:"#ff4d4d" }
+        { id:"meds", name:"Medicamentos", icon:"­ƒÆè", color:"#ff4d4d" },
+        { id:"therapy", name:"Psicolog├¡a", icon:"­ƒºá", color:"#ff4d4d" }
       ]},
       { id:"other", name:"Otros", items:[
-        { id:"other", name:"Otros", icon:"●", color:"#ff4d4d" }
+        { id:"other", name:"Otros", icon:"ÔùÅ", color:"#ff4d4d" }
       ]}
     ]
   };
@@ -16552,7 +16596,7 @@ function _ensureFcStyles(){if(!document.getElementById('fcStyles')){
     @keyframes fcSlideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
     @keyframes fcPop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
 
-    /* ── Main picker screen ── */
+    /* ÔöÇÔöÇ Main picker screen ÔöÇÔöÇ */
     .finCatBackdrop{
       position:fixed;inset:0;z-index:900;
       background:#0b0f19;
@@ -16655,7 +16699,7 @@ function _ensureFcStyles(){if(!document.getElementById('fcStyles')){
     }
     .fcp-empty-icon{font-size:36px;margin-bottom:10px}
 
-    /* ── Floating modal (nueva cat / nuevo grupo) ── */
+    /* ÔöÇÔöÇ Floating modal (nueva cat / nuevo grupo) ÔöÇÔöÇ */
     .fc-overlay{
       position:fixed;inset:0;z-index:9999;
       display:flex;align-items:center;justify-content:center;
@@ -16800,34 +16844,34 @@ function _ensureFcStyles(){if(!document.getElementById('fcStyles')){
 }
 }
 
-function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}={}){
+function financeOpenCategoryPicker({title="Categor├¡as", onPick, allowNew=true}={}){
   financeInitCategories();
   const host = document.querySelector('#app') || document.body;
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop finCatBackdrop';
 
-  // ── Shared palette & icons constants ──────────────────────────────────
+  // ÔöÇÔöÇ Shared palette & icons constants ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   const FC_PALETTE = [
     '#7c5cff','#36d399','#fb7185','#fbbf24','#38bdf8',
     '#f472b6','#a3e635','#fb923c','#e879f9','#34d399',
     '#60a5fa','#f87171','#4ade80','#facc15','#a78bfa'
   ];
-  const FC_ICONS = ['🏠','🍔','🚗','🎮','💊','📚','✈️','🎁','💡','👗','🐾','💪','🎵','📱','🛒','💸','🏋️','🎨','🧴','🏥','🔧','📦','🍺','☕','🌿','🧾','🎓','🏦'];
+  const FC_ICONS = ['­ƒÅá','­ƒìö','­ƒÜù','­ƒÄ«','­ƒÆè','­ƒôÜ','Ô£ê´©Å','­ƒÄü','­ƒÆí','­ƒæù','­ƒÉ¥','­ƒÆ¬','­ƒÄÁ','­ƒô▒','­ƒøÆ','­ƒÆ©','­ƒÅï´©Å','­ƒÄ¿','­ƒº┤','­ƒÅÑ','­ƒöº','­ƒôª','­ƒì║','Ôÿò','­ƒî┐','­ƒº¥','­ƒÄô','­ƒÅª'];
 
   _ensureFcStyles();
 
 
-  // ── Main screen HTML ───────────────────────────────────────────────────
+  // ÔöÇÔöÇ Main screen HTML ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   backdrop.innerHTML = `
     <div class="fcp-topbar">
-      <button class="fcp-back" id="finCatClose">←</button>
+      <button class="fcp-back" id="finCatClose">ÔåÉ</button>
       <div class="fcp-title">${escapeHtml(title)}</div>
-      ${allowNew ? `<button class="fcp-new-btn" id="finCatNewBtn">＋ Nueva</button>` : ''}
+      ${allowNew ? `<button class="fcp-new-btn" id="finCatNewBtn">´╝ï Nueva</button>` : ''}
     </div>
     <div class="fcp-search-wrap">
       <div class="fcp-search">
-        <span style="font-size:15px;opacity:.5">🔎</span>
-        <input id="finCatSearchInput" placeholder="Buscar categoría…">
+        <span style="font-size:15px;opacity:.5">­ƒöÄ</span>
+        <input id="finCatSearchInput" placeholder="Buscar categor├¡aÔÇª">
       </div>
     </div>
     <div class="fcp-body" id="finCatBody"></div>
@@ -16840,7 +16884,7 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
   const body  = backdrop.querySelector('#finCatBody');
   const input = backdrop.querySelector('#finCatSearchInput');
 
-  // ── Render main grid ───────────────────────────────────────────────────
+  // ÔöÇÔöÇ Render main grid ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   function render(filter=""){
     const f = String(filter||"").trim().toLowerCase();
     const groups = (state.financeCategories.groups||[]).map(g=>{
@@ -16853,8 +16897,8 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
     if(!groups.length){
       body.innerHTML = `
         <div class="fcp-empty">
-          <div class="fcp-empty-icon">🗂️</div>
-          ${f ? 'Sin resultados para "'+escapeHtml(f)+'"' : 'Aún no hay categorías.<br>Toca <b>＋ Nueva</b> para empezar.'}
+          <div class="fcp-empty-icon">­ƒùé´©Å</div>
+          ${f ? 'Sin resultados para "'+escapeHtml(f)+'"' : 'A├║n no hay categor├¡as.<br>Toca <b>´╝ï Nueva</b> para empezar.'}
         </div>`;
       return;
     }
@@ -16863,12 +16907,12 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
       <div class="fcp-group-block">
         <div class="fcp-group-header">
           <div class="fcp-group-name">${escapeHtml(g.name)}</div>
-          <div class="fcp-group-count">${items.length} ${items.length===1?'categoría':'categorías'}</div>
+          <div class="fcp-group-count">${items.length} ${items.length===1?'categor├¡a':'categor├¡as'}</div>
         </div>
         <div class="fcp-grid">
           ${items.map(it=>`
             <button class="fcp-item" data-name="${escapeHtml(it.name)}">
-              <div class="fcp-icon" style="background:${escapeHtml(it.color||'#7c5cff')}">${escapeHtml(it.icon||'●')}</div>
+              <div class="fcp-icon" style="background:${escapeHtml(it.color||'#7c5cff')}">${escapeHtml(it.icon||'ÔùÅ')}</div>
               <div class="fcp-label">${escapeHtml(it.name)}</div>
             </button>
           `).join('')}
@@ -16879,7 +16923,7 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
     body.querySelectorAll('.fcp-item').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const nm = btn.getAttribute('data-name')||'';
-        const cat = financeFindCategoryByName(nm)||{name:nm,icon:'●'};
+        const cat = financeFindCategoryByName(nm)||{name:nm,icon:'ÔùÅ'};
         try{ onPick && onPick(cat); }catch(_){}
         close();
       });
@@ -16889,7 +16933,7 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
   input?.addEventListener('input', ()=> render(input.value));
   render("");
 
-  // ── Open "Nueva Categoría" sheet ───────────────────────────────────────
+  // ÔöÇÔöÇ Open "Nueva Categor├¡a" sheet ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   if(allowNew){
     backdrop.querySelector('#finCatNewBtn')?.addEventListener('click', ()=>{
       openNewCategorySheet({ onSaved: ()=> render(input?.value||'') });
@@ -16897,14 +16941,14 @@ function financeOpenCategoryPicker({title="Categorías", onPick, allowNew=true}=
   }
 }
 
-// ── Modal: Nueva Categoría (bottom sheet) ─────────────────────────────────
+// ÔöÇÔöÇ Modal: Nueva Categor├¡a (bottom sheet) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 function openNewCategorySheet({ onSaved }={}){
   const PALETTE = [
     '#7c5cff','#36d399','#fb7185','#fbbf24','#38bdf8',
     '#f472b6','#a3e635','#fb923c','#e879f9','#34d399',
     '#60a5fa','#f87171','#4ade80','#facc15','#a78bfa'
   ];
-  const ICONS = ['🏠','🍔','🚗','🎮','💊','📚','✈️','🎁','💡','👗','🐾','💪','🎵','📱','🛒','💸','🏋️','🎨','🧴','🏥','🔧','📦','🍺','☕','🌿','🧾','🎓','🏦'];
+  const ICONS = ['­ƒÅá','­ƒìö','­ƒÜù','­ƒÄ«','­ƒÆè','­ƒôÜ','Ô£ê´©Å','­ƒÄü','­ƒÆí','­ƒæù','­ƒÉ¥','­ƒÆ¬','­ƒÄÁ','­ƒô▒','­ƒøÆ','­ƒÆ©','­ƒÅï´©Å','­ƒÄ¿','­ƒº┤','­ƒÅÑ','­ƒöº','­ƒôª','­ƒì║','Ôÿò','­ƒî┐','­ƒº¥','­ƒÄô','­ƒÅª'];
 
   let selColor = PALETTE[0];
   let selIcon  = ICONS[0];
@@ -16915,14 +16959,14 @@ function openNewCategorySheet({ onSaved }={}){
   const getGroups = ()=> (state.financeCategories.groups||[]);
   const buildGroupOptions = ()=> getGroups().map(g=>
     `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`
-  ).join('') + `<option value="__new__">＋ Crear nuevo grupo…</option>`;
+  ).join('') + `<option value="__new__">´╝ï Crear nuevo grupoÔÇª</option>`;
 
   overlay.innerHTML = `
     <div class="fc-sheet">
       <div class="fc-drag"></div>
       <div class="fc-sh-head">
-        <div class="fc-sh-title">✨ Nueva Categoría</div>
-        <button class="fc-sh-close" id="fcShClose">✕</button>
+        <div class="fc-sh-title">Ô£¿ Nueva Categor├¡a</div>
+        <button class="fc-sh-close" id="fcShClose">Ô£ò</button>
       </div>
       <div class="fc-sh-body">
 
@@ -16930,14 +16974,14 @@ function openNewCategorySheet({ onSaved }={}){
         <div class="fc-preview">
           <div class="fc-prev-icon" id="fcPrevIcon" style="background:${selColor}">${selIcon}</div>
           <div>
-            <div class="fc-prev-name" id="fcPrevName">Nombre de categoría</div>
+            <div class="fc-prev-name" id="fcPrevName">Nombre de categor├¡a</div>
             <div class="fc-prev-grp" id="fcPrevGrp">Sin grupo</div>
           </div>
         </div>
 
         <!-- Nombre -->
         <div class="fc-lbl">Nombre</div>
-        <input class="fc-inp" id="fcName" placeholder="ej: Delivery, Netflix, Gasolina…" maxlength="32">
+        <input class="fc-inp" id="fcName" placeholder="ej: Delivery, Netflix, GasolinaÔÇª" maxlength="32">
 
         <!-- Grupo (dropdown) -->
         <div class="fc-lbl" style="display:flex;align-items:center;justify-content:space-between">
@@ -16987,14 +17031,14 @@ function openNewCategorySheet({ onSaved }={}){
   const updatePreview = ()=>{
     elPrevIcon.style.background = selColor;
     elPrevIcon.textContent = selIcon;
-    elPrevName.textContent = elName.value.trim() || 'Nombre de categoría';
+    elPrevName.textContent = elName.value.trim() || 'Nombre de categor├¡a';
     const selOpt = elGrpSel.options[elGrpSel.selectedIndex];
     elPrevGrp.textContent = (selOpt && selOpt.value !== '__new__') ? selOpt.text : 'Sin grupo';
   };
 
   elName.addEventListener('input', updatePreview);
 
-  // Group dropdown — intercept "＋ Crear nuevo grupo…"
+  // Group dropdown ÔÇö intercept "´╝ï Crear nuevo grupoÔÇª"
   elGrpSel.addEventListener('change', ()=>{
     if(elGrpSel.value === '__new__'){
       elGrpSel.value = getGroups()[0]?.id || '__new__'; // reset while modal opens
@@ -17003,7 +17047,7 @@ function openNewCategorySheet({ onSaved }={}){
           // Rebuild options and select new group
           const opts = getGroups().map(g=>
             `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`
-          ).join('') + `<option value="__new__">＋ Crear nuevo grupo…</option>`;
+          ).join('') + `<option value="__new__">´╝ï Crear nuevo grupoÔÇª</option>`;
           elGrpSel.innerHTML = opts;
           elGrpSel.value = newGrp.id;
           updatePreview();
@@ -17058,13 +17102,13 @@ function openNewCategorySheet({ onSaved }={}){
   setTimeout(()=> elName.focus(), 100);
 }
 
-// ── Modal: Nuevo Grupo (bottom sheet) ─────────────────────────────────────
+// ÔöÇÔöÇ Modal: Nuevo Grupo (bottom sheet) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 function openNewGroupSheet({ onSaved }={}){
   const GRP_PALETTE = [
     '#7c5cff','#36d399','#fb7185','#fbbf24','#38bdf8',
     '#f472b6','#a3e635','#fb923c','#e879f9','#60a5fa'
   ];
-  const GRP_ICONS = ['🏠','🍽️','💊','🚌','🎉','👔','💰','📦','🌟','🎯','📁','🔑'];
+  const GRP_ICONS = ['­ƒÅá','­ƒì¢´©Å','­ƒÆè','­ƒÜî','­ƒÄë','­ƒæö','­ƒÆ░','­ƒôª','­ƒîƒ','­ƒÄ»','­ƒôü','­ƒöæ'];
 
   let selColor = GRP_PALETTE[0];
   let selIcon  = GRP_ICONS[0];
@@ -17077,8 +17121,8 @@ function openNewGroupSheet({ onSaved }={}){
     <div class="fc-sheet">
       <div class="fc-drag"></div>
       <div class="fc-sh-head">
-        <div class="fc-sh-title">📁 Nuevo Grupo</div>
-        <button class="fc-sh-close" id="fgClose">✕</button>
+        <div class="fc-sh-title">­ƒôü Nuevo Grupo</div>
+        <button class="fc-sh-close" id="fgClose">Ô£ò</button>
       </div>
       <div class="fc-sh-body">
 
@@ -17086,12 +17130,12 @@ function openNewGroupSheet({ onSaved }={}){
           <div class="fc-prev-icon" id="fgPrevIcon" style="background:${selColor};border-radius:50%">${selIcon}</div>
           <div>
             <div class="fc-prev-name" id="fgPrevName">Nombre del grupo</div>
-            <div class="fc-prev-grp">Agrupa tus categorías</div>
+            <div class="fc-prev-grp">Agrupa tus categor├¡as</div>
           </div>
         </div>
 
         <div class="fc-lbl">Nombre del grupo</div>
-        <input class="fc-inp" id="fgName" placeholder="ej: Casa, Comida, Salud…" maxlength="24">
+        <input class="fc-inp" id="fgName" placeholder="ej: Casa, Comida, SaludÔÇª" maxlength="24">
 
         <div class="fc-lbl">Icono representativo</div>
         <div class="fc-icon-grid" id="fgIconGrid" style="grid-template-columns:repeat(6,1fr)">
@@ -17387,13 +17431,13 @@ function _financeBalanceAfterMap(entriesNewToOld){
 
 function _financeIconForCategory(cat){
   const c = String(cat||"").toLowerCase();
-  if(c.includes("comida") || c.includes("rest") || c.includes("charcut") || c.includes("super")) return "🏠";
-  if(c.includes("bodega") || c.includes("mass") || c.includes("merc") || c.includes("market")) return "🛒";
-  if(c.includes("internet") || c.includes("entel") || c.includes("tel")) return "📶";
-  if(c.includes("med") || c.includes("salud") || c.includes("farm")) return "💊";
-  if(c.includes("bebida")) return "🥤";
-  if(c.includes("transp") || c.includes("taxi") || c.includes("bus")) return "🚌";
-  return "•";
+  if(c.includes("comida") || c.includes("rest") || c.includes("charcut") || c.includes("super")) return "­ƒÅá";
+  if(c.includes("bodega") || c.includes("mass") || c.includes("merc") || c.includes("market")) return "­ƒøÆ";
+  if(c.includes("internet") || c.includes("entel") || c.includes("tel")) return "­ƒôÂ";
+  if(c.includes("med") || c.includes("salud") || c.includes("farm")) return "­ƒÆè";
+  if(c.includes("bebida")) return "­ƒÑñ";
+  if(c.includes("transp") || c.includes("taxi") || c.includes("bus")) return "­ƒÜî";
+  return "ÔÇó";
 }
 
 function _financeGroupByDay(entries){
@@ -17420,7 +17464,7 @@ function renderFinanceMovements(){
 
   const groups = _financeGroupByDay(all);
   if(!groups.length){
-    return `<div class="muted" style="text-align:center; padding: 40px 0;">Nada por aquí. Añade tu primer movimiento.</div>`;
+    return `<div class="muted" style="text-align:center; padding: 40px 0;">Nada por aqu├¡. A├▒ade tu primer movimiento.</div>`;
   }
 
   return groups.map(g=>{
@@ -17443,14 +17487,14 @@ function renderFinanceMovements(){
           const amtCls = isExp ? "negative" : "positive";
           
           let title = e.category || (isExp ? "Gasto" : "Ingreso");
-          let sub = accName(e.accountId) + (e.note ? ` • ${e.note}` : '');
-          if (e.note && e.note.includes(' · ')) {
-             const parts = e.note.split(' · ');
+          let sub = accName(e.accountId) + (e.note ? ` ÔÇó ${e.note}` : '');
+          if (e.note && e.note.includes(' ┬À ')) {
+             const parts = e.note.split(' ┬À ');
              title = parts[0];
-             sub = accName(e.accountId) + ` • ${parts[1]}`;
+             sub = accName(e.accountId) + ` ÔÇó ${parts[1]}`;
           } else if (e.note) {
              title = e.note;
-             sub = accName(e.accountId) + ` • ${e.category||''}`;
+             sub = accName(e.accountId) + ` ÔÇó ${e.category||''}`;
           }
 
           const balAfter = afterMap[e.id];
@@ -17476,7 +17520,7 @@ try{ window.financeShiftMonth = financeShiftMonth; window.financeResetMonth = fi
 try{ window.financeHardResetAllConfirm = financeHardResetAllConfirm; }catch(e){}
 
 // ===============================
-// Finance Phase 3 — Weekly Intelligence Engine
+// Finance Phase 3 ÔÇö Weekly Intelligence Engine
 // ===============================
 if(!state.financeWeekly) state.financeWeekly = { lastRunDay: null, reports: [] };
 
@@ -17559,7 +17603,7 @@ function financeWeeklyComputeReport({refDate=null}={}){
       createdAt: new Date().toISOString(),
       range: { start: r1.start.toISOString().slice(0,10), end: r1.end.toISOString().slice(0,10) },
       title: "Semana en silencio",
-      bullets: ["No hubo movimientos esta semana. Si fue intencional, perfecto. Si no, registra aunque sea lo grande para que el análisis tenga material."],
+      bullets: ["No hubo movimientos esta semana. Si fue intencional, perfecto. Si no, registra aunque sea lo grande para que el an├ílisis tenga material."],
       stats: { expense:0, income:0, tx:0 }
     };
   }
@@ -17604,26 +17648,26 @@ function financeWeeklyComputeReport({refDate=null}={}){
   }).filter(x=>x.delta < 0).sort((a,b)=>a.delta - b.delta).slice(0,3);
 
   const bullets = [];
-  bullets.push(`Gasto semanal: **S/ ${_financeFmt(expTotal)}** · Ingreso: **S/ ${_financeFmt(incTotal)}** · Movimientos: **${w1.length}**.`);
+  bullets.push(`Gasto semanal: **S/ ${_financeFmt(expTotal)}** ┬À Ingreso: **S/ ${_financeFmt(incTotal)}** ┬À Movimientos: **${w1.length}**.`);
   if(plannedTotal || impulseTotal || emergencyTotal){
-    bullets.push(`Planificado: **S/ ${_financeFmt(plannedTotal)}** · Impulso: **S/ ${_financeFmt(impulseTotal)}** · Emergencia: **S/ ${_financeFmt(emergencyTotal)}**.`);
+    bullets.push(`Planificado: **S/ ${_financeFmt(plannedTotal)}** ┬À Impulso: **S/ ${_financeFmt(impulseTotal)}** ┬À Emergencia: **S/ ${_financeFmt(emergencyTotal)}**.`);
   }
-  bullets.push(`Categoría dominante: **${escapeHtml(topCatName)}** con **S/ ${_financeFmt(topCatAmount)}**.`);
-  bullets.push(`La categoría que más “rompió” fue **${escapeHtml(breaker.cat)}** (${breakerWhy}). Variación vs semana anterior: **S/ ${_financeFmt(breaker.delta)}**.`);
+  bullets.push(`Categor├¡a dominante: **${escapeHtml(topCatName)}** con **S/ ${_financeFmt(topCatAmount)}**.`);
+  bullets.push(`La categor├¡a que m├ís ÔÇ£rompi├│ÔÇØ fue **${escapeHtml(breaker.cat)}** (${breakerWhy}). Variaci├│n vs semana anterior: **S/ ${_financeFmt(breaker.delta)}**.`);
   if(lateCount){
-    bullets.push(`Gastos después de las 9pm: **${lateCount}** (S/ ${_financeFmt(lateTotal)}). Si quieres recortar fácil: aquí suelen haber fugas.`);
+    bullets.push(`Gastos despu├®s de las 9pm: **${lateCount}** (S/ ${_financeFmt(lateTotal)}). Si quieres recortar f├ícil: aqu├¡ suelen haber fugas.`);
   }else{
-    bullets.push(`Cero gastos después de las 9pm ✅. Ese patrón suele proteger el presupuesto.`);
+    bullets.push(`Cero gastos despu├®s de las 9pm Ô£à. Ese patr├│n suele proteger el presupuesto.`);
   }
   if(wins.length){
-    bullets.push(`Mejoras vs semana anterior: ${wins.map(w=>`**${escapeHtml(w.cat)}** (-S/ ${_financeFmt(Math.abs(w.delta))})`).join(" · ")}.`);
+    bullets.push(`Mejoras vs semana anterior: ${wins.map(w=>`**${escapeHtml(w.cat)}** (-S/ ${_financeFmt(Math.abs(w.delta))})`).join(" ┬À ")}.`);
   }
 
   return {
     id: "wk_" + Date.now(),
     createdAt: new Date().toISOString(),
     range: { start: r1.start.toISOString().slice(0,10), end: r1.end.toISOString().slice(0,10) },
-    title: `Análisis semanal (${r1.start.toLocaleDateString("es-PE",{day:"2-digit",month:"short"})} → ${r1.end.toLocaleDateString("es-PE",{day:"2-digit",month:"short"})})`,
+    title: `An├ílisis semanal (${r1.start.toLocaleDateString("es-PE",{day:"2-digit",month:"short"})} ÔåÆ ${r1.end.toLocaleDateString("es-PE",{day:"2-digit",month:"short"})})`,
     bullets,
     stats: { expense: expTotal, income: incTotal, tx: w1.length, lateCount, breaker: breaker.cat }
   };
@@ -17635,7 +17679,7 @@ function financeWeeklyGenerateNow(){
   state.financeWeekly.lastRunDay = _financeTodayKey();
   persist();
   view();
-  toast("Análisis semanal generado ✨");
+  toast("An├ílisis semanal generado Ô£¿");
   return rep;
 }
 
@@ -17660,12 +17704,12 @@ function renderFinanceWeeklyCard(){
   const r = (state.financeWeekly.reports||[])[0];
   if(!r){
     return `
-      <div class="muted">Aún no hay análisis. Se genera automáticamente los domingos, o puedes tocar ✨.</div>
-      <div style="margin-top:8px" class="muted">Tip: registra categoría + razón (plan/impulso/emergencia) para que la lectura sea más precisa.</div>
+      <div class="muted">A├║n no hay an├ílisis. Se genera autom├íticamente los domingos, o puedes tocar Ô£¿.</div>
+      <div style="margin-top:8px" class="muted">Tip: registra categor├¡a + raz├│n (plan/impulso/emergencia) para que la lectura sea m├ís precisa.</div>
     `;
   }
 
-  const bullets = (r.bullets||[]).map(b=> `<div class="finWeeklyBullet">• ${b}</div>`).join("");
+  const bullets = (r.bullets||[]).map(b=> `<div class="finWeeklyBullet">ÔÇó ${b}</div>`).join("");
   const show = !!state.financeWeekly.showHistory;
   const historyBtn = `<button class="chipBtn" onclick="financeToggleWeeklyHistory()">${show?"Ocultar":"Ver"} historial</button>`;
 
@@ -17680,15 +17724,15 @@ function renderFinanceWeeklyCard(){
         const s = (h.stats||{});
         return `<div class="finWeeklyHistRow">
           <div>${t}</div>
-          <div class="muted">Gasto S/ ${_financeFmt(s.expense||0)} · Ingreso S/ ${_financeFmt(s.income||0)}</div>
+          <div class="muted">Gasto S/ ${_financeFmt(s.expense||0)} ┬À Ingreso S/ ${_financeFmt(s.income||0)}</div>
         </div>`;
       }).join("")}
-    ` : `<div class="muted" style="margin-top:8px">Sin historial todavía.</div>`;
+    ` : `<div class="muted" style="margin-top:8px">Sin historial todav├¡a.</div>`;
   }
 
   return `
     <div class="finWeeklyTopRow">
-      <div><strong>${escapeHtml(r.title||"Análisis")}</strong></div>
+      <div><strong>${escapeHtml(r.title||"An├ílisis")}</strong></div>
       <div>${historyBtn}</div>
     </div>
     <div style="margin-top:8px">${bullets}</div>
@@ -17939,7 +17983,7 @@ function financeCommitmentTemplateById(id){
 function financeCommitmentStatusChip(st){
   const v = String(st||"pending");
   const map = {
-    pending:["⏳","Pendiente"], paid:["✅","Pagado"], partial:["🟡","Parcial"], overdue:["⚠️","Vencido"], postponed:["⏭️","Postergado"], covered_by_debt:["💳","Cubierto con deuda"], cancelled:["⛔","Cancelado"]
+    pending:["ÔÅ│","Pendiente"], paid:["Ô£à","Pagado"], partial:["­ƒƒí","Parcial"], overdue:["ÔÜá´©Å","Vencido"], postponed:["ÔÅ¡´©Å","Postergado"], covered_by_debt:["­ƒÆ│","Cubierto con deuda"], cancelled:["Ôøö","Cancelado"]
   };
   const [ico,label] = map[v] || map.pending;
   return `<span class="chip chipWarn">${ico} ${label}</span>`;
@@ -18017,25 +18061,25 @@ function openFinanceCommitmentModal(existing){
     <div class="fc-sheet" style="max-height:85vh">
       <div class="fc-drag"></div>
       <div class="fc-sh-head">
-        <div class="fc-sh-title">${existing ? '✏️ Editar compromiso' : '📋 Nuevo compromiso'}</div>
-        <button class="fc-sh-close" id="cmtShClose">✕</button>
+        <div class="fc-sh-title">${existing ? 'Ô£Å´©Å Editar compromiso' : '­ƒôï Nuevo compromiso'}</div>
+        <button class="fc-sh-close" id="cmtShClose">Ô£ò</button>
       </div>
       <div class="fc-sh-body" style="overflow-y:auto;flex:1;min-height:0">
 
         <div class="cmt-field">
           <div class="cmt-field-label">Nombre</div>
-          <input class="cmt-inp" id="cmtName" placeholder="ej: Alquiler, Netflix, Luz…" value="${escapeAttr(t.name||'')}" maxlength="48">
+          <input class="cmt-inp" id="cmtName" placeholder="ej: Alquiler, Netflix, LuzÔÇª" value="${escapeAttr(t.name||'')}" maxlength="48">
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div class="cmt-field">
-            <div class="cmt-field-label">Categoría</div>
+            <div class="cmt-field-label">Categor├¡a</div>
             <select class="cmt-inp" id="cmtGroup" style="appearance:auto">
               ${groups.map(g=>`<option value="${escapeAttr(g)}" ${t.category===g?'selected':''}>${escapeHtml(g)}</option>`).join('')}
             </select>
           </div>
           <div class="cmt-field">
-            <div class="cmt-field-label">Día de vencimiento</div>
+            <div class="cmt-field-label">D├¡a de vencimiento</div>
             <input class="cmt-inp" id="cmtDay" type="number" min="1" max="31" value="${Number(t.dueDay||1)}" placeholder="1-31">
           </div>
         </div>
@@ -18064,7 +18108,7 @@ function openFinanceCommitmentModal(existing){
 
         <div class="cmt-field">
           <div class="cmt-field-label">Nota (opcional)</div>
-          <textarea class="cmt-inp" id="cmtNote" rows="2" placeholder="Detalles, cuenta, referencia…" style="resize:vertical">${escapeHtml(t.notes||'')}</textarea>
+          <textarea class="cmt-inp" id="cmtNote" rows="2" placeholder="Detalles, cuenta, referenciaÔÇª" style="resize:vertical">${escapeHtml(t.notes||'')}</textarea>
         </div>
 
         <div style="display:flex;gap:18px;margin-bottom:14px">
@@ -18080,7 +18124,7 @@ function openFinanceCommitmentModal(existing){
 
       </div>
       <div class="fc-sh-footer" style="${existing?'justify-content:space-between':''}">
-        ${existing ? `<button class="fc-btn-sec" id="cmtDelBtn" style="color:#fb7185;border-color:rgba(251,113,133,.3)">🗑️ Eliminar</button>` : ''}
+        ${existing ? `<button class="fc-btn-sec" id="cmtDelBtn" style="color:#fb7185;border-color:rgba(251,113,133,.3)">­ƒùæ´©Å Eliminar</button>` : ''}
         <button class="fc-btn-pri" id="cmtSaveBtn" style="flex:2">Guardar</button>
       </div>
     </div>
@@ -18120,7 +18164,7 @@ function openFinanceCommitmentModal(existing){
 
   // Delete
   overlay.querySelector('#cmtDelBtn')?.addEventListener('click', ()=>{
-    if(!confirm('¿Eliminar este compromiso?')) return;
+    if(!confirm('┬┐Eliminar este compromiso?')) return;
     financeEnsureCommitments();
     state.financeCommitmentTemplates = (state.financeCommitmentTemplates||[]).filter(x=>x.id!==t.id);
     state.financeCommitments = (state.financeCommitments||[]).filter(x=>x.id!==t.id);
@@ -18209,7 +18253,7 @@ function saveFinanceCommitment(id){
 }
 
 function deleteFinanceCommitment(id){
-  if(!confirm("¿Eliminar este compromiso?")) return;
+  if(!confirm("┬┐Eliminar este compromiso?")) return;
   financeEnsureCommitments();
   const tpl = (state.financeCommitmentTemplates||[]).find(x=>x.id===id);
   state.financeCommitmentTemplates = (state.financeCommitmentTemplates||[]).filter(x=>x.id!==id);
@@ -18232,8 +18276,8 @@ function openFinanceCommitmentPayModal(id){
   const tmpl = c.template || {name:"Compromiso"};
   const srcOptions = (state.financePaymentSources||[]).filter(s=>s.isActive!==false).map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
   const statuses = ["pending","paid","partial","overdue","postponed","covered_by_debt","cancelled"];
-  const hist = (state.financeCommitmentInstances||[]).filter(i=>i.templateId===c.templateId && i.id!==c.id).sort((a,b)=> String(b.periodKey).localeCompare(String(a.periodKey))).slice(0,6).map(h=>`<div class="dueRow"><div>${h.periodKey} · S/ ${_financeFmt(h.expectedAmount||0)}</div><div class="muted">${h.status} · pagado S/ ${_financeFmt(h.paidAmount||0)}</div></div>`).join("") || `<div class="muted">Sin historial.</div>`;
-  const html = `<div class="modalOverlay" onclick="closeModal(event)"><div class="modal modalBig" onclick="event.stopPropagation()"><div class="modalHeader"><div class="modalTitle">${escapeHtml(tmpl.name)} · ${c.periodKey}</div><button class="iconBtn" onclick="closeModal()">✕</button></div><div class="modalBody modalScroll"><div class="muted">Último monto conocido: S/ ${_financeFmt(tmpl.lastKnownAmount||tmpl.baseAmount||0)}</div><label class="fieldLabel" style="margin-top:10px">Monto esperado mes</label><input id="cmtInstExpected" type="number" step="0.01" class="textInput" value="${Number(c.expectedAmount||0)}" /><label class="fieldLabel" style="margin-top:10px">Monto pagado</label><input id="cmtPayAmt" type="number" step="0.01" class="textInput" value="${Number(c.paidAmount||0)}" /><div class="row" style="gap:10px;margin-top:10px"><div style="flex:1"><label class="fieldLabel">Estado</label><select id="cmtPayStatus" class="textInput">${statuses.map(st=>`<option value="${st}" ${String(c.status)===st?'selected':''}>${st}</option>`).join("")}</select></div><div style="flex:1"><label class="fieldLabel">Fuente</label><select id="cmtPaySource" class="textInput"><option value="">—</option>${srcOptions}</select></div></div><label class="fieldLabel" style="margin-top:10px">Fecha pago</label><input id="cmtPayDate" type="date" class="textInput" value="${(c.paidAt||new Date().toISOString()).slice(0,10)}" /><label class="fieldLabel" style="margin-top:10px">Nota</label><textarea id="cmtPayNote" class="textInput" rows="3">${escapeHtml(c.notes||"")}</textarea><div class="hr" style="margin:12px 0"></div><div><strong>Historial reciente</strong></div>${hist}</div><div class="modalFooter"><div></div><button class="btn primary" onclick="saveFinanceCommitmentPayment('${c.id}')">Guardar</button></div></div></div>`;
+  const hist = (state.financeCommitmentInstances||[]).filter(i=>i.templateId===c.templateId && i.id!==c.id).sort((a,b)=> String(b.periodKey).localeCompare(String(a.periodKey))).slice(0,6).map(h=>`<div class="dueRow"><div>${h.periodKey} ┬À S/ ${_financeFmt(h.expectedAmount||0)}</div><div class="muted">${h.status} ┬À pagado S/ ${_financeFmt(h.paidAmount||0)}</div></div>`).join("") || `<div class="muted">Sin historial.</div>`;
+  const html = `<div class="modalOverlay" onclick="closeModal(event)"><div class="modal modalBig" onclick="event.stopPropagation()"><div class="modalHeader"><div class="modalTitle">${escapeHtml(tmpl.name)} ┬À ${c.periodKey}</div><button class="iconBtn" onclick="closeModal()">Ô£ò</button></div><div class="modalBody modalScroll"><div class="muted">├Ültimo monto conocido: S/ ${_financeFmt(tmpl.lastKnownAmount||tmpl.baseAmount||0)}</div><label class="fieldLabel" style="margin-top:10px">Monto esperado mes</label><input id="cmtInstExpected" type="number" step="0.01" class="textInput" value="${Number(c.expectedAmount||0)}" /><label class="fieldLabel" style="margin-top:10px">Monto pagado</label><input id="cmtPayAmt" type="number" step="0.01" class="textInput" value="${Number(c.paidAmount||0)}" /><div class="row" style="gap:10px;margin-top:10px"><div style="flex:1"><label class="fieldLabel">Estado</label><select id="cmtPayStatus" class="textInput">${statuses.map(st=>`<option value="${st}" ${String(c.status)===st?'selected':''}>${st}</option>`).join("")}</select></div><div style="flex:1"><label class="fieldLabel">Fuente</label><select id="cmtPaySource" class="textInput"><option value="">ÔÇö</option>${srcOptions}</select></div></div><label class="fieldLabel" style="margin-top:10px">Fecha pago</label><input id="cmtPayDate" type="date" class="textInput" value="${(c.paidAt||new Date().toISOString()).slice(0,10)}" /><label class="fieldLabel" style="margin-top:10px">Nota</label><textarea id="cmtPayNote" class="textInput" rows="3">${escapeHtml(c.notes||"")}</textarea><div class="hr" style="margin:12px 0"></div><div><strong>Historial reciente</strong></div>${hist}</div><div class="modalFooter"><div></div><button class="btn primary" onclick="saveFinanceCommitmentPayment('${c.id}')">Guardar</button></div></div></div>`;
   showModal(html);
   setTimeout(()=>{ const el=document.querySelector('#cmtPaySource'); if(el) el.value=c.paymentSourceId||""; },0);
 }
@@ -18269,7 +18313,7 @@ function saveFinanceCommitmentPayment(instanceId){
       accountId: state.financeLastAccountId || (state.financeAccounts||[])[0]?.id,
       category: "Servicios",
       reason: "planificado",
-      note: `Compromisos · ${(t?.name||'Compromiso')}${noteExtra?(" · "+noteExtra):""}`,
+      note: `Compromisos ┬À ${(t?.name||'Compromiso')}${noteExtra?(" ┬À "+noteExtra):""}`,
       date: new Date(`${date}T12:00:00`).toISOString(),
       kind: "commitment_payment",
       commitmentId: inst.templateId,
@@ -18490,7 +18534,7 @@ function openFinanceDebtModal(existing){
           <div class="modalTitle">${existing ? 'Editar deuda' : 'Nueva deuda'}</div>
           <div class="modalSub">Registra lo que debes y lo que toca pagar cada mes.</div>
         </div>
-        <button class="iconBtn" id="finDebtClose">✕</button>
+        <button class="iconBtn" id="finDebtClose">Ô£ò</button>
       </div>
       <div class="hr"></div>
 
@@ -18508,15 +18552,15 @@ function openFinanceDebtModal(existing){
           <div class="label">Tipo</div>
           <select id="finDebtType">
             ${[
-              ['loan','Préstamo'],
+              ['loan','Pr├®stamo'],
               ['card','Tarjeta'],
-              ['app','App / Microcrédito']
+              ['app','App / Microcr├®dito']
             ].map(x=>`<option value="${x[0]}" ${x[0]===String(d.type||'app')?'selected':''}>${x[1]}</option>`).join('')}
           </select>
         </div>
 
         <div class="field">
-          <div class="label">Día de pago (1-31)</div>
+          <div class="label">D├¡a de pago (1-31)</div>
           <input id="finDebtDueDay" type="number" min="1" max="31" value="${escapeHtml(String(d.dueDay||30))}" />
         </div>
 
@@ -18526,12 +18570,12 @@ function openFinanceDebtModal(existing){
         </div>
 
         <div class="field">
-          <div class="label">Pago mensual (mínimo / cuota)</div>
+          <div class="label">Pago mensual (m├¡nimo / cuota)</div>
           <input id="finDebtMonthlyDue" type="number" inputmode="decimal" value="${escapeHtml(String(d.monthlyDue||''))}" placeholder="0.00" />
         </div>
 
         <div class="field">
-          <div class="label">APR / Interés (opcional)</div>
+          <div class="label">APR / Inter├®s (opcional)</div>
           <input id="finDebtApr" type="number" inputmode="decimal" value="${escapeHtml(String(d.apr||''))}" placeholder="%" />
         </div>
         <div class="field" style="grid-column:1/-1">
@@ -18650,9 +18694,9 @@ function openFinanceDebtPayModal(debtId){
       <div class="modalTop">
         <div>
           <div class="modalTitle">Registrar pago</div>
-          <div class="modalSub">${escapeHtml(debt.name)} · saldo S/ ${_financeFmt(debt.balance)}</div>
+          <div class="modalSub">${escapeHtml(debt.name)} ┬À saldo S/ ${_financeFmt(debt.balance)}</div>
         </div>
-        <button class="iconBtn" id="finPayClose">✕</button>
+        <button class="iconBtn" id="finPayClose">Ô£ò</button>
       </div>
       <div class="hr"></div>
 
@@ -18693,7 +18737,7 @@ function openFinanceDebtPayModal(debtId){
   backdrop.querySelector('#finPaySave')?.addEventListener('click', ()=>{
     const date = String(backdrop.querySelector('#finPayDate')?.value||iso);
     const amount = financeDebtSafeNum(backdrop.querySelector('#finPayAmount')?.value);
-    if(!(amount>0)){ alert('Monto inválido'); return; }
+    if(!(amount>0)){ alert('Monto inv├ílido'); return; }
     const accountId = String(backdrop.querySelector('#finPayAccount')?.value||'');
     const noteExtra = (backdrop.querySelector('#finPayNote')?.value||'').trim();
 
@@ -18710,7 +18754,7 @@ function openFinanceDebtPayModal(debtId){
       accountId,
       category: 'Deudas',
       reason: 'planificado',
-      note: `Pago deuda: ${debt.name}${noteExtra?(' · '+noteExtra):''}`,
+      note: `Pago deuda: ${debt.name}${noteExtra?(' ┬À '+noteExtra):''}`,
       debtId: debt.id,
       kind: 'debt_payment',
       archived: false,
@@ -18976,15 +19020,15 @@ function financeDebtRenderUpcoming(){
       <div class="finDueRow">
         <div class="finDueLeft">
           <div class="finDueTitle">${escapeHtml(it.name)}</div>
-          <div class="muted">Vence: ${escapeHtml(it.dueLabel)} · saldo S/ ${fmt(it.balance)}</div>
+          <div class="muted">Vence: ${escapeHtml(it.dueLabel)} ┬À saldo S/ ${fmt(it.balance)}</div>
         </div>
         <div class="finDueAmt">S/ ${fmt(it.amount)}</div>
       </div>
     `;
   }
 
-  const weekHtml = u.inWeek.length ? u.inWeek.map(itemRow).join('') : `<div class="muted">Nada en los próximos 7 días.</div>`;
-  const monthHtml = u.inMonth.length ? u.inMonth.map(itemRow).join('') : `<div class="muted">Sin vencimientos este mes (según día de pago).</div>`;
+  const weekHtml = u.inWeek.length ? u.inWeek.map(itemRow).join('') : `<div class="muted">Nada en los pr├│ximos 7 d├¡as.</div>`;
+  const monthHtml = u.inMonth.length ? u.inMonth.map(itemRow).join('') : `<div class="muted">Sin vencimientos este mes (seg├║n d├¡a de pago).</div>`;
 
   const weekTotal = u.inWeek.reduce((s,x)=> s + financeDebtSafeNum(x.amount), 0);
   const monthTotal = u.inMonth.reduce((s,x)=> s + financeDebtSafeNum(x.amount), 0);
@@ -19168,8 +19212,8 @@ function renderFinanceDebtSurvivalBox(){
     : `<span class="chipGood">Estable</span>`;
 
   const deficitLine = a.deficit>0
-    ? `<div class="finDebtHint bad" style="margin-top:10px">Hueco semanal estimado: <strong>S/ ${fmt(a.deficit)}</strong>. Esto incluye compromisos + deudas que vencen en 7 días y una reserva de Mercado de S/ ${fmt(a.marketReserve)}.</div>`
-    : `<div class="finDebtHint good" style="margin-top:10px">Esta semana estás cubierto. Reserva Mercado estimada: <strong>S/ ${fmt(a.marketReserve)}</strong>.</div>`;
+    ? `<div class="finDebtHint bad" style="margin-top:10px">Hueco semanal estimado: <strong>S/ ${fmt(a.deficit)}</strong>. Esto incluye compromisos + deudas que vencen en 7 d├¡as y una reserva de Mercado de S/ ${fmt(a.marketReserve)}.</div>`
+    : `<div class="finDebtHint good" style="margin-top:10px">Esta semana est├ís cubierto. Reserva Mercado estimada: <strong>S/ ${fmt(a.marketReserve)}</strong>.</div>`;
 
   const chosenHtml = (a.chosen||[]).length ? a.chosen.map(c=>{
     const risk = c.payout * c.reliability;
@@ -19177,8 +19221,8 @@ function renderFinanceDebtSurvivalBox(){
     return `
       <div class="finDueRow">
         <div class="finDueLeft">
-          <div class="finDueTitle">🔁 ${escapeHtml(c.name)} <span class="muted">(confiab. ${(c.reliability||0).toFixed(2)})</span></div>
-          <div class="muted">Pagas S/ ${fmt(c.due)} y normalmente recibes S/ ${fmt(c.payout)} (neto -S/ ${fmt(netCost)}). Cobertura ajustada ≈ S/ ${fmt(risk)}.</div>
+          <div class="finDueTitle">­ƒöü ${escapeHtml(c.name)} <span class="muted">(confiab. ${(c.reliability||0).toFixed(2)})</span></div>
+          <div class="muted">Pagas S/ ${fmt(c.due)} y normalmente recibes S/ ${fmt(c.payout)} (neto -S/ ${fmt(netCost)}). Cobertura ajustada Ôëê S/ ${fmt(risk)}.</div>
         </div>
         <div class="finDueAmt">S/ ${fmt(c.payout)}</div>
       </div>
@@ -19186,7 +19230,7 @@ function renderFinanceDebtSurvivalBox(){
   }).join('') : `<div class="muted">Sin sugerencias de ruleteo por ahora.</div>`;
 
   const coverLine = a.deficit>0
-    ? `<div class="muted" style="margin-top:8px">Cobertura sugerida: <strong>S/ ${fmt(a.coveredNom)}</strong> (ajustada por confiabilidad ≈ <strong>S/ ${fmt(a.coveredRiskAdj)}</strong>).</div>`
+    ? `<div class="muted" style="margin-top:8px">Cobertura sugerida: <strong>S/ ${fmt(a.coveredNom)}</strong> (ajustada por confiabilidad Ôëê <strong>S/ ${fmt(a.coveredRiskAdj)}</strong>).</div>`
     : ``;
 
   const saveHint = a.status==='survival'
@@ -19255,8 +19299,8 @@ function financeDebtPlanUI(){
 
   const targetLine = target
     ? (plan.strategy==='avalanche'
-      ? `Prioridad: <strong>${escapeHtml(target.name)}</strong> (APR más alto) ⚡`
-      : `Prioridad: <strong>${escapeHtml(target.name)}</strong> (saldo más pequeño) ⛄`)
+      ? `Prioridad: <strong>${escapeHtml(target.name)}</strong> (APR m├ís alto) ÔÜí`
+      : `Prioridad: <strong>${escapeHtml(target.name)}</strong> (saldo m├ís peque├▒o) Ôøä`)
     : `Sin deudas activas.`;
 
   const finishLbl = (function(){
@@ -19267,27 +19311,27 @@ function financeDebtPlanUI(){
   })();
 
   const steps = sim.steps.map(s=>{
-    const lines = (s.top||[]).map(t=>`<div class="muted">· ${t}</div>`).join('');
+    const lines = (s.top||[]).map(t=>`<div class="muted">┬À ${t}</div>`).join('');
     return `
       <div class="finSimStep">
-        <div><strong>${escapeHtml(s.monthISO)}</strong> · pagas S/ ${fmt(s.paid)} · queda S/ ${fmt(s.remaining)}</div>
+        <div><strong>${escapeHtml(s.monthISO)}</strong> ┬À pagas S/ ${fmt(s.paid)} ┬À queda S/ ${fmt(s.remaining)}</div>
         ${lines ? `<div style="margin-top:6px">${lines}</div>` : ``}
       </div>
     `;
   }).join('');
 
   const interestNote = plan.includeInterest
-    ? `<div class="muted">Incluye interés aproximado (APR/12 si está registrado). Si una deuda no tiene APR, se asume 0%.</div>`
-    : `<div class="muted">Simulación sin interés (solo amortización). Útil para tener un estimado rápido.</div>`;
+    ? `<div class="muted">Incluye inter├®s aproximado (APR/12 si est├í registrado). Si una deuda no tiene APR, se asume 0%.</div>`
+    : `<div class="muted">Simulaci├│n sin inter├®s (solo amortizaci├│n). ├Ütil para tener un estimado r├ípido.</div>`;
 
   const extHint = `<div class="muted">Tip: el ingreso externo (emprendimiento de Fergis) puede ir directo a cubrir intereses o acelerar la deuda objetivo.</div>`;
 
   let timelineHtml = "";
   if (sim.ok && sim.payoffSchedule && sim.payoffSchedule.length > 0) {
-    const symbol = plan.strategy === 'avalanche' ? '⚡' : '⛄';
+    const symbol = plan.strategy === 'avalanche' ? 'ÔÜí' : 'Ôøä';
     timelineHtml = `
       <div style="margin-top: 14px; margin-bottom: 14px; background: rgba(124, 92, 255, 0.04); border: 1px solid rgba(124, 92, 255, 0.1); border-radius: 12px; padding: 14px;">
-        <div style="font-weight: 700; font-size: 13px; color: #fff; margin-bottom: 10px;">📅 Cronograma de Liquidación:</div>
+        <div style="font-weight: 700; font-size: 13px; color: #fff; margin-bottom: 10px;">­ƒôà Cronograma de Liquidaci├│n:</div>
         <div style="display: flex; flex-direction: column; gap: 12px; border-left: 2px dashed rgba(124, 92, 255, 0.3); padding-left: 14px; margin-left: 6px;">
           ${sim.payoffSchedule.map((p, idx) => {
             let monthLabel = p.month;
@@ -19311,7 +19355,7 @@ function financeDebtPlanUI(){
   return `
     <div class="finPlanBox">
       <div class="cardTop" style="margin-top:0">
-        <h3 class="cardTitle" style="font-size:14px">Plan y simulación</h3>
+        <h3 class="cardTitle" style="font-size:14px">Plan y simulaci├│n</h3>
       </div>
       <div class="hr"></div>
 
@@ -19321,15 +19365,15 @@ function financeDebtPlanUI(){
 
         <label class="row" style="gap:6px;align-items:center;margin-left:auto">
           <input type="checkbox" ${plan.includeInterest?'checked':''} onchange="financeDebtToggleInterest(this.checked)" />
-          <span class="muted">interés</span>
+          <span class="muted">inter├®s</span>
         </label>
       </div>
 
       <div class="grid2" style="gap:10px;margin-top:10px">
         <div class="field">
-          <div class="label">Extra mensual (tú)</div>
+          <div class="label">Extra mensual (t├║)</div>
           <input type="number" inputmode="decimal" value="${escapeHtml(String(extra))}" oninput="financeDebtSetExtraMonthly(this.value)" placeholder="0.00" />
-          <div class="muted">Pago adicional que puedes meter encima de mínimos.</div>
+          <div class="muted">Pago adicional que puedes meter encima de m├¡nimos.</div>
         </div>
         <div class="field">
           <div class="label">Extra mensual externo (Fergis)</div>
@@ -19343,8 +19387,8 @@ function financeDebtPlanUI(){
       <div class="finPlanSummary">
         <div>${targetLine}</div>
         <div class="muted" style="margin-top:6px">Pool estimado para acelerar: <strong>S/ ${fmt(pool)}</strong> (gap positivo + extras)</div>
-        <div class="muted" style="margin-top:6px">Deuda libre en aprox: <strong>${sim.months}</strong> meses (≈ ${escapeHtml(finishLbl)})</div>
-        <div class="muted" style="margin-top:6px">Interés estimado total: <strong>S/ ${fmt(sim.totalInterest)}</strong></div>
+        <div class="muted" style="margin-top:6px">Deuda libre en aprox: <strong>${sim.months}</strong> meses (Ôëê ${escapeHtml(finishLbl)})</div>
+        <div class="muted" style="margin-top:6px">Inter├®s estimado total: <strong>S/ ${fmt(sim.totalInterest)}</strong></div>
       </div>
 
       <div style="margin-top:10px">${interestNote}</div>
@@ -19400,7 +19444,7 @@ function renderFinanceDebtsTab(){
   const activeDebts = allDebts.filter(d => String(d.status || 'active') === 'active');
   const paidDebts = allDebts.filter(d => String(d.status || 'active') === 'closed');
 
-  const typeIcons = { loan: '🏢', card: '💳', app: '📱' };
+  const typeIcons = { loan: '­ƒÅó', card: '­ƒÆ│', app: '­ƒô▒' };
   
   const activeListHtml = activeDebts
     .sort((a, b) => financeDebtSafeNum(b.balance) - financeDebtSafeNum(a.balance))
@@ -19408,8 +19452,8 @@ function renderFinanceDebtsTab(){
       const p = financeDebtProgress(d);
       const dueIso = financeDebtNextDueISO(d.dueDay);
       const dueLbl = financeDebtDueLabel(dueIso);
-      const typeIcon = typeIcons[d.type] || '💰';
-      const aprText = d.apr ? ` · ${d.apr}% APR` : '';
+      const typeIcon = typeIcons[d.type] || '­ƒÆ░';
+      const aprText = d.apr ? ` ┬À ${d.apr}% APR` : '';
       return `
         <div class="finDebtRow" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); padding: 14px; border-radius: 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px;">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
@@ -19420,13 +19464,13 @@ function renderFinanceDebtsTab(){
                 ${financeDebtStatusChip(d)}
               </div>
               <div style="font-size: 12px; color: #aaa; margin-top: 4px;">
-                Cuota: <strong>S/ ${fmt(d.monthlyDue||0)}</strong> · vence: <strong>${escapeHtml(dueLbl)}</strong>${aprText}
+                Cuota: <strong>S/ ${fmt(d.monthlyDue||0)}</strong> ┬À vence: <strong>${escapeHtml(dueLbl)}</strong>${aprText}
               </div>
             </div>
             <div class="finDebtActions" style="display:flex; gap:6px; flex-shrink:0;">
-              <button class="iconBtn" title="Registrar pago" onclick="openFinanceDebtPayModal('${d.id}')" style="background: rgba(52,211,153,0.15); color: #34d399; padding: 6px; border-radius: 8px; font-size: 13px;">💸</button>
-              <button class="iconBtn" title="Editar" onclick="openFinanceDebtModalById('${d.id}')" style="background: rgba(96,165,250,0.15); color: #60a5fa; padding: 6px; border-radius: 8px; font-size: 13px;">✏️</button>
-              <button class="iconBtn" title="Borrar deuda" onclick="deleteFinanceDebt('${d.id}')" style="background: rgba(248,113,113,0.15); color: #f87171; padding: 6px; border-radius: 8px; font-size: 13px;">🗑️</button>
+              <button class="iconBtn" title="Registrar pago" onclick="openFinanceDebtPayModal('${d.id}')" style="background: rgba(52,211,153,0.15); color: #34d399; padding: 6px; border-radius: 8px; font-size: 13px;">­ƒÆ©</button>
+              <button class="iconBtn" title="Editar" onclick="openFinanceDebtModalById('${d.id}')" style="background: rgba(96,165,250,0.15); color: #60a5fa; padding: 6px; border-radius: 8px; font-size: 13px;">Ô£Å´©Å</button>
+              <button class="iconBtn" title="Borrar deuda" onclick="deleteFinanceDebt('${d.id}')" style="background: rgba(248,113,113,0.15); color: #f87171; padding: 6px; border-radius: 8px; font-size: 13px;">­ƒùæ´©Å</button>
             </div>
           </div>
           
@@ -19441,12 +19485,12 @@ function renderFinanceDebtsTab(){
           </div>
         </div>
       `;
-    }).join('') || `<div class="muted" style="text-align:center; padding: 20px 0;">Sin deudas activas. ¡Excelente! 🎉</div>`;
+    }).join('') || `<div class="muted" style="text-align:center; padding: 20px 0;">Sin deudas activas. ┬íExcelente! ­ƒÄë</div>`;
 
   const paidListHtml = paidDebts.length > 0 ? `
     <div style="margin-top: 16px; background: rgba(54, 211, 153, 0.05); border: 1px dashed rgba(54, 211, 153, 0.2); border-radius: 12px; padding: 12px;">
       <div style="font-weight: 700; font-size: 13px; color: #36d399; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-        <span>🎉</span> Victoria Financiera (${paidDebts.length} deudas pagadas)
+        <span>­ƒÄë</span> Victoria Financiera (${paidDebts.length} deudas pagadas)
       </div>
       <div style="display: flex; flex-direction: column; gap: 6px;">
         ${paidDebts.map(d => `
@@ -19454,7 +19498,7 @@ function renderFinanceDebtsTab(){
             <span style="text-decoration: line-through;">${escapeHtml(d.name)}</span>
             <div style="display:flex; gap:8px; align-items:center;">
               <span>S/ 0.00 saldo</span>
-              <button class="iconBtn" onclick="deleteFinanceDebt('${d.id}')" title="Eliminar de la lista" style="font-size: 10px; background:transparent; padding:0; opacity:0.6;">🗑️</button>
+              <button class="iconBtn" onclick="deleteFinanceDebt('${d.id}')" title="Eliminar de la lista" style="font-size: 10px; background:transparent; padding:0; opacity:0.6;">­ƒùæ´©Å</button>
             </div>
           </div>
         `).join('')}
@@ -19474,14 +19518,14 @@ function renderFinanceDebtsTab(){
   const recentPaymentsHtml = paymentLedger.length > 0 ? `
     <div class="finPlanBox" style="margin-top: 14px;">
       <div class="cardTop" style="margin-top:0">
-        <h3 class="cardTitle" style="font-size:14px;">💸 Pagos recientes registrados</h3>
+        <h3 class="cardTitle" style="font-size:14px;">­ƒÆ© Pagos recientes registrados</h3>
       </div>
       <div class="hr"></div>
       <div style="display:flex; flex-direction:column; gap:6px;">
         ${paymentLedger.slice(0, 5).map(e => {
           const rawNote = String(e.note || "");
-          const hasSep = rawNote.includes(" · ");
-          const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
+          const hasSep = rawNote.includes(" ┬À ");
+          const desc = hasSep ? rawNote.split(" ┬À ")[0].trim() : rawNote.trim();
           const shownDesc = desc || "Pago de deuda";
           return `
             <div style="display:flex; justify-content:space-between; font-size:12px; color:#ddd; padding:4px 0; border-bottom:1px solid #2a2a2c;">
@@ -19496,21 +19540,21 @@ function renderFinanceDebtsTab(){
 
   const hint = (gap<0)
     ? `<div class="finDebtHint bad">Te faltan <strong>S/ ${fmt(Math.abs(gap))}</strong> para cubrir solo deudas este mes. Vamos a usar esto para decidir prioridades y recortar fugas.</div>`
-    : `<div class="finDebtHint good">Bien: te sobran <strong>S/ ${fmt(gap)}</strong> después de cubrir deudas. Eso puede ir a acelerar una deuda (snowball/avalancha).</div>`;
+    : `<div class="finDebtHint good">Bien: te sobran <strong>S/ ${fmt(gap)}</strong> despu├®s de cubrir deudas. Eso puede ir a acelerar una deuda (snowball/avalancha).</div>`;
 
   return `
     <section class="card homeCard homeWide" style="display: flex; flex-direction: column; gap: 14px;">
       <div class="cardTop">
         <h2 class="cardTitle">Deudas</h2>
         <div class="row" style="gap:8px">
-          <button class="iconBtn" title="Nueva deuda" onclick="openFinanceDebtModal()">＋</button>
+          <button class="iconBtn" title="Nueva deuda" onclick="openFinanceDebtModal()">´╝ï</button>
         </div>
       </div>
       <div class="hr" style="margin: 0;"></div>
 
       <div style="background: rgba(124, 92, 255, 0.08); border: 1px solid rgba(124, 92, 255, 0.15); border-radius: 14px; padding: 14px;">
         <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:#fff; margin-bottom:6px;">
-          <span>Progreso de Liquidación</span>
+          <span>Progreso de Liquidaci├│n</span>
           <span style="color:#36d399;">S/ ${fmt(paidSoFar)} pagado (${progressPct}%)</span>
         </div>
         <div style="background: rgba(255,255,255,0.08); border-radius: 6px; height: 10px; overflow: hidden; width: 100%;">
@@ -19525,7 +19569,7 @@ function renderFinanceDebtsTab(){
           <div style="font-size: 10px; color: #888; margin-top: 4px;">Original: S/ ${fmt(originalTotal)}</div>
         </div>
         <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 12px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Pago Mínimo Mensual</div>
+          <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Pago M├¡nimo Mensual</div>
           <div style="font-size: 18px; font-weight: 800; color: #7c5cff;">S/ ${fmt(monthly)}</div>
           <div style="font-size: 10px; color: #888; margin-top: 4px;">Efectivo libre: S/ ${fmt(gap)}</div>
         </div>
@@ -19579,7 +19623,7 @@ function openFinanceDebtModalById(id){
 function deleteFinanceDebt(id){
   const debt = (state.financeDebts||[]).find(x=>x.id===id);
   if(!debt) return;
-  if(!confirm(`¿Borrar la deuda "${debt.name}"?`)) return;
+  if(!confirm(`┬┐Borrar la deuda "${debt.name}"?`)) return;
   state.financeDebts = (state.financeDebts||[]).filter(x=>x.id!==id);
   persist();
   view();
@@ -19604,7 +19648,7 @@ function renderFinanceMissionControl(){
     s.textContent = `
       .mc-wrap{ display:flex;flex-direction:column;gap:14px;padding-bottom:16px; }
 
-      /* ── Header card ── */
+      /* ÔöÇÔöÇ Header card ÔöÇÔöÇ */
       .mc-hero{
         background:linear-gradient(135deg,rgba(124,92,255,.25),rgba(54,211,153,.12));
         border:1px solid rgba(124,92,255,.3);
@@ -19649,7 +19693,7 @@ function renderFinanceMissionControl(){
         transition:width .4s ease;
       }
 
-      /* ── Priority list ── */
+      /* ÔöÇÔöÇ Priority list ÔöÇÔöÇ */
       .mc-section{
         background:rgba(255,255,255,.04);
         border:1px solid rgba(255,255,255,.08);
@@ -19692,7 +19736,7 @@ function renderFinanceMissionControl(){
       .badge-urgente{ background:rgba(251,191,36,.12);color:#fbbf24 }
       .badge-post{ background:rgba(255,255,255,.07);color:rgba(255,255,255,.4) }
 
-      /* ── Sources grid ── */
+      /* ÔöÇÔöÇ Sources grid ÔöÇÔöÇ */
       .mc-sources{ display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:12px 14px; }
       .mc-source-item{
         background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
@@ -19701,7 +19745,7 @@ function renderFinanceMissionControl(){
       .mc-source-name{ font-size:12px;font-weight:600;margin-bottom:2px }
       .mc-source-meta{ font-size:10px;color:rgba(255,255,255,.35) }
 
-      /* ── Insights ── */
+      /* ÔöÇÔöÇ Insights ÔöÇÔöÇ */
       .mc-insight{
         display:flex;gap:10px;align-items:flex-start;
         padding:11px 14px;
@@ -19724,7 +19768,7 @@ function renderFinanceMissionControl(){
     if(b==='hoy') return '<span class="mc-priority-badge badge-hoy">HOY</span>';
     if(b==='esta semana') return '<span class="mc-priority-badge badge-semana">ESTA SEMANA</span>';
     if(b==='urgente') return '<span class="mc-priority-badge badge-urgente">URGENTE</span>';
-    return '<span class="mc-priority-badge badge-post">DESPUÉS</span>';
+    return '<span class="mc-priority-badge badge-post">DESPU├ëS</span>';
   };
 
   const priorityItems = (m.upcoming||[]).slice(0,8).map(o=>`
@@ -19732,7 +19776,7 @@ function renderFinanceMissionControl(){
       <div class="mc-priority-dot" style="background:${bucketDot(o.bucket)}"></div>
       <div class="mc-priority-info">
         <div class="mc-priority-name">${escapeHtml(o.name)}</div>
-        <div class="mc-priority-meta">${escapeHtml(o.category||'General')} · día ${Number(o.dueDate||1)}</div>
+        <div class="mc-priority-meta">${escapeHtml(o.category||'General')} ┬À d├¡a ${Number(o.dueDate||1)}</div>
       </div>
       ${bucketBadge(o.bucket)}
       <div class="mc-priority-amt" style="color:${bucketDot(o.bucket)}">S/ ${fmt(o.amountExpected||0)}</div>
@@ -19755,7 +19799,7 @@ function renderFinanceMissionControl(){
   const sourceItems = (state.financePaymentSources||[]).filter(s=>s.isActive!==false).map(s=>`
     <div class="mc-source-item">
       <div class="mc-source-name">${escapeHtml(s.name)}</div>
-      <div class="mc-source-meta">${escapeHtml(s.sourceType)} · ${escapeHtml(s.owner)}</div>
+      <div class="mc-source-meta">${escapeHtml(s.sourceType)} ┬À ${escapeHtml(s.owner)}</div>
     </div>
   `).join('') || `<div style="padding:12px 16px;color:rgba(255,255,255,.3);font-size:12px">Sin fuentes configuradas</div>`;
 
@@ -19765,11 +19809,11 @@ function renderFinanceMissionControl(){
       <!-- Hero card -->
       <div class="mc-hero">
         <div class="mc-hero-top">
-          <div class="mc-hero-label">🛰 Mission Control · ${escapeHtml(m.mk)}</div>
+          <div class="mc-hero-label">­ƒø░ Mission Control ┬À ${escapeHtml(m.mk)}</div>
           <div class="mc-risk ${riskClass}">RIESGO ${escapeHtml(m.riskScore)}</div>
         </div>
         <div class="mc-balance" style="color:${marginColor}">S/ ${fmt(Math.abs(m.margin))}</div>
-        <div class="mc-balance-sub">${m.margin>=0?'margen disponible después de esenciales':'déficit estimado del mes'}</div>
+        <div class="mc-balance-sub">${m.margin>=0?'margen disponible despu├®s de esenciales':'d├®ficit estimado del mes'}</div>
         <div class="mc-stats">
           <div class="mc-stat good">
             <div class="mc-stat-val">S/ ${fmt(m.incomeConfirmed)}</div>
@@ -19810,10 +19854,10 @@ function renderFinanceMissionControl(){
       <!-- Prioridades inmediatas -->
       <div class="mc-section">
         <div class="mc-section-head">
-          <div class="mc-section-title">⚡ Prioridades inmediatas</div>
+          <div class="mc-section-title">ÔÜí Prioridades inmediatas</div>
           <div style="display:flex;gap:6px;">
-            <div class="mc-section-action" onclick="setFinanceSubTab('debts')">Deudas →</div>
-            <div class="mc-section-action" onclick="setFinanceSubTab('commitments')">Compromisos →</div>
+            <div class="mc-section-action" onclick="setFinanceSubTab('debts')">Deudas ÔåÆ</div>
+            <div class="mc-section-action" onclick="setFinanceSubTab('commitments')">Compromisos ÔåÆ</div>
           </div>
         </div>
         ${priorityItems}
@@ -19823,7 +19867,7 @@ function renderFinanceMissionControl(){
       ${insightItems ? `
       <div class="mc-section">
         <div class="mc-section-head">
-          <div class="mc-section-title">💡 Asistente</div>
+          <div class="mc-section-title">­ƒÆí Asistente</div>
         </div>
         ${insightItems}
       </div>` : ''}
@@ -19831,7 +19875,7 @@ function renderFinanceMissionControl(){
       <!-- Fuentes de pago -->
       <div class="mc-section">
         <div class="mc-section-head">
-          <div class="mc-section-title">💳 Fuentes de pago</div>
+          <div class="mc-section-title">­ƒÆ│ Fuentes de pago</div>
         </div>
         <div class="mc-sources">${sourceItems}</div>
       </div>
@@ -19883,7 +19927,7 @@ async function financeFetchTelegramPending() {
           amount: t.amount,
           accountId: accountId,
           category: t.category,
-          note: t.note || "Vía Telegram",
+          note: t.note || "V├¡a Telegram",
           reason: "telegram",
           neuronRole: "auto"
         });
@@ -19892,7 +19936,7 @@ async function financeFetchTelegramPending() {
       });
 
       if (addedCount > 0) {
-        toast(`📥 ${addedCount} transacciones añadidas desde Telegram`);
+        toast(`­ƒôÑ ${addedCount} transacciones a├▒adidas desde Telegram`);
         view(); // re-render UI
       }
     }
@@ -19913,20 +19957,20 @@ function viewFinance(){
   const topTabs = `
     <div class="finTopTabs">
       <button class="finTopTab ${state.financeSubTab==="main"?"active":""}" onclick="setFinanceSubTab('main')">Principal</button>
-      <button class="finTopTab ${state.financeSubTab==="crypto"?"active":""}" onclick="setFinanceSubTab('crypto')">🪙 Crypto / BTC</button>
-      <button class="finTopTab ${state.financeSubTab==="stats"?"active":""}" onclick="setFinanceSubTab('stats')">📊 Estadísticas</button>
+      <button class="finTopTab ${state.financeSubTab==="crypto"?"active":""}" onclick="setFinanceSubTab('crypto')">­ƒ¬Ö Crypto / BTC</button>
+      <button class="finTopTab ${state.financeSubTab==="stats"?"active":""}" onclick="setFinanceSubTab('stats')">­ƒôè Estad├¡sticas</button>
       <button class="finTopTab ${state.financeSubTab==="mission"?"active":""}" onclick="setFinanceSubTab('mission')">Mission Control</button>
       <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
       <button class="finTopTab ${state.financeSubTab==="reminders"?"active":""}" onclick="setFinanceSubTab('reminders')">Recordatorios</button>
       <button class="finTopTab ${state.financeSubTab==="debts"?"active":""}" onclick="setFinanceSubTab('debts')">Deudas</button>
-      <button class="finTopTab ${state.financeSubTab==="fiados"?"active":""}" onclick="setFinanceSubTab('fiados')">🤝 Fiados</button>
+      <button class="finTopTab ${state.financeSubTab==="fiados"?"active":""}" onclick="setFinanceSubTab('fiados')">­ƒñØ Fiados</button>
       <button class="finTopTab ${state.financeSubTab==="commitments"?"active":""}" onclick="setFinanceSubTab('commitments')">Compromisos</button>
-      <button class="finTopTab ${state.financeSubTab==="roadmap"?"active":""}" onclick="setFinanceSubTab('roadmap')">🗺️ Hoja de Ruta</button>
-      <button class="finTopTab ${state.financeSubTab==="neuronal"?"active":""}" onclick="setFinanceSubTab('neuronal')">🧠 Mapa Neuronal</button>
+      <button class="finTopTab ${state.financeSubTab==="roadmap"?"active":""}" onclick="setFinanceSubTab('roadmap')">­ƒù║´©Å Hoja de Ruta</button>
+      <button class="finTopTab ${state.financeSubTab==="neuronal"?"active":""}" onclick="setFinanceSubTab('neuronal')">­ƒºá Mapa Neuronal</button>
     </div>
   `;
 
-  // Principal content — redesigned
+  // Principal content ÔÇö redesigned
   const totalBalance = (state.financeAccounts||[]).reduce((s,a)=>{
     if (a.type === "crypto") {
       return s + (Number(a.balance||0) * state.btcPricePen);
@@ -19955,18 +19999,18 @@ function viewFinance(){
     const isPrimary = state.financePrimaryAccountId === a.id;
     return `
       <div class="finAccCard" style="position:relative;" onclick="openFinanceAccountDetails('${a.id}')">
-        <button onclick="event.stopPropagation(); toggleFinancePrimaryAccount('${a.id}')" style="position:absolute; top:8px; right:8px; background:none; border:none; color:${isPrimary?'#f59e0b':'#555'}; font-size:16px; cursor:pointer;" title="Establecer como cuenta principal">${isPrimary?'★':'☆'}</button>
+        <button onclick="event.stopPropagation(); toggleFinancePrimaryAccount('${a.id}')" style="position:absolute; top:8px; right:8px; background:none; border:none; color:${isPrimary?'#f59e0b':'#555'}; font-size:16px; cursor:pointer;" title="Establecer como cuenta principal">${isPrimary?'Ôÿà':'Ôÿå'}</button>
         <div class="finAccName" style="padding-right:20px;">${escapeHtml(a.name)}</div>
-        <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">${isCrypto ? `₿ ${bal.toFixed(8)}` : `S/ ${fmt(shownValue)}`}</div>
+        <div class="finAccBal ${isPos?'finAccPos':'finAccNeg'}">${isCrypto ? `Ôé┐ ${bal.toFixed(8)}` : `S/ ${fmt(shownValue)}`}</div>
         <div class="finAccHint">${balanceLabel}</div>
       </div>`;
-  }).join("") || `<div class="finAccEmpty">Sin cuentas · <span onclick="openFinanceAccountModal()" style="color:#7c5cff;cursor:pointer">Agregar +</span></div>`;
+  }).join("") || `<div class="finAccEmpty">Sin cuentas ┬À <span onclick="openFinanceAccountModal()" style="color:#7c5cff;cursor:pointer">Agregar +</span></div>`;
 
   const pillarsData = [
-    { icon:"🛒", label:"Mercado",   val: finPillars.market   },
-    { icon:"🧾", label:"Servicios", val: finPillars.services  },
-    { icon:"💳", label:"Deudas",    val: finPillars.debts     },
-    { icon:"📦", label:"Otros",     val: finPillars.other     },
+    { icon:"­ƒøÆ", label:"Mercado",   val: finPillars.market   },
+    { icon:"­ƒº¥", label:"Servicios", val: finPillars.services  },
+    { icon:"­ƒÆ│", label:"Deudas",    val: finPillars.debts     },
+    { icon:"­ƒôª", label:"Otros",     val: finPillars.other     },
   ];
   const pillarsTotal = pillarsData.reduce((s,p)=>s+p.val,0) || 1;
   const pillarsRows = pillarsData.map(p=>{
@@ -19992,7 +20036,7 @@ function viewFinance(){
     payablesHtml = `
       <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
         <div class="finSectionHead" style="margin-bottom:12px;">
-          <div class="finSectionTitle" style="color:#fbbf24;">🤝 Préstamos Rápidos (Por Pagar)</div>
+          <div class="finSectionTitle" style="color:#fbbf24;">­ƒñØ Pr├®stamos R├ípidos (Por Pagar)</div>
           <div style="font-weight:700; color:#fbbf24;">S/ ${fmt(totalPayables)}</div>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;">
@@ -20025,7 +20069,7 @@ function viewFinance(){
     usdHtml = `
       <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
         <div class="finSectionHead" style="margin-bottom:12px;">
-          <div class="finSectionTitle" style="color:#60a5fa;">💵 Rendimiento USD (PayPal/Ligo)</div>
+          <div class="finSectionTitle" style="color:#60a5fa;">­ƒÆÁ Rendimiento USD (PayPal/Ligo)</div>
           <div style="font-weight:700; color:#60a5fa;">Mes actual</div>
         </div>
         <div style="display:flex; gap:12px; margin-bottom:12px;">
@@ -20042,7 +20086,7 @@ function viewFinance(){
             <div style="font-weight:700; color:#ef4444;">$${fmt(totalFee)}</div>
           </div>
         </div>
-        <div style="font-size:12px; color:#aaa; text-align:center;">Estás perdiendo el <b>${feePct}%</b> de tus ingresos en dólares en comisiones este mes.</div>
+        <div style="font-size:12px; color:#aaa; text-align:center;">Est├ís perdiendo el <b>${feePct}%</b> de tus ingresos en d├│lares en comisiones este mes.</div>
       </section>
     `;
   }
@@ -20052,13 +20096,13 @@ function viewFinance(){
     <!-- CUENTAS TOP -->
     <section class="finSection">
       <div class="finSectionHead">
-        <div class="finSectionTitle">💳 Cuentas</div>
+        <div class="finSectionTitle">­ƒÆ│ Cuentas</div>
         <div style="display:flex;gap:6px;align-items:center;">
-          <button class="finIconBtn" title="Mes anterior" onclick="financeShiftMonth(-1)">◀</button>
-          <button class="finIconBtn" title="Mes actual" onclick="financeResetMonth()">●</button>
-          <button class="finIconBtn" title="Mes siguiente" onclick="financeShiftMonth(1)">▶</button>
-          <button class="finIconBtn" title="Agregar cuenta" onclick="openFinanceAccountModal()">＋</button>
-          <button class="finIconBtn" title="Más opciones" onclick="openFinanceImport()">⬆</button>
+          <button class="finIconBtn" title="Mes anterior" onclick="financeShiftMonth(-1)">ÔùÇ</button>
+          <button class="finIconBtn" title="Mes actual" onclick="financeResetMonth()">ÔùÅ</button>
+          <button class="finIconBtn" title="Mes siguiente" onclick="financeShiftMonth(1)">ÔûÂ</button>
+          <button class="finIconBtn" title="Agregar cuenta" onclick="openFinanceAccountModal()">´╝ï</button>
+          <button class="finIconBtn" title="M├ís opciones" onclick="openFinanceImport()">Ô¼å</button>
         </div>
       </div>
       <div class="finAccGrid">
@@ -20073,24 +20117,24 @@ function viewFinance(){
     <!-- RESUMEN DEL MES -->
     <section class="finSection">
       <div class="finSectionHead">
-        <div class="finSectionTitle">📊 Este mes</div>
-        <button class="finIconBtn" onclick="openFinanceMetaModal()">⚙️</button>
+        <div class="finSectionTitle">­ƒôè Este mes</div>
+        <button class="finIconBtn" onclick="openFinanceMetaModal()">ÔÜÖ´©Å</button>
       </div>
       <div class="finStatsGrid">
         <div class="finStatBox finStatIncome">
-          <div class="finStatIcon">📥</div>
+          <div class="finStatIcon">­ƒôÑ</div>
           <div class="finStatVal">S/ ${fmt(d.income)}</div>
           <div class="finStatLabel">Ingreso</div>
         </div>
         <div class="finStatBox finStatExpense">
-          <div class="finStatIcon">📤</div>
+          <div class="finStatIcon">­ƒôñ</div>
           <div class="finStatVal">S/ ${fmt(d.expense)}</div>
           <div class="finStatLabel">Gasto</div>
         </div>
         <div class="finStatBox ${savings>=0?'finStatSavings':'finStatNeg'}">
-          <div class="finStatIcon">${savings>=0?'💰':'⚠️'}</div>
+          <div class="finStatIcon">${savings>=0?'­ƒÆ░':'ÔÜá´©Å'}</div>
           <div class="finStatVal">S/ ${fmt(Math.abs(savings))}</div>
-          <div class="finStatLabel">${savings>=0?'Ahorro':'Déficit'}</div>
+          <div class="finStatLabel">${savings>=0?'Ahorro':'D├®ficit'}</div>
         </div>
       </div>
       ${spentPct!==null ? `
@@ -20098,7 +20142,7 @@ function viewFinance(){
         <div class="finBudgetBarInner">
           <div class="finBudgetFill ${spentPct>90?'finBudgetDanger':spentPct>70?'finBudgetWarn':''}" style="width:${spentPct}%"></div>
         </div>
-        <div class="finBudgetMeta">${spentPct}% del presupuesto · meta S/ ${fmt(meta.expectedIncome)}</div>
+        <div class="finBudgetMeta">${spentPct}% del presupuesto ┬À meta S/ ${fmt(meta.expectedIncome)}</div>
       </div>` : ""}
     </section>
 
@@ -20108,7 +20152,7 @@ function viewFinance(){
     <!-- GASTOS DIARIOS (7d) -->
     <section class="finSection">
       <div class="finSectionHead">
-        <div class="finSectionTitle">📅 Últimos 7 días</div>
+        <div class="finSectionTitle">­ƒôà ├Ültimos 7 d├¡as</div>
       </div>
       <canvas id="dailyExpenseChart" height="110" style="width:100%;max-width:100%;height:110px;display:block;"></canvas>
     </section>
@@ -20116,17 +20160,17 @@ function viewFinance(){
     <!-- PILARES -->
     <section class="finSection">
       <div class="finSectionHead">
-        <div class="finSectionTitle">🏛 Pilares del mes</div>
-        <button class="finIconBtn" onclick="setFinanceSubTab('commitments')">⚡</button>
+        <div class="finSectionTitle">­ƒÅø Pilares del mes</div>
+        <button class="finIconBtn" onclick="setFinanceSubTab('commitments')">ÔÜí</button>
       </div>
       ${pillarsRows}
       <canvas id="financePillarsChart" height="0" style="display:none"></canvas>
     </section>
 
-    <!-- PROYECCIÓN -->
+    <!-- PROYECCI├ôN -->
     <section class="finSection">
       <div class="finSectionHead">
-        <div class="finSectionTitle">📈 Proyección</div>
+        <div class="finSectionTitle">­ƒôê Proyecci├│n</div>
         <div style="display:flex;gap:4px;">
           <button class="finModeBtn ${state.financeProjectionMode==='conservative'?'finModeBtnActive':''}" onclick="financeSetProjectionMode('conservative')">Cons.</button>
           <button class="finModeBtn ${(!state.financeProjectionMode||state.financeProjectionMode==='normal')?'finModeBtnActive':''}" onclick="financeSetProjectionMode('normal')">Normal</button>
@@ -20143,11 +20187,11 @@ function viewFinance(){
       </div>
     </section>
 
-    <!-- ANÁLISIS SEMANAL -->
+    <!-- AN├üLISIS SEMANAL -->
     <section class="finSection">
       <div class="finSectionHead">
-        <div class="finSectionTitle">🧠 Análisis semanal</div>
-        <button class="finIconBtn" onclick="financeWeeklyGenerateNow()">✨</button>
+        <div class="finSectionTitle">­ƒºá An├ílisis semanal</div>
+        <button class="finIconBtn" onclick="financeWeeklyGenerateNow()">Ô£¿</button>
       </div>
       ${renderFinanceWeeklyCard()}
     </section>
@@ -20160,8 +20204,8 @@ function viewFinance(){
       <div class="cardTop">
         <h2 class="cardTitle">Movimientos</h2>
         <div style="display:flex;gap:6px;align-items:center;">
-          <button class="iconBtn" style="font-size:14px;padding:4px 8px;background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3);border-radius:8px;" onclick="financeDiagnostic()">🔍</button>
-          <button class="iconBtn" onclick="openFinanceTypeModal()">＋</button>
+          <button class="iconBtn" style="font-size:14px;padding:4px 8px;background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3);border-radius:8px;" onclick="financeDiagnostic()">­ƒöì</button>
+          <button class="iconBtn" onclick="openFinanceTypeModal()">´╝ï</button>
         </div>
       </div>
       <div class="hr"></div>
@@ -20175,10 +20219,10 @@ function viewFinance(){
     <section class="card homeCard homeWide">
       <div class="cardTop">
         <h2 class="cardTitle">Recordatorios</h2>
-        <button class="iconBtn" onclick="toast('Pronto: recordatorios financieros ✨')">＋</button>
+        <button class="iconBtn" onclick="toast('Pronto: recordatorios financieros Ô£¿')">´╝ï</button>
       </div>
       <div class="hr"></div>
-      <div class="muted">Aquí vamos a poner pagos, suscripciones, vencimientos y alertas.</div>
+      <div class="muted">Aqu├¡ vamos a poner pagos, suscripciones, vencimientos y alertas.</div>
     </section>
   `;
 
@@ -20233,9 +20277,9 @@ function renderFinanceCryptoTab() {
   if (cryptoAccounts.length === 0) {
     accountsHtml = `
       <div style="background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:12px;padding:16px;text-align:center;margin-bottom:16px;">
-        <div style="font-size:14px;color:#fbbf24;font-weight:600;margin-bottom:8px;">🪙 No tienes una cuenta de Bitcoin creada</div>
+        <div style="font-size:14px;color:#fbbf24;font-weight:600;margin-bottom:8px;">­ƒ¬Ö No tienes una cuenta de Bitcoin creada</div>
         <div style="font-size:12px;color:#94a3b8;margin-bottom:12px;">Para registrar tus ahorros, primero crea una cuenta de tipo "Cripto (BTC)".</div>
-        <button onclick="openFinanceAccountModal()" style="padding:8px 16px;background:#7c5cff;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">＋ Crear Cuenta Crypto</button>
+        <button onclick="openFinanceAccountModal()" style="padding:8px 16px;background:#7c5cff;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">´╝ï Crear Cuenta Crypto</button>
       </div>
     `;
   } else {
@@ -20249,10 +20293,10 @@ function renderFinanceCryptoTab() {
             <div style="font-weight:700;color:#e2e8f0;font-size:14px;">${escapeHtml(a.name)}</div>
             <div style="font-size:11px;color:#94a3b8;background:rgba(245,158,11,.1);padding:3px 6px;border-radius:6px;border:1px solid rgba(245,158,11,.2);">Billetera BTC</div>
           </div>
-          <div style="font-size:24px;font-weight:800;color:#f59e0b;margin:8px 0;font-family:monospace;">₿ ${bal.toFixed(8)}</div>
+          <div style="font-size:24px;font-weight:800;color:#f59e0b;margin:8px 0;font-family:monospace;">Ôé┐ ${bal.toFixed(8)}</div>
           <div style="display:flex;justify-content:space-between;font-size:12px;color:#64748b;">
-            <span>💵 Est. Soles: <strong style="color:#e2e8f0;">S/ ${fmt(penValue)}</strong></span>
-            <span>🇺🇸 Est. USD: <strong style="color:#e2e8f0;">$ ${fmt(usdValue)}</strong></span>
+            <span>­ƒÆÁ Est. Soles: <strong style="color:#e2e8f0;">S/ ${fmt(penValue)}</strong></span>
+            <span>­ƒç║­ƒç© Est. USD: <strong style="color:#e2e8f0;">$ ${fmt(usdValue)}</strong></span>
           </div>
         </div>
       `;
@@ -20263,7 +20307,7 @@ function renderFinanceCryptoTab() {
   const wizardHtml = `
     <div class="card homeCard homeWide" style="margin-top:16px;">
       <h3 style="font-size:15px;font-weight:700;color:#34d399;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-        🪙 Asistente de Compra Bitcoin (Soles ➔ USDT ➔ BTC)
+        ­ƒ¬Ö Asistente de Compra Bitcoin (Soles Ô×ö USDT Ô×ö BTC)
       </h3>
       <div class="hr" style="margin-bottom:14px;"></div>
       
@@ -20309,16 +20353,16 @@ function renderFinanceCryptoTab() {
         <!-- Live calculations preview -->
         <div style="background:rgba(15,23,42,.6);border:1px solid #334155;border-radius:8px;padding:12px;font-size:12px;line-height:1.6;color:#94a3b8;">
           <div style="display:flex;justify-content:space-between;">
-            <span>🟢 USDT Bruto estimado:</span>
+            <span>­ƒƒó USDT Bruto estimado:</span>
             <strong id="wizCalcUsdtGross" style="color:#e2e8f0;">0.00 USDT</strong>
           </div>
           <div style="display:flex;justify-content:space-between;">
-            <span>✂️ Comisión Binance (Trade):</span>
+            <span>Ô£é´©Å Comisi├│n Binance (Trade):</span>
             <strong id="wizCalcBinanceFee" style="color:#fb7185;">0.00 USDT</strong>
           </div>
           <div style="display:flex;justify-content:space-between;border-top:1px dashed #334155;margin-top:6px;padding-top:6px;">
-            <span>🪙 Bitcoin a recibir neto:</span>
-            <strong id="wizCalcBtcNet" style="color:#f59e0b;font-family:monospace;">₿ 0.00000000</strong>
+            <span>­ƒ¬Ö Bitcoin a recibir neto:</span>
+            <strong id="wizCalcBtcNet" style="color:#f59e0b;font-family:monospace;">Ôé┐ 0.00000000</strong>
           </div>
           <div style="font-size:10px;color:#64748b;margin-top:4px;text-align:right;">
             Costo promedio: 1 BTC = <span id="wizCalcAveragePrice">0.00</span> PEN
@@ -20326,7 +20370,7 @@ function renderFinanceCryptoTab() {
         </div>
 
         <button id="btnCryptoWizSave" style="width:100%;padding:12px;background:linear-gradient(135deg,#34d399,#059669);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;margin-top:4px;">
-          💾 Registrar Compra de Bitcoin
+          ­ƒÆ¥ Registrar Compra de Bitcoin
         </button>
 
       </div>
@@ -20345,7 +20389,7 @@ function renderFinanceCryptoTab() {
             <div style="font-size:13px;color:#94a3b8;">$ ${fmt(btcUsd)} USD</div>
           </div>
           <button id="btnCryptoFetchPrice" style="padding:10px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:12px;color:#f59e0b;cursor:pointer;font-size:14px;" title="Actualizar precio de mercado">
-            🔄
+            ­ƒöä
           </button>
         </div>
       </div>
@@ -20426,11 +20470,11 @@ function renderFinanceStatsTab() {
   const reasonColors = { planificado:'#7c5cff', impulso:'#f59e0b', emergencia:'#ef4444', normal:'#6b7280' };
   const expReasons = [...new Set(expenses.map(e => String(e.reason||'normal')))];
   const byReason = expReasons.map(r => ({ label:r.charAt(0).toUpperCase()+r.slice(1), value:expenses.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:expenses.filter(e=>String(e.reason||'normal')===r).length, color:reasonColors[r]||'#8b5cf6' })).sort((a,b)=>b.value-a.value);
-  const reasonRows = byReason.map(r=>barRow(r.label,r.value,totalExp,r.color,`${r.count} mov.`, 'reason_expense', r.label.toLowerCase())).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
+  const reasonRows = byReason.map(r=>barRow(r.label,r.value,totalExp,r.color,`${r.count} mov.`, 'reason_expense', r.label.toLowerCase())).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este per├¡odo</div>';
 
   const incReasons = [...new Set(incomes.map(e => String(e.reason||'normal')))];
   const incByReason = incReasons.map(r=>({ label:r.charAt(0).toUpperCase()+r.slice(1), value:incomes.filter(e=>String(e.reason||'normal')===r).reduce((s,e)=>s+Number(e.amount||0),0), count:incomes.filter(e=>String(e.reason||'normal')===r).length })).sort((a,b)=>b.value-a.value);
-  const incReasonRows = incByReason.map(r=>barRow(r.label,r.value,totalInc,'#34d399',`${r.count} mov.`, 'reason_income', r.label.toLowerCase())).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
+  const incReasonRows = incByReason.map(r=>barRow(r.label,r.value,totalInc,'#34d399',`${r.count} mov.`, 'reason_income', r.label.toLowerCase())).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este per├¡odo</div>';
 
   const catPalette = ['#7c5cff','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
   const definedCats = (state.financeEntryCategories || []).map(c => c.name);
@@ -20441,7 +20485,7 @@ function renderFinanceStatsTab() {
     value: expenses.filter(e => (e.category || 'Otros') === c).reduce((s, e) => s + Number(e.amount || 0), 0),
     count: expenses.filter(e => (e.category || 'Otros') === c).length
   })).sort((a, b) => b.value - a.value);
-  const catRows = byCat.map((c,i)=>barRow(c.label,c.value,totalExp,catPalette[i%catPalette.length],`${c.count} mov.`, 'category', c.label)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este período</div>';
+  const catRows = byCat.map((c,i)=>barRow(c.label,c.value,totalExp,catPalette[i%catPalette.length],`${c.count} mov.`, 'category', c.label)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin datos en este per├¡odo</div>';
 
   const accRows = (state.financeAccounts||[]).map(a=>({ id:a.id, name:a.name, value:expenses.filter(e=>e.accountId===a.id).reduce((s,e)=>s+Number(e.amount||0),0) })).filter(a=>a.value>0).sort((a,b)=>b.value-a.value).map(a=>barRow(a.name,a.value,totalExp,'#60a5fa','', 'account', a.id)).join('')||'<div style="color:#888;font-size:13px;padding:8px 0;">Sin uso registrado</div>';
 
@@ -20449,13 +20493,13 @@ function renderFinanceStatsTab() {
   const usdSection = usdMovs.length>0 ? (()=>{
     const tGross=usdMovs.reduce((s,m)=>s+(m.usdGross||0),0), tFee=usdMovs.reduce((s,m)=>s+(m.usdFee||0),0), tNet=tGross-tFee;
     const feePct=tGross>0?((tFee/tGross)*100).toFixed(1):0;
-    return `<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle" style="color:#60a5fa;">💵 USD — PayPal / Ligo</div></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;"><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Bruto</div><div style="font-weight:700;color:#fff;font-size:15px;">$${fmt(tGross)}</div></div><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Neto real</div><div style="font-weight:700;color:#34d399;font-size:15px;">$${fmt(tNet)}</div></div><div style="background:#ef444422;padding:10px;border-radius:8px;text-align:center;border:1px solid #ef444455;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">Comisiones</div><div style="font-weight:700;color:#ef4444;font-size:15px;">$${fmt(tFee)}</div></div></div>${usdMovs.map(m=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid #2a2a2c;"><div style="color:#ddd;">${m.note?escapeHtml(String(m.note).split('·')[0].trim()):'Ingreso'} <span style="color:#888;">${String(m.date||'').slice(0,10)}</span></div><div style="display:flex;gap:6px;"><span style="color:#aaa;">$${fmt(m.usdGross)}</span><span style="color:#ef4444;">-$${fmt(m.usdFee||0)}</span><span style="color:#34d399;font-weight:700;">=$${fmt((m.usdGross||0)-(m.usdFee||0))}</span></div></div>`).join('')}<div style="margin-top:10px;font-size:12px;color:#888;text-align:center;">Perdiste el <b style="color:#ef4444;">${feePct}%</b> en comisiones en este período.</div></section>`;
+    return `<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle" style="color:#60a5fa;">­ƒÆÁ USD ÔÇö PayPal / Ligo</div></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;"><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Bruto</div><div style="font-weight:700;color:#fff;font-size:15px;">$${fmt(tGross)}</div></div><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Neto real</div><div style="font-weight:700;color:#34d399;font-size:15px;">$${fmt(tNet)}</div></div><div style="background:#ef444422;padding:10px;border-radius:8px;text-align:center;border:1px solid #ef444455;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">Comisiones</div><div style="font-weight:700;color:#ef4444;font-size:15px;">$${fmt(tFee)}</div></div></div>${usdMovs.map(m=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid #2a2a2c;"><div style="color:#ddd;">${m.note?escapeHtml(String(m.note).split('┬À')[0].trim()):'Ingreso'} <span style="color:#888;">${String(m.date||'').slice(0,10)}</span></div><div style="display:flex;gap:6px;"><span style="color:#aaa;">$${fmt(m.usdGross)}</span><span style="color:#ef4444;">-$${fmt(m.usdFee||0)}</span><span style="color:#34d399;font-weight:700;">=$${fmt((m.usdGross||0)-(m.usdFee||0))}</span></div></div>`).join('')}<div style="margin-top:10px;font-size:12px;color:#888;text-align:center;">Perdiste el <b style="color:#ef4444;">${feePct}%</b> en comisiones en este per├¡odo.</div></section>`;
   })():'';
 
   const periodPills = `
     <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
       <button class="finModeBtn ${state.financeStatsPeriod==='week'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('week')">Esta semana</button>
-      <button class="finModeBtn ${state.financeStatsPeriod==='fortnight'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('fortnight')">15 días</button>
+      <button class="finModeBtn ${state.financeStatsPeriod==='fortnight'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('fortnight')">15 d├¡as</button>
       <button class="finModeBtn ${state.financeStatsPeriod==='month'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('month')">Este mes</button>
       <button class="finModeBtn ${state.financeStatsPeriod==='all'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('all')">Todo el historial</button>
     </div>
@@ -20463,7 +20507,7 @@ function renderFinanceStatsTab() {
 
   const searchBox = `
     <div style="display:flex; gap:8px; margin-bottom:16px;">
-      <input type="text" id="finStatsSearch" class="textInput" placeholder="🔍 Buscar (Ej. Javier, adelanto...)" value="${escapeHtml(state.financeStatsSearch || '')}" style="flex:1; margin:0;" />
+      <input type="text" id="finStatsSearch" class="textInput" placeholder="­ƒöì Buscar (Ej. Javier, adelanto...)" value="${escapeHtml(state.financeStatsSearch || '')}" style="flex:1; margin:0;" />
       ${state.financeStatsSearch ? `<button class="btn ghost" onclick="setFinanceStatsSearch('')" style="margin:0; padding:0 12px; font-size:13px; font-weight:700; height:42px;">Limpiar</button>` : ''}
     </div>
   `;
@@ -20480,7 +20524,7 @@ function renderFinanceStatsTab() {
     matchesHtml = `
       <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
         <div class="finSectionHead" style="margin-bottom:10px;">
-          <div class="finSectionTitle" style="color:#7c5cff;">📋 Coincidencias (${filteredMatches.length})</div>
+          <div class="finSectionTitle" style="color:#7c5cff;">­ƒôï Coincidencias (${filteredMatches.length})</div>
         </div>
         
         <div style="display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;">
@@ -20495,21 +20539,21 @@ function renderFinanceStatsTab() {
             const sign = isExp ? '-' : '+';
             const color = isExp ? '#ef4444' : '#34d399';
             const rawNote = String(e.note || "");
-            const hasSep = rawNote.includes(" · ");
-            const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
-            const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
-            const shownDesc = desc || "Sin descripción";
+            const hasSep = rawNote.includes(" ┬À ");
+            const desc = hasSep ? rawNote.split(" ┬À ")[0].trim() : rawNote.trim();
+            const noteDetails = hasSep ? rawNote.split(" ┬À ")[1].trim() : "";
+            const shownDesc = desc || "Sin descripci├│n";
             const noteText = noteDetails ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(noteDetails)})</span>` : "";
             return `
               <div style="display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid #2a2a2c; align-items:center;">
                 <div>
                   <div style="font-weight:700; color:#fff;">${escapeHtml(shownDesc)}</div>
-                  <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} • ${escapeHtml(e.category || "Otros")}${noteText}</div>
+                  <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} ÔÇó ${escapeHtml(e.category || "Otros")}${noteText}</div>
                 </div>
                 <div style="font-weight:700; color:${color}; font-size:14px;">${sign} S/ ${fmt(e.amount)}</div>
               </div>
             `;
-          }).join('') || '<div style="color:#888; font-size:13px; text-align:center; padding:10px 0;">Ningún movimiento coincide</div>'}
+          }).join('') || '<div style="color:#888; font-size:13px; text-align:center; padding:10px 0;">Ning├║n movimiento coincide</div>'}
         </div>
       </section>
     `;
@@ -20527,7 +20571,7 @@ function renderFinanceStatsTab() {
   const fiadosSection = periodFiados.length > 0 ? `
     <section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
       <div class="finSectionHead" style="margin-bottom:14px;">
-        <div class="finSectionTitle" style="color:#fbbf24;">🤝 Resumen de Fiados</div>
+        <div class="finSectionTitle" style="color:#fbbf24;">­ƒñØ Resumen de Fiados</div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <div style="background:#2a261a;border:1px solid #6c5a2b;padding:10px;border-radius:8px;text-align:center;">
@@ -20544,7 +20588,7 @@ function renderFinanceStatsTab() {
     </section>
   ` : '';
 
-  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas</div><div style="font-size:12px;color:#888;">${periodLabel}</div></div>${periodPills}${searchBox}<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div>${matchesHtml}<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Gastos por Categoría</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${fiadosSection}${usdSection}</div>`;
+  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">­ƒôè Estad├¡sticas</div><div style="font-size:12px;color:#888;">${periodLabel}</div></div>${periodPills}${searchBox}<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">­ƒôÑ Ingresos</div><div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">­ƒôñ Gastos</div><div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div>${matchesHtml}<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">­ƒÄ» Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">ÔÜÖ´©Å</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">­ƒÆÜ Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">­ƒÅÀ´©Å Gastos por Categor├¡a</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">­ƒÆ│ Gasto por Cuenta</div></div>${accRows}</section>${fiadosSection}${usdSection}</div>`;
 }
 
 function renderFinanceFiadosTab() {
@@ -20559,11 +20603,11 @@ function renderFinanceFiadosTab() {
   
   const parseFiadoName = (e) => {
     const rawNote = String(e.note || "");
-    const hasSep = rawNote.includes(" · ");
-    const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
-    const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
+    const hasSep = rawNote.includes(" ┬À ");
+    const desc = hasSep ? rawNote.split(" ┬À ")[0].trim() : rawNote.trim();
+    const noteDetails = hasSep ? rawNote.split(" ┬À ")[1].trim() : "";
     return {
-      desc: desc || "Fiado sin descripción",
+      desc: desc || "Fiado sin descripci├│n",
       note: noteDetails
     };
   };
@@ -20577,19 +20621,19 @@ function renderFinanceFiadosTab() {
       <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); padding: 14px; border-radius: 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
         <div style="flex:1; min-width:0; padding-right:12px;">
           <div style="font-weight: 800; font-size: 15px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-            🤝 ${escapeHtml(info.desc)}${noteText}
+            ­ƒñØ ${escapeHtml(info.desc)}${noteText}
           </div>
           <div style="font-size: 12px; color: #aaa; margin-top: 4px;">
-            Fecha: <strong>${e.date ? e.date.slice(0,10) : ''}</strong> · Categoría: <strong>${escapeHtml(e.category || "Otros")}</strong> · Cuenta: <strong>${escapeHtml(accName)}</strong>
+            Fecha: <strong>${e.date ? e.date.slice(0,10) : ''}</strong> ┬À Categor├¡a: <strong>${escapeHtml(e.category || "Otros")}</strong> ┬À Cuenta: <strong>${escapeHtml(accName)}</strong>
           </div>
         </div>
         <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px; flex-shrink:0;">
           <strong style="color:#fbbf24; font-size:15px;">S/ ${fmt(e.amount)}</strong>
-          <button class="btn primary" onclick="financeFiadoPay('${e.id}')" style="font-size:11px; padding:4px 10px; height:auto; line-height:1; margin:0;">💸 Liquidar</button>
+          <button class="btn primary" onclick="financeFiadoPay('${e.id}')" style="font-size:11px; padding:4px 10px; height:auto; line-height:1; margin:0;">­ƒÆ© Liquidar</button>
         </div>
       </div>
     `;
-  }).join('') || `<div class="muted" style="text-align:center; padding: 20px 0;">No tienes fiados pendientes. ¡Estás al día! 🙌</div>`;
+  }).join('') || `<div class="muted" style="text-align:center; padding: 20px 0;">No tienes fiados pendientes. ┬íEst├ís al d├¡a! ­ƒÖî</div>`;
 
   const paidListHtml = paidFiados.map(e => {
     const info = parseFiadoName(e);
@@ -20600,7 +20644,7 @@ function renderFinanceFiadosTab() {
         <span><span style="text-decoration: line-through;">${escapeHtml(info.desc)}</span> <span class="muted">${e.date ? e.date.slice(0,10) : ''}</span></span>
         <div style="display:flex; gap:8px; align-items:center;">
           <span style="color:#888;">S/ ${fmt(e.amount)} (${escapeHtml(accName)})</span>
-          <span style="color:#36d399; font-weight:700; font-size:11px;">Pagado ✅</span>
+          <span style="color:#36d399; font-weight:700; font-size:11px;">Pagado Ô£à</span>
         </div>
       </div>
     `;
@@ -20609,17 +20653,17 @@ function renderFinanceFiadosTab() {
   return `
     <section class="card homeCard homeWide" style="display: flex; flex-direction: column; gap: 14px;">
       <div class="cardTop">
-        <h2 class="cardTitle">🤝 Sistema de Fiados</h2>
+        <h2 class="cardTitle">­ƒñØ Sistema de Fiados</h2>
       </div>
       <div class="hr" style="margin: 0;"></div>
 
       <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
         <div style="background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.15); padding: 12px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 11px; color: #fbbf24; margin-bottom: 4px; font-weight: 700;">🤝 Total Fiado Pendiente</div>
+          <div style="font-size: 11px; color: #fbbf24; margin-bottom: 4px; font-weight: 700;">­ƒñØ Total Fiado Pendiente</div>
           <div style="font-size: 18px; font-weight: 800; color: #fbbf24;">S/ ${fmt(totalPending)}</div>
         </div>
         <div style="background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.15); padding: 12px; border-radius: 12px; text-align: center;">
-          <div style="font-size: 11px; color: #34d399; margin-bottom: 4px; font-weight: 700;">✅ Total Fiado Pagado</div>
+          <div style="font-size: 11px; color: #34d399; margin-bottom: 4px; font-weight: 700;">Ô£à Total Fiado Pagado</div>
           <div style="font-size: 18px; font-weight: 800; color: #34d399;">S/ ${fmt(totalPaid)}</div>
         </div>
       </div>
@@ -20646,7 +20690,7 @@ function renderFinanceFiadosTab() {
 window.financeFiadoPay = function(id) {
   const entry = (state.financeLedger || []).find(e => e.id === id);
   if (!entry) return;
-  if (!confirm(`¿Confirmas que liquidaste el fiado de "S/ ${_financeFmt(entry.amount)}"? Se descontará de la cuenta asignada.`)) return;
+  if (!confirm(`┬┐Confirmas que liquidaste el fiado de "S/ ${_financeFmt(entry.amount)}"? Se descontar├í de la cuenta asignada.`)) return;
   
   entry.fiadoStatus = "paid";
   const now = new Date();
@@ -20656,7 +20700,7 @@ window.financeFiadoPay = function(id) {
   financeRecomputeBalances();
   persist();
   view();
-  toast("Fiado liquidado y saldo descontado con éxito ✅");
+  toast("Fiado liquidado y saldo descontado con ├®xito Ô£à");
 };
 
 window.openFinanceReasonsManager = function() {
@@ -20664,7 +20708,7 @@ window.openFinanceReasonsManager = function() {
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop';
   const renderItems = () => (state.financeReasons||[]).map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;background:#2a2a2c;padding:10px 12px;border-radius:8px;margin-bottom:8px;"><span style="font-weight:600;text-transform:capitalize;">${escapeHtml(r)}</span>${['planificado','impulso','emergencia','normal'].includes(r)?'<span style="font-size:11px;color:#888;">Predeterminado</span>':`<button onclick="financeRemoveReason('${escapeHtml(r)}')" style="background:#ef444433;color:#ef4444;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;">Eliminar</button>`}</div>`).join('');
-  backdrop.innerHTML = `<div class="modal" style="max-width:420px;width:100%;"><div class="modalHead"><span style="font-weight:700;">⚙️ Gestionar Motivos</span><button class="iconBtn" onclick="this.closest('.modalBackdrop').remove()">✕</button></div><div style="padding:16px;max-height:55vh;overflow-y:auto;" id="reasonManagerList">${renderItems()}</div><div style="padding:0 16px 16px;display:flex;gap:8px;"><input id="newReasonInput" class="textInput" style="flex:1;" placeholder="Nuevo motivo..." /><button class="finProSaveBtn" style="flex:0 0 auto;padding:0 16px;" onclick="financeAddReasonFromManager()">Agregar</button></div></div>`;
+  backdrop.innerHTML = `<div class="modal" style="max-width:420px;width:100%;"><div class="modalHead"><span style="font-weight:700;">ÔÜÖ´©Å Gestionar Motivos</span><button class="iconBtn" onclick="this.closest('.modalBackdrop').remove()">Ô£ò</button></div><div style="padding:16px;max-height:55vh;overflow-y:auto;" id="reasonManagerList">${renderItems()}</div><div style="padding:0 16px 16px;display:flex;gap:8px;"><input id="newReasonInput" class="textInput" style="flex:1;" placeholder="Nuevo motivo..." /><button class="finProSaveBtn" style="flex:0 0 auto;padding:0 16px;" onclick="financeAddReasonFromManager()">Agregar</button></div></div>`;
   host.appendChild(backdrop);
   backdrop.addEventListener('click', e=>{ if(e.target===backdrop) backdrop.remove(); });
 }
@@ -20773,8 +20817,8 @@ window.openFinanceStatsBreakdownModal = function(type, key, label) {
   backdrop.innerHTML = `
     <div class="modal" style="max-width: 480px; width: 95%;">
       <div class="modalHead">
-        <span style="font-weight: 800; font-size: 16px;">📋 ${escapeHtml(label)}</span>
-        <button class="iconBtn" onclick="this.closest('.modalBackdrop').remove()">✕</button>
+        <span style="font-weight: 800; font-size: 16px;">­ƒôï ${escapeHtml(label)}</span>
+        <button class="iconBtn" onclick="this.closest('.modalBackdrop').remove()">Ô£ò</button>
       </div>
       <div style="padding: 16px; background: #1c1c1e;">
         <div style="background: rgba(255,255,255,0.03); border-radius: 10px; padding: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
@@ -20787,21 +20831,21 @@ window.openFinanceStatsBreakdownModal = function(type, key, label) {
             const sign = isExp ? '-' : '+';
             const color = isExp ? '#ef4444' : '#34d399';
             const rawNote = String(e.note || "");
-            const hasSep = rawNote.includes(" · ");
-            const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
-            const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
-            const shownDesc = desc || "Sin descripción";
+            const hasSep = rawNote.includes(" ┬À ");
+            const desc = hasSep ? rawNote.split(" ┬À ")[0].trim() : rawNote.trim();
+            const noteDetails = hasSep ? rawNote.split(" ┬À ")[1].trim() : "";
+            const shownDesc = desc || "Sin descripci├│n";
             const noteText = noteDetails ? ` <span style="color:#888; font-size:11px;">(${escapeHtml(noteDetails)})</span>` : "";
             return `
               <div style="display:flex; justify-content:space-between; font-size:13px; padding:8px 0; border-bottom:1px solid #2a2a2c; align-items:center;">
                 <div>
                   <div style="font-weight:700; color:#fff;">${escapeHtml(shownDesc)}</div>
-                  <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} • ${escapeHtml(e.category || "Otros")}${noteText}</div>
+                  <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} ÔÇó ${escapeHtml(e.category || "Otros")}${noteText}</div>
                 </div>
                 <div style="font-weight:700; color:${color}; font-size:14px;">${sign} S/ ${fmt(e.amount)}</div>
               </div>
             `;
-          }).join('') || `<div style="color: #888; text-align: center; padding: 20px 0;">No hay movimientos en este período</div>`}
+          }).join('') || `<div style="color: #888; text-align: center; padding: 20px 0;">No hay movimientos en este per├¡odo</div>`}
         </div>
       </div>
     </div>
@@ -20827,21 +20871,21 @@ function wireFinance(root) {
     });
   }
 
-  // ── Crypto Tab Interactivity ─────────────────────────────
+  // ÔöÇÔöÇ Crypto Tab Interactivity ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
   if (state.financeSubTab === "crypto") {
     const btnFetch = root.querySelector("#btnCryptoFetchPrice");
     if (btnFetch) {
       btnFetch.addEventListener("click", async () => {
         btnFetch.style.opacity = "0.5";
-        btnFetch.innerText = "⏳";
+        btnFetch.innerText = "ÔÅ│";
         const ok = await window.financeFetchBtcPrice();
         btnFetch.style.opacity = "1";
-        btnFetch.innerText = "🔄";
+        btnFetch.innerText = "­ƒöä";
         if (ok) {
-          toast("📈 Precio de BTC actualizado");
+          toast("­ƒôê Precio de BTC actualizado");
           view();
         } else {
-          toast("⚠️ Falló actualizar precio. Usando caché.");
+          toast("ÔÜá´©Å Fall├│ actualizar precio. Usando cach├®.");
         }
       });
     }
@@ -20872,7 +20916,7 @@ function wireFinance(root) {
 
       if (calcUsdtGross) calcUsdtGross.innerText = `${usdtGross.toFixed(2)} USDT`;
       if (calcBinanceFee) calcBinanceFee.innerText = `${binanceFee.toFixed(2)} USDT`;
-      if (calcBtcNet) calcBtcNet.innerText = `₿ ${btcNet.toFixed(8)}`;
+      if (calcBtcNet) calcBtcNet.innerText = `Ôé┐ ${btcNet.toFixed(8)}`;
       if (calcAvgPrice) calcAvgPrice.innerText = avgPrice.toLocaleString("es-PE", { maximumFractionDigits: 0 });
     };
 
@@ -20894,11 +20938,11 @@ function wireFinance(root) {
         const feePercent = parseFloat(feeInput?.value) || 0.1;
 
         if (!srcAccId || !destAccId) {
-          alert("⚠️ Asegúrate de tener creadas las cuentas de origen y destino.");
+          alert("ÔÜá´©Å Aseg├║rate de tener creadas las cuentas de origen y destino.");
           return;
         }
         if (pen <= 0) {
-          alert("⚠️ Ingresa una cantidad de Soles válida.");
+          alert("ÔÜá´©Å Ingresa una cantidad de Soles v├ílida.");
           return;
         }
 
@@ -20931,7 +20975,7 @@ function wireFinance(root) {
           date: dateISO
         });
 
-        toast("🚀 Compra de Bitcoin registrada con éxito!");
+        toast("­ƒÜÇ Compra de Bitcoin registrada con ├®xito!");
         if (window.financePushToSupabase) window.financePushToSupabase();
         view();
       });
@@ -21062,7 +21106,7 @@ function financeDrawMonthChart(){
           borderWidth: 2,
         },
         {
-          label: "Proyección",
+          label: "Proyecci├│n",
           data: d.accProjected,
           tension: 0.3,
           pointRadius: 0,
@@ -21296,7 +21340,7 @@ try{
 
 
 /* =========================
-   FOOTBALL LAB (V2-Clean UI) — V2-A + Match Logger integrated as a proper tab
+   FOOTBALL LAB (V2-Clean UI) ÔÇö V2-A + Match Logger integrated as a proper tab
    Storage: localStorage["footballDB"]
    ========================= */
 
@@ -21392,13 +21436,13 @@ function viewFootball(){
       <div class="row" style="justify-content:space-between;align-items:center;">
         <div>
           <div class="muted small">Modo estudio</div>
-          <div style="font-size:22px;font-weight:900;">⚽ Football Lab</div>
+          <div style="font-size:22px;font-weight:900;">ÔÜ¢ Football Lab</div>
           <div class="muted small" style="margin-top:4px;">Temporada: <b>${season}</b></div>
         </div>
         <button class="btn" data-act="fbOpenLab">Abrir</button>
       </div>
       <div class="muted" style="margin-top:10px; line-height:1.35;">
-        Aquí vive el laboratorio completo: equipos, XI, logger y simulaciones.
+        Aqu├¡ vive el laboratorio completo: equipos, XI, logger y simulaciones.
       </div>
     </div>
   `;
@@ -21435,7 +21479,7 @@ function initFootballTab(root){
   if(app){
     app.innerHTML = `
       <div class="card">
-        <div style="font-weight:900;font-size:16px;">⚽ Football Lab</div>
+        <div style="font-weight:900;font-size:16px;">ÔÜ¢ Football Lab</div>
         <div class="muted" style="margin-top:6px;">No pude abrir el Lab. Revisa consola para errores.</div>
       </div>
     `;
@@ -21445,7 +21489,7 @@ function initFootballTab(root){
 
 window.addEventListener("DOMContentLoaded", ()=>{ try{ initFootballLab(); }catch(e){ console.error(e); } });
 
-/* ===== Finance Roadmap v1 — inlined ===== */
+/* ===== Finance Roadmap v1 ÔÇö inlined ===== */
 
 function _roadmapSave(){
   try{ localStorage.setItem(LS.financeRoadmap, JSON.stringify(state.financeRoadmap)); }catch(_e){}
@@ -21484,7 +21528,7 @@ function roadmapBuildItems(mk){
     .map(c => ({
       id: c.id,
       type: 'commitment',
-      name: c.name || '—',
+      name: c.name || 'ÔÇö',
       amount: financeDebtSafeNum(c.amount||0),
       dueDay: c.dueDay || null,
       deferrable: false
@@ -21494,7 +21538,7 @@ function roadmapBuildItems(mk){
     .map(d => ({
       id: d.id,
       type: 'debt',
-      name: d.name || '—',
+      name: d.name || 'ÔÇö',
       amount: financeDebtSafeNum(d.monthlyDue||0),
       balance: financeDebtSafeNum(d.balance||0),
       dueDay: d.dueDay || null,
@@ -21556,7 +21600,7 @@ function renderFinanceRoadmapTab(){
   const sim = roadmapSimulate(mk);
   const fmt = _financeFmt;
   const tabs = ['cascade','timeline','cashflow'];
-  const tabLabels = { cascade:'💧 Cascada', timeline:'📅 Calendario', cashflow:'📊 Flujo semanal' };
+  const tabLabels = { cascade:'­ƒÆº Cascada', timeline:'­ƒôà Calendario', cashflow:'­ƒôè Flujo semanal' };
   const activeView = plan.activeView || 'cascade';
   const tabBtns = tabs.map(t => `
     <button class="rmTab ${activeView===t?'rmTabActive':''}"
@@ -21567,10 +21611,10 @@ function renderFinanceRoadmapTab(){
   const totalIn = sueldo + fergis;
   const incomePanel = `
     <div class="rmIncomePanel">
-      <div class="rmIncomePanelTitle">💰 Ingresos del mes</div>
+      <div class="rmIncomePanelTitle">­ƒÆ░ Ingresos del mes</div>
       <div class="rmIncomeGrid">
         <div class="rmIncomeRow">
-          <div class="rmIncomeIcon">🧑</div>
+          <div class="rmIncomeIcon">­ƒºæ</div>
           <div class="rmIncomeInfo">
             <div class="rmIncomeLabel">Tu sueldo</div>
             <input class="rmIncomeInput" type="number" inputmode="decimal"
@@ -21580,7 +21624,7 @@ function renderFinanceRoadmapTab(){
           <div class="rmIncomeAmt">S/ ${fmt(sueldo)}</div>
         </div>
         <div class="rmIncomeRow">
-          <div class="rmIncomeIcon">💜</div>
+          <div class="rmIncomeIcon">­ƒÆ£</div>
           <div class="rmIncomeInfo">
             <div class="rmIncomeLabel">Fergis</div>
             <input class="rmIncomeInput" type="number" inputmode="decimal"
@@ -21606,13 +21650,13 @@ function renderFinanceRoadmapTab(){
     .join('');
   const fergisAssign = fergis > 0 ? `
     <div class="rmFergisBox">
-      <div class="rmFergisTitle">💜 Asignación Fergis — S/ ${fmt(fergis)}</div>
-      <div class="muted" style="margin-bottom:8px">¿A qué deuda/compromiso va este ingreso?</div>
+      <div class="rmFergisTitle">­ƒÆ£ Asignaci├│n Fergis ÔÇö S/ ${fmt(fergis)}</div>
+      <div class="muted" style="margin-bottom:8px">┬┐A qu├® deuda/compromiso va este ingreso?</div>
       <select class="rmFergisSelect" onchange="roadmapSetFergisTarget('${mk}',this.value)">
-        <option value="">— Sin asignar —</option>
+        <option value="">ÔÇö Sin asignar ÔÇö</option>
         ${debtOptions}
       </select>
-      ${plan.fergisTarget ? `<div class="rmFergisNote">✅ S/ ${fmt(fergis)} asignado para reforzar el pago de <strong>${escapeHtml((typeof financeDebtsActive==='function' ? financeDebtsActive() : []).find(d=>d.id===plan.fergisTarget)?.name||'')}</strong></div>` : ''}
+      ${plan.fergisTarget ? `<div class="rmFergisNote">Ô£à S/ ${fmt(fergis)} asignado para reforzar el pago de <strong>${escapeHtml((typeof financeDebtsActive==='function' ? financeDebtsActive() : []).find(d=>d.id===plan.fergisTarget)?.name||'')}</strong></div>` : ''}
     </div>
   ` : '';
   const deferTotal = sim.steps.filter(s=>s.deferrable).reduce((a,s)=>a+s.amount,0);
@@ -21620,16 +21664,16 @@ function renderFinanceRoadmapTab(){
   const freeColor = sim.remaining >= 0 ? 'rmFreeGood' : 'rmFreeBad';
   const freeSummary = `
     <div class="rmFreeSummary ${freeColor}">
-      <div class="rmFreeLabel">${sim.remaining >= 0 ? '✅ Libre después de todo' : '⚠️ Déficit estimado'}</div>
+      <div class="rmFreeLabel">${sim.remaining >= 0 ? 'Ô£à Libre despu├®s de todo' : 'ÔÜá´©Å D├®ficit estimado'}</div>
       <div class="rmFreeAmt">S/ ${fmt(Math.abs(sim.remaining))}</div>
       ${sim.remaining < 0 ? `<div class="muted" style="margin-top:4px">Faltan S/ ${fmt(Math.abs(sim.remaining))} para cubrir todos los compromisos.</div>` : `<div class="muted" style="margin-top:4px">Puedes ahorrar, acelerar una deuda o guardarlo.</div>`}
-      ${deferTotal > 0 ? `<div class="rmDeferHint" style="margin-top:8px">Si aplazas los ítems marcados, tu libre quedaría en S/ ${fmt(Math.abs(freeAfterDeferring))}${freeAfterDeferring < 0 ? ' (déficit)' : ''}.</div>` : ''}
+      ${deferTotal > 0 ? `<div class="rmDeferHint" style="margin-top:8px">Si aplazas los ├¡tems marcados, tu libre quedar├¡a en S/ ${fmt(Math.abs(freeAfterDeferring))}${freeAfterDeferring < 0 ? ' (d├®ficit)' : ''}.</div>` : ''}
     </div>
   `;
   return `
     <section class="card homeCard homeWide rmWrap">
       <div class="cardTop">
-        <h2 class="cardTitle">🗺️ Hoja de Ruta Mensual</h2>
+        <h2 class="cardTitle">­ƒù║´©Å Hoja de Ruta Mensual</h2>
       </div>
       <div class="hr"></div>
       ${incomePanel}
@@ -21655,8 +21699,8 @@ function _roadmapCascadeView(mk, sim, fmt){
     const chip = s.deferrable
       ? `<span class="rmChipDefer">aplazable</span>`
       : `<span class="rmChipFixed">fijo</span>`;
-    const status = s.canPay ? `<span class="rmStatusOk">✓</span>` : `<span class="rmStatusBad">✗</span>`;
-    const fergisTag = s.isFergisTarget ? `<span class="rmChipFergis">💜 Fergis</span>` : '';
+    const status = s.canPay ? `<span class="rmStatusOk">Ô£ô</span>` : `<span class="rmStatusBad">Ô£ù</span>`;
+    const fergisTag = s.isFergisTarget ? `<span class="rmChipFergis">­ƒÆ£ Fergis</span>` : '';
     return `
       <div class="rmCascadeRow" data-id="${s.id}">
         <div class="rmCascadeLeft">
@@ -21664,10 +21708,10 @@ function _roadmapCascadeView(mk, sim, fmt){
           <div class="rmCascadeInfo">
             <div class="rmCascadeName">
               ${status} ${escapeHtml(s.name)}
-              <span class="rmCascadeType">${s.type==='commitment'?'💼':'💳'}</span>
+              <span class="rmCascadeType">${s.type==='commitment'?'­ƒÆ╝':'­ƒÆ│'}</span>
               ${chip} ${fergisTag}
             </div>
-            <div class="muted">Pago: S/ ${fmt(s.amount)} · queda S/ ${fmt(s.remainingAfter)} después</div>
+            <div class="muted">Pago: S/ ${fmt(s.amount)} ┬À queda S/ ${fmt(s.remainingAfter)} despu├®s</div>
             <div class="rmCascadeBar">
               <div class="rmCascadeBarFill" style="width:${pct.toFixed(1)}%"></div>
             </div>
@@ -21683,8 +21727,8 @@ function _roadmapCascadeView(mk, sim, fmt){
             </label>
           </div>
           <div class="rmMoveButtons">
-            <button class="rmMoveBtn" title="Subir" onclick="roadmapMoveItem('${mk}','${s.id}',-1)">▲</button>
-            <button class="rmMoveBtn" title="Bajar" onclick="roadmapMoveItem('${mk}','${s.id}',1)">▼</button>
+            <button class="rmMoveBtn" title="Subir" onclick="roadmapMoveItem('${mk}','${s.id}',-1)">Ôû▓</button>
+            <button class="rmMoveBtn" title="Bajar" onclick="roadmapMoveItem('${mk}','${s.id}',1)">Ôû╝</button>
           </div>
         </div>
       </div>
@@ -21692,7 +21736,7 @@ function _roadmapCascadeView(mk, sim, fmt){
   }).join('');
   const deferTotal = sim.steps.filter(s=>s.deferrable).reduce((a,s)=>a+s.amount,0);
   const deferHint = deferTotal > 0
-    ? `<div class="rmDeferHint">Si aplazas los ítems marcados, liberas S/ ${fmt(deferTotal)} adicionales.</div>`
+    ? `<div class="rmDeferHint">Si aplazas los ├¡tems marcados, liberas S/ ${fmt(deferTotal)} adicionales.</div>`
     : '';
   return `<div class="rmCascadeList">${rows}</div>${deferHint}`;
 }
@@ -21700,7 +21744,7 @@ function _roadmapCascadeView(mk, sim, fmt){
 function _roadmapTimelineView(mk, sim, fmt){
   const items = roadmapBuildItems(mk);
   const weeks = { '1-7':[], '8-14':[], '15-21':[], '22-31':[] };
-  const weekLabels = { '1-7':'Semana 1 (días 1–7)', '8-14':'Semana 2 (días 8–14)', '15-21':'Semana 3 (días 15–21)', '22-31':'Semana 4 (días 22–31)' };
+  const weekLabels = { '1-7':'Semana 1 (d├¡as 1ÔÇô7)', '8-14':'Semana 2 (d├¡as 8ÔÇô14)', '15-21':'Semana 3 (d├¡as 15ÔÇô21)', '22-31':'Semana 4 (d├¡as 22ÔÇô31)' };
   items.forEach(it => {
     const day = Number(it.dueDay||1);
     const key = day<=7 ? '1-7' : day<=14 ? '8-14' : day<=21 ? '15-21' : '22-31';
@@ -21714,7 +21758,7 @@ function _roadmapTimelineView(mk, sim, fmt){
     const ok = income >= total;
     const rows = wItems.map(it=>`
       <div class="rmTimelineItem">
-        <span class="rmTimelineIcon">${it.type==='commitment'?'💼':'💳'}</span>
+        <span class="rmTimelineIcon">${it.type==='commitment'?'­ƒÆ╝':'­ƒÆ│'}</span>
         <span class="rmTimelineName">${escapeHtml(it.name)}</span>
         <span class="rmTimelineAmt">S/ ${fmt(it.amount)}</span>
         ${it.deferrable?`<span class="rmChipDefer">aplazable</span>`:''}
@@ -21761,7 +21805,7 @@ function _roadmapCashflowView(mk, fmt){
   }).join('');
   const itemLegend = roadmapBuildItems(mk).slice(0,8).map(it=>`
     <div class="rmCfItem">
-      <span>${it.type==='commitment'?'💼':'💳'}</span>
+      <span>${it.type==='commitment'?'­ƒÆ╝':'­ƒÆ│'}</span>
       <span>${escapeHtml(it.name)}</span>
       <span class="rmCfItemAmt">S/ ${fmt(it.amount)}</span>
     </div>
@@ -21769,12 +21813,12 @@ function _roadmapCashflowView(mk, fmt){
   return `
     <div class="rmCfWrap">
       <div class="rmCfLegend">
-        <span class="rmCfLegIn">■ Entrada</span>
-        <span class="rmCfLegOut">■ Salida</span>
+        <span class="rmCfLegIn">Ôûá Entrada</span>
+        <span class="rmCfLegOut">Ôûá Salida</span>
       </div>
       <div class="rmCfChart">${rows}</div>
       <div class="hr" style="margin:10px 0"></div>
-      <div class="muted" style="margin-bottom:6px;font-size:11px">Ítems por semana</div>
+      <div class="muted" style="margin-bottom:6px;font-size:11px">├ìtems por semana</div>
       <div class="rmCfItemList">${itemLegend}</div>
     </div>
   `;
@@ -22010,7 +22054,7 @@ function _roadmapStyles(){
   return '';
 }
 
-// ─── 🔍 FINANCE DIAGNOSTIC ────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇ ­ƒöì FINANCE DIAGNOSTIC ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 window.financeDiagnostic = function() {
   try {
     // 1. Read raw from localStorage
@@ -22023,10 +22067,10 @@ window.financeDiagnostic = function() {
     let report = '';
 
     if (raw === null) {
-      report += `<div style="color:#fb7185;font-weight:700;font-size:16px;margin-bottom:12px;">⛔ localStorage VACÍO</div>`;
+      report += `<div style="color:#fb7185;font-weight:700;font-size:16px;margin-bottom:12px;">Ôøö localStorage VAC├ìO</div>`;
       report += `<p style="color:#94a3b8;font-size:13px;">La clave <code>memorycarl_v2_finance_ledger</code> no existe en localStorage.</p>`;
     } else if (!Array.isArray(raw)) {
-      report += `<div style="color:#fb7185;font-weight:700;">⛔ Datos corruptos</div>`;
+      report += `<div style="color:#fb7185;font-weight:700;">Ôøö Datos corruptos</div>`;
     } else {
       const total = raw.length;
       const archived = raw.filter(e => e.archived).length;
@@ -22036,11 +22080,11 @@ window.financeDiagnostic = function() {
       const fiados = raw.filter(e => e.isFiado && !e.archived).length;
 
       const dates = raw.map(e => e.date).filter(Boolean).sort();
-      const oldest = dates[0] || '—';
-      const newest = dates[dates.length - 1] || '—';
+      const oldest = dates[0] || 'ÔÇö';
+      const newest = dates[dates.length - 1] || 'ÔÇö';
 
       const stateTotal = stateEntries.length;
-      const stateDiff = stateTotal !== total ? `⚠️ Estado en memoria: ${stateTotal} (¡difiere!)` : `✅ Estado en memoria: ${stateTotal} (coincide)`;
+      const stateDiff = stateTotal !== total ? `ÔÜá´©Å Estado en memoria: ${stateTotal} (┬ídifiere!)` : `Ô£à Estado en memoria: ${stateTotal} (coincide)`;
       const color = active > 0 ? '#36d399' : '#fb7185';
 
       report += `
@@ -22063,23 +22107,23 @@ window.financeDiagnostic = function() {
           </div>
         </div>
         <div style="font-size:12px;color:#94a3b8;line-height:1.8;background:rgba(15,23,42,.4);border-radius:10px;padding:12px;">
-          <div>📥 <strong style="color:#e2e8f0;">Ingresos activos:</strong> ${incomes}</div>
-          <div>📤 <strong style="color:#e2e8f0;">Gastos activos:</strong> ${expenses}</div>
-          <div>📅 <strong style="color:#e2e8f0;">Más antiguo:</strong> ${oldest}</div>
-          <div>📅 <strong style="color:#e2e8f0;">Más reciente:</strong> ${newest}</div>
+          <div>­ƒôÑ <strong style="color:#e2e8f0;">Ingresos activos:</strong> ${incomes}</div>
+          <div>­ƒôñ <strong style="color:#e2e8f0;">Gastos activos:</strong> ${expenses}</div>
+          <div>­ƒôà <strong style="color:#e2e8f0;">M├ís antiguo:</strong> ${oldest}</div>
+          <div>­ƒôà <strong style="color:#e2e8f0;">M├ís reciente:</strong> ${newest}</div>
           <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(148,163,184,.1);">${stateDiff}</div>
         </div>
         ${archived > 0 && active === 0 ? `
           <div style="margin-top:12px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:10px;padding:10px;font-size:12px;color:#fbbf24;">
-            ⚠️ <strong>TODOS tus movimientos están archivados.</strong> Por eso no aparecen. Podemos restaurarlos.
+            ÔÜá´©Å <strong>TODOS tus movimientos est├ín archivados.</strong> Por eso no aparecen. Podemos restaurarlos.
           </div>
           <button onclick="financeRestoreArchived()" style="margin-top:10px;width:100%;padding:12px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;">
-            🔓 Restaurar todos (quitar archivado)
+            ­ƒöô Restaurar todos (quitar archivado)
           </button>
         ` : ''}
         ${total === 0 ? `
           <div style="margin-top:12px;background:rgba(251,113,133,.1);border:1px solid rgba(251,113,133,.3);border-radius:10px;padding:10px;font-size:12px;color:#fb7185;">
-            ⛔ <strong>No hay datos guardados.</strong> Los movimientos fueron borrados del dispositivo.
+            Ôøö <strong>No hay datos guardados.</strong> Los movimientos fueron borrados del dispositivo.
           </div>
         ` : ''}
       `;
@@ -22087,24 +22131,24 @@ window.financeDiagnostic = function() {
 
     // 3. Scan ALL finance localStorage keys
     const financeKeys = [
-      { key: 'memorycarl_v2_finance_ledger', label: '📒 Ledger principal' },
-      { key: 'memorycarl_v2_finance_transactions', label: '🔄 Transactions (copia)' },
-      { key: 'memorycarl_v2_finance_accounts', label: '🏦 Cuentas' },
-      { key: 'memorycarl_v2_finance_internal_balances', label: '⚖️ Balances internos' },
-      { key: 'memorycarl_v2_finance_loan_usage_ledger', label: '💳 Loan ledger' },
+      { key: 'memorycarl_v2_finance_ledger', label: '­ƒôÆ Ledger principal' },
+      { key: 'memorycarl_v2_finance_transactions', label: '­ƒöä Transactions (copia)' },
+      { key: 'memorycarl_v2_finance_accounts', label: '­ƒÅª Cuentas' },
+      { key: 'memorycarl_v2_finance_internal_balances', label: 'ÔÜû´©Å Balances internos' },
+      { key: 'memorycarl_v2_finance_loan_usage_ledger', label: '­ƒÆ│ Loan ledger' },
     ];
-    let keysHtml = `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📦 Todas las claves finance</div>`;
+    let keysHtml = `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">­ƒôª Todas las claves finance</div>`;
     financeKeys.forEach(function(fk) {
       try {
         const val = localStorage.getItem(fk.key);
         if (val === null) {
-          keysHtml += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.08);font-size:12px;"><span style="color:#475569;">${fk.label}</span><span style="color:#475569;">— vacío</span></div>`;
+          keysHtml += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.08);font-size:12px;"><span style="color:#475569;">${fk.label}</span><span style="color:#475569;">ÔÇö vac├¡o</span></div>`;
         } else {
           const parsed = JSON.parse(val);
           const count = Array.isArray(parsed) ? parsed.length : (typeof parsed === 'object' ? Object.keys(parsed).length : 1);
           const kb = (val.length / 1024).toFixed(1);
           const c = count > 1 ? '#36d399' : count === 1 ? '#fbbf24' : '#fb7185';
-          keysHtml += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.08);font-size:12px;"><span style="color:#94a3b8;">${fk.label}</span><span style="color:${c};font-weight:700;">${count} items · ${kb}kb</span></div>`;
+          keysHtml += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.08);font-size:12px;"><span style="color:#94a3b8;">${fk.label}</span><span style="color:${c};font-weight:700;">${count} items ┬À ${kb}kb</span></div>`;
         }
       } catch(e) {
         keysHtml += `<div style="font-size:12px;color:#fb7185;padding:4px 0;">${fk.label}: error parsing</div>`;
@@ -22116,27 +22160,27 @@ window.financeDiagnostic = function() {
     // 4. Account balances
     const accs = state.financeAccounts || [];
     if (accs.length > 0) {
-      let accHtml = `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🏦 Saldos en cuentas</div>`;
+      let accHtml = `<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">­ƒÅª Saldos en cuentas</div>`;
       accs.forEach(function(acc) {
         const bal = Number(acc.balance || 0).toFixed(2);
         const c = Number(bal) > 0 ? '#36d399' : Number(bal) < 0 ? '#fb7185' : '#94a3b8';
         accHtml += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.08);font-size:12px;"><span style="color:#94a3b8;">${acc.name||acc.id}</span><span style="color:${c};font-weight:700;">S/ ${bal}</span></div>`;
       });
-      accHtml += `<div style="margin-top:6px;font-size:11px;color:#64748b;">⚠️ Saldo alto con pocos registros = datos perdidos del ledger</div></div>`;
+      accHtml += `<div style="margin-top:6px;font-size:11px;color:#64748b;">ÔÜá´©Å Saldo alto con pocos registros = datos perdidos del ledger</div></div>`;
       report += accHtml;
     }
 
     // 5. Supabase Cloud Sync controls
     report += `
       <div style="margin-top:12px;background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25);border-radius:10px;padding:12px;font-size:12px;">
-        ☁️ <strong style="color:#34d399;">Sincronización en la Nube (Supabase)</strong><br>
+        Ôÿü´©Å <strong style="color:#34d399;">Sincronizaci├│n en la Nube (Supabase)</strong><br>
         <span style="color:#94a3b8;">Guarda tus movimientos financieros directamente en tu servidor.</span>
         <div style="display:flex;gap:6px;margin-top:8px;">
           <button onclick="window.financePullFromSupabase(true);" style="flex:1;padding:8px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
-            📥 Descargar Nube
+            ­ƒôÑ Descargar Nube
           </button>
           <button onclick="window.financePushToSupabase(true);" style="flex:1;padding:8px;background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
-            📤 Subir a Nube
+            ­ƒôñ Subir a Nube
           </button>
         </div>
       </div>
@@ -22150,25 +22194,25 @@ window.financeDiagnostic = function() {
         if (Array.isArray(txs) && txs.length > 1) {
           report += `
             <div style="margin-top:12px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);border-radius:10px;padding:12px;font-size:12px;">
-              💡 <strong style="color:#818cf8;">${txs.length} registros en Transactions</strong><br>
+              ­ƒÆí <strong style="color:#818cf8;">${txs.length} registros en Transactions</strong><br>
               <span style="color:#94a3b8;">Esta copia puede contener tus movimientos perdidos.</span>
               <div style="display:flex;gap:6px;margin-top:8px;">
                 <button onclick="window.financeDiagShowTx()" style="flex:1;padding:8px;background:rgba(99,102,241,.2);color:#818cf8;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:12px;cursor:pointer;">
-                  👁 Ver 10 reg.
+                  ­ƒæü Ver 10 reg.
                 </button>
                 <button onclick="window.financeRecoverFromTransactions()" style="flex:1;padding:8px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
-                  🔓 RECUPERAR
+                  ­ƒöô RECUPERAR
                 </button>
               </div>
               <div style="display:flex;gap:6px;margin-top:6px;">
                 <button onclick="window.financeUndoBadRecovery()" style="flex:1;padding:8px;background:rgba(251,113,133,.1);color:#fb7185;border:1px solid rgba(251,113,133,.3);border-radius:8px;font-size:12px;cursor:pointer;">
-                  ↩️ Deshacer Recuperación
+                  Ôå®´©Å Deshacer Recuperaci├│n
                 </button>
                 <button onclick="window.financeApplyHardcodedData()" style="flex:1;padding:8px;background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">
-                  ✨ APLICAR DATOS LIMPIOS
+                  Ô£¿ APLICAR DATOS LIMPIOS
                 </button>
                 <button onclick="window.financeExportDiagnosticJson()" style="flex:1;padding:8px;background:rgba(56,189,248,.1);color:#38bdf8;border:1px solid rgba(56,189,248,.3);border-radius:8px;font-size:12px;cursor:pointer;display:none;">
-                  📤 Exportar Todo
+                  ­ƒôñ Exportar Todo
                 </button>
               </div>
             </div>
@@ -22183,11 +22227,11 @@ window.financeDiagnostic = function() {
     overlay.innerHTML = `
       <div style="background:#1e293b;border-radius:20px 20px 16px 16px;width:100%;max-width:440px;padding:20px;max-height:85vh;overflow-y:auto;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <h3 style="margin:0;font-size:17px;font-weight:700;color:#e2e8f0;">🔍 Diagnóstico de Movimientos</h3>
-          <button onclick="this.closest('div[style]').remove()" style="background:rgba(148,163,184,.15);border:none;color:#94a3b8;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:14px;">✕</button>
+          <h3 style="margin:0;font-size:17px;font-weight:700;color:#e2e8f0;">­ƒöì Diagn├│stico de Movimientos</h3>
+          <button onclick="this.closest('div[style]').remove()" style="background:rgba(148,163,184,.15);border:none;color:#94a3b8;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:14px;">Ô£ò</button>
         </div>
         <button onclick="window.financeListIDBBackups()" style="width:100%;padding:10px;margin-bottom:12px;background:linear-gradient(135deg,rgba(99,102,241,.3),rgba(139,92,246,.3));border:1px solid rgba(99,102,241,.4);color:#a5b4fc;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;">
-          🕐 Ver Backups Automáticos
+          ­ƒòÉ Ver Backups Autom├íticos
         </button>
         ${report}
       </div>
@@ -22196,7 +22240,7 @@ window.financeDiagnostic = function() {
     overlay.addEventListener('click', (e) => { if(e.target === overlay) overlay.remove(); });
 
   } catch(err) {
-    toast('Error en diagnóstico: ' + err.message);
+    toast('Error en diagn├│stico: ' + err.message);
   }
 };
 
@@ -22210,11 +22254,11 @@ window.financeRestoreArchived = function() {
     if(changed > 0) {
       persist();
       view();
-      toast(`✅ ${changed} movimiento(s) restaurados`);
+      toast(`Ô£à ${changed} movimiento(s) restaurados`);
       // Close any open overlay
       document.querySelectorAll('div[style*="z-index:9999"]').forEach(el => el.remove());
     } else {
-      toast('No había movimientos archivados');
+      toast('No hab├¡a movimientos archivados');
     }
   } catch(err) {
     toast('Error al restaurar: ' + err.message);
@@ -22226,19 +22270,19 @@ window.financeDiagShowTx = function() {
     const txStr = localStorage.getItem('memorycarl_v2_finance_transactions');
     if (!txStr) { toast('Sin datos en transactions'); return; }
     const txs = JSON.parse(txStr);
-    if (!Array.isArray(txs) || !txs.length) { toast('Transactions vacío'); return; }
+    if (!Array.isArray(txs) || !txs.length) { toast('Transactions vac├¡o'); return; }
     const preview = txs.slice(0, 10).map(function(t) {
-      const dir = t.direction === 'inflow' ? '📥' : '📤';
+      const dir = t.direction === 'inflow' ? '­ƒôÑ' : '­ƒôñ';
       return `<div style="font-size:12px;color:#94a3b8;padding:5px 0;border-bottom:1px solid rgba(148,163,184,.08);">
         ${dir} <strong style="color:#e2e8f0;">S/ ${Number(t.amount||0).toFixed(2)}</strong>
         <span style="color:#64748b;margin-left:6px;">${(t.date||'').slice(0,10)}</span>
-        ${t.notes ? `<span style="color:#64748b;"> · ${t.notes}</span>` : ''}
+        ${t.notes ? `<span style="color:#64748b;"> ┬À ${t.notes}</span>` : ''}
       </div>`;
     }).join('');
     const d = document.createElement('div');
     d.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.85);display:flex;align-items:flex-end;justify-content:center;padding:16px;';
     d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:20px;width:100%;max-width:440px;max-height:80vh;overflow-y:auto;">
-      <div style="font-weight:700;color:#818cf8;margin-bottom:4px;">🔄 Transactions — ${txs.length} registros</div>
+      <div style="font-weight:700;color:#818cf8;margin-bottom:4px;">­ƒöä Transactions ÔÇö ${txs.length} registros</div>
       <div style="font-size:11px;color:#64748b;margin-bottom:12px;">Primeros 10 de ${txs.length}</div>
       ${preview}
       <button onclick="this.closest('div[style]').remove()" style="margin-top:12px;width:100%;padding:10px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:13px;">Cerrar</button>
@@ -22248,13 +22292,13 @@ window.financeDiagShowTx = function() {
   } catch(e) { toast('Error: ' + e.message); }
 };
 
-// ─── 🔓 RECOVER LEDGER FROM TRANSACTIONS BACKUP ──────────────────────────
+// ÔöÇÔöÇÔöÇ ­ƒöô RECOVER LEDGER FROM TRANSACTIONS BACKUP ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 window.financeRecoverFromTransactions = function() {
   try {
     const txStr = localStorage.getItem('memorycarl_v2_finance_transactions');
     if (!txStr) { toast('No hay backup en Transactions'); return; }
     const txs = JSON.parse(txStr);
-    if (!Array.isArray(txs) || !txs.length) { toast('Transactions vacío'); return; }
+    if (!Array.isArray(txs) || !txs.length) { toast('Transactions vac├¡o'); return; }
 
     // Find primary account (highest balance or flagged as primary)
     const accs = state.financeAccounts || [];
@@ -22275,7 +22319,7 @@ window.financeRecoverFromTransactions = function() {
       const tid = t.legacyLedgerId || t.id;
       if (existingIds.has(tid) || existingIds.has(t.id) || existingLegacyIds.has(t.id)) return;
 
-      // Map transaction → ledger entry
+      // Map transaction ÔåÆ ledger entry
       const entry = {
         id: t.legacyLedgerId || t.id || ('rec_' + Math.random().toString(36).slice(2)),
         date: t.date || new Date().toISOString(),
@@ -22292,16 +22336,16 @@ window.financeRecoverFromTransactions = function() {
     });
 
     if (!recovered.length) {
-      toast('No hay movimientos nuevos para recuperar (ya están en el ledger)');
+      toast('No hay movimientos nuevos para recuperar (ya est├ín en el ledger)');
       return;
     }
 
     const ok = confirm(
-      '🔓 Recuperar ' + recovered.length + ' movimientos del backup?\n\n' +
-      '• Se asignarán a la cuenta: ' + (primaryAcc ? primaryAcc.name : 'principal') + '\n' +
-      '• El saldo inicial de esa cuenta se reseteará a 0\n' +
-      '• Los movimientos actuales se conservan\n\n' +
-      '¿Continuar?'
+      '­ƒöô Recuperar ' + recovered.length + ' movimientos del backup?\n\n' +
+      'ÔÇó Se asignar├ín a la cuenta: ' + (primaryAcc ? primaryAcc.name : 'principal') + '\n' +
+      'ÔÇó El saldo inicial de esa cuenta se resetear├í a 0\n' +
+      'ÔÇó Los movimientos actuales se conservan\n\n' +
+      '┬┐Continuar?'
     );
     if (!ok) return;
 
@@ -22319,10 +22363,10 @@ window.financeRecoverFromTransactions = function() {
     // Close any open diagnostic overlay
     document.querySelectorAll('div[style*="z-index:9999"]').forEach(function(el){ el.remove(); });
 
-    toast('✅ ' + recovered.length + ' movimientos recuperados correctamente');
+    toast('Ô£à ' + recovered.length + ' movimientos recuperados correctamente');
 
   } catch(err) {
-    toast('Error en recuperación: ' + err.message);
+    toast('Error en recuperaci├│n: ' + err.message);
     console.error(err);
   }
 };
@@ -22341,7 +22385,7 @@ window.financeUndoBadRecovery = function() {
   financeRecomputeBalances();
   persist();
   view();
-  toast('✅ Recuperación deshecha (' + (beforeCount - afterCount) + ' movimientos borrados)');
+  toast('Ô£à Recuperaci├│n deshecha (' + (beforeCount - afterCount) + ' movimientos borrados)');
 };
 
 window.financeExportDiagnosticJson = function() {
@@ -22362,7 +22406,7 @@ window.financeExportDiagnosticJson = function() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast('✅ Archivo de respaldo descargado');
+    toast('Ô£à Archivo de respaldo descargado');
   } catch(e) {
     alert('Error al exportar: ' + e.message);
   }
@@ -22372,11 +22416,11 @@ window.financeApplyHardcodedData = async function() {
   try {
     const { recoveryData } = await import('./recovery_data.js');
     if (!recoveryData || !recoveryData.financeLedger) {
-      toast("Error: No se encontró el archivo de recuperación");
+      toast("Error: No se encontr├│ el archivo de recuperaci├│n");
       return;
     }
     
-    if (confirm(`✨ ¿Aplicar la limpieza de datos?\n\n• Se restaurarán los saldos exactos (BCP: 3017.13, Fergis: 163.88)\n• Se recuperarán ${recoveryData.financeLedger.length} movimientos ordenados y sin duplicados.\n• El ledger actual se reemplazará.\n\n¿Continuar?`)) {
+    if (confirm(`Ô£¿ ┬┐Aplicar la limpieza de datos?\n\nÔÇó Se restaurar├ín los saldos exactos (BCP: 3017.13, Fergis: 163.88)\nÔÇó Se recuperar├ín ${recoveryData.financeLedger.length} movimientos ordenados y sin duplicados.\nÔÇó El ledger actual se reemplazar├í.\n\n┬┐Continuar?`)) {
       state.financeLedger = recoveryData.financeLedger;
       state.financeAccounts = recoveryData.financeAccounts;
       financeRecomputeBalances();
@@ -22384,14 +22428,14 @@ window.financeApplyHardcodedData = async function() {
       view();
       
       document.querySelectorAll('div[style*="z-index:9999"]').forEach(function(el){ el.remove(); });
-      toast("✅ Datos limpios aplicados. Tu saldo ahora es correcto.");
+      toast("Ô£à Datos limpios aplicados. Tu saldo ahora es correcto.");
     }
   } catch(e) {
     alert("Error al cargar los datos limpios: " + e.message);
   }
 };
 
-// ─── RESTORE FROM IDB BACKUP ─────────────────────────────────────────
+// ÔöÇÔöÇÔöÇ RESTORE FROM IDB BACKUP ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 window.financeListIDBBackups = function() {
   const dbName = 'MemoryCarlFinanceBackups';
   const req = indexedDB.open(dbName, 1);
@@ -22407,7 +22451,7 @@ window.financeListIDBBackups = function() {
     all.onsuccess = function() {
       const backups = (all.result || []).sort((a,b) => b.timestamp - a.timestamp);
       if (!backups.length) {
-        toast('No hay backups automáticos guardados todavía');
+        toast('No hay backups autom├íticos guardados todav├¡a');
         return;
       }
       // Build modal
@@ -22426,8 +22470,8 @@ window.financeListIDBBackups = function() {
         </div>`;
       }).join('');
       d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:20px;width:100%;max-width:440px;max-height:80vh;overflow-y:auto;">
-        <div style="font-weight:700;color:#e2e8f0;font-size:16px;margin-bottom:4px;">🕐 Backups automáticos</div>
-        <div style="font-size:11px;color:#64748b;margin-bottom:14px;">Se guarda 1 backup por hora. Últimas 24h disponibles.</div>
+        <div style="font-weight:700;color:#e2e8f0;font-size:16px;margin-bottom:4px;">­ƒòÉ Backups autom├íticos</div>
+        <div style="font-size:11px;color:#64748b;margin-bottom:14px;">Se guarda 1 backup por hora. ├Ültimas 24h disponibles.</div>
         ${rows}
         <button onclick="this.closest('div[style]').remove()" style="margin-top:14px;width:100%;padding:10px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:13px;">Cerrar</button>
       </div>`;
@@ -22453,7 +22497,7 @@ window.financeRestoreFromIDB = function(hourKey) {
       const accounts = backup.financeAccounts || [];
       const active = ledger.filter(function(e){ return !e.archived; }).length;
       const dt = new Date(backup.timestamp).toLocaleString('es-PE');
-      if (!confirm(`¿Restaurar backup del ${dt}?\n\n• ${active} movimientos activos\n• ${accounts.length} cuentas\n\nEsto reemplazará el ledger actual.`)) return;
+      if (!confirm(`┬┐Restaurar backup del ${dt}?\n\nÔÇó ${active} movimientos activos\nÔÇó ${accounts.length} cuentas\n\nEsto reemplazar├í el ledger actual.`)) return;
       state.financeLedger = ledger;
       state.financeAccounts = accounts;
       financeRecomputeBalances();
@@ -22461,21 +22505,21 @@ window.financeRestoreFromIDB = function(hourKey) {
       view();
       document.querySelectorAll('div[style*="z-index:10001"]').forEach(function(el){ el.remove(); });
       document.querySelectorAll('div[style*="z-index:9999"]').forEach(function(el){ el.remove(); });
-      toast('✅ Backup restaurado correctamente');
+      toast('Ô£à Backup restaurado correctamente');
     };
   };
 };
 
-// ─── SUPABASE CLOUD SYNC SYSTEM ──────────────────────────────────────
+// ÔöÇÔöÇÔöÇ SUPABASE CLOUD SYNC SYSTEM ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 window.financePushToSupabase = async function(isManual = false) {
   try {
     const key = getSyncApiKey();
     if (!key) {
-      if (isManual) toast("⚠️ Sync no configurado (falta API Key)");
+      if (isManual) toast("ÔÜá´©Å Sync no configurado (falta API Key)");
       return;
     }
 
-    if (isManual) toast("📤 Enviando copia a Supabase...");
+    if (isManual) toast("­ƒôñ Enviando copia a Supabase...");
 
     const ledgerCount = (state.financeLedger || []).length;
     const activeCount = (state.financeLedger || []).filter(e => !e.archived).length;
@@ -22510,13 +22554,13 @@ window.financePushToSupabase = async function(isManual = false) {
         window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Sync Error: ${errText.slice(0, 60)}` });
       }
       // Always show error (manual or not) so user knows sync is failing
-      toast("❌ Error al sincronizar: " + errText.slice(0, 60));
+      toast("ÔØî Error al sincronizar: " + errText.slice(0, 60));
     } else {
       console.log("Supabase Sync Successful");
       if (window.__mcLogs) {
-        window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Sincronización exitosa: ${activeCount} activos enviados` });
+        window.__mcLogs.push({ time: ts, type: "info", text: `Ôÿü´©Å Sincronizaci├│n exitosa: ${activeCount} activos enviados` });
       }
-      if (isManual) toast(`✅ Guardado en la nube: ${activeCount} activos / ${ledgerCount} total`);
+      if (isManual) toast(`Ô£à Guardado en la nube: ${activeCount} activos / ${ledgerCount} total`);
     }
   } catch(e) {
     const ts = new Date().toLocaleTimeString('es-PE');
@@ -22524,7 +22568,7 @@ window.financePushToSupabase = async function(isManual = false) {
     if (window.__mcLogs) {
       window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Sync Conn Error: ${e.message}` });
     }
-    if (isManual) toast("❌ Error de conexión al sincronizar");
+    if (isManual) toast("ÔØî Error de conexi├│n al sincronizar");
   }
 };
 
@@ -22532,11 +22576,11 @@ window.financeCheckSupabase = async function() {
   try {
     const key = getSyncApiKey();
     if (!key) {
-      alert("⚠️ No tienes API Key configurada para la sincronización.\n\nVe a Configuración > Sync y pon tu API Key.");
+      alert("ÔÜá´©Å No tienes API Key configurada para la sincronizaci├│n.\n\nVe a Configuraci├│n > Sync y pon tu API Key.");
       return;
     }
 
-    toast("🔍 Verificando datos en la nube...");
+    toast("­ƒöì Verificando datos en la nube...");
 
     const res = await fetch('https://memory-carl.vercel.app/api/restore', {
       method: 'GET',
@@ -22545,7 +22589,7 @@ window.financeCheckSupabase = async function() {
 
     if (!res.ok) {
       const errText = await res.text();
-      alert("❌ Error al conectar con Supabase:\n\n" + errText);
+      alert("ÔØî Error al conectar con Supabase:\n\n" + errText);
       return;
     }
 
@@ -22558,10 +22602,10 @@ window.financeCheckSupabase = async function() {
 
     if (!appState || (!appState.financeLedger && !appState.financeAccounts)) {
       d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:24px;width:100%;max-width:440px;">
-        <div style="font-size:16px;font-weight:700;color:#fb7185;margin-bottom:8px;">☁️ Sin datos financieros en la nube</div>
-        <div style="font-size:13px;color:#94a3b8;margin-bottom:16px;">No se encontró ningún backup de finanzas en tu base de datos de Supabase. Pulsa el botón de abajo para subir tus datos locales actuales.</div>
+        <div style="font-size:16px;font-weight:700;color:#fb7185;margin-bottom:8px;">Ôÿü´©Å Sin datos financieros en la nube</div>
+        <div style="font-size:13px;color:#94a3b8;margin-bottom:16px;">No se encontr├│ ning├║n backup de finanzas en tu base de datos de Supabase. Pulsa el bot├│n de abajo para subir tus datos locales actuales.</div>
         <div style="display:flex;gap:10px;">
-          <button onclick="window.financePushToSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:12px;background:#7c5cff;border:none;color:#fff;font-weight:bold;border-radius:10px;cursor:pointer;">📤 Subir mis datos</button>
+          <button onclick="window.financePushToSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:12px;background:#7c5cff;border:none;color:#fff;font-weight:bold;border-radius:10px;cursor:pointer;">­ƒôñ Subir mis datos</button>
           <button onclick="this.closest('div').parentElement.remove()" style="padding:12px 20px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:10px;cursor:pointer;">Cerrar</button>
         </div>
       </div>`;
@@ -22571,17 +22615,17 @@ window.financeCheckSupabase = async function() {
       const active = ledger.filter(e => !e.archived).length;
       const archived = ledger.filter(e => e.archived).length;
       const dates = ledger.map(e => e.date).filter(Boolean).sort();
-      const oldest = dates[0] || '—';
-      const newest = dates[dates.length-1] || '—';
+      const oldest = dates[0] || 'ÔÇö';
+      const newest = dates[dates.length-1] || 'ÔÇö';
       const localCount = (state.financeLedger || []).length;
       const cloudCount = ledger.length;
       const diff = cloudCount - localCount;
-      const diffLabel = diff > 0 ? `<span style="color:#34d399">+${diff} más en la nube</span>` :
-                        diff < 0 ? `<span style="color:#fb7185">${Math.abs(diff)} más en local</span>` :
-                        `<span style="color:#34d399">✅ Sincronizados</span>`;
+      const diffLabel = diff > 0 ? `<span style="color:#34d399">+${diff} m├ís en la nube</span>` :
+                        diff < 0 ? `<span style="color:#fb7185">${Math.abs(diff)} m├ís en local</span>` :
+                        `<span style="color:#34d399">Ô£à Sincronizados</span>`;
 
       d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:20px;width:100%;max-width:440px;">
-        <div style="font-size:16px;font-weight:700;color:#34d399;margin-bottom:4px;">☁️ Estado en Supabase</div>
+        <div style="font-size:16px;font-weight:700;color:#34d399;margin-bottom:4px;">Ôÿü´©Å Estado en Supabase</div>
         <div style="font-size:11px;color:#64748b;margin-bottom:16px;">Datos actualmente guardados en la nube</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
           <div style="background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.2);border-radius:10px;padding:12px;text-align:center;">
@@ -22594,14 +22638,14 @@ window.financeCheckSupabase = async function() {
           </div>
         </div>
         <div style="font-size:12px;color:#94a3b8;line-height:2;background:rgba(15,23,42,.4);border-radius:8px;padding:10px;">
-          <div>📅 Más antiguo: <strong style="color:#e2e8f0">${oldest}</strong></div>
-          <div>📅 Más reciente: <strong style="color:#e2e8f0">${newest}</strong></div>
-          <div>🏦 Cuentas guardadas: <strong style="color:#e2e8f0">${accounts.length}</strong></div>
-          <div>🗃️ Archivados: <strong style="color:#fbbf24">${archived}</strong></div>
-          <div>📱 Local vs ☁️ Nube: ${diffLabel}</div>
+          <div>­ƒôà M├ís antiguo: <strong style="color:#e2e8f0">${oldest}</strong></div>
+          <div>­ƒôà M├ís reciente: <strong style="color:#e2e8f0">${newest}</strong></div>
+          <div>­ƒÅª Cuentas guardadas: <strong style="color:#e2e8f0">${accounts.length}</strong></div>
+          <div>­ƒùâ´©Å Archivados: <strong style="color:#fbbf24">${archived}</strong></div>
+          <div>­ƒô▒ Local vs Ôÿü´©Å Nube: ${diffLabel}</div>
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;">
-          <button onclick="window.financePullFromSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:10px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">📥 Importar a Local</button>
+          <button onclick="window.financePullFromSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:10px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">­ƒôÑ Importar a Local</button>
           <button onclick="this.closest('div').parentElement.remove()" style="flex:1;padding:10px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:12px;">Cerrar</button>
         </div>
       </div>`;
@@ -22612,7 +22656,7 @@ window.financeCheckSupabase = async function() {
 
   } catch(e) {
     console.error("Check Supabase Error:", e);
-    alert("❌ Error al verificar Supabase:\n" + e.message);
+    alert("ÔØî Error al verificar Supabase:\n" + e.message);
   }
 };
 
@@ -22620,11 +22664,11 @@ window.financePullFromSupabase = async function(isManual = false) {
   try {
     const key = getSyncApiKey();
     if (!key) {
-      if (isManual) toast("⚠️ Sync no configurado (falta API Key)");
+      if (isManual) toast("ÔÜá´©Å Sync no configurado (falta API Key)");
       return;
     }
 
-    if (isManual) toast("📥 Buscando datos en la nube...");
+    if (isManual) toast("­ƒôÑ Buscando datos en la nube...");
     console.log("Checking Supabase cloud state...");
     const res = await fetch('https://memory-carl.vercel.app/api/restore', {
       method: 'GET',
@@ -22639,7 +22683,7 @@ window.financePullFromSupabase = async function(isManual = false) {
       if (window.__mcLogs) {
         window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Pull Failed` });
       }
-      if (isManual) toast("❌ Error al descargar desde Supabase");
+      if (isManual) toast("ÔØî Error al descargar desde Supabase");
       return;
     }
 
@@ -22651,10 +22695,10 @@ window.financePullFromSupabase = async function(isManual = false) {
       
       let shouldImport = false;
       if (isManual) {
-        shouldImport = confirm(`☁️ Datos encontrados en la nube:\n\n` + 
+        shouldImport = confirm(`Ôÿü´©Å Datos encontrados en la nube:\n\n` + 
           `- Movimientos en Nube: ${cloudLedgerCount}\n` + 
           `- Movimientos en Local: ${localLedgerCount}\n\n` + 
-          `¿Deseas sobreescribir tus datos locales con los de la nube? (Recomendado solo si tu móvil se limpió o deseas restaurar un backup anterior)`);
+          `┬┐Deseas sobreescribir tus datos locales con los de la nube? (Recomendado solo si tu m├│vil se limpi├│ o deseas restaurar un backup anterior)`);
       } else {
         // Auto-pull on boot only overwrites if cloud has strictly more data to avoid loss
         shouldImport = (cloudLedgerCount > localLedgerCount);
@@ -22670,7 +22714,7 @@ window.financePullFromSupabase = async function(isManual = false) {
           try {
             localStorage.setItem('memorycarl_v2_finance_transactions', JSON.stringify(appState.financeTransactions));
           } catch(storageErr) {
-            console.warn("Storage quota exceeded saving financeTransactions backup, continuing without it:", storageErr);
+            console.warn('Storage quota exceeded saving financeTransactions backup, continuing without it:', storageErr);
           }
         }
 
@@ -22684,14 +22728,14 @@ window.financePullFromSupabase = async function(isManual = false) {
         view();
 
         if (window.__mcLogs) {
-          window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Descarga exitosa: ${cloudLedgerCount} movimientos restaurados` });
+          window.__mcLogs.push({ time: ts, type: "info", text: `Ôÿü´©Å Descarga exitosa: ${cloudLedgerCount} movimientos restaurados` });
         }
-        toast('☁️ Finanzas sincronizadas desde Supabase');
+        toast('Ôÿü´©Å Finanzas sincronizadas desde Supabase');
       } else {
-        if (isManual) toast("Sincronización cancelada o sin cambios");
+        if (isManual) toast("Sincronizaci├│n cancelada o sin cambios");
       }
     } else {
-      if (isManual) toast("ℹ️ Sin datos financieros en la nube todavía");
+      if (isManual) toast("Ôä╣´©Å Sin datos financieros en la nube todav├¡a");
     }
   } catch(e) {
     const ts = new Date().toLocaleTimeString('es-PE');
@@ -22699,7 +22743,7 @@ window.financePullFromSupabase = async function(isManual = false) {
     if (window.__mcLogs) {
       window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Pull Conn Error: ${e.message}` });
     }
-    if (isManual) toast("❌ Error de conexión al descargar");
+    if (isManual) toast("ÔØî Error de conexi├│n al descargar");
   }
 };
 
