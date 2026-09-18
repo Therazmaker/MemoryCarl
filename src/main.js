@@ -1,3 +1,4 @@
+import './finance/finance_core_v2.js';
 (function mcConsoleLogsInterceptorInit(){
   if (window.__mcLogsInterceptor) return;
   window.__mcLogs = [];
