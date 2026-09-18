@@ -718,22 +718,35 @@ function upsertLunarMoneyTodayFromSwiss(swiss){
 
 function renderLunarMoneyCard(){
   const swiss = loadSwissLast() || {};
+  let liteMoon = null;
+  let liteTransits = null;
+  try {
+    liteMoon = computeMoonNow(new Date());
+    liteTransits = getTransitLiteSignals(new Date());
+  } catch(e) {}
+
   const spend = getSpend24h();
   const natal = loadNatalChart();
   const house2 = (natal && Array.isArray(natal.houses)) ? natal.houses.find(h=>Number(h.house)===2) : null;
   const house2Sign = house2?.sign ? String(house2.sign) : "—";
   const regencia = (house2Sign.toLowerCase()==="pisces" || house2Sign.toLowerCase()==="piscis") ? "Neptuno / Júpiter" : "";
 
-  const phase = (swiss.moon_phase_name || "").trim();
-  const msign = (swiss.moon_sign || "").trim();
-  const mhouse = (swiss.transit_moon_house || "").trim();
-  const whisper = (swiss.transit_money_whisper || "").trim();
+  const phase = (swiss.moon_phase_name || (liteMoon && liteMoon.moon_phase_name) || "").trim();
+  const msign = (swiss.moon_sign || (liteMoon && liteMoon.moon_sign) || "").trim();
+  const mhouse = (swiss.transit_moon_house || (liteTransits && liteTransits.transit_moon_house) || "").trim();
+  let whisper = (swiss.transit_money_whisper || "").trim();
+
+  if (!whisper && msign) {
+    const hint = liteTransits?.transit_hint || "Observa tus emociones al gastar.";
+    whisper = `La luna transita por ${msign}${mhouse ? ` (Casa ${mhouse})` : ""}. ${hint}`;
+    if (spend > 0) whisper += ` Has gastado S/ ${spend} hoy. ¿Se siente alineado?`;
+  }
 
   const topLine = [
     phase ? `🌙 ${phase}` : "",
     msign ? `Luna en ${msign}` : "",
     mhouse ? `Casa ${mhouse}` : ""
-  ].filter(Boolean).join(" • ") || "Activa Swiss y recalcula para ver tu clima lunar de hoy.";
+  ].filter(Boolean).join(" • ");
 
   const spendLine = `Gasto 24h: <b>S/ ${escapeHtml(String(Math.round(spend*100)/100))}</b>`;
   const houseLine = `Casa 2: <b>${escapeHtml(house2Sign)}</b>${regencia ? ` <span class=\"muted\">(${escapeHtml(regencia)})</span>` : ""}`;
@@ -743,7 +756,7 @@ function renderLunarMoneyCard(){
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">Luna & Dinero 🌙💸</h2>
-          <div class="small">${topLine}</div>
+          <div class="small">${topLine || "Clima lunar"}</div>
         </div>
         <div class="row" style="gap:8px;">
           <button class="iconBtn" id="btnLunarMoneyRefresh" aria-label="Refresh">⟲</button>
@@ -761,9 +774,9 @@ function renderLunarMoneyCard(){
 
       ${whisper ? `
         <div style="line-height:1.45">${escapeHtml(whisper).replace(/\n/g,"<br>")}</div>
-        <div class="muted" style="margin-top:10px;">No es consejo financiero. Es lectura simbólica + tu data de gasto.</div>
+        <div class="muted" style="margin-top:10px;">(Lectura astrológica lite + tus gastos reales)</div>
       ` : `
-        <div class="muted">Aún no hay whisper. Pulsa ⟲ para recalcular con Swiss.</div>
+        <div class="muted">Configura tu carta natal para ver sugerencias personalizadas.</div>
       `}
     </section>
   `;
@@ -8288,7 +8301,12 @@ function wireHome(root){
   const btnLmRef = root.querySelector("#btnLunarMoneyRefresh");
   if(btnLmRef) btnLmRef.addEventListener("click", async (e)=>{
     e.stopPropagation();
-    await refreshSwissTransitsUI({ forceSpeak: true });
+    if(getSwissAstroUrl() && getSwissAstroKey()){
+      await refreshSwissTransitsUI({ forceSpeak: true });
+    } else {
+      toast("🌙 Calculando astrología (lite)...");
+      // lite updates instantly on view()
+    }
     view();
   });
 
