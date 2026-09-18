@@ -22667,7 +22667,13 @@ window.financePullFromSupabase = async function(isManual = false) {
           state.financeEntryCategories = appState.financeEntryCategories;
         }
         if (appState.financeTransactions) {
-          localStorage.setItem('memorycarl_v2_finance_transactions', JSON.stringify(appState.financeTransactions));
+          try {
+            localStorage.setItem('memorycarl_v2_finance_transactions', JSON.stringify(appState.financeTransactions));
+          } catch(err) {
+            console.warn("Could not save transactions to localStorage due to quota:", err);
+            // Optionally, fallback to in-memory only or just ignore since it's in Supabase and IDB
+            state.financeTransactions = appState.financeTransactions; 
+          }
         }
 
         financeRecomputeBalances();
