@@ -241,6 +241,7 @@ import "./sleep_radial_chart.js";
 import "./sleep_journal_pro.js";
 
 console.log("MemoryCarl loaded");
+console.log("MEMORYCARL VERSION: 2044");
 // ===== LocalStorage Keys =====
 const KEYS = {
   neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
