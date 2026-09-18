@@ -15616,8 +15616,8 @@ function addFinanceEntry(payload){
 
   const entry = {
     id: entryId,
-    date: entryDate, // ISO string
-    type: tnorm, // income | expense
+    date: entryDate,
+    type: tnorm,
     amount: amt,
     accountId,
     category: category||"Otros",
@@ -15628,18 +15628,25 @@ function addFinanceEntry(payload){
     archived: false,
     isFiado: !!isFiado,
     fiadoStatus: fiadoStatus || null,
-    // carry over usd props if present
     usdGross: payload.usdGross || null,
     usdNet: payload.usdNet || null,
     usdFee: payload.usdFee || null,
     usdExchange: payload.usdExchange || null,
-    usdFixedFee: payload.usdFixedFee || null
+    usdFixedFee: payload.usdFixedFee || null,
+    counterparty: payload.counterparty || null,
+    sourceLabel: payload.sourceLabel || null
   };
 
-  state.financeLedger.unshift(entry);
+  if(window.FINANCE){
+    window.FINANCE.addMovement(entry);
+  } else {
+    // Fallback just in case FINANCE is somehow not loaded
+    const copy = state.financeLedger;
+    copy.unshift(entry);
+    state.financeLedger = copy;
+  }
 
   // Remember last used account(s) for convenience defaults.
-  // (Works even when main.js is loaded as a module.)
   state.financeLastAccountId = accountId;
   if(String(category||"").toLowerCase()==="mercado") state.financeLastMarketAccountId = accountId;
 
@@ -15651,16 +15658,16 @@ function addFinanceEntry(payload){
 }
 
 function updateFinanceEntry(id, patch){
-  const idx = (state.financeLedger||[]).findIndex(e=>e.id===id);
+  const ledger = state.financeLedger || [];
+  const idx = ledger.findIndex(e=>e.id===id);
   if(idx===-1) return null;
-  const cur = state.financeLedger[idx];
+  const cur = ledger[idx];
 
-  // apply patch
   const next = {
     ...cur,
     ...patch,
   };
-  // normalize
+  
   if(next.amount !== undefined) next.amount = financeParseAmount(next.amount);
   if(next.type !== undefined) next.type = financeNormalizeType(next.type);
   if(next.date) next.date = String(next.date);
@@ -15669,7 +15676,14 @@ function updateFinanceEntry(id, patch){
   if(next.note !== undefined) next.note = String(next.note||"");
   if(next.neuronRole !== undefined) next.neuronRole = String(next.neuronRole||"auto");
 
-  state.financeLedger[idx] = next;
+  if (window.FINANCE) {
+    window.FINANCE.updateMovement(id, next);
+  } else {
+    const copy = [...ledger];
+    copy[idx] = next;
+    state.financeLedger = copy;
+  }
+
   financeRecomputeBalances();
   persist();
   view();
