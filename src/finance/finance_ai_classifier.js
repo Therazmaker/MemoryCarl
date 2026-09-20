@@ -29,11 +29,11 @@ function isShapeValid(obj) {
   if (typeof obj.isDebtRelated !== "boolean") return false;
   if (!Array.isArray(obj.derivedLabels)) return false;
   if (!obj.derivedLabels.every(function(l){ return VALID_LABELS.includes(l); })) return false;
-  // New fields — null is always acceptable; wrong type/value is not
-  if (obj.counterparty !== null && typeof obj.counterparty !== "string") return false;
-  if (obj.debtDirection !== null && !VALID_DEBT_DIRECTIONS.includes(obj.debtDirection)) return false;
-  if (obj.context !== null && !VALID_CONTEXTS.includes(obj.context)) return false;
-  if (obj.sourceRef !== null && typeof obj.sourceRef !== "string") return false;
+  // New fields — null or undefined is acceptable; wrong type/value is not
+  if (obj.counterparty != null && typeof obj.counterparty !== "string") return false;
+  if (obj.debtDirection != null && !VALID_DEBT_DIRECTIONS.includes(obj.debtDirection)) return false;
+  if (obj.context != null && !VALID_CONTEXTS.includes(obj.context)) return false;
+  if (obj.sourceRef != null && typeof obj.sourceRef !== "string") return false;
   return true;
 }
 
