@@ -481,9 +481,9 @@ body{
 .homeCard{margin-bottom:0}
 .homeWide{margin-top:10px}
 
-/* Make home widgets a bit more compact */
-.homeCard{padding:8px;border-radius:16px}
-.homeCard .cardTitle{font-size:14px}
+/* Make home widgets compact and mobile-friendly */
+.homeCard{padding:12px;border-radius:16px}
+.homeCard .cardTitle{font-size:15px;font-weight:800}
 .homeCard .small{margin-top:2px}
 
 /* tablet: 2-column board */
@@ -4091,8 +4091,8 @@ body{
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 16px;
-  padding: 24px 16px;
-  margin-bottom: 16px;
+  padding: 20px 12px;
+  margin-bottom: 12px;
   text-align: center;
   position: relative;
   overflow: hidden;
@@ -4112,10 +4112,12 @@ body{
   filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4));
 }
 .lt-spotlight-title {
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 800;
   color: #fff;
   margin-bottom: 4px;
+  padding: 0 4px;
+  word-break: break-word;
 }
 .lt-spotlight-sub {
   font-size: 12px;
@@ -4128,20 +4130,23 @@ body{
   gap: 8px;
   flex-wrap: wrap;
   justify-content: center;
+  width: 100%;
 }
 .lt-spot-btn {
-  padding: 10px 16px;
+  padding: 9px 12px;
   border-radius: 12px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   border: none;
   cursor: pointer;
   transition: transform 0.1s, filter 0.15s;
+  flex: 1 1 auto;
+  text-align: center;
 }
 .lt-spot-btn:active { transform: scale(0.95); }
-.lt-spot-yes { background: #22c55e; color: #fff; flex: 1; min-width: 120px; }
-.lt-spot-later { background: rgba(255,255,255,0.1); color: #fff; }
-.lt-spot-help { background: rgba(124,92,255,0.2); color: #a78bfa; }
+.lt-spot-yes { background: #22c55e; color: #fff; flex: 2 1 140px; }
+.lt-spot-later { background: rgba(255,255,255,0.1); color: #fff; flex: 1 1 80px; }
+.lt-spot-help { background: rgba(124,92,255,0.2); color: #a78bfa; flex: 1 1 90px; }
 
 .lt-urg-badge {
   position: absolute;

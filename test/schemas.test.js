@@ -25,11 +25,12 @@ test("legacy neurons stay valid without manual meta", () => {
 });
 
 test("temporal meta is sanitized and validated", () => {
-  const t = sanitizeTemporalMeta({ date: "2026-03-18", stage: "trabajo_actual" });
+  const today = new Date().toISOString().slice(0, 10);
+  const t = sanitizeTemporalMeta({ date: today, stage: "trabajo_actual" });
   assert.equal(validateTemporalMeta(t).length, 0);
   const n = sanitizeNeuron(createNeuron({
     core: { concept: "hoy me siento", domain: "emocional", summary: "actual" },
-    temporal: { date: "2026-03-18", recencyWeight: 0.01 },
+    temporal: { date: today, recencyWeight: 0.01 },
   }));
   assert.ok(n.temporal.recencyWeight > 0.5);
 });
