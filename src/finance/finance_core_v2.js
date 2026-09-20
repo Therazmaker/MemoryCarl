@@ -45,7 +45,11 @@ window.FINANCE = (function(){
   }
 
   function save(){
-    localStorage.setItem("finance_v2_state", JSON.stringify(state));
+    try {
+      localStorage.setItem("finance_v2_state", JSON.stringify(state));
+    } catch (err) {
+      console.warn("Storage quota exceeded or error saving finance_v2_state:", err);
+    }
   }
 
   function load(){
@@ -337,15 +341,13 @@ window.FINANCE = (function(){
     try {
       const urlRaw = localStorage.getItem("memorycarl_script_url");
       const apiKey = localStorage.getItem("memorycarl_script_api_key");
-      if (!urlRaw || !apiKey) return;
+      const url = urlRaw ? urlRaw.replace(/\/+$/, "") : "https://memory-carl.vercel.app";
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
-      const url = urlRaw.replace(/\/+$/, "");
       const res = await fetch(`${url}/api/telegram/pending`, {
         method: "GET",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        }
+        headers
       });
 
       if (!res.ok) throw new Error("Error fetching telegram pending");
