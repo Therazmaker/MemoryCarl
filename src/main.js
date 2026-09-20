@@ -6028,7 +6028,9 @@ function lifeTaskMarkDone(id, forcedTs) {
   state.lifeTasksLog = state.lifeTasksLog || [];
   state.lifeTasksLog.push({ id, ts });
   persist();
-  renderLifeTrackerStats();
+  if(typeof renderLifeTrackerStats === "function") {
+    renderLifeTrackerStats();
+  }
 }
 
 function lifeTaskAddCustom(title, icon, freqDays, category, partOfDay) {
