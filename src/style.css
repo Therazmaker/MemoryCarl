@@ -4081,7 +4081,7 @@ body{
 
 /* ===== LIFE TRACKER (TDA Vital Habits) ===== */
 .lifeTrackerCard {
-  grid-column: 1 / -1;
+  /* Default card behavior in grid */
 }
 .lt-spotlight {
   display: flex;

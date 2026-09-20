@@ -6238,18 +6238,18 @@ function renderLifeTrackerCard() {
   `;
 
   return `
-    <section class="card lifeTrackerCard" id="homeLifeTracker">
-      <div class="cardTop">
-        <div>
-          <h2 class="cardTitle">🧠 Tracker Vital</h2>
-          <div class="small">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : allDoneToday ? `<span style="color:#22c55e;font-weight:700">¡Completo! 🎉</span>` : `${doneToday}/${totalHabits} hábitos hoy`}</div>
+    <section class="card homeCard lifeTrackerCard" id="homeLifeTracker">
+      <div class="djp-sc-header">
+        <div class="djp-sc-icon">🧠</div>
+        <div class="djp-sc-title-block">
+          <div class="djp-sc-title">Tracker Vital</div>
+          <div class="djp-sc-sub">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : allDoneToday ? `<span style="color:#22c55e;font-weight:700">¡Completo! 🎉</span>` : `${doneToday}/${totalHabits} hábitos hoy`}</div>
         </div>
-        <div>
-          <button class="iconBtn" id="btnLifeTrackerStats" title="Estadísticas" style="margin-right:8px;font-size:16px;">📊</button>
-          <button class="btn small primary" id="btnAddLifeTask">➕ Agregar</button>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button class="iconBtn" id="btnLifeTrackerStats" title="Estadísticas" style="font-size:16px;">📊</button>
+          <button class="djp-sc-add-btn" id="btnAddLifeTask" aria-label="Agregar">＋</button>
         </div>
       </div>
-      <div class="hr"></div>
 
       ${eventsHtml}
 
@@ -6570,14 +6570,14 @@ function renderNeuroClawCard(){
   const stamp = ts ? ts.toLocaleString("es-PE",{hour:"2-digit",minute:"2-digit"}) : "";
   return `
     <section class="card homeCard" id="homeNeuroCard">
-      <div class="cardTop">
-        <div>
-          <h2 class="cardTitle">NeuroClaw</h2>
-          <div class="small">${loading ? "Analizando…" : (has ? `Sugerencias • ${escapeHtml(stamp)}` : "Sin señales aún")}</div>
+      <div class="djp-sc-header">
+        <div class="djp-sc-icon">⚙️</div>
+        <div class="djp-sc-title-block">
+          <div class="djp-sc-title">NeuroClaw</div>
+          <div class="djp-sc-sub">${loading ? "Analizando…" : (has ? `Sugerencias • ${escapeHtml(stamp)}` : "Sin señales aún")}</div>
         </div>
-        <button class="iconBtn" id="btnNeuroAnalyze" aria-label="Analyze">🧠</button>
+        <button class="djp-sc-add-btn" id="btnNeuroAnalyze" aria-label="Analyze">🧠</button>
       </div>
-      <div class="hr"></div>
       ${has ? `
         <div class="neuroList">
           ${items.map(it=>`
@@ -6618,17 +6618,17 @@ function renderSwissAstroCard(){
 
   return `
     <section class="card homeCard" id="homeSwissAstroCard">
-      <div class="cardTop">
-        <div>
-          <h2 class="cardTitle">Visión lunar</h2>
-          <div class="small">${escapeHtml(sub)}</div>
+      <div class="djp-sc-header">
+        <div class="djp-sc-icon">🌙</div>
+        <div class="djp-sc-title-block">
+          <div class="djp-sc-title">Visión lunar</div>
+          <div class="djp-sc-sub">${escapeHtml(sub)}</div>
         </div>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:6px; align-items:center;">
           <button class="iconBtn" id="btnSwissRefresh" aria-label="Refresh">⟳</button>
           <button class="iconBtn" id="btnSwissDetails" aria-label="Details">↗</button>
         </div>
       </div>
-      <div class="hr"></div>
       ${body}
     </section>
   `;
@@ -6824,28 +6824,28 @@ const sleepBars = renderSleepBars(sleepSeries);
       ${renderTarotWidget()}
 
       <section class="card homeCard homeMoodCard" id="homeMoodCard">
-        <div class="cardTop">
-          <div>
-            <h2 class="cardTitle">😊 Emociones</h2>
-            <div class="small">${todayEntries.length ? `${todayEntries.length} registro${todayEntries.length>1?"s":""} hoy` : "Sin registros hoy"}</div>
+        <div class="djp-sc-header">
+          <div class="djp-sc-icon">😊</div>
+          <div class="djp-sc-title-block">
+            <div class="djp-sc-title">Emociones</div>
+            <div class="djp-sc-sub">${todayEntries.length ? `${todayEntries.length} registro${todayEntries.length>1?"s":""} hoy` : "Sin registros hoy"}</div>
           </div>
-          <button class="iconBtn" id="btnAddMoodEntry" title="Registrar emoción">＋</button>
+          <button class="djp-sc-add-btn" id="btnAddMoodEntry" title="Registrar emoción">＋</button>
         </div>
-        <div class="hr"></div>
         <div class="moodTimeline" id="moodTimeline">
           ${moodTimelineRows || `<div class="muted" style="text-align:center;padding:16px 0;">Toca ＋ para registrar cómo te sientes</div>`}
         </div>
       </section>
 
       <section class="card homeCard" id="homeRemindersCard">
-        <div class="cardTop">
-          <div>
-            <h2 class="cardTitle">Reminders</h2>
-            <div class="small">Hoy</div>
+        <div class="djp-sc-header">
+          <div class="djp-sc-icon">⏰</div>
+          <div class="djp-sc-title-block">
+            <div class="djp-sc-title">Reminders</div>
+            <div class="djp-sc-sub">Hoy</div>
           </div>
           <button class="iconBtn" id="btnGoReminders" aria-label="Go reminders">↗</button>
         </div>
-        <div class="hr"></div>
         <div class="homeChecks">
           ${remindersHtml}
         </div>
