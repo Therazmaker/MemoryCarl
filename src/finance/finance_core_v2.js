@@ -14,11 +14,27 @@ if (typeof window === 'undefined') {
 window.FINANCE = (function(){
 
   const state = {
-    accounts: [],
     movements: [],
     currentMonth: new Date().getMonth(),
     currentYear: new Date().getFullYear()
   };
+
+  Object.defineProperty(state, 'accounts', {
+    get: function() {
+      if (typeof window !== 'undefined' && window.state && Array.isArray(window.state.financeAccounts)) {
+        return window.state.financeAccounts;
+      }
+      return this._accounts || [];
+    },
+    set: function(val) {
+      this._accounts = val;
+      if (typeof window !== 'undefined' && window.state) {
+        window.state.financeAccounts = val;
+      }
+    },
+    configurable: true,
+    enumerable: true
+  });
 
   /* ===============================
      UTIL
@@ -59,6 +75,12 @@ window.FINANCE = (function(){
   }
 
   function getAccount(id){
+    if(!id) return null;
+    const globalAccs = (typeof window !== 'undefined' && window.state && Array.isArray(window.state.financeAccounts)) ? window.state.financeAccounts : null;
+    if (globalAccs) {
+      const found = globalAccs.find(a => a.id === id);
+      if (found) return found;
+    }
     return state.accounts.find(a => a.id === id);
   }
 
@@ -90,13 +112,12 @@ window.FINANCE = (function(){
   }){
 
     const acc = getAccount(accountId);
-    if(!acc) return;
 
     const mId = id || uid();
     const movement = {
       id: mId,
       date: date || new Date().toISOString(),
-      type, // income | expense
+      type, // income | expense | transfer
       amount: Number(amount),
       accountId,
       category,
@@ -116,10 +137,12 @@ window.FINANCE = (function(){
       sourceLabel: sourceLabel || null
     };
 
-    if(type === "expense"){
-      acc.balance -= movement.amount;
-    }else{
-      acc.balance += movement.amount;
+    if(acc){
+      if(type === "expense"){
+        acc.balance -= movement.amount;
+      }else if(type === "income"){
+        acc.balance += movement.amount;
+      }
     }
 
     state.movements.push(movement);

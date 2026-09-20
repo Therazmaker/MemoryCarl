@@ -15616,7 +15616,9 @@ function addFinanceEntry(payload){
     usdNet: payload.usdNet || null,
     usdFee: payload.usdFee || null,
     usdExchange: payload.usdExchange || null,
-    usdFixedFee: payload.usdFixedFee || null
+    usdFixedFee: payload.usdFixedFee || null,
+    counterparty: payload.counterparty || null,
+    sourceLabel: payload.sourceLabel || null
   };
 
   if(window.FINANCE){
