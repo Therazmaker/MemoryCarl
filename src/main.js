@@ -572,9 +572,9 @@ async function refreshSwissTransitsUI({forceSpeak=false} = {}){
     }
 
     // Lunar money whisper (reflective, not advice)
-    const mw = (swiss.transit_money_whisper || "").trim();
+    const mw = String(swiss.transit_money_whisper ?? "").trim();
     if(mw){
-      const mk = `MONEY_${todayKey()}_${(swiss.moon_phase_name||"")}_${(swiss.transit_moon_house||"")}`;
+      const mk = `MONEY_${todayKey()}_${String(swiss.moon_phase_name ?? "")}_${String(swiss.transit_moon_house ?? "")}`;
       const hasSaid = seen.seen.includes(mk);
       const spend24 = Number(window.__MC_STATE__?.spend_24h_total ?? window.__MC_STATE__?.spend_24h ?? 0);
       const isSpendHot = isFinite(spend24) && spend24 > 0;
@@ -730,10 +730,10 @@ function renderLunarMoneyCard(){
   const house2Sign = house2?.sign ? String(house2.sign) : "—";
   const regencia = (house2Sign.toLowerCase()==="pisces" || house2Sign.toLowerCase()==="piscis") ? "Neptuno / Júpiter" : "";
 
-  const phase = (swiss.moon_phase_name || (liteMoon && liteMoon.moon_phase_name) || "").trim();
-  const msign = (swiss.moon_sign || (liteMoon && liteMoon.moon_sign) || "").trim();
-  const mhouse = (swiss.transit_moon_house || (liteTransits && liteTransits.transit_moon_house) || "").trim();
-  let whisper = (swiss.transit_money_whisper || "").trim();
+  const phase = String(swiss.moon_phase_name ?? liteMoon?.moon_phase_name ?? "").trim();
+  const msign = String(swiss.moon_sign ?? liteMoon?.moon_sign ?? "").trim();
+  const mhouse = String(swiss.transit_moon_house ?? liteTransits?.transit_moon_house ?? "").trim();
+  let whisper = String(swiss.transit_money_whisper ?? "").trim();
 
   if (!whisper && msign) {
     const hint = liteTransits?.transit_hint || "Observa tus emociones al gastar.";
