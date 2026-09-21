@@ -54,6 +54,10 @@ body{
   border:1px solid var(--line);
   border-radius:16px;box-shadow:var(--shadow);
   padding:10px;margin-bottom:10px;
+  max-width:100%;
+  box-sizing:border-box;
+  overflow-wrap:anywhere;
+  word-break:break-word;
 }
 .cardTop{display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
 .cardTitle{margin:0;font-size:16px}
@@ -249,6 +253,11 @@ body{
 .bottomNav{
   position:fixed;
   left:0; right:0; bottom:0;
+  max-width:520px;
+  width:100%;
+  margin:0 auto;
+  box-sizing:border-box;
+  overflow:hidden;
   height:var(--navH);
   padding:8px 10px 10px;
   background:linear-gradient(to top, rgba(11,15,25,.96), rgba(11,15,25,.80));
@@ -257,12 +266,15 @@ body{
   z-index:25;
 
   display:flex;
-  gap:8px;
+  gap:6px;
   justify-content:space-between;
   align-items:center;
 }
 .bn{
   flex:1;
+  min-width:0;
+  flex-shrink:1;
+  box-sizing:border-box;
   height:100%;
   border:1px solid rgba(255,255,255,.10);
   border-radius:16px;
@@ -503,6 +515,11 @@ body{
   border: 1px solid rgba(124,92,255,.18);
   position: relative;
   overflow: hidden;
+  padding: 10px !important;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .djp-sleep-card::before{
   content:"";
@@ -4773,4 +4790,30 @@ body{
 .finProSaveBtn:active {
   transform: scale(0.98);
 }
+
+/* Life Tracker overflow fix */
+.lt-chip-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  box-sizing: border-box;
+}
+.lt-chip {
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Week Strip horizontal scroll container */
+.weekStrip {
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+
 

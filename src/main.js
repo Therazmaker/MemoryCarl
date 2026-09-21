@@ -6236,7 +6236,7 @@ function renderLifeTrackerCard() {
   `;
 
   return `
-    <section class="card lifeTrackerCard" id="homeLifeTracker">
+    <section class="card homeCard" id="homeLifeTracker">
       <div class="cardTop">
         <div>
           <h2 class="cardTitle">🧠 Tracker Vital</h2>
@@ -6808,15 +6808,15 @@ const sleepBars = renderSleepBars(sleepSeries);
     </div>
 
     <div class="homeGrid">
-      <section class="card homeCard djp-sleep-card" id="homeSleepCard">
-        <div class="djp-sc-header">
-          <div class="djp-sc-icon">🌙</div>
-          <div class="djp-sc-title-block">
-            <div class="djp-sc-title">Sueño</div>
-            <div class="djp-sc-sub">7 días</div>
+      <section class="card homeCard" id="homeSleepCard">
+        <div class="cardTop">
+          <div>
+            <h2 class="cardTitle">🌙 Sueño</h2>
+            <div class="small">7 días</div>
           </div>
-          <button class="djp-sc-add-btn" id="btnAddSleep" aria-label="Add sleep">＋</button>
+          <button class="iconBtn" id="btnAddSleep" title="Registrar sueño">＋</button>
         </div>
+        <div class="hr"></div>
         ${sleepBars}
       </section>
       ${renderTarotWidget()}
