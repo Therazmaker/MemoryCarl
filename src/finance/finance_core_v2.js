@@ -14,11 +14,27 @@ if (typeof window === 'undefined') {
 window.FINANCE = (function(){
 
   const state = {
-    accounts: [],
     movements: [],
     currentMonth: new Date().getMonth(),
     currentYear: new Date().getFullYear()
   };
+
+  Object.defineProperty(state, 'accounts', {
+    get: function() {
+      if (typeof window !== 'undefined' && window.state && Array.isArray(window.state.financeAccounts)) {
+        return window.state.financeAccounts;
+      }
+      return this._accounts || [];
+    },
+    set: function(val) {
+      this._accounts = val;
+      if (typeof window !== 'undefined' && window.state) {
+        window.state.financeAccounts = val;
+      }
+    },
+    configurable: true,
+    enumerable: true
+  });
 
   /* ===============================
      UTIL
@@ -29,7 +45,11 @@ window.FINANCE = (function(){
   }
 
   function save(){
-    localStorage.setItem("finance_v2_state", JSON.stringify(state));
+    try {
+      localStorage.setItem("finance_v2_state", JSON.stringify(state));
+    } catch (err) {
+      console.warn("Storage quota exceeded or error saving finance_v2_state:", err);
+    }
   }
 
   function load(){
@@ -59,6 +79,12 @@ window.FINANCE = (function(){
   }
 
   function getAccount(id){
+    if(!id) return null;
+    const globalAccs = (typeof window !== 'undefined' && window.state && Array.isArray(window.state.financeAccounts)) ? window.state.financeAccounts : null;
+    if (globalAccs) {
+      const found = globalAccs.find(a => a.id === id);
+      if (found) return found;
+    }
     return state.accounts.find(a => a.id === id);
   }
 
@@ -90,13 +116,12 @@ window.FINANCE = (function(){
   }){
 
     const acc = getAccount(accountId);
-    if(!acc) return;
 
     const mId = id || uid();
     const movement = {
       id: mId,
       date: date || new Date().toISOString(),
-      type, // income | expense
+      type, // income | expense | transfer
       amount: Number(amount),
       accountId,
       category,
@@ -116,10 +141,12 @@ window.FINANCE = (function(){
       sourceLabel: sourceLabel || null
     };
 
-    if(type === "expense"){
-      acc.balance -= movement.amount;
-    }else{
-      acc.balance += movement.amount;
+    if(acc){
+      if(type === "expense"){
+        acc.balance -= movement.amount;
+      }else if(type === "income"){
+        acc.balance += movement.amount;
+      }
     }
 
     state.movements.push(movement);
@@ -314,15 +341,13 @@ window.FINANCE = (function(){
     try {
       const urlRaw = localStorage.getItem("memorycarl_script_url");
       const apiKey = localStorage.getItem("memorycarl_script_api_key");
-      if (!urlRaw || !apiKey) return;
+      const url = urlRaw ? urlRaw.replace(/\/+$/, "") : "https://memory-carl.vercel.app";
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
-      const url = urlRaw.replace(/\/+$/, "");
       const res = await fetch(`${url}/api/telegram/pending`, {
         method: "GET",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        }
+        headers
       });
 
       if (!res.ok) throw new Error("Error fetching telegram pending");
