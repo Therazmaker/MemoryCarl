@@ -225,7 +225,7 @@ export async function generateDailyBriefing(rootState = {}, now = new Date()) {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
         body: JSON.stringify({
-          model: settings.model || "gpt-oss:120b",
+          model: settings.model || "gemma4:31b",
           messages,
           stream: false,
           options: { temperature: 0.7, num_predict: 500 }
@@ -237,7 +237,7 @@ export async function generateDailyBriefing(rootState = {}, now = new Date()) {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
           body: JSON.stringify({
-            model: settings.model || "gpt-oss:120b",
+            model: settings.model || "gemma4:31b",
             messages,
             stream: false,
             options: { temperature: 0.7, num_predict: 500 }

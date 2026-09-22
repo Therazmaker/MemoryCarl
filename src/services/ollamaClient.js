@@ -17,21 +17,21 @@ const SETTINGS_KEY = "memorycarl_ollama_settings";
 const OLLAMA_CLOUD_BASE = "https://ollama.com";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-// ---- Modelos disponibles en Ollama Cloud ----
+// ---- Modelos disponibles en Ollama Cloud (Free Usage Tier) ----
 export const OLLAMA_CLOUD_MODELS = [
-  { id: "gpt-oss:120b", label: "GPT-OSS 120B (Recomendado)" },
-  { id: "qwen3.5", label: "Qwen 3.5" },
-  { id: "kimi-k2.6", label: "Kimi K2.6" },
-  { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
-  { id: "minimax-m3", label: "MiniMax M3" },
-  { id: "glm-5.1", label: "GLM 5.1" },
+  { id: "gemma4:31b", label: "Gemma 4 31B (Gratis / Rápido)" },
+  { id: "gpt-oss:120b", label: "GPT-OSS 120B (Gratis / Recomendado)" },
+  { id: "gpt-oss:20b", label: "GPT-OSS 20B (Gratis / Ligero)" },
+  { id: "nemotron-3-nano:30b", label: "Nemotron 3 Nano 30B (Gratis)" },
+  { id: "nemotron-3-super", label: "Nemotron 3 Super (Gratis)" },
+  { id: "nemotron-3-ultra", label: "Nemotron 3 Ultra (Gratis)" },
 ];
 
 export const DEFAULT_OLLAMA_SETTINGS = {
   enabled: false,
   apiKey: "",
-  model: "gpt-oss:120b",
-  baseUrl: OLLAMA_CLOUD_BASE,
+  model: "gemma4:31b",
+  baseUrl: "https://corsproxy.io/?https://ollama.com",
   timeoutMs: DEFAULT_TIMEOUT_MS,
   stream: true,
   temperature: 0.7,

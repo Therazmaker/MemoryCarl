@@ -155,7 +155,7 @@ async function callOllama(messages) {
   const url = `${baseUrl}/api/chat`;
 
   const body = {
-    model: settings.model || "gpt-oss:120b",
+    model: settings.model || "gemma4:31b",
     messages,
     stream: false,
     options: { temperature: settings.temperature ?? 0.7, num_predict: settings.maxTokens ?? 1024 },
