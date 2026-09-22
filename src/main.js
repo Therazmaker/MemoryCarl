@@ -53,8 +53,9 @@ import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
-import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
 import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO } from "./shopping/shoppingAi.js";
+import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles } from "./shopping/mealBundles.js";
+import { generateDailyBriefing, buildDailyFlowContext } from "./services/dailyFlowEngine.js";
 
 try {
   // Free up quota: remove heavy AI state on boot. It rebuilds automatically.
@@ -3280,6 +3281,34 @@ function view(){
             toast(`Chef AI descontó de inventario: ${deductedMsgs.join(", ")}`);
           }
         }
+
+        // Handle createMealBundle
+        if (result.actions && result.actions.createMealBundle) {
+          const mb = result.actions.createMealBundle;
+          if (mb.name && mb.portions) {
+            createMealBundle({
+              name: mb.name,
+              mealType: mb.mealType || "almuerzo",
+              totalCost: Number(mb.totalCost) || 0,
+              portions: Number(mb.portions) || 4,
+              notes: mb.notes || ""
+            });
+            toast(`🥘 Comida guardada: ${mb.name} (${mb.portions} porciones)`);
+          }
+        }
+
+        // Handle consumeMealBundle
+        if (result.actions && result.actions.consumeMealBundle) {
+          const activeBundles = loadMealBundles().filter(b => b.status === "active" && b.portionsRemaining > 0);
+          const targetType = result.actions.consumeMealBundle.mealType || "almuerzo";
+          const match = activeBundles.find(b => b.mealType === targetType) || activeBundles[0];
+          if (match) {
+            const consumed = consumeMealPortion(match.id);
+            if (consumed.bundle) {
+              toast(`✅ Porción de ${consumed.bundle.name} consumida (Quedan ${consumed.remaining}). Ahorro vs calle: S/ ${consumed.savingsToday}`);
+            }
+          }
+        }
         
         persist();
       } catch (err) {
@@ -3439,6 +3468,111 @@ function view(){
   }
   if(state.tab==="semana"){
     try{ wireSemana(); }catch(e){ console.error(e); }
+  }
+
+  // Daily Flow Card wiring (Home)
+  if(state.tab==="home"){
+    const btnRefreshBriefing = root.querySelector("#btnRefreshDailyBriefing");
+    if(btnRefreshBriefing){
+      btnRefreshBriefing.addEventListener("click", async ()=>{
+        const contentEl = root.querySelector("#dailyBriefingContent");
+        if(contentEl) contentEl.innerHTML = `<em>Consultando a Ollama para tu estrategia del día... ⏳</em>`;
+        btnRefreshBriefing.disabled = true;
+        try{
+          const res = await generateDailyBriefing(state);
+          localStorage.setItem("memorycarl_daily_briefing_cache", JSON.stringify({
+            date: new Date().toISOString().slice(0, 10),
+            text: res.briefingText
+          }));
+          if(contentEl) contentEl.textContent = res.briefingText;
+          toast("Estrategia matutina actualizada ✨");
+        }catch(err){
+          if(contentEl) contentEl.textContent = "No se pudo conectar con Ollama. Se mantendrá el cálculo local.";
+          toast("Error al conectar con Ollama");
+        }finally{
+          btnRefreshBriefing.disabled = false;
+        }
+      });
+    }
+
+    const btnReward = root.querySelector("#btnQuickDrinkReward");
+    if(btnReward){
+      btnReward.addEventListener("click", ()=>{
+        const pid = btnReward.dataset.prodId;
+        const prod = (state.products||[]).find(p => p.id === pid);
+        if(!prod) return;
+        const price = Number(prod.price || 0);
+        prod.lastConsumedAt = new Date().toISOString();
+
+        // Registrar en contabilidad
+        const primaryAcc = (state.financeAccounts||[])[0];
+        if(primaryAcc){
+          primaryAcc.balance = Number((Number(primaryAcc.balance || 0) - price).toFixed(2));
+          state.financeLedger = state.financeLedger || [];
+          state.financeLedger.unshift({
+            id: `fin_${Date.now().toString(36)}`,
+            type: "expense",
+            category: "Gasto",
+            date: new Date().toISOString().slice(0, 16),
+            reason: "normal",
+            note: prod.name,
+            accountId: primaryAcc.id,
+            amount: price,
+            archived: false
+          });
+        }
+        persist();
+        toast(`👑 ¡Gusto registrado! ${prod.name} (-S/ ${price.toFixed(2)})`);
+        view();
+      });
+    }
+
+    const btnBase = root.querySelector("#btnQuickDrinkBase");
+    if(btnBase){
+      btnBase.addEventListener("click", ()=>{
+        const pid = btnBase.dataset.prodId;
+        const prod = (state.products||[]).find(p => p.id === pid);
+        if(!prod) return;
+        const price = Number(prod.price || 0);
+        prod.lastConsumedAt = new Date().toISOString();
+
+        const primaryAcc = (state.financeAccounts||[])[0];
+        if(primaryAcc){
+          primaryAcc.balance = Number((Number(primaryAcc.balance || 0) - price).toFixed(2));
+          state.financeLedger = state.financeLedger || [];
+          state.financeLedger.unshift({
+            id: `fin_${Date.now().toString(36)}`,
+            type: "expense",
+            category: "Gasto",
+            date: new Date().toISOString().slice(0, 16),
+            reason: "normal",
+            note: prod.name,
+            accountId: primaryAcc.id,
+            amount: price,
+            archived: false
+          });
+        }
+        persist();
+        toast(`⚡ Bebida registrada: ${prod.name} (-S/ ${price.toFixed(2)})`);
+        view();
+      });
+    }
+
+    const btnHomeLunch = root.querySelector("#btnQuickHomeLunch");
+    if(btnHomeLunch){
+      btnHomeLunch.addEventListener("click", ()=>{
+        const activeBundles = loadMealBundles().filter(b => b.status === "active" && b.portionsRemaining > 0);
+        const match = activeBundles.find(b => b.mealType === "almuerzo") || activeBundles[0];
+        if(match){
+          const res = consumeMealPortion(match.id);
+          toast(`🍲 Almorzaste de casa: ${match.name}. Ahorro estimado: S/ ${res.savingsToday.toFixed(2)} (Quedan ${res.remaining})`);
+          persist();
+          view();
+        } else {
+          toast("No hay porciones registradas actualmente");
+        }
+      });
+    }
   }
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
@@ -6816,6 +6950,26 @@ function viewHome(){
 const sleepSeries = getSleepWeekSeries();
 const sleepBars = renderSleepBars(sleepSeries);
 
+  // Daily Flow Context & Briefing Cache
+  const dailyFlowCtx = buildDailyFlowContext(state, now);
+  const cachedBriefing = (function(){
+    try {
+      const raw = localStorage.getItem("memorycarl_daily_briefing_cache");
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && parsed.date === dailyFlowCtx.date && parsed.text) return parsed.text;
+    } catch(_){}
+    return null;
+  })();
+
+  const briefingText = cachedBriefing || (
+    dailyFlowCtx.hasHomeLunchReady
+      ? `Tienes almuerzo preparado en casa (${dailyFlowCtx.mealInventory.byMealType.almuerzo.portions} porciones disponibles). Te ahorras ~S/ 10.00 frente a comer en la calle. ${dailyFlowCtx.hedonicOpportunity.shouldUpgradeToReward ? `¡Luz verde para un ${dailyFlowCtx.hedonicOpportunity.topPremium?.name || "Monster"} en la oficina!` : `Ve con tu ${dailyFlowCtx.hedonicOpportunity.topBase?.name || "Volt"} habitual para cuidar el margen.`}`
+      : `No hay almuerzo casero listo hoy. Margen libre diario: S/ ${dailyFlowCtx.liquidity.dailyFreeBudget.toFixed(2)}. ${dailyFlowCtx.hedonicOpportunity.shouldUpgradeToReward ? `Tienes margen para consentirte con un ${dailyFlowCtx.hedonicOpportunity.topPremium?.name || "Monster"}.` : `Mantén hoy tu ${dailyFlowCtx.hedonicOpportunity.topBase?.name || "Volt"} para optimizar el cierre de quincena.`}`
+  );
+
+  const topPrem = dailyFlowCtx.hedonicOpportunity.topPremium;
+  const topBase = dailyFlowCtx.hedonicOpportunity.topBase;
+
   return `
     <div class="homeTop">
       <div class="homeHello">
@@ -6826,6 +6980,46 @@ const sleepBars = renderSleepBars(sleepSeries);
         ${weekHtml}
       </div>
     </div>
+
+    <!-- TARJETA PROACTIVA: DAILY LIFE FLOW -->
+    <section class="card homeCard homeWide" id="homeDailyFlowCard" style="background:linear-gradient(145deg, rgba(30,27,75,0.85) 0%, rgba(15,23,42,0.95) 100%);border:1px solid rgba(139,92,246,0.25);box-shadow:0 8px 24px rgba(0,0,0,0.25);">
+      <div class="cardTop" style="align-items:flex-start;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:20px;">⚡</span>
+            <h2 class="cardTitle" style="color:#f1f5f9;margin:0;">Tu Flow de Hoy</h2>
+            <span class="chip" style="background:rgba(139,92,246,0.2);color:#c4b5fd;border:1px solid rgba(139,92,246,0.3);font-size:11px;">${escapeHtml(dailyFlowCtx.liquidity.runway.label)}</span>
+          </div>
+          <div class="small" style="color:#94a3b8;margin-top:2px;">Margen libre diario: <strong style="color:#38bdf8;">S/ ${dailyFlowCtx.liquidity.dailyFreeBudget.toFixed(2)}</strong></div>
+        </div>
+        <button class="iconBtn" id="btnRefreshDailyBriefing" title="Pedir consejo a Ollama" style="background:rgba(255,255,255,0.06);font-size:14px;">✨</button>
+      </div>
+
+      <div class="hr" style="margin:8px 0;opacity:0.15;"></div>
+
+      <div id="dailyBriefingContent" style="font-size:13.5px;line-height:1.45;color:#e2e8f0;padding:4px 0 10px 0;">
+        ${escapeHtml(briefingText)}
+      </div>
+
+      <!-- BOTONES DE ACCIÓN EN 1 CLIC -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;padding-top:4px;">
+        ${topPrem ? `
+          <button class="btn" id="btnQuickDrinkReward" data-prod-id="${topPrem.id}" style="font-size:12px;padding:6px 10px;background:rgba(236,72,153,0.18);border:1px solid rgba(236,72,153,0.35);color:#fbcfe8;">
+            👑 Tomé ${escapeHtml(topPrem.name)} (S/ ${Number(topPrem.price||0).toFixed(2)})
+          </button>
+        ` : ""}
+        ${topBase ? `
+          <button class="btn" id="btnQuickDrinkBase" data-prod-id="${topBase.id}" style="font-size:12px;padding:6px 10px;background:rgba(59,130,246,0.18);border:1px solid rgba(59,130,246,0.35);color:#bfdbfe;">
+            ⚡ Tomé ${escapeHtml(topBase.name)} (S/ ${Number(topBase.price||0).toFixed(2)})
+          </button>
+        ` : ""}
+        ${dailyFlowCtx.hasHomeLunchReady ? `
+          <button class="btn" id="btnQuickHomeLunch" style="font-size:12px;padding:6px 10px;background:rgba(34,197,94,0.18);border:1px solid rgba(34,197,94,0.35);color:#bbf7d0;">
+            🍲 Almorcé de Casa (${dailyFlowCtx.mealInventory.byMealType.almuerzo.portions} restantes)
+          </button>
+        ` : ""}
+      </div>
+    </section>
 
     <div class="homeGrid">
       <section class="card homeCard" id="homeSleepCard">
@@ -11838,9 +12032,45 @@ try{
 LS.products = "memorycarl_v2_products";
 LS.shoppingHistory = "memorycarl_v2_shopping_history";
 LS.inventory = "memorycarl_v2_inventory";
-LS.inventoryLots = "memorycarl_v2_inventory_lots";
-state.products = load(LS.products, []);
-state.shoppingHistory = load(LS.shoppingHistory, []);
+state.products = (function(){
+  const loaded = load(LS.products, []);
+  return Array.isArray(loaded) ? loaded.map(p => {
+    // Normalización de campos inteligentes si faltan
+    const name = String(p.name || "").toLowerCase();
+    let defaultTier = "base_diario";
+    let defaultContext = "almuerzo_casa";
+    let defaultRating = 3;
+    if (name.includes("monster") || name.includes("red bull")) {
+      defaultTier = "premio_premium";
+      defaultRating = 5;
+      defaultContext = "oficina";
+    } else if (name.includes("volt") || name.includes("café") || name.includes("cafe")) {
+      defaultTier = "base_diario";
+      defaultRating = 3;
+      defaultContext = "oficina";
+    } else if (name.includes("pepsi") || name.includes("coca") || name.includes("gaseosa")) {
+      defaultTier = "gusto_medio";
+      defaultRating = 4;
+      defaultContext = "oficina";
+    } else if (name.includes("empanada") || name.includes("perro") || name.includes("bomba") || name.includes("keke")) {
+      defaultTier = "gusto_medio";
+      defaultRating = 4;
+      defaultContext = "calle_rapida";
+    } else if (name.includes("huevo") || name.includes("pan") || name.includes("platano") || name.includes("plátano")) {
+      defaultTier = "base_diario";
+      defaultRating = 3;
+      defaultContext = "desayuno_casa";
+    }
+    return {
+      ...p,
+      rating: Number(p.rating ?? defaultRating),
+      tier: p.tier || defaultTier,
+      context: p.context || defaultContext,
+      substituteOf: Array.isArray(p.substituteOf) ? p.substituteOf : (p.substituteOf ? [p.substituteOf] : []),
+      lastConsumedAt: p.lastConsumedAt || null
+    };
+  }) : [];
+})();
 state.inventory = load(LS.inventory, []);
 state.inventoryLots = load(LS.inventoryLots, []);
 state.shoppingSubtab = state.shoppingSubtab || "lists";
@@ -12244,14 +12474,21 @@ function openProductLibrary(){
           const u = String(p.unit||"u").toLowerCase();
           const isKg = u.includes("kg");
           const priceLabel = isKg ? `${money(p.price)}/kg` : money(p.price);
+          const ratingStars = "★".repeat(Math.max(1, Math.min(5, p.rating || 3)));
+          const tierBadge = p.tier === "premio_premium" ? "👑 Premio" : p.tier === "gusto_medio" ? "✨ Gusto" : "⚡ Base";
+          const lastCons = p.lastConsumedAt ? `<span style="font-size:11px;opacity:0.75;">· Visto: ${p.lastConsumedAt.slice(5,10)}</span>` : "";
           return `
             <div class="libCard">
               <div class="libCardTop">
-                <div class="libCardName">${ess}${escapeHtml(p.name)}</div>
+                <div class="libCardName">${ess}${escapeHtml(p.name)} <span style="font-size:11px;color:#f59e0b;" title="Afinidad">${ratingStars}</span></div>
                 ${trendHtml}
               </div>
-              <div class="libCardMeta">${priceLabel}${p.unit?` · ${escapeHtml(p.unit)}`:""}${p.store?` · ${escapeHtml(p.store)}`:""}</div>
-              ${p.category?`<div class="libCardCat">${escapeHtml(p.category)}</div>`:""}
+              <div class="libCardMeta">${priceLabel}${p.unit?` · ${escapeHtml(p.unit)}`:""}${p.store?` · ${escapeHtml(p.store)}`:""} ${lastCons}</div>
+              <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;">
+                ${p.category?`<div class="libCardCat">${escapeHtml(p.category)}</div>`:""}
+                <div class="libCardCat" style="background:rgba(255,255,255,0.08);color:#a5b4fc;">${tierBadge}</div>
+                ${p.context?`<div class="libCardCat" style="background:rgba(255,255,255,0.05);">${escapeHtml(p.context)}</div>`:""}
+              </div>
               <div class="libCardActions">
                 <button class="libActBtn libActChart" data-lib-chart="${p.id}">📈</button>
                 <button class="libActBtn libActEdit" data-lib-edit="${p.id}">✏️ Editar</button>
@@ -13520,17 +13757,25 @@ function openNewProduct(){
     title:"Nuevo producto",
     fields:[
       {key:"name", label:"Nombre"},
-      {key:"price", label:"Precio", type:"number"},
+      {key:"price", label:"Precio (S/)", type:"number"},
+      {key:"rating", label:"Gusto / Afinidad (1 al 5 ⭐)", value:"3"},
+      {key:"tier", label:"Tier (base_diario / gusto_medio / premio_premium)", value:"base_diario"},
+      {key:"context", label:"Contexto (oficina / desayuno_casa / almuerzo_casa / calle_rapida)", value:"almuerzo_casa"},
       {key:"store", label:"Tienda"},
       {key:"category", label:"Categoría", value:""},
       {key:"unit", label:"Unidad (u, kg, L)", value:"u"},
       {key:"essential", label:"Esencial (1/0)", value:"1"}
     ],
-    onSubmit: ({name, price, store, category, unit, essential})=>{
+    onSubmit: ({name, price, rating, tier, context, store, category, unit, essential})=>{
       state.products.unshift({
         id: uid("p"),
         name:name,
         price:Number(price||0),
+        rating: Math.max(1, Math.min(5, Number(rating||3))),
+        tier: (tier||"base_diario").trim(),
+        context: (context||"almuerzo_casa").trim(),
+        substituteOf: [],
+        lastConsumedAt: null,
         store:store,
         category:(category||"").trim(),
         unit:(unit||"u").trim() || "u",
@@ -13572,6 +13817,9 @@ function editProductDetails(productId){
     title:"Editar producto",
     fields:[
       {key:"name", label:"Nombre", value:String(p.name||"")},
+      {key:"rating", label:"Gusto / Afinidad (1 al 5 ⭐)", value:String(p.rating || 3)},
+      {key:"tier", label:"Tier (base_diario / gusto_medio / premio_premium)", value:String(p.tier || "base_diario")},
+      {key:"context", label:"Contexto (oficina / desayuno_casa / almuerzo_casa / calle_rapida)", value:String(p.context || "almuerzo_casa")},
       {key:"category", label:"Categoría", value:String(p.category||"")},
       {key:"unit", label:"Unidad (u, kg, L)", value:String(p.unit||"u")},
       {key:"price", label:(String(p.unit||"u").toLowerCase().includes("kg") ? "Precio por kg" : "Precio"), type:"number", value:String(p.price||0)},
@@ -13582,6 +13830,9 @@ function editProductDetails(productId){
       const name = (vals.name||"").trim();
       if(!name) return;
       p.name = name;
+      p.rating = Math.max(1, Math.min(5, Number(vals.rating || 3)));
+      p.tier = (vals.tier || "base_diario").trim();
+      p.context = (vals.context || "almuerzo_casa").trim();
       p.category = (vals.category||"").trim();
       p.unit = (vals.unit||"u").trim() || "u";
       p.store = (vals.store||"").trim();

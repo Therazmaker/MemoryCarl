@@ -5,6 +5,8 @@
  */
 
 import { getOllamaSettings, isOllamaConfigured } from "../services/ollamaClient.js";
+import { formatProductForAiPrompt, enrichAllProducts } from "./productIntelligence.js";
+import { formatMealInventoryForAiPrompt } from "./mealBundles.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -26,12 +28,9 @@ export function todayISO() {
  * Build system prompt with product library, inventory + past days context.
  */
 function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory = []) {
-  const libStr = products.length > 0
-    ? products.map(p => {
-        const unit = (p.unit || "u").toLowerCase();
-        const unitLabel = unit.includes("kg") ? "kg" : "u";
-        return `- ${p.name}${p.category ? ` [${p.category}]` : ""}: S/ ${Number(p.price || 0).toFixed(2)} por ${unitLabel}`;
-      }).join("\n")
+  const enrichedProducts = enrichAllProducts(products);
+  const libStr = enrichedProducts.length > 0
+    ? enrichedProducts.map(p => formatProductForAiPrompt(p)).join("\n")
     : "  (Biblioteca vacía)";
 
   const invStr = inventory.length > 0
@@ -76,6 +75,8 @@ function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory =
     ? `\n--- FRECUENCIA HISTÓRICA ---\n${freqLines.join("\n")}\n----------------------------\n`
     : "";
 
+  const mealBundlesStr = formatMealInventoryForAiPrompt();
+
   return `Eres "Chef AI", el asistente personal de cocina, compras y nutrición de Carlos, en Perú.
 La moneda es siempre SOLES PERUANOS (S/). Nunca uses dólares.
 
@@ -84,6 +85,9 @@ ${libStr}
 --------------------------------------------------------------
 --- TU INVENTARIO ACTUAL EN CASA (Despensa) ---
 ${invStr}
+--------------------------------------------------------------
+--- COMIDAS CASERAS PREPARADAS EN CASA (Meal Bundles & Porciones) ---
+${mealBundlesStr}
 --------------------------------------------------------------
 ${pastCtx}${freqStr}
 TU COMPORTAMIENTO:
@@ -102,14 +106,25 @@ TU COMPORTAMIENTO:
 
 5. **Seguimiento de frecuencia:** Usa el historial de días anteriores para detectar patrones ("Esta semana ya es la tercera vez que cenas eso").
 
-6. **Deducción de Inventario (NIVEL DIOS):** Si Carlos dice explícitamente que comió algo que está en su Despensa, al final de tu respuesta DEBES generar un bloque JSON oculto para que la app reste eso del inventario.
-   - Si no estás 100% seguro de la cantidad o del producto exacto (ej. hay varios arroces), PREGUNTA PRIMERO y NO generes el JSON.
-   - Si estás seguro, pon el JSON al final de tu respuesta así:
+6. **Deducción de Inventario y Creación de Meal Bundles (NIVEL DIOS):**
+   - Si Carlos dice que cocinó o preparó una comida para varios días (ej. "cociné pollo con arroz para 4 días y me costó 20"), DEBES crear un meal bundle con su nombre, mealType (desayuno/almuerzo/cena), costo total y porciones.
+   - Si Carlos dice que comió una porción de comida casera que ya tenía guardada, genera una acción de consumo de comida casera.
+   - Pon el JSON al final de tu respuesta así:
    ---ACTIONS---
    {
      "consume": [
        { "name": "Nombre Exacto del Producto", "qty": 0.25 }
-     ]
+     ],
+     "createMealBundle": {
+       "name": "Almuerzo: Pollo con Arroz",
+       "mealType": "almuerzo",
+       "totalCost": 20.00,
+       "portions": 4,
+       "notes": "Preparado en casa"
+     },
+     "consumeMealBundle": {
+       "mealType": "almuerzo"
+     }
    }
 
 7. **Tono:** Español, amigable, directo. Como un amigo chef que también sabe de finanzas y cálculo rápido.`;
