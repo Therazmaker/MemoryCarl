@@ -4055,6 +4055,10 @@ body{
 }
 
 .mnNeuronsList {
+  max-height: 200px;
+  overflow-y: auto;
+  align-content: flex-start;
+  padding-right: 4px;
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
@@ -4822,3 +4826,10 @@ body{
 
 
 
+.mnNeuronsList::-webkit-scrollbar {
+  width: 4px;
+}
+.mnNeuronsList::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 4px;
+}
