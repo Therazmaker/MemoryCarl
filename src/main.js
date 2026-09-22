@@ -668,8 +668,27 @@ function openSwissDailyModal(){
 // ---- Lunar Money Card (Home) ----
 function getSpend24h(){
   const s = (window.__MC_STATE__ && typeof window.__MC_STATE__==="object") ? window.__MC_STATE__ : refreshGlobalSignals();
-  const v = (s.spend_24h_total ?? s.spend_24h ?? s.spend_1d_total ?? 0);
-  const n = Number(v);
+  let v = (s.spend_24h_total ?? s.spend_24h ?? s.spend_1d_total ?? 0);
+  let n = Number(v) || 0;
+
+  // Also include expenses from Finance ledger in the last 24h
+  try {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const ledger = (typeof financeActiveLedger === 'function') ? financeActiveLedger() : (state?.financeLedger || []);
+    let finExpense24h = 0;
+    for (const e of ledger) {
+      if (!e || e.archived || e.type !== 'expense') continue;
+      if (e.isFiado && e.fiadoStatus !== 'paid') continue;
+      const d = new Date(e.date).getTime();
+      if (!isNaN(d) && d >= cutoff) {
+        finExpense24h += Number(e.amount || 0);
+      }
+    }
+    if (finExpense24h > 0) {
+      n = Math.max(n, finExpense24h);
+    }
+  } catch(e) {}
+
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -22673,8 +22692,9 @@ window.financePullFromSupabase = async function(isManual = false) {
           `- Movimientos en Local: ${localLedgerCount}\n\n` + 
           `¿Deseas sobreescribir tus datos locales con los de la nube? (Recomendado solo si tu móvil se limpió o deseas restaurar un backup anterior)`);
       } else {
-        // Auto-pull on boot only overwrites if cloud has strictly more data to avoid loss
-        shouldImport = (cloudLedgerCount > localLedgerCount);
+        // Auto-pull on boot only imports if local database is completely empty (fresh install / cleared cache)
+        // to avoid resurrecting deleted movements or overriding recent local deletions
+        shouldImport = (localLedgerCount === 0 && cloudLedgerCount > 0);
       }
 
       if (shouldImport) {

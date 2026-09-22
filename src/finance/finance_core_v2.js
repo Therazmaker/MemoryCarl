@@ -409,7 +409,8 @@ window.FINANCE = (function(){
     getMonthlyData,
     projection,
     weeklyReview,
-    fetchPendingTelegramTransactions
+    fetchPendingTelegramTransactions,
+    save
   };
 
 })();
