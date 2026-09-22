@@ -181,7 +181,27 @@ async function callOllama(messages) {
     return data?.message?.content || "";
   } catch (err) {
     clearTimeout(timer);
-    if (err.name === "AbortError") throw new Error("Tiempo de espera agotado. Revisa tu conexión.");
+    if (err.name === "AbortError") throw new Error("Tiempo de espera agotado con Ollama. Revisa tu conexión.");
+    
+    // Si es error de CORS (Failed to fetch) y no tiene proxy configurado
+    if (err.message?.toLowerCase().includes("failed to fetch") || err.name === "TypeError") {
+      // Intentar una vez con corsproxy.io si la url es directa a ollama.com
+      if (baseUrl === "https://ollama.com") {
+        try {
+          const proxyUrl = `https://corsproxy.io/?https://ollama.com/api/chat`;
+          const proxyRes = await fetch(proxyUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
+            body: JSON.stringify(body),
+          });
+          if (proxyRes.ok) {
+            const data = await proxyRes.json();
+            return data?.message?.content || "";
+          }
+        } catch (_proxyErr) {}
+      }
+      throw new Error("El navegador bloqueó la conexión a Ollama Cloud (CORS). Ve a NeuroChat → ⚙️ Configuración y en 'Base URL' coloca: https://corsproxy.io/?https://ollama.com");
+    }
     throw err;
   }
 }

@@ -219,17 +219,35 @@ export async function generateDailyBriefing(rootState = {}, now = new Date()) {
   ];
 
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
-      body: JSON.stringify({
-        model: settings.model || "gpt-oss:120b",
-        messages,
-        stream: false,
-        options: { temperature: 0.7, num_predict: 500 }
-      })
-    });
-    if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+    let res = null;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
+        body: JSON.stringify({
+          model: settings.model || "gpt-oss:120b",
+          messages,
+          stream: false,
+          options: { temperature: 0.7, num_predict: 500 }
+        })
+      });
+    } catch (fetchErr) {
+      if (baseUrl === "https://ollama.com") {
+        res = await fetch("https://corsproxy.io/?https://ollama.com/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
+          body: JSON.stringify({
+            model: settings.model || "gpt-oss:120b",
+            messages,
+            stream: false,
+            options: { temperature: 0.7, num_predict: 500 }
+          })
+        });
+      } else {
+        throw fetchErr;
+      }
+    }
+    if (!res || !res.ok) throw new Error(`Ollama HTTP ${res?.status}`);
     const data = await res.json();
     const briefingText = data?.message?.content || "";
     return { briefingText, context: ctx };
