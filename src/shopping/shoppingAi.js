@@ -143,31 +143,177 @@ TU COMPORTAMIENTO:
 5. **Tono:** Amigable, cercano, analítico. Un chef y copiloto de hábitos que aprende de cada comida de Carlos.`;
 }
 
-/**
- * Llama a Ollama Cloud (igual que NeuroChat) para responder al usuario.
- */
-async function callOllama(messages) {
-  if (!isOllamaConfigured()) {
-    throw new Error("Ollama Cloud no configurado. Ve a NeuroChat → ⚙️ Configuración y activa Ollama con tu API Key.");
-  }
-  const settings = getOllamaSettings();
-  const baseUrl = (settings.baseUrl || "https://ollama.com").replace(/\/+$/, "");
-  const url = `${baseUrl}/api/chat`;
+const CHEF_SETTINGS_KEY = "memorycarl_chef_settings";
 
-  const body = {
-    model: settings.model || "gemma4:31b",
-    messages,
-    stream: false,
-    options: { temperature: settings.temperature ?? 0.7, num_predict: settings.maxTokens ?? 1024 },
+/**
+ * Obtiene la configuración para Chef AI (revisa settings propios o hereda de NeuroChat).
+ */
+export function getChefAiSettings() {
+  let chefCustom = {};
+  try {
+    const raw = localStorage.getItem(CHEF_SETTINGS_KEY);
+    if (raw) chefCustom = JSON.parse(raw);
+  } catch (_) {}
+
+  // Heredar Gemini si está configurado en NeuroChat
+  let geminiKey = chefCustom.geminiApiKey || "";
+  let geminiModel = chefCustom.geminiModel || "gemini-2.5-flash";
+  if (!geminiKey) {
+    try {
+      const nc = JSON.parse(localStorage.getItem("memorycarl_neurochat_settings") || "{}");
+      if (nc.apiKey) {
+        geminiKey = nc.apiKey;
+        if (nc.model && nc.model.includes("gemini")) geminiModel = nc.model;
+      }
+    } catch (_) {}
+  }
+
+  // Ollama settings
+  const ollama = getOllamaSettings();
+
+  const provider = chefCustom.provider || (geminiKey ? "gemini" : (ollama.apiKey ? "ollama" : "gemini"));
+
+  return {
+    provider, // "gemini" | "ollama"
+    geminiApiKey: geminiKey,
+    geminiModel,
+    ollamaModel: chefCustom.ollamaModel || ollama.model || "gemma4:31b",
+    ollamaBaseUrl: chefCustom.ollamaBaseUrl || ollama.baseUrl || "https://ollama.com",
+    ollamaApiKey: chefCustom.ollamaApiKey || ollama.apiKey || "",
+  };
+}
+
+/**
+ * Guarda ajustes específicos para Chef AI y sincroniza con Gemini global.
+ */
+export function saveChefAiSettings(patch) {
+  const current = getChefAiSettings();
+  const next = { ...current, ...patch };
+  try {
+    localStorage.setItem(CHEF_SETTINGS_KEY, JSON.stringify(next));
+    // Sincronizar con NeuroChat si se configuró Gemini
+    if (patch.geminiApiKey) {
+      try {
+        const rawNc = localStorage.getItem("memorycarl_neurochat_settings");
+        const nc = rawNc ? JSON.parse(rawNc) : {};
+        nc.apiKey = patch.geminiApiKey;
+        if (patch.geminiModel) nc.model = patch.geminiModel;
+        nc.enabled = true;
+        localStorage.setItem("memorycarl_neurochat_settings", JSON.stringify(nc));
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.warn("No se pudo guardar ajustes de Chef AI:", e);
+  }
+  return next;
+}
+
+/**
+ * Llama a Google Gemini API para responder.
+ */
+async function callGemini(messages, apiKey, model = "gemini-2.5-flash") {
+  if (!apiKey || apiKey.trim().length < 5) {
+    throw new Error("Falta la API Key de Gemini. Pulsa el botón ⚙️ en Chef AI para configurarla.");
+  }
+  const cleanModel = encodeURIComponent(model || "gemini-2.5-flash");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey.trim()}`;
+
+  // Formatear mensajes a contents de Gemini
+  // System instruction va en systemInstruction o en el primer prompt
+  const systemMsg = messages.find(m => m.role === "system");
+  const nonSystem = messages.filter(m => m.role !== "system");
+
+  const contents = nonSystem.map(m => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }]
+  }));
+
+  if (contents.length === 0 && systemMsg) {
+    contents.push({ role: "user", parts: [{ text: "Hola" }] });
+  }
+
+  const payload = {
+    contents,
+    generationConfig: {
+      temperature: 0.6,
+      maxOutputTokens: 2048,
+    }
   };
 
+  if (systemMsg) {
+    payload.systemInstruction = {
+      parts: [{ text: systemMsg.content }]
+    };
+  }
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), settings.timeoutMs || DEFAULT_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const errJson = await res.json();
+        errMsg = errJson.error?.message || errMsg;
+      } catch (_) {}
+      throw new Error(`Error Gemini (${res.status}): ${errMsg}`);
+    }
+
+    const data = await res.json();
+    const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!reply) throw new Error("Gemini no devolvió texto en la respuesta.");
+    return reply;
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === "AbortError") throw new Error("Tiempo de espera agotado con Gemini.");
+    throw err;
+  }
+}
+
+/**
+ * Llama al modelo configurado (Gemini u Ollama).
+ */
+async function callAi(messages) {
+  const settings = getChefAiSettings();
+
+  // Si el proveedor preferido es Gemini o hay Gemini key
+  if (settings.provider === "gemini" || (settings.geminiApiKey && !settings.ollamaApiKey)) {
+    return await callGemini(messages, settings.geminiApiKey, settings.geminiModel);
+  }
+
+  // Si usa Ollama
+  if (!settings.ollamaApiKey && !isOllamaConfigured()) {
+    if (settings.geminiApiKey) {
+      return await callGemini(messages, settings.geminiApiKey, settings.geminiModel);
+    }
+    throw new Error("Chef AI necesita una API Key. Abre ⚙️ Configuración y coloca tu clave de Gemini (recomendado) u Ollama.");
+  }
+
+  const baseUrl = (settings.ollamaBaseUrl || "https://ollama.com").replace(/\/+$/, "");
+  const url = `${baseUrl}/api/chat`;
+
+  const body = {
+    model: settings.ollamaModel || "gemma4:31b",
+    messages,
+    stream: false,
+    options: { temperature: 0.7, num_predict: 1024 },
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.ollamaApiKey}` },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -181,26 +327,14 @@ async function callOllama(messages) {
     return data?.message?.content || "";
   } catch (err) {
     clearTimeout(timer);
-    if (err.name === "AbortError") throw new Error("Tiempo de espera agotado con Ollama. Revisa tu conexión.");
-    
-    // Si es error de CORS (Failed to fetch) y no tiene proxy configurado
+    // Si falla por CORS y tenemos Gemini configurado, fallback automático
+    if (settings.geminiApiKey && (err.message?.toLowerCase().includes("failed to fetch") || err.name === "TypeError")) {
+      console.warn("Ollama falló por CORS, ejecutando fallback transparente a Gemini...");
+      return await callGemini(messages, settings.geminiApiKey, settings.geminiModel);
+    }
+    if (err.name === "AbortError") throw new Error("Tiempo de espera agotado con el modelo. Revisa tu conexión.");
     if (err.message?.toLowerCase().includes("failed to fetch") || err.name === "TypeError") {
-      // Intentar una vez con corsproxy.io si la url es directa a ollama.com
-      if (baseUrl === "https://ollama.com") {
-        try {
-          const proxyUrl = `https://corsproxy.io/?https://ollama.com/api/chat`;
-          const proxyRes = await fetch(proxyUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
-            body: JSON.stringify(body),
-          });
-          if (proxyRes.ok) {
-            const data = await proxyRes.json();
-            return data?.message?.content || "";
-          }
-        } catch (_proxyErr) {}
-      }
-      throw new Error("El navegador bloqueó la conexión a Ollama Cloud (CORS). Ve a NeuroChat → ⚙️ Configuración y en 'Base URL' coloca: https://corsproxy.io/?https://ollama.com");
+      throw new Error("Error de CORS al conectar con Ollama. Te sugerimos abrir ⚙️ Configuración en Chef AI y cambiar a Google Gemini.");
     }
     throw err;
   }
@@ -229,7 +363,7 @@ export async function sendShoppingAiMessage(text, chatHistory, products, pastDay
     ...recentHistory.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }))
   ];
 
-  let aiText = await callOllama(messages);
+  let aiText = await callAi(messages);
   
   // Extract actions if present
   let extractedActions = null;
@@ -286,7 +420,7 @@ Si no hay suficiente información para calcular el costo, pon 0.`;
   ];
 
   try {
-    const raw = await callOllama(messages);
+    const raw = await callAi(messages);
     const summaryMatch = raw.match(/RESUMEN:\s*(.+)/);
     const costMatch = raw.match(/COSTO_ESTIMADO:\s*([\d.]+)/);
 

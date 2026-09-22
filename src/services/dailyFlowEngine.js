@@ -209,6 +209,47 @@ export async function generateDailyBriefing(rootState = {}, now = new Date()) {
   }
 
   const prompt = buildDailyBriefingPrompt(ctx);
+
+  // Intentar primero con Gemini si está configurado (inmune a CORS y ultrarrápido)
+  let geminiKey = "";
+  let geminiModel = "gemini-2.5-flash";
+  try {
+    const chefS = JSON.parse(localStorage.getItem("memorycarl_chef_settings") || "{}");
+    if (chefS.geminiApiKey) {
+      geminiKey = chefS.geminiApiKey;
+      if (chefS.geminiModel) geminiModel = chefS.geminiModel;
+    }
+    if (!geminiKey) {
+      const nc = JSON.parse(localStorage.getItem("memorycarl_neurochat_settings") || "{}");
+      if (nc.apiKey) {
+        geminiKey = nc.apiKey;
+        if (nc.model && nc.model.includes("gemini")) geminiModel = nc.model;
+      }
+    }
+  } catch (_) {}
+
+  if (geminiKey && geminiKey.length > 5) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${geminiKey.trim()}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          systemInstruction: { parts: [{ text: "Eres un estratega de vida y asistente diario directo y cercano. Responde en español peruano natural." }] },
+          generationConfig: { temperature: 0.6, maxOutputTokens: 500 }
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const briefingText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        if (briefingText.trim()) return { briefingText: briefingText.trim(), context: ctx };
+      }
+    } catch (gErr) {
+      console.warn("Gemini falló en briefing, probando Ollama...", gErr);
+    }
+  }
+
   const settings = getOllamaSettings();
   const baseUrl = (settings.baseUrl || "https://ollama.com").replace(/\/+$/, "");
   const url = `${baseUrl}/api/chat`;
@@ -219,40 +260,22 @@ export async function generateDailyBriefing(rootState = {}, now = new Date()) {
   ];
 
   try {
-    let res = null;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
-        body: JSON.stringify({
-          model: settings.model || "gemma4:31b",
-          messages,
-          stream: false,
-          options: { temperature: 0.7, num_predict: 500 }
-        })
-      });
-    } catch (fetchErr) {
-      if (baseUrl === "https://ollama.com") {
-        res = await fetch("https://corsproxy.io/?https://ollama.com/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
-          body: JSON.stringify({
-            model: settings.model || "gemma4:31b",
-            messages,
-            stream: false,
-            options: { temperature: 0.7, num_predict: 500 }
-          })
-        });
-      } else {
-        throw fetchErr;
-      }
-    }
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${settings.apiKey}` },
+      body: JSON.stringify({
+        model: settings.model || "gemma4:31b",
+        messages,
+        stream: false,
+        options: { temperature: 0.7, num_predict: 500 }
+      })
+    });
     if (!res || !res.ok) throw new Error(`Ollama HTTP ${res?.status}`);
     const data = await res.json();
     const briefingText = data?.message?.content || "";
     return { briefingText, context: ctx };
   } catch (err) {
-    console.warn("Fallo al llamar a Ollama para el briefing, usando fallback local:", err);
+    console.warn("Fallo al llamar a LLM para el briefing, usando fallback local:", err);
     const fallback = `¡Buenos días Carlos! Tienes S/ ${ctx.liquidity.dailyFreeBudget.toFixed(2)} de margen diario (${ctx.liquidity.runway.label}). ${ctx.hasHomeLunchReady ? "Lleva tu almuerzo de casa para ahorrar." : "Considera opciones económicas de almuerzo."} ${ctx.hedonicOpportunity.shouldUpgradeToReward ? `¡Luz verde para un ${ctx.hedonicOpportunity.topPremium?.name} hoy!` : `Ve con tu ${ctx.hedonicOpportunity.topBase?.name || "Volt"} habitual.`}`;
     return { briefingText: fallback, context: ctx };
   }

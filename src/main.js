@@ -54,7 +54,7 @@ import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
-import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO } from "./shopping/shoppingAi.js";
+import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO, getChefAiSettings, saveChefAiSettings } from "./shopping/shoppingAi.js";
 import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles } from "./shopping/mealBundles.js";
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
@@ -3422,6 +3422,13 @@ function view(){
         }
       });
     }
+
+    const btnChefSettings = root.querySelector("#btnChefSettings");
+    if(btnChefSettings) btnChefSettings.addEventListener("click", () => openChefSettingsModal());
+    const btnBannerSettings = root.querySelector("#btnOpenChefSettingsBanner");
+    if(btnBannerSettings) btnBannerSettings.addEventListener("click", () => openChefSettingsModal());
+    const chipStatus = root.querySelector("#chipChefProviderStatus");
+    if(chipStatus) chipStatus.addEventListener("click", () => openChefSettingsModal());
 
     setTimeout(() => {
       const log = document.getElementById("shopAiChatLog");
@@ -14492,29 +14499,214 @@ function openShoppingCategoryModal(category, preset){
 }
 window.openShoppingCategoryModal = openShoppingCategoryModal;
 
+function openChefSettingsModal() {
+  const host = document.querySelector("#app");
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+
+  const s = getChefAiSettings();
+
+  modal.innerHTML = `
+    <div class="modal" style="max-width:480px;">
+      <div class="cardTop">
+        <div>
+          <h2 style="margin:0;font-size:18px;">⚙️ Configuración Chef AI</h2>
+          <div class="small" style="color:rgba(255,255,255,0.6);">Configura la IA que alimenta a tu Chef y copiloto</div>
+        </div>
+        <button class="btn ghost" data-x="1" style="font-size:16px;">✕</button>
+      </div>
+
+      <div class="hr"></div>
+
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <!-- Selector de Proveedor -->
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:#a78bfa;">Proveedor de Inteligencia Artificial</label>
+          <div style="display:flex;gap:10px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+              <input type="radio" name="chefProvider" value="gemini" ${s.provider==="gemini"?"checked":""}>
+              ✨ Google Gemini (Recomendado)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+              <input type="radio" name="chefProvider" value="ollama" ${s.provider==="ollama"?"checked":""}>
+              🦙 Ollama Cloud
+            </label>
+          </div>
+          <div class="small muted" style="margin-top:4px;">
+            Gemini soporta CORS directamente en el navegador y nunca falla con "Failed to fetch".
+          </div>
+        </div>
+
+        <!-- Sección Gemini -->
+        <div id="chefGeminiSection" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;display:${s.provider==='gemini'?'flex':'none'};flex-direction:column;gap:10px;">
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Gemini API Key</label>
+            <div style="display:flex;gap:6px;">
+              <input type="password" id="chefGeminiKey" class="input" style="flex:1;" placeholder="AIzaSy..." value="${escapeHtml(s.geminiApiKey||"")}" autocomplete="new-password">
+              <button class="btn ghost" id="btnToggleChefGeminiKey" type="button">👁</button>
+            </div>
+            <div class="small muted" style="margin-top:4px;">
+              Obtén tu clave gratis en <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:#818cf8;text-decoration:underline;">Google AI Studio</a>.
+            </div>
+          </div>
+
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Modelo Gemini</label>
+            <select id="chefGeminiModel" class="input">
+              <option value="gemini-2.5-flash" ${s.geminiModel==="gemini-2.5-flash"?"selected":""}>Gemini 2.5 Flash (Ultrarrápido / Recomendado)</option>
+              <option value="gemini-2.5-pro" ${s.geminiModel==="gemini-2.5-pro"?"selected":""}>Gemini 2.5 Pro (Máximo Razonamiento)</option>
+            </select>
+          </div>
+
+          <button class="btn" id="btnTestChefGemini" type="button" style="align-self:flex-start;font-size:12px;padding:6px 12px;">⚡ Probar Gemini</button>
+        </div>
+
+        <!-- Sección Ollama -->
+        <div id="chefOllamaSection" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;display:${s.provider==='ollama'?'flex':'none'};flex-direction:column;gap:10px;">
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Ollama API Key</label>
+            <input type="password" id="chefOllamaKey" class="input" placeholder="ollama-..." value="${escapeHtml(s.ollamaApiKey||"")}">
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Base URL</label>
+            <input type="text" id="chefOllamaBaseUrl" class="input" placeholder="https://ollama.com" value="${escapeHtml(s.ollamaBaseUrl||"https://ollama.com")}">
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Modelo Ollama</label>
+            <input type="text" id="chefOllamaModel" class="input" placeholder="gemma4:31b" value="${escapeHtml(s.ollamaModel||"gemma4:31b")}">
+          </div>
+        </div>
+
+        <!-- Mensaje de estado -->
+        <div id="chefSettingsStatus" style="display:none;font-size:12px;padding:8px 10px;border-radius:6px;"></div>
+
+        <!-- Acciones -->
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
+          <button class="btn ghost" data-x="1">Cancelar</button>
+          <button class="btn primary" id="btnSaveChefSettings">Guardar configuración</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  host.appendChild(modal);
+
+  // Toggle radio sections
+  modal.querySelectorAll('input[name="chefProvider"]').forEach(radio => {
+    radio.addEventListener("change", (e) => {
+      const isGemini = e.target.value === "gemini";
+      modal.querySelector("#chefGeminiSection").style.display = isGemini ? "flex" : "none";
+      modal.querySelector("#chefOllamaSection").style.display = isGemini ? "none" : "flex";
+    });
+  });
+
+  // Toggle password visibility
+  modal.querySelector("#btnToggleChefGeminiKey")?.addEventListener("click", () => {
+    const inp = modal.querySelector("#chefGeminiKey");
+    if (inp) inp.type = inp.type === "password" ? "text" : "password";
+  });
+
+  // Test Gemini
+  modal.querySelector("#btnTestChefGemini")?.addEventListener("click", async () => {
+    const key = modal.querySelector("#chefGeminiKey")?.value?.trim();
+    const model = modal.querySelector("#chefGeminiModel")?.value?.trim() || "gemini-2.5-flash";
+    const statusDiv = modal.querySelector("#chefSettingsStatus");
+    if (!key) {
+      statusDiv.style.display = "block";
+      statusDiv.style.background = "rgba(239,68,68,0.15)";
+      statusDiv.style.color = "#f87171";
+      statusDiv.textContent = "Ingresa primero una API Key para probar.";
+      return;
+    }
+    statusDiv.style.display = "block";
+    statusDiv.style.background = "rgba(59,130,246,0.15)";
+    statusDiv.style.color = "#60a5fa";
+    statusDiv.textContent = "Probando conexión con Gemini...";
+
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}?key=${key}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        statusDiv.style.background = "rgba(16,185,129,0.15)";
+        statusDiv.style.color = "#34d399";
+        statusDiv.textContent = "✓ ¡Conexión exitosa con Google Gemini!";
+      } else {
+        const txt = await res.text().catch(() => "");
+        statusDiv.style.background = "rgba(239,68,68,0.15)";
+        statusDiv.style.color = "#f87171";
+        statusDiv.textContent = `Error ${res.status}: ${txt.slice(0, 90)}`;
+      }
+    } catch (e) {
+      statusDiv.style.background = "rgba(239,68,68,0.15)";
+      statusDiv.style.color = "#f87171";
+      statusDiv.textContent = "Error de red: " + e.message;
+    }
+  });
+
+  // Save Settings
+  modal.querySelector("#btnSaveChefSettings")?.addEventListener("click", () => {
+    const selectedProvider = modal.querySelector('input[name="chefProvider"]:checked')?.value || "gemini";
+    const geminiApiKey = modal.querySelector("#chefGeminiKey")?.value?.trim() || "";
+    const geminiModel = modal.querySelector("#chefGeminiModel")?.value?.trim() || "gemini-2.5-flash";
+    const ollamaApiKey = modal.querySelector("#chefOllamaKey")?.value?.trim() || "";
+    const ollamaBaseUrl = modal.querySelector("#chefOllamaBaseUrl")?.value?.trim() || "https://ollama.com";
+    const ollamaModel = modal.querySelector("#chefOllamaModel")?.value?.trim() || "gemma4:31b";
+
+    saveChefAiSettings({
+      provider: selectedProvider,
+      geminiApiKey,
+      geminiModel,
+      ollamaApiKey,
+      ollamaBaseUrl,
+      ollamaModel
+    });
+
+    toast("✓ Configuración de Chef AI guardada");
+    modal.remove();
+    view();
+  });
+
+  // Close handlers
+  modal.querySelectorAll('[data-x="1"]').forEach(b => b.addEventListener("click", () => modal.remove()));
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+}
+window.openChefSettingsModal = openChefSettingsModal;
+
 function viewShoppingAssistant(){
   const chat = Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [];
+  const chefSettings = getChefAiSettings();
 
-  // Check if Ollama is configured (same as NeuroChat checks)
-  let ollamaEnabled = false;
-  try {
-    const s = JSON.parse(localStorage.getItem("memorycarl_ollama_settings") || "{}");
-    ollamaEnabled = !!(s.enabled && s.apiKey && s.apiKey.trim().length > 10);
-  } catch(_){}
+  const isConfigured = Boolean(
+    (chefSettings.provider === "gemini" && chefSettings.geminiApiKey) ||
+    (chefSettings.provider === "ollama" && chefSettings.ollamaApiKey) ||
+    chefSettings.geminiApiKey
+  );
 
-  const notConfiguredBanner = !ollamaEnabled ? `
-    <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:rgba(245,158,11,0.9);">
-      ⚠️ <b>Ollama Cloud no configurado.</b> Ve a <b>NeuroChat → ⚙️ Configuración</b> y activa Ollama con tu API Key. El Chef AI usa la misma conexión.
+  const activeProviderLabel = chefSettings.provider === "gemini" 
+    ? (chefSettings.geminiApiKey ? "✨ Google Gemini" : "⚠️ Gemini sin API Key")
+    : "🦙 Ollama Cloud";
+
+  const notConfiguredBanner = !isConfigured ? `
+    <div style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:rgba(245,158,11,0.95);display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <div>
+        ⚠️ <b>Chef AI sin configurar:</b> Ingresa tu API Key de Google Gemini para hablar con el chef sin problemas de CORS.
+      </div>
+      <button class="btn" id="btnOpenChefSettingsBanner" style="font-size:12px;padding:6px 10px;white-space:nowrap;background:rgba(245,158,11,0.25);">⚙️ Configurar</button>
     </div>
   ` : "";
 
   return `
-    <div class="sectionTitle" style="margin-bottom:10px;">
+    <div class="sectionTitle" style="margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
       <div style="display:flex;align-items:center;gap:10px;">
         <button class="iconBtn" onclick="state.shoppingSubtab='lists';view();" title="Volver">‹</button>
         <div>🤖 Chef AI</div>
       </div>
-      <div class="chip" style="background:rgba(124,92,255,0.15);color:#a78bfa;">Ollama Cloud</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="chip" style="background:${isConfigured?'rgba(16,185,129,0.15)':'rgba(245,158,11,0.15)'};color:${isConfigured?'#34d399':'#fbbf24'};cursor:pointer;" id="chipChefProviderStatus">
+          ${activeProviderLabel}
+        </div>
+        <button class="iconBtn" id="btnChefSettings" title="Configuración de IA para Chef">⚙️</button>
+      </div>
     </div>
 
     ${notConfiguredBanner}
@@ -14525,7 +14717,7 @@ function viewShoppingAssistant(){
           <div style="text-align:center;color:rgba(255,255,255,0.35);margin-top:30px;">
             <div style="font-size:40px;margin-bottom:12px;">🍳</div>
             <div style="font-size:15px;font-weight:600;margin-bottom:6px;color:rgba(255,255,255,0.6);">Chef AI listo</div>
-            <div style="font-size:13px;line-height:1.5;">Dime qué comiste hoy y calculo el costo.<br>O pídeme un plan de comidas económico.</div>
+            <div style="font-size:13px;line-height:1.5;">Dime qué comiste hoy y calculo el costo.<br>Aprende de tus compras y hábitos automáticamente.</div>
           </div>
         ` : chat.map(msg => `
           <div style="display:flex;flex-direction:column;align-items:${msg.role==='user'?'flex-end':'flex-start'};">
