@@ -168,3 +168,38 @@ export function formatMealInventoryForAiPrompt() {
   lines.push(`  * Ahorro total acumulable si se consumen estas porciones en vez de comer en la calle: S/ ${inv.totalPotentialSavings.toFixed(2)}`);
   return lines.join("\n");
 }
+
+/**
+ * Actualiza un meal bundle existente.
+ */
+export function updateMealBundle(bundleId, patch) {
+  const bundles = loadMealBundles();
+  const idx = bundles.findIndex(b => b.id === bundleId);
+  if (idx === -1) return null;
+  const current = bundles[idx];
+  const next = { ...current, ...patch };
+
+  if (patch.portionsTotal !== undefined || patch.totalCost !== undefined) {
+    const totalCost = Number(next.totalCost) || 0;
+    const portionsTotal = Math.max(1, Number(next.portionsTotal) || 1);
+    next.costPerPortion = Number((totalCost / portionsTotal).toFixed(2));
+    const street = DEFAULT_STREET_COSTS[next.mealType] || 15.00;
+    next.savingsPerPortion = Math.max(0, Number((street - next.costPerPortion).toFixed(2)));
+  }
+
+  if (next.portionsRemaining <= 0) next.status = "completed";
+  else if (next.status === "completed" && next.portionsRemaining > 0) next.status = "active";
+
+  bundles[idx] = next;
+  saveMealBundles(bundles);
+  return next;
+}
+
+/**
+ * Elimina un meal bundle.
+ */
+export function deleteMealBundle(bundleId) {
+  const bundles = loadMealBundles().filter(b => b.id !== bundleId);
+  saveMealBundles(bundles);
+  return true;
+}

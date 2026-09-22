@@ -55,7 +55,7 @@ import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiSt
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
 import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO, getChefAiSettings, saveChefAiSettings } from "./shopping/shoppingAi.js";
-import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles } from "./shopping/mealBundles.js";
+import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles, updateMealBundle, deleteMealBundle, saveMealBundles } from "./shopping/mealBundles.js";
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
 
@@ -3429,6 +3429,8 @@ function view(){
     if(btnBannerSettings) btnBannerSettings.addEventListener("click", () => openChefSettingsModal());
     const chipStatus = root.querySelector("#chipChefProviderStatus");
     if(chipStatus) chipStatus.addEventListener("click", () => openChefSettingsModal());
+    const btnChefAuditor = root.querySelector("#btnChefAuditor");
+    if(btnChefAuditor) btnChefAuditor.addEventListener("click", () => openProductLibrary());
 
     setTimeout(() => {
       const log = document.getElementById("shopAiChatLog");
@@ -12546,50 +12548,188 @@ function openProductLibrary(){
     return { catChips, cards, count: prods.length };
   }
 
+  function buildMealsHTML(){
+    const bundles = loadMealBundles();
+    if(bundles.length === 0){
+      return `
+        <div style="text-align:center;padding:30px 14px;color:rgba(255,255,255,0.4);">
+          <div style="font-size:36px;margin-bottom:8px;">🥘</div>
+          <div style="font-size:14px;font-weight:600;color:rgba(255,255,255,0.7);">Sin comidas caseras registradas</div>
+          <div style="font-size:12px;margin-top:4px;">El Chef AI las crea cuando le dices que cocinaste, o puedes crear una con el botón de arriba.</div>
+        </div>
+      `;
+    }
+    return `
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        ${bundles.map(b => `
+          <div class="card" style="padding:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+              <div>
+                <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:2px 6px;border-radius:4px;background:rgba(124,92,255,0.15);color:#a78bfa;font-weight:700;">${escapeHtml(b.mealType || "almuerzo")}</span>
+                <span style="font-size:10px;margin-left:4px;padding:2px 6px;border-radius:4px;background:${b.status==='active'?'rgba(16,185,129,0.15)':'rgba(156,163,175,0.15)'};color:${b.status==='active'?'#34d399':'#9ca3af'};">${b.status==='active'?'Activo':'Terminado'}</span>
+                <h4 style="margin:6px 0 2px 0;font-size:15px;color:#fff;">${escapeHtml(b.name)}</h4>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-size:14px;font-weight:700;color:#34d399;">S/ ${Number(b.costPerPortion||0).toFixed(2)} <span style="font-size:10px;color:rgba(255,255,255,0.5);font-weight:400;">/ plato</span></div>
+                <div style="font-size:10px;color:#a78bfa;">Ahorras ~S/ ${Number(b.savingsPerPortion||0).toFixed(2)}</div>
+              </div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:rgba(255,255,255,0.6);margin-top:6px;border-top:1px solid rgba(255,255,255,0.05);padding-top:6px;">
+              <div>
+                Quedan: <b style="color:#fff;">${b.portionsRemaining}</b> de ${b.portionsTotal} porciones
+                ${b.lastConsumedAt ? `<span style="font-size:10px;opacity:0.7;"> · Último: ${b.lastConsumedAt.slice(5,10)}</span>` : ""}
+              </div>
+              <div style="display:flex;gap:6px;">
+                ${b.portionsRemaining > 0 ? `
+                  <button class="btn good" data-consume-bundle="${b.id}" style="padding:3px 8px;font-size:11px;">Comer 1 plato 🍽️</button>
+                ` : ""}
+                <button class="btn ghost" data-edit-bundle="${b.id}" style="padding:3px 8px;font-size:11px;">✏️</button>
+                <button class="btn danger" data-del-bundle="${b.id}" style="padding:3px 8px;font-size:11px;">🗑️</button>
+              </div>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function buildLearnedHTML(){
+    const prods = (state.products || []).filter(p => p.lastConsumedAt);
+    if(prods.length === 0){
+      return `
+        <div style="text-align:center;padding:30px 14px;color:rgba(255,255,255,0.4);">
+          <div style="font-size:36px;margin-bottom:8px;">🧠</div>
+          <div style="font-size:14px;font-weight:600;color:rgba(255,255,255,0.7);">Sin hábitos registrados por el Chef aún</div>
+          <div style="font-size:12px;margin-top:4px;">Cuando le cuentes al Chef qué comiste o compraste, irá deduciendo tus productos y frecuencias aquí.</div>
+        </div>
+      `;
+    }
+    return `
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="small muted" style="margin-bottom:4px;">
+          Estos son los productos y alimentos que el Chef AI tiene en su memoria activa:
+        </div>
+        ${prods.map(p => {
+          const ratingStars = "★".repeat(Math.max(1, Math.min(5, p.rating || 3)));
+          const tierBadge = p.tier === "premio_premium" ? "👑 Premio" : p.tier === "gusto_medio" ? "✨ Gusto" : "⚡ Base Diario";
+          return `
+            <div class="card" style="padding:10px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <div style="font-weight:600;font-size:14px;color:#fff;display:flex;align-items:center;gap:6px;">
+                  ${escapeHtml(p.name)}
+                  <span style="font-size:11px;color:#f59e0b;">${ratingStars}</span>
+                </div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px;">
+                  S/ ${Number(p.price||0).toFixed(2)} · ${escapeHtml(p.context||"almuerzo_casa")} · <span style="color:#a5b4fc;">${tierBadge}</span>
+                </div>
+                <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;">
+                  Último consumo: ${p.lastConsumedAt ? p.lastConsumedAt.replace("T", " ").slice(0, 16) : "—"}
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button class="btn ghost" data-lib-edit="${p.id}" style="padding:4px 8px;font-size:11px;">✏️ Editar</button>
+                <button class="btn danger" data-lib-del-prod="${p.id}" style="padding:4px 8px;font-size:11px;" title="Eliminar de memoria">🗑️</button>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
   sheet.innerHTML = `
     <div class="modal libModal">
       <div class="slHeader">
-        <div class="slTitle">📦 Biblioteca</div>
+        <div class="slTitle">📦 Biblioteca & Cerebro Chef</div>
         <button class="slCloseBtn" id="libClose">✕</button>
       </div>
 
-      <div class="libToolbar">
-        <div class="libSearchWrap">
-          <span class="slSearchIcon">🔍</span>
-          <input id="libSearch" class="slSearchInput" placeholder="Buscar producto…" autocomplete="off" />
+      <!-- Selector de Subpestaña Biblioteca -->
+      <div style="display:flex;gap:6px;padding:0 14px 10px 14px;border-bottom:1px solid rgba(255,255,255,0.08);margin-bottom:10px;">
+        <button class="btn primary btnLibTab" data-tab="products" style="flex:1;font-size:12px;padding:6px 0;">Productos (${(state.products||[]).length})</button>
+        <button class="btn ghost btnLibTab" data-tab="meals" style="flex:1;font-size:12px;padding:6px 0;">🥘 Comidas Caseras (${loadMealBundles().length})</button>
+        <button class="btn ghost btnLibTab" data-tab="learned" style="flex:1;font-size:12px;padding:6px 0;">🧠 Cerebro Chef</button>
+      </div>
+
+      <!-- Contenedor Productos -->
+      <div id="libSectionProducts">
+        <div class="libToolbar">
+          <div class="libSearchWrap">
+            <span class="slSearchIcon">🔍</span>
+            <input id="libSearch" class="slSearchInput" placeholder="Buscar producto…" autocomplete="off" />
+          </div>
+          <button class="libNewBtn" id="libNewBtn">＋ Nuevo</button>
         </div>
-        <button class="libNewBtn" id="libNewBtn">＋ Nuevo</button>
+
+        <div class="slCatRow" id="libCatRow">
+          <button class="slCat slCatActive" data-libcat="">Todo <span class="slCatCount">${(state.products||[]).length}</span></button>
+          ${cats.map(c=>{
+            const n = (state.products||[]).filter(p=>(p.category||"").trim()===c).length;
+            return `<button class="slCat" data-libcat="${escapeHtml(c)}">${escapeHtml(c)} <span class="slCatCount">${n}</span></button>`;
+          }).join("")}
+        </div>
+
+        <div id="libCards" class="libGrid"></div>
       </div>
 
-      <div class="slCatRow" id="libCatRow">
-        <button class="slCat slCatActive" data-libcat="">Todo <span class="slCatCount">${(state.products||[]).length}</span></button>
-        ${cats.map(c=>{
-          const n = (state.products||[]).filter(p=>(p.category||"").trim()===c).length;
-          return `<button class="slCat" data-libcat="${escapeHtml(c)}">${escapeHtml(c)} <span class="slCatCount">${n}</span></button>`;
-        }).join("")}
+      <!-- Contenedor Comidas Caseras (Meal Bundles) -->
+      <div id="libSectionMeals" style="display:none;padding:0 14px 14px 14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div class="small muted">Comidas cocinadas por lote con cálculo de ahorro</div>
+          <button class="btn primary" id="btnNewMealBundle" style="font-size:12px;padding:6px 12px;">＋ Nueva Comida</button>
+        </div>
+        <div id="libMealsContainer"></div>
       </div>
 
-      <div id="libCards" class="libGrid"></div>
+      <!-- Contenedor Cerebro Chef (Auditoría de Aprendizaje) -->
+      <div id="libSectionLearned" style="display:none;padding:0 14px 14px 14px;">
+        <div id="libLearnedContainer"></div>
+      </div>
     </div>
   `;
 
   host.appendChild(sheet);
 
+  let currentTab = "products";
   let activeCat = "";
   const searchEl = sheet.querySelector("#libSearch");
   const cardsEl = sheet.querySelector("#libCards");
   const catRow = sheet.querySelector("#libCatRow");
+  const mealsEl = sheet.querySelector("#libMealsContainer");
+  const learnedEl = sheet.querySelector("#libLearnedContainer");
 
   function render(){
-    const { catChips, cards } = buildHTML(searchEl.value, activeCat);
-    catRow.innerHTML = catChips;
-    catRow.querySelectorAll("[data-libcat]").forEach(b=>{
-      b.classList.toggle("slCatActive", b.dataset.libcat===activeCat);
-    });
-    cardsEl.innerHTML = cards;
+    if(currentTab === "products"){
+      const { catChips, cards } = buildHTML(searchEl.value, activeCat);
+      catRow.innerHTML = catChips;
+      catRow.querySelectorAll("[data-libcat]").forEach(b=>{
+        b.classList.toggle("slCatActive", b.dataset.libcat===activeCat);
+      });
+      cardsEl.innerHTML = cards;
+    } else if(currentTab === "meals"){
+      mealsEl.innerHTML = buildMealsHTML();
+    } else if(currentTab === "learned"){
+      learnedEl.innerHTML = buildLearnedHTML();
+    }
   }
 
   render();
+
+  // Tab switching
+  sheet.querySelectorAll(".btnLibTab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentTab = btn.dataset.tab;
+      sheet.querySelectorAll(".btnLibTab").forEach(b => {
+        b.classList.toggle("primary", b === btn);
+        b.classList.toggle("ghost", b !== btn);
+      });
+      sheet.querySelector("#libSectionProducts").style.display = currentTab === "products" ? "block" : "none";
+      sheet.querySelector("#libSectionMeals").style.display = currentTab === "meals" ? "block" : "none";
+      sheet.querySelector("#libSectionLearned").style.display = currentTab === "learned" ? "block" : "none";
+      render();
+    });
+  });
 
   searchEl.addEventListener("input", render);
 
@@ -12603,11 +12743,119 @@ function openProductLibrary(){
   sheet.querySelector("#libClose").addEventListener("click", ()=> sheet.remove());
   sheet.querySelector("#libNewBtn").addEventListener("click", ()=>{ openNewProduct(); });
 
+  // Crear nuevo Meal Bundle manual
+  sheet.querySelector("#btnNewMealBundle")?.addEventListener("click", () => {
+    openPromptModal({
+      title: "Nueva Comida Casera (Lote)",
+      fields: [
+        { key: "name", label: "Nombre del plato (ej. Pollo al jugo con arroz)" },
+        { key: "mealType", label: "Tipo (almuerzo / cena / desayuno / snack)", value: "almuerzo" },
+        { key: "totalCost", label: "Costo total de ingredientes (S/)", type: "number", value: "12" },
+        { key: "portions", label: "Número de porciones que rinde", type: "number", value: "3" },
+        { key: "notes", label: "Notas (ej. refrigerado en tapers)", value: "" }
+      ],
+      onSubmit: (vals) => {
+        const name = (vals.name || "").trim();
+        if(!name) return;
+        createMealBundle({
+          name,
+          mealType: (vals.mealType || "almuerzo").trim(),
+          totalCost: Number(vals.totalCost || 0),
+          portions: Number(vals.portions || 1),
+          notes: (vals.notes || "").trim()
+        });
+        toast("🥘 Comida casera guardada");
+        render();
+        view();
+      }
+    });
+  });
+
+  // Acciones en tarjetas de productos
   cardsEl.addEventListener("click", e=>{
     const chartBtn = e.target.closest("[data-lib-chart]");
     if(chartBtn){ openProductChart(chartBtn.dataset.libChart); return; }
     const editBtn = e.target.closest("[data-lib-edit]");
     if(editBtn){ editProductDetails(editBtn.dataset.libEdit); render(); return; }
+  });
+
+  // Acciones en Meal Bundles
+  mealsEl.addEventListener("click", e=>{
+    const consumeBtn = e.target.closest("[data-consume-bundle]");
+    if(consumeBtn){
+      const res = consumeMealPortion(consumeBtn.dataset.consumeBundle);
+      if(res.bundle){
+        toast(`✅ 1 porción consumida (Quedan ${res.remaining}). Ahorro: S/ ${res.savingsToday}`);
+        render();
+        view();
+      }
+      return;
+    }
+    const editBtn = e.target.closest("[data-edit-bundle]");
+    if(editBtn){
+      const bundles = loadMealBundles();
+      const b = bundles.find(x => x.id === editBtn.dataset.editBundle);
+      if(!b) return;
+      openPromptModal({
+        title: "Editar Comida Casera",
+        fields: [
+          { key: "name", label: "Nombre", value: b.name },
+          { key: "mealType", label: "Tipo (almuerzo/cena/desayuno/snack)", value: b.mealType },
+          { key: "totalCost", label: "Costo total (S/)", type: "number", value: String(b.totalCost) },
+          { key: "portionsTotal", label: "Porciones totales preparadas", type: "number", value: String(b.portionsTotal) },
+          { key: "portionsRemaining", label: "Porciones que aún quedan", type: "number", value: String(b.portionsRemaining) },
+          { key: "notes", label: "Notas", value: b.notes || "" }
+        ],
+        onSubmit: (vals) => {
+          updateMealBundle(b.id, {
+            name: (vals.name || "").trim() || b.name,
+            mealType: (vals.mealType || "").trim() || b.mealType,
+            totalCost: Number(vals.totalCost) || b.totalCost,
+            portionsTotal: Number(vals.portionsTotal) || b.portionsTotal,
+            portionsRemaining: Number(vals.portionsRemaining) || 0,
+            notes: (vals.notes || "").trim()
+          });
+          toast("✓ Comida casera actualizada");
+          render();
+          view();
+        }
+      });
+      return;
+    }
+    const delBtn = e.target.closest("[data-del-bundle]");
+    if(delBtn){
+      if(confirm("¿Eliminar este registro de comida casera?")){
+        deleteMealBundle(delBtn.dataset.delBundle);
+        toast("Comida eliminada");
+        render();
+        view();
+      }
+      return;
+    }
+  });
+
+  // Acciones en Cerebro Chef (Auditoría)
+  learnedEl.addEventListener("click", e=>{
+    const editBtn = e.target.closest("[data-lib-edit]");
+    if(editBtn){
+      editProductDetails(editBtn.dataset.libEdit);
+      render();
+      return;
+    }
+    const delBtn = e.target.closest("[data-lib-del-prod]");
+    if(delBtn){
+      const pid = delBtn.dataset.libDelProd;
+      const p = (state.products||[]).find(x=>x.id===pid);
+      if(!p) return;
+      if(confirm(`¿Olvidar el hábito de "${p.name}" en el Chef AI?\n(El producto se mantendrá en tu biblioteca pero se desmarcará su consumo reciente).`)){
+        p.lastConsumedAt = null;
+        persist();
+        toast(`Chef AI olvidó el consumo de ${p.name}`);
+        render();
+        view();
+      }
+      return;
+    }
   });
 
   setTimeout(()=> searchEl.focus(), 80);
@@ -14705,6 +14953,7 @@ function viewShoppingAssistant(){
         <div class="chip" style="background:${isConfigured?'rgba(16,185,129,0.15)':'rgba(245,158,11,0.15)'};color:${isConfigured?'#34d399':'#fbbf24'};cursor:pointer;" id="chipChefProviderStatus">
           ${activeProviderLabel}
         </div>
+        <button class="btn ghost" id="btnChefAuditor" title="Ver biblioteca y memoria del Chef" style="font-size:12px;padding:5px 9px;">📦 Memoria</button>
         <button class="iconBtn" id="btnChefSettings" title="Configuración de IA para Chef">⚙️</button>
       </div>
     </div>
