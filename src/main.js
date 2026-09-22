@@ -48,6 +48,7 @@ import './finance/finance_core_v2.js';
   });
 })();
 
+import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
 import { initFootballLab } from "./footballLab_v8e.js?v=2001";
 import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
