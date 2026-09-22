@@ -3293,12 +3293,17 @@ function view(){
           if (lp.name) {
             const existing = (state.products||[]).find(p => p.name.toLowerCase() === lp.name.toLowerCase());
             if (existing) {
-              if (lp.price !== undefined) existing.price = Number(lp.price) || existing.price;
+              const newPrice = lp.price !== undefined ? Number(lp.price) : null;
+              if (newPrice != null && !isNaN(newPrice) && newPrice !== existing.price) {
+                existing.history = existing.history || [];
+                existing.history.push({ price: existing.price, date: new Date().toISOString() });
+                existing.price = newPrice;
+              }
               if (lp.rating !== undefined) existing.rating = Number(lp.rating) || existing.rating;
               if (lp.context) existing.context = lp.context;
               if (lp.tier) existing.tier = lp.tier;
               existing.lastConsumedAt = new Date().toISOString();
-              toast(`🧠 Chef AI aprendió: ${existing.name} (consumido hoy)`);
+              toast(`🧠 Chef AI actualizó: ${existing.name} (S/ ${existing.price.toFixed(2)})`);
             } else {
               const newProd = enrichProductData({
                 id: uid("p"),
