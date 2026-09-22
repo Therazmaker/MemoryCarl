@@ -19,9 +19,13 @@ export function formatDayLabel(isoDate) {
   return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
 }
 
-/** Returns today's ISO date string (YYYY-MM-DD) */
+/** Returns today's ISO date string (YYYY-MM-DD) in Lima, Peru timezone */
 export function todayISO() {
-  return new Date().toISOString().split("T")[0];
+  try {
+    return new Date().toLocaleDateString("en-CA", { timeZone: "America/Lima" });
+  } catch (_) {
+    return new Date().toISOString().split("T")[0];
+  }
 }
 
 /**

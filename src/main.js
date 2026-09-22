@@ -56,7 +56,7 @@ import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
 import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO, getChefAiSettings, saveChefAiSettings } from "./shopping/shoppingAi.js";
 import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles, updateMealBundle, deleteMealBundle, saveMealBundles } from "./shopping/mealBundles.js";
-import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity } from "./services/dailyFlowEngine.js";
+import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
 
 try {
@@ -3529,19 +3529,19 @@ function view(){
     if(btnRefreshBriefing){
       btnRefreshBriefing.addEventListener("click", async ()=>{
         const contentEl = root.querySelector("#dailyBriefingContent");
-        if(contentEl) contentEl.innerHTML = `<em>Consultando a Ollama para tu estrategia del día... ⏳</em>`;
+        if(contentEl) contentEl.innerHTML = `<em>Consultando a tu Copiloto IA para la estrategia de hoy... ⏳</em>`;
         btnRefreshBriefing.disabled = true;
         try{
           const res = await generateDailyBriefing(state);
           localStorage.setItem("memorycarl_daily_briefing_cache", JSON.stringify({
-            date: new Date().toISOString().slice(0, 10),
+            date: getLimaDateString(new Date()),
             text: res.briefingText
           }));
           if(contentEl) contentEl.textContent = res.briefingText;
           toast("Estrategia matutina actualizada ✨");
         }catch(err){
-          if(contentEl) contentEl.textContent = "No se pudo conectar con Ollama. Se mantendrá el cálculo local.";
-          toast("Error al conectar con Ollama");
+          if(contentEl) contentEl.textContent = "No se pudo conectar con el modelo IA. Se mantendrá el cálculo local.";
+          toast("Error al conectar con la IA");
         }finally{
           btnRefreshBriefing.disabled = false;
         }
@@ -6955,7 +6955,7 @@ function viewHome(){
     if(!ts) return "";
     try {
       const d = new Date(ts);
-      return d.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", hour12: true });
+      return d.toLocaleTimeString("es-PE", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hour12: true });
     } catch(e){ return ""; }
   };
 
@@ -7027,7 +7027,7 @@ const sleepBars = renderSleepBars(sleepSeries);
     <div class="homeTop">
       <div class="homeHello">
         <div class="homeHelloText">Hola Carlos</div>
-        <div class="homeHelloSub">${escapeHtml(now.toLocaleDateString("es-PE",{weekday:"long", month:"long", day:"numeric"}))}</div>
+        <div class="homeHelloSub">${escapeHtml(now.toLocaleDateString("es-PE",{timeZone:"America/Lima", weekday:"long", month:"long", day:"numeric"}))}</div>
       </div>
       <div class="weekStrip" role="list" aria-label="Week">
         ${weekHtml}

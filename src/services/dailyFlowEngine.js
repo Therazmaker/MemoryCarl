@@ -14,16 +14,51 @@ import { enrichAllProducts, getDaysSinceLastConsumed } from "../shopping/product
 import { isOllamaConfigured, getOllamaSettings } from "./ollamaClient.js";
 
 /**
- * Calcula los días restantes para el siguiente cobro de quincena (día 15 o último del mes).
+ * Obtiene la fecha exacta en la zona horaria de Lima, Perú (America/Lima, UTC-5).
+ * Evita saltos de fecha accidentales cuando UTC está en el día siguiente.
+ * @param {Date|string|number} [input]
+ * @returns {Date} Objeto Date configurado en el mediodía local de Lima
+ */
+export function getLimaDate(input = new Date()) {
+  try {
+    const base = input instanceof Date ? input : new Date(input);
+    if (isNaN(base.getTime())) return new Date();
+    const s = base.toLocaleDateString("en-CA", { timeZone: "America/Lima" }); // 'YYYY-MM-DD'
+    const [y, m, da] = s.split("-").map(Number);
+    return new Date(y, m - 1, da, 12, 0, 0);
+  } catch (_) {
+    return input instanceof Date ? input : new Date(input);
+  }
+}
+
+/**
+ * Formatea una fecha como 'YYYY-MM-DD' en la zona horaria de Lima, Perú.
+ * @param {Date|string|number} [input]
+ * @returns {string}
+ */
+export function getLimaDateString(input = new Date()) {
+  try {
+    const base = input instanceof Date ? input : new Date(input);
+    if (isNaN(base.getTime())) return new Date().toISOString().slice(0, 10);
+    return base.toLocaleDateString("en-CA", { timeZone: "America/Lima" });
+  } catch (_) {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * Calcula los días restantes para el siguiente cobro de quincena (día 15 o último del mes),
+ * fijado a la hora oficial de Lima, Perú.
  * @param {Date} [now]
  * @returns {{ targetDay: number, daysRemaining: number, label: string }}
  */
 export function calculateFortnightRunway(now = new Date()) {
-  const currentDay = now.getDate();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth(); // 0-indexed
+  const limaNow = getLimaDate(now);
+  const currentDay = limaNow.getDate();
+  const currentYear = limaNow.getFullYear();
+  const currentMonth = limaNow.getMonth(); // 0-indexed
 
-  // Último día del mes actual
+  // Último día del mes actual en Lima
   const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
 
   let targetDay = 15;
@@ -142,7 +177,7 @@ export function buildDailyFlowContext(rootState = {}, now = new Date()) {
   const hedonic = evaluateHedonicOpportunity(products, liquidity.liquidityHealth, now);
 
   return {
-    date: now.toISOString().slice(0, 10),
+    date: getLimaDateString(now),
     liquidity,
     mealInventory: mealInv,
     hedonicOpportunity: hedonic,
