@@ -56,7 +56,8 @@ import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
 import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO } from "./shopping/shoppingAi.js";
 import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles } from "./shopping/mealBundles.js";
-import { generateDailyBriefing, buildDailyFlowContext } from "./services/dailyFlowEngine.js";
+import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity } from "./services/dailyFlowEngine.js";
+import { enrichProductData } from "./shopping/productIntelligence.js";
 
 try {
   // Free up quota: remove heavy AI state on boot. It rebuilds automatically.
@@ -3255,12 +3256,15 @@ function view(){
         // Set day date if empty
         if(!state.shoppingAiDayDate) state.shoppingAiDayDate = todayISO();
 
+        const finCtx = computeDailyLiquidity(state);
+
         const result = await sendShoppingAiMessage(
           text,
           Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [],
           products,
           pastDays,
-          inventory
+          inventory,
+          finCtx
         );
         state.shoppingAiChat = result.newChat;
         
@@ -3280,6 +3284,40 @@ function view(){
           
           if (deductedMsgs.length > 0) {
             toast(`Chef AI descontó de inventario: ${deductedMsgs.join(", ")}`);
+          }
+        }
+
+        // Handle learnProduct (Aprendizaje de nuevos hábitos o actualización de productos)
+        if (result.actions && result.actions.learnProduct) {
+          const lp = result.actions.learnProduct;
+          if (lp.name) {
+            const existing = (state.products||[]).find(p => p.name.toLowerCase() === lp.name.toLowerCase());
+            if (existing) {
+              if (lp.price !== undefined) existing.price = Number(lp.price) || existing.price;
+              if (lp.rating !== undefined) existing.rating = Number(lp.rating) || existing.rating;
+              if (lp.context) existing.context = lp.context;
+              if (lp.tier) existing.tier = lp.tier;
+              existing.lastConsumedAt = new Date().toISOString();
+              toast(`🧠 Chef AI aprendió: ${existing.name} (consumido hoy)`);
+            } else {
+              const newProd = enrichProductData({
+                id: uid("p"),
+                name: lp.name,
+                price: Number(lp.price || 0),
+                rating: Number(lp.rating || 4),
+                tier: lp.tier || "gusto_medio",
+                context: lp.context || "calle_rapida",
+                lastConsumedAt: new Date().toISOString(),
+                store: "",
+                category: "Comida",
+                unit: "u",
+                essential: false,
+                history: []
+              });
+              state.products = state.products || [];
+              state.products.unshift(newProd);
+              toast(`🧠 Nuevo hábito aprendido: ${newProd.name} (S/ ${newProd.price.toFixed(2)})`);
+            }
           }
         }
 

@@ -27,7 +27,7 @@ export function todayISO() {
 /**
  * Build system prompt with product library, inventory + past days context.
  */
-function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory = []) {
+function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory = [], financeContext = null) {
   const enrichedProducts = enrichAllProducts(products);
   const libStr = enrichedProducts.length > 0
     ? enrichedProducts.map(p => formatProductForAiPrompt(p)).join("\n")
@@ -77,10 +77,22 @@ function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory =
 
   const mealBundlesStr = formatMealInventoryForAiPrompt();
 
-  return `Eres "Chef AI", el asistente personal de cocina, compras y nutrición de Carlos, en Perú.
-La moneda es siempre SOLES PERUANOS (S/). Nunca uses dólares.
+  let financeStr = "";
+  if (financeContext) {
+    financeStr = `
+--- SITUACIÓN FINANCIERA ACTUAL (Solo lectura - Tú NO descuentas dinero) ---
+- Saldo total disponible: S/ ${financeContext.totalBalance.toFixed(2)}
+- Ciclo de cobro: ${financeContext.runway?.label || "15 y fin de mes"} (quedan ${financeContext.runway?.daysRemaining || 0} días)
+- Margen libre diario: S/ ${financeContext.dailyFreeBudget.toFixed(2)} / día
+- Salud de liquidez: ${financeContext.liquidityHealth?.toUpperCase() || "MODERADO"}
+--------------------------------------------------------------------------`;
+  }
 
---- BIBLIOTECA DE PRODUCTOS (${products.length} productos con precios base) ---
+  return `Eres "Chef AI", el estratega personal de cocina, hábitos y alimentación de Carlos en Perú.
+La moneda es siempre SOLES PERUANOS (S/). Nunca uses dólares.
+${financeStr}
+
+--- BIBLIOTECA DE PRODUCTOS (${products.length} productos con precios base y gustos) ---
 ${libStr}
 --------------------------------------------------------------
 --- TU INVENTARIO ACTUAL EN CASA (Despensa) ---
@@ -92,34 +104,35 @@ ${mealBundlesStr}
 ${pastCtx}${freqStr}
 TU COMPORTAMIENTO:
 
-1. **Sugerencias con Inventario:** Usa los productos que Carlos YA TIENE en su Despensa para sugerirle comidas económicas. Así gastará S/ 0 extra.
+1. **Visibilidad Financiera (NO descuentes dinero):**
+   - Conoces el saldo y el margen diario de Carlos para darle recomendaciones inteligentes según su liquidez.
+   - Carlos se encarga de sus finanzas manualmente, así que NUNCA intentes crear débitos o transacciones monetarias automáticas.
 
-2. **Matemática Fraccional (MUY IMPORTANTE):**
-   - En la biblioteca, los precios están por unidad completa o por kilogramo (kg).
-   - Si la biblioteca dice "Arroz: S/ 4.00 por kg" y Carlos dice "Comí 250g de arroz", **debes calcular la fracción**: (250g / 1000g) * S/ 4.00 = S/ 1.00.
-   - Si la biblioteca dice "Huevos: S/ 15.00 por u" (asumiendo que es una plancha de 30) y él come 2 huevos, haz un estimado razonable del costo unitario.
-   - Suma estos costos fraccionados para darle el costo REAL de su comida, no el precio del paquete entero.
+2. **Cerebro y Aprendizaje Continuo (NIVEL DIOS):**
+   - Cuando Carlos te cuente qué desayunó, almorzó o compró (ej. "desayuné 2 empanadas a 3 soles" o "compré 4 soles de pollo y 2 de arroz"), aprende y actualiza su base de conocimiento.
+   - Si menciona un producto que no está en la biblioteca o actualiza precios/preferencias, genera una acción en JSON para guardarlo.
+   - Si cocinó para varios días, genera un \`createMealBundle\` con porciones estimadas.
+   - Si consumió comida casera guardada, genera un \`consumeMealBundle\`.
 
-3. **Registro de comidas:** Cuando Carlos diga qué comió, calcula el costo aproximado en S/ aplicando la matemática fraccional. Indica el costo de cada ingrediente, el total de la comida y el acumulado del día.
+3. **Matemática Fraccional y Comidas:**
+   - Calcula el costo real de su comida fraccionada (ej. si comió parte de lo que tenía en despensa).
 
-4. **Pregunta cantidades:** Si Carlos dice "comí arroz", pregunta cuántos gramos o qué porción. Para ser exactos necesitas saber la fracción del producto que usó.
-
-5. **Seguimiento de frecuencia:** Usa el historial de días anteriores para detectar patrones ("Esta semana ya es la tercera vez que cenas eso").
-
-6. **Deducción de Inventario y Creación de Meal Bundles (NIVEL DIOS):**
-   - Si Carlos dice que cocinó o preparó una comida para varios días (ej. "cociné pollo con arroz para 4 días y me costó 20"), DEBES crear un meal bundle con su nombre, mealType (desayuno/almuerzo/cena), costo total y porciones.
-   - Si Carlos dice que comió una porción de comida casera que ya tenía guardada, genera una acción de consumo de comida casera.
-   - Pon el JSON al final de tu respuesta así:
+4. **Acciones JSON (Al final de tu respuesta):**
+   Pon el bloque JSON al final si aprendiste algo nuevo o si hay comidas/porciones que actualizar:
    ---ACTIONS---
    {
-     "consume": [
-       { "name": "Nombre Exacto del Producto", "qty": 0.25 }
-     ],
+     "learnProduct": {
+       "name": "Empanadas",
+       "price": 3.00,
+       "rating": 4,
+       "context": "calle_rapida",
+       "tier": "gusto_medio"
+     },
      "createMealBundle": {
        "name": "Almuerzo: Pollo con Arroz",
        "mealType": "almuerzo",
-       "totalCost": 20.00,
-       "portions": 4,
+       "totalCost": 6.00,
+       "portions": 2,
        "notes": "Preparado en casa"
      },
      "consumeMealBundle": {
@@ -127,7 +140,7 @@ TU COMPORTAMIENTO:
      }
    }
 
-7. **Tono:** Español, amigable, directo. Como un amigo chef que también sabe de finanzas y cálculo rápido.`;
+5. **Tono:** Amigable, cercano, analítico. Un chef y copiloto de hábitos que aprende de cada comida de Carlos.`;
 }
 
 /**
@@ -180,12 +193,13 @@ async function callOllama(messages) {
  * @param {object[]} products — state.products
  * @param {object[]} pastDays — state.shoppingAiDays
  * @param {object[]} inventory — state.inventory
+ * @param {object} [financeContext] — liquidez y margen diario
  * @returns {Promise<object[]>} — updated chat history
  */
-export async function sendShoppingAiMessage(text, chatHistory, products, pastDays = [], inventory = []) {
+export async function sendShoppingAiMessage(text, chatHistory, products, pastDays = [], inventory = [], financeContext = null) {
   if (!text || !text.trim()) return chatHistory;
 
-  const systemPrompt = buildChefSystemPrompt(products, chatHistory, pastDays, inventory);
+  const systemPrompt = buildChefSystemPrompt(products, chatHistory, pastDays, inventory, financeContext);
   const userMsg = { role: "user", content: text.trim(), ts: new Date().toISOString() };
   const newHistory = [...chatHistory, userMsg];
 
