@@ -92,19 +92,55 @@ export function calculateFortnightRunway(now = new Date()) {
  * @param {Date} [now]
  */
 export function computeDailyLiquidity(rootState = {}, now = new Date()) {
-  const accounts = Array.isArray(rootState.financeAccounts) ? rootState.financeAccounts : [];
-  const commitments = Array.isArray(rootState.financeCommitments) ? rootState.financeCommitments : [];
-  
-  // Saldo total disponible en cuentas líquidas
-  const totalBalance = accounts.reduce((acc, a) => acc + (Number(a.balance) || 0), 0);
+  let overrideBalance = null;
+  try {
+    const raw = localStorage.getItem("memorycarl_liquidity_override");
+    if (raw !== null && raw !== "") {
+      const parsed = Number(raw);
+      if (!isNaN(parsed) && parsed >= 0) overrideBalance = parsed;
+    }
+  } catch (_) {}
 
+  const rawAccounts = Array.isArray(rootState.financeAccounts) ? rootState.financeAccounts : (Array.isArray(rootState.finance_accounts) ? rootState.finance_accounts : []);
+  const btcPrice = Number(rootState.btcPricePen) || 0;
+  
+  // Detalle de cuentas líquidas
+  const accountsBreakdown = rawAccounts
+    .filter(a => !a.archived && !a.excludeFromTotal)
+    .map(a => {
+      const isCrypto = a.type === "crypto";
+      const penValue = isCrypto ? (Number(a.balance || 0) * btcPrice) : Number(a.balance || 0);
+      return {
+        id: a.id,
+        name: a.name || "Cuenta",
+        type: a.type || "fiat",
+        rawBalance: Number(a.balance || 0),
+        penBalance: Number(penValue.toFixed(2))
+      };
+    });
+
+  const calculatedBalance = accountsBreakdown.reduce((sum, a) => sum + a.penBalance, 0);
+  const totalBalance = overrideBalance !== null ? overrideBalance : calculatedBalance;
+
+  const commitments = Array.isArray(rootState.financeCommitments) ? rootState.financeCommitments : [];
   const runway = calculateFortnightRunway(now);
 
-  // Compromisos pendientes que vencen antes de la quincena
-  const upcomingCommitments = commitments
-    .filter(c => !c.resolved && c.dueDate && c.dueDate <= runway.targetDay)
-    .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  // Compromisos pendientes que vencen antes o en la quincena
+  const upcomingCommitmentsList = commitments
+    .filter(c => {
+      if (c.resolved || c.active === false || c.status === "paid" || c.status === "cancelled") return false;
+      const day = c.dueDay ? Number(c.dueDay) : (c.dueDate ? Number(c.dueDate) : null);
+      if (!day) return false;
+      return day <= runway.targetDay;
+    })
+    .map(c => ({
+      id: c.id,
+      name: c.name || "Compromiso",
+      amount: Number(c.amount || 0),
+      dueDay: c.dueDay || c.dueDate
+    }));
 
+  const upcomingCommitments = upcomingCommitmentsList.reduce((sum, c) => sum + c.amount, 0);
   const availableLiquidity = Math.max(0, totalBalance - upcomingCommitments);
   const dailyFreeBudget = Number((availableLiquidity / runway.daysRemaining).toFixed(2));
 
@@ -122,6 +158,10 @@ export function computeDailyLiquidity(rootState = {}, now = new Date()) {
 
   return {
     totalBalance,
+    calculatedBalance,
+    isManualOverride: overrideBalance !== null,
+    accountsBreakdown,
+    upcomingCommitmentsList,
     upcomingCommitments,
     availableLiquidity,
     dailyFreeBudget,

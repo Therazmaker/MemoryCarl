@@ -3523,8 +3523,170 @@ function view(){
     try{ wireSemana(); }catch(e){ console.error(e); }
   }
 
+function openLiquidityTrainingModal() {
+  const host = document.querySelector("#app") || document.body;
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+
+  const renderContent = () => {
+    const liq = computeDailyLiquidity(state);
+    const savedOverride = localStorage.getItem("memorycarl_liquidity_override") || "";
+
+    const accountsHtml = (liq.accountsBreakdown || []).map(a => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(255,255,255,0.04);border-radius:8px;font-size:13px;margin-bottom:6px;">
+        <div>
+          <span style="font-weight:600;color:#f1f5f9;">${escapeHtml(a.name)}</span>
+          <span style="font-size:11px;color:#94a3b8;margin-left:6px;">(${escapeHtml(a.type)})</span>
+        </div>
+        <div style="font-weight:700;color:#38bdf8;">
+          ${a.type === "crypto" ? `₿ ${a.rawBalance.toFixed(8)} ≈ ` : ""}S/ ${a.penBalance.toFixed(2)}
+        </div>
+      </div>
+    `).join("") || `<div class="muted small">No hay cuentas activas registradas en Contabilidad.</div>`;
+
+    const commitmentsHtml = (liq.upcomingCommitmentsList || []).map(c => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;font-size:13px;margin-bottom:6px;">
+        <div>
+          <span style="font-weight:600;color:#fca5a5;">${escapeHtml(c.name)}</span>
+          <span style="font-size:11px;color:#f87171;margin-left:6px;">(vence día ${c.dueDay})</span>
+        </div>
+        <div style="font-weight:700;color:#f87171;">- S/ ${c.amount.toFixed(2)}</div>
+      </div>
+    `).join("") || `<div class="muted small" style="color:#86efac;">¡Excelente! No hay compromisos que venzan antes de la quincena.</div>`;
+
+    return `
+      <div class="modal" role="dialog" aria-label="Auditor de Saldo y Sala de Entrenamiento" style="max-width:540px;width:95%;">
+        <div class="modalTop">
+          <div>
+            <div class="modalTitle" style="display:flex;align-items:center;gap:8px;">
+              <span>🎯</span> Sala de Entrenamiento & Auditor de Saldo
+            </div>
+            <div class="modalSub">Entrena y audita el cálculo exacto de tu margen diario y saldo real</div>
+          </div>
+          <button class="iconBtn" data-close aria-label="Close">✕</button>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px;padding:6px 0;">
+          <!-- RESUMEN EN VIVO -->
+          <div style="background:rgba(15,23,42,0.8);border:1px solid rgba(139,92,246,0.3);border-radius:12px;padding:14px;">
+            <div style="font-size:11px;text-transform:uppercase;color:#c4b5fd;letter-spacing:0.05em;font-weight:700;margin-bottom:8px;">Fórmula del Copiloto</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">
+              <div>
+                <span style="color:#94a3b8;">Saldo en cuentas:</span><br>
+                <strong style="color:#38bdf8;font-size:16px;">S/ ${liq.totalBalance.toFixed(2)}</strong>
+                ${liq.isManualOverride ? `<span style="font-size:10px;color:#facc15;display:block;">(Ajustado manualmente)</span>` : ""}
+              </div>
+              <div>
+                <span style="color:#94a3b8;">Días al cobro (${liq.runway.label.split('(')[0].trim()}):</span><br>
+                <strong style="color:#f1f5f9;font-size:16px;">${liq.runway.daysRemaining} días</strong>
+              </div>
+              <div>
+                <span style="color:#94a3b8;">Compromisos deducidos:</span><br>
+                <strong style="color:#f87171;font-size:16px;">- S/ ${liq.upcomingCommitments.toFixed(2)}</strong>
+              </div>
+              <div>
+                <span style="color:#94a3b8;">Margen Libre Diario:</span><br>
+                <strong style="color:#4ade80;font-size:18px;">S/ ${liq.dailyFreeBudget.toFixed(2)} / día</strong>
+              </div>
+            </div>
+            <div class="hr" style="margin:10px 0;opacity:0.2;"></div>
+            <div style="font-size:12px;color:#94a3b8;font-family:monospace;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;">
+              (S/ ${liq.totalBalance.toFixed(2)} - S/ ${liq.upcomingCommitments.toFixed(2)}) ÷ ${liq.runway.daysRemaining} días = <strong style="color:#4ade80;">S/ ${liq.dailyFreeBudget.toFixed(2)} / día</strong>
+            </div>
+          </div>
+
+          <!-- CUENTAS REGISTRADAS -->
+          <div>
+            <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">
+              🏦 Cuentas Líquidas en Sistema (Suma automática: S/ ${liq.calculatedBalance.toFixed(2)})
+            </div>
+            ${accountsHtml}
+          </div>
+
+          <!-- COMPROMISOS PRÓXIMOS -->
+          <div>
+            <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">
+              ⏳ Compromisos que vencen antes de quincena (Total: S/ ${liq.upcomingCommitments.toFixed(2)})
+            </div>
+            ${commitmentsHtml}
+          </div>
+
+          <!-- SALA DE ENTRENAMIENTO / AJUSTE MANUAL -->
+          <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:12px;padding:12px;">
+            <div style="font-size:13px;font-weight:700;color:#93c5fd;margin-bottom:4px;">
+              ⚙️ Sala de Entrenamiento & Calibración Manual
+            </div>
+            <div style="font-size:12px;color:#cbd5e1;line-height:1.4;margin-bottom:10px;">
+              Si tienes un saldo exacto diferente (por ejemplo <strong>S/ 120</strong>) y no deseas registrar cada ajuste contable, fíjalo aquí para que el card se sincronice de inmediato:
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="inputLiquidityOverride" type="number" step="0.50" placeholder="Ej: 120.00" value="${savedOverride}" style="flex:1;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:8px;padding:8px 12px;font-size:14px;" />
+              <button class="btn primary" id="btnSaveLiquidityOverride" style="font-size:13px;padding:8px 14px;">Fijar Saldo</button>
+              ${savedOverride ? `<button class="btn" id="btnClearLiquidityOverride" style="font-size:13px;background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.4);color:#fca5a5;">Restaurar</button>` : ""}
+            </div>
+          </div>
+        </div>
+
+        <div class="row" style="justify-content:flex-end;margin-top:10px;">
+          <button class="btn" data-close>Cerrar</button>
+        </div>
+      </div>
+    `;
+  };
+
+  modal.innerHTML = renderContent();
+  host.appendChild(modal);
+
+  const bindEvents = () => {
+    const close = () => modal.remove();
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal || (e.target && e.target.matches("[data-close]"))) close();
+    });
+
+    const btnSave = modal.querySelector("#btnSaveLiquidityOverride");
+    if (btnSave) {
+      btnSave.addEventListener("click", () => {
+        const inp = modal.querySelector("#inputLiquidityOverride");
+        const val = inp?.value?.trim();
+        if (val === "" || isNaN(Number(val))) {
+          toast("Ingresa un monto válido");
+          return;
+        }
+        localStorage.setItem("memorycarl_liquidity_override", Number(val).toFixed(2));
+        toast(`✅ Saldo fijado en S/ ${Number(val).toFixed(2)}`);
+        // Invalidar caché del briefing matutino para refrescar con la nueva cifra
+        localStorage.removeItem("memorycarl_daily_briefing_cache");
+        modal.innerHTML = renderContent();
+        bindEvents();
+        view();
+      });
+    }
+
+    const btnClear = modal.querySelector("#btnClearLiquidityOverride");
+    if (btnClear) {
+      btnClear.addEventListener("click", () => {
+        localStorage.removeItem("memorycarl_liquidity_override");
+        toast("🔄 Restaurado al cálculo automático de tus cuentas");
+        localStorage.removeItem("memorycarl_daily_briefing_cache");
+        modal.innerHTML = renderContent();
+        bindEvents();
+        view();
+      });
+    }
+  };
+
+  bindEvents();
+}
+
   // Daily Flow Card wiring (Home)
   if(state.tab==="home"){
+    const btnTraining = root.querySelector("#btnOpenLiquidityTraining");
+    if(btnTraining){
+      btnTraining.addEventListener("click", ()=>{
+        openLiquidityTrainingModal();
+      });
+    }
+
     const btnRefreshBriefing = root.querySelector("#btnRefreshDailyBriefing");
     if(btnRefreshBriefing){
       btnRefreshBriefing.addEventListener("click", async ()=>{
@@ -7037,15 +7199,23 @@ const sleepBars = renderSleepBars(sleepSeries);
     <!-- TARJETA PROACTIVA: DAILY LIFE FLOW -->
     <section class="card homeCard homeWide" id="homeDailyFlowCard" style="background:linear-gradient(145deg, rgba(30,27,75,0.85) 0%, rgba(15,23,42,0.95) 100%);border:1px solid rgba(139,92,246,0.25);box-shadow:0 8px 24px rgba(0,0,0,0.25);">
       <div class="cardTop" style="align-items:flex-start;">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;">
+        <div style="flex:1;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span style="font-size:20px;">⚡</span>
             <h2 class="cardTitle" style="color:#f1f5f9;margin:0;">Tu Flow de Hoy</h2>
             <span class="chip" style="background:rgba(139,92,246,0.2);color:#c4b5fd;border:1px solid rgba(139,92,246,0.3);font-size:11px;">${escapeHtml(dailyFlowCtx.liquidity.runway.label)}</span>
+            ${dailyFlowCtx.liquidity.isManualOverride ? `<span class="chip" style="background:rgba(234,179,8,0.2);color:#fef08a;border:1px solid rgba(234,179,8,0.4);font-size:10px;">Ajuste manual</span>` : ""}
           </div>
-          <div class="small" style="color:#94a3b8;margin-top:2px;">Margen libre diario: <strong style="color:#38bdf8;">S/ ${dailyFlowCtx.liquidity.dailyFreeBudget.toFixed(2)}</strong></div>
+          <div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-top:5px;">
+            <div class="small" style="color:#cbd5e1;">Saldo en cuenta: <strong style="color:#38bdf8;font-size:14px;">S/ ${dailyFlowCtx.liquidity.totalBalance.toFixed(2)}</strong></div>
+            <div class="small" style="color:#94a3b8;">Margen diario: <strong style="color:#4ade80;font-size:14px;">S/ ${dailyFlowCtx.liquidity.dailyFreeBudget.toFixed(2)} / día</strong></div>
+            ${dailyFlowCtx.liquidity.upcomingCommitments > 0 ? `<div class="small" style="color:#fca5a5;">(-S/ ${dailyFlowCtx.liquidity.upcomingCommitments.toFixed(2)} compromisos)</div>` : ""}
+          </div>
         </div>
-        <button class="iconBtn" id="btnRefreshDailyBriefing" title="Pedir consejo a Ollama" style="background:rgba(255,255,255,0.06);font-size:14px;">✨</button>
+        <div style="display:flex;gap:6px;">
+          <button class="iconBtn" id="btnOpenLiquidityTraining" title="Sala de Entrenamiento y Auditor de Saldo" style="background:rgba(255,255,255,0.06);font-size:13px;border:1px solid rgba(255,255,255,0.12);" aria-label="Auditar saldo">🔍 Balance</button>
+          <button class="iconBtn" id="btnRefreshDailyBriefing" title="Pedir consejo a tu Copiloto IA" style="background:rgba(255,255,255,0.06);font-size:14px;">✨</button>
+        </div>
       </div>
 
       <div class="hr" style="margin:8px 0;opacity:0.15;"></div>

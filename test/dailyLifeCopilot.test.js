@@ -180,6 +180,36 @@ test("dailyFlowEngine: cálculo de liquidez y margen libre diario restando compr
   assert.equal(liq.availableLiquidity, 480.00); // 600 - 120
   assert.equal(liq.dailyFreeBudget, 48.00);     // 480 / 10 días
   assert.equal(liq.liquidityHealth, "excelente");
+  assert.equal(liq.accountsBreakdown.length, 2);
+  assert.equal(liq.upcomingCommitmentsList.length, 1);
+});
+
+test("dailyFlowEngine: soporta calibración / override manual del saldo en cuenta", () => {
+  resetStorage();
+  const fakeState = {
+    financeAccounts: [{ id: "acc1", balance: 50.00 }]
+  };
+  const now = new Date("2026-09-20T12:00:00"); // 10 días restantes para el 30
+
+  // Sin override
+  let liq = computeDailyLiquidity(fakeState, now);
+  assert.equal(liq.totalBalance, 50.00);
+  assert.equal(liq.dailyFreeBudget, 5.00);
+  assert.equal(liq.isManualOverride, false);
+
+  // Con override manual (ej: usuario tiene S/ 120 reales)
+  localStorage.setItem("memorycarl_liquidity_override", "120.00");
+  liq = computeDailyLiquidity(fakeState, now);
+  assert.equal(liq.totalBalance, 120.00);
+  assert.equal(liq.calculatedBalance, 50.00);
+  assert.equal(liq.dailyFreeBudget, 12.00); // 120 / 10 días
+  assert.equal(liq.isManualOverride, true);
+
+  // Limpiar override
+  localStorage.removeItem("memorycarl_liquidity_override");
+  liq = computeDailyLiquidity(fakeState, now);
+  assert.equal(liq.totalBalance, 50.00);
+  assert.equal(liq.isManualOverride, false);
 });
 
 test("dailyFlowEngine: evaluación de oportunidad hedónica (luz verde para premio si hay abstinencia y liquidez)", () => {
