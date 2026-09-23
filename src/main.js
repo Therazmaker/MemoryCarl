@@ -3356,7 +3356,16 @@ function view(){
         
         persist();
       } catch (err) {
-        alert("Chef AI: " + err.message);
+        console.error("Chef AI Error:", err);
+        // Agregar mensaje de error explicativo directo al chat para que Carlos lo vea sin perder el hilo
+        state.shoppingAiChat = Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [];
+        state.shoppingAiChat.push({
+          role: "assistant",
+          content: err.message || "Ocurrió un error inesperado al consultar a la IA.",
+          isError: true,
+          ts: new Date().toISOString()
+        });
+        persist();
       } finally {
         if(typing) typing.style.display = "none";
         if(inp) inp.disabled = false;

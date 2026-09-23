@@ -213,6 +213,61 @@ export function saveChefAiSettings(patch) {
 }
 
 /**
+ * Interpreta errores de API y genera un diagnóstico humano y comprensible.
+ * Explica si se acabaron las llamadas gratis (cuota 429), clave inválida (400/401/403),
+ * modelo no encontrado (404), timeout o CORS.
+ * @param {Error|object} err
+ * @param {string} provider - "Gemini" | "Ollama"
+ * @param {number} [status]
+ * @param {string} [rawMessage]
+ * @returns {string}
+ */
+export function explainAiError(err, provider = "Gemini", status = 0, rawMessage = "") {
+  const msg = (rawMessage || err?.message || String(err) || "").toLowerCase();
+  const code = status || (err?.status ? Number(err.status) : 0);
+
+  // 1. Cuota agotada / Límite de llamadas gratis excedido (Rate Limit / Quota)
+  if (code === 429 || msg.includes("resource_exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests")) {
+    return `⚠️ LÍMITE DE LLAMADAS ALCANZADO (${provider}):
+Te has quedado sin llamadas gratis en este minuto o por el día de hoy (error 429 / Quota Exceeded).
+👉 Solución: Espera 1 o 2 minutos para que se reinicie tu cuota gratuita por minuto, o pulsa ⚙️ en Chef AI para cambiar a otro modelo más ligero o renovar tu clave gratuita en Google AI Studio.`;
+  }
+
+  // 2. API Key inválida o expirada
+  if (code === 401 || code === 403 || msg.includes("api_key_invalid") || msg.includes("invalid api key") || msg.includes("permission_denied") || msg.includes("unauthenticated")) {
+    return `🔑 ERROR DE AUTENTICACIÓN (${provider}):
+La API Key configurada no es válida o ha sido revocada (error ${code || 401}).
+👉 Solución: Pulsa ⚙️ en Chef AI y copia tu API Key correcta de Google AI Studio (o tu clave de Ollama).`;
+  }
+
+  // 3. Modelo no encontrado o no disponible
+  if (code === 404 || msg.includes("not found") || msg.includes("is not supported") || msg.includes("unsupported model")) {
+    return `🤖 MODELO NO ENCONTRADO (${provider}):
+El modelo seleccionado no está disponible o cambió de nombre (error 404).
+👉 Solución: Pulsa ⚙️ en Chef AI y selecciona el modelo recomendado ('gemini-2.5-flash').`;
+  }
+
+  // 4. Bloqueo de CORS o red
+  if (msg.includes("failed to fetch") || err?.name === "TypeError" || msg.includes("cors")) {
+    return `🌐 ERROR DE RED / CORS (${provider}):
+El navegador bloqueó la conexión directa (típico de Ollama por seguridad CORS en web).
+👉 Solución: Pulsa ⚙️ en Chef AI y activa Google Gemini (inmune a CORS y con 15 RPM gratis).`;
+  }
+
+  // 5. Tiempo de espera agotado (Timeout)
+  if (err?.name === "AbortError" || msg.includes("timeout") || msg.includes("tiempo de espera")) {
+    return `⏱️ TIEMPO DE ESPERA AGOTADO (${provider}):
+El servidor tardó más de 30 segundos en responder. Tu conexión a internet o el servidor de la IA están saturados.
+👉 Solución: Intenta enviar tu mensaje nuevamente en unos segundos.`;
+  }
+
+  // Fallback con el detalle técnico exacto
+  return `❌ ERROR DEL COPILOTO (${provider}${code ? ` ${code}` : ""}):
+${rawMessage || err?.message || "Ocurrió un error inesperado al procesar la respuesta."}
+👉 Pulsa ⚙️ en Chef AI para revisar tu clave o cambiar de proveedor.`;
+}
+
+/**
  * Llama a Google Gemini API para responder.
  */
 async function callGemini(messages, apiKey, model = "gemini-2.5-flash") {
@@ -222,8 +277,6 @@ async function callGemini(messages, apiKey, model = "gemini-2.5-flash") {
   const cleanModel = encodeURIComponent(model || "gemini-2.5-flash");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey.trim()}`;
 
-  // Formatear mensajes a contents de Gemini
-  // System instruction va en systemInstruction o en el primer prompt
   const systemMsg = messages.find(m => m.role === "system");
   const nonSystem = messages.filter(m => m.role !== "system");
 
@@ -268,17 +321,22 @@ async function callGemini(messages, apiKey, model = "gemini-2.5-flash") {
         const errJson = await res.json();
         errMsg = errJson.error?.message || errMsg;
       } catch (_) {}
-      throw new Error(`Error Gemini (${res.status}): ${errMsg}`);
+      const explained = explainAiError(null, "Google Gemini", res.status, errMsg);
+      const customErr = new Error(explained);
+      customErr.status = res.status;
+      customErr.rawMessage = errMsg;
+      throw customErr;
     }
 
     const data = await res.json();
     const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!reply) throw new Error("Gemini no devolvió texto en la respuesta.");
+    if (!reply) throw new Error("Gemini no devolvió texto en la respuesta. Puede que tu mensaje haya activado un filtro de seguridad.");
     return reply;
   } catch (err) {
     clearTimeout(timer);
-    if (err.name === "AbortError") throw new Error("Tiempo de espera agotado con Gemini.");
-    throw err;
+    if (err.rawMessage) throw err; // ya viene formateado
+    const explained = explainAiError(err, "Google Gemini");
+    throw new Error(explained);
   }
 }
 
@@ -298,7 +356,7 @@ async function callAi(messages) {
     if (settings.geminiApiKey) {
       return await callGemini(messages, settings.geminiApiKey, settings.geminiModel);
     }
-    throw new Error("Chef AI necesita una API Key. Abre ⚙️ Configuración y coloca tu clave de Gemini (recomendado) u Ollama.");
+    throw new Error("Chef AI necesita una API Key. Abre ⚙️ Configuración y coloca tu clave gratuita de Gemini (Google AI Studio) u Ollama.");
   }
 
   const baseUrl = (settings.ollamaBaseUrl || "https://ollama.com").replace(/\/+$/, "");
@@ -325,22 +383,24 @@ async function callAi(messages) {
     if (!res.ok) {
       let errMsg = `HTTP ${res.status}`;
       try { const e = await res.json(); errMsg = e?.error || errMsg; } catch (_) {}
-      throw new Error(`Error Ollama Cloud: ${errMsg}`);
+      const explained = explainAiError(null, "Ollama Cloud", res.status, errMsg);
+      const customErr = new Error(explained);
+      customErr.status = res.status;
+      customErr.rawMessage = errMsg;
+      throw customErr;
     }
     const data = await res.json();
     return data?.message?.content || "";
   } catch (err) {
     clearTimeout(timer);
+    if (err.rawMessage) throw err;
     // Si falla por CORS y tenemos Gemini configurado, fallback automático
     if (settings.geminiApiKey && (err.message?.toLowerCase().includes("failed to fetch") || err.name === "TypeError")) {
       console.warn("Ollama falló por CORS, ejecutando fallback transparente a Gemini...");
       return await callGemini(messages, settings.geminiApiKey, settings.geminiModel);
     }
-    if (err.name === "AbortError") throw new Error("Tiempo de espera agotado con el modelo. Revisa tu conexión.");
-    if (err.message?.toLowerCase().includes("failed to fetch") || err.name === "TypeError") {
-      throw new Error("Error de CORS al conectar con Ollama. Te sugerimos abrir ⚙️ Configuración en Chef AI y cambiar a Google Gemini.");
-    }
-    throw err;
+    const explained = explainAiError(err, "Ollama Cloud");
+    throw new Error(explained);
   }
 }
 

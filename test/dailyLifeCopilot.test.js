@@ -43,6 +43,8 @@ import {
   DEFAULT_STREET_COSTS
 } from "../src/shopping/mealBundles.js";
 
+import { explainAiError } from "../src/shopping/shoppingAi.js";
+
 import {
   calculateFortnightRunway,
   computeDailyLiquidity,
@@ -251,4 +253,22 @@ test("dailyFlowEngine: genera briefing con fallback inteligente cuando Ollama no
   assert.ok(res.briefingText.length > 20);
   assert.ok(res.briefingText.includes("almuerzo"));
   assert.ok(res.context.hasHomeLunchReady === true);
+});
+
+test("shoppingAi: explainAiError diagnostica con precisión límites de cuota, autenticación y CORS", () => {
+  // Caso 1: Límite de llamadas gratis alcanzado (429 / Quota)
+  const quotaErr = explainAiError(null, "Google Gemini", 429, "Resource has been exhausted (e.g. check quota)");
+  assert.ok(quotaErr.includes("LÍMITE DE LLAMADAS ALCANZADO"));
+  assert.ok(quotaErr.includes("429"));
+  assert.ok(quotaErr.includes("Espera 1 o 2 minutos"));
+
+  // Caso 2: API Key inválida (400 / 401)
+  const authErr = explainAiError(null, "Google Gemini", 400, "API_KEY_INVALID");
+  assert.ok(authErr.includes("ERROR DE AUTENTICACIÓN"));
+  assert.ok(authErr.includes("Google AI Studio"));
+
+  // Caso 3: Error de CORS o red
+  const corsErr = explainAiError(new TypeError("Failed to fetch"), "Ollama Cloud");
+  assert.ok(corsErr.includes("ERROR DE RED / CORS"));
+  assert.ok(corsErr.includes("activa Google Gemini"));
 });
