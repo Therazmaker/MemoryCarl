@@ -103,10 +103,18 @@ export function computeDailyLiquidity(rootState = {}, now = new Date()) {
 
   const rawAccounts = Array.isArray(rootState.financeAccounts) ? rootState.financeAccounts : (Array.isArray(rootState.finance_accounts) ? rootState.finance_accounts : []);
   const btcPrice = Number(rootState.btcPricePen) || 0;
+
+  // Cuentas de terceros o de seguimiento (ej: 'Fergis') que no son saldo líquido propio de Carlos
+  const isExcludedAccount = (a) => {
+    if (a.archived || a.excludeFromTotal) return true;
+    const name = String(a.name || "").toLowerCase().trim();
+    if (name.includes("fergis")) return true;
+    return false;
+  };
   
   // Detalle de cuentas líquidas
   const accountsBreakdown = rawAccounts
-    .filter(a => !a.archived && !a.excludeFromTotal)
+    .filter(a => !isExcludedAccount(a))
     .map(a => {
       const isCrypto = a.type === "crypto";
       const penValue = isCrypto ? (Number(a.balance || 0) * btcPrice) : Number(a.balance || 0);
@@ -124,14 +132,17 @@ export function computeDailyLiquidity(rootState = {}, now = new Date()) {
 
   const commitments = Array.isArray(rootState.financeCommitments) ? rootState.financeCommitments : [];
   const runway = calculateFortnightRunway(now);
+  const currentDay = getLimaDate(now).getDate();
 
-  // Compromisos pendientes que vencen antes o en la quincena
+  // Compromisos que vencen dentro del ciclo actual (entre hoy y el día de cobro)
+  // Ej: Si hoy es 23 y el cobro es el 30, solo compromisos entre el 23 y el 30.
+  // Un compromiso del día 1 vence en la SIGUIENTE quincena (mes próximo), NO antes de este 30.
   const upcomingCommitmentsList = commitments
     .filter(c => {
       if (c.resolved || c.active === false || c.status === "paid" || c.status === "cancelled") return false;
       const day = c.dueDay ? Number(c.dueDay) : (c.dueDate ? Number(c.dueDate) : null);
       if (!day) return false;
-      return day <= runway.targetDay;
+      return day >= currentDay && day <= runway.targetDay;
     })
     .map(c => ({
       id: c.id,
@@ -141,7 +152,16 @@ export function computeDailyLiquidity(rootState = {}, now = new Date()) {
     }));
 
   const upcomingCommitments = upcomingCommitmentsList.reduce((sum, c) => sum + c.amount, 0);
-  const availableLiquidity = Math.max(0, totalBalance - upcomingCommitments);
+
+  // Permitir al usuario si desea o no deducir compromisos de su margen diario (por defecto solo los del ciclo)
+  let deductCommitments = true;
+  try {
+    const rawSetting = localStorage.getItem("memorycarl_deduct_commitments");
+    if (rawSetting === "false") deductCommitments = false;
+  } catch (_) {}
+
+  const effectiveCommitments = deductCommitments ? upcomingCommitments : 0;
+  const availableLiquidity = Math.max(0, totalBalance - effectiveCommitments);
   const dailyFreeBudget = Number((availableLiquidity / runway.daysRemaining).toFixed(2));
 
   // Clasificación de holgura
@@ -163,6 +183,8 @@ export function computeDailyLiquidity(rootState = {}, now = new Date()) {
     accountsBreakdown,
     upcomingCommitmentsList,
     upcomingCommitments,
+    effectiveCommitments,
+    deductCommitments,
     availableLiquidity,
     dailyFreeBudget,
     liquidityHealth,

@@ -3557,11 +3557,11 @@ function openLiquidityTrainingModal() {
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;font-size:13px;margin-bottom:6px;">
         <div>
           <span style="font-weight:600;color:#fca5a5;">${escapeHtml(c.name)}</span>
-          <span style="font-size:11px;color:#f87171;margin-left:6px;">(vence día ${c.dueDay})</span>
+          <span style="font-size:11px;color:#f87171;margin-left:6px;">(vence día ${c.dueDay} de este mes)</span>
         </div>
         <div style="font-weight:700;color:#f87171;">- S/ ${c.amount.toFixed(2)}</div>
       </div>
-    `).join("") || `<div class="muted small" style="color:#86efac;">¡Excelente! No hay compromisos que venzan antes de la quincena.</div>`;
+    `).join("") || `<div class="muted small" style="color:#86efac;">¡Excelente! No tienes compromisos pendientes antes del cierre de este ciclo.</div>`;
 
     return `
       <div class="modal" role="dialog" aria-label="Auditor de Saldo y Sala de Entrenamiento" style="max-width:540px;width:95%;">
@@ -3581,7 +3581,7 @@ function openLiquidityTrainingModal() {
             <div style="font-size:11px;text-transform:uppercase;color:#c4b5fd;letter-spacing:0.05em;font-weight:700;margin-bottom:8px;">Fórmula del Copiloto</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">
               <div>
-                <span style="color:#94a3b8;">Saldo en cuentas:</span><br>
+                <span style="color:#94a3b8;">Saldo en cuenta líquida:</span><br>
                 <strong style="color:#38bdf8;font-size:16px;">S/ ${liq.totalBalance.toFixed(2)}</strong>
                 ${liq.isManualOverride ? `<span style="font-size:10px;color:#facc15;display:block;">(Ajustado manualmente)</span>` : ""}
               </div>
@@ -3591,7 +3591,8 @@ function openLiquidityTrainingModal() {
               </div>
               <div>
                 <span style="color:#94a3b8;">Compromisos deducidos:</span><br>
-                <strong style="color:#f87171;font-size:16px;">- S/ ${liq.upcomingCommitments.toFixed(2)}</strong>
+                <strong style="color:#f87171;font-size:16px;">- S/ ${liq.effectiveCommitments.toFixed(2)}</strong>
+                ${!liq.deductCommitments ? `<span style="font-size:10px;color:#94a3b8;display:block;">(Deducción desactivada)</span>` : ""}
               </div>
               <div>
                 <span style="color:#94a3b8;">Margen Libre Diario:</span><br>
@@ -3600,22 +3601,29 @@ function openLiquidityTrainingModal() {
             </div>
             <div class="hr" style="margin:10px 0;opacity:0.2;"></div>
             <div style="font-size:12px;color:#94a3b8;font-family:monospace;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;">
-              (S/ ${liq.totalBalance.toFixed(2)} - S/ ${liq.upcomingCommitments.toFixed(2)}) ÷ ${liq.runway.daysRemaining} días = <strong style="color:#4ade80;">S/ ${liq.dailyFreeBudget.toFixed(2)} / día</strong>
+              (S/ ${liq.totalBalance.toFixed(2)} - S/ ${liq.effectiveCommitments.toFixed(2)}) ÷ ${liq.runway.daysRemaining} días = <strong style="color:#4ade80;">S/ ${liq.dailyFreeBudget.toFixed(2)} / día</strong>
             </div>
           </div>
 
           <!-- CUENTAS REGISTRADAS -->
           <div>
             <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">
-              🏦 Cuentas Líquidas en Sistema (Suma automática: S/ ${liq.calculatedBalance.toFixed(2)})
+              🏦 Cuentas Líquidas Personales (Suma automática: S/ ${liq.calculatedBalance.toFixed(2)})
             </div>
             ${accountsHtml}
+            <div style="font-size:11px;color:#64748b;margin-top:4px;">* Cuentas de terceros o de seguimiento (ej: Fergis) están excluidas de tu saldo líquido personal.</div>
           </div>
 
-          <!-- COMPROMISOS PRÓXIMOS -->
+          <!-- COMPROMISOS PRÓXIMOS Y TOGGLE -->
           <div>
-            <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">
-              ⏳ Compromisos que vencen antes de quincena (Total: S/ ${liq.upcomingCommitments.toFixed(2)})
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;">
+                ⏳ Compromisos antes del cobro (${liq.upcomingCommitmentsList.length})
+              </div>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;color:#cbd5e1;">
+                <input type="checkbox" id="toggleDeductCommitments" ${liq.deductCommitments ? "checked" : ""} />
+                <span>Deducir de margen</span>
+              </label>
             </div>
             ${commitmentsHtml}
           </div>
@@ -3626,7 +3634,7 @@ function openLiquidityTrainingModal() {
               ⚙️ Sala de Entrenamiento & Calibración Manual
             </div>
             <div style="font-size:12px;color:#cbd5e1;line-height:1.4;margin-bottom:10px;">
-              Si tienes un saldo exacto diferente (por ejemplo <strong>S/ 120</strong>) y no deseas registrar cada ajuste contable, fíjalo aquí para que el card se sincronice de inmediato:
+              Si tienes un saldo exacto disponible (por ejemplo <strong>S/ 120</strong>) y no deseas registrar cada ajuste contable, fíjalo aquí para que el card se sincronice de inmediato:
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
               <input id="inputLiquidityOverride" type="number" step="0.50" placeholder="Ej: 120.00" value="${savedOverride}" style="flex:1;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:8px;padding:8px 12px;font-size:14px;" />
@@ -3652,6 +3660,17 @@ function openLiquidityTrainingModal() {
       if (e.target === modal || (e.target && e.target.matches("[data-close]"))) close();
     });
 
+    const toggleDeduct = modal.querySelector("#toggleDeductCommitments");
+    if (toggleDeduct) {
+      toggleDeduct.addEventListener("change", (e) => {
+        localStorage.setItem("memorycarl_deduct_commitments", e.target.checked ? "true" : "false");
+        localStorage.removeItem("memorycarl_daily_briefing_cache");
+        modal.innerHTML = renderContent();
+        bindEvents();
+        view();
+      });
+    }
+
     const btnSave = modal.querySelector("#btnSaveLiquidityOverride");
     if (btnSave) {
       btnSave.addEventListener("click", () => {
@@ -3663,7 +3682,6 @@ function openLiquidityTrainingModal() {
         }
         localStorage.setItem("memorycarl_liquidity_override", Number(val).toFixed(2));
         toast(`✅ Saldo fijado en S/ ${Number(val).toFixed(2)}`);
-        // Invalidar caché del briefing matutino para refrescar con la nueva cifra
         localStorage.removeItem("memorycarl_daily_briefing_cache");
         modal.innerHTML = renderContent();
         bindEvents();
@@ -7218,7 +7236,7 @@ const sleepBars = renderSleepBars(sleepSeries);
           <div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-top:5px;">
             <div class="small" style="color:#cbd5e1;">Saldo en cuenta: <strong style="color:#38bdf8;font-size:14px;">S/ ${dailyFlowCtx.liquidity.totalBalance.toFixed(2)}</strong></div>
             <div class="small" style="color:#94a3b8;">Margen diario: <strong style="color:#4ade80;font-size:14px;">S/ ${dailyFlowCtx.liquidity.dailyFreeBudget.toFixed(2)} / día</strong></div>
-            ${dailyFlowCtx.liquidity.upcomingCommitments > 0 ? `<div class="small" style="color:#fca5a5;">(-S/ ${dailyFlowCtx.liquidity.upcomingCommitments.toFixed(2)} compromisos)</div>` : ""}
+            ${dailyFlowCtx.liquidity.effectiveCommitments > 0 ? `<div class="small" style="color:#fca5a5;">(-S/ ${dailyFlowCtx.liquidity.effectiveCommitments.toFixed(2)} compromisos)</div>` : ""}
           </div>
         </div>
         <div style="display:flex;gap:6px;">

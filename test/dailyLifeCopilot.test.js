@@ -214,6 +214,39 @@ test("dailyFlowEngine: soporta calibración / override manual del saldo en cuent
   assert.equal(liq.isManualOverride, false);
 });
 
+test("dailyFlowEngine: excluye cuentas de terceros (Fergis) y no resta compromisos fuera de ciclo (ej: día 1)", () => {
+  resetStorage();
+  const stateWithFergis = {
+    financeAccounts: [
+      { id: "bcp", name: "BCP", balance: 120.00 },
+      { id: "fergis", name: "Fergis", balance: 163.88 }
+    ],
+    financeCommitments: [
+      // Compromiso del día 1: Vence en el siguiente ciclo (mes entrante), no antes del 30
+      { id: "c1", name: "Agua", amount: 138.00, dueDay: 1, resolved: false },
+      // Compromiso del día 28: Vence dentro de este ciclo (entre hoy 23 y fin de mes 30)
+      { id: "c2", name: "Internet", amount: 20.00, dueDay: 28, resolved: false }
+    ]
+  };
+
+  const now = new Date("2026-09-23T12:00:00"); // 7 días para el 30
+  const liq = computeDailyLiquidity(stateWithFergis, now);
+
+  // Solo BCP (120) debe contar; Fergis no
+  assert.equal(liq.totalBalance, 120.00);
+  assert.equal(liq.accountsBreakdown.length, 1);
+  assert.equal(liq.accountsBreakdown[0].name, "BCP");
+
+  // Solo el compromiso del día 28 debe deducirse; el del día 1 vence el próximo mes
+  assert.equal(liq.upcomingCommitmentsList.length, 1);
+  assert.equal(liq.upcomingCommitmentsList[0].name, "Internet");
+  assert.equal(liq.effectiveCommitments, 20.00);
+
+  // Margen libre: (120 - 20) / 7 = 14.29 / día (nunca 0)
+  assert.equal(liq.availableLiquidity, 100.00);
+  assert.equal(liq.dailyFreeBudget, 14.29);
+});
+
 test("dailyFlowEngine: evaluación de oportunidad hedónica (luz verde para premio si hay abstinencia y liquidez)", () => {
   const products = [
     { id: "p1", name: "Volt", price: 2.5, tier: "base_diario", context: "oficina", rating: 3 },
