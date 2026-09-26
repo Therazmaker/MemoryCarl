@@ -15080,10 +15080,14 @@ function openChefSettingsModal() {
         <!-- Selector de Proveedor -->
         <div>
           <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:#a78bfa;">Proveedor de Inteligencia Artificial</label>
-          <div style="display:flex;gap:10px;">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;">
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
               <input type="radio" name="chefProvider" value="gemini" ${s.provider==="gemini"?"checked":""}>
               ✨ Google Gemini (Recomendado)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+              <input type="radio" name="chefProvider" value="claude" ${s.provider==="claude"?"checked":""}>
+              💜 Anthropic Claude
             </label>
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
               <input type="radio" name="chefProvider" value="ollama" ${s.provider==="ollama"?"checked":""}>
@@ -15091,7 +15095,7 @@ function openChefSettingsModal() {
             </label>
           </div>
           <div class="small muted" style="margin-top:4px;">
-            Gemini soporta CORS directamente en el navegador y nunca falla con "Failed to fetch".
+            Gemini y Claude soportan solicitudes directas desde el navegador para el copiloto.
           </div>
         </div>
 
@@ -15117,6 +15121,31 @@ function openChefSettingsModal() {
           </div>
 
           <button class="btn" id="btnTestChefGemini" type="button" style="align-self:flex-start;font-size:12px;padding:6px 12px;">⚡ Probar Gemini</button>
+        </div>
+
+        <!-- Sección Claude -->
+        <div id="chefClaudeSection" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;display:${s.provider==='claude'?'flex':'none'};flex-direction:column;gap:10px;">
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Claude API Key</label>
+            <div style="display:flex;gap:6px;">
+              <input type="password" id="chefClaudeKey" class="input" style="flex:1;" placeholder="sk-ant-api..." value="${escapeHtml(s.claudeApiKey||"")}" autocomplete="new-password">
+              <button class="btn ghost" id="btnToggleChefClaudeKey" type="button">👁</button>
+            </div>
+            <div class="small muted" style="margin-top:4px;">
+              Obtén tu clave en <a href="https://console.anthropic.com/" target="_blank" style="color:#a78bfa;text-decoration:underline;">Anthropic Console</a>.
+            </div>
+          </div>
+
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Modelo Claude</label>
+            <select id="chefClaudeModel" class="input">
+              <option value="claude-3-5-sonnet-20241022" ${(s.claudeModel||"claude-3-5-sonnet-20241022")==="claude-3-5-sonnet-20241022"?"selected":""}>Claude 3.5 Sonnet (Recomendado)</option>
+              <option value="claude-3-7-sonnet-latest" ${s.claudeModel==="claude-3-7-sonnet-latest"?"selected":""}>Claude 3.7 Sonnet</option>
+              <option value="claude-3-5-haiku-20241022" ${s.claudeModel==="claude-3-5-haiku-20241022"?"selected":""}>Claude 3.5 Haiku (Rápido y liviano)</option>
+            </select>
+          </div>
+
+          <button class="btn" id="btnTestChefClaude" type="button" style="align-self:flex-start;font-size:12px;padding:6px 12px;">⚡ Probar Claude</button>
         </div>
 
         <!-- Sección Ollama -->
@@ -15152,15 +15181,21 @@ function openChefSettingsModal() {
   // Toggle radio sections
   modal.querySelectorAll('input[name="chefProvider"]').forEach(radio => {
     radio.addEventListener("change", (e) => {
-      const isGemini = e.target.value === "gemini";
-      modal.querySelector("#chefGeminiSection").style.display = isGemini ? "flex" : "none";
-      modal.querySelector("#chefOllamaSection").style.display = isGemini ? "none" : "flex";
+      const prov = e.target.value;
+      modal.querySelector("#chefGeminiSection").style.display = prov === "gemini" ? "flex" : "none";
+      modal.querySelector("#chefClaudeSection").style.display = prov === "claude" ? "flex" : "none";
+      modal.querySelector("#chefOllamaSection").style.display = prov === "ollama" ? "flex" : "none";
     });
   });
 
   // Toggle password visibility
   modal.querySelector("#btnToggleChefGeminiKey")?.addEventListener("click", () => {
     const inp = modal.querySelector("#chefGeminiKey");
+    if (inp) inp.type = inp.type === "password" ? "text" : "password";
+  });
+
+  modal.querySelector("#btnToggleChefClaudeKey")?.addEventListener("click", () => {
+    const inp = modal.querySelector("#chefClaudeKey");
     if (inp) inp.type = inp.type === "password" ? "text" : "password";
   });
 
@@ -15201,11 +15236,63 @@ function openChefSettingsModal() {
     }
   });
 
+  // Test Claude
+  modal.querySelector("#btnTestChefClaude")?.addEventListener("click", async () => {
+    const key = modal.querySelector("#chefClaudeKey")?.value?.trim();
+    const model = modal.querySelector("#chefClaudeModel")?.value?.trim() || "claude-3-5-sonnet-20241022";
+    const statusDiv = modal.querySelector("#chefSettingsStatus");
+    if (!key) {
+      statusDiv.style.display = "block";
+      statusDiv.style.background = "rgba(239,68,68,0.15)";
+      statusDiv.style.color = "#f87171";
+      statusDiv.textContent = "Ingresa primero una API Key de Claude para probar.";
+      return;
+    }
+    statusDiv.style.display = "block";
+    statusDiv.style.background = "rgba(59,130,246,0.15)";
+    statusDiv.style.color = "#60a5fa";
+    statusDiv.textContent = "Probando conexión con Anthropic Claude...";
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 10,
+          messages: [{ role: "user", content: "Ping" }]
+        })
+      });
+
+      if (res.ok) {
+        statusDiv.style.background = "rgba(16,185,129,0.15)";
+        statusDiv.style.color = "#34d399";
+        statusDiv.textContent = "✓ ¡Conexión exitosa con Anthropic Claude!";
+      } else {
+        const txt = await res.text().catch(() => "");
+        statusDiv.style.background = "rgba(239,68,68,0.15)";
+        statusDiv.style.color = "#f87171";
+        statusDiv.textContent = `Error ${res.status}: ${txt.slice(0, 90)}`;
+      }
+    } catch (e) {
+      statusDiv.style.background = "rgba(239,68,68,0.15)";
+      statusDiv.style.color = "#f87171";
+      statusDiv.textContent = "Error de red: " + e.message;
+    }
+  });
+
   // Save Settings
   modal.querySelector("#btnSaveChefSettings")?.addEventListener("click", () => {
     const selectedProvider = modal.querySelector('input[name="chefProvider"]:checked')?.value || "gemini";
     const geminiApiKey = modal.querySelector("#chefGeminiKey")?.value?.trim() || "";
     const geminiModel = modal.querySelector("#chefGeminiModel")?.value?.trim() || "gemini-2.5-flash";
+    const claudeApiKey = modal.querySelector("#chefClaudeKey")?.value?.trim() || "";
+    const claudeModel = modal.querySelector("#chefClaudeModel")?.value?.trim() || "claude-3-5-sonnet-20241022";
     const ollamaApiKey = modal.querySelector("#chefOllamaKey")?.value?.trim() || "";
     const ollamaBaseUrl = modal.querySelector("#chefOllamaBaseUrl")?.value?.trim() || "https://ollama.com";
     const ollamaModel = modal.querySelector("#chefOllamaModel")?.value?.trim() || "gemma4:31b";
@@ -15214,6 +15301,8 @@ function openChefSettingsModal() {
       provider: selectedProvider,
       geminiApiKey,
       geminiModel,
+      claudeApiKey,
+      claudeModel,
       ollamaApiKey,
       ollamaBaseUrl,
       ollamaModel
@@ -15236,18 +15325,22 @@ function viewShoppingAssistant(){
 
   const isConfigured = Boolean(
     (chefSettings.provider === "gemini" && chefSettings.geminiApiKey) ||
+    (chefSettings.provider === "claude" && chefSettings.claudeApiKey) ||
     (chefSettings.provider === "ollama" && chefSettings.ollamaApiKey) ||
-    chefSettings.geminiApiKey
+    chefSettings.geminiApiKey ||
+    chefSettings.claudeApiKey
   );
 
   const activeProviderLabel = chefSettings.provider === "gemini" 
     ? (chefSettings.geminiApiKey ? "✨ Google Gemini" : "⚠️ Gemini sin API Key")
-    : "🦙 Ollama Cloud";
+    : (chefSettings.provider === "claude"
+      ? (chefSettings.claudeApiKey ? "💜 Anthropic Claude" : "⚠️ Claude sin API Key")
+      : "🦙 Ollama Cloud");
 
   const notConfiguredBanner = !isConfigured ? `
     <div style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:rgba(245,158,11,0.95);display:flex;justify-content:space-between;align-items:center;gap:10px;">
       <div>
-        ⚠️ <b>Chef AI sin configurar:</b> Ingresa tu API Key de Google Gemini para hablar con el chef sin problemas de CORS.
+        ⚠️ <b>Chef AI sin configurar:</b> Ingresa tu API Key de Claude o Gemini para hablar con el chef.
       </div>
       <button class="btn" id="btnOpenChefSettingsBanner" style="font-size:12px;padding:6px 10px;white-space:nowrap;background:rgba(245,158,11,0.25);">⚙️ Configurar</button>
     </div>
