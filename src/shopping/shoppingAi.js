@@ -175,12 +175,14 @@ export function getChefAiSettings() {
   // Ollama settings
   const ollama = getOllamaSettings();
 
-  const provider = chefCustom.provider || (geminiKey ? "gemini" : (ollama.apiKey ? "ollama" : "gemini"));
+  const provider = chefCustom.provider || (geminiKey ? "gemini" : (chefCustom.claudeApiKey ? "claude" : (ollama.apiKey ? "ollama" : "gemini")));
 
   return {
-    provider, // "gemini" | "ollama"
+    provider, // "gemini" | "claude" | "ollama"
     geminiApiKey: geminiKey,
     geminiModel,
+    claudeApiKey: chefCustom.claudeApiKey || "",
+    claudeModel: chefCustom.claudeModel || "claude-3-5-sonnet-20241022",
     ollamaModel: chefCustom.ollamaModel || ollama.model || "gemma4:31b",
     ollamaBaseUrl: chefCustom.ollamaBaseUrl || ollama.baseUrl || "https://ollama.com",
     ollamaApiKey: chefCustom.ollamaApiKey || ollama.apiKey || "",
@@ -229,29 +231,29 @@ export function explainAiError(err, provider = "Gemini", status = 0, rawMessage 
   // 1. Cuota agotada / Límite de llamadas gratis excedido (Rate Limit / Quota)
   if (code === 429 || msg.includes("resource_exhausted") || msg.includes("quota") || msg.includes("rate limit") || msg.includes("too many requests")) {
     return `⚠️ LÍMITE DE LLAMADAS ALCANZADO (${provider}):
-Te has quedado sin llamadas gratis en este minuto o por el día de hoy (error 429 / Quota Exceeded).
-👉 Solución: Espera 1 o 2 minutos para que se reinicie tu cuota gratuita por minuto, o pulsa ⚙️ en Chef AI para cambiar a otro modelo más ligero o renovar tu clave gratuita en Google AI Studio.`;
+Te has quedado sin llamadas en este minuto o por el día de hoy (error 429 / Quota Exceeded).
+👉 Solución: Espera 1 o 2 minutos para que se reinicie tu cuota por minuto, o pulsa ⚙️ en Chef AI para cambiar a otro modelo más ligero o revisar tu clave.`;
   }
 
   // 2. API Key inválida o expirada
   if (code === 401 || code === 403 || msg.includes("api_key_invalid") || msg.includes("invalid api key") || msg.includes("permission_denied") || msg.includes("unauthenticated")) {
     return `🔑 ERROR DE AUTENTICACIÓN (${provider}):
 La API Key configurada no es válida o ha sido revocada (error ${code || 401}).
-👉 Solución: Pulsa ⚙️ en Chef AI y copia tu API Key correcta de Google AI Studio (o tu clave de Ollama).`;
+👉 Solución: Pulsa ⚙️ en Chef AI y copia tu API Key correcta (Google AI Studio, Anthropic o Ollama).`;
   }
 
   // 3. Modelo no encontrado o no disponible
   if (code === 404 || msg.includes("not found") || msg.includes("is not supported") || msg.includes("unsupported model")) {
     return `🤖 MODELO NO ENCONTRADO (${provider}):
 El modelo seleccionado no está disponible o cambió de nombre (error 404).
-👉 Solución: Pulsa ⚙️ en Chef AI y selecciona el modelo recomendado ('gemini-2.5-flash').`;
+👉 Solución: Pulsa ⚙️ en Chef AI y selecciona un modelo recomendado.`;
   }
 
   // 4. Bloqueo de CORS o red
   if (msg.includes("failed to fetch") || err?.name === "TypeError" || msg.includes("cors")) {
     return `🌐 ERROR DE RED / CORS (${provider}):
-El navegador bloqueó la conexión directa (típico de Ollama por seguridad CORS en web).
-👉 Solución: Pulsa ⚙️ en Chef AI y activa Google Gemini (inmune a CORS y con 15 RPM gratis).`;
+El navegador bloqueó la conexión directa.
+👉 Solución: Pulsa ⚙️ en Chef AI para verificar la clave o cambia a un proveedor compatible con navegador.`;
   }
 
   // 5. Tiempo de espera agotado (Timeout)
@@ -265,6 +267,79 @@ El servidor tardó más de 30 segundos en responder. Tu conexión a internet o e
   return `❌ ERROR DEL COPILOTO (${provider}${code ? ` ${code}` : ""}):
 ${rawMessage || err?.message || "Ocurrió un error inesperado al procesar la respuesta."}
 👉 Pulsa ⚙️ en Chef AI para revisar tu clave o cambiar de proveedor.`;
+}
+
+/**
+ * Llama a Anthropic Claude API para responder.
+ */
+export async function callClaude(messages, apiKey, model = "claude-3-5-sonnet-20241022") {
+  if (!apiKey || apiKey.trim().length < 5) {
+    throw new Error("Falta la API Key de Anthropic Claude. Pulsa el botón ⚙️ en Chef AI para configurarla.");
+  }
+  const url = "https://api.anthropic.com/v1/messages";
+
+  const systemMsg = messages.find(m => m.role === "system");
+  const nonSystem = messages.filter(m => m.role !== "system");
+
+  const formattedMessages = nonSystem.map(m => ({
+    role: m.role === "assistant" ? "assistant" : "user",
+    content: m.content
+  }));
+
+  if (formattedMessages.length === 0 && systemMsg) {
+    formattedMessages.push({ role: "user", content: "Hola" });
+  }
+
+  const payload = {
+    model: model || "claude-3-5-sonnet-20241022",
+    max_tokens: 2048,
+    messages: formattedMessages,
+  };
+
+  if (systemMsg) {
+    payload.system = systemMsg.content;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey.trim(),
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const errJson = await res.json();
+        errMsg = errJson.error?.message || errMsg;
+      } catch (_) {}
+      const explained = explainAiError(null, "Anthropic Claude", res.status, errMsg);
+      const customErr = new Error(explained);
+      customErr.status = res.status;
+      customErr.rawMessage = errMsg;
+      throw customErr;
+    }
+
+    const data = await res.json();
+    const reply = data?.content?.[0]?.text;
+    if (!reply) throw new Error("Claude no devolvió texto en la respuesta.");
+    return reply;
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.rawMessage) throw err;
+    const explained = explainAiError(err, "Anthropic Claude");
+    throw new Error(explained);
+  }
 }
 
 /**
@@ -346,17 +421,25 @@ async function callGemini(messages, apiKey, model = "gemini-2.5-flash") {
 async function callAi(messages) {
   const settings = getChefAiSettings();
 
-  // Si el proveedor preferido es Gemini o hay Gemini key
-  if (settings.provider === "gemini" || (settings.geminiApiKey && !settings.ollamaApiKey)) {
+  // Si el proveedor es Claude
+  if (settings.provider === "claude") {
+    return await callClaude(messages, settings.claudeApiKey, settings.claudeModel);
+  }
+
+  // Si el proveedor preferido es Gemini o hay Gemini key y no hay Claude/Ollama configurados
+  if (settings.provider === "gemini" || (settings.geminiApiKey && !settings.ollamaApiKey && !settings.claudeApiKey)) {
     return await callGemini(messages, settings.geminiApiKey, settings.geminiModel);
   }
 
   // Si usa Ollama
   if (!settings.ollamaApiKey && !isOllamaConfigured()) {
+    if (settings.claudeApiKey) {
+      return await callClaude(messages, settings.claudeApiKey, settings.claudeModel);
+    }
     if (settings.geminiApiKey) {
       return await callGemini(messages, settings.geminiApiKey, settings.geminiModel);
     }
-    throw new Error("Chef AI necesita una API Key. Abre ⚙️ Configuración y coloca tu clave gratuita de Gemini (Google AI Studio) u Ollama.");
+    throw new Error("Chef AI necesita una API Key. Abre ⚙️ Configuración y coloca tu clave de Claude (Anthropic), Gemini (Google AI Studio) u Ollama.");
   }
 
   const baseUrl = (settings.ollamaBaseUrl || "https://ollama.com").replace(/\/+$/, "");
