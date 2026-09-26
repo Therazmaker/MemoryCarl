@@ -182,7 +182,7 @@ export function getChefAiSettings() {
     geminiApiKey: geminiKey,
     geminiModel,
     claudeApiKey: chefCustom.claudeApiKey || "",
-    claudeModel: chefCustom.claudeModel || "claude-3-5-sonnet-20241022",
+    claudeModel: chefCustom.claudeModel || "claude-haiku-4-5",
     ollamaModel: chefCustom.ollamaModel || ollama.model || "gemma4:31b",
     ollamaBaseUrl: chefCustom.ollamaBaseUrl || ollama.baseUrl || "https://ollama.com",
     ollamaApiKey: chefCustom.ollamaApiKey || ollama.apiKey || "",
@@ -272,7 +272,7 @@ ${rawMessage || err?.message || "Ocurrió un error inesperado al procesar la res
 /**
  * Llama a Anthropic Claude API para responder.
  */
-export async function callClaude(messages, apiKey, model = "claude-3-5-sonnet-20241022") {
+export async function callClaude(messages, apiKey, model = "claude-haiku-4-5") {
   if (!apiKey || apiKey.trim().length < 5) {
     throw new Error("Falta la API Key de Anthropic Claude. Pulsa el botón ⚙️ en Chef AI para configurarla.");
   }
@@ -291,7 +291,7 @@ export async function callClaude(messages, apiKey, model = "claude-3-5-sonnet-20
   }
 
   const payload = {
-    model: model || "claude-3-5-sonnet-20241022",
+    model: model || "claude-haiku-4-5",
     max_tokens: 2048,
     messages: formattedMessages,
   };
