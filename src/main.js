@@ -15139,9 +15139,10 @@ function openChefSettingsModal() {
           <div>
             <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;">Modelo Claude</label>
             <select id="chefClaudeModel" class="input">
-              <option value="claude-3-5-sonnet-20241022" ${(s.claudeModel||"claude-3-5-sonnet-20241022")==="claude-3-5-sonnet-20241022"?"selected":""}>Claude 3.5 Sonnet (Recomendado)</option>
+              <option value="claude-haiku-4-5" ${(s.claudeModel||"claude-haiku-4-5")==="claude-haiku-4-5"?"selected":""}>Claude Haiku 4.5 (Recomendado - Más ligero y económico)</option>
+              <option value="claude-3-5-haiku-20241022" ${s.claudeModel==="claude-3-5-haiku-20241022"?"selected":""}>Claude 3.5 Haiku</option>
+              <option value="claude-3-5-sonnet-20241022" ${s.claudeModel==="claude-3-5-sonnet-20241022"?"selected":""}>Claude 3.5 Sonnet</option>
               <option value="claude-3-7-sonnet-latest" ${s.claudeModel==="claude-3-7-sonnet-latest"?"selected":""}>Claude 3.7 Sonnet</option>
-              <option value="claude-3-5-haiku-20241022" ${s.claudeModel==="claude-3-5-haiku-20241022"?"selected":""}>Claude 3.5 Haiku (Rápido y liviano)</option>
             </select>
           </div>
 
@@ -15239,7 +15240,7 @@ function openChefSettingsModal() {
   // Test Claude
   modal.querySelector("#btnTestChefClaude")?.addEventListener("click", async () => {
     const key = modal.querySelector("#chefClaudeKey")?.value?.trim();
-    const model = modal.querySelector("#chefClaudeModel")?.value?.trim() || "claude-3-5-sonnet-20241022";
+    const model = modal.querySelector("#chefClaudeModel")?.value?.trim() || "claude-haiku-4-5";
     const statusDiv = modal.querySelector("#chefSettingsStatus");
     if (!key) {
       statusDiv.style.display = "block";
@@ -15292,7 +15293,7 @@ function openChefSettingsModal() {
     const geminiApiKey = modal.querySelector("#chefGeminiKey")?.value?.trim() || "";
     const geminiModel = modal.querySelector("#chefGeminiModel")?.value?.trim() || "gemini-2.5-flash";
     const claudeApiKey = modal.querySelector("#chefClaudeKey")?.value?.trim() || "";
-    const claudeModel = modal.querySelector("#chefClaudeModel")?.value?.trim() || "claude-3-5-sonnet-20241022";
+    const claudeModel = modal.querySelector("#chefClaudeModel")?.value?.trim() || "claude-haiku-4-5";
     const ollamaApiKey = modal.querySelector("#chefOllamaKey")?.value?.trim() || "";
     const ollamaBaseUrl = modal.querySelector("#chefOllamaBaseUrl")?.value?.trim() || "https://ollama.com";
     const ollamaModel = modal.querySelector("#chefOllamaModel")?.value?.trim() || "gemma4:31b";

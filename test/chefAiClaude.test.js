@@ -23,7 +23,7 @@ test("Chef AI Claude: getChefAiSettings devuelve defaults y detecta claude", () 
   localStorage.clear();
   const defaults = getChefAiSettings();
   assert.equal(defaults.claudeApiKey, "");
-  assert.equal(defaults.claudeModel, "claude-3-5-sonnet-20241022");
+  assert.equal(defaults.claudeModel, "claude-haiku-4-5");
   assert.equal(defaults.provider, "gemini");
 });
 
