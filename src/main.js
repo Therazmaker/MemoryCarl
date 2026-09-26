@@ -3280,13 +3280,41 @@ function view(){
 
         const finCtx = computeDailyLiquidity(state);
 
+        // Gather extra context: Schedule & Finance Movements
+        const todayLimaIso = todayISO();
+        const scheduleContext = getPlannedVsActualForDate(todayLimaIso, products);
+
+        const financeLedger = (typeof financeActiveLedger === 'function') ? financeActiveLedger() : (state?.financeLedger || []);
+        const recentMovements = financeLedger
+          .filter(e => !e.archived)
+          .slice(0, 15)
+          .map(m => {
+            const acc = (state.financeAccounts || []).find(a => a.id === m.accountId);
+            return {
+              date: m.date,
+              type: m.type,
+              amount: m.amount,
+              category: m.category,
+              note: m.note,
+              accountName: acc ? acc.name : ""
+            };
+          });
+        const financeAccounts = (state.financeAccounts || []).map(a => a.name);
+
+        const extraOptions = {
+          scheduleContext,
+          financeMovements: recentMovements,
+          financeAccounts
+        };
+
         const result = await sendShoppingAiMessage(
           text,
           Array.isArray(state.shoppingAiChat) ? state.shoppingAiChat : [],
           products,
           pastDays,
           inventory,
-          finCtx
+          finCtx,
+          extraOptions
         );
         state.shoppingAiChat = result.newChat;
         
@@ -3375,8 +3403,109 @@ function view(){
             }
           }
         }
+
+        // Handle logScheduleConsumption
+        if (result.actions && result.actions.logScheduleConsumption) {
+          const lsc = result.actions.logScheduleConsumption;
+          if (lsc.name) {
+            logActualConsumption(todayLimaIso, {
+              slotId: lsc.slotId || "almuerzo",
+              name: lsc.name,
+              price: Number(lsc.price || 0),
+              isPlanned: lsc.isPlanned !== false
+            });
+            toast(`📅 Consumo registrado en Horario: ${lsc.name} (S/ ${(Number(lsc.price)||0).toFixed(2)})`);
+          }
+        }
+
+        // Handle updateMealSchedule
+        if (result.actions && result.actions.updateMealSchedule) {
+          const ums = result.actions.updateMealSchedule;
+          if (ums.dayKey && ums.slotId && Array.isArray(ums.items)) {
+            const sched = loadMealSchedule();
+            if (sched[ums.dayKey]) {
+              sched[ums.dayKey][ums.slotId] = ums.items.map(it => ({
+                name: String(it.name || "").trim(),
+                qty: Math.max(1, Number(it.qty) || 1),
+                estimatedPrice: Number(it.estimatedPrice || it.price || 0),
+                isCustom: true
+              }));
+              saveMealSchedule(sched);
+              toast(`📅 Plan del horario actualizado para ${ums.dayKey} (${ums.slotId})`);
+            }
+          }
+        }
+
+        // Handle recordFinanceMovement
+        if (result.actions && result.actions.recordFinanceMovement) {
+          const rfm = result.actions.recordFinanceMovement;
+          if (rfm.amount && Number(rfm.amount) > 0) {
+            const accs = state.financeAccounts || [];
+            let targetAcc = null;
+            if (rfm.accountName) {
+              const cleanAccName = rfm.accountName.toLowerCase().trim();
+              targetAcc = accs.find(a => a.name.toLowerCase().trim() === cleanAccName || a.name.toLowerCase().includes(cleanAccName));
+            }
+            if (!targetAcc) {
+              targetAcc = accs.find(a => a.id === state.financePrimaryAccountId) || accs[0];
+            }
+            if (targetAcc) {
+              addFinanceEntry({
+                type: rfm.type || "expense",
+                amount: Number(rfm.amount),
+                accountId: targetAcc.id,
+                category: rfm.category || "Comida/Restaurante",
+                reason: rfm.reason || "normal",
+                note: rfm.note || "Registrado por Chef AI",
+                date: new Date().toISOString()
+              });
+              toast(`💰 Movimiento registrado en ${targetAcc.name}: S/ ${Number(rfm.amount).toFixed(2)} (${rfm.note || rfm.category || "Gasto"})`);
+              if (window.financePushToSupabase) window.financePushToSupabase();
+            }
+          }
+        }
+
+        // Handle syncFoodExpense (combined Finance + Schedule action)
+        if (result.actions && result.actions.syncFoodExpense) {
+          const sfe = result.actions.syncFoodExpense;
+          if (sfe.amount && Number(sfe.amount) > 0) {
+            // 1. Finance Entry
+            const accs = state.financeAccounts || [];
+            let targetAcc = null;
+            if (sfe.accountName) {
+              const cleanAccName = sfe.accountName.toLowerCase().trim();
+              targetAcc = accs.find(a => a.name.toLowerCase().trim() === cleanAccName || a.name.toLowerCase().includes(cleanAccName));
+            }
+            if (!targetAcc) {
+              targetAcc = accs.find(a => a.id === state.financePrimaryAccountId) || accs[0];
+            }
+            if (targetAcc) {
+              addFinanceEntry({
+                type: sfe.type || "expense",
+                amount: Number(sfe.amount),
+                accountId: targetAcc.id,
+                category: sfe.category || "Comida/Restaurante",
+                reason: sfe.reason || "normal",
+                note: sfe.note || `Comida: ${sfe.mealName || "Almuerzo"}`,
+                date: new Date().toISOString()
+              });
+            }
+
+            // 2. Schedule Consumption Log
+            logActualConsumption(todayLimaIso, {
+              slotId: sfe.slotId || "almuerzo",
+              name: sfe.mealName || sfe.note || "Comida",
+              price: Number(sfe.amount),
+              isPlanned: sfe.isPlanned !== false
+            });
+
+            toast(`⚡ Finanzas & Schedule sincronizados: S/ ${Number(sfe.amount).toFixed(2)} (${sfe.mealName || "Comida"})`);
+            if (window.financePushToSupabase) window.financePushToSupabase();
+          }
+        }
         
         persist();
+        view();
       } catch (err) {
         console.error("Chef AI Error:", err);
         // Agregar mensaje de error explicativo directo al chat para que Carlos lo vea sin perder el hilo

@@ -31,7 +31,7 @@ export function todayISO() {
 /**
  * Build system prompt with product library, inventory + past days context.
  */
-function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory = [], financeContext = null) {
+function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory = [], financeContext = null, extraOptions = {}) {
   const enrichedProducts = enrichAllProducts(products);
   const libStr = enrichedProducts.length > 0
     ? enrichedProducts.map(p => formatProductForAiPrompt(p)).join("\n")
@@ -81,20 +81,69 @@ function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory =
 
   const mealBundlesStr = formatMealInventoryForAiPrompt();
 
+  let finAccountsStr = "";
+  if (Array.isArray(extraOptions.financeAccounts) && extraOptions.financeAccounts.length > 0) {
+    finAccountsStr = `\nCuentas disponibles para transacciones: ${extraOptions.financeAccounts.join(", ")}\n`;
+  }
+
   let financeStr = "";
   if (financeContext) {
     financeStr = `
---- SITUACIÓN FINANCIERA ACTUAL (Solo lectura - Tú NO descuentas dinero) ---
+--- SITUACIÓN FINANCIERA ACTUAL ---
 - Saldo total disponible: S/ ${financeContext.totalBalance.toFixed(2)}
 - Ciclo de cobro: ${financeContext.runway?.label || "15 y fin de mes"} (quedan ${financeContext.runway?.daysRemaining || 0} días)
 - Margen libre diario: S/ ${financeContext.dailyFreeBudget.toFixed(2)} / día
-- Salud de liquidez: ${financeContext.liquidityHealth?.toUpperCase() || "MODERADO"}
+- Salud de liquidez: ${financeContext.liquidityHealth?.toUpperCase() || "MODERADO"}${finAccountsStr}
 --------------------------------------------------------------------------`;
   }
 
-  return `Eres "Chef AI", el estratega personal de cocina, hábitos y alimentación de Carlos en Perú.
+  // Schedule context
+  let scheduleStr = "";
+  if (extraOptions.scheduleContext) {
+    const sc = extraOptions.scheduleContext;
+    let slotsDetail = "";
+    if (sc.bySlot) {
+      Object.values(sc.bySlot).forEach(slot => {
+        const itemNames = (slot.items || []).map(it => `${it.name}${it.qty > 1 ? ` x${it.qty}` : ""} (S/ ${it.totalPrice})`).join(", ");
+        slotsDetail += `  - ${slot.icon} ${slot.label}: ${itemNames || "(Nada proyectado)"}\n`;
+      });
+    }
+    let actualDetail = "";
+    if (sc.actualItems && sc.actualItems.length > 0) {
+      actualDetail = "  - Consumos reales registrados hoy:\n" +
+        sc.actualItems.map(a => `    • [${a.slotId || "comida"}] ${a.name}: S/ ${(Number(a.price)||0).toFixed(2)}`).join("\n") + "\n";
+    } else {
+      actualDetail = "  - Consumos reales registrados hoy: Ninguno aún\n";
+    }
+
+    scheduleStr = `
+--- HORARIO Y CONSUMO PROYECTADO DE HOY (${sc.dayKey || "día"}) ---
+Costo proyectado del día: S/ ${Number(sc.dayTotalCost || 0).toFixed(2)}
+Proyección por tiempos de comida:
+${slotsDetail}${actualDetail}--------------------------------------------------------------`;
+  }
+
+  // Finance movements context
+  let finMovementsStr = "";
+  if (Array.isArray(extraOptions.financeMovements) && extraOptions.financeMovements.length > 0) {
+    const recentMovs = extraOptions.financeMovements.slice(0, 12);
+    const lines = recentMovs.map(m => {
+      const sign = m.type === "expense" ? "-" : "+";
+      const cat = m.category ? ` [${m.category}]` : "";
+      const note = m.note ? ` (${m.note})` : "";
+      const acc = m.accountName ? ` · ${m.accountName}` : "";
+      const date = m.date ? String(m.date).slice(0, 10) : "";
+      return `  - ${date} | ${sign}S/ ${Number(m.amount||0).toFixed(2)}${cat}${note}${acc}`;
+    });
+    finMovementsStr = `
+--- RECIENTES MOVIMIENTOS EN FINANZAS (Últimos ${recentMovs.length}) ---
+${lines.join("\n")}
+--------------------------------------------------------------`;
+  }
+
+  return `Eres "Chef AI", el estratega personal de cocina, hábitos, alimentación y finanzas diarias de Carlos en Perú.
 La moneda es siempre SOLES PERUANOS (S/). Nunca uses dólares.
-${financeStr}
+${financeStr}${scheduleStr}${finMovementsStr}
 
 --- BIBLIOTECA DE PRODUCTOS (${products.length} productos con precios base y gustos) ---
 ${libStr}
@@ -108,21 +157,23 @@ ${mealBundlesStr}
 ${pastCtx}${freqStr}
 TU COMPORTAMIENTO:
 
-1. **Visibilidad Financiera (NO descuentes dinero):**
-   - Conoces el saldo y el margen diario de Carlos para darle recomendaciones inteligentes según su liquidez.
-   - Carlos se encarga de sus finanzas manualmente, así que NUNCA intentes crear débitos o transacciones monetarias automáticas.
+1. **Gestión Inteligente de Comidas, Schedule y Finanzas:**
+   - Tienes visión completa de la despensa, el Horario Proyectado de Comidas (Schedule) y los Movimientos en Finanzas.
+   - Cuando Carlos te mencione lo que almorzó, cenó, tomó o compró (ej. "almorcé un menú de 15 soles y pagué con Yape"), puedes responder cercanamente Y actualizar/crear acciones en el Schedule o en Finanzas.
 
 2. **Cerebro y Aprendizaje Continuo (NIVEL DIOS):**
-   - Cuando Carlos te cuente qué desayunó, almorzó o compró (ej. "desayuné 2 empanadas a 3 soles" o "compré 4 soles de pollo y 2 de arroz"), aprende y actualiza su base de conocimiento.
-   - Si menciona un producto que no está en la biblioteca o actualiza precios/preferencias, genera una acción en JSON para guardarlo.
+   - Si menciona un producto nuevo o actualiza precios/preferencias, genera un \`learnProduct\`.
    - Si cocinó para varios días, genera un \`createMealBundle\` con porciones estimadas.
    - Si consumió comida casera guardada, genera un \`consumeMealBundle\`.
+   - Si consumió algo de su horario o calle, genera \`logScheduleConsumption\` o \`syncFoodExpense\`.
+   - Si quiere cambiar la plantilla del horario proyectado de algún día (ej. "cambia mi almuerzo de los lunes por pollo a la brasa 18 soles"), genera \`updateMealSchedule\`.
+   - Si quiere registrar un gasto o ingreso financiero directo, genera \`recordFinanceMovement\`.
 
 3. **Matemática Fraccional y Comidas:**
    - Calcula el costo real de su comida fraccionada (ej. si comió parte de lo que tenía en despensa).
 
 4. **Acciones JSON (Al final de tu respuesta):**
-   Pon el bloque JSON al final si aprendiste algo nuevo o si hay comidas/porciones que actualizar:
+   Pon el bloque JSON al final si hay productos, porciones, schedule o movimientos de finanzas que actualizar/crear:
    ---ACTIONS---
    {
      "learnProduct": {
@@ -141,6 +192,36 @@ TU COMPORTAMIENTO:
      },
      "consumeMealBundle": {
        "mealType": "almuerzo"
+     },
+     "logScheduleConsumption": {
+       "slotId": "almuerzo",
+       "name": "Menú Ejecutivo / Almuerzo",
+       "price": 14.00,
+       "isPlanned": true
+     },
+     "updateMealSchedule": {
+       "dayKey": "lunes",
+       "slotId": "almuerzo",
+       "items": [
+         { "name": "Pollo al Horno", "estimatedPrice": 18.00 }
+       ]
+     },
+     "recordFinanceMovement": {
+       "type": "expense",
+       "amount": 15.00,
+       "category": "Comida/Restaurante",
+       "note": "Almuerzo menú ejecutivo",
+       "accountName": "Yape"
+     },
+     "syncFoodExpense": {
+       "type": "expense",
+       "amount": 15.00,
+       "category": "Comida/Restaurante",
+       "note": "Almuerzo menú ejecutivo",
+       "accountName": "Yape",
+       "slotId": "almuerzo",
+       "mealName": "Menú Ejecutivo",
+       "isPlanned": true
      }
    }
 
@@ -497,10 +578,10 @@ async function callAi(messages) {
  * @param {object} [financeContext] — liquidez y margen diario
  * @returns {Promise<object[]>} — updated chat history
  */
-export async function sendShoppingAiMessage(text, chatHistory, products, pastDays = [], inventory = [], financeContext = null) {
+export async function sendShoppingAiMessage(text, chatHistory, products, pastDays = [], inventory = [], financeContext = null, extraOptions = {}) {
   if (!text || !text.trim()) return chatHistory;
 
-  const systemPrompt = buildChefSystemPrompt(products, chatHistory, pastDays, inventory, financeContext);
+  const systemPrompt = buildChefSystemPrompt(products, chatHistory, pastDays, inventory, financeContext, extraOptions);
   const userMsg = { role: "user", content: text.trim(), ts: new Date().toISOString() };
   const newHistory = [...chatHistory, userMsg];
 
