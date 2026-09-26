@@ -58,6 +58,19 @@ import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO, ge
 import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles, updateMealBundle, deleteMealBundle, saveMealBundles } from "./shopping/mealBundles.js";
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
+import {
+  MEAL_SLOTS,
+  DAYS_OF_WEEK,
+  loadMealSchedule,
+  saveMealSchedule,
+  loadScheduleLog,
+  saveScheduleLog,
+  getDayScheduleSummary,
+  getWeeklyScheduleSummary,
+  logActualConsumption,
+  getPlannedVsActualForDate,
+  findProductInLibrary
+} from "./shopping/mealSchedule.js";
 
 try {
   // Free up quota: remove heavy AI state on boot. It rebuilds automatically.
@@ -2353,7 +2366,9 @@ function exportBackup(){
     financeCommitmentTemplates: state.financeCommitmentTemplates,
     financeCommitmentInstances: state.financeCommitmentInstances,
     financeLoanUsageLedger: state.financeLoanUsageLedger,
-    financeMeta: state.financeMeta
+    financeMeta: state.financeMeta,
+    mealSchedule: loadMealSchedule(),
+    mealScheduleLog: loadScheduleLog()
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -2476,6 +2491,13 @@ function importBackup(file){
       state.calDraw = (data.calDraw && typeof data.calDraw === "object") ? data.calDraw : load(LS.calDraw, {});
       if(!house) state.house = load(LS.house, seedHouse());
       state.musicCursor = 0;
+
+      if(data.mealSchedule && typeof data.mealSchedule === "object"){
+        saveMealSchedule(data.mealSchedule);
+      }
+      if(data.mealScheduleLog && typeof data.mealScheduleLog === "object"){
+        saveScheduleLog(data.mealScheduleLog);
+      }
 
       persist();
       view();
@@ -3445,6 +3467,11 @@ function view(){
     if(chipStatus) chipStatus.addEventListener("click", () => openChefSettingsModal());
     const btnChefAuditor = root.querySelector("#btnChefAuditor");
     if(btnChefAuditor) btnChefAuditor.addEventListener("click", () => openProductLibrary());
+    const btnChefSchedule = root.querySelector("#btnChefSchedule");
+    if(btnChefSchedule) btnChefSchedule.addEventListener("click", () => {
+      state.shoppingSubtab = "schedule";
+      view();
+    });
 
     setTimeout(() => {
       const log = document.getElementById("shopAiChatLog");
@@ -3465,6 +3492,66 @@ function view(){
           day.editedNotes = txta.value.trim();
           persist();
           toast("Notas guardadas ✅");
+        }
+      });
+    });
+  }
+
+  // Meal Schedule wiring
+  if(state.tab === "shopping" && state.shoppingSubtab === "schedule"){
+    // Sub-view tabs (daily, weekly, monthly)
+    root.querySelector("#btnScheduleTabDaily")?.addEventListener("click", () => {
+      _mealScheduleViewMode = "daily";
+      view();
+    });
+    root.querySelector("#btnScheduleTabWeekly")?.addEventListener("click", () => {
+      _mealScheduleViewMode = "weekly";
+      view();
+    });
+    root.querySelector("#btnScheduleTabMonthly")?.addEventListener("click", () => {
+      _mealScheduleViewMode = "monthly";
+      view();
+    });
+
+    // Day selector in daily view
+    root.querySelectorAll(".btnScheduleDaySelect").forEach(btn => {
+      btn.addEventListener("click", () => {
+        _selectedScheduleDay = btn.dataset.day || "lunes";
+        view();
+      });
+    });
+
+    // Fix missing prices modal
+    root.querySelector("#btnFixMissingSchedulePrices")?.addEventListener("click", () => {
+      openResolveMissingPricesModal();
+    });
+
+    // Log actual consumption modal
+    root.querySelector("#btnLogScheduleItemNow")?.addEventListener("click", () => {
+      openLogActualMealModal();
+    });
+
+    // Add item to schedule slot
+    root.querySelectorAll(".btnAddScheduleItem").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const dKey = btn.dataset.day;
+        const sId = btn.dataset.slot;
+        openAddScheduleItemModal(dKey, sId);
+      });
+    });
+
+    // Delete item from schedule slot
+    root.querySelectorAll(".btnDeleteScheduleItem").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const dKey = btn.dataset.day;
+        const sId = btn.dataset.slot;
+        const idx = Number(btn.dataset.idx);
+        const sched = loadMealSchedule();
+        if(sched[dKey] && Array.isArray(sched[dKey][sId])){
+          sched[dKey][sId].splice(idx, 1);
+          saveMealSchedule(sched);
+          toast("Item eliminado");
+          view();
         }
       });
     });
@@ -3711,6 +3798,15 @@ function openLiquidityTrainingModal() {
     if(btnTraining){
       btnTraining.addEventListener("click", ()=>{
         openLiquidityTrainingModal();
+      });
+    }
+
+    const btnGoSchedule = root.querySelector("#btnGoHomeSchedule");
+    if(btnGoSchedule){
+      btnGoSchedule.addEventListener("click", ()=>{
+        state.tab = "shopping";
+        state.shoppingSubtab = "schedule";
+        view();
       });
     }
 
@@ -7236,10 +7332,12 @@ const sleepBars = renderSleepBars(sleepSeries);
           <div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-top:5px;">
             <div class="small" style="color:#cbd5e1;">Saldo en cuenta: <strong style="color:#38bdf8;font-size:14px;">S/ ${dailyFlowCtx.liquidity.totalBalance.toFixed(2)}</strong></div>
             <div class="small" style="color:#94a3b8;">Margen diario: <strong style="color:#4ade80;font-size:14px;">S/ ${dailyFlowCtx.liquidity.dailyFreeBudget.toFixed(2)} / día</strong></div>
+            ${dailyFlowCtx.plannedToday ? `<div class="small" style="color:#c084fc;">Comidas hoy: <strong style="color:#f1f5f9;font-size:13px;">S/ ${dailyFlowCtx.plannedToday.plannedTotal.toFixed(2)}</strong> (Real: <strong style="color:${dailyFlowCtx.plannedToday.delta > 0 ? '#f87171' : '#4ade80'};">S/ ${dailyFlowCtx.plannedToday.actualTotal.toFixed(2)}</strong>)</div>` : ""}
             ${dailyFlowCtx.liquidity.effectiveCommitments > 0 ? `<div class="small" style="color:#fca5a5;">(-S/ ${dailyFlowCtx.liquidity.effectiveCommitments.toFixed(2)} compromisos)</div>` : ""}
           </div>
         </div>
         <div style="display:flex;gap:6px;">
+          <button class="iconBtn" id="btnGoHomeSchedule" title="Ver Schedule de Comidas (Plan vs Real)" style="background:rgba(255,255,255,0.06);font-size:13px;border:1px solid rgba(192,132,252,0.3);color:#c084fc;" aria-label="Schedule">📅 Schedule</button>
           <button class="iconBtn" id="btnOpenLiquidityTraining" title="Sala de Entrenamiento y Auditor de Saldo" style="background:rgba(255,255,255,0.06);font-size:13px;border:1px solid rgba(255,255,255,0.12);" aria-label="Auditar saldo">🔍 Balance</button>
           <button class="iconBtn" id="btnRefreshDailyBriefing" title="Pedir consejo a tu Copiloto IA" style="background:rgba(255,255,255,0.06);font-size:14px;">✨</button>
         </div>
@@ -8926,6 +9024,10 @@ function viewShopping(){
     return viewShoppingAssistant();
   }
 
+  if(sub === "schedule"){
+    return viewMealSchedule();
+  }
+
   if(sub === "history"){
     return viewShoppingHistory();
   }
@@ -8941,6 +9043,7 @@ function viewShopping(){
       <button class="btn" data-act="openInventory">🏠 Inventario</button>
       <button class="btn" data-act="openShoppingDashboard">📊 Dashboard</button>
       <button class="btn" data-act="openShoppingAi">🤖 Asistente</button>
+      <button class="btn" data-act="openShoppingSchedule" style="color:#c084fc;border-color:rgba(192,132,252,0.4);">📅 Schedule</button>
       <button class="btn" data-act="openShoppingHistory">📅 Historial</button>
       <div class="chip">hist: ${histCount}</div>
     </div>
@@ -11522,6 +11625,11 @@ if(act==="invMode"){
           const log = document.getElementById("shopAiChatLog");
           if(log) log.scrollTop = log.scrollHeight;
         }, 50);
+        return;
+      }
+      if(act==="openShoppingSchedule"){
+        state.shoppingSubtab = "schedule";
+        view();
         return;
       }
       if(act==="openShoppingHistory"){
@@ -15155,6 +15263,7 @@ function viewShoppingAssistant(){
         <div class="chip" style="background:${isConfigured?'rgba(16,185,129,0.15)':'rgba(245,158,11,0.15)'};color:${isConfigured?'#34d399':'#fbbf24'};cursor:pointer;" id="chipChefProviderStatus">
           ${activeProviderLabel}
         </div>
+        <button class="btn ghost" id="btnChefSchedule" title="Horario y Planificador Predictivo de Comidas" style="font-size:12px;padding:5px 9px;color:#c084fc;border-color:rgba(192,132,252,0.4);">📅 Schedule</button>
         <button class="btn ghost" id="btnChefAuditor" title="Ver biblioteca y memoria del Chef" style="font-size:12px;padding:5px 9px;">📦 Memoria</button>
         <button class="iconBtn" id="btnChefSettings" title="Configuración de IA para Chef">⚙️</button>
       </div>
@@ -15253,6 +15362,352 @@ function viewShoppingHistory(){
     </div>
   `;
 }
+
+/* =========================================================================
+   MEAL SCHEDULE (PLANIFICADOR PREDICTIVO: DÍA, SEMANA, MES)
+   ========================================================================= */
+
+let _mealScheduleViewMode = "daily"; // "daily" | "weekly" | "monthly"
+let _selectedScheduleDay = "lunes";
+
+function viewMealSchedule(){
+  const prods = Array.isArray(state.products) ? state.products : [];
+  const schedule = loadMealSchedule();
+  const weekly = getWeeklyScheduleSummary(prods);
+  const now = new Date();
+  const todayLimaIso = getLimaDateString(now);
+  const todayComparison = getPlannedVsActualForDate(todayLimaIso, prods);
+
+  // Missing prices detection
+  const missingCount = weekly.missingItems.length;
+
+  return `
+    <div class="sectionTitle" style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="iconBtn" onclick="state.shoppingSubtab='ai';view();" title="Volver al Chef AI">‹</button>
+        <div>📅 Schedule de Comidas</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button class="btn ${(_mealScheduleViewMode==='daily'?'primary':'ghost')}" id="btnScheduleTabDaily" style="font-size:12px;padding:5px 10px;">Día</button>
+        <button class="btn ${(_mealScheduleViewMode==='weekly'?'primary':'ghost')}" id="btnScheduleTabWeekly" style="font-size:12px;padding:5px 10px;">Semana</button>
+        <button class="btn ${(_mealScheduleViewMode==='monthly'?'primary':'ghost')}" id="btnScheduleTabMonthly" style="font-size:12px;padding:5px 10px;">Mes</button>
+      </div>
+    </div>
+
+    ${missingCount > 0 ? `
+      <div style="background:rgba(234,179,8,0.12);border:1px solid rgba(234,179,8,0.35);border-radius:10px;padding:10px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div style="font-size:12.5px;color:#fef08a;">
+          ⚠️ <b>${missingCount} alimento${missingCount > 1 ? "s" : ""} sin precio en biblioteca:</b>
+          <span style="opacity:0.85;">${weekly.missingItems.slice(0, 3).map(m => m.name).join(", ")}${missingCount > 3 ? "..." : ""}</span>
+        </div>
+        <button class="btn" id="btnFixMissingSchedulePrices" style="font-size:11px;padding:5px 9px;background:rgba(234,179,8,0.25);color:#fef08a;border:1px solid rgba(234,179,8,0.4);white-space:nowrap;">
+          Resolver precios
+        </button>
+      </div>
+    ` : ""}
+
+    <!-- TARJETA STATUS REAL DE HOY -->
+    <div class="card" style="background:linear-gradient(135deg, rgba(30,27,75,0.7) 0%, rgba(15,23,42,0.85) 100%);border:1px solid rgba(192,132,252,0.25);margin-bottom:14px;padding:12px 14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div>
+          <div style="font-size:11px;color:#c084fc;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Control de Hoy (${todayComparison.dayConfig.label})</div>
+          <div style="display:flex;gap:12px;align-items:baseline;margin-top:2px;">
+            <div style="font-size:13px;color:#cbd5e1;">Previsto: <b>S/ ${todayComparison.plannedTotal.toFixed(2)}</b></div>
+            <div style="font-size:13px;color:#cbd5e1;">Consumido: <b style="color:${todayComparison.delta > 0 ? '#f87171' : '#4ade80'};">S/ ${todayComparison.actualTotal.toFixed(2)}</b></div>
+            <div style="font-size:12px;color:${todayComparison.delta > 0 ? '#fca5a5' : '#86efac'};">
+              ${todayComparison.delta > 0 ? `(+S/ ${todayComparison.delta.toFixed(2)} desvío)` : (todayComparison.actualItems.length > 0 ? `(-S/ ${Math.abs(todayComparison.delta).toFixed(2)} dentro del plan)` : "(Sin registros aún)")}
+            </div>
+          </div>
+        </div>
+        <button class="btn good" id="btnLogScheduleItemNow" style="font-size:12px;padding:5px 10px;">＋ Registrar lo que comí</button>
+      </div>
+    </div>
+
+    <!-- CONTENIDO SEGÚN VISTA SELECCIONADA -->
+    ${_mealScheduleViewMode === "daily" ? renderScheduleDailyView(schedule, prods) : ""}
+    ${_mealScheduleViewMode === "weekly" ? renderScheduleWeeklyView(weekly) : ""}
+    ${_mealScheduleViewMode === "monthly" ? renderScheduleMonthlyView(weekly) : ""}
+  `;
+}
+
+function renderScheduleDailyView(schedule, prods){
+  const daySum = getDayScheduleSummary(_selectedScheduleDay, prods);
+  const currentDayConfig = DAYS_OF_WEEK.find(d => d.key === _selectedScheduleDay) || DAYS_OF_WEEK[0];
+
+  return `
+    <!-- SELECTOR DE DÍA DE LA SEMANA -->
+    <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:12px;">
+      ${DAYS_OF_WEEK.map(d => {
+        const isSel = d.key === _selectedScheduleDay;
+        return `
+          <button class="btn ${isSel ? 'primary' : 'ghost'} btnScheduleDaySelect" data-day="${d.key}" style="font-size:12px;padding:6px 12px;white-space:nowrap;border-radius:20px;">
+            ${d.label}
+          </button>
+        `;
+      }).join("")}
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div style="font-size:14px;font-weight:600;color:#f1f5f9;">
+        Baseline de comidas: ${currentDayConfig.label}
+      </div>
+      <div style="font-size:14px;font-weight:700;color:#38bdf8;">
+        Total: S/ ${daySum.dayTotalCost.toFixed(2)}
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      ${MEAL_SLOTS.map(slot => {
+        const slotData = daySum.bySlot[slot.id];
+        const items = slotData?.items || [];
+        return `
+          <div class="card" style="padding:12px 14px;border:1px solid rgba(255,255,255,0.08);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <div style="font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:6px;color:#e2e8f0;">
+                <span>${slot.icon}</span>
+                <span>${slot.label}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12.5px;font-weight:700;color:#93c5fd;">S/ ${slotData.slotTotal.toFixed(2)}</span>
+                <button class="iconBtn btnAddScheduleItem" data-day="${_selectedScheduleDay}" data-slot="${slot.id}" title="Agregar alimento/bebida" style="width:26px;height:26px;font-size:13px;padding:0;">＋</button>
+              </div>
+            </div>
+
+            ${items.length === 0 ? `
+              <div style="font-size:12px;color:rgba(255,255,255,0.35);font-style:italic;padding:4px 0;">
+                Sin elementos configurados. Toca ＋ para añadir.
+              </div>
+            ` : `
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                ${items.map((it, idx) => `
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:rgba(255,255,255,0.03);border-radius:6px;font-size:13px;">
+                    <div>
+                      <span style="color:#f8fafc;font-weight:500;">${escapeHtml(it.name)}</span>
+                      <span style="font-size:11px;color:rgba(255,255,255,0.45);margin-left:4px;">x${it.qty}</span>
+                      ${!it.foundInLibrary ? `<span class="chip" style="font-size:9.5px;padding:1px 5px;background:rgba(234,179,8,0.18);color:#fef08a;margin-left:4px;">No en biblioteca</span>` : ""}
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="font-weight:600;color:${it.foundInLibrary ? '#38bdf8' : '#fbbf24'};">S/ ${it.totalPrice.toFixed(2)}</span>
+                      <button class="iconBtn btnDeleteScheduleItem" data-day="${_selectedScheduleDay}" data-slot="${slot.id}" data-idx="${idx}" title="Eliminar" style="width:22px;height:22px;font-size:11px;color:#f87171;padding:0;">✕</button>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            `}
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderScheduleWeeklyView(weekly){
+  return `
+    <div class="card" style="padding:14px;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:#f1f5f9;">Proyección Semanal (7 Días)</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.5);">Costo estimado de lunes a domingo según tu plan</div>
+        </div>
+        <div style="font-size:18px;font-weight:800;color:#4ade80;">
+          S/ ${weekly.weeklyTotalCost.toFixed(2)}
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${weekly.daysSummary.map(d => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;">
+            <div>
+              <div style="font-weight:600;font-size:13px;color:#e2e8f0;">${d.label}</div>
+              <div style="font-size:11px;color:rgba(255,255,255,0.4);">
+                🍳 S/ ${d.summary.bySlot.desayuno.slotTotal.toFixed(2)} &nbsp;•&nbsp; 
+                🍲 S/ ${d.summary.bySlot.almuerzo.slotTotal.toFixed(2)} &nbsp;•&nbsp; 
+                🥗 S/ ${d.summary.bySlot.cena.slotTotal.toFixed(2)} &nbsp;•&nbsp; 
+                ⚡ S/ ${d.summary.bySlot.bebidas.slotTotal.toFixed(2)}
+              </div>
+            </div>
+            <div style="font-weight:700;font-size:13.5px;color:#38bdf8;">
+              S/ ${d.summary.dayTotalCost.toFixed(2)}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderScheduleMonthlyView(weekly){
+  const days30 = (weekly.weeklyTotalCost / 7) * 30;
+  const fortnight15 = (weekly.weeklyTotalCost / 7) * 15;
+
+  return `
+    <div class="card" style="padding:14px;margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:#f1f5f9;">Proyección Mensual</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.5);">Estimación basada en tu baseline semanal continuo</div>
+        </div>
+        <div style="font-size:18px;font-weight:800;color:#c084fc;">
+          ~S/ ${days30.toFixed(2)}
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+        <div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;">Presupuesto Quincenal (15d)</div>
+          <div style="font-size:16px;font-weight:700;color:#38bdf8;">S/ ${fortnight15.toFixed(2)}</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:10px;text-align:center;">
+          <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px;">Presupuesto Mensual (30d)</div>
+          <div style="font-size:16px;font-weight:700;color:#4ade80;">S/ ${days30.toFixed(2)}</div>
+        </div>
+      </div>
+
+      <div style="font-size:12.5px;color:rgba(255,255,255,0.7);line-height:1.5;">
+        💡 <b>Cómo funciona:</b> Este presupuesto es tu guía fija permanente. A medida que registres lo que realmente consumes cada día, el sistema calculará tu ahorro o exceso sin tocar tus cuentas bancarias directamente, ajustando el consejo inteligente del Home.
+      </div>
+    </div>
+  `;
+}
+
+function openAddScheduleItemModal(dayKey, slotId){
+  const slot = MEAL_SLOTS.find(s => s.id === slotId) || MEAL_SLOTS[0];
+  const day = DAYS_OF_WEEK.find(d => d.key === dayKey) || DAYS_OF_WEEK[0];
+
+  openPromptModal({
+    title: `Agregar a ${slot.label} (${day.label})`,
+    fields: [
+      { key: "name", label: "Nombre del alimento o bebida (ej: Menú ejecutivo, Volt, Empanadas)" },
+      { key: "qty", label: "Cantidad", value: "1", type: "number" },
+      { key: "estimatedPrice", label: "Precio estimado si no está en biblioteca (S/)", value: "0", type: "number" }
+    ],
+    onSubmit: ({ name, qty, estimatedPrice }) => {
+      const cleanName = (name || "").trim();
+      if (!cleanName) return;
+
+      const schedule = loadMealSchedule();
+      if (!schedule[dayKey]) schedule[dayKey] = {};
+      if (!Array.isArray(schedule[dayKey][slotId])) schedule[dayKey][slotId] = [];
+
+      schedule[dayKey][slotId].push({
+        name: cleanName,
+        qty: Math.max(1, Number(qty) || 1),
+        estimatedPrice: Number(estimatedPrice) || 0,
+        isCustom: true
+      });
+
+      saveMealSchedule(schedule);
+      toast(`✓ Agregado a ${slot.label}`);
+      view();
+    }
+  });
+}
+
+function openLogActualMealModal(){
+  const now = new Date();
+  const todayLimaIso = getLimaDateString(now);
+
+  openPromptModal({
+    title: "Registrar consumo de hoy",
+    fields: [
+      { key: "slotId", label: "Momento (desayuno / almuerzo / cena / bebidas)", value: "almuerzo" },
+      { key: "name", label: "Qué consumiste (ej: Menú en calle, Volt, Galletas)" },
+      { key: "price", label: "Monto pagado en Soles (S/)", value: "0", type: "number" }
+    ],
+    onSubmit: ({ slotId, name, price }) => {
+      const cleanName = (name || "").trim();
+      if (!cleanName) return;
+
+      logActualConsumption(todayLimaIso, {
+        slotId: (slotId || "almuerzo").toLowerCase().trim(),
+        name: cleanName,
+        price: Number(price) || 0,
+        isPlanned: true
+      });
+
+      toast("✓ Consumo registrado para hoy");
+      view();
+    }
+  });
+}
+
+function openResolveMissingPricesModal(){
+  const weekly = getWeeklyScheduleSummary(state.products || []);
+  const missing = weekly.missingItems;
+  if (missing.length === 0) {
+    toast("✓ Todos los alimentos tienen precio en la biblioteca");
+    return;
+  }
+
+  const modal = document.createElement("div");
+  modal.className = "modalBackdrop";
+  modal.style.zIndex = "9999";
+
+  modal.innerHTML = `
+    <div class="modal" style="max-width:440px;padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h3 style="margin:0;font-size:16px;color:#f1f5f9;">Precios Faltantes en Biblioteca</h3>
+        <button class="iconBtn" data-x="1">✕</button>
+      </div>
+      <div style="font-size:12.5px;color:rgba(255,255,255,0.7);margin-bottom:12px;">
+        Estos alimentos no se encontraron en tu biblioteca. Asígnales un precio para guardarlos en tu catálogo:
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;max-height:300px;overflow-y:auto;padding-right:4px;">
+        ${missing.map((m, idx) => `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;background:rgba(255,255,255,0.03);padding:8px 10px;border-radius:6px;">
+            <div style="font-size:13px;font-weight:600;color:#e2e8f0;flex:1;">${escapeHtml(m.name)}</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:12px;color:rgba(255,255,255,0.5);">S/</span>
+              <input type="number" step="0.5" class="input missingPriceInput" data-name="${escapeHtml(m.name)}" value="${m.currentPrice || 0}" style="width:70px;padding:4px 6px;font-size:13px;">
+              <button class="btn good btnSaveMissingProduct" data-idx="${idx}" data-name="${escapeHtml(m.name)}" style="font-size:11px;padding:4px 8px;">Guardar</button>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+        <button class="btn ghost" data-x="1">Cerrar</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  modal.querySelectorAll(".btnSaveMissingProduct").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const name = btn.dataset.name;
+      const inp = modal.querySelector(`.missingPriceInput[data-name="${name}"]`);
+      const price = Number(inp?.value || 0);
+
+      // Create or update in products library
+      let prod = (state.products || []).find(p => p.name.toLowerCase() === name.toLowerCase());
+      if (prod) {
+        prod.price = price;
+      } else {
+        state.products = state.products || [];
+        state.products.unshift({
+          id: uid("p"),
+          name: name,
+          price: price,
+          rating: 3,
+          tier: "base_diario",
+          context: "almuerzo_casa",
+          unit: "u",
+          essential: true,
+          history: []
+        });
+      }
+      persist();
+      btn.textContent = "✓ Listo";
+      btn.disabled = true;
+      toast(`✓ ${name} guardado a S/ ${price.toFixed(2)}`);
+      view();
+    });
+  });
+
+  modal.querySelectorAll('[data-x="1"]').forEach(b => b.addEventListener("click", () => modal.remove()));
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+}
+
 
 
 function viewShoppingDashboard(){

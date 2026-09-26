@@ -12,6 +12,7 @@
 import { getActiveMealInventory } from "../shopping/mealBundles.js";
 import { enrichAllProducts, getDaysSinceLastConsumed } from "../shopping/productIntelligence.js";
 import { isOllamaConfigured, getOllamaSettings } from "./ollamaClient.js";
+import { getPlannedVsActualForDate } from "../shopping/mealSchedule.js";
 
 /**
  * Obtiene la fecha exacta en la zona horaria de Lima, Perú (America/Lima, UTC-5).
@@ -237,12 +238,15 @@ export function buildDailyFlowContext(rootState = {}, now = new Date()) {
   const liquidity = computeDailyLiquidity(rootState, now);
   const mealInv = getActiveMealInventory();
   const hedonic = evaluateHedonicOpportunity(products, liquidity.liquidityHealth, now);
+  const limaIso = getLimaDateString(now);
+  const plannedToday = getPlannedVsActualForDate(limaIso, products);
 
   return {
-    date: getLimaDateString(now),
+    date: limaIso,
     liquidity,
     mealInventory: mealInv,
     hedonicOpportunity: hedonic,
+    plannedToday,
     hasHomeLunchReady: (mealInv.byMealType.almuerzo?.portions || 0) > 0,
     hasHomeBreakfastReady: (mealInv.byMealType.desayuno?.portions || 0) > 0,
   };

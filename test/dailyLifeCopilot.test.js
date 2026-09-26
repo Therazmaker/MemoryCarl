@@ -305,3 +305,61 @@ test("shoppingAi: explainAiError diagnostica con precisión límites de cuota, a
   assert.ok(corsErr.includes("ERROR DE RED / CORS"));
   assert.ok(corsErr.includes("activa Google Gemini"));
 });
+
+// ============================================================================
+// 4. MEAL SCHEDULE & PREDICTIVE PLAN TESTS
+// ============================================================================
+
+import {
+  findProductInLibrary,
+  resolveScheduleItems,
+  getDayScheduleSummary,
+  getWeeklyScheduleSummary,
+  logActualConsumption,
+  getPlannedVsActualForDate
+} from "../src/shopping/mealSchedule.js";
+
+test("mealSchedule: resolución automática de precios y detección de items faltantes en biblioteca", () => {
+  resetStorage();
+  const products = [
+    { id: "p1", name: "Volt Blue", price: 2.50, tier: "base_diario" },
+    { id: "p2", name: "Monster Mango Loco", price: 7.50, tier: "premio_premium" },
+    { id: "p3", name: "Menú Ejecutivo", price: 14.00, tier: "base_diario" }
+  ];
+
+  // Caso 1: Item existe en biblioteca
+  const match = findProductInLibrary("Volt Blue", products);
+  assert.equal(match.id, "p1");
+  assert.equal(match.price, 2.50);
+
+  // Caso 2: Resolver lista mixta (con productos en biblioteca y productos faltantes)
+  const items = [
+    { name: "Volt Blue", qty: 2 }, // 2 * 2.50 = 5.00
+    { name: "Menú Ejecutivo", qty: 1 }, // 1 * 14.00 = 14.00
+    { name: "Pastel de Choclo Desconocido", qty: 1, estimatedPrice: 6.00 } // No existe en biblioteca
+  ];
+
+  const res = resolveScheduleItems(items, products);
+  assert.equal(res.totalCost, 25.00); // 5 + 14 + 6
+  assert.equal(res.missingItems.length, 1);
+  assert.equal(res.missingItems[0].name, "Pastel de Choclo Desconocido");
+});
+
+test("mealSchedule: seguimiento inmutable de plan proyectado vs consumos reales", () => {
+  resetStorage();
+  const products = [
+    { id: "p1", name: "Volt", price: 2.50 },
+    { id: "p2", name: "Almuerzo", price: 14.00 }
+  ];
+
+  const dateIso = "2026-09-23"; // Miércoles
+  // Registrar consumo real de hoy
+  logActualConsumption(dateIso, { slotId: "almuerzo", name: "Almuerzo", price: 15.00, isPlanned: true });
+  logActualConsumption(dateIso, { slotId: "bebidas", name: "Monster Extra", price: 7.50, isPlanned: false });
+
+  const comp = getPlannedVsActualForDate(dateIso, products);
+  assert.equal(comp.actualTotal, 22.50);
+  assert.ok(comp.actualItems.length === 2);
+  assert.ok(typeof comp.plannedTotal === "number");
+});
+
