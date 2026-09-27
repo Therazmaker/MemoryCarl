@@ -3225,6 +3225,7 @@ function view(){
     });
   }
 
+
   // House history modal wiring + button
   if(state.tab==="house"){
     const btnH = root.querySelector("#btnHouseHistory");
@@ -17243,6 +17244,8 @@ function addFinanceEntry(payload){
     archived: false,
     isFiado: !!isFiado,
     fiadoStatus: fiadoStatus || null,
+    isSourcePool: !!payload.isSourcePool,
+    sourcePoolName: payload.sourcePoolName || null,
     // carry over usd props if present
     usdGross: payload.usdGross || null,
     usdNet: payload.usdNet || null,
@@ -17673,6 +17676,13 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
 
       <div id="finProIncomeOpts" style="display:${draft.type==='income'?'block':'none'}; margin: 12px 0; background: #1c1c1e; padding: 12px; border-radius: 12px; border: 1px solid #333;">
         <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; cursor:pointer;">
+          <input type="checkbox" id="finEntryIsSourcePool" ${existing?.isSourcePool?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
+          <span style="font-size:14px; font-weight:600; color:#34d399;">🎯 Marcar como Pozo de Dinero / Quincena</span>
+        </label>
+        <div id="finProSourcePoolWrap" style="display:${existing?.isSourcePool?'block':'none'}; margin-bottom:12px;">
+          <input type="text" id="finEntrySourcePoolName" class="textInput" placeholder="Nombre del pozo (Ej. 1ra Quincena Septiembre, Bono)" value="${escapeHtml(existing?.sourcePoolName || '')}" style="width:100%; box-sizing:border-box; margin:0; font-size:13px;">
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; cursor:pointer;">
           <input type="checkbox" id="finEntryIsLoan" ${existing?.isLoan?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
           <span style="font-size:14px; font-weight:600;">Me prestaron dinero (Generar Deuda)</span>
         </label>
@@ -17756,16 +17766,19 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <select id="finEntrySourceSelect" class="textInput" style="width:100%; box-sizing:border-box; margin-bottom:6px; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
           <option value="">-- Sin origen asignado (Caja general) --</option>
           ${(() => {
-            const recentIncomes = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived);
-            return recentIncomes.map(inc => {
-              const notePart = inc.note ? String(inc.note).split(' · ')[0] : 'Ingreso';
-              const label = `${inc.date ? inc.date.slice(0,10) : ''} - ${notePart} (S/ ${_financeFmt(inc.amount)})`;
+            const pools = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived && (m.isSourcePool || existing?.sourceMovementId === m.id));
+            if (pools.length === 0) {
+              return `<option value="" disabled>-- No hay pozos creados aún (Marca un Ingreso como Pozo) --</option>`;
+            }
+            return pools.map(inc => {
+              const poolTitle = inc.sourcePoolName || (inc.note ? String(inc.note).split(' · ')[0] : 'Pozo');
+              const label = `${inc.date ? inc.date.slice(0,10) : ''} - ${poolTitle} (S/ ${_financeFmt(inc.amount)})`;
               const isSelected = existing?.sourceMovementId === inc.id;
-              return `<option value="${inc.id}" data-label="${escapeHtml(notePart)}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+              return `<option value="${inc.id}" data-label="${escapeHtml(poolTitle)}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
             }).join('');
           })()}
         </select>
-        <input type="text" id="finEntryOrigin" class="finProNote" placeholder="O escribe el origen (Ej: sueldo, lo de Jhon)" value="${escapeHtml(existing?.sourceLabel || '')}" style="margin-bottom:0;">
+        <input type="text" id="finEntryOrigin" class="finProNote" placeholder="O escribe el origen libre (Ej: sueldo, lo de Jhon)" value="${escapeHtml(existing?.sourceLabel || '')}" style="margin-bottom:0;">
       </div>
       
       <div class="finProAdvToggle" id="finAdvToggle">Más opciones (Cuentas, Notas) ▼</div>
@@ -17852,6 +17865,14 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       advToggle.innerHTML = "Menos opciones ▲";
     }
   });
+
+  const isSourcePool = backdrop.querySelector('#finEntryIsSourcePool');
+  const sourcePoolWrap = backdrop.querySelector('#finProSourcePoolWrap');
+  if (isSourcePool && sourcePoolWrap) {
+    isSourcePool.addEventListener('change', () => {
+      sourcePoolWrap.style.display = isSourcePool.checked ? 'block' : 'none';
+    });
+  }
 
   const incomeOpts = backdrop.querySelector('#finProIncomeOpts');
   const expenseOpts = backdrop.querySelector('#finProExpenseOpts');
@@ -18069,6 +18090,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   
   const isLoanChecked = backdrop.querySelector('#finEntryIsLoan')?.checked;
   const isFiadoChecked = !!backdrop.querySelector('#finEntryIsFiado')?.checked;
+  const isSourcePoolChecked = !!backdrop.querySelector('#finEntryIsSourcePool')?.checked;
+  const sourcePoolNameVal = isSourcePoolChecked ? (backdrop.querySelector('#finEntrySourcePoolName')?.value||'').trim() : null;
 
   // New fields: Persona (counterparty override) and Origen (sourceLabel / sourceMovementId override)
   const personVal = (backdrop.querySelector('#finEntryPerson')?.value||'').trim();
@@ -18093,6 +18116,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     isLoan: isLoanChecked,
     isFiado: isFiadoChecked,
     fiadoStatus: existing ? (isFiadoChecked ? (existing.fiadoStatus || "pending") : null) : (isFiadoChecked ? "pending" : null),
+    isSourcePool: draft.type === 'income' ? isSourcePoolChecked : false,
+    sourcePoolName: draft.type === 'income' ? sourcePoolNameVal : null,
     usdGross,
     usdNet,
     usdFee,
@@ -22055,8 +22080,8 @@ function renderFinanceStatsTab() {
   
   let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[]));
 
-  // Find all non-archived income entries for the source selector dropdown
-  const allIncomes = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived);
+  // Find all non-archived income entries that are explicitly source pools (or currently selected)
+  const allIncomes = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived && (m.isSourcePool || m.id === state.financeStatsSourceId));
   const selectedSourceId = state.financeStatsSourceId || "";
   const selectedSource = selectedSourceId ? allIncomes.find(inc => inc.id === selectedSourceId) : null;
   
@@ -22268,9 +22293,9 @@ function renderFinanceStatsTab() {
       <select onchange="setFinanceStatsSource(this.value)" style="width:100%; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
         <option value="">-- Todos los Ingresos (Vista Global) --</option>
         ${allIncomes.map(inc => {
-          const notePart = inc.note ? String(inc.note).split(' · ')[0].trim() : 'Ingreso';
+          const poolTitle = inc.sourcePoolName || (inc.note ? String(inc.note).split(' · ')[0].trim() : 'Pozo');
           const isSel = inc.id === selectedSourceId ? 'selected' : '';
-          return `<option value="${inc.id}" ${isSel}>${inc.date ? inc.date.slice(0,10) : ''} — ${escapeHtml(notePart)} (S/ ${fmt(inc.amount)})</option>`;
+          return `<option value="${inc.id}" ${isSel}>${inc.date ? inc.date.slice(0,10) : ''} — ${escapeHtml(poolTitle)} (S/ ${fmt(inc.amount)})</option>`;
         }).join('')}
       </select>
     </div>
