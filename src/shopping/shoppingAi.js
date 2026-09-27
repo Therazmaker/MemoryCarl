@@ -7,6 +7,7 @@
 import { getOllamaSettings, isOllamaConfigured } from "../services/ollamaClient.js";
 import { formatProductForAiPrompt, enrichAllProducts } from "./productIntelligence.js";
 import { formatMealInventoryForAiPrompt } from "./mealBundles.js";
+import { DAYS_OF_WEEK, MEAL_SLOTS } from "./mealSchedule.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -202,7 +203,7 @@ TU COMPORTAMIENTO:
    - Si cocinó para varios días, genera un \`createMealBundle\` con porciones estimadas.
    - Si consumió comida casera guardada, genera un \`consumeMealBundle\`.
    - Si consumió algo de su horario o calle, genera \`logScheduleConsumption\` o \`syncFoodExpense\`.
-   - Si te pide cambiar, actualizar, modificar o reemplazar la plantilla del horario proyectado de cualquier día (ej. "cambia mi almuerzo de los lunes por pollo a la brasa 18 soles", "actualiza mi menú de hoy/mañana", "en la cena del viernes pon pizza 12 soles"), SIEMPRE genera la acción `updateMealSchedule`.
+   - Si te pide cambiar, actualizar, modificar o reemplazar la plantilla del horario proyectado de cualquier día (ej. "cambia mi almuerzo de los lunes por pollo a la brasa 18 soles", "actualiza mi menú de hoy/mañana", "en la cena del viernes pon pizza 12 soles"), SIEMPRE genera la acción \`updateMealSchedule\`.
    - Si quiere registrar un gasto o ingreso financiero directo, genera \`recordFinanceMovement\`.
 
 3. **Matemática Fraccional y Comidas:**
@@ -243,7 +244,7 @@ TU COMPORTAMIENTO:
        ]
      },
 
-CRÍTICO PARA HORARIO (SCHEDULE): Si el usuario solicita modificar el menú u horario proyectado para cualquier día (lunes a domingo, hoy o mañana), SIEMPRE debes generar la acción `updateMealSchedule` en `---ACTIONS---`. `dayKey` debe ser la clave del día ('lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo', 'hoy', 'manana') y `slotId` una de: 'desayuno', 'almuerzo', 'cena', 'bebidas' (o 'snack').
+CRÍTICO PARA HORARIO (SCHEDULE): Si el usuario solicita modificar el menú u horario proyectado para cualquier día (lunes a domingo, hoy o mañana), SIEMPRE debes generar la acción \`updateMealSchedule\` en \`---ACTIONS---\`. \`dayKey\` debe ser la clave del día ('lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo', 'hoy', 'manana') y \`slotId\` una de: 'desayuno', 'almuerzo', 'cena', 'bebidas' (o 'snack').
      "recordFinanceMovement": {
        "type": "expense",
        "amount": 15.00,
