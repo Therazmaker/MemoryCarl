@@ -17246,6 +17246,7 @@ function addFinanceEntry(payload){
     fiadoStatus: fiadoStatus || null,
     isSourcePool: !!payload.isSourcePool,
     sourcePoolName: payload.sourcePoolName || null,
+    parentPoolId: payload.parentPoolId || null,
     // carry over usd props if present
     usdGross: payload.usdGross || null,
     usdNet: payload.usdNet || null,
@@ -17682,6 +17683,20 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <div id="finProSourcePoolWrap" style="display:${existing?.isSourcePool?'block':'none'}; margin-bottom:12px;">
           <input type="text" id="finEntrySourcePoolName" class="textInput" placeholder="Nombre del pozo (Ej. 1ra Quincena Septiembre, Bono)" value="${escapeHtml(existing?.sourcePoolName || '')}" style="width:100%; box-sizing:border-box; margin:0; font-size:13px;">
         </div>
+        <div id="finProReloadPoolWrap" style="margin-bottom:12px;">
+          <label style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:600;">➕ Sumar / Recargar a un Pozo Existente</label>
+          <select id="finEntryIncomePoolSelect" class="textInput" style="width:100%; box-sizing:border-box; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
+            <option value="">-- Nuevo Ingreso Independiente --</option>
+            ${(() => {
+              const activePools = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived && m.isSourcePool && m.id !== existing?.id);
+              return activePools.map(p => {
+                const name = p.sourcePoolName || (p.note ? String(p.note).split(' · ')[0] : 'Pozo');
+                const isSel = existing?.parentPoolId === p.id;
+                return `<option value="${p.id}" ${isSel ? 'selected' : ''}>Sumar a: ${escapeHtml(name)} (${p.date ? p.date.slice(0,10) : ''})</option>`;
+              }).join('');
+            })()}
+          </select>
+        </div>
         <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; cursor:pointer;">
           <input type="checkbox" id="finEntryIsLoan" ${existing?.isLoan?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
           <span style="font-size:14px; font-weight:600;">Me prestaron dinero (Generar Deuda)</span>
@@ -18092,6 +18107,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const isFiadoChecked = !!backdrop.querySelector('#finEntryIsFiado')?.checked;
   const isSourcePoolChecked = !!backdrop.querySelector('#finEntryIsSourcePool')?.checked;
   const sourcePoolNameVal = isSourcePoolChecked ? (backdrop.querySelector('#finEntrySourcePoolName')?.value||'').trim() : null;
+  const parentPoolSelectEl = backdrop.querySelector('#finEntryIncomePoolSelect');
+  const parentPoolIdVal = parentPoolSelectEl ? parentPoolSelectEl.value || null : null;
 
   // New fields: Persona (counterparty override) and Origen (sourceLabel / sourceMovementId override)
   const personVal = (backdrop.querySelector('#finEntryPerson')?.value||'').trim();
@@ -18118,6 +18135,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     fiadoStatus: existing ? (isFiadoChecked ? (existing.fiadoStatus || "pending") : null) : (isFiadoChecked ? "pending" : null),
     isSourcePool: draft.type === 'income' ? isSourcePoolChecked : false,
     sourcePoolName: draft.type === 'income' ? sourcePoolNameVal : null,
+    parentPoolId: draft.type === 'income' ? parentPoolIdVal : null,
     usdGross,
     usdNet,
     usdFee,
@@ -22231,11 +22249,17 @@ function renderFinanceStatsTab() {
 
   // Source / Quincena filtering logic
   let filteredExpenses = expenses;
+  let poolInflows = [];
   let sourceHeaderHtml = "";
 
   if (selectedSource) {
-    const srcAmount = Number(selectedSource.amount || 0);
-    const srcNote = selectedSource.note ? String(selectedSource.note).split(' · ')[0].trim() : 'Ingreso';
+    const srcNote = selectedSource.sourcePoolName || (selectedSource.note ? String(selectedSource.note).split(' · ')[0].trim() : 'Pozo');
+
+    // Find all reloads / extra inflows linked to this pool
+    const poolReloads = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived && (m.parentPoolId === selectedSource.id || m.sourceMovementId === selectedSource.id));
+    poolInflows = [selectedSource, ...poolReloads].sort((a,b) => new Date(a.date) - new Date(b.date));
+
+    const totalPoolInflow = poolInflows.reduce((s, e) => s + Number(e.amount || 0), 0);
 
     // Find expenses linked via sourceMovementId or sourceLabel
     filteredExpenses = expenses.filter(e => {
@@ -22245,9 +22269,26 @@ function renderFinanceStatsTab() {
     });
 
     const srcSpent = filteredExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-    const srcRemaining = srcAmount - srcSpent;
-    const srcPct = srcAmount > 0 ? Math.min(100, Math.round((srcSpent / srcAmount) * 100)) : 0;
+    const srcRemaining = totalPoolInflow - srcSpent;
+    const srcPct = totalPoolInflow > 0 ? Math.min(100, Math.round((srcSpent / totalPoolInflow) * 100)) : 0;
     const barColor = srcPct > 90 ? '#ef4444' : (srcPct > 70 ? '#f59e0b' : '#34d399');
+
+    // "Cómo Entró" (Abonos/Ingresos) HTML Timeline
+    const inflowsTimelineHtml = poolInflows.map((inc, i) => {
+      const isInitial = inc.id === selectedSource.id;
+      const incNote = inc.note ? String(inc.note).split(' · ')[0].trim() : (isInitial ? 'Fondo Inicial' : 'Abono / Recarga');
+      const party = inc.counterparty ? ` • De: ${escapeHtml(inc.counterparty)}` : '';
+      return `
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+          <div>
+            <span style="font-weight:700; color:#34d399;">${isInitial ? '🚀 Fondo Inicial' : '➕ Recarga #' + i}</span>
+            <span style="color:#aaa; font-size:11px;">(${inc.date ? inc.date.slice(0,10) : ''}${party})</span>
+            <div style="font-size:11px; color:#cbd5e1;">${escapeHtml(incNote)}</div>
+          </div>
+          <div style="font-weight:800; color:#34d399; font-size:13px;">+ S/ ${fmt(inc.amount)}</div>
+        </div>
+      `;
+    }).join('');
 
     sourceHeaderHtml = `
       <section class="finSection" style="background:linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%); border:1px solid #4338ca; border-radius:14px; padding:16px; margin-bottom:16px;">
@@ -22255,32 +22296,42 @@ function renderFinanceStatsTab() {
           <div>
             <div style="font-size:11px; color:#a5b4fc; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">🎯 Pozo de Ingreso / Quincena</div>
             <div style="font-size:18px; font-weight:800; color:#fff; margin-top:2px;">${escapeHtml(srcNote)}</div>
-            <div style="font-size:12px; color:#94a3b8;">${selectedSource.date ? selectedSource.date.slice(0,10) : ''} • Pozo Inicial: <b>S/ ${fmt(srcAmount)}</b></div>
+            <div style="font-size:12px; color:#94a3b8;">${selectedSource.date ? selectedSource.date.slice(0,10) : ''} • ${poolInflows.length} Entradas de Dinero</div>
           </div>
           <button class="btn ghost" onclick="setFinanceStatsSource('')" style="font-size:12px; padding:4px 10px; margin:0; height:auto; color:#a5b4fc; border:1px solid #4338ca;">Ver Todo</button>
         </div>
 
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
-          <div style="background:rgba(0,0,0,0.3); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.05);">
-            <div style="font-size:11px; color:#fca5a5;">Gastado de este pozo</div>
-            <div style="font-size:18px; font-weight:800; color:#f87171;">S/ ${fmt(srcSpent)}</div>
-            <div style="font-size:11px; color:#aaa;">${filteredExpenses.length} gastos vinculados</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:12px;">
+          <div style="background:rgba(0,0,0,0.3); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.05); text-align:center;">
+            <div style="font-size:10px; color:#6fcf97;">Total Entrado</div>
+            <div style="font-size:16px; font-weight:800; color:#34d399;">S/ ${fmt(totalPoolInflow)}</div>
+            <div style="font-size:10px; color:#aaa;">${poolInflows.length} abonos</div>
           </div>
-          <div style="background:rgba(0,0,0,0.3); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.05);">
-            <div style="font-size:11px; color:#6fcf97;">Saldo Restante</div>
-            <div style="font-size:18px; font-weight:800; color:${srcRemaining >= 0 ? '#34d399' : '#ef4444'};">S/ ${fmt(srcRemaining)}</div>
-            <div style="font-size:11px; color:#aaa;">${100 - srcPct}% disponible</div>
+          <div style="background:rgba(0,0,0,0.3); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.05); text-align:center;">
+            <div style="font-size:10px; color:#fca5a5;">Gastado de Pozo</div>
+            <div style="font-size:16px; font-weight:800; color:#f87171;">S/ ${fmt(srcSpent)}</div>
+            <div style="font-size:10px; color:#aaa;">${filteredExpenses.length} gastos</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.3); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.05); text-align:center;">
+            <div style="font-size:10px; color:#a5b4fc;">Saldo Restante</div>
+            <div style="font-size:16px; font-weight:800; color:${srcRemaining >= 0 ? '#34d399' : '#ef4444'};">S/ ${fmt(srcRemaining)}</div>
+            <div style="font-size:10px; color:#aaa;">${100 - srcPct}% libre</div>
           </div>
         </div>
 
-        <div style="margin-top:6px;">
+        <div style="margin-bottom:14px;">
           <div style="display:flex; justify-content:space-between; font-size:11px; color:#aaa; margin-bottom:4px;">
-            <span>Consumo de la quincena</span>
+            <span>Consumo del Pozo</span>
             <span style="font-weight:700; color:${barColor};">${srcPct}%</span>
           </div>
           <div style="background:#1e293b; border-radius:8px; height:10px; overflow:hidden;">
             <div style="height:100%; width:${srcPct}%; background:${barColor}; border-radius:8px; transition:width 0.4s ease;"></div>
           </div>
+        </div>
+
+        <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px;">
+          <div style="font-size:11px; font-weight:700; color:#34d399; margin-bottom:6px; text-transform:uppercase;">📥 Detalle de "Cómo Entró" el dinero:</div>
+          ${inflowsTimelineHtml}
         </div>
       </section>
     `;
@@ -22393,7 +22444,7 @@ function renderFinanceStatsTab() {
 
   // Trigger drawing interactive charts after DOM update
   setTimeout(() => {
-    drawFinanceStatsCharts(filteredExpenses, byFilteredCat);
+    drawFinanceStatsCharts(filteredExpenses, byFilteredCat, poolInflows);
   }, 50);
 
   return `
@@ -22452,47 +22503,92 @@ function renderFinanceStatsTab() {
   `;
 }
 
-function drawFinanceStatsCharts(expensesList, byCatList) {
+function drawFinanceStatsCharts(expensesList, byCatList, poolInflows = []) {
   if (typeof Chart === "undefined") return;
 
-  // 1. Line Chart (Daily expense evolution)
+  // 1. Line Chart (Multi-line: Inflows vs Outflows vs Cumulative Net Balance)
   const lineCanvas = document.getElementById("finStatsLineCanvas");
   if (lineCanvas) {
     try { if (_finStatsLineChart) { _finStatsLineChart.destroy(); _finStatsLineChart = null; } } catch(e){}
 
-    // Group expenses by date (YYYY-MM-DD)
-    const dailyMap = {};
+    // Aggregate dates from both inflows and expenses
+    const expDaily = {};
     expensesList.forEach(e => {
       const day = e.date ? e.date.slice(0, 10) : "Sin fecha";
-      dailyMap[day] = (dailyMap[day] || 0) + Number(e.amount || 0);
+      expDaily[day] = (expDaily[day] || 0) + Number(e.amount || 0);
     });
 
-    const sortedDays = Object.keys(dailyMap).sort();
-    const lineLabels = sortedDays.map(d => d.slice(5)); // MM-DD
-    const lineValues = sortedDays.map(d => dailyMap[d]);
+    const incDaily = {};
+    poolInflows.forEach(e => {
+      const day = e.date ? e.date.slice(0, 10) : "Sin fecha";
+      incDaily[day] = (incDaily[day] || 0) + Number(e.amount || 0);
+    });
+
+    const allDates = [...new Set([...Object.keys(expDaily), ...Object.keys(incDaily)])].sort();
+
+    const lineLabels = allDates.map(d => d.slice(5)); // MM-DD
+    const expenseData = allDates.map(d => expDaily[d] || 0);
+    const incomeData = allDates.map(d => incDaily[d] || 0);
+
+    // Compute cumulative balance
+    let running = 0;
+    const balanceData = allDates.map(d => {
+      running += (incDaily[d] || 0) - (expDaily[d] || 0);
+      return running;
+    });
+
+    const datasets = [
+      {
+        label: "Gasto Diario",
+        data: expenseData.length > 0 ? expenseData : [0],
+        borderColor: "#f87171",
+        backgroundColor: "rgba(248, 113, 113, 0.1)",
+        borderWidth: 2,
+        fill: false,
+        tension: 0.2,
+        pointRadius: 3
+      }
+    ];
+
+    if (poolInflows.length > 0) {
+      datasets.unshift({
+        label: "Saldo Acumulado",
+        data: balanceData,
+        borderColor: "#a5b4fc",
+        backgroundColor: "rgba(165, 180, 252, 0.15)",
+        borderWidth: 2,
+        fill: true,
+        tension: 0.2,
+        pointRadius: 4
+      });
+      datasets.unshift({
+        label: "Ingreso / Recarga",
+        data: incomeData,
+        borderColor: "#34d399",
+        backgroundColor: "rgba(52, 211, 153, 0.2)",
+        borderWidth: 2,
+        fill: false,
+        tension: 0.2,
+        pointRadius: 4
+      });
+    }
 
     _finStatsLineChart = new Chart(lineCanvas.getContext("2d"), {
       type: "line",
       data: {
         labels: lineLabels.length > 0 ? lineLabels : ["Sin datos"],
-        datasets: [{
-          label: "Gasto Diario (S/)",
-          data: lineValues.length > 0 ? lineValues : [0],
-          borderColor: "#7c5cff",
-          backgroundColor: "rgba(124, 92, 255, 0.15)",
-          borderWidth: 2,
-          fill: true,
-          tension: 0.3,
-          pointRadius: 4,
-          pointBackgroundColor: "#7c5cff"
-        }]
+        datasets: datasets
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: ctx => ` S/ ${Number(ctx.raw||0).toFixed(2)}` } }
+          legend: {
+            display: poolInflows.length > 0,
+            position: "top",
+            labels: { color: "#fff", font: { size: 10 }, boxWidth: 10 }
+          },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: S/ ${Number(ctx.raw||0).toFixed(2)}` } }
         },
         scales: {
           x: { ticks: { color: "rgba(255,255,255,0.5)", font: { size: 10 } }, grid: { display: false } },

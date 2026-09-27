@@ -113,7 +113,10 @@ window.FINANCE = (function(){
     usdFixedFee,
     counterparty,
     sourceLabel,
-    sourceMovementId
+    sourceMovementId,
+    isSourcePool,
+    sourcePoolName,
+    parentPoolId
   }){
 
     const acc = getAccount(accountId);
@@ -140,7 +143,10 @@ window.FINANCE = (function(){
       usdFixedFee: usdFixedFee || null,
       counterparty: counterparty || null,
       sourceLabel: sourceLabel || null,
-      sourceMovementId: sourceMovementId || null
+      sourceMovementId: sourceMovementId || null,
+      isSourcePool: !!isSourcePool,
+      sourcePoolName: sourcePoolName || null,
+      parentPoolId: parentPoolId || null
     };
 
     if(acc){
