@@ -34,6 +34,50 @@ export const DAYS_OF_WEEK = [
 ];
 
 /**
+ * Normaliza un nombre o clave de día a su clave estándar en minúsculas sin tildes.
+ * Soporta variantes con tilde ("miércoles", "sábado"), inglés ("monday") y palabras relativas ("hoy", "mañana").
+ * @param {string} key
+ * @param {string} [isoDateReference] - 'YYYY-MM-DD' fecha de referencia opcional
+ * @returns {string|null} - 'lunes' | 'martes' | 'miercoles' | 'jueves' | 'viernes' | 'sabado' | 'domingo' | null
+ */
+export function normalizeDayKey(key, isoDateReference = null) {
+  if (!key) return null;
+  const clean = String(key)
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const dayKeysMap = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
+
+  if (clean === "hoy" || clean === "today") {
+    const refDate = isoDateReference ? new Date(isoDateReference + "T12:00:00") : new Date();
+    return dayKeysMap[refDate.getDay()] || "lunes";
+  }
+
+  if (clean === "manana" || clean === "tomorrow") {
+    const refDate = isoDateReference ? new Date(isoDateReference + "T12:00:00") : new Date();
+    refDate.setDate(refDate.getDate() + 1);
+    return dayKeysMap[refDate.getDay()] || "martes";
+  }
+
+  const enMap = {
+    monday: "lunes",
+    tuesday: "martes",
+    wednesday: "miercoles",
+    thursday: "jueves",
+    friday: "viernes",
+    saturday: "sabado",
+    sunday: "domingo"
+  };
+  if (enMap[clean]) return enMap[clean];
+
+  if (dayKeysMap.includes(clean)) return clean;
+
+  return null;
+}
+
+/**
  * Carga el horario semanal/plantilla de comidas proyectadas.
  * Formato: { [dayKey]: { desayuno: [items], almuerzo: [items], cena: [items], bebidas: [items] } }
  */

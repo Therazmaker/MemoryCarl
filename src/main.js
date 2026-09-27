@@ -61,6 +61,7 @@ import { enrichProductData } from "./shopping/productIntelligence.js";
 import {
   MEAL_SLOTS,
   DAYS_OF_WEEK,
+  normalizeDayKey,
   loadMealSchedule,
   saveMealSchedule,
   loadScheduleLog,

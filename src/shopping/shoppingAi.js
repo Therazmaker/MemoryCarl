@@ -99,12 +99,48 @@ function buildChefSystemPrompt(products, chatHistory, pastDays = [], inventory =
 
   // Schedule context
   let scheduleStr = "";
-  if (extraOptions.scheduleContext) {
+  if (extraOptions.weeklySchedule) {
+    const weekly = extraOptions.weeklySchedule;
+    let weeklyDetail = "";
+    DAYS_OF_WEEK.forEach(day => {
+      const daySched = weekly[day.key] || {};
+      const daySlotsStr = MEAL_SLOTS.map(slot => {
+        const rawItems = daySched[slot.id];
+        const items = Array.isArray(rawItems) ? rawItems : (Array.isArray(rawItems?.items) ? rawItems.items : []);
+        if (items.length === 0) return null;
+        const itemsList = items.map(it => {
+          const price = Number(it.estimatedPrice ?? it.price ?? it.unitPrice ?? 0);
+          return `${it.name}${it.qty > 1 ? ` x${it.qty}` : ""} (S/ ${price.toFixed(2)})`;
+        }).join(", ");
+        return `${slot.icon} ${slot.label}: ${itemsList}`;
+      }).filter(Boolean).join(" | ");
+      weeklyDetail += `  - ${day.label} (${day.key}): ${daySlotsStr || "(Sin menú proyectado)"}\n`;
+    });
+
+    let todayDetail = "";
+    if (extraOptions.scheduleContext) {
+      const sc = extraOptions.scheduleContext;
+      if (sc.actualItems && sc.actualItems.length > 0) {
+        todayDetail = "  - Consumos reales registrados hoy:\n" +
+          sc.actualItems.map(a => `    • [${a.slotId || "comida"}] ${a.name}: S/ ${(Number(a.price)||0).toFixed(2)}`).join("\n") + "\n";
+      } else {
+        todayDetail = "  - Consumos reales registrados hoy: Ninguno aún\n";
+      }
+    }
+
+    scheduleStr = `
+--- HORARIO SEMANAL PROYECTADO (Schedule Template) ---
+${weeklyDetail}${todayDetail}--------------------------------------------------------------`;
+  } else if (extraOptions.scheduleContext) {
     const sc = extraOptions.scheduleContext;
     let slotsDetail = "";
     if (sc.bySlot) {
       Object.values(sc.bySlot).forEach(slot => {
-        const itemNames = (slot.items || []).map(it => `${it.name}${it.qty > 1 ? ` x${it.qty}` : ""} (S/ ${it.totalPrice})`).join(", ");
+        const rawItems = slot.items || [];
+        const itemNames = rawItems.map(it => {
+          const price = Number(it.estimatedPrice ?? it.price ?? it.totalPrice ?? it.unitPrice ?? 0);
+          return `${it.name}${it.qty > 1 ? ` x${it.qty}` : ""} (S/ ${price.toFixed(2)})`;
+        }).join(", ");
         slotsDetail += `  - ${slot.icon} ${slot.label}: ${itemNames || "(Nada proyectado)"}\n`;
       });
     }
@@ -166,7 +202,7 @@ TU COMPORTAMIENTO:
    - Si cocinó para varios días, genera un \`createMealBundle\` con porciones estimadas.
    - Si consumió comida casera guardada, genera un \`consumeMealBundle\`.
    - Si consumió algo de su horario o calle, genera \`logScheduleConsumption\` o \`syncFoodExpense\`.
-   - Si quiere cambiar la plantilla del horario proyectado de algún día (ej. "cambia mi almuerzo de los lunes por pollo a la brasa 18 soles"), genera \`updateMealSchedule\`.
+   - Si te pide cambiar, actualizar, modificar o reemplazar la plantilla del horario proyectado de cualquier día (ej. "cambia mi almuerzo de los lunes por pollo a la brasa 18 soles", "actualiza mi menú de hoy/mañana", "en la cena del viernes pon pizza 12 soles"), SIEMPRE genera la acción `updateMealSchedule`.
    - Si quiere registrar un gasto o ingreso financiero directo, genera \`recordFinanceMovement\`.
 
 3. **Matemática Fraccional y Comidas:**
@@ -206,6 +242,8 @@ TU COMPORTAMIENTO:
          { "name": "Pollo al Horno", "estimatedPrice": 18.00 }
        ]
      },
+
+CRÍTICO PARA HORARIO (SCHEDULE): Si el usuario solicita modificar el menú u horario proyectado para cualquier día (lunes a domingo, hoy o mañana), SIEMPRE debes generar la acción `updateMealSchedule` en `---ACTIONS---`. `dayKey` debe ser la clave del día ('lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo', 'hoy', 'manana') y `slotId` una de: 'desayuno', 'almuerzo', 'cena', 'bebidas' (o 'snack').
      "recordFinanceMovement": {
        "type": "expense",
        "amount": 15.00,
