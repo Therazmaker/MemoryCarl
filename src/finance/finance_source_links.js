@@ -58,9 +58,6 @@ export function resolveSourceLink(movement) {
 
   if (candidates.length === 1) {
     movement.sourceMovementId = candidates[0].id;
-    // Persist: update in FINANCE.state.movements directly (same object ref)
-    // since movement IS a reference into the array, no extra save needed here.
-    // Caller (addMovement) already calls save() after this.
   }
   // Zero or multiple matches → leave sourceLabel as free text, no link assigned
 }
