@@ -112,7 +112,8 @@ window.FINANCE = (function(){
     usdExchange,
     usdFixedFee,
     counterparty,
-    sourceLabel
+    sourceLabel,
+    sourceMovementId
   }){
 
     const acc = getAccount(accountId);
@@ -138,7 +139,8 @@ window.FINANCE = (function(){
       usdExchange: usdExchange || null,
       usdFixedFee: usdFixedFee || null,
       counterparty: counterparty || null,
-      sourceLabel: sourceLabel || null
+      sourceLabel: sourceLabel || null,
+      sourceMovementId: sourceMovementId || null
     };
 
     if(acc){

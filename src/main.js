@@ -17250,7 +17250,8 @@ function addFinanceEntry(payload){
     usdExchange: payload.usdExchange || null,
     usdFixedFee: payload.usdFixedFee || null,
     counterparty: payload.counterparty || null,
-    sourceLabel: payload.sourceLabel || null
+    sourceLabel: payload.sourceLabel || null,
+    sourceMovementId: payload.sourceMovementId || null
   };
 
   if(window.FINANCE){
@@ -17750,7 +17751,22 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <input type="text" id="finEntryPerson" class="finProNote" placeholder="Nombre de la persona (Ej: Jhon, María)" value="${escapeHtml(existing?.counterparty || '')}" style="margin-top:4px;">
       </div>
 
-      <input type="text" id="finEntryOrigin" class="finProNote" placeholder="¿De dónde salió este dinero? (Ej: sueldo, lo de Jhon, venta de pantalones)" value="${escapeHtml(existing?.sourceLabel || '')}" style="margin-bottom:10px;">
+      <div id="finEntrySourceWrap" style="margin-bottom:10px;">
+        <label style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:600;">💰 Origen del Dinero (Ingreso / Pozo)</label>
+        <select id="finEntrySourceSelect" class="textInput" style="width:100%; box-sizing:border-box; margin-bottom:6px; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
+          <option value="">-- Sin origen asignado (Caja general) --</option>
+          ${(() => {
+            const recentIncomes = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived);
+            return recentIncomes.map(inc => {
+              const notePart = inc.note ? String(inc.note).split(' · ')[0] : 'Ingreso';
+              const label = `${inc.date ? inc.date.slice(0,10) : ''} - ${notePart} (S/ ${_financeFmt(inc.amount)})`;
+              const isSelected = existing?.sourceMovementId === inc.id;
+              return `<option value="${inc.id}" data-label="${escapeHtml(notePart)}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+            }).join('');
+          })()}
+        </select>
+        <input type="text" id="finEntryOrigin" class="finProNote" placeholder="O escribe el origen (Ej: sueldo, lo de Jhon)" value="${escapeHtml(existing?.sourceLabel || '')}" style="margin-bottom:0;">
+      </div>
       
       <div class="finProAdvToggle" id="finAdvToggle">Más opciones (Cuentas, Notas) ▼</div>
       
@@ -18054,9 +18070,16 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const isLoanChecked = backdrop.querySelector('#finEntryIsLoan')?.checked;
   const isFiadoChecked = !!backdrop.querySelector('#finEntryIsFiado')?.checked;
 
-  // New fields: Persona (counterparty override) and Origen (sourceLabel override)
+  // New fields: Persona (counterparty override) and Origen (sourceLabel / sourceMovementId override)
   const personVal = (backdrop.querySelector('#finEntryPerson')?.value||'').trim();
-  const originVal = (backdrop.querySelector('#finEntryOrigin')?.value||'').trim();
+  let originVal = (backdrop.querySelector('#finEntryOrigin')?.value||'').trim();
+  const sourceSelectEl = backdrop.querySelector('#finEntrySourceSelect');
+  const sourceMovementIdVal = sourceSelectEl ? sourceSelectEl.value || null : null;
+
+  if (sourceMovementIdVal && !originVal) {
+    const opt = sourceSelectEl.options[sourceSelectEl.selectedIndex];
+    if (opt) originVal = opt.getAttribute('data-label') || '';
+  }
 
   const entryPayload = {
     type: draft.type,
@@ -18077,7 +18100,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     usdFixedFee,
     // Manual overrides — written before AI call so AI won't overwrite them
     counterparty: personVal || null,
-    sourceLabel: originVal || null
+    sourceLabel: originVal || null,
+    sourceMovementId: sourceMovementIdVal
   };
 
   if(existing){
@@ -22011,13 +22035,30 @@ function renderFinanceCryptoTab() {
 
 
 
+let _finStatsDonutChart = null;
+let _finStatsLineChart = null;
+
+window.setFinanceStatsSource = function(srcId) {
+  state.financeStatsSourceId = srcId;
+  save("memorycarl_v2_finance_stats_source", srcId);
+  view();
+};
+
 function renderFinanceStatsTab() {
   if (!state.financeStatsPeriod) state.financeStatsPeriod = "month";
   if (state.financeStatsSearch === undefined) state.financeStatsSearch = "";
+  if (state.financeStatsSourceId === undefined) {
+    try { state.financeStatsSourceId = localStorage.getItem("memorycarl_v2_finance_stats_source") || ""; } catch(e) { state.financeStatsSourceId = ""; }
+  }
   const fmt = _financeFmt;
   const monthKey = getCurrentMonthKey();
   
   let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[]));
+
+  // Find all non-archived income entries for the source selector dropdown
+  const allIncomes = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived);
+  const selectedSourceId = state.financeStatsSourceId || "";
+  const selectedSource = selectedSourceId ? allIncomes.find(inc => inc.id === selectedSourceId) : null;
   
   const now = new Date();
   if (state.financeStatsPeriod === 'week') {
@@ -22163,6 +22204,131 @@ function renderFinanceStatsTab() {
     `;
   }
 
+  // Source / Quincena filtering logic
+  let filteredExpenses = expenses;
+  let sourceHeaderHtml = "";
+
+  if (selectedSource) {
+    const srcAmount = Number(selectedSource.amount || 0);
+    const srcNote = selectedSource.note ? String(selectedSource.note).split(' · ')[0].trim() : 'Ingreso';
+
+    // Find expenses linked via sourceMovementId or sourceLabel
+    filteredExpenses = expenses.filter(e => {
+      if (e.sourceMovementId === selectedSource.id) return true;
+      if (e.sourceLabel && srcNote && e.sourceLabel.toLowerCase().includes(srcNote.toLowerCase())) return true;
+      return false;
+    });
+
+    const srcSpent = filteredExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+    const srcRemaining = srcAmount - srcSpent;
+    const srcPct = srcAmount > 0 ? Math.min(100, Math.round((srcSpent / srcAmount) * 100)) : 0;
+    const barColor = srcPct > 90 ? '#ef4444' : (srcPct > 70 ? '#f59e0b' : '#34d399');
+
+    sourceHeaderHtml = `
+      <section class="finSection" style="background:linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%); border:1px solid #4338ca; border-radius:14px; padding:16px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+          <div>
+            <div style="font-size:11px; color:#a5b4fc; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">🎯 Pozo de Ingreso / Quincena</div>
+            <div style="font-size:18px; font-weight:800; color:#fff; margin-top:2px;">${escapeHtml(srcNote)}</div>
+            <div style="font-size:12px; color:#94a3b8;">${selectedSource.date ? selectedSource.date.slice(0,10) : ''} • Pozo Inicial: <b>S/ ${fmt(srcAmount)}</b></div>
+          </div>
+          <button class="btn ghost" onclick="setFinanceStatsSource('')" style="font-size:12px; padding:4px 10px; margin:0; height:auto; color:#a5b4fc; border:1px solid #4338ca;">Ver Todo</button>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+          <div style="background:rgba(0,0,0,0.3); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:11px; color:#fca5a5;">Gastado de este pozo</div>
+            <div style="font-size:18px; font-weight:800; color:#f87171;">S/ ${fmt(srcSpent)}</div>
+            <div style="font-size:11px; color:#aaa;">${filteredExpenses.length} gastos vinculados</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.3); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.05);">
+            <div style="font-size:11px; color:#6fcf97;">Saldo Restante</div>
+            <div style="font-size:18px; font-weight:800; color:${srcRemaining >= 0 ? '#34d399' : '#ef4444'};">S/ ${fmt(srcRemaining)}</div>
+            <div style="font-size:11px; color:#aaa;">${100 - srcPct}% disponible</div>
+          </div>
+        </div>
+
+        <div style="margin-top:6px;">
+          <div style="display:flex; justify-content:space-between; font-size:11px; color:#aaa; margin-bottom:4px;">
+            <span>Consumo de la quincena</span>
+            <span style="font-weight:700; color:${barColor};">${srcPct}%</span>
+          </div>
+          <div style="background:#1e293b; border-radius:8px; height:10px; overflow:hidden;">
+            <div style="height:100%; width:${srcPct}%; background:${barColor}; border-radius:8px; transition:width 0.4s ease;"></div>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  // Source Selector dropdown
+  const sourceSelectorHtml = `
+    <div style="margin-bottom:16px; background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:12px;">
+      <label style="display:block; font-size:12px; font-weight:700; color:#a5b4fc; margin-bottom:6px;">🔍 Filtrar por Ingreso Específico / Quincena:</label>
+      <select onchange="setFinanceStatsSource(this.value)" style="width:100%; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
+        <option value="">-- Todos los Ingresos (Vista Global) --</option>
+        ${allIncomes.map(inc => {
+          const notePart = inc.note ? String(inc.note).split(' · ')[0].trim() : 'Ingreso';
+          const isSel = inc.id === selectedSourceId ? 'selected' : '';
+          return `<option value="${inc.id}" ${isSel}>${inc.date ? inc.date.slice(0,10) : ''} — ${escapeHtml(notePart)} (S/ ${fmt(inc.amount)})</option>`;
+        }).join('')}
+      </select>
+    </div>
+  `;
+
+  // Visual Charts Section (Line Chart + Donut Chart)
+  const chartsSectionHtml = `
+    <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
+      <div class="finSectionHead" style="margin-bottom:14px;">
+        <div class="finSectionTitle" style="color:#60a5fa;">📈 Evolución e Distribución Visual</div>
+      </div>
+
+      <div style="margin-bottom:18px;">
+        <div style="font-size:12px; font-weight:700; color:#aaa; margin-bottom:8px;">Evolución Diaria de Consumo (S/)</div>
+        <div style="position:relative; width:100%; height:160px;">
+          <canvas id="finStatsLineCanvas"></canvas>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:12px; font-weight:700; color:#aaa; margin-bottom:8px;">Distribución por Categorías</div>
+        <div style="position:relative; width:100%; height:180px; display:flex; justify-content:center;">
+          <canvas id="finStatsDonutCanvas"></canvas>
+        </div>
+      </div>
+    </section>
+  `;
+
+  // Expenses without assigned source (Unassigned section)
+  const unassignedExpenses = (state.financeLedger || []).filter(e => e.type === 'expense' && !e.archived && !e.sourceMovementId);
+  const totalUnassigned = unassignedExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+
+  const unassignedSectionHtml = (!selectedSourceId && unassignedExpenses.length > 0) ? `
+    <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
+      <div class="finSectionHead" style="margin-bottom:10px;">
+        <div class="finSectionTitle" style="color:#f59e0b;">⚠️ Gastos sin Origen Asignado (${unassignedExpenses.length})</div>
+        <div style="font-size:13px; font-weight:700; color:#f59e0b;">S/ ${fmt(totalUnassigned)}</div>
+      </div>
+      <div style="font-size:11px; color:#888; margin-bottom:10px;">Toca cualquier gasto para editarlo y vincularlo a una quincena o ingreso:</div>
+      <div style="display:flex; flex-direction:column; gap:6px; max-height:180px; overflow-y:auto;">
+        ${unassignedExpenses.slice(0, 10).map(e => {
+          const rawNote = String(e.note || "");
+          const desc = rawNote.includes(" · ") ? rawNote.split(" · ")[0].trim() : rawNote.trim();
+          return `
+            <div onclick="openFinanceEntryModal('${e.id}')" style="display:flex; justify-content:space-between; align-items:center; font-size:12px; padding:8px 10px; background:#2a2a2c; border-radius:8px; cursor:pointer; border:1px solid #3a3a3c;">
+              <div>
+                <div style="font-weight:700; color:#fff;">${escapeHtml(desc || "Sin descripción")}</div>
+                <div style="font-size:10px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} • ${escapeHtml(e.category || "Otros")}</div>
+              </div>
+              <div style="font-weight:700; color:#f87171;">- S/ ${fmt(e.amount)}</div>
+            </div>
+          `;
+        }).join('')}
+        ${unassignedExpenses.length > 10 ? `<div style="text-align:center; font-size:11px; color:#888; padding:4px 0;">Y ${unassignedExpenses.length - 10} más...</div>` : ''}
+      </div>
+    </section>
+  ` : '';
+
   const periodLabel = state.financeStatsPeriod === 'all' ? 'Todo el historial' : monthKey;
 
   const periodFiados = ledger.filter(e => e.isFiado);
@@ -22192,7 +22358,161 @@ function renderFinanceStatsTab() {
     </section>
   ` : '';
 
-  return `<div style="padding-bottom:80px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;"><div style="font-size:18px;font-weight:700;">📊 Estadísticas</div><div style="font-size:12px;color:#888;">${periodLabel}</div></div>${periodPills}${searchBox}<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;"><div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos</div><div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div><div style="font-size:12px;color:#888;">${incomes.length} movs.</div></div><div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos</div><div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div><div style="font-size:12px;color:#888;">${expenses.length} movs.</div></div></div>${matchesHtml}<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🎯 Gastos por Motivo</div><button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button></div>${reasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💚 Ingresos por Motivo</div></div>${incReasonRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">🏷️ Gastos por Categoría</div></div>${catRows}</section><section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle">💳 Gasto por Cuenta</div></div>${accRows}</section>${fiadosSection}${usdSection}</div>`;
+  // Re-calculate category breakdown for filteredExpenses so donut chart reflects selected quincena/source
+  const filteredCats = [...new Set([...definedCats, ...ledgerCats])];
+  const byFilteredCat = filteredCats.map(c => ({
+    label: c,
+    value: filteredExpenses.filter(e => (e.category || 'Otros') === c).reduce((s, e) => s + Number(e.amount || 0), 0),
+    count: filteredExpenses.filter(e => (e.category || 'Otros') === c).length
+  })).sort((a, b) => b.value - a.value);
+
+  // Trigger drawing interactive charts after DOM update
+  setTimeout(() => {
+    drawFinanceStatsCharts(filteredExpenses, byFilteredCat);
+  }, 50);
+
+  return `
+    <div style="padding-bottom:80px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 2px;">
+        <div style="font-size:18px;font-weight:700;">📊 Estadísticas Financieras</div>
+        <div style="font-size:12px;color:#888;">${periodLabel}</div>
+      </div>
+      ${periodPills}
+      ${sourceSelectorHtml}
+      ${sourceHeaderHtml}
+      ${searchBox}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+        <div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;">
+          <div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos Totales</div>
+          <div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div>
+          <div style="font-size:12px;color:#888;">${incomes.length} movs.</div>
+        </div>
+        <div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;">
+          <div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos Totales</div>
+          <div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div>
+          <div style="font-size:12px;color:#888;">${expenses.length} movs.</div>
+        </div>
+      </div>
+      ${chartsSectionHtml}
+      ${unassignedSectionHtml}
+      ${matchesHtml}
+      <section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+        <div class="finSectionHead" style="margin-bottom:14px;">
+          <div class="finSectionTitle">🎯 Gastos por Motivo</div>
+          <button class="finIconBtn" onclick="openFinanceReasonsManager()" title="Gestionar motivos">⚙️</button>
+        </div>
+        ${reasonRows}
+      </section>
+      <section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+        <div class="finSectionHead" style="margin-bottom:14px;">
+          <div class="finSectionTitle">💚 Ingresos por Motivo</div>
+        </div>
+        ${incReasonRows}
+      </section>
+      <section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+        <div class="finSectionHead" style="margin-bottom:14px;">
+          <div class="finSectionTitle">🏷️ Gastos por Categoría</div>
+        </div>
+        ${catRows}
+      </section>
+      <section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;">
+        <div class="finSectionHead" style="margin-bottom:14px;">
+          <div class="finSectionTitle">💳 Gasto por Cuenta</div>
+        </div>
+        ${accRows}
+      </section>
+      ${fiadosSection}
+      ${usdSection}
+    </div>
+  `;
+}
+
+function drawFinanceStatsCharts(expensesList, byCatList) {
+  if (typeof Chart === "undefined") return;
+
+  // 1. Line Chart (Daily expense evolution)
+  const lineCanvas = document.getElementById("finStatsLineCanvas");
+  if (lineCanvas) {
+    try { if (_finStatsLineChart) { _finStatsLineChart.destroy(); _finStatsLineChart = null; } } catch(e){}
+
+    // Group expenses by date (YYYY-MM-DD)
+    const dailyMap = {};
+    expensesList.forEach(e => {
+      const day = e.date ? e.date.slice(0, 10) : "Sin fecha";
+      dailyMap[day] = (dailyMap[day] || 0) + Number(e.amount || 0);
+    });
+
+    const sortedDays = Object.keys(dailyMap).sort();
+    const lineLabels = sortedDays.map(d => d.slice(5)); // MM-DD
+    const lineValues = sortedDays.map(d => dailyMap[d]);
+
+    _finStatsLineChart = new Chart(lineCanvas.getContext("2d"), {
+      type: "line",
+      data: {
+        labels: lineLabels.length > 0 ? lineLabels : ["Sin datos"],
+        datasets: [{
+          label: "Gasto Diario (S/)",
+          data: lineValues.length > 0 ? lineValues : [0],
+          borderColor: "#7c5cff",
+          backgroundColor: "rgba(124, 92, 255, 0.15)",
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 4,
+          pointBackgroundColor: "#7c5cff"
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ` S/ ${Number(ctx.raw||0).toFixed(2)}` } }
+        },
+        scales: {
+          x: { ticks: { color: "rgba(255,255,255,0.5)", font: { size: 10 } }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { color: "rgba(255,255,255,0.5)", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } }
+        }
+      }
+    });
+  }
+
+  // 2. Donut Chart (Category distribution)
+  const donutCanvas = document.getElementById("finStatsDonutCanvas");
+  if (donutCanvas) {
+    try { if (_finStatsDonutChart) { _finStatsDonutChart.destroy(); _finStatsDonutChart = null; } } catch(e){}
+
+    const activeCatList = byCatList.filter(c => c.value > 0);
+    const donutLabels = activeCatList.map(c => c.label);
+    const donutValues = activeCatList.map(c => c.value);
+    const palette = ['#7c5cff','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#3b82f6'];
+
+    _finStatsDonutChart = new Chart(donutCanvas.getContext("2d"), {
+      type: "doughnut",
+      data: {
+        labels: donutLabels.length > 0 ? donutLabels : ["Sin datos"],
+        datasets: [{
+          data: donutValues.length > 0 ? donutValues : [1],
+          backgroundColor: donutValues.length > 0 ? palette.slice(0, donutValues.length) : ["#333"],
+          borderWidth: 1,
+          borderColor: "#1c1c1e"
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: "right",
+            labels: { color: "#fff", font: { size: 11 }, boxWidth: 12 }
+          },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.label}: S/ ${Number(ctx.raw||0).toFixed(2)}` } }
+        },
+        cutout: "65%"
+      }
+    });
+  }
 }
 
 function renderFinanceFiadosTab() {
