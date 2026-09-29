@@ -417,7 +417,13 @@ export async function callClaude(messages, apiKey, model = "claude-haiku-4-5") {
   };
 
   if (systemMsg) {
-    payload.system = systemMsg.content;
+    payload.system = [
+      {
+        type: "text",
+        text: systemMsg.content,
+        cache_control: { type: "ephemeral" }
+      }
+    ];
   }
 
   const controller = new AbortController();
@@ -451,6 +457,9 @@ export async function callClaude(messages, apiKey, model = "claude-haiku-4-5") {
     }
 
     const data = await res.json();
+    if (data?.usage) {
+      console.log(`[Claude Prompt Caching] Tokens: input=${data.usage.input_tokens || 0}, output=${data.usage.output_tokens || 0}, cache_creation=${data.usage.cache_creation_input_tokens || 0}, cache_read=${data.usage.cache_read_input_tokens || 0}`);
+    }
     const reply = data?.content?.[0]?.text;
     if (!reply) throw new Error("Claude no devolvió texto en la respuesta.");
     return reply;
