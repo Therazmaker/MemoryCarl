@@ -11997,6 +11997,7 @@ function doSavePurchase_({list, decisions}){
       // ────────────────────────────────────────────────────────────────────
 
       const totals = calcEntryTotals(items);
+      if (!Array.isArray(state.shoppingHistory)) state.shoppingHistory = [];
       state.shoppingHistory.unshift({
         id: uid("sh"),
         date: safeDate,
@@ -12560,6 +12561,7 @@ state.products = (function(){
     };
   }) : [];
 })();
+state.shoppingHistory = Array.isArray(state.shoppingHistory) ? state.shoppingHistory : load(LS.shoppingHistory, []);
 state.inventory = load(LS.inventory, []);
 state.inventoryLots = load(LS.inventoryLots, []);
 state.shoppingSubtab = state.shoppingSubtab || "lists";
