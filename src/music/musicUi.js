@@ -390,7 +390,7 @@ async function updateMusicHubDynamicContent() {
         const meta = await parseAudioMetadata(file);
         let cover = meta.coverBlobUrl;
         if (!cover) {
-          cover = await fetchOnlineCoverArt(meta.title, meta.artist);
+          cover = await fetchOnlineCoverArt(meta.title, meta.artist, meta.albumArtist, meta.album, meta.durationSeconds);
         }
         if (!cover) {
           cover = generateFallbackCoverSvg(meta.title, meta.artist);
@@ -399,8 +399,13 @@ async function updateMusicHubDynamicContent() {
           id: `tr_${Math.random().toString(16).slice(2)}_${Date.now()}`,
           title: meta.title,
           artist: meta.artist,
+          albumArtist: meta.albumArtist,
           album: meta.album,
+          year: meta.year,
+          trackNumber: meta.trackNumber,
+          discNumber: meta.discNumber,
           genre: meta.genre,
+          durationSeconds: meta.durationSeconds,
           coverBlobUrl: cover,
           fileBlob: file,
           fileName: file.name,
