@@ -13,6 +13,7 @@ import { getActiveMealInventory } from "../shopping/mealBundles.js";
 import { enrichAllProducts, getDaysSinceLastConsumed } from "../shopping/productIntelligence.js";
 import { isOllamaConfigured, getOllamaSettings } from "./ollamaClient.js";
 import { getPlannedVsActualForDate } from "../shopping/mealSchedule.js";
+import { closeDayIfNeeded, recordDailySnapshot, getWeekdayPattern, getYesterdaySnapshot } from "./financeDayHistory.js";
 
 /**
  * Obtiene la fecha exacta en la zona horaria de Lima, Perú (America/Lima, UTC-5).
@@ -44,6 +45,27 @@ export function getLimaDateString(input = new Date()) {
     return base.toLocaleDateString("en-CA", { timeZone: "America/Lima" });
   } catch (_) {
     return new Date().toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * Obtiene la hora actual (0-23) en la zona horaria de Lima, Perú.
+ * @param {Date|string|number} [input]
+ * @returns {number}
+ */
+export function getLimaHour(input = new Date()) {
+  try {
+    const base = input instanceof Date ? input : new Date(input);
+    if (isNaN(base.getTime())) return new Date().getHours();
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Lima",
+      hour: "numeric",
+      hour12: false
+    }).formatToParts(base);
+    const hourPart = parts.find(p => p.type === "hour");
+    return hourPart ? Number(hourPart.value) : base.getHours();
+  } catch (_) {
+    return (input instanceof Date ? input : new Date()).getHours();
   }
 }
 
@@ -198,8 +220,9 @@ export function computeDailyLiquidity(rootState = {}, now = new Date()) {
  * @param {object[]} products
  * @param {string} liquidityHealth
  * @param {Date} [now]
+ * @param {Array<object>} [todayMovements]
  */
-export function evaluateHedonicOpportunity(products = [], liquidityHealth = "bueno", now = new Date()) {
+export function evaluateHedonicOpportunity(products = [], liquidityHealth = "bueno", now = new Date(), todayMovements = []) {
   const enriched = enrichAllProducts(products);
 
   // Buscar productos premium o de alto gusto (rating >= 4)
@@ -219,15 +242,97 @@ export function evaluateHedonicOpportunity(products = [], liquidityHealth = "bue
   const daysSince = topPremium ? (getDaysSinceLastConsumed(topPremium, now) ?? "bastante") : null;
   const canAffordReward = (liquidityHealth === "excelente" || liquidityHealth === "bueno");
 
+  // Revisar si ya se registró un gasto de premio/gusto hoy
+  const alreadySpentRewardToday = Array.isArray(todayMovements) && todayMovements.some(m => {
+    const text = `${m.category || ""} ${m.note || ""}`.toLowerCase();
+    const premName = topPremium?.name?.toLowerCase() || "monster";
+    return /ocio|gusto|premio|recompensa/.test(text) || (premName.length > 2 && text.includes(premName));
+  });
+
+  if (alreadySpentRewardToday) {
+    return {
+      topPremium,
+      topBase,
+      daysSincePremium: daysSince,
+      shouldUpgradeToReward: false,
+      alreadySpentToday: true,
+      reason: `Ya se registró un gasto de gusto/premio hoy en los movimientos.`
+    };
+  }
+
   return {
     topPremium,
     topBase,
     daysSincePremium: daysSince,
     shouldUpgradeToReward: canAffordReward && topPremium && (typeof daysSince === "number" ? daysSince >= 3 : true),
+    alreadySpentToday: false,
     reason: canAffordReward 
       ? `Hay buena liquidez (${liquidityHealth}) y llevas ${daysSince} días sin ${topPremium?.name || "darte un gusto"}.`
       : `Liquidez ${liquidityHealth}: conviene mantener la opción base (${topBase?.name || "Volt/Café"}).`
   };
+}
+
+/**
+ * Obtiene la lista de movimientos tipo gasto registrados hoy.
+ * @param {object} rootState
+ * @param {Date} [now]
+ * @returns {Array<{category: string, amount: number, note: string, sourceLabel: string|null}>}
+ */
+export function getTodayMovements(rootState = {}, now = new Date()) {
+  const dateStr = getLimaDateString(now);
+  const all = Array.isArray(rootState.financeMovementsV2)
+    ? rootState.financeMovementsV2
+    : ((typeof window !== "undefined" && window.FINANCE?.state?.movements) || []);
+  return all
+    .filter(m => getLimaDateString(m.date) === dateStr && m.type === "expense")
+    .map(m => ({
+      category: m.category,
+      amount: Number(m.amount) || 0,
+      note: m.note,
+      sourceLabel: m.sourceLabel || null
+    }));
+}
+
+/**
+ * Genera el paquete completo de contexto del día para Ollama o la UI.
+ */
+/**
+ * Infiere si hoy es un día laboral o no según el patrón histórico de gasto en movilidad/transporte.
+ * @param {object} ctx - Objeto de contexto del día
+ * @param {Date} [now]
+ * @returns {{ status: "sin_datos_suficientes" | "parece_dia_libre" | "dia_laboral" | "patron_dia_no_laboral" | "ambiguo", confidence: number }}
+ */
+export function inferWorkdayStatus(ctx, now = new Date()) {
+  const weekday = getLimaDate(now).getDay();
+  const pattern = getWeekdayPattern(weekday, getLimaDateString(now), 8);
+
+  if (!pattern || pattern.length < 4) {
+    return { status: "sin_datos_suficientes", confidence: 0 };
+  }
+
+  const workdayRate = pattern.filter(p => p.hadMobilityExpense).length / pattern.length;
+
+  if (workdayRate < 0.25 || workdayRate > 0.75) {
+    const movements = Array.isArray(ctx?.todayMovements) ? ctx.todayMovements : [];
+    const hoyTieneMovilidad = movements.some(m => {
+      const text = `${m.category || ""} ${m.note || ""}`.toLowerCase();
+      return /movilidad|transporte|uber|taxi|bus|gasolina|combustible/.test(text);
+    });
+    const esperabaMovilidad = workdayRate > 0.5;
+
+    const horaActual = getLimaHour(now);
+    if (esperabaMovilidad && !hoyTieneMovilidad && horaActual >= 11) {
+      return { status: "parece_dia_libre", confidence: workdayRate };
+    }
+    if (esperabaMovilidad && hoyTieneMovilidad) {
+      return { status: "dia_laboral", confidence: workdayRate };
+    }
+    if (!esperabaMovilidad) {
+      return { status: "patron_dia_no_laboral", confidence: 1 - workdayRate };
+    }
+  }
+
+  return { status: "ambiguo", confidence: workdayRate };
 }
 
 /**
@@ -237,58 +342,163 @@ export function buildDailyFlowContext(rootState = {}, now = new Date()) {
   const products = Array.isArray(rootState.products) ? rootState.products : [];
   const liquidity = computeDailyLiquidity(rootState, now);
   const mealInv = getActiveMealInventory();
-  const hedonic = evaluateHedonicOpportunity(products, liquidity.liquidityHealth, now);
   const limaIso = getLimaDateString(now);
   const plannedToday = getPlannedVsActualForDate(limaIso, products);
+  const todayMovements = getTodayMovements(rootState, now);
+  const totalSpentToday = todayMovements.reduce((s, m) => s + m.amount, 0);
+  const hedonic = evaluateHedonicOpportunity(products, liquidity.liquidityHealth, now, todayMovements);
 
-  return {
+  closeDayIfNeeded(now);
+
+  const hasHomeLunchReady = (mealInv.byMealType.almuerzo?.portions || 0) > 0;
+  const ateOutAnyway = hasHomeLunchReady && todayMovements.some(m => {
+    const text = `${m.category || ""} ${m.note || ""}`.toLowerCase();
+    return /almuerzo|comida|menu|menú|restaurante/.test(text);
+  });
+
+  const baseCtx = {
     date: limaIso,
     liquidity,
     mealInventory: mealInv,
     hedonicOpportunity: hedonic,
     plannedToday,
-    hasHomeLunchReady: (mealInv.byMealType.almuerzo?.portions || 0) > 0,
+    hasHomeLunchReady,
     hasHomeBreakfastReady: (mealInv.byMealType.desayuno?.portions || 0) > 0,
+    ateOutAnyway,
+    todayMovements,
+    totalSpentToday,
   };
+
+  const workdayStatus = inferWorkdayStatus(baseCtx, now);
+  const ctx = {
+    ...baseCtx,
+    workdayStatus
+  };
+
+  recordDailySnapshot(ctx, now);
+
+  return ctx;
 }
 
 /**
- * Construye el prompt para que Ollama redacte el Daily Briefing matutino.
+ * Valida si un texto contiene palabras prohibidas de tono de control.
+ * @param {string} text
+ * @returns {boolean}
  */
-function buildDailyBriefingPrompt(ctx) {
+export function hasProhibitedTone(text = "") {
+  if (!text) return false;
+  return /\b(deberías|deberias|cuidado|evita|no deberías|no deberias)\b/i.test(text);
+}
+
+/**
+ * Genera el briefing determinista fallback siguiendo la regla hecho + efecto en el presente.
+ * @param {object} ctx
+ * @param {Date} [now]
+ * @returns {string}
+ */
+export function generateDeterministicFallback(ctx, now = new Date()) {
+  const yesterday = getYesterdaySnapshot(now);
+  let yesterdayTxt = "";
+  if (yesterday) {
+    if (yesterday.difference < 0) {
+      yesterdayTxt = `Ayer gastaste S/ ${Math.abs(yesterday.difference).toFixed(2)} más de lo previsto.`;
+    } else {
+      yesterdayTxt = `Ayer te mantuviste dentro de lo previsto.`;
+    }
+  }
+
+  const isFreeDay = ctx.workdayStatus?.status === "parece_dia_libre" || ctx.workdayStatus?.status === "patron_dia_no_laboral";
+
+  const movements = Array.isArray(ctx.todayMovements) ? ctx.todayMovements : [];
+  let todayMovTxt = "";
+  if (movements.length > 0) {
+    const listStr = movements.map(m => {
+      const label = m.category || m.note || "Gasto";
+      return `${label} S/ ${m.amount.toFixed(2)}`;
+    }).join(", ");
+    todayMovTxt = `Ya llevas registrado: ${listStr}.`;
+  }
+
+  const marginTxt = `Hoy tu margen libre es S/ ${ctx.liquidity.dailyFreeBudget.toFixed(2)} (${ctx.liquidity.runway.label}).`;
+
+  if (isFreeDay) {
+    const parts = ["¡Buenos días Carlos!", yesterdayTxt, marginTxt, todayMovTxt].filter(Boolean);
+    return parts.join(" ");
+  }
+
+  const lunchTxt = ctx.hasHomeLunchReady
+    ? `Tienes almuerzo casero listo en casa (ahorras ~S/ 10.00).`
+    : `No hay almuerzo casero listo hoy.`;
+
+  const drinkTxt = ctx.hedonicOpportunity?.shouldUpgradeToReward && ctx.hedonicOpportunity?.topPremium
+    ? `Margen disponible para ${ctx.hedonicOpportunity.topPremium.name} hoy.`
+    : `Opción base para hoy: ${ctx.hedonicOpportunity?.topBase?.name || "Volt"}.`;
+
+  const parts = ["¡Buenos días Carlos!", yesterdayTxt, marginTxt, todayMovTxt, lunchTxt, drinkTxt].filter(Boolean);
+  return parts.join(" ");
+}
+
+/**
+ * Construye el prompt para que Ollama o Gemini redacte el Daily Briefing matutino.
+ */
+function buildDailyBriefingPrompt(ctx, now = new Date()) {
   const { runway, dailyFreeBudget, liquidityHealth } = ctx.liquidity;
-  const { hedonicOpportunity, mealInventory, hasHomeLunchReady } = ctx;
+  const { hedonicOpportunity, mealInventory, hasHomeLunchReady, workdayStatus } = ctx;
 
-  const lunchInfo = hasHomeLunchReady
-    ? `En casa hay ${mealInventory.byMealType.almuerzo.portions} porción/es lista/s de comida casera (${mealInventory.byMealType.almuerzo.items.map(i => i.name).join(", ")}).`
-    : `En casa NO hay almuerzo preparado (se requerirá menú de calle ~S/ 15 o cocinar algo rápido).`;
+  const yesterday = getYesterdaySnapshot(now);
+  let yesterdayInfo = "Ayer: Sin registro previo.";
+  if (yesterday) {
+    if (yesterday.difference < 0) {
+      yesterdayInfo = `Ayer: Se gastó S/ ${Math.abs(yesterday.difference).toFixed(2)} MÁS de lo previsto (planeado S/ ${yesterday.dailyFreeBudgetPlanned.toFixed(2)}, real gastado S/ ${yesterday.totalSpentReal.toFixed(2)}).`;
+    } else {
+      yesterdayInfo = `Ayer: Se gastó S/ ${yesterday.totalSpentReal.toFixed(2)} de S/ ${yesterday.dailyFreeBudgetPlanned.toFixed(2)} previstos (dentro de lo planificado).`;
+    }
+  }
 
-  const drinkSuggestion = hedonicOpportunity.shouldUpgradeToReward && hedonicOpportunity.topPremium
-    ? `Luz VERDE para ${hedonicOpportunity.topPremium.name} (S/ ${hedonicOpportunity.topPremium.price.toFixed(2)}): lleva ${hedonicOpportunity.daysSincePremium} días sin tomarlo y la liquidez lo permite.`
-    : `Recomienda la bebida base de rutina: ${hedonicOpportunity.topBase ? hedonicOpportunity.topBase.name : "Volt"} (S/ ${hedonicOpportunity.topBase ? hedonicOpportunity.topBase.price.toFixed(2) : "2.50"}).`;
+  const movements = Array.isArray(ctx.todayMovements) ? ctx.todayMovements : [];
+  let todayMovInfo = "Gastos de hoy hasta el momento: Ninguno.";
+  if (movements.length > 0) {
+    const list = movements.map(m => `${m.category || m.note || 'Gasto'}: S/ ${m.amount.toFixed(2)}`).join(", ");
+    todayMovInfo = `Gastos de hoy hasta el momento: ${list} (Total: S/ ${ctx.totalSpentToday.toFixed(2)}).`;
+  }
+
+  const isFreeDay = workdayStatus?.status === "parece_dia_libre" || workdayStatus?.status === "patron_dia_no_laboral";
+
+  const workdayInfo = isFreeDay
+    ? `Día detectado: PARECE DÍA LIBRE / NO LABORAL. OMITIR sugerencias de almuerzo de oficina y bebidas de rutina laboral.`
+    : `Día detectado: DÍA LABORAL.`;
+
+  const lunchInfo = isFreeDay ? "" : (hasHomeLunchReady
+    ? `En casa hay ${mealInventory.byMealType.almuerzo?.portions || 1} porción/es lista/s de comida casera (${mealInventory.byMealType.almuerzo?.items?.map(i => i.name).join(", ") || ""}).`
+    : `En casa NO hay almuerzo preparado.`);
+
+  const drinkSuggestion = isFreeDay ? "" : (hedonicOpportunity.shouldUpgradeToReward && hedonicOpportunity.topPremium
+    ? `Luz verde para ${hedonicOpportunity.topPremium.name} (S/ ${hedonicOpportunity.topPremium.price.toFixed(2)}).`
+    : `Bebida base habitual: ${hedonicOpportunity.topBase ? hedonicOpportunity.topBase.name : "Volt"} (S/ ${hedonicOpportunity.topBase ? hedonicOpportunity.topBase.price.toFixed(2) : "2.50"}).`);
 
   return `Eres el Asistente Personal y Estratega de Vida de Carlos en Perú.
 Moneda: SOLES PERUANOS (S/).
 
---- DATOS REALES DE HOY ---
+--- DATOS REALES Y COMPARATIVOS ---
 - Fecha: ${ctx.date}
+- Registro de Ayer: ${yesterdayInfo}
 - Cobro: ${runway.label} (faltan ${runway.daysRemaining} días para la quincena).
-- Margen diario libre en cuenta: S/ ${dailyFreeBudget.toFixed(2)} por día.
-- Salud financiera: ${liquidityHealth.toUpperCase()}.
-- Estado del Almuerzo: ${lunchInfo}
-- Bebida de oficina analizada: ${drinkSuggestion}
+- Margen diario libre en cuenta HOY: S/ ${dailyFreeBudget.toFixed(2)} por día.
+- ${todayMovInfo}
+- Estado del día: ${workdayInfo}
+${lunchInfo ? `- Almuerzo: ${lunchInfo}` : ""}
+${drinkSuggestion ? `- Bebida oficina: ${drinkSuggestion}` : ""}
 ----------------------------
 
-INSTRUCCIÓN:
-Escribe un 'Morning Briefing' breve, entusiasta, humano y directo (máximo 4 a 5 líneas) para iniciar el día:
-1. Dile cómo está su quincena y su margen diario de hoy.
-2. Si hay almuerzo en casa, recomiéndale llevarlo y dile cuánto se ahorra vs comer en la calle.
-3. Si hay luz verde para el gusto de la bebida (${hedonicOpportunity.topPremium?.name || "Monster"}), dile expresamente que hoy se lo merece y por qué; si no, anímalo con la opción inteligente de ahorro (${hedonicOpportunity.topBase?.name || "Volt"}).
-4. Tono: Como un amigo cercano que sabe de finanzas y quiere que disfrute su día sin perder el control. Sin rodeos ni saludos corporativos.`;
+REGLAS ESTRICTAS DE TONO (MANDATORIO):
+1. NUNCA instruir ni advertir en tono de control: PROHIBIDO usar las palabras 'deberías', 'deberias', 'cuidado', 'evita', 'no deberías', 'no deberias haber'.
+2. FORMATO OBLIGATORIO: [hecho pasado] -> [efecto en el presente], [dato neutral]. Ejemplo: "Ayer gastaste S/12 más de lo previsto en comida. Hoy tu margen bajó a S/14.50."
+3. Si el día es no laboral o parece día libre, mantén solo el margen y saldo del día, omitiendo sugerencias de oficina/almuerzo.
+4. Escribe un 'Morning Briefing' breve, directo y humano (máximo 3 a 4 líneas).`;
 }
 
 /**
- * Solicita a Ollama Cloud el briefing matutino diario.
+ * Solicita a Ollama Cloud o Gemini el briefing matutino diario.
  * @param {object} rootState
  * @param {Date} [now]
  * @returns {Promise<{ briefingText: string, context: object }>}
@@ -297,19 +507,11 @@ export async function generateDailyBriefing(rootState = {}, now = new Date()) {
   const ctx = buildDailyFlowContext(rootState, now);
 
   if (!isOllamaConfigured()) {
-    // Fallback inteligente determinista si Ollama no está conectado
-    const lunchTxt = ctx.hasHomeLunchReady
-      ? `Tienes almuerzo casero listo en casa (ahorras ~S/ 10).`
-      : `No hay almuerzo en casa; prevé menú de calle.`;
-    const drinkTxt = ctx.hedonicOpportunity.shouldUpgradeToReward && ctx.hedonicOpportunity.topPremium
-      ? `Hoy tienes margen para darte el gusto con un ${ctx.hedonicOpportunity.topPremium.name} (hace ${ctx.hedonicOpportunity.daysSincePremium} días no lo tomas).`
-      : `Mantén hoy tu ${ctx.hedonicOpportunity.topBase?.name || "Volt"} habitual para cuidar el margen.`;
-
-    const fallback = `¡Buenos días Carlos! Estás a ${ctx.liquidity.runway.daysRemaining} días del cobro con un margen diario de S/ ${ctx.liquidity.dailyFreeBudget.toFixed(2)}. ${lunchTxt} ${drinkTxt}`;
+    const fallback = generateDeterministicFallback(ctx, now);
     return { briefingText: fallback, context: ctx };
   }
 
-  const prompt = buildDailyBriefingPrompt(ctx);
+  const prompt = buildDailyBriefingPrompt(ctx, now);
 
   // Intentar primero con Gemini si está configurado (inmune a CORS y ultrarrápido)
   let geminiKey = "";
@@ -337,14 +539,20 @@ export async function generateDailyBriefing(rootState = {}, now = new Date()) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          systemInstruction: { parts: [{ text: "Eres un estratega de vida y asistente diario directo y cercano. Responde en español peruano natural." }] },
+          systemInstruction: { parts: [{ text: "Eres un estratega de vida y asistente diario directo y cercano. Responde en español peruano natural sin todo de orden ni regaño." }] },
           generationConfig: { temperature: 0.6, maxOutputTokens: 500 }
         })
       });
       if (res.ok) {
         const data = await res.json();
-        const briefingText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        if (briefingText.trim()) return { briefingText: briefingText.trim(), context: ctx };
+        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        if (rawText.trim()) {
+          if (hasProhibitedTone(rawText)) {
+            console.warn("AI Gemini returned prohibited tone words; substituting with deterministic fallback.");
+            return { briefingText: generateDeterministicFallback(ctx, now), context: ctx };
+          }
+          return { briefingText: rawText.trim(), context: ctx };
+        }
       }
     } catch (gErr) {
       console.warn("Gemini falló en briefing, probando Ollama...", gErr);
@@ -356,7 +564,7 @@ export async function generateDailyBriefing(rootState = {}, now = new Date()) {
   const url = `${baseUrl}/api/chat`;
 
   const messages = [
-    { role: "system", content: "Eres un estratega de vida y asistente diario directo y cercano. Responde en español peruano natural." },
+    { role: "system", content: "Eres un estratega de vida y asistente diario directo y cercano. Responde en español peruano natural sin todo de orden ni regaño." },
     { role: "user", content: prompt }
   ];
 
@@ -373,11 +581,15 @@ export async function generateDailyBriefing(rootState = {}, now = new Date()) {
     });
     if (!res || !res.ok) throw new Error(`Ollama HTTP ${res?.status}`);
     const data = await res.json();
-    const briefingText = data?.message?.content || "";
-    return { briefingText, context: ctx };
+    const rawText = data?.message?.content || "";
+    if (hasProhibitedTone(rawText)) {
+      console.warn("AI Ollama returned prohibited tone words; substituting with deterministic fallback.");
+      return { briefingText: generateDeterministicFallback(ctx, now), context: ctx };
+    }
+    return { briefingText: rawText, context: ctx };
   } catch (err) {
     console.warn("Fallo al llamar a LLM para el briefing, usando fallback local:", err);
-    const fallback = `¡Buenos días Carlos! Tienes S/ ${ctx.liquidity.dailyFreeBudget.toFixed(2)} de margen diario (${ctx.liquidity.runway.label}). ${ctx.hasHomeLunchReady ? "Lleva tu almuerzo de casa para ahorrar." : "Considera opciones económicas de almuerzo."} ${ctx.hedonicOpportunity.shouldUpgradeToReward ? `¡Luz verde para un ${ctx.hedonicOpportunity.topPremium?.name} hoy!` : `Ve con tu ${ctx.hedonicOpportunity.topBase?.name || "Volt"} habitual.`}`;
+    const fallback = generateDeterministicFallback(ctx, now);
     return { briefingText: fallback, context: ctx };
   }
 }

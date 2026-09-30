@@ -345,3 +345,16 @@ export function getPlannedVsActualForDate(isoDate, products = []) {
     status: delta > 0 ? "exceeded" : (actualItems.length > 0 ? "optimized" : "pending")
   };
 }
+
+/**
+ * Determina si la porción de comida casera debe preservarse para mañana cuando se registra un gasto de almuerzo fuera.
+ * @param {Array<object>} [movements] - Lista de movimientos de gasto del día
+ * @returns {boolean} true si hubo gasto de almuerzo fuera ese día.
+ */
+export function isHomeLunchPreserved(movements = []) {
+  if (!Array.isArray(movements) || movements.length === 0) return false;
+  return movements.some(m => {
+    const text = `${m.category || ""} ${m.note || ""}`.toLowerCase();
+    return /almuerzo|comida|menu|menú|restaurante/.test(text);
+  });
+}

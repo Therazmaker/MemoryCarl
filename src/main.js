@@ -16637,6 +16637,17 @@ const oldLedger = load(LS.financeLedger, []);
           }
       }
   });
+  Object.defineProperty(state, 'financeMovementsV2', {
+      get: function() { return window.FINANCE ? window.FINANCE.state.movements : []; },
+      set: function(val) {
+          if (window.FINANCE) {
+              window.FINANCE.state.movements = val || [];
+              if(window.FINANCE.save) window.FINANCE.save();
+          }
+      },
+      enumerable: true,
+      configurable: true
+  });
 state.financeReasons = load(LS.financeReasons, ["planificado", "impulso", "emergencia", "normal"]);
 state.financeEntryCategories = load(LS.financeEntryCategories, [
   { id: "Alimentos", icon: "🛒", name: "Alimentos" },
