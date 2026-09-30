@@ -15,6 +15,7 @@ import {
   deletePlaylist
 } from "./musicStore.js";
 import { parseAudioMetadata } from "./id3Parser.js";
+import { fetchOnlineCoverArt, generateFallbackCoverSvg } from "./coverArtService.js";
 
 let isFullPlayerOpen = false;
 let isMusicHubOpen = false;
@@ -387,13 +388,20 @@ async function updateMusicHubDynamicContent() {
       const batch = [];
       for (const file of files) {
         const meta = await parseAudioMetadata(file);
+        let cover = meta.coverBlobUrl;
+        if (!cover) {
+          cover = await fetchOnlineCoverArt(meta.title, meta.artist);
+        }
+        if (!cover) {
+          cover = generateFallbackCoverSvg(meta.title, meta.artist);
+        }
         batch.push({
           id: `tr_${Math.random().toString(16).slice(2)}_${Date.now()}`,
           title: meta.title,
           artist: meta.artist,
           album: meta.album,
           genre: meta.genre,
-          coverBlobUrl: meta.coverBlobUrl,
+          coverBlobUrl: cover,
           fileBlob: file,
           fileName: file.name,
           addedAt: new Date().toISOString()
