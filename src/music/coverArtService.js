@@ -4,21 +4,39 @@
  * or generates dynamic gradient SVG covers when tracks don't have embedded ID3 covers.
  */
 
-export async function fetchOnlineCoverArt(title, artist) {
+export async function fetchOnlineCoverArt(title, artist, albumArtist = "", album = "", durationSeconds = 0) {
   if (!title) return null;
 
+  const normalizedTitle = normalizeString(title);
+  const normalizedArtist = normalizeString(artist || albumArtist);
+
   try {
-    const query = `${title} ${artist || ""}`.trim();
-    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=1`;
+    const query = `${title} ${artist || albumArtist || ""}`.trim();
+    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=5`;
     const res = await fetch(url);
     if (!res.ok) return null;
 
     const data = await res.json();
     if (data.results && data.results.length > 0) {
-      const item = data.results[0];
-      if (item.artworkUrl100) {
-        // Upgrade image resolution from 100x100 to 600x600
-        return item.artworkUrl100.replace("100x100bb", "600x600bb");
+      // Find best match matching title and duration or artist
+      const match = data.results.find(item => {
+        const itemTitle = normalizeString(item.trackName || "");
+        const itemArtist = normalizeString(item.artistName || "");
+        const isTitleSame = itemTitle.includes(normalizedTitle) || normalizedTitle.includes(itemTitle);
+        const isArtistSame = !normalizedArtist || itemArtist.includes(normalizedArtist) || normalizedArtist.includes(itemArtist);
+
+        let isDurationClose = true;
+        if (durationSeconds > 0 && item.trackTimeMillis) {
+          const itemDurationSec = Math.round(item.trackTimeMillis / 1000);
+          isDurationClose = Math.abs(itemDurationSec - durationSeconds) <= 5;
+        }
+
+        return isTitleSame && (isArtistSame || isDurationClose);
+      }) || data.results[0];
+
+      if (match && match.artworkUrl100) {
+        // Upgrade artwork resolution to 1024x1024 as in ArchiveTune
+        return match.artworkUrl100.replace("100x100bb", "1024x1024bb");
       }
     }
   } catch (err) {
@@ -26,6 +44,11 @@ export async function fetchOnlineCoverArt(title, artist) {
   }
 
   return null;
+}
+
+function normalizeString(str) {
+  if (!str) return "";
+  return str.normalize("NFKC").toLowerCase().trim().replace(/\s+/g, " ");
 }
 
 export function generateFallbackCoverSvg(title = "Música", artist = "Artista") {

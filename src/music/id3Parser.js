@@ -4,13 +4,17 @@
  */
 
 export async function parseAudioMetadata(file) {
+  const cleanFileName = file.name.replace(/\.[^/.]+$/, "");
   const fallback = {
-    title: file.name.replace(/\.[^/.]+$/, ""),
+    title: cleanFileName,
     artist: "Artista desconocido",
+    albumArtist: "",
     album: "Álbum desconocido",
-    year: "",
+    year: null,
+    trackNumber: null,
+    discNumber: null,
     genre: "",
-    duration: 0,
+    durationSeconds: 0,
     coverBlobUrl: null
   };
 
@@ -72,15 +76,24 @@ export async function parseAudioMetadata(file) {
       const frameDataOffset = offset + 10;
 
       if (frameId === "TIT2" || frameId === "TT2") {
-        metadata.title = parseTextFrame(view, frameDataOffset, frameSize) || metadata.title;
+        metadata.title = cleanTagValue(parseTextFrame(view, frameDataOffset, frameSize)) || metadata.title;
       } else if (frameId === "TPE1" || frameId === "TP1") {
-        metadata.artist = parseTextFrame(view, frameDataOffset, frameSize) || metadata.artist;
+        metadata.artist = cleanTagValue(parseTextFrame(view, frameDataOffset, frameSize)) || metadata.artist;
+      } else if (frameId === "TPE2" || frameId === "TP2") {
+        metadata.albumArtist = cleanTagValue(parseTextFrame(view, frameDataOffset, frameSize)) || "";
       } else if (frameId === "TALB" || frameId === "TAL") {
-        metadata.album = parseTextFrame(view, frameDataOffset, frameSize) || metadata.album;
-      } else if (frameId === "TYER" || frameId === "TDRC") {
-        metadata.year = parseTextFrame(view, frameDataOffset, frameSize) || metadata.year;
+        metadata.album = cleanTagValue(parseTextFrame(view, frameDataOffset, frameSize)) || metadata.album;
+      } else if (frameId === "TYER" || frameId === "TDRC" || frameId === "TDA") {
+        const yStr = parseTextFrame(view, frameDataOffset, frameSize);
+        metadata.year = parseYear(yStr) || metadata.year;
+      } else if (frameId === "TRCK" || frameId === "TRK") {
+        const trkStr = parseTextFrame(view, frameDataOffset, frameSize);
+        metadata.trackNumber = parseTrackNumber(trkStr);
+      } else if (frameId === "TPOS" || frameId === "TPA") {
+        const discStr = parseTextFrame(view, frameDataOffset, frameSize);
+        metadata.discNumber = parseTrackNumber(discStr);
       } else if (frameId === "TCON") {
-        metadata.genre = parseTextFrame(view, frameDataOffset, frameSize) || metadata.genre;
+        metadata.genre = cleanTagValue(parseTextFrame(view, frameDataOffset, frameSize)) || metadata.genre;
       } else if (frameId === "APIC" || frameId === "PIC") {
         const cover = parseApicFrame(view, frameDataOffset, frameSize);
         if (cover) {
@@ -96,6 +109,32 @@ export async function parseAudioMetadata(file) {
     console.warn("ID3 parsing error:", err);
     return fallback;
   }
+}
+
+const UNKNOWN_VALUES = new Set(["<unknown>", "unknown", "unknown artist", "unknown album", "unknown title", "artista desconocido", "álbum desconocido"]);
+
+function cleanTagValue(val) {
+  if (!val) return null;
+  const cleaned = val.trim();
+  if (!cleaned || UNKNOWN_VALUES.has(cleaned.toLowerCase())) return null;
+  return cleaned;
+}
+
+function parseYear(val) {
+  if (!val) return null;
+  const match = val.match(/(?<!\d)\d{4}(?!\d)/);
+  if (match) {
+    const y = parseInt(match[0], 10);
+    if (y >= 1 && y <= 9999) return y;
+  }
+  return null;
+}
+
+function parseTrackNumber(val) {
+  if (!val) return null;
+  const numStr = val.split("/")[0].trim();
+  const num = parseInt(numStr, 10);
+  return isNaN(num) || num <= 0 ? null : num;
 }
 
 function parseSyncsafe32(view, offset) {
