@@ -167,8 +167,13 @@ function parseApicFrame(view, offset, length) {
     if (imageLength <= 0) return null;
 
     const imgBytes = new Uint8Array(view.buffer, view.byteOffset + cursor, imageLength);
-    const blob = new Blob([imgBytes], { type: mimeType });
-    return URL.createObjectURL(blob);
+    let binary = "";
+    const len = imgBytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(imgBytes[i]);
+    }
+    const base64 = btoa(binary);
+    return `data:${mimeType};base64,${base64}`;
   } catch (e) {
     return null;
   }
