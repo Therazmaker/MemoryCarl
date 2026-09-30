@@ -4833,3 +4833,534 @@ body{
   background: rgba(255,255,255,0.15);
   border-radius: 4px;
 }
+
+/* ==========================================================================
+   SPOTIFY-STYLE MUSIC PLAYER STYLES
+   ========================================================================== */
+
+/* Mini Player Bar */
+.spotMiniPlayer {
+  position: fixed;
+  bottom: 64px;
+  left: 12px;
+  right: 12px;
+  z-index: 999;
+  background: #282828;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+}
+
+.spotMiniProgress {
+  height: 2px;
+  background: #1db954;
+  transition: width 0.2s linear;
+}
+
+.spotMiniContent {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  gap: 12px;
+}
+
+.spotMiniCover {
+  width: 42px;
+  height: 42px;
+  border-radius: 6px;
+  background: #121212;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 20px;
+}
+
+.spotMiniCover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.spotMiniInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.spotMiniTitle {
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotMiniArtist {
+  font-size: 11px;
+  color: #b3b3b3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.spotMiniBtns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spotIconBtn {
+  background: transparent;
+  border: none;
+  color: #b3b3b3;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spotIconBtn:hover {
+  color: #fff;
+}
+
+.spotPlayBtn {
+  background: #fff;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #000;
+  font-weight: 900;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+/* Full Expanded Player Modal */
+.spotFullModal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: linear-gradient(180deg, #1e1e28 0%, #121212 100%);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  box-sizing: border-box;
+  animation: slideUp 0.25s cubic-bezier(0.1, 0.9, 0.2, 1);
+  overflow-y: auto;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.spotFullContainer {
+  max-width: 440px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  justify-content: space-between;
+}
+
+.spotFullHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.spotIconBtnBig {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.spotFullHeaderTitle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.smallMuted {
+  font-size: 10px;
+  color: #b3b3b3;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+.spotHeaderAlbum {
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.spotFullCoverWrapper {
+  width: 100%;
+  aspect-ratio: 1;
+  max-width: 340px;
+  margin: 0 auto 24px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
+}
+
+.spotBigCover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.spotBigCoverPlaceholder {
+  width: 100%;
+  height: 100%;
+  background: #282828;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 80px;
+}
+
+.spotFullMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.spotMetaText {
+  flex: 1;
+  min-width: 0;
+
+}
+
+.spotFullTitle {
+  font-size: 20px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotFullArtist {
+  font-size: 14px;
+  color: #b3b3b3;
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotProgressBlock {
+  margin-bottom: 20px;
+}
+
+.spotSeekBar {
+  width: 100%;
+  accent-color: #1db954;
+  height: 4px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.spotTimeLabels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #b3b3b3;
+  margin-top: 6px;
+}
+
+.spotFullControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 20px;
+}
+
+.spotCtrlBtn {
+  background: transparent;
+  border: none;
+  color: #b3b3b3;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.spotCtrlBtn.active {
+  color: #1db954;
+}
+
+.spotPlayMainBtn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #1db954;
+  color: #000;
+  border: none;
+  font-size: 24px;
+  font-weight: 900;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 16px rgba(29, 185, 84, 0.4);
+}
+
+/* Music Hub Modal */
+.spotHubModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.spotHubModal {
+  background: #121212;
+  color: #fff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.8);
+}
+
+.spotHubHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.spotHubTitleBlock h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.spotSub {
+  font-size: 11px;
+  color: #b3b3b3;
+}
+
+.spotHubTabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  overflow-x: auto;
+}
+
+.spotTabBtn {
+  background: #282828;
+  border: none;
+  color: #b3b3b3;
+  padding: 8px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.spotTabBtn.active {
+  background: #1db954;
+  color: #000;
+}
+
+.spotHubBody {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.spotHubSearchRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.spotSearchInput {
+  flex: 1;
+  min-width: 140px;
+  background: #282828;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+}
+
+.spotImportBtn, .spotImportBtnSecondary {
+  background: #1db954;
+  color: #000;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.spotImportBtnSecondary {
+  background: #282828;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.spotTrackList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spotTrackRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.spotTrackRow:hover, .spotTrackRow.playing {
+  background: rgba(29, 185, 84, 0.15);
+}
+
+.spotTrackCover {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: #282828;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.spotTrackCover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.spotTrackInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.spotTrackTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotTrackSub {
+  font-size: 11px;
+  color: #b3b3b3;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotTrackBtn {
+  background: transparent;
+  border: none;
+  color: #b3b3b3;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.spotTrackBtn:hover {
+  color: #fff;
+}
+
+.spotEmptyState, .spotLoadingState {
+  text-align: center;
+  padding: 40px 16px;
+  color: #b3b3b3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.spotPlaylistCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: #282828;
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+
+.spotPlName {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.spotPlSub {
+  font-size: 11px;
+  color: #b3b3b3;
+  margin-top: 2px;
+}
+
+.spotAiHero {
+  text-align: center;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(29, 185, 84, 0.2) 0%, rgba(18, 18, 18, 1) 100%);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.spotAiForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spotAiResultCard {
+  margin-top: 16px;
+  padding: 14px;
+  background: #282828;
+  border-radius: 12px;
+  border: 1px solid rgba(29, 185, 84, 0.3);
+}

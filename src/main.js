@@ -48,6 +48,8 @@ import './finance/finance_core_v2.js';
   });
 })();
 
+import { initMusicUi, openMusicHubModal, openFullPlayer } from "./music/musicUi.js";
+import { musicEngine } from "./music/musicEngine.js";
 import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
 import { initFootballLab } from "./footballLab_v8e.js?v=2001";
 import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
@@ -6423,18 +6425,37 @@ function renderSleepBars(series){
 }
 
 function getMusicDisplay(){
+  const playerState = musicEngine ? musicEngine.getState() : null;
+  if (playerState && playerState.currentTrack) {
+    const tr = playerState.currentTrack;
+    return {
+      item: {
+        song: tr.title,
+        title: tr.title,
+        artist: tr.artist,
+        album: tr.album,
+        coverUrl: tr.coverBlobUrl || "",
+        isPlayerTrack: true
+      },
+      mode: "player",
+      cursor: playerState.queueIndex,
+      total: playerState.totalQueue,
+      isPlaying: playerState.isPlaying
+    };
+  }
+
   const log = Array.isArray(state.musicLog) ? state.musicLog : [];
   const cursor = Math.max(0, Math.min(log.length-1, Number(state.musicCursor||0)));
   const todayIso = getTodayIso();
 
   // Prefer today's explicit record if date matches
   if (state.musicToday && state.musicToday.date === todayIso){
-    return { item: state.musicToday, mode:"today", cursor:0, total: log.length };
+    return { item: state.musicToday, mode:"today", cursor:0, total: log.length, isPlaying: false };
   }
   if (log.length === 0){
-    return { item: null, mode:"empty", cursor:0, total:0 };
+    return { item: null, mode:"empty", cursor:0, total:0, isPlaying: false };
   }
-  return { item: log[cursor], mode:"log", cursor, total: log.length };
+  return { item: log[cursor], mode:"log", cursor, total: log.length, isPlaying: false };
 }
 
 // ====================== NeuroClaw (local suggestions engine) ======================
@@ -8627,7 +8648,7 @@ function navigateMusic(delta){
   view();
 }
 
-function openMusicHubModal() {
+function legacyOpenMusicHubModal() {
   const host = document.querySelector("#app");
   const modal = document.createElement("div");
   modal.className = "modalBackdrop";
@@ -8871,13 +8892,17 @@ function wireHome(root){
   };
 
   const btnAdd = root.querySelector("#btnAddMusic");
-  if(btnAdd) btnAdd.addEventListener("click", () => openMusicModal());
+  if(btnAdd) btnAdd.addEventListener("click", () => openMusicHubModal());
 
   const homeMusicCard = root.querySelector("#homeMusicCard");
   if(homeMusicCard){
     homeMusicCard.addEventListener("click", (e)=>{
       if(e.target.closest("#btnMusicPrev") || e.target.closest("#btnMusicNext") || e.target.closest("#btnMusicPlay") || e.target.closest("#btnAddMusic") || e.target.closest(".musicCover")) return;
-      openMusicHubModal();
+      if (musicEngine.currentTrack) {
+        openFullPlayer();
+      } else {
+        openMusicHubModal();
+      }
     });
   }
 
@@ -8925,27 +8950,31 @@ function wireHome(root){
 
   const prev = root.querySelector("#btnMusicPrev");
   const next = root.querySelector("#btnMusicNext");
-  if(prev) prev.addEventListener("click", ()=>navigateMusic(1)); // older
-  if(next) next.addEventListener("click", ()=>navigateMusic(-1)); // newer
+  if(prev) prev.addEventListener("click", ()=> {
+    if (musicEngine.queue.length > 0) musicEngine.prev();
+    else navigateMusic(1);
+  });
+  if(next) next.addEventListener("click", ()=> {
+    if (musicEngine.queue.length > 0) musicEngine.next();
+    else navigateMusic(-1);
+  });
 
   const play = root.querySelector("#btnMusicPlay");
   if(play) play.addEventListener("click", ()=>{
-    const music = getMusicDisplay();
-    const m = music.item;
-    const link = m && (m.linkUrl || "");
-    if(link){
-      window.open(link, "_blank", "noopener,noreferrer");
-      return;
+    if (musicEngine.currentTrack || musicEngine.queue.length > 0) {
+      musicEngine.togglePlay();
+    } else {
+      openMusicHubModal();
     }
-    toast("Agrega un link (Spotify/YouTube) en el registro 🎧");
   });
 
   const cover = root.querySelector(".musicCover");
   if(cover) cover.addEventListener("click", ()=>{
-    const music = getMusicDisplay();
-    const m = music.item;
-    const link = m && (m.linkUrl || "");
-    if(link) window.open(link, "_blank", "noopener,noreferrer");
+    if (musicEngine.currentTrack) {
+      openFullPlayer();
+    } else {
+      openMusicHubModal();
+    }
   });
 
   const goRem = root.querySelector("#btnGoReminders");
@@ -24805,6 +24834,18 @@ window.financePullFromSupabase = async function(isManual = false) {
     if (isManual) toast("❌ Error de conexión al descargar");
   }
 };
+
+// Initialize Music UI & Player Mini Bar
+try {
+  initMusicUi();
+  musicEngine.subscribe(() => {
+    if (state && state.tab === "home") {
+      try { view(); } catch(e) {}
+    }
+  });
+} catch (e) {
+  console.warn("Music UI initialization warning:", e);
+}
 
 // Auto-trigger pull when app boots up
 setTimeout(() => {
