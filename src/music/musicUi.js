@@ -246,6 +246,49 @@ function renderFullPlayer() {
   }
 }
 
+function openTrackDetailsModal(track) {
+  const existing = document.getElementById("spotDetailsModal");
+  if (existing) existing.remove();
+
+  const modal = document.createElement("div");
+  modal.id = "spotDetailsModal";
+  modal.className = "spotModalBackdrop";
+  modal.innerHTML = `
+    <div class="spotModalContent spotDetailsSheet">
+      <div class="spotDetailsHeader">
+        <div class="spotDetailsCover">
+          ${track.coverBlobUrl ? `<img src="${escapeHtml(track.coverBlobUrl)}" alt="" />` : `🎵`}
+        </div>
+        <div>
+          <div style="font-size:18px; font-weight:700; color:#fff;">${escapeHtml(track.title)}</div>
+          <div style="color:#b3b3b3; font-size:14px;">${escapeHtml(track.artist)}</div>
+        </div>
+      </div>
+
+      <div class="spotDetailsGrid">
+        <div class="spotDetailItem"><span class="label">Álbum:</span> <span>${escapeHtml(track.album || "Sin Álbum")}</span></div>
+        <div class="spotDetailItem"><span class="label">Artista del Álbum:</span> <span>${escapeHtml(track.albumArtist || track.artist || "-")}</span></div>
+        <div class="spotDetailItem"><span class="label">Año:</span> <span>${track.year || "-"}</span></div>
+        <div class="spotDetailItem"><span class="label">Nº Pista:</span> <span>${track.trackNumber || "-"}</span></div>
+        <div class="spotDetailItem"><span class="label">Nº Disco:</span> <span>${track.discNumber || "-"}</span></div>
+        <div class="spotDetailItem"><span class="label">Género:</span> <span>${escapeHtml(track.genre || "-")}</span></div>
+        <div class="spotDetailItem"><span class="label">Duración:</span> <span>${track.durationSeconds ? `${Math.floor(track.durationSeconds / 60)}:${String(track.durationSeconds % 60).padStart(2, "0")}` : "-"}</span></div>
+        <div class="spotDetailItem"><span class="label">Archivo:</span> <span>${escapeHtml(track.fileName || "-")}</span></div>
+      </div>
+
+      <div style="margin-top:20px; text-align:right;">
+        <button class="btn primary" id="btnCloseDetailsModal">Cerrar</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  modal.querySelector("#btnCloseDetailsModal")?.addEventListener("click", () => modal.remove());
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.remove();
+  });
+}
+
 // ================= MUSIC HUB / LIBRARY MODAL =================
 export function openMusicHubModal() {
   isMusicHubOpen = true;
@@ -345,6 +388,7 @@ async function updateMusicHubDynamicContent() {
                 <div class="spotTrackSub">${escapeHtml(track.artist)} • ${escapeHtml(track.album || "Sin Álbum")}</div>
               </div>
               <div class="spotTrackActions">
+                <button class="spotTrackBtn btnTrackInfo" data-id="${track.id}" title="Detalles e Información">ℹ️</button>
                 <button class="spotTrackBtn btnDeleteTrack" data-id="${track.id}" title="Eliminar">🗑️</button>
               </div>
             </div>
@@ -431,6 +475,15 @@ async function updateMusicHubDynamicContent() {
           await musicEngine.setQueue(filtered, idx, true);
           openFullPlayer();
         }
+      });
+    });
+
+    container.querySelectorAll(".btnTrackInfo").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const track = allTracks.find(t => t.id === id);
+        if (track) openTrackDetailsModal(track);
       });
     });
 
