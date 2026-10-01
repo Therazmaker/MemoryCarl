@@ -98,6 +98,7 @@ window.FINANCE = (function(){
     type,
     amount,
     accountId,
+    toAccountId,
     category,
     reason,
     note,
@@ -120,6 +121,7 @@ window.FINANCE = (function(){
   }){
 
     const acc = getAccount(accountId);
+    const toAcc = getAccount(toAccountId);
 
     const mId = id || uid();
     const movement = {
@@ -128,6 +130,7 @@ window.FINANCE = (function(){
       type, // income | expense | transfer
       amount: Number(amount),
       accountId,
+      toAccountId: toAccountId || null,
       category,
       reason,
       note,
@@ -149,12 +152,13 @@ window.FINANCE = (function(){
       parentPoolId: parentPoolId || null
     };
 
-    if(acc){
-      if(type === "expense"){
-        acc.balance -= movement.amount;
-      }else if(type === "income"){
-        acc.balance += movement.amount;
-      }
+    if(type === "expense"){
+      if(acc) acc.balance -= movement.amount;
+    }else if(type === "income"){
+      if(acc) acc.balance += movement.amount;
+    }else if(type === "transfer"){
+      if(acc) acc.balance -= movement.amount;
+      if(toAcc) toAcc.balance += movement.amount;
     }
 
     state.movements.push(movement);
@@ -198,27 +202,31 @@ window.FINANCE = (function(){
     if(idx === -1) return null;
 
     const oldMovement = state.movements[idx];
-    const acc = getAccount(oldMovement.accountId);
+    const oldAcc = getAccount(oldMovement.accountId);
+    const oldToAcc = getAccount(oldMovement.toAccountId);
 
     // Revert old balance
-    if(acc){
-      if(oldMovement.type === "expense"){
-        acc.balance += oldMovement.amount;
-      }else{
-        acc.balance -= oldMovement.amount;
-      }
+    if(oldMovement.type === "expense"){
+      if(oldAcc) oldAcc.balance += oldMovement.amount;
+    }else if(oldMovement.type === "income"){
+      if(oldAcc) oldAcc.balance -= oldMovement.amount;
+    }else if(oldMovement.type === "transfer"){
+      if(oldAcc) oldAcc.balance += oldMovement.amount;
+      if(oldToAcc) oldToAcc.balance -= oldMovement.amount;
     }
 
     const updatedMovement = { ...oldMovement, ...patch };
 
     // Apply new balance
     const newAcc = getAccount(updatedMovement.accountId);
-    if(newAcc){
-      if(updatedMovement.type === "expense"){
-        newAcc.balance -= updatedMovement.amount;
-      }else{
-        newAcc.balance += updatedMovement.amount;
-      }
+    const newToAcc = getAccount(updatedMovement.toAccountId);
+    if(updatedMovement.type === "expense"){
+      if(newAcc) newAcc.balance -= updatedMovement.amount;
+    }else if(updatedMovement.type === "income"){
+      if(newAcc) newAcc.balance += updatedMovement.amount;
+    }else if(updatedMovement.type === "transfer"){
+      if(newAcc) newAcc.balance -= updatedMovement.amount;
+      if(newToAcc) newToAcc.balance += updatedMovement.amount;
     }
 
     state.movements[idx] = updatedMovement;
@@ -232,13 +240,15 @@ window.FINANCE = (function(){
 
     const movement = state.movements[idx];
     const acc = getAccount(movement.accountId);
+    const toAcc = getAccount(movement.toAccountId);
 
-    if(acc){
-      if(movement.type === "expense"){
-        acc.balance += movement.amount;
-      }else{
-        acc.balance -= movement.amount;
-      }
+    if(movement.type === "expense"){
+      if(acc) acc.balance += movement.amount;
+    }else if(movement.type === "income"){
+      if(acc) acc.balance -= movement.amount;
+    }else if(movement.type === "transfer"){
+      if(acc) acc.balance += movement.amount;
+      if(toAcc) toAcc.balance -= movement.amount;
     }
 
     state.movements.splice(idx, 1);

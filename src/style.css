@@ -4589,6 +4589,9 @@ body{
 .finMovProIcon.income {
   background: rgba(34, 197, 94, 0.15); /* Soft green */
 }
+.finMovProIcon.transfer {
+  background: rgba(124, 92, 255, 0.15); /* Soft purple */
+}
 .finMovProInfo {
   flex: 1;
 }
@@ -4610,6 +4613,7 @@ body{
 }
 .finMovProAmt.negative { color: #ef4444; }
 .finMovProAmt.positive { color: #22c55e; }
+.finMovProAmt.transfer { color: #818cf8; }
 
 .finDayProHeader {
   display: flex;
