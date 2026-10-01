@@ -14628,6 +14628,8 @@ function editProductDetails(productId){
 window.editProductDetails = editProductDetails;
 
 
+let _productChart = null;
+
 function openProductChart(productId){
   const p = state.products.find(x=>x.id===productId);
   if(!p) return;
@@ -14653,9 +14655,9 @@ function openProductChart(productId){
   host.appendChild(modal);
 
   const ctx = modal.querySelector("#chart").getContext("2d");
-  try{ if(_dailyExpenseChart){ _dailyExpenseChart.destroy(); _dailyExpenseChart=null; } }catch(e){}
+  try{ if(_productChart){ _productChart.destroy(); _productChart=null; } }catch(e){}
 
-  _dailyExpenseChart = new Chart(ctx, {
+  _productChart = new Chart(ctx, {
     type:'line',
     data:{
       labels:labels,
@@ -21864,10 +21866,18 @@ function viewFinance(){
 
     <!-- GASTOS DIARIOS (7d) -->
     <section class="finSection">
-      <div class="finSectionHead">
+      <div class="finSectionHead" style="margin-bottom:8px;">
         <div class="finSectionTitle">📅 Últimos 7 días</div>
+        <div id="fin7dSummaryBadge" style="font-size:11px;color:#a1a1aa;font-weight:600;"></div>
       </div>
-      <canvas id="dailyExpenseChart" height="110" style="width:100%;max-width:100%;height:110px;display:block;"></canvas>
+
+      <div id="fin7dKpiRow" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;background:#18181b;padding:10px;border-radius:10px;border:1px solid #27272a;">
+      </div>
+
+      <canvas id="dailyExpenseChart" height="150" style="width:100%;max-width:100%;height:150px;display:block;"></canvas>
+
+      <div id="fin7dDailyStrip" style="display:flex;gap:6px;overflow-x:auto;padding-top:12px;padding-bottom:2px;scrollbar-width:none;">
+      </div>
     </section>
 
     <!-- PILARES -->
@@ -23263,24 +23273,127 @@ view = function(){
 
 function getLast7DaysExpenseData(){
   const now = new Date();
+  const days = [];
   const labels = [];
+  const fullLabels = [];
   const values = [];
+  const weekdayAverages = [];
+  const dateKeys = [];
+  const movementsByDay = [];
+
+  const ledger = (typeof financeActiveLedger === 'function') ? (financeActiveLedger() || []) : [];
+  const expenseLedger = ledger.filter(e => e.type === "expense" && Number(e.amount || 0) > 0);
+
+  // Group all historical expenses by YYYY-MM-DD
+  const dailyTotalsMap = {};
+  const dailyMovementsMap = {};
   
-  for(let i=6;i>=0;i--){
+  expenseLedger.forEach(e => {
+    const rawDate = String(e.date || "").slice(0, 10);
+    if (!rawDate) return;
+    dailyTotalsMap[rawDate] = (dailyTotalsMap[rawDate] || 0) + Number(e.amount || 0);
+    if (!dailyMovementsMap[rawDate]) dailyMovementsMap[rawDate] = [];
+    dailyMovementsMap[rawDate].push(e);
+  });
+
+  const historicalDates = Object.keys(dailyTotalsMap);
+
+  // Compute 7 day date keys for current window
+  const currentWindowKeys = [];
+  for (let i = 6; i >= 0; i--) {
     const d = new Date(now);
-    d.setDate(now.getDate()-i);
-    const key = d.toISOString().slice(0,10);
-    const label = d.toLocaleDateString("es-PE",{weekday:"short"});
-    
-    const total = (financeActiveLedger()||[])
-      .filter(e=>e.type==="expense" && String(e.date||"").slice(0,10)===key)
-      .reduce((s,e)=>s+Number(e.amount||0),0);
-    
-    labels.push(label);
-    values.push(total);
+    d.setDate(now.getDate() - i);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    currentWindowKeys.push(`${y}-${m}-${day}`);
   }
-  
-  return {labels, values};
+
+  // Function to calculate average for a given weekday index (0=Sun..6=Sat)
+  function getWeekdayAverage(targetWeekday) {
+    // Look for past historical dates with matching weekday, excluding current 7-day window
+    const pastMatchingDates = historicalDates.filter(dateStr => {
+      if (currentWindowKeys.includes(dateStr)) return false;
+      const parts = dateStr.split("-");
+      if (parts.length !== 3) return false;
+      const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      return !isNaN(d.getTime()) && d.getDay() === targetWeekday;
+    });
+
+    if (pastMatchingDates.length === 0) {
+      // Fallback: if no historical dates outside current 7-day window, check all matching dates
+      const allMatchingDates = historicalDates.filter(dateStr => {
+        const parts = dateStr.split("-");
+        if (parts.length !== 3) return false;
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        return !isNaN(d.getTime()) && d.getDay() === targetWeekday;
+      });
+      if (allMatchingDates.length === 0) return 0;
+      const sum = allMatchingDates.reduce((s, k) => s + (dailyTotalsMap[k] || 0), 0);
+      return sum / allMatchingDates.length;
+    }
+
+    const sum = pastMatchingDates.reduce((s, k) => s + (dailyTotalsMap[k] || 0), 0);
+    return sum / pastMatchingDates.length;
+  }
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - i);
+
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dayNum = String(d.getDate()).padStart(2, '0');
+    const key = `${y}-${m}-${dayNum}`;
+    
+    const weekdayIdx = d.getDay();
+    const rawShortWeekday = d.toLocaleDateString("es-PE", { weekday: "short" }).replace(".", "");
+    const capitalizedWeekday = rawShortWeekday.charAt(0).toUpperCase() + rawShortWeekday.slice(1);
+    
+    const totalSpentReal = dailyTotalsMap[key] || 0;
+    const avgForWeekday = getWeekdayAverage(weekdayIdx);
+    const dayMovements = dailyMovementsMap[key] || [];
+    const isToday = (i === 0);
+
+    labels.push(capitalizedWeekday);
+    fullLabels.push(`${capitalizedWeekday} ${dayNum}/${m}`);
+    values.push(Number(totalSpentReal.toFixed(2)));
+    weekdayAverages.push(Number(avgForWeekday.toFixed(2)));
+    dateKeys.push(key);
+    movementsByDay.push(dayMovements);
+
+    days.push({
+      dateKey: key,
+      label: capitalizedWeekday,
+      fullLabel: `${capitalizedWeekday} ${dayNum}/${m}`,
+      dayNum,
+      monthNum: m,
+      weekdayIdx,
+      realSpent: Number(totalSpentReal.toFixed(2)),
+      usualAvg: Number(avgForWeekday.toFixed(2)),
+      diff: Number((totalSpentReal - avgForWeekday).toFixed(2)),
+      movementsCount: dayMovements.length,
+      movements: dayMovements,
+      isToday
+    });
+  }
+
+  const total7DaysSpent = values.reduce((s, v) => s + v, 0);
+  const avg7DaysSpentReal = total7DaysSpent / 7;
+  const total7DaysUsualAvg = weekdayAverages.reduce((s, v) => s + v, 0);
+
+  return {
+    labels,
+    fullLabels,
+    values,
+    weekdayAverages,
+    dateKeys,
+    movementsByDay,
+    days,
+    total7DaysSpent: Number(total7DaysSpent.toFixed(2)),
+    avg7DaysSpentReal: Number(avg7DaysSpentReal.toFixed(2)),
+    total7DaysUsualAvg: Number(total7DaysUsualAvg.toFixed(2))
+  };
 }
 
 
@@ -23328,56 +23441,271 @@ function openFinanceImport(){
 
 
 
+window.openDayExpenseDetailsModal = function(dateKey, dayLabel, realSpent, usualAvg) {
+  const ledger = (typeof financeActiveLedger === 'function' ? financeActiveLedger() : [])
+    .filter(e => e.type === "expense" && String(e.date || "").slice(0, 10) === dateKey);
+
+  const diff = Number((realSpent - usualAvg).toFixed(2));
+  let diffBadge = "";
+  if (usualAvg > 0 || realSpent > 0) {
+    if (diff > 0) {
+      diffBadge = `<span style="color:#f87171;font-weight:700;">+S/ ${diff.toFixed(2)} sobre tu promedio habitual</span>`;
+    } else if (diff < 0) {
+      diffBadge = `<span style="color:#34d399;font-weight:700;">-S/ ${Math.abs(diff).toFixed(2)} bajo tu promedio habitual</span>`;
+    } else {
+      diffBadge = `<span style="color:#a1a1aa;font-weight:600;">Igual a tu promedio habitual</span>`;
+    }
+  } else {
+    diffBadge = `<span style="color:#71717a;">Sin movimientos ni historial previo</span>`;
+  }
+
+  const existingModal = document.getElementById("finDayExpenseDetailModal");
+  if (existingModal) existingModal.remove();
+
+  const modal = document.createElement("div");
+  modal.id = "finDayExpenseDetailModal";
+  modal.className = "modalBackdrop";
+  modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(4px);";
+
+  const rows = ledger.length > 0 ? ledger.map(m => {
+    const categoryTag = m.category ? `<span style="background:#27272a;padding:2px 6px;border-radius:4px;font-size:10px;color:#a78bfa;margin-right:4px;">${escapeHtml(m.category)}</span>` : "";
+    const accountTag = m.account ? `<span style="font-size:11px;color:#71717a;">· ${escapeHtml(m.account)}</span>` : "";
+    const noteStr = m.note ? escapeHtml(m.note) : (m.category || "Gasto sin descripción");
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #27272a;">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:#fff;">${noteStr}</div>
+          <div style="font-size:11px;color:#a1a1aa;margin-top:2px;">${categoryTag}${accountTag}</div>
+        </div>
+        <div style="font-size:14px;font-weight:700;color:#f87171;">-S/ ${Number(m.amount || 0).toFixed(2)}</div>
+      </div>
+    `;
+  }).join("") : `<div style="text-align:center;padding:24px;color:#71717a;font-size:13px;">No hay gastos registrados en esta fecha (${dateKey}).</div>`;
+
+  modal.innerHTML = `
+    <div style="background:#18181b;border:1px solid #3f3f46;border-radius:16px;padding:20px;width:100%;max-width:400px;max-height:85vh;overflow-y:auto;box-shadow:0 12px 30px rgba(0,0,0,0.6);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+        <div>
+          <h3 style="margin:0;font-size:16px;color:#fff;font-weight:700;">📅 Gastos del ${escapeHtml(dayLabel)}</h3>
+          <div style="font-size:12px;margin-top:3px;">${diffBadge}</div>
+        </div>
+        <button onclick="this.closest('.modalBackdrop').remove()" style="background:none;border:none;color:#a1a1aa;font-size:22px;cursor:pointer;padding:0 4px;line-height:1;">✕</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;background:#27272a;padding:12px;border-radius:12px;">
+        <div>
+          <div style="font-size:10px;color:#a1a1aa;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Gasto Real</div>
+          <div style="font-size:17px;font-weight:800;color:#fff;margin-top:2px;">S/ ${realSpent.toFixed(2)}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:#a1a1aa;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Promedio Habitual</div>
+          <div style="font-size:17px;font-weight:800;color:#fbbf24;margin-top:2px;">S/ ${usualAvg.toFixed(2)}</div>
+        </div>
+      </div>
+
+      <div style="font-size:11px;font-weight:700;color:#a1a1aa;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Movimientos (${ledger.length})</div>
+      <div style="display:flex;flex-direction:column;">
+        ${rows}
+      </div>
+
+      <button onclick="this.closest('.modalBackdrop').remove()" style="width:100%;margin-top:16px;padding:10px;background:#27272a;border:1px solid #3f3f46;border-radius:10px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">Cerrar</button>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+};
+
 let _dailyExpenseChart = null;
 
 function renderDailyExpenseChart(){
   const ctx = document.getElementById("dailyExpenseChart");
   if(!ctx || typeof Chart === "undefined") return;
 
-  // Lock canvas height to avoid responsive resize loops that can make this
-  // section grow infinitely on some mobile layout passes.
-  try{
+  try {
     ctx.style.width = "100%";
     ctx.style.maxWidth = "100%";
-    ctx.style.height = "110px";
-    ctx.height = 110;
-  }catch(_e){}
+    ctx.style.height = "150px";
+    ctx.height = 150;
+  } catch(_e){}
   
   const d = getLast7DaysExpenseData();
 
-  try{ if(_dailyExpenseChart){ _dailyExpenseChart.destroy(); _dailyExpenseChart = null; } }catch(_e){}
+  // Populate header summary badge & KPI cards
+  const summaryBadgeEl = document.getElementById("fin7dSummaryBadge");
+  if (summaryBadgeEl) {
+    const diffTotal = d.total7DaysSpent - d.total7DaysUsualAvg;
+    if (d.total7DaysUsualAvg > 0 || d.total7DaysSpent > 0) {
+      if (diffTotal > 0) {
+        summaryBadgeEl.innerHTML = `<span style="color:#f87171;">+S/ ${diffTotal.toFixed(2)} vs lo habitual</span>`;
+      } else if (diffTotal < 0) {
+        summaryBadgeEl.innerHTML = `<span style="color:#34d399;">-S/ ${Math.abs(diffTotal).toFixed(2)} vs lo habitual</span>`;
+      } else {
+        summaryBadgeEl.innerHTML = `<span style="color:#a1a1aa;">En línea con lo habitual</span>`;
+      }
+    } else {
+      summaryBadgeEl.innerHTML = "";
+    }
+  }
 
-  const maxVal = Math.max(...d.values, 1);
+  const kpiRowEl = document.getElementById("fin7dKpiRow");
+  if (kpiRowEl) {
+    const avgDailyUsual = (d.total7DaysUsualAvg / 7).toFixed(2);
+    kpiRowEl.innerHTML = `
+      <div style="text-align:center;">
+        <div style="font-size:10px;color:#a1a1aa;text-transform:uppercase;font-weight:700;">Total 7d</div>
+        <div style="font-size:14px;font-weight:800;color:#fff;margin-top:2px;">S/ ${d.total7DaysSpent.toFixed(2)}</div>
+      </div>
+      <div style="text-align:center;border-left:1px solid #27272a;border-right:1px solid #27272a;">
+        <div style="font-size:10px;color:#a1a1aa;text-transform:uppercase;font-weight:700;">Prom. Real</div>
+        <div style="font-size:14px;font-weight:800;color:#60a5fa;margin-top:2px;">S/ ${d.avg7DaysSpentReal.toFixed(2)}</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:10px;color:#a1a1aa;text-transform:uppercase;font-weight:700;">Prom. Habitual</div>
+        <div style="font-size:14px;font-weight:800;color:#fbbf24;margin-top:2px;">S/ ${avgDailyUsual}</div>
+      </div>
+    `;
+  }
+
+  // Populate interactive daily strip
+  const stripEl = document.getElementById("fin7dDailyStrip");
+  if (stripEl) {
+    stripEl.innerHTML = d.days.map(day => {
+      const diff = day.realSpent - day.usualAvg;
+      let badgeBg = "#27272a";
+      let badgeText = "=";
+      let badgeColor = "#a1a1aa";
+
+      if (day.usualAvg > 0 || day.realSpent > 0) {
+        if (diff > 0) {
+          badgeBg = "rgba(239, 68, 68, 0.2)";
+          badgeText = `+${diff.toFixed(0)}`;
+          badgeColor = "#f87171";
+        } else if (diff < 0) {
+          badgeBg = "rgba(52, 211, 153, 0.2)";
+          badgeText = `-${Math.abs(diff).toFixed(0)}`;
+          badgeColor = "#34d399";
+        }
+      }
+
+      const cardStyle = day.isToday
+        ? "border:1px solid #7c5cff;background:rgba(124,92,255,0.12);"
+        : "border:1px solid #27272a;background:#18181b;";
+
+      return `
+        <div onclick="openDayExpenseDetailsModal('${day.dateKey}', '${escapeHtml(day.fullLabel)}', ${day.realSpent}, ${day.usualAvg})"
+             style="flex:1;min-width:62px;${cardStyle}border-radius:10px;padding:8px 4px;text-align:center;cursor:pointer;transition:all 0.15s ease;"
+             title="Ver detalle del ${escapeHtml(day.fullLabel)}">
+          <div style="font-size:10px;color:${day.isToday ? '#a78bfa' : '#a1a1aa'};font-weight:700;">${day.label}</div>
+          <div style="font-size:9px;color:#71717a;">${day.dayNum}/${day.monthNum}</div>
+          <div style="font-size:12px;font-weight:800;color:#fff;margin:4px 0 2px 0;">S/${day.realSpent.toFixed(0)}</div>
+          <div style="display:inline-block;padding:1px 5px;border-radius:4px;font-size:9px;font-weight:700;background:${badgeBg};color:${badgeColor};">
+            ${badgeText}
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  try { if (_dailyExpenseChart) { _dailyExpenseChart.destroy(); _dailyExpenseChart = null; } } catch(_e){}
+
   _dailyExpenseChart = new Chart(ctx, {
     type: "bar",
     data: {
       labels: d.labels,
-      datasets: [{
-        label: "Gastos",
-        data: d.values,
-        backgroundColor: d.values.map(v => v === maxVal ? "rgba(248,113,113,0.85)" : "rgba(124,92,255,0.55)"),
-        borderRadius: 8,
-        borderSkipped: false,
-      }]
+      datasets: [
+        {
+          type: "bar",
+          label: "Gasto Real",
+          data: d.values,
+          backgroundColor: d.days.map(day => {
+            if (day.isToday) return "rgba(124, 92, 255, 0.9)";
+            if (day.realSpent > day.usualAvg && day.usualAvg > 0) return "rgba(248, 113, 113, 0.85)";
+            return "rgba(96, 165, 250, 0.75)";
+          }),
+          borderRadius: 6,
+          borderSkipped: false,
+          order: 2
+        },
+        {
+          type: "line",
+          label: "Prom. Habitual",
+          data: d.weekdayAverages,
+          borderColor: "rgba(251, 191, 36, 0.95)",
+          backgroundColor: "rgba(251, 191, 36, 0.15)",
+          borderWidth: 2,
+          borderDash: [4, 4],
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: "#fbbf24",
+          pointBorderColor: "#18181b",
+          pointBorderWidth: 1.5,
+          tension: 0.2,
+          order: 1
+        }
+      ]
     },
     options: {
       responsive: false,
-      maintainAspectRatio: true,
+      maintainAspectRatio: false,
+      onClick: (evt, activeEls) => {
+        if (activeEls && activeEls.length > 0) {
+          const idx = activeEls[0].index;
+          const dayObj = d.days[idx];
+          if (dayObj) {
+            openDayExpenseDetailsModal(dayObj.dateKey, dayObj.fullLabel, dayObj.realSpent, dayObj.usualAvg);
+          }
+        }
+      },
       plugins: {
-        legend: { display: false },
+        legend: {
+          display: true,
+          position: "top",
+          align: "end",
+          labels: {
+            color: "rgba(255,255,255,0.7)",
+            font: { size: 10, weight: "600" },
+            boxWidth: 10,
+            boxHeight: 10,
+            padding: 8
+          }
+        },
         tooltip: {
-          callbacks: { label: ctx => `S/ ${ctx.raw.toFixed(2)}` }
+          callbacks: {
+            title: (tooltipItems) => {
+              const idx = tooltipItems[0].dataIndex;
+              const dayObj = d.days[idx];
+              return dayObj ? `${dayObj.fullLabel}${dayObj.isToday ? " (Hoy)" : ""}` : "";
+            },
+            label: (ctx) => {
+              if (ctx.dataset.label === "Gasto Real") {
+                return ` 📊 Gasto Real: S/ ${ctx.raw.toFixed(2)}`;
+              } else if (ctx.dataset.label === "Prom. Habitual") {
+                return ` 📈 Prom. Habitual: S/ ${ctx.raw.toFixed(2)}`;
+              }
+              return `S/ ${ctx.raw.toFixed(2)}`;
+            },
+            afterBody: (tooltipItems) => {
+              const idx = tooltipItems[0].dataIndex;
+              const dayObj = d.days[idx];
+              if (!dayObj) return [];
+              const diff = dayObj.realSpent - dayObj.usualAvg;
+              if (dayObj.usualAvg === 0 && dayObj.realSpent === 0) return [" ℹ️ Sin datos de gastos"];
+              if (diff > 0) return [` ⚠️ +S/ ${diff.toFixed(2)} sobre tu promedio habitual`];
+              if (diff < 0) return [` ✅ -S/ ${Math.abs(diff).toFixed(2)} bajo tu promedio habitual`];
+              return [" ⚖️ Exacto al promedio habitual"];
+            }
+          }
         }
       },
       scales: {
         x: {
           grid: { display: false },
-          ticks: { color: "rgba(255,255,255,0.4)", font: { size: 11, weight: "700" } },
+          ticks: { color: "rgba(255,255,255,0.6)", font: { size: 11, weight: "700" } },
           border: { display: false }
         },
         y: {
-          grid: { color: "rgba(255,255,255,0.05)" },
-          ticks: { color: "rgba(255,255,255,0.3)", font: { size: 10 }, callback: v => `S/${v}` },
+          grid: { color: "rgba(255,255,255,0.06)" },
+          ticks: { color: "rgba(255,255,255,0.4)", font: { size: 10 }, callback: v => `S/${v}` },
           border: { display: false }
         }
       }
