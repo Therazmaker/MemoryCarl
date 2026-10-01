@@ -17091,6 +17091,7 @@ function financeNormalizeType(t){
   const s = String(t||"").toLowerCase().trim();
   if(["income","ingreso","in","+","plus","entrada"].includes(s)) return "income";
   if(["expense","gasto","out","-","minus","salida"].includes(s)) return "expense";
+  if(["transfer","traspaso","transferencia"].includes(s)) return "transfer";
   // Default: expense to avoid silently inflating balances
   return s || "expense";
 }
@@ -17127,17 +17128,24 @@ function financeRecomputeBalances(){
   const sums = {};
   (financeActiveLedger()||[]).forEach(e=>{
     const accId = e.accountId;
-    if(!accId) return;
-    if(sums[accId] === undefined) sums[accId] = 0;
     const amt = Number(e.amount||0);
-    if(e.type === "expense") {
-      if (e.isFiado && e.fiadoStatus !== "paid") {
-        // Ignorar fiados pendientes de pago
-      } else {
-        sums[accId] -= amt;
+    if(accId) {
+      if(sums[accId] === undefined) sums[accId] = 0;
+      if(e.type === "expense") {
+        if (e.isFiado && e.fiadoStatus !== "paid") {
+          // Ignorar fiados pendientes de pago
+        } else {
+          sums[accId] -= amt;
+        }
       }
+      else if(e.type === "income") sums[accId] += amt;
+      else if(e.type === "transfer") sums[accId] -= amt;
     }
-    else if(e.type === "income") sums[accId] += amt;
+    if(e.type === "transfer" && e.toAccountId) {
+      const toAccId = e.toAccountId;
+      if(sums[toAccId] === undefined) sums[toAccId] = 0;
+      sums[toAccId] += amt;
+    }
   });
 
   (state.financeAccounts||[]).forEach(a=>{
@@ -17264,7 +17272,7 @@ try {
 }
 
 function addFinanceEntry(payload){
-  const {type, amount, accountId, category, reason, note, date, neuronRole, isFiado, fiadoStatus} = payload;
+  const {type, amount, accountId, toAccountId, category, reason, note, date, neuronRole, isFiado, fiadoStatus} = payload;
   const acc = state.financeAccounts.find(a=>a.id===accountId);
   if(!acc) return null;
 
@@ -17277,10 +17285,11 @@ function addFinanceEntry(payload){
   const entry = {
     id: entryId,
     date: entryDate, // ISO string
-    type: tnorm, // income | expense
+    type: tnorm, // income | expense | transfer
     amount: amt,
     accountId,
-    category: category||"Otros",
+    toAccountId: toAccountId || null,
+    category: category||(tnorm==='transfer'?"Traspaso":"Otros"),
     reason: reason||"normal",
     note: note||"",
     neuronRole: resolvedNeuronRole,
@@ -17693,6 +17702,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     category: (existing?.category) || "Otros",
     reason: (existing?.reason) || "normal",
     accountId: (existing?.accountId) || state.financePrimaryAccountId || (state.financeAccounts||[])[0]?.id,
+    toAccountId: (existing?.toAccountId) || null,
     neuronRole: (existing?.neuronRole) || "auto",
     note: existingSplit.note
   };
@@ -17782,6 +17792,22 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         </label>
       </div>
 
+      <div id="finProTransferOpts" style="display:${draft.type==='transfer'?'block':'none'}; margin: 12px 0; background: #1c1c1e; padding: 12px; border-radius: 12px; border: 1px solid #333;">
+        <div style="margin-bottom:10px;">
+          <label style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:600;">📤 Cuenta Origen (Descuenta)</label>
+          <select id="finEntryTransferFrom" class="textInput" style="width:100%; box-sizing:border-box; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
+            ${(state.financeAccounts||[]).map(a=>`<option value="${a.id}" ${a.id===draft.accountId?'selected':''}>${escapeHtml(a.name)} (${a.type||''})</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:600;">📥 Cuenta Destino (Acredita)</label>
+          <select id="finEntryTransferTo" class="textInput" style="width:100%; box-sizing:border-box; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
+            <option value="">-- Selecciona cuenta destino --</option>
+            ${(state.financeAccounts||[]).map(a=>`<option value="${a.id}" ${a.id===draft.toAccountId?'selected':''}>${escapeHtml(a.name)} (${a.type||''})</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
       <div class="finProAmountWrap">
         <span class="finProCurrency">S/</span>
         <input type="text" inputmode="decimal" id="finEntryAmount" class="finProAmountInput" placeholder="0.00" value="${escapeHtml(draft.amount)}">
@@ -17820,7 +17846,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <input type="text" id="finEntryPerson" class="finProNote" placeholder="Nombre de la persona (Ej: Jhon, María)" value="${escapeHtml(existing?.counterparty || '')}" style="margin-top:4px;">
       </div>
 
-      <div id="finEntrySourceWrap" style="margin-bottom:10px;">
+      <div id="finEntrySourceWrap" style="margin-bottom:10px; display:${draft.type==='transfer'?'none':'block'};">
         <label style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:600;">💰 Origen del Dinero (Ingreso / Pozo)</label>
         <select id="finEntrySourceSelect" class="textInput" style="width:100%; box-sizing:border-box; margin-bottom:6px; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
           <option value="">-- Sin origen asignado (Caja general) --</option>
@@ -17935,6 +17961,9 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
 
   const incomeOpts = backdrop.querySelector('#finProIncomeOpts');
   const expenseOpts = backdrop.querySelector('#finProExpenseOpts');
+  const transferOpts = backdrop.querySelector('#finProTransferOpts');
+  const sourceWrap = backdrop.querySelector('#finEntrySourceWrap');
+
   backdrop.querySelectorAll('.finProTypeBtn').forEach(btn => {
     btn.addEventListener('click', () => {
       backdrop.querySelectorAll('.finProTypeBtn').forEach(b => b.classList.remove('active'));
@@ -17943,12 +17972,18 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       if (draft.type === 'income') {
         if (incomeOpts) incomeOpts.style.display = 'block';
         if (expenseOpts) expenseOpts.style.display = 'none';
+        if (transferOpts) transferOpts.style.display = 'none';
+        if (sourceWrap) sourceWrap.style.display = 'block';
       } else if (draft.type === 'expense') {
         if (incomeOpts) incomeOpts.style.display = 'none';
         if (expenseOpts) expenseOpts.style.display = 'block';
-      } else {
+        if (transferOpts) transferOpts.style.display = 'none';
+        if (sourceWrap) sourceWrap.style.display = 'block';
+      } else if (draft.type === 'transfer') {
         if (incomeOpts) incomeOpts.style.display = 'none';
         if (expenseOpts) expenseOpts.style.display = 'none';
+        if (transferOpts) transferOpts.style.display = 'block';
+        if (sourceWrap) sourceWrap.style.display = 'none';
       }
     });
   });
@@ -18117,9 +18152,24 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   const name = (backdrop.querySelector('#finEntryName')?.value||'').trim();
   const rawAmount = (backdrop.querySelector('#finEntryAmount')?.value||'');
   const amount = financeParseAmount(rawAmount);
-  const category = (draft.category||'Otros');
+  let category = (draft.category||'Otros');
   const reason = (backdrop.querySelector('#finEntryReason')?.value||'normal');
-  const accountId = (backdrop.querySelector('#finEntryAccount')?.value||draft.accountId);
+  let accountId = (backdrop.querySelector('#finEntryAccount')?.value||draft.accountId);
+  let toAccountId = null;
+
+  if (draft.type === 'transfer') {
+    accountId = backdrop.querySelector('#finEntryTransferFrom')?.value || accountId;
+    toAccountId = backdrop.querySelector('#finEntryTransferTo')?.value;
+    if (!toAccountId) {
+      toast('Selecciona la cuenta destino');
+      return;
+    }
+    if (accountId === toAccountId) {
+      toast('Las cuentas deben ser distintas');
+      return;
+    }
+    if (category === 'Otros') category = 'Traspaso';
+  }
   const noteText = (backdrop.querySelector('#finEntryNote')?.value||'').trim();
   const sourceId = (backdrop.querySelector('#finEntrySource')?.value||'');
   const paidBy = (backdrop.querySelector('#finEntryPaidBy')?.value||'me');
@@ -18169,6 +18219,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     type: draft.type,
     amount,
     accountId,
+    toAccountId: draft.type === 'transfer' ? toAccountId : null,
     category,
     reason,
     note,
@@ -19199,23 +19250,32 @@ function renderFinanceMovements(){
         ${g.items.map(e=>{
           const amt = Number(e.amount||0);
           const isExp = e.type==="expense";
-          const amtCls = isExp ? "negative" : "positive";
+          const isTrf = e.type==="transfer";
+          const amtCls = isTrf ? "transfer" : (isExp ? "negative" : "positive");
+          const iconCls = isTrf ? "transfer" : (isExp ? "expense" : "income");
+          const iconSymbol = isTrf ? "🔄" : financeCategoryIcon(e.category||(isExp ? "Gasto" : "Ingreso"));
           
-          let title = e.category || (isExp ? "Gasto" : "Ingreso");
-          let sub = accName(e.accountId) + (e.note ? ` • ${e.note}` : '');
-          if (e.note && e.note.includes(' · ')) {
+          let title = e.category || (isTrf ? "Traspaso" : (isExp ? "Gasto" : "Ingreso"));
+          let sub = "";
+          if (isTrf) {
+             const fromName = accName(e.accountId);
+             const toName = accName(e.toAccountId);
+             sub = `${fromName} ➔ ${toName}` + (e.note ? ` • ${e.note}` : '');
+          } else if (e.note && e.note.includes(' · ')) {
              const parts = e.note.split(' · ');
              title = parts[0];
              sub = accName(e.accountId) + ` • ${parts[1]}`;
           } else if (e.note) {
              title = e.note;
              sub = accName(e.accountId) + ` • ${e.category||''}`;
+          } else {
+             sub = accName(e.accountId) + (e.category ? ` • ${e.category}` : '');
           }
 
           const balAfter = afterMap[e.id];
           return `
             <div class="finMovProItem" onclick="openFinanceEntryModal('${e.id}')">
-              <div class="finMovProIcon ${isExp?"expense":"income"}">${escapeHtml(financeCategoryIcon(e.category||title))}</div>
+              <div class="finMovProIcon ${iconCls}">${escapeHtml(iconSymbol)}</div>
               <div class="finMovProInfo">
                 <div class="finMovProTitle">${escapeHtml(title)}</div>
                 <div class="finMovProSub">${escapeHtml(sub)}</div>
@@ -22258,6 +22318,7 @@ function renderFinanceStatsTab() {
     const filteredMatches = ledger.filter(e => {
       if (searchType === "income") return e.type === "income";
       if (searchType === "expense") return e.type === "expense";
+      if (searchType === "transfer") return e.type === "transfer";
       return true;
     });
 
@@ -22271,13 +22332,15 @@ function renderFinanceStatsTab() {
           <button class="finModeBtn ${searchType==='all'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('all')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Todos</button>
           <button class="finModeBtn ${searchType==='income'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('income')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Ingresos</button>
           <button class="finModeBtn ${searchType==='expense'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('expense')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Egresos</button>
+          <button class="finModeBtn ${searchType==='transfer'?'finModeBtnActive':''}" onclick="setFinanceStatsSearchType('transfer')" style="font-size:11px; padding:4px 10px; margin:0; height:auto; line-height:1;">Traspasos</button>
         </div>
 
         <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;">
           ${filteredMatches.map(e => {
             const isExp = e.type === 'expense';
-            const sign = isExp ? '-' : '+';
-            const color = isExp ? '#ef4444' : '#34d399';
+            const isTrf = e.type === 'transfer';
+            const sign = isTrf ? '' : (isExp ? '-' : '+');
+            const color = isTrf ? '#818cf8' : (isExp ? '#ef4444' : '#34d399');
             const rawNote = String(e.note || "");
             const hasSep = rawNote.includes(" · ");
             const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
@@ -22509,17 +22572,29 @@ function renderFinanceStatsTab() {
       ${sourceSelectorHtml}
       ${sourceHeaderHtml}
       ${searchBox}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+      <div style="display:grid;grid-template-columns:${ledger.filter(e => e.type === 'transfer').length > 0 ? '1fr 1fr 1fr' : '1fr 1fr'};gap:10px;margin-bottom:16px;">
         <div style="background:#1c3a2a;border:1px solid #2d6a4f;border-radius:12px;padding:14px;">
           <div style="font-size:11px;color:#6fcf97;margin-bottom:4px;">📥 Ingresos Totales</div>
-          <div style="font-size:20px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div>
-          <div style="font-size:12px;color:#888;">${incomes.length} movs.</div>
+          <div style="font-size:18px;font-weight:800;color:#34d399;">S/ ${fmt(totalInc)}</div>
+          <div style="font-size:11px;color:#888;">${incomes.length} movs.</div>
         </div>
         <div style="background:#3a1c1c;border:1px solid #6a2d2d;border-radius:12px;padding:14px;">
           <div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">📤 Gastos Totales</div>
-          <div style="font-size:20px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div>
-          <div style="font-size:12px;color:#888;">${expenses.length} movs.</div>
+          <div style="font-size:18px;font-weight:800;color:#f87171;">S/ ${fmt(totalExp)}</div>
+          <div style="font-size:11px;color:#888;">${expenses.length} movs.</div>
         </div>
+        ${(() => {
+          const transfers = ledger.filter(e => e.type === 'transfer');
+          if (transfers.length === 0) return '';
+          const totalTrf = transfers.reduce((s, e) => s + Number(e.amount || 0), 0);
+          return `
+            <div style="background:#231c3a;border:1px solid #4338ca;border-radius:12px;padding:14px;">
+              <div style="font-size:11px;color:#a5b4fc;margin-bottom:4px;">🔄 Traspasos</div>
+              <div style="font-size:18px;font-weight:800;color:#818cf8;">S/ ${fmt(totalTrf)}</div>
+              <div style="font-size:11px;color:#888;">${transfers.length} movs.</div>
+            </div>
+          `;
+        })()}
       </div>
       ${chartsSectionHtml}
       ${unassignedSectionHtml}
