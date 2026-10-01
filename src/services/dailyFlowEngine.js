@@ -129,7 +129,7 @@ export function computeDailyLiquidity(rootState = {}, now = new Date()) {
 
   // Cuentas de terceros o de seguimiento (ej: 'Fergis') que no son saldo líquido propio de Carlos
   const isExcludedAccount = (a) => {
-    if (a.archived || a.excludeFromTotal) return true;
+    if (a.archived || a.status === "archived" || a.excludeFromTotal) return true;
     const name = String(a.name || "").toLowerCase().trim();
     if (name.includes("fergis")) return true;
     return false;
@@ -150,7 +150,7 @@ export function computeDailyLiquidity(rootState = {}, now = new Date()) {
       };
     });
 
-  const calculatedBalance = accountsBreakdown.reduce((sum, a) => sum + a.penBalance, 0);
+  const calculatedBalance = Number(accountsBreakdown.reduce((sum, a) => sum + a.penBalance, 0).toFixed(2));
   const totalBalance = overrideBalance !== null ? overrideBalance : calculatedBalance;
 
   const commitments = Array.isArray(rootState.financeCommitments) ? rootState.financeCommitments : [];

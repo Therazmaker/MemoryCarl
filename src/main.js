@@ -21835,7 +21835,12 @@ function viewFinance(){
   `;
 
   // Principal content — redesigned
-  const totalBalance = (state.financeAccounts||[]).reduce((s,a)=>{
+  const activeAccounts = (state.financeAccounts||[]).filter(a => !a.archived && a.status !== 'archived');
+
+  const totalBalance = activeAccounts.reduce((s,a)=>{
+    if (a.excludeFromTotal) return s;
+    const isFergisAccount = String(a.name||"").toLowerCase().includes("fergis");
+    if (isFergisAccount) return s;
     if (a.type === "crypto") {
       return s + (Number(a.balance||0) * state.btcPricePen);
     }
@@ -21845,7 +21850,7 @@ function viewFinance(){
   const savingsPct = meta.expectedIncome > 0 ? Math.round((savings / meta.expectedIncome) * 100) : null;
   const spentPct = meta.expectedIncome > 0 ? Math.min(100, Math.round((d.expense / meta.expectedIncome) * 100)) : null;
 
-  const accountCards = (state.financeAccounts||[]).map(a=>{
+  const accountCards = activeAccounts.map(a=>{
     const bal = Number(a.balance||0);
     const isFergisAccount = String(a.name||"").toLowerCase().includes("fergis");
     const isCrypto = a.type === "crypto";
