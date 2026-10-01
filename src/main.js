@@ -3664,6 +3664,15 @@ function view(){
       openLogActualMealModal();
     });
 
+    // Pick meal bundle from Memoria
+    root.querySelectorAll(".btnPickMealBundle").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const dKey = btn.dataset.day;
+        const sId = btn.dataset.slot;
+        openPickMealBundleModal(dKey, sId);
+      });
+    });
+
     // Add item to schedule slot
     root.querySelectorAll(".btnAddScheduleItem").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -15725,9 +15734,10 @@ function renderScheduleDailyView(schedule, prods){
                 <span>${slot.icon}</span>
                 <span>${slot.label}</span>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <span style="font-size:12.5px;font-weight:700;color:#93c5fd;">S/ ${slotData.slotTotal.toFixed(2)}</span>
-                <button class="iconBtn btnAddScheduleItem" data-day="${_selectedScheduleDay}" data-slot="${slot.id}" title="Agregar alimento/bebida" style="width:26px;height:26px;font-size:13px;padding:0;">＋</button>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:12.5px;font-weight:700;color:#93c5fd;margin-right:4px;">S/ ${slotData.slotTotal.toFixed(2)}</span>
+                <button class="btn ghost btnPickMealBundle" data-day="${_selectedScheduleDay}" data-slot="${slot.id}" title="Elegir de Memoria de Comidas" style="padding:3px 7px;font-size:11px;display:flex;align-items:center;gap:3px;">🥘 Memoria</button>
+                <button class="iconBtn btnAddScheduleItem" data-day="${_selectedScheduleDay}" data-slot="${slot.id}" title="Agregar alimento/bebida manualmente" style="width:26px;height:26px;font-size:13px;padding:0;">＋</button>
               </div>
             </div>
 
@@ -15826,6 +15836,85 @@ function renderScheduleMonthlyView(weekly){
       </div>
     </div>
   `;
+}
+
+function openPickMealBundleModal(dayKey, slotId){
+  const slot = MEAL_SLOTS.find(s => s.id === slotId) || MEAL_SLOTS[0];
+  const day = DAYS_OF_WEEK.find(d => d.key === dayKey) || DAYS_OF_WEEK[0];
+  const bundles = loadMealBundles();
+
+  if (!bundles || bundles.length === 0) {
+    toast("⚠️ No tienes comidas guardadas en la memoria. Puedes agregarlas desde Biblioteca > Comidas.");
+    openAddScheduleItemModal(dayKey, slotId);
+    return;
+  }
+
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop";
+  b.innerHTML = `
+    <div class="modal" style="max-width:440px;width:90%;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2 style="margin:0;font-size:16px;">🥘 Elegir de Memoria de Comidas</h2>
+        <button class="iconBtn" id="btnCloseBundlePicker" style="width:26px;height:26px;font-size:12px;">✕</button>
+      </div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:12px;">
+        Selecciona un plato para añadirlo a <b>${escapeHtml(slot.label)} (${escapeHtml(day.label)})</b>.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto;padding-right:4px;">
+        ${bundles.map(mb => `
+          <div class="card btnSelectBundleItem" data-bundle-id="${mb.id}" style="padding:10px 12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;transition:all 0.15s ease;">
+            <div>
+              <div style="font-weight:600;font-size:13.5px;color:#f8fafc;">${escapeHtml(mb.name)}</div>
+              <div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:2px;">
+                Costo por porción: <b style="color:#a78bfa;">S/ ${(mb.costPerPortion || 0).toFixed(2)}</b> • Rinde: ${mb.portionsTotal || 1} porciones
+              </div>
+            </div>
+            <button class="btn primary" style="padding:4px 10px;font-size:11px;pointer-events:none;">Elegir</button>
+          </div>
+        `).join("")}
+      </div>
+      <div style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;">
+        <button class="btn ghost" id="btnManualAddScheduleItem" style="font-size:12px;">✏️ Escribir manualmente</button>
+        <button class="btn ghost" id="btnCancelBundlePicker" style="font-size:12px;">Cancelar</button>
+      </div>
+    </div>
+  `;
+  host.appendChild(b);
+
+  const close = () => b.remove();
+  b.addEventListener("click", (e) => { if (e.target === b) close(); });
+  b.querySelector("#btnCloseBundlePicker")?.addEventListener("click", close);
+  b.querySelector("#btnCancelBundlePicker")?.addEventListener("click", close);
+  b.querySelector("#btnManualAddScheduleItem")?.addEventListener("click", () => {
+    close();
+    openAddScheduleItemModal(dayKey, slotId);
+  });
+
+  b.querySelectorAll(".btnSelectBundleItem").forEach(itemEl => {
+    itemEl.addEventListener("click", () => {
+      const bId = itemEl.dataset.bundleId;
+      const mb = bundles.find(x => x.id === bId);
+      if (!mb) return;
+
+      const schedule = loadMealSchedule();
+      if (!schedule[dayKey]) schedule[dayKey] = {};
+      if (!Array.isArray(schedule[dayKey][slotId])) schedule[dayKey][slotId] = [];
+
+      schedule[dayKey][slotId].push({
+        name: mb.name,
+        qty: 1,
+        estimatedPrice: mb.costPerPortion || 0,
+        isCustom: true,
+        bundleId: mb.id
+      });
+
+      saveMealSchedule(schedule);
+      close();
+      toast(`✓ ${mb.name} agregado a ${slot.label}`);
+      view();
+    });
+  });
 }
 
 function openAddScheduleItemModal(dayKey, slotId){
