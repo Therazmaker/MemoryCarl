@@ -16,11 +16,22 @@ import {
 } from "./musicStore.js";
 import { parseAudioMetadata } from "./id3Parser.js";
 import { fetchOnlineCoverArt, generateFallbackCoverSvg } from "./coverArtService.js";
+import {
+  searchSpotiFlacTracks,
+  downloadSpotiFlacTrack,
+  getRegistryUrl,
+  setRegistryUrl,
+  fetchRegistry
+} from "./spotiflacService.js";
 
 let isFullPlayerOpen = false;
 let isMusicHubOpen = false;
-let currentTab = "songs"; // "songs" | "playlists" | "ai" | "favorites"
+let currentTab = "songs"; // "songs" | "albums" | "spotiflac" | "playlists" | "ai" | "favorites"
 let searchQuery = "";
+let spotiflacSearchQuery = "";
+let spotiflacResults = [];
+let spotiflacDownloadingIds = new Set();
+let selectedAlbumName = null;
 
 function escapeHtml(str) {
   return String(str ?? "")
@@ -312,6 +323,8 @@ export function openMusicHubModal() {
 
       <div class="spotHubTabs">
         <button class="spotTabBtn ${currentTab === "songs" ? "active" : ""}" data-tab="songs">🎶 Canciones</button>
+        <button class="spotTabBtn ${currentTab === "albums" ? "active" : ""}" data-tab="albums">💿 Álbumes</button>
+        <button class="spotTabBtn ${currentTab === "spotiflac" ? "active" : ""}" data-tab="spotiflac">🌐 SpotiFLAC</button>
         <button class="spotTabBtn ${currentTab === "playlists" ? "active" : ""}" data-tab="playlists">📁 Playlists</button>
         <button class="spotTabBtn ${currentTab === "ai" ? "active" : ""}" data-tab="ai">🤖 DJ AI</button>
         <button class="spotTabBtn ${currentTab === "favorites" ? "active" : ""}" data-tab="favorites">❤️ Favoritos</button>
@@ -501,6 +514,231 @@ async function updateMusicHubDynamicContent() {
         await clearAllTracks();
         updateMusicHubDynamicContent();
       }
+    });
+
+  } else if (currentTab === "albums") {
+    const allTracks = await getAllTracks();
+    const albumsMap = new Map();
+
+    for (const tr of allTracks) {
+      const albumName = tr.album || "Sin Álbum";
+      if (!albumsMap.has(albumName)) {
+        albumsMap.set(albumName, {
+          name: albumName,
+          artist: tr.albumArtist || tr.artist || "Artista Desconocido",
+          cover: tr.coverBlobUrl || "",
+          tracks: []
+        });
+      }
+      albumsMap.get(albumName).tracks.push(tr);
+    }
+
+    const albumsList = Array.from(albumsMap.values());
+
+    if (selectedAlbumName && albumsMap.has(selectedAlbumName)) {
+      const album = albumsMap.get(selectedAlbumName);
+      container.innerHTML = `
+        <div style="margin-bottom: 12px; display:flex; align-items:center; gap: 10px;">
+          <button class="btn ghost" id="btnBackToAlbums" style="font-size:14px; padding: 4px 8px;">← Volver a Álbumes</button>
+        </div>
+        <div class="spotAlbumHeaderCard" style="display:flex; gap:16px; background:#1e1e1e; padding:16px; border-radius:12px; margin-bottom:16px; align-items:center;">
+          <div style="width:90px; height:90px; border-radius:8px; overflow:hidden; flex-shrink:0; background:#282828; display:flex; align-items:center; justify-content:center; font-size:32px;">
+            ${album.cover ? `<img src="${escapeHtml(album.cover)}" style="width:100%; height:100%; object-fit:cover;" />` : `💿`}
+          </div>
+          <div>
+            <div style="font-size:18px; font-weight:800; color:#fff;">${escapeHtml(album.name)}</div>
+            <div style="font-size:14px; color:#b3b3b3; margin-top:2px;">${escapeHtml(album.artist)} • ${album.tracks.length} canciones</div>
+            <button class="btn primary" id="btnPlayFullAlbum" style="margin-top:8px; font-size:13px; padding:6px 14px;">▶ Reproducir Álbum</button>
+          </div>
+        </div>
+
+        <div class="spotTrackList">
+          ${album.tracks.map((track, idx) => `
+            <div class="spotTrackRow" data-track-id="${track.id}">
+              <div style="width:24px; color:#b3b3b3; font-size:13px; text-align:center;">${idx + 1}</div>
+              <div class="spotTrackInfo">
+                <div class="spotTrackTitle">${escapeHtml(track.title)}</div>
+                <div class="spotTrackSub">${escapeHtml(track.artist)} • ${formatTime(track.durationSeconds)}</div>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+
+      container.querySelector("#btnBackToAlbums")?.addEventListener("click", () => {
+        selectedAlbumName = null;
+        updateMusicHubDynamicContent();
+      });
+
+      container.querySelector("#btnPlayFullAlbum")?.addEventListener("click", async () => {
+        await musicEngine.setQueue(album.tracks, 0, true);
+        openFullPlayer();
+      });
+
+      container.querySelectorAll(".spotTrackRow").forEach(row => {
+        row.addEventListener("click", async () => {
+          const id = row.dataset.trackId;
+          const idx = album.tracks.findIndex(t => t.id === id);
+          if (idx !== -1) {
+            await musicEngine.setQueue(album.tracks, idx, true);
+            openFullPlayer();
+          }
+        });
+      });
+
+    } else {
+      container.innerHTML = `
+        <div class="spotAlbumsGrid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:14px;">
+          ${albumsList.length > 0 ? albumsList.map(album => `
+            <div class="spotAlbumCard" data-album-name="${escapeHtml(album.name)}" style="background:#181818; padding:10px; border-radius:10px; cursor:pointer; transition:background 0.2s; border:1px solid rgba(255,255,255,0.05);">
+              <div style="width:100%; aspect-ratio:1/1; border-radius:8px; overflow:hidden; background:#282828; display:flex; align-items:center; justify-content:center; font-size:36px; margin-bottom:8px;">
+                ${album.cover ? `<img src="${escapeHtml(album.cover)}" style="width:100%; height:100%; object-fit:cover;" />` : `💿`}
+              </div>
+              <div style="font-size:13px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(album.name)}</div>
+              <div style="font-size:11px; color:#b3b3b3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">${escapeHtml(album.artist)}</div>
+              <div style="font-size:10px; color:#1db954; font-weight:600; margin-top:4px;">${album.tracks.length} Pistas</div>
+            </div>
+          `).join("") : `
+            <div class="spotEmptyState" style="grid-column: 1 / -1;">
+              <div style="font-size:40px;">💿</div>
+              <div>No hay álbumes en tu biblioteca.</div>
+              <div class="smallMuted">Importa canciones o usa SpotiFLAC para descargar música con metadatos de álbum.</div>
+            </div>
+          `}
+        </div>
+      `;
+
+      container.querySelectorAll(".spotAlbumCard").forEach(card => {
+        card.addEventListener("click", () => {
+          selectedAlbumName = card.dataset.albumName;
+          updateMusicHubDynamicContent();
+        });
+      });
+    }
+
+  } else if (currentTab === "spotiflac") {
+    container.innerHTML = `
+      <div class="spotiflacSection" style="display:flex; flex-direction:column; gap:12px;">
+        <div style="background: linear-gradient(135deg, #1db95422 0%, #000000 100%); border:1px solid #1db95444; border-radius:12px; padding:12px 16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <span style="font-weight:800; color:#1db954; font-size:15px;">🌐 SpotiFLAC Downloader</span>
+              <span style="font-size:11px; color:#b3b3b3; display:block;">Descarga música FLAC & Lossless directamente al almacenamiento de tu teléfono.</span>
+            </div>
+            <button class="btn ghost" id="btnConfigRegistry" style="font-size:11px; padding:4px 8px;">⚙️ Registry</button>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="spotiflacSearchInp" class="spotSearchInput" placeholder="🔍 Buscar canción o artista en SpotiFLAC..." value="${escapeHtml(spotiflacSearchQuery)}" style="flex:1;" />
+          <button class="btn primary" id="btnSearchSpotiFlac" style="padding:0 16px;">Buscar</button>
+        </div>
+
+        <div id="spotiflacNoticeHost"></div>
+
+        <div id="spotiflacResultsHost">
+          ${spotiflacResults.length > 0 ? `
+            <div class="spotTrackList">
+              ${spotiflacResults.map(item => {
+                const isDownloading = spotiflacDownloadingIds.has(item.id);
+                return `
+                  <div class="spotTrackRow" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <div style="width:48px; height:48px; border-radius:6px; overflow:hidden; flex-shrink:0; background:#282828; display:flex; align-items:center; justify-content:center; font-size:20px;">
+                      ${item.coverUrl ? `<img src="${escapeHtml(item.coverUrl)}" style="width:100%; height:100%; object-fit:cover;" />` : `🎵`}
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                      <div style="font-size:14px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(item.title)}</div>
+                      <div style="font-size:12px; color:#b3b3b3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(item.artist)} • ${escapeHtml(item.album)}</div>
+                      <div style="display:flex; gap:6px; margin-top:3px;">
+                        <span style="background:#1db95422; color:#1db954; font-size:10px; padding:1px 6px; border-radius:4px; font-weight:700;">${escapeHtml(item.quality)}</span>
+                        <span style="background:#333; color:#aaa; font-size:10px; padding:1px 6px; border-radius:4px;">${escapeHtml(item.sourceProvider)}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <button class="btn primary btnDownloadSpfl" data-id="${item.id}" ${isDownloading ? "disabled" : ""} style="font-size:12px; padding:6px 12px; font-weight:700;">
+                        ${isDownloading ? "⏳ Descargando..." : "⬇️ Descargar"}
+                      </button>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          ` : `
+            <div class="spotEmptyState">
+              <div style="font-size:40px;">🎧</div>
+              <div>Escribe una canción o artista para buscar y descargar en SpotiFLAC.</div>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+
+    container.querySelector("#btnConfigRegistry")?.addEventListener("click", () => {
+      const current = getRegistryUrl();
+      const newUrl = prompt("Configuración del registro SpotiFLAC Extension (registry.json URL):", current);
+      if (newUrl !== null) {
+        setRegistryUrl(newUrl);
+        alert("URL del registro de SpotiFLAC actualizada.");
+      }
+    });
+
+    const executeSearch = async () => {
+      const inp = container.querySelector("#spotiflacSearchInp");
+      const query = inp ? inp.value.trim() : "";
+      if (!query) return;
+
+      spotiflacSearchQuery = query;
+      const resultsHost = container.querySelector("#spotiflacResultsHost");
+      resultsHost.innerHTML = `<div class="spotLoadingState">🔍 Buscando en proveedores de SpotiFLAC...</div>`;
+
+      try {
+        spotiflacResults = await searchSpotiFlacTracks(query);
+        updateMusicHubDynamicContent();
+      } catch (err) {
+        resultsHost.innerHTML = `<div style="color:#ef4444; font-size:12px; padding:12px;">❌ Error buscando: ${escapeHtml(err.message)}</div>`;
+      }
+    };
+
+    container.querySelector("#btnSearchSpotiFlac")?.addEventListener("click", executeSearch);
+    container.querySelector("#spotiflacSearchInp")?.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") executeSearch();
+    });
+
+    container.querySelectorAll(".btnDownloadSpfl").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.id;
+        const item = spotiflacResults.find(r => r.id === id);
+        if (!item) return;
+
+        spotiflacDownloadingIds.add(id);
+        btn.disabled = true;
+        btn.textContent = "⏳ Descargando...";
+
+        const noticeHost = container.querySelector("#spotiflacNoticeHost");
+        if (noticeHost) {
+          noticeHost.innerHTML = `<div class="spotLoadingState">⬇️ Descargando "${escapeHtml(item.title)}"...</div>`;
+        }
+
+        try {
+          await downloadSpotiFlacTrack(item, (progress) => {
+            if (noticeHost) {
+              noticeHost.innerHTML = `<div class="spotLoadingState">⬇️ ${escapeHtml(progress.message)}</div>`;
+            }
+          });
+
+          if (noticeHost) {
+            noticeHost.innerHTML = `<div style="background:#1db95422; border:1px solid #1db954; color:#1db954; padding:8px 12px; border-radius:8px; font-size:12px; font-weight:700;">✅ ¡"${escapeHtml(item.title)}" se descargó y guardó en tu biblioteca!</div>`;
+          }
+        } catch (err) {
+          if (noticeHost) {
+            noticeHost.innerHTML = `<div style="background:#ef444422; border:1px solid #ef4444; color:#ef4444; padding:8px 12px; border-radius:8px; font-size:12px;">❌ Error al descargar: ${escapeHtml(err.message)}</div>`;
+          }
+        } finally {
+          spotiflacDownloadingIds.delete(id);
+          btn.disabled = false;
+          btn.textContent = "⬇️ Descargar";
+        }
+      });
     });
 
   } else if (currentTab === "playlists") {
