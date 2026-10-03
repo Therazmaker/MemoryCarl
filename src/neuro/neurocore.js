@@ -12,6 +12,7 @@ import { createTrace, addStep, recordTiming, finalizeTrace } from "./trace.js";
 import { requestChatReply, isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { isGeminiPremiumConfigured, requestAssistedReply } from "../services/geminiPremiumClient.js";
 import { isOllamaConfigured, requestOllamaChatReply, requestOllamaNeuronGeneration } from "../services/ollamaClient.js";
+import { isClaudeConfigured, requestClaudeChatReply } from "../services/claudeClient.js";
 import { dedupeGeneratedNeurons } from "./dedup.js";
 import { shouldUsePremiumGeneration } from "./premiumPolicy.js";
 import { incrementPremiumUsage } from "./premiumUsage.js";
@@ -553,6 +554,7 @@ export async function processNeuroInput(userInput, options = {}) {
     isNeuroclawConfigured: isNeuroclawConfigured(),
     isGeminiConfigured: isGeminiPremiumConfigured(),
     isOllamaConfigured: isOllamaConfigured(),
+    isClaudeConfigured: isClaudeConfigured(),
   });
   addStep(trace, "reply_mode_chosen", { replyMode, patternCount, relationCount });
   trace.replyMode = replyMode;
@@ -566,6 +568,116 @@ export async function processNeuroInput(userInput, options = {}) {
   let intent = "respond";
 
   const bestPatternMatch = findBestPattern(userInput, finalActivated.map((a) => a.neuron));
+
+  // ---- Bloque de respuesta Claude (prioritario) ----
+  if (!reply && replyMode === "claude" && isClaudeConfigured()) {
+    try {
+      addStep(trace, "claude_reply_start");
+
+      const claudeResult = await requestClaudeChatReply({
+        userInput,
+        context,
+        history: (options.history || []).slice(-16),
+        insights: insightResult.insights,
+        temporalContext,
+        dayContext,
+        memoryRecall: memoryRecallResult.ranked,
+        conversationSession: options.conversationSession,
+      });
+
+      if (claudeResult && claudeResult.reply) {
+        reply = claudeResult.reply;
+        geminiReplyText = claudeResult.reply;
+        replySource = "claude";
+        addStep(trace, "claude_reply_received", { length: reply.length });
+
+        const { actions = [], intent: parsedIntent = "respond" } = claudeResult.neuronActions || {};
+        replySource = `claude_${parsedIntent}`;
+
+        intent = parsedIntent;
+        claudeResult.intent = parsedIntent;
+
+        if (actions.length > 0) {
+          addStep(trace, "claude_neuron_actions_start", { count: actions.length });
+          const allAtActionTime = getAllNeurons();
+          const neuronsToSave = [];
+
+          for (const action of actions) {
+            try {
+              if (action.type === "create" && action.neuron) {
+                const sanitized = sanitizeNeuron({
+                  ...action.neuron,
+                  source: { kind: "model_proposed", ref: "claude" },
+                });
+                if (sanitized) {
+                  if (!sanitized.embedding || sanitized.embedding.length === 0) {
+                    const text = [sanitized.core?.concept, sanitized.core?.summary, ...(sanitized.triggers || [])].filter(Boolean).join(" ");
+                    sanitized.embedding = await getEmbedding(text);
+                  }
+                  const dedupeCheck = dedupeGeneratedNeurons([sanitized], allAtActionTime);
+                  if (dedupeCheck.toSave.length > 0) {
+                    const n = dedupeCheck.toSave[0];
+                    const related = await findRelatedNeurons(n, [...allAtActionTime, ...neuronsToSave]);
+                    attachConnections(n, related);
+                    neuronsToSave.push(n);
+                    generated.push(n);
+                    addStep(trace, "claude_neuron_created", { concept: n.core?.concept });
+                  }
+                }
+              } else if ((action.type === "update" || action.type === "refine") && action.neuronId) {
+                const changes = {};
+                if (action.changes) {
+                  for (const [key, value] of Object.entries(action.changes)) {
+                    if (key.includes(".")) {
+                      const parts = key.split(".");
+                      const existing = allAtActionTime.find((n) => n.id === action.neuronId);
+                      if (existing) {
+                        const nested = { ...(existing[parts[0]] || {}) };
+                        nested[parts[1]] = value;
+                        changes[parts[0]] = nested;
+                      }
+                    } else {
+                      changes[key] = value;
+                    }
+                  }
+                }
+                if (Array.isArray(action.addTriggers)) {
+                  const existing = allAtActionTime.find((n) => n.id === action.neuronId);
+                  if (existing) {
+                    const currentTriggers = changes.triggers || existing.triggers || [];
+                    const newTriggers = [...new Set([...currentTriggers, ...action.addTriggers])];
+                    changes.triggers = newTriggers;
+                  }
+                }
+                if (Object.keys(changes).length > 0) {
+                  updateNeuron(action.neuronId, changes);
+                  addStep(trace, "claude_neuron_updated", { id: action.neuronId });
+                }
+              } else if (action.type === "merge" && action.sourceId && action.targetId) {
+                const source = allAtActionTime.find((n) => n.id === action.sourceId);
+                const target = allAtActionTime.find((n) => n.id === action.targetId);
+                if (source && target) {
+                  const mergedTriggers = [...new Set([...(target.triggers || []), ...(source.triggers || [])])];
+                  updateNeuron(action.targetId, { triggers: mergedTriggers });
+                  addStep(trace, "claude_neuron_merged", { source: action.sourceId, target: action.targetId });
+                }
+              }
+            } catch (actionErr) {
+              console.warn("[neurocore] Error aplicando acción Claude:", actionErr);
+            }
+          }
+
+          if (neuronsToSave.length > 0) {
+            saveManyNeurons(neuronsToSave);
+            addStep(trace, "claude_neurons_saved", { count: neuronsToSave.length });
+          }
+        }
+      }
+    } catch (claudeErr) {
+      console.warn("[neurocore] Claude reply falló, intentando fallback:", claudeErr);
+      addStep(trace, "claude_reply_failed", { error: String(claudeErr) });
+    }
+  }
 
   // ---- Bloque de respuesta Ollama (prioritario) ----
   // Ollama responde Y gestiona neuronas en un solo turno

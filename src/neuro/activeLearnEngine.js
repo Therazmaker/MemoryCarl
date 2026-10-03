@@ -30,8 +30,9 @@ const MIN_RELATIONS_FOR_AUTONOMOUS = 3; // y al menos 3 relaciones en el grafo
  *   isNeuroclawConfigured: boolean,
  *   isGeminiConfigured: boolean,
  *   isOllamaConfigured: boolean,
+ *   isClaudeConfigured: boolean,
  * }} params
- * @returns {"ollama" | "autonomous" | "assisted" | "delegated"}
+ * @returns {"claude" | "ollama" | "autonomous" | "assisted" | "delegated"}
  */
 export function chooseReplyMode({
   coverage = 0,
@@ -42,9 +43,13 @@ export function chooseReplyMode({
   isNeuroclawConfigured = false,
   isGeminiConfigured = false,
   isOllamaConfigured = false,
+  isClaudeConfigured = false,
 }) {
-  // Ollama es el motor primario: si está configurado, siempre lo usamos
-  // (excepto cuando el sistema local tiene cobertura perfecta y muchos patrones)
+  // Claude u Ollama son motores de primera clase para NeuroChat
+  if (isClaudeConfigured) {
+    return "claude";
+  }
+
   if (isOllamaConfigured) {
     return "ollama";
   }
