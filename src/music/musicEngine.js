@@ -38,10 +38,43 @@ class MusicEngine {
     this.isShuffle = false;
     this.isFav = false;
 
+    this.wakeLock = null;
     this.subscribers = new Set();
 
     this.initAudioEvents();
     this.initMediaSession();
+    this.initWakeLockAndLifecycleHandlers();
+  }
+
+  async requestWakeLock() {
+    if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
+      try {
+        if (!this.wakeLock) {
+          this.wakeLock = await navigator.wakeLock.request("screen");
+        }
+      } catch (err) {
+        console.warn("Screen Wake Lock error or denied:", err);
+      }
+    }
+  }
+
+  async releaseWakeLock() {
+    if (this.wakeLock) {
+      try {
+        await this.wakeLock.release();
+      } catch (e) {}
+      this.wakeLock = null;
+    }
+  }
+
+  initWakeLockAndLifecycleHandlers() {
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", async () => {
+        if (document.visibilityState === "visible" && this.isPlaying) {
+          await this.requestWakeLock();
+        }
+      });
+    }
   }
 
   initAudioEvents() {
@@ -69,6 +102,7 @@ class MusicEngine {
       if (typeof navigator !== "undefined" && navigator.mediaSession) {
         navigator.mediaSession.playbackState = "playing";
       }
+      this.requestWakeLock();
       this.notifySubscribers();
     });
 
@@ -77,6 +111,7 @@ class MusicEngine {
       if (typeof navigator !== "undefined" && navigator.mediaSession) {
         navigator.mediaSession.playbackState = "paused";
       }
+      this.releaseWakeLock();
       this.notifySubscribers();
     });
 
