@@ -3,6 +3,7 @@
  */
 
 import { getAllNeurons, saveManyNeurons, updateNeuron } from "./neuronStore.js";
+import { sanitizeNeuron } from "./schemas.js";
 import { activateNeurons } from "./activation.js";
 import { detectMissingConcepts, generateMissingNeurons, generateMissingNeuronsPremium } from "./generator.js";
 import { findRelatedNeurons, attachConnections } from "./connections.js";
@@ -244,49 +245,9 @@ export async function processNeuroInput(userInput, options = {}) {
 
   const shouldGenerate = Boolean(missingAnalysis.needsGeneration || options.forceGeneration || manualOverride);
 
-  // Usar Ollama para generación de neuronas si está configurado y NeuroClaw no lo está
-  if (!options.skipGeneration && shouldGenerate && isOllamaConfigured() && !isNeuroclawConfigured()) {
-    addStep(trace, "ollama_neuron_generation_triggered");
-    try {
-      const rawGenerated = await requestOllamaNeuronGeneration({
-        userInput,
-        activatedNeurons: activated,
-        missingAnalysis,
-        history: options.history || [],
-      });
-
-      if (rawGenerated && rawGenerated.length > 0) {
-        for (const n of rawGenerated) {
-          if (!n.embedding || n.embedding.length === 0) {
-            const text = [n.core?.concept, n.core?.summary, ...(n.triggers || [])].filter(Boolean).join(" ");
-            n.embedding = await getEmbedding(text);
-          }
-        }
-        const allAtGenTime = getAllNeurons();
-        const dedupeResult = dedupeGeneratedNeurons(rawGenerated, allAtGenTime);
-        dedupeSummary = {
-          saved: dedupeResult.toSave.length,
-          merged: dedupeResult.toMerge.length,
-          discarded: dedupeResult.discarded.length,
-          mergedIds: dedupeResult.toMerge.map((m) => m.targetId),
-        };
-        if (dedupeResult.toSave.length > 0) {
-          for (const n of dedupeResult.toSave) {
-            const related = await findRelatedNeurons(n, [...allAtGenTime, ...dedupeResult.toSave]);
-            attachConnections(n, related);
-          }
-          saveManyNeurons(dedupeResult.toSave);
-        }
-        for (const mergeEntry of dedupeResult.toMerge) {
-          try { updateNeuron(mergeEntry.targetId, mergeEntry.mergedNeuron); } catch (_e) {}
-        }
-        generated = dedupeResult.toSave;
-        addStep(trace, "ollama_neurons_persisted", dedupeSummary);
-      }
-    } catch (ollamaGenErr) {
-      console.warn("[neurocore] Ollama neuron generation falló:", ollamaGenErr);
-    }
-  } else if (!options.skipGeneration && shouldGenerate && isNeuroclawConfigured()) {
+  // Cuando Ollama está configurado, se omite la pre-generación porque la respuesta del chat
+  // generará las neuronas vía la sección ---NEURON_ACTIONS--- en el mismo turno.
+  if (!options.skipGeneration && shouldGenerate && isNeuroclawConfigured()) {
     const shouldAttemptPremium = premiumDecision.usePremium || manualOverride;
     addStep(trace, "generation_triggered", {
       premium: shouldAttemptPremium,
@@ -658,36 +619,50 @@ export async function processNeuroInput(userInput, options = {}) {
           for (const action of actions) {
             try {
               if (action.type === "create" && action.neuron) {
-                const newNeuron = action.neuron;
-                if (!newNeuron.embedding || newNeuron.embedding.length === 0) {
-                  const text = [newNeuron.core?.concept, newNeuron.core?.summary, ...(newNeuron.triggers || [])].filter(Boolean).join(" ");
-                  newNeuron.embedding = await getEmbedding(text);
+                const sanitized = sanitizeNeuron({
+                  ...action.neuron,
+                  source: { kind: "model_proposed", ref: "ollama" },
+                });
+                if (sanitized) {
+                  if (!sanitized.embedding || sanitized.embedding.length === 0) {
+                    const text = [sanitized.core?.concept, sanitized.core?.summary, ...(sanitized.triggers || [])].filter(Boolean).join(" ");
+                    sanitized.embedding = await getEmbedding(text);
+                  }
+                  // Deduplicar antes de guardar
+                  const dedupeCheck = dedupeGeneratedNeurons([sanitized], allAtActionTime);
+                  if (dedupeCheck.toSave.length > 0) {
+                    const n = dedupeCheck.toSave[0];
+                    const related = await findRelatedNeurons(n, [...allAtActionTime, ...neuronsToSave]);
+                    attachConnections(n, related);
+                    neuronsToSave.push(n);
+                    generated.push(n);
+                    addStep(trace, "ollama_neuron_created", { concept: n.core?.concept });
+                  }
                 }
-                // Deduplicar antes de guardar
-                const dedupeCheck = dedupeGeneratedNeurons([newNeuron], allAtActionTime);
-                if (dedupeCheck.toSave.length > 0) {
-                  const n = dedupeCheck.toSave[0];
-                  const related = await findRelatedNeurons(n, [...allAtActionTime, ...neuronsToSave]);
-                  attachConnections(n, related);
-                  neuronsToSave.push(n);
-                  generated.push(n);
-                  addStep(trace, "ollama_neuron_created", { concept: newNeuron.core?.concept });
-                }
-              } else if (action.type === "update" && action.neuronId) {
-                // Actualizar neurona existente con los cambios indicados
+              } else if ((action.type === "update" || action.type === "refine") && action.neuronId) {
+                // Actualizar neurona existente con los cambios o triggers indicados
                 const changes = {};
-                for (const [key, value] of Object.entries(action.changes || {})) {
-                  if (key.includes(".")) {
-                    // Campos anidados como "core.summary"
-                    const parts = key.split(".");
-                    const existing = allAtActionTime.find((n) => n.id === action.neuronId);
-                    if (existing) {
-                      const nested = { ...(existing[parts[0]] || {}) };
-                      nested[parts[1]] = value;
-                      changes[parts[0]] = nested;
+                if (action.changes) {
+                  for (const [key, value] of Object.entries(action.changes)) {
+                    if (key.includes(".")) {
+                      const parts = key.split(".");
+                      const existing = allAtActionTime.find((n) => n.id === action.neuronId);
+                      if (existing) {
+                        const nested = { ...(existing[parts[0]] || {}) };
+                        nested[parts[1]] = value;
+                        changes[parts[0]] = nested;
+                      }
+                    } else {
+                      changes[key] = value;
                     }
-                  } else {
-                    changes[key] = value;
+                  }
+                }
+                if (Array.isArray(action.addTriggers)) {
+                  const existing = allAtActionTime.find((n) => n.id === action.neuronId);
+                  if (existing) {
+                    const currentTriggers = changes.triggers || existing.triggers || [];
+                    const newTriggers = [...new Set([...currentTriggers, ...action.addTriggers])];
+                    changes.triggers = newTriggers;
                   }
                 }
                 if (Object.keys(changes).length > 0) {
@@ -819,8 +794,6 @@ export async function processNeuroInput(userInput, options = {}) {
   }
 
   if (memoryRecallResult.ranked.length > 0) {
-    const recallText = memoryRecallResult.ranked.map((item) => item.snippet).join("\n\n");
-    reply = `${reply}\n\n${recallText}`;
     addStep(trace, "memory_recall_attached", {
       count: memoryRecallResult.ranked.length,
       topScore: memoryRecallResult.ranked[0]?.score || 0,

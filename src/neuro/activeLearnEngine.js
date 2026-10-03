@@ -46,14 +46,6 @@ export function chooseReplyMode({
   // Ollama es el motor primario: si está configurado, siempre lo usamos
   // (excepto cuando el sistema local tiene cobertura perfecta y muchos patrones)
   if (isOllamaConfigured) {
-    // Solo omitir Ollama si el sistema local es verdaderamente autónomo y completo
-    const isFullyAutonomous = (
-      coverage >= AUTONOMOUS_COVERAGE_THRESHOLD
-      && patternCount >= MIN_PATTERNS_FOR_AUTONOMOUS * 2  // umbral más alto para preferir local
-      && relationCount >= MIN_RELATIONS_FOR_AUTONOMOUS * 2
-      && activatedCount >= 5
-    );
-    if (isFullyAutonomous) return "autonomous";
     return "ollama";
   }
 
