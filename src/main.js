@@ -25095,18 +25095,16 @@ window.financeRestoreFromIDB = function(hourKey) {
 };
 
 // ─── SUPABASE CLOUD SYNC SYSTEM ──────────────────────────────────────
-window.financePushToSupabase = async function(isManual = false) {
+let _financePushTimer = null;
+let _lastPushedPayloadStr = null;
+
+async function _performFinancePushToSupabase(isManual = false) {
   try {
     const key = getSyncApiKey();
     if (!key) {
       if (isManual) toast("⚠️ Sync no configurado (falta API Key)");
       return;
     }
-
-    if (isManual) toast("📤 Enviando copia a Supabase...");
-
-    const ledgerCount = (state.financeLedger || []).length;
-    const activeCount = (state.financeLedger || []).filter(e => !e.archived).length;
 
     const payload = {
       appState: {
@@ -25119,6 +25117,17 @@ window.financePushToSupabase = async function(isManual = false) {
       }
     };
 
+    const payloadStr = JSON.stringify(payload);
+    if (!isManual && payloadStr === _lastPushedPayloadStr) {
+      console.log("Supabase Sync skipped: no payload changes detected.");
+      return;
+    }
+
+    if (isManual) toast("📤 Enviando copia a Supabase...");
+
+    const ledgerCount = (state.financeLedger || []).length;
+    const activeCount = (state.financeLedger || []).filter(e => !e.archived).length;
+
     console.log("Finance Push Payload Sample (first 3 entries):", (state.financeLedger || []).slice(0, 3));
 
     const res = await fetch('https://memory-carl.vercel.app/api/sync', {
@@ -25127,7 +25136,7 @@ window.financePushToSupabase = async function(isManual = false) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${key}`
       },
-      body: JSON.stringify(payload)
+      body: payloadStr
     });
 
     const ts = new Date().toLocaleTimeString('es-PE');
@@ -25137,9 +25146,9 @@ window.financePushToSupabase = async function(isManual = false) {
       if (window.__mcLogs) {
         window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Sync Error: ${errText.slice(0, 60)}` });
       }
-      // Always show error (manual or not) so user knows sync is failing
       toast("❌ Error al sincronizar: " + errText.slice(0, 60));
     } else {
+      _lastPushedPayloadStr = payloadStr;
       console.log("Supabase Sync Successful");
       if (window.__mcLogs) {
         window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Sincronización exitosa: ${activeCount} activos enviados` });
@@ -25154,6 +25163,25 @@ window.financePushToSupabase = async function(isManual = false) {
     }
     if (isManual) toast("❌ Error de conexión al sincronizar");
   }
+}
+
+window.financePushToSupabase = function(isManual = false) {
+  if (isManual) {
+    if (_financePushTimer) {
+      clearTimeout(_financePushTimer);
+      _financePushTimer = null;
+    }
+    return _performFinancePushToSupabase(true);
+  }
+
+  if (_financePushTimer) {
+    clearTimeout(_financePushTimer);
+  }
+
+  _financePushTimer = setTimeout(() => {
+    _financePushTimer = null;
+    _performFinancePushToSupabase(false);
+  }, 3000);
 };
 
 window.financeCheckSupabase = async function() {
@@ -25344,9 +25372,13 @@ try {
   console.warn("Music UI initialization warning:", e);
 }
 
-// Auto-trigger pull when app boots up
+// Auto-trigger pull when app boots up (only if local finance ledger is empty to avoid unnecessary bandwidth)
 setTimeout(() => {
   try {
-    window.financePullFromSupabase();
+    const localLedgerCount = (state.financeLedger || []).length;
+    const localAccountsCount = (state.financeAccounts || []).length;
+    if (localLedgerCount === 0 && localAccountsCount === 0) {
+      window.financePullFromSupabase();
+    }
   } catch(err) {}
 }, 2000);

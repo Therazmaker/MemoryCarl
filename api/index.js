@@ -204,8 +204,8 @@ app.get('/api/restore', requireAuth, async (req, res) => {
     const [neuronsRes, memoriesRes, chatRes, daysRes, appStateRes, accountsRes, ledgerRes] = await Promise.all([
       supabase.from('neurons').select('*'),
       supabase.from('memories').select('*'),
-      supabase.from('chat_history').select('*').order('created_at', { ascending: true }),
-      supabase.from('days').select('*').order('date', { ascending: false }),
+      supabase.from('chat_history').select('*').order('created_at', { ascending: false }).limit(100),
+      supabase.from('days').select('*').order('date', { ascending: false }).limit(90),
       supabase.from('app_state').select('*').eq('id', 'default_user').single(),
       supabase.from('finance_accounts').select('*'),
       supabase.from('finance_ledger').select('*').order('date', { ascending: false })
@@ -251,12 +251,14 @@ app.get('/api/restore', requireAuth, async (req, res) => {
       }
     }
 
+    const orderedChatHistory = (chatRes.data || []).reverse();
+
     res.json({
       status: 'ok',
       data: {
         neurons: neuronsRes.data || [],
         memories: memoriesRes.data || [],
-        chatHistory: chatRes.data || [],
+        chatHistory: orderedChatHistory,
         days: daysRes.data || [],
         appState: reconstructedAppState,
       }
