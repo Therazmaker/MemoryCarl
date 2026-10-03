@@ -236,7 +236,10 @@ export async function activateNeurons(userInput, neurons, options = {}) {
     return { neuron, score, components: { semantic, keyword, weight, recency, emotion, temporalBoost, aliasMatch, manualBoost, neuronFeedbackBoost } };
   }));
 
-  const activated = scored.filter((r) => r.score >= minScore).sort((a, b) => b.score - a.score).slice(0, topK);
+  const activated = scored
+    .filter((r) => r.score >= minScore && (r.components.semantic >= 0.08 || r.components.keyword > 0))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
 
   if (persist) {
     for (const { neuron } of activated) {
