@@ -54,6 +54,7 @@ export async function fetchRegistry() {
 export async function searchSpotiFlacTracks(query) {
   if (!query || !query.trim()) return [];
 
+  const registry = await fetchRegistry();
   const cleanQuery = query.trim();
   const searchResults = [];
 
@@ -196,6 +197,8 @@ export async function downloadSpotiFlacTrack(trackItem, onProgress = null) {
     coverDataUrl = generateFallbackCoverSvg(trackItem.title, trackItem.artist);
   }
 
+  const isPreviewOnly = !trackItem.downloadStreamUrl && trackItem.previewUrl && audioBlob;
+
   const trackRecord = {
     id: `tr_spfl_${Date.now()}_${Math.random().toString(16).slice(2)}`,
     title: trackItem.title,
@@ -204,11 +207,11 @@ export async function downloadSpotiFlacTrack(trackItem, onProgress = null) {
     album: trackItem.album || "SpotiFLAC Downloads",
     year: trackItem.year || new Date().getFullYear(),
     genre: trackItem.genre || "Lossless",
-    durationSeconds: trackItem.durationSeconds || 0,
+    durationSeconds: isPreviewOnly ? 30 : (trackItem.durationSeconds || 0),
     coverBlobUrl: coverDataUrl,
     fileBlob: audioBlob,
     fileName: `${trackItem.artist} - ${trackItem.title}.${fileExtension}`,
-    quality: trackItem.quality || "FLAC / Lossless",
+    quality: isPreviewOnly ? "Audio Clip (30s Preview)" : (trackItem.quality || "FLAC / Lossless"),
     addedAt: new Date().toISOString()
   };
 

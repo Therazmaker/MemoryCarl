@@ -51,9 +51,15 @@ class MusicEngine {
       try {
         if (!this.wakeLock) {
           this.wakeLock = await navigator.wakeLock.request("screen");
+          if (this.wakeLock) {
+            this.wakeLock.addEventListener("release", () => {
+              this.wakeLock = null;
+            });
+          }
         }
       } catch (err) {
         console.warn("Screen Wake Lock error or denied:", err);
+        this.wakeLock = null;
       }
     }
   }
