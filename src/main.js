@@ -21817,14 +21817,14 @@ function viewFinance(){
   const finPillars = financeComputePillars(monthKey);
 
 
-  // header tabs (Principal / Movimientos / Recordatorios / Deudas / Crypto)
+  // header tabs (Principal / Movimientos / Estadísticas / Crypto / Mission Control / ...)
   const topTabs = `
     <div class="finTopTabs">
       <button class="finTopTab ${state.financeSubTab==="main"?"active":""}" onclick="setFinanceSubTab('main')">Principal</button>
-      <button class="finTopTab ${state.financeSubTab==="crypto"?"active":""}" onclick="setFinanceSubTab('crypto')">🪙 Crypto / BTC</button>
-      <button class="finTopTab ${state.financeSubTab==="stats"?"active":""}" onclick="setFinanceSubTab('stats')">📊 Estadísticas</button>
-      <button class="finTopTab ${state.financeSubTab==="mission"?"active":""}" onclick="setFinanceSubTab('mission')">Mission Control</button>
       <button class="finTopTab ${state.financeSubTab==="movements"?"active":""}" onclick="setFinanceSubTab('movements')">Movimientos</button>
+      <button class="finTopTab ${state.financeSubTab==="stats"?"active":""}" onclick="setFinanceSubTab('stats')">📊 Estadísticas</button>
+      <button class="finTopTab ${state.financeSubTab==="crypto"?"active":""}" onclick="setFinanceSubTab('crypto')">🪙 Crypto / BTC</button>
+      <button class="finTopTab ${state.financeSubTab==="mission"?"active":""}" onclick="setFinanceSubTab('mission')">Mission Control</button>
       <button class="finTopTab ${state.financeSubTab==="reminders"?"active":""}" onclick="setFinanceSubTab('reminders')">Recordatorios</button>
       <button class="finTopTab ${state.financeSubTab==="debts"?"active":""}" onclick="setFinanceSubTab('debts')">Deudas</button>
       <button class="finTopTab ${state.financeSubTab==="fiados"?"active":""}" onclick="setFinanceSubTab('fiados')">🤝 Fiados</button>
