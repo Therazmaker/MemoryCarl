@@ -17,6 +17,8 @@ export const DEFAULT_SETTINGS = {
   enabled:                true,
   apiKey:                 "",
   model:                  "gemini-2.5-flash",
+  claudeApiKey:           "",
+  claudeModel:            "claude-haiku-4-5",
   dailyLimit:             20,
   timeoutMs:              20000,
   temperature:            0.4,
@@ -112,6 +114,12 @@ export function validateNeuroChatSettings(settings) {
   if (typeof settings.enabled !== "boolean") errs.push("enabled debe ser boolean");
   if (typeof settings.apiKey  !== "string")  errs.push("apiKey debe ser string");
   if (typeof settings.model   !== "string" || !settings.model) errs.push("model inválido");
+  if (settings.claudeApiKey !== undefined && typeof settings.claudeApiKey !== "string") {
+    errs.push("claudeApiKey debe ser string");
+  }
+  if (settings.claudeModel !== undefined && typeof settings.claudeModel !== "string") {
+    errs.push("claudeModel debe ser string");
+  }
   if (typeof settings.dailyLimit !== "number"      || settings.dailyLimit < 1)    errs.push("dailyLimit debe ser >= 1");
   if (typeof settings.timeoutMs  !== "number"      || settings.timeoutMs  < 1000) errs.push("timeoutMs debe ser >= 1000");
   if (typeof settings.temperature !== "number"     || settings.temperature < 0 || settings.temperature > 2) {
