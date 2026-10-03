@@ -9,6 +9,7 @@
  */
 
 import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
+import { processDislikeExplanation } from "../neuro/feedback.js";
 import { NeuroProbeUI } from "./neuroprobe-ui.js";
 import { saveMemory, updateMemory, deleteMemory, autoFixMemory, suggestMemoryMilestone } from "../memory/memoryStore.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
@@ -90,6 +91,7 @@ const uiState = {
   },
   selectedMemoryId: null,
   memoryComposerOpen: false,
+  dislikeExplanationOpenFor: null,
 };
 
 const MODE_OPTIONS = [
@@ -244,7 +246,12 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false, options = {}) 
         <button class="ncFeedbackBtn ncFeedbackBtn--remove ${isRemoved ? "ncFeedbackBtn--active" : ""}" aria-label="Eliminar neurona ${esc(n.core.concept || "sin nombre")}" data-remove-neuron="${esc(n.id)}" ${isRemoved ? "disabled" : ""} title="Remove neuron">❌</button>
         ${currentFeedback && currentFeedback !== "remove" ? `<span class="ncFeedbackState">${currentFeedback === "like" ? "Relevante" : "No relevante"}</span>` : ""}
         ${isRemoved ? `<span class="ncFeedbackState ncFeedbackState--removed">Eliminada</span>` : ""}
-      </div>`
+      </div>
+      ${(currentFeedback === "dislike" || uiState.dislikeExplanationOpenFor === n.id) ? `
+      <div class="ncDislikeExplanationBox" style="margin-top: 6px; display: flex; gap: 6px; align-items: center;">
+        <input type="text" class="ncSettingsInput" id="ncDislikeReasonInput_${esc(n.id)}" placeholder="¿Por qué no aplicaba aquí? (opcional)" style="font-size: 11px; padding: 4px 8px;" />
+        <button class="ncActionBtn" data-submit-dislike-reason="${esc(n.id)}" style="font-size: 10px; padding: 4px 8px; white-space: nowrap;">Enviar</button>
+      </div>` : ""}`
     : "";
   return `
     <div class="ncNeuronCard" title="${esc(n.core.summary)}">
@@ -1250,11 +1257,34 @@ function wireMessageEvents(root) {
                 : item
             ));
           }
+          if (feedback === "dislike") {
+            uiState.dislikeExplanationOpenFor = neuronId;
+          }
           uiState.error = null;
         }
       } catch (err) {
         uiState.error = err.message || "No se pudo guardar feedback";
       }
+      rerenderSidePanel(root);
+    });
+  });
+
+  root.querySelectorAll("[data-submit-dislike-reason]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const neuronId = btn.getAttribute("data-submit-dislike-reason");
+      if (!neuronId) return;
+      const inputEl = root.querySelector(`#ncDislikeReasonInput_${CSS.escape(neuronId)}`);
+      const explanation = inputEl?.value?.trim() || "";
+      const messageId = uiState.lastResult?.messageId;
+      const userInput = getChatHistory().filter((m) => m.role === "user").slice(-1)[0]?.content || "";
+
+      if (explanation) {
+        processDislikeExplanation({ neuronId, userInput, explanation, messageId }).catch((e) => {
+          console.warn("Error enviando explicación de dislike:", e);
+        });
+      }
+
+      uiState.dislikeExplanationOpenFor = null;
       rerenderSidePanel(root);
     });
   });

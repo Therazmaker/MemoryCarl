@@ -3,8 +3,13 @@
  */
 
 import { clamp } from "./utils.js";
-import { getNeuronById, updateNeuron } from "./neuronStore.js";
+import { getNeuronById, updateNeuron, getAllNeurons, saveManyNeurons } from "./neuronStore.js";
 import { ensureNeuronEvolution, adjustNeuronWeight, updateNeuronEvolution, extractTriggerCandidatesFromInput, appendTriggerCandidate } from "./evolution.js";
+import { isOllamaConfigured, requestOllamaChatReply } from "../services/ollamaClient.js";
+import { sanitizeNeuron } from "./schemas.js";
+import { getEmbedding } from "./embeddings.js";
+import { dedupeGeneratedNeurons } from "./dedup.js";
+import { findRelatedNeurons, attachConnections } from "./connections.js";
 
 const FEEDBACK_STORE_KEY = "memorycarl_neurochat_feedback_history";
 const MAX_FEEDBACK_ITEMS = 5000;
@@ -323,4 +328,96 @@ export function getRecentNeuronFeedback(neuronId, limit = 5) {
  */
 export function applyNeuronFeedbackAndPersist(params) {
   return recordNeuronFeedback(params);
+}
+
+/**
+ * Procesa la explicación dada por el usuario tras un dislike en segundo plano.
+ * @param {{ neuronId: string, userInput?: string, explanation: string, messageId?: string|null }} params
+ */
+export async function processDislikeExplanation({ neuronId, userInput = "", explanation, messageId = null } = {}) {
+  if (!explanation || !explanation.trim() || !neuronId) return;
+  const neuron = getNeuronById(neuronId);
+  if (!neuron) return;
+
+  if (isOllamaConfigured()) {
+    try {
+      const prompt = `Carlos acaba de marcar con Dislike (no relevante) la neurona "${neuron.core?.concept || ""}" (${neuron.core?.summary || ""}) en el siguiente contexto:
+Mensaje de Carlos: "${userInput || ""}"
+Explicación de Carlos de por qué NO aplicaba aquí: "${explanation.trim()}"
+
+Tu tarea: basándote estrictamente en la explicación de Carlos, decide si:
+1) Se debe actualizar/refinar la neurona existente (p. ej. añadiendo triggers)
+2) Se debe crear una neurona nueva si la explicación describe un concepto/patrón que merece su propia neurona separada.
+
+Devuelve las acciones en formato JSON usando exactamente esta estructura al final de tu respuesta:
+---NEURON_ACTIONS---
+{
+  "intent": "consolidate",
+  "actions": [
+    {
+      "type": "create",
+      "neuron": {
+        "type": "pattern",
+        "core": { "concept": "...", "domain": "general", "summary": "..." },
+        "triggers": ["..."],
+        "emotion": "neutral"
+      }
+    },
+    {
+      "type": "update",
+      "neuronId": "${neuronId}",
+      "addTriggers": ["..."]
+    }
+  ]
+}`;
+
+      const res = await requestOllamaChatReply({
+        userInput: prompt,
+        context: [{ concept: neuron.core?.concept, domain: neuron.core?.domain, summary: neuron.core?.summary }],
+      });
+
+      if (res && res.neuronActions?.actions?.length > 0) {
+        const allAtActionTime = getAllNeurons();
+        const toSave = [];
+        for (const action of res.neuronActions.actions) {
+          if (action.type === "create" && action.neuron) {
+            const sanitized = sanitizeNeuron({
+              ...action.neuron,
+              source: { kind: "model_proposed", ref: "dislike_explanation" },
+            });
+            if (sanitized) {
+              if (!sanitized.embedding || sanitized.embedding.length === 0) {
+                const text = [sanitized.core?.concept, sanitized.core?.summary, ...(sanitized.triggers || [])].filter(Boolean).join(" ");
+                sanitized.embedding = await getEmbedding(text);
+              }
+              const dedupeCheck = dedupeGeneratedNeurons([sanitized], allAtActionTime);
+              if (dedupeCheck.toSave.length > 0) {
+                const n = dedupeCheck.toSave[0];
+                const related = await findRelatedNeurons(n, allAtActionTime);
+                attachConnections(n, related);
+                toSave.push(n);
+              }
+            }
+          } else if ((action.type === "update" || action.type === "refine") && action.neuronId) {
+            const changes = {};
+            if (action.changes) Object.assign(changes, action.changes);
+            if (Array.isArray(action.addTriggers)) {
+              const existing = allAtActionTime.find((n) => n.id === action.neuronId);
+              if (existing) {
+                changes.triggers = [...new Set([...(existing.triggers || []), ...action.addTriggers])];
+              }
+            }
+            if (Object.keys(changes).length > 0) {
+              updateNeuron(action.neuronId, changes);
+            }
+          }
+        }
+        if (toSave.length > 0) {
+          saveManyNeurons(toSave);
+        }
+      }
+    } catch (e) {
+      console.warn("[feedback] Error procesando explicación de dislike:", e);
+    }
+  }
 }
