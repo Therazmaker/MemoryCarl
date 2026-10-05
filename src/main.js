@@ -18009,7 +18009,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
           <select id="finEntryIncomePoolSelect" class="textInput" style="width:100%; box-sizing:border-box; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
             <option value="">-- Nuevo Ingreso Independiente --</option>
             ${(() => {
-              const activePools = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived && m.isSourcePool && m.id !== existing?.id);
+              const activePools = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger || [])).filter(m => m.type === 'income' && !m.archived && m.isSourcePool && m.id !== existing?.id);
               return activePools.map(p => {
                 const name = p.sourcePoolName || (p.note ? String(p.note).split(' · ')[0] : 'Pozo');
                 const isSel = existing?.parentPoolId === p.id;
@@ -18118,7 +18118,8 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <select id="finEntrySourceSelect" class="textInput" style="width:100%; box-sizing:border-box; margin-bottom:6px; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
           <option value="">-- Sin origen asignado (Caja general) --</option>
           ${(() => {
-            const pools = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived && (m.isSourcePool || existing?.sourceMovementId === m.id));
+            const activeLedger = financeActiveLedger ? financeActiveLedger() : (state.financeLedger || []);
+            const pools = activeLedger.filter(m => m.type === 'income' && !m.archived && (m.isSourcePool || existing?.sourceMovementId === m.id));
             if (pools.length === 0) {
               return `<option value="" disabled>-- No hay pozos creados aún (Marca un Ingreso como Pozo) --</option>`;
             }
@@ -22483,7 +22484,8 @@ function renderFinanceStatsTab() {
   let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[]));
 
   // Find all non-archived income entries that are explicitly source pools (or currently selected)
-  const allIncomes = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived && (m.isSourcePool || m.id === state.financeStatsSourceId));
+  const activeLedger = financeActiveLedger ? financeActiveLedger() : (state.financeLedger || []);
+  const allIncomes = activeLedger.filter(m => m.type === 'income' && !m.archived && (m.isSourcePool || m.id === state.financeStatsSourceId));
   const selectedSourceId = state.financeStatsSourceId || "";
   const selectedSource = selectedSourceId ? allIncomes.find(inc => inc.id === selectedSourceId) : null;
   
