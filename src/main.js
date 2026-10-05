@@ -22616,6 +22616,7 @@ function renderFinanceCryptoTab() {
 
 let _finStatsDonutChart = null;
 let _finStatsLineChart = null;
+let _finStatsYearlyBarChart = null;
 
 window.setFinanceStatsSource = function(srcId) {
   state.financeStatsSourceId = srcId;
@@ -22629,6 +22630,15 @@ function renderFinanceStatsTab() {
   if (state.financeStatsSourceId === undefined) {
     try { state.financeStatsSourceId = localStorage.getItem("memorycarl_v2_finance_stats_source") || ""; } catch(e) { state.financeStatsSourceId = ""; }
   }
+  const nowObj = new Date();
+  const currentYearStr = String(nowObj.getFullYear());
+  const currentMonthStr = String(nowObj.getMonth() + 1).padStart(2, '0');
+  if (!state.financeStatsYear) {
+    try { state.financeStatsYear = localStorage.getItem("memorycarl_v2_finance_stats_year") || currentYearStr; } catch(e) { state.financeStatsYear = currentYearStr; }
+  }
+  if (!state.financeStatsMonth) {
+    try { state.financeStatsMonth = localStorage.getItem("memorycarl_v2_finance_stats_month") || currentMonthStr; } catch(e) { state.financeStatsMonth = currentMonthStr; }
+  }
   const fmt = _financeFmt;
   const monthKey = getCurrentMonthKey();
   
@@ -22640,6 +22650,10 @@ function renderFinanceStatsTab() {
   const selectedSourceId = state.financeStatsSourceId || "";
   const selectedSource = selectedSourceId ? allIncomes.find(inc => inc.id === selectedSourceId) : null;
   
+  const selYear = state.financeStatsYear || currentYearStr;
+  const selMonth = state.financeStatsMonth || currentMonthStr;
+  const selectedMonthKey = `${selYear}-${selMonth}`;
+
   const now = new Date();
   if (state.financeStatsPeriod === 'week') {
     const day = now.getDay();
@@ -22659,7 +22673,9 @@ function renderFinanceStatsTab() {
       return d >= startFortnight && d <= new Date();
     });
   } else if (state.financeStatsPeriod === 'month') {
-    ledger = ledger.filter(e => String(e.date||'').startsWith(monthKey));
+    ledger = ledger.filter(e => String(e.date||'').startsWith(selectedMonthKey));
+  } else if (state.financeStatsPeriod === 'year' || state.financeStatsPeriod === 'all') {
+    ledger = ledger.filter(e => String(e.date||'').startsWith(selYear));
   }
 
   // Apply search query filter
@@ -22721,12 +22737,45 @@ function renderFinanceStatsTab() {
     return `<section class="finSection" style="background:#1c1c1e;border:1px solid #333;border-radius:12px;padding:16px;margin-bottom:16px;"><div class="finSectionHead" style="margin-bottom:14px;"><div class="finSectionTitle" style="color:#60a5fa;">💵 USD — PayPal / Ligo</div></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px;"><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Bruto</div><div style="font-weight:700;color:#fff;font-size:15px;">$${fmt(tGross)}</div></div><div style="background:#2a2a2c;padding:10px;border-radius:8px;text-align:center;"><div style="font-size:11px;color:#aaa;margin-bottom:4px;">Neto real</div><div style="font-weight:700;color:#34d399;font-size:15px;">$${fmt(tNet)}</div></div><div style="background:#ef444422;padding:10px;border-radius:8px;text-align:center;border:1px solid #ef444455;"><div style="font-size:11px;color:#fca5a5;margin-bottom:4px;">Comisiones</div><div style="font-weight:700;color:#ef4444;font-size:15px;">$${fmt(tFee)}</div></div></div>${usdMovs.map(m=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid #2a2a2c;"><div style="color:#ddd;">${m.note?escapeHtml(String(m.note).split('·')[0].trim()):'Ingreso'} <span style="color:#888;">${String(m.date||'').slice(0,10)}</span></div><div style="display:flex;gap:6px;"><span style="color:#aaa;">$${fmt(m.usdGross)}</span><span style="color:#ef4444;">-$${fmt(m.usdFee||0)}</span><span style="color:#34d399;font-weight:700;">=$${fmt((m.usdGross||0)-(m.usdFee||0))}</span></div></div>`).join('')}<div style="margin-top:10px;font-size:12px;color:#888;text-align:center;">Perdiste el <b style="color:#ef4444;">${feePct}%</b> en comisiones en este período.</div></section>`;
   })():'';
 
+  const availableYears = [...new Set(activeLedger.map(e => String(e.date || '').slice(0, 4)).filter(y => y && y.length === 4))];
+  if (!availableYears.includes(currentYearStr)) availableYears.push(currentYearStr);
+  availableYears.sort((a, b) => b.localeCompare(a));
+
+  const monthsList = [
+    { m: '01', name: 'Enero' }, { m: '02', name: 'Febrero' }, { m: '03', name: 'Marzo' },
+    { m: '04', name: 'Abril' }, { m: '05', name: 'Mayo' }, { m: '06', name: 'Junio' },
+    { m: '07', name: 'Julio' }, { m: '08', name: 'Agosto' }, { m: '09', name: 'Septiembre' },
+    { m: '10', name: 'Octubre' }, { m: '11', name: 'Noviembre' }, { m: '12', name: 'Diciembre' }
+  ];
+
+  const monthOptionsHtml = monthsList.map(mo => {
+    const isSel = (state.financeStatsPeriod === 'month' && state.financeStatsMonth === mo.m) ? 'selected' : '';
+    return `<option value="${mo.m}" ${isSel}>${mo.name}</option>`;
+  }).join('');
+
   const periodPills = `
-    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
-      <button class="finModeBtn ${state.financeStatsPeriod==='week'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('week')">Esta semana</button>
-      <button class="finModeBtn ${state.financeStatsPeriod==='fortnight'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('fortnight')">15 días</button>
-      <button class="finModeBtn ${state.financeStatsPeriod==='month'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('month')">Este mes</button>
-      <button class="finModeBtn ${state.financeStatsPeriod==='all'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('all')">Todo el historial</button>
+    <div style="margin-bottom:16px;">
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+        <button class="finModeBtn ${state.financeStatsPeriod==='week'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('week')">Esta semana</button>
+        <button class="finModeBtn ${state.financeStatsPeriod==='fortnight'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('fortnight')">15 días</button>
+        <button class="finModeBtn ${state.financeStatsPeriod==='month'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('month')">Este mes</button>
+        <button class="finModeBtn ${state.financeStatsPeriod==='year'?'finModeBtnActive':''}" onclick="setFinanceStatsPeriod('year')">Todo el año</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div style="flex:1;">
+          <label style="font-size:11px;color:#aaa;display:block;margin-bottom:2px;">📅 Año</label>
+          <select onchange="setFinanceStatsYear(this.value)" style="width:100%;background:#2a2a2c;color:#fff;border:1px solid #444;border-radius:8px;padding:8px 10px;font-size:13px;outline:none;box-sizing:border-box;">
+            ${availableYears.map(y => `<option value="${y}" ${y === state.financeStatsYear ? 'selected' : ''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        <div style="flex:1;">
+          <label style="font-size:11px;color:#aaa;display:block;margin-bottom:2px;">📆 Mes</label>
+          <select onchange="setFinanceStatsMonth(this.value)" style="width:100%;background:#2a2a2c;color:#fff;border:1px solid #444;border-radius:8px;padding:8px 10px;font-size:13px;outline:none;box-sizing:border-box;">
+            <option value="all" ${state.financeStatsPeriod === 'year' || state.financeStatsMonth === 'all' ? 'selected' : ''}>-- Todo el año --</option>
+            ${monthOptionsHtml}
+          </select>
+        </div>
+      </div>
     </div>
   `;
 
@@ -22892,11 +22941,22 @@ function renderFinanceStatsTab() {
     </div>
   `;
 
-  // Visual Charts Section (Line Chart + Donut Chart)
+  // Visual Charts Section (Yearly Bar Chart + Line Chart + Donut Chart)
+  const isYearView = state.financeStatsPeriod === 'year' || state.financeStatsPeriod === 'all';
   const chartsSectionHtml = `
     <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
       <div class="finSectionHead" style="margin-bottom:14px;">
-        <div class="finSectionTitle" style="color:#60a5fa;">📈 Evolución e Distribución Visual</div>
+        <div class="finSectionTitle" style="color:#60a5fa;">📈 Evolución y Distribución Visual</div>
+      </div>
+
+      <div id="finStatsYearlyBarContainer" style="margin-bottom:18px; ${isYearView ? '' : 'display:none;'}">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <div style="font-size:12px; font-weight:700; color:#aaa;">📊 Comparativa Mensual ${selYear} (Ingresos vs Gastos)</div>
+          <div style="font-size:11px; color:#34d399;">💡 Toca un mes para ver su detalle</div>
+        </div>
+        <div style="position:relative; width:100%; height:170px;">
+          <canvas id="finStatsYearlyBarCanvas"></canvas>
+        </div>
       </div>
 
       <div style="margin-bottom:18px;">
@@ -22945,7 +23005,11 @@ function renderFinanceStatsTab() {
     </section>
   ` : '';
 
-  const periodLabel = state.financeStatsPeriod === 'all' ? 'Todo el historial' : monthKey;
+  let periodLabel = "Este mes";
+  if (state.financeStatsPeriod === 'week') periodLabel = "Esta semana";
+  else if (state.financeStatsPeriod === 'fortnight') periodLabel = "15 días";
+  else if (state.financeStatsPeriod === 'month') periodLabel = selectedMonthKey;
+  else if (state.financeStatsPeriod === 'year' || state.financeStatsPeriod === 'all') periodLabel = `Año ${selYear}`;
 
   const periodFiados = ledger.filter(e => e.isFiado);
   const pendingFiados = periodFiados.filter(e => e.fiadoStatus === "pending");
@@ -23057,6 +23121,79 @@ function renderFinanceStatsTab() {
 
 function drawFinanceStatsCharts(expensesList, byCatList, poolInflows = []) {
   if (typeof Chart === "undefined") return;
+
+  // 0. Yearly Side-by-Side Bar Chart (Incomes Green vs Expenses Red per Month)
+  const barCanvas = document.getElementById("finStatsYearlyBarCanvas");
+  if (barCanvas) {
+    try { if (_finStatsYearlyBarChart) { _finStatsYearlyBarChart.destroy(); _finStatsYearlyBarChart = null; } } catch(e){}
+
+    const activeLedger = financeActiveLedger ? financeActiveLedger() : (state.financeLedger || []);
+    const targetYear = state.financeStatsYear || String(new Date().getFullYear());
+    const monthShorts = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+    const monthKeys = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
+
+    const yearlyIncomes = monthKeys.map(mk => {
+      const ym = `${targetYear}-${mk}`;
+      return activeLedger
+        .filter(m => m.type === 'income' && !m.archived && String(m.date || '').startsWith(ym))
+        .reduce((sum, m) => sum + Number(m.amount || 0), 0);
+    });
+
+    const yearlyExpenses = monthKeys.map(mk => {
+      const ym = `${targetYear}-${mk}`;
+      return activeLedger
+        .filter(m => m.type === 'expense' && !m.archived && String(m.date || '').startsWith(ym))
+        .reduce((sum, m) => sum + Number(m.amount || 0), 0);
+    });
+
+    _finStatsYearlyBarChart = new Chart(barCanvas.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels: monthShorts,
+        datasets: [
+          {
+            label: "Ingresos",
+            data: yearlyIncomes,
+            backgroundColor: "#34d399",
+            borderRadius: 4
+          },
+          {
+            label: "Gastos",
+            data: yearlyExpenses,
+            backgroundColor: "#f87171",
+            borderRadius: 4
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        onClick: (evt, activeEls) => {
+          if (activeEls && activeEls.length > 0) {
+            const index = activeEls[0].index;
+            const selectedMonthStr = monthKeys[index];
+            if (typeof window.setFinanceStatsMonth === "function") {
+              window.setFinanceStatsMonth(selectedMonthStr);
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            display: true,
+            position: "top",
+            labels: { color: "#fff", font: { size: 10 }, boxWidth: 10 }
+          },
+          tooltip: {
+            callbacks: { label: ctx => ` ${ctx.dataset.label}: S/ ${Number(ctx.raw||0).toFixed(2)}` }
+          }
+        },
+        scales: {
+          x: { ticks: { color: "rgba(255,255,255,0.7)", font: { size: 10 } }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { color: "rgba(255,255,255,0.5)", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } }
+        }
+      }
+    });
+  }
 
   // 1. Line Chart (Multi-line: Inflows vs Outflows vs Cumulative Net Balance)
   const lineCanvas = document.getElementById("finStatsLineCanvas");
@@ -23344,6 +23481,24 @@ window.setFinanceStatsPeriod = function(period) {
   view();
 };
 
+window.setFinanceStatsYear = function(year) {
+  state.financeStatsYear = year;
+  save("memorycarl_v2_finance_stats_year", year);
+  view();
+};
+
+window.setFinanceStatsMonth = function(month) {
+  if (month === "all") {
+    state.financeStatsPeriod = "year";
+  } else {
+    state.financeStatsPeriod = "month";
+    state.financeStatsMonth = month;
+    save("memorycarl_v2_finance_stats_month", month);
+  }
+  save("memorycarl_v2_finance_stats_period", state.financeStatsPeriod);
+  view();
+};
+
 window.setFinanceStatsSearch = function(q) {
   state.financeStatsSearch = q;
   view();
@@ -23367,6 +23522,10 @@ window.openFinanceStatsBreakdownModal = function(type, key, label) {
   let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[]));
   
   const now = new Date();
+  const selYear = state.financeStatsYear || String(now.getFullYear());
+  const selMonth = state.financeStatsMonth || String(now.getMonth() + 1).padStart(2, '0');
+  const selectedMonthKey = `${selYear}-${selMonth}`;
+
   if (period === 'week') {
     const day = now.getDay();
     const diff = now.getDate() - day + (day === 0 ? -6 : 1);
@@ -23385,8 +23544,9 @@ window.openFinanceStatsBreakdownModal = function(type, key, label) {
       return d >= startFortnight && d <= new Date();
     });
   } else if (period === 'month') {
-    const monthKey = getCurrentMonthKey();
-    ledger = ledger.filter(e => String(e.date||'').startsWith(monthKey));
+    ledger = ledger.filter(e => String(e.date||'').startsWith(selectedMonthKey));
+  } else if (period === 'year' || period === 'all') {
+    ledger = ledger.filter(e => String(e.date||'').startsWith(selYear));
   }
   
   if (searchQ) {
