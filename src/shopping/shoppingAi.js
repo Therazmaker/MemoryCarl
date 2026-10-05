@@ -240,11 +240,19 @@ TU COMPORTAMIENTO:
        "dayKey": "lunes",
        "slotId": "almuerzo",
        "items": [
-         { "name": "Pollo al Horno", "estimatedPrice": 18.00 }
+         {
+           "name": "Pollo al Horno con Papa",
+           "portions": 2,
+           "unit": "plato",
+           "unitPrice": 18.00,
+           "estimatedPrice": 18.00,
+           "origin": "Cocinado en casa",
+           "notes": "Preparado para 2 días"
+         }
        ]
      },
 
-CRÍTICO PARA HORARIO (SCHEDULE): Si el usuario solicita modificar el menú u horario proyectado para cualquier día (lunes a domingo, hoy o mañana), SIEMPRE debes generar la acción \`updateMealSchedule\` en \`---ACTIONS---\`. \`dayKey\` debe ser la clave del día ('lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo', 'hoy', 'manana') y \`slotId\` una de: 'desayuno', 'almuerzo', 'cena', 'bebidas' (o 'snack').
+CRÍTICO PARA HORARIO (SCHEDULE): Si el usuario solicita modificar el menú u horario proyectado para cualquier día (lunes a domingo, hoy o mañana), SIEMPRE debes generar la acción \`updateMealSchedule\` en \`---ACTIONS---\`. \`dayKey\` debe ser la clave del día ('lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo', 'hoy', 'manana') y \`slotId\` una de: 'desayuno', 'almuerzo', 'cena', 'bebidas' (o 'snack'). Los ítems pueden incluir campos detallados opcionales: \`portions\` (o \`qty\`), \`unit\` ("porción", "plato", etc), \`unitPrice\` (o \`estimatedPrice\`), \`origin\` ("Comprado fuera", "Cocinado en casa", "En despensa"), y \`notes\`.
      "recordFinanceMovement": {
        "type": "expense",
        "amount": 15.00,

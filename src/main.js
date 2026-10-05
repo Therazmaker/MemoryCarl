@@ -3426,16 +3426,27 @@ function view(){
         if (result.actions && result.actions.updateMealSchedule) {
           const ums = result.actions.updateMealSchedule;
           if (ums.dayKey && ums.slotId && Array.isArray(ums.items)) {
+            const canonicalDay = normalizeDayKey(ums.dayKey) || ums.dayKey;
+            const canonicalSlot = ums.slotId === "snack" ? "bebidas" : ums.slotId;
             const sched = loadMealSchedule();
-            if (sched[ums.dayKey]) {
-              sched[ums.dayKey][ums.slotId] = ums.items.map(it => ({
-                name: String(it.name || "").trim(),
-                qty: Math.max(1, Number(it.qty) || 1),
-                estimatedPrice: Number(it.estimatedPrice || it.price || 0),
-                isCustom: true
-              }));
+            if (sched[canonicalDay]) {
+              sched[canonicalDay][canonicalSlot] = ums.items.map(it => {
+                const portions = Math.max(0.1, Number(it.portions ?? it.qty) || 1);
+                const unitPrice = Number(it.unitPrice ?? it.estimatedPrice ?? it.price ?? 0);
+                return {
+                  name: String(it.name || "").trim(),
+                  portions,
+                  qty: portions,
+                  unit: String(it.unit || "porción").trim(),
+                  unitPrice,
+                  estimatedPrice: unitPrice,
+                  origin: String(it.origin || "Comprado fuera").trim(),
+                  notes: String(it.notes || "").trim(),
+                  isCustom: true
+                };
+              });
               saveMealSchedule(sched);
-              toast(`📅 Plan del horario actualizado para ${ums.dayKey} (${ums.slotId})`);
+              toast(`📅 Plan del horario actualizado para ${canonicalDay} (${canonicalSlot})`);
             }
           }
         }
@@ -3679,6 +3690,16 @@ function view(){
         const dKey = btn.dataset.day;
         const sId = btn.dataset.slot;
         openAddScheduleItemModal(dKey, sId);
+      });
+    });
+
+    // Edit item in schedule slot
+    root.querySelectorAll(".btnEditScheduleItem").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const dKey = btn.dataset.day;
+        const sId = btn.dataset.slot;
+        const idx = Number(btn.dataset.idx);
+        openAddScheduleItemModal(dKey, sId, idx);
       });
     });
 
@@ -15748,15 +15769,27 @@ function renderScheduleDailyView(schedule, prods){
             ` : `
               <div style="display:flex;flex-direction:column;gap:6px;">
                 ${items.map((it, idx) => `
-                  <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:rgba(255,255,255,0.03);border-radius:6px;font-size:13px;">
-                    <div>
-                      <span style="color:#f8fafc;font-weight:500;">${escapeHtml(it.name)}</span>
-                      <span style="font-size:11px;color:rgba(255,255,255,0.45);margin-left:4px;">x${it.qty}</span>
-                      ${!it.foundInLibrary ? `<span class="chip" style="font-size:9.5px;padding:1px 5px;background:rgba(234,179,8,0.18);color:#fef08a;margin-left:4px;">No en biblioteca</span>` : ""}
+                  <div style="display:flex;flex-direction:column;gap:4px;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.04);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <span style="color:#f8fafc;font-weight:600;font-size:13.5px;">${escapeHtml(it.name)}</span>
+                        <span class="chip" style="font-size:10px;padding:1px 6px;background:rgba(56,189,248,0.15);color:#38bdf8;">
+                          ${it.portions} ${escapeHtml(it.unit || "porción")}${it.portions > 1 ? "es" : ""}
+                        </span>
+                        <span class="chip" style="font-size:10px;padding:1px 6px;background:rgba(255,255,255,0.08);color:#cbd5e1;">
+                          ${escapeHtml(it.origin || "Comprado fuera")}
+                        </span>
+                        ${!it.foundInLibrary ? `<span class="chip" style="font-size:9.5px;padding:1px 5px;background:rgba(234,179,8,0.18);color:#fef08a;">No en biblioteca</span>` : ""}
+                      </div>
+                      <div style="display:flex;align-items:center;gap:6px;">
+                        <span style="font-weight:700;font-size:13px;color:${it.foundInLibrary ? '#38bdf8' : '#fbbf24'};">S/ ${it.totalPrice.toFixed(2)}</span>
+                        <button class="iconBtn btnEditScheduleItem" data-day="${_selectedScheduleDay}" data-slot="${slot.id}" data-idx="${idx}" title="Editar detalle" style="width:22px;height:22px;font-size:11px;color:#94a3b8;padding:0;">✏️</button>
+                        <button class="iconBtn btnDeleteScheduleItem" data-day="${_selectedScheduleDay}" data-slot="${slot.id}" data-idx="${idx}" title="Eliminar" style="width:22px;height:22px;font-size:11px;color:#f87171;padding:0;">✕</button>
+                      </div>
                     </div>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                      <span style="font-weight:600;color:${it.foundInLibrary ? '#38bdf8' : '#fbbf24'};">S/ ${it.totalPrice.toFixed(2)}</span>
-                      <button class="iconBtn btnDeleteScheduleItem" data-day="${_selectedScheduleDay}" data-slot="${slot.id}" data-idx="${idx}" title="Eliminar" style="width:22px;height:22px;font-size:11px;color:#f87171;padding:0;">✕</button>
+                    <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:rgba(255,255,255,0.5);">
+                      <span>Precio unitario: S/ ${Number(it.unitPrice || 0).toFixed(2)}</span>
+                      ${it.notes ? `<span style="font-style:italic;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📝 ${escapeHtml(it.notes)}</span>` : ""}
                     </div>
                   </div>
                 `).join("")}
@@ -15903,8 +15936,13 @@ function openPickMealBundleModal(dayKey, slotId){
 
       schedule[dayKey][slotId].push({
         name: mb.name,
-        qty: 1,
+        portions: mb.servings || 1,
+        qty: mb.servings || 1,
+        unit: "porción",
+        unitPrice: mb.costPerPortion || 0,
         estimatedPrice: mb.costPerPortion || 0,
+        origin: "Cocinado en casa",
+        notes: mb.description || "",
         isCustom: true,
         bundleId: mb.id
       });
@@ -15917,36 +15955,149 @@ function openPickMealBundleModal(dayKey, slotId){
   });
 }
 
-function openAddScheduleItemModal(dayKey, slotId){
+function openAddScheduleItemModal(dayKey, slotId, editIdx = null){
   const slot = MEAL_SLOTS.find(s => s.id === slotId) || MEAL_SLOTS[0];
   const day = DAYS_OF_WEEK.find(d => d.key === dayKey) || DAYS_OF_WEEK[0];
+  const schedule = loadMealSchedule();
+  const existingItems = schedule[dayKey]?.[slotId] || [];
+  const existingItem = (editIdx !== null && existingItems[editIdx]) ? existingItems[editIdx] : null;
 
-  openPromptModal({
-    title: `Agregar a ${slot.label} (${day.label})`,
-    fields: [
-      { key: "name", label: "Nombre del alimento o bebida (ej: Menú ejecutivo, Volt, Empanadas)" },
-      { key: "qty", label: "Cantidad", value: "1", type: "number" },
-      { key: "estimatedPrice", label: "Precio estimado si no está en biblioteca (S/)", value: "0", type: "number" }
-    ],
-    onSubmit: ({ name, qty, estimatedPrice }) => {
-      const cleanName = (name || "").trim();
-      if (!cleanName) return;
+  const isEditing = editIdx !== null && existingItem !== null;
 
-      const schedule = loadMealSchedule();
-      if (!schedule[dayKey]) schedule[dayKey] = {};
-      if (!Array.isArray(schedule[dayKey][slotId])) schedule[dayKey][slotId] = [];
+  const host = document.querySelector("#app");
+  const b = document.createElement("div");
+  b.className = "modalBackdrop";
+  b.innerHTML = `
+    <div class="modal" style="max-width:460px;width:92%;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <h2 style="margin:0;font-size:16px;">
+          ${isEditing ? "✏️ Editar detalle" : "➕ Agregar"} a ${slot.label} (${day.label})
+        </h2>
+        <button class="iconBtn" id="btnCloseScheduleItemModal" style="font-size:14px;">✕</button>
+      </div>
 
-      schedule[dayKey][slotId].push({
-        name: cleanName,
-        qty: Math.max(1, Number(qty) || 1),
-        estimatedPrice: Number(estimatedPrice) || 0,
-        isCustom: true
-      });
+      <form id="scheduleItemDetailForm" style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <label style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:4px;display:block;">
+            Nombre del alimento / bebida / platillo *
+          </label>
+          <input type="text" id="schItemName" class="input" required placeholder="Ej: Menú ejecutivo, Pollo a la brasa, Volt" value="${escapeHtml(existingItem?.name || "")}" style="width:100%;box-sizing:border-box;">
+        </div>
 
-      saveMealSchedule(schedule);
-      toast(`✓ Agregado a ${slot.label}`);
-      view();
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:4px;display:block;">
+              Porciones / Cantidad *
+            </label>
+            <input type="number" id="schItemPortions" class="input" step="any" min="0" required value="${existingItem?.portions ?? existingItem?.qty ?? 1}" style="width:100%;box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:4px;display:block;">
+              Unidad / Medida
+            </label>
+            <input type="text" id="schItemUnit" class="input" placeholder="porción, plato, botella, g" value="${escapeHtml(existingItem?.unit || "porción")}" style="width:100%;box-sizing:border-box;">
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:4px;display:block;">
+              Precio Unitario / porción (S/) *
+            </label>
+            <input type="number" id="schItemUnitPrice" class="input" step="any" min="0" value="${existingItem?.unitPrice ?? existingItem?.estimatedPrice ?? 0}" style="width:100%;box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:4px;display:block;">
+              Total estimado (S/)
+            </label>
+            <input type="text" id="schItemTotalPrice" class="input" readonly style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.06);font-weight:700;color:#38bdf8;" value="S/ 0.00">
+          </div>
+        </div>
+
+        <div>
+          <label style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:4px;display:block;">
+            Origen / Preparación
+          </label>
+          <select id="schItemOrigin" class="input" style="width:100%;box-sizing:border-box;background:#1e293b;color:#f8fafc;">
+            <option value="Comprado fuera" ${existingItem?.origin === "Comprado fuera" ? "selected" : ""}>Comprado fuera / Restaurante</option>
+            <option value="Cocinado en casa" ${existingItem?.origin === "Cocinado en casa" ? "selected" : ""}>Cocinado en casa</option>
+            <option value="En despensa" ${existingItem?.origin === "En despensa" ? "selected" : ""}>En despensa</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:4px;display:block;">
+            Notas / Ingredientes adicionales
+          </label>
+          <input type="text" id="schItemNotes" class="input" placeholder="Ej: Con ensalada y chicha, sin picante" value="${escapeHtml(existingItem?.notes || "")}" style="width:100%;box-sizing:border-box;">
+        </div>
+
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px;">
+          <button type="button" class="btn ghost" id="btnCancelScheduleItemModal">Cancelar</button>
+          <button type="submit" class="btn primary">Guardar detalle</button>
+        </div>
+      </form>
+    </div>
+  `;
+  host.appendChild(b);
+
+  const form = b.querySelector("#scheduleItemDetailForm");
+  const portionsInp = b.querySelector("#schItemPortions");
+  const unitPriceInp = b.querySelector("#schItemUnitPrice");
+  const totalPriceInp = b.querySelector("#schItemTotalPrice");
+
+  const recalcTotal = () => {
+    const p = Math.max(0, Number(portionsInp.value) || 0);
+    const u = Math.max(0, Number(unitPriceInp.value) || 0);
+    totalPriceInp.value = `S/ ${(p * u).toFixed(2)}`;
+  };
+
+  portionsInp.addEventListener("input", recalcTotal);
+  unitPriceInp.addEventListener("input", recalcTotal);
+  recalcTotal();
+
+  const close = () => b.remove();
+  b.addEventListener("click", (e) => { if (e.target === b) close(); });
+  b.querySelector("#btnCloseScheduleItemModal")?.addEventListener("click", close);
+  b.querySelector("#btnCancelScheduleItemModal")?.addEventListener("click", close);
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = b.querySelector("#schItemName").value.trim();
+    if (!name) return;
+
+    const portions = Math.max(0.1, Number(portionsInp.value) || 1);
+    const unitPrice = Math.max(0, Number(unitPriceInp.value) || 0);
+    const unit = b.querySelector("#schItemUnit").value.trim() || "porción";
+    const origin = b.querySelector("#schItemOrigin").value || "Comprado fuera";
+    const notes = b.querySelector("#schItemNotes").value.trim();
+
+    const currentSched = loadMealSchedule();
+    if (!currentSched[dayKey]) currentSched[dayKey] = {};
+    if (!Array.isArray(currentSched[dayKey][slotId])) currentSched[dayKey][slotId] = [];
+
+    const itemObj = {
+      name,
+      portions,
+      qty: portions,
+      unit,
+      unitPrice,
+      estimatedPrice: unitPrice,
+      origin,
+      notes,
+      isCustom: true
+    };
+
+    if (isEditing) {
+      currentSched[dayKey][slotId][editIdx] = itemObj;
+    } else {
+      currentSched[dayKey][slotId].push(itemObj);
     }
+
+    saveMealSchedule(currentSched);
+    close();
+    toast(`✓ ${isEditing ? "Actualizado" : "Agregado a " + slot.label}`);
+    view();
   });
 }
 
