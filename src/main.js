@@ -17215,8 +17215,10 @@ function financeActiveLedger(){
 
 function financeRecomputeBalances(){
   const sums = {};
+  const primaryId = state.financePrimaryAccountId || (state.financeAccounts||[]).find(a=>!a.archived && a.status !== 'archived')?.id;
+
   (financeActiveLedger()||[]).forEach(e=>{
-    const accId = e.accountId;
+    const accId = e.accountId || primaryId;
     const amt = Number(e.amount||0);
     if(accId) {
       if(sums[accId] === undefined) sums[accId] = 0;
@@ -17243,6 +17245,10 @@ function financeRecomputeBalances(){
     const finalVal = base + delta;
     a.balance = a.type === "crypto" ? Number(finalVal.toFixed(8)) : Number(finalVal.toFixed(2));
   });
+
+  if (window.FINANCE && Array.isArray(window.FINANCE.state?.accounts)) {
+    window.FINANCE.state.accounts = state.financeAccounts;
+  }
 }
 
 function financeResetToZero(){
@@ -17581,17 +17587,27 @@ function openFinanceAccountModal(prefill=null){
         // Calculate: initialBalance = realBalance - sum(ledger)
         const realBal = Number(realBalVal);
         let sumLedger = 0;
+        const primaryId = state.financePrimaryAccountId || (state.financeAccounts||[])[0]?.id;
         (financeActiveLedger()||[]).forEach(e => {
-          if(e.accountId !== acc.id) return;
+          const accId = e.accountId || primaryId;
           const amt = Number(e.amount||0);
           if(e.type === "expense") {
             if (e.isFiado && e.fiadoStatus !== "paid") {
               // ignore
-            } else {
+            } else if (accId === acc.id) {
               sumLedger -= amt;
             }
           } else if(e.type === "income") {
-            sumLedger += amt;
+            if (accId === acc.id) {
+              sumLedger += amt;
+            }
+          } else if(e.type === "transfer") {
+            if (accId === acc.id) {
+              sumLedger -= amt;
+            }
+            if (e.toAccountId === acc.id) {
+              sumLedger += amt;
+            }
           }
         });
         acc.initialBalance = realBal - sumLedger;
@@ -17671,42 +17687,105 @@ function financeAccountStats(accountId) {
   return { monthExpense, monthIncome, sortedWeeks, currentMonth };
 }
 
+function getMovementOriginBadge(e) {
+  const noteLow = String(e.note || "").toLowerCase();
+  const catLow = String(e.category || "").toLowerCase();
+  if (e.neuronRole === "ia" || e.source === "chat" || e.source === "neurochat" || e.source === "chef" || noteLow.includes("chef") || noteLow.includes("ia") || e.aiClassification) {
+    return `<span style="background:rgba(124,92,255,0.2); color:#a78bfa; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">🤖 IA / Chef</span>`;
+  }
+  if (e.source === "shopping" || catLow.includes("mercado") || noteLow.includes("compras")) {
+    return `<span style="background:rgba(52,211,153,0.2); color:#34d399; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">🛒 Compras</span>`;
+  }
+  if (e.source === "quick" || e.reason === "impulso") {
+    return `<span style="background:rgba(251,191,36,0.2); color:#fbbf24; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">⚡ Rápido</span>`;
+  }
+  return `<span style="background:rgba(148,163,184,0.2); color:#94a3b8; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">👤 Manual</span>`;
+}
+
 function openFinanceAccountDetails(accountId) {
   const acc = (state.financeAccounts||[]).find(a=>a.id===accountId);
   if(!acc) return;
   
+  const primaryId = state.financePrimaryAccountId || (state.financeAccounts||[])[0]?.id;
+  const isPrimary = acc.id === primaryId;
   const stats = financeAccountStats(accountId);
   const isFergis = String(acc.name||"").toLowerCase().includes("fergis");
   const fmt = _financeFmt;
   
+  const allLedger = financeActiveLedger() || [];
+  const accLedger = _financeSortLedgerNewToOld(
+    allLedger.filter(e => (e.accountId || primaryId) === acc.id || e.toAccountId === acc.id)
+  );
+
+  let totIncome = 0;
+  let totExpense = 0;
+  let totTransfersIn = 0;
+  let totTransfersOut = 0;
+  let unassignedCount = 0;
+
+  allLedger.forEach(e => {
+    const assignedAccId = e.accountId || primaryId;
+    if (!e.accountId && isPrimary) {
+      unassignedCount++;
+    }
+    const amt = Number(e.amount || 0);
+    if (e.type === "expense") {
+      if (assignedAccId === acc.id && !(e.isFiado && e.fiadoStatus !== "paid")) {
+        totExpense += amt;
+      }
+    } else if (e.type === "income") {
+      if (assignedAccId === acc.id) {
+        totIncome += amt;
+      }
+    } else if (e.type === "transfer") {
+      if (assignedAccId === acc.id) {
+        totTransfersOut += amt;
+      }
+      if (e.toAccountId === acc.id) {
+        totTransfersIn += amt;
+      }
+    }
+  });
+
+  const initBal = Number(acc.initialBalance || 0);
+  const netTransfers = totTransfersIn - totTransfersOut;
+  const calcBal = initBal + totIncome - totExpense + netTransfers;
+
+  // Detect potential duplicates
+  const duplicates = [];
+  const seenDupIds = new Set();
+  for (let i = 0; i < accLedger.length; i++) {
+    for (let j = i + 1; j < accLedger.length; j++) {
+      const a = accLedger[i];
+      const b = accLedger[j];
+      if (a.id !== b.id && a.type === b.type && Math.abs(Number(a.amount || 0) - Number(b.amount || 0)) < 0.01) {
+        const dateA = String(a.date || "").slice(0, 10);
+        const dateB = String(b.date || "").slice(0, 10);
+        if (dateA === dateB && !seenDupIds.has(a.id) && !seenDupIds.has(b.id)) {
+          duplicates.push({ entry1: a, entry2: b });
+          seenDupIds.add(a.id);
+          seenDupIds.add(b.id);
+        }
+      }
+    }
+  }
+
   const host = document.body;
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop finAccBackdrop';
-  
-  const weeksHtml = stats.sortedWeeks.map((w) => {
-    return `
-      <div class="finAccDetailsRow">
-        <div class="finAccDetailsLabel">Semana del ${w.weekStart}</div>
-        <div class="finAccDetailsValRow">
-          <div class="finAccDetailsVal exp">S/ ${fmt(w.expense)}</div>
-          ${!isFergis ? `<div class="finAccDetailsVal inc">+ S/ ${fmt(w.income)}</div>` : ''}
-        </div>
-      </div>
-    `;
-  }).join('');
 
   backdrop.innerHTML = `
     <div class="modal finAccDetailsModal" role="dialog" aria-label="Detalles de Cuenta">
       <div class="finEntryTop">
         <button class="iconBtn" id="finAccDetClose" aria-label="Cerrar">←</button>
         <div class="finEntryTopTitle">${escapeHtml(acc.name)}</div>
-        <button class="iconBtn" id="finAccDetEdit" title="Editar">✏️</button>
+        <button class="iconBtn" id="finAccDetEdit" title="Editar cuenta">✏️</button>
       </div>
 
-      <div class="finEntryScroll">
+      <div class="finEntryScroll" style="padding-bottom:24px;">
         <div class="finAccDetailsHero">
           <div class="finAccDetailsHeroLabel">${isFergis ? 'Uso este mes' : 'Saldo Actual'}</div>
-          <div class="finAccDetailsHeroVal">S/ ${fmt(isFergis ? stats.monthExpense : acc.balance)}</div>
+          <div class="finAccDetailsHeroVal ${!isFergis && acc.balance < 0 ? 'finAccNeg' : ''}">S/ ${fmt(isFergis ? stats.monthExpense : acc.balance)}</div>
         </div>
 
         ${!isFergis ? `
@@ -17720,11 +17799,83 @@ function openFinanceAccountDetails(accountId) {
             <div class="statVal exp">- S/ ${fmt(stats.monthExpense)}</div>
           </div>
         </div>
+
+        <!-- AUDITORÍA DE SALDO -->
+        <div style="background:#1e1e24; border:1px solid #333; border-radius:10px; padding:12px; margin-bottom:14px; font-size:12px; color:#ccc;">
+          <div style="font-weight:700; color:#a78bfa; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+            <span>📊 Auditoría de Saldo</span>
+            <span style="font-size:11px; opacity:0.8;">Fórmula histórica</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">
+            <div>• Saldo inicial: <strong style="color:#fff;">S/ ${fmt(initBal)}</strong></div>
+            <div>• Ingresos: <strong style="color:#34d399;">+S/ ${fmt(totIncome)}</strong></div>
+            <div>• Gastos: <strong style="color:#f87171;">-S/ ${fmt(totExpense)}</strong></div>
+            <div>• Traspasos: <strong style="color:#60a5fa;">${netTransfers >= 0 ? '+' : ''}S/ ${fmt(netTransfers)}</strong></div>
+          </div>
+          <div style="border-top:1px solid #333; padding-top:6px; margin-top:4px; display:flex; justify-content:space-between; font-weight:700;">
+            <span>= Saldo Calculado:</span>
+            <span class="${calcBal >= 0 ? 'finAccPos' : 'finAccNeg'}">S/ ${fmt(calcBal)}</span>
+          </div>
+        </div>
         ` : ''}
 
-        <div class="finAccDetailsTitle">Desglose Semanal</div>
-        <div class="finAccDetailsList">
-          ${weeksHtml || '<div class="muted" style="text-align:center;padding:20px;">Sin movimientos este mes</div>'}
+        ${!isFergis && acc.balance < 0 ? `
+        <div style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:10px; padding:12px; margin-bottom:14px; font-size:12px; color:#fca5a5;">
+          <div style="font-weight:700; font-size:13px; color:#ef4444; margin-bottom:4px;">⚠️ Saldo Negativo Explicado</div>
+          <div>Los gastos e imprevistos acumulados en esta cuenta (S/ ${fmt(totExpense)}) superan tu saldo inicial e ingresos asignados (S/ ${fmt(initBal + totIncome)}) por <strong>S/ ${fmt(Math.abs(acc.balance))}</strong>.</div>
+          <div style="margin-top:8px; display:flex; gap:8px;">
+            <button class="btn" style="background:#ef4444; color:#fff; padding:6px 12px; border-radius:6px; font-size:11px; font-weight:bold; cursor:pointer;" id="finAccDetFixBal">✏️ Ajustar Saldo Real Hoy</button>
+          </div>
+        </div>
+        ` : ''}
+
+        ${isPrimary && unassignedCount > 0 ? `
+        <div style="background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.3); border-radius:10px; padding:10px 12px; margin-bottom:14px; font-size:12px; color:#a5b4fc;">
+          <strong>ℹ️ Movimientos atribuibles:</strong> Hay <strong>${unassignedCount}</strong> movimiento(s) sin cuenta explícita atribuido(s) a tu cuenta principal.
+        </div>
+        ` : ''}
+
+        ${duplicates.length > 0 ? `
+        <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); border-radius:10px; padding:12px; margin-bottom:14px; font-size:12px; color:#fde68a;">
+          <div style="font-weight:700; color:#f59e0b; margin-bottom:6px;">⚠️ Posibles Movimientos Duplicados (${duplicates.length})</div>
+          ${duplicates.map(dup => `
+            <div style="background:#1f1f23; padding:8px 10px; border-radius:6px; margin-bottom:6px; border:1px solid #333;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                <span style="font-weight:600; color:#fff;">${escapeHtml(dup.entry1.note || dup.entry1.category)}</span>
+                <span style="font-weight:700; color:#fbbf24;">S/ ${fmt(dup.entry1.amount)}</span>
+              </div>
+              <div style="font-size:11px; color:#aaa; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <span>1) ${dup.entry1.date.slice(0,10)} ${getMovementOriginBadge(dup.entry1)}</span>
+                <button class="iconBtn btnDelDup" data-id="${dup.entry1.id}" style="color:#ef4444; font-size:11px; border:1px solid #ef444455; padding:2px 6px; border-radius:4px;" title="Borrar este">🗑️ Borrar</button>
+              </div>
+              <div style="font-size:11px; color:#aaa; display:flex; justify-content:space-between; align-items:center;">
+                <span>2) ${dup.entry2.date.slice(0,10)} ${getMovementOriginBadge(dup.entry2)}</span>
+                <button class="iconBtn btnDelDup" data-id="${dup.entry2.id}" style="color:#ef4444; font-size:11px; border:1px solid #ef444455; padding:2px 6px; border-radius:4px;" title="Borrar este">🗑️ Borrar</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        ` : ''}
+
+        <div class="finAccDetailsTitle" style="margin-top:12px; margin-bottom:8px; font-weight:700; font-size:14px; color:#fff;">📋 Historial de Movimientos de la Cuenta</div>
+        <div style="display:flex; flex-direction:column; gap:8px; max-height:280px; overflow-y:auto; padding-right:4px;">
+          ${accLedger.slice(0, 40).map(e => `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#1e1e24; padding:8px 12px; border-radius:8px; border:1px solid #2d2d35;">
+              <div>
+                <div style="font-size:13px; font-weight:600; color:#fff; display:flex; align-items:center; gap:6px;">
+                  ${escapeHtml(e.note || e.category || 'Movimiento')}
+                  ${getMovementOriginBadge(e)}
+                </div>
+                <div style="font-size:11px; color:#888; margin-top:2px;">${String(e.date||'').slice(0,10)} · ${escapeHtml(e.category||'')}</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-weight:700; font-size:13px;" class="${e.type==='income'?'finAccPos':e.type==='expense'?'finAccNeg':''}">
+                  ${e.type==='income'?'+':e.type==='expense'?'-':''}S/ ${fmt(e.amount)}
+                </span>
+                <button class="iconBtn btnEditMov" data-id="${e.id}" style="font-size:12px; color:#aaa; padding:4px;" title="Editar">✏️</button>
+              </div>
+            </div>
+          `).join('') || '<div class="muted" style="text-align:center;padding:20px;">Sin movimientos registrados para esta cuenta</div>'}
         </div>
       </div>
     </div>
@@ -17732,11 +17883,38 @@ function openFinanceAccountDetails(accountId) {
 
   host.appendChild(backdrop);
   const close = ()=> backdrop.remove();
-  backdrop.querySelector('#finAccDetClose').addEventListener('click', close);
+  backdrop.querySelector('#finAccDetClose')?.addEventListener('click', close);
   backdrop.addEventListener('click', e=>{ if(e.target===backdrop) close(); });
-  backdrop.querySelector('#finAccDetEdit').addEventListener('click', ()=>{ 
+
+  backdrop.querySelector('#finAccDetEdit')?.addEventListener('click', ()=>{
     close(); 
     openFinanceAccountEdit(accountId); 
+  });
+
+  backdrop.querySelector('#finAccDetFixBal')?.addEventListener('click', ()=>{
+    close();
+    openFinanceAccountEdit(accountId);
+  });
+
+  backdrop.querySelectorAll('.btnDelDup').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const id = btn.dataset.id;
+      if (confirm("¿Deseas eliminar este movimiento duplicado?")) {
+        deleteFinanceEntry(id);
+        close();
+        openFinanceAccountDetails(accountId);
+      }
+    });
+  });
+
+  backdrop.querySelectorAll('.btnEditMov').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const id = btn.dataset.id;
+      close();
+      openFinanceEntryModal(id);
+    });
   });
 }
 
