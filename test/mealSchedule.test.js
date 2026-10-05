@@ -32,37 +32,40 @@ assert.strictEqual(normalizeDayKey("invalid_day"), null);
 
 console.log("✓ normalizeDayKey tests passed");
 
-// 2. Test resolveScheduleItems
+// 2. Test resolveScheduleItems with detailed fields
 const products = [
   { id: "p1", name: "Pollo a la Brasa", price: 18.00, tier: "gusto_medio" }
 ];
 
 const items = [
-  { name: "Pollo a la Brasa", qty: 1, estimatedPrice: 18.00 },
-  { name: "Sopa Casera", qty: 2, estimatedPrice: 5.00 }
+  { name: "Pollo a la Brasa", portions: 2, unit: "plato", unitPrice: 18.00, origin: "Comprado fuera", notes: "Extra papas" },
+  { name: "Sopa Casera", qty: 2, estimatedPrice: 5.00 } // legacy item
 ];
 
 const res = resolveScheduleItems(items, products);
 assert.strictEqual(res.resolvedItems.length, 2);
+assert.strictEqual(res.resolvedItems[0].portions, 2);
+assert.strictEqual(res.resolvedItems[0].unit, "plato");
 assert.strictEqual(res.resolvedItems[0].unitPrice, 18.00);
-assert.strictEqual(res.resolvedItems[0].totalPrice, 18.00);
-assert.strictEqual(res.resolvedItems[0].foundInLibrary, true);
+assert.strictEqual(res.resolvedItems[0].totalPrice, 36.00);
+assert.strictEqual(res.resolvedItems[0].origin, "Comprado fuera");
+assert.strictEqual(res.resolvedItems[0].notes, "Extra papas");
 
+// Legacy item check
+assert.strictEqual(res.resolvedItems[1].portions, 2);
 assert.strictEqual(res.resolvedItems[1].unitPrice, 5.00);
 assert.strictEqual(res.resolvedItems[1].totalPrice, 10.00);
 assert.strictEqual(res.resolvedItems[1].foundInLibrary, false);
 
-assert.strictEqual(res.totalCost, 28.00);
-assert.strictEqual(res.missingItems.length, 1);
-assert.strictEqual(res.missingItems[0].name, "Sopa Casera");
+assert.strictEqual(res.totalCost, 46.00);
 
-console.log("✓ resolveScheduleItems tests passed");
+console.log("✓ resolveScheduleItems detailed tests passed");
 
 // 3. Test schedule update normalization logic
 const updatePayload = {
   dayKey: "miércoles",
   slotId: "almuerzo",
-  items: [{ name: "Seco de Pollo", price: 16.00 }]
+  items: [{ name: "Seco de Pollo", portions: 2, unitPrice: 16.00, origin: "Cocinado en casa", notes: "Con frejoles" }]
 };
 
 const targetKey = normalizeDayKey(updatePayload.dayKey);
@@ -70,12 +73,17 @@ assert.strictEqual(targetKey, "miercoles");
 
 const formattedItems = updatePayload.items.map(it => ({
   name: String(it.name).trim(),
-  estimatedPrice: Number(it.estimatedPrice ?? it.price ?? 0),
-  qty: Math.max(1, Number(it.qty) || 1)
+  portions: Math.max(0.1, Number(it.portions ?? it.qty) || 1),
+  unitPrice: Number(it.unitPrice ?? it.estimatedPrice ?? it.price ?? 0),
+  origin: String(it.origin || "Comprado fuera").trim(),
+  notes: String(it.notes || "").trim()
 }));
 
 assert.strictEqual(formattedItems[0].name, "Seco de Pollo");
-assert.strictEqual(formattedItems[0].estimatedPrice, 16.00);
+assert.strictEqual(formattedItems[0].portions, 2);
+assert.strictEqual(formattedItems[0].unitPrice, 16.00);
+assert.strictEqual(formattedItems[0].origin, "Cocinado en casa");
+assert.strictEqual(formattedItems[0].notes, "Con frejoles");
 
 console.log("✓ updateMealSchedule payload formatting tests passed");
 

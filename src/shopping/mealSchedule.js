@@ -135,16 +135,16 @@ function getDefaultSchedule() {
   DAYS_OF_WEEK.forEach(d => {
     base[d.key] = {
       desayuno: [
-        { name: "Huevos y Pan", qty: 1, estimatedPrice: 3.50, isCustom: false }
+        { name: "Huevos y Pan", portions: 1, qty: 1, unit: "porción", unitPrice: 3.50, estimatedPrice: 3.50, origin: "Cocinado en casa", notes: "", isCustom: false }
       ],
       almuerzo: [
-        { name: "Menú Ejecutivo / Almuerzo", qty: 1, estimatedPrice: 14.00, isCustom: false }
+        { name: "Menú Ejecutivo / Almuerzo", portions: 1, qty: 1, unit: "plato", unitPrice: 14.00, estimatedPrice: 14.00, origin: "Comprado fuera", notes: "", isCustom: false }
       ],
       cena: [
-        { name: "Cena ligera en casa", qty: 1, estimatedPrice: 5.00, isCustom: false }
+        { name: "Cena ligera en casa", portions: 1, qty: 1, unit: "porción", unitPrice: 5.00, estimatedPrice: 5.00, origin: "Cocinado en casa", notes: "", isCustom: false }
       ],
       bebidas: [
-        { name: "Volt", qty: 1, estimatedPrice: 2.50, isCustom: false }
+        { name: "Volt", portions: 1, qty: 1, unit: "botella", unitPrice: 2.50, estimatedPrice: 2.50, origin: "Comprado fuera", notes: "", isCustom: false }
       ]
     };
   });
@@ -189,30 +189,46 @@ export function resolveScheduleItems(items = [], products = []) {
   const missingItems = [];
   const resolvedItems = (items || []).map(it => {
     const name = String(it.name || "").trim();
-    const qty = Math.max(1, Number(it.qty) || 1);
+    const portions = Math.max(0.1, Number(it.portions ?? it.qty) || 1);
+    const qty = portions;
+    const unit = String(it.unit || "porción").trim();
+    const origin = String(it.origin || "Comprado fuera").trim();
+    const notes = String(it.notes || "").trim();
+
     const prod = findProductInLibrary(name, products);
 
     let unitPrice = 0;
     let foundInLibrary = false;
 
-    if (prod && typeof prod.price === "number" && !isNaN(prod.price)) {
+    const explicitPrice = [it.unitPrice, it.estimatedPrice, it.costPerPortion].find(
+      val => typeof val === "number" && !isNaN(val) && val > 0
+    );
+
+    if (explicitPrice !== undefined) {
+      unitPrice = explicitPrice;
+      foundInLibrary = !!(prod && typeof prod.price === "number" && prod.price === explicitPrice);
+      if (!foundInLibrary) {
+        missingItems.push({ name, currentPrice: unitPrice, isCustom: true });
+      }
+    } else if (prod && typeof prod.price === "number" && !isNaN(prod.price)) {
       unitPrice = prod.price;
       foundInLibrary = true;
-    } else if (typeof it.estimatedPrice === "number" && it.estimatedPrice > 0) {
-      unitPrice = it.estimatedPrice;
-      foundInLibrary = false;
-      missingItems.push({ name, currentPrice: unitPrice, isCustom: true });
     } else {
       missingItems.push({ name, currentPrice: 0, isCustom: false });
     }
 
-    const itemTotal = Number((unitPrice * qty).toFixed(2));
+    const itemTotal = Number((unitPrice * portions).toFixed(2));
     totalCost += itemTotal;
 
     return {
       name,
+      portions,
       qty,
+      unit,
+      origin,
+      notes,
       unitPrice,
+      estimatedPrice: unitPrice,
       totalPrice: itemTotal,
       foundInLibrary,
       productId: prod?.id || null,
