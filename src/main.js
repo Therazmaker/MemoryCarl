@@ -3422,6 +3422,44 @@ function view(){
           }
         }
 
+        // Handle createShoppingList
+        if (result.actions && result.actions.createShoppingList) {
+          const csl = result.actions.createShoppingList;
+          if (Array.isArray(csl.items) && csl.items.length > 0) {
+            const listName = (csl.name || "").trim() || `Compra ${todayISO()}`;
+            const formattedItems = csl.items.map(it => {
+              const itemName = String(it.name || "Producto").trim();
+              const libProd = (state.products || []).find(p => p.name.toLowerCase() === itemName.toLowerCase());
+              const price = Number(it.price !== undefined && it.price !== null && !isNaN(it.price) ? it.price : (libProd ? libProd.price : 0));
+              const qty = Math.max(1, Number(it.qty || 1));
+              const category = String(it.category || (libProd ? libProd.category : "Comida")).trim();
+              const unit = String(it.unit || (libProd ? libProd.unit : "")).trim();
+              const essential = it.essential !== undefined ? !!it.essential : (libProd ? !!libProd.essential : false);
+
+              return {
+                id: uid("i"),
+                name: itemName,
+                price: Number(price.toFixed(2)),
+                qty,
+                bought: false,
+                productId: libProd ? libProd.id : "",
+                category,
+                unit,
+                essential
+              };
+            });
+
+            if (!Array.isArray(state.shopping)) state.shopping = [];
+            state.shopping.unshift({
+              id: uid("l"),
+              name: listName,
+              items: formattedItems
+            });
+
+            toast(`🛒 Lista creada: "${listName}" (${formattedItems.length} ítems)`);
+          }
+        }
+
         // Handle updateMealSchedule
         if (result.actions && result.actions.updateMealSchedule) {
           const ums = result.actions.updateMealSchedule;
