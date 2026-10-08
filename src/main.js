@@ -2,6 +2,7 @@ import './finance/finance_core_v2.js';
 (function mcConsoleLogsInterceptorInit(){
   if (window.__mcLogsInterceptor) return;
   window.__mcLogs = [];
+  window.__mcCmdHistory = [];
   window.__mcLogsInterceptor = true;
   const originalLog = console.log;
   const originalError = console.error;
@@ -11,7 +12,7 @@ import './finance/finance_core_v2.js';
     const time = new Date().toTimeString().split(' ')[0];
     const text = args.map(arg => {
       if (typeof arg === 'object') {
-        try { return JSON.stringify(arg); } catch (e) { return String(arg); }
+        try { return JSON.stringify(arg, null, 2); } catch (e) { return String(arg); }
       }
       return String(arg);
     }).join(' ');
@@ -27,12 +28,40 @@ import './finance/finance_core_v2.js';
       p.style.whiteSpace = 'pre-wrap';
       p.style.borderBottom = '1px solid #222';
       p.style.padding = '4px 0';
-      p.style.color = type === 'error' ? '#f87171' : (type === 'warn' ? '#f59e0b' : '#38bdf8');
+      p.style.color = type === 'error' ? '#f87171' : (type === 'warn' ? '#f59e0b' : (type === 'cmd' ? '#a78bfa' : (type === 'result' ? '#34d399' : '#38bdf8')));
       
       const esc = (s) => String(s || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       p.innerHTML = `<span style="color:#888;">[${time}]</span> ${esc(text)}`;
       logEl.appendChild(p);
       logEl.scrollTop = logEl.scrollHeight;
+    }
+  };
+
+  window.__mcEvalJs = function(codeStr) {
+    if (!codeStr || !codeStr.trim()) return;
+    const code = codeStr.trim();
+    if (!window.__mcCmdHistory.length || window.__mcCmdHistory[window.__mcCmdHistory.length - 1] !== code) {
+      window.__mcCmdHistory.push(code);
+    }
+    addLog('cmd', [`> ${code}`]);
+    try {
+      let res = window.eval(code);
+      if (res && typeof res.then === 'function') {
+        addLog('warn', ['⏳ Evaluando Promesa en segundo plano...']);
+        res.then(val => {
+          let fmt;
+          try { fmt = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val); } catch(e){ fmt = String(val); }
+          addLog('result', [`< [Promise Resolved]\n${fmt}`]);
+        }).catch(err => {
+          addLog('error', [`❌ [Promise Rejected]\n${err && (err.stack || err.message) ? (err.stack || err.message) : String(err)}`]);
+        });
+      } else {
+        let fmt;
+        try { fmt = typeof res === 'object' ? JSON.stringify(res, null, 2) : String(res); } catch(e){ fmt = String(res); }
+        addLog('result', [`< ${fmt}`]);
+      }
+    } catch (err) {
+      addLog('error', [`❌ ${err && (err.stack || err.message) ? (err.stack || err.message) : String(err)}`]);
     }
   };
 
@@ -108,7 +137,7 @@ try {
     backdrop.style.justifyContent = 'center';
     
     const logsHtml = (window.__mcLogs || []).map(log => {
-      const typeColor = log.type === 'error' ? '#f87171' : (log.type === 'warn' ? '#f59e0b' : '#38bdf8');
+      const typeColor = log.type === 'error' ? '#f87171' : (log.type === 'warn' ? '#f59e0b' : (log.type === 'cmd' ? '#a78bfa' : (log.type === 'result' ? '#34d399' : '#38bdf8')));
       const esc = (s) => String(s || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       return `
         <div style="font-size:11px; white-space:pre-wrap; border-bottom:1px solid #222; padding:3px 0; color:${typeColor}; font-family:monospace;">
@@ -118,17 +147,28 @@ try {
     }).join('') || '<div style="color:#888;font-size:12px;font-family:sans-serif;">Sin logs guardados aún.</div>';
 
     backdrop.innerHTML = `
-      <div style="max-width:500px; width:90%; background:#1c1c1e; color:#fff; border-radius:14px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,0.5); font-family:system-ui, -apple-system, sans-serif;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="max-width:520px; width:92%; max-height:90vh; display:flex; flex-direction:column; background:#1c1c1e; color:#fff; border-radius:14px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,0.5); font-family:system-ui, -apple-system, sans-serif;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
           <span style="font-weight:700; font-size:15px;">📺 Consola de Rescate</span>
           <button style="background:none; border:none; color:#fff; font-size:18px; cursor:pointer;" id="mcCloseRescueConsole">✕</button>
         </div>
-        <div style="background:#09090b; border:1px solid #333; border-radius:8px; height:300px; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:4px; margin-bottom:12px;">
+        <div id="mcLiveConsoleLogs" style="background:#09090b; border:1px solid #333; border-radius:8px; height:240px; overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:4px; margin-bottom:10px; font-family:monospace;">
           ${logsHtml}
         </div>
-        <div style="display:flex; gap:10px;">
-          <button id="mcCopyRescueLogs" style="flex:1; border:0; border-radius:12px; padding:10px; font-weight:800; background:#2b73ff; color:#fff; cursor:pointer;">Copiar Logs</button>
-          <button id="mcCloseRescueBtn" style="flex:1; border:0; border-radius:12px; padding:10px; font-weight:800; background:#3a3a3c; color:#fff; cursor:pointer;">Cerrar</button>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
+          <button class="mcShortBtn" data-code="state" style="background:#2d2d30; border:1px solid #444; color:#a78bfa; font-size:11px; font-weight:700; border-radius:6px; padding:4px 8px; cursor:pointer;">state</button>
+          <button class="mcShortBtn" data-code="localStorage" style="background:#2d2d30; border:1px solid #444; color:#a78bfa; font-size:11px; font-weight:700; border-radius:6px; padding:4px 8px; cursor:pointer;">localStorage</button>
+          <button class="mcShortBtn" data-code="window.MemoryCarlSync ? window.MemoryCarlSync.status() : 'No Sync'" style="background:#2d2d30; border:1px solid #444; color:#a78bfa; font-size:11px; font-weight:700; border-radius:6px; padding:4px 8px; cursor:pointer;">sync status</button>
+          <button class="mcShortBtn" data-code="location.reload()" style="background:#2d2d30; border:1px solid #444; color:#f87171; font-size:11px; font-weight:700; border-radius:6px; padding:4px 8px; cursor:pointer;">reload()</button>
+        </div>
+        <div style="display:flex; gap:8px; margin-bottom:10px;">
+          <input type="text" id="mcRescueCmdInput" placeholder="Escribe código JS (ej: state)..." style="flex:1; background:#09090b; border:1px solid #444; color:#fff; border-radius:8px; padding:8px 10px; font-family:monospace; font-size:12px; outline:none;" />
+          <button id="mcRescueRunBtn" style="border:0; border-radius:8px; padding:8px 14px; font-weight:800; background:#a78bfa; color:#111; cursor:pointer; font-size:12px;">Ejecutar</button>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button id="mcClearRescueLogs" style="flex:1; border:0; border-radius:10px; padding:8px; font-weight:700; background:#3a3a3c; color:#fff; cursor:pointer; font-size:12px;">Limpiar</button>
+          <button id="mcCopyRescueLogs" style="flex:1; border:0; border-radius:10px; padding:8px; font-weight:800; background:#2b73ff; color:#fff; cursor:pointer; font-size:12px;">Copiar Logs</button>
+          <button id="mcCloseRescueBtn" style="flex:1; border:0; border-radius:10px; padding:8px; font-weight:800; background:#3a3a3c; color:#fff; cursor:pointer; font-size:12px;">Cerrar</button>
         </div>
       </div>
     `;
@@ -139,6 +179,59 @@ try {
     backdrop.querySelector('#mcCloseRescueConsole').onclick = close;
     backdrop.querySelector('#mcCloseRescueBtn').onclick = close;
     
+    const logBox = backdrop.querySelector('#mcLiveConsoleLogs');
+    if (logBox) logBox.scrollTop = logBox.scrollHeight;
+
+    const input = backdrop.querySelector('#mcRescueCmdInput');
+    const runBtn = backdrop.querySelector('#mcRescueRunBtn');
+
+    let histIdx = (window.__mcCmdHistory || []).length;
+
+    const runCmd = () => {
+      const val = input.value;
+      if (!val.trim()) return;
+      window.__mcEvalJs(val);
+      input.value = '';
+      histIdx = window.__mcCmdHistory.length;
+    };
+
+    runBtn.onclick = runCmd;
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runCmd();
+      } else if (e.key === 'ArrowUp') {
+        if (histIdx > 0) {
+          histIdx--;
+          input.value = window.__mcCmdHistory[histIdx] || '';
+        }
+      } else if (e.key === 'ArrowDown') {
+        if (histIdx < window.__mcCmdHistory.length - 1) {
+          histIdx++;
+          input.value = window.__mcCmdHistory[histIdx] || '';
+        } else {
+          histIdx = window.__mcCmdHistory.length;
+          input.value = '';
+        }
+      }
+    };
+
+    backdrop.querySelectorAll('.mcShortBtn').forEach(btn => {
+      btn.onclick = () => {
+        const code = btn.getAttribute('data-code');
+        if (code) {
+          input.value = code;
+          runCmd();
+        }
+      };
+    });
+
+    backdrop.querySelector('#mcClearRescueLogs').onclick = () => {
+      window.__mcLogs = [];
+      const box = backdrop.querySelector('#mcLiveConsoleLogs');
+      if (box) box.innerHTML = '<div style="color:#888;font-size:12px;font-family:sans-serif;">Logs limpiados.</div>';
+    };
+
     backdrop.querySelector('#mcCopyRescueLogs').onclick = () => {
       const logsText = JSON.stringify(window.__mcLogs, null, 2);
       navigator.clipboard.writeText(logsText).then(() => {
@@ -2884,6 +2977,49 @@ function view(){
   if(state.tab==="settings"){
     initBottomSheet();
 
+    const setInput = root.querySelector("#mcSettingsCmdInput");
+    const setRunBtn = root.querySelector("#mcSettingsRunBtn");
+    if(setInput && setRunBtn){
+      let histIdx = (window.__mcCmdHistory || []).length;
+      const runCmd = () => {
+        const val = setInput.value;
+        if (!val.trim()) return;
+        window.__mcEvalJs(val);
+        setInput.value = '';
+        histIdx = window.__mcCmdHistory.length;
+      };
+      setRunBtn.onclick = runCmd;
+      setInput.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          runCmd();
+        } else if (e.key === 'ArrowUp') {
+          if (histIdx > 0) {
+            histIdx--;
+            setInput.value = window.__mcCmdHistory[histIdx] || '';
+          }
+        } else if (e.key === 'ArrowDown') {
+          if (histIdx < window.__mcCmdHistory.length - 1) {
+            histIdx++;
+            setInput.value = window.__mcCmdHistory[histIdx] || '';
+          } else {
+            histIdx = window.__mcCmdHistory.length;
+            setInput.value = '';
+          }
+        }
+      };
+
+      root.querySelectorAll('.mcShortBtnInline').forEach(btn => {
+        btn.onclick = () => {
+          const code = btn.getAttribute('data-code');
+          if (code) {
+            setInput.value = code;
+            runCmd();
+          }
+        };
+      });
+    }
+
     const btnCopy = root.querySelector("#btnNcAiCopy");
     if(btnCopy){
       btnCopy.addEventListener("click", async ()=>{
@@ -5109,19 +5245,29 @@ function viewSettings(){
     <div class="card">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">📺 Consola de Depuración</h2>
-          <div class="small">Errores y logs del sistema en tiempo real. Útil para móviles.</div>
+          <h2 class="cardTitle">📺 Consola de Depuración Interactiva</h2>
+          <div class="small">Errores, logs y ejecutor de código JS en vivo.</div>
         </div>
       </div>
       <div class="hr"></div>
-      <div id="mcLiveConsoleLogs" style="background:#09090b; border:1px solid #333; border-radius:8px; height:200px; overflow-y:auto; padding:10px; margin-bottom:10px; font-family:monospace; display:flex; flex-direction:column; gap:4px; max-height:200px;">
+      <div id="mcLiveConsoleLogs" style="background:#09090b; border:1px solid #333; border-radius:8px; height:220px; overflow-y:auto; padding:10px; margin-bottom:10px; font-family:monospace; display:flex; flex-direction:column; gap:4px; max-height:220px;">
         ${(window.__mcLogs || []).map(log => `
-          <div style="font-size:11px; white-space:pre-wrap; border-bottom:1px solid #222; padding:3px 0; color:${log.type === 'error' ? '#f87171' : (log.type === 'warn' ? '#f59e0b' : '#38bdf8')};">
+          <div style="font-size:11px; white-space:pre-wrap; border-bottom:1px solid #222; padding:3px 0; color:${log.type === 'error' ? '#f87171' : (log.type === 'warn' ? '#f59e0b' : (log.type === 'cmd' ? '#a78bfa' : (log.type === 'result' ? '#34d399' : '#38bdf8')))};">
             <span style="color:#888;">[${log.time}]</span> ${escapeHtml(log.text)}
           </div>
         `).join('')}
       </div>
-      <div class="btnRow" style="margin-top:10px; display:flex; gap:10px;">
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
+        <button class="mcShortBtnInline" data-code="state" style="background:#2d2d30; border:1px solid #444; color:#a78bfa; font-size:11px; font-weight:700; border-radius:6px; padding:4px 8px; cursor:pointer;">state</button>
+        <button class="mcShortBtnInline" data-code="localStorage" style="background:#2d2d30; border:1px solid #444; color:#a78bfa; font-size:11px; font-weight:700; border-radius:6px; padding:4px 8px; cursor:pointer;">localStorage</button>
+        <button class="mcShortBtnInline" data-code="window.MemoryCarlSync ? window.MemoryCarlSync.status() : 'No Sync'" style="background:#2d2d30; border:1px solid #444; color:#a78bfa; font-size:11px; font-weight:700; border-radius:6px; padding:4px 8px; cursor:pointer;">sync status</button>
+        <button class="mcShortBtnInline" data-code="location.reload()" style="background:#2d2d30; border:1px solid #444; color:#f87171; font-size:11px; font-weight:700; border-radius:6px; padding:4px 8px; cursor:pointer;">reload()</button>
+      </div>
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <input type="text" id="mcSettingsCmdInput" placeholder="Escribe código JS (ej: state)..." style="flex:1; background:#09090b; border:1px solid #444; color:#fff; border-radius:8px; padding:8px 10px; font-family:monospace; font-size:12px; outline:none;" />
+        <button id="mcSettingsRunBtn" class="btn primary" style="font-size:12px; font-weight:800; padding:8px 14px;">Ejecutar</button>
+      </div>
+      <div class="btnRow" style="margin-top:5px; display:flex; gap:10px;">
         <button class="btn ghost" onclick="document.getElementById('mcLiveConsoleLogs').innerHTML = ''; window.__mcLogs = [];">Limpiar logs</button>
         <button class="btn" onclick="navigator.clipboard.writeText(JSON.stringify(window.__mcLogs, null, 2)).then(() => toast('Copiado ✅')).catch(() => { const ta = document.createElement('textarea'); ta.value = JSON.stringify(window.__mcLogs, null, 2); document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Copiado ✅'); });">Copiar Logs</button>
       </div>
