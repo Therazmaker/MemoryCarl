@@ -6777,6 +6777,37 @@ function lifeTaskDelete(id) {
   persist();
 }
 
+function lifeTaskUpdate(id, updates) {
+  const tasks = lifeTasksGet();
+  const index = tasks.findIndex(t => t.id === id);
+  if(index !== -1) {
+    tasks[index] = { ...tasks[index], ...updates };
+    state.lifeTasks = tasks;
+    persist();
+  }
+}
+
+function lifeTaskDeleteLogEntry(logIndex) {
+  if(!Array.isArray(state.lifeTasksLog)) return;
+  if(logIndex >= 0 && logIndex < state.lifeTasksLog.length) {
+    const removed = state.lifeTasksLog.splice(logIndex, 1)[0];
+    if(removed && removed.id) {
+      // Recalculate lastDone for this task based on remaining log
+      const task = (state.lifeTasks || []).find(t => t.id === removed.id);
+      if(task) {
+        const remainingLogs = state.lifeTasksLog.filter(l => l.id === removed.id);
+        if(remainingLogs.length > 0) {
+          remainingLogs.sort((a,b) => new Date(b.ts) - new Date(a.ts));
+          task.lastDone = remainingLogs[0].ts;
+        } else {
+          task.lastDone = null;
+        }
+      }
+    }
+    persist();
+  }
+}
+
 function lifeTaskDaysSince(task) {
   if(!task.lastDone) return 999;
   return (Date.now() - new Date(task.lastDone).getTime()) / (1000 * 60 * 60 * 24);
@@ -6864,6 +6895,17 @@ function renderLifeTrackerCard() {
     return u === "critical" || u === "due";
   }).length;
 
+  const filterPod = state._ltFilterPod || "todos";
+
+  let podFilterHtml = `
+    <div class="lt-pod-filter-bar">
+      <button class="lt-pod-btn ${filterPod==='todos'?'active':''}" data-lt-pod-filter="todos">🌟 Todos</button>
+      <button class="lt-pod-btn ${filterPod==='manana'?'active':''}" data-lt-pod-filter="manana">🌅 Mañana</button>
+      <button class="lt-pod-btn ${filterPod==='tarde'?'active':''}" data-lt-pod-filter="tarde">🌇 Tarde</button>
+      <button class="lt-pod-btn ${filterPod==='noche'?'active':''}" data-lt-pod-filter="noche">🌙 Noche</button>
+    </div>
+  `;
+
   let eventsHtml = "";
   if(events.length) {
     const pendingEvents = events.filter(e => !e.done);
@@ -6882,7 +6924,11 @@ function renderLifeTrackerCard() {
                   <div class="lt-event-title">${escapeHtml(evt.title)}</div>
                   <div class="lt-event-date">${dateStr}${evt.note ? ` · ${escapeHtml(evt.note)}` : ""}</div>
                 </div>
-                <button class="lt-evt-done-btn" data-lt-evt-done="${evt.id}" title="Marcar realizado">✓</button>
+                <div style="display:flex;gap:4px;align-items:center;">
+                  <button class="lt-evt-done-btn" data-lt-evt-done="${evt.id}" title="Marcar realizado">✓</button>
+                  <button class="lt-mini-icon-btn" data-lt-edit="${evt.id}" title="Editar evento">✏️</button>
+                  <button class="lt-mini-icon-btn" data-lt-del="${evt.id}" title="Eliminar evento">🗑️</button>
+                </div>
               </div>
             `;
           }).join("")}
@@ -6899,6 +6945,10 @@ function renderLifeTrackerCard() {
     const urgLabel = urg === "critical" ? "⚠️ MUY ATRASADO" : urg === "due" ? "⏳ TOCA HOY" : urg === "soon" ? "PRONTO" : "AL DÍA";
     spotlightHtml = `
       <div class="lt-spotlight" id="ltSpotlight">
+        <div class="lt-spotlight-top-actions">
+          <button class="lt-mini-icon-btn" data-lt-edit="${spotlightTask.id}" title="Editar hábito">✏️</button>
+          <button class="lt-mini-icon-btn" data-lt-del="${spotlightTask.id}" title="Eliminar hábito">🗑️</button>
+        </div>
         <div class="lt-urg-badge lt-urg-${urg}">${urgLabel}</div>
         <div class="lt-spotlight-emoji">${spotlightTask.icon || "📌"}</div>
         <div class="lt-spotlight-title">${escapeHtml(spotlightTask.title)}</div>
@@ -6920,7 +6970,12 @@ function renderLifeTrackerCard() {
     `;
   }
 
-  const otherTasks = tasks.filter(t => !spotlightTask || t.id !== spotlightTask.id);
+  let filteredTasks = tasks;
+  if(filterPod && filterPod !== "todos") {
+    filteredTasks = tasks.filter(t => t.partOfDay === filterPod || t.partOfDay === "cualquier");
+  }
+
+  const otherTasks = filteredTasks.filter(t => !spotlightTask || t.id !== spotlightTask.id);
   let chipRailHtml = "";
   if(otherTasks.length) {
     chipRailHtml = otherTasks.map(t => {
@@ -6931,6 +6986,7 @@ function renderLifeTrackerCard() {
           <span>${t.icon || "📌"}</span>
           <span>${escapeHtml(t.title)}</span>
           ${isDone ? '<span class="lt-chip-check">✓</span>' : ""}
+          <span class="lt-chip-edit-trigger" data-lt-edit="${t.id}" title="Editar/Eliminar">✏️</span>
         </div>
       `;
     }).join("");
@@ -6950,23 +7006,27 @@ function renderLifeTrackerCard() {
 
   return `
     <section class="card homeCard" id="homeLifeTracker">
-      <div class="cardTop">
-        <div>
-          <h2 class="cardTitle">🧠 Tracker Vital</h2>
-          <div class="small">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : allDoneToday ? `<span style="color:#22c55e;font-weight:700">¡Completo! 🎉</span>` : `${doneToday}/${totalHabits} hábitos hoy`}</div>
+      <div class="djp-sc-header">
+        <div class="djp-sc-icon">🧠</div>
+        <div class="djp-sc-title-block">
+          <div class="djp-sc-title">Tracker Vital</div>
+          <div class="djp-sc-sub">${totalAlerts > 0 ? `<span style="color:#ef4444;font-weight:700">${totalAlerts} alerta${totalAlerts>1?"s":""}</span>` : allDoneToday ? `<span style="color:#22c55e;font-weight:700">¡Completo! 🎉</span>` : `${doneToday}/${totalHabits} hábitos hoy`}</div>
         </div>
-        <div style="display:flex; gap:6px; align-items:center;">
-          <button class="iconBtn" id="btnLifeTrackerStats" title="Estadísticas" style="font-size:16px;">📊</button>
-          <button class="btn small primary" id="btnAddLifeTask">➕ Agregar</button>
+        <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
+          <button class="iconBtn" id="btnLifeTrackerHelp" title="Guía y Ayuda TDAH" style="font-size:14px;padding:4px;">ℹ️</button>
+          <button class="iconBtn" id="btnLifeTrackerStats" title="Estadísticas" style="font-size:14px;padding:4px;">📊</button>
+          <button class="btn small primary" id="btnAddLifeTask" style="padding:4px 8px;font-size:12px;">➕</button>
         </div>
       </div>
+
+      ${podFilterHtml}
 
       ${eventsHtml}
 
       <div class="lt-section-title" style="margin-top:${eventsHtml?"12px":"4px"}">🎯 Ahora mismo</div>
       ${spotlightHtml}
 
-      ${chipRailHtml ? `<div class="lt-section-title" style="margin-top:14px">🔁 Lo demás</div>
+      ${chipRailHtml ? `<div class="lt-section-title" style="margin-top:14px">🔁 Lo demás ${filterPod !== "todos" ? `(${filterPod})` : ""}</div>
       <div class="lt-chip-rail">${chipRailHtml}</div>` : ""}
 
       ${streakBarHtml}
@@ -6975,6 +7035,25 @@ function renderLifeTrackerCard() {
 }
 
 function wireLifeTracker(root) {
+  root.querySelectorAll("[data-lt-pod-filter]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      state._ltFilterPod = btn.getAttribute("data-lt-pod-filter");
+      view();
+    });
+  });
+
+  root.querySelectorAll("[data-lt-edit]").forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-lt-edit");
+      const item = lifeTasksGet().find(t => t.id === id);
+      if(item) {
+        openLifeTaskModal(item);
+      }
+    });
+  });
+
   root.querySelectorAll("[data-lt-done]").forEach(btn => {
     btn.addEventListener("click", e => {
       e.stopPropagation();
@@ -7028,6 +7107,9 @@ function wireLifeTracker(root) {
   const btnStats = root.querySelector("#btnLifeTrackerStats");
   if(btnStats) btnStats.addEventListener("click", () => openLifeTrackerStatsModal());
 
+  const btnHelp = root.querySelector("#btnLifeTrackerHelp");
+  if(btnHelp) btnHelp.addEventListener("click", () => openLifeTrackerHelpModal());
+
   root.querySelectorAll("[data-lt-suggest]").forEach(btn => {
     btn.addEventListener("click", () => {
       try {
@@ -7071,6 +7153,7 @@ function wireLifeTracker(root) {
   root.querySelectorAll("[data-lt-chip-id]").forEach(chip => {
     chip.addEventListener("click", e => {
       e.stopPropagation();
+      if(e.target.closest("[data-lt-edit]")) return;
       if(chip.classList.contains("lt-chip-done")) return;
       lifeTaskMarkDone(chip.getAttribute("data-lt-chip-id"));
       const spot = root.querySelector("#homeLifeTracker");
@@ -7090,54 +7173,65 @@ function wireLifeTracker(root) {
   });
 }
 
-function openLifeTaskModal() {
+function openLifeTaskModal(editItem = null) {
   const host = document.querySelector("#app");
   const bd = document.createElement("div");
   bd.className = "modalBackdrop";
-  const todayIso = new Date().toISOString().split("T")[0];
   const tomorrowIso = new Date(Date.now()+86400000).toISOString().split("T")[0];
+
+  const isEditing = !!editItem;
+  const isEvent = isEditing ? !!editItem.isEvent : false;
+
   bd.innerHTML = `
     <div class="modal" style="max-width:380px">
-      <div class="modalHeader"><span>➕ Agregar al Tracker</span><button class="mpm-icon-btn" data-close>✕</button></div>
+      <div class="modalHeader">
+        <span>${isEditing ? (isEvent ? "✏️ Editar Evento" : "✏️ Editar Hábito") : "➕ Agregar al Tracker"}</span>
+        <button class="mpm-icon-btn" data-close>✕</button>
+      </div>
       <div class="modalBody" style="display:flex;flex-direction:column;gap:0">
-        <div class="lt-modal-tabs">
-          <button class="lt-modal-tab active" data-lttab="habit">🔁 Hábito recurrente</button>
-          <button class="lt-modal-tab" data-lttab="event">📅 Evento único</button>
-        </div>
+        ${!isEditing ? `
+          <div class="lt-modal-tabs">
+            <button class="lt-modal-tab active" data-lttab="habit">🔁 Hábito recurrente</button>
+            <button class="lt-modal-tab" data-lttab="event">📅 Evento único</button>
+          </div>
+        ` : ""}
 
-        <div id="ltHabitForm" style="display:flex;flex-direction:column;gap:12px;padding-top:16px">
-          <input class="input" id="ltTitle" placeholder="Ej: Lavar el carro" />
+        <div id="ltHabitForm" style="display:${(!isEditing || !isEvent) ? 'flex' : 'none'};flex-direction:column;gap:12px;padding-top:16px">
+          <input class="input" id="ltTitle" placeholder="Ej: Lavar el carro" value="${isEditing && !isEvent ? escapeHtml(editItem.title) : ''}" />
           <div style="display:flex;gap:8px">
-            <input class="input" id="ltIcon" placeholder="Ícono 🧹" style="width:70px;text-align:center"/>
-            <input class="input" id="ltFreq" type="number" min="1" placeholder="Cada X días" style="flex:1"/>
+            <input class="input" id="ltIcon" placeholder="Ícono 🧹" style="width:70px;text-align:center" value="${isEditing && !isEvent ? escapeHtml(editItem.icon || '📌') : ''}"/>
+            <input class="input" id="ltFreq" type="number" step="0.1" min="0.1" placeholder="Cada X días" style="flex:1" value="${isEditing && !isEvent ? editItem.freqDays : ''}"/>
           </div>
           <select class="input" id="ltCat">
-            <option value="higiene">🧴 Higiene</option>
-            <option value="hogar">🏠 Hogar</option>
-            <option value="pago">💸 Pago/Deuda</option>
-            <option value="salud">💊 Salud</option>
-            <option value="otro">📌 Otro</option>
+            <option value="higiene" ${isEditing && editItem.category==='higiene'?'selected':''}>🧴 Higiene</option>
+            <option value="hogar" ${isEditing && editItem.category==='hogar'?'selected':''}>🏠 Hogar</option>
+            <option value="pago" ${isEditing && editItem.category==='pago'?'selected':''}>💸 Pago/Deuda</option>
+            <option value="salud" ${isEditing && editItem.category==='salud'?'selected':''}>💊 Salud</option>
+            <option value="otro" ${isEditing && editItem.category==='otro'?'selected':''}>📌 Otro</option>
           </select>
           <select class="input" id="ltPod">
-            <option value="cualquier">🕒 En cualquier momento</option>
-            <option value="manana">🌅 Por la mañana (6am-12pm)</option>
-            <option value="tarde">🌇 Por la tarde (12pm-7pm)</option>
-            <option value="noche">🌙 Por la noche (7pm-12am)</option>
+            <option value="cualquier" ${isEditing && editItem.partOfDay==='cualquier'?'selected':''}>🕒 En cualquier momento</option>
+            <option value="manana" ${isEditing && editItem.partOfDay==='manana'?'selected':''}>🌅 Por la mañana (6am-12pm)</option>
+            <option value="tarde" ${isEditing && editItem.partOfDay==='tarde'?'selected':''}>🌇 Por la tarde (12pm-7pm)</option>
+            <option value="noche" ${isEditing && editItem.partOfDay==='noche'?'selected':''}>🌙 Por la noche (7pm-12am)</option>
           </select>
-          <button class="btn primary" id="ltSaveHabit">Guardar hábito</button>
+          <div style="display:flex;gap:8px;margin-top:4px;">
+            ${isEditing ? `<button class="btn danger" id="ltDeleteHabit" style="flex:1">🗑️ Eliminar</button>` : ""}
+            <button class="btn primary" id="ltSaveHabit" style="flex:2">${isEditing ? 'Guardar cambios' : 'Guardar hábito'}</button>
+          </div>
         </div>
 
-        <div id="ltEventForm" style="display:none;flex-direction:column;gap:12px;padding-top:16px">
-          <input class="input" id="ltEvtTitle" placeholder="Ej: Entrevista de trabajo" />
+        <div id="ltEventForm" style="display:${(isEditing && isEvent) ? 'flex' : 'none'};flex-direction:column;gap:12px;padding-top:16px">
+          <input class="input" id="ltEvtTitle" placeholder="Ej: Entrevista de trabajo" value="${isEditing && isEvent ? escapeHtml(editItem.title) : ''}" />
           <div style="display:flex;gap:8px">
-            <input class="input" id="ltEvtIcon" placeholder="Ícono 💼" style="width:70px;text-align:center"/>
-            <input class="input" id="ltEvtDate" type="date" value="${tomorrowIso}" style="flex:1"/>
+            <input class="input" id="ltEvtIcon" placeholder="Ícono 💼" style="width:70px;text-align:center" value="${isEditing && isEvent ? escapeHtml(editItem.icon || '💼') : ''}"/>
+            <input class="input" id="ltEvtDate" type="date" value="${isEditing && isEvent ? editItem.dueDate : tomorrowIso}" style="flex:1"/>
           </div>
-          <input class="input" id="ltEvtNote" placeholder="Nota (opcional): empresa, lugar..." />
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(255,255,255,0.6);cursor:pointer">
-            <input type="checkbox" id="ltEvtFollowup" checked style="width:16px;height:16px"/> Que Carl me pregunte cómo me fue
-          </label>
-          <button class="btn primary" id="ltSaveEvent">Guardar evento</button>
+          <input class="input" id="ltEvtNote" placeholder="Nota (opcional): empresa, lugar..." value="${isEditing && isEvent ? escapeHtml(editItem.note || '') : ''}" />
+          <div style="display:flex;gap:8px;margin-top:4px;">
+            ${isEditing ? `<button class="btn danger" id="ltDeleteEvent" style="flex:1">🗑️ Eliminar</button>` : ""}
+            <button class="btn primary" id="ltSaveEvent" style="flex:2">${isEditing ? 'Guardar cambios' : 'Guardar evento'}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -7153,18 +7247,113 @@ function openLifeTaskModal() {
     });
   });
   bd.addEventListener("click", e => { if(e.target===bd||e.target.closest("[data-close]")) bd.remove(); });
-  bd.querySelector("#ltSaveHabit").addEventListener("click", () => {
-    const title = bd.querySelector("#ltTitle").value.trim();
-    if(!title) return;
-    lifeTaskAddCustom(title, bd.querySelector("#ltIcon").value.trim()||"📌", Number(bd.querySelector("#ltFreq").value)||7, bd.querySelector("#ltCat").value, bd.querySelector("#ltPod").value);
-    bd.remove(); view();
-  });
-  bd.querySelector("#ltSaveEvent").addEventListener("click", () => {
-    const title = bd.querySelector("#ltEvtTitle").value.trim();
-    if(!title) return;
-    lifeEventAdd(title, bd.querySelector("#ltEvtIcon").value.trim()||"💼", bd.querySelector("#ltEvtDate").value, bd.querySelector("#ltEvtNote").value.trim(), "evento");
-    bd.remove(); view();
-  });
+
+  const btnSaveHabit = bd.querySelector("#ltSaveHabit");
+  if(btnSaveHabit) {
+    btnSaveHabit.addEventListener("click", () => {
+      const title = bd.querySelector("#ltTitle").value.trim();
+      if(!title) return;
+      if(isEditing) {
+        lifeTaskUpdate(editItem.id, {
+          title,
+          icon: bd.querySelector("#ltIcon").value.trim() || "📌",
+          freqDays: Number(bd.querySelector("#ltFreq").value) || 7,
+          category: bd.querySelector("#ltCat").value,
+          partOfDay: bd.querySelector("#ltPod").value
+        });
+      } else {
+        lifeTaskAddCustom(title, bd.querySelector("#ltIcon").value.trim()||"📌", Number(bd.querySelector("#ltFreq").value)||7, bd.querySelector("#ltCat").value, bd.querySelector("#ltPod").value);
+      }
+      bd.remove(); view();
+    });
+  }
+
+  const btnDelHabit = bd.querySelector("#ltDeleteHabit");
+  if(btnDelHabit) {
+    btnDelHabit.addEventListener("click", () => {
+      if(confirm("¿Eliminar este hábito del Tracker Vital?")) {
+        lifeTaskDelete(editItem.id);
+        bd.remove(); view();
+      }
+    });
+  }
+
+  const btnSaveEvt = bd.querySelector("#ltSaveEvent");
+  if(btnSaveEvt) {
+    btnSaveEvt.addEventListener("click", () => {
+      const title = bd.querySelector("#ltEvtTitle").value.trim();
+      if(!title) return;
+      if(isEditing) {
+        lifeTaskUpdate(editItem.id, {
+          title,
+          icon: bd.querySelector("#ltEvtIcon").value.trim() || "💼",
+          dueDate: bd.querySelector("#ltEvtDate").value,
+          note: bd.querySelector("#ltEvtNote").value.trim()
+        });
+      } else {
+        lifeEventAdd(title, bd.querySelector("#ltEvtIcon").value.trim()||"💼", bd.querySelector("#ltEvtDate").value, bd.querySelector("#ltEvtNote").value.trim(), "evento");
+      }
+      bd.remove(); view();
+    });
+  }
+
+  const btnDelEvt = bd.querySelector("#ltDeleteEvent");
+  if(btnDelEvt) {
+    btnDelEvt.addEventListener("click", () => {
+      if(confirm("¿Eliminar este evento del Tracker Vital?")) {
+        lifeTaskDelete(editItem.id);
+        bd.remove(); view();
+      }
+    });
+  }
+
+  host.appendChild(bd);
+}
+
+function openLifeTrackerHelpModal() {
+  const host = document.querySelector("#app");
+  const bd = document.createElement("div");
+  bd.className = "modalBackdrop";
+  bd.innerHTML = `
+    <div class="modal" style="max-width:400px;background:#1e1e1e">
+      <div class="modalHeader">
+        <span>🧠 Guía del Tracker Vital (TDAH)</span>
+        <button class="mpm-icon-btn" data-close>✕</button>
+      </div>
+      <div class="modalBody" style="display:flex;flex-direction:column;gap:14px;font-size:13px;line-height:1.5;color:rgba(255,255,255,0.85);">
+        <div>
+          <strong style="color:#a78bfa;font-size:14px;">🎯 ¿Cómo funciona el Spotlight?</strong>
+          <p style="margin-top:4px;color:rgba(255,255,255,0.7)">El Tracker analiza la urgencia y el momento del día para sugerirte la <strong>única tarea prioritaria</strong> que deberías atender ahora mismo, reduciendo la parálisis por análisis.</p>
+        </div>
+
+        <div>
+          <strong style="color:#22c55e;font-size:14px;">🚦 Niveles de Urgencia</strong>
+          <ul style="margin-top:4px;padding-left:18px;color:rgba(255,255,255,0.7)">
+            <li><span style="color:#22c55e">● Al día:</span> Realizado dentro de su frecuencia habitual.</li>
+            <li><span style="color:#eab308">● Pronto:</span> Se aproxima la fecha estimada.</li>
+            <li><span style="color:#f97316">● Toca hoy:</span> Alcanzó el límite de días configurado.</li>
+            <li><span style="color:#ef4444">● Muy atrasado:</span> Superó el tiempo normal por más del 50%.</li>
+          </ul>
+        </div>
+
+        <div>
+          <strong style="color:#7c5cff;font-size:14px;">⚡ Botón Micro-paso</strong>
+          <p style="margin-top:4px;color:rgba(255,255,255,0.7)">Si sientes fricción o resistencia para empezar, presiona <em>Micro-paso</em>. Carl te dará una acción ridículamente pequeña de menos de 2 minutos para activar el arranque motor.</p>
+        </div>
+
+        <div>
+          <strong style="color:#38bdf8;font-size:14px;">🌅 Filtros por Momento del Día</strong>
+          <p style="margin-top:4px;color:rgba(255,255,255,0.7)">Usa la barra superior para ver hábitos específicos de la <strong>Mañana</strong>, <strong>Tarde</strong> o <strong>Noche</strong>, ocultando el ruido del resto del día.</p>
+        </div>
+
+        <div>
+          <strong style="color:#f43f5e;font-size:14px;">✏️ Edición y Eliminación</strong>
+          <p style="margin-top:4px;color:rgba(255,255,255,0.7)">Toca el ícono <code>✏️</code> en cualquier hábito o evento para cambiar su frecuencia, horario, o borrarlo de tu lista.</p>
+        </div>
+      </div>
+    </div>
+  `;
+  bd.addEventListener("click", e => { if(e.target===bd||e.target.closest("[data-close]")) bd.remove(); });
   host.appendChild(bd);
 }
 
@@ -7173,101 +7362,197 @@ function openLifeTrackerStatsModal() {
   const bd = document.createElement("div");
   bd.className = "modalBackdrop";
 
-  const tasks = lifeTasksGet();
-  const habits = tasks.filter(t => t.type!=="event");
-  const log = Array.isArray(state.lifeTasksLog) ? state.lifeTasksLog : [];
+  function renderStatsContent(tab = "salud") {
+    const tasks = lifeTasksGet();
+    const habits = tasks.filter(t => !t.isEvent);
+    const log = Array.isArray(state.lifeTasksLog) ? state.lifeTasksLog : [];
 
-  // 1. Salud del sistema (Distribución de urgencias)
-  let ok=0, soon=0, due=0, crit=0;
-  habits.forEach(t => {
-    const u = lifeTaskUrgency(t);
-    if(u==="critical") crit++;
-    else if(u==="due") due++;
-    else if(u==="soon") soon++;
-    else ok++;
-  });
-  const total = habits.length || 1;
-  const pctOk = Math.round((ok/total)*100);
-  const healthHtml = `
-    <div class="mmchart-card" style="margin-bottom:12px;">
-      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Salud de Hábitos</div>
-      <div style="display:flex;align-items:center;gap:16px;">
-        <div style="width:60px;height:60px;border-radius:50%;background:conic-gradient(#22c55e ${pctOk}%, #ef4444 0);display:flex;align-items:center;justify-content:center;">
-          <div style="width:48px;height:48px;border-radius:50%;background:#1e1e1e;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;">${pctOk}%</div>
-        </div>
-        <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;">
-          <div style="color:#22c55e">● ${ok} Al día</div>
-          <div style="color:#eab308">● ${soon} Pronto</div>
-          <div style="color:#f97316">● ${due} Hoy</div>
-          <div style="color:#ef4444">● ${crit} Atrasados</div>
-        </div>
+    // Tab buttons
+    const tabsHtml = `
+      <div class="lt-modal-tabs" style="margin-bottom:12px;">
+        <button class="lt-modal-tab ${tab==='salud'?'active':''}" data-ltstatstab="salud">📊 Salud</button>
+        <button class="lt-modal-tab ${tab==='habitos'?'active':''}" data-ltstatstab="habitos">🔁 Hábitos (${habits.length})</button>
+        <button class="lt-modal-tab ${tab==='historial'?'active':''}" data-ltstatstab="historial">📜 Historial</button>
       </div>
-    </div>
-  `;
+    `;
 
-  // 2. Actividad últimos 7 días (Gráfico de barras simple usando divs)
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const weekData = Array.from({length:7}, (_,i) => {
-    const d = new Date(today.getTime() - (6-i)*86400000);
-    return { iso: isoDate(d), count:0, dateStr: d.toLocaleDateString("es-PE",{weekday:"short"}) };
-  });
-  log.forEach(l => {
-    const iso = String(l.ts).split("T")[0];
-    const wd = weekData.find(w => w.iso === iso);
-    if(wd) wd.count++;
-  });
-  const maxCount = Math.max(1, ...weekData.map(w=>w.count));
-  const weekHtml = `
-    <div class="mmchart-card" style="margin-bottom:12px;">
-      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-weight:700;text-transform:uppercase;">Actividad (7 días)</div>
-      <div style="display:flex;justify-content:space-between;align-items:flex-end;height:80px;padding-top:10px;border-bottom:1px solid rgba(255,255,255,0.1);">
-        ${weekData.map(w => {
-          const h = (w.count / maxCount) * 100;
-          return `
-            <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
-              <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;margin-bottom:4px">${w.count>0?w.count:""}</div>
-              <div style="width:14px;background:#a78bfa;border-radius:4px 4px 0 0;height:${h}%;min-height:2px;transition:height 0.3s"></div>
+    let bodyContent = "";
+
+    if(tab === "salud") {
+      // 1. Salud del sistema (Distribución de urgencias)
+      let ok=0, soon=0, due=0, crit=0;
+      habits.forEach(t => {
+        const u = lifeTaskUrgency(t);
+        if(u==="critical") crit++;
+        else if(u==="due") due++;
+        else if(u==="soon") soon++;
+        else ok++;
+      });
+      const total = habits.length || 1;
+      const pctOk = Math.round((ok/total)*100);
+      const healthHtml = `
+        <div class="mmchart-card" style="margin-bottom:12px;">
+          <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">Salud de Hábitos</div>
+          <div style="display:flex;align-items:center;gap:16px;">
+            <div style="width:60px;height:60px;border-radius:50%;background:conic-gradient(#22c55e ${pctOk}%, #ef4444 0);display:flex;align-items:center;justify-content:center;">
+              <div style="width:48px;height:48px;border-radius:50%;background:#1e1e1e;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;">${pctOk}%</div>
             </div>
-          `;
-        }).join("")}
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-top:6px;">
-        ${weekData.map(w => `<div style="flex:1;text-align:center;font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;">${w.dateStr}</div>`).join("")}
-      </div>
-    </div>
-  `;
+            <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;">
+              <div style="color:#22c55e">● ${ok} Al día</div>
+              <div style="color:#eab308">● ${soon} Pronto</div>
+              <div style="color:#f97316">● ${due} Hoy</div>
+              <div style="color:#ef4444">● ${crit} Atrasados</div>
+            </div>
+          </div>
+        </div>
+      `;
 
-  // 3. Hábito más atrasado (El que tiene el ratio más alto de urgencia)
-  const mostOverdue = [...habits].filter(t=>t.freqDays>0).sort((a,b)=>{
-    const ratioA = lifeTaskDaysSince(a)/a.freqDays;
-    const ratioB = lifeTaskDaysSince(b)/b.freqDays;
-    return ratioB - ratioA;
-  })[0];
-  const overdueHtml = mostOverdue ? `
-    <div class="mmchart-card">
-      <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">El más olvidado</div>
-      <div style="display:flex;align-items:center;gap:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);padding:10px;border-radius:12px;">
-        <div style="font-size:24px;">${mostOverdue.icon}</div>
-        <div>
-          <div style="font-size:14px;font-weight:700;color:#ef4444">${escapeHtml(mostOverdue.title)}</div>
-          <div style="font-size:11px;color:rgba(255,255,255,0.6)">Debería ser cada ${mostOverdue.freqDays} días.</div>
+      // 2. Actividad últimos 7 días
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const weekData = Array.from({length:7}, (_,i) => {
+        const d = new Date(today.getTime() - (6-i)*86400000);
+        return { iso: isoDate(d), count:0, dateStr: d.toLocaleDateString("es-PE",{weekday:"short"}) };
+      });
+      log.forEach(l => {
+        const iso = String(l.ts).split("T")[0];
+        const wd = weekData.find(w => w.iso === iso);
+        if(wd) wd.count++;
+      });
+      const maxCount = Math.max(1, ...weekData.map(w=>w.count));
+      const weekHtml = `
+        <div class="mmchart-card" style="margin-bottom:12px;">
+          <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px;font-weight:700;text-transform:uppercase;">Actividad (7 días)</div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-end;height:80px;padding-top:10px;border-bottom:1px solid rgba(255,255,255,0.1);">
+            ${weekData.map(w => {
+              const h = (w.count / maxCount) * 100;
+              return `
+                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+                  <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;margin-bottom:4px">${w.count>0?w.count:""}</div>
+                  <div style="width:14px;background:#a78bfa;border-radius:4px 4px 0 0;height:${h}%;min-height:2px;transition:height 0.3s"></div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;">
+            ${weekData.map(w => `<div style="flex:1;text-align:center;font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;">${w.dateStr}</div>`).join("")}
+          </div>
+        </div>
+      `;
+
+      // 3. Hábito más atrasado
+      const mostOverdue = [...habits].filter(t=>t.freqDays>0).sort((a,b)=>{
+        const ratioA = lifeTaskDaysSince(a)/a.freqDays;
+        const ratioB = lifeTaskDaysSince(b)/b.freqDays;
+        return ratioB - ratioA;
+      })[0];
+      const overdueHtml = mostOverdue ? `
+        <div class="mmchart-card">
+          <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:8px;font-weight:700;text-transform:uppercase;">El más olvidado</div>
+          <div style="display:flex;align-items:center;gap:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);padding:10px;border-radius:12px;">
+            <div style="font-size:24px;">${mostOverdue.icon}</div>
+            <div>
+              <div style="font-size:14px;font-weight:700;color:#ef4444">${escapeHtml(mostOverdue.title)}</div>
+              <div style="font-size:11px;color:rgba(255,255,255,0.6)">Debería ser cada ${mostOverdue.freqDays} días.</div>
+            </div>
+          </div>
+        </div>
+      ` : "";
+
+      bodyContent = healthHtml + weekHtml + overdueHtml;
+    } else if(tab === "habitos") {
+      const habitRows = habits.map(h => {
+        const completions = log.filter(l => l.id === h.id).length;
+        const daysSince = lifeTaskDaysSince(h);
+        const urg = lifeTaskUrgency(h);
+        const urgBadgeClass = urg === "critical" ? "color:#ef4444" : urg === "due" ? "color:#f97316" : urg === "soon" ? "color:#eab308" : "color:#22c55e";
+        const lastStr = h.lastDone ? new Date(h.lastDone).toLocaleDateString("es-PE", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}) : "Nunca";
+        return `
+          <div style="display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);padding:10px 12px;border-radius:12px;">
+            <div style="font-size:22px;">${h.icon || "📌"}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(h.title)}</div>
+              <div style="font-size:11px;color:rgba(255,255,255,0.5)">Cada ${h.freqDays}d · Completo: <strong>${completions}x</strong> · Último: ${lastStr}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:11px;font-weight:800;${urgBadgeClass}">${urg === "critical" ? "Atrasado" : urg === "due" ? "Toca hoy" : urg === "soon" ? "Pronto" : "Al día"}</div>
+              <button class="lt-mini-icon-btn" data-lt-stat-edit="${h.id}" title="Editar" style="margin-top:4px;">✏️</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      bodyContent = `
+        <div style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow-y:auto;">
+          ${habitRows || '<div style="color:rgba(255,255,255,0.5);font-size:12px;text-align:center;padding:12px;">No hay hábitos configurados.</div>'}
+        </div>
+      `;
+    } else if(tab === "historial") {
+      const sortedLog = log.slice().map((entry, originalIndex) => ({ ...entry, logIndex: originalIndex })).reverse();
+      const logRows = sortedLog.slice(0, 30).map(item => {
+        const task = tasks.find(t => t.id === item.id) || { title: "Hábito borrado", icon: "❓" };
+        const d = item.ts ? new Date(item.ts) : null;
+        const dateStr = d ? d.toLocaleString("es-PE", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) : "-";
+        return `
+          <div style="display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);padding:8px 12px;border-radius:10px;">
+            <div style="font-size:18px;">${task.icon || "📌"}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(task.title)}</div>
+              <div style="font-size:10px;color:rgba(255,255,255,0.5);">${dateStr}</div>
+            </div>
+            <button class="lt-mini-icon-btn" data-lt-del-log="${item.logIndex}" title="Eliminar este registro" style="color:#ef4444;">🗑️</button>
+          </div>
+        `;
+      }).join("");
+
+      bodyContent = `
+        <div style="display:flex;flex-direction:column;gap:6px;max-height:360px;overflow-y:auto;">
+          ${logRows || '<div style="color:rgba(255,255,255,0.5);font-size:12px;text-align:center;padding:12px;">Sin registros en el historial todavía.</div>'}
+        </div>
+      `;
+    }
+
+    bd.innerHTML = `
+      <div class="modal" style="max-width:380px;background:#1e1e1e">
+        <div class="modalHeader"><span>📊 Stats del Tracker</span><button class="mpm-icon-btn" data-close>✕</button></div>
+        <div class="modalBody" style="display:flex;flex-direction:column;gap:0;">
+          ${tabsHtml}
+          ${bodyContent}
         </div>
       </div>
-    </div>
-  ` : "";
+    `;
 
-  bd.innerHTML = `
-    <div class="modal" style="max-width:380px;background:#1e1e1e">
-      <div class="modalHeader"><span>📊 Stats del Tracker</span><button class="mpm-icon-btn" data-close>✕</button></div>
-      <div class="modalBody" style="display:flex;flex-direction:column;gap:0;">
-        ${healthHtml}
-        ${weekHtml}
-        ${overdueHtml}
-      </div>
-    </div>
-  `;
-  bd.addEventListener("click", e => { if(e.target===bd||e.target.closest("[data-close]")) bd.remove(); });
+    bd.querySelectorAll("[data-ltstatstab]").forEach(tBtn => {
+      tBtn.addEventListener("click", () => {
+        renderStatsContent(tBtn.getAttribute("data-ltstatstab"));
+      });
+    });
+
+    bd.querySelectorAll("[data-lt-stat-edit]").forEach(eBtn => {
+      eBtn.addEventListener("click", () => {
+        const id = eBtn.getAttribute("data-lt-stat-edit");
+        const item = lifeTasksGet().find(t => t.id === id);
+        if(item) {
+          bd.remove();
+          openLifeTaskModal(item);
+        }
+      });
+    });
+
+    bd.querySelectorAll("[data-lt-del-log]").forEach(dBtn => {
+      dBtn.addEventListener("click", () => {
+        const idx = Number(dBtn.getAttribute("data-lt-del-log"));
+        if(confirm("¿Borrar esta entrada del historial de completados?")) {
+          lifeTaskDeleteLogEntry(idx);
+          renderStatsContent("historial");
+        }
+      });
+    });
+
+    bd.addEventListener("click", e => { if(e.target===bd||e.target.closest("[data-close]")) bd.remove(); });
+  }
+
+  renderStatsContent("salud");
   host.appendChild(bd);
 }
 

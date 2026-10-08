@@ -4112,11 +4112,16 @@ body{
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 16px;
-  padding: 20px 12px;
+  padding: 38px 12px 20px 12px;
   margin-bottom: 12px;
   text-align: center;
   position: relative;
   overflow: hidden;
+}
+
+#btnAddLifeTask {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .lt-spotlight-empty {
   opacity: 0.6;
@@ -4183,6 +4188,60 @@ body{
 .lt-urg-due { background: rgba(249,115,22,0.15); color: #f97316; border: 1px solid rgba(249,115,22,0.3); }
 .lt-urg-soon { background: rgba(234,179,8,0.15); color: #eab308; border: 1px solid rgba(234,179,8,0.3); }
 
+.lt-pod-filter-bar {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+  scrollbar-width: none;
+}
+.lt-pod-filter-bar::-webkit-scrollbar { display: none; }
+
+.lt-pod-btn {
+  padding: 5px 10px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.7);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.lt-pod-btn.active {
+  background: #7c5cff;
+  color: #fff;
+  border-color: #7c5cff;
+  box-shadow: 0 2px 8px rgba(124,92,255,0.3);
+}
+
+.lt-spotlight-top-actions {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  gap: 4px;
+}
+.lt-mini-icon-btn {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.8);
+  border-radius: 8px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.lt-mini-icon-btn:hover {
+  background: rgba(255,255,255,0.18);
+}
+
 .lt-chip-rail {
   display: flex;
   gap: 8px;
@@ -4218,6 +4277,18 @@ body{
 .lt-chip-check {
   color: #22c55e;
   font-weight: 800;
+}
+.lt-chip-edit-trigger {
+  font-size: 10px;
+  opacity: 0.5;
+  margin-left: 2px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.lt-chip-edit-trigger:hover {
+  opacity: 1;
+  background: rgba(255,255,255,0.15);
 }
 
 .lt-streak-wrap {
