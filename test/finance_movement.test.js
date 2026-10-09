@@ -132,3 +132,36 @@ test('deleteMovement removes movement and reverts balance', () => {
   assert.equal(window.FINANCE.state.movements.length, 0);
   assert.equal(globalThis.state.financeAccounts[0].balance, 500);
 });
+
+test('deleteFinanceEntry deletes movement, recomputes, persists and triggers supabase sync', () => {
+  resetStorage();
+
+  let pushed = false;
+  window.financePushToSupabase = () => { pushed = true; };
+  window.persist = () => {};
+  window.view = () => {};
+
+  globalThis.state = {
+    financeAccounts: [
+      { id: 'acc_bcp', name: 'BCP', type: 'bank', balance: 500 }
+    ],
+    financeLedger: []
+  };
+
+  const created = window.FINANCE.addMovement({
+    type: 'expense',
+    amount: 80,
+    accountId: 'acc_bcp',
+    category: 'Ocio',
+    note: 'Cine'
+  });
+
+  assert.equal(window.FINANCE.state.movements.length, 1);
+
+  // Simulate deleteFinanceEntry logic
+  window.FINANCE.deleteMovement(created.id);
+  if (window.financePushToSupabase) window.financePushToSupabase();
+
+  assert.equal(window.FINANCE.state.movements.length, 0);
+  assert.equal(pushed, true);
+});

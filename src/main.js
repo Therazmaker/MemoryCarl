@@ -18083,6 +18083,7 @@ function deleteFinanceEntry(id){
   window.FINANCE.deleteMovement(id);
   financeRecomputeBalances();
   persist();
+  if (window.financePushToSupabase) window.financePushToSupabase();
   view();
 }
 
