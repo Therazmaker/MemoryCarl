@@ -3,6 +3,7 @@ import {
   saveClosetState,
   wearClothingItems,
   markItemsAsLaundry,
+  updateClothingItem,
   analyzeClosetHygiene,
   CLOTHING_CATEGORIES,
   getDayKey
@@ -211,6 +212,7 @@ export function openClosetModal(onStateChanged) {
   document.body.appendChild(modal);
 
   let activeTab = "inventory"; // 'inventory' | 'add' | 'history'
+  let editingItemId = null;
 
   const renderModalContent = () => {
     const { items, log } = loadClosetState();
@@ -237,6 +239,26 @@ export function openClosetModal(onStateChanged) {
           statusBadge = `<span style="background:rgba(34,197,94,0.2); color:#4ade80; border:1px solid rgba(34,197,94,0.4); font-size:10px; padding:2px 6px; border-radius:10px;">Limpia ✨</span>`;
         }
 
+        if (editingItemId === item.id) {
+          const catOptionsHtml = CLOTHING_CATEGORIES.map(c => `<option value="${c.id}" ${c.id===item.category?'selected':''}>${c.icon} ${c.label}</option>`).join("");
+          return `
+            <form id="formEditClothingItem" data-id="${item.id}" style="background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.4); border-radius:8px; padding:10px; margin-bottom:8px;">
+              <div style="font-weight:600; font-size:12px; margin-bottom:6px; color:#60a5fa;">✏️ Editar Prenda</div>
+              <div style="display:flex; gap:6px; margin-bottom:6px;">
+                <input type="text" id="editCode" class="input" value="${item.code}" required style="width:90px; font-family:monospace; text-transform:uppercase; font-size:12px; padding:4px;">
+                <input type="text" id="editName" class="input" value="${item.name}" required style="flex:1; font-size:12px; padding:4px;">
+              </div>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <select id="editCategory" class="input" style="flex:1; font-size:12px; padding:4px;">
+                  ${catOptionsHtml}
+                </select>
+                <button type="submit" class="btn small primary" style="padding:4px 8px; font-size:11px;">Guardar</button>
+                <button type="button" class="btn small secondary" id="btnCancelEdit" style="padding:4px 8px; font-size:11px;">Cancelar</button>
+              </div>
+            </form>
+          `;
+        }
+
         return `
           <div style="background:var(--card-bg, #1e293b); border:1px solid var(--border-color, rgba(255,255,255,0.1)); border-radius:8px; padding:10px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
             <div>
@@ -251,6 +273,7 @@ export function openClosetModal(onStateChanged) {
               </div>
             </div>
             <div style="display:flex; gap:4px; align-items:center;">
+              <button class="btn small secondary" data-act="edit-item" data-id="${item.id}" style="padding:2px 6px; font-size:11px;">✏️</button>
               ${item.status === "sucia"
                 ? `<button class="btn small primary" data-act="wash-one" data-id="${item.id}" style="padding:2px 6px; font-size:11px;">🧺 Lavar</button>`
                 : `<button class="btn small warning" data-act="dirty-one" data-id="${item.id}" style="padding:2px 6px; font-size:11px; background:#f59e0b; color:black; border:none;">🧺 Sucia</button>`
@@ -401,6 +424,38 @@ export function openClosetModal(onStateChanged) {
         if (typeof onStateChanged === "function") onStateChanged();
       };
     });
+
+    modal.querySelectorAll("[data-act='edit-item']").forEach(btn => {
+      btn.onclick = () => {
+        editingItemId = btn.getAttribute("data-id");
+        renderModalContent();
+      };
+    });
+
+    const formEdit = modal.querySelector("#formEditClothingItem");
+    if (formEdit) {
+      formEdit.onsubmit = (e) => {
+        e.preventDefault();
+        const id = formEdit.getAttribute("data-id");
+        const code = formEdit.querySelector("#editCode").value;
+        const name = formEdit.querySelector("#editName").value;
+        const category = formEdit.querySelector("#editCategory").value;
+
+        const updated = updateClothingItem(id, { code, name, category }, items);
+        saveClosetState(updated, log);
+        editingItemId = null;
+        renderModalContent();
+        if (typeof onStateChanged === "function") onStateChanged();
+      };
+
+      const btnCancel = formEdit.querySelector("#btnCancelEdit");
+      if (btnCancel) {
+        btnCancel.onclick = () => {
+          editingItemId = null;
+          renderModalContent();
+        };
+      }
+    }
 
     modal.querySelectorAll("[data-act='delete-item']").forEach(btn => {
       btn.onclick = () => {

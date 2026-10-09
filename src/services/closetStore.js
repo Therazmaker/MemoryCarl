@@ -34,7 +34,7 @@ export function loadClosetState() {
     let items = itemsRaw ? JSON.parse(itemsRaw) : null;
     let log = logRaw ? JSON.parse(logRaw) : [];
 
-    if (!Array.isArray(items) || items.length === 0) {
+    if (itemsRaw === null || !Array.isArray(items)) {
       items = JSON.parse(JSON.stringify(DEFAULT_CLOSET_ITEMS));
       localStorage.setItem(LS_CLOSET_KEY, JSON.stringify(items));
     }
@@ -137,6 +137,24 @@ export function wearClothingItems(itemIds, currentItems, currentLog, dateKey = g
 /**
  * Cambia el estado de prendas seleccionadas a 'sucia' o 'limpia' (lavado).
  */
+/**
+ * Actualiza una prenda existente en el clóset por su ID.
+ */
+export function updateClothingItem(id, updates, currentItems) {
+  return currentItems.map(item => {
+    if (item.id === id) {
+      return {
+        ...item,
+        code: updates.code ? updates.code.trim().toUpperCase() : item.code,
+        name: updates.name ? updates.name.trim() : item.name,
+        category: updates.category || item.category,
+        status: updates.status || item.status
+      };
+    }
+    return item;
+  });
+}
+
 export function markItemsAsLaundry(itemIds, currentItems, action = "wash") {
   const nowIso = new Date().toISOString();
   const updatedItems = currentItems.map(item => {
