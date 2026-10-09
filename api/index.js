@@ -187,6 +187,57 @@ app.post('/api/sync', requireAuth, async (req, res) => {
         );
         if (ledErr) throw new Error('Error guardando finance_ledger: ' + ledErr.message);
       }
+
+      // 4. Guardar registros de sueño individuales en sleep_log (si la tabla existe)
+      const sleepLog = Array.isArray(appState.sleepLog) ? appState.sleepLog : [];
+      if (sleepLog.length > 0) {
+        const { error: sleepErr } = await supabase.from('sleep_log').upsert(
+          sleepLog.map(s => ({
+            id: String(s.id),
+            date: s.date || new Date().toISOString().split('T')[0],
+            total_minutes: Number(s.totalMinutes || s.total_minutes || 0),
+            quality: (s.quality !== undefined && s.quality !== null && s.quality !== "") ? Number(s.quality) : null,
+            note: s.note || '',
+            mode: s.mode || 'simple',
+            start_time: s.start || s.start_time || '',
+            end_time: s.end || s.end_time || '',
+            dream_type: s.dreamType || s.dream_type || '',
+            wake_emotion: s.wakeEmotion || s.wake_emotion || '',
+            narrative: s.narrative || '',
+            symbols: Array.isArray(s.symbols) ? s.symbols : [],
+            clarity: (s.clarity !== undefined && s.clarity !== null && s.clarity !== "") ? Number(s.clarity) : null,
+            created_at: s.ts || s.created_at || new Date().toISOString()
+          })), { onConflict: 'id' }
+        );
+        if (sleepErr) console.warn('Aviso sincronizando sleep_log:', sleepErr.message);
+      }
+
+      // 5. Guardar registros de estado de ánimo individuales en mood_daily (si la tabla existe)
+      const moodDaily = (appState.moodDaily && typeof appState.moodDaily === 'object') ? appState.moodDaily : {};
+      const moodEntries = [];
+      Object.entries(moodDaily).forEach(([dateKey, val]) => {
+        const items = Array.isArray(val) ? val : [val];
+        items.forEach((e, idx) => {
+          if (!e || typeof e !== 'object') return;
+          const entryId = e.id || `${dateKey}_${idx}_${e.spriteId || 'mood'}`;
+          moodEntries.push({
+            id: String(entryId),
+            date: dateKey,
+            sprite_id: e.spriteId || e.sprite_id || null,
+            label: e.label || null,
+            activities: Array.isArray(e.activities) ? e.activities : [],
+            energy: (e.energy !== undefined && e.energy !== null && e.energy !== "") ? Number(e.energy) : null,
+            note: e.note || '',
+            ts: e.ts || new Date().toISOString()
+          });
+        });
+      });
+      if (moodEntries.length > 0) {
+        const { error: moodErr } = await supabase.from('mood_daily').upsert(
+          moodEntries, { onConflict: 'id' }
+        );
+        if (moodErr) console.warn('Aviso sincronizando mood_daily:', moodErr.message);
+      }
     }
 
     res.json({ status: 'ok', data: results });
@@ -201,14 +252,16 @@ app.get('/api/restore', requireAuth, async (req, res) => {
   if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
 
   try {
-    const [neuronsRes, memoriesRes, chatRes, daysRes, appStateRes, accountsRes, ledgerRes] = await Promise.all([
+    const [neuronsRes, memoriesRes, chatRes, daysRes, appStateRes, accountsRes, ledgerRes, sleepRes, moodRes] = await Promise.all([
       supabase.from('neurons').select('*'),
       supabase.from('memories').select('*'),
       supabase.from('chat_history').select('*').order('created_at', { ascending: true }),
       supabase.from('days').select('*').order('date', { ascending: false }),
       supabase.from('app_state').select('*').eq('id', 'default_user').single(),
       supabase.from('finance_accounts').select('*'),
-      supabase.from('finance_ledger').select('*').order('date', { ascending: false })
+      supabase.from('finance_ledger').select('*').order('date', { ascending: false }),
+      supabase.from('sleep_log').select('*').order('date', { ascending: false }),
+      supabase.from('mood_daily').select('*').order('date', { ascending: false })
     ]);
 
     if (neuronsRes.error) throw new Error('Error leyendo neuronas: ' + neuronsRes.error.message);
@@ -219,10 +272,9 @@ app.get('/api/restore', requireAuth, async (req, res) => {
 
     // Reconstruir el appState prioritariamente desde las tablas dedicadas si tienen datos
     let reconstructedAppState = appStateRes.data?.state_json || null;
+    if (!reconstructedAppState) reconstructedAppState = {};
     
     if (accountsRes.data && accountsRes.data.length > 0) {
-      if (!reconstructedAppState) reconstructedAppState = {};
-      
       reconstructedAppState.financeAccounts = accountsRes.data.map(a => ({
         id: a.id,
         name: a.name,
@@ -249,6 +301,42 @@ app.get('/api/restore', requireAuth, async (req, res) => {
           createdAt: e.created_at
         }));
       }
+    }
+
+    if (sleepRes.data && sleepRes.data.length > 0) {
+      reconstructedAppState.sleepLog = sleepRes.data.map(s => ({
+        id: s.id,
+        date: s.date,
+        totalMinutes: Number(s.total_minutes || 0),
+        quality: s.quality,
+        note: s.note,
+        mode: s.mode,
+        start: s.start_time,
+        end: s.end_time,
+        dreamType: s.dream_type,
+        wakeEmotion: s.wake_emotion,
+        narrative: s.narrative,
+        symbols: s.symbols || [],
+        clarity: s.clarity,
+        ts: s.created_at
+      }));
+    }
+
+    if (moodRes.data && moodRes.data.length > 0) {
+      const moodMap = {};
+      moodRes.data.forEach(m => {
+        if (!moodMap[m.date]) moodMap[m.date] = [];
+        moodMap[m.date].push({
+          id: m.id,
+          spriteId: m.sprite_id,
+          label: m.label,
+          activities: m.activities || [],
+          energy: m.energy,
+          note: m.note,
+          ts: m.ts
+        });
+      });
+      reconstructedAppState.moodDaily = moodMap;
     }
 
     res.json({
