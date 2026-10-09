@@ -7,6 +7,7 @@ import {
   saveClosetState,
   wearClothingItems,
   markItemsAsLaundry,
+  updateClothingItem,
   analyzeClosetHygiene,
   getDayKey
 } from "../src/services/closetStore.js";
@@ -53,5 +54,16 @@ assert.strictEqual(washedBoxer.washCount, 1);
 const analysis = analyzeClosetHygiene(washedItems, wearResultDay2.log, "2025-05-11");
 assert.strictEqual(typeof analysis.cleanCount, "number");
 assert.strictEqual(typeof analysis.dirtyCount, "number");
+
+// Test 6: Update Clothing Item
+const updatedItems = updateClothingItem("c_box_1", { code: "BOX-99", name: "Bóxer Modificado", category: "boxer" }, washedItems);
+const editedBoxer = updatedItems.find(i => i.id === "c_box_1");
+assert.strictEqual(editedBoxer.code, "BOX-99");
+assert.strictEqual(editedBoxer.name, "Bóxer Modificado");
+
+// Test 7: Deleting all items keeps closet empty without resurrecting defaults
+saveClosetState([], []);
+const emptyState = loadClosetState();
+assert.strictEqual(emptyState.items.length, 0, "Deleting all items should keep closet empty []");
 
 console.log("✅ All Closet Store Unit Tests passed successfully!");
