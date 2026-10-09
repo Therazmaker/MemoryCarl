@@ -26076,7 +26076,9 @@ window.financePushToSupabase = async function(isManual = false) {
         financeTransactions: JSON.parse(localStorage.getItem('memorycarl_v2_finance_transactions') || '[]'),
         financeResetAt: state.financeResetAt || null,
         financeDebts: state.financeDebts || [],
-        financeEntryCategories: state.financeEntryCategories || []
+        financeEntryCategories: state.financeEntryCategories || [],
+        sleepLog: state.sleepLog || [],
+        moodDaily: state.moodDaily || {}
       }
     };
 
@@ -26102,6 +26104,13 @@ window.financePushToSupabase = async function(isManual = false) {
       toast("❌ Error al sincronizar: " + errText.slice(0, 60));
     } else {
       console.log("Supabase Sync Successful");
+      const json = await res.json().catch(() => null);
+      if (json?.data?.sleepError) {
+        toast("⚠️ Error guardando sueño: " + json.data.sleepError);
+      }
+      if (json?.data?.moodError) {
+        toast("⚠️ Error guardando mood: " + json.data.moodError);
+      }
       if (window.__mcLogs) {
         window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Sincronización exitosa: ${activeCount} activos enviados` });
       }
@@ -26234,6 +26243,39 @@ window.financePullFromSupabase = async function(isManual = false) {
 
     const json = await res.json();
     const appState = json?.data?.appState;
+    if (appState) {
+      let nonFinanceChanged = false;
+      if (Array.isArray(appState.sleepLog) && appState.sleepLog.length > 0) {
+        if (!Array.isArray(state.sleepLog)) state.sleepLog = [];
+        const localSleepIds = new Set(state.sleepLog.map(s => String(s.id)));
+        appState.sleepLog.forEach(s => {
+          if (s && s.id !== undefined && s.id !== null && !localSleepIds.has(String(s.id))) {
+            state.sleepLog.push(s);
+            localSleepIds.add(String(s.id));
+            nonFinanceChanged = true;
+          }
+        });
+      }
+
+      if (appState.moodDaily && typeof appState.moodDaily === 'object') {
+        if (!state.moodDaily || typeof state.moodDaily !== 'object') state.moodDaily = {};
+        Object.entries(appState.moodDaily).forEach(([dateKey, val]) => {
+          if (val && state.moodDaily[dateKey] === undefined) {
+            state.moodDaily[dateKey] = val;
+            nonFinanceChanged = true;
+          }
+        });
+      }
+
+      if (nonFinanceChanged) {
+        const _tmpPush = window.financePushToSupabase;
+        window.financePushToSupabase = null;
+        persist();
+        window.financePushToSupabase = _tmpPush;
+        view();
+      }
+    }
+
     if (appState && (appState.financeLedger || appState.financeAccounts)) {
       const localLedgerCount = (state.financeLedger || []).length;
       const cloudLedgerCount = (appState.financeLedger || []).length;

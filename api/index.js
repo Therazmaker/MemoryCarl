@@ -9,6 +9,9 @@ const { handleTelegramWebhook, getPendingTelegramTransactions } = require("./src
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_ANON_KEY) {
+  console.warn("⚠️ ADVERTENCIA: SUPABASE_SERVICE_ROLE_KEY no está definida. Se está usando SUPABASE_ANON_KEY. Las operaciones con RLS sin políticas activas pueden fallar.");
+}
 const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
 
 const app = express();
@@ -142,10 +145,21 @@ app.post('/api/sync', requireAuth, async (req, res) => {
     }
 
     if (appState) {
-      // 1. Guardar en app_state de seguridad
+      // 1. Guardar en app_state combinando con el estado existente
       console.log("Sync Payload - Ledger Sample:", appState.financeLedger ? JSON.stringify(appState.financeLedger.slice(0, 3)) : "none");
+      const { data: existingAppStateRow } = await supabase
+        .from('app_state')
+        .select('state_json')
+        .eq('id', 'default_user')
+        .maybeSingle();
+
+      const mergedAppState = {
+        ...(existingAppStateRow?.state_json || {}),
+        ...appState
+      };
+
       const { error: asErr } = await supabase.from('app_state').upsert(
-        [{ id: 'default_user', state_json: appState, updated_at: new Date().toISOString() }],
+        [{ id: 'default_user', state_json: mergedAppState, updated_at: new Date().toISOString() }],
         { onConflict: 'id' }
       );
       if (asErr) throw new Error('Error guardando app_state: ' + asErr.message);
@@ -206,10 +220,16 @@ app.post('/api/sync', requireAuth, async (req, res) => {
             narrative: s.narrative || '',
             symbols: Array.isArray(s.symbols) ? s.symbols : [],
             clarity: (s.clarity !== undefined && s.clarity !== null && s.clarity !== "") ? Number(s.clarity) : null,
-            created_at: s.ts || s.created_at || new Date().toISOString()
+            created_at: s.ts || s.created_at || new Date().toISOString(),
+            data: s
           })), { onConflict: 'id' }
         );
-        if (sleepErr) console.warn('Aviso sincronizando sleep_log:', sleepErr.message);
+        if (sleepErr) {
+          console.warn('Aviso sincronizando sleep_log:', sleepErr.message);
+          results.sleepError = sleepErr.message;
+        } else {
+          results.sleepSynced = sleepLog.length;
+        }
       }
 
       // 5. Guardar registros de estado de ánimo individuales en mood_daily (si la tabla existe)
@@ -219,7 +239,7 @@ app.post('/api/sync', requireAuth, async (req, res) => {
         const items = Array.isArray(val) ? val : [val];
         items.forEach((e, idx) => {
           if (!e || typeof e !== 'object') return;
-          const entryId = e.id || `${dateKey}_${idx}_${e.spriteId || 'mood'}`;
+          const entryId = `${dateKey}_${e.ts || idx}`;
           moodEntries.push({
             id: String(entryId),
             date: dateKey,
@@ -228,7 +248,9 @@ app.post('/api/sync', requireAuth, async (req, res) => {
             activities: Array.isArray(e.activities) ? e.activities : [],
             energy: (e.energy !== undefined && e.energy !== null && e.energy !== "") ? Number(e.energy) : null,
             note: e.note || '',
-            ts: e.ts || new Date().toISOString()
+            tags: Array.isArray(e.tags) ? e.tags : [],
+            ts: e.ts || new Date().toISOString(),
+            data: e
           });
         });
       });
@@ -236,7 +258,12 @@ app.post('/api/sync', requireAuth, async (req, res) => {
         const { error: moodErr } = await supabase.from('mood_daily').upsert(
           moodEntries, { onConflict: 'id' }
         );
-        if (moodErr) console.warn('Aviso sincronizando mood_daily:', moodErr.message);
+        if (moodErr) {
+          console.warn('Aviso sincronizando mood_daily:', moodErr.message);
+          results.moodError = moodErr.message;
+        } else {
+          results.moodSynced = moodEntries.length;
+        }
       }
     }
 
