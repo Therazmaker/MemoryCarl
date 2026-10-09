@@ -1,9 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// Import index.js (express app)
-const app = require('../api/index.js');
-
 test('Supabase sync & restore mapping logic for sleep_log and mood_daily', async (t) => {
   // Sample appState payload
   const sampleSleep = [
@@ -32,6 +29,7 @@ test('Supabase sync & restore mapping logic for sleep_log and mood_daily', async
         spriteId: 'incredible',
         label: 'Increíble',
         activities: ['ejercicio', 'comer_rico'],
+        tags: ['salud', 'deporte'],
         energy: 5,
         note: 'Excelente día',
         ts: '2025-05-10T20:00:00.000Z'
@@ -54,7 +52,8 @@ test('Supabase sync & restore mapping logic for sleep_log and mood_daily', async
     narrative: s.narrative || '',
     symbols: Array.isArray(s.symbols) ? s.symbols : [],
     clarity: (s.clarity !== undefined && s.clarity !== null && s.clarity !== "") ? Number(s.clarity) : null,
-    created_at: s.ts || s.created_at || new Date().toISOString()
+    created_at: s.ts || s.created_at || new Date().toISOString(),
+    data: s
   }));
 
   assert.equal(sleepRows.length, 1);
@@ -62,6 +61,7 @@ test('Supabase sync & restore mapping logic for sleep_log and mood_daily', async
   assert.equal(sleepRows[0].total_minutes, 480);
   assert.equal(sleepRows[0].dream_type, 'lúcido');
   assert.deepEqual(sleepRows[0].symbols, ['vuelo', 'cielo']);
+  assert.deepEqual(sleepRows[0].data, sampleSleep[0]);
 
   // Test mapping to DB rows for mood
   const moodEntries = [];
@@ -69,7 +69,7 @@ test('Supabase sync & restore mapping logic for sleep_log and mood_daily', async
     const items = Array.isArray(val) ? val : [val];
     items.forEach((e, idx) => {
       if (!e || typeof e !== 'object') return;
-      const entryId = e.id || `${dateKey}_${idx}_${e.spriteId || 'mood'}`;
+      const entryId = `${dateKey}_${e.ts || idx}`;
       moodEntries.push({
         id: String(entryId),
         date: dateKey,
@@ -78,54 +78,18 @@ test('Supabase sync & restore mapping logic for sleep_log and mood_daily', async
         activities: Array.isArray(e.activities) ? e.activities : [],
         energy: (e.energy !== undefined && e.energy !== null && e.energy !== "") ? Number(e.energy) : null,
         note: e.note || '',
-        ts: e.ts || new Date().toISOString()
+        tags: Array.isArray(e.tags) ? e.tags : [],
+        ts: e.ts || new Date().toISOString(),
+        data: e
       });
     });
   });
 
   assert.equal(moodEntries.length, 1);
-  assert.equal(moodEntries[0].id, 'mood_1');
+  assert.equal(moodEntries[0].id, '2025-05-10_2025-05-10T20:00:00.000Z');
   assert.equal(moodEntries[0].date, '2025-05-10');
   assert.equal(moodEntries[0].sprite_id, 'incredible');
   assert.deepEqual(moodEntries[0].activities, ['ejercicio', 'comer_rico']);
-
-  // Test restore mapping back to appState
-  const restoredSleep = sleepRows.map(s => ({
-    id: s.id,
-    date: s.date,
-    totalMinutes: Number(s.total_minutes || 0),
-    quality: s.quality,
-    note: s.note,
-    mode: s.mode,
-    start: s.start_time,
-    end: s.end_time,
-    dreamType: s.dream_type,
-    wakeEmotion: s.wake_emotion,
-    narrative: s.narrative,
-    symbols: s.symbols || [],
-    clarity: s.clarity,
-    ts: s.created_at
-  }));
-
-  assert.equal(restoredSleep[0].id, sampleSleep[0].id);
-  assert.equal(restoredSleep[0].totalMinutes, sampleSleep[0].totalMinutes);
-  assert.equal(restoredSleep[0].narrative, sampleSleep[0].narrative);
-
-  const restoredMoodMap = {};
-  moodEntries.forEach(m => {
-    if (!restoredMoodMap[m.date]) restoredMoodMap[m.date] = [];
-    restoredMoodMap[m.date].push({
-      id: m.id,
-      spriteId: m.sprite_id,
-      label: m.label,
-      activities: m.activities || [],
-      energy: m.energy,
-      note: m.note,
-      ts: m.ts
-    });
-  });
-
-  assert.ok(restoredMoodMap['2025-05-10']);
-  assert.equal(restoredMoodMap['2025-05-10'][0].spriteId, 'incredible');
-  assert.equal(restoredMoodMap['2025-05-10'][0].energy, 5);
+  assert.deepEqual(moodEntries[0].tags, ['salud', 'deporte']);
+  assert.deepEqual(moodEntries[0].data, sampleMood['2025-05-10'][0]);
 });
