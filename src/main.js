@@ -85,7 +85,7 @@ import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
-import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO, getChefAiSettings, saveChefAiSettings } from "./shopping/shoppingAi.js";
+import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO, getChefAiSettings, saveChefAiSettings, callClaude, explainAiError } from "./shopping/shoppingAi.js";
 import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles, updateMealBundle, deleteMealBundle, saveMealBundles } from "./shopping/mealBundles.js";
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
@@ -1449,6 +1449,308 @@ function openDB(name, version, upgradeCallback){
     }
   });
 }
+
+function openMcUnexpectedModal() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modalBackdrop active";
+  backdrop.id = "mcUnexpectedModal";
+
+  const todayDay = new Date().getDate();
+
+  backdrop.innerHTML = `
+    <div class="modal" data-act="modal-content-stop" style="max-width:400px;padding:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:16px;font-weight:800;color:#fff;">➕ Registrar Pago Inesperado / Imprevisto</h3>
+        <button class="iconBtn" onclick="document.getElementById('mcUnexpectedModal').remove()">✕</button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;">Concepto / Descripción</label>
+          <input type="text" id="mcUnexpName" class="input" placeholder="Ej. Reparación de auto, Consulta médica..." style="width:100%;" />
+        </div>
+
+        <div>
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;">Monto (S/)</label>
+          <input type="number" inputmode="decimal" id="mcUnexpAmount" class="input" placeholder="0.00" style="width:100%;" />
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;">Día del mes</label>
+            <input type="number" id="mcUnexpDueDay" class="input" value="${todayDay}" min="1" max="31" style="width:100%;" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;">Categoría</label>
+            <select id="mcUnexpCategory" class="input" style="width:100%;">
+              <option value="Emergencia">Emergencia</option>
+              <option value="Salud">Salud</option>
+              <option value="Hogar">Hogar</option>
+              <option value="Vehículo">Vehículo</option>
+              <option value="Otros">Otros</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;">Notas adicionales</label>
+          <input type="text" id="mcUnexpNotes" class="input" placeholder="Opcional..." style="width:100%;" />
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:8px;">
+          <button class="btn secondary" style="flex:1;" onclick="document.getElementById('mcUnexpectedModal').remove()">Cancelar</button>
+          <button class="btn primary" style="flex:1;" onclick="submitMcUnexpectedModal()">Guardar Imprevisto</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+}
+
+function submitMcUnexpectedModal() {
+  const name = document.getElementById("mcUnexpName")?.value?.trim();
+  const amount = parseFloat(document.getElementById("mcUnexpAmount")?.value || 0);
+  const dueDay = parseInt(document.getElementById("mcUnexpDueDay")?.value || 1, 10);
+  const category = document.getElementById("mcUnexpCategory")?.value || "Emergencia";
+  const notes = document.getElementById("mcUnexpNotes")?.value?.trim() || "";
+
+  if (!name || amount <= 0) {
+    toast("⚠️ Ingrese un concepto y monto válido");
+    return;
+  }
+
+  financeEnsureMissionControlStructures();
+  const mk = state.financeMissionMonthKey || getCurrentMonthKey();
+
+  const item = {
+    id: uid("mc_unexp"),
+    monthKey: mk,
+    type: "unexpected",
+    refId: null,
+    name,
+    category,
+    amount,
+    dueDay: Math.max(1, Math.min(31, dueDay)),
+    status: "pending",
+    paidAmount: 0,
+    paidDate: null,
+    movementId: null,
+    notes
+  };
+
+  state.financeMissionPayments.unshift(item);
+  persist();
+  document.getElementById("mcUnexpectedModal")?.remove();
+  toast("⚡ Pago imprevisto guardado");
+  view();
+}
+
+function openMcPayModal(itemId) {
+  financeEnsureMissionControlStructures();
+  const mk = state.financeMissionMonthKey || getCurrentMonthKey();
+  const m = financeMissionControlModel(mk);
+  const item = m.items.find(i => i.id === itemId);
+
+  if (!item) {
+    toast("⚠️ Pago no encontrado");
+    return;
+  }
+
+  const accounts = (state.financeAccounts || []).filter(a => !a.archived);
+  const defaultAccId = state.financePrimaryAccountId || (accounts[0] ? accounts[0].id : "");
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modalBackdrop active";
+  backdrop.id = "mcPayModal";
+
+  backdrop.innerHTML = `
+    <div class="modal" data-act="modal-content-stop" style="max-width:400px;padding:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <h3 style="margin:0;font-size:16px;font-weight:800;color:#fff;">✅ Confirmar Pago: ${escapeHtml(item.name)}</h3>
+        <button class="iconBtn" onclick="document.getElementById('mcPayModal').remove()">✕</button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;">Monto a pagar (S/)</label>
+          <input type="number" inputmode="decimal" id="mcPayAmount" class="input" value="${item.amount}" style="width:100%;" />
+        </div>
+
+        <div>
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;">Cuenta / Caja de Origen</label>
+          <select id="mcPayAccountId" class="input" style="width:100%;">
+            ${accounts.map(a => `<option value="${a.id}" ${a.id === defaultAccId ? "selected" : ""}>${escapeHtml(a.name)} (S/ ${_financeFmt(a.balance)})</option>`).join("")}
+          </select>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:8px;">
+          <button class="btn secondary" style="flex:1;" onclick="document.getElementById('mcPayModal').remove()">Cancelar</button>
+          <button class="btn primary" style="flex:1;" onclick="submitMcPayModal('${item.id}')">Confirmar Pago</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+}
+
+function submitMcPayModal(itemId) {
+  financeEnsureMissionControlStructures();
+  const mk = state.financeMissionMonthKey || getCurrentMonthKey();
+  const m = financeMissionControlModel(mk);
+  let item = state.financeMissionPayments.find(p => p.id === itemId);
+
+  // Promote virtual item to stored item
+  if (!item && itemId.startsWith("virtual_")) {
+    const isCmt = itemId.startsWith("virtual_cmt_");
+    const refId = itemId.replace(isCmt ? `virtual_cmt_` : `virtual_dbt_`, "").replace(`_${mk}`, "");
+    if (isCmt) {
+      const c = (state.financeCommitments || []).find(x => x.id === refId);
+      if (c) {
+        item = {
+          id: uid("mc_cmt"),
+          monthKey: mk,
+          type: "commitment",
+          refId: c.id,
+          name: c.name,
+          category: c.group || "Compromiso",
+          amount: Number(c.amount || 0),
+          dueDay: Number(c.dueDay || 1),
+          status: "pending",
+          paidAmount: 0,
+          paidDate: null,
+          movementId: null,
+          notes: c.note || ""
+        };
+        state.financeMissionPayments.push(item);
+      }
+    } else {
+      const d = (state.financeDebts || []).find(x => x.id === refId);
+      if (d) {
+        item = {
+          id: uid("mc_dbt"),
+          monthKey: mk,
+          type: "debt",
+          refId: d.id,
+          name: d.name,
+          category: "Deuda",
+          amount: Math.min(Number(d.monthlyDue || d.balance || 0), Number(d.balance || 0)),
+          dueDay: Number(d.dueDay || 15),
+          status: "pending",
+          paidAmount: 0,
+          paidDate: null,
+          movementId: null,
+          totalDebtBalance: Number(d.balance || 0),
+          notes: d.notes || ""
+        };
+        state.financeMissionPayments.push(item);
+      }
+    }
+  }
+
+  if (!item) {
+    toast("⚠️ No se pudo procesar el pago");
+    return;
+  }
+
+  const payAmount = parseFloat(document.getElementById("mcPayAmount")?.value || item.amount);
+  const accountId = document.getElementById("mcPayAccountId")?.value;
+
+  if (!accountId || payAmount <= 0) {
+    toast("⚠️ Seleccione una cuenta y monto válido");
+    return;
+  }
+
+  // Create movement in financeLedger
+  const entry = addFinanceEntry({
+    date: new Date().toISOString(),
+    type: "expense",
+    amount: payAmount,
+    accountId,
+    category: item.category || "Deudas/Compromisos",
+    reason: "planificado",
+    note: `[Mission Control] Pago de ${item.name}`,
+    neuronRole: "auto"
+  });
+
+  // Mark item as paid
+  item.status = "paid";
+  item.paidAmount = payAmount;
+  item.paidDate = new Date().toISOString();
+  item.movementId = entry ? entry.id : null;
+
+  // Reduce balance of Debt if debt
+  if (item.type === "debt" && item.refId) {
+    const debt = (state.financeDebts || []).find(d => d.id === item.refId);
+    if (debt) {
+      debt.balance = Math.max(0, Number(debt.balance || 0) - payAmount);
+      if (debt.balance === 0) debt.status = "closed";
+    }
+  }
+
+  persist();
+  document.getElementById("mcPayModal")?.remove();
+  toast(`✅ Pago registrado: ${item.name} por S/ ${_financeFmt(payAmount)}`);
+  view();
+}
+
+async function mcRunAiAnalysis() {
+  const outputEl = document.getElementById("mcAiOutput");
+  if (outputEl) outputEl.textContent = "🤖 El copiloto está evaluando tu estrategia de deudas y pagos...";
+
+  const chefS = getChefAiSettings();
+  const mk = state.financeMissionMonthKey || getCurrentMonthKey();
+  const m = financeMissionControlModel(mk);
+
+  const debtsSummary = (state.financeDebts || []).map(d => `- ${d.name}: Saldo S/ ${_financeFmt(d.balance)}, Cuota S/ ${_financeFmt(d.monthlyDue)}, Estado: ${d.status || 'activa'}`).join("\n") || "(Sin deudas registradas)";
+
+  const prompt = `Actúa como un Copiloto Financiero Experto y Estratégico.
+Analiza la siguiente situación de deudas y pagos del mes (${mk}) para Carlos:
+
+SITUACIÓN DEL MES:
+- Meta Total de Pagos del Mes: S/ ${m.totalExpected.toFixed(2)}
+- Ya Pagado: S/ ${m.totalPaid.toFixed(2)}
+- Pendiente del Mes: S/ ${m.totalPending.toFixed(2)}
+- Imprevistos Registrados: S/ ${m.unexpectedTotal.toFixed(2)}
+- Saldo Total Consolidado de Deudas Restantes: S/ ${m.totalRemainingDebtsBalance.toFixed(2)}
+- Caja Disponible Actual: S/ ${m.availableCash.toFixed(2)}
+
+DEUDAS ACTIVAS REGISTRADAS:
+${debtsSummary}
+
+INSTRUCCIONES:
+1. Da un diagnóstico breve y cercano del avance de pagos del mes.
+2. Analiza las deudas de mayor antigüedad o fricción (como la deuda de Carlos Emilio si aparece) y sugiere en qué momento abonarle cuando se liberen otras deudas menores o haya excedente de caja.
+3. Da 3 recomendaciones accionables y breves (máximo 150 palabras en total, tono motivador y estructurado).`;
+
+  try {
+    let result = "";
+    if (chefS.provider === "claude" && chefS.claudeApiKey) {
+      const messages = [{ role: "user", content: prompt }];
+      result = await callClaude(messages, chefS.claudeApiKey, chefS.claudeModel);
+    } else {
+      result = `💡 *Análisis Estratégico del Copiloto (${mk})*:\n- Tienes S/ ${_financeFmt(m.totalPending)} pendientes por cubrir de tu meta mensual.\n- Tu caja disponible de S/ ${_financeFmt(m.availableCash)} te permite priorizar las cuotas más urgentes.\n- *Estrategia de Deudas (ej. Carlos Emilio)*: En cuanto cubras los compromisos fijos del mes y mantengas tu fondo de imprevistos, destina los excedentes a amortizar la deuda de Carlos Emilio para liquidar los saldos más antiguos.`;
+    }
+
+    _mcAiAnalysisText = result;
+    if (outputEl) outputEl.textContent = result;
+  } catch (err) {
+    const errorMsg = explainAiError(err, chefS.provider || "IA");
+    _mcAiAnalysisText = errorMsg;
+    if (outputEl) outputEl.textContent = errorMsg;
+  }
+}
+
+try {
+  window.mcChangeMonth = mcChangeMonth;
+  window.mcSetCurrentMonth = mcSetCurrentMonth;
+  window.openMcUnexpectedModal = openMcUnexpectedModal;
+  window.submitMcUnexpectedModal = submitMcUnexpectedModal;
+  window.openMcPayModal = openMcPayModal;
+  window.submitMcPayModal = submitMcPayModal;
+  window.mcRunAiAnalysis = mcRunAiAnalysis;
+} catch (e) {}
 
 async function openDBWithRequiredStores(dbName, storeNames = []){
   let db = await openDB(dbName);
@@ -4074,6 +4376,10 @@ function openLiquidityTrainingModal() {
         </div>
       </div>
     `;
+
+    setTimeout(() => {
+      mcRenderChart();
+    }, 50);
   };
 
   modal.innerHTML = renderContent();
@@ -17364,6 +17670,7 @@ LS.financeCommitmentTemplates = "memorycarl_v2_finance_commitment_templates";
 LS.financeCommitmentInstances = "memorycarl_v2_finance_commitment_instances";
 LS.financeLoanUsageLedger = "memorycarl_v2_finance_loan_usage_ledger";
 LS.financeRoadmap = "memorycarl_v2_finance_roadmap";
+LS.financeMissionPayments = "memorycarl_v2_finance_mission_payments";
 LS.financeReasons = "memorycarl_v2_finance_reasons";
 LS.financeEntryCategories = "memorycarl_v3_finance_entry_categories";
 
@@ -17418,6 +17725,8 @@ state.financeCommitmentTemplates = load(LS.financeCommitmentTemplates, []);
 state.financeCommitmentInstances = load(LS.financeCommitmentInstances, []);
 state.financeLoanUsageLedger = load(LS.financeLoanUsageLedger, []);
 state.financeRoadmap = load(LS.financeRoadmap, {});
+state.financeMissionPayments = load(LS.financeMissionPayments, []);
+state.financeMissionMonthKey = getCurrentMonthKey();
 
 state.btcPricePen = Number(localStorage.getItem("memorycarl_btc_price_pen") || 225000);
 state.btcPriceUsd = Number(localStorage.getItem("memorycarl_btc_price_usd") || 60000);
@@ -17480,6 +17789,7 @@ persist = function(){
   try{ save(LS.financeMeta, state.financeMeta); }catch(_e){}
   try{ save(LS.financeEntryCategories, state.financeEntryCategories); }catch(_e){}
   try{ save(LS.financeRoadmap, state.financeRoadmap||{}); }catch(_e){}
+  try{ save(LS.financeMissionPayments, state.financeMissionPayments||[]); }catch(_e){}
   try{ localStorage.setItem("memorycarl_v2_finance_projection_mode", String(state.financeProjectionMode||"normal")); }catch(_e){}
 
   // Auto-backup to IndexedDB
@@ -17593,6 +17903,8 @@ function financeMigrateV2(){
 }
 
 function financeEnsureMissionControlStructures(){
+  if(!Array.isArray(state.financeMissionPayments)) state.financeMissionPayments = [];
+  if(!state.financeMissionMonthKey) state.financeMissionMonthKey = getCurrentMonthKey();
   if(!Array.isArray(state.financeObligations)) state.financeObligations = [];
   if(!Array.isArray(state.financePaymentSources)) state.financePaymentSources = [];
   if(!Array.isArray(state.financeTransactions)) state.financeTransactions = [];
@@ -17656,34 +17968,92 @@ function financeGetMonthKeyFromIso(iso){
 
 function financeMissionControlModel(monthKey){
   financeEnsureMissionControlStructures();
-  const mk = monthKey || getCurrentMonthKey();
-  const tx = (state.financeTransactions||[]).filter(t=> financeGetMonthKeyFromIso(t.date)===mk && !t.archived);
-  const incomeConfirmed = tx.filter(t=>t.direction==='inflow').reduce((s,t)=>s+Number(t.amount||0),0);
-  const paidNow = tx.filter(t=>t.direction==='outflow').reduce((s,t)=>s+Number(t.amount||0),0);
-  const obligations = (state.financeObligations||[]).filter(o=>o.isActive!==false);
-  const obligationsMonth = obligations.reduce((s,o)=>s+Number(o.amountExpected||0),0);
-  const pending = Math.max(0, obligationsMonth - paidNow);
-  const foreignUse = tx.filter(t=>String(t.impactMode||'').includes('internal_debt')).reduce((s,t)=>s+Number(t.amount||0),0);
-  const internalDebt = (state.financeInternalBalances||[]).filter(b=>b.balanceType==='owed_by_me').reduce((s,b)=>s+Number(b.currentAmount||0),0);
-  const realAvailable = (state.financeAccounts||[]).reduce((s,a)=>s+Number(a.balance||0),0);
-  const essential = obligations.filter(o=>String(o.type||'').includes('essential') || String(o.type||'').includes('debt')).reduce((s,o)=>s+Number(o.amountExpected||0),0);
-  const margin = incomeConfirmed - essential;
-  const riskScore = pending > incomeConfirmed ? 'ALTO' : (pending > incomeConfirmed*0.6 ? 'MEDIO' : 'BAJO');
+  const mk = monthKey || state.financeMissionMonthKey || getCurrentMonthKey();
 
-  let upcoming = obligations.map(o=>{
-    const day = Number(o.dueDate||1);
-    const due = new Date(`${mk}-${String(Math.max(1,Math.min(31,day))).padStart(2,'0')}T12:00:00`);
-    const diff = Math.ceil((due.getTime()-Date.now())/(24*60*60*1000));
-    const bucket = diff<=0 ? 'hoy' : (diff<=7?'esta semana':(diff<=14?'urgente':'postergable'));
-    return {...o, due, bucket, _type: 'commitment'};
+  const storedForMonth = (state.financeMissionPayments||[]).filter(p => p && p.monthKey === mk);
+  const storedRefIds = new Set(storedForMonth.map(p => p.refId).filter(Boolean));
+
+  const items = storedForMonth.map(p => ({ ...p }));
+
+  // Auto-generate commitment items for month if not explicitly stored
+  (state.financeCommitments || []).filter(c => c && c.active !== false).forEach(c => {
+    if (!storedRefIds.has(c.id)) {
+      items.push({
+        id: `virtual_cmt_${c.id}_${mk}`,
+        monthKey: mk,
+        type: "commitment",
+        refId: c.id,
+        name: c.name || "Compromiso",
+        category: c.group || "Compromiso",
+        amount: Number(c.amount || 0),
+        dueDay: Number(c.dueDay || 1),
+        status: "pending",
+        paidAmount: 0,
+        paidDate: null,
+        movementId: null,
+        notes: c.note || ""
+      });
+    }
   });
 
-  // Disconnected from Mission Control as requested
+  // Auto-generate debt items for month if not explicitly stored
+  (state.financeDebts || []).filter(d => d && String(d.status || 'active') === 'active').forEach(d => {
+    if (!storedRefIds.has(d.id)) {
+      const dueAmt = Math.min(Number(d.monthlyDue || d.balance || 0), Number(d.balance || 0));
+      items.push({
+        id: `virtual_dbt_${d.id}_${mk}`,
+        monthKey: mk,
+        type: "debt",
+        refId: d.id,
+        name: d.name || "Deuda",
+        category: "Deuda",
+        amount: dueAmt,
+        dueDay: Number(d.dueDay || d.dueDate || 15),
+        status: "pending",
+        paidAmount: 0,
+        paidDate: null,
+        movementId: null,
+        totalDebtBalance: Number(d.balance || 0),
+        notes: d.notes || ""
+      });
+    }
+  });
 
+  items.sort((a, b) => (Number(a.dueDay) || 1) - (Number(b.dueDay) || 1));
 
-  upcoming.sort((a,b)=>a.due-b.due);
+  const totalExpected = items.reduce((s, i) => s + Number(i.amount || 0), 0);
+  const totalPaid = items.reduce((s, i) => s + (i.status === 'paid' ? Number(i.paidAmount || i.amount || 0) : 0), 0);
+  const totalPending = Math.max(0, totalExpected - totalPaid);
+  const unexpectedTotal = items.filter(i => i.type === 'unexpected').reduce((s, i) => s + Number(i.amount || 0), 0);
+  const commitmentsTotal = items.filter(i => i.type === 'commitment').reduce((s, i) => s + Number(i.amount || 0), 0);
+  const debtsTotal = items.filter(i => i.type === 'debt').reduce((s, i) => s + Number(i.amount || 0), 0);
+  const completionPct = totalExpected > 0 ? Math.min(100, Math.round((totalPaid / totalExpected) * 100)) : 0;
 
-  return {mk,incomeConfirmed,obligationsMonth,paidNow,pending,realAvailable,foreignUse,internalDebt,margin,riskScore,upcoming,tx};
+  const totalRemainingDebtsBalance = (state.financeDebts || [])
+    .filter(d => String(d.status || 'active') === 'active')
+    .reduce((s, d) => s + Number(d.balance || 0), 0);
+
+  const availableCash = (state.financeAccounts || [])
+    .filter(a => !a.archived && !a.excludeFromTotal)
+    .reduce((s, a) => s + Number(a.balance || 0), 0);
+
+  const tx = (state.financeTransactions||[]).filter(t => financeGetMonthKeyFromIso(t.date) === mk && !t.archived);
+  const incomeConfirmed = tx.filter(t => t.direction === 'inflow').reduce((s, t) => s + Number(t.amount || 0), 0);
+
+  return {
+    mk,
+    items,
+    totalExpected,
+    totalPaid,
+    totalPending,
+    unexpectedTotal,
+    commitmentsTotal,
+    debtsTotal,
+    completionPct,
+    totalRemainingDebtsBalance,
+    availableCash,
+    incomeConfirmed
+  };
 }
 
 function financeGenerateInsights(monthKey){
@@ -22304,252 +22674,347 @@ try{
   window.deleteFinanceDebt = deleteFinanceDebt;
 }catch(e){}
 
+let _mcAiAnalysisText = "";
+
+function mcChangeMonth(delta) {
+  financeEnsureMissionControlStructures();
+  const current = state.financeMissionMonthKey || getCurrentMonthKey();
+  const parts = current.split("-");
+  let y = parseInt(parts[0], 10);
+  let m = parseInt(parts[1], 10) + delta;
+  if (m < 1) { m = 12; y--; }
+  if (m > 12) { m = 1; y++; }
+  state.financeMissionMonthKey = `${y}-${String(m).padStart(2, "0")}`;
+  _mcAiAnalysisText = "";
+  persist();
+  view();
+}
+
+function mcSetCurrentMonth() {
+  state.financeMissionMonthKey = getCurrentMonthKey();
+  _mcAiAnalysisText = "";
+  persist();
+  view();
+}
+
 function renderFinanceMissionControl(){
-  const m = financeMissionControlModel(getCurrentMonthKey());
-  const insights = financeGenerateInsights(m.mk);
+  financeEnsureMissionControlStructures();
+  const mk = state.financeMissionMonthKey || getCurrentMonthKey();
+  const m = financeMissionControlModel(mk);
   const fmt = _financeFmt;
+
+  // Format Month Title
+  const parts = mk.split("-");
+  const yearNum = parts[0];
+  const monthNum = parseInt(parts[1], 10);
+  const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const monthTitle = `${monthNames[monthNum - 1] || "Mes"} ${yearNum}`;
 
   // Inject styles once
   if(!document.getElementById('mcStyles')){
     const s = document.createElement('style');
     s.id = 'mcStyles';
     s.textContent = `
-      .mc-wrap{ display:flex;flex-direction:column;gap:14px;padding-bottom:16px; }
+      .mc-wrap{ display:flex;flex-direction:column;gap:16px;padding-bottom:24px; }
 
-      /* ── Header card ── */
+      /* ── Month Selector ── */
+      .mc-month-nav{
+        display:flex;align-items:center;justify-content:space-between;
+        background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+        border-radius:16px;padding:8px 12px;
+      }
+      .mc-month-btn{
+        background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);
+        color:#fff;border-radius:10px;padding:6px 14px;font-size:12px;font-weight:700;
+        cursor:pointer;transition:all .15s;
+      }
+      .mc-month-btn:hover{ background:rgba(255,255,255,.16) }
+      .mc-month-title{ font-size:15px;font-weight:800;color:#fff;letter-spacing:-.3px;cursor:pointer }
+
+      /* ── Hero Card ── */
       .mc-hero{
-        background:linear-gradient(135deg,rgba(124,92,255,.25),rgba(54,211,153,.12));
+        background:linear-gradient(135deg,rgba(124,92,255,.22),rgba(54,211,153,.12));
         border:1px solid rgba(124,92,255,.3);
         border-radius:20px;padding:18px 16px 14px;
       }
-      .mc-hero-top{ display:flex;align-items:center;justify-content:space-between;margin-bottom:14px }
-      .mc-hero-label{ font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600 }
-      .mc-risk{
-        font-size:11px;font-weight:700;letter-spacing:.5px;
-        padding:4px 10px;border-radius:20px;
+      .mc-hero-top{ display:flex;align-items:center;justify-content:space-between;margin-bottom:12px }
+      .mc-hero-label{ font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:rgba(255,255,255,.5);font-weight:700 }
+      .mc-hero-badge{
+        font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;
+        background:rgba(54,211,153,.18);color:#36d399;border:1px solid rgba(54,211,153,.3);
       }
-      .mc-risk.low{ background:rgba(54,211,153,.18);color:#36d399;border:1px solid rgba(54,211,153,.3) }
-      .mc-risk.mid{ background:rgba(251,191,36,.18);color:#fbbf24;border:1px solid rgba(251,191,36,.3) }
-      .mc-risk.high{ background:rgba(251,113,133,.18);color:#fb7185;border:1px solid rgba(251,113,133,.3) }
 
-      .mc-balance{ font-size:32px;font-weight:800;letter-spacing:-1px;margin-bottom:4px }
-      .mc-balance-sub{ font-size:12px;color:rgba(255,255,255,.4) }
+      .mc-balance{ font-size:30px;font-weight:800;letter-spacing:-1px;margin-bottom:2px }
+      .mc-balance-sub{ font-size:12px;color:rgba(255,255,255,.45) }
 
       .mc-stats{ display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px }
       .mc-stat{
         background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
-        border-radius:13px;padding:10px 10px 8px;text-align:center;
+        border-radius:13px;padding:10px 8px;text-align:center;
       }
-      .mc-stat-val{ font-size:15px;font-weight:700;margin-bottom:2px }
-      .mc-stat-lbl{ font-size:10px;color:rgba(255,255,255,.4);letter-spacing:.3px }
+      .mc-stat-val{ font-size:14px;font-weight:800;margin-bottom:2px }
+      .mc-stat-lbl{ font-size:10px;color:rgba(255,255,255,.45);letter-spacing:.2px }
       .mc-stat.accent .mc-stat-val{ color:#7c5cff }
       .mc-stat.good .mc-stat-val{ color:#36d399 }
       .mc-stat.warn .mc-stat-val{ color:#fb7185 }
 
-      /* Progress bar */
+      /* Progress Bar */
       .mc-progress-wrap{ margin-top:14px }
-      .mc-progress-label{
-        display:flex;justify-content:space-between;
-        font-size:11px;color:rgba(255,255,255,.45);margin-bottom:6px;
-      }
-      .mc-progress-track{
-        height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;
-      }
-      .mc-progress-fill{
-        height:100%;border-radius:3px;
-        background:linear-gradient(90deg,#7c5cff,#36d399);
-        transition:width .4s ease;
-      }
+      .mc-progress-label{ display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,.5);margin-bottom:6px }
+      .mc-progress-track{ height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden }
+      .mc-progress-fill{ height:100%;border-radius:4px;background:linear-gradient(90deg,#7c5cff,#36d399);transition:width .4s ease }
 
-      /* ── Priority list ── */
+      /* ── Sections ── */
       .mc-section{
-        background:rgba(255,255,255,.04);
+        background:rgba(255,255,255,.03);
         border:1px solid rgba(255,255,255,.08);
         border-radius:18px;overflow:hidden;
       }
       .mc-section-head{
         display:flex;align-items:center;justify-content:space-between;
-        padding:13px 16px;border-bottom:1px solid rgba(255,255,255,.06);
+        padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);
       }
-      .mc-section-title{ font-size:13px;font-weight:700;letter-spacing:.2px }
-      .mc-section-action{
-        font-size:11px;color:#7c5cff;cursor:pointer;
-        padding:4px 10px;border-radius:10px;
-        background:rgba(124,92,255,.12);border:1px solid rgba(124,92,255,.2);
-        font-weight:600;transition:background .14s;
+      .mc-section-title{ font-size:14px;font-weight:800;color:#fff }
+      .mc-btn-primary{
+        font-size:12px;font-weight:700;color:#fff;
+        background:linear-gradient(135deg,#7c5cff,#6366f1);
+        border:none;border-radius:10px;padding:6px 12px;cursor:pointer;
+        box-shadow:0 2px 8px rgba(124,92,255,.3);transition:opacity .15s;
       }
-      .mc-section-action:hover{ background:rgba(124,92,255,.22) }
+      .mc-btn-primary:hover{ opacity:.9 }
 
-      .mc-priority-item{
-        display:flex;align-items:center;gap:12px;
-        padding:12px 16px;
-        border-bottom:1px solid rgba(255,255,255,.05);
-        cursor:pointer;transition:background .14s;
+      /* ── Items List ── */
+      .mc-item{
+        display:flex;align-items:center;gap:12px;padding:12px 16px;
+        border-bottom:1px solid rgba(255,255,255,.04);transition:background .14s;
       }
-      .mc-priority-item:last-child{ border-bottom:none }
-      .mc-priority-item:hover{ background:rgba(255,255,255,.04) }
-      .mc-priority-dot{
-        width:10px;height:10px;border-radius:50%;flex-shrink:0;
+      .mc-item:last-child{ border-bottom:none }
+      .mc-item.paid{ opacity:.65 }
+      .mc-item-day{
+        width:36px;height:36px;border-radius:10px;
+        background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        flex-shrink:0;
       }
-      .mc-priority-info{ flex:1;min-width:0 }
-      .mc-priority-name{ font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
-      .mc-priority-meta{ font-size:11px;color:rgba(255,255,255,.4);margin-top:1px }
-      .mc-priority-amt{ font-size:14px;font-weight:700;white-space:nowrap }
-      .mc-priority-badge{
-        font-size:10px;font-weight:700;letter-spacing:.3px;
-        padding:2px 7px;border-radius:8px;white-space:nowrap;
-      }
-      .badge-hoy{ background:rgba(251,113,133,.2);color:#fb7185 }
-      .badge-semana{ background:rgba(251,191,36,.2);color:#fbbf24 }
-      .badge-urgente{ background:rgba(251,191,36,.12);color:#fbbf24 }
-      .badge-post{ background:rgba(255,255,255,.07);color:rgba(255,255,255,.4) }
+      .mc-item-day-num{ font-size:14px;font-weight:800;color:#fff;line-height:1 }
+      .mc-item-day-lbl{ font-size:9px;color:rgba(255,255,255,.4);text-transform:uppercase;margin-top:1px }
 
-      /* ── Sources grid ── */
-      .mc-sources{ display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:12px 14px; }
-      .mc-source-item{
-        background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
-        border-radius:12px;padding:10px 12px;
-      }
-      .mc-source-name{ font-size:12px;font-weight:600;margin-bottom:2px }
-      .mc-source-meta{ font-size:10px;color:rgba(255,255,255,.35) }
+      .mc-item-info{ flex:1;min-width:0 }
+      .mc-item-title{ font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
+      .mc-item-sub{ font-size:11px;color:rgba(255,255,255,.45);margin-top:2px;display:flex;align-items:center;gap:6px }
 
-      /* ── Insights ── */
-      .mc-insight{
-        display:flex;gap:10px;align-items:flex-start;
-        padding:11px 14px;
-        border-bottom:1px solid rgba(255,255,255,.05);
+      .mc-badge{ font-size:9px;font-weight:800;padding:2px 6px;border-radius:6px;text-transform:uppercase }
+      .mc-badge.commitment{ background:rgba(124,92,255,.2);color:#a78bfa;border:1px solid rgba(124,92,255,.3) }
+      .mc-badge.debt{ background:rgba(251,191,36,.2);color:#fbbf24;border:1px solid rgba(251,191,36,.3) }
+      .mc-badge.unexpected{ background:rgba(251,113,133,.2);color:#fb7185;border:1px solid rgba(251,113,133,.3) }
+
+      .mc-item-right{ text-align:right;flex-shrink:0 }
+      .mc-item-amt{ font-size:14px;font-weight:800;color:#fff }
+      .mc-item-paybtn{
+        margin-top:4px;font-size:10px;font-weight:700;padding:3px 8px;border-radius:8px;
+        background:rgba(54,211,153,.18);color:#36d399;border:1px solid rgba(54,211,153,.3);
+        cursor:pointer;display:inline-block;
       }
-      .mc-insight:last-child{ border-bottom:none }
-      .mc-insight-dot{ width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px }
-      .mc-insight-title{ font-size:12px;font-weight:700;margin-bottom:2px }
-      .mc-insight-msg{ font-size:11px;color:rgba(255,255,255,.5);line-height:1.5 }
+      .mc-item-paybtn:hover{ background:rgba(54,211,153,.3) }
+
+      /* AI Copilot Box */
+      .mc-copilot-box{
+        background:linear-gradient(135deg,rgba(124,92,255,.12),rgba(99,102,241,.08));
+        border:1px solid rgba(124,92,255,.25);border-radius:16px;padding:16px;
+      }
+      .mc-copilot-text{ font-size:12px;color:rgba(255,255,255,.85);line-height:1.5;white-space:pre-wrap }
+
+      /* Charts Wrap */
+      .mc-chart-card{ background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:16px }
     `;
     document.head.appendChild(s);
   }
 
-  const riskClass = m.riskScore==='BAJO' ? 'low' : (m.riskScore==='MEDIO' ? 'mid' : 'high');
-  const paidPct = m.obligationsMonth > 0 ? Math.min(100, Math.round((m.paidNow/m.obligationsMonth)*100)) : 0;
-  const marginColor = m.margin >= 0 ? '#36d399' : '#fb7185';
+  // Generate Items List
+  const itemsHtml = m.items.length > 0 ? m.items.map(item => {
+    const isPaid = item.status === "paid";
+    const badgeClass = item.type === "commitment" ? "commitment" : (item.type === "debt" ? "debt" : "unexpected");
+    const badgeText = item.type === "commitment" ? "Compromiso" : (item.type === "debt" ? "Deuda" : "⚡ Imprevisto");
 
-  const bucketDot = b => b==='hoy'?'#fb7185':(b==='esta semana'?'#fbbf24':'#7c5cff');
-  const bucketBadge = b => {
-    if(b==='hoy') return '<span class="mc-priority-badge badge-hoy">HOY</span>';
-    if(b==='esta semana') return '<span class="mc-priority-badge badge-semana">ESTA SEMANA</span>';
-    if(b==='urgente') return '<span class="mc-priority-badge badge-urgente">URGENTE</span>';
-    return '<span class="mc-priority-badge badge-post">DESPUÉS</span>';
-  };
-
-  const priorityItems = (m.upcoming||[]).slice(0,8).map(o=>`
-    <div class="mc-priority-item" onclick="setFinanceSubTab('${o._type==='debt'?'debts':'commitments'}')" title="Ver detalle">
-      <div class="mc-priority-dot" style="background:${bucketDot(o.bucket)}"></div>
-      <div class="mc-priority-info">
-        <div class="mc-priority-name">${escapeHtml(o.name)}</div>
-        <div class="mc-priority-meta">${escapeHtml(o.category||'General')} · día ${Number(o.dueDate||1)}</div>
-      </div>
-      ${bucketBadge(o.bucket)}
-      <div class="mc-priority-amt" style="color:${bucketDot(o.bucket)}">S/ ${fmt(o.amountExpected||0)}</div>
-    </div>
-  `).join('') || `<div style="padding:20px 16px;text-align:center;color:rgba(255,255,255,.3);font-size:13px">Sin obligaciones activas.</div>`;
-
-  const insightItems = (insights||[]).map(i=>{
-    const col = i.level==='urgent'?'#fb7185':(i.level==='warning'?'#fbbf24':'#7c5cff');
     return `
-      <div class="mc-insight">
-        <div class="mc-insight-dot" style="background:${col}"></div>
-        <div>
-          <div class="mc-insight-title">${escapeHtml(i.title)}</div>
-          <div class="mc-insight-msg">${escapeHtml(i.message)}</div>
+      <div class="mc-item ${isPaid ? 'paid' : ''}">
+        <div class="mc-item-day">
+          <div class="mc-item-day-num">${item.dueDay || 1}</div>
+          <div class="mc-item-day-lbl">Día</div>
+        </div>
+        <div class="mc-item-info">
+          <div class="mc-item-title">${escapeHtml(item.name)}</div>
+          <div class="mc-item-sub">
+            <span class="mc-badge ${badgeClass}">${badgeText}</span>
+            <span>· ${escapeHtml(item.category || "General")}</span>
+          </div>
+        </div>
+        <div class="mc-item-right">
+          <div class="mc-item-amt" style="${isPaid ? 'color:#36d399' : ''}">
+            S/ ${fmt(isPaid ? (item.paidAmount || item.amount) : item.amount)}
+          </div>
+          ${isPaid ? `
+            <div style="font-size:10px;color:#36d399;font-weight:700;margin-top:3px;">
+              ✅ Pagado
+            </div>
+          ` : `
+            <button class="mc-item-paybtn" onclick="openMcPayModal('${item.id}')">
+              ✅ Pagar
+            </button>
+          `}
         </div>
       </div>
     `;
-  }).join('');
-
-  const sourceItems = (state.financePaymentSources||[]).filter(s=>s.isActive!==false).map(s=>`
-    <div class="mc-source-item">
-      <div class="mc-source-name">${escapeHtml(s.name)}</div>
-      <div class="mc-source-meta">${escapeHtml(s.sourceType)} · ${escapeHtml(s.owner)}</div>
-    </div>
-  `).join('') || `<div style="padding:12px 16px;color:rgba(255,255,255,.3);font-size:12px">Sin fuentes configuradas</div>`;
+  }).join('') : `<div style="padding:24px;text-align:center;color:rgba(255,255,255,.4);font-size:13px">Sin pagos programados para este mes.</div>`;
 
   return `
     <div class="mc-wrap">
 
-      <!-- Hero card -->
+      <!-- Month Selector -->
+      <div class="mc-month-nav">
+        <button class="mc-month-btn" onclick="mcChangeMonth(-1)">◀ Anterior</button>
+        <div class="mc-month-title" onclick="mcSetCurrentMonth()" title="Ir al mes actual">
+          📅 ${escapeHtml(monthTitle)}
+        </div>
+        <button class="mc-month-btn" onclick="mcChangeMonth(1)">Siguiente ▶</button>
+      </div>
+
+      <!-- Hero Card KPI -->
       <div class="mc-hero">
         <div class="mc-hero-top">
-          <div class="mc-hero-label">🛰 Mission Control · ${escapeHtml(m.mk)}</div>
-          <div class="mc-risk ${riskClass}">RIESGO ${escapeHtml(m.riskScore)}</div>
+          <div class="mc-hero-label">🛰 Mission Control · ${escapeHtml(mk)}</div>
+          <div class="mc-hero-badge">${m.completionPct}% CUMPLIDO</div>
         </div>
-        <div class="mc-balance" style="color:${marginColor}">S/ ${fmt(Math.abs(m.margin))}</div>
-        <div class="mc-balance-sub">${m.margin>=0?'margen disponible después de esenciales':'déficit estimado del mes'}</div>
+
+        <div class="mc-balance" style="color:${m.totalPending === 0 ? '#36d399' : '#fb7185'}">
+          S/ ${fmt(m.totalPending)}
+        </div>
+        <div class="mc-balance-sub">Pendiente de pago este mes</div>
+
         <div class="mc-stats">
-          <div class="mc-stat good">
-            <div class="mc-stat-val">S/ ${fmt(m.incomeConfirmed)}</div>
-            <div class="mc-stat-lbl">Ingreso</div>
-          </div>
           <div class="mc-stat accent">
-            <div class="mc-stat-val">S/ ${fmt(m.obligationsMonth)}</div>
-            <div class="mc-stat-lbl">Obligaciones</div>
+            <div class="mc-stat-val">S/ ${fmt(m.totalExpected)}</div>
+            <div class="mc-stat-lbl">Meta Pagos</div>
+          </div>
+          <div class="mc-stat good">
+            <div class="mc-stat-val">S/ ${fmt(m.totalPaid)}</div>
+            <div class="mc-stat-lbl">Pagado Real</div>
           </div>
           <div class="mc-stat warn">
-            <div class="mc-stat-val">S/ ${fmt(m.pending)}</div>
-            <div class="mc-stat-lbl">Pendiente</div>
+            <div class="mc-stat-val">S/ ${fmt(m.unexpectedTotal)}</div>
+            <div class="mc-stat-lbl">Imprevistos</div>
           </div>
           <div class="mc-stat">
-            <div class="mc-stat-val">S/ ${fmt(m.paidNow)}</div>
-            <div class="mc-stat-lbl">Pagado</div>
+            <div class="mc-stat-val">S/ ${fmt(m.commitmentsTotal)}</div>
+            <div class="mc-stat-lbl">Compromisos</div>
           </div>
           <div class="mc-stat">
-            <div class="mc-stat-val">S/ ${fmt(m.realAvailable)}</div>
-            <div class="mc-stat-lbl">Disponible</div>
+            <div class="mc-stat-val">S/ ${fmt(m.debtsTotal)}</div>
+            <div class="mc-stat-lbl">Deudas Cuota</div>
           </div>
-          <div class="mc-stat ${m.internalDebt>0?'warn':''}">
-            <div class="mc-stat-val">S/ ${fmt(m.internalDebt)}</div>
-            <div class="mc-stat-lbl">Deuda int.</div>
+          <div class="mc-stat good">
+            <div class="mc-stat-val">S/ ${fmt(m.availableCash)}</div>
+            <div class="mc-stat-lbl">Caja Disponible</div>
           </div>
         </div>
+
         <div class="mc-progress-wrap">
           <div class="mc-progress-label">
-            <span>Compromisos pagados</span>
-            <span>${paidPct}%</span>
+            <span>Progreso de Pagos</span>
+            <span>${m.completionPct}%</span>
           </div>
           <div class="mc-progress-track">
-            <div class="mc-progress-fill" style="width:${paidPct}%"></div>
+            <div class="mc-progress-fill" style="width:${m.completionPct}%"></div>
           </div>
         </div>
       </div>
 
-      <!-- Prioridades inmediatas -->
-      <div class="mc-section">
-        <div class="mc-section-head">
-          <div class="mc-section-title">⚡ Prioridades inmediatas</div>
-          <div style="display:flex;gap:6px;">
-            <div class="mc-section-action" onclick="setFinanceSubTab('debts')">Deudas →</div>
-            <div class="mc-section-action" onclick="setFinanceSubTab('commitments')">Compromisos →</div>
+      <!-- Copiloto IA de Deudas -->
+      <div class="mc-copilot-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:800;color:#fff;display:flex;align-items:center;gap:6px;">
+            <span>💡</span> Copiloto Estratégico de Deudas
           </div>
+          <button class="mc-btn-primary" style="padding:4px 10px;font-size:11px;" onclick="mcRunAiAnalysis()">
+            🤖 Analizar con IA
+          </button>
         </div>
-        ${priorityItems}
+        <div id="mcAiOutput" class="mc-copilot-text">
+          ${_mcAiAnalysisText ? escapeHtml(_mcAiAnalysisText) : `Presiona "Analizar con IA" para que tu copiloto evalúe tu avance de deudas, detecte cuando liberar deudas antiguas (como la de Carlos Emilio) y te arme la mejor estrategia de pago del mes.`}
+        </div>
       </div>
 
-      <!-- Asistente -->
-      ${insightItems ? `
+      <!-- Lista de Pagos del Mes -->
       <div class="mc-section">
         <div class="mc-section-head">
-          <div class="mc-section-title">💡 Asistente</div>
+          <div class="mc-section-title">📋 Pagos del Mes (${m.items.length})</div>
+          <button class="mc-btn-primary" onclick="openMcUnexpectedModal()">
+            ➕ Pago Inesperado
+          </button>
         </div>
-        ${insightItems}
-      </div>` : ''}
+        ${itemsHtml}
+      </div>
 
-      <!-- Fuentes de pago -->
-      <div class="mc-section">
-        <div class="mc-section-head">
-          <div class="mc-section-title">💳 Fuentes de pago</div>
+      <!-- Estadísticas y Gráfico de Distribución -->
+      <div class="mc-chart-card">
+        <div style="font-size:14px;font-weight:800;color:#fff;margin-bottom:12px;">
+          📊 Análisis Estratégico de Pagos
         </div>
-        <div class="mc-sources">${sourceItems}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:center;">
+          <div style="background:rgba(255,255,255,.04);padding:10px;border-radius:12px;">
+            <div style="font-size:11px;color:rgba(255,255,255,.45);">Saldo Deudas Restantes</div>
+            <div style="font-size:16px;font-weight:800;color:#fbbf24;margin-top:2px;">S/ ${fmt(m.totalRemainingDebtsBalance)}</div>
+          </div>
+          <div style="background:rgba(255,255,255,.04);padding:10px;border-radius:12px;">
+            <div style="font-size:11px;color:rgba(255,255,255,.45);">Ingreso Confirmado</div>
+            <div style="font-size:16px;font-weight:800;color:#36d399;margin-top:2px;">S/ ${fmt(m.incomeConfirmed)}</div>
+          </div>
+        </div>
+        <div style="margin-top:14px;height:160px;position:relative;">
+          <canvas id="mcDistributionChart"></canvas>
+        </div>
       </div>
 
     </div>
   `;
+}
+
+setTimeout(() => {
+  mcRenderChart();
+}, 100);
+
+function mcRenderChart() {
+  const canvas = document.getElementById("mcDistributionChart");
+  if (!canvas || typeof Chart === "undefined") return;
+
+  const mk = state.financeMissionMonthKey || getCurrentMonthKey();
+  const m = financeMissionControlModel(mk);
+
+  if (window._mcChartInstance) {
+    window._mcChartInstance.destroy();
+  }
+
+  window._mcChartInstance = new Chart(canvas.getContext("2d"), {
+    type: "doughnut",
+    data: {
+      labels: ["Compromisos Fijos", "Cuotas de Deudas", "Imprevistos"],
+      datasets: [{
+        data: [m.commitmentsTotal, m.debtsTotal, m.unexpectedTotal],
+        backgroundColor: ["#7c5cff", "#fbbf24", "#fb7185"],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: { color: "rgba(255,255,255,0.7)", font: { size: 11 } }
+        }
+      }
+    }
+  });
 }
 
 
