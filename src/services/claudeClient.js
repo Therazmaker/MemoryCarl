@@ -287,3 +287,125 @@ export async function requestClaudeChatReply(payload) {
     return null;
   }
 }
+
+/**
+ * Llama a Anthropic Claude como un Socratic Pattern Weaver para el NeuroProbe.
+ *
+ * @param {{
+ *   context: object,
+ *   history: Array<{role: string, content: string}>,
+ *   recentMemoriesSummary?: string,
+ *   activeNeurons?: Array<object>
+ * }} payload
+ * @returns {Promise<{ isDraft: boolean, message: string, proposedNeuron?: object }>}
+ */
+export async function requestClaudeSocraticProbe(payload = {}) {
+  const settings = getClaudeSettings();
+  if (!settings.apiKey) {
+    throw new Error("Claude API Key no configurada para NeuroProbe");
+  }
+
+  const { context = {}, history = [], recentMemoriesSummary = "", activeNeurons = [] } = payload;
+  const historyText = history.map(h => `${h.role === 'assistant' ? 'Carl' : 'Usuario'}: ${h.content}`).join("\n");
+
+  const activeNeuronsSummary = (activeNeurons || [])
+    .slice(0, 6)
+    .map(n => `- [${n.core?.domain || "general"}] ${n.core?.concept}: ${n.core?.summary || ""}`)
+    .join("\n");
+
+  const systemPrompt = `Eres NeuroProbe, un observador cognitivo socrático e inquisitivo que ayuda al usuario a descubrir patrones, hábitos, creencias o conexiones profundas en su mente.
+
+Contexto cognitivo detectado: ${JSON.stringify(context)}
+${recentMemoriesSummary ? `Resumen de memorias/conversaciones recientes:\n${recentMemoriesSummary}\n` : ""}
+${activeNeuronsSummary ? `Neuronas activas o relevantes:\n${activeNeuronsSummary}\n` : ""}
+
+REGLAS CRÍTICAS:
+1. Tu objetivo es hacer una PREGUNTA SOCRÁTICA PROFUNDA, ESPECÍFICA y ATINADA sobre la vida, decisiones, emociones o patrones del usuario basándote en el contexto reciente y sus neuronas.
+2. NUNCA hagas preguntas genéricas, obvias o "random". Conecta directamente con lo que el usuario está viviendo o pensando.
+3. Si el usuario está respondiendo a tu pregunta y necesitas explorar más (1-2 turnos): Devuelve "isDraft": false, y en "message" haz una repregunta reflexiva o señálale un patrón intrigante.
+4. Si el usuario ya ha revelado una idea, patrón o hábito claro que deba convertirse en neurona: Devuelve "isDraft": true, un "message" empático de conclusión reconociendo el patrón, y completa "proposedNeuron".
+
+FORMATO DE RESPUESTA (Responde ÚNICAMENTE con un objeto JSON válido, sin bloques markdown ni texto adicional):
+{
+  "isDraft": false,
+  "message": "Tu pregunta o repregunta socrática...",
+  "proposedNeuron": {
+    "type": "pattern",
+    "core": { "concept": "nombre claro y conciso del patrón", "domain": "general|work|personal|emotions|etc", "summary": "resumen descriptivo del patrón o creencia" },
+    "triggers": ["palabra1", "palabra2"],
+    "emotion": "neutral",
+    "evidence": ["extracto o evidencia literal expresada por el usuario"]
+  }
+}`;
+
+  const formattedMessages = [];
+  if (historyText) {
+    formattedMessages.push({
+      role: "user",
+      content: `Historial de diálogo del probe:\n${historyText}\n\nAnaliza la última respuesta del usuario y continúa la indagación socrática o formaliza la neurona.`
+    });
+  } else {
+    formattedMessages.push({
+      role: "user",
+      content: `Genera una pregunta socrática inicial profunda y relevante basada en mi contexto actual.`
+    });
+  }
+
+  const requestBody = {
+    model: settings.model || "claude-haiku-4-5",
+    max_tokens: 1024,
+    system: [
+      {
+        type: "text",
+        text: systemPrompt,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: formattedMessages,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(ANTHROPIC_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": settings.apiKey.trim(),
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const errJson = await res.json();
+        errMsg = errJson.error?.message || errMsg;
+      } catch (_) {}
+      throw new Error(`Error Anthropic Claude: ${errMsg}`);
+    }
+
+    const data = await res.json();
+    const fullText = data?.content?.[0]?.text;
+
+    if (!fullText) {
+      throw new Error("Respuesta vacía de Claude API en SocraticProbe");
+    }
+
+    let text = fullText.trim();
+    text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) text = match[0];
+
+    return JSON.parse(text);
+  } catch (err) {
+    clearTimeout(timer);
+    throw new Error(`Error en requestClaudeSocraticProbe: ${err.message}`);
+  }
+}

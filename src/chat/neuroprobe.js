@@ -222,11 +222,11 @@ function buildGenesisQuestion(domain, hint = "") {
 
 // ─── Motor de análisis ────────────────────────────────────────────────────────
 
-function detectGaps(allNeurons) {
+function detectGaps(allNeurons, activeIds = []) {
   const gaps = [];
   const checked = new Set();
+  const activeSet = new Set(activeIds);
 
-  // Solo analizar neuronas con algo de peso y que hayan sido activadas
   const candidates = allNeurons.filter(n =>
     !n.deleted && n.weight > 0.4 && (n.timesActivated || 0) > 0
   );
@@ -239,8 +239,9 @@ function detectGaps(allNeurons) {
       if (checked.has(key)) continue;
       checked.add(key);
 
-      const score = gapScore(a, b, allNeurons);
-      if (score >= 0.6) {
+      let score = gapScore(a, b, allNeurons);
+      if (score >= 0.5) {
+        if (activeSet.has(a.id) || activeSet.has(b.id)) score += 0.4;
         gaps.push({ neuronA: a, neuronB: b, score, type: PROBE_QUESTION_TYPES.GAP });
       }
     }
@@ -249,9 +250,10 @@ function detectGaps(allNeurons) {
   return gaps.sort((a, b) => b.score - a.score).slice(0, 10);
 }
 
-function detectBridges(allNeurons) {
+function detectBridges(allNeurons, activeIds = []) {
   const bridges = [];
   const checked = new Set();
+  const activeSet = new Set(activeIds);
 
   const candidates = allNeurons.filter(n =>
     !n.deleted && n.weight > 0.5 && n.core.domain !== "general"
@@ -268,11 +270,12 @@ function detectBridges(allNeurons) {
       if (checked.has(key)) continue;
       checked.add(key);
 
-      // Solo sugerir puente si ambas tienen peso alto
       if (a.weight > 0.65 && b.weight > 0.65) {
+        let score = (a.weight + b.weight) / 2;
+        if (activeSet.has(a.id) || activeSet.has(b.id)) score += 0.4;
         bridges.push({
           neuronA: a, neuronB: b,
-          score: (a.weight + b.weight) / 2,
+          score,
           type: PROBE_QUESTION_TYPES.BRIDGE
         });
       }
@@ -282,7 +285,8 @@ function detectBridges(allNeurons) {
   return bridges.sort((a, b) => b.score - a.score).slice(0, 6);
 }
 
-function detectWeakNeurons(allNeurons) {
+function detectWeakNeurons(allNeurons, activeIds = []) {
+  const activeSet = new Set(activeIds);
   return allNeurons
     .filter(n => {
       if (n.deleted) return false;
@@ -292,7 +296,12 @@ function detectWeakNeurons(allNeurons) {
       const hasLowWeight = n.weight < 0.5;
       return (hasShortSummary || hasFewTriggers) && hasFewEvidence && !hasLowWeight;
     })
-    .map(n => ({ neuron: n, type: PROBE_QUESTION_TYPES.DEPTH }))
+    .map(n => ({
+      neuron: n,
+      type: PROBE_QUESTION_TYPES.DEPTH,
+      score: activeSet.has(n.id) ? 0.9 : 0.6
+    }))
+    .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 }
 
@@ -503,20 +512,19 @@ export class NeuroProbe {
     const allNeurons = getAllNeurons();
     if (allNeurons.length < 3) return; // Muy pocas neuronas todavía
 
-    // Calcular todos los candidatos
-    const gaps      = detectGaps(allNeurons);
-    const bridges   = detectBridges(allNeurons);
-    const weak      = detectWeakNeurons(allNeurons);
+    const activeIds = this._lastActivatedIds || [];
+
+    // Calcular todos los candidatos favoreciendo el contexto de neuronas recientemente activas
+    const gaps      = detectGaps(allNeurons, activeIds);
+    const bridges   = detectBridges(allNeurons, activeIds);
+    const weak      = detectWeakNeurons(allNeurons, activeIds);
     const dormant   = detectDormantNeurons(allNeurons);
     const genesis   = detectGenesisDomains(allNeurons);
 
     // Guardar análisis para stats
     this._sessionAnalysis = { gaps, bridges, weak, dormant, genesis };
 
-    // Priorizar: gaps > genesis > bridges > depth > temporal
     let chosen = null;
-
-    // Evitar repetir la misma neurona que se preguntó antes
     const recentIds = new Set(this._state.recentProbedIds || []);
 
     if (gaps.length > 0) {
@@ -529,6 +537,18 @@ export class NeuroProbe {
           text: buildGapQuestion(fresh.neuronA, fresh.neuronB),
           neuronA: fresh.neuronA,
           neuronB: fresh.neuronB,
+          score: fresh.score,
+        };
+      }
+    }
+
+    if (!chosen && weak.length > 0) {
+      const fresh = weak.find(w => !recentIds.has(w.neuron.id));
+      if (fresh) {
+        chosen = {
+          type: PROBE_QUESTION_TYPES.DEPTH,
+          text: buildDepthQuestion(fresh.neuron),
+          neuron: fresh.neuron,
           score: fresh.score,
         };
       }
@@ -559,18 +579,6 @@ export class NeuroProbe {
       }
     }
 
-    if (!chosen && weak.length > 0) {
-      const fresh = weak.find(w => !recentIds.has(w.neuron.id));
-      if (fresh) {
-        chosen = {
-          type: PROBE_QUESTION_TYPES.DEPTH,
-          text: buildDepthQuestion(fresh.neuron),
-          neuron: fresh.neuron,
-          score: 0.6,
-        };
-      }
-    }
-
     if (!chosen && dormant.length > 0) {
       const fresh = dormant.find(d => !recentIds.has(d.neuron.id));
       if (fresh) {
@@ -592,9 +600,62 @@ export class NeuroProbe {
         answered: false,
       };
 
+      this._enhancePendingQuestionWithAI();
+
       if (this._options.verbose) {
         console.log("[NeuroProbe] Pregunta generada:", this._pendingQuestion.type, chosen.text.slice(0, 60));
       }
+    }
+  }
+
+  async _enhancePendingQuestionWithAI() {
+    const q = this._pendingQuestion;
+    if (!q || q.aiEnhanced) return;
+
+    try {
+      const { isClaudeConfigured, requestClaudeSocraticProbe } = await import("../services/claudeClient.js");
+      const { isGeminiPremiumConfigured, requestGeminiSocraticProbe } = await import("../services/geminiPremiumClient.js");
+      const { getRecentSessions } = await import("../neuro/sessionMemory.js");
+
+      const recentSessions = getRecentSessions(3).map(s => s.summary).join(" | ");
+      const initContextObj = {
+        type: q.type,
+        targetDomain: q.domain,
+        neuronA: q.neuronA?.core?.concept,
+        summaryA: q.neuronA?.core?.summary,
+        neuronB: q.neuronB?.core?.concept,
+        summaryB: q.neuronB?.core?.summary,
+        neuron: q.neuron?.core?.concept,
+        summary: q.neuron?.core?.summary,
+        lastUserInput: this._lastUserInput || ""
+      };
+
+      let aiRes = null;
+      if (isClaudeConfigured()) {
+        aiRes = await requestClaudeSocraticProbe({
+          context: initContextObj,
+          history: [],
+          recentMemoriesSummary: recentSessions,
+          activeNeurons: getAllNeurons().filter(n => !n.deleted && n.weight > 0.4).slice(0, 10)
+        });
+      } else if (isGeminiPremiumConfigured()) {
+        aiRes = await requestGeminiSocraticProbe({
+          context: initContextObj,
+          history: [],
+          recentMemoriesSummary: recentSessions
+        });
+      }
+
+      if (aiRes && aiRes.message && this._pendingQuestion && this._pendingQuestion.id === q.id) {
+        this._pendingQuestion.text = aiRes.message;
+        this._pendingQuestion.aiEnhanced = true;
+        if (aiRes.isDraft && aiRes.proposedNeuron) {
+          this._pendingQuestion.isDraft = true;
+          this._pendingQuestion.proposedNeuron = aiRes.proposedNeuron;
+        }
+      }
+    } catch (err) {
+      console.warn("[NeuroProbe] Error generando pregunta inicial con IA:", err);
     }
   }
 
@@ -635,11 +696,12 @@ export class NeuroProbe {
         generatedAt: new Date().toISOString(),
         answered: false,
       };
+      this._enhancePendingQuestionWithAI();
       return this._pendingQuestion;
     }
 
     if (type === PROBE_QUESTION_TYPES.GAP) {
-      const gaps = detectGaps(allNeurons);
+      const gaps = detectGaps(allNeurons, this._lastActivatedIds || []);
       const gap = options.neuronId
         ? gaps.find(g => g.neuronA.id === options.neuronId || g.neuronB.id === options.neuronId)
         : gaps[0];
@@ -653,12 +715,13 @@ export class NeuroProbe {
           generatedAt: new Date().toISOString(),
           answered: false,
         };
+        this._enhancePendingQuestionWithAI();
       }
       return this._pendingQuestion;
     }
 
     if (type === PROBE_QUESTION_TYPES.DEPTH) {
-      const weak = detectWeakNeurons(allNeurons);
+      const weak = detectWeakNeurons(allNeurons, this._lastActivatedIds || []);
       const target = options.neuronId
         ? weak.find(w => w.neuron.id === options.neuronId)
         : weak[0];
@@ -671,6 +734,7 @@ export class NeuroProbe {
           generatedAt: new Date().toISOString(),
           answered: false,
         };
+        this._enhancePendingQuestionWithAI();
       }
       return this._pendingQuestion;
     }
@@ -695,12 +759,60 @@ export class NeuroProbe {
     context.history = context.history || [];
     context.history.push({ role: "user", content: userAnswer });
 
-    // Intentar Socratic Weaver (Gemini Premium)
+    // 1. Intentar Claude Socratic Probe
+    try {
+      const { isClaudeConfigured, requestClaudeSocraticProbe } = await import("../services/claudeClient.js");
+      if (isClaudeConfigured()) {
+        const { getRecentSessions } = await import("../neuro/sessionMemory.js");
+        const recentSessions = getRecentSessions(3).map(s => s.summary).join(" | ");
+        const initContextObj = {
+          type: context.type,
+          originalText: context.text,
+          targetDomain: context.domain,
+          neuronA: context.neuronA?.core?.concept,
+          neuronB: context.neuronB?.core?.concept,
+          neuron: context.neuron?.core?.concept
+        };
+
+        const cRes = await requestClaudeSocraticProbe({
+          context: initContextObj,
+          history: context.history,
+          recentMemoriesSummary: recentSessions,
+          activeNeurons: getAllNeurons().filter(n => !n.deleted && n.weight > 0.4).slice(0, 10)
+        });
+
+        if (!cRes.isDraft) {
+          context.history.push({ role: "assistant", content: cRes.message });
+          context.text = cRes.message; // update for UI
+
+          return {
+            socraticTurn: true,
+            summary: "El probe Socrático está procesando tus ideas...",
+            message: cRes.message
+          };
+        } else {
+          context.isDraft = true;
+          context.proposedNeuron = cRes.proposedNeuron;
+          context.text = cRes.message;
+          context.history.push({ role: "assistant", content: cRes.message });
+
+          return {
+            draftReady: true,
+            summary: "✨ El Probe tiene una propuesta basada en tu patrón.",
+            message: cRes.message,
+            proposedNeuron: cRes.proposedNeuron
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[NeuroProbe] Error Claude Socratic Weaver (intentando Gemini):", e);
+    }
+
+    // 2. Intentar Gemini Premium Socratic Probe
     try {
       const { requestGeminiSocraticProbe, isGeminiPremiumConfigured } = await import("../services/geminiPremiumClient.js");
-      const { getRecentSessions } = await import("../neuro/sessionMemory.js");
-
       if (isGeminiPremiumConfigured()) {
+        const { getRecentSessions } = await import("../neuro/sessionMemory.js");
         const recentSessions = getRecentSessions(3).map(s => s.summary).join(" | ");
         const initContextObj = {
           type: context.type,
@@ -741,7 +853,7 @@ export class NeuroProbe {
         }
       }
     } catch (e) {
-      console.warn("[NeuroProbe] Error Socratic Weaver (usando local fallback):", e);
+      console.warn("[NeuroProbe] Error Socratic Weaver Gemini (usando local fallback):", e);
     }
 
     // FALLBACK LOCAL: Single Turn
