@@ -89,6 +89,7 @@ import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO, ge
 import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles, updateMealBundle, deleteMealBundle, saveMealBundles } from "./shopping/mealBundles.js";
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
+import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
 import {
   MEAL_SLOTS,
   DAYS_OF_WEEK,
@@ -7176,11 +7177,14 @@ function renderLifeTrackerCard() {
       <div class="lt-chip-rail">${chipRailHtml}</div>` : ""}
 
       ${streakBarHtml}
+
+      ${renderTrackerVitalClosetWidget()}
     </section>
   `;
 }
 
 function wireLifeTracker(root) {
+  wireTrackerVitalClosetWidget(root, () => view());
   root.querySelectorAll("[data-lt-pod-filter]").forEach(btn => {
     btn.addEventListener("click", e => {
       e.stopPropagation();
