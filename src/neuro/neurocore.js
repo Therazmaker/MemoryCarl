@@ -35,6 +35,7 @@ import { getAllPatterns } from "./responsePatterns.js";
 import { findRelevantMemories } from "../memory/memoryRecall.js";
 import { getAllMemories } from "../memory/memoryStore.js";
 import { findRelevantDays } from "../day/dayStore.js";
+import { isFinanceTopic, buildFinanceContext } from "../services/financeContextEngine.js";
 
 function buildDayContext(relevantDays = []) {
   if (!relevantDays.length) return null;
@@ -538,6 +539,16 @@ export async function processNeuroInput(userInput, options = {}) {
   const dayContext = buildDayContext(relevantDays);
   addStep(trace, "relevant_days_found", { count: relevantDays.length });
 
+  addStep(trace, "evaluate_finance_context");
+  let financeContext = null;
+  if (isFinanceTopic(userInput, finalActivated)) {
+    financeContext = buildFinanceContext();
+  }
+  addStep(trace, "finance_context_evaluated", {
+    isFinanceTopic: Boolean(financeContext),
+    movementsCount: financeContext?.movements?.length || 0,
+  });
+
   addStep(trace, "choose_reply_mode");
   const patternCount = (() => {
     try { return getAllPatterns().length; } catch (_e) { return 0; }
@@ -583,6 +594,7 @@ export async function processNeuroInput(userInput, options = {}) {
         dayContext,
         memoryRecall: memoryRecallResult.ranked,
         conversationSession: options.conversationSession,
+        financeContext,
       });
 
       if (claudeResult && claudeResult.reply) {
@@ -707,6 +719,7 @@ export async function processNeuroInput(userInput, options = {}) {
         dayContext,
         memoryRecall: memoryRecallResult.ranked,
         conversationSession: options.conversationSession, // Pasamos la sesión
+        financeContext,
       }, ollamaChunkCallback);
 
       if (ollamaResult && ollamaResult.reply) {
@@ -854,6 +867,7 @@ export async function processNeuroInput(userInput, options = {}) {
         insights: insightResult.insights,
         temporalContext,
         dayContext,
+        financeContext,
       });
       if (assistedReply) {
         geminiReplyText = assistedReply;

@@ -405,6 +405,7 @@ export async function requestAssistedReply(payload = {}) {
     context = [],
     insights = [],
     dayContext = null,
+    financeContext = null,
   } = payload;
 
   const contextSummary = context.slice(0, 4)
@@ -415,6 +416,10 @@ export async function requestAssistedReply(payload = {}) {
 
   const dayContextPrompt = Array.isArray(dayContext)
     ? "\nContexto de días previos relacionados:\n" + dayContext.map(d => `- ${d.date}: ${d.summary} (Emoción: ${d.emotion})`).join("\n")
+    : "";
+
+  const financePrompt = financeContext
+    ? `\nContexto Financiero (Últimos 30 días):\n- Saldo cuentas: S/ ${(financeContext.totalBalance || 0).toFixed(2)}\n- Gastos 30d: S/ ${(financeContext.totalExpense30d || 0).toFixed(2)}\n- Ingresos 30d: S/ ${(financeContext.totalIncome30d || 0).toFixed(2)}\n`
     : "";
 
   const prompt = `Eres un asistente de memoria personal. Ya se generó este borrador de respuesta:
@@ -428,6 +433,7 @@ Contexto de memoria relevante:
 ${contextSummary || "(sin contexto adicional)"}
 ${insightLine ? `\nInsight detectado: ${insightLine}` : ""}
 ${dayContextPrompt}
+${financePrompt}
 
 Tu tarea: mejora el borrador. Puedes hacerlo más específico, más empático, o añadir una observación que el borrador no incluye. Úsalo si detectas que situaciones de días previos se están repitiendo. NO lo hagas más largo de forma innecesaria. Máximo 3 frases adicionales. Mantén el tono del borrador. Responde SOLO con la respuesta mejorada, sin explicaciones.`;
 
