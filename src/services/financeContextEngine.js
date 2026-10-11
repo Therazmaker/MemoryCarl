@@ -124,17 +124,34 @@ export function buildFinanceContext(options = {}) {
     const note = m.note || m.notes || m.notas || "";
     const dateStr = String(m.date || m.createdAt || "").slice(0, 10);
 
-    if (type === "income" || (type !== "transfer" && rawAmount > 0)) {
+    if (type === "income") {
       totalIncome30d += amount;
-    } else if (type === "expense" || (type !== "transfer" && rawAmount < 0)) {
+    } else if (type === "expense") {
       totalExpense30d += amount;
       categoryExpenses[category] = (categoryExpenses[category] || 0) + amount;
+    } else if (type !== "transfer") {
+      if (rawAmount > 0) {
+        totalIncome30d += amount;
+      } else if (rawAmount < 0) {
+        totalExpense30d += amount;
+        categoryExpenses[category] = (categoryExpenses[category] || 0) + amount;
+      }
     }
+
+    const resolvedType = type === "income"
+      ? "ingreso"
+      : type === "expense"
+      ? "gasto"
+      : type === "transfer"
+      ? "transferencia"
+      : rawAmount > 0
+      ? "ingreso"
+      : "gasto";
 
     return {
       id: m.id,
       date: dateStr,
-      type: type === "income" || rawAmount > 0 ? "ingreso" : type === "transfer" ? "transferencia" : "gasto",
+      type: resolvedType,
       category,
       amount,
       note,

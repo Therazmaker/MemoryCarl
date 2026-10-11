@@ -26,7 +26,7 @@ test("buildFinanceContext filters movements within last 30 days and totals accou
       { id: "acc3", name: "Fergis", balance: 50, currency: "PEN" }, // should be excluded from total balance
     ],
     financeLedger: [
-      { id: "m1", date: new Date(now - 5 * dayMs).toISOString(), type: "expense", amount: -100, category: "Alimentación", note: "Supermercado" },
+      { id: "m1", date: new Date(now - 5 * dayMs).toISOString(), type: "expense", amount: 100, category: "Alimentación", note: "Supermercado" }, // positive expense amount
       { id: "m2", date: new Date(now - 10 * dayMs).toISOString(), type: "income", amount: 1200, category: "Sueldo", note: "Pago quiniela" },
       { id: "m3", date: new Date(now - 45 * dayMs).toISOString(), type: "expense", amount: -300, category: "Viaje", note: "Antiguo" }, // older than 30 days
     ],
@@ -41,4 +41,5 @@ test("buildFinanceContext filters movements within last 30 days and totals accou
   assert.equal(context.net30d, 1100);
   assert.equal(context.movements.length, 2);
   assert.equal(context.movements[0].category, "Alimentación");
+  assert.equal(context.movements[0].type, "gasto");
 });
