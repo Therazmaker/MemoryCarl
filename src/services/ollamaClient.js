@@ -132,7 +132,7 @@ IMPORTANTE: El JSON de acciones debe ir SIEMPRE al final, después de ---NEURON_
  * @param {object} payload
  * @returns {object[]}
  */
-function buildMessages({ userInput, context = [], history = [], insights = [], temporalContext = null, dayContext = null, memoryRecall = [], conversationSession = null }) {
+function buildMessages({ userInput, context = [], history = [], insights = [], temporalContext = null, dayContext = null, memoryRecall = [], conversationSession = null, financeContext = null }) {
   const messages = [];
 
   // System message con las instrucciones y el contexto neuronal
@@ -171,6 +171,23 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
     memoryRecall.slice(0, 3).forEach((m) => {
       systemContent += `- **${m.memory?.title || "Memoria"}**: ${m.snippet || ""}\n`;
     });
+  }
+
+  if (financeContext) {
+    systemContent += "\n## CONTEXTO FINANCIERO (ÚLTIMOS 30 DÍAS - SOLO LECTURA)\n";
+    systemContent += `- Balance total cuentas activas: S/ ${(financeContext.totalBalance || 0).toFixed(2)}\n`;
+    systemContent += `- Ingresos totales (30d): S/ ${(financeContext.totalIncome30d || 0).toFixed(2)}\n`;
+    systemContent += `- Gastos totales (30d): S/ ${(financeContext.totalExpense30d || 0).toFixed(2)}\n`;
+    systemContent += `- Flujo neto (30d): S/ ${(financeContext.net30d || 0).toFixed(2)}\n`;
+    if (financeContext.topExpenseCategories?.length > 0) {
+      systemContent += `- Principales categorías de gasto (30d): ${financeContext.topExpenseCategories.map((c) => `${c.category} (S/ ${c.total.toFixed(2)})`).join(", ")}\n`;
+    }
+    if (financeContext.movements?.length > 0) {
+      systemContent += "\n### Movimientos recientes (últimos 30 días):\n";
+      financeContext.movements.forEach((m) => {
+        systemContent += `- [${m.date}] ${m.type.toUpperCase()}: S/ ${m.amount.toFixed(2)} (${m.category}${m.note ? ` - ${m.note}` : ""})\n`;
+      });
+    }
   }
 
   if (conversationSession) {
