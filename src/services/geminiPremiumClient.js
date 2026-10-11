@@ -419,7 +419,7 @@ export async function requestAssistedReply(payload = {}) {
     : "";
 
   const financePrompt = financeContext
-    ? `\nContexto Financiero (Últimos 30 días):\n- Saldo cuentas: S/ ${(financeContext.totalBalance || 0).toFixed(2)}\n- Gastos 30d: S/ ${(financeContext.totalExpense30d || 0).toFixed(2)}\n- Ingresos 30d: S/ ${(financeContext.totalIncome30d || 0).toFixed(2)}\n`
+    ? `\nContexto Financiero (Acumulado Últimos 30 días - Solo lectura):\n⚠️ NOTA: Los totales de ingresos/gastos son acumulados de los últimos 30 días. Si el usuario pregunta por fechas específicas, revisa los movimientos individuales por fecha.\n- Balance actual cuentas: S/ ${(financeContext.totalBalance || 0).toFixed(2)}\n- Acumulado gastos 30d: S/ ${(financeContext.totalExpense30d || 0).toFixed(2)}\n- Acumulado ingresos 30d: S/ ${(financeContext.totalIncome30d || 0).toFixed(2)}\n`
     : "";
 
   const prompt = `Eres un asistente de memoria personal. Ya se generó este borrador de respuesta:

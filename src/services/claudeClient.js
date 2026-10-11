@@ -134,18 +134,19 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
   }
 
   if (financeContext) {
-    systemContent += "\n## CONTEXTO FINANCIERO (ÚLTIMOS 30 DÍAS - SOLO LECTURA)\n";
-    systemContent += `- Balance total cuentas activas: S/ ${(financeContext.totalBalance || 0).toFixed(2)}\n`;
-    systemContent += `- Ingresos totales (30d): S/ ${(financeContext.totalIncome30d || 0).toFixed(2)}\n`;
-    systemContent += `- Gastos totales (30d): S/ ${(financeContext.totalExpense30d || 0).toFixed(2)}\n`;
-    systemContent += `- Flujo neto (30d): S/ ${(financeContext.net30d || 0).toFixed(2)}\n`;
+    systemContent += "\n## CONTEXTO FINANCIERO (ACUMULADO ÚLTIMOS 30 DÍAS - SOLO LECTURA)\n";
+    systemContent += `⚠️ NOTA PARA EL ASISTENTE: 'Ingresos totales (30d)' y 'Gastos totales (30d)' son la SUMA ACUMULADA de los últimos 30 días, NO de un solo día ni de una sola fecha. Cuando el usuario pregunte por fechas específicas (ej. 'desde el 30 de septiembre' o 'ayer'), DEBES revisar la fecha exacta [YYYY-MM-DD] de los movimientos de la lista para calcular los totales de ese rango específico.\n`;
+    systemContent += `- Balance actual en cuentas: S/ ${(financeContext.totalBalance || 0).toFixed(2)}\n`;
+    systemContent += `- Acumulado ingresos (últimos 30 días): S/ ${(financeContext.totalIncome30d || 0).toFixed(2)}\n`;
+    systemContent += `- Acumulado gastos (últimos 30 días): S/ ${(financeContext.totalExpense30d || 0).toFixed(2)}\n`;
+    systemContent += `- Flujo neto acumulado (30d): S/ ${(financeContext.net30d || 0).toFixed(2)}\n`;
     if (financeContext.topExpenseCategories?.length > 0) {
       systemContent += `- Principales categorías de gasto (30d): ${financeContext.topExpenseCategories.map((c) => `${c.category} (S/ ${c.total.toFixed(2)})`).join(", ")}\n`;
     }
     if (financeContext.movements?.length > 0) {
-      systemContent += "\n### Movimientos recientes (últimos 30 días):\n";
+      systemContent += "\n### Lista de movimientos individuales (últimos 30 días):\n";
       financeContext.movements.forEach((m) => {
-        systemContent += `- [${m.date}] ${m.type.toUpperCase()}: S/ ${m.amount.toFixed(2)} (${m.category}${m.note ? ` - ${m.note}` : ""})\n`;
+        systemContent += `- [Fecha: ${m.date}] TIPO: ${m.type.toUpperCase()} | Monto: S/ ${m.amount.toFixed(2)} | Categoría: ${m.category}${m.note ? ` (${m.note})` : ""}\n`;
       });
     }
   }
