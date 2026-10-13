@@ -30,9 +30,35 @@ function readMemories() {
   return safeParse(localStorage.getItem(MEMORY_KEY) || "[]", []);
 }
 
+function triggerNeuroChatPush() {
+  if (typeof window === "undefined") return;
+  if (window._neurochatPushDebounce) clearTimeout(window._neurochatPushDebounce);
+  window._neurochatPushDebounce = setTimeout(() => {
+    if (typeof window.neurochatPushToSupabase === "function") {
+      window.neurochatPushToSupabase();
+    }
+  }, 1000);
+}
+
 function writeMemories(memories) {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
+  try {
+    localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
+    triggerNeuroChatPush();
+  } catch (e) {
+    if (e && (e.name === "QuotaExceededError" || e.code === 22 || e.code === 1014)) {
+      console.warn("[memoryStore] LocalStorage quota exceeded when writing memories. Pruning local memory cache.");
+      try {
+        const pruned = (Array.isArray(memories) ? memories : []).slice(-50);
+        localStorage.setItem(MEMORY_KEY, JSON.stringify(pruned));
+      } catch (_e2) {
+        console.warn("[memoryStore] Could not write pruned memories to LocalStorage.");
+      }
+      triggerNeuroChatPush();
+    } else {
+      console.error("[memoryStore] Error writing memories:", e);
+    }
+  }
 }
 
 function normalizeImportance(value) {

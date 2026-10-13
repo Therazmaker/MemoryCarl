@@ -38,12 +38,37 @@ function readAll() {
   }
 }
 
+function triggerNeuroChatPush() {
+  if (typeof window === "undefined") return;
+  if (window._neurochatPushDebounce) clearTimeout(window._neurochatPushDebounce);
+  window._neurochatPushDebounce = setTimeout(() => {
+    if (typeof window.neurochatPushToSupabase === "function") {
+      window.neurochatPushToSupabase();
+    }
+  }, 1000);
+}
+
 function writeAll(neurons) {
   try {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(STORE_KEY, JSON.stringify(neurons));
+    triggerNeuroChatPush();
   } catch (e) {
-    console.error("[neuronStore] Error al guardar neuronas:", e);
+    if (e && (e.name === "QuotaExceededError" || e.code === 22 || e.code === 1014)) {
+      console.warn("[neuronStore] LocalStorage quota exceeded. Pruning old neurons for local cache while keeping cloud sync active.");
+      try {
+        // Safe fallback: prune deleted or oldest non-manual neurons locally to fit under quota
+        const pruned = (Array.isArray(neurons) ? neurons : [])
+          .filter(n => !n.deleted)
+          .slice(-100);
+        localStorage.setItem(STORE_KEY, JSON.stringify(pruned));
+      } catch (_e2) {
+        console.warn("[neuronStore] Could not write pruned neurons to LocalStorage.");
+      }
+      triggerNeuroChatPush();
+    } else {
+      console.error("[neuronStore] Error al guardar neuronas:", e);
+    }
   }
 }
 
