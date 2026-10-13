@@ -36,6 +36,7 @@ import {
 } from "../neuro/structuredFeedback.js";
 import { viewDayCalendar, viewDayDetail, wireDayCalendar, wireDayDetail, dayUiState } from "../day/day-calendar-ui.js";
 import { getAllDays, getDayByDate } from "../day/dayStore.js";
+import { viewCouch, wireCouch } from "./couch-ui.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
@@ -60,7 +61,7 @@ const uiState = {
   lastResult:      null,  // NeuroCoreResult
   traceExpanded:   false,
   neuronsExpanded: false,
-  activeTab:       "chat",   // "chat" | "graph" | "context" | "memories" | "days"
+  activeTab:       "chat",   // "chat" | "graph" | "context" | "memories" | "days" | "couch"
   settingsOpen:    false,
   settingsMsg:     null,
   settingsApiKeyVisible: false,
@@ -801,6 +802,7 @@ function nchatInner() {
   const tabContext = uiState.activeTab === "context";
   const tabMemories = uiState.activeTab === "memories";
   const tabDays = uiState.activeTab === "days";
+  const tabCouch = uiState.activeTab === "couch";
   const showSidePanel = uiState.neuronsExpanded || Boolean(uiState.lastResult) || history.length > 0;
 
   const settingsModal = uiState.settingsOpen ? renderSettingsModal() : "";
@@ -836,6 +838,9 @@ function nchatInner() {
         ? viewDayDetail(getAllDays().find((d) => d.id === dayUiState.selectedDayId) || null)
         : viewDayCalendar())
     : "";
+  const couchContent = tabCouch
+    ? viewCouch()
+    : "";
 
   return `
     <div class="nchatWrap">
@@ -867,6 +872,7 @@ function nchatInner() {
         <button class="ncTab ${tabContext ? "ncTab--active" : ""}" id="btnTabContext">🗂️ Context Window</button>
         <button class="ncTab ${tabMemories ? "ncTab--active" : ""}" id="btnTabMemories">🕰️ Memorias</button>
         <button class="ncTab ${tabDays ? "ncTab--active" : ""}" id="btnTabDays">📅 Días</button>
+        <button class="ncTab ${tabCouch ? "ncTab--active" : ""}" id="btnTabCouch">🛋️ Couch</button>
       </div>
 
       <!-- Contenido del tab activo -->
@@ -875,6 +881,7 @@ function nchatInner() {
       ${contextContent}
       ${memoriesContent}
       ${daysContent}
+      ${couchContent}
 
       <!-- Settings modal -->
       ${settingsModal}
@@ -1551,6 +1558,10 @@ function wireNeuroChatInner(root) {
     dayUiState.view = "calendar";
     fullRerender();
   });
+  root.querySelector("#btnTabCouch")?.addEventListener("click", () => {
+    uiState.activeTab = "couch";
+    fullRerender();
+  });
 
   // Si el tab activo es el grafo, wirear
   if (uiState.activeTab === "graph") {
@@ -1566,6 +1577,9 @@ function wireNeuroChatInner(root) {
     } else {
       wireDayCalendar(root, dayRerenderCallback);
     }
+  }
+  if (uiState.activeTab === "couch") {
+    wireCouch(root);
   }
   root.querySelector("#ncMemorySearch")?.addEventListener("input", (e) => {
     uiState.memorySearch = e.target.value || "";
