@@ -42,6 +42,17 @@ let conversationSession = {
   clarifyCount: 0,
 };
 
+let _pushDebounceTimer = null;
+function triggerNeuroChatPush() {
+  if (typeof window === "undefined") return;
+  if (_pushDebounceTimer) clearTimeout(_pushDebounceTimer);
+  _pushDebounceTimer = setTimeout(() => {
+    if (typeof window.neurochatPushToSupabase === "function") {
+      window.neurochatPushToSupabase();
+    }
+  }, 1000);
+}
+
 function loadHistory() {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
@@ -51,8 +62,16 @@ function loadHistory() {
 }
 
 function saveHistory(history) {
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-MAX_HISTORY_LS))); }
-  catch (_e) {}
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-MAX_HISTORY_LS)));
+  } catch (e) {
+    if (e && (e.name === "QuotaExceededError" || e.code === 22 || e.code === 1014)) {
+      console.warn("[neurochat] LocalStorage quota exceeded when writing chat history. Pruning local history.");
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-15)));
+      } catch (_e2) {}
+    }
+  }
 }
 
 function getHistory() {
@@ -158,6 +177,7 @@ function appendMessage(role, content, meta = {}) {
   getHistory().push(msg);
   saveHistory(getHistory());
   void saveMessageToIdb(msg);
+  triggerNeuroChatPush();
   return msg;
 }
 
@@ -398,6 +418,7 @@ export function clearChatHistory() {
   _history = [];
   saveHistory([]);
   void clearHistoryIdb();
+  triggerNeuroChatPush();
 }
 export function getNeurons() { return getAllNeurons(); }
 export function addNeuron(data) { return saveNeuron(createNeuron(data)); }

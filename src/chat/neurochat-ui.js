@@ -2096,6 +2096,104 @@ export function initNeuroChat() {
   } catch (_e) {
     // noop — el usuario puede configurarlo manualmente desde settings
   }
+
+  // Define global push/pull helper functions for Supabase cloud sync
+  window.neurochatPushToSupabase = async function(isManual = false) {
+    try {
+      const url = localStorage.getItem("memorycarl_api_url") || "";
+      const key = localStorage.getItem("memorycarl_api_key") || "";
+      if (!url) return;
+
+      const neurons = getNeurons() || [];
+      const memories = getMemories() || [];
+      const chatHistory = getChatHistory() || [];
+      const days = getAllDays() || [];
+      const appState = (typeof window !== "undefined" && window.state) ? window.state : null;
+
+      const res = await fetch(`${url.replace(/\/+$/, "")}/api/sync`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(key && { "Authorization": `Bearer ${key}` })
+        },
+        body: JSON.stringify({ neurons, memories, chatHistory, days, appState }),
+        keepalive: true
+      });
+
+      if (isManual) {
+        if (res.ok) alert("Sincronización a Supabase completada con éxito ✅");
+        else alert("Error en sincronización a Supabase ❌");
+      }
+    } catch (e) {
+      console.warn("[NeuroChat Push Error]", e);
+      if (isManual) alert("Error de conexión al sincronizar con Supabase: " + e.message);
+    }
+  };
+
+  window.neurochatPullFromSupabase = async function(isManual = false) {
+    try {
+      const url = localStorage.getItem("memorycarl_api_url") || "";
+      const key = localStorage.getItem("memorycarl_api_key") || "";
+      if (!url) return;
+
+      const res = await fetch(`${url.replace(/\/+$/, "")}/api/restore`, {
+        method: "GET",
+        headers: { ...(key && { "Authorization": `Bearer ${key}` }) }
+      });
+
+      if (!res.ok) return;
+      const { data } = await res.json();
+      if (!data) return;
+
+      let changed = false;
+      if (Array.isArray(data.neurons) && data.neurons.length > 0) {
+        localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(data.neurons));
+        changed = true;
+      }
+      if (Array.isArray(data.memories) && data.memories.length > 0) {
+        localStorage.setItem("memorycarl_memories_v1", JSON.stringify(data.memories));
+        changed = true;
+      }
+      if (Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
+        localStorage.setItem("memorycarl_neurochat_history", JSON.stringify(data.chatHistory));
+        changed = true;
+      }
+      if (Array.isArray(data.days) && data.days.length > 0) {
+        localStorage.setItem("memorycarl_days_v1", JSON.stringify(data.days));
+        changed = true;
+      }
+
+      if (changed) {
+        if (isManual) {
+          alert("Restauración desde Supabase completada con éxito ✅");
+        }
+        rerender();
+      }
+    } catch (e) {
+      console.warn("[NeuroChat Pull Error]", e);
+      if (isManual) alert("Error de conexión al restaurar desde Supabase: " + e.message);
+    }
+  };
+
+  // Auto-pull on boot if local database is empty or on init
+  setTimeout(() => {
+    try {
+      if (window.neurochatPullFromSupabase) window.neurochatPullFromSupabase(false);
+    } catch (_e) {}
+  }, 1500);
+
+  // Auto-push on page unload / backgrounding
+  if (typeof window !== "undefined" && !window.__neurochatSyncEventsAttached) {
+    window.__neurochatSyncEventsAttached = true;
+    window.addEventListener("beforeunload", () => {
+      if (window.neurochatPushToSupabase) window.neurochatPushToSupabase(false);
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden" && window.neurochatPushToSupabase) {
+        window.neurochatPushToSupabase(false);
+      }
+    });
+  }
 }
 
 // ---- CSS embebido del módulo ----
