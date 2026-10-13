@@ -11,8 +11,19 @@ import './finance/finance_core_v2.js';
   const addLog = (type, args) => {
     const time = new Date().toTimeString().split(' ')[0];
     const text = args.map(arg => {
-      if (typeof arg === 'object') {
-        try { return JSON.stringify(arg, null, 2); } catch (e) { return String(arg); }
+      if (arg instanceof Error) {
+        return arg.stack || `${arg.name || 'Error'}: ${arg.message}`;
+      }
+      if (typeof arg === 'object' && arg !== null) {
+        if (arg.message && (arg.name || arg.stack)) {
+          return arg.stack || `${arg.name || 'Error'}: ${arg.message}`;
+        }
+        try {
+          const json = JSON.stringify(arg, null, 2);
+          return json === '{}' ? String(arg) : json;
+        } catch (e) {
+          return String(arg);
+        }
       }
       return String(arg);
     }).join(' ');
@@ -26702,9 +26713,10 @@ window.financePullFromSupabase = async function(isManual = false) {
 
     const ts = new Date().toLocaleTimeString('es-PE');
     if (!res.ok) {
-      console.warn("Supabase Pull Failed:", await res.text());
+      const errText = await res.text();
+      console.warn("Supabase Pull Failed:", errText);
       if (window.__mcLogs) {
-        window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Pull Failed` });
+        window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Pull Failed: ${errText.slice(0, 60)}` });
       }
       if (isManual) toast("❌ Error al descargar desde Supabase");
       return;
