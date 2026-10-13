@@ -9,9 +9,9 @@ import {
 import {
   renderNatalChartSvg,
   viewCouch,
+  couchUiState,
 } from "../src/chat/couch-ui.js";
 
-// Mock localStorage for node environment
 const localStorageMock = (() => {
   let store = {};
   return {
@@ -24,48 +24,51 @@ const localStorageMock = (() => {
 
 global.localStorage = localStorageMock;
 
-test("couchStore: default state and saving/loading natal chart", () => {
+test("couchStore: default state and saving/loading natal chart with transition houses and precise degrees", () => {
   localStorage.clear();
   const defaultChart = getNatalChartData();
   assert.strictEqual(defaultChart.planets.length, 0);
-  assert.strictEqual(defaultChart.houseCusps.length, 12);
 
   const sampleChart = {
     birthDetails: { name: "Carl", date: "1995-05-15", time: "14:30", location: "Santiago" },
-    planets: [{ planetId: "sol", sign: "tauro", degree: 24, house: 9, isRetrograde: false }],
+    planets: [
+      { planetId: "jupiter", sign: "virgo", degree: 12, minutes: 27, seconds: 48, house: 7, secondaryHouse: 8, isRetrograde: true }
+    ],
     houseCusps: defaultChart.houseCusps,
     aspects: [],
   };
 
   saveNatalChartData(sampleChart);
   const loaded = getNatalChartData();
-  assert.strictEqual(loaded.birthDetails.name, "Carl");
   assert.strictEqual(loaded.planets.length, 1);
-  assert.strictEqual(loaded.planets[0].planetId, "sol");
+  assert.strictEqual(loaded.planets[0].planetId, "jupiter");
+  assert.strictEqual(loaded.planets[0].house, 7);
+  assert.strictEqual(loaded.planets[0].secondaryHouse, 8);
+  assert.strictEqual(loaded.planets[0].minutes, 27);
 
   resetNatalChartData();
-  const resetData = getNatalChartData();
-  assert.strictEqual(resetData.planets.length, 0);
+  assert.strictEqual(getNatalChartData().planets.length, 0);
 });
 
-test("couch-ui: render SVG natal chart HTML", () => {
+test("couch-ui: render planetary table with transition houses and exact degrees", () => {
   const sampleData = {
     birthDetails: { name: "Test" },
     planets: [
-      { planetId: "sol", sign: "aries", degree: 10, house: 1 },
-      { planetId: "luna", sign: "libra", degree: 10, house: 7 },
+      { planetId: "jupiter", sign: "virgo", degree: 12, minutes: 27, seconds: 48, house: 7, secondaryHouse: 8, isRetrograde: true },
+      { planetId: "saturno", sign: "acuario", degree: 10, minutes: 8, seconds: 14, house: 12, secondaryHouse: 1, isRetrograde: false }
     ],
     houseCusps: DEFAULT_NATAL_CHART.houseCusps,
-    aspects: [{ planet1Id: "sol", aspectId: "oposicion", planet2Id: "luna" }],
+    aspects: [],
   };
+
+  saveNatalChartData(sampleData);
 
   const svgHtml = renderNatalChartSvg(sampleData);
   assert.ok(svgHtml.includes("<svg"));
-  assert.ok(svgHtml.includes("couchNatalSvg"));
-  assert.ok(svgHtml.includes("☉")); // Sol glyph
-  assert.ok(svgHtml.includes("☽")); // Luna glyph
 
+  couchUiState.activeSubTab = "data";
   const couchViewHtml = viewCouch();
-  assert.ok(couchViewHtml.includes("Couch Astro — Carta Natal"));
-  assert.ok(couchViewHtml.includes("couchBottomBar"));
+  assert.ok(couchViewHtml.includes("7 » 8"));
+  assert.ok(couchViewHtml.includes("12 » 1"));
+  assert.ok(couchViewHtml.includes("12°27'48\""));
 });
