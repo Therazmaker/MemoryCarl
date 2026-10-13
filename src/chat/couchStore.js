@@ -31,8 +31,10 @@ export const PLANETS_CATALOG = [
   { id: "urano", name: "Urano", symbol: "♅" },
   { id: "neptuno", name: "Neptuno", symbol: "♆" },
   { id: "pluton", name: "Plutón", symbol: "♇" },
+  { id: "nodo_norte", name: "Nodo N (m)", symbol: "☊" },
+  { id: "nodo_sur", name: "Nodo S", symbol: "☋" },
+  { id: "lilith", name: "Lilith (m)", symbol: "⚸" },
   { id: "chiron", name: "Quirón", symbol: "⚷" },
-  { id: "nodo_norte", name: "Nodo Norte", symbol: "☊" },
   { id: "ascendente", name: "Ascendente", symbol: "AC" },
   { id: "mediocielo", name: "Medio Cielo", symbol: "MC" },
 ];
@@ -58,6 +60,8 @@ export const DEFAULT_NATAL_CHART = {
     house: i + 1,
     sign: ZODIAC_SIGNS[i % 12].id,
     degree: 0,
+    minutes: 0,
+    seconds: 0,
   })),
   aspects: [],
 };

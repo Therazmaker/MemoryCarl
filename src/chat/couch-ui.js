@@ -26,24 +26,36 @@ function esc(str) {
 }
 
 /**
- * Convierte Signo + Grado en grados eclípticos (0° a 360°)
+ * Convierte Signo + Grados + Minutos + Segundos en grados eclípticos decimales precisos (0° a 360°)
  */
-function getAbsoluteEclipticDegree(signId, degree) {
+function getAbsoluteEclipticDegree(signId, degree, minutes = 0, seconds = 0) {
   const signIdx = ZODIAC_SIGNS.findIndex((s) => s.id === signId);
   if (signIdx === -1) return 0;
-  const deg = Math.max(0, Math.min(29.99, parseFloat(degree) || 0));
-  return signIdx * 30 + deg;
+
+  const deg = Math.max(0, Math.min(29, parseFloat(degree) || 0));
+  const min = Math.max(0, Math.min(59, parseFloat(minutes) || 0)) / 60;
+  const sec = Math.max(0, Math.min(59, parseFloat(seconds) || 0)) / 3600;
+
+  return signIdx * 30 + deg + min + sec;
 }
 
 /**
- * Convierte grados eclípticos a ángulo en radianes/grados para SVG.
- * En la carta natal tradicional, 0° Aries se ubica usualmente a la izquierda (180° astronómico/trigonométrico)
- * y gira en sentido antihorario.
+ * Convierte grados eclípticos a ángulo en radianes para SVG.
+ * 0° Aries se ubica a la izquierda (180° trigonométrico) y gira en sentido antihorario.
  */
 function eclipticToSvgAngle(eclipticDeg) {
-  // 0° Aries en 180° (izquierda), girando en sentido antihorario (restando ángulo)
   const angleDeg = (180 - eclipticDeg + 360) % 360;
   return (angleDeg * Math.PI) / 180;
+}
+
+/**
+ * Formatea grados, minutos y segundos (ej. 12°27'48")
+ */
+function formatDegrees(degree = 0, minutes = 0, seconds = 0) {
+  const d = Math.floor(degree || 0);
+  const m = String(Math.floor(minutes || 0)).padStart(2, "0");
+  const s = String(Math.floor(seconds || 0)).padStart(2, "0");
+  return `${d}°${m}'${s}"`;
 }
 
 /**
@@ -79,7 +91,6 @@ export function renderNatalChartSvg(chartData) {
     const x2Inner = cx + rZodiacInner * Math.cos(endAngle);
     const y2Inner = cy + rZodiacInner * Math.sin(endAngle);
 
-    // SVG Path arc for zodiac sector
     const pathD = `
       M ${x1Inner} ${y1Inner}
       L ${x1Outer} ${y1Outer}
@@ -97,11 +108,10 @@ export function renderNatalChartSvg(chartData) {
     };
     const fillColor = elemColors[sign.element] || "rgba(255,255,255,0.05)";
 
-    // Símbolo del signo al centro de la tajada
     const midAngle = eclipticToSvgAngle(startDeg + 15);
     const rSymbol = (rOuter + rZodiacInner) / 2;
     const sx = cx + rSymbol * Math.cos(midAngle);
-    const sy = cy + rSymbol * Math.sin(midAngle) + 5; // offset vertical para alineación centrada
+    const sy = cy + rSymbol * Math.sin(midAngle) + 5;
 
     zodiacSlicesHtml += `
       <path d="${pathD}" fill="${fillColor}" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
@@ -111,10 +121,9 @@ export function renderNatalChartSvg(chartData) {
 
   // 2. Cúspides de Casas (1 a 12)
   let houseLinesHtml = "";
-  const houseCoords = {}; // Para guardar posición (x,y) de cada planeta en el centro de aspectos
 
   (chartData.houseCusps || []).forEach((h) => {
-    const deg = getAbsoluteEclipticDegree(h.sign, h.degree);
+    const deg = getAbsoluteEclipticDegree(h.sign, h.degree, h.minutes, h.seconds);
     const angle = eclipticToSvgAngle(deg);
 
     const xInner = cx + rHousesInner * Math.cos(angle);
@@ -130,7 +139,6 @@ export function renderNatalChartSvg(chartData) {
       <line x1="${xInner}" y1="${yInner}" x2="${xOuter}" y2="${yOuter}" stroke="${strokeColor}" stroke-width="${strokeWidth}" />
     `;
 
-    // Número de la casa
     const midAngle = eclipticToSvgAngle(deg + 12);
     const rText = rHousesInner + 15;
     const tx = cx + rText * Math.cos(midAngle);
@@ -149,23 +157,19 @@ export function renderNatalChartSvg(chartData) {
     const cat = PLANETS_CATALOG.find((item) => item.id === p.planetId);
     if (!cat) return;
 
-    const absDeg = getAbsoluteEclipticDegree(p.sign, p.degree);
+    const absDeg = getAbsoluteEclipticDegree(p.sign, p.degree, p.minutes, p.seconds);
     const angle = eclipticToSvgAngle(absDeg);
 
-    // Punto en el círculo interno para aspectos
     const pxAspect = cx + rAspects * Math.cos(angle);
     const pyAspect = cy + rAspects * Math.sin(angle);
     planetPositionsMap[p.planetId] = { x: pxAspect, y: pyAspect };
 
-    // Símbolo en la franja de planetas
     const rPlanetRing = (rZodiacInner + rHousesInner) / 2;
     const px = cx + rPlanetRing * Math.cos(angle);
     const py = cy + rPlanetRing * Math.sin(angle) + 4;
 
-    const retroText = p.isRetrograde ? "<sub>R</sub>" : "";
-
     planetsHtml += `
-      <g class="couchPlanetGlyph" title="${esc(cat.name)} en ${esc(p.sign)} ${p.degree}°">
+      <g class="couchPlanetGlyph" title="${esc(cat.name)} en ${esc(p.sign)} ${formatDegrees(p.degree, p.minutes, p.seconds)}">
         <circle cx="${cx + rAspects * Math.cos(angle)}" cy="${cy + rAspects * Math.sin(angle)}" r="3" fill="#a855f7" />
         <line x1="${cx + rAspects * Math.cos(angle)}" y1="${cy + rAspects * Math.sin(angle)}" x2="${cx + rHousesInner * Math.cos(angle)}" y2="${cy + rHousesInner * Math.sin(angle)}" stroke="rgba(168, 85, 247, 0.4)" stroke-dasharray="2,2" />
         <text x="${px}" y="${py}" font-size="15" fill="#e0e7ff" text-anchor="middle" dominant-baseline="central" font-weight="bold">${cat.symbol}</text>
@@ -195,24 +199,15 @@ export function renderNatalChartSvg(chartData) {
   return `
     <div class="couchChartContainer">
       <svg viewBox="0 0 ${width} ${height}" class="couchNatalSvg">
-        <!-- Círculo exterior e interior -->
         <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" />
         <circle cx="${cx}" cy="${cy}" r="${rZodiacInner}" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
         <circle cx="${cx}" cy="${cy}" r="${rHousesInner}" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
         <circle cx="${cx}" cy="${cy}" r="${rAspects}" fill="rgba(15, 23, 42, 0.6)" stroke="rgba(255,255,255,0.15)" stroke-width="1" />
 
-        <!-- Slices de Signos -->
         ${zodiacSlicesHtml}
-
-        <!-- Líneas de Casas -->
         ${houseLinesHtml}
-
-        <!-- Aspectos -->
         ${aspectLinesHtml}
-
-        <!-- Planetas -->
         ${planetsHtml}
-
         ${emptyNotice}
       </svg>
     </div>
@@ -223,38 +218,69 @@ export function renderNatalChartSvg(chartData) {
  * Renderiza el formulario de la Pestaña 2: Casas y Aspectos
  */
 function renderDataEditorTab(chartData) {
-  // Datos Generales
   const details = chartData.birthDetails || {};
 
-  // Opciones de signos
   const signOptions = ZODIAC_SIGNS.map(
     (s) => `<option value="${s.id}">${s.symbol} ${esc(s.name)}</option>`
   ).join("");
 
-  // Opciones de planetas
   const planetOptions = PLANETS_CATALOG.map(
     (p) => `<option value="${p.id}">${p.symbol} ${esc(p.name)}</option>`
   ).join("");
 
-  // Opciones de aspectos
   const aspectOptions = ASPECT_TYPES.map(
     (a) => `<option value="${a.id}">${a.symbol} ${esc(a.name)} (${a.angle}°)</option>`
   ).join("");
 
-  // Tabla/Lista de planetas agregados
-  const planetsListHtml = (chartData.planets || []).map((p, idx) => {
+  // Tabla estructurada de planetas agregados (estilo screenshot)
+  const planetRowsHtml = (chartData.planets || []).map((p, idx) => {
     const cat = PLANETS_CATALOG.find((item) => item.id === p.planetId);
     const sign = ZODIAC_SIGNS.find((s) => s.id === p.sign);
-    return `
-      <div class="couchDataRow">
-        <span class="couchDataLabel">${cat ? `${cat.symbol} ${esc(cat.name)}` : esc(p.planetId)}</span>
-        <span class="couchDataVal">${sign ? `${sign.symbol} ${esc(sign.name)}` : esc(p.sign)} ${p.degree}° ${p.isRetrograde ? "(R)" : ""} · Casa ${p.house || "—"}</span>
-        <button class="ncIconBtn couchBtnRemove" data-remove-planet-idx="${idx}">✕</button>
-      </div>
-    `;
-  }).join("") || `<div class="ncSideEmpty">No se han registrado planetas.</div>`;
 
-  // Filas de cúspides de las 12 Casas
+    const houseDisplay = p.secondaryHouse
+      ? `<span class="couchTransitionHouse">${p.house} » ${p.secondaryHouse}</span>`
+      : `<span class="couchSingleHouse">${p.house || "—"}</span>`;
+
+    const retroBadge = p.isRetrograde ? `<span class="couchRetroBadge">R</span>` : "";
+
+    return `
+      <tr class="couchPlanetsTableRow">
+        <td class="couchTableCell couchCellPlanet">
+          <span class="couchPlanetSymbol">${cat ? cat.symbol : ""}</span>
+          <span class="couchPlanetName">${cat ? esc(cat.name) : esc(p.planetId)}</span>
+        </td>
+        <td class="couchTableCell couchCellCoords">
+          <span class="couchSignSymbol">${sign ? sign.symbol : ""}</span>
+          <span class="couchDegText">${formatDegrees(p.degree, p.minutes, p.seconds)}</span>
+          ${retroBadge}
+        </td>
+        <td class="couchTableCell couchCellHouse">${houseDisplay}</td>
+        <td class="couchTableCell couchCellActions">
+          <button class="ncIconBtn couchBtnRemove" data-remove-planet-idx="${idx}">✕</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  const planetsTableHtml = (chartData.planets || []).length > 0
+    ? `
+      <table class="couchPlanetsTable">
+        <thead>
+          <tr>
+            <th>Planeta</th>
+            <th>Coordenadas</th>
+            <th>Casa</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${planetRowsHtml}
+        </tbody>
+      </table>
+    `
+    : `<div class="ncSideEmpty">No se han registrado planetas.</div>`;
+
+  // Cúspides de las 12 Casas
   const cuspsFormHtml = (chartData.houseCusps || []).map((h) => {
     return `
       <div class="couchCuspRow">
@@ -262,12 +288,13 @@ function renderDataEditorTab(chartData) {
         <select class="ncSettingsInput couchCuspSign" data-cusp-house="${h.house}">
           ${ZODIAC_SIGNS.map((s) => `<option value="${s.id}" ${s.id === h.sign ? "selected" : ""}>${s.symbol} ${esc(s.name)}</option>`).join("")}
         </select>
-        <input type="number" class="ncSettingsInput ncSettingsInputSm couchCuspDeg" data-cusp-house="${h.house}" value="${h.degree || 0}" min="0" max="29" step="1" /> °
+        <input type="number" class="ncSettingsInput ncSettingsInputSm couchCuspDeg" data-cusp-house="${h.house}" value="${h.degree || 0}" min="0" max="29" placeholder="°" />
+        <input type="number" class="ncSettingsInput ncSettingsInputSm couchCuspMin" data-cusp-house="${h.house}" value="${h.minutes || 0}" min="0" max="59" placeholder="'" />
       </div>
     `;
   }).join("");
 
-  // Lista de aspectos agregados
+  // Aspectos agregados
   const aspectsListHtml = (chartData.aspects || []).map((asp, idx) => {
     const p1 = PLANETS_CATALOG.find((item) => item.id === asp.planet1Id);
     const p2 = PLANETS_CATALOG.find((item) => item.id === asp.planet2Id);
@@ -309,15 +336,37 @@ function renderDataEditorTab(chartData) {
       <!-- Sección 2: Agregar Planetas -->
       <div class="couchFormSection">
         <div class="couchSectionTitle">🪐 Registrar Posiciones Planetarias</div>
-        <div class="couchAddRow">
-          <select id="couchAddPlanetId" class="ncSettingsInput">${planetOptions}</select>
-          <select id="couchAddPlanetSign" class="ncSettingsInput">${signOptions}</select>
-          <input type="number" id="couchAddPlanetDeg" class="ncSettingsInput ncSettingsInputSm" placeholder="Grado 0-29" min="0" max="29" value="0" />
-          <input type="number" id="couchAddPlanetHouse" class="ncSettingsInput ncSettingsInputSm" placeholder="Casa 1-12" min="1" max="12" value="1" />
-          <label class="couchRetroLabel"><input type="checkbox" id="couchAddPlanetRetro" /> ℞</label>
-          <button class="ncActionBtn ncActionBtnPrimary" id="btnAddPlanet">Agregar</button>
+        <div class="couchAddGrid">
+          <div>
+            <label class="ncSettingsLabel">Planeta</label>
+            <select id="couchAddPlanetId" class="ncSettingsInput">${planetOptions}</select>
+          </div>
+          <div>
+            <label class="ncSettingsLabel">Signo</label>
+            <select id="couchAddPlanetSign" class="ncSettingsInput">${signOptions}</select>
+          </div>
+          <div>
+            <label class="ncSettingsLabel">Grados / Min / Seg</label>
+            <div class="couchDegreeInputs">
+              <input type="number" id="couchAddPlanetDeg" class="ncSettingsInput" placeholder="° (0-29)" min="0" max="29" value="0" />
+              <input type="number" id="couchAddPlanetMin" class="ncSettingsInput" placeholder="' (0-59)" min="0" max="59" value="0" />
+              <input type="number" id="couchAddPlanetSec" class="ncSettingsInput" placeholder='" (0-59)' min="0" max="59" value="0" />
+            </div>
+          </div>
+          <div>
+            <label class="ncSettingsLabel">Casa / Transición</label>
+            <div class="couchHouseInputs">
+              <input type="number" id="couchAddPlanetHouse" class="ncSettingsInput" placeholder="Casa (1-12)" min="1" max="12" value="1" />
+              <span class="couchTransitionSymbol">»</span>
+              <input type="number" id="couchAddPlanetSecHouse" class="ncSettingsInput" placeholder="2da Casa (opcional)" min="1" max="12" />
+            </div>
+          </div>
+          <div class="couchAddActionWrap">
+            <label class="couchRetroLabel"><input type="checkbox" id="couchAddPlanetRetro" /> Retrógrado (R)</label>
+            <button class="ncActionBtn ncActionBtnPrimary" id="btnAddPlanet">Agregar Planeta</button>
+          </div>
         </div>
-        <div class="couchDataList">${planetsListHtml}</div>
+        <div class="couchDataList" style="margin-top: 14px;">${planetsTableHtml}</div>
       </div>
 
       <!-- Sección 3: Cúspides de las 12 Casas -->
@@ -379,7 +428,6 @@ export function viewCouch() {
     <div class="couchWrap">
       ${couchCss()}
 
-      <!-- Header Couch -->
       <div class="couchHeader">
         <div class="couchHeaderTitle">🛋️ Couch Astro — Carta Natal</div>
         <div class="couchHeaderSub">
@@ -388,10 +436,8 @@ export function viewCouch() {
         </div>
       </div>
 
-      <!-- Contenido de la Sub-Pestaña Activa -->
       <div class="couchBody">${bodyHtml}</div>
 
-      <!-- Barra de Navegación Inferior (Mobile/Desktop Bottom Bar) -->
       <div class="couchBottomBar">
         <button class="couchBarBtn ${isChartTab ? "couchBarBtn--active" : ""}" id="btnCouchSubChart">
           <span class="couchBarIcon">🔮</span>
@@ -416,7 +462,6 @@ export function viewCouch() {
 export function wireCouch(root) {
   const chartData = getNatalChartData();
 
-  // Cambios de pestañas inferiores
   root.querySelector("#btnCouchSubChart")?.addEventListener("click", () => {
     couchUiState.activeSubTab = "chart";
     rerenderCouch(root);
@@ -431,7 +476,6 @@ export function wireCouch(root) {
   });
 
   if (couchUiState.activeSubTab === "data") {
-    // 1. Guardado automático de datos generales al escribir
     const saveDetails = () => {
       chartData.birthDetails = {
         name: root.querySelector("#couchBirthName")?.value || "",
@@ -447,17 +491,30 @@ export function wireCouch(root) {
       root.querySelector(sel)?.addEventListener("input", saveDetails);
     });
 
-    // 2. Agregar Planeta
+    // Agregar Planeta con precisión de minutos/segundos y transición de casa
     root.querySelector("#btnAddPlanet")?.addEventListener("click", () => {
       const planetId = root.querySelector("#couchAddPlanetId")?.value;
       const sign = root.querySelector("#couchAddPlanetSign")?.value;
       const degree = parseFloat(root.querySelector("#couchAddPlanetDeg")?.value) || 0;
+      const minutes = parseFloat(root.querySelector("#couchAddPlanetMin")?.value) || 0;
+      const seconds = parseFloat(root.querySelector("#couchAddPlanetSec")?.value) || 0;
       const house = parseInt(root.querySelector("#couchAddPlanetHouse")?.value, 10) || 1;
+      const secondaryHouse = parseInt(root.querySelector("#couchAddPlanetSecHouse")?.value, 10) || null;
       const isRetrograde = Boolean(root.querySelector("#couchAddPlanetRetro")?.checked);
 
       if (!planetId || !sign) return;
 
-      chartData.planets.push({ planetId, sign, degree, house, isRetrograde });
+      chartData.planets.push({
+        planetId,
+        sign,
+        degree,
+        minutes,
+        seconds,
+        house,
+        secondaryHouse,
+        isRetrograde,
+      });
+
       saveNatalChartData(chartData);
       rerenderCouch(root);
     });
@@ -474,8 +531,8 @@ export function wireCouch(root) {
       });
     });
 
-    // 3. Editar Cúspides de Casas
-    root.querySelectorAll(".couchCuspSign, .couchCuspDeg").forEach((el) => {
+    // Editar Cúspides
+    root.querySelectorAll(".couchCuspSign, .couchCuspDeg, .couchCuspMin").forEach((el) => {
       el.addEventListener("change", () => {
         const houseNum = parseInt(el.getAttribute("data-cusp-house"), 10);
         const cuspObj = chartData.houseCusps.find((h) => h.house === houseNum);
@@ -484,13 +541,14 @@ export function wireCouch(root) {
           if (row) {
             cuspObj.sign = row.querySelector(".couchCuspSign")?.value || cuspObj.sign;
             cuspObj.degree = parseFloat(row.querySelector(".couchCuspDeg")?.value) || 0;
+            cuspObj.minutes = parseFloat(row.querySelector(".couchCuspMin")?.value) || 0;
             saveNatalChartData(chartData);
           }
         }
       });
     });
 
-    // 4. Agregar Aspecto
+    // Agregar Aspecto
     root.querySelector("#btnAddAspect")?.addEventListener("click", () => {
       const planet1Id = root.querySelector("#couchAddAspP1")?.value;
       const aspectId = root.querySelector("#couchAddAspType")?.value;
@@ -532,7 +590,6 @@ export function wireCouch(root) {
 function rerenderCouch(root) {
   const container = root.querySelector(".nchatWrap");
   if (!container) return;
-  // Si estamos dentro del flujo NeuroChat, refrescar
   const activeTabContent = container.querySelector(".couchWrap");
   if (activeTabContent) {
     activeTabContent.outerHTML = viewCouch();
@@ -560,15 +617,27 @@ function couchCss() {
     .couchSectionTitle { font-size: 13px; font-weight: 800; opacity: 0.85; margin-bottom: 10px; color: #e9d5ff; }
     .couchGrid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-    .couchAddRow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
-    .couchRetroLabel { font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
-    .couchDataList { display: flex; flex-direction: column; gap: 6px; }
-    .couchDataRow { display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.05); padding: 6px 10px; border-radius: 8px; font-size: 12px; }
-    .couchDataLabel { font-weight: 700; }
-    .couchDataVal { opacity: 0.8; }
-    .couchBtnRemove { padding: 2px 6px; font-size: 11px; color: #fb7185; border-color: rgba(251,113,133,0.3); }
+    .couchAddGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; align-items: end; }
+    .couchDegreeInputs, .couchHouseInputs { display: flex; gap: 4px; align-items: center; }
+    .couchTransitionSymbol { font-weight: bold; color: #ef4444; }
+    .couchAddActionWrap { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; }
+    .couchRetroLabel { font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; color: #60a5fa; }
 
-    .couchCuspsGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+    /* Planetary Table styling matching user screenshot */
+    .couchPlanetsTable { width: 100%; border-collapse: collapse; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; overflow: hidden; font-size: 13px; }
+    .couchPlanetsTable th { text-align: left; padding: 8px 12px; background: rgba(255,255,255,0.05); font-size: 11px; text-transform: uppercase; color: rgba(255,255,255,0.6); border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .couchPlanetsTableRow { border-bottom: 1px dashed rgba(255,255,255,0.08); }
+    .couchPlanetsTableRow:last-child { border-bottom: none; }
+    .couchTableCell { padding: 8px 12px; vertical-align: middle; }
+    .couchCellPlanet { display: flex; align-items: center; gap: 6px; font-weight: bold; }
+    .couchPlanetSymbol { font-size: 16px; color: #e0e7ff; }
+    .couchSignSymbol { font-size: 15px; color: #38bdf8; margin-right: 4px; }
+    .couchDegText { font-family: monospace; font-size: 12px; }
+    .couchRetroBadge { font-size: 10px; font-weight: bold; color: #38bdf8; margin-left: 4px; }
+    .couchTransitionHouse { color: #ef4444; font-weight: bold; }
+    .couchSingleHouse { font-weight: bold; color: #ef4444; }
+
+    .couchCuspsGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
     .couchCuspRow { display: flex; align-items: center; gap: 4px; font-size: 11px; background: rgba(255,255,255,0.03); padding: 4px 6px; border-radius: 6px; }
     .couchCuspLabel { font-weight: 700; min-width: 48px; }
     .couchDangerRow { margin-top: 16px; text-align: center; }
