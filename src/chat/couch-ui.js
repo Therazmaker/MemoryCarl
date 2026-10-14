@@ -59,6 +59,42 @@ function formatDegrees(degree = 0, minutes = 0, seconds = 0) {
 }
 
 /**
+ * Obtiene el nombre/etiqueta angular de la casa (AC, IC, DC, MC)
+ */
+function getHouseLabel(houseNum) {
+  if (houseNum === 1) return "Casa 1 (AC)";
+  if (houseNum === 4) return "Casa 4";
+  if (houseNum === 7) return "Casa 7";
+  if (houseNum === 10) return "Casa 10 (MC)";
+  return `Casa ${houseNum}`;
+}
+
+/**
+ * Calcula la orbe y tipo (A) Aplicativo / (S) Separativo entre dos planetas para un aspecto
+ */
+function computeAspectOrbText(asp, chartData) {
+  if (asp.orbText) return asp.orbText;
+
+  const p1 = (chartData.planets || []).find((p) => p.planetId === asp.planet1Id);
+  const p2 = (chartData.planets || []).find((p) => p.planetId === asp.planet2Id);
+  const aspectInfo = ASPECT_TYPES.find((a) => a.id === asp.aspectId);
+
+  if (!p1 || !p2 || !aspectInfo) return "—";
+
+  const deg1 = getAbsoluteEclipticDegree(p1.sign, p1.degree, p1.minutes, p1.seconds);
+  const deg2 = getAbsoluteEclipticDegree(p2.sign, p2.degree, p2.minutes, p2.seconds);
+
+  let rawDiff = Math.abs(deg1 - deg2);
+  if (rawDiff > 180) rawDiff = 360 - rawDiff;
+
+  const orb = Math.abs(rawDiff - aspectInfo.angle);
+  const isApplying = rawDiff <= aspectInfo.angle;
+  const status = isApplying ? "A" : "S";
+
+  return `${orb.toFixed(2)}° (${status})`;
+}
+
+/**
  * Renderiza el gráfico SVG de la Carta Natal
  */
 export function renderNatalChartSvg(chartData) {
@@ -71,6 +107,12 @@ export function renderNatalChartSvg(chartData) {
   const rZodiacInner = 190;
   const rHousesInner = 130;
   const rAspects = 125;
+
+  // Pre-calcular grados absolutos para cúspides de casas
+  const houseCuspsMap = (chartData.houseCusps || []).map((h) => ({
+    ...h,
+    absDeg: getAbsoluteEclipticDegree(h.sign, h.degree, h.minutes, h.seconds),
+  }));
 
   // 1. Dibuja rueda del zodíaco (12 signos)
   let zodiacSlicesHtml = "";
@@ -122,8 +164,8 @@ export function renderNatalChartSvg(chartData) {
   // 2. Cúspides de Casas (1 a 12)
   let houseLinesHtml = "";
 
-  (chartData.houseCusps || []).forEach((h) => {
-    const deg = getAbsoluteEclipticDegree(h.sign, h.degree, h.minutes, h.seconds);
+  houseCuspsMap.forEach((h, i) => {
+    const deg = h.absDeg;
     const angle = eclipticToSvgAngle(deg);
 
     const xInner = cx + rHousesInner * Math.cos(angle);
@@ -132,20 +174,38 @@ export function renderNatalChartSvg(chartData) {
     const yOuter = cy + rZodiacInner * Math.sin(angle);
 
     const isAngular = h.house === 1 || h.house === 4 || h.house === 7 || h.house === 10;
-    const strokeWidth = isAngular ? 2 : 1;
-    const strokeColor = isAngular ? "rgba(168, 85, 247, 0.8)" : "rgba(255,255,255,0.25)";
+    const strokeWidth = isAngular ? 2.5 : 1;
+    const strokeColor = isAngular ? "#c084fc" : "rgba(255,255,255,0.3)";
+
+    // Extensión exterior para ángulos AC, MC, etc.
+    const xLabelExt = cx + (rZodiacInner + 18) * Math.cos(angle);
+    const yLabelExt = cy + (rZodiacInner + 18) * Math.sin(angle);
 
     houseLinesHtml += `
       <line x1="${xInner}" y1="${yInner}" x2="${xOuter}" y2="${yOuter}" stroke="${strokeColor}" stroke-width="${strokeWidth}" />
     `;
 
-    const midAngle = eclipticToSvgAngle(deg + 12);
+    // Etiqueta de la casa
+    if (isAngular) {
+      const angularTag = h.house === 1 ? "AC" : h.house === 10 ? "MC" : h.house === 7 ? "DC" : "IC";
+      houseLinesHtml += `
+        <text x="${xLabelExt}" y="${yLabelExt}" font-size="11" font-weight="bold" fill="#c084fc" text-anchor="middle" dominant-baseline="central">${angularTag}</text>
+      `;
+    }
+
+    // Calcular el ángulo medio con la siguiente casa para colocar el número de casa centrado
+    const nextCusp = houseCuspsMap[(i + 1) % 12];
+    let nextDeg = nextCusp ? nextCusp.absDeg : deg + 30;
+    if (nextDeg < deg) nextDeg += 360;
+    const midSectorDeg = (deg + nextDeg) / 2;
+    const midAngle = eclipticToSvgAngle(midSectorDeg % 360);
+
     const rText = rHousesInner + 15;
     const tx = cx + rText * Math.cos(midAngle);
     const ty = cy + rText * Math.sin(midAngle);
 
     houseLinesHtml += `
-      <text x="${tx}" y="${ty}" font-size="10" fill="rgba(255,255,255,0.4)" text-anchor="middle" dominant-baseline="central">${h.house}</text>
+      <text x="${tx}" y="${ty}" font-size="10" font-weight="600" fill="rgba(255,255,255,0.6)" text-anchor="middle" dominant-baseline="central">${h.house}</text>
     `;
   });
 
@@ -280,7 +340,36 @@ function renderDataEditorTab(chartData) {
     `
     : `<div class="ncSideEmpty">No se han registrado planetas.</div>`;
 
-  // Cúspides de las 12 Casas
+  // Tabla de Cúspides de las Casas (estilo screenshot Casas (Placidus))
+  const houseCuspsTableRows = (chartData.houseCusps || []).map((h) => {
+    const sign = ZODIAC_SIGNS.find((s) => s.id === h.sign);
+    const label = getHouseLabel(h.house);
+    return `
+      <tr class="couchPlanetsTableRow">
+        <td class="couchTableCell" style="font-weight: 700; color: #f3f4f6;">${esc(label)}</td>
+        <td class="couchTableCell couchCellCoords">
+          <span class="couchSignSymbol">${sign ? sign.symbol : ""}</span>
+          <span class="couchDegText">${formatDegrees(h.degree, h.minutes, h.seconds)}</span>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  const houseCuspsTableHtml = `
+    <table class="couchPlanetsTable" style="margin-bottom: 12px;">
+      <thead>
+        <tr>
+          <th>Casas (Placidus)</th>
+          <th>Coordenadas</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${houseCuspsTableRows}
+      </tbody>
+    </table>
+  `;
+
+  // Cúspides de las 12 Casas (Campos de edición)
   const cuspsFormHtml = (chartData.houseCusps || []).map((h) => {
     return `
       <div class="couchCuspRow">
@@ -290,23 +379,59 @@ function renderDataEditorTab(chartData) {
         </select>
         <input type="number" class="ncSettingsInput ncSettingsInputSm couchCuspDeg" data-cusp-house="${h.house}" value="${h.degree || 0}" min="0" max="29" placeholder="°" />
         <input type="number" class="ncSettingsInput ncSettingsInputSm couchCuspMin" data-cusp-house="${h.house}" value="${h.minutes || 0}" min="0" max="59" placeholder="'" />
+        <input type="number" class="ncSettingsInput ncSettingsInputSm couchCuspSec" data-cusp-house="${h.house}" value="${h.seconds || 0}" min="0" max="59" placeholder='"' />
       </div>
     `;
   }).join("");
 
-  // Aspectos agregados
-  const aspectsListHtml = (chartData.aspects || []).map((asp, idx) => {
+  // Tabla estructurada de Aspectos (estilo screenshot)
+  const aspectRowsHtml = (chartData.aspects || []).map((asp, idx) => {
     const p1 = PLANETS_CATALOG.find((item) => item.id === asp.planet1Id);
     const p2 = PLANETS_CATALOG.find((item) => item.id === asp.planet2Id);
     const aType = ASPECT_TYPES.find((item) => item.id === asp.aspectId);
+    const orbText = computeAspectOrbText(asp, chartData);
+
     return `
-      <div class="couchDataRow">
-        <span class="couchDataLabel">${p1 ? p1.symbol : ""} vs ${p2 ? p2.symbol : ""}</span>
-        <span class="couchDataVal" style="color: ${aType ? aType.color : "inherit"}">${aType ? `${aType.symbol} ${esc(aType.name)}` : esc(asp.aspectId)}</span>
-        <button class="ncIconBtn couchBtnRemove" data-remove-aspect-idx="${idx}">✕</button>
-      </div>
+      <tr class="couchPlanetsTableRow">
+        <td class="couchTableCell">
+          <span class="couchPlanetSymbol">${p1 ? p1.symbol : ""}</span>
+          <span>${p1 ? esc(p1.name) : esc(asp.planet1Id)}</span>
+        </td>
+        <td class="couchTableCell" style="text-align: center; color: ${aType ? aType.color : "inherit"}; font-size: 16px;">
+          <span title="${aType ? esc(aType.name) : ""}">${aType ? aType.symbol : "—"}</span>
+        </td>
+        <td class="couchTableCell">
+          <span class="couchPlanetSymbol">${p2 ? p2.symbol : ""}</span>
+          <span>${p2 ? esc(p2.name) : esc(asp.planet2Id)}</span>
+        </td>
+        <td class="couchTableCell" style="font-family: monospace; font-size: 12px; color: #cbd5e1;">
+          ${esc(orbText)}
+        </td>
+        <td class="couchTableCell couchCellActions">
+          <button class="ncIconBtn couchBtnRemove" data-remove-aspect-idx="${idx}">✕</button>
+        </td>
+      </tr>
     `;
-  }).join("") || `<div class="ncSideEmpty">No hay aspectos registrados.</div>`;
+  }).join("");
+
+  const aspectsTableHtml = (chartData.aspects || []).length > 0
+    ? `
+      <table class="couchPlanetsTable">
+        <thead>
+          <tr>
+            <th>Planeta</th>
+            <th style="text-align: center;">Aspecto</th>
+            <th>Planeta</th>
+            <th>Orbes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${aspectRowsHtml}
+        </tbody>
+      </table>
+    `
+    : `<div class="ncSideEmpty">No hay aspectos registrados.</div>`;
 
   return `
     <div class="couchDataEditor">
@@ -371,20 +496,24 @@ function renderDataEditorTab(chartData) {
 
       <!-- Sección 3: Cúspides de las 12 Casas -->
       <div class="couchFormSection">
-        <div class="couchSectionTitle">🏛️ Cúspides de Casas</div>
-        <div class="couchCuspsGrid">${cuspsFormHtml}</div>
+        <div class="couchSectionTitle">🏛️ Cúspides de Casas (Placidus)</div>
+        ${houseCuspsTableHtml}
+        <details class="couchCuspsDetails">
+          <summary style="cursor: pointer; font-size: 12px; font-weight: bold; color: #c084fc; margin-bottom: 8px;">✏️ Editar Coordenadas de Casas</summary>
+          <div class="couchCuspsGrid" style="margin-top: 8px;">${cuspsFormHtml}</div>
+        </details>
       </div>
 
       <!-- Sección 4: Registrar Aspectos -->
       <div class="couchFormSection">
-        <div class="couchSectionTitle">📐 Registrar Aspectos entre Planetas</div>
-        <div class="couchAddRow">
-          <select id="couchAddAspP1" class="ncSettingsInput">${planetOptions}</select>
-          <select id="couchAddAspType" class="ncSettingsInput">${aspectOptions}</select>
-          <select id="couchAddAspP2" class="ncSettingsInput">${planetOptions}</select>
-          <button class="ncActionBtn ncActionBtnPrimary" id="btnAddAspect">Agregar</button>
+        <div class="couchSectionTitle">📐 Aspectos y Orbes</div>
+        <div class="couchAddRow" style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+          <select id="couchAddAspP1" class="ncSettingsInput" style="flex: 1; min-width: 110px;">${planetOptions}</select>
+          <select id="couchAddAspType" class="ncSettingsInput" style="flex: 1; min-width: 120px;">${aspectOptions}</select>
+          <select id="couchAddAspP2" class="ncSettingsInput" style="flex: 1; min-width: 110px;">${planetOptions}</select>
+          <button class="ncActionBtn ncActionBtnPrimary" id="btnAddAspect">Agregar Aspecto</button>
         </div>
-        <div class="couchDataList">${aspectsListHtml}</div>
+        <div class="couchDataList">${aspectsTableHtml}</div>
       </div>
 
       <div class="couchDangerRow">
@@ -531,8 +660,8 @@ export function wireCouch(root) {
       });
     });
 
-    // Editar Cúspides
-    root.querySelectorAll(".couchCuspSign, .couchCuspDeg, .couchCuspMin").forEach((el) => {
+    // Editar Cúspides (Signo, Grados, Minutos, Segundos)
+    root.querySelectorAll(".couchCuspSign, .couchCuspDeg, .couchCuspMin, .couchCuspSec").forEach((el) => {
       el.addEventListener("change", () => {
         const houseNum = parseInt(el.getAttribute("data-cusp-house"), 10);
         const cuspObj = chartData.houseCusps.find((h) => h.house === houseNum);
@@ -542,6 +671,7 @@ export function wireCouch(root) {
             cuspObj.sign = row.querySelector(".couchCuspSign")?.value || cuspObj.sign;
             cuspObj.degree = parseFloat(row.querySelector(".couchCuspDeg")?.value) || 0;
             cuspObj.minutes = parseFloat(row.querySelector(".couchCuspMin")?.value) || 0;
+            cuspObj.seconds = parseFloat(row.querySelector(".couchCuspSec")?.value) || 0;
             saveNatalChartData(chartData);
           }
         }
