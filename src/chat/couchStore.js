@@ -41,11 +41,12 @@ export const PLANETS_CATALOG = [
 
 export const ASPECT_TYPES = [
   { id: "conjuncion", name: "Conjunción", symbol: "☌", angle: 0, color: "#a855f7", nature: "neutral" },
-  { id: "oposicion", name: "Oposición", symbol: "☍", angle: 180, color: "#ef4444", nature: "tension" },
-  { id: "trigono", name: "Trígono", symbol: "△", angle: 120, color: "#22c55e", nature: "harmony" },
-  { id: "cuadratura", name: "Cuadratura", symbol: "□", angle: 90, color: "#f97316", nature: "tension" },
+  { id: "semisextil", name: "Semi-sextil", symbol: "⚺", angle: 30, color: "#22c55e", nature: "harmony" },
   { id: "sextil", name: "Sextil", symbol: "✱", angle: 60, color: "#3b82f6", nature: "harmony" },
+  { id: "cuadratura", name: "Cuadratura", symbol: "□", angle: 90, color: "#f97316", nature: "tension" },
+  { id: "trigono", name: "Trígono", symbol: "△", angle: 120, color: "#22c55e", nature: "harmony" },
   { id: "quincuncio", name: "Quincuncio", symbol: "⚮", angle: 150, color: "#eab308", nature: "neutral" },
+  { id: "oposicion", name: "Oposición", symbol: "☍", angle: 180, color: "#ef4444", nature: "tension" },
 ];
 
 export const DEFAULT_NATAL_CHART = {
