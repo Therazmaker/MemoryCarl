@@ -371,15 +371,17 @@ function renderDataEditorTab(chartData) {
 
   // Cúspides de las 12 Casas (Campos de edición)
   const cuspsFormHtml = (chartData.houseCusps || []).map((h) => {
+    const isAngular = h.house === 1 || h.house === 4 || h.house === 7 || h.house === 10;
+    const tag = h.house === 1 ? " (AC)" : h.house === 10 ? " (MC)" : h.house === 7 ? " (DC)" : h.house === 4 ? " (IC)" : "";
     return `
       <div class="couchCuspRow">
-        <span class="couchCuspLabel">Casa ${h.house}:</span>
+        <span class="couchCuspLabel ${isAngular ? "couchCuspLabel--angular" : ""}">Casa ${h.house}${tag}:</span>
         <select class="ncSettingsInput couchCuspSign" data-cusp-house="${h.house}">
           ${ZODIAC_SIGNS.map((s) => `<option value="${s.id}" ${s.id === h.sign ? "selected" : ""}>${s.symbol} ${esc(s.name)}</option>`).join("")}
         </select>
-        <input type="number" class="ncSettingsInput ncSettingsInputSm couchCuspDeg" data-cusp-house="${h.house}" value="${h.degree || 0}" min="0" max="29" placeholder="°" />
-        <input type="number" class="ncSettingsInput ncSettingsInputSm couchCuspMin" data-cusp-house="${h.house}" value="${h.minutes || 0}" min="0" max="59" placeholder="'" />
-        <input type="number" class="ncSettingsInput ncSettingsInputSm couchCuspSec" data-cusp-house="${h.house}" value="${h.seconds || 0}" min="0" max="59" placeholder='"' />
+        <input type="number" class="ncSettingsInput couchCuspDeg" data-cusp-house="${h.house}" value="${h.degree ?? 0}" min="0" max="29" placeholder="°" title="Grados" />
+        <input type="number" class="ncSettingsInput couchCuspMin" data-cusp-house="${h.house}" value="${h.minutes ?? 0}" min="0" max="59" placeholder="'" title="Minutos" />
+        <input type="number" class="ncSettingsInput couchCuspSec" data-cusp-house="${h.house}" value="${h.seconds ?? 0}" min="0" max="59" placeholder='"' title="Segundos" />
       </div>
     `;
   }).join("");
@@ -498,9 +500,20 @@ function renderDataEditorTab(chartData) {
       <div class="couchFormSection">
         <div class="couchSectionTitle">🏛️ Cúspides de Casas (Placidus)</div>
         ${houseCuspsTableHtml}
-        <details class="couchCuspsDetails">
+        <details class="couchCuspsDetails" open>
           <summary style="cursor: pointer; font-size: 12px; font-weight: bold; color: #c084fc; margin-bottom: 8px;">✏️ Editar Coordenadas de Casas</summary>
-          <div class="couchCuspsGrid" style="margin-top: 8px;">${cuspsFormHtml}</div>
+          <div class="couchCuspsHeaderRow">
+            <span>Casa</span>
+            <span>Signo</span>
+            <span>°</span>
+            <span>'</span>
+            <span>"</span>
+          </div>
+          <div class="couchCuspsGrid">${cuspsFormHtml}</div>
+          <div style="margin-top: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <button class="ncActionBtn ncActionBtnPrimary" id="btnSaveCusps" style="font-size: 12px; padding: 8px 16px;">💾 Guardar Coordenadas de Casas</button>
+            <span id="couchCuspsSaveStatus" style="font-size: 12px; font-weight: bold; color: #34d399; display: none;">✓ Coordenadas guardadas</span>
+          </div>
         </details>
       </div>
 
@@ -660,22 +673,48 @@ export function wireCouch(root) {
       });
     });
 
-    // Editar Cúspides (Signo, Grados, Minutos, Segundos)
-    root.querySelectorAll(".couchCuspSign, .couchCuspDeg, .couchCuspMin, .couchCuspSec").forEach((el) => {
-      el.addEventListener("change", () => {
-        const houseNum = parseInt(el.getAttribute("data-cusp-house"), 10);
+    // Función helper para sincronizar datos de cúspides
+    const syncCuspsFromForm = () => {
+      root.querySelectorAll(".couchCuspRow").forEach((row) => {
+        const signEl = row.querySelector(".couchCuspSign");
+        if (!signEl) return;
+        const houseNum = parseInt(signEl.getAttribute("data-cusp-house"), 10);
         const cuspObj = chartData.houseCusps.find((h) => h.house === houseNum);
         if (cuspObj) {
-          const row = el.closest(".couchCuspRow");
-          if (row) {
-            cuspObj.sign = row.querySelector(".couchCuspSign")?.value || cuspObj.sign;
-            cuspObj.degree = parseFloat(row.querySelector(".couchCuspDeg")?.value) || 0;
-            cuspObj.minutes = parseFloat(row.querySelector(".couchCuspMin")?.value) || 0;
-            cuspObj.seconds = parseFloat(row.querySelector(".couchCuspSec")?.value) || 0;
-            saveNatalChartData(chartData);
-          }
+          cuspObj.sign = signEl.value || cuspObj.sign;
+          cuspObj.degree = parseFloat(row.querySelector(".couchCuspDeg")?.value) || 0;
+          cuspObj.minutes = parseFloat(row.querySelector(".couchCuspMin")?.value) || 0;
+          cuspObj.seconds = parseFloat(row.querySelector(".couchCuspSec")?.value) || 0;
         }
       });
+      saveNatalChartData(chartData);
+    };
+
+    // Auto-save en 'input' y 'change' para las cúspides
+    root.querySelectorAll(".couchCuspSign, .couchCuspDeg, .couchCuspMin, .couchCuspSec").forEach((el) => {
+      const handleCuspChange = () => {
+        syncCuspsFromForm();
+        const statusEl = root.querySelector("#couchCuspsSaveStatus");
+        if (statusEl) {
+          statusEl.style.display = "inline";
+          statusEl.textContent = "✓ Guardado automático";
+          setTimeout(() => { if (statusEl) statusEl.style.display = "none"; }, 2000);
+        }
+      };
+      el.addEventListener("change", handleCuspChange);
+      el.addEventListener("input", handleCuspChange);
+    });
+
+    // Botón explícito "Guardar Coordenadas de Casas"
+    root.querySelector("#btnSaveCusps")?.addEventListener("click", () => {
+      syncCuspsFromForm();
+      const statusEl = root.querySelector("#couchCuspsSaveStatus");
+      if (statusEl) {
+        statusEl.style.display = "inline";
+        statusEl.textContent = "✓ Coordenadas guardadas";
+        setTimeout(() => { if (statusEl) statusEl.style.display = "none"; }, 3000);
+      }
+      rerenderCouch(root);
     });
 
     // Agregar Aspecto
@@ -767,14 +806,62 @@ function couchCss() {
     .couchTransitionHouse { color: #ef4444; font-weight: bold; }
     .couchSingleHouse { font-weight: bold; color: #ef4444; }
 
-    .couchCuspsGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
-    .couchCuspRow { display: flex; align-items: center; gap: 4px; font-size: 11px; background: rgba(255,255,255,0.03); padding: 4px 6px; border-radius: 6px; }
-    .couchCuspLabel { font-weight: 700; min-width: 48px; }
+    .couchCuspsHeaderRow { display: grid; grid-template-columns: minmax(75px, 1fr) minmax(90px, 1.2fr) minmax(42px, 0.6fr) minmax(42px, 0.6fr) minmax(42px, 0.6fr); gap: 6px; font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.6); text-transform: uppercase; padding: 4px 8px; margin-bottom: 4px; }
+    .couchCuspsGrid { display: flex; flex-direction: column; gap: 6px; }
+    .couchCuspRow { display: grid; grid-template-columns: minmax(75px, 1fr) minmax(90px, 1.2fr) minmax(42px, 0.6fr) minmax(42px, 0.6fr) minmax(42px, 0.6fr); gap: 6px; align-items: center; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.12); padding: 6px 8px; border-radius: 8px; }
+    .couchCuspLabel { font-size: 11px; font-weight: 700; color: #f3f4f6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .couchCuspLabel--angular { color: #c084fc; font-weight: 800; }
+
+    /* Estilos explícitos de alta visibilidad para inputs y selects */
+    .couchWrap select.ncSettingsInput,
+    .couchWrap input.ncSettingsInput {
+      background-color: #1e293b !important;
+      color: #ffffff !important;
+      border: 1px solid rgba(255, 255, 255, 0.25) !important;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+      font-weight: 600;
+      width: 100%;
+      box-sizing: border-box;
+      outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .couchWrap select.ncSettingsInput {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23c084fc' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E") !important;
+      background-repeat: no-repeat !important;
+      background-position: right 4px center !important;
+      background-size: 16px 16px !important;
+      padding-right: 20px !important;
+    }
+
+    .couchWrap select.ncSettingsInput option {
+      background-color: #0f172a !important;
+      color: #ffffff !important;
+    }
+
+    .couchWrap input.ncSettingsInput:focus,
+    .couchWrap select.ncSettingsInput:focus {
+      border-color: #c084fc !important;
+      box-shadow: 0 0 0 2px rgba(192, 132, 252, 0.3) !important;
+    }
+
+    .couchWrap input[type="number"].ncSettingsInput {
+      text-align: center;
+      padding: 6px 2px;
+    }
+
     .couchDangerRow { margin-top: 16px; text-align: center; }
 
     @media (max-width: 600px) {
       .couchGrid2 { grid-template-columns: 1fr; }
-      .couchCuspsGrid { grid-template-columns: 1fr 1fr; }
+      .couchCuspsHeaderRow,
+      .couchCuspRow { grid-template-columns: minmax(65px, 0.9fr) minmax(80px, 1.1fr) minmax(36px, 0.5fr) minmax(36px, 0.5fr) minmax(36px, 0.5fr); gap: 4px; padding: 4px 6px; }
+      .couchCuspLabel { font-size: 10px; }
+      .couchWrap select.ncSettingsInput,
+      .couchWrap input.ncSettingsInput { font-size: 11px; padding: 4px; }
     }
   </style>`;
 }
