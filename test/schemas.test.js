@@ -24,6 +24,18 @@ test("legacy neurons stay valid without manual meta", () => {
   assert.equal(errs.length, 0);
 });
 
+test("empty concept neurons are rejected by sanitizeNeuron and validateNeuron", () => {
+  const empty1 = sanitizeNeuron({ id: "nrn_test", core: { concept: "", summary: "sin concepto" } });
+  assert.equal(empty1, null);
+
+  const empty2 = sanitizeNeuron({ id: "nrn_test", core: { concept: "   ", summary: "solo espacios" } });
+  assert.equal(empty2, null);
+
+  const invalid = createNeuron({ id: "nrn_test", core: { concept: "  " } });
+  const errs = validateNeuron(invalid);
+  assert.ok(errs.some((e) => e.includes("concept")));
+});
+
 test("temporal meta is sanitized and validated", () => {
   const today = new Date().toISOString().slice(0, 10);
   const t = sanitizeTemporalMeta({ date: today, stage: "trabajo_actual" });
