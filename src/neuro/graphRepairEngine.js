@@ -11,6 +11,103 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 /**
+ * Parsea e intenta reparar respuestas JSON de LLMs que tengan comas finales
+ * o estén truncadas por límite de tokens.
+ */
+export function safeParseJSON(text) {
+  if (!text || typeof text !== "string") {
+    throw new Error("Respuesta vacía o no válida.");
+  }
+
+  let cleaned = text.trim();
+
+  // Quitar bloques de código Markdown ```json ... ```
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+
+  // Ubicar delimitadores de JSON principal
+  const firstBrace = cleaned.indexOf("{");
+  if (firstBrace !== -1) {
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (lastBrace > firstBrace) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    } else {
+      cleaned = cleaned.substring(firstBrace);
+    }
+  }
+
+  const removeTrailingCommas = (str) => str.replace(/,\s*([\}\]])/g, "$1");
+
+  // Intento 1: Parseo directo limpiando comas sobrantes
+  try {
+    return JSON.parse(removeTrailingCommas(cleaned));
+  } catch (err1) {
+    // Intento 2: Reparación de JSON truncado por límite de tokens
+    const repaired = repairTruncatedJSON(removeTrailingCommas(cleaned));
+    if (repaired) {
+      try {
+        return JSON.parse(repaired);
+      } catch (_) {}
+    }
+    throw new Error(`Error parseando respuesta JSON de Claude: ${err1.message}`);
+  }
+}
+
+/**
+ * Reconstruye estructuras JSON truncadas intentando cerrar comillas, llaves y corchetes pendientes.
+ */
+function repairTruncatedJSON(jsonStr) {
+  let str = jsonStr.trim();
+
+  // Cerrar comilla si quedó a mitad de un string
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === '"' && !escaped) {
+      inString = !inString;
+    }
+    escaped = char === "\\" && !escaped;
+  }
+  if (inString) {
+    str += '"';
+  }
+
+  // Eliminar coma o propiedad incompleta al final
+  str = str.replace(/,\s*$/, "");
+  str = str.replace(/,\s*"[^"]*"?\s*:?\s*$/, "");
+
+  // Balancear llaves y corchetes
+  const stack = [];
+  inString = false;
+  escaped = false;
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === '"' && !escaped) {
+      inString = !inString;
+    }
+    escaped = char === "\\" && !escaped;
+
+    if (!inString) {
+      if (char === "{" || char === "[") {
+        stack.push(char);
+      } else if (char === "}" && stack[stack.length - 1] === "{") {
+        stack.pop();
+      } else if (char === "]" && stack[stack.length - 1] === "[") {
+        stack.pop();
+      }
+    }
+  }
+
+  while (stack.length > 0) {
+    const last = stack.pop();
+    if (last === "{") str += "}";
+    if (last === "[") str += "]";
+  }
+
+  return str;
+}
+
+/**
  * Ejecuta una reparación profunda del grafo neuronal utilizando Claude API.
  *
  * @param {object} options
@@ -55,9 +152,8 @@ export async function repairGraphWithClaude(options = {}) {
     concept: n.core?.concept || "",
     domain: n.core?.domain || "general",
     summary: n.core?.summary || "",
-    triggers: n.triggers || [],
+    triggers: (n.triggers || []).slice(0, 10),
     connections: n.connections || [],
-    sourceKind: n.source?.kind || "user",
   }));
 
   const systemPrompt = `Eres un Ingeniero Cognitivo de Grafos especializado en depurar, estructurar y enriquecer redes neuronales de memoria personal.
@@ -100,7 +196,7 @@ REGLAS CRÍTICAS:
 
   const requestBody = {
     model: settings.model || "claude-haiku-4-5",
-    max_tokens: 4096,
+    max_tokens: 8192,
     system: [
       {
         type: "text",
@@ -111,7 +207,7 @@ REGLAS CRÍTICAS:
     messages: [
       {
         role: "user",
-        content: `Aquí está la lista de neuronas actual (${remainingNeurons.length} neuronas):\n${JSON.stringify(formattedNeurons, null, 2)}\n\nRealiza el análisis y devuelve el JSON con el plan de reparación.`,
+        content: `Lista de neuronas (${remainingNeurons.length}):\n${JSON.stringify(formattedNeurons)}\n\nDevuelve únicamente el JSON con deletions, merges y updates.`,
       },
     ],
   };
@@ -153,12 +249,7 @@ REGLAS CRÍTICAS:
     }
 
     onProgress("Parseando plan de reparación de Claude...");
-    let text = fullText.trim();
-    text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) text = jsonMatch[0];
-
-    const repairPlan = JSON.parse(text);
+    const repairPlan = safeParseJSON(fullText);
 
     onProgress("Aplicando correcciones en el almacenamiento local...");
 
