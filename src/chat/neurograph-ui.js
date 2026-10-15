@@ -66,7 +66,7 @@ const RELATION_COLORS = {
 // ---- Estado interno ----
 const graphState = {
   graph:        { nodes: [], edges: [] },
-  filters:      { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null, showDeleted: false },
+  filters:      { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null, showDeleted: false, reach: "importantes", focusId: null },
   filtered:     { nodes: [], edges: [] },
   selectedNode: null,
   simulation:   null,
@@ -107,10 +107,28 @@ function fmtDate(ts) {
 }
 
 function hexToRgba(hex, alpha = 1) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
+  if (!hex || typeof hex !== "string" || !hex.startsWith("#")) return `rgba(148,163,184,${alpha})`;
+  const h = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
+  const r = parseInt(h.slice(1, 3), 16) || 148;
+  const g = parseInt(h.slice(3, 5), 16) || 163;
+  const b = parseInt(h.slice(5, 7), 16) || 184;
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function clamp(val, min, max) {
+  return Math.min(Math.max(val, min), max);
+}
+
+// Dynamic node sizing formula inspired by Regulación (getNodeSize)
+function getNodeSize(n) {
+  const mentions = (n.timesActivated || n.mentions || 0) + (n.numberOfConnections || n.degree || 0) * 0.5;
+  return clamp(10 + 4 * Math.sqrt(mentions), 10, 32);
+}
+
+// Dynamic font sizing formula inspired by Regulación (getNodeFontSize)
+function getNodeFontSize(n) {
+  const mentions = (n.timesActivated || n.mentions || 0) + (n.numberOfConnections || n.degree || 0) * 0.5;
+  return clamp(11 + Math.sqrt(mentions), 11, 18);
 }
 
 function nodeColor(n) {
@@ -135,36 +153,48 @@ function initPositions(nodes, w, h) {
   });
 }
 
-// ---- Force simulation ----
+// ---- Force-directed simulation (ForceAtlas2Based style from Regulación) ----
 function tickSimulation() {
   const nodes = graphState.filtered.nodes;
   const edges = graphState.filtered.edges;
   const pos   = graphState.positions;
   const alpha = graphState.alpha;
-  if (alpha < 0.001) return;
+  if (alpha < 0.0005) return;
 
-  const REPULSION  = 1800;
-  const SPRING_LEN = 130;
-  const SPRING_K   = 0.06;
-  const CENTER_K   = 0.012;
-  const DAMPING    = 0.82;
+  // Parámetros inspirados en Vis.js / ForceAtlas2Based de Regulación:
+  // gravitationalConstant: -30, centralGravity: 0.01, springLength: 80, springConstant: 0.08, damping: 0.4
+  const GRAVITATIONAL_CONSTANT = 30; // constante de repulsión entre nodos
+  const CENTRAL_GRAVITY        = 0.01;
+  const SPRING_LENGTH          = 85;
+  const SPRING_CONSTANT        = 0.08;
+  const DAMPING                = 0.72;
+
   const cx = graphState.width  / 2;
   const cy = graphState.height / 2;
 
-  // Repulsión entre todos los nodos
+  // Repulsión ForceAtlas2 (proporcional al grado/tamaño)
   for (let i = 0; i < nodes.length; i++) {
-    const a = pos[nodes[i].id];
+    const nodeA = nodes[i];
+    const a = pos[nodeA.id];
     if (!a) continue;
+    const degA = (nodeA.numberOfConnections || nodeA.degree || 1) + 1;
+
     for (let j = i + 1; j < nodes.length; j++) {
-      const b = pos[nodes[j].id];
+      const nodeB = nodes[j];
+      const b = pos[nodeB.id];
       if (!b) continue;
+      const degB = (nodeB.numberOfConnections || nodeB.degree || 1) + 1;
+
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const dist2 = dx * dx + dy * dy || 1;
       const dist  = Math.sqrt(dist2);
-      const force = (REPULSION / dist2) * alpha;
+
+      // Fuerza inversamente proporcional a la distancia con masa por conectividad
+      const force = ((GRAVITATIONAL_CONSTANT * 180 * degA * degB) / dist2) * alpha;
       const nx = dx / dist;
       const ny = dy / dist;
+
       a.vx -= nx * force;
       a.vy -= ny * force;
       b.vx += nx * force;
@@ -172,7 +202,7 @@ function tickSimulation() {
     }
   }
 
-  // Resortes en edges
+  // Resortes en edges (ForceAtlas2 spring model)
   for (const edge of edges) {
     const a = pos[edge.source];
     const b = pos[edge.target];
@@ -180,38 +210,51 @@ function tickSimulation() {
     const dx   = b.x - a.x;
     const dy   = b.y - a.y;
     const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    const force = (dist - SPRING_LEN) * SPRING_K * alpha;
+
+    // F = springConstant * (dist - springLength)
+    const force = (dist - SPRING_LENGTH) * SPRING_CONSTANT * alpha;
     const nx = dx / dist;
     const ny = dy / dist;
+
     a.vx += nx * force;
     a.vy += ny * force;
     b.vx -= nx * force;
     b.vy -= ny * force;
   }
 
-  // Atracción hacia el centro
+  // Gravedad central suave
   for (const n of nodes) {
     const p = pos[n.id];
     if (!p) continue;
-    p.vx += (cx - p.x) * CENTER_K * alpha;
-    p.vy += (cy - p.y) * CENTER_K * alpha;
+    p.vx += (cx - p.x) * CENTRAL_GRAVITY * alpha;
+    p.vy += (cy - p.y) * CENTRAL_GRAVITY * alpha;
   }
 
-  // Integrar velocidades
+  // Integración de velocidad con amortiguación
   for (const n of nodes) {
     const p = pos[n.id];
     if (!p || graphState.dragging === n.id) continue;
     p.vx *= DAMPING;
     p.vy *= DAMPING;
-    p.x  += p.vx;
-    p.y  += p.vy;
-    // Contener dentro del canvas
-    const r = n.size || 14;
+
+    // Limitar velocidad máxima para evitar brincos bruscos
+    const maxSpeed = 15;
+    const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+    if (speed > maxSpeed) {
+      p.vx = (p.vx / speed) * maxSpeed;
+      p.vy = (p.vy / speed) * maxSpeed;
+    }
+
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // Contener suavemente dentro del canvas
+    const r = getNodeSize(n);
     p.x = Math.max(r, Math.min(graphState.width  - r, p.x));
     p.y = Math.max(r, Math.min(graphState.height - r, p.y));
   }
 
-  graphState.alpha *= 0.994;
+  graphState.alpha *= 0.991;
 }
 
 // ---- Renderizado Canvas ----
@@ -275,7 +318,8 @@ function drawGraph() {
   for (const n of nodes) {
     const p = positions[n.id];
     if (!p) continue;
-    const r          = n.size || 14;
+    const r          = getNodeSize(n);
+    const fontSize   = getNodeFontSize(n);
     const color      = nodeColor(n);
     const isSelected = selectedNode?.id === n.id;
     const isHovered  = hoveredNode?.id  === n.id;
@@ -343,17 +387,17 @@ function drawGraph() {
       ctx.fill();
     }
 
-    // Etiqueta
-    const maxLabelChars = Math.max(6, Math.floor(r / 3.5));
+    // Etiqueta con escalado de fuente según el nodo
+    const maxLabelChars = Math.max(8, Math.floor(r / 2.8));
     const label = n.label.length > maxLabelChars ? n.label.slice(0, maxLabelChars) + "…" : n.label;
-    ctx.font      = `${isSelected ? "600" : "400"} ${isSelected ? 11 : 9}px system-ui, sans-serif`;
+    ctx.font      = `${isSelected ? "600" : "400"} ${isSelected ? fontSize + 1 : fontSize}px system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
 
     // Sombra del texto
     ctx.shadowColor = "rgba(0,0,0,0.8)";
     ctx.shadowBlur  = 4;
-    ctx.fillStyle   = isSelected ? "#ffffff" : "rgba(255,255,255,0.75)";
+    ctx.fillStyle   = isSelected ? "#ffffff" : "rgba(255,255,255,0.85)";
     ctx.fillText(label, p.x, p.y + r + 4);
     ctx.shadowBlur  = 0;
     ctx.shadowColor = "transparent";
@@ -394,9 +438,10 @@ function hitTest(wx, wy) {
     const n = nodes[i];
     const p = graphState.positions[n.id];
     if (!p) continue;
+    const r = getNodeSize(n);
     const dx = wx - p.x;
     const dy = wy - p.y;
-    if (dx * dx + dy * dy <= (n.size + 4) * (n.size + 4)) return n;
+    if (dx * dx + dy * dy <= (r + 4) * (r + 4)) return n;
   }
   return null;
 }
@@ -497,9 +542,11 @@ function wireCanvas(root, sessionState = {}) {
       if (!moved) {
         const hit = graphState.filtered.nodes.find(n => n.id === graphState.dragging);
         if (hit) {
-          graphState.selectedNode = hit;
-          graphState.editorMode   = false;
-          graphState.editorMsg    = "";
+          graphState.selectedNode   = hit;
+          graphState.filters.focusId = hit.id;
+          graphState.editorMode     = false;
+          graphState.editorMsg      = "";
+          applyFiltersAndRerender(root, sessionState);
           rerenderDetailPanel(root);
           wireDetailPanel(root, sessionState);
         }
@@ -508,11 +555,13 @@ function wireCanvas(root, sessionState = {}) {
     } else if (graphState.panning) {
       graphState.panning = false;
     } else {
-      // Click en vacío → deseleccionar
+      // Click en vacío → deseleccionar y remover focusId
       const hit = hitTest(x, y);
       if (!hit) {
-        graphState.selectedNode = null;
-        graphState.editorMode   = false;
+        graphState.selectedNode   = null;
+        graphState.filters.focusId = null;
+        graphState.editorMode     = false;
+        applyFiltersAndRerender(root, sessionState);
         rerenderDetailPanel(root);
         wireDetailPanel(root, sessionState);
       }
@@ -708,35 +757,51 @@ function renderFiltersBar() {
   const domainOpts  = domains.map(d  => `<option value="${esc(d)}"  ${filters.domain  === d  ? "selected" : ""}>${esc(d)}</option>`).join("");
   const emotionOpts = emotions.map(e => `<option value="${esc(e)}"  ${filters.emotion === e  ? "selected" : ""}>${esc(e)}</option>`).join("");
 
+  const reach = filters.reach || "importantes";
+
   return `
-    <div class="ngFilters">
-      <input type="search" class="ngInput ngSearchInput" id="ngSearch" placeholder="🔍 Buscar neurona…" value="${esc(filters.search || "")}" />
-      <select class="ngInput ngSelect" id="ngFilterDomain">
-        <option value="">Todos los dominios</option>${domainOpts}
-      </select>
-      <select class="ngInput ngSelect" id="ngFilterEmotion">
-        <option value="">Todas las emociones</option>${emotionOpts}
-      </select>
-      <select class="ngInput ngSelect" id="ngFilterRecent">
-        <option value="">Cualquier fecha</option>
-        <option value="1"  ${filters.recentDays === 1  ? "selected" : ""}>Hoy</option>
-        <option value="7"  ${filters.recentDays === 7  ? "selected" : ""}>Últimos 7d</option>
-        <option value="30" ${filters.recentDays === 30 ? "selected" : ""}>Últimos 30d</option>
-      </select>
-      <select class="ngInput ngSelect" id="ngFilterSource">
-        <option value="">Manual + auto</option>
-        <option value="manual" ${filters.sourceKind === "manual" ? "selected" : ""}>Solo manuales</option>
-        <option value="auto"   ${filters.sourceKind === "auto"   ? "selected" : ""}>Solo automáticas</option>
-      </select>
-      <select class="ngInput ngSelect" id="ngColorBy">
-        <option value="domain"  ${colorBy === "domain"  ? "selected" : ""}>Color: dominio</option>
-        <option value="emotion" ${colorBy === "emotion" ? "selected" : ""}>Color: emoción</option>
-      </select>
-      <label style="display:flex;gap:4px;align-items:center;font-size:11px;opacity:.8;padding:0 6px">
-        <input type="checkbox" id="ngFilterShowDeleted" ${filters.showDeleted ? "checked" : ""}/>
-        show deleted
-      </label>
-      <button class="ngBtn" id="ngBtnReset" title="Resetear filtros">✕</button>
+    <div class="ngFiltersContainer">
+      <div class="ngFilters">
+        <input type="search" class="ngInput ngSearchInput" id="ngSearch" placeholder="🔍 Buscar neurona…" value="${esc(filters.search || "")}" />
+
+        <div class="ngReachToggle">
+          <button class="ngReachBtn ${reach === "importantes" ? "active" : ""}" data-reach="importantes">Importantes</button>
+          <button class="ngReachBtn ${reach === "recientes" ? "active" : ""}" data-reach="recientes">Recientes</button>
+          <button class="ngReachBtn ${reach === "todos" ? "active" : ""}" data-reach="todos">Todos</button>
+        </div>
+
+        <select class="ngInput ngSelect" id="ngFilterDomain">
+          <option value="">Todos los dominios</option>${domainOpts}
+        </select>
+        <select class="ngInput ngSelect" id="ngFilterEmotion">
+          <option value="">Todas las emociones</option>${emotionOpts}
+        </select>
+        <select class="ngInput ngSelect" id="ngFilterSource">
+          <option value="">Manual + auto</option>
+          <option value="manual" ${filters.sourceKind === "manual" ? "selected" : ""}>Solo manuales</option>
+          <option value="auto"   ${filters.sourceKind === "auto"   ? "selected" : ""}>Solo automáticas</option>
+        </select>
+        <select class="ngInput ngSelect" id="ngColorBy">
+          <option value="domain"  ${colorBy === "domain"  ? "selected" : ""}>Color: dominio</option>
+          <option value="emotion" ${colorBy === "emotion" ? "selected" : ""}>Color: emoción</option>
+        </select>
+        <label style="display:flex;gap:4px;align-items:center;font-size:11px;opacity:.8;padding:0 6px">
+          <input type="checkbox" id="ngFilterShowDeleted" ${filters.showDeleted ? "checked" : ""}/>
+          show deleted
+        </label>
+        <button class="ngBtn" id="ngBtnReset" title="Resetear filtros">✕</button>
+      </div>
+
+      <!-- Chips de Dominios Rápido (estilo Regulación) -->
+      <div class="ngCategoryChips">
+        <span style="font-size:10px;opacity:.5;margin-right:4px">Dominios:</span>
+        <button class="ngChipBtn ${!filters.domain ? "active" : ""}" data-domain-chip="">Todos</button>
+        ${domains.map(d => {
+          const isSelected = filters.domain === d;
+          const color = DOMAIN_PALETTE[d] || "#a78bfa";
+          return `<button class="ngChipBtn ${isSelected ? "active" : ""}" data-domain-chip="${esc(d)}" style="${isSelected ? `background:${hexToRgba(color, 0.25)};border-color:${color};color:${color};font-weight:700` : ''}">${esc(d)}</button>`;
+        }).join("")}
+      </div>
     </div>`;
 }
 
@@ -995,22 +1060,22 @@ function wireNeuroGraphInner(root, sessionState = {}) {
     graphState.pan   = { x: 0, y: 0 };
   });
   root.querySelector("#ngBtnReset")?.addEventListener("click", () => {
-    graphState.filters = { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null, showDeleted: false };
+    graphState.filters = { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null, showDeleted: false, reach: "importantes", focusId: null };
+    graphState.selectedNode = null;
     const s = root.querySelector("#ngSearch");
     if (s) s.value = "";
-    ["#ngFilterDomain","#ngFilterEmotion","#ngFilterRecent","#ngFilterSource","#ngColorBy"].forEach(sel => {
+    ["#ngFilterDomain","#ngFilterEmotion","#ngFilterSource","#ngColorBy"].forEach(sel => {
       const el = root.querySelector(sel);
       if (el) el.value = "";
     });
     const showDeleted = root.querySelector("#ngFilterShowDeleted");
     if (showDeleted) showDeleted.checked = false;
-    applyFiltersAndRerender(root, sessionState);
+    rebuildAndRender(root, sessionState);
   });
 
   const filterMap = {
     "#ngFilterDomain":  v => { graphState.filters.domain     = v || null; },
     "#ngFilterEmotion": v => { graphState.filters.emotion    = v || null; },
-    "#ngFilterRecent":  v => { graphState.filters.recentDays = v ? parseInt(v, 10) : null; },
     "#ngFilterSource":  v => { graphState.filters.sourceKind = v || null; },
     "#ngColorBy":       v => { graphState.colorBy = v || "domain"; rebuildAndRender(root, sessionState); return; },
   };
@@ -1023,6 +1088,27 @@ function wireNeuroGraphInner(root, sessionState = {}) {
   root.querySelector("#ngFilterShowDeleted")?.addEventListener("change", (e) => {
     graphState.filters.showDeleted = Boolean(e.target.checked);
     applyFiltersAndRerender(root, sessionState);
+  });
+
+  // Eventos para el Toggle de Alcance (Reach: Importantes / Recientes / Todos)
+  root.querySelectorAll(".ngReachBtn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const reachVal = btn.dataset.reach || "importantes";
+      graphState.filters.reach = reachVal;
+      root.querySelectorAll(".ngReachBtn").forEach(b => b.classList.toggle("active", b.dataset.reach === reachVal));
+      applyFiltersAndRerender(root, sessionState);
+    });
+  });
+
+  // Eventos para Chips de Categoría / Dominio
+  root.querySelectorAll(".ngChipBtn").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const domVal = chip.dataset.domainChip || null;
+      graphState.filters.domain = domVal;
+      const select = root.querySelector("#ngFilterDomain");
+      if (select) select.value = domVal || "";
+      applyFiltersAndRerender(root, sessionState);
+    });
   });
 
   let searchTimer = null;
@@ -1139,13 +1225,46 @@ function ngCss() {
   .ngInput::placeholder { opacity: .35; }
 
   /* Filtros */
+  .ngFiltersContainer { margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
   .ngFilters {
     display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
     background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.07);
-    border-radius: 14px; padding: 10px 14px; margin-bottom: 12px;
+    border-radius: 14px; padding: 10px 14px;
   }
   .ngSearchInput { flex: 2; min-width: 160px; }
   .ngSelect { cursor: pointer; flex: 1; min-width: 120px; }
+
+  /* Reach toggle */
+  .ngReachToggle {
+    display: flex; background: rgba(0,0,0,.25); border-radius: 9px; padding: 2px;
+    border: 1px solid rgba(255,255,255,.08); flex-shrink: 0;
+  }
+  .ngReachBtn {
+    background: transparent; border: none; padding: 4px 10px; font-size: 11px;
+    color: rgba(255,255,255,.6); border-radius: 7px; cursor: pointer; font-weight: 500;
+    transition: all .15s ease;
+  }
+  .ngReachBtn:hover { color: #fff; }
+  .ngReachBtn.active {
+    background: rgba(124,92,255,.35); color: #fff; font-weight: 700;
+    box-shadow: 0 1px 4px rgba(0,0,0,.3);
+  }
+
+  /* Chips de categoría */
+  .ngCategoryChips {
+    display: flex; gap: 6px; align-items: center; overflow-x: auto; padding: 2px 4px;
+    scrollbar-width: none;
+  }
+  .ngCategoryChips::-webkit-scrollbar { display: none; }
+  .ngChipBtn {
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    color: rgba(255,255,255,.7); border-radius: 20px; padding: 3px 10px; font-size: 10px;
+    cursor: pointer; white-space: nowrap; transition: all .12s ease; flex-shrink: 0;
+  }
+  .ngChipBtn:hover { background: rgba(255,255,255,.12); color: #fff; }
+  .ngChipBtn.active {
+    background: rgba(124,92,255,.28); border-color: rgba(124,92,255,.5); color: #c4b5fd; font-weight: 700;
+  }
 
   /* Layout */
   .ngLayout { display: flex; gap: 14px; align-items: flex-start; }

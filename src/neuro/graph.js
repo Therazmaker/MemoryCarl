@@ -259,22 +259,53 @@ export function filterGraphNodes(graph, filters = {}) {
   if (filters.type) {
     nodes = nodes.filter((n) => n.type === filters.type);
   }
+  // Reach filter (from Regulación)
+  if (filters.reach === "importantes") {
+    nodes = [...nodes].sort((a, b) => {
+      const scoreA = (a.timesActivated || a.mentions || 0) + (a.numberOfConnections || a.degree || 0) * 0.5;
+      const scoreB = (b.timesActivated || b.mentions || 0) + (b.numberOfConnections || b.degree || 0) * 0.5;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      const lastA = typeof a.lastActivated === "number" ? a.lastActivated : (a.lastActivated ? new Date(a.lastActivated).getTime() : 0);
+      const lastB = typeof b.lastActivated === "number" ? b.lastActivated : (b.lastActivated ? new Date(b.lastActivated).getTime() : 0);
+      return lastB - lastA;
+    }).slice(0, 40);
+  } else if (filters.reach === "recientes") {
+    const cutoff30d = Date.now() - 30 * 86400000;
+    nodes = nodes.filter((n) => {
+      if (!n.lastActivated) return false;
+      const ts = typeof n.lastActivated === "number" ? n.lastActivated : new Date(n.lastActivated).getTime();
+      return ts >= cutoff30d;
+    });
+  }
+
   if (filters.search && filters.search.trim()) {
-    const lower = filters.search.trim().toLowerCase();
+    const normalizeText = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    const lower = normalizeText(filters.search);
     nodes = nodes.filter((n) =>
-      n.label.toLowerCase().includes(lower) ||
-      n.summary.toLowerCase().includes(lower) ||
-      n.triggers.some((t) => t.toLowerCase().includes(lower)) ||
-      n.aliases.some((a) => a.toLowerCase().includes(lower))
+      normalizeText(n.label).includes(lower) ||
+      normalizeText(n.summary).includes(lower) ||
+      n.triggers.some((t) => normalizeText(t).includes(lower)) ||
+      n.aliases.some((a) => normalizeText(a).includes(lower))
     );
   }
 
-  const nodeIds = new Set(nodes.map((n) => n.id));
-  const edges   = graph.edges.filter(
-    (e) => nodeIds.has(e.source) && nodeIds.has(e.target)
+  const visibleSet = new Set(nodes.map((n) => n.id));
+
+  // Focus 1-hop neighbors mode (from Regulación)
+  if (filters.focusId && graph.nodes.some((n) => n.id === filters.focusId)) {
+    visibleSet.add(filters.focusId);
+    for (const edge of graph.edges) {
+      if (edge.source === filters.focusId) visibleSet.add(edge.target);
+      if (edge.target === filters.focusId) visibleSet.add(edge.source);
+    }
+  }
+
+  const finalNodes = graph.nodes.filter((n) => visibleSet.has(n.id));
+  const finalEdges = graph.edges.filter(
+    (e) => visibleSet.has(e.source) && visibleSet.has(e.target)
   );
 
-  return { nodes, edges };
+  return { nodes: finalNodes, edges: finalEdges };
 }
 
 /**
