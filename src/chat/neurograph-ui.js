@@ -314,7 +314,7 @@ function drawGraph() {
     }
   }
 
-  // --- Nodos ---
+  // --- Nodos (Estilo Anillo Hueco de Regulación) ---
   for (const n of nodes) {
     const p = positions[n.id];
     if (!p) continue;
@@ -325,82 +325,78 @@ function drawGraph() {
     const isHovered  = hoveredNode?.id  === n.id;
     const isActive   = n.status === "active";
     const isNew      = n.status === "new";
-    const isMerged   = n.status === "merged";
     const pulse      = Math.sin(timestamp / 700) * 0.5 + 0.5;
 
     // Halo animado para nodos activos/nuevos
     if (isActive || isNew) {
-      const haloR = r + 8 + pulse * 5;
+      const haloR = r + 7 + pulse * 4;
       const haloColor = isNew ? "#34d399" : "#a78bfa";
       ctx.beginPath();
       ctx.arc(p.x, p.y, haloR, 0, Math.PI * 2);
-      ctx.strokeStyle = hexToRgba(haloColor, 0.15 + pulse * 0.2);
-      ctx.lineWidth   = 3;
+      ctx.strokeStyle = hexToRgba(haloColor, 0.2 + pulse * 0.25);
+      ctx.lineWidth   = 2.5;
       ctx.stroke();
     }
 
     // Sombra suave en nodo seleccionado/hover
     if (isSelected || isHovered) {
-      ctx.shadowColor = hexToRgba(color, 0.6);
-      ctx.shadowBlur  = 18;
+      ctx.shadowColor = hexToRgba(color, 0.7);
+      ctx.shadowBlur  = 16;
     }
 
-    // Círculo base con gradiente radial
-    const grad = ctx.createRadialGradient(p.x - r * 0.3, p.y - r * 0.3, r * 0.1, p.x, p.y, r);
-    grad.addColorStop(0, hexToRgba(color, isSelected ? 1 : isHovered ? 0.95 : 0.9));
-    grad.addColorStop(1, hexToRgba(color, isSelected ? 0.85 : isHovered ? 0.75 : 0.55));
-
+    // Relleno hueco / translúcido (Anillo Regulación)
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
+    ctx.fillStyle = isSelected
+      ? hexToRgba(color, 0.35)
+      : isHovered
+      ? hexToRgba(color, 0.25)
+      : "rgba(15, 13, 25, 0.85)";
     ctx.fill();
 
     ctx.shadowBlur  = 0;
     ctx.shadowColor = "transparent";
 
-    // Borde
+    // Borde de Anillo (Stroke principal estilo Regulación)
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
     if (isSelected) {
       ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth   = 2.5;
-    } else if (isNew) {
-      ctx.strokeStyle = "#34d399";
-      ctx.lineWidth   = 2;
-    } else if (isMerged) {
-      ctx.strokeStyle = "#fbbf24";
-      ctx.lineWidth   = 2;
+      ctx.lineWidth   = 3;
     } else if (isHovered) {
       ctx.strokeStyle = hexToRgba(color, 1);
-      ctx.lineWidth   = 1.5;
+      ctx.lineWidth   = 2.8;
     } else {
-      ctx.strokeStyle = hexToRgba(color, 0.4);
-      ctx.lineWidth   = 0.8;
+      ctx.strokeStyle = hexToRgba(color, 0.9);
+      ctx.lineWidth   = Math.max(1.5, r * 0.22);
     }
     ctx.stroke();
 
     // Pin indicator
     if (n.pin) {
       ctx.beginPath();
-      ctx.arc(p.x + r * 0.65, p.y - r * 0.65, 4, 0, Math.PI * 2);
+      ctx.arc(p.x + r * 0.7, p.y - r * 0.7, 3.5, 0, Math.PI * 2);
       ctx.fillStyle = "#fbbf24";
       ctx.fill();
     }
 
-    // Etiqueta con escalado de fuente según el nodo
-    const maxLabelChars = Math.max(8, Math.floor(r / 2.8));
-    const label = n.label.length > maxLabelChars ? n.label.slice(0, maxLabelChars) + "…" : n.label;
-    ctx.font      = `${isSelected ? "600" : "400"} ${isSelected ? fontSize + 1 : fontSize}px system-ui, sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
+    // Etiqueta con visibilidad fluida según zoom y selección
+    const showLabel = zoom >= 0.85 || isSelected || isHovered || (n.timesActivated || 0) >= 3 || (n.degree || 0) >= 4;
+    if (showLabel) {
+      const maxLabelChars = Math.max(8, Math.floor(r / 2.5));
+      const label = n.label.length > maxLabelChars ? n.label.slice(0, maxLabelChars) + "…" : n.label;
+      ctx.font      = `${isSelected ? "700" : "500"} ${isSelected ? fontSize + 1 : fontSize}px system-ui, -apple-system, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
 
-    // Sombra del texto
-    ctx.shadowColor = "rgba(0,0,0,0.8)";
-    ctx.shadowBlur  = 4;
-    ctx.fillStyle   = isSelected ? "#ffffff" : "rgba(255,255,255,0.85)";
-    ctx.fillText(label, p.x, p.y + r + 4);
-    ctx.shadowBlur  = 0;
-    ctx.shadowColor = "transparent";
+      // Sombra del texto
+      ctx.shadowColor = "rgba(0,0,0,0.9)";
+      ctx.shadowBlur  = 5;
+      ctx.fillStyle   = isSelected ? "#ffffff" : isHovered ? "#f8fafc" : "rgba(241,245,249,0.9)";
+      ctx.fillText(label, p.x, p.y + r + 5);
+      ctx.shadowBlur  = 0;
+      ctx.shadowColor = "transparent";
+    }
   }
 
   ctx.restore();
@@ -748,82 +744,79 @@ function renderNodeEditor(n) {
     </div>`;
 }
 
-// ---- Barra de filtros ----
+// ---- Barra de filtros e interfaz estilo Regulación ----
 function renderFiltersBar() {
-  const { graph, filters, colorBy } = graphState;
+  const { graph, filtered, filters } = graphState;
   const domains  = getGraphDomains(graph);
-  const emotions = getGraphEmotions(graph);
-
-  const domainOpts  = domains.map(d  => `<option value="${esc(d)}"  ${filters.domain  === d  ? "selected" : ""}>${esc(d)}</option>`).join("");
-  const emotionOpts = emotions.map(e => `<option value="${esc(e)}"  ${filters.emotion === e  ? "selected" : ""}>${esc(e)}</option>`).join("");
 
   const reach = filters.reach || "importantes";
 
   return `
     <div class="ngFiltersContainer">
-      <div class="ngFilters">
-        <input type="search" class="ngInput ngSearchInput" id="ngSearch" placeholder="🔍 Buscar neurona…" value="${esc(filters.search || "")}" />
+      <div class="ngSearchRow">
+        <div class="ngSearchWrapper">
+          <span class="ngSearchIcon">🔍</span>
+          <input type="search" class="ngSearchInput" id="ngSearch" placeholder="Buscar nodos…" value="${esc(filters.search || "")}" />
+          <span class="ngCountBadge">${filtered.nodes.length} de ${graph.nodes.length}</span>
+        </div>
+      </div>
 
-        <div class="ngReachToggle">
+      <!-- Strip unificado de filtros y categorías -->
+      <div class="ngFilterStrip">
+        <div class="ngReachGroup">
           <button class="ngReachBtn ${reach === "importantes" ? "active" : ""}" data-reach="importantes">Importantes</button>
           <button class="ngReachBtn ${reach === "recientes" ? "active" : ""}" data-reach="recientes">Recientes</button>
           <button class="ngReachBtn ${reach === "todos" ? "active" : ""}" data-reach="todos">Todos</button>
         </div>
-
-        <select class="ngInput ngSelect" id="ngFilterDomain">
-          <option value="">Todos los dominios</option>${domainOpts}
-        </select>
-        <select class="ngInput ngSelect" id="ngFilterEmotion">
-          <option value="">Todas las emociones</option>${emotionOpts}
-        </select>
-        <select class="ngInput ngSelect" id="ngFilterSource">
-          <option value="">Manual + auto</option>
-          <option value="manual" ${filters.sourceKind === "manual" ? "selected" : ""}>Solo manuales</option>
-          <option value="auto"   ${filters.sourceKind === "auto"   ? "selected" : ""}>Solo automáticas</option>
-        </select>
-        <select class="ngInput ngSelect" id="ngColorBy">
-          <option value="domain"  ${colorBy === "domain"  ? "selected" : ""}>Color: dominio</option>
-          <option value="emotion" ${colorBy === "emotion" ? "selected" : ""}>Color: emoción</option>
-        </select>
-        <label style="display:flex;gap:4px;align-items:center;font-size:11px;opacity:.8;padding:0 6px">
-          <input type="checkbox" id="ngFilterShowDeleted" ${filters.showDeleted ? "checked" : ""}/>
-          show deleted
-        </label>
-        <button class="ngBtn" id="ngBtnReset" title="Resetear filtros">✕</button>
-      </div>
-
-      <!-- Chips de Dominios Rápido (estilo Regulación) -->
-      <div class="ngCategoryChips">
-        <span style="font-size:10px;opacity:.5;margin-right:4px">Dominios:</span>
-        <button class="ngChipBtn ${!filters.domain ? "active" : ""}" data-domain-chip="">Todos</button>
-        ${domains.map(d => {
-          const isSelected = filters.domain === d;
-          const color = DOMAIN_PALETTE[d] || "#a78bfa";
-          return `<button class="ngChipBtn ${isSelected ? "active" : ""}" data-domain-chip="${esc(d)}" style="${isSelected ? `background:${hexToRgba(color, 0.25)};border-color:${color};color:${color};font-weight:700` : ''}">${esc(d)}</button>`;
-        }).join("")}
+        <div class="ngChipDivider"></div>
+        <div class="ngCategoryChips">
+          <button class="ngChipBtn ${!filters.domain ? "active" : ""}" data-domain-chip="">Todos</button>
+          ${domains.map(d => {
+            const isSelected = filters.domain === d;
+            const color = DOMAIN_PALETTE[d] || "#a78bfa";
+            return `<button class="ngChipBtn ${isSelected ? "active" : ""}" data-domain-chip="${esc(d)}" style="${isSelected ? `background:${hexToRgba(color, 0.2)};border-color:${color};color:${color};font-weight:700` : ''}">${esc(d)}</button>`;
+          }).join("")}
+        </div>
       </div>
     </div>`;
 }
 
 // ---- Vista principal ----
 function ngraphInner(sessionState = {}) {
-  const { graph, filtered } = graphState;
+  const { graph } = graphState;
   return `
     <div class="ngWrap">
       ${ngCss()}
       <div class="ngHeader">
         <div class="ngHeaderLeft">
-          <div>
-            <div class="ngHeaderTitle">Neuron Graph</div>
-            <div class="ngHeaderSub">${graph.nodes.length} neuronas · ${filtered.nodes.length} visibles · ${filtered.edges.length} conexiones</div>
+          <div class="ngHeaderIcon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="6" cy="6" r="3" />
+              <circle cx="18" cy="6" r="3" />
+              <circle cx="12" cy="18" r="3" />
+              <path d="M8.5 7.5L10.5 15.5" />
+              <path d="M15.5 7.5L13.5 15.5" />
+              <path d="M9 6h6" />
+            </svg>
           </div>
+          <div class="ngHeaderTitle">Grafo de Conexiones</div>
         </div>
-        <div class="ngHeaderActions">
-          <button class="ngBtn ngBtn--primary" id="ngBtnRepairGraph" title="Reparar y organizar grafo con Claude AI">✨ Reparar con Claude</button>
-          <button class="ngBtn" id="ngBtnRefresh" title="Refrescar">↺</button>
-          <button class="ngBtn" id="ngBtnZoomIn"  title="Acercar">+</button>
-          <button class="ngBtn" id="ngBtnZoomOut" title="Alejar">−</button>
-          <button class="ngBtn" id="ngBtnZoomReset" title="Centrar">⊙</button>
+        <div class="ngHeaderRight">
+          <span class="ngNodePill">${graph.nodes.length} nodos</span>
+          <div class="ngMenuWrap">
+            <button class="ngMenuBtn" id="ngMenuBtn" title="Opciones del grafo">⋮</button>
+            <div class="ngMenuDropdown" id="ngMenuDropdown">
+              <button class="ngMenuItem" id="ngBtnRepairGraph">✨ Reparar con Claude</button>
+              <button class="ngMenuItem" id="ngBtnRefresh">↺ Refrescar grafo</button>
+              <button class="ngMenuItem" id="ngBtnZoomReset">⊙ Centrar vista</button>
+              <button class="ngMenuItem" id="ngBtnResetPositions">⟲ Reiniciar posiciones</button>
+              <div class="ngMenuDivider"></div>
+              <label class="ngMenuItem ngMenuLabel">
+                <input type="checkbox" id="ngFilterShowDeleted" ${graphState.filters.showDeleted ? "checked" : ""}/>
+                Mostrar eliminadas
+              </label>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -832,6 +825,10 @@ function ngraphInner(sessionState = {}) {
       <div class="ngLayout">
         <div class="ngGraphArea" id="ngGraphArea">
           <canvas id="ngCanvas"></canvas>
+          <div class="ngZoomFloatingControls">
+            <button class="ngCircleBtn" id="ngBtnZoomIn" title="Acercar">+</button>
+            <button class="ngCircleBtn" id="ngBtnZoomOut" title="Alejar">−</button>
+          </div>
           <div class="ngLegendOverlay" id="ngLegendOverlay">${buildLegendOverlay()}</div>
         </div>
         <div class="ngDetailPanel" id="ngDetailPanel">
@@ -865,7 +862,7 @@ function initCanvas(root) {
   if (!canvas || !area) return;
 
   const w = area.clientWidth  || 700;
-  const h = Math.max(460, window.innerHeight * 0.55);
+  const h = Math.max(520, Math.floor(window.innerHeight * 0.68));
   canvas.width  = w;
   canvas.height = h;
   graphState.canvas = canvas;
@@ -1045,8 +1042,32 @@ function wireNeuroGraphInner(root, sessionState = {}) {
     }
   });
 
+  // Menu de 3 puntos (Dropdown)
+  const menuBtn = root.querySelector("#ngMenuBtn");
+  const menuDropdown = root.querySelector("#ngMenuDropdown");
+  if (menuBtn && menuDropdown) {
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      menuDropdown.classList.toggle("show");
+    });
+    document.addEventListener("click", () => {
+      menuDropdown.classList.remove("show");
+    });
+    menuDropdown.addEventListener("click", (e) => {
+      e.stopPropagation();
+    });
+  }
+
+  root.querySelector("#ngBtnResetPositions")?.addEventListener("click", () => {
+    graphState.positions = {};
+    graphState.alpha = 1.0;
+    menuDropdown?.classList.remove("show");
+    rebuildAndRender(root, sessionState);
+  });
+
   root.querySelector("#ngBtnRefresh")?.addEventListener("click", () => {
     graphState.positions = {};
+    menuDropdown?.classList.remove("show");
     rebuildAndRender(root, sessionState);
   });
   root.querySelector("#ngBtnZoomIn")?.addEventListener("click", () => {
@@ -1058,19 +1079,7 @@ function wireNeuroGraphInner(root, sessionState = {}) {
   root.querySelector("#ngBtnZoomReset")?.addEventListener("click", () => {
     graphState.zoom  = 1;
     graphState.pan   = { x: 0, y: 0 };
-  });
-  root.querySelector("#ngBtnReset")?.addEventListener("click", () => {
-    graphState.filters = { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null, showDeleted: false, reach: "importantes", focusId: null };
-    graphState.selectedNode = null;
-    const s = root.querySelector("#ngSearch");
-    if (s) s.value = "";
-    ["#ngFilterDomain","#ngFilterEmotion","#ngFilterSource","#ngColorBy"].forEach(sel => {
-      const el = root.querySelector(sel);
-      if (el) el.value = "";
-    });
-    const showDeleted = root.querySelector("#ngFilterShowDeleted");
-    if (showDeleted) showDeleted.checked = false;
-    rebuildAndRender(root, sessionState);
+    menuDropdown?.classList.remove("show");
   });
 
   const filterMap = {
@@ -1187,95 +1196,117 @@ export function wireNeuroGraph(root, sessionState = {}) {
 // ---- CSS ----
 function ngCss() {
   return `<style id="ngraphStyles">
-  .ngWrap { max-width: 1200px; margin: 0 auto; padding: 0 0 80px; font-family: system-ui, sans-serif; }
+  .ngWrap { max-width: 1200px; margin: 0 auto; padding: 0 0 80px; font-family: system-ui, -apple-system, sans-serif; }
 
-  /* Header */
+  /* Header estilo Regulación */
   .ngHeader {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 18px;
-    background: linear-gradient(135deg, rgba(124,92,255,.14) 0%, rgba(99,102,241,.08) 100%);
-    border: 1px solid rgba(124,92,255,.28); border-radius: 18px; margin-bottom: 12px;
+    padding: 12px 16px; margin-bottom: 12px;
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 16px;
   }
-  .ngHeaderLeft  { display: flex; align-items: center; gap: 12px; }
-  .ngHeaderTitle { font-size: 16px; font-weight: 700; letter-spacing: -.2px; }
-  .ngHeaderSub   { font-size: 11px; opacity: .55; margin-top: 2px; }
-  .ngHeaderActions { display: flex; gap: 6px; }
+  .ngHeaderLeft { display: flex; align-items: center; gap: 10px; }
+  .ngHeaderIcon { color: #fbbf24; display: flex; align-items: center; }
+  .ngHeaderTitle { font-size: 18px; font-weight: 700; color: #f8fafc; letter-spacing: -.3px; }
 
-  /* Botones */
-  .ngBtn {
-    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
-    border-radius: 9px; padding: 6px 12px; cursor: pointer; font-size: 13px;
-    color: inherit; transition: background .12s, transform .08s;
-    font-family: inherit;
+  .ngHeaderRight { display: flex; align-items: center; gap: 10px; }
+  .ngNodePill {
+    background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 20px; padding: 4px 12px; font-size: 12px; font-weight: 600;
   }
-  .ngBtn:hover  { background: rgba(255,255,255,.14); }
-  .ngBtn:active { transform: scale(.96); }
-  .ngBtn--primary {
-    background: rgba(124,92,255,.22); border-color: rgba(124,92,255,.4); color: #c4b5fd;
-  }
-  .ngBtn--primary:hover { background: rgba(124,92,255,.32); }
 
-  /* Inputs */
-  .ngInput {
-    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
-    border-radius: 9px; padding: 7px 11px; color: inherit; font-size: 12px;
-    font-family: inherit; outline: none; resize: vertical; width: 100%; box-sizing: border-box;
+  /* Menu Dropdown */
+  .ngMenuWrap { position: relative; }
+  .ngMenuBtn {
+    background: transparent; border: none; color: #94a3b8; font-size: 20px;
+    cursor: pointer; padding: 4px 8px; border-radius: 8px; transition: background .12s;
   }
-  .ngInput:focus { border-color: rgba(124,92,255,.5); background: rgba(124,92,255,.07); }
-  .ngInput::placeholder { opacity: .35; }
+  .ngMenuBtn:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .ngMenuDropdown {
+    display: none; position: absolute; top: 100%; right: 0; margin-top: 6px;
+    background: #1e1b2e; border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
+    padding: 6px; min-width: 180px; box-shadow: 0 10px 25px rgba(0,0,0,.5); z-index: 100;
+  }
+  .ngMenuDropdown.show { display: block; }
+  .ngMenuItem {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px;
+    background: transparent; border: none; color: #e2e8f0; font-size: 12px; font-weight: 500;
+    text-align: left; cursor: pointer; border-radius: 8px; transition: background .12s;
+  }
+  .ngMenuItem:hover { background: rgba(124,92,255,.2); color: #fff; }
+  .ngMenuDivider { height: 1px; background: rgba(255,255,255,.08); margin: 4px 0; }
+  .ngMenuLabel { cursor: pointer; opacity: .85; }
 
-  /* Filtros */
-  .ngFiltersContainer { margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
-  .ngFilters {
-    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-    background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.07);
-    border-radius: 14px; padding: 10px 14px;
+  /* Búsqueda y Filtros */
+  .ngFiltersContainer { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .ngSearchRow { display: flex; width: 100%; }
+  .ngSearchWrapper {
+    position: relative; display: flex; align-items: center; width: 100%;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09);
+    border-radius: 14px; padding: 0 12px; transition: border-color .15s;
   }
-  .ngSearchInput { flex: 2; min-width: 160px; }
-  .ngSelect { cursor: pointer; flex: 1; min-width: 120px; }
+  .ngSearchWrapper:focus-within { border-color: rgba(124,92,255,.5); background: rgba(124,92,255,.05); }
+  .ngSearchIcon { opacity: .4; font-size: 13px; margin-right: 8px; }
+  .ngSearchInput {
+    flex: 1; background: transparent; border: none; padding: 10px 0; color: #fff;
+    font-size: 13px; outline: none; font-family: inherit;
+  }
+  .ngSearchInput::placeholder { opacity: .4; }
+  .ngCountBadge {
+    background: rgba(255,255,255,.08); color: #94a3b8; font-size: 11px;
+    padding: 3px 8px; border-radius: 12px; font-weight: 500; white-space: nowrap;
+  }
 
-  /* Reach toggle */
-  .ngReachToggle {
-    display: flex; background: rgba(0,0,0,.25); border-radius: 9px; padding: 2px;
-    border: 1px solid rgba(255,255,255,.08); flex-shrink: 0;
+  /* Strip unificado con scroll horizontal */
+  .ngFilterStrip {
+    display: flex; align-items: center; gap: 8px; overflow-x: auto; padding: 2px 0 6px;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
   }
+  .ngFilterStrip::-webkit-scrollbar { display: none; }
+
+  .ngReachGroup { display: flex; gap: 4px; flex-shrink: 0; }
   .ngReachBtn {
-    background: transparent; border: none; padding: 4px 10px; font-size: 11px;
-    color: rgba(255,255,255,.6); border-radius: 7px; cursor: pointer; font-weight: 500;
-    transition: all .15s ease;
+    background: transparent; border: none; padding: 5px 12px; font-size: 12px;
+    color: #94a3b8; font-weight: 500; border-radius: 20px; cursor: pointer; transition: all .15s;
   }
-  .ngReachBtn:hover { color: #fff; }
   .ngReachBtn.active {
-    background: rgba(124,92,255,.35); color: #fff; font-weight: 700;
-    box-shadow: 0 1px 4px rgba(0,0,0,.3);
+    background: rgba(255,255,255,.12); color: #fff; font-weight: 700;
   }
+  .ngChipDivider { width: 1px; height: 16px; background: rgba(255,255,255,.12); flex-shrink: 0; }
 
-  /* Chips de categoría */
-  .ngCategoryChips {
-    display: flex; gap: 6px; align-items: center; overflow-x: auto; padding: 2px 4px;
-    scrollbar-width: none;
-  }
-  .ngCategoryChips::-webkit-scrollbar { display: none; }
+  .ngCategoryChips { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
   .ngChipBtn {
     background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
-    color: rgba(255,255,255,.7); border-radius: 20px; padding: 3px 10px; font-size: 10px;
+    color: #94a3b8; border-radius: 20px; padding: 4px 12px; font-size: 12px;
     cursor: pointer; white-space: nowrap; transition: all .12s ease; flex-shrink: 0;
   }
   .ngChipBtn:hover { background: rgba(255,255,255,.12); color: #fff; }
   .ngChipBtn.active {
-    background: rgba(124,92,255,.28); border-color: rgba(124,92,255,.5); color: #c4b5fd; font-weight: 700;
+    background: rgba(124,92,255,.25); border-color: rgba(124,92,255,.5); color: #c4b5fd; font-weight: 700;
   }
 
-  /* Layout */
+  /* Layout y Canvas */
   .ngLayout { display: flex; gap: 14px; align-items: flex-start; }
   .ngGraphArea {
     flex: 1; min-width: 0; position: relative;
-    background: rgba(10,8,20,.6);
+    background: rgba(10,8,20,.65);
     border: 1px solid rgba(124,92,255,.18); border-radius: 18px;
-    overflow: hidden; min-height: 460px;
+    overflow: hidden; min-height: 520px;
   }
   #ngCanvas { display: block; width: 100%; cursor: grab; }
   #ngCanvas:active { cursor: grabbing; }
+
+  .ngZoomFloatingControls {
+    position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 10;
+  }
+  .ngCircleBtn {
+    width: 34px; height: 34px; border-radius: 50%; background: rgba(30,27,46,.85);
+    border: 1px solid rgba(255,255,255,.15); color: #fff; font-size: 16px; font-weight: bold;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,.3); transition: transform .1s, background .12s;
+  }
+  .ngCircleBtn:hover { background: rgba(124,92,255,.4); }
+  .ngCircleBtn:active { transform: scale(.92); }
 
   .ngDetailPanel {
     width: 280px; flex-shrink: 0;
