@@ -22,6 +22,7 @@ import {
 } from "../neuro/graph.js";
 import { linkNeurons, unlinkNeurons } from "../neuro/connections.js";
 import { getNeuronCalibrationSummary } from "../neuro/feedback.js";
+import { repairGraphWithClaude } from "../neuro/graphRepairEngine.js";
 
 // ---- Paleta de colores ----
 const DOMAIN_PALETTE = {
@@ -753,6 +754,7 @@ function ngraphInner(sessionState = {}) {
           </div>
         </div>
         <div class="ngHeaderActions">
+          <button class="ngBtn ngBtn--primary" id="ngBtnRepairGraph" title="Reparar y organizar grafo con Claude AI">✨ Reparar con Claude</button>
           <button class="ngBtn" id="ngBtnRefresh" title="Refrescar">↺</button>
           <button class="ngBtn" id="ngBtnZoomIn"  title="Acercar">+</button>
           <button class="ngBtn" id="ngBtnZoomOut" title="Alejar">−</button>
@@ -937,6 +939,46 @@ function wireNeuroGraphInner(root, sessionState = {}) {
   wireCanvas(root, sessionState);
   startLoop(root);
   wireDetailPanel(root, sessionState);
+
+  root.querySelector("#ngBtnRepairGraph")?.addEventListener("click", async () => {
+    const btn = root.querySelector("#ngBtnRepairGraph");
+    const headerSub = root.querySelector(".ngHeaderSub");
+    const originalText = btn ? btn.textContent : "";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "⏳ Analizando...";
+    }
+
+    try {
+      const result = await repairGraphWithClaude({
+        onProgress: (statusMsg) => {
+          if (headerSub) headerSub.textContent = statusMsg;
+        },
+      });
+
+      if (result.ok) {
+        alert(
+          `✨ Reparación del Grafo Completada\n\n` +
+          `• Neuronas limpiadas/eliminadas: ${result.deletedCount || 0}\n` +
+          `• Neuronas fusionadas: ${result.mergedCount || 0}\n` +
+          `• Neuronas mejoradas: ${result.updatedCount || 0}\n` +
+          `• Conexiones creadas: ${result.connectionsCreatedCount || 0}\n\n` +
+          `Resumen de Claude:\n${result.summary}`
+        );
+      } else {
+        alert(`❌ No se pudo completar la reparación:\n${result.error || "Error desconocido"}`);
+      }
+    } catch (err) {
+      alert(`❌ Error al reparar el grafo: ${err.message}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+      graphState.positions = {};
+      rebuildAndRender(root, sessionState);
+    }
+  });
 
   root.querySelector("#ngBtnRefresh")?.addEventListener("click", () => {
     graphState.positions = {};

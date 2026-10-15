@@ -201,7 +201,7 @@ export function validateNeuron(n) {
   if (!NEURON_TYPES.includes(n.type))            errs.push(`type inválido: ${n.type}`);
   if (!n.core || typeof n.core !== "object")     errs.push("core faltante");
   else {
-    if (typeof n.core.concept !== "string")      errs.push("core.concept inválido");
+    if (typeof n.core.concept !== "string" || !n.core.concept.trim()) errs.push("core.concept inválido o vacío");
     if (typeof n.core.domain  !== "string")      errs.push("core.domain inválido");
     if (typeof n.core.summary !== "string")      errs.push("core.summary inválido");
   }
@@ -262,6 +262,8 @@ export function validateNeuron(n) {
  */
 export function sanitizeNeuron(raw) {
   if (!raw || typeof raw !== "object") return null;
+  const rawConcept = String(raw.core?.concept || "").trim();
+  if (!rawConcept) return null;
   const n = createNeuron(raw);
   // Clamp weight a [0, 1]
   n.weight = Math.max(0, Math.min(1, isFinite(n.weight) ? n.weight : 0.5));
