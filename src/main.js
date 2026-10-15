@@ -70,6 +70,7 @@ import './finance/finance_core_v2.js';
   console.warn = (...args) => { originalWarn(...args); addLog('warn', args); };
 
   window.addEventListener('error', (e) => {
+    if (e && e.message && e.message.includes('ResizeObserver loop')) return;
     addLog('error', [`Uncaught Error: ${e.message} at ${e.filename}:${e.lineno}:${e.colno}`]);
   });
   window.addEventListener('unhandledrejection', (e) => {
@@ -333,7 +334,10 @@ try {
   }catch(_e){}
 
   // Global errors => offer rescue
-  window.addEventListener('error', ()=> showRescueBanner('error JS'));
+  window.addEventListener('error', (e)=> {
+    if (e && e.message && e.message.includes('ResizeObserver loop')) return;
+    showRescueBanner('error JS');
+  });
   window.addEventListener('unhandledrejection', ()=> showRescueBanner('promesa rechazada'));
 
   // If in 6s the app hasn't rendered, offer rescue anyway

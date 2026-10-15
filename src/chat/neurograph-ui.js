@@ -1132,17 +1132,22 @@ function wireNeuroGraphInner(root, sessionState = {}) {
   // Resize observer
   const area = root.querySelector("#ngGraphArea");
   if (area && window.ResizeObserver) {
+    let ngResizeRaf = 0;
     new ResizeObserver(() => {
-      const canvas = graphState.canvas;
-      if (!canvas) return;
-      const w = area.clientWidth;
-      const h = Math.max(460, window.innerHeight * 0.55);
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width  = w;
-        canvas.height = h;
-        graphState.width  = w;
-        graphState.height = h;
-      }
+      if (ngResizeRaf) cancelAnimationFrame(ngResizeRaf);
+      ngResizeRaf = requestAnimationFrame(() => {
+        ngResizeRaf = 0;
+        const canvas = graphState.canvas;
+        if (!canvas || !area) return;
+        const w = area.clientWidth;
+        const h = Math.max(460, window.innerHeight * 0.55);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width  = w;
+          canvas.height = h;
+          graphState.width  = w;
+          graphState.height = h;
+        }
+      });
     }).observe(area);
   }
 }
