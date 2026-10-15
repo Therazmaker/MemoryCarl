@@ -638,10 +638,14 @@ function renderNodeDetail() {
 
   return `
     <div class="ngDetail">
-      <div class="ngDetailHeader" style="border-left: 3px solid ${color}; padding-left: 10px; margin-bottom: 10px;">
-        <div class="ngDetailConcept">${esc(n.label)}</div>
-        <div class="ngDetailType">${esc(n.type)} · ${esc(n.domain)}</div>
-        ${statusBadge}
+      <div class="ngSheetHandleBar"><div class="ngSheetHandle"></div></div>
+      <div class="ngDetailTopRow">
+        <div class="ngDetailHeader" style="border-left: 3px solid ${color}; padding-left: 10px; flex:1;">
+          <div class="ngDetailConcept">${esc(n.label)}</div>
+          <div class="ngDetailType">${esc(n.type)} · ${esc(n.domain)}</div>
+          ${statusBadge}
+        </div>
+        <button class="ngBtnCloseSheet" id="ngBtnCloseDetail" title="Cerrar detalles">✕</button>
       </div>
 
       ${n.summary ? `<div class="ngDetailSummary">${esc(n.summary)}</div>` : ""}
@@ -862,7 +866,7 @@ function initCanvas(root) {
   if (!canvas || !area) return;
 
   const w = area.clientWidth  || 700;
-  const h = Math.max(520, Math.floor(window.innerHeight * 0.68));
+  const h = area.clientHeight || Math.max(540, Math.floor(window.innerHeight - 210));
   canvas.width  = w;
   canvas.height = h;
   graphState.canvas = canvas;
@@ -877,12 +881,27 @@ function initCanvas(root) {
 // ---- Detalle y editor ----
 function rerenderDetailPanel(root) {
   const panel = root.querySelector("#ngDetailPanel");
-  if (panel) panel.innerHTML = renderNodeDetail();
+  if (panel) {
+    panel.innerHTML = renderNodeDetail();
+    if (graphState.selectedNode) {
+      panel.classList.add("open");
+    } else {
+      panel.classList.remove("open");
+    }
+  }
 }
 
 function wireDetailPanel(root, sessionState = {}) {
   const panel = root.querySelector("#ngDetailPanel");
   if (!panel) return;
+
+  panel.querySelector("#ngBtnCloseDetail")?.addEventListener("click", () => {
+    graphState.selectedNode   = null;
+    graphState.filters.focusId = null;
+    graphState.editorMode     = false;
+    applyFiltersAndRerender(root, sessionState);
+    rerenderDetailPanel(root);
+  });
 
   panel.querySelector("#ngBtnOpenEditor")?.addEventListener("click", () => {
     graphState.editorMode = true;
@@ -977,7 +996,7 @@ function wireDetailPanel(root, sessionState = {}) {
     const impact = getNeuronDeletionImpact(selected.id);
     if (!impact) return;
     const warning = impact.likes >= 5 || impact.connectionsAffected >= 6
-      ? "\\n⚠️ Alta relevancia detectada (likes/conectividad)." : "";
+      ? "\n⚠️ Alta relevancia detectada (likes/conectividad)." : "";
     const msg = `Esta neurona está conectada a ${impact.memoriesAffected} memorias y ${impact.connectionsAffected} neuronas. Insights afectados: ${impact.insightsAffected}. ¿Deseas eliminarla de todos modos?${warning}`;
     if (!confirm(msg)) return;
     deleteNeuronSafely(selected.id, { hard: true });
@@ -1205,6 +1224,7 @@ function ngCss() {
 
   /* Header estilo Regulación */
   .ngHeader {
+    position: relative; z-index: 50;
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 16px; margin-bottom: 12px;
     background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
@@ -1230,7 +1250,7 @@ function ngCss() {
   .ngMenuDropdown {
     display: none; position: absolute; top: 100%; right: 0; margin-top: 6px;
     background: #1e1b2e; border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
-    padding: 6px; min-width: 180px; box-shadow: 0 10px 25px rgba(0,0,0,.5); z-index: 100;
+    padding: 6px; min-width: 180px; box-shadow: 0 10px 25px rgba(0,0,0,.5); z-index: 1000;
   }
   .ngMenuDropdown.show { display: block; }
   .ngMenuItem {
@@ -1291,14 +1311,14 @@ function ngCss() {
   }
 
   /* Layout y Canvas */
-  .ngLayout { display: flex; gap: 14px; align-items: flex-start; }
+  .ngLayout { display: flex; flex-direction: column; position: relative; gap: 0; }
   .ngGraphArea {
-    flex: 1; min-width: 0; position: relative;
+    width: 100%; min-width: 0; position: relative;
     background: rgba(10,8,20,.65);
     border: 1px solid rgba(124,92,255,.18); border-radius: 18px;
-    overflow: hidden; min-height: 520px;
+    overflow: hidden; height: calc(100vh - 210px); min-height: 540px;
   }
-  #ngCanvas { display: block; width: 100%; cursor: grab; }
+  #ngCanvas { display: block; width: 100%; height: 100%; cursor: grab; }
   #ngCanvas:active { cursor: grabbing; }
 
   .ngZoomFloatingControls {
@@ -1313,14 +1333,34 @@ function ngCss() {
   .ngCircleBtn:hover { background: rgba(124,92,255,.4); }
   .ngCircleBtn:active { transform: scale(.92); }
 
+  /* Detail panel (Sliding Bottom Sheet Drawer) */
   .ngDetailPanel {
-    width: 280px; flex-shrink: 0;
-    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
-    border-radius: 18px; overflow-y: auto; max-height: 560px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 990;
+    max-width: 600px; margin: 0 auto;
+    background: #181528; border: 1px solid rgba(124,92,255,.3);
+    border-bottom: none; border-radius: 20px 20px 0 0;
+    box-shadow: 0 -10px 30px rgba(0,0,0,.6);
+    overflow-y: auto; max-height: 65vh;
+    transform: translateY(105%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
+  .ngDetailPanel.open {
+    transform: translateY(0);
+  }
+  .ngSheetHandleBar { display: flex; justify-content: center; padding: 8px 0 4px; }
+  .ngSheetHandle { width: 36px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); }
+  .ngDetailTopRow { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+  .ngBtnCloseSheet {
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
+    color: #fff; width: 30px; height: 30px; border-radius: 50%; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    flex-shrink: 0; transition: background .12s;
+  }
+  .ngBtnCloseSheet:hover { background: rgba(255,255,255,.2); }
+
   @media(max-width:720px) {
-    .ngLayout      { flex-direction: column; }
-    .ngDetailPanel { width: 100%; max-height: none; }
+    .ngGraphArea { height: calc(100vh - 230px); min-height: 480px; }
+    .ngDetailPanel { max-height: 75vh; }
   }
 
   /* Legend overlay */
