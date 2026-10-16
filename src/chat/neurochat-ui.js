@@ -2134,13 +2134,16 @@ export function initNeuroChat() {
         keepalive: true
       });
 
-      if (isManual) {
-        if (res.ok) alert("Sincronización a Supabase completada con éxito ✅");
-        else alert("Error en sincronización a Supabase ❌");
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        console.warn("[NeuroChat Push Failed]", errText);
+        if (isManual) alert("Error en sincronización a Supabase ❌:\n" + errText);
+      } else if (isManual) {
+        alert("Sincronización a Supabase completada con éxito ✅");
       }
     } catch (e) {
-      console.warn("[NeuroChat Push Error]", e);
-      if (isManual) alert("Error de conexión al sincronizar con Supabase: " + e.message);
+      console.warn("[NeuroChat Push Error]", e.message || String(e));
+      if (isManual) alert("Error de conexión al sincronizar con Supabase: " + (e.message || String(e)));
     }
   };
 
@@ -2155,7 +2158,12 @@ export function initNeuroChat() {
         headers: { ...(key && { "Authorization": `Bearer ${key}` }) }
       });
 
-      if (!res.ok) return;
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        console.warn("[NeuroChat Pull Failed]", errText);
+        if (isManual) alert("Error al restaurar desde Supabase ❌:\n" + errText);
+        return;
+      }
       const { data } = await res.json();
       if (!data) return;
 
