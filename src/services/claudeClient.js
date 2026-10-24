@@ -9,6 +9,9 @@
 
 import { getNeuroChatSettings } from "../settings/neurochatSettings.js";
 import { getChefAiSettings } from "../shopping/shoppingAi.js";
+import { buildLifeFactsPromptBlock } from "../chat/lifeFacts.js";
+import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
+import { buildRecentDaysPromptBlock } from "../chat/recentContext.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -61,7 +64,7 @@ REGLAS DE COMPORTAMIENTO Y CONVERSACIÓN:
 - Si el usuario dice algo vago o incompleto sobre un tema importante, haz UNA sola pregunta clara para explorar más contexto.
 
 GESTIÓN DE NEURONAS E INTENCIÓN (al final de tu respuesta, separado por ---NEURON_ACTIONS---):
-Después de responder, indica tu intención conversacional y qué acciones tomar sobre el grafo. Usa este formato JSON estricto:
+Después de responder, indica tu intención conversacional y qué acciones tomar sobre el grafo o hechos de vida. Usa este formato JSON estricto:
 {
   "intent": "clarify|explore|respond|consolidate",
   "actions": [
@@ -79,9 +82,37 @@ Después de responder, indica tu intención conversacional y qué acciones tomar
       "type": "update",
       "neuronId": "id-de-neurona-existente",
       "changes": { "core.summary": "nuevo summary", "triggers": ["nuevo_trigger"] }
+    },
+    {
+      "type": "upsertLifeFact",
+      "fact": {
+        "text": "Descripción corta del hecho afirmado por el usuario",
+        "category": "trabajo|dinero|vivienda|relaciones|salud|proyecto|otro",
+        "since": "YYYY-MM-DD"
+      }
+    },
+    {
+      "type": "endLifeFact",
+      "match": "id o fragmento del texto del hecho que ya no aplica"
+    },
+    {
+      "type": "openThread",
+      "thread": {
+        "topic": "Pendiente o tema en curso mencionado por el usuario",
+        "dueDate": "YYYY-MM-DD",
+        "note": "nota opcional"
+      }
+    },
+    {
+      "type": "resolveThread",
+      "match": "id o texto del hilo resuelto o completado"
     }
   ]
 }
+
+REGLAS PARA HECHOS DE VIDA (upsertLifeFact / endLifeFact):
+- Solo registra un hecho si el usuario lo afirmó claramente (ej. "renuncié a mi trabajo", "me mudé a Lima", "conseguí empleo").
+- Si el usuario habla en tono hipotético, dudoso o pregunta algo (ej. "¿y si dejo mi empleo?"), NO registres un hecho de vida. Si dudas, no lo registres.
 
 Significado de intent:
 - clarify: El input es vago, hiciste una pregunta corta para entender mejor.
@@ -97,6 +128,24 @@ IMPORTANTE: El JSON de acciones debe ir SIEMPRE al final, después de ---NEURON_
  */
 function buildClaudePayload({ userInput, context = [], history = [], insights = [], temporalContext = null, dayContext = null, memoryRecall = [], conversationSession = null, financeContext = null }) {
   let systemContent = NEUROCHAT_CLAUDE_SYSTEM_PROMPT;
+
+  // CAPA 1: SITUACIÓN ACTUAL (Hechos Vigentes)
+  const lifeFactsBlock = buildLifeFactsPromptBlock(userInput);
+  if (lifeFactsBlock.blockText) {
+    systemContent += lifeFactsBlock.blockText;
+  }
+
+  // CAPA 2: HILOS ABIERTOS (Pendientes)
+  const openThreadsBlock = buildOpenThreadsPromptBlock();
+  if (openThreadsBlock.blockText) {
+    systemContent += openThreadsBlock.blockText;
+  }
+
+  // CAPA 3: DÍAS RECIENTES
+  const recentDaysBlock = buildRecentDaysPromptBlock();
+  if (recentDaysBlock.blockText) {
+    systemContent += recentDaysBlock.blockText;
+  }
 
   if (context.length > 0) {
     systemContent += "\n\n## CONTEXTO NEURONAL ACTIVO\n";

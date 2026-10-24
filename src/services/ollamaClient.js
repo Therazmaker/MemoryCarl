@@ -81,6 +81,10 @@ export function isOllamaConfigured() {
   return Boolean(s.enabled && s.apiKey && s.apiKey.trim().length > 10);
 }
 
+import { buildLifeFactsPromptBlock } from "../chat/lifeFacts.js";
+import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
+import { buildRecentDaysPromptBlock } from "../chat/recentContext.js";
+
 // ---- System prompt para NeuroChat ----
 
 const NEUROCHAT_SYSTEM_PROMPT = `Eres Carl, una inteligencia personal con memoria contextual. Tienes acceso al grafo mental del usuario: neuronas (conceptos, patrones y creencias aprendidas), insights y memorias relevantes.
@@ -94,7 +98,7 @@ REGLAS DE COMPORTAMIENTO Y CONVERSACIÓN:
 - Si notas patrones similares en el pasado (basado en neuronas activas), menciónalos.
 
 GESTIÓN DE NEURONAS E INTENCIÓN (al final de tu respuesta, separado por ---NEURON_ACTIONS---):
-Después de responder, indica tu intención conversacional y qué acciones tomar sobre el grafo. Usa este formato JSON estricto:
+Después de responder, indica tu intención conversacional y qué acciones tomar sobre el grafo o hechos de vida. Usa este formato JSON estricto:
 {
   "intent": "clarify|explore|respond|consolidate",
   "actions": [
@@ -112,9 +116,37 @@ Después de responder, indica tu intención conversacional y qué acciones tomar
       "type": "update",
       "neuronId": "id-de-neurona-existente",
       "changes": { "core.summary": "nuevo summary", "triggers": ["nuevo_trigger"] }
+    },
+    {
+      "type": "upsertLifeFact",
+      "fact": {
+        "text": "Descripción corta del hecho afirmado por el usuario",
+        "category": "trabajo|dinero|vivienda|relaciones|salud|proyecto|otro",
+        "since": "YYYY-MM-DD"
+      }
+    },
+    {
+      "type": "endLifeFact",
+      "match": "id o fragmento del texto del hecho que ya no aplica"
+    },
+    {
+      "type": "openThread",
+      "thread": {
+        "topic": "Pendiente o tema en curso mencionado por el usuario",
+        "dueDate": "YYYY-MM-DD",
+        "note": "nota opcional"
+      }
+    },
+    {
+      "type": "resolveThread",
+      "match": "id o texto del hilo resuelto o completado"
     }
   ]
 }
+
+REGLAS PARA HECHOS DE VIDA (upsertLifeFact / endLifeFact):
+- Solo registra un hecho si el usuario lo afirmó claramente (ej. "renuncié a mi trabajo", "me mudé a Lima", "conseguí empleo").
+- Si el usuario habla en tono hipotético, dudoso o pregunta algo (ej. "¿y si dejo mi empleo?"), NO registres un hecho de vida. Si dudas, no lo registres.
 
 Significado de intent:
 - clarify: El input es muy vago, hiciste una pregunta corta para entender.
@@ -137,6 +169,24 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
 
   // System message con las instrucciones y el contexto neuronal
   let systemContent = NEUROCHAT_SYSTEM_PROMPT;
+
+  // CAPA 1: SITUACIÓN ACTUAL (Hechos Vigentes)
+  const lifeFactsBlock = buildLifeFactsPromptBlock(userInput);
+  if (lifeFactsBlock.blockText) {
+    systemContent += lifeFactsBlock.blockText;
+  }
+
+  // CAPA 2: HILOS ABIERTOS (Pendientes)
+  const openThreadsBlock = buildOpenThreadsPromptBlock();
+  if (openThreadsBlock.blockText) {
+    systemContent += openThreadsBlock.blockText;
+  }
+
+  // CAPA 3: DÍAS RECIENTES
+  const recentDaysBlock = buildRecentDaysPromptBlock();
+  if (recentDaysBlock.blockText) {
+    systemContent += recentDaysBlock.blockText;
+  }
 
   if (context.length > 0) {
     systemContent += "\n\n## CONTEXTO NEURONAL ACTIVO\n";
