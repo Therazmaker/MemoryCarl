@@ -17,10 +17,18 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export const CLAUDE_MODELS = [
-  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (Rápido y económico)" },
-  { id: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku" },
+  { id: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku (Rápido y económico)" },
   { id: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet (Avanzado)" },
+  { id: "claude-3-7-sonnet-latest", label: "Claude 3.7 Sonnet (Último)" },
 ];
+
+/**
+ * Normaliza nombres de modelos obsoletos o inválidos.
+ */
+export function normalizeClaudeModel(model) {
+  if (!model || model === "claude-haiku-4-5") return "claude-3-5-haiku-20241022";
+  return model;
+}
 
 /**
  * Obtiene la configuración de Claude leyendo settings de NeuroChat o heredando de Chef AI.
@@ -28,13 +36,13 @@ export const CLAUDE_MODELS = [
 export function getClaudeSettings() {
   const nc = getNeuroChatSettings();
   let apiKey = nc.claudeApiKey || "";
-  let model = nc.claudeModel || "claude-haiku-4-5";
+  let model = normalizeClaudeModel(nc.claudeModel);
 
   if (!apiKey) {
     const chef = getChefAiSettings();
     if (chef.claudeApiKey) {
       apiKey = chef.claudeApiKey;
-      if (chef.claudeModel) model = chef.claudeModel;
+      if (chef.claudeModel) model = normalizeClaudeModel(chef.claudeModel);
     }
   }
 
@@ -235,19 +243,41 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
     }
   } catch (_e) {}
 
-  const formattedMessages = [];
-  const recentHistory = (history || []).slice(-8);
+  const rawFormatted = [];
+  const recentHistory = (history || []).slice(-12);
   for (const msg of recentHistory) {
     if (msg.role === "user" || msg.role === "assistant") {
-      let content = String(msg.content || "");
+      let content = String(msg.content || "").trim();
+      if (!content) continue;
       if (msg.role === "assistant" && content.includes("---NEURON_ACTIONS---")) {
         content = content.split("---NEURON_ACTIONS---")[0].trim();
       }
-      formattedMessages.push({ role: msg.role === "assistant" ? "assistant" : "user", content });
+      if (!content) continue;
+      rawFormatted.push({ role: msg.role === "assistant" ? "assistant" : "user", content });
     }
   }
 
-  formattedMessages.push({ role: "user", content: userInput });
+  // Anthropic exige alternancia estricta entre user y assistant, comenzando por user y terminando con user
+  const formattedMessages = [];
+  for (const msg of rawFormatted) {
+    if (formattedMessages.length === 0) {
+      if (msg.role === "user") formattedMessages.push(msg);
+    } else {
+      const lastRole = formattedMessages[formattedMessages.length - 1].role;
+      if (msg.role !== lastRole) {
+        formattedMessages.push(msg);
+      } else {
+        // Concatenar mensajes seguidos del mismo rol para evitar errores de API
+        formattedMessages[formattedMessages.length - 1].content += `\n${msg.content}`;
+      }
+    }
+  }
+
+  if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === "user") {
+    formattedMessages[formattedMessages.length - 1].content += `\n${userInput}`;
+  } else {
+    formattedMessages.push({ role: "user", content: userInput });
+  }
 
   return { systemContent, messages: formattedMessages };
 }
@@ -295,8 +325,9 @@ export async function requestClaudeChatReply(payload, onRetryProgress = null) {
 
   const { systemContent, messages } = buildClaudePayload(payload);
 
+  const modelToUse = normalizeClaudeModel(settings.model);
   const requestBody = {
-    model: settings.model || "claude-haiku-4-5",
+    model: modelToUse,
     max_tokens: 2048,
     system: [
       {
@@ -369,7 +400,10 @@ export async function requestClaudeChatReply(payload, onRetryProgress = null) {
   }
 
   console.error("[claudeClient] Fallaron todos los intentos con Claude:", lastError);
-  return null;
+  const errMessage = lastError?.message || "Error desconocido en Claude API";
+  const err = new Error(errMessage);
+  err.lastError = lastError;
+  throw err;
 }
 
 /**
