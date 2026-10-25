@@ -76,6 +76,7 @@ function getProbeUI() {
 }
 const uiState = {
   loading:         false,
+  loadingStatusText: "",
   error:           null,
   lastResult:      null,  // NeuroCoreResult
   traceExpanded:   false,
@@ -215,11 +216,22 @@ function renderMemoryRecallCard(msg) {
 function renderMessage(msg) {
   const isUser = msg.role === "user";
   const time = timeSince(msg.ts);
+  const isApiError = !isUser && (
+    msg.replySource === "api_error" ||
+    msg.generatedBy === "api_backend_error" ||
+    (typeof msg.content === "string" && (msg.content.includes("Error al comunicar") || msg.content.includes("Error al conectar")))
+  );
+
   const bodyHtml = isUser
     ? `<div class="ncMsgBubble">${esc(msg.content)}</div>`
-    : `<div class="ncMsgBubble ncMsgBubble--md">${renderMarkdown(msg.content)}</div>`;
+    : `<div class="ncMsgBubble ncMsgBubble--md ${isApiError ? "ncMsgBubble--apiError" : ""}">${renderMarkdown(msg.content)}
+        ${isApiError ? `
+          <div class="ncRetryActionRow" style="margin-top: 10px;">
+            <button class="ncActionBtn ncActionBtnPrimary ncRetryMsgBtn" data-retry-msg-id="${esc(msg.messageId || "")}">🔄 Reintentar respuesta</button>
+          </div>` : ""}
+      </div>`;
 
-  const responseFeedback = (!isUser && msg.messageId) ? `
+  const responseFeedback = (!isUser && !isApiError && msg.messageId) ? `
     <div class="ncResponseFeedback" data-msg-id="${esc(msg.messageId)}">
       <button class="ncRfBtn" data-rf-rating="useful" data-rf-msg="${esc(msg.messageId)}" title="Útil">Útil</button>
       <button class="ncRfBtn" data-rf-rating="partial" data-rf-msg="${esc(msg.messageId)}" title="Parcialmente útil">Parcial</button>
@@ -919,8 +931,9 @@ function buildMessagesHtml() {
         <div class="ncWelcomeTitle">NeuroChat</div>
         <div class="ncWelcomeSub">Conversación con memoria contextual viva.</div>
       </div>`;
+  const statusMsg = uiState.loadingStatusText ? `<span class="ncLoadingStatus" style="font-size:12px;opacity:0.8;margin-left:6px;">${esc(uiState.loadingStatusText)}</span>` : "";
   return `${messagesHtml}
-    ${uiState.loading ? `<div class="ncLoading"><span class="ncDot"></span><span class="ncDot"></span><span class="ncDot"></span></div>` : ""}
+    ${uiState.loading ? `<div class="ncLoading"><span class="ncDot"></span><span class="ncDot"></span><span class="ncDot"></span>${statusMsg}</div>` : ""}
     ${uiState.error ? `<div class="ncError">⚠️ ${esc(uiState.error)}</div>` : ""}`;
 }
 
@@ -1436,18 +1449,27 @@ export function viewNeuroChat() {
 
 // ---- Wiring de eventos ----
 
-async function doSend(root, inputEl) {
-  if (!inputEl || uiState.loading) return;
-  const text = inputEl.value.trim();
+async function doSend(root, inputEl, textOverride = null) {
+  if (uiState.loading) return;
+  const text = textOverride || (inputEl ? inputEl.value.trim() : "");
   if (!text) return;
-  inputEl.value = "";
+  if (inputEl && !textOverride) inputEl.value = "";
   uiState.loading = true;
+  uiState.loadingStatusText = "";
   uiState.error = null;
   rerender();
   try {
-    const result = await sendMessage(text, { mode: uiState.currentMode, interpretationMode: uiState.interpretationMode });
+    const result = await sendMessage(text, {
+      mode: uiState.currentMode,
+      interpretationMode: uiState.interpretationMode,
+      onRetryProgress: ({ attempt, maxAttempts }) => {
+        uiState.loadingStatusText = `Reintentando (${attempt}/${maxAttempts})...`;
+        rerender();
+      },
+    });
     uiState.lastResult = result;
     uiState.loading = false;
+    uiState.loadingStatusText = "";
     if (result) {
       if (result.messageId) {
         uiState.feedbackByMessage[result.messageId] = { ...(result.feedbackForMessage || {}) };
@@ -1462,7 +1484,6 @@ async function doSend(root, inputEl) {
       uiState.sessionState.lastMergedIds = (result.dedupeSummary?.mergedIds || []);
 
       // ── NeuroProbe: mostrar pregunta si el observe() generó una ──
-      // Actualizar el probe con el resultado (y la entrada del usuario si no viene)
       result.userInput = result.userInput || text;
       getProbeUI().update(result);
     }
@@ -1470,6 +1491,7 @@ async function doSend(root, inputEl) {
     console.error("[NeuroChat]", err);
     uiState.error = err.message || "Error desconocido";
     uiState.loading = false;
+    uiState.loadingStatusText = "";
   }
   rerender();
   const rootEl = document.querySelector("#app");
@@ -1616,6 +1638,19 @@ function wireMessageEvents(root) {
         uiState.error = err.message || "No se pudo eliminar la neurona";
       }
       rerenderSidePanel(root);
+    });
+  });
+
+  root.querySelectorAll("[data-retry-msg-id]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const messageId = btn.getAttribute("data-retry-msg-id");
+      const history = getChatHistory();
+      const userMsg = [...history].reverse().find((m) => m.role === "user" && m.messageId === messageId) ||
+                      [...history].reverse().find((m) => m.role === "user");
+      if (userMsg && userMsg.content) {
+        const inputEl = root.querySelector("#ncInput");
+        doSend(root, inputEl, userMsg.content);
+      }
     });
   });
 
@@ -2937,6 +2972,10 @@ function ncCss() {
   .ncMsgBubble--streaming {
     border-color: rgba(129,140,248,.5);
     background: rgba(129,140,248,.08);
+  }
+  .ncMsgBubble--apiError {
+    border: 1px solid rgba(251,113,133,.4);
+    background: rgba(251,113,133,.08);
   }
   .ncSettingsSaveBtn {
     background: rgba(124,92,255,.8); border: none; border-radius: 10px;

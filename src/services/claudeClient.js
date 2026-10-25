@@ -285,7 +285,7 @@ export function parseClaudeNeuronActions(rawActions) {
  * @param {object} payload
  * @returns {Promise<{ reply: string, neuronActions: { actions: object[], intent: string }, intent: string } | null>}
  */
-export async function requestClaudeChatReply(payload) {
+export async function requestClaudeChatReply(payload, onRetryProgress = null) {
   const settings = getClaudeSettings();
 
   if (!settings.apiKey) {
@@ -308,51 +308,68 @@ export async function requestClaudeChatReply(payload) {
     messages,
   };
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const maxAttempts = 3;
+  let lastError = null;
 
-  try {
-    const res = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": settings.apiKey.trim(),
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timer);
-
-    if (!res.ok) {
-      let errMsg = `HTTP ${res.status}`;
-      try {
-        const errJson = await res.json();
-        errMsg = errJson.error?.message || errMsg;
-      } catch (_) {}
-      console.error(`[claudeClient] Error Anthropic Claude: ${errMsg}`);
-      return null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      if (typeof onRetryProgress === "function") {
+        try { onRetryProgress({ attempt, maxAttempts, service: "claude" }); } catch (_e) {}
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
     }
 
-    const data = await res.json();
-    const fullText = data?.content?.[0]?.text;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
-    if (!fullText) {
-      console.warn("[claudeClient] Respuesta vacía de Claude API.");
-      return null;
+    try {
+      const res = await fetch(ANTHROPIC_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": settings.apiKey.trim(),
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (!res.ok) {
+        let errMsg = `HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          errMsg = errJson.error?.message || errMsg;
+        } catch (_) {}
+        lastError = new Error(`Claude error: ${errMsg}`);
+        console.warn(`[claudeClient] Intento ${attempt}/${maxAttempts} falló: ${errMsg}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const fullText = data?.content?.[0]?.text;
+
+      if (!fullText) {
+        lastError = new Error("Respuesta vacía de Claude API");
+        console.warn(`[claudeClient] Intento ${attempt}/${maxAttempts}: respuesta vacía.`);
+        continue;
+      }
+
+      const { reply, rawActions } = splitReplyAndActions(fullText);
+      const { actions, intent } = parseClaudeNeuronActions(rawActions);
+
+      return { reply, neuronActions: { actions, intent }, intent };
+    } catch (err) {
+      clearTimeout(timer);
+      lastError = err;
+      console.warn(`[claudeClient] Intento ${attempt}/${maxAttempts} error de red/timeout:`, err.message || err);
     }
-
-    const { reply, rawActions } = splitReplyAndActions(fullText);
-    const { actions, intent } = parseClaudeNeuronActions(rawActions);
-
-    return { reply, neuronActions: { actions, intent }, intent };
-  } catch (err) {
-    clearTimeout(timer);
-    console.error("[claudeClient] Falló solicitud a Claude:", err);
-    return null;
   }
+
+  console.error("[claudeClient] Fallaron todos los intentos con Claude:", lastError);
+  return null;
 }
 
 /**
