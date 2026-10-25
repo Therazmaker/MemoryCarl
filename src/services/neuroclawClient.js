@@ -67,7 +67,7 @@ async function safeJson(res) {
  * @param {any} body
  * @returns {Promise<any>}
  */
-async function callNeuroClaw(endpoint, body) {
+async function callNeuroClaw(endpoint, body, onRetryProgress = null) {
   const base = getBaseUrl();
   const key  = getApiKey();
 
@@ -79,22 +79,45 @@ async function callNeuroClaw(endpoint, body) {
   const url = `${base}${endpoint}`;
   console.log(`[neuroclawClient] POST ${url}`);
 
-  const res = await fetchWithTimeout(url, {
-    method:  "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-mc-key":     key,
-    },
-    body: JSON.stringify(body),
-  });
+  const maxAttempts = 3;
+  let lastError = null;
 
-  if (!res.ok) {
-    const errData = await safeJson(res);
-    console.error(`[neuroclawClient] HTTP ${res.status} en ${endpoint}:`, errData);
-    return null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      if (typeof onRetryProgress === "function") {
+        try { onRetryProgress({ attempt, maxAttempts, service: "neuroclaw" }); } catch (_e) {}
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+
+    try {
+      const res = await fetchWithTimeout(url, {
+        method:  "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-mc-key":     key,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const errData = await safeJson(res);
+        lastError = new Error(`HTTP ${res.status}`);
+        console.warn(`[neuroclawClient] Intento ${attempt}/${maxAttempts} HTTP ${res.status} en ${endpoint}:`, errData);
+        continue;
+      }
+
+      const json = await safeJson(res);
+      if (json) return json;
+      lastError = new Error("Respuesta no-JSON de NeuroClaw");
+    } catch (err) {
+      lastError = err;
+      console.warn(`[neuroclawClient] Intento ${attempt}/${maxAttempts} error de red/timeout:`, err.message || err);
+    }
   }
 
-  return safeJson(res);
+  console.error(`[neuroclawClient] Fallaron todos los intentos en ${endpoint}:`, lastError);
+  return null;
 }
 
 // ---- API pública ----
@@ -153,7 +176,7 @@ export async function requestNeuronGeneration(payload) {
  * @param {object} payload
  * @returns {Promise<string|null>} el texto de respuesta o null
  */
-export async function requestChatReply(payload) {
+export async function requestChatReply(payload, onRetryProgress = null) {
   const body = {
     task: "chat_reply",
     systemPrompt:
@@ -172,7 +195,7 @@ export async function requestChatReply(payload) {
     ...payload,
   };
 
-  const data = await callNeuroClaw("/neurochat/reply", body);
+  const data = await callNeuroClaw("/neurochat/reply", body, onRetryProgress);
   if (!data) return null;
 
   if (typeof data.reply === "string") return data.reply;

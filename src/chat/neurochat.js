@@ -231,21 +231,39 @@ export async function sendMessage(userInput, options = {}) {
   // ---- Modo API Backend (si está configurado) ----
   const apiSettings = getApiSettings();
   if (apiSettings.enabled) {
-    try {
-      const res = await fetch(`${apiSettings.url}/api/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiSettings.key}`,
-        },
-        body: JSON.stringify({ message: trimmed }),
-      });
+    const maxAttempts = 3;
+    let apiReply = null;
+    let apiIntent = "respond";
+    let apiErrLast = null;
+    let neuronsCreated = 0;
 
-      if (!res.ok) throw new Error(`Error del servidor API: ${res.status}`);
-      const json = await res.json();
-      const apiReply = json.data?.reply || "(Sin respuesta del servidor)";
-      const apiIntent = json.data?.intent || "respond";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) {
+        await new Promise((r) => setTimeout(r, attempt * 500));
+      }
+      try {
+        const res = await fetch(`${apiSettings.url}/api/chat`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiSettings.key}`,
+          },
+          body: JSON.stringify({ message: trimmed }),
+        });
 
+        if (!res.ok) throw new Error(`Error del servidor API: ${res.status}`);
+        const json = await res.json();
+        apiReply = json.data?.reply || "(Sin respuesta del servidor)";
+        apiIntent = json.data?.intent || "respond";
+        neuronsCreated = json.data?.neuronsCreated || 0;
+        break;
+      } catch (err) {
+        apiErrLast = err;
+        console.warn(`[neurochat] API backend intento ${attempt}/${maxAttempts} falló:`, err.message);
+      }
+    }
+
+    if (apiReply) {
       conversationSession.intent = apiIntent;
       if (["clarify", "explore"].includes(apiIntent)) conversationSession.clarifyCount++;
       else conversationSession.clarifyCount = 0;
@@ -254,7 +272,8 @@ export async function sendMessage(userInput, options = {}) {
         messageId, mode, interpretationMode,
         generatedBy: "api_backend",
         intent: apiIntent,
-        neuronsCreated: json.data?.neuronsCreated || 0,
+        neuronsCreated,
+        replySource: "api_backend",
       });
 
       try { appendToCurrentDay(assistantMsg); } catch (_e) {}
@@ -269,10 +288,32 @@ export async function sendMessage(userInput, options = {}) {
         feedbackForMessage: getMessageFeedbackMap(messageId),
         probeQuestion: null,
         generatedBy: "api_backend",
+        replySource: "api_backend",
       };
-    } catch (apiErr) {
-      console.warn("[neurochat] API backend falló, usando modo local:", apiErr.message);
-      // Si falla el backend, cae al modo local automáticamente
+    } else {
+      const errorReply = "⚠️ Error al comunicar con el servidor API tras 3 intentos. Por favor, reintenta.";
+      const assistantMsg = appendMessage("assistant", errorReply, {
+        messageId, mode, interpretationMode,
+        generatedBy: "api_backend_error",
+        intent: "error",
+        replySource: "api_error",
+      });
+
+      try { appendToCurrentDay(assistantMsg); } catch (_e) {}
+
+      return {
+        reply: errorReply,
+        messageId,
+        intent: "error",
+        activated: [],
+        generated: [],
+        memorySuggestion: { suggestSave: false },
+        feedbackForMessage: getMessageFeedbackMap(messageId),
+        probeQuestion: null,
+        generatedBy: "api_backend_error",
+        replySource: "api_error",
+        apiError: true,
+      };
     }
   }
 
@@ -284,6 +325,7 @@ export async function sendMessage(userInput, options = {}) {
     premiumOptions: options.premiumOptions,
     messageId,
     conversationSession, // Pasamos el estado de conversación
+    onRetryProgress: options.onRetryProgress,
   });
 
   // Actualizar estado de sesión según la intención devuelta por el asistente

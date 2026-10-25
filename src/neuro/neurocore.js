@@ -597,7 +597,7 @@ export async function processNeuroInput(userInput, options = {}) {
         memoryRecall: memoryRecallResult.ranked,
         conversationSession: options.conversationSession,
         financeContext,
-      });
+      }, options.onRetryProgress);
 
       if (claudeResult && claudeResult.reply) {
         reply = claudeResult.reply;
@@ -742,7 +742,7 @@ export async function processNeuroInput(userInput, options = {}) {
         memoryRecall: memoryRecallResult.ranked,
         conversationSession: options.conversationSession, // Pasamos la sesión
         financeContext,
-      }, ollamaChunkCallback);
+      }, ollamaChunkCallback, options.onRetryProgress);
 
       if (ollamaResult && ollamaResult.reply) {
         reply = ollamaResult.reply;
@@ -910,7 +910,7 @@ export async function processNeuroInput(userInput, options = {}) {
         temporalContext,
         dayContext,
         financeContext,
-      });
+      }, options.onRetryProgress);
       if (assistedReply) {
         geminiReplyText = assistedReply;
         reply = assistedReply;
@@ -936,7 +936,7 @@ export async function processNeuroInput(userInput, options = {}) {
         temporalContext,
         interpretationMode,
         dayContext,
-      });
+      }, options.onRetryProgress);
       if (reply) {
         geminiReplyText = reply;
         replySource = "gemini";
@@ -947,7 +947,13 @@ export async function processNeuroInput(userInput, options = {}) {
     }
   }
 
-  if (!reply && localDraft) {
+  const isAiConfigured = isClaudeConfigured() || isOllamaConfigured() || isGeminiPremiumConfigured() || isNeuroclawConfigured();
+
+  if (!reply && isAiConfigured) {
+    reply = "⚠️ Error al conectar con el motor de IA tras varios intentos. No se pudo obtener respuesta del servidor.";
+    replySource = "api_error";
+    addStep(trace, "api_error_no_script_fallback");
+  } else if (!reply && localDraft) {
     reply = localDraft;
     replySource = "local_engine";
     addStep(trace, "local_engine_fallback_used");
@@ -960,8 +966,13 @@ export async function processNeuroInput(userInput, options = {}) {
   } else {
     if (hasPressuringTone(reply)) {
       addStep(trace, "pressuring_tone_detected", { replyPreview: reply.slice(0, 50) });
-      reply = buildFallbackReply(finalActivated);
-      replySource = "pressuring_tone_fallback";
+      if (isAiConfigured) {
+        reply = "⚠️ Respuesta reescrita por seguridad: tono no adecuado detectado.";
+        replySource = "api_error";
+      } else {
+        reply = buildFallbackReply(finalActivated);
+        replySource = "pressuring_tone_fallback";
+      }
     } else {
       addStep(trace, "reply_received", { source: replySource });
     }

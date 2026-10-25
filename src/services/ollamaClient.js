@@ -435,7 +435,7 @@ export function parseNeuronActions(rawActions) {
  * @param {function|null} onChunk — callback(text) llamado en cada fragmento de streaming
  * @returns {Promise<{ reply: string, neuronActions: { actions: object[] } } | null>}
  */
-export async function requestOllamaChatReply(payload, onChunk = null) {
+export async function requestOllamaChatReply(payload, onChunk = null, onRetryProgress = null) {
   const settings = getOllamaSettings();
 
   if (!isOllamaConfigured()) {
@@ -458,92 +458,106 @@ export async function requestOllamaChatReply(payload, onChunk = null) {
     },
   };
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), settings.timeoutMs || DEFAULT_TIMEOUT_MS);
+  const maxAttempts = 3;
+  let lastError = null;
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${settings.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timer);
-
-    if (!res.ok) {
-      let errMsg = `HTTP ${res.status}`;
-      try {
-        const errData = await res.json();
-        errMsg = errData?.error || errMsg;
-      } catch (_e) {}
-      console.error(`[ollamaClient] Error en Ollama Cloud: ${errMsg}`);
-      return null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      if (typeof onRetryProgress === "function") {
+        try { onRetryProgress({ attempt, maxAttempts, service: "ollama" }); } catch (_e) {}
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
     }
 
-    let fullText = "";
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), settings.timeoutMs || DEFAULT_TIMEOUT_MS);
 
-    if (useStream) {
-      // Streaming: leer el ReadableStream línea a línea (NDJSON)
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${settings.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      clearTimeout(timer);
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // la última línea puede estar incompleta
+      if (!res.ok) {
+        let errMsg = `HTTP ${res.status}`;
+        try {
+          const errData = await res.json();
+          errMsg = errData?.error || errMsg;
+        } catch (_e) {}
+        lastError = new Error(`Ollama Cloud error: ${errMsg}`);
+        console.warn(`[ollamaClient] Intento ${attempt}/${maxAttempts} falló: ${errMsg}`);
+        continue;
+      }
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const chunk = JSON.parse(trimmed);
-            const token = chunk?.message?.content || "";
-            if (token) {
-              fullText += token;
-              // Solo pasar al UI el texto conversacional (antes del separador de acciones)
-              const displayText = fullText.includes("---NEURON_ACTIONS---")
-                ? fullText.split("---NEURON_ACTIONS---")[0]
-                : fullText;
-              onChunk(displayText);
+      let fullText = "";
+
+      if (useStream) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const chunk = JSON.parse(trimmed);
+              const token = chunk?.message?.content || "";
+              if (token) {
+                fullText += token;
+                const displayText = fullText.includes("---NEURON_ACTIONS---")
+                  ? fullText.split("---NEURON_ACTIONS---")[0]
+                  : fullText;
+                onChunk(displayText);
+              }
+              if (chunk?.done) break;
+            } catch (_parseErr) {
+              // noop
             }
-            if (chunk?.done) break;
-          } catch (_parseErr) {
-            // Línea no-JSON, ignorar
           }
         }
+      } else {
+        const data = await res.json();
+        fullText = data?.message?.content || data?.response || "";
       }
-    } else {
-      // Sin streaming: respuesta completa
-      const data = await res.json();
-      fullText = data?.message?.content || data?.response || "";
-    }
 
-    if (!fullText) {
-      console.warn("[ollamaClient] Respuesta vacía de Ollama Cloud.");
-      return null;
-    }
+      if (!fullText) {
+        lastError = new Error("Respuesta vacía de Ollama Cloud");
+        console.warn(`[ollamaClient] Intento ${attempt}/${maxAttempts}: respuesta vacía.`);
+        continue;
+      }
 
-    const { reply, rawActions } = splitReplyAndActions(fullText);
-    const neuronActions = parseNeuronActions(rawActions);
+      const { reply, rawActions } = splitReplyAndActions(fullText);
+      const neuronActions = parseNeuronActions(rawActions);
 
-    return { reply, neuronActions };
-  } catch (err) {
-    clearTimeout(timer);
-    if (err.name === "AbortError") {
-      console.error("[ollamaClient] Timeout alcanzado.");
-    } else {
-      console.error("[ollamaClient] Error de red:", err);
+      return { reply, neuronActions };
+    } catch (err) {
+      clearTimeout(timer);
+      lastError = err;
+      if (err.name === "AbortError") {
+        console.warn(`[ollamaClient] Intento ${attempt}/${maxAttempts} timeout.`);
+      } else {
+        console.warn(`[ollamaClient] Intento ${attempt}/${maxAttempts} error de red:`, err.message || err);
+      }
     }
-    return null;
   }
+
+  console.error("[ollamaClient] Fallaron todos los intentos con Ollama Cloud:", lastError);
+  return null;
 }
 
 /**

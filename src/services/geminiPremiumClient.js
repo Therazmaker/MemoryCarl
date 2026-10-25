@@ -203,7 +203,7 @@ export function sanitizeGeminiNeuronPayload(rawNeurons) {
  * @param {{ userInput: string, activatedNeurons: object[], missingAnalysis: object, history?: object[] }} payload
  * @returns {Promise<import('../neuro/schemas.js').Neuron[]>}
  */
-export async function requestGeminiPremiumNeuronGeneration(payload) {
+export async function requestGeminiPremiumNeuronGeneration(payload, onRetryProgress = null) {
   const settings = getGeminiPremiumSettings();
 
   if (!isGeminiPremiumConfigured()) {
@@ -223,49 +223,67 @@ export async function requestGeminiPremiumNeuronGeneration(payload) {
     },
   };
 
-  // Fetch con timeout usando AbortController
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const maxAttempts = 3;
+  let lastError = null;
 
-  let response;
-  try {
-    response = await fetch(url, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(body),
-      signal:  controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timer);
-    if (err.name === "AbortError") {
-      throw new Error(`Gemini timeout después de ${timeout}ms`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      if (typeof onRetryProgress === "function") {
+        try { onRetryProgress({ attempt, maxAttempts, service: "gemini" }); } catch (_e) {}
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
     }
-    throw new Error(`Error de red al llamar Gemini: ${err.message}`);
-  } finally {
-    clearTimeout(timer);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    let response;
+    try {
+      response = await fetch(url, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(body),
+        signal:  controller.signal,
+      });
+      clearTimeout(timer);
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === "AbortError") {
+        lastError = new Error(`Gemini timeout después de ${timeout}ms`);
+      } else {
+        lastError = new Error(`Error de red al llamar Gemini: ${err.message}`);
+      }
+      console.warn(`[geminiPremiumClient] Intento ${attempt}/${maxAttempts} error:`, lastError.message);
+      continue;
+    }
+
+    if (!response.ok) {
+      let errText = "";
+      try { errText = await response.text(); } catch (_e) {}
+      lastError = new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`);
+      console.warn(`[geminiPremiumClient] Intento ${attempt}/${maxAttempts} HTTP ${response.status}`);
+      continue;
+    }
+
+    let json;
+    try {
+      json = await response.json();
+    } catch (e) {
+      lastError = new Error(`Gemini devolvió respuesta no-JSON: ${e.message}`);
+      continue;
+    }
+
+    const rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) {
+      lastError = new Error("Gemini no devolvió contenido en candidates[0].content.parts[0].text");
+      continue;
+    }
+
+    const { neurons: rawNeurons } = parseGeminiJsonResponse(rawText);
+    return sanitizeGeminiNeuronPayload(rawNeurons);
   }
 
-  if (!response.ok) {
-    let errText = "";
-    try { errText = await response.text(); } catch (_e) {}
-    throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 200)}`);
-  }
-
-  let json;
-  try {
-    json = await response.json();
-  } catch (e) {
-    throw new Error(`Gemini devolvió respuesta no-JSON: ${e.message}`);
-  }
-
-  // Extraer el texto de la respuesta
-  const rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText) {
-    throw new Error("Gemini no devolvió contenido en candidates[0].content.parts[0].text");
-  }
-
-  const { neurons: rawNeurons } = parseGeminiJsonResponse(rawText);
-  return sanitizeGeminiNeuronPayload(rawNeurons);
+  throw lastError || new Error("Fallaron todos los intentos con Gemini");
 }
 
 /**
@@ -393,7 +411,7 @@ ${JSON.stringify(payload, null, 2)}
  * }} payload
  * @returns {Promise<string>} respuesta enriquecida
  */
-export async function requestAssistedReply(payload = {}) {
+export async function requestAssistedReply(payload = {}, onRetryProgress = null) {
   const settings = getGeminiPremiumSettings();
   if (!isGeminiPremiumConfigured()) {
     throw new Error("Gemini no configurado");
@@ -449,34 +467,55 @@ Tu tarea: mejora el borrador. Puedes hacerlo más específico, más empático, o
     },
   };
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const maxAttempts = 3;
+  let lastError = null;
 
-  let response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timer);
-    if (err.name === "AbortError") throw new Error("Gemini assisted timeout");
-    throw new Error(`Error de red: ${err.message}`);
-  } finally {
-    clearTimeout(timer);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      if (typeof onRetryProgress === "function") {
+        try { onRetryProgress({ attempt, maxAttempts, service: "gemini_assisted" }); } catch (_e) {}
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    let response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === "AbortError") {
+        lastError = new Error("Gemini assisted timeout");
+      } else {
+        lastError = new Error(`Error de red: ${err.message}`);
+      }
+      continue;
+    }
+
+    if (!response.ok) {
+      const txt = await response.text().catch(() => "");
+      lastError = new Error(`Gemini assisted error ${response.status}: ${txt.slice(0, 100)}`);
+      continue;
+    }
+
+    const json = await response.json();
+    const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      lastError = new Error("Gemini assisted: sin contenido en respuesta");
+      continue;
+    }
+    return text.trim();
   }
 
-  if (!response.ok) {
-    const txt = await response.text().catch(() => "");
-    throw new Error(`Gemini assisted error ${response.status}: ${txt.slice(0, 100)}`);
-  }
-
-  const json = await response.json();
-  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini assisted: sin contenido en respuesta");
-  return text.trim();
+  throw lastError || new Error("Fallaron todos los intentos con Gemini assisted");
 }
 
 /**
