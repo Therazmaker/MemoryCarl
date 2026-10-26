@@ -2193,7 +2193,7 @@ function wireSettingsModal(root) {
     const patch = {
       enabled:         root.querySelector("#ncsPremiumEnabled")?.checked ?? true,
       model:           root.querySelector("#ncsModel")?.value?.trim() || "gemini-2.5-flash",
-      claudeModel:     root.querySelector("#ncsClaudeModel")?.value?.trim() || "claude-3-5-haiku-20241022",
+      claudeModel:     root.querySelector("#ncsClaudeModel")?.value?.trim() || "claude-haiku-4-5",
       dailyLimit:      parseInt(root.querySelector("#ncsDailyLimit")?.value, 10) || 20,
       timeoutMs:       parseInt(root.querySelector("#ncsTimeout")?.value,    10) || 20000,
       temperature:     parseFloat(root.querySelector("#ncsTemp")?.value)    || 0.4,
@@ -2441,7 +2441,7 @@ function wireSettingsModal(root) {
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({
-          model: s.model || "claude-3-5-haiku-20241022",
+          model: s.model || "claude-haiku-4-5",
           max_tokens: 10,
           messages: [{ role: "user", content: "ping" }],
         }),

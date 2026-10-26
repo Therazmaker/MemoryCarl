@@ -2,7 +2,7 @@
  * claudeClient.js — Cliente para Anthropic Claude API en NeuroChat
  * MemoryCarl / NeuroChat
  *
- * Permite usar el modelo Anthropic Claude (e.g. claude-haiku-4-5, claude-3-5-sonnet-20241022)
+ * Permite usar el modelo Anthropic Claude (e.g. claude-haiku-4-5, claude-sonnet-4-5)
  * como motor conversacional de NeuroChat, con soporte para activación y gestión
  * dinámica de neuronas vía ---NEURON_ACTIONS---.
  */
@@ -17,17 +17,32 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export const CLAUDE_MODELS = [
-  { id: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku (Rápido y económico)" },
-  { id: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet (Avanzado)" },
-  { id: "claude-3-7-sonnet-latest", label: "Claude 3.7 Sonnet (Último)" },
+  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (Rápido y económico)" },
+  { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5 (Avanzado)" },
 ];
 
 /**
- * Normaliza nombres de modelos obsoletos o inválidos.
+ * Modelos retirados por Anthropic: la API responde 404 "model: <id>".
+ * Se migran automáticamente a un modelo vigente para que settings guardados antes no rompan el chat.
+ */
+const RETIRED_CLAUDE_MODELS = {
+  "claude-3-5-haiku-20241022": "claude-haiku-4-5",
+  "claude-3-5-haiku-latest": "claude-haiku-4-5",
+  "claude-3-haiku-20240307": "claude-haiku-4-5",
+  "claude-3-5-sonnet-20241022": "claude-sonnet-4-5",
+  "claude-3-5-sonnet-20240620": "claude-sonnet-4-5",
+  "claude-3-5-sonnet-latest": "claude-sonnet-4-5",
+  "claude-3-7-sonnet-latest": "claude-sonnet-4-5",
+  "claude-3-7-sonnet-20250219": "claude-sonnet-4-5",
+};
+
+/**
+ * Normaliza nombres de modelos vacíos o retirados a un modelo vigente.
  */
 export function normalizeClaudeModel(model) {
-  if (!model || model === "claude-haiku-4-5") return "claude-3-5-haiku-20241022";
-  return model;
+  const m = String(model || "").trim();
+  if (!m) return "claude-haiku-4-5";
+  return RETIRED_CLAUDE_MODELS[m] || m;
 }
 
 /**

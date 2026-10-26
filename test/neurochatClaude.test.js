@@ -23,12 +23,12 @@ test("Claude Integration: getClaudeSettings inherits key from Chef AI if NeuroCh
   localStorage.clear();
   localStorage.setItem("memorycarl_chef_settings", JSON.stringify({
     claudeApiKey: "sk-ant-test-chef-key-12345",
-    claudeModel: "claude-3-5-sonnet-20241022",
+    claudeModel: "claude-sonnet-4-5",
   }));
 
   const settings = getClaudeSettings();
   assert.equal(settings.apiKey, "sk-ant-test-chef-key-12345");
-  assert.equal(settings.model, "claude-3-5-sonnet-20241022");
+  assert.equal(settings.model, "claude-sonnet-4-5");
   assert.equal(isClaudeConfigured(), true);
 });
 
