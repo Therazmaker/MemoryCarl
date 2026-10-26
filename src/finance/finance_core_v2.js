@@ -6,6 +6,7 @@
 import { classifyMovementWithAI } from './finance_ai_classifier.js';
 import { updateDebtBalance } from './finance_debt_tracker.js';
 import { resolveSourceLink } from './finance_source_links.js';
+import { getFinanceBlob, setFinanceBlob, isFinanceStorageAvailable } from './finance_storage.js';
 
 if (typeof window === 'undefined') {
   globalThis.window = globalThis;
@@ -44,20 +45,119 @@ window.FINANCE = (function(){
     return "id_" + Math.random().toString(36).slice(2) + Date.now();
   }
 
-  function save(){
+  /* ===============================
+     PERSISTENCIA (IndexedDB + fallback localStorage)
+     - save() sigue siendo síncrono para quien lo llama.
+     - Con IndexedDB disponible: escritura async con debounce; solo tras confirmar la
+       escritura se elimina la copia de localStorage (libera cuota).
+     - Sin IndexedDB (o si falla): comportamiento anterior en localStorage.
+     - Mientras no termine la hidratación inicial NO se escribe en IndexedDB, para que un
+       estado vacío de arranque nunca pise datos guardados.
+  =============================== */
+
+  const LS_KEY = "finance_v2_state";
+  const SAVE_DEBOUNCE_MS = 300;
+  let hydrated = false;
+  let saveTimer = null;
+  let pendingWhileHydrating = false;
+  let idbWriteChain = Promise.resolve();
+
+  function saveToLocalStorage(){
     try {
-      localStorage.setItem("finance_v2_state", JSON.stringify(state));
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
     } catch (err) {
       console.warn("Storage quota exceeded or error saving finance_v2_state:", err);
     }
   }
 
+  function flushToIdb(){
+    saveTimer = null;
+    let json;
+    try {
+      json = JSON.stringify(state);
+    } catch (err) {
+      console.warn("[finance] No se pudo serializar el estado:", err);
+      return idbWriteChain;
+    }
+    idbWriteChain = idbWriteChain.then(async () => {
+      const ok = await setFinanceBlob(json);
+      if (ok) {
+        // Verificar lectura antes de liberar localStorage
+        const back = await getFinanceBlob();
+        if (back === json) {
+          try { if (typeof localStorage !== "undefined") localStorage.removeItem(LS_KEY); } catch (_e) {}
+        }
+      } else {
+        // IndexedDB falló: no perder el guardado, usar el camino anterior
+        saveToLocalStorage();
+      }
+    }).catch((err) => {
+      console.warn("[finance] Error guardando en IndexedDB:", err);
+      saveToLocalStorage();
+    });
+    return idbWriteChain;
+  }
+
+  function save(){
+    if (!isFinanceStorageAvailable()) {
+      saveToLocalStorage();
+      return;
+    }
+    if (!hydrated) {
+      pendingWhileHydrating = true;
+      return;
+    }
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushToIdb, SAVE_DEBOUNCE_MS);
+  }
+
+  // Lectura síncrona legacy (copia vieja en localStorage, si existe)
   function load(){
-  if (typeof localStorage === "undefined") return;
-    const raw = localStorage.getItem("finance_v2_state");
+    if (typeof localStorage === "undefined") return;
+    const raw = localStorage.getItem(LS_KEY);
     if(raw){
       Object.assign(state, JSON.parse(raw));
     }
+  }
+
+  // Hidratación async desde IndexedDB. Regla: si en memoria ya hay movimientos
+  // (copia legacy de localStorage o datos recién creados) manda la memoria; si no, manda IndexedDB.
+  async function hydrate(){
+    if (!isFinanceStorageAvailable()) {
+      hydrated = true;
+      return false;
+    }
+    let adopted = false;
+    try {
+      const raw = await getFinanceBlob();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(state.movements) || state.movements.length === 0) {
+          // 'accounts' es un getter/setter hacia window.state.financeAccounts: no pisarlo con vacío
+          const { accounts, ...rest } = parsed;
+          Object.assign(state, rest);
+          if (Array.isArray(accounts) && accounts.length > 0 &&
+              (!Array.isArray(state.accounts) || state.accounts.length === 0)) {
+            state.accounts = accounts;
+          }
+          adopted = true;
+        }
+      }
+    } catch (err) {
+      console.warn("[finance] Error hidratando desde IndexedDB:", err);
+    }
+    hydrated = true;
+    // Migración: si había copia legacy en memoria o cambios pendientes, persistir ya en IndexedDB
+    if (pendingWhileHydrating || (!adopted && state.movements && state.movements.length > 0)) {
+      pendingWhileHydrating = false;
+      await flushToIdb();
+    }
+    try {
+      if (typeof window.dispatchEvent === "function" && typeof CustomEvent !== "undefined") {
+        window.dispatchEvent(new CustomEvent("finance:hydrated", { detail: { adopted } }));
+      }
+    } catch (_e) {}
+    return adopted;
   }
 
   /* ===============================
@@ -417,9 +517,12 @@ window.FINANCE = (function(){
   /* =============================== */
 
   load();
+  const ready = hydrate();
 
   return {
     state,
+    ready,
+    flush: () => (saveTimer ? (clearTimeout(saveTimer), flushToIdb()) : idbWriteChain),
     createAccount,
     addMovement,
     updateMovement,
