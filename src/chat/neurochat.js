@@ -10,6 +10,9 @@ import { getMessageFeedbackMap, recordNeuronFeedback, recordNeuronRemoval } from
 import { saveMemory, getAllMemories, searchMemories, detectMemoryEmotion, extractMemoryTags, inferMemoryDate, getMemoriesByNeuron } from "../memory/memoryStore.js";
 import { getInsightHistory } from "../neuro/insightHistory.js";
 import { appendToCurrentDay, linkDayToNeurons, getCurrentDay } from "../day/dayStore.js";
+import { isClaudeConfigured } from "../services/claudeClient.js";
+import { isOllamaConfigured } from "../services/ollamaClient.js";
+import { isGeminiPremiumConfigured } from "../services/geminiPremiumClient.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
 const DB_NAME = "memorycarl_chat";
@@ -229,8 +232,12 @@ export async function sendMessage(userInput, options = {}) {
   try { appendToCurrentDay(userMsg); } catch (_e) {}
 
   // ---- Modo API Backend (si está configurado) ----
+  // La URL/key del API sirven también para sincronizar con Supabase. El chat por backend
+  // (/api/chat) solo habla con Ollama y no recibe credenciales, así que solo se usa si el
+  // usuario NO tiene Claude/Ollama/Gemini configurado localmente.
   const apiSettings = getApiSettings();
-  if (apiSettings.enabled) {
+  const hasLocalAi = isClaudeConfigured() || isOllamaConfigured() || isGeminiPremiumConfigured();
+  if (apiSettings.enabled && !hasLocalAi) {
     const maxAttempts = 3;
     let apiReply = null;
     let apiIntent = "respond";

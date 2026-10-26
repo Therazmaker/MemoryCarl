@@ -17679,9 +17679,17 @@ LS.financeReasons = "memorycarl_v2_finance_reasons";
 LS.financeEntryCategories = "memorycarl_v3_finance_entry_categories";
 
 const oldLedger = load(LS.financeLedger, []);
-  if (window.FINANCE && window.FINANCE.state.movements.length === 0 && oldLedger.length > 0) {
-      window.FINANCE.state.movements = oldLedger.slice().reverse();
-      if(window.FINANCE.save) window.FINANCE.save();
+  if (window.FINANCE) {
+      // finance_v2_state vive en IndexedDB (carga async): esperar a que termine antes de decidir
+      // si el ledger está "vacío", para no pisar datos guardados con una copia vieja.
+      Promise.resolve(window.FINANCE.ready).then((adopted) => {
+          if (window.FINANCE.state.movements.length === 0 && oldLedger.length > 0) {
+              window.FINANCE.state.movements = oldLedger.slice().reverse();
+              if(window.FINANCE.save) window.FINANCE.save();
+              adopted = true;
+          }
+          if (adopted && typeof window.renderApp === "function") window.renderApp();
+      }).catch((e) => console.warn("[finance] hidratación falló:", e));
   }
   Object.defineProperty(state, 'financeLedger', {
       get: function() { return window.FINANCE ? window.FINANCE.state.movements.slice().reverse() : []; },
@@ -26689,6 +26697,11 @@ window.financeCheckSupabase = async function() {
 
 window.financePullFromSupabase = async function(isManual = false) {
   try {
+    // Esperar a que finance_v2_state termine de cargar desde IndexedDB: si no, el ledger local
+    // parece vacío y el pull automático lo sobreescribiría con la nube.
+    if (window.FINANCE && window.FINANCE.ready) {
+      try { await window.FINANCE.ready; } catch (_e) {}
+    }
     const key = getSyncApiKey();
     if (!key) {
       if (isManual) toast("⚠️ Sync no configurado (falta API Key)");
