@@ -22,6 +22,7 @@ import { isGeminiPremiumConfigured, streamGeminiNeuronGeneration } from "../serv
 import {
   isOllamaConfigured, getOllamaSettings, saveOllamaSettings, OLLAMA_CLOUD_MODELS, enhanceMemoryWithOllama
 } from "../services/ollamaClient.js";
+import { isClaudeConfigured, getClaudeSettings, CLAUDE_MODELS } from "../services/claudeClient.js";
 import { viewNeuroGraph, wireNeuroGraph } from "./neurograph-ui.js";
 import { renderMemoryLinkedNeurons } from "./memory-timeline-ui.js";
 import { viewContextWindow, wireContextWindow } from "./context-window-ui.js";
@@ -601,6 +602,14 @@ function renderSettingsModal() {
     : "AIza… (tu API key de Gemini)";
   const premiumConfigured = isGeminiPremiumConfigured();
 
+  // Claude settings
+  const claudeS = getClaudeSettings();
+  const claudeMaskedKey = claudeS.apiKey ? maskApiKey(claudeS.apiKey) : "";
+  const claudeKeyPlaceholder = claudeS.apiKey
+    ? `${claudeMaskedKey} (escribe para reemplazar)`
+    : "sk-ant-… (tu API key de Claude)";
+  const claudeActive = isClaudeConfigured();
+
   // Ollama settings
   const ollamaS = getOllamaSettings();
   const ollamaMaskedKey = ollamaS.apiKey ? maskApiKey(ollamaS.apiKey) : "";
@@ -609,6 +618,10 @@ function renderSettingsModal() {
     : "cc049e… (tu API key de Ollama Cloud)";
   const ollamaActive = isOllamaConfigured();
 
+  const claudeStatusBadge = claudeActive
+    ? `<span class="ncSettingsBadge ncSettingsBadgeOn">✓ Anthropic Claude activo</span>`
+    : `<span class="ncSettingsBadge ncSettingsBadgeOff">Claude no configurado</span>`;
+
   const ollamaStatusBadge = ollamaActive
     ? `<span class="ncSettingsBadge ncSettingsBadgeOn">✓ Ollama Cloud activo</span>`
     : `<span class="ncSettingsBadge ncSettingsBadgeOff">Ollama no configurado</span>`;
@@ -616,6 +629,10 @@ function renderSettingsModal() {
   const statusBadge = premiumConfigured
     ? `<span class="ncSettingsBadge ncSettingsBadgeOn">✓ Gemini Premium activo</span>`
     : `<span class="ncSettingsBadge ncSettingsBadgeOff">Gemini sin API key</span>`;
+
+  const claudeModelOptions = CLAUDE_MODELS.map((m) =>
+    `<option value="${esc(m.id)}" ${claudeS.model === m.id ? "selected" : ""}>${esc(m.label)}</option>`
+  ).join("");
 
   const ollamaModelOptions = OLLAMA_CLOUD_MODELS.map((m) =>
     `<option value="${esc(m.id)}" ${ollamaS.model === m.id ? "selected" : ""}>${esc(m.label)}</option>`
@@ -630,16 +647,55 @@ function renderSettingsModal() {
         </div>
 
         <div class="ncSettingsStatus">
+          ${claudeStatusBadge}
           ${ollamaStatusBadge}
           ${statusBadge}
-          <span class="ncSettingsStatusSub">${ollamaActive ? "Ollama Cloud es el motor principal del chat" : (premiumConfigured ? "Gemini Premium activo" : "Solo modo local")}</span>
+          <span class="ncSettingsStatusSub">${claudeActive ? "Claude AI es el motor principal del chat" : (ollamaActive ? "Ollama Cloud es el motor principal" : (premiumConfigured ? "Gemini Premium activo" : "Solo modo local"))}</span>
         </div>
 
         ${uiState.settingsMsg ? `<div class="ncSettingsMsg ncSettingsMsgType--${uiState.settingsMsg.type}">${esc(uiState.settingsMsg.text)}</div>` : ""}
 
         <form id="ncSettingsForm" autocomplete="off">
 
-          <!-- ════════ OLLAMA CLOUD (MOTOR PRINCIPAL) ════════ -->
+          <!-- ════════ ANTHROPIC CLAUDE ════════ -->
+          <div class="ncSettingsSection">
+            <div class="ncSettingsSectionTitle">💜 Anthropic Claude <span class="ncSettingsSectionBadge">Motor principal</span></div>
+            <div class="ncSettingsSectionDesc">Claude ofrece conversación fluida, empatía y gestión automática de neuronas. Puedes ingresar tu propia API Key o heredarla de Chef AI.</div>
+
+            <!-- API Key Claude -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsClaudeApiKey">Claude API key</label>
+              <div class="ncSettingsKeyRow">
+                <input
+                  type="${uiState.settingsApiKeyVisible ? "text" : "password"}"
+                  id="ncsClaudeApiKey"
+                  class="ncSettingsInput"
+                  placeholder="${esc(claudeKeyPlaceholder)}"
+                  autocomplete="new-password"
+                  value=""
+                />
+                <button type="button" class="ncIconBtn" id="btnToggleClaudeKeyVisibility">
+                  ${uiState.settingsApiKeyVisible ? "🙈" : "👁"}
+                </button>
+              </div>
+              <div class="ncSettingsHint">Guardada solo en tu navegador (localStorage). Si la dejas vacía, heredará la clave de Chef AI.</div>
+            </div>
+
+            <!-- Modelo Claude -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsClaudeModel">Modelo Claude</label>
+              <select id="ncsClaudeModel" class="ncSettingsInput">
+                ${claudeModelOptions}
+              </select>
+            </div>
+
+            <!-- Botones Claude -->
+            <div class="ncSettingsBtns ncSettingsBtnsSmall">
+              <button type="button" class="ncSettingsTestBtn" id="btnClaudeTest">Probar conexión Claude</button>
+            </div>
+          </div>
+
+          <!-- ════════ OLLAMA CLOUD (FALLBACK) ════════ -->
           <div class="ncSettingsSection">
             <div class="ncSettingsSectionTitle">🤖 Ollama Cloud <span class="ncSettingsSectionBadge">Motor principal</span></div>
             <div class="ncSettingsSectionDesc">Ollama gestiona el chat y las neuronas automáticamente. Los otros motores actúan como fallback.</div>
@@ -820,13 +876,16 @@ function nchatInner() {
     </div>`;
 
   const totalNeurons = getNeurons().length;
-  const premiumConfigured = isGeminiPremiumConfigured();
+  const claudeActive = isClaudeConfigured();
   const ollamaActive = isOllamaConfigured();
-  const aiDot = ollamaActive
-    ? `<span class="ncPremiumDot ncPremiumDotOn" title="Ollama Cloud activo (motor principal)">🤖</span>`
-    : premiumConfigured
-      ? `<span class="ncPremiumDot ncPremiumDotOn" title="Gemini premium activo">⚡</span>`
-      : `<span class="ncPremiumDot" title="Sin IA configurada">○</span>`;
+  const premiumConfigured = isGeminiPremiumConfigured();
+  const aiDot = claudeActive
+    ? `<span class="ncPremiumDot ncPremiumDotOn" title="Claude AI activo (motor principal)">💜</span>`
+    : ollamaActive
+      ? `<span class="ncPremiumDot ncPremiumDotOn" title="Ollama Cloud activo (motor principal)">🤖</span>`
+      : premiumConfigured
+        ? `<span class="ncPremiumDot ncPremiumDotOn" title="Gemini premium activo">⚡</span>`
+        : `<span class="ncPremiumDot" title="Sin IA configurada">○</span>`;
 
   const tabChat  = uiState.activeTab === "chat";
   const tabNow   = uiState.activeTab === "now";
@@ -2096,6 +2155,12 @@ function wireSettingsModal(root) {
     }
   });
 
+  // Toggle Claude API key visibility
+  root.querySelector("#btnToggleClaudeKeyVisibility")?.addEventListener("click", () => {
+    uiState.settingsApiKeyVisible = !uiState.settingsApiKeyVisible;
+    rerender();
+  });
+
   // Toggle Ollama API key visibility
   root.querySelector("#btnToggleOllamaKeyVisibility")?.addEventListener("click", () => {
     uiState.settingsApiKeyVisible = !uiState.settingsApiKeyVisible;
@@ -2124,15 +2189,19 @@ function wireSettingsModal(root) {
 
     // --- Guardar settings Gemini ---
     const apiKeyInput = root.querySelector("#ncsApiKey");
+    const claudeKeyInput = root.querySelector("#ncsClaudeApiKey");
     const patch = {
       enabled:         root.querySelector("#ncsPremiumEnabled")?.checked ?? true,
       model:           root.querySelector("#ncsModel")?.value?.trim() || "gemini-2.5-flash",
+      claudeModel:     root.querySelector("#ncsClaudeModel")?.value?.trim() || "claude-3-5-haiku-20241022",
       dailyLimit:      parseInt(root.querySelector("#ncsDailyLimit")?.value, 10) || 20,
       timeoutMs:       parseInt(root.querySelector("#ncsTimeout")?.value,    10) || 20000,
       temperature:     parseFloat(root.querySelector("#ncsTemp")?.value)    || 0.4,
       maxOutputTokens: parseInt(root.querySelector("#ncsMaxTokens")?.value, 10) || 4096,
       premiumOnlyForGeneration: true,
     };
+    const newClaudeKey = claudeKeyInput?.value?.trim();
+    if (newClaudeKey) patch.claudeApiKey = newClaudeKey;
     const newKey = apiKeyInput?.value?.trim();
     if (newKey) patch.apiKey = newKey;
 
@@ -2346,6 +2415,46 @@ function wireSettingsModal(root) {
       } else {
         uiState.settingsMsg = { type: "error", text: `Error de red: ${err.message}` };
       }
+    }
+    rerender();
+  });
+
+  // Test Claude
+  root.querySelector("#btnClaudeTest")?.addEventListener("click", async () => {
+    const { isClaudeConfigured: configured, getClaudeSettings: getSettings } =
+      await import("../services/claudeClient.js");
+    if (!configured()) {
+      uiState.settingsMsg = { type: "error", text: "Sin API key de Claude configurada. Guarda primero la key." };
+      rerender();
+      return;
+    }
+    const s = getSettings();
+    uiState.settingsMsg = { type: "info", text: "Probando conexión con Anthropic Claude…" };
+    rerender();
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": s.apiKey.trim(),
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: s.model || "claude-3-5-haiku-20241022",
+          max_tokens: 10,
+          messages: [{ role: "user", content: "ping" }],
+        }),
+      });
+      if (res.ok) {
+        uiState.settingsMsg = { type: "success", text: `✓ Conexión OK con Anthropic Claude (${s.model})` };
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        const msg = errJson.error?.message || `HTTP ${res.status}`;
+        uiState.settingsMsg = { type: "error", text: `Error ${res.status}: ${msg}` };
+      }
+    } catch (err) {
+      uiState.settingsMsg = { type: "error", text: `Error de red: ${err.message}` };
     }
     rerender();
   });

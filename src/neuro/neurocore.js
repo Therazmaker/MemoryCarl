@@ -709,6 +709,7 @@ export async function processNeuroInput(userInput, options = {}) {
       }
     } catch (claudeErr) {
       console.warn("[neurocore] Claude reply falló, intentando fallback:", claudeErr);
+      options.lastAiError = claudeErr.message || String(claudeErr);
       addStep(trace, "claude_reply_failed", { error: String(claudeErr) });
     }
   }
@@ -859,6 +860,7 @@ export async function processNeuroInput(userInput, options = {}) {
       }
     } catch (ollamaErr) {
       console.warn("[neurocore] Ollama reply falló, intentando fallback:", ollamaErr);
+      options.lastAiError = ollamaErr.message || String(ollamaErr);
       addStep(trace, "ollama_reply_failed", { error: String(ollamaErr) });
     }
   }
@@ -919,6 +921,7 @@ export async function processNeuroInput(userInput, options = {}) {
       }
     } catch (err) {
       console.warn("[neurocore] assisted reply falló:", err);
+      options.lastAiError = err.message || String(err);
     }
   }
 
@@ -944,15 +947,17 @@ export async function processNeuroInput(userInput, options = {}) {
       }
     } catch (err) {
       console.warn("[neurocore] delegated reply falló:", err);
+      options.lastAiError = err.message || String(err);
     }
   }
 
   const isAiConfigured = isClaudeConfigured() || isOllamaConfigured() || isGeminiPremiumConfigured() || isNeuroclawConfigured();
 
   if (!reply && isAiConfigured) {
-    reply = "⚠️ Error al conectar con el motor de IA tras varios intentos. No se pudo obtener respuesta del servidor.";
+    const errorDetails = options.lastAiError ? ` (${options.lastAiError})` : "";
+    reply = `⚠️ Error al conectar con el motor de IA tras varios intentos${errorDetails}. No se pudo obtener respuesta del servidor.`;
     replySource = "api_error";
-    addStep(trace, "api_error_no_script_fallback");
+    addStep(trace, "api_error_no_script_fallback", { lastAiError: options.lastAiError || null });
   } else if (!reply && localDraft) {
     reply = localDraft;
     replySource = "local_engine";

@@ -33,11 +33,12 @@ test("requestClaudeChatReply retries 3 times when fetch fails", async () => {
 
   const progressEvents = [];
   try {
-    const res = await requestClaudeChatReply(
+    await requestClaudeChatReply(
       { userInput: "hola" },
       (p) => progressEvents.push(p)
     );
-    assert.equal(res, null);
+    assert.fail("Debería haber lanzado un error");
+  } catch (err) {
     assert.equal(calls, 3);
     assert.equal(progressEvents.length, 2); // attempts 2 and 3
     assert.equal(progressEvents[0].attempt, 2);
