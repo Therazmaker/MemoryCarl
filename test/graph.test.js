@@ -13,6 +13,7 @@ import {
   getGraphEmotions,
   getDomainColors,
   getEmotionColors,
+  getDomainColor,
   computeNodeSize,
 } from "../src/neuro/graph.js";
 
@@ -335,4 +336,12 @@ test("buildNeuronGraph incluye metadata manual y filtros manuales", () => {
   assert.equal(mNode.pin, true);
   const filtered = filterGraphNodes(g, { sourceKind: "manual", pinned: true, manualCategory: "people" });
   assert.equal(filtered.nodes.length, 1);
+});
+
+test("getDomainColor: dominio desconocido recibe un color hex estable, no gris", () => {
+  const c1 = getDomainColor("astrologia");
+  assert.match(c1, /^#[0-9a-f]{6}$/);
+  assert.equal(getDomainColor("astrologia"), c1);
+  assert.notEqual(c1, "#94a3b8");
+  assert.equal(getDomainColor("work"), getDomainColors().work);
 });

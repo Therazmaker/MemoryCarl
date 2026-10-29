@@ -9,6 +9,8 @@ import { getAllRelations, RELATION_TYPE_LABELS } from "./relationStore.js";
  *   filterGraphNodes(graph, filters)
  *   getDomainColors()
  *   getEmotionColors()
+ *   getDomainColor(domain)
+ *   getEmotionColor(emotion)
  *   computeNodeSize(neuron, options?)
  */
 
@@ -53,6 +55,49 @@ const MANUAL_CATEGORY_COLORS = {
   identity: "#e879f9",
   other: "#94a3b8",
 };
+const FALLBACK_COLOR = "#94a3b8";
+
+function hslToHex(h, s, l) {
+  const a = s * Math.min(l, 1 - l);
+  const f = (k) => {
+    const n = (k + h / 30) % 12;
+    const c = l - a * Math.max(-1, Math.min(n - 3, 9 - n, 1));
+    return Math.round(c * 255).toString(16).padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+/**
+ * Color estable derivado del texto, para claves que no están en la paleta.
+ * @param {string} key
+ * @returns {string} color hex
+ */
+export function colorFromKey(key) {
+  const str = String(key || "").trim().toLowerCase();
+  if (!str) return FALLBACK_COLOR;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) | 0;
+  return hslToHex(Math.abs(hash) % 360, 0.7, 0.66);
+}
+
+/**
+ * Color de un dominio; los dominios desconocidos reciben un color estable propio.
+ * @param {string} domain
+ * @returns {string}
+ */
+export function getDomainColor(domain) {
+  return DOMAIN_COLORS[domain] || colorFromKey(domain);
+}
+
+/**
+ * Color de una emoción.
+ * @param {string} emotion
+ * @returns {string}
+ */
+export function getEmotionColor(emotion) {
+  return EMOTION_COLORS[emotion] || FALLBACK_COLOR;
+}
+
 /**
  * Devuelve el mapa de colores por dominio.
  * @returns {Record<string, string>}
@@ -112,14 +157,14 @@ export function buildNeuronGraph(neurons, options = {}) {
   const highlightIds = new Set(options.highlightIds || []);
   const newIds       = new Set(options.newIds       || []);
   const mergedIds    = new Set(options.mergedIds    || []);
-  const colorMap     = colorBy === "emotion" ? EMOTION_COLORS : DOMAIN_COLORS;
 
   // ---- Construir nodos ----
   const nodes = neurons.map((n) => {
     const key      = colorBy === "emotion" ? (n.emotion || "neutral") : (n.core?.domain || "general");
     const manualCategory = n.meta?.manualCategory || null;
     const isManual = n.source?.kind === "manual";
-    const color    = isManual ? (n.meta?.colorTag || MANUAL_CATEGORY_COLORS[manualCategory] || "#94a3b8") : (colorMap[key] || "#94a3b8");
+    const color    = isManual ? (n.meta?.colorTag || MANUAL_CATEGORY_COLORS[manualCategory] || FALLBACK_COLOR)
+      : (colorBy === "emotion" ? getEmotionColor(key) : getDomainColor(key));
     const size     = computeNodeSize(n, { minSize: options.minSize, maxSize: options.maxSize });
     const isHighlight = highlightIds.has(n.id);
     const isNew       = newIds.has(n.id);

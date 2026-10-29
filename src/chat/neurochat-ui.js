@@ -276,7 +276,7 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false, options = {}) 
     ? `<div class="ncNeuronFeedbackRow">
         <button class="ncFeedbackBtn ${currentFeedback === "like" ? "ncFeedbackBtn--active" : ""}" aria-label="Marcar neurona ${esc(n.core.concept || "sin nombre")} como relevante" data-feedback-neuron="${esc(n.id)}" data-feedback-type="like" ${currentFeedback ? "disabled" : ""} title="Relevante">👍</button>
         <button class="ncFeedbackBtn ${currentFeedback === "dislike" ? "ncFeedbackBtn--active ncFeedbackBtn--negative" : "ncFeedbackBtn--negative"}" aria-label="Marcar neurona ${esc(n.core.concept || "sin nombre")} como no relevante" data-feedback-neuron="${esc(n.id)}" data-feedback-type="dislike" ${currentFeedback ? "disabled" : ""} title="No relevante">👎</button>
-        <button class="ncFeedbackBtn ncFeedbackBtn--remove ${isRemoved ? "ncFeedbackBtn--active" : ""}" aria-label="Eliminar neurona ${esc(n.core.concept || "sin nombre")}" data-remove-neuron="${esc(n.id)}" ${isRemoved ? "disabled" : ""} title="Remove neuron">❌</button>
+        <button class="ncFeedbackBtn ncFeedbackBtn--remove ${isRemoved ? "ncFeedbackBtn--active" : ""}" aria-label="Eliminar neurona ${esc(n.core.concept || "sin nombre")}" data-remove-neuron="${esc(n.id)}" ${isRemoved ? "disabled" : ""} title="Eliminar neurona">❌</button>
         ${currentFeedback && currentFeedback !== "remove" ? `<span class="ncFeedbackState">${currentFeedback === "like" ? "Relevante" : "No relevante"}</span>` : ""}
         ${isRemoved ? `<span class="ncFeedbackState ncFeedbackState--removed">Eliminada</span>` : ""}
       </div>
