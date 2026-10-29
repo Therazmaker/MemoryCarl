@@ -19,6 +19,6 @@ test("graph nodes exponen evolution para UI", () => {
 
 test("neurograph UI expone controles de borrado seguro", () => {
   const html = viewNeuroGraph();
-  assert.match(html, /show deleted/i);
+  assert.match(html, /mostrar eliminadas/i);
   assert.match(html, /Haz clic en una neurona para ver su detalle/i);
 });

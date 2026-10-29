@@ -17,40 +17,41 @@ import {
   filterGraphNodes,
   getGraphDomains,
   getGraphEmotions,
-  getDomainColors,
-  getEmotionColors,
+  getDomainColor,
+  getEmotionColor,
 } from "../neuro/graph.js";
 import { linkNeurons, unlinkNeurons } from "../neuro/connections.js";
 import { getNeuronCalibrationSummary } from "../neuro/feedback.js";
 import { repairGraphWithClaude } from "../neuro/graphRepairEngine.js";
 
-// ---- Paleta de colores ----
-const DOMAIN_PALETTE = {
-  general:       "#7c5cff",
-  personal:      "#a78bfa",
-  work:          "#60a5fa",
-  health:        "#34d399",
-  finance:       "#fbbf24",
-  relationships: "#f472b6",
-  habits:        "#fb923c",
-  beliefs:       "#e879f9",
-  emotions:      "#f87171",
-  learning:      "#38bdf8",
-  creativity:    "#4ade80",
+// ---- Etiquetas y colores de relaciones (la paleta de dominios/emociones vive en graph.js) ----
+const DOMAIN_LABELS = {
+  general:       "General",
+  personal:      "Personal",
+  work:          "Trabajo",
+  health:        "Salud",
+  finance:       "Finanzas",
+  relationships: "Relaciones",
+  habits:        "Hábitos",
+  beliefs:       "Creencias",
+  emotions:      "Emociones",
+  learning:      "Aprendizaje",
+  creativity:    "Creatividad",
 };
 
-const EMOTION_PALETTE = {
-  joy:       "#34d399",
-  sadness:   "#60a5fa",
-  anger:     "#f87171",
-  fear:      "#a78bfa",
-  surprise:  "#fbbf24",
-  disgust:   "#9ca3af",
-  curiosity: "#38bdf8",
-  pride:     "#fb923c",
-  shame:     "#6b7280",
-  love:      "#f472b6",
-  neutral:   "#94a3b8",
+const EMOTION_LABELS = {
+  joy:       "alegría",
+  sadness:   "tristeza",
+  anger:     "enojo",
+  fear:      "miedo",
+  surprise:  "sorpresa",
+  disgust:   "desagrado",
+  curiosity: "curiosidad",
+  pride:     "orgullo",
+  shame:     "vergüenza",
+  love:      "amor",
+  neutral:   "neutral",
+  mixed:     "mixta",
 };
 
 const RELATION_COLORS = {
@@ -62,6 +63,19 @@ const RELATION_COLORS = {
   precede_a:    "#fbbf24",
   resuelve:     "#a78bfa",
 };
+
+const RELATION_LABELS = {
+  causa:        "causa",
+  consecuencia: "consecuencia",
+  refuerza:     "refuerza",
+  contradice:   "contradice",
+  parte_de:     "parte de",
+  precede_a:    "precede a",
+  resuelve:     "resuelve",
+};
+
+// Por debajo de este alpha la simulación se considera estable
+const ALPHA_MIN = 0.002;
 
 // ---- Estado interno ----
 const graphState = {
@@ -83,8 +97,11 @@ const graphState = {
   hoveredNode:  null,
   canvas:       null,
   ctx:          null,
-  width:        700,
+  width:        700,   // tamaño lógico en px CSS
   height:       500,
+  dpr:          1,     // devicePixelRatio aplicado al canvas
+  resizeObserver: null,
+  menuCloseHandler: null,
   alpha:        1.0,   // simulation cooling
   sessionState: {},
 };
@@ -132,8 +149,28 @@ function getNodeFontSize(n) {
 }
 
 function nodeColor(n) {
-  if (graphState.colorBy === "emotion") return EMOTION_PALETTE[n.emotion] || "#94a3b8";
-  return DOMAIN_PALETTE[n.domain] || "#94a3b8";
+  if (typeof n.color === "string" && n.color.startsWith("#")) return n.color;
+  if (graphState.colorBy === "emotion") return getEmotionColor(n.emotion);
+  return getDomainColor(n.domain);
+}
+
+function domainLabel(domain) {
+  return DOMAIN_LABELS[domain] || domain;
+}
+
+function emotionLabel(emotion) {
+  return EMOTION_LABELS[emotion] || emotion;
+}
+
+// Texto de la etiqueta tal como se dibuja bajo el nodo
+function nodeLabel(n) {
+  const maxLabelChars = Math.max(8, Math.floor(getNodeSize(n) / 2.5));
+  return n.label.length > maxLabelChars ? n.label.slice(0, maxLabelChars) + "…" : n.label;
+}
+
+// Media anchura aproximada de la etiqueta (sin medir en canvas)
+function labelHalfWidth(n) {
+  return nodeLabel(n).length * getNodeFontSize(n) * 0.29;
 }
 
 // ---- Posicionamiento inicial ----
@@ -159,7 +196,7 @@ function tickSimulation() {
   const edges = graphState.filtered.edges;
   const pos   = graphState.positions;
   const alpha = graphState.alpha;
-  if (alpha < 0.0005) return;
+  if (alpha < ALPHA_MIN) return;
 
   // Parámetros inspirados en Vis.js / ForceAtlas2Based de Regulación:
   // gravitationalConstant: -30, centralGravity: 0.01, springLength: 80, springConstant: 0.08, damping: 0.4
@@ -248,10 +285,14 @@ function tickSimulation() {
     p.x += p.vx;
     p.y += p.vy;
 
-    // Contener suavemente dentro del canvas
-    const r = getNodeSize(n);
-    p.x = Math.max(r, Math.min(graphState.width  - r, p.x));
-    p.y = Math.max(r, Math.min(graphState.height - r, p.y));
+    // Contener dentro del canvas, contando el anillo y la etiqueta bajo el nodo
+    const r      = getNodeSize(n);
+    const font   = getNodeFontSize(n);
+    const padX   = Math.min(Math.max(r + 4, labelHalfWidth(n)), graphState.width / 4);
+    const padTop = r + 4;
+    const padBot = r + font + 10;
+    p.x = Math.max(padX,   Math.min(graphState.width  - padX,   p.x));
+    p.y = Math.max(padTop, Math.min(graphState.height - padBot, p.y));
   }
 
   graphState.alpha *= 0.991;
@@ -259,9 +300,10 @@ function tickSimulation() {
 
 // ---- Renderizado Canvas ----
 function drawGraph() {
-  const { ctx, width, height, filtered, positions, selectedNode, hoveredNode, zoom, pan } = graphState;
+  const { ctx, width, height, dpr, filtered, positions, selectedNode, hoveredNode, zoom, pan } = graphState;
   if (!ctx) return;
 
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
   ctx.save();
   ctx.translate(pan.x, pan.y);
@@ -383,8 +425,7 @@ function drawGraph() {
     // Etiqueta con visibilidad fluida según zoom y selección
     const showLabel = zoom >= 0.85 || isSelected || isHovered || (n.timesActivated || 0) >= 3 || (n.degree || 0) >= 4;
     if (showLabel) {
-      const maxLabelChars = Math.max(8, Math.floor(r / 2.5));
-      const label = n.label.length > maxLabelChars ? n.label.slice(0, maxLabelChars) + "…" : n.label;
+      const label = nodeLabel(n);
       ctx.font      = `${isSelected ? "700" : "500"} ${isSelected ? fontSize + 1 : fontSize}px system-ui, -apple-system, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -403,14 +444,30 @@ function drawGraph() {
 }
 
 // ---- Loop principal ----
-function startLoop(root) {
-  stopLoop();
-  function loop() {
-    tickSimulation();
-    drawGraph();
-    graphState.animFrame = requestAnimationFrame(loop);
-  }
+// Solo se anima mientras la simulación se mueve, hay un drag o hay nodos pulsando.
+function needsAnimation() {
+  if (graphState.alpha >= ALPHA_MIN || graphState.dragging) return true;
+  return graphState.filtered.nodes.some(n => n.status === "active" || n.status === "new");
+}
+
+function loop() {
+  graphState.animFrame = null;
+  if (!graphState.canvas?.isConnected) return; // la vista se desmontó
+  tickSimulation();
+  drawGraph();
+  if (needsAnimation()) graphState.animFrame = requestAnimationFrame(loop);
+}
+
+// Pide un frame; si el loop estaba dormido, lo despierta.
+function requestFrame(minAlpha = 0) {
+  if (minAlpha) graphState.alpha = Math.max(graphState.alpha, minAlpha);
+  if (graphState.animFrame || !graphState.canvas) return;
   graphState.animFrame = requestAnimationFrame(loop);
+}
+
+function startLoop() {
+  stopLoop();
+  requestFrame();
 }
 
 function stopLoop() {
@@ -455,9 +512,10 @@ function wireCanvas(root, sessionState = {}) {
   let lastPanY    = 0;
 
   function getXY(e) {
+    // Coordenadas en px CSS: el escalado por devicePixelRatio se aplica al dibujar
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width  / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const scaleX = rect.width  ? graphState.width  / rect.width  : 1;
+    const scaleY = rect.height ? graphState.height / rect.height : 1;
     const touchPoint = e.touches?.[0] || e.changedTouches?.[0] || null;
     if (touchPoint) {
       return {
@@ -467,8 +525,8 @@ function wireCanvas(root, sessionState = {}) {
     }
     if (typeof e.clientX !== "number" || typeof e.clientY !== "number") {
       return {
-        cx: canvas.width / 2,
-        cy: canvas.height / 2,
+        cx: graphState.width / 2,
+        cy: graphState.height / 2,
       };
     }
     return {
@@ -488,7 +546,7 @@ function wireCanvas(root, sessionState = {}) {
       const p               = graphState.positions[hit.id];
       dragOffsetX           = x - p.x;
       dragOffsetY           = y - p.y;
-      graphState.alpha      = Math.max(graphState.alpha, 0.3); // reiniciar simulación
+      requestFrame(0.3); // reiniciar simulación
       e.preventDefault?.();
     } else {
       graphState.panning  = true;
@@ -512,14 +570,19 @@ function wireCanvas(root, sessionState = {}) {
         p.vx = 0;
         p.vy = 0;
       }
+      requestFrame();
       e.preventDefault?.();
     } else if (graphState.panning) {
       graphState.pan.x = lastPanX + (cx - panStartX);
       graphState.pan.y = lastPanY + (cy - panStartY);
+      requestFrame();
     } else {
       // hover
-      const hit = hitTest(x, y);
-      graphState.hoveredNode = hit || null;
+      const hit = hitTest(x, y) || null;
+      if (hit?.id !== graphState.hoveredNode?.id) {
+        graphState.hoveredNode = hit;
+        requestFrame();
+      }
       canvas.style.cursor = hit ? "pointer" : "grab";
     }
   }
@@ -572,6 +635,7 @@ function wireCanvas(root, sessionState = {}) {
     graphState.dragging    = null;
     graphState.panning     = false;
     graphState.hoveredNode = null;
+    requestFrame();
   });
 
   // Touch
@@ -589,6 +653,7 @@ function wireCanvas(root, sessionState = {}) {
     graphState.pan.x  = cx - (cx - graphState.pan.x) * (newZoom / graphState.zoom);
     graphState.pan.y  = cy - (cy - graphState.pan.y) * (newZoom / graphState.zoom);
     graphState.zoom   = newZoom;
+    requestFrame();
   }, { passive: false });
 }
 
@@ -642,7 +707,7 @@ function renderNodeDetail() {
       <div class="ngDetailTopRow">
         <div class="ngDetailHeader" style="border-left: 3px solid ${color}; padding-left: 10px; flex:1;">
           <div class="ngDetailConcept">${esc(n.label)}</div>
-          <div class="ngDetailType">${esc(n.type)} · ${esc(n.domain)}</div>
+          <div class="ngDetailType">${esc(n.type)} · ${esc(domainLabel(n.domain))}</div>
           ${statusBadge}
         </div>
         <button class="ngBtnCloseSheet" id="ngBtnCloseDetail" title="Cerrar detalles">✕</button>
@@ -652,20 +717,20 @@ function renderNodeDetail() {
       ${temporalLine ? `<div class="ngMeta">🕒 ${esc(temporalLine)}</div>` : ""}
 
       <div class="ngCalibBadge ngCalib--${calibCls}">
-        👍 ${calib.likes} · 👎 ${calib.dislikes} · net ${calib.netScore >= 0 ? "+" : ""}${calib.netScore}
+        👍 ${calib.likes} · 👎 ${calib.dislikes} · neto ${calib.netScore >= 0 ? "+" : ""}${calib.netScore}
         <span style="opacity:.6;margin-left:4px">${esc(calib.label)}</span>
       </div>
 
       <div class="ngDetailGrid">
-        <div class="ngDetailItem"><div class="ngDetailItemLabel">Emoción</div><div>${esc(n.emotion)}</div></div>
+        <div class="ngDetailItem"><div class="ngDetailItemLabel">Emoción</div><div>${esc(emotionLabel(n.emotion))}</div></div>
         <div class="ngDetailItem"><div class="ngDetailItemLabel">Peso</div><div>${typeof n.weight === "number" ? n.weight.toFixed(2) : "—"}</div></div>
         <div class="ngDetailItem"><div class="ngDetailItemLabel">Activaciones</div><div>${n.timesActivated}</div></div>
         <div class="ngDetailItem"><div class="ngDetailItemLabel">Conexiones</div><div>${n.numberOfConnections}</div></div>
         <div class="ngDetailItem"><div class="ngDetailItemLabel">Última activación</div><div>${fmtDate(n.lastActivated)}</div></div>
-        <div class="ngDetailItem"><div class="ngDetailItemLabel">False+</div><div>${n.activationLearning?.falsePositiveCount ?? 0}</div></div>
+        <div class="ngDetailItem"><div class="ngDetailItemLabel">Falsos positivos</div><div>${n.activationLearning?.falsePositiveCount ?? 0}</div></div>
       </div>
 
-      ${n.aliases?.length ? `<div class="ngMeta">aliases: ${n.aliases.join(", ")}</div>` : ""}
+      ${n.aliases?.length ? `<div class="ngMeta">Alias: ${esc(n.aliases.join(", "))}</div>` : ""}
       ${n.notes ? `<div class="ngMeta">📝 ${esc(n.notes)}</div>` : ""}
 
       <div class="ngDetailSection">
@@ -674,7 +739,7 @@ function renderNodeDetail() {
       </div>
 
       <div class="ngDetailSection">
-        <div class="ngDetailSectionTitle">Evolution</div>
+        <div class="ngDetailSectionTitle">Evolución</div>
         <div class="ngMeta">uso: ${evo.usageCount || 0} · ok: ${evo.successfulActivations || 0} · fail: ${evo.failedActivations || 0}</div>
       </div>
 
@@ -689,8 +754,8 @@ function renderNodeDetail() {
 
       <div style="margin-top:12px">
         <button class="ngBtn ngBtn--primary" id="ngBtnOpenEditor" style="width:100%">✏️ Editar neurona</button>
-        <button class="ngBtn" id="ngBtnDeleteNeuron" style="width:100%;margin-top:8px">🗑️ Delete neuron</button>
-        ${n.deleted ? '<button class="ngBtn" id="ngBtnRestoreNeuron" style="width:100%;margin-top:8px">♻️ Restore neuron</button>' : ""}
+        <button class="ngBtn" id="ngBtnDeleteNeuron" style="width:100%;margin-top:8px">🗑️ Eliminar neurona</button>
+        ${n.deleted ? '<button class="ngBtn" id="ngBtnRestoreNeuron" style="width:100%;margin-top:8px">♻️ Restaurar neurona</button>' : ""}
       </div>
     </div>`;
 }
@@ -712,33 +777,33 @@ function renderNodeEditor(n) {
         <input type="hidden" name="id" value="${esc(n.id)}" />
         <label class="ngEditorLabel">Concepto</label>
         <input name="concept" class="ngInput" value="${esc(fullN.core?.concept || "")}" required />
-        <label class="ngEditorLabel">Summary</label>
+        <label class="ngEditorLabel">Resumen</label>
         <textarea name="summary" class="ngInput" rows="2">${esc(fullN.core?.summary || "")}</textarea>
-        <label class="ngEditorLabel">Domain</label>
+        <label class="ngEditorLabel">Dominio</label>
         <input name="domain" class="ngInput" value="${esc(fullN.core?.domain || "")}" />
-        <label class="ngEditorLabel">Emotion</label>
+        <label class="ngEditorLabel">Emoción</label>
         <input name="emotion" class="ngInput" value="${esc(fullN.emotion || "neutral")}" />
         <label class="ngEditorLabel">Triggers (coma)</label>
         <input name="triggers" class="ngInput" value="${esc((fullN.triggers || []).join(", "))}" />
         <label class="ngEditorLabel">Fecha</label>
         <input type="date" name="date" class="ngInput" value="${esc(fullN.temporal?.date || "")}" />
-        <label class="ngEditorLabel">Stage</label>
+        <label class="ngEditorLabel">Etapa</label>
         <input name="stage" class="ngInput" value="${esc(fullN.temporal?.stage || "")}" />
         <label class="ngEditorLabel" style="flex-direction:row;gap:6px;align-items:center;display:flex">
           <input type="checkbox" name="isHistorical" ${fullN.temporal?.isHistorical ? "checked" : ""} /> Histórico
         </label>
-        <label class="ngEditorLabel">Aliases (coma)</label>
+        <label class="ngEditorLabel">Alias (coma)</label>
         <input name="aliases" class="ngInput" value="${esc((fullN.meta?.aliases || []).join(", "))}" />
-        <label class="ngEditorLabel">Priority</label>
+        <label class="ngEditorLabel">Prioridad</label>
         <select name="priority" class="ngInput">
-          <option value="low"    ${fullN.meta?.priority === "low"    ? "selected" : ""}>low</option>
-          <option value="medium" ${(!fullN.meta?.priority || fullN.meta?.priority === "medium") ? "selected" : ""}>medium</option>
-          <option value="high"   ${fullN.meta?.priority === "high"   ? "selected" : ""}>high</option>
+          <option value="low"    ${fullN.meta?.priority === "low"    ? "selected" : ""}>Baja</option>
+          <option value="medium" ${(!fullN.meta?.priority || fullN.meta?.priority === "medium") ? "selected" : ""}>Media</option>
+          <option value="high"   ${fullN.meta?.priority === "high"   ? "selected" : ""}>Alta</option>
         </select>
         <label class="ngEditorLabel" style="flex-direction:row;gap:6px;align-items:center;display:flex">
-          <input type="checkbox" name="pin" ${fullN.meta?.pin ? "checked" : ""} /> Pin
+          <input type="checkbox" name="pin" ${fullN.meta?.pin ? "checked" : ""} /> Fijar
         </label>
-        <label class="ngEditorLabel">Notes</label>
+        <label class="ngEditorLabel">Notas</label>
         <textarea name="notes" class="ngInput" rows="2">${esc(fullN.meta?.notes || "")}</textarea>
         <div style="display:flex;gap:8px;margin-top:10px">
           <button type="submit" class="ngBtn ngBtn--primary" style="flex:1">💾 Guardar</button>
@@ -770,15 +835,15 @@ function renderFiltersBar() {
         <div class="ngReachGroup">
           <button class="ngReachBtn ${reach === "importantes" ? "active" : ""}" data-reach="importantes">Importantes</button>
           <button class="ngReachBtn ${reach === "recientes" ? "active" : ""}" data-reach="recientes">Recientes</button>
-          <button class="ngReachBtn ${reach === "todos" ? "active" : ""}" data-reach="todos">Todos</button>
+          <button class="ngReachBtn ${reach === "todos" ? "active" : ""}" data-reach="todos">Completo</button>
         </div>
         <div class="ngChipDivider"></div>
         <div class="ngCategoryChips">
-          <button class="ngChipBtn ${!filters.domain ? "active" : ""}" data-domain-chip="">Todos</button>
+          <button class="ngChipBtn ${!filters.domain ? "active" : ""}" data-domain-chip="">Todas las áreas</button>
           ${domains.map(d => {
             const isSelected = filters.domain === d;
-            const color = DOMAIN_PALETTE[d] || "#a78bfa";
-            return `<button class="ngChipBtn ${isSelected ? "active" : ""}" data-domain-chip="${esc(d)}" style="${isSelected ? `background:${hexToRgba(color, 0.2)};border-color:${color};color:${color};font-weight:700` : ''}">${esc(d)}</button>`;
+            const color = getDomainColor(d);
+            return `<button class="ngChipBtn ${isSelected ? "active" : ""}" data-domain-chip="${esc(d)}" style="${isSelected ? `background:${hexToRgba(color, 0.2)};border-color:${color};color:${color};font-weight:700` : ''}"><span class="ngChipDot" style="background:${color}"></span>${esc(domainLabel(d))}</button>`;
           }).join("")}
         </div>
       </div>
@@ -833,8 +898,11 @@ function ngraphInner(sessionState = {}) {
             <button class="ngCircleBtn" id="ngBtnZoomIn" title="Acercar">+</button>
             <button class="ngCircleBtn" id="ngBtnZoomOut" title="Alejar">−</button>
           </div>
-          <div class="ngLegendOverlay" id="ngLegendOverlay">${buildLegendOverlay()}</div>
         </div>
+        <details class="ngLegendBar" id="ngLegendBar">
+          <summary>Leyenda</summary>
+          ${buildLegend()}
+        </details>
         <div class="ngDetailPanel" id="ngDetailPanel">
           ${renderNodeDetail()}
         </div>
@@ -842,39 +910,60 @@ function ngraphInner(sessionState = {}) {
     </div>`;
 }
 
-function buildLegendOverlay() {
+function buildLegend() {
   const items = [
     { color: "#a78bfa", label: "Activada" },
     { color: "#34d399", label: "Nueva" },
-    { color: "#fbbf24", label: "Mergeada · pin" },
+    { color: "#fbbf24", label: "Fijada" },
   ];
-  const relItems = Object.entries(RELATION_COLORS).slice(0, 4).map(([type, color]) =>
-    `<span class="ngLegItem"><span class="ngLegLine" style="background:${color}"></span>${type}</span>`
+  const relItems = Object.entries(RELATION_COLORS).map(([type, color]) =>
+    `<span class="ngLegItem"><span class="ngLegLine" style="background:${color}"></span>${esc(RELATION_LABELS[type] || type)}</span>`
   ).join("");
 
   return `
     <div class="ngLegend">
-      ${items.map(i => `<span class="ngLegItem"><span class="ngLegDot" style="background:${i.color}"></span>${i.label}</span>`).join("")}
-      ${relItems}
+      <div class="ngLegGroup">
+        <span class="ngLegGroupTitle">Estado</span>
+        ${items.map(i => `<span class="ngLegItem"><span class="ngLegDot" style="background:${i.color}"></span>${i.label}</span>`).join("")}
+      </div>
+      <div class="ngLegGroup">
+        <span class="ngLegGroupTitle">Relaciones</span>
+        ${relItems}
+      </div>
     </div>`;
 }
 
 // ---- Inicializar canvas después de insertar en DOM ----
+// Ajusta el canvas al tamaño real del área y a la densidad de la pantalla.
+// Devuelve true si el tamaño cambió.
+function resizeCanvas(area) {
+  const canvas = graphState.canvas;
+  if (!canvas || !area) return false;
+  const w   = Math.round(area.clientWidth  || 700);
+  const h   = Math.round(area.clientHeight || Math.max(540, Math.floor(window.innerHeight - 210)));
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  if (w === graphState.width && h === graphState.height && dpr === graphState.dpr
+    && canvas.width === Math.round(w * dpr) && canvas.height === Math.round(h * dpr)) {
+    return false;
+  }
+  canvas.width  = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  graphState.width  = w;
+  graphState.height = h;
+  graphState.dpr    = dpr;
+  return true;
+}
+
 function initCanvas(root) {
   const canvas = root.querySelector("#ngCanvas");
   const area   = root.querySelector("#ngGraphArea");
   if (!canvas || !area) return;
 
-  const w = area.clientWidth  || 700;
-  const h = area.clientHeight || Math.max(540, Math.floor(window.innerHeight - 210));
-  canvas.width  = w;
-  canvas.height = h;
   graphState.canvas = canvas;
   graphState.ctx    = canvas.getContext("2d");
-  graphState.width  = w;
-  graphState.height = h;
+  resizeCanvas(area);
 
-  initPositions(graphState.filtered.nodes, w, h);
+  initPositions(graphState.filtered.nodes, graphState.width, graphState.height);
   graphState.alpha = 1.0;
 }
 
@@ -1016,9 +1105,14 @@ function wireDetailPanel(root, sessionState = {}) {
 function wireNeuroGraphInner(root, sessionState = {}) {
   graphState.sessionState = sessionState;
 
+  // Evita duplicar listeners si la misma vista se cablea dos veces
+  const canvasEl = root.querySelector("#ngCanvas");
+  if (!canvasEl || canvasEl.dataset.ngWired === "1") return;
+  canvasEl.dataset.ngWired = "1";
+
   initCanvas(root);
   wireCanvas(root, sessionState);
-  startLoop(root);
+  startLoop();
   wireDetailPanel(root, sessionState);
 
   root.querySelector("#ngBtnRepairGraph")?.addEventListener("click", async () => {
@@ -1069,9 +1163,10 @@ function wireNeuroGraphInner(root, sessionState = {}) {
       e.stopPropagation();
       menuDropdown.classList.toggle("show");
     });
-    document.addEventListener("click", () => {
-      menuDropdown.classList.remove("show");
-    });
+    // Un único listener global: se reemplaza en cada re-render en lugar de acumularse
+    if (graphState.menuCloseHandler) document.removeEventListener("click", graphState.menuCloseHandler);
+    graphState.menuCloseHandler = () => menuDropdown.classList.remove("show");
+    document.addEventListener("click", graphState.menuCloseHandler);
     menuDropdown.addEventListener("click", (e) => {
       e.stopPropagation();
     });
@@ -1091,14 +1186,17 @@ function wireNeuroGraphInner(root, sessionState = {}) {
   });
   root.querySelector("#ngBtnZoomIn")?.addEventListener("click", () => {
     graphState.zoom = Math.min(graphState.zoom * 1.25, 6);
+    requestFrame();
   });
   root.querySelector("#ngBtnZoomOut")?.addEventListener("click", () => {
     graphState.zoom = Math.max(graphState.zoom / 1.25, 0.15);
+    requestFrame();
   });
   root.querySelector("#ngBtnZoomReset")?.addEventListener("click", () => {
     graphState.zoom  = 1;
     graphState.pan   = { x: 0, y: 0 };
     menuDropdown?.classList.remove("show");
+    requestFrame();
   });
 
   const filterMap = {
@@ -1148,31 +1246,28 @@ function wireNeuroGraphInner(root, sessionState = {}) {
     }, 180);
   });
 
-  // Resize observer
+  // Resize observer: mantiene el canvas al tamaño del área (rotación, ventana, sidebar)
+  graphState.resizeObserver?.disconnect();
+  graphState.resizeObserver = null;
   const area = root.querySelector("#ngGraphArea");
   if (area && window.ResizeObserver) {
     let ngResizeRaf = 0;
-    new ResizeObserver(() => {
+    graphState.resizeObserver = new ResizeObserver(() => {
       if (ngResizeRaf) cancelAnimationFrame(ngResizeRaf);
       ngResizeRaf = requestAnimationFrame(() => {
         ngResizeRaf = 0;
-        const canvas = graphState.canvas;
-        if (!canvas || !area) return;
-        const w = area.clientWidth;
-        const h = Math.max(460, window.innerHeight * 0.55);
-        if (canvas.width !== w || canvas.height !== h) {
-          canvas.width  = w;
-          canvas.height = h;
-          graphState.width  = w;
-          graphState.height = h;
-        }
+        // Relajar un poco la simulación para recolocar nodos que quedaron fuera
+        if (resizeCanvas(area)) requestFrame(0.3);
       });
-    }).observe(area);
+    });
+    graphState.resizeObserver.observe(area);
   }
 }
 
 function applyFiltersAndRerender(root, sessionState = {}) {
   graphState.filtered = filterGraphNodes(graphState.graph, graphState.filters);
+  initPositions(graphState.filtered.nodes, graphState.width, graphState.height);
+  requestFrame(0.3);
   const header = root.querySelector(".ngHeaderSub");
   if (header) {
     const { graph, filtered } = graphState;
@@ -1306,6 +1401,7 @@ function ngCss() {
     cursor: pointer; white-space: nowrap; transition: all .12s ease; flex-shrink: 0;
   }
   .ngChipBtn:hover { background: rgba(255,255,255,.12); color: #fff; }
+  .ngChipDot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
   .ngChipBtn.active {
     background: rgba(124,92,255,.25); border-color: rgba(124,92,255,.5); color: #c4b5fd; font-weight: 700;
   }
@@ -1363,12 +1459,20 @@ function ngCss() {
     .ngDetailPanel { max-height: 75vh; }
   }
 
-  /* Legend overlay */
-  .ngLegendOverlay {
-    position: absolute; bottom: 10px; left: 12px; pointer-events: none;
+  /* Leyenda (fuera del canvas, plegable) */
+  .ngLegendBar {
+    margin-top: 8px; padding: 8px 14px;
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px; font-size: 12px; color: #94a3b8;
   }
-  .ngLegend { display: flex; gap: 10px; flex-wrap: wrap; }
-  .ngLegItem { display: flex; align-items: center; gap: 5px; font-size: 10px; opacity: .55; }
+  .ngLegendBar > summary { cursor: pointer; font-weight: 600; list-style: none; user-select: none; }
+  .ngLegendBar > summary::-webkit-details-marker { display: none; }
+  .ngLegendBar > summary::before { content: "▸"; display: inline-block; width: 14px; transition: transform .15s; }
+  .ngLegendBar[open] > summary::before { transform: rotate(90deg); }
+  .ngLegend { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .ngLegGroup { display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center; }
+  .ngLegGroupTitle { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; opacity: .5; min-width: 72px; }
+  .ngLegItem { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #cbd5e1; }
   .ngLegDot  { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   .ngLegLine { width: 16px; height: 2px; border-radius: 2px; flex-shrink: 0; }
 
