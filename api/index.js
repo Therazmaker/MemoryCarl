@@ -60,211 +60,242 @@ app.post('/api/sync', requireAuth, async (req, res) => {
   if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
 
   try {
-    const results = { neuronsSynced: 0, memoriesSynced: 0, chatSynced: 0, daysSynced: 0, appStateSynced: false };
+    const results = { neuronsSynced: 0, memoriesSynced: 0, chatSynced: 0, daysSynced: 0, appStateSynced: false, errors: [] };
     
-    if (neurons.length > 0) {
-      const { error: nErr } = await supabase.from('neurons').upsert(
-        neurons.map(n => ({
-          id: n.id,
-          concept: n.core?.concept || 'Sin nombre',
-          domain: n.core?.domain || 'general',
-          summary: n.core?.summary || '',
-          triggers: n.triggers || [],
-          emotion: n.emotion || 'neutral',
-          weight: n.weight || 1.0,
-          temporal: n.temporal || {},
-          updated_at: new Date().toISOString()
-        })), { onConflict: 'id' }
-      );
-      if (nErr) throw new Error('Error guardando neuronas: ' + nErr.message);
-      results.neuronsSynced = neurons.length;
-    }
+    // El estado de la app (incluye "Ahora") va primero: es lo más pequeño y lo más importante
+    // app_state: si falla, se anota el error y se siguen guardando las demás secciones
+    try {
+      if (appState) {
+        // 1. Guardar en app_state combinando con el estado existente
+        console.log("Sync Payload - Ledger Sample:", appState.financeLedger ? JSON.stringify(appState.financeLedger.slice(0, 3)) : "none");
+        const { data: existingAppStateRow } = await supabase
+          .from('app_state')
+          .select('state_json')
+          .eq('id', 'default_user')
+          .maybeSingle();
 
-    if (memories.length > 0) {
-      const { error: mErr } = await supabase.from('memories').upsert(
-        memories.map(m => ({
-          id: m.id,
-          title: m.title || 'Memoria',
-          snippet: (m.text || '').substring(0, 100),
-          text_content: m.text || '',
-          date: m.date || new Date().toISOString().split('T')[0],
-          emotion: m.emotion || 'neutral',
-          tags: m.tags || [],
-          linked_neurons: m.linkedNeurons || [],
-          importance: m.importance || 'medium',
-          temporal: m.temporal || {}
-        })), { onConflict: 'id' }
-      );
-      if (mErr) throw new Error('Error guardando memorias: ' + mErr.message);
-      results.memoriesSynced = memories.length;
-    }
+        const mergedAppState = {
+          ...(existingAppStateRow?.state_json || {}),
+          ...appState
+        };
 
-    if (chatHistory.length > 0) {
-      // Usar un mapa para asegurar que no haya duplicados con el mismo ID en el payload
-      const uniqueChatMap = new Map();
-      chatHistory.forEach(c => {
-        const derivedId = c.messageId || c.id || Math.random().toString(36).substring(7);
-        uniqueChatMap.set(derivedId, {
-          id: derivedId,
-          message_id: derivedId,
-          role: c.role || 'user',
-          content: c.content || c.text || '',
-          meta: c.meta || {}
-        });
-      });
-      const uniqueChat = Array.from(uniqueChatMap.values());
-
-      const { error: cErr } = await supabase.from('chat_history').upsert(
-        uniqueChat, { onConflict: 'id' }
-      );
-      if (cErr) throw new Error('Error guardando historial: ' + cErr.message);
-      results.chatSynced = uniqueChat.length;
-    }
-
-    if (days.length > 0) {
-      // Usar un mapa para asegurar que no haya duplicados con la misma fecha en el payload
-      const uniqueDaysMap = new Map();
-      days.forEach(d => {
-        uniqueDaysMap.set(d.date, {
-          id: d.id || d.date,
-          date: d.date,
-          summary: d.summary || '',
-          dominant_emotion: d.dominantEmotion || 'neutral',
-          dominant_themes: d.dominantThemes || [],
-          insights: d.insights || [],
-          is_milestone: d.isMilestone || false
-        });
-      });
-      const uniqueDays = Array.from(uniqueDaysMap.values());
-
-      const { error: dErr } = await supabase.from('days').upsert(
-        uniqueDays, { onConflict: 'date' }
-      );
-      if (dErr) throw new Error('Error guardando días: ' + dErr.message);
-      results.daysSynced = uniqueDays.length;
-    }
-
-    if (appState) {
-      // 1. Guardar en app_state combinando con el estado existente
-      console.log("Sync Payload - Ledger Sample:", appState.financeLedger ? JSON.stringify(appState.financeLedger.slice(0, 3)) : "none");
-      const { data: existingAppStateRow } = await supabase
-        .from('app_state')
-        .select('state_json')
-        .eq('id', 'default_user')
-        .maybeSingle();
-
-      const mergedAppState = {
-        ...(existingAppStateRow?.state_json || {}),
-        ...appState
-      };
-
-      const { error: asErr } = await supabase.from('app_state').upsert(
-        [{ id: 'default_user', state_json: mergedAppState, updated_at: new Date().toISOString() }],
-        { onConflict: 'id' }
-      );
-      if (asErr) throw new Error('Error guardando app_state: ' + asErr.message);
-      results.appStateSynced = true;
-
-      // 2. Guardar cuentas individuales en finance_accounts
-      if (Array.isArray(appState.financeAccounts) && appState.financeAccounts.length > 0) {
-        const { error: accErr } = await supabase.from('finance_accounts').upsert(
-          appState.financeAccounts.map(a => ({
-            id: a.id,
-            name: a.name || 'Cuenta',
-            type: a.type || 'bank',
-            initial_balance: Number(a.initialBalance || 0),
-            balance: Number(a.balance || 0),
-            color: a.color || null,
-            created_at: a.createdAt || new Date().toISOString()
-          })), { onConflict: 'id' }
+        const { error: asErr } = await supabase.from('app_state').upsert(
+          [{ id: 'default_user', state_json: mergedAppState, updated_at: new Date().toISOString() }],
+          { onConflict: 'id' }
         );
-        if (accErr) throw new Error('Error guardando finance_accounts: ' + accErr.message);
-      }
+        if (asErr) throw new Error('Error guardando app_state: ' + asErr.message);
+        results.appStateSynced = true;
 
-      // 3. Guardar movimientos individuales en finance_ledger
-      if (Array.isArray(appState.financeLedger) && appState.financeLedger.length > 0) {
-        const { error: ledErr } = await supabase.from('finance_ledger').upsert(
-          appState.financeLedger.map(e => ({
-            id: e.id,
-            account_id: e.accountId,
-            type: e.type || 'expense',
-            amount: Number(e.amount || 0),
-            category: e.category || 'Otros',
-            reason: e.reason || 'normal',
-            note: e.note || '',
-            date: e.date || new Date().toISOString(),
-            is_fiado: !!e.isFiado,
-            fiado_status: e.fiadoStatus || null,
-            archived: !!e.archived,
-            created_at: e.createdAt || new Date().toISOString()
-          })), { onConflict: 'id' }
-        );
-        if (ledErr) throw new Error('Error guardando finance_ledger: ' + ledErr.message);
-      }
-
-      // 4. Guardar registros de sueño individuales en sleep_log (si la tabla existe)
-      const sleepLog = Array.isArray(appState.sleepLog) ? appState.sleepLog : [];
-      if (sleepLog.length > 0) {
-        const { error: sleepErr } = await supabase.from('sleep_log').upsert(
-          sleepLog.map(s => ({
-            id: String(s.id),
-            date: s.date || new Date().toISOString().split('T')[0],
-            total_minutes: Number(s.totalMinutes || s.total_minutes || 0),
-            quality: (s.quality !== undefined && s.quality !== null && s.quality !== "") ? Number(s.quality) : null,
-            note: s.note || '',
-            mode: s.mode || 'simple',
-            start_time: s.start || s.start_time || '',
-            end_time: s.end || s.end_time || '',
-            dream_type: s.dreamType || s.dream_type || '',
-            wake_emotion: s.wakeEmotion || s.wake_emotion || '',
-            narrative: s.narrative || '',
-            symbols: Array.isArray(s.symbols) ? s.symbols : [],
-            clarity: (s.clarity !== undefined && s.clarity !== null && s.clarity !== "") ? Number(s.clarity) : null,
-            created_at: s.ts || s.created_at || new Date().toISOString(),
-            data: s
-          })), { onConflict: 'id' }
-        );
-        if (sleepErr) {
-          console.warn('Aviso sincronizando sleep_log:', sleepErr.message);
-          results.sleepError = sleepErr.message;
-        } else {
-          results.sleepSynced = sleepLog.length;
+        // 2. Guardar cuentas individuales en finance_accounts
+        if (Array.isArray(appState.financeAccounts) && appState.financeAccounts.length > 0) {
+          const { error: accErr } = await supabase.from('finance_accounts').upsert(
+            appState.financeAccounts.map(a => ({
+              id: a.id,
+              name: a.name || 'Cuenta',
+              type: a.type || 'bank',
+              initial_balance: Number(a.initialBalance || 0),
+              balance: Number(a.balance || 0),
+              color: a.color || null,
+              created_at: a.createdAt || new Date().toISOString()
+            })), { onConflict: 'id' }
+          );
+          if (accErr) throw new Error('Error guardando finance_accounts: ' + accErr.message);
         }
-      }
 
-      // 5. Guardar registros de estado de ánimo individuales en mood_daily (si la tabla existe)
-      const moodDaily = (appState.moodDaily && typeof appState.moodDaily === 'object') ? appState.moodDaily : {};
-      const moodEntries = [];
-      Object.entries(moodDaily).forEach(([dateKey, val]) => {
-        const items = Array.isArray(val) ? val : [val];
-        items.forEach((e, idx) => {
-          if (!e || typeof e !== 'object') return;
-          const entryId = `${dateKey}_${e.ts || idx}`;
-          moodEntries.push({
-            id: String(entryId),
-            date: dateKey,
-            sprite_id: e.spriteId || e.sprite_id || null,
-            label: e.label || null,
-            activities: Array.isArray(e.activities) ? e.activities : [],
-            energy: (e.energy !== undefined && e.energy !== null && e.energy !== "") ? Number(e.energy) : null,
-            note: e.note || '',
-            tags: Array.isArray(e.tags) ? e.tags : [],
-            ts: e.ts || new Date().toISOString(),
-            data: e
+        // 3. Guardar movimientos individuales en finance_ledger
+        if (Array.isArray(appState.financeLedger) && appState.financeLedger.length > 0) {
+          const { error: ledErr } = await supabase.from('finance_ledger').upsert(
+            appState.financeLedger.map(e => ({
+              id: e.id,
+              account_id: e.accountId,
+              type: e.type || 'expense',
+              amount: Number(e.amount || 0),
+              category: e.category || 'Otros',
+              reason: e.reason || 'normal',
+              note: e.note || '',
+              date: e.date || new Date().toISOString(),
+              is_fiado: !!e.isFiado,
+              fiado_status: e.fiadoStatus || null,
+              archived: !!e.archived,
+              created_at: e.createdAt || new Date().toISOString()
+            })), { onConflict: 'id' }
+          );
+          if (ledErr) throw new Error('Error guardando finance_ledger: ' + ledErr.message);
+        }
+
+        // 4. Guardar registros de sueño individuales en sleep_log (si la tabla existe)
+        const sleepLog = Array.isArray(appState.sleepLog) ? appState.sleepLog : [];
+        if (sleepLog.length > 0) {
+          const { error: sleepErr } = await supabase.from('sleep_log').upsert(
+            sleepLog.map(s => ({
+              id: String(s.id),
+              date: s.date || new Date().toISOString().split('T')[0],
+              total_minutes: Number(s.totalMinutes || s.total_minutes || 0),
+              quality: (s.quality !== undefined && s.quality !== null && s.quality !== "") ? Number(s.quality) : null,
+              note: s.note || '',
+              mode: s.mode || 'simple',
+              start_time: s.start || s.start_time || '',
+              end_time: s.end || s.end_time || '',
+              dream_type: s.dreamType || s.dream_type || '',
+              wake_emotion: s.wakeEmotion || s.wake_emotion || '',
+              narrative: s.narrative || '',
+              symbols: Array.isArray(s.symbols) ? s.symbols : [],
+              clarity: (s.clarity !== undefined && s.clarity !== null && s.clarity !== "") ? Number(s.clarity) : null,
+              created_at: s.ts || s.created_at || new Date().toISOString(),
+              data: s
+            })), { onConflict: 'id' }
+          );
+          if (sleepErr) {
+            console.warn('Aviso sincronizando sleep_log:', sleepErr.message);
+            results.sleepError = sleepErr.message;
+          } else {
+            results.sleepSynced = sleepLog.length;
+          }
+        }
+
+        // 5. Guardar registros de estado de ánimo individuales en mood_daily (si la tabla existe)
+        const moodDaily = (appState.moodDaily && typeof appState.moodDaily === 'object') ? appState.moodDaily : {};
+        const moodEntries = [];
+        Object.entries(moodDaily).forEach(([dateKey, val]) => {
+          const items = Array.isArray(val) ? val : [val];
+          items.forEach((e, idx) => {
+            if (!e || typeof e !== 'object') return;
+            const entryId = `${dateKey}_${e.ts || idx}`;
+            moodEntries.push({
+              id: String(entryId),
+              date: dateKey,
+              sprite_id: e.spriteId || e.sprite_id || null,
+              label: e.label || null,
+              activities: Array.isArray(e.activities) ? e.activities : [],
+              energy: (e.energy !== undefined && e.energy !== null && e.energy !== "") ? Number(e.energy) : null,
+              note: e.note || '',
+              tags: Array.isArray(e.tags) ? e.tags : [],
+              ts: e.ts || new Date().toISOString(),
+              data: e
+            });
           });
         });
-      });
-      if (moodEntries.length > 0) {
-        const { error: moodErr } = await supabase.from('mood_daily').upsert(
-          moodEntries, { onConflict: 'id' }
-        );
-        if (moodErr) {
-          console.warn('Aviso sincronizando mood_daily:', moodErr.message);
-          results.moodError = moodErr.message;
-        } else {
-          results.moodSynced = moodEntries.length;
+        if (moodEntries.length > 0) {
+          const { error: moodErr } = await supabase.from('mood_daily').upsert(
+            moodEntries, { onConflict: 'id' }
+          );
+          if (moodErr) {
+            console.warn('Aviso sincronizando mood_daily:', moodErr.message);
+            results.moodError = moodErr.message;
+          } else {
+            results.moodSynced = moodEntries.length;
+          }
         }
       }
+    } catch (err) {
+      console.error('[Sync Error] app_state:', err.message);
+      results.errors.push(err.message);
+    }
+
+    // neurons: si falla, se anota el error y se siguen guardando las demás secciones
+    try {
+      if (neurons.length > 0) {
+        const { error: nErr } = await supabase.from('neurons').upsert(
+          neurons.map(n => ({
+            id: n.id,
+            concept: n.core?.concept || 'Sin nombre',
+            domain: n.core?.domain || 'general',
+            summary: n.core?.summary || '',
+            triggers: n.triggers || [],
+            emotion: n.emotion || 'neutral',
+            weight: n.weight || 1.0,
+            temporal: n.temporal || {},
+            updated_at: new Date().toISOString()
+          })), { onConflict: 'id' }
+        );
+        if (nErr) throw new Error('Error guardando neuronas: ' + nErr.message);
+        results.neuronsSynced = neurons.length;
+      }
+    } catch (err) {
+      console.error('[Sync Error] neurons:', err.message);
+      results.errors.push(err.message);
+    }
+
+    // memories: si falla, se anota el error y se siguen guardando las demás secciones
+    try {
+      if (memories.length > 0) {
+        const { error: mErr } = await supabase.from('memories').upsert(
+          memories.map(m => ({
+            id: m.id,
+            title: m.title || 'Memoria',
+            snippet: (m.text || '').substring(0, 100),
+            text_content: m.text || '',
+            date: m.date || new Date().toISOString().split('T')[0],
+            emotion: m.emotion || 'neutral',
+            tags: m.tags || [],
+            linked_neurons: m.linkedNeurons || [],
+            importance: m.importance || 'medium',
+            temporal: m.temporal || {}
+          })), { onConflict: 'id' }
+        );
+        if (mErr) throw new Error('Error guardando memorias: ' + mErr.message);
+        results.memoriesSynced = memories.length;
+      }
+    } catch (err) {
+      console.error('[Sync Error] memories:', err.message);
+      results.errors.push(err.message);
+    }
+
+    // chat_history: si falla, se anota el error y se siguen guardando las demás secciones
+    try {
+      if (chatHistory.length > 0) {
+        // Usar un mapa para asegurar que no haya duplicados con el mismo ID en el payload
+        const uniqueChatMap = new Map();
+        chatHistory.forEach(c => {
+          const derivedId = c.messageId || c.id || Math.random().toString(36).substring(7);
+          uniqueChatMap.set(derivedId, {
+            id: derivedId,
+            message_id: derivedId,
+            role: c.role || 'user',
+            content: c.content || c.text || '',
+            meta: c.meta || {}
+          });
+        });
+        const uniqueChat = Array.from(uniqueChatMap.values());
+
+        const { error: cErr } = await supabase.from('chat_history').upsert(
+          uniqueChat, { onConflict: 'id' }
+        );
+        if (cErr) throw new Error('Error guardando historial: ' + cErr.message);
+        results.chatSynced = uniqueChat.length;
+      }
+    } catch (err) {
+      console.error('[Sync Error] chat_history:', err.message);
+      results.errors.push(err.message);
+    }
+
+    // days: si falla, se anota el error y se siguen guardando las demás secciones
+    try {
+      if (days.length > 0) {
+        // Usar un mapa para asegurar que no haya duplicados con la misma fecha en el payload
+        const uniqueDaysMap = new Map();
+        days.forEach(d => {
+          uniqueDaysMap.set(d.date, {
+            id: d.id || d.date,
+            date: d.date,
+            summary: d.summary || '',
+            dominant_emotion: d.dominantEmotion || 'neutral',
+            dominant_themes: d.dominantThemes || [],
+            insights: d.insights || [],
+            is_milestone: d.isMilestone || false
+          });
+        });
+        const uniqueDays = Array.from(uniqueDaysMap.values());
+
+        const { error: dErr } = await supabase.from('days').upsert(
+          uniqueDays, { onConflict: 'date' }
+        );
+        if (dErr) throw new Error('Error guardando días: ' + dErr.message);
+        results.daysSynced = uniqueDays.length;
+      }
+    } catch (err) {
+      console.error('[Sync Error] days:', err.message);
+      results.errors.push(err.message);
     }
 
     res.json({ status: 'ok', data: results });
