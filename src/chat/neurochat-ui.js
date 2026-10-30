@@ -61,7 +61,7 @@ import {
   deleteThread,
   getOpenThreads,
 } from "./openThreads.js";
-import { reconcileThreadsWithFacts, undoLifeChanges, describeLifeChange } from "./lifeChanges.js";
+import { reconcileThreadsWithFacts, undoLifeChanges, describeLifeChange, mergeLifeLists } from "./lifeChanges.js";
 import { todayLocalStr } from "./lifeDates.js";
 
 // ---- Constantes UI ----
@@ -228,7 +228,10 @@ function renderLifeChangesCard(msg) {
     <div class="ncLifeCard${undone ? " ncLifeCard--undone" : ""}">
       <div class="ncLifeCardHead">
         <span>${undone ? "Cambios deshechos" : "📌 Actualicé tu situación"}</span>
-        ${undone ? "" : `<button class="ncGhostBtn" data-undo-life="${esc(msg.messageId || "")}">Deshacer</button>`}
+        ${undone ? "" : `<span class="ncLifeCardBtns">
+          <button class="ncGhostBtn" data-goto-now>Ver en Ahora</button>
+          <button class="ncGhostBtn" data-undo-life="${esc(msg.messageId || "")}">Deshacer</button>
+        </span>`}
       </div>
       <ul class="ncLifeCardList">
         ${msg.lifeChanges.map((c) => { const d = describeLifeChange(c); return `<li>${d.icon} ${esc(d.text)}</li>`; }).join("")}
@@ -1736,6 +1739,12 @@ function wireInputBarEvents(root) {
 }
 
 function wireMessageEvents(root) {
+  root.querySelectorAll("[data-goto-now]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      uiState.activeTab = "now";
+      fullRerender();
+    });
+  });
   root.querySelectorAll("[data-undo-life]").forEach((btn) => {
     btn.addEventListener("click", () => {
       undoMessageLifeChanges(btn.getAttribute("data-undo-life"));
@@ -2718,14 +2727,16 @@ export function initNeuroChat() {
         openThreads,
       };
 
+      const body = JSON.stringify({ neurons, memories, chatHistory, days, appState });
       const res = await fetch(`${url.replace(/\/+$/, "")}/api/sync`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...(key && { "Authorization": `Bearer ${key}` })
         },
-        body: JSON.stringify({ neurons, memories, chatHistory, days, appState }),
-        keepalive: true
+        body,
+        // keepalive solo admite cuerpos de hasta 64 KB: por encima el navegador rechaza el envío
+        keepalive: body.length < 60000,
       });
 
       if (isManual) {
@@ -2771,19 +2782,24 @@ export function initNeuroChat() {
         changed = true;
       }
 
-      // Restaurar Hechos de Vida (lifeFacts) de forma no destructiva si vienen de la nube
-      const cloudLifeFacts = data.lifeFacts || data.appState?.lifeFacts;
-      if (Array.isArray(cloudLifeFacts) && cloudLifeFacts.length > 0) {
-        localStorage.setItem(LIFE_FACTS_KEY, JSON.stringify(cloudLifeFacts));
-        changed = true;
-      }
-
-      // Restaurar Hilos Abiertos (openThreads) de forma no destructiva si vienen de la nube
-      const cloudOpenThreads = data.openThreads || data.appState?.openThreads;
-      if (Array.isArray(cloudOpenThreads) && cloudOpenThreads.length > 0) {
-        localStorage.setItem("memorycarl_open_threads", JSON.stringify(cloudOpenThreads));
-        changed = true;
-      }
+      // Hechos de vida e hilos: se fusionan con lo local (gana lo modificado más reciente),
+      // así una copia vieja de la nube no borra lo que Carl acaba de guardar
+      let needsPush = false;
+      const mergeKey = (storageKey, cloudList) => {
+        if (!Array.isArray(cloudList) || !cloudList.length) return;
+        let localList = [];
+        try { localList = JSON.parse(localStorage.getItem(storageKey) || "[]"); } catch (_e) {}
+        const merged = mergeLifeLists(localList, cloudList);
+        const mergedJson = JSON.stringify(merged);
+        if (mergedJson !== JSON.stringify(localList)) {
+          localStorage.setItem(storageKey, mergedJson);
+          changed = true;
+        }
+        if (mergedJson !== JSON.stringify(cloudList)) needsPush = true;
+      };
+      mergeKey(LIFE_FACTS_KEY, data.lifeFacts || data.appState?.lifeFacts);
+      mergeKey("memorycarl_open_threads", data.openThreads || data.appState?.openThreads);
+      if (needsPush) setTimeout(() => window.neurochatPushToSupabase?.(false), 500);
 
       if (changed) {
         if (isManual) {
@@ -3355,6 +3371,7 @@ function ncCss() {
     background: rgba(124,92,255,.08); border: 1px solid rgba(124,92,255,.25); border-radius: 12px; font-size: 12px;
   }
   .ncLifeCardHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; }
+  .ncLifeCardBtns { display: flex; gap: 6px; }
   .ncLifeCardList { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; opacity: .9; }
   .ncLifeCard--undone { opacity: .55; }
   .ncLifeCard--undone .ncLifeCardList { text-decoration: line-through; }
