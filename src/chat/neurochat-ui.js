@@ -8,7 +8,7 @@
  *   initNeuroChat()   → inicialización del módulo
  */
 
-import { sendMessage, forcePremiumGenerationForMessage, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
+import { sendMessage, forcePremiumGenerationForMessage, undoMessageLifeChanges, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
 import { processDislikeExplanation } from "../neuro/feedback.js";
 import { NeuroProbeUI } from "./neuroprobe-ui.js";
 import { saveMemory, updateMemory, deleteMemory, autoFixMemory, suggestMemoryMilestone } from "../memory/memoryStore.js";
@@ -42,13 +42,17 @@ import {
   loadLifeFacts,
   LIFE_FACTS_KEY,
   upsertLifeFact,
+  updateLifeFact,
   endLifeFact,
+  reactivateLifeFact,
   confirmPendingLifeFact,
   discardPendingLifeFact,
   deleteLifeFact,
   getLifeFacts,
-  calculateDurationString,
+  formatSpan,
+  formatShortDate,
   VALID_CATEGORIES,
+  AREA_META,
 } from "./lifeFacts.js";
 
 import {
@@ -57,6 +61,8 @@ import {
   deleteThread,
   getOpenThreads,
 } from "./openThreads.js";
+import { reconcileThreadsWithFacts, undoLifeChanges, describeLifeChange } from "./lifeChanges.js";
+import { todayLocalStr } from "./lifeDates.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
@@ -214,6 +220,22 @@ function renderMemoryRecallCard(msg) {
     </details>`;
 }
 
+// Aviso bajo la respuesta cuando la IA cambió la situación de vida (con opción de deshacer)
+function renderLifeChangesCard(msg) {
+  if (!msg.lifeChanges?.length) return "";
+  const undone = Boolean(msg.lifeChangesUndone);
+  return `
+    <div class="ncLifeCard${undone ? " ncLifeCard--undone" : ""}">
+      <div class="ncLifeCardHead">
+        <span>${undone ? "Cambios deshechos" : "📌 Actualicé tu situación"}</span>
+        ${undone ? "" : `<button class="ncGhostBtn" data-undo-life="${esc(msg.messageId || "")}">Deshacer</button>`}
+      </div>
+      <ul class="ncLifeCardList">
+        ${msg.lifeChanges.map((c) => { const d = describeLifeChange(c); return `<li>${d.icon} ${esc(d.text)}</li>`; }).join("")}
+      </ul>
+    </div>`;
+}
+
 function renderMessage(msg) {
   const isUser = msg.role === "user";
   const time = timeSince(msg.ts);
@@ -247,6 +269,7 @@ function renderMessage(msg) {
       ${bodyHtml}
       ${memoryRecall}
       ${dayRecall}
+      ${!isUser ? renderLifeChangesCard(msg) : ""}
       <div class="ncMsgMeta">
         ${time}${msg.coverage != null ? ` · cobertura ${Math.round(msg.coverage * 100)}%` : ""}
         ${msg.generated > 0 ? ` <span style="color: #4ade80; font-weight: bold;">· 🧠 +${msg.generated} neurona${msg.generated > 1 ? "s" : ""} nueva${msg.generated > 1 ? "s" : ""}</span>` : ""}
@@ -1023,273 +1046,382 @@ function buildInputBarHtml() {
   `;
 }
 
-export function renderNowTab() {
-  const pendingFacts = getLifeFacts({ status: "pending" });
-  const activeFacts = getLifeFacts({ status: "active" });
-  const endedFacts = getLifeFacts({ status: "ended" });
+// ---- Pestaña Ahora: situación actual, temas en curso y línea de vida ----
 
-  const pendingHtml = pendingFacts.length
-    ? `
-      <div class="ncNowSection ncNowPendingBox">
-        <div class="ncNowSectionTitle">⚡ Hechos propuestos por Carl para revalidar (${pendingFacts.length})</div>
-        <div class="ncNowPendingList">
-          ${pendingFacts.map((f) => `
-            <div class="ncNowCard ncNowCardPending">
-              <div class="ncNowCardHead">
-                <span class="ncTag ncTagPending">${esc(f.category)}</span>
-                <span class="ncNowCardSource">propuesto por la IA</span>
-              </div>
-              <div class="ncNowCardText">${esc(f.text)}</div>
-              <div class="ncNowCardMeta">Desde: ${esc(f.since)} (${calculateDurationString(f.since)})</div>
-              <div class="ncNowCardActions">
-                <button class="ncActionBtn ncActionBtnPrimary" data-confirm-pending-fact="${esc(f.id)}">✓ Confirmar</button>
-                <button class="ncActionBtn" data-discard-pending-fact="${esc(f.id)}">✕ Descartar</button>
-              </div>
-            </div>
-          `).join("")}
+// Estado local de la pestaña (qué tarjeta se edita, formularios abiertos, aviso)
+const nowState = {
+  editId: null,
+  endingId: null,
+  addStageOpen: false,
+  addThreadOpen: false,
+  notice: null,      // cambios hechos automáticamente al abrir la pestaña
+  reconciled: false, // la reconciliación hilos ↔ etapas ya corrió en esta sesión
+};
+
+function areaMeta(category) {
+  return AREA_META[category] || AREA_META.otro;
+}
+
+function areaOptions(selected = "otro") {
+  return VALID_CATEGORIES.map((c) =>
+    `<option value="${c}" ${c === selected ? "selected" : ""}>${areaMeta(c).icon} ${esc(areaMeta(c).label)}</option>`
+  ).join("");
+}
+
+function daysFromToday(dateStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || "")) return null;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((new Date(y, m - 1, d) - today) / 86400000);
+}
+
+function dueLabel(dueDate) {
+  const diff = daysFromToday(dueDate);
+  if (diff == null) return "";
+  if (diff < 0) return `<span class="ncDue ncDue--late">venció hace ${formatSpan(dueDate)}</span>`;
+  if (diff === 0) return `<span class="ncDue ncDue--soon">es hoy</span>`;
+  if (diff === 1) return `<span class="ncDue ncDue--soon">es mañana</span>`;
+  return `<span class="ncDue">${diff < 7 ? `en ${diff} días` : formatShortDate(dueDate)}</span>`;
+}
+
+function renderStageCard(f) {
+  const meta = areaMeta(f.category);
+  const isFuture = (daysFromToday(f.since) ?? 0) > 0;
+  const head = `
+    <div class="ncStageHead">
+      <span class="ncStageArea">${meta.icon} ${esc(meta.label)}</span>
+      <span class="ncStageSpan">${isFuture ? `empieza ${formatShortDate(f.since)}` : formatSpan(f.since)}</span>
+    </div>`;
+
+  if (nowState.editId === f.id) {
+    return `
+      <div class="ncStage ncStage--editing" style="--area:${meta.color}">
+        ${head}
+        <input class="ncSettingsInput" data-now-field="text" value="${esc(f.text)}" maxlength="200" />
+        <div class="ncNowRow">
+          <select class="ncSettingsInput" data-now-field="category">${areaOptions(f.category)}</select>
+          <input type="date" class="ncSettingsInput" data-now-field="since" value="${esc(f.since)}" />
         </div>
-      </div>`
-    : "";
+        <div class="ncNowRow">
+          <button class="ncActionBtn ncActionBtnPrimary" data-now="edit-save" data-id="${esc(f.id)}">Guardar</button>
+          <button class="ncActionBtn" data-now="edit-cancel">Cancelar</button>
+          <button class="ncActionBtn ncActionBtnDanger ncNowPushRight" data-now="delete-fact" data-id="${esc(f.id)}">Borrar</button>
+        </div>
+      </div>`;
+  }
 
-  const activeByCat = VALID_CATEGORIES.reduce((acc, cat) => {
-    acc[cat] = activeFacts.filter((f) => f.category === cat);
-    return acc;
-  }, {});
+  if (nowState.endingId === f.id) {
+    return `
+      <div class="ncStage ncStage--editing" style="--area:${meta.color}">
+        ${head}
+        <div class="ncStageText">${esc(f.text)}</div>
+        <div class="ncNowAsk">¿Cuándo terminó esta etapa?</div>
+        <div class="ncNowRow">
+          <input type="date" class="ncSettingsInput" data-now-field="until" value="${todayLocalStr()}" max="${todayLocalStr()}" />
+          <input class="ncSettingsInput ncNowGrow" data-now-field="endNote" placeholder="Cómo terminó (opcional)" maxlength="200" />
+        </div>
+        <div class="ncNowRow">
+          <button class="ncActionBtn ncActionBtnPrimary" data-now="end-confirm" data-id="${esc(f.id)}">Terminar etapa</button>
+          <button class="ncActionBtn" data-now="end-cancel">Cancelar</button>
+        </div>
+      </div>`;
+  }
 
-  const activeHtml = activeFacts.length
-    ? VALID_CATEGORIES.map((cat) => {
-        const catFacts = activeByCat[cat] || [];
-        if (!catFacts.length) return "";
-        return `
-          <div class="ncNowCatGroup">
-            <div class="ncNowCatTitle">${esc(cat.toUpperCase())} (${catFacts.length})</div>
-            <div class="ncNowCatList">
-              ${catFacts.map((f) => `
-                <div class="ncNowCard" data-fact-id="${esc(f.id)}">
-                  <div class="ncNowCardHead">
-                    <span class="ncTag">${esc(f.category)}</span>
-                    <span class="ncNowCardDuration">🕒 ${calculateDurationString(f.since)}</span>
-                  </div>
-                  <div class="ncNowCardEditRow">
-                    <input class="ncSettingsInput ncNowTextInput" value="${esc(f.text)}" data-fact-text-id="${esc(f.id)}" placeholder="Descripción del hecho" />
-                    <input type="date" class="ncSettingsInput ncNowDateInput" value="${esc(f.since)}" data-fact-since-id="${esc(f.id)}" />
-                  </div>
-                  <div class="ncNowCardActions">
-                    <button class="ncActionBtn" data-save-fact-edit="${esc(f.id)}">💾 Guardar</button>
-                    <button class="ncActionBtn" data-end-fact="${esc(f.id)}">✋ Ya no es así</button>
-                    <button class="ncActionBtn ncActionBtnDanger" data-delete-fact="${esc(f.id)}">🗑 Borrar</button>
-                  </div>
-                </div>
-              `).join("")}
-            </div>
+  return `
+    <div class="ncStage" style="--area:${meta.color}">
+      ${head}
+      <div class="ncStageText">${esc(f.text)}</div>
+      <div class="ncStageFoot">
+        <span class="ncStageSince">${isFuture ? "" : `desde ${formatShortDate(f.since)}`}</span>
+        <span class="ncStageActions">
+          <button class="ncGhostBtn" data-now="end" data-id="${esc(f.id)}">Terminó</button>
+          <button class="ncGhostBtn" data-now="edit" data-id="${esc(f.id)}">Editar</button>
+        </span>
+      </div>
+    </div>`;
+}
+
+function renderThreadRow(t) {
+  const meta = areaMeta(t.category);
+  return `
+    <div class="ncThread" style="--area:${meta.color}">
+      <span class="ncThreadIcon">${meta.icon}</span>
+      <div class="ncThreadBody">
+        <div class="ncThreadTopic">${esc(t.topic)}</div>
+        <div class="ncThreadMeta">abierto hace ${formatSpan(t.openedAt)}${t.dueDate ? ` · ${dueLabel(t.dueDate)}` : ""}${t.note ? ` · ${esc(t.note)}` : ""}</div>
+      </div>
+      <button class="ncGhostBtn ncGhostBtn--ok" data-now="resolve-thread" data-id="${esc(t.id)}" title="Marcar como resuelto">✓ Hecho</button>
+      <button class="ncGhostBtn ncGhostBtn--icon" data-now="delete-thread" data-id="${esc(t.id)}" title="Borrar" aria-label="Borrar tema">🗑</button>
+    </div>`;
+}
+
+// Línea de vida de un área: etapas y temas resueltos, del más reciente al más antiguo
+function renderAreaTimeline(category, facts, threads) {
+  const meta = areaMeta(category);
+  const items = [
+    ...facts.map((f) => ({ kind: "stage", date: f.since, f })),
+    ...threads.map((t) => ({ kind: "thread", date: t.resolvedAt || t.openedAt, t })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
+
+  const rows = items.map((it) => {
+    if (it.kind === "thread") {
+      return `
+        <li class="ncTl ncTl--thread">
+          <span class="ncTlDot"></span>
+          <div class="ncTlBody">
+            <div class="ncTlTitle">✓ ${esc(it.t.topic)}</div>
+            <div class="ncTlMeta">resuelto ${formatShortDate(it.t.resolvedAt)}${it.t.resolution ? ` · ${esc(it.t.resolution)}` : ""}</div>
           </div>
-        `;
-      }).join("")
-    : `<div class="ncSideEmpty">No hay hechos vigentes activos registrados aún.</div>`;
-
-  const endedHtml = endedFacts.length
-    ? `
-      <details class="ncNowEndedDetails">
-        <summary class="ncNowEndedSummary">📜 Historial de hechos terminados (${endedFacts.length})</summary>
-        <div class="ncNowEndedList">
-          ${endedFacts.map((f) => `
-            <div class="ncNowCard ncNowCardEnded">
-              <div class="ncNowCardHead">
-                <span class="ncTag">${esc(f.category)}</span>
-                <span class="ncNowCardDates">${esc(f.since)} » ${esc(f.until || "hoy")}</span>
-              </div>
-              <div class="ncNowCardText">${esc(f.text)}</div>
-              <div class="ncNowCardActions">
-                <button class="ncActionBtn" data-reactivate-fact="${esc(f.id)}">↩ Reactivar</button>
-                <button class="ncActionBtn ncActionBtnDanger" data-delete-fact="${esc(f.id)}">🗑 Borrar</button>
-              </div>
-            </div>
-          `).join("")}
+        </li>`;
+    }
+    const f = it.f;
+    const active = f.status === "active";
+    const range = active
+      ? `${formatShortDate(f.since)} → hoy · ${formatSpan(f.since)}`
+      : `${formatShortDate(f.since)} → ${formatShortDate(f.until)} · ${formatSpan(f.since, f.until)}`;
+    return `
+      <li class="ncTl ${active ? "ncTl--active" : ""}">
+        <span class="ncTlDot"></span>
+        <div class="ncTlBody">
+          <div class="ncTlTitle">${esc(f.text)}${active ? ` <span class="ncTlNow">ahora</span>` : ""}</div>
+          <div class="ncTlMeta">${range}</div>
+          ${f.endNote ? `<div class="ncTlNote">${esc(f.endNote)}</div>` : ""}
+          ${active ? "" : `
+          <div class="ncTlActions">
+            <button class="ncGhostBtn" data-now="reactivate" data-id="${esc(f.id)}">Sigue vigente</button>
+            <button class="ncGhostBtn ncGhostBtn--danger" data-now="delete-fact" data-id="${esc(f.id)}">Borrar</button>
+          </div>`}
         </div>
-      </details>`
-    : "";
+      </li>`;
+  }).join("");
 
-  // Hilos Abiertos
-  const activeThreads = getOpenThreads({ status: "open" });
+  return `
+    <details class="ncTlArea" style="--area:${meta.color}" ${facts.some((f) => f.status === "active") ? "open" : ""}>
+      <summary><span>${meta.icon} ${esc(meta.label)}</span><span class="ncTlCount">${items.length}</span></summary>
+      <ol class="ncTlList">${rows}</ol>
+    </details>`;
+}
+
+function renderNowNotice() {
+  if (!nowState.notice?.length) return "";
+  return `
+    <div class="ncNowNotice">
+      <div class="ncNowNoticeBody">
+        ${nowState.notice.map((c) => { const d = describeLifeChange(c); return `<div>${d.icon} ${esc(d.text)}</div>`; }).join("")}
+        <div class="ncNowNoticeWhy">Lo cerré porque empezó una etapa nueva en esa área.</div>
+      </div>
+      <div class="ncNowNoticeActions">
+        <button class="ncGhostBtn" data-now="notice-undo">Deshacer</button>
+        <button class="ncGhostBtn ncGhostBtn--icon" data-now="notice-close" aria-label="Cerrar aviso">✕</button>
+      </div>
+    </div>`;
+}
+
+export function renderNowTab() {
+  // Una vez por sesión: cerrar búsquedas que ya se cumplieron (ej. "buscando trabajo" con trabajo nuevo)
+  if (!nowState.reconciled) {
+    nowState.reconciled = true;
+    const changes = reconcileThreadsWithFacts();
+    if (changes.length) nowState.notice = changes;
+  }
+
+  const pendingFacts = getLifeFacts({ status: "pending" });
+  const activeFacts = getLifeFacts({ status: "active" })
+    .sort((a, b) => VALID_CATEGORIES.indexOf(a.category) - VALID_CATEGORIES.indexOf(b.category) || b.since.localeCompare(a.since));
+  const allFacts = getLifeFacts({ status: "all" }).filter((f) => !f.pendingConfirm);
+  const openThreads = getOpenThreads({ status: "open" })
+    .sort((a, b) => (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || b.lastMentioned.localeCompare(a.lastMentioned));
   const resolvedThreads = getOpenThreads({ status: "resolved" });
 
-  const threadsHtml = activeThreads.length
-    ? activeThreads.map((t) => `
-        <div class="ncNowCard">
-          <div class="ncNowCardHead">
-            <span class="ncTag">hilo en curso</span>
-            <span class="ncNowCardDuration">${t.dueDate ? `Fecha tope: ${esc(t.dueDate)}` : `Abierto: ${esc(t.openedAt)}`}</span>
+  const pendingHtml = pendingFacts.length ? `
+    <section class="ncNowSection ncNowSection--pending">
+      <div class="ncNowSectionHead"><h3>Carl cree que…</h3></div>
+      ${pendingFacts.map((f) => `
+        <div class="ncStage" style="--area:${areaMeta(f.category).color}">
+          <div class="ncStageHead"><span class="ncStageArea">${areaMeta(f.category).icon} ${esc(areaMeta(f.category).label)}</span></div>
+          <div class="ncStageText">${esc(f.text)}</div>
+          <div class="ncNowRow">
+            <button class="ncActionBtn ncActionBtnPrimary" data-now="confirm-pending" data-id="${esc(f.id)}">Sí, es así</button>
+            <button class="ncActionBtn" data-now="discard-pending" data-id="${esc(f.id)}">No</button>
           </div>
-          <div class="ncNowCardText">${esc(t.topic)}</div>
-          ${t.note ? `<div class="ncNowCardMeta">${esc(t.note)}</div>` : ""}
-          <div class="ncNowCardActions">
-            <button class="ncActionBtn ncActionBtnPrimary" data-resolve-thread="${esc(t.id)}">✓ Resolver</button>
-            <button class="ncActionBtn ncActionBtnDanger" data-delete-thread="${esc(t.id)}">🗑 Borrar</button>
-          </div>
-        </div>
-      `).join("")
-    : `<div class="ncSideEmpty">No hay hilos o pendientes abiertos actualmente.</div>`;
+        </div>`).join("")}
+    </section>` : "";
 
-  const resolvedThreadsHtml = resolvedThreads.length
-    ? `
-      <details class="ncNowEndedDetails">
-        <summary class="ncNowEndedSummary">📜 Hilos resueltos (${resolvedThreads.length})</summary>
-        <div class="ncNowEndedList">
-          ${resolvedThreads.map((t) => `
-            <div class="ncNowCard ncNowCardEnded">
-              <div class="ncNowCardHead">
-                <span class="ncTag">resuelto</span>
-                <span class="ncNowCardDates">Resuelto el ${esc(t.resolvedAt || "recientemente")}</span>
-              </div>
-              <div class="ncNowCardText">${esc(t.topic)}</div>
-              <div class="ncNowCardActions">
-                <button class="ncActionBtn ncActionBtnDanger" data-delete-thread="${esc(t.id)}">🗑 Borrar</button>
-              </div>
-            </div>
-          `).join("")}
-        </div>
-      </details>`
-    : "";
+  const addStageHtml = nowState.addStageOpen ? `
+    <div class="ncNowComposer">
+      <input class="ncSettingsInput" id="ncNowNewText" placeholder="¿Qué está pasando? (ej: Trabajo en Empresa B)" maxlength="200" />
+      <div class="ncNowRow">
+        <select class="ncSettingsInput" id="ncNowNewCat">${areaOptions("trabajo")}</select>
+        <input type="date" class="ncSettingsInput" id="ncNowNewSince" value="${todayLocalStr()}" title="Desde cuándo" />
+      </div>
+      <div class="ncNowRow">
+        <button class="ncActionBtn ncActionBtnPrimary" data-now="add-stage-save">Añadir etapa</button>
+        <button class="ncActionBtn" data-now="add-stage-toggle">Cancelar</button>
+      </div>
+      <div class="ncNowHint">En Trabajo y Vivienda, la etapa nueva cierra la anterior.</div>
+    </div>` : "";
+
+  const addThreadHtml = nowState.addThreadOpen ? `
+    <div class="ncNowComposer">
+      <input class="ncSettingsInput" id="ncNowThreadTopic" placeholder="Tema en curso (ej: entrevista el jueves)" maxlength="200" />
+      <div class="ncNowRow">
+        <select class="ncSettingsInput" id="ncNowThreadCat">${areaOptions("otro")}</select>
+        <input type="date" class="ncSettingsInput" id="ncNowThreadDueDate" title="Fecha tope (opcional)" />
+      </div>
+      <div class="ncNowRow">
+        <button class="ncActionBtn ncActionBtnPrimary" data-now="add-thread-save">Añadir tema</button>
+        <button class="ncActionBtn" data-now="add-thread-toggle">Cancelar</button>
+      </div>
+    </div>` : "";
+
+  const timelineAreas = VALID_CATEGORIES
+    .map((cat) => ({
+      cat,
+      facts: allFacts.filter((f) => f.category === cat),
+      threads: resolvedThreads.filter((t) => t.category === cat),
+    }))
+    .filter((a) => a.facts.length + a.threads.length > 0);
 
   return `
     <div class="ncNowWrap">
       <div class="ncNowHeader">
-        <div class="ncNowTitle">🧭 Situación Actual & Hechos Vigentes</div>
-        <div class="ncNowSub">Lo que Carl sabe sobre tu vida ahora mismo. Puedes editar, confirmar o corregir cualquier dato.</div>
+        <div class="ncNowTitle">Ahora</div>
+        <div class="ncNowSub">Tu situación actual y cómo ha ido cambiando. Carl la tiene presente en cada conversación.</div>
       </div>
 
+      ${renderNowNotice()}
       ${pendingHtml}
 
-      <!-- Formulario para agregar hecho manualmente -->
-      <div class="ncNowNewComposer">
-        <input class="ncSettingsInput ncNowNewText" id="ncNowNewText" placeholder="Nuevo hecho de vida (ej: Dejé mi trabajo)..." />
-        <select class="ncSettingsInput ncNowNewCat" id="ncNowNewCat">
-          ${VALID_CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join("")}
-        </select>
-        <input type="date" class="ncSettingsInput ncNowNewSince" id="ncNowNewSince" value="${new Date().toISOString().split("T")[0]}" />
-        <button class="ncActionBtn ncActionBtnPrimary" id="btnNcNowAdd">+ Agregar hecho</button>
-      </div>
-
-      <div class="ncNowActiveSection">
-        ${activeHtml}
-      </div>
-
-      ${endedHtml}
-
-      <!-- Sección de Hilos Abiertos -->
-      <div class="ncNowThreadsSection" style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,.08); padding-top: 16px;">
-        <div class="ncNowSectionTitle" style="color: #818cf8;">📌 Hilos y Pendientes Abiertos</div>
-
-        <div class="ncNowNewComposer" style="margin-bottom: 12px;">
-          <input class="ncSettingsInput" id="ncNowThreadTopic" placeholder="Nuevo hilo o tema en curso (ej: buscando trabajo, entrevista el jueves)..." style="flex: 3; min-width: 200px;" />
-          <input type="date" class="ncSettingsInput" id="ncNowThreadDueDate" style="flex: 1; min-width: 130px;" title="Fecha tope opcional" />
-          <button class="ncActionBtn ncActionBtnPrimary" id="btnNcNowAddThread">+ Abrir Hilo</button>
+      <section class="ncNowSection">
+        <div class="ncNowSectionHead">
+          <h3>Tu momento</h3>
+          <button class="ncGhostBtn" data-now="add-stage-toggle">+ Etapa</button>
         </div>
+        ${addStageHtml}
+        ${activeFacts.length
+          ? `<div class="ncStageGrid">${activeFacts.map(renderStageCard).join("")}</div>`
+          : `<div class="ncNowEmpty">Todavía no hay nada aquí. Cuéntale a Carl qué está pasando en tu vida (trabajo, casa, proyectos…) o añade una etapa.</div>`}
+      </section>
 
-        <div class="ncNowCatList">
-          ${threadsHtml}
+      <section class="ncNowSection">
+        <div class="ncNowSectionHead">
+          <h3>En curso${openThreads.length ? ` <span class="ncNowCount">${openThreads.length}</span>` : ""}</h3>
+          <button class="ncGhostBtn" data-now="add-thread-toggle">+ Tema</button>
         </div>
+        ${addThreadHtml}
+        ${openThreads.length
+          ? `<div class="ncThreadList">${openThreads.map(renderThreadRow).join("")}</div>`
+          : `<div class="ncNowEmpty">Nada pendiente. Cuando menciones algo en curso (una búsqueda, una entrevista, una espera) aparecerá aquí.</div>`}
+      </section>
 
-        ${resolvedThreadsHtml}
-      </div>
+      ${timelineAreas.length ? `
+      <section class="ncNowSection">
+        <div class="ncNowSectionHead"><h3>Línea de vida</h3></div>
+        ${timelineAreas.map((a) => renderAreaTimeline(a.cat, a.facts, a.threads)).join("")}
+      </section>` : ""}
     </div>
   `;
 }
 
 function wireNowTabEvents(root) {
-  root.querySelector("#btnNcNowAdd")?.addEventListener("click", () => {
-    const textEl = root.querySelector("#ncNowNewText");
-    const catEl = root.querySelector("#ncNowNewCat");
-    const sinceEl = root.querySelector("#ncNowNewSince");
-    const text = textEl?.value?.trim();
-    if (!text) return;
-    upsertLifeFact({
-      text,
-      category: catEl?.value || "otro",
-      since: sinceEl?.value || new Date().toISOString().split("T")[0],
-      source: "user_said",
-    });
+  const wrap = root.querySelector(".ncNowWrap");
+  if (!wrap) return;
+  const field = (card, name) => card?.querySelector(`[data-now-field="${name}"]`)?.value?.trim() || "";
+
+  wrap.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-now]");
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const card = btn.closest(".ncStage");
+
+    switch (btn.dataset.now) {
+      case "add-stage-toggle":
+        nowState.addStageOpen = !nowState.addStageOpen;
+        break;
+      case "add-stage-save": {
+        const text = root.querySelector("#ncNowNewText")?.value?.trim();
+        if (!text) return;
+        upsertLifeFact({
+          text,
+          category: root.querySelector("#ncNowNewCat")?.value || "otro",
+          since: root.querySelector("#ncNowNewSince")?.value || todayLocalStr(),
+          source: "user_said",
+        });
+        nowState.addStageOpen = false;
+        break;
+      }
+      case "edit":
+        nowState.editId = id;
+        nowState.endingId = null;
+        break;
+      case "edit-save": {
+        const text = field(card, "text");
+        if (!text) return;
+        updateLifeFact(id, { text, category: field(card, "category"), since: field(card, "since") });
+        nowState.editId = null;
+        break;
+      }
+      case "edit-cancel":
+        nowState.editId = null;
+        break;
+      case "end":
+        nowState.endingId = id;
+        nowState.editId = null;
+        break;
+      case "end-confirm":
+        endLifeFact(id, { until: field(card, "until"), endNote: field(card, "endNote") });
+        nowState.endingId = null;
+        break;
+      case "end-cancel":
+        nowState.endingId = null;
+        break;
+      case "reactivate":
+        reactivateLifeFact(id);
+        break;
+      case "delete-fact":
+        if (!confirm("¿Borrar esta etapa? Desaparece también de la línea de vida.")) return;
+        deleteLifeFact(id);
+        nowState.editId = null;
+        break;
+      case "confirm-pending":
+        confirmPendingLifeFact(id);
+        break;
+      case "discard-pending":
+        discardPendingLifeFact(id);
+        break;
+      case "add-thread-toggle":
+        nowState.addThreadOpen = !nowState.addThreadOpen;
+        break;
+      case "add-thread-save": {
+        const topic = root.querySelector("#ncNowThreadTopic")?.value?.trim();
+        if (!topic) return;
+        openThread({
+          topic,
+          category: root.querySelector("#ncNowThreadCat")?.value || null,
+          dueDate: root.querySelector("#ncNowThreadDueDate")?.value || null,
+        });
+        nowState.addThreadOpen = false;
+        break;
+      }
+      case "resolve-thread":
+        resolveThread(id);
+        break;
+      case "delete-thread":
+        if (!confirm("¿Borrar este tema?")) return;
+        deleteThread(id);
+        break;
+      case "notice-undo":
+        undoLifeChanges(nowState.notice || []);
+        nowState.notice = null;
+        break;
+      case "notice-close":
+        nowState.notice = null;
+        break;
+      default:
+        return;
+    }
     fullRerender();
-  });
-
-  root.querySelectorAll("[data-confirm-pending-fact]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-confirm-pending-fact");
-      confirmPendingLifeFact(id);
-      fullRerender();
-    });
-  });
-
-  root.querySelectorAll("[data-discard-pending-fact]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-discard-pending-fact");
-      discardPendingLifeFact(id);
-      fullRerender();
-    });
-  });
-
-  root.querySelectorAll("[data-save-fact-edit]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-save-fact-edit");
-      const textEl = root.querySelector(`[data-fact-text-id="${CSS.escape(id)}"]`);
-      const sinceEl = root.querySelector(`[data-fact-since-id="${CSS.escape(id)}"]`);
-      const text = textEl?.value?.trim();
-      if (!text) return;
-      upsertLifeFact({ id, text, since: sinceEl?.value });
-      fullRerender();
-    });
-  });
-
-  root.querySelectorAll("[data-end-fact]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-end-fact");
-      endLifeFact(id);
-      fullRerender();
-    });
-  });
-
-  root.querySelectorAll("[data-reactivate-fact]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-reactivate-fact");
-      upsertLifeFact({ id, status: "active", lastConfirmed: new Date().toISOString().split("T")[0] });
-      fullRerender();
-    });
-  });
-
-  root.querySelectorAll("[data-delete-fact]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-delete-fact");
-      deleteLifeFact(id);
-      fullRerender();
-    });
-  });
-
-  root.querySelector("#btnNcNowAddThread")?.addEventListener("click", () => {
-    const topicEl = root.querySelector("#ncNowThreadTopic");
-    const dateEl = root.querySelector("#ncNowThreadDueDate");
-    const topic = topicEl?.value?.trim();
-    if (!topic) return;
-    openThread({
-      topic,
-      dueDate: dateEl?.value || null,
-    });
-    fullRerender();
-  });
-
-  root.querySelectorAll("[data-resolve-thread]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-resolve-thread");
-      resolveThread(id);
-      fullRerender();
-    });
-  });
-
-  root.querySelectorAll("[data-delete-thread]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = btn.getAttribute("data-delete-thread");
-      deleteThread(id);
-      fullRerender();
-    });
   });
 }
 
@@ -1604,6 +1736,13 @@ function wireInputBarEvents(root) {
 }
 
 function wireMessageEvents(root) {
+  root.querySelectorAll("[data-undo-life]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      undoMessageLifeChanges(btn.getAttribute("data-undo-life"));
+      rerenderMessages(root);
+    });
+  });
+
   const btnTrace = root.querySelector("#btnTraceToggle");
   if (btnTrace) {
     btnTrace.addEventListener("click", () => {
@@ -3114,52 +3253,111 @@ function ncCss() {
   }
   @keyframes ncFadeOut { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
 
-  /* Now tab (Situación Actual) */
-  .ncNowWrap {
-    background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
-    border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 16px;
+  /* Pestaña Ahora: tu momento, en curso y línea de vida */
+  .ncNowWrap { display: flex; flex-direction: column; gap: 22px; padding: 4px 2px 40px; max-width: 760px; margin: 0 auto; width: 100%; }
+  .ncNowTitle { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
+  .ncNowSub { font-size: 13px; opacity: .65; margin-top: 4px; line-height: 1.45; }
+  .ncNowSection { display: flex; flex-direction: column; gap: 10px; }
+  .ncNowSectionHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .ncNowSectionHead h3 { margin: 0; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; opacity: .6; display: flex; align-items: center; gap: 6px; }
+  .ncNowSection--pending .ncNowSectionHead h3 { color: #fbbf24; opacity: 1; }
+  .ncNowCount { background: rgba(255,255,255,.1); border-radius: 10px; padding: 1px 7px; font-size: 11px; letter-spacing: 0; }
+  .ncNowEmpty { font-size: 13px; opacity: .55; line-height: 1.5; padding: 14px; border: 1px dashed rgba(255,255,255,.12); border-radius: 14px; }
+  .ncNowRow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .ncNowRow > .ncSettingsInput { flex: 1; min-width: 130px; }
+  .ncNowGrow { flex: 2 !important; }
+  .ncNowPushRight { margin-left: auto; }
+  .ncNowAsk { font-size: 13px; font-weight: 600; }
+  .ncNowHint { font-size: 11px; opacity: .5; }
+  .ncNowComposer {
+    display: flex; flex-direction: column; gap: 8px; padding: 12px;
+    background: rgba(124,92,255,.08); border: 1px solid rgba(124,92,255,.25); border-radius: 14px;
   }
-  .ncNowHeader { margin-bottom: 4px; }
-  .ncNowTitle { font-size: 16px; font-weight: 800; }
-  .ncNowSub { font-size: 12px; opacity: .65; margin-top: 3px; }
-  .ncNowPendingBox {
-    background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.3);
-    border-radius: 14px; padding: 12px;
+
+  .ncGhostBtn {
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: inherit;
+    border-radius: 10px; padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
   }
-  .ncNowSectionTitle { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; color: #fbbf24; }
-  .ncNowPendingList { display: flex; flex-direction: column; gap: 8px; }
-  .ncNowCard {
-    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09);
-    border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
-  }
-  .ncNowCardPending { border-color: rgba(251,191,36,.4); background: rgba(251,191,36,.05); }
-  .ncNowCardEnded { opacity: .7; border-style: dashed; }
-  .ncNowCardHead { display: flex; justify-content: space-between; align-items: center; }
-  .ncTagPending { background: rgba(251,191,36,.25); color: #fde047; }
-  .ncNowCardSource { font-size: 10px; opacity: .5; }
-  .ncNowCardText { font-size: 14px; font-weight: 600; line-height: 1.4; }
-  .ncNowCardMeta { font-size: 11px; opacity: .6; }
-  .ncNowCardDuration { font-size: 11px; opacity: .7; }
-  .ncNowCardDates { font-size: 11px; opacity: .6; }
-  .ncNowCardEditRow { display: flex; gap: 8px; flex-wrap: wrap; }
-  .ncNowTextInput { flex: 2; min-width: 200px; }
-  .ncNowDateInput { flex: 1; min-width: 130px; }
-  .ncNowCardActions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ncGhostBtn:hover { background: rgba(255,255,255,.12); }
+  .ncGhostBtn--ok { color: #34d399; border-color: rgba(52,211,153,.35); }
+  .ncGhostBtn--danger { color: #fb7185; border-color: rgba(251,113,133,.3); }
+  .ncGhostBtn--icon { padding: 5px 8px; opacity: .6; }
   .ncActionBtnDanger { border-color: rgba(251,113,133,.4); color: #fb7185; }
-  .ncNowNewComposer {
-    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-    background: rgba(124,92,255,.08); border: 1px solid rgba(124,92,255,.2);
-    border-radius: 12px; padding: 12px;
+
+  /* Tarjetas de etapa (tu momento) */
+  .ncStageGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .ncStage {
+    position: relative; display: flex; flex-direction: column; gap: 8px; padding: 14px 14px 12px 16px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--area) 14%, transparent), rgba(255,255,255,.03));
+    border: 1px solid color-mix(in srgb, var(--area) 35%, transparent); border-radius: 16px; overflow: hidden;
   }
-  .ncNowNewText { flex: 3; min-width: 200px; }
-  .ncNowNewCat  { flex: 1; min-width: 110px; }
-  .ncNowNewSince { flex: 1; min-width: 130px; }
-  .ncNowCatGroup { margin-bottom: 12px; }
-  .ncNowCatTitle { font-size: 11px; font-weight: 800; opacity: .55; letter-spacing: .6px; margin-bottom: 8px; }
-  .ncNowCatList { display: flex; flex-direction: column; gap: 8px; }
-  .ncNowEndedDetails { margin-top: 12px; border-top: 1px solid rgba(255,255,255,.08); padding-top: 12px; }
-  .ncNowEndedSummary { cursor: pointer; font-size: 13px; font-weight: 700; opacity: .8; }
-  .ncNowEndedList { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .ncStage::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--area); }
+  .ncStage--editing { grid-column: 1 / -1; }
+  .ncStageHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .ncStageArea { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; color: var(--area); }
+  .ncStageSpan { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: rgba(0,0,0,.25); white-space: nowrap; }
+  .ncStageText { font-size: 16px; font-weight: 700; line-height: 1.35; word-break: break-word; }
+  .ncStageFoot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ncStageSince { font-size: 12px; opacity: .6; }
+  .ncStageActions { display: flex; gap: 6px; }
+
+  /* Temas en curso */
+  .ncThreadList { display: flex; flex-direction: column; gap: 8px; }
+  .ncThread {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09);
+    border-left: 3px solid var(--area); border-radius: 12px;
+  }
+  .ncThreadIcon { font-size: 18px; flex-shrink: 0; }
+  .ncThreadBody { flex: 1; min-width: 0; }
+  .ncThreadTopic { font-size: 14px; font-weight: 600; line-height: 1.35; word-break: break-word; }
+  .ncThreadMeta { font-size: 11px; opacity: .65; margin-top: 2px; }
+  .ncDue { font-weight: 700; }
+  .ncDue--soon { color: #fbbf24; }
+  .ncDue--late { color: #fb7185; }
+
+  /* Línea de vida */
+  .ncTlArea { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 4px 12px; }
+  .ncTlArea > summary {
+    list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 0; font-size: 14px; font-weight: 700;
+  }
+  .ncTlArea > summary::-webkit-details-marker { display: none; }
+  .ncTlCount { font-size: 11px; opacity: .55; font-weight: 600; }
+  .ncTlList { list-style: none; margin: 0; padding: 4px 0 10px; }
+  .ncTl { position: relative; display: flex; gap: 12px; padding-bottom: 14px; }
+  .ncTl::before { content: ""; position: absolute; left: 5px; top: 14px; bottom: 0; width: 2px; background: rgba(255,255,255,.1); }
+  .ncTl:last-child { padding-bottom: 2px; }
+  .ncTl:last-child::before { display: none; }
+  .ncTlDot { width: 12px; height: 12px; border-radius: 50%; margin-top: 3px; flex-shrink: 0; border: 2px solid var(--area); background: #0f0d19; z-index: 1; }
+  .ncTl--active .ncTlDot { background: var(--area); box-shadow: 0 0 0 4px color-mix(in srgb, var(--area) 25%, transparent); }
+  .ncTl--thread .ncTlDot { width: 8px; height: 8px; margin: 5px 2px 0; border-width: 0; background: rgba(255,255,255,.3); }
+  .ncTlBody { flex: 1; min-width: 0; }
+  .ncTlTitle { font-size: 14px; font-weight: 600; line-height: 1.35; word-break: break-word; }
+  .ncTl--thread .ncTlTitle { font-size: 13px; font-weight: 500; opacity: .75; }
+  .ncTlNow { font-size: 10px; font-weight: 800; text-transform: uppercase; color: var(--area); margin-left: 4px; }
+  .ncTlMeta { font-size: 12px; opacity: .55; margin-top: 2px; }
+  .ncTlNote { font-size: 12px; opacity: .7; margin-top: 4px; font-style: italic; }
+  .ncTlActions { display: flex; gap: 6px; margin-top: 6px; }
+
+  /* Aviso de cambios automáticos */
+  .ncNowNotice {
+    display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 12px;
+    background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.3); border-radius: 14px; font-size: 13px;
+  }
+  .ncNowNoticeBody { display: flex; flex-direction: column; gap: 3px; }
+  .ncNowNoticeWhy { font-size: 11px; opacity: .6; }
+  .ncNowNoticeActions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* Aviso en el chat cuando la IA actualiza la situación */
+  .ncLifeCard {
+    margin-top: 6px; padding: 8px 10px; max-width: 100%;
+    background: rgba(124,92,255,.08); border: 1px solid rgba(124,92,255,.25); border-radius: 12px; font-size: 12px;
+  }
+  .ncLifeCardHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; }
+  .ncLifeCardList { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; opacity: .9; }
+  .ncLifeCard--undone { opacity: .55; }
+  .ncLifeCard--undone .ncLifeCardList { text-decoration: line-through; }
 
   /* Mobile coverage row — hidden on desktop (shown in side panel), visible on mobile */
   .ncMobileCovRow {

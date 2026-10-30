@@ -6,6 +6,8 @@
  * dinero, salud, proyectos, relaciones) con fechas reales y duraciones calculadas por código.
  */
 
+import { todayLocalStr } from "./lifeDates.js";
+
 export const LIFE_FACTS_KEY = "memorycarl_life_facts";
 
 export const VALID_CATEGORIES = [
@@ -17,6 +19,53 @@ export const VALID_CATEGORIES = [
   "proyecto",
   "otro",
 ];
+
+/** Nombre e icono de cada área de vida (para la UI y los avisos) */
+export const AREA_META = {
+  trabajo:    { label: "Trabajo",    icon: "💼", color: "#60a5fa" },
+  dinero:     { label: "Dinero",     icon: "💰", color: "#fbbf24" },
+  vivienda:   { label: "Vivienda",   icon: "🏠", color: "#fb923c" },
+  relaciones: { label: "Relaciones", icon: "❤️", color: "#f472b6" },
+  salud:      { label: "Salud",      icon: "🩺", color: "#34d399" },
+  proyecto:   { label: "Proyectos",  icon: "🚀", color: "#a78bfa" },
+  otro:       { label: "Otros",      icon: "✨", color: "#94a3b8" },
+};
+
+/**
+ * Áreas donde normalmente hay una sola situación vigente a la vez:
+ * una etapa nueva reemplaza a la anterior si no se indica otra cosa.
+ * En el resto (relaciones, salud, proyectos…) pueden convivir varias.
+ */
+export const EXCLUSIVE_CATEGORIES = ["trabajo", "vivienda"];
+
+// Palabras que delatan el área de un texto libre (sin tildes, en minúsculas)
+const AREA_KEYWORDS = {
+  trabajo: ["trabaj", "emple", "chamba", "entrevista", "jefe", "oficina", "sueldo", "contrat", "renunci", "despid", "cv", "curriculum", "linkedin", "postul", "freelance", "cliente"],
+  vivienda: ["casa", "depa", "departamento", "alquiler", "mudanz", "mudar", "cuarto", "vivienda", "inquilin", "hipoteca"],
+  dinero: ["deuda", "dinero", "plata", "ahorr", "prestamo", "pagar", "banco", "tarjeta", "presupuesto", "soles"],
+  salud: ["salud", "medic", "doctor", "dentist", "terapia", "psicolog", "dolor", "gym", "gimnasio", "dieta", "enferm", "ansiedad", "dormir", "examen"],
+  relaciones: ["novi", "pareja", "esposa", "esposo", "amig", "familia", "mama", "papa", "herman", "hij", "relacion"],
+  proyecto: ["proyecto", "app", "curso", "estudi", "aprender", "negocio", "emprend", "lanzar", "tesis"],
+};
+
+/** Quita tildes y pasa a minúsculas, para comparar textos. */
+export function normalizeText(str = "") {
+  return String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+/**
+ * Deduce el área de vida de un texto libre. Devuelve "otro" si no hay pistas.
+ * @param {string} text
+ * @returns {string}
+ */
+export function inferArea(text = "") {
+  const lower = normalizeText(text);
+  if (!lower) return "otro";
+  for (const [area, words] of Object.entries(AREA_KEYWORDS)) {
+    if (words.some((w) => lower.includes(w))) return area;
+  }
+  return "otro";
+}
 
 const SPANISH_MONTH_SHORT = [
   "ene", "feb", "mar", "abr", "may", "jun",
@@ -46,7 +95,17 @@ let lastInjectedBlockStats = {
 };
 
 function getTodayStr() {
-  return new Date().toISOString().split("T")[0];
+  return todayLocalStr();
+}
+
+function copy(obj) {
+  return obj ? JSON.parse(JSON.stringify(obj)) : null;
+}
+
+// Registra un cambio con su estado anterior y posterior, para poder deshacerlo
+function recordChange(changes, kind, before, after) {
+  if (!Array.isArray(changes)) return;
+  changes.push({ store: "fact", kind, id: (after || before).id, before: copy(before), after: copy(after) });
 }
 
 function parseDateStr(dateStr) {
@@ -79,7 +138,9 @@ export function calculateDurationString(sinceStr) {
     ? `${dayNum} ${monthName} ${yearNum}`
     : `${dayNum} ${monthName}`;
 
-  if (diffDays <= 0) {
+  if (diffDays < 0) {
+    return `a partir del ${formattedDate}`;
+  } else if (diffDays === 0) {
     return `desde hoy (${formattedDate})`;
   } else if (diffDays < 7) {
     return `desde hace ${diffDays} día${diffDays > 1 ? "s" : ""} (${formattedDate})`;
@@ -93,6 +154,44 @@ export function calculateDurationString(sinceStr) {
     const years = Math.floor(diffDays / 365);
     return `desde hace ${years} año${years > 1 ? "s" : ""} (${formattedDate})`;
   }
+}
+
+/**
+ * Duración entre dos fechas YYYY-MM-DD en texto corto: "3 días", "2 semanas", "5 meses", "1 año".
+ * @param {string} fromStr
+ * @param {string} [toStr] - por defecto hoy
+ * @returns {string}
+ */
+export function formatSpan(fromStr, toStr = getTodayStr()) {
+  const from = parseDateStr(fromStr);
+  const to = parseDateStr(toStr);
+  if (!from || !to) return "";
+  const days = Math.max(0, Math.round((to.getTime() - from.getTime()) / 86400000));
+  if (days === 0) return "menos de un día";
+  if (days < 7) return `${days} día${days > 1 ? "s" : ""}`;
+  if (days < 30) {
+    const w = Math.floor(days / 7);
+    return `${w} semana${w > 1 ? "s" : ""}`;
+  }
+  if (days < 365) {
+    const m = Math.floor(days / 30);
+    return `${m} mes${m > 1 ? "es" : ""}`;
+  }
+  const y = Math.floor(days / 365);
+  const rest = Math.floor((days % 365) / 30);
+  return `${y} año${y > 1 ? "s" : ""}${rest ? ` y ${rest} mes${rest > 1 ? "es" : ""}` : ""}`;
+}
+
+/**
+ * Fecha corta en español: "9 oct" o "9 oct 2025" si no es del año actual.
+ * @param {string} dateStr
+ * @returns {string}
+ */
+export function formatShortDate(dateStr) {
+  const d = parseDateStr(dateStr);
+  if (!d) return "—";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return `${d.getDate()} ${SPANISH_MONTH_SHORT[d.getMonth()]}${sameYear ? "" : ` ${d.getFullYear()}`}`;
 }
 
 /**
@@ -152,6 +251,7 @@ export function sanitizeLifeFact(fact) {
 
   const id = fact.id || `fact_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const pendingConfirm = Boolean(fact.pendingConfirm);
+  const endNote = fact.endNote ? String(fact.endNote).trim().slice(0, 200) : "";
 
   return {
     id,
@@ -163,56 +263,98 @@ export function sanitizeLifeFact(fact) {
     lastConfirmed,
     source,
     pendingConfirm,
+    ...(endNote ? { endNote } : {}),
   };
 }
 
 /**
- * Agrega o actualiza un hecho de vida vigente.
- * Si entra un nuevo hecho activo en una categoría que contradice o reemplaza un hecho anterior,
- * el hecho previo pasa a status "ended" con until = hoy.
+ * Busca hechos por ID exacto o, si no hay ID, por texto (sin tildes ni mayúsculas).
+ * @param {Array} facts
+ * @param {string} idOrMatch
+ * @param {(f: object) => boolean} [filter]
+ * @returns {Array}
+ */
+function findFacts(facts, idOrMatch, filter = () => true) {
+  if (!idOrMatch) return [];
+  const byId = facts.filter((f) => f.id === idOrMatch && filter(f));
+  if (byId.length) return byId;
+  const match = normalizeText(idOrMatch);
+  if (!match) return [];
+  return facts.filter((f) => filter(f) && normalizeText(f.text).includes(match));
+}
+
+/**
+ * Agrega o actualiza un hecho de vida (una "etapa").
+ *
+ * Reemplazo de etapas:
+ * - `replaces` (id o texto, o lista) termina explícitamente esas etapas.
+ * - Sin `replaces`, en áreas exclusivas (trabajo, vivienda) la etapa nueva termina
+ *   a las activas de la misma área. En las demás áreas conviven.
+ * La etapa reemplazada termina en la fecha de inicio de la nueva.
  *
  * @param {object} factInput
+ * @param {{ changes?: Array }} [opts] - si se pasa `changes`, se registran los cambios (para deshacer)
  * @returns {object|null} hecho creado/actualizado
  */
-export function upsertLifeFact(factInput) {
+export function upsertLifeFact(factInput, opts = {}) {
   const sanitized = sanitizeLifeFact(factInput);
   if (!sanitized) return null;
 
   const facts = loadLifeFacts();
   const todayStr = getTodayStr();
 
-  // Buscar si ya existe por ID o texto idéntico/similar (case insensitive)
+  // Buscar si ya existe por ID o texto idéntico (case insensitive)
   const existingIdx = facts.findIndex(
-    (f) => f.id === sanitized.id || f.text.toLowerCase() === sanitized.text.toLowerCase()
+    (f) => f.id === sanitized.id || normalizeText(f.text) === normalizeText(sanitized.text)
   );
 
   if (existingIdx !== -1) {
-    // Si existía como pendiente y ahora viene confirmado, se actualiza
-    facts[existingIdx] = {
-      ...facts[existingIdx],
-      ...sanitized,
-      lastConfirmed: todayStr,
-    };
+    const before = copy(facts[existingIdx]);
+    // Solo se pisan los campos que vienen en la entrada
+    const patch = {};
+    for (const key of ["text", "category", "status", "since", "until", "pendingConfirm", "source", "endNote"]) {
+      if (factInput[key] !== undefined) patch[key] = sanitized[key];
+    }
+    if (patch.status === "active") patch.until = null;
+    facts[existingIdx] = { ...facts[existingIdx], ...patch, lastConfirmed: todayStr };
+    const after = facts[existingIdx];
+    const kind = before.status === "active" && after.status === "ended" ? "fact_ended"
+      : before.status === "ended" && after.status === "active" ? "fact_reactivated"
+      : "fact_updated";
+    recordChange(opts.changes, kind, before, after);
     saveLifeFacts(facts);
     return facts[existingIdx];
   }
 
-  // Manejo de contradicción / reemplazo en la misma categoría si es un nuevo hecho activo
   if (sanitized.status === "active" && !sanitized.pendingConfirm) {
-    facts.forEach((existingFact) => {
-      if (
-        existingFact.category === sanitized.category &&
-        existingFact.status === "active" &&
-        !existingFact.pendingConfirm
-      ) {
-        // Finalizar el hecho antiguo para mantener historial
-        existingFact.status = "ended";
-        existingFact.until = todayStr;
+    const isLive = (f) => f.status === "active" && !f.pendingConfirm;
+    const replaces = [].concat(factInput.replaces || []).filter(Boolean);
+    let toEnd = [];
+    if (replaces.length) {
+      toEnd = replaces.flatMap((r) => findFacts(facts, String(r), isLive));
+    } else if (EXCLUSIVE_CATEGORIES.includes(sanitized.category)) {
+      const sameArea = facts.filter((f) => isLive(f) && f.category === sanitized.category);
+      const newer = sameArea.filter((f) => f.since > sanitized.since);
+      if (newer.length) {
+        // Etapa del pasado: queda terminada justo donde empieza la vigente
+        sanitized.status = "ended";
+        sanitized.until = newer.map((f) => f.since).sort()[0];
+      } else {
+        toEnd = sameArea;
       }
-    });
+    }
+    const until = sanitized.since <= todayStr ? sanitized.since : todayStr;
+    for (const f of new Set(toEnd)) {
+      const before = copy(f);
+      f.status = "ended";
+      f.until = until >= f.since ? until : todayStr;
+      f.replacedBy = sanitized.id;
+      recordChange(opts.changes, "fact_ended", before, f);
+    }
   }
 
   facts.push(sanitized);
+  recordChange(opts.changes, "fact_started", null, sanitized);
   saveLifeFacts(facts);
   return sanitized;
 }
@@ -220,30 +362,65 @@ export function upsertLifeFact(factInput) {
 /**
  * Marca un hecho como finalizado (`status: "ended"`).
  * @param {string} idOrMatchText - ID exacto o fragmento de texto del hecho
+ * @param {{ changes?: Array, until?: string, endNote?: string }} [opts]
  * @returns {boolean} true si se encontró y finalizó
  */
-export function endLifeFact(idOrMatchText) {
-  if (!idOrMatchText) return false;
-  const matchStr = String(idOrMatchText).toLowerCase().trim();
+export function endLifeFact(idOrMatchText, opts = {}) {
   const facts = loadLifeFacts();
+  const targets = findFacts(facts, idOrMatchText, (f) => f.status === "active");
+  if (!targets.length) return false;
+
   const todayStr = getTodayStr();
-
-  let found = false;
-  facts.forEach((f) => {
-    if (
-      f.status === "active" &&
-      (f.id === idOrMatchText || f.text.toLowerCase().includes(matchStr))
-    ) {
-      f.status = "ended";
-      f.until = todayStr;
-      found = true;
-    }
-  });
-
-  if (found) {
-    saveLifeFacts(facts);
+  const until = parseDateStr(opts.until) && opts.until <= todayStr ? opts.until : todayStr;
+  for (const f of targets) {
+    const before = copy(f);
+    f.status = "ended";
+    f.until = until >= f.since ? until : todayStr;
+    if (opts.endNote) f.endNote = String(opts.endNote).trim().slice(0, 200);
+    recordChange(opts.changes, "fact_ended", before, f);
   }
-  return found;
+  saveLifeFacts(facts);
+  return true;
+}
+
+/**
+ * Edita campos de un hecho existente (texto, área, fechas).
+ * @param {string} id
+ * @param {{ text?: string, category?: string, since?: string, until?: string }} patch
+ * @param {{ changes?: Array }} [opts]
+ * @returns {object|null}
+ */
+export function updateLifeFact(id, patch = {}, opts = {}) {
+  const facts = loadLifeFacts();
+  const idx = facts.findIndex((f) => f.id === id);
+  if (idx === -1) return null;
+  const before = copy(facts[idx]);
+  const merged = sanitizeLifeFact({ ...facts[idx], ...patch, id });
+  if (!merged) return null;
+  facts[idx] = { ...facts[idx], ...merged, lastConfirmed: getTodayStr() };
+  recordChange(opts.changes, "fact_updated", before, facts[idx]);
+  saveLifeFacts(facts);
+  return facts[idx];
+}
+
+/**
+ * Vuelve a activar un hecho terminado.
+ * @param {string} id
+ * @param {{ changes?: Array }} [opts]
+ * @returns {object|null}
+ */
+export function reactivateLifeFact(id, opts = {}) {
+  const facts = loadLifeFacts();
+  const fact = facts.find((f) => f.id === id);
+  if (!fact) return null;
+  const before = copy(fact);
+  fact.status = "active";
+  fact.until = null;
+  delete fact.replacedBy;
+  fact.lastConfirmed = getTodayStr();
+  recordChange(opts.changes, "fact_reactivated", before, fact);
+  saveLifeFacts(facts);
+  return fact;
 }
 
 /**
@@ -261,13 +438,16 @@ export function confirmPendingLifeFact(id) {
   fact.status = "active";
   fact.lastConfirmed = getTodayStr();
 
-  // Finalizar otros hechos activos enfrentados en la misma categoría
-  facts.forEach((f) => {
-    if (f.id !== id && f.category === fact.category && f.status === "active" && !f.pendingConfirm) {
-      f.status = "ended";
-      f.until = getTodayStr();
-    }
-  });
+  // En áreas exclusivas, la etapa confirmada reemplaza a las activas de la misma área
+  if (EXCLUSIVE_CATEGORIES.includes(fact.category)) {
+    facts.forEach((f) => {
+      if (f.id !== id && f.category === fact.category && f.status === "active" && !f.pendingConfirm) {
+        f.status = "ended";
+        f.until = getTodayStr();
+        f.replacedBy = id;
+      }
+    });
+  }
 
   saveLifeFacts(facts);
   return fact;
@@ -396,10 +576,10 @@ export function buildLifeFactsPromptBlock(userInput = "") {
     const daysUnconfirmed = Math.floor((todayMs - lastConfMs) / (1000 * 60 * 60 * 24));
     const revalidateTag = daysUnconfirmed >= 45 ? " [por revalidar]" : "";
 
-    return `- [${fact.category.toUpperCase()}] ${fact.text} (${duration})${revalidateTag}`;
+    return `- [${fact.category.toUpperCase()}] id=${fact.id} · ${fact.text} (${duration})${revalidateTag}`;
   });
 
-  const blockText = `\n\n## SITUACIÓN ACTUAL (HECHOS VIGENTES DE SU VIDA)\nEsta es la situación real y vigente del usuario. Úsala como contexto de fondo. No la recites ni la menciones si no viene al caso. Si el mensaje la toca, respóndele con ella presente. Si el usuario dice algo que cambia un hecho, regístralo.\n${factLines.join("\n")}`;
+  const blockText = `\n\n## SITUACIÓN ACTUAL (HECHOS VIGENTES DE SU VIDA)\nEsta es la situación real y vigente del usuario. Úsala como contexto de fondo. No la recites ni la menciones si no viene al caso. Si el mensaje la toca, respóndele con ella presente. Si el usuario dice algo que cambia o termina uno de estos hechos, usa su id en upsertLifeFact.replaces o en endLifeFact.\n${factLines.join("\n")}`;
 
   lastInjectedBlockStats = {
     blockText,

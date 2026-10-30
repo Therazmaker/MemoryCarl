@@ -5,7 +5,14 @@
  * Administra hilos o pendientes en curso (ej: "buscando trabajo", "entrevista el jueves 29", "esperando respuesta de X").
  */
 
+import { todayLocalStr } from "./lifeDates.js";
+import { VALID_CATEGORIES, inferArea, normalizeText } from "./lifeFacts.js";
+
 export const OPEN_THREADS_KEY = "memorycarl_open_threads";
+
+// Hilos que se cierran solos cuando empieza una etapa nueva en su área
+// (ej. "buscando trabajo" al conseguir trabajo)
+const SEARCH_TOPIC_PATTERN = /(busc|busqued|consegu|encontr|postul|esperando respuesta|entrevista)/;
 
 const PROHIBITED_TONE_PATTERNS = [
   /deber[íi][as]?/iu,
@@ -17,7 +24,26 @@ const PROHIBITED_TONE_PATTERNS = [
 ];
 
 function getTodayStr() {
-  return new Date().toISOString().split("T")[0];
+  return todayLocalStr();
+}
+
+function copy(obj) {
+  return obj ? JSON.parse(JSON.stringify(obj)) : null;
+}
+
+function recordChange(changes, kind, before, after) {
+  if (!Array.isArray(changes)) return;
+  changes.push({ store: "thread", kind, id: (after || before).id, before: copy(before), after: copy(after) });
+}
+
+function normalizeCategory(category, topic) {
+  const raw = String(category || "").toLowerCase().trim();
+  return VALID_CATEGORIES.includes(raw) ? raw : inferArea(topic);
+}
+
+/** true si el hilo es una búsqueda o espera que se resuelve al empezar una etapa nueva en su área */
+export function isSearchThread(thread) {
+  return SEARCH_TOPIC_PATTERN.test(normalizeText(thread?.topic));
 }
 
 /**
@@ -29,7 +55,9 @@ export function loadOpenThreads() {
     if (typeof localStorage === "undefined") return [];
     const raw = localStorage.getItem(OPEN_THREADS_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Hilos antiguos sin área: se deduce del texto
+    return parsed.map((t) => (t && !t.category ? { ...t, category: normalizeCategory(null, t.topic) } : t));
   } catch (_e) {
     return [];
   }
@@ -56,7 +84,7 @@ export function saveOpenThreads(threads) {
  * @param {object} threadData - { topic, dueDate?, note? }
  * @returns {object|null}
  */
-export function openThread(threadData) {
+export function openThread(threadData, opts = {}) {
   if (!threadData || typeof threadData !== "object") return null;
   const topic = String(threadData.topic || "").trim();
   if (!topic || topic.length > 200) return null;
@@ -66,13 +94,20 @@ export function openThread(threadData) {
 
   // Si ya existe un hilo abierto idéntico o similar, se actualiza
   const existingIdx = threads.findIndex(
-    (t) => t.status === "open" && t.topic.toLowerCase() === topic.toLowerCase()
+    (t) => t.status === "open" && normalizeText(t.topic) === normalizeText(topic)
   );
 
   if (existingIdx !== -1) {
+    const before = copy(threads[existingIdx]);
     threads[existingIdx].lastMentioned = todayStr;
     if (threadData.dueDate) threads[existingIdx].dueDate = threadData.dueDate;
     if (threadData.note) threads[existingIdx].note = threadData.note;
+    if (threadData.category) threads[existingIdx].category = normalizeCategory(threadData.category, topic);
+    // Volver a mencionar un hilo no es un cambio que valga la pena avisar
+    const after = threads[existingIdx];
+    if (after.dueDate !== before.dueDate || after.note !== before.note || after.category !== before.category) {
+      recordChange(opts.changes, "thread_updated", before, after);
+    }
     saveOpenThreads(threads);
     return threads[existingIdx];
   }
@@ -84,11 +119,13 @@ export function openThread(threadData) {
     status: "open",
     openedAt: threadData.openedAt || todayStr,
     lastMentioned: todayStr,
-    dueDate: threadData.dueDate || null,
+    dueDate: /^\d{4}-\d{2}-\d{2}$/.test(threadData.dueDate || "") ? threadData.dueDate : null,
     note: threadData.note || "",
+    category: normalizeCategory(threadData.category, topic),
   };
 
   threads.push(newThread);
+  recordChange(opts.changes, "thread_opened", null, newThread);
   saveOpenThreads(threads);
   return newThread;
 }
@@ -98,22 +135,24 @@ export function openThread(threadData) {
  * @param {string} idOrMatch - ID exacto o fragmento del topic
  * @returns {boolean} true si se encontró y resolvió
  */
-export function resolveThread(idOrMatch) {
+export function resolveThread(idOrMatch, opts = {}) {
   if (!idOrMatch) return false;
-  const matchStr = String(idOrMatch).toLowerCase().trim();
   const threads = loadOpenThreads();
-  let found = false;
+  // ID exacto primero; si no, por texto sin tildes ni mayúsculas
+  let targets = threads.filter((t) => t.status === "open" && t.id === idOrMatch);
+  if (!targets.length) {
+    const matchStr = normalizeText(idOrMatch);
+    targets = matchStr ? threads.filter((t) => t.status === "open" && normalizeText(t.topic).includes(matchStr)) : [];
+  }
+  const found = targets.length > 0;
 
-  threads.forEach((t) => {
-    if (
-      t.status === "open" &&
-      (t.id === idOrMatch || t.topic.toLowerCase().includes(matchStr))
-    ) {
-      t.status = "resolved";
-      t.resolvedAt = getTodayStr();
-      found = true;
-    }
-  });
+  for (const t of targets) {
+    const before = copy(t);
+    t.status = "resolved";
+    t.resolvedAt = getTodayStr();
+    if (opts.resolution) t.resolution = String(opts.resolution).slice(0, 200);
+    recordChange(opts.changes, "thread_resolved", before, t);
+  }
 
   if (found) {
     saveOpenThreads(threads);
@@ -180,22 +219,23 @@ export function buildOpenThreadsPromptBlock() {
   const selected = sorted.slice(0, 5);
 
   const lines = selected.map((t) => {
+    const area = String(t.category || "otro").toUpperCase();
     const isOverdue = t.dueDate && t.dueDate < todayStr;
     if (isOverdue) {
       if (overdueInjectedCount < 1) {
         overdueInjectedCount++;
         hasOverdueThread = true;
-        return `- [HILO PENDIENTE] "${t.topic}" tenía fecha tope ${t.dueDate} (ya pasó, sin resolver).`;
+        return `- [HILO PENDIENTE · ${area}] id=${t.id} · "${t.topic}" tenía fecha tope ${t.dueDate} (ya pasó, sin resolver).`;
       } else {
         // Ignorar vencimiento extra para no sobrecargar el prompt (máximo 1 seguimiento)
-        return `- [HILO ABIERTO] "${t.topic}" (abierto el ${t.openedAt}).`;
+        return `- [HILO ABIERTO · ${area}] id=${t.id} · "${t.topic}" (abierto el ${t.openedAt}).`;
       }
     }
     const dueStr = t.dueDate ? ` (fecha tope: ${t.dueDate})` : "";
-    return `- [HILO ABIERTO] "${t.topic}"${dueStr}.`;
+    return `- [HILO ABIERTO · ${area}] id=${t.id} · "${t.topic}"${dueStr}.`;
   });
 
-  const blockText = `\n\n## HILOS ABIERTOS (TEMAS PENDIENTES O EN CURSO)\nEstos son temas en curso del usuario. Mantenlos presentes de forma curiosa e informativa. PROHIBIDO presionar o sermonearlas ("deberías", "tienes que", "ya es hora").\n${lines.join("\n")}`;
+  const blockText = `\n\n## HILOS ABIERTOS (TEMAS PENDIENTES O EN CURSO)\nEstos son temas en curso del usuario. Mantenlos presentes de forma curiosa e informativa. PROHIBIDO presionar o sermonearlas ("deberías", "tienes que", "ya es hora"). Si el usuario cuenta que uno se cumplió o ya no aplica, ciérralo con resolveThread usando su id.\n${lines.join("\n")}`;
 
   return {
     blockText,
