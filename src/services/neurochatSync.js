@@ -93,12 +93,31 @@ function saveSyncStatus(status) {
 // Tandas por petición (muy por debajo del límite de 4,5 MB de Vercel)
 const BATCH_LIMITS = { neurons: 150, memories: 100, days: 10, chat: 200 };
 const MAX_BATCHES_PER_PUSH = 40;
+// Tamaño máximo por petición (Vercel rechaza por encima de 4,5 MB)
+const MAX_BODY_BYTES = 3 * 1024 * 1024;
 export const BACKFILL_FLAG = "memorycarl_sync_backfill_v2";
 
 // La neurona viaja completa salvo el embedding (se recalcula en el teléfono)
 function neuronForCloud(n) {
   const { embedding, ...rest } = n;
   return rest;
+}
+
+// El día viaja completo salvo la copia de "deshacer" (duplicaría su tamaño)
+function dayForCloud(d) {
+  const { _previousVersion, ...rest } = d;
+  return rest;
+}
+
+// Último recurso para un elemento que por sí solo no cabe: se sube sin las partes pesadas
+function shrinkPayload(payload) {
+  return {
+    ...payload,
+    days: (payload.days || []).map((d) => ({ ...d, rawChat: (d.rawChat || []).slice(-300).map((m) => ({ role: m.role, content: String(m.content || "").slice(0, 4000), ts: m.ts })) })),
+    neurons: (payload.neurons || []).map(({ evolution, evidence, ...n }) => n),
+    memories: (payload.memories || []).map((m) => ({ ...m, text: String(m.text || "").slice(0, 20000) })),
+    chatHistory: (payload.chatHistory || []).map((c) => ({ ...c, content: String(c.content || "").slice(0, 20000) })),
+  };
 }
 
 function chatForCloud(m) {
@@ -133,11 +152,11 @@ export async function queueFullBackfill() {
  * Prepara una tanda con los cambios pendientes de la cola.
  * @returns {Promise<{ payload: object, sent: object, empty: boolean }>}
  */
-export async function buildOutboxBatch() {
+export async function buildOutboxBatch(limits = BATCH_LIMITS) {
   const box = loadOutbox();
   const take = (kind) => Object.entries(box[kind] || {})
     .sort((x, y) => x[1].seq - y[1].seq)
-    .slice(0, BATCH_LIMITS[kind]);
+    .slice(0, limits[kind]);
   const sent = { neurons: {}, memories: {}, days: {}, chat: {}, appState: 0 };
   const deleted = { neurons: [], memories: [], days: [] };
 
@@ -159,7 +178,7 @@ export async function buildOutboxBatch() {
   const cEntries = take("chat");
   const neurons = nEntries.length ? collect("neurons", nEntries, getAllNeurons({ includeDeleted: true }), (n) => n.id, neuronForCloud) : [];
   const memories = mEntries.length ? collect("memories", mEntries, getAllMemories(), (m) => m.id, (m) => m) : [];
-  const days = dEntries.length ? collect("days", dEntries, getAllDays(), (d) => d.date, (d) => d) : [];
+  const days = dEntries.length ? collect("days", dEntries, getAllDays(), (d) => d.date, dayForCloud) : [];
 
   let chatHistory = [];
   if (cEntries.length) {
@@ -179,7 +198,8 @@ export async function buildOutboxBatch() {
     payload.appState = { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads() };
   }
   const empty = !nEntries.length && !mEntries.length && !dEntries.length && !cEntries.length && !box.appState;
-  return { payload, sent, empty };
+  const items = nEntries.length + mEntries.length + dEntries.length + cEntries.length;
+  return { payload, sent, empty, items };
 }
 
 // Qué secciones fallaron en el servidor, según el texto de cada error
@@ -229,14 +249,30 @@ export async function pushNeurochatNow() {
 
   for (let i = 0; i < MAX_BATCHES_PER_PUSH; i++) {
     let batch;
+    let body;
     try {
-      batch = await buildOutboxBatch();
+      // Se arma la tanda y, si pesa demasiado, se parte a la mitad hasta que quepa
+      let limits = { ...BATCH_LIMITS };
+      batch = await buildOutboxBatch(limits);
+      body = JSON.stringify(batch.payload);
+      while (body.length > MAX_BODY_BYTES && batch.items > 1) {
+        limits = Object.fromEntries(Object.entries(limits).map(([k, v]) => [k, Math.max(1, Math.floor(v / 2))]));
+        if (Object.values(limits).every((v) => v === 1) && batch.items <= 4) {
+          limits = { neurons: 1, memories: 0, days: 0, chat: 0 };
+          for (const k of ["neurons", "memories", "days", "chat"]) {
+            if (Object.keys(loadOutbox()[k] || {}).length) { limits = { neurons: 0, memories: 0, days: 0, chat: 0, [k]: 1 }; break; }
+          }
+        }
+        batch = await buildOutboxBatch(limits);
+        body = JSON.stringify(batch.payload);
+      }
+      // Un solo elemento que no cabe: se sube recortado para no bloquear la cola
+      if (body.length > MAX_BODY_BYTES) body = JSON.stringify(shrinkPayload(batch.payload));
     } catch (err) {
       return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", pending: pendingCount(), message: `No se pudo preparar el envío: ${err.message}` });
     }
     if (batch.empty) break;
 
-    const body = JSON.stringify(batch.payload);
     const sizeKB = Math.round(body.length / 1024);
     totalKB += sizeKB;
     let res;

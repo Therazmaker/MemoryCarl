@@ -100,3 +100,25 @@ test("sin key no intenta subir y lo explica", async () => {
   assert.equal(called, false);
   assert.match(st.message, /Falta la API key/);
 });
+
+test("una tanda demasiado grande se parte y ningún envío supera ~3 MB", async () => {
+  localStorage.clear();
+  localStorage.setItem("memorycarl_api_key", "k");
+  // 6 días con ~900 KB de chat cada uno (10 juntos superarían el límite)
+  const big = "x".repeat(900 * 1024);
+  const days = Array.from({ length: 6 }, (_, i) => ({ id: "d" + i, date: `2026-10-0${i + 1}`, rawChat: [{ role: "user", content: big, ts: i }], summary: "", _previousVersion: { rawChat: [{ content: big }] } }));
+  localStorage.setItem("memorycarl_days_v1", JSON.stringify(days));
+  markChanged("days", days.map((d) => d.date));
+  const sizes = [];
+  global.fetch = async (_url, opts) => {
+    sizes.push(opts.body.length);
+    const body = JSON.parse(opts.body);
+    assert.ok(!("_previousVersion" in body.days[0]));
+    return new Response(JSON.stringify({ data: { daysSynced: body.days.length, errors: [] } }), { status: 200 });
+  };
+  const st = await pushNeurochatNow();
+  assert.equal(st.counts.days, 6);
+  assert.ok(sizes.length >= 2);
+  assert.ok(Math.max(...sizes) <= 3 * 1024 * 1024);
+  assert.equal(pendingCount(), 0);
+});
