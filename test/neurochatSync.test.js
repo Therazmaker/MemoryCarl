@@ -156,3 +156,20 @@ test("al fusionar 'Ahora' con la nube, lo que solo está en el teléfono se marc
   const { payload } = await buildOutboxBatch();
   assert.deepEqual(payload.appState.lifeFacts.map((f) => f.id).sort(), ["local", "nube"]);
 });
+
+test("un borrado sin conexión antes de la primera sync no se pierde", async () => {
+  localStorage.clear();
+  localStorage.setItem("memorycarl_api_key", "k");
+  localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify([{ id: "queda", type: "memory", core: { concept: "Queda", domain: "general", summary: "" }, triggers: [], connections: [], weight: 0.5, emotion: "neutral", evidence: [], embedding: [] }]));
+  markChanged("neurons", [], ["borrada"]);
+  let sent = null;
+  global.fetch = async (url, opts = {}) => {
+    if (String(url).includes("restore")) return new Response(JSON.stringify({ data: { neurons: [{ id: "borrada", concept: "Borrada", domain: "general" }], appState: {} } }), { status: 200 });
+    sent = JSON.parse(opts.body);
+    return new Response(JSON.stringify({ data: { neuronsSynced: sent.neurons.length, errors: [] } }), { status: 200 });
+  };
+  await pushNeurochatNow();
+  const local = JSON.parse(localStorage.getItem("memorycarl_neurochat_neurons")).map((n) => n.id);
+  assert.ok(!local.includes("borrada"), "no se trae de vuelta");
+  assert.deepEqual(sent.deleted.neurons, ["borrada"]);
+});

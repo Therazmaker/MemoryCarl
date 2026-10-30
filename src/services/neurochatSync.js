@@ -16,7 +16,7 @@ import { getAllDays, mergeDaysFromCloud } from "../day/dayStore.js";
 import { loadLifeFacts, LIFE_FACTS_KEY } from "../chat/lifeFacts.js";
 import { loadOpenThreads, OPEN_THREADS_KEY } from "../chat/openThreads.js";
 import { mergeLifeLists } from "../chat/lifeChanges.js";
-import { loadOutbox, markChanged, markAppStateChanged, ackSent, pendingCount, chatKey } from "./syncOutbox.js";
+import { loadOutbox, markChanged, markAppStateChanged, ackSent, pendingCount, pendingDeletes, chatKey } from "./syncOutbox.js";
 import { getFullChatHistory } from "../chat/neurochat.js";
 import { addMissingById, cloudNeuronToLocal, cloudMemoryToLocal, cloudChatToLocal, refreshNeuronsFromCloud } from "./cloudRestore.js";
 
@@ -146,12 +146,13 @@ export async function queueFullBackfill() {
   } catch (_e) {
     return false;
   }
-  markChanged("neurons", getAllNeurons({ includeDeleted: true }).map((n) => n.id));
-  markChanged("memories", getAllMemories().map((m) => m.id));
-  markChanged("days", getAllDays().map((d) => d.date));
+  const keep = { keepDeletes: true };
+  markChanged("neurons", getAllNeurons({ includeDeleted: true }).map((n) => n.id), [], keep);
+  markChanged("memories", getAllMemories().map((m) => m.id), [], keep);
+  markChanged("days", getAllDays().map((d) => d.date), [], keep);
   try {
     const history = await getFullChatHistory();
-    markChanged("chat", history.filter((m) => m?.content).map(chatKey));
+    markChanged("chat", history.filter((m) => m?.content).map(chatKey), [], keep);
   } catch (_e) {}
   markAppStateChanged();
   try { localStorage.setItem(BACKFILL_FLAG, "1"); } catch (_e) {}
@@ -403,7 +404,9 @@ export async function pullNeurochat(opts = {}) {
 
   const addMissing = (storageKey, cloudList, convert, field) => {
     if (!Array.isArray(cloudList) || !cloudList.length) return;
-    const { list, added: n } = addMissingById(readJsonArray(storageKey), cloudList, convert);
+    // No traer de vuelta lo que se borró en el teléfono y aún no se subió
+    const skip = pendingDeletes(field);
+    const { list, added: n } = addMissingById(readJsonArray(storageKey), cloudList.filter((r) => !skip.has(String(r?.id))), convert);
     if (n) {
       localStorage.setItem(storageKey, JSON.stringify(list));
       added[field] = n;

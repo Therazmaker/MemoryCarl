@@ -54,10 +54,15 @@ function notify() {
  * @param {string[]} upserts - ids/claves creados o modificados
  * @param {string[]} [deletes] - ids/claves borrados
  */
-export function markChanged(kind, upserts = [], deletes = []) {
+export function markChanged(kind, upserts = [], deletes = [], { keepDeletes = false } = {}) {
   if (!KINDS.includes(kind) || (!upserts.length && !deletes.length)) return;
   const box = loadOutbox();
-  for (const id of upserts) if (id != null) box[kind][String(id)] = { op: "upsert", seq: ++box.seq };
+  for (const id of upserts) {
+    if (id == null) continue;
+    // La subida inicial no debe pisar un borrado que aún no se subió
+    if (keepDeletes && box[kind][String(id)]?.op === "delete") continue;
+    box[kind][String(id)] = { op: "upsert", seq: ++box.seq };
+  }
   for (const id of deletes) if (id != null) box[kind][String(id)] = { op: "delete", seq: ++box.seq };
   saveOutbox(box);
   notify();
@@ -100,6 +105,12 @@ export function trackListChanges(kind, prevList = [], nextList = [], keyOf = (x)
 /** Clave de un mensaje del chat en la cola. */
 export function chatKey(msg) {
   return `${msg?.ts}_${msg?.role}`;
+}
+
+/** Claves con un borrado pendiente de subir (para no traerlas de vuelta al restaurar). */
+export function pendingDeletes(kind) {
+  const box = loadOutbox();
+  return new Set(Object.entries(box[kind] || {}).filter(([, v]) => v?.op === "delete").map(([k]) => k));
 }
 
 /** Número de cambios pendientes. */
