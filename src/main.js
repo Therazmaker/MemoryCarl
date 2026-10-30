@@ -26541,7 +26541,12 @@ window.financePushToSupabase = async function(isManual = false) {
   try {
     const key = getSyncApiKey();
     if (!key) {
+      // Antes se saltaba en silencio: ahora queda constancia en la consola de la app
       if (isManual) toast("⚠️ Sync no configurado (falta API Key)");
+      if (window.__mcLogs && !window.__mcSyncNoKeyLogged) {
+        window.__mcSyncNoKeyLogged = true;
+        window.__mcLogs.push({ time: new Date().toLocaleTimeString('es-PE'), type: "error", text: "☁️ Supabase: no se sincroniza porque falta la API Key (Configuración → Sync)" });
+      }
       return;
     }
 
@@ -26576,7 +26581,7 @@ window.financePushToSupabase = async function(isManual = false) {
 
     const ts = new Date().toLocaleTimeString('es-PE');
     if (!res.ok) {
-      const errText = await res.text();
+      const errText = `HTTP ${res.status} · ${await res.text()}`;
       console.warn("Supabase Sync Failed:", errText);
       if (window.__mcLogs) {
         window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Sync Error: ${errText.slice(0, 60)}` });
@@ -26591,6 +26596,11 @@ window.financePushToSupabase = async function(isManual = false) {
       }
       if (json?.data?.moodError) {
         toast("⚠️ Error guardando mood: " + json.data.moodError);
+      }
+      if (Array.isArray(json?.data?.errors) && json.data.errors.length) {
+        const msg = json.data.errors.join(" · ");
+        if (window.__mcLogs) window.__mcLogs.push({ time: ts, type: "error", text: `☁️ Supabase guardó con errores: ${msg.slice(0, 160)}` });
+        toast("⚠️ Supabase guardó con errores: " + msg.slice(0, 60));
       }
       if (window.__mcLogs) {
         window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Sincronización exitosa: ${activeCount} activos enviados` });
