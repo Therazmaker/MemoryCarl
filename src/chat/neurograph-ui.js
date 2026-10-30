@@ -74,22 +74,23 @@ const RELATION_LABELS = {
   resuelve:     "resuelve",
 };
 
-// Por debajo de este alpha la simulación se considera estable
-const ALPHA_MIN = 0.002;
+// Posiciones fijas guardadas entre sesiones
+const LAYOUT_KEY = "memorycarl_neurograph_layout_v1";
+const MIN_ZOOM   = 0.05;
+const MAX_ZOOM   = 6;
 
 // ---- Estado interno ----
 const graphState = {
   graph:        { nodes: [], edges: [] },
-  filters:      { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null, showDeleted: false, reach: "importantes", focusId: null },
+  filters:      { domain: null, emotion: null, recentDays: null, search: "", sourceKind: null, manualCategory: null, pinned: null, showDeleted: false, reach: "todos", focusId: null },
   filtered:     { nodes: [], edges: [] },
   selectedNode: null,
-  simulation:   null,
-  positions:    {},    // id → { x, y, vx, vy }
+  detailOpen:   false, // hoja de detalle abierta (la selección puede existir sin ella)
+  positions:    {},    // id → { x, y } en coordenadas del mundo, fijas
   zoom:         1,
   pan:          { x: 0, y: 0 },
-  dragging:     null,  // id del nodo dragging
-  panning:      false,
-  panStart:     { x: 0, y: 0 },
+  camAnim:      null,  // animación de cámara en curso
+  cameraReady:  false, // la cámara ya se encuadró una vez
   colorBy:      "domain",
   editorMode:   false,
   editorMsg:    "",
@@ -102,7 +103,6 @@ const graphState = {
   dpr:          1,     // devicePixelRatio aplicado al canvas
   resizeObserver: null,
   menuCloseHandler: null,
-  alpha:        1.0,   // simulation cooling
   sessionState: {},
 };
 
@@ -162,140 +162,251 @@ function emotionLabel(emotion) {
   return EMOTION_LABELS[emotion] || emotion;
 }
 
-// Texto de la etiqueta tal como se dibuja bajo el nodo
-function nodeLabel(n) {
-  const maxLabelChars = Math.max(8, Math.floor(getNodeSize(n) / 2.5));
+// Texto de la etiqueta; recortado salvo que se pida completo
+function nodeLabel(n, full = false) {
+  if (full) return n.label;
+  const maxLabelChars = Math.max(10, Math.floor(getNodeSize(n) / 2));
   return n.label.length > maxLabelChars ? n.label.slice(0, maxLabelChars) + "…" : n.label;
 }
 
-// Media anchura aproximada de la etiqueta (sin medir en canvas)
-function labelHalfWidth(n) {
-  return nodeLabel(n).length * getNodeFontSize(n) * 0.29;
+// ---- Layout fijo ----
+// Las posiciones se calculan una vez, se guardan y no se mueven al interactuar.
+// Las neuronas nuevas se colocan junto a sus conexiones sin mover las existentes.
+
+function loadSavedLayout() {
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(LAYOUT_KEY) : null;
+    const parsed = JSON.parse(raw || "{}");
+    const out = {};
+    for (const [id, p] of Object.entries(parsed || {})) {
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) out[id] = { x: p.x, y: p.y };
+    }
+    return out;
+  } catch (_e) { return {}; }
 }
 
-// ---- Posicionamiento inicial ----
-function initPositions(nodes, w, h) {
-  const domains = [...new Set(nodes.map(n => n.domain))];
-  nodes.forEach((n, i) => {
-    if (graphState.positions[n.id]) return;
-    const dIdx   = domains.indexOf(n.domain);
-    const angle  = (dIdx / Math.max(domains.length, 1)) * Math.PI * 2 + i * 0.3;
-    const radius = Math.min(w, h) * 0.28;
-    graphState.positions[n.id] = {
-      x:  w / 2 + Math.cos(angle) * radius + (Math.random() - 0.5) * 80,
-      y:  h / 2 + Math.sin(angle) * radius + (Math.random() - 0.5) * 80,
-      vx: 0,
-      vy: 0,
-    };
-  });
+function saveLayout() {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const out = {};
+    for (const n of graphState.graph.nodes) {
+      const p = graphState.positions[n.id];
+      if (p) out[n.id] = { x: Math.round(p.x), y: Math.round(p.y) };
+    }
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(out));
+  } catch (_e) { /* cuota llena: el layout se recalcula la próxima vez */ }
 }
 
-// ---- Force-directed simulation (ForceAtlas2Based style from Regulación) ----
-function tickSimulation() {
-  const nodes = graphState.filtered.nodes;
-  const edges = graphState.filtered.edges;
-  const pos   = graphState.positions;
-  const alpha = graphState.alpha;
-  if (alpha < ALPHA_MIN) return;
+function buildAdjacency(edges) {
+  const adj = new Map();
+  for (const e of edges) {
+    if (!adj.has(e.source)) adj.set(e.source, new Set());
+    if (!adj.has(e.target)) adj.set(e.target, new Set());
+    adj.get(e.source).add(e.target);
+    adj.get(e.target).add(e.source);
+  }
+  return adj;
+}
 
-  // Parámetros inspirados en Vis.js / ForceAtlas2Based de Regulación:
-  // gravitationalConstant: -30, centralGravity: 0.01, springLength: 80, springConstant: 0.08, damping: 0.4
-  const GRAVITATIONAL_CONSTANT = 30; // constante de repulsión entre nodos
+// Simulación de fuerzas síncrona (estilo ForceAtlas2 de Regulación), sin dibujar.
+// Los nodos en `pinned` no se mueven pero sí empujan a los demás.
+function runLayout(nodes, edges, pinned, iterations) {
+  const GRAVITATIONAL_CONSTANT = 30;
   const CENTRAL_GRAVITY        = 0.01;
   const SPRING_LENGTH          = 85;
   const SPRING_CONSTANT        = 0.08;
   const DAMPING                = 0.72;
+  const MAX_SPEED              = 15;
 
-  const cx = graphState.width  / 2;
-  const cy = graphState.height / 2;
+  const pos = graphState.positions;
+  const live = nodes.filter(n => pos[n.id]);
+  const vel = new Map(live.map(n => [n.id, { vx: 0, vy: 0 }]));
+  const deg = new Map(live.map(n => [n.id, (n.numberOfConnections || 1) + 1]));
+  let alpha = 1;
 
-  // Repulsión ForceAtlas2 (proporcional al grado/tamaño)
-  for (let i = 0; i < nodes.length; i++) {
-    const nodeA = nodes[i];
-    const a = pos[nodeA.id];
-    if (!a) continue;
-    const degA = (nodeA.numberOfConnections || nodeA.degree || 1) + 1;
-
-    for (let j = i + 1; j < nodes.length; j++) {
-      const nodeB = nodes[j];
-      const b = pos[nodeB.id];
-      if (!b) continue;
-      const degB = (nodeB.numberOfConnections || nodeB.degree || 1) + 1;
-
+  for (let it = 0; it < iterations; it++) {
+    for (let i = 0; i < live.length; i++) {
+      const idA = live[i].id;
+      const a = pos[idA];
+      const va = vel.get(idA);
+      for (let j = i + 1; j < live.length; j++) {
+        const idB = live[j].id;
+        const b = pos[idB];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist2 = dx * dx + dy * dy || 1;
+        const dist  = Math.sqrt(dist2);
+        const force = ((GRAVITATIONAL_CONSTANT * 180 * deg.get(idA) * deg.get(idB)) / dist2) * alpha;
+        const vb = vel.get(idB);
+        va.vx -= (dx / dist) * force;
+        va.vy -= (dy / dist) * force;
+        vb.vx += (dx / dist) * force;
+        vb.vy += (dy / dist) * force;
+      }
+    }
+    for (const e of edges) {
+      const a = pos[e.source];
+      const b = pos[e.target];
+      const va = vel.get(e.source);
+      const vb = vel.get(e.target);
+      if (!a || !b || !va || !vb) continue;
       const dx = b.x - a.x;
       const dy = b.y - a.y;
-      const dist2 = dx * dx + dy * dy || 1;
-      const dist  = Math.sqrt(dist2);
-
-      // Fuerza inversamente proporcional a la distancia con masa por conectividad
-      const force = ((GRAVITATIONAL_CONSTANT * 180 * degA * degB) / dist2) * alpha;
-      const nx = dx / dist;
-      const ny = dy / dist;
-
-      a.vx -= nx * force;
-      a.vy -= ny * force;
-      b.vx += nx * force;
-      b.vy += ny * force;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const force = (dist - SPRING_LENGTH) * SPRING_CONSTANT * alpha;
+      va.vx += (dx / dist) * force;
+      va.vy += (dy / dist) * force;
+      vb.vx -= (dx / dist) * force;
+      vb.vy -= (dy / dist) * force;
     }
-  }
-
-  // Resortes en edges (ForceAtlas2 spring model)
-  for (const edge of edges) {
-    const a = pos[edge.source];
-    const b = pos[edge.target];
-    if (!a || !b) continue;
-    const dx   = b.x - a.x;
-    const dy   = b.y - a.y;
-    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-
-    // F = springConstant * (dist - springLength)
-    const force = (dist - SPRING_LENGTH) * SPRING_CONSTANT * alpha;
-    const nx = dx / dist;
-    const ny = dy / dist;
-
-    a.vx += nx * force;
-    a.vy += ny * force;
-    b.vx -= nx * force;
-    b.vy -= ny * force;
-  }
-
-  // Gravedad central suave
-  for (const n of nodes) {
-    const p = pos[n.id];
-    if (!p) continue;
-    p.vx += (cx - p.x) * CENTRAL_GRAVITY * alpha;
-    p.vy += (cy - p.y) * CENTRAL_GRAVITY * alpha;
-  }
-
-  // Integración de velocidad con amortiguación
-  for (const n of nodes) {
-    const p = pos[n.id];
-    if (!p || graphState.dragging === n.id) continue;
-    p.vx *= DAMPING;
-    p.vy *= DAMPING;
-
-    // Limitar velocidad máxima para evitar brincos bruscos
-    const maxSpeed = 15;
-    const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-    if (speed > maxSpeed) {
-      p.vx = (p.vx / speed) * maxSpeed;
-      p.vy = (p.vy / speed) * maxSpeed;
+    for (const n of live) {
+      if (pinned.has(n.id)) continue;
+      const p = pos[n.id];
+      const v = vel.get(n.id);
+      v.vx = (v.vx - p.x * CENTRAL_GRAVITY * alpha) * DAMPING;
+      v.vy = (v.vy - p.y * CENTRAL_GRAVITY * alpha) * DAMPING;
+      const speed = Math.sqrt(v.vx * v.vx + v.vy * v.vy);
+      if (speed > MAX_SPEED) {
+        v.vx = (v.vx / speed) * MAX_SPEED;
+        v.vy = (v.vy / speed) * MAX_SPEED;
+      }
+      p.x += v.vx;
+      p.y += v.vy;
     }
-
-    p.x += p.vx;
-    p.y += p.vy;
-
-    // Contener dentro del canvas, contando el anillo y la etiqueta bajo el nodo
-    const r      = getNodeSize(n);
-    const font   = getNodeFontSize(n);
-    const padX   = Math.min(Math.max(r + 4, labelHalfWidth(n)), graphState.width / 4);
-    const padTop = r + 4;
-    const padBot = r + font + 10;
-    p.x = Math.max(padX,   Math.min(graphState.width  - padX,   p.x));
-    p.y = Math.max(padTop, Math.min(graphState.height - padBot, p.y));
+    alpha *= 0.985;
   }
+}
 
-  graphState.alpha *= 0.991;
+// Garantiza que todas las neuronas del grafo tengan posición. Devuelve true si calculó algo.
+function ensureLayout() {
+  const { nodes, edges } = graphState.graph;
+  const pos = graphState.positions;
+  if (!Object.keys(pos).length) Object.assign(pos, loadSavedLayout());
+
+  const missing = nodes.filter(n => !pos[n.id]);
+  if (!missing.length) return false;
+
+  const fresh = missing.length === nodes.length;
+  const adj = buildAdjacency(edges);
+  const radius = 60 + Math.sqrt(nodes.length) * 40;
+  missing.forEach((n, i) => {
+    // Junto a sus vecinos ya colocados; si no tiene, en una espiral alrededor del centro
+    const placed = [...(adj.get(n.id) || [])].map(id => pos[id]).filter(Boolean);
+    if (placed.length) {
+      const cx = placed.reduce((s, p) => s + p.x, 0) / placed.length;
+      const cy = placed.reduce((s, p) => s + p.y, 0) / placed.length;
+      pos[n.id] = { x: cx + (Math.random() - 0.5) * 60, y: cy + (Math.random() - 0.5) * 60 };
+    } else {
+      const angle = i * 2.399963; // ángulo áureo
+      const r = fresh ? radius * Math.sqrt((i + 0.5) / missing.length) : radius + 40;
+      pos[n.id] = { x: Math.cos(angle) * r, y: Math.sin(angle) * r };
+    }
+  });
+
+  const pinned = fresh ? new Set() : new Set(nodes.filter(n => !missing.includes(n)).map(n => n.id));
+  const iterations = fresh ? (nodes.length > 600 ? 120 : 300) : 120;
+  runLayout(nodes, edges, pinned, iterations);
+  saveLayout();
+  return true;
+}
+
+// ---- Cámara ----
+function canvasToWorld(cx, cy) {
+  return {
+    x: (cx - graphState.pan.x) / graphState.zoom,
+    y: (cy - graphState.pan.y) / graphState.zoom,
+  };
+}
+
+function cameraCenter() {
+  return canvasToWorld(graphState.width / 2, graphState.height / 2);
+}
+
+function setCamera(center, zoom) {
+  graphState.zoom  = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+  graphState.pan.x = graphState.width  / 2 - center.x * graphState.zoom;
+  graphState.pan.y = graphState.height / 2 - center.y * graphState.zoom;
+}
+
+// Mueve la cámara con animación (centro lineal, zoom geométrico)
+function flyTo(center, zoom, duration = 450) {
+  const from = { center: cameraCenter(), zoom: graphState.zoom };
+  const to   = { center, zoom: clamp(zoom, MIN_ZOOM, MAX_ZOOM) };
+  if (!duration) {
+    graphState.camAnim = null;
+    setCamera(to.center, to.zoom);
+    requestFrame();
+    return;
+  }
+  graphState.camAnim = { from, to, start: performance.now(), duration };
+  requestFrame();
+}
+
+function stepCamera(now) {
+  const anim = graphState.camAnim;
+  if (!anim) return;
+  const t = clamp((now - anim.start) / anim.duration, 0, 1);
+  const e = 1 - Math.pow(1 - t, 3); // ease-out
+  setCamera({
+    x: anim.from.center.x + (anim.to.center.x - anim.from.center.x) * e,
+    y: anim.from.center.y + (anim.to.center.y - anim.from.center.y) * e,
+  }, anim.from.zoom * Math.pow(anim.to.zoom / anim.from.zoom, e));
+  if (t >= 1) graphState.camAnim = null;
+}
+
+// Zoom manteniendo fijo el punto de pantalla (sx, sy)
+function zoomAt(sx, sy, newZoom, duration = 0) {
+  const world = canvasToWorld(sx, sy);
+  const z = clamp(newZoom, MIN_ZOOM, MAX_ZOOM);
+  const center = {
+    x: world.x + (graphState.width  / 2 - sx) / z,
+    y: world.y + (graphState.height / 2 - sy) / z,
+  };
+  flyTo(center, z, duration);
+}
+
+// Encuadra un conjunto de nodos
+function fitView(nodes = graphState.filtered.nodes, duration = 450) {
+  const pts = nodes.map(n => graphState.positions[n.id]).filter(Boolean);
+  if (!pts.length) return;
+  const pad = 40;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  const bw = Math.max(maxX - minX, 1) + pad * 2;
+  const bh = Math.max(maxY - minY, 1) + pad * 2;
+  const zoom = Math.min(graphState.width / bw, graphState.height / bh, 1.6);
+  flyTo({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 }, zoom, duration);
+}
+
+function neighborIds(id) {
+  const out = new Set();
+  for (const e of graphState.graph.edges) {
+    if (e.source === id) out.add(e.target);
+    if (e.target === id) out.add(e.source);
+  }
+  return out;
+}
+
+// Centra la neurona y acerca lo justo para que se vean sus conexiones
+function focusNode(n) {
+  const p = graphState.positions[n.id];
+  if (!p) return;
+  let maxDx = 60, maxDy = 60;
+  for (const id of neighborIds(n.id)) {
+    const q = graphState.positions[id];
+    if (!q) continue;
+    maxDx = Math.max(maxDx, Math.abs(q.x - p.x));
+    maxDy = Math.max(maxDy, Math.abs(q.y - p.y));
+  }
+  const margin = 50;
+  const zoom = Math.min(
+    (graphState.width  / 2 - margin) / maxDx,
+    (graphState.height / 2 - margin - 60) / maxDy, // deja sitio a la barra de conexiones
+  );
+  flyTo({ x: p.x, y: p.y }, clamp(zoom, 0.9, 2.5));
 }
 
 // ---- Renderizado Canvas ----
@@ -311,40 +422,50 @@ function drawGraph() {
 
   const { nodes, edges } = filtered;
   const timestamp = Date.now();
+  const focusSet  = selectedNode ? neighborIds(selectedNode.id) : null;
+  if (focusSet) focusSet.add(selectedNode.id);
+  const px = 1 / zoom; // 1 px de pantalla en unidades del mundo
+
+  // Recorte: solo se dibuja lo que cae en pantalla
+  const view = {
+    minX: -pan.x / zoom - 60, minY: -pan.y / zoom - 60,
+    maxX: (width - pan.x) / zoom + 60, maxY: (height - pan.y) / zoom + 60,
+  };
+  const inView = (p) => p.x >= view.minX && p.x <= view.maxX && p.y >= view.minY && p.y <= view.maxY;
 
   // --- Edges ---
   for (const edge of edges) {
     const a = positions[edge.source];
     const b = positions[edge.target];
-    if (!a || !b) continue;
+    if (!a || !b || (!inView(a) && !inView(b))) continue;
 
-    const relColor = edge.relationType ? (RELATION_COLORS[edge.relationType] || "rgba(255,255,255,0.12)") : null;
-    const baseColor = relColor || "rgba(255,255,255,0.10)";
-    const isHighlight = selectedNode && (edge.source === selectedNode.id || edge.target === selectedNode.id);
+    const relColor = edge.relationType ? RELATION_COLORS[edge.relationType] || null : null;
+    const touchesSelection = selectedNode && (edge.source === selectedNode.id || edge.target === selectedNode.id);
 
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
-    ctx.strokeStyle = isHighlight ? (relColor || "rgba(167,139,250,0.7)") : baseColor;
-    ctx.lineWidth   = isHighlight ? (edge.relationType ? 2.5 : 1.8) : (edge.relationType ? 1.5 : 0.8);
-
-    if (edge.relationType) {
-      ctx.setLineDash([]);
+    if (touchesSelection) {
+      ctx.strokeStyle = relColor || hexToRgba(nodeColor(selectedNode), 0.85);
+      ctx.lineWidth   = 2.2 * px;
+    } else if (selectedNode) {
+      ctx.strokeStyle = "rgba(255,255,255,0.04)";
+      ctx.lineWidth   = 1 * px;
     } else {
-      ctx.setLineDash([]);
+      ctx.strokeStyle = relColor ? hexToRgba(relColor, 0.55) : "rgba(203,213,225,0.16)";
+      ctx.lineWidth   = (relColor ? 1.5 : 1) * px;
     }
-
     ctx.stroke();
-    ctx.setLineDash([]);
 
     // Flecha en mitad si hay tipo de relación
-    if (edge.relationType && isHighlight) {
+    if (edge.relationType && touchesSelection) {
       const mx = (a.x + b.x) / 2;
       const my = (a.y + b.y) / 2;
       const angle = Math.atan2(b.y - a.y, b.x - a.x);
       ctx.save();
       ctx.translate(mx, my);
       ctx.rotate(angle);
+      ctx.scale(px, px);
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(-8, -4);
@@ -356,111 +477,109 @@ function drawGraph() {
     }
   }
 
-  // --- Nodos (Estilo Anillo Hueco de Regulación) ---
+  // --- Nodos: puntos cuando están lejos, anillos al acercarse ---
+  const labels = [];
   for (const n of nodes) {
     const p = positions[n.id];
-    if (!p) continue;
-    const r          = getNodeSize(n);
-    const fontSize   = getNodeFontSize(n);
+    if (!p || !inView(p)) continue;
+    const r          = Math.max(getNodeSize(n), 2.5 * px);
+    const screenR    = r * zoom;
     const color      = nodeColor(n);
     const isSelected = selectedNode?.id === n.id;
     const isHovered  = hoveredNode?.id  === n.id;
-    const isActive   = n.status === "active";
-    const isNew      = n.status === "new";
+    const isNeighbor = Boolean(focusSet?.has(n.id)) && !isSelected;
+    const dimmed     = Boolean(focusSet) && !focusSet.has(n.id);
     const pulse      = Math.sin(timestamp / 700) * 0.5 + 0.5;
 
+    ctx.globalAlpha = dimmed ? 0.16 : 1;
+
     // Halo animado para nodos activos/nuevos
-    if (isActive || isNew) {
-      const haloR = r + 7 + pulse * 4;
-      const haloColor = isNew ? "#34d399" : "#a78bfa";
+    if (n.status === "active" || n.status === "new") {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, haloR, 0, Math.PI * 2);
-      ctx.strokeStyle = hexToRgba(haloColor, 0.2 + pulse * 0.25);
-      ctx.lineWidth   = 2.5;
+      ctx.arc(p.x, p.y, r + (5 + pulse * 4) * px, 0, Math.PI * 2);
+      ctx.strokeStyle = hexToRgba(n.status === "new" ? "#34d399" : "#a78bfa", 0.2 + pulse * 0.25);
+      ctx.lineWidth   = 2.5 * px;
       ctx.stroke();
     }
 
-    // Sombra suave en nodo seleccionado/hover
     if (isSelected || isHovered) {
-      ctx.shadowColor = hexToRgba(color, 0.7);
-      ctx.shadowBlur  = 16;
+      ctx.shadowColor = hexToRgba(color, 0.8);
+      ctx.shadowBlur  = 18;
     }
 
-    // Relleno hueco / translúcido (Anillo Regulación)
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = isSelected
-      ? hexToRgba(color, 0.35)
-      : isHovered
-      ? hexToRgba(color, 0.25)
-      : "rgba(15, 13, 25, 0.85)";
-    ctx.fill();
-
+    if (screenR < 7) {
+      // Lejos: punto sólido, se lee mejor que un anillo diminuto
+      ctx.fillStyle = hexToRgba(color, 0.95);
+      ctx.fill();
+    } else {
+      // Base opaca para que las líneas no se transparenten dentro del anillo
+      ctx.fillStyle = "#0f0d19";
+      ctx.fill();
+      if (isSelected || isHovered) {
+        ctx.fillStyle = hexToRgba(color, isSelected ? 0.35 : 0.25);
+        ctx.fill();
+      }
+      ctx.shadowBlur  = 0;
+      ctx.shadowColor = "transparent";
+      ctx.strokeStyle = isSelected ? "#ffffff" : hexToRgba(color, isHovered ? 1 : 0.9);
+      ctx.lineWidth   = isSelected ? 3 * px : Math.max(r * 0.2, 1.5 * px);
+      ctx.stroke();
+    }
     ctx.shadowBlur  = 0;
     ctx.shadowColor = "transparent";
 
-    // Borde de Anillo (Stroke principal estilo Regulación)
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    if (isSelected) {
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth   = 3;
-    } else if (isHovered) {
-      ctx.strokeStyle = hexToRgba(color, 1);
-      ctx.lineWidth   = 2.8;
-    } else {
-      ctx.strokeStyle = hexToRgba(color, 0.9);
-      ctx.lineWidth   = Math.max(1.5, r * 0.22);
-    }
-    ctx.stroke();
-
-    // Pin indicator
-    if (n.pin) {
+    if (n.pin && screenR >= 7) {
       ctx.beginPath();
-      ctx.arc(p.x + r * 0.7, p.y - r * 0.7, 3.5, 0, Math.PI * 2);
+      ctx.arc(p.x + r * 0.7, p.y - r * 0.7, Math.max(3.5, r * 0.18), 0, Math.PI * 2);
       ctx.fillStyle = "#fbbf24";
       ctx.fill();
     }
 
-    // Etiqueta con visibilidad fluida según zoom y selección
-    const showLabel = zoom >= 0.85 || isSelected || isHovered || (n.timesActivated || 0) >= 3 || (n.degree || 0) >= 4;
-    if (showLabel) {
-      const label = nodeLabel(n);
-      ctx.font      = `${isSelected ? "700" : "500"} ${isSelected ? fontSize + 1 : fontSize}px system-ui, -apple-system, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
+    // Etiquetas: aparecen al acercarse; la seleccionada y sus vecinas siempre
+    const showLabel = !dimmed && (screenR >= 13 || isSelected || isHovered || isNeighbor);
+    if (showLabel) labels.push({ n, p, r, isSelected, isHovered, full: isSelected || isNeighbor || zoom >= 1.6 });
+  }
+  ctx.globalAlpha = 1;
 
-      // Sombra del texto
-      ctx.shadowColor = "rgba(0,0,0,0.9)";
-      ctx.shadowBlur  = 5;
-      ctx.fillStyle   = isSelected ? "#ffffff" : isHovered ? "#f8fafc" : "rgba(241,245,249,0.9)";
-      ctx.fillText(label, p.x, p.y + r + 5);
-      ctx.shadowBlur  = 0;
-      ctx.shadowColor = "transparent";
-    }
+  // Las etiquetas van encima de todos los nodos, con tamaño constante en pantalla
+  for (const { n, p, r, isSelected, isHovered, full } of labels) {
+    const fontPx = Math.min(getNodeFontSize(n), 15) + (isSelected ? 2 : 0);
+    ctx.font = `${isSelected ? 700 : 500} ${fontPx * px}px system-ui, -apple-system, sans-serif`;
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "top";
+    const text = nodeLabel(n, full);
+    const y = p.y + r + 5 * px;
+    const w = ctx.measureText(text).width;
+    ctx.fillStyle = "rgba(10,8,20,0.72)";
+    ctx.beginPath();
+    ctx.roundRect?.(p.x - w / 2 - 5 * px, y - 2 * px, w + 10 * px, (fontPx + 5) * px, 6 * px);
+    ctx.fill();
+    ctx.fillStyle = isSelected ? "#ffffff" : isHovered ? "#f8fafc" : "rgba(241,245,249,0.92)";
+    ctx.fillText(text, p.x, y);
   }
 
   ctx.restore();
 }
 
 // ---- Loop principal ----
-// Solo se anima mientras la simulación se mueve, hay un drag o hay nodos pulsando.
+// Solo se anima mientras la cámara se mueve o hay nodos activos/nuevos pulsando.
 function needsAnimation() {
-  if (graphState.alpha >= ALPHA_MIN || graphState.dragging) return true;
+  if (graphState.camAnim) return true;
   return graphState.filtered.nodes.some(n => n.status === "active" || n.status === "new");
 }
 
-function loop() {
+function loop(now) {
   graphState.animFrame = null;
   if (!graphState.canvas?.isConnected) return; // la vista se desmontó
-  tickSimulation();
+  stepCamera(now ?? performance.now());
   drawGraph();
   if (needsAnimation()) graphState.animFrame = requestAnimationFrame(loop);
 }
 
 // Pide un frame; si el loop estaba dormido, lo despierta.
-function requestFrame(minAlpha = 0) {
-  if (minAlpha) graphState.alpha = Math.max(graphState.alpha, minAlpha);
+function requestFrame() {
   if (graphState.animFrame || !graphState.canvas) return;
   graphState.animFrame = requestAnimationFrame(loop);
 }
@@ -477,183 +596,191 @@ function stopLoop() {
   }
 }
 
-// ---- Conversión coordenadas canvas ↔ mundo ----
-function canvasToWorld(cx, cy) {
-  return {
-    x: (cx - graphState.pan.x) / graphState.zoom,
-    y: (cy - graphState.pan.y) / graphState.zoom,
-  };
-}
-
-function hitTest(wx, wy) {
-  const nodes = graphState.filtered.nodes;
-  for (let i = nodes.length - 1; i >= 0; i--) {
-    const n = nodes[i];
+// Nodo más cercano al punto, con margen extra para dedos
+function hitTest(wx, wy, slopPx = 6) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const n of graphState.filtered.nodes) {
     const p = graphState.positions[n.id];
     if (!p) continue;
-    const r = getNodeSize(n);
-    const dx = wx - p.x;
-    const dy = wy - p.y;
-    if (dx * dx + dy * dy <= (r + 4) * (r + 4)) return n;
+    const r = Math.max(getNodeSize(n), 2.5 / graphState.zoom) + slopPx / graphState.zoom;
+    const d = Math.hypot(wx - p.x, wy - p.y);
+    if (d <= r && d < bestDist) {
+      best = n;
+      bestDist = d;
+    }
   }
-  return null;
+  return best;
 }
 
-// ---- Wiring del Canvas ----
-function wireCanvas(root, sessionState = {}) {
+// ---- Selección ----
+function selectNode(root, n, { fly = true } = {}) {
+  graphState.selectedNode    = n;
+  graphState.filters.focusId = n ? n.id : null; // muestra sus vecinas aunque un filtro las oculte
+  graphState.editorMode      = false;
+  graphState.editorMsg       = "";
+  if (!n) graphState.detailOpen = false;
+  applyFiltersAndRerender(root, graphState.sessionState);
+  rerenderDetailPanel(root);
+  wireDetailPanel(root, graphState.sessionState);
+  renderPeek(root);
+  if (n && fly) focusNode(n);
+  requestFrame();
+}
+
+// Barra inferior con la neurona seleccionada y sus conexiones para saltar entre ellas
+function renderPeek(root) {
+  const el = root.querySelector("#ngPeek");
+  if (!el) return;
+  const n = graphState.selectedNode;
+  if (!n) {
+    el.classList.remove("show");
+    el.innerHTML = "";
+    return;
+  }
+  const byId = new Map(graphState.graph.nodes.map(x => [x.id, x]));
+  const neighbors = [...neighborIds(n.id)].map(id => byId.get(id)).filter(Boolean)
+    .sort((a, b) => getNodeSize(b) - getNodeSize(a));
+  el.innerHTML = `
+    <div class="ngPeekHead">
+      <span class="ngPeekDot" style="background:${nodeColor(n)}"></span>
+      <span class="ngPeekTitle">${esc(n.label)}</span>
+      <button class="ngPeekBtn" data-peek-detail>Detalle</button>
+      <button class="ngPeekClose" data-peek-close title="Quitar selección">✕</button>
+    </div>
+    <div class="ngPeekLinks">
+      ${neighbors.length
+        ? `<span class="ngPeekLabel">Conectada con</span>${neighbors.map(x =>
+            `<button class="ngPeekChip" data-goto="${esc(x.id)}"><span class="ngPeekDot" style="background:${nodeColor(x)}"></span>${esc(x.label)}</button>`
+          ).join("")}`
+        : `<span class="ngPeekLabel">Sin conexiones</span>`}
+    </div>`;
+  el.classList.add("show");
+}
+
+function goToNode(root, id) {
+  const target = graphState.graph.nodes.find(x => x.id === id);
+  if (target) selectNode(root, target);
+}
+
+// ---- Wiring del Canvas: pellizco para zoom, un dedo para mover, toque para seleccionar ----
+function wireCanvas(root) {
   const canvas = graphState.canvas;
   if (!canvas) return;
 
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
-  let panStartX   = 0;
-  let panStartY   = 0;
-  let lastPanX    = 0;
-  let lastPanY    = 0;
+  const pointers = new Map(); // pointerId → { x, y }
+  let gesture  = null;
+  let lastTap  = { t: 0, x: 0, y: 0 };
 
   function getXY(e) {
-    // Coordenadas en px CSS: el escalado por devicePixelRatio se aplica al dibujar
     const rect = canvas.getBoundingClientRect();
-    const scaleX = rect.width  ? graphState.width  / rect.width  : 1;
-    const scaleY = rect.height ? graphState.height / rect.height : 1;
-    const touchPoint = e.touches?.[0] || e.changedTouches?.[0] || null;
-    if (touchPoint) {
-      return {
-        cx: (touchPoint.clientX - rect.left) * scaleX,
-        cy: (touchPoint.clientY - rect.top)  * scaleY,
-      };
-    }
-    if (typeof e.clientX !== "number" || typeof e.clientY !== "number") {
-      return {
-        cx: graphState.width / 2,
-        cy: graphState.height / 2,
-      };
-    }
-    return {
-      cx: (e.clientX - rect.left) * scaleX,
-      cy: (e.clientY - rect.top)  * scaleY,
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function startPan(pt, moved = false) {
+    gesture = { type: "pan", startX: pt.x, startY: pt.y, panX: graphState.pan.x, panY: graphState.pan.y, moved };
+  }
+
+  function startPinch() {
+    const [a, b] = [...pointers.values()];
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    gesture = {
+      type: "pinch",
+      startDist: Math.hypot(b.x - a.x, b.y - a.y) || 1,
+      startZoom: graphState.zoom,
+      worldMid:  canvasToWorld(mid.x, mid.y),
     };
   }
 
-  function onPointerDown(e) {
-    const { cx, cy } = getXY(e);
-    const { x, y }   = canvasToWorld(cx, cy);
-    const hit         = hitTest(x, y);
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture?.(e.pointerId);
+    graphState.camAnim = null; // el dedo manda sobre cualquier animación
+    pointers.set(e.pointerId, getXY(e));
+    if (pointers.size === 1) startPan(getXY(e));
+    else if (pointers.size === 2) startPinch();
+    e.preventDefault();
+  });
 
-    if (hit) {
-      graphState.dragging   = hit.id;
-      graphState.panning    = false;
-      const p               = graphState.positions[hit.id];
-      dragOffsetX           = x - p.x;
-      dragOffsetY           = y - p.y;
-      requestFrame(0.3); // reiniciar simulación
-      e.preventDefault?.();
-    } else {
-      graphState.panning  = true;
-      graphState.dragging = null;
-      panStartX           = cx;
-      panStartY           = cy;
-      lastPanX            = graphState.pan.x;
-      lastPanY            = graphState.pan.y;
-    }
-  }
-
-  function onPointerMove(e) {
-    const { cx, cy } = getXY(e);
-    const { x, y }   = canvasToWorld(cx, cy);
-
-    if (graphState.dragging) {
-      const p = graphState.positions[graphState.dragging];
-      if (p) {
-        p.x  = x - dragOffsetX;
-        p.y  = y - dragOffsetY;
-        p.vx = 0;
-        p.vy = 0;
-      }
-      requestFrame();
-      e.preventDefault?.();
-    } else if (graphState.panning) {
-      graphState.pan.x = lastPanX + (cx - panStartX);
-      graphState.pan.y = lastPanY + (cy - panStartY);
-      requestFrame();
-    } else {
-      // hover
-      const hit = hitTest(x, y) || null;
+  canvas.addEventListener("pointermove", (e) => {
+    const pt = getXY(e);
+    if (!pointers.has(e.pointerId)) {
+      // Ratón sin botón pulsado: hover
+      const { x, y } = canvasToWorld(pt.x, pt.y);
+      const hit = hitTest(x, y, 2) || null;
       if (hit?.id !== graphState.hoveredNode?.id) {
         graphState.hoveredNode = hit;
         requestFrame();
       }
       canvas.style.cursor = hit ? "pointer" : "grab";
+      return;
     }
-  }
+    pointers.set(e.pointerId, pt);
 
-  function onPointerUp(e) {
-    const { cx, cy } = getXY(e);
-    const { x, y }   = canvasToWorld(cx, cy);
-
-    if (graphState.dragging) {
-      // Si apenas se movió → seleccionar
-      const p   = graphState.positions[graphState.dragging];
-      const dx  = p ? p.x - (x - dragOffsetX) : 9999;
-      const dy  = p ? p.y - (y - dragOffsetY) : 9999;
-      const moved = Math.sqrt(dx * dx + dy * dy) > 4;
-
-      if (!moved) {
-        const hit = graphState.filtered.nodes.find(n => n.id === graphState.dragging);
-        if (hit) {
-          graphState.selectedNode   = hit;
-          graphState.filters.focusId = hit.id;
-          graphState.editorMode     = false;
-          graphState.editorMsg      = "";
-          applyFiltersAndRerender(root, sessionState);
-          rerenderDetailPanel(root);
-          wireDetailPanel(root, sessionState);
-        }
-      }
-      graphState.dragging = null;
-    } else if (graphState.panning) {
-      graphState.panning = false;
-    } else {
-      // Click en vacío → deseleccionar y remover focusId
-      const hit = hitTest(x, y);
-      if (!hit) {
-        graphState.selectedNode   = null;
-        graphState.filters.focusId = null;
-        graphState.editorMode     = false;
-        applyFiltersAndRerender(root, sessionState);
-        rerenderDetailPanel(root);
-        wireDetailPanel(root, sessionState);
+    if (gesture?.type === "pinch" && pointers.size >= 2) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const mid  = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      graphState.zoom  = clamp(gesture.startZoom * (dist / gesture.startDist), MIN_ZOOM, MAX_ZOOM);
+      graphState.pan.x = mid.x - gesture.worldMid.x * graphState.zoom;
+      graphState.pan.y = mid.y - gesture.worldMid.y * graphState.zoom;
+      requestFrame();
+    } else if (gesture?.type === "pan") {
+      const dx = pt.x - gesture.startX;
+      const dy = pt.y - gesture.startY;
+      if (!gesture.moved && Math.hypot(dx, dy) > 6) gesture.moved = true;
+      if (gesture.moved) {
+        graphState.pan.x = gesture.panX + dx;
+        graphState.pan.y = gesture.panY + dy;
+        canvas.style.cursor = "grabbing";
+        requestFrame();
       }
     }
-  }
-
-  // Mouse
-  canvas.addEventListener("mousedown",  onPointerDown);
-  canvas.addEventListener("mousemove",  onPointerMove);
-  canvas.addEventListener("mouseup",    onPointerUp);
-  canvas.addEventListener("mouseleave", () => {
-    graphState.dragging    = null;
-    graphState.panning     = false;
-    graphState.hoveredNode = null;
-    requestFrame();
   });
 
-  // Touch
-  canvas.addEventListener("touchstart", onPointerDown, { passive: false });
-  canvas.addEventListener("touchmove",  onPointerMove, { passive: false });
-  canvas.addEventListener("touchend",   onPointerUp);
+  function onPointerEnd(e) {
+    if (!pointers.has(e.pointerId)) return;
+    const pt = getXY(e);
+    pointers.delete(e.pointerId);
+    const wasTap = gesture?.type === "pan" && !gesture.moved && pointers.size === 0 && e.type === "pointerup";
 
-  // Wheel zoom
+    if (pointers.size === 1) {
+      // De pellizco a un dedo: seguir moviendo sin que cuente como toque
+      startPan([...pointers.values()][0], true);
+      return;
+    }
+    if (pointers.size === 0) gesture = null;
+    canvas.style.cursor = "grab";
+    if (!wasTap) return;
+
+    const now = performance.now();
+    const isDoubleTap = now - lastTap.t < 320 && Math.hypot(pt.x - lastTap.x, pt.y - lastTap.y) < 30;
+    lastTap = { t: isDoubleTap ? 0 : now, x: pt.x, y: pt.y };
+
+    const { x, y } = canvasToWorld(pt.x, pt.y);
+    const hit = hitTest(x, y, e.pointerType === "touch" ? 14 : 4);
+    if (hit) {
+      selectNode(root, hit);
+    } else if (isDoubleTap) {
+      zoomAt(pt.x, pt.y, graphState.zoom * 2, 300);
+    } else if (graphState.selectedNode) {
+      selectNode(root, null);
+    }
+  }
+  canvas.addEventListener("pointerup", onPointerEnd);
+  canvas.addEventListener("pointercancel", onPointerEnd);
+  canvas.addEventListener("pointerleave", () => {
+    if (graphState.hoveredNode && !pointers.size) {
+      graphState.hoveredNode = null;
+      requestFrame();
+    }
+  });
+
+  // Rueda / trackpad: zoom centrado en el cursor
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const { cx, cy } = getXY(e);
-    const factor      = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    const newZoom     = Math.max(0.15, Math.min(6, graphState.zoom * factor));
-    // Zoom centrado en el cursor
-    graphState.pan.x  = cx - (cx - graphState.pan.x) * (newZoom / graphState.zoom);
-    graphState.pan.y  = cy - (cy - graphState.pan.y) * (newZoom / graphState.zoom);
-    graphState.zoom   = newZoom;
-    requestFrame();
+    const { x, y } = getXY(e);
+    const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018));
+    zoomAt(x, y, graphState.zoom * factor);
   }, { passive: false });
 }
 
@@ -684,7 +811,7 @@ function renderNodeDetail() {
         const cn    = graphState.graph.nodes.find(x => x.id === cid);
         const label = cn ? cn.label : `[${cid.slice(0, 10)}…]`;
         return `<div class="ngConnItem">
-          <span class="ngTag" style="background:rgba(255,255,255,.06)">${esc(label)}</span>
+          <button class="ngTag ngConnGoto" data-goto="${esc(cid)}" title="Ir a esta neurona">${esc(label)}</button>
           <button class="ngUnlinkBtn" data-source="${esc(n.id)}" data-target="${esc(cid)}" title="Quitar">✕</button>
         </div>`;
       }).join("")
@@ -894,6 +1021,8 @@ function ngraphInner(sessionState = {}) {
       <div class="ngLayout">
         <div class="ngGraphArea" id="ngGraphArea">
           <canvas id="ngCanvas"></canvas>
+          <div class="ngPeek" id="ngPeek"></div>
+          <div class="ngHint" id="ngHint">Pellizca para acercar · toca una neurona para seguir sus conexiones</div>
           <div class="ngZoomFloatingControls">
             <button class="ngCircleBtn" id="ngBtnZoomIn" title="Acercar">+</button>
             <button class="ngCircleBtn" id="ngBtnZoomOut" title="Alejar">−</button>
@@ -959,12 +1088,20 @@ function initCanvas(root) {
   const area   = root.querySelector("#ngGraphArea");
   if (!canvas || !area) return;
 
+  // Si la vista se re-renderiza, se conserva el encuadre actual
+  const center = graphState.cameraReady ? cameraCenter() : null;
   graphState.canvas = canvas;
   graphState.ctx    = canvas.getContext("2d");
   resizeCanvas(area);
+  ensureLayout();
 
-  initPositions(graphState.filtered.nodes, graphState.width, graphState.height);
-  graphState.alpha = 1.0;
+  if (center) {
+    setCamera(center, graphState.zoom);
+  } else {
+    // Al abrir: toda la red a la vista, neuronas pequeñas
+    fitView(graphState.filtered.nodes, 0);
+    graphState.cameraReady = true;
+  }
 }
 
 // ---- Detalle y editor ----
@@ -972,7 +1109,7 @@ function rerenderDetailPanel(root) {
   const panel = root.querySelector("#ngDetailPanel");
   if (panel) {
     panel.innerHTML = renderNodeDetail();
-    if (graphState.selectedNode) {
+    if (graphState.selectedNode && graphState.detailOpen) {
       panel.classList.add("open");
     } else {
       panel.classList.remove("open");
@@ -984,12 +1121,18 @@ function wireDetailPanel(root, sessionState = {}) {
   const panel = root.querySelector("#ngDetailPanel");
   if (!panel) return;
 
+  // Cerrar la hoja no quita la selección: se sigue navegando por sus conexiones
   panel.querySelector("#ngBtnCloseDetail")?.addEventListener("click", () => {
-    graphState.selectedNode   = null;
-    graphState.filters.focusId = null;
-    graphState.editorMode     = false;
-    applyFiltersAndRerender(root, sessionState);
+    graphState.detailOpen = false;
+    graphState.editorMode = false;
     rerenderDetailPanel(root);
+  });
+
+  panel.querySelectorAll(".ngConnGoto").forEach(btn => {
+    btn.addEventListener("click", () => {
+      graphState.detailOpen = false;
+      goToNode(root, btn.dataset.goto);
+    });
   });
 
   panel.querySelector("#ngBtnOpenEditor")?.addEventListener("click", () => {
@@ -1089,7 +1232,9 @@ function wireDetailPanel(root, sessionState = {}) {
     const msg = `Esta neurona está conectada a ${impact.memoriesAffected} memorias y ${impact.connectionsAffected} neuronas. Insights afectados: ${impact.insightsAffected}. ¿Deseas eliminarla de todos modos?${warning}`;
     if (!confirm(msg)) return;
     deleteNeuronSafely(selected.id, { hard: true });
-    graphState.selectedNode = null;
+    graphState.selectedNode    = null;
+    graphState.filters.focusId = null;
+    graphState.detailOpen      = false;
     rebuildAndRender(root, sessionState);
   });
 
@@ -1111,9 +1256,29 @@ function wireNeuroGraphInner(root, sessionState = {}) {
   canvasEl.dataset.ngWired = "1";
 
   initCanvas(root);
-  wireCanvas(root, sessionState);
+  wireCanvas(root);
   startLoop();
   wireDetailPanel(root, sessionState);
+  renderPeek(root);
+
+  const peek = root.querySelector("#ngPeek");
+  peek?.addEventListener("click", (e) => {
+    const goto = e.target.closest("[data-goto]");
+    if (goto) { goToNode(root, goto.dataset.goto); return; }
+    if (e.target.closest("[data-peek-close]")) { selectNode(root, null); return; }
+    if (e.target.closest("[data-peek-detail]")) {
+      graphState.detailOpen = true;
+      rerenderDetailPanel(root);
+      wireDetailPanel(root, sessionState);
+    }
+  });
+
+  // La pista desaparece con el primer gesto
+  const hint = root.querySelector("#ngHint");
+  if (hint) {
+    if (graphState.hintSeen) hint.remove();
+    else canvasEl.addEventListener("pointerdown", () => { graphState.hintSeen = true; hint.remove(); }, { once: true });
+  }
 
   root.querySelector("#ngBtnRepairGraph")?.addEventListener("click", async () => {
     const btn = root.querySelector("#ngBtnRepairGraph");
@@ -1150,7 +1315,6 @@ function wireNeuroGraphInner(root, sessionState = {}) {
         btn.disabled = false;
         btn.textContent = originalText;
       }
-      graphState.positions = {};
       rebuildAndRender(root, sessionState);
     }
   });
@@ -1173,30 +1337,26 @@ function wireNeuroGraphInner(root, sessionState = {}) {
   }
 
   root.querySelector("#ngBtnResetPositions")?.addEventListener("click", () => {
-    graphState.positions = {};
-    graphState.alpha = 1.0;
     menuDropdown?.classList.remove("show");
+    graphState.positions = {};
+    try { localStorage.removeItem(LAYOUT_KEY); } catch (_e) { /* noop */ }
+    graphState.cameraReady = false;
     rebuildAndRender(root, sessionState);
   });
 
   root.querySelector("#ngBtnRefresh")?.addEventListener("click", () => {
-    graphState.positions = {};
     menuDropdown?.classList.remove("show");
     rebuildAndRender(root, sessionState);
   });
   root.querySelector("#ngBtnZoomIn")?.addEventListener("click", () => {
-    graphState.zoom = Math.min(graphState.zoom * 1.25, 6);
-    requestFrame();
+    zoomAt(graphState.width / 2, graphState.height / 2, graphState.zoom * 1.5, 220);
   });
   root.querySelector("#ngBtnZoomOut")?.addEventListener("click", () => {
-    graphState.zoom = Math.max(graphState.zoom / 1.25, 0.15);
-    requestFrame();
+    zoomAt(graphState.width / 2, graphState.height / 2, graphState.zoom / 1.5, 220);
   });
   root.querySelector("#ngBtnZoomReset")?.addEventListener("click", () => {
-    graphState.zoom  = 1;
-    graphState.pan   = { x: 0, y: 0 };
     menuDropdown?.classList.remove("show");
-    requestFrame();
+    fitView();
   });
 
   const filterMap = {
@@ -1223,6 +1383,7 @@ function wireNeuroGraphInner(root, sessionState = {}) {
       graphState.filters.reach = reachVal;
       root.querySelectorAll(".ngReachBtn").forEach(b => b.classList.toggle("active", b.dataset.reach === reachVal));
       applyFiltersAndRerender(root, sessionState);
+      fitView();
     });
   });
 
@@ -1234,6 +1395,7 @@ function wireNeuroGraphInner(root, sessionState = {}) {
       const select = root.querySelector("#ngFilterDomain");
       if (select) select.value = domVal || "";
       applyFiltersAndRerender(root, sessionState);
+      fitView();
     });
   });
 
@@ -1243,6 +1405,7 @@ function wireNeuroGraphInner(root, sessionState = {}) {
     searchTimer = setTimeout(() => {
       graphState.filters.search = e.target.value;
       applyFiltersAndRerender(root, sessionState);
+      fitView();
     }, 180);
   });
 
@@ -1256,8 +1419,12 @@ function wireNeuroGraphInner(root, sessionState = {}) {
       if (ngResizeRaf) cancelAnimationFrame(ngResizeRaf);
       ngResizeRaf = requestAnimationFrame(() => {
         ngResizeRaf = 0;
-        // Relajar un poco la simulación para recolocar nodos que quedaron fuera
-        if (resizeCanvas(area)) requestFrame(0.3);
+        // Mantener el mismo punto del mundo en el centro de la pantalla
+        const center = cameraCenter();
+        if (resizeCanvas(area)) {
+          setCamera(center, graphState.zoom);
+          requestFrame();
+        }
       });
     });
     graphState.resizeObserver.observe(area);
@@ -1266,8 +1433,7 @@ function wireNeuroGraphInner(root, sessionState = {}) {
 
 function applyFiltersAndRerender(root, sessionState = {}) {
   graphState.filtered = filterGraphNodes(graphState.graph, graphState.filters);
-  initPositions(graphState.filtered.nodes, graphState.width, graphState.height);
-  requestFrame(0.3);
+  requestFrame();
   const header = root.querySelector(".ngHeaderSub");
   if (header) {
     const { graph, filtered } = graphState;
@@ -1283,8 +1449,14 @@ function rebuildAndRender(root, sessionState = {}) {
     newIds:       sessionState.lastGeneratedIds  || [],
     mergedIds:    sessionState.lastMergedIds     || [],
   });
+  // La selección apunta al nodo recién construido (o desaparece si se borró)
+  const selId = graphState.selectedNode?.id;
+  graphState.selectedNode = selId ? graphState.graph.nodes.find(n => n.id === selId) || null : null;
+  if (!graphState.selectedNode) {
+    graphState.filters.focusId = null;
+    graphState.detailOpen      = false;
+  }
   graphState.filtered = filterGraphNodes(graphState.graph, graphState.filters);
-  graphState.alpha    = Math.max(graphState.alpha, 0.6);
 
   const wrap = root.querySelector(".ngWrap");
   if (!wrap) return;
@@ -1414,7 +1586,44 @@ function ngCss() {
     border: 1px solid rgba(124,92,255,.18); border-radius: 18px;
     overflow: hidden; height: calc(100vh - 210px); min-height: 540px;
   }
-  #ngCanvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  #ngCanvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+
+  /* Barra de la neurona seleccionada y sus conexiones */
+  .ngPeek {
+    position: absolute; left: 10px; right: 58px; bottom: 10px; z-index: 11;
+    display: none; flex-direction: column; gap: 6px; padding: 8px 10px;
+    background: rgba(24,21,40,.92); border: 1px solid rgba(124,92,255,.3); border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); backdrop-filter: blur(6px);
+  }
+  .ngPeek.show { display: flex; }
+  .ngPeekHead { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .ngPeekTitle { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ngPeekDot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .ngPeekBtn {
+    background: rgba(124,92,255,.25); border: 1px solid rgba(124,92,255,.5); color: #ddd6fe;
+    border-radius: 10px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .ngPeekClose {
+    background: transparent; border: none; color: #94a3b8; font-size: 14px; cursor: pointer; padding: 2px 6px;
+  }
+  .ngPeekLinks {
+    display: flex; gap: 6px; align-items: center; overflow-x: auto; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ngPeekLinks::-webkit-scrollbar { display: none; }
+  .ngPeekLabel { font-size: 11px; color: #94a3b8; white-space: nowrap; flex-shrink: 0; }
+  .ngPeekChip {
+    display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: #e2e8f0;
+    border-radius: 20px; padding: 5px 11px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .ngPeekChip:active { background: rgba(124,92,255,.3); }
+  .ngHint {
+    position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 5;
+    pointer-events: none; font-size: 11px; color: #cbd5e1; white-space: nowrap;
+    background: rgba(24,21,40,.85); border: 1px solid rgba(255,255,255,.1); border-radius: 20px; padding: 5px 12px;
+  }
+  .ngConnGoto { border: none; cursor: pointer; font-family: inherit; }
   #ngCanvas:active { cursor: grabbing; }
 
   .ngZoomFloatingControls {
