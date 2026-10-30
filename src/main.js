@@ -82,7 +82,7 @@ import { initMusicUi, openMusicHubModal, openFullPlayer } from "./music/musicUi.
 import { musicEngine } from "./music/musicEngine.js";
 import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
 import { initFootballLab } from "./footballLab_v8e.js?v=2001";
-import { viewNeuroChat, wireNeuroChat } from "./chat/neurochat-ui.js";
+import { viewNeuroChat, wireNeuroChat, initNeuroChat } from "./chat/neurochat-ui.js";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";
@@ -358,6 +358,12 @@ import "./sleep_radial_chart.js";
 import "./sleep_journal_pro.js";
 
 console.log("MemoryCarl loaded");
+
+// NeuroChat se inicializa al arrancar (no solo al abrir su pestaña): registra la
+// sincronización con Supabase, trae lo que falte de la nube y sube lo local.
+setTimeout(() => {
+  try { initNeuroChat(); } catch (e) { console.warn("[NeuroChat] init falló:", e); }
+}, 0);
 // ===== LocalStorage Keys =====
 const KEYS = {
   neuroclawAiUrl: "memorycarl_v2_neuroclaw_ai_url",
@@ -26601,6 +26607,7 @@ window.financePushToSupabase = async function(isManual = false) {
         const msg = json.data.errors.join(" · ");
         if (window.__mcLogs) window.__mcLogs.push({ time: ts, type: "error", text: `☁️ Supabase guardó con errores: ${msg.slice(0, 160)}` });
         toast("⚠️ Supabase guardó con errores: " + msg.slice(0, 60));
+        return; // no se informa como éxito si algo no se guardó
       }
       if (window.__mcLogs) {
         window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Sincronización exitosa: ${activeCount} activos enviados` });

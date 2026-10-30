@@ -74,3 +74,20 @@ test("mensajes de la nube recuperan su fecha", () => {
   assert.equal(m.messageId, "a");
   assert.equal(mergeDaysFromCloud([]), false);
 });
+
+test("una neurona más reciente en la nube actualiza la local sin perder conexiones", async () => {
+  const { refreshNeuronsFromCloud } = await import("../src/services/cloudRestore.js");
+  const local = [
+    { id: "a", core: { concept: "Viejo", domain: "general", summary: "" }, connections: ["b"], updatedAt: "2026-07-01T00:00:00.000Z" },
+    { id: "b", core: { concept: "Local nuevo", domain: "general", summary: "" }, connections: [], updatedAt: "2026-10-30T00:00:00.000Z" },
+  ];
+  const cloud = [
+    { id: "a", concept: "Nuevo en la nube", domain: "work", updated_at: "2026-10-29T00:00:00.000Z" },
+    { id: "b", concept: "Viejo en la nube", domain: "general", updated_at: "2026-08-01T00:00:00.000Z" },
+  ];
+  const { list, updated } = refreshNeuronsFromCloud(local, cloud);
+  assert.equal(updated, 1);
+  assert.equal(list[0].core.concept, "Nuevo en la nube");
+  assert.deepEqual(list[0].connections, ["b"]);
+  assert.equal(list[1].core.concept, "Local nuevo");
+});
