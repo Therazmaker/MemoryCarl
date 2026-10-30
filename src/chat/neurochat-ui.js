@@ -8,7 +8,7 @@
  *   initNeuroChat()   → inicialización del módulo
  */
 
-import { sendMessage, forcePremiumGenerationForMessage, undoMessageLifeChanges, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
+import { sendMessage, forcePremiumGenerationForMessage, undoMessageLifeChanges, getFullChatHistory, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
 import { processDislikeExplanation } from "../neuro/feedback.js";
 import { NeuroProbeUI } from "./neuroprobe-ui.js";
 import { saveMemory, updateMemory, deleteMemory, autoFixMemory, suggestMemoryMilestone } from "../memory/memoryStore.js";
@@ -36,7 +36,7 @@ import {
   createUserRelation,
 } from "../neuro/structuredFeedback.js";
 import { viewDayCalendar, viewDayDetail, wireDayCalendar, wireDayDetail, dayUiState } from "../day/day-calendar-ui.js";
-import { getAllDays, getDayByDate } from "../day/dayStore.js";
+import { getAllDays, getDayByDate, mergeDaysFromCloud, repairDaysFromChatHistory } from "../day/dayStore.js";
 import { viewCouch, wireCouch } from "./couch-ui.js";
 import {
   loadLifeFacts,
@@ -62,6 +62,7 @@ import {
   getOpenThreads,
 } from "./openThreads.js";
 import { reconcileThreadsWithFacts, undoLifeChanges, describeLifeChange, mergeLifeLists } from "./lifeChanges.js";
+import { addMissingById, cloudNeuronToLocal, cloudMemoryToLocal, cloudChatToLocal } from "../services/cloudRestore.js";
 import { todayLocalStr } from "./lifeDates.js";
 
 // ---- Constantes UI ----
@@ -2686,6 +2687,14 @@ export function wireNeuroChat(root) {
  * Inicialización del módulo (llamada una vez al montar el tab).
  */
 export function initNeuroChat() {
+  // Recupera en "Días" los mensajes que una restauración desde la nube pudo haber borrado
+  // (el historial completo del chat vive en IndexedDB y no se ve afectado)
+  getFullChatHistory()
+    .then((history) => {
+      if (repairDaysFromChatHistory(history) > 0 && uiState.activeTab === "days") rerender();
+    })
+    .catch((err) => console.warn("[NeuroChat] No se pudieron reparar los días:", err));
+
   // Pre-cargar la API key de Ollama si el usuario la proporcionó y no está guardada
   try {
     const currentSettings = getOllamaSettings();
@@ -2764,23 +2773,31 @@ export function initNeuroChat() {
       const { data } = await res.json();
       if (!data) return;
 
+      // La nube guarda versiones recortadas (neuronas sin conexiones, días sin mensajes,
+      // chat sin fechas): solo se AÑADE lo que falta en el teléfono, nunca se reemplaza
       let changed = false;
-      if (Array.isArray(data.neurons) && data.neurons.length > 0) {
-        localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(data.neurons));
-        changed = true;
+      const readLocal = (key) => {
+        try { const v = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(v) ? v : []; } catch (_e) { return []; }
+      };
+      const addMissing = (key, cloudList, convert) => {
+        if (!Array.isArray(cloudList) || !cloudList.length) return;
+        const { list, added } = addMissingById(readLocal(key), cloudList, convert);
+        if (added) {
+          localStorage.setItem(key, JSON.stringify(list));
+          changed = true;
+        }
+      };
+      addMissing("memorycarl_neurochat_neurons", data.neurons, cloudNeuronToLocal);
+      addMissing("memorycarl_memories_v1", data.memories, cloudMemoryToLocal);
+      // El chat solo se restaura en un dispositivo sin historial (el backend pierde mensajes)
+      if (Array.isArray(data.chatHistory) && data.chatHistory.length && !readLocal("memorycarl_neurochat_history").length) {
+        const local = await getFullChatHistory();
+        if (!local.length) {
+          localStorage.setItem("memorycarl_neurochat_history", JSON.stringify(data.chatHistory.map(cloudChatToLocal).filter(Boolean).slice(-50)));
+          changed = true;
+        }
       }
-      if (Array.isArray(data.memories) && data.memories.length > 0) {
-        localStorage.setItem("memorycarl_memories_v1", JSON.stringify(data.memories));
-        changed = true;
-      }
-      if (Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
-        localStorage.setItem("memorycarl_neurochat_history", JSON.stringify(data.chatHistory));
-        changed = true;
-      }
-      if (Array.isArray(data.days) && data.days.length > 0) {
-        localStorage.setItem("memorycarl_days_v1", JSON.stringify(data.days));
-        changed = true;
-      }
+      if (Array.isArray(data.days) && data.days.length && mergeDaysFromCloud(data.days)) changed = true;
 
       // Hechos de vida e hilos: se fusionan con lo local (gana lo modificado más reciente),
       // así una copia vieja de la nube no borra lo que Carl acaba de guardar

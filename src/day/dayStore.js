@@ -1,3 +1,5 @@
+import { todayLocalStr } from "../chat/lifeDates.js";
+import { cloudDayToLocal, mergeCloudDays, repairDaysFromChat } from "../services/cloudRestore.js";
 /**
  * dayStore.js — Almacenamiento del Daily Memory Engine
  * MemoryCarl
@@ -33,7 +35,8 @@ function loadDays() {
   try {
     const raw = localStorage.getItem(DAY_STORE_KEY);
     const parsed = JSON.parse(raw || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    // Días restaurados desde la nube sin rawChat se normalizan al formato de la app
+    return Array.isArray(parsed) ? parsed.map((d) => (Array.isArray(d?.rawChat) ? d : cloudDayToLocal(d))).filter(Boolean) : [];
   } catch (_e) {
     return [];
   }
@@ -48,7 +51,8 @@ function saveDays(days) {
 }
 
 function getTodayDate() {
-  return new Date().toISOString().slice(0, 10);
+  // Fecha local (en UTC, de noche en Perú ya sería "mañana")
+  return todayLocalStr();
 }
 
 function generateDayId(date) {
@@ -154,6 +158,28 @@ export function updateDay(day) {
   };
   saveDays(days);
   return days[idx];
+}
+
+/**
+ * Rellena cada día con los mensajes del historial completo del chat que le falten
+ * (por ejemplo, si una restauración desde la nube los borró). Crea los días que falten.
+ * @param {Array} messages
+ * @returns {number} mensajes añadidos
+ */
+export function repairDaysFromChatHistory(messages = []) {
+  const { list, added } = repairDaysFromChat(loadDays(), messages, buildEmptyDay);
+  if (added) saveDays(list);
+  return added;
+}
+
+/**
+ * Fusiona los días que vienen de la nube sin pisar los locales.
+ * @returns {boolean} si hubo cambios
+ */
+export function mergeDaysFromCloud(cloudDays = []) {
+  const { list, changed } = mergeCloudDays(loadDays(), cloudDays);
+  if (changed) saveDays(list);
+  return changed;
 }
 
 /**

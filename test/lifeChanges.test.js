@@ -37,16 +37,18 @@ test("deshacer deja todo como estaba", () => {
   localStorage.clear();
   openThread({ topic: "Buscando trabajo", openedAt: daysAgo(20) });
   upsertLifeFact({ text: "Sin empleo", category: "trabajo", since: daysAgo(30) });
-  const beforeFacts = JSON.stringify(getLifeFacts({ status: "all" }));
-  const beforeThreads = localStorage.getItem(OPEN_THREADS_KEY);
+  // updatedAt cambia al deshacer (es un cambio más reciente); el resto debe quedar igual
+  const plain = (list) => list.map(({ updatedAt, ...rest }) => rest);
+  const beforeFacts = plain(getLifeFacts({ status: "all" }));
+  const beforeThreads = plain(JSON.parse(localStorage.getItem(OPEN_THREADS_KEY)));
 
   const changes = applyLifeActions([
     { type: "upsertLifeFact", fact: { text: "Trabaja en Empresa B", category: "trabajo" } },
   ]);
   undoLifeChanges(changes);
 
-  assert.equal(JSON.stringify(getLifeFacts({ status: "all" })), beforeFacts);
-  assert.deepEqual(JSON.parse(localStorage.getItem(OPEN_THREADS_KEY)), JSON.parse(beforeThreads));
+  assert.deepEqual(plain(getLifeFacts({ status: "all" })), beforeFacts);
+  assert.deepEqual(plain(JSON.parse(localStorage.getItem(OPEN_THREADS_KEY))), beforeThreads);
 });
 
 test("la IA puede cerrar hilos y etapas por id", () => {
