@@ -6,6 +6,7 @@
  */
 
 import { todayLocalStr, stampUpdatedAt } from "./lifeDates.js";
+import { markAppStateChanged } from "../services/syncOutbox.js";
 import { VALID_CATEGORIES, inferArea, normalizeText } from "./lifeFacts.js";
 
 export const OPEN_THREADS_KEY = "memorycarl_open_threads";
@@ -72,6 +73,7 @@ export function saveOpenThreads(threads) {
     if (typeof localStorage === "undefined") return;
     stampUpdatedAt(threads, loadOpenThreads());
     localStorage.setItem(OPEN_THREADS_KEY, JSON.stringify(threads));
+    markAppStateChanged();
     if (typeof window !== "undefined" && typeof window.neurochatPushToSupabase === "function") {
       window.neurochatPushToSupabase(false);
     }

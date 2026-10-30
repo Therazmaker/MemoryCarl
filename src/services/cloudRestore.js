@@ -12,6 +12,8 @@ import { todayLocalStr } from "../chat/lifeDates.js";
 /** Neurona del backend (plana) → neurona de la app. Si ya tiene `core`, se devuelve tal cual. */
 export function cloudNeuronToLocal(row) {
   if (!row || typeof row !== "object") return null;
+  // Columna `data`: la neurona completa tal como estaba en el teléfono
+  if (row.data && typeof row.data === "object" && row.data.core) return { ...row.data, id: row.data.id || row.id };
   if (row.core && typeof row.core === "object") return row;
   if (!row.concept) return row;
   return {
@@ -30,6 +32,7 @@ export function cloudNeuronToLocal(row) {
 /** Memoria del backend → memoria de la app. */
 export function cloudMemoryToLocal(row) {
   if (!row || typeof row !== "object") return null;
+  if (row.data && typeof row.data === "object" && typeof row.data.text === "string") return { ...row.data, id: row.data.id || row.id };
   if (typeof row.text === "string") return row;
   const { text_content, linked_neurons, ...rest } = row;
   return { ...rest, text: text_content || row.snippet || "", linkedNeurons: Array.isArray(linked_neurons) ? linked_neurons : [] };
@@ -38,6 +41,10 @@ export function cloudMemoryToLocal(row) {
 /** Día del backend (solo resumen) → día de la app, sin mensajes. */
 export function cloudDayToLocal(row) {
   if (!row?.date) return null;
+  // Columna `data`: el día completo, con su chat
+  if (row.data && typeof row.data === "object" && Array.isArray(row.data.rawChat)) {
+    return { ...row.data, date: row.data.date || row.date };
+  }
   const now = new Date().toISOString();
   return {
     id: row.id || `day_${row.date}`,
@@ -97,9 +104,16 @@ export function refreshNeuronsFromCloud(local = [], cloud = []) {
   let updated = 0;
   const list = local.map((n) => {
     const row = byId.get(n?.id);
-    const cloudAt = Date.parse(row?.updated_at || "") || 0;
+    const cloudAt = Date.parse(row?.data?.updatedAt || row?.updated_at || "") || 0;
     const localAt = Date.parse(n?.updatedAt || "") || 0;
     if (!row || !cloudAt || cloudAt <= localAt) return n;
+    // Con `data` la nube trae la neurona completa: se toma entera conservando el embedding local
+    if (row.data?.core) {
+      const full = { ...row.data, id: n.id, embedding: n.embedding };
+      if (JSON.stringify(full) === JSON.stringify(n)) return n;
+      updated++;
+      return full;
+    }
     const c = cloudNeuronToLocal(row);
     const next = {
       ...n,
@@ -135,8 +149,25 @@ export function mergeCloudDays(localDays = [], cloudDays = []) {
       continue;
     }
     const day = list[idx];
-    if (!day.summary && cloudDay.summary) {
-      list[idx] = { ...day, summary: cloudDay.summary, dominantEmotion: day.dominantEmotion !== "neutral" ? day.dominantEmotion : cloudDay.dominantEmotion, dominantThemes: day.dominantThemes?.length ? day.dominantThemes : cloudDay.dominantThemes };
+    let next = day;
+    // Mensajes: se unen los de ambos lados (nunca se pierde ninguno)
+    const cloudChat = Array.isArray(cloudDay.rawChat) ? cloudDay.rawChat : [];
+    if (cloudChat.length) {
+      const keyOf = (m) => `${m.role}|${m.ts}`;
+      const seen = new Set((day.rawChat || []).map(keyOf));
+      const extra = cloudChat.filter((m) => m && !seen.has(keyOf(m)));
+      if (extra.length) next = { ...next, rawChat: [...(day.rawChat || []), ...extra].sort((a, b) => (a.ts || 0) - (b.ts || 0)) };
+    }
+    // Resumen, emoción, temas…: gana la versión modificada más recientemente
+    const cloudNewer = String(cloudDay.updatedAt || "") > String(day.updatedAt || "") && Array.isArray(row?.data?.rawChat);
+    if (cloudNewer) {
+      const { rawChat, ...meta } = cloudDay;
+      next = { ...next, ...meta, rawChat: next.rawChat };
+    } else if (!day.summary && cloudDay.summary) {
+      next = { ...next, summary: cloudDay.summary, dominantEmotion: day.dominantEmotion !== "neutral" ? day.dominantEmotion : cloudDay.dominantEmotion, dominantThemes: day.dominantThemes?.length ? day.dominantThemes : cloudDay.dominantThemes };
+    }
+    if (next !== day) {
+      list[idx] = next;
       changed = true;
     }
   }

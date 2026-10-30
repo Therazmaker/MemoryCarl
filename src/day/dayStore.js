@@ -1,4 +1,5 @@
 import { todayLocalStr } from "../chat/lifeDates.js";
+import { trackListChanges } from "../services/syncOutbox.js";
 import { cloudDayToLocal, mergeCloudDays, repairDaysFromChat } from "../services/cloudRestore.js";
 /**
  * dayStore.js — Almacenamiento del Daily Memory Engine
@@ -44,7 +45,10 @@ function loadDays() {
 
 function saveDays(days) {
   try {
+    let prev = [];
+    try { prev = JSON.parse(localStorage.getItem(DAY_STORE_KEY) || "[]"); } catch (_e) {}
     localStorage.setItem(DAY_STORE_KEY, JSON.stringify(days));
+    trackListChanges("days", prev, days, (d) => d?.date);
   } catch (_e) {
     // noop — almacenamiento lleno o no disponible
   }

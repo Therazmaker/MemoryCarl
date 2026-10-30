@@ -9,7 +9,10 @@ global.localStorage = {
   clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
 };
 
-const { getApiConfig, buildSyncPayload, pushNeurochatNow, getSyncStatus } = await import("../src/services/neurochatSync.js");
+const { getApiConfig, buildOutboxBatch, pushNeurochatNow, getSyncStatus } = await import("../src/services/neurochatSync.js");
+const { markChanged, markAppStateChanged, pendingCount, loadOutbox } = await import("../src/services/syncOutbox.js");
+const { saveNeuron, deleteNeuron } = await import("../src/neuro/neuronStore.js");
+const { createNeuron } = await import("../src/neuro/schemas.js");
 
 test("usa la key de la app principal si NeuroChat no tiene la suya", () => {
   localStorage.clear();
@@ -21,29 +24,72 @@ test("usa la key de la app principal si NeuroChat no tiene la suya", () => {
   assert.deepEqual(getApiConfig(), { url: "https://otra.vercel.app", key: "k-nc", source: "neurochat" });
 });
 
-test("el envío lleva solo lo que el servidor guarda", () => {
+test("la cola lleva la neurona completa sin embedding y los días con su chat", async () => {
   localStorage.clear();
   localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify([{ id: "n1", type: "memory", core: { concept: "A", domain: "general", summary: "" }, triggers: [], connections: ["n2"], weight: 0.5, emotion: "neutral", evidence: [], embedding: [0.1, 0.2] }]));
   localStorage.setItem("memorycarl_days_v1", JSON.stringify([{ id: "d", date: "2026-10-30", rawChat: [{ role: "user", content: "hola", ts: 1 }], summary: "s" }]));
-  localStorage.setItem("memorycarl_neurochat_history", JSON.stringify([
-    { role: "user", content: "hola", ts: 1, messageId: "m1" },
-    { role: "assistant", content: "¡hola!", ts: 2, messageId: "m1" },
-  ]));
-  const p = buildSyncPayload();
-  assert.ok(!("embedding" in p.neurons[0]));
-  assert.ok(!("rawChat" in p.days[0]));
-  assert.deepEqual(Object.keys(p.appState).sort(), ["lifeFacts", "openThreads"]);
-  assert.deepEqual(p.chatHistory.map((m) => m.messageId), ["m1_user", "m1_assistant"]);
+  markChanged("neurons", ["n1"]);
+  markChanged("days", ["2026-10-30"]);
+  markAppStateChanged();
+  const { payload, empty } = await buildOutboxBatch();
+  assert.equal(empty, false);
+  assert.ok(!("embedding" in payload.neurons[0]));
+  assert.deepEqual(payload.neurons[0].connections, ["n2"]);
+  assert.equal(payload.days[0].rawChat.length, 1);
+  assert.deepEqual(Object.keys(payload.appState).sort(), ["lifeFacts", "openThreads"]);
+});
+
+test("guardar y borrar neuronas las anota en la cola", () => {
+  localStorage.clear();
+  const n = createNeuron({ core: { concept: "Trabajo", domain: "work", summary: "" } });
+  saveNeuron(n);
+  assert.equal(loadOutbox().neurons[n.id].op, "upsert");
+  deleteNeuron(n.id);
+  assert.equal(loadOutbox().neurons[n.id].op, "delete");
+});
+
+test("solo se confirma lo que el servidor guardó; lo que falló sigue en la cola", async () => {
+  localStorage.clear();
+  localStorage.setItem("memorycarl_api_key", "k");
+  localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify([{ id: "n1", type: "memory", core: { concept: "A", domain: "general", summary: "" }, triggers: [], connections: [], weight: 0.5, emotion: "neutral", evidence: [], embedding: [] }]));
+  localStorage.setItem("memorycarl_days_v1", JSON.stringify([{ id: "d", date: "2026-10-30", rawChat: [], summary: "" }]));
+  markChanged("neurons", ["n1"]);
+  markChanged("days", ["2026-10-30"]);
+  global.fetch = async () => new Response(JSON.stringify({ data: { neuronsSynced: 1, errors: ["Error guardando días: boom"] } }), { status: 200 });
+  const st = await pushNeurochatNow();
+  assert.equal(st.partial, true);
+  assert.equal(Object.keys(loadOutbox().neurons).length, 0);
+  assert.equal(Object.keys(loadOutbox().days).length, 1);
+});
+
+test("muchos cambios se suben en varias tandas hasta vaciar la cola", async () => {
+  localStorage.clear();
+  localStorage.setItem("memorycarl_api_key", "k");
+  const neurons = Array.from({ length: 320 }, (_, i) => ({ id: "n" + i, type: "memory", core: { concept: "N" + i, domain: "general", summary: "" }, triggers: [], connections: [], weight: 0.5, emotion: "neutral", evidence: [], embedding: [] }));
+  localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(neurons));
+  markChanged("neurons", neurons.map((n) => n.id));
+  let calls = 0;
+  global.fetch = async (_url, opts) => {
+    calls++;
+    const body = JSON.parse(opts.body);
+    return new Response(JSON.stringify({ data: { neuronsSynced: body.neurons.length, errors: [] } }), { status: 200 });
+  };
+  const st = await pushNeurochatNow();
+  assert.equal(calls, 3);
+  assert.equal(st.counts.neurons, 320);
+  assert.equal(pendingCount(), 0);
 });
 
 test("guarda el error del servidor para mostrarlo", async () => {
   localStorage.clear();
   localStorage.setItem("memorycarl_api_key", "mala");
+  markAppStateChanged();
   global.fetch = async () => new Response(JSON.stringify({ message: "No autorizado. API Key inválida." }), { status: 401 });
   const st = await pushNeurochatNow();
   assert.equal(st.ok, false);
   assert.equal(st.httpStatus, 401);
   assert.match(getSyncStatus().message, /No autorizado/);
+  assert.equal(pendingCount(), 1, "lo pendiente sigue en la cola");
 });
 
 test("sin key no intenta subir y lo explica", async () => {

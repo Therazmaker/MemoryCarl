@@ -12,6 +12,7 @@ import {
   dedupeMemoryTags,
   suggestMemoryMilestone,
 } from "./memoryNormalizer.js";
+import { trackListChanges } from "../services/syncOutbox.js";
 import { cloudMemoryToLocal } from "../services/cloudRestore.js";
 import { getAllNeurons } from "../neuro/neuronStore.js";
 
@@ -45,7 +46,11 @@ function triggerNeuroChatPush() {
 function writeMemories(memories) {
   if (typeof localStorage === "undefined") return;
   try {
+    let prev = [];
+    try { prev = JSON.parse(localStorage.getItem(MEMORY_KEY) || "[]"); } catch (_e) {}
     localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
+    // Cola de subida: solo en guardados normales (el recorte por cuota no cuenta como borrado)
+    trackListChanges("memories", prev, memories);
     triggerNeuroChatPush();
   } catch (e) {
     if (e && (e.name === "QuotaExceededError" || e.code === 22 || e.code === 1014)) {

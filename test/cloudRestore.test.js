@@ -91,3 +91,19 @@ test("una neurona más reciente en la nube actualiza la local sin perder conexio
   assert.deepEqual(list[0].connections, ["b"]);
   assert.equal(list[1].core.concept, "Local nuevo");
 });
+
+test("con la columna data se restaura la neurona, la memoria y el día completos", async () => {
+  const { cloudNeuronToLocal, cloudMemoryToLocal, cloudDayToLocal, mergeCloudDays } = await import("../src/services/cloudRestore.js");
+  const n = cloudNeuronToLocal({ id: "n1", concept: "X", data: { id: "n1", core: { concept: "X", domain: "work", summary: "s" }, connections: ["n2"], triggers: ["t"] } });
+  assert.deepEqual(n.connections, ["n2"]);
+  const m = cloudMemoryToLocal({ id: "m1", text_content: "corto", data: { id: "m1", text: "texto completo", linkedNeurons: ["n1"] } });
+  assert.equal(m.text, "texto completo");
+  const d = cloudDayToLocal({ date: "2026-10-30", summary: "", data: { id: "d1", date: "2026-10-30", rawChat: [{ role: "user", content: "hola", ts: 5 }], summary: "Día" } });
+  assert.equal(d.rawChat.length, 1);
+
+  // Días: se unen los mensajes de los dos lados
+  const local = [{ id: "d1", date: "2026-10-30", rawChat: [{ role: "user", content: "otro", ts: 9 }], summary: "", updatedAt: "2026-10-30T10:00:00Z" }];
+  const { list } = mergeCloudDays(local, [{ date: "2026-10-30", data: { id: "d1", date: "2026-10-30", rawChat: [{ role: "user", content: "hola", ts: 5 }], summary: "Día", updatedAt: "2026-10-30T12:00:00Z" } }]);
+  assert.deepEqual(list[0].rawChat.map((x) => x.ts), [5, 9]);
+  assert.equal(list[0].summary, "Día");
+});

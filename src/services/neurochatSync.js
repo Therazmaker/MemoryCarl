@@ -16,11 +16,12 @@ import { getAllDays, mergeDaysFromCloud } from "../day/dayStore.js";
 import { loadLifeFacts, LIFE_FACTS_KEY } from "../chat/lifeFacts.js";
 import { loadOpenThreads, OPEN_THREADS_KEY } from "../chat/openThreads.js";
 import { mergeLifeLists } from "../chat/lifeChanges.js";
+import { loadOutbox, markChanged, markAppStateChanged, ackSent, pendingCount, chatKey } from "./syncOutbox.js";
+import { getFullChatHistory } from "../chat/neurochat.js";
 import { addMissingById, cloudNeuronToLocal, cloudMemoryToLocal, cloudChatToLocal, refreshNeuronsFromCloud } from "./cloudRestore.js";
 
 export const SYNC_STATUS_KEY = "memorycarl_neurochat_sync_status";
 const HISTORY_KEY = "memorycarl_neurochat_history";
-const MAX_CHAT_MESSAGES = 100;
 const PUSH_DEBOUNCE_MS = 2500;
 const TIMEOUT_MS = 30000;
 
@@ -67,8 +68,10 @@ function logToAppConsole(status) {
   if (typeof window === "undefined" || !Array.isArray(window.__mcLogs)) return;
   const time = new Date().toLocaleTimeString("es-PE");
   if (status.kind === "push") {
+    const c = status.counts || {};
+    if (status.ok && !c.neurons && !c.memories && !c.days && !c.chat && !c.appState && !c.deleted) return; // nada que subir
     const text = status.ok
-      ? `☁️ NeuroChat sincronizado (${status.sizeKB} KB: ${status.counts?.neurons || 0} neuronas, ${status.counts?.days || 0} días)`
+      ? `☁️ NeuroChat sincronizado (${status.counts?.neurons || 0} neuronas, ${status.counts?.days || 0} días, ${status.counts?.chat || 0} mensajes${status.pending ? `; quedan ${status.pending}` : ""})`
       : `☁️ NeuroChat NO sincronizado${status.httpStatus ? ` (HTTP ${status.httpStatus})` : ""}: ${status.message}`;
     window.__mcLogs.push({ time, type: status.ok ? "info" : "error", text });
   } else if (status.pullOk === false) {
@@ -87,42 +90,108 @@ function saveSyncStatus(status) {
   return status;
 }
 
-/** Payload mínimo: solo los campos que /api/sync guarda. */
-export function buildSyncPayload() {
-  const neurons = getAllNeurons().map((n) => ({
-    id: n.id,
-    core: n.core,
-    triggers: n.triggers,
-    emotion: n.emotion,
-    weight: n.weight,
-    temporal: n.temporal,
-  }));
-  const memories = getAllMemories().map((m) => ({
-    id: m.id,
-    title: m.title,
-    text: m.text,
-    date: m.date,
-    emotion: m.emotion,
-    tags: m.tags,
-    linkedNeurons: m.linkedNeurons,
-    importance: m.importance,
-    temporal: m.temporal,
-  }));
-  const days = getAllDays().map((d) => ({
-    id: d.id,
-    date: d.date,
-    summary: d.summary,
-    dominantEmotion: d.dominantEmotion,
-    dominantThemes: d.dominantThemes,
-    insights: d.insights,
-    isMilestone: d.isMilestone,
-  }));
+// Tandas por petición (muy por debajo del límite de 4,5 MB de Vercel)
+const BATCH_LIMITS = { neurons: 150, memories: 100, days: 10, chat: 200 };
+const MAX_BATCHES_PER_PUSH = 40;
+export const BACKFILL_FLAG = "memorycarl_sync_backfill_v2";
+
+// La neurona viaja completa salvo el embedding (se recalcula en el teléfono)
+function neuronForCloud(n) {
+  const { embedding, ...rest } = n;
+  return rest;
+}
+
+function chatForCloud(m) {
   // Usuario y asistente comparten messageId: se separa por rol para que el backend no los junte
-  const chatHistory = readJsonArray(HISTORY_KEY).slice(-MAX_CHAT_MESSAGES)
-    .filter((m) => m && m.content)
-    .map((m) => ({ messageId: `${m.messageId || m.ts}_${m.role}`, role: m.role, content: m.content, meta: { ts: m.ts } }));
-  const appState = { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads() };
-  return { neurons, memories, chatHistory, days, appState };
+  return { messageId: `${m.messageId || m.ts}_${m.role}`, role: m.role, content: m.content, meta: { ts: m.ts, messageId: m.messageId || null } };
+}
+
+/**
+ * La primera vez pone en la cola todo lo que hay en el teléfono, para que Supabase
+ * recupere lo que no se subió (por ejemplo, desde julio).
+ * @returns {Promise<boolean>} si se encoló
+ */
+export async function queueFullBackfill() {
+  try {
+    if (localStorage.getItem(BACKFILL_FLAG) === "1") return false;
+  } catch (_e) {
+    return false;
+  }
+  markChanged("neurons", getAllNeurons({ includeDeleted: true }).map((n) => n.id));
+  markChanged("memories", getAllMemories().map((m) => m.id));
+  markChanged("days", getAllDays().map((d) => d.date));
+  try {
+    const history = await getFullChatHistory();
+    markChanged("chat", history.filter((m) => m?.content).map(chatKey));
+  } catch (_e) {}
+  markAppStateChanged();
+  try { localStorage.setItem(BACKFILL_FLAG, "1"); } catch (_e) {}
+  return true;
+}
+
+/**
+ * Prepara una tanda con los cambios pendientes de la cola.
+ * @returns {Promise<{ payload: object, sent: object, empty: boolean }>}
+ */
+export async function buildOutboxBatch() {
+  const box = loadOutbox();
+  const take = (kind) => Object.entries(box[kind] || {})
+    .sort((x, y) => x[1].seq - y[1].seq)
+    .slice(0, BATCH_LIMITS[kind]);
+  const sent = { neurons: {}, memories: {}, days: {}, chat: {}, appState: 0 };
+  const deleted = { neurons: [], memories: [], days: [] };
+
+  const collect = (kind, entries, list, keyOf, convert) => {
+    const byKey = new Map(list.map((x) => [String(keyOf(x)), x]));
+    const out = [];
+    for (const [key, entry] of entries) {
+      sent[kind][key] = entry.seq;
+      const item = byKey.get(key);
+      if (entry.op === "delete" || !item) deleted[kind].push(key);
+      else out.push(convert(item));
+    }
+    return out;
+  };
+
+  const nEntries = take("neurons");
+  const mEntries = take("memories");
+  const dEntries = take("days");
+  const cEntries = take("chat");
+  const neurons = nEntries.length ? collect("neurons", nEntries, getAllNeurons({ includeDeleted: true }), (n) => n.id, neuronForCloud) : [];
+  const memories = mEntries.length ? collect("memories", mEntries, getAllMemories(), (m) => m.id, (m) => m) : [];
+  const days = dEntries.length ? collect("days", dEntries, getAllDays(), (d) => d.date, (d) => d) : [];
+
+  let chatHistory = [];
+  if (cEntries.length) {
+    let history = [];
+    try { history = await getFullChatHistory(); } catch (_e) {}
+    const byKey = new Map(history.map((m) => [chatKey(m), m]));
+    for (const [key, entry] of cEntries) {
+      sent.chat[key] = entry.seq;
+      const msg = byKey.get(key);
+      if (msg?.content) chatHistory.push(chatForCloud(msg));
+    }
+  }
+
+  const payload = { neurons, memories, days, chatHistory, deleted };
+  if (box.appState) {
+    sent.appState = box.appState;
+    payload.appState = { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads() };
+  }
+  const empty = !nEntries.length && !mEntries.length && !dEntries.length && !cEntries.length && !box.appState;
+  return { payload, sent, empty };
+}
+
+// Qué secciones fallaron en el servidor, según el texto de cada error
+function failedSections(errors = []) {
+  const text = errors.join(" ").toLowerCase();
+  return {
+    neurons: /neurona/.test(text),
+    memories: /memoria/.test(text),
+    chat: /historial/.test(text),
+    days: /d[ií]as/.test(text),
+    appState: /app_state|finance|estado/.test(text),
+  };
 }
 
 async function fetchWithTimeout(url, opts) {
@@ -146,49 +215,84 @@ async function readError(res) {
 }
 
 /**
- * Sube los datos de NeuroChat ahora mismo.
- * @returns {Promise<object>} estado guardado ({ ok, at, httpStatus, sizeKB, message, ... })
+ * Sube los cambios pendientes de la cola, en tandas, hasta vaciarla.
+ * @returns {Promise<object>} estado guardado ({ ok, at, httpStatus, sizeKB, message, counts, pending })
  */
 export async function pushNeurochatNow() {
   const { url, key } = getApiConfig();
-  if (!key) return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", message: "Falta la API key del servidor (Ajustes de NeuroChat → Carl API, o la key de sincronización de la app)." });
+  if (!key) return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", pending: pendingCount(), message: "Falta la API key del servidor (Ajustes de NeuroChat → Carl API, o la key de sincronización de la app)." });
 
-  let body;
-  try {
-    body = JSON.stringify(buildSyncPayload());
-  } catch (err) {
-    return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", message: `No se pudo preparar el envío: ${err.message}` });
-  }
-  const sizeKB = Math.round(body.length / 1024);
-  try {
-    const res = await fetchWithTimeout(`${url}/api/sync`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body,
-      // keepalive solo admite cuerpos de hasta 64 KB
-      keepalive: body.length < 60000,
-    });
+  const counts = { neurons: 0, memories: 0, chat: 0, days: 0, deleted: 0, appState: false };
+  let totalKB = 0;
+  let fullData = true;
+  const errors = [];
+
+  for (let i = 0; i < MAX_BATCHES_PER_PUSH; i++) {
+    let batch;
+    try {
+      batch = await buildOutboxBatch();
+    } catch (err) {
+      return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", pending: pendingCount(), message: `No se pudo preparar el envío: ${err.message}` });
+    }
+    if (batch.empty) break;
+
+    const body = JSON.stringify(batch.payload);
+    const sizeKB = Math.round(body.length / 1024);
+    totalKB += sizeKB;
+    let res;
+    try {
+      res = await fetchWithTimeout(`${url}/api/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        body,
+        // keepalive solo admite cuerpos de hasta 64 KB
+        keepalive: body.length < 60000,
+      });
+    } catch (err) {
+      const msg = err?.name === "AbortError" ? "El servidor tardó demasiado en responder." : `Sin conexión con el servidor (${err?.message || err}).`;
+      return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", sizeKB, pending: pendingCount(), message: msg });
+    }
     if (!res.ok) {
       const msg = await readError(res);
-      return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", httpStatus: res.status, sizeKB, message: res.status === 413 ? `El envío es demasiado grande (${sizeKB} KB).` : msg });
+      return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", httpStatus: res.status, sizeKB, pending: pendingCount(), message: res.status === 413 ? `El envío es demasiado grande (${sizeKB} KB).` : msg });
     }
-    const json = await res.json().catch(() => ({}));
-    const data = json?.data || {};
-    const errors = Array.isArray(data.errors) ? data.errors : [];
-    return saveSyncStatus({
-      ok: errors.length === 0,
-      partial: errors.length > 0,
-      at: Date.now(),
-      kind: "push",
-      httpStatus: res.status,
-      sizeKB,
-      counts: { neurons: data.neuronsSynced || 0, memories: data.memoriesSynced || 0, chat: data.chatSynced || 0, days: data.daysSynced || 0, appState: Boolean(data.appStateSynced) },
-      message: errors.length ? errors.join(" · ") : "",
+
+    const data = (await res.json().catch(() => ({})))?.data || {};
+    const batchErrors = Array.isArray(data.errors) ? data.errors : [];
+    if (data.fullData === false) fullData = false;
+    // Solo se quita de la cola lo que el servidor guardó; lo que falló se reintenta
+    const failed = failedSections(batchErrors);
+    ackSent({
+      neurons: failed.neurons ? {} : batch.sent.neurons,
+      memories: failed.memories ? {} : batch.sent.memories,
+      days: failed.days ? {} : batch.sent.days,
+      chat: failed.chat ? {} : batch.sent.chat,
+      appState: failed.appState ? 0 : batch.sent.appState,
     });
-  } catch (err) {
-    const msg = err?.name === "AbortError" ? "El servidor tardó demasiado en responder." : `Sin conexión con el servidor (${err?.message || err}).`;
-    return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", sizeKB, message: msg });
+    counts.neurons += data.neuronsSynced || 0;
+    counts.memories += data.memoriesSynced || 0;
+    counts.chat += data.chatSynced || 0;
+    counts.days += data.daysSynced || 0;
+    counts.deleted += Object.values(data.deleted || {}).reduce((a, b) => a + b, 0);
+    counts.appState = counts.appState || Boolean(data.appStateSynced);
+    if (batchErrors.length) {
+      errors.push(...batchErrors);
+      break; // no insistir en esta ronda; queda en la cola para el siguiente intento
+    }
   }
+
+  const pending = pendingCount();
+  return saveSyncStatus({
+    ok: errors.length === 0,
+    partial: errors.length > 0,
+    at: Date.now(),
+    kind: "push",
+    sizeKB: totalKB,
+    counts,
+    pending,
+    fullData,
+    message: errors.length ? errors.join(" · ") : fullData ? "" : "Supabase no tiene la columna data: se guardó la versión resumida.",
+  });
 }
 
 let pushTimer = null;

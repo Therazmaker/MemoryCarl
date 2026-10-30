@@ -5,6 +5,7 @@
  */
 
 import { sanitizeNeuron, validateNeuron, createNeuron } from "./schemas.js";
+import { trackListChanges } from "../services/syncOutbox.js";
 import { cloudNeuronToLocal } from "../services/cloudRestore.js";
 import { getEmbedding } from "./embeddings.js";
 import { rebuildGraph } from "./connections.js";
@@ -37,7 +38,8 @@ function readAll() {
         return clean;
       })
       .filter(Boolean);
-    if (changed) writeAll(normalized);
+    // Normalizar al leer no es un cambio del usuario: no se anota en la cola de subida
+    if (changed) writeAll(normalized, { track: false });
     return normalized;
   } catch (_e) {
     return [];
@@ -54,10 +56,14 @@ function triggerNeuroChatPush() {
   }, 1000);
 }
 
-function writeAll(neurons) {
+function writeAll(neurons, { track = true } = {}) {
   try {
     if (typeof localStorage === "undefined") return;
+    let prev = [];
+    try { prev = JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); } catch (_e) {}
     localStorage.setItem(STORE_KEY, JSON.stringify(neurons));
+    // Cola de subida: solo en guardados normales (el recorte por cuota no cuenta como borrado)
+    if (track) trackListChanges("neurons", prev, neurons);
     triggerNeuroChatPush();
   } catch (e) {
     if (e && (e.name === "QuotaExceededError" || e.code === 22 || e.code === 1014)) {
