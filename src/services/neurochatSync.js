@@ -103,6 +103,15 @@ function neuronForCloud(n) {
   return rest;
 }
 
+// Bytes reales que se envían (UTF-8): con tildes o emojis es más que el número de caracteres
+function byteLength(str) {
+  if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(str).length;
+  return unescape(encodeURIComponent(str)).length;
+}
+
+// Marca de que ya se leyó la nube con éxito alguna vez (antes de subir todo lo local)
+export const PULLED_ONCE_FLAG = "memorycarl_sync_pulled_once";
+
 // El día viaja completo salvo la copia de "deshacer" (duplicaría su tamaño)
 function dayForCloud(d) {
   const { _previousVersion, ...rest } = d;
@@ -133,6 +142,7 @@ function chatForCloud(m) {
 export async function queueFullBackfill() {
   try {
     if (localStorage.getItem(BACKFILL_FLAG) === "1") return false;
+    if (localStorage.getItem(PULLED_ONCE_FLAG) !== "1") return false;
   } catch (_e) {
     return false;
   }
@@ -242,6 +252,16 @@ export async function pushNeurochatNow() {
   const { url, key } = getApiConfig();
   if (!key) return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", pending: pendingCount(), message: "Falta la API key del servidor (Ajustes de NeuroChat → Carl API, o la key de sincronización de la app)." });
 
+  // Subida inicial de todo lo local (una vez). Siempre después de haber leído la nube con
+  // éxito, para que un dispositivo con datos viejos no pise lo más reciente.
+  try {
+    if (localStorage.getItem(BACKFILL_FLAG) !== "1") {
+      let pulled = localStorage.getItem(PULLED_ONCE_FLAG) === "1";
+      if (!pulled) pulled = (await pullNeurochat()).ok;
+      if (pulled) await queueFullBackfill();
+    }
+  } catch (_e) {}
+
   const counts = { neurons: 0, memories: 0, chat: 0, days: 0, deleted: 0, appState: false };
   let totalKB = 0;
   let fullData = true;
@@ -255,7 +275,7 @@ export async function pushNeurochatNow() {
       let limits = { ...BATCH_LIMITS };
       batch = await buildOutboxBatch(limits);
       body = JSON.stringify(batch.payload);
-      while (body.length > MAX_BODY_BYTES && batch.items > 1) {
+      while (byteLength(body) > MAX_BODY_BYTES && batch.items > 1) {
         limits = Object.fromEntries(Object.entries(limits).map(([k, v]) => [k, Math.max(1, Math.floor(v / 2))]));
         if (Object.values(limits).every((v) => v === 1) && batch.items <= 4) {
           limits = { neurons: 1, memories: 0, days: 0, chat: 0 };
@@ -267,13 +287,13 @@ export async function pushNeurochatNow() {
         body = JSON.stringify(batch.payload);
       }
       // Un solo elemento que no cabe: se sube recortado para no bloquear la cola
-      if (body.length > MAX_BODY_BYTES) body = JSON.stringify(shrinkPayload(batch.payload));
+      if (byteLength(body) > MAX_BODY_BYTES) body = JSON.stringify(shrinkPayload(batch.payload));
     } catch (err) {
       return saveSyncStatus({ ok: false, at: Date.now(), kind: "push", pending: pendingCount(), message: `No se pudo preparar el envío: ${err.message}` });
     }
     if (batch.empty) break;
 
-    const sizeKB = Math.round(body.length / 1024);
+    const sizeKB = Math.round(byteLength(body) / 1024);
     totalKB += sizeKB;
     let res;
     try {
@@ -434,6 +454,7 @@ export async function pullNeurochat(opts = {}) {
   mergeKey(OPEN_THREADS_KEY, data.openThreads || data.appState?.openThreads);
 
   saveSyncStatus({ ...(getSyncStatus() || {}), kind: "pull", pullOk: true, pullAt: Date.now(), pullMessage: "" });
+  try { localStorage.setItem(PULLED_ONCE_FLAG, "1"); } catch (_e) {}
   if (needsPush) schedulePush();
   return { ok: true, changed, added };
 }

@@ -51,6 +51,7 @@ test("guardar y borrar neuronas las anota en la cola", () => {
 test("solo se confirma lo que el servidor guardó; lo que falló sigue en la cola", async () => {
   localStorage.clear();
   localStorage.setItem("memorycarl_api_key", "k");
+  localStorage.setItem("memorycarl_sync_backfill_v2", "1");
   localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify([{ id: "n1", type: "memory", core: { concept: "A", domain: "general", summary: "" }, triggers: [], connections: [], weight: 0.5, emotion: "neutral", evidence: [], embedding: [] }]));
   localStorage.setItem("memorycarl_days_v1", JSON.stringify([{ id: "d", date: "2026-10-30", rawChat: [], summary: "" }]));
   markChanged("neurons", ["n1"]);
@@ -65,6 +66,7 @@ test("solo se confirma lo que el servidor guardó; lo que falló sigue en la col
 test("muchos cambios se suben en varias tandas hasta vaciar la cola", async () => {
   localStorage.clear();
   localStorage.setItem("memorycarl_api_key", "k");
+  localStorage.setItem("memorycarl_sync_backfill_v2", "1");
   const neurons = Array.from({ length: 320 }, (_, i) => ({ id: "n" + i, type: "memory", core: { concept: "N" + i, domain: "general", summary: "" }, triggers: [], connections: [], weight: 0.5, emotion: "neutral", evidence: [], embedding: [] }));
   localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(neurons));
   markChanged("neurons", neurons.map((n) => n.id));
@@ -83,6 +85,7 @@ test("muchos cambios se suben en varias tandas hasta vaciar la cola", async () =
 test("guarda el error del servidor para mostrarlo", async () => {
   localStorage.clear();
   localStorage.setItem("memorycarl_api_key", "mala");
+  localStorage.setItem("memorycarl_sync_backfill_v2", "1");
   markAppStateChanged();
   global.fetch = async () => new Response(JSON.stringify({ message: "No autorizado. API Key inválida." }), { status: 401 });
   const st = await pushNeurochatNow();
@@ -104,6 +107,7 @@ test("sin key no intenta subir y lo explica", async () => {
 test("una tanda demasiado grande se parte y ningún envío supera ~3 MB", async () => {
   localStorage.clear();
   localStorage.setItem("memorycarl_api_key", "k");
+  localStorage.setItem("memorycarl_sync_backfill_v2", "1");
   // 6 días con ~900 KB de chat cada uno (10 juntos superarían el límite)
   const big = "x".repeat(900 * 1024);
   const days = Array.from({ length: 6 }, (_, i) => ({ id: "d" + i, date: `2026-10-0${i + 1}`, rawChat: [{ role: "user", content: big, ts: i }], summary: "", _previousVersion: { rawChat: [{ content: big }] } }));
@@ -121,4 +125,21 @@ test("una tanda demasiado grande se parte y ningún envío supera ~3 MB", async 
   assert.ok(sizes.length >= 2);
   assert.ok(Math.max(...sizes) <= 3 * 1024 * 1024);
   assert.equal(pendingCount(), 0);
+});
+
+test("la subida inicial de todo se hace aunque el arranque haya fallado, y siempre tras leer la nube", async () => {
+  localStorage.clear();
+  localStorage.setItem("memorycarl_api_key", "k");
+  localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify([{ id: "viejo", type: "memory", core: { concept: "Desde julio", domain: "general", summary: "" }, triggers: [], connections: [], weight: 0.5, emotion: "neutral", evidence: [], embedding: [] }]));
+  const calls = [];
+  global.fetch = async (url, opts = {}) => {
+    calls.push(String(url).includes("restore") ? "restore" : "sync");
+    if (String(url).includes("restore")) return new Response(JSON.stringify({ data: { appState: {} } }), { status: 200 });
+    const body = JSON.parse(opts.body);
+    return new Response(JSON.stringify({ data: { neuronsSynced: body.neurons.length, errors: [] } }), { status: 200 });
+  };
+  const st = await pushNeurochatNow();
+  assert.equal(calls[0], "restore", "primero lee la nube");
+  assert.equal(st.counts.neurons, 1, "sube lo que ya existía");
+  assert.equal(localStorage.getItem("memorycarl_sync_backfill_v2"), "1");
 });
