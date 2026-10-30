@@ -143,3 +143,16 @@ test("la subida inicial de todo se hace aunque el arranque haya fallado, y siemp
   assert.equal(st.counts.neurons, 1, "sube lo que ya existía");
   assert.equal(localStorage.getItem("memorycarl_sync_backfill_v2"), "1");
 });
+
+test("al fusionar 'Ahora' con la nube, lo que solo está en el teléfono se marca para subir", async () => {
+  localStorage.clear();
+  localStorage.setItem("memorycarl_api_key", "k");
+  localStorage.setItem("memorycarl_sync_backfill_v2", "1");
+  localStorage.setItem("memorycarl_life_facts", JSON.stringify([{ id: "local", text: "Solo en el teléfono", category: "otro", status: "active", since: "2026-10-30", updatedAt: "2026-10-30T10:00:00Z" }]));
+  global.fetch = async () => new Response(JSON.stringify({ data: { appState: { lifeFacts: [{ id: "nube", text: "Solo en la nube", category: "otro", status: "active", since: "2026-10-29", updatedAt: "2026-10-29T10:00:00Z" }] } } }), { status: 200 });
+  const { pullNeurochat } = await import("../src/services/neurochatSync.js");
+  await pullNeurochat();
+  assert.ok(loadOutbox().appState > 0);
+  const { payload } = await buildOutboxBatch();
+  assert.deepEqual(payload.appState.lifeFacts.map((f) => f.id).sort(), ["local", "nube"]);
+});

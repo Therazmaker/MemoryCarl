@@ -455,6 +455,10 @@ export async function pullNeurochat(opts = {}) {
 
   saveSyncStatus({ ...(getSyncStatus() || {}), kind: "pull", pullOk: true, pullAt: Date.now(), pullMessage: "" });
   try { localStorage.setItem(PULLED_ONCE_FLAG, "1"); } catch (_e) {}
-  if (needsPush) schedulePush();
+  // La fusión tiene elementos que la nube no tiene: se marca "Ahora" para que se suba
+  if (needsPush) {
+    markAppStateChanged();
+    schedulePush();
+  }
   return { ok: true, changed, added };
 }
