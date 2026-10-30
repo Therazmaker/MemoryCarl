@@ -6,7 +6,7 @@
  * dinero, salud, proyectos, relaciones) con fechas reales y duraciones calculadas por código.
  */
 
-import { todayLocalStr } from "./lifeDates.js";
+import { todayLocalStr, stampUpdatedAt } from "./lifeDates.js";
 
 export const LIFE_FACTS_KEY = "memorycarl_life_facts";
 
@@ -216,6 +216,7 @@ export function loadLifeFacts() {
 export function saveLifeFacts(facts) {
   try {
     if (typeof localStorage === "undefined") return;
+    stampUpdatedAt(facts, loadLifeFacts());
     localStorage.setItem(LIFE_FACTS_KEY, JSON.stringify(facts));
     if (typeof window !== "undefined" && typeof window.neurochatPushToSupabase === "function") {
       window.neurochatPushToSupabase(false);
@@ -321,7 +322,10 @@ export function upsertLifeFact(factInput, opts = {}) {
     const kind = before.status === "active" && after.status === "ended" ? "fact_ended"
       : before.status === "ended" && after.status === "active" ? "fact_reactivated"
       : "fact_updated";
-    recordChange(opts.changes, kind, before, after);
+    // Reconfirmar un hecho tal cual no es un cambio que valga la pena avisar
+    const meaningful = ["text", "category", "status", "since", "until", "endNote", "pendingConfirm"]
+      .some((k) => (before[k] ?? null) !== (after[k] ?? null));
+    if (meaningful) recordChange(opts.changes, kind, before, after);
     saveLifeFacts(facts);
     return facts[existingIdx];
   }

@@ -938,18 +938,10 @@ export async function processNeuroInput(userInput, options = {}) {
     replySource = "fallback";
     addStep(trace, "fallback_reply_used");
   } else {
-    if (hasPressuringTone(reply)) {
-      addStep(trace, "pressuring_tone_detected", { replyPreview: reply.slice(0, 50) });
-      if (isAiConfigured) {
-        reply = "⚠️ Respuesta reescrita por seguridad: tono no adecuado detectado.";
-        replySource = "api_error";
-      } else {
-        reply = buildFallbackReply(finalActivated);
-        replySource = "pressuring_tone_fallback";
-      }
-    } else {
-      addStep(trace, "reply_received", { source: replySource });
-    }
+    // Frases como "tienes que" o "debería" aparecen en respuestas normales: solo se anota
+    // en la traza para depurar, nunca se reemplaza la respuesta
+    if (hasPressuringTone(reply)) addStep(trace, "pressuring_tone_detected", { replyPreview: reply.slice(0, 50) });
+    addStep(trace, "reply_received", { source: replySource });
   }
 
   if (memoryRecallResult.ranked.length > 0) {

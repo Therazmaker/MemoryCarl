@@ -5,7 +5,7 @@
  * Administra hilos o pendientes en curso (ej: "buscando trabajo", "entrevista el jueves 29", "esperando respuesta de X").
  */
 
-import { todayLocalStr } from "./lifeDates.js";
+import { todayLocalStr, stampUpdatedAt } from "./lifeDates.js";
 import { VALID_CATEGORIES, inferArea, normalizeText } from "./lifeFacts.js";
 
 export const OPEN_THREADS_KEY = "memorycarl_open_threads";
@@ -70,6 +70,7 @@ export function loadOpenThreads() {
 export function saveOpenThreads(threads) {
   try {
     if (typeof localStorage === "undefined") return;
+    stampUpdatedAt(threads, loadOpenThreads());
     localStorage.setItem(OPEN_THREADS_KEY, JSON.stringify(threads));
     if (typeof window !== "undefined" && typeof window.neurochatPushToSupabase === "function") {
       window.neurochatPushToSupabase(false);

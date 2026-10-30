@@ -32,3 +32,20 @@ export function todayLocalStr(date = new Date()) {
 export function todayLongStr(date = new Date()) {
   return `${WEEKDAYS[date.getDay()]} ${date.getDate()} de ${MONTHS[date.getMonth()]} de ${date.getFullYear()} (${todayLocalStr(date)})`;
 }
+
+/**
+ * Marca con `updatedAt` los elementos que cambiaron respecto a la versión guardada.
+ * Sirve para fusionar con la copia de la nube sin perder los cambios más recientes.
+ * @param {Array} next - lista a guardar (se modifica en el sitio)
+ * @param {Array} prev - lista guardada anteriormente
+ * @returns {Array} next
+ */
+export function stampUpdatedAt(next, prev = []) {
+  const strip = ({ updatedAt, ...rest }) => JSON.stringify(rest);
+  const before = new Map((Array.isArray(prev) ? prev : []).filter((x) => x?.id).map((x) => [x.id, strip(x)]));
+  const now = new Date().toISOString();
+  for (const item of next) {
+    if (item?.id && before.get(item.id) !== strip(item)) item.updatedAt = now;
+  }
+  return next;
+}

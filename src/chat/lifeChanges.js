@@ -111,3 +111,22 @@ export function describeLifeChange(change) {
     default:                 return { icon: "•", text: item.text || item.topic || "Cambio" };
   }
 }
+
+/**
+ * Fusiona la copia local con la de la nube elemento a elemento (por id),
+ * quedándose con la versión modificada más recientemente. Lo que solo existe
+ * en un lado se conserva.
+ * @param {Array} local
+ * @param {Array} cloud
+ * @returns {Array}
+ */
+export function mergeLifeLists(local = [], cloud = []) {
+  const merged = new Map();
+  for (const item of Array.isArray(cloud) ? cloud : []) if (item?.id) merged.set(item.id, item);
+  for (const item of Array.isArray(local) ? local : []) {
+    if (!item?.id) continue;
+    const other = merged.get(item.id);
+    if (!other || String(item.updatedAt || "") >= String(other.updatedAt || "")) merged.set(item.id, item);
+  }
+  return [...merged.values()];
+}

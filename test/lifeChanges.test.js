@@ -12,7 +12,8 @@ global.localStorage = {
 const { todayLocalStr } = await import("../src/chat/lifeDates.js");
 const { upsertLifeFact, getLifeFacts, buildLifeFactsPromptBlock, inferArea } = await import("../src/chat/lifeFacts.js");
 const { openThread, getOpenThreads, buildOpenThreadsPromptBlock, OPEN_THREADS_KEY } = await import("../src/chat/openThreads.js");
-const { applyLifeActions, undoLifeChanges, reconcileThreadsWithFacts, describeLifeChange } = await import("../src/chat/lifeChanges.js");
+const { applyLifeActions, undoLifeChanges, reconcileThreadsWithFacts, describeLifeChange, mergeLifeLists } = await import("../src/chat/lifeChanges.js");
+const { LIFE_FACTS_KEY } = await import("../src/chat/lifeFacts.js");
 
 const daysAgo = (n) => todayLocalStr(new Date(Date.now() - n * 86400000));
 
@@ -100,4 +101,35 @@ test("inferArea deduce el área de textos libres", () => {
   assert.equal(inferArea("Buscando chamba"), "trabajo");
   assert.equal(inferArea("Mudanza al nuevo depa"), "vivienda");
   assert.equal(inferArea("algo sin pistas"), "otro");
+});
+
+test("reconfirmar un hecho igual no genera aviso", () => {
+  localStorage.clear();
+  const f = upsertLifeFact({ text: "Trabaja en Empresa B", category: "trabajo", source: "user_said" });
+  const changes = applyLifeActions([{ type: "upsertLifeFact", fact: { id: f.id, text: "Trabaja en Empresa B", category: "trabajo" } }]);
+  assert.equal(changes.length, 0);
+});
+
+test("cada cambio guardado lleva updatedAt", () => {
+  localStorage.clear();
+  const f = upsertLifeFact({ text: "Vive en Lima", category: "vivienda" });
+  const stored = JSON.parse(localStorage.getItem(LIFE_FACTS_KEY));
+  assert.ok(stored.find((x) => x.id === f.id).updatedAt);
+});
+
+test("una copia vieja de la nube no borra lo guardado en el teléfono", () => {
+  const cloud = [
+    { id: "t1", topic: "Buscando trabajo", status: "open", updatedAt: "2026-09-01T00:00:00.000Z" },
+    { id: "t2", topic: "Solo en la nube", status: "open", updatedAt: "2026-09-01T00:00:00.000Z" },
+  ];
+  const local = [
+    { id: "t1", topic: "Buscando trabajo", status: "resolved", updatedAt: "2026-10-30T00:00:00.000Z" },
+    { id: "t3", topic: "Nuevo en el teléfono", status: "open", updatedAt: "2026-10-30T00:00:00.000Z" },
+  ];
+  const merged = mergeLifeLists(local, cloud);
+  assert.equal(merged.length, 3);
+  assert.equal(merged.find((x) => x.id === "t1").status, "resolved");
+  // Si la nube es más reciente, gana la nube
+  const newer = mergeLifeLists([{ id: "a", v: 1, updatedAt: "2026-01-01" }], [{ id: "a", v: 2, updatedAt: "2026-02-01" }]);
+  assert.equal(newer[0].v, 2);
 });
