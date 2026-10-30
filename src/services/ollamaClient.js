@@ -82,6 +82,7 @@ export function isOllamaConfigured() {
 }
 
 import { buildLifeFactsPromptBlock } from "../chat/lifeFacts.js";
+import { todayLongStr } from "../chat/lifeDates.js";
 import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
 import { buildRecentDaysPromptBlock } from "../chat/recentContext.js";
 
@@ -122,24 +123,27 @@ Después de responder, indica tu intención conversacional y qué acciones tomar
       "fact": {
         "text": "Descripción corta del hecho afirmado por el usuario",
         "category": "trabajo|dinero|vivienda|relaciones|salud|proyecto|otro",
-        "since": "YYYY-MM-DD"
+        "since": "YYYY-MM-DD",
+        "replaces": "id del hecho vigente que esta etapa reemplaza (opcional)"
       }
     },
     {
       "type": "endLifeFact",
-      "match": "id o fragmento del texto del hecho que ya no aplica"
+      "id": "id del hecho que ya no aplica",
+      "until": "YYYY-MM-DD (opcional)"
     },
     {
       "type": "openThread",
       "thread": {
         "topic": "Pendiente o tema en curso mencionado por el usuario",
+        "category": "trabajo|dinero|vivienda|relaciones|salud|proyecto|otro",
         "dueDate": "YYYY-MM-DD",
         "note": "nota opcional"
       }
     },
     {
       "type": "resolveThread",
-      "match": "id o texto del hilo resuelto o completado"
+      "id": "id del hilo resuelto o que ya no aplica"
     }
   ]
 }
@@ -147,6 +151,10 @@ Después de responder, indica tu intención conversacional y qué acciones tomar
 REGLAS PARA HECHOS DE VIDA (upsertLifeFact / endLifeFact):
 - Solo registra un hecho si el usuario lo afirmó claramente (ej. "renuncié a mi trabajo", "me mudé a Lima", "conseguí empleo").
 - Si el usuario habla en tono hipotético, dudoso o pregunta algo (ej. "¿y si dejo mi empleo?"), NO registres un hecho de vida. Si dudas, no lo registres.
+- Las fechas se calculan desde la fecha de HOY indicada abajo ("ayer", "el lunes", "hace dos semanas"). Si el usuario no da fecha, usa la de hoy.
+- Cuando algo de la SITUACIÓN ACTUAL cambia (consiguió o dejó un trabajo, se mudó, terminó una relación), registra la etapa nueva con upsertLifeFact y pon en "replaces" el id del hecho que deja de valer. Si solo terminó algo sin reemplazo, usa endLifeFact con su id.
+- Cuando un HILO ABIERTO se cumple o deja de aplicar (ej. "conseguí trabajo" cierra "buscando trabajo"; "ya fui a la entrevista" cierra "entrevista el jueves"), ciérralo con resolveThread y su id.
+- Usa siempre los id exactos que aparecen en las listas (id=...). No inventes ids.
 
 Significado de intent:
 - clarify: El input es muy vago, hiciste una pregunta corta para entender.
@@ -169,6 +177,9 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
 
   // System message con las instrucciones y el contexto neuronal
   let systemContent = NEUROCHAT_SYSTEM_PROMPT;
+
+  // Fecha local de hoy: la IA la necesita para fechar etapas y entender "ayer", "el lunes"…
+  systemContent += `\n\n## HOY\nHoy es ${todayLongStr()}.`;
 
   // CAPA 1: SITUACIÓN ACTUAL (Hechos Vigentes)
   const lifeFactsBlock = buildLifeFactsPromptBlock(userInput);

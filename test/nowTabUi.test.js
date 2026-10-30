@@ -39,11 +39,18 @@ upsertLifeFact({
 
 const html = renderNowTab();
 
-assert.ok(html.includes("Situación Actual & Hechos Vigentes"));
-assert.ok(html.includes("Hechos propuestos por Carl para revalidar"));
+assert.ok(html.includes("Tu momento"));
+assert.ok(html.includes("Carl cree que"));
 assert.ok(html.includes("¿Te quedaste sin empleo?"));
 assert.ok(html.includes("Vive en departamento propio"));
-assert.ok(html.includes("Confirmar"));
-assert.ok(html.includes("Descartar"));
+assert.ok(html.includes("Sí, es así"));
+assert.ok(html.includes("Línea de vida"));
+
+// Una etapa terminada aparece en la línea de vida con su rango de fechas
+upsertLifeFact({ text: "Vive con sus padres", category: "vivienda", since: "2024-01-01" });
+const html2 = renderNowTab();
+assert.ok(html2.includes("Vive con sus padres"));
+assert.ok(html2.includes("Sigue vigente"));
+assert.strictEqual(getLifeFacts({ status: "active" }).length, 1);
 
 console.log("✅ Pruebas de la pestaña 🧭 Ahora completadas correctamente.");

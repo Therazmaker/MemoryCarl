@@ -13,6 +13,7 @@ import { appendToCurrentDay, linkDayToNeurons, getCurrentDay } from "../day/dayS
 import { isClaudeConfigured } from "../services/claudeClient.js";
 import { isOllamaConfigured } from "../services/ollamaClient.js";
 import { isGeminiPremiumConfigured } from "../services/geminiPremiumClient.js";
+import { undoLifeChanges } from "./lifeChanges.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
 const DB_NAME = "memorycarl_chat";
@@ -370,6 +371,8 @@ export async function sendMessage(userInput, options = {}) {
     })),
     memoryRecallIds: (result.memoryRecall || []).map((entry) => entry.memory?.id).filter(Boolean),
     relevantDays: result.relevantDays || [],
+    // Cambios en la situación de vida hechos en este turno (se muestran con opción de deshacer)
+    ...(result.lifeChanges?.length ? { lifeChanges: result.lifeChanges } : {}),
   });
 
   // Guardar respuesta del asistente en el día actual y vincular neuronas activadas
@@ -450,6 +453,22 @@ export function submitNeuronFeedback({ neuronId, feedback, messageId, inputPrevi
 
 export function submitNeuronRemoval({ neuronId, messageId = null }) {
   return recordNeuronRemoval({ neuronId, messageId });
+}
+
+/**
+ * Deshace los cambios de situación de vida que hizo la IA en un mensaje y lo marca como deshecho.
+ * @param {string} messageId
+ * @returns {boolean}
+ */
+export function undoMessageLifeChanges(messageId) {
+  const msg = getHistory().find((m) => m.role === "assistant" && m.messageId === messageId);
+  if (!msg || !msg.lifeChanges?.length || msg.lifeChangesUndone) return false;
+  undoLifeChanges(msg.lifeChanges);
+  msg.lifeChangesUndone = true;
+  saveHistory(getHistory());
+  void saveMessageToIdb(msg);
+  triggerNeuroChatPush();
+  return true;
 }
 
 export async function getFullChatHistory() {

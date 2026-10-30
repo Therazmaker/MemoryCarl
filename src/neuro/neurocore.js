@@ -36,8 +36,8 @@ import { findRelevantMemories } from "../memory/memoryRecall.js";
 import { getAllMemories } from "../memory/memoryStore.js";
 import { findRelevantDays } from "../day/dayStore.js";
 import { isFinanceTopic, buildFinanceContext } from "../services/financeContextEngine.js";
-import { upsertLifeFact, endLifeFact } from "../chat/lifeFacts.js";
-import { openThread, resolveThread, hasPressuringTone, buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
+import { hasPressuringTone, buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
+import { applyLifeActions } from "../chat/lifeChanges.js";
 
 function buildDayContext(relevantDays = []) {
   if (!relevantDays.length) return null;
@@ -579,6 +579,7 @@ export async function processNeuroInput(userInput, options = {}) {
   let localDraft = "";
   let geminiReplyText = "";
   let intent = "respond";
+  let lifeChanges = [];
 
   const bestPatternMatch = findBestPattern(userInput, finalActivated.map((a) => a.neuron));
 
@@ -675,31 +676,15 @@ export async function processNeuroInput(userInput, options = {}) {
                   updateNeuron(action.targetId, { triggers: mergedTriggers });
                   addStep(trace, "claude_neuron_merged", { source: action.sourceId, target: action.targetId });
                 }
-              } else if (action.type === "upsertLifeFact" && action.fact) {
-                const fact = upsertLifeFact({ ...action.fact, source: "model_proposed" });
-                if (fact) {
-                  addStep(trace, "claude_life_fact_upserted", { id: fact.id, category: fact.category });
-                }
-              } else if (action.type === "endLifeFact" && (action.id || action.match)) {
-                const ended = endLifeFact(action.id || action.match);
-                if (ended) {
-                  addStep(trace, "claude_life_fact_ended", { match: action.id || action.match });
-                }
-              } else if (action.type === "openThread" && action.thread) {
-                const thread = openThread(action.thread);
-                if (thread) {
-                  addStep(trace, "claude_open_thread_created", { id: thread.id, topic: thread.topic });
-                }
-              } else if (action.type === "resolveThread" && (action.id || action.match)) {
-                const resolved = resolveThread(action.id || action.match);
-                if (resolved) {
-                  addStep(trace, "claude_open_thread_resolved", { match: action.id || action.match });
-                }
               }
             } catch (actionErr) {
               console.warn("[neurocore] Error aplicando acción Claude:", actionErr);
             }
           }
+
+          // Situación de vida (etapas e hilos): se aplica aparte para poder mostrar y deshacer los cambios
+          lifeChanges = applyLifeActions(actions);
+          if (lifeChanges.length) addStep(trace, "claude_life_changes", { count: lifeChanges.length });
 
           if (neuronsToSave.length > 0) {
             saveManyNeurons(neuronsToSave);
@@ -826,31 +811,15 @@ export async function processNeuroInput(userInput, options = {}) {
                   updateNeuron(action.targetId, { triggers: mergedTriggers });
                   addStep(trace, "ollama_neuron_merged", { source: action.sourceId, target: action.targetId });
                 }
-              } else if (action.type === "upsertLifeFact" && action.fact) {
-                const fact = upsertLifeFact({ ...action.fact, source: "model_proposed" });
-                if (fact) {
-                  addStep(trace, "ollama_life_fact_upserted", { id: fact.id, category: fact.category });
-                }
-              } else if (action.type === "endLifeFact" && (action.id || action.match)) {
-                const ended = endLifeFact(action.id || action.match);
-                if (ended) {
-                  addStep(trace, "ollama_life_fact_ended", { match: action.id || action.match });
-                }
-              } else if (action.type === "openThread" && action.thread) {
-                const thread = openThread(action.thread);
-                if (thread) {
-                  addStep(trace, "ollama_open_thread_created", { id: thread.id, topic: thread.topic });
-                }
-              } else if (action.type === "resolveThread" && (action.id || action.match)) {
-                const resolved = resolveThread(action.id || action.match);
-                if (resolved) {
-                  addStep(trace, "ollama_open_thread_resolved", { match: action.id || action.match });
-                }
               }
             } catch (actionErr) {
               console.warn("[neurocore] Error aplicando acción Ollama:", actionErr);
             }
           }
+
+          // Situación de vida (etapas e hilos): se aplica aparte para poder mostrar y deshacer los cambios
+          lifeChanges = applyLifeActions(actions);
+          if (lifeChanges.length) addStep(trace, "ollama_life_changes", { count: lifeChanges.length });
 
           if (neuronsToSave.length > 0) {
             saveManyNeurons(neuronsToSave);
@@ -1124,6 +1093,7 @@ export async function processNeuroInput(userInput, options = {}) {
     replySource,
     replyMode,
     intent,
+    lifeChanges,
     knowledgeExtracted: {
       relationHints: trace.knowledgeExtracted?.relationHints || 0,
       triggerCandidates: trace.knowledgeExtracted?.triggerCandidates || 0,
