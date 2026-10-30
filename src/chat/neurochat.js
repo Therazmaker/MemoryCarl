@@ -3,6 +3,7 @@
  */
 
 import { processNeuroInput } from "../neuro/neurocore.js";
+import { markChanged, chatKey } from "../services/syncOutbox.js";
 import { getAllNeurons, saveNeuron, deleteNeuron } from "../neuro/neuronStore.js";
 import { neuroProbe } from "./neuroprobe.js";
 import { createNeuron } from "../neuro/schemas.js";
@@ -184,6 +185,7 @@ function appendMessage(role, content, meta = {}) {
   getHistory().push(msg);
   saveHistory(getHistory());
   void saveMessageToIdb(msg);
+  markChanged("chat", [chatKey(msg)]);
   triggerNeuroChatPush();
   return msg;
 }
@@ -473,6 +475,7 @@ export function undoMessageLifeChanges(messageId) {
   msg.lifeChangesUndone = true;
   saveHistory(getHistory());
   void saveMessageToIdb(msg);
+  markChanged("chat", [chatKey(msg)]);
   triggerNeuroChatPush();
   return true;
 }

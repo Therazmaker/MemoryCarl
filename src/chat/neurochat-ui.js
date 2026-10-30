@@ -62,7 +62,8 @@ import {
   getOpenThreads,
 } from "./openThreads.js";
 import { reconcileThreadsWithFacts, undoLifeChanges, describeLifeChange } from "./lifeChanges.js";
-import { schedulePush, pullNeurochat, getSyncStatus, getApiConfig as getSyncApiConfig } from "../services/neurochatSync.js";
+import { schedulePush, pullNeurochat, getSyncStatus, getApiConfig as getSyncApiConfig, queueFullBackfill } from "../services/neurochatSync.js";
+import { pendingCount } from "../services/syncOutbox.js";
 import { todayLocalStr } from "./lifeDates.js";
 
 // ---- Constantes UI ----
@@ -637,8 +638,11 @@ function renderSyncStatus() {
   const st = getSyncStatus();
   const via = cfg.source === "app" ? " · usando la key de la app" : "";
   if (!st) return `<span>☁️ Aún no se ha sincronizado${via}.</span>`;
-  const push = st.ok
-    ? `<span class="ncSyncOk">✓ Guardado en la nube ${fmtAgo(st.at)}${st.sizeKB != null ? ` · ${st.sizeKB} KB` : ""}</span>`
+  const pending = pendingCount();
+  const push = st.ok && !pending
+    ? `<span class="ncSyncOk">✓ Todo en la nube · última subida ${fmtAgo(st.at)}${st.fullData === false ? " (versión resumida: falta la columna data)" : ""}</span>`
+    : st.ok
+      ? `<span class="ncSyncWarn">⏳ ${pending} cambio${pending === 1 ? "" : "s"} pendiente${pending === 1 ? "" : "s"} de subir · última subida ${fmtAgo(st.at)}</span>`
     : st.partial
       ? `<span class="ncSyncWarn">⚠️ Guardado parcial ${fmtAgo(st.at)}: ${esc(st.message)}</span>`
       : `<span class="ncSyncBad">❌ No se pudo guardar ${fmtAgo(st.at)}${st.httpStatus ? ` (HTTP ${st.httpStatus})` : ""}: ${esc(st.message)}</span>`;
@@ -2427,7 +2431,9 @@ function wireSettingsModal(root) {
     btn.disabled = true;
     const status = await schedulePush({ immediate: true });
     uiState.settingsMsg = status?.ok
-      ? { type: "success", text: `✓ Sincronizado: ${status.counts?.neurons || 0} neuronas, ${status.counts?.memories || 0} memorias, ${status.counts?.days || 0} días y tu situación de "Ahora" (${status.sizeKB} KB).` }
+      ? { type: "success", text: status.counts && (status.counts.neurons || status.counts.memories || status.counts.days || status.counts.chat || status.counts.appState)
+          ? `✓ Subido: ${status.counts.neurons} neuronas, ${status.counts.memories} memorias, ${status.counts.days} días y ${status.counts.chat} mensajes${status.pending ? ` · quedan ${status.pending}` : ""}.`
+          : "✓ Todo estaba ya en la nube." }
       : { type: "error", text: `Error al sincronizar: ${status?.message || "desconocido"}` };
     btn.textContent = originalText;
     btn.disabled = false;
@@ -2653,9 +2659,19 @@ export function initNeuroChat() {
   // si eso funcionó se sube lo local; así un dispositivo con datos viejos no pisa la nube
   setTimeout(() => {
     window.neurochatPullFromSupabase()
-      .then((result) => { if (result?.ok) schedulePush({ immediate: true }); })
+      .then(async (result) => {
+        if (!result?.ok) return;
+        // Una sola vez: poner en cola todo lo local para que Supabase recupere lo atrasado
+        await queueFullBackfill();
+        schedulePush({ immediate: true });
+      })
       .catch(() => {});
   }, 2500);
+
+  // Si quedó algo en la cola (sin conexión, error del servidor), reintentar cada minuto
+  setInterval(() => {
+    if (pendingCount() > 0) schedulePush();
+  }, 60000);
 
   if (typeof window !== "undefined" && !window.__neurochatSyncEventsAttached) {
     window.__neurochatSyncEventsAttached = true;

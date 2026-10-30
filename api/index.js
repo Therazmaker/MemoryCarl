@@ -54,13 +54,32 @@ app.get('/api/test-db', async (req, res) => {
   }
 });
 
+// Upsert que guarda además el objeto completo en la columna `data` (jsonb). Si la tabla
+// todavía no tiene esa columna, reintenta sin ella para no perder la sincronización.
+async function upsertWithData(table, rows, onConflict) {
+  const first = await supabase.from(table).upsert(rows, { onConflict });
+  if (!first.error) return { error: null, withData: true };
+  if (!/data/i.test(first.error.message || '')) return { error: first.error, withData: false };
+  const fallback = rows.map(({ data, ...rest }) => rest);
+  const second = await supabase.from(table).upsert(fallback, { onConflict });
+  return { error: second.error, withData: false };
+}
+
+// Borra en la nube lo que se borró en el teléfono (para que no reaparezca al restaurar)
+async function deleteIds(table, column, ids, results, label) {
+  if (!Array.isArray(ids) || !ids.length) return;
+  const { error } = await supabase.from(table).delete().in(column, ids.map(String));
+  if (error) results.errors.push(`Error borrando ${label}: ${error.message}`);
+  else results.deleted[label] = ids.length;
+}
+
 // Endpoint de Sincronización (Backup a Supabase)
 app.post('/api/sync', requireAuth, async (req, res) => {
-  const { neurons = [], memories = [], chatHistory = [], days = [], appState = null } = req.body;
+  const { neurons = [], memories = [], chatHistory = [], days = [], appState = null, deleted = {} } = req.body;
   if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
 
   try {
-    const results = { neuronsSynced: 0, memoriesSynced: 0, chatSynced: 0, daysSynced: 0, appStateSynced: false, errors: [] };
+    const results = { neuronsSynced: 0, memoriesSynced: 0, chatSynced: 0, daysSynced: 0, appStateSynced: false, fullData: true, deleted: {}, errors: [] };
     
     // El estado de la app (incluye "Ahora") va primero: es lo más pequeño y lo más importante
     // app_state: si falla, se anota el error y se siguen guardando las demás secciones
@@ -195,7 +214,7 @@ app.post('/api/sync', requireAuth, async (req, res) => {
     // neurons: si falla, se anota el error y se siguen guardando las demás secciones
     try {
       if (neurons.length > 0) {
-        const { error: nErr } = await supabase.from('neurons').upsert(
+        const { error: nErr, withData } = await upsertWithData('neurons',
           neurons.map(n => ({
             id: n.id,
             concept: n.core?.concept || 'Sin nombre',
@@ -205,10 +224,12 @@ app.post('/api/sync', requireAuth, async (req, res) => {
             emotion: n.emotion || 'neutral',
             weight: n.weight || 1.0,
             temporal: n.temporal || {},
-            updated_at: new Date().toISOString()
-          })), { onConflict: 'id' }
+            updated_at: n.updatedAt || new Date().toISOString(),
+            data: n
+          })), 'id'
         );
         if (nErr) throw new Error('Error guardando neuronas: ' + nErr.message);
+        if (!withData) results.fullData = false;
         results.neuronsSynced = neurons.length;
       }
     } catch (err) {
@@ -219,7 +240,7 @@ app.post('/api/sync', requireAuth, async (req, res) => {
     // memories: si falla, se anota el error y se siguen guardando las demás secciones
     try {
       if (memories.length > 0) {
-        const { error: mErr } = await supabase.from('memories').upsert(
+        const { error: mErr, withData } = await upsertWithData('memories',
           memories.map(m => ({
             id: m.id,
             title: m.title || 'Memoria',
@@ -230,10 +251,12 @@ app.post('/api/sync', requireAuth, async (req, res) => {
             tags: m.tags || [],
             linked_neurons: m.linkedNeurons || [],
             importance: m.importance || 'medium',
-            temporal: m.temporal || {}
-          })), { onConflict: 'id' }
+            temporal: m.temporal || {},
+            data: m
+          })), 'id'
         );
         if (mErr) throw new Error('Error guardando memorias: ' + mErr.message);
+        if (!withData) results.fullData = false;
         results.memoriesSynced = memories.length;
       }
     } catch (err) {
@@ -282,19 +305,28 @@ app.post('/api/sync', requireAuth, async (req, res) => {
             dominant_emotion: d.dominantEmotion || 'neutral',
             dominant_themes: d.dominantThemes || [],
             insights: d.insights || [],
-            is_milestone: d.isMilestone || false
+            is_milestone: d.isMilestone || false,
+            data: d
           });
         });
         const uniqueDays = Array.from(uniqueDaysMap.values());
 
-        const { error: dErr } = await supabase.from('days').upsert(
-          uniqueDays, { onConflict: 'date' }
-        );
+        const { error: dErr, withData } = await upsertWithData('days', uniqueDays, 'date');
         if (dErr) throw new Error('Error guardando días: ' + dErr.message);
+        if (!withData) results.fullData = false;
         results.daysSynced = uniqueDays.length;
       }
     } catch (err) {
       console.error('[Sync Error] days:', err.message);
+      results.errors.push(err.message);
+    }
+
+    // Borrados hechos en el teléfono
+    try {
+      await deleteIds('neurons', 'id', deleted.neurons, results, 'neuronas');
+      await deleteIds('memories', 'id', deleted.memories, results, 'memorias');
+      await deleteIds('days', 'date', deleted.days, results, 'días');
+    } catch (err) {
       results.errors.push(err.message);
     }
 

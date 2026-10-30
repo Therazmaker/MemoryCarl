@@ -7,6 +7,7 @@
  */
 
 import { todayLocalStr, stampUpdatedAt } from "./lifeDates.js";
+import { markAppStateChanged } from "../services/syncOutbox.js";
 
 export const LIFE_FACTS_KEY = "memorycarl_life_facts";
 
@@ -218,6 +219,7 @@ export function saveLifeFacts(facts) {
     if (typeof localStorage === "undefined") return;
     stampUpdatedAt(facts, loadLifeFacts());
     localStorage.setItem(LIFE_FACTS_KEY, JSON.stringify(facts));
+    markAppStateChanged();
     if (typeof window !== "undefined" && typeof window.neurochatPushToSupabase === "function") {
       window.neurochatPushToSupabase(false);
     }
