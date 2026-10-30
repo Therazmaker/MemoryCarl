@@ -87,6 +87,37 @@ export function addMissingById(local = [], cloud = [], convert = (x) => x) {
 }
 
 /**
+ * Actualiza neuronas locales con la versión de la nube cuando la nube es más reciente
+ * (subida desde otro dispositivo después de la última edición local). Solo se toman los
+ * campos que guarda el backend; conexiones, embeddings y evolución locales se conservan.
+ * @returns {{ list: Array, updated: number }}
+ */
+export function refreshNeuronsFromCloud(local = [], cloud = []) {
+  const byId = new Map(cloud.filter((r) => r?.id).map((r) => [r.id, r]));
+  let updated = 0;
+  const list = local.map((n) => {
+    const row = byId.get(n?.id);
+    const cloudAt = Date.parse(row?.updated_at || "") || 0;
+    const localAt = Date.parse(n?.updatedAt || "") || 0;
+    if (!row || !cloudAt || cloudAt <= localAt) return n;
+    const c = cloudNeuronToLocal(row);
+    const next = {
+      ...n,
+      core: { ...(n.core || {}), ...(c.core || {}) },
+      triggers: Array.isArray(c.triggers) ? c.triggers : n.triggers,
+      emotion: c.emotion || n.emotion,
+      weight: typeof c.weight === "number" ? c.weight : n.weight,
+      ...(c.temporal ? { temporal: c.temporal } : {}),
+      updatedAt: row.updated_at,
+    };
+    if (JSON.stringify(next) === JSON.stringify(n)) return n;
+    updated++;
+    return next;
+  });
+  return { list, updated };
+}
+
+/**
  * Fusiona días de la nube por fecha: añade los que faltan y, en los existentes,
  * solo completa el resumen/temas si en el teléfono están vacíos. Nunca toca rawChat.
  * @returns {{ list: Array, changed: boolean }}

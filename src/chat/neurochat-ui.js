@@ -2649,11 +2649,12 @@ export function initNeuroChat() {
     return result;
   };
 
-  // Al arrancar: traer de la nube lo que falte (sin pisar nada local) y subir todo lo local
+  // Al arrancar: primero se reconcilia con la nube (lo que falta y lo más reciente) y solo
+  // si eso funcionó se sube lo local; así un dispositivo con datos viejos no pisa la nube
   setTimeout(() => {
     window.neurochatPullFromSupabase()
-      .catch(() => {})
-      .finally(() => schedulePush({ immediate: true }));
+      .then((result) => { if (result?.ok) schedulePush({ immediate: true }); })
+      .catch(() => {});
   }, 2500);
 
   if (typeof window !== "undefined" && !window.__neurochatSyncEventsAttached) {

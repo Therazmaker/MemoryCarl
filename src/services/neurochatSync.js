@@ -16,7 +16,7 @@ import { getAllDays, mergeDaysFromCloud } from "../day/dayStore.js";
 import { loadLifeFacts, LIFE_FACTS_KEY } from "../chat/lifeFacts.js";
 import { loadOpenThreads, OPEN_THREADS_KEY } from "../chat/openThreads.js";
 import { mergeLifeLists } from "../chat/lifeChanges.js";
-import { addMissingById, cloudNeuronToLocal, cloudMemoryToLocal, cloudChatToLocal } from "./cloudRestore.js";
+import { addMissingById, cloudNeuronToLocal, cloudMemoryToLocal, cloudChatToLocal, refreshNeuronsFromCloud } from "./cloudRestore.js";
 
 export const SYNC_STATUS_KEY = "memorycarl_neurochat_sync_status";
 const HISTORY_KEY = "memorycarl_neurochat_history";
@@ -250,6 +250,15 @@ export async function pullNeurochat(opts = {}) {
       changed = true;
     }
   };
+  // Neuronas que otro dispositivo actualizó después de la última edición local
+  if (Array.isArray(data.neurons) && data.neurons.length) {
+    const { list, updated } = refreshNeuronsFromCloud(readJsonArray("memorycarl_neurochat_neurons"), data.neurons);
+    if (updated) {
+      localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(list));
+      added.updatedNeurons = updated;
+      changed = true;
+    }
+  }
   addMissing("memorycarl_neurochat_neurons", data.neurons, cloudNeuronToLocal, "neurons");
   addMissing("memorycarl_memories_v1", data.memories, cloudMemoryToLocal, "memories");
 
