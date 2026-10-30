@@ -83,6 +83,7 @@ export function isOllamaConfigured() {
 
 import { buildLifeFactsPromptBlock } from "../chat/lifeFacts.js";
 import { todayLongStr } from "../chat/lifeDates.js";
+import { buildAstroPromptBlock } from "../chat/astroLinks.js";
 import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
 import { buildRecentDaysPromptBlock } from "../chat/recentContext.js";
 
@@ -198,6 +199,9 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
   if (recentDaysBlock.blockText) {
     systemContent += recentDaysBlock.blockText;
   }
+
+  // Carta natal: solo si el usuario lo activó en Couch y el mensaje toca algún tema
+  systemContent += buildAstroPromptBlock(userInput);
 
   if (context.length > 0) {
     systemContent += "\n\n## CONTEXTO NEURONAL ACTIVO\n";

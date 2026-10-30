@@ -14,6 +14,7 @@ import { isClaudeConfigured } from "../services/claudeClient.js";
 import { isOllamaConfigured } from "../services/ollamaClient.js";
 import { isGeminiPremiumConfigured } from "../services/geminiPremiumClient.js";
 import { undoLifeChanges } from "./lifeChanges.js";
+import { recordAstroActivation } from "./astroLinks.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
 const DB_NAME = "memorycarl_chat";
@@ -228,6 +229,9 @@ export async function sendMessage(userInput, options = {}) {
 
   const messageId = generateMessageId();
   const userMsg = appendMessage("user", trimmed, { mode, interpretationMode, messageId });
+
+  // Vincula el mensaje con la carta natal (cálculo local, sin tokens)
+  try { recordAstroActivation({ text: trimmed, messageId, ts: userMsg.ts }); } catch (_e) {}
 
   // Guardar mensaje del usuario en el día actual
   try { appendToCurrentDay(userMsg); } catch (_e) {}
