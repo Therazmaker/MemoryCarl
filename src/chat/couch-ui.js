@@ -11,9 +11,34 @@ import {
   saveNatalChartData,
   resetNatalChartData,
 } from "./couchStore.js";
+import {
+  chartPoints,
+  effectiveAspects,
+  aspectMode,
+  computeAspects,
+  hasChartData,
+  planetsInHouse,
+  HOUSE_THEMES,
+  SIGN_RULERS,
+} from "./astroChart.js";
+import { renderNatalWheel, aspectStyle, ELEMENT_COLORS } from "./natalWheel.js";
+import {
+  getActivationStats,
+  backfillAstroActivations,
+  isAstroInPromptEnabled,
+  setAstroInPromptEnabled,
+  BACKFILL_KEY,
+} from "./astroLinks.js";
+import { getFullChatHistory } from "./neurochat.js";
 
 export const couchUiState = {
-  activeSubTab: "chart", // "chart" | "data" | "interpretation"
+  activeSubTab: "chart", // "chart" | "activations" | "data"
+  selectedPlanet: null,  // planeta con la ficha abierta
+  hiddenGroups: ["menores"], // grupos de aspectos ocultos en la rueda
+  showAllAspects: false, // lista de aspectos completa o solo los más exactos
+  periodDays: 30,        // periodo de Activaciones (null = todo)
+  openKey: null,         // fila de ranking expandida
+  backfillRunning: false,
 };
 
 function esc(str) {
@@ -37,15 +62,6 @@ function getAbsoluteEclipticDegree(signId, degree, minutes = 0, seconds = 0) {
   const sec = Math.max(0, Math.min(59, parseFloat(seconds) || 0)) / 3600;
 
   return signIdx * 30 + deg + min + sec;
-}
-
-/**
- * Convierte grados eclípticos a ángulo en radianes para SVG.
- * 0° Aries se ubica a la izquierda (180° trigonométrico) y gira en sentido antihorario.
- */
-function eclipticToSvgAngle(eclipticDeg) {
-  const angleDeg = (180 - eclipticDeg + 360) % 360;
-  return (angleDeg * Math.PI) / 180;
 }
 
 /**
@@ -92,186 +108,6 @@ function computeAspectOrbText(asp, chartData) {
   const status = isApplying ? "A" : "S";
 
   return `${orb.toFixed(2)}° (${status})`;
-}
-
-/**
- * Renderiza el gráfico SVG de la Carta Natal
- */
-export function renderNatalChartSvg(chartData) {
-  const width = 500;
-  const height = 500;
-  const cx = width / 2;
-  const cy = height / 2;
-
-  const rOuter = 230;
-  const rZodiacInner = 190;
-  const rHousesInner = 130;
-  const rAspects = 125;
-
-  // Pre-calcular grados absolutos para cúspides de casas
-  const houseCuspsMap = (chartData.houseCusps || []).map((h) => ({
-    ...h,
-    absDeg: getAbsoluteEclipticDegree(h.sign, h.degree, h.minutes, h.seconds),
-  }));
-
-  // 1. Dibuja rueda del zodíaco (12 signos)
-  let zodiacSlicesHtml = "";
-  ZODIAC_SIGNS.forEach((sign, idx) => {
-    const startDeg = idx * 30;
-    const endDeg = (idx + 1) * 30;
-
-    const startAngle = eclipticToSvgAngle(startDeg);
-    const endAngle = eclipticToSvgAngle(endDeg);
-
-    const x1Outer = cx + rOuter * Math.cos(startAngle);
-    const y1Outer = cy + rOuter * Math.sin(startAngle);
-    const x2Outer = cx + rOuter * Math.cos(endAngle);
-    const y2Outer = cy + rOuter * Math.sin(endAngle);
-
-    const x1Inner = cx + rZodiacInner * Math.cos(startAngle);
-    const y1Inner = cy + rZodiacInner * Math.sin(startAngle);
-    const x2Inner = cx + rZodiacInner * Math.cos(endAngle);
-    const y2Inner = cy + rZodiacInner * Math.sin(endAngle);
-
-    const pathD = `
-      M ${x1Inner} ${y1Inner}
-      L ${x1Outer} ${y1Outer}
-      A ${rOuter} ${rOuter} 0 0 0 ${x2Outer} ${y2Outer}
-      L ${x2Inner} ${y2Inner}
-      A ${rZodiacInner} ${rZodiacInner} 0 0 1 ${x1Inner} ${y1Inner}
-      Z
-    `;
-
-    const elemColors = {
-      fuego: "rgba(239, 68, 68, 0.15)",
-      tierra: "rgba(234, 179, 8, 0.15)",
-      aire: "rgba(59, 130, 246, 0.15)",
-      agua: "rgba(34, 197, 94, 0.15)",
-    };
-    const fillColor = elemColors[sign.element] || "rgba(255,255,255,0.05)";
-
-    const midAngle = eclipticToSvgAngle(startDeg + 15);
-    const rSymbol = (rOuter + rZodiacInner) / 2;
-    const sx = cx + rSymbol * Math.cos(midAngle);
-    const sy = cy + rSymbol * Math.sin(midAngle) + 5;
-
-    zodiacSlicesHtml += `
-      <path d="${pathD}" fill="${fillColor}" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
-      <text x="${sx}" y="${sy}" font-size="16" fill="#f3f4f6" text-anchor="middle" dominant-baseline="central" font-family="sans-serif">${sign.symbol}</text>
-    `;
-  });
-
-  // 2. Cúspides de Casas (1 a 12)
-  let houseLinesHtml = "";
-
-  houseCuspsMap.forEach((h, i) => {
-    const deg = h.absDeg;
-    const angle = eclipticToSvgAngle(deg);
-
-    const xInner = cx + rHousesInner * Math.cos(angle);
-    const yInner = cy + rHousesInner * Math.sin(angle);
-    const xOuter = cx + rZodiacInner * Math.cos(angle);
-    const yOuter = cy + rZodiacInner * Math.sin(angle);
-
-    const isAngular = h.house === 1 || h.house === 4 || h.house === 7 || h.house === 10;
-    const strokeWidth = isAngular ? 2.5 : 1;
-    const strokeColor = isAngular ? "#c084fc" : "rgba(255,255,255,0.3)";
-
-    // Extensión exterior para ángulos AC, MC, etc.
-    const xLabelExt = cx + (rZodiacInner + 18) * Math.cos(angle);
-    const yLabelExt = cy + (rZodiacInner + 18) * Math.sin(angle);
-
-    houseLinesHtml += `
-      <line x1="${xInner}" y1="${yInner}" x2="${xOuter}" y2="${yOuter}" stroke="${strokeColor}" stroke-width="${strokeWidth}" />
-    `;
-
-    // Etiqueta de la casa
-    if (isAngular) {
-      const angularTag = h.house === 1 ? "AC" : h.house === 10 ? "MC" : h.house === 7 ? "DC" : "IC";
-      houseLinesHtml += `
-        <text x="${xLabelExt}" y="${yLabelExt}" font-size="11" font-weight="bold" fill="#c084fc" text-anchor="middle" dominant-baseline="central">${angularTag}</text>
-      `;
-    }
-
-    // Calcular el ángulo medio con la siguiente casa para colocar el número de casa centrado
-    const nextCusp = houseCuspsMap[(i + 1) % 12];
-    let nextDeg = nextCusp ? nextCusp.absDeg : deg + 30;
-    if (nextDeg < deg) nextDeg += 360;
-    const midSectorDeg = (deg + nextDeg) / 2;
-    const midAngle = eclipticToSvgAngle(midSectorDeg % 360);
-
-    const rText = rHousesInner + 15;
-    const tx = cx + rText * Math.cos(midAngle);
-    const ty = cy + rText * Math.sin(midAngle);
-
-    houseLinesHtml += `
-      <text x="${tx}" y="${ty}" font-size="10" font-weight="600" fill="rgba(255,255,255,0.6)" text-anchor="middle" dominant-baseline="central">${h.house}</text>
-    `;
-  });
-
-  // 3. Posiciones Planetarias
-  let planetsHtml = "";
-  const planetPositionsMap = {};
-
-  (chartData.planets || []).forEach((p) => {
-    const cat = PLANETS_CATALOG.find((item) => item.id === p.planetId);
-    if (!cat) return;
-
-    const absDeg = getAbsoluteEclipticDegree(p.sign, p.degree, p.minutes, p.seconds);
-    const angle = eclipticToSvgAngle(absDeg);
-
-    const pxAspect = cx + rAspects * Math.cos(angle);
-    const pyAspect = cy + rAspects * Math.sin(angle);
-    planetPositionsMap[p.planetId] = { x: pxAspect, y: pyAspect };
-
-    const rPlanetRing = (rZodiacInner + rHousesInner) / 2;
-    const px = cx + rPlanetRing * Math.cos(angle);
-    const py = cy + rPlanetRing * Math.sin(angle) + 4;
-
-    planetsHtml += `
-      <g class="couchPlanetGlyph" title="${esc(cat.name)} en ${esc(p.sign)} ${formatDegrees(p.degree, p.minutes, p.seconds)}">
-        <circle cx="${cx + rAspects * Math.cos(angle)}" cy="${cy + rAspects * Math.sin(angle)}" r="3" fill="#a855f7" />
-        <line x1="${cx + rAspects * Math.cos(angle)}" y1="${cy + rAspects * Math.sin(angle)}" x2="${cx + rHousesInner * Math.cos(angle)}" y2="${cy + rHousesInner * Math.sin(angle)}" stroke="rgba(168, 85, 247, 0.4)" stroke-dasharray="2,2" />
-        <text x="${px}" y="${py}" font-size="15" fill="#e0e7ff" text-anchor="middle" dominant-baseline="central" font-weight="bold">${cat.symbol}</text>
-      </g>
-    `;
-  });
-
-  // 4. Aspectos entre planetas (Líneas centrales)
-  let aspectLinesHtml = "";
-  (chartData.aspects || []).forEach((asp) => {
-    const pos1 = planetPositionsMap[asp.planet1Id];
-    const pos2 = planetPositionsMap[asp.planet2Id];
-    if (!pos1 || !pos2) return;
-
-    const aspectInfo = ASPECT_TYPES.find((a) => a.id === asp.aspectId);
-    const color = aspectInfo ? aspectInfo.color : "rgba(255,255,255,0.4)";
-
-    aspectLinesHtml += `
-      <line x1="${pos1.x}" y1="${pos1.y}" x2="${pos2.x}" y2="${pos2.y}" stroke="${color}" stroke-width="1.5" stroke-opacity="0.85" />
-    `;
-  });
-
-  const emptyNotice = (!chartData.planets || chartData.planets.length === 0)
-    ? `<text x="${cx}" y="${cy}" font-size="12" fill="rgba(255,255,255,0.3)" text-anchor="middle">Carta Vacía — Agrega planetas en 'Casas y Aspectos'</text>`
-    : "";
-
-  return `
-    <div class="couchChartContainer">
-      <svg viewBox="0 0 ${width} ${height}" class="couchNatalSvg">
-        <circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" />
-        <circle cx="${cx}" cy="${cy}" r="${rZodiacInner}" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
-        <circle cx="${cx}" cy="${cy}" r="${rHousesInner}" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1" />
-        <circle cx="${cx}" cy="${cy}" r="${rAspects}" fill="rgba(15, 23, 42, 0.6)" stroke="rgba(255,255,255,0.15)" stroke-width="1" />
-
-        ${zodiacSlicesHtml}
-        ${houseLinesHtml}
-        ${aspectLinesHtml}
-        ${planetsHtml}
-        ${emptyNotice}
-      </svg>
-    </div>
-  `;
 }
 
 /**
@@ -517,16 +353,39 @@ function renderDataEditorTab(chartData) {
         </details>
       </div>
 
-      <!-- Sección 4: Registrar Aspectos -->
+      <!-- Sección 4: Aspectos -->
       <div class="couchFormSection">
         <div class="couchSectionTitle">📐 Aspectos y Orbes</div>
-        <div class="couchAddRow" style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-          <select id="couchAddAspP1" class="ncSettingsInput" style="flex: 1; min-width: 110px;">${planetOptions}</select>
-          <select id="couchAddAspType" class="ncSettingsInput" style="flex: 1; min-width: 120px;">${aspectOptions}</select>
-          <select id="couchAddAspP2" class="ncSettingsInput" style="flex: 1; min-width: 110px;">${planetOptions}</select>
-          <button class="ncActionBtn ncActionBtnPrimary" id="btnAddAspect">Agregar Aspecto</button>
+        <div class="couchModeSwitch">
+          <button class="couchChip ${aspectMode(chartData) === "auto" ? "couchChip--on" : ""}" data-couch="aspect-mode" data-id="auto">Calculados automáticamente</button>
+          <button class="couchChip ${aspectMode(chartData) === "manual" ? "couchChip--on" : ""}" data-couch="aspect-mode" data-id="manual">Los que cargué a mano</button>
         </div>
-        <div class="couchDataList">${aspectsTableHtml}</div>
+        ${aspectMode(chartData) === "auto" ? `
+          <div class="couchHint">Se calculan solos a partir de tus planetas (orbes: 8° conjunción y oposición, 7° trígono y cuadratura, 5° sextil, 2–3° menores; +2° con Sol o Luna). Tus aspectos manuales se conservan por si vuelves a ese modo.</div>
+          <div class="couchDataList">${computeAspects(chartData).length ? `
+            <table class="couchPlanetsTable">
+              <thead><tr><th>Planeta</th><th style="text-align:center;">Aspecto</th><th>Planeta</th><th>Orbe</th></tr></thead>
+              <tbody>${computeAspects(chartData).map((asp) => {
+                const p1 = PLANETS_CATALOG.find((item) => item.id === asp.planet1Id);
+                const p2 = PLANETS_CATALOG.find((item) => item.id === asp.planet2Id);
+                const aType = ASPECT_TYPES.find((item) => item.id === asp.aspectId);
+                return `<tr class="couchPlanetsTableRow">
+                  <td class="couchTableCell">${p1 ? p1.symbol : ""} ${p1 ? esc(p1.name) : ""}</td>
+                  <td class="couchTableCell" style="text-align:center;color:${aType ? aType.color : "inherit"}">${aType ? aType.symbol : ""} ${aType ? esc(aType.name) : ""}</td>
+                  <td class="couchTableCell">${p2 ? p2.symbol : ""} ${p2 ? esc(p2.name) : ""}</td>
+                  <td class="couchTableCell" style="font-family:monospace;font-size:12px;">${asp.orb.toFixed(2)}°</td>
+                </tr>`;
+              }).join("")}</tbody>
+            </table>` : `<div class="ncSideEmpty">Agrega planetas para calcular aspectos.</div>`}</div>
+        ` : `
+          <div class="couchAddRow" style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <select id="couchAddAspP1" class="ncSettingsInput" style="flex: 1; min-width: 110px;">${planetOptions}</select>
+            <select id="couchAddAspType" class="ncSettingsInput" style="flex: 1; min-width: 120px;">${aspectOptions}</select>
+            <select id="couchAddAspP2" class="ncSettingsInput" style="flex: 1; min-width: 110px;">${planetOptions}</select>
+            <button class="ncActionBtn ncActionBtnPrimary" id="btnAddAspect">Agregar Aspecto</button>
+          </div>
+          <div class="couchDataList">${aspectsTableHtml}</div>
+        `}
       </div>
 
       <div class="couchDangerRow">
@@ -537,18 +396,221 @@ function renderDataEditorTab(chartData) {
 }
 
 /**
- * Renderiza el placeholder para la Pestaña 3: Interpretación
+ * Rueda de la carta natal (se mantiene el nombre para compatibilidad)
  */
-function renderInterpretationTab() {
+export function renderNatalChartSvg(chartData, opts = {}) {
+  return `<div class="couchChartContainer">${renderNatalWheel(chartData, opts)}</div>`;
+}
+
+const ASPECT_GROUPS = [
+  { id: "tension", label: "Tensión", color: "#f87171", hint: "cuadratura, oposición" },
+  { id: "armonia", label: "Armonía", color: "#60a5fa", hint: "trígono, sextil" },
+  { id: "conjuncion", label: "Conjunción", color: "#c084fc", hint: "planetas juntos" },
+  { id: "menores", label: "Menores", color: "#94a3b8", hint: "semisextil, quincuncio" },
+];
+
+function signName(id) {
+  return ZODIAC_SIGNS.find((s) => s.id === id)?.name || id;
+}
+
+function planetName(id) {
+  return PLANETS_CATALOG.find((p) => p.id === id)?.name || id;
+}
+
+function planetSymbol(id) {
+  const s = PLANETS_CATALOG.find((p) => p.id === id)?.symbol || "";
+  return s.length === 1 ? `${s}︎` : s;
+}
+
+function fmtOrb(orb) {
+  return orb == null ? "—" : `${orb.toFixed(1)}°`;
+}
+
+// Ficha del planeta seleccionado
+function renderPlanetCard(chartData, aspects) {
+  const id = couchUiState.selectedPlanet;
+  const p = chartPoints(chartData).find((x) => x.id === id);
+  if (!p) {
+    return `<div class="couchHint">Toca un planeta en la rueda para ver su ficha y resaltar sus aspectos.</div>`;
+  }
+  const sign = ZODIAC_SIGNS.find((s) => s.id === p.sign);
+  const rules = (chartData.houseCusps || []).filter((h) => SIGN_RULERS[h.sign] === p.id).map((h) => h.house);
+  const own = aspects.filter((a) => a.planet1Id === p.id || a.planet2Id === p.id);
   return `
-    <div class="couchInterpretationWrap">
-      <div class="ncWelcome">
-        <div class="ncWelcomeIcon">📜</div>
-        <div class="ncWelcomeTitle">Interpretación Astral</div>
-        <div class="ncWelcomeSub">Próximamente: Podrás redactar y generar interpretaciones psicológicas y astrológicas detalladas para tu carta natal.</div>
+    <div class="couchCard">
+      <div class="couchCardHead">
+        <span class="couchCardGlyph">${planetSymbol(p.id)}</span>
+        <div>
+          <div class="couchCardTitle">${esc(p.name)} en ${esc(sign?.name || p.sign)} ${formatDegrees(p.raw.degree, p.raw.minutes, p.raw.seconds)}${p.retro ? ` <span class="couchRetroBadge">R</span>` : ""}</div>
+          <div class="couchCardSub">${p.house ? `Casa ${p.house} · ${esc(HOUSE_THEMES[p.house])}` : "Casa sin indicar"}${sign ? ` · ${esc(sign.element)}` : ""}</div>
+        </div>
+        <button class="couchIconBtn" data-couch="select-planet" data-id="" aria-label="Cerrar ficha">✕</button>
       </div>
+      ${rules.length ? `<div class="couchCardLine">Rige tu${rules.length > 1 ? "s casas" : " casa"} ${rules.join(" y ")} (${rules.map((h) => esc(HOUSE_THEMES[h])).join("; ")})</div>` : ""}
+      ${own.length ? `
+        <div class="couchCardAspects">
+          ${own.map((a) => {
+            const other = a.planet1Id === p.id ? a.planet2Id : a.planet1Id;
+            const t = ASPECT_TYPES.find((x) => x.id === a.aspectId);
+            const st = aspectStyle(a.aspectId);
+            return `<button class="couchChip" data-couch="select-planet" data-id="${esc(other)}" style="--c:${st.color}">
+              <span style="color:${st.color}">${t?.symbol || ""}</span> ${esc(t?.name || a.aspectId)} ${planetSymbol(other)} ${esc(planetName(other))} <span class="couchOrb">${fmtOrb(a.orb)}</span>
+            </button>`;
+          }).join("")}
+        </div>` : `<div class="couchCardLine couchMuted">Sin aspectos con los orbes actuales.</div>`}
+    </div>`;
+}
+
+function renderElementBalance(chartData) {
+  const counts = { fuego: 0, tierra: 0, aire: 0, agua: 0 };
+  for (const p of chartPoints(chartData).filter((x) => !x.isAngle && !["nodo_norte", "nodo_sur", "lilith", "chiron"].includes(x.id))) {
+    const el = ZODIAC_SIGNS.find((s) => s.id === p.sign)?.element;
+    if (el) counts[el]++;
+  }
+  const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+  return `
+    <div class="couchSection">
+      <div class="couchSectionHead"><h3>Elementos</h3></div>
+      <div class="couchBalance">
+        ${Object.entries(counts).map(([el, n]) => `
+          <div class="couchBalanceRow">
+            <span class="couchBalanceLabel">${el[0].toUpperCase() + el.slice(1)}</span>
+            <span class="couchBar"><span style="width:${Math.round((n / total) * 100)}%;background:${ELEMENT_COLORS[el]}"></span></span>
+            <span class="couchBalanceNum">${n}</span>
+          </div>`).join("")}
+      </div>
+    </div>`;
+}
+
+function renderChartTab(chartData) {
+  const aspects = effectiveAspects(chartData);
+  const hidden = couchUiState.hiddenGroups;
+  const countBy = (g) => aspects.filter((a) => aspectStyle(a.aspectId).group === g).length;
+  const visibleAll = aspects.filter((a) => !hidden.includes(aspectStyle(a.aspectId).group))
+    .sort((x, y) => (x.orb ?? 99) - (y.orb ?? 99));
+  const visible = couchUiState.showAllAspects ? visibleAll : visibleAll.slice(0, 12);
+
+  return `
+    ${renderNatalChartSvg(chartData, { selected: couchUiState.selectedPlanet, hiddenGroups: hidden })}
+    <div class="couchLegend">
+      ${ASPECT_GROUPS.map((g) => `
+        <button class="couchLegendChip ${hidden.includes(g.id) ? "couchLegendChip--off" : ""}" data-couch="toggle-group" data-id="${g.id}" title="${esc(g.hint)}">
+          <span class="couchLegendLine" style="background:${g.color}"></span>${g.label} <span class="couchMuted">${countBy(g.id)}</span>
+        </button>`).join("")}
     </div>
-  `;
+    ${renderPlanetCard(chartData, aspects)}
+    ${renderElementBalance(chartData)}
+    <div class="couchSection">
+      <div class="couchSectionHead">
+        <h3>Aspectos</h3>
+        <span class="couchMuted">${aspectMode(chartData) === "auto" ? "calculados" : "cargados a mano"}</span>
+      </div>
+      ${visible.length ? `
+        <div class="couchAspectList">
+          ${visible.map((a) => {
+            const t = ASPECT_TYPES.find((x) => x.id === a.aspectId);
+            const st = aspectStyle(a.aspectId);
+            return `<button class="couchAspectRow" data-couch="select-planet" data-id="${esc(a.planet1Id)}">
+              <span>${planetSymbol(a.planet1Id)} ${esc(planetName(a.planet1Id))}</span>
+              <span class="couchAspectType" style="color:${st.color}">${t?.symbol || ""} ${esc(t?.name || a.aspectId)}</span>
+              <span>${planetSymbol(a.planet2Id)} ${esc(planetName(a.planet2Id))}</span>
+              <span class="couchOrb">${fmtOrb(a.orb)}</span>
+            </button>`;
+          }).join("")}
+        </div>
+        ${visibleAll.length > 12 ? `<button class="couchChip" data-couch="toggle-all-aspects">${couchUiState.showAllAspects ? "Ver solo los más exactos" : `Ver todos (${visibleAll.length})`}</button>` : ""}` : `<div class="couchHint">No hay aspectos que mostrar.</div>`}
+    </div>`;
+}
+
+function fmtWhen(ts) {
+  try {
+    return new Date(ts).toLocaleDateString("es", { day: "numeric", month: "short", year: "numeric" });
+  } catch (_e) {
+    return "";
+  }
+}
+
+function renderExamples(item) {
+  if (!item.examples.length) return "";
+  return `
+    <div class="couchExamples">
+      ${item.examples.map((r) => `
+        <div class="couchExample">
+          <div class="couchExampleText">“${esc(r.snippet)}”</div>
+          <div class="couchExampleMeta">${fmtWhen(r.ts)}</div>
+        </div>`).join("")}
+    </div>`;
+}
+
+function renderRankRow(key, label, sub, item, max) {
+  const open = couchUiState.openKey === key;
+  return `
+    <div class="couchRank ${open ? "couchRank--open" : ""}">
+      <button class="couchRankBtn" data-couch="open-key" data-id="${esc(key)}">
+        <div class="couchRankTop">
+          <span class="couchRankLabel">${label}</span>
+          <span class="couchRankCount">${item.count} msj</span>
+        </div>
+        <span class="couchBar"><span style="width:${Math.max(4, Math.round((item.score / max) * 100))}%"></span></span>
+        <div class="couchRankSub">${sub}</div>
+      </button>
+      ${open ? renderExamples(item) : ""}
+    </div>`;
+}
+
+function renderActivationsTab(chartData) {
+  if (couchUiState.backfillRunning) {
+    return `<div class="couchHint">Analizando tu historial de conversaciones…</div>`;
+  }
+  const days = couchUiState.periodDays;
+  const stats = getActivationStats({ days, chart: chartData });
+  const houses = stats.houses.filter((h) => h.score > 0).sort((a, b) => b.score - a.score);
+  const maxHouse = Math.max(1, ...houses.map((h) => h.score));
+  const maxPlanet = Math.max(1, ...stats.planets.map((p) => p.score));
+  const heat = {
+    houses: Object.fromEntries(stats.houses.map((h) => [h.house, h.score / maxHouse])),
+    planets: Object.fromEntries(stats.planets.map((p) => [p.id, p.score / maxPlanet])),
+  };
+  const chartReady = hasChartData(chartData);
+  const promptOn = isAstroInPromptEnabled();
+
+  const periods = [
+    { d: 7, label: "7 días" },
+    { d: 30, label: "30 días" },
+    { d: null, label: "Todo" },
+  ];
+
+  return `
+    <div class="couchIntro">
+      Cada mensaje que le escribes a Carl se cruza con tu carta: si hablas de trabajo se activa tu casa 10 y sus planetas; de pareja, la casa 7 y Venus… Se calcula en tu teléfono, sin gastar tokens.
+    </div>
+    <div class="couchPeriods">
+      ${periods.map((p) => `<button class="couchChip ${days === p.d ? "couchChip--on" : ""}" data-couch="period" data-id="${p.d ?? ""}">${p.label}</button>`).join("")}
+      <span class="couchMuted couchPushRight">${stats.total} mensaje${stats.total === 1 ? "" : "s"} vinculado${stats.total === 1 ? "" : "s"}</span>
+    </div>
+    ${!stats.total ? `<div class="couchHint">Todavía no hay mensajes vinculados en este periodo. Habla con Carl de tu día, tu trabajo, tus relaciones… y aquí verás qué partes de tu carta se activan.</div>` : `
+      ${chartReady ? renderNatalChartSvg(chartData, { heat }) : `<div class="couchHint">Completa tu carta en "Datos" para ver el mapa de calor sobre la rueda.</div>`}
+      <div class="couchSection">
+        <div class="couchSectionHead"><h3>Casas más activas</h3></div>
+        ${houses.slice(0, 6).map((h) => renderRankRow(`h${h.house}`, `Casa ${h.house} · ${esc(h.theme)}`,
+          `por: ${esc(h.via.join(", "))}${chartReady && planetsInHouse(chartData, h.house).length ? ` · con ${planetsInHouse(chartData, h.house).map((id) => `${planetSymbol(id)} ${esc(planetName(id))}`).join(", ")}` : ""}`,
+          h, maxHouse)).join("")}
+      </div>
+      <div class="couchSection">
+        <div class="couchSectionHead"><h3>Planetas más activos</h3></div>
+        ${stats.planets.slice(0, 6).map((p) => renderRankRow(`p${p.id}`, `${planetSymbol(p.id)} ${esc(p.name)}`,
+          `${esc(p.via.join(" · "))}`, p, maxPlanet)).join("")}
+      </div>
+    `}
+    <div class="couchSection">
+      <label class="couchToggle">
+        <input type="checkbox" data-couch="toggle-prompt" ${promptOn ? "checked" : ""} ${chartReady ? "" : "disabled"} />
+        <span>
+          <strong>Carl tiene en cuenta tu carta al responder</strong>
+          <span class="couchMuted">Solo cuando el mensaje toca un tema de tu carta se envía un resumen de unos 150–200 tokens. Si está apagado, no se envía nada.</span>
+        </span>
+      </label>
+    </div>`;
 }
 
 /**
@@ -556,46 +618,59 @@ function renderInterpretationTab() {
  */
 export function viewCouch() {
   const chartData = getNatalChartData();
-
-  const isChartTab = couchUiState.activeSubTab === "chart";
-  const isDataTab = couchUiState.activeSubTab === "data";
-  const isInterpTab = couchUiState.activeSubTab === "interpretation";
+  const tab = couchUiState.activeSubTab;
 
   let bodyHtml = "";
-  if (isChartTab) bodyHtml = renderNatalChartSvg(chartData);
-  else if (isDataTab) bodyHtml = renderDataEditorTab(chartData);
-  else if (isInterpTab) bodyHtml = renderInterpretationTab();
+  if (tab === "data") bodyHtml = renderDataEditorTab(chartData);
+  else if (tab === "activations") bodyHtml = renderActivationsTab(chartData);
+  else bodyHtml = renderChartTab(chartData);
+
+  const tabs = [
+    { id: "chart", icon: "🔮", label: "Carta" },
+    { id: "activations", icon: "✨", label: "Activaciones" },
+    { id: "data", icon: "📝", label: "Datos" },
+  ];
 
   return `
     <div class="couchWrap">
       ${couchCss()}
 
       <div class="couchHeader">
-        <div class="couchHeaderTitle">🛋️ Couch Astro — Carta Natal</div>
+        <div class="couchHeaderTitle">Couch · Carta natal</div>
         <div class="couchHeaderSub">
-          ${chartData.birthDetails.name ? `Carta de: <strong>${esc(chartData.birthDetails.name)}</strong>` : "Sin datos de nacimiento"}
+          ${chartData.birthDetails.name ? `<strong>${esc(chartData.birthDetails.name)}</strong>` : "Sin datos de nacimiento"}
           ${chartData.birthDetails.date ? ` · ${esc(chartData.birthDetails.date)}` : ""}
+          ${chartData.birthDetails.time ? ` · ${esc(chartData.birthDetails.time)}` : ""}
+          ${chartData.birthDetails.location ? ` · ${esc(chartData.birthDetails.location)}` : ""}
         </div>
       </div>
 
-      <div class="couchBody">${bodyHtml}</div>
-
-      <div class="couchBottomBar">
-        <button class="couchBarBtn ${isChartTab ? "couchBarBtn--active" : ""}" id="btnCouchSubChart">
-          <span class="couchBarIcon">🔮</span>
-          <span class="couchBarLabel">Carta Natal</span>
-        </button>
-        <button class="couchBarBtn ${isDataTab ? "couchBarBtn--active" : ""}" id="btnCouchSubData">
-          <span class="couchBarIcon">📝</span>
-          <span class="couchBarLabel">Casas y Aspectos</span>
-        </button>
-        <button class="couchBarBtn ${isInterpTab ? "couchBarBtn--active" : ""} couchBarBtn--disabled" id="btnCouchSubInterp" title="Próximamente">
-          <span class="couchBarIcon">📜</span>
-          <span class="couchBarLabel">Interpretación</span>
-        </button>
+      <div class="couchTabs" role="tablist">
+        ${tabs.map((t) => `<button class="couchTab ${tab === t.id ? "couchTab--active" : ""}" data-couch="tab" data-id="${t.id}" role="tab" aria-selected="${tab === t.id}">${t.icon} ${t.label}</button>`).join("")}
       </div>
+
+      <div class="couchBody">${bodyHtml}</div>
     </div>
   `;
+}
+
+// Analiza el historial una vez (en segundo plano) y vuelve a pintar
+async function runBackfillIfNeeded(root) {
+  try {
+    if (localStorage.getItem(BACKFILL_KEY) === "1" || couchUiState.backfillRunning) return;
+  } catch (_e) {
+    return;
+  }
+  couchUiState.backfillRunning = true;
+  rerenderCouch(root);
+  try {
+    const history = await getFullChatHistory();
+    backfillAstroActivations(history);
+  } catch (err) {
+    console.warn("[Couch] No se pudo analizar el historial:", err);
+  }
+  couchUiState.backfillRunning = false;
+  rerenderCouch(root);
 }
 
 /**
@@ -603,19 +678,56 @@ export function viewCouch() {
  */
 export function wireCouch(root) {
   const chartData = getNatalChartData();
+  const wrap = root.querySelector(".couchWrap");
 
-  root.querySelector("#btnCouchSubChart")?.addEventListener("click", () => {
-    couchUiState.activeSubTab = "chart";
+  wrap?.addEventListener("click", (e) => {
+    const target = e.target.closest("[data-couch], [data-planet]");
+    if (!target) return;
+    if (target.matches("[data-planet]") && !target.matches("[data-couch]")) {
+      const id = target.getAttribute("data-planet");
+      couchUiState.selectedPlanet = couchUiState.selectedPlanet === id ? null : id;
+      rerenderCouch(root);
+      return;
+    }
+    const id = target.dataset.id;
+    switch (target.dataset.couch) {
+      case "tab":
+        couchUiState.activeSubTab = id;
+        break;
+      case "select-planet":
+        couchUiState.selectedPlanet = id || null;
+        break;
+      case "toggle-group": {
+        const set = new Set(couchUiState.hiddenGroups);
+        if (set.has(id)) set.delete(id); else set.add(id);
+        couchUiState.hiddenGroups = [...set];
+        break;
+      }
+      case "period":
+        couchUiState.periodDays = id ? Number(id) : null;
+        couchUiState.openKey = null;
+        break;
+      case "toggle-all-aspects":
+        couchUiState.showAllAspects = !couchUiState.showAllAspects;
+        break;
+      case "open-key":
+        couchUiState.openKey = couchUiState.openKey === id ? null : id;
+        break;
+      case "aspect-mode":
+        chartData.aspectMode = id;
+        saveNatalChartData(chartData);
+        break;
+      case "toggle-prompt":
+        setAstroInPromptEnabled(target.checked);
+        return;
+      default:
+        return;
+    }
     rerenderCouch(root);
   });
-  root.querySelector("#btnCouchSubData")?.addEventListener("click", () => {
-    couchUiState.activeSubTab = "data";
-    rerenderCouch(root);
-  });
-  root.querySelector("#btnCouchSubInterp")?.addEventListener("click", () => {
-    couchUiState.activeSubTab = "interpretation";
-    rerenderCouch(root);
-  });
+
+  if (couchUiState.activeSubTab === "activations") runBackfillIfNeeded(root);
+
 
   if (couchUiState.activeSubTab === "data") {
     const saveDetails = () => {
@@ -768,19 +880,74 @@ function rerenderCouch(root) {
 
 function couchCss() {
   return `<style id="couchStyles">
-    .couchWrap { display: flex; flex-direction: column; gap: 12px; margin-bottom: 60px; }
-    .couchHeader { background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 14px; padding: 12px 16px; }
-    .couchHeaderTitle { font-size: 16px; font-weight: 800; color: #f3e8ff; }
-    .couchHeaderSub { font-size: 12px; opacity: 0.7; margin-top: 2px; }
+    .couchWrap { display: flex; flex-direction: column; gap: 14px; margin: 0 auto 60px; max-width: 760px; width: 100%; }
+    .couchHeader { padding: 2px 2px 0; }
+    .couchHeaderTitle { font-size: 22px; font-weight: 800; letter-spacing: -.3px; color: #f5f3ff; }
+    .couchHeaderSub { font-size: 13px; opacity: 0.65; margin-top: 3px; }
 
-    .couchChartContainer { display: flex; justify-content: center; align-items: center; padding: 10px; background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; }
-    .couchNatalSvg { width: 100%; max-width: 460px; height: auto; max-height: 460px; }
+    .couchTabs { display: flex; gap: 4px; padding: 4px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; }
+    .couchTab { flex: 1; background: none; border: none; color: rgba(255,255,255,.6); font-size: 13px; font-weight: 600; padding: 9px 6px; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+    .couchTab--active { background: rgba(168,85,247,.22); color: #f3e8ff; font-weight: 800; }
+    .couchBody { display: flex; flex-direction: column; gap: 14px; }
 
-    .couchBottomBar { position: fixed; bottom: 0; left: 0; right: 0; background: #111827; border-top: 1px solid rgba(255,255,255,0.12); display: flex; justify-content: space-around; padding: 6px 12px; z-index: 100; max-width: 900px; margin: 0 auto; }
-    .couchBarBtn { flex: 1; background: none; border: none; color: rgba(255,255,255,0.5); display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; padding: 6px; border-radius: 8px; font-size: 11px; }
-    .couchBarBtn--active { color: #c084fc; background: rgba(168, 85, 247, 0.15); font-weight: 700; }
-    .couchBarBtn--disabled { opacity: 0.35; cursor: not-allowed; }
-    .couchBarIcon { font-size: 18px; }
+    .couchChartContainer { display: flex; justify-content: center; align-items: center; padding: 6px; background: radial-gradient(circle at center, rgba(124,58,237,.12), rgba(15,13,25,.6) 70%); border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; }
+    .couchNatalSvg { width: 100%; max-width: 520px; height: auto; touch-action: manipulation; }
+    .couchPlanet { cursor: pointer; }
+    .couchPlanet text { pointer-events: none; }
+
+    .couchLegend { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+    .couchLegendChip { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); color: #e5e7eb; border-radius: 20px; padding: 5px 11px; font-size: 12px; cursor: pointer; }
+    .couchLegendChip--off { opacity: .4; text-decoration: line-through; }
+    .couchLegendLine { width: 16px; height: 3px; border-radius: 2px; }
+
+    .couchSection { display: flex; flex-direction: column; gap: 8px; }
+    .couchSectionHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .couchSectionHead h3 { margin: 0; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; opacity: .6; }
+    .couchMuted { opacity: .55; font-size: 12px; font-weight: 500; }
+    .couchHint, .couchIntro { font-size: 13px; line-height: 1.5; opacity: .7; padding: 12px 14px; border: 1px dashed rgba(255,255,255,.14); border-radius: 14px; }
+    .couchIntro { border-style: solid; background: rgba(168,85,247,.07); border-color: rgba(168,85,247,.22); opacity: .9; }
+    .couchPushRight { margin-left: auto; }
+
+    .couchCard { background: rgba(168,85,247,.08); border: 1px solid rgba(168,85,247,.28); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+    .couchCardHead { display: flex; align-items: center; gap: 12px; }
+    .couchCardHead > div { flex: 1; min-width: 0; }
+    .couchCardGlyph { font-size: 28px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(0,0,0,.25); }
+    .couchCardTitle { font-size: 15px; font-weight: 800; }
+    .couchCardSub, .couchCardLine { font-size: 12px; opacity: .75; }
+    .couchCardAspects { display: flex; flex-wrap: wrap; gap: 6px; }
+    .couchIconBtn { background: none; border: none; color: rgba(255,255,255,.5); font-size: 15px; cursor: pointer; padding: 4px 6px; }
+    .couchChip { display: inline-flex; align-items: center; gap: 5px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: #e5e7eb; border-radius: 20px; padding: 5px 11px; font-size: 12px; cursor: pointer; }
+    .couchChip--on { background: rgba(168,85,247,.28); border-color: rgba(192,132,252,.6); color: #f3e8ff; font-weight: 700; }
+    .couchOrb { font-family: monospace; font-size: 11px; opacity: .6; }
+
+    .couchAspectList { display: flex; flex-direction: column; gap: 4px; }
+    .couchAspectRow { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 8px; align-items: center; text-align: left; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07); color: #e5e7eb; border-radius: 10px; padding: 7px 10px; font-size: 12px; cursor: pointer; }
+    .couchAspectType { font-weight: 700; white-space: nowrap; }
+
+    .couchBalance { display: flex; flex-direction: column; gap: 6px; }
+    .couchBalanceRow { display: grid; grid-template-columns: 56px 1fr 20px; gap: 8px; align-items: center; font-size: 12px; }
+    .couchBalanceNum { text-align: right; opacity: .7; }
+    .couchBar { display: block; height: 8px; background: rgba(255,255,255,.07); border-radius: 6px; overflow: hidden; }
+    .couchBar > span { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, #f59e0b, #f97316); }
+    .couchBalance .couchBar > span { opacity: .85; }
+
+    .couchPeriods { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .couchRank { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; overflow: hidden; }
+    .couchRank--open { border-color: rgba(245,158,11,.4); }
+    .couchRankBtn { width: 100%; text-align: left; background: none; border: none; color: inherit; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+    .couchRankTop { display: flex; justify-content: space-between; gap: 8px; }
+    .couchRankLabel { font-size: 14px; font-weight: 700; }
+    .couchRankCount { font-size: 12px; opacity: .6; white-space: nowrap; }
+    .couchRankSub { font-size: 11px; opacity: .55; }
+    .couchExamples { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 12px; }
+    .couchExample { background: rgba(0,0,0,.2); border-radius: 10px; padding: 8px 10px; }
+    .couchExampleText { font-size: 13px; line-height: 1.4; }
+    .couchExampleMeta { font-size: 11px; opacity: .5; margin-top: 3px; }
+
+    .couchToggle { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; cursor: pointer; font-size: 13px; }
+    .couchToggle > span { display: flex; flex-direction: column; gap: 3px; }
+    .couchToggle input { margin-top: 3px; width: 18px; height: 18px; accent-color: #a855f7; flex-shrink: 0; }
+    .couchModeSwitch { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 
     .couchFormSection { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
     .couchSectionTitle { font-size: 13px; font-weight: 800; opacity: 0.85; margin-bottom: 10px; color: #e9d5ff; }

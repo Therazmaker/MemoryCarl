@@ -11,6 +11,7 @@ import { getNeuroChatSettings } from "../settings/neurochatSettings.js";
 import { getChefAiSettings } from "../shopping/shoppingAi.js";
 import { buildLifeFactsPromptBlock } from "../chat/lifeFacts.js";
 import { todayLongStr } from "../chat/lifeDates.js";
+import { buildAstroPromptBlock } from "../chat/astroLinks.js";
 import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
 import { buildRecentDaysPromptBlock } from "../chat/recentContext.js";
 
@@ -180,6 +181,9 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
   if (recentDaysBlock.blockText) {
     systemContent += recentDaysBlock.blockText;
   }
+
+  // Carta natal: solo si el usuario lo activó en Couch y el mensaje toca algún tema
+  systemContent += buildAstroPromptBlock(userInput);
 
   if (context.length > 0) {
     systemContent += "\n\n## CONTEXTO NEURONAL ACTIVO\n";

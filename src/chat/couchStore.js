@@ -82,6 +82,7 @@ export function getNatalChartData() {
         ? parsed.houseCusps
         : JSON.parse(JSON.stringify(DEFAULT_NATAL_CHART.houseCusps)),
       aspects: Array.isArray(parsed.aspects) ? parsed.aspects : [],
+      ...(parsed.aspectMode === "auto" || parsed.aspectMode === "manual" ? { aspectMode: parsed.aspectMode } : {}),
     };
   } catch (err) {
     console.warn("[CouchStore] Error al leer carta natal:", err);
