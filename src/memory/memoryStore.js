@@ -12,6 +12,7 @@ import {
   dedupeMemoryTags,
   suggestMemoryMilestone,
 } from "./memoryNormalizer.js";
+import { cloudMemoryToLocal } from "../services/cloudRestore.js";
 import { getAllNeurons } from "../neuro/neuronStore.js";
 
 const MEMORY_KEY = "memorycarl_memories_v1";
@@ -27,7 +28,8 @@ function safeParse(raw, fallback) {
 
 function readMemories() {
   if (typeof localStorage === "undefined") return [];
-  return safeParse(localStorage.getItem(MEMORY_KEY) || "[]", []);
+  // Memorias que llegaron recortadas desde la nube (text_content, linked_neurons) se normalizan
+  return safeParse(localStorage.getItem(MEMORY_KEY) || "[]", []).map(cloudMemoryToLocal).filter(Boolean);
 }
 
 function triggerNeuroChatPush() {

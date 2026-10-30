@@ -15,6 +15,7 @@ import { isOllamaConfigured } from "../services/ollamaClient.js";
 import { isGeminiPremiumConfigured } from "../services/geminiPremiumClient.js";
 import { undoLifeChanges } from "./lifeChanges.js";
 import { recordAstroActivation } from "./astroLinks.js";
+import { cloudChatToLocal } from "../services/cloudRestore.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
 const DB_NAME = "memorycarl_chat";
@@ -62,7 +63,8 @@ function loadHistory() {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     const parsed = JSON.parse(raw || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    // Mensajes restaurados desde la nube sin fecha (created_at) se normalizan
+    return Array.isArray(parsed) ? parsed.map(cloudChatToLocal).filter(Boolean) : [];
   } catch (_e) { return []; }
 }
 

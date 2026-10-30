@@ -5,6 +5,7 @@
  */
 
 import { sanitizeNeuron, validateNeuron, createNeuron } from "./schemas.js";
+import { cloudNeuronToLocal } from "../services/cloudRestore.js";
 import { getEmbedding } from "./embeddings.js";
 import { rebuildGraph } from "./connections.js";
 import { normalizeTemporalMeta } from "./temporal.js";
@@ -25,6 +26,11 @@ function readAll() {
     let changed = false;
     const normalized = parsed
       .map((n) => {
+        // Neuronas que llegaron recortadas desde la nube: se reconstruye su estructura
+        if (n && !n.core && n.concept) {
+          n = cloudNeuronToLocal(n);
+          changed = true;
+        }
         const clean = sanitizeNeuron(n);
         if (!clean) return null;
         if (!n.temporal) changed = true;
