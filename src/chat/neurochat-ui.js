@@ -2419,7 +2419,7 @@ function wireSettingsModal(root) {
     rerender();
   });
 
-  // Test Ollama
+  // Sincronizar ahora (una sola acción)
   root.querySelector("#btnSyncSupabase")?.addEventListener("click", async () => {
     const btn = root.querySelector("#btnSyncSupabase");
     const originalText = btn.textContent;
@@ -2441,8 +2441,6 @@ function wireSettingsModal(root) {
     btn.textContent = "Restaurando...";
     btn.disabled = true;
     const result = await pullNeurochat({ hasLocalChat: async () => (await getFullChatHistory()).length > 0 });
-    // Finanzas, sueño y ánimo los restaura la app principal con su propia lógica
-    try { if (typeof window.financePullFromSupabase === "function") await window.financePullFromSupabase(false); } catch (_e) {}
     const a = result.added || {};
     uiState.settingsMsg = result.ok
       ? { type: "success", text: result.changed ? `✓ Restaurado sin borrar nada: ${a.neurons || 0} neuronas y ${a.memories || 0} memorias añadidas, días y "Ahora" fusionados.` : "✓ Ya tenías todo: no faltaba nada por restaurar." }
@@ -2450,103 +2448,6 @@ function wireSettingsModal(root) {
     btn.textContent = originalText;
     btn.disabled = false;
     rerender();
-  });
-
-  // Test Ollama
-  root.querySelector("#btnSyncSupabase")?.addEventListener("click", async () => {
-    const btn = root.querySelector("#btnSyncSupabase");
-    const originalText = btn.textContent;
-    btn.textContent = "Sincronizando...";
-    btn.disabled = true;
-    const status = await schedulePush({ immediate: true });
-    uiState.settingsMsg = status?.ok
-      ? { type: "success", text: `✓ Sincronizado: ${status.counts?.neurons || 0} neuronas, ${status.counts?.memories || 0} memorias, ${status.counts?.days || 0} días y tu situación de "Ahora" (${status.sizeKB} KB).` }
-      : { type: "error", text: `Error al sincronizar: ${status?.message || "desconocido"}` };
-    btn.textContent = originalText;
-    btn.disabled = false;
-    rerender();
-  });
-
-  // Restaurar desde Supabase
-  root.querySelector("#btnRestoreSupabase")?.addEventListener("click", async () => {
-    const url = localStorage.getItem("memorycarl_api_url") || "";
-    const key = localStorage.getItem("memorycarl_api_key") || "";
-    if (!url) {
-      uiState.settingsMsg = { type: "error", text: "Falta configurar la URL del servidor API para poder restaurar." };
-      rerender();
-      return;
-    }
-
-    const confirmRestore = window.confirm(
-      "⚠️ ¿Restaurar todo desde Supabase?\n\nEsto sobreescribirá tus neuronas, memorias y estado local con el backup guardado en la nube.\n\nTus datos actuales serán reemplazados."
-    );
-    if (!confirmRestore) return;
-
-    const btn = root.querySelector("#btnRestoreSupabase");
-    const originalText = btn.textContent;
-    btn.textContent = "Restaurando...";
-    btn.disabled = true;
-
-    try {
-      const res = await fetch(`${url}/api/restore`, {
-        method: "GET",
-        headers: { ...(key && { "Authorization": `Bearer ${key}` }) }
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || `Error del servidor (${res.status})`);
-      }
-
-      const { data } = await res.json();
-
-      // Restaurar neuronas
-      if (data.neurons?.length > 0) {
-        localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(data.neurons));
-      }
-
-      // Restaurar memorias
-      if (data.memories?.length > 0) {
-        localStorage.setItem("memorycarl_memories_v1", JSON.stringify(data.memories));
-      }
-
-      // Restaurar historial de chat
-      if (data.chatHistory?.length > 0) {
-        const { HISTORY_KEY } = await import("./neurochat.js").catch(() => ({ HISTORY_KEY: "memorycarl_neurochat_history" }));
-        localStorage.setItem(HISTORY_KEY || "memorycarl_neurochat_history", JSON.stringify(data.chatHistory));
-      }
-
-      // Restaurar días
-      if (data.days?.length > 0) {
-        const { DAY_STORE_KEY } = await import("../day/dayStore.js").catch(() => ({ DAY_STORE_KEY: "memorycarl_days_v1" }));
-        localStorage.setItem(DAY_STORE_KEY || "memorycarl_days_v1", JSON.stringify(data.days));
-      }
-
-      // Restaurar window.state (sueño, finanzas, emociones, rutinas...)
-      if (data.appState && typeof window !== 'undefined' && window.state) {
-        const keysToRestore = ['sleepLog', 'moodDaily', 'routines', 'shopping', 'reminders',
-          'finance_accounts', 'finance_ledger', 'finance_debts', 'finance_commitments',
-          'finance_transactions', 'finance_insights', 'inventory', 'house', 'musicLog'];
-        keysToRestore.forEach(k => {
-          if (data.appState[k] !== undefined) {
-            window.state[k] = data.appState[k];
-          }
-        });
-        // Llamar a persist() si existe para que guarde el estado en localStorage
-        if (typeof window.persist === 'function') window.persist();
-      }
-
-      uiState.settingsMsg = {
-        type: "success",
-        text: `✓ Restauración exitosa: ${data.neurons?.length || 0} neuronas, ${data.memories?.length || 0} memorias, ${data.days?.length || 0} días, ${data.chatHistory?.length || 0} chats. Recarga la página para ver todos los cambios.`
-      };
-    } catch (e) {
-      uiState.settingsMsg = { type: "error", text: `Error al restaurar: ${e.message}` };
-    } finally {
-      btn.textContent = originalText;
-      btn.disabled = false;
-      rerender();
-    }
   });
 
   // Test Ollama
@@ -2718,41 +2619,42 @@ export function wireNeuroChat(root) {
 /**
  * Inicialización del módulo (llamada una vez al montar el tab).
  */
+// Repinta NeuroChat solo si está montado (desde el arranque de la app no debe tocar otras pestañas)
+function rerenderIfMounted() {
+  if (typeof document !== "undefined" && document.querySelector("#app .nchatWrap")) rerender();
+}
+
+/**
+ * Inicializa NeuroChat una vez al arrancar la app (no solo al abrir la pestaña):
+ * registra la sincronización con Supabase, trae lo que falte y sube lo local.
+ */
 export function initNeuroChat() {
+  if (typeof window !== "undefined") {
+    if (window.__neurochatInited) return;
+    window.__neurochatInited = true;
+  }
   // Recupera en "Días" los mensajes que una restauración desde la nube pudo haber borrado
   // (el historial completo del chat vive en IndexedDB y no se ve afectado)
   getFullChatHistory()
     .then((history) => {
-      if (repairDaysFromChatHistory(history) > 0 && uiState.activeTab === "days") rerender();
+      if (repairDaysFromChatHistory(history) > 0 && uiState.activeTab === "days") rerenderIfMounted();
     })
     .catch((err) => console.warn("[NeuroChat] No se pudieron reparar los días:", err));
-
-  // Pre-cargar la API key de Ollama si el usuario la proporcionó y no está guardada
-  try {
-    const currentSettings = getOllamaSettings();
-    if (!currentSettings.apiKey) {
-      // API key pre-configurada (se puede cambiar desde el panel de settings)
-      saveOllamaSettings({
-        enabled: true,
-        apiKey: "cc049e1d73344bf0a6b129fecf63a6c3.FUJY2X6-jUHGJvo38D7HcR_C",
-        model: "gpt-oss:120b",
-      });
-      console.log("[NeuroChat] Ollama Cloud configurado automáticamente.");
-    }
-  } catch (_e) {
-    // noop — el usuario puede configurarlo manualmente desde settings
-  }
 
   // Sincronización con Supabase (ver services/neurochatSync.js)
   window.neurochatPushToSupabase = (isManual = false) => (isManual ? schedulePush({ immediate: true }) : schedulePush());
   window.neurochatPullFromSupabase = async () => {
     const result = await pullNeurochat({ hasLocalChat: async () => (await getFullChatHistory()).length > 0 });
-    if (result.changed) rerender();
+    if (result.changed) rerenderIfMounted();
     return result;
   };
 
-  // Al abrir: traer de la nube lo que falte (sin pisar nada local)
-  setTimeout(() => { window.neurochatPullFromSupabase().catch(() => {}); }, 1500);
+  // Al arrancar: traer de la nube lo que falte (sin pisar nada local) y subir todo lo local
+  setTimeout(() => {
+    window.neurochatPullFromSupabase()
+      .catch(() => {})
+      .finally(() => schedulePush({ immediate: true }));
+  }, 2500);
 
   if (typeof window !== "undefined" && !window.__neurochatSyncEventsAttached) {
     window.__neurochatSyncEventsAttached = true;

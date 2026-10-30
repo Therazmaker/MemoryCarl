@@ -62,7 +62,8 @@ export function cloudDayToLocal(row) {
 export function cloudChatToLocal(row) {
   if (!row || typeof row !== "object") return null;
   if (typeof row.ts === "number") return row;
-  const ts = Date.parse(row.created_at || "") || Date.now();
+  // La hora original viaja en meta.ts; created_at es la hora de subida
+  const ts = Number(row.meta?.ts) || Date.parse(row.created_at || "") || Date.now();
   return { role: row.role || "user", content: row.content || "", ts, messageId: row.message_id || row.messageId || row.id };
 }
 

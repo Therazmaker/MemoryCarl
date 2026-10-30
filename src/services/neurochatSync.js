@@ -62,10 +62,25 @@ export function getSyncStatus() {
   }
 }
 
+// Deja el resultado en la consola de la app (la misma donde aparece la sync de finanzas)
+function logToAppConsole(status) {
+  if (typeof window === "undefined" || !Array.isArray(window.__mcLogs)) return;
+  const time = new Date().toLocaleTimeString("es-PE");
+  if (status.kind === "push") {
+    const text = status.ok
+      ? `☁️ NeuroChat sincronizado (${status.sizeKB} KB: ${status.counts?.neurons || 0} neuronas, ${status.counts?.days || 0} días)`
+      : `☁️ NeuroChat NO sincronizado${status.httpStatus ? ` (HTTP ${status.httpStatus})` : ""}: ${status.message}`;
+    window.__mcLogs.push({ time, type: status.ok ? "info" : "error", text });
+  } else if (status.pullOk === false) {
+    window.__mcLogs.push({ time, type: "error", text: `☁️ NeuroChat no pudo leer Supabase: ${status.pullMessage}` });
+  }
+}
+
 function saveSyncStatus(status) {
   try {
     localStorage.setItem(SYNC_STATUS_KEY, JSON.stringify(status));
   } catch (_e) {}
+  logToAppConsole(status);
   if (typeof window !== "undefined") {
     try { window.dispatchEvent(new CustomEvent("neurochat-sync-status", { detail: status })); } catch (_e) {}
   }
@@ -105,7 +120,7 @@ export function buildSyncPayload() {
   // Usuario y asistente comparten messageId: se separa por rol para que el backend no los junte
   const chatHistory = readJsonArray(HISTORY_KEY).slice(-MAX_CHAT_MESSAGES)
     .filter((m) => m && m.content)
-    .map((m) => ({ messageId: `${m.messageId || m.ts}_${m.role}`, role: m.role, content: m.content }));
+    .map((m) => ({ messageId: `${m.messageId || m.ts}_${m.role}`, role: m.role, content: m.content, meta: { ts: m.ts } }));
   const appState = { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads() };
   return { neurons, memories, chatHistory, days, appState };
 }
@@ -211,13 +226,13 @@ export async function pullNeurochat(opts = {}) {
     const res = await fetchWithTimeout(`${url}/api/restore`, { method: "GET", headers: { Authorization: `Bearer ${key}` } });
     if (!res.ok) {
       const message = await readError(res);
-      saveSyncStatus({ ...(getSyncStatus() || {}), pullOk: false, pullAt: Date.now(), pullMessage: message });
+      saveSyncStatus({ ...(getSyncStatus() || {}), kind: "pull", pullOk: false, pullAt: Date.now(), pullMessage: message });
       return { ok: false, changed: false, message };
     }
     data = (await res.json())?.data;
   } catch (err) {
     const message = `Sin conexión con el servidor (${err?.message || err}).`;
-    saveSyncStatus({ ...(getSyncStatus() || {}), pullOk: false, pullAt: Date.now(), pullMessage: message });
+    saveSyncStatus({ ...(getSyncStatus() || {}), kind: "pull", pullOk: false, pullAt: Date.now(), pullMessage: message });
     return { ok: false, changed: false, message };
   }
   if (!data) return { ok: true, changed: false };
@@ -269,7 +284,7 @@ export async function pullNeurochat(opts = {}) {
   mergeKey(LIFE_FACTS_KEY, data.lifeFacts || data.appState?.lifeFacts);
   mergeKey(OPEN_THREADS_KEY, data.openThreads || data.appState?.openThreads);
 
-  saveSyncStatus({ ...(getSyncStatus() || {}), pullOk: true, pullAt: Date.now(), pullMessage: "" });
+  saveSyncStatus({ ...(getSyncStatus() || {}), kind: "pull", pullOk: true, pullAt: Date.now(), pullMessage: "" });
   if (needsPush) schedulePush();
   return { ok: true, changed, added };
 }
