@@ -36,7 +36,7 @@ import {
   createUserRelation,
 } from "../neuro/structuredFeedback.js";
 import { viewDayCalendar, viewDayDetail, wireDayCalendar, wireDayDetail, dayUiState } from "../day/day-calendar-ui.js";
-import { getAllDays, getDayByDate, mergeDaysFromCloud, repairDaysFromChatHistory } from "../day/dayStore.js";
+import { getAllDays, getDayByDate, repairDaysFromChatHistory } from "../day/dayStore.js";
 import { viewCouch, wireCouch } from "./couch-ui.js";
 import {
   loadLifeFacts,
@@ -61,8 +61,8 @@ import {
   deleteThread,
   getOpenThreads,
 } from "./openThreads.js";
-import { reconcileThreadsWithFacts, undoLifeChanges, describeLifeChange, mergeLifeLists } from "./lifeChanges.js";
-import { addMissingById, cloudNeuronToLocal, cloudMemoryToLocal, cloudChatToLocal } from "../services/cloudRestore.js";
+import { reconcileThreadsWithFacts, undoLifeChanges, describeLifeChange } from "./lifeChanges.js";
+import { schedulePush, pullNeurochat, getSyncStatus, getApiConfig as getSyncApiConfig } from "../services/neurochatSync.js";
 import { todayLocalStr } from "./lifeDates.js";
 
 // ---- Constantes UI ----
@@ -621,6 +621,40 @@ function renderSidePanel() {
 
 // ---- Settings Modal ----
 
+// ---- Estado de la sincronización con Supabase ----
+function fmtAgo(ts) {
+  if (!ts) return "nunca";
+  const s = Math.round((Date.now() - ts) / 1000);
+  if (s < 60) return "hace un momento";
+  if (s < 3600) return `hace ${Math.round(s / 60)} min`;
+  if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
+  return new Date(ts).toLocaleDateString("es", { day: "numeric", month: "short" });
+}
+
+function renderSyncStatus() {
+  const cfg = getSyncApiConfig();
+  if (!cfg.key) return `<span class="ncSyncBad">⚠️ Sin API key: NeuroChat no se está guardando en Supabase.</span>`;
+  const st = getSyncStatus();
+  const via = cfg.source === "app" ? " · usando la key de la app" : "";
+  if (!st) return `<span>☁️ Aún no se ha sincronizado${via}.</span>`;
+  const push = st.ok
+    ? `<span class="ncSyncOk">✓ Guardado en la nube ${fmtAgo(st.at)}${st.sizeKB != null ? ` · ${st.sizeKB} KB` : ""}</span>`
+    : st.partial
+      ? `<span class="ncSyncWarn">⚠️ Guardado parcial ${fmtAgo(st.at)}: ${esc(st.message)}</span>`
+      : `<span class="ncSyncBad">❌ No se pudo guardar ${fmtAgo(st.at)}${st.httpStatus ? ` (HTTP ${st.httpStatus})` : ""}: ${esc(st.message)}</span>`;
+  const pull = st.pullAt
+    ? (st.pullOk ? `<span>⬇️ Última restauración ${fmtAgo(st.pullAt)}</span>` : `<span class="ncSyncBad">⬇️ Restauración fallida ${fmtAgo(st.pullAt)}: ${esc(st.pullMessage)}</span>`)
+    : "";
+  return `${push}${pull ? `<br>${pull}` : ""}<br><span class="ncSyncMuted">Servidor: ${esc(cfg.url)}${via}</span>`;
+}
+
+function renderSyncChip() {
+  const cfg = getSyncApiConfig();
+  const st = getSyncStatus();
+  if (!cfg.key || !st || st.ok) return `<span data-sync-chip></span>`;
+  return `<span data-sync-chip class="ncSyncChip" title="${esc(st.message || "")}">☁️ sync con error</span>`;
+}
+
 function renderSettingsModal() {
   const s       = getNeuroChatSettings();
   const maskedKey = s.apiKey ? maskApiKey(s.apiKey) : "";
@@ -817,6 +851,7 @@ function renderSettingsModal() {
               <button type="button" class="ncSettingsTestBtn" id="btnSyncSupabase" style="color: #4f46e5; border-color: #4f46e5;">☁️ Sincronizar (Backup) a Supabase</button>
               <button type="button" class="ncSettingsTestBtn" id="btnRestoreSupabase" style="color: #0891b2; border-color: #0891b2;">⬇️ Restaurar desde Supabase</button>
             </div>
+            <div class="ncSyncStatus" data-sync-status>${renderSyncStatus()}</div>
           </div>
 
           <!-- ════════ GEMINI PREMIUM (FALLBACK) ════════ -->
@@ -971,7 +1006,7 @@ function nchatInner() {
           <span class="ncHeaderIcon">🧠</span>
           <div>
             <div class="ncHeaderTitle">NeuroChat ${aiDot}</div>
-            <div class="ncHeaderSub">${totalNeurons} neuronas · ${history.filter(m => m.role === "user").length} conversaciones</div>
+            <div class="ncHeaderSub">${totalNeurons} neuronas · ${history.filter(m => m.role === "user").length} conversaciones ${renderSyncChip()}</div>
           </div>
         </div>
         <div class="ncHeaderActions">
@@ -2386,53 +2421,50 @@ function wireSettingsModal(root) {
 
   // Test Ollama
   root.querySelector("#btnSyncSupabase")?.addEventListener("click", async () => {
-    const url = localStorage.getItem("memorycarl_api_url") || "";
-    const key = localStorage.getItem("memorycarl_api_key") || "";
-    if (!url) {
-      uiState.settingsMsg = { type: "error", text: "Falta configurar la URL del servidor API para poder sincronizar." };
-      rerender();
-      return;
-    }
     const btn = root.querySelector("#btnSyncSupabase");
     const originalText = btn.textContent;
     btn.textContent = "Sincronizando...";
     btn.disabled = true;
+    const status = await schedulePush({ immediate: true });
+    uiState.settingsMsg = status?.ok
+      ? { type: "success", text: `✓ Sincronizado: ${status.counts?.neurons || 0} neuronas, ${status.counts?.memories || 0} memorias, ${status.counts?.days || 0} días y tu situación de "Ahora" (${status.sizeKB} KB).` }
+      : { type: "error", text: `Error al sincronizar: ${status?.message || "desconocido"}` };
+    btn.textContent = originalText;
+    btn.disabled = false;
+    rerender();
+  });
 
-    try {
-      const { getNeurons, getMemories, getChatHistory } = await import("./neurochat.js");
-      const { getAllDays } = await import("../day/dayStore.js");
+  // Restaurar desde Supabase: solo añade lo que falta, nunca reemplaza lo local
+  root.querySelector("#btnRestoreSupabase")?.addEventListener("click", async () => {
+    const btn = root.querySelector("#btnRestoreSupabase");
+    const originalText = btn.textContent;
+    btn.textContent = "Restaurando...";
+    btn.disabled = true;
+    const result = await pullNeurochat({ hasLocalChat: async () => (await getFullChatHistory()).length > 0 });
+    // Finanzas, sueño y ánimo los restaura la app principal con su propia lógica
+    try { if (typeof window.financePullFromSupabase === "function") await window.financePullFromSupabase(false); } catch (_e) {}
+    const a = result.added || {};
+    uiState.settingsMsg = result.ok
+      ? { type: "success", text: result.changed ? `✓ Restaurado sin borrar nada: ${a.neurons || 0} neuronas y ${a.memories || 0} memorias añadidas, días y "Ahora" fusionados.` : "✓ Ya tenías todo: no faltaba nada por restaurar." }
+      : { type: "error", text: `Error al restaurar: ${result.message}` };
+    btn.textContent = originalText;
+    btn.disabled = false;
+    rerender();
+  });
 
-      const neurons = getNeurons() || [];
-      const memories = getMemories() || [];
-      const chatHistory = getChatHistory() || [];
-      const days = getAllDays() || [];
-
-      const appState = (typeof window !== 'undefined' && window.state) ? window.state : null;
-
-      const res = await fetch(`${url}/api/sync`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(key && { "Authorization": `Bearer ${key}` })
-        },
-        body: JSON.stringify({ neurons, memories, chatHistory, days, appState })
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || `Error del servidor (${res.status})`);
-      }
-
-      const data = await res.json();
-      const stateMsg = data.data.appStateSynced ? " + estado de la app (sueño, finanzas, emociones ✓)" : "";
-      uiState.settingsMsg = { type: "success", text: `✓ Sincronización exitosa: ${data.data.neuronsSynced} neuronas, ${data.data.memoriesSynced} memorias, ${data.data.chatSynced} chats, ${data.data.daysSynced} días${stateMsg}.` };
-    } catch (e) {
-      uiState.settingsMsg = { type: "error", text: `Error al sincronizar: ${e.message}` };
-    } finally {
-      btn.textContent = originalText;
-      btn.disabled = false;
-      rerender();
-    }
+  // Test Ollama
+  root.querySelector("#btnSyncSupabase")?.addEventListener("click", async () => {
+    const btn = root.querySelector("#btnSyncSupabase");
+    const originalText = btn.textContent;
+    btn.textContent = "Sincronizando...";
+    btn.disabled = true;
+    const status = await schedulePush({ immediate: true });
+    uiState.settingsMsg = status?.ok
+      ? { type: "success", text: `✓ Sincronizado: ${status.counts?.neurons || 0} neuronas, ${status.counts?.memories || 0} memorias, ${status.counts?.days || 0} días y tu situación de "Ahora" (${status.sizeKB} KB).` }
+      : { type: "error", text: `Error al sincronizar: ${status?.message || "desconocido"}` };
+    btn.textContent = originalText;
+    btn.disabled = false;
+    rerender();
   });
 
   // Restaurar desde Supabase
@@ -2711,142 +2743,28 @@ export function initNeuroChat() {
     // noop — el usuario puede configurarlo manualmente desde settings
   }
 
-  // Define global push/pull helper functions for Supabase cloud sync
-  window.neurochatPushToSupabase = async function(isManual = false) {
-    try {
-      const url = localStorage.getItem("memorycarl_api_url") || "";
-      const key = localStorage.getItem("memorycarl_api_key") || "";
-      if (!url) return;
-
-      const neurons = getNeurons() || [];
-      const memories = getMemories() || [];
-      const chatHistory = getChatHistory() || [];
-      const days = getAllDays() || [];
-      const lifeFacts = loadLifeFacts() || [];
-      let openThreads = [];
-      try {
-        const rawThreads = localStorage.getItem("memorycarl_open_threads");
-        if (rawThreads) openThreads = JSON.parse(rawThreads);
-      } catch (_e) {}
-
-      const rawAppState = (typeof window !== "undefined" && window.state) ? window.state : {};
-      const appState = {
-        ...rawAppState,
-        lifeFacts,
-        openThreads,
-      };
-
-      const body = JSON.stringify({ neurons, memories, chatHistory, days, appState });
-      const res = await fetch(`${url.replace(/\/+$/, "")}/api/sync`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(key && { "Authorization": `Bearer ${key}` })
-        },
-        body,
-        // keepalive solo admite cuerpos de hasta 64 KB: por encima el navegador rechaza el envío
-        keepalive: body.length < 60000,
-      });
-
-      if (isManual) {
-        if (res.ok) alert("Sincronización a Supabase completada con éxito ✅");
-        else alert("Error en sincronización a Supabase ❌");
-      }
-    } catch (e) {
-      console.warn("[NeuroChat Push Error]", e);
-      if (isManual) alert("Error de conexión al sincronizar con Supabase: " + e.message);
-    }
+  // Sincronización con Supabase (ver services/neurochatSync.js)
+  window.neurochatPushToSupabase = (isManual = false) => (isManual ? schedulePush({ immediate: true }) : schedulePush());
+  window.neurochatPullFromSupabase = async () => {
+    const result = await pullNeurochat({ hasLocalChat: async () => (await getFullChatHistory()).length > 0 });
+    if (result.changed) rerender();
+    return result;
   };
 
-  window.neurochatPullFromSupabase = async function(isManual = false) {
-    try {
-      const url = localStorage.getItem("memorycarl_api_url") || "";
-      const key = localStorage.getItem("memorycarl_api_key") || "";
-      if (!url) return;
+  // Al abrir: traer de la nube lo que falte (sin pisar nada local)
+  setTimeout(() => { window.neurochatPullFromSupabase().catch(() => {}); }, 1500);
 
-      const res = await fetch(`${url.replace(/\/+$/, "")}/api/restore`, {
-        method: "GET",
-        headers: { ...(key && { "Authorization": `Bearer ${key}` }) }
-      });
-
-      if (!res.ok) return;
-      const { data } = await res.json();
-      if (!data) return;
-
-      // La nube guarda versiones recortadas (neuronas sin conexiones, días sin mensajes,
-      // chat sin fechas): solo se AÑADE lo que falta en el teléfono, nunca se reemplaza
-      let changed = false;
-      const readLocal = (key) => {
-        try { const v = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(v) ? v : []; } catch (_e) { return []; }
-      };
-      const addMissing = (key, cloudList, convert) => {
-        if (!Array.isArray(cloudList) || !cloudList.length) return;
-        const { list, added } = addMissingById(readLocal(key), cloudList, convert);
-        if (added) {
-          localStorage.setItem(key, JSON.stringify(list));
-          changed = true;
-        }
-      };
-      addMissing("memorycarl_neurochat_neurons", data.neurons, cloudNeuronToLocal);
-      addMissing("memorycarl_memories_v1", data.memories, cloudMemoryToLocal);
-      // El chat solo se restaura en un dispositivo sin historial (el backend pierde mensajes)
-      if (Array.isArray(data.chatHistory) && data.chatHistory.length && !readLocal("memorycarl_neurochat_history").length) {
-        const local = await getFullChatHistory();
-        if (!local.length) {
-          localStorage.setItem("memorycarl_neurochat_history", JSON.stringify(data.chatHistory.map(cloudChatToLocal).filter(Boolean).slice(-50)));
-          changed = true;
-        }
-      }
-      if (Array.isArray(data.days) && data.days.length && mergeDaysFromCloud(data.days)) changed = true;
-
-      // Hechos de vida e hilos: se fusionan con lo local (gana lo modificado más reciente),
-      // así una copia vieja de la nube no borra lo que Carl acaba de guardar
-      let needsPush = false;
-      const mergeKey = (storageKey, cloudList) => {
-        if (!Array.isArray(cloudList) || !cloudList.length) return;
-        let localList = [];
-        try { localList = JSON.parse(localStorage.getItem(storageKey) || "[]"); } catch (_e) {}
-        const merged = mergeLifeLists(localList, cloudList);
-        const mergedJson = JSON.stringify(merged);
-        if (mergedJson !== JSON.stringify(localList)) {
-          localStorage.setItem(storageKey, mergedJson);
-          changed = true;
-        }
-        if (mergedJson !== JSON.stringify(cloudList)) needsPush = true;
-      };
-      mergeKey(LIFE_FACTS_KEY, data.lifeFacts || data.appState?.lifeFacts);
-      mergeKey("memorycarl_open_threads", data.openThreads || data.appState?.openThreads);
-      if (needsPush) setTimeout(() => window.neurochatPushToSupabase?.(false), 500);
-
-      if (changed) {
-        if (isManual) {
-          alert("Restauración desde Supabase completada con éxito ✅");
-        }
-        rerender();
-      }
-    } catch (e) {
-      console.warn("[NeuroChat Pull Error]", e);
-      if (isManual) alert("Error de conexión al restaurar desde Supabase: " + e.message);
-    }
-  };
-
-  // Auto-pull on boot if local database is empty or on init
-  setTimeout(() => {
-    try {
-      if (window.neurochatPullFromSupabase) window.neurochatPullFromSupabase(false);
-    } catch (_e) {}
-  }, 1500);
-
-  // Auto-push on page unload / backgrounding
   if (typeof window !== "undefined" && !window.__neurochatSyncEventsAttached) {
     window.__neurochatSyncEventsAttached = true;
-    window.addEventListener("beforeunload", () => {
-      if (window.neurochatPushToSupabase) window.neurochatPushToSupabase(false);
-    });
+    // Subir al salir o pasar a segundo plano
+    window.addEventListener("beforeunload", () => schedulePush({ immediate: true }));
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden" && window.neurochatPushToSupabase) {
-        window.neurochatPushToSupabase(false);
-      }
+      if (document.visibilityState === "hidden") schedulePush({ immediate: true });
+    });
+    // Refrescar el estado de sincronización visible
+    window.addEventListener("neurochat-sync-status", () => {
+      document.querySelectorAll("[data-sync-status]").forEach((el) => { el.innerHTML = renderSyncStatus(); });
+      document.querySelectorAll("[data-sync-chip]").forEach((el) => { el.outerHTML = renderSyncChip(); });
     });
   }
 }
@@ -3389,6 +3307,12 @@ function ncCss() {
   }
   .ncLifeCardHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; }
   .ncLifeCardBtns { display: flex; gap: 6px; }
+  .ncSyncStatus { margin-top: 10px; font-size: 12px; line-height: 1.6; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+  .ncSyncOk { color: #34d399; }
+  .ncSyncWarn { color: #fbbf24; }
+  .ncSyncBad { color: #fb7185; }
+  .ncSyncMuted { opacity: .55; }
+  .ncSyncChip { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700; color: #fb7185; background: rgba(251,113,133,.12); border: 1px solid rgba(251,113,133,.35); border-radius: 8px; padding: 1px 6px; }
   .ncLifeCardList { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; opacity: .9; }
   .ncLifeCard--undone { opacity: .55; }
   .ncLifeCard--undone .ncLifeCardList { text-decoration: line-through; }
