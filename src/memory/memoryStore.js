@@ -12,6 +12,7 @@ import {
   dedupeMemoryTags,
   suggestMemoryMilestone,
 } from "./memoryNormalizer.js";
+import "../services/unlimitedStorage.js";
 import { trackListChanges } from "../services/syncOutbox.js";
 import { cloudMemoryToLocal } from "../services/cloudRestore.js";
 import { getAllNeurons } from "../neuro/neuronStore.js";

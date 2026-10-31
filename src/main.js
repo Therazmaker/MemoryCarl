@@ -350,14 +350,29 @@ try {
 
 window.__MC_VERSION__ = "invcal-v1-2026-02-24a";
 
+import { hydrateUnlimitedStorage, getStorageStats } from "./services/unlimitedStorage.js";
 import { computeMoonNow } from "./cosmic_lite.js";
 import { getTransitLiteSignals } from "./transit_lite.js";
 import { getTransitSwissSignals, swissTransitsAvailable, getSwissDailyCached, swissDailyAvailable } from "./transit_swiss.js";
 import "./finance/neuron_financiera.js";
 import "./sleep_radial_chart.js";
 import "./sleep_journal_pro.js";
+import {
+  initDbService,
+  flushOfflineQueue,
+  pullFromSupabase,
+  scheduleSync,
+  getSupabaseConfig,
+  saveSupabaseConfig,
+  getOfflineQueueCount,
+} from "./services/dbService.js";
 
 console.log("MemoryCarl loaded");
+
+// Inicializar motor unificado de sincronización de Doble Capa (Local-First + Supabase)
+setTimeout(() => {
+  try { initDbService(); } catch (e) { console.warn("[dbService] init falló:", e); }
+}, 0);
 
 // NeuroChat se inicializa al arrancar (no solo al abrir su pestaña): registra la
 // sincronización con Supabase, trae lo que falte de la nube y sube lo local.
@@ -2733,7 +2748,67 @@ function persist(){
     if(LS.financeLoanUsageLedger) save(LS.financeLoanUsageLedger, state.financeLoanUsageLedger||[]);
     if(LS.financeMeta) save(LS.financeMeta, state.financeMeta||{});
   }catch(e){}
+
+  // Disparar sincronización automática hacia la cola inteligente (dbService)
+  if (!window.__mcSuppressSync) {
+    try { scheduleSync({ immediate: false }); } catch (_e) {}
+  }
 }
+
+// Hidratar desde IndexedDB ilimitado si alguna clave pesada fue desalojada de localStorage nativo
+Promise.all([hydrateUnlimitedStorage(), mcBootstrapIdbCache()]).then(() => {
+  try {
+    let hydratedAny = false;
+    const reloadIfPresent = (lsKey, stateProp) => {
+      if (!lsKey) return;
+      const raw = localStorage.getItem(lsKey) || (mcIdbCache.has(lsKey) ? mcIdbCache.get(lsKey) : null);
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed !== null && parsed !== undefined && JSON.stringify(state[stateProp]) !== JSON.stringify(parsed)) {
+          state[stateProp] = parsed;
+          hydratedAny = true;
+        }
+      } catch (_e) {}
+    };
+
+    reloadIfPresent(LS.routines, "routines");
+    reloadIfPresent(LS.shopping, "shopping");
+    reloadIfPresent(LS.reminders, "reminders");
+    reloadIfPresent(LS.musicToday, "musicToday");
+    reloadIfPresent(LS.musicLog, "musicLog");
+    reloadIfPresent(LS.sleepLog, "sleepLog");
+    reloadIfPresent(LS.budgetMonthly, "budgetMonthly");
+    reloadIfPresent(LS.calDraw, "calDraw");
+    reloadIfPresent(LS.moodDaily, "moodDaily");
+    reloadIfPresent(LS.moodSpritesCustom, "moodSpritesCustom");
+    reloadIfPresent(LS.moodActivityCats, "moodActivityCats");
+    reloadIfPresent(LS.lifeTasks, "lifeTasks");
+    reloadIfPresent(LS.lifeTasksLog, "lifeTasksLog");
+    reloadIfPresent(LS.house, "house");
+    reloadIfPresent(LS.semana, "semana");
+    reloadIfPresent(LS.products, "products");
+    reloadIfPresent(LS.shoppingHistory, "shoppingHistory");
+    reloadIfPresent(LS.inventory, "inventory");
+    reloadIfPresent(LS.inventoryLots, "inventoryLots");
+    reloadIfPresent(LS.financeAccounts, "financeAccounts");
+    reloadIfPresent(LS.financeDebts, "financeDebts");
+    reloadIfPresent(LS.financeCommitments, "financeCommitments");
+    reloadIfPresent(LS.financeObligations, "financeObligations");
+    reloadIfPresent(LS.financePaymentSources, "financePaymentSources");
+    reloadIfPresent(LS.financeCommitmentTemplates, "financeCommitmentTemplates");
+    reloadIfPresent(LS.financeCommitmentInstances, "financeCommitmentInstances");
+    reloadIfPresent(LS.financeLoanUsageLedger, "financeLoanUsageLedger");
+    reloadIfPresent(LS.financeMeta, "financeMeta");
+
+    if (hydratedAny && typeof view === "function") {
+      try { financeRecomputeBalances(); } catch (_e) {}
+      view();
+    }
+  } catch (err) {
+    console.warn("[unlimitedStorage] Error rehidratando state:", err);
+  }
+});
 
 function exposeWeekCtx(){
   window.state = state;
@@ -3388,15 +3463,37 @@ function view(){
 
     const semanaKeyInp = root.querySelector("#semanaGeminiApiKey");
 
-    // ── Supabase Sync buttons ────────────────────────────────
+    // ── Supabase Sync buttons (Motor Doble Capa dbService.js) ────────────
     const btnSaveKey = root.querySelector("#supabaseSaveKey");
     if (btnSaveKey) {
-      btnSaveKey.addEventListener("click", () => {
-        const inp = root.querySelector("#supabaseApiKeyInput");
-        const k = (inp?.value || "").trim();
-        setSyncApiKey(k);
+      btnSaveKey.addEventListener("click", async () => {
+        const urlInp = root.querySelector("#supabaseUrlInput");
+        const anonInp = root.querySelector("#supabaseAnonKeyInput");
+        const apiInp = root.querySelector("#supabaseApiKeyInput");
+
+        const supabaseUrl = (urlInp?.value || "").trim();
+        const supabaseAnonKey = (anonInp?.value || "").trim();
+        const apiKey = (apiInp?.value || "").trim();
+
+        saveSupabaseConfig({ supabaseUrl, supabaseAnonKey, apiKey });
+        setSyncApiKey(apiKey || supabaseAnonKey);
         view();
-        try { if(typeof toast === "function") toast(k ? "🔑 API Key guardada ✅" : "🗑️ API Key eliminada"); } catch(e) {}
+        try {
+          if (typeof toast === "function") {
+            toast(
+              supabaseUrl && supabaseAnonKey
+                ? "🟢 Conexión directa a Supabase guardada ✅"
+                : apiKey
+                ? "🔑 API Key guardada ✅"
+                : "🗑️ Configuración de Supabase limpiada"
+            );
+          }
+        } catch (_e) {}
+
+        if ((supabaseUrl && supabaseAnonKey) || apiKey) {
+          await pullFromSupabase({ isManual: false });
+          await flushOfflineQueue({ isManual: true, forceAll: true });
+        }
       });
     }
 
@@ -3420,7 +3517,7 @@ function view(){
         window.financeCheckSupabase();
       });
     }
-    // ────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
 
     const btnSemanaKeySave = root.querySelector("#btnSemanaGeminiSave");
@@ -5360,26 +5457,41 @@ function viewSettings(){
     <div class="card" style="border:1px solid rgba(52,211,153,.3);background:rgba(52,211,153,.04);">
       <div class="cardTop">
         <div>
-          <h2 class="cardTitle">☁️ Sincronización con Supabase</h2>
-          <div class="small">Guarda tus finanzas en la nube para que nunca se pierdan.</div>
+          <h2 class="cardTitle">☁️ Sincronización con Supabase (Doble Capa)</h2>
+          <div class="small">Local-First + Nube Instantánea • Cola Offline Inteligente (${getOfflineQueueCount()} pendientes)</div>
+          <div class="small" style="color:#34d399;margin-top:2px;">💾 Memoria Ilimitada (IndexedDB): ${getStorageStats().totalMB} MB en uso • localStorage libre (${getStorageStats().nativeLocalStorageKB} KB / 5000 KB)</div>
         </div>
         <div id="supabaseSyncStatus" class="chip" style="background:rgba(52,211,153,.15);color:#34d399;">
-          ${getSyncApiKey() ? '🟢 Key activa' : '⚪ Sin key'}
+          ${getSupabaseConfig().hasDirectSupabase ? '🟢 Directo Activo' : getSupabaseConfig().hasApiSync ? '🟢 API Activa' : '⚪ Sin configurar'}
         </div>
       </div>
       <div class="hr"></div>
 
-      <div style="margin-bottom:10px;">
-        <div class="k" style="font-size:12px;color:#64748b;margin-bottom:6px;">API Key del servidor (la misma que configuraste en Vercel):</div>
-        <div style="display:flex;gap:8px;">
-          <input id="supabaseApiKeyInput" type="password" placeholder="Tu API Key..." 
-            value="${getSyncApiKey()}"
-            style="flex:1;padding:10px;background:#0f172a;border:1px solid rgba(52,211,153,.3);border-radius:8px;color:#e2e8f0;font-size:13px;font-family:monospace;" />
-          <button id="supabaseSaveKey" style="padding:10px 16px;background:linear-gradient(135deg,#34d399,#059669);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;white-space:nowrap;">
-            Guardar
-          </button>
+      <div style="margin-bottom:10px;display:flex;flex-direction:column;gap:8px;">
+        <div>
+          <div class="k" style="font-size:12px;color:#94a3b8;margin-bottom:4px;">1. Supabase Project URL (NEXT_PUBLIC_SUPABASE_URL):</div>
+          <input id="supabaseUrlInput" type="text" placeholder="https://tu-proyecto.supabase.co"
+            value="${getSupabaseConfig().supabaseUrl || ''}"
+            style="width:100%;padding:10px;background:#0f172a;border:1px solid rgba(52,211,153,.3);border-radius:8px;color:#e2e8f0;font-size:13px;font-family:monospace;" />
         </div>
-        <div style="font-size:11px;color:#475569;margin-top:4px;">Esta key protege tu servidor. La encuentras en el panel de Vercel &gt; Environment Variables &gt; API_SECRET_KEY</div>
+        <div>
+          <div class="k" style="font-size:12px;color:#94a3b8;margin-bottom:4px;">2. Supabase Anon Public Key (NEXT_PUBLIC_SUPABASE_ANON_KEY):</div>
+          <input id="supabaseAnonKeyInput" type="password" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            value="${getSupabaseConfig().supabaseAnonKey || ''}"
+            style="width:100%;padding:10px;background:#0f172a;border:1px solid rgba(52,211,153,.3);border-radius:8px;color:#e2e8f0;font-size:13px;font-family:monospace;" />
+        </div>
+        <details style="margin-top:2px;">
+          <summary style="font-size:11px;color:#64748b;cursor:pointer;">Opcional: API_SECRET_KEY del servidor Vercel</summary>
+          <input id="supabaseApiKeyInput" type="password" placeholder="API_SECRET_KEY (opcional)..." 
+            value="${getSyncApiKey()}"
+            style="width:100%;margin-top:6px;padding:8px;background:#0f172a;border:1px solid rgba(148,163,184,.25);border-radius:8px;color:#e2e8f0;font-size:12px;font-family:monospace;" />
+        </details>
+        <button id="supabaseSaveKey" style="padding:10px 16px;background:linear-gradient(135deg,#34d399,#059669);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;">
+          💾 Guardar y Sincronizar Ahora
+        </button>
+        <div style="font-size:11px;color:#64748b;">
+          💡 Si ya configuraste <code>NEXT_PUBLIC_SUPABASE_URL</code> y <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> en Vercel, se autodetectan solos. También puedes pegarlos aquí para conexión directa instantánea desde cualquier dispositivo.
+        </div>
       </div>
 
       <div class="btnRow" style="gap:8px;flex-wrap:wrap;">
@@ -26542,301 +26654,126 @@ window.financeRestoreFromIDB = function(hourKey) {
   };
 };
 
-// ─── SUPABASE CLOUD SYNC SYSTEM ──────────────────────────────────────
+// ─── SUPABASE CLOUD SYNC SYSTEM (MOTOR DOBLE CAPA: dbService.js) ─────
 window.financePushToSupabase = async function(isManual = false) {
   try {
-    const key = getSyncApiKey();
-    if (!key) {
-      // Antes se saltaba en silencio: ahora queda constancia en la consola de la app
-      if (isManual) toast("⚠️ Sync no configurado (falta API Key)");
-      if (window.__mcLogs && !window.__mcSyncNoKeyLogged) {
-        window.__mcSyncNoKeyLogged = true;
-        window.__mcLogs.push({ time: new Date().toLocaleTimeString('es-PE'), type: "error", text: "☁️ Supabase: no se sincroniza porque falta la API Key (Configuración → Sync)" });
-      }
-      return;
+    if (isManual) toast("📤 Sincronizando con Supabase...");
+    const result = await flushOfflineQueue({ isManual, forceAll: isManual });
+    if (result?.offline) {
+      if (isManual) toast(`⚡ Sin internet: guardado en cola local (${result.pending || 0} pendientes)`);
+      return result;
     }
-
-    if (isManual) toast("📤 Enviando copia a Supabase...");
-
+    if (!result?.ok) {
+      if (isManual) toast("❌ Error al sincronizar: " + (result?.message || "Verifica tu configuración"));
+      return result;
+    }
     const ledgerCount = (state.financeLedger || []).length;
     const activeCount = (state.financeLedger || []).filter(e => !e.archived).length;
-
-    const payload = {
-      appState: {
-        financeLedger: state.financeLedger || [],
-        financeAccounts: state.financeAccounts || [],
-        financeTransactions: JSON.parse(localStorage.getItem('memorycarl_v2_finance_transactions') || '[]'),
-        financeResetAt: state.financeResetAt || null,
-        financeDebts: state.financeDebts || [],
-        financeEntryCategories: state.financeEntryCategories || [],
-        sleepLog: state.sleepLog || [],
-        moodDaily: state.moodDaily || {}
-      }
-    };
-
-    console.log("Finance Push Payload Sample (first 3 entries):", (state.financeLedger || []).slice(0, 3));
-
-    const res = await fetch('https://memory-carl.vercel.app/api/sync', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const ts = new Date().toLocaleTimeString('es-PE');
-    if (!res.ok) {
-      const errText = `HTTP ${res.status} · ${await res.text()}`;
-      console.warn("Supabase Sync Failed:", errText);
-      if (window.__mcLogs) {
-        window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Sync Error: ${errText.slice(0, 60)}` });
-      }
-      // Always show error (manual or not) so user knows sync is failing
-      toast("❌ Error al sincronizar: " + errText.slice(0, 60));
-    } else {
-      console.log("Supabase Sync Successful");
-      const json = await res.json().catch(() => null);
-      if (json?.data?.sleepError) {
-        toast("⚠️ Error guardando sueño: " + json.data.sleepError);
-      }
-      if (json?.data?.moodError) {
-        toast("⚠️ Error guardando mood: " + json.data.moodError);
-      }
-      if (Array.isArray(json?.data?.errors) && json.data.errors.length) {
-        const msg = json.data.errors.join(" · ");
-        if (window.__mcLogs) window.__mcLogs.push({ time: ts, type: "error", text: `☁️ Supabase guardó con errores: ${msg.slice(0, 160)}` });
-        toast("⚠️ Supabase guardó con errores: " + msg.slice(0, 60));
-        return; // no se informa como éxito si algo no se guardó
-      }
-      if (window.__mcLogs) {
-        window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Sincronización exitosa: ${activeCount} activos enviados` });
-      }
-      if (isManual) toast(`✅ Guardado en la nube: ${activeCount} activos / ${ledgerCount} total`);
+    if (isManual) {
+      toast(`✅ Sincronizado con Supabase (${activeCount} movimientos activos / ${ledgerCount} total)`);
     }
-  } catch(e) {
-    const ts = new Date().toLocaleTimeString('es-PE');
-    console.error("Supabase Sync Error:", e);
-    if (window.__mcLogs) {
-      window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Sync Conn Error: ${e.message}` });
-    }
-    if (isManual) toast("❌ Error de conexión al sincronizar");
-  }
-};
-
-window.financeCheckSupabase = async function() {
-  try {
-    const key = getSyncApiKey();
-    if (!key) {
-      alert("⚠️ No tienes API Key configurada para la sincronización.\n\nVe a Configuración > Sync y pon tu API Key.");
-      return;
-    }
-
-    toast("🔍 Verificando datos en la nube...");
-
-    const res = await fetch('https://memory-carl.vercel.app/api/restore', {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${key}` }
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      alert("❌ Error al conectar con Supabase:\n\n" + errText);
-      return;
-    }
-
-    const json = await res.json();
-    const appState = json?.data?.appState;
-
-    // Build summary
-    const d = document.createElement('div');
-    d.style.cssText = 'position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.85);display:flex;align-items:flex-end;justify-content:center;padding:16px;';
-
-    if (!appState || (!appState.financeLedger && !appState.financeAccounts)) {
-      d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:24px;width:100%;max-width:440px;">
-        <div style="font-size:16px;font-weight:700;color:#fb7185;margin-bottom:8px;">☁️ Sin datos financieros en la nube</div>
-        <div style="font-size:13px;color:#94a3b8;margin-bottom:16px;">No se encontró ningún backup de finanzas en tu base de datos de Supabase. Pulsa el botón de abajo para subir tus datos locales actuales.</div>
-        <div style="display:flex;gap:10px;">
-          <button onclick="window.financePushToSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:12px;background:#7c5cff;border:none;color:#fff;font-weight:bold;border-radius:10px;cursor:pointer;">📤 Subir mis datos</button>
-          <button onclick="this.closest('div').parentElement.remove()" style="padding:12px 20px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:10px;cursor:pointer;">Cerrar</button>
-        </div>
-      </div>`;
-    } else {
-      const ledger = appState.financeLedger || [];
-      const accounts = appState.financeAccounts || [];
-      const active = ledger.filter(e => !e.archived).length;
-      const archived = ledger.filter(e => e.archived).length;
-      const dates = ledger.map(e => e.date).filter(Boolean).sort();
-      const oldest = dates[0] || '—';
-      const newest = dates[dates.length-1] || '—';
-      const localCount = (state.financeLedger || []).length;
-      const cloudCount = ledger.length;
-      const diff = cloudCount - localCount;
-      const diffLabel = diff > 0 ? `<span style="color:#34d399">+${diff} más en la nube</span>` :
-                        diff < 0 ? `<span style="color:#fb7185">${Math.abs(diff)} más en local</span>` :
-                        `<span style="color:#34d399">✅ Sincronizados</span>`;
-
-      d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:20px;width:100%;max-width:440px;">
-        <div style="font-size:16px;font-weight:700;color:#34d399;margin-bottom:4px;">☁️ Estado en Supabase</div>
-        <div style="font-size:11px;color:#64748b;margin-bottom:16px;">Datos actualmente guardados en la nube</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-          <div style="background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.2);border-radius:10px;padding:12px;text-align:center;">
-            <div style="font-size:26px;font-weight:800;color:#34d399;">${active}</div>
-            <div style="font-size:11px;color:#94a3b8;">Activos en nube</div>
-          </div>
-          <div style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:10px;padding:12px;text-align:center;">
-            <div style="font-size:26px;font-weight:800;color:#818cf8;">${cloudCount}</div>
-            <div style="font-size:11px;color:#94a3b8;">Total en nube</div>
-          </div>
-        </div>
-        <div style="font-size:12px;color:#94a3b8;line-height:2;background:rgba(15,23,42,.4);border-radius:8px;padding:10px;">
-          <div>📅 Más antiguo: <strong style="color:#e2e8f0">${oldest}</strong></div>
-          <div>📅 Más reciente: <strong style="color:#e2e8f0">${newest}</strong></div>
-          <div>🏦 Cuentas guardadas: <strong style="color:#e2e8f0">${accounts.length}</strong></div>
-          <div>🗃️ Archivados: <strong style="color:#fbbf24">${archived}</strong></div>
-          <div>📱 Local vs ☁️ Nube: ${diffLabel}</div>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:12px;">
-          <button onclick="window.financePullFromSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:10px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">📥 Importar a Local</button>
-          <button onclick="this.closest('div').parentElement.remove()" style="flex:1;padding:10px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:12px;">Cerrar</button>
-        </div>
-      </div>`;
-    }
-
-    document.body.appendChild(d);
-    d.addEventListener('click', ev => { if(ev.target === d) d.remove(); });
-
-  } catch(e) {
-    console.error("Check Supabase Error:", e);
-    alert("❌ Error al verificar Supabase:\n" + e.message);
+    return result;
+  } catch (e) {
+    console.error("[dbService] Push error:", e);
+    if (isManual) toast("❌ Error al sincronizar: " + e.message);
   }
 };
 
 window.financePullFromSupabase = async function(isManual = false) {
   try {
-    // Esperar a que finance_v2_state termine de cargar desde IndexedDB: si no, el ledger local
-    // parece vacío y el pull automático lo sobreescribiría con la nube.
-    if (window.FINANCE && window.FINANCE.ready) {
-      try { await window.FINANCE.ready; } catch (_e) {}
+    if (isManual) toast("📥 Sincronizando desde Supabase...");
+    const res = await pullFromSupabase({ isManual });
+    if (!res?.ok) {
+      if (isManual) toast("⚠️ " + (res?.message || "No se pudo descargar desde Supabase"));
+      return res;
     }
-    const key = getSyncApiKey();
-    if (!key) {
-      if (isManual) toast("⚠️ Sync no configurado (falta API Key)");
-      return;
+    try { financeRecomputeBalances(); } catch (_e) {}
+    view();
+    if (isManual) {
+      const a = res.added || {};
+      const totalAdded = (a.accounts || 0) + (a.ledger || 0) + (a.neurons || 0) + (a.memories || 0) + (a.days || 0);
+      toast(
+        res.changed
+          ? `✅ Sincronizado desde la nube (+${totalAdded} registros fusionados sin pisar datos locales)`
+          : "✅ Todo al día con Supabase"
+      );
     }
-
-    if (isManual) toast("📥 Buscando datos en la nube...");
-    console.log("Checking Supabase cloud state...");
-    const res = await fetch('https://memory-carl.vercel.app/api/restore', {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${key}`
-      }
-    });
-
-    const ts = new Date().toLocaleTimeString('es-PE');
-    if (!res.ok) {
-      console.warn("Supabase Pull Failed:", await res.text());
-      if (window.__mcLogs) {
-        window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Pull Failed` });
-      }
-      if (isManual) toast("❌ Error al descargar desde Supabase");
-      return;
-    }
-
-    const json = await res.json();
-    const appState = json?.data?.appState;
-    if (appState) {
-      let nonFinanceChanged = false;
-      if (Array.isArray(appState.sleepLog) && appState.sleepLog.length > 0) {
-        if (!Array.isArray(state.sleepLog)) state.sleepLog = [];
-        const localSleepIds = new Set(state.sleepLog.map(s => String(s.id)));
-        appState.sleepLog.forEach(s => {
-          if (s && s.id !== undefined && s.id !== null && !localSleepIds.has(String(s.id))) {
-            state.sleepLog.push(s);
-            localSleepIds.add(String(s.id));
-            nonFinanceChanged = true;
-          }
-        });
-      }
-
-      if (appState.moodDaily && typeof appState.moodDaily === 'object') {
-        if (!state.moodDaily || typeof state.moodDaily !== 'object') state.moodDaily = {};
-        Object.entries(appState.moodDaily).forEach(([dateKey, val]) => {
-          if (val && state.moodDaily[dateKey] === undefined) {
-            state.moodDaily[dateKey] = val;
-            nonFinanceChanged = true;
-          }
-        });
-      }
-
-      if (nonFinanceChanged) {
-        const _tmpPush = window.financePushToSupabase;
-        window.financePushToSupabase = null;
-        persist();
-        window.financePushToSupabase = _tmpPush;
-        view();
-      }
-    }
-
-    if (appState && (appState.financeLedger || appState.financeAccounts)) {
-      const localLedgerCount = (state.financeLedger || []).length;
-      const cloudLedgerCount = (appState.financeLedger || []).length;
-      
-      let shouldImport = false;
-      if (isManual) {
-        shouldImport = confirm(`☁️ Datos encontrados en la nube:\n\n` + 
-          `- Movimientos en Nube: ${cloudLedgerCount}\n` + 
-          `- Movimientos en Local: ${localLedgerCount}\n\n` + 
-          `¿Deseas sobreescribir tus datos locales con los de la nube? (Recomendado solo si tu móvil se limpió o deseas restaurar un backup anterior)`);
-      } else {
-        // Auto-pull on boot only imports if local database is completely empty (fresh install / cleared cache)
-        // to avoid resurrecting deleted movements or overriding recent local deletions
-        shouldImport = (localLedgerCount === 0 && cloudLedgerCount > 0);
-      }
-
-      if (shouldImport) {
-        state.financeLedger = appState.financeLedger || [];
-        state.financeAccounts = appState.financeAccounts || [];
-        if (appState.financeEntryCategories && appState.financeEntryCategories.length > 0) {
-          state.financeEntryCategories = appState.financeEntryCategories;
-        }
-        if (appState.financeTransactions) {
-          try {
-            localStorage.setItem('memorycarl_v2_finance_transactions', JSON.stringify(appState.financeTransactions));
-          } catch(storageErr) {
-            console.warn('Storage quota exceeded saving financeTransactions backup, continuing without it:', storageErr);
-          }
-        }
-
-        financeRecomputeBalances();
-        
-        // Save to localStorage without triggering a recursive push
-        const _tmpPush = window.financePushToSupabase;
-        window.financePushToSupabase = null;
-        persist();
-        window.financePushToSupabase = _tmpPush;
-        view();
-
-        if (window.__mcLogs) {
-          window.__mcLogs.push({ time: ts, type: "info", text: `☁️ Descarga exitosa: ${cloudLedgerCount} movimientos restaurados` });
-        }
-        toast('☁️ Finanzas sincronizadas desde Supabase');
-      } else {
-        if (isManual) toast("Sincronización cancelada o sin cambios");
-      }
-    } else {
-      if (isManual) toast("ℹ️ Sin datos financieros en la nube todavía");
-    }
-  } catch(e) {
-    const ts = new Date().toLocaleTimeString('es-PE');
-    console.error("Supabase Pull Error:", e);
-    if (window.__mcLogs) {
-      window.__mcLogs.push({ time: ts, type: "error", text: `Supabase Pull Conn Error: ${e.message}` });
-    }
-    if (isManual) toast("❌ Error de conexión al descargar");
+    return res;
+  } catch (e) {
+    console.error("[dbService] Pull error:", e);
+    if (isManual) toast("❌ Error al descargar desde Supabase");
   }
 };
+
+window.financeCheckSupabase = async function() {
+  try {
+    toast("🔍 Consultando estado en Supabase...");
+    const res = await pullFromSupabase({ isManual: false });
+    if (!res?.ok) {
+      alert("❌ No se pudo conectar con Supabase:\n\n" + (res?.message || "Revisa tu URL y Anon Key en Ajustes."));
+      return;
+    }
+
+    const cloud = res.cloud || {};
+    const ledger = cloud.ledger || [];
+    const accounts = cloud.accounts || [];
+    const neurons = cloud.neurons || [];
+    const days = cloud.days || [];
+    const pendingQueue = getOfflineQueueCount();
+    const cfg = getSupabaseConfig();
+
+    const active = ledger.filter(e => !e.archived).length;
+    const localCount = (state.financeLedger || []).length;
+    const cloudCount = ledger.length;
+
+    const d = document.createElement("div");
+    d.style.cssText = "position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.85);display:flex;align-items:flex-end;justify-content:center;padding:16px;";
+    d.innerHTML = `<div style="background:#1e293b;border-radius:20px 20px 16px 16px;padding:20px;width:100%;max-width:440px;">
+      <div style="font-size:16px;font-weight:700;color:#34d399;margin-bottom:4px;">☁️ Estado en Supabase (${cfg.hasDirectSupabase ? "Conexión Directa" : "Vía API"})</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:16px;">Arquitectura Doble Capa • Local-First + Nube</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+        <div style="background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.2);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:24px;font-weight:800;color:#34d399;">${cloudCount}</div>
+          <div style="font-size:11px;color:#94a3b8;">Movimientos (${active} activos)</div>
+        </div>
+        <div style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:24px;font-weight:800;color:#818cf8;">${neurons.length}</div>
+          <div style="font-size:11px;color:#94a3b8;">Neuronas (${days.length} días)</div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:#94a3b8;line-height:2;background:rgba(15,23,42,.4);border-radius:8px;padding:10px;">
+        <div>🏦 Cuentas en nube: <strong style="color:#e2e8f0">${accounts.length}</strong></div>
+        <div>📱 Movimientos en local: <strong style="color:#e2e8f0">${localCount}</strong></div>
+        <div>⚡ Cola Offline pendiente: <strong style="color:${pendingQueue > 0 ? '#fbbf24' : '#34d399'}">${pendingQueue} cambio(s)</strong></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button onclick="window.financePushToSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:10px;background:rgba(99,102,241,.2);color:#a5b4fc;border:1px solid rgba(99,102,241,.35);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">📤 Subir Todo</button>
+        <button onclick="window.financePullFromSupabase(true); this.closest('div').parentElement.remove();" style="flex:1;padding:10px;background:rgba(52,211,153,.15);color:#34d399;border:1px solid rgba(52,211,153,.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:700;">📥 Fusionar Nube</button>
+        <button onclick="this.closest('div').parentElement.remove()" style="padding:10px 14px;background:rgba(148,163,184,.1);border:none;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:12px;">Cerrar</button>
+      </div>
+    </div>`;
+
+    document.body.appendChild(d);
+    d.addEventListener("click", ev => { if (ev.target === d) d.remove(); });
+  } catch (e) {
+    console.error("Check Supabase Error:", e);
+    alert("❌ Error al verificar Supabase:\n" + e.message);
+  }
+};
+
+/* =====================================================================================
+ * CÓDIGO ANTERIOR DE SINCRONIZACIÓN COMENTADO (REFERENCIA HISTÓRICA)
+ * Reemplazado por `src/services/dbService.js` (Doble Capa + memorycarl_offline_queue)
+ * =====================================================================================
+ * window.financePushToSupabase_LEGACY = async function(isManual = false) {
+ *   // Antes enviaba todo el ledger completo en un único POST a https://memory-carl.vercel.app/api/sync
+ *   // sin cola offline, sin soporte directo a Supabase y pisando app_state de NeuroChat.
+ * };
+ * window.financePullFromSupabase_LEGACY = async function(isManual = false) {
+ *   // Antes solo importaba al arrancar si localLedgerCount === 0, o pedía confirm() destructivo
+ *   // que sobreescribía los movimientos locales.
+ * };
+ * ===================================================================================== */
 
 // Initialize Music UI & Player Mini Bar
 try {
@@ -26849,10 +26786,3 @@ try {
 } catch (e) {
   console.warn("Music UI initialization warning:", e);
 }
-
-// Auto-trigger pull when app boots up
-setTimeout(() => {
-  try {
-    window.financePullFromSupabase();
-  } catch(err) {}
-}, 2000);

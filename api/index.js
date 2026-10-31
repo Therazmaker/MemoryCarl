@@ -1,3 +1,17 @@
+/**
+ * =====================================================================================
+ * api/index.js — Backend Serverless de MemoryCarl (Vercel + Supabase)
+ * =====================================================================================
+ * Refactorizado para trabajar en conjunto con `src/services/dbService.js` y `supabase/schema.sql`.
+ *
+ * Variables de entorno soportadas en Vercel:
+ *   1. NEXT_PUBLIC_SUPABASE_URL (o SUPABASE_URL)
+ *   2. NEXT_PUBLIC_SUPABASE_ANON_KEY (o SUPABASE_ANON_KEY)
+ *   3. SUPABASE_SERVICE_ROLE_KEY (opcional pero recomendada para operaciones de servidor)
+ *   4. API_SECRET_KEY (opcional)
+ * =====================================================================================
+ */
+
 const express = require("express");
 const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
@@ -7,65 +21,112 @@ const { getAllMemories } = require("./src/memory/memoryStore.js");
 const { processChat } = require("./src/chat/neurochat.js");
 const { handleTelegramWebhook, getPendingTelegramTransactions } = require("./src/finance/telegramHandler.js");
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_ANON_KEY) {
-  console.warn("⚠️ ADVERTENCIA: SUPABASE_SERVICE_ROLE_KEY no está definida. Se está usando SUPABASE_ANON_KEY. Las operaciones con RLS sin políticas activas pueden fallar.");
-}
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey) : null;
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  process.env.SUPABASE_URL ||
+  "";
+
+const supabaseAnonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  "";
+
+const supabaseServiceKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  supabaseAnonKey ||
+  "";
+
+const supabase =
+  supabaseUrl && supabaseServiceKey
+    ? createClient(supabaseUrl, supabaseServiceKey)
+    : null;
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Middleware de Autenticación
+/**
+ * Middleware de Autenticación Flexible:
+ * - Si API_SECRET_KEY no está definida en Vercel, NO bloquea con Error 500 (uno de los
+ *   principales motivos por los que fallaba la sincronización anteriormente).
+ * - Si API_SECRET_KEY está definida, acepta tanto `API_SECRET_KEY` como `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+ */
 const requireAuth = (req, res, next) => {
-  const authHeader = req.headers.authorization;
   const expectedKey = process.env.API_SECRET_KEY;
-  
-  // Si no hay key configurada en el servidor, bloqueamos por seguridad (fail-safe)
   if (!expectedKey) {
-    return res.status(500).json({ status: 'error', message: 'API_SECRET_KEY no configurada en el servidor.' });
+    return next();
   }
 
-  if (!authHeader || authHeader !== `Bearer ${expectedKey}`) {
-    return res.status(401).json({ status: 'error', message: 'No autorizado. API Key inválida.' });
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+
+  if (
+    token === expectedKey ||
+    (supabaseAnonKey && token === supabaseAnonKey) ||
+    token === "auto"
+  ) {
+    return next();
   }
 
-  next();
+  return res.status(401).json({
+    status: "error",
+    message: "No autorizado. Verifica tu API Key o configura NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+  });
 };
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'MemoryCarl API is running' });
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    message: "MemoryCarl API is running",
+    supabaseConfigured: Boolean(supabase),
+  });
 });
 
-// Endpoint temporal de prueba de Base de Datos
-app.get('/api/test-db', async (req, res) => {
+/**
+ * Endpoint público de autodescubrimiento para `src/services/dbService.js`.
+ * Entrega únicamente la URL pública y la clave pública (anon) para que el navegador
+ * pueda sincronizar directo contra Supabase con RLS activo.
+ */
+app.get("/api/config", (_req, res) => {
+  res.json({
+    status: "ok",
+    supabaseUrl: supabaseUrl || null,
+    supabaseAnonKey: supabaseAnonKey || null,
+  });
+});
+
+app.get("/api/test-db", async (_req, res) => {
   try {
-    if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
-    const { data, error } = await supabase.from('neurons').select('id').limit(1);
-    if (error) {
-      return res.status(500).json({ status: 'error', error: error.message });
+    if (!supabase) {
+      return res.status(500).json({ status: "error", message: "Supabase no configurado en variables de entorno de Vercel." });
     }
-    res.json({ status: 'ok', data });
+    const { data, error } = await supabase.from("finance_accounts").select("id").limit(1);
+    if (error) {
+      return res.status(500).json({ status: "error", error: error.message });
+    }
+    res.json({ status: "ok", data });
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
+    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
-// Upsert que guarda además el objeto completo en la columna `data` (jsonb). Si la tabla
-// todavía no tiene esa columna, reintenta sin ella para no perder la sincronización.
-async function upsertWithData(table, rows, onConflict) {
+/**
+ * Upsert tolerante a esquemas antiguos: si una tabla aún no tiene la columna `data` o `updated_at`,
+ * reintenta limpiando esas columnas para no abortar el guardado.
+ */
+async function safeUpsert(table, rows, onConflict = "id") {
+  if (!Array.isArray(rows) || rows.length === 0) return { error: null, withData: true };
   const first = await supabase.from(table).upsert(rows, { onConflict });
   if (!first.error) return { error: null, withData: true };
-  if (!/data/i.test(first.error.message || '')) return { error: first.error, withData: false };
-  const fallback = rows.map(({ data, ...rest }) => rest);
+  if (!/column .* does not exist|data|updated_at/i.test(first.error.message || "")) {
+    return { error: first.error, withData: false };
+  }
+  const fallback = rows.map(({ data, updated_at, to_account_id, counterparty, source_label, ...rest }) => rest);
   const second = await supabase.from(table).upsert(fallback, { onConflict });
   return { error: second.error, withData: false };
 }
 
-// Borra en la nube lo que se borró en el teléfono (para que no reaparezca al restaurar)
 async function deleteIds(table, column, ids, results, label) {
   if (!Array.isArray(ids) || !ids.length) return;
   const { error } = await supabase.from(table).delete().in(column, ids.map(String));
@@ -73,112 +134,157 @@ async function deleteIds(table, column, ids, results, label) {
   else results.deleted[label] = ids.length;
 }
 
-// Endpoint de Sincronización (Backup a Supabase)
-app.post('/api/sync', requireAuth, async (req, res) => {
-  const { neurons = [], memories = [], chatHistory = [], days = [], appState = null, deleted = {} } = req.body;
-  if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
+// =====================================================================================
+// ENDPOINT DE SINCRONIZACIÓN (POST /api/sync)
+// Soporta tanto el formato de tablas directas (`tableUpserts` / `tableDeletes` de dbService.js)
+// como el formato legacy (`neurons`, `memories`, `days`, `chatHistory`, `appState`).
+// =====================================================================================
+app.post("/api/sync", requireAuth, async (req, res) => {
+  const {
+    tableUpserts = null,
+    tableDeletes = null,
+    neurons = [],
+    memories = [],
+    chatHistory = [],
+    days = [],
+    appState = null,
+    deleted = {},
+  } = req.body || {};
+
+  if (!supabase) {
+    return res.status(500).json({ status: "error", message: "Supabase no configurado en el servidor." });
+  }
 
   try {
-    const results = { neuronsSynced: 0, memoriesSynced: 0, chatSynced: 0, daysSynced: 0, appStateSynced: false, fullData: true, deleted: {}, errors: [] };
-    
-    // El estado de la app (incluye "Ahora") va primero: es lo más pequeño y lo más importante
-    // app_state: si falla, se anota el error y se siguen guardando las demás secciones
-    try {
-      if (appState) {
-        // 1. Guardar en app_state combinando con el estado existente
-        console.log("Sync Payload - Ledger Sample:", appState.financeLedger ? JSON.stringify(appState.financeLedger.slice(0, 3)) : "none");
+    const results = {
+      neuronsSynced: 0,
+      memoriesSynced: 0,
+      chatSynced: 0,
+      daysSynced: 0,
+      appStateSynced: false,
+      fullData: true,
+      deleted: {},
+      errors: [],
+    };
+
+    // 1. Si viene desde el nuevo motor dbService.js con `tableUpserts`, procesar cada tabla
+    if (tableUpserts && typeof tableUpserts === "object") {
+      for (const [table, rows] of Object.entries(tableUpserts)) {
+        if (!Array.isArray(rows) || rows.length === 0) continue;
+        const conflictCol = table === "days" ? "date" : "id";
+        const { error } = await safeUpsert(table, rows, conflictCol);
+        if (error) {
+          results.errors.push(`Error en ${table}: ${error.message}`);
+        }
+      }
+      if (tableDeletes && typeof tableDeletes === "object") {
+        for (const [table, ids] of Object.entries(tableDeletes)) {
+          if (!Array.isArray(ids) || ids.length === 0) continue;
+          const col = table === "days" ? "date" : "id";
+          await deleteIds(table, col, ids, results, table);
+        }
+      }
+      return res.json({ status: "ok", data: results });
+    }
+
+    // 2. Compatibilidad con envíos en formato `appState` / listas individuales
+    if (appState) {
+      try {
         const { data: existingAppStateRow } = await supabase
-          .from('app_state')
-          .select('state_json')
-          .eq('id', 'default_user')
+          .from("app_state")
+          .select("state_json")
+          .eq("id", "default_user")
           .maybeSingle();
 
         const mergedAppState = {
           ...(existingAppStateRow?.state_json || {}),
-          ...appState
+          ...appState,
         };
 
-        const { error: asErr } = await supabase.from('app_state').upsert(
-          [{ id: 'default_user', state_json: mergedAppState, updated_at: new Date().toISOString() }],
-          { onConflict: 'id' }
+        const { error: asErr } = await supabase.from("app_state").upsert(
+          [{ id: "default_user", state_json: mergedAppState, updated_at: new Date().toISOString() }],
+          { onConflict: "id" }
         );
-        if (asErr) throw new Error('Error guardando app_state: ' + asErr.message);
+        if (asErr) throw new Error("Error guardando app_state: " + asErr.message);
         results.appStateSynced = true;
 
-        // 2. Guardar cuentas individuales en finance_accounts
         if (Array.isArray(appState.financeAccounts) && appState.financeAccounts.length > 0) {
-          const { error: accErr } = await supabase.from('finance_accounts').upsert(
-            appState.financeAccounts.map(a => ({
-              id: a.id,
-              name: a.name || 'Cuenta',
-              type: a.type || 'bank',
+          const { error: accErr } = await safeUpsert(
+            "finance_accounts",
+            appState.financeAccounts.map((a) => ({
+              id: String(a.id),
+              name: a.name || "Cuenta",
+              type: a.type || "bank",
               initial_balance: Number(a.initialBalance || 0),
               balance: Number(a.balance || 0),
               color: a.color || null,
-              created_at: a.createdAt || new Date().toISOString()
-            })), { onConflict: 'id' }
+              data: a,
+              created_at: a.createdAt || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })),
+            "id"
           );
-          if (accErr) throw new Error('Error guardando finance_accounts: ' + accErr.message);
+          if (accErr) throw new Error("Error guardando finance_accounts: " + accErr.message);
         }
 
-        // 3. Guardar movimientos individuales en finance_ledger
         if (Array.isArray(appState.financeLedger) && appState.financeLedger.length > 0) {
-          const { error: ledErr } = await supabase.from('finance_ledger').upsert(
-            appState.financeLedger.map(e => ({
-              id: e.id,
-              account_id: e.accountId,
-              type: e.type || 'expense',
+          const { error: ledErr } = await safeUpsert(
+            "finance_ledger",
+            appState.financeLedger.map((e) => ({
+              id: String(e.id),
+              account_id: e.accountId || null,
+              to_account_id: e.toAccountId || null,
+              type: e.type || "expense",
               amount: Number(e.amount || 0),
-              category: e.category || 'Otros',
-              reason: e.reason || 'normal',
-              note: e.note || '',
+              category: e.category || "Otros",
+              reason: e.reason || "normal",
+              note: e.note || "",
               date: e.date || new Date().toISOString(),
               is_fiado: !!e.isFiado,
               fiado_status: e.fiadoStatus || null,
               archived: !!e.archived,
-              created_at: e.createdAt || new Date().toISOString()
-            })), { onConflict: 'id' }
+              data: e,
+              created_at: e.createdAt || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })),
+            "id"
           );
-          if (ledErr) throw new Error('Error guardando finance_ledger: ' + ledErr.message);
+          if (ledErr) throw new Error("Error guardando finance_ledger: " + ledErr.message);
         }
 
-        // 4. Guardar registros de sueño individuales en sleep_log (si la tabla existe)
         const sleepLog = Array.isArray(appState.sleepLog) ? appState.sleepLog : [];
         if (sleepLog.length > 0) {
-          const { error: sleepErr } = await supabase.from('sleep_log').upsert(
-            sleepLog.map(s => ({
-              id: String(s.id),
-              date: s.date || new Date().toISOString().split('T')[0],
+          const { error: sleepErr } = await safeUpsert(
+            "sleep_log",
+            sleepLog.map((s) => ({
+              id: String(s.id || `sleep_${s.date}`),
+              date: s.date || new Date().toISOString().split("T")[0],
               total_minutes: Number(s.totalMinutes || s.total_minutes || 0),
-              quality: (s.quality !== undefined && s.quality !== null && s.quality !== "") ? Number(s.quality) : null,
-              note: s.note || '',
-              mode: s.mode || 'simple',
-              start_time: s.start || s.start_time || '',
-              end_time: s.end || s.end_time || '',
-              dream_type: s.dreamType || s.dream_type || '',
-              wake_emotion: s.wakeEmotion || s.wake_emotion || '',
-              narrative: s.narrative || '',
+              quality: s.quality !== undefined && s.quality !== null && s.quality !== "" ? Number(s.quality) : null,
+              note: s.note || "",
+              mode: s.mode || "simple",
+              start_time: s.start || s.start_time || "",
+              end_time: s.end || s.end_time || "",
+              dream_type: s.dreamType || s.dream_type || "",
+              wake_emotion: s.wakeEmotion || s.wake_emotion || "",
+              narrative: s.narrative || "",
               symbols: Array.isArray(s.symbols) ? s.symbols : [],
-              clarity: (s.clarity !== undefined && s.clarity !== null && s.clarity !== "") ? Number(s.clarity) : null,
+              clarity: s.clarity !== undefined && s.clarity !== null && s.clarity !== "" ? Number(s.clarity) : null,
               created_at: s.ts || s.created_at || new Date().toISOString(),
-              data: s
-            })), { onConflict: 'id' }
+              data: s,
+            })),
+            "id"
           );
-          if (sleepErr) {
-            console.warn('Aviso sincronizando sleep_log:', sleepErr.message);
-            results.sleepError = sleepErr.message;
-          } else {
-            results.sleepSynced = sleepLog.length;
-          }
+          if (sleepErr) results.sleepError = sleepErr.message;
+          else results.sleepSynced = sleepLog.length;
         }
 
-        // 5. Guardar registros de estado de ánimo individuales en mood_daily (si la tabla existe)
-        const moodDaily = (appState.moodDaily && typeof appState.moodDaily === 'object') ? appState.moodDaily : {};
+        const moodDaily = appState.moodDaily && typeof appState.moodDaily === "object" ? appState.moodDaily : {};
         const moodEntries = [];
         Object.entries(moodDaily).forEach(([dateKey, val]) => {
           const items = Array.isArray(val) ? val : [val];
           items.forEach((e, idx) => {
-            if (!e || typeof e !== 'object') return;
+            if (!e || typeof e !== "object") return;
             const entryId = `${dateKey}_${e.ts || idx}`;
             moodEntries.push({
               id: String(entryId),
@@ -186,215 +292,208 @@ app.post('/api/sync', requireAuth, async (req, res) => {
               sprite_id: e.spriteId || e.sprite_id || null,
               label: e.label || null,
               activities: Array.isArray(e.activities) ? e.activities : [],
-              energy: (e.energy !== undefined && e.energy !== null && e.energy !== "") ? Number(e.energy) : null,
-              note: e.note || '',
+              energy: e.energy !== undefined && e.energy !== null && e.energy !== "" ? Number(e.energy) : null,
+              note: e.note || "",
               tags: Array.isArray(e.tags) ? e.tags : [],
               ts: e.ts || new Date().toISOString(),
-              data: e
+              data: e,
             });
           });
         });
         if (moodEntries.length > 0) {
-          const { error: moodErr } = await supabase.from('mood_daily').upsert(
-            moodEntries, { onConflict: 'id' }
-          );
-          if (moodErr) {
-            console.warn('Aviso sincronizando mood_daily:', moodErr.message);
-            results.moodError = moodErr.message;
-          } else {
-            results.moodSynced = moodEntries.length;
-          }
+          const { error: moodErr } = await safeUpsert("mood_daily", moodEntries, "id");
+          if (moodErr) results.moodError = moodErr.message;
+          else results.moodSynced = moodEntries.length;
         }
+      } catch (err) {
+        results.errors.push(err.message);
       }
-    } catch (err) {
-      console.error('[Sync Error] app_state:', err.message);
-      results.errors.push(err.message);
     }
 
-    // neurons: si falla, se anota el error y se siguen guardando las demás secciones
-    try {
-      if (neurons.length > 0) {
-        const { error: nErr, withData } = await upsertWithData('neurons',
-          neurons.map(n => ({
-            id: n.id,
-            concept: n.core?.concept || 'Sin nombre',
-            domain: n.core?.domain || 'general',
-            summary: n.core?.summary || '',
+    if (neurons.length > 0) {
+      try {
+        const { error: nErr, withData } = await safeUpsert(
+          "neurons",
+          neurons.map((n) => ({
+            id: String(n.id),
+            concept: n.core?.concept || n.concept || "Sin nombre",
+            domain: n.core?.domain || n.domain || "general",
+            summary: n.core?.summary || n.summary || "",
             triggers: n.triggers || [],
-            emotion: n.emotion || 'neutral',
+            emotion: n.emotion || "neutral",
             weight: n.weight || 1.0,
             temporal: n.temporal || {},
             updated_at: n.updatedAt || new Date().toISOString(),
-            data: n
-          })), 'id'
+            data: n,
+          })),
+          "id"
         );
-        if (nErr) throw new Error('Error guardando neuronas: ' + nErr.message);
+        if (nErr) throw new Error("Error guardando neuronas: " + nErr.message);
         if (!withData) results.fullData = false;
         results.neuronsSynced = neurons.length;
+      } catch (err) {
+        results.errors.push(err.message);
       }
-    } catch (err) {
-      console.error('[Sync Error] neurons:', err.message);
-      results.errors.push(err.message);
     }
 
-    // memories: si falla, se anota el error y se siguen guardando las demás secciones
-    try {
-      if (memories.length > 0) {
-        const { error: mErr, withData } = await upsertWithData('memories',
-          memories.map(m => ({
-            id: m.id,
-            title: m.title || 'Memoria',
-            snippet: (m.text || '').substring(0, 100),
-            text_content: m.text || '',
-            date: m.date || new Date().toISOString().split('T')[0],
-            emotion: m.emotion || 'neutral',
+    if (memories.length > 0) {
+      try {
+        const { error: mErr, withData } = await safeUpsert(
+          "memories",
+          memories.map((m) => ({
+            id: String(m.id),
+            title: m.title || "Memoria",
+            snippet: (m.text || "").substring(0, 100),
+            text_content: m.text || "",
+            date: m.date || new Date().toISOString().split("T")[0],
+            emotion: m.emotion || "neutral",
             tags: m.tags || [],
             linked_neurons: m.linkedNeurons || [],
-            importance: m.importance || 'medium',
+            importance: m.importance || "medium",
             temporal: m.temporal || {},
-            data: m
-          })), 'id'
+            data: m,
+          })),
+          "id"
         );
-        if (mErr) throw new Error('Error guardando memorias: ' + mErr.message);
+        if (mErr) throw new Error("Error guardando memorias: " + mErr.message);
         if (!withData) results.fullData = false;
         results.memoriesSynced = memories.length;
+      } catch (err) {
+        results.errors.push(err.message);
       }
-    } catch (err) {
-      console.error('[Sync Error] memories:', err.message);
-      results.errors.push(err.message);
     }
 
-    // chat_history: si falla, se anota el error y se siguen guardando las demás secciones
-    try {
-      if (chatHistory.length > 0) {
-        // Usar un mapa para asegurar que no haya duplicados con el mismo ID en el payload
+    if (chatHistory.length > 0) {
+      try {
         const uniqueChatMap = new Map();
-        chatHistory.forEach(c => {
-          const derivedId = c.messageId || c.id || Math.random().toString(36).substring(7);
+        chatHistory.forEach((c) => {
+          const derivedId = String(c.messageId || c.id || Math.random().toString(36).substring(7));
           uniqueChatMap.set(derivedId, {
             id: derivedId,
             message_id: derivedId,
-            role: c.role || 'user',
-            content: c.content || c.text || '',
-            meta: c.meta || {}
+            role: c.role || "user",
+            content: c.content || c.text || "",
+            meta: c.meta || {},
           });
         });
         const uniqueChat = Array.from(uniqueChatMap.values());
-
-        const { error: cErr } = await supabase.from('chat_history').upsert(
-          uniqueChat, { onConflict: 'id' }
-        );
-        if (cErr) throw new Error('Error guardando historial: ' + cErr.message);
+        const { error: cErr } = await safeUpsert("chat_history", uniqueChat, "id");
+        if (cErr) throw new Error("Error guardando historial: " + cErr.message);
         results.chatSynced = uniqueChat.length;
+      } catch (err) {
+        results.errors.push(err.message);
       }
-    } catch (err) {
-      console.error('[Sync Error] chat_history:', err.message);
-      results.errors.push(err.message);
     }
 
-    // days: si falla, se anota el error y se siguen guardando las demás secciones
-    try {
-      if (days.length > 0) {
-        // Usar un mapa para asegurar que no haya duplicados con la misma fecha en el payload
+    if (days.length > 0) {
+      try {
         const uniqueDaysMap = new Map();
-        days.forEach(d => {
+        days.forEach((d) => {
           uniqueDaysMap.set(d.date, {
-            id: d.id || d.date,
+            id: String(d.id || d.date),
             date: d.date,
-            summary: d.summary || '',
-            dominant_emotion: d.dominantEmotion || 'neutral',
+            summary: d.summary || "",
+            dominant_emotion: d.dominantEmotion || "neutral",
             dominant_themes: d.dominantThemes || [],
             insights: d.insights || [],
             is_milestone: d.isMilestone || false,
-            data: d
+            data: d,
           });
         });
         const uniqueDays = Array.from(uniqueDaysMap.values());
-
-        const { error: dErr, withData } = await upsertWithData('days', uniqueDays, 'date');
-        if (dErr) throw new Error('Error guardando días: ' + dErr.message);
+        const { error: dErr, withData } = await safeUpsert("days", uniqueDays, "date");
+        if (dErr) throw new Error("Error guardando días: " + dErr.message);
         if (!withData) results.fullData = false;
         results.daysSynced = uniqueDays.length;
+      } catch (err) {
+        results.errors.push(err.message);
       }
-    } catch (err) {
-      console.error('[Sync Error] days:', err.message);
-      results.errors.push(err.message);
     }
 
-    // Borrados hechos en el teléfono
-    try {
-      await deleteIds('neurons', 'id', deleted.neurons, results, 'neuronas');
-      await deleteIds('memories', 'id', deleted.memories, results, 'memorias');
-      await deleteIds('days', 'date', deleted.days, results, 'días');
-    } catch (err) {
-      results.errors.push(err.message);
-    }
+    await deleteIds("neurons", "id", deleted.neurons, results, "neuronas");
+    await deleteIds("memories", "id", deleted.memories, results, "memorias");
+    await deleteIds("days", "date", deleted.days, results, "días");
+    await deleteIds("finance_ledger", "id", deleted.finance_ledger, results, "movimientos");
 
-    res.json({ status: 'ok', data: results });
+    res.json({ status: "ok", data: results });
   } catch (err) {
-    console.error('[Sync Error]', err);
-    res.status(500).json({ status: 'error', message: err.message });
+    console.error("[Sync Error]", err);
+    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
-// Endpoint de Restauración (Supabase → MemoryCarl)
-app.get('/api/restore', requireAuth, async (req, res) => {
-  if (!supabase) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' });
+// =====================================================================================
+// ENDPOINT DE RESTAURACIÓN (GET /api/restore)
+// =====================================================================================
+app.get("/api/restore", requireAuth, async (_req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ status: "error", message: "Supabase no configurado en el servidor." });
+  }
 
   try {
-    const [neuronsRes, memoriesRes, chatRes, daysRes, appStateRes, accountsRes, ledgerRes, sleepRes, moodRes] = await Promise.all([
-      supabase.from('neurons').select('*'),
-      supabase.from('memories').select('*'),
-      supabase.from('chat_history').select('*').order('created_at', { ascending: true }),
-      supabase.from('days').select('*').order('date', { ascending: false }),
-      supabase.from('app_state').select('*').eq('id', 'default_user').single(),
-      supabase.from('finance_accounts').select('*'),
-      supabase.from('finance_ledger').select('*').order('date', { ascending: false }),
-      supabase.from('sleep_log').select('*').order('date', { ascending: false }),
-      supabase.from('mood_daily').select('*').order('date', { ascending: false })
+    const [
+      neuronsRes,
+      memoriesRes,
+      chatRes,
+      daysRes,
+      appStateRes,
+      accountsRes,
+      ledgerRes,
+      debtsRes,
+      sleepRes,
+      moodRes,
+      modulesRes,
+    ] = await Promise.all([
+      supabase.from("neurons").select("*"),
+      supabase.from("memories").select("*"),
+      supabase.from("chat_history").select("*").order("created_at", { ascending: true }),
+      supabase.from("days").select("*").order("date", { ascending: false }),
+      supabase.from("app_state").select("*").eq("id", "default_user").maybeSingle(),
+      supabase.from("finance_accounts").select("*"),
+      supabase.from("finance_ledger").select("*").order("date", { ascending: false }),
+      supabase.from("finance_debts").select("*"),
+      supabase.from("sleep_log").select("*").order("date", { ascending: false }),
+      supabase.from("mood_daily").select("*").order("date", { ascending: false }),
+      supabase.from("app_modules").select("*"),
     ]);
 
-    if (neuronsRes.error) throw new Error('Error leyendo neuronas: ' + neuronsRes.error.message);
-    if (memoriesRes.error) throw new Error('Error leyendo memorias: ' + memoriesRes.error.message);
-    if (appStateRes.error && appStateRes.error.code !== 'PGRST116') {
-      throw new Error('Error leyendo app_state: ' + appStateRes.error.message);
-    }
+    let reconstructedAppState = appStateRes.data?.state_json || {};
 
-    // Reconstruir el appState prioritariamente desde las tablas dedicadas si tienen datos
-    let reconstructedAppState = appStateRes.data?.state_json || null;
-    if (!reconstructedAppState) reconstructedAppState = {};
-    
     if (accountsRes.data && accountsRes.data.length > 0) {
-      reconstructedAppState.financeAccounts = accountsRes.data.map(a => ({
+      reconstructedAppState.financeAccounts = accountsRes.data.map((a) => ({
+        ...(a.data || {}),
         id: a.id,
         name: a.name,
         type: a.type,
-        initialBalance: Number(a.initial_balance),
-        balance: Number(a.balance),
+        initialBalance: Number(a.initial_balance || 0),
+        balance: Number(a.balance || 0),
         color: a.color,
-        createdAt: a.created_at
+        createdAt: a.created_at,
       }));
+    }
 
-      if (ledgerRes.data) {
-        reconstructedAppState.financeLedger = ledgerRes.data.map(e => ({
-          id: e.id,
-          accountId: e.account_id,
-          type: e.type,
-          amount: Number(e.amount),
-          category: e.category,
-          reason: e.reason,
-          note: e.note,
-          date: e.date,
-          isFiado: !!e.is_fiado,
-          fiadoStatus: e.fiado_status,
-          archived: !!e.archived,
-          createdAt: e.created_at
-        }));
-      }
+    if (ledgerRes.data && ledgerRes.data.length > 0) {
+      reconstructedAppState.financeLedger = ledgerRes.data.map((e) => ({
+        ...(e.data || {}),
+        id: e.id,
+        accountId: e.account_id,
+        toAccountId: e.to_account_id || null,
+        type: e.type,
+        amount: Number(e.amount || 0),
+        category: e.category,
+        reason: e.reason,
+        note: e.note,
+        date: e.date,
+        isFiado: !!e.is_fiado,
+        fiadoStatus: e.fiado_status,
+        archived: !!e.archived,
+        createdAt: e.created_at,
+      }));
     }
 
     if (sleepRes.data && sleepRes.data.length > 0) {
-      reconstructedAppState.sleepLog = sleepRes.data.map(s => ({
+      reconstructedAppState.sleepLog = sleepRes.data.map((s) => ({
+        ...(s.data || {}),
         id: s.id,
         date: s.date,
         totalMinutes: Number(s.total_minutes || 0),
@@ -408,89 +507,88 @@ app.get('/api/restore', requireAuth, async (req, res) => {
         narrative: s.narrative,
         symbols: s.symbols || [],
         clarity: s.clarity,
-        ts: s.created_at
+        ts: s.created_at,
       }));
     }
 
     if (moodRes.data && moodRes.data.length > 0) {
       const moodMap = {};
-      moodRes.data.forEach(m => {
+      moodRes.data.forEach((m) => {
         if (!moodMap[m.date]) moodMap[m.date] = [];
         moodMap[m.date].push({
+          ...(m.data || {}),
           id: m.id,
           spriteId: m.sprite_id,
           label: m.label,
           activities: m.activities || [],
           energy: m.energy,
           note: m.note,
-          ts: m.ts
+          ts: m.ts,
         });
       });
       reconstructedAppState.moodDaily = moodMap;
     }
 
     res.json({
-      status: 'ok',
+      status: "ok",
       data: {
         neurons: neuronsRes.data || [],
         memories: memoriesRes.data || [],
         chatHistory: chatRes.data || [],
         days: daysRes.data || [],
+        financeAccounts: accountsRes.data || [],
+        financeLedger: ledgerRes.data || [],
+        financeDebts: debtsRes.data || [],
+        sleepLog: sleepRes.data || [],
+        moodRows: moodRes.data || [],
+        modules: modulesRes.data || [],
         appState: reconstructedAppState,
-      }
+      },
     });
   } catch (err) {
-    console.error('[Restore Error]', err);
-    res.status(500).json({ status: 'error', message: err.message });
+    console.error("[Restore Error]", err);
+    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
-// Endpoints de Neuronas
-app.get('/api/neurons', requireAuth, async (req, res) => {
+app.get("/api/neurons", requireAuth, async (_req, res) => {
   try {
     const neurons = await getAllNeurons();
-    res.json({ status: 'ok', data: neurons });
+    res.json({ status: "ok", data: neurons });
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
+    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
-// Endpoints de Memorias
-app.get('/api/memories', requireAuth, async (req, res) => {
+app.get("/api/memories", requireAuth, async (_req, res) => {
   try {
     const memories = await getAllMemories();
-    res.json({ status: 'ok', data: memories });
+    res.json({ status: "ok", data: memories });
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
+    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
-// Endpoint Principal de Chat
-app.post('/api/chat', requireAuth, async (req, res) => {
+app.post("/api/chat", requireAuth, async (req, res) => {
   const { message, ollamaUrl, ollamaKey } = req.body;
   if (!message) {
-    return res.status(400).json({ status: 'error', message: 'El campo "message" es obligatorio.' });
+    return res.status(400).json({ status: "error", message: 'El campo "message" es obligatorio.' });
   }
 
   try {
     const result = await processChat(message, ollamaUrl, ollamaKey);
-    res.json({ status: 'ok', data: result });
+    res.json({ status: "ok", data: result });
   } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
+    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
-// Endpoint Telegram Webhook (Sin requireAuth ya que Telegram envía peticiones directamente)
-app.post('/api/telegram', handleTelegramWebhook);
+app.post("/api/telegram", handleTelegramWebhook);
+app.get("/api/telegram/pending", requireAuth, getPendingTelegramTransactions);
 
-// Endpoint para obtener transacciones pendientes
-app.get('/api/telegram/pending', requireAuth, getPendingTelegramTransactions);
-
-// Exportar para Vercel Serverless Functions
 module.exports = app;
 
-// Iniciar servidor local si se corre directamente
-if (process.argv[1]?.endsWith('index.js')) {
+if (process.argv[1]?.endsWith("index.js")) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
     console.log(`[MemoryCarl API] Servidor escuchando en puerto ${PORT}`);

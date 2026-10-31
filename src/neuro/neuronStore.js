@@ -4,6 +4,7 @@
  * NeuroChat / MemoryCarl
  */
 
+import "../services/unlimitedStorage.js";
 import { sanitizeNeuron, validateNeuron, createNeuron } from "./schemas.js";
 import { trackListChanges } from "../services/syncOutbox.js";
 import { cloudNeuronToLocal } from "../services/cloudRestore.js";
