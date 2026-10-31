@@ -63,9 +63,11 @@ function writeAll(neurons, { track = true } = {}) {
     let prev = [];
     try { prev = JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); } catch (_e) {}
     localStorage.setItem(STORE_KEY, JSON.stringify(neurons));
-    // Cola de subida: solo en guardados normales (el recorte por cuota no cuenta como borrado)
-    if (track) trackListChanges("neurons", prev, neurons);
-    triggerNeuroChatPush();
+    // Cola de subida: solo en guardados normales (el recorte por cuota o lectura no cuenta como cambio)
+    if (track) {
+      trackListChanges("neurons", prev, neurons);
+      triggerNeuroChatPush();
+    }
   } catch (e) {
     if (e && (e.name === "QuotaExceededError" || e.code === 22 || e.code === 1014)) {
       console.warn("[neuronStore] LocalStorage quota exceeded. Pruning old neurons for local cache while keeping cloud sync active.");

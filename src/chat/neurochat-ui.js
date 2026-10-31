@@ -2655,18 +2655,8 @@ export function initNeuroChat() {
     return result;
   };
 
-  // Al arrancar: primero se reconcilia con la nube (lo que falta y lo más reciente) y solo
-  // si eso funcionó se sube lo local; así un dispositivo con datos viejos no pisa la nube
-  setTimeout(() => {
-    window.neurochatPullFromSupabase()
-      .then(async (result) => {
-        if (!result?.ok) return;
-        // Una sola vez: poner en cola todo lo local para que Supabase recupere lo atrasado
-        await queueFullBackfill();
-        schedulePush({ immediate: true });
-      })
-      .catch(() => {});
-  }, 2500);
+  // El arranque de sincronización lo coordina de forma unificada `initDbService()` en `dbService.js`
+  // para evitar ejecuciones duplicadas en paralelo al iniciar la app.
 
   // Si quedó algo en la cola (sin conexión, error del servidor), reintentar cada minuto
   setInterval(() => {

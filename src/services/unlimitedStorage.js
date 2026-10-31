@@ -1,27 +1,17 @@
 /**
  * =====================================================================================
- * unlimitedStorage.js — Motor de Almacenamiento Local Sin Límite de 5 MB (RAM + IndexedDB)
- * MemoryCarl
+ * unlimitedStorage.js — Almacenamiento Híbrido de Bajo Consumo de RAM (LocalStorage + IDB)
+ * MemoryCarl — Edición Anti-OOM para Móviles
  * =====================================================================================
  *
- * ¿POR QUÉ EXISTE ESTE MÓDULO?
- * `localStorage` en los navegadores tiene un límite estricto de ~5 MB para todo el dominio.
- * Cuando MemoryCarl acumula neuronas, días de chat, memorias, finanzas, Semana y FootballLab,
- * `localStorage` se llena al 100% y lanza `QuotaExceededError`, provocando que:
- *   1. No se puedan guardar ni siquiera las API Keys de Supabase ni el estado de sincronización.
- *   2. La cola offline (`memorycarl_offline_queue`) no pueda persistirse.
- *   3. `dayStore.js` ignore guardados en silencio y `neuronStore.js` / `memoryStore.js` recorten datos.
- *
- * ¿CÓMO LO SOLUCIONA?
- *   1. Mantiene una caché en memoria RAM (`ramStore`) de acceso 100% síncrono (0 ms) para que
- *      todas las lecturas `localStorage.getItem(key)` y escrituras `localStorage.setItem(key, val)`
- *      de toda la app funcionen al instante sin cambiar la arquitectura síncrona de los módulos.
- *   2. Persiste automáticamente todas las claves de datos en `IndexedDB` (`memorycarl_unlimited_db`,
- *      que soporta gigabytes de información en móvil y PC).
- *   3. Desaloja automáticamente de `localStorage` nativo cualquier clave pesada (> 4 KB),
- *      dejando `localStorage` nativo libre (< 30 KB en total) únicamente para claves pequeñas
- *      de configuración y credenciales.
- *   4. Nunca lanza `QuotaExceededError`.
+ * ¿CÓMO EVITA CRASHES DE MEMORIA ("¡Oh, no! Se produjo un error") EN MÓVILES?
+ * 1. NO duplica todo `localStorage` en RAM:
+ *    Si una clave ya cabe y vive en `localStorage` nativo, la lee directo de `localStorage`
+ *    nativo sin clonarla en un `Map` en RAM.
+ * 2. `overflowRamStore` solo guarda en RAM las claves que desbordaron la cuota de 5 MB
+ *    de `localStorage` y tuvieron que moverse a `IndexedDB`.
+ * 3. Al arrancar, elimina directamente en `IndexedDB` (sin cargar en RAM) cualquier
+ *    cola antigua pesada (`memorycarl_offline_queue`) que haya quedado del crash anterior.
  * =====================================================================================
  */
 
@@ -29,47 +19,35 @@ const IDB_NAME = "memorycarl_unlimited_db";
 const IDB_VERSION = 1;
 const IDB_STORE = "kv_store";
 
-// Claves que SIEMPRE deben permanecer también en el localStorage nativo (son pequeñas y críticas en el arranque)
-const NATIVE_KEEP_KEYS = new Set([
-  "memorycarl_supabase_url",
-  "memorycarl_supabase_anon_key",
-  "memorycarl_script_api_key",
-  "memorycarl_script_url",
-  "memorycarl_api_key",
-  "memorycarl_api_url",
-  "memorycarl_neurochat_settings",
-  "memorycarl_neurochat_sync_status",
-  "memorycarl_dbservice_backfill_v3",
-  "memorycarl_sync_pulled_once",
-  "mc_ins_heat_mode",
-  "mc_sheet_open",
-]);
+// Solo las claves que NO cupieron en localStorage nativo viven en este Map
+const overflowRamStore = new Map();
 
-// Umbral máximo para mantener una copia en localStorage nativo (4 KB)
-const MAX_NATIVE_BYTES = 4096;
-
-// Caché síncrona en memoria RAM (clave -> string)
-const ramStore = new Map();
-const deletedKeys = new Set();
-
-// Referencias a los métodos originales nativos de Storage
 const nativeGetItem = Storage.prototype.getItem.bind(localStorage);
 const nativeSetItem = Storage.prototype.setItem.bind(localStorage);
 const nativeRemoveItem = Storage.prototype.removeItem.bind(localStorage);
 const nativeKey = Storage.prototype.key.bind(localStorage);
 
-let idbInstance = null;
+let idbOpenPromise = null;
 let hydrationPromise = null;
 let isHydrated = false;
 
+const pendingIdbWrites = new Map();
+let idbFlushTimer = null;
+
+function isQuotaError(err) {
+  if (!err) return false;
+  return err.name === "QuotaExceededError" || err.code === 22 || err.code === 1014;
+}
+
 // =====================================================================================
-// 1. CONEXIÓN Y OPERACIONES CON INDEXEDDB (`memorycarl_unlimited_db`)
+// 1. CONEXIÓN SINGLETON Y ESCRITURA AGRUPADA EN INDEXEDDB
 // =====================================================================================
 function openUnlimitedIdb() {
-  if (idbInstance) return Promise.resolve(idbInstance);
-  return new Promise((resolve, reject) => {
+  if (idbOpenPromise) return idbOpenPromise;
+  idbOpenPromise = new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
-      return reject(new Error("IndexedDB no soportado en este navegador"));
+      idbOpenPromise = null;
+      return reject(new Error("IndexedDB no disponible"));
     }
     const req = indexedDB.open(IDB_NAME, IDB_VERSION);
     req.onupgradeneeded = () => {
@@ -79,140 +57,88 @@ function openUnlimitedIdb() {
       }
     };
     req.onsuccess = () => {
-      idbInstance = req.result;
-      idbInstance.onclose = () => {
-        idbInstance = null;
+      const db = req.result;
+      db.onclose = () => {
+        idbOpenPromise = null;
       };
-      resolve(idbInstance);
+      db.onversionchange = () => {
+        db.close();
+        idbOpenPromise = null;
+      };
+      resolve(db);
     };
-    req.onerror = () => reject(req.error || new Error("Error abriendo memorycarl_unlimited_db"));
+    req.onerror = () => {
+      idbOpenPromise = null;
+      reject(req.error || new Error("Error abriendo memorycarl_unlimited_db"));
+    };
   });
+  return idbOpenPromise;
 }
 
-async function idbWrite(key, value) {
+function scheduleIdbFlush() {
+  if (idbFlushTimer) return;
+  idbFlushTimer = setTimeout(flushPendingIdbWrites, 300);
+}
+
+async function flushPendingIdbWrites() {
+  idbFlushTimer = null;
+  if (pendingIdbWrites.size === 0) return;
+
+  const batch = new Map(pendingIdbWrites);
+  pendingIdbWrites.clear();
+
   try {
     const db = await openUnlimitedIdb();
     await new Promise((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, "readwrite");
-      tx.objectStore(IDB_STORE).put({ key, value: String(value), updatedAt: Date.now() });
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.warn(`[unlimitedStorage] Error escribiendo "${key}" en IndexedDB:`, err);
-  }
-}
-
-async function idbRemove(key) {
-  try {
-    const db = await openUnlimitedIdb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, "readwrite");
-      tx.objectStore(IDB_STORE).delete(key);
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.warn(`[unlimitedStorage] Error borrando "${key}" en IndexedDB:`, err);
-  }
-}
-
-async function idbReadAllFromStore(dbName, storeName) {
-  return new Promise((resolve) => {
-    if (typeof indexedDB === "undefined") return resolve([]);
-    try {
-      const req = indexedDB.open(dbName);
-      req.onsuccess = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains(storeName)) {
-          db.close();
-          return resolve([]);
-        }
-        try {
-          const tx = db.transaction(storeName, "readonly");
-          const getAllReq = tx.objectStore(storeName).getAll();
-          getAllReq.onsuccess = () => {
-            const res = getAllReq.result || [];
-            db.close();
-            resolve(res);
-          };
-          getAllReq.onerror = () => {
-            db.close();
-            resolve([]);
-          };
-        } catch (_e) {
-          db.close();
-          resolve([]);
-        }
-      };
-      req.onerror = () => resolve([]);
-    } catch (_e) {
-      resolve([]);
-    }
-  });
-}
-
-// =====================================================================================
-// 2. CARGA INICIAL SÍNCRONA DESDE LOCALSTORAGE + MIGRACIÓN DE CLAVES PESADAS A IDB
-// =====================================================================================
-function bootstrapSyncFromNativeLocalStorage() {
-  try {
-    const keysToOffload = [];
-    const total = localStorage.length;
-    for (let i = 0; i < total; i++) {
-      const k = nativeKey(i);
-      if (!k) continue;
-      const v = nativeGetItem(k);
-      if (typeof v === "string") {
-        ramStore.set(k, v);
-        if (!NATIVE_KEEP_KEYS.has(k) && v.length > MAX_NATIVE_BYTES) {
-          keysToOffload.push({ key: k, value: v });
+      const store = tx.objectStore(IDB_STORE);
+      const now = Date.now();
+      for (const [key, val] of batch.entries()) {
+        if (val === null) {
+          store.delete(key);
+        } else {
+          store.put({ key, value: String(val), updatedAt: now });
         }
       }
-    }
-
-    // Mover asíncronamente las claves pesadas (> 4 KB) hacia IndexedDB y liberar espacio en localStorage nativo
-    if (keysToOffload.length > 0) {
-      Promise.all(keysToOffload.map((item) => idbWrite(item.key, item.value)))
-        .then(() => {
-          let freedBytes = 0;
-          for (const item of keysToOffload) {
-            try {
-              nativeRemoveItem(item.key);
-              freedBytes += item.value.length;
-            } catch (_e) {}
-          }
-          console.log(
-            `[unlimitedStorage] 🧹 Liberados ${Math.round(freedBytes / 1024)} KB de localStorage nativo (${keysToOffload.length} claves pesadas migradas a IndexedDB sin pérdida de datos).`
-          );
-        })
-        .catch((err) => console.warn("[unlimitedStorage] Aviso al migrar claves pesadas:", err));
-    }
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
   } catch (err) {
-    console.warn("[unlimitedStorage] Error en lectura inicial de localStorage:", err);
+    console.warn("[unlimitedStorage] Aviso en escritura IndexedDB:", err);
   }
 }
 
+function queueIdbWrite(key, value) {
+  pendingIdbWrites.set(key, String(value));
+  scheduleIdbFlush();
+}
+
+function queueIdbDelete(key) {
+  pendingIdbWrites.set(key, null);
+  scheduleIdbFlush();
+}
+
 // =====================================================================================
-// 3. VIRTUALIZACIÓN TRANSPARENTE DE `localStorage` (0 MS SÍNCRONO + BACKING EN IDB)
+// 2. INTERCEPTOR LIGERO DE `localStorage` (SOLO USA IDB SI LOCALSTORAGE ESTÁ LLENO)
 // =====================================================================================
 function installStorageInterceptor() {
   if (typeof window === "undefined" || window.__mcUnlimitedStorageInstalled) return;
   window.__mcUnlimitedStorageInstalled = true;
 
-  bootstrapSyncFromNativeLocalStorage();
+  // Limpiar de inmediato colas antiguas en localStorage que causaban el crash al recargar
+  try {
+    nativeRemoveItem("memorycarl_offline_queue");
+    nativeRemoveItem("memorycarl_sync_hashes_v3");
+    nativeRemoveItem("memorycarl_sync_outbox_v1");
+  } catch (_e) {}
 
   Storage.prototype.getItem = function (key) {
     if (this === localStorage) {
       const k = String(key);
-      if (deletedKeys.has(k)) return null;
-      if (ramStore.has(k)) return ramStore.get(k);
-      const nativeVal = nativeGetItem(k);
-      if (nativeVal !== null) {
-        ramStore.set(k, nativeVal);
-        return nativeVal;
+      if (overflowRamStore.has(k)) {
+        return overflowRamStore.get(k);
       }
-      return null;
+      return nativeGetItem(k);
     }
     return nativeGetItem.call(this, key);
   };
@@ -221,30 +147,40 @@ function installStorageInterceptor() {
     if (this === localStorage) {
       const k = String(key);
       const v = String(value);
-      deletedKeys.delete(k);
-      ramStore.set(k, v);
 
-      // Persistir siempre en IndexedDB ilimitado
-      idbWrite(k, v);
+      // Si esta clave ya fue migrada a IndexedDB por exceso de cuota, mantenerla en IDB
+      if (overflowRamStore.has(k)) {
+        overflowRamStore.set(k, v);
+        queueIdbWrite(k, v);
+        return;
+      }
 
-      // Si es una clave pequeña o de configuración, guardarla también en localStorage nativo;
-      // si es pesada (> 4 KB), eliminar su copia vieja de localStorage nativo para no saturar los 5 MB.
-      if (NATIVE_KEEP_KEYS.has(k) || v.length <= MAX_NATIVE_BYTES) {
-        try {
-          nativeSetItem(k, v);
-        } catch (_quotaErr) {
-          // Si incluso una clave pequeña falla porque había basura previa, limpiar claves pesadas de localStorage
-          freeHeavyNativeKeys();
+      // Intentar guardar en localStorage nativo primero (0 uso extra de RAM)
+      try {
+        nativeSetItem(k, v);
+        return;
+      } catch (err) {
+        if (!isQuotaError(err)) throw err;
+
+        // Si localStorage nativo se llenó (5 MB), liberar la clave más pesada hacia IDB
+        offloadHeaviestKeyFromNativeStorage();
+
+        // Reintentar en localStorage nativo si la clave actual es pequeña (< 32 KB)
+        if (v.length < 32768) {
           try {
             nativeSetItem(k, v);
-          } catch (_e2) {}
+            return;
+          } catch (_err2) {}
         }
-      } else {
+
+        // Si sigue sin caber o es pesada, guardarla en overflowRamStore + IndexedDB
         try {
           nativeRemoveItem(k);
         } catch (_e) {}
+        overflowRamStore.set(k, v);
+        queueIdbWrite(k, v);
+        return;
       }
-      return;
     }
     return nativeSetItem.call(this, key, value);
   };
@@ -252,41 +188,48 @@ function installStorageInterceptor() {
   Storage.prototype.removeItem = function (key) {
     if (this === localStorage) {
       const k = String(key);
-      deletedKeys.add(k);
-      ramStore.delete(k);
+      if (overflowRamStore.has(k)) {
+        overflowRamStore.delete(k);
+        queueIdbDelete(k);
+      }
       try {
         nativeRemoveItem(k);
       } catch (_e) {}
-      idbRemove(k);
       return;
     }
     return nativeRemoveItem.call(this, key);
   };
 }
 
-function freeHeavyNativeKeys() {
+/**
+ * Busca las 2 claves más pesadas en `localStorage` nativo y las pasa a IndexedDB
+ * para dejar espacio libre inmediato sin duplicar el resto de claves en RAM.
+ */
+function offloadHeaviestKeyFromNativeStorage() {
   try {
-    const toRemove = [];
-    for (let i = 0; i < localStorage.length; i++) {
+    const candidates = [];
+    const len = localStorage.length;
+    for (let i = 0; i < len; i++) {
       const k = nativeKey(i);
-      if (!k || NATIVE_KEEP_KEYS.has(k)) continue;
+      if (!k || k.includes("supabase") || k.includes("api_key") || k.includes("settings")) continue;
       const v = nativeGetItem(k);
-      if (v && v.length > 1024) {
-        ramStore.set(k, v);
-        idbWrite(k, v);
-        toRemove.push(k);
+      if (v && v.length > 50000) {
+        candidates.push({ key: k, length: v.length, value: v });
       }
     }
-    for (const k of toRemove) {
+    candidates.sort((a, b) => b.length - a.length);
+    for (const item of candidates.slice(0, 2)) {
+      overflowRamStore.set(item.key, item.value);
+      queueIdbWrite(item.key, item.value);
       try {
-        nativeRemoveItem(k);
+        nativeRemoveItem(item.key);
       } catch (_e) {}
     }
   } catch (_e) {}
 }
 
 // =====================================================================================
-// 4. HIDRATACIÓN COMPLETA DESDE INDEXEDDB AL ARRANCAR
+// 3. HIDRATACIÓN SEGURA CON CURSOR (SIN `getAll()` MASIVO QUE CAUSE OOM)
 // =====================================================================================
 export function hydrateUnlimitedStorage() {
   installStorageInterceptor();
@@ -294,29 +237,56 @@ export function hydrateUnlimitedStorage() {
 
   hydrationPromise = (async () => {
     try {
-      // 1. Leer todas las claves de la base ilimitada principal (`memorycarl_unlimited_db`)
-      const mainRows = await idbReadAllFromStore(IDB_NAME, IDB_STORE);
-      for (const row of mainRows) {
-        if (!row || typeof row.key !== "string" || deletedKeys.has(row.key)) continue;
-        const val = row.value ?? row.payload;
-        if (typeof val === "string") {
-          // Si en localStorage nativo no estaba (porque fue desalojada por tamaño), cargarla a RAM
-          if (!ramStore.has(row.key) || val.length >= (ramStore.get(row.key)?.length || 0)) {
-            ramStore.set(row.key, val);
-          }
-        }
-      }
+      const db = await openUnlimitedIdb();
 
-      // 2. Migrar también cualquier clave que hubiera quedado en el fallback antiguo (`memorycarl_v2_storage`)
-      const legacyRows = await idbReadAllFromStore("memorycarl_v2_storage", "kv");
-      for (const row of legacyRows) {
-        if (!row || typeof row.key !== "string" || deletedKeys.has(row.key)) continue;
-        const val = row.payload ?? row.value;
-        if (typeof val === "string" && !ramStore.has(row.key)) {
-          ramStore.set(row.key, val);
-          await idbWrite(row.key, val);
+      // Primero borrar en IndexedDB (a nivel nativo sin leer a RAM) cualquier cola pesada vieja
+      await new Promise((resolve) => {
+        try {
+          const tx = db.transaction(IDB_STORE, "readwrite");
+          const store = tx.objectStore(IDB_STORE);
+          store.delete("memorycarl_offline_queue");
+          store.delete("memorycarl_sync_hashes_v3");
+          tx.oncomplete = resolve;
+          tx.onerror = resolve;
+        } catch (_e) {
+          resolve();
         }
-      }
+      });
+
+      // Leer mediante cursor solo las claves que NO están ya en localStorage nativo
+      await new Promise((resolve) => {
+        try {
+          const tx = db.transaction(IDB_STORE, "readonly");
+          const store = tx.objectStore(IDB_STORE);
+          const cursorReq = store.openCursor();
+          cursorReq.onsuccess = (ev) => {
+            const cursor = ev.target.result;
+            if (!cursor) return resolve();
+            const row = cursor.value;
+            const k = row?.key;
+            const v = row?.value ?? row?.payload;
+            if (typeof k === "string" && typeof v === "string") {
+              // Si cabe de vuelta en localStorage nativo y no está ahí, restaurarlo a nativo
+              // salvo que supere 250 KB, en cuyo caso se queda en overflowRamStore
+              if (nativeGetItem(k) === null) {
+                if (v.length < 100000) {
+                  try {
+                    nativeSetItem(k, v);
+                  } catch (_e) {
+                    overflowRamStore.set(k, v);
+                  }
+                } else {
+                  overflowRamStore.set(k, v);
+                }
+              }
+            }
+            cursor.continue();
+          };
+          cursorReq.onerror = () => resolve();
+        } catch (_e) {
+          resolve();
+        }
+      });
 
       isHydrated = true;
       if (typeof window !== "undefined") {
@@ -324,19 +294,19 @@ export function hydrateUnlimitedStorage() {
         window.dispatchEvent(new CustomEvent("memorycarl:storage-hydrated"));
       }
     } catch (err) {
-      console.warn("[unlimitedStorage] Error hidratando desde IndexedDB:", err);
+      console.warn("[unlimitedStorage] Aviso en hidratación:", err);
       isHydrated = true;
     }
-    return ramStore;
+    return overflowRamStore;
   })();
 
   return hydrationPromise;
 }
 
 export function getStorageStats() {
-  let ramBytes = 0;
-  for (const v of ramStore.values()) {
-    ramBytes += (v?.length || 0) * 2;
+  let overflowBytes = 0;
+  for (const v of overflowRamStore.values()) {
+    overflowBytes += (v?.length || 0) * 2;
   }
   let nativeBytes = 0;
   try {
@@ -348,13 +318,12 @@ export function getStorageStats() {
   } catch (_e) {}
 
   return {
-    totalKeys: ramStore.size,
-    totalMB: (ramBytes / (1024 * 1024)).toFixed(2),
+    totalKeys: localStorage.length + overflowRamStore.size,
+    totalMB: ((nativeBytes + overflowBytes) / (1024 * 1024)).toFixed(2),
     nativeLocalStorageKB: Math.round(nativeBytes / 1024),
     isHydrated,
   };
 }
 
-// Instalar interceptor inmediatamente al importar el módulo
 installStorageInterceptor();
 hydrateUnlimitedStorage();
