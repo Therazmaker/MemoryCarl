@@ -655,9 +655,11 @@ app.post("/api/sleep", async (req, res) => {
     }
 
     if (rawSessions.length === 0) {
-      return res.status(400).json({
-        status: "error",
-        message: "No se encontraron sesiones de sueño en el payload (se esperaba { sessions: [...] }).",
+      return res.status(200).json({
+        status: "ok",
+        message: "No se enviaron sesiones de sueño en esta sincronización (array vacío).",
+        count: 0,
+        syncedSessions: [],
       });
     }
 
@@ -761,9 +763,11 @@ app.post("/api/sleep", async (req, res) => {
     }
 
     if (rowsToUpsert.length === 0) {
-      return res.status(400).json({
-        status: "error",
-        message: "No se pudieron procesar sesiones válidas de sueño.",
+      return res.status(200).json({
+        status: "ok",
+        message: "No se encontraron sesiones con minutos válidos para registrar.",
+        count: 0,
+        syncedSessions: [],
       });
     }
 
