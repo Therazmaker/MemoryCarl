@@ -613,6 +613,23 @@ app.get("/api/sleep", async (req, res) => {
   }
 });
 
+app.delete("/api/sleep", requireAuth, async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ status: "error", message: "Supabase no configurado en el servidor." });
+  }
+  const id = req.query.id || req.body?.id;
+  if (!id) {
+    return res.status(400).json({ status: "error", message: "Falta parámetro 'id' a eliminar." });
+  }
+  try {
+    const { error } = await supabase.from("sleep_log").delete().eq("id", String(id));
+    if (error) throw error;
+    res.json({ status: "ok", deleted: id });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
 app.post("/api/sleep", async (req, res) => {
   if (!supabase) {
     return res.status(500).json({ status: "error", message: "Supabase no configurado en el servidor." });
