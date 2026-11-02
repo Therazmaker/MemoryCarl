@@ -586,6 +586,267 @@ app.post("/api/chat", requireAuth, async (req, res) => {
 app.post("/api/telegram", handleTelegramWebhook);
 app.get("/api/telegram/pending", requireAuth, getPendingTelegramTransactions);
 
+// =====================================================================================
+// ENDPOINT DE SUEÑO / SLEEPSYNC (POST y GET /api/sleep)
+// Recibe datos de sueño sincronizados desde Health Connect (Mi Fitness) vía SleepSync APK
+// =====================================================================================
+app.get("/api/sleep", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ status: "error", message: "Supabase no configurado en el servidor." });
+  }
+  try {
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
+    const { data, error } = await supabase
+      .from("sleep_log")
+      .select("*")
+      .order("date", { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    res.json({
+      status: "ok",
+      count: data?.length || 0,
+      data: data || [],
+    });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
+app.post("/api/sleep", async (req, res) => {
+  if (!supabase) {
+    return res.status(500).json({ status: "error", message: "Supabase no configurado en el servidor." });
+  }
+
+  // Validación de autenticación flexible:
+  // Si API_SECRET_KEY está configurada, acepta Bearer <token>, ?token=..., o token="auto" / "sleepsync".
+  // Si la petición viene de SleepSync (source === 'health-connect'), se permite procesar.
+  const expectedKey = process.env.API_SECRET_KEY;
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim() || req.query.token || req.body?.token;
+
+  if (expectedKey) {
+    const isSleepSyncPayload = req.body?.source === "health-connect" && Array.isArray(req.body?.sessions);
+    const isAuthorized =
+      token === expectedKey ||
+      (supabaseAnonKey && token === supabaseAnonKey) ||
+      token === "auto" ||
+      token === "sleepsync" ||
+      isSleepSyncPayload;
+
+    if (!isAuthorized) {
+      return res.status(401).json({
+        status: "error",
+        message: "No autorizado. Pasa tu API Key como Bearer token o usa 'auto'.",
+      });
+    }
+  }
+
+  try {
+    const body = req.body || {};
+    // Acepta formato { source: "health-connect", sessions: [...] }, { sessions: [...] }, o lista directa
+    let rawSessions = [];
+    if (Array.isArray(body)) {
+      rawSessions = body;
+    } else if (Array.isArray(body.sessions)) {
+      rawSessions = body.sessions;
+    } else if (body.start && body.end) {
+      rawSessions = [body];
+    }
+
+    if (rawSessions.length === 0) {
+      return res.status(400).json({
+        status: "error",
+        message: "No se encontraron sesiones de sueño en el payload (se esperaba { sessions: [...] }).",
+      });
+    }
+
+    // Función auxiliar para obtener fecha local respetando start_offset (ej: -05:00)
+    const computeLocalDate = (isoStr, offsetStr) => {
+      if (!isoStr) return new Date().toISOString().split("T")[0];
+      try {
+        const d = new Date(isoStr);
+        if (offsetStr && typeof offsetStr === "string") {
+          const match = offsetStr.match(/^([+-])(\d{2}):?(\d{2})?$/);
+          if (match) {
+            const sign = match[1] === "-" ? -1 : 1;
+            const h = parseInt(match[2], 10);
+            const m = match[3] ? parseInt(match[3], 10) : 0;
+            const offsetMs = sign * (h * 60 + m) * 60 * 1000;
+            const local = new Date(d.getTime() + offsetMs);
+            return local.toISOString().split("T")[0];
+          }
+        }
+        return d.toISOString().split("T")[0];
+      } catch (_e) {
+        return String(isoStr).split("T")[0];
+      }
+    };
+
+    const rowsToUpsert = [];
+    for (const s of rawSessions) {
+      if (!s || typeof s !== "object") continue;
+
+      const offset = s.start_offset || s.startOffset || null;
+      // Para sueño nocturno, la fecha relevante es la de despertar (end), con fallback a start
+      const sessionDate = computeLocalDate(s.end || s.start, offset);
+
+      const totalMinutes = Math.round(
+        Number(
+          s.duration_minutes ??
+          s.durationMinutes ??
+          (s.start && s.end ? (new Date(s.end) - new Date(s.start)) / 60000 : 0)
+        ) || 0
+      );
+
+      if (totalMinutes <= 0 && !s.stages?.length) continue;
+
+      // Calcular desglose de etapas si viene disponible
+      const stageTotals = s.stage_totals_minutes || s.stageTotalsMinutes || {};
+      const noteParts = [];
+      const deep = Number(stageTotals.deep || 0);
+      const light = Number(stageTotals.light || 0);
+      const rem = Number(stageTotals.rem || 0);
+      const awake = Number(stageTotals.awake || 0);
+
+      if (deep > 0) noteParts.push(`Profundo: ${Math.floor(deep / 60)}h ${deep % 60}m`);
+      if (light > 0) noteParts.push(`Ligero: ${Math.floor(light / 60)}h ${light % 60}m`);
+      if (rem > 0) noteParts.push(`REM: ${Math.floor(rem / 60)}h ${rem % 60}m`);
+      if (awake > 0) noteParts.push(`Despierto: ${awake}m`);
+
+      const note = noteParts.length
+        ? `Mi Fitness · ${noteParts.join(" | ")}`
+        : (s.notes || s.title || "Sincronizado vía SleepSync");
+
+      // Calidad estimada 1 a 5 según duración y fase reparadora (profundo + REM)
+      let quality = null;
+      if (totalMinutes > 0) {
+        const restful = deep + rem;
+        const ratio = totalMinutes > 0 ? restful / totalMinutes : 0;
+        if (totalMinutes >= 420 && ratio >= 0.3) quality = 5;
+        else if (totalMinutes >= 380 && ratio >= 0.2) quality = 4;
+        else if (totalMinutes >= 320) quality = 3;
+        else if (totalMinutes >= 240) quality = 2;
+        else quality = 1;
+      }
+
+      // ID determinístico por sesión o fecha para evitar duplicados
+      const cleanId = s.id
+        ? (String(s.id).startsWith("sleep_") ? String(s.id) : `sleep_${s.id}`)
+        : `sleep_${sessionDate}`;
+
+      rowsToUpsert.push({
+        id: cleanId,
+        date: sessionDate,
+        total_minutes: totalMinutes,
+        quality: quality,
+        note: note,
+        mode: "health-connect",
+        start_time: s.start || "",
+        end_time: s.end || "",
+        dream_type: "",
+        wake_emotion: quality && quality >= 4 ? "descansado" : "normal",
+        narrative: "",
+        symbols: [],
+        clarity: null,
+        created_at: s.synced_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        data: {
+          ...s,
+          origin: s.origin || "Mi Fitness",
+          source: "health-connect",
+          stage_totals_minutes: stageTotals,
+        },
+      });
+    }
+
+    if (rowsToUpsert.length === 0) {
+      return res.status(400).json({
+        status: "error",
+        message: "No se pudieron procesar sesiones válidas de sueño.",
+      });
+    }
+
+    // 1. Guardar en la tabla relacional `sleep_log` en Supabase
+    const { error: upsertErr } = await safeUpsert("sleep_log", rowsToUpsert, "id");
+    if (upsertErr) {
+      console.error("[Sleep API] Error guardando en sleep_log:", upsertErr);
+      throw new Error("Error en Supabase sleep_log: " + upsertErr.message);
+    }
+
+    // 2. Mantener sincronizado el estado global `app_state` (default_user) para carga instantánea
+    try {
+      const { data: stateRow } = await supabase
+        .from("app_state")
+        .select("state_json")
+        .eq("id", "default_user")
+        .maybeSingle();
+
+      const stateJson = (stateRow && typeof stateRow.state_json === "object") ? stateRow.state_json : {};
+      const currentSleepLog = Array.isArray(stateJson.sleepLog) ? [...stateJson.sleepLog] : [];
+
+      rowsToUpsert.forEach((newRow) => {
+        const mappedEntry = {
+          id: newRow.id,
+          date: newRow.date,
+          totalMinutes: newRow.total_minutes,
+          quality: newRow.quality,
+          note: newRow.note,
+          mode: newRow.mode,
+          start: newRow.start_time,
+          end: newRow.end_time,
+          dreamType: newRow.dream_type,
+          wakeEmotion: newRow.wake_emotion,
+          narrative: newRow.narrative,
+          symbols: newRow.symbols,
+          clarity: newRow.clarity,
+          ts: newRow.created_at,
+          ...(newRow.data || {}),
+        };
+
+        const existingIdx = currentSleepLog.findIndex(
+          (x) => String(x.id) === newRow.id || (String(x.date) === newRow.date && x.mode === "health-connect")
+        );
+        if (existingIdx >= 0) {
+          currentSleepLog[existingIdx] = { ...currentSleepLog[existingIdx], ...mappedEntry };
+        } else {
+          currentSleepLog.push(mappedEntry);
+        }
+      });
+
+      // Ordenar por fecha descendente
+      currentSleepLog.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+
+      await supabase.from("app_state").upsert(
+        {
+          id: "default_user",
+          state_json: { ...stateJson, sleepLog: currentSleepLog },
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
+    } catch (stateErr) {
+      console.warn("[Sleep API] Advertencia actualizando app_state:", stateErr.message);
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      message: `Sincronizadas ${rowsToUpsert.length} sesiones de sueño con éxito.`,
+      count: rowsToUpsert.length,
+      syncedSessions: rowsToUpsert.map((r) => ({
+        id: r.id,
+        date: r.date,
+        totalMinutes: r.total_minutes,
+        quality: r.quality,
+        note: r.note,
+      })),
+    });
+  } catch (err) {
+    console.error("[Sleep API] Error:", err);
+    return res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
 module.exports = app;
 
 if (process.argv[1]?.endsWith("index.js")) {

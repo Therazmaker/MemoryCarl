@@ -100,6 +100,9 @@ export function loadActivations() {
 function saveActivations(records) {
   try {
     localStorage.setItem(ACTIVATIONS_KEY, JSON.stringify(records.slice(-MAX_RECORDS)));
+    if (typeof window !== "undefined" && window.dbService?.scheduleSync) {
+      window.dbService.scheduleSync();
+    }
   } catch (_e) {
     // Cuota llena: se descartan los más antiguos
     try { localStorage.setItem(ACTIVATIONS_KEY, JSON.stringify(records.slice(-Math.floor(MAX_RECORDS / 2)))); } catch (_e2) {}
@@ -220,7 +223,12 @@ export function isAstroInPromptEnabled() {
 }
 
 export function setAstroInPromptEnabled(enabled) {
-  try { localStorage.setItem(ASTRO_IN_PROMPT_KEY, enabled ? "1" : "0"); } catch (_e) {}
+  try {
+    localStorage.setItem(ASTRO_IN_PROMPT_KEY, enabled ? "1" : "0");
+    if (typeof window !== "undefined" && window.dbService?.scheduleSync) {
+      window.dbService.scheduleSync();
+    }
+  } catch (_e) {}
 }
 
 /**
