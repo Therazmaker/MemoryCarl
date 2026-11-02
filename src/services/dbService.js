@@ -1456,6 +1456,42 @@ export async function pullFromSupabase({ isManual = false } = {}) {
         case "house":
           if (p && typeof p === "object" && (!st.house || !st.house.zones?.length)) { st.house = p; changed = true; }
           break;
+        case "home_widgets":
+          if (p && typeof p === "object") {
+            if (Array.isArray(p.moodActivityCats) && p.moodActivityCats.length > 0) {
+              if (!Array.isArray(st.moodActivityCats) || st.moodActivityCats.length === 0) {
+                st.moodActivityCats = p.moodActivityCats;
+                localStorage.setItem("memorycarl_v2_mood_activity_cats", JSON.stringify(p.moodActivityCats));
+                changed = true;
+              } else {
+                // Merge custom items across categories so no custom activity label is lost
+                let catsChanged = false;
+                for (const cloudCat of p.moodActivityCats) {
+                  if (!cloudCat?.id) continue;
+                  const localCat = st.moodActivityCats.find((c) => c.id === cloudCat.id);
+                  if (!localCat) {
+                    st.moodActivityCats.push(cloudCat);
+                    catsChanged = true;
+                  } else if (Array.isArray(cloudCat.items)) {
+                    if (!Array.isArray(localCat.items)) localCat.items = [];
+                    const existingIds = new Set(localCat.items.map((it) => it.id));
+                    for (const item of cloudCat.items) {
+                      if (item?.id && !existingIds.has(item.id)) {
+                        localCat.items.push(item);
+                        existingIds.add(item.id);
+                        catsChanged = true;
+                      }
+                    }
+                  }
+                }
+                if (catsChanged) {
+                  localStorage.setItem("memorycarl_v2_mood_activity_cats", JSON.stringify(st.moodActivityCats));
+                  changed = true;
+                }
+              }
+            }
+          }
+          break;
         case "neurochat_now":
           if (Array.isArray(p.lifeFacts) && p.lifeFacts.length) {
             const localFacts = readLocalArray(LIFE_FACTS_KEY);

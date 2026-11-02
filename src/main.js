@@ -6159,6 +6159,127 @@ function readFilesAsDataUrls(fileList, cb){
   });
 }
 
+const MOOD_ACTIVITY_CATS_DEFAULT = [
+  {
+    id:"rutina", label:"Rutina", icon:"⭐",
+    items:[
+      {id:"tarot",      icon:"🔮", label:"Tarot"},
+      {id:"dibujo",     icon:"🎨", label:"Dibujos"},
+      {id:"fergis",     icon:"💜", label:"Fergis"},
+      {id:"trading",    icon:"📈", label:"Trading"},
+      {id:"musica",     icon:"🎵", label:"Música"},
+      {id:"tiktok",     icon:"📱", label:"TikTok"},
+      {id:"lectura",    icon:"📖", label:"Lectura"},
+      {id:"meditacion", icon:"🧘", label:"Meditación"},
+    ]
+  },
+  {
+    id:"trabajo", label:"Trabajo", icon:"💼",
+    items:[
+      {id:"work",       icon:"💼", label:"Trabajo"},
+      {id:"claims",     icon:"🗂️", label:"Claims"},
+      {id:"clases",     icon:"📚", label:"Clases"},
+      {id:"upwork",     icon:"💻", label:"Upwork"},
+      {id:"deudas",     icon:"💸", label:"Deudas"},
+      {id:"itinerario", icon:"🗺️", label:"Itinerario"},
+    ]
+  },
+  {
+    id:"sueno", label:"Sueño", icon:"🌙",
+    items:[
+      {id:"buen_sueno",       icon:"😴", label:"Buen sueño"},
+      {id:"sueno_malo",       icon:"😵", label:"Sueño malo"},
+      {id:"sueno_temprano",   icon:"🌛", label:"Sueño temprano"},
+      {id:"sueno_tarde",      icon:"🌜", label:"Sueño tarde"},
+    ]
+  },
+  {
+    id:"salud", label:"Salud", icon:"🌿",
+    items:[
+      {id:"ejercicio",  icon:"🏃", label:"Ejercicio"},
+      {id:"comer_rico", icon:"🥗", label:"Comer rico"},
+      {id:"agua",       icon:"💧", label:"Agua"},
+      {id:"enfermedad", icon:"🤒", label:"Enfermedad"},
+      {id:"descanso",   icon:"🛋️", label:"Descanso"},
+    ]
+  },
+  {
+    id:"hogar", label:"Hogar", icon:"🏠",
+    items:[
+      {id:"limpiar",   icon:"🧹", label:"Limpiar"},
+      {id:"cocinar",   icon:"🍳", label:"Cocinar"},
+      {id:"compras",   icon:"🛒", label:"Compras"},
+      {id:"familia",   icon:"👨‍👩‍👧", label:"Familia"},
+      {id:"parrilla",  icon:"🥩", label:"Parrilla"},
+    ]
+  },
+  {
+    id:"ocio", label:"Ocio", icon:"🎮",
+    items:[
+      {id:"videojuegos",icon:"🎮", label:"Videojuegos"},
+      {id:"serie",      icon:"📺", label:"Serie/Película"},
+      {id:"salir",      icon:"🚶", label:"Salir"},
+      {id:"estoico",    icon:"📜", label:"Diario Estoico"},
+      {id:"nuevo_alquiler",icon:"🏡",label:"Nuevo Alquiler"},
+    ]
+  },
+];
+
+function getMoodActivityCatalog(){
+  const byId = new Map();
+  for(const cat of MOOD_ACTIVITY_CATS_DEFAULT){
+    for(const it of (cat.items || [])){
+      if(it && it.id) byId.set(String(it.id), { id: String(it.id), icon: it.icon || cat.icon || "🏷️", label: it.label || String(it.id) });
+    }
+  }
+  const customCats = Array.isArray(state?.moodActivityCats)
+    ? state.moodActivityCats
+    : load(LS.moodActivityCats, null);
+  if(Array.isArray(customCats)){
+    for(const cat of customCats){
+      for(const it of (cat?.items || [])){
+        if(it && it.id) byId.set(String(it.id), { id: String(it.id), icon: it.icon || cat.icon || "🏷️", label: it.label || String(it.id) });
+      }
+    }
+  }
+  return byId;
+}
+
+function resolveMoodActivity(actId, entry = null){
+  if(!actId) return { id: "", icon: "🏷️", label: "" };
+  if(typeof actId === "object"){
+    return {
+      id: String(actId.id || ""),
+      icon: actId.icon || "🏷️",
+      label: actId.label || String(actId.id || ""),
+    };
+  }
+  const key = String(actId);
+  if(entry && entry.activityMeta && entry.activityMeta[key]){
+    const m = entry.activityMeta[key];
+    if(m && m.label) return { id: key, icon: m.icon || "🏷️", label: m.label };
+  }
+  const catalog = getMoodActivityCatalog();
+  if(catalog.has(key)) return catalog.get(key);
+
+  // Fallback para IDs generados tipo "custom_salud_1793641781874_5nnd0" si provienen de otro dispositivo sin categorías sincronizadas
+  const customMatch = key.match(/^custom_([a-z0-9]+)_/i);
+  if(customMatch){
+    const catId = customMatch[1].toLowerCase();
+    const allCats = [
+      ...(Array.isArray(state?.moodActivityCats) ? state.moodActivityCats : []),
+      ...MOOD_ACTIVITY_CATS_DEFAULT,
+    ];
+    const foundCat = allCats.find(c => String(c?.id || "").toLowerCase() === catId);
+    if(foundCat){
+      return { id: key, icon: foundCat.icon || "🏷️", label: foundCat.label || catId };
+    }
+    const cleanCat = catId.charAt(0).toUpperCase() + catId.slice(1);
+    return { id: key, icon: "🏷️", label: cleanCat };
+  }
+  return { id: key, icon: "🏷️", label: key };
+}
+
 function openMoodPickerModal(iso, opts={}){
   const host = document.querySelector("#app");
   const backdrop = document.createElement("div");
@@ -6522,10 +6643,22 @@ function openMoodPickerModal(iso, opts={}){
       let arr = Array.isArray(state.moodDaily[key]) ? state.moodDaily[key] : (state.moodDaily[key] ? [state.moodDaily[key]] : []);
       
       if(selectedId) {
+        const actList = Array.from(activities);
+        const activityMeta = {};
+        for(const aId of actList){
+          for(const cat of ACTIVITY_CATS){
+            const found = (cat.items || []).find(it => it.id === aId);
+            if(found){
+              activityMeta[aId] = { icon: found.icon || cat.icon || "🏷️", label: found.label };
+              break;
+            }
+          }
+        }
         arr.push({
           spriteId: selectedId,
           label: FACE_LABELS[selectedId]||selectedId,
-          activities: Array.from(activities),
+          activities: actList,
+          activityMeta,
           energy,
           note,
           ts: new Date().toISOString()
@@ -6775,28 +6908,16 @@ function openMoodMonthModal(initialIso){
 
       // 4. Activities top
       const actCount = {};
-      entries.forEach(e=>{ (Array.isArray(e.activities)?e.activities:[]).forEach(a=>{ actCount[a]=(actCount[a]||0)+1; }); });
+      const actSampleEntry = {};
+      entries.forEach(e=>{ (Array.isArray(e.activities)?e.activities:[]).forEach(a=>{ actCount[a]=(actCount[a]||0)+1; if(!actSampleEntry[a]) actSampleEntry[a]=e; }); });
       const topActs = Object.entries(actCount).sort((a,b)=>b[1]-a[1]).slice(0,8);
       const actSection = topActs.length ? `
         <div class="mmchart-card">
           <div class="mmchart-title">🏃 Actividades del mes</div>
           <div class="mmact-grid">
             ${topActs.map(([id,n])=>{
-              const allItems = [
-                {id:"tarot",icon:"🔮"},{id:"dibujo",icon:"🎨"},{id:"fergis",icon:"💜"},
-                {id:"trading",icon:"📈"},{id:"musica",icon:"🎵"},{id:"tiktok",icon:"📱"},
-                {id:"lectura",icon:"📖"},{id:"meditacion",icon:"🧘"},{id:"work",icon:"💼"},
-                {id:"claims",icon:"🗂️"},{id:"clases",icon:"📚"},{id:"upwork",icon:"💻"},
-                {id:"deudas",icon:"💸"},{id:"itinerario",icon:"🗺️"},{id:"buen_sueno",icon:"😴"},
-                {id:"sueno_malo",icon:"😵"},{id:"sueno_temprano",icon:"🌛"},{id:"sueno_tarde",icon:"🌜"},
-                {id:"ejercicio",icon:"🏃"},{id:"comer_rico",icon:"🥗"},{id:"agua",icon:"💧"},
-                {id:"enfermedad",icon:"🤒"},{id:"descanso",icon:"🛋️"},{id:"limpiar",icon:"🧹"},
-                {id:"cocinar",icon:"🍳"},{id:"compras",icon:"🛒"},{id:"familia",icon:"👨‍👩‍👧"},
-                {id:"parrilla",icon:"🥩"},{id:"videojuegos",icon:"🎮"},{id:"serie",icon:"📺"},
-                {id:"salir",icon:"🚶"},{id:"estoico",icon:"📜"},{id:"nuevo_alquiler",icon:"🏡"},
-              ];
-              const item = allItems.find(x=>x.id===id)||{icon:"🏷️"};
-              return `<div class="mmact-item">
+              const item = resolveMoodActivity(id, actSampleEntry[id]);
+              return `<div class="mmact-item" title="${escapeHtml(item.label)}">
                 <div class="mmact-icon">${item.icon}</div>
                 <div class="mmact-n">${n}</div>
               </div>`;
@@ -6872,8 +6993,7 @@ function openMoodMonthModal(initialIso){
         const en = Number(e.energy)||0;
         const enDots = en>0?Array.from({length:5},(_,i)=>`<div class="mml-en-dot ${i<en?"on":""}" style="${i<en?"--ec:"+ENERGY_COLORS[en]:""}"></div>`).join(""):"";
         const acts = Array.isArray(e.activities)?e.activities:[];
-        const allItems2 = [{id:"tarot",icon:"🔮",label:"Tarot"},{id:"dibujo",icon:"🎨",label:"Dibujos"},{id:"fergis",icon:"💜",label:"Fergis"},{id:"trading",icon:"📈",label:"Trading"},{id:"musica",icon:"🎵",label:"Música"},{id:"tiktok",icon:"📱",label:"TikTok"},{id:"lectura",icon:"📖",label:"Lectura"},{id:"meditacion",icon:"🧘",label:"Meditación"},{id:"work",icon:"💼",label:"Trabajo"},{id:"claims",icon:"🗂️",label:"Claims"},{id:"clases",icon:"📚",label:"Clases"},{id:"upwork",icon:"💻",label:"Upwork"},{id:"deudas",icon:"💸",label:"Deudas"},{id:"itinerario",icon:"🗺️",label:"Itinerario"},{id:"buen_sueno",icon:"😴",label:"Buen sueño"},{id:"sueno_malo",icon:"😵",label:"Sueño malo"},{id:"sueno_temprano",icon:"🌛",label:"Sueño temprano"},{id:"sueno_tarde",icon:"🌜",label:"Sueño tarde"},{id:"ejercicio",icon:"🏃",label:"Ejercicio"},{id:"comer_rico",icon:"🥗",label:"Comer rico"},{id:"agua",icon:"💧",label:"Agua"},{id:"enfermedad",icon:"🤒",label:"Enfermedad"},{id:"descanso",icon:"🛋️",label:"Descanso"},{id:"limpiar",icon:"🧹",label:"Limpiar"},{id:"cocinar",icon:"🍳",label:"Cocinar"},{id:"compras",icon:"🛒",label:"Compras"},{id:"familia",icon:"👨‍👩‍👧",label:"Familia"},{id:"parrilla",icon:"🥩",label:"Parrilla"},{id:"videojuegos",icon:"🎮",label:"Videojuegos"},{id:"serie",icon:"📺",label:"Serie"},{id:"salir",icon:"🚶",label:"Salir"},{id:"estoico",icon:"📜",label:"Estoico"},{id:"nuevo_alquiler",icon:"🏡",label:"Nuevo Alquiler"}];
-        const actChips = acts.slice(0,6).map(a=>{ const it=allItems2.find(x=>x.id===a)||{icon:"🏷️",label:a}; return `<span class="mml-tag-chip">${it.icon} ${escapeHtml(it.label)}</span>`; }).join("");
+        const actChips = acts.slice(0,6).map(a=>{ const it=resolveMoodActivity(a, e); return `<span class="mml-tag-chip">${it.icon} ${escapeHtml(it.label)}</span>`; }).join("");
         const dateLabel = (()=>{ try{ return new Date(e.iso+"T00:00:00").toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short"}); }catch{return e.iso;} })();
         return `
           <div class="moodLogCard mml-card" data-iso="${escapeHtml(e.iso)}">
@@ -8340,7 +8460,10 @@ function viewHome(){
     const color = FACE_COLORS_MAP[entry.spriteId] || "#7c5cff";
     const label = entry.label || FACE_LABEL_MAP[entry.spriteId] || entry.spriteId;
     const timeStr = fmtTime(entry.ts);
-    const acts = (entry.activities||[]).slice(0,3).join(" · ");
+    const acts = (entry.activities||[]).slice(0,3).map(a => {
+      const it = resolveMoodActivity(a, entry);
+      return it.icon ? `${it.icon} ${it.label}` : it.label;
+    }).join(" · ");
     return `
       <div class="moodTimelineRow">
         <div class="moodTimelineFace" style="--fc:${color}">${svg||"😶"}</div>
