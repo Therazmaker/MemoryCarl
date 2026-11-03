@@ -64,6 +64,8 @@ export function schedulePush({ immediate = false } = {}) {
   return scheduleSync({ immediate });
 }
 
+export const scheduleAutoSync = schedulePush;
+
 export async function pullNeurochat(_opts = {}) {
   return await pullFromSupabase({ isManual: false });
 }

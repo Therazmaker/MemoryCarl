@@ -4,7 +4,7 @@
  */
 
 import { markAppStateChanged } from "../services/syncOutbox.js";
-import { scheduleAutoSync } from "../services/neurochatSync.js";
+import { schedulePush } from "../services/neurochatSync.js";
 
 const STORAGE_KEY = "memorycarl_couch_natal_chart";
 
@@ -100,7 +100,7 @@ export function saveNatalChartData(data) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     markAppStateChanged();
-    scheduleAutoSync();
+    schedulePush();
     return true;
   } catch (err) {
     console.error("[CouchStore] Error al guardar carta natal:", err);
@@ -115,7 +115,7 @@ export function resetNatalChartData() {
   try {
     localStorage.removeItem(STORAGE_KEY);
     markAppStateChanged();
-    scheduleAutoSync();
+    schedulePush();
     return JSON.parse(JSON.stringify(DEFAULT_NATAL_CHART));
   } catch (err) {
     console.error("[CouchStore] Error al reiniciar carta natal:", err);
