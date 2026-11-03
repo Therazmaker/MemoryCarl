@@ -6,8 +6,6 @@
  */
 
 import {
-  SYNC_STATUS_KEY as DB_SYNC_STATUS_KEY,
-  INITIAL_BACKFILL_DONE_KEY,
   getSupabaseConfig,
   getSyncStatus as dbGetSyncStatus,
   flushOfflineQueue,
@@ -17,8 +15,8 @@ import {
   loadOfflineQueue,
 } from "./dbService.js";
 
-export const SYNC_STATUS_KEY = DB_SYNC_STATUS_KEY;
-export const BACKFILL_FLAG = INITIAL_BACKFILL_DONE_KEY;
+export const SYNC_STATUS_KEY = "memorycarl_neurochat_sync_status";
+export const BACKFILL_FLAG = "memorycarl_dbservice_backfill_v4";
 export const PULLED_ONCE_FLAG = "memorycarl_sync_pulled_once";
 
 export function getApiConfig() {
