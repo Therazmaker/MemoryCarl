@@ -234,7 +234,10 @@ window.FINANCE = (function(){
     sourceMovementId,
     isSourcePool,
     sourcePoolName,
-    parentPoolId
+    parentPoolId,
+    noAccountDebit,
+    isExternalPayment,
+    paidBy
   }){
 
     const acc = getAccount(accountId);
@@ -326,29 +329,35 @@ window.FINANCE = (function(){
     const oldMovement = state.movements[idx];
     const oldAcc = getAccount(oldMovement.accountId);
     const oldToAcc = getAccount(oldMovement.toAccountId);
+    const oldNoDebit = !!oldMovement.noAccountDebit || !!oldMovement.isExternalPayment || oldMovement.accountId === "ext_fergis" || oldMovement.accountId === "ext_historical";
 
     // Revert old balance
-    if(oldMovement.type === "expense"){
-      if(oldAcc) oldAcc.balance += oldMovement.amount;
-    }else if(oldMovement.type === "income"){
-      if(oldAcc) oldAcc.balance -= oldMovement.amount;
-    }else if(oldMovement.type === "transfer"){
-      if(oldAcc) oldAcc.balance += oldMovement.amount;
-      if(oldToAcc) oldToAcc.balance -= oldMovement.amount;
+    if(!oldNoDebit){
+      if(oldMovement.type === "expense"){
+        if(oldAcc) oldAcc.balance += oldMovement.amount;
+      }else if(oldMovement.type === "income"){
+        if(oldAcc) oldAcc.balance -= oldMovement.amount;
+      }else if(oldMovement.type === "transfer"){
+        if(oldAcc) oldAcc.balance += oldMovement.amount;
+        if(oldToAcc) oldToAcc.balance -= oldMovement.amount;
+      }
     }
 
     const updatedMovement = { ...oldMovement, ...patch };
+    const newNoDebit = !!updatedMovement.noAccountDebit || !!updatedMovement.isExternalPayment || updatedMovement.accountId === "ext_fergis" || updatedMovement.accountId === "ext_historical";
 
     // Apply new balance
     const newAcc = getAccount(updatedMovement.accountId);
     const newToAcc = getAccount(updatedMovement.toAccountId);
-    if(updatedMovement.type === "expense"){
-      if(newAcc) newAcc.balance -= updatedMovement.amount;
-    }else if(updatedMovement.type === "income"){
-      if(newAcc) newAcc.balance += updatedMovement.amount;
-    }else if(updatedMovement.type === "transfer"){
-      if(newAcc) newAcc.balance -= updatedMovement.amount;
-      if(newToAcc) newToAcc.balance += updatedMovement.amount;
+    if(!newNoDebit){
+      if(updatedMovement.type === "expense"){
+        if(newAcc) newAcc.balance -= updatedMovement.amount;
+      }else if(updatedMovement.type === "income"){
+        if(newAcc) newAcc.balance += updatedMovement.amount;
+      }else if(updatedMovement.type === "transfer"){
+        if(newAcc) newAcc.balance -= updatedMovement.amount;
+        if(newToAcc) newToAcc.balance += updatedMovement.amount;
+      }
     }
 
     state.movements[idx] = updatedMovement;
@@ -363,14 +372,17 @@ window.FINANCE = (function(){
     const movement = state.movements[idx];
     const acc = getAccount(movement.accountId);
     const toAcc = getAccount(movement.toAccountId);
+    const isNoDebit = !!movement.noAccountDebit || !!movement.isExternalPayment || movement.accountId === "ext_fergis" || movement.accountId === "ext_historical";
 
-    if(movement.type === "expense"){
-      if(acc) acc.balance += movement.amount;
-    }else if(movement.type === "income"){
-      if(acc) acc.balance -= movement.amount;
-    }else if(movement.type === "transfer"){
-      if(acc) acc.balance += movement.amount;
-      if(toAcc) toAcc.balance -= movement.amount;
+    if(!isNoDebit){
+      if(movement.type === "expense"){
+        if(acc) acc.balance += movement.amount;
+      }else if(movement.type === "income"){
+        if(acc) acc.balance -= movement.amount;
+      }else if(movement.type === "transfer"){
+        if(acc) acc.balance += movement.amount;
+        if(toAcc) toAcc.balance -= movement.amount;
+      }
     }
 
     state.movements.splice(idx, 1);
