@@ -266,15 +266,20 @@ window.FINANCE = (function(){
       sourceMovementId: sourceMovementId || null,
       isSourcePool: !!isSourcePool,
       sourcePoolName: sourcePoolName || null,
-      parentPoolId: parentPoolId || null
+      parentPoolId: parentPoolId || null,
+      noAccountDebit: !!noAccountDebit,
+      isExternalPayment: !!isExternalPayment,
+      paidBy: paidBy || "me"
     };
 
+    const isNoDebit = !!noAccountDebit || !!isExternalPayment || accountId === "ext_fergis" || accountId === "ext_historical";
+
     if(type === "expense"){
-      if(acc) acc.balance -= movement.amount;
+      if(acc && !isNoDebit) acc.balance -= movement.amount;
     }else if(type === "income"){
-      if(acc) acc.balance += movement.amount;
+      if(acc && !isNoDebit) acc.balance += movement.amount;
     }else if(type === "transfer"){
-      if(acc) acc.balance -= movement.amount;
+      if(acc && !isNoDebit) acc.balance -= movement.amount;
       if(toAcc) toAcc.balance += movement.amount;
     }
 

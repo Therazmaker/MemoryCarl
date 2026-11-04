@@ -1688,11 +1688,7 @@ function submitMcPayModal(itemId) {
     ? " · [Pagado por Fergis]"
     : (isHistorical ? " · [Registro histórico sin débito]" : "");
 
-  let assignedAccId = accountId;
-  if (noAccountDebit) {
-    const primary = state.financePrimaryAccountId || (state.financeAccounts || [])[0]?.id || "external";
-    assignedAccId = primary;
-  }
+  let assignedAccId = noAccountDebit ? (isExternalFergis ? "ext_fergis" : "ext_historical") : accountId;
 
   // Target month key for mission record (based on payment date)
   const targetMk = financeGetMonthKeyFromIso(dateISO);
@@ -18282,7 +18278,51 @@ function financeMigrateV2(){
   persist();
 }
 
+function financeDeduplicateDebts() {
+  if (!Array.isArray(state.financeDebts) || state.financeDebts.length <= 1) return;
+
+  const seenId = new Map();
+  const seenNameDay = new Map();
+  const cleaned = [];
+
+  for (const d of state.financeDebts) {
+    if (!d) continue;
+    const cleanId = String(d.id || '').replace(/^debt_/, '');
+    const normName = String(d.name || '').trim().toLowerCase();
+    const nameDayKey = normName ? `${normName}_${d.dueDay || 30}_${d.type || 'loan'}` : null;
+
+    let existing = null;
+    if (cleanId && seenId.has(cleanId)) {
+      existing = seenId.get(cleanId);
+    } else if (nameDayKey && seenNameDay.has(nameDayKey)) {
+      existing = seenNameDay.get(nameDayKey);
+    }
+
+    if (existing) {
+      // Merge into the existing debt: keep the lower balance (more recently paid)
+      if (Number(d.balance || 0) < Number(existing.balance || 0)) {
+        existing.balance = d.balance;
+      }
+      if (d.monthlyDue && !existing.monthlyDue) existing.monthlyDue = d.monthlyDue;
+      if (d.status === 'closed' || existing.status === 'closed') {
+        if (existing.balance <= 0) existing.status = 'closed';
+      }
+    } else {
+      if (cleanId) seenId.set(cleanId, d);
+      if (nameDayKey) seenNameDay.set(nameDayKey, d);
+      cleaned.push(d);
+    }
+  }
+
+  if (cleaned.length !== state.financeDebts.length) {
+    console.log(`[Finance] Cleaned duplicate debts from ${state.financeDebts.length} down to ${cleaned.length}`);
+    state.financeDebts = cleaned;
+    persist();
+  }
+}
+
 function financeEnsureMissionControlStructures(){
+  financeDeduplicateDebts();
   if(!Array.isArray(state.financeMissionPayments)) state.financeMissionPayments = [];
   if(!state.financeMissionMonthKey) state.financeMissionMonthKey = getCurrentMonthKey();
   if(!Array.isArray(state.financeObligations)) state.financeObligations = [];
@@ -18479,7 +18519,18 @@ function financeMissionControlModel(monthKey){
     });
   });
 
-  items.sort((a, b) => (Number(a.dueDay) || 1) - (Number(b.dueDay) || 1));
+  // Deduplicate items in Mission Control
+  const seenMissionKeys = new Set();
+  const dedupedItems = [];
+  for (const it of items) {
+    const key = `${it.type}_${String(it.name || '').trim().toLowerCase()}_${it.dueDay || 1}`;
+    if (seenMissionKeys.has(key)) continue;
+    seenMissionKeys.add(key);
+    dedupedItems.push(it);
+  }
+  dedupedItems.sort((a, b) => (Number(a.dueDay) || 1) - (Number(b.dueDay) || 1));
+  items.length = 0;
+  items.push(...dedupedItems);
 
   const totalExpected = items.reduce((s, i) => s + Number(i.amount || 0), 0);
   const totalPaid = items.reduce((s, i) => s + (i.status === 'paid' ? Number(i.paidAmount || i.amount || 0) : 0), 0);
@@ -18679,6 +18730,21 @@ function financeActiveLedger(){
 }
 
 function financeRecomputeBalances(){
+  // Auto-repair any past movements tagged as historical or Fergis that were accidentally assigned to a bank account
+  (financeActiveLedger()||[]).forEach(e => {
+    if (e && e.note) {
+      if (e.note.includes('[Registro histórico sin débito]') || e.note.includes('Registro histórico')) {
+        e.accountId = 'ext_historical';
+        e.noAccountDebit = true;
+        e.isExternalPayment = false;
+      } else if (e.note.includes('[Pagado por Fergis]') || e.note.includes('Pagado por Fergis')) {
+        e.accountId = 'ext_fergis';
+        e.noAccountDebit = true;
+        e.isExternalPayment = true;
+        e.paidBy = 'fergis';
+      }
+    }
+  });
   const sums = {};
   const primaryId = state.financePrimaryAccountId || (state.financeAccounts||[]).find(a=>!a.archived && a.status !== 'archived')?.id;
 
@@ -18835,8 +18901,9 @@ try {
 
 function addFinanceEntry(payload){
   const {type, amount, accountId, toAccountId, category, reason, note, date, neuronRole, isFiado, fiadoStatus} = payload;
+  const isNoDebit = !!payload.noAccountDebit || !!payload.isExternalPayment || accountId === "ext_fergis" || accountId === "ext_historical";
   const acc = state.financeAccounts.find(a=>a.id===accountId);
-  if(!acc) return null;
+  if(!acc && !isNoDebit) return null;
 
   const amt = financeParseAmount(amount);
   const entryDate = date || new Date().toISOString();
@@ -20989,6 +21056,8 @@ function renderFinanceMovements(){
   const afterMap = _financeBalanceAfterMap(all);
   
   const accName = (id)=>{
+    if (id === "ext_fergis") return "💜 Pagado por Fergis";
+    if (id === "ext_historical") return "📜 Pago Histórico (Sin débito)";
     const a = (state.financeAccounts||[]).find(x=>x.id===id);
     return a ? a.name : "Cuenta";
   };
@@ -22311,7 +22380,7 @@ function openFinanceDebtPayModal(debtId){
       : (isHistorical ? " · [Registro histórico sin débito]" : "");
 
     const assignedAccId = noAccountDebit
-      ? ((state.financeAccounts||[])[0]?.id || "external")
+      ? (isExternalFergis ? "ext_fergis" : "ext_historical")
       : accountId;
 
     // Update debt balance

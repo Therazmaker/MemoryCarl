@@ -1381,22 +1381,44 @@ export async function pullFromSupabase({ isManual = false } = {}) {
     const commitments = Array.isArray(st.financeCommitments) ? [...st.financeCommitments] : [];
     const obligations = Array.isArray(st.financeObligations) ? [...st.financeObligations] : [];
 
-    const debtIds = new Set(debts.map((d) => String(d.id)));
-    const commIds = new Set(commitments.map((c) => String(c.id)));
-    const obIds = new Set(obligations.map((o) => String(o.id)));
+    const debtIds = new Set(debts.flatMap((d) => [String(d.id), String(d.id).replace(/^debt_/, ""), `debt_${d.id}`]));
+    const commIds = new Set(commitments.flatMap((c) => [String(c.id), String(c.id).replace(/^commitment_/, ""), `commitment_${c.id}`]));
+    const obIds = new Set(obligations.flatMap((o) => [String(o.id), String(o.id).replace(/^obligation_/, ""), `obligation_${o.id}`]));
 
     for (const row of cloud.debts) {
       if (!row?.id || deletedDebts.has(String(row.id)) || pendingDebts.has(String(row.id))) continue;
-      const item = row.data && typeof row.data === "object" ? row.data : row;
+      const item = row.data && typeof row.data === "object" ? { ...row.data } : { ...row };
       const rawId = String(item.id || row.id).replace(/^(debt|commitment|obligation)_/, "");
-      item.id = rawId;
 
       if (row.kind === "commitment") {
-        if (!commIds.has(rawId)) { commitments.push(item); commIds.add(rawId); changed = true; }
+        if (!commIds.has(rawId)) {
+          item.id = item.id || rawId;
+          commitments.push(item);
+          commIds.add(rawId);
+          commIds.add(`commitment_${rawId}`);
+          changed = true;
+        }
       } else if (row.kind === "obligation") {
-        if (!obIds.has(rawId)) { obligations.push(item); obIds.add(rawId); changed = true; }
+        if (!obIds.has(rawId)) {
+          item.id = item.id || rawId;
+          obligations.push(item);
+          obIds.add(rawId);
+          obIds.add(`obligation_${rawId}`);
+          changed = true;
+        }
       } else {
-        if (!debtIds.has(rawId)) { debts.push(item); debtIds.add(rawId); changed = true; }
+        const normName = String(item.name || '').trim().toLowerCase();
+        const existingByName = normName ? debts.find(d => String(d.name || '').trim().toLowerCase() === normName && Number(d.dueDay || 0) === Number(item.dueDay || 0)) : null;
+
+        if (!debtIds.has(rawId) && !existingByName) {
+          item.id = item.id || rawId;
+          debts.push(item);
+          debtIds.add(rawId);
+          debtIds.add(`debt_${rawId}`);
+          changed = true;
+        } else if (existingByName && !debtIds.has(rawId)) {
+          debtIds.add(rawId);
+        }
       }
     }
     st.financeDebts = debts;
