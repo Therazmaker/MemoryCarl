@@ -1603,7 +1603,7 @@ function openMcPayModal(itemId) {
   backdrop.id = "mcPayModal";
 
   backdrop.innerHTML = `
-    <div class="modal" data-act="modal-content-stop" style="max-width:420px;padding:22px;border-radius:18px;">
+    <div class="modal" data-act="modal-content-stop" style="max-width:440px;padding:22px;border-radius:18px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:20px;">${typeIcons[item.type] || '💸'}</span>
@@ -1622,15 +1622,27 @@ function openMcPayModal(itemId) {
       </div>
 
       <div style="display:flex;flex-direction:column;gap:12px;">
-        <div>
-          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Monto a pagar (S/)</label>
-          <input type="number" inputmode="decimal" id="mcPayAmount" class="input" value="${Number(item.amount || 0).toFixed(2)}" style="width:100%;font-size:16px;font-weight:700;" />
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Monto a pagar (S/)</label>
+            <input type="number" inputmode="decimal" id="mcPayAmount" class="input" value="${Number(item.amount || 0).toFixed(2)}" style="width:100%;font-size:15px;font-weight:700;" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Fecha de Pago</label>
+            <input type="date" id="mcPayDate" class="input" value="${new Date().toISOString().slice(0, 10)}" style="width:100%;font-size:13px;" />
+          </div>
         </div>
 
         <div>
-          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Cuenta / Caja de Origen</label>
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Cuenta / Origen del Pago</label>
           <select id="mcPayAccountId" class="input" style="width:100%;">
-            ${accounts.map(a => `<option value="${a.id}" ${a.id === defaultAccId ? "selected" : ""}>${escapeHtml(a.name)} (S/ ${_financeFmt(a.balance)})</option>`).join("")}
+            <optgroup label="── Cuentas Propias (Descuenta tu saldo) ──">
+              ${accounts.map(a => `<option value="${a.id}" ${a.id === defaultAccId ? "selected" : ""}>${escapeHtml(a.name)} (S/ ${_financeFmt(a.balance)})</option>`).join("")}
+            </optgroup>
+            <optgroup label="── Fuentes Especiales (NO descuenta tu saldo) ──">
+              <option value="ext_fergis">💜 Pagado por Fergis (Dinero de ella · Externo)</option>
+              <option value="ext_historical">📜 Pago Histórico Pasado (Ya asumido · Sin débito)</option>
+            </optgroup>
           </select>
         </div>
 
@@ -1658,15 +1670,32 @@ function submitMcPayModal(itemId) {
 
   const payAmount = parseFloat(document.getElementById("mcPayAmount")?.value || item.amount);
   const accountId = document.getElementById("mcPayAccountId")?.value;
+  const payDateVal = document.getElementById("mcPayDate")?.value || new Date().toISOString().slice(0, 10);
 
   if (!accountId || !(payAmount > 0)) {
     toast("⚠️ Seleccione una cuenta y monto válido");
     return;
   }
 
-  const now = new Date();
-  const dateISO = now.toISOString();
-  const dateStr = now.toLocaleDateString("es-PE");
+  const isExternalFergis = accountId === "ext_fergis";
+  const isHistorical = accountId === "ext_historical";
+  const noAccountDebit = isExternalFergis || isHistorical;
+
+  const dateISO = new Date(`${payDateVal}T12:00:00`).toISOString();
+  const dateStr = new Date(`${payDateVal}T12:00:00`).toLocaleDateString("es-PE");
+
+  const tagExtra = isExternalFergis
+    ? " · [Pagado por Fergis]"
+    : (isHistorical ? " · [Registro histórico sin débito]" : "");
+
+  let assignedAccId = accountId;
+  if (noAccountDebit) {
+    const primary = state.financePrimaryAccountId || (state.financeAccounts || [])[0]?.id || "external";
+    assignedAccId = primary;
+  }
+
+  // Target month key for mission record (based on payment date)
+  const targetMk = financeGetMonthKeyFromIso(dateISO);
 
   // 1. COMMITMENT
   if (item.type === "commitment") {
@@ -1677,12 +1706,12 @@ function submitMcPayModal(itemId) {
       inst.paidAmount = payAmount;
       inst.actualAmount = payAmount;
       inst.paidAt = dateISO;
-      inst.paymentSourceId = accountId;
+      inst.paymentSourceId = assignedAccId;
       inst.updatedAt = dateISO;
     }
-    let mcRec = (state.financeMissionPayments || []).find(p => p.monthKey === mk && (p.refId === item.refId || p.refId === item.templateId));
+    let mcRec = (state.financeMissionPayments || []).find(p => p.monthKey === targetMk && (p.refId === item.refId || p.refId === item.templateId));
     if (!mcRec) {
-      mcRec = { id: uid("mc_cmt"), monthKey: mk, type: "commitment", refId: item.refId || item.templateId, name: item.name };
+      mcRec = { id: uid("mc_cmt"), monthKey: targetMk, type: "commitment", refId: item.refId || item.templateId, name: item.name };
       state.financeMissionPayments.push(mcRec);
     }
     mcRec.status = "paid";
@@ -1693,10 +1722,13 @@ function submitMcPayModal(itemId) {
       date: dateISO,
       type: "expense",
       amount: payAmount,
-      accountId,
+      accountId: assignedAccId,
+      noAccountDebit,
+      isExternalPayment: isExternalFergis,
+      paidBy: isExternalFergis ? "fergis" : "me",
       category: item.category || "Servicios",
-      reason: "planificado",
-      note: `[Mission Control] Pago de ${item.name}`,
+      reason: isHistorical ? "historico" : "planificado",
+      note: `[Mission Control] Pago de ${item.name}${tagExtra}`,
       kind: "commitment_payment",
       commitmentId: item.templateId || item.refId,
       commitmentInstanceId: item.refId
@@ -1711,9 +1743,9 @@ function submitMcPayModal(itemId) {
       if (debt.balance <= 0) debt.status = "closed";
     }
 
-    let mcRec = (state.financeMissionPayments || []).find(p => p.monthKey === mk && p.refId === item.refId);
+    let mcRec = (state.financeMissionPayments || []).find(p => p.monthKey === targetMk && p.refId === item.refId);
     if (!mcRec) {
-      mcRec = { id: uid("mc_dbt"), monthKey: mk, type: "debt", refId: item.refId, name: item.name };
+      mcRec = { id: uid("mc_dbt"), monthKey: targetMk, type: "debt", refId: item.refId, name: item.name };
       state.financeMissionPayments.push(mcRec);
     }
     mcRec.status = "paid";
@@ -1724,10 +1756,13 @@ function submitMcPayModal(itemId) {
       date: dateISO,
       type: "expense",
       amount: payAmount,
-      accountId,
+      accountId: assignedAccId,
+      noAccountDebit,
+      isExternalPayment: isExternalFergis,
+      paidBy: isExternalFergis ? "fergis" : "me",
       category: "Deudas",
-      reason: "planificado",
-      note: `[Mission Control] Pago cuota: ${item.name}`,
+      reason: isHistorical ? "historico" : "planificado",
+      note: `[Mission Control] Pago cuota: ${item.name}${tagExtra}`,
       debtId: item.refId,
       kind: "debt_payment"
     });
@@ -1738,13 +1773,16 @@ function submitMcPayModal(itemId) {
     const entry = (state.financeLedger || []).find(e => e.id === item.refId);
     if (entry) {
       entry.fiadoStatus = "paid";
-      entry.accountId = accountId;
-      entry.note = entry.note ? `${entry.note} (Liquidado [Mission Control] ${dateStr})` : `Liquidado [Mission Control] ${dateStr}`;
+      entry.accountId = assignedAccId;
+      entry.noAccountDebit = noAccountDebit;
+      entry.isExternalPayment = isExternalFergis;
+      entry.paidBy = isExternalFergis ? "fergis" : "me";
+      entry.note = entry.note ? `${entry.note} (Liquidado [Mission Control] ${dateStr}${tagExtra})` : `Liquidado [Mission Control] ${dateStr}${tagExtra}`;
     }
 
-    let mcRec = (state.financeMissionPayments || []).find(p => p.monthKey === mk && p.refId === item.refId);
+    let mcRec = (state.financeMissionPayments || []).find(p => p.monthKey === targetMk && p.refId === item.refId);
     if (!mcRec) {
-      mcRec = { id: uid("mc_fdo"), monthKey: mk, type: "fiado", refId: item.refId, name: item.name };
+      mcRec = { id: uid("mc_fdo"), monthKey: targetMk, type: "fiado", refId: item.refId, name: item.name };
       state.financeMissionPayments.push(mcRec);
     }
     mcRec.status = "paid";
@@ -1767,17 +1805,25 @@ function submitMcPayModal(itemId) {
       date: dateISO,
       type: "expense",
       amount: payAmount,
-      accountId,
+      accountId: assignedAccId,
+      noAccountDebit,
+      isExternalPayment: isExternalFergis,
+      paidBy: isExternalFergis ? "fergis" : "me",
       category: item.category || "Emergencia",
-      reason: "emergencia",
-      note: `[Mission Control] Pago imprevisto: ${item.name}`
+      reason: isHistorical ? "historico" : "emergencia",
+      note: `[Mission Control] Pago imprevisto: ${item.name}${tagExtra}`
     });
   }
 
   financeRecomputeBalances();
   persist();
   document.getElementById("mcPayModal")?.remove();
-  toast(`✅ Pago registrado: ${item.name} por S/ ${_financeFmt(payAmount)}`);
+  const feedbackMsg = isExternalFergis
+    ? `✅ Pago registrado por Fergis: ${item.name} por S/ ${_financeFmt(payAmount)} (Sin débito en tus cuentas)`
+    : (isHistorical
+      ? `✅ Pago histórico registrado: ${item.name} por S/ ${_financeFmt(payAmount)} (Sin afectar saldo actual)`
+      : `✅ Pago registrado: ${item.name} por S/ ${_financeFmt(payAmount)}`);
+  toast(feedbackMsg);
   view();
 }
 
@@ -18644,6 +18690,8 @@ function financeRecomputeBalances(){
       if(e.type === "expense") {
         if (e.isFiado && e.fiadoStatus !== "paid") {
           // Ignorar fiados pendientes de pago
+        } else if (e.noAccountDebit || e.isExternalPayment || e.accountId === "ext_fergis" || e.accountId === "ext_historical") {
+          // Pagos externos (ej. Fergis) o históricos sin impacto en saldo actual
         } else {
           sums[accId] -= amt;
         }
@@ -18811,6 +18859,9 @@ function addFinanceEntry(payload){
     archived: false,
     isFiado: !!isFiado,
     fiadoStatus: fiadoStatus || null,
+    noAccountDebit: !!payload.noAccountDebit,
+    isExternalPayment: !!payload.isExternalPayment,
+    paidBy: payload.paidBy || "me",
     isSourcePool: !!payload.isSourcePool,
     sourcePoolName: payload.sourcePoolName || null,
     parentPoolId: payload.parentPoolId || null,
@@ -20898,7 +20949,11 @@ function _financeBalanceAfterMap(entriesNewToOld){
     afterById[e.id] = cur;
 
     // rollback to "before this entry" for next (older) line
-    if(e.type==="expense") running[accId] = cur + amt;
+    if(e.type==="expense") {
+      if(!e.noAccountDebit && !e.isExternalPayment && e.accountId !== "ext_fergis" && e.accountId !== "ext_historical" && !(e.isFiado && e.fiadoStatus !== "paid")){
+        running[accId] = cur + amt;
+      }
+    }
     else if(e.type==="income") running[accId] = cur - amt;
   });
 
@@ -20965,6 +21020,10 @@ function renderFinanceMovements(){
           const iconCls = isTrf ? "transfer" : (isExp ? "expense" : "income");
           const iconSymbol = isTrf ? "🔄" : financeCategoryIcon(e.category||(isExp ? "Gasto" : "Ingreso"));
           
+          const isNoDebit = e.noAccountDebit || e.isExternalPayment || e.accountId === "ext_fergis" || e.accountId === "ext_historical";
+          const isFromFergis = e.isExternalPayment || e.paidBy === "fergis" || e.accountId === "ext_fergis";
+          const originName = isFromFergis ? "💜 Fergis" : (isNoDebit ? "📜 Histórico" : accName(e.accountId));
+
           let title = e.category || (isTrf ? "Traspaso" : (isExp ? "Gasto" : "Ingreso"));
           let sub = "";
           if (isTrf) {
@@ -20974,15 +21033,19 @@ function renderFinanceMovements(){
           } else if (e.note && e.note.includes(' · ')) {
              const parts = e.note.split(' · ');
              title = parts[0];
-             sub = accName(e.accountId) + ` • ${parts[1]}`;
+             sub = originName + ` • ${parts[1]}`;
           } else if (e.note) {
              title = e.note;
-             sub = accName(e.accountId) + ` • ${e.category||''}`;
+             sub = originName + ` • ${e.category||''}`;
           } else {
-             sub = accName(e.accountId) + (e.category ? ` • ${e.category}` : '');
+             sub = originName + (e.category ? ` • ${e.category}` : '');
           }
 
           const balAfter = afterMap[e.id];
+          const badgeHtml = isFromFergis
+            ? `<span style="display:block;font-size:9px;font-weight:700;color:#a78bfa;text-transform:uppercase;">💜 Fergis</span>`
+            : (isNoDebit ? `<span style="display:block;font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;">📜 Histórico</span>` : '');
+
           return `
             <div class="finMovProItem" onclick="openFinanceEntryModal('${e.id}')">
               <div class="finMovProIcon ${iconCls}">${escapeHtml(iconSymbol)}</div>
@@ -20990,7 +21053,10 @@ function renderFinanceMovements(){
                 <div class="finMovProTitle">${escapeHtml(title)}</div>
                 <div class="finMovProSub">${escapeHtml(sub)}</div>
               </div>
-              <div class="finMovProAmt ${amtCls}">${isExp?"-":""}S/ ${fmt(amt)}</div>
+              <div class="finMovProAmt ${amtCls}">
+                ${isExp?"-":""}S/ ${fmt(amt)}
+                ${badgeHtml}
+              </div>
             </div>
           `;
         }).join("")}
@@ -22175,41 +22241,51 @@ function openFinanceDebtPayModal(debtId){
   const backdrop = document.createElement('div');
   backdrop.className = 'modalBackdrop';
   backdrop.innerHTML = `
-    <div class="modal" style="max-width:720px;max-height:90vh;overflow:auto" role="dialog" aria-label="Registrar pago">
+    <div class="modal" style="max-width:480px;max-height:90vh;overflow:auto;padding:22px;border-radius:18px;" role="dialog" aria-label="Registrar pago de deuda">
       <div class="modalTop">
         <div>
-          <div class="modalTitle">Registrar pago</div>
-          <div class="modalSub">${escapeHtml(debt.name)} · saldo S/ ${_financeFmt(debt.balance)}</div>
+          <div class="modalTitle" style="font-size:16px;font-weight:800;">💸 Registrar Pago de Deuda</div>
+          <div class="modalSub" style="font-size:12px;color:#aaa;margin-top:2px;">${escapeHtml(debt.name)} · Saldo global: S/ ${_financeFmt(debt.balance)}</div>
         </div>
         <button class="iconBtn" id="finPayClose">✕</button>
       </div>
-      <div class="hr"></div>
+      <div class="hr" style="margin:12px 0;"></div>
 
-      <div class="grid2" style="gap:10px">
-        <div class="field">
-          <div class="label">Fecha</div>
-          <input id="finPayDate" type="date" value="${iso}" />
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Fecha de Pago</label>
+            <input id="finPayDate" type="date" class="input" value="${iso}" style="width:100%;font-size:13px;" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Monto Pagado (S/)</label>
+            <input id="finPayAmount" type="number" inputmode="decimal" class="input" placeholder="0.00" value="${escapeHtml(String(debt.monthlyDue||''))}" style="width:100%;font-size:15px;font-weight:700;" />
+          </div>
         </div>
-        <div class="field">
-          <div class="label">Monto pagado</div>
-          <input id="finPayAmount" type="number" inputmode="decimal" placeholder="0.00" value="${escapeHtml(String(debt.monthlyDue||''))}" />
-        </div>
-        <div class="field" style="grid-column:1/-1">
-          <div class="label">Cuenta</div>
-          <select id="finPayAccount">
-            ${(state.financeAccounts||[]).map(a=>`<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('')}
+
+        <div>
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Cuenta / Origen del Pago</label>
+          <select id="finPayAccount" class="input" style="width:100%;">
+            <optgroup label="── Cuentas Propias (Descuenta tu saldo) ──">
+              ${(state.financeAccounts||[]).map(a=>`<option value="${a.id}">${escapeHtml(a.name)} (S/ ${_financeFmt(a.balance)})</option>`).join('')}
+            </optgroup>
+            <optgroup label="── Fuentes Especiales (NO descuenta tu saldo) ──">
+              <option value="ext_fergis">💜 Pagado por Fergis (Dinero de ella · Externo)</option>
+              <option value="ext_historical">📜 Pago Histórico Pasado (Ya asumido · Sin débito)</option>
+            </optgroup>
           </select>
         </div>
-        <div class="field" style="grid-column:1/-1">
-          <div class="label">Nota (opcional)</div>
-          <input id="finPayNote" type="text" placeholder="Ej: cuota febrero" />
+
+        <div>
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Nota adicional (opcional)</label>
+          <input id="finPayNote" type="text" class="input" placeholder="Ej: cuota adelantada, abono directo..." style="width:100%;" />
         </div>
       </div>
 
-      <div class="hr" style="margin-top:12px"></div>
+      <div class="hr" style="margin:16px 0 12px;"></div>
       <div class="row" style="gap:10px;justify-content:flex-end">
-        <button class="btn" id="finPayCancel">Cancelar</button>
-        <button class="btn primary" id="finPaySave">Guardar</button>
+        <button class="btn secondary" id="finPayCancel">Cancelar</button>
+        <button class="btn primary" id="finPaySave" style="background:linear-gradient(135deg,#7c5cff,#36d399);border:none;">Guardar Pago</button>
       </div>
     </div>
   `;
@@ -22226,27 +22302,46 @@ function openFinanceDebtPayModal(debtId){
     const accountId = String(backdrop.querySelector('#finPayAccount')?.value||'');
     const noteExtra = (backdrop.querySelector('#finPayNote')?.value||'').trim();
 
+    const isExternalFergis = accountId === "ext_fergis";
+    const isHistorical = accountId === "ext_historical";
+    const noAccountDebit = isExternalFergis || isHistorical;
+
+    const tagExtra = isExternalFergis
+      ? " · [Pagado por Fergis]"
+      : (isHistorical ? " · [Registro histórico sin débito]" : "");
+
+    const assignedAccId = noAccountDebit
+      ? ((state.financeAccounts||[])[0]?.id || "external")
+      : accountId;
+
     // Update debt balance
     debt.balance = Math.max(0, financeDebtSafeNum(debt.balance) - amount);
     if(debt.balance<=0) debt.status = 'closed';
 
+    const entryDateISO = new Date(`${date}T12:00:00`).toISOString();
+
     // Also log as finance expense
     const entry = {
       id: uid('fin_'),
-      date,
+      date: entryDateISO,
       type: 'expense',
       amount,
-      accountId,
+      accountId: assignedAccId,
+      noAccountDebit,
+      isExternalPayment: isExternalFergis,
+      paidBy: isExternalFergis ? "fergis" : "me",
       category: 'Deudas',
-      reason: 'planificado',
-      note: `Pago deuda: ${debt.name}${noteExtra?(' · '+noteExtra):''}`,
+      reason: isHistorical ? 'historico' : 'planificado',
+      note: `Pago deuda: ${debt.name}${noteExtra ? (' · ' + noteExtra) : ''}${tagExtra}`,
       debtId: debt.id,
       kind: 'debt_payment',
       archived: false,
     };
     window.FINANCE.addMovement(entry);
+
+    // Sync to Mission Control for date's month
     try {
-      const dmk = financeGetMonthKeyFromIso(date);
+      const dmk = financeGetMonthKeyFromIso(entry.date);
       if (!Array.isArray(state.financeMissionPayments)) state.financeMissionPayments = [];
       let mcRec = state.financeMissionPayments.find(p => p.monthKey === dmk && p.refId === debt.id);
       if (!mcRec) {
@@ -22255,12 +22350,16 @@ function openFinanceDebtPayModal(debtId){
       }
       mcRec.status = "paid";
       mcRec.paidAmount = Number(mcRec.paidAmount || 0) + amount;
-      mcRec.paidDate = new Date(`${date}T12:00:00`).toISOString();
+      mcRec.paidDate = entry.date;
     } catch (_e) {}
+
     financeRecomputeBalances();
     persist();
     close();
     view();
+    toast(isExternalFergis
+      ? `✅ Pago registrado por Fergis (Sin débito en tus cuentas)`
+      : (isHistorical ? `✅ Pago histórico registrado sin afectar saldo actual` : `✅ Pago registrado: S/ ${_financeFmt(amount)}`));
   });
 }
 
