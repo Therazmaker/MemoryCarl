@@ -1,4 +1,4 @@
-import './finance/finance_core_v2.js';
+import './finance/finance_core_v2.js?v=2050';
 (function mcConsoleLogsInterceptorInit(){
   if (window.__mcLogsInterceptor) return;
   window.__mcLogs = [];
@@ -394,7 +394,7 @@ const KEYS = {
 // 2) Paste the VAPID public key below
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker
-    .register("./firebase-messaging-sw.js?v=1003")
+    .register("./firebase-messaging-sw.js?v=1004")
     .then(reg => {
       console.log("SW registered:", reg.scope);
 
