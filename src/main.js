@@ -1578,32 +1578,57 @@ function openMcPayModal(itemId) {
   const item = m.items.find(i => i.id === itemId);
 
   if (!item) {
-    toast("⚠️ Pago no encontrado");
+    toast("⚠️ Obligación no encontrada");
     return;
   }
 
-  const accounts = (state.financeAccounts || []).filter(a => !a.archived);
+  const accounts = (state.financeAccounts || []).filter(a => !a.archived && a.status !== 'archived');
   const defaultAccId = state.financePrimaryAccountId || (accounts[0] ? accounts[0].id : "");
+
+  const typeLabels = {
+    commitment: "Compromiso Fijo",
+    debt: "Cuota de Deuda",
+    fiado: "Liquidación de Fiado",
+    unexpected: "Pago Imprevisto"
+  };
+  const typeIcons = {
+    commitment: "📅",
+    debt: "💳",
+    fiado: "🤝",
+    unexpected: "⚡"
+  };
 
   const backdrop = document.createElement("div");
   backdrop.className = "modalBackdrop active";
   backdrop.id = "mcPayModal";
 
   backdrop.innerHTML = `
-    <div class="modal" data-act="modal-content-stop" style="max-width:400px;padding:20px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <h3 style="margin:0;font-size:16px;font-weight:800;color:#fff;">✅ Confirmar Pago: ${escapeHtml(item.name)}</h3>
+    <div class="modal" data-act="modal-content-stop" style="max-width:420px;padding:22px;border-radius:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:20px;">${typeIcons[item.type] || '💸'}</span>
+          <div>
+            <h3 style="margin:0;font-size:15px;font-weight:800;color:#fff;">Confirmar Pago</h3>
+            <span style="font-size:11px;color:rgba(255,255,255,0.5);">${typeLabels[item.type] || 'Obligación'} · ${escapeHtml(item.category || '')}</span>
+          </div>
+        </div>
         <button class="iconBtn" onclick="document.getElementById('mcPayModal').remove()">✕</button>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;margin-bottom:14px;">
+        <div style="font-size:14px;font-weight:700;color:#fff;">${escapeHtml(item.name)}</div>
+        ${item.totalDebtBalance !== undefined ? `<div style="font-size:11px;color:#fbbf24;margin-top:2px;">Saldo global restante: S/ ${_financeFmt(item.totalDebtBalance)}</div>` : ''}
+        ${item.notes ? `<div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:4px;">Nota: ${escapeHtml(item.notes)}</div>` : ''}
       </div>
 
       <div style="display:flex;flex-direction:column;gap:12px;">
         <div>
-          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;">Monto a pagar (S/)</label>
-          <input type="number" inputmode="decimal" id="mcPayAmount" class="input" value="${item.amount}" style="width:100%;" />
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Monto a pagar (S/)</label>
+          <input type="number" inputmode="decimal" id="mcPayAmount" class="input" value="${Number(item.amount || 0).toFixed(2)}" style="width:100%;font-size:16px;font-weight:700;" />
         </div>
 
         <div>
-          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;">Cuenta / Caja de Origen</label>
+          <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Cuenta / Caja de Origen</label>
           <select id="mcPayAccountId" class="input" style="width:100%;">
             ${accounts.map(a => `<option value="${a.id}" ${a.id === defaultAccId ? "selected" : ""}>${escapeHtml(a.name)} (S/ ${_financeFmt(a.balance)})</option>`).join("")}
           </select>
@@ -1611,7 +1636,7 @@ function openMcPayModal(itemId) {
 
         <div style="display:flex;gap:10px;margin-top:8px;">
           <button class="btn secondary" style="flex:1;" onclick="document.getElementById('mcPayModal').remove()">Cancelar</button>
-          <button class="btn primary" style="flex:1;" onclick="submitMcPayModal('${item.id}')">Confirmar Pago</button>
+          <button class="btn primary" style="flex:1;background:linear-gradient(135deg,#7c5cff,#36d399);border:none;" onclick="submitMcPayModal('${item.id}')">Confirmar Pago</button>
         </div>
       </div>
     </div>
@@ -1624,55 +1649,7 @@ function submitMcPayModal(itemId) {
   financeEnsureMissionControlStructures();
   const mk = state.financeMissionMonthKey || getCurrentMonthKey();
   const m = financeMissionControlModel(mk);
-  let item = state.financeMissionPayments.find(p => p.id === itemId);
-
-  // Promote virtual item to stored item
-  if (!item && itemId.startsWith("virtual_")) {
-    const isCmt = itemId.startsWith("virtual_cmt_");
-    const refId = itemId.replace(isCmt ? `virtual_cmt_` : `virtual_dbt_`, "").replace(`_${mk}`, "");
-    if (isCmt) {
-      const c = (state.financeCommitments || []).find(x => x.id === refId);
-      if (c) {
-        item = {
-          id: uid("mc_cmt"),
-          monthKey: mk,
-          type: "commitment",
-          refId: c.id,
-          name: c.name,
-          category: c.group || "Compromiso",
-          amount: Number(c.amount || 0),
-          dueDay: Number(c.dueDay || 1),
-          status: "pending",
-          paidAmount: 0,
-          paidDate: null,
-          movementId: null,
-          notes: c.note || ""
-        };
-        state.financeMissionPayments.push(item);
-      }
-    } else {
-      const d = (state.financeDebts || []).find(x => x.id === refId);
-      if (d) {
-        item = {
-          id: uid("mc_dbt"),
-          monthKey: mk,
-          type: "debt",
-          refId: d.id,
-          name: d.name,
-          category: "Deuda",
-          amount: Math.min(Number(d.monthlyDue || d.balance || 0), Number(d.balance || 0)),
-          dueDay: Number(d.dueDay || 15),
-          status: "pending",
-          paidAmount: 0,
-          paidDate: null,
-          movementId: null,
-          totalDebtBalance: Number(d.balance || 0),
-          notes: d.notes || ""
-        };
-        state.financeMissionPayments.push(item);
-      }
-    }
-  }
+  const item = m.items.find(i => i.id === itemId);
 
   if (!item) {
     toast("⚠️ No se pudo procesar el pago");
@@ -1682,38 +1659,122 @@ function submitMcPayModal(itemId) {
   const payAmount = parseFloat(document.getElementById("mcPayAmount")?.value || item.amount);
   const accountId = document.getElementById("mcPayAccountId")?.value;
 
-  if (!accountId || payAmount <= 0) {
+  if (!accountId || !(payAmount > 0)) {
     toast("⚠️ Seleccione una cuenta y monto válido");
     return;
   }
 
-  // Create movement in financeLedger
-  const entry = addFinanceEntry({
-    date: new Date().toISOString(),
-    type: "expense",
-    amount: payAmount,
-    accountId,
-    category: item.category || "Deudas/Compromisos",
-    reason: "planificado",
-    note: `[Mission Control] Pago de ${item.name}`,
-    neuronRole: "auto"
-  });
+  const now = new Date();
+  const dateISO = now.toISOString();
+  const dateStr = now.toLocaleDateString("es-PE");
 
-  // Mark item as paid
-  item.status = "paid";
-  item.paidAmount = payAmount;
-  item.paidDate = new Date().toISOString();
-  item.movementId = entry ? entry.id : null;
-
-  // Reduce balance of Debt if debt
-  if (item.type === "debt" && item.refId) {
-    const debt = (state.financeDebts || []).find(d => d.id === item.refId);
-    if (debt) {
-      debt.balance = Math.max(0, Number(debt.balance || 0) - payAmount);
-      if (debt.balance === 0) debt.status = "closed";
+  // 1. COMMITMENT
+  if (item.type === "commitment") {
+    financeEnsureCommitments();
+    const inst = (state.financeCommitmentInstances || []).find(x => x.id === item.refId || x.templateId === item.refId);
+    if (inst) {
+      inst.status = "paid";
+      inst.paidAmount = payAmount;
+      inst.actualAmount = payAmount;
+      inst.paidAt = dateISO;
+      inst.paymentSourceId = accountId;
+      inst.updatedAt = dateISO;
     }
+    let mcRec = (state.financeMissionPayments || []).find(p => p.monthKey === mk && (p.refId === item.refId || p.refId === item.templateId));
+    if (!mcRec) {
+      mcRec = { id: uid("mc_cmt"), monthKey: mk, type: "commitment", refId: item.refId || item.templateId, name: item.name };
+      state.financeMissionPayments.push(mcRec);
+    }
+    mcRec.status = "paid";
+    mcRec.paidAmount = payAmount;
+    mcRec.paidDate = dateISO;
+
+    addFinanceEntry({
+      date: dateISO,
+      type: "expense",
+      amount: payAmount,
+      accountId,
+      category: item.category || "Servicios",
+      reason: "planificado",
+      note: `[Mission Control] Pago de ${item.name}`,
+      kind: "commitment_payment",
+      commitmentId: item.templateId || item.refId,
+      commitmentInstanceId: item.refId
+    });
   }
 
+  // 2. DEBT
+  else if (item.type === "debt") {
+    const debt = (state.financeDebts || []).find(d => d.id === item.refId);
+    if (debt) {
+      debt.balance = Math.max(0, financeDebtSafeNum(debt.balance) - payAmount);
+      if (debt.balance <= 0) debt.status = "closed";
+    }
+
+    let mcRec = (state.financeMissionPayments || []).find(p => p.monthKey === mk && p.refId === item.refId);
+    if (!mcRec) {
+      mcRec = { id: uid("mc_dbt"), monthKey: mk, type: "debt", refId: item.refId, name: item.name };
+      state.financeMissionPayments.push(mcRec);
+    }
+    mcRec.status = "paid";
+    mcRec.paidAmount = payAmount;
+    mcRec.paidDate = dateISO;
+
+    addFinanceEntry({
+      date: dateISO,
+      type: "expense",
+      amount: payAmount,
+      accountId,
+      category: "Deudas",
+      reason: "planificado",
+      note: `[Mission Control] Pago cuota: ${item.name}`,
+      debtId: item.refId,
+      kind: "debt_payment"
+    });
+  }
+
+  // 3. FIADO
+  else if (item.type === "fiado") {
+    const entry = (state.financeLedger || []).find(e => e.id === item.refId);
+    if (entry) {
+      entry.fiadoStatus = "paid";
+      entry.accountId = accountId;
+      entry.note = entry.note ? `${entry.note} (Liquidado [Mission Control] ${dateStr})` : `Liquidado [Mission Control] ${dateStr}`;
+    }
+
+    let mcRec = (state.financeMissionPayments || []).find(p => p.monthKey === mk && p.refId === item.refId);
+    if (!mcRec) {
+      mcRec = { id: uid("mc_fdo"), monthKey: mk, type: "fiado", refId: item.refId, name: item.name };
+      state.financeMissionPayments.push(mcRec);
+    }
+    mcRec.status = "paid";
+    mcRec.paidAmount = payAmount;
+    mcRec.paidDate = dateISO;
+  }
+
+  // 4. UNEXPECTED
+  else if (item.type === "unexpected") {
+    let unexp = (state.financeMissionPayments || []).find(p => p.id === item.id);
+    if (!unexp) {
+      unexp = item;
+      state.financeMissionPayments.push(unexp);
+    }
+    unexp.status = "paid";
+    unexp.paidAmount = payAmount;
+    unexp.paidDate = dateISO;
+
+    addFinanceEntry({
+      date: dateISO,
+      type: "expense",
+      amount: payAmount,
+      accountId,
+      category: item.category || "Emergencia",
+      reason: "emergencia",
+      note: `[Mission Control] Pago imprevisto: ${item.name}`
+    });
+  }
+
+  financeRecomputeBalances();
   persist();
   document.getElementById("mcPayModal")?.remove();
   toast(`✅ Pago registrado: ${item.name} por S/ ${_financeFmt(payAmount)}`);
@@ -1722,32 +1783,39 @@ function submitMcPayModal(itemId) {
 
 async function mcRunAiAnalysis() {
   const outputEl = document.getElementById("mcAiOutput");
-  if (outputEl) outputEl.textContent = "🤖 El copiloto está evaluando tu estrategia de deudas y pagos...";
+  if (outputEl) outputEl.textContent = "🤖 El copiloto está evaluando tu salud de caja, deudas y fiados...";
 
   const chefS = getChefAiSettings();
   const mk = state.financeMissionMonthKey || getCurrentMonthKey();
   const m = financeMissionControlModel(mk);
 
-  const debtsSummary = (state.financeDebts || []).map(d => `- ${d.name}: Saldo S/ ${_financeFmt(d.balance)}, Cuota S/ ${_financeFmt(d.monthlyDue)}, Estado: ${d.status || 'activa'}`).join("\n") || "(Sin deudas registradas)";
+  const debtsList = (state.financeDebts || []).filter(d => String(d.status || 'active') === 'active');
+  const debtsSummary = debtsList.map(d => `- ${d.name}: Saldo S/ ${_financeFmt(d.balance)}, Cuota S/ ${_financeFmt(d.monthlyDue)}`).join("\n") || "(Sin deudas registradas)";
+  const fiadosPendingList = (m.items || []).filter(i => i.type === 'fiado' && i.status === 'pending');
 
   const prompt = `Actúa como un Copiloto Financiero Experto y Estratégico.
-Analiza la siguiente situación de deudas y pagos del mes (${mk}) para Carlos:
+Analiza la siguiente situación financiera mensual (${mk}) para Carlos:
 
 SITUACIÓN DEL MES:
 - Meta Total de Pagos del Mes: S/ ${m.totalExpected.toFixed(2)}
-- Ya Pagado: S/ ${m.totalPaid.toFixed(2)}
+- Ya Pagado Real: S/ ${m.totalPaid.toFixed(2)} (${m.completionPct}%)
 - Pendiente del Mes: S/ ${m.totalPending.toFixed(2)}
-- Imprevistos Registrados: S/ ${m.unexpectedTotal.toFixed(2)}
-- Saldo Total Consolidado de Deudas Restantes: S/ ${m.totalRemainingDebtsBalance.toFixed(2)}
-- Caja Disponible Actual: S/ ${m.availableCash.toFixed(2)}
+- Compromisos Fijos: S/ ${m.commitmentsTotal.toFixed(2)}
+- Cuotas de Deudas: S/ ${m.debtsTotal.toFixed(2)}
+- Fiados pendientes: S/ ${m.fiadosTotal.toFixed(2)} (${fiadosPendingList.length} compras fiadas)
+- Imprevistos: S/ ${m.unexpectedTotal.toFixed(2)}
+- Caja Disponible Real en cuentas: S/ ${m.availableCash.toFixed(2)}
+- Brecha de Cobertura: S/ ${m.coverageGap.toFixed(2)} (${m.coverageGap >= 0 ? "Superávit suficiente" : "Déficit que falta cubrir"})
+- Saldo Global Consolidado de Deudas: S/ ${m.totalRemainingDebtsBalance.toFixed(2)}
 
-DEUDAS ACTIVAS REGISTRADAS:
+DEUDAS ACTIVAS:
 ${debtsSummary}
 
 INSTRUCCIONES:
-1. Da un diagnóstico breve y cercano del avance de pagos del mes.
-2. Analiza las deudas de mayor antigüedad o fricción (como la deuda de Carlos Emilio si aparece) y sugiere en qué momento abonarle cuando se liberen otras deudas menores o haya excedente de caja.
-3. Da 3 recomendaciones accionables y breves (máximo 150 palabras en total, tono motivador y estructurado).`;
+1. Da un diagnóstico honesto de liquidez (si la caja actual alcanza para cubrir lo pendiente).
+2. Si hay fiados pendientes, prioriza liquidarlos primero porque dañan relaciones de confianza cotidianas.
+3. Sugiere cómo distribuir los pagos de deudas y compromisos restantes del mes de forma inteligente.
+(Máximo 140 palabras en total, tono motivador, directo y profesional).`;
 
   try {
     let result = "";
@@ -1755,7 +1823,19 @@ INSTRUCCIONES:
       const messages = [{ role: "user", content: prompt }];
       result = await callClaude(messages, chefS.claudeApiKey, chefS.claudeModel);
     } else {
-      result = `💡 *Análisis Estratégico del Copiloto (${mk})*:\n- Tienes S/ ${_financeFmt(m.totalPending)} pendientes por cubrir de tu meta mensual.\n- Tu caja disponible de S/ ${_financeFmt(m.availableCash)} te permite priorizar las cuotas más urgentes.\n- *Estrategia de Deudas (ej. Carlos Emilio)*: En cuanto cubras los compromisos fijos del mes y mantengas tu fondo de imprevistos, destina los excedentes a amortizar la deuda de Carlos Emilio para liquidar los saldos más antiguos.`;
+      const gapText = m.coverageGap >= 0
+        ? `✅ *Caja Saludable*: Tu caja actual de S/ ${_financeFmt(m.availableCash)} cubre al 100% tus pagos pendientes de S/ ${_financeFmt(m.totalPending)} (margen libre restante: S/ ${_financeFmt(m.coverageGap)}).`
+        : `⚠️ *Atención a la Liquidez*: Tienes S/ ${_financeFmt(m.availableCash)} en caja y debes pagar S/ ${_financeFmt(m.totalPending)}. Te faltan S/ ${_financeFmt(Math.abs(m.coverageGap))} para completar el mes.`;
+
+      const fiadoAdvice = m.fiadosTotal > 0
+        ? `\n- *Prioridad Inmediata*: Tienes S/ ${_financeFmt(m.fiadosTotal)} en fiados pendientes. Liquídalos primero para mantener crédito abierto y cuentas limpias.`
+        : `\n- *Fiados al día*: No tienes compromisos informales ni compras fiadas pendientes.`;
+
+      const debtAdvice = debtsList.length > 0
+        ? `\n- *Estrategia Deudas*: Con tus cuotas fijadas en S/ ${_financeFmt(m.debtsTotal)}, mantén al día las cuotas prioritarias y usa cualquier ingreso excedente para amortizar capital.`
+        : `\n- *Sin Deudas Críticas*: Tu estructura financiera está ligera en pasivos.`;
+
+      result = `💡 *Diagnóstico de Mission Control (${mk})*:\n${gapText}${fiadoAdvice}${debtAdvice}`;
     }
 
     _mcAiAnalysisText = result;
@@ -2747,6 +2827,7 @@ function persist(){
     if(LS.financeCommitmentInstances) save(LS.financeCommitmentInstances, state.financeCommitmentInstances||[]);
     if(LS.financeLoanUsageLedger) save(LS.financeLoanUsageLedger, state.financeLoanUsageLedger||[]);
     if(LS.financeMeta) save(LS.financeMeta, state.financeMeta||{});
+    if(LS.financeMissionPayments) save(LS.financeMissionPayments, state.financeMissionPayments||[]);
   }catch(e){}
 
   // Disparar sincronización automática hacia la cola inteligente (dbService)
@@ -18221,55 +18302,135 @@ function financeGetMonthKeyFromIso(iso){
 
 function financeMissionControlModel(monthKey){
   financeEnsureMissionControlStructures();
+  financeEnsureCommitments();
   const mk = monthKey || state.financeMissionMonthKey || getCurrentMonthKey();
 
-  const storedForMonth = (state.financeMissionPayments||[]).filter(p => p && p.monthKey === mk);
-  const storedRefIds = new Set(storedForMonth.map(p => p.refId).filter(Boolean));
+  const items = [];
+  const storedForMonth = (state.financeMissionPayments || []).filter(p => p && p.monthKey === mk);
+  const storedById = new Map();
+  storedForMonth.forEach(p => {
+    if (p.refId) storedById.set(p.refId, p);
+    if (p.id) storedById.set(p.id, p);
+  });
 
-  const items = storedForMonth.map(p => ({ ...p }));
+  // 1. COMPROMISOS (De financeCommitmentMonthModel)
+  try {
+    const cmtModel = financeCommitmentMonthModel(mk);
+    (cmtModel.instances || []).forEach(inst => {
+      const tmpl = inst.template || (state.financeCommitmentTemplates || []).find(t => t.id === inst.templateId) || {};
+      if (tmpl.isActive === false) return;
 
-  // Auto-generate commitment items for month if not explicitly stored
-  (state.financeCommitments || []).filter(c => c && c.active !== false).forEach(c => {
-    if (!storedRefIds.has(c.id)) {
+      const isPaid = ["paid", "covered_by_debt"].includes(String(inst.status || ""));
+      const stored = storedById.get(inst.id) || storedById.get(inst.templateId);
+      const paid = isPaid || stored?.status === "paid";
+      const expAmt = Number(inst.expectedAmount || tmpl.baseAmount || 0);
+      const paidAmt = paid ? Number(inst.paidAmount || stored?.paidAmount || expAmt) : 0;
+      const dueDay = Number(tmpl.dueDay || (inst.dueDate ? parseInt(String(inst.dueDate).slice(8, 10), 10) : 1)) || 1;
+
       items.push({
-        id: `virtual_cmt_${c.id}_${mk}`,
+        id: `mc_cmt_${inst.id}`,
         monthKey: mk,
         type: "commitment",
-        refId: c.id,
-        name: c.name || "Compromiso",
-        category: c.group || "Compromiso",
-        amount: Number(c.amount || 0),
-        dueDay: Number(c.dueDay || 1),
-        status: "pending",
-        paidAmount: 0,
-        paidDate: null,
-        movementId: null,
-        notes: c.note || ""
+        refId: inst.id,
+        templateId: inst.templateId,
+        name: tmpl.name || "Compromiso",
+        category: tmpl.category || "Compromiso",
+        amount: expAmt,
+        dueDay,
+        status: paid ? "paid" : "pending",
+        paidAmount: paidAmt,
+        paidDate: inst.paidAt || stored?.paidDate || null,
+        movementId: stored?.movementId || null,
+        notes: inst.notes || tmpl.notes || ""
+      });
+    });
+  } catch (e) {
+    console.error("Error loading commitments in Mission Control:", e);
+  }
+
+  // 2. CUOTAS DE DEUDAS (De state.financeDebts)
+  (state.financeDebts || []).filter(d => d && String(d.status || 'active') === 'active').forEach(d => {
+    const quota = Number(d.monthlyDue || 0);
+    const balance = Number(d.balance || 0);
+    const dueAmt = quota > 0 ? Math.min(quota, balance) : (balance <= 300 ? balance : 0);
+
+    const stored = storedById.get(d.id);
+    const ledgerPayments = (state.financeLedger || []).filter(e =>
+      !e.archived &&
+      e.type === 'expense' &&
+      e.debtId === d.id &&
+      financeGetMonthKeyFromIso(e.date) === mk
+    );
+    const ledgerPaidSum = ledgerPayments.reduce((s, e) => s + Number(e.amount || 0), 0);
+    const totalPaidThisMonth = Math.max(ledgerPaidSum, Number(stored?.paidAmount || 0));
+    const isPaid = (totalPaidThisMonth >= dueAmt && dueAmt > 0) || stored?.status === 'paid' || balance === 0;
+
+    items.push({
+      id: `mc_dbt_${d.id}_${mk}`,
+      monthKey: mk,
+      type: "debt",
+      refId: d.id,
+      name: d.name || "Deuda",
+      category: d.type === 'card' ? 'Tarjeta' : (d.type === 'person_loan' ? 'Préstamo' : 'Deuda'),
+      amount: dueAmt > 0 ? dueAmt : balance,
+      quotaExpected: dueAmt,
+      totalDebtBalance: balance,
+      dueDay: Number(d.dueDay || d.dueDate || 15) || 15,
+      status: isPaid ? "paid" : "pending",
+      paidAmount: isPaid ? (totalPaidThisMonth > 0 ? totalPaidThisMonth : (dueAmt > 0 ? dueAmt : balance)) : 0,
+      paidDate: stored?.paidDate || (ledgerPayments[0]?.date) || null,
+      notes: d.notes || ""
+    });
+  });
+
+  // 3. FIADOS (De state.financeLedger con isFiado: true)
+  const allFiados = (state.financeLedger || []).filter(e => !e.archived && e.isFiado);
+  allFiados.forEach(e => {
+    const eMonth = financeGetMonthKeyFromIso(e.date);
+    const isPending = e.fiadoStatus === "pending";
+    const isPaidThisMonth = e.fiadoStatus === "paid" && (eMonth === mk || String(e.note || '').includes(mk));
+
+    if (isPending || isPaidThisMonth) {
+      const parsed = financeParseFiadoName(e);
+      const day = e.date ? parseInt(e.date.slice(8, 10), 10) : 15;
+      const amt = Number(e.amount || 0);
+      const isPaid = !isPending;
+
+      items.push({
+        id: `mc_fiado_${e.id}`,
+        monthKey: mk,
+        type: "fiado",
+        refId: e.id,
+        name: parsed.desc || "Fiado",
+        category: e.category || "Fiado",
+        amount: amt,
+        dueDay: isNaN(day) ? 15 : Math.max(1, Math.min(31, day)),
+        status: isPaid ? "paid" : "pending",
+        paidAmount: isPaid ? amt : 0,
+        paidDate: isPaid ? (e.date || null) : null,
+        movementId: e.id,
+        notes: parsed.note || e.note || ""
       });
     }
   });
 
-  // Auto-generate debt items for month if not explicitly stored
-  (state.financeDebts || []).filter(d => d && String(d.status || 'active') === 'active').forEach(d => {
-    if (!storedRefIds.has(d.id)) {
-      const dueAmt = Math.min(Number(d.monthlyDue || d.balance || 0), Number(d.balance || 0));
-      items.push({
-        id: `virtual_dbt_${d.id}_${mk}`,
-        monthKey: mk,
-        type: "debt",
-        refId: d.id,
-        name: d.name || "Deuda",
-        category: "Deuda",
-        amount: dueAmt,
-        dueDay: Number(d.dueDay || d.dueDate || 15),
-        status: "pending",
-        paidAmount: 0,
-        paidDate: null,
-        movementId: null,
-        totalDebtBalance: Number(d.balance || 0),
-        notes: d.notes || ""
-      });
-    }
+  // 4. IMPREVISTOS GUARDADOS (type === "unexpected")
+  storedForMonth.filter(p => p.type === "unexpected").forEach(unexp => {
+    items.push({
+      id: unexp.id,
+      monthKey: mk,
+      type: "unexpected",
+      refId: null,
+      name: unexp.name || "Imprevisto",
+      category: unexp.category || "Emergencia",
+      amount: Number(unexp.amount || 0),
+      dueDay: Number(unexp.dueDay || 1) || 1,
+      status: unexp.status === "paid" ? "paid" : "pending",
+      paidAmount: unexp.status === "paid" ? Number(unexp.paidAmount || unexp.amount || 0) : 0,
+      paidDate: unexp.paidDate || null,
+      movementId: unexp.movementId || null,
+      notes: unexp.notes || ""
+    });
   });
 
   items.sort((a, b) => (Number(a.dueDay) || 1) - (Number(b.dueDay) || 1));
@@ -18277,21 +18438,29 @@ function financeMissionControlModel(monthKey){
   const totalExpected = items.reduce((s, i) => s + Number(i.amount || 0), 0);
   const totalPaid = items.reduce((s, i) => s + (i.status === 'paid' ? Number(i.paidAmount || i.amount || 0) : 0), 0);
   const totalPending = Math.max(0, totalExpected - totalPaid);
-  const unexpectedTotal = items.filter(i => i.type === 'unexpected').reduce((s, i) => s + Number(i.amount || 0), 0);
+
   const commitmentsTotal = items.filter(i => i.type === 'commitment').reduce((s, i) => s + Number(i.amount || 0), 0);
   const debtsTotal = items.filter(i => i.type === 'debt').reduce((s, i) => s + Number(i.amount || 0), 0);
-  const completionPct = totalExpected > 0 ? Math.min(100, Math.round((totalPaid / totalExpected) * 100)) : 0;
+  const fiadosTotal = items.filter(i => i.type === 'fiado').reduce((s, i) => s + Number(i.amount || 0), 0);
+  const unexpectedTotal = items.filter(i => i.type === 'unexpected').reduce((s, i) => s + Number(i.amount || 0), 0);
+
+  const completionPct = totalExpected > 0 ? Math.min(100, Math.round((totalPaid / totalExpected) * 100)) : 100;
 
   const totalRemainingDebtsBalance = (state.financeDebts || [])
     .filter(d => String(d.status || 'active') === 'active')
     .reduce((s, d) => s + Number(d.balance || 0), 0);
 
   const availableCash = (state.financeAccounts || [])
-    .filter(a => !a.archived && !a.excludeFromTotal)
-    .reduce((s, a) => s + Number(a.balance || 0), 0);
+    .filter(a => !a.archived && a.status !== 'archived' && !a.excludeFromTotal && !String(a.name || '').toLowerCase().includes('fergis'))
+    .reduce((s, a) => {
+      if (a.type === 'crypto') return s + (Number(a.balance || 0) * (state.btcPricePen || 0));
+      return s + Number(a.balance || 0);
+    }, 0);
 
-  const tx = (state.financeTransactions||[]).filter(t => financeGetMonthKeyFromIso(t.date) === mk && !t.archived);
-  const incomeConfirmed = tx.filter(t => t.direction === 'inflow').reduce((s, t) => s + Number(t.amount || 0), 0);
+  const coverageGap = availableCash - totalPending;
+
+  const tx = (state.financeLedger || []).filter(e => !e.archived && financeGetMonthKeyFromIso(e.date) === mk);
+  const incomeConfirmed = tx.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
 
   return {
     mk,
@@ -18299,12 +18468,14 @@ function financeMissionControlModel(monthKey){
     totalExpected,
     totalPaid,
     totalPending,
-    unexpectedTotal,
     commitmentsTotal,
     debtsTotal,
+    fiadosTotal,
+    unexpectedTotal,
     completionPct,
     totalRemainingDebtsBalance,
     availableCash,
+    coverageGap,
     incomeConfirmed
   };
 }
@@ -18312,14 +18483,15 @@ function financeMissionControlModel(monthKey){
 function financeGenerateInsights(monthKey){
   const m = financeMissionControlModel(monthKey);
   const list = [];
-  if(m.upcoming.length){
-    const u = m.upcoming[0];
-    list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:'warning', title:'Prioridad inmediata', message:`Esta semana tu prioridad es cubrir ${u.name} (S/ ${_financeFmt(u.amountExpected)}).`, relatedIds:[u.id], status:'open' });
+  const pending = (m.items || []).filter(i => i.status === 'pending');
+  if(pending.length){
+    const u = pending[0];
+    list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:'warning', title:'Prioridad inmediata', message:`Tu prioridad pendiente más cercana es cubrir ${u.name} (S/ ${_financeFmt(u.amount)}).`, relatedIds:[u.id], status:'open' });
   }
-  if(m.foreignUse>0){
-    list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:'urgent', title:'Uso de dinero ajeno', message:`Ya cargaste S/ ${_financeFmt(m.foreignUse)} a fuentes de terceros este mes.`, relatedIds:[], status:'open' });
+  if(m.fiadosTotal > 0){
+    list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:'urgent', title:'Compras fiadas pendientes', message:`Tienes S/ ${_financeFmt(m.fiadosTotal)} pendientes en fiados que conviene liquidar.`, relatedIds:[], status:'open' });
   }
-  list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:(m.margin<0?'urgent':'info'), title:'Margen real del mes', message:`Tu margen real después de esenciales es S/ ${_financeFmt(m.margin)}.`, relatedIds:[], status:'open' });
+  list.push({ id: uid('ins'), createdAt:new Date().toISOString(), level:(m.coverageGap < 0 ? 'urgent' : 'info'), title:'Cobertura de caja del mes', message: m.coverageGap >= 0 ? `Tu caja disponible cubre tus obligaciones restantes con un margen de S/ ${_financeFmt(m.coverageGap)}.` : `Te faltan S/ ${_financeFmt(Math.abs(m.coverageGap))} para cubrir todas las obligaciones de este mes.`, relatedIds:[], status:'open' });
   state.financeInsights = list;
   return list;
 }
@@ -20657,6 +20829,28 @@ function setFinanceSubTab(tab){
   state.financeSubTab = tab;
   persist();
   view();
+  if (tab === "mission") {
+    setTimeout(() => { if (typeof mcRenderChart === "function") mcRenderChart(); }, 40);
+  }
+}
+
+function setFinanceMissionFilter(filter){
+  state.financeMissionFilter = filter;
+  persist();
+  view();
+  setTimeout(() => { if (typeof mcRenderChart === "function") mcRenderChart(); }, 40);
+}
+try { window.setFinanceMissionFilter = setFinanceMissionFilter; } catch(e){}
+
+function financeParseFiadoName(e) {
+  const rawNote = String(e?.note || "");
+  const hasSep = rawNote.includes(" · ");
+  const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
+  const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
+  return {
+    desc: desc || "Fiado sin descripción",
+    note: noteDetails
+  };
 }
 
 function _financeFmt(n){
@@ -22051,6 +22245,18 @@ function openFinanceDebtPayModal(debtId){
       archived: false,
     };
     window.FINANCE.addMovement(entry);
+    try {
+      const dmk = financeGetMonthKeyFromIso(date);
+      if (!Array.isArray(state.financeMissionPayments)) state.financeMissionPayments = [];
+      let mcRec = state.financeMissionPayments.find(p => p.monthKey === dmk && p.refId === debt.id);
+      if (!mcRec) {
+        mcRec = { id: uid("mc_dbt"), monthKey: dmk, type: "debt", refId: debt.id, name: debt.name };
+        state.financeMissionPayments.push(mcRec);
+      }
+      mcRec.status = "paid";
+      mcRec.paidAmount = Number(mcRec.paidAmount || 0) + amount;
+      mcRec.paidDate = new Date(`${date}T12:00:00`).toISOString();
+    } catch (_e) {}
     financeRecomputeBalances();
     persist();
     close();
@@ -22955,6 +23161,7 @@ function renderFinanceMissionControl(){
   const mk = state.financeMissionMonthKey || getCurrentMonthKey();
   const m = financeMissionControlModel(mk);
   const fmt = _financeFmt;
+  const filter = state.financeMissionFilter || 'all';
 
   // Format Month Title
   const parts = mk.split("-");
@@ -22963,21 +23170,39 @@ function renderFinanceMissionControl(){
   const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
   const monthTitle = `${monthNames[monthNum - 1] || "Mes"} ${yearNum}`;
 
+  // Counts for filter pills
+  const totalCount = m.items.length;
+  const pendingCount = m.items.filter(i => i.status === 'pending').length;
+  const paidCount = m.items.filter(i => i.status === 'paid').length;
+  const cmtCount = m.items.filter(i => i.type === 'commitment').length;
+  const dbtCount = m.items.filter(i => i.type === 'debt').length;
+  const fdoCount = m.items.filter(i => i.type === 'fiado').length;
+  const unexpCount = m.items.filter(i => i.type === 'unexpected').length;
+
+  // Filter items
+  let filteredItems = m.items;
+  if (filter === 'pending') filteredItems = m.items.filter(i => i.status === 'pending');
+  else if (filter === 'paid') filteredItems = m.items.filter(i => i.status === 'paid');
+  else if (filter === 'commitment') filteredItems = m.items.filter(i => i.type === 'commitment');
+  else if (filter === 'debt') filteredItems = m.items.filter(i => i.type === 'debt');
+  else if (filter === 'fiado') filteredItems = m.items.filter(i => i.type === 'fiado');
+  else if (filter === 'unexpected') filteredItems = m.items.filter(i => i.type === 'unexpected');
+
   // Inject styles once
   if(!document.getElementById('mcStyles')){
     const s = document.createElement('style');
     s.id = 'mcStyles';
     s.textContent = `
-      .mc-wrap{ display:flex;flex-direction:column;gap:16px;padding-bottom:24px; }
+      .mc-wrap{ display:flex;flex-direction:column;gap:14px;padding-bottom:28px; }
 
       /* ── Month Selector ── */
       .mc-month-nav{
         display:flex;align-items:center;justify-content:space-between;
-        background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+        background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
         border-radius:16px;padding:8px 12px;
       }
       .mc-month-btn{
-        background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);
+        background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
         color:#fff;border-radius:10px;padding:6px 14px;font-size:12px;font-weight:700;
         cursor:pointer;transition:all .15s;
       }
@@ -22988,34 +23213,50 @@ function renderFinanceMissionControl(){
       .mc-hero{
         background:linear-gradient(135deg,rgba(124,92,255,.22),rgba(54,211,153,.12));
         border:1px solid rgba(124,92,255,.3);
-        border-radius:20px;padding:18px 16px 14px;
+        border-radius:20px;padding:18px 16px 16px;
       }
-      .mc-hero-top{ display:flex;align-items:center;justify-content:space-between;margin-bottom:12px }
-      .mc-hero-label{ font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:rgba(255,255,255,.5);font-weight:700 }
+      .mc-hero-top{ display:flex;align-items:center;justify-content:space-between;margin-bottom:10px }
+      .mc-hero-label{ font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:rgba(255,255,255,.55);font-weight:700 }
       .mc-hero-badge{
-        font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;
+        font-size:11px;font-weight:800;padding:4px 10px;border-radius:20px;
         background:rgba(54,211,153,.18);color:#36d399;border:1px solid rgba(54,211,153,.3);
       }
 
-      .mc-balance{ font-size:30px;font-weight:800;letter-spacing:-1px;margin-bottom:2px }
-      .mc-balance-sub{ font-size:12px;color:rgba(255,255,255,.45) }
+      .mc-balance{ font-size:32px;font-weight:800;letter-spacing:-1px;margin-bottom:2px }
+      .mc-balance-sub{ font-size:12px;color:rgba(255,255,255,.5) }
 
-      .mc-stats{ display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px }
+      .mc-stats{ display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px }
+      @media(max-width:640px){ .mc-stats{ grid-template-columns:repeat(2,1fr); } }
+
       .mc-stat{
         background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
         border-radius:13px;padding:10px 8px;text-align:center;
       }
       .mc-stat-val{ font-size:14px;font-weight:800;margin-bottom:2px }
       .mc-stat-lbl{ font-size:10px;color:rgba(255,255,255,.45);letter-spacing:.2px }
-      .mc-stat.accent .mc-stat-val{ color:#7c5cff }
-      .mc-stat.good .mc-stat-val{ color:#36d399 }
+      .mc-stat.accent .mc-stat-val{ color:#a78bfa }
+      .mc-stat.good .mc-stat-val{ color:#34d399 }
       .mc-stat.warn .mc-stat-val{ color:#fb7185 }
+      .mc-stat.amber .mc-stat-val{ color:#fbbf24 }
+      .mc-stat.cyan .mc-stat-val{ color:#38bdf8 }
 
       /* Progress Bar */
       .mc-progress-wrap{ margin-top:14px }
       .mc-progress-label{ display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,.5);margin-bottom:6px }
-      .mc-progress-track{ height:7px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden }
+      .mc-progress-track{ height:8px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden }
       .mc-progress-fill{ height:100%;border-radius:4px;background:linear-gradient(90deg,#7c5cff,#36d399);transition:width .4s ease }
+
+      /* Filter pills bar */
+      .mc-filter-bar{
+        display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;
+      }
+      .mc-filter-bar::-webkit-scrollbar{ display:none; }
+      .mc-pill{
+        font-size:11px;font-weight:700;padding:6px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.1);
+        background:rgba(255,255,255,.05);color:rgba(255,255,255,.7);cursor:pointer;white-space:nowrap;transition:all .15s;
+      }
+      .mc-pill:hover{ background:rgba(255,255,255,.12);color:#fff }
+      .mc-pill.active{ background:#7c5cff;color:#fff;border-color:#7c5cff;box-shadow:0 2px 8px rgba(124,92,255,.3) }
 
       /* ── Sections ── */
       .mc-section{
@@ -23029,7 +23270,7 @@ function renderFinanceMissionControl(){
       }
       .mc-section-title{ font-size:14px;font-weight:800;color:#fff }
       .mc-btn-primary{
-        font-size:12px;font-weight:700;color:#fff;
+        font-size:11px;font-weight:700;color:#fff;
         background:linear-gradient(135deg,#7c5cff,#6366f1);
         border:none;border-radius:10px;padding:6px 12px;cursor:pointer;
         box-shadow:0 2px 8px rgba(124,92,255,.3);transition:opacity .15s;
@@ -23044,29 +23285,30 @@ function renderFinanceMissionControl(){
       .mc-item:last-child{ border-bottom:none }
       .mc-item.paid{ opacity:.65 }
       .mc-item-day{
-        width:36px;height:36px;border-radius:10px;
+        width:38px;height:38px;border-radius:10px;
         background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
         display:flex;flex-direction:column;align-items:center;justify-content:center;
         flex-shrink:0;
       }
       .mc-item-day-num{ font-size:14px;font-weight:800;color:#fff;line-height:1 }
-      .mc-item-day-lbl{ font-size:9px;color:rgba(255,255,255,.4);text-transform:uppercase;margin-top:1px }
+      .mc-item-day-lbl{ font-size:9px;color:rgba(255,255,255,.45);text-transform:uppercase;margin-top:1px }
 
       .mc-item-info{ flex:1;min-width:0 }
       .mc-item-title{ font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis }
-      .mc-item-sub{ font-size:11px;color:rgba(255,255,255,.45);margin-top:2px;display:flex;align-items:center;gap:6px }
+      .mc-item-sub{ font-size:11px;color:rgba(255,255,255,.45);margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap; }
 
       .mc-badge{ font-size:9px;font-weight:800;padding:2px 6px;border-radius:6px;text-transform:uppercase }
       .mc-badge.commitment{ background:rgba(124,92,255,.2);color:#a78bfa;border:1px solid rgba(124,92,255,.3) }
       .mc-badge.debt{ background:rgba(251,191,36,.2);color:#fbbf24;border:1px solid rgba(251,191,36,.3) }
+      .mc-badge.fiado{ background:rgba(6,182,212,.2);color:#38bdf8;border:1px solid rgba(6,182,212,.3) }
       .mc-badge.unexpected{ background:rgba(251,113,133,.2);color:#fb7185;border:1px solid rgba(251,113,133,.3) }
 
       .mc-item-right{ text-align:right;flex-shrink:0 }
       .mc-item-amt{ font-size:14px;font-weight:800;color:#fff }
       .mc-item-paybtn{
-        margin-top:4px;font-size:10px;font-weight:700;padding:3px 8px;border-radius:8px;
+        margin-top:4px;font-size:11px;font-weight:700;padding:4px 10px;border-radius:8px;
         background:rgba(54,211,153,.18);color:#36d399;border:1px solid rgba(54,211,153,.3);
-        cursor:pointer;display:inline-block;
+        cursor:pointer;display:inline-block;transition:all .14s;
       }
       .mc-item-paybtn:hover{ background:rgba(54,211,153,.3) }
 
@@ -23075,7 +23317,7 @@ function renderFinanceMissionControl(){
         background:linear-gradient(135deg,rgba(124,92,255,.12),rgba(99,102,241,.08));
         border:1px solid rgba(124,92,255,.25);border-radius:16px;padding:16px;
       }
-      .mc-copilot-text{ font-size:12px;color:rgba(255,255,255,.85);line-height:1.5;white-space:pre-wrap }
+      .mc-copilot-text{ font-size:12px;color:rgba(255,255,255,.88);line-height:1.55;white-space:pre-wrap }
 
       /* Charts Wrap */
       .mc-chart-card{ background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:16px }
@@ -23083,11 +23325,16 @@ function renderFinanceMissionControl(){
     document.head.appendChild(s);
   }
 
-  // Generate Items List
-  const itemsHtml = m.items.length > 0 ? m.items.map(item => {
+  // Generate Items List HTML
+  const itemsHtml = filteredItems.length > 0 ? filteredItems.map(item => {
     const isPaid = item.status === "paid";
-    const badgeClass = item.type === "commitment" ? "commitment" : (item.type === "debt" ? "debt" : "unexpected");
-    const badgeText = item.type === "commitment" ? "Compromiso" : (item.type === "debt" ? "Deuda" : "⚡ Imprevisto");
+    const badgeMap = {
+      commitment: { cls: "commitment", text: "Compromiso" },
+      debt: { cls: "debt", text: "Deuda" },
+      fiado: { cls: "fiado", text: "🤝 Fiado" },
+      unexpected: { cls: "unexpected", text: "⚡ Imprevisto" }
+    };
+    const b = badgeMap[item.type] || { cls: "commitment", text: "Pago" };
 
     return `
       <div class="mc-item ${isPaid ? 'paid' : ''}">
@@ -23098,8 +23345,9 @@ function renderFinanceMissionControl(){
         <div class="mc-item-info">
           <div class="mc-item-title">${escapeHtml(item.name)}</div>
           <div class="mc-item-sub">
-            <span class="mc-badge ${badgeClass}">${badgeText}</span>
+            <span class="mc-badge ${b.cls}">${b.text}</span>
             <span>· ${escapeHtml(item.category || "General")}</span>
+            ${item.totalDebtBalance !== undefined ? `<span style="color:#fbbf24;">(Saldo rest: S/ ${fmt(item.totalDebtBalance)})</span>` : ''}
           </div>
         </div>
         <div class="mc-item-right">
@@ -23112,13 +23360,32 @@ function renderFinanceMissionControl(){
             </div>
           ` : `
             <button class="mc-item-paybtn" onclick="openMcPayModal('${item.id}')">
-              ✅ Pagar
+              💸 Pagar
             </button>
           `}
         </div>
       </div>
     `;
-  }).join('') : `<div style="padding:24px;text-align:center;color:rgba(255,255,255,.4);font-size:13px">Sin pagos programados para este mes.</div>`;
+  }).join('') : `<div style="padding:28px;text-align:center;color:rgba(255,255,255,.45);font-size:13px">No hay obligaciones en esta categoría para este mes.</div>`;
+
+  // Liquidity semáforo banner
+  const liquidityBanner = m.coverageGap >= 0
+    ? `
+      <div style="margin-top:12px;padding:12px 14px;border-radius:14px;background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.25);display:flex;align-items:center;gap:12px;">
+        <span style="font-size:20px;">🟢</span>
+        <div style="font-size:12px;color:#34d399;line-height:1.4;">
+          <strong>Caja suficiente:</strong> Tienes <strong>S/ ${fmt(m.availableCash)}</strong> disponible en cuentas para cubrir los <strong>S/ ${fmt(m.totalPending)}</strong> pendientes. Saldo libre proyectado: <strong>S/ ${fmt(m.coverageGap)}</strong>.
+        </div>
+      </div>
+    `
+    : `
+      <div style="margin-top:12px;padding:12px 14px;border-radius:14px;background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.25);display:flex;align-items:center;gap:12px;">
+        <span style="font-size:20px;">🔴</span>
+        <div style="font-size:12px;color:#fb7185;line-height:1.4;">
+          <strong>Alerta de liquidez:</strong> Tienes <strong>S/ ${fmt(m.availableCash)}</strong> en cuentas y faltan <strong>S/ ${fmt(m.totalPending)}</strong> de pagos este mes. Brecha a cubrir: <strong>S/ ${fmt(Math.abs(m.coverageGap))}</strong>.
+        </div>
+      </div>
+    `;
 
   return `
     <div class="mc-wrap">
@@ -23135,45 +23402,55 @@ function renderFinanceMissionControl(){
       <!-- Hero Card KPI -->
       <div class="mc-hero">
         <div class="mc-hero-top">
-          <div class="mc-hero-label">🛰 Mission Control · ${escapeHtml(mk)}</div>
+          <div class="mc-hero-label">🛰 Mission Control Central · ${escapeHtml(mk)}</div>
           <div class="mc-hero-badge">${m.completionPct}% CUMPLIDO</div>
         </div>
 
-        <div class="mc-balance" style="color:${m.totalPending === 0 ? '#36d399' : '#fb7185'}">
+        <div class="mc-balance" style="color:${m.totalPending === 0 ? '#34d399' : '#fb7185'}">
           S/ ${fmt(m.totalPending)}
         </div>
-        <div class="mc-balance-sub">Pendiente de pago este mes</div>
+        <div class="mc-balance-sub">Pendiente por pagar este mes</div>
+
+        ${liquidityBanner}
 
         <div class="mc-stats">
           <div class="mc-stat accent">
             <div class="mc-stat-val">S/ ${fmt(m.totalExpected)}</div>
-            <div class="mc-stat-lbl">Meta Pagos</div>
+            <div class="mc-stat-lbl">Meta del Mes</div>
           </div>
           <div class="mc-stat good">
             <div class="mc-stat-val">S/ ${fmt(m.totalPaid)}</div>
             <div class="mc-stat-lbl">Pagado Real</div>
           </div>
-          <div class="mc-stat warn">
-            <div class="mc-stat-val">S/ ${fmt(m.unexpectedTotal)}</div>
-            <div class="mc-stat-lbl">Imprevistos</div>
-          </div>
-          <div class="mc-stat">
-            <div class="mc-stat-val">S/ ${fmt(m.commitmentsTotal)}</div>
-            <div class="mc-stat-lbl">Compromisos</div>
-          </div>
-          <div class="mc-stat">
-            <div class="mc-stat-val">S/ ${fmt(m.debtsTotal)}</div>
-            <div class="mc-stat-lbl">Deudas Cuota</div>
+          <div class="mc-stat ${m.totalPending === 0 ? 'good' : 'warn'}">
+            <div class="mc-stat-val">S/ ${fmt(m.totalPending)}</div>
+            <div class="mc-stat-lbl">Por Pagar</div>
           </div>
           <div class="mc-stat good">
             <div class="mc-stat-val">S/ ${fmt(m.availableCash)}</div>
             <div class="mc-stat-lbl">Caja Disponible</div>
           </div>
+          <div class="mc-stat accent">
+            <div class="mc-stat-val">S/ ${fmt(m.commitmentsTotal)}</div>
+            <div class="mc-stat-lbl">Compromisos</div>
+          </div>
+          <div class="mc-stat amber">
+            <div class="mc-stat-val">S/ ${fmt(m.debtsTotal)}</div>
+            <div class="mc-stat-lbl">Cuotas Deudas</div>
+          </div>
+          <div class="mc-stat cyan">
+            <div class="mc-stat-val">S/ ${fmt(m.fiadosTotal)}</div>
+            <div class="mc-stat-lbl">Fiados Pendientes</div>
+          </div>
+          <div class="mc-stat warn">
+            <div class="mc-stat-val">S/ ${fmt(m.unexpectedTotal)}</div>
+            <div class="mc-stat-lbl">Imprevistos</div>
+          </div>
         </div>
 
         <div class="mc-progress-wrap">
           <div class="mc-progress-label">
-            <span>Progreso de Pagos</span>
+            <span>Progreso General de Obligaciones</span>
             <span>${m.completionPct}%</span>
           </div>
           <div class="mc-progress-track">
@@ -23182,27 +23459,38 @@ function renderFinanceMissionControl(){
         </div>
       </div>
 
-      <!-- Copiloto IA de Deudas -->
+      <!-- Copiloto IA de Finanzas -->
       <div class="mc-copilot-box">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
           <div style="font-size:13px;font-weight:800;color:#fff;display:flex;align-items:center;gap:6px;">
-            <span>💡</span> Copiloto Estratégico de Deudas
+            <span>💡</span> Copiloto Estratégico Unificado
           </div>
           <button class="mc-btn-primary" style="padding:4px 10px;font-size:11px;" onclick="mcRunAiAnalysis()">
-            🤖 Analizar con IA
+            🤖 Analizar Estrategia
           </button>
         </div>
         <div id="mcAiOutput" class="mc-copilot-text">
-          ${_mcAiAnalysisText ? escapeHtml(_mcAiAnalysisText) : `Presiona "Analizar con IA" para que tu copiloto evalúe tu avance de deudas, detecte cuando liberar deudas antiguas (como la de Carlos Emilio) y te arme la mejor estrategia de pago del mes.`}
+          ${_mcAiAnalysisText ? escapeHtml(_mcAiAnalysisText) : `Presiona "Analizar Estrategia" para que el copiloto evalúe tu liquidez, balance entre compromisos y fiados, y priorice los pagos más críticos de ${escapeHtml(monthTitle)}.`}
         </div>
       </div>
 
-      <!-- Lista de Pagos del Mes -->
+      <!-- Barra de Filtros Rápidos -->
+      <div class="mc-filter-bar">
+        <button class="mc-pill ${filter === 'all' ? 'active' : ''}" onclick="setFinanceMissionFilter('all')">Todos (${totalCount})</button>
+        <button class="mc-pill ${filter === 'pending' ? 'active' : ''}" onclick="setFinanceMissionFilter('pending')">⏳ Pendientes (${pendingCount})</button>
+        <button class="mc-pill ${filter === 'paid' ? 'active' : ''}" onclick="setFinanceMissionFilter('paid')">✅ Pagados (${paidCount})</button>
+        <button class="mc-pill ${filter === 'commitment' ? 'active' : ''}" onclick="setFinanceMissionFilter('commitment')">📅 Compromisos (${cmtCount})</button>
+        <button class="mc-pill ${filter === 'debt' ? 'active' : ''}" onclick="setFinanceMissionFilter('debt')">💳 Deudas (${dbtCount})</button>
+        <button class="mc-pill ${filter === 'fiado' ? 'active' : ''}" onclick="setFinanceMissionFilter('fiado')">🤝 Fiados (${fdoCount})</button>
+        <button class="mc-pill ${filter === 'unexpected' ? 'active' : ''}" onclick="setFinanceMissionFilter('unexpected')">⚡ Imprevistos (${unexpCount})</button>
+      </div>
+
+      <!-- Lista Unificada de Obligaciones -->
       <div class="mc-section">
         <div class="mc-section-head">
-          <div class="mc-section-title">📋 Pagos del Mes (${m.items.length})</div>
+          <div class="mc-section-title">📋 Obligaciones del Mes (${filteredItems.length})</div>
           <button class="mc-btn-primary" onclick="openMcUnexpectedModal()">
-            ➕ Pago Inesperado
+            ➕ Registrar Imprevisto
           </button>
         </div>
         ${itemsHtml}
@@ -23211,19 +23499,19 @@ function renderFinanceMissionControl(){
       <!-- Estadísticas y Gráfico de Distribución -->
       <div class="mc-chart-card">
         <div style="font-size:14px;font-weight:800;color:#fff;margin-bottom:12px;">
-          📊 Análisis Estratégico de Pagos
+          📊 Composición de Obligaciones del Mes
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:center;">
           <div style="background:rgba(255,255,255,.04);padding:10px;border-radius:12px;">
-            <div style="font-size:11px;color:rgba(255,255,255,.45);">Saldo Deudas Restantes</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.45);">Saldo Deudas Totales</div>
             <div style="font-size:16px;font-weight:800;color:#fbbf24;margin-top:2px;">S/ ${fmt(m.totalRemainingDebtsBalance)}</div>
           </div>
           <div style="background:rgba(255,255,255,.04);padding:10px;border-radius:12px;">
-            <div style="font-size:11px;color:rgba(255,255,255,.45);">Ingreso Confirmado</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.45);">Ingresos del Mes</div>
             <div style="font-size:16px;font-weight:800;color:#36d399;margin-top:2px;">S/ ${fmt(m.incomeConfirmed)}</div>
           </div>
         </div>
-        <div style="margin-top:14px;height:160px;position:relative;">
+        <div style="margin-top:14px;height:180px;position:relative;">
           <canvas id="mcDistributionChart"></canvas>
         </div>
       </div>
@@ -23231,10 +23519,6 @@ function renderFinanceMissionControl(){
     </div>
   `;
 }
-
-setTimeout(() => {
-  mcRenderChart();
-}, 100);
 
 function mcRenderChart() {
   const canvas = document.getElementById("mcDistributionChart");
@@ -23244,16 +23528,19 @@ function mcRenderChart() {
   const m = financeMissionControlModel(mk);
 
   if (window._mcChartInstance) {
-    window._mcChartInstance.destroy();
+    try { window._mcChartInstance.destroy(); } catch(e){}
   }
+
+  const dataValues = [m.commitmentsTotal, m.debtsTotal, m.fiadosTotal, m.unexpectedTotal];
+  const hasData = dataValues.some(v => v > 0);
 
   window._mcChartInstance = new Chart(canvas.getContext("2d"), {
     type: "doughnut",
     data: {
-      labels: ["Compromisos Fijos", "Cuotas de Deudas", "Imprevistos"],
+      labels: ["Compromisos", "Cuotas Deudas", "Fiados", "Imprevistos"],
       datasets: [{
-        data: [m.commitmentsTotal, m.debtsTotal, m.unexpectedTotal],
-        backgroundColor: ["#7c5cff", "#fbbf24", "#fb7185"],
+        data: hasData ? dataValues : [1],
+        backgroundColor: hasData ? ["#8b5cf6", "#f59e0b", "#06b6d4", "#f43f5e"] : ["rgba(255,255,255,0.1)"],
         borderWidth: 0
       }]
     },
@@ -23263,15 +23550,12 @@ function mcRenderChart() {
       plugins: {
         legend: {
           position: "bottom",
-          labels: { color: "rgba(255,255,255,0.7)", font: { size: 11 } }
+          labels: { color: "rgba(255,255,255,0.75)", font: { size: 11 } }
         }
       }
     }
   });
 }
-
-
-
 
 async function financeFetchTelegramPending() {
   try {
@@ -24527,16 +24811,7 @@ function renderFinanceFiadosTab() {
   const totalPending = pendingFiados.reduce((sum, e) => sum + Number(e.amount || 0), 0);
   const totalPaid = paidFiados.reduce((sum, e) => sum + Number(e.amount || 0), 0);
   
-  const parseFiadoName = (e) => {
-    const rawNote = String(e.note || "");
-    const hasSep = rawNote.includes(" · ");
-    const desc = hasSep ? rawNote.split(" · ")[0].trim() : rawNote.trim();
-    const noteDetails = hasSep ? rawNote.split(" · ")[1].trim() : "";
-    return {
-      desc: desc || "Fiado sin descripción",
-      note: noteDetails
-    };
-  };
+  const parseFiadoName = financeParseFiadoName;
 
   const pendingListHtml = pendingFiados.map(e => {
     const info = parseFiadoName(e);
@@ -24805,6 +25080,9 @@ window.openFinanceStatsBreakdownModal = function(type, key, label) {
 };
 
 function wireFinance(root) {
+  if (state.financeSubTab === "mission") {
+    setTimeout(() => { if (typeof mcRenderChart === "function") mcRenderChart(); }, 40);
+  }
   const searchInput = root.querySelector("#finStatsSearch");
   if (searchInput) {
     searchInput.addEventListener("input", (e) => {
