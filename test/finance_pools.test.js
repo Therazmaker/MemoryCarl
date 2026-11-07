@@ -72,6 +72,9 @@ test("la IA solo enlaza si el texto nombra a un único pozo abierto", () => {
   assert.equal(matchPoolByLabel(ledger, "lo pagué con la quincena 1"), "q1");
   assert.equal(matchPoolByLabel(ledger, "del bono"), null, "pozo cerrado");
   assert.equal(matchPoolByLabel(ledger, "sueldo"), null);
+  const bono = [inc("b", 100, { isSourcePool: true, sourcePoolName: "Bono" })];
+  assert.equal(matchPoolByLabel(bono, "abono del cliente"), null, "no enlaza por un trozo de palabra");
+  assert.equal(matchPoolByLabel(bono, "lo saqué del bono"), "b");
 });
 
 test("nombre del pozo: sourcePoolName, si no la primera parte de la nota", () => {

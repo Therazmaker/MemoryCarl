@@ -165,9 +165,12 @@ export function matchPoolByLabel(ledger = [], label = "") {
   const text = normalize(label);
   if (!text) return null;
   const open = buildPools(ledger).filter((p) => !p.closed);
+  // El nombre tiene que aparecer como palabra o frase completa ("bono" no debe enlazar "abono")
+  const escape = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const hits = open.filter((p) => {
     const n = normalize(p.name);
-    return n && n !== "pozo" && (text === n || text.includes(n));
+    if (!n || n === "pozo") return false;
+    return new RegExp(`(^|[^a-z0-9ñ])${escape(n)}($|[^a-z0-9ñ])`).test(text);
   });
   return hits.length === 1 ? hits[0].id : null;
 }
