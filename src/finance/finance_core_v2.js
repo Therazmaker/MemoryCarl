@@ -235,6 +235,7 @@ window.FINANCE = (function(){
     isSourcePool,
     sourcePoolName,
     parentPoolId,
+    poolClosed,
     noAccountDebit,
     isExternalPayment,
     paidBy
@@ -270,6 +271,7 @@ window.FINANCE = (function(){
       isSourcePool: !!isSourcePool,
       sourcePoolName: sourcePoolName || null,
       parentPoolId: parentPoolId || null,
+      poolClosed: !!poolClosed,
       noAccountDebit: !!noAccountDebit,
       isExternalPayment: !!isExternalPayment,
       paidBy: paidBy || "me"
