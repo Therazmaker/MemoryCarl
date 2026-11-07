@@ -1,4 +1,5 @@
 import './finance/finance_core_v2.js?v=2050';
+import { buildPools, expensePoolId, expensesWithoutPool, resolvePoolRootId } from './finance/finance_pools.js';
 (function mcConsoleLogsInterceptorInit(){
   if (window.__mcLogsInterceptor) return;
   window.__mcLogs = [];
@@ -18729,6 +18730,15 @@ function financeActiveLedger(){
   return (state.financeLedger||[]).filter(e=>!e.archived);
 }
 
+// Pozo del que es recarga un ingreso (parentPoolId o, en datos viejos, sourceMovementId)
+function financePoolParentOf(m){
+  if(!m || m.type !== 'income' || m.isSourcePool) return null;
+  const parent = m.parentPoolId || m.sourceMovementId;
+  if(!parent) return null;
+  const active = financeActiveLedger();
+  return resolvePoolRootId(new Map(active.map(x => [x.id, x])), parent);
+}
+
 function financeRecomputeBalances(){
   // Auto-repair any past movements tagged as historical or Fergis that were accidentally assigned to a bank account
   (financeActiveLedger()||[]).forEach(e => {
@@ -18932,6 +18942,7 @@ function addFinanceEntry(payload){
     isSourcePool: !!payload.isSourcePool,
     sourcePoolName: payload.sourcePoolName || null,
     parentPoolId: payload.parentPoolId || null,
+    poolClosed: !!payload.poolClosed,
     // carry over usd props if present
     usdGross: payload.usdGross || null,
     usdNet: payload.usdNet || null,
@@ -19535,27 +19546,32 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
       </div>
 
       <div id="finProIncomeOpts" style="display:${draft.type==='income'?'block':'none'}; margin: 12px 0; background: #1c1c1e; padding: 12px; border-radius: 12px; border: 1px solid #333;">
-        <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; cursor:pointer;">
-          <input type="checkbox" id="finEntryIsSourcePool" ${existing?.isSourcePool?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
-          <span style="font-size:14px; font-weight:600; color:#34d399;">🎯 Marcar como Pozo de Dinero / Quincena</span>
-        </label>
-        <div id="finProSourcePoolWrap" style="display:${existing?.isSourcePool?'block':'none'}; margin-bottom:12px;">
-          <input type="text" id="finEntrySourcePoolName" class="textInput" placeholder="Nombre del pozo (Ej. 1ra Quincena Septiembre, Bono)" value="${escapeHtml(existing?.sourcePoolName || '')}" style="width:100%; box-sizing:border-box; margin:0; font-size:13px;">
-        </div>
-        <div id="finProReloadPoolWrap" style="margin-bottom:12px;">
-          <label style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:600;">➕ Sumar / Recargar a un Pozo Existente</label>
-          <select id="finEntryIncomePoolSelect" class="textInput" style="width:100%; box-sizing:border-box; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
-            <option value="">-- Nuevo Ingreso Independiente --</option>
-            ${(() => {
-              const activePools = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger || [])).filter(m => m.type === 'income' && !m.archived && m.isSourcePool && m.id !== existing?.id);
-              return activePools.map(p => {
-                const name = p.sourcePoolName || (p.note ? String(p.note).split(' · ')[0] : 'Pozo');
-                const isSel = existing?.parentPoolId === p.id;
-                return `<option value="${p.id}" ${isSel ? 'selected' : ''}>Sumar a: ${escapeHtml(name)} (${p.date ? p.date.slice(0,10) : ''})</option>`;
-              }).join('');
-            })()}
-          </select>
-        </div>
+        ${(() => {
+          // Tipo de ingreso respecto a los pozos: una sola opción a la vez
+          const otherPools = buildPools(financeActiveLedger(), { excludeId: existing?.id })
+            .filter(p => !p.closed || p.id === financePoolParentOf(existing));
+          const mode = existing?.isSourcePool ? 'pool' : (financePoolParentOf(existing) ? 'reload' : 'none');
+          const opt = (val, title, sub) => `
+            <label class="finPoolModeOpt ${mode===val?'active':''}">
+              <input type="radio" name="finEntryPoolMode" value="${val}" ${mode===val?'checked':''}>
+              <span><b>${title}</b><small>${sub}</small></span>
+            </label>`;
+          return `
+            <div class="finPoolModeLabel">💰 ¿Este ingreso es un pozo de dinero?</div>
+            <div class="finPoolModeGroup">
+              ${opt('none', 'Ingreso normal', 'No se usa para separar gastos')}
+              ${opt('pool', 'Pozo nuevo', 'Ej. 1ra quincena, bono, pago de un cliente')}
+              ${otherPools.length ? opt('reload', 'Recarga de un pozo', 'Suma dinero a un pozo que ya existe') : ''}
+            </div>
+            <div id="finProSourcePoolWrap" style="display:${mode==='pool'?'block':'none'}; margin:8px 0 12px;">
+              <input type="text" id="finEntrySourcePoolName" class="textInput" placeholder="Nombre del pozo (Ej. 1ra Quincena Noviembre, Bono)" value="${escapeHtml(existing?.sourcePoolName || '')}" style="width:100%; box-sizing:border-box; margin:0; font-size:13px;">
+            </div>
+            <div id="finProReloadPoolWrap" style="display:${mode==='reload'?'block':'none'}; margin:8px 0 12px;">
+              <select id="finEntryIncomePoolSelect" class="textInput" style="width:100%; box-sizing:border-box; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
+                ${otherPools.map(p => `<option value="${p.id}" ${financePoolParentOf(existing)===p.id ? 'selected' : ''}>${escapeHtml(p.name)} · quedan S/ ${_financeFmt(p.remaining)}${p.closed ? ' (cerrado)' : ''}</option>`).join('')}
+              </select>
+            </div>`;
+        })()}
         <label style="display:flex; align-items:center; gap:8px; margin-bottom:12px; cursor:pointer;">
           <input type="checkbox" id="finEntryIsLoan" ${existing?.isLoan?'checked':''} style="width:18px;height:18px;accent-color:#7c5cff;">
           <span style="font-size:14px; font-weight:600;">Me prestaron dinero (Generar Deuda)</span>
@@ -19651,25 +19667,21 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         <input type="text" id="finEntryPerson" class="finProNote" placeholder="Nombre de la persona (Ej: Jhon, María)" value="${escapeHtml(existing?.counterparty || '')}" style="margin-top:4px;">
       </div>
 
-      <div id="finEntrySourceWrap" style="margin-bottom:10px; display:${draft.type==='transfer'?'none':'block'};">
-        <label style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:600;">💰 Origen del Dinero (Ingreso / Pozo)</label>
-        <select id="finEntrySourceSelect" class="textInput" style="width:100%; box-sizing:border-box; margin-bottom:6px; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
-          <option value="">-- Sin origen asignado (Caja general) --</option>
-          ${(() => {
-            const activeLedger = financeActiveLedger ? financeActiveLedger() : (state.financeLedger || []);
-            const pools = activeLedger.filter(m => m.type === 'income' && !m.archived && (m.isSourcePool || existing?.sourceMovementId === m.id));
-            if (pools.length === 0) {
-              return `<option value="" disabled>-- No hay pozos creados aún (Marca un Ingreso como Pozo) --</option>`;
-            }
-            return pools.map(inc => {
-              const poolTitle = inc.sourcePoolName || (inc.note ? String(inc.note).split(' · ')[0] : 'Pozo');
-              const label = `${inc.date ? inc.date.slice(0,10) : ''} - ${poolTitle} (S/ ${_financeFmt(inc.amount)})`;
-              const isSelected = existing?.sourceMovementId === inc.id;
-              return `<option value="${inc.id}" data-label="${escapeHtml(poolTitle)}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
-            }).join('');
-          })()}
-        </select>
-        <input type="text" id="finEntryOrigin" class="finProNote" placeholder="O escribe el origen libre (Ej: sueldo, lo de Jhon)" value="${escapeHtml(existing?.sourceLabel || '')}" style="margin-bottom:0;">
+      <div id="finEntrySourceWrap" style="margin-bottom:10px; display:${draft.type==='expense'?'block':'none'};">
+        <label style="display:block; font-size:12px; color:#aaa; margin-bottom:4px; font-weight:600;">💰 ¿De qué pozo sale este gasto?</label>
+        ${(() => {
+          const pools = buildPools(financeActiveLedger(), { excludeId: existing?.id });
+          const currentPool = existing && existing.type === 'expense' ? expensePoolId(financeActiveLedger(), existing) : null;
+          const shown = pools.filter(p => !p.closed || p.id === currentPool);
+          return `
+            <select id="finEntrySourceSelect" class="textInput" style="width:100%; box-sizing:border-box; margin-bottom:6px; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:8px 10px; font-size:13px;">
+              <option value="" data-remaining="">Sin pozo (caja general)</option>
+              ${shown.map(p => `<option value="${p.id}" data-label="${escapeHtml(p.name)}" data-remaining="${p.remaining}" ${currentPool===p.id?'selected':''}>${escapeHtml(p.name)} · quedan S/ ${_financeFmt(p.remaining)}${p.closed ? ' (cerrado)' : ''}</option>`).join('')}
+            </select>
+            ${shown.length ? '' : '<div style="font-size:11px; color:#888; margin-bottom:6px;">Aún no tienes pozos. Al registrar un ingreso, elige "Pozo nuevo".</div>'}
+            <div id="finEntryPoolHint" style="font-size:12px; margin-bottom:6px;"></div>`;
+        })()}
+        <input type="text" id="finEntryOrigin" class="finProNote" placeholder="Detalle del origen (opcional, ej: lo que me dio Jhon)" value="${escapeHtml(existing?.sourceLabel || '')}" style="margin-bottom:0;">
       </div>
       
       <div class="finProAdvToggle" id="finAdvToggle">Más opciones (Cuentas, Notas) ▼</div>
@@ -19757,13 +19769,37 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     }
   });
 
-  const isSourcePool = backdrop.querySelector('#finEntryIsSourcePool');
+  // Tipo de ingreso: normal / pozo nuevo / recarga (excluyentes)
   const sourcePoolWrap = backdrop.querySelector('#finProSourcePoolWrap');
-  if (isSourcePool && sourcePoolWrap) {
-    isSourcePool.addEventListener('change', () => {
-      sourcePoolWrap.style.display = isSourcePool.checked ? 'block' : 'none';
+  const reloadPoolWrap = backdrop.querySelector('#finProReloadPoolWrap');
+  backdrop.querySelectorAll('input[name="finEntryPoolMode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const mode = backdrop.querySelector('input[name="finEntryPoolMode"]:checked')?.value || 'none';
+      if (sourcePoolWrap) sourcePoolWrap.style.display = mode === 'pool' ? 'block' : 'none';
+      if (reloadPoolWrap) reloadPoolWrap.style.display = mode === 'reload' ? 'block' : 'none';
+      backdrop.querySelectorAll('.finPoolModeOpt').forEach(o => o.classList.toggle('active', o.querySelector('input')?.checked));
+      if (mode === 'pool') backdrop.querySelector('#finEntrySourcePoolName')?.focus();
     });
-  }
+  });
+
+  // Gasto: saldo del pozo elegido y aviso si el gasto lo supera
+  const poolSelect = backdrop.querySelector('#finEntrySourceSelect');
+  const poolHint = backdrop.querySelector('#finEntryPoolHint');
+  const updatePoolHint = () => {
+    if (!poolSelect || !poolHint) return;
+    const opt = poolSelect.options[poolSelect.selectedIndex];
+    const rem = opt && opt.getAttribute('data-remaining') !== '' ? Number(opt.getAttribute('data-remaining')) : null;
+    if (rem === null || Number.isNaN(rem)) { poolHint.textContent = ''; return; }
+    const amt = financeParseAmount(backdrop.querySelector('#finEntryAmount')?.value || 0) || 0;
+    const after = rem - amt;
+    poolHint.style.color = after < 0 ? '#f87171' : '#34d399';
+    poolHint.textContent = after < 0
+      ? `⚠️ Este gasto supera lo que queda en el pozo por S/ ${_financeFmt(-after)}`
+      : `Después de este gasto quedarán S/ ${_financeFmt(after)}`;
+  };
+  poolSelect?.addEventListener('change', updatePoolHint);
+  backdrop.querySelector('#finEntryAmount')?.addEventListener('input', updatePoolHint);
+  updatePoolHint();
 
   const incomeOpts = backdrop.querySelector('#finProIncomeOpts');
   const expenseOpts = backdrop.querySelector('#finProExpenseOpts');
@@ -19779,7 +19815,7 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
         if (incomeOpts) incomeOpts.style.display = 'block';
         if (expenseOpts) expenseOpts.style.display = 'none';
         if (transferOpts) transferOpts.style.display = 'none';
-        if (sourceWrap) sourceWrap.style.display = 'block';
+        if (sourceWrap) sourceWrap.style.display = 'none';
       } else if (draft.type === 'expense') {
         if (incomeOpts) incomeOpts.style.display = 'none';
         if (expenseOpts) expenseOpts.style.display = 'block';
@@ -20005,21 +20041,18 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
   
   const isLoanChecked = backdrop.querySelector('#finEntryIsLoan')?.checked;
   const isFiadoChecked = !!backdrop.querySelector('#finEntryIsFiado')?.checked;
-  const isSourcePoolChecked = !!backdrop.querySelector('#finEntryIsSourcePool')?.checked;
-  const sourcePoolNameVal = isSourcePoolChecked ? (backdrop.querySelector('#finEntrySourcePoolName')?.value||'').trim() : null;
-  const parentPoolSelectEl = backdrop.querySelector('#finEntryIncomePoolSelect');
-  const parentPoolIdVal = parentPoolSelectEl ? parentPoolSelectEl.value || null : null;
+  const poolMode = backdrop.querySelector('input[name="finEntryPoolMode"]:checked')?.value || 'none';
+  const isSourcePoolChecked = poolMode === 'pool';
+  const sourcePoolNameVal = isSourcePoolChecked ? ((backdrop.querySelector('#finEntrySourcePoolName')?.value||'').trim() || name || 'Pozo') : null;
+  const parentPoolIdVal = poolMode === 'reload' ? (backdrop.querySelector('#finEntryIncomePoolSelect')?.value || null) : null;
 
   // New fields: Persona (counterparty override) and Origen (sourceLabel / sourceMovementId override)
   const personVal = (backdrop.querySelector('#finEntryPerson')?.value||'').trim();
   let originVal = (backdrop.querySelector('#finEntryOrigin')?.value||'').trim();
   const sourceSelectEl = backdrop.querySelector('#finEntrySourceSelect');
-  const sourceMovementIdVal = sourceSelectEl ? sourceSelectEl.value || null : null;
-
-  if (sourceMovementIdVal && !originVal) {
-    const opt = sourceSelectEl.options[sourceSelectEl.selectedIndex];
-    if (opt) originVal = opt.getAttribute('data-label') || '';
-  }
+  // Solo los gastos salen de un pozo; los ingresos se enlazan con parentPoolId
+  const sourceMovementIdVal = draft.type === 'expense' && sourceSelectEl ? sourceSelectEl.value || null : null;
+  if (draft.type !== 'expense') originVal = draft.type === 'income' ? originVal : '';
 
   const entryPayload = {
     type: draft.type,
@@ -20045,7 +20078,9 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     // Manual overrides — written before AI call so AI won't overwrite them
     counterparty: personVal || null,
     sourceLabel: originVal || null,
-    sourceMovementId: sourceMovementIdVal
+    sourceMovementId: sourceMovementIdVal,
+    // Un pozo cerrado sigue cerrado al editarlo
+    poolClosed: draft.type === 'income' && isSourcePoolChecked ? !!existing?.poolClosed : false
   };
 
   if(existing){
@@ -24268,6 +24303,15 @@ window.setFinanceStatsSource = function(srcId) {
   view();
 };
 
+// Cerrar un pozo lo saca de la lista al registrar gastos nuevos; reabrirlo lo devuelve
+window.financeTogglePoolClosed = function(poolId) {
+  const pool = (state.financeLedger || []).find(e => e.id === poolId);
+  if (!pool || !pool.isSourcePool) return;
+  updateFinanceEntry(poolId, { poolClosed: !pool.poolClosed });
+  toast(pool.poolClosed ? 'Pozo reabierto' : 'Pozo cerrado 🔒');
+  view();
+};
+
 function renderFinanceStatsTab() {
   if (!state.financeStatsPeriod) state.financeStatsPeriod = "month";
   if (state.financeStatsSearch === undefined) state.financeStatsSearch = "";
@@ -24288,11 +24332,12 @@ function renderFinanceStatsTab() {
   
   let ledger = (financeActiveLedger ? financeActiveLedger() : (state.financeLedger||[]));
 
-  // Find all non-archived income entries that are explicitly source pools (or currently selected)
+  // Pozos de dinero: saldo calculado con TODOS sus movimientos, no solo los del periodo visto
   const activeLedger = financeActiveLedger ? financeActiveLedger() : (state.financeLedger || []);
-  const allIncomes = activeLedger.filter(m => m.type === 'income' && !m.archived && (m.isSourcePool || m.id === state.financeStatsSourceId));
+  const allPools = buildPools(activeLedger);
   const selectedSourceId = state.financeStatsSourceId || "";
-  const selectedSource = selectedSourceId ? allIncomes.find(inc => inc.id === selectedSourceId) : null;
+  const selectedPool = selectedSourceId ? allPools.find(p => p.id === selectedSourceId) : null;
+  const selectedSource = selectedPool ? selectedPool.root : null;
   
   const selYear = state.financeStatsYear || currentYearStr;
   const selMonth = state.financeStatsMonth || currentMonthStr;
@@ -24485,25 +24530,14 @@ function renderFinanceStatsTab() {
   let poolInflows = [];
   let sourceHeaderHtml = "";
 
-  if (selectedSource) {
-    const srcNote = selectedSource.sourcePoolName || (selectedSource.note ? String(selectedSource.note).split(' · ')[0].trim() : 'Pozo');
-
-    // Find all reloads / extra inflows linked to this pool
-    const poolReloads = (state.financeLedger || []).filter(m => m.type === 'income' && !m.archived && (m.parentPoolId === selectedSource.id || m.sourceMovementId === selectedSource.id));
-    poolInflows = [selectedSource, ...poolReloads].sort((a,b) => new Date(a.date) - new Date(b.date));
-
-    const totalPoolInflow = poolInflows.reduce((s, e) => s + Number(e.amount || 0), 0);
-
-    // Find expenses linked via sourceMovementId or sourceLabel
-    filteredExpenses = expenses.filter(e => {
-      if (e.sourceMovementId === selectedSource.id) return true;
-      if (e.sourceLabel && srcNote && e.sourceLabel.toLowerCase().includes(srcNote.toLowerCase())) return true;
-      return false;
-    });
-
-    const srcSpent = filteredExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-    const srcRemaining = totalPoolInflow - srcSpent;
-    const srcPct = totalPoolInflow > 0 ? Math.min(100, Math.round((srcSpent / totalPoolInflow) * 100)) : 0;
+  if (selectedPool) {
+    const srcNote = selectedPool.name;
+    poolInflows = selectedPool.inflows;
+    filteredExpenses = selectedPool.expenses;
+    const totalPoolInflow = selectedPool.totalIn;
+    const srcSpent = selectedPool.spent;
+    const srcRemaining = selectedPool.remaining;
+    const srcPct = selectedPool.pct;
     const barColor = srcPct > 90 ? '#ef4444' : (srcPct > 70 ? '#f59e0b' : '#34d399');
 
     // "Cómo Entró" (Abonos/Ingresos) HTML Timeline
@@ -24529,9 +24563,12 @@ function renderFinanceStatsTab() {
           <div>
             <div style="font-size:11px; color:#a5b4fc; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">🎯 Pozo de Ingreso / Quincena</div>
             <div style="font-size:18px; font-weight:800; color:#fff; margin-top:2px;">${escapeHtml(srcNote)}</div>
-            <div style="font-size:12px; color:#94a3b8;">${selectedSource.date ? selectedSource.date.slice(0,10) : ''} • ${poolInflows.length} Entradas de Dinero</div>
+            <div style="font-size:12px; color:#94a3b8;">${selectedSource.date ? selectedSource.date.slice(0,10) : ''} • ${poolInflows.length} Entradas de Dinero${selectedPool.closed ? ' • 🔒 Cerrado' : ''}</div>
           </div>
-          <button class="btn ghost" onclick="setFinanceStatsSource('')" style="font-size:12px; padding:4px 10px; margin:0; height:auto; color:#a5b4fc; border:1px solid #4338ca;">Ver Todo</button>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+            <button class="btn ghost" onclick="financeTogglePoolClosed('${selectedPool.id}')" style="font-size:12px; padding:4px 10px; margin:0; height:auto; color:${selectedPool.closed ? '#34d399' : '#fbbf24'}; border:1px solid #4338ca;">${selectedPool.closed ? 'Reabrir pozo' : 'Cerrar pozo'}</button>
+            <button class="btn ghost" onclick="setFinanceStatsSource('')" style="font-size:12px; padding:4px 10px; margin:0; height:auto; color:#a5b4fc; border:1px solid #4338ca;">Ver Todo</button>
+          </div>
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:12px;">
@@ -24566,22 +24603,52 @@ function renderFinanceStatsTab() {
           <div style="font-size:11px; font-weight:700; color:#34d399; margin-bottom:6px; text-transform:uppercase;">📥 Detalle de "Cómo Entró" el dinero:</div>
           ${inflowsTimelineHtml}
         </div>
+
+        <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px; margin-top:10px;">
+          <div style="font-size:11px; font-weight:700; color:#f87171; margin-bottom:6px; text-transform:uppercase;">📤 En qué se fue (${filteredExpenses.length}):</div>
+          ${filteredExpenses.length ? filteredExpenses.map(e => {
+            const rawNote = String(e.note || "");
+            const desc = rawNote.includes(" · ") ? rawNote.split(" · ")[0].trim() : (rawNote.trim() || e.category || "Gasto");
+            return `
+              <div onclick="openFinanceEntryModal('${e.id}')" style="display:flex; justify-content:space-between; align-items:center; font-size:12px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer;">
+                <div>
+                  <div style="color:#fff; font-weight:600;">${escapeHtml(desc)}</div>
+                  <div style="font-size:11px; color:#aaa;">${e.date ? e.date.slice(0,10) : ''} • ${escapeHtml(e.category || "Otros")}</div>
+                </div>
+                <div style="font-weight:800; color:#f87171; font-size:13px;">- S/ ${fmt(e.amount)}</div>
+              </div>`;
+          }).join('') : '<div style="font-size:12px; color:#888;">Todavía no hay gastos de este pozo.</div>'}
+        </div>
       </section>
     `;
   }
 
-  // Source Selector dropdown
+  // Selector de pozos y tarjetas de los pozos abiertos
+  const openPools = allPools.filter(p => !p.closed);
+  const closedPools = allPools.filter(p => p.closed);
+  const poolCard = (p) => {
+    const color = p.pct > 90 ? '#ef4444' : (p.pct > 70 ? '#f59e0b' : '#34d399');
+    return `
+      <div onclick="setFinanceStatsSource('${p.id}')" style="cursor:pointer; background:#232325; border:1px solid #3a3a3c; border-radius:10px; padding:10px;">
+        <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px;">
+          <span style="font-weight:700; color:#fff;">${escapeHtml(p.name)}</span>
+          <span style="font-weight:800; color:${p.remaining >= 0 ? '#34d399' : '#ef4444'};">S/ ${fmt(p.remaining)}</span>
+        </div>
+        <div style="font-size:11px; color:#9ca3af; margin:2px 0 6px;">${p.date ? p.date.slice(0,10) : ''} · gastado S/ ${fmt(p.spent)} de S/ ${fmt(p.totalIn)}</div>
+        <div style="background:#1e293b; border-radius:6px; height:6px; overflow:hidden;"><div style="height:100%; width:${p.pct}%; background:${color};"></div></div>
+      </div>`;
+  };
   const sourceSelectorHtml = `
     <div style="margin-bottom:16px; background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:12px;">
-      <label style="display:block; font-size:12px; font-weight:700; color:#a5b4fc; margin-bottom:6px;">🔍 Filtrar por Ingreso Específico / Quincena:</label>
-      <select onchange="setFinanceStatsSource(this.value)" style="width:100%; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
-        <option value="">-- Todos los Ingresos (Vista Global) --</option>
-        ${allIncomes.map(inc => {
-          const poolTitle = inc.sourcePoolName || (inc.note ? String(inc.note).split(' · ')[0].trim() : 'Pozo');
-          const isSel = inc.id === selectedSourceId ? 'selected' : '';
-          return `<option value="${inc.id}" ${isSel}>${inc.date ? inc.date.slice(0,10) : ''} — ${escapeHtml(poolTitle)} (S/ ${fmt(inc.amount)})</option>`;
-        }).join('')}
-      </select>
+      <label style="display:block; font-size:12px; font-weight:700; color:#a5b4fc; margin-bottom:6px;">🎯 Pozos de dinero</label>
+      ${allPools.length ? `
+        <select onchange="setFinanceStatsSource(this.value)" style="width:100%; background:#2a2a2c; color:#fff; border:1px solid #444; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box; margin-bottom:${!selectedPool && openPools.length ? '10px' : '0'};">
+          <option value="">-- Vista global (todos los movimientos) --</option>
+          ${openPools.map(p => `<option value="${p.id}" ${p.id === selectedSourceId ? 'selected' : ''}>${escapeHtml(p.name)} · quedan S/ ${fmt(p.remaining)}</option>`).join('')}
+          ${closedPools.length ? `<optgroup label="Cerrados">${closedPools.map(p => `<option value="${p.id}" ${p.id === selectedSourceId ? 'selected' : ''}>${escapeHtml(p.name)} · ${p.date ? p.date.slice(0,10) : ''}</option>`).join('')}</optgroup>` : ''}
+        </select>
+        ${!selectedPool && openPools.length ? `<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:8px;">${openPools.map(poolCard).join('')}</div>` : ''}
+      ` : `<div style="font-size:12px; color:#888;">Aún no tienes pozos. Al registrar un ingreso (una quincena, un bono…), elige "Pozo nuevo" y luego asigna a él tus gastos.</div>`}
     </div>
   `;
 
@@ -24619,17 +24686,17 @@ function renderFinanceStatsTab() {
     </section>
   `;
 
-  // Expenses without assigned source (Unassigned section)
-  const unassignedExpenses = (state.financeLedger || []).filter(e => e.type === 'expense' && !e.archived && !e.sourceMovementId);
+  // Gastos del periodo que no salen de ningún pozo (solo tiene sentido si hay pozos)
+  const unassignedExpenses = allPools.length ? expensesWithoutPool(activeLedger, expenses) : [];
   const totalUnassigned = unassignedExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
 
   const unassignedSectionHtml = (!selectedSourceId && unassignedExpenses.length > 0) ? `
     <section class="finSection" style="background:#1c1c1e; border:1px solid #333; border-radius:12px; padding:16px; margin-bottom:16px;">
       <div class="finSectionHead" style="margin-bottom:10px;">
-        <div class="finSectionTitle" style="color:#f59e0b;">⚠️ Gastos sin Origen Asignado (${unassignedExpenses.length})</div>
+        <div class="finSectionTitle" style="color:#f59e0b;">⚠️ Gastos de este periodo sin pozo (${unassignedExpenses.length})</div>
         <div style="font-size:13px; font-weight:700; color:#f59e0b;">S/ ${fmt(totalUnassigned)}</div>
       </div>
-      <div style="font-size:11px; color:#888; margin-bottom:10px;">Toca cualquier gasto para editarlo y vincularlo a una quincena o ingreso:</div>
+      <div style="font-size:11px; color:#888; margin-bottom:10px;">Toca un gasto para indicar de qué pozo salió:</div>
       <div style="display:flex; flex-direction:column; gap:6px; max-height:180px; overflow-y:auto;">
         ${unassignedExpenses.slice(0, 10).map(e => {
           const rawNote = String(e.note || "");
