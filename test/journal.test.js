@@ -59,3 +59,27 @@ test("el bloque para Carl resume los últimos días y está vacío si no hay nad
   assert.ok(!block.includes("Muy viejo"));
   assert.ok(block.indexOf("Llegué tarde") < block.indexOf("Terminé"), "orden cronológico");
 });
+
+test("editar o borrar una entrada rehace o quita su activación astro", async () => {
+  // localStorage mínimo con forma de Storage (unlimitedStorage.js parchea su prototipo)
+  if (!globalThis.Storage) {
+    const mem = new Map();
+    globalThis.Storage = class Storage {
+      getItem(k) { return mem.has(k) ? mem.get(k) : null; }
+      setItem(k, v) { mem.set(k, String(v)); }
+      removeItem(k) { mem.delete(k); }
+      key(i) { return [...mem.keys()][i] ?? null; }
+      get length() { return mem.size; }
+    };
+    globalThis.localStorage = new globalThis.Storage();
+  }
+  const { recordAstroActivation, replaceAstroActivation, loadActivations } = await import("../src/chat/astroLinks.js");
+  recordAstroActivation({ text: "Hoy en el trabajo me fue bien", messageId: "jr_1", ts: 1 });
+  const before = loadActivations().filter((r) => r.messageId === "jr_1");
+  assert.equal(before.length, 1);
+  replaceAstroActivation({ messageId: "jr_1", text: "Cené con mi familia", ts: 1 });
+  const edited = loadActivations().filter((r) => r.messageId === "jr_1");
+  assert.ok(edited.every((r) => !r.snippet.includes("trabajo")), "no queda el texto viejo");
+  replaceAstroActivation({ messageId: "jr_1" });
+  assert.equal(loadActivations().filter((r) => r.messageId === "jr_1").length, 0);
+});

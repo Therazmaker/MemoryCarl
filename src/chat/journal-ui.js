@@ -9,7 +9,7 @@
 import { addJournalEntry, updateJournalEntry, deleteJournalEntry, getJournalEntries } from "../day/dayStore.js";
 import { JOURNAL_MOODS, QUICK_TAGS, moodById } from "../day/journal.js";
 import { todayLocalStr } from "./lifeDates.js";
-import { recordAstroActivation } from "./astroLinks.js";
+import { recordAstroActivation, replaceAstroActivation } from "./astroLinks.js";
 
 const DRAFT_KEY = "memorycarl_journal_draft";
 const WEEKDAYS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
@@ -304,13 +304,17 @@ export function wireJournal(root, rerender) {
         const text = box.querySelector("[data-jr-edit-text]")?.value || "";
         if (!text.trim()) return;
         const mood = box.querySelector('[data-jr="edit-mood"].jrMood--on')?.dataset.id || null;
-        updateJournalEntry(id, { text, mood });
+        if (updateJournalEntry(id, { text, mood })) {
+          const saved = getJournalEntries().find((x) => x.id === id);
+          try { replaceAstroActivation({ messageId: id, text: saved?.text || "", ts: saved?.ts }); } catch (_e) {}
+        }
         s.editId = null;
         break;
       }
       case "delete":
         if (!confirm("¿Borrar esta entrada del diario?")) return;
         deleteJournalEntry(id);
+        try { replaceAstroActivation({ messageId: id }); } catch (_e) {}
         s.editId = null;
         break;
       default:

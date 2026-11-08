@@ -136,6 +136,20 @@ export function recordAstroActivation({ text, messageId = null, ts = Date.now() 
 }
 
 /**
+ * Rehace (o quita, si `text` está vacío) la activación ligada a un id: al editar o borrar
+ * una entrada del diario no debe quedar el fragmento viejo.
+ */
+export function replaceAstroActivation({ messageId, text = "", ts = Date.now() } = {}) {
+  if (!messageId) return null;
+  const records = loadActivations();
+  const kept = records.filter((r) => r.messageId !== messageId);
+  const rec = text ? buildRecord({ text, messageId, ts, source: "live" }) : null;
+  if (rec) kept.push(rec);
+  if (kept.length !== records.length || rec) saveActivations(kept);
+  return rec;
+}
+
+/**
  * Analiza el historial de chat una sola vez para que las activaciones no empiecen vacías.
  * @param {Array} messages - mensajes del chat ({ role, content, ts, messageId })
  * @returns {number} registros añadidos
