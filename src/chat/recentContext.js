@@ -7,6 +7,7 @@
  */
 
 import { getAllDays } from "../day/dayStore.js";
+import { buildJournalPromptBlock } from "../day/journal.js";
 import { buildLifeFactsPromptBlock } from "./lifeFacts.js";
 import { buildOpenThreadsPromptBlock } from "./openThreads.js";
 
@@ -116,4 +117,13 @@ export function getContinuityPromptStats(userInput = "", activatedNeurons = [], 
 
 if (typeof window !== "undefined") {
   window.__getContinuityPromptStats = (userInput = "") => getContinuityPromptStats(userInput);
+}
+
+/** Diario de los últimos días (pestaña 📓 Diario), compacto. Vacío si no hay entradas. */
+export function buildRecentJournalBlock() {
+  try {
+    return buildJournalPromptBlock(getAllDays());
+  } catch (_e) {
+    return "";
+  }
 }

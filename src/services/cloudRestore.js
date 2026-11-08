@@ -8,6 +8,7 @@
  */
 
 import { todayLocalStr } from "../chat/lifeDates.js";
+import { mergeJournals } from "../day/journal.js";
 
 /** Neurona del backend (plana) → neurona de la app. Si ya tiene `core`, se devuelve tal cual. */
 export function cloudNeuronToLocal(row) {
@@ -158,11 +159,14 @@ export function mergeCloudDays(localDays = [], cloudDays = []) {
       const extra = cloudChat.filter((m) => m && !seen.has(keyOf(m)));
       if (extra.length) next = { ...next, rawChat: [...(day.rawChat || []), ...extra].sort((a, b) => (a.ts || 0) - (b.ts || 0)) };
     }
+    // Diario: se unen las entradas de ambos lados (por id, gana la edición más reciente)
+    const journal = mergeJournals(day.journal || [], cloudDay.journal || []);
+    if (JSON.stringify(journal) !== JSON.stringify(day.journal || [])) next = { ...next, journal };
     // Resumen, emoción, temas…: gana la versión modificada más recientemente
     const cloudNewer = String(cloudDay.updatedAt || "") > String(day.updatedAt || "") && Array.isArray(row?.data?.rawChat);
     if (cloudNewer) {
-      const { rawChat, ...meta } = cloudDay;
-      next = { ...next, ...meta, rawChat: next.rawChat };
+      const { rawChat, journal: _j, ...meta } = cloudDay;
+      next = { ...next, ...meta, rawChat: next.rawChat, ...(next.journal ? { journal: next.journal } : {}) };
     } else if (!day.summary && cloudDay.summary) {
       next = { ...next, summary: cloudDay.summary, dominantEmotion: day.dominantEmotion !== "neutral" ? day.dominantEmotion : cloudDay.dominantEmotion, dominantThemes: day.dominantThemes?.length ? day.dominantThemes : cloudDay.dominantThemes };
     }
