@@ -13,7 +13,7 @@ import { buildLifeFactsPromptBlock } from "../chat/lifeFacts.js";
 import { todayLongStr } from "../chat/lifeDates.js";
 import { buildAstroPromptBlock } from "../chat/astroLinks.js";
 import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
-import { buildRecentDaysPromptBlock } from "../chat/recentContext.js";
+import { buildRecentDaysPromptBlock, buildRecentJournalBlock } from "../chat/recentContext.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -181,6 +181,9 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
   if (recentDaysBlock.blockText) {
     systemContent += recentDaysBlock.blockText;
   }
+
+  // Diario: lo que el usuario escribió para sí mismo (sin conversar)
+  systemContent += buildRecentJournalBlock();
 
   // Carta natal: solo si el usuario lo activó en Couch y el mensaje toca algún tema
   systemContent += buildAstroPromptBlock(userInput);

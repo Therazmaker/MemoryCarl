@@ -2,6 +2,7 @@ import "../services/unlimitedStorage.js";
 import { todayLocalStr } from "../chat/lifeDates.js";
 import { trackListChanges } from "../services/syncOutbox.js";
 import { cloudDayToLocal, mergeCloudDays, repairDaysFromChat } from "../services/cloudRestore.js";
+import { createEntry, addEntryToDays, updateEntryInDays, deleteEntryInDays, journalEntries } from "./journal.js";
 /**
  * dayStore.js — Almacenamiento del Daily Memory Engine
  * MemoryCarl
@@ -99,6 +100,38 @@ export function getCurrentDay() {
     saveDays(days);
   }
   return day;
+}
+
+// ---- Diario (entradas sin conversación, guardadas dentro de cada día) ----
+
+/**
+ * Añade una entrada al diario en su día (lo crea si hace falta).
+ * @returns {object|null} la entrada creada
+ */
+export function addJournalEntry({ text, mood = null, tags = [], ts = Date.now() } = {}) {
+  const entry = createEntry({ text, mood, tags, ts });
+  if (!entry) return null;
+  saveDays(addEntryToDays(loadDays(), entry, buildEmptyDay));
+  return entry;
+}
+
+/** Edita una entrada del diario. */
+export function updateJournalEntry(id, patch = {}) {
+  const { list, found } = updateEntryInDays(loadDays(), id, patch);
+  if (found) saveDays(list);
+  return found;
+}
+
+/** Borra una entrada del diario. */
+export function deleteJournalEntry(id) {
+  const { list, found } = deleteEntryInDays(loadDays(), id);
+  if (found) saveDays(list);
+  return found;
+}
+
+/** Entradas del diario, de la más reciente a la más antigua. */
+export function getJournalEntries() {
+  return journalEntries(loadDays());
 }
 
 /**

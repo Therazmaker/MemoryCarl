@@ -11,6 +11,7 @@
 import {
   getAllDays, getCurrentDay, closeDay, updateDay, rollbackDay, getDayByDate, reopenDay,
 } from "./dayStore.js";
+import { moodById } from "./journal.js";
 import { summarizeDay, inferDayEmotion, extractDayThemes, aggregateActivatedNeurons } from "./dayAnalyzer.js";
 import { getAllNeurons } from "../neuro/neuronStore.js";
 import { requestGeminiDayRefine } from "../services/geminiPremiumClient.js";
@@ -339,6 +340,7 @@ export function viewDayCalendar() {
         const emoIcon = EMOTION_ICONS[day.dominantEmotion] || "😐";
         const msgCount = (day.rawChat || []).filter((m) => m.role === "user").length;
         const neuronCount = (day.linkedNeurons || []).length;
+        const journalCount = (day.journal || []).filter((e) => e && !e.deleted).length;
         const statusClass = day.status === "open" ? "dcDayCard--open" : "dcDayCard--closed";
         const statusLabel = day.status === "open" ? "open" : "cerrado";
         const statusCls = day.status === "open" ? "dcDayStatus--open" : "dcDayStatus--closed";
@@ -348,7 +350,7 @@ export function viewDayCalendar() {
             <div class="dcDayEmoIcon">${emoIcon}</div>
             <div class="dcDayMeta">
               <div class="dcDayDate">${esc(formatDate(day.date))}${milestoneTag ? " " + milestoneTag : ""}</div>
-              <div class="dcDayStats">${msgCount} mensaje${msgCount !== 1 ? "s" : ""} · ${neuronCount} neurona${neuronCount !== 1 ? "s" : ""}${day.geminiProcessed ? " · ✨ Refinado" : ""}</div>
+              <div class="dcDayStats">${msgCount} mensaje${msgCount !== 1 ? "s" : ""} · ${neuronCount} neurona${neuronCount !== 1 ? "s" : ""}${journalCount ? ` · 📓 ${journalCount}` : ""}${day.geminiProcessed ? " · ✨ Refinado" : ""}</div>
             </div>
             <div class="dcDayStatus ${statusCls}">${statusLabel}</div>
           </div>`;
@@ -426,6 +428,20 @@ export function viewDayDetail(day) {
         </div>`).join("")}</div>
     </div>` : "";
 
+  const journalItems = (day.journal || []).filter((e) => e && !e.deleted).sort((a, b) => a.ts - b.ts);
+  const journalHtml = journalItems.length ? `
+    <div class="dcSection">
+      <div class="dcSectionTitle">📓 Diario (${journalItems.length})</div>
+      ${journalItems.map((e) => {
+        const timeStr = new Date(e.ts).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+        const mood = moodById(e.mood);
+        return `<div class="dcInsightItem" style="border-left:3px solid #f59e0b">
+          <span style="opacity:.6">${esc(timeStr)}</span>${mood ? ` ${mood.emoji}` : ""}
+          <div style="margin-top:3px;white-space:pre-wrap">${esc(e.text)}</div>
+        </div>`;
+      }).join("")}
+    </div>` : "";
+
   const timelineHtml = (day.rawChat || []).length ? `
     <div class="dcSection">
       <div class="dcSectionTitle">Timeline (${day.rawChat.length} mensajes)</div>
@@ -492,6 +508,7 @@ export function viewDayDetail(day) {
       ${neuronsHtml}
       ${insightsHtml}
       ${memorySuggestionsHtml}
+      ${journalHtml}
       ${timelineHtml}
     </div>`;
 }

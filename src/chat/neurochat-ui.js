@@ -38,6 +38,7 @@ import {
 import { viewDayCalendar, viewDayDetail, wireDayCalendar, wireDayDetail, dayUiState } from "../day/day-calendar-ui.js";
 import { getAllDays, getDayByDate, repairDaysFromChatHistory } from "../day/dayStore.js";
 import { viewCouch, wireCouch } from "./couch-ui.js";
+import { viewJournal, wireJournal } from "./journal-ui.js";
 import {
   loadLifeFacts,
   LIFE_FACTS_KEY,
@@ -960,6 +961,7 @@ function nchatInner() {
   const tabMemories = uiState.activeTab === "memories";
   const tabDays = uiState.activeTab === "days";
   const tabCouch = uiState.activeTab === "couch";
+  const tabJournal = uiState.activeTab === "journal";
   const showSidePanel = uiState.neuronsExpanded || Boolean(uiState.lastResult) || history.length > 0;
 
   const settingsModal = uiState.settingsOpen ? renderSettingsModal() : "";
@@ -1026,6 +1028,7 @@ function nchatInner() {
       <div class="ncTabs">
         <button class="ncTab ${tabChat  ? "ncTab--active" : ""}" id="btnTabChat">💬 Chat</button>
         <button class="ncTab ${tabNow   ? "ncTab--active" : ""}" id="btnTabNow">🧭 Ahora</button>
+        <button class="ncTab ${tabJournal ? "ncTab--active" : ""}" id="btnTabJournal">📓 Diario</button>
         <button class="ncTab ${tabGraph ? "ncTab--active" : ""}" id="btnTabGraph">🕸️ Neuron Graph</button>
         <button class="ncTab ${tabContext ? "ncTab--active" : ""}" id="btnTabContext">🗂️ Context Window</button>
         <button class="ncTab ${tabMemories ? "ncTab--active" : ""}" id="btnTabMemories">🕰️ Memorias</button>
@@ -1036,6 +1039,7 @@ function nchatInner() {
       <!-- Contenido del tab activo -->
       ${chatContent}
       ${tabNow ? renderNowTab() : ""}
+      ${tabJournal ? viewJournal() : ""}
       ${graphContent}
       ${contextContent}
       ${memoriesContent}
@@ -2140,6 +2144,10 @@ function wireNeuroChatInner(root) {
     uiState.activeTab = "couch";
     fullRerender();
   });
+  root.querySelector("#btnTabJournal")?.addEventListener("click", () => {
+    uiState.activeTab = "journal";
+    fullRerender();
+  });
 
   // Si el tab activo es el grafo, wirear
   if (uiState.activeTab === "graph") {
@@ -2161,6 +2169,9 @@ function wireNeuroChatInner(root) {
   }
   if (uiState.activeTab === "now") {
     wireNowTabEvents(root);
+  }
+  if (uiState.activeTab === "journal") {
+    wireJournal(root, () => fullRerender());
   }
   root.querySelector("#ncMemorySearch")?.addEventListener("input", (e) => {
     uiState.memorySearch = e.target.value || "";
