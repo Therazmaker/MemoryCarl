@@ -1630,7 +1630,7 @@ function openMcPayModal(itemId) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <div>
             <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Monto a pagar (S/)</label>
-            <input type="number" inputmode="decimal" id="mcPayAmount" class="input" value="${Number(item.amount || 0).toFixed(2)}" style="width:100%;font-size:15px;font-weight:700;" />
+            <input type="number" inputmode="decimal" id="mcPayAmount" class="input" value="${Number((item.pendingAmount ?? item.amount) || 0).toFixed(2)}" style="width:100%;font-size:15px;font-weight:700;" />
           </div>
           <div>
             <label style="font-size:11px;color:rgba(255,255,255,0.6);display:block;margin-bottom:4px;font-weight:600;">Fecha de Pago</label>
@@ -1673,7 +1673,7 @@ function submitMcPayModal(itemId) {
     return;
   }
 
-  const payAmount = parseFloat(document.getElementById("mcPayAmount")?.value || item.amount);
+  const payAmount = parseFloat(document.getElementById("mcPayAmount")?.value || (item.pendingAmount ?? item.amount));
   const accountId = document.getElementById("mcPayAccountId")?.value;
   const payDateVal = document.getElementById("mcPayDate")?.value || new Date().toISOString().slice(0, 10);
 
@@ -1703,9 +1703,11 @@ function submitMcPayModal(itemId) {
     financeEnsureCommitments();
     const inst = (state.financeCommitmentInstances || []).find(x => x.id === item.refId || x.templateId === item.refId);
     if (inst) {
+      // Si ya había un pago parcial, se suma (no se pisa)
+      const prevPartial = String(inst.status || "") === "paid" ? 0 : Math.max(0, Number(inst.paidAmount || 0));
       inst.status = "paid";
-      inst.paidAmount = payAmount;
-      inst.actualAmount = payAmount;
+      inst.paidAmount = prevPartial + payAmount;
+      inst.actualAmount = prevPartial + payAmount;
       inst.paidAt = dateISO;
       inst.paymentSourceId = assignedAccId;
       inst.updatedAt = dateISO;
@@ -18476,7 +18478,6 @@ function financeMissionControlModel(monthKey){
   (state.financeDebts || []).filter(d => d && String(d.status || 'active') === 'active').forEach(d => {
     const quota = Number(d.monthlyDue || 0);
     const balance = Number(d.balance || 0);
-    const dueAmt = quota > 0 ? Math.min(quota, balance) : (balance <= 300 ? balance : 0);
 
     const stored = storedById.get(d.id);
     const ledgerPayments = (state.financeLedger || []).filter(e =>
@@ -18487,7 +18488,12 @@ function financeMissionControlModel(monthKey){
     );
     const ledgerPaidSum = ledgerPayments.reduce((s, e) => s + Number(e.amount || 0), 0);
     const totalPaidThisMonth = Math.max(ledgerPaidSum, Number(stored?.paidAmount || 0));
-    const isPaid = (totalPaidThisMonth >= dueAmt && dueAmt > 0) || stored?.status === 'paid' || balance === 0;
+    // La cuota se mide con el saldo que había al empezar el mes (los abonos ya lo bajaron)
+    const balanceAtStart = balance + totalPaidThisMonth;
+    const dueAmt = quota > 0 ? Math.min(quota, balanceAtStart) : (balanceAtStart <= 300 ? balanceAtStart : 0);
+    // Pagada si lo abonado cubre la cuota (un abono menor queda pendiente aunque se haya
+    // guardado como "paid"); sin cuota fija, vale el estado guardado
+    const isPaid = (dueAmt > 0 ? totalPaidThisMonth >= dueAmt - 0.009 : stored?.status === 'paid') || balance === 0;
 
     items.push({
       id: `mc_dbt_${d.id}_${mk}`,
