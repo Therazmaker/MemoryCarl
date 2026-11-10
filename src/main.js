@@ -18910,6 +18910,15 @@ try {
   console.warn("Crypto account auto-migration failed:", err);
 }
 
+// Opciones de "Quién pagó"/"Responsabilidad": conserva valores que no están en la lista
+// (p. ej. "fergis" en pagos externos) para que editar no los cambie a "Yo".
+function financePayerOptions(current){
+  const opts = [["me","Yo"],["wife","Esposa"],["shared","Compartido"],["other","Otro"]];
+  const cur = String(current || "me");
+  if (!opts.some(o=>o[0]===cur)) opts.push([cur, cur.charAt(0).toUpperCase() + cur.slice(1)]);
+  return opts.map(o=>`<option value="${escapeHtml(o[0])}" ${o[0]===cur?'selected':''}>${escapeHtml(o[1])}</option>`).join('');
+}
+
 function addFinanceEntry(payload){
   const {type, amount, accountId, toAccountId, category, reason, note, date, neuronRole, isFiado, fiadoStatus} = payload;
   const isNoDebit = !!payload.noAccountDebit || !!payload.isExternalPayment || accountId === "ext_fergis" || accountId === "ext_historical";
@@ -19709,13 +19718,13 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
           <div class="finEntryField" style="flex:1">
             <label class="fieldLabel">Quién pagó</label>
             <select id="finEntryPaidBy" class="textInput">
-              ${[["me","Yo"],["wife","Esposa"],["shared","Compartido"],["other","Otro"]].map(o=>`<option value="${o[0]}" ${o[0]===draft.paidBy?'selected':''}>${o[1]}</option>`).join('')}
+              ${financePayerOptions(draft.paidBy)}
             </select>
           </div>
           <div class="finEntryField" style="flex:1">
             <label class="fieldLabel">Responsabilidad</label>
             <select id="finEntryResponsible" class="textInput">
-              ${[["me","Yo"],["wife","Esposa"],["shared","Compartido"],["other","Otro"]].map(o=>`<option value="${o[0]}" ${o[0]===draft.responsibleParty?'selected':''}>${o[1]}</option>`).join('')}
+              ${financePayerOptions(draft.responsibleParty)}
             </select>
           </div>
         </div>

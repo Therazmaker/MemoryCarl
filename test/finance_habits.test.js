@@ -106,7 +106,7 @@ test("aviso de gasto fuera de lo normal", () => {
 test("bloque para Carl: compacto y vacío sin datos", () => {
   const block = buildFinanceHabitsPromptBlock(sample(), { now: NOW });
   assert.match(block, /HÁBITOS DE DINERO/);
-  assert.match(block, /Jhon le debe S\/ 70/);
+  assert.match(block, /Jhon le debe al usuario S\/ 70/);
   assert.ok(block.length < 1000);
   assert.equal(buildFinanceHabitsPromptBlock([], { now: NOW }), "");
 });
@@ -118,4 +118,14 @@ test("un hábito con nombre propio no hereda 'esencial' de su categoría", () =>
   const m = buildFinanceNeurons(L, { now: NOW });
   assert.notEqual(m.neurons.find((n) => n.key === "h:cafe").tag, "esencial");
   assert.equal(m.neurons.find((n) => n.key === "h:supermercado").tag, "esencial");
+});
+
+test("un fiado es deuda del usuario y desaparece al pagarse", () => {
+  const d = (n) => new Date(2026, 10, n, 9).toISOString();
+  const L = [{ id: "f1", type: "expense", amount: 40, note: "pan fiado", category: "Alimentos", counterparty: "Bodega", isFiado: true, fiadoStatus: "pending", date: d(3) }];
+  let p = buildFinanceNeurons(L, { now: NOW }).people.find((x) => x.key === "p:bodega");
+  assert.equal(p.balance, -40, "el usuario le debe a la bodega");
+  L[0].fiadoStatus = "paid";
+  p = buildFinanceNeurons(L, { now: NOW }).people.find((x) => x.key === "p:bodega");
+  assert.equal(p.balance, 0);
 });

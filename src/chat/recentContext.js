@@ -129,11 +129,14 @@ export function buildRecentJournalBlock() {
   }
 }
 
-const MONEY_RE = /\b(plata|dinero|lucas|soles|s\/|gast\w*|compr\w*|pag\w*|deud\w*|debo|debe\w*|prest\w*|sueldo|quincena|ahorr\w*|presupuesto|finanz\w*|banco|cuenta|tarjeta|caro|barato|precio|cuesta|cobr\w*|pozo|alquiler|suscrip\w*|ingreso\w*|gana\w*|corto|quebrado|fiado)\b/i;
+const MONEY_RE = /\b(plata|dinero|lucas|soles|gast\w*|compr\w*|pag\w*|deud\w*|debo|debe\w*|prest\w*|sueldo|quincena|ahorr\w*|presupuesto|finanz\w*|banco|cuenta|tarjeta|caro|barato|precio|cuesta|cobr\w*|pozo|alquiler|suscrip\w*|ingreso\w*|gana\w*|corto|quebrado|fiado)\b/i;
+// "S/ 50", "s/50": la barra rompe el \b, así que la moneda va aparte
+const CURRENCY_RE = /(^|[^a-z])s\/\s*\d/i;
 
 /** ¿El mensaje toca dinero? (solo entonces se añade el bloque de finanzas) */
 export function mentionsMoney(text = "") {
-  return MONEY_RE.test(String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+  const t = String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return MONEY_RE.test(t) || CURRENCY_RE.test(t);
 }
 
 /**

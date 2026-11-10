@@ -13,7 +13,7 @@
  * Lógica pura y sin almacenamiento: recibe el ledger y las preferencias del usuario.
  */
 
-import { buildPools, expensePoolId } from "./finance_pools.js";
+import { buildPools, buildPoolResolver } from "./finance_pools.js";
 
 const DAY = 86400000;
 
@@ -181,6 +181,7 @@ export function buildFinanceNeurons(ledger = [], opts = {}) {
 
   const pools = buildPools(ledger);
   const poolById = new Map(pools.map((p) => [p.id, p]));
+  const poolOf = buildPoolResolver(ledger);
 
   const neurons = new Map();
   const people = new Map();
@@ -243,8 +244,12 @@ export function buildFinanceNeurons(ledger = [], opts = {}) {
     const who = String(m.counterparty || "").trim();
     const pk = personKey(who);
     if (pk) {
-      const p = people.get(pk) || { key: pk, label: titleCase(who), given: 0, received: 0, count: 0, loans: 0, fiados: 0, last: 0, movements: [] };
+      const p = people.get(pk) || { key: pk, label: titleCase(who), given: 0, received: 0, lent: 0, owed: 0, count: 0, loans: 0, fiados: 0, last: 0, movements: [] };
       if (m.type === "expense") p.given += amount; else p.received += amount;
+      // Deuda: lo prestado (gasto con préstamo) menos lo que entró de esa persona
+      // (devoluciones o préstamos recibidos) menos los fiados aún sin pagar (eso lo debe el usuario)
+      if (m.type === "expense" && m.isLoan) p.lent += amount;
+      if (m.type === "expense" && m.isFiado && m.fiadoStatus !== "paid") p.owed += amount;
       p.count++;
       if (m.isLoan) p.loans++;
       if (m.isFiado) p.fiados++;
@@ -257,7 +262,7 @@ export function buildFinanceNeurons(ledger = [], opts = {}) {
 
     // Pozo del que salió el gasto
     if (m.type === "expense") {
-      const pid = expensePoolId(ledger, m);
+      const pid = poolOf(m);
       if (pid && poolById.has(pid)) {
         n.pools[pid] = (n.pools[pid] || 0) + amount;
         addEdge(key, `w:${pid}`, "pool", amount);
@@ -341,7 +346,7 @@ export function buildFinanceNeurons(ledger = [], opts = {}) {
     ...p,
     given: round2(p.given),
     received: round2(p.received),
-    balance: round2(p.given - p.received),
+    balance: round2(p.lent - p.received - p.owed),
     movementIds: p.movements.sort((a, b) => timeOf(b) - timeOf(a)).map((m) => m.id),
     movements: undefined,
   })).sort((a, b) => b.count - a.count);
@@ -419,7 +424,7 @@ export function summarizeFinanceNeurons(model, { prefs } = {}) {
     add(`margin_${model.thisMonth}`, "alto", "Gastas más de lo que entra", `Este mes entraron ${money(earned)} y salieron ${money(spent)}.`);
   }
   for (const person of model.people.filter((x) => x.balance >= 50 && (x.loans || x.fiados)).slice(0, 2)) {
-    add(`person_${person.key}`, "bajo", `${person.label} te debe`, `Le diste ${money(person.given)} y te devolvió ${money(person.received)}: quedan ${money(person.balance)}.`, person.key);
+    add(`person_${person.key}`, "bajo", `${person.label} te debe`, `Le prestaste ${money(person.lent)} y te devolvió ${money(person.received)}: quedan ${money(person.balance)}.`, person.key);
   }
   for (const pool of model.pools.filter((x) => !x.closed && x.totalIn > 0 && x.pct >= 85).slice(0, 2)) {
     add(`pool_${pool.id}_${pool.pct >= 100 ? "full" : "near"}`, pool.pct >= 100 ? "alto" : "medio", `Pozo ${pool.label}`, pool.remaining < 0 ? `Te pasaste por ${money(-pool.remaining)}.` : `Ya usaste el ${pool.pct}%: quedan ${money(pool.remaining)}.`, pool.key);
@@ -469,7 +474,7 @@ export function buildFinanceHabitsPromptBlock(ledger = [], opts = {}) {
   parts.push(`Hábitos principales: ${top.join("; ")}.`);
   for (const l of s.lines.slice(0, 3)) parts.push(`${l.text}.`);
   const debts = model.people.filter((p) => Math.abs(p.balance) >= 50 && (p.loans || p.fiados)).slice(0, 2);
-  if (debts.length) parts.push(`Pendientes con personas: ${debts.map((p) => `${p.label} ${p.balance > 0 ? "le debe" : "le prestó"} ${money(Math.abs(p.balance))}`).join("; ")}.`);
+  if (debts.length) parts.push(`Pendientes con personas: ${debts.map((p) => (p.balance > 0 ? `${p.label} le debe al usuario ${money(p.balance)}` : `el usuario le debe a ${p.label} ${money(-p.balance)}`)).join("; ")}.`);
   const text = parts.join(" ").slice(0, 750);
   return `\n\n## HÁBITOS DE DINERO DEL USUARIO\nResumen local de sus finanzas (no lo recites; úsalo solo si la conversación toca dinero, gastos o planes).\n${text}`;
 }
