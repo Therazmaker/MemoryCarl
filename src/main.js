@@ -357,6 +357,8 @@ import { getTransitLiteSignals } from "./transit_lite.js";
 import { getTransitSwissSignals, swissTransitsAvailable, getSwissDailyCached, swissDailyAvailable } from "./transit_swiss.js";
 import "./finance/neuron_financiera.js";
 import { checkMovementAnomaly } from "./finance/finance_habits.js";
+import { renderQuincenaPlanSection, quincenaPlanCardFor } from "./finance/finance_quincena_ui.js";
+import { computeQuincenaPlan } from "./finance/finance_quincena_plan.js";
 import "./sleep_radial_chart.js";
 import "./sleep_journal_pro.js";
 import {
@@ -1563,7 +1565,8 @@ function submitMcUnexpectedModal() {
     paidAmount: 0,
     paidDate: null,
     movementId: null,
-    notes
+    notes,
+    updatedAt: new Date().toISOString()
   };
 
   state.financeMissionPayments.unshift(item);
@@ -1713,6 +1716,7 @@ function submitMcPayModal(itemId) {
       state.financeMissionPayments.push(mcRec);
     }
     mcRec.status = "paid";
+    mcRec.updatedAt = new Date().toISOString();
     mcRec.paidAmount = payAmount;
     mcRec.paidDate = dateISO;
 
@@ -1747,6 +1751,7 @@ function submitMcPayModal(itemId) {
       state.financeMissionPayments.push(mcRec);
     }
     mcRec.status = "paid";
+    mcRec.updatedAt = new Date().toISOString();
     mcRec.paidAmount = payAmount;
     mcRec.paidDate = dateISO;
 
@@ -1784,6 +1789,7 @@ function submitMcPayModal(itemId) {
       state.financeMissionPayments.push(mcRec);
     }
     mcRec.status = "paid";
+    mcRec.updatedAt = new Date().toISOString();
     mcRec.paidAmount = payAmount;
     mcRec.paidDate = dateISO;
   }
@@ -1796,6 +1802,7 @@ function submitMcPayModal(itemId) {
       state.financeMissionPayments.push(unexp);
     }
     unexp.status = "paid";
+    unexp.updatedAt = new Date().toISOString();
     unexp.paidAmount = payAmount;
     unexp.paidDate = dateISO;
 
@@ -1836,6 +1843,10 @@ async function mcRunAiAnalysis() {
   const debtsList = (state.financeDebts || []).filter(d => String(d.status || 'active') === 'active');
   const debtsSummary = debtsList.map(d => `- ${d.name}: Saldo S/ ${_financeFmt(d.balance)}, Cuota S/ ${_financeFmt(d.monthlyDue)}`).join("\n") || "(Sin deudas registradas)";
   const fiadosPendingList = (m.items || []).filter(i => i.type === 'fiado' && i.status === 'pending');
+  const [pyY, pyM] = mk.split("-");
+  const planMonthLabel = `${["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][Number(pyM) - 1] || ""} ${pyY}`;
+  let planCard = "";
+  try { planCard = quincenaPlanCardFor(mk, m.items, planMonthLabel); } catch (_e) {}
 
   const prompt = `Actúa como un Copiloto Financiero Experto y Estratégico.
 Analiza la siguiente situación financiera mensual (${mk}) para Carlos:
@@ -1854,11 +1865,11 @@ SITUACIÓN DEL MES:
 
 DEUDAS ACTIVAS:
 ${debtsSummary}
-
+${planCard ? `\n${planCard}\n` : ""}
 INSTRUCCIONES:
 1. Da un diagnóstico honesto de liquidez (si la caja actual alcanza para cubrir lo pendiente).
 2. Si hay fiados pendientes, prioriza liquidarlos primero porque dañan relaciones de confianza cotidianas.
-3. Sugiere cómo distribuir los pagos de deudas y compromisos restantes del mes de forma inteligente.
+3. Sugiere cómo distribuir los pagos de deudas y compromisos restantes del mes de forma inteligente.${planCard ? "\n4. El usuario ya armó un PLAN DE QUINCENAS: úsalo como base, respeta lo reservado y, si hay imprevistos sin ubicar, di de qué fila del plan conviene sacar el dinero." : ""}
 (Máximo 140 palabras en total, tono motivador, directo y profesional).`;
 
   try {
@@ -1879,7 +1890,15 @@ INSTRUCCIONES:
         ? `\n- *Estrategia Deudas*: Con tus cuotas fijadas en S/ ${_financeFmt(m.debtsTotal)}, mantén al día las cuotas prioritarias y usa cualquier ingreso excedente para amortizar capital.`
         : `\n- *Sin Deudas Críticas*: Tu estructura financiera está ligera en pasivos.`;
 
-      result = `💡 *Diagnóstico de Mission Control (${mk})*:\n${gapText}${fiadoAdvice}${debtAdvice}`;
+      let planAdvice = "";
+      try {
+        const pc = computeQuincenaPlan(state.financeMeta?.quincenaPlans?.[mk], m.items);
+        if (pc.hasPlan) {
+          planAdvice = `\n- *Plan de quincenas*: del 15 te quedan libres S/ ${_financeFmt(pc.periods.q15.free)}${pc.periods.q30.reserveNeeded > 0 ? ` (ya guardando S/ ${_financeFmt(pc.periods.q30.reserveNeeded)} para el 30)` : ""}; a fin de mes S/ ${_financeFmt(pc.periods.q30.free)}.`;
+          if (pc.unassigned.length) planAdvice += ` Aún falta ubicar S/ ${_financeFmt(pc.unassignedTotal)} (${pc.unassigned.slice(0, 3).map(i => i.name).join(", ")}).`;
+        }
+      } catch (_e) {}
+      result = `💡 *Diagnóstico de Mission Control (${mk})*:\n${gapText}${fiadoAdvice}${debtAdvice}${planAdvice}`;
     }
 
     _mcAiAnalysisText = result;
@@ -21015,7 +21034,7 @@ function setFinanceMissionFilter(filter){
   view();
   setTimeout(() => { if (typeof mcRenderChart === "function") mcRenderChart(); }, 40);
 }
-try { window.setFinanceMissionFilter = setFinanceMissionFilter; } catch(e){}
+try { window.setFinanceMissionFilter = setFinanceMissionFilter; window.financeMissionControlModel = financeMissionControlModel; } catch(e){}
 
 function financeParseFiadoName(e) {
   const rawNote = String(e?.note || "");
@@ -22475,6 +22494,8 @@ function openFinanceDebtPayModal(debtId){
         state.financeMissionPayments.push(mcRec);
       }
       mcRec.status = "paid";
+      mcRec.updatedAt = new Date().toISOString();
+    mcRec.updatedAt = new Date().toISOString();
       mcRec.paidAmount = Number(mcRec.paidAmount || 0) + amount;
       mcRec.paidDate = entry.date;
     } catch (_e) {}
@@ -23698,6 +23719,9 @@ function renderFinanceMissionControl(){
           ${_mcAiAnalysisText ? escapeHtml(_mcAiAnalysisText) : `Presiona "Analizar Estrategia" para que el copiloto evalúe tu liquidez, balance entre compromisos y fiados, y priorice los pagos más críticos de ${escapeHtml(monthTitle)}.`}
         </div>
       </div>
+
+      <!-- Plan de quincenas (manual) -->
+      ${renderQuincenaPlanSection(mk, m.items, monthTitle)}
 
       <!-- Barra de Filtros Rápidos -->
       <div class="mc-filter-bar">
