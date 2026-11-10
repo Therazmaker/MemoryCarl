@@ -85,7 +85,7 @@ import { buildLifeFactsPromptBlock } from "../chat/lifeFacts.js";
 import { todayLongStr } from "../chat/lifeDates.js";
 import { buildAstroPromptBlock } from "../chat/astroLinks.js";
 import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
-import { buildRecentDaysPromptBlock, buildRecentJournalBlock } from "../chat/recentContext.js";
+import { buildRecentDaysPromptBlock, buildRecentJournalBlock, buildRecentFinanceBlock } from "../chat/recentContext.js";
 
 // ---- System prompt para NeuroChat ----
 
@@ -202,6 +202,9 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
 
   // Diario: lo que el usuario escribió para sí mismo (sin conversar)
   systemContent += buildRecentJournalBlock();
+
+  // Finanzas: hábitos de dinero, solo si el mensaje habla de plata
+  systemContent += buildRecentFinanceBlock(userInput);
 
   // Carta natal: solo si el usuario lo activó en Couch y el mensaje toca algún tema
   systemContent += buildAstroPromptBlock(userInput);

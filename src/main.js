@@ -356,6 +356,7 @@ import { computeMoonNow } from "./cosmic_lite.js";
 import { getTransitLiteSignals } from "./transit_lite.js";
 import { getTransitSwissSignals, swissTransitsAvailable, getSwissDailyCached, swissDailyAvailable } from "./transit_swiss.js";
 import "./finance/neuron_financiera.js";
+import { checkMovementAnomaly } from "./finance/finance_habits.js";
 import "./sleep_radial_chart.js";
 import "./sleep_journal_pro.js";
 import {
@@ -13571,7 +13572,7 @@ function openReminderModal(){
 }
 
 let toastTimer = null;
-function toast(msg){
+function toast(msg, ms = 1400){
   clearTimeout(toastTimer);
   let host = document.querySelector("#toastHost");
   if(!host) return;
@@ -13582,7 +13583,7 @@ function toast(msg){
     backdrop-filter:blur(10px);z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.35);
     font-weight:800;font-size:13px;max-width:85%;text-align:center;
   ">${escapeHtml(msg)}</div>`;
-  toastTimer = setTimeout(()=>{ host.innerHTML = ""; }, 1400);
+  toastTimer = setTimeout(()=>{ host.innerHTML = ""; }, ms);
 }
 window.toast = toast;
 
@@ -18939,6 +18940,7 @@ function addFinanceEntry(payload){
     noAccountDebit: !!payload.noAccountDebit,
     isExternalPayment: !!payload.isExternalPayment,
     paidBy: payload.paidBy || "me",
+    responsibleParty: payload.responsibleParty || "me",
     isSourcePool: !!payload.isSourcePool,
     sourcePoolName: payload.sourcePoolName || null,
     parentPoolId: payload.parentPoolId || null,
@@ -19520,6 +19522,8 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
     accountId: (existing?.accountId) || state.financePrimaryAccountId || (state.financeAccounts||[])[0]?.id,
     toAccountId: (existing?.toAccountId) || null,
     neuronRole: (existing?.neuronRole) || "auto",
+    paidBy: (existing?.paidBy) || "me",
+    responsibleParty: (existing?.responsibleParty) || "me",
     note: existingSplit.note
   };
 
@@ -19705,13 +19709,13 @@ function openFinanceEntryModal(existingId=null, typeOverride=null){
           <div class="finEntryField" style="flex:1">
             <label class="fieldLabel">Quién pagó</label>
             <select id="finEntryPaidBy" class="textInput">
-              <option value="me">Yo</option><option value="wife">Esposa</option><option value="shared">Compartido</option><option value="other">Otro</option>
+              ${[["me","Yo"],["wife","Esposa"],["shared","Compartido"],["other","Otro"]].map(o=>`<option value="${o[0]}" ${o[0]===draft.paidBy?'selected':''}>${o[1]}</option>`).join('')}
             </select>
           </div>
           <div class="finEntryField" style="flex:1">
             <label class="fieldLabel">Responsabilidad</label>
             <select id="finEntryResponsible" class="textInput">
-              <option value="me">Yo</option><option value="wife">Esposa</option><option value="shared">Compartido</option><option value="other">Otro</option>
+              ${[["me","Yo"],["wife","Esposa"],["shared","Compartido"],["other","Otro"]].map(o=>`<option value="${o[0]}" ${o[0]===draft.responsibleParty?'selected':''}>${o[1]}</option>`).join('')}
             </select>
           </div>
         </div>
@@ -20064,6 +20068,8 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     note,
     date: dateISO,
     neuronRole,
+    paidBy,
+    responsibleParty,
     isLoan: isLoanChecked,
     isFiado: isFiadoChecked,
     fiadoStatus: existing ? (isFiadoChecked ? (existing.fiadoStatus || "pending") : null) : (isFiadoChecked ? "pending" : null),
@@ -20088,7 +20094,7 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
     toast('Actualizado ✅');
   }else{
-    addFinanceEntry(entryPayload);
+    const savedEntry = addFinanceEntry(entryPayload);
     financeAddUnifiedTransaction({ date: dateISO, amount, direction: draft.type==='income'?'inflow':'outflow', obligationId:null, sourceId, paidBy, responsibleParty, impactMode, notes: note, tags:[category] });
     
     // Auto-create debt if it's a loan received
@@ -20112,6 +20118,13 @@ backdrop.querySelector('#finEntrySave')?.addEventListener('click', ()=>{
     }
 
     toast('Guardado ✅');
+    // Aviso si el gasto es muy distinto a lo normal en su hábito (Mapa Neuronal)
+    try {
+      const ledgerNow = Array.isArray(state.financeLedger) ? state.financeLedger : [];
+      const withSaved = savedEntry && !ledgerNow.some((x) => x && x.id === savedEntry.id) ? [...ledgerNow, savedEntry] : ledgerNow;
+      const warn = savedEntry && checkMovementAnomaly(withSaved, savedEntry, { prefs: state.financeMeta?.habitPrefs });
+      if (warn) setTimeout(() => toast(`⚠️ ${warn}`, 5000), 1400);
+    } catch(_e) {}
     // Auto-update neural map and open neuron modal pre-filled with this movement
     try {
       if (typeof window.neuronasRunDayUpdate === 'function') window.neuronasRunDayUpdate();
