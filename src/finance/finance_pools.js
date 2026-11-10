@@ -145,6 +145,17 @@ export function expensePoolId(ledger = [], expense) {
 }
 
 /**
+ * Resolutor de pozos para muchos movimientos: indexa el ledger UNA vez.
+ * @returns {(m: object) => string|null}
+ */
+export function buildPoolResolver(ledger = []) {
+  const active = (Array.isArray(ledger) ? ledger : []).filter((m) => m && !m.archived);
+  const byId = new Map(active.map((m) => [m.id, m]));
+  const poolByName = uniqueNameIndex(active.filter(isPoolRoot));
+  return (m) => poolIdOfMovement(byId, m, poolByName);
+}
+
+/**
  * Gastos sin pozo dentro de una lista (por ejemplo, los del periodo que se está viendo).
  * @param {Array} ledger - todos los movimientos (para resolver los enlaces)
  * @param {Array} expenses - gastos a revisar

@@ -8,6 +8,7 @@
 
 import { getAllDays } from "../day/dayStore.js";
 import { buildJournalPromptBlock } from "../day/journal.js";
+import { buildFinanceHabitsPromptBlock } from "../finance/finance_habits.js";
 import { buildLifeFactsPromptBlock } from "./lifeFacts.js";
 import { buildOpenThreadsPromptBlock } from "./openThreads.js";
 
@@ -123,6 +124,32 @@ if (typeof window !== "undefined") {
 export function buildRecentJournalBlock() {
   try {
     return buildJournalPromptBlock(getAllDays());
+  } catch (_e) {
+    return "";
+  }
+}
+
+const MONEY_RE = /\b(plata|dinero|lucas|soles|gast\w*|compr\w*|pag\w*|deud\w*|debo|debe\w*|prest\w*|sueldo|quincena|ahorr\w*|presupuesto|finanz\w*|banco|cuenta|tarjeta|caro|barato|precio|cuesta|cobr\w*|pozo|alquiler|suscrip\w*|ingreso\w*|gana\w*|corto|quebrado|fiado)\b/i;
+// "S/ 50", "s/50": la barra rompe el \b, así que la moneda va aparte
+const CURRENCY_RE = /(^|[^a-z])s\/\s*\d/i;
+
+/** ¿El mensaje toca dinero? (solo entonces se añade el bloque de finanzas) */
+export function mentionsMoney(text = "") {
+  const t = String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return MONEY_RE.test(t) || CURRENCY_RE.test(t);
+}
+
+/**
+ * Hábitos de dinero del Mapa Neuronal de Finanzas (~100 palabras), solo si el mensaje
+ * habla de dinero. Vacío si no hay movimientos.
+ */
+export function buildRecentFinanceBlock(userInput = "") {
+  try {
+    if (!mentionsMoney(userInput)) return "";
+    const st = typeof globalThis !== "undefined" ? globalThis.state : null;
+    const ledger = Array.isArray(st?.financeLedger) ? st.financeLedger : [];
+    if (!ledger.length) return "";
+    return buildFinanceHabitsPromptBlock(ledger, { prefs: st?.financeMeta?.habitPrefs, accounts: st?.financeAccounts || [] });
   } catch (_e) {
     return "";
   }

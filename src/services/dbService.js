@@ -1514,6 +1514,25 @@ export async function pullFromSupabase({ isManual = false } = {}) {
             }
           }
           break;
+        case "finance_extras": {
+          // Preferencias del Mapa Neuronal (renombres, uniones, necesario/evitable): se unen, gana lo local
+          const cloudPrefs = p?.financeMeta?.habitPrefs;
+          if (cloudPrefs && typeof cloudPrefs === "object") {
+            const local = (st.financeMeta && st.financeMeta.habitPrefs) || {};
+            const merged = {
+              merges: { ...(cloudPrefs.merges || {}), ...(local.merges || {}) },
+              labels: { ...(cloudPrefs.labels || {}), ...(local.labels || {}) },
+              verdicts: { ...(cloudPrefs.verdicts || {}), ...(local.verdicts || {}) },
+              dismissed: [...new Set([...(cloudPrefs.dismissed || []), ...(local.dismissed || [])])].slice(-200),
+            };
+            if (JSON.stringify(merged) !== JSON.stringify(local)) {
+              st.financeMeta = { ...(st.financeMeta || {}), habitPrefs: merged };
+              localStorage.setItem("memorycarl_v2_finance_meta", JSON.stringify(st.financeMeta));
+              changed = true;
+            }
+          }
+          break;
+        }
         case "neurochat_now":
           if (Array.isArray(p.lifeFacts) && p.lifeFacts.length) {
             const localFacts = readLocalArray(LIFE_FACTS_KEY);
