@@ -113,3 +113,13 @@ test("pago que vence antes del cobro y línea de caja del mes", () => {
   assert.equal(t.end.me, 920);
   assert.equal(t.lowest.me, 0);
 });
+
+test("en un mes de 31 días, lo que vence el 29 y se paga con el último avisa que llega tarde", () => {
+  const its = [{ id: "x", name: "Internet", amount: 90, dueDay: 29, status: "pending", type: "commitment" }];
+  const p = { periods: { q15: { income: 500, rows: [] }, q30: { income: 500, rows: [{ id: "r", itemId: "x", amount: 90 }] } } };
+  assert.equal(computeQuincenaPlan(p, its, { lastDay: 31 }).periods.q30.rows[0].late, true);
+  assert.equal(computeQuincenaPlan(p, its, { lastDay: 29 }).periods.q30.rows[0].late, false);
+  assert.equal(periodForDay(30, 31), "q15", "el 30 de un mes de 31 días va antes del cobro del 31");
+  const t = buildCashTimeline(p, its, { lastDay: 31 });
+  assert.equal(t.events.find((e) => e.kind === "out").day, 31);
+});

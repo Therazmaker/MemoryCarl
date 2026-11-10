@@ -86,7 +86,7 @@ const perLabel = (id) => (id === "q15" ? "15" : "último");
 
 /** Tarjeta del plan para el copiloto (texto). */
 export function quincenaPlanCardFor(mk, items, monthLabel) {
-  return buildQuincenaPlanCard(loadQuincenaPlan(mk), items, { monthLabel });
+  return buildQuincenaPlanCard(loadQuincenaPlan(mk), items, { monthLabel, lastDay: lastDayOf(mk) });
 }
 
 /**
@@ -111,7 +111,7 @@ function migrateOldRoadmap(mk, items) {
   if (old.fergisTarget) {
     const item = items.find((i) => i.refId === old.fergisTarget);
     if (item) {
-      const per = periodForDay(item.dueDay);
+      const per = periodForDay(item.dueDay, lastDayOf(mk));
       plan.periods[per].rows.push({ id: newId(), itemId: item.id, label: item.name, amount: Math.min(Number(item.amount) || 0, fergis || Number(item.amount) || 0), note: "", done: false, payer: "fergis" });
     }
   }
@@ -290,11 +290,11 @@ export function renderRoadmapTab() {
   const items = missionItems(mk);
   migrateOldRoadmap(mk, items);
   const plan = loadQuincenaPlan(mk);
-  const c = computeQuincenaPlan(plan, items);
+  const c = computeQuincenaPlan(plan, items, { lastDay: lastDayOf(mk) });
   const prev = normalizePlan(g().state?.financeMeta?.quincenaPlans?.[prevMonthKey(mk)]);
   const prevHas = PERIODS.some(({ id }) => prev.periods[id].income || prev.periods[id].fergisIncome || prev.periods[id].rows.length);
   const showFergis = true;
-  const card = buildQuincenaPlanCard(plan, items, { monthLabel: monthLabelOf(mk) });
+  const card = buildQuincenaPlanCard(plan, items, { monthLabel: monthLabelOf(mk), lastDay: lastDayOf(mk) });
   return `
     <section class="card homeCard homeWide qpWrap qpRoadmap">
       ${css()}
@@ -324,7 +324,7 @@ export function renderRoadmapTab() {
 
 /** Resumen en Mission Control (el editor está en la Hoja de Ruta). */
 export function renderQuincenaPlanSection(mk, items) {
-  const c = computeQuincenaPlan(loadQuincenaPlan(mk), items);
+  const c = computeQuincenaPlan(loadQuincenaPlan(mk), items, { lastDay: lastDayOf(mk) });
   const open = `<button class="mc-btn-primary" onclick="setFinanceSubTab('roadmap')">🗺️ ${c.hasPlan ? "Editar" : "Armar"} en Hoja de Ruta</button>`;
   if (!c.hasPlan) {
     return `
@@ -409,7 +409,7 @@ const actions = {
   },
   qpAssign(mk, itemId, periodId) {
     const items = missionItems(mk);
-    const c = computeQuincenaPlan(loadQuincenaPlan(mk), items);
+    const c = computeQuincenaPlan(loadQuincenaPlan(mk), items, { lastDay: lastDayOf(mk) });
     const un = c.unassigned.find((i) => i.id === itemId);
     if (!un) return;
     const plan = loadQuincenaPlan(mk);

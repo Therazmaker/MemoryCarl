@@ -1892,7 +1892,8 @@ INSTRUCCIONES:
 
       let planAdvice = "";
       try {
-        const pc = computeQuincenaPlan(state.financeMeta?.quincenaPlans?.[mk], m.items);
+        const [pcY, pcM] = mk.split("-").map(Number);
+        const pc = computeQuincenaPlan(state.financeMeta?.quincenaPlans?.[mk], m.items, { lastDay: new Date(pcY, pcM, 0).getDate() });
         if (pc.hasPlan) {
           if (pc.usesFergis) {
             const me = pc.periods.q15.people.me, fe = pc.periods.q15.people.fergis;

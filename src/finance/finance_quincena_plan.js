@@ -74,24 +74,26 @@ export function normalizePlan(raw) {
  * lo que vence del 15 al 29 sale de la quincena del 15; lo que vence el último o en los
  * primeros días (1–14) sale de lo que se cobra el último.
  */
-export function periodForDay(day) {
+export function periodForDay(day, lastDay = 30) {
   const d = Number(day) || 1;
-  return d >= 15 && d < 30 ? "q15" : "q30";
+  return d >= 15 && d < lastDay ? "q15" : "q30";
 }
 
 /** true si el pago vence antes de que llegue el dinero con que se planeó pagarlo. */
-function dueBeforePay(periodId, dueDay) {
+function dueBeforePay(periodId, dueDay, lastDay = 30) {
   const d = Number(dueDay);
   if (!d) return false;
-  return periodId === "q15" ? d < 15 : d >= 15 && d < 28;
+  // El cobro del "último" llega el último día real del mes (28–31)
+  return periodId === "q15" ? d < 15 : d >= 15 && d < lastDay;
 }
 
 /**
  * Cálculo del plan.
  * @param {object} rawPlan
  * @param {Array} items - obligaciones del mes ({ id, name, amount, dueDay, status, type, paidAmount })
+ * @param {{ lastDay?: number }} [opts] - último día del mes (día del cobro del último)
  */
-export function computeQuincenaPlan(rawPlan, items = []) {
+export function computeQuincenaPlan(rawPlan, items = [], { lastDay = 30 } = {}) {
   const plan = normalizePlan(rawPlan);
   const byId = new Map((items || []).filter((i) => i && i.id).map((i) => [i.id, i]));
   const assigned = new Map();
@@ -111,7 +113,7 @@ export function computeQuincenaPlan(rawPlan, items = []) {
         label: r.label || item?.name || "Pago",
         item: item || null,
         dueDay: item?.dueDay || null,
-        late: dueBeforePay(def.id, item?.dueDay),
+        late: dueBeforePay(def.id, item?.dueDay, lastDay),
         missing: !!r.itemId && !item, // la obligación ya no existe este mes
         partial: !!item && r.amount + 0.009 < Number(item.amount || 0),
         itemTotal: item ? round2(item.amount) : null,
@@ -152,7 +154,7 @@ export function computeQuincenaPlan(rawPlan, items = []) {
     .filter((i) => i && i.status !== "paid" && Number(i.amount) > 0)
     .map((i) => {
       const remaining = round2(Number(i.amount) - (assigned.get(i.id) || 0));
-      return { ...i, assignedAmount: round2(assigned.get(i.id) || 0), remaining, suggested: periodForDay(i.dueDay) };
+      return { ...i, assignedAmount: round2(assigned.get(i.id) || 0), remaining, suggested: periodForDay(i.dueDay, lastDay) };
     })
     .filter((i) => i.remaining > 0.009)
     .sort((a, b) => (a.dueDay || 1) - (b.dueDay || 1));
@@ -218,7 +220,7 @@ export function computeQuincenaPlan(rawPlan, items = []) {
  * pero nunca antes del cobro con que se planeó pagarlo.
  */
 export function buildCashTimeline(rawPlan, items = [], { lastDay = 30 } = {}) {
-  const c = computeQuincenaPlan(rawPlan, items);
+  const c = computeQuincenaPlan(rawPlan, items, { lastDay });
   const events = [];
   for (const def of PERIODS) {
     const p = c.periods[def.id];
@@ -253,8 +255,8 @@ function fmt(n) {
  * Tarjeta de texto del plan para el Copiloto Estratégico Unificado y para Carl.
  * Vacía si no hay plan.
  */
-export function buildQuincenaPlanCard(rawPlan, items = [], { monthLabel = "" } = {}) {
-  const c = computeQuincenaPlan(rawPlan, items);
+export function buildQuincenaPlanCard(rawPlan, items = [], { monthLabel = "", lastDay = 30 } = {}) {
+  const c = computeQuincenaPlan(rawPlan, items, { lastDay });
   if (!c.hasPlan) return "";
   const lines = [`PLAN DE QUINCENAS${monthLabel ? ` (${monthLabel})` : ""}, hecho a mano por el usuario${c.usesFergis ? " junto con Fergis (su pareja, también cobra el 15 y el último)" : ""}:`];
   for (const def of PERIODS) {
