@@ -359,6 +359,7 @@ import "./finance/neuron_financiera.js";
 import { checkMovementAnomaly } from "./finance/finance_habits.js";
 import { renderQuincenaPlanSection, quincenaPlanCardFor, renderRoadmapTab } from "./finance/finance_quincena_ui.js";
 import { computeQuincenaPlan } from "./finance/finance_quincena_plan.js";
+import { commitmentCardSpark, ensureCommitmentSparkStyles } from "./finance/finance_commitment_profile_ui.js";
 import "./sleep_radial_chart.js";
 import "./sleep_journal_pro.js";
 import {
@@ -22137,6 +22138,7 @@ function renderFinanceCommitmentsTab(){
     document.head.appendChild(s);
   }
 
+  try { ensureCommitmentSparkStyles(); } catch (_e) {}
   const statusColor = st => {
     if(st==='paid'||st==='covered_by_debt') return '#36d399';
     if(st==='overdue') return '#fb7185';
@@ -22174,7 +22176,7 @@ function renderFinanceCommitmentsTab(){
               <div class="cmt-status-dot" style="background:${statusColor(i.status)}"></div>
               <div class="cmt-info">
                 <div class="cmt-name">${escapeHtml(tmpl.name||i.label||'Compromiso')}${recLabel?`<span class="cmt-rec-badge">${recLabel}</span>`:''}</div>
-                <div class="cmt-meta">${escapeHtml(tmpl.category||'General')} &middot; d&iacute;a ${Number(tmpl.dueDay||1)} &middot; ${statusLabel(i.status)}</div>
+                <div class="cmt-meta">${escapeHtml(tmpl.category||'General')} &middot; d&iacute;a ${Number(tmpl.dueDay||1)} &middot; ${statusLabel(i.status)}${(()=>{ try { return commitmentCardSpark(i.templateId); } catch (_e) { return ''; } })()}</div>
               </div>
             </div>
             <div class="cmt-right">
@@ -22184,6 +22186,7 @@ function renderFinanceCommitmentsTab(){
           </div>
           <div class="cmt-card-actions">
             <button class="cmt-action-btn pay" onclick="event.stopPropagation();openFinanceCommitmentPayModal('${i.id}')">&#x1F4B3; Pagar</button>
+            <button class="cmt-action-btn edit" onclick="event.stopPropagation();openCommitmentProfile('${tplId}')">&#x1F4C8; Perfil</button>
             <button class="cmt-action-btn edit" onclick="event.stopPropagation();openFinanceCommitmentModalById('${tplId}')">&#x270F;&#xFE0F; Editar</button>
             <button class="cmt-action-btn del" onclick="event.stopPropagation();deleteFinanceCommitment('${tplId}')">&#x1F5D1;&#xFE0F;</button>
           </div>
