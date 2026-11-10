@@ -77,3 +77,12 @@ test("la minigráfica ignora el mes en curso aún sin pagar", () => {
   rows.push({ ...inst("2026-11", 0, { status: "pending" }), templateId: "alq" });
   assert.deepEqual(commitmentMiniStats(alq, rows, [], { now: NOW }).series, [1500, 1500, 1500]);
 });
+
+test("la racha exige meses seguidos: un mes sin pagar la corta", () => {
+  const gaps = [inst("2026-06", 100), inst("2026-08", 100), inst("2026-10", 100)];
+  const p = buildCommitmentProfile(tpl, gaps, [], { now: NOW });
+  assert.equal(p.streak, 1, "noviembre en curso se salta; octubre cuenta y setiembre sin pago corta la racha");
+  assert.ok(!p.insights.some((i) => /meses seguidos/.test(i.text)));
+  const pending = [...history.slice(0, 5), { ...inst("2026-11", 0, { status: "pending" }) }];
+  assert.equal(buildCommitmentProfile(tpl, pending, [], { now: NOW }).streak, 2, "el mes en curso sin pagar no corta la racha");
+});

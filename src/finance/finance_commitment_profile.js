@@ -121,8 +121,15 @@ export function buildCommitmentProfile(template, instances = [], ledger = [], op
   const timed = series.filter((s) => s.onTime !== null);
   const onTimeCount = timed.filter((s) => s.onTime).length;
   const punctuality = timed.length ? Math.round((onTimeCount / timed.length) * 100) : null;
+  // Racha: meses CONSECUTIVOS pagados a tiempo, del más reciente hacia atrás. Un mes sin
+  // pagar o pagado tarde la corta; solo se salta el mes en curso si aún no se pagó.
   let streak = 0;
-  for (let i = timed.length - 1; i >= 0 && timed[i].onTime; i--) streak++;
+  for (let i = series.length - 1; i >= 0; i--) {
+    const sm = series[i];
+    if (sm.isCurrent && sm.onTime === null) continue;
+    if (sm.onTime !== true) break;
+    streak++;
+  }
 
   const variable = String(template?.amountMode || "fixed") === "variable" || (values.length >= 3 && max.paid - min.paid > Math.max(5, avg * 0.05));
   const recent = values.slice(-3);
