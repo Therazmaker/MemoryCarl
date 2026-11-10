@@ -658,6 +658,7 @@ function getAppModulesList() {
         financeCommitmentInstances: st.financeCommitmentInstances,
         financeLoanUsageLedger: st.financeLoanUsageLedger,
         financeMeta: st.financeMeta,
+        financeMissionPayments: st.financeMissionPayments,
       },
     },
     { id: "neurochat_now", payload: { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads() } },
@@ -1515,6 +1516,36 @@ export async function pullFromSupabase({ isManual = false } = {}) {
           }
           break;
         case "finance_extras": {
+          // Plan de quincenas de Mission Control: por mes, gana el editado más recientemente
+          const cloudPlans = p?.financeMeta?.quincenaPlans;
+          if (cloudPlans && typeof cloudPlans === "object") {
+            const localPlans = (st.financeMeta && st.financeMeta.quincenaPlans) || {};
+            const mergedPlans = { ...localPlans };
+            let plansChanged = false;
+            for (const [mk, plan] of Object.entries(cloudPlans)) {
+              const cur = localPlans[mk];
+              if (plan && (!cur || String(plan.updatedAt || "") > String(cur.updatedAt || ""))) {
+                mergedPlans[mk] = plan;
+                plansChanged = true;
+              }
+            }
+            if (plansChanged) {
+              st.financeMeta = { ...(st.financeMeta || {}), quincenaPlans: mergedPlans };
+              localStorage.setItem("memorycarl_v2_finance_meta", JSON.stringify(st.financeMeta));
+              changed = true;
+            }
+          }
+          // Imprevistos y pagos marcados en Mission Control: se añaden los que falten (por id)
+          if (Array.isArray(p?.financeMissionPayments) && p.financeMissionPayments.length) {
+            const localPays = Array.isArray(st.financeMissionPayments) ? st.financeMissionPayments : [];
+            const ids = new Set(localPays.map((x) => x && x.id).filter(Boolean));
+            const extra = p.financeMissionPayments.filter((x) => x && x.id && !ids.has(x.id));
+            if (extra.length) {
+              st.financeMissionPayments = [...localPays, ...extra];
+              localStorage.setItem("memorycarl_v2_finance_mission_payments", JSON.stringify(st.financeMissionPayments));
+              changed = true;
+            }
+          }
           // Preferencias del Mapa Neuronal (renombres, uniones, necesario/evitable): se unen, gana lo local
           const cloudPrefs = p?.financeMeta?.habitPrefs;
           if (cloudPrefs && typeof cloudPrefs === "object") {

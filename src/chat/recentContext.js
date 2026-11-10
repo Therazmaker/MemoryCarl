@@ -9,6 +9,7 @@
 import { getAllDays } from "../day/dayStore.js";
 import { buildJournalPromptBlock } from "../day/journal.js";
 import { buildFinanceHabitsPromptBlock } from "../finance/finance_habits.js";
+import { buildQuincenaPlanCard } from "../finance/finance_quincena_plan.js";
 import { buildLifeFactsPromptBlock } from "./lifeFacts.js";
 import { buildOpenThreadsPromptBlock } from "./openThreads.js";
 
@@ -149,7 +150,19 @@ export function buildRecentFinanceBlock(userInput = "") {
     const st = typeof globalThis !== "undefined" ? globalThis.state : null;
     const ledger = Array.isArray(st?.financeLedger) ? st.financeLedger : [];
     if (!ledger.length) return "";
-    return buildFinanceHabitsPromptBlock(ledger, { prefs: st?.financeMeta?.habitPrefs, accounts: st?.financeAccounts || [] });
+    let block = buildFinanceHabitsPromptBlock(ledger, { prefs: st?.financeMeta?.habitPrefs, accounts: st?.financeAccounts || [] });
+    // Plan de quincenas del mes (Mission Control), si el usuario armó uno
+    try {
+      const d = new Date();
+      const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const plan = st?.financeMeta?.quincenaPlans?.[mk];
+      const fn = globalThis.financeMissionControlModel;
+      if (plan && typeof fn === "function") {
+        const card = buildQuincenaPlanCard(plan, fn(mk).items || []);
+        if (card) block += `\n\n${card}`;
+      }
+    } catch (_e) {}
+    return block;
   } catch (_e) {
     return "";
   }
