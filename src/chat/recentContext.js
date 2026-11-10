@@ -149,8 +149,8 @@ export function buildRecentFinanceBlock(userInput = "") {
     if (!mentionsMoney(userInput)) return "";
     const st = typeof globalThis !== "undefined" ? globalThis.state : null;
     const ledger = Array.isArray(st?.financeLedger) ? st.financeLedger : [];
-    if (!ledger.length) return "";
-    let block = buildFinanceHabitsPromptBlock(ledger, { prefs: st?.financeMeta?.habitPrefs, accounts: st?.financeAccounts || [] });
+    // Sin movimientos el bloque de hábitos queda vacío, pero el plan de quincenas igual se añade
+    let block = ledger.length ? buildFinanceHabitsPromptBlock(ledger, { prefs: st?.financeMeta?.habitPrefs, accounts: st?.financeAccounts || [] }) : "";
     // Plan de quincenas del mes (Mission Control), si el usuario armó uno
     try {
       const d = new Date();
@@ -159,7 +159,7 @@ export function buildRecentFinanceBlock(userInput = "") {
       const fn = globalThis.financeMissionControlModel;
       if (plan && typeof fn === "function") {
         const card = buildQuincenaPlanCard(plan, fn(mk).items || []);
-        if (card) block += `\n\n${card}`;
+        if (card) block += block ? `\n\n${card}` : `\n\n## PLAN DE DINERO DEL USUARIO\n${card}`;
       }
     } catch (_e) {}
     return block;

@@ -553,11 +553,22 @@ function saveHashes() {
 /**
  * Huella ultrarrápida sin `JSON.stringify` masivo (evita picos de RAM en móviles)
  */
+function contentHash(value) {
+  let str = "";
+  try { str = JSON.stringify(value) || ""; } catch (_e) { return "x"; }
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return `${str.length}:${(h >>> 0).toString(36)}`;
+}
+
 function fastHash(item) {
   if (!item || typeof item !== "object") return String(item);
   // Si es un módulo de app_modules ({ id, payload })
   if (item.payload !== undefined && item.id) {
     const p = item.payload;
+    // finance_extras cambia por dentro (plan de quincenas, estado de pagos de Mission Control)
+    // sin cambiar longitudes ni tipos: se usa un hash del contenido completo
+    if (item.id === "finance_extras") return `fx:${contentHash(p)}`;
     if (Array.isArray(p)) return `arr:${p.length}:${p[p.length - 1]?.id || p[p.length - 1]?.updatedAt || ""}`;
     if (p && typeof p === "object") {
       const keys = Object.keys(p);
@@ -1536,13 +1547,31 @@ export async function pullFromSupabase({ isManual = false } = {}) {
             }
           }
           // Imprevistos y pagos marcados en Mission Control: se añaden los que falten (por id)
+          // y, si ya existen, se toma la versión de la nube cuando avanzó (pagado, monto pagado…)
           if (Array.isArray(p?.financeMissionPayments) && p.financeMissionPayments.length) {
             const localPays = Array.isArray(st.financeMissionPayments) ? st.financeMissionPayments : [];
-            const ids = new Set(localPays.map((x) => x && x.id).filter(Boolean));
-            const extra = p.financeMissionPayments.filter((x) => x && x.id && !ids.has(x.id));
-            if (extra.length) {
-              st.financeMissionPayments = [...localPays, ...extra];
-              localStorage.setItem("memorycarl_v2_finance_mission_payments", JSON.stringify(st.financeMissionPayments));
+            const byId = new Map(localPays.filter((x) => x && x.id).map((x) => [x.id, x]));
+            let paysChanged = false;
+            const nextPays = [...localPays];
+            for (const cloud of p.financeMissionPayments) {
+              if (!cloud || !cloud.id) continue;
+              const local = byId.get(cloud.id);
+              if (!local) {
+                nextPays.push(cloud);
+                paysChanged = true;
+                continue;
+              }
+              const cloudAt = String(cloud.updatedAt || cloud.paidDate || "");
+              const localAt = String(local.updatedAt || local.paidDate || "");
+              const cloudAhead = cloudAt > localAt || (cloud.status === "paid" && local.status !== "paid");
+              if (cloudAhead && JSON.stringify(cloud) !== JSON.stringify(local)) {
+                nextPays[nextPays.indexOf(local)] = { ...local, ...cloud };
+                paysChanged = true;
+              }
+            }
+            if (paysChanged) {
+              st.financeMissionPayments = nextPays;
+              localStorage.setItem("memorycarl_v2_finance_mission_payments", JSON.stringify(nextPays));
               changed = true;
             }
           }

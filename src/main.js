@@ -1565,7 +1565,8 @@ function submitMcUnexpectedModal() {
     paidAmount: 0,
     paidDate: null,
     movementId: null,
-    notes
+    notes,
+    updatedAt: new Date().toISOString()
   };
 
   state.financeMissionPayments.unshift(item);
@@ -1715,6 +1716,7 @@ function submitMcPayModal(itemId) {
       state.financeMissionPayments.push(mcRec);
     }
     mcRec.status = "paid";
+    mcRec.updatedAt = new Date().toISOString();
     mcRec.paidAmount = payAmount;
     mcRec.paidDate = dateISO;
 
@@ -1749,6 +1751,7 @@ function submitMcPayModal(itemId) {
       state.financeMissionPayments.push(mcRec);
     }
     mcRec.status = "paid";
+    mcRec.updatedAt = new Date().toISOString();
     mcRec.paidAmount = payAmount;
     mcRec.paidDate = dateISO;
 
@@ -1786,6 +1789,7 @@ function submitMcPayModal(itemId) {
       state.financeMissionPayments.push(mcRec);
     }
     mcRec.status = "paid";
+    mcRec.updatedAt = new Date().toISOString();
     mcRec.paidAmount = payAmount;
     mcRec.paidDate = dateISO;
   }
@@ -1798,6 +1802,7 @@ function submitMcPayModal(itemId) {
       state.financeMissionPayments.push(unexp);
     }
     unexp.status = "paid";
+    unexp.updatedAt = new Date().toISOString();
     unexp.paidAmount = payAmount;
     unexp.paidDate = dateISO;
 
@@ -22489,6 +22494,8 @@ function openFinanceDebtPayModal(debtId){
         state.financeMissionPayments.push(mcRec);
       }
       mcRec.status = "paid";
+      mcRec.updatedAt = new Date().toISOString();
+    mcRec.updatedAt = new Date().toISOString();
       mcRec.paidAmount = Number(mcRec.paidAmount || 0) + amount;
       mcRec.paidDate = entry.date;
     } catch (_e) {}
