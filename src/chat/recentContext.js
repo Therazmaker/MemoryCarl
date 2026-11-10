@@ -158,7 +158,7 @@ export function buildRecentFinanceBlock(userInput = "") {
       const plan = st?.financeMeta?.quincenaPlans?.[mk];
       const fn = globalThis.financeMissionControlModel;
       if (plan && typeof fn === "function") {
-        const card = buildQuincenaPlanCard(plan, fn(mk).items || []);
+        const card = buildQuincenaPlanCard(plan, fn(mk).items || [], { lastDay: new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate() });
         if (card) block += block ? `\n\n${card}` : `\n\n## PLAN DE DINERO DEL USUARIO\n${card}`;
       }
     } catch (_e) {}
