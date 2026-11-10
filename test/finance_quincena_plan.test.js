@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { computeQuincenaPlan, buildQuincenaPlanCard, normalizePlan, periodForDay, buildCashTimeline } from "../src/finance/finance_quincena_plan.js";
+import { computeQuincenaPlan, buildQuincenaPlanCard, normalizePlan, periodForDay, buildCashTimeline, autoAssignUnassigned, owedOf } from "../src/finance/finance_quincena_plan.js";
 
 const items = [
   { id: "alq", name: "Alquiler", amount: 1500, dueDay: 30, status: "pending", type: "commitment" },
@@ -119,7 +119,35 @@ test("en un mes de 31 días, lo que vence el 29 y se paga con el último avisa q
   const p = { periods: { q15: { income: 500, rows: [] }, q30: { income: 500, rows: [{ id: "r", itemId: "x", amount: 90 }] } } };
   assert.equal(computeQuincenaPlan(p, its, { lastDay: 31 }).periods.q30.rows[0].late, true);
   assert.equal(computeQuincenaPlan(p, its, { lastDay: 29 }).periods.q30.rows[0].late, false);
-  assert.equal(periodForDay(30, 31), "q15", "el 30 de un mes de 31 días va antes del cobro del 31");
+  assert.equal(periodForDay(30, 31), "q30", "el alquiler del 30 se sugiere con el último (con aviso si cobras el 31)");
+  assert.equal(periodForDay(27, 31), "q15");
   const t = buildCashTimeline(p, its, { lastDay: 31 });
   assert.equal(t.events.find((e) => e.kind === "out").day, 31);
+});
+
+test("pagado a medias: solo cuenta lo que falta", () => {
+  const its = [{ id: "luz", name: "Luz", amount: 120, partialPaid: 50, pendingAmount: 70, dueDay: 20, status: "pending", type: "commitment" }];
+  assert.equal(owedOf(its[0]), 70);
+  const c = computeQuincenaPlan({}, its);
+  assert.equal(c.unassigned[0].remaining, 70);
+  const c2 = computeQuincenaPlan({ periods: { q15: { income: 500, rows: [{ id: "r", itemId: "luz", amount: 70 }] } } }, its);
+  assert.equal(c2.periods.q15.rows[0].partial, false, "70 de 70 pendientes no es adelanto");
+  assert.equal(c2.unassigned.length, 0);
+});
+
+test("ubicar todo según su fecha, a nombre de quien se elija", () => {
+  const its = [
+    { id: "a", name: "Internet", amount: 90, dueDay: 20, status: "pending", type: "commitment" },
+    { id: "b", name: "Alquiler", amount: 1500, dueDay: 30, status: "pending", type: "commitment" },
+    { id: "c", name: "Luz", amount: 80, dueDay: 5, status: "pending", type: "commitment" },
+    { id: "d", name: "Gas", amount: 40, dueDay: 25, status: "paid", type: "commitment" },
+  ];
+  let i = 0;
+  const { plan, count } = autoAssignUnassigned({ periods: { q15: { income: 1250 }, q30: { income: 1250 } } }, its, { payer: "fergis", newId: () => `n${i++}` });
+  assert.equal(count, 3, "lo pagado no se ubica");
+  assert.deepEqual(plan.periods.q15.rows.map((r) => r.label), ["Internet"]);
+  assert.deepEqual(plan.periods.q30.rows.map((r) => r.label).sort(), ["Alquiler", "Luz"]);
+  assert.ok([...plan.periods.q15.rows, ...plan.periods.q30.rows].every((r) => r.payer === "fergis"));
+  assert.equal(computeQuincenaPlan(plan, its).unassigned.length, 0);
+  assert.equal(autoAssignUnassigned(plan, its).count, 0, "no duplica");
 });

@@ -27,6 +27,13 @@ export const PEOPLE = [
 const PAYERS = new Set(PEOPLE.map((p) => p.id));
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+/** Lo que de verdad falta pagar de una obligación (si se pagó una parte, solo la diferencia). */
+export function owedOf(item) {
+  if (!item) return 0;
+  const pending = Number(item.pendingAmount);
+  return Number.isFinite(pending) && item.pendingAmount !== undefined && item.pendingAmount !== null ? Math.max(0, pending) : Math.max(0, Number(item.amount) || 0);
+}
+
 export function emptyPeriod() {
   return { income: 0, fergisIncome: 0, rows: [] };
 }
@@ -71,12 +78,15 @@ export function normalizePlan(raw) {
 
 /**
  * Con qué cobro conviene pagar algo según su día de vencimiento:
- * lo que vence del 15 al 29 sale de la quincena del 15; lo que vence el último o en los
- * primeros días (1–14) sale de lo que se cobra el último.
+ * lo que vence del 15 al 27 sale de la quincena del 15; lo de fin de mes (28 en adelante)
+ * y lo de los primeros días (1–14) sale de lo que se cobra el último.
  */
 export function periodForDay(day, lastDay = 30) {
   const d = Number(day) || 1;
-  return d >= 15 && d < lastDay ? "q15" : "q30";
+  // Lo de fin de mes (28 en adelante) se sugiere con el cobro del último; si vence un día
+  // antes de ese cobro, el plan igual muestra el aviso ⏰.
+  const monthEnd = Math.min(28, Number(lastDay) || 30);
+  return d >= 15 && d < monthEnd ? "q15" : "q30";
 }
 
 /** true si el pago vence antes de que llegue el dinero con que se planeó pagarlo. */
@@ -115,8 +125,9 @@ export function computeQuincenaPlan(rawPlan, items = [], { lastDay = 30 } = {}) 
         dueDay: item?.dueDay || null,
         late: dueBeforePay(def.id, item?.dueDay, lastDay),
         missing: !!r.itemId && !item, // la obligación ya no existe este mes
-        partial: !!item && r.amount + 0.009 < Number(item.amount || 0),
-        itemTotal: item ? round2(item.amount) : null,
+        partial: !!item && r.amount + 0.009 < owedOf(item),
+        itemTotal: item ? round2(owedOf(item)) : null,
+        itemPartialPaid: item ? round2(item.partialPaid || 0) : 0,
         itemPaid: item?.status === "paid",
       };
     });
@@ -151,9 +162,9 @@ export function computeQuincenaPlan(rawPlan, items = [], { lastDay = 30 } = {}) 
   q15.shortfall = q15.free < 0 ? round2(-q15.free) : 0;
 
   const unassigned = (items || [])
-    .filter((i) => i && i.status !== "paid" && Number(i.amount) > 0)
+    .filter((i) => i && i.status !== "paid" && owedOf(i) > 0)
     .map((i) => {
-      const remaining = round2(Number(i.amount) - (assigned.get(i.id) || 0));
+      const remaining = round2(owedOf(i) - (assigned.get(i.id) || 0));
       return { ...i, assignedAmount: round2(assigned.get(i.id) || 0), remaining, suggested: periodForDay(i.dueDay, lastDay) };
     })
     .filter((i) => i.remaining > 0.009)
@@ -295,4 +306,29 @@ export function buildQuincenaPlanCard(rawPlan, items = [], { monthLabel = "", la
   if (recent.length) lines.push(`- Cambios recientes del plan: ${recent.map((h) => h.text).join("; ")}.`);
   lines.push("Respeta este orden al aconsejar: no propongas gastar lo que está reservado, respeta quién paga cada cosa y, si hay un imprevisto, sugiere de qué fila del plan (y de quién) sacarlo.");
   return lines.join("\n");
+}
+
+/**
+ * Ubica en el plan todo lo pendiente sin asignar, cada cosa en la quincena sugerida por su
+ * fecha y a nombre de `payer`. Devuelve un plan nuevo (no modifica el recibido) y cuántos ubicó.
+ */
+export function autoAssignUnassigned(rawPlan, items = [], { payer = "me", lastDay = 30, newId } = {}) {
+  const plan = normalizePlan(rawPlan);
+  const c = computeQuincenaPlan(plan, items, { lastDay });
+  const who = PAYERS.has(payer) ? payer : "me";
+  let n = 0;
+  for (const u of c.unassigned) {
+    const per = u.suggested || periodForDay(u.dueDay, lastDay);
+    plan.periods[per].rows.push({
+      id: typeof newId === "function" ? newId() : `qr_${Date.now().toString(36)}_${n}`,
+      itemId: u.id,
+      label: u.name,
+      amount: u.remaining,
+      note: u.type === "unexpected" ? "imprevisto" : "",
+      done: false,
+      payer: who,
+    });
+    n++;
+  }
+  return { plan, count: n };
 }

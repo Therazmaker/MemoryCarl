@@ -6,7 +6,7 @@
  * El mes es el mismo que el de Mission Control (state.financeMissionMonthKey).
  */
 
-import { PERIODS, PEOPLE, normalizePlan, computeQuincenaPlan, buildQuincenaPlanCard, buildCashTimeline, incomeKey, periodForDay } from "./finance_quincena_plan.js";
+import { PERIODS, PEOPLE, normalizePlan, computeQuincenaPlan, buildQuincenaPlanCard, buildCashTimeline, incomeKey, periodForDay, autoAssignUnassigned } from "./finance_quincena_plan.js";
 
 const ui = { addFor: null, showCard: false, assignAs: "me", view: "plan" };
 
@@ -124,6 +124,7 @@ function rowHtml(mk, periodId, r, idx, count) {
   const status = r.itemPaid || r.done;
   const sub = [
     r.partial ? `adelanto de S/ ${fmt(r.itemTotal)}` : "",
+    r.itemPartialPaid > 0 && !r.itemPaid ? `ya pagaste S/ ${fmt(r.itemPartialPaid)}` : "",
     r.note && !(r.partial && /^adelanto$/i.test(r.note.trim())) ? esc(r.note) : "",
     r.dueDay ? `vence el ${r.dueDay}` : "",
     r.itemPaid ? "✅ pagado" : "",
@@ -235,9 +236,10 @@ function unassignedHtml(mk, c) {
         ${PEOPLE.map((p) => `<button type="button" class="${ui.assignAs === p.id ? "on" : ""}" onclick="qpSetAssignAs('${p.id}')">${p.emoji} ${p.label}</button>`).join("")}
       </div>
     </div>
+    <button type="button" class="qpAddBtn" onclick="qpAutoAssign('${mk}')">📍 Ubicar todo según su fecha${ui.assignAs === "fergis" ? " (paga Fergis)" : ""}</button>
     ${c.unassigned.map((i) => `
       <div class="qpUn">
-        <div class="qpRowInfo"><div class="qpRowLabel">${esc(i.name)}</div><div class="qpRowSub">Día ${i.dueDay || "-"} · ${i.assignedAmount ? `resta S/ ${fmt(i.remaining)} de S/ ${fmt(i.amount)}` : `S/ ${fmt(i.remaining)}`}${i.type === "unexpected" ? " · ⚡ imprevisto" : ""}</div></div>
+        <div class="qpRowInfo"><div class="qpRowLabel">${esc(i.name)}</div><div class="qpRowSub">Día ${i.dueDay || "-"} · ${i.assignedAmount ? `resta S/ ${fmt(i.remaining)} de S/ ${fmt(i.assignedAmount + i.remaining)}` : `S/ ${fmt(i.remaining)}`}${i.partialPaid > 0 ? ` · ya pagaste S/ ${fmt(i.partialPaid)}` : ""}${i.type === "unexpected" ? " · ⚡ imprevisto" : ""}</div></div>
         <button type="button" class="qpTo ${i.suggested === "q15" ? "sug" : ""}" onclick="qpAssign('${mk}','${esc(i.id)}','q15')">→ 15</button>
         <button type="button" class="qpTo ${i.suggested === "q30" ? "sug" : ""}" onclick="qpAssign('${mk}','${esc(i.id)}','q30')">→ Últ</button>
       </div>`).join("")}`;
@@ -416,6 +418,14 @@ const actions = {
     const payer = ui.assignAs;
     plan.periods[periodId].rows.push({ id: newId(), itemId, label: un.name, amount: un.remaining, note: un.type === "unexpected" ? "imprevisto" : "", done: false, payer });
     savePlan(mk, plan, `${perLabel(periodId)}: ${un.name} S/ ${fmt(un.remaining)}${un.type === "unexpected" ? " (imprevisto)" : ""}${payer === "fergis" ? ", paga Fergis" : ""}`);
+    rerender();
+  },
+  qpAutoAssign(mk) {
+    const items = missionItems(mk);
+    const { plan, count } = autoAssignUnassigned(loadQuincenaPlan(mk), items, { payer: ui.assignAs, lastDay: lastDayOf(mk), newId });
+    if (!count) return;
+    savePlan(mk, plan, `ubicó ${count} pago${count === 1 ? "" : "s"} según su fecha${ui.assignAs === "fergis" ? " (paga Fergis)" : ""}`);
+    try { g().toast?.(`📍 ${count} pago${count === 1 ? "" : "s"} ubicado${count === 1 ? "" : "s"}: revisa y ajusta`); } catch (_e) {}
     rerender();
   },
   qpSetRowAmount(mk, periodId, rowId, value) {

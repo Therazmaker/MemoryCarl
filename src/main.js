@@ -18417,6 +18417,12 @@ function financeMissionControlModel(monthKey){
   financeEnsureMissionControlStructures();
   financeEnsureCommitments();
   const mk = monthKey || state.financeMissionMonthKey || getCurrentMonthKey();
+  // Meses futuros: se crean sus compromisos para poder planificarlos
+  try {
+    if (financeEnsureCommitmentInstancesForMonth(mk) > 0) {
+      try { save(LS.financeCommitmentInstances, state.financeCommitmentInstances); } catch (_e) {}
+    }
+  } catch (_e) {}
 
   const items = [];
   const storedForMonth = (state.financeMissionPayments || []).filter(p => p && p.monthKey === mk);
@@ -18438,7 +18444,10 @@ function financeMissionControlModel(monthKey){
       const paid = isPaid || stored?.status === "paid";
       const expAmt = Number(inst.expectedAmount || tmpl.baseAmount || 0);
       const paidAmt = paid ? Number(inst.paidAmount || stored?.paidAmount || expAmt) : 0;
-      const dueDay = Number(tmpl.dueDay || (inst.dueDate ? parseInt(String(inst.dueDate).slice(8, 10), 10) : 1)) || 1;
+      // Pagado a medias: solo falta la diferencia
+      const partialPaid = !paid ? Math.max(0, Math.min(expAmt, Number(inst.paidAmount || 0))) : 0;
+      // El día real de este mes (un compromiso del 31 vence el 30 en noviembre)
+      const dueDay = (inst.dueDate ? parseInt(String(inst.dueDate).slice(8, 10), 10) : 0) || Number(tmpl.dueDay || 1) || 1;
 
       items.push({
         id: `mc_cmt_${inst.id}`,
@@ -18452,6 +18461,8 @@ function financeMissionControlModel(monthKey){
         dueDay,
         status: paid ? "paid" : "pending",
         paidAmount: paidAmt,
+        partialPaid,
+        pendingAmount: paid ? 0 : Math.max(0, expAmt - partialPaid),
         paidDate: inst.paidAt || stored?.paidDate || null,
         movementId: stored?.movementId || null,
         notes: inst.notes || tmpl.notes || ""
@@ -18491,6 +18502,8 @@ function financeMissionControlModel(monthKey){
       dueDay: Number(d.dueDay || d.dueDate || 15) || 15,
       status: isPaid ? "paid" : "pending",
       paidAmount: isPaid ? (totalPaidThisMonth > 0 ? totalPaidThisMonth : (dueAmt > 0 ? dueAmt : balance)) : 0,
+      partialPaid: isPaid ? 0 : Math.min(totalPaidThisMonth, dueAmt > 0 ? dueAmt : balance),
+      pendingAmount: isPaid ? 0 : Math.max(0, (dueAmt > 0 ? dueAmt : balance) - totalPaidThisMonth),
       paidDate: stored?.paidDate || (ledgerPayments[0]?.date) || null,
       notes: d.notes || ""
     });
@@ -18560,7 +18573,8 @@ function financeMissionControlModel(monthKey){
   items.push(...dedupedItems);
 
   const totalExpected = items.reduce((s, i) => s + Number(i.amount || 0), 0);
-  const totalPaid = items.reduce((s, i) => s + (i.status === 'paid' ? Number(i.paidAmount || i.amount || 0) : 0), 0);
+  // Lo pagado a medias también cuenta como pagado (y deja de estar pendiente)
+  const totalPaid = items.reduce((s, i) => s + (i.status === 'paid' ? Number(i.paidAmount || i.amount || 0) : Number(i.partialPaid || 0)), 0);
   const totalPending = Math.max(0, totalExpected - totalPaid);
 
   const commitmentsTotal = items.filter(i => i.type === 'commitment').reduce((s, i) => s + Number(i.amount || 0), 0);
@@ -21546,6 +21560,53 @@ function financeDebtProgress(d){
 
 
 // ===== Finance Commitments (Servicios / gastos fijos) + Pillars =====
+/**
+ * Crea las instancias del mes de cada compromiso recurrente (si no existen).
+ * Se usa para el mes actual y para los meses futuros que se abren en Mission Control /
+ * Hoja de Ruta, así se puede planificar con los compromisos de diciembre desde noviembre.
+ * Los meses pasados no se rellenan (son historia).
+ * @returns {number} instancias creadas
+ */
+function financeEnsureCommitmentInstancesForMonth(monthKey){
+  if(!/^\d{4}-\d{2}$/.test(String(monthKey||""))) return 0;
+  if(!Array.isArray(state.financeCommitmentInstances)) state.financeCommitmentInstances = [];
+  const current = getCurrentMonthKey();
+  if(monthKey < current) return 0;
+  const [cy, cm] = current.split("-").map(Number);
+  const [ty, tm] = monthKey.split("-").map(Number);
+  if(((ty - cy) * 12 + (tm - cm)) > 12) return 0; // como mucho un año hacia adelante
+  const lastDay = new Date(ty, tm, 0).getDate();
+  const now = new Date();
+  let created = 0;
+  for(const t of (state.financeCommitmentTemplates||[])){
+    if(t.isActive===false || t.autoCreateMonthly===false) continue;
+    const exists = state.financeCommitmentInstances.some(i=>i.templateId===t.id && i.periodKey===monthKey);
+    if(exists) continue;
+    const expected = String(t.amountMode||"fixed")==="variable" ? Number(t.lastKnownAmount||t.baseAmount||0) : Number(t.baseAmount||0);
+    // Un compromiso del 31 cae el último día en los meses más cortos
+    const day = Math.max(1, Math.min(lastDay, Number(t.dueDay||1)));
+    state.financeCommitmentInstances.unshift({
+      id: uid("cmi"),
+      templateId: t.id,
+      periodKey: monthKey,
+      label: `${t.name} ${monthKey}`,
+      expectedAmount: expected,
+      actualAmount: null,
+      dueDate: `${monthKey}-${String(day).padStart(2,'0')}`,
+      status: "pending",
+      paidAmount: 0,
+      paidAt: null,
+      paymentSourceId: null,
+      linkedDebtId: null,
+      notes: "",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    });
+    created++;
+  }
+  return created;
+}
+
 function financeEnsureCommitments(){
   if(!Array.isArray(state.financeCommitments)) state.financeCommitments = [];
   if(!Array.isArray(state.financeCommitmentGroups)) state.financeCommitmentGroups = ["Hogar","Servicios","Suscripciones","Salud","Otros"];
@@ -21637,31 +21698,7 @@ function financeEnsureCommitments(){
     console.error("Failed to sync debts to obligations", e);
   }
 
-  const monthKey = getCurrentMonthKey();
-  const now = new Date();
-  for(const t of (state.financeCommitmentTemplates||[])){
-    if(t.isActive===false || t.autoCreateMonthly===false) continue;
-    const exists = (state.financeCommitmentInstances||[]).some(i=>i.templateId===t.id && i.periodKey===monthKey);
-    if(exists) continue;
-    const expected = String(t.amountMode||"fixed")==="variable" ? Number(t.lastKnownAmount||t.baseAmount||0) : Number(t.baseAmount||0);
-    state.financeCommitmentInstances.unshift({
-      id: uid("cmi"),
-      templateId: t.id,
-      periodKey: monthKey,
-      label: `${t.name} ${monthKey}`,
-      expectedAmount: expected,
-      actualAmount: null,
-      dueDate: `${monthKey}-${String(Math.max(1, Math.min(31, Number(t.dueDay||1)))).padStart(2,'0')}`,
-      status: "pending",
-      paidAmount: 0,
-      paidAt: null,
-      paymentSourceId: null,
-      linkedDebtId: null,
-      notes: "",
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString()
-    });
-  }
+  financeEnsureCommitmentInstancesForMonth(getCurrentMonthKey());
 
   // Backward compatibility: seed legacy list from templates if empty.
   if(!(state.financeCommitments||[]).length && (state.financeCommitmentTemplates||[]).length){
@@ -23600,6 +23637,7 @@ function renderFinanceMissionControl(){
             <span class="mc-badge ${b.cls}">${b.text}</span>
             <span>· ${escapeHtml(item.category || "General")}</span>
             ${item.totalDebtBalance !== undefined ? `<span style="color:#fbbf24;">(Saldo rest: S/ ${fmt(item.totalDebtBalance)})</span>` : ''}
+            ${!isPaid && Number(item.partialPaid || 0) > 0 ? `<span style="color:#38bdf8;">(pagaste S/ ${fmt(item.partialPaid)}, resta S/ ${fmt(item.pendingAmount)})</span>` : ''}
           </div>
         </div>
         <div class="mc-item-right">
