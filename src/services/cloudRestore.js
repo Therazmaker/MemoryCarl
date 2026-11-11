@@ -224,3 +224,44 @@ export function repairDaysFromChat(days = [], messages = [], buildDay) {
   list.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return { list, added };
 }
+
+/**
+ * Borrados hechos directamente en la nube (módulo `neuron_tombstones` en app_modules).
+ * La restauración normal solo AÑADE neuronas, así que sin esto una neurona borrada en
+ * Supabase seguiría en el teléfono y volvería a subirse al usarse.
+ *
+ * payload: { ids: string[] (neuronas borradas), mergedInto?: { [idBorrada]: idQueQueda } }
+ * Quita esas neuronas, redirige las conexiones y los enlaces de memorias a la que quedó.
+ * @returns {{ neurons: Array, memories: Array, removed: number, memoriesChanged: number }}
+ */
+export function applyNeuronTombstones(neurons = [], memories = [], payload = {}) {
+  const gone = new Set((Array.isArray(payload?.ids) ? payload.ids : []).map(String));
+  const into = payload?.mergedInto && typeof payload.mergedInto === "object" ? payload.mergedInto : {};
+  if (!gone.size) return { neurons, memories, removed: 0, memoriesChanged: 0 };
+  const resolve = (id) => {
+    const seen = new Set();
+    let cur = String(id);
+    while (into[cur] && !seen.has(cur)) { seen.add(cur); cur = String(into[cur]); }
+    return cur;
+  };
+  const kept = (Array.isArray(neurons) ? neurons : []).filter((n) => n && !gone.has(String(n.id)));
+  const keptIds = new Set(kept.map((n) => String(n.id)));
+  const removed = (Array.isArray(neurons) ? neurons.length : 0) - kept.length;
+  const nextNeurons = removed
+    ? kept.map((n) => {
+        if (!Array.isArray(n.connections)) return n;
+        const conns = [...new Set(n.connections.map(resolve))].filter((id) => id !== String(n.id) && keptIds.has(id));
+        return conns.length === n.connections.length && conns.every((id, i) => id === n.connections[i]) ? n : { ...n, connections: conns };
+      })
+    : neurons;
+  let memoriesChanged = 0;
+  const nextMemories = (Array.isArray(memories) ? memories : []).map((m) => {
+    const prev = Array.isArray(m?.linkedNeurons) ? m.linkedNeurons : null;
+    if (!prev) return m;
+    const next = [...new Set(prev.map(resolve))].filter((id) => !gone.has(id));
+    if (next.length === prev.length && next.every((id, i) => id === prev[i])) return m;
+    memoriesChanged++;
+    return { ...m, linkedNeurons: next };
+  });
+  return { neurons: nextNeurons, memories: nextMemories, removed, memoriesChanged };
+}

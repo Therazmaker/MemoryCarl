@@ -148,6 +148,42 @@ export function findBestNeuronMatch(candidate, existingNeurons, options = {}) {
   return best;
 }
 
+const ENTITY_TYPES = new Set(["person", "relationship"]);
+const HONORIFICS = /^(señora|senora|sra\.?|señor|senor|sr\.?|don|doña|dona)\s+/i;
+
+/**
+ * Nombre propio al inicio del concepto ("Lucas: amigo…" → "lucas", "Señora Marta" → "marta").
+ * Solo nombres cortos (1 a 3 palabras) que empiezan con mayúscula.
+ * @returns {string} nombre normalizado o ""
+ */
+export function entityNameOf(neuron) {
+  const concept = String(neuron?.core?.concept || "").trim();
+  if (!concept) return "";
+  const head = concept.split(/\s*(?::|\(|—|–|\s-\s|,)\s*/)[0].replace(HONORIFICS, "").trim();
+  if (!head || !/^\p{Lu}/u.test(head)) return "";
+  const words = head.split(/\s+/);
+  if (words.length > 3 || head.length < 3) return "";
+  // Si el concepto entero es una frase larga sin separador, no es un nombre
+  if (head === concept && words.length > 2) return "";
+  return head.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function isEntityNeuron(n) {
+  return ENTITY_TYPES.has(n?.type) || /relationship|relacion/i.test(String(n?.core?.domain || ""));
+}
+
+/** Neurona existente que habla de la misma persona que el candidato, o null. */
+export function findSameEntityNeuron(candidate, existingNeurons = []) {
+  const name = entityNameOf(candidate);
+  if (!name) return null;
+  for (const n of existingNeurons || []) {
+    if (!n || n.id === candidate.id || n.deleted || n.feedbackStats?.removed) continue;
+    if (entityNameOf(n) !== name) continue;
+    if (isEntityNeuron(candidate) || isEntityNeuron(n)) return n;
+  }
+  return null;
+}
+
 /**
  * Decide si un candidato debe fusionarse con alguna neurona existente.
  *
@@ -159,6 +195,13 @@ export function findBestNeuronMatch(candidate, existingNeurons, options = {}) {
 export function shouldMergeNeuron(candidate, existingNeurons, options = {}) {
   const mergeThreshold  = options.mergeThreshold  ?? THRESHOLD_MERGE;
   const reviewThreshold = options.reviewThreshold ?? THRESHOLD_REVIEW;
+
+  // Misma persona con otro título ("Lucas: amigo…" / "Lucas: hijo de Marta") → fusionar.
+  // El texto completo se parece poco, así que el score normal no lo detecta.
+  const sameEntity = findSameEntityNeuron(candidate, existingNeurons);
+  if (sameEntity) {
+    return { action: "merge_existing", matchId: sameEntity.id, score: 1, reasons: [`misma persona: "${entityNameOf(candidate)}"`] };
+  }
 
   const match = findBestNeuronMatch(candidate, existingNeurons, options);
 
