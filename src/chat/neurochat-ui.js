@@ -66,6 +66,7 @@ import { reconcileThreadsWithFacts, undoLifeChanges, describeLifeChange } from "
 import { schedulePush, pullNeurochat, getSyncStatus, getApiConfig as getSyncApiConfig, queueFullBackfill } from "../services/neurochatSync.js";
 import { pendingCount } from "../services/syncOutbox.js";
 import { todayLocalStr } from "./lifeDates.js";
+import { startDayOneImport } from "./dayoneImport-ui.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
@@ -112,6 +113,7 @@ const uiState = {
   memoryDraftMessageId: null,
   memorySuggestionText: "",
   memorySearch: "",
+  memoryYearsExpanded: {}, // año → true para ver todas sus memorias
   memoryFilters: {
     emotion: "",
     importance: "",
@@ -1472,6 +1474,9 @@ function wireNowTabEvents(root) {
   });
 }
 
+// Por año se muestran las más recientes; el resto con "Ver las N"
+const MEMORY_YEAR_PREVIEW = 40;
+
 export function renderMemoriesTimeline() {
   const filters = {
     ...uiState.memoryFilters,
@@ -1491,7 +1496,7 @@ export function renderMemoriesTimeline() {
   const rows = Object.keys(rowsByYear).sort().reverse().map((year) => `
     <div class="ncMemoryGroup">
       <div class="ncMemoryGroupYear">${esc(year)}</div>
-      ${rowsByYear[year].map((m) => `
+      ${(uiState.memoryYearsExpanded[year] ? rowsByYear[year] : rowsByYear[year].slice(-MEMORY_YEAR_PREVIEW)).reverse().map((m) => `
         <button class="ncMemoryCard ${selectedMemory?.id === m.id ? "ncMemoryCard--active" : ""} ${m.isMilestone ? "ncMemoryCard--milestone" : ""}" data-open-memory="${esc(m.id)}">
           <div class="ncMemoryHead">
             <span class="ncMemoryDate">${esc(m.date || "Sin fecha")}</span>
@@ -1502,6 +1507,9 @@ export function renderMemoriesTimeline() {
           <div class="ncMemoryMeta">importancia: ${esc(m.importance || "medium")} · tags: ${esc((m.tags || []).join(", ") || "—")} · neuronas: ${(m.linkedNeurons || []).length}</div>
         </button>
       `).join("")}
+      ${rowsByYear[year].length > MEMORY_YEAR_PREVIEW && !uiState.memoryYearsExpanded[year]
+        ? `<button class="ncActionBtn" data-expand-memory-year="${esc(year)}">Ver las ${rowsByYear[year].length} de ${esc(year)}</button>`
+        : ""}
     </div>
   `).join("");
 
@@ -1535,6 +1543,7 @@ export function renderMemoriesTimeline() {
         <input class="ncSettingsInput ncSettingsInputSm" id="ncMemoryDateFromFilter" type="date" value="${esc(uiState.memoryFilters.dateFrom)}" />
         <input class="ncSettingsInput ncSettingsInputSm" id="ncMemoryDateToFilter" type="date" value="${esc(uiState.memoryFilters.dateTo)}" />
         <button class="ncActionBtn ncActionBtnPrimary" id="btnNewMemory">Nueva memoria</button>
+        <button class="ncActionBtn" id="btnImportDiary" title="Importar un diario exportado de Day One (.zip o .json)">📥 Importar diario</button>
       </div>
       ${uiState.memoryComposerOpen ? renderNewMemoryComposer() : ""}
       <div class="ncMemoriesLayout">
@@ -2200,6 +2209,15 @@ function wireNeuroChatInner(root) {
   root.querySelector("#ncMemoryDateToFilter")?.addEventListener("change", (e) => {
     uiState.memoryFilters.dateTo = e.target.value || "";
     fullRerender();
+  });
+  root.querySelector("#btnImportDiary")?.addEventListener("click", () => {
+    startDayOneImport({ onDone: () => fullRerender() });
+  });
+  root.querySelectorAll("[data-expand-memory-year]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      uiState.memoryYearsExpanded[btn.dataset.expandMemoryYear] = true;
+      fullRerender();
+    });
   });
   root.querySelector("#btnNewMemory")?.addEventListener("click", () => {
     uiState.memoryComposerOpen = !uiState.memoryComposerOpen;

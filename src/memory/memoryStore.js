@@ -118,7 +118,8 @@ function normalizeMemory(memory = {}, options = {}) {
     emotion: String(normalizedByRules.emotion || memory.emotion || "neutral").trim() || "neutral",
     context,
     importance: normalizeImportance(normalizedByRules.importance || memory.importance),
-    tags: dedupeMemoryTags(normalizeMemoryTags(normalizedByRules.tags || memory.tags || [])),
+    // Las etiquetas que trae la memoria (escritas o importadas) van primero; luego las detectadas
+    tags: dedupeMemoryTags(normalizeMemoryTags([...(Array.isArray(memory.tags) ? memory.tags : []), ...(normalizedByRules.tags || [])])).slice(0, 12),
     linkedNeurons: uniqueStrings(normalizedByRules.linkedNeurons || memory.linkedNeurons || []),
     linkedNeuronDisplay: Array.isArray(normalizedByRules.linkedNeuronDisplay) ? normalizedByRules.linkedNeuronDisplay : [],
     relatedInsights: compressRelatedInsights(memory.relatedInsights || []),
@@ -230,6 +231,30 @@ export function deleteMemory(memoryId) {
   memories.splice(idx, 1);
   writeMemories(memories);
   return true;
+}
+
+/**
+ * Guarda muchas memorias de una vez (importación). Las que ya existen por id se reemplazan.
+ * Normaliza cada una (emoción, importancia, etiquetas) y escribe una sola vez.
+ * @returns {number} cuántas se guardaron
+ */
+export function importMemories(list = [], options = {}) {
+  if (!Array.isArray(list) || !list.length) return 0;
+  const neurons = options.neurons || getAllNeurons();
+  const memories = readMemories();
+  const byId = new Map(memories.map((m, i) => [m.id, i]));
+  let count = 0;
+  for (const raw of list) {
+    const record = normalizeMemory(raw, { neurons });
+    if (!record.text) continue;
+    if (raw.importance && ["low", "medium", "high"].includes(raw.importance)) record.importance = raw.importance;
+    if (byId.has(record.id)) memories[byId.get(record.id)] = record;
+    else { byId.set(record.id, memories.length); memories.push(record); }
+    count++;
+  }
+  memories.sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0));
+  writeMemories(memories);
+  return count;
 }
 
 /** Reemplaza todos los recuerdos de una vez (reparación del grafo / deshacer). */
