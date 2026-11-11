@@ -33,6 +33,7 @@ import {
   cloudMemoryToLocal,
   cloudChatToLocal,
   refreshNeuronsFromCloud,
+  applyNeuronTombstones,
 } from "./cloudRestore.js";
 
 // Usamos una nueva clave limpia v4 para descartar cualquier cola pesada v3 que causaba OOM
@@ -1526,6 +1527,21 @@ export async function pullFromSupabase({ isManual = false } = {}) {
             }
           }
           break;
+        case "neuron_tombstones": {
+          // Neuronas borradas o fusionadas directamente en Supabase: se quitan también aquí
+          const localNeurons = readLocalArray("memorycarl_neurochat_neurons");
+          const localMemories = readLocalArray("memorycarl_memories_v1");
+          const r = applyNeuronTombstones(localNeurons, localMemories, p);
+          if (r.removed || r.connectionsChanged) {
+            localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(r.neurons));
+            changed = true;
+          }
+          if (r.memoriesChanged) {
+            localStorage.setItem("memorycarl_memories_v1", JSON.stringify(r.memories));
+            changed = true;
+          }
+          break;
+        }
         case "finance_extras": {
           // Plan de quincenas de Mission Control: por mes, gana el editado más recientemente
           const cloudPlans = p?.financeMeta?.quincenaPlans;

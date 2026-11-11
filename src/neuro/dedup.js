@@ -148,6 +148,64 @@ export function findBestNeuronMatch(candidate, existingNeurons, options = {}) {
   return best;
 }
 
+const ENTITY_TYPES = new Set(["person", "relationship"]);
+const HONORIFICS = /^(señora|senora|sra\.?|señor|senor|sr\.?|don|doña|dona)\s+/i;
+
+/**
+ * Nombre propio al inicio del concepto ("Lucas: amigo…" → "lucas", "Señora Marta" → "marta").
+ * Solo nombres cortos (1 a 3 palabras) que empiezan con mayúscula.
+ * @returns {string} nombre normalizado o ""
+ */
+export function entityNameOf(neuron) {
+  const concept = String(neuron?.core?.concept || "").trim();
+  if (!concept) return "";
+  const head = concept.split(/\s*(?::|\(|—|–|\s-\s|,)\s*/)[0].replace(HONORIFICS, "").trim();
+  if (!head || !/^\p{Lu}/u.test(head)) return "";
+  const words = head.split(/\s+/);
+  if (words.length > 3 || head.length < 3) return "";
+  // Si el concepto entero es una frase larga sin separador, no es un nombre
+  if (head === concept && words.length > 2) return "";
+  return head.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function isEntityNeuron(n) {
+  return ENTITY_TYPES.has(n?.type) || /relationship|relacion/i.test(String(n?.core?.domain || ""));
+}
+
+const strip = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+/**
+ * Cuánto se parecen dos neuronas que comparten nombre, además del nombre: triggers en común
+ * (sin contar el propio nombre) y parecido de los resúmenes. Evita unir a dos "Ana" distintas.
+ */
+function sameEntityEvidence(a, b, name) {
+  const tA = new Set((a.triggers || []).map(strip).filter((t) => t && t !== name));
+  const sharedTriggers = (b.triggers || []).map(strip).filter((t) => t && t !== name && tA.has(t)).length;
+  const summarySim = stringSim(a.core?.summary || "", b.core?.summary || "");
+  return { sharedTriggers, summarySim, score: sharedTriggers + summarySim * 4 };
+}
+
+/**
+ * Neurona existente que habla de la misma persona que el candidato, o null.
+ * Exige algo más que el nombre (un trigger en común o un resumen parecido) y, si varias
+ * neuronas comparten el nombre, elige la que más se parece.
+ */
+export function findSameEntityNeuron(candidate, existingNeurons = []) {
+  const name = entityNameOf(candidate);
+  if (!name) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const n of existingNeurons || []) {
+    if (!n || n.id === candidate.id || n.deleted || n.feedbackStats?.removed) continue;
+    if (entityNameOf(n) !== name) continue;
+    if (!isEntityNeuron(candidate) && !isEntityNeuron(n)) continue;
+    const ev = sameEntityEvidence(candidate, n, name);
+    if (ev.sharedTriggers < 1 && ev.summarySim < 0.12) continue;
+    if (ev.score > bestScore) { best = n; bestScore = ev.score; }
+  }
+  return best;
+}
+
 /**
  * Decide si un candidato debe fusionarse con alguna neurona existente.
  *
@@ -159,6 +217,13 @@ export function findBestNeuronMatch(candidate, existingNeurons, options = {}) {
 export function shouldMergeNeuron(candidate, existingNeurons, options = {}) {
   const mergeThreshold  = options.mergeThreshold  ?? THRESHOLD_MERGE;
   const reviewThreshold = options.reviewThreshold ?? THRESHOLD_REVIEW;
+
+  // Misma persona con otro título ("Lucas: amigo…" / "Lucas: hijo de Marta") → fusionar.
+  // El texto completo se parece poco, así que el score normal no lo detecta.
+  const sameEntity = findSameEntityNeuron(candidate, existingNeurons);
+  if (sameEntity) {
+    return { action: "merge_existing", matchId: sameEntity.id, score: 1, reasons: [`misma persona: "${entityNameOf(candidate)}"`] };
+  }
 
   const match = findBestNeuronMatch(candidate, existingNeurons, options);
 

@@ -224,3 +224,53 @@ export function repairDaysFromChat(days = [], messages = [], buildDay) {
   list.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return { list, added };
 }
+
+/**
+ * Borrados hechos directamente en la nube (módulo `neuron_tombstones` en app_modules).
+ * La restauración normal solo AÑADE neuronas, así que sin esto una neurona borrada en
+ * Supabase seguiría en el teléfono y volvería a subirse al usarse.
+ *
+ * payload: { ids: string[] (neuronas borradas), mergedInto?: { [idBorrada]: idQueQueda } }
+ * Quita esas neuronas, redirige las conexiones y los enlaces de memorias a la que quedó.
+ * @returns {{ neurons: Array, memories: Array, removed: number, memoriesChanged: number }}
+ */
+export function applyNeuronTombstones(neurons = [], memories = [], payload = {}) {
+  const gone = new Set((Array.isArray(payload?.ids) ? payload.ids : []).map(String));
+  const into = payload?.mergedInto && typeof payload.mergedInto === "object" ? payload.mergedInto : {};
+  if (!gone.size) return { neurons, memories, removed: 0, memoriesChanged: 0 };
+  const resolve = (id) => {
+    const seen = new Set();
+    let cur = String(id);
+    while (into[cur] && !seen.has(cur)) { seen.add(cur); cur = String(into[cur]); }
+    return cur;
+  };
+  const kept = (Array.isArray(neurons) ? neurons : []).filter((n) => n && !gone.has(String(n.id)));
+  const keptIds = new Set(kept.map((n) => String(n.id)));
+  const removed = (Array.isArray(neurons) ? neurons.length : 0) - kept.length;
+  // Las conexiones a ids borrados se redirigen (o se quitan) aunque este teléfono ya no
+  // tuviera esas neuronas; las demás conexiones no se tocan.
+  let connectionsChanged = 0;
+  const nextNeurons = kept.map((n) => {
+    if (!Array.isArray(n.connections) || !n.connections.some((id) => gone.has(String(id)))) return n;
+    const conns = [];
+    for (const raw of n.connections) {
+      const id = String(raw);
+      if (!gone.has(id)) { if (!conns.includes(id)) conns.push(id); continue; }
+      // Id borrado: pasa a la neurona que quedó si existe aquí; si no, se quita
+      const target = resolve(id);
+      if (target !== String(n.id) && !gone.has(target) && keptIds.has(target) && !conns.includes(target)) conns.push(target);
+    }
+    connectionsChanged++;
+    return { ...n, connections: conns };
+  });
+  let memoriesChanged = 0;
+  const nextMemories = (Array.isArray(memories) ? memories : []).map((m) => {
+    const prev = Array.isArray(m?.linkedNeurons) ? m.linkedNeurons : null;
+    if (!prev) return m;
+    const next = [...new Set(prev.map(resolve))].filter((id) => !gone.has(id));
+    if (next.length === prev.length && next.every((id, i) => id === prev[i])) return m;
+    memoriesChanged++;
+    return { ...m, linkedNeurons: next };
+  });
+  return { neurons: removed || connectionsChanged ? nextNeurons : neurons, memories: nextMemories, removed, connectionsChanged, memoriesChanged };
+}
