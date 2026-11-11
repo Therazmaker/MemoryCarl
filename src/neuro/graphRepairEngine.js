@@ -1,356 +1,227 @@
 /**
- * graphRepairEngine.js — Reparador de Grafo Cognitivo impulsado por Claude API
+ * graphRepairEngine.js — "Reparar con Claude"
  * MemoryCarl / NeuroChat
+ *
+ * Flujo en dos pasos:
+ *   1. proposeGraphRepair(): manda a Claude una versión compacta del grafo y recibe un plan
+ *      con salida estructurada (JSON validado por esquema), en streaming para no cortarse.
+ *      El plan se valida localmente. No se cambia nada todavía.
+ *   2. applyGraphRepair(plan): guarda una copia, aplica todo de una sola vez y registra
+ *      los borrados para los otros dispositivos. undoLastGraphRepair() vuelve atrás.
  */
 
-import { getAllNeurons, saveNeuron, updateNeuron, deleteNeuronSafely, reindexConnections } from "./neuronStore.js";
+import { getAllNeurons, replaceAllNeurons } from "./neuronStore.js";
+import { RepairError, friendlyApiError, readMessageStream } from "./claudeStream.js";
+import { getAllMemories, replaceAllMemories } from "../memory/memoryStore.js";
 import { getClaudeSettings, isClaudeConfigured } from "../services/claudeClient.js";
-import { sanitizeNeuron, validateNeuron } from "./schemas.js";
+import { applyNeuronTombstones } from "../services/cloudRestore.js";
+import { loadTombstones, saveTombstones, addTombstones, withoutTombstones } from "./neuronTombstones.js";
+import {
+  buildRepairInput, validateRepairPlan, applyRepairPlan, planIsEmpty,
+  REPAIR_PLAN_SCHEMA, REPAIR_SYSTEM_PROMPT,
+} from "./graphRepairPlan.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const DEFAULT_TIMEOUT_MS = 60_000;
+export const REPAIR_MODEL = "claude-opus-5-5";
+const FALLBACK_BETA = "server-side-fallback-2026-07-01";
+const IDLE_TIMEOUT_MS = 120_000;   // sin recibir nada del stream
+const TOTAL_TIMEOUT_MS = 8 * 60_000;
+const MAX_TOKENS = 32_000;
+export const REPAIR_BACKUP_KEY = "memorycarl_neurograph_repair_backup_v1";
 
-/**
- * Parsea e intenta reparar respuestas JSON de LLMs que tengan comas finales
- * o estén truncadas por límite de tokens.
- */
-export function safeParseJSON(text) {
-  if (!text || typeof text !== "string") {
-    throw new Error("Respuesta vacía o no válida.");
-  }
-
-  let cleaned = text.trim();
-
-  // Quitar bloques de código Markdown ```json ... ```
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-
-  // Ubicar delimitadores de JSON principal
-  const firstBrace = cleaned.indexOf("{");
-  if (firstBrace !== -1) {
-    const lastBrace = cleaned.lastIndexOf("}");
-    if (lastBrace > firstBrace) {
-      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
-    } else {
-      cleaned = cleaned.substring(firstBrace);
-    }
-  }
-
-  const removeTrailingCommas = (str) => str.replace(/,\s*([\}\]])/g, "$1");
-
-  // Intento 1: Parseo directo limpiando comas sobrantes
-  try {
-    return JSON.parse(removeTrailingCommas(cleaned));
-  } catch (err1) {
-    // Intento 2: Reparación de JSON truncado por límite de tokens
-    const repaired = repairTruncatedJSON(removeTrailingCommas(cleaned));
-    if (repaired) {
-      try {
-        return JSON.parse(repaired);
-      } catch (_) {}
-    }
-    throw new Error(`Error parseando respuesta JSON de Claude: ${err1.message}`);
-  }
-}
-
-/**
- * Reconstruye estructuras JSON truncadas intentando cerrar comillas, llaves y corchetes pendientes.
- */
-function repairTruncatedJSON(jsonStr) {
-  let str = jsonStr.trim();
-
-  // Cerrar comilla si quedó a mitad de un string
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < str.length; i++) {
-    const char = str[i];
-    if (char === '"' && !escaped) {
-      inString = !inString;
-    }
-    escaped = char === "\\" && !escaped;
-  }
-  if (inString) {
-    str += '"';
-  }
-
-  // Eliminar coma o propiedad incompleta al final
-  str = str.replace(/,\s*$/, "");
-  str = str.replace(/,\s*"[^"]*"?\s*:?\s*$/, "");
-
-  // Balancear llaves y corchetes
-  const stack = [];
-  inString = false;
-  escaped = false;
-  for (let i = 0; i < str.length; i++) {
-    const char = str[i];
-    if (char === '"' && !escaped) {
-      inString = !inString;
-    }
-    escaped = char === "\\" && !escaped;
-
-    if (!inString) {
-      if (char === "{" || char === "[") {
-        stack.push(char);
-      } else if (char === "}" && stack[stack.length - 1] === "{") {
-        stack.pop();
-      } else if (char === "]" && stack[stack.length - 1] === "[") {
-        stack.pop();
-      }
-    }
-  }
-
-  while (stack.length > 0) {
-    const last = stack.pop();
-    if (last === "{") str += "}";
-    if (last === "[") str += "]";
-  }
-
-  return str;
-}
-
-/**
- * Ejecuta una reparación profunda del grafo neuronal utilizando Claude API.
- *
- * @param {object} options
- * @param {function} [options.onProgress] Callback para informar sobre el estado del proceso
- * @returns {Promise<{ ok: boolean, summary?: string, deletedCount?: number, mergedCount?: number, updatedCount?: number, connectionsCreatedCount?: number, error?: string }>}
- */
-export async function repairGraphWithClaude(options = {}) {
-  const { onProgress = () => {} } = options;
-
-  onProgress("Validando configuración de Claude API...");
-  if (!isClaudeConfigured()) {
-    return { ok: false, error: "Claude API Key no está configurada o es inválida en los ajustes." };
-  }
-
-  const settings = getClaudeSettings();
-  onProgress("Cargando neuronas del grafo actual...");
-  const allNeurons = getAllNeurons({ includeDeleted: false });
-
-  if (allNeurons.length === 0) {
-    return { ok: true, summary: "No hay neuronas activas en el grafo para analizar.", deletedCount: 0, mergedCount: 0, updatedCount: 0, connectionsCreatedCount: 0 };
-  }
-
-  // Pre-limpieza local de neuronas vacías
-  let localEmptyPruned = 0;
-  for (const n of allNeurons) {
-    if (!n.core?.concept || !n.core.concept.trim()) {
-      deleteNeuronSafely(n.id, { hard: true });
-      localEmptyPruned++;
-    }
-  }
-
-  const remainingNeurons = getAllNeurons({ includeDeleted: false });
-  if (remainingNeurons.length === 0) {
-    return { ok: true, summary: `Se eliminaron ${localEmptyPruned} neuronas vacías localmente. El grafo quedó sin neuronas.`, deletedCount: localEmptyPruned, mergedCount: 0, updatedCount: 0, connectionsCreatedCount: 0 };
-  }
-
-  onProgress(`Formateando ${remainingNeurons.length} neuronas para enviar a Claude...`);
-
-  const formattedNeurons = remainingNeurons.map((n) => ({
-    id: n.id,
-    type: n.type,
-    concept: n.core?.concept || "",
-    domain: n.core?.domain || "general",
-    summary: n.core?.summary || "",
-    triggers: (n.triggers || []).slice(0, 10),
-    connections: n.connections || [],
-  }));
-
-  const systemPrompt = `Eres un Ingeniero Cognitivo de Grafos especializado en depurar, estructurar y enriquecer redes neuronales de memoria personal.
-
-Analiza las neuronas del usuario y realiza 3 operaciones fundamentales:
-1. **ELIMINAR (\`deletions\`)**: Identifica neuronas vacías, corruptas, duplicadas inservibles o sin concepto real.
-2. **FUSIONAR (\`merges\`)**: Identifica neuronas que hablen de la MISMA persona, concepto, entidad o lugar (ej. "Frederick" e "Hijo Frederick", o "Fergis" y "Esposa Fergis"). Consolida en \`targetId\` y marca \`sourceId\` para fusión.
-3. **ACTUALIZAR Y CONECTAR (\`updates\`)**:
-   - Enriquece resúmenes o conceptos usando el contexto cruzado entre neuronas (ej. si una neurona dice que Alicia es amiga de Fergis y otra menciona a Fergis, vincula esas personas).
-   - Añade conexiones explícitas e inteligibles (\`addConnections\`) entre neuronas relacionadas semántica o afectivamente (padre-hijo, esposos, amigos, hábitos-proyectos).
-   - Añade triggers clave faltantes (\`addTriggers\`).
-
-REGLAS CRÍTICAS:
-- Sé riguroso y mantén intacta la información real del usuario.
-- Devuelve EXCLUSIVAMENTE un objeto JSON válido según el siguiente esquema (sin Markdown extra):
-
-{
-  "summary": "Breve explicación en español de los hallazgos y correcciones aplicadas",
-  "deletions": ["id1", "id2"],
-  "merges": [
-    {
-      "sourceId": "id_duplicado",
-      "targetId": "id_canónico",
-      "mergedTriggers": ["trigger1", "trigger2"],
-      "updatedSummary": "Resumen unificado opcional"
-    }
-  ],
-  "updates": [
-    {
-      "id": "id_neurona",
-      "changes": {
-        "core.concept": "Concepto mejorado si aplica",
-        "core.summary": "Resumen clarificado con contexto real"
-      },
-      "addTriggers": ["trigger_nuevo"],
-      "addConnections": ["id_otra_neurona_relacionada"]
-    }
-  ]
-}`;
-
-  const requestBody = {
-    model: settings.model || "claude-haiku-4-5",
-    max_tokens: 8192,
-    system: [
-      {
-        type: "text",
-        text: systemPrompt,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    messages: [
-      {
-        role: "user",
-        content: `Lista de neuronas (${remainingNeurons.length}):\n${JSON.stringify(formattedNeurons)}\n\nDevuelve únicamente el JSON con deletions, merges y updates.`,
-      },
-    ],
+function buildRequest(input, { withFallback = true } = {}) {
+  const body = {
+    model: REPAIR_MODEL,
+    max_tokens: MAX_TOKENS,
+    stream: true,
+    thinking: { type: "adaptive" },
+    output_config: {
+      effort: "medium",
+      format: { type: "json_schema", schema: REPAIR_PLAN_SCHEMA },
+    },
+    system: [{ type: "text", text: REPAIR_SYSTEM_PROMPT }],
+    messages: [{
+      role: "user",
+      content: `Grafo actual (${input.length} neuronas):\n${JSON.stringify(input)}\n\nPropón el plan de limpieza.`,
+    }],
   };
+  if (withFallback) body.fallbacks = "default";
+  return body;
+}
 
-  onProgress("Analizando grafo con Claude AI...");
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
-  try {
-    const res = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
+async function callClaude(input, { apiKey, onProgress, signal: outerSignal }) {
+  const attempt = async (withFallback) => {
+    const controller = new AbortController();
+    let idleTimer = null;
+    const bump = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => controller.abort("idle"), IDLE_TIMEOUT_MS);
+    };
+    const totalTimer = setTimeout(() => controller.abort("total"), TOTAL_TIMEOUT_MS);
+    const onOuterAbort = () => controller.abort("user");
+    outerSignal?.addEventListener?.("abort", onOuterAbort);
+    bump();
+    try {
+      const headers = {
         "Content-Type": "application/json",
-        "x-api-key": settings.apiKey.trim(),
+        "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timer);
-
-    if (!res.ok) {
-      let errMsg = `HTTP ${res.status}`;
-      try {
-        const errJson = await res.json();
-        errMsg = errJson.error?.message || errMsg;
-      } catch (_) {}
-      return { ok: false, error: `Error en respuesta de Claude API: ${errMsg}` };
-    }
-
-    const data = await res.json();
-    const fullText = data?.content?.[0]?.text;
-
-    if (!fullText) {
-      return { ok: false, error: "Claude devolvió una respuesta vacía." };
-    }
-
-    onProgress("Parseando plan de reparación de Claude...");
-    const repairPlan = safeParseJSON(fullText);
-
-    onProgress("Aplicando correcciones en el almacenamiento local...");
-
-    let deletedCount = localEmptyPruned;
-    let mergedCount = 0;
-    let updatedCount = 0;
-    let connectionsCreatedCount = 0;
-
-    // 1. Aplicar eliminaciones
-    if (Array.isArray(repairPlan.deletions)) {
-      for (const id of repairPlan.deletions) {
-        if (typeof id === "string" && id) {
-          const removed = deleteNeuronSafely(id, { hard: true });
-          if (removed.ok) deletedCount++;
-        }
+      };
+      if (withFallback) headers["anthropic-beta"] = FALLBACK_BETA;
+      const res = await fetch(ANTHROPIC_API_URL, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(buildRequest(input, { withFallback })),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        let msg = "";
+        try { msg = (await res.json())?.error?.message || ""; } catch (_e) { /* sin cuerpo */ }
+        // Si la cuenta no acepta el respaldo automático, se reintenta sin él
+        if (withFallback && res.status === 400 && /fallback|beta/i.test(msg)) return { retryWithoutFallback: true };
+        throw new RepairError(friendlyApiError(res.status, msg));
       }
+      if (!res.body) throw new RepairError("El navegador no pudo leer la respuesta de Claude.");
+      let lastShown = 0;
+      return await readMessageStream(res.body, {
+        signal: controller.signal,
+        onActivity: (phase, chars) => {
+          bump();
+          const now = Date.now();
+          if (now - lastShown < 400) return;
+          lastShown = now;
+          onProgress(phase === "writing" ? `Claude está escribiendo el plan… (${Math.round(chars / 100) / 10}k)` : "Claude está analizando el grafo…");
+        },
+      });
+    } catch (err) {
+      if (err instanceof RepairError) throw err;
+      const reason = controller.signal.reason;
+      if (reason === "user") throw new RepairError("Se canceló el análisis.");
+      if (reason === "idle" || reason === "total") throw new RepairError("Claude tardó demasiado en responder. Intenta de nuevo en un momento.");
+      if (err?.name === "TypeError") throw new RepairError("No se pudo conectar con Claude. Revisa tu conexión a internet.");
+      throw new RepairError(err?.message || "Error inesperado al hablar con Claude.");
+    } finally {
+      clearTimeout(idleTimer);
+      clearTimeout(totalTimer);
+      outerSignal?.removeEventListener?.("abort", onOuterAbort);
     }
+  };
 
-    // 2. Aplicar fusiones (merges)
-    if (Array.isArray(repairPlan.merges)) {
-      const currentNeurons = getAllNeurons({ includeDeleted: false });
-      for (const merge of repairPlan.merges) {
-        const { sourceId, targetId, mergedTriggers = [], updatedSummary } = merge;
-        if (!sourceId || !targetId || sourceId === targetId) continue;
+  let out = await attempt(true);
+  if (out?.retryWithoutFallback) out = await attempt(false);
+  return out;
+}
 
-        const source = currentNeurons.find((n) => n.id === sourceId);
-        const target = currentNeurons.find((n) => n.id === targetId);
-
-        if (target) {
-          const newTriggers = [...new Set([...(target.triggers || []), ...(source?.triggers || []), ...mergedTriggers])];
-          const newConnections = [...new Set([...(target.connections || []), ...(source?.connections || []).filter((c) => c !== targetId)])];
-
-          const patch = {
-            triggers: newTriggers,
-            connections: newConnections,
-          };
-
-          if (updatedSummary) {
-            patch.core = { ...(target.core || {}), summary: updatedSummary };
-          }
-
-          updateNeuron(targetId, patch);
-          deleteNeuronSafely(sourceId, { hard: true });
-          mergedCount++;
-        }
-      }
+/**
+ * Paso 1: pide el plan. No modifica nada.
+ * @returns {Promise<{ ok: boolean, plan?: object, warnings?: string[], neuronCount?: number, error?: string }>}
+ */
+export async function proposeGraphRepair({ onProgress = () => {}, signal } = {}) {
+  try {
+    if (!isClaudeConfigured()) {
+      return { ok: false, error: "Falta la API key de Claude. Agrégala en Ajustes de NeuroChat." };
     }
+    const settings = getClaudeSettings();
+    const neurons = getAllNeurons({ includeDeleted: false });
+    if (!neurons.length) return { ok: false, error: "No hay neuronas para revisar." };
 
-    // 3. Aplicar actualizaciones y conexiones
-    if (Array.isArray(repairPlan.updates)) {
-      for (const update of repairPlan.updates) {
-        const { id, changes = {}, addTriggers = [], addConnections = [] } = update;
-        if (!id) continue;
+    onProgress(`Preparando ${neurons.length} neuronas…`);
+    const input = buildRepairInput(neurons);
+    onProgress("Enviando el grafo a Claude…");
+    const { text, stopReason } = await callClaude(input, { apiKey: settings.apiKey.trim(), onProgress, signal });
 
-        const existing = remainingNeurons.find((n) => n.id === id);
-        if (!existing) continue;
+    if (stopReason === "refusal") return { ok: false, error: "Claude no quiso procesar este contenido. Prueba de nuevo más tarde." };
+    if (stopReason === "max_tokens") return { ok: false, error: "El plan salió demasiado largo y quedó incompleto. Vuelve a intentarlo: Claude suele proponer menos cambios la segunda vez." };
+    if (!text.trim()) return { ok: false, error: "Claude devolvió una respuesta vacía." };
 
-        const patchedConcept = changes["core.concept"] || existing.core?.concept;
-        const patchedSummary = changes["core.summary"] || existing.core?.summary;
-        const patchedDomain = changes["core.domain"] || existing.core?.domain;
+    let raw;
+    try { raw = JSON.parse(text); } catch (_e) { return { ok: false, error: "La respuesta de Claude no se pudo leer. Intenta de nuevo." }; }
 
-        const newTriggers = [...new Set([...(existing.triggers || []), ...addTriggers])];
-        const newConnections = [...new Set([...(existing.connections || []), ...addConnections.filter((c) => c !== id)])];
-
-        if (addConnections.length > 0) {
-          connectionsCreatedCount += addConnections.length;
-        }
-
-        const patch = {
-          core: {
-            concept: patchedConcept,
-            summary: patchedSummary,
-            domain: patchedDomain,
-          },
-          triggers: newTriggers,
-          connections: newConnections,
-        };
-
-        const result = updateNeuron(id, patch);
-        if (result) updatedCount++;
-      }
-    }
-
-    onProgress("Reindexando conexiones y sincronizando...");
-    reindexConnections();
-
-    if (typeof window !== "undefined" && typeof window.neurochatPushToSupabase === "function") {
-      window.neurochatPushToSupabase();
-    }
-
-    return {
-      ok: true,
-      summary: repairPlan.summary || "Grafo reparado exitosamente con Claude.",
-      deletedCount,
-      mergedCount,
-      updatedCount,
-      connectionsCreatedCount,
-    };
+    onProgress("Revisando el plan…");
+    // Se valida contra el estado de AHORA (pudo cambiar mientras Claude pensaba)
+    const current = getAllNeurons({ includeDeleted: false });
+    const { plan, warnings } = validateRepairPlan(raw, current);
+    return { ok: true, plan, warnings, neuronCount: current.length, empty: planIsEmpty(plan) };
   } catch (err) {
-    clearTimeout(timer);
-    console.error("[graphRepairEngine] Error durante la reparación:", err);
-    return { ok: false, error: err.message || "Ocurrió un error inesperado procesando la reparación." };
+    console.error("[graphRepairEngine]", err);
+    return { ok: false, error: err?.message || "Ocurrió un error inesperado." };
   }
+}
+
+/** Paso 2: aplica un plan validado, con copia para deshacer. */
+export function applyGraphRepair(plan) {
+  const neurons = getAllNeurons({ includeDeleted: true });
+  const memories = getAllMemories();
+  const tombsBefore = loadTombstones();
+  const backup = { at: new Date().toISOString(), neurons, memories, tombstones: tombsBefore };
+  try {
+    localStorage.setItem(REPAIR_BACKUP_KEY, JSON.stringify(backup));
+  } catch (_e) {
+    return { ok: false, error: "No hay espacio para guardar la copia de seguridad; no se aplicó nada." };
+  }
+
+  // Las eliminadas (papelera) se conservan tal cual; la reparación solo toca las activas
+  const trashed = neurons.filter((n) => n.deleted);
+  const { neurons: repaired, removedIds, mergedInto, stats } = applyRepairPlan(neurons.filter((n) => !n.deleted), plan);
+  const removedSet = new Set(removedIds);
+  const nextNeurons = [...repaired, ...trashed.filter((n) => !removedSet.has(String(n.id)))];
+
+  const memResult = applyNeuronTombstones([], memories, { ids: removedIds, mergedInto });
+
+  replaceAllNeurons(nextNeurons);
+  if (memResult.memoriesChanged) replaceAllMemories(memResult.memories);
+  if (removedIds.length) addTombstones(removedIds, mergedInto);
+
+  if (typeof window !== "undefined" && typeof window.neurochatPushToSupabase === "function") {
+    window.neurochatPushToSupabase(true);
+  }
+  return { ok: true, stats: { ...stats, memories: memResult.memoriesChanged || 0 }, removedIds };
+}
+
+export function getRepairBackupInfo() {
+  try {
+    const raw = localStorage.getItem(REPAIR_BACKUP_KEY);
+    if (!raw) return null;
+    const b = JSON.parse(raw);
+    return b?.at ? { at: b.at, count: Array.isArray(b.neurons) ? b.neurons.length : 0 } : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+/** Vuelve al estado anterior a la última reparación. */
+export function undoLastGraphRepair() {
+  let backup;
+  try { backup = JSON.parse(localStorage.getItem(REPAIR_BACKUP_KEY) || "null"); } catch (_e) { backup = null; }
+  if (!backup || !Array.isArray(backup.neurons)) return { ok: false, error: "No hay una reparación para deshacer." };
+
+  const restoredIds = backup.neurons.map((n) => String(n.id));
+  replaceAllNeurons(backup.neurons);
+  if (Array.isArray(backup.memories)) replaceAllMemories(backup.memories);
+  // Las neuronas recuperadas dejan de estar en el registro de borrados
+  saveTombstones(withoutTombstones(loadTombstones() || backup.tombstones || {}, restoredIds));
+  try { localStorage.removeItem(REPAIR_BACKUP_KEY); } catch (_e) { /* noop */ }
+
+  if (typeof window !== "undefined" && typeof window.neurochatPushToSupabase === "function") {
+    window.neurochatPushToSupabase(true);
+  }
+  return { ok: true, count: backup.neurons.length };
+}
+
+// Compatibilidad con llamadas antiguas: pide el plan y lo aplica sin vista previa.
+export async function repairGraphWithClaude(options = {}) {
+  const res = await proposeGraphRepair(options);
+  if (!res.ok) return res;
+  if (res.empty) return { ok: true, summary: res.plan.summary || "El grafo ya está ordenado.", deletedCount: 0, mergedCount: 0, updatedCount: 0, connectionsCreatedCount: 0 };
+  const applied = applyGraphRepair(res.plan);
+  if (!applied.ok) return applied;
+  return {
+    ok: true,
+    summary: res.plan.summary,
+    deletedCount: applied.stats.deleted,
+    mergedCount: applied.stats.merged,
+    updatedCount: applied.stats.updated,
+    connectionsCreatedCount: applied.stats.connected,
+  };
 }

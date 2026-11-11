@@ -232,6 +232,13 @@ export function deleteMemory(memoryId) {
   return true;
 }
 
+/** Reemplaza todos los recuerdos de una vez (reparación del grafo / deshacer). */
+export function replaceAllMemories(memories) {
+  if (!Array.isArray(memories)) return 0;
+  writeMemories(memories.filter(Boolean));
+  return memories.length;
+}
+
 export function getAllMemories(options = {}) {
   const base = readMemories();
   const filters = options.filters || {};

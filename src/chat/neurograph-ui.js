@@ -22,7 +22,8 @@ import {
 } from "../neuro/graph.js";
 import { linkNeurons, unlinkNeurons } from "../neuro/connections.js";
 import { getNeuronCalibrationSummary } from "../neuro/feedback.js";
-import { repairGraphWithClaude } from "../neuro/graphRepairEngine.js";
+import { openGraphRepair } from "./graphRepair-ui.js";
+import { runForceLayout, seedPositions, computeAreaAnchors, areaCentroids } from "../neuro/graphLayout.js";
 
 // ---- Etiquetas y colores de relaciones (la paleta de dominios/emociones vive en graph.js) ----
 const DOMAIN_LABELS = {
@@ -75,7 +76,13 @@ const RELATION_LABELS = {
 };
 
 // Posiciones fijas guardadas entre sesiones
-const LAYOUT_KEY = "memorycarl_neurograph_layout_v1";
+// v2: distribución con más espacio; las posiciones viejas (muy apretadas) se recalculan
+const LAYOUT_KEY = "memorycarl_neurograph_layout_v2";
+const LAYOUT_MODE_KEY = "memorycarl_neurograph_layout_mode";
+
+function loadLayoutMode() {
+  try { return localStorage.getItem(LAYOUT_MODE_KEY) === "areas" ? "areas" : "network"; } catch (_e) { return "network"; }
+}
 const MIN_ZOOM   = 0.05;
 const MAX_ZOOM   = 6;
 
@@ -92,6 +99,7 @@ const graphState = {
   camAnim:      null,  // animación de cámara en curso
   cameraReady:  false, // la cámara ya se encuadró una vez
   colorBy:      "domain",
+  layoutMode:   loadLayoutMode(), // "network" | "areas"
   editorMode:   false,
   editorMsg:    "",
   animFrame:    null,
@@ -197,115 +205,22 @@ function saveLayout() {
   } catch (_e) { /* cuota llena: el layout se recalcula la próxima vez */ }
 }
 
-function buildAdjacency(edges) {
-  const adj = new Map();
-  for (const e of edges) {
-    if (!adj.has(e.source)) adj.set(e.source, new Set());
-    if (!adj.has(e.target)) adj.set(e.target, new Set());
-    adj.get(e.source).add(e.target);
-    adj.get(e.target).add(e.source);
-  }
-  return adj;
-}
-
-// Simulación de fuerzas síncrona (estilo ForceAtlas2 de Regulación), sin dibujar.
-// Los nodos en `pinned` no se mueven pero sí empujan a los demás.
-function runLayout(nodes, edges, pinned, iterations) {
-  const GRAVITATIONAL_CONSTANT = 30;
-  const CENTRAL_GRAVITY        = 0.01;
-  const SPRING_LENGTH          = 85;
-  const SPRING_CONSTANT        = 0.08;
-  const DAMPING                = 0.72;
-  const MAX_SPEED              = 15;
-
-  const pos = graphState.positions;
-  const live = nodes.filter(n => pos[n.id]);
-  const vel = new Map(live.map(n => [n.id, { vx: 0, vy: 0 }]));
-  const deg = new Map(live.map(n => [n.id, (n.numberOfConnections || 1) + 1]));
-  let alpha = 1;
-
-  for (let it = 0; it < iterations; it++) {
-    for (let i = 0; i < live.length; i++) {
-      const idA = live[i].id;
-      const a = pos[idA];
-      const va = vel.get(idA);
-      for (let j = i + 1; j < live.length; j++) {
-        const idB = live[j].id;
-        const b = pos[idB];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const dist2 = dx * dx + dy * dy || 1;
-        const dist  = Math.sqrt(dist2);
-        const force = ((GRAVITATIONAL_CONSTANT * 180 * deg.get(idA) * deg.get(idB)) / dist2) * alpha;
-        const vb = vel.get(idB);
-        va.vx -= (dx / dist) * force;
-        va.vy -= (dy / dist) * force;
-        vb.vx += (dx / dist) * force;
-        vb.vy += (dy / dist) * force;
-      }
-    }
-    for (const e of edges) {
-      const a = pos[e.source];
-      const b = pos[e.target];
-      const va = vel.get(e.source);
-      const vb = vel.get(e.target);
-      if (!a || !b || !va || !vb) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const force = (dist - SPRING_LENGTH) * SPRING_CONSTANT * alpha;
-      va.vx += (dx / dist) * force;
-      va.vy += (dy / dist) * force;
-      vb.vx -= (dx / dist) * force;
-      vb.vy -= (dy / dist) * force;
-    }
-    for (const n of live) {
-      if (pinned.has(n.id)) continue;
-      const p = pos[n.id];
-      const v = vel.get(n.id);
-      v.vx = (v.vx - p.x * CENTRAL_GRAVITY * alpha) * DAMPING;
-      v.vy = (v.vy - p.y * CENTRAL_GRAVITY * alpha) * DAMPING;
-      const speed = Math.sqrt(v.vx * v.vx + v.vy * v.vy);
-      if (speed > MAX_SPEED) {
-        v.vx = (v.vx / speed) * MAX_SPEED;
-        v.vy = (v.vy / speed) * MAX_SPEED;
-      }
-      p.x += v.vx;
-      p.y += v.vy;
-    }
-    alpha *= 0.985;
-  }
-}
-
 // Garantiza que todas las neuronas del grafo tengan posición. Devuelve true si calculó algo.
+// La simulación vive en ../neuro/graphLayout.js (modo red libre o agrupado por área).
 function ensureLayout() {
   const { nodes, edges } = graphState.graph;
   const pos = graphState.positions;
   if (!Object.keys(pos).length) Object.assign(pos, loadSavedLayout());
 
-  const missing = nodes.filter(n => !pos[n.id]);
+  const mode = graphState.layoutMode;
+  const anchors = mode === "areas" ? computeAreaAnchors(nodes) : null;
+  const { fresh, missing } = seedPositions(nodes, edges, pos, { mode, anchors });
   if (!missing.length) return false;
 
-  const fresh = missing.length === nodes.length;
-  const adj = buildAdjacency(edges);
-  const radius = 60 + Math.sqrt(nodes.length) * 40;
-  missing.forEach((n, i) => {
-    // Junto a sus vecinos ya colocados; si no tiene, en una espiral alrededor del centro
-    const placed = [...(adj.get(n.id) || [])].map(id => pos[id]).filter(Boolean);
-    if (placed.length) {
-      const cx = placed.reduce((s, p) => s + p.x, 0) / placed.length;
-      const cy = placed.reduce((s, p) => s + p.y, 0) / placed.length;
-      pos[n.id] = { x: cx + (Math.random() - 0.5) * 60, y: cy + (Math.random() - 0.5) * 60 };
-    } else {
-      const angle = i * 2.399963; // ángulo áureo
-      const r = fresh ? radius * Math.sqrt((i + 0.5) / missing.length) : radius + 40;
-      pos[n.id] = { x: Math.cos(angle) * r, y: Math.sin(angle) * r };
-    }
-  });
-
-  const pinned = fresh ? new Set() : new Set(nodes.filter(n => !missing.includes(n)).map(n => n.id));
-  const iterations = fresh ? (nodes.length > 600 ? 120 : 300) : 120;
-  runLayout(nodes, edges, pinned, iterations);
+  const missingIds = new Set(missing.map(n => n.id));
+  const pinned = fresh ? new Set() : new Set(nodes.filter(n => !missingIds.has(n.id)).map(n => n.id));
+  const iterations = fresh ? (nodes.length > 600 ? 140 : 360) : 140;
+  runForceLayout(nodes, edges, pos, { mode, pinned, iterations, anchors, sizeOf: getNodeSize });
   saveLayout();
   return true;
 }
@@ -433,6 +348,24 @@ function drawGraph() {
   };
   const inView = (p) => p.x >= view.minX && p.x <= view.maxX && p.y >= view.minY && p.y <= view.maxY;
 
+  // --- Áreas: en el modo "por área", un halo suave y el nombre de cada grupo ---
+  const areaTitles = [];
+  if (graphState.layoutMode === "areas" && !focusSet) {
+    for (const g of areaCentroids(nodes, positions)) {
+      if (g.count < 2) continue;
+      const color = getDomainColor(g.domain);
+      ctx.beginPath();
+      ctx.arc(g.x, g.y, g.r + 46, 0, Math.PI * 2);
+      ctx.fillStyle = hexToRgba(color, 0.05);
+      ctx.fill();
+      ctx.strokeStyle = hexToRgba(color, 0.16);
+      ctx.lineWidth = 1 * px;
+      ctx.stroke();
+      areaTitles.push({ g, color });
+    }
+  }
+
+  const domainOf = graphState.layoutMode === "areas" ? new Map(nodes.map(n => [n.id, n.domain || "general"])) : null;
   // --- Edges ---
   for (const edge of edges) {
     const a = positions[edge.source];
@@ -450,6 +383,10 @@ function drawGraph() {
       ctx.lineWidth   = 2.2 * px;
     } else if (selectedNode) {
       ctx.strokeStyle = "rgba(255,255,255,0.04)";
+      ctx.lineWidth   = 1 * px;
+    } else if (domainOf && domainOf.get(edge.source) !== domainOf.get(edge.target)) {
+      // En "por área" las líneas entre grupos distintos van tenues para no tapar los grupos
+      ctx.strokeStyle = "rgba(203,213,225,0.05)";
       ctx.lineWidth   = 1 * px;
     } else {
       ctx.strokeStyle = relColor ? hexToRgba(relColor, 0.55) : "rgba(203,213,225,0.16)";
@@ -537,27 +474,58 @@ function drawGraph() {
       ctx.fill();
     }
 
-    // Etiquetas: aparecen al acercarse; la seleccionada y sus vecinas siempre
-    const showLabel = !dimmed && (screenR >= 13 || isSelected || isHovered || isNeighbor);
-    if (showLabel) labels.push({ n, p, r, isSelected, isHovered, full: isSelected || isNeighbor || zoom >= 1.6 });
+    // Candidatas a etiqueta: todas las visibles; luego se descartan las que se pisan
+    if (!dimmed) labels.push({ n, p, r, isSelected, isHovered, isNeighbor, full: isSelected || isNeighbor || zoom >= 1.6 });
   }
   ctx.globalAlpha = 1;
 
-  // Las etiquetas van encima de todos los nodos, con tamaño constante en pantalla
-  for (const { n, p, r, isSelected, isHovered, full } of labels) {
-    const fontPx = Math.min(getNodeFontSize(n), 15) + (isSelected ? 2 : 0);
-    ctx.font = `${isSelected ? 700 : 500} ${fontPx * px}px system-ui, -apple-system, sans-serif`;
+  // Etiquetas encima de los nodos. El tamaño acompaña al zoom (al alejarse se achican igual
+  // que los círculos) y se dibujan primero las importantes; si una pisa a otra ya puesta, se omite.
+  const prio = (l) => (l.isSelected ? 1e6 : l.isHovered ? 1e5 : l.isNeighbor ? 1e4 : 0) + l.r;
+  labels.sort((a, b) => prio(b) - prio(a));
+  const placed = [];
+  const overlaps = (box) => placed.some((o) => box.x1 < o.x2 && box.x2 > o.x1 && box.y1 < o.y2 && box.y2 > o.y1);
+  for (const { n, p, r, isSelected, isHovered, isNeighbor, full } of labels) {
+    const important = isSelected || isHovered || isNeighbor;
+    const baseFont = Math.min(getNodeFontSize(n), 15) + (isSelected ? 2 : 0);
+    // Tamaño en pantalla: proporcional al zoom, entre 8px y su tamaño normal
+    const fontScreen = clamp(baseFont * Math.min(1, zoom * 1.15), important ? 11 : 8, baseFont);
+    ctx.font = `${isSelected ? 700 : 500} ${fontScreen * px}px system-ui, -apple-system, sans-serif`;
+    const text = nodeLabel(n, full);
+    const w = ctx.measureText(text).width;
+    const y = p.y + r + 4 * px;
+    // Caja en coordenadas de pantalla para detectar choques
+    const sx = p.x * zoom + pan.x;
+    const sy = y * zoom + pan.y;
+    const ws = w * zoom;
+    const box = { x1: sx - ws / 2 - 3, x2: sx + ws / 2 + 3, y1: sy - 2, y2: sy + fontScreen + 3 };
+    if (!important && overlaps(box)) continue;
+    placed.push(box);
     ctx.textAlign    = "center";
     ctx.textBaseline = "top";
-    const text = nodeLabel(n, full);
-    const y = p.y + r + 5 * px;
-    const w = ctx.measureText(text).width;
     ctx.fillStyle = "rgba(10,8,20,0.72)";
     ctx.beginPath();
-    ctx.roundRect?.(p.x - w / 2 - 5 * px, y - 2 * px, w + 10 * px, (fontPx + 5) * px, 6 * px);
+    ctx.roundRect?.(p.x - w / 2 - 4 * px, y - 2 * px, w + 8 * px, (fontScreen + 4) * px, 5 * px);
     ctx.fill();
     ctx.fillStyle = isSelected ? "#ffffff" : isHovered ? "#f8fafc" : "rgba(241,245,249,0.92)";
     ctx.fillText(text, p.x, y);
+  }
+
+  // Nombres de las áreas encima de todo, con fondo para que se lean
+  for (const { g, color } of areaTitles) {
+    const fs = clamp(15 * zoom, 11, 20);
+    ctx.font = `700 ${fs * px}px system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const t = `${domainLabel(g.domain)} · ${g.count}`.toUpperCase();
+    const w = ctx.measureText(t).width;
+    const ty = g.y - g.r - 30;
+    ctx.fillStyle = "rgba(10,8,20,0.82)";
+    ctx.beginPath();
+    ctx.roundRect?.(g.x - w / 2 - 8 * px, ty - (fs / 2 + 4) * px, w + 16 * px, (fs + 8) * px, 8 * px);
+    ctx.fill();
+    ctx.fillStyle = hexToRgba(color, 0.95);
+    ctx.fillText(t, g.x, ty);
   }
 
   ctx.restore();
@@ -1005,6 +973,7 @@ function ngraphInner(sessionState = {}) {
               <button class="ngMenuItem" id="ngBtnRepairGraph">✨ Reparar con Claude</button>
               <button class="ngMenuItem" id="ngBtnRefresh">↺ Refrescar grafo</button>
               <button class="ngMenuItem" id="ngBtnZoomReset">⊙ Centrar vista</button>
+              <button class="ngMenuItem" id="ngBtnLayoutMode">${graphState.layoutMode === "areas" ? "🕸️ Ver como red" : "🧭 Agrupar por área"}</button>
               <button class="ngMenuItem" id="ngBtnResetPositions">⟲ Reiniciar posiciones</button>
               <div class="ngMenuDivider"></div>
               <label class="ngMenuItem ngMenuLabel">
@@ -1280,43 +1249,9 @@ function wireNeuroGraphInner(root, sessionState = {}) {
     else canvasEl.addEventListener("pointerdown", () => { graphState.hintSeen = true; hint.remove(); }, { once: true });
   }
 
-  root.querySelector("#ngBtnRepairGraph")?.addEventListener("click", async () => {
-    const btn = root.querySelector("#ngBtnRepairGraph");
-    const headerSub = root.querySelector(".ngHeaderSub");
-    const originalText = btn ? btn.textContent : "";
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = "⏳ Analizando...";
-    }
-
-    try {
-      const result = await repairGraphWithClaude({
-        onProgress: (statusMsg) => {
-          if (headerSub) headerSub.textContent = statusMsg;
-        },
-      });
-
-      if (result.ok) {
-        alert(
-          `✨ Reparación del Grafo Completada\n\n` +
-          `• Neuronas limpiadas/eliminadas: ${result.deletedCount || 0}\n` +
-          `• Neuronas fusionadas: ${result.mergedCount || 0}\n` +
-          `• Neuronas mejoradas: ${result.updatedCount || 0}\n` +
-          `• Conexiones creadas: ${result.connectionsCreatedCount || 0}\n\n` +
-          `Resumen de Claude:\n${result.summary}`
-        );
-      } else {
-        alert(`❌ No se pudo completar la reparación:\n${result.error || "Error desconocido"}`);
-      }
-    } catch (err) {
-      alert(`❌ Error al reparar el grafo: ${err.message}`);
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = originalText;
-      }
-      rebuildAndRender(root, sessionState);
-    }
+  root.querySelector("#ngBtnRepairGraph")?.addEventListener("click", () => {
+    root.querySelector("#ngMenuDropdown")?.classList.remove("show");
+    openGraphRepair({ onApplied: () => rebuildAndRender(root, sessionState) });
   });
 
   // Menu de 3 puntos (Dropdown)
@@ -1338,6 +1273,16 @@ function wireNeuroGraphInner(root, sessionState = {}) {
 
   root.querySelector("#ngBtnResetPositions")?.addEventListener("click", () => {
     menuDropdown?.classList.remove("show");
+    graphState.positions = {};
+    try { localStorage.removeItem(LAYOUT_KEY); } catch (_e) { /* noop */ }
+    graphState.cameraReady = false;
+    rebuildAndRender(root, sessionState);
+  });
+
+  root.querySelector("#ngBtnLayoutMode")?.addEventListener("click", () => {
+    menuDropdown?.classList.remove("show");
+    graphState.layoutMode = graphState.layoutMode === "areas" ? "network" : "areas";
+    try { localStorage.setItem(LAYOUT_MODE_KEY, graphState.layoutMode); } catch (_e) { /* noop */ }
     graphState.positions = {};
     try { localStorage.removeItem(LAYOUT_KEY); } catch (_e) { /* noop */ }
     graphState.cameraReady = false;
