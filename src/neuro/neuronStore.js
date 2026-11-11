@@ -152,6 +152,18 @@ export function getAllNeurons(options = {}) {
   return all.filter((n) => !n.deleted);
 }
 
+/**
+ * Reemplaza todas las neuronas de una vez (reparación del grafo / deshacer).
+ * Sanea cada una y anota los cambios en la cola de subida (incluye los borrados).
+ * @returns {number} cantidad guardada
+ */
+export function replaceAllNeurons(neurons) {
+  if (!Array.isArray(neurons)) return 0;
+  const clean = neurons.map((n) => sanitizeNeuron(n)).filter(Boolean);
+  writeAll(clean);
+  return clean.length;
+}
+
 /** Devuelve una neurona por ID o null si no existe. */
 export function getNeuronById(id) {
   return readAll().find((n) => n.id === id) || null;

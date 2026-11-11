@@ -25,6 +25,7 @@ import { getAllMemories } from "../memory/memoryStore.js";
 import { getAllDays, mergeDaysFromCloud } from "../day/dayStore.js";
 import { loadLifeFacts, LIFE_FACTS_KEY } from "../chat/lifeFacts.js";
 import { loadOpenThreads, OPEN_THREADS_KEY } from "../chat/openThreads.js";
+import { loadTombstones, saveTombstones, mergeTombstones } from "../neuro/neuronTombstones.js";
 import { mergeLifeLists } from "../chat/lifeChanges.js";
 import { getFullChatHistory } from "../chat/neurochat.js";
 import {
@@ -570,6 +571,7 @@ function fastHash(item) {
     // finance_extras cambia por dentro (plan de quincenas, estado de pagos de Mission Control)
     // sin cambiar longitudes ni tipos: se usa un hash del contenido completo
     if (item.id === "finance_extras") return `fx:${contentHash(p)}`;
+    if (item.id === "neuron_tombstones") return `nt:${contentHash(p)}`;
     if (Array.isArray(p)) return `arr:${p.length}:${p[p.length - 1]?.id || p[p.length - 1]?.updatedAt || ""}`;
     if (p && typeof p === "object") {
       const keys = Object.keys(p);
@@ -674,6 +676,8 @@ function getAppModulesList() {
       },
     },
     { id: "neurochat_now", payload: { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads() } },
+    // Neuronas borradas/fusionadas (reparación del grafo): solo si este dispositivo tiene registro
+    { id: "neuron_tombstones", payload: loadTombstones() || undefined },
   ];
   return list.filter((m) => m.payload !== undefined);
 }
@@ -1532,6 +1536,9 @@ export async function pullFromSupabase({ isManual = false } = {}) {
           const localNeurons = readLocalArray("memorycarl_neurochat_neurons");
           const localMemories = readLocalArray("memorycarl_memories_v1");
           const r = applyNeuronTombstones(localNeurons, localMemories, p);
+          // El registro local se une con el de la nube para no perderlo al volver a subirlo
+          // (así una reparación hecha aquí no pisa los borrados que ya estaban en la nube)
+          saveTombstones(mergeTombstones(p, loadTombstones()));
           if (r.removed || r.connectionsChanged) {
             localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(r.neurons));
             changed = true;
