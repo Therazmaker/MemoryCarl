@@ -172,16 +172,38 @@ function isEntityNeuron(n) {
   return ENTITY_TYPES.has(n?.type) || /relationship|relacion/i.test(String(n?.core?.domain || ""));
 }
 
-/** Neurona existente que habla de la misma persona que el candidato, o null. */
+const strip = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+/**
+ * Cuánto se parecen dos neuronas que comparten nombre, además del nombre: triggers en común
+ * (sin contar el propio nombre) y parecido de los resúmenes. Evita unir a dos "Ana" distintas.
+ */
+function sameEntityEvidence(a, b, name) {
+  const tA = new Set((a.triggers || []).map(strip).filter((t) => t && t !== name));
+  const sharedTriggers = (b.triggers || []).map(strip).filter((t) => t && t !== name && tA.has(t)).length;
+  const summarySim = stringSim(a.core?.summary || "", b.core?.summary || "");
+  return { sharedTriggers, summarySim, score: sharedTriggers + summarySim * 4 };
+}
+
+/**
+ * Neurona existente que habla de la misma persona que el candidato, o null.
+ * Exige algo más que el nombre (un trigger en común o un resumen parecido) y, si varias
+ * neuronas comparten el nombre, elige la que más se parece.
+ */
 export function findSameEntityNeuron(candidate, existingNeurons = []) {
   const name = entityNameOf(candidate);
   if (!name) return null;
+  let best = null;
+  let bestScore = 0;
   for (const n of existingNeurons || []) {
     if (!n || n.id === candidate.id || n.deleted || n.feedbackStats?.removed) continue;
     if (entityNameOf(n) !== name) continue;
-    if (isEntityNeuron(candidate) || isEntityNeuron(n)) return n;
+    if (!isEntityNeuron(candidate) && !isEntityNeuron(n)) continue;
+    const ev = sameEntityEvidence(candidate, n, name);
+    if (ev.sharedTriggers < 1 && ev.summarySim < 0.12) continue;
+    if (ev.score > bestScore) { best = n; bestScore = ev.score; }
   }
-  return null;
+  return best;
 }
 
 /**

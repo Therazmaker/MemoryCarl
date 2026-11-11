@@ -25,3 +25,11 @@ test("sin lista o ya aplicada: no cambia nada", () => {
   assert.equal(twice.removed, 0);
   assert.equal(twice.memoriesChanged, 0);
 });
+
+test("redirige conexiones a ids borrados aunque este teléfono ya no tuviera esas neuronas", () => {
+  const neurons = [n("keep"), n("other", ["a", "zzz", "junk"])];
+  const r = applyNeuronTombstones(neurons, [], { ids: ["a", "junk"], mergedInto: { a: "keep" } });
+  assert.equal(r.removed, 0);
+  assert.deepEqual(r.neurons.find((x) => x.id === "other").connections, ["keep", "zzz"], "las ajenas al borrado no se tocan");
+  assert.equal(r.connectionsChanged, 1);
+});

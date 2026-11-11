@@ -247,13 +247,22 @@ export function applyNeuronTombstones(neurons = [], memories = [], payload = {})
   const kept = (Array.isArray(neurons) ? neurons : []).filter((n) => n && !gone.has(String(n.id)));
   const keptIds = new Set(kept.map((n) => String(n.id)));
   const removed = (Array.isArray(neurons) ? neurons.length : 0) - kept.length;
-  const nextNeurons = removed
-    ? kept.map((n) => {
-        if (!Array.isArray(n.connections)) return n;
-        const conns = [...new Set(n.connections.map(resolve))].filter((id) => id !== String(n.id) && keptIds.has(id));
-        return conns.length === n.connections.length && conns.every((id, i) => id === n.connections[i]) ? n : { ...n, connections: conns };
-      })
-    : neurons;
+  // Las conexiones a ids borrados se redirigen (o se quitan) aunque este teléfono ya no
+  // tuviera esas neuronas; las demás conexiones no se tocan.
+  let connectionsChanged = 0;
+  const nextNeurons = kept.map((n) => {
+    if (!Array.isArray(n.connections) || !n.connections.some((id) => gone.has(String(id)))) return n;
+    const conns = [];
+    for (const raw of n.connections) {
+      const id = String(raw);
+      if (!gone.has(id)) { if (!conns.includes(id)) conns.push(id); continue; }
+      // Id borrado: pasa a la neurona que quedó si existe aquí; si no, se quita
+      const target = resolve(id);
+      if (target !== String(n.id) && !gone.has(target) && keptIds.has(target) && !conns.includes(target)) conns.push(target);
+    }
+    connectionsChanged++;
+    return { ...n, connections: conns };
+  });
   let memoriesChanged = 0;
   const nextMemories = (Array.isArray(memories) ? memories : []).map((m) => {
     const prev = Array.isArray(m?.linkedNeurons) ? m.linkedNeurons : null;
@@ -263,5 +272,5 @@ export function applyNeuronTombstones(neurons = [], memories = [], payload = {})
     memoriesChanged++;
     return { ...m, linkedNeurons: next };
   });
-  return { neurons: nextNeurons, memories: nextMemories, removed, memoriesChanged };
+  return { neurons: removed || connectionsChanged ? nextNeurons : neurons, memories: nextMemories, removed, connectionsChanged, memoriesChanged };
 }

@@ -1532,7 +1532,7 @@ export async function pullFromSupabase({ isManual = false } = {}) {
           const localNeurons = readLocalArray("memorycarl_neurochat_neurons");
           const localMemories = readLocalArray("memorycarl_memories_v1");
           const r = applyNeuronTombstones(localNeurons, localMemories, p);
-          if (r.removed) {
+          if (r.removed || r.connectionsChanged) {
             localStorage.setItem("memorycarl_neurochat_neurons", JSON.stringify(r.neurons));
             changed = true;
           }
