@@ -133,7 +133,8 @@ export function buildMemoriesFromDayOne(entries = [], opts = {}) {
     const { title, body } = splitTitleAndBody(raw);
     const text = body || title;
     if (!raw.trim()) { skipped.empty++; continue; }
-    if (text.replace(/\s/g, "").length < 10) { skipped.photoOnly++; continue; }
+    // Solo se omite si al quitar las fotos no queda texto (un "Te amo" corto sí se guarda)
+    if (!text.trim()) { if (/dayone-moment:/.test(raw)) skipped.photoOnly++; else skipped.empty++; continue; }
     const key = strip(text).replace(/\s+/g, " ");
     if (seenText.has(key)) { skipped.duplicate++; continue; }
     seenText.add(key);

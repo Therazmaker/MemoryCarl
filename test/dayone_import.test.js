@@ -53,6 +53,13 @@ test("enlaces a neuronas: el nombre va solo a la neurona de la persona", () => {
   assert.ok(memories[2].linkedNeurons.includes("n_deudas"), "dos triggers (deuda + préstamo) bastan");
 });
 
+test("las entradas cortas con texto se conservan", () => {
+  const { memories, skipped } = buildMemoriesFromDayOne([entry("S1", "Te amo", "2023-02-14T15:00:00Z"), entry("S2", "![](dayone-moment://Q)\n", "2023-02-15T15:00:00Z")]);
+  assert.equal(memories.length, 1);
+  assert.equal(memories[0].text, "Te amo");
+  assert.equal(skipped.photoOnly, 1);
+});
+
 test("volver a importar el mismo archivo no duplica", () => {
   const first = buildMemoriesFromDayOne(entries, { neurons });
   const again = buildMemoriesFromDayOne(entries, { neurons, existingIds: first.memories.map((m) => m.id) });
