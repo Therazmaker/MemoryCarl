@@ -12,6 +12,9 @@
 
 import { getAllNeurons, replaceAllNeurons } from "./neuronStore.js";
 import { RepairError, friendlyApiError, readMessageStream } from "./claudeStream.js";
+
+// Compatibilidad: el parser tolerante sigue disponible para quien lo importe desde aquí
+export { safeParseJSON } from "./claudeStream.js";
 import { getAllMemories, replaceAllMemories } from "../memory/memoryStore.js";
 import { getClaudeSettings, isClaudeConfigured } from "../services/claudeClient.js";
 import { applyNeuronTombstones } from "../services/cloudRestore.js";

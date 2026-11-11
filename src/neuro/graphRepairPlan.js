@@ -32,7 +32,10 @@ const str = (v) => (typeof v === "string" ? v.trim() : "");
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 export function isProtectedNeuron(n) {
-  return Boolean(n?.meta?.pin || n?.pin || n?.type === "manual_context" || n?.type === "identity_anchor" || n?.source === "manual");
+  return Boolean(
+    n?.meta?.pin || n?.pin || n?.type === "manual_context" || n?.type === "identity_anchor" ||
+    n?.source === "manual" || n?.source?.kind === "manual",
+  );
 }
 
 export function conceptOf(n) {
@@ -386,6 +389,8 @@ export function applyRepairPlan(neurons = [], plan = {}, opts = {}) {
     const a = keptById.get(resolve(c.a));
     const b = keptById.get(resolve(c.b));
     if (!a || !b || a === b) continue;
+    // Sin cupo en alguna de las dos: no se agrega (el tope de conexiones las recortaría solo de un lado)
+    if (a.connections.length >= MAX_CONNECTIONS || b.connections.length >= MAX_CONNECTIONS) continue;
     if (!a.connections.includes(String(b.id))) a.connections.push(String(b.id));
     if (!b.connections.includes(String(a.id))) b.connections.push(String(a.id));
     stats.connected++;
@@ -399,6 +404,19 @@ export function applyRepairPlan(neurons = [], plan = {}, opts = {}) {
         other.connections.push(String(n.id));
         stats.fixedLinks++;
       }
+    }
+  }
+
+  // Tope de conexiones (el mismo que aplica sanitizeNeuron al guardar): se recorta aquí y se quita
+  // también el enlace del otro lado, para que el grafo siga siendo simétrico al guardarse.
+  // Se conservan primero las conexiones que ya tenía.
+  for (const n of kept) {
+    if (n.connections.length <= MAX_CONNECTIONS) continue;
+    const dropped = n.connections.slice(MAX_CONNECTIONS);
+    n.connections = n.connections.slice(0, MAX_CONNECTIONS);
+    for (const id of dropped) {
+      const other = keptById.get(id);
+      if (other) other.connections = other.connections.filter((c) => c !== String(n.id));
     }
   }
 

@@ -99,3 +99,31 @@ test("plan vacío", () => {
   assert.ok(planIsEmpty(plan));
   assert.ok(planIsEmpty(validateRepairPlan(null, []).plan));
 });
+
+test("neuronas con origen manual quedan protegidas", () => {
+  const g = graph();
+  g.push(N("m", "Nota manual", { source: { kind: "manual", ref: "context_window" } }));
+  const { plan } = validateRepairPlan({ summary: "", deletions: [{ id: "m", reason: "" }], merges: [{ keepId: "a", removeIds: ["m"], concept: "", summary: "", reason: "" }], updates: [], connections: [] }, g);
+  assert.equal(plan.deletions.some((d) => d.id === "m"), false);
+  assert.equal(plan.merges.length, 0);
+});
+
+test("con el tope de 30 conexiones el grafo sigue simétrico", () => {
+  const hub = N("h", "Centro");
+  const leaves = Array.from({ length: 30 }, (_, i) => N(`l${i}`, `Hoja ${i}`, { connections: ["h"] }));
+  hub.connections = leaves.map((l) => l.id);
+  const dup = N("h2", "Centro bis", { connections: ["q"] });
+  const q = N("q", "Otra", { connections: ["h2"] });
+  const extra = N("w", "Nueva");
+  const neurons = [hub, ...leaves, dup, q, extra];
+  const { plan } = validateRepairPlan({
+    summary: "", deletions: [], updates: [],
+    merges: [{ keepId: "h", removeIds: ["h2"], concept: "", summary: "", reason: "" }],
+    connections: [{ a: "h", b: "w", reason: "" }],
+  }, neurons);
+  const out = applyRepairPlan(neurons, plan);
+  const by = new Map(out.neurons.map((n) => [n.id, n]));
+  assert.ok(by.get("h").connections.length <= 30);
+  assert.ok(!by.get("w").connections.includes("h"), "no se agrega a una neurona sin cupo");
+  for (const n of out.neurons) for (const id of n.connections) assert.ok(by.get(id).connections.includes(n.id), `${n.id}↔${id}`);
+});

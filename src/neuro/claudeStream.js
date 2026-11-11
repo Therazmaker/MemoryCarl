@@ -81,3 +81,100 @@ export async function readMessageStream(body, { onActivity = () => {}, signal } 
   return { text, stopReason };
 }
 
+
+/**
+ * Parsea e intenta reparar respuestas JSON de LLMs que tengan comas finales
+ * o estén truncadas por límite de tokens.
+ */
+export function safeParseJSON(text) {
+  if (!text || typeof text !== "string") {
+    throw new Error("Respuesta vacía o no válida.");
+  }
+
+  let cleaned = text.trim();
+
+  // Quitar bloques de código Markdown ```json ... ```
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+
+  // Ubicar delimitadores de JSON principal
+  const firstBrace = cleaned.indexOf("{");
+  if (firstBrace !== -1) {
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (lastBrace > firstBrace) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    } else {
+      cleaned = cleaned.substring(firstBrace);
+    }
+  }
+
+  const removeTrailingCommas = (str) => str.replace(/,\s*([\}\]])/g, "$1");
+
+  // Intento 1: Parseo directo limpiando comas sobrantes
+  try {
+    return JSON.parse(removeTrailingCommas(cleaned));
+  } catch (err1) {
+    // Intento 2: Reparación de JSON truncado por límite de tokens
+    const repaired = repairTruncatedJSON(removeTrailingCommas(cleaned));
+    if (repaired) {
+      try {
+        return JSON.parse(repaired);
+      } catch (_) {}
+    }
+    throw new Error(`Error parseando respuesta JSON de Claude: ${err1.message}`);
+  }
+}
+
+/**
+ * Reconstruye estructuras JSON truncadas intentando cerrar comillas, llaves y corchetes pendientes.
+ */
+export function repairTruncatedJSON(jsonStr) {
+  let str = jsonStr.trim();
+
+  // Cerrar comilla si quedó a mitad de un string
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === '"' && !escaped) {
+      inString = !inString;
+    }
+    escaped = char === "\\" && !escaped;
+  }
+  if (inString) {
+    str += '"';
+  }
+
+  // Eliminar coma o propiedad incompleta al final
+  str = str.replace(/,\s*$/, "");
+  str = str.replace(/,\s*"[^"]*"?\s*:?\s*$/, "");
+
+  // Balancear llaves y corchetes
+  const stack = [];
+  inString = false;
+  escaped = false;
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === '"' && !escaped) {
+      inString = !inString;
+    }
+    escaped = char === "\\" && !escaped;
+
+    if (!inString) {
+      if (char === "{" || char === "[") {
+        stack.push(char);
+      } else if (char === "}" && stack[stack.length - 1] === "{") {
+        stack.pop();
+      } else if (char === "]" && stack[stack.length - 1] === "[") {
+        stack.pop();
+      }
+    }
+  }
+
+  while (stack.length > 0) {
+    const last = stack.pop();
+    if (last === "{") str += "}";
+    if (last === "[") str += "]";
+  }
+
+  return str;
+}
