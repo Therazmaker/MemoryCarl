@@ -65,7 +65,7 @@ export function splitTitleAndBody(raw = "") {
   let title = "";
   const first = (lines[0] || "").trim();
   if (/^#{1,6}\s+/.test(first)) {
-    title = first.replace(/^#{1,6}\s+/, "").trim();
+    title = first.replace(/^[#\s]+/, "").trim();
     lines.shift();
   }
   const body = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();

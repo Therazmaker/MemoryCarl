@@ -378,6 +378,8 @@ export async function sendMessage(userInput, options = {}) {
       snippet: entry.snippet,
     })),
     memoryRecallIds: (result.memoryRecall || []).map((entry) => entry.memory?.id).filter(Boolean),
+    // Qué buscó Carl en tu historia para esta respuesta
+    ...(result.carlSearches?.length ? { carlSearches: result.carlSearches } : {}),
     relevantDays: result.relevantDays || [],
     // Cambios en la situación de vida hechos en este turno (se muestran con opción de deshacer)
     ...(result.lifeChanges?.length ? { lifeChanges: result.lifeChanges } : {}),
