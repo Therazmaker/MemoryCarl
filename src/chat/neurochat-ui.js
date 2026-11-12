@@ -343,6 +343,7 @@ function renderNeuronCard(neuronOrActivated, isGenerated = false, options = {}) 
         <span>${emotionIcon(n.emotion)}</span>
         ${badge}
       </div>
+      ${neuronOrActivated.components?.reason ? `<div class="ncNeuronMeta" title="Por qué se activó">💡 ${esc(neuronOrActivated.components.reason)}</div>` : ""}
       <div class="ncNeuronMeta">
         <span class="ncTag">${esc(n.core.domain)}</span>
         ${temporalBadge}

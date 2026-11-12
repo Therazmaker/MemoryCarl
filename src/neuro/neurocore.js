@@ -185,6 +185,7 @@ export async function processNeuroInput(userInput, options = {}) {
     topK: options.topK ?? 8,
     persistActivation: true,
     totalNeurons,
+    history: options.history || [],
     bootstrapState,
     traceMeta: activationMeta,
   });
@@ -370,6 +371,7 @@ export async function processNeuroInput(userInput, options = {}) {
         topK: 12,
         persistActivation: false,
         totalNeurons: finalNeurons.length,
+        history: options.history || [],
         bootstrapState: getBootstrapState(finalNeurons.length, options.bootstrapOptions),
         traceMeta: finalActivationMeta,
       })
