@@ -67,6 +67,7 @@ import { schedulePush, pullNeurochat, getSyncStatus, getApiConfig as getSyncApiC
 import { pendingCount } from "../services/syncOutbox.js";
 import { todayLocalStr } from "./lifeDates.js";
 import { startDayOneImport } from "./dayoneImport-ui.js";
+import { getSemanticStatus, ensureSemanticIndex } from "../neuro/semanticQuery.js";
 
 // ---- Constantes UI ----
 const MAX_INPUT_HEIGHT_PX = 140;
@@ -682,6 +683,28 @@ function renderSyncChip() {
   return `<span data-sync-chip class="ncSyncChip" title="${esc(st.message || "")}">☁️ sync con error</span>`;
 }
 
+function renderVoyageSettingsSection(s) {
+  const status = getSemanticStatus(getNeurons());
+  const placeholder = s.voyageApiKey ? `${maskApiKey(s.voyageApiKey)} (escribe para reemplazar)` : "pa-… (tu API key de Voyage)";
+  const line = !status.configured
+    ? "Sin configurar: Carl elige neuronas solo por palabras."
+    : status.pending
+      ? `Índice: ${status.ready} de ${status.total} neuronas listas. Faltan ${status.pending}${status.lastError ? ` · ${esc(status.lastError)}` : " (se completa solo en segundo plano)"}.`
+      : `Índice listo: ${status.total} neuronas.`;
+  return `
+          <div class="ncSettingsSection">
+            <div class="ncSettingsSectionTitle">🧭 Voyage AI <span class="ncSettingsSectionBadge">Significado</span></div>
+            <div class="ncSettingsSectionDesc">Con Voyage, Carl entiende lo que dices aunque uses otras palabras ("estoy reventado" → agotamiento). Usa tus tokens gratis de Voyage; sin clave, todo sigue funcionando por palabras.</div>
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel" for="ncsVoyageApiKey">Voyage API key</label>
+              <input type="password" id="ncsVoyageApiKey" class="ncSettingsInput" placeholder="${esc(placeholder)}" autocomplete="new-password" value="" />
+              <div class="ncSettingsHint">Guardada solo en tu navegador. Para quitarla escribe "borrar".</div>
+            </div>
+            <div class="ncSettingsHint" id="ncsVoyageStatus">${line}</div>
+            ${status.configured ? `<div class="ncSettingsBtns ncSettingsBtnsSmall"><button type="button" class="ncSettingsTestBtn" id="btnVoyageIndex">Indexar ahora</button></div>` : ""}
+          </div>`;
+}
+
 function renderSettingsModal() {
   const s       = getNeuroChatSettings();
   const maskedKey = s.apiKey ? maskApiKey(s.apiKey) : "";
@@ -788,6 +811,9 @@ function renderSettingsModal() {
               <button type="button" class="ncSettingsTestBtn" id="btnClaudeTest">Probar conexión Claude</button>
             </div>
           </div>
+
+          <!-- ════════ VOYAGE AI: búsqueda por significado ════════ -->
+          ${renderVoyageSettingsSection(s)}
 
           <!-- ════════ OLLAMA CLOUD (FALLBACK) ════════ -->
           <div class="ncSettingsSection">
@@ -2446,6 +2472,10 @@ function wireSettingsModal(root) {
     };
     const newClaudeKey = claudeKeyInput?.value?.trim();
     if (newClaudeKey) patch.claudeApiKey = newClaudeKey;
+    const newVoyageKey = root.querySelector("#ncsVoyageApiKey")?.value?.trim();
+    if (newVoyageKey) patch.voyageApiKey = newVoyageKey.toLowerCase() === "borrar" ? "" : newVoyageKey;
+    // Al guardar una clave nueva, el índice de significado empieza a armarse en segundo plano
+    if (newVoyageKey && newVoyageKey.toLowerCase() !== "borrar") setTimeout(() => ensureSemanticIndex(getNeurons()), 800);
     const newKey = apiKeyInput?.value?.trim();
     if (newKey) patch.apiKey = newKey;
 
@@ -2564,6 +2594,17 @@ function wireSettingsModal(root) {
   });
 
   // Test Claude
+  root.querySelector("#btnVoyageIndex")?.addEventListener("click", async () => {
+    const btn = root.querySelector("#btnVoyageIndex");
+    const statusEl = root.querySelector("#ncsVoyageStatus");
+    if (btn) btn.disabled = true;
+    const res = await ensureSemanticIndex(getNeurons(), {
+      onProgress: ({ done, total }) => { if (statusEl) statusEl.textContent = total ? `Indexando… ${done} de ${total}` : "Todo al día."; },
+    });
+    const st = getSemanticStatus(getNeurons());
+    if (statusEl) statusEl.textContent = res ? `Índice listo: ${st.ready} de ${st.total} neuronas.` : `No se pudo indexar: ${st.lastError || "error"}`;
+    if (btn) btn.disabled = false;
+  });
   root.querySelector("#btnClaudeTest")?.addEventListener("click", async () => {
     const { isClaudeConfigured: configured, getClaudeSettings: getSettings } =
       await import("../services/claudeClient.js");

@@ -19,7 +19,8 @@ export const DEFAULT_SETTINGS = {
   model:                  "gemini-2.5-flash",
   claudeApiKey:           "",
   claudeModel:            "claude-haiku-4-5",
-  carlTools:              true,  // Carl puede buscar en tus memorias y neuronas (memoria larga)
+  carlTools:              true,
+  voyageApiKey:           "",    // Voyage AI: búsqueda por significado (opcional)  // Carl puede buscar en tus memorias y neuronas (memoria larga)
   dailyLimit:             20,
   timeoutMs:              20000,
   temperature:            0.4,
