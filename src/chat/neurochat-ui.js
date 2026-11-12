@@ -2599,6 +2599,7 @@ function wireSettingsModal(root) {
     const statusEl = root.querySelector("#ncsVoyageStatus");
     if (btn) btn.disabled = true;
     const res = await ensureSemanticIndex(getNeurons(), {
+      force: true,
       onProgress: ({ done, total }) => { if (statusEl) statusEl.textContent = total ? `Indexando… ${done} de ${total}` : "Todo al día."; },
     });
     const st = getSemanticStatus(getNeurons());

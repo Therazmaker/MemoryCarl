@@ -34,13 +34,22 @@ export async function semanticSignalsFor(text, { neuronIds = null } = {}) {
 }
 
 /** Indexa lo pendiente en segundo plano. No lanza errores. */
-export function ensureSemanticIndex(neurons, { onProgress } = {}) {
+let indexRetryAt = 0;
+
+export function ensureSemanticIndex(neurons, { onProgress, force = false } = {}) {
   if (!isVoyageConfigured()) return Promise.resolve(null);
+  // Tras un fallo, los mensajes siguientes no reintentan enseguida (el botón sí puede)
+  if (!force && Date.now() < indexRetryAt) return Promise.resolve(null);
   return indexNeurons({
     neurons,
     model: VOYAGE_MODEL,
     embed: (texts) => embedTexts(texts, { inputType: "document", timeoutMs: 30_000 }),
     onProgress,
-  }).then((r) => { lastIndexError = null; return r; })
-    .catch((err) => { lastIndexError = err?.message || String(err); console.warn("[semantic] indexado pausado:", lastIndexError); return null; });
+  }).then((r) => { lastIndexError = null; indexRetryAt = 0; return r; })
+    .catch((err) => {
+      lastIndexError = err?.message || String(err);
+      indexRetryAt = Date.now() + (err?.status === 429 ? 2 * 60_000 : 5 * 60_000);
+      console.warn("[semantic] indexado pausado:", lastIndexError);
+      return null;
+    });
 }

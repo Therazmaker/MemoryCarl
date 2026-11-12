@@ -19,8 +19,8 @@ export const DEFAULT_SETTINGS = {
   model:                  "gemini-2.5-flash",
   claudeApiKey:           "",
   claudeModel:            "claude-haiku-4-5",
-  carlTools:              true,
-  voyageApiKey:           "",    // Voyage AI: búsqueda por significado (opcional)  // Carl puede buscar en tus memorias y neuronas (memoria larga)
+  carlTools:              true,  // Carl puede buscar en tus memorias y neuronas (memoria larga)
+  voyageApiKey:           "",    // Voyage AI: búsqueda por significado (opcional)
   dailyLimit:             20,
   timeoutMs:              20000,
   temperature:            0.4,
@@ -97,6 +97,8 @@ export function resetNeuroChatSettings(options = {}) {
   if (options.keepApiKey) {
     const current = getNeuroChatSettings();
     defaults.apiKey = current.apiKey;
+    // Las demás claves tampoco se borran al restablecer
+    if (current.voyageApiKey) defaults.voyageApiKey = current.voyageApiKey;
   }
   writeRaw(defaults);
   return defaults;

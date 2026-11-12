@@ -10,8 +10,11 @@
  */
 
 export const SEMANTIC_KEY = "memorycarl_semantic_index_v1";
-const MAX_TOKENS_PER_BATCH = 7000;   // por debajo de 10.000 tokens/minuto
-const BATCH_PAUSE_MS = 21_000;       // 3 llamadas por minuto como máximo
+// Sin método de pago, Voyage permite 3 llamadas y 10.000 tokens por minuto. Una tanda de
+// hasta 7.000 tokens por minuto deja margen para las consultas del chat.
+const MAX_TOKENS_PER_BATCH = 7000;
+const BATCH_PAUSE_MS = 61_000;
+const RATE_LIMIT_RETRIES = 2;
 
 export function neuronEmbeddingText(n) {
   const summary = String(n?.core?.summary || "").replace(/\s+/g, " ").slice(0, 400);
@@ -126,7 +129,16 @@ export function indexNeurons({ neurons, embed, model, onProgress = () => {}, sle
       if (b > 0) await sleep(BATCH_PAUSE_MS);
       const batch = batches[b];
       const texts = batch.map(neuronEmbeddingText);
-      const { vectors } = await embed(texts);
+      // Si Voyage pide esperar (429), se espera una ventana completa y se reintenta la tanda
+      let vectors = null;
+      for (let attempt = 0; !vectors; attempt++) {
+        try {
+          ({ vectors } = await embed(texts));
+        } catch (err) {
+          if (err?.status !== 429 || attempt >= RATE_LIMIT_RETRIES) throw err;
+          await sleep(BATCH_PAUSE_MS);
+        }
+      }
       batch.forEach((n, i) => { index.items[n.id] = { h: textHash(texts[i]), v: round(vectors[i]) }; });
       index.updatedAt = new Date().toISOString();
       saveSemanticIndex(index);

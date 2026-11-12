@@ -64,3 +64,27 @@ test("indexar: guarda vectores, solo pide lo pendiente y pausa entre tandas", as
   assert.deepEqual(calls, [3]);
   assert.equal(sleeps.length, 0);
 });
+
+test("indexar: un 429 espera la ventana y reintenta la tanda", async () => {
+  memStorage();
+  const neurons = [N("a", "Uno"), N("b", "Dos"), N("c", "Tres")];
+  let n = 0;
+  const embed = async (texts) => {
+    n++;
+    if (n === 1) { const e = new Error("límite"); e.status = 429; throw e; }
+    return { vectors: texts.map(() => [1, 0]) };
+  };
+  const sleeps = [];
+  const r = await indexNeurons({ neurons, embed, model: "m", sleep: async (ms) => { sleeps.push(ms); } });
+  assert.equal(r.indexed, 3);
+  assert.equal(n, 2);
+  assert.ok(sleeps[0] >= 60_000, "espera una ventana completa de un minuto");
+});
+
+test("el promedio usa solo las neuronas elegibles", () => {
+  const index = { items: { a: { v: [1, 0] }, b: { v: [0.9, 0.1] }, c: { v: [0, 1] }, d: { v: [0.1, 0.9] }, r: { v: [1, 0] } } };
+  const all = semanticSignals([1, 0], index);
+  const eligible = semanticSignals([1, 0], index, new Set(["a", "b", "c", "d"]));
+  assert.ok(!eligible.has("r"));
+  assert.ok(eligible.get("a") >= all.get("a"));
+});

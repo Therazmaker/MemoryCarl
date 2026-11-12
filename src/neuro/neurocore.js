@@ -183,7 +183,9 @@ export async function processNeuroInput(userInput, options = {}) {
   const t2 = Date.now();
   const activationMeta = {};
   // Búsqueda por significado (si Voyage está configurado); sin ella sigue por palabras
-  const semanticSignals = await semanticSignalsFor(userInput);
+  // El promedio se calcula solo con las neuronas que pueden activarse (sin las quitadas)
+  const eligibleIds = new Set(allNeurons.filter((n) => !n.deleted && !n.feedbackStats?.removed).map((n) => n.id));
+  const semanticSignals = await semanticSignalsFor(userInput, { neuronIds: eligibleIds });
   if (semanticSignals.size) addStep(trace, "semantic_signals", { count: semanticSignals.size });
   ensureSemanticIndex(allNeurons); // en segundo plano: neuronas nuevas o cambiadas
   const activated = await activateNeurons(userInput, allNeurons, {
