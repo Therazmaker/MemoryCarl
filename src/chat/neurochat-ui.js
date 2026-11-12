@@ -11,7 +11,7 @@
 import { sendMessage, forcePremiumGenerationForMessage, undoMessageLifeChanges, getFullChatHistory, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
 import { processDislikeExplanation } from "../neuro/feedback.js";
 import { NeuroProbeUI } from "./neuroprobe-ui.js";
-import { saveMemory, updateMemory, deleteMemory, autoFixMemory, suggestMemoryMilestone } from "../memory/memoryStore.js";
+import { saveMemory, updateMemory, deleteMemory, autoFixMemory, suggestMemoryMilestone, getAllMemories } from "../memory/memoryStore.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
 import {
@@ -208,6 +208,25 @@ function renderDayRecallCard(msg) {
     </details>`;
 }
 
+// Lo que Carl buscó en tu historia antes de responder (herramientas)
+function renderCarlSearchCard(msg) {
+  const searches = Array.isArray(msg?.carlSearches) ? msg.carlSearches : [];
+  if (!searches.length) return "";
+  const memIds = [...new Set(searches.flatMap((s) => s.ids || []))];
+  const mems = memIds.length ? getAllMemories().filter((m) => memIds.includes(m.id)).slice(0, 6) : [];
+  return `
+    <details class="ncMemoryRecall">
+      <summary>🔎 Carl buscó en tu historia (${searches.length})</summary>
+      <div class="ncMemoryRecallList">
+        ${searches.map((s) => `<div class="ncRecallItemMeta">• ${esc(s.label || s.name)} — ${Number(s.count) || 0} resultado${Number(s.count) === 1 ? "" : "s"}</div>`).join("")}
+        ${mems.map((m) => `
+          <button class="ncRecallItem" data-open-memory-timeline="${esc(m.id)}">
+            <div class="ncRecallItemHead">🧠 ${esc(m.date || "—")} — ${esc(m.title || "Memoria")}</div>
+          </button>`).join("")}
+      </div>
+    </details>`;
+}
+
 function renderMemoryRecallCard(msg) {
   const recalls = Array.isArray(msg?.memoryRecall) ? msg.memoryRecall.slice(0, 3) : [];
   if (!recalls.length) return "";
@@ -269,7 +288,7 @@ function renderMessage(msg) {
       <button class="ncRfBtn" data-rf-rating="useless" data-rf-msg="${esc(msg.messageId)}" title="No útil">No útil</button>
     </div>` : "";
 
-  const memoryRecall = !isUser ? renderMemoryRecallCard(msg) : "";
+  const memoryRecall = !isUser ? renderCarlSearchCard(msg) + renderMemoryRecallCard(msg) : "";
   const dayRecall = !isUser ? renderDayRecallCard(msg) : "";
 
   return `
@@ -755,6 +774,12 @@ function renderSettingsModal() {
               <select id="ncsClaudeModel" class="ncSettingsInput">
                 ${claudeModelOptions}
               </select>
+            </div>
+
+            <!-- Memoria larga: herramientas de búsqueda -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel"><input type="checkbox" id="ncsCarlTools" ${s.carlTools !== false ? "checked" : ""}/> Carl puede buscar en tus memorias y neuronas</label>
+              <div class="ncSettingsSectionDesc">Cuando hablas de tu pasado o de alguien, Carl busca en tu historia antes de responder. Esos mensajes cuestan un poco más (centavos).</div>
             </div>
 
             <!-- Botones Claude -->
@@ -2411,6 +2436,7 @@ function wireSettingsModal(root) {
       enabled:         root.querySelector("#ncsPremiumEnabled")?.checked ?? true,
       model:           root.querySelector("#ncsModel")?.value?.trim() || "gemini-2.5-flash",
       claudeModel:     root.querySelector("#ncsClaudeModel")?.value?.trim() || "claude-haiku-4-5",
+      carlTools:       root.querySelector("#ncsCarlTools")?.checked ?? true,
       dailyLimit:      parseInt(root.querySelector("#ncsDailyLimit")?.value, 10) || 20,
       timeoutMs:       parseInt(root.querySelector("#ncsTimeout")?.value,    10) || 20000,
       temperature:     parseFloat(root.querySelector("#ncsTemp")?.value)    || 0.4,

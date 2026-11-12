@@ -576,6 +576,7 @@ export async function processNeuroInput(userInput, options = {}) {
   const t4 = Date.now();
   let reply = null;
   let replySource = "fallback";
+  let carlSearches = [];
   let localDraft = "";
   let geminiReplyText = "";
   let intent = "respond";
@@ -598,7 +599,14 @@ export async function processNeuroInput(userInput, options = {}) {
         memoryRecall: memoryRecallResult.ranked,
         conversationSession: options.conversationSession,
         financeContext,
+        // Memoria larga: Carl puede buscar en memorias y neuronas cuando lo necesite
+        toolData: () => ({ memories: getAllMemories(), neurons: getAllNeurons() }),
       }, options.onRetryProgress);
+
+      if (claudeResult?.toolCalls?.length) {
+        carlSearches = claudeResult.toolCalls.map(({ name, label, count, ids }) => ({ name, label, count, ids: (ids || []).slice(0, 10) }));
+        addStep(trace, "claude_tool_calls", { count: carlSearches.length });
+      }
 
       if (claudeResult && claudeResult.reply) {
         reply = claudeResult.reply;
@@ -1057,6 +1065,7 @@ export async function processNeuroInput(userInput, options = {}) {
     memorySuggestion,
     memoryRecall: memoryRecallResult.ranked,
     memoryRecallThreshold: memoryRecallResult.threshold,
+    carlSearches,
     reasoningContext,
     insightTrace: {
       clusters: insightResult.clusters,

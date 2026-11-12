@@ -13,6 +13,7 @@ import { buildLifeFactsPromptBlock } from "../chat/lifeFacts.js";
 import { todayLongStr } from "../chat/lifeDates.js";
 import { buildAstroPromptBlock } from "../chat/astroLinks.js";
 import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
+import { CARL_TOOLS, CARL_TOOLS_PROMPT, CARL_TOOL_LIMITS, runCarlTool } from "../chat/carlTools.js";
 import { buildRecentDaysPromptBlock, buildRecentJournalBlock, buildRecentFinanceBlock } from "../chat/recentContext.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
@@ -360,86 +361,128 @@ export async function requestClaudeChatReply(payload, onRetryProgress = null) {
   }
 
   const { systemContent, messages } = buildClaudePayload(payload);
+  // Memoria larga: si hay de dónde sacar datos, Carl puede buscar en la historia del usuario
+  const toolData = typeof payload?.toolData === "function" ? payload.toolData : null;
+  const useTools = Boolean(toolData) && getNeuroChatSettings().carlTools !== false;
 
   const modelToUse = normalizeClaudeModel(settings.model);
-  const requestBody = {
+  const baseBody = {
     model: modelToUse,
     max_tokens: 2048,
     system: [
       {
         type: "text",
-        text: systemContent,
+        text: useTools ? systemContent + CARL_TOOLS_PROMPT : systemContent,
         cache_control: { type: "ephemeral" },
       },
     ],
-    messages,
+    ...(useTools ? { tools: CARL_TOOLS, tool_choice: { type: "auto" } } : {}),
   };
 
-  const maxAttempts = 3;
-  let lastError = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (attempt > 1) {
-      if (typeof onRetryProgress === "function") {
-        try { onRetryProgress({ attempt, maxAttempts, service: "claude" }); } catch (_e) {}
+  // Una llamada con reintentos ante errores de red o del servidor
+  const callOnce = async (convo, extra = {}) => {
+    const maxAttempts = 3;
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) {
+        if (typeof onRetryProgress === "function") {
+          try { onRetryProgress({ attempt, maxAttempts, service: "claude" }); } catch (_e) {}
+        }
+        await new Promise((resolve) => setTimeout(resolve, attempt * 500));
       }
-      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+      try {
+        const res = await fetch(ANTHROPIC_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": settings.apiKey.trim(),
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true",
+          },
+          body: JSON.stringify({ ...baseBody, ...extra, messages: convo }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) {
+          let errMsg = `HTTP ${res.status}`;
+          try {
+            const errJson = await res.json();
+            errMsg = errJson.error?.message || errMsg;
+          } catch (_) {}
+          lastError = new Error(`Claude error: ${errMsg}`);
+          console.warn(`[claudeClient] Intento ${attempt}/${maxAttempts} falló: ${errMsg}`);
+          // Errores de la solicitud (4xx salvo 429) no mejoran reintentando
+          if (res.status >= 400 && res.status < 500 && res.status !== 429) break;
+          continue;
+        }
+        return await res.json();
+      } catch (err) {
+        clearTimeout(timer);
+        lastError = err;
+        console.warn(`[claudeClient] Intento ${attempt}/${maxAttempts} error de red/timeout:`, err.message || err);
+      }
     }
+    const err = new Error(lastError?.message || "Error desconocido en Claude API");
+    err.lastError = lastError;
+    throw err;
+  };
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
-    try {
-      const res = await fetch(ANTHROPIC_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": settings.apiKey.trim(),
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timer);
-
-      if (!res.ok) {
-        let errMsg = `HTTP ${res.status}`;
-        try {
-          const errJson = await res.json();
-          errMsg = errJson.error?.message || errMsg;
-        } catch (_) {}
-        lastError = new Error(`Claude error: ${errMsg}`);
-        console.warn(`[claudeClient] Intento ${attempt}/${maxAttempts} falló: ${errMsg}`);
-        continue;
+  const convo = [...messages];
+  const toolCalls = [];
+  let data = null;
+  let finalText = "";
+  for (let round = 0; round <= CARL_TOOL_LIMITS.maxRounds; round++) {
+    data = await callOnce(convo);
+    const blocks = Array.isArray(data?.content) ? data.content : [];
+    const text = blocks.filter((b) => b.type === "text").map((b) => b.text || "").join("\n").trim();
+    const uses = blocks.filter((b) => b.type === "tool_use");
+    if (data?.stop_reason !== "tool_use" || !uses.length || !useTools) {
+      finalText = text;
+      break;
+    }
+    // Carl pidió buscar: se ejecuta en el teléfono y se le devuelve el resultado
+    convo.push({ role: "assistant", content: blocks });
+    const sources = toolData();
+    const results = uses.map((u) => {
+      if (toolCalls.length >= CARL_TOOL_LIMITS.maxCallsPerTurn) {
+        return { type: "tool_result", tool_use_id: u.id, content: JSON.stringify({ error: "Límite de búsquedas en este turno. Responde con lo que ya tienes." }), is_error: true };
       }
-
-      const data = await res.json();
-      const fullText = data?.content?.[0]?.text;
-
-      if (!fullText) {
-        lastError = new Error("Respuesta vacía de Claude API");
-        console.warn(`[claudeClient] Intento ${attempt}/${maxAttempts}: respuesta vacía.`);
-        continue;
-      }
-
-      const { reply, rawActions } = splitReplyAndActions(fullText);
-      const { actions, intent } = parseClaudeNeuronActions(rawActions);
-
-      return { reply, neuronActions: { actions, intent }, intent };
-    } catch (err) {
-      clearTimeout(timer);
-      lastError = err;
-      console.warn(`[claudeClient] Intento ${attempt}/${maxAttempts} error de red/timeout:`, err.message || err);
+      const out = runCarlTool(u.name, u.input || {}, sources);
+      toolCalls.push({ name: u.name, input: u.input || {}, ...out.summary });
+      return { type: "tool_result", tool_use_id: u.id, content: out.content, ...(out.isError ? { is_error: true } : {}) };
+    });
+    convo.push({ role: "user", content: results });
+    if (round === CARL_TOOL_LIMITS.maxRounds - 1) {
+      // Última vuelta: se le pide responder sin buscar más
+      results.push({ type: "text", text: "Ya no puedes buscar más en este turno: responde ahora con lo que encontraste." });
     }
   }
 
-  console.error("[claudeClient] Fallaron todos los intentos con Claude:", lastError);
-  const errMessage = lastError?.message || "Error desconocido en Claude API";
-  const err = new Error(errMessage);
-  err.lastError = lastError;
-  throw err;
+  // Si siguió pidiendo búsquedas hasta el límite, una última llamada sin herramientas
+  if (!finalText && useTools && toolCalls.length && data?.stop_reason === "tool_use") {
+    const blocks = Array.isArray(data?.content) ? data.content : [];
+    convo.push({ role: "assistant", content: blocks });
+    convo.push({
+      role: "user",
+      content: blocks.filter((b) => b.type === "tool_use").map((u) => ({
+        type: "tool_result", tool_use_id: u.id, is_error: true,
+        content: JSON.stringify({ error: "Límite de búsquedas alcanzado. Responde con lo que ya tienes." }),
+      })),
+    });
+    data = await callOnce(convo, { tool_choice: { type: "none" } });
+    finalText = (Array.isArray(data?.content) ? data.content : []).filter((b) => b.type === "text").map((b) => b.text || "").join("\n").trim();
+  }
+
+  if (!finalText) {
+    if (data?.stop_reason === "refusal") throw new Error("Claude no quiso responder a este mensaje.");
+    throw new Error("Respuesta vacía de Claude API");
+  }
+
+  const { reply, rawActions } = splitReplyAndActions(finalText);
+  const { actions, intent } = parseClaudeNeuronActions(rawActions);
+  return { reply, neuronActions: { actions, intent }, intent, toolCalls };
 }
 
 /**
