@@ -2,11 +2,11 @@
  * activation.js — Motor de activación neuronal
  */
 
-import { getEmbedding, cosineSimilarity } from "./embeddings.js";
 import { tokenize, keywordOverlap, clamp, neuronTokenSet, daysSince } from "./utils.js";
 import { updateNeuron } from "./neuronStore.js";
 import { getBootstrapState } from "./bootstrap.js";
 import { computeRecencyWeight, isHistoricalNeuron } from "./temporal.js";
+import { buildRelevanceScorer } from "./relevance.js";
 
 const WEIGHTS = { semantic: 0.42, keyword: 0.20, weight: 0.14, recency: 0.08, emotion: 0.08, temporal: 0.08 };
 const DEFAULT_TOP_K = 8;
@@ -198,48 +198,87 @@ export async function activateNeurons(userInput, neurons, options = {}) {
   }
 
   const queryTokens = tokenize(userInput);
-  const queryEmbed = await getEmbedding(userInput);
   const now = new Date().toISOString();
   const orientation = detectPastOrPresentOrientation(userInput, options);
   if (options.traceMeta && typeof options.traceMeta === "object") options.traceMeta.temporalOrientation = orientation;
 
-  const scored = await Promise.all(activeNeurons.map(async (neuron) => {
-    let neuronEmbed = neuron.embedding;
-    if (!Array.isArray(neuronEmbed) || neuronEmbed.length === 0) {
-      const neuronText = [neuron.core.concept, neuron.core.summary, ...neuron.triggers, ...(neuron.meta?.aliases || [])].join(" ");
-      neuronEmbed = await getEmbedding(neuronText);
-    }
+  // Relevancia real (palabras, raíces, equivalencias, menciones y los últimos mensajes).
+  // Sin evidencia, una neurona no entra: el peso y la recencia solo desempatan.
+  const relevanceOf = buildRelevanceScorer(activeNeurons);
+  const contextText = (Array.isArray(options.history) ? options.history : [])
+    .filter((m) => m?.role === "user").slice(-3).map((m) => m.content || "").join(" ");
+  const relevance = relevanceOf(userInput, { context: contextText });
 
-    const semantic = cosineSimilarity(queryEmbed, neuronEmbed);
+  const scored = [];
+  for (const neuron of activeNeurons) {
+    const rel = relevance.get(neuron.id);
+    if (!rel) continue;
     const keyword = computeKeywordMatch(queryTokens, neuron);
     const weight = clamp(neuron.weight, 0, 1);
     const recency = computeRecencyBoost(neuron.lastActivated);
     const temporalBoost = computeTemporalActivationBoost(userInput, neuron, { orientation, ...options });
     const emotion = computeEmotionMatch(userInput, neuron.emotion);
     const aliasMatch = computeAliasMatch(userInput, neuron);
-    const entityMention = isLikelyEntityMention(userInput, neuron);
+    const entityMention = rel.mention || isLikelyEntityMention(userInput, neuron);
     const conceptMention = normalizeText(userInput).includes(normalizeText(neuron.core?.concept || ""));
     const manualBoost = getManualNeuronBoost(neuron, { aliasMatch, entityMention, conceptMention });
     const neuronFeedbackBoost = computeNeuronFeedbackBoost(neuron);
 
     const score = normalizeScore(
-      semantic * tuning.weights.semantic +
-      keyword * tuning.weights.keyword +
-      weight * tuning.weights.weight +
-      recency * tuning.weights.recency +
-      emotion * tuning.weights.emotion +
-      temporalBoost * tuning.weights.temporal +
+      rel.relevance * 0.72 +
+      keyword * 0.08 +
+      weight * 0.06 +
+      recency * 0.03 +
+      (emotion - 0.5) * 0.06 +
+      temporalBoost * 0.25 +
       manualBoost +
       neuronFeedbackBoost
     );
 
-    return { neuron, score, components: { semantic, keyword, weight, recency, emotion, temporalBoost, aliasMatch, manualBoost, neuronFeedbackBoost } };
-  }));
+    scored.push({
+      neuron,
+      score,
+      components: {
+        semantic: rel.relevance, keyword, weight, recency, emotion, temporalBoost, aliasMatch, manualBoost, neuronFeedbackBoost,
+        lexical: rel.lexical, mention: rel.mention, fromContext: rel.context > rel.lexical,
+        reason: rel.mention ? "la mencionaste" : rel.context > rel.lexical ? "por lo que venían hablando" : "palabras en común",
+      },
+    });
+  }
 
-  const activated = scored
-    .filter((r) => r.score >= minScore && (r.components.semantic >= 0.08 || r.components.keyword > 0))
+  // Se descartan las de evidencia floja: muy por debajo de la más relevante o casi sin coincidencia
+  const topRelevance = scored.reduce((m, r) => Math.max(m, r.components.semantic), 0);
+  const floor = Math.max(0.3, topRelevance * 0.45);
+  let activated = scored
+    .filter((r) => r.score >= minScore && (r.components.semantic >= floor || r.components.manualBoost > 0))
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
+
+  // El grafo ayuda: las vecinas de una neurona mencionada por nombre
+  // reciben una parte de su puntaje. Máximo 2 por neurona y 3 en total.
+  if (options.spread !== false && activated.length < topK) {
+    const byId = new Map(activeNeurons.map((n) => [n.id, n]));
+    const taken = new Set(activated.map((a) => a.neuron.id));
+    const extra = [];
+    for (const parent of activated) {
+      // Solo desde neuronas mencionadas directamente (por nombre o alias)
+      if (!parent.components.mention || extra.length >= 3) continue;
+      const neighbours = (parent.neuron.connections || []).map((id) => byId.get(id)).filter((n) => n && !taken.has(n.id))
+        .sort((a, b) => (b.weight || 0) - (a.weight || 0)).slice(0, 2);
+      for (const n of neighbours) {
+        if (extra.length >= 3) break;
+        const score = normalizeScore(parent.score * 0.4 + clamp(n.weight, 0, 1) * 0.05);
+        if (score < minScore) continue;
+        taken.add(n.id);
+        extra.push({
+          neuron: n,
+          score,
+          components: { semantic: parent.components.semantic * 0.4, keyword: 0, weight: clamp(n.weight, 0, 1), recency: computeRecencyBoost(n.lastActivated), emotion: 0.5, temporalBoost: 0, aliasMatch: 0, manualBoost: 0, neuronFeedbackBoost: computeNeuronFeedbackBoost(n), viaNeighbor: parent.neuron.id, reason: `conectada con «${String(parent.neuron.core?.concept || "").slice(0, 40)}»` },
+        });
+      }
+    }
+    activated = [...activated, ...extra].sort((a, b) => b.score - a.score).slice(0, topK);
+  }
 
   if (persist) {
     for (const { neuron } of activated) {
