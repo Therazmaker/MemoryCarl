@@ -12,7 +12,7 @@
  * Lógica pura.
  */
 
-import { buildIndex, scoreIndex, normalize } from "../memory/lifeSearch.js";
+import { buildIndex, scoreIndex, normalize, terms } from "../memory/lifeSearch.js";
 
 /** Equivalencias: cada palabra suma también las de su grupo a la búsqueda. */
 const SYNONYM_GROUPS = [
@@ -85,6 +85,10 @@ export function buildRelevanceScorer(neurons = []) {
     },
   })), { concept: 3, triggers: 2, aliases: 2.5, summary: 1 });
 
+  // Términos (raíces) de concepto y triggers: una coincidencia aquí es evidencia directa
+  // aunque BM25 dé poco, como pasa con pocas neuronas (cada palabra está en casi todas).
+  const keyTerms = new Map(live.map((n) => [n.id, new Set(terms(`${n.core.concept} ${(n.triggers || []).join(" ")}`))]));
+
   // BM25 → 0..1 (saturación suave: ~0.5 con una coincidencia clara de palabra rara)
   const squash = (s) => (s > 0 ? s / (s + 4) : 0);
 
@@ -97,6 +101,7 @@ export function buildRelevanceScorer(neurons = []) {
     const cq = cleanQuery(opts.context || "");
     const ctx = cq ? scoreIndex(idx, `${cq} ${expandQuery(cq)}`) : new Map();
     const hay = ` ${normalize(input).replace(/\s+/g, " ")} `;
+    const qTerms = new Set(terms(q));
     for (const n of live) {
       // Con coincidencia exacta, las equivalencias solo suman un poco; sin ella valen a medias
       const exact = squash(main.get(n.id) || 0);
@@ -107,8 +112,10 @@ export function buildRelevanceScorer(neurons = []) {
       const mention = (name.split(" ").length <= 3 && mentioned(hay, name))
         || (n.meta?.aliases || []).some((a) => mentioned(hay, a));
       let relevance = Math.max(lexical, context * 0.45);
+      const keyHit = [...qTerms].some((t) => keyTerms.get(n.id)?.has(t));
+      if (keyHit) relevance = Math.max(relevance, 0.45);
       if (mention) relevance = Math.max(relevance, 0.9);
-      if (relevance > 0) out.set(n.id, { relevance, lexical, mention, context });
+      if (relevance > 0) out.set(n.id, { relevance, lexical, mention, context, keyHit });
     }
     return out;
   };

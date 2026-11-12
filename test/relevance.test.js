@@ -39,3 +39,13 @@ test("los últimos mensajes ayudan, con menos fuerza", () => {
   const d = r.get("n_deudas");
   assert.ok(d && d.relevance < 0.5 && d.context > 0);
 });
+
+test("con pocas neuronas, una coincidencia exacta de trigger igual alcanza", () => {
+  const few = buildRelevanceScorer([
+    N("a", "ansiedad en el trabajo", "me pongo ansioso", ["ansiedad", "trabajo"]),
+    N("b", "ansiedad social", "en reuniones", ["ansiedad", "gente"]),
+  ]);
+  const r = few("tengo ansiedad");
+  assert.ok(r.get("a").relevance >= 0.45 && r.get("b").relevance >= 0.45);
+  assert.ok(r.get("a").keyHit);
+});
