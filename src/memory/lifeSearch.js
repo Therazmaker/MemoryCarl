@@ -83,10 +83,13 @@ export function scoreIndex(idx, query, { k1 = 1.4, b = 0.7 } = {}) {
   return out;
 }
 
+// Los límites pueden ser año ("2024"), mes ("2024-03") o día: se compara con el mismo largo,
+// así "hasta 2024-03" incluye todo marzo.
 function inRange(date, from, to) {
   const d = String(date || "").slice(0, 10);
-  if (from && d && d < from) return false;
-  if (to && d && d > to.slice(0, 10)) return false;
+  if (!d) return true;
+  if (from && d.slice(0, from.length) < from) return false;
+  if (to && d.slice(0, to.slice(0, 10).length) > to.slice(0, 10)) return false;
   return true;
 }
 

@@ -31,6 +31,8 @@ test("buscar memorias: por palabras con raíz, acentos y fechas", () => {
   assert.equal(searchMemories(memories, { query: "prestamo" })[0].id, "m3", "sin acento también");
   const ranged = searchMemories(memories, { query: "trabajo", from: "2024-01-01" });
   assert.deepEqual(ranged.map((x) => x.id), ["m4"]);
+  assert.deepEqual(searchMemories(memories, { query: "deuda", to: "2024-01" }).map((x) => x.id), ["m3"], "hasta un mes incluye todo ese mes");
+  assert.deepEqual(searchMemories(memories, { query: "trabajo", from: "2024", to: "2024" }).map((x) => x.id), ["m4"], "límites por año");
   const noQuery = searchMemories(memories, { from: "2024-01-01" });
   assert.deepEqual(noQuery.map((x) => x.id), ["m4", "m3"], "sin consulta: las del rango, recientes primero");
   assert.deepEqual(searchMemories(memories, { query: "entrevista" }, neurons)[0].neurons, ["Lucas"]);

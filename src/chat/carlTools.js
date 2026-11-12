@@ -10,7 +10,7 @@ import { searchMemories, readMemory, searchNeurons, memoryTimeline } from "../me
 
 export const CARL_TOOL_LIMITS = { maxRounds: 4, maxCallsPerTurn: 8 };
 
-const dateProp = (desc) => ({ type: "string", description: `${desc} (AAAA-MM-DD). Opcional.` });
+const dateProp = (desc) => ({ type: "string", description: `${desc}: AAAA, AAAA-MM o AAAA-MM-DD. Opcional.` });
 
 export const CARL_TOOLS = [
   {
@@ -74,7 +74,7 @@ const clampInt = (v, lo, hi, def) => {
   const n = Number.parseInt(v, 10);
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
 };
-const dateOrEmpty = (v) => (/^\d{4}-\d{2}(-\d{2})?$/.test(String(v || "")) ? String(v) : "");
+const dateOrEmpty = (v) => (/^\d{4}(-\d{2}(-\d{2})?)?$/.test(String(v || "")) ? String(v) : "");
 
 /** Texto corto para mostrar al usuario qué buscó Carl. */
 export function describeToolCall(name, input = {}) {
