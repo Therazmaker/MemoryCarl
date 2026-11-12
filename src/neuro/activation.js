@@ -207,7 +207,7 @@ export async function activateNeurons(userInput, neurons, options = {}) {
   const relevanceOf = buildRelevanceScorer(activeNeurons);
   const contextText = (Array.isArray(options.history) ? options.history : [])
     .filter((m) => m?.role === "user").slice(-3).map((m) => m.content || "").join(" ");
-  const relevance = relevanceOf(userInput, { context: contextText });
+  const relevance = relevanceOf(userInput, { context: contextText, semantic: options.semanticSignals });
 
   const scored = [];
   for (const neuron of activeNeurons) {
@@ -241,7 +241,9 @@ export async function activateNeurons(userInput, neurons, options = {}) {
       components: {
         semantic: rel.relevance, keyword, weight, recency, emotion, temporalBoost, aliasMatch, manualBoost, neuronFeedbackBoost,
         lexical: rel.lexical, mention: rel.mention, fromContext: rel.context > rel.lexical,
-        reason: rel.mention ? "la mencionaste" : rel.context > rel.lexical ? "por lo que venían hablando" : "palabras en común",
+        reason: rel.mention ? "la mencionaste"
+          : (rel.semantic * 0.85 > rel.lexical && rel.semantic * 0.85 >= rel.context * 0.45) ? "por significado"
+          : rel.context > rel.lexical ? "por lo que venían hablando" : "palabras en común",
       },
     });
   }

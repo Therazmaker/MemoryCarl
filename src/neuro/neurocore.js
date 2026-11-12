@@ -5,6 +5,7 @@
 import { getAllNeurons, saveManyNeurons, updateNeuron } from "./neuronStore.js";
 import { sanitizeNeuron } from "./schemas.js";
 import { activateNeurons } from "./activation.js";
+import { semanticSignalsFor, ensureSemanticIndex } from "./semanticQuery.js";
 import { detectMissingConcepts, generateMissingNeurons, generateMissingNeuronsPremium } from "./generator.js";
 import { findRelatedNeurons, attachConnections } from "./connections.js";
 import { getEmbedding } from "./embeddings.js";
@@ -181,7 +182,14 @@ export async function processNeuroInput(userInput, options = {}) {
   addStep(trace, "activate_neurons");
   const t2 = Date.now();
   const activationMeta = {};
+  // Búsqueda por significado (si Voyage está configurado); sin ella sigue por palabras
+  // El promedio se calcula solo con las neuronas que pueden activarse (sin las quitadas)
+  const eligibleIds = new Set(allNeurons.filter((n) => !n.deleted && !n.feedbackStats?.removed).map((n) => n.id));
+  const semanticSignals = await semanticSignalsFor(userInput, { neuronIds: eligibleIds });
+  if (semanticSignals.size) addStep(trace, "semantic_signals", { count: semanticSignals.size });
+  ensureSemanticIndex(allNeurons); // en segundo plano: neuronas nuevas o cambiadas
   const activated = await activateNeurons(userInput, allNeurons, {
+    semanticSignals,
     topK: options.topK ?? 8,
     persistActivation: true,
     totalNeurons,
@@ -372,6 +380,7 @@ export async function processNeuroInput(userInput, options = {}) {
         persistActivation: false,
         totalNeurons: finalNeurons.length,
         history: options.history || [],
+        semanticSignals,
         bootstrapState: getBootstrapState(finalNeurons.length, options.bootstrapOptions),
         traceMeta: finalActivationMeta,
       })

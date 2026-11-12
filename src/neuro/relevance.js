@@ -114,8 +114,11 @@ export function buildRelevanceScorer(neurons = []) {
       let relevance = Math.max(lexical, context * 0.45);
       const keyHit = [...qTerms].some((t) => keyTerms.get(n.id)?.has(t));
       if (keyHit) relevance = Math.max(relevance, 0.45);
+      // Búsqueda por significado (Voyage), si hay: encuentra lo dicho con otras palabras
+      const semantic = opts.semantic?.get?.(n.id) || 0;
+      if (semantic) relevance = Math.max(relevance, 0.85 * semantic);
       if (mention) relevance = Math.max(relevance, 0.9);
-      if (relevance > 0) out.set(n.id, { relevance, lexical, mention, context, keyHit });
+      if (relevance > 0) out.set(n.id, { relevance, lexical, mention, context, keyHit, semantic });
     }
     return out;
   };
