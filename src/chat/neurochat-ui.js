@@ -1080,14 +1080,14 @@ function nchatInner() {
 
       <!-- Tabs -->
       <div class="ncTabs">
-        <button class="ncTab ${tabChat  ? "ncTab--active" : ""}" id="btnTabChat">💬 Chat</button>
-        <button class="ncTab ${tabNow   ? "ncTab--active" : ""}" id="btnTabNow">🧭 Ahora</button>
-        <button class="ncTab ${tabJournal ? "ncTab--active" : ""}" id="btnTabJournal">📓 Diario</button>
-        <button class="ncTab ${tabGraph ? "ncTab--active" : ""}" id="btnTabGraph">🕸️ Neuron Graph</button>
-        <button class="ncTab ${tabContext ? "ncTab--active" : ""}" id="btnTabContext">🗂️ Context Window</button>
-        <button class="ncTab ${tabMemories ? "ncTab--active" : ""}" id="btnTabMemories">🕰️ Memorias</button>
-        <button class="ncTab ${tabDays ? "ncTab--active" : ""}" id="btnTabDays">📅 Días</button>
-        <button class="ncTab ${tabCouch ? "ncTab--active" : ""}" id="btnTabCouch">🛋️ Couch</button>
+        <button class="ncTab ${tabChat  ? "ncTab--active" : ""}" id="btnTabChat"><span class="ncTabIcon">💬</span><span class="ncTabLong">Chat</span><span class="ncTabShort">Chat</span></button>
+        <button class="ncTab ${tabNow   ? "ncTab--active" : ""}" id="btnTabNow"><span class="ncTabIcon">🧭</span><span class="ncTabLong">Ahora</span><span class="ncTabShort">Ahora</span></button>
+        <button class="ncTab ${tabJournal ? "ncTab--active" : ""}" id="btnTabJournal"><span class="ncTabIcon">📓</span><span class="ncTabLong">Diario</span><span class="ncTabShort">Diario</span></button>
+        <button class="ncTab ${tabGraph ? "ncTab--active" : ""}" id="btnTabGraph"><span class="ncTabIcon">🕸️</span><span class="ncTabLong">Neuron Graph</span><span class="ncTabShort">Grafo</span></button>
+        <button class="ncTab ${tabContext ? "ncTab--active" : ""}" id="btnTabContext"><span class="ncTabIcon">🗂️</span><span class="ncTabLong">Context Window</span><span class="ncTabShort">Contexto</span></button>
+        <button class="ncTab ${tabMemories ? "ncTab--active" : ""}" id="btnTabMemories"><span class="ncTabIcon">🕰️</span><span class="ncTabLong">Memorias</span><span class="ncTabShort">Memorias</span></button>
+        <button class="ncTab ${tabDays ? "ncTab--active" : ""}" id="btnTabDays"><span class="ncTabIcon">📅</span><span class="ncTabLong">Días</span><span class="ncTabShort">Días</span></button>
+        <button class="ncTab ${tabCouch ? "ncTab--active" : ""}" id="btnTabCouch"><span class="ncTabIcon">🛋️</span><span class="ncTabLong">Couch</span><span class="ncTabShort">Couch</span></button>
       </div>
 
       <!-- Contenido del tab activo -->
@@ -3046,18 +3046,20 @@ function ncCss() {
 
   /* Tabs */
   .ncTabs {
-    display: flex; gap: 4px; margin: 10px 0 12px;
+    display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 12px;
     background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
     border-radius: 12px; padding: 4px;
   }
   .ncTab {
-    flex: 1; background: none; border: none; cursor: pointer;
+    flex: 1 1 auto; white-space: nowrap; background: none; border: none; cursor: pointer;
     color: inherit; font-size: 13px; font-weight: 600; padding: 7px 12px;
     border-radius: 9px; transition: background .12s;
     opacity: .55;
   }
   .ncTab:hover      { background: rgba(255,255,255,.08); opacity: .8; }
   .ncTab--active    { background: rgba(124,92,255,.25); color: #a78bfa; opacity: 1; }
+  .ncTabIcon { margin-right: 4px; }
+  .ncTabShort { display: none; }
   .ncMemoriesWrap {
     background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
     border-radius: 16px; padding: 12px;
@@ -3391,8 +3393,12 @@ function ncCss() {
     .ncHeader { padding: 10px 12px; }
     .ncHeaderTitle { font-size: 14px; }
     .ncHeaderSub { font-size: 10px; }
-    .ncTabs { gap: 2px; }
-    .ncTab { font-size: 12px; padding: 7px 8px; }
+    /* Celular: las 8 pestañas en 2 filas de 4, ícono arriba y nombre corto (todas visibles) */
+    .ncTabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
+    .ncTab { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; padding: 6px 2px; min-width: 0; }
+    .ncTabIcon { margin-right: 0; font-size: 17px; line-height: 1; }
+    .ncTabLong { display: none; }
+    .ncTabShort { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ncInputBar { flex-wrap: wrap; gap: 6px; }
     .ncModeSelect, .ncInterpretSelect { max-width: 100%; flex: 1 1 46%; min-width: 130px; }
     .ncInput { width: 100%; flex-basis: 100%; }
