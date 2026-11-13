@@ -219,9 +219,74 @@ function messageHtml(msg) {
   return `<div class="bkMsg bkMsgCarl">${msg.type === "analysis" && msg.text ? `<div class="bkBubble">${esc(msg.text)}</div>` : ""}${body}</div>`;
 }
 
+const DOW = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+const buyerLabel = (b) => (b === "fergis" ? "Fergis" : b === "yo" ? "Tú" : "¿Quién?");
+const entryTotal = (e) => Number(e?.totals?.total) || (e?.items || []).reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 1), 0);
+
+function purchaseEditor(e) {
+  return `
+    <div class="bkFormRow"><span>¿Quién compró?</span>
+      ${BUYERS.map((b) => `<label class="bkChip"><input type="radio" name="bkEdBuyer_${esc(e.id)}" value="${b.id}" ${e.buyer === b.id ? "checked" : ""}/> ${b.label}</label>`).join("")}
+    </div>
+    <div class="bkFormRow"><input class="bkInput" data-f="store" placeholder="Tienda" value="${esc(e.store || "")}"/><input class="bkInput" type="date" data-f="date" value="${esc(e.date || todayISO())}"/></div>
+    ${(e.items || []).map((it, i) => `
+      <div class="bkFormItem bkEdItem" data-idx="${i}">
+        <span class="bkFormName">${esc(it.name)}</span>
+        <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="qty" value="${esc(it.qty ?? 1)}" aria-label="Cantidad"/>
+        <span class="bkPriceCell"><input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="price" value="${esc(it.price ?? 0)}" aria-label="Precio"/><button class="bkX" data-bk-rmitem="${i}" title="Quitar">✕</button></span>
+      </div>`).join("")}
+    <div class="bkActions">
+      <button class="bkBtn" data-bk-edcancel>Cancelar</button>
+      <button class="bkBtn bkBtnPrimary" data-bk-edsave="${esc(e.id)}">Guardar cambios</button>
+    </div>`;
+}
+
+function renderPurchases(state, ui) {
+  const hist = [...(Array.isArray(state.shoppingHistory) ? state.shoppingHistory : [])]
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  const shown = hist.slice(0, ui.purchasesAll ? hist.length : 40);
+  if (!hist.length) return `<div class="bkEmpty">Todavía no hay compras guardadas. Cuando toques “Ya lo compré”, aparecen aquí.</div>`;
+  const noBuyer = hist.filter((e) => !e.buyer).length;
+  return `
+    <div class="bkHint">Estas son las compras de las que aprendo. Si alguna tiene un precio mal, está repetida o falta quién compró, corrígela aquí.</div>
+    ${noBuyer ? `<div class="bkHint">👤 ${noBuyer} compra${noBuyer === 1 ? "" : "s"} sin “quién compró”: puedes asignarlo editándolas.</div>` : ""}
+    ${shown.map((e) => {
+      const d = new Date(`${e.date}T12:00:00`);
+      const label = Number.isNaN(d.getTime()) ? esc(e.date || "sin fecha") : `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
+      const items = e.items || [];
+      return `
+        <div class="bkPurchase" data-pid="${esc(e.id)}">
+          <div class="bkPTop">
+            <div><b>${label}</b> · <span class="bkBuyerChip ${e.buyer ? "" : "bkBuyerNone"}">${buyerLabel(e.buyer)}</span>${e.store ? ` · ${esc(e.store)}` : ""}</div>
+            <b>${esc(soles(entryTotal(e)))}</b>
+          </div>
+          <div class="bkPItems">${items.slice(0, 6).map((it) => `${esc(it.name)}${Number(it.qty) && Number(it.qty) !== 1 ? ` ×${esc(it.qty)}` : ""}`).join(" · ")}${items.length > 6 ? ` · +${items.length - 6} más` : ""}</div>
+          <div class="bkActions">
+            <button class="bkBtn" data-bk-edit="${esc(e.id)}">✏️ Editar</button>
+            <button class="bkBtn" data-bk-del="${esc(e.id)}">🗑️ Borrar</button>
+          </div>
+          <div class="bkBuyForm" id="bkEd_${esc(e.id)}" hidden></div>
+        </div>`;
+    }).join("")}
+    ${hist.length > shown.length ? `<button class="bkBtn" data-bk-allpurch>Ver las ${hist.length}</button>` : ""}`;
+}
+
 export function renderBasket(state) {
   const L = learn(state);
   const chat = loadChat();
+  const ui = loadJson(UI_KEY, {});
+  if (ui.view === "purchases") {
+    return `
+    ${css()}
+    <div class="bkWrap">
+      <div class="bkHead">
+        <button class="bkBack" data-bk-back>←</button>
+        <div><div class="bkTitle">🧺 La Canasta</div><div class="bkSub">Compras guardadas</div></div>
+      </div>
+      <div class="bkTabs"><button class="bkTab" data-bk-view="chat">💬 Chat</button><button class="bkTab bkTabOn" data-bk-view="purchases">🧾 Compras guardadas (${(state.shoppingHistory || []).length})</button></div>
+      ${renderPurchases(state, ui)}
+    </div>`;
+  }
   const intro = !chat.length ? `
     <div class="bkMsg bkMsgCarl"><div class="bkBubble">Hola 👋 Pega aquí la lista de compras (la tuya o la que te pasa Fergis, como venga) y te digo qué hace falta, qué puede esperar y cuánto sale. Cuando compren, toca “Ya lo compré” y así aprendo cada cuánto compran cada cosa.</div></div>` : "";
   return `
@@ -231,6 +296,7 @@ export function renderBasket(state) {
         <button class="bkBack" data-bk-back>←</button>
         <div><div class="bkTitle">🧺 La Canasta</div><div class="bkSub">Pega la lista, yo aprendo cómo compran</div></div>
       </div>
+      <div class="bkTabs"><button class="bkTab bkTabOn" data-bk-view="chat">💬 Chat</button><button class="bkTab" data-bk-view="purchases">🧾 Compras guardadas (${(state.shoppingHistory || []).length})</button></div>
       ${renderDashboard(state, L, chat.length > 0)}
       <div class="bkLog" id="bkLog">${intro}${chat.map(messageHtml).join("")}<div class="bkTyping" id="bkTyping" hidden>Carl está pensando…</div></div>
       <div class="bkQuick">
@@ -308,6 +374,81 @@ export function wireBasket(root, ctx) {
   const update = (id, fn) => { const c = loadChat(); const m = c.find((x) => x.id === id); if (m) { fn(m); saveChat(c); } };
 
   root.querySelector("[data-bk-back]")?.addEventListener("click", () => { state.shoppingSubtab = "lists"; ctx.view(); });
+  root.querySelectorAll("[data-bk-view]").forEach((b) => b.addEventListener("click", () => {
+    const ui = loadJson(UI_KEY, {}); ui.view = b.dataset.bkView; saveJson(UI_KEY, ui); ctx.view();
+  }));
+  root.querySelector("[data-bk-allpurch]")?.addEventListener("click", () => {
+    const ui = loadJson(UI_KEY, {}); ui.purchasesAll = true; saveJson(UI_KEY, ui); ctx.view();
+  });
+  const findEntry = (id) => (state.shoppingHistory || []).find((e) => e.id === id);
+  root.querySelectorAll("[data-bk-del]").forEach((b) => b.addEventListener("click", () => {
+    const e = findEntry(b.dataset.bkDel);
+    if (!e) return;
+    const hasFin = typeof ctx.financeForPurchase === "function" && ctx.financeForPurchase(e.sourceListId);
+    if (!confirm(`¿Borrar la compra del ${e.date} (${soles(entryTotal(e))})?${hasFin ? "\n\nTambién se borrará su gasto en Finanzas." : ""}`)) return;
+    state.shoppingHistory = (state.shoppingHistory || []).filter((x) => x.id !== e.id);
+    if (hasFin) ctx.deleteFinanceForPurchase?.(e.sourceListId);
+    ctx.persist();
+    ctx.toast?.("Compra borrada");
+    ctx.view();
+  }));
+  root.querySelectorAll("[data-bk-edit]").forEach((b) => b.addEventListener("click", () => {
+    const e = findEntry(b.dataset.bkEdit);
+    const box = root.querySelector(`#bkEd_${CSS.escape(b.dataset.bkEdit)}`);
+    if (!e || !box) return;
+    const draft = JSON.parse(JSON.stringify(e));
+    const draw = () => {
+      box.innerHTML = purchaseEditor(draft);
+      box.hidden = false;
+      // Mantener lo escrito al quitar una fila
+      const readRows = () => box.querySelectorAll(".bkEdItem").forEach((row) => {
+        const it = draft.items[Number(row.dataset.idx)];
+        if (!it) return;
+        it.qty = Math.max(0.01, Number(row.querySelector('[data-f="qty"]').value) || 1);
+        it.price = Math.max(0, Number(row.querySelector('[data-f="price"]').value) || 0);
+      });
+      box.querySelectorAll("[data-bk-rmitem]").forEach((x) => x.addEventListener("click", () => {
+        readRows();
+        draft.buyer = box.querySelector(`input[name="bkEdBuyer_${CSS.escape(e.id)}"]:checked`)?.value || draft.buyer || "";
+        draft.store = box.querySelector('[data-f="store"]').value.trim();
+        draft.date = box.querySelector('[data-f="date"]').value || draft.date;
+        draft.items.splice(Number(x.dataset.bkRmitem), 1);
+        draw();
+      }));
+      box.querySelector("[data-bk-edcancel]")?.addEventListener("click", () => { box.hidden = true; box.innerHTML = ""; });
+      box.querySelector("[data-bk-edsave]")?.addEventListener("click", () => {
+        readRows();
+        if (!draft.items.length) { ctx.toast?.("Una compra sin productos: mejor bórrala."); return; }
+        const target = findEntry(e.id);
+        if (!target) return;
+        target.buyer = box.querySelector(`input[name="bkEdBuyer_${CSS.escape(e.id)}"]:checked`)?.value || "";
+        target.store = box.querySelector('[data-f="store"]').value.trim();
+        target.date = box.querySelector('[data-f="date"]').value || target.date;
+        // Si es la compra más reciente de un producto, el precio corregido pasa a la biblioteca
+        const before = new Map((target.items || []).map((it) => [it.id, Number(it.price) || 0]));
+        for (const it of draft.items) {
+          if (!it.productId || before.get(it.id) === it.price || !(it.price > 0)) continue;
+          const newer = (state.shoppingHistory || []).some((h) => h.id !== target.id && String(h.date) > String(target.date) && (h.items || []).some((x) => x.productId === it.productId));
+          const product = (state.products || []).find((p) => p.id === it.productId);
+          if (newer || !product || Math.abs(Number(product.price || 0) - it.price) < 0.01) continue;
+          product.history = Array.isArray(product.history) ? product.history : [];
+          product.history.push({ price: product.price, date: new Date().toISOString() });
+          product.price = it.price;
+        }
+        target.items = draft.items;
+        const total = Math.round(target.items.reduce((sum, it) => sum + it.price * it.qty, 0) * 100) / 100;
+        const byCategory = {};
+        for (const it of target.items) { const c = it.category || "Other"; byCategory[c] = Math.round(((byCategory[c] || 0) + it.price * it.qty) * 100) / 100; }
+        target.totals = { ...(target.totals || {}), total, itemsCount: target.items.length, byCategory };
+        ctx.updateFinanceForPurchase?.(target.sourceListId, { amount: total, dateISO: `${target.date}T12:00:00` });
+        ctx.persist();
+        ctx.toast?.("Compra actualizada");
+        ctx.view();
+      });
+    };
+    draw();
+  }));
+
   root.querySelector("#bkDash")?.addEventListener("toggle", (e) => { const ui = loadJson(UI_KEY, {}); ui.dashClosed = !e.target.open; saveJson(UI_KEY, ui); });
 
   // Detalle al tocar barras y filas de los gráficos
@@ -527,5 +668,17 @@ function css() {
   .bkTextarea { flex:1; resize:vertical; min-height:44px; max-height:220px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); color:inherit; border-radius:10px; padding:9px 10px; font-size:14px; font-family:inherit; }
   .bkSend { width:44px; height:44px; border-radius:12px; border:none; background:#7c5cff; color:#fff; font-size:18px; cursor:pointer; }
   .bkTyping { font-size:12px; opacity:.6; }
+  .bkTabs { display:flex; gap:6px; }
+  .bkTab { flex:1; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.1); background:rgba(255,255,255,.03); color:inherit; font-size:12.5px; font-weight:600; cursor:pointer; opacity:.7; }
+  .bkTabOn { background:rgba(124,92,255,.25); color:#c4b5fd; opacity:1; }
+  .bkHint { font-size:12px; opacity:.7; }
+  .bkPurchase { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px; }
+  .bkPTop { display:flex; justify-content:space-between; gap:8px; font-size:13px; }
+  .bkPItems { font-size:12px; opacity:.7; margin:4px 0 6px; line-height:1.4; }
+  .bkBuyerChip { font-size:11px; padding:1px 8px; border-radius:99px; background:rgba(124,92,255,.22); }
+  .bkBuyerNone { background:rgba(251,191,36,.15); color:#fde68a; }
+  .bkPriceCell { display:flex; gap:4px; align-items:center; }
+  .bkX { border:none; background:rgba(255,255,255,.06); color:inherit; border-radius:8px; width:28px; height:30px; cursor:pointer; flex:none; }
+  .bkFormItem.bkEdItem { grid-template-columns: 1fr 60px 112px; }
   </style>`;
 }

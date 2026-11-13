@@ -3959,6 +3959,22 @@ function view(){
   if(state.tab === "shopping" && state.shoppingSubtab === "basket"){
     wireBasket(root, {
       state, persist, view, toast, uid,
+      // Gasto en Finanzas ligado a una compra (para borrar o corregir junto con ella)
+      financeForPurchase: (sourceListId) => (state.financeLedger||[]).find(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId) || null,
+      deleteFinanceForPurchase: (sourceListId) => {
+        const mv = (state.financeLedger||[]).find(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId);
+        if(!mv || !window.FINANCE?.deleteMovement) return;
+        window.FINANCE.deleteMovement(mv.id);
+        financeRecomputeBalances();
+        if (window.financePushToSupabase) window.financePushToSupabase();
+      },
+      updateFinanceForPurchase: (sourceListId, { amount, dateISO }) => {
+        const mv = (state.financeLedger||[]).find(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId);
+        if(!mv || !window.FINANCE?.updateMovement) return;
+        window.FINANCE.updateMovement(mv.id, { amount: Number(amount||0), ...(dateISO ? { date: dateISO } : {}) });
+        financeRecomputeBalances();
+        if (window.financePushToSupabase) window.financePushToSupabase();
+      },
       recordFinance: (o) => {
         const accountId = state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "";
         if(accountId) financeEnsureShoppingExpense_({ ...o, accountId });
@@ -10428,7 +10444,7 @@ function viewShopping(){
       <button class="btn" data-act="openShoppingDashboard">📊 Dashboard</button>
       <button class="btn" data-act="openShoppingAi">🤖 Asistente</button>
       <button class="btn" data-act="openShoppingSchedule" style="color:#c084fc;border-color:rgba(192,132,252,0.4);">📅 Schedule</button>
-      <button class="btn" data-act="openShoppingHistory">📅 Historial</button>
+      <button class="btn" data-act="openShoppingHistory">📅 Días Chef AI</button>
       <div class="chip">hist: ${histCount}</div>
     </div>
 
