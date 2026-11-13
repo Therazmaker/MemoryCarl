@@ -469,7 +469,7 @@ export function viewDayDetail(day) {
     </div>` : "";
 
   const errorBanner = dayUiState.error ? `<div class="dcError">⚠️ ${esc(dayUiState.error)}</div>` : "";
-  const loadingBanner = dayUiState.loading ? `<div class="dcLoading">⏳ Procesando…</div>` : "";
+  const loadingBanner = dayUiState.loading ? `<div class="dcLoading">⏳ ${esc(dayUiState.loadingNote || "Procesando…")}</div>` : "";
 
   const canClose = day.status === "open";
   const canReopen = day.status === "closed";
@@ -617,6 +617,7 @@ export function wireDayDetail(root, rerenderCallback) {
     if (!day) return;
 
     dayUiState.loading = true;
+    dayUiState.loadingNote = "Gemini está leyendo el día…";
     dayUiState.error = null;
     rerenderCallback();
 
@@ -636,6 +637,12 @@ export function wireDayDetail(root, rerenderCallback) {
         currentThemes: day.dominantThemes,
         currentInsights: day.insights || [],
         date: day.date,
+      }, {
+        // Gemini a veces está saturado o tarda: reintenta solo y lo dice
+        onRetry: ({ attempt, maxAttempts }) => {
+          dayUiState.loadingNote = `Gemini no respondió bien, reintentando (${attempt}/${maxAttempts})…`;
+          rerenderCallback();
+        },
       });
 
       if (response) {
@@ -644,9 +651,10 @@ export function wireDayDetail(root, rerenderCallback) {
         dayUiState.error = "No se pudo refinar con Gemini. Verifica tu API key en Ajustes de NeuroChat.";
       }
     } catch (err) {
-      dayUiState.error = `Error al refinar: ${err?.message || "desconocido"}`;
+      dayUiState.error = `No se pudo refinar con Gemini: ${err?.message || "desconocido"}.`;
     } finally {
       dayUiState.loading = false;
+      dayUiState.loadingNote = "";
       rerenderCallback();
     }
   });

@@ -286,29 +286,55 @@ export async function requestGeminiPremiumNeuronGeneration(payload, onRetryProgr
   throw lastError || new Error("Fallaron todos los intentos con Gemini");
 }
 
+const DAY_REFINE_MIN_TIMEOUT = 90_000;   // un día entero + razonamiento tarda más de 20 s
+const DAY_REFINE_MIN_TOKENS  = 8192;     // el JSON completo no cabe en 4096 si el modelo además "piensa"
+const DAY_REFINE_ATTEMPTS    = 3;
+
+/** Recorta el día para el prompt: mensajes largos y campos que Gemini no necesita. */
+function compactDayPayload(payload = {}) {
+  const clip = (s, n) => { const t = String(s ?? ""); return t.length > n ? `${t.slice(0, n)}…` : t; };
+  const rawChat = (Array.isArray(payload.rawChat) ? payload.rawChat : [])
+    .map((m) => ({ role: m?.role, content: clip(m?.content ?? m?.text ?? "", 1200), ...(m?.ts || m?.timestamp ? { ts: m.ts || m.timestamp } : {}) }))
+    .filter((m) => m.content);
+  return { ...payload, rawChat: rawChat.slice(-150) };
+}
+
+/** Texto de la respuesta: une todas las partes (sin las de razonamiento). */
+function geminiResponseText(json) {
+  const parts = json?.candidates?.[0]?.content?.parts || [];
+  return parts.filter((p) => p && !p.thought && typeof p.text === "string").map((p) => p.text).join("").trim();
+}
+
+function friendlyDayRefineError(err) {
+  const m = String(err?.message || err || "");
+  if (/timeout/i.test(m)) return "Gemini tardó demasiado en responder";
+  if (/\b(429)\b/.test(m)) return "Gemini está limitando las peticiones (cuota por minuto)";
+  if (/\b(500|502|503|504)\b/.test(m)) return "Gemini está saturado en este momento";
+  if (/\b(400|401|403)\b/.test(m)) return `Gemini rechazó la petición: ${m.slice(0, 160)}`;
+  if (/MAX_TOKENS|cortada/i.test(m)) return "La respuesta de Gemini salió cortada";
+  return m || "error desconocido";
+}
+
 /**
  * Refina un día completo usando Gemini API (sin backend NeuroClaw).
+ * Reintenta solo (hasta 3 veces) cuando Gemini está saturado, tarda, limita la cuota
+ * o devuelve un JSON cortado: antes había que darle al botón varias veces.
  *
- * @param {{
- *   rawChat?: any[],
- *   memories?: any[],
- *   linkedNeurons?: any[],
- *   currentSummary?: string,
- *   currentEmotion?: string,
- *   currentThemes?: string[],
- *   currentInsights?: string[],
- *   date?: string,
- * }} payload
+ * @param {object} payload
+ * @param {{ settings?: object, fetchImpl?: Function, sleep?: Function, onRetry?: Function }} [deps]
  * @returns {Promise<object>}
  */
-export async function requestGeminiDayRefine(payload = {}) {
-  const settings = getGeminiPremiumSettings();
-  if (!isGeminiPremiumConfigured()) {
-    throw new Error("Gemini no configurado");
-  }
+export async function requestGeminiDayRefine(payload = {}, deps = {}) {
+  const settings = deps.settings || getGeminiPremiumSettings();
+  const configured = deps.settings
+    ? Boolean(settings.enabled !== false && settings.apiKey && String(settings.apiKey).trim().length > 8)
+    : isGeminiPremiumConfigured();
+  if (!configured) throw new Error("Gemini no configurado");
+  const doFetch = deps.fetchImpl || ((...a) => fetch(...a));
+  const sleep = deps.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
 
   const model = settings.model || "gemini-2.5-flash";
-  const timeout = settings.timeoutMs || 20000;
+  const timeout = Math.max(Number(settings.timeoutMs) || 0, DAY_REFINE_MIN_TIMEOUT);
   const url = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent?key=${settings.apiKey}`;
 
   const prompt = `You are an advanced cognitive refinement engine. Your task is to analyze a full day of a user's experiences and improve the system's understanding of that day. You are NOT a chatbot. You are a system optimizer.
@@ -340,61 +366,75 @@ OUTPUT FORMAT (STRICT JSON — return ONLY JSON, no markdown, no extra text):
 CRITICAL RULES: NO generic outputs. NO repetition. NO hallucinated facts. DO NOT fabricate events not present in input.
 
 INPUT DATA:
-${JSON.stringify(payload, null, 2)}
+${JSON.stringify(compactDayPayload(payload))}
 `;
 
-  const body = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: settings.temperature ?? 0.4,
-      maxOutputTokens: settings.maxOutputTokens ?? 4096,
-    },
+  const generationConfig = {
+    temperature: settings.temperature ?? 0.4,
+    maxOutputTokens: Math.max(Number(settings.maxOutputTokens) || 0, DAY_REFINE_MIN_TOKENS),
+    responseMimeType: "application/json",
   };
+  // En 2.5 el razonamiento gasta del mismo presupuesto de salida: se limita para que quepa el JSON
+  if (/gemini-2\.5/i.test(model)) generationConfig.thinkingConfig = { thinkingBudget: /pro/i.test(model) ? 2048 : 1024 };
+  const body = JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig });
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  let response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timer);
-    if (err.name === "AbortError") throw new Error("Gemini day refine timeout");
-    throw new Error(`Error de red: ${err.message}`);
-  } finally {
-    clearTimeout(timer);
+  let lastError = null;
+  for (let attempt = 1; attempt <= DAY_REFINE_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      try { deps.onRetry?.({ attempt, maxAttempts: DAY_REFINE_ATTEMPTS, error: lastError }); } catch (_e) {}
+      const is429 = /\b429\b/.test(String(lastError?.message));
+      await sleep(is429 ? 8000 * (attempt - 1) : 1500 * 2 ** (attempt - 2));
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    let response;
+    try {
+      response = await doFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body, signal: controller.signal });
+    } catch (err) {
+      lastError = new Error(err?.name === "AbortError" ? "Gemini day refine timeout" : `Error de red: ${err?.message}`);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!response.ok) {
+      const txt = await response.text().catch(() => "");
+      lastError = new Error(`Gemini day refine error ${response.status}: ${txt.slice(0, 200)}`);
+      // 400/401/403/404: la clave o el modelo están mal, reintentar no sirve
+      if ([400, 401, 403, 404].includes(response.status)) break;
+      continue;
+    }
+
+    let json;
+    try { json = await response.json(); } catch (e) { lastError = new Error(`Gemini devolvió algo que no es JSON: ${e.message}`); continue; }
+    const finish = json?.candidates?.[0]?.finishReason;
+    let text = geminiResponseText(json);
+    if (!text) {
+      const block = json?.promptFeedback?.blockReason;
+      lastError = new Error(block ? `Gemini bloqueó el contenido (${block})` : `Gemini day refine: sin contenido en respuesta${finish ? ` (${finish})` : ""}`);
+      if (block) break;
+      continue;
+    }
+    text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) text = jsonMatch[0];
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      lastError = new Error(finish === "MAX_TOKENS" ? "Gemini day refine: respuesta cortada (MAX_TOKENS)" : `Gemini day refine JSON inválido: ${e.message}`);
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      lastError = new Error("Gemini day refine: estructura inválida");
+      continue;
+    }
+    return parsed;
   }
-
-  if (!response.ok) {
-    const txt = await response.text().catch(() => "");
-    throw new Error(`Gemini day refine error ${response.status}: ${txt.slice(0, 200)}`);
-  }
-
-  const json = await response.json();
-  const rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText) throw new Error("Gemini day refine: sin contenido en respuesta");
-
-  let text = rawText.trim();
-  text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (jsonMatch) text = jsonMatch[0];
-
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    throw new Error(`Gemini day refine JSON inválido: ${e.message}`);
-  }
-
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Gemini day refine: estructura inválida");
-  }
-
-  return parsed;
+  const err = new Error(friendlyDayRefineError(lastError));
+  err.cause = lastError;
+  throw err;
 }
 
 /**
