@@ -91,6 +91,7 @@ import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO, ge
 import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles, updateMealBundle, deleteMealBundle, saveMealBundles } from "./shopping/mealBundles.js";
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
+import { renderBasket, wireBasket } from "./shopping/basket-ui.js";
 import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
 import {
   MEAL_SLOTS,
@@ -3951,6 +3952,17 @@ function view(){
           persist(); view();
         }
       });
+    });
+  }
+
+  // La Canasta: chat de compras que aprende
+  if(state.tab === "shopping" && state.shoppingSubtab === "basket"){
+    wireBasket(root, {
+      state, persist, view, toast, uid,
+      recordFinance: (o) => {
+        const accountId = state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "";
+        if(accountId) financeEnsureShoppingExpense_({ ...o, accountId });
+      },
     });
   }
 
@@ -10391,6 +10403,10 @@ function viewShopping(){
     return viewShoppingAssistant();
   }
 
+  if(sub === "basket"){
+    return renderBasket(state);
+  }
+
   if(sub === "schedule"){
     return viewMealSchedule();
   }
@@ -10406,6 +10422,7 @@ function viewShopping(){
     </div>
 
     <div class="row" style="margin-bottom:12px;">
+      <button class="btn" data-act="openShoppingBasket" style="background:#7c5cff;border-color:#7c5cff;color:#fff;font-weight:700;">🧺 La Canasta</button>
       <button class="btn" onclick="openProductLibrary()">📦 Biblioteca</button>
       <button class="btn" data-act="openInventory">🏠 Inventario</button>
       <button class="btn" data-act="openShoppingDashboard">📊 Dashboard</button>
@@ -12982,6 +12999,11 @@ if(act==="invMode"){
 
       if(act==="openShoppingDashboard"){
         state.shoppingSubtab = "dashboard";
+        view();
+        return;
+      }
+      if(act==="openShoppingBasket"){
+        state.shoppingSubtab = "basket";
         view();
         return;
       }
