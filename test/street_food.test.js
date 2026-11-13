@@ -100,3 +100,8 @@ test("gasto: personas y monto", () => {
   assert.equal(parseSpendIntent("vamos a cenar chifa para 4 personas, sale 80").amount, 80);
   assert.equal(parseSpendIntent("me alcanza para una pizza 45?").amount, 45);
 });
+
+test("gasto: 'para 4' es gente, y '2 pollos a 30' es cantidad × precio", () => {
+  assert.equal(parseSpendIntent("vamos a cenar chifa para 4, sale 80").amount, 80);
+  assert.equal(parseSpendIntent("quiero pedir 2 pollos a 30").amount, 60);
+});
