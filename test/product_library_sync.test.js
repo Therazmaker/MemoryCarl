@@ -57,3 +57,25 @@ test("reconstruir: productos con último precio, unidad kg y categoría desde la
   const leche = r.products.find((p) => p.name === "Leche");
   assert.equal(leche.price, 4.5); assert.equal(leche.history.length, 1); assert.equal(leche.category, "Lácteos");
 });
+
+import { stampChangedProducts } from "../src/shopping/productLibrarySync.js";
+
+test("biblioteca: un historial que solo llega de la nube cuenta como actualización", () => {
+  const local = [{ id: "a", name: "Arroz", price: 20, history: [{ price: 19, date: "2026-01-05" }] }];
+  const cloud = [{ id: "a", name: "Arroz", price: 20, history: [{ price: 17, date: "2025-11-01" }] }];
+  const r = mergeProducts(local, cloud);
+  assert.equal(r.updated, 1);
+  assert.equal(r.products[0].history.length, 2);
+});
+
+test("biblioteca: editar categoría o unidad marca el producto y gana en otro dispositivo", () => {
+  const prev = new Map();
+  const prods = [{ id: "a", name: "Arroz", price: 20, category: "" }];
+  assert.equal(stampChangedProducts(prods, prev, "2026-01-01T00:00:00Z"), 0, "la primera vez solo toma huellas");
+  prods[0].category = "Despensa";
+  assert.equal(stampChangedProducts(prods, prev, "2026-01-02T00:00:00Z"), 1);
+  assert.equal(prods[0].updatedAt, "2026-01-02T00:00:00Z");
+  assert.equal(stampChangedProducts(prods, prev, "2026-01-03T00:00:00Z"), 0, "sin cambios no se vuelve a marcar");
+  const other = [{ id: "a", name: "Arroz", price: 20, category: "" }];
+  assert.equal(mergeProducts(other, prods).products[0].category, "Despensa");
+});

@@ -92,7 +92,7 @@ import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealB
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
 import { renderBasket, wireBasket } from "./shopping/basket-ui.js";
-import { mergeProducts, rebuildFromPurchases } from "./shopping/productLibrarySync.js";
+import { mergeProducts, rebuildFromPurchases, stampChangedProducts } from "./shopping/productLibrarySync.js";
 import { STREET_CATEGORY, streetNote } from "./finance/streetFood.js";
 import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
 import {
@@ -13878,7 +13878,11 @@ state.shoppingSubtab = state.shoppingSubtab || "lists";
 state.shoppingDashPreset = state.shoppingDashPreset || "7d";
 
 const _persistBase = persist;
+const _productStamps = new Map();
+try { stampChangedProducts(state.products, _productStamps); } catch (_e) {} // huellas iniciales
 persist = function(){
+  // Cada producto editado queda con su fecha, así la edición más reciente gana en otros dispositivos
+  try { stampChangedProducts(state.products, _productStamps); } catch (_e) {}
   _persistBase();
   save(LS.products, state.products);
   save(LS.shoppingHistory, state.shoppingHistory);

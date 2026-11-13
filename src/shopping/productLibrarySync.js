@@ -40,13 +40,37 @@ export function mergeProducts(local = [], cloud = []) {
     const seen = new Set();
     const mergedHist = hist.filter((h) => { const k = `${h?.date}|${h?.price}`; if (seen.has(k)) return false; seen.add(k); return true; })
       .sort((a, b) => String(a?.date || "").localeCompare(String(b?.date || "")));
+    let touched = false;
     if (stamp(c) > stamp(mine)) {
       Object.assign(mine, { ...c, id: mine.id || c.id });
-      updated++;
+      touched = true;
     }
-    if (mergedHist.length !== (mine.history || []).length) mine.history = mergedHist;
+    if (mergedHist.length !== (mine.history || []).length) { mine.history = mergedHist; touched = true; }
+    if (touched) updated++;
   }
   return { products: out, added, updated };
+}
+
+/**
+ * Marca con updatedAt los productos que cambiaron desde la última vez (cualquier campo:
+ * precio, categoría, unidad…), para que la edición más reciente gane en otros dispositivos.
+ * `prev` es un Map id → huella; se actualiza. La primera vez solo toma las huellas.
+ * @returns {number} cuántos productos se marcaron
+ */
+export function stampChangedProducts(products = [], prev = new Map(), now = new Date().toISOString()) {
+  let n = 0;
+  const first = prev.size === 0;
+  for (const p of Array.isArray(products) ? products : []) {
+    if (!p || !p.id) continue;
+    const { updatedAt: _u, ...rest } = p;
+    let h;
+    try { h = JSON.stringify(rest); } catch (_e) { continue; }
+    const before = prev.get(String(p.id));
+    if (!first && before !== undefined && before !== h) { p.updatedAt = now; n++; }
+    else if (!first && before === undefined && !p.updatedAt) { p.updatedAt = now; n++; }
+    prev.set(String(p.id), h);
+  }
+  return n;
 }
 
 /** Une listas de registros por id (historial de compras, listas): agrega los que falten. */
