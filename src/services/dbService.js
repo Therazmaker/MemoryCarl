@@ -27,6 +27,7 @@ import { loadLifeFacts, LIFE_FACTS_KEY } from "../chat/lifeFacts.js";
 import { loadOpenThreads, OPEN_THREADS_KEY } from "../chat/openThreads.js";
 import { loadTombstones, saveTombstones, mergeTombstones } from "../neuro/neuronTombstones.js";
 import { mergeLifeLists } from "../chat/lifeChanges.js";
+import { mergeProducts, mergeById, libraryPayload } from "../shopping/productLibrarySync.js";
 import { getFullChatHistory } from "../chat/neurochat.js";
 import {
   addMissingById,
@@ -572,6 +573,9 @@ function fastHash(item) {
     // sin cambiar longitudes ni tipos: se usa un hash del contenido completo
     if (item.id === "finance_extras") return `fx:${contentHash(p)}`;
     if (item.id === "neuron_tombstones") return `nt:${contentHash(p)}`;
+    // Biblioteca y compras: cualquier cambio de precio o de producto cuenta (no solo cuántos hay)
+    if (item.id === "product_library") return `pl:${contentHash(p?.products)}`;
+    if (item.id === "shopping") return `sh:${contentHash(p)}`;
     if (Array.isArray(p)) return `arr:${p.length}:${p[p.length - 1]?.id || p[p.length - 1]?.updatedAt || ""}`;
     if (p && typeof p === "object") {
       const keys = Object.keys(p);
@@ -620,6 +624,8 @@ function diffTableListInMemory(table, list, getKey, conflictColumn = "id") {
   }
 
   for (const oldKey of Object.keys(prevMap)) {
+    // Los módulos de la app no se borran de la nube porque falten aquí (p. ej. biblioteca vacía)
+    if (table === "app_modules") { nextMap[oldKey] = prevMap[oldKey]; continue; }
     if (!(oldKey in nextMap)) {
       enqueueOperation(table, oldKey, "d", null, conflictColumn, false);
       changes++;
@@ -656,7 +662,16 @@ function getAppModulesList() {
     { id: "routines", payload: st.routines },
     { id: "semana", payload: st.semana },
     { id: "house", payload: st.house },
-    { id: "shopping", payload: { shopping: st.shopping, products: st.products, shoppingHistory: st.shoppingHistory } },
+    // Si el teléfono no tiene nada de compras (instalación nueva, datos borrados) no se sube:
+    // así no pisa la copia buena de la nube antes de recuperarla
+    {
+      id: "shopping",
+      payload: (st.products?.length || st.shoppingHistory?.length || st.shopping?.length)
+        ? { shopping: st.shopping, products: st.products, shoppingHistory: st.shoppingHistory }
+        : undefined,
+    },
+    // La biblioteca de productos aparte, y nunca vacía
+    { id: "product_library", payload: libraryPayload(st.products) || undefined },
     { id: "inventory", payload: { inventory: st.inventory, inventoryLots: st.inventoryLots } },
     { id: "reminders", payload: { reminders: st.reminders, lifeTasks: st.lifeTasks, lifeTasksLog: st.lifeTasksLog } },
     { id: "home_widgets", payload: { musicToday: st.musicToday, musicLog: st.musicLog, budgetMonthly: st.budgetMonthly, calDraw: st.calDraw, moodSpritesCustom: st.moodSpritesCustom, moodActivityCats: st.moodActivityCats } },
@@ -1531,6 +1546,32 @@ export async function pullFromSupabase({ isManual = false } = {}) {
             }
           }
           break;
+        case "shopping":
+        case "product_library": {
+          // La biblioteca, el historial de compras y las listas se UNEN con lo local (nunca se vacían)
+          if (Array.isArray(p.products) && p.products.length) {
+            const r = mergeProducts(st.products || [], p.products);
+            if (r.added || r.updated) {
+              st.products = r.products;
+              localStorage.setItem("memorycarl_v2_products", JSON.stringify(r.products));
+              added.products = (added.products || 0) + r.added;
+              changed = true;
+            }
+          }
+          if (Array.isArray(p.shoppingHistory) && p.shoppingHistory.length) {
+            const r = mergeById(st.shoppingHistory || [], p.shoppingHistory);
+            if (r.added) {
+              st.shoppingHistory = r.list;
+              localStorage.setItem("memorycarl_v2_shopping_history", JSON.stringify(r.list));
+              changed = true;
+            }
+          }
+          if (Array.isArray(p.shopping) && p.shopping.length && (!Array.isArray(st.shopping) || st.shopping.length === 0)) {
+            st.shopping = p.shopping;
+            changed = true;
+          }
+          break;
+        }
         case "neuron_tombstones": {
           // Neuronas borradas o fusionadas directamente en Supabase: se quitan también aquí
           const localNeurons = readLocalArray("memorycarl_neurochat_neurons");
@@ -1907,6 +1948,7 @@ export function initDbService() {
     scheduleSync,
     getOfflineQueueCount,
     captureLocalChangesToQueue,
+    enqueueOperation,
   };
 
   window.addEventListener("online", () => {

@@ -92,6 +92,7 @@ import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealB
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
 import { renderBasket, wireBasket } from "./shopping/basket-ui.js";
+import { mergeProducts, rebuildFromPurchases, stampChangedProducts } from "./shopping/productLibrarySync.js";
 import { STREET_CATEGORY, streetNote } from "./finance/streetFood.js";
 import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
 import {
@@ -3995,6 +3996,9 @@ function view(){
         if (window.financePushToSupabase) window.financePushToSupabase();
         return true;
       },
+      // Pagos de Mission Control desde La Canasta (siempre en el mes actual)
+      openPay: (itemId) => { state.financeMissionMonthKey = getCurrentMonthKey(); openMcPayModal(itemId); },
+      addPayment: () => { state.financeMissionMonthKey = getCurrentMonthKey(); openMcUnexpectedModal(); },
       recordFinance: (o) => {
         const valid = (id) => id && (state.financeAccounts||[]).some(a => a && a.id === id && !a.archived);
         const accountId = valid(o?.accountId) ? o.accountId : (state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "");
@@ -13874,7 +13878,11 @@ state.shoppingSubtab = state.shoppingSubtab || "lists";
 state.shoppingDashPreset = state.shoppingDashPreset || "7d";
 
 const _persistBase = persist;
+const _productStamps = new Map();
+try { stampChangedProducts(state.products, _productStamps); } catch (_e) {} // huellas iniciales
 persist = function(){
+  // Cada producto editado queda con su fecha, así la edición más reciente gana en otros dispositivos
+  try { stampChangedProducts(state.products, _productStamps); } catch (_e) {}
   _persistBase();
   save(LS.products, state.products);
   save(LS.shoppingHistory, state.shoppingHistory);
@@ -14410,6 +14418,12 @@ function openProductLibrary(){
           </div>
           <button class="libNewBtn" id="libNewBtn">＋ Nuevo</button>
         </div>
+        <div class="libCloudRow" style="display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 10px 14px;">
+          <button class="btn ghost" id="libCloudUp" style="font-size:12px;padding:6px 10px;">☁️ Guardar en la nube</button>
+          <button class="btn ghost" id="libCloudDown" style="font-size:12px;padding:6px 10px;">⬇️ Traer de la nube</button>
+          <button class="btn ghost" id="libRebuild" style="font-size:12px;padding:6px 10px;">🧩 Reconstruir con mis compras</button>
+          <div class="small muted" id="libCloudMsg" style="width:100%;font-size:11px;">${(()=>{ try{ const v = JSON.parse(localStorage.getItem("memorycarl_library_cloud_v1")||"null"); return v && v.at ? `Última copia en la nube: ${v.count} productos · ${new Date(v.at).toLocaleString("es-PE",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}` : "La biblioteca se guarda sola en la nube cuando cambia (nunca se sube vacía)."; }catch(_e){ return ""; } })()}</div>
+        </div>
 
         <div class="slCatRow" id="libCatRow">
           <button class="slCat slCatActive" data-libcat="">Todo <span class="slCatCount">${(state.products||[]).length}</span></button>
@@ -14491,6 +14505,54 @@ function openProductLibrary(){
 
   sheet.querySelector("#libClose").addEventListener("click", ()=> sheet.remove());
   sheet.querySelector("#libNewBtn").addEventListener("click", ()=>{ openNewProduct(); });
+  // ---- Biblioteca en Supabase: guardar, traer (se une, no reemplaza) y reconstruir ----
+  const cloudMsg = sheet.querySelector("#libCloudMsg");
+  const reopenLib = () => { try{ sheet.remove(); }catch(_e){} openProductLibrary(); };
+  sheet.querySelector("#libCloudUp")?.addEventListener("click", async ()=>{
+    const n = (state.products||[]).length;
+    if(!n){ toast("La biblioteca está vacía: no la subo para no pisar la copia de la nube."); return; }
+    const db = window.dbService;
+    if(!db){ toast("La sincronización no está lista todavía."); return; }
+    if(cloudMsg) cloudMsg.textContent = "Subiendo…";
+    try{
+      // Se fuerza la subida de la biblioteca aunque no haya cambiado
+      try{ db.enqueueOperation?.("app_modules", "product_library", "u", null, "id", true); }catch(_e){}
+      const r = await db.flushOfflineQueue({ isManual: true });
+      if(r && r.ok === false) throw new Error(r.error || r.message || "no se pudo subir");
+      localStorage.setItem("memorycarl_library_cloud_v1", JSON.stringify({ count: n, at: Date.now() }));
+      if(cloudMsg) cloudMsg.textContent = `✅ ${n} productos guardados en la nube.`;
+      toast(`☁️ Biblioteca guardada (${n} productos)`);
+    }catch(err){
+      const why = String(err?.message||err||"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,120);
+      if(cloudMsg) cloudMsg.textContent = `No se pudo subir: ${why || "sin conexión con la nube"}. Revisa Ajustes → Sincronización con Supabase.`;
+    }
+  });
+  sheet.querySelector("#libCloudDown")?.addEventListener("click", async ()=>{
+    const db = window.dbService;
+    if(!db){ toast("La sincronización no está lista todavía."); return; }
+    if(cloudMsg) cloudMsg.textContent = "Buscando en la nube…";
+    const before = (state.products||[]).length;
+    try{
+      const r = await db.pullFromSupabase({ isManual: true });
+      if(!r || r.ok === false) throw new Error(r?.error || r?.message || "no se pudo leer la nube");
+      const after = (state.products||[]).length;
+      if(after > before){ toast(`⬇️ Recuperé ${after - before} productos de la nube`); reopenLib(); }
+      else if(cloudMsg) cloudMsg.textContent = after ? "La nube no tenía productos que te falten." : "La nube tampoco tiene productos guardados. Prueba “Reconstruir con mis compras”.";
+    }catch(err){
+      const why = String(err?.message||err||"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,120);
+      if(cloudMsg) cloudMsg.textContent = `No se pudo traer: ${why || "sin conexión con la nube"}.`;
+    }
+  });
+  sheet.querySelector("#libRebuild")?.addEventListener("click", ()=>{
+    const r = rebuildFromPurchases({ history: state.shoppingHistory||[], lists: state.shopping||[], existing: state.products||[], uid: ()=>uid("p") });
+    if(!r.added){ toast("No encontré productos nuevos en tus compras ni listas."); return; }
+    const sample = r.products.slice(0, 8).map(p=>`• ${p.name}${p.price?` — S/ ${p.price.toFixed(2)}${p.unit==="kg"?"/kg":""}`:""}`).join("\n");
+    if(!confirm(`Encontré ${r.added} productos en tus compras y listas:\n${sample}${r.added>8?"\n…":""}\n\n¿Los agrego a la biblioteca? (los que ya tienes no se tocan)`)) return;
+    state.products = mergeProducts(state.products||[], r.products.map(p=>enrichProductData(p))).products;
+    persist();
+    toast(`🧩 ${r.added} productos recuperados`);
+    reopenLib();
+  });
 
   // Crear nuevo Meal Bundle manual
   sheet.querySelector("#btnNewMealBundle")?.addEventListener("click", () => {
