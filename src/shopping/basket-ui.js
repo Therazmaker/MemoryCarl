@@ -13,7 +13,7 @@ import { parseListText, learnRhythm, weeklyMinimum, analyzeList, weeklySpend, ca
 import { enrichProductData } from "./productIntelligence.js";
 import { callClaude } from "./shoppingAi.js";
 import { getClaudeSettings } from "../services/claudeClient.js";
-import { MEAL_TYPES, mealLabel, mealEmoji, guessMealType, runway, impact, streetPatterns, streetEntries } from "../finance/streetFood.js";
+import { MEAL_TYPES, mealLabel, mealEmoji, guessMealType, runway, impact, streetPatterns, streetEntries, parseSpendIntent } from "../finance/streetFood.js";
 import { looksLikeRoutine, parseRoutineText, routinesOf, daysLabel, WEEKDAYS, ALL_DAYS } from "../finance/routines.js";
 
 const SKIPS_KEY = "memorycarl_street_skips_v1";
@@ -486,10 +486,17 @@ function contextForClaude(L, chat) {
   const weeks = weeklySpend(L.history, { weeks: 8 }).map((w) => `${w.start}: ${soles(w.total)}`).join(", ");
   const last = [...chat].reverse().find((m) => m.type === "analysis");
   const list = last ? last.data.items.map((it) => `${it.name} ×${it.qty} ${soles(it.price * it.qty)} [${it.group}]`).join("; ") : "";
-  return `Ritmo de compra aprendido (de su historial):\n${rhythm || "sin datos"}\n\nMínimo semanal estimado: ${soles(L.minimum.total)} (${L.minimum.confidence})\nGasto en compras por semana: ${weeks}\n${list ? `Última lista analizada: ${list}` : ""}`;
+  const rw = moneyNow(L);
+  const fmtD = (d) => d.toISOString().slice(0, 10);
+  const money = rw
+    ? `Dinero (de Finanzas, dato real): caja disponible ${soles(rw.cash)}; próximo cobro ${rw.payday.label} (${fmtD(rw.payday.date)}, faltan ${rw.payday.daysLeft} días); pagos pendientes antes del cobro ${soles(rw.pending)}${rw.dueItems.length ? ` (${rw.dueItems.slice(0, 6).map((i) => `${i.name} ${soles(i.amount)}`).join(", ")})` : ""}; libre ${soles(rw.free)} (${soles(rw.perDay)}/día); comida de casa hasta el cobro ${soles(rw.homeFoodNeed)}; rutinas apartadas ${soles(rw.routine.total)}; extra después de todo ${soles(rw.extra)}.`
+    : "Dinero: Finanzas no tiene cuentas cargadas; si el usuario dice cuánto tiene y cuándo cobra, usa eso.";
+  const routines = routinesOf(ENV.state?.products || []).map((r) => `${r.name} ${soles(r.price)} × ${r.qty} (${daysLabel(r.days)})`).join("; ");
+  const sp = streetPatterns(streetEntries(ENV.state?.financeLedger || []), { skipped: loadSkips() });
+  return `${money}\n${routines ? `Rutinas protegidas (no se cuestionan): ${routines}\n` : ""}Comida en la calle: esta semana ${soles(sp.weekTotal)} (lo normal ${soles(sp.typicalTotal)}/semana), este mes ${soles(sp.month)}.\n\nRitmo de compra aprendido (de su historial):\n${rhythm || "sin datos"}\n\nMínimo semanal estimado: ${soles(L.minimum.total)} (${L.minimum.confidence})\nGasto en compras por semana: ${weeks}\n${list ? `Última lista analizada: ${list}` : ""}`;
 }
 
-const SYSTEM = `Eres Carl dentro de "La Canasta", el chat de compras de una familia en Perú (compran él y su pareja, Fergis; moneda soles). El objetivo no es prohibir, es que el dinero alcance hasta el próximo cobro: ayudas a decidir qué comprar ahora, qué puede esperar, cantidades justas y sustitutos más baratos, usando SOLO los datos de abajo (no inventes precios). Responde en español, corto y concreto (máximo 6 líneas o una lista breve), sin sermones.`;
+const SYSTEM = `Eres Carl dentro de "La Canasta", el chat de compras de una familia en Perú (compran él y su pareja, Fergis; moneda soles). El objetivo no es prohibir, es que el dinero alcance hasta el próximo cobro: ayudas a decidir qué comprar ahora, qué puede esperar, cantidades justas y sustitutos más baratos, usando SOLO los datos de abajo (no inventes precios). El dinero disponible, el próximo cobro y los pagos pendientes ya están abajo: no preguntes por ellos, úsalos (si el usuario da otra cifra, usa la suya). Las rutinas protegidas no se cuestionan. Para un gasto concreto di claro si alcanza o no y cómo queda el resto hasta el cobro. Responde en español, corto y concreto (máximo 6 líneas o una lista breve), sin sermones ni preguntas innecesarias.`;
 
 async function askClaude(text, L, chat) {
   const s = getClaudeSettings();
@@ -649,6 +656,14 @@ export function wireBasket(root, ctx) {
       rerender();
       return;
     }
+    // "Voy a comprar almuerzo… cuesta 12.10 más una Pepsi a 2.90" → ¿Me alcanza? con el total
+    const spend = parseSpendIntent(t, new Date());
+    const futureIntent = /\b(voy a|vamos a|quiero|queremos|me provoca|nos provoca|pienso|puedo|podemos|estoy por|me alcanza|nos alcanza)\b/.test(lower);
+    if (spend && (futureIntent || !looksLikeRoutine(t))) {
+      push({ role: "carl", type: "check", data: { amount: spend.amount, desc: spend.desc, mealType: spend.mealType, who: "yo", decided: null } });
+      rerender();
+      return;
+    }
     if (looksLikeRoutine(t)) {
       const items = parseRoutineText(t);
       if (items.length) {
@@ -674,7 +689,8 @@ export function wireBasket(root, ctx) {
       rerender();
       return;
     }
-    if (/qu[eé] (toca|falta|hay que comprar)/.test(lower)) { push({ role: "carl", type: "text", text: dueText(L) }); rerender(); return; }
+    // Solo la pregunta ("¿qué toca?", "qué falta comprar"), no frases como "así que faltan 15 días"
+    if (/^\s*¿?\s*(y\s+)?qu[eé] (nos |me |les )?(toca|falta|hace falta|hay que comprar)\b/.test(lower)) { push({ role: "carl", type: "text", text: dueText(L) }); rerender(); return; }
     if (/m[ií]nimo/.test(lower)) { push({ role: "carl", type: "text", text: minimumText(L) }); rerender(); return; }
     rerender();
     const typing = document.getElementById("bkTyping");

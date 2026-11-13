@@ -81,3 +81,22 @@ test("rutinas: se leen de una frase y se apartan hasta el cobro", () => {
   // un gasto que se come la rutina queda en "no"
   assert.equal(impact(rw, 270).status, "no");
 });
+
+import { parseSpendIntent } from "../src/finance/streetFood.js";
+
+test("gasto: 'voy a comprar almuerzo… cuesta 12.10 más una Pepsi 750ml a 2.90' suma 15 y no cuenta los ml", () => {
+  const r = parseSpendIntent("Voy a comprar almuerzo para mi solo en la calle. Cuesta 12.10 más una Pepsi 750ml a 2.90", new Date(2026, 0, 5, 13));
+  assert.equal(r.amount, 15);
+  assert.equal(r.mealType, "almuerzo");
+});
+
+test("gasto: frases que no son un gasto de comida no se toman", () => {
+  assert.equal(parseSpendIntent("Hoy pagaron así que faltan 15 para el próximo pago. Quedan 1250"), null);
+  assert.equal(parseSpendIntent("2 kg arroz"), null);
+  assert.equal(parseSpendIntent("Mis bebidas del trabajo: Volt 2.50 y café 3 de lunes a viernes"), null);
+});
+
+test("gasto: personas y monto", () => {
+  assert.equal(parseSpendIntent("vamos a cenar chifa para 4 personas, sale 80").amount, 80);
+  assert.equal(parseSpendIntent("me alcanza para una pizza 45?").amount, 45);
+});
