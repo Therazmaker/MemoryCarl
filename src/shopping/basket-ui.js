@@ -14,6 +14,7 @@ import { enrichProductData } from "./productIntelligence.js";
 import { callClaude } from "./shoppingAi.js";
 import { getClaudeSettings } from "../services/claudeClient.js";
 import { MEAL_TYPES, mealLabel, mealEmoji, guessMealType, runway, impact, streetPatterns, streetEntries } from "../finance/streetFood.js";
+import { looksLikeRoutine, parseRoutineText, routinesOf, daysLabel, WEEKDAYS, ALL_DAYS } from "../finance/routines.js";
 
 const SKIPS_KEY = "memorycarl_street_skips_v1";
 // Datos de Finanzas que pasa main.js (caja real y obligaciones del mes)
@@ -24,7 +25,7 @@ function moneyNow(L) {
   try {
     const m = ENV.getMoney?.();
     if (!m) return null;
-    return runway({ availableCash: m.availableCash, items: m.items, homeFoodPerWeek: L.minimum.total });
+    return runway({ availableCash: m.availableCash, items: m.items, homeFoodPerWeek: L.minimum.total, routines: routinesOf(ENV.state?.products || []) });
   } catch (_e) { return null; }
 }
 
@@ -36,17 +37,18 @@ const STATUS = {
 
 function runwayCard(rw) {
   if (!rw) return "";
-  const share = rw.free > 0 ? Math.max(0, Math.min(100, (rw.homeFoodNeed / rw.free) * 100)) : 100;
+  const share = rw.free > 0 ? Math.max(0, Math.min(100, ((rw.homeFoodNeed + (rw.routine?.total || 0)) / rw.free) * 100)) : 100;
   return `
     <div class="bkCard">
       <div class="bkCardTitle">💸 Hasta el cobro (${esc(rw.payday.label)}, en ${rw.payday.daysLeft} día${rw.payday.daysLeft === 1 ? "" : "s"})</div>
       <div class="bkRunNums">
         <div><div class="bkTileVal">${esc(soles(rw.free))}</div><div class="bkTileLbl">libre (S/ ${esc((rw.perDay).toFixed(2))} por día)</div></div>
-        <div><div class="bkTileVal ${rw.extra < 0 ? "bkNeg" : ""}">${esc(soles(rw.extra))}</div><div class="bkTileLbl">extra, ya separada la comida de casa</div></div>
+        <div><div class="bkTileVal ${rw.extra < 0 ? "bkNeg" : ""}">${esc(soles(rw.extra))}</div><div class="bkTileLbl">extra, ya separada la comida de casa${rw.routine?.total ? " y tu rutina" : ""}</div></div>
       </div>
       <div class="bkSplit" title="Comida de casa vs. extra">
         <div class="bkSplitHome" style="width:${share}%"></div>
       </div>
+      ${rw.routine?.total ? `<div class="bkRoutineLine">🛡️ Tu rutina está asegurada: ${esc(soles(rw.routine.total))} apartados (${rw.routine.items.map((i) => `${esc(i.name)} ×${i.daysCount}`).join(", ")})</div>` : ""}
       <div class="bkDueMeta">Caja ${esc(soles(rw.cash))} − pagos antes del cobro ${esc(soles(rw.pending))}${rw.dueItems.length ? ` (${rw.dueItems.slice(0, 3).map((d) => esc(d.name)).join(", ")}${rw.dueItems.length > 3 ? "…" : ""})` : ""} · comida de casa ~${esc(soles(rw.homeFoodNeed))}</div>
     </div>`;
 }
@@ -94,6 +96,38 @@ function checkCard(msg, L) {
     </div>`;
 }
 
+const DAY_OPTS = [{ id: "wk", label: "Lun–Vie", days: WEEKDAYS }, { id: "all", label: "Todos los días", days: ALL_DAYS }, { id: "we", label: "Fines de semana", days: [0, 6] }];
+const dayOptOf = (days) => (DAY_OPTS.find((o) => o.days.join(",") === [...days].sort().join(",")) || DAY_OPTS[0]).id;
+
+function routineCard(msg) {
+  const d = msg.data;
+  if (d.saved) return `<div class="bkCardMsg"><div class="bkSaved">🛡️ Rutina protegida: ${d.items.map((i) => `${esc(i.name)} (${esc(soles(i.price * i.qty))}, ${esc(daysLabel(i.days))})`).join(" · ")}</div></div>`;
+  return `
+    <div class="bkCardMsg" data-routine="${esc(msg.id)}">
+      <div class="bkGroupTitle">🛡️ ¿Protejo esta rutina?</div>
+      <div class="bkHint">No la voy a cuestionar: la aparto hasta cada cobro para que siempre esté.</div>
+      ${d.items.map((it, i) => `
+        <div class="bkRoutineRow" data-i="${i}">
+          <input class="bkInput" data-r="name" value="${esc(it.name)}" aria-label="Qué"/>
+          <input class="bkInput bkNum" data-r="qty" type="number" min="1" step="1" value="${esc(it.qty)}" aria-label="Cantidad por día"/>
+          <input class="bkInput bkNum" data-r="price" type="number" min="0" step="0.1" value="${esc(it.price)}" aria-label="Precio"/>
+          <select class="bkInput" data-r="days">${DAY_OPTS.map((o) => `<option value="${o.id}" ${dayOptOf(it.days) === o.id ? "selected" : ""}>${o.label}</option>`).join("")}</select>
+        </div>`).join("")}
+      <div class="bkActions"><button class="bkBtn bkBtnPrimary" data-r-save>🛡️ Proteger esta rutina</button></div>
+    </div>`;
+}
+
+function routinesListCard(state) {
+  const list = routinesOf(state.products || []);
+  if (!list.length) return `<div class="bkBubble">Todavía no tienes rutinas protegidas. Escríbeme algo como:\n“Mis bebidas del trabajo: Volt 2.50 y café 3 de lunes a viernes”\ny lo aparto hasta cada cobro.</div>`;
+  return `
+    <div class="bkCardMsg">
+      <div class="bkGroupTitle">🛡️ Tus rutinas protegidas</div>
+      ${list.map((r) => `<div class="bkItem"><div class="bkItemMain"><div class="bkItemName">${esc(r.name)}${r.qty > 1 ? ` ×${r.qty}` : ""}</div><div class="bkItemWhy">${esc(daysLabel(r.days))}${r.label ? ` · ${esc(r.label)}` : ""}</div></div><div class="bkItemPrice">${esc(soles(r.price * r.qty))}/día</div><button class="bkX" data-r-remove="${esc(r.productId)}" title="Dejar de proteger">✕</button></div>`).join("")}
+      <div class="bkHint">Para cambiar una, escríbela de nuevo con el precio nuevo.</div>
+    </div>`;
+}
+
 function impactHtml(rw, amount, who = "yo") {
   if (who === "fergis") return `<div class="bkHint">💜 Lo paga Fergis con su dinero: no cambia lo tuyo hasta el cobro${rw ? ` (${esc(soles(rw.free))} libres)` : ""}. Igual queda anotado para ver los patrones.</div>`;
   if (!rw) return `<div class="bkHint">Para saber si alcanza necesito tus cuentas en Finanzas.</div>`;
@@ -104,8 +138,9 @@ function impactHtml(rw, amount, who = "yo") {
     <div class="bkVerdict ${st.cls}">${st.icon} ${st.label}</div>
     <div class="bkImpRow"><span>Libre hasta ${esc(rw.payday.label)}</span><b>${esc(soles(rw.free))} → ${esc(soles(im.freeAfter))}</b></div>
     <div class="bkImpRow"><span>Por día (${rw.payday.daysLeft} d)</span><b>S/ ${rw.perDay.toFixed(2)} → S/ ${im.perDayAfter.toFixed(2)}</b></div>
-    <div class="bkImpRow"><span>Extra después de la comida de casa</span><b class="${im.extraAfter < 0 ? "bkNeg" : ""}">${esc(soles(im.extraAfter))}</b></div>
-    ${im.status === "no" ? `<div class="bkHint">Si lo compran, falta${im.extraAfter < 0 ? `n ${esc(soles(-im.extraAfter))}` : ""} para comer en casa hasta el cobro.</div>` : ""}`;
+    <div class="bkImpRow"><span>Extra después de la comida de casa${rw.routine?.total ? " y tu rutina" : ""}</span><b class="${im.extraAfter < 0 ? "bkNeg" : ""}">${esc(soles(im.extraAfter))}</b></div>
+    ${rw.routine?.total ? `<div class="bkRoutineLine">🛡️ Tu rutina (${esc(soles(rw.routine.total))}) ${im.extraAfter < 0 && im.freeAfter - rw.homeFoodNeed < rw.routine.total ? "se vería afectada con esta compra" : "sigue asegurada"}.</div>` : ""}
+    ${im.status === "no" ? `<div class="bkHint">Si lo compran, falta${im.extraAfter < 0 ? `n ${esc(soles(-im.extraAfter))}` : ""} para la comida de casa${rw.routine?.total ? " y tu rutina" : ""} hasta el cobro.</div>` : ""}`;
 }
 
 
@@ -312,6 +347,8 @@ function buyForm(msg, ctx) {
 
 function messageHtml(msg) {
   if (msg.role === "user") return `<div class="bkMsg bkMsgUser"><div class="bkBubble">${esc(msg.text).replace(/\n/g, "<br>")}</div></div>`;
+  if (msg.type === "routine") return `<div class="bkMsg bkMsgCarl">${routineCard(msg)}</div>`;
+  if (msg.type === "routines") return `<div class="bkMsg bkMsgCarl">${routinesListCard(ENV.state || {})}</div>`;
   if (msg.type === "check") return `<div class="bkMsg bkMsgCarl">${checkCard(msg, learn(ENV.state || {}))}</div>`;
   const body = msg.type === "analysis" ? analysisCard(msg) : `<div class="bkBubble">${esc(msg.text).replace(/\n/g, "<br>")}</div>`;
   return `<div class="bkMsg bkMsgCarl">${msg.type === "analysis" && msg.text ? `<div class="bkBubble">${esc(msg.text)}</div>` : ""}${body}</div>`;
@@ -400,6 +437,7 @@ export function renderBasket(state, env = {}) {
       <div class="bkLog" id="bkLog">${intro}${chat.map(messageHtml).join("")}<div class="bkTyping" id="bkTyping" hidden>Carl está pensando…</div></div>
       <div class="bkQuick">
         <button class="bkChipBtn bkChipHot" data-bk-quick="check">🍔 ¿Me alcanza?</button>
+        <button class="bkChipBtn" data-bk-quick="routines">🛡️ Mi rutina</button>
         <button class="bkChipBtn" data-bk-quick="due">🔔 ¿Qué toca comprar?</button>
         <button class="bkChipBtn" data-bk-quick="min">📉 ¿Cuánto es lo mínimo?</button>
         ${chat.length ? `<button class="bkChipBtn" data-bk-quick="clear">🧹 Limpiar chat</button>` : ""}
@@ -577,6 +615,14 @@ export function wireBasket(root, ctx) {
       rerender();
       return;
     }
+    if (looksLikeRoutine(t)) {
+      const items = parseRoutineText(t);
+      if (items.length) {
+        push({ role: "carl", type: "routine", data: { items, saved: false } });
+        rerender();
+        return;
+      }
+    }
     if (looksLikeList(t)) {
       const parsed = parseListText(t);
       const a = analyzeList(parsed, { products: L.products, rhythm: L.rhythm });
@@ -611,6 +657,7 @@ export function wireBasket(root, ctx) {
     const q = b.dataset.bkQuick;
     const L = learn(state);
     if (q === "clear") { if (confirm("¿Limpiar el chat? Las compras guardadas no se borran.")) { saveChat([]); rerender(); } return; }
+    if (q === "routines") { push({ role: "carl", type: "routines" }); rerender(); return; }
     if (q === "check") {
       push({ role: "carl", type: "check", data: { amount: "", desc: "", mealType: guessMealType("", new Date()), who: "yo", decided: null } });
       rerender();
@@ -618,6 +665,49 @@ export function wireBasket(root, ctx) {
     }
     push({ role: "user", text: q === "due" ? "¿Qué toca comprar?" : "¿Cuánto es lo mínimo para la semana?" });
     push({ role: "carl", type: "text", text: q === "due" ? dueText(L) : minimumText(L) });
+    rerender();
+  }));
+
+  root.querySelectorAll("[data-routine]").forEach((card) => {
+    const id = card.dataset.routine;
+    card.querySelector("[data-r-save]")?.addEventListener("click", () => {
+      const items = [...card.querySelectorAll(".bkRoutineRow")].map((row) => ({
+        name: row.querySelector('[data-r="name"]').value.trim(),
+        qty: Math.max(1, Math.round(Number(row.querySelector('[data-r="qty"]').value) || 1)),
+        price: Math.max(0, Number(row.querySelector('[data-r="price"]').value) || 0),
+        days: (DAY_OPTS.find((o) => o.id === row.querySelector('[data-r="days"]').value) || DAY_OPTS[0]).days,
+      })).filter((it) => it.name && it.price > 0);
+      if (!items.length) { ctx.toast?.("Pon al menos un precio."); return; }
+      const label = loadChat().find((x) => x.id === id)?.data?.items?.[0]?.label || "";
+      if (!Array.isArray(state.products)) state.products = [];
+      for (const it of items) {
+        let p = matchProduct(it.name, state.products);
+        if (!p) {
+          p = enrichProductData({ id: ctx.uid("p"), name: it.name, price: it.price, category: label === "Trabajo" ? "Trabajo" : "", history: [] });
+          state.products.push(p);
+        } else if (Math.abs(Number(p.price || 0) - it.price) > 0.009) {
+          p.history = Array.isArray(p.history) ? p.history : [];
+          p.history.push({ price: p.price, date: new Date().toISOString() });
+          p.price = it.price;
+        }
+        p.routine = { qty: it.qty, days: it.days, label };
+        // Una rutina es básica, no un gusto
+        if (/gusto|premio|premium/.test(String(p.tier || ""))) p.tier = "base_diario";
+      }
+      update(id, (m) => { m.data = { items, saved: true }; });
+      const rw = moneyNow(learn(state));
+      push({ role: "carl", type: "text", text: rw
+        ? `Listo 🛡️ Tu rutina queda protegida: aparto ${soles(rw.routine.total)} hasta ${rw.payday.label}. Cuando uses “¿Me alcanza?” la tengo en cuenta primero.`
+        : "Listo 🛡️ Tu rutina queda protegida. Cuando estén tus cuentas en Finanzas, la aparto hasta cada cobro." });
+      ctx.persist();
+      rerender();
+    });
+  });
+  root.querySelectorAll("[data-r-remove]").forEach((b) => b.addEventListener("click", () => {
+    const p = (state.products || []).find((x) => x.id === b.dataset.rRemove);
+    if (!p || !confirm(`¿Dejar de proteger “${p.name}”?`)) return;
+    delete p.routine;
+    ctx.persist();
     rerender();
   }));
 
@@ -840,6 +930,9 @@ function css() {
   .bkSend { width:44px; height:44px; border-radius:12px; border:none; background:#7c5cff; color:#fff; font-size:18px; cursor:pointer; }
   .bkTyping { font-size:12px; opacity:.6; }
   .bkTabs { display:flex; gap:6px; }
+  .bkRoutineLine { font-size:12px; color:#a7f3d0; margin:4px 0; }
+  .bkRoutineRow { display:grid; grid-template-columns: 1fr 52px 70px 1fr; gap:6px; margin:6px 0; }
+  @media (max-width: 420px) { .bkRoutineRow { grid-template-columns: 1fr 48px 64px; } .bkRoutineRow select { grid-column: 1 / -1; } }
   .bkChipHot { background:rgba(251,191,36,.14); border-color:rgba(251,191,36,.4); color:#fde68a; font-weight:700; }
   .bkRunNums { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
   .bkNeg { color:#fca5a5 !important; }
