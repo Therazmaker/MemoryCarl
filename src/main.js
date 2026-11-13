@@ -3978,9 +3978,17 @@ function view(){
       },
       // Comida en la calle: se registra como gasto en Finanzas con el tipo de comida en la nota
       recordStreetExpense: ({ amount, desc, mealType, who }) => {
-        const accountId = state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "";
+        // Si paga Fergis, sale de su dinero (externo) y no descuenta tu cuenta
+        const byFergis = who === "fergis";
+        const accountId = byFergis ? "ext_fergis" : (state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "");
         if(!accountId) return false;
-        const entry = addFinanceEntry({ type:"expense", amount, accountId, category: STREET_CATEGORY, reason:"normal", note: streetNote(mealType, desc), date: new Date().toISOString(), paidBy: who === "fergis" ? "fergis" : "me" });
+        const entry = addFinanceEntry({
+          type:"expense", amount, accountId, category: STREET_CATEGORY, reason:"normal",
+          note: streetNote(mealType, desc) + (byFergis ? " · [Pagado por Fergis]" : ""),
+          date: new Date().toISOString(),
+          paidBy: byFergis ? "fergis" : "me",
+          ...(byFergis ? { noAccountDebit: true, isExternalPayment: true } : {}),
+        });
         if(!entry) return false;
         if (window.financePushToSupabase) window.financePushToSupabase();
         return true;

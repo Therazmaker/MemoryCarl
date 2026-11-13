@@ -86,7 +86,7 @@ function checkCard(msg, L) {
       </div>
       <div class="bkMeals">${MEAL_TYPES.map((m) => `<button class="bkMeal ${d.mealType === m.id ? "bkMealOn" : ""}" data-meal="${m.id}">${m.emoji} ${esc(m.label)}</button>`).join("")}</div>
       <div class="bkFormRow"><span>¿Quién paga?</span>${BUYERS.map((b) => `<button class="bkMeal ${d.who === b.id ? "bkMealOn" : ""}" data-who="${b.id}">${b.label}</button>`).join("")}</div>
-      <div class="bkImpact" data-impact>${impactHtml(rw, d.amount)}</div>
+      <div class="bkImpact" data-impact>${impactHtml(rw, d.amount, d.who)}</div>
       <div class="bkActions">
         <button class="bkBtn" data-c-skip>💪 Mejor no</button>
         <button class="bkBtn bkBtnPrimary" data-c-buy>🍽️ Lo compramos</button>
@@ -94,7 +94,8 @@ function checkCard(msg, L) {
     </div>`;
 }
 
-function impactHtml(rw, amount) {
+function impactHtml(rw, amount, who = "yo") {
+  if (who === "fergis") return `<div class="bkHint">💜 Lo paga Fergis con su dinero: no cambia lo tuyo hasta el cobro${rw ? ` (${esc(soles(rw.free))} libres)` : ""}. Igual queda anotado para ver los patrones.</div>`;
   if (!rw) return `<div class="bkHint">Para saber si alcanza necesito tus cuentas en Finanzas.</div>`;
   if (!(Number(amount) > 0)) return `<div class="bkHint">Libre hasta ${esc(rw.payday.label)}: <b>${esc(soles(rw.free))}</b> (S/ ${rw.perDay.toFixed(2)} por día). Después de la comida de casa quedan ${esc(soles(rw.extra))}. Escribe cuánto cuesta.</div>`;
   const im = impact(rw, amount);
@@ -628,8 +629,9 @@ export function wireBasket(root, ctx) {
     });
     const refresh = () => {
       const { amount } = read();
+      const who = loadChat().find((x) => x.id === id)?.data?.who || "yo";
       const box = card.querySelector("[data-impact]");
-      if (box) box.innerHTML = impactHtml(moneyNow(learn(state)), amount);
+      if (box) box.innerHTML = impactHtml(moneyNow(learn(state)), amount, who);
     };
     card.querySelector('[data-c="amount"]')?.addEventListener("input", refresh);
     card.querySelector('[data-c="desc"]')?.addEventListener("change", () => {
@@ -647,6 +649,7 @@ export function wireBasket(root, ctx) {
     card.querySelectorAll("[data-who]").forEach((b) => b.addEventListener("click", () => {
       update(id, (m) => { m.data.who = b.dataset.who; });
       card.querySelectorAll("[data-who]").forEach((x) => x.classList.toggle("bkMealOn", x === b));
+      refresh();
     }));
     const decide = (decision) => {
       const { desc, amount } = read();
@@ -655,7 +658,7 @@ export function wireBasket(root, ctx) {
       const mealType = msg?.data?.mealType || guessMealType(desc, new Date());
       const who = msg?.data?.who || "yo";
       const rw = moneyNow(learn(state));
-      const im = rw ? impact(rw, amount) : null;
+      const im = rw && who !== "fergis" ? impact(rw, amount) : null;
       if (decision === "bought") {
         const ok = ctx.recordStreetExpense?.({ amount, desc, mealType, who });
         if (ok === false) { ctx.toast?.("No pude registrarlo: revisa tus cuentas en Finanzas."); return; }
