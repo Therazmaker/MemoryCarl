@@ -59,3 +59,25 @@ test("patrones: semana contra lo normal, día que se repite y 'mejor no'", () =>
   assert.ok(p.insights.some((i) => /viernes/.test(i)));
   assert.ok(p.insights.some((i) => /mejor no/.test(i) && /45/.test(i)));
 });
+
+import { parseRoutineText, looksLikeRoutine, routineDaysUntil, routinesOf, daysLabel } from "../src/finance/routines.js";
+
+test("rutinas: se leen de una frase y se apartan hasta el cobro", () => {
+  const t = "Mis bebidas del trabajo: Volt 2.50 y café 3 de lunes a viernes";
+  assert.ok(looksLikeRoutine(t));
+  assert.ok(!looksLikeRoutine("arroz\nhuevos"));
+  const r = parseRoutineText(t);
+  assert.deepEqual(r.map((x) => [x.name, x.price, x.qty]), [["Volt", 2.5, 1], ["Café", 3, 1]]);
+  assert.deepEqual(r[0].days, [1, 2, 3, 4, 5]);
+  assert.equal(r[0].label, "Trabajo");
+  assert.deepEqual(parseRoutineText("todos los días 2 volt a 2.50").map((x) => [x.name, x.qty, x.price, x.days.length]), [["Volt", 2, 2.5, 7]]);
+  // lunes 9 → cobro el 15 (domingo): lun-vie = 5 días
+  assert.equal(routineDaysUntil([1, 2, 3, 4, 5], new Date(2026, 10, 9), new Date(2026, 10, 15)), 5);
+  assert.equal(daysLabel([1, 2, 3, 4, 5]), "lunes a viernes");
+  const routines = routinesOf([{ id: "v", name: "Volt", price: 2.5, routine: { qty: 1, days: [1, 2, 3, 4, 5] } }, { id: "x", name: "Arroz", price: 20 }]);
+  const rw = runway({ availableCash: 400, items: [], now: new Date(2026, 10, 9), homeFoodPerWeek: 140, routines });
+  assert.equal(rw.routine.total, 12.5);
+  assert.equal(rw.extra, 400 - 120 - 12.5);
+  // un gasto que se come la rutina queda en "no"
+  assert.equal(impact(rw, 270).status, "no");
+});

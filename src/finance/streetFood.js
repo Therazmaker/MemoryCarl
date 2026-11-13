@@ -13,6 +13,8 @@
  * "Comida en la calle" y el tipo de comida al inicio de la nota ("🍽️ Cena · pollo").
  */
 
+import { routineNeed } from "./routines.js";
+
 export const STREET_CATEGORY = "Comida en la calle";
 
 export const MEAL_TYPES = [
@@ -91,7 +93,7 @@ const owed = (i) => {
  * @param {{ availableCash: number, items: Array, now?: Date, homeFoodPerWeek?: number }} input
  *   items: obligaciones del mes de Mission Control ({ name, dueDay, status, amount, pendingAmount }).
  */
-export function runway({ availableCash = 0, items = [], now = new Date(), homeFoodPerWeek = 0 } = {}) {
+export function runway({ availableCash = 0, items = [], now = new Date(), homeFoodPerWeek = 0, routines = [] } = {}) {
   const pay = nextPayday(now);
   const today = now.getDate();
   const sameMonth = pay.date.getMonth() === now.getMonth();
@@ -101,6 +103,8 @@ export function runway({ availableCash = 0, items = [], now = new Date(), homeFo
   const pending = round2(due.reduce((s, i) => s + owed(i), 0));
   const free = round2(Number(availableCash || 0) - pending);
   const homeFoodNeed = round2((Number(homeFoodPerWeek) || 0) / 7 * pay.daysLeft);
+  // Rutinas protegidas (bebidas del trabajo…): se apartan hasta el cobro
+  const routine = routineNeed(routines, now, pay.date);
   return {
     payday: pay,
     cash: round2(availableCash),
@@ -109,7 +113,9 @@ export function runway({ availableCash = 0, items = [], now = new Date(), homeFo
     free,
     perDay: round2(free / pay.daysLeft),
     homeFoodNeed,
-    extra: round2(free - homeFoodNeed), // lo que queda después de asegurar la comida de casa
+    routine,
+    // lo que queda después de asegurar la comida de casa y las rutinas
+    extra: round2(free - homeFoodNeed - routine.total),
   };
 }
 
