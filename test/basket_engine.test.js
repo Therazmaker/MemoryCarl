@@ -114,3 +114,47 @@ test("fracciones al inicio y bebidas básicas", () => {
   assert.ok(names.includes("Agua 7L"), "el agua básica entra al mínimo");
   assert.ok(!names.includes("Gaseosa"), "la gaseosa sin nivel sigue siendo gusto por su nombre");
 });
+
+// ---- Productos por peso ----
+import { isWeighed, weighedLine, kgFromWritten, weighedHistoryFields } from "../src/shopping/basketEngine.js";
+
+test("peso: solo lo pagado estima los kg con el precio de la biblioteca", () => {
+  const l = weighedLine({ pricePerKg: 4, paid: 3 });
+  assert.deepEqual(l, { paid: 3, kg: 0.75, pricePerKg: 4, estimated: true });
+  const h = weighedHistoryFields(l);
+  assert.equal(h.price, 3); assert.equal(h.qty, 1); assert.equal(h.weight_g, 750); assert.equal(h.weightEstimated, true);
+});
+
+test("peso: pagado + kg aprende el precio real por kg", () => {
+  const l = weighedLine({ pricePerKg: 4, paid: 4.5, kg: 1 });
+  assert.equal(l.pricePerKg, 4.5); assert.equal(l.estimated, false);
+  assert.equal(weighedHistoryFields(l).weightEstimated, undefined);
+});
+
+test("peso: solo kg calcula lo pagado; sin datos → null", () => {
+  assert.equal(weighedLine({ pricePerKg: 4, kg: 0.5 }).paid, 2);
+  assert.equal(weighedLine({ pricePerKg: 4 }), null);
+});
+
+test("peso: unidades escritas y producto por kg", () => {
+  assert.equal(kgFromWritten(500, "g"), 0.5);
+  assert.equal(kgFromWritten(1.5, "kg"), 1.5);
+  assert.equal(kgFromWritten(3, ""), null);
+  assert.equal(isWeighed({ unit: "kg" }), true);
+  assert.equal(isWeighed({ unit: "u" }), false);
+});
+
+test("peso: el ritmo cuenta kg a precio por kg y la lista estima con eso", () => {
+  const products = [{ id: "tom", name: "Tomate", price: 4, unit: "kg" }];
+  const day = (n) => { const d = new Date(2026, 0, 30); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  const history = [10, 5].map((n) => ({ date: day(n), items: [{ name: "Tomate", productId: "tom", price: 3, qty: 1, weight_g: 750, pricePerKg: 4, unit: "g" }] }));
+  const rhythm = learnRhythm(history, { now: new Date(2026, 0, 30), products });
+  const st = rhythm.get("p:tom");
+  assert.equal(st.avgQty, 0.75);
+  assert.equal(st.lastPrice, 4);
+  const a = analyzeList(parseListText("tomate 500 g\ntomate"), { products, rhythm });
+  assert.equal(a.items[0].weighed, true);
+  assert.equal(a.items[0].qty, 0.5);
+  assert.equal(a.items[0].line, 2);
+  assert.equal(a.items[1].qty, 0.75); // sin peso escrito: lo de siempre
+});

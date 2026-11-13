@@ -36,6 +36,42 @@ const UNIT_WORDS = {
 };
 const NUMBER_WORDS = { un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, medio: 0.5, media: 0.5 };
 
+// ---- Productos por peso (precio por kg en la biblioteca) ----
+
+/** ¿El producto se vende por peso? (en la biblioteca su precio es por kg) */
+export const isWeighed = (product) => /kg|kilo/i.test(String(product?.unit || ""));
+
+/**
+ * Una línea pesada a partir de lo que se sepa: lo pagado, los kg, o ambos.
+ *   - pagado + kg → precio real por kg (se aprende)
+ *   - solo pagado → kg estimados con el precio por kg de la biblioteca
+ *   - solo kg     → lo que costó con el precio por kg de la biblioteca
+ * @returns {{ paid: number, kg: number, pricePerKg: number, estimated: boolean } | null}
+ */
+export function weighedLine({ pricePerKg = 0, paid = 0, kg = 0 } = {}) {
+  const ppk = Math.max(0, Number(pricePerKg) || 0);
+  const pd = Math.max(0, Number(paid) || 0);
+  const k = Math.max(0, Number(kg) || 0);
+  if (pd > 0 && k > 0) return { paid: round2(pd), kg: round3(k), pricePerKg: round2(pd / k), estimated: false };
+  if (pd > 0) return { paid: round2(pd), kg: ppk > 0 ? round3(pd / ppk) : 0, pricePerKg: round2(ppk), estimated: true };
+  if (k > 0 && ppk > 0) return { paid: round2(k * ppk), kg: round3(k), pricePerKg: round2(ppk), estimated: false };
+  return null;
+}
+
+/** Kg de una cantidad escrita ("500 g" → 0.5, "1.5 kg" → 1.5); null si no dice peso. */
+export function kgFromWritten(qty, unit) {
+  const q = Number(qty);
+  if (!(q > 0)) return null;
+  if (unit === "g") return round3(q / 1000);
+  if (unit === "kg") return round3(q);
+  return null;
+}
+
+/** Línea de historial pesada (formato compatible con la lista de compras): precio = lo pagado, qty 1. */
+export function weighedHistoryFields(line) {
+  return { price: line.paid, qty: 1, weight_g: Math.round(line.kg * 1000), pricePerKg: line.pricePerKg, unit: "g", ...(line.estimated ? { weightEstimated: true } : {}) };
+}
+
 /** Interpreta una cantidad suelta: "2", "1/2", "1.5", "dos". */
 function parseQty(tok) {
   if (tok == null) return null;
@@ -140,6 +176,7 @@ const median = (arr) => {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 };
 const toDay = (d) => { const x = new Date(String(d).length <= 10 ? `${d}T12:00:00` : d); return Number.isNaN(x.getTime()) ? null : x; };
+const round3 = (n) => Math.round((Number(n) || 0) * 1000) / 1000;
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
@@ -158,7 +195,12 @@ export function learnRhythm(history = [], { now = new Date(), products = [] } = 
       if (!it || !it.name) continue;
       const k = itemKey(it);
       if (!byKey.has(k)) byKey.set(k, { key: k, name: it.name, productId: it.productId || "", category: it.category || "", buys: [] });
-      byKey.get(k).buys.push({ t: day.getTime(), qty: Math.max(0.01, Number(it.qty) || 1), price: Number(it.price) || 0, buyer: entry.buyer || "" });
+      // Compras por peso: la cantidad son los kg y el precio es por kg (no el total pagado)
+      const wkg = Number(it.weight_g) > 0 ? Number(it.weight_g) / 1000 : 0;
+      const buy = wkg
+        ? { qty: Math.max(0.01, wkg * (Number(it.qty) || 1)), price: Number(it.pricePerKg) || (Number(it.price) || 0) / wkg }
+        : { qty: Math.max(0.01, Number(it.qty) || 1), price: Number(it.price) || 0 };
+      byKey.get(k).buys.push({ t: day.getTime(), ...buy, buyer: entry.buyer || "" });
     }
   }
   const out = new Map();
@@ -253,7 +295,9 @@ export function analyzeList(parsed = [], { products = [], rhythm = new Map() } =
     if (!stat && product) stat = rhythm.get(`n:${keyWords(product.name).join(" ")}`);
     if (!stat) for (const s of rhythm.values()) if (matchProduct(p.name, [{ id: s.key, name: s.name }])) { stat = s; break; }
     const price = Number(product?.price) || stat?.lastPrice || 0;
-    const qty = p.qty || stat?.avgQty || 1;
+    const weighed = isWeighed(product);
+    // Por peso: la cantidad va en kg ("500 g" → 0.5); si no dice peso, lo de siempre o 1 kg
+    const qty = weighed ? (kgFromWritten(p.qty, p.unit) ?? stat?.avgQty ?? 1) : (p.qty || stat?.avgQty || 1);
     const name = product?.name || stat?.name || p.name;
     let group = "falta";
     let reason = "";
@@ -277,8 +321,9 @@ export function analyzeList(parsed = [], { products = [], rhythm = new Map() } =
       written: p.name,
       productId: product?.id || stat?.productId || "",
       category: product?.category || stat?.category || "",
-      qty: round2(qty),
-      unit: p.unit || "",
+      qty: weighed ? round3(qty) : round2(qty),
+      unit: weighed ? "kg" : (p.unit || ""),
+      weighed,
       price: round2(price),
       line: round2(price * qty),
       group,

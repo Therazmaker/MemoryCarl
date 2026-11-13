@@ -9,7 +9,7 @@
  * - Preguntas libres van a Claude con el contexto de lo aprendido.
  */
 
-import { parseListText, learnRhythm, weeklyMinimum, analyzeList, weeklySpend, categorySpend, matchProduct } from "./basketEngine.js";
+import { parseListText, learnRhythm, weeklyMinimum, analyzeList, weeklySpend, categorySpend, matchProduct, isWeighed, weighedLine, weighedHistoryFields } from "./basketEngine.js";
 import { enrichProductData } from "./productIntelligence.js";
 import { callClaude } from "./shoppingAi.js";
 import { getClaudeSettings } from "../services/claudeClient.js";
@@ -335,7 +335,13 @@ function buyForm(msg, ctx) {
     </div>
     <div class="bkFormRow"><input class="bkInput" data-f="store" placeholder="Tienda (opcional)"/><input class="bkInput" type="date" data-f="date" value="${todayISO()}"/></div>
     <div class="bkFormHint">Corrige precio y cantidad si cambiaron: así aprendo el precio real.</div>
-    ${picked.map((it) => `
+    ${picked.map((it) => it.weighed ? `
+      <div class="bkFormItem bkWeighed" data-item="${esc(it.id)}" data-ppk="${esc(it.price || 0)}">
+        <span class="bkFormName">${esc(it.name)} <span class="bkQty">por kg</span></span>
+        <input class="bkInput bkNum" type="number" step="0.001" min="0" data-f="kg" placeholder="¿kg?" aria-label="Kilos (si lo sabes)"/>
+        <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="paid" placeholder="Pagué S/" aria-label="Lo que pagaste"/>
+        <span class="bkWeighHint" data-weigh-hint>${it.price ? `Pon lo que pagaste; los kg son opcionales (S/ ${esc(it.price)}/kg)` : "Pon lo que pagaste y los kg para aprender el precio por kg"}</span>
+      </div>` : `
       <div class="bkFormItem" data-item="${esc(it.id)}">
         <span class="bkFormName">${esc(it.name)}</span>
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="qty" value="${esc(it.qty || 1)}" aria-label="Cantidad"/>
@@ -364,7 +370,12 @@ function purchaseEditor(e) {
       ${BUYERS.map((b) => `<label class="bkChip"><input type="radio" name="bkEdBuyer_${esc(e.id)}" value="${b.id}" ${e.buyer === b.id ? "checked" : ""}/> ${b.label}</label>`).join("")}
     </div>
     <div class="bkFormRow"><input class="bkInput" data-f="store" placeholder="Tienda" value="${esc(e.store || "")}"/><input class="bkInput" type="date" data-f="date" value="${esc(e.date || todayISO())}"/></div>
-    ${(e.items || []).map((it, i) => `
+    ${(e.items || []).map((it, i) => Number(it.weight_g) > 0 ? `
+      <div class="bkFormItem bkEdItem" data-idx="${i}" data-weighed="1">
+        <span class="bkFormName">${esc(it.name)} <span class="bkQty">${it.weightEstimated ? "≈" : ""}kg · pagado</span></span>
+        <input class="bkInput bkNum" type="number" step="0.001" min="0" data-f="kg" value="${it.weightEstimated ? "" : esc(Number(it.weight_g) / 1000)}" placeholder="${esc(Math.round(Number(it.weight_g)) / 1000)}" aria-label="Kilos"/>
+        <span class="bkPriceCell"><input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="price" value="${esc(it.price ?? 0)}" aria-label="Pagado"/><button class="bkX" data-bk-rmitem="${i}" title="Quitar">✕</button></span>
+      </div>` : `
       <div class="bkFormItem bkEdItem" data-idx="${i}">
         <span class="bkFormName">${esc(it.name)}</span>
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="qty" value="${esc(it.qty ?? 1)}" aria-label="Cantidad"/>
@@ -542,6 +553,18 @@ export function wireBasket(root, ctx) {
       const readRows = () => box.querySelectorAll(".bkEdItem").forEach((row) => {
         const it = draft.items[Number(row.dataset.idx)];
         if (!it) return;
+        if (row.dataset.weighed) {
+          // Por peso: precio = lo pagado; los kg escritos son reales, si no se estiman
+          const paid = Math.max(0, Number(row.querySelector('[data-f="price"]').value) || 0);
+          const product = (state.products || []).find((p) => p.id === it.productId);
+          const line = weighedLine({ pricePerKg: Number(it.pricePerKg) || Number(product?.price) || 0, paid, kg: row.querySelector('[data-f="kg"]').value });
+          if (line) {
+            const { weightEstimated: _drop, ...rest } = it;
+            Object.assign(it, { ...rest, ...weighedHistoryFields(line) });
+            if (!line.estimated) delete it.weightEstimated;
+          } else { it.price = paid; it.qty = 1; }
+          return;
+        }
         it.qty = Math.max(0.01, Number(row.querySelector('[data-f="qty"]').value) || 1);
         it.price = Math.max(0, Number(row.querySelector('[data-f="price"]').value) || 0);
       });
@@ -565,6 +588,17 @@ export function wireBasket(root, ctx) {
         // Si es la compra más reciente de un producto, el precio corregido pasa a la biblioteca
         const before = new Map((target.items || []).map((it) => [it.id, Number(it.price) || 0]));
         for (const it of draft.items) {
+          if (Number(it.weight_g) > 0) {
+            // Por peso: solo se aprende el precio por kg si los kg son reales
+            if (!it.productId || it.weightEstimated || !(it.pricePerKg > 0)) continue;
+            const newerW = (state.shoppingHistory || []).some((h) => h.id !== target.id && String(h.date) > String(target.date) && (h.items || []).some((x) => x.productId === it.productId));
+            const prodW = (state.products || []).find((p) => p.id === it.productId);
+            if (newerW || !prodW || Math.abs(Number(prodW.price || 0) - it.pricePerKg) < 0.01) continue;
+            prodW.history = Array.isArray(prodW.history) ? prodW.history : [];
+            prodW.history.push({ price: prodW.price, date: new Date().toISOString() });
+            prodW.price = it.pricePerKg;
+            continue;
+          }
           if (!it.productId || before.get(it.id) === it.price || !(it.price > 0)) continue;
           const newer = (state.shoppingHistory || []).some((h) => h.id !== target.id && String(h.date) > String(target.date) && (h.items || []).some((x) => x.productId === it.productId));
           const product = (state.products || []).find((p) => p.id === it.productId);
@@ -797,6 +831,18 @@ export function wireBasket(root, ctx) {
     box.innerHTML = buyForm(msg, ctx);
     box.hidden = false;
     b.hidden = true;
+    // Por peso: muestra al momento cuántos kg salen de lo pagado (o el precio real por kg)
+    box.querySelectorAll(".bkWeighed").forEach((row) => {
+      const hint = row.querySelector("[data-weigh-hint]");
+      const upd = () => {
+        const l = weighedLine({ pricePerKg: Number(row.dataset.ppk) || 0, paid: row.querySelector('[data-f="paid"]').value, kg: row.querySelector('[data-f="kg"]').value });
+        if (!l || !hint) return;
+        hint.textContent = l.estimated
+          ? (l.kg ? `≈ ${l.kg} kg a S/ ${l.pricePerKg}/kg (estimado)` : "Sin precio por kg todavía: pon también los kg")
+          : `${l.kg} kg · S/ ${l.paid} · S/ ${l.pricePerKg}/kg${Math.abs(l.pricePerKg - (Number(row.dataset.ppk) || 0)) > 0.009 ? " (lo aprendo)" : ""}`;
+      };
+      row.querySelectorAll("input").forEach((x) => x.addEventListener("input", upd));
+    });
     box.querySelector("[data-bk-save]")?.addEventListener("click", () => saveBuy(msg.id, box));
   }));
 
@@ -811,6 +857,26 @@ export function wireBasket(root, ctx) {
     const items = [];
     for (const it of msg.data.items.filter((x) => !off.has(x.id))) {
       const row = box.querySelector(`.bkFormItem[data-item="${CSS.escape(it.id)}"]`);
+      if (it.weighed) {
+        // Por peso: basta con lo pagado; con los kg también aprende el precio real por kg
+        const product = it.productId ? (state.products || []).find((p) => p.id === it.productId) : matchProduct(it.name, state.products || []);
+        const line = weighedLine({
+          pricePerKg: Number(product?.price) || it.price,
+          paid: row?.querySelector('[data-f="paid"]')?.value,
+          kg: row?.querySelector('[data-f="kg"]')?.value,
+        });
+        if (!line) continue;
+        if (product && !line.estimated && line.pricePerKg > 0 && Math.abs(Number(product.price || 0) - line.pricePerKg) > 0.009) {
+          product.history = Array.isArray(product.history) ? product.history : [];
+          product.history.push({ price: product.price, date: new Date().toISOString() });
+          product.price = line.pricePerKg;
+        }
+        items.push({
+          id: ctx.uid("i"), name: product?.name || it.name, bought: true, ...weighedHistoryFields(line),
+          productId: product?.id || "", category: product?.category || it.category || "", essential: Boolean(product?.essential), sourceListId,
+        });
+        continue;
+      }
       const qty = Math.max(0.01, Number(row?.querySelector('[data-f="qty"]')?.value) || it.qty || 1);
       const price = Math.max(0, Number(row?.querySelector('[data-f="price"]')?.value) || 0);
       // La biblioteca aprende el precio real (o el producto nuevo)
@@ -919,6 +985,7 @@ function css() {
   .bkFormRow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:12.5px; }
   .bkFormHint { font-size:11px; opacity:.6; }
   .bkFormItem { display:grid; grid-template-columns: 1fr 64px 76px; gap:6px; align-items:center; font-size:12.5px; }
+  .bkWeighHint { grid-column: 1 / -1; font-size:11px; opacity:.7; margin-top:-2px; }
   .bkFormName { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .bkInput { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); color:inherit; border-radius:8px; padding:7px 8px; font-size:13px; min-width:0; flex:1; }
   .bkNum { text-align:right; }
