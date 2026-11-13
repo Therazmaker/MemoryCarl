@@ -124,7 +124,10 @@ export function runway({ availableCash = 0, items = [], now = new Date(), homeFo
     payday: pay,
     cash: round2(availableCash),
     pending,
-    dueItems: due.map((i) => ({ name: i.name, amount: round2(owed(i)), dueDay: i.dueDay })).sort((a, b) => (a.dueDay || 0) - (b.dueDay || 0)),
+    dueItems: due.map((i) => ({ id: i.id, name: i.name, amount: round2(owed(i)), dueDay: i.dueDay, type: i.type })).sort((a, b) => (a.dueDay || 0) - (b.dueDay || 0)),
+    // Pendientes del mes que vencen después del cobro (se pagan con el próximo sueldo)
+    laterItems: (items || []).filter((i) => i && i.status !== "paid" && owed(i) > 0 && !due.includes(i))
+      .map((i) => ({ id: i.id, name: i.name, amount: round2(owed(i)), dueDay: i.dueDay, type: i.type })).sort((a, b) => (a.dueDay || 0) - (b.dueDay || 0)),
     free,
     perDay: round2(free / pay.daysLeft),
     homeFoodNeed,

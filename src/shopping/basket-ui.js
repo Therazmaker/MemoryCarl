@@ -35,22 +35,32 @@ const STATUS = {
   no: { icon: "🛑", label: "No llegan al cobro", cls: "bkStBad" },
 };
 
-function runwayCard(rw) {
-  if (!rw) return "";
-  const share = rw.free > 0 ? Math.max(0, Math.min(100, ((rw.homeFoodNeed + (rw.routine?.total || 0)) / rw.free) * 100)) : 100;
-  return `
-    <div class="bkCard">
-      <div class="bkCardTitle">💸 Hasta el cobro (${esc(rw.payday.label)}, en ${rw.payday.daysLeft} día${rw.payday.daysLeft === 1 ? "" : "s"})</div>
-      <div class="bkRunNums">
-        <div><div class="bkTileVal">${esc(soles(rw.free))}</div><div class="bkTileLbl">libre (S/ ${esc((rw.perDay).toFixed(2))} por día)</div></div>
-        <div><div class="bkTileVal ${rw.extra < 0 ? "bkNeg" : ""}">${esc(soles(rw.extra))}</div><div class="bkTileLbl">extra, ya separada la comida de casa${rw.routine?.total ? " y tu rutina" : ""}</div></div>
-      </div>
-      <div class="bkSplit" title="Comida de casa vs. extra">
-        <div class="bkSplitHome" style="width:${share}%"></div>
-      </div>
-      ${rw.routine?.total ? `<div class="bkRoutineLine">🛡️ Tu rutina está asegurada: ${esc(soles(rw.routine.total))} apartados (${rw.routine.items.map((i) => `${esc(i.name)} ×${i.daysCount}`).join(", ")})</div>` : ""}
-      <div class="bkDueMeta">Caja ${esc(soles(rw.cash))} − pagos antes del cobro ${esc(soles(rw.pending))}${rw.dueItems.length ? ` (${rw.dueItems.slice(0, 3).map((d) => esc(d.name)).join(", ")}${rw.dueItems.length > 3 ? "…" : ""})` : ""} · comida de casa ~${esc(soles(rw.homeFoodNeed))}</div>
+// Tarjeta siempre visible: qué hay hasta el cobro y qué pagos se descuentan (se pueden marcar pagados)
+function paydayCard(rw) {
+  if (!rw) {
+    return `<details class="bkPay" open id="bkPay"><summary>💸 Hasta el cobro</summary><div class="bkEmpty">Agrega tus cuentas en Finanzas y aquí verás cuánto tienes libre hasta el cobro y qué pagos vienen antes.</div></details>`;
+  }
+  const ui = loadJson(UI_KEY, {});
+  const row = (d, later) => `
+    <div class="bkPayRow ${later ? "bkPayLater" : ""}">
+      <div class="bkPayName">${esc(d.name)}<span class="bkPayDay">${d.dueDay ? ` · día ${esc(d.dueDay)}` : ""}</span></div>
+      <div class="bkPayAmt">${esc(soles(d.amount))}</div>
+      ${d.id && !later ? `<button class="bkMiniBtn" data-bk-pay="${esc(d.id)}">✅ Pagué</button>` : ""}
     </div>`;
+  return `
+    <details class="bkPay" ${ui.payClosed ? "" : "open"} id="bkPay">
+      <summary>💸 Hasta el cobro · ${esc(rw.payday.label)} (${rw.payday.daysLeft} día${rw.payday.daysLeft === 1 ? "" : "s"}) · libre <b>${esc(soles(rw.free))}</b></summary>
+      <div class="bkPayLine"><span>Tienes en tus cuentas</span><b>${esc(soles(rw.cash))}</b></div>
+      <div class="bkPayLine"><span>− Pagos antes del cobro</span><b>${esc(soles(rw.pending))}</b></div>
+      ${rw.dueItems.length ? rw.dueItems.map((d) => row(d, false)).join("") : `<div class="bkHint">No tienes pagos pendientes antes del cobro.</div>`}
+      <div class="bkPayLine bkPayTotal"><span>= Libre hasta ${esc(rw.payday.label)}</span><b>${esc(soles(rw.free))}</b></div>
+      <div class="bkPayLine"><span>− Comida de casa (aprox.)</span><b>${esc(soles(rw.homeFoodNeed))}</b></div>
+      ${rw.routine?.total ? `<div class="bkPayLine"><span>− 🛡️ Tu rutina</span><b>${esc(soles(rw.routine.total))}</b></div>` : ""}
+      <div class="bkPayLine bkPayTotal"><span>= Para lo demás</span><b class="${rw.extra < 0 ? "bkNeg" : ""}">${esc(soles(rw.extra))}</b></div>
+      <div class="bkActions"><button class="bkBtn" data-bk-addpay>＋ Agregar un pago que viene</button></div>
+      ${rw.laterItems?.length ? `<details class="bkPayLaterBox"><summary>Después del cobro (${rw.laterItems.length}) · no se descuentan ahora</summary>${rw.laterItems.map((d) => row(d, true)).join("")}</details>` : ""}
+      <div class="bkDueMeta">Los pagos salen de Finanzas → Mission Control. Si ya pagaste uno, toca “Pagué” y deja de restarse.</div>
+    </details>`;
 }
 
 function streetCard(state) {
@@ -278,7 +288,6 @@ function renderDashboard(state, L, hasChat = false) {
         <div class="bkTile"><div class="bkTileVal">${esc(soles(thisWeek?.total || 0))}</div><div class="bkTileLbl">Llevan esta semana</div><div class="bkTileSub">${L.minimum.total ? (thisWeek.total > L.minimum.total ? `+${soles(thisWeek.total - L.minimum.total)} sobre el mínimo` : `${soles(L.minimum.total - thisWeek.total)} bajo el mínimo`) : ""}</div></div>
         <div class="bkTile"><div class="bkTileVal">${esc(soles(month.yo + month.fergis + month.otro))}</div><div class="bkTileLbl">Este mes</div><div class="bkTileSub">Tú ${esc(soles(month.yo))} · Fergis ${esc(soles(month.fergis))}</div></div>
       </div>
-      ${runwayCard(moneyNow(L))}
       ${streetCard(state)}
       <div class="bkCard">
         <div class="bkCardTitle">Gasto por semana</div>
@@ -466,6 +475,7 @@ export function renderBasket(state, env = {}) {
         <div><div class="bkTitle">🧺 La Canasta</div><div class="bkSub">Pega la lista, yo aprendo cómo compran</div></div>
       </div>
       <div class="bkTabs"><button class="bkTab bkTabOn" data-bk-view="chat">💬 Chat</button><button class="bkTab" data-bk-view="purchases">🧾 Compras guardadas (${(state.shoppingHistory || []).length})</button></div>
+      ${paydayCard(moneyNow(L))}
       ${renderDashboard(state, L, chat.length > 0)}
       <div class="bkLog" id="bkLog">${intro}${chat.map(messageHtml).join("")}<div class="bkTyping" id="bkTyping" hidden>Carl está pensando…</div></div>
       <div class="bkQuick">
@@ -650,6 +660,9 @@ export function wireBasket(root, ctx) {
     draw();
   }));
 
+  root.querySelector("#bkPay")?.addEventListener("toggle", (e) => { const ui = loadJson(UI_KEY, {}); ui.payClosed = !e.target.open; saveJson(UI_KEY, ui); });
+  root.querySelectorAll("[data-bk-pay]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); ctx.openPay?.(b.dataset.bkPay); }));
+  root.querySelector("[data-bk-addpay]")?.addEventListener("click", (e) => { e.preventDefault(); ctx.addPayment?.(); });
   root.querySelector("#bkDash")?.addEventListener("toggle", (e) => { const ui = loadJson(UI_KEY, {}); ui.dashClosed = !e.target.open; saveJson(UI_KEY, ui); });
 
   // Detalle al tocar barras y filas de los gráficos
@@ -972,6 +985,17 @@ function css() {
   .bkBack { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); color:inherit; border-radius:10px; width:36px; height:36px; font-size:18px; cursor:pointer; }
   .bkTitle { font-size:18px; font-weight:800; }
   .bkSub { font-size:12px; opacity:.65; }
+  .bkPay { background:rgba(124,92,255,.07); border:1px solid rgba(124,92,255,.3); border-radius:14px; padding:10px 12px; margin-bottom:8px; }
+  .bkPay > summary { cursor:pointer; font-weight:700; font-size:14px; }
+  .bkPayLine { display:flex; justify-content:space-between; font-size:13px; padding:4px 0; }
+  .bkPayTotal { border-top:1px solid rgba(255,255,255,.1); margin-top:2px; padding-top:6px; }
+  .bkPayRow { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center; font-size:12.5px; padding:4px 0 4px 10px; opacity:.95; }
+  .bkPayLater { opacity:.6; }
+  .bkPayDay { opacity:.6; font-size:11px; }
+  .bkPayAmt { font-weight:600; }
+  .bkMiniBtn { font-size:11px; padding:3px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.06); color:inherit; cursor:pointer; }
+  .bkPayLaterBox { margin-top:6px; font-size:12px; }
+  .bkPayLaterBox > summary { cursor:pointer; opacity:.75; }
   .bkDash { background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:10px 12px; }
   .bkDash > summary { cursor:pointer; font-weight:700; font-size:14px; }
   .bkTiles { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin:10px 0; }
