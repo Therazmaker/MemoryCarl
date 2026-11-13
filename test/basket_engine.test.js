@@ -100,3 +100,17 @@ test("gasto por semana y por categoría", () => {
   const c = categorySpend(history.map((e) => ({ ...e, items: e.items.map((i) => ({ ...i, category: i.productId === "gaseosa" ? "Bebidas" : "Despensa" })) })), { days: 30, now: NOW });
   assert.equal(c[0].category, "Despensa");
 });
+
+test("fracciones al inicio y bebidas básicas", () => {
+  const [a, b] = parseListText("1/2 kilo de arroz\nqueso 1/4 kg");
+  assert.equal(a.name, "Arroz"); assert.equal(a.qty, 0.5); assert.equal(a.unit, "kg");
+  assert.equal(b.name, "Queso"); assert.equal(b.qty, 0.25);
+  const prods = [{ id: "agua", name: "Agua 7L", price: 8, category: "Bebidas", tier: "base_diario" }, { id: "gas", name: "Gaseosa", price: 10, category: "Bebidas" }];
+  const r = learnRhythm([
+    { date: "2026-11-01", items: [{ productId: "agua", name: "Agua", qty: 1, price: 8 }, { productId: "gas", name: "Gaseosa", qty: 1, price: 10 }] },
+    { date: "2026-11-08", items: [{ productId: "agua", name: "Agua", qty: 1, price: 8 }, { productId: "gas", name: "Gaseosa", qty: 1, price: 10 }] },
+  ], { now: new Date("2026-11-10T12:00:00"), products: prods });
+  const names = weeklyMinimum(r).items.map((i) => i.name);
+  assert.ok(names.includes("Agua 7L"), "el agua básica entra al mínimo");
+  assert.ok(!names.includes("Gaseosa"), "la gaseosa sin nivel sigue siendo gusto por su nombre");
+});

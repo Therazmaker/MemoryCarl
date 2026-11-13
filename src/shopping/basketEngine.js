@@ -73,7 +73,7 @@ export function parseListText(text = "") {
     let m = s.match(/(?:\(\s*(\d+(?:[.,]\d+)?)\s*\)|\bx\s*(\d+(?:[.,]\d+)?))\s*$/i);
     if (m) { qty = parseQty(m[1] || m[2]); s = s.slice(0, m.index).trim(); }
     // cantidad + unidad al inicio: "2 kg de arroz", "dos paquetes de fideos", "1/2 kilo"
-    m = s.match(/^(\d+(?:[.,]\d+)?|\d+\/\d+|un|una|uno|dos|tres|cuatro|cinco|seis|medio|media)\s*([a-zñ]+)?\s*(?:de\s+)?(.*)$/i);
+    m = s.match(/^(\d+\/\d+|\d+(?:[.,]\d+)?|un|una|uno|dos|tres|cuatro|cinco|seis|medio|media)\s*([a-zñ]+)?\s*(?:de\s+)?(.*)$/i);
     if (m && m[3]) {
       const u = m[2] ? UNIT_WORDS[m[2].toLowerCase()] : null;
       if (u || !m[2]) {
@@ -91,7 +91,7 @@ export function parseListText(text = "") {
       if (!u && parseQty(m[1]) != null) { qty = parseQty(m[1]); s = m[2]; }
     }
     // cantidad + unidad al final: "arroz 2kg", "pollo 1 kilo"
-    m = s.match(/^(.*?)\s+(\d+(?:[.,]\d+)?|\d+\/\d+)\s*([a-zñ]+)?$/i);
+    m = s.match(/^(.*?)\s+(\d+\/\d+|\d+(?:[.,]\d+)?)\s*([a-zñ]+)?$/i);
     if (m && m[1] && (!m[3] || UNIT_WORDS[m[3].toLowerCase()])) {
       qty = qty ?? parseQty(m[2]);
       unit = unit || (m[3] ? UNIT_WORDS[m[3].toLowerCase()] : "");
@@ -212,7 +212,14 @@ export function learnRhythm(history = [], { now = new Date(), products = [] } = 
   return out;
 }
 
-const isTreat = (s) => /gusto|premio|premium/.test(String(s?.tier || "")) || /snack|golosin|dulce|gaseosa|bebida|licor|cerveza|antojo/i.test(String(s?.category || ""));
+// La clasificación del producto manda (una bebida "base_diario" como agua o leche es básica);
+// la categoría y el nombre solo se usan si el producto no tiene nivel.
+const isTreat = (s) => {
+  const tier = String(s?.tier || "");
+  if (/gusto|premio|premium/.test(tier)) return true;
+  if (tier) return false;
+  return /snack|golosin|dulce|gaseosa|licor|cerveza|antojo/i.test(`${s?.category || ""} ${s?.name || ""}`);
+};
 
 /**
  * Canasta mínima semanal: lo básico (no gustos) que se consume en 7 días, a precio actual.
