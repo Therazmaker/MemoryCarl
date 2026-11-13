@@ -836,9 +836,10 @@ export function wireBasket(root, ctx) {
       const hint = row.querySelector("[data-weigh-hint]");
       const upd = () => {
         const l = weighedLine({ pricePerKg: Number(row.dataset.ppk) || 0, paid: row.querySelector('[data-f="paid"]').value, kg: row.querySelector('[data-f="kg"]').value });
-        if (!l || !hint) return;
+        if (!hint) return;
+        if (!l) { if (Number(row.querySelector('[data-f="paid"]').value) > 0) hint.textContent = "Sin precio por kg todavía: pon también los kg"; return; }
         hint.textContent = l.estimated
-          ? (l.kg ? `≈ ${l.kg} kg a S/ ${l.pricePerKg}/kg (estimado)` : "Sin precio por kg todavía: pon también los kg")
+          ? `≈ ${l.kg} kg a S/ ${l.pricePerKg}/kg (estimado)`
           : `${l.kg} kg · S/ ${l.paid} · S/ ${l.pricePerKg}/kg${Math.abs(l.pricePerKg - (Number(row.dataset.ppk) || 0)) > 0.009 ? " (lo aprendo)" : ""}`;
       };
       row.querySelectorAll("input").forEach((x) => x.addEventListener("input", upd));
@@ -865,7 +866,13 @@ export function wireBasket(root, ctx) {
           paid: row?.querySelector('[data-f="paid"]')?.value,
           kg: row?.querySelector('[data-f="kg"]')?.value,
         });
-        if (!line) continue;
+        if (!line) {
+          if (Number(row?.querySelector('[data-f="paid"]')?.value) > 0) {
+            ctx.toast?.(`Pon también los kg de ${product?.name || it.name}: aún no sé su precio por kg.`);
+            return;
+          }
+          continue;
+        }
         if (product && !line.estimated && line.pricePerKg > 0 && Math.abs(Number(product.price || 0) - line.pricePerKg) > 0.009) {
           product.history = Array.isArray(product.history) ? product.history : [];
           product.history.push({ price: product.price, date: new Date().toISOString() });

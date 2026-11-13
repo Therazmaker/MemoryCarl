@@ -53,7 +53,8 @@ export function weighedLine({ pricePerKg = 0, paid = 0, kg = 0 } = {}) {
   const pd = Math.max(0, Number(paid) || 0);
   const k = Math.max(0, Number(kg) || 0);
   if (pd > 0 && k > 0) return { paid: round2(pd), kg: round3(k), pricePerKg: round2(pd / k), estimated: false };
-  if (pd > 0) return { paid: round2(pd), kg: ppk > 0 ? round3(pd / ppk) : 0, pricePerKg: round2(ppk), estimated: true };
+  // Sin precio por kg conocido no se puede estimar el peso: hacen falta los kg
+  if (pd > 0) return ppk > 0 ? { paid: round2(pd), kg: round3(pd / ppk), pricePerKg: round2(ppk), estimated: true } : null;
   if (k > 0 && ppk > 0) return { paid: round2(k * ppk), kg: round3(k), pricePerKg: round2(ppk), estimated: false };
   return null;
 }

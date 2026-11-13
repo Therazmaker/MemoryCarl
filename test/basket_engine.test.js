@@ -158,3 +158,8 @@ test("peso: el ritmo cuenta kg a precio por kg y la lista estima con eso", () =>
   assert.equal(a.items[0].line, 2);
   assert.equal(a.items[1].qty, 0.75); // sin peso escrito: lo de siempre
 });
+
+test("peso: solo lo pagado sin precio por kg conocido → null (hacen falta los kg)", () => {
+  assert.equal(weighedLine({ pricePerKg: 0, paid: 3 }), null);
+  assert.equal(weighedLine({ pricePerKg: 0, paid: 3, kg: 0.5 }).pricePerKg, 6);
+});
