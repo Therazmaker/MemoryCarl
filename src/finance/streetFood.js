@@ -71,16 +71,31 @@ export function streetEntries(ledger = []) {
     && (e.category === STREET_CATEGORY || /^🍽️/.test(String(e.note || ""))));
 }
 
-/** Próximo cobro: el 15 o el último día del mes (si hoy es día de cobro, se cuenta el siguiente). */
+const DOW_SHORT = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+
+/** Si el día cae sábado o domingo, se paga el viernes anterior (último día hábil). */
+function lastBusinessDayOnOrBefore(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  while (x.getDay() === 0 || x.getDay() === 6) x.setDate(x.getDate() - 1);
+  return x;
+}
+
+/**
+ * Próximo cobro: el último día hábil hasta el 15 y hasta fin de mes
+ * (si el 15 cae domingo se cobra el viernes 13). Si hoy es día de cobro, ya se cobró: cuenta el siguiente.
+ */
 export function nextPayday(now = new Date()) {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-  let date;
-  if (d.getDate() < 15) date = new Date(d.getFullYear(), d.getMonth(), 15);
-  else if (d.getDate() < lastDay) date = new Date(d.getFullYear(), d.getMonth(), lastDay);
-  else date = new Date(d.getFullYear(), d.getMonth() + 1, 15);
+  const candidates = [];
+  for (let k = 0; k < 3; k++) {
+    const y = d.getFullYear();
+    const mo = d.getMonth() + k;
+    candidates.push(lastBusinessDayOnOrBefore(new Date(y, mo, 15)));
+    candidates.push(lastBusinessDayOnOrBefore(new Date(y, mo + 1, 0)));
+  }
+  const date = candidates.find((c) => c > d);
   const daysLeft = Math.max(1, Math.round((date - d) / DAY));
-  return { date, day: date.getDate(), daysLeft, label: date.getDate() === 15 ? "el 15" : `el ${date.getDate()}` };
+  return { date, day: date.getDate(), daysLeft, label: `el ${DOW_SHORT[date.getDay()]} ${date.getDate()}` };
 }
 
 const owed = (i) => {

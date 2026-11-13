@@ -13,11 +13,20 @@ test("adivina el tipo de comida por texto y por hora", () => {
   assert.equal(mealTypeOf({ note: streetNote("merienda_ninos", "galletas"), date: "2026-11-13T21:00:00" }), "merienda_ninos");
 });
 
-test("próximo cobro: 15 o último día", () => {
-  assert.equal(nextPayday(new Date(2026, 10, 9)).day, 15);
-  assert.equal(nextPayday(new Date(2026, 10, 9)).daysLeft, 6);
-  assert.equal(nextPayday(new Date(2026, 10, 15)).day, 30);
-  assert.equal(nextPayday(new Date(2026, 10, 30)).date.getMonth(), 11);
+test("próximo cobro: último día hábil hasta el 15 y hasta fin de mes", () => {
+  // diciembre 2026: el 15 es martes, el 31 jueves
+  assert.equal(nextPayday(new Date(2026, 11, 9)).day, 15);
+  assert.equal(nextPayday(new Date(2026, 11, 9)).daysLeft, 6);
+  assert.equal(nextPayday(new Date(2026, 11, 15)).day, 31);
+  assert.equal(nextPayday(new Date(2026, 11, 31)).date.getMonth(), 0);
+  // noviembre 2026: el 15 cae domingo → se cobra el viernes 13
+  assert.equal(nextPayday(new Date(2026, 10, 9)).day, 13);
+  assert.equal(nextPayday(new Date(2026, 10, 9)).label, "el vie 13");
+  // ese viernes ya se cobró: el siguiente es el lunes 30
+  assert.equal(nextPayday(new Date(2026, 10, 13)).day, 30);
+  assert.equal(nextPayday(new Date(2026, 10, 14)).day, 30);
+  // fin de mes en domingo (mayo 2026: 31 domingo) → viernes 29
+  assert.equal(nextPayday(new Date(2026, 4, 20)).day, 29);
 });
 
 test("lo libre hasta el cobro descuenta lo que vence antes y la comida de casa", () => {
@@ -27,7 +36,7 @@ test("lo libre hasta el cobro descuenta lo que vence antes y la comida de casa",
     { name: "Agua", dueDay: 5, status: "paid", amount: 40, pendingAmount: 0 },
     { name: "Préstamo", dueDay: 3, status: "pending", amount: 150, pendingAmount: 50 },
   ];
-  const rw = runway({ availableCash: 400, items, now: new Date(2026, 10, 9), homeFoodPerWeek: 140 });
+  const rw = runway({ availableCash: 400, items, now: new Date(2026, 11, 9), homeFoodPerWeek: 140 });
   assert.equal(rw.pending, 130, "luz + lo que falta del préstamo; internet vence después del cobro");
   assert.equal(rw.free, 270);
   assert.equal(rw.payday.daysLeft, 6);
@@ -75,11 +84,12 @@ test("rutinas: se leen de una frase y se apartan hasta el cobro", () => {
   assert.equal(routineDaysUntil([1, 2, 3, 4, 5], new Date(2026, 10, 9), new Date(2026, 10, 15)), 5);
   assert.equal(daysLabel([1, 2, 3, 4, 5]), "lunes a viernes");
   const routines = routinesOf([{ id: "v", name: "Volt", price: 2.5, routine: { qty: 1, days: [1, 2, 3, 4, 5] } }, { id: "x", name: "Arroz", price: 20 }]);
-  const rw = runway({ availableCash: 400, items: [], now: new Date(2026, 10, 9), homeFoodPerWeek: 140, routines });
-  assert.equal(rw.routine.total, 12.5);
-  assert.equal(rw.extra, 400 - 120 - 12.5);
+  // miércoles 9 dic → cobro martes 15: mié, jue, vie, lun = 4 días de trabajo
+  const rw = runway({ availableCash: 400, items: [], now: new Date(2026, 11, 9), homeFoodPerWeek: 140, routines });
+  assert.equal(rw.routine.total, 10);
+  assert.equal(rw.extra, 400 - 120 - 10);
   // un gasto que se come la rutina queda en "no"
-  assert.equal(impact(rw, 270).status, "no");
+  assert.equal(impact(rw, 275).status, "no");
 });
 
 import { parseSpendIntent } from "../src/finance/streetFood.js";
