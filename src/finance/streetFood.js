@@ -190,3 +190,46 @@ export function streetPatterns(entries = [], { now = new Date(), skipped = [] } 
     insights,
   };
 }
+
+/**
+ * ¿El mensaje es "voy a gastar en comida fuera"? Saca el monto (suma todo lo que cuesta) y el tipo de comida.
+ * "Voy a comprar almuerzo en la calle. Cuesta 12.10 más una Pepsi 750ml a 2.90" → { amount: 15, mealType: "almuerzo" }
+ * Las medidas (750ml, 1kg, 2L) no cuentan como plata.
+ * @returns {{ amount: number, desc: string, mealType: string } | null}
+ */
+export function parseSpendIntent(text = "", when = new Date()) {
+  const t = norm(text);
+  const intent = /\b(voy a|vamos a|quiero|queremos|me provoca|nos provoca|pienso|pensamos|puedo|podemos|estoy por)\b.*\b(compr|pedir|pido|gastar|comer|almorzar|cenar|desayunar)/.test(t)
+    || /\b(me|nos) alcanza\b/.test(t)
+    || /\b(cuesta|cuestan|sale|salen|vale|valen)\b/.test(t);
+  const food = /\b(almuerz|almorzar|cena|cenar|desayun|merienda|lonche|snack|menu|comida|calle|delivery|pollo|chifa|pizza|hamburguesa|broaster|salchipapa|sanguch|cafe|bebida|gaseosa|pepsi|coca|inca|jugo|postre|helado)/.test(t);
+  if (!intent || !food) return null;
+  // Montos: números que no son medidas, horas ni cantidades de gente
+  const UNIT_AFTER = /^\s*(ml|cc|g|gr|grs|gramos|kg|kilos?|l|lt|lts|litros?|oz|cm|x\b|:|%|am\b|pm\b|hrs?\b|horas|min|personas|platos|dias|d\b)/;
+  const found = [];
+  const re = /\d+(?:[.,]\d+)?/g;
+  let m;
+  while ((m = re.exec(t))) {
+    const end = m.index + m[0].length;
+    if (UNIT_AFTER.test(t.slice(end))) continue;
+    // "para 4", "somos 3", "entre los 2": cantidad de gente, no plata
+    if (/\b(para|somos|seremos|entre)\s+(los\s+|las\s+)?$/.test(t.slice(0, m.index))) continue;
+    found.push({ n: Number(m[0].replace(",", ".")), int: !/[.,]/.test(m[0]), index: m.index, end });
+  }
+  const nums = [];
+  for (let i = 0; i < found.length; i++) {
+    const cur = found[i];
+    const next = found[i + 1];
+    // "2 pollos a 30" → 2 × 30
+    if (next && cur.int && cur.n <= 20 && /^\s+[a-zñ]+(\s+[a-zñ]+){0,3}\s+(a|de|por|x)\s+(s\/\.?\s*)?$/.test(t.slice(cur.end, next.index))) {
+      nums.push(cur.n * next.n);
+      i++;
+      continue;
+    }
+    if (cur.n > 0 && cur.n < 5000) nums.push(cur.n);
+  }
+  if (!nums.length) return null;
+  const amount = round2(nums.reduce((s, n) => s + n, 0));
+  const desc = String(text).replace(/\s+/g, " ").trim().slice(0, 80);
+  return { amount, desc, mealType: guessMealType(text, when) };
+}
