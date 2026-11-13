@@ -89,3 +89,10 @@ test("day refine: sin clave no llama", async () => {
   await assert.rejects(() => requestGeminiDayRefine(payload, { settings: { ...settings, apiKey: "" }, fetchImpl, sleep }), /no configurado/);
   assert.equal(calls.length, 0);
 });
+
+test("day refine: respuesta bloqueada (SAFETY) no reintenta", async () => {
+  const blocked = { ok: true, status: 200, text: async () => "", json: async () => ({ candidates: [{ finishReason: "SAFETY" }] }) };
+  const { calls, fetchImpl } = seq([blocked]);
+  await assert.rejects(() => requestGeminiDayRefine(payload, { settings, fetchImpl, sleep }), /bloqueó/);
+  assert.equal(calls.length, 1);
+});

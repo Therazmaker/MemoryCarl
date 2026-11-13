@@ -411,7 +411,9 @@ ${JSON.stringify(compactDayPayload(payload))}
     const finish = json?.candidates?.[0]?.finishReason;
     let text = geminiResponseText(json);
     if (!text) {
-      const block = json?.promptFeedback?.blockReason;
+      // Bloqueo del prompt o de la respuesta (SAFETY, RECITATION…): reintentar da lo mismo
+      const block = json?.promptFeedback?.blockReason
+        || (/^(SAFETY|RECITATION|BLOCKLIST|PROHIBITED_CONTENT|SPII|IMAGE_SAFETY)$/.test(String(finish || "")) ? finish : "");
       lastError = new Error(block ? `Gemini bloqueó el contenido (${block})` : `Gemini day refine: sin contenido en respuesta${finish ? ` (${finish})` : ""}`);
       if (block) break;
       continue;
