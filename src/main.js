@@ -92,6 +92,7 @@ import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealB
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
 import { renderBasket, wireBasket } from "./shopping/basket-ui.js";
+import { STREET_CATEGORY, streetNote } from "./finance/streetFood.js";
 import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
 import {
   MEAL_SLOTS,
@@ -3974,6 +3975,15 @@ function view(){
         window.FINANCE.updateMovement(mv.id, { amount: Number(amount||0), ...(dateISO ? { date: dateISO } : {}) });
         financeRecomputeBalances();
         if (window.financePushToSupabase) window.financePushToSupabase();
+      },
+      // Comida en la calle: se registra como gasto en Finanzas con el tipo de comida en la nota
+      recordStreetExpense: ({ amount, desc, mealType, who }) => {
+        const accountId = state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "";
+        if(!accountId) return false;
+        const entry = addFinanceEntry({ type:"expense", amount, accountId, category: STREET_CATEGORY, reason:"normal", note: streetNote(mealType, desc), date: new Date().toISOString(), paidBy: who === "fergis" ? "fergis" : "me" });
+        if(!entry) return false;
+        if (window.financePushToSupabase) window.financePushToSupabase();
+        return true;
       },
       recordFinance: (o) => {
         const accountId = state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "";
@@ -10403,6 +10413,17 @@ function routineCard(r){
   `;
 }
 
+// Datos de Finanzas para La Canasta ("¿Me alcanza?"): caja real y obligaciones del mes
+function basketEnv_(){
+  return {
+    getMoney: () => {
+      if(!(state.financeAccounts||[]).length) return null;
+      const m = financeMissionControlModel(getCurrentMonthKey());
+      return { availableCash: m.availableCash, items: m.items };
+    },
+  };
+}
+
 function viewShopping(){
   const sub = state.shoppingSubtab || "lists";
   const histCount = (state.shoppingHistory||[]).length;
@@ -10420,7 +10441,7 @@ function viewShopping(){
   }
 
   if(sub === "basket"){
-    return renderBasket(state);
+    return renderBasket(state, basketEnv_());
   }
 
   if(sub === "schedule"){

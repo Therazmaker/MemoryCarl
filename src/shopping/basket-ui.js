@@ -13,6 +13,100 @@ import { parseListText, learnRhythm, weeklyMinimum, analyzeList, weeklySpend, ca
 import { enrichProductData } from "./productIntelligence.js";
 import { callClaude } from "./shoppingAi.js";
 import { getClaudeSettings } from "../services/claudeClient.js";
+import { MEAL_TYPES, mealLabel, mealEmoji, guessMealType, runway, impact, streetPatterns, streetEntries } from "../finance/streetFood.js";
+
+const SKIPS_KEY = "memorycarl_street_skips_v1";
+// Datos de Finanzas que pasa main.js (caja real y obligaciones del mes)
+let ENV = {};
+const loadSkips = () => { const v = loadJson(SKIPS_KEY, []); return Array.isArray(v) ? v : []; };
+
+function moneyNow(L) {
+  try {
+    const m = ENV.getMoney?.();
+    if (!m) return null;
+    return runway({ availableCash: m.availableCash, items: m.items, homeFoodPerWeek: L.minimum.total });
+  } catch (_e) { return null; }
+}
+
+const STATUS = {
+  ok: { icon: "✅", label: "Alcanza", cls: "bkStOk" },
+  justo: { icon: "⚠️", label: "Queda justo", cls: "bkStWarn" },
+  no: { icon: "🛑", label: "No llegan al cobro", cls: "bkStBad" },
+};
+
+function runwayCard(rw) {
+  if (!rw) return "";
+  const share = rw.free > 0 ? Math.max(0, Math.min(100, (rw.homeFoodNeed / rw.free) * 100)) : 100;
+  return `
+    <div class="bkCard">
+      <div class="bkCardTitle">💸 Hasta el cobro (${esc(rw.payday.label)}, en ${rw.payday.daysLeft} día${rw.payday.daysLeft === 1 ? "" : "s"})</div>
+      <div class="bkRunNums">
+        <div><div class="bkTileVal">${esc(soles(rw.free))}</div><div class="bkTileLbl">libre (S/ ${esc((rw.perDay).toFixed(2))} por día)</div></div>
+        <div><div class="bkTileVal ${rw.extra < 0 ? "bkNeg" : ""}">${esc(soles(rw.extra))}</div><div class="bkTileLbl">extra, ya separada la comida de casa</div></div>
+      </div>
+      <div class="bkSplit" title="Comida de casa vs. extra">
+        <div class="bkSplitHome" style="width:${share}%"></div>
+      </div>
+      <div class="bkDueMeta">Caja ${esc(soles(rw.cash))} − pagos antes del cobro ${esc(soles(rw.pending))}${rw.dueItems.length ? ` (${rw.dueItems.slice(0, 3).map((d) => esc(d.name)).join(", ")}${rw.dueItems.length > 3 ? "…" : ""})` : ""} · comida de casa ~${esc(soles(rw.homeFoodNeed))}</div>
+    </div>`;
+}
+
+function streetCard(state) {
+  const p = streetPatterns(streetEntries(state.financeLedger || []), { skipped: loadSkips() });
+  const max = Math.max(1, ...p.byType.map((t) => Math.max(t.week.total, t.typical.total)));
+  const rows = p.byType.filter((t) => t.week.count || t.typical.count).map((t) => `
+    <div class="bkHRow bkStreetRow" data-tip="${esc(t.label)}: esta semana ${t.week.count} (${esc(soles(t.week.total))}) · lo normal ${t.typical.count} por semana (${esc(soles(t.typical.total))})">
+      <div class="bkHLabel">${t.emoji} ${esc(t.label)}</div>
+      <div class="bkHTrack bkMarkTrack"><div class="bkHFill" style="width:${Math.max(2, (t.week.total / max) * 100)}%"></div>${t.typical.total ? `<div class="bkMark" style="left:${(t.typical.total / max) * 100}%"></div>` : ""}</div>
+      <div class="bkHVal">${t.week.count}× ${esc(soles(t.week.total))}</div>
+    </div>`).join("");
+  return `
+    <div class="bkCard">
+      <div class="bkCardTitle">🍔 Comida en la calle esta semana · ${esc(soles(p.weekTotal))}</div>
+      ${rows || `<div class="bkEmpty">Cuando usen “¿Me alcanza?” y compren, aquí verán desayunos, almuerzos, cenas, snacks y meriendas.</div>`}
+      ${rows ? `<div class="bkDueMeta">La rayita amarilla es lo normal por semana (últimas 4). Este mes: ${esc(soles(p.month))} en ${p.monthCount} compra${p.monthCount === 1 ? "" : "s"}.</div>` : ""}
+      ${p.insights.map((i) => `<div class="bkInsight">• ${esc(i)}</div>`).join("")}
+      <div class="bkTip" data-tip-out></div>
+    </div>`;
+}
+
+function checkCard(msg, L) {
+  const d = msg.data;
+  if (d.decided) {
+    const what = `${mealEmoji(d.mealType)} ${esc(mealLabel(d.mealType))}${d.desc ? ` · ${esc(d.desc)}` : ""} · ${esc(soles(d.amount))}`;
+    return `<div class="bkCardMsg"><div class="bkSaved ${d.decided === "skipped" ? "" : "bkSavedNeutral"}">${d.decided === "skipped" ? "💪 Mejor no" : "🍽️ Lo compraron"}: ${what}</div></div>`;
+  }
+  const rw = moneyNow(L);
+  return `
+    <div class="bkCardMsg" data-check="${esc(msg.id)}">
+      <div class="bkGroupTitle">🍔 ¿Me alcanza?</div>
+      <div class="bkFormRow">
+        <input class="bkInput" data-c="desc" placeholder="¿Qué? (pollo, menú, galletas…)" value="${esc(d.desc || "")}"/>
+        <input class="bkInput bkNum bkAmount" data-c="amount" type="number" inputmode="decimal" step="0.5" min="0" placeholder="S/" value="${esc(d.amount || "")}"/>
+      </div>
+      <div class="bkMeals">${MEAL_TYPES.map((m) => `<button class="bkMeal ${d.mealType === m.id ? "bkMealOn" : ""}" data-meal="${m.id}">${m.emoji} ${esc(m.label)}</button>`).join("")}</div>
+      <div class="bkFormRow"><span>¿Quién paga?</span>${BUYERS.map((b) => `<button class="bkMeal ${d.who === b.id ? "bkMealOn" : ""}" data-who="${b.id}">${b.label}</button>`).join("")}</div>
+      <div class="bkImpact" data-impact>${impactHtml(rw, d.amount)}</div>
+      <div class="bkActions">
+        <button class="bkBtn" data-c-skip>💪 Mejor no</button>
+        <button class="bkBtn bkBtnPrimary" data-c-buy>🍽️ Lo compramos</button>
+      </div>
+    </div>`;
+}
+
+function impactHtml(rw, amount) {
+  if (!rw) return `<div class="bkHint">Para saber si alcanza necesito tus cuentas en Finanzas.</div>`;
+  if (!(Number(amount) > 0)) return `<div class="bkHint">Libre hasta ${esc(rw.payday.label)}: <b>${esc(soles(rw.free))}</b> (S/ ${rw.perDay.toFixed(2)} por día). Después de la comida de casa quedan ${esc(soles(rw.extra))}. Escribe cuánto cuesta.</div>`;
+  const im = impact(rw, amount);
+  const st = STATUS[im.status];
+  return `
+    <div class="bkVerdict ${st.cls}">${st.icon} ${st.label}</div>
+    <div class="bkImpRow"><span>Libre hasta ${esc(rw.payday.label)}</span><b>${esc(soles(rw.free))} → ${esc(soles(im.freeAfter))}</b></div>
+    <div class="bkImpRow"><span>Por día (${rw.payday.daysLeft} d)</span><b>S/ ${rw.perDay.toFixed(2)} → S/ ${im.perDayAfter.toFixed(2)}</b></div>
+    <div class="bkImpRow"><span>Extra después de la comida de casa</span><b class="${im.extraAfter < 0 ? "bkNeg" : ""}">${esc(soles(im.extraAfter))}</b></div>
+    ${im.status === "no" ? `<div class="bkHint">Si lo compran, falta${im.extraAfter < 0 ? `n ${esc(soles(-im.extraAfter))}` : ""} para comer en casa hasta el cobro.</div>` : ""}`;
+}
+
 
 const CHAT_KEY = "memorycarl_basket_chat_v1";
 const UI_KEY = "memorycarl_basket_ui_v1";
@@ -126,6 +220,8 @@ function renderDashboard(state, L, hasChat = false) {
         <div class="bkTile"><div class="bkTileVal">${esc(soles(thisWeek?.total || 0))}</div><div class="bkTileLbl">Llevan esta semana</div><div class="bkTileSub">${L.minimum.total ? (thisWeek.total > L.minimum.total ? `+${soles(thisWeek.total - L.minimum.total)} sobre el mínimo` : `${soles(L.minimum.total - thisWeek.total)} bajo el mínimo`) : ""}</div></div>
         <div class="bkTile"><div class="bkTileVal">${esc(soles(month.yo + month.fergis + month.otro))}</div><div class="bkTileLbl">Este mes</div><div class="bkTileSub">Tú ${esc(soles(month.yo))} · Fergis ${esc(soles(month.fergis))}</div></div>
       </div>
+      ${runwayCard(moneyNow(L))}
+      ${streetCard(state)}
       <div class="bkCard">
         <div class="bkCardTitle">Gasto por semana</div>
         ${weeks}
@@ -215,6 +311,7 @@ function buyForm(msg, ctx) {
 
 function messageHtml(msg) {
   if (msg.role === "user") return `<div class="bkMsg bkMsgUser"><div class="bkBubble">${esc(msg.text).replace(/\n/g, "<br>")}</div></div>`;
+  if (msg.type === "check") return `<div class="bkMsg bkMsgCarl">${checkCard(msg, learn(ENV.state || {}))}</div>`;
   const body = msg.type === "analysis" ? analysisCard(msg) : `<div class="bkBubble">${esc(msg.text).replace(/\n/g, "<br>")}</div>`;
   return `<div class="bkMsg bkMsgCarl">${msg.type === "analysis" && msg.text ? `<div class="bkBubble">${esc(msg.text)}</div>` : ""}${body}</div>`;
 }
@@ -271,7 +368,8 @@ function renderPurchases(state, ui) {
     ${hist.length > shown.length ? `<button class="bkBtn" data-bk-allpurch>Ver las ${hist.length}</button>` : ""}`;
 }
 
-export function renderBasket(state) {
+export function renderBasket(state, env = {}) {
+  ENV = { ...env, state };
   const L = learn(state);
   const chat = loadChat();
   const ui = loadJson(UI_KEY, {});
@@ -300,6 +398,7 @@ export function renderBasket(state) {
       ${renderDashboard(state, L, chat.length > 0)}
       <div class="bkLog" id="bkLog">${intro}${chat.map(messageHtml).join("")}<div class="bkTyping" id="bkTyping" hidden>Carl está pensando…</div></div>
       <div class="bkQuick">
+        <button class="bkChipBtn bkChipHot" data-bk-quick="check">🍔 ¿Me alcanza?</button>
         <button class="bkChipBtn" data-bk-quick="due">🔔 ¿Qué toca comprar?</button>
         <button class="bkChipBtn" data-bk-quick="min">📉 ¿Cuánto es lo mínimo?</button>
         ${chat.length ? `<button class="bkChipBtn" data-bk-quick="clear">🧹 Limpiar chat</button>` : ""}
@@ -487,6 +586,13 @@ export function wireBasket(root, ctx) {
       rerender();
       return;
     }
+    const alc = lower.match(/me alcanza(?: para)?\s*(.*?)\s*(?:s\/\s*)?(\d+(?:[.,]\d+)?)\s*(?:soles)?\s*\??$/);
+    if (alc) {
+      const desc = alc[1].replace(/\b(un|una|unos)\b/g, "").trim();
+      push({ role: "carl", type: "check", data: { amount: Number(alc[2].replace(",", ".")), desc, mealType: guessMealType(desc, new Date()), who: "yo", decided: null } });
+      rerender();
+      return;
+    }
     if (/qu[eé] (toca|falta|hay que comprar)/.test(lower)) { push({ role: "carl", type: "text", text: dueText(L) }); rerender(); return; }
     if (/m[ií]nimo/.test(lower)) { push({ role: "carl", type: "text", text: minimumText(L) }); rerender(); return; }
     rerender();
@@ -504,10 +610,72 @@ export function wireBasket(root, ctx) {
     const q = b.dataset.bkQuick;
     const L = learn(state);
     if (q === "clear") { if (confirm("¿Limpiar el chat? Las compras guardadas no se borran.")) { saveChat([]); rerender(); } return; }
+    if (q === "check") {
+      push({ role: "carl", type: "check", data: { amount: "", desc: "", mealType: guessMealType("", new Date()), who: "yo", decided: null } });
+      rerender();
+      return;
+    }
     push({ role: "user", text: q === "due" ? "¿Qué toca comprar?" : "¿Cuánto es lo mínimo para la semana?" });
     push({ role: "carl", type: "text", text: q === "due" ? dueText(L) : minimumText(L) });
     rerender();
   }));
+
+  root.querySelectorAll("[data-check]").forEach((card) => {
+    const id = card.dataset.check;
+    const read = () => ({
+      desc: card.querySelector('[data-c="desc"]').value.trim(),
+      amount: Number(card.querySelector('[data-c="amount"]').value) || 0,
+    });
+    const refresh = () => {
+      const { amount } = read();
+      const box = card.querySelector("[data-impact]");
+      if (box) box.innerHTML = impactHtml(moneyNow(learn(state)), amount);
+    };
+    card.querySelector('[data-c="amount"]')?.addEventListener("input", refresh);
+    card.querySelector('[data-c="desc"]')?.addEventListener("change", () => {
+      // Si escribe "lonchera", "pollo a la brasa"… se ajusta el tipo de comida
+      const { desc } = read();
+      if (!desc) return;
+      const guess = guessMealType(desc, new Date());
+      update(id, (m) => { m.data.desc = desc; m.data.amount = read().amount; m.data.mealType = guess; });
+      card.querySelectorAll("[data-meal]").forEach((b) => b.classList.toggle("bkMealOn", b.dataset.meal === guess));
+    });
+    card.querySelectorAll("[data-meal]").forEach((b) => b.addEventListener("click", () => {
+      update(id, (m) => { m.data.mealType = b.dataset.meal; });
+      card.querySelectorAll("[data-meal]").forEach((x) => x.classList.toggle("bkMealOn", x === b));
+    }));
+    card.querySelectorAll("[data-who]").forEach((b) => b.addEventListener("click", () => {
+      update(id, (m) => { m.data.who = b.dataset.who; });
+      card.querySelectorAll("[data-who]").forEach((x) => x.classList.toggle("bkMealOn", x === b));
+    }));
+    const decide = (decision) => {
+      const { desc, amount } = read();
+      if (!(amount > 0)) { ctx.toast?.("Escribe cuánto cuesta."); return; }
+      const msg = loadChat().find((x) => x.id === id);
+      const mealType = msg?.data?.mealType || guessMealType(desc, new Date());
+      const who = msg?.data?.who || "yo";
+      const rw = moneyNow(learn(state));
+      const im = rw ? impact(rw, amount) : null;
+      if (decision === "bought") {
+        const ok = ctx.recordStreetExpense?.({ amount, desc, mealType, who });
+        if (ok === false) { ctx.toast?.("No pude registrarlo: revisa tus cuentas en Finanzas."); return; }
+      } else {
+        const skips = loadSkips();
+        skips.push({ ts: Date.now(), amount, desc, mealType });
+        saveJson(SKIPS_KEY, skips.slice(-300));
+      }
+      update(id, (m) => { m.data = { ...m.data, desc, amount, mealType, who, decided: decision }; });
+      const p = streetPatterns(streetEntries(state.financeLedger || []), { skipped: loadSkips() });
+      const tail = p.insights[0] ? `\n${p.insights[0]}` : "";
+      push({ role: "carl", type: "text", text: decision === "bought"
+        ? `Anotado en Finanzas (${mealLabel(mealType).toLowerCase()}, ${soles(amount)}).${im ? ` Quedan ${soles(im.freeAfter)} libres hasta ${rw.payday.label}: S/ ${im.perDayAfter.toFixed(2)} por día.` : ""}${tail}`
+        : `Bien ahí 💪 Esos ${soles(amount)} siguen en casa.${rw ? ` Libre hasta ${rw.payday.label}: ${soles(rw.free)}.` : ""}${tail}` });
+      ctx.persist();
+      rerender();
+    };
+    card.querySelector("[data-c-buy]")?.addEventListener("click", () => decide("bought"));
+    card.querySelector("[data-c-skip]")?.addEventListener("click", () => decide("skipped"));
+  });
 
   root.querySelectorAll("[data-bk-toggle]").forEach((cb) => cb.addEventListener("change", () => {
     update(cb.dataset.bkToggle, (m) => {
@@ -669,6 +837,23 @@ function css() {
   .bkSend { width:44px; height:44px; border-radius:12px; border:none; background:#7c5cff; color:#fff; font-size:18px; cursor:pointer; }
   .bkTyping { font-size:12px; opacity:.6; }
   .bkTabs { display:flex; gap:6px; }
+  .bkChipHot { background:rgba(251,191,36,.14); border-color:rgba(251,191,36,.4); color:#fde68a; font-weight:700; }
+  .bkRunNums { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+  .bkNeg { color:#fca5a5 !important; }
+  .bkSplit { height:10px; border-radius:6px; background:#8b5cf6; overflow:hidden; margin:4px 0 6px; }
+  .bkSplitHome { height:100%; background:rgba(255,255,255,.22); }
+  .bkMarkTrack { position:relative; overflow:visible; }
+  .bkMark { position:absolute; top:-3px; width:3px; height:14px; background:#fbbf24; border-radius:2px; transform:translateX(-1px); }
+  .bkInsight { font-size:12px; color:#fde68a; margin-top:5px; line-height:1.4; }
+  .bkMeals { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+  .bkMeal { padding:6px 10px; border-radius:99px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.04); color:inherit; font-size:12px; cursor:pointer; }
+  .bkMealOn { background:rgba(124,92,255,.3); border-color:#8b5cf6; color:#fff; }
+  .bkAmount { max-width:96px; font-size:16px; font-weight:700; }
+  .bkImpact { background:rgba(255,255,255,.03); border-radius:10px; padding:8px 10px; margin:6px 0; display:flex; flex-direction:column; gap:4px; }
+  .bkVerdict { font-weight:800; font-size:15px; }
+  .bkStOk { color:#86efac; } .bkStWarn { color:#fde68a; } .bkStBad { color:#fca5a5; }
+  .bkImpRow { display:flex; justify-content:space-between; gap:8px; font-size:12.5px; }
+  .bkSavedNeutral { color:#e2e8f0; }
   .bkTab { flex:1; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.1); background:rgba(255,255,255,.03); color:inherit; font-size:12.5px; font-weight:600; cursor:pointer; opacity:.7; }
   .bkTabOn { background:rgba(124,92,255,.25); color:#c4b5fd; opacity:1; }
   .bkHint { font-size:12px; opacity:.7; }
