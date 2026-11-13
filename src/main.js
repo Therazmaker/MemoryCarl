@@ -3977,10 +3977,12 @@ function view(){
         if (window.financePushToSupabase) window.financePushToSupabase();
       },
       // Comida en la calle: se registra como gasto en Finanzas con el tipo de comida en la nota
-      recordStreetExpense: ({ amount, desc, mealType, who }) => {
-        // Si paga Fergis, sale de su dinero (externo) y no descuenta tu cuenta
+      recordStreetExpense: ({ amount, desc, mealType, who, accountId: chosen }) => {
+        // Si paga Fergis, sale de su dinero (externo) y no descuenta tu cuenta.
+        // Si pagas tú, sale de la cuenta que elegiste en la tarjeta.
         const byFergis = who === "fergis";
-        const accountId = byFergis ? "ext_fergis" : (state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "");
+        const valid = (id) => id && (state.financeAccounts||[]).some(a => a && a.id === id && !a.archived);
+        const accountId = byFergis ? "ext_fergis" : (valid(chosen) ? chosen : (state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || ""));
         if(!accountId) return false;
         const entry = addFinanceEntry({
           type:"expense", amount, accountId, category: STREET_CATEGORY, reason:"normal",
@@ -3994,7 +3996,8 @@ function view(){
         return true;
       },
       recordFinance: (o) => {
-        const accountId = state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "";
+        const valid = (id) => id && (state.financeAccounts||[]).some(a => a && a.id === id && !a.archived);
+        const accountId = valid(o?.accountId) ? o.accountId : (state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "");
         if(accountId) financeEnsureShoppingExpense_({ ...o, accountId });
       },
     });

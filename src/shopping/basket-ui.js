@@ -72,6 +72,27 @@ function streetCard(state) {
     </div>`;
 }
 
+// Cuentas propias para registrar un gasto (las de Fergis van aparte, con "¿Quién paga?")
+function myAccounts(state) {
+  return (state?.financeAccounts || []).filter((a) => a && !a.archived && a.status !== "archived" && !/fergis/i.test(String(a.name || "")));
+}
+// La última cuenta elegida aquí (comida en la calle / compras), recordada en este teléfono
+const ACC_KEY = "memorycarl_basket_accounts_v1";
+const rememberAccount = (kind, id) => { if (!id) return; const v = loadJson(ACC_KEY, {}); saveJson(ACC_KEY, { ...(v && typeof v === "object" ? v : {}), [kind]: id }); };
+function defaultAccountId(state, kind) {
+  const ids = new Set(myAccounts(state).map((a) => a.id));
+  const saved = loadJson(ACC_KEY, {}) || {};
+  const pick = [saved[kind], state?.financePrimaryAccountId, state?.financeLastAccountId]
+    .find((id) => id && ids.has(id));
+  return pick || myAccounts(state)[0]?.id || "";
+}
+function accountSelect(state, selected, attr) {
+  const accs = myAccounts(state);
+  if (!accs.length) return "";
+  const sel = accs.some((a) => a.id === selected) ? selected : accs[0].id;
+  return `<label class="bkFormRow bkAccRow"><span>💳 ¿De qué cuenta?</span><select class="bkInput" ${attr}>${accs.map((a) => `<option value="${esc(a.id)}" ${a.id === sel ? "selected" : ""}>${esc(a.name || a.id)}</option>`).join("")}</select></label>`;
+}
+
 function checkCard(msg, L) {
   const d = msg.data;
   if (d.decided) {
@@ -88,6 +109,7 @@ function checkCard(msg, L) {
       </div>
       <div class="bkMeals">${MEAL_TYPES.map((m) => `<button class="bkMeal ${d.mealType === m.id ? "bkMealOn" : ""}" data-meal="${m.id}">${m.emoji} ${esc(m.label)}</button>`).join("")}</div>
       <div class="bkFormRow"><span>¿Quién paga?</span>${BUYERS.map((b) => `<button class="bkMeal ${d.who === b.id ? "bkMealOn" : ""}" data-who="${b.id}">${b.label}</button>`).join("")}</div>
+      <div data-acc-wrap ${d.who === "fergis" ? "hidden" : ""}>${accountSelect(ENV.state, d.accountId || defaultAccountId(ENV.state, "street"), 'data-c="account"')}</div>
       <div class="bkImpact" data-impact>${impactHtml(rw, d.amount, d.who)}</div>
       <div class="bkActions">
         <button class="bkBtn" data-c-skip>💪 Mejor no</button>
@@ -347,7 +369,7 @@ function buyForm(msg, ctx) {
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="qty" value="${esc(it.qty || 1)}" aria-label="Cantidad"/>
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="price" value="${esc(it.price || "")}" placeholder="S/" aria-label="Precio por unidad"/>
       </div>`).join("")}
-    ${hasFinance ? `<label class="bkFormRow"><input type="checkbox" data-f="finance" checked/> Registrar el gasto en Finanzas</label>` : ""}
+    ${hasFinance ? `<label class="bkFormRow"><input type="checkbox" data-f="finance" checked/> Registrar el gasto en Finanzas</label>${accountSelect(ctx.state, defaultAccountId(ctx.state, "market"), 'data-f="account"')}` : ""}
     <button class="bkBtn bkBtnPrimary" data-bk-save="${esc(msg.id)}">Guardar compra</button>`;
 }
 
@@ -789,6 +811,8 @@ export function wireBasket(root, ctx) {
     card.querySelectorAll("[data-who]").forEach((b) => b.addEventListener("click", () => {
       update(id, (m) => { m.data.who = b.dataset.who; });
       card.querySelectorAll("[data-who]").forEach((x) => x.classList.toggle("bkMealOn", x === b));
+      const accWrap = card.querySelector("[data-acc-wrap]");
+      if (accWrap) accWrap.hidden = b.dataset.who === "fergis";
       refresh();
     }));
     const decide = (decision) => {
@@ -800,7 +824,9 @@ export function wireBasket(root, ctx) {
       const rw = moneyNow(learn(state));
       const im = rw && who !== "fergis" ? impact(rw, amount) : null;
       if (decision === "bought") {
-        const ok = ctx.recordStreetExpense?.({ amount, desc, mealType, who });
+        const accountId = card.querySelector('[data-c="account"]')?.value || "";
+        if (who !== "fergis") rememberAccount("street", accountId);
+        const ok = ctx.recordStreetExpense?.({ amount, desc, mealType, who, accountId });
         if (ok === false) { ctx.toast?.("No pude registrarlo: revisa tus cuentas en Finanzas."); return; }
       } else {
         const skips = loadSkips();
@@ -925,7 +951,9 @@ export function wireBasket(root, ctx) {
     if (!Array.isArray(state.shoppingHistory)) state.shoppingHistory = [];
     state.shoppingHistory.unshift({ id: ctx.uid("sh"), date, store, notes: "La Canasta", sourceListId, buyer, items, totals: { total, itemsCount: items.length, byCategory } });
     if (box.querySelector('[data-f="finance"]')?.checked && typeof ctx.recordFinance === "function") {
-      ctx.recordFinance({ sourceListId, dateISO: `${date}T12:00:00`, amount: total, store, notes: `La Canasta${buyer ? ` · ${buyer === "fergis" ? "Fergis" : "yo"}` : ""}` });
+      const accountId = box.querySelector('[data-f="account"]')?.value || "";
+      rememberAccount("market", accountId);
+      ctx.recordFinance({ sourceListId, accountId, dateISO: `${date}T12:00:00`, amount: total, store, notes: `La Canasta${buyer ? ` · ${buyer === "fergis" ? "Fergis" : "yo"}` : ""}` });
     }
     update(id, (m) => { m.data.saved = true; m.data.savedTotal = total; m.data.savedBuyer = buyer; m.data.savedStore = store; });
     const L = learn(state);
