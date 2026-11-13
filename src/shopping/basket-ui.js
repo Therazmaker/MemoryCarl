@@ -226,7 +226,7 @@ const entryTotal = (e) => Number(e?.totals?.total) || (e?.items || []).reduce((s
 function purchaseEditor(e) {
   return `
     <div class="bkFormRow"><span>¿Quién compró?</span>
-      ${BUYERS.map((b) => `<label class="bkChip"><input type="radio" name="bkEdBuyer" value="${b.id}" ${e.buyer === b.id ? "checked" : ""}/> ${b.label}</label>`).join("")}
+      ${BUYERS.map((b) => `<label class="bkChip"><input type="radio" name="bkEdBuyer_${esc(e.id)}" value="${b.id}" ${e.buyer === b.id ? "checked" : ""}/> ${b.label}</label>`).join("")}
     </div>
     <div class="bkFormRow"><input class="bkInput" data-f="store" placeholder="Tienda" value="${esc(e.store || "")}"/><input class="bkInput" type="date" data-f="date" value="${esc(e.date || todayISO())}"/></div>
     ${(e.items || []).map((it, i) => `
@@ -409,7 +409,7 @@ export function wireBasket(root, ctx) {
       });
       box.querySelectorAll("[data-bk-rmitem]").forEach((x) => x.addEventListener("click", () => {
         readRows();
-        draft.buyer = box.querySelector('input[name="bkEdBuyer"]:checked')?.value || draft.buyer || "";
+        draft.buyer = box.querySelector(`input[name="bkEdBuyer_${CSS.escape(e.id)}"]:checked`)?.value || draft.buyer || "";
         draft.store = box.querySelector('[data-f="store"]').value.trim();
         draft.date = box.querySelector('[data-f="date"]').value || draft.date;
         draft.items.splice(Number(x.dataset.bkRmitem), 1);
@@ -421,9 +421,20 @@ export function wireBasket(root, ctx) {
         if (!draft.items.length) { ctx.toast?.("Una compra sin productos: mejor bórrala."); return; }
         const target = findEntry(e.id);
         if (!target) return;
-        target.buyer = box.querySelector('input[name="bkEdBuyer"]:checked')?.value || "";
+        target.buyer = box.querySelector(`input[name="bkEdBuyer_${CSS.escape(e.id)}"]:checked`)?.value || "";
         target.store = box.querySelector('[data-f="store"]').value.trim();
         target.date = box.querySelector('[data-f="date"]').value || target.date;
+        // Si es la compra más reciente de un producto, el precio corregido pasa a la biblioteca
+        const before = new Map((target.items || []).map((it) => [it.id, Number(it.price) || 0]));
+        for (const it of draft.items) {
+          if (!it.productId || before.get(it.id) === it.price || !(it.price > 0)) continue;
+          const newer = (state.shoppingHistory || []).some((h) => h.id !== target.id && String(h.date) > String(target.date) && (h.items || []).some((x) => x.productId === it.productId));
+          const product = (state.products || []).find((p) => p.id === it.productId);
+          if (newer || !product || Math.abs(Number(product.price || 0) - it.price) < 0.01) continue;
+          product.history = Array.isArray(product.history) ? product.history : [];
+          product.history.push({ price: product.price, date: new Date().toISOString() });
+          product.price = it.price;
+        }
         target.items = draft.items;
         const total = Math.round(target.items.reduce((sum, it) => sum + it.price * it.qty, 0) * 100) / 100;
         const byCategory = {};
