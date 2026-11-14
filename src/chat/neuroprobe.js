@@ -50,6 +50,12 @@ const DORMANT_DAYS       = 14;
 
 // ─── Tipos de pregunta ────────────────────────────────────────────────────────
 
+/**
+ * NeuroProbe apagado por ahora (no está aportando). Para volver a activarlo: true.
+ * Con false no se muestra el botón 🔮 ni la burbuja de preguntas, y no se generan preguntas.
+ */
+export const NEUROPROBE_ENABLED = false;
+
 export const PROBE_QUESTION_TYPES = {
   GAP:      "gap",       // Vacío entre dos neuronas relacionadas
   BRIDGE:   "bridge",    // Puente entre dominios distintos
