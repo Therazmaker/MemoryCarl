@@ -1002,7 +1002,7 @@ export function wireBasket(root, ctx) {
           ...(it.weighed && it.paid ? { price: it.paid } : it.writtenPrice && !it.weighed ? { price: it.price } : {}) })),
         ...m.data.missing.map((x) => ({ raw: x.name, name: x.name, qty: x.qty, unit: "" }))];
       const a = analyzeList(parsed, { products: L.products, rhythm: L.rhythm });
-      m.data = { ...a, missing: [], off: [] };
+      m.data = { ...a, missing: [], off: [], ...(m.data.prefill ? { prefill: m.data.prefill } : {}), ...(m.data.brain ? { brain: m.data.brain } : {}) };
     });
     rerender();
   }));
