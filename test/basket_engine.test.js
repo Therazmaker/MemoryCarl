@@ -163,3 +163,35 @@ test("peso: solo lo pagado sin precio por kg conocido → null (hacen falta los 
   assert.equal(weighedLine({ pricePerKg: 0, paid: 3 }), null);
   assert.equal(weighedLine({ pricePerKg: 0, paid: 3, kg: 0.5 }).pricePerKg, 6);
 });
+
+test("lista: precios escritos ('a 3.20', '1 sol de pan') y verbos/artículos fuera del nombre", () => {
+  const r = parseListText("Compré un Paté a 3.20, un Sporade a 2.5 y 1 sol de Pan");
+  assert.deepEqual(r.map((x) => [x.name, x.price]), [["Paté", 3.2], ["Sporade", 2.5], ["Pan", 1]]);
+  const a = analyzeList(r, { products: [], rhythm: new Map() });
+  assert.equal(a.totals.all, 6.7);
+  assert.ok(a.items.every((i) => i.group !== "sinprecio"));
+  assert.deepEqual(parseListText("2 leches a 4.20").map((x) => [x.name, x.qty, x.price]), [["Leches", 2, 4.2]]);
+  assert.deepEqual(parseListText("arroz 2kg").map((x) => [x.qty, x.unit, x.price]), [[2, "kg", undefined]]);
+});
+
+test("lista: producto por kilo con lo pagado escrito estima los kg", () => {
+  const a = analyzeList(parseListText("tomate a 3"), { products: [{ id: "t", name: "Tomate", price: 4, unit: "kg" }], rhythm: new Map() });
+  assert.equal(a.items[0].qty, 0.75);
+  assert.equal(a.items[0].paid, 3);
+  assert.equal(a.items[0].line, 3);
+});
+
+test("lista por kilo: peso escrito manda y sin precio por kg sigue por peso", () => {
+  const tom = [{ id: "t", name: "Tomate", price: 4, unit: "kg" }];
+  const a = analyzeList(parseListText("tomate 500 g a 3"), { products: tom, rhythm: new Map() });
+  assert.equal(a.items[0].qty, 0.5);
+  assert.equal(a.items[0].line, 3);
+  assert.equal(a.items[0].kgWritten, true);
+  const b = analyzeList(parseListText("tomate 500 g a 3"), { products: [{ id: "t", name: "Tomate", price: 0, unit: "kg" }], rhythm: new Map() });
+  assert.equal(b.items[0].weighed, true);
+  assert.equal(b.items[0].qty, 0.5);
+  assert.equal(b.items[0].line, 3, "no 500 unidades a S/ 3");
+  const c = analyzeList(parseListText("tomate a 3"), { products: [{ id: "t", name: "Tomate", price: 0, unit: "kg" }], rhythm: new Map() });
+  assert.equal(c.items[0].weighed, true);
+  assert.equal(c.items[0].line, 3);
+});

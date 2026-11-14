@@ -326,7 +326,13 @@ function analysisCard(msg) {
       <div class="bkGroup">
         <div class="bkGroupTitle">${g.title} <span class="bkCount">${items.length}</span></div>
         ${g.hint ? `<div class="bkGroupHint">${g.hint}</div>` : ""}
-        ${items.map((it) => `
+        ${items.map((it) => d.editing === it.id && !d.saved ? `
+          <div class="bkItem bkItemEdit" data-edit-row="${esc(msg.id)}" data-item="${esc(it.id)}">
+            <input class="bkInput" data-e="name" value="${esc(it.name)}" aria-label="Producto"/>
+            <input class="bkInput bkNum" type="number" step="0.01" min="0" data-e="qty" value="${esc(it.qty || 1)}" aria-label="Cantidad"/>
+            <input class="bkInput bkNum" type="number" step="0.01" min="0" data-e="price" value="${esc(it.price || "")}" placeholder="S/ c/u" aria-label="Precio"/>
+            <button class="bkMiniBtn" data-e-save>✓</button><button class="bkMiniBtn" data-e-cancel>✕</button>
+          </div>` : `
           <label class="bkItem ${off.has(it.id) ? "bkItemOff" : ""}">
             <input type="checkbox" data-bk-toggle="${esc(msg.id)}" data-item="${esc(it.id)}" ${off.has(it.id) ? "" : "checked"} ${d.saved ? "disabled" : ""}/>
             <div class="bkItemMain">
@@ -334,6 +340,7 @@ function analysisCard(msg) {
               <div class="bkItemWhy">${esc(it.reason)}</div>
             </div>
             <div class="bkItemPrice">${it.price ? esc(soles(it.price * it.qty)) : "—"}</div>
+            ${d.saved ? "" : `<button class="bkEditBtn" data-bk-edit-item="${esc(msg.id)}" data-item="${esc(it.id)}" title="Corregir nombre, cantidad o precio">✏️</button>`}
           </label>`).join("")}
       </div>`;
   }).join("");
@@ -367,14 +374,14 @@ function buyForm(msg, ctx) {
     <div class="bkFormRow"><input class="bkInput" data-f="store" placeholder="Tienda (opcional)"/><input class="bkInput" type="date" data-f="date" value="${todayISO()}"/></div>
     <div class="bkFormHint">Corrige precio y cantidad si cambiaron: así aprendo el precio real.</div>
     ${picked.map((it) => it.weighed ? `
-      <div class="bkFormItem bkWeighed" data-item="${esc(it.id)}" data-ppk="${esc(it.price || 0)}">
+      <div class="bkFormItem bkWeighed" data-item="${esc(it.id)}" data-ppk="${esc(it.ppk ?? it.price ?? 0)}">
         <span class="bkFormName">${esc(it.name)} <span class="bkQty">por kg</span></span>
-        <input class="bkInput bkNum" type="number" step="0.001" min="0" data-f="kg" placeholder="¿kg?" aria-label="Kilos (si lo sabes)"/>
-        <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="paid" placeholder="Pagué S/" aria-label="Lo que pagaste"/>
-        <span class="bkWeighHint" data-weigh-hint>${it.price ? `Pon lo que pagaste; los kg son opcionales (S/ ${esc(it.price)}/kg)` : "Pon lo que pagaste y los kg para aprender el precio por kg"}</span>
+        <input class="bkInput bkNum" type="number" step="0.001" min="0" data-f="kg" placeholder="¿kg?" value="${it.kgWritten ? esc(it.qty) : ""}" aria-label="Kilos (si lo sabes)"/>
+        <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="paid" placeholder="Pagué S/" value="${esc(it.paid || "")}" aria-label="Lo que pagaste"/>
+        <span class="bkWeighHint" data-weigh-hint>${(it.ppk ?? it.price) ? `Pon lo que pagaste; los kg son opcionales (S/ ${esc(it.ppk ?? it.price)}/kg)` : "Pon lo que pagaste y los kg para aprender el precio por kg"}</span>
       </div>` : `
       <div class="bkFormItem" data-item="${esc(it.id)}">
-        <span class="bkFormName">${esc(it.name)}</span>
+        <input class="bkInput bkFormName" data-f="name" value="${esc(it.name)}" aria-label="Producto"/>
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="qty" value="${esc(it.qty || 1)}" aria-label="Cantidad"/>
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="price" value="${esc(it.price || "")}" placeholder="S/" aria-label="Precio por unidad"/>
       </div>`).join("")}
@@ -712,7 +719,8 @@ export function wireBasket(root, ctx) {
       const a = analyzeList(parsed, { products: L.products, rhythm: L.rhythm });
       const counts = GROUPS.map((g) => [g, a.items.filter((i) => i.group === g.id).length]).filter(([, n]) => n);
       const WORDS = { falta: ["hace falta", "hacen falta"], sinprecio: ["sin precio", "sin precio"], espera: ["puede esperar", "pueden esperar"], gusto: ["gusto", "gustos"] };
-      const text = `Revisé ${a.items.length} cosa${a.items.length === 1 ? "" : "s"}: ${counts.map(([g, n]) => `${n} ${WORDS[g.id][n === 1 ? 0 : 1]}`).join(", ")}. Total estimado ${soles(a.totals.all)}.`;
+      const bought = /^\s*(?:ya\s+)?(?:me\s+|nos\s+)?(?:compr[ée]|compramos|compraron|traje|trajimos)(?=\s|$)/i.test(t);
+      const text = `Revisé ${a.items.length} cosa${a.items.length === 1 ? "" : "s"}: ${counts.map(([g, n]) => `${n} ${WORDS[g.id][n === 1 ? 0 : 1]}`).join(", ")}. Total ${bought ? "" : "estimado "}${soles(a.totals.all)}.${bought ? " Si está bien, toca “🧾 Ya lo compré” para guardarlo (con ✏️ corriges cualquier cosa)." : ""}`;
       push({ role: "carl", type: "analysis", text, data: { ...a, off: [] } });
       rerender();
       return;
@@ -868,10 +876,43 @@ export function wireBasket(root, ctx) {
     rerender();
   }));
 
+  // Corregir un producto de la lista (nombre, cantidad, precio) antes de comprar
+  root.querySelectorAll("[data-bk-edit-item]").forEach((b) => b.addEventListener("click", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    update(b.dataset.bkEditItem, (m) => { m.data.editing = b.dataset.item; });
+    rerender();
+  }));
+  root.querySelectorAll("[data-edit-row]").forEach((row) => {
+    const id = row.dataset.editRow;
+    row.querySelector("[data-e-cancel]")?.addEventListener("click", () => { update(id, (m) => { delete m.data.editing; }); rerender(); });
+    row.querySelector("[data-e-save]")?.addEventListener("click", () => {
+      const name = row.querySelector('[data-e="name"]').value.trim();
+      const qty = Math.max(0.01, Number(row.querySelector('[data-e="qty"]').value) || 1);
+      const price = Math.max(0, Number(row.querySelector('[data-e="price"]').value) || 0);
+      update(id, (m) => {
+        const it = m.data.items.find((x) => x.id === row.dataset.item);
+        if (it) {
+          if (name && name !== it.name) { it.name = name; it.written = name; it.productId = ""; }
+          it.qty = qty;
+          it.price = Math.round(price * 100) / 100;
+          it.line = Math.round(it.price * qty * 100) / 100;
+          if (it.price > 0) {
+            it.writtenPrice = true;
+            if (it.group === "sinprecio") { it.group = "falta"; it.reason = "Precio que escribiste (lo agrego a la biblioteca al guardar)"; }
+          }
+        }
+        delete m.data.editing;
+      });
+      rerender();
+    });
+  });
+
   root.querySelectorAll("[data-bk-addmissing]").forEach((b) => b.addEventListener("click", () => {
     const L = learn(state);
     update(b.dataset.bkAddmissing, (m) => {
-      const parsed = [...m.data.items.map((it) => ({ raw: it.written, name: it.written, qty: it.qty, unit: it.unit })),
+      const parsed = [...m.data.items.map((it) => ({ raw: it.written, name: it.written, qty: it.qty, unit: it.unit,
+          // Por peso, lo escrito es lo pagado (no el precio por kg)
+          ...(it.weighed && it.paid ? { price: it.paid } : it.writtenPrice && !it.weighed ? { price: it.price } : {}) })),
         ...m.data.missing.map((x) => ({ raw: x.name, name: x.name, qty: x.qty, unit: "" }))];
       const a = analyzeList(parsed, { products: L.products, rhythm: L.rhythm });
       m.data = { ...a, missing: [], off: [] };
@@ -942,9 +983,11 @@ export function wireBasket(root, ctx) {
       const qty = Math.max(0.01, Number(row?.querySelector('[data-f="qty"]')?.value) || it.qty || 1);
       const price = Math.max(0, Number(row?.querySelector('[data-f="price"]')?.value) || 0);
       // La biblioteca aprende el precio real (o el producto nuevo)
-      let product = it.productId ? (state.products || []).find((p) => p.id === it.productId) : matchProduct(it.name, state.products || []);
+      const typedName = row?.querySelector('[data-f="name"]')?.value?.trim() || it.name;
+      const renamed = typedName !== it.name;
+      let product = it.productId && !renamed ? (state.products || []).find((p) => p.id === it.productId) : matchProduct(typedName, state.products || []);
       if (!product && price > 0) {
-        product = enrichProductData({ id: ctx.uid("p"), name: it.name, price, category: it.category || "", history: [], store });
+        product = enrichProductData({ id: ctx.uid("p"), name: typedName, price, category: it.category || "", history: [], store });
         if (!Array.isArray(state.products)) state.products = [];
         state.products.push(product);
       } else if (product && price > 0 && Math.abs(Number(product.price || 0) - price) > 0.009) {
@@ -953,7 +996,7 @@ export function wireBasket(root, ctx) {
         product.price = price;
       }
       items.push({
-        id: ctx.uid("i"), name: product?.name || it.name, price, qty, bought: true,
+        id: ctx.uid("i"), name: product?.name || typedName, price, qty, bought: true,
         productId: product?.id || "", category: product?.category || it.category || "", essential: Boolean(product?.essential), unit: it.unit || "", sourceListId,
       });
     }
@@ -985,6 +1028,8 @@ function css() {
   .bkBack { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); color:inherit; border-radius:10px; width:36px; height:36px; font-size:18px; cursor:pointer; }
   .bkTitle { font-size:18px; font-weight:800; }
   .bkSub { font-size:12px; opacity:.65; }
+  .bkEditBtn { background:none; border:none; cursor:pointer; font-size:14px; padding:2px 4px; opacity:.75; }
+  .bkItemEdit { display:grid; grid-template-columns: 1fr 56px 70px auto auto; gap:6px; align-items:center; }
   .bkPay { background:rgba(124,92,255,.07); border:1px solid rgba(124,92,255,.3); border-radius:14px; padding:10px 12px; margin-bottom:8px; }
   .bkPay > summary { cursor:pointer; font-weight:700; font-size:14px; }
   .bkPayLine { display:flex; justify-content:space-between; font-size:13px; padding:4px 0; }

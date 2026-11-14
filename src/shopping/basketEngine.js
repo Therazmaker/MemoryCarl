@@ -104,6 +104,21 @@ export function parseListText(text = "") {
       .replace(/[¡!¿?:]+$/g, "")
       .trim();
     if (!s || s.length > 80) continue;
+    // "Compré un paté…", "necesito una leche…": el verbo y el artículo no son parte del nombre
+    s = s.replace(/^(?:yo\s+|ya\s+)?(?:me\s+|nos\s+)?(?:compr[ée]|compramos|compraron|compr[óo]|traje|trajimos|llev[ée]|llevamos|quiero|queremos|necesito|necesitamos|faltan?|hay que comprar|comprar)\s+/i, "")
+      .replace(/^(?:un|una|unos|unas|el|la|los|las)\s+(?=[a-zñáéíóú])/i, "")
+      .trim();
+    // Precio escrito: "paté a 3.20", "pan por 1", "leche s/ 4.50", "huevos 12 soles", "1 sol de pan"
+    let price = null;
+    let pm = s.match(/^(\d+(?:[.,]\d+)?)\s*(?:sol(?:es)?|lucas?)\s+(?:de\s+)?(.+)$/i);
+    if (pm) { price = Number(pm[1].replace(",", ".")); s = pm[2].trim(); }
+    else {
+      pm = s.match(/\s+(?:a|por|en|=|:)\s*(?:s\/\.?\s*)?(\d+(?:[.,]\d+)?)\s*(?:sol(?:es)?|lucas?)?\s*(?:c\/u|cada uno|cada una)?$/i)
+        || s.match(/\s+s\/\.?\s*(\d+(?:[.,]\d+)?)\s*$/i)
+        || s.match(/\s+(\d+(?:[.,]\d+)?)\s*(?:sol(?:es)?|lucas?)\s*$/i);
+      if (pm) { price = Number(pm[1].replace(",", ".")); s = s.slice(0, pm.index).trim(); }
+    }
+    if (!(price > 0)) price = null;
     let qty = null;
     let unit = "";
     // "(6)" o "x6" o "x 6" al final
@@ -136,7 +151,7 @@ export function parseListText(text = "") {
     }
     const name = s.replace(/\s+/g, " ").replace(/^(de|del)\s+/i, "").trim();
     if (!name || !/[a-zñáéíóú]/i.test(name)) continue;
-    out.push({ raw, name: name.charAt(0).toUpperCase() + name.slice(1), qty, unit });
+    out.push({ raw, name: name.charAt(0).toUpperCase() + name.slice(1), qty, unit, ...(price ? { price: Math.round(price * 100) / 100 } : {}) });
   }
   return out;
 }
@@ -295,10 +310,25 @@ export function analyzeList(parsed = [], { products = [], rhythm = new Map() } =
     let stat = rhythm.get(key);
     if (!stat && product) stat = rhythm.get(`n:${keyWords(product.name).join(" ")}`);
     if (!stat) for (const s of rhythm.values()) if (matchProduct(p.name, [{ id: s.key, name: s.name }])) { stat = s; break; }
-    const price = Number(product?.price) || stat?.lastPrice || 0;
+    // El precio escrito en el mensaje manda; si no, el de la biblioteca o el de la última compra
+    const written = Number(p.price) > 0 ? Number(p.price) : 0;
+    const ppk = Number(product?.price) || 0;
     const weighed = isWeighed(product);
-    // Por peso: la cantidad va en kg ("500 g" → 0.5); si no dice peso, lo de siempre o 1 kg
-    const qty = weighed ? (kgFromWritten(p.qty, p.unit) ?? stat?.avgQty ?? 1) : (p.qty || stat?.avgQty || 1);
+    const paidWritten = weighed && written ? written : 0;
+    let price;
+    let qty;
+    if (weighed) {
+      // Por peso: los kg escritos mandan ("500 g" → 0.5); si solo dice lo pagado, se estiman
+      const kgWritten = kgFromWritten(p.qty, p.unit);
+      const perKg = ppk || stat?.lastPrice || 0;
+      if (paidWritten && kgWritten) { qty = kgWritten; price = round2(paidWritten / kgWritten); }
+      else if (paidWritten && perKg) { qty = round3(paidWritten / perKg); price = perKg; }
+      else if (paidWritten) { qty = 1; price = paidWritten; } // sin precio por kg: al guardar pide los kg
+      else { qty = kgWritten ?? stat?.avgQty ?? 1; price = perKg; }
+    } else {
+      price = written || ppk || stat?.lastPrice || 0;
+      qty = written ? (p.qty || 1) : (p.qty || stat?.avgQty || 1);
+    }
     const name = product?.name || stat?.name || p.name;
     let group = "falta";
     let reason = "";
@@ -314,7 +344,7 @@ export function analyzeList(parsed = [], { products = [], rhythm = new Map() } =
       group = "sinprecio";
       reason = "No está en la biblioteca: pon su precio al comprar";
     } else {
-      reason = stat ? "Todavía aprendo su ritmo" : "Primera vez que lo veo en una compra";
+      reason = written && !product ? "Precio que escribiste (lo agrego a la biblioteca al guardar)" : stat ? "Todavía aprendo su ritmo" : "Primera vez que lo veo en una compra";
     }
     return {
       id: `li${i}`,
@@ -325,6 +355,10 @@ export function analyzeList(parsed = [], { products = [], rhythm = new Map() } =
       qty: weighed ? round3(qty) : round2(qty),
       unit: weighed ? "kg" : (p.unit || ""),
       weighed,
+      ...(weighed ? { ppk: round2(ppk) } : {}),
+      ...(weighed && kgFromWritten(p.qty, p.unit) != null ? { kgWritten: true } : {}),
+      ...(paidWritten ? { paid: round2(paidWritten) } : {}),
+      ...(written ? { writtenPrice: true } : {}),
       price: round2(price),
       line: round2(price * qty),
       group,
