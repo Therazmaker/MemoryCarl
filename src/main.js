@@ -3973,7 +3973,14 @@ function view(){
       updateFinanceForPurchase: (sourceListId, { amount, dateISO }) => {
         const mv = (state.financeLedger||[]).find(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId);
         if(!mv || !window.FINANCE?.updateMovement) return;
-        window.FINANCE.updateMovement(mv.id, { amount: Number(amount||0), ...(dateISO ? { date: dateISO } : {}) });
+        // Al corregir la fecha se conserva la hora con la que se anotó
+        let date = dateISO;
+        if (dateISO && mv.date) {
+          const old = new Date(mv.date);
+          const d = new Date(`${String(dateISO).slice(0, 10)}T${String(old.getHours()).padStart(2,"0")}:${String(old.getMinutes()).padStart(2,"0")}:00`);
+          if (Number.isFinite(old.getTime()) && Number.isFinite(d.getTime())) date = d.toISOString();
+        }
+        window.FINANCE.updateMovement(mv.id, { amount: Number(amount||0), ...(date ? { date } : {}) });
         financeRecomputeBalances();
         if (window.financePushToSupabase) window.financePushToSupabase();
       },
