@@ -144,7 +144,11 @@ export function parseListText(text = "") {
     }
     // cantidad + unidad al final: "arroz 2kg", "pollo 1 kilo"
     m = s.match(/^(.*?)\s+(\d+\/\d+|\d+(?:[.,]\d+)?)\s*([a-zñ]+)?$/i);
-    if (m && m[1] && (!m[3] || UNIT_WORDS[m[3].toLowerCase()])) {
+    if (m && m[1] && !m[3] && price == null && /[.,]\d/.test(m[2])) {
+      // "Pepsi 5.5", "Limón 0.68": número con decimales y sin unidad al final = precio
+      price = Number(m[2].replace(",", "."));
+      s = m[1].trim();
+    } else if (m && m[1] && (!m[3] || UNIT_WORDS[m[3].toLowerCase()])) {
       qty = qty ?? parseQty(m[2]);
       unit = unit || (m[3] ? UNIT_WORDS[m[3].toLowerCase()] : "");
       s = m[1].trim();

@@ -195,3 +195,11 @@ test("lista por kilo: peso escrito manda y sin precio por kg sigue por peso", ()
   assert.equal(c.items[0].weighed, true);
   assert.equal(c.items[0].line, 3);
 });
+
+test("lista: 'Pepsi 5.5' (decimales sin unidad) es precio; '2kg' y 'huevos 12' siguen siendo cantidad", () => {
+  const r = parseListText("Pepsi 5.5\nLimón 0.68\nTomate 4.11\narroz 2kg\nhuevos 12\npollo 1.5 kg");
+  assert.deepEqual(r.map((x) => [x.name, x.qty, x.unit, x.price]), [
+    ["Pepsi", null, "", 5.5], ["Limón", null, "", 0.68], ["Tomate", null, "", 4.11],
+    ["Arroz", 2, "kg", undefined], ["Huevos", 12, "", undefined], ["Pollo", 1.5, "kg", undefined],
+  ]);
+});
