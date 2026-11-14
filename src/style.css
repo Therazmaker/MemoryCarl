@@ -3185,8 +3185,13 @@ body{
   cursor: pointer;
   white-space: nowrap;
 }
+/* Las secciones ocupan el alto que queda y se desplazan dentro del modal */
+#libSectionProducts { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#libSectionMeals, #libSectionLearned { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+.libCloudRow, .slCatRow { flex-shrink: 0; }
 .libGrid {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 4px 12px 24px;
   -webkit-overflow-scrolling: touch;
