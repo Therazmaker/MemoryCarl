@@ -374,11 +374,11 @@ function buyForm(msg, ctx) {
     <div class="bkFormRow"><input class="bkInput" data-f="store" placeholder="Tienda (opcional)"/><input class="bkInput" type="date" data-f="date" value="${todayISO()}"/></div>
     <div class="bkFormHint">Corrige precio y cantidad si cambiaron: así aprendo el precio real.</div>
     ${picked.map((it) => it.weighed ? `
-      <div class="bkFormItem bkWeighed" data-item="${esc(it.id)}" data-ppk="${esc(it.price || 0)}">
+      <div class="bkFormItem bkWeighed" data-item="${esc(it.id)}" data-ppk="${esc(it.ppk ?? it.price ?? 0)}">
         <span class="bkFormName">${esc(it.name)} <span class="bkQty">por kg</span></span>
-        <input class="bkInput bkNum" type="number" step="0.001" min="0" data-f="kg" placeholder="¿kg?" aria-label="Kilos (si lo sabes)"/>
+        <input class="bkInput bkNum" type="number" step="0.001" min="0" data-f="kg" placeholder="¿kg?" value="${it.kgWritten ? esc(it.qty) : ""}" aria-label="Kilos (si lo sabes)"/>
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="paid" placeholder="Pagué S/" value="${esc(it.paid || "")}" aria-label="Lo que pagaste"/>
-        <span class="bkWeighHint" data-weigh-hint>${it.price ? `Pon lo que pagaste; los kg son opcionales (S/ ${esc(it.price)}/kg)` : "Pon lo que pagaste y los kg para aprender el precio por kg"}</span>
+        <span class="bkWeighHint" data-weigh-hint>${(it.ppk ?? it.price) ? `Pon lo que pagaste; los kg son opcionales (S/ ${esc(it.ppk ?? it.price)}/kg)` : "Pon lo que pagaste y los kg para aprender el precio por kg"}</span>
       </div>` : `
       <div class="bkFormItem" data-item="${esc(it.id)}">
         <input class="bkInput bkFormName" data-f="name" value="${esc(it.name)}" aria-label="Producto"/>
@@ -910,7 +910,9 @@ export function wireBasket(root, ctx) {
   root.querySelectorAll("[data-bk-addmissing]").forEach((b) => b.addEventListener("click", () => {
     const L = learn(state);
     update(b.dataset.bkAddmissing, (m) => {
-      const parsed = [...m.data.items.map((it) => ({ raw: it.written, name: it.written, qty: it.qty, unit: it.unit, ...(it.writtenPrice ? { price: it.price } : {}) })),
+      const parsed = [...m.data.items.map((it) => ({ raw: it.written, name: it.written, qty: it.qty, unit: it.unit,
+          // Por peso, lo escrito es lo pagado (no el precio por kg)
+          ...(it.weighed && it.paid ? { price: it.paid } : it.writtenPrice && !it.weighed ? { price: it.price } : {}) })),
         ...m.data.missing.map((x) => ({ raw: x.name, name: x.name, qty: x.qty, unit: "" }))];
       const a = analyzeList(parsed, { products: L.products, rhythm: L.rhythm });
       m.data = { ...a, missing: [], off: [] };

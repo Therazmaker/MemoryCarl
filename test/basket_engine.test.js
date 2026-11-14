@@ -180,3 +180,18 @@ test("lista: producto por kilo con lo pagado escrito estima los kg", () => {
   assert.equal(a.items[0].paid, 3);
   assert.equal(a.items[0].line, 3);
 });
+
+test("lista por kilo: peso escrito manda y sin precio por kg sigue por peso", () => {
+  const tom = [{ id: "t", name: "Tomate", price: 4, unit: "kg" }];
+  const a = analyzeList(parseListText("tomate 500 g a 3"), { products: tom, rhythm: new Map() });
+  assert.equal(a.items[0].qty, 0.5);
+  assert.equal(a.items[0].line, 3);
+  assert.equal(a.items[0].kgWritten, true);
+  const b = analyzeList(parseListText("tomate 500 g a 3"), { products: [{ id: "t", name: "Tomate", price: 0, unit: "kg" }], rhythm: new Map() });
+  assert.equal(b.items[0].weighed, true);
+  assert.equal(b.items[0].qty, 0.5);
+  assert.equal(b.items[0].line, 3, "no 500 unidades a S/ 3");
+  const c = analyzeList(parseListText("tomate a 3"), { products: [{ id: "t", name: "Tomate", price: 0, unit: "kg" }], rhythm: new Map() });
+  assert.equal(c.items[0].weighed, true);
+  assert.equal(c.items[0].line, 3);
+});

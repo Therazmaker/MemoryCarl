@@ -313,14 +313,22 @@ export function analyzeList(parsed = [], { products = [], rhythm = new Map() } =
     // El precio escrito en el mensaje manda; si no, el de la biblioteca o el de la última compra
     const written = Number(p.price) > 0 ? Number(p.price) : 0;
     const ppk = Number(product?.price) || 0;
-    // Por peso con lo pagado escrito ("tomate a 3"): los kg salen del precio por kg
-    const weighed = isWeighed(product) && !(written && !ppk);
+    const weighed = isWeighed(product);
     const paidWritten = weighed && written ? written : 0;
-    const price = weighed ? (ppk || stat?.lastPrice || 0) : (written || ppk || stat?.lastPrice || 0);
-    // Por peso: la cantidad va en kg ("500 g" → 0.5); si no dice peso, lo de siempre o 1 kg
-    const qty = weighed
-      ? (paidWritten && price ? round3(paidWritten / price) : (kgFromWritten(p.qty, p.unit) ?? stat?.avgQty ?? 1))
-      : (written ? (p.qty || 1) : (p.qty || stat?.avgQty || 1));
+    let price;
+    let qty;
+    if (weighed) {
+      // Por peso: los kg escritos mandan ("500 g" → 0.5); si solo dice lo pagado, se estiman
+      const kgWritten = kgFromWritten(p.qty, p.unit);
+      const perKg = ppk || stat?.lastPrice || 0;
+      if (paidWritten && kgWritten) { qty = kgWritten; price = round2(paidWritten / kgWritten); }
+      else if (paidWritten && perKg) { qty = round3(paidWritten / perKg); price = perKg; }
+      else if (paidWritten) { qty = 1; price = paidWritten; } // sin precio por kg: al guardar pide los kg
+      else { qty = kgWritten ?? stat?.avgQty ?? 1; price = perKg; }
+    } else {
+      price = written || ppk || stat?.lastPrice || 0;
+      qty = written ? (p.qty || 1) : (p.qty || stat?.avgQty || 1);
+    }
     const name = product?.name || stat?.name || p.name;
     let group = "falta";
     let reason = "";
@@ -347,6 +355,8 @@ export function analyzeList(parsed = [], { products = [], rhythm = new Map() } =
       qty: weighed ? round3(qty) : round2(qty),
       unit: weighed ? "kg" : (p.unit || ""),
       weighed,
+      ...(weighed ? { ppk: round2(ppk) } : {}),
+      ...(weighed && kgFromWritten(p.qty, p.unit) != null ? { kgWritten: true } : {}),
       ...(paidWritten ? { paid: round2(paidWritten) } : {}),
       ...(written ? { writtenPrice: true } : {}),
       price: round2(price),
