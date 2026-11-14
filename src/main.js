@@ -14495,7 +14495,7 @@ function openProductLibrary(){
         b.classList.toggle("primary", b === btn);
         b.classList.toggle("ghost", b !== btn);
       });
-      sheet.querySelector("#libSectionProducts").style.display = currentTab === "products" ? "block" : "none";
+      sheet.querySelector("#libSectionProducts").style.display = currentTab === "products" ? "flex" : "none";
       sheet.querySelector("#libSectionMeals").style.display = currentTab === "meals" ? "block" : "none";
       sheet.querySelector("#libSectionLearned").style.display = currentTab === "learned" ? "block" : "none";
       render();
