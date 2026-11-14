@@ -11,6 +11,7 @@
 import { sendMessage, forcePremiumGenerationForMessage, undoMessageLifeChanges, getFullChatHistory, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
 import { processDislikeExplanation } from "../neuro/feedback.js";
 import { NeuroProbeUI } from "./neuroprobe-ui.js";
+import { NEUROPROBE_ENABLED } from "./neuroprobe.js";
 import { saveMemory, updateMemory, deleteMemory, autoFixMemory, suggestMemoryMilestone, getAllMemories } from "../memory/memoryStore.js";
 import { isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { getPremiumUsageState } from "../neuro/premiumUsage.js";
@@ -1026,7 +1027,7 @@ function nchatInner() {
       <div class="ncMain">
         <div class="ncMessages" id="ncMessages" role="log" aria-live="polite" aria-label="Historial de conversación">${buildMessagesHtml()}</div>
 
-        <div id="neuroprobe-area"></div>
+        ${NEUROPROBE_ENABLED ? `<div id="neuroprobe-area"></div>` : ""}
 
         ${renderMobileCoverage()}
 
@@ -1072,7 +1073,7 @@ function nchatInner() {
         <div class="ncHeaderActions">
           <button class="ncIconBtn" id="btnNcCloseSession" title="Cerrar sesión y guardar resumen">💾</button>
           <button class="ncIconBtn" id="btnNcToggleNeurons" title="Ver neuronas">${uiState.neuronsExpanded ? "📱🧠▾" : "📱🧠"}</button>
-          <button class="ncIconBtn" id="btnNcProbe" title="NeuroProbe: pregúntame algo">🔮</button>
+          ${NEUROPROBE_ENABLED ? `<button class="ncIconBtn" id="btnNcProbe" title="NeuroProbe: pregúntame algo">🔮</button>` : ""}
           <button class="ncIconBtn" id="btnNcClear" title="Limpiar chat">🗑</button>
           <button class="ncIconBtn" id="btnNcSettings" title="Configuración">⚙️</button>
         </div>
@@ -1784,7 +1785,7 @@ async function doSend(root, inputEl, textOverride = null) {
 
       // ── NeuroProbe: mostrar pregunta si el observe() generó una ──
       result.userInput = result.userInput || text;
-      getProbeUI().update(result);
+      if (NEUROPROBE_ENABLED) getProbeUI().update(result);
     }
   } catch (err) {
     console.error("[NeuroChat]", err);
@@ -2111,7 +2112,7 @@ function wireNeuroChatInner(root) {
   wireInputBarEvents(root);
 
   // ── NeuroProbe: asignar contenedor y botón manual ──
-  const probeArea = root.querySelector("#neuroprobe-area");
+  const probeArea = NEUROPROBE_ENABLED ? root.querySelector("#neuroprobe-area") : null;
   if (probeArea) {
     const probe = getProbeUI();
     probe._container = probeArea;

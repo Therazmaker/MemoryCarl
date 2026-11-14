@@ -5,7 +5,7 @@
 import { processNeuroInput } from "../neuro/neurocore.js";
 import { markChanged, chatKey } from "../services/syncOutbox.js";
 import { getAllNeurons, saveNeuron, deleteNeuron } from "../neuro/neuronStore.js";
-import { neuroProbe } from "./neuroprobe.js";
+import { neuroProbe, NEUROPROBE_ENABLED } from "./neuroprobe.js";
 import { createNeuron } from "../neuro/schemas.js";
 import { getMessageFeedbackMap, recordNeuronFeedback, recordNeuronRemoval } from "../neuro/feedback.js";
 import { saveMemory, getAllMemories, searchMemories, detectMemoryEmotion, extractMemoryTags, inferMemoryDate, getMemoriesByNeuron } from "../memory/memoryStore.js";
@@ -402,6 +402,7 @@ export async function sendMessage(userInput, options = {}) {
       : detectImportantMemoryInput(trimmed),
     feedbackForMessage: getMessageFeedbackMap(messageId),
     probeQuestion: (() => {
+      if (!NEUROPROBE_ENABLED) return null;
       neuroProbe.observe({
         activated: result.activated || [],
         generated: result.generated || [],
