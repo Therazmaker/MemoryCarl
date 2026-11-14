@@ -3973,7 +3973,14 @@ function view(){
       updateFinanceForPurchase: (sourceListId, { amount, dateISO }) => {
         const mv = (state.financeLedger||[]).find(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId);
         if(!mv || !window.FINANCE?.updateMovement) return;
-        window.FINANCE.updateMovement(mv.id, { amount: Number(amount||0), ...(dateISO ? { date: dateISO } : {}) });
+        // Al corregir la fecha se conserva la hora con la que se anotó
+        let date = dateISO;
+        if (dateISO && mv.date) {
+          const old = new Date(mv.date);
+          const d = new Date(`${String(dateISO).slice(0, 10)}T${String(old.getHours()).padStart(2,"0")}:${String(old.getMinutes()).padStart(2,"0")}:00`);
+          if (Number.isFinite(old.getTime()) && Number.isFinite(d.getTime())) date = d.toISOString();
+        }
+        window.FINANCE.updateMovement(mv.id, { amount: Number(amount||0), ...(date ? { date } : {}) });
         financeRecomputeBalances();
         if (window.financePushToSupabase) window.financePushToSupabase();
       },
@@ -4001,7 +4008,7 @@ function view(){
       addPayment: () => { state.financeMissionMonthKey = getCurrentMonthKey(); openMcUnexpectedModal(); },
       recordFinance: (o) => {
         const valid = (id) => id && (state.financeAccounts||[]).some(a => a && a.id === id && !a.archived);
-        const accountId = valid(o?.accountId) ? o.accountId : (state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || "");
+        const accountId = o?.byFergis ? "ext_fergis" : (valid(o?.accountId) ? o.accountId : (state.financeLastMarketAccountId || state.financeLastAccountId || (state.financeAccounts||[])[0]?.id || ""));
         if(accountId) financeEnsureShoppingExpense_({ ...o, accountId });
       },
     });
@@ -13595,7 +13602,7 @@ function openShoppingSavePurchaseModal({defaultDate, defaultStore, defaultNotes,
   if(first) first.focus();
 }
 
-function financeEnsureShoppingExpense_({sourceListId, dateISO, amount, accountId, store, notes}){
+function financeEnsureShoppingExpense_({sourceListId, dateISO, amount, accountId, store, notes, note: noteIn, category, reason, byFergis}){
   if(!sourceListId) return null;
   if(!(state.financeAccounts||[]).length) return null;
   const exists = (state.financeLedger||[]).some(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId);
@@ -13604,16 +13611,17 @@ function financeEnsureShoppingExpense_({sourceListId, dateISO, amount, accountId
   const noteParts = [];
   if(store) noteParts.push(`Shopping · ${store}`);
   if(notes) noteParts.push(notes);
-  const note = noteParts.join(" · ");
+  const note = noteIn ? (byFergis ? `${noteIn} · [Pagado por Fergis]` : noteIn) : noteParts.join(" · ");
 
   const entry = addFinanceEntry({
     type: "expense",
     amount: Number(amount||0),
-    accountId,
-    category: "Mercado",
-    reason: "planificado",
+    accountId: byFergis ? "ext_fergis" : accountId,
+    category: category || "Mercado",
+    reason: reason || "planificado",
     note,
-    date: dateISO
+    date: dateISO,
+    ...(byFergis ? { paidBy: "fergis", noAccountDebit: true, isExternalPayment: true } : {}),
   });
   if(entry){
     entry.source = "shopping";

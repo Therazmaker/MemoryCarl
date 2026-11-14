@@ -361,6 +361,33 @@ function analysisCard(msg) {
   return `<div class="bkCardMsg">${groups}${missing}${waitNote}${footer}</div>`;
 }
 
+// ---- El gasto en Finanzas: se ve y se elige antes de guardar (categoría, motivo, nota, hora, cuenta) ----
+const FIN_KEY = "memorycarl_basket_finance_v1";
+const REASON_LABEL = { planificado: "📋 Planificado", normal: "🙂 Normal", impulso: "⚡ Impulso", emergencia: "🚨 Emergencia" };
+const nowHM = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+export function purchaseNote(items = [], store = "") {
+  const names = items.map((it) => String(it.name || "").trim()).filter(Boolean);
+  const list = names.slice(0, 6).join(", ") + (names.length > 6 ? ` y ${names.length - 6} más` : "");
+  return `🧺 ${list || "Compra"}${store ? ` · ${store}` : ""}`;
+}
+function financeBlock(state, picked) {
+  const saved = loadJson(FIN_KEY, {}) || {};
+  const cats = (state.financeEntryCategories || []).map((c) => c && (c.name || c.id)).filter(Boolean);
+  const cat = cats.includes(saved.category) ? saved.category : (cats.find((c) => /aliment|mercado|comida/i.test(c)) || cats[0] || "Alimentos");
+  const reasons = (state.financeReasons || ["planificado", "normal", "impulso", "emergencia"]);
+  const reason = reasons.includes(saved.reason) ? saved.reason : "planificado";
+  return `
+    <label class="bkFormRow"><input type="checkbox" data-f="finance" ${saved.off ? "" : "checked"}/> Registrar el gasto en Finanzas</label>
+    <div class="bkFinBox" data-fin-box ${saved.off ? "hidden" : ""}>
+      <div class="bkFormRow"><span>Categoría</span><select class="bkInput" data-f="category">${cats.map((c) => `<option ${c === cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+      <div class="bkFormRow"><span>Motivo</span><select class="bkInput" data-f="reason">${reasons.map((r) => `<option value="${esc(r)}" ${r === reason ? "selected" : ""}>${esc(REASON_LABEL[r] || r)}</option>`).join("")}</select></div>
+      <div class="bkFormRow"><input class="bkInput" data-f="note" data-auto="1" data-base="${esc(purchaseNote(picked))}" value="${esc(purchaseNote(picked))}" aria-label="Nota en Finanzas"/></div>
+      <div class="bkFormRow"><span>Hora</span><input class="bkInput" type="time" data-f="time" value="${nowHM()}"/></div>
+      <div data-fin-acc>${accountSelect(state, defaultAccountId(state, "market"), 'data-f="account"')}</div>
+      <div class="bkHint" data-fin-fergis hidden>Si compró Fergis, se anota como pagado por ella (no descuenta tus cuentas).</div>
+    </div>`;
+}
+
 function buyForm(msg, ctx) {
   const d = msg.data;
   const off = new Set(d.off || []);
@@ -385,7 +412,7 @@ function buyForm(msg, ctx) {
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="qty" value="${esc(it.qty || 1)}" aria-label="Cantidad"/>
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="price" value="${esc(it.price || "")}" placeholder="S/" aria-label="Precio por unidad"/>
       </div>`).join("")}
-    ${hasFinance ? `<label class="bkFormRow"><input type="checkbox" data-f="finance" checked/> Registrar el gasto en Finanzas</label>${accountSelect(ctx.state, defaultAccountId(ctx.state, "market"), 'data-f="account"')}` : ""}
+    ${hasFinance ? financeBlock(ctx.state, picked) : ""}
     <button class="bkBtn bkBtnPrimary" data-bk-save="${esc(msg.id)}">Guardar compra</button>`;
 }
 
@@ -505,7 +532,10 @@ function looksLikeList(text) {
   const t = text.trim();
   if (/\?\s*$/.test(t) && !t.includes("\n")) return false;
   const parsed = parseListText(t);
-  return t.includes("\n") ? parsed.length >= 1 : parsed.length >= 2;
+  if (t.includes("\n")) return parsed.length >= 1;
+  // Una sola cosa cuenta si dice que se compró o trae precio: "Compré leche a 4.20"
+  const bought = /^\s*(?:ya\s+)?(?:me\s+|nos\s+)?(?:compr[ée]|compramos|compraron|traje|trajimos)(?=\s|$)/i.test(t);
+  return parsed.length >= 2 || (parsed.length === 1 && (bought || parsed[0].price > 0));
 }
 
 function dueText(L) {
@@ -940,6 +970,22 @@ export function wireBasket(root, ctx) {
       };
       row.querySelectorAll("input").forEach((x) => x.addEventListener("input", upd));
     });
+    const finCb = box.querySelector('[data-f="finance"]');
+    const finBox = box.querySelector("[data-fin-box]");
+    finCb?.addEventListener("change", () => { if (finBox) finBox.hidden = !finCb.checked; });
+    // La nota sigue a la tienda mientras no la escribas tú
+    const noteEl = box.querySelector('[data-f="note"]');
+    noteEl?.addEventListener("input", () => { noteEl.dataset.auto = "0"; });
+    box.querySelector('[data-f="store"]')?.addEventListener("input", (e) => {
+      if (noteEl && noteEl.dataset.auto === "1") { const st = e.target.value.trim(); noteEl.value = `${noteEl.dataset.base}${st ? ` · ${st}` : ""}`; }
+    });
+    const syncBuyer = () => {
+      const fergis = box.querySelector(`input[name="bkBuyer_${CSS.escape(msg.id)}"]:checked`)?.value === "fergis";
+      const acc = box.querySelector("[data-fin-acc]"); if (acc) acc.hidden = fergis;
+      const fh = box.querySelector("[data-fin-fergis]"); if (fh) fh.hidden = !fergis;
+    };
+    box.querySelectorAll(`input[name="bkBuyer_${CSS.escape(msg.id)}"]`).forEach((r) => r.addEventListener("change", syncBuyer));
+    syncBuyer();
     box.querySelector("[data-bk-save]")?.addEventListener("click", () => saveBuy(msg.id, box));
   }));
 
@@ -1006,10 +1052,22 @@ export function wireBasket(root, ctx) {
     for (const it of items) { const c = it.category || "Other"; byCategory[c] = Math.round(((byCategory[c] || 0) + it.price * it.qty) * 100) / 100; }
     if (!Array.isArray(state.shoppingHistory)) state.shoppingHistory = [];
     state.shoppingHistory.unshift({ id: ctx.uid("sh"), date, store, notes: "La Canasta", sourceListId, buyer, items, totals: { total, itemsCount: items.length, byCategory } });
-    if (box.querySelector('[data-f="finance"]')?.checked && typeof ctx.recordFinance === "function") {
+    const wantFinance = Boolean(box.querySelector('[data-f="finance"]')?.checked);
+    if (box.querySelector('[data-f="finance"]')) saveJson(FIN_KEY, { ...(loadJson(FIN_KEY, {}) || {}), off: !wantFinance });
+    if (wantFinance && typeof ctx.recordFinance === "function") {
       const accountId = box.querySelector('[data-f="account"]')?.value || "";
-      rememberAccount("market", accountId);
-      ctx.recordFinance({ sourceListId, accountId, dateISO: `${date}T12:00:00`, amount: total, store, notes: `La Canasta${buyer ? ` · ${buyer === "fergis" ? "Fergis" : "yo"}` : ""}` });
+      const category = box.querySelector('[data-f="category"]')?.value || "";
+      const reason = box.querySelector('[data-f="reason"]')?.value || "planificado";
+      const time = box.querySelector('[data-f="time"]')?.value || nowHM();
+      const note = box.querySelector('[data-f="note"]')?.value?.trim() || purchaseNote(items, store);
+      const when = new Date(`${date}T${time}:00`);
+      if (buyer !== "fergis") rememberAccount("market", accountId);
+      saveJson(FIN_KEY, { ...(loadJson(FIN_KEY, {}) || {}), category, reason, off: false });
+      ctx.recordFinance({
+        sourceListId, accountId, amount: total, store, category, reason, note,
+        dateISO: Number.isFinite(when.getTime()) ? when.toISOString() : new Date().toISOString(),
+        byFergis: buyer === "fergis",
+      });
     }
     update(id, (m) => { m.data.saved = true; m.data.savedTotal = total; m.data.savedBuyer = buyer; m.data.savedStore = store; });
     const L = learn(state);
@@ -1028,6 +1086,8 @@ function css() {
   .bkBack { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); color:inherit; border-radius:10px; width:36px; height:36px; font-size:18px; cursor:pointer; }
   .bkTitle { font-size:18px; font-weight:800; }
   .bkSub { font-size:12px; opacity:.65; }
+  .bkFinBox { border-left:2px solid rgba(124,92,255,.4); padding-left:8px; margin:4px 0 8px; display:grid; gap:6px; }
+  .bkFinBox .bkFormRow > span { min-width:70px; font-size:12px; opacity:.8; }
   .bkEditBtn { background:none; border:none; cursor:pointer; font-size:14px; padding:2px 4px; opacity:.75; }
   .bkItemEdit { display:grid; grid-template-columns: 1fr 56px 70px auto auto; gap:6px; align-items:center; }
   .bkPay { background:rgba(124,92,255,.07); border:1px solid rgba(124,92,255,.3); border-radius:14px; padding:10px 12px; margin-bottom:8px; }
