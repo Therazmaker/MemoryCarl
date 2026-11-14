@@ -13,6 +13,8 @@ import { parseListText, learnRhythm, weeklyMinimum, analyzeList, weeklySpend, ca
 import { enrichProductData } from "./productIntelligence.js";
 import { callClaude } from "./shoppingAi.js";
 import { getClaudeSettings } from "../services/claudeClient.js";
+import { getNeuroChatSettings } from "../settings/neurochatSettings.js";
+import { askBrain, brainContext, brainItemsToParsed } from "./basketBrain.js";
 import { MEAL_TYPES, mealLabel, mealEmoji, guessMealType, runway, impact, streetPatterns, streetEntries, parseSpendIntent } from "../finance/streetFood.js";
 import { looksLikeRoutine, parseRoutineText, routinesOf, daysLabel, WEEKDAYS, ALL_DAYS } from "../finance/routines.js";
 
@@ -370,7 +372,7 @@ export function purchaseNote(items = [], store = "") {
   const list = names.slice(0, 6).join(", ") + (names.length > 6 ? ` y ${names.length - 6} más` : "");
   return `🧺 ${list || "Compra"}${store ? ` · ${store}` : ""}`;
 }
-function financeBlock(state, picked) {
+function financeBlock(state, picked, store = "") {
   const saved = loadJson(FIN_KEY, {}) || {};
   const cats = (state.financeEntryCategories || []).map((c) => c && (c.name || c.id)).filter(Boolean);
   const cat = cats.includes(saved.category) ? saved.category : (cats.find((c) => /aliment|mercado|comida/i.test(c)) || cats[0] || "Alimentos");
@@ -381,7 +383,7 @@ function financeBlock(state, picked) {
     <div class="bkFinBox" data-fin-box ${saved.off ? "hidden" : ""}>
       <div class="bkFormRow"><span>Categoría</span><select class="bkInput" data-f="category">${cats.map((c) => `<option ${c === cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
       <div class="bkFormRow"><span>Motivo</span><select class="bkInput" data-f="reason">${reasons.map((r) => `<option value="${esc(r)}" ${r === reason ? "selected" : ""}>${esc(REASON_LABEL[r] || r)}</option>`).join("")}</select></div>
-      <div class="bkFormRow"><input class="bkInput" data-f="note" data-auto="1" data-base="${esc(purchaseNote(picked))}" value="${esc(purchaseNote(picked))}" aria-label="Nota en Finanzas"/></div>
+      <div class="bkFormRow"><input class="bkInput" data-f="note" data-auto="1" data-base="${esc(purchaseNote(picked))}" value="${esc(purchaseNote(picked, store))}" aria-label="Nota en Finanzas"/></div>
       <div class="bkFormRow"><span>Hora</span><input class="bkInput" type="time" data-f="time" value="${nowHM()}"/></div>
       <div data-fin-acc>${accountSelect(state, defaultAccountId(state, "market"), 'data-f="account"')}</div>
       <div class="bkHint" data-fin-fergis hidden>Si compró Fergis, se anota como pagado por ella (no descuenta tus cuentas).</div>
@@ -396,9 +398,9 @@ function buyForm(msg, ctx) {
   return `
     <div class="bkFormRow">
       <span>¿Quién compró?</span>
-      ${BUYERS.map((b, i) => `<label class="bkChip"><input type="radio" name="bkBuyer_${esc(msg.id)}" value="${b.id}" ${i === 0 ? "checked" : ""}/> ${b.label}</label>`).join("")}
+      ${BUYERS.map((b, i) => `<label class="bkChip"><input type="radio" name="bkBuyer_${esc(msg.id)}" value="${b.id}" ${(d.prefill?.buyer ? d.prefill.buyer === b.id : i === 0) ? "checked" : ""}/> ${b.label}</label>`).join("")}
     </div>
-    <div class="bkFormRow"><input class="bkInput" data-f="store" placeholder="Tienda (opcional)"/><input class="bkInput" type="date" data-f="date" value="${todayISO()}"/></div>
+    <div class="bkFormRow"><input class="bkInput" data-f="store" placeholder="Tienda (opcional)" value="${esc(d.prefill?.store || "")}"/><input class="bkInput" type="date" data-f="date" value="${todayISO()}"/></div>
     <div class="bkFormHint">Corrige precio y cantidad si cambiaron: así aprendo el precio real.</div>
     ${picked.map((it) => it.weighed ? `
       <div class="bkFormItem bkWeighed" data-item="${esc(it.id)}" data-ppk="${esc(it.ppk ?? it.price ?? 0)}">
@@ -412,7 +414,7 @@ function buyForm(msg, ctx) {
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="qty" value="${esc(it.qty || 1)}" aria-label="Cantidad"/>
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="price" value="${esc(it.price || "")}" placeholder="S/" aria-label="Precio por unidad"/>
       </div>`).join("")}
-    ${hasFinance ? financeBlock(ctx.state, picked) : ""}
+    ${hasFinance ? financeBlock(ctx.state, picked, d.prefill?.store || "") : ""}
     <button class="bkBtn bkBtnPrimary" data-bk-save="${esc(msg.id)}">Guardar compra</button>`;
 }
 
@@ -595,7 +597,14 @@ export function wireBasket(root, ctx) {
   setTimeout(scrollDown, 30);
 
   const rerender = () => { ctx.view(); };
-  const push = (msg) => { const c = loadChat(); c.push({ id: mid(), ts: Date.now(), ...msg }); saveChat(c); };
+  const aiFellBackRef = { v: false };
+  const push = (msg) => {
+    const c = loadChat();
+    // Si la IA no respondió, lo que contestan las reglas lo dice
+    const m = aiFellBackRef.v && msg.role === "carl" && typeof msg.text === "string" ? { ...msg, text: `${msg.text} · ⚙️ sin IA (no respondió)` } : msg;
+    c.push({ id: mid(), ts: Date.now(), ...m });
+    saveChat(c);
+  };
   const update = (id, fn) => { const c = loadChat(); const m = c.find((x) => x.id === id); if (m) { fn(m); saveChat(c); } };
 
   root.querySelector("[data-bk-back]")?.addEventListener("click", () => { state.shoppingSubtab = "lists"; ctx.view(); });
@@ -714,9 +723,55 @@ export function wireBasket(root, ctx) {
     });
   });
 
+  const aiKeys = () => {
+    const c = getClaudeSettings() || {};
+    let g = {};
+    try { g = getNeuroChatSettings() || {}; } catch (_e) {}
+    return { claude: { apiKey: c.apiKey || "", model: c.model }, gemini: { apiKey: (g.apiKey || "").trim().length > 8 ? g.apiKey : "", model: g.model } };
+  };
+  const understandWithAi = async (t, L) => {
+    aiFellBackRef.v = false;
+    const keys = aiKeys();
+    if (!keys.claude.apiKey && !keys.gemini.apiKey) return false;
+    rerender();
+    const typing = document.getElementById("bkTyping");
+    if (typing) { typing.hidden = false; typing.textContent = "🧠 Carl está entendiendo…"; }
+    const context = brainContext({
+      products: L.products, rhythm: L.rhythm, runway: moneyNow(L),
+      routines: routinesOf(state.products || []), chat: loadChat().slice(0, -1),
+    });
+    const { result: r, provider, error } = await askBrain({ text: t, context, claude: keys.claude, gemini: keys.gemini, callClaude });
+    if (!r) {
+      console.warn("[La Canasta] IA no disponible, uso reglas:", error);
+      aiFellBackRef.v = true;
+      return false;
+    }
+    const tag = provider ? ` · 🧠 ${provider}` : "";
+    if ((r.intent === "compra" || r.intent === "lista") && r.items.length) {
+      const parsed = brainItemsToParsed(r.items, L.products);
+      const a = analyzeList(parsed, { products: L.products, rhythm: L.rhythm });
+      push({
+        role: "carl", type: "analysis",
+        text: (r.reply || `Revisé ${a.items.length} cosa${a.items.length === 1 ? "" : "s"}. Total ${soles(a.totals.all)}.`) + tag,
+        data: { ...a, off: [], prefill: { buyer: r.buyer || "", store: r.store || "" }, autoBuy: r.intent === "compra", brain: provider },
+      });
+    } else if (r.intent === "me_alcanza" && r.spend) {
+      push({ role: "carl", type: "check", data: { amount: r.spend.amount, desc: r.spend.desc, mealType: r.spend.mealType, who: r.spend.who, decided: null } });
+      if (r.reply) push({ role: "carl", type: "text", text: r.reply + tag });
+    } else if (r.intent === "rutina" && r.routine.length) {
+      const label = /trabajo|oficina|chamba/i.test(t) ? "Trabajo" : "";
+      push({ role: "carl", type: "routine", data: { items: r.routine.map((x) => ({ ...x, label })), saved: false } });
+    } else {
+      push({ role: "carl", type: "text", text: (r.reply || "No te entendí bien, ¿me lo dices de otra forma?") + tag });
+    }
+    rerender();
+    return true;
+  };
+
   const send = async (text) => {
     const t = String(text || "").trim();
     if (!t) return;
+    aiFellBackRef.v = false;
     const L = learn(state);
     push({ role: "user", text: t });
     const lower = t.toLowerCase();
@@ -728,6 +783,8 @@ export function wireBasket(root, ctx) {
       rerender();
       return;
     }
+    // 🧠 Primero la IA (Claude y, si falla, Gemini) con el contexto real; las reglas quedan de respaldo
+    if (await understandWithAi(t, L)) return;
     // "Voy a comprar almuerzo… cuesta 12.10 más una Pepsi a 2.90" → ¿Me alcanza? con el total
     const spend = parseSpendIntent(t, new Date());
     const futureIntent = /\b(voy a|vamos a|quiero|queremos|me provoca|nos provoca|pienso|puedo|podemos|estoy por|me alcanza|nos alcanza)\b/.test(lower);
@@ -945,7 +1002,7 @@ export function wireBasket(root, ctx) {
           ...(it.weighed && it.paid ? { price: it.paid } : it.writtenPrice && !it.weighed ? { price: it.price } : {}) })),
         ...m.data.missing.map((x) => ({ raw: x.name, name: x.name, qty: x.qty, unit: "" }))];
       const a = analyzeList(parsed, { products: L.products, rhythm: L.rhythm });
-      m.data = { ...a, missing: [], off: [] };
+      m.data = { ...a, missing: [], off: [], ...(m.data.prefill ? { prefill: m.data.prefill } : {}), ...(m.data.brain ? { brain: m.data.brain } : {}) };
     });
     rerender();
   }));
@@ -988,6 +1045,14 @@ export function wireBasket(root, ctx) {
     syncBuyer();
     box.querySelector("[data-bk-save]")?.addEventListener("click", () => saveBuy(msg.id, box));
   }));
+  // Si la IA entendió que ya compraste, el formulario de "Ya lo compré" se abre solo (una vez)
+  {
+    const pending = loadChat().filter((m) => m.type === "analysis" && m.data?.autoBuy && !m.data?.saved && !m.data?.autoOpened).pop();
+    if (pending) {
+      update(pending.id, (m) => { m.data.autoOpened = true; });
+      root.querySelector(`[data-bk-buy="${CSS.escape(pending.id)}"]`)?.click();
+    }
+  }
 
   const saveBuy = (id, box) => {
     const msg = loadChat().find((x) => x.id === id);
