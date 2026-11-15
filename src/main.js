@@ -91,7 +91,8 @@ import { sendShoppingAiMessage, generateDaySummary, formatDayLabel, todayISO, ge
 import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealBundles, updateMealBundle, deleteMealBundle, saveMealBundles } from "./shopping/mealBundles.js";
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
-import { renderBasket, wireBasket } from "./shopping/basket-ui.js";
+// Con versión: así el teléfono no se queda con una copia vieja de La Canasta
+import { renderBasket, wireBasket } from "./shopping/basket-ui.js?v=2081";
 import { mergeProducts, rebuildFromPurchases, stampChangedProducts } from "./shopping/productLibrarySync.js";
 import { proposeGroups, groupEmoji, classifyProductName } from "./shopping/productGroups.js";
 import { classifyWithAi } from "./shopping/basketBrain.js";

@@ -197,9 +197,13 @@ test("lista por kilo: peso escrito manda y sin precio por kg sigue por peso", ()
 });
 
 test("lista: 'Pepsi 5.5' (decimales sin unidad) es precio; '2kg' y 'huevos 12' siguen siendo cantidad", () => {
-  const r = parseListText("Pepsi 5.5\nLimón 0.68\nTomate 4.11\narroz 2kg\nhuevos 12\npollo 1.5 kg");
+  const r = parseListText("Pepsi 5.5\nLimón 0.68\nTomate 4.11\narroz 2kg\npollo 1.5 kg");
   assert.deepEqual(r.map((x) => [x.name, x.qty, x.unit, x.price]), [
     ["Pepsi", null, "", 5.5], ["Limón", null, "", 0.68], ["Tomate", null, "", 4.11],
-    ["Arroz", 2, "kg", undefined], ["Huevos", 12, "", undefined], ["Pollo", 1.5, "kg", undefined],
+    ["Arroz", 2, "kg", undefined], ["Pollo", 1.5, "kg", undefined],
   ]);
+  // Sin precios en la lista, el entero suelto es cantidad
+  assert.deepEqual(parseListText("huevos 12\nleche 2").map((x) => [x.qty, x.price]), [[12, undefined], [2, undefined]]);
+  // Con precios en la lista, el entero suelto también es precio ("Queso 9", "Nutella 8")
+  assert.deepEqual(parseListText("Pepsi 5.5\nQueso 9\nNutella 8").map((x) => [x.name, x.qty, x.price]), [["Pepsi", null, 5.5], ["Queso", null, 9], ["Nutella", null, 8]]);
 });

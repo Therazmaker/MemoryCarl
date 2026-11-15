@@ -16,7 +16,7 @@ import { getClaudeSettings } from "../services/claudeClient.js";
 import { getNeuroChatSettings } from "../settings/neurochatSettings.js";
 import { askBrain, brainContext, brainItemsToParsed, classifyWithAi } from "./basketBrain.js";
 import { SPLIT_MAIN, SPLIT_SKIP, initialChoices, rememberChoices, buildFinanceGroups, namesNote } from "./purchaseSplit.js";
-import { classifyProductName, proposeGroups, groupEmoji } from "./productGroups.js";
+import { classifyProductName, proposeGroups, groupEmoji, isGroup, GROUP_IDS } from "./productGroups.js";
 import { MEAL_TYPES, mealLabel, mealEmoji, guessMealType, runway, impact, streetPatterns, streetEntries, parseSpendIntent } from "../finance/streetFood.js";
 import { looksLikeRoutine, parseRoutineText, routinesOf, daysLabel, WEEKDAYS, ALL_DAYS } from "../finance/routines.js";
 
@@ -238,8 +238,37 @@ function weeksChart(weeks, minimum) {
     </svg>`;
 }
 
+// Grupo de una cosa comprada: el de su producto en la biblioteca, el que traía, o por su nombre.
+// Nunca "Sin categoría": si no se sabe, devuelve "" y queda para clasificar (IA o a mano).
+function groupOfItem(it, products = []) {
+  const prod = it?.productId ? products.find((p) => p && p.id === it.productId) : null;
+  if (prod && isGroup(prod.category)) return prod.category;
+  if (isGroup(it?.category)) return it.category;
+  return classifyProductName(prod?.name || it?.name) || (prod?.category || it?.category || "").trim();
+}
+const pendingKey = (x) => (x.productId ? `p:${x.productId}` : `n:${String(x.name || "").toLowerCase().trim()}`);
+
+function pendingGroupsCard(pending = [], busy = false) {
+  if (!pending.length) return "";
+  const total = pending.reduce((s, x) => s + x.total, 0);
+  return `
+    <div class="bkPendGroups">
+      <div class="bkGroupTitle">❓ Elige el grupo <span class="bkCount">${pending.length}</span> <span class="bkItemWhy">${esc(soles(total))}</span></div>
+      <div class="bkHint">${busy ? "🧠 La IA los está ordenando…" : "No supe dónde va esto. Elígelo una vez y lo corrijo en todas tus compras y en la biblioteca."}</div>
+      ${pending.slice(0, 12).map((x) => `
+        <div class="bkSplitRow">
+          <span class="bkSplitName">${esc(x.name)} <span class="bkQty">${esc(soles(x.total))}</span></span>
+          <select class="bkInput" data-bk-group-for="${esc(pendingKey(x))}" data-name="${esc(x.name)}" data-pid="${esc(x.productId || "")}">
+            <option value="">Elegir grupo…</option>
+            ${GROUP_IDS.map((g) => `<option value="${esc(g)}">${groupEmoji(g)} ${esc(g)}</option>`).join("")}
+          </select>
+        </div>`).join("")}
+    </div>`;
+}
+
 function categoryChart(cats) {
-  if (!cats.length) return `<div class="bkEmpty">Todavía no hay compras en los últimos 30 días.</div>`;
+  if (!cats.length && !(cats.pending || []).length) return `<div class="bkEmpty">Todavía no hay compras en los últimos 30 días.</div>`;
+  if (!cats.length) return pendingGroupsCard(cats.pending, AI_GROUPING.busy);
   const top = cats.slice(0, 6);
   const max = Math.max(...top.map((c) => c.total), 1);
   return top.map((c) => `
@@ -247,8 +276,10 @@ function categoryChart(cats) {
       <div class="bkHLabel">${esc(c.category)}</div>
       <div class="bkHTrack"><div class="bkHFill" style="width:${Math.max(3, (c.total / max) * 100)}%"></div></div>
       <div class="bkHVal">${esc(soles(c.total))}</div>
-    </div>`).join("");
+    </div>`).join("") + pendingGroupsCard(cats.pending, AI_GROUPING.busy);
 }
+// La IA ordena sola lo que no tiene grupo (una vez por cosa en cada sesión)
+const AI_GROUPING = { busy: false, tried: new Set() };
 
 function dueList(rhythm) {
   const rows = [...rhythm.values()]
@@ -304,7 +335,7 @@ function renderDashboard(state, L, hasChat = false) {
       </div>
       <div class="bkCard">
         <div class="bkCardTitle">En qué se va (últimos 30 días)</div>
-        ${categoryChart(categorySpend(L.history, { days: 30 }))}
+        ${categoryChart(categorySpend(L.history, { days: 30, resolve: (it) => groupOfItem(it, L.products) }))}
       </div>
     </details>`;
 }
@@ -406,9 +437,10 @@ function splitSection(state, picked, cats) {
   const { choices, dupes } = initialChoices(picked.map((it) => ({ ...it, price: itemLine(it), qty: 1 })), { ledger: state.financeLedger || [], habits, categories: cats });
   const opt = (v, label, sel) => `<option value="${esc(v)}" ${sel ? "selected" : ""}>${esc(label)}</option>`;
   return `
-    <details class="bkSplitBox" ${Object.values(choices).some((c) => c !== SPLIT_MAIN) ? "open" : ""}>
-      <summary>📊 ¿Algo va aparte en Finanzas? <span class="bkSplitSum" data-fin-summary></span></summary>
-      <div class="bkHint">Lo que pongas aparte se registra como su propio gasto con esa categoría (lo que va a la misma categoría se junta). Lo recuerdo para la próxima.</div>
+    <div class="bkSplitBox">
+      <div class="bkSplitTitle">📊 ¿Algo va aparte en Finanzas?</div>
+      <div class="bkSplitSum" data-fin-summary></div>
+      <div class="bkHint">Cambia “Con la compra” por una categoría para registrarlo como gasto aparte (lo de la misma categoría se junta). Lo recuerdo para la próxima.</div>
       ${picked.map((it) => {
         const c = choices[it.id];
         const dup = dupes[it.id];
@@ -423,7 +455,7 @@ function splitSection(state, picked, cats) {
           ${dup ? `<div class="bkDupHint">⚠️ Parece que ya lo anotaste: ${esc(soles(dup.amount))} · ${esc(new Date(dup.date).toLocaleString("es-PE", { weekday: "short", hour: "2-digit", minute: "2-digit" }))}${dup.note ? ` · “${esc(String(dup.note).slice(0, 40))}”` : ""}. No lo sumo otra vez.</div>` : ""}
         </div>`;
       }).join("")}
-    </details>`;
+    </div>`;
 }
 
 function buyForm(msg, ctx) {
@@ -743,6 +775,46 @@ export function wireBasket(root, ctx) {
     draw();
   }));
 
+  const aiKeys = () => {
+    const c = getClaudeSettings() || {};
+    let g = {};
+    try { g = getNeuroChatSettings() || {}; } catch (_e) {}
+    return { claude: { apiKey: c.apiKey || "", model: c.model }, gemini: { apiKey: (g.apiKey || "").trim().length > 8 ? g.apiKey : "", model: g.model } };
+  };
+  // ---- Grupos: aplicar a todas las compras con esa cosa y a su producto en la biblioteca ----
+  const applyGroup = (key, name, pid, group) => {
+    if (!group) return;
+    const low = String(name || "").toLowerCase().trim();
+    const match = (it) => (pid ? it.productId === pid : (!it.productId && String(it.name || "").toLowerCase().trim() === low));
+    for (const e of state.shoppingHistory || []) for (const it of e.items || []) if (match(it)) it.category = group;
+    const prod = pid ? (state.products || []).find((p) => p.id === pid) : (state.products || []).find((p) => String(p.name || "").toLowerCase().trim() === low);
+    if (prod && !isGroup(prod.category)) prod.category = group;
+  };
+  root.querySelectorAll("[data-bk-group-for]").forEach((sel) => sel.addEventListener("change", () => {
+    if (!sel.value) return;
+    applyGroup(sel.dataset.bkGroupFor, sel.dataset.name, sel.dataset.pid, sel.value);
+    ctx.persist();
+    ctx.toast?.(`${groupEmoji(sel.value)} ${sel.dataset.name} → ${sel.value}`);
+    rerender();
+  }));
+  {
+    const Lg = learn(state);
+    const pend = (categorySpend(Lg.history, { days: 30, resolve: (it) => groupOfItem(it, Lg.products) }).pending || [])
+      .filter((x) => !AI_GROUPING.tried.has(pendingKey(x)));
+    const keys = aiKeys();
+    if (pend.length && !AI_GROUPING.busy && (keys.claude.apiKey || keys.gemini.apiKey)) {
+      AI_GROUPING.busy = true;
+      pend.forEach((x) => AI_GROUPING.tried.add(pendingKey(x)));
+      classifyWithAi({ products: pend.map((x) => ({ id: pendingKey(x), name: x.name })), claude: keys.claude, gemini: keys.gemini, callClaude })
+        .then((map) => {
+          let n = 0;
+          for (const x of pend) { const g = map[pendingKey(x)]; if (g) { applyGroup(pendingKey(x), x.name, x.productId, g); n++; } }
+          if (n) { ctx.persist(); ctx.toast?.(`🧠 Ordené ${n} cosa${n === 1 ? "" : "s"} en su grupo`); }
+        })
+        .catch(() => {})
+        .finally(() => { AI_GROUPING.busy = false; rerender(); });
+    }
+  }
   root.querySelector("#bkPay")?.addEventListener("toggle", (e) => { const ui = loadJson(UI_KEY, {}); ui.payClosed = !e.target.open; saveJson(UI_KEY, ui); });
   root.querySelectorAll("[data-bk-pay]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); ctx.openPay?.(b.dataset.bkPay); }));
   root.querySelector("[data-bk-addpay]")?.addEventListener("click", (e) => { e.preventDefault(); ctx.addPayment?.(); });
@@ -760,12 +832,6 @@ export function wireBasket(root, ctx) {
     });
   });
 
-  const aiKeys = () => {
-    const c = getClaudeSettings() || {};
-    let g = {};
-    try { g = getNeuroChatSettings() || {}; } catch (_e) {}
-    return { claude: { apiKey: c.apiKey || "", model: c.model }, gemini: { apiKey: (g.apiKey || "").trim().length > 8 ? g.apiKey : "", model: g.model } };
-  };
   const understandWithAi = async (t, L) => {
     aiFellBackRef.v = false;
     const keys = aiKeys();
@@ -1180,7 +1246,7 @@ export function wireBasket(root, ctx) {
         }
         items.push({
           id: ctx.uid("i"), srcId: it.id, name: product?.name || it.name, bought: true, ...weighedHistoryFields(line),
-          productId: product?.id || "", category: product?.category || it.category || "", essential: Boolean(product?.essential), sourceListId,
+          productId: product?.id || "", category: groupOfItem({ productId: product?.id, name: product?.name || it.name, category: it.category }, state.products || []), essential: Boolean(product?.essential), sourceListId,
         });
         continue;
       }
@@ -1202,7 +1268,7 @@ export function wireBasket(root, ctx) {
       }
       items.push({
         id: ctx.uid("i"), srcId: it.id, name: product?.name || typedName, price, qty, bought: true,
-        productId: product?.id || "", category: product?.category || it.category || "", essential: Boolean(product?.essential), unit: it.unit || "", sourceListId,
+        productId: product?.id || "", category: groupOfItem({ productId: product?.id, name: product?.name || typedName, category: it.category }, state.products || []), essential: Boolean(product?.essential), unit: it.unit || "", sourceListId,
       });
     }
     if (!items.length) { ctx.toast?.("No hay nada marcado para guardar."); return; }
@@ -1262,9 +1328,10 @@ function css() {
   .bkFinBox .bkFormRow > span { min-width:70px; font-size:12px; opacity:.8; }
   .bkEditBtn { background:none; border:none; cursor:pointer; font-size:14px; padding:2px 4px; opacity:.75; }
   .bkItem.bkItemEdit { display:grid; grid-template-columns: 1fr 56px 70px auto auto; gap:6px; align-items:center; cursor:default; }
-  .bkSplitBox { margin-top:4px; font-size:12.5px; }
-  .bkSplitBox > summary { cursor:pointer; font-weight:600; }
-  .bkSplitSum { font-weight:400; opacity:.75; font-size:11.5px; }
+  .bkPendGroups { margin-top:8px; padding:8px; border:1px dashed rgba(251,191,36,.5); border-radius:10px; }
+  .bkSplitBox { margin-top:6px; font-size:12.5px; border-top:1px solid rgba(255,255,255,.08); padding-top:8px; }
+  .bkSplitTitle { font-weight:700; }
+  .bkSplitSum { opacity:.8; font-size:12px; margin:2px 0 4px; }
   .bkSplitRow { display:grid; grid-template-columns: 1fr 1fr; gap:6px; align-items:center; padding:4px 0; }
   .bkSplitName { font-size:12px; }
   .bkDupHint { grid-column:1 / -1; font-size:11px; color:#fbbf24; }
