@@ -121,6 +121,7 @@ export function parseListText(text = "") {
     if (!(price > 0)) price = null;
     let qty = null;
     let unit = "";
+    let bareTail = false;
     // "(6)" o "x6" o "x 6" al final
     let m = s.match(/(?:\(\s*(\d+(?:[.,]\d+)?)\s*\)|\bx\s*(\d+(?:[.,]\d+)?))\s*$/i);
     if (m) { qty = parseQty(m[1] || m[2]); s = s.slice(0, m.index).trim(); }
@@ -149,13 +150,21 @@ export function parseListText(text = "") {
       price = Number(m[2].replace(",", "."));
       s = m[1].trim();
     } else if (m && m[1] && (!m[3] || UNIT_WORDS[m[3].toLowerCase()])) {
+      if (qty == null && !m[3]) bareTail = true; // "Queso 9": ¿cantidad o precio? se decide con toda la lista
       qty = qty ?? parseQty(m[2]);
       unit = unit || (m[3] ? UNIT_WORDS[m[3].toLowerCase()] : "");
       s = m[1].trim();
     }
     const name = s.replace(/\s+/g, " ").replace(/^(de|del)\s+/i, "").trim();
     if (!name || !/[a-zñáéíóú]/i.test(name)) continue;
-    out.push({ raw, name: name.charAt(0).toUpperCase() + name.slice(1), qty, unit, ...(price ? { price: Math.round(price * 100) / 100 } : {}) });
+    out.push({ raw, name: name.charAt(0).toUpperCase() + name.slice(1), qty, unit, ...(price ? { price: Math.round(price * 100) / 100 } : {}), ...(bareTail ? { _bare: true } : {}) });
+  }
+  // Si en la lista hay precios escritos ("Pepsi 5.5"), un número entero suelto al final también es
+  // precio ("Queso 9", "Nutella 8"); si no hay ninguno, sigue siendo cantidad ("huevos 12").
+  const hasPrices = out.some((i) => i.price > 0);
+  for (const i of out) {
+    if (i._bare && hasPrices && !(i.price > 0)) { i.price = i.qty; i.qty = null; }
+    delete i._bare;
   }
   return out;
 }
@@ -413,16 +422,32 @@ export function weeklySpend(history = [], { weeks = 8, now = new Date() } = {}) 
 }
 
 /** Gasto por categoría en los últimos N días. */
-export function categorySpend(history = [], { days = 30, now = new Date() } = {}) {
+/**
+ * En qué se va el dinero. `resolve(item)` da el grupo de cada cosa (biblioteca, nombre…);
+ * lo que no tiene grupo NO se muestra como "Sin categoría": queda en `pending` para clasificarlo.
+ * @returns {Array<{category, total}>} con la propiedad extra `pending: Array<{name, productId, total}>`
+ */
+export function categorySpend(history = [], { days = 30, now = new Date(), resolve = null } = {}) {
   const from = new Date(now).getTime() - days * DAY;
   const map = new Map();
+  const pending = new Map();
   for (const e of history || []) {
     const d = toDay(e?.date);
     if (!d || d.getTime() < from) continue;
     for (const it of e.items || []) {
-      const cat = String(it.category || "").trim() || "Sin categoría";
-      map.set(cat, round2((map.get(cat) || 0) + (Number(it.price) || 0) * (Number(it.qty) || 1)));
+      const amount = (Number(it.price) || 0) * (Number(it.qty) || 1);
+      const cat = String((resolve ? resolve(it) : it.category) || "").trim();
+      if (!cat) {
+        const k = it.productId ? `p:${it.productId}` : `n:${String(it.name || "").toLowerCase().trim()}`;
+        const cur = pending.get(k) || { name: it.name || "¿?", productId: it.productId || "", total: 0 };
+        cur.total = round2(cur.total + amount);
+        pending.set(k, cur);
+        continue;
+      }
+      map.set(cat, round2((map.get(cat) || 0) + amount));
     }
   }
-  return [...map.entries()].map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total);
+  const out = [...map.entries()].map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total);
+  out.pending = [...pending.values()].sort((a, b) => b.total - a.total);
+  return out;
 }
