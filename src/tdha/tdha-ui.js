@@ -8,8 +8,8 @@
  * y qué desregula). No diagnostica.
  */
 
-import { STATES, SIGNALS, FACTORS, detectLocal, autoFactors, dailyView, patterns, signalCounts, parseTdhaReply, tdhaSystemPrompt, factorInfo, signalInfo, hookStatus, hookSpending, hookStats } from "./tdhaEngine.js";
-import { loadTdha, addEntry, updateEntry, deleteEntry, pushChat, clearChat, upsertHook, updateHook, deleteHook } from "./tdhaStore.js";
+import { STATES, SIGNALS, FACTORS, detectLocal, autoFactors, dailyView, patterns, signalCounts, parseTdhaReply, tdhaSystemPrompt, factorInfo, signalInfo, hookStatus, hookSpending, hookStats, forgetStats, forgetInfo, FORGET_KINDS } from "./tdhaEngine.js";
+import { loadTdha, addEntry, updateEntry, deleteEntry, pushChat, clearChat, upsertHook, updateHook, deleteHook, addForget, updateForget, deleteForget } from "./tdhaStore.js";
 import { callClaude } from "../shopping/shoppingAi.js";
 import { geminiJson } from "../shopping/basketBrain.js";
 import { getClaudeSettings } from "../services/claudeClient.js";
@@ -138,8 +138,42 @@ function regulationGraph(entries) {
     <div class="tdHint">Más grueso = relación más fuerte. Toca un círculo para ver los números.</div>`;
 }
 
-function visualsHtml(entries, hooks) {
+/** 💨 Mis olvidos: qué, cuándo, lo que se repite y con qué aparece más. */
+function forgetsHtml(forgets, entries) {
+  const st = forgetStats(forgets, entries);
+  const recent = [...forgets].sort((a, b) => b.ts - a.ts).slice(0, 10);
+  if (!recent.length) return `<div class="tdHint">Cuando me cuentes que se te olvidó algo (“se me olvidó la billetera”, “no me acordé de pagar la luz”) lo anoto aquí. Con el tiempo te muestro qué se te olvida más, a qué hora y con qué se relaciona.</div>`;
+  const maxPart = Math.max(1, ...Object.values(st.parts));
+  const partsSvg = `<svg class="tdSvg" viewBox="0 0 300 70" role="img" aria-label="Olvidos por momento del día">${Object.entries(st.parts).map(([k, n], i) => {
+    const w = (n / maxPart) * 190;
+    return `<text x="0" y="${16 + i * 22}" font-size="10" fill="currentColor" opacity=".8">${k}</text><rect x="60" y="${6 + i * 22}" width="${Math.max(2, w)}" height="13" rx="6" fill="#f59e0b" opacity="${n ? 0.85 : 0.2}"/><text x="${66 + w}" y="${16 + i * 22}" font-size="10" fill="currentColor">${n}</text>`;
+  }).join("")}</svg>`;
+  const kinds = Object.entries(st.byKind).sort((a, b) => b[1] - a[1]).map(([k, n]) => { const f = forgetInfo(k); return `<span class="tdChip tdChip--sig">${f.emoji} ${esc(f.label)} ×${n}</span>`; }).join("");
+  const when = (ts) => new Date(ts).toLocaleString("es-PE", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const rows = recent.map((f) => {
+    const k = forgetInfo(f.kind);
+    return `
+    <div class="tdHook ${f.resolved ? "tdDone" : ""}">
+      <div>${k.emoji} <b>${esc(f.what)}</b> <span class="tdPatWhy">${esc(when(f.ts))}${f.pending && !f.resolved ? " · pendiente" : ""}${f.resolved ? " · resuelto" : ""}${f.reminderId ? " · ⏰ en recordatorios" : ""}</span></div>
+      <div class="tdHookBtns">
+        ${f.pending && !f.resolved && !f.reminderId ? `<button class="tdMini" data-td-fg-remind="${esc(f.id)}">⏰ Recordármelo</button>` : ""}
+        ${f.pending && !f.resolved ? `<button class="tdMini" data-td-fg-done="${esc(f.id)}">✅</button>` : ""}
+        <button class="tdMini" data-td-fg-del="${esc(f.id)}" title="Borrar">🗑</button>
+      </div>
+    </div>`;
+  }).join("");
   return `
+    <div class="tdHint">${st.total} olvido${st.total === 1 ? "" : "s"} en los últimos 60 días${st.pending ? ` · ${st.pending} pendiente${st.pending === 1 ? "" : "s"}` : ""}.</div>
+    ${kinds ? `<div class="tdChips">${kinds}</div>` : ""}
+    ${st.repeated.length ? `<div class="tdColTitle">🔁 Se te repite</div><div class="tdChips">${st.repeated.map((r) => `<span class="tdChip">“${esc(r.word)}” ×${r.n}</span>`).join("")}</div>` : ""}
+    <div class="tdColTitle">¿A qué hora?</div>${partsSvg}
+    ${st.related.length ? `<div class="tdColTitle">Olvidas más los días con…</div>${st.related.map((r) => `<div class="tdPat"><span>${r.emoji} ${esc(r.label)}</span><span class="tdPatWhy">olvidos el ${r.withPct}% de esos días vs ${r.withoutPct}% sin eso · ${r.n} días</span></div>`).join("")}` : ""}
+    <div class="tdColTitle">Últimos</div>${rows}`;
+}
+
+function visualsHtml(entries, hooks, forgets = []) {
+  return `
+    <details class="tdCard" open><summary>💨 Mis olvidos</summary>${forgetsHtml(forgets, entries)}</details>
     <details class="tdCard" open><summary>🗓️ Mis últimas 8 semanas</summary>${heatmapSvg(entries)}</details>
     <details class="tdCard" open><summary>🔁 Mis enganches</summary>${hooksRiver(hooks)}</details>
     <details class="tdCard"><summary>🕸️ Grafo: qué me regula y qué me desregula</summary>${regulationGraph(entries)}</details>`;
@@ -175,7 +209,7 @@ function insightsHtml(entries) {
 }
 
 export function viewTdha() {
-  const { entries, chat, hooks } = loadTdha();
+  const { entries, chat, hooks, forgets } = loadTdha();
   const byId = new Map(entries.map((e) => [e.id, e]));
   const msgs = chat.map((m) => m.role === "user"
     ? `<div class="tdMsg tdMsgUser"><div class="tdBubble">${esc(m.text).replace(/\n/g, "<br>")}</div></div>`
@@ -187,6 +221,7 @@ export function viewTdha() {
       <div class="tdQuick">
         <span>¿Cómo estás ahora?</span>
         ${Object.values(STATES).map((s) => `<button class="tdQuickBtn" data-td-quick="${s.id}">${s.emoji} ${esc(s.label)}</button>`).join("")}
+        <button class="tdQuickBtn" data-td-forgot>💨 Se me olvidó…</button>
       </div>
       <div class="tdLog" id="tdLog">${intro}${msgs}${ui.busy ? `<div class="tdTyping">🧠 Carl está entendiendo…</div>` : ""}</div>
       <div class="tdInputBar">
@@ -195,7 +230,7 @@ export function viewTdha() {
       </div>
       <div class="tdRow"><button class="tdMini" data-td-clear>🧹 Limpiar chat (los registros se quedan)</button></div>
       ${insightsHtml(entries)}
-      ${visualsHtml(entries, hooks)}
+      ${visualsHtml(entries, hooks, forgets)}
     </div>`;
 }
 
@@ -245,8 +280,11 @@ export function wireTdha(root, rerender) {
     const factors = [...new Set([...(res.factors || []), ...autoFactors({ date: new Date(ts), sleepLog: st().sleepLog || [], ledger: st().financeLedger || [] })])];
     // Enganche: lo nombra la IA o se saca del texto ("pienso mucho en…")
     const hookName = res.hook || local.hook;
-    const signals = [...new Set([...(res.signals || []), ...(hookName ? ["enganche"] : [])])];
+    // Olvido: lo entiende la IA o se saca del texto ("se me olvidó…")
+    const forgot = res.forgot || local.forgot;
+    const signals = [...new Set([...(res.signals || []), ...(hookName ? ["enganche"] : []), ...(forgot ? ["olvido"] : [])])];
     if (hookName) upsertHook(hookName, ts);
+    if (forgot) addForget({ ts, what: forgot.what, kind: forgot.kind, pending: Boolean(forgot.pending) });
     let entryId = null;
     if (res.state || signals.length || factors.length) {
       entryId = addEntry({ ts, state: res.state || null, signals, factors, text, source: "chat", ...(hookName ? { hook: hookName } : {}) }).id;
@@ -291,6 +329,23 @@ export function wireTdha(root, rerender) {
     try { window.persist?.(); } catch (_e) {}
     rerender();
   }));
+  root.querySelector("[data-td-forgot]")?.addEventListener("click", () => {
+    const inp = root.querySelector("#tdInput");
+    if (inp) { inp.value = "Se me olvidó "; inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  });
+  root.querySelectorAll("[data-td-fg-remind]").forEach((b) => b.addEventListener("click", () => {
+    const f = (loadTdha().forgets || []).find((x) => x.id === b.dataset.tdFgRemind);
+    const s0 = st();
+    if (!f || !Array.isArray(s0.reminders)) return;
+    const id = `m_${Date.now().toString(36)}`;
+    s0.reminders.unshift({ id, text: `💨 ${f.what}`, done: false });
+    updateForget(f.id, { reminderId: id });
+    try { window.persist?.(); } catch (_e) {}
+    try { window.toast?.("⏰ Agregado a tus recordatorios"); } catch (_e) {}
+    rerender();
+  }));
+  root.querySelectorAll("[data-td-fg-done]").forEach((b) => b.addEventListener("click", () => { updateForget(b.dataset.tdFgDone, { resolved: true }); try { window.persist?.(); } catch (_e) {} rerender(); }));
+  root.querySelectorAll("[data-td-fg-del]").forEach((b) => b.addEventListener("click", () => { if (!confirm("¿Borrar este olvido?")) return; deleteForget(b.dataset.tdFgDel); try { window.persist?.(); } catch (_e) {} rerender(); }));
   root.querySelectorAll("[data-td-hook-end]").forEach((b) => b.addEventListener("click", () => { updateHook(b.dataset.tdHookEnd, { endedTs: Date.now() }); try { window.persist?.(); } catch (_e) {} rerender(); }));
   root.querySelectorAll("[data-td-hook-back]").forEach((b) => b.addEventListener("click", () => { updateHook(b.dataset.tdHookBack, { endedTs: undefined, lastTs: Date.now() }); try { window.persist?.(); } catch (_e) {} rerender(); }));
   root.querySelectorAll("[data-td-hook-del]").forEach((b) => b.addEventListener("click", () => { if (!confirm("¿Borrar este enganche?")) return; deleteHook(b.dataset.tdHookDel); try { window.persist?.(); } catch (_e) {} rerender(); }));
@@ -350,5 +405,6 @@ function tdCss() {
   .tdLegend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:4px; vertical-align:middle; }
   .tdHook { display:flex; justify-content:space-between; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.05); font-size:13px; }
   .tdHookBtns { display:flex; gap:4px; flex:none; }
+  .tdDone { opacity:.55; }
   </style>`;
 }

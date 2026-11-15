@@ -15,14 +15,14 @@ export const TDHA_KEY = "memorycarl_tdha_v1";
 const read = () => {
   try {
     const v = JSON.parse(localStorage.getItem(TDHA_KEY) || "null");
-    return { entries: Array.isArray(v?.entries) ? v.entries : [], chat: Array.isArray(v?.chat) ? v.chat : [], hooks: Array.isArray(v?.hooks) ? v.hooks : [] };
-  } catch (_e) { return { entries: [], chat: [], hooks: [] }; }
+    return { entries: Array.isArray(v?.entries) ? v.entries : [], chat: Array.isArray(v?.chat) ? v.chat : [], hooks: Array.isArray(v?.hooks) ? v.hooks : [], forgets: Array.isArray(v?.forgets) ? v.forgets : [] };
+  } catch (_e) { return { entries: [], chat: [], hooks: [], forgets: [] }; }
 };
 const write = (d) => { try { localStorage.setItem(TDHA_KEY, JSON.stringify(d)); } catch (_e) {} };
 const uid = (p) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
 export const loadTdha = read;
-export function saveTdha(d) { write({ entries: d.entries || [], chat: (d.chat || []).slice(-400), hooks: d.hooks || [] }); }
+export function saveTdha(d) { write({ entries: d.entries || [], chat: (d.chat || []).slice(-400), hooks: d.hooks || [], forgets: d.forgets || [] }); }
 
 export function addEntry(entry) {
   const d = read();
@@ -85,13 +85,31 @@ export function updateHook(id, patch) {
 
 export function deleteHook(id) { const d = read(); d.hooks = d.hooks.filter((x) => x.id !== id); write(d); }
 
+// ---- Olvidos ----
+export function addForget(f) {
+  const d = read();
+  const x = { id: uid("fg"), ts: Date.now(), kind: "otro", pending: false, resolved: false, ...f, updatedAt: new Date().toISOString() };
+  d.forgets.push(x);
+  write(d);
+  return x;
+}
+export function updateForget(id, patch) {
+  const d = read();
+  const x = d.forgets.find((f) => f.id === id);
+  if (!x) return null;
+  Object.assign(x, patch, { updatedAt: new Date().toISOString() });
+  write(d);
+  return x;
+}
+export function deleteForget(id) { const d = read(); d.forgets = d.forgets.filter((f) => f.id !== id); write(d); }
+
 export function clearChat() { const d = read(); d.chat = []; write(d); }
 
 /** Payload para la nube (null si no hay nada: así no pisa la copia de la nube). */
 export function tdhaPayload() {
   const d = read();
-  if (!d.entries.length && !d.chat.length && !d.hooks.length) return null;
-  return { entries: d.entries, chat: d.chat.slice(-200), hooks: d.hooks };
+  if (!d.entries.length && !d.chat.length && !d.hooks.length && !d.forgets.length) return null;
+  return { entries: d.entries, chat: d.chat.slice(-200), hooks: d.hooks, forgets: d.forgets };
 }
 
 /** Une lo que viene de la nube con lo local (por id; gana el más reciente). */
@@ -113,5 +131,11 @@ export function mergeTdha(local, cloud) {
     const cur = hooks.get(h.id);
     if (!cur || String(h.updatedAt || "") > String(cur.updatedAt || "")) { hooks.set(h.id, h); changed = true; }
   }
-  return { entries: [...byId.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0)), chat, hooks: [...hooks.values()], changed };
+  const forgets = new Map((local.forgets || []).map((f) => [f.id, f]));
+  for (const f of cloud?.forgets || []) {
+    if (!f?.id) continue;
+    const cur = forgets.get(f.id);
+    if (!cur || String(f.updatedAt || "") > String(cur.updatedAt || "")) { forgets.set(f.id, f); changed = true; }
+  }
+  return { entries: [...byId.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0)), chat, hooks: [...hooks.values()], forgets: [...forgets.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0)), changed };
 }
