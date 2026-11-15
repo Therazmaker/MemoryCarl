@@ -143,7 +143,7 @@ export function brainItemsToParsed(items = [], products = []) {
 }
 
 /** Llama a Gemini pidiendo JSON. */
-async function geminiJson({ system, user, apiKey, model = "gemini-2.5-flash", fetchImpl = fetch, timeoutMs = 30000 }) {
+export async function geminiJson({ system, user, apiKey, model = "gemini-2.5-flash", fetchImpl = fetch, timeoutMs = 30000 }) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${String(apiKey).trim()}`;
   const generationConfig = { temperature: 0.2, maxOutputTokens: 4096, responseMimeType: "application/json" };
   if (/gemini-2\.5/i.test(model)) generationConfig.thinkingConfig = { thinkingBudget: /pro/i.test(model) ? 1024 : 512 };

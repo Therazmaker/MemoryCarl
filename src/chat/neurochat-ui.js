@@ -39,6 +39,7 @@ import {
 import { viewDayCalendar, viewDayDetail, wireDayCalendar, wireDayDetail, dayUiState } from "../day/day-calendar-ui.js";
 import { getAllDays, getDayByDate, repairDaysFromChatHistory } from "../day/dayStore.js";
 import { viewCouch, wireCouch } from "./couch-ui.js";
+import { viewTdha, wireTdha } from "../tdha/tdha-ui.js";
 import { viewJournal, wireJournal } from "./journal-ui.js";
 import {
   loadLifeFacts,
@@ -1017,6 +1018,7 @@ function nchatInner() {
   const tabDays = uiState.activeTab === "days";
   const tabCouch = uiState.activeTab === "couch";
   const tabJournal = uiState.activeTab === "journal";
+  const tabTdha = uiState.activeTab === "tdha";
   const showSidePanel = uiState.neuronsExpanded || Boolean(uiState.lastResult) || history.length > 0;
 
   const settingsModal = uiState.settingsOpen ? renderSettingsModal() : "";
@@ -1089,6 +1091,7 @@ function nchatInner() {
         <button class="ncTab ${tabMemories ? "ncTab--active" : ""}" id="btnTabMemories"><span class="ncTabIcon">🕰️</span><span class="ncTabLong">Memorias</span><span class="ncTabShort">Memorias</span></button>
         <button class="ncTab ${tabDays ? "ncTab--active" : ""}" id="btnTabDays"><span class="ncTabIcon">📅</span><span class="ncTabLong">Días</span><span class="ncTabShort">Días</span></button>
         <button class="ncTab ${tabCouch ? "ncTab--active" : ""}" id="btnTabCouch"><span class="ncTabIcon">🛋️</span><span class="ncTabLong">Couch</span><span class="ncTabShort">Couch</span></button>
+        <button class="ncTab ${tabTdha ? "ncTab--active" : ""}" id="btnTabTdha"><span class="ncTabIcon">🧩</span><span class="ncTabLong">TDHA</span><span class="ncTabShort">TDHA</span></button>
       </div>
 
       <!-- Contenido del tab activo -->
@@ -1100,6 +1103,7 @@ function nchatInner() {
       ${memoriesContent}
       ${daysContent}
       ${couchContent}
+      ${tabTdha ? viewTdha() : ""}
 
       <!-- Settings modal -->
       ${settingsModal}
@@ -2206,6 +2210,10 @@ function wireNeuroChatInner(root) {
     uiState.activeTab = "couch";
     fullRerender();
   });
+  root.querySelector("#btnTabTdha")?.addEventListener("click", () => {
+    uiState.activeTab = "tdha";
+    fullRerender();
+  });
   root.querySelector("#btnTabJournal")?.addEventListener("click", () => {
     uiState.activeTab = "journal";
     fullRerender();
@@ -2228,6 +2236,9 @@ function wireNeuroChatInner(root) {
   }
   if (uiState.activeTab === "couch") {
     wireCouch(root);
+  }
+  if (uiState.activeTab === "tdha") {
+    wireTdha(root, () => fullRerender());
   }
   if (uiState.activeTab === "now") {
     wireNowTabEvents(root);
