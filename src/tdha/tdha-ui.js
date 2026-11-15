@@ -8,8 +8,8 @@
  * y qué desregula). No diagnostica.
  */
 
-import { STATES, SIGNALS, FACTORS, detectLocal, autoFactors, dailyView, patterns, signalCounts, parseTdhaReply, tdhaSystemPrompt, factorInfo, signalInfo } from "./tdhaEngine.js";
-import { loadTdha, addEntry, updateEntry, deleteEntry, pushChat, clearChat } from "./tdhaStore.js";
+import { STATES, SIGNALS, FACTORS, detectLocal, autoFactors, dailyView, patterns, signalCounts, parseTdhaReply, tdhaSystemPrompt, factorInfo, signalInfo, hookStatus, hookSpending, hookStats } from "./tdhaEngine.js";
+import { loadTdha, addEntry, updateEntry, deleteEntry, pushChat, clearChat, upsertHook, updateHook, deleteHook } from "./tdhaStore.js";
 import { callClaude } from "../shopping/shoppingAi.js";
 import { geminiJson } from "../shopping/basketBrain.js";
 import { getClaudeSettings } from "../services/claudeClient.js";
@@ -48,6 +48,103 @@ function chipsFor(entry, editable = false) {
     </div>`;
 }
 
+// ---------- Visuales ----------
+
+const STATE_COLOR = { green: "#22c55e", yellow: "#eab308", red: "#ef4444" };
+
+/** 🗓️ Mapa de 8 semanas: un cuadrito por día (lunes arriba), pintado por cómo estuviste. */
+function heatmapSvg(entries) {
+  const byDay = new Map(dailyView(entries).map((d) => [d.day, d]));
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const weeks = 8;
+  const start = new Date(today); start.setDate(start.getDate() - ((start.getDay() + 6) % 7) - (weeks - 1) * 7);
+  const cell = 15; const gap = 3; const left = 22; const top = 14;
+  const W = left + weeks * (cell + gap); const H = top + 7 * (cell + gap);
+  let rects = "";
+  for (let w = 0; w < weeks; w++) {
+    for (let r = 0; r < 7; r++) {
+      const d = new Date(start); d.setDate(start.getDate() + w * 7 + r);
+      if (d > today) continue;
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const day = byDay.get(k);
+      const fill = day?.state ? STATE_COLOR[day.state] : "rgba(255,255,255,.08)";
+      const tip = `${d.toLocaleDateString("es-PE", { weekday: "short", day: "numeric", month: "short" })}${day?.state ? ` · ${STATES[day.state].label}` : " · sin registro"}`;
+      rects += `<rect x="${left + w * (cell + gap)}" y="${top + r * (cell + gap)}" width="${cell}" height="${cell}" rx="3" fill="${fill}"><title>${esc(tip)}</title></rect>`;
+    }
+  }
+  const dows = ["L", "", "M", "", "V", "", "D"].map((l, r) => l ? `<text x="4" y="${top + r * (cell + gap) + 11}" font-size="9" fill="currentColor" opacity=".6">${l}</text>` : "").join("");
+  return `<svg class="tdSvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Mapa de 8 semanas">${dows}${rects}</svg>
+    <div class="tdLegend"><span><i style="background:${STATE_COLOR.green}"></i>Regulado</span><span><i style="background:${STATE_COLOR.yellow}"></i>A medias</span><span><i style="background:${STATE_COLOR.red}"></i>Desregulado</span></div>`;
+}
+
+/** 🔁 Río de enganches: una barra por enganche en la línea de tiempo. */
+function hooksRiver(hooks) {
+  const st = appState();
+  const now = Date.now();
+  const list = hooks.map((h) => ({ ...h, ...hookStatus(h, now), spend: hookSpending(h, { ledger: st.financeLedger || [], history: st.shoppingHistory || [] }, now) }))
+    .sort((a, b) => b.firstTs - a.firstTs).slice(0, 12);
+  if (!list.length) return `<div class="tdHint">Cuando me cuentes que algo te tiene enganchado (“pienso mucho en…”, “no me lo saco de la cabeza”), aparece aquí con cuánto te duró.</div>`;
+  const from = Math.min(...list.map((h) => h.firstTs)) - 86400000;
+  const span = Math.max(now - from, 7 * 86400000);
+  const W = 320; const rowH = 30; const H = list.length * rowH + 8;
+  const x = (t) => 4 + ((t - from) / span) * (W - 8);
+  const bars = list.map((h, i) => {
+    const y = 4 + i * rowH;
+    const x1 = x(h.firstTs); const x2 = Math.max(x(h.endTs), x1 + 6);
+    const color = h.active ? "#a78bfa" : "rgba(167,139,250,.45)";
+    // nombre arriba de la barra, alineado para que no se salga
+    const lx = Math.min(Math.max(x1, 4), W - 4);
+    const anchor = lx > W * 0.6 ? "end" : "start";
+    return `<text x="${anchor === "end" ? Math.min(x2, W - 4) : lx}" y="${y + 9}" font-size="9" fill="currentColor" text-anchor="${anchor}" opacity=".85">${esc(h.name.slice(0, 30))} · ${h.days} d</text>
+      <rect x="${x1}" y="${y + 13}" width="${x2 - x1}" height="10" rx="5" fill="${color}"><title>${esc(h.name)} · ${h.days} día${h.days === 1 ? "" : "s"}</title></rect>
+      ${(h.mentions || []).map((m) => `<circle cx="${x(m)}" cy="${y + 18}" r="2" fill="#fff" opacity=".85"/>`).join("")}`;
+  }).join("");
+  const stats = hookStats(hooks, now);
+  const rows = list.map((h) => `
+    <div class="tdHook">
+      <div><b>🔁 ${esc(h.name)}</b> <span class="tdPatWhy">${h.active ? "sigue" : "ya pasó"} · ${h.days} día${h.days === 1 ? "" : "s"} · ${h.mentionCount} mención${h.mentionCount === 1 ? "" : "es"}${h.spend.count ? ` · 💸 ${h.spend.count} compra${h.spend.count === 1 ? "" : "s"} (S/ ${h.spend.total.toFixed(2)})` : ""}</span></div>
+      <div class="tdHookBtns">
+        ${h.active ? `<button class="tdMini" data-td-hook-end="${esc(h.id)}">Ya pasó</button>` : `<button class="tdMini" data-td-hook-back="${esc(h.id)}">Sigue</button>`}
+        <button class="tdMini" data-td-hook-del="${esc(h.id)}" title="Borrar">🗑</button>
+      </div>
+    </div>`).join("");
+  return `
+    <svg class="tdSvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Enganches en el tiempo">${bars}</svg>
+    ${stats.avgDays ? `<div class="tdHint">Tus enganches suelen durar ~${stats.avgDays} día${stats.avgDays === 1 ? "" : "s"}${stats.everyDays ? ` y llega uno nuevo cada ~${stats.everyDays} días` : ""}.</div>` : ""}
+    ${rows}`;
+}
+
+/** 🕸️ Grafo: activaciones alrededor de 🟢 y 🔴, el grosor es qué tan fuerte es la relación. */
+function regulationGraph(entries) {
+  const p = patterns(entries, { minDays: 2 });
+  const nodes = [...p.helps.slice(0, 6).map((r) => ({ ...r, side: "green" })), ...p.hurts.slice(0, 6).map((r) => ({ ...r, side: "red" }))];
+  if (p.days < p.need || !nodes.length) return `<div class="tdHint">El grafo aparece cuando haya ${p.need}+ días y alguna relación clara (llevas ${p.days}).</div>`;
+  const W = 320; const H = 240;
+  const hub = { green: { x: 120, y: H / 2 }, red: { x: 200, y: H / 2 } };
+  // Cada centro abre sus activaciones en abanico hacia su lado
+  const place = (arr, side) => arr.map((n, i) => {
+    const t = arr.length === 1 ? 0 : -1 + (2 * i) / (arr.length - 1);
+    const ang = t * (65 * Math.PI / 180);
+    const r = 92;
+    const dir = side === "green" ? -1 : 1;
+    return { ...n, x: hub[side].x + dir * r * Math.cos(ang), y: H / 2 + r * Math.sin(ang) };
+  });
+  const g = place(nodes.filter((n) => n.side === "green"), "green");
+  const r = place(nodes.filter((n) => n.side === "red"), "red");
+  const edge = (n) => `<line x1="${hub[n.side].x}" y1="${hub[n.side].y}" x2="${n.x}" y2="${n.y}" stroke="${STATE_COLOR[n.side]}" stroke-width="${Math.max(1.5, Math.min(8, n.delta / 10))}" opacity=".7"/>`;
+  const node = (n) => `<g><circle cx="${n.x}" cy="${n.y}" r="13" fill="rgba(20,20,30,.95)" stroke="${STATE_COLOR[n.side]}"/><text x="${n.x}" y="${n.y + 5}" text-anchor="middle" font-size="13">${n.emoji}</text><text x="${n.x}" y="${n.y + 25}" text-anchor="middle" font-size="8" fill="currentColor" opacity=".75">${esc(n.label.split(" / ")[0].slice(0, 14))}</text><title>${esc(n.label)} · ${n.side === "red" ? `🔴 ${n.redWith}% vs ${n.redWithout}%` : `🟢 ${n.greenWith}% vs ${n.greenWithout}%`}</title></g>`;
+  const hubs = Object.entries(hub).map(([k, h]) => `<circle cx="${h.x}" cy="${h.y}" r="17" fill="${STATE_COLOR[k]}" opacity=".9"/><text x="${h.x}" y="${h.y + 32}" text-anchor="middle" font-size="10" fill="currentColor" font-weight="700">${k === "green" ? "Regula" : "Desregula"}</text>`).join("");
+  return `<svg class="tdSvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Grafo de lo que regula y desregula">${[...g, ...r].map(edge).join("")}${hubs}${[...g, ...r].map(node).join("")}</svg>
+    <div class="tdHint">Más grueso = relación más fuerte. Toca un círculo para ver los números.</div>`;
+}
+
+function visualsHtml(entries, hooks) {
+  return `
+    <details class="tdCard" open><summary>🗓️ Mis últimas 8 semanas</summary>${heatmapSvg(entries)}</details>
+    <details class="tdCard" open><summary>🔁 Mis enganches</summary>${hooksRiver(hooks)}</details>
+    <details class="tdCard"><summary>🕸️ Grafo: qué me regula y qué me desregula</summary>${regulationGraph(entries)}</details>`;
+}
+
 function insightsHtml(entries) {
   const p = patterns(entries);
   const sigs = signalCounts(entries).slice(0, 6);
@@ -78,7 +175,7 @@ function insightsHtml(entries) {
 }
 
 export function viewTdha() {
-  const { entries, chat } = loadTdha();
+  const { entries, chat, hooks } = loadTdha();
   const byId = new Map(entries.map((e) => [e.id, e]));
   const msgs = chat.map((m) => m.role === "user"
     ? `<div class="tdMsg tdMsgUser"><div class="tdBubble">${esc(m.text).replace(/\n/g, "<br>")}</div></div>`
@@ -98,6 +195,7 @@ export function viewTdha() {
       </div>
       <div class="tdRow"><button class="tdMini" data-td-clear>🧹 Limpiar chat (los registros se quedan)</button></div>
       ${insightsHtml(entries)}
+      ${visualsHtml(entries, hooks)}
     </div>`;
 }
 
@@ -145,10 +243,13 @@ export function wireTdha(root, rerender) {
     // Si es de ayer, se registra ayer en la tarde
     const ts = res.when === "ayer" ? (() => { const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(20, 0, 0, 0); return d.getTime(); })() : Date.now();
     const factors = [...new Set([...(res.factors || []), ...autoFactors({ date: new Date(ts), sleepLog: st().sleepLog || [], ledger: st().financeLedger || [] })])];
-    const signals = [...new Set(res.signals || [])];
+    // Enganche: lo nombra la IA o se saca del texto ("pienso mucho en…")
+    const hookName = res.hook || local.hook;
+    const signals = [...new Set([...(res.signals || []), ...(hookName ? ["enganche"] : [])])];
+    if (hookName) upsertHook(hookName, ts);
     let entryId = null;
     if (res.state || signals.length || factors.length) {
-      entryId = addEntry({ ts, state: res.state || null, signals, factors, text, source: "chat" }).id;
+      entryId = addEntry({ ts, state: res.state || null, signals, factors, text, source: "chat", ...(hookName ? { hook: hookName } : {}) }).id;
     }
     pushChat({ role: "carl", text: res.reply || "Anotado.", entryId });
     ui.busy = false;
@@ -190,6 +291,9 @@ export function wireTdha(root, rerender) {
     try { window.persist?.(); } catch (_e) {}
     rerender();
   }));
+  root.querySelectorAll("[data-td-hook-end]").forEach((b) => b.addEventListener("click", () => { updateHook(b.dataset.tdHookEnd, { endedTs: Date.now() }); try { window.persist?.(); } catch (_e) {} rerender(); }));
+  root.querySelectorAll("[data-td-hook-back]").forEach((b) => b.addEventListener("click", () => { updateHook(b.dataset.tdHookBack, { endedTs: undefined, lastTs: Date.now() }); try { window.persist?.(); } catch (_e) {} rerender(); }));
+  root.querySelectorAll("[data-td-hook-del]").forEach((b) => b.addEventListener("click", () => { if (!confirm("¿Borrar este enganche?")) return; deleteHook(b.dataset.tdHookDel); try { window.persist?.(); } catch (_e) {} rerender(); }));
   root.querySelector("[data-td-clear]")?.addEventListener("click", () => {
     if (!confirm("¿Limpiar la conversación? Los registros y patrones se quedan.")) return;
     clearChat();
@@ -241,5 +345,10 @@ function tdCss() {
   @media (max-width: 520px) { .tdCols { grid-template-columns:1fr; } }
   .tdPat { display:flex; flex-direction:column; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.05); font-size:13px; }
   .tdPatWhy { font-size:11px; opacity:.7; }
+  .tdSvg { width:100%; height:auto; display:block; margin-top:8px; color:inherit; }
+  .tdLegend { display:flex; gap:10px; font-size:11px; opacity:.8; margin-top:4px; }
+  .tdLegend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:4px; vertical-align:middle; }
+  .tdHook { display:flex; justify-content:space-between; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.05); font-size:13px; }
+  .tdHookBtns { display:flex; gap:4px; flex:none; }
   </style>`;
 }
