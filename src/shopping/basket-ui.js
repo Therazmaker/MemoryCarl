@@ -406,7 +406,7 @@ function splitSection(state, picked, cats) {
   const { choices, dupes } = initialChoices(picked.map((it) => ({ ...it, price: itemLine(it), qty: 1 })), { ledger: state.financeLedger || [], habits, categories: cats });
   const opt = (v, label, sel) => `<option value="${esc(v)}" ${sel ? "selected" : ""}>${esc(label)}</option>`;
   return `
-    <details class="bkSplit" ${Object.values(choices).some((c) => c !== SPLIT_MAIN) ? "open" : ""}>
+    <details class="bkSplitBox" ${Object.values(choices).some((c) => c !== SPLIT_MAIN) ? "open" : ""}>
       <summary>📊 ¿Algo va aparte en Finanzas? <span class="bkSplitSum" data-fin-summary></span></summary>
       <div class="bkHint">Lo que pongas aparte se registra como su propio gasto con esa categoría (lo que va a la misma categoría se junta). Lo recuerdo para la próxima.</div>
       ${picked.map((it) => {
@@ -1262,8 +1262,8 @@ function css() {
   .bkFinBox .bkFormRow > span { min-width:70px; font-size:12px; opacity:.8; }
   .bkEditBtn { background:none; border:none; cursor:pointer; font-size:14px; padding:2px 4px; opacity:.75; }
   .bkItem.bkItemEdit { display:grid; grid-template-columns: 1fr 56px 70px auto auto; gap:6px; align-items:center; cursor:default; }
-  .bkSplit { margin-top:4px; font-size:12.5px; }
-  .bkSplit > summary { cursor:pointer; font-weight:600; }
+  .bkSplitBox { margin-top:4px; font-size:12.5px; }
+  .bkSplitBox > summary { cursor:pointer; font-weight:600; }
   .bkSplitSum { font-weight:400; opacity:.75; font-size:11.5px; }
   .bkSplitRow { display:grid; grid-template-columns: 1fr 1fr; gap:6px; align-items:center; padding:4px 0; }
   .bkSplitName { font-size:12px; }
