@@ -59,7 +59,7 @@ test("señales frecuentes y respuesta de la IA", () => {
   const s = signalCounts([{ ts: now.getTime() - 86400000, signals: ["sed", "ansiedad"] }, { ts: now.getTime(), signals: ["sed"] }], 30, now);
   assert.deepEqual(s.map((x) => [x.id, x.n]), [["sed", 2], ["ansiedad", 1]]);
   const r = parseTdhaReply('{"state":"yellow","signals":["sed","inventada"],"factors":["cafeina"],"when":"ayer","reply":"Te leo."}');
-  assert.deepEqual(r, { state: "yellow", signals: ["sed"], factors: ["cafeina"], when: "ayer", reply: "Te leo." });
+  assert.deepEqual(r, { state: "yellow", signals: ["sed"], factors: ["cafeina"], when: "ayer", hook: null, reply: "Te leo." });
 });
 
 test("nube: se une por id y gana lo más reciente", () => {

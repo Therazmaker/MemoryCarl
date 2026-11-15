@@ -28,6 +28,7 @@ export const SIGNALS = [
   { id: "triste", emoji: "😔", label: "Bajón", re: /\b(triste|bajon|bajón|desanimad[oa]|sin ganas)\b/ },
   { id: "enfocado", emoji: "🎯", label: "Enfocado", re: /\b(enfocad[oa]|concentrad[oa]|productiv[oa]|fluyendo|en la zona)\b/ },
   { id: "tranquilo", emoji: "😌", label: "Tranquilo", re: /\b(tranquil[oa]|en calma|relajad[oa]|en paz)\b/ },
+  { id: "enganche", emoji: "🔁", label: "Me enganché con algo", re: /\b(pienso mucho en|pensando (mucho |todo el d[ií]a )?en|no me (lo |la )?saco de la cabeza|obsesionad[oa] con|me enganch[eé]|no dejo de pensar en|me tiene (loc[oa]|enganchad[oa])|quiero (comprar|probar)l?[oa]? ya)\b/ },
 ];
 
 // Activaciones: lo que estuvo presente y puede influir
@@ -63,10 +64,21 @@ export function detectLocal(text = "") {
   const t = norm(text);
   const signals = SIGNALS.filter((s) => s.re.test(t)).map((s) => s.id);
   const factors = FACTORS.filter((f) => f.re && f.re.test(t)).map((f) => f.id);
-  const bad = signals.filter((s) => !["enfocado", "tranquilo"].includes(s)).length;
+  const bad = signals.filter((s) => !["enfocado", "tranquilo", "enganche"].includes(s)).length;
   const good = signals.filter((s) => ["enfocado", "tranquilo"].includes(s)).length;
   const state = bad >= 2 ? "red" : bad === 1 ? "yellow" : good ? "green" : null;
-  return { state, signals, factors };
+  return { state, signals, factors, hook: detectHook(text) };
+}
+
+/** "pienso mucho en una bebida Score de mango" → "una bebida Score de mango" */
+export function detectHook(text = "") {
+  const m = String(text).match(/(?:pienso mucho en|pensando (?:mucho |todo el d[ií]a )?en|no me (?:lo |la )?saco de la cabeza|obsesionad[oa] con|me enganch[eé] con|no dejo de pensar en|me tiene (?:loc[oa]|enganchad[oa]) con|quiero (?:comprar|probar) ya)\s+(?:(?:el|la|los|las|un|una|unos|unas|lo de|eso de)\s+)?([^.,;!?\n]{2,60})/i);
+  if (!m) return null;
+  // Nombre corto: sin "nueva/nuevo" ni la descripción genérica ("bebida energética Score de mango" → "Score de mango")
+  let name = m[1].trim().replace(/\s+/g, " ").replace(/^(nuev[oa]s?|otr[oa])\s+/i, "");
+  const generic = name.match(/^(?:bebida|bebidas|gaseosa|energizante|zapatillas?|polo|juego|serie|app|comida|snack|cosa)(?:\s+(?:energ[eé]tica|nueva))?\s+(.{3,})$/i);
+  if (generic && /[A-ZÁÉÍÓÚ]/.test(generic[1])) name = generic[1];
+  return name;
 }
 
 const dayKey = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
@@ -158,7 +170,63 @@ export function parseTdhaReply(raw) {
   const signals = (Array.isArray(j?.signals) ? j.signals : []).filter((s) => SIGNAL_BY_ID.has(s));
   const factors = (Array.isArray(j?.factors) ? j.factors : []).filter((f) => FACTOR_BY_ID.has(f));
   const when = j?.when === "ayer" ? "ayer" : "hoy";
-  return { state, signals, factors, when, reply: String(j?.reply || "").trim().slice(0, 700) };
+  const hook = typeof j?.hook === "string" && j.hook.trim() ? j.hook.trim().slice(0, 60) : null;
+  return { state, signals, factors, when, hook, reply: String(j?.reply || "").trim().slice(0, 700) };
+}
+
+// ---- Enganches: algo nuevo que atrapa por unos días y luego se olvida ----
+
+const hookNorm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9ñ ]/g, " ").replace(/\b(una?|el|la|los|las|de|del|nuevo|nueva|bebida|energetica)\b/g, " ").replace(/\s+/g, " ").trim();
+const hookWords = (s) => hookNorm(s).split(" ").filter((w) => w.length >= 3);
+
+/** ¿Es el mismo enganche? (comparten palabras clave: "score de mango" ~ "la Score") */
+export function sameHook(a, b) {
+  const wa = new Set(hookWords(a));
+  const wb = hookWords(b);
+  if (!wa.size || !wb.length) return false;
+  const shared = wb.filter((w) => wa.has(w)).length;
+  return shared >= Math.min(wa.size, wb.length, 2) || (shared >= 1 && (wa.size === 1 || wb.length === 1));
+}
+
+const HOOK_IDLE_DAYS = 10;
+/** Estado de cada enganche: activo si se mencionó hace menos de 10 días (o no se cerró a mano). */
+export function hookStatus(hook, now = Date.now()) {
+  const last = Math.max(...(hook.mentions || [hook.lastTs || hook.firstTs || now]));
+  const ended = hook.endedTs || (now - last > HOOK_IDLE_DAYS * 86400000 ? last : null);
+  const end = ended || now;
+  return { active: !ended, endTs: end, days: Math.max(1, Math.round((end - hook.firstTs) / 86400000)), mentionCount: (hook.mentions || []).length };
+}
+
+/** Lo que se gastó en algo del enganche mientras duró (Finanzas y compras). */
+export function hookSpending(hook, { ledger = [], history = [] } = {}, now = Date.now()) {
+  const words = hookWords(hook.name).filter((w) => w.length >= 4);
+  if (!words.length) return { count: 0, total: 0 };
+  const from = hook.firstTs - 86400000;
+  const to = hookStatus(hook, now).endTs + 3 * 86400000;
+  const hit = (txt) => { const t = hookNorm(txt); return words.some((w) => t.includes(w)); };
+  let count = 0;
+  let total = 0;
+  for (const e of ledger || []) {
+    const t = new Date(e?.date).getTime();
+    if (!e || e.archived || e.type !== "expense" || e.source === "shopping" || t < from || t > to) continue;
+    if (hit(e.note)) { count++; total += Number(e.amount) || 0; }
+  }
+  for (const h of history || []) {
+    const t = new Date(h?.date).getTime();
+    if (!(t >= from && t <= to)) continue;
+    for (const it of h.items || []) if (hit(it.name)) { count++; total += (Number(it.price) || 0) * (Number(it.qty) || 1); }
+  }
+  return { count, total: Math.round(total * 100) / 100 };
+}
+
+/** Resumen de enganches: cuánto suelen durar y cada cuánto llega uno nuevo. */
+export function hookStats(hooks = [], now = Date.now()) {
+  const done = hooks.map((h) => ({ ...h, ...hookStatus(h, now) })).filter((h) => !h.active);
+  const avgDays = done.length ? Math.round(done.reduce((s, h) => s + h.days, 0) / done.length) : null;
+  const starts = hooks.map((h) => h.firstTs).sort((a, b) => a - b);
+  const gaps = starts.slice(1).map((t, i) => (t - starts[i]) / 86400000);
+  const everyDays = gaps.length ? Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length) : null;
+  return { avgDays, everyDays, total: hooks.length, active: hooks.filter((h) => hookStatus(h, now).active).length };
 }
 
 export function tdhaSystemPrompt() {
@@ -170,6 +238,7 @@ Devuelve SOLO JSON (sin markdown):
   "signals": [ids],                              // cómo lo nota: ${SIGNALS.map((s) => s.id).join(", ")}
   "factors": [ids],                              // lo que estuvo presente: ${FACTORS.filter((f) => !f.auto).map((f) => f.id).join(", ")}
   "when": "hoy" | "ayer",                        // si habla de ayer
+  "hook": "texto corto" | null,                  // si algo nuevo lo tiene enganchado (no se lo saca de la cabeza, quiere probarlo/comprarlo ya): nómbralo corto, p. ej. "Score de mango"; si no, null. Agrega también la señal "enganche".
   "reply": "tu respuesta"
 }
 Usa solo los ids de las listas. Si en el historial ya se ve un patrón que le sirve (algo que lo reguló antes), puedes mencionarlo con suavidad.`;
