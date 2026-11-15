@@ -28,6 +28,7 @@ export const SIGNALS = [
   { id: "triste", emoji: "😔", label: "Bajón", re: /\b(triste|bajon|bajón|desanimad[oa]|sin ganas)\b/ },
   { id: "enfocado", emoji: "🎯", label: "Enfocado", re: /\b(enfocad[oa]|concentrad[oa]|productiv[oa]|fluyendo|en la zona)\b/ },
   { id: "tranquilo", emoji: "😌", label: "Tranquilo", re: /\b(tranquil[oa]|en calma|relajad[oa]|en paz)\b/ },
+  { id: "olvido", emoji: "💨", label: "Se me olvidó algo", re: /\b(se me olvid|olvid[eé]|me olvid[eé]|no me acord[eé]|se me pas[oó]|dej[eé] (?:mi |mis |el |la |las |los )?\S+ en (?:casa|el carro|la oficina))/ },
   { id: "enganche", emoji: "🔁", label: "Me enganché con algo", re: /\b(pienso mucho en|pensando (mucho |todo el d[ií]a )?en|no me (lo |la )?saco de la cabeza|obsesionad[oa] con|me enganch[eé]|no dejo de pensar en|me tiene (loc[oa]|enganchad[oa])|quiero (comprar|probar)l?[oa]? ya)\b/ },
 ];
 
@@ -64,10 +65,10 @@ export function detectLocal(text = "") {
   const t = norm(text);
   const signals = SIGNALS.filter((s) => s.re.test(t)).map((s) => s.id);
   const factors = FACTORS.filter((f) => f.re && f.re.test(t)).map((f) => f.id);
-  const bad = signals.filter((s) => !["enfocado", "tranquilo", "enganche"].includes(s)).length;
+  const bad = signals.filter((s) => !["enfocado", "tranquilo", "enganche", "olvido"].includes(s)).length;
   const good = signals.filter((s) => ["enfocado", "tranquilo"].includes(s)).length;
   const state = bad >= 2 ? "red" : bad === 1 ? "yellow" : good ? "green" : null;
-  return { state, signals, factors, hook: detectHook(text) };
+  return { state, signals, factors, hook: detectHook(text), forgot: detectForget(text) };
 }
 
 /** "pienso mucho en una bebida Score de mango" → "una bebida Score de mango" */
@@ -171,7 +172,72 @@ export function parseTdhaReply(raw) {
   const factors = (Array.isArray(j?.factors) ? j.factors : []).filter((f) => FACTOR_BY_ID.has(f));
   const when = j?.when === "ayer" ? "ayer" : "hoy";
   const hook = typeof j?.hook === "string" && j.hook.trim() ? j.hook.trim().slice(0, 60) : null;
-  return { state, signals, factors, when, hook, reply: String(j?.reply || "").trim().slice(0, 700) };
+  const f = j?.forgot && typeof j.forgot === "object" && String(j.forgot.what || "").trim() ? j.forgot : null;
+  const forgot = f ? { what: String(f.what).trim().slice(0, 80), kind: FORGET_KINDS.some((k) => k.id === f.kind) ? f.kind : forgetKind(f.what), pending: Boolean(f.pending) } : null;
+  return { state, signals, factors, when, hook, forgot, reply: String(j?.reply || "").trim().slice(0, 700) };
+}
+
+// ---- Olvidos: qué se me olvida, cuándo y con qué se relaciona ----
+
+export const FORGET_KINDS = [
+  { id: "objeto", emoji: "🔑", label: "Cosas (llaves, billetera…)", re: /\b(llave|llaves|billetera|cartera|celular|telefono|teléfono|cargador|lentes|audifonos|audífonos|tarjeta|dni|mochila|lonchera|tupper|paraguas|casaca)\b/ },
+  { id: "pago", emoji: "💸", label: "Pagos", re: /\b(pagar|pago|recibo|cuota|deuda|transferir|yape|plin|factura)\b/ },
+  { id: "medicina", emoji: "💊", label: "Medicina", re: /\b(pastilla|medicina|medicacion|medicación|dosis|vitamina)\b/ },
+  { id: "decir", emoji: "💬", label: "Llamar o decir algo", re: /\b(iba a decir|decir|contar|preguntar|avisar|responder|contestar|mensaje|llamar|escribirle|saludar)\b/ },
+  { id: "cita", emoji: "📅", label: "Citas y horarios", re: /\b(cita|reunion|reunión|cumpleanos|cumpleaños|turno|hora de|recoger|llamada|evento|clase)\b/ },
+  { id: "tarea", emoji: "📝", label: "Tareas y pendientes", re: /\b(comprar|hacer|mandar|enviar|llevar|traer|lavar|limpiar|tarea|pendiente|entregar|sacar)\b/ },
+];
+export const forgetInfo = (id) => FORGET_KINDS.find((k) => k.id === id) || { id: "otro", emoji: "💨", label: "Otro" };
+export function forgetKind(what = "") {
+  const t = ` ${String(what).toLowerCase()} `;
+  return (FORGET_KINDS.find((k) => k.re.test(t)) || { id: "otro" }).id;
+}
+
+/** "se me olvidó la billetera en casa" → { what: "la billetera en casa", kind: "objeto" } */
+export function detectForget(text = "") {
+  const m = String(text).match(/(?:se me olvid[oóa]|me olvid[eé] de|olvid[eé]|no me acord[eé] de|se me pas[oó])\s+(?:(?:que )?(?:ten[ií]a que |deb[ií]a )?)?([^.,;!?\n]{2,70})/i)
+    || String(text).match(/(dej[eé] (?:mi |mis |el |la |las |los )?\S+ en (?:casa|el carro|la oficina))/i);
+  if (!m) return null;
+  const what = m[1].trim().replace(/\s+/g, " ").replace(/\s+(otra vez|de nuevo|nuevamente|otra vez más|again)$/i, "");
+  const pending = /\b(tengo que|todav[ií]a|a[uú]n|ma[ñn]ana|luego|pendiente|hoy)\b/i.test(text) && !/\bya (lo|la) (hice|pagu[eé]|resolv)/i.test(text);
+  return { what, kind: forgetKind(what), pending };
+}
+
+const fwords = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9ñ ]/g, " ").split(" ").filter((w) => w.length >= 4 && !["casa", "otra", "otro", "tenia", "debia"].includes(w));
+
+/**
+ * Resumen de olvidos: por tipo, lo que se repite, a qué hora suele pasar y con qué activaciones
+ * del día aparece más.
+ */
+export function forgetStats(forgets = [], entries = [], { days = 60, now = Date.now() } = {}) {
+  const from = now - days * 86400000;
+  const list = (forgets || []).filter((f) => f && f.ts >= from);
+  const byKind = {};
+  for (const f of list) byKind[f.kind || "otro"] = (byKind[f.kind || "otro"] || 0) + 1;
+  // lo que se repite (comparten una palabra clave: "billetera")
+  const wc = new Map();
+  for (const f of list) for (const w of new Set(fwords(f.what))) wc.set(w, (wc.get(w) || 0) + 1);
+  const repeated = [...wc.entries()].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([word, n]) => ({ word, n }));
+  // momento del día
+  const parts = { "mañana": 0, "tarde": 0, "noche": 0 };
+  for (const f of list) { const h = new Date(f.ts).getHours(); parts[h < 12 ? "mañana" : h < 19 ? "tarde" : "noche"]++; }
+  // días con olvidos vs activaciones de ese día
+  const daysView = dailyView(entries).filter((d) => new Date(`${d.day}T12:00:00`).getTime() >= from);
+  const forgetDays = new Set(list.map((f) => dayKey(f.ts)));
+  const related = [];
+  if (daysView.length >= 4) {
+    const ids = new Set(daysView.flatMap((d) => [...d.factors]));
+    for (const id of ids) {
+      const withF = daysView.filter((d) => d.factors.has(id));
+      const without = daysView.filter((d) => !d.factors.has(id));
+      if (withF.length < 2 || without.length < 2) continue;
+      const a = withF.filter((d) => forgetDays.has(d.day)).length / withF.length;
+      const b = without.filter((d) => forgetDays.has(d.day)).length / without.length;
+      if (a - b >= 0.25) related.push({ ...factorInfo(id), withPct: Math.round(a * 100), withoutPct: Math.round(b * 100), n: withF.length });
+    }
+    related.sort((x, y) => (y.withPct - y.withoutPct) - (x.withPct - x.withoutPct));
+  }
+  return { total: list.length, byKind, repeated, parts, related: related.slice(0, 4), pending: list.filter((f) => f.pending && !f.resolved).length };
 }
 
 // ---- Enganches: algo nuevo que atrapa por unos días y luego se olvida ----
@@ -238,6 +304,7 @@ Devuelve SOLO JSON (sin markdown):
   "signals": [ids],                              // cómo lo nota: ${SIGNALS.map((s) => s.id).join(", ")}
   "factors": [ids],                              // lo que estuvo presente: ${FACTORS.filter((f) => !f.auto).map((f) => f.id).join(", ")}
   "when": "hoy" | "ayer",                        // si habla de ayer
+  "forgot": { "what": "qué se le olvidó, corto", "kind": "${FORGET_KINDS.map((k) => k.id).join('" | "')}" | "otro", "pending": true si todavía hay que hacerlo } | null,   // si cuenta que se le olvidó algo; agrega también la señal "olvido"
   "hook": "texto corto" | null,                  // si algo nuevo lo tiene enganchado (no se lo saca de la cabeza, quiere probarlo/comprarlo ya): nómbralo corto, p. ej. "Score de mango"; si no, null. Agrega también la señal "enganche".
   "reply": "tu respuesta"
 }
