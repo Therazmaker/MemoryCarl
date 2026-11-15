@@ -28,6 +28,7 @@ import { loadOpenThreads, OPEN_THREADS_KEY } from "../chat/openThreads.js";
 import { loadTombstones, saveTombstones, mergeTombstones } from "../neuro/neuronTombstones.js";
 import { mergeLifeLists } from "../chat/lifeChanges.js";
 import { mergeProducts, mergeById, libraryPayload } from "../shopping/productLibrarySync.js";
+import { tdhaPayload, mergeTdha, loadTdha, saveTdha } from "../tdha/tdhaStore.js";
 import { getFullChatHistory } from "../chat/neurochat.js";
 import {
   addMissingById,
@@ -575,6 +576,7 @@ function fastHash(item) {
     if (item.id === "neuron_tombstones") return `nt:${contentHash(p)}`;
     // Biblioteca y compras: cualquier cambio de precio o de producto cuenta (no solo cuántos hay)
     if (item.id === "product_library") return `pl:${contentHash(p?.products)}`;
+    if (item.id === "tdha") return `td:${contentHash(p)}`;
     if (item.id === "shopping") return `sh:${contentHash(p)}`;
     if (Array.isArray(p)) return `arr:${p.length}:${p[p.length - 1]?.id || p[p.length - 1]?.updatedAt || ""}`;
     if (p && typeof p === "object") {
@@ -672,6 +674,8 @@ function getAppModulesList() {
     },
     // La biblioteca de productos aparte, y nunca vacía
     { id: "product_library", payload: libraryPayload(st.products) || undefined },
+    // Pestaña TDHA: registros de cómo estoy y qué me regula (nunca se sube vacía)
+    { id: "tdha", payload: tdhaPayload() || undefined },
     { id: "inventory", payload: { inventory: st.inventory, inventoryLots: st.inventoryLots } },
     { id: "reminders", payload: { reminders: st.reminders, lifeTasks: st.lifeTasks, lifeTasksLog: st.lifeTasksLog } },
     { id: "home_widgets", payload: { musicToday: st.musicToday, musicLog: st.musicLog, budgetMonthly: st.budgetMonthly, calDraw: st.calDraw, moodSpritesCustom: st.moodSpritesCustom, moodActivityCats: st.moodActivityCats } },
@@ -1546,6 +1550,11 @@ export async function pullFromSupabase({ isManual = false } = {}) {
             }
           }
           break;
+        case "tdha": {
+          const r = mergeTdha(loadTdha(), p);
+          if (r.changed) { saveTdha(r); changed = true; }
+          break;
+        }
         case "shopping":
         case "product_library": {
           // La biblioteca, el historial de compras y las listas se UNEN con lo local (nunca se vacían)
