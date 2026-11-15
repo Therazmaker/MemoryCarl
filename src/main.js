@@ -93,6 +93,10 @@ import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, ge
 import { enrichProductData } from "./shopping/productIntelligence.js";
 import { renderBasket, wireBasket } from "./shopping/basket-ui.js";
 import { mergeProducts, rebuildFromPurchases, stampChangedProducts } from "./shopping/productLibrarySync.js";
+import { proposeGroups, groupEmoji, classifyProductName } from "./shopping/productGroups.js";
+import { classifyWithAi } from "./shopping/basketBrain.js";
+import { getClaudeSettings } from "./services/claudeClient.js";
+import { getNeuroChatSettings } from "./settings/neurochatSettings.js";
 import { STREET_CATEGORY, streetNote } from "./finance/streetFood.js";
 import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
 import {
@@ -3962,25 +3966,31 @@ function view(){
     wireBasket(root, {
       state, persist, view, toast, uid,
       // Gasto en Finanzas ligado a una compra (para borrar o corregir junto con ella)
-      financeForPurchase: (sourceListId) => (state.financeLedger||[]).find(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId) || null,
+      // Gastos en Finanzas ligados a una compra (el de la compra y los "aparte": id__categoría)
+      financeForPurchase: (sourceListId) => (state.financeLedger||[]).find(e=>e && !e.archived && e.source==="shopping" && (e.sourceListId===sourceListId || String(e.sourceListId||"").startsWith(`${sourceListId}__`))) || null,
       deleteFinanceForPurchase: (sourceListId) => {
-        const mv = (state.financeLedger||[]).find(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId);
-        if(!mv || !window.FINANCE?.deleteMovement) return;
-        window.FINANCE.deleteMovement(mv.id);
+        const mvs = (state.financeLedger||[]).filter(e=>e && !e.archived && e.source==="shopping" && (e.sourceListId===sourceListId || String(e.sourceListId||"").startsWith(`${sourceListId}__`)));
+        if(!mvs.length || !window.FINANCE?.deleteMovement) return;
+        mvs.forEach(mv => window.FINANCE.deleteMovement(mv.id));
         financeRecomputeBalances();
         if (window.financePushToSupabase) window.financePushToSupabase();
       },
       updateFinanceForPurchase: (sourceListId, { amount, dateISO }) => {
-        const mv = (state.financeLedger||[]).find(e=>e && !e.archived && e.source==="shopping" && e.sourceListId===sourceListId);
-        if(!mv || !window.FINANCE?.updateMovement) return;
+        const all = (state.financeLedger||[]).filter(e=>e && !e.archived && e.source==="shopping" && (e.sourceListId===sourceListId || String(e.sourceListId||"").startsWith(`${sourceListId}__`)));
+        if(!all.length || !window.FINANCE?.updateMovement) return;
+        const main = all.find(e => e.sourceListId === sourceListId);
+        const parts = all.filter(e => e !== main);
         // Al corregir la fecha se conserva la hora con la que se anotó
-        let date = dateISO;
-        if (dateISO && mv.date) {
+        const withTime = (mv) => {
+          if (!dateISO || !mv.date) return dateISO;
           const old = new Date(mv.date);
           const d = new Date(`${String(dateISO).slice(0, 10)}T${String(old.getHours()).padStart(2,"0")}:${String(old.getMinutes()).padStart(2,"0")}:00`);
-          if (Number.isFinite(old.getTime()) && Number.isFinite(d.getTime())) date = d.toISOString();
-        }
-        window.FINANCE.updateMovement(mv.id, { amount: Number(amount||0), ...(date ? { date } : {}) });
+          return (Number.isFinite(old.getTime()) && Number.isFinite(d.getTime())) ? d.toISOString() : dateISO;
+        };
+        // El gasto de la compra lleva el total menos lo que se registró aparte
+        const apart = parts.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+        if (main) window.FINANCE.updateMovement(main.id, { amount: Math.max(0, Math.round((Number(amount||0) - apart) * 100) / 100), ...(dateISO ? { date: withTime(main) } : {}) });
+        if (dateISO) parts.forEach(mv => window.FINANCE.updateMovement(mv.id, { date: withTime(mv) }));
         financeRecomputeBalances();
         if (window.financePushToSupabase) window.financePushToSupabase();
       },
@@ -13621,6 +13631,9 @@ function financeEnsureShoppingExpense_({sourceListId, dateISO, amount, accountId
     reason: reason || "planificado",
     note,
     date: dateISO,
+    source: "shopping",
+    sourceListId,
+    store: store || "",
     ...(byFergis ? { paidBy: "fergis", noAccountDebit: true, isExternalPayment: true } : {}),
   });
   if(entry){
@@ -14430,6 +14443,8 @@ function openProductLibrary(){
           <button class="btn ghost" id="libCloudUp" style="font-size:12px;padding:6px 10px;">☁️ Guardar en la nube</button>
           <button class="btn ghost" id="libCloudDown" style="font-size:12px;padding:6px 10px;">⬇️ Traer de la nube</button>
           <button class="btn ghost" id="libRebuild" style="font-size:12px;padding:6px 10px;">🧩 Reconstruir con mis compras</button>
+          <button class="btn ghost" id="libGroup" style="font-size:12px;padding:6px 10px;">🗂️ Agrupar sola</button>
+          ${(()=>{ try{ return localStorage.getItem("memorycarl_library_groups_backup_v1") ? `<button class="btn ghost" id="libGroupUndo" style="font-size:12px;padding:6px 10px;">↩️ Deshacer agrupación</button>` : ""; }catch(_e){ return ""; } })()}
           <div class="small muted" id="libCloudMsg" style="width:100%;font-size:11px;">${(()=>{ try{ const v = JSON.parse(localStorage.getItem("memorycarl_library_cloud_v1")||"null"); return v && v.at ? `Última copia en la nube: ${v.count} productos · ${new Date(v.at).toLocaleString("es-PE",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}` : "La biblioteca se guarda sola en la nube cuando cambia (nunca se sube vacía)."; }catch(_e){ return ""; } })()}</div>
         </div>
 
@@ -14551,12 +14566,52 @@ function openProductLibrary(){
       if(cloudMsg) cloudMsg.textContent = `No se pudo traer: ${why || "sin conexión con la nube"}.`;
     }
   });
+  // ---- Agrupar la biblioteca: reglas primero, la IA para lo que no reconoce ----
+  sheet.querySelector("#libGroup")?.addEventListener("click", async ()=>{
+    const prods = state.products || [];
+    if(!prods.length){ toast("La biblioteca está vacía."); return; }
+    const { changes, unknown } = proposeGroups(prods);
+    let aiChanges = [];
+    if(unknown.length){
+      if(cloudMsg) cloudMsg.textContent = `Preguntando a la IA por ${unknown.length} producto${unknown.length===1?"":"s"} que no reconozco…`;
+      try{
+        const c = getClaudeSettings() || {};
+        let g = {}; try{ g = getNeuroChatSettings() || {}; }catch(_e){}
+        const map = await classifyWithAi({ products: unknown, claude: { apiKey: c.apiKey || "", model: c.model }, gemini: { apiKey: (g.apiKey||"").trim().length > 8 ? g.apiKey : "", model: g.model }, callClaude });
+        aiChanges = unknown.filter(u => map[u.id]).map(u => ({ id: u.id, name: u.name, from: (prods.find(p=>p.id===u.id)||{}).category || "", to: map[u.id] }));
+      }catch(_e){}
+    }
+    const all = [...changes, ...aiChanges];
+    if(!all.length){ if(cloudMsg) cloudMsg.textContent = "Tu biblioteca ya está agrupada."; return; }
+    const byGroup = {};
+    all.forEach(c => { (byGroup[c.to] ||= []).push(c.name); });
+    const summary = Object.entries(byGroup).map(([gname, names]) => `${groupEmoji(gname)} ${gname}: ${names.slice(0,4).join(", ")}${names.length>4?` y ${names.length-4} más`:""}`).join("\n");
+    const left = unknown.length - aiChanges.length;
+    if(!confirm(`Voy a ordenar ${all.length} producto${all.length===1?"":"s"} en grupos:\n\n${summary}${left>0?`\n\n(${left} quedan como están: no supe dónde van)`:""}\n\n¿Lo aplico? Puedes deshacerlo.`)){ if(cloudMsg) cloudMsg.textContent = ""; return; }
+    const backup = {};
+    all.forEach(c => { backup[c.id] = c.from; const p = prods.find(x=>x.id===c.id); if(p) p.category = c.to; });
+    try{ localStorage.setItem("memorycarl_library_groups_backup_v1", JSON.stringify(backup)); }catch(_e){}
+    persist();
+    toast(`🗂️ ${all.length} productos agrupados`);
+    reopenLib();
+  });
+  sheet.querySelector("#libGroupUndo")?.addEventListener("click", ()=>{
+    let backup = null;
+    try{ backup = JSON.parse(localStorage.getItem("memorycarl_library_groups_backup_v1")||"null"); }catch(_e){}
+    if(!backup){ toast("No hay nada que deshacer."); return; }
+    if(!confirm("¿Vuelvo las categorías como estaban antes de agrupar?")) return;
+    (state.products||[]).forEach(p => { if(p && Object.prototype.hasOwnProperty.call(backup, p.id)) p.category = backup[p.id]; });
+    try{ localStorage.removeItem("memorycarl_library_groups_backup_v1"); }catch(_e){}
+    persist();
+    toast("↩️ Categorías restauradas");
+    reopenLib();
+  });
   sheet.querySelector("#libRebuild")?.addEventListener("click", ()=>{
     const r = rebuildFromPurchases({ history: state.shoppingHistory||[], lists: state.shopping||[], existing: state.products||[], uid: ()=>uid("p") });
     if(!r.added){ toast("No encontré productos nuevos en tus compras ni listas."); return; }
     const sample = r.products.slice(0, 8).map(p=>`• ${p.name}${p.price?` — S/ ${p.price.toFixed(2)}${p.unit==="kg"?"/kg":""}`:""}`).join("\n");
     if(!confirm(`Encontré ${r.added} productos en tus compras y listas:\n${sample}${r.added>8?"\n…":""}\n\n¿Los agrego a la biblioteca? (los que ya tienes no se tocan)`)) return;
-    state.products = mergeProducts(state.products||[], r.products.map(p=>enrichProductData(p))).products;
+    state.products = mergeProducts(state.products||[], r.products.map(p=>enrichProductData({ ...p, category: p.category || classifyProductName(p.name) || "" }))).products;
     persist();
     toast(`🧩 ${r.added} productos recuperados`);
     reopenLib();
@@ -19148,7 +19203,10 @@ function addFinanceEntry(payload){
     usdFixedFee: payload.usdFixedFee || null,
     counterparty: payload.counterparty || null,
     sourceLabel: payload.sourceLabel || null,
-    sourceMovementId: payload.sourceMovementId || null
+    sourceMovementId: payload.sourceMovementId || null,
+    ...(payload.source ? { source: payload.source } : {}),
+    ...(payload.sourceListId ? { sourceListId: payload.sourceListId } : {}),
+    ...(payload.store ? { store: payload.store } : {})
   };
 
   if(window.FINANCE){

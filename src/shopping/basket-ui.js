@@ -14,7 +14,9 @@ import { enrichProductData } from "./productIntelligence.js";
 import { callClaude } from "./shoppingAi.js";
 import { getClaudeSettings } from "../services/claudeClient.js";
 import { getNeuroChatSettings } from "../settings/neurochatSettings.js";
-import { askBrain, brainContext, brainItemsToParsed } from "./basketBrain.js";
+import { askBrain, brainContext, brainItemsToParsed, classifyWithAi } from "./basketBrain.js";
+import { SPLIT_MAIN, SPLIT_SKIP, initialChoices, rememberChoices, buildFinanceGroups, namesNote } from "./purchaseSplit.js";
+import { classifyProductName, proposeGroups, groupEmoji } from "./productGroups.js";
 import { MEAL_TYPES, mealLabel, mealEmoji, guessMealType, runway, impact, streetPatterns, streetEntries, parseSpendIntent } from "../finance/streetFood.js";
 import { looksLikeRoutine, parseRoutineText, routinesOf, daysLabel, WEEKDAYS, ALL_DAYS } from "../finance/routines.js";
 
@@ -332,8 +334,13 @@ function analysisCard(msg) {
           <div class="bkItem bkItemEdit" data-edit-row="${esc(msg.id)}" data-item="${esc(it.id)}">
             <input class="bkInput" data-e="name" value="${esc(it.name)}" aria-label="Producto"/>
             <input class="bkInput bkNum" type="number" step="0.01" min="0" data-e="qty" value="${esc(it.qty || 1)}" aria-label="Cantidad"/>
-            <input class="bkInput bkNum" type="number" step="0.01" min="0" data-e="price" value="${esc(it.price || "")}" placeholder="S/ c/u" aria-label="Precio"/>
+            <input class="bkInput bkNum" type="number" step="0.01" min="0" data-e="price" value="${esc(it.weighed && it.paid ? it.paid : (it.price || ""))}" placeholder="${it.weighed ? "Pagué S/" : "S/ c/u"}" aria-label="Precio"/>
             <button class="bkMiniBtn" data-e-save>✓</button><button class="bkMiniBtn" data-e-cancel>✕</button>
+            <div class="bkLibPick">
+              <span>📦 Es de la biblioteca:</span>
+              <input class="bkInput" data-e="lib" list="bkLibList" placeholder="Busca… (pepsi, leche)" value="${esc(it.productId ? it.name : "")}" aria-label="Producto de la biblioteca"/>
+              <label class="bkChip"><input type="checkbox" data-e="new" ${it.forceNew ? "checked" : ""}/> Es nuevo</label>
+            </div>
           </div>` : `
           <label class="bkItem ${off.has(it.id) ? "bkItemOff" : ""}">
             <input type="checkbox" data-bk-toggle="${esc(msg.id)}" data-item="${esc(it.id)}" ${off.has(it.id) ? "" : "checked"} ${d.saved ? "disabled" : ""}/>
@@ -387,7 +394,36 @@ function financeBlock(state, picked, store = "") {
       <div class="bkFormRow"><span>Hora</span><input class="bkInput" type="time" data-f="time" value="${nowHM()}"/></div>
       <div data-fin-acc>${accountSelect(state, defaultAccountId(state, "market"), 'data-f="account"')}</div>
       <div class="bkHint" data-fin-fergis hidden>Si compró Fergis, se anota como pagado por ella (no descuenta tus cuentas).</div>
+      ${splitSection(state, picked, cats)}
     </div>`;
+}
+
+// ---- Finanzas por partes: cada cosa va con la compra, aparte (en su categoría) o ya está anotada ----
+const SPLIT_KEY = "memorycarl_basket_split_v1";
+const itemLine = (it) => Math.round(((it.weighed && it.paid) ? it.paid : (Number(it.price) || 0) * (Number(it.qty) || 1)) * 100) / 100;
+function splitSection(state, picked, cats) {
+  const habits = loadJson(SPLIT_KEY, {}) || {};
+  const { choices, dupes } = initialChoices(picked.map((it) => ({ ...it, price: itemLine(it), qty: 1 })), { ledger: state.financeLedger || [], habits, categories: cats });
+  const opt = (v, label, sel) => `<option value="${esc(v)}" ${sel ? "selected" : ""}>${esc(label)}</option>`;
+  return `
+    <details class="bkSplit" ${Object.values(choices).some((c) => c !== SPLIT_MAIN) ? "open" : ""}>
+      <summary>📊 ¿Algo va aparte en Finanzas? <span class="bkSplitSum" data-fin-summary></span></summary>
+      <div class="bkHint">Lo que pongas aparte se registra como su propio gasto con esa categoría (lo que va a la misma categoría se junta). Lo recuerdo para la próxima.</div>
+      ${picked.map((it) => {
+        const c = choices[it.id];
+        const dup = dupes[it.id];
+        return `
+        <div class="bkSplitRow" data-split-row="${esc(it.id)}">
+          <span class="bkSplitName">${esc(it.name)} <span class="bkQty">${esc(soles(itemLine(it)))}</span></span>
+          <select class="bkInput" data-split="${esc(it.id)}">
+            ${opt(SPLIT_MAIN, "🧺 Con la compra", c === SPLIT_MAIN)}
+            ${cats.map((k) => opt(k, `➜ Aparte: ${k}`, c === k)).join("")}
+            ${opt(SPLIT_SKIP, "✅ Ya está en Finanzas", c === SPLIT_SKIP)}
+          </select>
+          ${dup ? `<div class="bkDupHint">⚠️ Parece que ya lo anotaste: ${esc(soles(dup.amount))} · ${esc(new Date(dup.date).toLocaleString("es-PE", { weekday: "short", hour: "2-digit", minute: "2-digit" }))}${dup.note ? ` · “${esc(String(dup.note).slice(0, 40))}”` : ""}. No lo sumo otra vez.</div>` : ""}
+        </div>`;
+      }).join("")}
+    </details>`;
 }
 
 function buyForm(msg, ctx) {
@@ -511,6 +547,7 @@ export function renderBasket(state, env = {}) {
         <div><div class="bkTitle">🧺 La Canasta</div><div class="bkSub">Pega la lista, yo aprendo cómo compran</div></div>
       </div>
       <div class="bkTabs"><button class="bkTab bkTabOn" data-bk-view="chat">💬 Chat</button><button class="bkTab" data-bk-view="purchases">🧾 Compras guardadas (${(state.shoppingHistory || []).length})</button></div>
+      <datalist id="bkLibList">${(state.products || []).filter((p) => p && p.name).slice(0, 500).map((p) => `<option value="${esc(p.name)}">${esc(soles(p.price))}${/kg|kilo/i.test(String(p.unit || "")) ? "/kg" : ""}</option>`).join("")}</datalist>
       ${paydayCard(moneyNow(L))}
       ${renderDashboard(state, L, chat.length > 0)}
       <div class="bkLog" id="bkLog">${intro}${chat.map(messageHtml).join("")}<div class="bkTyping" id="bkTyping" hidden>Carl está pensando…</div></div>
@@ -739,6 +776,11 @@ export function wireBasket(root, ctx) {
     const context = brainContext({
       products: L.products, rhythm: L.rhythm, runway: moneyNow(L),
       routines: routinesOf(state.products || []), chat: loadChat().slice(0, -1),
+      apartHabits: Object.entries(loadJson(SPLIT_KEY, {}) || {}).slice(0, 30).map(([k, cat]) => {
+        const id = k.startsWith("p:") ? k.slice(2) : null;
+        const name = id ? (state.products || []).find((p) => p.id === id)?.name : k.slice(2);
+        return name ? `${name} → ${cat}` : "";
+      }).filter(Boolean).join("; "),
     });
     const { result: r, provider, error } = await askBrain({ text: t, context, claude: keys.claude, gemini: keys.gemini, callClaude });
     if (!r) {
@@ -972,12 +1014,39 @@ export function wireBasket(root, ctx) {
   root.querySelectorAll("[data-edit-row]").forEach((row) => {
     const id = row.dataset.editRow;
     row.querySelector("[data-e-cancel]")?.addEventListener("click", () => { update(id, (m) => { delete m.data.editing; }); rerender(); });
+    // Al elegir un producto de la biblioteca, el nombre se completa solo
+    const libInput = row.querySelector('[data-e="lib"]');
+    const findLib = (v) => { const t = String(v || "").trim().toLowerCase(); return t ? (state.products || []).find((p) => String(p.name || "").trim().toLowerCase() === t) : null; };
+    libInput?.addEventListener("change", () => {
+      const p = findLib(libInput.value);
+      if (p) { row.querySelector('[data-e="name"]').value = p.name; row.querySelector('[data-e="new"]').checked = false; }
+    });
     row.querySelector("[data-e-save]")?.addEventListener("click", () => {
       const name = row.querySelector('[data-e="name"]').value.trim();
       const qty = Math.max(0.01, Number(row.querySelector('[data-e="qty"]').value) || 1);
       const price = Math.max(0, Number(row.querySelector('[data-e="price"]').value) || 0);
+      const forceNew = Boolean(row.querySelector('[data-e="new"]')?.checked);
+      const lib = forceNew ? null : findLib(libInput?.value);
+      if (lib) {
+        // Unido a mano a un producto de la biblioteca: se vuelve a analizar con ese producto
+        const L = learn(state);
+        const weighed = /kg|kilo/i.test(String(lib.unit || ""));
+        update(id, (m) => {
+          const idx = m.data.items.findIndex((x) => x.id === row.dataset.item);
+          if (idx < 0) return;
+          const old = m.data.items[idx];
+          const paidOrUnit = price > 0 ? price : null;
+          const a = analyzeList([{ raw: lib.name, name: lib.name, qty: weighed ? null : qty, unit: "", ...(paidOrUnit ? { price: paidOrUnit } : {}) }], { products: L.products, rhythm: L.rhythm });
+          const fresh = a.items[0];
+          if (fresh) m.data.items[idx] = { ...fresh, id: old.id, productId: lib.id, linkedByHand: true };
+          delete m.data.editing;
+        });
+        rerender();
+        return;
+      }
       update(id, (m) => {
         const it = m.data.items.find((x) => x.id === row.dataset.item);
+        if (it && forceNew) { it.forceNew = true; it.productId = ""; it.weighed = false; delete it.paid; delete it.ppk; }
         if (it) {
           if (name && name !== it.name) { it.name = name; it.written = name; it.productId = ""; }
           it.qty = qty;
@@ -1043,6 +1112,30 @@ export function wireBasket(root, ctx) {
     };
     box.querySelectorAll(`input[name="bkBuyer_${CSS.escape(msg.id)}"]`).forEach((r) => r.addEventListener("change", syncBuyer));
     syncBuyer();
+    // Resumen en vivo de cómo queda en Finanzas
+    const sumEl = box.querySelector("[data-fin-summary]");
+    const liveAmount = (itemId) => {
+      const row = box.querySelector(`.bkFormItem[data-item="${CSS.escape(itemId)}"]`);
+      if (!row) return 0;
+      if (row.classList.contains("bkWeighed")) return Number(row.querySelector('[data-f="paid"]')?.value) || 0;
+      return (Number(row.querySelector('[data-f="qty"]')?.value) || 1) * (Number(row.querySelector('[data-f="price"]')?.value) || 0);
+    };
+    const refreshSplit = () => {
+      if (!sumEl) return;
+      const parts = new Map();
+      let skipped = 0;
+      box.querySelectorAll("[data-split]").forEach((sel) => {
+        const a = liveAmount(sel.dataset.split);
+        if (sel.value === SPLIT_SKIP) { skipped += a; return; }
+        const k = sel.value === SPLIT_MAIN ? "🧺 Compra" : `➜ ${sel.value}`;
+        parts.set(k, (parts.get(k) || 0) + a);
+      });
+      const txt = [...parts].filter(([, a]) => a > 0).map(([k, a]) => `${k} ${soles(a)}`).join(" · ");
+      sumEl.textContent = `${parts.size > 1 || skipped ? `${parts.size} gasto${parts.size === 1 ? "" : "s"}: ` : ""}${txt}${skipped ? ` · ✅ ya anotado ${soles(skipped)}` : ""}`;
+    };
+    box.querySelectorAll("[data-split]").forEach((sel) => sel.addEventListener("change", refreshSplit));
+    box.querySelectorAll(".bkFormItem input").forEach((inp) => inp.addEventListener("input", refreshSplit));
+    refreshSplit();
     box.querySelector("[data-bk-save]")?.addEventListener("click", () => saveBuy(msg.id, box));
   }));
   // Si la IA entendió que ya compraste, el formulario de "Ya lo compré" se abre solo (una vez)
@@ -1086,7 +1179,7 @@ export function wireBasket(root, ctx) {
           product.price = line.pricePerKg;
         }
         items.push({
-          id: ctx.uid("i"), name: product?.name || it.name, bought: true, ...weighedHistoryFields(line),
+          id: ctx.uid("i"), srcId: it.id, name: product?.name || it.name, bought: true, ...weighedHistoryFields(line),
           productId: product?.id || "", category: product?.category || it.category || "", essential: Boolean(product?.essential), sourceListId,
         });
         continue;
@@ -1096,9 +1189,10 @@ export function wireBasket(root, ctx) {
       // La biblioteca aprende el precio real (o el producto nuevo)
       const typedName = row?.querySelector('[data-f="name"]')?.value?.trim() || it.name;
       const renamed = typedName !== it.name;
-      let product = it.productId && !renamed ? (state.products || []).find((p) => p.id === it.productId) : matchProduct(typedName, state.products || []);
+      let product = it.productId && !renamed ? (state.products || []).find((p) => p.id === it.productId) : (it.forceNew ? null : matchProduct(typedName, state.products || []));
       if (!product && price > 0) {
-        product = enrichProductData({ id: ctx.uid("p"), name: typedName, price, category: it.category || "", history: [], store });
+        // Producto nuevo: entra a la biblioteca ya en su grupo (Bebidas, Frutas, Pollo…)
+        product = enrichProductData({ id: ctx.uid("p"), name: typedName, price, category: it.category || classifyProductName(typedName) || "", history: [], store });
         if (!Array.isArray(state.products)) state.products = [];
         state.products.push(product);
       } else if (product && price > 0 && Math.abs(Number(product.price || 0) - price) > 0.009) {
@@ -1107,7 +1201,7 @@ export function wireBasket(root, ctx) {
         product.price = price;
       }
       items.push({
-        id: ctx.uid("i"), name: product?.name || typedName, price, qty, bought: true,
+        id: ctx.uid("i"), srcId: it.id, name: product?.name || typedName, price, qty, bought: true,
         productId: product?.id || "", category: product?.category || it.category || "", essential: Boolean(product?.essential), unit: it.unit || "", sourceListId,
       });
     }
@@ -1128,11 +1222,24 @@ export function wireBasket(root, ctx) {
       const when = new Date(`${date}T${time}:00`);
       if (buyer !== "fergis") rememberAccount("market", accountId);
       saveJson(FIN_KEY, { ...(loadJson(FIN_KEY, {}) || {}), category, reason, off: false });
-      ctx.recordFinance({
-        sourceListId, accountId, amount: total, store, category, reason, note,
-        dateISO: Number.isFinite(when.getTime()) ? when.toISOString() : new Date().toISOString(),
-        byFergis: buyer === "fergis",
-      });
+      // Por partes: con la compra, aparte por categoría, o ya anotado (no se suma)
+      const choices = {};
+      box.querySelectorAll("[data-split]").forEach((sel) => { choices[sel.dataset.split] = sel.value; });
+      const finItems = items.map((x) => ({ ...x, id: x.srcId || x.id }));
+      const noteAuto = box.querySelector('[data-f="note"]')?.dataset.auto === "1";
+      const mainItems = finItems.filter((x) => (choices[x.id] || SPLIT_MAIN) === SPLIT_MAIN);
+      const groups = buildFinanceGroups(finItems, choices, { mainCategory: category, store, mainNote: noteAuto ? namesNote(mainItems, store) : note });
+      const dateISO = Number.isFinite(when.getTime()) ? when.toISOString() : new Date().toISOString();
+      for (const g of groups) {
+        ctx.recordFinance({
+          sourceListId: g.key === "main" ? sourceListId : `${sourceListId}__${g.key}`,
+          accountId, amount: g.amount, store, category: g.category, reason, note: g.note, dateISO,
+          byFergis: buyer === "fergis",
+        });
+      }
+      saveJson(SPLIT_KEY, rememberChoices(loadJson(SPLIT_KEY, {}) || {}, finItems, choices));
+      const hist = state.shoppingHistory.find((h) => h.sourceListId === sourceListId);
+      if (hist) hist.financeParts = groups.map((g) => ({ key: g.key, category: g.category, amount: g.amount }));
     }
     update(id, (m) => { m.data.saved = true; m.data.savedTotal = total; m.data.savedBuyer = buyer; m.data.savedStore = store; });
     const L = learn(state);
@@ -1154,7 +1261,15 @@ function css() {
   .bkFinBox { border-left:2px solid rgba(124,92,255,.4); padding-left:8px; margin:4px 0 8px; display:grid; gap:6px; }
   .bkFinBox .bkFormRow > span { min-width:70px; font-size:12px; opacity:.8; }
   .bkEditBtn { background:none; border:none; cursor:pointer; font-size:14px; padding:2px 4px; opacity:.75; }
-  .bkItemEdit { display:grid; grid-template-columns: 1fr 56px 70px auto auto; gap:6px; align-items:center; }
+  .bkItem.bkItemEdit { display:grid; grid-template-columns: 1fr 56px 70px auto auto; gap:6px; align-items:center; cursor:default; }
+  .bkSplit { margin-top:4px; font-size:12.5px; }
+  .bkSplit > summary { cursor:pointer; font-weight:600; }
+  .bkSplitSum { font-weight:400; opacity:.75; font-size:11.5px; }
+  .bkSplitRow { display:grid; grid-template-columns: 1fr 1fr; gap:6px; align-items:center; padding:4px 0; }
+  .bkSplitName { font-size:12px; }
+  .bkDupHint { grid-column:1 / -1; font-size:11px; color:#fbbf24; }
+  .bkLibPick { grid-column: 1 / -1; display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; }
+  .bkLibPick .bkInput { flex:1; min-width:140px; }
   .bkPay { background:rgba(124,92,255,.07); border:1px solid rgba(124,92,255,.3); border-radius:14px; padding:10px 12px; margin-bottom:8px; }
   .bkPay > summary { cursor:pointer; font-weight:700; font-size:14px; }
   .bkPayLine { display:flex; justify-content:space-between; font-size:13px; padding:4px 0; }
@@ -1211,6 +1326,8 @@ function css() {
   .bkGroupHint { font-size:11px; opacity:.6; margin-bottom:4px; }
   .bkItem { display:flex; gap:8px; align-items:flex-start; padding:7px 4px; border-bottom:1px solid rgba(255,255,255,.05); cursor:pointer; }
   .bkItem input { margin-top:3px; width:17px; height:17px; accent-color:#8b5cf6; flex:none; }
+  .bkItem.bkItemEdit input.bkInput { width:auto; height:auto; margin-top:0; }
+  .bkItem.bkItemEdit .bkChip input { width:16px; height:16px; margin-top:0; }
   .bkItemMain { flex:1; min-width:0; }
   .bkItemName { font-size:13.5px; font-weight:600; }
   .bkQty { font-weight:500; opacity:.7; }

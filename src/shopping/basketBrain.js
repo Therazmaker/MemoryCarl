@@ -9,6 +9,8 @@
  * Si no hay clave o la IA falla, se usan las reglas locales.
  */
 
+import { GROUP_IDS, classifyProductName } from "./productGroups.js";
+
 export const BRAIN_INTENTS = ["compra", "lista", "me_alcanza", "rutina", "pregunta"];
 const MEALS = ["desayuno", "almuerzo", "cena", "snack_trabajo", "merienda_ninos", "otro"];
 
@@ -18,7 +20,7 @@ const DOW = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "s
 const money = (n) => `S/ ${(Math.round((Number(n) || 0) * 100) / 100).toFixed(2)}`;
 
 /** Contexto compacto para la IA. */
-export function brainContext({ products = [], rhythm = new Map(), runway = null, routines = [], chat = [], now = new Date() } = {}) {
+export function brainContext({ products = [], rhythm = new Map(), runway = null, routines = [], chat = [], now = new Date(), apartHabits = "" } = {}) {
   const lib = (products || []).filter((p) => p && p.name).slice(0, 400)
     .map((p) => `${p.id}|${str(p.name, 60)}|${Number(p.price) || 0}|${/kg|kilo/i.test(String(p.unit || "")) ? "kg" : (p.unit || "u")}|${str(p.category, 30)}`).join("\n");
   const due = [...(rhythm?.values?.() || [])].filter((s) => s.intervalDays).sort((a, b) => (a.dueInDays ?? 99) - (b.dueInDays ?? 99)).slice(0, 25)
@@ -35,6 +37,7 @@ export function brainContext({ products = [], rhythm = new Map(), runway = null,
     rt ? `Rutinas protegidas (no se cuestionan): ${rt}` : "",
     `Biblioteca de productos (id|nombre|precio|unidad|categoría; si la unidad es kg el precio es por kg):\n${lib || "(vacía)"}`,
     due ? `Ritmo de compra aprendido:\n${due}` : "",
+    apartHabits ? `En Finanzas registra aparte (no con la compra): ${apartHabits}` : "",
     recent ? `Conversación reciente:\n${recent}` : "",
   ].filter(Boolean).join("\n\n");
 }
@@ -43,7 +46,7 @@ export const BRAIN_SYSTEM = `Eres Carl, el asistente de compras de una familia e
 
 {
   "intent": "compra" | "lista" | "me_alcanza" | "rutina" | "pregunta",
-  "items": [{ "name": "texto", "productId": "id de la biblioteca o null", "qty": número, "unit": "u" | "kg" | "g" | "l" | "ml" | "paq", "price": número o null, "paid": número o null }],
+  "items": [{ "name": "texto", "productId": "id de la biblioteca o null", "qty": número, "unit": "u" | "kg" | "g" | "l" | "ml" | "paq", "price": número o null, "paid": número o null, "group": "grupo" }],
   "buyer": "yo" | "fergis" | null,
   "store": "texto" | null,
   "spend": { "amount": número, "desc": "texto", "mealType": "desayuno" | "almuerzo" | "cena" | "snack_trabajo" | "merienda_ninos" | "otro", "who": "yo" | "fergis" } | null,
@@ -66,6 +69,7 @@ Reglas para items:
 - Para productos que en la biblioteca son por kg y solo dicen cuánto se pagó, pon paid y deja qty en null.
 - NUNCA inventes precios: si no se dijo y no está en la biblioteca, price null.
 - Limpia los nombres (sin "compré", "un", "a").
+- "group" es el grupo del producto, uno de: ${GROUP_IDS.join(", ")}.
 
 Para reply (máximo 3 líneas, español peruano natural, sin sermones):
 - En compra/lista: resume el total, y avisa si algún precio está muy distinto al de la biblioteca o si falta algo que ya toca según el ritmo.
@@ -89,6 +93,7 @@ export function parseBrainReply(raw) {
     unit: ["u", "kg", "g", "l", "ml", "paq"].includes(it?.unit) ? it.unit : "",
     price: num(it?.price),
     paid: num(it?.paid),
+    group: GROUP_IDS.includes(it?.group) ? it.group : null,
   })).filter((it) => it.name);
   const sp = j.spend && typeof j.spend === "object" ? j.spend : null;
   const spend = sp && num(sp.amount) ? {
@@ -132,7 +137,8 @@ export function brainItemsToParsed(items = [], products = []) {
       price = it.price || (it.paid ? Math.round((it.paid / (it.qty || 1)) * 100) / 100 : null);
       if (unit === "kg" || unit === "g") unit = ""; // no es por peso en la biblioteca
     }
-    return { raw: it.name, name, qty: qty || null, unit: unit || "", ...(price ? { price } : {}) };
+    const category = prod?.category || it.group || classifyProductName(name) || "";
+    return { raw: it.name, name, qty: qty || null, unit: unit || "", ...(price ? { price } : {}), ...(category ? { category } : {}) };
   });
 }
 
@@ -183,4 +189,30 @@ export async function askBrain({ text, context, claude = {}, gemini = {}, callCl
     }
   }
   return { result: null, provider: null, error: lastErr };
+}
+
+
+/**
+ * Pide a la IA el grupo de productos que las reglas no reconocen.
+ * @returns {Promise<Object<string,string>>} id → grupo
+ */
+export async function classifyWithAi({ products = [], claude = {}, gemini = {}, callClaude, fetchImpl }) {
+  if (!products.length) return {};
+  const system = `Clasificas productos de supermercado de Perú. Devuelve SOLO JSON {"<id>": "<grupo>"} usando únicamente estos grupos: ${GROUP_IDS.join(", ")}.`;
+  const user = products.slice(0, 200).map((p) => `${p.id}: ${p.name}`).join("\n");
+  const tries = [];
+  if (claude.apiKey && typeof callClaude === "function") tries.push(() => callClaude([{ role: "system", content: system }, { role: "user", content: user }], claude.apiKey, claude.model));
+  if (gemini.apiKey) tries.push(() => geminiJson({ system, user, apiKey: gemini.apiKey, model: gemini.model || "gemini-2.5-flash", fetchImpl: fetchImpl || fetch }));
+  for (const run of tries) {
+    try {
+      const raw = String(await run() || "").replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "");
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) continue;
+      const j = JSON.parse(m[0]);
+      const out = {};
+      for (const [id, g] of Object.entries(j || {})) if (GROUP_IDS.includes(g)) out[id] = g;
+      return out;
+    } catch (_e) { /* siguiente */ }
+  }
+  return {};
 }

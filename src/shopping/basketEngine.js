@@ -355,7 +355,7 @@ export function analyzeList(parsed = [], { products = [], rhythm = new Map() } =
       name,
       written: p.name,
       productId: product?.id || stat?.productId || "",
-      category: product?.category || stat?.category || "",
+      category: product?.category || stat?.category || p.category || "",
       qty: weighed ? round3(qty) : round2(qty),
       unit: weighed ? "kg" : (p.unit || ""),
       weighed,

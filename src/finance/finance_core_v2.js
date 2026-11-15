@@ -238,7 +238,10 @@ window.FINANCE = (function(){
     poolClosed,
     noAccountDebit,
     isExternalPayment,
-    paidBy
+    paidBy,
+    source,
+    sourceListId,
+    store
   }){
 
     const acc = getAccount(accountId);
@@ -274,7 +277,11 @@ window.FINANCE = (function(){
       poolClosed: !!poolClosed,
       noAccountDebit: !!noAccountDebit,
       isExternalPayment: !!isExternalPayment,
-      paidBy: paidBy || "me"
+      paidBy: paidBy || "me",
+      // De dónde viene (p. ej. una compra de La Canasta) para poder corregirlo o borrarlo junto con ella
+      ...(source ? { source } : {}),
+      ...(sourceListId ? { sourceListId } : {}),
+      ...(store ? { store } : {})
     };
 
     const isNoDebit = !!noAccountDebit || !!isExternalPayment || accountId === "ext_fergis" || accountId === "ext_historical";
