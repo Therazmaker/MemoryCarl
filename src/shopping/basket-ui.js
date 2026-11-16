@@ -155,12 +155,24 @@ function routineCard(msg) {
 
 function routinesListCard(state) {
   const list = routinesOf(state.products || []);
-  if (!list.length) return `<div class="bkBubble">Todavía no tienes rutinas protegidas. Escríbeme algo como:\n“Mis bebidas del trabajo: Volt 2.50 y café 3 de lunes a viernes”\ny lo aparto hasta cada cobro.</div>`;
+  const addForm = `
+      <div class="bkRtAdd">
+        <div class="bkGroupTitle">＋ Agregar de la biblioteca</div>
+        <div class="bkFormRow">
+          <input class="bkInput" data-r-add-name list="bkLibList" placeholder="Busca… (pepsi, volt)"/>
+          <input class="bkInput bkNum" data-r-add-qty type="number" min="1" step="1" value="1" aria-label="Cuántas por día"/>
+        </div>
+        <div class="bkFormRow">
+          <select class="bkInput" data-r-add-days>${DAY_OPTS.map((o) => `<option value="${o.id}">${o.label}</option>`).join("")}</select>
+          <button class="bkBtn bkBtnPrimary" data-r-add>🛡️ Proteger</button>
+        </div>
+      </div>`;
+  if (!list.length) return `<div class="bkCardMsg"><div class="bkHint">Todavía no tienes rutinas protegidas. Escríbeme algo como “Mis bebidas del trabajo: Volt 2.50 y café 3 de lunes a viernes”, o elige un producto aquí abajo.</div>${addForm}</div>`;
   return `
     <div class="bkCardMsg">
       <div class="bkGroupTitle">🛡️ Tus rutinas protegidas</div>
       ${list.map((r) => `<div class="bkItem"><div class="bkItemMain"><div class="bkItemName">${esc(r.name)}${r.qty > 1 ? ` ×${r.qty}` : ""}</div><div class="bkItemWhy">${esc(daysLabel(r.days))}${r.label ? ` · ${esc(r.label)}` : ""}</div></div><div class="bkItemPrice">${esc(soles(r.price * r.qty))}/día</div><button class="bkX" data-r-remove="${esc(r.productId)}" title="Dejar de proteger">✕</button></div>`).join("")}
-      <div class="bkHint">Para cambiar una, escríbela de nuevo con el precio nuevo.</div>
+      ${addForm}
     </div>`;
 }
 
@@ -458,6 +470,24 @@ function splitSection(state, picked, cats) {
     </div>`;
 }
 
+// 🛡️ Marcar a mano qué de esta compra es rutina (lo que ya es rutina viene marcado)
+function routineSection(state, picked) {
+  const prodOf = (it) => (it.productId ? (state.products || []).find((p) => p.id === it.productId) : null);
+  return `
+    <details class="bkRtBox" ${picked.some((it) => prodOf(it)?.routine) ? "open" : ""}>
+      <summary>🛡️ ¿Algo de esto es tu rutina?</summary>
+      <div class="bkHint">Márcalo y lo aparto hasta cada cobro, como tus bebidas del trabajo.</div>
+      ${picked.map((it) => {
+        const r = prodOf(it)?.routine;
+        return `
+        <div class="bkSplitRow">
+          <label class="bkChip"><input type="checkbox" data-rt-item="${esc(it.id)}" ${r ? "checked" : ""}/> ${esc(it.name)}</label>
+          <select class="bkInput" data-rt-days="${esc(it.id)}">${DAY_OPTS.map((o) => `<option value="${o.id}" ${r && dayOptOf(r.days) === o.id ? "selected" : ""}>${o.label}</option>`).join("")}</select>
+        </div>`;
+      }).join("")}
+    </details>`;
+}
+
 function buyForm(msg, ctx) {
   const d = msg.data;
   const off = new Set(d.off || []);
@@ -482,6 +512,7 @@ function buyForm(msg, ctx) {
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="qty" value="${esc(it.qty || 1)}" aria-label="Cantidad"/>
         <input class="bkInput bkNum" type="number" step="0.01" min="0" data-f="price" value="${esc(it.price || "")}" placeholder="S/" aria-label="Precio por unidad"/>
       </div>`).join("")}
+    ${routineSection(ctx.state, picked)}
     ${hasFinance ? financeBlock(ctx.state, picked, d.prefill?.store || "") : ""}
     <button class="bkBtn bkBtnPrimary" data-bk-save="${esc(msg.id)}">Guardar compra</button>`;
 }
@@ -991,6 +1022,21 @@ export function wireBasket(root, ctx) {
       rerender();
     });
   });
+  // Proteger a mano un producto de la biblioteca (por si no se detectó como rutina)
+  root.querySelectorAll("[data-r-add]").forEach((b) => b.addEventListener("click", () => {
+    const box = b.closest(".bkRtAdd");
+    const name = box?.querySelector("[data-r-add-name]")?.value?.trim() || "";
+    const low = name.toLowerCase();
+    const p = (state.products || []).find((x) => String(x.name || "").trim().toLowerCase() === low) || (name ? matchProduct(name, state.products || []) : null);
+    if (!p) { ctx.toast?.("Elige un producto de la biblioteca (o regístralo primero con una compra)."); return; }
+    const qty = Math.max(1, Math.round(Number(box.querySelector("[data-r-add-qty]")?.value) || 1));
+    const days = (DAY_OPTS.find((o) => o.id === box.querySelector("[data-r-add-days]")?.value) || DAY_OPTS[0]).days;
+    p.routine = { qty, days, label: p.routine?.label || "" };
+    if (/gusto|premio|premium/.test(String(p.tier || ""))) p.tier = "base_diario";
+    ctx.persist();
+    ctx.toast?.(`🛡️ ${p.name} protegida (${daysLabel(days)})`);
+    rerender();
+  }));
   root.querySelectorAll("[data-r-remove]").forEach((b) => b.addEventListener("click", () => {
     const p = (state.products || []).find((x) => x.id === b.dataset.rRemove);
     if (!p || !confirm(`¿Dejar de proteger “${p.name}”?`)) return;
@@ -1272,6 +1318,21 @@ export function wireBasket(root, ctx) {
       });
     }
     if (!items.length) { ctx.toast?.("No hay nada marcado para guardar."); return; }
+    // 🛡️ Rutinas marcadas a mano en esta compra
+    for (const x of items) {
+      const cb = box.querySelector(`[data-rt-item="${CSS.escape(x.srcId || "")}"]`);
+      if (!cb) continue;
+      const prod = x.productId ? (state.products || []).find((p) => p.id === x.productId) : null;
+      if (!prod) continue;
+      if (cb.checked) {
+        const days = (DAY_OPTS.find((o) => o.id === box.querySelector(`[data-rt-days="${CSS.escape(x.srcId)}"]`)?.value) || DAY_OPTS[0]).days;
+        const qty = Number(x.weight_g) > 0 ? 1 : Math.max(1, Math.round(Number(x.qty) || 1));
+        prod.routine = { qty: prod.routine?.qty || qty, days, label: prod.routine?.label || "" };
+        if (/gusto|premio|premium/.test(String(prod.tier || ""))) prod.tier = "base_diario";
+      } else if (prod.routine) {
+        delete prod.routine;
+      }
+    }
     const total = Math.round(items.reduce((s, it) => s + it.price * it.qty, 0) * 100) / 100;
     const byCategory = {};
     for (const it of items) { const c = it.category || "Other"; byCategory[c] = Math.round(((byCategory[c] || 0) + it.price * it.qty) * 100) / 100; }
@@ -1328,6 +1389,9 @@ function css() {
   .bkFinBox .bkFormRow > span { min-width:70px; font-size:12px; opacity:.8; }
   .bkEditBtn { background:none; border:none; cursor:pointer; font-size:14px; padding:2px 4px; opacity:.75; }
   .bkItem.bkItemEdit { display:grid; grid-template-columns: 1fr 56px 70px auto auto; gap:6px; align-items:center; cursor:default; }
+  .bkRtBox { margin-top:6px; font-size:12.5px; }
+  .bkRtBox > summary { cursor:pointer; font-weight:700; }
+  .bkRtAdd { margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08); display:grid; gap:6px; }
   .bkPendGroups { margin-top:8px; padding:8px; border:1px dashed rgba(251,191,36,.5); border-radius:10px; }
   .bkSplitBox { margin-top:6px; font-size:12.5px; border-top:1px solid rgba(255,255,255,.08); padding-top:8px; }
   .bkSplitTitle { font-weight:700; }

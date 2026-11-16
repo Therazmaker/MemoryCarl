@@ -92,7 +92,7 @@ import { createMealBundle, consumeMealPortion, getActiveMealInventory, loadMealB
 import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, getLimaDate, getLimaDateString } from "./services/dailyFlowEngine.js";
 import { enrichProductData } from "./shopping/productIntelligence.js";
 // Con versión: así el teléfono no se queda con una copia vieja de La Canasta
-import { renderBasket, wireBasket } from "./shopping/basket-ui.js?v=2081";
+import { renderBasket, wireBasket } from "./shopping/basket-ui.js?v=2085";
 import { mergeProducts, rebuildFromPurchases, stampChangedProducts } from "./shopping/productLibrarySync.js";
 import { proposeGroups, groupEmoji, classifyProductName } from "./shopping/productGroups.js";
 import { classifyWithAi } from "./shopping/basketBrain.js";
