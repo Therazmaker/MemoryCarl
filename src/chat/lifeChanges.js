@@ -11,6 +11,7 @@
 
 import { loadLifeFacts, saveLifeFacts, upsertLifeFact, endLifeFact, AREA_META } from "./lifeFacts.js";
 import { loadOpenThreads, saveOpenThreads, openThread, resolveThread, isSearchThread } from "./openThreads.js";
+import { guardLifeActions } from "./grounding.js";
 
 /**
  * Cierra los hilos de búsqueda/espera abiertos antes de que empezara una etapa activa
@@ -40,7 +41,8 @@ export function applyLifeActions(actions = []) {
   const changes = [];
   if (!Array.isArray(actions)) return changes;
 
-  for (const action of actions) {
+  // Lo que todavía no pasa va como pendiente con fecha, no como hecho; sin fecha no se inventa una
+  for (const action of guardLifeActions(actions)) {
     try {
       if (action?.type === "upsertLifeFact" && action.fact) {
         upsertLifeFact({ ...action.fact, source: "model_proposed" }, { changes });

@@ -28,7 +28,8 @@ test("Claude Integration: getClaudeSettings inherits key from Chef AI if NeuroCh
 
   const settings = getClaudeSettings();
   assert.equal(settings.apiKey, "sk-ant-test-chef-key-12345");
-  assert.equal(settings.model, "claude-sonnet-4-5");
+  // Sonnet 4.5 se retira: pasa a su sucesor
+  assert.equal(settings.model, "claude-sonnet-5-5");
   assert.equal(isClaudeConfigured(), true);
 });
 

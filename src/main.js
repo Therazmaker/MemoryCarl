@@ -83,7 +83,7 @@ import { initMusicUi, openMusicHubModal, openFullPlayer } from "./music/musicUi.
 import { musicEngine } from "./music/musicEngine.js";
 import { renderTarotWidget, viewTarot, wireTarot, injectTarotStyles } from "./tarot/tarot.js";
 import { initFootballLab } from "./footballLab_v8e.js?v=2001";
-import { viewNeuroChat, wireNeuroChat, initNeuroChat } from "./chat/neurochat-ui.js";
+import { viewNeuroChat, wireNeuroChat, initNeuroChat } from "./chat/neurochat-ui.js?v=2086";
 import { viewDayCalendar, wireDayCalendar, viewDayDetail, wireDayDetail, dayUiState } from "./day/day-calendar-ui.js";
 import { getAllDays as getDaysForEngine } from "./day/dayStore.js";
 import { viewSemana, wireSemana, seedSemana } from "./semana/semana.js";

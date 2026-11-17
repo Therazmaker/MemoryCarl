@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS = {
   apiKey:                 "",
   model:                  "gemini-2.5-flash",
   claudeApiKey:           "",
-  claudeModel:            "claude-haiku-4-5",
+  claudeModel:            "claude-opus-5-5",
   carlTools:              true,  // Carl puede buscar en tus memorias y neuronas (memoria larga)
   voyageApiKey:           "",    // Voyage AI: búsqueda por significado (opcional)
   dailyLimit:             20,
@@ -60,6 +60,13 @@ function writeRaw(settings) {
 export function getNeuroChatSettings() {
   const raw = readRaw();
   if (!raw) return { ...DEFAULT_SETTINGS };
+  // Una sola vez: quien tenía el modelo que venía por defecto (Haiku 4.5) pasa al recomendado.
+  // Si después elige otro en Ajustes, se respeta.
+  if (!raw.claudeModelUpgradedAt) {
+    if (!raw.claudeModel || raw.claudeModel === "claude-haiku-4-5") raw.claudeModel = DEFAULT_SETTINGS.claudeModel;
+    raw.claudeModelUpgradedAt = new Date().toISOString();
+    writeRaw(raw);
+  }
   return {
     ...DEFAULT_SETTINGS,
     ...raw,

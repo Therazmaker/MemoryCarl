@@ -86,6 +86,9 @@ import { todayLongStr } from "../chat/lifeDates.js";
 import { buildAstroPromptBlock } from "../chat/astroLinks.js";
 import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
 import { buildRecentDaysPromptBlock, buildRecentJournalBlock, buildRecentFinanceBlock } from "../chat/recentContext.js";
+import { GROUNDING_RULES, buildHistoryMessages } from "../chat/grounding.js";
+import { buildPeopleBlock } from "../chat/peopleDirectory.js";
+import { buildCorrectionsBlock } from "../chat/corrections.js";
 
 // ---- System prompt para NeuroChat ----
 
@@ -94,10 +97,10 @@ const NEUROCHAT_SYSTEM_PROMPT = `Eres Carl, una inteligencia personal con memori
 REGLAS DE COMPORTAMIENTO Y CONVERSACIÓN:
 - Eres un compañero de conversación. Actúa con curiosidad y empatía. No uses tono robótico ni moralista.
 - Basa tu respuesta en el contexto neuronal provisto. No inventes recuerdos.
-- CRÍTICO: Cuando bases tu respuesta en el contexto neuronal o memorias provistas, menciónalo explícitamente y de forma natural (ej. "Recuerdo que mencionaste que...", "Según lo que sé de tu gusto por..."). Esto es vital para que el usuario sepa que estás usando tu memoria.
-- CRÍTICO: Sé proactivo al aprender. Si el usuario te da un dato nuevo sobre sí mismo, no des vueltas preguntando. Genera inmediatamente la acción "consolidate" para guardar la neurona y menciona en tu respuesta que acabas de aprender o tomar nota de eso.
+- Sé proactivo al aprender. Si el usuario te da un dato nuevo sobre sí mismo, no des vueltas preguntando: genera la acción para guardar la neurona.
 - Si el usuario dice algo vago (ej: "Tuve un mal día"), haz UNA sola pregunta clara para explorar.
 - Si notas patrones similares en el pasado (basado en neuronas activas), menciónalos.
+${GROUNDING_RULES}
 
 GESTIÓN DE NEURONAS E INTENCIÓN (al final de tu respuesta, separado por ---NEURON_ACTIONS---):
 Después de responder, indica tu intención conversacional y qué acciones tomar sobre el grafo o hechos de vida. Usa este formato JSON estricto:
@@ -150,9 +153,10 @@ Después de responder, indica tu intención conversacional y qué acciones tomar
 }
 
 REGLAS PARA HECHOS DE VIDA (upsertLifeFact / endLifeFact):
-- Solo registra un hecho si el usuario lo afirmó claramente (ej. "renuncié a mi trabajo", "me mudé a Lima", "conseguí empleo").
+- Solo registra un hecho si el usuario lo afirmó claramente y YA PASÓ (ej. "renuncié a mi trabajo", "me mudé a Lima", "conseguí empleo").
+- Lo que todavía no pasa ("mi hermano va llegando", "el lunes empiezo", "vamos a mudarnos") NO es un hecho: regístralo con openThread y su dueDate si hay fecha.
 - Si el usuario habla en tono hipotético, dudoso o pregunta algo (ej. "¿y si dejo mi empleo?"), NO registres un hecho de vida. Si dudas, no lo registres.
-- Las fechas se calculan desde la fecha de HOY indicada abajo ("ayer", "el lunes", "hace dos semanas"). Si el usuario no da fecha, usa la de hoy.
+- Las fechas se calculan desde la fecha de HOY indicada abajo ("ayer", "el lunes", "hace dos semanas"). Si el usuario no da fecha, NO pongas "since" (no inventes una).
 - Cuando algo de la SITUACIÓN ACTUAL cambia (consiguió o dejó un trabajo, se mudó, terminó una relación), registra la etapa nueva con upsertLifeFact y pon en "replaces" el id del hecho que deja de valer. Si solo terminó algo sin reemplazo, usa endLifeFact con su id.
 - Cuando un HILO ABIERTO se cumple o deja de aplicar (ej. "conseguí trabajo" cierra "buscando trabajo"; "ya fui a la entrevista" cierra "entrevista el jueves"), ciérralo con resolveThread y su id.
 - Usa siempre los id exactos que aparecen en las listas (id=...). No inventes ids.
@@ -182,6 +186,10 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
   // Fecha local de hoy: la IA la necesita para fechar etapas y entender "ayer", "el lunes"…
   systemContent += `\n\n## HOY\nHoy es ${todayLongStr()}.`;
 
+  // Quién es quién (siempre) y lo que el usuario ya corrigió
+  systemContent += buildPeopleBlock(userInput);
+  systemContent += buildCorrectionsBlock();
+
   // CAPA 1: SITUACIÓN ACTUAL (Hechos Vigentes)
   const lifeFactsBlock = buildLifeFactsPromptBlock(userInput);
   if (lifeFactsBlock.blockText) {
@@ -210,7 +218,7 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
   systemContent += buildAstroPromptBlock(userInput);
 
   if (context.length > 0) {
-    systemContent += "\n\n## CONTEXTO NEURONAL ACTIVO\n";
+    systemContent += "\n\n## CONTEXTO NEURONAL ACTIVO\nLo que recuerdas relacionado con este mensaje. Puede estar desactualizado: si choca con el directorio de personas, las correcciones o lo que el usuario dice ahora, manda eso.\n";
     context.forEach((c) => {
       systemContent += `- [${c.domain || "general"}] **${c.concept}** (relevancia: ${Math.round((c.score || 0) * 100)}%): ${c.summary || ""}\n`;
     });
@@ -387,23 +395,10 @@ function buildMessages({ userInput, context = [], history = [], insights = [], t
     }
   } catch (_e) { /* silencioso */ }
 
-  messages.push({ role: "system", content: systemContent });
-
-  // Historial de conversación (últimos 8 turnos)
-  const recentHistory = (history || []).slice(-8);
-  for (const msg of recentHistory) {
-    if (msg.role === "user" || msg.role === "assistant") {
-      // Para el historial del asistente, solo el texto de respuesta (sin acciones)
-      let content = String(msg.content || "");
-      if (msg.role === "assistant" && content.includes("---NEURON_ACTIONS---")) {
-        content = content.split("---NEURON_ACTIONS---")[0].trim();
-      }
-      messages.push({ role: msg.role, content });
-    }
-  }
-
-  // Mensaje actual del usuario
-  messages.push({ role: "user", content: userInput });
+  // Historial con fecha y hora de cada mensaje del usuario (y aviso si pasó mucho tiempo)
+  const hist = buildHistoryMessages(history, userInput, { limit: 8 });
+  messages.push({ role: "system", content: systemContent + hist.gapNote });
+  messages.push(...hist.messages);
 
   return messages;
 }

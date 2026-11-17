@@ -2,12 +2,13 @@
  * claudeClient.js — Cliente para Anthropic Claude API en NeuroChat
  * MemoryCarl / NeuroChat
  *
- * Permite usar el modelo Anthropic Claude (e.g. claude-haiku-4-5, claude-sonnet-4-5)
+ * Permite usar el modelo Anthropic Claude (e.g. claude-opus-5-5, claude-sonnet-5-5)
  * como motor conversacional de NeuroChat, con soporte para activación y gestión
  * dinámica de neuronas vía ---NEURON_ACTIONS---.
  */
 
 import { getNeuroChatSettings } from "../settings/neurochatSettings.js";
+import { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL, isThinkingClaudeModel, claudeCallParams, claudeReplyText } from "./claudeModels.js";
 import { getChefAiSettings } from "../shopping/shoppingAi.js";
 import { buildLifeFactsPromptBlock } from "../chat/lifeFacts.js";
 import { todayLongStr } from "../chat/lifeDates.js";
@@ -15,14 +16,14 @@ import { buildAstroPromptBlock } from "../chat/astroLinks.js";
 import { buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
 import { CARL_TOOLS, CARL_TOOLS_PROMPT, CARL_TOOL_LIMITS, runCarlTool } from "../chat/carlTools.js";
 import { buildRecentDaysPromptBlock, buildRecentJournalBlock, buildRecentFinanceBlock } from "../chat/recentContext.js";
+import { GROUNDING_RULES, buildHistoryMessages } from "../chat/grounding.js";
+import { buildPeopleBlock } from "../chat/peopleDirectory.js";
+import { buildCorrectionsBlock } from "../chat/corrections.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export const CLAUDE_MODELS = [
-  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (Rápido y económico)" },
-  { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5 (Avanzado)" },
-];
+export { CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL, isThinkingClaudeModel, claudeCallParams, claudeReplyText };
 
 /**
  * Modelos retirados por Anthropic: la API responde 404 "model: <id>".
@@ -32,11 +33,13 @@ const RETIRED_CLAUDE_MODELS = {
   "claude-3-5-haiku-20241022": "claude-haiku-4-5",
   "claude-3-5-haiku-latest": "claude-haiku-4-5",
   "claude-3-haiku-20240307": "claude-haiku-4-5",
-  "claude-3-5-sonnet-20241022": "claude-sonnet-4-5",
-  "claude-3-5-sonnet-20240620": "claude-sonnet-4-5",
-  "claude-3-5-sonnet-latest": "claude-sonnet-4-5",
-  "claude-3-7-sonnet-latest": "claude-sonnet-4-5",
-  "claude-3-7-sonnet-20250219": "claude-sonnet-4-5",
+  "claude-3-5-sonnet-20241022": "claude-sonnet-5-5",
+  "claude-3-5-sonnet-20240620": "claude-sonnet-5-5",
+  "claude-3-5-sonnet-latest": "claude-sonnet-5-5",
+  "claude-3-7-sonnet-latest": "claude-sonnet-5-5",
+  "claude-3-7-sonnet-20250219": "claude-sonnet-5-5",
+  // Se retira el 30 de noviembre de 2026
+  "claude-sonnet-4-5": "claude-sonnet-5-5",
 };
 
 /**
@@ -44,7 +47,7 @@ const RETIRED_CLAUDE_MODELS = {
  */
 export function normalizeClaudeModel(model) {
   const m = String(model || "").trim();
-  if (!m) return "claude-haiku-4-5";
+  if (!m) return DEFAULT_CLAUDE_MODEL;
   return RETIRED_CLAUDE_MODELS[m] || m;
 }
 
@@ -85,9 +88,9 @@ REGLAS DE COMPORTAMIENTO Y CONVERSACIÓN:
 - Eres un compañero de conversación empático, cercano y natural. Actúa como un amigo de verdad. No uses tono robótico, sermoneador ni moralista.
 - Si el mensaje del usuario es un saludo casual o charla informal (ej. "hola", "qué tal"), responde amablemente y de forma relajada sin forzar conceptos innecesarios.
 - Si el usuario habla de un tema personal, emociones, decisiones, proyectos o hábitos, activa tus recuerdos y demuestra comprensión profunda.
-- CRÍTICO: Cuando bases tu respuesta en el contexto neuronal o memorias provistas, menciónalo explícitamente y de forma natural (ej. "Recuerdo que me contaste que...", "Como sé que te gusta..."). Esto es vital para que el usuario sepa que estás usando tu memoria.
-- CRÍTICO: Sé proactivo al aprender. Si el usuario te da un dato nuevo sobre sí mismo, o falta contexto sobre algo personal, pregúntale de forma cercana. Cuando te dé la información o te cuente algo relevante, genera inmediatamente acciones para crear o actualizar neuronas y toma nota de eso.
+- Sé proactivo al aprender. Si el usuario te da un dato nuevo sobre sí mismo, o falta contexto sobre algo personal, pregúntale de forma cercana. Cuando te dé la información o te cuente algo relevante, genera acciones para crear o actualizar neuronas.
 - Si el usuario dice algo vago o incompleto sobre un tema importante, haz UNA sola pregunta clara para explorar más contexto.
+${GROUNDING_RULES}
 
 GESTIÓN DE NEURONAS E INTENCIÓN (al final de tu respuesta, separado por ---NEURON_ACTIONS---):
 Después de responder, indica tu intención conversacional y qué acciones tomar sobre el grafo o hechos de vida. Usa este formato JSON estricto:
@@ -140,9 +143,10 @@ Después de responder, indica tu intención conversacional y qué acciones tomar
 }
 
 REGLAS PARA HECHOS DE VIDA (upsertLifeFact / endLifeFact):
-- Solo registra un hecho si el usuario lo afirmó claramente (ej. "renuncié a mi trabajo", "me mudé a Lima", "conseguí empleo").
+- Solo registra un hecho si el usuario lo afirmó claramente y YA PASÓ (ej. "renuncié a mi trabajo", "me mudé a Lima", "conseguí empleo").
+- Lo que todavía no pasa ("mi hermano va llegando", "el lunes empiezo", "vamos a mudarnos") NO es un hecho: regístralo con openThread y su dueDate si hay fecha. Cuando el usuario cuente que ya pasó, ahí sí registra el hecho y cierra el hilo.
 - Si el usuario habla en tono hipotético, dudoso o pregunta algo (ej. "¿y si dejo mi empleo?"), NO registres un hecho de vida. Si dudas, no lo registres.
-- Las fechas se calculan desde la fecha de HOY indicada abajo ("ayer", "el lunes", "hace dos semanas"). Si el usuario no da fecha, usa la de hoy.
+- Las fechas se calculan desde la fecha de HOY indicada abajo ("ayer", "el lunes", "hace dos semanas"). Si el usuario no da fecha, NO pongas "since" (no inventes una).
 - Cuando algo de la SITUACIÓN ACTUAL cambia (consiguió o dejó un trabajo, se mudó, terminó una relación), registra la etapa nueva con upsertLifeFact y pon en "replaces" el id del hecho que deja de valer. Si solo terminó algo sin reemplazo, usa endLifeFact con su id.
 - Cuando un HILO ABIERTO se cumple o deja de aplicar (ej. "conseguí trabajo" cierra "buscando trabajo"; "ya fui a la entrevista" cierra "entrevista el jueves"), ciérralo con resolveThread y su id.
 - Usa siempre los id exactos que aparecen en las listas (id=...). No inventes ids.
@@ -164,6 +168,10 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
 
   // Fecha local de hoy: la IA la necesita para fechar etapas y entender "ayer", "el lunes"…
   systemContent += `\n\n## HOY\nHoy es ${todayLongStr()}.`;
+
+  // Quién es quién (siempre) y lo que el usuario ya corrigió (manda sobre todo lo demás)
+  systemContent += buildPeopleBlock(userInput);
+  systemContent += buildCorrectionsBlock();
 
   // CAPA 1: SITUACIÓN ACTUAL (Hechos Vigentes)
   const lifeFactsBlock = buildLifeFactsPromptBlock(userInput);
@@ -193,7 +201,7 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
   systemContent += buildAstroPromptBlock(userInput);
 
   if (context.length > 0) {
-    systemContent += "\n\n## CONTEXTO NEURONAL ACTIVO\n";
+    systemContent += "\n\n## CONTEXTO NEURONAL ACTIVO\nLo que recuerdas relacionado con este mensaje. Puede estar desactualizado: si choca con el directorio de personas, las correcciones o lo que el usuario dice ahora, manda eso.\n";
     context.forEach((c) => {
       systemContent += `- [${c.domain || "general"}] **${c.concept}** (relevancia: ${Math.round((c.score || 0) * 100)}%): ${c.summary || ""}\n`;
     });
@@ -280,40 +288,24 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
     }
   } catch (_e) {}
 
-  const rawFormatted = [];
-  const recentHistory = (history || []).slice(-12);
-  for (const msg of recentHistory) {
-    if (msg.role === "user" || msg.role === "assistant") {
-      let content = String(msg.content || "").trim();
-      if (!content) continue;
-      if (msg.role === "assistant" && content.includes("---NEURON_ACTIONS---")) {
-        content = content.split("---NEURON_ACTIONS---")[0].trim();
-      }
-      if (!content) continue;
-      rawFormatted.push({ role: msg.role === "assistant" ? "assistant" : "user", content });
-    }
-  }
+  // Historial con fecha y hora de cada mensaje del usuario (y aviso si pasó mucho tiempo)
+  const { messages: rawFormatted, gapNote } = buildHistoryMessages(history, userInput, { limit: 12 });
+  systemContent += gapNote;
 
   // Anthropic exige alternancia estricta entre user y assistant, comenzando por user y terminando con user
   const formattedMessages = [];
   for (const msg of rawFormatted) {
     if (formattedMessages.length === 0) {
-      if (msg.role === "user") formattedMessages.push(msg);
+      if (msg.role === "user") formattedMessages.push({ ...msg });
     } else {
       const lastRole = formattedMessages[formattedMessages.length - 1].role;
       if (msg.role !== lastRole) {
-        formattedMessages.push(msg);
+        formattedMessages.push({ ...msg });
       } else {
         // Concatenar mensajes seguidos del mismo rol para evitar errores de API
         formattedMessages[formattedMessages.length - 1].content += `\n${msg.content}`;
       }
     }
-  }
-
-  if (formattedMessages.length > 0 && formattedMessages[formattedMessages.length - 1].role === "user") {
-    formattedMessages[formattedMessages.length - 1].content += `\n${userInput}`;
-  } else {
-    formattedMessages.push({ role: "user", content: userInput });
   }
 
   return { systemContent, messages: formattedMessages };
@@ -366,9 +358,10 @@ export async function requestClaudeChatReply(payload, onRetryProgress = null) {
   const useTools = Boolean(toolData) && getNeuroChatSettings().carlTools !== false;
 
   const modelToUse = normalizeClaudeModel(settings.model);
+  const params = claudeCallParams(modelToUse, { maxTokens: 2048 });
   const baseBody = {
     model: modelToUse,
-    max_tokens: 2048,
+    ...params.body,
     system: [
       {
         type: "text",
@@ -391,7 +384,7 @@ export async function requestClaudeChatReply(payload, onRetryProgress = null) {
         await new Promise((resolve) => setTimeout(resolve, attempt * 500));
       }
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+      const timer = setTimeout(() => controller.abort(), params.timeoutMs || DEFAULT_TIMEOUT_MS);
       try {
         const res = await fetch(ANTHROPIC_API_URL, {
           method: "POST",

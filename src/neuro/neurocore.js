@@ -39,6 +39,8 @@ import { findRelevantDays } from "../day/dayStore.js";
 import { isFinanceTopic, buildFinanceContext } from "../services/financeContextEngine.js";
 import { hasPressuringTone, buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
 import { applyLifeActions } from "../chat/lifeChanges.js";
+import { applyMemoryActions } from "../chat/grounding.js";
+import { seedPeopleFromNeurons } from "../chat/peopleDirectory.js";
 
 function buildDayContext(relevantDays = []) {
   if (!relevantDays.length) return null;
@@ -592,6 +594,9 @@ export async function processNeuroInput(userInput, options = {}) {
   let geminiReplyText = "";
   let intent = "respond";
   let lifeChanges = [];
+  let memorySaved = [];
+  // El directorio de personas empieza con las que ya existen como neuronas
+  try { seedPeopleFromNeurons(getAllNeurons()); } catch (_e) {}
 
   const bestPatternMatch = findBestPattern(userInput, finalActivated.map((a) => a.neuron));
 
@@ -704,6 +709,8 @@ export async function processNeuroInput(userInput, options = {}) {
           // Situación de vida (etapas e hilos): se aplica aparte para poder mostrar y deshacer los cambios
           lifeChanges = applyLifeActions(actions);
           if (lifeChanges.length) addStep(trace, "claude_life_changes", { count: lifeChanges.length });
+          memorySaved = applyMemoryActions(actions);
+          if (memorySaved.length) addStep(trace, "claude_memory_saved", { count: memorySaved.length });
 
           if (neuronsToSave.length > 0) {
             saveManyNeurons(neuronsToSave);
@@ -839,6 +846,7 @@ export async function processNeuroInput(userInput, options = {}) {
           // Situación de vida (etapas e hilos): se aplica aparte para poder mostrar y deshacer los cambios
           lifeChanges = applyLifeActions(actions);
           if (lifeChanges.length) addStep(trace, "ollama_life_changes", { count: lifeChanges.length });
+          memorySaved = applyMemoryActions(actions);
 
           if (neuronsToSave.length > 0) {
             saveManyNeurons(neuronsToSave);
@@ -1106,6 +1114,7 @@ export async function processNeuroInput(userInput, options = {}) {
     replyMode,
     intent,
     lifeChanges,
+    memorySaved,
     knowledgeExtracted: {
       relationHints: trace.knowledgeExtracted?.relationHints || 0,
       triggerCandidates: trace.knowledgeExtracted?.triggerCandidates || 0,

@@ -228,13 +228,13 @@ export function buildOpenThreadsPromptBlock() {
       if (overdueInjectedCount < 1) {
         overdueInjectedCount++;
         hasOverdueThread = true;
-        return `- [HILO PENDIENTE · ${area}] id=${t.id} · "${t.topic}" tenía fecha tope ${t.dueDate} (ya pasó, sin resolver).`;
+        return `- [HILO PENDIENTE · ${area}] id=${t.id} · "${t.topic}" era para el ${t.dueDate}. No sabes si pasó: si sale el tema, pregunta cómo fue; no lo des por hecho.`;
       } else {
         // Ignorar vencimiento extra para no sobrecargar el prompt (máximo 1 seguimiento)
-        return `- [HILO ABIERTO · ${area}] id=${t.id} · "${t.topic}" (abierto el ${t.openedAt}).`;
+        return `- [HILO ABIERTO · ${area}] id=${t.id} · "${t.topic}" (era para el ${t.dueDate}; no sabes si pasó).`;
       }
     }
-    const dueStr = t.dueDate ? ` (fecha tope: ${t.dueDate})` : "";
+    const dueStr = t.dueDate ? (t.dueDate === todayStr ? " (es para hoy; no sabes si ya pasó)" : ` (para el ${t.dueDate}: todavía no llega esa fecha)`) : ` (anotado el ${t.openedAt}; sin fecha: no sabes si ya pasó)`;
     return `- [HILO ABIERTO · ${area}] id=${t.id} · "${t.topic}"${dueStr}.`;
   });
 

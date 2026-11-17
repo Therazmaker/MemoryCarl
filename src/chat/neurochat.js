@@ -383,6 +383,8 @@ export async function sendMessage(userInput, options = {}) {
     relevantDays: result.relevantDays || [],
     // Cambios en la situación de vida hechos en este turno (se muestran con opción de deshacer)
     ...(result.lifeChanges?.length ? { lifeChanges: result.lifeChanges } : {}),
+    // Personas y correcciones que Carl anotó en este turno
+    ...(result.memorySaved?.length ? { memorySaved: result.memorySaved } : {}),
   });
 
   // Guardar respuesta del asistente en el día actual y vincular neuronas activadas

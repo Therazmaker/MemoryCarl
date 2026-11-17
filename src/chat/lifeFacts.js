@@ -254,6 +254,8 @@ export function sanitizeLifeFact(fact) {
 
   const id = fact.id || `fact_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const pendingConfirm = Boolean(fact.pendingConfirm);
+  // Sin fecha dicha por el usuario: se guarda la de hoy, pero marcada (no se inventa "desde hace X días")
+  const sinceApprox = Boolean(fact.sinceApprox) || !parseDateStr(fact.since);
   const endNote = fact.endNote ? String(fact.endNote).trim().slice(0, 200) : "";
 
   return {
@@ -266,6 +268,7 @@ export function sanitizeLifeFact(fact) {
     lastConfirmed,
     source,
     pendingConfirm,
+    ...(sinceApprox ? { sinceApprox: true } : {}),
     ...(endNote ? { endNote } : {}),
   };
 }
@@ -318,6 +321,9 @@ export function upsertLifeFact(factInput, opts = {}) {
     for (const key of ["text", "category", "status", "since", "until", "pendingConfirm", "source", "endNote"]) {
       if (factInput[key] !== undefined) patch[key] = sanitized[key];
     }
+    // Una fecha dicha ahora corrige la que faltaba; sin fecha no se pisa la que ya había
+    if (factInput.since === undefined || factInput.sinceApprox) delete patch.since;
+    else if (parseDateStr(factInput.since)) patch.sinceApprox = false;
     if (patch.status === "active") patch.until = null;
     facts[existingIdx] = { ...facts[existingIdx], ...patch, lastConfirmed: todayStr };
     const after = facts[existingIdx];
@@ -401,9 +407,10 @@ export function updateLifeFact(id, patch = {}, opts = {}) {
   const idx = facts.findIndex((f) => f.id === id);
   if (idx === -1) return null;
   const before = copy(facts[idx]);
-  const merged = sanitizeLifeFact({ ...facts[idx], ...patch, id });
+  const merged = sanitizeLifeFact({ ...facts[idx], ...patch, id, ...(patch.since && parseDateStr(patch.since) ? { sinceApprox: false } : {}) });
   if (!merged) return null;
   facts[idx] = { ...facts[idx], ...merged, lastConfirmed: getTodayStr() };
+  if (!merged.sinceApprox) delete facts[idx].sinceApprox;
   recordChange(opts.changes, "fact_updated", before, facts[idx]);
   saveLifeFacts(facts);
   return facts[idx];
@@ -577,7 +584,9 @@ export function buildLifeFactsPromptBlock(userInput = "") {
   }
 
   const factLines = selectedFacts.map((fact) => {
-    const duration = calculateDurationString(fact.since);
+    const duration = fact.sinceApprox
+      ? `anotado el ${formatShortDate(fact.since)}; no dijo desde cuándo`
+      : calculateDurationString(fact.since);
     const lastConfMs = parseDateStr(fact.lastConfirmed)?.getTime() || todayMs;
     const daysUnconfirmed = Math.floor((todayMs - lastConfMs) / (1000 * 60 * 60 * 24));
     const revalidateTag = daysUnconfirmed >= 45 ? " [por revalidar]" : "";
@@ -585,7 +594,7 @@ export function buildLifeFactsPromptBlock(userInput = "") {
     return `- [${fact.category.toUpperCase()}] id=${fact.id} · ${fact.text} (${duration})${revalidateTag}`;
   });
 
-  const blockText = `\n\n## SITUACIÓN ACTUAL (HECHOS VIGENTES DE SU VIDA)\nEsta es la situación real y vigente del usuario. Úsala como contexto de fondo. No la recites ni la menciones si no viene al caso. Si el mensaje la toca, respóndele con ella presente. Si el usuario dice algo que cambia o termina uno de estos hechos, usa su id en upsertLifeFact.replaces o en endLifeFact.\n${factLines.join("\n")}`;
+  const blockText = `\n\n## SITUACIÓN ACTUAL (HECHOS VIGENTES DE SU VIDA)\nEsta es la situación vigente del usuario, con las duraciones ya calculadas (no calcules ni inventes otras). Úsala como contexto de fondo. No la recites ni la menciones si no viene al caso. Si el mensaje la toca, respóndele con ella presente. Si el usuario dice algo que cambia o termina uno de estos hechos, usa su id en upsertLifeFact.replaces o en endLifeFact.\n${factLines.join("\n")}`;
 
   lastInjectedBlockStats = {
     blockText,
