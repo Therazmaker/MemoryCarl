@@ -68,6 +68,8 @@ import { reconcileThreadsWithFacts, undoLifeChanges, describeLifeChange } from "
 import { schedulePush, pullNeurochat, getSyncStatus, getApiConfig as getSyncApiConfig, queueFullBackfill } from "../services/neurochatSync.js";
 import { pendingCount } from "../services/syncOutbox.js";
 import { todayLocalStr } from "./lifeDates.js";
+import { loadPeople, upsertPerson, deletePerson } from "./peopleDirectory.js";
+import { loadCorrections, addCorrection, deleteCorrection } from "./corrections.js";
 import { startDayOneImport } from "./dayoneImport-ui.js";
 import { getSemanticStatus, ensureSemanticIndex } from "../neuro/semanticQuery.js";
 
@@ -289,7 +291,11 @@ function renderMessage(msg) {
       <button class="ncRfBtn" data-rf-rating="useful" data-rf-msg="${esc(msg.messageId)}" title="Útil">Útil</button>
       <button class="ncRfBtn" data-rf-rating="partial" data-rf-msg="${esc(msg.messageId)}" title="Parcialmente útil">Parcial</button>
       <button class="ncRfBtn" data-rf-rating="useless" data-rf-msg="${esc(msg.messageId)}" title="No útil">No útil</button>
+      <button class="ncRfBtn ncRfBtn--wrong" data-wrong-msg="${esc(msg.messageId)}" title="Carl dijo algo que no es cierto">🚫 No es así</button>
     </div>` : "";
+  const savedNote = !isUser && msg.memorySaved?.length
+    ? `<div class="ncSavedNote">${msg.memorySaved.map((m) => m.kind === "person" ? `👥 Anoté a ${esc(m.text)}` : `✍️ Corrección guardada: ${esc(m.text)}`).join(" · ")}</div>`
+    : "";
 
   const memoryRecall = !isUser ? renderCarlSearchCard(msg) + renderMemoryRecallCard(msg) : "";
   const dayRecall = !isUser ? renderDayRecallCard(msg) : "";
@@ -300,6 +306,7 @@ function renderMessage(msg) {
       ${memoryRecall}
       ${dayRecall}
       ${!isUser ? renderLifeChangesCard(msg) : ""}
+      ${savedNote}
       <div class="ncMsgMeta">
         ${time}${msg.coverage != null ? ` · cobertura ${Math.round(msg.coverage * 100)}%` : ""}
         ${msg.generated > 0 ? ` <span style="color: #4ade80; font-weight: bold;">· 🧠 +${msg.generated} neurona${msg.generated > 1 ? "s" : ""} nueva${msg.generated > 1 ? "s" : ""}</span>` : ""}
@@ -1197,7 +1204,7 @@ function renderStageCard(f) {
   const head = `
     <div class="ncStageHead">
       <span class="ncStageArea">${meta.icon} ${esc(meta.label)}</span>
-      <span class="ncStageSpan">${isFuture ? `empieza ${formatShortDate(f.since)}` : formatSpan(f.since)}</span>
+      <span class="ncStageSpan">${f.sinceApprox ? "sin fecha exacta" : isFuture ? `empieza ${formatShortDate(f.since)}` : formatSpan(f.since)}</span>
     </div>`;
 
   if (nowState.editId === f.id) {
@@ -1239,10 +1246,11 @@ function renderStageCard(f) {
       ${head}
       <div class="ncStageText">${esc(f.text)}</div>
       <div class="ncStageFoot">
-        <span class="ncStageSince">${isFuture ? "" : `desde ${formatShortDate(f.since)}`}</span>
+        <span class="ncStageSince">${f.sinceApprox ? `anotado el ${formatShortDate(f.since)} · <button class="ncLinkBtn" data-now="edit" data-id="${esc(f.id)}">poner fecha</button>` : isFuture ? "" : `desde ${formatShortDate(f.since)}`}</span>
         <span class="ncStageActions">
           <button class="ncGhostBtn" data-now="end" data-id="${esc(f.id)}">Terminó</button>
           <button class="ncGhostBtn" data-now="edit" data-id="${esc(f.id)}">Editar</button>
+          <button class="ncGhostBtn ncGhostBtn--danger" data-now="wrong-fact" data-id="${esc(f.id)}" title="Carl lo entendió mal">🚫 No es así</button>
         </span>
       </div>
     </div>`;
@@ -1258,6 +1266,7 @@ function renderThreadRow(t) {
         <div class="ncThreadMeta">abierto hace ${formatSpan(t.openedAt)}${t.dueDate ? ` · ${dueLabel(t.dueDate)}` : ""}${t.note ? ` · ${esc(t.note)}` : ""}</div>
       </div>
       <button class="ncGhostBtn ncGhostBtn--ok" data-now="resolve-thread" data-id="${esc(t.id)}" title="Marcar como resuelto">✓ Hecho</button>
+      <button class="ncGhostBtn ncGhostBtn--icon" data-now="wrong-thread" data-id="${esc(t.id)}" title="Carl lo entendió mal" aria-label="No es así">🚫</button>
       <button class="ncGhostBtn ncGhostBtn--icon" data-now="delete-thread" data-id="${esc(t.id)}" title="Borrar" aria-label="Borrar tema">🗑</button>
     </div>`;
 }
@@ -1322,6 +1331,75 @@ function renderNowNotice() {
         <button class="ncGhostBtn ncGhostBtn--icon" data-now="notice-close" aria-label="Cerrar aviso">✕</button>
       </div>
     </div>`;
+}
+
+// ---- Personas (directorio fijo) y correcciones ----
+function renderPersonRow(p) {
+  if (nowState.personEditId === p.id) {
+    return `
+      <div class="ncPerson ncPerson--editing" data-person-card="${esc(p.id)}">
+        <input class="ncSettingsInput" data-person-field="name" value="${esc(p.name)}" maxlength="60" placeholder="Nombre" />
+        <input class="ncSettingsInput" data-person-field="relation" value="${esc(p.relation || "")}" maxlength="120" placeholder="Quién es para ti (ej: mi hermano, mi pareja)" />
+        <input class="ncSettingsInput" data-person-field="aliases" value="${esc((p.aliases || []).join(", "))}" maxlength="200" placeholder="Apodos, separados por coma (opcional)" />
+        <div class="ncNowRow">
+          <button class="ncActionBtn ncActionBtnPrimary" data-now="person-save" data-id="${esc(p.id)}">Guardar</button>
+          <button class="ncActionBtn" data-now="person-cancel">Cancelar</button>
+          <button class="ncActionBtn ncActionBtnDanger ncNowPushRight" data-now="person-delete" data-id="${esc(p.id)}">Quitar</button>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="ncPerson">
+      <div class="ncPersonBody">
+        <div class="ncPersonName">${esc(p.name)}${p.aliases?.length ? ` <span class="ncPersonAlias">(${esc(p.aliases.join(", "))})</span>` : ""}</div>
+        <div class="ncPersonRel">${p.relation ? esc(p.relation) : `<em>sin decir quién es</em>`}${p.source === "user" ? "" : ` · <span class="ncPersonSrc">${p.source === "carl" ? "lo anotó Carl" : "de tus neuronas"}</span>`}</div>
+      </div>
+      <button class="ncGhostBtn" data-now="person-edit" data-id="${esc(p.id)}">Editar</button>
+    </div>`;
+}
+
+function renderPeopleSection() {
+  const people = loadPeople().filter((p) => !p.deleted).sort((a, b) => a.name.localeCompare(b.name));
+  const composer = nowState.personAddOpen ? `
+    <div class="ncNowComposer" data-person-card="new">
+      <input class="ncSettingsInput" data-person-field="name" maxlength="60" placeholder="Nombre (tal como le dices)" />
+      <input class="ncSettingsInput" data-person-field="relation" maxlength="120" placeholder="Quién es para ti (ej: mi hermano, amiga del trabajo)" />
+      <input class="ncSettingsInput" data-person-field="aliases" maxlength="200" placeholder="Apodos, separados por coma (opcional)" />
+      <div class="ncNowRow">
+        <button class="ncActionBtn ncActionBtnPrimary" data-now="person-save" data-id="">Añadir</button>
+        <button class="ncActionBtn" data-now="person-add-toggle">Cancelar</button>
+      </div>
+    </div>` : "";
+  return `
+    <section class="ncNowSection">
+      <div class="ncNowSectionHead">
+        <h3>👥 Personas${people.length ? ` <span class="ncNowCount">${people.length}</span>` : ""}</h3>
+        <button class="ncGhostBtn" data-now="person-add-toggle">+ Persona</button>
+      </div>
+      <div class="ncNowHint">Carl usa estos nombres tal cual en cada respuesta. Si alguien no está aquí, para Carl es otra persona y te pregunta quién es.</div>
+      ${composer}
+      ${people.length ? `<div class="ncPeopleList">${people.map(renderPersonRow).join("")}</div>` : `<div class="ncNowEmpty">Todavía nadie. Añade a las personas importantes o cuéntale a Carl quién es quién.</div>`}
+    </section>`;
+}
+
+function renderCorrectionsSection() {
+  const list = loadCorrections().filter((c) => !c.deleted).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  if (!list.length) return "";
+  return `
+    <section class="ncNowSection">
+      <div class="ncNowSectionHead"><h3>✍️ Correcciones <span class="ncNowCount">${list.length}</span></h3></div>
+      <div class="ncNowHint">Lo que le corregiste a Carl. Lo tiene presente siempre y manda sobre todo lo demás.</div>
+      <div class="ncThreadList">${list.map((c) => `
+        <div class="ncThread">
+          <span class="ncThreadIcon">✍️</span>
+          <div class="ncThreadBody">
+            ${c.wrong ? `<div class="ncThreadMeta">No es cierto: ${esc(c.wrong)}</div>` : ""}
+            ${c.right ? `<div class="ncThreadTopic">${esc(c.right)}</div>` : ""}
+          </div>
+          <button class="ncGhostBtn ncGhostBtn--icon" data-now="correction-delete" data-id="${esc(c.id)}" title="Quitar" aria-label="Quitar corrección">🗑</button>
+        </div>`).join("")}
+      </div>
+    </section>`;
 }
 
 export function renderNowTab() {
@@ -1421,6 +1499,9 @@ export function renderNowTab() {
           : `<div class="ncNowEmpty">Nada pendiente. Cuando menciones algo en curso (una búsqueda, una entrevista, una espera) aparecerá aquí.</div>`}
       </section>
 
+      ${renderPeopleSection()}
+      ${renderCorrectionsSection()}
+
       ${timelineAreas.length ? `
       <section class="ncNowSection">
         <div class="ncNowSectionHead"><h3>Línea de vida</h3></div>
@@ -1516,6 +1597,53 @@ function wireNowTabEvents(root) {
       case "delete-thread":
         if (!confirm("¿Borrar este tema?")) return;
         deleteThread(id);
+        break;
+      case "wrong-fact": {
+        const f = getLifeFacts({ status: "all" }).find((x) => x.id === id);
+        if (!f) return;
+        const right = window.prompt(`Carl anotó: "${f.text}".\n¿Qué es lo cierto? (puedes dejarlo vacío)`);
+        if (right === null) return;
+        addCorrection({ wrong: f.text, right: right.trim(), source: "ahora" });
+        deleteLifeFact(id);
+        break;
+      }
+      case "wrong-thread": {
+        const t = getOpenThreads({ status: "all" }).find((x) => x.id === id);
+        if (!t) return;
+        const right = window.prompt(`Carl anotó: "${t.topic}".\n¿Qué es lo cierto? (puedes dejarlo vacío)`);
+        if (right === null) return;
+        addCorrection({ wrong: t.topic, right: right.trim(), source: "ahora" });
+        deleteThread(id);
+        break;
+      }
+      case "person-add-toggle":
+        nowState.personAddOpen = !nowState.personAddOpen;
+        nowState.personEditId = null;
+        break;
+      case "person-edit":
+        nowState.personEditId = id;
+        nowState.personAddOpen = false;
+        break;
+      case "person-cancel":
+        nowState.personEditId = null;
+        break;
+      case "person-save": {
+        const pcard = btn.closest("[data-person-card]");
+        const pf = (name) => pcard?.querySelector(`[data-person-field="${name}"]`)?.value?.trim() || "";
+        const name = pf("name");
+        if (!name) return;
+        upsertPerson({ id: id || undefined, name, relation: pf("relation"), aliases: pf("aliases").split(",").map((a) => a.trim()).filter(Boolean), source: "user" });
+        nowState.personEditId = null;
+        nowState.personAddOpen = false;
+        break;
+      }
+      case "person-delete":
+        if (!confirm("¿Quitar a esta persona del directorio?")) return;
+        deletePerson(id);
+        nowState.personEditId = null;
+        break;
+      case "correction-delete":
+        deleteCorrection(id);
         break;
       case "notice-undo":
         undoLifeChanges(nowState.notice || []);
@@ -1990,6 +2118,21 @@ function wireMessageEvents(root) {
       dayUiState.view = "detail";
       uiState.activeTab = "days";
       fullRerender();
+    });
+  });
+
+  // "No es así": lo cierto queda anotado y Carl lo tiene presente en cada respuesta
+  root.querySelectorAll("[data-wrong-msg]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const right = window.prompt("¿Qué dijo mal Carl? Escribe lo cierto.\nEj.: Mi hermano todavía no llega · Fernanda no es Fergis, es otra persona");
+      if (!right || !right.trim()) return;
+      const msg = getChatHistory().find((m) => m.messageId === btn.getAttribute("data-wrong-msg") && m.role === "assistant");
+      addCorrection({ right: right.trim(), wrong: "", source: "respuesta" });
+      try {
+        recordResponseFeedback({ messageId: btn.getAttribute("data-wrong-msg"), rating: "useless", replySource: msg?.replySource || "unknown", activatedIds: [] });
+      } catch (_e) {}
+      btn.textContent = "✓ Anotado";
+      btn.disabled = true;
     });
   });
 
@@ -2474,7 +2617,7 @@ function wireSettingsModal(root) {
     const patch = {
       enabled:         root.querySelector("#ncsPremiumEnabled")?.checked ?? true,
       model:           root.querySelector("#ncsModel")?.value?.trim() || "gemini-2.5-flash",
-      claudeModel:     root.querySelector("#ncsClaudeModel")?.value?.trim() || "claude-haiku-4-5",
+      claudeModel:     root.querySelector("#ncsClaudeModel")?.value?.trim() || "claude-opus-5-5",
       carlTools:       root.querySelector("#ncsCarlTools")?.checked ?? true,
       dailyLimit:      parseInt(root.querySelector("#ncsDailyLimit")?.value, 10) || 20,
       timeoutMs:       parseInt(root.querySelector("#ncsTimeout")?.value,    10) || 20000,
@@ -2639,8 +2782,10 @@ function wireSettingsModal(root) {
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({
-          model: s.model || "claude-haiku-4-5",
-          max_tokens: 10,
+          model: s.model || "claude-opus-5-5",
+          // Los modelos 5.x piensan antes de responder: se les deja un poco de margen
+          max_tokens: 256,
+          ...(/^claude-(opus|sonnet|haiku)-5/.test(s.model || "") ? { output_config: { effort: "low" } } : {}),
           messages: [{ role: "user", content: "ping" }],
         }),
       });
@@ -3284,6 +3429,17 @@ function ncCss() {
   .ncThreadBody { flex: 1; min-width: 0; }
   .ncThreadTopic { font-size: 14px; font-weight: 600; line-height: 1.35; word-break: break-word; }
   .ncThreadMeta { font-size: 11px; opacity: .65; margin-top: 2px; }
+  .ncPeopleList { display: flex; flex-direction: column; gap: 8px; }
+  .ncPerson { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+  .ncPerson--editing { flex-direction: column; align-items: stretch; }
+  .ncPersonBody { flex: 1; min-width: 0; }
+  .ncPersonName { font-size: 14px; font-weight: 700; word-break: break-word; }
+  .ncPersonAlias { font-weight: 400; opacity: .6; font-size: 12px; }
+  .ncPersonRel { font-size: 12px; opacity: .75; margin-top: 2px; word-break: break-word; }
+  .ncPersonSrc { opacity: .7; font-style: italic; }
+  .ncLinkBtn { background: none; border: none; color: #a78bfa; padding: 0; font: inherit; text-decoration: underline; cursor: pointer; }
+  .ncSavedNote { font-size: 11px; opacity: .8; margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: rgba(167,139,250,.12); color: #c4b5fd; }
+  .ncRfBtn--wrong { margin-left: auto; }
   .ncDue { font-weight: 700; }
   .ncDue--soon { color: #fbbf24; }
   .ncDue--late { color: #fb7185; }

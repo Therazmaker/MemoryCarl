@@ -10,15 +10,17 @@ const { normalizeClaudeModel, CLAUDE_MODELS } = await import('../src/services/cl
 
 test('normalizeClaudeModel migra modelos retirados a modelos vigentes', () => {
   assert.equal(normalizeClaudeModel('claude-3-5-haiku-20241022'), 'claude-haiku-4-5');
-  assert.equal(normalizeClaudeModel('claude-3-5-sonnet-20241022'), 'claude-sonnet-4-5');
-  assert.equal(normalizeClaudeModel('claude-3-7-sonnet-latest'), 'claude-sonnet-4-5');
+  assert.equal(normalizeClaudeModel('claude-3-5-sonnet-20241022'), 'claude-sonnet-5-5');
+  assert.equal(normalizeClaudeModel('claude-3-7-sonnet-latest'), 'claude-sonnet-5-5');
+  // Sonnet 4.5 se retira el 30 de noviembre de 2026
+  assert.equal(normalizeClaudeModel('claude-sonnet-4-5'), 'claude-sonnet-5-5');
 });
 
-test('normalizeClaudeModel conserva modelos vigentes y usa Haiku 4.5 por defecto', () => {
+test('normalizeClaudeModel conserva modelos vigentes y usa Opus 5.5 por defecto', () => {
   assert.equal(normalizeClaudeModel('claude-haiku-4-5'), 'claude-haiku-4-5');
-  assert.equal(normalizeClaudeModel('claude-sonnet-4-5'), 'claude-sonnet-4-5');
-  assert.equal(normalizeClaudeModel(''), 'claude-haiku-4-5');
-  assert.equal(normalizeClaudeModel(undefined), 'claude-haiku-4-5');
+  assert.equal(normalizeClaudeModel('claude-sonnet-5-5'), 'claude-sonnet-5-5');
+  assert.equal(normalizeClaudeModel(''), 'claude-opus-5-5');
+  assert.equal(normalizeClaudeModel(undefined), 'claude-opus-5-5');
 });
 
 test('CLAUDE_MODELS no ofrece modelos retirados', () => {

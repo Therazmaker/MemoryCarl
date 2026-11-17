@@ -47,7 +47,7 @@ openThread({ topic: "Esperando respuesta de cliente", dueDate: "2026-12-31" });
 
 const promptBlock = buildOpenThreadsPromptBlock();
 assert.ok(promptBlock.blockText.includes("HILOS ABIERTOS"));
-assert.ok(promptBlock.blockText.includes("tenía fecha tope 2020-01-01 (ya pasó, sin resolver)"));
+assert.ok(promptBlock.blockText.includes("era para el 2020-01-01. No sabes si pasó"));
 assert.strictEqual(promptBlock.hasOverdueThread, true);
 
 // 4. Detección de tono de presión

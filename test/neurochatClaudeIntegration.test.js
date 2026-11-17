@@ -7,9 +7,9 @@ import { processNeuroInput } from "../src/neuro/neurocore.js";
 test("normalizeClaudeModel handles obsolete and empty model names", () => {
   // Los modelos 3.x fueron retirados por Anthropic (la API responde 404): se migran a vigentes.
   assert.equal(normalizeClaudeModel("claude-haiku-4-5"), "claude-haiku-4-5");
-  assert.equal(normalizeClaudeModel(""), "claude-haiku-4-5");
+  assert.equal(normalizeClaudeModel(""), "claude-opus-5-5");
   assert.equal(normalizeClaudeModel("claude-3-5-haiku-20241022"), "claude-haiku-4-5");
-  assert.equal(normalizeClaudeModel("claude-3-5-sonnet-20241022"), "claude-sonnet-4-5");
+  assert.equal(normalizeClaudeModel("claude-3-5-sonnet-20241022"), "claude-sonnet-5-5");
 });
 
 test("chooseReplyMode selects claude when isClaudeConfigured is true", () => {

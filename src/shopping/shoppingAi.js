@@ -8,6 +8,7 @@ import { getOllamaSettings, isOllamaConfigured } from "../services/ollamaClient.
 import { formatProductForAiPrompt, enrichAllProducts } from "./productIntelligence.js";
 import { formatMealInventoryForAiPrompt } from "./mealBundles.js";
 import { DAYS_OF_WEEK, MEAL_SLOTS } from "./mealSchedule.js";
+import { claudeCallParams, claudeReplyText } from "../services/claudeModels.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -438,9 +439,12 @@ export async function callClaude(messages, apiKey, model = "claude-haiku-4-5") {
     formattedMessages.push({ role: "user", content: "Hola" });
   }
 
+  const useModel = model || "claude-haiku-4-5";
+  // Los modelos 5.x piensan antes de responder: más tokens y más tiempo, con esfuerzo bajo (son tareas cortas)
+  const params = claudeCallParams(useModel, { maxTokens: 2048, effort: "low" });
   const payload = {
-    model: model || "claude-haiku-4-5",
-    max_tokens: 2048,
+    model: useModel,
+    ...params.body,
     messages: formattedMessages,
   };
 
@@ -455,7 +459,7 @@ export async function callClaude(messages, apiKey, model = "claude-haiku-4-5") {
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), params.timeoutMs || DEFAULT_TIMEOUT_MS);
 
   try {
     const res = await fetch(url, {
@@ -488,8 +492,8 @@ export async function callClaude(messages, apiKey, model = "claude-haiku-4-5") {
     if (data?.usage) {
       console.log(`[Claude Prompt Caching] Tokens: input=${data.usage.input_tokens || 0}, output=${data.usage.output_tokens || 0}, cache_creation=${data.usage.cache_creation_input_tokens || 0}, cache_read=${data.usage.cache_read_input_tokens || 0}`);
     }
-    const reply = data?.content?.[0]?.text;
-    if (!reply) throw new Error("Claude no devolvió texto en la respuesta.");
+    const reply = claudeReplyText(data);
+    if (!reply) throw new Error(data?.stop_reason === "refusal" ? "Claude no quiso responder a este mensaje." : "Claude no devolvió texto en la respuesta.");
     return reply;
   } catch (err) {
     clearTimeout(timer);

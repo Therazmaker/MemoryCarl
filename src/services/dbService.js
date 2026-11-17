@@ -24,6 +24,8 @@ import { getAllNeurons } from "../neuro/neuronStore.js";
 import { getAllMemories } from "../memory/memoryStore.js";
 import { getAllDays, mergeDaysFromCloud } from "../day/dayStore.js";
 import { loadLifeFacts, LIFE_FACTS_KEY } from "../chat/lifeFacts.js";
+import { loadPeople, mergePeople, PEOPLE_KEY } from "../chat/peopleDirectory.js";
+import { loadCorrections, mergeCorrections, CORRECTIONS_KEY } from "../chat/corrections.js";
 import { loadOpenThreads, OPEN_THREADS_KEY } from "../chat/openThreads.js";
 import { loadTombstones, saveTombstones, mergeTombstones } from "../neuro/neuronTombstones.js";
 import { mergeLifeLists } from "../chat/lifeChanges.js";
@@ -577,6 +579,8 @@ function fastHash(item) {
     // Biblioteca y compras: cualquier cambio de precio o de producto cuenta (no solo cuántos hay)
     if (item.id === "product_library") return `pl:${contentHash(p?.products)}`;
     if (item.id === "tdha") return `td:${contentHash(p)}`;
+    // Etapas, pendientes, personas y correcciones: una edición por dentro también cuenta
+    if (item.id === "neurochat_now") return `now:${contentHash(p)}`;
     if (item.id === "shopping") return `sh:${contentHash(p)}`;
     if (Array.isArray(p)) return `arr:${p.length}:${p[p.length - 1]?.id || p[p.length - 1]?.updatedAt || ""}`;
     if (p && typeof p === "object") {
@@ -694,7 +698,7 @@ function getAppModulesList() {
         financeMissionPayments: st.financeMissionPayments,
       },
     },
-    { id: "neurochat_now", payload: { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads() } },
+    { id: "neurochat_now", payload: { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads(), people: loadPeople(), corrections: loadCorrections() } },
     // Neuronas borradas/fusionadas (reparación del grafo): solo si este dispositivo tiene registro
     { id: "neuron_tombstones", payload: loadTombstones() || undefined },
   ];
@@ -1680,6 +1684,20 @@ export async function pullFromSupabase({ isManual = false } = {}) {
             const merged = mergeLifeLists(localThreads, p.openThreads);
             if (JSON.stringify(merged) !== JSON.stringify(localThreads)) {
               localStorage.setItem(OPEN_THREADS_KEY, JSON.stringify(merged));
+              changed = true;
+            }
+          }
+          if (Array.isArray(p.people) && p.people.length) {
+            const r = mergePeople(readLocalArray(PEOPLE_KEY), p.people);
+            if (r.changed) {
+              localStorage.setItem(PEOPLE_KEY, JSON.stringify(r.list));
+              changed = true;
+            }
+          }
+          if (Array.isArray(p.corrections) && p.corrections.length) {
+            const r = mergeCorrections(readLocalArray(CORRECTIONS_KEY), p.corrections);
+            if (r.changed) {
+              localStorage.setItem(CORRECTIONS_KEY, JSON.stringify(r.list));
               changed = true;
             }
           }
