@@ -31,6 +31,7 @@ import { loadTombstones, saveTombstones, mergeTombstones } from "../neuro/neuron
 import { mergeLifeLists } from "../chat/lifeChanges.js";
 import { mergeProducts, mergeById, libraryPayload } from "../shopping/productLibrarySync.js";
 import { tdhaPayload, mergeTdha, loadTdha, saveTdha } from "../tdha/tdhaStore.js";
+import { magicPayload, mergeMagicFromCloud } from "../todo/magicTodoStore.js";
 import { getFullChatHistory } from "../chat/neurochat.js";
 import {
   addMissingById,
@@ -581,6 +582,9 @@ function fastHash(item) {
     if (item.id === "tdha") return `td:${contentHash(p)}`;
     // Etapas, pendientes, personas y correcciones: una edición por dentro también cuenta
     if (item.id === "neurochat_now") return `now:${contentHash(p)}`;
+    // Magic ToDo: marcar un paso o editarlo cambia por dentro
+    if (item.id === "reminders") return `rem:${contentHash(p)}`;
+    if (item.id === "magic_todo") return `mt:${contentHash(p)}`;
     if (item.id === "shopping") return `sh:${contentHash(p)}`;
     if (Array.isArray(p)) return `arr:${p.length}:${p[p.length - 1]?.id || p[p.length - 1]?.updatedAt || ""}`;
     if (p && typeof p === "object") {
@@ -680,6 +684,8 @@ function getAppModulesList() {
     { id: "product_library", payload: libraryPayload(st.products) || undefined },
     // Pestaña TDHA: registros de cómo estoy y qué me regula (nunca se sube vacía)
     { id: "tdha", payload: tdhaPayload() || undefined },
+    // Magic ToDo: las tareas cumplidas (de ahí aprende) y sus preferencias
+    { id: "magic_todo", payload: magicPayload() || undefined },
     { id: "inventory", payload: { inventory: st.inventory, inventoryLots: st.inventoryLots } },
     { id: "reminders", payload: { reminders: st.reminders, lifeTasks: st.lifeTasks, lifeTasksLog: st.lifeTasksLog } },
     { id: "home_widgets", payload: { musicToday: st.musicToday, musicLog: st.musicLog, budgetMonthly: st.budgetMonthly, calDraw: st.calDraw, moodSpritesCustom: st.moodSpritesCustom, moodActivityCats: st.moodActivityCats } },
@@ -1559,6 +1565,9 @@ export async function pullFromSupabase({ isManual = false } = {}) {
           if (r.changed) { saveTdha(r); changed = true; }
           break;
         }
+        case "magic_todo":
+          if (mergeMagicFromCloud(p)) changed = true;
+          break;
         case "shopping":
         case "product_library": {
           // La biblioteca, el historial de compras y las listas se UNEN con lo local (nunca se vacían)

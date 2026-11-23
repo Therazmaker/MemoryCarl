@@ -93,6 +93,7 @@ import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, ge
 import { enrichProductData } from "./shopping/productIntelligence.js";
 // Con versión: así el teléfono no se queda con una copia vieja de La Canasta
 import { renderBasket, wireBasket } from "./shopping/basket-ui.js?v=2085";
+import { renderMagicTodo, wireMagicTodo } from "./todo/magicTodo-ui.js?v=2088";
 import { mergeProducts, rebuildFromPurchases, stampChangedProducts } from "./shopping/productLibrarySync.js";
 import { proposeGroups, groupEmoji, classifyProductName } from "./shopping/productGroups.js";
 import { classifyWithAi } from "./shopping/basketBrain.js";
@@ -3427,7 +3428,7 @@ function renderMoreModal(){
         </div>
 
         <div class="list" style="margin-top:12px;">
-          ${mk("reminders","⏰","Reminders","Pendientes + notifs")}
+          ${mk("reminders","✨","Magic ToDo","Tareas que se desarman en pasos")}
           ${mk("calendar","📅","Calendario","Dibuja X, notas")}
           ${mk("learn","🧠","Aprender","Mini contenido")}
           ${mk("insights","📊","Insights","Todo por día")}
@@ -3960,6 +3961,11 @@ function view(){
         }
       });
     });
+  }
+
+  // Magic ToDo (pestaña de Reminders)
+  if(state.tab === "reminders"){
+    wireMagicTodo(root, { state, persist, view, toast });
   }
 
   // La Canasta: chat de compras que aprende
@@ -4890,12 +4896,12 @@ function openLiquidityTrainingModal() {
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
   if(fab){
-    fab.style.display = (state.tab==="learn" || state.tab==="settings" || state.tab==="neurochat" || state.tab==="dayengine" || state.tab==="semana") ? "none" : "flex";
+    fab.style.display = (state.tab==="learn" || state.tab==="settings" || state.tab==="neurochat" || state.tab==="dayengine" || state.tab==="semana" || state.tab==="reminders") ? "none" : "flex";
     fab.addEventListener("click", ()=>{
     if(state.tab==="home") openMusicModal();
     if(state.tab==="routines") openRoutineModal();
     if(state.tab==="shopping") openShoppingModal();
-    if(state.tab==="reminders") openReminderModal();
+    if(state.tab==="reminders"){ const i = document.querySelector("#mtNew"); if(i){ i.focus(); i.scrollIntoView({ block: "center" }); } }
 		if(state.tab==="house") openHouseTaskModal();
 	    if(state.tab==="calendar") openCalendarDrawModal(isoDate(new Date()));
 	    if(state.tab==="finance") openFinanceTypeModal();
@@ -10568,27 +10574,8 @@ function shoppingCard(list){
 }
 
 function viewReminders(){
-  const open = state.reminders.filter(r=>!r.done).length;
-  return `
-    <div class="sectionTitle">
-      <div>Reminders</div>
-      <div class="chip">${open} open</div>
-    </div>
-    ${state.reminders.map(r => `
-      <section class="card" data-reminder-id="${r.id}">
-        <div class="cardTop">
-          <div>
-            <h3 class="cardTitle">${r.done ? "✅" : "⬜"} ${escapeHtml(r.text)}</h3>
-            <div class="small">${r.done ? "Completed" : "Pending"}</div>
-          </div>
-          <div class="row">
-            <button class="btn ${r.done ? "ghost" : "primary"}" data-act="toggleReminder">${r.done ? "Undo" : "Done"}</button>
-            <button class="btn danger" data-act="deleteReminder">Del</button>
-          </div>
-        </div>
-      </section>
-    `).join("")}
-  `;
+  // Magic ToDo: las tareas siguen en state.reminders (con pasos, tiempos y aviso)
+  return renderMagicTodo(state);
 }
 
 // ---- Calendar (big canvas + mini preview) ----
