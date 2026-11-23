@@ -3,6 +3,8 @@ package com.memorycarl.widgets
 import android.Manifest
 import android.app.Activity
 import android.app.AlarmManager
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -24,6 +26,7 @@ import java.util.Locale
  */
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var widgetsInfo: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,8 +71,13 @@ class MainActivity : Activity() {
         })
         col.addView(Ui.spacer(this, 12))
 
-        col.addView(Ui.text(this, "Cómo poner los widgets", 17f, bold = true))
-        col.addView(Ui.text(this, "1. Mantén presionada la pantalla de inicio → Widgets.\n2. Busca \"MemoryCarl Widgets\" y arrastra: 💸 Gasto rápido, 📓 Diario o ✅ Hoy.\n3. Lo que registres llega a MemoryCarl la próxima vez que la abras.", 14f))
+        col.addView(Ui.text(this, "Poner los widgets", 17f, bold = true))
+        widgetsInfo = Ui.text(this, "", 13f, muted = true)
+        col.addView(widgetsInfo)
+        col.addView(Ui.button(this, "Poner 💸 Gasto rápido") { pinWidget(ExpenseWidget::class.java) })
+        col.addView(Ui.button(this, "Poner 📓 Diario") { pinWidget(JournalWidget::class.java) })
+        col.addView(Ui.button(this, "Poner ✅ Hoy") { pinWidget(TodayWidget::class.java) })
+        col.addView(Ui.text(this, "Si no pasa nada al tocarlos: en Ajustes → Apps → MemoryCarl Widgets → Otros permisos, activa \"Atajos de la pantalla de inicio\" y vuelve a intentar. También puedes mantener presionada la pantalla de inicio → Widgets y buscar \"MemoryCarl Widgets\".\nLo que registres llega a MemoryCarl la próxima vez que la abras.", 13f, muted = true))
         col.addView(Ui.spacer(this, 8))
         col.addView(Ui.text(this, "En el reloj", 17f, bold = true))
         col.addView(Ui.text(this, "En la app de tu reloj (Mi Fitness, Zepp…) entra a Notificaciones y activa \"MemoryCarl Widgets\". Los avisos te llegan al reloj con su vibración.", 14f))
@@ -99,6 +107,31 @@ class MainActivity : Activity() {
             if (am != null && !am.canScheduleExactAlarms()) parts.add("⚠️ Avisos exactos sin permiso (pueden llegar unos minutos tarde)")
         }
         status.text = parts.joinToString("\n")
+        // Cuántos widgets de esta app reconoce Android (si son 3, el problema es la lista del launcher)
+        if (::widgetsInfo.isInitialized) {
+            val mgr = AppWidgetManager.getInstance(this)
+            val known = try { mgr.getInstalledProvidersForPackage(packageName, null).size } catch (e: Exception) { -1 }
+            val placed = listOf(ExpenseWidget::class.java, JournalWidget::class.java, TodayWidget::class.java)
+                .sumOf { mgr.getAppWidgetIds(ComponentName(this, it)).size }
+            widgetsInfo.text = "Android reconoce $known widgets de esta app · tienes $placed en tu pantalla" +
+                if (mgr.isRequestPinAppWidgetSupported) "" else "\nTu pantalla de inicio no deja ponerlos desde aquí: usa la lista de widgets."
+        }
+    }
+
+    /** Pide a la pantalla de inicio que ponga el widget (sin pasar por la lista de widgets). */
+    private fun pinWidget(cls: Class<*>) {
+        val mgr = AppWidgetManager.getInstance(this)
+        val ok = try {
+            mgr.isRequestPinAppWidgetSupported && mgr.requestPinAppWidget(ComponentName(this, cls), null, null)
+        } catch (e: Exception) {
+            false
+        }
+        Toast.makeText(
+            this,
+            if (ok) "Confirma en la pantalla que aparece" else "Tu pantalla de inicio no lo permitió: activa \"Atajos de la pantalla de inicio\" en los permisos de la app",
+            Toast.LENGTH_LONG,
+        ).show()
+        status.postDelayed({ refreshStatus() }, 3000)
     }
 
     private fun testConnection() {
