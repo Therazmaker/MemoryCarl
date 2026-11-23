@@ -64,3 +64,21 @@ dependencies {
     testImplementation("androidx.work:work-testing:2.9.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
+
+// Robolectric (pruebas) necesita un Android simulado. Antes lo bajaba solo en cada prueba y
+// Maven Central a veces respondía "demasiadas solicitudes". Ahora lo baja Gradle (con reintentos
+// y caché) y las pruebas lo usan sin conexión.
+val robolectricJars: Configuration by configurations.creating { isTransitive = false }
+dependencies {
+    robolectricJars("org.robolectric:android-all-instrumented:14-robolectric-10818077-i7")
+}
+val robolectricDir = layout.buildDirectory.dir("robolectric-jars")
+val copyRobolectricJars by tasks.registering(Copy::class) {
+    from(robolectricJars)
+    into(robolectricDir)
+}
+tasks.withType<Test>().configureEach {
+    dependsOn(copyRobolectricJars)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricDir.get().asFile.absolutePath)
+}
