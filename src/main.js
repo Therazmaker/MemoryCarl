@@ -383,6 +383,7 @@ import {
   getSupabaseConfig,
   saveSupabaseConfig,
   getOfflineQueueCount,
+  getLastSyncStatus,
 } from "./services/dbService.js";
 
 console.log("MemoryCarl loaded");
@@ -5728,6 +5729,14 @@ function viewSettings(){
         <div>
           <h2 class="cardTitle">☁️ Sincronización con Supabase (Doble Capa)</h2>
           <div class="small">Local-First + Nube Instantánea • Cola Offline Inteligente (${getOfflineQueueCount()} pendientes)</div>
+          ${(() => {
+            const st = getLastSyncStatus();
+            if (!st) return "";
+            const hm = st.at ? new Date(st.at).toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit" }) : "";
+            if (st.ok) return `<div class="small" style="color:#34d399;margin-top:2px;">✓ Última sincronización: ${escapeHtml(hm)}</div>`;
+            if (st.offline) return `<div class="small" style="color:#fbbf24;margin-top:2px;">⚡ Sin internet: se subirá sola al volver la conexión</div>`;
+            return `<div class="small" style="color:#fda4af;margin-top:4px;padding:6px 8px;border-radius:8px;background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.3);word-break:break-word;">⚠️ ${escapeHtml(hm)} · ${escapeHtml(String(st.message || "No se pudo sincronizar").slice(0, 400))}</div>`;
+          })()}
           <div class="small" style="color:#34d399;margin-top:2px;">💾 Memoria Ilimitada: ${getStorageStats().totalMB} MB guardados en el teléfono • ${getStorageStats().nativeLocalStorageKB} KB en el almacén rápido (lo que no cabe pasa solo a IndexedDB)</div>
         </div>
         <div id="supabaseSyncStatus" class="chip" style="background:rgba(52,211,153,.15);color:#34d399;">

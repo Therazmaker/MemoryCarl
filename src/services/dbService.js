@@ -1067,6 +1067,17 @@ export function scheduleSync({ immediate = false } = {}) {
   return null;
 }
 
+const TABLE_LABELS = {
+  finance_ledger: "movimientos de Finanzas", finance_accounts: "cuentas", finance_debts: "deudas",
+  neurons: "neuronas", memories: "memorias", days: "días", chat_history: "chat", app_modules: "módulos",
+  sleep_log: "sueño", mood_daily: "ánimo", app_state: "estado",
+};
+
+/** Último resultado de la sincronización (para mostrar en Ajustes). */
+export function getLastSyncStatus() {
+  try { return JSON.parse(localStorage.getItem(SYNC_STATUS_KEY) || "null"); } catch (_e) { return null; }
+}
+
 export async function flushOfflineQueue({ isManual = false, forceAll = false } = {}) {
   await captureLocalChangesToQueue({ forceAll });
 
@@ -1123,6 +1134,7 @@ export async function flushOfflineQueue({ isManual = false, forceAll = false } =
   }
 
   const counts = { finance: 0, neurons: 0, memories: 0, days: 0, chat: 0, appState: false };
+  const tableErrors = {};
   let totalSyncedSoFar = 0;
   const MAX_BATCHES_PER_CYCLE = 6; // Máximo 6 micro-tandas por ciclo para liberar el recolector de basura (GC)
   let batchesRun = 0;
@@ -1168,32 +1180,43 @@ export async function flushOfflineQueue({ isManual = false, forceAll = false } =
         }
       }
 
-      if (cfg.hasDirectSupabase) {
-        for (const [table, rows] of Object.entries(byTableUpserts)) {
-          await directSupabaseUpsert(cfg, table, rows, conflictColByTable[table] || "id");
+      // Si una tabla falla (columna que no existe, dato raro…), se saltea en esta vuelta y
+      // sigue con las demás: antes un solo error dejaba todo lo demás sin subir.
+      try {
+        if (cfg.hasDirectSupabase) {
+          for (const [table, rows] of Object.entries(byTableUpserts)) {
+            await directSupabaseUpsert(cfg, table, rows, conflictColByTable[table] || "id");
+          }
+          for (const [table, ids] of Object.entries(byTableDeletes)) {
+            await directSupabaseDelete(cfg, table, ids, conflictColByTable[table] || "id");
+          }
+        } else {
+          const headers = { "Content-Type": "application/json" };
+          if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
+          const res = await fetchWithTimeout(`${cfg.apiUrl}/api/sync`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              tableUpserts: byTableUpserts,
+              tableDeletes: byTableDeletes,
+            }),
+          });
+          if (!res.ok) {
+            const errText = await res.text().catch(() => `HTTP ${res.status}`);
+            throw new Error(errText);
+          }
+          const resJson = await res.json().catch(() => ({}));
+          if (Array.isArray(resJson?.data?.errors) && resJson.data.errors.length > 0) {
+            throw new Error(resJson.data.errors.join(" · "));
+          }
         }
-        for (const [table, ids] of Object.entries(byTableDeletes)) {
-          await directSupabaseDelete(cfg, table, ids, conflictColByTable[table] || "id");
-        }
-      } else {
-        const headers = { "Content-Type": "application/json" };
-        if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
-        const res = await fetchWithTimeout(`${cfg.apiUrl}/api/sync`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            tableUpserts: byTableUpserts,
-            tableDeletes: byTableDeletes,
-          }),
-        });
-        if (!res.ok) {
-          const errText = await res.text().catch(() => `HTTP ${res.status}`);
-          throw new Error(errText);
-        }
-        const resJson = await res.json().catch(() => ({}));
-        if (Array.isArray(resJson?.data?.errors) && resJson.data.errors.length > 0) {
-          throw new Error(resJson.data.errors.join(" · "));
-        }
+      } catch (tableErr) {
+        const msg = String(tableErr?.message || tableErr);
+        // Sin internet o API key incorrecta: no tiene sentido seguir con otras tablas
+        if (/No autorizado|HTTP 401|Failed to fetch|NetworkError|Load failed|aborted|timeout/i.test(msg)) throw tableErr;
+        tableErrors[targetTable] = msg.slice(0, 300);
+        entries = entries.filter(([, it]) => it.t !== targetTable);
+        continue;
       }
 
       counts.finance += (byTableUpserts.finance_ledger?.length || 0) + (byTableUpserts.finance_accounts?.length || 0);
@@ -1212,11 +1235,21 @@ export async function flushOfflineQueue({ isManual = false, forceAll = false } =
       persistOfflineQueue();
 
       totalSyncedSoFar += slice.length;
-      entries = Object.entries(currentQueue.items || {});
+      // Las tablas que ya fallaron en esta vuelta no se reintentan hasta la próxima
+      entries = Object.entries(currentQueue.items || {}).filter(([, it]) => !tableErrors[it.t]);
 
       if (entries.length > 0) {
         await new Promise((r) => setTimeout(r, 60));
       }
+    }
+
+    // Tablas que fallaron: quedan en la cola para la próxima vuelta y se avisa cuáles y por qué
+    const failedTables = Object.keys(tableErrors);
+    if (failedTables.length) {
+      const pendingNow = getOfflineQueueCount();
+      const message = `No se pudo subir ${failedTables.map((t) => `${TABLE_LABELS[t] || t} (${tableErrors[t]})`).join(" · ")}`;
+      updateSyncBannerUI({ error: message });
+      return saveSyncStatusObj({ ok: false, at: Date.now(), kind: "push", counts, pending: pendingNow, failedTables: tableErrors, synced: totalSyncedSoFar, message });
     }
 
     // Si aún quedan más lotes por subir (p. ej. en el backfill inicial de 1,198 elementos),
@@ -1249,6 +1282,9 @@ export async function flushOfflineQueue({ isManual = false, forceAll = false } =
     });
   } catch (err) {
     console.warn("[dbService] Pausa en sincronización (el progreso ya subido se conservó):", err);
+    if (/No autorizado/i.test(String(err?.message || ""))) {
+      err = new Error("La API key de Ajustes no coincide con la API_SECRET_KEY de Vercel. Pega la correcta en \"Opcional: API_SECRET_KEY del servidor Vercel\".");
+    }
     updateSyncBannerUI({ error: err.message });
     return saveSyncStatusObj({
       ok: false,
