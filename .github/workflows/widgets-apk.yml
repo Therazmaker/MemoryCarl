@@ -75,17 +75,6 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      # El Android simulado de las pruebas viene de Maven Central, que a veces responde
-      # "demasiadas solicitudes": se baja antes, con reintentos (y queda en la caché de Gradle)
-      - name: Bajar dependencias (con reintentos)
-        if: ${{ github.event_name != 'schedule' }}
-        run: |
-          for i in 1 2 3 4; do
-            gradle -p android-widgets :app:copyRobolectricJars --no-daemon && exit 0
-            echo "Reintento $i en $((i * 45)) s"; sleep $((i * 45))
-          done
-          exit 1
-
       - name: Compilar APK
         if: ${{ github.event_name != 'schedule' }}
         env:
