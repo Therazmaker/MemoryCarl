@@ -32,6 +32,7 @@ import { mergeLifeLists } from "../chat/lifeChanges.js";
 import { mergeProducts, mergeById, libraryPayload } from "../shopping/productLibrarySync.js";
 import { tdhaPayload, mergeTdha, loadTdha, saveTdha } from "../tdha/tdhaStore.js";
 import { magicPayload, mergeMagicFromCloud } from "../todo/magicTodoStore.js";
+import { currentWidgetSummary, summaryForHash } from "../widgets/widgetBridge.js";
 import { getFullChatHistory } from "../chat/neurochat.js";
 import {
   addMissingById,
@@ -585,6 +586,8 @@ function fastHash(item) {
     // Magic ToDo: marcar un paso o editarlo cambia por dentro
     if (item.id === "reminders") return `rem:${contentHash(p)}`;
     if (item.id === "magic_todo") return `mt:${contentHash(p)}`;
+    // Resumen de los widgets: no cuenta la hora en que se armó
+    if (item.id === "widget_summary") return `ws:${contentHash(summaryForHash(p))}`;
     if (item.id === "shopping") return `sh:${contentHash(p)}`;
     if (Array.isArray(p)) return `arr:${p.length}:${p[p.length - 1]?.id || p[p.length - 1]?.updatedAt || ""}`;
     if (p && typeof p === "object") {
@@ -686,6 +689,8 @@ function getAppModulesList() {
     { id: "tdha", payload: tdhaPayload() || undefined },
     // Magic ToDo: las tareas cumplidas (de ahí aprende) y sus preferencias
     { id: "magic_todo", payload: magicPayload() || undefined },
+    // Lo que muestran los widgets de la APK (cuentas, categorías, hasta el cobro, tareas con hora)
+    { id: "widget_summary", payload: currentWidgetSummary() || undefined },
     { id: "inventory", payload: { inventory: st.inventory, inventoryLots: st.inventoryLots } },
     { id: "reminders", payload: { reminders: st.reminders, lifeTasks: st.lifeTasks, lifeTasksLog: st.lifeTasksLog } },
     { id: "home_widgets", payload: { musicToday: st.musicToday, musicLog: st.musicLog, budgetMonthly: st.budgetMonthly, calDraw: st.calDraw, moodSpritesCustom: st.moodSpritesCustom, moodActivityCats: st.moodActivityCats } },

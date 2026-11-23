@@ -99,7 +99,11 @@ import { proposeGroups, groupEmoji, classifyProductName } from "./shopping/produ
 import { classifyWithAi } from "./shopping/basketBrain.js";
 import { getClaudeSettings } from "./services/claudeClient.js";
 import { getNeuroChatSettings } from "./settings/neurochatSettings.js";
-import { STREET_CATEGORY, streetNote } from "./finance/streetFood.js";
+import { STREET_CATEGORY, streetNote, runway as streetRunway } from "./finance/streetFood.js";
+import { routinesOf as routinesOfProducts } from "./finance/routines.js";
+import { addJournalEntry as addJournalEntryFromWidget } from "./day/dayStore.js";
+import { addToHistory as addMagicHistory } from "./todo/magicTodoStore.js";
+import { buildWidgetSummary, syncWidgetInbox, setWidgetSummaryProvider } from "./widgets/widgetBridge.js";
 import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
 import {
   MEAL_SLOTS,
@@ -387,6 +391,39 @@ console.log("MemoryCarl loaded");
 setTimeout(() => {
   try { initDbService(); } catch (e) { console.warn("[dbService] init falló:", e); }
 }, 0);
+
+// ===== App de widgets (APK) =====
+// Resumen que muestran los widgets (se publica con los demás módulos)
+setWidgetSummaryProvider(() => {
+  let rw = null;
+  try {
+    if((state.financeAccounts||[]).length){
+      const m = financeMissionControlModel(getCurrentMonthKey());
+      rw = streetRunway({ availableCash: m.availableCash, items: m.items, routines: routinesOfProducts(state.products || []) });
+    }
+  }catch(_e){}
+  return buildWidgetSummary({ state, runway: rw });
+});
+// Lo que registraste desde los widgets: se aplica al abrir la app y al volver a ella
+function widgetInboxSync_(force = false){
+  return syncWidgetInbox({
+    expense: (d) => {
+      const own = (id) => id && (state.financeAccounts||[]).some(a => a && a.id === id && !a.archived);
+      const accountId = own(d.accountId) ? d.accountId : (state.financeLastAccountId || (state.financeAccounts||[]).find(a=>a && !a.archived)?.id || "");
+      if(!accountId) return null;
+      return addFinanceEntry({ type: "expense", amount: d.amount, accountId, category: d.category || "Otros", note: d.note || "", reason: "normal", date: d.date, source: "widget", neuronRole: "auto" });
+    },
+    journal: (d) => addJournalEntryFromWidget({ text: d.text, mood: d.mood, ts: d.ts }),
+    task: (id) => (state.reminders||[]).find(t => t && t.id === id) || null,
+    history: (entry) => addMagicHistory(entry),
+    save: () => { persist(); view(); },
+  }, { force }).then((r) => {
+    if(r?.applied) toast(`📱 De tus widgets: ${r.summary.slice(0, 3).join(" · ")}${r.summary.length > 3 ? ` y ${r.summary.length - 3} más` : ""}`, 3500);
+  }).catch(()=>{});
+}
+setTimeout(() => widgetInboxSync_(true), 3000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") widgetInboxSync_(); });
+setInterval(() => { if (document.visibilityState === "visible") widgetInboxSync_(); }, 120000);
 
 // NeuroChat se inicializa al arrancar (no solo al abrir su pestaña): registra la
 // sincronización con Supabase, trae lo que falte de la nube y sube lo local.
