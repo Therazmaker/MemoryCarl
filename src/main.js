@@ -5728,7 +5728,7 @@ function viewSettings(){
         <div>
           <h2 class="cardTitle">☁️ Sincronización con Supabase (Doble Capa)</h2>
           <div class="small">Local-First + Nube Instantánea • Cola Offline Inteligente (${getOfflineQueueCount()} pendientes)</div>
-          <div class="small" style="color:#34d399;margin-top:2px;">💾 Memoria Ilimitada (IndexedDB): ${getStorageStats().totalMB} MB en uso • localStorage libre (${getStorageStats().nativeLocalStorageKB} KB / 5000 KB)</div>
+          <div class="small" style="color:#34d399;margin-top:2px;">💾 Memoria Ilimitada: ${getStorageStats().totalMB} MB guardados en el teléfono • ${getStorageStats().nativeLocalStorageKB} KB en el almacén rápido (lo que no cabe pasa solo a IndexedDB)</div>
         </div>
         <div id="supabaseSyncStatus" class="chip" style="background:rgba(52,211,153,.15);color:#34d399;">
           ${getSupabaseConfig().hasDirectSupabase ? '🟢 Directo Activo' : getSupabaseConfig().hasApiSync ? '🟢 API Activa' : '⚪ Sin configurar'}
