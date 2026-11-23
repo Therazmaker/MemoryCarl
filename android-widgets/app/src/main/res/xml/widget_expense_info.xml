@@ -2,6 +2,8 @@
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_expense_desc"
     android:initialLayout="@layout/widget_expense"
+    android:previewLayout="@layout/widget_expense"
+    android:previewImage="@mipmap/ic_launcher"
     android:minWidth="250dp"
     android:minHeight="60dp"
     android:resizeMode="horizontal|vertical"

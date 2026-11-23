@@ -41,9 +41,10 @@
             android:theme="@style/QuickDialog"
             android:windowSoftInputMode="stateVisible|adjustResize" />
 
+        <!-- Los widgets van "exported": algunos launchers (Xiaomi) no listan los que no lo están -->
         <receiver
             android:name=".ExpenseWidget"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/widget_expense">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -54,7 +55,7 @@
         </receiver>
         <receiver
             android:name=".JournalWidget"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/widget_journal">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -65,7 +66,7 @@
         </receiver>
         <receiver
             android:name=".TodayWidget"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/widget_today">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
