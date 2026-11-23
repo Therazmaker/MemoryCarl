@@ -1,0 +1,115 @@
+name: Widgets APK
+
+# Compila la app de widgets (android-widgets/). En main publica la APK como Release
+# ("MemoryCarl Widgets vN") para descargarla desde el teléfono.
+on:
+  push:
+    paths:
+      - "android-widgets/**"
+      - ".github/workflows/widgets-apk.yml"
+  workflow_dispatch: {}
+  # Una vez por semana: mantiene viva la llave de firma guardada en caché (si no se usa en
+  # 7 días GitHub la borra y la APK nueva ya no se instalaría encima de la anterior)
+  schedule:
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: widgets-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Llave de firma: la del secreto si existe; si no, una generada y guardada en caché
+      - name: Llave de firma (caché)
+        id: kscache
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.mc-widgets-keystore
+          key: mc-widgets-keystore-v1
+
+      - name: Preparar llave de firma
+        env:
+          KS_B64: ${{ secrets.WIDGETS_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.WIDGETS_KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p ~/.mc-widgets-keystore
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
+            echo "$KS_B64" | base64 -d > ~/.mc-widgets-keystore/secret.jks
+            echo "KEYSTORE_PATH=$HOME/.mc-widgets-keystore/secret.jks" >> "$GITHUB_ENV"
+            echo "::add-mask::$KS_PASS"
+            echo "KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+          else
+            if [ ! -f ~/.mc-widgets-keystore/widgets.jks ]; then
+              PASS=$(openssl rand -hex 24)
+              keytool -genkeypair -v -keystore ~/.mc-widgets-keystore/widgets.jks -alias widgets \
+                -keyalg RSA -keysize 2048 -validity 10000 -storepass "$PASS" -keypass "$PASS" \
+                -dname "CN=MemoryCarl Widgets" >/dev/null 2>&1
+              echo "$PASS" > ~/.mc-widgets-keystore/pass
+            fi
+            PASS=$(cat ~/.mc-widgets-keystore/pass)
+            echo "::add-mask::$PASS"
+            echo "KEYSTORE_PATH=$HOME/.mc-widgets-keystore/widgets.jks" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+          fi
+
+      - name: Solo mantener la llave (tarea semanal)
+        if: ${{ github.event_name == 'schedule' }}
+        run: echo "Llave de firma usada; no se compila."
+
+      - uses: actions/setup-java@v4
+        if: ${{ github.event_name != 'schedule' }}
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: ${{ github.event_name != 'schedule' }}
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Compilar APK
+        if: ${{ github.event_name != 'schedule' }}
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: gradle -p android-widgets testReleaseUnitTest assembleRelease --no-daemon --stacktrace
+
+      - name: Resultado de las pruebas
+        if: ${{ always() && github.event_name != 'schedule' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pruebas-widgets
+          path: android-widgets/app/build/reports/tests/
+          if-no-files-found: ignore
+
+      - name: Renombrar APK
+        if: ${{ github.event_name != 'schedule' }}
+        run: |
+          mkdir -p out
+          cp android-widgets/app/build/outputs/apk/release/app-release.apk "out/MemoryCarl-Widgets-v${{ github.run_number }}.apk"
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.event_name != 'schedule' }}
+        with:
+          name: MemoryCarl-Widgets-v${{ github.run_number }}
+          path: out/*.apk
+
+      - name: Publicar en Releases (solo main)
+        if: ${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: widgets-v${{ github.run_number }}
+          name: MemoryCarl Widgets v${{ github.run_number }}
+          make_latest: true
+          body: |
+            Descarga el archivo .apk desde el teléfono e instálalo (si Android lo pide, permite "instalar apps desconocidas" para tu navegador).
+            Si ya tenías la app, esta versión se instala encima sin perder la configuración.
+          files: out/*.apk
