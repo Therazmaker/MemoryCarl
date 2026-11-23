@@ -52,21 +52,24 @@ object Widgets {
         val v = RemoteViews(ctx.packageName, R.layout.widget_expense)
         val s = Store.summary(ctx)
         val rw = s?.optJSONObject("runway")
+        val total = s?.takeIf { it.has("totalBalance") && !it.isNull("totalBalance") }?.optDouble("totalBalance")
+        val label = rw?.optString("paydayLabel", "") ?: ""
         when {
             !Store.isConfigured(ctx) -> {
-                v.setTextViewText(R.id.free, "MemoryCarl")
-                v.setTextViewText(R.id.sub, "Toca para configurar")
+                v.setTextViewText(R.id.title, "💸 MemoryCarl")
+                v.setTextViewText(R.id.free, "Configurar")
+                v.setTextViewText(R.id.sub, "Toca para poner tu API key")
             }
-            rw != null -> {
-                v.setTextViewText(R.id.free, soles(rw.optDouble("free", 0.0)))
-                val perDay = rw.optDouble("perDay", 0.0)
-                val label = rw.optString("paydayLabel", "")
-                v.setTextViewText(R.id.sub, "${soles(perDay)} por día" + if (label.isNotBlank()) " · cobro $label" else "")
+            total != null -> {
+                // El mismo TOTAL de la pestaña Finanzas
+                v.setTextViewText(R.id.title, "💸 En tus cuentas")
+                v.setTextViewText(R.id.free, soles(total))
+                v.setTextViewText(R.id.sub, if (label.isNotBlank()) "Próximo cobro $label" else "Total de Finanzas")
             }
             else -> {
+                v.setTextViewText(R.id.title, "💸 En tus cuentas")
                 v.setTextViewText(R.id.free, "S/ —")
-                val last = s?.optJSONObject("lastExpense")
-                v.setTextViewText(R.id.sub, if (last != null) "Último: ${soles(last.optDouble("amount", 0.0))} ${last.optString("category")}" else "Abre MemoryCarl para ver tu saldo")
+                v.setTextViewText(R.id.sub, "Abre MemoryCarl para actualizar")
             }
         }
         v.setOnClickPendingIntent(R.id.btn_add, openActivity(ctx, if (Store.isConfigured(ctx)) ExpenseActivity::class.java else MainActivity::class.java, 101))

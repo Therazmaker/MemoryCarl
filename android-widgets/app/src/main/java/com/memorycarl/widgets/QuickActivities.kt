@@ -21,8 +21,8 @@ class ExpenseActivity : Activity() {
         val s = Store.summary(this)
         val col = Ui.column(this, 20)
         col.addView(Ui.text(this, "💸 Nuevo gasto", 20f, bold = true))
-        s?.optJSONObject("runway")?.let { rw ->
-            col.addView(Ui.text(this, "Te quedan ${Widgets.soles(rw.optDouble("free", 0.0))} hasta el cobro", 13f, muted = true))
+        s?.takeIf { it.has("totalBalance") && !it.isNull("totalBalance") }?.let { sum ->
+            col.addView(Ui.text(this, "Tienes ${Widgets.soles(sum.optDouble("totalBalance", 0.0))} en tus cuentas", 13f, muted = true))
         }
 
         val amount = Ui.input(this, "Monto (S/)", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
@@ -79,7 +79,7 @@ class ExpenseActivity : Activity() {
             Store.enqueue(this, "expense", data)
             // Se ve al instante en el widget, sin esperar a MemoryCarl
             Store.patchSummary(this) { sum ->
-                sum.optJSONObject("runway")?.let { rw -> rw.put("free", rw.optDouble("free", 0.0) - value) }
+                if (sum.has("totalBalance") && !sum.isNull("totalBalance")) sum.put("totalBalance", sum.optDouble("totalBalance", 0.0) - value)
                 sum.put("lastExpense", JSONObject().put("amount", value).put("category", category))
             }
             Widgets.updateAll(this)

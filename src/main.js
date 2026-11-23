@@ -402,7 +402,9 @@ setWidgetSummaryProvider(() => {
       rw = streetRunway({ availableCash: m.availableCash, items: m.items, routines: routinesOfProducts(state.products || []) });
     }
   }catch(_e){}
-  return buildWidgetSummary({ state, runway: rw });
+  let total = null;
+  try { total = (state.financeAccounts||[]).length ? financeTotalBalance_() : null; }catch(_e){}
+  return buildWidgetSummary({ state, runway: rw, totalBalance: total });
 });
 // Lo que registraste desde los widgets: se aplica al abrir la app y al volver a ella
 function widgetInboxSync_(force = false){
@@ -24082,6 +24084,17 @@ function mcRenderChart() {
   });
 }
 
+// Total de Finanzas: cuentas activas (cripto en soles), sin la de Fergis ni las excluidas del total.
+// Lo usan la pestaña Finanzas y el widget del teléfono, así siempre coinciden.
+function financeTotalBalance_(){
+  return (state.financeAccounts||[]).filter(a => a && !a.archived && a.status !== 'archived').reduce((s,a)=>{
+    if (a.excludeFromTotal) return s;
+    if (String(a.name||"").toLowerCase().includes("fergis")) return s;
+    if (a.type === "crypto") return s + (Number(a.balance||0) * (Number(state.btcPricePen)||0));
+    return s + Number(a.balance||0);
+  }, 0);
+}
+
 function viewFinance(){
   const fmt = _financeFmt;
   const d = financeMonthDataAdvanced();
@@ -24110,15 +24123,7 @@ function viewFinance(){
   // Principal content — redesigned
   const activeAccounts = (state.financeAccounts||[]).filter(a => !a.archived && a.status !== 'archived');
 
-  const totalBalance = activeAccounts.reduce((s,a)=>{
-    if (a.excludeFromTotal) return s;
-    const isFergisAccount = String(a.name||"").toLowerCase().includes("fergis");
-    if (isFergisAccount) return s;
-    if (a.type === "crypto") {
-      return s + (Number(a.balance||0) * state.btcPricePen);
-    }
-    return s + Number(a.balance||0);
-  }, 0);
+  const totalBalance = financeTotalBalance_();
   const savings = d.income - d.expense;
   const savingsPct = meta.expectedIncome > 0 ? Math.round((savings / meta.expectedIncome) * 100) : null;
   const spentPct = meta.expectedIncome > 0 ? Math.min(100, Math.round((d.expense / meta.expectedIncome) * 100)) : null;

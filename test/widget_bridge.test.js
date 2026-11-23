@@ -40,7 +40,9 @@ test("resumen: cuentas propias, categorías más usadas, último gasto, hasta el
     ],
     reminders: [t2, t1, far, { id: "x", text: "Hecha", done: true }],
   };
-  const s = buildWidgetSummary({ state, runway: { free: 320.5, perDay: 45.8, payday: { daysLeft: 7, label: "el lun 30" } }, now: NOW });
+  const s = buildWidgetSummary({ state, runway: { free: 320.5, perDay: 45.8, payday: { daysLeft: 7, label: "el lun 30" } }, totalBalance: 122.914, now: NOW });
+  assert.equal(s.totalBalance, 122.91);
+  assert.equal(buildWidgetSummary({ state, now: NOW }).totalBalance, null);
   assert.deepEqual(s.accounts, [{ id: "acc1", name: "Billetera" }]);
   assert.equal(s.lastAccountId, "acc1");
   assert.deepEqual(s.categories.slice(0, 2), ["Transporte", "Comida"]);

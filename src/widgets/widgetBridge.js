@@ -22,7 +22,7 @@ const isOwnAccount = (a) => a && a.id && !a.archived && !String(a.id).startsWith
  * Lo que muestran los widgets.
  * @param {{ state: object, runway?: object|null, now?: Date }} o
  */
-export function buildWidgetSummary({ state = {}, runway = null, now = new Date() } = {}) {
+export function buildWidgetSummary({ state = {}, runway = null, totalBalance = null, now = new Date() } = {}) {
   const ledger = (state.financeLedger || []).filter((e) => e && !e.archived && e.type === "expense");
   const since = now.getTime() - 60 * DAY;
   const counts = {};
@@ -52,6 +52,8 @@ export function buildWidgetSummary({ state = {}, runway = null, now = new Date()
     generatedAt: now.toISOString(),
     accounts,
     lastAccountId,
+    // El mismo TOTAL de la pestaña Finanzas
+    totalBalance: Number.isFinite(Number(totalBalance)) && totalBalance !== null ? Math.round(Number(totalBalance) * 100) / 100 : null,
     categories,
     lastExpense: last ? { amount: Number(last.amount) || 0, category: last.category || "", date: last.date } : null,
     runway: runway ? { free: runway.free, perDay: runway.perDay, daysLeft: runway.payday?.daysLeft ?? null, paydayLabel: runway.payday?.label || "" } : null,
