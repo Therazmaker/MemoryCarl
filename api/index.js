@@ -19,7 +19,7 @@ const { createClient } = require("@supabase/supabase-js");
 const { getAllNeurons } = require("./src/neuro/neuronStore.js");
 const { getAllMemories } = require("./src/memory/memoryStore.js");
 const { processChat } = require("./src/chat/neurochat.js");
-const { handleTelegramWebhook, getPendingTelegramTransactions } = require("./src/finance/telegramHandler.js");
+const { mountWidgetRoutes } = require("./src/widget/widgetInbox.js");
 
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -74,6 +74,9 @@ const requireAuth = (req, res, next) => {
     message: "No autorizado. Verifica tu API Key o configura NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.",
   });
 };
+
+// App de widgets (APK): buzón de registros y resumen para mostrar
+mountWidgetRoutes(app, () => supabase);
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -583,8 +586,6 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/telegram", handleTelegramWebhook);
-app.get("/api/telegram/pending", requireAuth, getPendingTelegramTransactions);
 
 // =====================================================================================
 // ENDPOINT DE SUEÑO / SLEEPSYNC (POST y GET /api/sleep)

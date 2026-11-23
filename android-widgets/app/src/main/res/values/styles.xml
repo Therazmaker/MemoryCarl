@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ventanita encima de la pantalla de inicio -->
+    <style name="QuickDialog" parent="@android:style/Theme.DeviceDefault.Dialog.NoActionBar">
+        <item name="android:windowMinWidthMajor">90%</item>
+        <item name="android:windowMinWidthMinor">94%</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
+</resources>

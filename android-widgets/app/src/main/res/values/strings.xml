@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MemoryCarl Widgets</string>
+    <string name="widget_expense">Gasto rápido</string>
+    <string name="widget_journal">Diario</string>
+    <string name="widget_today">Hoy (tareas)</string>
+    <string name="widget_expense_desc">Lo que queda hasta el cobro y un botón para anotar un gasto</string>
+    <string name="widget_journal_desc">Escribe en tu Diario sin abrir la app</string>
+    <string name="widget_today_desc">Tus próximas tareas del Magic ToDo</string>
+</resources>

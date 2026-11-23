@@ -93,12 +93,17 @@ import { generateDailyBriefing, buildDailyFlowContext, computeDailyLiquidity, ge
 import { enrichProductData } from "./shopping/productIntelligence.js";
 // Con versión: así el teléfono no se queda con una copia vieja de La Canasta
 import { renderBasket, wireBasket } from "./shopping/basket-ui.js?v=2085";
+import { renderMagicTodo, wireMagicTodo } from "./todo/magicTodo-ui.js?v=2088";
 import { mergeProducts, rebuildFromPurchases, stampChangedProducts } from "./shopping/productLibrarySync.js";
 import { proposeGroups, groupEmoji, classifyProductName } from "./shopping/productGroups.js";
 import { classifyWithAi } from "./shopping/basketBrain.js";
 import { getClaudeSettings } from "./services/claudeClient.js";
 import { getNeuroChatSettings } from "./settings/neurochatSettings.js";
-import { STREET_CATEGORY, streetNote } from "./finance/streetFood.js";
+import { STREET_CATEGORY, streetNote, runway as streetRunway } from "./finance/streetFood.js";
+import { routinesOf as routinesOfProducts } from "./finance/routines.js";
+import { addJournalEntry as addJournalEntryFromWidget } from "./day/dayStore.js";
+import { addToHistory as addMagicHistory } from "./todo/magicTodoStore.js";
+import { buildWidgetSummary, syncWidgetInbox, setWidgetSummaryProvider } from "./widgets/widgetBridge.js";
 import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
 import {
   MEAL_SLOTS,
@@ -386,6 +391,39 @@ console.log("MemoryCarl loaded");
 setTimeout(() => {
   try { initDbService(); } catch (e) { console.warn("[dbService] init falló:", e); }
 }, 0);
+
+// ===== App de widgets (APK) =====
+// Resumen que muestran los widgets (se publica con los demás módulos)
+setWidgetSummaryProvider(() => {
+  let rw = null;
+  try {
+    if((state.financeAccounts||[]).length){
+      const m = financeMissionControlModel(getCurrentMonthKey());
+      rw = streetRunway({ availableCash: m.availableCash, items: m.items, routines: routinesOfProducts(state.products || []) });
+    }
+  }catch(_e){}
+  return buildWidgetSummary({ state, runway: rw });
+});
+// Lo que registraste desde los widgets: se aplica al abrir la app y al volver a ella
+function widgetInboxSync_(force = false){
+  return syncWidgetInbox({
+    expense: (d) => {
+      const own = (id) => id && (state.financeAccounts||[]).some(a => a && a.id === id && !a.archived);
+      const accountId = own(d.accountId) ? d.accountId : (state.financeLastAccountId || (state.financeAccounts||[]).find(a=>a && !a.archived)?.id || "");
+      if(!accountId) return null;
+      return addFinanceEntry({ type: "expense", amount: d.amount, accountId, category: d.category || "Otros", note: d.note || "", reason: "normal", date: d.date, source: "widget", neuronRole: "auto" });
+    },
+    journal: (d) => addJournalEntryFromWidget({ text: d.text, mood: d.mood, ts: d.ts }),
+    task: (id) => (state.reminders||[]).find(t => t && t.id === id) || null,
+    history: (entry) => addMagicHistory(entry),
+    save: () => { persist(); view(); },
+  }, { force }).then((r) => {
+    if(r?.applied) toast(`📱 De tus widgets: ${r.summary.slice(0, 3).join(" · ")}${r.summary.length > 3 ? ` y ${r.summary.length - 3} más` : ""}`, 3500);
+  }).catch(()=>{});
+}
+setTimeout(() => widgetInboxSync_(true), 3000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") widgetInboxSync_(); });
+setInterval(() => { if (document.visibilityState === "visible") widgetInboxSync_(); }, 120000);
 
 // NeuroChat se inicializa al arrancar (no solo al abrir su pestaña): registra la
 // sincronización con Supabase, trae lo que falte de la nube y sube lo local.
@@ -3427,7 +3465,7 @@ function renderMoreModal(){
         </div>
 
         <div class="list" style="margin-top:12px;">
-          ${mk("reminders","⏰","Reminders","Pendientes + notifs")}
+          ${mk("reminders","✨","Magic ToDo","Tareas que se desarman en pasos")}
           ${mk("calendar","📅","Calendario","Dibuja X, notas")}
           ${mk("learn","🧠","Aprender","Mini contenido")}
           ${mk("insights","📊","Insights","Todo por día")}
@@ -3960,6 +3998,11 @@ function view(){
         }
       });
     });
+  }
+
+  // Magic ToDo (pestaña de Reminders)
+  if(state.tab === "reminders"){
+    wireMagicTodo(root, { state, persist, view, toast });
   }
 
   // La Canasta: chat de compras que aprende
@@ -4890,12 +4933,12 @@ function openLiquidityTrainingModal() {
   // FAB action per tab (disabled on Learn)
   const fab = root.querySelector("#fab");
   if(fab){
-    fab.style.display = (state.tab==="learn" || state.tab==="settings" || state.tab==="neurochat" || state.tab==="dayengine" || state.tab==="semana") ? "none" : "flex";
+    fab.style.display = (state.tab==="learn" || state.tab==="settings" || state.tab==="neurochat" || state.tab==="dayengine" || state.tab==="semana" || state.tab==="reminders") ? "none" : "flex";
     fab.addEventListener("click", ()=>{
     if(state.tab==="home") openMusicModal();
     if(state.tab==="routines") openRoutineModal();
     if(state.tab==="shopping") openShoppingModal();
-    if(state.tab==="reminders") openReminderModal();
+    if(state.tab==="reminders"){ const i = document.querySelector("#mtNew"); if(i){ i.focus(); i.scrollIntoView({ block: "center" }); } }
 		if(state.tab==="house") openHouseTaskModal();
 	    if(state.tab==="calendar") openCalendarDrawModal(isoDate(new Date()));
 	    if(state.tab==="finance") openFinanceTypeModal();
@@ -10568,27 +10611,8 @@ function shoppingCard(list){
 }
 
 function viewReminders(){
-  const open = state.reminders.filter(r=>!r.done).length;
-  return `
-    <div class="sectionTitle">
-      <div>Reminders</div>
-      <div class="chip">${open} open</div>
-    </div>
-    ${state.reminders.map(r => `
-      <section class="card" data-reminder-id="${r.id}">
-        <div class="cardTop">
-          <div>
-            <h3 class="cardTitle">${r.done ? "✅" : "⬜"} ${escapeHtml(r.text)}</h3>
-            <div class="small">${r.done ? "Completed" : "Pending"}</div>
-          </div>
-          <div class="row">
-            <button class="btn ${r.done ? "ghost" : "primary"}" data-act="toggleReminder">${r.done ? "Undo" : "Done"}</button>
-            <button class="btn danger" data-act="deleteReminder">Del</button>
-          </div>
-        </div>
-      </section>
-    `).join("")}
-  `;
+  // Magic ToDo: las tareas siguen en state.reminders (con pasos, tiempos y aviso)
+  return renderMagicTodo(state);
 }
 
 // ---- Calendar (big canvas + mini preview) ----
@@ -24058,64 +24082,6 @@ function mcRenderChart() {
   });
 }
 
-async function financeFetchTelegramPending() {
-  try {
-    const fetchUrl = `https://memory-carl.vercel.app/api/telegram/pending`;
-    // We use basic fetch, you might want to add token auth later if it's protected, 
-    // but right now it looks unprotected or relies on cookies.
-    const res = await fetch(fetchUrl, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" }
-    });
-
-    if (!res.ok) throw new Error("Error fetching telegram pending");
-    const json = await res.json();
-    
-    if (json.status === 'ok' && json.data && json.data.length > 0) {
-      let addedCount = 0;
-      json.data.forEach(t => {
-        // Resolve accountId
-        let accountId = t.account_id;
-        if (accountId === "default" || accountId === "cash" || accountId === "bank") {
-          const accs = state.financeAccounts || [];
-          if (accs.length > 0) {
-            if (accountId === "cash") {
-              const c = accs.find(a => a.type === "cash" || String(a.name).toLowerCase().includes("efectivo"));
-              accountId = c ? c.id : accs[0].id;
-            } else if (accountId === "bank") {
-              const b = accs.find(a => a.type === "bank" || a.type === "card");
-              accountId = b ? b.id : accs[0].id;
-            } else {
-              accountId = accs[0].id; // Default
-            }
-          }
-        }
-
-        // Add to main.js state using addFinanceEntry
-        const entry = addFinanceEntry({
-          date: t.created_at || new Date().toISOString(),
-          type: t.type,
-          amount: t.amount,
-          accountId: accountId,
-          category: t.category,
-          note: t.note || "Vía Telegram",
-          reason: "telegram",
-          neuronRole: "auto"
-        });
-        
-        if (entry) addedCount++;
-      });
-
-      if (addedCount > 0) {
-        toast(`📥 ${addedCount} transacciones añadidas desde Telegram`);
-        view(); // re-render UI
-      }
-    }
-  } catch (e) {
-    console.error("Telegram Sync Error:", e);
-  }
-}
-
 function viewFinance(){
   const fmt = _financeFmt;
   const d = financeMonthDataAdvanced();
@@ -25926,7 +25892,6 @@ view = function(){
         try{ if(state.financeSubTab==='debts') financeDrawDebtChart(); }catch(_e){}
         try{ if(state.financeSubTab==='debts') financeBindDebtIncomeInput(); }catch(_e){}
         try{ if(state.financeSubTab==='neuronal') neuronasInitGrafo(); }catch(_e){}
-        try{ financeFetchTelegramPending(); }catch(_e){}
       }, 0);
     }else{
       financeProjectionDestroyChart();
