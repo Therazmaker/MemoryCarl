@@ -301,20 +301,10 @@ ALTER TABLE public.app_modules ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT '{
 ALTER TABLE public.app_modules ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 -- =====================================================================================
--- 11. BANDEJA DE ENTRADA DE TELEGRAM (telegram_inbox)
+-- 11. TELEGRAM (RETIRADO)
+-- El bot de Telegram se quitó de la app. Se borra su bandeja de entrada.
 -- =====================================================================================
-CREATE TABLE IF NOT EXISTS public.telegram_inbox (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  type TEXT NOT NULL DEFAULT 'expense',
-  amount NUMERIC(14,2) NOT NULL DEFAULT 0,
-  category TEXT DEFAULT 'Otros',
-  note TEXT DEFAULT '',
-  account_id TEXT DEFAULT 'default',
-  processed BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-ALTER TABLE public.telegram_inbox ADD COLUMN IF NOT EXISTS processed BOOLEAN DEFAULT FALSE;
+DROP TABLE IF EXISTS public.telegram_inbox;
 
 -- =====================================================================================
 -- 12. PERMISOS RLS (ROW LEVEL SECURITY) — ACCESO TOTAL PARA SINCRONIZACIÓN FLUIDA
@@ -330,7 +320,6 @@ ALTER TABLE public.days ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_modules ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.telegram_inbox ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Acceso total finance_accounts" ON public.finance_accounts;
 CREATE POLICY "Acceso total finance_accounts" ON public.finance_accounts FOR ALL USING (true) WITH CHECK (true);
@@ -365,5 +354,3 @@ CREATE POLICY "Acceso total app_state" ON public.app_state FOR ALL USING (true) 
 DROP POLICY IF EXISTS "Acceso total app_modules" ON public.app_modules;
 CREATE POLICY "Acceso total app_modules" ON public.app_modules FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Acceso total telegram_inbox" ON public.telegram_inbox;
-CREATE POLICY "Acceso total telegram_inbox" ON public.telegram_inbox FOR ALL USING (true) WITH CHECK (true);

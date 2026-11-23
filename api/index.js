@@ -19,7 +19,6 @@ const { createClient } = require("@supabase/supabase-js");
 const { getAllNeurons } = require("./src/neuro/neuronStore.js");
 const { getAllMemories } = require("./src/memory/memoryStore.js");
 const { processChat } = require("./src/chat/neurochat.js");
-const { handleTelegramWebhook, getPendingTelegramTransactions } = require("./src/finance/telegramHandler.js");
 
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -583,8 +582,6 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/telegram", handleTelegramWebhook);
-app.get("/api/telegram/pending", requireAuth, getPendingTelegramTransactions);
 
 // =====================================================================================
 // ENDPOINT DE SUEÑO / SLEEPSYNC (POST y GET /api/sleep)

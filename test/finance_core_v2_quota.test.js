@@ -44,25 +44,3 @@ test('FINANCE.addMovement handles QuotaExceededError gracefully without crashing
 
   globalThis.localStorage.setItem = origSetItem;
 });
-
-test('FINANCE.fetchPendingTelegramTransactions uses fallback default endpoint', async () => {
-  globalThis.localStorage.removeItem('memorycarl_script_url');
-  globalThis.localStorage.removeItem('memorycarl_script_api_key');
-
-  let fetchedUrl = '';
-  let fetchedHeaders = {};
-
-  globalThis.fetch = async (url, options) => {
-    fetchedUrl = url;
-    fetchedHeaders = options?.headers || {};
-    return {
-      ok: true,
-      json: async () => ({ status: 'ok', data: [] })
-    };
-  };
-
-  await window.FINANCE.fetchPendingTelegramTransactions();
-
-  assert.equal(fetchedUrl, 'https://memory-carl.vercel.app/api/telegram/pending');
-  assert.equal(fetchedHeaders['Content-Type'], 'application/json');
-});
