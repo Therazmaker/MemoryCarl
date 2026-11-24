@@ -13,7 +13,10 @@ import { createTrace, addStep, recordTiming, finalizeTrace } from "./trace.js";
 import { requestChatReply, isNeuroclawConfigured } from "../services/neuroclawClient.js";
 import { isGeminiPremiumConfigured, requestAssistedReply } from "../services/geminiPremiumClient.js";
 import { isOllamaConfigured, requestOllamaChatReply, requestOllamaNeuronGeneration } from "../services/ollamaClient.js";
-import { isClaudeConfigured, requestClaudeChatReply } from "../services/claudeClient.js";
+import { isClaudeConfigured, requestClaudeChatReply, getClaudeSettings } from "../services/claudeClient.js";
+import { runReceptionist, buildMemoryIndex } from "../chat/receptionist.js";
+import { searchMemories } from "../memory/lifeSearch.js";
+import { loadPeople } from "../chat/peopleDirectory.js";
 import { dedupeGeneratedNeurons } from "./dedup.js";
 import { shouldUsePremiumGeneration } from "./premiumPolicy.js";
 import { incrementPremiumUsage } from "./premiumUsage.js";
@@ -180,6 +183,12 @@ export async function processNeuroInput(userInput, options = {}) {
   trace.interpretationMode = interpretationMode;
 
   addStep(trace, "neurons_loaded", { count: totalNeurons, bootstrapState, mode });
+
+  // Recepcionista (Haiku): entiende el mensaje y elige qué de la memoria necesita Claude.
+  // Corre en paralelo con la búsqueda por palabras; si falla, todo sigue como antes.
+  const receptionPromise = (!options.skipReceptionist && isClaudeConfigured())
+    ? runReceptionist({ userInput, history: options.history || [], neurons: allNeurons, apiKey: getClaudeSettings().apiKey }).catch(() => null)
+    : Promise.resolve(null);
 
   addStep(trace, "activate_neurons");
   const t2 = Date.now();
@@ -407,7 +416,7 @@ export async function processNeuroInput(userInput, options = {}) {
 
   addStep(trace, "enforce_diversity", { topInitial: top10.length, topK });
   const diversityResult = await enforceNeuronDiversity(top10, { topK });
-  const finalActivated = diversityResult.selected.slice(0, topK);
+  let finalActivated = diversityResult.selected.slice(0, topK);
 
   const bridgeAnalysis = detectBridgeNeuronNeed({
     input: userInput,
@@ -451,6 +460,30 @@ export async function processNeuroInput(userInput, options = {}) {
     finalSelected: trace.selection.finalSelected.length,
     bridgeSuggested: bridgeAnalysis.bridgeSuggested,
   });
+
+  // Lo que eligió el recepcionista se SUMA a lo del buscador por palabras (va primero)
+  const reception = await receptionPromise;
+  if (reception) {
+    const have = new Set(finalActivated.map((a) => a.neuron?.id));
+    const byId = new Map(finalNeurons.map((n) => [n.id, n]));
+    const added = (reception.neuronIds || [])
+      .filter((id) => !have.has(id))
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((neuron) => ({ neuron, score: 0.9, scoreFinal: 0.9, fromReceptionist: true }));
+    if (added.length) finalActivated = [...added, ...finalActivated].slice(0, 8);
+    trace.receptionist = {
+      ok: !reception.failed,
+      ms: reception.ms || null,
+      model: reception.model || null,
+      chosen: reception.names || [],
+      added: added.map((a) => a.neuron.core?.concept),
+      searches: reception.searches || [],
+      finance: Boolean(reception.finance),
+      references: reception.references || "",
+    };
+    addStep(trace, "receptionist_applied", { chosen: trace.receptionist.chosen.length, added: added.length, failed: Boolean(reception.failed) });
+  }
 
   const context = buildContext(finalActivated);
   const enrichedContext = buildEnrichedContext(userInput, finalActivated);
@@ -538,6 +571,21 @@ export async function processNeuroInput(userInput, options = {}) {
       recentMemoryIds: recentMemoryRecallIds,
     },
   );
+  // Búsquedas que pidió el recepcionista ("mudanza papá") en el diario
+  if (reception?.searches?.length) {
+    try {
+      const mems = getAllMemories();
+      const memById = new Map(mems.map((m) => [m.id, m]));
+      const seen = new Set(memoryRecallResult.ranked.map((r) => r.memory?.id));
+      for (const q of reception.searches) {
+        for (const hit of searchMemories(mems, { query: q, limit: 2 }, finalNeurons)) {
+          if (seen.has(hit.id) || !memById.has(hit.id)) continue;
+          seen.add(hit.id);
+          memoryRecallResult.ranked.push({ memory: memById.get(hit.id), snippet: hit.snippet, score: 0.8, fromReceptionist: true });
+        }
+      }
+    } catch (_e) {}
+  }
   addStep(trace, "memory_recall_evaluated", {
     threshold: memoryRecallResult.threshold,
     candidates: memoryRecallResult.ranked.length,
@@ -556,7 +604,7 @@ export async function processNeuroInput(userInput, options = {}) {
 
   addStep(trace, "evaluate_finance_context");
   let financeContext = null;
-  if (isFinanceTopic(userInput, finalActivated)) {
+  if (isFinanceTopic(userInput, finalActivated) || reception?.finance) {
     financeContext = buildFinanceContext();
   }
   addStep(trace, "finance_context_evaluated", {
@@ -615,6 +663,8 @@ export async function processNeuroInput(userInput, options = {}) {
         memoryRecall: memoryRecallResult.ranked,
         conversationSession: options.conversationSession,
         financeContext,
+        reception,
+        memoryIndex: reception?.index || buildMemoryIndex(finalNeurons, loadPeople()),
         // Memoria larga: Carl puede buscar en memorias y neuronas cuando lo necesite
         toolData: () => ({ memories: getAllMemories(), neurons: getAllNeurons() }),
       }, options.onRetryProgress);

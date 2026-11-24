@@ -815,6 +815,12 @@ function renderSettingsModal() {
               <div class="ncSettingsSectionDesc">Cuando hablas de tu pasado o de alguien, Carl busca en tu historia antes de responder. Esos mensajes cuestan un poco más (centavos).</div>
             </div>
 
+            <!-- Recepcionista: entiende el mensaje y elige qué de la memoria necesita Claude -->
+            <div class="ncSettingsField">
+              <label class="ncSettingsLabel"><input type="checkbox" id="ncsReceptionist" ${s.receptionist !== false ? "checked" : ""}/> Recepcionista: entiende tu mensaje antes que Carl</label>
+              <div class="ncSettingsSectionDesc">Un modelo barato (Claude Haiku) lee tu mensaje, entiende a quién o a qué te refieres ("mi viejo", "lo que te conté") y le prepara a Carl lo que necesita de tu memoria. Carl sigue siendo quien responde. Cada decisión se guarda en el teléfono para que Gemma pueda ganarse el puesto más adelante.</div>
+            </div>
+
             <!-- Botones Claude -->
             <div class="ncSettingsBtns ncSettingsBtnsSmall">
               <button type="button" class="ncSettingsTestBtn" id="btnClaudeTest">Probar conexión Claude</button>
@@ -2619,6 +2625,7 @@ function wireSettingsModal(root) {
       model:           root.querySelector("#ncsModel")?.value?.trim() || "gemini-2.5-flash",
       claudeModel:     root.querySelector("#ncsClaudeModel")?.value?.trim() || "claude-opus-5-5",
       carlTools:       root.querySelector("#ncsCarlTools")?.checked ?? true,
+      receptionist:    root.querySelector("#ncsReceptionist")?.checked ?? true,
       dailyLimit:      parseInt(root.querySelector("#ncsDailyLimit")?.value, 10) || 20,
       timeoutMs:       parseInt(root.querySelector("#ncsTimeout")?.value,    10) || 20000,
       temperature:     parseFloat(root.querySelector("#ncsTemp")?.value)    || 0.4,

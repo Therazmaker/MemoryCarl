@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS = {
   claudeApiKey:           "",
   claudeModel:            "claude-opus-5-5",
   carlTools:              true,  // Carl puede buscar en tus memorias y neuronas (memoria larga)
+  receptionist:           true,  // Recepcionista: un modelo barato elige qué de la memoria necesita Claude
+  receptionistModel:      "claude-haiku-4-5",
   voyageApiKey:           "",    // Voyage AI: búsqueda por significado (opcional)
   dailyLimit:             20,
   timeoutMs:              20000,

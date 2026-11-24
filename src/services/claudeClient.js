@@ -20,6 +20,7 @@ import { GROUNDING_RULES, buildHistoryMessages } from "../chat/grounding.js";
 import { buildPeopleBlock } from "../chat/peopleDirectory.js";
 import { buildCorrectionsBlock } from "../chat/corrections.js";
 import { buildUserStatusBlock } from "../chat/userStatusBlock.js";
+import { buildIndexPromptBlock, buildReceptionPromptBlock } from "../chat/receptionist.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -164,7 +165,7 @@ IMPORTANTE: El JSON de acciones debe ir SIEMPRE al final, después de ---NEURON_
 /**
  * Construye el prompt de sistema y los mensajes para la API de Claude.
  */
-function buildClaudePayload({ userInput, context = [], history = [], insights = [], temporalContext = null, dayContext = null, memoryRecall = [], conversationSession = null, financeContext = null }) {
+function buildClaudePayload({ userInput, context = [], history = [], insights = [], temporalContext = null, dayContext = null, memoryRecall = [], conversationSession = null, financeContext = null, reception = null, memoryIndex = null }) {
   let systemContent = NEUROCHAT_CLAUDE_SYSTEM_PROMPT;
 
   // Fecha local de hoy: la IA la necesita para fechar etapas y entender "ayer", "el lunes"…
@@ -173,6 +174,9 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
   // Quién es quién (siempre) y lo que el usuario ya corrigió (manda sobre todo lo demás)
   systemContent += buildPeopleBlock(userInput);
   systemContent += buildCorrectionsBlock();
+
+  // Índice de la memoria: Carl sabe QUÉ sabe del usuario (y lo busca si no tiene el detalle)
+  systemContent += buildIndexPromptBlock(memoryIndex);
 
   // CAPA 1: SITUACIÓN ACTUAL (Hechos Vigentes)
   const lifeFactsBlock = buildLifeFactsPromptBlock(userInput);
@@ -208,6 +212,9 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
     });
   }
 
+  // Lo que preparó el recepcionista (quién importa, a qué se refiere lo indirecto)
+  systemContent += buildReceptionPromptBlock(reception);
+
   if (insights && insights.length > 0) {
     systemContent += "\n## INSIGHTS DETECTADOS\n";
     insights.slice(0, 4).forEach((i) => {
@@ -231,7 +238,7 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
 
   if (memoryRecall && memoryRecall.length > 0) {
     systemContent += "\n## MEMORIAS RECORDADAS\n";
-    memoryRecall.slice(0, 3).forEach((m) => {
+    memoryRecall.slice(0, 6).forEach((m) => {
       systemContent += `- **${m.memory?.title || "Memoria"}**: ${m.snippet || ""}\n`;
     });
   }
