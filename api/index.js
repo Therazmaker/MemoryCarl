@@ -47,36 +47,28 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 /**
- * Middleware de Autenticación Flexible:
- * - Si API_SECRET_KEY no está definida en Vercel, NO bloquea con Error 500 (uno de los
- *   principales motivos por los que fallaba la sincronización anteriormente).
- * - Si API_SECRET_KEY está definida, acepta tanto `API_SECRET_KEY` como `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+ * Autenticación: solo la API_SECRET_KEY exacta. Antes también aceptaba la clave pública de
+ * Supabase y la palabra "auto", y con eso cualquiera podía bajar todos los datos (las rutas
+ * usan la clave de servicio de Supabase, que salta el RLS).
  */
 const requireAuth = (req, res, next) => {
   const expectedKey = process.env.API_SECRET_KEY;
   if (!expectedKey) {
-    return next();
+    return res.status(503).json({
+      status: "error",
+      message: "Falta configurar API_SECRET_KEY en Vercel.",
+    });
   }
 
   const authHeader = req.headers.authorization || "";
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-
-  if (
-    token === expectedKey ||
-    (supabaseAnonKey && token === supabaseAnonKey) ||
-    token === "auto"
-  ) {
-    return next();
-  }
+  if (token && token === expectedKey) return next();
 
   return res.status(401).json({
     status: "error",
-    message: "No autorizado. Verifica tu API Key o configura NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+    message: "No autorizado. Verifica tu API Key (la API_SECRET_KEY de Vercel).",
   });
 };
-
-// App de widgets (APK): buzón de registros y resumen para mostrar
-mountWidgetRoutes(app, () => supabase);
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -99,7 +91,7 @@ app.get("/api/config", (_req, res) => {
   });
 });
 
-app.get("/api/test-db", async (_req, res) => {
+app.get("/api/test-db", requireAuth, async (_req, res) => {
   try {
     if (!supabase) {
       return res.status(500).json({ status: "error", message: "Supabase no configurado en variables de entorno de Vercel." });
@@ -591,7 +583,7 @@ app.post("/api/chat", requireAuth, async (req, res) => {
 // ENDPOINT DE SUEÑO / SLEEPSYNC (POST y GET /api/sleep)
 // Recibe datos de sueño sincronizados desde Health Connect (Mi Fitness) vía SleepSync APK
 // =====================================================================================
-app.get("/api/sleep", async (req, res) => {
+app.get("/api/sleep", requireAuth, async (req, res) => {
   if (!supabase) {
     return res.status(500).json({ status: "error", message: "Supabase no configurado en el servidor." });
   }
