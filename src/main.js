@@ -105,6 +105,7 @@ import { addJournalEntry as addJournalEntryFromWidget } from "./day/dayStore.js"
 import { addToHistory as addMagicHistory } from "./todo/magicTodoStore.js";
 import { buildWidgetSummary, syncWidgetInbox, setWidgetSummaryProvider } from "./widgets/widgetBridge.js";
 import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
+import { renderDailyScalesCard, wireDailyScalesCard } from "./scales/dailyScales-ui.js";
 import {
   MEAL_SLOTS,
   DAYS_OF_WEEK,
@@ -8665,6 +8666,17 @@ function renderNeuroDebugModal(){
 }
 
 
+// Bitácora 1–10: de dónde saca el sueño y el ánimo
+function dailyScalesCtx(){
+  return {
+    sleepLog: (state.sleepLog || []).map(normalizeSleepEntry).filter(Boolean),
+    moodDaily: (state.moodDaily && typeof state.moodDaily === "object") ? state.moodDaily : {},
+    moodScoreOf: (id) => getMoodScoreById(id),
+    isoDate,
+    onChange: () => view(),
+  };
+}
+
 function viewHome(){
   const now = new Date();
   const monday = startOfWeekMonday(now);
@@ -8852,6 +8864,8 @@ const sleepBars = renderSleepBars(sleepSeries);
         ` : ""}
       </div>
     </section>
+
+    ${renderDailyScalesCard(dailyScalesCtx())}
 
     <div class="homeGrid">
       <section class="card homeCard" id="homeSleepCard">
@@ -10331,6 +10345,7 @@ function wireHome(root){
 
   // Life Tracker events
   wireLifeTracker(root);
+  wireDailyScalesCard(root, dailyScalesCtx());
 
   const budgetCard = root.querySelector("#homeBudgetCard");
   if(budgetCard) budgetCard.addEventListener("click", (e)=>{ if(e.target && e.target.closest("#btnAddBudgetItem")) return; /* no auto-open, keeps card tappable but safe */ });
