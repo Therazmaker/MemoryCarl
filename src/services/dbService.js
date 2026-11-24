@@ -31,6 +31,7 @@ import { loadTombstones, saveTombstones, mergeTombstones } from "../neuro/neuron
 import { mergeLifeLists } from "../chat/lifeChanges.js";
 import { mergeProducts, mergeById, libraryPayload } from "../shopping/productLibrarySync.js";
 import { tdhaPayload, mergeTdha, loadTdha, saveTdha } from "../tdha/tdhaStore.js";
+import { scalesPayload, mergeScales, loadScales, saveScales } from "../scales/dailyScalesStore.js";
 import { magicPayload, mergeMagicFromCloud } from "../todo/magicTodoStore.js";
 import { currentWidgetSummary, summaryForHash } from "../widgets/widgetBridge.js";
 import { getFullChatHistory } from "../chat/neurochat.js";
@@ -586,6 +587,8 @@ function fastHash(item) {
     // Biblioteca y compras: cualquier cambio de precio o de producto cuenta (no solo cuántos hay)
     if (item.id === "product_library") return `pl:${contentHash(p?.products)}`;
     if (item.id === "tdha") return `td:${contentHash(p)}`;
+    // Bitácora 1–10: cambiar un número de un día ya marcado no cambia cuántos días hay
+    if (item.id === "daily_scales") return `ds:${contentHash(p)}`;
     // Etapas, pendientes, personas y correcciones: una edición por dentro también cuenta
     if (item.id === "neurochat_now") return `now:${contentHash(p)}`;
     // Magic ToDo: marcar un paso o editarlo cambia por dentro
@@ -692,6 +695,8 @@ function getAppModulesList() {
     { id: "product_library", payload: libraryPayload(st.products) || undefined },
     // Pestaña TDHA: registros de cómo estoy y qué me regula (nunca se sube vacía)
     { id: "tdha", payload: tdhaPayload() || undefined },
+    // Bitácora 1–10 del Home (energía, estrés, enfoque...; nunca se sube vacía)
+    { id: "daily_scales", payload: scalesPayload() || undefined },
     // Magic ToDo: las tareas cumplidas (de ahí aprende) y sus preferencias
     { id: "magic_todo", payload: magicPayload() || undefined },
     // Lo que muestran los widgets de la APK (cuentas, categorías, hasta el cobro, tareas con hora)
@@ -1614,6 +1619,11 @@ export async function pullFromSupabase({ isManual = false } = {}) {
         case "tdha": {
           const r = mergeTdha(loadTdha(), p);
           if (r.changed) { saveTdha(r); changed = true; }
+          break;
+        }
+        case "daily_scales": {
+          const r = mergeScales(loadScales(), p);
+          if (r.changed) { saveScales(r); changed = true; }
           break;
         }
         case "magic_todo":
