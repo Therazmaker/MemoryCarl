@@ -47,6 +47,11 @@ import {
 export const OFFLINE_QUEUE_KEY = "memorycarl_offline_queue_v4";
 export const SYNC_HASHES_KEY = "memorycarl_sync_hashes_v4";
 export const SYNC_STATUS_KEY = "memorycarl_neurochat_sync_status";
+// Cuándo se borró la conversación de NeuroChat (lo anterior no se restaura en el chat)
+const CHAT_CLEARED_KEY = "memorycarl_neurochat_cleared_at";
+const chatClearedAt = () => {
+  try { return Number(localStorage.getItem(CHAT_CLEARED_KEY)) || 0; } catch (_e) { return 0; }
+};
 export const SUPABASE_URL_KEY = "memorycarl_supabase_url";
 export const SUPABASE_ANON_KEY = "memorycarl_supabase_anon_key";
 export const INITIAL_BACKFILL_DONE_KEY = "memorycarl_dbservice_backfill_v4";
@@ -709,7 +714,7 @@ function getAppModulesList() {
         financeMissionPayments: st.financeMissionPayments,
       },
     },
-    { id: "neurochat_now", payload: { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads(), people: loadPeople(), corrections: loadCorrections() } },
+    { id: "neurochat_now", payload: { lifeFacts: loadLifeFacts(), openThreads: loadOpenThreads(), people: loadPeople(), corrections: loadCorrections(), chatClearedAt: chatClearedAt() } },
     // Neuronas borradas/fusionadas (reparación del grafo): solo si este dispositivo tiene registro
     { id: "neuron_tombstones", payload: loadTombstones() || undefined },
   ];
@@ -1553,6 +1558,11 @@ export async function pullFromSupabase({ isManual = false } = {}) {
   if (st && Array.isArray(cloud.modules) && cloud.modules.length > 0) {
     const pendingMods = getPendingIdsForTable("app_modules");
     for (const modRow of cloud.modules) {
+      // Si borraste la conversación en otro dispositivo, aquí tampoco vuelve (se queda la más
+      // reciente, así que es seguro aunque haya cambios locales pendientes de subir)
+      if (modRow?.id === "neurochat_now" && Number(modRow.payload?.chatClearedAt) > chatClearedAt()) {
+        try { localStorage.setItem(CHAT_CLEARED_KEY, String(Number(modRow.payload.chatClearedAt))); } catch (_e) {}
+      }
       if (!modRow?.id || pendingMods.has(String(modRow.id)) || !modRow.payload) continue;
       const p = modRow.payload;
       switch (modRow.id) {
@@ -1797,9 +1807,12 @@ export async function pullFromSupabase({ isManual = false } = {}) {
   if (Array.isArray(cloud.chatHistory) && cloud.chatHistory.length > 0) {
     const localHist = readLocalArray("memorycarl_neurochat_history");
     if (localHist.length === 0) {
+      // Solo lo posterior a la última vez que borraste la conversación
+      const clearedAt = chatClearedAt();
       const msgs = cloud.chatHistory
         .map(cloudChatToLocal)
         .filter(Boolean)
+        .filter((m) => Number(m.ts) > clearedAt)
         .map((m) => ({ ...m, messageId: String(m.messageId || "").replace(/_(user|assistant)$/, "") }))
         .slice(-50);
       if (msgs.length > 0) {

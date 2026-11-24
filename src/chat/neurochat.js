@@ -3,7 +3,7 @@
  */
 
 import { processNeuroInput } from "../neuro/neurocore.js";
-import { markChanged, chatKey } from "../services/syncOutbox.js";
+import { markChanged, chatKey, markAppStateChanged } from "../services/syncOutbox.js";
 import { getAllNeurons, saveNeuron, deleteNeuron } from "../neuro/neuronStore.js";
 import { neuroProbe, NEUROPROBE_ENABLED } from "./neuroprobe.js";
 import { createNeuron } from "../neuro/schemas.js";
@@ -496,10 +496,20 @@ export function getChatHistory() {
   return getHistory();
 }
 
+// Cuándo borraste la conversación: lo anterior queda archivado en la nube, pero ya no
+// vuelve a aparecer en el chat al abrirlo (antes se restauraba solo si el chat estaba vacío)
+export const CHAT_CLEARED_KEY = "memorycarl_neurochat_cleared_at";
+
+export function getChatClearedAt() {
+  try { return Number(localStorage.getItem(CHAT_CLEARED_KEY)) || 0; } catch (_e) { return 0; }
+}
+
 export function clearChatHistory() {
   _history = [];
   saveHistory([]);
+  try { localStorage.setItem(CHAT_CLEARED_KEY, String(Date.now())); } catch (_e) {}
   void clearHistoryIdb();
+  try { markAppStateChanged(); } catch (_e) {}
   triggerNeuroChatPush();
 }
 export function getNeurons() { return getAllNeurons(); }
