@@ -19,6 +19,7 @@ import { buildRecentDaysPromptBlock, buildRecentJournalBlock, buildRecentFinance
 import { GROUNDING_RULES, buildHistoryMessages } from "../chat/grounding.js";
 import { buildPeopleBlock } from "../chat/peopleDirectory.js";
 import { buildCorrectionsBlock } from "../chat/corrections.js";
+import { buildUserStatusBlock } from "../chat/userStatusBlock.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -261,31 +262,10 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
     }
   }
 
-  // Estado del usuario en tiempo real
+  // Estado del usuario en tiempo real: último sueño, caras de hoy y Bitácora 1–10 (fecha local)
   try {
     const s = (typeof window !== "undefined" && window.state) ? window.state : null;
-    if (s) {
-      const statusParts = [];
-      const sleepLog = Array.isArray(s.sleepLog) ? s.sleepLog : [];
-      const lastSleep = sleepLog.length > 0 ? sleepLog[sleepLog.length - 1] : null;
-      if (lastSleep) {
-        const hrs = lastSleep.hours ?? lastSleep.h ?? lastSleep.sleepHours ?? null;
-        const qual = lastSleep.quality || lastSleep.feel || null;
-        if (hrs != null) statusParts.push(`🌙 Último sueño: ${hrs}h${qual ? `, sensación: ${qual}` : ""}`);
-      }
-
-      const mood = s.moodDaily;
-      if (mood) {
-        const todayKey = new Date().toISOString().split("T")[0];
-        const todayMood = (typeof mood === "object" && mood[todayKey]) ? mood[todayKey] : null;
-        if (todayMood) statusParts.push(`😊 Ánimo hoy: ${todayMood.value || todayMood.label || todayMood}`);
-      }
-
-      if (statusParts.length > 0) {
-        systemContent += "\n\n## ESTADO ACTUAL DEL USUARIO\n";
-        statusParts.forEach((p) => { systemContent += `- ${p}\n`; });
-      }
-    }
+    if (s) systemContent += buildUserStatusBlock({ sleepLog: s.sleepLog, moodDaily: s.moodDaily });
   } catch (_e) {}
 
   // Historial con fecha y hora de cada mensaje del usuario (y aviso si pasó mucho tiempo)
