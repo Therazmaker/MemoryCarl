@@ -324,7 +324,11 @@ CREATE INDEX IF NOT EXISTS widget_inbox_pending_idx ON public.widget_inbox (appl
 ALTER TABLE public.widget_inbox ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================================================
--- 12. PERMISOS RLS (ROW LEVEL SECURITY) — ACCESO TOTAL PARA SINCRONIZACIÓN FLUIDA
+-- 12. PERMISOS RLS (ROW LEVEL SECURITY) — SIN ACCESO PÚBLICO
+-- Todas las tablas con RLS y SIN reglas para "public": la clave pública (anon) no puede leer
+-- ni escribir. MemoryCarl sincroniza a través del servidor de Vercel, que usa la
+-- SUPABASE_SERVICE_ROLE_KEY (esa clave salta el RLS). Antes había reglas "Acceso total"
+-- que dejaban todo abierto a cualquiera con la clave pública: aquí se borran.
 -- =====================================================================================
 ALTER TABLE public.finance_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.finance_ledger ENABLE ROW LEVEL SECURITY;
@@ -339,35 +343,37 @@ ALTER TABLE public.app_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_modules ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Acceso total finance_accounts" ON public.finance_accounts;
-CREATE POLICY "Acceso total finance_accounts" ON public.finance_accounts FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total finance_ledger" ON public.finance_ledger;
-CREATE POLICY "Acceso total finance_ledger" ON public.finance_ledger FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total finance_debts" ON public.finance_debts;
-CREATE POLICY "Acceso total finance_debts" ON public.finance_debts FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total sleep_log" ON public.sleep_log;
-CREATE POLICY "Acceso total sleep_log" ON public.sleep_log FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total mood_daily" ON public.mood_daily;
-CREATE POLICY "Acceso total mood_daily" ON public.mood_daily FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total neurons" ON public.neurons;
-CREATE POLICY "Acceso total neurons" ON public.neurons FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total memories" ON public.memories;
-CREATE POLICY "Acceso total memories" ON public.memories FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total days" ON public.days;
-CREATE POLICY "Acceso total days" ON public.days FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total chat_history" ON public.chat_history;
-CREATE POLICY "Acceso total chat_history" ON public.chat_history FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total app_state" ON public.app_state;
-CREATE POLICY "Acceso total app_state" ON public.app_state FOR ALL USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Acceso total app_modules" ON public.app_modules;
-CREATE POLICY "Acceso total app_modules" ON public.app_modules FOR ALL USING (true) WITH CHECK (true);
 
+-- Reglas viejas creadas a mano que también abrían las tablas
+DROP POLICY IF EXISTS "Permitir todo a la API Key" ON public.app_state;
+DROP POLICY IF EXISTS "Permitir todo en finance_accounts" ON public.finance_accounts;
+DROP POLICY IF EXISTS "Permitir todo en finance_ledger" ON public.finance_ledger;
+
+-- Cualquier otra tabla del esquema public sin RLS (ej. copias de respaldo) queda protegida
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND NOT rowsecurity LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.tablename);
+  END LOOP;
+END $$;

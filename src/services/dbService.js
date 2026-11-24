@@ -131,7 +131,9 @@ export function getSupabaseConfig() {
 
     const apiUrl = ownApiUrl || (isVercelOrLocalServer ? window.location.origin : DEFAULT_API_ORIGIN);
 
-    const hasDirectSupabase = Boolean(supabaseUrl && supabaseAnonKey);
+    // Con la API key del servidor se sincroniza siempre por el servidor (usa la clave de servicio):
+    // las tablas de Supabase no tienen reglas públicas, así que la clave pública ya no alcanza.
+    const hasDirectSupabase = Boolean(supabaseUrl && supabaseAnonKey && !apiKey);
     const hasApiSync = Boolean(apiUrl && (apiKey || hasDirectSupabase || isVercelOrLocalServer));
 
     return {
@@ -187,7 +189,7 @@ export async function autoDiscoverConfig() {
   configAutoFetched = true;
 
   const current = getSupabaseConfig();
-  if (current.hasDirectSupabase) return current;
+  if (current.hasDirectSupabase || current.apiKey) return current;
 
   const candidates = [];
   if (
