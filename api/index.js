@@ -70,6 +70,9 @@ const requireAuth = (req, res, next) => {
   });
 };
 
+// App de widgets (APK): buzón de registros y resumen para mostrar
+mountWidgetRoutes(app, () => supabase);
+
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
