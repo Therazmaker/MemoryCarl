@@ -57,3 +57,12 @@ test("mergeScales: por día gana el más reciente", () => {
   assert.equal(r.days.c.food, 4);
   assert.deepEqual(r.hidden, ["water"]);
 });
+
+test("fillWithAverage: huecos y días por venir toman el promedio", async () => {
+  const { fillWithAverage } = await import("../src/scales/dailyScalesStore.js");
+  const r = fillWithAverage([4, null, 8, null, null], 2);
+  assert.equal(r.avg, 6);
+  assert.deepEqual(r.values, [4, 6, 8, 6, 6]);
+  assert.deepEqual(r.est, [false, true, false, true, true]);
+  assert.equal(fillWithAverage([null, null], 1).avg, null);
+});

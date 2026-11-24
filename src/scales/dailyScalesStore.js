@@ -148,3 +148,16 @@ export function mergeScales(local, cloud) {
   const hidden = Array.isArray(local?.hidden) ? local.hidden : [];
   return { days, hidden, changed };
 }
+
+/**
+ * Rellena los días vacíos con el promedio de los días que sí tienen dato,
+ * para que la línea no quede cortada. Los días después de hoy (resto del mes) también.
+ * Devuelve { values, est, avg } — est[i] = true si ese punto es estimado. Sin ningún dato: avg = null.
+ */
+export function fillWithAverage(values, todayIdx = values.length - 1) {
+  const real = values.filter((v, i) => v !== null && v !== undefined && i <= todayIdx);
+  if (!real.length) return { values: values.map(() => null), est: values.map(() => false), avg: null };
+  const avg = Math.round((real.reduce((s, v) => s + v, 0) / real.length) * 10) / 10;
+  const est = values.map((v, i) => i > todayIdx || v === null || v === undefined);
+  return { values: values.map((v, i) => (est[i] ? avg : v)), est, avg };
+}
