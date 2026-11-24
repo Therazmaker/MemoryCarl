@@ -41,6 +41,14 @@
             android:theme="@style/QuickDialog"
             android:windowSoftInputMode="stateVisible|adjustResize" />
 
+        <activity
+            android:name=".DayActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/QuickDialog"
+            android:windowSoftInputMode="stateVisible|adjustResize" />
+
         <!-- Los widgets van "exported": algunos launchers (Xiaomi) no listan los que no lo están -->
         <receiver
             android:name=".ExpenseWidget"

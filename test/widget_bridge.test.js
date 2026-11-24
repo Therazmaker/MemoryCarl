@@ -115,3 +115,17 @@ test("sincronizar: baja, aplica y confirma solo lo aplicado", async () => {
   assert.deepEqual(ack.body.ids, ["w_gasto0009"]);
   assert.equal(calls[0].auth, "Bearer k");
 });
+
+test("buzón: la Bitácora que viene de los widgets se anota en su día", () => {
+  const got = [];
+  const r = applyInboxItems(
+    [{ id: "w_scales001", kind: "scales", client_ts: "2026-11-24T22:00:00Z", data: { date: "2026-11-24", values: { stress: 8, energy: 3 } } }],
+    { scales: (date, values) => { got.push([date, values]); return values; }, save: () => {} },
+    { appliedIds: [] },
+  );
+  assert.deepEqual(r.applied, ["w_scales001"]);
+  assert.deepEqual(got, [["2026-11-24", { stress: 8, energy: 3 }]]);
+  assert.deepEqual(r.summary, ["📓 Bitácora"]);
+  const bad = applyInboxItems([{ id: "w_scales002", kind: "scales", data: { date: "2026-11-24", values: { stress: 8 } } }], {}, { appliedIds: [] });
+  assert.equal(bad.failed.length, 1, "sin quién lo anote, no se confirma");
+});

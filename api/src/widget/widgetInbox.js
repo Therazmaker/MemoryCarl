@@ -13,7 +13,10 @@
  * Seguridad: estas rutas exigen la API_SECRET_KEY exacta (no aceptan la clave anónima ni "auto").
  */
 
-const KINDS = ["expense", "journal", "task_done", "task_snooze"];
+const KINDS = ["expense", "journal", "task_done", "task_snooze", "scales"];
+// Bitácora 1–10 (lo que se marca a mano; sueño y ánimo salen de sus propios registros)
+const SCALE_IDS = ["energy", "stress", "focus", "food", "water", "body"];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 const str = (v, max) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -42,6 +45,23 @@ function validateInboxItem(raw) {
       const text = String(d.text ?? "").trim().slice(0, 4000);
       if (!text) return { ok: false, error: "El texto está vacío." };
       data = { text, mood: str(d.mood, 20) || null };
+      break;
+    }
+    case "scales": {
+      const date = String(d.date || "");
+      const t = Date.parse(`${date}T12:00:00Z`);
+      if (!DATE_RE.test(date) || !Number.isFinite(t)) return { ok: false, error: "Fecha inválida." };
+      if (t > Date.now() + 2 * 86400000 || t < Date.now() - 400 * 86400000) return { ok: false, error: "La fecha está fuera de rango." };
+      const src = d.values && typeof d.values === "object" ? d.values : {};
+      const values = {};
+      for (const k of SCALE_IDS) {
+        if (src[k] === undefined || src[k] === null || src[k] === "") continue;
+        const n = Math.round(Number(src[k]));
+        if (!Number.isFinite(n) || n < 1 || n > 10) return { ok: false, error: `Valor inválido en ${k} (va del 1 al 10).` };
+        values[k] = n;
+      }
+      if (!Object.keys(values).length) return { ok: false, error: "No hay ningún valor de la Bitácora." };
+      data = { date, values };
       break;
     }
     case "task_done":

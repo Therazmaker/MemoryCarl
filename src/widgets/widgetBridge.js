@@ -92,6 +92,10 @@ export function applyInboxItems(items = [], handlers = {}, opts = {}) {
         const ok = handlers.journal?.({ text: d.text, mood: d.mood || null, ts: Date.parse(it.client_ts) || Date.now() }, it);
         if (!ok) throw new Error("No se pudo guardar en el diario");
         summary.push("📓 diario");
+      } else if (it.kind === "scales") {
+        const ok = handlers.scales?.(d.date, d.values || {}, it);
+        if (!ok) throw new Error("No se pudo anotar en la Bitácora");
+        summary.push("📓 Bitácora");
       } else if (it.kind === "task_done" || it.kind === "task_snooze") {
         const task = handlers.task?.(d.taskId);
         // Una tarea que ya no existe (la borraste) no bloquea el buzón

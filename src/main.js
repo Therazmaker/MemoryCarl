@@ -106,6 +106,7 @@ import { addToHistory as addMagicHistory } from "./todo/magicTodoStore.js";
 import { buildWidgetSummary, syncWidgetInbox, setWidgetSummaryProvider } from "./widgets/widgetBridge.js";
 import { renderTrackerVitalClosetWidget, wireTrackerVitalClosetWidget } from "./services/closetUi.js";
 import { renderDailyScalesCard, wireDailyScalesCard } from "./scales/dailyScales-ui.js";
+import { setDayScales } from "./scales/dailyScalesStore.js";
 import {
   MEAL_SLOTS,
   DAYS_OF_WEEK,
@@ -418,6 +419,7 @@ function widgetInboxSync_(force = false){
       return addFinanceEntry({ type: "expense", amount: d.amount, accountId, category: d.category || "Otros", note: d.note || "", reason: "normal", date: d.date, source: "widget", neuronRole: "auto" });
     },
     journal: (d) => addJournalEntryFromWidget({ text: d.text, mood: d.mood, ts: d.ts }),
+    scales: (date, values) => setDayScales(date, values),
     task: (id) => (state.reminders||[]).find(t => t && t.id === id) || null,
     history: (entry) => addMagicHistory(entry),
     save: () => { persist(); view(); },

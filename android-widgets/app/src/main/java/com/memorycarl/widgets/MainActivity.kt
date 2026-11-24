@@ -27,6 +27,7 @@ import java.util.Locale
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var widgetsInfo: TextView
+    private lateinit var modelInfo: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,6 +72,25 @@ class MainActivity : Activity() {
         })
         col.addView(Ui.spacer(this, 12))
 
+        col.addView(Ui.text(this, "🧠 Modelo local (Gemma)", 17f, bold = true))
+        col.addView(Ui.text(this, "Un modelo chico que corre en el teléfono, sin internet. Entiende lo que cuentas en \"Cuéntame tu día\" y propone los números de tu Bitácora. No reemplaza a Carl: solo ordena.", 13f, muted = true))
+        modelInfo = Ui.text(this, "", 14f)
+        col.addView(modelInfo)
+        col.addView(Ui.button(this, "🧠 Cuéntame tu día", primary = true) { startActivity(Intent(this, DayActivity::class.java)) })
+        col.addView(Ui.button(this, "Elegir archivo del modelo (.task)") {
+            startActivityForResult(
+                Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),
+                PICK_MODEL,
+            )
+        })
+        col.addView(Ui.button(this, "Quitar el modelo") {
+            LocalModel.delete(this)
+            refreshModel()
+            Toast.makeText(this, "Modelo quitado", Toast.LENGTH_SHORT).show()
+        })
+        col.addView(Ui.text(this, "Cómo conseguirlo: en Hugging Face busca \"litert-community/Gemma3-1B-IT\", acepta la licencia de Google y descarga gemma3-1b-it-int4.task (unos 550 MB). Después tócalo aquí arriba en \"Elegir archivo\". Es el mismo archivo que usa la app Google AI Edge Gallery.", 13f, muted = true))
+        col.addView(Ui.spacer(this, 12))
+
         col.addView(Ui.text(this, "Poner los widgets", 17f, bold = true))
         widgetsInfo = Ui.text(this, "", 13f, muted = true)
         col.addView(widgetsInfo)
@@ -85,6 +105,42 @@ class MainActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(col) })
         SyncWorker.schedulePeriodic(this)
         refreshStatus()
+        refreshModel()
+    }
+
+    private fun refreshModel() {
+        modelInfo.text = if (LocalModel.isReady(this)) "✓ Modelo listo: ${LocalModel.name(this).ifBlank { "model.task" }} (${LocalModel.sizeLabel(this)})" else "Sin modelo todavía"
+    }
+
+    @Deprecated("Activity clásica")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PICK_MODEL || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        val name = try {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        } catch (e: Exception) {
+            null
+        } ?: "model.task"
+        modelInfo.text = "Copiando $name…"
+        Thread {
+            val msg = try {
+                LocalModel.importFrom(this, uri, name) { pct -> runOnUiThread { modelInfo.text = "Copiando $name… $pct%" } }
+                "🧠 Modelo listo"
+            } catch (e: Throwable) {
+                "⚠️ ${e.message ?: "No se pudo copiar"}"
+            }
+            runOnUiThread {
+                refreshModel()
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            }
+        }.start()
+    }
+
+    companion object {
+        private const val PICK_MODEL = 42
     }
 
     override fun onResume() {

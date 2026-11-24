@@ -81,6 +81,7 @@ object Widgets {
         val v = RemoteViews(ctx.packageName, R.layout.widget_journal)
         v.setOnClickPendingIntent(R.id.btn_write, openActivity(ctx, if (Store.isConfigured(ctx)) JournalActivity::class.java else MainActivity::class.java, 201))
         v.setOnClickPendingIntent(R.id.root, openActivity(ctx, if (Store.isConfigured(ctx)) JournalActivity::class.java else MainActivity::class.java, 202))
+        v.setOnClickPendingIntent(R.id.btn_day, openActivity(ctx, if (Store.isConfigured(ctx)) DayActivity::class.java else MainActivity::class.java, 203))
         mgr.updateAppWidget(id, v)
     }
 

@@ -101,3 +101,14 @@ test("buzón: dejar, reenviar sin duplicar, bajar pendientes, confirmar y consul
   assert.equal(sum.body.data.runway.free, 120);
   delete process.env.API_SECRET_KEY;
 });
+
+test("validar: Bitácora 1–10 desde la app de widgets", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const ok = validateInboxItem({ id: "w_scales001", kind: "scales", data: { date: today, values: { stress: 8.4, energy: "3", focus: null, hack: 9 } } });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.item.data, { date: today, values: { stress: 8, energy: 3 } }, "redondea, ignora vacíos y claves desconocidas");
+  assert.equal(validateInboxItem({ id: "w_scales002", kind: "scales", data: { date: today, values: { stress: 11 } } }).ok, false);
+  assert.equal(validateInboxItem({ id: "w_scales003", kind: "scales", data: { date: today, values: {} } }).ok, false);
+  assert.equal(validateInboxItem({ id: "w_scales004", kind: "scales", data: { date: "ayer", values: { stress: 5 } } }).ok, false);
+  assert.equal(validateInboxItem({ id: "w_scales005", kind: "scales", data: { date: "2099-01-01", values: { stress: 5 } } }).ok, false);
+});
