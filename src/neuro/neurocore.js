@@ -642,6 +642,7 @@ export async function processNeuroInput(userInput, options = {}) {
   let geminiReplyText = "";
   let intent = "respond";
   let lifeChanges = [];
+  let solve = null; // 🧭 Modo ABC: oferta, paso en curso o plan listo (lo informa Claude)
   let memorySaved = [];
   // El directorio de personas empieza con las que ya existen como neuronas
   try { seedPeopleFromNeurons(getAllNeurons()); } catch (_e) {}
@@ -682,6 +683,7 @@ export async function processNeuroInput(userInput, options = {}) {
 
         const { actions = [], intent: parsedIntent = "respond" } = claudeResult.neuronActions || {};
         replySource = `claude_${parsedIntent}`;
+        solve = claudeResult.solve || claudeResult.neuronActions?.solve || null;
 
         intent = parsedIntent;
         claudeResult.intent = parsedIntent;
@@ -1165,6 +1167,7 @@ export async function processNeuroInput(userInput, options = {}) {
     intent,
     lifeChanges,
     memorySaved,
+    ...(solve ? { solve } : {}),
     knowledgeExtracted: {
       relationHints: trace.knowledgeExtracted?.relationHints || 0,
       triggerCandidates: trace.knowledgeExtracted?.triggerCandidates || 0,

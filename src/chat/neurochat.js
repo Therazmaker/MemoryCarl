@@ -17,6 +17,7 @@ import { isGeminiPremiumConfigured } from "../services/geminiPremiumClient.js";
 import { undoLifeChanges } from "./lifeChanges.js";
 import { recordAstroActivation } from "./astroLinks.js";
 import { cloudChatToLocal } from "../services/cloudRestore.js";
+import { noteStep } from "./solveMode.js";
 
 const HISTORY_KEY = "memorycarl_neurochat_history";
 const DB_NAME = "memorycarl_chat";
@@ -383,9 +384,14 @@ export async function sendMessage(userInput, options = {}) {
     relevantDays: result.relevantDays || [],
     // Cambios en la situación de vida hechos en este turno (se muestran con opción de deshacer)
     ...(result.lifeChanges?.length ? { lifeChanges: result.lifeChanges } : {}),
+    // 🧭 Modo ABC: oferta de plan, paso en curso o plan listo para guardar
+    ...(result.solve ? { solve: result.solve } : {}),
     // Personas y correcciones que Carl anotó en este turno
     ...(result.memorySaved?.length ? { memorySaved: result.memorySaved } : {}),
   });
+
+  // 🧭 El paso del modo ABC en el que quedó la conversación
+  if (result.solve?.solveStep) { try { noteStep(result.solve.solveStep); } catch (_e) {} }
 
   // Guardar respuesta del asistente en el día actual y vincular neuronas activadas
   try {
@@ -478,6 +484,18 @@ export function undoMessageLifeChanges(messageId) {
   if (!msg || !msg.lifeChanges?.length || msg.lifeChangesUndone) return false;
   undoLifeChanges(msg.lifeChanges);
   msg.lifeChangesUndone = true;
+  saveHistory(getHistory());
+  void saveMessageToIdb(msg);
+  markChanged("chat", [chatKey(msg)]);
+  triggerNeuroChatPush();
+  return true;
+}
+
+/** Anota en un mensaje de Carl que su plan ya se guardó en Magic ToDo. */
+export function markSolvePlanSaved(messageId, taskId) {
+  const msg = getHistory().find((m) => m.role === "assistant" && m.messageId === messageId);
+  if (!msg?.solve?.plan) return false;
+  msg.solve = { ...msg.solve, savedTaskId: taskId, savedAt: Date.now() };
   saveHistory(getHistory());
   void saveMessageToIdb(msg);
   markChanged("chat", [chatKey(msg)]);

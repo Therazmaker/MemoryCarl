@@ -21,6 +21,7 @@ import { buildPeopleBlock } from "../chat/peopleDirectory.js";
 import { buildCorrectionsBlock } from "../chat/corrections.js";
 import { buildUserStatusBlock } from "../chat/userStatusBlock.js";
 import { buildIndexPromptBlock, buildReceptionPromptBlock } from "../chat/receptionist.js";
+import { buildSolvePromptBlock, parseSolveFields } from "../chat/solveMode.js";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -269,6 +270,9 @@ function buildClaudePayload({ userInput, context = [], history = [], insights = 
     }
   }
 
+  // 🧭 Modo ABC: ofrecer un plan, o guiarlo si está activo (con su intensidad)
+  try { systemContent += buildSolvePromptBlock(); } catch (_e) {}
+
   // Estado del usuario en tiempo real: último sueño, caras de hoy y Bitácora 1–10 (fecha local)
   try {
     const s = (typeof window !== "undefined" && window.state) ? window.state : null;
@@ -318,7 +322,8 @@ export function parseClaudeNeuronActions(rawActions) {
     const parsed = JSON.parse(jsonMatch[0]);
     const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
     const intent = parsed.intent || "respond";
-    return { actions, intent };
+    const solve = parseSolveFields(parsed);
+    return { actions, intent, ...(solve ? { solve } : {}) };
   } catch (_e) {
     console.warn("[claudeClient] No se pudo parsear neuron actions:", rawActions.slice(0, 200));
     return { actions: [], intent: "respond" };
@@ -461,8 +466,8 @@ export async function requestClaudeChatReply(payload, onRetryProgress = null) {
   }
 
   const { reply, rawActions } = splitReplyAndActions(finalText);
-  const { actions, intent } = parseClaudeNeuronActions(rawActions);
-  return { reply, neuronActions: { actions, intent }, intent, toolCalls };
+  const { actions, intent, solve } = parseClaudeNeuronActions(rawActions);
+  return { reply, neuronActions: { actions, intent, ...(solve ? { solve } : {}) }, intent, toolCalls, ...(solve ? { solve } : {}) };
 }
 
 /**

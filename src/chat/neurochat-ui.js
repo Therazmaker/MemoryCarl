@@ -8,6 +8,9 @@
  *   initNeuroChat()   → inicialización del módulo
  */
 
+import { markSolvePlanSaved } from "./neurochat.js";
+import { INTENSITIES, STEPS, loadSolve, startSolve, stopSolve, setIntensity, declineOffer, planToTask } from "./solveMode.js";
+import { createTask as mtCreateTask, createStep as mtCreateStep } from "../todo/magicTodoEngine.js";
 import { sendMessage, forcePremiumGenerationForMessage, undoMessageLifeChanges, getFullChatHistory, getChatHistory, clearChatHistory, getNeurons, submitNeuronFeedback, submitNeuronRemoval, saveMemoryFromMessage, getMemories, getMemoryContextByNeuron } from "./neurochat.js";
 import { processDislikeExplanation } from "../neuro/feedback.js";
 import { NeuroProbeUI } from "./neuroprobe-ui.js";
@@ -268,7 +271,47 @@ function renderLifeChangesCard(msg) {
     </div>`;
 }
 
-function renderMessage(msg) {
+// 🧭 Modo ABC: oferta (solo en el último mensaje de Carl) y plan listo para guardar
+const SOLVE_DAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+const SOLVE_MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+function solveWhen(local) {
+  const [d, t] = String(local || "").split("T");
+  const [y, m, da] = (d || "").split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, da || 1);
+  if (!Number.isFinite(dt.getTime())) return local;
+  return `${SOLVE_DAYS[dt.getDay()]} ${da} ${SOLVE_MONTHS[dt.getMonth()]}, ${t || ""}`.trim();
+}
+
+function renderSolveCard(msg, isLast) {
+  const sv = msg.solve;
+  if (!sv) return "";
+  let html = "";
+  if (sv.offerSolve && isLast && !loadSolve().active) {
+    html += `
+      <div class="ncSolveOffer">
+        <div class="ncSolveOfferHead">🧭 ¿Lo bajamos a un plan? Elige la intensidad:</div>
+        <div class="ncSolveBtns">
+          ${Object.entries(INTENSITIES).map(([k, v]) => `<button class="ncSolveBtn ncSolveBtn--${k}" data-solve-start="${k}" title="${esc(v.hint)}">${v.emoji} ${v.label}</button>`).join("")}
+          <button class="ncGhostBtn" data-solve-decline>Solo quiero desahogarme</button>
+        </div>
+      </div>`;
+  }
+  if (sv.plan?.steps?.length) {
+    const saved = Boolean(sv.savedTaskId);
+    html += `
+      <div class="ncSolvePlan">
+        <div class="ncSolvePlanHead">📋 ${esc(sv.plan.title)}</div>
+        <ol>${sv.plan.steps.map((st) => `<li>${esc(st.text)}${st.minutes ? ` <span class="ncSolveMin">· ${st.minutes} min</span>` : ""}</li>`).join("")}</ol>
+        ${sv.plan.firstStepAt ? `<div class="ncSolvePlanWhen">⏰ Primer paso: ${esc(solveWhen(sv.plan.firstStepAt))}</div>` : ""}
+        ${saved
+          ? `<div class="ncSolveSaved">✓ Guardado en Magic ToDo${sv.plan.firstStepAt ? " · te aviso a la hora" : ""}</div>`
+          : `<button class="ncActionBtn ncActionBtnPrimary" data-solve-save="${esc(msg.messageId || "")}">📋 Guardar el plan en Magic ToDo</button>`}
+      </div>`;
+  }
+  return html;
+}
+
+function renderMessage(msg, isLastAssistant = false) {
   const isUser = msg.role === "user";
   const time = timeSince(msg.ts);
   const isApiError = !isUser && (
@@ -306,6 +349,7 @@ function renderMessage(msg) {
       ${memoryRecall}
       ${dayRecall}
       ${!isUser ? renderLifeChangesCard(msg) : ""}
+      ${!isUser ? renderSolveCard(msg, isLastAssistant) : ""}
       ${savedNote}
       <div class="ncMsgMeta">
         ${time}${msg.coverage != null ? ` · cobertura ${Math.round(msg.coverage * 100)}%` : ""}
@@ -1126,7 +1170,10 @@ function nchatInner() {
 function buildMessagesHtml() {
   const history = getChatHistory();
   const messagesHtml = history.length
-    ? history.map(renderMessage).join("")
+    ? (() => {
+        const lastId = [...history].reverse().find((m) => m.role === "assistant")?.messageId;
+        return history.map((m) => renderMessage(m, m.role === "assistant" && m.messageId === lastId)).join("");
+      })()
     : `<div class="ncWelcome">
         <div class="ncWelcomeIcon">🧠</div>
         <div class="ncWelcomeTitle">NeuroChat</div>
@@ -1138,9 +1185,37 @@ function buildMessagesHtml() {
     ${uiState.error ? `<div class="ncError">⚠️ ${esc(uiState.error)}</div>` : ""}`;
 }
 
+// 🧭 Barra del modo ABC encima de la caja de texto (activo, o eligiendo intensidad)
+function buildSolveBarHtml() {
+  const s = loadSolve();
+  if (s.active) {
+    const it = INTENSITIES[s.intensity];
+    const stepTxt = s.step === "done" ? "plan listo" : `${s.step} · ${STEPS[s.step]}`;
+    return `
+      <div class="ncSolveBar ncSolveBar--${s.intensity}">
+        <span class="ncSolveBarTxt">🧭 <b>ABC</b> · ${it.emoji} ${it.label} · ${esc(stepTxt)}</span>
+        <span class="ncSolveBarBtns">
+          ${Object.entries(INTENSITIES).filter(([k]) => k !== s.intensity).map(([k, v]) => `<button class="ncSolveMini" data-solve-intensity="${k}" title="Cambiar a ${v.label}">${v.emoji}</button>`).join("")}
+          <button class="ncSolveMini" data-solve-stop>Salir</button>
+        </span>
+      </div>`;
+  }
+  if (uiState.solveMenuOpen) {
+    return `
+      <div class="ncSolveBar">
+        <span class="ncSolveBarTxt">🧭 Resolver un problema · ¿con qué intensidad?</span>
+        <span class="ncSolveBarBtns">
+          ${Object.entries(INTENSITIES).map(([k, v]) => `<button class="ncSolveMini ncSolveMini--pick" data-solve-start="${k}" title="${esc(v.hint)}">${v.emoji} ${v.label}</button>`).join("")}
+          <button class="ncSolveMini" data-solve-menu>✕</button>
+        </span>
+      </div>`;
+  }
+  return "";
+}
+
 function buildInputBarHtml() {
   const heightStyle = uiState.inputHeightPx ? `style=\"height:${uiState.inputHeightPx}px\"` : "";
-  return `
+  return `${buildSolveBarHtml()}
     <select class="ncModeSelect" id="ncModeSelect" ${uiState.loading ? "disabled" : ""}>
       ${MODE_OPTIONS.map((m) => `<option value="${m.value}" ${uiState.currentMode === m.value ? "selected" : ""}>${m.label}</option>`).join("")}
     </select>
@@ -1156,6 +1231,7 @@ function buildInputBarHtml() {
       ${heightStyle}
       ${uiState.loading ? "disabled" : ""}
     ></textarea>
+    ${loadSolve().active ? "" : `<button class="ncSolveToggle" data-solve-menu title="Modo ABC: resolver un problema" aria-label="Modo ABC" ${uiState.loading ? "disabled" : ""}>🧭</button>`}
     <button class="ncSendBtn" id="btnNcSend" ${uiState.loading ? "disabled" : ""}>
       ${uiState.loading ? "…" : "↑"}
     </button>
@@ -1940,6 +2016,13 @@ async function doSend(root, inputEl, textOverride = null) {
 }
 
 function wireInputBarEvents(root) {
+  const bar = root.querySelector(".ncInputBar");
+  if (bar) {
+    bar.querySelectorAll("[data-solve-menu]").forEach((b) => bindOnce(b, () => { uiState.solveMenuOpen = !uiState.solveMenuOpen; rerenderInputBar(root); }));
+    bar.querySelectorAll("[data-solve-start]").forEach((b) => bindOnce(b, () => beginSolve(root, b.getAttribute("data-solve-start"))));
+    bar.querySelectorAll("[data-solve-intensity]").forEach((b) => bindOnce(b, () => { setIntensity(b.getAttribute("data-solve-intensity")); rerenderInputBar(root); }));
+    bar.querySelectorAll("[data-solve-stop]").forEach((b) => bindOnce(b, () => { stopSolve(); rerenderInputBar(root); rerenderMessages(root); }));
+  }
   const btnSend = root.querySelector("#btnNcSend");
   const inputEl = root.querySelector("#ncInput");
   if (btnSend) btnSend.addEventListener("click", () => doSend(root, inputEl));
@@ -1982,7 +2065,45 @@ function wireInputBarEvents(root) {
   }
 }
 
+// 🧭 Empieza el modo ABC: lo anota y le pide a Carl que arranque por la A
+function beginSolve(root, intensity) {
+  if (uiState.loading) return;
+  startSolve(intensity);
+  uiState.solveMenuOpen = false;
+  const it = INTENSITIES[intensity] || INTENSITIES.medio;
+  doSend(root, null, `🧭 Armemos el ABC (modo ${it.label}).`);
+}
+
+function bindOnce(el, fn) {
+  if (!el || el.dataset.ncBound) return;
+  el.dataset.ncBound = "1";
+  el.addEventListener("click", fn);
+}
+
+function wireSolveMessageEvents(root) {
+  root.querySelectorAll("#ncMessages [data-solve-start]").forEach((btn) => bindOnce(btn, () => beginSolve(root, btn.getAttribute("data-solve-start"))));
+  root.querySelectorAll("#ncMessages [data-solve-decline]").forEach((btn) => bindOnce(btn, () => {
+    declineOffer();
+    rerenderMessages(root);
+    rerenderInputBar(root);
+  }));
+  root.querySelectorAll("#ncMessages [data-solve-save]").forEach((btn) => bindOnce(btn, () => {
+    const id = btn.getAttribute("data-solve-save");
+    const msg = getChatHistory().find((m) => m.role === "assistant" && m.messageId === id);
+    const st = typeof window !== "undefined" ? window.state : null;
+    if (!msg?.solve?.plan || msg.solve.savedTaskId || !st) return;
+    const task = planToTask(msg.solve.plan, { createTask: mtCreateTask, createStep: mtCreateStep });
+    if (!task) return;
+    st.reminders = Array.isArray(st.reminders) ? st.reminders : [];
+    st.reminders.unshift(task);
+    try { window.persist?.(); } catch (_e) {}
+    markSolvePlanSaved(id, task.id);
+    rerenderMessages(root);
+  }));
+}
+
 function wireMessageEvents(root) {
+  wireSolveMessageEvents(root);
   root.querySelectorAll("[data-goto-now]").forEach((btn) => {
     btn.addEventListener("click", () => {
       uiState.activeTab = "now";
@@ -3034,6 +3155,27 @@ function ncCss() {
     background: rgba(251,113,133,.12); border: 1px solid rgba(251,113,133,.25);
     border-radius: 10px; padding: 8px 12px; font-size: 13px; color: #fb7185;
   }
+
+  /* 🧭 Modo ABC */
+  .ncInputBar { flex-wrap: wrap; }
+  .ncSolveBar { flex-basis: 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: space-between;
+    padding: 6px 10px; border-radius: 12px; background: rgba(124,92,255,.14); border: 1px solid rgba(124,92,255,.35); font-size: 13px; }
+  .ncSolveBar--suave { background: rgba(74,222,128,.12); border-color: rgba(74,222,128,.35); }
+  .ncSolveBar--hardcore { background: rgba(249,115,22,.14); border-color: rgba(249,115,22,.45); }
+  .ncSolveBarBtns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ncSolveMini { border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: inherit; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .ncSolveToggle { border: 1px solid rgba(255,255,255,.15); background: rgba(255,255,255,.07); color: inherit; border-radius: 12px; min-width: 42px; min-height: 40px; font-size: 18px; cursor: pointer; }
+  .ncSolveOffer, .ncSolvePlan { margin-top: 8px; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(124,92,255,.35); background: rgba(124,92,255,.08); }
+  .ncSolveOfferHead, .ncSolvePlanHead { font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+  .ncSolveBtns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .ncSolveBtn { border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.07); color: inherit; border-radius: 999px; padding: 7px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .ncSolveBtn--suave { border-color: rgba(74,222,128,.5); }
+  .ncSolveBtn--medio { border-color: rgba(124,92,255,.6); }
+  .ncSolveBtn--hardcore { border-color: rgba(249,115,22,.7); background: rgba(249,115,22,.14); }
+  .ncSolvePlan ol { margin: 0 0 8px 18px; padding: 0; font-size: 13px; line-height: 1.5; }
+  .ncSolveMin { opacity: .6; font-size: 12px; }
+  .ncSolvePlanWhen { font-size: 12px; opacity: .8; margin-bottom: 8px; }
+  .ncSolveSaved { font-size: 13px; color: #4ade80; font-weight: 600; }
 
   /* Input bar */
   .ncInputBar {
