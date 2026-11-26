@@ -57,7 +57,7 @@ test("neuronas con sus conexiones y línea de tiempo", () => {
 });
 
 test("herramientas de Carl: esquema, ejecución y resumen", () => {
-  assert.deepEqual(CARL_TOOLS.map((t) => t.name), ["buscar_memorias", "leer_memoria", "buscar_neuronas", "linea_de_tiempo"]);
+  assert.deepEqual(CARL_TOOLS.map((t) => t.name), ["buscar_memorias", "leer_memoria", "leer_dia", "buscar_neuronas", "linea_de_tiempo"]);
   for (const t of CARL_TOOLS) assert.equal(t.input_schema.type, "object");
   const out = runCarlTool("buscar_memorias", { consulta: "deuda", limite: 50 }, { memories, neurons });
   const parsed = JSON.parse(out.content);
@@ -71,4 +71,52 @@ test("herramientas de Carl: esquema, ejecución y resumen", () => {
   const bad = runCarlTool("otra", {}, {});
   assert.ok(bad.isError);
   assert.match(describeToolCall("buscar_memorias", { consulta: "x", desde: "2023-01-01" }), /“x” \(2023-01-01\)/);
+});
+
+// ---- El Diario y los días también se buscan (antes Carl no los veía) ----
+const days = [
+  {
+    date: "2026-11-25",
+    summary: "",
+    dominantThemes: [],
+    journal: [
+      { id: "jr_a", ts: Date.parse("2026-11-25T15:00:00"), text: "Fergis le dijo a mi papá y a Javier que no iba a pagar el pasaje.", mood: "angry", tags: ["familia"] },
+      { id: "jr_b", ts: Date.parse("2026-11-25T16:00:00"), text: "borrada", deleted: true },
+    ],
+    rawChat: [
+      { role: "user", content: "Hoy fue un día pesado con mi papá", ts: Date.parse("2026-11-25T20:00:00") },
+      { role: "assistant", content: "Respuesta de Carl", ts: Date.parse("2026-11-25T20:01:00") },
+    ],
+  },
+  { date: "2026-11-24", summary: "Día tranquilo en el trabajo.", dominantThemes: ["trabajo"], rawChat: [] },
+];
+
+test("buscar_memorias encuentra entradas del Diario por nombre", () => {
+  const out = runCarlTool("buscar_memorias", { consulta: "Fergis" }, { memories, neurons, days });
+  const res = JSON.parse(out.content).resultados;
+  assert.equal(res[0].id, "jr_a");
+  assert.equal(res[0].date, "2026-11-25");
+  assert.ok(!JSON.stringify(res).includes("borrada"), "las entradas borradas no aparecen");
+});
+
+test("buscar_memorias por fecha incluye diario, chat del usuario y resumen", () => {
+  const res = JSON.parse(runCarlTool("buscar_memorias", { desde: "2026-11-25", hasta: "2026-11-25" }, { memories, neurons, days }).content).resultados;
+  const ids = res.map((r) => r.id).sort();
+  assert.deepEqual(ids, ["chat_2026-11-25", "jr_a"]);
+  assert.ok(!JSON.stringify(res).includes("Respuesta de Carl"), "solo lo que escribió el usuario");
+});
+
+test("leer_dia devuelve todo lo de una fecha", () => {
+  const out = runCarlTool("leer_dia", { fecha: "2026-11-25" }, { memories, neurons, days });
+  const d = JSON.parse(out.content);
+  assert.equal(d.diario.length, 1);
+  assert.match(d.diario[0].texto, /Fergis/);
+  assert.equal(d.diario[0].animo, "Enojo");
+  assert.equal(d.chat_del_usuario.length, 1);
+  assert.equal(out.summary.count, 2);
+  const empty = JSON.parse(runCarlTool("leer_dia", { fecha: "2026-01-01" }, { days }).content);
+  assert.ok(empty.nota);
+  assert.ok(runCarlTool("leer_dia", { fecha: "ayer" }, { days }).isError);
+  const res = JSON.parse(runCarlTool("leer_memoria", { id: "dia_2026-11-24" }, { days }).content);
+  assert.match(res.text, /tranquilo/);
 });

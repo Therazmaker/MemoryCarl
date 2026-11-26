@@ -173,5 +173,5 @@ export function buildJournalPromptBlock(days = [], { lastDays = 3, maxChars = 70
     lines.unshift(line);
     used += line.length;
   }
-  return `\n\n## DIARIO DEL USUARIO (últimos días)\nNotas que el usuario escribió para sí mismo, sin conversar. Úsalas como contexto de su día a día; no las cites literalmente ni comentes que las leíste salvo que venga al caso.\n${lines.join("\n")}`;
+  return `\n\n## DIARIO DEL USUARIO (últimos días)\nNotas que el usuario escribió para sí mismo, sin conversar. Úsalas como contexto de su día a día; no las cites literalmente salvo que venga al caso. Si el usuario se refiere a algo que escribió, úsalo: lo tienes. Las entradas largas aparecen recortadas; léelas completas con leer_dia.\n${lines.join("\n")}`;
 }

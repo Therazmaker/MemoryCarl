@@ -8,6 +8,8 @@
 
 import { searchMemories, readMemory, searchNeurons, memoryTimeline } from "../memory/lifeSearch.js";
 
+import { moodById } from "../day/journal.js";
+
 export const CARL_TOOL_LIMITS = { maxRounds: 4, maxCallsPerTurn: 8 };
 
 const dateProp = (desc) => ({ type: "string", description: `${desc}: AAAA, AAAA-MM o AAAA-MM-DD. Opcional.` });
@@ -16,7 +18,8 @@ export const CARL_TOOLS = [
   {
     name: "buscar_memorias",
     description:
-      "Busca en las memorias del usuario: entradas de su diario (incluye un diario antiguo de 2022-2025) y momentos guardados desde el chat. " +
+      "Busca en las memorias del usuario: su Diario (las notas que escribe cada día), lo que contó en el chat cada día, los resúmenes de sus días, " +
+      "un diario antiguo de 2022-2025 y momentos guardados desde el chat. " +
       "Úsala cuando el usuario mencione algo del pasado, una persona, un lugar o un tema recurrente, pregunte '¿te acuerdas…?', " +
       "o cuando te falte contexto para entender lo que dice. La búsqueda es por palabras: prueba sinónimos o nombres si no encuentras nada. " +
       "Sin consulta, devuelve las memorias de un rango de fechas.",
@@ -37,6 +40,18 @@ export const CARL_TOOLS = [
       type: "object",
       properties: { id: { type: "string", description: "El id de la memoria." } },
       required: ["id"],
+    },
+  },
+  {
+    name: "leer_dia",
+    description:
+      "Lee todo lo registrado en una fecha: las entradas completas del Diario, el resumen del día y lo que el usuario escribió en el chat ese día. " +
+      "Úsala SIEMPRE que el usuario diga que algo está en un día concreto ('está en el 25', 'lo escribí ayer', 'el lunes te conté'), " +
+      "o cuando necesites saber qué pasó en una fecha.",
+    input_schema: {
+      type: "object",
+      properties: { fecha: { type: "string", description: "La fecha: AAAA-MM-DD." } },
+      required: ["fecha"],
     },
   },
   {
@@ -82,18 +97,71 @@ export function describeToolCall(name, input = {}) {
   switch (name) {
     case "buscar_memorias": return `Buscó en tus memorias${input.consulta ? `: “${input.consulta}”` : ""}${range ? ` (${range})` : ""}`;
     case "leer_memoria": return "Leyó una memoria completa";
+    case "leer_dia": return `Leyó tu día ${input.fecha || ""}`.trim();
     case "buscar_neuronas": return `Buscó en tu grafo: “${input.consulta || ""}”`;
     case "linea_de_tiempo": return `Revisó tu línea de tiempo${input.tema ? `: “${input.tema}”` : ""}${range ? ` (${range})` : ""}`;
     default: return name;
   }
 }
 
+const clip = (t, n) => { const s = String(t || "").trim(); return s.length > n ? `${s.slice(0, n)}…` : s; };
+const hhmm = (ts) => { try { return new Date(ts).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" }); } catch (_e) { return ""; } };
+const msgText = (m) => String(m?.content ?? m?.text ?? "");
+const liveJournal = (d) => (Array.isArray(d?.journal) ? d.journal : []).filter((e) => e && !e.deleted && e.text).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+const userChat = (d) => (Array.isArray(d?.rawChat) ? d.rawChat : []).filter((m) => m && m.role === "user" && msgText(m).trim());
+
 /**
- * Ejecuta una herramienta. data = { memories, neurons }.
+ * Los días (Diario, resumen y chat del usuario) como memorias buscables, para que Carl
+ * encuentre lo que el usuario escribió en una fecha aunque no lo haya guardado como memoria.
+ */
+export function dayDocsAsMemories(days = []) {
+  const out = [];
+  for (const d of Array.isArray(days) ? days : []) {
+    if (!d?.date) continue;
+    for (const e of liveJournal(d)) {
+      out.push({ id: e.id, date: d.date, title: `Diario ${d.date} ${hhmm(e.ts)}`.trim(), text: e.text, tags: [...(e.tags || []), "diario"], linkedNeurons: [], source: "diario" });
+    }
+    const summary = String(d.summary || "").trim();
+    if (summary) {
+      out.push({ id: `dia_${d.date}`, date: d.date, title: `Resumen del día ${d.date}`, text: summary, tags: d.dominantThemes || [], linkedNeurons: d.linkedNeurons || [], source: "dia" });
+    }
+    const chat = userChat(d);
+    if (chat.length) {
+      out.push({ id: `chat_${d.date}`, date: d.date, title: `Lo que contó en el chat el ${d.date}`, text: chat.map((m) => msgText(m).trim()).join("\n"), tags: [], linkedNeurons: [], source: "chat" });
+    }
+  }
+  return out;
+}
+
+/** Todo lo registrado en una fecha, para leer_dia. */
+export function readDay(days = [], date, maxChars = 6000) {
+  const d = (Array.isArray(days) ? days : []).find((x) => x?.date === date);
+  if (!d) return null;
+  let budget = maxChars;
+  const take = (t, n) => { const s = clip(t, Math.max(0, Math.min(n, budget))); budget -= s.length; return s; };
+  const diario = liveJournal(d).map((e) => {
+    const mood = moodById(e.mood);
+    return { hora: hhmm(e.ts), ...(mood ? { animo: mood.label } : {}), texto: take(e.text, 2000) };
+  }).filter((e) => e.texto);
+  const resumen = take(d.summary, 1200);
+  const chat = userChat(d).map((m) => ({ hora: hhmm(m.ts), texto: take(msgText(m), 800) })).filter((m) => m.texto);
+  return {
+    fecha: d.date,
+    ...(resumen ? { resumen } : {}),
+    ...(d.dominantEmotion && d.dominantEmotion !== "neutral" ? { emocion: d.dominantEmotion } : {}),
+    ...(d.dominantThemes?.length ? { temas: d.dominantThemes } : {}),
+    diario,
+    chat_del_usuario: chat,
+  };
+}
+
+/**
+ * Ejecuta una herramienta. data = { memories, neurons, days }.
  * Devuelve { content: string (JSON para Claude), summary: { label, count, ids } }.
  */
 export function runCarlTool(name, input = {}, data = {}) {
-  const memories = Array.isArray(data.memories) ? data.memories : [];
+  const days = Array.isArray(data.days) ? data.days : [];
+  const memories = [...(Array.isArray(data.memories) ? data.memories : []), ...dayDocsAsMemories(days)];
   const neurons = Array.isArray(data.neurons) ? data.neurons : [];
   const label = describeToolCall(name, input);
   try {
@@ -112,6 +180,16 @@ export function runCarlTool(name, input = {}, data = {}) {
     if (name === "leer_memoria") {
       const m = readMemory(memories, String(input.id || ""));
       return { content: JSON.stringify(m || { error: "No existe una memoria con ese id." }), summary: { label, count: m ? 1 : 0, ids: m ? [m.id] : [] } };
+    }
+    if (name === "leer_dia") {
+      const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(input.fecha || "")) ? String(input.fecha) : "";
+      if (!fecha) return { content: JSON.stringify({ error: "Indica la fecha como AAAA-MM-DD." }), summary: { label, count: 0, ids: [] }, isError: true };
+      const day = readDay(days, fecha);
+      const empty = !day || (!day.resumen && !day.diario.length && !day.chat_del_usuario.length);
+      return {
+        content: JSON.stringify(empty ? { fecha, nota: "No hay nada registrado en esa fecha en este teléfono. Prueba el día anterior o siguiente, o buscar_memorias con palabras clave." } : day),
+        summary: { label, count: empty ? 0 : day.diario.length + day.chat_del_usuario.length + (day.resumen ? 1 : 0), ids: [] },
+      };
     }
     if (name === "buscar_neuronas") {
       const res = searchNeurons(neurons, { query: String(input.consulta || ""), limit: clampInt(input.limite, 1, 10, 6) });
@@ -136,7 +214,9 @@ export function runCarlTool(name, input = {}, data = {}) {
 export const CARL_TOOLS_PROMPT = `
 
 ## TU MEMORIA LARGA (herramientas)
-Tienes herramientas para buscar en la historia del usuario: buscar_memorias, leer_memoria, buscar_neuronas y linea_de_tiempo.
+Tienes herramientas para buscar en la historia del usuario: buscar_memorias, leer_memoria, leer_dia, buscar_neuronas y linea_de_tiempo.
+- buscar_memorias también encuentra lo que el usuario escribió en su Diario y en el chat de cada día.
+- Si el usuario dice que algo está registrado en una fecha, usa leer_dia con esa fecha antes de responder. Nunca le digas que no lo tienes sin haber buscado.
 - Úsalas cuando lo que dice el usuario toque su pasado, una persona, un patrón o algo que no está en el contexto de arriba. No las uses para charla trivial.
 - Busca antes de pedirle que te explique algo que podría estar en sus memorias: la idea es que no tenga que repetirte el contexto.
 - Varias búsquedas cortas funcionan mejor que una larga; si no encuentras, prueba sinónimos, el nombre de la persona o un rango de fechas.
