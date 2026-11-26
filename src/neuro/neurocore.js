@@ -38,7 +38,7 @@ import { upsertRelation, getAllRelations } from "./relationStore.js";
 import { getAllPatterns } from "./responsePatterns.js";
 import { findRelevantMemories } from "../memory/memoryRecall.js";
 import { getAllMemories } from "../memory/memoryStore.js";
-import { findRelevantDays } from "../day/dayStore.js";
+import { findRelevantDays, getAllDays } from "../day/dayStore.js";
 import { isFinanceTopic, buildFinanceContext } from "../services/financeContextEngine.js";
 import { hasPressuringTone, buildOpenThreadsPromptBlock } from "../chat/openThreads.js";
 import { applyLifeActions } from "../chat/lifeChanges.js";
@@ -667,7 +667,7 @@ export async function processNeuroInput(userInput, options = {}) {
         reception,
         memoryIndex: reception?.index || buildMemoryIndex(finalNeurons, loadPeople()),
         // Memoria larga: Carl puede buscar en memorias y neuronas cuando lo necesite
-        toolData: () => ({ memories: getAllMemories(), neurons: getAllNeurons() }),
+        toolData: () => ({ memories: getAllMemories(), neurons: getAllNeurons(), days: getAllDays() }),
       }, options.onRetryProgress);
 
       if (claudeResult?.toolCalls?.length) {
