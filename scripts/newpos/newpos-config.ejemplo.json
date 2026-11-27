@@ -1,0 +1,5 @@
+{
+  "EnviarA": "https://gestor-proyectos-weld.vercel.app/api/newpos/reportes",
+  "Token": "PEGAR_AQUI_EL_TOKEN",
+  "Local": "Nombre del local / caja"
+}
