@@ -64,7 +64,15 @@ function Buscar-Carpetas {
             Where-Object { $_.Name -match $Patron } |
             ForEach-Object { Get-ChildItem $_.FullName -Directory -ErrorAction SilentlyContinue }
     }
-    $encontradas | Select-Object -ExpandProperty FullName -Unique
+    $rutas = @($encontradas | Select-Object -ExpandProperty FullName)
+    # Si NewPos esta abierto, su carpeta real sale del proceso (aunque tenga otro nombre)
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match $Patron -and $_.Path } | ForEach-Object {
+        $dir = Split-Path $_.Path -Parent
+        $rutas += $dir
+        $padre = Split-Path $dir -Parent
+        if ($padre -and $padre.Length -gt 3 -and $padre -notmatch '\\(Program Files( \(x86\))?|Windows)$') { $rutas += $padre }
+    }
+    $rutas | Where-Object { $_ } | Select-Object -Unique
 }
 
 # ---------------------------------------------------------------- 2. Servidores que usa NewPos
