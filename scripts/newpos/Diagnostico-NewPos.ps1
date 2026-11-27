@@ -159,6 +159,9 @@ function Enviar-Panel([string]$tipo, $datos) {
 
 # ================================================================ MODO MONITOR
 if ($Monitor) {
+    # Evita dos monitores a la vez (por ejemplo, el oculto + uno abierto a mano)
+    $mtx = New-Object System.Threading.Mutex($false, 'Local\NewPosMonitor')
+    if (-not $mtx.WaitOne(0)) { Write-Host 'El monitor ya esta corriendo en esta PC. Para pararlo: Detener-Monitor.bat' -ForegroundColor Yellow; Start-Sleep 5; exit }
     $carpetas = Buscar-Carpetas
     $hosts = @(Buscar-Servidores $carpetas) + $HostsExtra + @('https://api-am.newhotelcloud.com/', 'https://www.google.com/') |
              Where-Object { $_ } | Select-Object -Unique

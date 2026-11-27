@@ -8,13 +8,16 @@ Solo leen información: no tocan NewPos ni Windows.
 |---|---|
 | `Diagnostico-NewPos.bat` | Doble clic **justo cuando sale el error**. Junta logs de NewPos, eventos de Windows y una prueba de conexión, da un veredicto y crea un ZIP en el Escritorio. |
 | `Monitor-NewPos.bat` | Se deja abierto todo el turno. Cada 60 s prueba los servidores de NewHotel y anota en `Escritorio\Monitor-NewPos.csv`. |
+| `Instalar-Inicio-Automatico.bat` | Deja el monitor corriendo **oculto (sin ventana)** y hace que arranque solo en cada inicio de sesión. No pide administrador. |
+| `Detener-Monitor.bat` / `Desinstalar-Inicio-Automatico.bat` | Paran el monitor oculto / quitan el arranque automático. |
 | `newpos-config.ejemplo.json` | Renombrarlo a `newpos-config.json` para enviar los datos al panel. |
 
 ## Enviar al panel (gestor de proyectos)
 
 1. Copiar la carpeta a la PC de caja (por ejemplo `C:\NewPosMonitor`).
 2. Renombrar `newpos-config.ejemplo.json` a `newpos-config.json` y llenar `EnviarA`, `Token` y `Local`.
-3. Para que arranque solo al iniciar sesión, en un CMD como administrador:
+3. Para que arranque solo y oculto: doble clic en `Instalar-Inicio-Automatico.bat`.
+   (Alternativa con tarea programada, en un CMD como administrador:)
 
 ```
 schtasks /Create /TN "NewPos Monitor" /SC ONLOGON /RL LIMITED /TR "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\NewPosMonitor\Diagnostico-NewPos.ps1 -Monitor"
