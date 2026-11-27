@@ -72,7 +72,9 @@ function Buscar-Carpetas {
         $padre = Split-Path $dir -Parent
         if ($padre -and $padre.Length -gt 3 -and $padre -notmatch '\\(Program Files( \(x86\))?|Windows)$') { $rutas += $padre }
     }
-    $rutas | Where-Object { $_ } | Select-Object -Unique
+    # Excluir la carpeta de este mismo script (C:\NewPosMonitor tambien contiene "NewPos" en el nombre)
+    $propia = (Resolve-Path $PSScriptRoot -ErrorAction SilentlyContinue).Path
+    $rutas | Where-Object { $_ -and $_ -ne $propia -and -not ($propia -and $_.StartsWith($propia + '\')) } | Select-Object -Unique
 }
 
 # ---------------------------------------------------------------- 2. Servidores que usa NewPos
@@ -87,7 +89,9 @@ function Buscar-Servidores($carpetas) {
                 }
             }
     }
-    $urls | Where-Object { $_ -notmatch 'schemas\.|w3\.org|microsoft\.com|xmlsoap|localhost/schema' } | Select-Object -Unique
+    $hostPanel = ''; if ($EnviarA) { try { $hostPanel = ([Uri]$EnviarA).Host } catch {} }
+    $urls | Where-Object { $_ -notmatch 'schemas\.|w3\.org|microsoft\.com|xmlsoap|localhost/schema' -and
+                           -not ($hostPanel -and $_ -match [regex]::Escape($hostPanel)) } | Select-Object -Unique
 }
 
 # ---------------------------------------------------------------- 3. Probar un servidor
